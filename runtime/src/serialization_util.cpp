@@ -226,6 +226,14 @@ constexpr const char *kSceneCaptureTypeName =
     "engine::runtime::SceneCaptureComponent";
 constexpr const char *kCameraTypeName = "engine::runtime::CameraComponent";
 
+// Object-shape field names for AnimationComponent (issue #253). Named
+// rather than repeated as literals because the writer and reader below are
+// the only two places they appear, and a silent divergence between them is
+// the drift this codec exists to close.
+constexpr const char *kAnimationControllerPathField = "controllerPath";
+constexpr const char *kAnimationPlayingField = "playing";
+constexpr const char *kAnimationPlaybackSpeedField = "playbackSpeed";
+
 bool find_reflected_component_descriptors(
     ReflectedComponentDescriptors *outDescs, const char *logChannel) noexcept {
   if (outDescs == nullptr) {
@@ -450,7 +458,10 @@ bool read_reflected_component(const core::JsonParser &parser,
 //  - FoliagePatchComponent, NameComponent, ScriptComponent,
 //    AnimationComponent: fixed-size arrays and bounded strings; reflection
 //    has no array/string field kinds (their zero-field descriptors are
-//    documented in reflect_types.cpp).
+//    documented in reflect_types.cpp). AnimationComponent's authored
+//    bool/float therefore ride its hand-written codec rather than the
+//    reflected path, since one unrepresentable field takes the whole type
+//    off it (issue #253).
 
 void write_mesh_component(core::JsonWriter &writer,
                           const MeshComponent &component) noexcept {
@@ -841,6 +852,74 @@ bool read_foliage_patch_component(
     component.instanceCount = requestedCount;
   }
 
+  *outComponent = component;
+  return true;
+}
+
+void write_animation_component(core::JsonWriter &writer, const char *key,
+                               const AnimationComponent &component) noexcept {
+  if ((key == nullptr) || (component.controllerPath[0] == '\0')) {
+    return;
+  }
+
+  // Compared against a default-constructed component rather than literals so
+  // the shape follows the component's own defaults if they ever change.
+  const AnimationComponent defaults{};
+  if ((component.playing == defaults.playing) &&
+      (component.playbackSpeed == defaults.playbackSpeed)) {
+    writer.write_string(key, component.controllerPath);
+    return;
+  }
+
+  writer.write_key(key);
+  writer.begin_object();
+  writer.write_string(kAnimationControllerPathField, component.controllerPath);
+  writer.write_bool(kAnimationPlayingField, component.playing);
+  writer.write_float(kAnimationPlaybackSpeedField, component.playbackSpeed);
+  writer.end_object();
+}
+
+bool read_animation_component(const core::JsonParser &parser,
+                              const core::JsonValue &value,
+                              bool requireNonEmptyPath,
+                              AnimationComponent *outComponent) noexcept {
+  if (outComponent == nullptr) {
+    return false;
+  }
+
+  AnimationComponent component{};
+
+  if (value.type == core::JsonValue::Type::String) {
+    if (!parser.copy_string_strict(value, component.controllerPath,
+                                   sizeof(component.controllerPath))) {
+      return false;
+    }
+  } else if (value.type == core::JsonValue::Type::Object) {
+    core::JsonValue field{};
+    if (!parser.get_object_field(value, kAnimationControllerPathField,
+                                 &field) ||
+        !parser.copy_string_strict(field, component.controllerPath,
+                                   sizeof(component.controllerPath))) {
+      return false;
+    }
+    if (parser.get_object_field(value, kAnimationPlayingField, &field) &&
+        !parser.as_bool(field, &component.playing)) {
+      return false;
+    }
+    if (parser.get_object_field(value, kAnimationPlaybackSpeedField, &field) &&
+        !parser.as_float(field, &component.playbackSpeed)) {
+      return false;
+    }
+  } else {
+    return false;
+  }
+
+  if (requireNonEmptyPath && (component.controllerPath[0] == '\0')) {
+    return false;
+  }
+
+  // `component` starts default-constructed, so the runtime slots the format
+  // never carries land on their defaults rather than on stale values.
   *outComponent = component;
   return true;
 }

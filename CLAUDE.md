@@ -382,7 +382,14 @@ directory-global by design.
   against `World::PersistentComponentTypes` and cross-validated per row by
   `engine_unit_component_registry`; shared `serialization_util` codecs;
   reflection-backed components; registry row order is the serialized key
-  order of both formats), physics/
+  order of both formats; `AnimationComponent` persists its whole authored
+  set — controller path plus `playing` and `playbackSpeed` (#253) —
+  through one string-or-object codec both formats share: a component still
+  holding the default playing/speed writes the bare controller-path
+  string, so pre-#253 files stay byte-identical and the scene version is
+  unchanged, and that string remains readable as the legacy form; the
+  runtime members (slots, current/previous state, blend timers, params)
+  are never serialized), physics/
   scripting/editor bridges, render-prep pipeline, skeletal animation (CPU
   pose evaluation in `animation.cpp`, cooked .skel/.anim loaders, the
   controller state machine + palette handoff in `animation_system.cpp`),

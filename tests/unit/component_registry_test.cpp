@@ -314,14 +314,22 @@ bool components_equal(const FoliagePatchComponent &a,
   return true;
 }
 
+// Every authored field takes a non-default value: the round trip has to
+// carry playing/playbackSpeed, not just the controller path (issue #253).
+// The runtime members (slots, state, blend timers, params) are deliberately
+// left at their defaults -- they are not persisted, and the comparator below
+// asserts they come back that way.
 void make_test_value(AnimationComponent *out) noexcept {
   std::snprintf(out->controllerPath, sizeof(out->controllerPath), "%s",
                 "assets/anim/registry_controller.json");
+  out->playing = false;
+  out->playbackSpeed = 2.25F;
 }
 
 bool components_equal(const AnimationComponent &a,
                       const AnimationComponent &b) noexcept {
-  return std::strcmp(a.controllerPath, b.controllerPath) == 0;
+  return (std::strcmp(a.controllerPath, b.controllerPath) == 0) &&
+         (a.playing == b.playing) && (a.playbackSpeed == b.playbackSpeed);
 }
 
 void make_test_value(CameraComponent *out) noexcept {

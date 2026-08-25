@@ -5,8 +5,10 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <new>
+#include <string>
 
 #include "engine/core/json.h"
 #include "engine/physics/physics.h"
@@ -1285,6 +1287,185 @@ int check_every_component_type_survives_load() {
   return 0;
 }
 
+/// EXPECTATION: every authored AnimationComponent field survives the scene
+/// round trip (issue #253 — `playing` and `playbackSpeed` are Inspector-
+/// edited authored state that the bare-string wire shape could not carry,
+/// so they silently reverted to defaults on load). Also pins the three
+/// properties the shape split rests on: a component still holding the
+/// default playing/speed keeps writing the bare string, the bare string is
+/// still read as the legacy form, and runtime state is not persisted.
+int check_animation_authored_fields_round_trip() {
+  using namespace engine::runtime;
+
+  constexpr const char *kControllerPath = "assets/character.animctrl.json";
+
+  std::unique_ptr<World> source(new (std::nothrow) World());
+  if (source == nullptr) {
+    return 320;
+  }
+
+  const Entity entity = source->create_scene_object(Transform{});
+  if (entity == kInvalidEntity) {
+    return 321;
+  }
+
+  NameComponent name{};
+  std::snprintf(name.name, sizeof(name.name), "%s", "Animated");
+  AnimationComponent animation{};
+  std::snprintf(animation.controllerPath, sizeof(animation.controllerPath),
+                "%s", kControllerPath);
+  animation.playing = false;
+  animation.playbackSpeed = 2.25F;
+  // Runtime state: set to non-defaults so the load side can prove the format
+  // does not carry it back.
+  animation.currentState = 3U;
+  animation.stateTime = 9.5F;
+  if (!source->add_name_component(entity, name) ||
+      !source->add_animation_component(entity, animation)) {
+    return 322;
+  }
+
+  std::unique_ptr<std::array<char, engine::core::JsonWriter::kBufferBytes>>
+      buffer(new (std::nothrow)
+                 std::array<char, engine::core::JsonWriter::kBufferBytes>());
+  if (buffer == nullptr) {
+    return 323;
+  }
+  std::size_t size = 0U;
+  if (!save_scene(*source, buffer->data(), buffer->size(), &size) ||
+      (size == 0U)) {
+    return 324;
+  }
+
+  std::unique_ptr<World> loaded(new (std::nothrow) World());
+  if ((loaded == nullptr) || !load_scene(*loaded, buffer->data(), size)) {
+    return 325;
+  }
+  const Entity found = loaded->find_entity_by_name("Animated");
+  if (found == kInvalidEntity) {
+    return 326;
+  }
+
+  AnimationComponent loadedAnimation{};
+  if (!loaded->get_animation_component(found, &loadedAnimation)) {
+    return 327;
+  }
+  if (std::strcmp(loadedAnimation.controllerPath, kControllerPath) != 0) {
+    return 328;
+  }
+  // Exact: the authored values are serialized data, not computed floats.
+  if (loadedAnimation.playing || (loadedAnimation.playbackSpeed != 2.25F)) {
+    return 329;
+  }
+  const AnimationComponent defaults{};
+  if ((loadedAnimation.currentState != defaults.currentState) ||
+      (loadedAnimation.stateTime != defaults.stateTime) ||
+      (loadedAnimation.controllerSlot != defaults.controllerSlot)) {
+    return 330;
+  }
+
+  // A component still holding the default playing/speed writes the bare
+  // string, so scenes that author neither stay byte-identical to the files
+  // this build's predecessors wrote.
+  std::unique_ptr<World> defaultSource(new (std::nothrow) World());
+  if (defaultSource == nullptr) {
+    return 331;
+  }
+  const Entity defaultEntity = defaultSource->create_scene_object(Transform{});
+  if (defaultEntity == kInvalidEntity) {
+    return 332;
+  }
+  AnimationComponent defaultAnimation{};
+  std::snprintf(defaultAnimation.controllerPath,
+                sizeof(defaultAnimation.controllerPath), "%s", kControllerPath);
+  if (!defaultSource->add_animation_component(defaultEntity,
+                                              defaultAnimation)) {
+    return 333;
+  }
+  std::size_t defaultSize = 0U;
+  if (!save_scene(*defaultSource, buffer->data(), buffer->size(),
+                  &defaultSize) ||
+      (defaultSize == 0U)) {
+    return 334;
+  }
+  const std::string defaultText(buffer->data(), defaultSize);
+  const std::string expectedBareString =
+      std::string("\"AnimationComponent\":\"") + kControllerPath + "\"";
+  if (defaultText.find(expectedBareString) == std::string::npos) {
+    return 335;
+  }
+
+  // The bare string remains a legal read, supplying defaults for the fields
+  // it cannot express -- this is the migration path for every scene authored
+  // before the object shape existed.
+  constexpr const char *kLegacyScene =
+      "{\"version\":2,\"entities\":[{\"components\":{"
+      "\"name\":\"Legacy\","
+      "\"AnimationComponent\":\"assets/character.animctrl.json\"}}]}";
+  std::unique_ptr<World> legacy(new (std::nothrow) World());
+  if ((legacy == nullptr) ||
+      !load_scene(*legacy, kLegacyScene, std::strlen(kLegacyScene))) {
+    return 336;
+  }
+  const Entity legacyEntity = legacy->find_entity_by_name("Legacy");
+  AnimationComponent legacyAnimation{};
+  if ((legacyEntity == kInvalidEntity) ||
+      !legacy->get_animation_component(legacyEntity, &legacyAnimation)) {
+    return 337;
+  }
+  if ((std::strcmp(legacyAnimation.controllerPath, kControllerPath) != 0) ||
+      (legacyAnimation.playing != defaults.playing) ||
+      (legacyAnimation.playbackSpeed != defaults.playbackSpeed)) {
+    return 338;
+  }
+
+  // Strict on the new fields, matching the other object-shaped codecs: a
+  // present-but-malformed field fails the load rather than silently keeping
+  // the default.
+  constexpr const char *kMalformedScene =
+      "{\"version\":2,\"entities\":[{\"components\":{"
+      "\"AnimationComponent\":{"
+      "\"controllerPath\":\"assets/character.animctrl.json\","
+      "\"playing\":\"yes\"}}}]}";
+  std::unique_ptr<World> malformed(new (std::nothrow) World());
+  if (malformed == nullptr) {
+    return 339;
+  }
+  if (load_scene(*malformed, kMalformedScene, std::strlen(kMalformedScene))) {
+    return 340;
+  }
+
+  // Boundary: playbackSpeed is now written, so a non-finite value reaches the
+  // JSON writer, which refuses it. The save fails rather than emitting a
+  // token no reader accepts -- the same treatment every other serialized
+  // float already gets. (Before the object shape the field was simply
+  // dropped, so this path could not arise.)
+  std::unique_ptr<World> nonFinite(new (std::nothrow) World());
+  if (nonFinite == nullptr) {
+    return 341;
+  }
+  const Entity nonFiniteEntity = nonFinite->create_scene_object(Transform{});
+  if (nonFiniteEntity == kInvalidEntity) {
+    return 342;
+  }
+  AnimationComponent nonFiniteAnimation{};
+  std::snprintf(nonFiniteAnimation.controllerPath,
+                sizeof(nonFiniteAnimation.controllerPath), "%s",
+                kControllerPath);
+  nonFiniteAnimation.playbackSpeed =
+      std::numeric_limits<float>::infinity();
+  if (!nonFinite->add_animation_component(nonFiniteEntity,
+                                          nonFiniteAnimation)) {
+    return 343;
+  }
+  std::size_t nonFiniteSize = 0U;
+  if (save_scene(*nonFinite, buffer->data(), buffer->size(), &nonFiniteSize)) {
+    return 344;
+  }
+
+  return 0;
+}
+
 /// EXPECTATION: non-default world gravity survives a save/load round trip
 /// exactly, and a default-gravity scene loads back to the default.
 int check_gravity_round_trip() {
@@ -1706,6 +1887,13 @@ int main() {
   }
 
   result = check_every_component_type_survives_load();
+  if (result != 0) {
+    static_cast<void>(std::remove(kScenePath));
+    static_cast<void>(std::remove(kLargeScenePath));
+    return result;
+  }
+
+  result = check_animation_authored_fields_round_trip();
   if (result != 0) {
     static_cast<void>(std::remove(kScenePath));
     static_cast<void>(std::remove(kLargeScenePath));
