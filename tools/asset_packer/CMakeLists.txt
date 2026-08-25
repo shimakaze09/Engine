@@ -21,9 +21,6 @@ engine_add_executable_target(asset_packer
     thumbnail_resample.cpp
     thumbnail_resample.h
     PRIVATE_INCLUDE_DIRS
-    ${CMAKE_SOURCE_DIR}/core/include
-    ${CMAKE_SOURCE_DIR}/math/include
-    ${CMAKE_SOURCE_DIR}/physics/include
     ${ENGINE_CGLTF_INCLUDE_DIR}
     ${ENGINE_STB_INCLUDE_DIR}
     PRIVATE_DEPS
