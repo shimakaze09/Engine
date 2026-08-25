@@ -582,7 +582,13 @@ directory-global by design.
   backend; device
   resources are owned by whichever system created them, destruction is
   immediate and idempotent, and `shutdown_render_device` invalidates every
-  outstanding handle; preserve
+  outstanding handle. The command-buffer backend still initializes lazily
+  from the first flush, but only inside a lifetime its owner opened:
+  `engine::bootstrap` calls `initialize_renderer`, `engine::shutdown`
+  calls `shutdown_renderer`, and between the two a flush or probe bake is
+  a logged no-op rather than a rebuild against the destroyed device
+  (#318, contract #168 — no global may lazily resurrect a subsystem).
+  Preserve
   forward fallback and transparency behavior when touching deferred paths;
   prefer CPU-verifiable renderer tests (GPU tests carry the `gpu` label).
 - Scripting: don't break the Lua API without tests + doc updates; validate

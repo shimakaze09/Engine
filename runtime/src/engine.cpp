@@ -134,6 +134,11 @@ bool bootstrap(const EngineConfig &config) noexcept {
     return false;
   }
   renderer::set_shader_root_path(g_activeConfig.shaderRootPath);
+  // Opens the renderer lifetime this bootstrap owns, pairing with the
+  // shutdown_renderer in shutdown(). A process that bootstraps again
+  // after shutting down gets a renderer that initializes on demand once
+  // more, instead of one still latched off by the previous teardown.
+  renderer::initialize_renderer();
 
   // #138: the swapchain-owning backend initializes its device here,
   // before the editor bridge — the bgfx ImGui renderer creates device
@@ -143,6 +148,12 @@ bool bootstrap(const EngineConfig &config) noexcept {
       !renderer::initialize_render_device()) {
     core::log_message(core::LogLevel::Error, "renderer",
                       "render device initialization failed at bootstrap");
+    // The renderer lifetime opened above is released here and on every
+    // failure path below, immediately before core: it was acquired just
+    // after core, so LIFO rollback closes it last. A bootstrap that
+    // returns false must leave the renderer latched off, or the module
+    // stays open for lazy initialization against a destroyed core.
+    renderer::shutdown_renderer();
     core::shutdown_core();
     return false;
   }
@@ -169,6 +180,7 @@ bool bootstrap(const EngineConfig &config) noexcept {
     if (!core::make_render_context_current()) {
       core::log_message(core::LogLevel::Error, "editor",
                         "failed to acquire render context for editor init");
+      renderer::shutdown_renderer();
       core::shutdown_core();
       return false;
     }
@@ -177,6 +189,7 @@ bool bootstrap(const EngineConfig &config) noexcept {
       core::log_message(core::LogLevel::Error, "editor",
                         "failed to initialize editor bridge");
       core::release_render_context();
+      renderer::shutdown_renderer();
       core::shutdown_core();
       return false;
     }
@@ -188,6 +201,7 @@ bool bootstrap(const EngineConfig &config) noexcept {
     core::log_message(core::LogLevel::Error, "scripting",
                       "failed to initialize scripting");
     shutdown_editor_bridge(bridge);
+    renderer::shutdown_renderer();
     core::shutdown_core();
     return false;
   }
@@ -211,6 +225,7 @@ bool bootstrap(const EngineConfig &config) noexcept {
     scripting::dap_stop();
     scripting::shutdown_scripting();
     shutdown_editor_bridge(bridge);
+    renderer::shutdown_renderer();
     core::shutdown_core();
     return false;
   }
@@ -224,6 +239,7 @@ bool bootstrap(const EngineConfig &config) noexcept {
     scripting::dap_stop();
     scripting::shutdown_scripting();
     shutdown_editor_bridge(bridge);
+    renderer::shutdown_renderer();
     core::shutdown_core();
     return false;
   }

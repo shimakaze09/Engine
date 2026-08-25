@@ -38,6 +38,20 @@ namespace engine::renderer {
 
 namespace {
 
+/// Latched by shutdown_renderer and cleared by initialize_renderer, so a
+/// shut-down module is distinguishable from one that has never started.
+/// The backend initializes lazily from the first flush and shutdown ends
+/// with `backend = BackendState{}`, which clears both the initialized and
+/// failed flags — without this latch those two states are identical, and
+/// a flush issued after teardown re-runs full initialization against a
+/// destroyed device and shader system. Ownership contract (#168): no
+/// global may lazily resurrect a subsystem.
+bool g_shutDown = false;
+
+/// True once the refusal below has been logged, so a caller that keeps
+/// flushing after shutdown logs the reason once rather than once a frame.
+bool g_shutDownRefusalLogged = false;
+
 /// Builds a configured shader path from a shader file name.
 bool make_shader_path(const char *fileName, char *outPath,
                       std::size_t outCapacity) noexcept {
@@ -89,6 +103,19 @@ ShaderProgramHandle load_configured_shader_variant(
 /// soft-fail environment, lighting, and post groups whose availability
 /// flags gate their passes.
 bool initialize_backend() noexcept {
+  // Checked before the resource flags: while the module is shut down its
+  // backend state says nothing, and lazily rebuilding it here is the
+  // resurrection the latch exists to refuse.
+  if (g_shutDown) {
+    if (!g_shutDownRefusalLogged) {
+      g_shutDownRefusalLogged = true;
+      core::log_message(core::LogLevel::Warning, "renderer",
+                        "renderer work issued after shutdown_renderer; "
+                        "ignored rather than re-initializing the backend");
+    }
+    return false;
+  }
+
   BackendState &backend = backend_state();
   if (backend.initialized) {
     return true;
@@ -506,8 +533,20 @@ void destroy_backend_resources(BackendState *backend) noexcept {
 
 } // namespace
 
+/// Opens a renderer lifetime for the owning system.
+void initialize_renderer() noexcept {
+  g_shutDown = false;
+  g_shutDownRefusalLogged = false;
+}
+
 /// Shuts down the owning system for renderer.
 void shutdown_renderer() noexcept {
+  // Latched before the early return below, so the contract holds on every
+  // path: once this call returns, the module is shut down whether or not
+  // it had reached the point of owning device resources.
+  g_shutDown = true;
+  g_shutDownRefusalLogged = false;
+
   BackendState &backend = backend_state();
   if (!backend.initialized && !backend.failed) {
     // No device resources exist yet, but capture slots may hold texture-
