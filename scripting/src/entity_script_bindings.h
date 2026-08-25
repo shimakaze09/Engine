@@ -29,6 +29,14 @@ struct EntityScriptBindingCallbacks final {
 void configure_entity_script_bindings(
     lua_State *state, const EntityScriptBindingCallbacks &callbacks) noexcept;
 
+/// Clears the Lua state alias and callbacks installed by configure. Called
+/// by the VM's owner as it destroys the VM: every entry point here guards
+/// on the alias, so clearing it turns a post-shutdown call into a no-op
+/// instead of a dispatch into the freed lua_State. Distinct from
+/// reset_entity_script_bindings, which clears run-scoped cache state while
+/// the VM stays alive.
+void clear_entity_script_bindings() noexcept;
+
 /// Lua binding: Lua engine.require(path).
 int lua_engine_require(lua_State *state) noexcept;
 

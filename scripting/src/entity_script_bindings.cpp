@@ -701,6 +701,11 @@ void configure_entity_script_bindings(
   g_callbacks = callbacks;
 }
 
+void clear_entity_script_bindings() noexcept {
+  g_state = nullptr;
+  g_callbacks = {};
+}
+
 int lua_engine_require(lua_State *state) noexcept {
   const char *path = lua_tostring(state, 1);
   if ((path == nullptr) || (path[0] == '\0')) {
