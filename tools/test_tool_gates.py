@@ -32,6 +32,13 @@ def run(script_args):
     return proc.returncode
 
 
+def run_captured(script_args):
+    """Runs a gate and returns its exit code with its combined output."""
+    proc = subprocess.run([sys.executable] + script_args,
+                          capture_output=True, text=True)
+    return proc.returncode, proc.stdout + proc.stderr
+
+
 def test_coverage_gate():
     cov = str(TOOLS / "ci" / "check_coverage_threshold.py")
     with tempfile.TemporaryDirectory() as tmp:
@@ -284,6 +291,39 @@ def test_module_dependency_gate():
             leaf="sub/CMakeLists.txt"))]) != 0,
               "module deps: a grant in a nested CMakeLists fails")
 
+        # Two more spellings of the same directory. CMake treats these as
+        # identical to the flagged `../runtime/include`, so a verdict that
+        # differs between them would be judging spelling, not location.
+        check(run([script, "--root", str(grant_case(
+            "grant_dot_relative", ["./../runtime/include"]))]) != 0,
+              "module deps: a './..' spelling fails too")
+        check(run([script, "--root", str(grant_case(
+            "grant_through_subdir",
+            ["sub/../../runtime/include"]))]) != 0,
+              "module deps: a path through a subdirectory fails too")
+
+        # CMake is whitespace-insensitive, so a line's verdict must not
+        # depend on token order: an own-module directory listed first must
+        # not excuse a foreign one after it.
+        check(run([script, "--root", str(grant_case("grant_own_first", [
+            "${CMAKE_SOURCE_DIR}/editor/include "
+            "${CMAKE_SOURCE_DIR}/runtime/include",
+        ]))]) != 0,
+              "module deps: an own-module dir first does not excuse the rest "
+              "of the line")
+
+        # And every foreign grant on a line is reported, not just the
+        # first — an under-reporting finding list invites the same
+        # hand-enumeration error the allowlist already made once.
+        code, output = run_captured([script, "--root", str(grant_case(
+            "grant_two_foreign", [
+                "${CMAKE_SOURCE_DIR}/runtime/include "
+                "${CMAKE_SOURCE_DIR}/core/include",
+            ]))])
+        check(code != 0 and "runtime/include" in output
+              and "core/include" in output,
+              "module deps: both grants on one line are reported")
+
         # The other direction: a module's own include dir, in every
         # spelling, and a third-party variable, are not foreign grants.
         check(run([script, "--root", str(grant_case("grant_own", [
@@ -293,6 +333,12 @@ def test_module_dependency_gate():
         ]))]) == 0,
               "module deps: a module's own and third-party dirs are not "
               "grants")
+        # Same, all on one line, since the per-token filter is what makes
+        # that safe now.
+        check(run([script, "--root", str(grant_case("grant_own_same_line", [
+            "${CMAKE_CURRENT_SOURCE_DIR}/include ./include ../editor/include",
+        ]))]) == 0,
+              "module deps: own-module dirs sharing a line are not grants")
 
     # The real tree: green today, and the allowlist is load-bearing.
     spec = importlib.util.spec_from_file_location(

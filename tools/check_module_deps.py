@@ -53,6 +53,7 @@ from __future__ import annotations
 import argparse
 import pathlib
 import re
+from collections.abc import Iterator
 
 # Every dependency each module may express, as the transitive downward
 # closure of the CLAUDE.md chain
@@ -392,20 +393,26 @@ def check_include_edges(
     return findings
 
 
-def granted_module(
+def granted_modules(
     root: pathlib.Path, lists_file: pathlib.Path, line: str
-) -> tuple[str, str] | None:
-    """Returns the foreign module and subdirectory a line hand-wires."""
+) -> Iterator[tuple[str, str]]:
+    """Yields each module and subdirectory a line's tokens name.
+
+    Every token, not the first that resolves: CMake is whitespace-
+    insensitive, so two directories on one line are two grants, and a
+    line's verdict must not depend on their order. Own-module tokens are
+    yielded too and filtered by the caller, which knows the module.
+    """
     for match in CMAKE_DIR_TOKEN_RE.finditer(line):
         variable = match.group("variable")
         path = match.group("path")
         subdirectory = match.group("subdirectory")
         if variable is None:
-            # A bare relative path only names a directory when it walks
-            # out of its own; anything else is a plain word like the
-            # `include` in a comment.
-            if not path.startswith(".."):
-                continue
+            # No spelling test here: resolution is what decides, and a
+            # bare word cannot reach this point anyway — the pattern
+            # requires a `/` before the subdirectory. A relative path
+            # that stays inside its own module resolves to that module
+            # and the caller skips it.
             base = lists_file.parent
         elif variable in CMAKE_ROOT_VARIABLES:
             base = root
@@ -414,14 +421,14 @@ def granted_module(
         else:
             # A third-party or unknown variable names no module here.
             continue
-        # Resolved rather than pattern-matched, so `../../core/include`
-        # and `${CMAKE_SOURCE_DIR}/core/include` are judged identically —
-        # by where they land, not how they are spelled.
+        # Resolved rather than pattern-matched, so `../../core/include`,
+        # `./../core/include` and `${CMAKE_SOURCE_DIR}/core/include` are
+        # judged identically — by where they land, not how they are
+        # spelled.
         resolved = (base / path.lstrip("/") / subdirectory).resolve()
         target = module_of(root, resolved)
         if target is not None:
-            return target, subdirectory
-    return None
+            yield target, subdirectory
 
 
 def check_cmake_grants(
@@ -441,24 +448,29 @@ def check_cmake_grants(
             for number, line in enumerate(
                 lists_file.read_text(encoding="utf-8").splitlines(), start=1
             ):
-                granted = granted_module(root, lists_file, line)
-                if granted is None:
-                    continue
-                target, subdirectory = granted
-                if target == module:
-                    continue
-                key = (relative, target, subdirectory)
-                if allowlisted and key in KNOWN_CMAKE_GRANTS:
-                    used.add(key)
-                    continue
-                findings.append(
-                    Finding(
-                        f"{relative}:{number}",
-                        f"hand-wires {target}/{subdirectory}: declare a dep on "
-                        f"engine_{target} instead so usage requirements carry "
-                        "it",
+                reported: set[tuple[str, str]] = set()
+                for target, subdirectory in granted_modules(
+                    root, lists_file, line
+                ):
+                    # Per token, not per line: an own-module directory
+                    # listed first must not excuse a foreign one after it.
+                    if target == module:
+                        continue
+                    if (target, subdirectory) in reported:
+                        continue
+                    reported.add((target, subdirectory))
+                    key = (relative, target, subdirectory)
+                    if allowlisted and key in KNOWN_CMAKE_GRANTS:
+                        used.add(key)
+                        continue
+                    findings.append(
+                        Finding(
+                            f"{relative}:{number}",
+                            f"hand-wires {target}/{subdirectory}: declare a "
+                            f"dep on engine_{target} instead so usage "
+                            "requirements carry it",
+                        )
                     )
-                )
     return findings
 
 
