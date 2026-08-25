@@ -507,18 +507,18 @@ void check_empty_stored_file_still_permits_saving(TestContext &ctx) noexcept {
 /// is atomic and therefore durable, which is exactly what makes it
 /// destructive. Drives the production entry points in the order the
 /// editor does — load, then the first settle.
-void check_unreadable_stored_layout_is_never_overwritten(
+void check_oversized_stored_layout_is_never_overwritten(
     TestContext &ctx) noexcept {
   std::string dir{};
-  if (!make_scratch_dir("unreadable", &dir)) {
-    ctx.fail("unreadable: scratch directory");
+  if (!make_scratch_dir("oversized", &dir)) {
+    ctx.fail("oversized: scratch directory");
     return;
   }
   editor_layout_set_directory_override_for_tests(dir.c_str());
 
   std::string path{};
   if (!layout_path(&path)) {
-    ctx.fail("unreadable: layout path resolves");
+    ctx.fail("oversized: layout path resolves");
     editor_layout_set_directory_override_for_tests("");
     return;
   }
@@ -529,53 +529,64 @@ void check_unreadable_stored_layout_is_never_overwritten(
   // perfectly good, and losing it would be the worst version of this bug.
   const std::string oversized(200U * 1024U, 'x');
   if (!write_file(destination, oversized)) {
-    ctx.fail("unreadable: the oversized layout could be planted");
+    ctx.fail("oversized: the oversized layout could be planted");
     editor_layout_set_directory_override_for_tests("");
     return;
   }
 
   begin_context(true);
   ctx.check(!editor_layout_load(),
-            "unreadable: load reports that nothing was restored");
+            "oversized: load reports that nothing was restored");
   // What the editor does next: builds a default layout and settles.
   ImGui::LoadIniSettingsFromMemory(kProbeLayout, std::strlen(kProbeLayout));
   ImGui::GetIO().WantSaveIniSettings = true;
   editor_layout_save_if_dirty();
   ctx.check(!editor_layout_save(),
-            "unreadable: an explicit save is refused too");
+            "oversized: an explicit save is refused too");
   end_context();
 
   std::string after{};
   ctx.check(read_file(destination, &after),
-            "unreadable: the stored layout is still readable");
+            "oversized: the stored layout is still readable");
   ctx.check(after.size() == oversized.size(),
-            "unreadable: the stored layout kept its full length");
+            "oversized: the stored layout kept its full length");
   ctx.check(after == oversized,
-            "unreadable: the stored layout is byte-for-byte intact");
+            "oversized: the stored layout is byte-for-byte intact");
 
   // The latch is per-profile, not permanent: a different profile saves.
   editor_layout_set_directory_override_for_tests("");
   std::string other{};
-  if (make_scratch_dir("unreadable_other", &other)) {
+  if (make_scratch_dir("oversized_other", &other)) {
     editor_layout_set_directory_override_for_tests(other.c_str());
     begin_context(true);
     ImGui::LoadIniSettingsFromMemory(kProbeLayout, std::strlen(kProbeLayout));
     ctx.check(editor_layout_save(),
-              "unreadable: the refusal does not leak into another profile");
+              "oversized: the refusal does not leak into another profile");
     end_context();
     editor_layout_set_directory_override_for_tests("");
   } else {
-    ctx.fail("unreadable: second scratch directory");
+    ctx.fail("oversized: second scratch directory");
   }
 }
 
-/// A read that fails part-way — not a short file — must be refused
-/// rather than reported as a shorter layout. A directory planted at the
-/// destination gives a POSIX CRT an open that succeeds and a read that
-/// fails with the error flag set; Windows CRTs refuse the open instead,
-/// so the asserted contract is the one both share: nothing is restored,
-/// and the destination is not replaced.
-void check_failed_read_is_not_a_shorter_layout(TestContext &ctx) noexcept {
+/// The Unreadable branch: a stored layout that exists but cannot be read
+/// must latch saving off, exactly as the oversized one does, rather than
+/// being replaced by the default layout at the first settle.
+///
+/// A directory planted at the destination reaches that branch on both
+/// platforms, by different routes: a POSIX CRT opens it and fails the
+/// read with the error flag set, while a Windows CRT refuses the open
+/// with something other than ENOENT. The second route is only Unreadable
+/// because the opener distinguishes absence from other open failures —
+/// before that it was Absent, and this case passed on Windows for a
+/// reason unrelated to the contract it names.
+///
+/// Permission damage is the other way in, and the more likely one in the
+/// field, but it cannot be injected here: the test suite runs as root in
+/// CI containers, and root bypasses the DAC check that would deny the
+/// open. The planted directory needs no privilege to work.
+void check_unopenable_stored_layout_latches_and_survives(
+    TestContext &ctx) noexcept {
   std::string dir{};
   if (!make_scratch_dir("read_fault", &dir)) {
     ctx.fail("read fault: scratch directory");
@@ -605,12 +616,70 @@ void check_failed_read_is_not_a_shorter_layout(TestContext &ctx) noexcept {
   ImGui::LoadIniSettingsFromMemory(kProbeLayout, std::strlen(kProbeLayout));
   ImGui::GetIO().WantSaveIniSettings = true;
   editor_layout_save_if_dirty();
+  // The latch, not the destination's happening to be unwritable, is what
+  // must stop this: assert the refusal itself, so the case cannot pass
+  // for the incidental reason that atomic_write_file fails on a directory.
+  ctx.check(!editor_layout_save(),
+            "read fault: saving is latched off for the session");
   end_context();
 
   ctx.check(std::filesystem::is_directory(destination),
             "read fault: the destination is untouched");
   ctx.check(std::filesystem::exists(destination / "occupied"),
             "read fault: the destination's contents are intact");
+
+  editor_layout_set_directory_override_for_tests("");
+}
+
+/// The same Unreadable contract reached through a failing *open* rather
+/// than a failing read, which is the branch that decides whether "the
+/// open failed" is mistaken for "there is no file".
+///
+/// A self-referential symlink is the injection: opening it fails with
+/// ELOOP, which no privilege level bypasses — unlike the permission
+/// damage this stands in for, which root would sail straight through.
+/// Skipped where symlinks cannot be created (Windows without the
+/// privilege), rather than silently asserting nothing.
+void check_unopenable_path_is_not_mistaken_for_absent(
+    TestContext &ctx) noexcept {
+  std::string dir{};
+  if (!make_scratch_dir("open_fault", &dir)) {
+    ctx.fail("open fault: scratch directory");
+    return;
+  }
+  editor_layout_set_directory_override_for_tests(dir.c_str());
+
+  std::string path{};
+  if (!layout_path(&path)) {
+    ctx.fail("open fault: layout path resolves");
+    editor_layout_set_directory_override_for_tests("");
+    return;
+  }
+  const std::filesystem::path destination(path);
+
+  std::error_code ec{};
+  std::filesystem::create_symlink(destination.filename(), destination, ec);
+  if (ec) {
+    std::fprintf(stdout,
+                 "open fault: symlinks unavailable here; case skipped\n");
+    editor_layout_set_directory_override_for_tests("");
+    return;
+  }
+
+  begin_context(true);
+  ctx.check(!editor_layout_load(),
+            "open fault: load reports that nothing was restored");
+  ImGui::LoadIniSettingsFromMemory(kProbeLayout, std::strlen(kProbeLayout));
+  ImGui::GetIO().WantSaveIniSettings = true;
+  editor_layout_save_if_dirty();
+  ctx.check(!editor_layout_save(),
+            "open fault: a failed open latches saving off, not a fresh "
+            "profile");
+  end_context();
+
+  ctx.check(std::filesystem::is_symlink(std::filesystem::symlink_status(
+                destination, ec)),
+            "open fault: the unopenable path was not replaced");
 
   editor_layout_set_directory_override_for_tests("");
 }
@@ -628,8 +697,9 @@ int main() {
   check_layout_path_is_independent_of_the_working_directory(ctx);
   check_dirty_flag_service_saves_and_clears(ctx);
   check_empty_stored_file_still_permits_saving(ctx);
-  check_unreadable_stored_layout_is_never_overwritten(ctx);
-  check_failed_read_is_not_a_shorter_layout(ctx);
+  check_oversized_stored_layout_is_never_overwritten(ctx);
+  check_unopenable_stored_layout_latches_and_survives(ctx);
+  check_unopenable_path_is_not_mistaken_for_absent(ctx);
 
   return ctx.finish("editor_layout");
 }

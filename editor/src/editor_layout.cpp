@@ -11,6 +11,7 @@
 
 #include <imgui.h>
 
+#include <cerrno>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -43,19 +44,6 @@ char g_directoryOverride[900] = {};
 /// largest in the module by an order of magnitude.
 char g_readBuffer[kMaxLayoutBytes] = {};
 
-/// Portably opens a file for reading across CRTs.
-std::FILE *open_file_for_read(const char *path) noexcept {
-  std::FILE *file = nullptr;
-#ifdef _WIN32
-  if (fopen_s(&file, path, "rb") != 0) {
-    file = nullptr;
-  }
-#else
-  file = std::fopen(path, "rb");
-#endif
-  return file;
-}
-
 /// Distinguishes the ordinary fresh-profile case from a real fault, so
 /// the loader can stay silent for the former and report the latter
 /// without a filesystem probe (which would allocate on a noexcept path).
@@ -64,14 +52,44 @@ std::FILE *open_file_for_read(const char *path) noexcept {
 /// but outgrew the buffer this build can hold.
 enum class ReadResult : std::uint8_t { Ok, Absent, Unreadable, TooLarge };
 
+/// Portably opens a file for reading across CRTs, reporting which kind of
+/// failure a null return was. Absent is reserved for a genuine ENOENT:
+/// every other open failure — a permission-damaged profile, a sharing
+/// violation while a backup or indexer holds the file, a descriptor
+/// exhaustion — is a fault, because treating it as a fresh profile would
+/// let the default layout be committed over a file that is still perfectly
+/// good on disk. The CRT already reports which: POSIX through errno,
+/// fopen_s through its errno_t return.
+std::FILE *open_file_for_read(const char *path,
+                              ReadResult *outFailure) noexcept {
+  std::FILE *file = nullptr;
+#ifdef _WIN32
+  const errno_t openError = fopen_s(&file, path, "rb");
+  if (openError != 0) {
+    file = nullptr;
+    *outFailure =
+        (openError == ENOENT) ? ReadResult::Absent : ReadResult::Unreadable;
+  }
+#else
+  errno = 0;
+  file = std::fopen(path, "rb");
+  if (file == nullptr) {
+    *outFailure =
+        (errno == ENOENT) ? ReadResult::Absent : ReadResult::Unreadable;
+  }
+#endif
+  return file;
+}
+
 /// Latched when a stored layout exists but could not be read. Saving is
 /// refused for the rest of the session while it is set, because the
 /// alternative is that the default layout ImGui builds moments later is
 /// atomically committed over a file whose contents we failed to read —
 /// the very loss this module exists to prevent, and a rule violation:
 /// a failed load must preserve the previous valid state, not preserve it
-/// until the first settle. An absent or empty file is NOT a failed load;
-/// those are the genuine fresh-profile paths and keep saving normally.
+/// until the first settle. Only a genuine ENOENT and an empty file are
+/// NOT failed loads; those are the fresh-profile paths and keep saving
+/// normally. An open that fails any other way is a fault, not an absence.
 bool g_loadFailed = false;
 
 /// True once the refusal above has been logged, so a session that keeps
@@ -85,9 +103,10 @@ bool g_refusalLogged = false;
 /// written back whole either.
 ReadResult read_whole_file(const char *path, char *out, std::size_t capacity,
                            std::size_t *outSize) noexcept {
-  std::FILE *file = open_file_for_read(path);
+  ReadResult openFailure = ReadResult::Absent;
+  std::FILE *file = open_file_for_read(path, &openFailure);
   if (file == nullptr) {
-    return ReadResult::Absent;
+    return openFailure;
   }
   const std::size_t readCount = std::fread(out, 1U, capacity - 1U, file);
   const bool overflow = std::fgetc(file) != EOF;
@@ -180,9 +199,10 @@ bool editor_layout_load() noexcept {
         "defaults and leaving the stored file untouched for this session");
     return false;
   }
-  // A missing file is the ordinary fresh-profile case, and so is an empty
-  // one; neither is a fault, and both leave ImGui on its defaults — and
-  // both keep saving enabled, so a first run still stores its layout.
+  // A genuinely absent file is the ordinary fresh-profile case, and so is
+  // an empty one; neither is a fault, and both leave ImGui on its defaults
+  // — and both keep saving enabled, so a first run still stores its
+  // layout. An open that failed any other way came back Unreadable above.
   if ((result != ReadResult::Ok) || (size == 0U)) {
     return false;
   }
