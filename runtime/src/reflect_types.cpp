@@ -57,7 +57,10 @@ REFLECT_END()
 REFLECT_TYPE(engine::runtime::AnimationComponent)
 static_cast<void>(desc);
 // Intentionally registers a zero-field descriptor. The controller path is
-// a fixed char array serialized manually; the rest is runtime state.
+// a fixed char array, which reflection has no field kind for, so the whole
+// authored set -- path, playing, playbackSpeed -- is serialized manually by
+// write_animation_component/read_animation_component; the remaining members
+// are runtime state and are never persisted.
 REFLECT_END()
 
 REFLECT_TYPE(engine::runtime::SpringArmComponent)

@@ -23,8 +23,8 @@ namespace engine::runtime {
 // ENGINE_PERSISTENT_COMPONENT_TABLE; each type's prefab wire shape lives
 // in the decode/encode pair below (default: object-shaped reflected codec;
 // specials: Name's nested object, Script's legacy string-or-object with a
-// required path, Animation's required bare path, and the custom
-// collider/mesh/light/foliage shapes).
+// required path, Animation's string-or-object with a required path, and the
+// custom collider/mesh/light/foliage shapes).
 
 /// Decodes one prefab component value into `out`; non-string shapes
 /// require a JSON object, matching the pre-registry per-row validation.
@@ -49,9 +49,7 @@ bool decode_prefab_component(const core::JsonParser &parser,
     }
     return gotPath && (out->scriptPath[0] != '\0');
   } else if constexpr (std::is_same_v<T, AnimationComponent>) {
-    return parser.copy_string_strict(value, out->controllerPath,
-                                     sizeof(out->controllerPath)) &&
-           (out->controllerPath[0] != '\0');
+    return read_animation_component(parser, value, true, out);
   } else if (value.type != core::JsonValue::Type::Object) {
     return false;
   } else if constexpr (std::is_same_v<T, NameComponent>) {
@@ -92,9 +90,7 @@ bool encode_prefab_component(core::JsonWriter &w, const char *key,
     }
     return true;
   } else if constexpr (std::is_same_v<T, AnimationComponent>) {
-    if (component.controllerPath[0] != '\0') {
-      w.write_string(key, component.controllerPath);
-    }
+    write_animation_component(w, key, component);
     return true;
   } else if constexpr (std::is_same_v<T, Collider>) {
     return write_collider_component(w, component);

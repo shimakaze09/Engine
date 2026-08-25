@@ -191,4 +191,29 @@ bool read_foliage_patch_component(const core::JsonParser &parser,
                                   const core::JsonValue &foliageObject,
                                   FoliagePatchComponent *outComponent) noexcept;
 
+// --- AnimationComponent ----------------------------------------------------
+
+/// Writes the animation component under `key`, carrying every authored
+/// field (issue #253). A component whose `playing`/`playbackSpeed` still
+/// hold their defaults writes the bare controller-path string the format
+/// has always used, so files that author no non-default value stay
+/// byte-identical; only a component that the string shape cannot represent
+/// widens to an object. An empty controller path writes nothing, matching
+/// the pre-registry writer. Runtime state (slots, current/previous state,
+/// blend timers, parameters) is never serialized.
+void write_animation_component(core::JsonWriter &writer, const char *key,
+                               const AnimationComponent &component) noexcept;
+/// Reads an animation component from either shape: a bare string is the
+/// legacy/default form and supplies the controller path with defaults for
+/// the remaining authored fields; an object reads `controllerPath` plus the
+/// optional `playing` and `playbackSpeed`. Strict: a present-but-malformed
+/// field fails the read (absent fields keep component defaults). The
+/// controller path is required by both shapes; `requireNonEmptyPath`
+/// additionally rejects an empty one, which the prefab format has always
+/// done.
+bool read_animation_component(const core::JsonParser &parser,
+                              const core::JsonValue &value,
+                              bool requireNonEmptyPath,
+                              AnimationComponent *outComponent) noexcept;
+
 } // namespace engine::runtime

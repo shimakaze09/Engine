@@ -70,8 +70,8 @@ const char *scene_component_key(const char *registryKey) noexcept {
 
 /// Decodes one component value into `out`; the default path is the
 /// reflected codec, with the custom wire shapes (collider payloads, mesh
-/// LODs, light enums, foliage arrays, the bare Name/Script/Animation
-/// strings) enumerated explicitly.
+/// LODs, light enums, foliage arrays, the bare Name/Script strings, and
+/// Animation's string-or-object) enumerated explicitly.
 template <typename T>
 bool decode_scene_component(const core::JsonParser &parser,
                             const core::JsonValue &value,
@@ -91,8 +91,7 @@ bool decode_scene_component(const core::JsonParser &parser,
     return parser.copy_string_strict(value, out->scriptPath,
                                      sizeof(out->scriptPath));
   } else if constexpr (std::is_same_v<T, AnimationComponent>) {
-    return parser.copy_string_strict(value, out->controllerPath,
-                                     sizeof(out->controllerPath));
+    return read_animation_component(parser, value, false, out);
   } else {
     return read_reflected_component(parser, value,
                                     component_descriptor(descs, out), out);
@@ -126,9 +125,7 @@ bool encode_scene_component(core::JsonWriter &writer, const char *key,
     }
     return true;
   } else if constexpr (std::is_same_v<T, AnimationComponent>) {
-    if (component.controllerPath[0] != '\0') {
-      writer.write_string(key, component.controllerPath);
-    }
+    write_animation_component(writer, key, component);
     return true;
   } else {
     return write_reflected_component(

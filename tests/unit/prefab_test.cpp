@@ -258,6 +258,83 @@ int verify_spring_arm_prefab_round_trip() {
   return 0;
 }
 
+/// Issue #253: the prefab format carried only AnimationComponent's
+/// controller path, so the authored `playing`/`playbackSpeed` reverted to
+/// their defaults on instantiate. Pins the round trip, the legacy bare-path
+/// shape the format has always written, and the format's standing rule that
+/// an empty controller path is rejected.
+int verify_animation_prefab_round_trip() {
+  using namespace engine::runtime;
+
+  constexpr const char *kControllerPath = "assets/character.animctrl.json";
+
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 96;
+  }
+  const Entity entity = world->create_scene_object();
+  if (entity == kInvalidEntity) {
+    return 97;
+  }
+  AnimationComponent animation{};
+  std::snprintf(animation.controllerPath, sizeof(animation.controllerPath),
+                "%s", kControllerPath);
+  animation.playing = false;
+  animation.playbackSpeed = 0.5F;
+  if (!world->add_animation_component(entity, animation)) {
+    return 98;
+  }
+
+  if (!save_prefab(*world, entity, kPrefabPath)) {
+    return 99;
+  }
+  const Entity spawned = instantiate_prefab(*world, kPrefabPath);
+  if (spawned == kInvalidEntity) {
+    return 100;
+  }
+  AnimationComponent loaded{};
+  if (!world->get_animation_component(spawned, &loaded)) {
+    return 101;
+  }
+  // Exact: authored serialized data, not computed floats.
+  if ((std::strcmp(loaded.controllerPath, kControllerPath) != 0) ||
+      loaded.playing || (loaded.playbackSpeed != 0.5F)) {
+    return 102;
+  }
+
+  // The bare path stays readable, supplying defaults for the fields it
+  // cannot express -- every prefab authored before the object shape.
+  if (!write_prefab_text("{\"version\":1,\"components\":{"
+                         "\"AnimationComponent\":"
+                         "\"assets/character.animctrl.json\"}}")) {
+    return 103;
+  }
+  const Entity legacy = instantiate_prefab(*world, kPrefabPath);
+  if (legacy == kInvalidEntity) {
+    return 104;
+  }
+  AnimationComponent legacyAnimation{};
+  const AnimationComponent defaults{};
+  if (!world->get_animation_component(legacy, &legacyAnimation) ||
+      (std::strcmp(legacyAnimation.controllerPath, kControllerPath) != 0) ||
+      (legacyAnimation.playing != defaults.playing) ||
+      (legacyAnimation.playbackSpeed != defaults.playbackSpeed)) {
+    return 105;
+  }
+
+  // Unchanged rule: the prefab format requires a non-empty controller path,
+  // in the object shape as well as the string.
+  if (!write_prefab_text("{\"version\":1,\"components\":{"
+                         "\"AnimationComponent\":{\"controllerPath\":\"\"}}}")) {
+    return 106;
+  }
+  if (instantiate_prefab(*world, kPrefabPath) != kInvalidEntity) {
+    return 107;
+  }
+
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -631,6 +708,12 @@ int main() {
   }
 
   result = verify_spring_arm_prefab_round_trip();
+  if (result != 0) {
+    remove_prefab_file();
+    return result;
+  }
+
+  result = verify_animation_prefab_round_trip();
   if (result != 0) {
     remove_prefab_file();
     return result;
