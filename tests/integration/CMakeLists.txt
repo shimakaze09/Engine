@@ -174,6 +174,16 @@ engine_add_test_executable(engine_integration_script_begin_play_retry
     integration
 )
 
+engine_add_test_executable(engine_integration_script_vm_alias_shutdown
+    SOURCES
+    script_vm_alias_shutdown_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_scripting
+    LABELS
+    integration
+)
+
 engine_add_test_executable(engine_integration_script_deferred_write
     SOURCES
     script_deferred_write_test.cpp

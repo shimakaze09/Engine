@@ -516,6 +516,11 @@ void shutdown_scripting() noexcept {
   reset_scene_bindings();
   reset_debug_bindings();
   set_debug_lua_state(nullptr);
+  // Cleared here rather than in reset_entity_script_bindings: that reset
+  // also runs between runs, while the VM lives on and the alias must
+  // survive. The alias belongs to whoever destroyed the VM, so it is
+  // cleared beside the sibling debug alias, after shutdown_lua_state.
+  clear_entity_script_bindings();
   reset_cheat_bindings();
   reset_entity_pool_bindings();
   reset_game_bindings();
