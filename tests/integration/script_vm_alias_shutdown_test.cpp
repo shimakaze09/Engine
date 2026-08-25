@@ -1,10 +1,22 @@
 // Verifies the entity-script bindings' Lua state alias is cleared by the
 // VM's owner (issue #318, contract #168): after shutdown_scripting the
-// alias must not still point at the destroyed lua_State, so every public
-// entity-script entry point becomes a no-op instead of dispatching into
-// freed memory. Also pins the repeated-lifecycle boundary — a second
+// alias must not still point at the destroyed lua_State, so an
+// entity-script dispatch becomes a no-op instead of running into freed
+// memory. Also pins the repeated-lifecycle boundary — a second
 // initialize_scripting re-arms dispatch rather than inheriting a stale
 // alias — since a cleared alias is only correct if it is re-established.
+//
+// Each case is staged so the alias guard is the thing under test. Several
+// of these entry points carry a second guard on the runtime binding,
+// which shutdown_scripting also clears, so a case that left the binding
+// down would return on that sibling guard and prove nothing about the
+// alias; the preconditions below fail rather than let a case pass empty.
+//
+// One public entry point is deliberately absent: clear_entity_script_modules
+// unrefs through the alias, but only over cached modules, and shutdown has
+// necessarily emptied that cache — repopulating it would need the very VM
+// that is gone. There is no state in which it can reach the freed VM, so
+// no case here claims to cover it.
 
 #include <cstdio>
 #include <cstring>
@@ -93,8 +105,11 @@ bool fired_count_is(int expected) noexcept {
 /// The live baseline: with the VM up, a scripted entity is dispatched.
 /// Without this the post-shutdown assertions below would also hold for a
 /// harness that never dispatches anything.
-void test_dispatch_is_live_before_shutdown(engine::tests::TestContext &ctx,
-                                           rt::World *world) {
+/// Returns the dispatched entity, which the EndPlay case later queues for
+/// destruction — an entity that began play is exactly what that dispatch
+/// needs to reach the alias.
+rt::Entity test_dispatch_is_live_before_shutdown(
+    engine::tests::TestContext &ctx, rt::World *world) {
   const rt::Entity entity = make_scripted_entity(world);
   ctx.check(entity != rt::kInvalidEntity, "live: create scripted entity");
 
@@ -102,6 +117,8 @@ void test_dispatch_is_live_before_shutdown(engine::tests::TestContext &ctx,
   ctx.check(fired_count_is(1), "live: on_begin_play was delivered");
   ctx.check(world->begin_play_pending_count() == 0U,
             "live: the entity was consumed by the dispatch");
+  ctx.check(world->has_begun_play(entity), "live: the entity began play");
+  return entity;
 }
 
 /// The finding: a BeginPlay dispatch issued after shutdown_scripting must
@@ -127,28 +144,70 @@ void test_begin_play_after_shutdown_is_a_no_op(
             "post-shutdown: BeginPlay dispatch left the entity pending");
 }
 
-/// The remaining public entity-script entry points on the same contract:
-/// each guards on the same alias, so each must decline post-shutdown
-/// rather than reach the freed VM. Driven with a World that has pending
-/// begin-play and pending-destroy work, so a guard that failed to hold
-/// would have something to walk into.
-void test_remaining_entry_points_after_shutdown(
-    engine::tests::TestContext &ctx, rt::World *world) {
+/// The four entry points that read the world from the runtime binding
+/// rather than an argument. They guard on `g_state != nullptr ||
+/// runtime_binding().world != nullptr`, and shutdown_scripting clears the
+/// binding too — so with the binding down they return on the sibling
+/// guard and say nothing about the alias.
+///
+/// Rebinding the runtime is what makes the alias decisive here, and it is
+/// #318's own failure scenario rather than a contrived state: the binding
+/// is run-tier and the VM engine-tier, so a teardown-ordering change (or
+/// a late notification) leaves exactly this pairing. Past the guard each
+/// of the four dereferences the alias directly via arm_debug_lua_hook and
+/// then loads a module through it.
+///
+/// dispatch_entity_scripts_start is the observable one: it calls
+/// mark_begin_play_done on a successful dispatch, so a guard that failed
+/// to hold consumes the pending entity.
+void test_bound_runtime_after_shutdown_is_a_no_op(
+    engine::tests::TestContext &ctx, rt::World *world,
+    engine::core::ServiceLocator &serviceLocator) {
+  rt::bind_scripting_runtime(world, serviceLocator);
+
   const rt::Entity entity = make_scripted_entity(world);
-  ctx.check(entity != rt::kInvalidEntity, "entry points: create entity");
+  ctx.check(entity != rt::kInvalidEntity, "bound runtime: create entity");
   const std::size_t pendingBefore = world->begin_play_pending_count();
+  ctx.check(pendingBefore > 0U,
+            "bound runtime: there is pending work to dispatch");
 
   sc::dispatch_entity_scripts_start();
   sc::dispatch_entity_scripts_update(1.0F / 60.0F);
   sc::dispatch_entity_scripts_end();
-  sc::dispatch_entity_scripts_end_play(world);
   sc::dispatch_entity_scripts_end_for_transition();
-  // Unrefs cached module registry entries through the alias when it is
-  // set, which is the module-clearing use-after-free in the finding.
-  sc::clear_entity_script_modules();
 
   ctx.check(world->begin_play_pending_count() == pendingBefore,
-            "entry points: no post-shutdown dispatch consumed the entity");
+            "bound runtime: no dispatch consumed the pending entity");
+}
+
+/// dispatch_entity_scripts_end_play takes its world as an argument, so
+/// the binding does not gate it — but it only reaches the alias for an
+/// entity that both began play and is queued for deferred destruction.
+/// Without that work the walk is zero-trip and proves nothing, so the
+/// entity dispatched while the VM was alive is queued here and the
+/// preconditions refuse to let the case pass as empty.
+///
+/// Driven through a real frame walk because that is what produces the
+/// state: destroy_entity defers during Simulation precisely so EndPlay
+/// fires for the subtree, and the EndPlay phase is entered from Render.
+void test_end_play_after_shutdown_is_a_no_op(engine::tests::TestContext &ctx,
+                                             rt::World *world,
+                                             rt::Entity begunEntity) {
+  world->begin_update_phase();
+  ctx.check(world->destroy_entity(begunEntity),
+            "end play: the entity is queued for destruction");
+  ctx.check(world->pending_destroy_count() > 0U,
+            "end play: the destroy deferred rather than running now");
+  ctx.check(world->has_begun_play(begunEntity),
+            "end play: the queued entity began play, so it would dispatch");
+
+  world->begin_transform_phase();
+  world->begin_render_prep_phase();
+  world->begin_render_phase();
+  world->begin_end_play_phase();
+  sc::dispatch_entity_scripts_end_play(world);
+  world->end_end_play_phase();
+  world->end_frame_phase();
 }
 
 } // namespace
@@ -173,7 +232,8 @@ int main() {
   rt::bind_scripting_runtime(world.get(), serviceLocator);
 
   engine::tests::TestContext ctx;
-  test_dispatch_is_live_before_shutdown(ctx, world.get());
+  const rt::Entity begunEntity =
+      test_dispatch_is_live_before_shutdown(ctx, world.get());
 
   // The VM dies while the World lives on, which is the ordering the
   // finding is about: engine-tier teardown does not take run-tier state
@@ -182,7 +242,9 @@ int main() {
   sc::shutdown_scripting();
 
   test_begin_play_after_shutdown_is_a_no_op(ctx, world.get());
-  test_remaining_entry_points_after_shutdown(ctx, world.get());
+  test_bound_runtime_after_shutdown_is_a_no_op(ctx, world.get(),
+                                               serviceLocator);
+  test_end_play_after_shutdown_is_a_no_op(ctx, world.get(), begunEntity);
 
   // Repeated lifecycle: a cleared alias must be re-established by the
   // next initialize_scripting, not left cleared, or the fix would trade
