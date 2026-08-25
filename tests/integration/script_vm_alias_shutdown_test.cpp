@@ -145,10 +145,11 @@ void test_begin_play_after_shutdown_is_a_no_op(
 }
 
 /// The four entry points that read the world from the runtime binding
-/// rather than an argument. They guard on `g_state != nullptr ||
-/// runtime_binding().world != nullptr`, and shutdown_scripting clears the
-/// binding too — so with the binding down they return on the sibling
-/// guard and say nothing about the alias.
+/// rather than an argument. Each returns early on
+/// `(g_state == nullptr) || (runtime_binding().world == nullptr)`, so a
+/// dispatch proceeds only when both are non-null — and shutdown_scripting
+/// clears the binding as well as the alias, so with the binding down they
+/// return on the sibling guard and say nothing about the alias.
 ///
 /// Rebinding the runtime is what makes the alias decisive here, and it is
 /// #318's own failure scenario rather than a contrived state: the binding
