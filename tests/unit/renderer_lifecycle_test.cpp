@@ -15,13 +15,18 @@
 // sink API, which exists to observe log_message without a second
 // logging backend.
 //
-// Headless, on the null device (#196), so no GPU is required. Shader
-// loading then fails — cooked binaries are absent on lanes built with
-// ENGINE_BGFX_SHADERC=OFF — which costs nothing here: these cases are
+// Headless, on the null device (#196), so no GPU is required. Backend
+// initialization is then deliberately made to FAIL, by pointing the
+// shader root at a directory that holds no shaders: the cooked binary
+// path is built beside the source path, so an absent root misses on
+// every lane, cooked or not. That costs these cases nothing — they are
 // about whether initialization is ATTEMPTED after shutdown, and the
-// attempt announces its device before reaching any shader. The failure
-// also supplies the control below, since a failed backend is the one
-// state that already latched correctly.
+// attempt announces its device before it reaches any shader — and it
+// buys two things. The failed backend supplies the control below, since
+// that is the one state which already latched correctly; and forcing the
+// failure here rather than inheriting it from ENGINE_BGFX_SHADERC=OFF
+// means the control cannot quietly become vacuous on a lane that does
+// cook shaders, where initialization would otherwise succeed.
 
 #include "../test_harness.h"
 
@@ -31,6 +36,7 @@
 #include "engine/core/cvar.h"
 #include "engine/core/logging.h"
 #include "engine/renderer/command_buffer.h"
+#include "engine/renderer/render_device.h"
 
 namespace {
 
@@ -77,10 +83,18 @@ LogTally flush_and_tally() noexcept {
 /// The live baseline: a cold flush really does build the backend, so the
 /// post-shutdown assertions below cannot pass merely because this harness
 /// never initializes anything.
+///
+/// It also establishes the state the control depends on. The absent
+/// shader root makes the default-shader load fail, and that failure path
+/// unwinds the device it had just created, so a null device afterwards is
+/// public witness that initialization was attempted and left the backend
+/// in its failed state — the precondition the next case reads as given.
 void check_cold_flush_initializes_the_device(engine::tests::TestContext &ctx) {
   const LogTally cold = flush_and_tally();
   ctx.check(cold.deviceInitializations == 1U,
             "cold: the first flush initializes a render device");
+  ctx.check(rr::render_device() == nullptr,
+            "cold: the failed initialization unwound the device it made");
 }
 
 /// The control, and the reason this defect stayed latent: a backend that
@@ -88,6 +102,12 @@ void check_cold_flush_initializes_the_device(engine::tests::TestContext &ctx) {
 /// the wholesale reset in shutdown loses that memory. Pinning this here
 /// keeps the new latch from being credited with behavior that already
 /// worked, and would catch a fix that disabled retry-suppression instead.
+///
+/// Load-bearing that the backend really is in the failed state and not
+/// merely initialized: an already-initialized backend also returns early,
+/// which would make this case assert something trivially true instead.
+/// The previous case asserts that state rather than assuming it, and the
+/// forced shader failure is what makes it hold on every lane.
 void check_failed_backend_does_not_retry(engine::tests::TestContext &ctx) {
   const LogTally repeat = flush_and_tally();
   ctx.check(repeat.deviceInitializations == 0U,
@@ -152,6 +172,12 @@ int main() {
       "r_null_device", true,
       "Test/CI: replace the render device with a null backend (#196)"));
   static_cast<void>(engine::core::cvar_set_bool("r_null_device", true));
+  // Forces backend initialization to fail at the default-shader load on
+  // every lane: the cooked binary path is built beside the source path,
+  // so a root holding no shaders misses whether or not the lane cooked
+  // any. See the file header — this is what keeps the control case from
+  // going vacuous where shaders are present.
+  rr::set_shader_root_path("engine_renderer_lifecycle_absent_shader_root");
   if (!engine::core::initialize_logging()) {
     return 1;
   }
