@@ -147,11 +147,155 @@ def test_binding_generator():
               "bindgen: reserved parameter name fails")
 
 
+def write_source(root, relative, includes):
+    """Plants a commented source file naming the given quoted includes."""
+    path = root / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    body = "// Synthetic fixture for the module dependency gate.\n"
+    body += "".join(f'#include "{name}"\n' for name in includes)
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
+def test_module_dependency_gate():
+    """The declared-graph gate (issue #311) must reject every edge the
+    dependency rule forbids, accept the legal downward ones, and hold its
+    allowlist to exactly today's tracked violations."""
+    script = str(TOOLS / "check_module_deps.py")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+
+        # A legal tree: downward edges only, including one that skips a
+        # tier (editor -> renderer), plus own-module and third-party
+        # includes the gate must not care about.
+        clean = tmp / "clean"
+        write_source(clean, "core/src/logging.cpp", ["engine/core/logging.h"])
+        write_source(clean, "math/src/mat4.h", ["engine/core/entity.h"])
+        write_source(clean, "content/src/store.cpp", ["engine/core/vfs.h"])
+        write_source(clean, "renderer/src/flush.cpp",
+                     ["engine/core/cvar.h", "engine/math/mat4.h",
+                      "engine/content/asset_id.h", "pch.h"])
+        write_source(clean, "renderer/src/pch.h", [])
+        write_source(clean, "runtime/src/world.cpp",
+                     ["engine/physics/collider.h", "engine/scripting/vm.h"])
+        write_source(clean, "editor/src/panels.cpp",
+                     ["engine/runtime/world.h", "engine/renderer/device.h"])
+        check(run([script, "--root", str(clean)]) == 0,
+              "module deps: a strictly downward tree passes")
+
+        # Upward: the issue #309 class, a subsystem reaching into runtime.
+        upward = tmp / "upward"
+        write_source(upward, "scripting/src/bindings.cpp",
+                     ["engine/runtime/world.h"])
+        check(run([script, "--root", str(upward)]) != 0,
+              "module deps: an upward subsystem -> runtime edge fails")
+
+        # Sideways: the issue #310 class, two mid-tier siblings meeting
+        # outside runtime.
+        sideways = tmp / "sideways"
+        write_source(sideways, "scripting/src/spawn.cpp",
+                     ["engine/physics/primitive_hulls.h"])
+        check(run([script, "--root", str(sideways)]) != 0,
+              "module deps: a sideways subsystem -> subsystem edge fails")
+
+        # The bottom tier has a direction too: math -> core, never back.
+        reversed_bottom = tmp / "reversed_bottom"
+        write_source(reversed_bottom, "core/src/logging.cpp",
+                     ["engine/math/vec3.h"])
+        check(run([script, "--root", str(reversed_bottom)]) != 0,
+              "module deps: core -> math reverses the bottom tier and fails")
+
+        # content is the generic asset layer and depends only on core.
+        impure_content = tmp / "impure_content"
+        write_source(impure_content, "content/src/store.cpp",
+                     ["engine/math/vec3.h"])
+        check(run([script, "--root", str(impure_content)]) != 0,
+              "module deps: content -> math breaks content purity and fails")
+
+        # A private header is not a public surface, even downward.
+        private_header = tmp / "private_header"
+        write_source(private_header, "runtime/src/component_registry.h", [])
+        write_source(private_header, "editor/src/inspector.cpp",
+                     ["component_registry.h"])
+        check(run([script, "--root", str(private_header)]) != 0,
+              "module deps: including another module's private header fails")
+
+        # A relative path can climb out of the module while still
+        # resolving next to the including file; the owner is decided by
+        # where it lands, not by the include spelling.
+        climbing = tmp / "climbing"
+        write_source(climbing, "runtime/src/component_registry.h", [])
+        write_source(climbing, "editor/src/inspector.cpp",
+                     ["../../runtime/src/component_registry.h"])
+        check(run([script, "--root", str(climbing)]) != 0,
+              "module deps: a '..' path out of the module is still a crossing")
+
+        # A same-named private header in the including module resolves
+        # locally and is not a crossing.
+        shadowed = tmp / "shadowed"
+        write_source(shadowed, "runtime/src/pch.h", [])
+        write_source(shadowed, "editor/src/pch.h", [])
+        write_source(shadowed, "editor/src/panels.cpp", ["pch.h"])
+        check(run([script, "--root", str(shadowed)]) == 0,
+              "module deps: a module's own private header is not a crossing")
+
+        # A hand-wired foreign include dir grants headers without
+        # declaring the dependency.
+        grant = tmp / "grant"
+        write_source(grant, "scripting/src/vm.cpp", [])
+        lists = grant / "scripting" / "CMakeLists.txt"
+        lists.write_text(
+            "# Synthetic fixture for the module dependency gate.\n"
+            "engine_add_module_library(engine_scripting\n"
+            "    PRIVATE_INCLUDE_DIRS\n"
+            "    ${CMAKE_SOURCE_DIR}/runtime/include\n"
+            ")\n", encoding="utf-8")
+        check(run([script, "--root", str(grant)]) != 0,
+              "module deps: a hand-wired foreign include dir fails")
+
+    # The real tree: green today, and the allowlist is load-bearing.
+    spec = importlib.util.spec_from_file_location(
+        "check_module_deps", TOOLS / "check_module_deps.py")
+    deps = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(deps)
+
+    argv = sys.argv
+    sys.argv = ["check_module_deps.py"]
+    try:
+        check(deps.main() == 0,
+              "module deps: this checkout passes with its tracked allowlist")
+
+        # Dropping an entry must turn the site it excused red, which is
+        # what makes the gate red on the base revision of each #309/#310
+        # fix rather than merely documenting the debt.
+        excused = ("scripting/src/scripting.cpp",
+                   "engine/runtime/scripting_bridge.h")
+        reason = deps.KNOWN_VIOLATIONS.pop(excused)
+        check(deps.main() != 0,
+              "module deps: an unexcused tracked violation fails the gate")
+        deps.KNOWN_VIOLATIONS[excused] = reason
+
+        # And an entry that excuses nothing must fail too, so the list
+        # can only shrink as the migration lands.
+        stale = ("scripting/src/nothing_here.cpp", "engine/runtime/world.h")
+        deps.KNOWN_VIOLATIONS[stale] = "stale fixture"
+        check(deps.main() != 0,
+              "module deps: a stale allowlist entry fails the gate")
+        del deps.KNOWN_VIOLATIONS[stale]
+
+        check(deps.main() == 0,
+              "module deps: the allowlist is restored and the gate is green")
+    finally:
+        sys.argv = argv
+
+
 def main():
     test_coverage_gate()
     test_perf_gate_evaluate()
     test_metadata_path_check()
     test_binding_generator()
+    test_module_dependency_gate()
     if failures:
         print(f"\nFAILED ({len(failures)} failure(s))")
         return 1

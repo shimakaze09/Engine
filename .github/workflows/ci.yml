@@ -266,6 +266,9 @@ jobs:
       - name: Audit comment quality
         run: python3 tools/check_comment_quality.py
 
+      - name: Audit module dependencies
+        run: python3 tools/check_module_deps.py
+
       - name: Audit asset metadata paths
         run: python3 tools/ci/check_asset_metadata_paths.py
 

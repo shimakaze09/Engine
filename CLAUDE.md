@@ -56,14 +56,29 @@ is prohibited.
   input, jobs). Fixed-size/preallocated storage; no unordered containers,
   locks, or virtual dispatch on hot paths without justification backed by a
   profile and budget.
-- **[REVIEW]** Dependency flow strictly downward, no cycles or sideways deps:
-  `app → editor → runtime → renderer/physics/scripting/audio → content →
+- **[CI][REVIEW]** Dependency flow strictly downward, no cycles or sideways
+  deps: `app → editor → runtime → renderer/physics/scripting/audio → content →
   core/math` (`content` is the generic asset layer, #171; it depends only
   on `core` and must never link a subsystem module). Within the bottom
   tier the direction is `math → core` (component PODs carry entity
   handles); `core → math` is forbidden. The four mid-tier subsystem
   modules are siblings and must not include or link each other; they meet
-  only in `runtime`, which owns the bridges.
+  only in `runtime`, which owns the bridges. The chain states direction,
+  not adjacency: reaching past a tier downward (`editor → renderer`) is
+  legal. `tools/check_module_deps.py` (#311) is the mechanical gate, run
+  in the static-analysis CI job beside the comment audits: it validates
+  every first-party `#include "engine/<module>/..."` against that graph,
+  rejects includes of another module's private `src/` headers, and rejects
+  foreign include directories hand-wired via `*_INCLUDE_DIRS` — a
+  dependency is expressed only as a dep on the target, so CMake usage
+  requirements stay the single source of truth. The gate carries an
+  allowlist of today's tracked violations (the #309 scripting→runtime
+  cycle, the #310 scripting→physics edge, the #311 CMake declarations, and
+  the sanctioned editor→`runtime/src/component_registry.h` crossing from
+  #156). It can only shrink: an entry that no longer matches anything is
+  itself a finding, so each fix deletes its own entries and the gate is
+  red on that fix's base. The rule is [CI] for every edge not on that
+  list and [REVIEW] for the listed ones until the allowlist empties.
 - **[REVIEW]** Public headers are self-contained and never leak SDL/bgfx/
   Lua/ImGui/ImGuizmo types. bgfx stays inside renderer impl (plus the
   editor's sanctioned ImGui backend); Lua inside scripting impl;
@@ -161,6 +176,7 @@ ctest --test-dir build --output-on-failure -R engine_integration_
 ctest --test-dir build --output-on-failure -R engine_bench_
 python tools/check_source_comments.py             # comment presence audit
 python tools/check_comment_quality.py             # comment quality audit
+python tools/check_module_deps.py                 # module dependency audit
 cmake --build build --target analysis             # cppcheck / clang-tidy
 ```
 
@@ -472,8 +488,10 @@ directory-global by design.
   `scene.json`) — synced to the build dir by CMake. `tools/` — asset_packer
   (deterministic cook, thumbnails, glTF mesh/skeleton/animation import,
   dependency graph), binding generator, asset generators (`gen_character`,
-  `gen_props`, `gen_sounds`, `gen_island_scene`), comment audits, CI
-  helpers. `tests/` — unit / integration /
+  `gen_props`, `gen_sounds`, `gen_island_scene`), comment audits, the
+  module dependency audit (`check_module_deps.py`, #311), CI
+  helpers (the gates' own self-tests run as
+  `engine_integration_tool_gates`). `tests/` — unit / integration /
   smoke (`gpu` label) / benchmark + `test_harness.h`.
   `.github/workflows/ci.yml` — 11 jobs: canonical-toolchain build matrix
   (3 OS × 2 configs; clang-cl via VS ClangCL / clang / AppleClang, issue
