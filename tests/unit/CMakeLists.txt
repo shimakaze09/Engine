@@ -1070,6 +1070,15 @@ engine_add_test_executable(engine_unit_command_buffer
     engine_core
 )
 
+engine_add_test_executable(engine_unit_renderer_lifecycle
+    SOURCES
+    renderer_lifecycle_test.cpp
+    PRIVATE_DEPS
+    engine_renderer
+    engine_math
+    engine_core
+)
+
 engine_add_test_executable(engine_unit_command_buffer_post_chain
     SOURCES
     command_buffer_post_chain_test.cpp

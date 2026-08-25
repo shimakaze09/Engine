@@ -134,6 +134,11 @@ bool bootstrap(const EngineConfig &config) noexcept {
     return false;
   }
   renderer::set_shader_root_path(g_activeConfig.shaderRootPath);
+  // Opens the renderer lifetime this bootstrap owns, pairing with the
+  // shutdown_renderer in shutdown(). A process that bootstraps again
+  // after shutting down gets a renderer that initializes on demand once
+  // more, instead of one still latched off by the previous teardown.
+  renderer::initialize_renderer();
 
   // #138: the swapchain-owning backend initializes its device here,
   // before the editor bridge — the bgfx ImGui renderer creates device

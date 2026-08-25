@@ -257,7 +257,19 @@ struct RendererFrameStats final {
 void flush_renderer(CommandBufferView commandBufferView,
                     const GpuMeshRegistry *registry, float timeSeconds,
                     const SceneLightData &lights) noexcept;
-/// Shuts down the owning system for renderer.
+/// Opens a renderer lifetime, re-arming the lazy backend initialization
+/// that shutdown_renderer latched off. The backend itself is still built
+/// on demand by the first flush, so this call creates no device
+/// resources; it exists because the module's owner — engine::bootstrap,
+/// which pairs it with shutdown_renderer — is the only thing that can
+/// distinguish a new lifetime from a stray flush after teardown (#168:
+/// no global may lazily resurrect a subsystem). Calling it twice, or
+/// without an intervening shutdown, is harmless.
+void initialize_renderer() noexcept;
+/// Shuts down the owning system for renderer. Every later flush, probe
+/// bake, or other lazy entry point is a logged no-op until the next
+/// initialize_renderer, rather than rebuilding the backend against the
+/// device and shader system this call destroyed.
 void shutdown_renderer() noexcept;
 
 /// Sets the virtual root used for built-in renderer shaders.
