@@ -75,10 +75,14 @@ is prohibited.
   allowlist of today's tracked violations (the #309 scripting→runtime
   cycle, the #310 scripting→physics edge, the #311 CMake declarations, and
   the sanctioned editor→`runtime/src/component_registry.h` crossing from
-  #156). It can only shrink: an entry that no longer matches anything is
-  itself a finding, so each fix deletes its own entries and the gate is
-  red on that fix's base. The rule is [CI] for every edge not on that
-  list and [REVIEW] for the listed ones until the allowlist empties.
+  #156). Entries cannot be left behind once fixed: one that no longer
+  matches anything is itself a finding, so each fix deletes its own
+  entries and the gate is red on that fix's base. Adding a new entry is
+  not mechanically prevented and stays [REVIEW]. The rule is [CI] for
+  every edge not on that list and [REVIEW] for the listed ones until the
+  allowlist empties. The gate reads include edges and hand-wired
+  `*_INCLUDE_DIRS` only; dependency *visibility* (a PUBLIC dep that
+  should be PRIVATE) is not mechanically checked and stays [REVIEW].
 - **[REVIEW]** Public headers are self-contained and never leak SDL/bgfx/
   Lua/ImGui/ImGuizmo types. bgfx stays inside renderer impl (plus the
   editor's sanctioned ImGui backend); Lua inside scripting impl;

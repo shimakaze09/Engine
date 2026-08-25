@@ -240,19 +240,59 @@ def test_module_dependency_gate():
         check(run([script, "--root", str(shadowed)]) == 0,
               "module deps: a module's own private header is not a crossing")
 
+        # An angle-bracket first-party include names a module just as a
+        # quoted one does, and must not bypass the direction rule.
+        angled = tmp / "angled"
+        write_source(angled, "scripting/src/vm.cpp",
+                     ["engine/runtime/world.h"])
+        (angled / "scripting" / "src" / "vm.cpp").write_text(
+            "// Synthetic fixture for the module dependency gate.\n"
+            "#include <engine/runtime/world.h>\n", encoding="utf-8")
+        check(run([script, "--root", str(angled)]) != 0,
+              "module deps: an angle-bracket first-party include is audited")
+
         # A hand-wired foreign include dir grants headers without
-        # declaring the dependency.
-        grant = tmp / "grant"
-        write_source(grant, "scripting/src/vm.cpp", [])
-        lists = grant / "scripting" / "CMakeLists.txt"
-        lists.write_text(
-            "# Synthetic fixture for the module dependency gate.\n"
-            "engine_add_module_library(engine_scripting\n"
-            "    PRIVATE_INCLUDE_DIRS\n"
-            "    ${CMAKE_SOURCE_DIR}/runtime/include\n"
-            ")\n", encoding="utf-8")
-        check(run([script, "--root", str(grant)]) != 0,
+        # declaring the dependency. Each spelling below reaches the same
+        # directory, so each must be judged the same way.
+        def grant_case(name, lines, leaf="CMakeLists.txt"):
+            case = tmp / name
+            write_source(case, "editor/src/panels.cpp", [])
+            target = case / "editor" / leaf
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(
+                "# Synthetic fixture for the module dependency gate.\n"
+                "engine_add_module_library(engine_editor\n"
+                "    PRIVATE_INCLUDE_DIRS\n"
+                + "".join(f"    {line}\n" for line in lines)
+                + ")\n", encoding="utf-8")
+            return case
+
+        check(run([script, "--root", str(grant_case(
+            "grant", ["${CMAKE_SOURCE_DIR}/runtime/include"]))]) != 0,
               "module deps: a hand-wired foreign include dir fails")
+        check(run([script, "--root", str(grant_case(
+            "grant_project", ["${PROJECT_SOURCE_DIR}/runtime/include"]))]) != 0,
+              "module deps: the PROJECT_SOURCE_DIR spelling fails too")
+        check(run([script, "--root", str(grant_case(
+            "grant_relative",
+            ["${CMAKE_CURRENT_SOURCE_DIR}/../runtime/include"]))]) != 0,
+              "module deps: the relative spelling fails too")
+        # Nested, because a grant in a subdirectory is the same grant —
+        # three lived in tools/asset_packer/CMakeLists.txt unseen.
+        check(run([script, "--root", str(grant_case(
+            "grant_nested", ["${CMAKE_SOURCE_DIR}/runtime/include"],
+            leaf="sub/CMakeLists.txt"))]) != 0,
+              "module deps: a grant in a nested CMakeLists fails")
+
+        # The other direction: a module's own include dir, in every
+        # spelling, and a third-party variable, are not foreign grants.
+        check(run([script, "--root", str(grant_case("grant_own", [
+            "${CMAKE_CURRENT_SOURCE_DIR}/include",
+            "${CMAKE_SOURCE_DIR}/editor/include",
+            "${ENGINE_STB_INCLUDE_DIR}",
+        ]))]) == 0,
+              "module deps: a module's own and third-party dirs are not "
+              "grants")
 
     # The real tree: green today, and the allowlist is load-bearing.
     spec = importlib.util.spec_from_file_location(

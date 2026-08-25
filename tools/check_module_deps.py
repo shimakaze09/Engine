@@ -10,14 +10,15 @@ it reports findings and exits non-zero, and CI holds it at zero.
 
 Three checks, one root cause each:
 
-  1. Declared-graph direction. Every `#include "engine/<module>/..."` is
-     validated against ALLOWED_DEPENDENCIES below. The declared chain in
+  1. Declared-graph direction. Every `#include "engine/<module>/..."`
+     — quoted or angle-bracketed — is validated against
+     ALLOWED_DEPENDENCIES below. The declared chain in
      CLAUDE.md describes DIRECTION, not adjacency, so reaching past a
      tier downward (editor -> renderer) is legal while anything upward
      (scripting -> runtime) or sideways (scripting -> physics) is not.
 
-  2. Cross-module private headers. A quoted include that resolves only
-     into another module's src/ bypasses that module's public surface.
+  2. Cross-module private headers. An include that resolves only into
+     another module's src/ bypasses that module's public surface.
      The one sanctioned case is editor -> runtime/src/component_registry.h
      (issue #156), which is allowlisted rather than special-cased.
 
@@ -28,9 +29,15 @@ Three checks, one root cause each:
 
 Today's known violations are listed in KNOWN_VIOLATIONS with the issue
 that tracks each. An entry that no longer matches anything is itself a
-finding, so the list can only shrink: the fix that removes the last
-site of a tracked edge must delete its entries in the same commit, and
-the gate is red on that fix's base revision.
+finding, so entries cannot be left behind once fixed: the fix that
+removes the last site of a tracked edge must delete its entries in the
+same commit, and the gate is red on that fix's base revision. Adding a
+new entry is not mechanically prevented — that half stays [REVIEW].
+
+What this gate does NOT see: dependency visibility. A PUBLIC dep that
+should be PRIVATE (issue #311 lists `engine_lua` on engine_scripting)
+leaks a module's headers upward without any hand-wired directory or
+first-party include to catch, so it remains a [REVIEW] concern.
 
 Tests are deliberately out of scope: test targets legitimately reach
 into module src/ directories through PRIVATE_INCLUDE_DIRS to exercise
@@ -113,12 +120,32 @@ MODULE_SOURCE_DIRS: tuple[str, ...] = ("include", "src")
 
 CPP_SUFFIXES = frozenset({".cpp", ".cc", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".inl"})
 
-QUOTED_INCLUDE_RE = re.compile(r'^\s*#\s*include\s+"([^"]+)"')
+# Both include forms. Angle brackets are matched too: `#include
+# <engine/runtime/world.h>` names a first-party header just as surely as
+# the quoted spelling, and would otherwise bypass the direction, sibling
+# and content-purity rules entirely. There are no angle-bracket
+# first-party includes in the tree today, so this closes the hole before
+# it is used rather than after.
+INCLUDE_RE = re.compile(r'^\s*#\s*include\s+["<]([^">]+)[">]')
 ENGINE_INCLUDE_RE = re.compile(r"^engine/([a-z_]+)/")
-# A hand-wired path into another module's headers, e.g.
-# ${CMAKE_SOURCE_DIR}/runtime/include.
-CMAKE_FOREIGN_DIR_RE = re.compile(
-    r"\$\{CMAKE_SOURCE_DIR\}/([a-z_]+)/(include|src)\b"
+
+# A CMake path token ending at a module header directory, in any of the
+# spellings that reach the same place: ${CMAKE_SOURCE_DIR}/runtime/include,
+# its PROJECT_SOURCE_DIR synonym, and the relative forms
+# (${CMAKE_CURRENT_SOURCE_DIR}/../runtime/include, ../runtime/include).
+# Matching the spelling is not enough — the path is resolved below, so
+# every form is judged by where it lands.
+CMAKE_DIR_TOKEN_RE = re.compile(
+    r"(?:\$\{(?P<variable>[A-Za-z0-9_]+)\})?(?P<path>[A-Za-z0-9_./]*)"
+    r"/(?P<subdirectory>include|src)\b"
+)
+
+# The CMake variables this gate can resolve. Anything else (a
+# third-party ${ENGINE_STB_INCLUDE_DIR}, say) names no module and is
+# skipped rather than guessed at.
+CMAKE_ROOT_VARIABLES = frozenset({"CMAKE_SOURCE_DIR", "PROJECT_SOURCE_DIR"})
+CMAKE_CURRENT_VARIABLES = frozenset(
+    {"CMAKE_CURRENT_SOURCE_DIR", "CMAKE_CURRENT_LIST_DIR"}
 )
 
 # Violations that exist today, each tracked by an open issue. Entries are
@@ -258,15 +285,15 @@ def audited_sources(root: pathlib.Path) -> list[pathlib.Path]:
     return found
 
 
-def quoted_includes(path: pathlib.Path) -> list[str]:
-    """Returns the quoted include paths a file names, in file order."""
+def included_paths(path: pathlib.Path) -> list[str]:
+    """Returns the include paths a file names, in file order."""
     try:
         text = path.read_text(encoding="utf-8")
     except UnicodeDecodeError:
         text = path.read_text(encoding="utf-8-sig")
     includes: list[str] = []
     for line in text.splitlines():
-        match = QUOTED_INCLUDE_RE.match(line)
+        match = INCLUDE_RE.match(line)
         if match is not None:
             includes.append(match.group(1))
     return includes
@@ -327,7 +354,7 @@ def check_include_edges(
             continue
         relative = source.relative_to(root).as_posix()
         allowed = ALLOWED_DEPENDENCIES[module]
-        for include in quoted_includes(source):
+        for include in included_paths(source):
             key = (relative, include)
             engine_match = ENGINE_INCLUDE_RE.match(include)
             if engine_match is not None:
@@ -365,36 +392,73 @@ def check_include_edges(
     return findings
 
 
+def granted_module(
+    root: pathlib.Path, lists_file: pathlib.Path, line: str
+) -> tuple[str, str] | None:
+    """Returns the foreign module and subdirectory a line hand-wires."""
+    for match in CMAKE_DIR_TOKEN_RE.finditer(line):
+        variable = match.group("variable")
+        path = match.group("path")
+        subdirectory = match.group("subdirectory")
+        if variable is None:
+            # A bare relative path only names a directory when it walks
+            # out of its own; anything else is a plain word like the
+            # `include` in a comment.
+            if not path.startswith(".."):
+                continue
+            base = lists_file.parent
+        elif variable in CMAKE_ROOT_VARIABLES:
+            base = root
+        elif variable in CMAKE_CURRENT_VARIABLES:
+            base = lists_file.parent
+        else:
+            # A third-party or unknown variable names no module here.
+            continue
+        # Resolved rather than pattern-matched, so `../../core/include`
+        # and `${CMAKE_SOURCE_DIR}/core/include` are judged identically —
+        # by where they land, not how they are spelled.
+        resolved = (base / path.lstrip("/") / subdirectory).resolve()
+        target = module_of(root, resolved)
+        if target is not None:
+            return target, subdirectory
+    return None
+
+
 def check_cmake_grants(
     root: pathlib.Path, used: set[tuple[str, str, str]], allowlisted: bool
 ) -> list[Finding]:
     """Flags hand-wired include directories into other modules."""
     findings: list[Finding] = []
     for module in sorted(ALLOWED_DEPENDENCIES):
-        lists_file = root / module / "CMakeLists.txt"
-        if not lists_file.is_file():
+        module_dir = root / module
+        if not module_dir.is_dir():
             continue
-        relative = lists_file.relative_to(root).as_posix()
-        for number, line in enumerate(
-            lists_file.read_text(encoding="utf-8").splitlines(), start=1
-        ):
-            match = CMAKE_FOREIGN_DIR_RE.search(line)
-            if match is None:
-                continue
-            target, subdirectory = match.group(1), match.group(2)
-            if target == module:
-                continue
-            key = (relative, target, subdirectory)
-            if allowlisted and key in KNOWN_CMAKE_GRANTS:
-                used.add(key)
-                continue
-            findings.append(
-                Finding(
-                    f"{relative}:{number}",
-                    f"hand-wires {target}/{subdirectory}: declare a dep on "
-                    f"engine_{target} instead so usage requirements carry it",
+        # rglob, not one fixed path: a grant in a nested CMakeLists is the
+        # same grant. tools/asset_packer/CMakeLists.txt carried three that
+        # a top-level-only scan could not see.
+        for lists_file in sorted(module_dir.rglob("CMakeLists.txt")):
+            relative = lists_file.relative_to(root).as_posix()
+            for number, line in enumerate(
+                lists_file.read_text(encoding="utf-8").splitlines(), start=1
+            ):
+                granted = granted_module(root, lists_file, line)
+                if granted is None:
+                    continue
+                target, subdirectory = granted
+                if target == module:
+                    continue
+                key = (relative, target, subdirectory)
+                if allowlisted and key in KNOWN_CMAKE_GRANTS:
+                    used.add(key)
+                    continue
+                findings.append(
+                    Finding(
+                        f"{relative}:{number}",
+                        f"hand-wires {target}/{subdirectory}: declare a dep on "
+                        f"engine_{target} instead so usage requirements carry "
+                        "it",
+                    )
                 )
-            )
     return findings
 
 
