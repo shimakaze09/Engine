@@ -54,6 +54,7 @@
 
 #include "editor_commands.h"
 #include "editor_console_capture.h"
+#include "editor_layout.h"
 #include "editor_material_edit.h"
 #include "editor_panels_assets.h"
 #include "editor_panels_console.h"
@@ -238,6 +239,11 @@ bool initialize_editor(void *sdlWindow) noexcept {
   ImGuiIO &io = ImGui::GetIO();
   io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 
+  // Before any frame: takes layout persistence off ImGui's truncating
+  // ini writer and restores the stored layout, so the docking flag above
+  // is already set when the dock settings are parsed (issue #313).
+  static_cast<void>(editor_layout_initialize());
+
   static_cast<void>(core::cvar_register_float(
       "editor.ui_scale", 1.0F, "Editor UI scale multiplier"));
   const float displayScale =
@@ -293,6 +299,10 @@ void shutdown_editor() noexcept {
   if (!editor_session().initialized) {
     return;
   }
+
+  // Persisted while the context still exists; a failed write leaves the
+  // previously stored layout intact rather than emptying it.
+  static_cast<void>(editor_layout_save());
 
   ImGui_ImplBgfx_Shutdown();
   ImGui_ImplSDL3_Shutdown();
@@ -363,6 +373,11 @@ void editor_render(float frameMs, float utilizationPct) noexcept {
   draw_editor_panels(frameMs, utilizationPct);
   ImGui::Render();
   ImGui_ImplBgfx_RenderDrawData(ImGui::GetDrawData());
+
+  // Services the flag ImGui raises in place of its own periodic write,
+  // so an interrupted session loses at most the changes since the last
+  // settle rather than the whole layout.
+  editor_layout_save_if_dirty();
 }
 
 void editor_process_event(void *sdlEvent) noexcept {
