@@ -595,6 +595,10 @@ directory-global by design.
   calls `shutdown_renderer`, and between the two a flush or probe bake is
   a logged no-op rather than a rebuild against the destroyed device
   (#318, contract #168 — no global may lazily resurrect a subsystem).
+  The device's lifetime is its own, not that backend's: bootstrap creates
+  it directly for swapchain-owning backends and a run may never flush, so
+  `shutdown_renderer` releases a live device on its cold path as well as
+  its warm one (#326).
   Preserve
   forward fallback and transparency behavior when touching deferred paths;
   prefer CPU-verifiable renderer tests (GPU tests carry the `gpu` label).
