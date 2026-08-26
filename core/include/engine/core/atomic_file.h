@@ -32,8 +32,13 @@ public:
   bool begin(const char *destinationPath) noexcept;
   /// Appends one checked chunk; a short write aborts the stage.
   bool write(const void *data, std::size_t sizeBytes) noexcept;
-  /// Flush + sync + close + atomic rename; false leaves the previous
-  /// destination intact with the temporary removed.
+  /// Flush + sync + close + atomic rename + parent-directory sync, so
+  /// the new directory entry is durable and not just the bytes behind
+  /// it. False leaves the previous destination intact with the
+  /// temporary removed. True once the rename has committed: a failure
+  /// to sync the directory afterwards is logged as an error rather than
+  /// reported here, because the destination already holds the new
+  /// payload and the caller must not treat its old file as intact.
   bool commit() noexcept;
   /// Discards the staged temporary without touching the destination.
   void abort() noexcept;
@@ -45,11 +50,12 @@ private:
 };
 
 /// Writes the payload to a uniquely named sibling temporary file (flushed,
-/// synced, and closed with every step checked) and atomically renames it
-/// over the destination; on any failure the previous destination file is
-/// left intact and the temporary is removed. Concurrent writers never
-/// share a temporary; concurrent commits to the same destination resolve
-/// as last-writer-wins.
+/// synced, and closed with every step checked), atomically renames it
+/// over the destination, and syncs the containing directory so the entry
+/// survives power loss; on any failure before the rename the previous
+/// destination file is left intact and the temporary is removed.
+/// Concurrent writers never share a temporary; concurrent commits to the
+/// same destination resolve as last-writer-wins.
 bool atomic_write_file(const char *path, const void *data,
                        std::size_t size) noexcept;
 

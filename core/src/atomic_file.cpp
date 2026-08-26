@@ -1,11 +1,15 @@
 // Implements the atomic authored-file write: the payload lands in a
-// sibling temporary file that is flushed, synced, and closed with every
-// step checked, then atomically renamed over the destination, so an
-// interrupted save, a full disk, or a failed close can never destroy the
-// previous valid file. AtomicFileWriter streams the same protocol in
-// checked chunks for payloads too large to double-buffer.
+// sibling temporary file, and commit hands that staged file to the
+// durable-replacement protocol (durable_replace.h), so an interrupted
+// save, a full disk, or a failed close can never destroy the previous
+// valid file and the completed rename is itself made durable.
+// AtomicFileWriter streams the same protocol in checked chunks for
+// payloads too large to double-buffer.
 
 #include "engine/core/atomic_file.h"
+
+#include "durable_replace.h"
+#include "engine/core/logging.h"
 
 #include <atomic>
 #include <cstdio>
@@ -14,7 +18,6 @@
 #include <system_error>
 
 #ifdef _WIN32
-#include <io.h>
 #include <process.h>
 #else
 #include <unistd.h>
@@ -107,27 +110,26 @@ bool AtomicFileWriter::commit() noexcept {
     return false;
   }
 
-  bool ok = std::fflush(m_file) == 0;
-#ifdef _WIN32
-  ok = ok && (_commit(_fileno(m_file)) == 0);
-#else
-  ok = ok && (fsync(fileno(m_file)) == 0);
-#endif
-  ok = (std::fclose(m_file) == 0) && ok;
+  std::FILE *file = m_file;
   m_file = nullptr;
+  const detail::ReplaceOutcome outcome = detail::durable_replace(
+      file, m_tempPath, m_destinationPath, detail::production_replace_ops());
 
-  if (ok) {
-    std::error_code renameError{};
-    std::filesystem::rename(m_tempPath, m_destinationPath, renameError);
-    ok = !renameError;
+  // The replacement already happened, so the save is not reportable as a
+  // failure — only its power-loss resistance is degraded, and that must
+  // not pass silently.
+  if (outcome == detail::ReplaceOutcome::ReplacedNotDurable) {
+    char message[1152] = {};
+    std::snprintf(message, sizeof(message),
+                  "wrote '%s' but could not sync its directory entry: the "
+                  "file is in place and may not survive power loss",
+                  m_destinationPath);
+    log_message(LogLevel::Error, "core.atomic_file", message);
   }
-  if (!ok) {
-    std::error_code removeError{};
-    std::filesystem::remove(m_tempPath, removeError);
-  }
+
   m_tempPath[0] = '\0';
   m_destinationPath[0] = '\0';
-  return ok;
+  return outcome != detail::ReplaceOutcome::Failed;
 }
 
 void AtomicFileWriter::abort() noexcept {
