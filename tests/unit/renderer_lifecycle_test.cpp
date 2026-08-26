@@ -15,6 +15,17 @@
 // sink API, which exists to observe log_message without a second
 // logging backend.
 //
+// The same file covers the device half of that ownership rule (issue
+// #326). The render device is a subsystem of its own: engine::bootstrap
+// creates it directly for swapchain-owning backends, and a run can shut
+// down without anything ever flushing, so the command-buffer backend's
+// state is not a witness to whether a device is live. Keying the device's
+// teardown off that state leaks the device out of the engine's lifetime
+// and leaves the next initialization handing back the stale one — the
+// resurrection hazard above, one layer down. Those cases live here rather
+// than in a file of their own because they read the device's liveness
+// through the same log sink and the same public observables.
+//
 // Headless, on the null device (#196), so no GPU is required. Backend
 // initialization is then deliberately made to FAIL, by pointing the
 // shader root at a directory that holds no shaders: the cooked binary
@@ -162,6 +173,80 @@ void check_a_new_lifetime_re_arms_the_backend(
             "restart: the second shutdown latches the backend off again");
 }
 
+/// Boundary (#326): shutting down with no device live must stay a quiet
+/// no-op. The state is inherited, not assumed — the case above ends with
+/// a shutdown, and the failed initialization inside it unwound its device.
+void check_shutdown_without_a_device_is_a_no_op(
+    engine::tests::TestContext &ctx) {
+  ctx.check(rr::render_device() == nullptr,
+            "no device: the previous shutdown left none behind");
+
+  g_tally = LogTally{};
+  rr::shutdown_renderer();
+  ctx.check(g_tally.deviceInitializations == 0U,
+            "no device: shutdown initializes nothing of its own");
+  ctx.check(rr::render_device() == nullptr,
+            "no device: shutdown leaves the device absent");
+}
+
+/// The finding (#326): a device created outside the command-buffer
+/// backend, with nothing ever flushed, must still be released by the
+/// renderer's teardown — the owner releases what it acquired (#168).
+/// This is bootstrap's ordering: initialize the device directly, run no
+/// frame, shut down.
+///
+/// On the unfixed revision shutdown_renderer sees a cold backend and
+/// returns before reaching the device, so the device survives the engine.
+/// The consequence is read through the next initialization: it finds the
+/// stale context still marked initialized and hands the same device back
+/// silently, which the missing announcement reports.
+void check_shutdown_releases_a_device_the_backend_never_owned(
+    engine::tests::TestContext &ctx) {
+  // A lifetime is open around this: the device is the subject, but a
+  // renderer left latched off by the previous case would make the
+  // shutdown below trivially reachable for the wrong reason.
+  rr::initialize_renderer();
+
+  g_tally = LogTally{};
+  ctx.check(rr::initialize_render_device(),
+            "cold backend: a bootstrap-style device initialization succeeds");
+  ctx.check(g_tally.deviceInitializations == 1U,
+            "cold backend: that initialization created a device");
+  ctx.check(rr::render_device() != nullptr,
+            "cold backend: the device is live with no frame ever flushed");
+
+  rr::shutdown_renderer();
+  ctx.check(rr::render_device() == nullptr,
+            "cold backend: shutdown released the device bootstrap created");
+
+  // Why the leak matters: an initialization after a completed shutdown
+  // must build a device rather than resurrect the previous one. The
+  // announcement is emitted only when a device is actually created, so
+  // its absence is the stale hand-back.
+  g_tally = LogTally{};
+  ctx.check(rr::initialize_render_device(),
+            "restart: initialization succeeds after the shutdown");
+  ctx.check(g_tally.deviceInitializations == 1U,
+            "restart: it created a device instead of returning the stale one");
+}
+
+/// Boundary and control (#326): the failed-backend path, which released
+/// the device before this change and must keep doing so. It starts from
+/// the live device the previous case leaves, opens a lifetime and flushes
+/// once: initialization adopts that device, fails at the absent shader
+/// root and unwinds it there, and the shutdown that follows takes the warm
+/// branch. Either way the device must be gone once teardown returns.
+void check_failed_backend_leaves_no_device(engine::tests::TestContext &ctx) {
+  ctx.check(rr::render_device() != nullptr,
+            "failed backend: the case starts with a live device");
+
+  rr::initialize_renderer();
+  static_cast<void>(flush_and_tally());
+  rr::shutdown_renderer();
+  ctx.check(rr::render_device() == nullptr,
+            "failed backend: teardown leaves no device behind");
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -190,6 +275,9 @@ int main() {
   check_failed_backend_does_not_retry(ctx);
   check_flush_after_shutdown_does_not_resurrect(ctx);
   check_a_new_lifetime_re_arms_the_backend(ctx);
+  check_shutdown_without_a_device_is_a_no_op(ctx);
+  check_shutdown_releases_a_device_the_backend_never_owned(ctx);
+  check_failed_backend_leaves_no_device(ctx);
 
   engine::core::log_unregister_sink(&tally_sink, nullptr);
   return ctx.finish("renderer_lifecycle");

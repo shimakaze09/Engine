@@ -549,10 +549,28 @@ void shutdown_renderer() noexcept {
 
   BackendState &backend = backend_state();
   if (!backend.initialized && !backend.failed) {
-    // No device resources exist yet, but capture slots may hold texture-
+    // No backend resources exist yet, but capture slots may hold texture-
     // system handles that would go stale across a texture-system restart.
     destroy_scene_capture_targets(backend, nullptr);
     backend.sceneCaptureTargets = {};
+    // The device's lifetime is its own, not this backend's: bootstrap
+    // creates it directly for swapchain-owning backends (#138), and a run
+    // that never flushes reaches teardown with the backend still cold.
+    // Releasing it here is the module owner closing what was opened
+    // (#168) — otherwise the device and its swapchain outlive the engine
+    // and the next initialization hands back the stale one (#326).
+    if (render_device() != nullptr) {
+      // Making the context current is best effort here, unlike the warm
+      // path below: nothing but the device itself is being destroyed, and
+      // the device owns its own context under the swapchain-owning
+      // backend. A process with no window (a failed platform init) has no
+      // context to offer and must still not leak the device.
+      const bool contextCurrent = core::make_render_context_current();
+      shutdown_render_device();
+      if (contextCurrent) {
+        core::release_render_context();
+      }
+    }
     reset_renderer_public_state();
     return;
   }
