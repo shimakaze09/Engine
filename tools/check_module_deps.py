@@ -503,6 +503,10 @@ def public_dependency_targets(root: pathlib.Path, module: str) -> set[str]:
 
     Both spellings that reach the same property: the helper call's
     PUBLIC_DEPS section and a raw target_link_libraries(... PUBLIC ...).
+    INTERFACE counts alongside PUBLIC there: it propagates the dep's
+    usage requirements to consumers just the same, and on a header-only
+    target it is the only spelling CMake accepts — demanding PUBLIC of
+    one would name a remedy CMake rejects outright.
     Only the module's own library target counts — a nested CMakeLists
     declaring a tool target says nothing about the module's surface.
     """
@@ -519,7 +523,7 @@ def public_dependency_targets(root: pathlib.Path, module: str) -> set[str]:
                 continue
             if call == "target_link_libraries":
                 declared |= tokens_in_section(
-                    tokens[1:], {"PUBLIC"}, CMAKE_LINK_VISIBILITIES
+                    tokens[1:], {"PUBLIC", "INTERFACE"}, CMAKE_LINK_VISIBILITIES
                 )
             elif call in ENGINE_LIBRARY_HELPERS:
                 declared |= tokens_in_section(

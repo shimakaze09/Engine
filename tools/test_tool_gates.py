@@ -10,6 +10,7 @@
 # engine_integration_tool_gates.
 
 import importlib.util
+import re
 import subprocess
 import sys
 import tempfile
@@ -410,6 +411,21 @@ def test_module_dependency_gate():
                 "target_link_libraries(engine_physics PRIVATE engine_core)\n"
             )))]) != 0,
               "module deps: target_link_libraries PRIVATE does not")
+        # INTERFACE propagates usage requirements to consumers exactly as
+        # PUBLIC does, and on a header-only target it is the ONLY spelling
+        # CMake accepts — flagging it would name a remedy CMake rejects.
+        header_only = tmp / "visibility_interface"
+        write_source(header_only, "math/include/engine/math/vec.h",
+                     ["engine/core/entity.h"])
+        lists_file = header_only / "math" / "CMakeLists.txt"
+        lists_file.parent.mkdir(parents=True, exist_ok=True)
+        lists_file.write_text(
+            "# Synthetic fixture for the module dependency gate.\n"
+            "add_library(engine_math INTERFACE)\n"
+            "target_link_libraries(engine_math INTERFACE engine_core)\n",
+            encoding="utf-8")
+        check(run([script, "--root", str(header_only)]) == 0,
+              "module deps: an INTERFACE target's dep is declared publicly")
         # A commented-out declaration declares nothing, and prose naming
         # a target must not be read as a declaration either.
         check(run([script, "--root", str(visibility_case(
@@ -477,6 +493,26 @@ def test_module_dependency_gate():
               "module deps: the allowlist is restored and the gate is green")
     finally:
         sys.argv = argv
+
+    # ENGINE_HELPER_KEYWORDS mirrors the library helpers' signatures, and
+    # drift fails OPEN: tokens_in_section treats an unknown keyword as a
+    # section value, so a keyword added to a helper and written after
+    # PUBLIC_DEPS would silently join the declared-PUBLIC set and hide a
+    # real under-declaration. Assert the mirror against the source.
+    helpers = (TOOLS.parent / "cmake" / "EngineHelpers.cmake").read_text(
+        encoding="utf-8")
+    declared_keywords = set()
+    for helper in ("engine_add_module_library", "engine_add_header_library"):
+        body = helpers.split(f"function({helper} target)", 1)[1]
+        body = body.split("endfunction()", 1)[0]
+        for kind in ("oneValueArgs", "multiValueArgs"):
+            match = re.search(rf"set\({kind}([^)]*)\)", body)
+            if match is not None:
+                declared_keywords |= set(match.group(1).split())
+    check(declared_keywords == set(deps.ENGINE_HELPER_KEYWORDS),
+          "module deps: ENGINE_HELPER_KEYWORDS matches the helper signatures "
+          f"(helpers declare {sorted(declared_keywords)}, gate knows "
+          f"{sorted(deps.ENGINE_HELPER_KEYWORDS)})")
 
 
 def main():
