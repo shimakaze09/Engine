@@ -427,6 +427,14 @@ engine_add_test_executable(engine_unit_ccd
     engine_runtime
 )
 
+engine_add_test_executable(engine_unit_platform_rider_ccd
+    SOURCES
+    platform_rider_ccd_test.cpp
+    PRIVATE_DEPS
+    engine_physics
+    engine_runtime
+)
+
 engine_add_test_executable(engine_unit_blocked_body_warning
     SOURCES
     blocked_body_warning_test.cpp
