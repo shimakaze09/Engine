@@ -339,8 +339,10 @@ void check_parent_directory_resolution(engine::tests::TestContext &ctx) {
 
 /// EXPECTATION: the production ops run the whole protocol against a real
 /// filesystem — the public writer commits a file in a subdirectory, the
-/// payload lands exactly, and no durability degradation is reported,
-/// which is only true when the real parent-directory sync succeeded.
+/// payload lands exactly, no durability degradation is reported, and the
+/// protocol's outcome is exactly the one this platform can deliver:
+/// Durable where a directory-sync primitive exists, and the explicit
+/// ReplacedDurabilityUnavailable on Windows until #358 lands.
 void check_production_path(engine::tests::TestContext &ctx) {
   const std::filesystem::path directory{"durable_replace_test_dir"};
   std::error_code ec{};
@@ -380,6 +382,45 @@ void check_production_path(engine::tests::TestContext &ctx) {
   ctx.check(sinkReady, "the durability sink was registered");
   ctx.check(log.errors == 0,
             "the real parent-directory sync reported no degradation");
+
+  // `wrote && log.errors == 0` isolates Durable only where the platform
+  // has a directory-sync primitive: ReplacedDurabilityUnavailable also
+  // commits true and logs nothing, so on Windows the assertions above
+  // would hold with no sync attempted at all. Assert the production
+  // ops' exact outcome per platform, so the day Windows gains a real
+  // primitive (issue #358) this case fails until it is updated.
+  const std::string outcomeTemp =
+      (directory / "outcome.json.staged").generic_string();
+  const std::string outcomeDestination =
+      (directory / "outcome.json").generic_string();
+  std::FILE *staged = nullptr;
+#ifdef _WIN32
+  if (fopen_s(&staged, outcomeTemp.c_str(), "wb") != 0) {
+    staged = nullptr;
+  }
+#else
+  staged = std::fopen(outcomeTemp.c_str(), "wb");
+#endif
+  if (staged == nullptr) {
+    ctx.fail("the production-ops case could not stage its file");
+    std::filesystem::remove_all(directory, ec);
+    return;
+  }
+  static_cast<void>(std::fputs(payload, staged));
+
+  const ReplaceOutcome outcome =
+      durable_replace(staged, outcomeTemp.c_str(), outcomeDestination.c_str(),
+                      engine::core::detail::production_replace_ops());
+
+#ifdef _WIN32
+  ctx.check(outcome == ReplaceOutcome::ReplacedDurabilityUnavailable,
+            "Windows reports the durability primitive as unavailable");
+#else
+  ctx.check(outcome == ReplaceOutcome::Durable,
+            "the production ops sync the real parent directory");
+#endif
+  ctx.check(std::filesystem::exists(outcomeDestination, ec),
+            "the production ops replaced the destination");
 
   std::filesystem::remove_all(directory, ec);
 }

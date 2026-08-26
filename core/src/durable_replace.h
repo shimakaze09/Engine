@@ -87,6 +87,16 @@ ReplaceOutcome durable_replace(std::FILE *file, const char *tempPath,
 /// Copies the directory part of filePath into dst — "." when the path
 /// names a bare file and "/" when it sits at the root. False (with dst
 /// left empty) when the arguments are null or the result does not fit.
+///
+/// Resolves POSIX path shapes, which is all the protocol asks of it
+/// today: only the POSIX branch of open_parent_directory calls it. It
+/// splits on the platform's separators but does not model Windows
+/// roots, so the Windows implementation (issue #358) must supply its
+/// own handling for at least these shapes rather than inherit this one:
+/// "C:/x" yields "C:", the drive's current directory rather than its
+/// root; "C:x" has no separator and yields "."  — the current directory
+/// of a possibly different drive; and a UNC "\\server\share\x" yields
+/// "\\server\share", which is not a syncable directory handle.
 bool parent_directory_of(char *dst, std::size_t dstCapacity,
                          const char *filePath) noexcept;
 
