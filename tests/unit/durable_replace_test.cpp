@@ -18,6 +18,7 @@
 #include <cstring>
 #include <filesystem>
 #include <string>
+#include <system_error>
 #include <vector>
 
 namespace {
@@ -76,8 +77,24 @@ bool steps_are(const std::vector<Step> &expected) {
 
 /// The staged file the fake ops receive and never dereference; a real
 /// stream so the protocol is handed the same kind of handle production
-/// gives it. Closed once, by main.
+/// gives it. Closed and removed once, by main — std::tmpfile is avoided
+/// deliberately: the Windows CRT creates its temporary in the drive
+/// root, which fails outright for a user without write access there.
+constexpr const char *kStagedFilePath = "durable_replace_test_stage.tmp";
 std::FILE *g_stagedFile = nullptr;
+
+/// Opens the staged stand-in in the working directory.
+std::FILE *open_staged_file() {
+  std::FILE *file = nullptr;
+#ifdef _WIN32
+  if (fopen_s(&file, kStagedFilePath, "wb") != 0) {
+    file = nullptr;
+  }
+#else
+  file = std::fopen(kStagedFilePath, "wb");
+#endif
+  return file;
+}
 
 bool fake_flush(std::FILE *) noexcept { return g_recorder.run(Step::FileFlush); }
 bool fake_sync(std::FILE *) noexcept { return g_recorder.run(Step::FileSync); }
@@ -373,7 +390,7 @@ void check_production_path(engine::tests::TestContext &ctx) {
 int main() {
   engine::tests::TestContext ctx{};
 
-  g_stagedFile = std::tmpfile();
+  g_stagedFile = open_staged_file();
   if (g_stagedFile == nullptr) {
     ctx.fail("the staged file stand-in could not be opened");
     return ctx.finish("durable_replace_test");
@@ -390,6 +407,8 @@ int main() {
 
   static_cast<void>(std::fclose(g_stagedFile));
   g_stagedFile = nullptr;
+  std::error_code stageEc{};
+  std::filesystem::remove(kStagedFilePath, stageEc);
 
   return ctx.finish("durable_replace_test");
 }
