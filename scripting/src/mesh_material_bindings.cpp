@@ -26,8 +26,7 @@ extern "C" {
 #include "engine/core/logging.h"
 #include "engine/core/string_util.h"
 #include "engine/math/quat.h"
-#include "engine/physics/primitive_hulls.h"
-#include "engine/runtime/physics_bridge.h"
+#include "engine/runtime/primitive_collider.h"
 #include "engine/runtime/scripting_bridge.h"
 #include "engine/runtime/world.h"
 
@@ -107,50 +106,39 @@ int lua_engine_spawn_shape(lua_State *state) noexcept {
   const char *shape = lua_tostring(state, 1);
 
   std::uint64_t meshId = g_defaultMeshAssetId;
-  math::Vec3 halfExtents(0.5F, 0.5F, 0.5F);
-  runtime::ColliderShape colliderShape = runtime::ColliderShape::AABB;
+  // Authored per shape: the collider a spawn keeps when the shape has no
+  // canonical hull, and the provenance the runtime resolves it from when it
+  // does.
+  runtime::Collider collider{};
+  collider.halfExtents = math::Vec3(0.5F, 0.5F, 0.5F);
+  collider.shape = runtime::ColliderShape::AABB;
   runtime::HullSource hullSource = runtime::HullSource::None;
-  physics::ConvexHullData hull{};
-  bool hasHull = false;
 
   if (std::strcmp(shape, "cube") == 0) {
     meshId =
         (g_builtinCubeMesh != 0ULL) ? g_builtinCubeMesh : g_defaultMeshAssetId;
-    halfExtents = math::Vec3(0.5F, 0.5F, 0.5F);
-    colliderShape = runtime::ColliderShape::AABB;
   } else if (std::strcmp(shape, "sphere") == 0) {
     meshId = (g_builtinSphereMesh != 0ULL) ? g_builtinSphereMesh
                                            : g_defaultMeshAssetId;
-    halfExtents = math::Vec3(0.5F, 0.5F, 0.5F);
-    colliderShape = runtime::ColliderShape::Sphere;
+    collider.shape = runtime::ColliderShape::Sphere;
   } else if (std::strcmp(shape, "cylinder") == 0) {
     meshId = (g_builtinCylinderMesh != 0ULL) ? g_builtinCylinderMesh
                                              : g_defaultMeshAssetId;
-    hasHull = physics::build_cylinder_hull(&hull);
-    colliderShape = hasHull ? runtime::ColliderShape::ConvexHull
-                            : runtime::ColliderShape::Capsule;
-    hullSource = hasHull ? runtime::HullSource::Cylinder
-                         : runtime::HullSource::None;
-    halfExtents = hasHull ? hull.localHalfExtents : math::Vec3(0.5F, 0.5F, 0.5F);
+    collider.shape = runtime::ColliderShape::Capsule;
+    hullSource = runtime::HullSource::Cylinder;
   } else if (std::strcmp(shape, "capsule") == 0) {
     meshId = (g_builtinCapsuleMesh != 0ULL) ? g_builtinCapsuleMesh
                                             : g_defaultMeshAssetId;
-    halfExtents = math::Vec3(0.5F, 0.5F, 0.5F);
-    colliderShape = runtime::ColliderShape::Capsule;
+    collider.shape = runtime::ColliderShape::Capsule;
   } else if (std::strcmp(shape, "pyramid") == 0) {
     meshId = (g_builtinPyramidMesh != 0ULL) ? g_builtinPyramidMesh
                                             : g_defaultMeshAssetId;
-    hasHull = physics::build_pyramid_hull(&hull);
-    colliderShape = hasHull ? runtime::ColliderShape::ConvexHull
-                            : runtime::ColliderShape::AABB;
-    hullSource = hasHull ? runtime::HullSource::Pyramid
-                         : runtime::HullSource::None;
-    halfExtents = hasHull ? hull.localHalfExtents : math::Vec3(0.5F, 0.5F, 0.58F);
+    collider.halfExtents = math::Vec3(0.5F, 0.5F, 0.58F);
+    hullSource = runtime::HullSource::Pyramid;
   } else if (std::strcmp(shape, "plane") == 0) {
     meshId = (g_builtinPlaneMesh != 0ULL) ? g_builtinPlaneMesh
                                           : g_defaultMeshAssetId;
-    halfExtents = math::Vec3(5.0F, 0.1F, 5.0F);
-    colliderShape = runtime::ColliderShape::AABB;
+    collider.halfExtents = math::Vec3(5.0F, 0.1F, 5.0F);
   } else {
     // An unrecognized shape name previously fell through to the default cube
     // mesh with a box collider, so a typo silently produced the wrong object.
@@ -159,6 +147,12 @@ int lua_engine_spawn_shape(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
+
+  // Hull provenance is resolved by the runtime tier that owns collider
+  // installation: it sizes and tags the collider, and World::add_collider
+  // rebuilds the payload from that tag, so a script spawn never builds or
+  // carries a physics hull of its own (issue #310).
+  const bool hasHull = runtime::apply_primitive_hull(hullSource, &collider);
 
   runtime::World &world = *runtime_binding().world;
   runtime::Transform transform{};
@@ -179,14 +173,10 @@ int lua_engine_spawn_shape(lua_State *state) noexcept {
     failedStep = "rigid body";
   }
 
-  runtime::Collider collider{};
-  collider.halfExtents = halfExtents;
-  collider.shape = colliderShape;
-  collider.hullSource = hullSource;
   if (failedStep == nullptr) {
     if (!world.add_collider(entity, collider)) {
       failedStep = "collider";
-    } else if (hasHull && !runtime::set_convex_hull_data(world, entity, hull)) {
+    } else if (hasHull && !world.has_convex_hull_payload(entity)) {
       // Documented fallback: hull slots exhausted degrades to the bounding
       // box, but only if the replacement collider actually installs.
       core::log_message(

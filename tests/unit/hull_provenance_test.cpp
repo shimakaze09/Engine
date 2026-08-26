@@ -1,7 +1,9 @@
 // Verifies convex-hull provenance behavior: World::add_collider rebuilds the
-// canonical primitive hull recorded in Collider::hullSource, the scene
-// serializer round-trips the field, and buffer save/load (the editor's play
-// snapshot/Stop-restore mechanism) restores hull payloads exactly.
+// canonical primitive hull recorded in Collider::hullSource, the collider
+// description spawn paths derive from that provenance (#310) matches the
+// canonical builder, the scene serializer round-trips the field, and buffer
+// save/load (the editor's play snapshot/Stop-restore mechanism) restores hull
+// payloads exactly.
 
 #include <cstddef>
 #include <cstring>
@@ -11,6 +13,7 @@
 #include "engine/physics/physics.h"
 #include "engine/physics/primitive_hulls.h"
 #include "engine/runtime/physics_bridge.h"
+#include "engine/runtime/primitive_collider.h"
 #include "engine/runtime/scene_serializer.h"
 #include "engine/runtime/world.h"
 
@@ -124,6 +127,100 @@ int verify_add_collider_installs_provenance_hull() {
 
   if (engine::runtime::get_convex_hull_data(*world, bare) != nullptr) {
     return 15;
+  }
+
+  return 0;
+}
+
+/// Verifies the collider description spawn paths derive from provenance
+/// (issue #310): apply_primitive_hull reproduces the canonical builder's own
+/// half extents exactly, leaves a hull-less source untouched so the caller's
+/// authored fallback stands, and describes a collider whose installed payload
+/// matches the builder. Also pins has_convex_hull_payload, the observable a
+/// spawn uses to see whether the rebuild found a free hull slot.
+int verify_apply_primitive_hull_describes_canonical_collider() {
+  engine::physics::ConvexHullData cylinderHull{};
+  engine::physics::ConvexHullData pyramidHull{};
+  if (!engine::physics::build_cylinder_hull(&cylinderHull) ||
+      !engine::physics::build_pyramid_hull(&pyramidHull)) {
+    return 70;
+  }
+
+  // The authored fallback a caller brings: what must survive when the source
+  // names no hull, and what must be replaced when it does.
+  engine::runtime::Collider cylinder{};
+  cylinder.shape = engine::runtime::ColliderShape::Capsule;
+  cylinder.halfExtents = engine::math::Vec3(0.5F, 0.5F, 0.5F);
+  if (!engine::runtime::apply_primitive_hull(
+          engine::runtime::HullSource::Cylinder, &cylinder)) {
+    return 71;
+  }
+  if ((cylinder.shape != engine::runtime::ColliderShape::ConvexHull) ||
+      (cylinder.hullSource != engine::runtime::HullSource::Cylinder) ||
+      (cylinder.halfExtents.x != cylinderHull.localHalfExtents.x) ||
+      (cylinder.halfExtents.y != cylinderHull.localHalfExtents.y) ||
+      (cylinder.halfExtents.z != cylinderHull.localHalfExtents.z)) {
+    return 72;
+  }
+
+  engine::runtime::Collider pyramid{};
+  pyramid.shape = engine::runtime::ColliderShape::AABB;
+  pyramid.halfExtents = engine::math::Vec3(0.5F, 0.5F, 0.58F);
+  if (!engine::runtime::apply_primitive_hull(
+          engine::runtime::HullSource::Pyramid, &pyramid)) {
+    return 73;
+  }
+  if ((pyramid.shape != engine::runtime::ColliderShape::ConvexHull) ||
+      (pyramid.hullSource != engine::runtime::HullSource::Pyramid) ||
+      (pyramid.halfExtents.x != pyramidHull.localHalfExtents.x) ||
+      (pyramid.halfExtents.y != pyramidHull.localHalfExtents.y) ||
+      (pyramid.halfExtents.z != pyramidHull.localHalfExtents.z)) {
+    return 74;
+  }
+
+  engine::runtime::Collider untouched{};
+  untouched.shape = engine::runtime::ColliderShape::Capsule;
+  untouched.halfExtents = engine::math::Vec3(1.0F, 2.0F, 3.0F);
+  if (engine::runtime::apply_primitive_hull(engine::runtime::HullSource::None,
+                                            &untouched)) {
+    return 75;
+  }
+  if ((untouched.shape != engine::runtime::ColliderShape::Capsule) ||
+      (untouched.hullSource != engine::runtime::HullSource::None) ||
+      (untouched.halfExtents.x != 1.0F) || (untouched.halfExtents.y != 2.0F) ||
+      (untouched.halfExtents.z != 3.0F)) {
+    return 76;
+  }
+
+  if (engine::runtime::apply_primitive_hull(
+          engine::runtime::HullSource::Cylinder, nullptr)) {
+    return 77;
+  }
+
+  // Production parity: the described collider installs the builder's payload.
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 78;
+  }
+  const engine::runtime::Entity described = add_collider_entity(*world,
+                                                                cylinder);
+  const engine::runtime::Entity bare = add_collider_entity(
+      *world, make_hull_collider(engine::runtime::HullSource::None,
+                                 engine::math::Vec3(0.5F, 0.5F, 0.5F)));
+  if ((described == engine::runtime::kInvalidEntity) ||
+      (bare == engine::runtime::kInvalidEntity)) {
+    return 79;
+  }
+  const engine::physics::ConvexHullData *installed =
+      engine::runtime::get_convex_hull_data(*world, described);
+  if ((installed == nullptr) || !hulls_exactly_equal(*installed,
+                                                     cylinderHull)) {
+    return 80;
+  }
+  if (!world->has_convex_hull_payload(described) ||
+      world->has_convex_hull_payload(bare)) {
+    return 81;
   }
 
   return 0;
@@ -337,6 +434,11 @@ int verify_play_snapshot_restore_preserves_hull() {
 /// Runs every hull provenance suite in order and returns the first failure.
 int main() {
   int result = verify_add_collider_installs_provenance_hull();
+  if (result != 0) {
+    return result;
+  }
+
+  result = verify_apply_primitive_hull_describes_canonical_collider();
   if (result != 0) {
     return result;
   }

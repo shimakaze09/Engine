@@ -10,8 +10,8 @@
 #include "engine/core/string_util.h"
 #include "engine/math/transform.h"
 #include "engine/physics/physics.h"
-#include "engine/physics/primitive_hulls.h"
 #include "engine/runtime/reflect_types.h"
+#include "primitive_hull_build.h"
 #include "world_internal.h"
 
 #include <array>
@@ -164,19 +164,8 @@ void install_provenance_hull(physics::PhysicsContext &context, Entity entity,
   }
 
   physics::ConvexHullData hull{};
-  bool built = false;
-  switch (collider.hullSource) {
-  case HullSource::Cylinder:
-    built = physics::build_cylinder_hull(&hull);
-    break;
-  case HullSource::Pyramid:
-    built = physics::build_pyramid_hull(&hull);
-    break;
-  default:
-    break;
-  }
-
-  if (!built || !physics::set_convex_hull_data(context, entity, hull)) {
+  if (!build_primitive_hull(collider.hullSource, &hull) ||
+      !physics::set_convex_hull_data(context, entity, hull)) {
     char message[128] = {};
     std::snprintf(message, sizeof(message),
                   "convex hull rebuild failed for entity %u (source %u) — "
@@ -512,6 +501,10 @@ bool World::remove_collider(Entity entity) noexcept {
 bool World::get_collider(Entity entity, Collider *outCollider) const noexcept {
   return get_component_checked(m_colliders, entity, outCollider,
                                "get_collider");
+}
+
+bool World::has_convex_hull_payload(Entity entity) const noexcept {
+  return physics::get_convex_hull_data(m_physicsContext, entity) != nullptr;
 }
 
 bool World::add_mesh_component(Entity entity,

@@ -73,9 +73,14 @@ is prohibited.
   dependency is expressed only as a dep on the target, so CMake usage
   requirements stay the single source of truth. The gate carries an
   allowlist of today's tracked violations (the #309 scripting→runtime
-  cycle, the #310 scripting→physics edge, the #311 CMake declarations, and
+  cycle, the #311 CMake declarations, and
   the sanctioned editor→`runtime/src/component_registry.h` crossing from
-  #156). Entries cannot be left behind once fixed: one that no longer
+  #156). The #310 scripting→physics edge is no longer among them: no
+  scripting TU includes `engine/physics/` (2026-08-26), so that direction
+  is enforced with no exception, and scripting's remaining
+  `engine_physics` dep carries only the physics include paths that
+  runtime's public headers need under the #309 grant.
+  Entries cannot be left behind once fixed: one that no longer
   matches anything is itself a finding, so each fix deletes its own
   entries and the gate is red on that fix's base. Adding a new entry is
   not mechanically prevented and stays [REVIEW]. The rule is [CI] for
@@ -363,7 +368,13 @@ directory-global by design.
   convex-hull provenance (`Collider::hullSource` serializes which primitive
   builder made a ConvexHull payload; `World::add_collider` rebuilds it on
   every install path — scene/prefab load, world copy, editor undo — while
-  Heightfield payloads remain unserialized, test-only reachable),
+  Heightfield payloads remain unserialized, test-only reachable; #310:
+  `primitive_collider.{h,cpp}`'s `apply_primitive_hull` is the one place a
+  spawn path turns a `HullSource` into a collider — ConvexHull shape,
+  provenance tag, the builder's own half extents — so script and editor
+  spawns describe a collider instead of building hull payloads of their
+  own, and `World::has_convex_hull_payload` is the observable a spawn uses
+  to see whether the fixed hull slots had room),
   `EnginePipeline` (17 named frame stages, fixed 1/60 step, job-graph frame
   split into a simulation graph and a render-prep graph; animation evaluates
   per fixed step BEFORE the simulation graph so render prep bakes

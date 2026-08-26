@@ -40,11 +40,11 @@
 #include "engine/math/transform.h"
 #include "engine/math/vec2.h"
 #include "engine/math/vec4.h"
-#include "engine/physics/primitive_hulls.h"
 #include "engine/content/asset_metadata.h"
 #include "engine/renderer/camera.h"
 #include "engine/renderer/command_buffer.h"
 #include "engine/runtime/editor_bridge.h"
+#include "engine/runtime/primitive_collider.h"
 #include "engine/runtime/scene_serializer.h"
 #include "engine/runtime/world.h"
 
@@ -732,18 +732,11 @@ runtime::Entity execute_primitive_spawn(EditorPrimitive primitive) noexcept {
   command->colliderComponent.shape = desc.fallbackShape;
   command->colliderComponent.halfExtents = desc.halfExtents;
   command->colliderComponent.localPosition = desc.colliderLocalPosition;
-  physics::ConvexHullData hull{};
-  bool hullBuilt = false;
-  if (desc.hullSource == math::HullSource::Cylinder) {
-    hullBuilt = physics::build_cylinder_hull(&hull);
-  } else if (desc.hullSource == math::HullSource::Pyramid) {
-    hullBuilt = physics::build_pyramid_hull(&hull);
-  }
-  if (hullBuilt) {
-    command->colliderComponent.shape = math::ColliderShape::ConvexHull;
-    command->colliderComponent.hullSource = desc.hullSource;
-    command->colliderComponent.halfExtents = hull.localHalfExtents;
-  }
+  // The authored fallback above stands when the primitive names no hull;
+  // otherwise the runtime sizes and tags the collider from the one hull
+  // provenance every install path rebuilds from (issue #310).
+  static_cast<void>(runtime::apply_primitive_hull(
+      desc.hullSource, &command->colliderComponent));
   if (!editor_session().commandHistory.execute(command)) {
     return runtime::kInvalidEntity;
   }

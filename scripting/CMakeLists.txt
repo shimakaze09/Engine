@@ -57,6 +57,11 @@ engine_add_module_library(engine_scripting
     engine_math
     engine_lua
     PRIVATE_DEPS
+    # Not scripting's own dependency: no scripting TU includes or calls
+    # engine/physics any more (issue #310). This carries the physics include
+    # paths that runtime's public headers need — world.h includes
+    # physics_world_view.h — under the issue #309 runtime-include grant
+    # above, and is deleted with that grant when the bridge migration lands.
     engine_physics
     PCH src/pch.h
 )
