@@ -34,6 +34,10 @@ engine_add_module_library(engine_runtime
     PUBLIC_DEPS
     engine_core
     engine_math
+    # editor_bridge.h and service_registry.h include engine/content/
+    # headers, so content is part of runtime's public surface in its own
+    # right, not something to reach through engine_renderer.
+    engine_content
     engine_physics
     engine_scripting
     engine_renderer

@@ -68,12 +68,17 @@ is prohibited.
   legal. `tools/check_module_deps.py` (#311) is the mechanical gate, run
   in the static-analysis CI job beside the comment audits: it validates
   every first-party `#include "engine/<module>/..."` against that graph,
-  rejects includes of another module's private `src/` headers, and rejects
+  rejects includes of another module's private `src/` headers, rejects
   foreign include directories hand-wired via `*_INCLUDE_DIRS` — a
   dependency is expressed only as a dep on the target, so CMake usage
-  requirements stay the single source of truth. The gate carries an
+  requirements stay the single source of truth — and requires a module
+  whose *public headers* include `engine/<other>/...` to declare
+  `engine_<other>` as a PUBLIC dep rather than leaving consumers to
+  compile through some other dep's transitive usage requirements
+  (#311, 2026-08-26; that fourth check carries no allowlist and starts
+  at zero). The gate carries an
   allowlist of today's tracked violations (the #309 scripting→runtime
-  cycle, the #311 CMake declarations, and
+  cycle and its `runtime/include` grant, plus
   the sanctioned editor→`runtime/src/component_registry.h` crossing from
   #156). The #310 scripting→physics edge is no longer among them: no
   scripting TU includes `engine/physics/` (2026-08-26), so that direction
@@ -85,9 +90,11 @@ is prohibited.
   entries and the gate is red on that fix's base. Adding a new entry is
   not mechanically prevented and stays [REVIEW]. The rule is [CI] for
   every edge not on that list and [REVIEW] for the listed ones until the
-  allowlist empties. The gate reads include edges and hand-wired
-  `*_INCLUDE_DIRS` only; dependency *visibility* (a PUBLIC dep that
-  should be PRIVATE) is not mechanically checked and stays [REVIEW].
+  allowlist empties. The visibility check runs one direction only:
+  an under-declared dep (public headers need it, the declaration does
+  not carry it) is [CI]; the opposite, a PUBLIC dep no public header
+  needs, stays [REVIEW] — proving a dep unnecessary means proving no
+  consumer relies on the propagation, which include edges cannot show.
 - **[REVIEW]** Public headers are self-contained and never leak SDL/bgfx/
   Lua/ImGui/ImGuizmo types. bgfx stays inside renderer impl (plus the
   editor's sanctioned ImGui backend); Lua inside scripting impl;

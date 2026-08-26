@@ -55,8 +55,11 @@ engine_add_module_library(engine_scripting
     PUBLIC_DEPS
     engine_core
     engine_math
-    engine_lua
     PRIVATE_DEPS
+    # PRIVATE: no scripting public header includes a Lua header — the
+    # hard rule keeps Lua types out of them — so nothing upstream should
+    # be able to include lua.h through scripting's usage requirements.
+    engine_lua
     # Not scripting's own dependency: no scripting TU includes or calls
     # engine/physics any more (issue #310). This carries the physics include
     # paths that runtime's public headers need — world.h includes
