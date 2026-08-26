@@ -295,6 +295,11 @@ public:
   get_collider_range(std::size_t startIndex, std::size_t count,
                      const Entity **outEntities,
                      const Collider **outColliders) const noexcept override;
+  /// True when the entity holds a convex-hull payload. A caller that
+  /// installed a ConvexHull collider asks this to learn whether the
+  /// provenance rebuild found a free hull slot, without reaching into the
+  /// physics payload store itself.
+  bool has_convex_hull_payload(Entity entity) const noexcept;
 
   /// Adds or replaces the entity's mesh component. Requires the Input phase and
   /// a live entity; logs and returns false otherwise or when storage is full.

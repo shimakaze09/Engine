@@ -17,6 +17,7 @@ engine_add_module_library(engine_runtime
     src/engine_runtime_streaming.cpp
     src/physics_bridge.cpp
     src/prefab_serializer.cpp
+    src/primitive_collider.cpp
     src/render_prep_pipeline.cpp
     src/save_data.cpp
     src/reflect_types.cpp
