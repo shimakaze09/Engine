@@ -612,18 +612,24 @@ void check_directory_creation_path_shapes(engine::tests::TestContext &ctx) {
 #ifdef _WIN32
     const std::vector<std::string> expected{"a", "a\\b"};
     const char *expectation = "a backslash separates segments on Windows";
+    const char *expectedParent = "a";
 #else
     const std::vector<std::string> expected{"a\\b"};
     const char *expectation =
         "a backslash is an ordinary POSIX filename character, not a split";
+    const char *expectedParent = ".";
 #endif
+    // createdPaths pins the walk's half of the agreement; the parent
+    // this resolves to pins the other half, so it is the exact answer
+    // for this platform — accepting the other platform's answer would
+    // let a regression in either function pass unnoticed.
     ctx.check(g_recorder.createdPaths == expected, expectation);
 
     char parent[64] = {};
     ctx.check(parent_directory_of(parent, sizeof(parent),
                                   g_recorder.createdPaths.back().c_str()),
               "the deepest created prefix resolves a parent");
-    ctx.check(std::strcmp(parent, "a") == 0 || std::strcmp(parent, ".") == 0,
+    ctx.check(std::strcmp(parent, expectedParent) == 0,
               "that parent is the directory the prefix really sits in");
   }
   {
