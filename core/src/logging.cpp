@@ -28,10 +28,11 @@ struct SinkSlot final {
 std::mutex g_sinkMutex{};
 std::array<SinkSlot, kMaxLogSinks> g_sinks{};
 
-/// Dispatches currently executing a sink out of each slot, guarded by
-/// g_sinkMutex. A slot is quiescent at zero, which is the point at which its
-/// owner's userData can no longer be reached through a dispatch snapshot;
-/// removal waits for that, so unregister doubles as the lifetime barrier.
+/// Dispatches that snapshotted each slot and have not finished their walk,
+/// guarded by g_sinkMutex. A slot is quiescent at zero, which is the point at
+/// which its owner's userData can no longer be reached through a dispatch
+/// snapshot; removal waits for that, so unregister doubles as the lifetime
+/// barrier.
 std::array<std::uint32_t, kMaxLogSinks> g_sinkActive{};
 
 /// Signalled by a dispatch that has finished calling its snapshot, waking the
@@ -43,15 +44,18 @@ std::condition_variable g_sinkQuiescent{};
 /// own callback is not waiting on the dispatch that is running it.
 thread_local std::array<std::uint32_t, kMaxLogSinks> t_sinkActiveOnThread{};
 
-/// True when nothing except the calling thread's own in-flight call can still
-/// reach the slot. Callers must hold g_sinkMutex.
+/// True when no dispatch except the calling thread's own can still reach the
+/// slot. Only the caller's share is subtracted, so a thread waiting here still
+/// waits out every other thread's dispatch of this slot. Callers must hold
+/// g_sinkMutex.
 bool slot_quiescent_for_caller(std::size_t index) noexcept {
   return g_sinkActive[index] <= t_sinkActiveOnThread[index];
 }
 
 /// Blocks until every removed slot is quiescent for the caller, then returns.
-/// The wait is bounded by the sink contract in logging.h: sinks do
-/// fixed-size, non-blocking work, so this is the time one callback takes.
+/// A dispatch releases its claim on all the slots it snapshotted at once, so
+/// this spans a whole dispatch of the table rather than one callback; the sink
+/// contract in logging.h — fixed-size, non-blocking work — is what bounds it.
 void wait_for_slots_quiescent(std::unique_lock<std::mutex> &lock,
                               std::size_t first, std::size_t last) noexcept {
   g_sinkQuiescent.wait(lock, [first, last]() noexcept {
