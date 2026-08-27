@@ -2,10 +2,10 @@
 // runs (audit #338): the staged payload is flushed, synced and closed,
 // renamed over the destination, and the directory holding that entry is
 // synced, so the rename itself survives power loss instead of only the
-// bytes behind it. Its companion (audit #357) covers the step before —
-// creating the directory the commit writes into, syncing the parent that
-// now carries each newly created entry, so the file's durability rests
-// on a directory whose own existence is durable too. The filesystem
+// bytes behind it. Its companion covers the step before — creating the
+// directory the commit writes into, syncing the parent that now carries
+// each newly created entry, so the file's durability rests on a
+// directory whose own existence is durable too. The filesystem
 // operations are injected rather than called directly so the fault
 // branches — a directory that cannot be opened, a directory sync that
 // fails after the rename already committed, a segment that cannot be
@@ -79,7 +79,7 @@ enum class CreateDirectoryOutcome : std::uint8_t {
   /// Segments were created on a platform that exposes no directory-sync
   /// primitive, so their entries' durability is whatever the filesystem
   /// provides on its own. Windows takes this path, as it does for the
-  /// rename (issue #358).
+  /// rename.
   CreatedDurabilityUnavailable,
   /// A segment could not be created, so the destination directory does
   /// not exist and no commit into it can succeed.
@@ -123,9 +123,9 @@ const ReplaceOps &production_replace_ops() noexcept;
 /// Creates every missing segment of directoryPath, syncing the parent
 /// directory that carries each newly created entry before moving on, so
 /// the whole path from an already-durable ancestor down to the
-/// destination is durable before a file is committed into it (audit
-/// #357). Existing segments cost no sync. Creation stops at the first
-/// segment that fails, leaving the segments already created in place.
+/// destination is durable before a file is committed into it. Existing
+/// segments cost no sync. Creation stops at the first segment that
+/// fails, leaving the segments already created in place.
 ///
 /// A segment ending in ':' is a drive designator, not a directory, and
 /// is stepped over rather than created; a leading or repeated separator

@@ -602,6 +602,31 @@ void check_directory_creation_path_shapes(engine::tests::TestContext &ctx) {
               "a drive designator is stepped over, not created");
   }
   {
+    // The walk and parent_directory_of must agree on what ends a
+    // segment, because the walk hands that function the prefixes it
+    // builds. A backslash is a separator only where the platform says
+    // so; splitting on it under POSIX would create a directory the
+    // caller never named.
+    begin_case();
+    static_cast<void>(durable_create_directories("a\\b", recording_ops()));
+#ifdef _WIN32
+    const std::vector<std::string> expected{"a", "a\\b"};
+    const char *expectation = "a backslash separates segments on Windows";
+#else
+    const std::vector<std::string> expected{"a\\b"};
+    const char *expectation =
+        "a backslash is an ordinary POSIX filename character, not a split";
+#endif
+    ctx.check(g_recorder.createdPaths == expected, expectation);
+
+    char parent[64] = {};
+    ctx.check(parent_directory_of(parent, sizeof(parent),
+                                  g_recorder.createdPaths.back().c_str()),
+              "the deepest created prefix resolves a parent");
+    ctx.check(std::strcmp(parent, "a") == 0 || std::strcmp(parent, ".") == 0,
+              "that parent is the directory the prefix really sits in");
+  }
+  {
     begin_case();
     const CreateDirectoryOutcome rootOutcome =
         durable_create_directories("/", recording_ops());

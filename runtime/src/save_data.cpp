@@ -55,8 +55,8 @@ bool save_game_data_to(const char *directory, const char *json,
   }
 
   // The save directory does not exist before a profile's first save, and
-  // a directory created here has its own entry synced (audit #357) — the
-  // save's durability would otherwise rest on a directory that might not
+  // a directory created here has its own entry synced — the save's
+  // durability would otherwise rest on a directory that might not
   // survive the same power loss.
   if (!core::create_directories_durably(directory)) {
     core::log_message(core::LogLevel::Error, "save",

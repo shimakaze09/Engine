@@ -1,9 +1,8 @@
 // Implements the durable-replacement protocol, its directory-creation
-// companion, and the production syscall table behind both (audits #338
-// and #357). The protocols order the steps; the table supplies the
-// platform primitives, including the POSIX parent-directory fsync that
-// makes a rename — and a freshly created directory's own entry —
-// durable.
+// companion, and the production syscall table behind both. The protocols
+// order the steps; the table supplies the platform primitives, including
+// the POSIX parent-directory fsync that makes a rename — and a freshly
+// created directory's own entry — durable.
 
 #include "durable_replace.h"
 
@@ -27,6 +26,17 @@
 namespace engine::core::detail {
 
 namespace {
+
+/// Reports whether c separates path segments on this platform. POSIX
+/// treats only '/' as a separator — a backslash is an ordinary character
+/// in a POSIX filename — while Windows accepts either.
+bool is_path_separator(char c) noexcept {
+#ifdef _WIN32
+  return (c == '/') || (c == '\\');
+#else
+  return c == '/';
+#endif
+}
 
 /// Flushes the C stream's buffered bytes to the operating system.
 bool production_flush_file(std::FILE *file) noexcept {
@@ -162,12 +172,7 @@ bool parent_directory_of(char *dst, std::size_t dstCapacity,
   std::size_t separator = 0U;
   bool found = false;
   for (std::size_t i = 0U; filePath[i] != '\0'; ++i) {
-    const bool isSeparator = (filePath[i] == '/')
-#ifdef _WIN32
-                             || (filePath[i] == '\\')
-#endif
-        ;
-    if (isSeparator) {
+    if (is_path_separator(filePath[i])) {
       separator = i;
       found = true;
     }
@@ -223,14 +228,19 @@ durable_create_directories(const char *directoryPath,
 
   for (std::size_t i = 0U; i <= length; ++i) {
     const char c = directoryPath[i];
-    const bool boundary = (c == '/') || (c == '\\') || (c == '\0');
+    // The separator set is the one parent_directory_of resolves against,
+    // so a character that ends a segment here also ends one there. They
+    // must agree: this walk hands that function the very prefixes it
+    // builds, and on POSIX a backslash is part of a name rather than a
+    // boundary.
+    const bool boundary = is_path_separator(c) || (c == '\0');
     if (boundary) {
       const char previous = (i > 0U) ? directoryPath[i - 1U] : '\0';
       // Index 0 names no segment (a leading separator is the root), a
       // repeated separator repeats the segment just handled, and a
       // drive designator is not a directory that can be created.
-      const bool namesSegment = (i > 0U) && (previous != ':') &&
-                                (previous != '/') && (previous != '\\');
+      const bool namesSegment =
+          (i > 0U) && (previous != ':') && !is_path_separator(previous);
       if (namesSegment) {
         partial[i] = '\0';
         const MakeDirectoryOutcome made = ops.make_directory(partial);
