@@ -488,6 +488,22 @@ struct EnginePipeline::Impl final {
   runtime::EngineAssetDatabaseService assetDatabaseService{};
   runtime::EngineRendererService rendererService{};
 
+  // --- Run lifetime ---
+  // The run whose values currently occupy the process-wide alias slots (the
+  // editor bridge's world, the editor asset service, the scripting
+  // bindings). Those slots hold one value each, so the run that published
+  // last owns them and is the only one entitled to clear them. Never
+  // dereferenced, and never stale: every Impl is torn down before it is
+  // destroyed, and a run clears this on the way out.
+  static Impl *s_publishingRun;
+
+  // Closing a run releases what that run still owns: its own service
+  // registrations, streaming workers and asset-manager content always, and
+  // the process-wide aliases only while this run is the one holding them.
+  // The owner closes from teardown(), from destruction, and from a replacing
+  // initialize(), so the release runs exactly once per Impl.
+  bool tornDown = false;
+
   // --- External references ---
   const runtime::EditorBridge *bridge = nullptr;
 
@@ -566,6 +582,8 @@ struct EnginePipeline::Impl final {
   void stage_frame_pacing() noexcept;
 };
 
+EnginePipeline::Impl *EnginePipeline::Impl::s_publishingRun = nullptr;
+
 EnginePipeline::Impl::Impl() noexcept : serviceRegistry(serviceLocator) {}
 
 // ---------------------------------------------------------------------------
@@ -625,6 +643,8 @@ bool EnginePipeline::Impl::initialize(std::uint32_t maxFrameCount) noexcept {
     serviceRegistry.unregister_services();
     return false;
   }
+
+  s_publishingRun = this;
 
   bridge = runtime::editor_bridge();
   runtime::set_editor_asset_service(&assetDatabaseService);
@@ -759,24 +779,41 @@ bool EnginePipeline::Impl::execute_frame() noexcept {
 // ---------------------------------------------------------------------------
 
 void EnginePipeline::Impl::teardown() noexcept {
-  if ((bridge != nullptr) && (bridge->set_world != nullptr)) {
-    bridge->set_world(nullptr);
+  if (tornDown) {
+    return;
+  }
+  tornDown = true;
+
+  // The steps below reach process-wide state, so they belong to whichever
+  // run currently owns the alias slots. A run closing while a newer one owns
+  // them would otherwise clear the newer run's world alias, input bindings
+  // and game state out from under it; a run that never published (an
+  // initialize that failed before the publish block) owns nothing here.
+  if (s_publishingRun == this) {
+    s_publishingRun = nullptr;
+
+    if ((bridge != nullptr) && (bridge->set_world != nullptr)) {
+      bridge->set_world(nullptr);
+    }
+
+    // Run-scoped residue must not leak into a later pipeline run (#168): the
+    // scripting run state and the animation controller registry are reset
+    // while the VM and bindings are still alive, before anything unbinds,
+    // then the engine-tier subsystems drop their run-scoped content (script
+    // input bindings, scene audio, per-run renderer state).
+    scripting::reset_run_state();
+    runtime::reset_anim_controllers();
+    core::clear_gameplay_bindings();
+    audio::unload_all_sounds();
+    renderer::reset_renderer_public_state();
+
+    runtime::set_editor_asset_service(nullptr);
+    scripting::bind_game_state(nullptr);
+    runtime::unbind_scripting_runtime(serviceLocator);
   }
 
-  // Run-scoped residue must not leak into a later pipeline run (#168): the
-  // scripting run state and the animation controller registry are reset
-  // while the VM and bindings are still alive, before anything unbinds,
-  // then the engine-tier subsystems drop their run-scoped content (script
-  // input bindings, scene audio, per-run renderer state).
-  scripting::reset_run_state();
-  runtime::reset_anim_controllers();
-  core::clear_gameplay_bindings();
-  audio::unload_all_sounds();
-  renderer::reset_renderer_public_state();
-
-  runtime::set_editor_asset_service(nullptr);
-  scripting::bind_game_state(nullptr);
-  runtime::unbind_scripting_runtime(serviceLocator);
+  // The rest is this Impl's own storage, released whichever run holds the
+  // alias slots.
   serviceRegistry.unregister_services();
 
   content::shutdown_asset_streaming(assetStreamingQueue.get());
@@ -1704,14 +1741,29 @@ void EnginePipeline::Impl::stage_frame_pacing() noexcept {
 // ===========================================================================
 
 EnginePipeline::EnginePipeline() noexcept = default;
-EnginePipeline::~EnginePipeline() noexcept = default;
+
+EnginePipeline::~EnginePipeline() noexcept { teardown(); }
 
 bool EnginePipeline::initialize(std::uint32_t maxFrames) noexcept {
+  // A run publishes aliases into its own Impl's storage (the editor world,
+  // the scripting service locator, the editor asset service), so the run
+  // being replaced is closed before the replacement publishes over it.
+  if (m_impl) {
+    core::log_message(core::LogLevel::Warning, "engine",
+                      "pipeline initialize replaced a run that was still "
+                      "open; closing the previous run first");
+    teardown();
+  }
+
   m_impl.reset(new (std::nothrow) Impl());
   if (!m_impl) {
     return false;
   }
   if (!m_impl->initialize(maxFrames)) {
+    // Initialization stops at its first failure, which may be past the point
+    // where the run published; closing regardless keeps that independent of
+    // which step failed.
+    m_impl->teardown();
     m_impl.reset();
     return false;
   }

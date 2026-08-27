@@ -58,6 +58,16 @@ engine_add_test_executable(engine_integration_player_mode
     integration
 )
 
+engine_add_test_executable(engine_integration_pipeline_lifetime
+    SOURCES
+    pipeline_lifetime_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_scripting
+    LABELS
+    integration
+)
+
 engine_add_test_executable(engine_integration_quit_end_play
     SOURCES
     quit_end_play_test.cpp

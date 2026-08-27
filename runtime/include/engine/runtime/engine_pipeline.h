@@ -46,13 +46,17 @@ bool process_pending_scene_op(World &world) noexcept;
 class EnginePipeline final {
 public:
   EnginePipeline() noexcept;
+  /// Closes a run that is still open, so the aliases a run publishes never
+  /// outlive the storage they name.
   ~EnginePipeline() noexcept;
 
   EnginePipeline(const EnginePipeline &) = delete;
   EnginePipeline &operator=(const EnginePipeline &) = delete;
 
   /// Allocate runtime resources (World, renderers, assets, bootstrap scene).
-  /// Must be called after engine::bootstrap().
+  /// Must be called after engine::bootstrap().  A pipeline holds one run at
+  /// a time: a run this pipeline still holds is closed before the
+  /// replacement allocates, so the two never overlap.
   /// Returns false on allocation or subsystem failure.
   bool initialize(std::uint32_t maxFrames) noexcept;
 
@@ -67,7 +71,10 @@ public:
   /// and tests; null before initialize() and after teardown().
   runtime::World *world() noexcept;
 
-  /// Release per-run resources.  Safe to call even if initialize() failed.
+  /// Release per-run resources.  Safe to call even if initialize() failed,
+  /// and safe to call repeatedly.  Destruction and a replacing initialize()
+  /// release the same resources, so calling this is a matter of choosing
+  /// when the run ends rather than whether it is closed.
   void teardown() noexcept;
 
 private:
