@@ -21,6 +21,7 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <memory>
 
 namespace {
 
@@ -191,6 +192,39 @@ int main() {
 
     pipeline.teardown();
     check_run_closed("teardown closes the replacement run");
+  }
+
+  // --- Closing one run leaves a newer run's published state alone. ---
+  {
+    // The older pipeline is heap-held so it can be destroyed while the newer
+    // one is still running; the newer run publishes last and therefore owns
+    // the process-wide aliases both runs write to.
+    auto older = std::make_unique<engine::EnginePipeline>();
+    engine::EnginePipeline newer;
+    if (!older->initialize(0U) || !newer.initialize(0U)) {
+      std::fprintf(stderr, "FAIL: two-pipeline initialize\n");
+      newer.teardown();
+      older.reset();
+      engine::shutdown();
+      return 6;
+    }
+    dirty_run_state();
+    CHECK(g_world == newer.world(), "the newer run published the world alias");
+
+    older.reset();
+
+    CHECK(g_world == newer.world(),
+          "closing an older run leaves the newer run's world alias");
+    CHECK(engine::core::gameplay_action_count() > 0U,
+          "closing an older run leaves the newer run's input actions");
+    CHECK(engine::core::gameplay_axis_count() > 0U,
+          "closing an older run leaves the newer run's input axes");
+    CHECK(game_state_is("in_progress"),
+          "closing an older run leaves the newer run's game state");
+    CHECK(newer.execute_frame(), "the newer run still frames after the close");
+
+    newer.teardown();
+    check_run_closed("teardown closes the newer run");
   }
 
   engine::shutdown();
