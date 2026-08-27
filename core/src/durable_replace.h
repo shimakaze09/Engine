@@ -2,10 +2,14 @@
 // runs (audit #338): the staged payload is flushed, synced and closed,
 // renamed over the destination, and the directory holding that entry is
 // synced, so the rename itself survives power loss instead of only the
-// bytes behind it. The filesystem operations are injected rather than
-// called directly so the fault branches — a directory that cannot be
-// opened, a directory sync that fails after the rename already
-// committed — are exercised on the same function the production path
+// bytes behind it. Its companion covers the step before — creating the
+// directory the commit writes into, syncing the parent that now carries
+// each newly created entry, so the file's durability rests on a
+// directory whose own existence is durable too. The filesystem
+// operations are injected rather than called directly so the fault
+// branches — a directory that cannot be opened, a directory sync that
+// fails after the rename already committed, a segment that cannot be
+// created — are exercised on the same functions the production path
 // runs.
 
 #pragma once
@@ -47,11 +51,50 @@ inline constexpr DirectoryHandle kInvalidDirectoryHandle = -1;
 /// directory-sync primitive, so no open is attempted at all.
 inline constexpr DirectoryHandle kDirectoryDurabilityUnavailable = -2;
 
+/// Outcome of creating one directory segment.
+enum class MakeDirectoryOutcome : std::uint8_t {
+  /// The segment did not exist and now does, so its entry in the parent
+  /// is new and that parent needs syncing.
+  Created = 0,
+  /// A directory was already there; nothing was added to the parent.
+  AlreadyExists,
+  /// The segment could not be created, or the name is taken by
+  /// something that is not a directory.
+  Failed,
+};
+
+/// Outcome of creating a whole directory path. Only Failed means the
+/// destination directory is absent; the rest all leave it in place and
+/// differ in how well its own entry is proven to survive power loss.
+enum class CreateDirectoryOutcome : std::uint8_t {
+  /// Every segment was created and each new entry's parent was synced.
+  Durable = 0,
+  /// Nothing needed creating, so nothing was synced: the path was
+  /// already there, and whatever durability it had it keeps.
+  AlreadyExists,
+  /// Segments were created, but at least one parent could not be opened
+  /// or synced. The directory stands; only its resistance to power loss
+  /// is degraded, so the caller proceeds and logs the degradation.
+  CreatedNotDurable,
+  /// Segments were created on a platform that exposes no directory-sync
+  /// primitive, so their entries' durability is whatever the filesystem
+  /// provides on its own. Windows takes this path, as it does for the
+  /// rename.
+  CreatedDurabilityUnavailable,
+  /// A segment could not be created, so the destination directory does
+  /// not exist and no commit into it can succeed.
+  Failed,
+};
+
 /// The filesystem operations the protocol issues. Production passes
 /// production_replace_ops(); a test passes a table that records each
 /// step and fails whichever one it is proving. Every member must be
 /// non-null.
 struct ReplaceOps {
+  /// Creates one directory segment, distinguishing a directory it
+  /// created — whose new entry the parent must sync — from one that was
+  /// already there.
+  MakeDirectoryOutcome (*make_directory)(const char *path) noexcept;
   /// Pushes buffered payload bytes to the operating system.
   bool (*flush_file)(std::FILE *file) noexcept;
   /// Forces the flushed payload to storage.
@@ -71,10 +114,26 @@ struct ReplaceOps {
   bool (*remove_file)(const char *path) noexcept;
 };
 
-/// The operations the production commit path runs: buffered-file flush,
-/// fsync (Windows: _commit), close, std::filesystem::rename, and — on
-/// POSIX — an O_RDONLY open plus fsync of the containing directory.
+/// The operations the production commit path runs: mkdir (Windows:
+/// _mkdir), buffered-file flush, fsync (Windows: _commit), close,
+/// std::filesystem::rename, and — on POSIX — an O_RDONLY open plus fsync
+/// of the containing directory.
 const ReplaceOps &production_replace_ops() noexcept;
+
+/// Creates every missing segment of directoryPath, syncing the parent
+/// directory that carries each newly created entry before moving on, so
+/// the whole path from an already-durable ancestor down to the
+/// destination is durable before a file is committed into it. Existing
+/// segments cost no sync. Creation stops at the first segment that
+/// fails, leaving the segments already created in place.
+///
+/// A segment ending in ':' is a drive designator, not a directory, and
+/// is stepped over rather than created; a leading or repeated separator
+/// names no segment and is likewise skipped. A null, empty, or
+/// over-long path reports Failed without touching the filesystem.
+CreateDirectoryOutcome
+durable_create_directories(const char *directoryPath,
+                           const ReplaceOps &ops) noexcept;
 
 /// Runs the protocol over an open staged file. The file is closed in
 /// every outcome, and a failure before the rename removes the temporary

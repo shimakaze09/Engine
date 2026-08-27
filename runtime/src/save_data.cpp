@@ -7,13 +7,6 @@
 #include <cstdio>
 #include <cstring>
 
-#ifdef _WIN32
-#include <direct.h>
-#else
-#include <sys/stat.h>
-#include <sys/types.h>
-#endif
-
 #include "engine/core/atomic_file.h"
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
@@ -23,32 +16,6 @@ namespace engine::runtime {
 namespace {
 
 constexpr const char *kSaveFileName = "save.json";
-
-/// Creates every missing segment of the directory path (existing
-/// segments are fine; only the final result is checked by the write).
-void create_directory_recursive(const char *directory) noexcept {
-  char partial[1024] = {};
-  const std::size_t length = std::strlen(directory);
-  if (length >= sizeof(partial)) {
-    return;
-  }
-  for (std::size_t i = 0U; i <= length; ++i) {
-    const char c = directory[i];
-    if ((c == '/') || (c == '\\') || (c == '\0')) {
-      if ((i > 0U) && (partial[i - 1U] != ':')) {
-#ifdef _WIN32
-        static_cast<void>(_mkdir(partial));
-#else
-        static_cast<void>(mkdir(partial, 0755));
-#endif
-      }
-      if (c == '\0') {
-        break;
-      }
-    }
-    partial[i] = c;
-  }
-}
 
 /// Builds "<directory>/save.json"; false when the path would truncate.
 bool build_save_path(const char *directory, char *out,
@@ -87,7 +54,15 @@ bool save_game_data_to(const char *directory, const char *json,
     return false;
   }
 
-  create_directory_recursive(directory);
+  // The save directory does not exist before a profile's first save, and
+  // a directory created here has its own entry synced — the save's
+  // durability would otherwise rest on a directory that might not
+  // survive the same power loss.
+  if (!core::create_directories_durably(directory)) {
+    core::log_message(core::LogLevel::Error, "save",
+                      "failed to create the save directory");
+    return false;
+  }
   if (!core::atomic_write_file(path, json, length)) {
     core::log_message(core::LogLevel::Error, "save",
                       "failed to write save file");

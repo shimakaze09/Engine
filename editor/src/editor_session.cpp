@@ -275,9 +275,9 @@ void content_browser_state_persist() noexcept {
   const ContentBrowserState &cb = editor_session().contentBrowser;
 
   char directory[900] = {};
-  if (resolve_content_browser_directory(directory, sizeof(directory))) {
-    std::error_code ec{};
-    std::filesystem::create_directories(std::filesystem::path(directory), ec);
+  if (resolve_content_browser_directory(directory, sizeof(directory)) &&
+      !core::create_directories_durably(directory)) {
+    return;
   }
 
   char path[1024] = {};

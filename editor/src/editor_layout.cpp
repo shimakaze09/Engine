@@ -15,8 +15,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
-#include <filesystem>
-#include <system_error>
 
 #include "engine/core/atomic_file.h"
 #include "engine/core/logging.h"
@@ -242,13 +240,15 @@ bool editor_layout_save() noexcept {
   }
 
   // platform_get_save_dir composes a path without creating it, so the
-  // first save of a fresh profile has to. Mirrors recent_scenes_persist,
-  // including its allocating path construction on a noexcept path, which
-  // #316 tracks for the persist helpers as a group.
+  // first save of a fresh profile has to — through the durable creator,
+  // so the layout's own durability is not staked on a directory entry
+  // that never reached storage.
   char directory[900] = {};
-  if (resolve_layout_directory(directory, sizeof(directory))) {
-    std::error_code ec{};
-    std::filesystem::create_directories(std::filesystem::path(directory), ec);
+  if (resolve_layout_directory(directory, sizeof(directory)) &&
+      !core::create_directories_durably(directory)) {
+    core::log_message(core::LogLevel::Error, kLogChannel,
+                      "could not create the layout directory; not saved");
+    return false;
   }
 
   char path[1024] = {};

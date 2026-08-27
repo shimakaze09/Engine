@@ -1,7 +1,8 @@
-// Implements the durable-replacement protocol and the production
-// syscall table behind it (audit #338). The protocol orders the steps;
-// the table supplies the platform primitives, including the POSIX
-// parent-directory fsync that makes the rename itself durable.
+// Implements the durable-replacement protocol, its directory-creation
+// companion, and the production syscall table behind both. The protocols
+// order the steps; the table supplies the platform primitives, including
+// the POSIX parent-directory fsync that makes a rename — and a freshly
+// created directory's own entry — durable.
 
 #include "durable_replace.h"
 
@@ -11,15 +12,31 @@
 #include <system_error>
 
 #ifdef _WIN32
+#include <direct.h>
 #include <io.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #else
 #include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <unistd.h>
 #endif
 
 namespace engine::core::detail {
 
 namespace {
+
+/// Reports whether c separates path segments on this platform. POSIX
+/// treats only '/' as a separator — a backslash is an ordinary character
+/// in a POSIX filename — while Windows accepts either.
+bool is_path_separator(char c) noexcept {
+#ifdef _WIN32
+  return (c == '/') || (c == '\\');
+#else
+  return c == '/';
+#endif
+}
 
 /// Flushes the C stream's buffered bytes to the operating system.
 bool production_flush_file(std::FILE *file) noexcept {
@@ -98,6 +115,42 @@ void production_close_directory(DirectoryHandle handle) noexcept {
 #endif
 }
 
+/// Reports whether the path names an existing directory, so a name
+/// already taken by a file is refused instead of being mistaken for a
+/// directory that was already there. Uses stat rather than
+/// std::filesystem so the check allocates nothing.
+bool path_is_directory(const char *path) noexcept {
+#ifdef _WIN32
+  struct _stat info = {};
+  return (_stat(path, &info) == 0) && ((info.st_mode & _S_IFDIR) != 0);
+#else
+  struct stat info = {};
+  return (::stat(path, &info) == 0) && S_ISDIR(info.st_mode);
+#endif
+}
+
+/// Creates one directory segment. EEXIST alone does not mean success:
+/// mkdir reports it for a plain file of the same name too, so the kind
+/// of the existing entry decides.
+MakeDirectoryOutcome production_make_directory(const char *path) noexcept {
+#ifdef _WIN32
+  const int result = _mkdir(path);
+#else
+  int result = 0;
+  do {
+    result = ::mkdir(path, 0755);
+  } while ((result != 0) && (errno == EINTR));
+#endif
+  if (result == 0) {
+    return MakeDirectoryOutcome::Created;
+  }
+  if (errno == EEXIST) {
+    return path_is_directory(path) ? MakeDirectoryOutcome::AlreadyExists
+                                   : MakeDirectoryOutcome::Failed;
+  }
+  return MakeDirectoryOutcome::Failed;
+}
+
 /// Discards the staged temporary.
 bool production_remove_file(const char *path) noexcept {
   std::error_code removeError{};
@@ -119,12 +172,7 @@ bool parent_directory_of(char *dst, std::size_t dstCapacity,
   std::size_t separator = 0U;
   bool found = false;
   for (std::size_t i = 0U; filePath[i] != '\0'; ++i) {
-    const bool isSeparator = (filePath[i] == '/')
-#ifdef _WIN32
-                             || (filePath[i] == '\\')
-#endif
-        ;
-    if (isSeparator) {
+    if (is_path_separator(filePath[i])) {
       separator = i;
       found = true;
     }
@@ -154,11 +202,89 @@ bool parent_directory_of(char *dst, std::size_t dstCapacity,
 
 const ReplaceOps &production_replace_ops() noexcept {
   static const ReplaceOps ops{
-      &production_flush_file,           &production_sync_file,
-      &production_close_file,           &production_rename_file,
-      &production_open_parent_directory, &production_sync_directory,
-      &production_close_directory,      &production_remove_file};
+      &production_make_directory,        &production_flush_file,
+      &production_sync_file,             &production_close_file,
+      &production_rename_file,           &production_open_parent_directory,
+      &production_sync_directory,        &production_close_directory,
+      &production_remove_file};
   return ops;
+}
+
+CreateDirectoryOutcome
+durable_create_directories(const char *directoryPath,
+                           const ReplaceOps &ops) noexcept {
+  if (directoryPath == nullptr) {
+    return CreateDirectoryOutcome::Failed;
+  }
+  char partial[1024] = {};
+  const std::size_t length = std::strlen(directoryPath);
+  if ((length == 0U) || (length >= sizeof(partial))) {
+    return CreateDirectoryOutcome::Failed;
+  }
+
+  bool createdAny = false;
+  bool notDurable = false;
+  bool durabilityUnavailable = false;
+
+  for (std::size_t i = 0U; i <= length; ++i) {
+    const char c = directoryPath[i];
+    // The separator set is the one parent_directory_of resolves against,
+    // so a character that ends a segment here also ends one there. They
+    // must agree: this walk hands that function the very prefixes it
+    // builds, and on POSIX a backslash is part of a name rather than a
+    // boundary.
+    const bool boundary = is_path_separator(c) || (c == '\0');
+    if (boundary) {
+      const char previous = (i > 0U) ? directoryPath[i - 1U] : '\0';
+      // Index 0 names no segment (a leading separator is the root), a
+      // repeated separator repeats the segment just handled, and a
+      // drive designator is not a directory that can be created.
+      const bool namesSegment =
+          (i > 0U) && (previous != ':') && !is_path_separator(previous);
+      if (namesSegment) {
+        partial[i] = '\0';
+        const MakeDirectoryOutcome made = ops.make_directory(partial);
+        if (made == MakeDirectoryOutcome::Failed) {
+          return CreateDirectoryOutcome::Failed;
+        }
+        if (made == MakeDirectoryOutcome::Created) {
+          createdAny = true;
+          // The new entry lives in this segment's parent, so that is the
+          // directory whose entries must reach storage — syncing the
+          // segment itself would prove only that its (empty) contents
+          // are durable, not that the segment exists at all.
+          const DirectoryHandle parent = ops.open_parent_directory(partial);
+          if (parent == kDirectoryDurabilityUnavailable) {
+            durabilityUnavailable = true;
+          } else if (parent == kInvalidDirectoryHandle) {
+            notDurable = true;
+          } else {
+            if (!ops.sync_directory(parent)) {
+              notDurable = true;
+            }
+            ops.close_directory(parent);
+          }
+        }
+      }
+      if (c == '\0') {
+        break;
+      }
+    }
+    partial[i] = c;
+  }
+
+  if (!createdAny) {
+    return CreateDirectoryOutcome::AlreadyExists;
+  }
+  // A sync that was attempted and failed is the more specific report, so
+  // it outranks a platform that never offered the primitive at all.
+  if (notDurable) {
+    return CreateDirectoryOutcome::CreatedNotDurable;
+  }
+  if (durabilityUnavailable) {
+    return CreateDirectoryOutcome::CreatedDurabilityUnavailable;
+  }
+  return CreateDirectoryOutcome::Durable;
 }
 
 ReplaceOutcome durable_replace(std::FILE *file, const char *tempPath,
