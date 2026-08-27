@@ -77,8 +77,10 @@ std::vector<std::string> read_lines(const fs::path &path) {
   return lines;
 }
 
-/// Returns the argument recorded after the last occurrence of a flag, or an
-/// empty string when the flag carried no value.
+/// Returns the argument recorded after the first occurrence of a flag; empty
+/// when the flag is absent, or ends the recording with no argument after it.
+/// Every case here drives a single launch, so the first occurrence is the only
+/// one; a case recording several launches wants a run-scoped lookup instead.
 std::string value_after(const std::vector<std::string> &lines,
                         const std::string &flag) {
   for (std::size_t i = 0U; (i + 1U) < lines.size(); ++i) {
