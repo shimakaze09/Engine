@@ -10,6 +10,7 @@
 # engine_integration_tool_gates.
 
 import importlib.util
+import re
 import subprocess
 import sys
 import tempfile
@@ -340,6 +341,124 @@ def test_module_dependency_gate():
         ]))]) == 0,
               "module deps: own-module dirs sharing a line are not grants")
 
+        # Public-header dependency visibility (check 4). A module whose
+        # public headers include another module's headers must declare
+        # that dep PUBLIC; PRIVATE leaves consumers compiling through
+        # somebody else's transitive usage requirements, which is how
+        # engine_physics reached core through engine_math.
+        def visibility_case(name, deps_lines, header_includes=None,
+                            source_includes=None, body=None):
+            case = tmp / name
+            write_source(case, "physics/include/engine/physics/context.h",
+                         header_includes
+                         if header_includes is not None
+                         else ["engine/core/entity.h"])
+            if source_includes is not None:
+                write_source(case, "physics/src/collider.cpp",
+                             source_includes)
+            lists_file = case / "physics" / "CMakeLists.txt"
+            lists_file.parent.mkdir(parents=True, exist_ok=True)
+            lists_file.write_text(
+                "# Synthetic fixture for the module dependency gate.\n"
+                + (body if body is not None else
+                   "engine_add_module_library(engine_physics\n"
+                   "    SOURCES\n"
+                   "    src/collider.cpp\n"
+                   "    PUBLIC_INCLUDE_DIRS\n"
+                   "    ${CMAKE_CURRENT_SOURCE_DIR}/include\n"
+                   + "".join(f"    {line}\n" for line in deps_lines)
+                   + ")\n"),
+                encoding="utf-8")
+            return case
+
+        check(run([script, "--root", str(visibility_case(
+            "visibility_private", ["PRIVATE_DEPS", "engine_core"]))]) != 0,
+              "module deps: a public header's dep declared PRIVATE fails")
+        check(run([script, "--root", str(visibility_case(
+            "visibility_absent", []))]) != 0,
+              "module deps: a public header's undeclared dep fails")
+        check(run([script, "--root", str(visibility_case(
+            "visibility_public", ["PUBLIC_DEPS", "engine_core"]))]) == 0,
+              "module deps: a public header's dep declared PUBLIC passes")
+        # PUBLIC_DEPS is a section, so the entries after it all count —
+        # a per-line reading would see only the keyword's own line.
+        check(run([script, "--root", str(visibility_case(
+            "visibility_public_section",
+            ["PUBLIC_DEPS", "engine_math", "engine_core",
+             "PRIVATE_DEPS", "engine_lua"]))]) == 0,
+              "module deps: every entry in the PUBLIC_DEPS section counts")
+        # PRIVATE is right when only the module's own sources include it.
+        check(run([script, "--root", str(visibility_case(
+            "visibility_private_source_only",
+            ["PRIVATE_DEPS", "engine_core"],
+            header_includes=[],
+            source_includes=["engine/core/entity.h"]))]) == 0,
+              "module deps: a dep only src/ includes may stay PRIVATE")
+        # The raw spelling of the same property.
+        check(run([script, "--root", str(visibility_case(
+            "visibility_raw_link", [], body=(
+                "engine_add_module_library(engine_physics\n"
+                "    SOURCES src/collider.cpp\n"
+                ")\n"
+                "target_link_libraries(engine_physics PUBLIC engine_core)\n"
+            )))]) == 0,
+              "module deps: target_link_libraries PUBLIC declares it too")
+        check(run([script, "--root", str(visibility_case(
+            "visibility_raw_link_private", [], body=(
+                "engine_add_module_library(engine_physics\n"
+                "    SOURCES src/collider.cpp\n"
+                ")\n"
+                "target_link_libraries(engine_physics PRIVATE engine_core)\n"
+            )))]) != 0,
+              "module deps: target_link_libraries PRIVATE does not")
+        # INTERFACE propagates usage requirements to consumers exactly as
+        # PUBLIC does, and on a header-only target it is the ONLY spelling
+        # CMake accepts — flagging it would name a remedy CMake rejects.
+        header_only = tmp / "visibility_interface"
+        write_source(header_only, "math/include/engine/math/vec.h",
+                     ["engine/core/entity.h"])
+        lists_file = header_only / "math" / "CMakeLists.txt"
+        lists_file.parent.mkdir(parents=True, exist_ok=True)
+        lists_file.write_text(
+            "# Synthetic fixture for the module dependency gate.\n"
+            "add_library(engine_math INTERFACE)\n"
+            "target_link_libraries(engine_math INTERFACE engine_core)\n",
+            encoding="utf-8")
+        check(run([script, "--root", str(header_only)]) == 0,
+              "module deps: an INTERFACE target's dep is declared publicly")
+        # A commented-out declaration declares nothing, and prose naming
+        # a target must not be read as a declaration either.
+        check(run([script, "--root", str(visibility_case(
+            "visibility_commented", [], body=(
+                "engine_add_module_library(engine_physics\n"
+                "    SOURCES src/collider.cpp\n"
+                "    # PUBLIC_DEPS engine_core\n"
+                ")\n"
+            )))]) != 0,
+              "module deps: a commented-out PUBLIC_DEPS declares nothing")
+        # Another target's deps in the same file say nothing about the
+        # module's own library.
+        check(run([script, "--root", str(visibility_case(
+            "visibility_other_target", [], body=(
+                "engine_add_module_library(engine_physics\n"
+                "    SOURCES src/collider.cpp\n"
+                ")\n"
+                "engine_add_module_library(engine_physics_tool\n"
+                "    SOURCES src/tool.cpp\n"
+                "    PUBLIC_DEPS engine_core\n"
+                ")\n"
+            )))]) != 0,
+              "module deps: another target's PUBLIC_DEPS does not count")
+        # An edge the graph forbids outright belongs to check 1, which
+        # says to delete it — not to check 4, which would say to declare
+        # it. One finding, not two contradictory ones.
+        forbidden = tmp / "visibility_forbidden"
+        write_source(forbidden, "scripting/include/engine/scripting/vm.h",
+                     ["engine/runtime/world.h"])
+        code, output = run_captured([script, "--root", str(forbidden)])
+        check(code != 0 and "PUBLIC dep" not in output,
+              "module deps: a forbidden edge is reported as direction only")
+
     # The real tree: green today, and the allowlist is load-bearing.
     spec = importlib.util.spec_from_file_location(
         "check_module_deps", TOOLS / "check_module_deps.py")
@@ -374,6 +493,26 @@ def test_module_dependency_gate():
               "module deps: the allowlist is restored and the gate is green")
     finally:
         sys.argv = argv
+
+    # ENGINE_HELPER_KEYWORDS mirrors the library helpers' signatures, and
+    # drift fails OPEN: tokens_in_section treats an unknown keyword as a
+    # section value, so a keyword added to a helper and written after
+    # PUBLIC_DEPS would silently join the declared-PUBLIC set and hide a
+    # real under-declaration. Assert the mirror against the source.
+    helpers = (TOOLS.parent / "cmake" / "EngineHelpers.cmake").read_text(
+        encoding="utf-8")
+    declared_keywords = set()
+    for helper in ("engine_add_module_library", "engine_add_header_library"):
+        body = helpers.split(f"function({helper} target)", 1)[1]
+        body = body.split("endfunction()", 1)[0]
+        for kind in ("oneValueArgs", "multiValueArgs"):
+            match = re.search(rf"set\({kind}([^)]*)\)", body)
+            if match is not None:
+                declared_keywords |= set(match.group(1).split())
+    check(declared_keywords == set(deps.ENGINE_HELPER_KEYWORDS),
+          "module deps: ENGINE_HELPER_KEYWORDS matches the helper signatures "
+          f"(helpers declare {sorted(declared_keywords)}, gate knows "
+          f"{sorted(deps.ENGINE_HELPER_KEYWORDS)})")
 
 
 def main():

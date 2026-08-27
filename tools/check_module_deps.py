@@ -8,7 +8,7 @@ TUs without tripping anything. This gate makes the target graph the
 enforced source of truth, in the shape of the existing comment audits:
 it reports findings and exits non-zero, and CI holds it at zero.
 
-Three checks, one root cause each:
+Four checks, one root cause each:
 
   1. Declared-graph direction. Every `#include "engine/<module>/..."`
      — quoted or angle-bracketed — is validated against
@@ -27,6 +27,15 @@ Three checks, one root cause each:
      the dependency, so CMake's usage requirements stop being the source
      of truth. A dependency is expressed only as a dep on the target.
 
+  4. Public-header dependency visibility. A module whose PUBLIC headers
+     include `engine/<other>/...` must declare `engine_<other>` as a
+     PUBLIC dep. Declaring it PRIVATE (or not at all) leaves consumers
+     compiling through some other dep's transitive usage requirements —
+     `engine_physics` reached core only via `engine_math`, so dropping
+     math's core dep would have broken every physics consumer at once.
+     Same root cause as check 3, one level up: the dep graph, not luck,
+     has to carry the headers a public surface needs.
+
 Today's known violations are listed in KNOWN_VIOLATIONS with the issue
 that tracks each. An entry that no longer matches anything is itself a
 finding, so entries cannot be left behind once fixed: the fix that
@@ -34,10 +43,17 @@ removes the last site of a tracked edge must delete its entries in the
 same commit, and the gate is red on that fix's base revision. Adding a
 new entry is not mechanically prevented — that half stays [REVIEW].
 
-What this gate does NOT see: dependency visibility. A PUBLIC dep that
-should be PRIVATE (issue #311 lists `engine_lua` on engine_scripting)
-leaks a module's headers upward without any hand-wired directory or
-first-party include to catch, so it remains a [REVIEW] concern.
+Check 4 carries no allowlist: the two gaps it found on the tree
+(engine_physics -> core, engine_runtime -> content) are fixed in the
+commit that adds it, so it starts and stays at zero.
+
+What this gate still does NOT see: the opposite visibility direction, a
+PUBLIC dep no public header needs (issue #311 lists `engine_lua` on
+engine_scripting, fixed by hand alongside check 4). Deciding that a dep
+is unnecessary means proving no consumer relies on the propagation,
+which include edges alone cannot show — and for a third-party target
+like `engine_lua` there is no `engine/<module>/` include to count in the
+first place. That direction remains a [REVIEW] concern.
 
 Tests are deliberately out of scope: test targets legitimately reach
 into module src/ directories through PRIVATE_INCLUDE_DIRS to exercise
@@ -141,6 +157,29 @@ CMAKE_DIR_TOKEN_RE = re.compile(
     r"/(?P<subdirectory>include|src)\b"
 )
 
+# A CMake call, for the visibility check: the command name and the
+# opening paren, from which the matching close paren is scanned.
+CMAKE_CALL_RE = re.compile(r"(?P<command>[A-Za-z_][A-Za-z0-9_]*)\s*\(")
+
+# The helpers in cmake/EngineHelpers.cmake that declare a module's
+# library, and every keyword that ends one of their sections.
+ENGINE_LIBRARY_HELPERS = frozenset(
+    {"engine_add_module_library", "engine_add_header_library"}
+)
+ENGINE_HELPER_KEYWORDS = frozenset(
+    {
+        "SOURCES",
+        "PUBLIC_INCLUDE_DIRS",
+        "PRIVATE_INCLUDE_DIRS",
+        "PUBLIC_DEPS",
+        "PRIVATE_DEPS",
+        "PCH",
+    }
+)
+
+# The visibility keywords of a raw target_link_libraries call.
+CMAKE_LINK_VISIBILITIES = frozenset({"PUBLIC", "PRIVATE", "INTERFACE"})
+
 # The CMake variables this gate can resolve. Anything else (a
 # third-party ${ENGINE_STB_INCLUDE_DIR}, say) names no module and is
 # skipped rather than guessed at.
@@ -234,21 +273,6 @@ KNOWN_CMAKE_GRANTS: dict[tuple[str, str, str], str] = {
         "runtime",
         "src",
     ): "sanctioned: issue #156 component registry, paired with the include above",
-    (
-        "editor/CMakeLists.txt",
-        "runtime",
-        "include",
-    ): "tracked: issue #311 — redundant, PUBLIC_DEPS engine_runtime already propagates it",
-    (
-        "editor/CMakeLists.txt",
-        "renderer",
-        "include",
-    ): "tracked: issue #311 — redundant, PUBLIC_DEPS engine_renderer already propagates it",
-    (
-        "physics/CMakeLists.txt",
-        "core",
-        "include",
-    ): "tracked: issue #311 — core belongs in PUBLIC_DEPS; public headers include engine/core/entity.h",
 }
 
 
@@ -474,6 +498,120 @@ def check_cmake_grants(
     return findings
 
 
+def public_dependency_targets(root: pathlib.Path, module: str) -> set[str]:
+    """Returns the targets a module declares as PUBLIC deps of its library.
+
+    Both spellings that reach the same property: the helper call's
+    PUBLIC_DEPS section and a raw target_link_libraries(... PUBLIC ...).
+    INTERFACE counts alongside PUBLIC there: it propagates the dep's
+    usage requirements to consumers just the same, and on a header-only
+    target it is the only spelling CMake accepts — demanding PUBLIC of
+    one would name a remedy CMake rejects outright.
+    Only the module's own library target counts — a nested CMakeLists
+    declaring a tool target says nothing about the module's surface.
+    """
+    library = f"engine_{module}"
+    declared: set[str] = set()
+    module_dir = root / module
+    if not module_dir.is_dir():
+        return declared
+    for lists_file in sorted(module_dir.rglob("CMakeLists.txt")):
+        text = strip_cmake_comments(lists_file.read_text(encoding="utf-8"))
+        for call, arguments in cmake_calls(text):
+            tokens = arguments.split()
+            if not tokens or tokens[0] != library:
+                continue
+            if call == "target_link_libraries":
+                declared |= tokens_in_section(
+                    tokens[1:], {"PUBLIC", "INTERFACE"}, CMAKE_LINK_VISIBILITIES
+                )
+            elif call in ENGINE_LIBRARY_HELPERS:
+                declared |= tokens_in_section(
+                    tokens[1:], {"PUBLIC_DEPS"}, ENGINE_HELPER_KEYWORDS
+                )
+    return declared
+
+
+def strip_cmake_comments(text: str) -> str:
+    """Returns CMake text with `#` comments removed.
+
+    A commented-out `PUBLIC_DEPS engine_core` declares nothing, and a
+    prose comment naming a target must not be read as one either.
+    """
+    return "\n".join(line.split("#", 1)[0] for line in text.splitlines())
+
+
+def cmake_calls(text: str) -> Iterator[tuple[str, str]]:
+    """Yields each CMake call in the text as (command, argument text)."""
+    for match in CMAKE_CALL_RE.finditer(text):
+        depth = 1
+        index = match.end()
+        while index < len(text) and depth > 0:
+            if text[index] == "(":
+                depth += 1
+            elif text[index] == ")":
+                depth -= 1
+            index += 1
+        if depth == 0:
+            yield match.group("command"), text[match.end() : index - 1]
+
+
+def tokens_in_section(
+    tokens: list[str], wanted: set[str], keywords: frozenset[str]
+) -> set[str]:
+    """Returns the tokens that follow a wanted keyword, up to the next one."""
+    collected: set[str] = set()
+    active = False
+    for token in tokens:
+        if token in keywords:
+            active = token in wanted
+            continue
+        if active:
+            collected.add(token)
+    return collected
+
+
+def check_public_dependency_visibility(root: pathlib.Path) -> list[Finding]:
+    """Flags public headers whose module does not declare their dep PUBLIC."""
+    findings: list[Finding] = []
+    for module in sorted(ALLOWED_DEPENDENCIES):
+        include_dir = root / module / "include"
+        if not include_dir.is_dir():
+            continue
+        # First header per target, so one under-declared dep is one
+        # finding with one place to look, not one per include site.
+        needed: dict[str, tuple[pathlib.Path, str]] = {}
+        for header in sorted(include_dir.rglob("*")):
+            if not header.is_file() or header.suffix.lower() not in CPP_SUFFIXES:
+                continue
+            for include in included_paths(header):
+                match = ENGINE_INCLUDE_RE.match(include)
+                if match is None:
+                    continue
+                target = match.group(1)
+                if target == module or target not in ALLOWED_DEPENDENCIES:
+                    continue
+                # An edge the graph forbids outright belongs to check 1;
+                # reporting it here too would say the fix is to declare it.
+                if target not in ALLOWED_DEPENDENCIES[module]:
+                    continue
+                needed.setdefault(target, (header, include))
+        declared = public_dependency_targets(root, module)
+        for target, (header, include) in sorted(needed.items()):
+            if f"engine_{target}" in declared:
+                continue
+            findings.append(
+                Finding(
+                    header.relative_to(root).as_posix(),
+                    f'includes "{include}" from a public header, but '
+                    f"{module} does not declare engine_{target} as a PUBLIC "
+                    "dep: consumers compile only through another dep's "
+                    "transitive usage requirements",
+                )
+            )
+    return findings
+
+
 def check_stale_allowlist(
     used_includes: set[tuple[str, str]], used_grants: set[tuple[str, str, str]]
 ) -> list[Finding]:
@@ -524,6 +662,7 @@ def main() -> int:
 
     findings = check_include_edges(root, used_includes, allowlisted)
     findings += check_cmake_grants(root, used_grants, allowlisted)
+    findings += check_public_dependency_visibility(root)
     if allowlisted:
         findings += check_stale_allowlist(used_includes, used_grants)
 

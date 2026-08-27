@@ -29,8 +29,6 @@ engine_add_module_library(engine_editor
     src/editor_camera.cpp
     PUBLIC_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_SOURCE_DIR}/runtime/include
-    ${CMAKE_SOURCE_DIR}/renderer/include
     PRIVATE_INCLUDE_DIRS
     ${ENGINE_STB_INCLUDE_DIR}
     ${CMAKE_SOURCE_DIR}/runtime/src

@@ -25,11 +25,11 @@ engine_add_module_library(engine_physics
     src/joints/joint_projection.cpp
     PUBLIC_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    PRIVATE_INCLUDE_DIRS
-    ${CMAKE_SOURCE_DIR}/core/include
     PUBLIC_DEPS
     engine_math
-    PRIVATE_DEPS
+    # PUBLIC, not PRIVATE: physics_context.h and physics_types.h include
+    # engine/core/entity.h, so a consumer of physics headers needs core's
+    # include dirs from physics itself rather than through engine_math.
     engine_core
     PCH src/pch.h
 )
