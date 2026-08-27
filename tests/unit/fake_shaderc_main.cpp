@@ -6,31 +6,50 @@
 // was split or rewritten on its way to the child is visible as a line count
 // or a line body that does not match what the manifest authored.
 
-#include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
+#include <string>
 
 namespace {
 
-/// Appends this run's argument vector to the recording file named by the
-/// ENGINE_FAKE_SHADERC_ARGV environment variable; a run with the variable
-/// unset records nothing.
+/// Reads the recording file's path from the ENGINE_FAKE_SHADERC_ARGV
+/// environment variable; empty when the variable is unset. Windows hosts read
+/// it through the bounds-checked form their CRT offers, since the plain one
+/// is deprecated there.
+std::string argv_log_path() {
+#ifdef _WIN32
+  char buffer[4096] = {};
+  std::size_t length = 0U;
+  if ((getenv_s(&length, buffer, sizeof(buffer),
+                "ENGINE_FAKE_SHADERC_ARGV") != 0) ||
+      (length == 0U)) {
+    return {};
+  }
+  return buffer;
+#else
+  const char *value = std::getenv("ENGINE_FAKE_SHADERC_ARGV");
+  return (value != nullptr) ? std::string(value) : std::string{};
+#endif
+}
+
+/// Appends this run's argument vector to the recording file; a run with no
+/// recording file configured records nothing.
 void record_arguments(int argc, char **argv) {
-  const char *logPath = std::getenv("ENGINE_FAKE_SHADERC_ARGV");
-  if (logPath == nullptr) {
+  const std::string logPath = argv_log_path();
+  if (logPath.empty()) {
     return;
   }
-  FILE *log = std::fopen(logPath, "ab");
-  if (log == nullptr) {
+  std::ofstream log(logPath, std::ios::binary | std::ios::app);
+  if (!log) {
     return;
   }
   // Runs append, so a cook that invoked the tool more than once is
   // distinguishable from one that invoked it once with more arguments.
-  std::fprintf(log, "<run>\n");
+  log << "<run>\n";
   for (int i = 1; i < argc; ++i) {
-    std::fprintf(log, "%s\n", argv[i]);
+    log << argv[i] << "\n";
   }
-  std::fclose(log);
 }
 
 /// Writes stub bytes to the path following -o; false when no output path was
@@ -45,15 +64,12 @@ bool write_stub_output(int argc, char **argv) {
   if (outPath == nullptr) {
     return false;
   }
-  FILE *out = std::fopen(outPath, "wb");
-  if (out == nullptr) {
+  std::ofstream out(outPath, std::ios::binary | std::ios::trunc);
+  if (!out) {
     return false;
   }
-  static const char kStub[] = "FAKE-SHADER-BINARY";
-  const std::size_t written =
-      std::fwrite(kStub, 1U, sizeof(kStub) - 1U, out);
-  std::fclose(out);
-  return written == (sizeof(kStub) - 1U);
+  out << "FAKE-SHADER-BINARY";
+  return out.good();
 }
 
 } // namespace

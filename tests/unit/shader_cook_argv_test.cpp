@@ -9,7 +9,6 @@
 
 #include "../test_harness.h"
 
-#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
