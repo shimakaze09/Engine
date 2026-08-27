@@ -488,6 +488,13 @@ struct EnginePipeline::Impl final {
   runtime::EngineAssetDatabaseService assetDatabaseService{};
   runtime::EngineRendererService rendererService{};
 
+  // --- Run lifetime ---
+  // Closing a run releases what that run published: service registrations,
+  // the aliases naming Impl-owned storage, streaming workers, asset-manager
+  // content. The owner closes from teardown(), from destruction, and from a
+  // replacing initialize(), so the release runs exactly once per Impl.
+  bool tornDown = false;
+
   // --- External references ---
   const runtime::EditorBridge *bridge = nullptr;
 
@@ -759,6 +766,11 @@ bool EnginePipeline::Impl::execute_frame() noexcept {
 // ---------------------------------------------------------------------------
 
 void EnginePipeline::Impl::teardown() noexcept {
+  if (tornDown) {
+    return;
+  }
+  tornDown = true;
+
   if ((bridge != nullptr) && (bridge->set_world != nullptr)) {
     bridge->set_world(nullptr);
   }
@@ -1704,14 +1716,29 @@ void EnginePipeline::Impl::stage_frame_pacing() noexcept {
 // ===========================================================================
 
 EnginePipeline::EnginePipeline() noexcept = default;
-EnginePipeline::~EnginePipeline() noexcept = default;
+
+EnginePipeline::~EnginePipeline() noexcept { teardown(); }
 
 bool EnginePipeline::initialize(std::uint32_t maxFrames) noexcept {
+  // A run publishes aliases into its own Impl's storage (the editor world,
+  // the scripting service locator, the editor asset service), so the run
+  // being replaced is closed before the replacement publishes over it.
+  if (m_impl) {
+    core::log_message(core::LogLevel::Warning, "engine",
+                      "pipeline initialize replaced a run that was still "
+                      "open; closing the previous run first");
+    teardown();
+  }
+
   m_impl.reset(new (std::nothrow) Impl());
   if (!m_impl) {
     return false;
   }
   if (!m_impl->initialize(maxFrames)) {
+    // Initialization stops at its first failure, which may be past the point
+    // where the run published; closing regardless keeps that independent of
+    // which step failed.
+    m_impl->teardown();
     m_impl.reset();
     return false;
   }

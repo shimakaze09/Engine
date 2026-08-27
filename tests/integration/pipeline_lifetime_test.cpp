@@ -90,12 +90,24 @@ bool game_state_is(const char *expected) noexcept {
   return (actual != nullptr) && (std::strcmp(actual, expected) == 0);
 }
 
+/// Reports one closed-run observable, naming both the exit under test and
+/// the observable, since the same set is checked after several exits.
+void check_closed(bool condition, const char *exit, const char *what) noexcept {
+  if (!condition) {
+    std::fprintf(stderr, "FAIL: %s: %s\n", exit, what);
+    ++g_failures;
+  }
+}
+
 /// Asserts every observable a closed run must leave behind.
-void check_run_closed(const char *context) noexcept {
-  CHECK(g_world == nullptr, context);
-  CHECK(engine::core::gameplay_action_count() == 0U, context);
-  CHECK(engine::core::gameplay_axis_count() == 0U, context);
-  CHECK(game_state_is("startup"), context);
+void check_run_closed(const char *exit) noexcept {
+  check_closed(g_world == nullptr, exit, "the published world alias is clear");
+  check_closed(engine::core::gameplay_action_count() == 0U, exit,
+               "the run's input actions are released");
+  check_closed(engine::core::gameplay_axis_count() == 0U, exit,
+               "the run's input axes are released");
+  check_closed(game_state_is("startup"), exit,
+               "the game state is back to its default");
 }
 
 } // namespace
@@ -152,8 +164,7 @@ int main() {
     }
     CHECK(pipeline.execute_frame(), "run B frame");
     dirty_run_state();
-    const engine::runtime::World *firstWorld = pipeline.world();
-    CHECK(firstWorld != nullptr, "run B holds a world");
+    CHECK(pipeline.world() != nullptr, "run B holds a world");
 
     if (!pipeline.initialize(0U)) {
       std::fprintf(stderr, "FAIL: pipeline C initialize\n");
@@ -170,8 +181,10 @@ int main() {
           "replacing a run clears the previous run's axes");
     CHECK(game_state_is("startup"),
           "replacing a run resets the previous run's game state");
-    CHECK(pipeline.world() != firstWorld,
-          "the replacement run owns a different world");
+    // Address identity says nothing here: closing the previous run frees its
+    // World before the replacement allocates, so the allocator may hand back
+    // the same address. What must hold is that the alias names the live run.
+    CHECK(pipeline.world() != nullptr, "the replacement run holds a world");
     CHECK(g_world == pipeline.world(),
           "the replacement run published its own world alias");
     CHECK(pipeline.execute_frame(), "run C frame");
