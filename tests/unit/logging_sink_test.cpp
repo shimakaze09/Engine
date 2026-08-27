@@ -4,6 +4,7 @@
 #include "../test_harness.h"
 
 #include <atomic>
+#include <chrono>
 #include <cstring>
 #include <thread>
 #include <vector>
@@ -164,6 +165,159 @@ void check_sink_dispatch_is_thread_safe() noexcept {
   engine::core::log_unregister_sink(&recording_sink, nullptr);
 }
 
+/// Stand-in for state a sink owner reclaims once it has unregistered:
+/// `retired` marks the instant the owner considers the payload dead, which
+/// in production is where the memory would be freed.
+struct SinkPayload final {
+  std::atomic<bool> retired{false};
+};
+
+std::atomic<bool> g_gateEntered{false};
+std::atomic<bool> g_gateReleased{false};
+std::atomic<bool> g_payloadSinkCalled{false};
+std::atomic<bool> g_payloadObservedAfterRetire{false};
+std::atomic<int> g_selfUnregisterCalls{0};
+
+/// Holds one dispatch in flight until the test releases it, so removal can
+/// be attempted while a snapshot of the sink table is still being walked.
+/// Blocking here is a harness-only device: production sinks owe the header's
+/// fixed-size, non-blocking contract, which is what bounds how long a
+/// removal can wait.
+void gate_sink(engine::core::LogLevel, const char *, const char *,
+               void *) noexcept {
+  g_gateEntered.store(true, std::memory_order_release);
+  while (!g_gateReleased.load(std::memory_order_acquire)) {
+    std::this_thread::yield();
+  }
+}
+
+/// Reads its userData on every call and reports any call that arrives after
+/// the owner retired that payload — the use-after-free the barrier prevents.
+void payload_sink(engine::core::LogLevel, const char *, const char *,
+                  void *userData) noexcept {
+  auto *payload = static_cast<SinkPayload *>(userData);
+  g_payloadSinkCalled.store(true, std::memory_order_release);
+  if ((payload != nullptr) && payload->retired.load(std::memory_order_acquire)) {
+    g_payloadObservedAfterRetire.store(true, std::memory_order_release);
+  }
+}
+
+/// Removes itself from inside its own callback; the removal must complete
+/// rather than wait on the dispatch that is running it.
+void self_unregistering_sink(engine::core::LogLevel, const char *,
+                             const char *, void *userData) noexcept {
+  g_selfUnregisterCalls.fetch_add(1, std::memory_order_relaxed);
+  engine::core::log_unregister_sink(&self_unregistering_sink, userData);
+}
+
+/// Runs the two-sink barrier sequence: a logging thread parks inside
+/// gate_sink with payload_sink still ahead of it in the same dispatch, a
+/// second thread performs `remove` and retires the payload the moment that
+/// call returns, then the gate is released. Returns true when some sink call
+/// observed the retired payload.
+bool removal_races_in_flight_dispatch(void (*remove)(SinkPayload &),
+                                      SinkPayload &payload) noexcept {
+  g_gateEntered.store(false, std::memory_order_relaxed);
+  g_gateReleased.store(false, std::memory_order_relaxed);
+  g_payloadSinkCalled.store(false, std::memory_order_relaxed);
+  g_payloadObservedAfterRetire.store(false, std::memory_order_relaxed);
+
+  std::thread logger([]() noexcept {
+    engine::core::log_message(engine::core::LogLevel::Info, "core",
+                              "dispatch held in flight");
+  });
+  while (!g_gateEntered.load(std::memory_order_acquire)) {
+    std::this_thread::yield();
+  }
+
+  std::atomic<bool> removalReturned{false};
+  std::thread remover([&]() noexcept {
+    remove(payload);
+    payload.retired.store(true, std::memory_order_release);
+    removalReturned.store(true, std::memory_order_release);
+  });
+
+  // Settle window: gives a removal that does NOT wait for quiescence time to
+  // return and retire the payload before the held dispatch resumes, so the
+  // defect shows deterministically instead of by scheduling luck. A removal
+  // that does wait cannot return until the release below, and no assertion
+  // reads the elapsed time.
+  for (int i = 0; (i < 500) && !removalReturned.load(std::memory_order_acquire);
+       ++i) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+
+  g_gateReleased.store(true, std::memory_order_release);
+  logger.join();
+  remover.join();
+  return g_payloadObservedAfterRetire.load(std::memory_order_acquire);
+}
+
+/// EXPECTATION (regression, audit #335): log_unregister_sink does not return
+/// while a dispatch that snapshotted the sink is still running, so an owner
+/// may release its userData as soon as the call returns.
+void check_unregister_waits_for_in_flight_dispatch() noexcept {
+  SinkPayload payload{};
+  check(engine::core::log_register_sink(&gate_sink, nullptr),
+        "register gate sink");
+  check(engine::core::log_register_sink(&payload_sink, &payload),
+        "register payload sink");
+
+  const bool observedAfterRetire = removal_races_in_flight_dispatch(
+      [](SinkPayload &owned) noexcept {
+        engine::core::log_unregister_sink(&payload_sink, &owned);
+      },
+      payload);
+
+  check(g_payloadSinkCalled.load(std::memory_order_acquire),
+        "payload sink observed the in-flight event");
+  check(!observedAfterRetire,
+        "no sink call after log_unregister_sink released the payload");
+
+  engine::core::log_unregister_sink(&gate_sink, nullptr);
+}
+
+/// EXPECTATION (regression, audit #335): shutdown_logging drops the sink
+/// table under the same barrier, so teardown cannot strand a dispatch that
+/// is still calling a sink whose owner is being destroyed.
+void check_shutdown_waits_for_in_flight_dispatch() noexcept {
+  SinkPayload payload{};
+  check(engine::core::log_register_sink(&gate_sink, nullptr),
+        "register gate sink for shutdown barrier");
+  check(engine::core::log_register_sink(&payload_sink, &payload),
+        "register payload sink for shutdown barrier");
+
+  const bool observedAfterRetire = removal_races_in_flight_dispatch(
+      [](SinkPayload &) noexcept { engine::core::shutdown_logging(); }, payload);
+
+  check(g_payloadSinkCalled.load(std::memory_order_acquire),
+        "payload sink observed the event shutdown raced");
+  check(!observedAfterRetire,
+        "no sink call after shutdown_logging released the sink table");
+
+  check(engine::core::initialize_logging(),
+        "logging re-initialized after the shutdown barrier");
+}
+
+/// EXPECTATION (regression, audit #335): a sink that unregisters itself from
+/// inside its own callback completes instead of waiting on the dispatch it
+/// is running in, and stops receiving events afterwards.
+void check_self_unregister_completes() noexcept {
+  g_selfUnregisterCalls.store(0, std::memory_order_relaxed);
+  check(engine::core::log_register_sink(&self_unregistering_sink, nullptr),
+        "register self-unregistering sink");
+
+  engine::core::log_message(engine::core::LogLevel::Info, "core",
+                            "sink removes itself");
+  check(g_selfUnregisterCalls.load(std::memory_order_relaxed) == 1,
+        "sink observed the event during which it unregistered");
+
+  engine::core::log_message(engine::core::LogLevel::Info, "core",
+                            "after self removal");
+  check(g_selfUnregisterCalls.load(std::memory_order_relaxed) == 1,
+        "no delivery after a sink unregisters itself");
+}
+
 /// EXPECTATION: log_set_frame_index publishes a value log_current_frame_
 /// index immediately observes, independent of any sink or log_message call.
 void check_frame_index_publication() noexcept {
@@ -185,7 +339,12 @@ int main() {
   check_unregister_stops_delivery_and_rejects_duplicates();
   check_sink_table_capacity_is_bounded();
   check_sink_dispatch_is_thread_safe();
+  check_unregister_waits_for_in_flight_dispatch();
+  check_self_unregister_completes();
   check_frame_index_publication();
+  // Runs last among the sink cases: it tears the logging system down and
+  // brings it back up, so anything after it would race that transition.
+  check_shutdown_waits_for_in_flight_dispatch();
 
   engine::core::shutdown_logging();
   return g_tests.finish("logging_sink_test");

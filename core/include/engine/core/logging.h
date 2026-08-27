@@ -21,7 +21,8 @@ const char *log_level_to_string(LogLevel level) noexcept;
 
 /// Initializes the owning system for logging.
 bool initialize_logging() noexcept;
-/// Shuts down the owning system for logging.
+/// Shuts down the owning system for logging, dropping every still-registered
+/// sink under the same lifetime barrier log_unregister_sink provides.
 void shutdown_logging() noexcept;
 /// Writes one log line (level + channel + message) to the sinks.
 void log_message(LogLevel level, const char* channel, const char* message) noexcept;
@@ -55,10 +56,18 @@ typedef void (*LogSinkFn)(LogLevel level, const char *channel,
 
 /// Registers a sink invoked on every subsequent log_message call. Returns
 /// false when the (fn, userData) pair is already registered or the fixed
-/// sink table (kMaxLogSinks) is full; never allocates.
+/// sink table (kMaxLogSinks) is full; never allocates. A slot counts as full
+/// until the sink that left it is done being dispatched, so a registration
+/// racing another sink's removal can be refused while that removal drains.
 bool log_register_sink(LogSinkFn fn, void *userData) noexcept;
 /// Unregisters a sink previously accepted by log_register_sink; a no-op if
-/// the (fn, userData) pair is not currently registered.
+/// the (fn, userData) pair is not currently registered. Returns only once no
+/// dispatch is still inside that sink, so the owner may release userData
+/// immediately afterwards; the wait lasts at most one callback, given the
+/// fixed-size non-blocking work sinks owe above. Because it waits, the caller
+/// must not hold a lock its own sink acquires. A sink unregistering itself
+/// from inside its own callback returns without waiting on that call, and
+/// must keep its userData valid until the callback returns.
 void log_unregister_sink(LogSinkFn fn, void *userData) noexcept;
 
 /// Hard cap on simultaneously registered sinks (fixed table, no growth).
