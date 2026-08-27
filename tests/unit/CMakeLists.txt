@@ -432,6 +432,18 @@ engine_add_test_executable(engine_unit_atomic_file
     engine_core
 )
 
+# Durable-replacement protocol (audit #338): reaches core's private
+# protocol header so the injected-fault cases run on the same function
+# the production commit path calls.
+engine_add_test_executable(engine_unit_durable_replace
+    SOURCES
+    durable_replace_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/core/src
+    PRIVATE_DEPS
+    engine_core
+)
+
 engine_add_test_executable(engine_unit_event_bus
     SOURCES
     event_bus_test.cpp

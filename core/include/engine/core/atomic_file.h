@@ -32,8 +32,17 @@ public:
   bool begin(const char *destinationPath) noexcept;
   /// Appends one checked chunk; a short write aborts the stage.
   bool write(const void *data, std::size_t sizeBytes) noexcept;
-  /// Flush + sync + close + atomic rename; false leaves the previous
-  /// destination intact with the temporary removed.
+  /// Flush + sync + close + atomic rename, then — where the platform
+  /// exposes a directory-sync primitive — a parent-directory sync, so
+  /// the new directory entry is durable and not just the bytes behind
+  /// it. Windows exposes no such primitive and its durable-rename
+  /// equivalent is not yet implemented (issue #358), so the entry's
+  /// durability there is whatever the filesystem provides on its own.
+  /// False leaves the previous destination intact with the temporary
+  /// removed. True once the rename has committed: a failure to sync the
+  /// directory afterwards is logged as an error rather than reported
+  /// here, because the destination already holds the new payload and
+  /// the caller must not treat its old file as intact.
   bool commit() noexcept;
   /// Discards the staged temporary without touching the destination.
   void abort() noexcept;
@@ -45,11 +54,14 @@ private:
 };
 
 /// Writes the payload to a uniquely named sibling temporary file (flushed,
-/// synced, and closed with every step checked) and atomically renames it
-/// over the destination; on any failure the previous destination file is
-/// left intact and the temporary is removed. Concurrent writers never
-/// share a temporary; concurrent commits to the same destination resolve
-/// as last-writer-wins.
+/// synced, and closed with every step checked), atomically renames it
+/// over the destination, and — where the platform exposes a
+/// directory-sync primitive, which Windows does not (issue #358) — syncs
+/// the containing directory so the entry survives power loss; on any
+/// failure before the rename the previous destination file is left
+/// intact and the temporary is removed. Concurrent writers never share a
+/// temporary; concurrent commits to the same destination resolve as
+/// last-writer-wins.
 bool atomic_write_file(const char *path, const void *data,
                        std::size_t size) noexcept;
 
