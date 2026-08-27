@@ -155,4 +155,33 @@ bool atomic_write_file(const char *path, const void *data,
   return writer.begin(path) && writer.write(data, size) && writer.commit();
 }
 
+bool create_directories_durably(const char *directoryPath) noexcept {
+  const detail::CreateDirectoryOutcome outcome =
+      detail::durable_create_directories(directoryPath,
+                                         detail::production_replace_ops());
+
+  if (outcome == detail::CreateDirectoryOutcome::Failed) {
+    char message[1152] = {};
+    std::snprintf(message, sizeof(message),
+                  "could not create the directory '%s'; nothing can be saved "
+                  "into it",
+                  (directoryPath != nullptr) ? directoryPath : "(null)");
+    log_message(LogLevel::Error, "core.atomic_file", message);
+    return false;
+  }
+
+  // The directory is in place, so this is not reportable as a failure —
+  // only the power-loss resistance of its own entry is degraded, and
+  // that must not pass silently.
+  if (outcome == detail::CreateDirectoryOutcome::CreatedNotDurable) {
+    char message[1152] = {};
+    std::snprintf(message, sizeof(message),
+                  "created '%s' but could not sync its directory entry: the "
+                  "directory is in place and may not survive power loss",
+                  directoryPath);
+    log_message(LogLevel::Error, "core.atomic_file", message);
+  }
+  return true;
+}
+
 } // namespace engine::core

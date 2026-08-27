@@ -65,4 +65,22 @@ private:
 bool atomic_write_file(const char *path, const void *data,
                        std::size_t size) noexcept;
 
+/// Creates every missing segment of directoryPath and — where the
+/// platform exposes a directory-sync primitive, which Windows does not
+/// (issue #358) — syncs the parent that now carries each newly created
+/// entry, so a file committed into the directory afterwards is durable
+/// relative to a directory whose own existence is durable too (audit
+/// #357). Callers that write into a directory the engine may have to
+/// create run this first; atomic_write_file deliberately still refuses a
+/// destination whose directory is absent rather than creating one behind
+/// the caller's back.
+///
+/// True when the directory is in place — whether it was already there or
+/// this call created it. A durability degradation is logged rather than
+/// reported here, because the directory does exist and the caller must
+/// not treat the situation as "no directory". False only when a segment
+/// could not be created, in which case the commit that would follow
+/// cannot succeed and must not be attempted.
+bool create_directories_durably(const char *directoryPath) noexcept;
+
 } // namespace engine::core
