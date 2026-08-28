@@ -10,11 +10,11 @@
 #include "shader_cook.h"
 
 #include "packer_shared.h"
+#include "process_run.h"
 
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <string>
@@ -83,6 +83,40 @@ std::string variant_key(std::vector<std::string> defines) {
     key += defines[i];
   }
   return key;
+}
+
+/// True for a manifest define the preprocessor can act on: an identifier,
+/// optionally followed by '=' and a value of identifier, digit, sign or
+/// decimal-point characters. A define outside that grammar cannot name a
+/// macro, so it is a manifest error rather than something to forward.
+bool is_valid_define(const std::string &define) {
+  const auto is_identifier_start = [](char c) {
+    return ((c >= 'A') && (c <= 'Z')) || ((c >= 'a') && (c <= 'z')) ||
+           (c == '_');
+  };
+  const auto is_identifier_char = [&](char c) {
+    return is_identifier_start(c) || ((c >= '0') && (c <= '9'));
+  };
+  if (define.empty() || !is_identifier_start(define[0])) {
+    return false;
+  }
+  std::size_t i = 1U;
+  while ((i < define.size()) && is_identifier_char(define[i])) {
+    ++i;
+  }
+  if (i == define.size()) {
+    return true;
+  }
+  if (define[i] != '=') {
+    return false;
+  }
+  for (++i; i < define.size(); ++i) {
+    const char c = define[i];
+    if (!is_identifier_char(c) && (c != '.') && (c != '+') && (c != '-')) {
+      return false;
+    }
+  }
+  return true;
 }
 
 /// Reads the manifest JSON into shader entries; false on parse or shape
@@ -189,6 +223,13 @@ bool read_manifest(const char *manifestPath,
                        v);
           return false;
         }
+        if (!is_valid_define(buffer)) {
+          std::fprintf(stderr,
+                       "shader cook: entry %zu variant %zu define \"%s\" is "
+                       "not a preprocessor macro\n",
+                       i, v, buffer);
+          return false;
+        }
         defines.emplace_back(buffer);
       }
       shader.variants.push_back(std::move(defines));
@@ -240,6 +281,44 @@ void shrink_frag_data_declaration(std::vector<char> &bytes) {
   bytes[declDigit] = static_cast<char>('0' + (maxUsed + 1));
 }
 
+/// POSIX hosts drop shaderc's standard error: it reports per-invocation
+/// progress there, and the cook prints its own failure line naming the
+/// source and profile. Windows hosts inherit it.
+#ifdef _WIN32
+constexpr bool kDiscardShadercDiagnostics = false;
+#else
+constexpr bool kDiscardShadercDiagnostics = true;
+#endif
+
+/// Builds the argument vector for one shaderc invocation. Each element is
+/// one argument the child receives verbatim, so a value carrying spaces or
+/// a host shell's metacharacters stays a single argument.
+std::vector<std::string> build_shaderc_arguments(
+    const std::string &sourcePath, const std::string &stagedPath,
+    const std::string &varyingPath, const std::string &includeDir,
+    bool isVertex, const std::vector<std::string> &defines,
+    const ShaderProfile &profile) {
+  std::vector<std::string> arguments{"-f",
+                                     sourcePath,
+                                     "-o",
+                                     stagedPath,
+                                     "--type",
+                                     isVertex ? "v" : "f",
+                                     "--platform",
+                                     profile.platform,
+                                     "-p",
+                                     profile.profile,
+                                     "-i",
+                                     includeDir,
+                                     "--varyingdef",
+                                     varyingPath};
+  for (const std::string &define : defines) {
+    arguments.emplace_back("--define");
+    arguments.push_back(define);
+  }
+  return arguments;
+}
+
 /// Invokes shaderc for one source/variant/profile into a staged sibling
 /// and atomically replaces the final output; false on any failure with
 /// the stage cleaned up.
@@ -248,23 +327,16 @@ bool cook_one(const std::string &shadercPath, const std::string &sourcePath,
               bool isVertex, const std::vector<std::string> &defines,
               const ShaderProfile &profile, const std::string &finalPath) {
   const std::string stagedPath = finalPath + ".cooking";
-  std::string command = "\"" + shadercPath + "\" -f \"" + sourcePath +
-                        "\" -o \"" + stagedPath + "\" --type " +
-                        (isVertex ? "v" : "f") + " --platform " +
-                        profile.platform + " -p " + profile.profile +
-                        " -i \"" + includeDir + "\" --varyingdef \"" +
-                        varyingPath + "\"";
-  for (const std::string &define : defines) {
-    command += " --define " + define;
+  const std::vector<std::string> arguments = build_shaderc_arguments(
+      sourcePath, stagedPath, varyingPath, includeDir, isVertex, defines,
+      profile);
+  const ProcessResult run =
+      run_process(shadercPath, arguments, kDiscardShadercDiagnostics);
+  if (!run.launched) {
+    std::fprintf(stderr, "shader cook: cannot launch %s\n",
+                 shadercPath.c_str());
   }
-#ifdef _WIN32
-  // cmd.exe strips the outer quote pair from the whole command line.
-  command = "\"" + command + "\"";
-#else
-  command += " 2>/dev/null";
-#endif
-  const int exitCode = std::system(command.c_str());
-  bool ok = (exitCode == 0);
+  bool ok = run.launched && (run.exitCode == 0);
   std::vector<char> bytes;
   if (ok) {
     FILE *staged = std::fopen(stagedPath.c_str(), "rb");

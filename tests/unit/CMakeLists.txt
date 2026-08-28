@@ -136,6 +136,28 @@ if(TARGET bgfx_shader_cook)
     set_tests_properties(engine_unit_shader_cook PROPERTIES TIMEOUT 300)
 endif()
 
+if(TARGET asset_packer)
+    # Records the argument vector the packer launches its shader compiler
+    # with, so the cook's launch is observable without a real shaderc and
+    # the suite runs on every lane, including those built without one.
+    engine_add_executable_target(engine_test_fake_shaderc
+        SOURCES
+        fake_shaderc_main.cpp
+    )
+
+    engine_add_test_executable(engine_unit_shader_cook_argv
+        SOURCES
+        shader_cook_argv_test.cpp
+        PRIVATE_DEPS
+        engine_core
+    )
+    target_compile_definitions(engine_unit_shader_cook_argv PRIVATE
+        ENGINE_TEST_ASSET_PACKER="$<TARGET_FILE:asset_packer>"
+        ENGINE_TEST_FAKE_SHADERC="$<TARGET_FILE:engine_test_fake_shaderc>")
+    add_dependencies(engine_unit_shader_cook_argv asset_packer
+        engine_test_fake_shaderc)
+endif()
+
 engine_add_test_executable(engine_unit_mesh_loader
     SOURCES
     mesh_loader_test.cpp
