@@ -214,6 +214,16 @@ engine_add_test_executable(engine_integration_hotreload_rollback
     integration
 )
 
+engine_add_test_executable(engine_integration_hotreload_scene_op_rollback
+    SOURCES
+    hotreload_scene_op_rollback_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_scripting
+    LABELS
+    integration
+)
+
 engine_add_test_executable(engine_integration_script_module_cache
     SOURCES
     script_module_cache_test.cpp

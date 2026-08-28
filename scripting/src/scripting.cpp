@@ -1004,7 +1004,15 @@ void restore_global_bindings(lua_State *state, int snapshotReference) noexcept {
                                           "hot_reload globals restore"));
 }
 
-/// Executes a reload while rolling back all top-level bindings on failure.
+/// Executes a reload, rolling back a failed chunk's top-level Lua bindings
+/// and the deferred scene request it queued. The scene request rolls back
+/// with them because it outlives the chunk: the runtime commits it after the
+/// frame, so a chunk that asks for a new scene and then fails would destroy
+/// the live World on the strength of bindings that were just discarded.
+/// A prior request the chunk overwrote is restored for the same reason —
+/// the failed chunk is not entitled to redirect a transition already queued.
+/// TODO(#343): timer, audio, and ECS mutations a failed chunk performed are
+/// not rolled back.
 bool reload_script_transactionally(const char *path) noexcept {
   lua_State *state = lua_state();
   if ((state == nullptr) || (path == nullptr)) {
@@ -1020,10 +1028,14 @@ bool reload_script_transactionally(const char *path) noexcept {
     lua_pop(state, 1);
     return false;
   }
+  // Captured after the chunk is loaded and before it runs: loading executes
+  // no chunk code, so this is the request as it stood before the reload.
+  const PendingSceneOpCheckpoint sceneOpCheckpoint = capture_pending_scene_op();
   arm_debug_lua_hook(state);
   if (lua_pcall(state, 0, 0, 0) != LUA_OK) {
     log_lua_error("hot_reload");
     restore_global_bindings(state, snapshotReference);
+    restore_pending_scene_op(sceneOpCheckpoint);
     luaL_unref(state, LUA_REGISTRYINDEX, snapshotReference);
     return false;
   }
@@ -1032,6 +1044,7 @@ bool reload_script_transactionally(const char *path) noexcept {
     core::log_message(core::LogLevel::Error, "scripting",
                       "hot_reload: CPU instruction budget exhausted");
     restore_global_bindings(state, snapshotReference);
+    restore_pending_scene_op(sceneOpCheckpoint);
     luaL_unref(state, LUA_REGISTRYINDEX, snapshotReference);
     return false;
   }
