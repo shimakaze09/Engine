@@ -255,7 +255,10 @@ directory-global by design.
 - `content/` — generic asset/content layer (#171, depends only on core):
   `AssetId`/`AssetTypeTag`/`AssetMetadata` identity + tag + dependency-edge
   helpers, the `MetadataStore` (registration/lookup, tags, type queries,
-  dependency edges, dependency-ordered load with cycle rejection), the
+  dependency edges, dependency-ordered load with cycle rejection — one
+  callback per distinct asset, marked by table slot so deduplication
+  covers the store's whole capacity, with the ids it holds no record for
+  capped and the cap reported rather than met by repeating a load), the
   asset transition-request queue, the async streaming queue (engine-neutral
   load/upload callbacks, worker threads, budget cvars), the cooked-asset
   staleness diagnostic, and the LRU cache. Non-render consumers and tools

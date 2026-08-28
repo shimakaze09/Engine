@@ -191,6 +191,13 @@ engine_add_test_executable(engine_unit_content_metadata
     engine_content
 )
 
+engine_add_test_executable(engine_unit_content_dependency_dedup
+    SOURCES
+    content_dependency_dedup_test.cpp
+    PRIVATE_DEPS
+    engine_content
+)
+
 engine_add_test_executable(engine_unit_content_asset_queue
     SOURCES
     content_asset_queue_test.cpp

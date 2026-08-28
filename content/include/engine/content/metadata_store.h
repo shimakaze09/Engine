@@ -56,9 +56,12 @@ bool add_asset_dependency(MetadataStore *store, AssetId id,
                           AssetId depId) noexcept;
 
 /// Loads an asset and all its dependencies depth-first, dependency-first,
-/// invoking loadCallback per asset in dependency order (callers reach their
-/// own state through userData). False on a cycle, excessive depth, or a
-/// failed callback.
+/// invoking loadCallback exactly once per distinct asset in dependency
+/// order (callers reach their own state through userData), so a shared
+/// dependency is never loaded twice however wide the graph. False on a
+/// cycle, excessive depth, a failed callback, or a graph that reaches more
+/// ids the store holds no metadata for than the traversal can remember —
+/// that limit is reported rather than met by repeating a load.
 bool load_with_dependencies(MetadataStore *store, AssetId rootId,
                             bool (*loadCallback)(AssetId id, void *userData),
                             void *userData) noexcept;
