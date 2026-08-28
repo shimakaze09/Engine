@@ -627,3 +627,13 @@ engine_add_test_executable(engine_integration_run_fatal_frame
     LABELS
     integration
 )
+
+engine_add_test_executable(engine_integration_engine_config_strings
+    SOURCES
+    engine_config_strings_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_scripting
+    LABELS
+    integration
+)
