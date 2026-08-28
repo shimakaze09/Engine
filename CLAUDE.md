@@ -542,7 +542,12 @@ directory-global by design.
   services (via `core::initialize_core`/`shutdown_core`, LIFO with
   partial-init rollback), the cvar/console tables, scripting VM, audio
   device, DAP, texture registry, renderer teardown, and the active
-  `EngineConfig`. **Run tier** — `EnginePipeline::Impl` owns the World,
+  `EngineConfig` — whose caller-supplied strings bootstrap copies into
+  engine-owned fixed storage (`runtime/src/engine_config_strings.{h,cpp}`),
+  staged so a rejected path leaves the previously adopted configuration
+  intact, because the active configuration is read for the whole process
+  lifetime and must not borrow an embedder's buffers.
+  **Run tier** — `EnginePipeline::Impl` owns the World,
   asset database/manager/streaming, command buffer, mesh registry, service
   locator + registry, game-binding state, and published bridge services;
   its `teardown` is the single audit point for run residue and resets
