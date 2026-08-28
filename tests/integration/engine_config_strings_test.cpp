@@ -207,11 +207,11 @@ int main() {
     char overlong[kMaxConfigStringLength + 2U] = {};
     fill_path(overlong, kMaxConfigStringLength + 1U, 'a');
 
-    // Only the over-long field is set, so every other field carries its
-    // default — different text from what the block above adopted. An
-    // implementation that wrote each field into the live storage as it
-    // validated would leave the earlier defaults behind, which is what
-    // the mainScriptPath assertion below catches.
+    // Only the over-long field is set, so the field the assertion below
+    // reads carries its default — different text from what the block
+    // above adopted. An implementation that wrote each field into the
+    // live storage as it validated would leave that default behind,
+    // which is what the mainScriptPath assertion catches.
     engine::EngineConfig config{};
     config.core.platform.headless = true;
     config.bootstrapMeshPath = overlong;
