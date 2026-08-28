@@ -6,6 +6,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <memory>
 
@@ -32,6 +33,25 @@ bool read_text_file(const char *path, std::unique_ptr<char[]> *outBuffer,
 /// Writes `size` bytes to `path`; false unless every byte lands.
 bool write_text_file(const char *path, const char *text,
                      std::size_t size) noexcept;
+
+// --- Schema version --------------------------------------------------------
+
+/// JSON key naming the schema revision a document was written against.
+/// Both runtime serializers write it and gate their reads on it.
+inline constexpr const char *kSchemaVersionKey = "version";
+
+/// Whether a document's schema revision is one this build can interpret.
+/// A document that omits the key reads as revision 1, the earliest revision
+/// of either runtime format, so a hand-authored document without it still
+/// loads; a present key must hold an unsigned integer in
+/// [1, currentVersion]. `noun` names the document in the diagnostics logged
+/// on `channel`. Callers check this before consuming any payload, so a
+/// document written by a newer engine leaves the destination untouched
+/// instead of loading as a partial, resavable reduction of itself.
+bool schema_version_supported(const core::JsonParser &parser,
+                              const core::JsonValue &root,
+                              std::uint32_t currentVersion, const char *noun,
+                              const char *channel) noexcept;
 
 // --- Vector / quaternion JSON fields (fixed-size float arrays) -------------
 
