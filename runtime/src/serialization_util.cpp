@@ -14,6 +14,36 @@
 
 namespace engine::runtime {
 
+bool schema_version_supported(const core::JsonParser &parser,
+                              const core::JsonValue &root,
+                              std::uint32_t currentVersion, const char *noun,
+                              const char *channel) noexcept {
+  // An absent key is the documented legacy revision rather than a parse
+  // failure; a present one is read strictly, so a value of the wrong JSON
+  // type is a refusal instead of a silent fall back to that revision.
+  std::uint32_t version = 1U;
+  core::JsonValue versionValue{};
+  if (parser.get_object_field(root, kSchemaVersionKey, &versionValue) &&
+      !parser.as_uint(versionValue, &version)) {
+    char message[128] = {};
+    static_cast<void>(std::snprintf(message, sizeof(message),
+                                    "%s version must be an unsigned integer",
+                                    noun));
+    core::log_message(core::LogLevel::Error, channel, message);
+    return false;
+  }
+
+  if ((version == 0U) || (version > currentVersion)) {
+    char message[128] = {};
+    static_cast<void>(std::snprintf(message, sizeof(message),
+                                    "unsupported %s version", noun));
+    core::log_message(core::LogLevel::Error, channel, message);
+    return false;
+  }
+
+  return true;
+}
+
 bool open_file_for_read(const char *path, FILE **outFile) noexcept {
   if ((path == nullptr) || (outFile == nullptr)) {
     return false;

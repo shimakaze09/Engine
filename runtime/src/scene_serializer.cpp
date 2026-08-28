@@ -30,7 +30,6 @@ namespace engine::runtime {
 namespace {
 
 constexpr const char *kSceneLogChannel = "scene";
-constexpr const char *kVersionKey = "version";
 constexpr std::uint32_t kCurrentSceneVersion = 2U;
 constexpr const char *kEntitiesKey = "entities";
 constexpr const char *kComponentsKey = "components";
@@ -337,7 +336,7 @@ bool serialize_scene_to_writer(const World &world,
   core::JsonWriter &writer = *outWriter;
   writer.reset();
   writer.begin_object();
-  writer.write_uint(kVersionKey, kCurrentSceneVersion);
+  writer.write_uint(kSchemaVersionKey, kCurrentSceneVersion);
 
   // World gravity is authored state; written only when it differs from the
   // default so existing scenes stay byte-identical.
@@ -570,19 +569,8 @@ bool load_scene(World &world, const char *buffer, std::size_t size,
     return false;
   }
 
-  std::uint32_t sceneVersion = 1U;
-  core::JsonValue versionValue{};
-  if (parser.get_object_field(*root, kVersionKey, &versionValue)) {
-    if (!parser.as_uint(versionValue, &sceneVersion)) {
-      core::log_message(core::LogLevel::Error, kSceneLogChannel,
-                        "scene version must be an unsigned integer");
-      return false;
-    }
-  }
-
-  if ((sceneVersion == 0U) || (sceneVersion > kCurrentSceneVersion)) {
-    core::log_message(core::LogLevel::Error, kSceneLogChannel,
-                      "unsupported scene version");
+  if (!schema_version_supported(parser, *root, kCurrentSceneVersion, "scene",
+                                kSceneLogChannel)) {
     return false;
   }
 

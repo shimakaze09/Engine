@@ -161,7 +161,7 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
 
   core::JsonWriter w{};
   w.begin_object();
-  w.write_uint("version", kPrefabVersion);
+  w.write_uint(kSchemaVersionKey, kPrefabVersion);
   w.write_key("components");
   w.begin_object();
 
@@ -225,6 +225,13 @@ Entity instantiate_prefab(World &world, const char *path) noexcept {
     return kInvalidEntity;
   }
   const core::JsonValue root = *rootPtr;
+
+  // The revision decides how everything below it is interpreted, so a
+  // document this build cannot read is refused before an instance exists.
+  if (!schema_version_supported(parser, root, kPrefabVersion, "prefab",
+                                kPrefabLogChannel)) {
+    return kInvalidEntity;
+  }
 
   core::JsonValue componentsVal{};
   if (!parser.get_object_field(root, "components", &componentsVal) ||

@@ -103,6 +103,73 @@ int verify_instantiate_rejects_malformed_component() {
   return 0;
 }
 
+/// Regression for #332: instantiate_prefab must gate on the document's
+/// schema revision. Covers the revisions this build accepts, the future
+/// and malformed values it must refuse, and the requirement that a refusal
+/// creates nothing -- the version is read before the instance exists.
+int verify_instantiate_validates_schema_version() {
+  struct VersionCase final {
+    const char *json;
+    bool accepted;
+  };
+
+  // Revision 1 is the only one this build writes. A document omitting the
+  // key reads as that revision, so hand-authored prefabs still load.
+  constexpr VersionCase kCases[] = {
+      {"{\"version\":1,\"components\":{}}", true},
+      {"{\"components\":{}}", true},
+      {"{\"version\":2,\"components\":{}}", false},
+      {"{\"version\":999,\"components\":{}}", false},
+      {"{\"version\":0,\"components\":{}}", false},
+      {"{\"version\":-1,\"components\":{}}", false},
+      {"{\"version\":1.5,\"components\":{}}", false},
+      {"{\"version\":4294967296,\"components\":{}}", false},
+      {"{\"version\":\"1\",\"components\":{}}", false},
+      {"{\"version\":true,\"components\":{}}", false},
+      {"{\"version\":null,\"components\":{}}", false},
+      {"{\"version\":[1],\"components\":{}}", false},
+  };
+
+  for (const VersionCase &testCase : kCases) {
+    remove_prefab_file();
+    if (!write_prefab_text(testCase.json)) {
+      remove_prefab_file();
+      return 200;
+    }
+
+    std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                      engine::runtime::World());
+    if (world == nullptr) {
+      remove_prefab_file();
+      return 201;
+    }
+
+    const std::size_t aliveBefore = world->alive_entity_count();
+    const engine::runtime::Entity entity =
+        engine::runtime::instantiate_prefab(*world, kPrefabPath);
+    remove_prefab_file();
+
+    const bool accepted = (entity != engine::runtime::kInvalidEntity);
+    if (accepted != testCase.accepted) {
+      std::fprintf(stderr, "FAIL: prefab %s was %s: %s\n",
+                   testCase.accepted ? "rejected" : "accepted",
+                   testCase.accepted ? "expected to load" : "expected refused",
+                   testCase.json);
+      return testCase.accepted ? 202 : 203;
+    }
+
+    const std::size_t expectedAlive =
+        aliveBefore + (testCase.accepted ? 1U : 0U);
+    if (world->alive_entity_count() != expectedAlive) {
+      std::fprintf(stderr, "FAIL: prefab left the world changed: %s\n",
+                   testCase.json);
+      return 204;
+    }
+  }
+
+  return 0;
+}
+
 int verify_instantiate_rolls_back_on_component_add_failure() {
   remove_prefab_file();
   constexpr const char *kPointLightPrefab =
@@ -690,6 +757,12 @@ int main() {
   }
 
   int result = verify_instantiate_rejects_malformed_component();
+  if (result != 0) {
+    remove_prefab_file();
+    return result;
+  }
+
+  result = verify_instantiate_validates_schema_version();
   if (result != 0) {
     remove_prefab_file();
     return result;
