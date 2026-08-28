@@ -24,6 +24,7 @@
 #include "engine/runtime/engine_pipeline.h"
 #include "engine/scripting/dap_server.h"
 #include "engine/scripting/scripting.h"
+#include "engine_config_strings.h"
 
 namespace engine {
 
@@ -60,7 +61,15 @@ bool bootstrap() noexcept {
 /// configured project asset root is mounted before any runtime or
 /// editor path resolves through the VFS.
 bool bootstrap(const EngineConfig &config) noexcept {
-  g_activeConfig = config;
+  // The caller's strings are borrowed for the duration of this call only,
+  // while runtime and editor systems keep reading active_config() frames
+  // later, so the engine takes its own copies first. Staging into a local
+  // keeps the active configuration intact when a string is rejected.
+  EngineConfig adopted = config;
+  if (!adopt_config_strings(adopted)) {
+    return false;
+  }
+  g_activeConfig = adopted;
 
   // #138: a backend that owns its swapchain (bgfx) needs the platform
   // window created without an OpenGL context; headless keeps priority.

@@ -7,6 +7,7 @@ engine_add_module_library(engine_runtime
     src/camera_component_update.cpp
     src/editor_bridge.cpp
     src/engine.cpp
+    src/engine_config_strings.cpp
     src/animation.cpp
     src/animation_assets.cpp
     src/animation_system.cpp
