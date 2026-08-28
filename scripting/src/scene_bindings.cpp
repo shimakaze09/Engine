@@ -9,15 +9,13 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 
 namespace engine::scripting {
 namespace {
 
-/// Identifies the deferred scene operation requested from Lua.
-enum class SceneOp : std::uint8_t { None, Load, New };
-
 SceneOp g_pendingSceneOp = SceneOp::None;
-char g_pendingScenePath[512] = {};
+char g_pendingScenePath[kPendingScenePathCapacity] = {};
 /// Re-entrancy guard for the #198 outgoing-scene on_end_play dispatch: set
 /// only while dispatch_entity_scripts_end_for_transition() is running.
 bool g_teardownDispatchActive = false;
@@ -112,6 +110,19 @@ void reset_scene_bindings() noexcept {
   g_pendingSceneOp = SceneOp::None;
   g_pendingScenePath[0] = '\0';
   g_teardownDispatchActive = false;
+}
+
+PendingSceneOpCheckpoint capture_pending_scene_op() noexcept {
+  PendingSceneOpCheckpoint checkpoint{};
+  checkpoint.op = g_pendingSceneOp;
+  std::memcpy(checkpoint.path, g_pendingScenePath, sizeof(checkpoint.path));
+  return checkpoint;
+}
+
+void restore_pending_scene_op(
+    const PendingSceneOpCheckpoint &checkpoint) noexcept {
+  g_pendingSceneOp = checkpoint.op;
+  std::memcpy(g_pendingScenePath, checkpoint.path, sizeof(g_pendingScenePath));
 }
 
 bool has_pending_scene_op() noexcept {
