@@ -105,13 +105,18 @@ int main() {
   }
 
   // --- Adopted strings outlive the caller's buffers. ---
+  // Every value a rejection case later reads back differs from the
+  // matching `EngineConfig` default, so an assertion that it survived
+  // distinguishes preserved storage from storage overwritten with the
+  // default's identical text. The mount pair stays "assets" because
+  // bootstrap mounts it for real.
   char *assetMount = heap_string("assets");
   char *assetRoot = heap_string("assets");
-  char *mainScriptPath = heap_string("assets/main.lua");
-  char *bootstrapMeshPath = heap_string("assets/triangle.mesh");
-  char *shaderRootPath = heap_string("assets/shaders");
-  char *editorScenePath = heap_string("assets/scene.json");
-  char *editorAssetRoot = heap_string("assets");
+  char *mainScriptPath = heap_string("assets/probe_main.lua");
+  char *bootstrapMeshPath = heap_string("assets/probe.mesh");
+  char *shaderRootPath = heap_string("assets/probe_shaders");
+  char *editorScenePath = heap_string("assets/probe_scene.json");
+  char *editorAssetRoot = heap_string("assets/probe_root");
   char *windowTitle = heap_string("config strings probe");
   if ((assetMount == nullptr) || (assetRoot == nullptr) ||
       (mainScriptPath == nullptr) || (bootstrapMeshPath == nullptr) ||
@@ -160,15 +165,15 @@ int main() {
           "assetMount survives the caller overwriting its buffer");
     CHECK(adopted_equals(active.assetRoot, "assets"),
           "assetRoot survives the caller overwriting its buffer");
-    CHECK(adopted_equals(active.mainScriptPath, "assets/main.lua"),
+    CHECK(adopted_equals(active.mainScriptPath, "assets/probe_main.lua"),
           "mainScriptPath survives the caller overwriting its buffer");
-    CHECK(adopted_equals(active.bootstrapMeshPath, "assets/triangle.mesh"),
+    CHECK(adopted_equals(active.bootstrapMeshPath, "assets/probe.mesh"),
           "bootstrapMeshPath survives the caller overwriting its buffer");
-    CHECK(adopted_equals(active.shaderRootPath, "assets/shaders"),
+    CHECK(adopted_equals(active.shaderRootPath, "assets/probe_shaders"),
           "shaderRootPath survives the caller overwriting its buffer");
-    CHECK(adopted_equals(active.editorScenePath, "assets/scene.json"),
+    CHECK(adopted_equals(active.editorScenePath, "assets/probe_scene.json"),
           "editorScenePath survives the caller overwriting its buffer");
-    CHECK(adopted_equals(active.editorAssetRoot, "assets"),
+    CHECK(adopted_equals(active.editorAssetRoot, "assets/probe_root"),
           "editorAssetRoot survives the caller overwriting its buffer");
     CHECK(adopted_equals(active.core.platform.title, "config strings probe"),
           "the window title survives the caller overwriting its buffer");
@@ -186,9 +191,9 @@ int main() {
 
     CHECK(adopted_equals(active.assetMount, "assets"),
           "assetMount survives the caller freeing its buffer");
-    CHECK(adopted_equals(active.mainScriptPath, "assets/main.lua"),
+    CHECK(adopted_equals(active.mainScriptPath, "assets/probe_main.lua"),
           "mainScriptPath survives the caller freeing its buffer");
-    CHECK(adopted_equals(active.editorScenePath, "assets/scene.json"),
+    CHECK(adopted_equals(active.editorScenePath, "assets/probe_scene.json"),
           "editorScenePath survives the caller freeing its buffer");
     CHECK(adopted_equals(active.core.platform.title, "config strings probe"),
           "the window title survives the caller freeing its buffer");
@@ -196,12 +201,17 @@ int main() {
     engine::shutdown();
   }
 
-  // --- A path one character past the limit is rejected, and rejection
-  // leaves the previously adopted configuration untouched. ---
+  // --- A path one character past the limit is rejected, and the fields
+  // adopted before it keep the values they were adopted with. ---
   {
     char overlong[kMaxConfigStringLength + 2U] = {};
     fill_path(overlong, kMaxConfigStringLength + 1U, 'a');
 
+    // Only the over-long field is set, so every other field carries its
+    // default — different text from what the block above adopted. An
+    // implementation that wrote each field into the live storage as it
+    // validated would leave the earlier defaults behind, which is what
+    // the mainScriptPath assertion below catches.
     engine::EngineConfig config{};
     config.core.platform.headless = true;
     config.bootstrapMeshPath = overlong;
@@ -210,26 +220,56 @@ int main() {
     CHECK(!booted, "a path one character past the limit is rejected");
     CHECK(!engine::core::is_core_initialized(),
           "a rejected configuration initializes no subsystem");
+    CHECK(adopted_equals(engine::active_config().mainScriptPath,
+                         "assets/probe_main.lua"),
+          "rejection leaves a field validated before it untouched");
     CHECK(adopted_equals(engine::active_config().bootstrapMeshPath,
-                         "assets/triangle.mesh"),
-          "rejection keeps the previously adopted paths");
+                         "assets/probe.mesh"),
+          "rejection keeps the rejected field's adopted value");
     if (booted) {
       engine::shutdown();
     }
   }
 
-  // --- A null path is reported instead of dereferenced. ---
+  // --- A null path is reported instead of dereferenced, and failing on
+  // the last field still leaves every earlier one untouched. ---
+  {
+    engine::EngineConfig config{};
+    config.core.platform.headless = true;
+    config.editorAssetRoot = nullptr;
+
+    const bool booted = engine::bootstrap(config);
+    CHECK(!booted, "a null path is rejected");
+    CHECK(!engine::core::is_core_initialized(),
+          "a null path initializes no subsystem");
+    // The widest partial-write window: a failure on the final field
+    // means every earlier one had already passed validation.
+    const engine::EngineConfig &active = engine::active_config();
+    CHECK(adopted_equals(active.mainScriptPath, "assets/probe_main.lua"),
+          "a late rejection leaves mainScriptPath untouched");
+    CHECK(adopted_equals(active.shaderRootPath, "assets/probe_shaders"),
+          "a late rejection leaves shaderRootPath untouched");
+    CHECK(adopted_equals(active.editorScenePath, "assets/probe_scene.json"),
+          "a late rejection leaves editorScenePath untouched");
+    CHECK(adopted_equals(active.editorAssetRoot, "assets/probe_root"),
+          "a late rejection keeps the rejected field's adopted value");
+    if (booted) {
+      engine::shutdown();
+    }
+  }
+
+  // --- A null mount is rejected before any subsystem starts. ---
   {
     engine::EngineConfig config{};
     config.core.platform.headless = true;
     config.assetMount = nullptr;
 
     const bool booted = engine::bootstrap(config);
-    CHECK(!booted, "a null path is rejected");
+    CHECK(!booted, "a null mount is rejected");
     CHECK(!engine::core::is_core_initialized(),
-          "a null path initializes no subsystem");
+          "a null mount initializes no subsystem");
     CHECK(adopted_equals(engine::active_config().assetMount, "assets"),
-          "a null path leaves the previously adopted mount in place");
+          "a null mount leaves the previously adopted mount in place");
     if (booted) {
       engine::shutdown();
     }
