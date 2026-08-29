@@ -413,6 +413,13 @@ engine_add_test_executable(engine_unit_scene_serializer
     engine_runtime
 )
 
+engine_add_test_executable(engine_unit_scene_version_gate
+    SOURCES
+    scene_version_gate_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+)
+
 engine_add_test_executable(engine_unit_entity_handle_epoch
     SOURCES
     entity_handle_epoch_test.cpp
