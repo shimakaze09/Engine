@@ -112,7 +112,11 @@ void run_load_case(engine::renderer::AssetDatabase *database,
     check((params != nullptr) && exactly_equal(params->roughness, 0.25F),
           "accepted load registered exact params");
   } else {
-    check(result.error() == engine::renderer::MaterialLoadError::Parse,
+    // Short-circuit before error(): if the gate regressed and the load
+    // succeeded, reading error() from an engaged expected would be UB on
+    // exactly the path that must report the regression.
+    check(!result.has_value() &&
+              (result.error() == engine::renderer::MaterialLoadError::Parse),
           "refusal classified as Parse");
     // A refused fresh load must not have registered anything for the id the
     // path would have produced.
