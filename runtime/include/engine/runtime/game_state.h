@@ -139,8 +139,16 @@ private:
   /// stored slot, so a key truncated on store could never be retrieved, yet
   /// the setter would still report success. Setters therefore reject a key
   /// that does not fit its fixed slot (kMaxKeyLength - 1 characters + NUL).
+  /// Scanned as a loop rather than a fixed-bound memchr: the caller's buffer
+  /// may legitimately be shorter than the slot, and this never reads past
+  /// the terminator.
   static bool key_fits(const char *key) noexcept {
-    return std::memchr(key, '\0', kMaxKeyLength) != nullptr;
+    for (std::size_t i = 0U; i < kMaxKeyLength; ++i) {
+      if (key[i] == '\0') {
+        return true;
+      }
+    }
+    return false;
   }
 
   /// Finds the matching object or resource for entry.
