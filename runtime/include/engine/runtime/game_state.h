@@ -29,9 +29,10 @@ struct GameState final {
   std::array<Entry, kMaxEntries> entries{};
   std::size_t entryCount = 0U;
 
-  // Store a numeric value. Overwrites if key exists. Returns false if full.
+  // Store a numeric value. Overwrites if key exists. Returns false if full
+  // or if the key exceeds kMaxKeyLength - 1 characters.
   bool set_number(const char *key, float value) noexcept {
-    if ((key == nullptr) || (key[0] == '\0')) {
+    if ((key == nullptr) || (key[0] == '\0') || !key_fits(key)) {
       return false;
     }
     Entry *existing = find_entry(key);
@@ -53,9 +54,11 @@ struct GameState final {
     return true;
   }
 
-  // Store a string value. Overwrites if key exists. Returns false if full.
+  // Store a string value. Overwrites if key exists. Returns false if full
+  // or if the key exceeds kMaxKeyLength - 1 characters. The value is not
+  // identity and still truncates to kMaxStringLength - 1 characters.
   bool set_string(const char *key, const char *value) noexcept {
-    if ((key == nullptr) || (key[0] == '\0')) {
+    if ((key == nullptr) || (key[0] == '\0') || !key_fits(key)) {
       return false;
     }
     Entry *existing = find_entry(key);
@@ -132,6 +135,22 @@ struct GameState final {
   }
 
 private:
+  /// Keys are identity: lookups compare the caller's full string against the
+  /// stored slot, so a key truncated on store could never be retrieved, yet
+  /// the setter would still report success. Setters therefore reject a key
+  /// that does not fit its fixed slot (kMaxKeyLength - 1 characters + NUL).
+  /// Scanned as a loop rather than a fixed-bound memchr: the caller's buffer
+  /// may legitimately be shorter than the slot, and this never reads past
+  /// the terminator.
+  static bool key_fits(const char *key) noexcept {
+    for (std::size_t i = 0U; i < kMaxKeyLength; ++i) {
+      if (key[i] == '\0') {
+        return true;
+      }
+    }
+    return false;
+  }
+
   /// Finds the matching object or resource for entry.
   Entry *find_entry(const char *key) noexcept {
     if ((key == nullptr) || (key[0] == '\0')) {

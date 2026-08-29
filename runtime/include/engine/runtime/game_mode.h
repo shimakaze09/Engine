@@ -39,9 +39,11 @@ struct GameMode final {
   std::array<Rule, kMaxRules> rules{};
   std::size_t ruleCount = 0U;
 
-  // Set a rule key-value pair. Overwrites if key exists. Returns false if full.
+  // Set a rule key-value pair. Overwrites if key exists. Returns false if
+  // full or if the key exceeds kMaxKeyLength - 1 characters. The value is
+  // not identity and still truncates to kMaxValueLength - 1 characters.
   bool set_rule(const char *key, const char *value) noexcept {
-    if ((key == nullptr) || (key[0] == '\0')) {
+    if ((key == nullptr) || (key[0] == '\0') || !key_fits(key)) {
       return false;
     }
     for (std::size_t i = 0U; i < ruleCount; ++i) {
@@ -108,6 +110,23 @@ struct GameMode final {
     }
     state = State::Ended;
     return true;
+  }
+
+private:
+  /// Rule keys are identity: get_rule compares the caller's full string
+  /// against the stored slot, so a key truncated on store could never be
+  /// retrieved, yet set_rule would still report success. set_rule therefore
+  /// rejects a key that does not fit its fixed slot (kMaxKeyLength - 1
+  /// characters + NUL). Scanned as a loop rather than a fixed-bound memchr:
+  /// the caller's buffer may legitimately be shorter than the slot, and
+  /// this never reads past the terminator.
+  static bool key_fits(const char *key) noexcept {
+    for (std::size_t i = 0U; i < kMaxKeyLength; ++i) {
+      if (key[i] == '\0') {
+        return true;
+      }
+    }
+    return false;
   }
 };
 
