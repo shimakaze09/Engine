@@ -23,9 +23,10 @@ namespace engine::runtime {
 // --- Whole-file IO ---------------------------------------------------------
 
 /// Opens `path` for binary reading; false on null args or open failure.
+/// Deliberately read-only: every production write goes through
+/// write_text_file's atomic replacement, so this header offers no
+/// truncating-open counterpart for a caller to bypass it with.
 bool open_file_for_read(const char *path, FILE **outFile) noexcept;
-/// Opens `path` for binary writing (truncates); false on null args or failure.
-bool open_file_for_write(const char *path, FILE **outFile) noexcept;
 /// Reads an entire file into a null-terminated heap buffer.
 /// Fails on empty files, short reads, or allocation failure.
 bool read_text_file(const char *path, std::unique_ptr<char[]> *outBuffer,

@@ -58,20 +58,6 @@ bool open_file_for_read(const char *path, FILE **outFile) noexcept {
 #endif
 }
 
-bool open_file_for_write(const char *path, FILE **outFile) noexcept {
-  if ((path == nullptr) || (outFile == nullptr)) {
-    return false;
-  }
-
-  *outFile = nullptr;
-#ifdef _WIN32
-  return fopen_s(outFile, path, "wb") == 0;
-#else
-  *outFile = std::fopen(path, "wb");
-  return *outFile != nullptr;
-#endif
-}
-
 bool read_text_file(const char *path, std::unique_ptr<char[]> *outBuffer,
                     std::size_t *outSize) noexcept {
   if ((path == nullptr) || (outBuffer == nullptr) || (outSize == nullptr)) {
