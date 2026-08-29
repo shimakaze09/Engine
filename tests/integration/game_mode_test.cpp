@@ -1,5 +1,6 @@
 // Verifies game mode test behavior for the Engine test suite.
 
+#include <cstdio>
 #include <cstring>
 #include <memory>
 #include <new>
@@ -195,6 +196,140 @@ static bool test_game_state_remove_and_clear() noexcept {
   return true;
 }
 
+// Regression for issue #344: keys are identity, so a key that cannot fit its
+// fixed slot must be rejected up front — a truncated store would report
+// success for an entry the full-string lookups can never reach, and repeated
+// writes of such a key would consume slots for unreachable entries.
+static bool test_game_state_key_length_boundary() noexcept {
+  using engine::runtime::GameState;
+  GameState gs;
+
+  // 31 characters + NUL fills the slot exactly; one more cannot fit.
+  char maxKey[GameState::kMaxKeyLength] = {};
+  std::memset(maxKey, 'k', GameState::kMaxKeyLength - 1U);
+  char longKeyA[GameState::kMaxKeyLength + 1U] = {};
+  std::memset(longKeyA, 'k', GameState::kMaxKeyLength);
+  char longKeyB[GameState::kMaxKeyLength + 1U] = {};
+  std::memset(longKeyB, 'k', GameState::kMaxKeyLength);
+  longKeyB[GameState::kMaxKeyLength - 1U] = 'B';
+
+  check(gs.set_number(maxKey, 7.0F), "31-char key accepted");
+  check(gs.entryCount == 1U, "31-char key stored one entry");
+  check(gs.has(maxKey), "31-char key retrievable");
+  check(gs.get_number(maxKey) == 7.0F, "31-char key value exact");
+
+  check(!gs.set_number(longKeyA, 1.0F), "32-char numeric key rejected");
+  check(!gs.set_string(longKeyA, "v"), "32-char string key rejected");
+  check(gs.entryCount == 1U, "rejected keys stored nothing");
+  check(!gs.has(longKeyA), "rejected key not present");
+  check(gs.get_number(longKeyA) == 0.0F,
+        "rejected key reads as absent number");
+  check(gs.get_string(longKeyA) == nullptr,
+        "rejected key reads as absent string");
+  check(!gs.remove(longKeyA), "rejected key cannot be removed");
+
+  // longKeyA and longKeyB share maxKey's 31 characters as their prefix; the
+  // rejected writes must not have redirected into the fitting key's slot.
+  check(!gs.set_number(longKeyB, 2.0F),
+        "distinct shared-prefix over-long key rejected");
+  check(gs.entryCount == 1U, "shared-prefix rejections stored nothing");
+  check(gs.get_number(maxKey) == 7.0F, "31-char key untouched by rejections");
+
+  // Repeated over-long writes must not consume slots.
+  for (int i = 0; i < 3; ++i) {
+    static_cast<void>(gs.set_number(longKeyA, static_cast<float>(i)));
+  }
+  check(gs.entryCount == 1U, "repeated rejected writes consume no slots");
+  return true;
+}
+
+// Capacity boundary for issue #344's exhaustion half: a full table still
+// overwrites existing keys, refuses new ones, and refuses over-long keys
+// without disturbing stored entries.
+static bool test_game_state_capacity_boundary() noexcept {
+  using engine::runtime::GameState;
+  GameState gs;
+
+  char key[16] = {};
+  bool allAccepted = true;
+  for (std::size_t i = 0U; i < GameState::kMaxEntries; ++i) {
+    std::snprintf(key, sizeof(key), "key_%03zu", i);
+    allAccepted = allAccepted && gs.set_number(key, static_cast<float>(i));
+  }
+  check(allAccepted, "all in-capacity keys accepted");
+  check(gs.entryCount == GameState::kMaxEntries, "table full");
+
+  check(!gs.set_number("one_more", 1.0F), "new key rejected when full");
+  check(gs.set_number("key_000", 9.0F), "overwrite still works when full");
+  check(gs.get_number("key_000") == 9.0F, "overwrite at capacity lands");
+  check(gs.entryCount == GameState::kMaxEntries,
+        "overwrite at capacity adds no entry");
+
+  char longKey[GameState::kMaxKeyLength + 1U] = {};
+  std::memset(longKey, 'q', GameState::kMaxKeyLength);
+  check(!gs.set_number(longKey, 1.0F), "over-long key rejected when full");
+  check(gs.entryCount == GameState::kMaxEntries,
+        "full table unchanged by over-long key");
+  return true;
+}
+
+// Regression for issue #344 on GameMode: rule keys are identity with the
+// same fixed slot, so an unfittable rule key is rejected rather than stored
+// truncated and unreachable.
+static bool test_game_mode_rule_key_length_boundary() noexcept {
+  using engine::runtime::GameMode;
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (!world) {
+    check(false, "world allocation");
+    return false;
+  }
+  auto &gm = world->game_mode();
+
+  char maxKey[GameMode::kMaxKeyLength] = {};
+  std::memset(maxKey, 'r', GameMode::kMaxKeyLength - 1U);
+  char longKeyA[GameMode::kMaxKeyLength + 1U] = {};
+  std::memset(longKeyA, 'r', GameMode::kMaxKeyLength);
+  char longKeyB[GameMode::kMaxKeyLength + 1U] = {};
+  std::memset(longKeyB, 'r', GameMode::kMaxKeyLength);
+  longKeyB[GameMode::kMaxKeyLength - 1U] = 'B';
+
+  check(gm.set_rule(maxKey, "fits"), "31-char rule key accepted");
+  check(gm.ruleCount == 1U, "31-char rule key stored one rule");
+  const char *v = gm.get_rule(maxKey);
+  check(v != nullptr && std::strcmp(v, "fits") == 0,
+        "31-char rule key retrievable");
+
+  check(!gm.set_rule(longKeyA, "a"), "32-char rule key rejected");
+  check(!gm.set_rule(longKeyB, "b"),
+        "distinct shared-prefix over-long rule key rejected");
+  check(gm.ruleCount == 1U, "rejected rule keys stored nothing");
+  check(gm.get_rule(longKeyA) == nullptr, "rejected rule key not present");
+  v = gm.get_rule(maxKey);
+  check(v != nullptr && std::strcmp(v, "fits") == 0,
+        "31-char rule untouched by rejections");
+
+  // Capacity: fill the remaining slots, then a full table refuses new and
+  // over-long keys but still overwrites existing ones.
+  char key[16] = {};
+  bool allAccepted = true;
+  for (std::size_t i = gm.ruleCount; i < GameMode::kMaxRules; ++i) {
+    std::snprintf(key, sizeof(key), "rule_%02zu", i);
+    allAccepted = allAccepted && gm.set_rule(key, "v");
+  }
+  check(allAccepted, "all in-capacity rule keys accepted");
+  check(gm.ruleCount == GameMode::kMaxRules, "rule table full");
+  check(!gm.set_rule("one_more", "v"), "new rule key rejected when full");
+  check(!gm.set_rule(longKeyA, "v"), "over-long rule key rejected when full");
+  check(gm.set_rule(maxKey, "changed"), "overwrite still works when full");
+  v = gm.get_rule(maxKey);
+  check(v != nullptr && std::strcmp(v, "changed") == 0,
+        "overwrite at capacity lands");
+  check(gm.ruleCount == GameMode::kMaxRules,
+        "full rule table unchanged by rejections");
+  return true;
+}
+
 static bool test_player_controller_array() noexcept {
   engine::runtime::PlayerControllerArray pca;
   constexpr engine::runtime::Entity kEntityA{42U, 1U};
@@ -266,6 +401,9 @@ int main() {
   test_game_state_numbers();
   test_game_state_strings();
   test_game_state_remove_and_clear();
+  test_game_state_key_length_boundary();
+  test_game_state_capacity_boundary();
+  test_game_mode_rule_key_length_boundary();
   test_player_controller_array();
   test_game_state_persists_across_worlds();
 

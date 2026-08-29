@@ -253,6 +253,16 @@ engine_add_test_executable(engine_integration_game_mode
     integration
 )
 
+engine_add_test_executable(engine_integration_game_key_ingress
+    SOURCES
+    game_key_ingress_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_scripting
+    LABELS
+    integration
+)
+
 engine_add_test_executable(engine_integration_timer
     SOURCES
     timer_test.cpp
