@@ -1,11 +1,15 @@
-// Regression for #333: the packer's shader cook launches shaderc as an
-// argument vector, so manifest-authored strings are data to the child
-// process and never text a shell parses. Drives the production packer CLI
-// against a fake compiler that records its argument vector, over a manifest
-// carrying the two authored fields that reach the launch: a variant define
-// and a source path. Asserts that shell separators in a define are refused
-// before any launch, that a source path built from shell substitution syntax
-// arrives at the child byte-for-byte, and that neither payload runs.
+// Regression for #333 and #364: the packer's shader cook launches shaderc
+// as an argument vector, so manifest-authored strings are data to the child
+// process and never text a shell parses, and a variant's defines all reach
+// the compiler in the one grammar shaderc reads — a single --define option
+// whose value joins them with ';' (shaderc consults the first --define only
+// and splits its value on ';'). Drives the production packer CLI against a
+// fake compiler that records its argument vector, over manifests carrying
+// the two authored fields that reach the launch: variant defines and a
+// source path. Asserts that shell separators in a define are refused before
+// any launch, that a source path built from shell substitution syntax
+// arrives at the child byte-for-byte, that neither payload runs, and that a
+// multi-define variant delivers every define.
 
 #include "../test_harness.h"
 
@@ -100,6 +104,18 @@ std::size_t count_runs(const std::vector<std::string> &lines) {
     }
   }
   return runs;
+}
+
+/// Counts how many times a flag itself appears in the recording.
+std::size_t count_flag(const std::vector<std::string> &lines,
+                       const std::string &flag) {
+  std::size_t occurrences = 0U;
+  for (const std::string &line : lines) {
+    if (line == flag) {
+      ++occurrences;
+    }
+  }
+  return occurrences;
 }
 
 /// Writes the two shaderc include headers the cook digests as inputs.
@@ -229,6 +245,44 @@ int main() {
             "the variant define arrives as one verbatim argument");
     t.check(fs::exists(scratch / "out_path" / "probe.vert.PBR_FULL.glsl.bin"),
             "the cooked output commits");
+  }
+
+  // --- A multi-define variant delivers every define to the compiler. ---
+  {
+    const fs::path sources = scratch / "sources_multi";
+    fs::create_directories(sources, ignored);
+    const fs::path argvLog = scratch / "multi_argv.txt";
+    set_argv_log(argvLog.string());
+
+    if (!write_text(sources / "varying.def.sc",
+                    "vec4 v_color : COLOR0;\n") ||
+        !write_text(sources / "probe.vs.sc", "// stub source\n") ||
+        !write_text(sources / "shaders.json",
+                    manifest_text("probe.vs.sc",
+                                  {"INSTANCED", "PBR_FULL"}))) {
+      t.fail("multi-define manifest written");
+      fs::current_path(savedCwd, ignored);
+      return t.finish("shader_cook_argv");
+    }
+
+    const int exitCode = run_cook((sources / "shaders.json").string(),
+                                  (scratch / "out_multi").string(),
+                                  include.string());
+    t.check(exitCode == 0, "a cook over a multi-define variant succeeds");
+
+    const std::vector<std::string> lines = read_lines(argvLog);
+    t.check(count_runs(lines) == 1U,
+            "the multi-define cook launched the compiler once");
+    // shaderc consults the first --define option only, so the whole set
+    // must arrive as that one option's value, ';'-joined — the grammar
+    // shaderc splits it back on.
+    t.check(count_flag(lines, "--define") == 1U,
+            "a variant's defines ride exactly one --define option");
+    t.check(value_after(lines, "--define") == "INSTANCED;PBR_FULL",
+            "every define of the variant reaches the compiler");
+    t.check(fs::exists(scratch / "out_multi" /
+                       "probe.vert.INSTANCED-PBR_FULL.glsl.bin"),
+            "the cooked output commits under the variant key");
   }
 
   fs::current_path(savedCwd, ignored);

@@ -312,9 +312,21 @@ std::vector<std::string> build_shaderc_arguments(
                                      includeDir,
                                      "--varyingdef",
                                      varyingPath};
-  for (const std::string &define : defines) {
+  // shaderc reads --define once (bx's findOption returns the first
+  // occurrence only) and splits that single value on ';', so a variant's
+  // defines must ride one option value; repeating the option would
+  // silently drop every define after the first. The manifest define
+  // grammar excludes ';', so the join introduces no ambiguity.
+  if (!defines.empty()) {
+    std::string joined;
+    for (std::size_t i = 0U; i < defines.size(); ++i) {
+      if (i > 0U) {
+        joined += ";";
+      }
+      joined += defines[i];
+    }
     arguments.emplace_back("--define");
-    arguments.push_back(define);
+    arguments.push_back(std::move(joined));
   }
   return arguments;
 }
