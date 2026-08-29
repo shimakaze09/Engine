@@ -4,8 +4,10 @@
 // binary through an atomic replace, and commits the whole output set
 // under one cook stamp so interruption can never certify a mixed
 // generation (#211). Inputs are digested (manifest, sources, varying
-// table, shaderc's shared include headers) so should_repack skips
-// byte-identical cooks and any input edit recooks.
+// table, shaderc's shared include headers) and the cook's own logic
+// revision joins the settings hash, so should_repack skips
+// byte-identical cooks while any input edit or cook-behavior change
+// recooks.
 
 #include "shader_cook.h"
 
@@ -28,6 +30,16 @@ namespace {
 
 constexpr std::uint64_t kFnv64Offset = 14695981039346656037ULL;
 constexpr std::uint64_t kFnv64Prime = 1099511628211ULL;
+
+// Cook-logic revision, folded into the settings hash. The stamp's other
+// inputs cover only what the cook reads, so a change to what the cook
+// *does* with identical inputs — argument construction, output fixups,
+// any future transform — would otherwise never reach a build tree that
+// already holds a valid stamp: the rebuilt packer would see identical
+// hashes and skip. Bump this whenever the cook's observable output for
+// identical inputs changes; a compile-time constant cannot test its own
+// future bumps, so the bump is a review obligation ([REVIEW]).
+constexpr const char *kCookLogicRevision = "cook-logic-1";
 
 /// One engine profile tag with its shaderc platform/profile arguments.
 struct ShaderProfile final {
@@ -581,9 +593,11 @@ int run_shader_cook(int argc, char **argv) {
   if (!sourceOk) {
     return 1;
   }
-  // Settings analog: the requested profile set and every variant define
-  // participate in the cook key, so a profile or variant change recooks.
+  // Settings analog: the cook-logic revision, the requested profile set,
+  // and every variant define participate in the cook key, so a logic,
+  // profile, or variant change recooks.
   std::uint64_t settingsHash = kFnv64Offset;
+  settingsHash = fnv_append(settingsHash, kCookLogicRevision);
   settingsHash = fnv_append(settingsHash, profilesCsv.c_str());
   for (const ShaderEntry &entry : entries) {
     settingsHash = fnv_append(settingsHash, entry.output.c_str());
