@@ -119,6 +119,27 @@ bool is_valid_define(const std::string &define) {
   return true;
 }
 
+/// True for a manifest source or output entry the cook may compose into
+/// a path: exactly one plain filename component. Separator characters,
+/// drive designators and the dot directories are refused, so an authored
+/// entry cannot address anything outside the manifest's directory or the
+/// cook's output root — every path the cook derives (source reads,
+/// staged writes, committed binaries, stamp records) stays inside its
+/// root by construction, with no canonicalization step to get wrong.
+/// ':' also covers NTFS alternate data streams and Windows
+/// drive-relative names, which have no separator to catch.
+bool is_manifest_filename(const std::string &name) {
+  if (name.empty() || (name == ".") || (name == "..")) {
+    return false;
+  }
+  for (const char c : name) {
+    if ((c == '/') || (c == '\\') || (c == ':')) {
+      return false;
+    }
+  }
+  return true;
+}
+
 /// Reads the manifest JSON into shader entries; false on parse or shape
 /// errors (logged).
 bool read_manifest(const char *manifestPath,
@@ -175,6 +196,13 @@ bool read_manifest(const char *manifestPath,
       return false;
     }
     shader.source = buffer;
+    if (!is_manifest_filename(shader.source)) {
+      std::fprintf(stderr,
+                   "shader cook: entry %zu source \"%s\" must be a plain "
+                   "filename\n",
+                   i, shader.source.c_str());
+      return false;
+    }
     field = parser.get_object_field(*entry, "type");
     if ((field == nullptr) ||
         !parser.copy_string(*field, buffer, sizeof(buffer))) {
@@ -198,6 +226,13 @@ bool read_manifest(const char *manifestPath,
       return false;
     }
     shader.output = buffer;
+    if (!is_manifest_filename(shader.output)) {
+      std::fprintf(stderr,
+                   "shader cook: entry %zu output \"%s\" must be a plain "
+                   "filename\n",
+                   i, shader.output.c_str());
+      return false;
+    }
     const engine::core::JsonValue *variants =
         parser.get_object_field(*entry, "variants");
     if (variants == nullptr) {
