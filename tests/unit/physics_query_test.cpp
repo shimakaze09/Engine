@@ -628,6 +628,79 @@ int test_sweep_box_skip_entity() noexcept {
   return 0;
 }
 
+// Audit #336: a large uniform scale shrinks the collider-local ray direction
+// produced by the inverse world transform toward zero, and the local
+// intersection tests formerly rejected such directions as degenerate — so
+// raycasts against very large scaled colliders returned false negatives
+// through the production query path. Scale 2e8 puts each local direction
+// component at 5e-9, below the old 1e-8 (AABB) and squared 1e-12 (sphere)
+// cutoffs. The 1e-3 relative distance tolerance covers the float rounding of
+// the world<->local round trip at 1e8 magnitudes; the hit itself is exact
+// algebra (box face at world x = -1e8).
+int test_raycast_hits_hugely_scaled_colliders() noexcept {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 1;
+  }
+  world->end_frame_phase();
+
+  constexpr float kScale = 2.0e8F;
+
+  const Entity box = world->create_entity();
+  Transform boxTransform{};
+  boxTransform.scale = math::Vec3(kScale, kScale, kScale);
+  if (!world->add_transform(box, boxTransform)) {
+    return 2;
+  }
+  Collider boxCollider{};
+  boxCollider.halfExtents = math::Vec3(0.5F, 0.5F, 0.5F);
+  boxCollider.collisionLayer = 1U;
+  boxCollider.collisionMask = 0xFFFFFFFFU;
+  if (!world->add_collider(box, boxCollider)) {
+    return 3;
+  }
+
+  PhysicsRaycastHit boxHit{};
+  const std::size_t boxCount =
+      physics::raycast_all(*world, math::Vec3(-2.0e8F, 0.0F, 0.0F),
+                           math::Vec3(1.0F, 0.0F, 0.0F), 4.0e8F, &boxHit, 1U);
+  if ((boxCount != 1U) || (boxHit.entity != box)) {
+    return 4;
+  }
+  if (std::fabs(boxHit.distance - 1.0e8F) > (1.0e-3F * 1.0e8F)) {
+    return 5;
+  }
+
+  const Entity sphere = world->create_entity();
+  Transform sphereTransform{};
+  sphereTransform.position = math::Vec3(0.0F, 4.0e8F, 0.0F);
+  sphereTransform.scale = math::Vec3(kScale, kScale, kScale);
+  if (!world->add_transform(sphere, sphereTransform)) {
+    return 6;
+  }
+  Collider sphereCollider{};
+  sphereCollider.shape = engine::runtime::ColliderShape::Sphere;
+  sphereCollider.halfExtents = math::Vec3(0.5F, 0.5F, 0.5F);
+  sphereCollider.collisionLayer = 1U;
+  sphereCollider.collisionMask = 0xFFFFFFFFU;
+  if (!world->add_collider(sphere, sphereCollider)) {
+    return 7;
+  }
+
+  PhysicsRaycastHit sphereHit{};
+  const std::size_t sphereCount = physics::raycast_all(
+      *world, math::Vec3(-2.0e8F, 4.0e8F, 0.0F),
+      math::Vec3(1.0F, 0.0F, 0.0F), 4.0e8F, &sphereHit, 1U);
+  if ((sphereCount != 1U) || (sphereHit.entity != sphere)) {
+    return 8;
+  }
+  if (std::fabs(sphereHit.distance - 1.0e8F) > (1.0e-3F * 1.0e8F)) {
+    return 9;
+  }
+
+  return 0;
+}
+
 int main() {
   struct TestCase {
     const char *name;
@@ -651,6 +724,8 @@ int main() {
       {"parented_trs_collider_queries", test_parented_trs_collider_queries},
       {"sweep_sphere_skip_entity", test_sweep_sphere_skip_entity},
       {"sweep_box_skip_entity", test_sweep_box_skip_entity},
+      {"raycast_hits_hugely_scaled_colliders",
+       test_raycast_hits_hugely_scaled_colliders},
   };
 
   int failures = 0;

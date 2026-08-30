@@ -402,5 +402,52 @@ int main() {
     return 36;
   }
 
+  // Non-unit tiny directions (audit #336): the slab test must treat only an
+  // exactly-zero component as parallel, so a legitimate direction of any
+  // representable magnitude still hits with t scaling as 1/magnitude. The
+  // 1e-4 relative tolerance covers the float rounding of the reciprocal and
+  // slab arithmetic; the expectation itself is exact algebra (t = 1/s for a
+  // unit-distance gap).
+  engine::math::AABB offsetBox{};
+  offsetBox.min = engine::math::Vec3(0.0F, -1.0F, -1.0F);
+  offsetBox.max = engine::math::Vec3(1.0F, 1.0F, 1.0F);
+  const float directionScales[3] = {1.0e-3F, 1.0e-6F, 1.0e-9F};
+  for (const float scale : directionScales) {
+    engine::math::Ray tinyRay{};
+    tinyRay.origin = engine::math::Vec3(-1.0F, 0.0F, 0.0F);
+    tinyRay.direction = engine::math::Vec3(scale, 0.0F, 0.0F);
+    float tinyT = -1.0F;
+    if (!engine::math::ray_intersects_aabb(tinyRay, offsetBox, &tinyT)) {
+      return 40;
+    }
+    const float expectedT = 1.0F / scale;
+    if (std::fabs(tinyT - expectedT) > (1.0e-4F * expectedT)) {
+      return 41;
+    }
+
+    engine::math::Ray tinySphereRay{};
+    tinySphereRay.origin = engine::math::Vec3(0.0F, 0.0F, -2.0F);
+    tinySphereRay.direction = engine::math::Vec3(0.0F, 0.0F, scale);
+    float sphereT = -1.0F;
+    if (!engine::math::ray_intersects_sphere(tinySphereRay, unitSphere,
+                                             &sphereT)) {
+      return 42;
+    }
+    if (std::fabs(sphereT - expectedT) > (1.0e-4F * expectedT)) {
+      return 43;
+    }
+  }
+
+  // The sphere test's degeneracy boundary is the representable limit: a
+  // direction whose squared length underflows to exactly zero is refused
+  // (indistinguishable from a zero direction in float), not one that merely
+  // fails a magnitude cutoff.
+  engine::math::Ray underflowRay{};
+  underflowRay.origin = engine::math::Vec3(0.0F, 0.0F, -2.0F);
+  underflowRay.direction = engine::math::Vec3(0.0F, 0.0F, 1.0e-25F);
+  if (engine::math::ray_intersects_sphere(underflowRay, unitSphere, nullptr)) {
+    return 44;
+  }
+
   return 0;
 }

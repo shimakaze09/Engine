@@ -31,12 +31,20 @@ constexpr bool sphere_intersects_sphere(const Sphere &a,
 }
 
 /// Nearest non-negative ray/sphere intersection; false when the ray misses or
-/// the sphere is entirely behind the origin.
+/// the sphere is entirely behind the origin. *outT is the parametric t along
+/// ray.direction (origin + t * direction is the hit point); the physical
+/// distance is t * length(direction) and equals t only for unit directions.
 inline bool ray_intersects_sphere(const Ray &ray, const Sphere &sphere,
                                   float *outT) noexcept {
   const Vec3 oc = sub(ray.origin, sphere.center);
   const float a = dot(ray.direction, ray.direction);
-  if (a <= 1.0e-12F) {
+  // Degenerate only when the squared length computes to exactly zero (a
+  // true zero direction, or one so small the square underflows past float's
+  // subnormal range). A magnitude cutoff here (formerly 1e-12) rejected
+  // legitimate tiny directions — the shape a large-scale inverse transform
+  // produces — turning far hits into misses; the quadratic is homogeneous
+  // in the direction scale, so float handles those coefficients exactly.
+  if (a == 0.0F) {
     return false;
   }
 
@@ -49,9 +57,12 @@ inline bool ray_intersects_sphere(const Ray &ray, const Sphere &sphere,
   }
 
   const float sqrtDisc = std::sqrt(discriminant);
-  const float invTwoA = 1.0F / (2.0F * a);
-  const float t0 = (-b - sqrtDisc) * invTwoA;
-  const float t1 = (-b + sqrtDisc) * invTwoA;
+  // Direct division: a reciprocal of 2a overflows to infinity for tiny a
+  // (turning huge finite hits into inf), while the division itself stays
+  // finite whenever the true quotient is representable.
+  const float twoA = 2.0F * a;
+  const float t0 = (-b - sqrtDisc) / twoA;
+  const float t1 = (-b + sqrtDisc) / twoA;
   const float t = (t0 >= 0.0F) ? t0 : t1;
 
   if (t < 0.0F) {
