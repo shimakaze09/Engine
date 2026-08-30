@@ -24,7 +24,12 @@ constexpr float vec3_component(const Vec3 &value, int axis) noexcept {
   return (axis == 0) ? value.x : ((axis == 1) ? value.y : value.z);
 }
 
-// Returns true if the ray hits the box. Sets *outT to the hit distance (>= 0).
+// Returns true if the ray hits the box. Sets *outT to the parametric hit t
+// (>= 0) along ray.direction — origin + t * direction is the hit point; the
+// physical distance is t * length(direction) and equals t only for unit
+// directions. The parameter is affine-invariant, which is what lets physics
+// intersect in collider-local space (a non-unit direction after an inverse
+// world transform) and reuse t on the world ray.
 inline bool ray_intersects_aabb(const Ray &ray, const AABB &box,
                                 float *outT) noexcept {
   constexpr float kInfinity = std::numeric_limits<float>::infinity();
@@ -37,7 +42,13 @@ inline bool ray_intersects_aabb(const Ray &ray, const AABB &box,
     const float directionAxis = vec3_component(ray.direction, i);
     const float minAxis = vec3_component(box.min, i);
     const float maxAxis = vec3_component(box.max, i);
-    if (std::fabs(directionAxis) < 1.0e-8F) {
+    // Only an exactly-zero component is parallel to the slab. A magnitude
+    // cutoff here (formerly 1e-8) silently rejected legitimate tiny
+    // components — the shape every large-scale inverse transform produces —
+    // turning far hits into misses; IEEE division handles those components
+    // exactly (a reciprocal overflowing to infinity still rejects outside
+    // origins via tMin > tMax and passes inside ones).
+    if (directionAxis == 0.0F) {
       if ((originAxis < minAxis) || (originAxis > maxAxis)) {
         return false;
       }
