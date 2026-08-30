@@ -74,10 +74,9 @@ bool load_game_data_from(const char *directory, char *out,
     return false;
   }
 
-  // The shared reader keeps the distinction PR #319 fixed here: a read
-  // that fails part-way is Unreadable, never a successful empty load the
-  // caller would overwrite on the next write. Absent stays silent — no
-  // save yet is the ordinary first-run case.
+  // A read that fails part-way is Unreadable, never a successful empty
+  // load the caller would overwrite on the next write. Absent stays
+  // silent — no save yet is the ordinary first-run case.
   std::size_t read = 0U;
   const core::FileReadResult result =
       core::read_whole_file(path, out, capacity, &read);
