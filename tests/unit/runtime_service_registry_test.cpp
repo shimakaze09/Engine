@@ -168,5 +168,67 @@ int main() {
   engine::runtime::unregister_engine_subsystem_services(optionalLoc);
   check(optionalLoc.count() == 0U, "optional services unregister cleanly");
 
+  // Scoped-owner contract (audit #339): the scoped registry must remove only
+  // entries still holding the pointers it registered. Entries a newer
+  // provider replaced after registration survive its teardown, while the
+  // registry's own remaining entries disappear.
+  std::unique_ptr<engine::runtime::World> newerWorld(
+      new (std::nothrow) engine::runtime::World());
+  check(newerWorld != nullptr, "newer world allocated");
+  engine::runtime::EngineAudioService newerAudioService{};
+  {
+    engine::core::ServiceLocator scopedLoc{};
+    engine::runtime::EngineServiceRegistry registry(scopedLoc);
+    check(registry.register_services(world.get(), &physicsService,
+                                     &audioService, &assetService,
+                                     &rendererService),
+          "scoped registry registers");
+
+    check(scopedLoc.register_service<engine::runtime::World>(newerWorld.get()),
+          "newer provider replaces world");
+    check(scopedLoc.register_service<engine::runtime::EngineAudioService>(
+              &newerAudioService),
+          "newer provider replaces audio service");
+
+    registry.unregister_services();
+    check(scopedLoc.get_service<engine::runtime::World>() == newerWorld.get(),
+          "replaced world survives scoped unregister");
+    check(scopedLoc.get_service<engine::runtime::EngineAudioService>() ==
+              &newerAudioService,
+          "replaced audio service survives scoped unregister");
+    check(scopedLoc.get_service<engine::physics::PhysicsContext>() == nullptr,
+          "owned physics context removed by scoped unregister");
+    check(scopedLoc.get_service<engine::renderer::RenderDevice>() == nullptr,
+          "owned render device removed by scoped unregister");
+    check(scopedLoc.count() == 2U,
+          "only the replaced entries remain after scoped unregister");
+
+    // A second unregister with nothing registered must not touch the
+    // replacements either.
+    registry.unregister_services();
+    check(scopedLoc.get_service<engine::runtime::World>() == newerWorld.get(),
+          "repeat unregister leaves replacements alone");
+  }
+
+  // Destructor teardown takes the same conditional path as the explicit call.
+  {
+    engine::core::ServiceLocator scopedLoc{};
+    {
+      engine::runtime::EngineServiceRegistry registry(scopedLoc);
+      check(registry.register_services(world.get(), &physicsService,
+                                       &audioService, &assetService,
+                                       &rendererService),
+            "scoped registry registers before destructor");
+      check(scopedLoc.register_service<engine::runtime::World>(
+                newerWorld.get()),
+            "newer provider replaces world before destructor");
+    }
+    check(scopedLoc.get_service<engine::runtime::World>() == newerWorld.get(),
+          "replaced world survives registry destructor");
+    check(scopedLoc.get_service<engine::runtime::EngineRendererService>() ==
+              nullptr,
+          "owned renderer service removed by registry destructor");
+  }
+
   return g_tests.finish("Runtime service registry tests");
 }

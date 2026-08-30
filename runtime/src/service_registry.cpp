@@ -37,6 +37,19 @@ void restore_service(core::ServiceLocator &locator,
   }
 }
 
+/// Removes one entry only while it still holds the pointer this owner
+/// registered (the locator's scoped-owner rule); an entry a newer provider
+/// replaced is left in place. A null registered pointer means the owner
+/// never installed the type — registering null removes a type instead of
+/// installing it — so there is nothing of the owner's to remove.
+template <typename T>
+void remove_service_if_current(core::ServiceLocator &locator,
+                               T *registered) noexcept {
+  if ((registered != nullptr) && (locator.get_service<T>() == registered)) {
+    static_cast<void>(locator.remove_service<T>());
+  }
+}
+
 } // namespace
 
 /// Creates a scoped service registry bound to one locator.
@@ -56,17 +69,21 @@ bool EngineServiceRegistry::register_services(
   if ((m_locator == nullptr) ||
       !register_engine_subsystem_services(*m_locator, world, physicsService,
                                           audioService, assetDatabaseService,
-                                          rendererService)) {
+                                          rendererService,
+                                          &m_registeredServices)) {
+    m_registeredServices = {};
     return false;
   }
   m_registered = true;
   return true;
 }
 
-/// Removes any services registered through this scoped registry.
+/// Removes the services this scoped registry installed, leaving replaced
+/// entries to their newer providers.
 void EngineServiceRegistry::unregister_services() noexcept {
   if ((m_locator != nullptr) && m_registered) {
-    unregister_engine_subsystem_services(*m_locator);
+    unregister_engine_subsystem_services(*m_locator, m_registeredServices);
+    m_registeredServices = {};
     m_registered = false;
   }
 }
@@ -77,7 +94,11 @@ bool register_engine_subsystem_services(
     EnginePhysicsService *physicsService,
     EngineAudioService *audioService,
     EngineAssetDatabaseService *assetDatabaseService,
-    EngineRendererService *rendererService) noexcept {
+    EngineRendererService *rendererService,
+    EngineRegisteredServices *outRegistered) noexcept {
+  if (outRegistered != nullptr) {
+    *outRegistered = {};
+  }
   physics::PhysicsWorldView *worldView = nullptr;
   physics::PhysicsContext *physicsContext = nullptr;
   if (world != nullptr) {
@@ -197,7 +218,52 @@ bool register_engine_subsystem_services(
     return false;
   }
 
+  if (outRegistered != nullptr) {
+    outRegistered->world = world;
+    outRegistered->worldView = worldView;
+    outRegistered->physicsContext = physicsContext;
+    outRegistered->physicsService = physicsService;
+    outRegistered->audioService = audioService;
+    outRegistered->assetDatabase = assetDatabase;
+    outRegistered->assetManager = assetManager;
+    outRegistered->assetDatabaseService = assetDatabaseService;
+    outRegistered->commandBuffer = commandBuffer;
+    outRegistered->meshRegistry = meshRegistry;
+    outRegistered->renderDevice = renderDevice;
+    outRegistered->rendererService = rendererService;
+  }
+
   return true;
+}
+
+/// Removes only the entries still holding the pointers one registration
+/// installed; entries a newer provider has replaced survive it.
+void unregister_engine_subsystem_services(
+    core::ServiceLocator &locator,
+    const EngineRegisteredServices &registered) noexcept {
+  remove_service_if_current<EngineRendererService>(locator,
+                                                   registered.rendererService);
+  remove_service_if_current<renderer::RenderDevice>(locator,
+                                                    registered.renderDevice);
+  remove_service_if_current<renderer::GpuMeshRegistry>(locator,
+                                                       registered.meshRegistry);
+  remove_service_if_current<renderer::CommandBufferBuilder>(
+      locator, registered.commandBuffer);
+  remove_service_if_current<EngineAssetDatabaseService>(
+      locator, registered.assetDatabaseService);
+  remove_service_if_current<renderer::AssetManager>(locator,
+                                                    registered.assetManager);
+  remove_service_if_current<renderer::AssetDatabase>(locator,
+                                                     registered.assetDatabase);
+  remove_service_if_current<EngineAudioService>(locator,
+                                                registered.audioService);
+  remove_service_if_current<EnginePhysicsService>(locator,
+                                                  registered.physicsService);
+  remove_service_if_current<physics::PhysicsContext>(
+      locator, registered.physicsContext);
+  remove_service_if_current<physics::PhysicsWorldView>(locator,
+                                                       registered.worldView);
+  remove_service_if_current<World>(locator, registered.world);
 }
 
 /// Removes engine subsystem services from an explicit service locator.
