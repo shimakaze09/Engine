@@ -318,6 +318,115 @@ void check_self_unregister_completes() noexcept {
         "no delivery after a sink unregisters itself");
 }
 
+/// Runs the three-thread variant of the barrier sequence: a logging thread
+/// parks inside gate_sink, `first` is started and given a settle window to
+/// mark the payload sink's slot, then `second` runs and retires the payload
+/// the moment it returns. Returns true when some sink call observed the
+/// retired payload — the early-return gap #363 tracks. The settle windows
+/// order the two removals; a correct barrier is order-independent, so the
+/// ordering only makes the defect deterministic, never a pass.
+bool second_removal_races_first(void (*first)(SinkPayload &),
+                                void (*second)(SinkPayload &),
+                                SinkPayload &payload) noexcept {
+  g_gateEntered.store(false, std::memory_order_relaxed);
+  g_gateReleased.store(false, std::memory_order_relaxed);
+  g_payloadSinkCalled.store(false, std::memory_order_relaxed);
+  g_payloadObservedAfterRetire.store(false, std::memory_order_relaxed);
+
+  std::thread logger([]() noexcept {
+    engine::core::log_message(engine::core::LogLevel::Info, "core",
+                              "dispatch held across two removals");
+  });
+  while (!g_gateEntered.load(std::memory_order_acquire)) {
+    std::this_thread::yield();
+  }
+
+  std::thread firstRemover(
+      [&]() noexcept { first(payload); });
+  // Settle window: lets the first removal take the slot (its mark happens
+  // under the sink mutex almost immediately) before the second starts, so
+  // the second exercises the found-nothing/found-retiring branch.
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+  std::atomic<bool> secondReturned{false};
+  std::thread secondRemover([&]() noexcept {
+    second(payload);
+    payload.retired.store(true, std::memory_order_release);
+    secondReturned.store(true, std::memory_order_release);
+  });
+
+  // Same settle shape as removal_races_in_flight_dispatch: a second removal
+  // that does not wait gets ample time to return and retire the payload
+  // while the dispatch is still parked; one that waits stays blocked until
+  // the release below, and no assertion reads the elapsed time.
+  for (int i = 0; (i < 500) && !secondReturned.load(std::memory_order_acquire);
+       ++i) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+
+  g_gateReleased.store(true, std::memory_order_release);
+  logger.join();
+  firstRemover.join();
+  secondRemover.join();
+  return g_payloadObservedAfterRetire.load(std::memory_order_acquire);
+}
+
+/// EXPECTATION (regression, #363): a second concurrent remover of the same
+/// (fn, userData) pair carries the same lifetime barrier as the first — it
+/// must not return, letting its owner retire the payload, while a dispatch
+/// that snapshotted the sink is still parked mid-walk. A hang here (rather
+/// than a red check) is bounded by the ctest timeout.
+void check_second_remover_of_same_pair_waits() noexcept {
+  SinkPayload payload{};
+  check(engine::core::log_register_sink(&gate_sink, nullptr),
+        "register gate sink for double-removal race");
+  check(engine::core::log_register_sink(&payload_sink, &payload),
+        "register payload sink for double-removal race");
+
+  const bool observedAfterRetire = second_removal_races_first(
+      [](SinkPayload &owned) noexcept {
+        engine::core::log_unregister_sink(&payload_sink, &owned);
+      },
+      [](SinkPayload &owned) noexcept {
+        engine::core::log_unregister_sink(&payload_sink, &owned);
+      },
+      payload);
+
+  check(g_payloadSinkCalled.load(std::memory_order_acquire),
+        "payload sink observed the event the removals raced");
+  check(!observedAfterRetire,
+        "no sink call after the second remover released the payload");
+
+  engine::core::log_unregister_sink(&gate_sink, nullptr);
+}
+
+/// EXPECTATION (regression, #363): an unregister racing shutdown_logging's
+/// table-wide teardown still finds its pair — shutdown retires slots rather
+/// than clearing them mid-drain — and waits out the parked dispatch instead
+/// of returning early because the table looks empty.
+void check_unregister_racing_shutdown_waits() noexcept {
+  SinkPayload payload{};
+  check(engine::core::log_register_sink(&gate_sink, nullptr),
+        "register gate sink for shutdown race");
+  check(engine::core::log_register_sink(&payload_sink, &payload),
+        "register payload sink for shutdown race");
+
+  const bool observedAfterRetire = second_removal_races_first(
+      [](SinkPayload &) noexcept { engine::core::shutdown_logging(); },
+      [](SinkPayload &owned) noexcept {
+        engine::core::log_unregister_sink(&payload_sink, &owned);
+      },
+      payload);
+
+  check(g_payloadSinkCalled.load(std::memory_order_acquire),
+        "payload sink observed the event the shutdown race held");
+  check(!observedAfterRetire,
+        "no sink call after the shutdown-racing remover released the payload");
+
+  check(engine::core::initialize_logging(),
+        "logging re-initialized after the shutdown race");
+}
+
 /// EXPECTATION: log_set_frame_index publishes a value log_current_frame_
 /// index immediately observes, independent of any sink or log_message call.
 void check_frame_index_publication() noexcept {
@@ -342,9 +451,11 @@ int main() {
   check_unregister_waits_for_in_flight_dispatch();
   check_self_unregister_completes();
   check_frame_index_publication();
-  // Runs last among the sink cases: it tears the logging system down and
-  // brings it back up, so anything after it would race that transition.
+  // The remaining cases each tear the logging system down and/or bring it
+  // back up, so they run after every case that assumes it stays up.
   check_shutdown_waits_for_in_flight_dispatch();
+  check_second_remover_of_same_pair_waits();
+  check_unregister_racing_shutdown_waits();
 
   engine::core::shutdown_logging();
   return g_tests.finish("logging_sink_test");

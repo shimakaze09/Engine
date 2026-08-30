@@ -61,13 +61,16 @@ typedef void (*LogSinkFn)(LogLevel level, const char *channel,
 /// racing another sink's removal can be refused while that removal drains.
 bool log_register_sink(LogSinkFn fn, void *userData) noexcept;
 /// Unregisters a sink previously accepted by log_register_sink; a no-op if
-/// the (fn, userData) pair is not currently registered. The call that finds
-/// the pair returns only once no dispatch is still inside that sink, so its
-/// owner may release userData immediately afterwards; a call that finds
-/// nothing — a second remover of the same pair, or one racing
-/// shutdown_logging — carries no such wait. Dispatches release their claim on
-/// every sink they snapshotted together, so the wait spans one whole dispatch
-/// of the table, bounded by the fixed-size non-blocking work sinks owe above.
+/// the (fn, userData) pair is not currently registered. Every call that
+/// finds the pair returns only once no dispatch is still inside that sink,
+/// so its owner may release userData immediately afterwards — a departing
+/// pair stays matchable while its removal drains, so a second concurrent
+/// remover of the same pair, or one racing shutdown_logging, waits on the
+/// same quiescence rather than returning early. A call that finds nothing
+/// means the pair was never registered or its removal has already fully
+/// drained. Dispatches release their claim on every sink they snapshotted
+/// together, so the wait spans one whole dispatch of the table, bounded by
+/// the fixed-size non-blocking work sinks owe above.
 ///
 /// Because it waits, the caller must not hold a lock its own sink acquires. A
 /// sink may unregister itself from inside its own callback — that returns
