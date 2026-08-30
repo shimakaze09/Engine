@@ -730,6 +730,11 @@ bool EnginePipeline::Impl::execute_frame() noexcept {
   // (including early stages ahead of stage_scripting) tags itself with the
   // right index for the editor Console's frame-context column (issue #155).
   core::log_set_frame_index(frameIndex);
+  // The Lua-visible frame index is published at the same point, for the same
+  // reason: begin-play and start callbacks dispatch in stage_play_transitions,
+  // ahead of stage_scripting, and engine.frame_count() there must name the
+  // frame those callbacks run in — not the previous frame's publication.
+  scripting::set_frame_index(frameIndex);
   PROFILE_SCOPE("engine_frame");
   frameStart = Clock::now();
   wallFrameMs =
@@ -953,8 +958,6 @@ void EnginePipeline::Impl::stage_timing() noexcept {
 // ---------------------------------------------------------------------------
 
 void EnginePipeline::Impl::stage_scripting() noexcept {
-  scripting::set_frame_index(frameIndex);
-
   if (isPlaying && (updateStepCount > 0U)) {
     scripting::set_frame_time(static_cast<float>(step_seconds()),
                               static_cast<float>(simulationTimeSeconds));

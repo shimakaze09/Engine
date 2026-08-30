@@ -71,6 +71,18 @@ float g_deltaSeconds = 0.0F;
 float g_totalSeconds = 0.0F;
 std::uint32_t g_frameIndex = 0U;
 
+/// Returns the Lua-visible clocks (delta/elapsed/frame index) to their
+/// initial values. Run-scoped: a run's end must zero them so a later run's
+/// begin-play/start callbacks — which fire before the pipeline's first
+/// per-frame publication — cannot observe the previous run's time. Ordinary
+/// scene transitions keep the VM and the run alive and never come through
+/// here, so clocks stay continuous across engine.load_scene.
+void reset_clock_bindings() noexcept {
+  g_deltaSeconds = 0.0F;
+  g_totalSeconds = 0.0F;
+  g_frameIndex = 0U;
+}
+
 /// One hot-reload watch entry: a script path and its last known mtime.
 struct WatchedScript final {
   char path[512] = {};
@@ -524,6 +536,7 @@ void shutdown_scripting() noexcept {
   reset_cheat_bindings();
   reset_entity_pool_bindings();
   reset_game_bindings();
+  reset_clock_bindings();
   for (WatchedScript &watchedScript : g_watchedScripts) {
     watchedScript = {};
   }
@@ -549,6 +562,7 @@ void reset_run_state() noexcept {
   reset_cheat_bindings();
   reset_entity_pool_bindings();
   reset_game_bindings();
+  reset_clock_bindings();
   for (WatchedScript &watchedScript : g_watchedScripts) {
     watchedScript = {};
   }
