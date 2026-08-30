@@ -8,6 +8,7 @@
 
 #include "editor_session.h"
 
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -25,10 +26,19 @@ void check(bool condition, const char *name) noexcept {
 
 constexpr const char *kStateFileName = "editor_content_browser_state.json";
 
-/// Writes `content` to the path; false on any short write.
+/// Writes `content` to the path; false on any short write. The open is
+/// guarded per CRT: the Windows lanes build with /W4 /WX, where a bare
+/// fopen is a deprecation error.
 bool write_file(const std::filesystem::path &path,
                 const std::string &content) {
-  std::FILE *file = std::fopen(path.string().c_str(), "wb");
+  std::FILE *file = nullptr;
+#ifdef _WIN32
+  if (fopen_s(&file, path.string().c_str(), "wb") != 0) {
+    file = nullptr;
+  }
+#else
+  file = std::fopen(path.string().c_str(), "wb");
+#endif
   if (file == nullptr) {
     return false;
   }
