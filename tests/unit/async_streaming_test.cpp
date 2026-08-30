@@ -454,6 +454,84 @@ static void test_shutdown_wakes_waiter() noexcept {
   engine::core::shutdown_cvars();
 }
 
+/// Barrier state for the cancellation-vs-upload race: the upload callback
+/// parks until released so cancellation can be attempted while the pump is
+/// demonstrably inside the callback, outside the queue lock.
+struct UploadGate final {
+  std::atomic<bool> inCallback{false};
+  std::atomic<bool> release{false};
+  std::atomic<int> completedUploads{0};
+};
+
+static bool gated_upload(AssetId, void *userData) noexcept {
+  auto *gate = static_cast<UploadGate *>(userData);
+  gate->inCallback.store(true, std::memory_order_release);
+  while (!gate->release.load(std::memory_order_acquire)) {
+    std::this_thread::yield();
+  }
+  gate->completedUploads.fetch_add(1, std::memory_order_acq_rel);
+  return true;
+}
+
+/// EXPECTATION (regression, audit #334): a request whose upload callback is
+/// already running cannot be cancelled — a cancellation that succeeded there
+/// would coexist with the callback's completed side effects (created GPU
+/// objects nothing tracks or retires). The cancel must fail, the upload must
+/// land as Ready, and the caller releases the slot through the terminal
+/// path.
+static void test_cancel_refused_while_upload_callback_runs() noexcept {
+  engine::core::initialize_cvars();
+  auto queue = std::make_unique<AssetStreamingQueue>();
+  initialize_asset_streaming(queue.get());
+
+  UploadGate gate{};
+  LoadHandle h = load_asset_async(queue.get(), make_id(0), "gated.mesh",
+                                  LoadPriority::Normal);
+  CHECK(h.valid(), "gated handle valid");
+
+  // First pump schedules the load; the worker moves the request to
+  // Uploading on its own thread once ok_load returns.
+  begin_streaming_frame(queue.get());
+  static_cast<void>(
+      update_asset_streaming(queue.get(), &ok_load, &gated_upload, &gate));
+  for (std::size_t i = 0U;
+       (i < 5000U) &&
+       (get_load_state(queue.get(), h) != LoadingState::Uploading);
+       ++i) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  CHECK(get_load_state(queue.get(), h) == LoadingState::Uploading,
+        "request reached Uploading");
+
+  // The pump blocks inside gated_upload on its own thread, so the main
+  // thread can race cancel_load against the in-flight callback.
+  std::thread pump([&]() noexcept {
+    begin_streaming_frame(queue.get());
+    static_cast<void>(
+        update_asset_streaming(queue.get(), &ok_load, &gated_upload, &gate));
+  });
+  while (!gate.inCallback.load(std::memory_order_acquire)) {
+    std::this_thread::yield();
+  }
+
+  const bool cancelled = cancel_load(queue.get(), h);
+  CHECK(!cancelled, "cancel refused while the upload callback runs");
+  CHECK(gate.completedUploads.load(std::memory_order_acquire) == 0,
+        "cancel was decided before the upload completed");
+
+  gate.release.store(true, std::memory_order_release);
+  pump.join();
+
+  CHECK(gate.completedUploads.load(std::memory_order_acquire) == 1,
+        "upload side effect completed exactly once");
+  CHECK(get_load_state(queue.get(), h) == LoadingState::Ready,
+        "completed upload landed as Ready, not a reset slot");
+  CHECK(release_load(queue.get(), h),
+        "terminal release reclaims the slot after the refused cancel");
+
+  engine::core::shutdown_cvars();
+}
+
 /// Runs this executable or test program.
 int main() {
   std::printf("=== Async Streaming Unit Tests ===\n");
@@ -472,6 +550,7 @@ int main() {
   test_wait_without_pump_times_out();
   test_wait_returns_terminal_state();
   test_shutdown_wakes_waiter();
+  test_cancel_refused_while_upload_callback_runs();
 
   return g_tests.finish("Async Streaming Unit Tests");
 }
