@@ -19,10 +19,16 @@ namespace {
 std::atomic<bool> g_loggingInitialized{false};
 std::atomic<std::uint32_t> g_frameIndex{0U};
 
-/// One fixed sink table slot; unused slots have fn == nullptr.
+/// One fixed sink table slot; unused slots have fn == nullptr. A retiring
+/// slot keeps its (fn, userData) pair matchable while its removal drains:
+/// dispatches skip it, registration treats it as occupied, and any remover
+/// that matches it — a second concurrent remover of the same pair, or one
+/// racing shutdown's table-wide retire — waits on the same quiescence
+/// instead of returning while a dispatch may still be inside the sink.
 struct SinkSlot final {
   LogSinkFn fn = nullptr;
   void *userData = nullptr;
+  bool retiring = false;
 };
 
 std::mutex g_sinkMutex{};
@@ -80,6 +86,14 @@ void dispatch_to_sinks(LogLevel level, const char *channel,
     std::lock_guard<std::mutex> lock(g_sinkMutex);
     snapshot = g_sinks;
     for (std::size_t i = 0U; i < kMaxLogSinks; ++i) {
+      // A retiring slot is no longer dispatched: its removal is already
+      // draining, and a new claim here would extend the wait it is
+      // draining toward. Blanked in the snapshot so the call loop below
+      // cannot pick it up.
+      if (snapshot[i].retiring) {
+        snapshot[i] = SinkSlot{};
+        continue;
+      }
       if (snapshot[i].fn != nullptr) {
         ++g_sinkActive[i];
         ++t_sinkActiveOnThread[i];
@@ -136,10 +150,18 @@ void shutdown_logging() noexcept {
   // Drop any sink its owner failed to unregister (#236) so a dead sink is
   // never dispatched to after a later re-initialization. Teardown owes the
   // same lifetime barrier as unregister: it returns only once no dispatch is
-  // still inside one of the sinks it just dropped.
+  // still inside one of the sinks it just dropped. Slots are retired, not
+  // cleared, until the drain completes, so an unregister racing this
+  // teardown still matches its pair and waits on the same quiescence
+  // instead of finding an already-empty table and returning early.
   std::unique_lock<std::mutex> lock(g_sinkMutex);
-  g_sinks = {};
+  for (std::size_t i = 0U; i < kMaxLogSinks; ++i) {
+    if (g_sinks[i].fn != nullptr) {
+      g_sinks[i].retiring = true;
+    }
+  }
   wait_for_slots_quiescent(lock, 0U, kMaxLogSinks);
+  g_sinks = {};
 }
 
 void log_message(LogLevel level,
@@ -216,12 +238,23 @@ void log_unregister_sink(LogSinkFn fn, void *userData) noexcept {
   std::unique_lock<std::mutex> lock(g_sinkMutex);
   for (std::size_t i = 0U; i < kMaxLogSinks; ++i) {
     if ((g_sinks[i].fn == fn) && (g_sinks[i].userData == userData)) {
-      // Clearing the slot stops new dispatches from picking the sink up;
-      // waiting for the slot to fall quiescent covers the dispatches that
-      // already snapshotted it, so the owner may release userData as soon as
-      // this returns.
-      g_sinks[i] = SinkSlot{};
+      // Marking the slot retiring stops new dispatches from picking the
+      // sink up while keeping the pair matchable, so a second remover of
+      // the same pair arriving mid-drain waits on this same quiescence
+      // instead of returning early; waiting covers the dispatches that
+      // already snapshotted the slot, so the owner may release userData as
+      // soon as this returns. The slot is cleared only after the drain —
+      // clearing is idempotent when concurrent removers both wake.
+      g_sinks[i].retiring = true;
       wait_for_slots_quiescent(lock, i, i + 1U);
+      // Cleared only while the slot still holds this retiring pair: a
+      // concurrent remover or shutdown may have cleared it during the wait
+      // and the slot may already carry a new registration, which is a
+      // separate lifetime this remover must not consume.
+      if ((g_sinks[i].fn == fn) && (g_sinks[i].userData == userData) &&
+          g_sinks[i].retiring) {
+        g_sinks[i] = SinkSlot{};
+      }
       return;
     }
   }
