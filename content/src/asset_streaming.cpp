@@ -398,7 +398,7 @@ bool cancel_load(AssetStreamingQueue *queue, LoadHandle handle) noexcept {
   if (!req.occupied) {
     return false;
   }
-  if (req.loadInProgress) {
+  if (req.loadInProgress || req.uploadInProgress) {
     return false;
   }
 
@@ -563,6 +563,11 @@ std::size_t update_asset_streaming(
       if (!req.occupied || (req.state != LoadingState::Uploading)) {
         continue;
       }
+      // Pinned before the lock drops, mirroring loadInProgress on the
+      // worker path: cancel_load must refuse the slot while the callback
+      // below runs, or its completed side effects would be discarded by a
+      // cancellation that reported success.
+      req.uploadInProgress = true;
       assetId = req.assetId;
       callback = queue->uploadCallback;
       callbackUserData = queue->callbackUserData;
@@ -574,6 +579,7 @@ std::size_t update_asset_streaming(
     {
       std::lock_guard<std::mutex> lock(queue->mutex);
       LoadRequest &req = queue->requests[i];
+      req.uploadInProgress = false;
       if (!req.occupied || (req.assetId != assetId) ||
           (req.state != LoadingState::Uploading)) {
         continue;

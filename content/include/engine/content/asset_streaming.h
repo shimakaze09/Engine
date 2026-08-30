@@ -65,6 +65,11 @@ struct LoadRequest final {
   std::uint64_t loadedSizeBytes = 0ULL;
   std::uint32_t generation = 1U;
   bool loadInProgress = false;
+  /// Pinned while the upload pump is inside this request's callback outside
+  /// the queue lock, the upload-side analogue of loadInProgress: cancellation
+  /// must not reset the slot mid-callback, or a "successful" cancel coexists
+  /// with completed upload side effects nothing tracks.
+  bool uploadInProgress = false;
   bool occupied = false;
 };
 
@@ -121,7 +126,11 @@ LoadHandle load_asset_async(AssetStreamingQueue *queue, AssetId id,
 bool update_load_priority(AssetStreamingQueue *queue, LoadHandle handle,
                           LoadPriority newPriority) noexcept;
 
-/// Cancel a pending request.
+/// Cancel a pending request. Fails (returns false) once the request's
+/// callback work is in flight — a worker inside the load callback or the
+/// pump inside the upload callback — because the slot cannot be reclaimed
+/// mid-callback without the callback's side effects escaping tracking; the
+/// caller instead observes the terminal state and releases it.
 bool cancel_load(AssetStreamingQueue *queue, LoadHandle handle) noexcept;
 
 /// Release a completed or failed request slot after the caller has observed its
