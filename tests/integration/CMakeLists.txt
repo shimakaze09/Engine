@@ -48,6 +48,16 @@ engine_add_test_executable(engine_integration_pipeline_teardown_run_state
     gpu;integration
 )
 
+engine_add_test_executable(engine_integration_pipeline_clock_reset
+    SOURCES
+    pipeline_clock_reset_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_scripting
+    LABELS
+    integration
+)
+
 engine_add_test_executable(engine_integration_player_mode
     SOURCES
     player_mode_test.cpp
