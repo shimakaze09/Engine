@@ -18,6 +18,7 @@
 #include <system_error>
 
 #include "engine/core/atomic_file.h"
+#include "engine/core/file_read.h"
 #include "engine/core/json.h"
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
@@ -78,41 +79,6 @@ void reset_session_for_scene_switch() noexcept {
   session.hasPlaySnapshot = false;
   session.playSnapshotSize = 0U;
   session.playSnapshotWorld = nullptr;
-}
-
-/// Portably opens a file for reading/writing across CRTs.
-std::FILE *open_file(const char *path, const char *mode) noexcept {
-  std::FILE *file = nullptr;
-#ifdef _WIN32
-  if (fopen_s(&file, path, mode) != 0) {
-    file = nullptr;
-  }
-#else
-  file = std::fopen(path, mode);
-#endif
-  return file;
-}
-
-/// Reads the whole file into `out`, null-terminated; false when absent,
-/// unreadable, or larger than capacity - 1.
-bool read_whole_file(const char *path, char *out, std::size_t capacity,
-                     std::size_t *outSize) noexcept {
-  std::FILE *file = open_file(path, "rb");
-  if (file == nullptr) {
-    return false;
-  }
-  const std::size_t readCount = std::fread(out, 1U, capacity - 1U, file);
-  const bool overflow = std::fgetc(file) != EOF;
-  const bool hitError = std::ferror(file) != 0;
-  std::fclose(file);
-  if (overflow || hitError) {
-    return false;
-  }
-  out[readCount] = '\0';
-  if (outSize != nullptr) {
-    *outSize = readCount;
-  }
-  return true;
 }
 
 /// Resolves the recent-scenes persistence directory: the test override
@@ -574,7 +540,11 @@ void recent_scenes_load_once() noexcept {
 
   char buffer[8192] = {};
   std::size_t size = 0U;
-  if (!read_whole_file(path, buffer, sizeof(buffer), &size)) {
+  // Any non-Ok read leaves the in-memory recent list empty; a fault here is
+  // recoverable convenience data, and distinguishing it from absence is the
+  // reader's job (kept for diagnosis by callers that persist authored data).
+  if (core::read_whole_file(path, buffer, sizeof(buffer), &size) !=
+      core::FileReadResult::Ok) {
     return;
   }
 

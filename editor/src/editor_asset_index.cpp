@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <string>
 
+#include "engine/core/file_read.h"
 #include "engine/core/json.h"
 #include "engine/core/logging.h"
 #include "engine/engine.h"
@@ -58,43 +59,17 @@ void lower_ascii(char *text) noexcept {
   }
 }
 
-/// Reads a whole small file into a fixed buffer; false on overflow or I/O
-/// failure. Used only to sniff ambiguous ".json" files during the cold
-/// index rebuild, never per frame.
-bool read_small_file(const char *path, char *out, std::size_t capacity,
-                     std::size_t *outSize) noexcept {
-  std::FILE *file = nullptr;
-#ifdef _WIN32
-  if (fopen_s(&file, path, "rb") != 0) {
-    file = nullptr;
-  }
-#else
-  file = std::fopen(path, "rb");
-#endif
-  if (file == nullptr) {
-    return false;
-  }
-  const std::size_t readCount = std::fread(out, 1U, capacity - 1U, file);
-  const bool overflow = std::fgetc(file) != EOF;
-  const bool hitError = std::ferror(file) != 0;
-  std::fclose(file);
-  if (overflow || hitError) {
-    return false;
-  }
-  out[readCount] = '\0';
-  if (outSize != nullptr) {
-    *outSize = readCount;
-  }
-  return true;
-}
-
 /// Distinguishes scene/material/animation-controller ".json" documents by
 /// their top-level keys (schemas already documented on save_scene,
 /// load_material_asset, and the .animctrl loader respectively).
 AssetKind classify_json_by_content(const char *osPath) noexcept {
   char buffer[16U * 1024U] = {};
   std::size_t size = 0U;
-  if (!read_small_file(osPath, buffer, sizeof(buffer), &size)) {
+  // Every non-Ok outcome — absent, unreadable, or larger than the sniff
+  // buffer — classifies as Other: the index never writes the file back, so
+  // a conservative kind is the whole cost of a fault here.
+  if (core::read_whole_file(osPath, buffer, sizeof(buffer), &size) !=
+      core::FileReadResult::Ok) {
     return AssetKind::Other;
   }
   core::JsonParser parser{};

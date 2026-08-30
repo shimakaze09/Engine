@@ -11,12 +11,12 @@
 
 #include <imgui.h>
 
-#include <cerrno>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
 
 #include "engine/core/atomic_file.h"
+#include "engine/core/file_read.h"
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
 
@@ -42,43 +42,6 @@ char g_directoryOverride[900] = {};
 /// largest in the module by an order of magnitude.
 char g_readBuffer[kMaxLayoutBytes] = {};
 
-/// Distinguishes the ordinary fresh-profile case from a real fault, so
-/// the loader can stay silent for the former and report the latter
-/// without a filesystem probe (which would allocate on a noexcept path).
-/// TooLarge is kept apart from Unreadable because the two say different
-/// things to a user: the stored layout is damaged, versus it is intact
-/// but outgrew the buffer this build can hold.
-enum class ReadResult : std::uint8_t { Ok, Absent, Unreadable, TooLarge };
-
-/// Portably opens a file for reading across CRTs, reporting which kind of
-/// failure a null return was. Absent is reserved for a genuine ENOENT:
-/// every other open failure — a permission-damaged profile, a sharing
-/// violation while a backup or indexer holds the file, a descriptor
-/// exhaustion — is a fault, because treating it as a fresh profile would
-/// let the default layout be committed over a file that is still perfectly
-/// good on disk. The CRT already reports which: POSIX through errno,
-/// fopen_s through its errno_t return.
-std::FILE *open_file_for_read(const char *path,
-                              ReadResult *outFailure) noexcept {
-  std::FILE *file = nullptr;
-#ifdef _WIN32
-  const errno_t openError = fopen_s(&file, path, "rb");
-  if (openError != 0) {
-    file = nullptr;
-    *outFailure =
-        (openError == ENOENT) ? ReadResult::Absent : ReadResult::Unreadable;
-  }
-#else
-  errno = 0;
-  file = std::fopen(path, "rb");
-  if (file == nullptr) {
-    *outFailure =
-        (errno == ENOENT) ? ReadResult::Absent : ReadResult::Unreadable;
-  }
-#endif
-  return file;
-}
-
 /// Latched when a stored layout exists but could not be read. Saving is
 /// refused for the rest of the session while it is set, because the
 /// alternative is that the default layout ImGui builds moments later is
@@ -93,35 +56,6 @@ bool g_loadFailed = false;
 /// True once the refusal above has been logged, so a session that keeps
 /// settling logs the reason once rather than once per settle.
 bool g_refusalLogged = false;
-
-/// Reads the whole file into `out`, NUL-terminated. A read that fails
-/// part-way is rejected rather than reported as a shorter layout, so a
-/// damaged read can never be re-saved over the good file as a
-/// truncation; so is one larger than capacity - 1, which could not be
-/// written back whole either.
-ReadResult read_whole_file(const char *path, char *out, std::size_t capacity,
-                           std::size_t *outSize) noexcept {
-  ReadResult openFailure = ReadResult::Absent;
-  std::FILE *file = open_file_for_read(path, &openFailure);
-  if (file == nullptr) {
-    return openFailure;
-  }
-  const std::size_t readCount = std::fread(out, 1U, capacity - 1U, file);
-  const bool overflow = std::fgetc(file) != EOF;
-  const bool hitError = std::ferror(file) != 0;
-  static_cast<void>(std::fclose(file));
-  if (hitError) {
-    return ReadResult::Unreadable;
-  }
-  if (overflow) {
-    return ReadResult::TooLarge;
-  }
-  out[readCount] = '\0';
-  if (outSize != nullptr) {
-    *outSize = readCount;
-  }
-  return ReadResult::Ok;
-}
 
 /// Resolves the layout directory: the test override when set, otherwise
 /// the real per-user platform save directory.
@@ -177,9 +111,9 @@ bool editor_layout_load() noexcept {
   }
 
   std::size_t size = 0U;
-  const ReadResult result =
-      read_whole_file(path, g_readBuffer, sizeof(g_readBuffer), &size);
-  if (result == ReadResult::Unreadable) {
+  const core::FileReadResult result =
+      core::read_whole_file(path, g_readBuffer, sizeof(g_readBuffer), &size);
+  if (result == core::FileReadResult::Unreadable) {
     // Latched, not merely reported: see g_loadFailed. The file stays where
     // it is so a later run — or the user — can still recover it.
     g_loadFailed = true;
@@ -189,7 +123,7 @@ bool editor_layout_load() noexcept {
         "the stored file untouched for this session");
     return false;
   }
-  if (result == ReadResult::TooLarge) {
+  if (result == core::FileReadResult::TooLarge) {
     g_loadFailed = true;
     core::log_message(
         core::LogLevel::Error, kLogChannel,
@@ -201,7 +135,7 @@ bool editor_layout_load() noexcept {
   // an empty one; neither is a fault, and both leave ImGui on its defaults
   // — and both keep saving enabled, so a first run still stores its
   // layout. An open that failed any other way came back Unreadable above.
-  if ((result != ReadResult::Ok) || (size == 0U)) {
+  if ((result != core::FileReadResult::Ok) || (size == 0U)) {
     return false;
   }
 

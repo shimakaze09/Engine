@@ -18,6 +18,7 @@ engine_add_module_library(engine_core
     src/debug_draw.cpp
     src/durable_replace.cpp
     src/engine_stats.cpp
+    src/file_read.cpp
     src/mem_tracker.cpp
     src/event_bus.cpp
     src/input.cpp
