@@ -48,8 +48,11 @@ std::uint32_t find_blocking_partner(const PhysicsContext &ctx,
                                     std::uint32_t entityIndex) noexcept {
   const std::size_t elementCount = ctx.collisionPairCount * 2U;
   for (std::size_t i = 0U; i < elementCount; ++i) {
-    if (ctx.collisionPairData[i] == entityIndex) {
-      return ctx.collisionPairData[i ^ 1U];
+    // Index-only on purpose: this diagnostic reads the step buffer within
+    // the same step it was recorded, where no index can be recycled, and
+    // its published stats carry bare indices.
+    if (ctx.collisionPairData[i].index == entityIndex) {
+      return ctx.collisionPairData[i ^ 1U].index;
     }
   }
   return 0U;

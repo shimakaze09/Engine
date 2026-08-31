@@ -23,10 +23,10 @@ constexpr std::size_t kMaxRecordedPairs = 4096U;
 
 std::size_t g_recordedCount = 0U;
 std::size_t g_dispatchCalls = 0U;
-std::uint32_t g_recordedPairs[kMaxRecordedPairs * 2U] = {};
+engine::runtime::Entity g_recordedPairs[kMaxRecordedPairs * 2U] = {};
 
 /// Dispatch callback: appends every delivered pair in delivery order.
-void record_collision_pairs(const std::uint32_t *pairs,
+void record_collision_pairs(const engine::runtime::Entity *pairs,
                             std::size_t pairCount) noexcept {
   ++g_dispatchCalls;
   for (std::size_t i = 0U; i < pairCount; ++i) {
@@ -45,17 +45,17 @@ void reset_recorder() noexcept {
   g_dispatchCalls = 0U;
 }
 
-/// Reports whether recorded pair `slot` contains exactly the two entities.
+/// Reports whether recorded pair `slot` contains exactly the two entities
+/// (full identity: index and generation).
 [[nodiscard]] bool recorded_pair_is(std::size_t slot,
                                     engine::runtime::Entity first,
                                     engine::runtime::Entity second) noexcept {
   if (slot >= g_recordedCount) {
     return false;
   }
-  const std::uint32_t a = g_recordedPairs[slot * 2U];
-  const std::uint32_t b = g_recordedPairs[(slot * 2U) + 1U];
-  return ((a == first.index) && (b == second.index)) ||
-         ((a == second.index) && (b == first.index));
+  const engine::runtime::Entity a = g_recordedPairs[slot * 2U];
+  const engine::runtime::Entity b = g_recordedPairs[(slot * 2U) + 1U];
+  return ((a == first) && (b == second)) || ((a == second) && (b == first));
 }
 
 /// Creates a World in its component-mutation phase.
@@ -234,7 +234,7 @@ int check_once_per_substep_and_empty_frame() noexcept {
 /// Determinism: one-step-per-frame execution and a two-step catch-up frame
 /// deliver identical event sequences for identical worlds.
 int check_catchup_matches_single_step_frames() noexcept {
-  std::uint32_t singleStepPairs[4U] = {};
+  engine::runtime::Entity singleStepPairs[4U] = {};
   std::size_t singleStepCount = 0U;
 
   {

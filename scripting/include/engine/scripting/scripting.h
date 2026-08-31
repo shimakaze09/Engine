@@ -67,10 +67,13 @@ void debugger_clear_breakpoints_for_source(const char *file) noexcept;
 bool debugger_add_breakpoint(const char *file, int line) noexcept;
 
 // Dispatch Lua on_collision(entityA, entityB) for each pair in pairData.
-// pairData is an array of [entityIndexA, entityIndexB, ...] uint32 values.
-// pairCount is the number of pairs (not element count).
+// pairData is an array of [entityA, entityB, ...] generation-bearing
+// entity values (the physics CollisionDispatchFn contract); pairCount is
+// the number of pairs (not element count). Handlers receive the recorded
+// identities: a participant no longer alive under its recorded generation
+// arrives as nil, never as an entity that recycled its index.
 // No-op if the scripting system is not initialised or no handlers are present.
-void dispatch_physics_callbacks(const std::uint32_t *pairData,
+void dispatch_physics_callbacks(const core::Entity *pairData,
                                 std::size_t pairCount) noexcept;
 
 // Dispatch registered Lua handlers and the global on_anim_event fallback

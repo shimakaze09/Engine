@@ -303,7 +303,7 @@ void test_epa_depth_never_exceeds_geometry() noexcept {
 std::size_t g_pairCount = 0U;
 
 /// Collision dispatch sink for the production-path compound case.
-void record_collision_pairs(const std::uint32_t * /*pairs*/,
+void record_collision_pairs(const engine::runtime::Entity * /*pairs*/,
                             std::size_t pairCount) noexcept {
   g_pairCount = pairCount;
 }

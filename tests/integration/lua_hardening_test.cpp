@@ -238,7 +238,7 @@ bool test_collision_dispatch_survives_hostile_metatable() noexcept {
     return false;
   }
 
-  const std::uint32_t pairData[2] = {1U, 2U};
+  const engine::core::Entity pairData[2] = {{1U, 1U}, {2U, 1U}};
   engine::scripting::dispatch_physics_callbacks(pairData, 1U);
   remove_script();
   return engine::scripting::call_script_function("probe_after_boom");

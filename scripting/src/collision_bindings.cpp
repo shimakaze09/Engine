@@ -19,15 +19,19 @@ int g_collisionHandlers[kMaxCollisionHandlers] = {
 
 /// Carries one collision callback invocation into the protected trampoline.
 struct CollisionCallArgs final {
-  PushEntityHandleFromIndexFn pushEntityHandleFromIndex = nullptr;
-  std::uint32_t entityIndexA = 0U;
-  std::uint32_t entityIndexB = 0U;
+  PushEntityHandleFn pushEntityHandle = nullptr;
+  core::Entity entityA{};
+  core::Entity entityB{};
   int handlerRef = LUA_NOREF;
 };
 
 /// Protected trampoline: resolves one handler (registry ref or the global
 /// on_collision fallback), pushes both entity handles, and calls it, so
-/// metamethods and allocation failures stay catchable.
+/// metamethods and allocation failures stay catchable. The handles are
+/// pushed from the pair's recorded identities — never re-resolved from an
+/// index — so a participant destroyed by an earlier handler in the same
+/// dispatch pushes as nil rather than as whatever entity now occupies its
+/// recycled index.
 int collision_call_trampoline(lua_State *state) noexcept {
   auto *args = static_cast<CollisionCallArgs *>(lua_touserdata(state, 1));
   if (args->handlerRef != LUA_NOREF) {
@@ -38,8 +42,8 @@ int collision_call_trampoline(lua_State *state) noexcept {
   if (lua_isfunction(state, -1) == 0) {
     return 0;
   }
-  args->pushEntityHandleFromIndex(state, args->entityIndexA);
-  args->pushEntityHandleFromIndex(state, args->entityIndexB);
+  args->pushEntityHandle(state, args->entityA);
+  args->pushEntityHandle(state, args->entityB);
   lua_call(state, 2, 0);
   return 0;
 }
@@ -91,19 +95,20 @@ void clear_collision_handlers(lua_State *state) noexcept {
   }
 }
 
-void dispatch_collision_handlers(
-    lua_State *state, const std::uint32_t *pairData, std::size_t pairCount,
-    PushEntityHandleFromIndexFn pushEntityHandleFromIndex) noexcept {
+void dispatch_collision_handlers(lua_State *state,
+                                 const core::Entity *pairData,
+                                 std::size_t pairCount,
+                                 PushEntityHandleFn pushEntityHandle) noexcept {
   if ((state == nullptr) || (pairData == nullptr) || (pairCount == 0U) ||
-      (pushEntityHandleFromIndex == nullptr)) {
+      (pushEntityHandle == nullptr)) {
     return;
   }
 
   for (std::size_t i = 0U; i < pairCount; ++i) {
     CollisionCallArgs args{};
-    args.pushEntityHandleFromIndex = pushEntityHandleFromIndex;
-    args.entityIndexA = pairData[i * 2U];
-    args.entityIndexB = pairData[i * 2U + 1U];
+    args.pushEntityHandle = pushEntityHandle;
+    args.entityA = pairData[i * 2U];
+    args.entityB = pairData[i * 2U + 1U];
 
     for (std::size_t h = 0U; h < kMaxCollisionHandlers; ++h) {
       if (g_collisionHandlers[h] == LUA_NOREF) {

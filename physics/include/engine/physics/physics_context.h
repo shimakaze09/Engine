@@ -191,8 +191,11 @@ struct PhysicsContext final {
   // jointCount go nonzero without a live store (see joint_handle.h).
   std::size_t jointCount = 0U;
 
-  // Packed collision pairs: [entityIndexA0, entityIndexB0, ...]
-  std::array<std::uint32_t, kMaxCollisionPairs * 2U> collisionPairData{};
+  // Packed collision pairs: [entityA0, entityB0, ...]. Generation-bearing
+  // Entity values, not bare indices: callbacks fire after entity mutation
+  // is legal again, so a bare index could be recycled by a handler's
+  // destroy/spawn and retarget the event to an unrelated entity.
+  std::array<Entity, kMaxCollisionPairs * 2U> collisionPairData{};
   std::size_t collisionPairCount = 0U;
   CollisionDispatchFn collisionDispatch = nullptr;
 
@@ -200,8 +203,7 @@ struct PhysicsContext final {
   // pairs in step order and dispatch drains once per rendered frame, so a
   // pair persisting across substeps repeats once per substep. Drops are
   // counted per rendered frame (per-step caps plus append overflow).
-  std::array<std::uint32_t,
-             kMaxCollisionPairs * kMaxCollisionFrameSteps * 2U>
+  std::array<Entity, kMaxCollisionPairs * kMaxCollisionFrameSteps * 2U>
       frameCollisionPairData{};
   std::size_t frameCollisionPairCount = 0U;
   std::uint32_t frameCollisionPairDropCount = 0U;

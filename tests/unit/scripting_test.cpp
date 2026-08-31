@@ -1160,8 +1160,13 @@ int main() {
       remove_script_file();
       return 62;
     }
-    constexpr std::uint32_t kPairData[] = {1U, 2U};
-    engine::scripting::dispatch_physics_callbacks(kPairData, 1U);
+    engine::runtime::Transform pairTransform{};
+    const engine::runtime::Entity pairEntityA =
+        world->create_scene_object(pairTransform);
+    const engine::runtime::Entity pairEntityB =
+        world->create_scene_object(pairTransform);
+    const engine::runtime::Entity pairData[] = {pairEntityA, pairEntityB};
+    engine::scripting::dispatch_physics_callbacks(pairData, 1U);
     bool collisionFired = false;
     world->for_each_alive([&](engine::runtime::Entity ent) noexcept {
       engine::runtime::NameComponent nc{};

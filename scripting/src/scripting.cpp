@@ -663,10 +663,10 @@ bool call_script_function_float(const char *name, float arg) noexcept {
   return args.called;
 }
 
-void dispatch_physics_callbacks(const std::uint32_t *pairData,
+void dispatch_physics_callbacks(const core::Entity *pairData,
                                 std::size_t pairCount) noexcept {
   dispatch_collision_handlers(lua_state(), pairData, pairCount,
-                              push_entity_handle_from_index);
+                              push_entity_handle);
 }
 
 void dispatch_animation_event_callbacks() noexcept {
