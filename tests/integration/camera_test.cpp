@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <limits>
 #include <memory>
 #include <new>
 
@@ -293,6 +294,115 @@ bool test_destroyed_owner_removes_camera() noexcept {
   }
   const CameraEntry *active = world->camera_manager().active_camera();
   return (active != nullptr) && (active->ownerEntity == recycled);
+}
+
+
+/// Regression for issue #393: the manager boundary refuses non-finite and
+/// out-of-range camera and shake parameters, and a refusal mutates
+/// nothing — a live entry keeps its values and the evaluated camera stays
+/// finite and unchanged.
+bool test_manager_rejects_invalid_parameters() noexcept {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  auto &cm = world->camera_manager();
+  const float kNan = std::numeric_limits<float>::quiet_NaN();
+  const float kInf = std::numeric_limits<float>::infinity();
+
+  // Baseline valid camera.
+  CameraEntry valid{};
+  valid.position = math::Vec3(3.0F, 2.0F, 1.0F);
+  valid.target = math::Vec3(0.0F, 0.0F, 0.0F);
+  if (!cm.push_camera(kOwnerA, valid, 1.0F)) {
+    return false;
+  }
+
+  // Each invalid push must return false, add nothing, and leave owner A's
+  // live entry untouched — including the update path, where the same
+  // owner's refused push must not partially overwrite the live fields.
+  CameraEntry nanPosition = valid;
+  nanPosition.position.y = kNan;
+  CameraEntry infTarget = valid;
+  infTarget.target.z = kInf;
+  CameraEntry nanUp = valid;
+  nanUp.up.x = kNan;
+  CameraEntry nanFov = valid;
+  nanFov.fovRadians = kNan;
+  CameraEntry zeroNear = valid;
+  zeroNear.nearPlane = 0.0F;
+  CameraEntry negativeNear = valid;
+  negativeNear.nearPlane = -0.1F;
+  CameraEntry farInsideNear = valid;
+  farInsideNear.farPlane = valid.nearPlane;
+  CameraEntry infFar = valid;
+  infFar.farPlane = kInf;
+  CameraEntry negativeBlend = valid;
+  negativeBlend.blendSpeed = -1.0F;
+  CameraEntry zeroOrthoSize = valid;
+  zeroOrthoSize.projection = 1U;
+  zeroOrthoSize.orthographicSize = 0.0F;
+
+  const CameraEntry *invalid[] = {
+      &nanPosition, &infTarget,     &nanUp,  &nanFov,        &zeroNear,
+      &negativeNear, &farInsideNear, &infFar, &negativeBlend, &zeroOrthoSize};
+  for (const CameraEntry *entry : invalid) {
+    if (cm.push_camera(kOwnerB, *entry, 1.0F) ||
+        cm.push_camera(kOwnerA, *entry, 1.0F)) {
+      return false;
+    }
+    const CameraEntry *live = cm.active_camera();
+    if ((cm.camera_count() != 1U) || (live == nullptr) ||
+        !nearly(live->position.x, 3.0F) ||
+        !nearly(live->nearPlane, valid.nearPlane) ||
+        !nearly(live->farPlane, valid.farPlane)) {
+      return false;
+    }
+  }
+
+  // A NaN priority is refused too.
+  if (cm.push_camera(kOwnerB, valid, kNan)) {
+    return false;
+  }
+
+  // Invalid shakes: refused with no slot activated, and the evaluated
+  // camera stays exactly the baseline.
+  const float badShakes[][4] = {
+      {kNan, 15.0F, 1.0F, 1.0F},  {0.1F, kInf, 1.0F, 1.0F},
+      {0.1F, 15.0F, 0.0F, 1.0F},  {0.1F, 15.0F, -1.0F, 1.0F},
+      {-0.1F, 15.0F, 1.0F, 1.0F}, {0.1F, -1.0F, 1.0F, 1.0F},
+      {0.1F, 15.0F, 1.0F, kNan},  {0.1F, 15.0F, 1.0F, -1.0F}};
+  for (const auto &shake : badShakes) {
+    if (cm.add_shake(shake[0], shake[1], shake[2], shake[3])) {
+      return false;
+    }
+  }
+
+  math::Vec3 position{};
+  math::Vec3 target{};
+  math::Vec3 up{};
+  float fov = 0.0F;
+  float nearPlane = 0.0F;
+  float farPlane = 0.0F;
+  cm.evaluate(10.0F, &position, &target, &up, &fov, &nearPlane, &farPlane);
+  if (!std::isfinite(position.x) || !std::isfinite(position.y) ||
+      !std::isfinite(position.z) || !std::isfinite(target.x) ||
+      !std::isfinite(fov) || !nearly(position.x, 3.0F) ||
+      !nearly(position.y, 2.0F) || !nearly(position.z, 1.0F)) {
+    return false;
+  }
+
+  // Boundary-valid values stay accepted: a tiny positive near with far
+  // just beyond it, a zero blend speed, and an all-zero (but positive
+  // duration) shake.
+  CameraEntry boundary = valid;
+  boundary.nearPlane = 1.0e-6F;
+  boundary.farPlane = 2.0e-6F;
+  boundary.blendSpeed = 0.0F;
+  if (!cm.push_camera(kOwnerB, boundary, 2.0F)) {
+    return false;
+  }
+  if (!cm.add_shake(0.0F, 0.0F, 0.001F, 0.0F)) {
+    return false;
+  }
+  return true;
 }
 
 bool test_spring_arm_crud() noexcept {
@@ -955,6 +1065,8 @@ int main() {
   run("test_multiple_shakes_additive", test_multiple_shakes_additive);
   run("test_camera_shake_large_phase_is_finite_and_deterministic",
       test_camera_shake_large_phase_is_finite_and_deterministic);
+  run("test_manager_rejects_invalid_parameters",
+      test_manager_rejects_invalid_parameters);
   run("test_spring_arm_crud", test_spring_arm_crud);
   run("test_spring_arm_updates_camera_position",
       test_spring_arm_updates_camera_position);

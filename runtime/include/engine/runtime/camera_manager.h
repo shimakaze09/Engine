@@ -48,6 +48,11 @@ public:
   static constexpr std::size_t kMaxShakes = 8U;
 
   /// Push a new camera onto the priority stack (or update if owner exists).
+  /// Refuses — mutating nothing, so the current evaluated state survives —
+  /// an entry with any non-finite vector, lens, blend, or priority value,
+  /// a non-positive near plane, a far plane at or inside near, a negative
+  /// blend speed, or a non-positive orthographic size when the entry
+  /// selects the orthographic projection.
   bool push_camera(core::Entity ownerEntity, const CameraEntry &entry,
                    float priority) noexcept;
 
@@ -60,7 +65,9 @@ public:
   /// Get the raw entry for the highest-priority camera (before shake).
   const CameraEntry *active_camera() const noexcept;
 
-  /// Add a camera shake.
+  /// Add a camera shake. Refuses non-finite parameters, a non-positive
+  /// duration, and a negative amplitude, frequency, or decay, activating
+  /// no slot on refusal.
   bool add_shake(float amplitude, float frequency, float duration,
                  float decay) noexcept;
 
