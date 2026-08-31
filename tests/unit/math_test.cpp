@@ -517,6 +517,10 @@ int main() {
     for (std::size_t col = 0U; col < 4U; ++col) {
       if (!nearly_equal(sentinel.columns[col].x, sentinelCopy.columns[col].x,
                         0.0F) ||
+          !nearly_equal(sentinel.columns[col].y, sentinelCopy.columns[col].y,
+                        0.0F) ||
+          !nearly_equal(sentinel.columns[col].z, sentinelCopy.columns[col].z,
+                        0.0F) ||
           !nearly_equal(sentinel.columns[col].w, sentinelCopy.columns[col].w,
                         0.0F)) {
         return 60;
