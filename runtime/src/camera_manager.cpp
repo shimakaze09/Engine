@@ -19,6 +19,41 @@ math::Vec3 lerp_vec3(const math::Vec3 &a, const math::Vec3 &b,
   return math::Vec3(lerp(a.x, b.x, t), lerp(a.y, b.y, t), lerp(a.z, b.z, t));
 }
 
+/// True when a Vec3 carries only finite components.
+bool finite_vec3(const math::Vec3 &v) noexcept {
+  return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
+}
+
+/// Validates a camera entry and its priority at the manager boundary.
+/// Every field evaluate() folds into frame state must be finite — one NaN
+/// contaminates blend state, the view/culling camera, and the audio
+/// listener until a clear resets it — and the documented range
+/// relationships hold: a positive near plane, far beyond near, a
+/// nonnegative blend speed, and a positive orthographic size when the
+/// entry selects the orthographic projection.
+bool camera_entry_valid(const CameraEntry &entry, float priority) noexcept {
+  if (!finite_vec3(entry.position) || !finite_vec3(entry.target) ||
+      !finite_vec3(entry.up)) {
+    return false;
+  }
+  if (!std::isfinite(entry.fovRadians) || !std::isfinite(entry.nearPlane) ||
+      !std::isfinite(entry.farPlane) ||
+      !std::isfinite(entry.orthographicSize) ||
+      !std::isfinite(entry.blendSpeed) || !std::isfinite(priority)) {
+    return false;
+  }
+  if (!(entry.nearPlane > 0.0F) || !(entry.farPlane > entry.nearPlane)) {
+    return false;
+  }
+  if (entry.blendSpeed < 0.0F) {
+    return false;
+  }
+  if ((entry.projection != 0U) && !(entry.orthographicSize > 0.0F)) {
+    return false;
+  }
+  return true;
+}
+
 float clamp01(float v) noexcept {
   if (v < 0.0F) {
     return 0.0F;
@@ -35,6 +70,16 @@ bool CameraManager::push_camera(core::Entity ownerEntity,
                                 const CameraEntry &entry,
                                 float priority) noexcept {
   if (ownerEntity == core::kInvalidEntity) {
+    return false;
+  }
+
+  // Validated before any slot is touched, so a refused push — a fresh
+  // entry or an update to a live one — leaves the stack and the current
+  // evaluated state exactly as they were.
+  if (!camera_entry_valid(entry, priority)) {
+    core::log_message(core::LogLevel::Warning, kLogChannel,
+                      "push_camera rejected non-finite or out-of-range "
+                      "camera parameters");
     return false;
   }
 
@@ -101,6 +146,20 @@ const CameraEntry *CameraManager::active_camera() const noexcept {
 
 bool CameraManager::add_shake(float amplitude, float frequency, float duration,
                               float decay) noexcept {
+  // Same boundary rule as push_camera: shake parameters feed the evaluated
+  // camera additively every frame, so non-finite values, a non-positive
+  // duration, or a negative amplitude/frequency/decay are refused before
+  // any slot activates.
+  if (!std::isfinite(amplitude) || !std::isfinite(frequency) ||
+      !std::isfinite(duration) || !std::isfinite(decay) ||
+      !(duration > 0.0F) || (amplitude < 0.0F) || (frequency < 0.0F) ||
+      (decay < 0.0F)) {
+    core::log_message(core::LogLevel::Warning, kLogChannel,
+                      "add_shake rejected non-finite or out-of-range shake "
+                      "parameters");
+    return false;
+  }
+
   for (auto &shake : m_shakes) {
     if (!shake.active) {
       shake.amplitude = amplitude;
