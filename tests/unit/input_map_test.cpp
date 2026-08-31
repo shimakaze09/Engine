@@ -810,10 +810,6 @@ bool test_save_to_directory_destination_fails() noexcept {
   return ok && (leftovers == 0U);
 }
 
-} // namespace
-
-/// Runs this executable or test program.
-
 /// Over-capacity authored documents are rejected whole (issue #385): a
 /// syntactically valid document with 65 actions, nine bindings on one
 /// action, 65 axes, or nine sources on one axis must fail the load and
@@ -958,6 +954,9 @@ bool test_over_capacity_load_rejected_whole() noexcept {
   return roundTripped;
 }
 
+} // namespace
+
+/// Runs this executable or test program.
 int main() {
   int passed = 0;
   int failed = 0;
