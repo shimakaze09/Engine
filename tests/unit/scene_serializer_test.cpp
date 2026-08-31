@@ -927,6 +927,156 @@ int verify_foliage_parse_failures_reject_scene() {
   return 0;
 }
 
+
+/// Over-capacity authored data must reject the load whole (issue #387): an
+/// overlong entity name, a fourth foliage LOD id, more instances than the
+/// fixed capacity, an instanceCount disagreeing with the instances array,
+/// or an over-capacity bare instanceCount all fail the load and leave the
+/// destination World untouched; capacity-sized data still round-trips
+/// byte-identically.
+int verify_over_capacity_authored_data_rejected() {
+  // 32 'n's: one byte past NameComponent's 31-char capacity.
+  constexpr const char *kOverlongNameScene =
+      "{\"version\":2,\"entities\":[{\"components\":{"
+      "\"name\":\"nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn\"}}]}";
+  constexpr const char *kFourLodScene =
+      "{\"version\":2,\"entities\":[{\"components\":{"
+      "\"FoliagePatchComponent\":{\"meshAssetIds\":[1,2,3,4]}}}]}";
+  constexpr const char *kCountAboveArrayScene =
+      "{\"version\":2,\"entities\":[{\"components\":{"
+      "\"FoliagePatchComponent\":{\"instanceCount\":2,"
+      "\"instances\":[{\"scale\":1.0}]}}}]}";
+  constexpr const char *kCountBelowArrayScene =
+      "{\"version\":2,\"entities\":[{\"components\":{"
+      "\"FoliagePatchComponent\":{\"instanceCount\":1,"
+      "\"instances\":[{\"scale\":1.0},{\"scale\":2.0}]}}}]}";
+  constexpr const char *kBareCountOverCapacityScene =
+      "{\"version\":2,\"entities\":[{\"components\":{"
+      "\"FoliagePatchComponent\":{\"instanceCount\":65}}}]}";
+
+  // One instance entry past the fixed capacity.
+  std::string overCapacityInstances =
+      "{\"version\":2,\"entities\":[{\"components\":{"
+      "\"FoliagePatchComponent\":{\"instances\":[";
+  for (std::size_t i = 0U;
+       i <= engine::runtime::FoliagePatchComponent::kMaxInstances; ++i) {
+    if (i > 0U) {
+      overCapacityInstances += ",";
+    }
+    overCapacityInstances += "{\"scale\":1.0}";
+  }
+  overCapacityInstances += "]}}}]}";
+
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 200;
+  }
+  world->end_frame_phase();
+
+  // Pre-existing content proves refusal preserves the destination.
+  const engine::runtime::Entity keeper = world->create_scene_object();
+  engine::runtime::NameComponent keeperName{};
+  std::snprintf(keeperName.name, sizeof(keeperName.name), "%s", "keeper");
+  if ((keeper == engine::runtime::kInvalidEntity) ||
+      !world->add_name_component(keeper, keeperName)) {
+    return 201;
+  }
+
+  const char *rejected[] = {kOverlongNameScene,
+                            kFourLodScene,
+                            kCountAboveArrayScene,
+                            kCountBelowArrayScene,
+                            kBareCountOverCapacityScene,
+                            overCapacityInstances.c_str()};
+  for (const char *scene : rejected) {
+    if (engine::runtime::load_scene(*world, scene, std::strlen(scene))) {
+      return 202;
+    }
+    engine::runtime::NameComponent survivor{};
+    if ((world->alive_entity_count() != 1U) ||
+        !world->get_name_component(keeper, &survivor) ||
+        (std::strcmp(survivor.name, "keeper") != 0)) {
+      return 203;
+    }
+  }
+
+  // Capacity boundary: a 31-char name, all three LOD ids, and exactly
+  // kMaxInstances instances load whole, and a save of the loaded World is
+  // byte-identical to a save of the authored one — nothing was dropped or
+  // normalized on the way through.
+  std::unique_ptr<engine::runtime::World> authored(
+      new (std::nothrow) engine::runtime::World());
+  if (authored == nullptr) {
+    return 204;
+  }
+  authored->end_frame_phase();
+  const engine::runtime::Entity entity = authored->create_scene_object();
+  if (entity == engine::runtime::kInvalidEntity) {
+    return 205;
+  }
+  engine::runtime::NameComponent boundaryName{};
+  for (std::size_t i = 0U;
+       i < engine::runtime::NameComponent::kMaxNameLength; ++i) {
+    boundaryName.name[i] = 'n';
+  }
+  if (!authored->add_name_component(entity, boundaryName)) {
+    return 206;
+  }
+  engine::runtime::FoliagePatchComponent foliage{};
+  for (std::size_t i = 0U;
+       i < engine::runtime::FoliagePatchComponent::kMaxLods; ++i) {
+    foliage.meshAssetIds[i] = 100ULL + i;
+  }
+  foliage.instanceCount = static_cast<std::uint32_t>(
+      engine::runtime::FoliagePatchComponent::kMaxInstances);
+  for (std::uint32_t i = 0U; i < foliage.instanceCount; ++i) {
+    foliage.instances[i].offset =
+        engine::math::Vec3(static_cast<float>(i), 0.0F, 0.0F);
+    foliage.instances[i].scale = 1.0F;
+  }
+  if (!authored->add_foliage_patch_component(entity, foliage)) {
+    return 207;
+  }
+
+  std::unique_ptr<std::array<char, engine::core::JsonWriter::kBufferBytes>>
+      firstSave(new (std::nothrow)
+                    std::array<char, engine::core::JsonWriter::kBufferBytes>());
+  std::unique_ptr<std::array<char, engine::core::JsonWriter::kBufferBytes>>
+      secondSave(
+          new (std::nothrow)
+              std::array<char, engine::core::JsonWriter::kBufferBytes>());
+  if ((firstSave == nullptr) || (secondSave == nullptr)) {
+    return 208;
+  }
+  std::size_t firstSize = 0U;
+  std::size_t secondSize = 0U;
+  if (!engine::runtime::save_scene(*authored, firstSave->data(),
+                                   firstSave->size(), &firstSize)) {
+    return 209;
+  }
+
+  std::unique_ptr<engine::runtime::World> loaded(new (std::nothrow)
+                                                     engine::runtime::World());
+  if (loaded == nullptr) {
+    return 210;
+  }
+  loaded->end_frame_phase();
+  if (!engine::runtime::load_scene(*loaded, firstSave->data(), firstSize)) {
+    return 211;
+  }
+  if (!engine::runtime::save_scene(*loaded, secondSave->data(),
+                                   secondSave->size(), &secondSize)) {
+    return 212;
+  }
+  if ((firstSize != secondSize) ||
+      (std::memcmp(firstSave->data(), secondSave->data(), firstSize) != 0)) {
+    return 213;
+  }
+
+  return 0;
+}
+
 /// A malformed CameraComponent field fails the load and leaves the
 /// destination World completely unchanged (staged World + commit-on-success
 /// only, per the serialization contract), matching the FoliagePatch/Light
@@ -1845,6 +1995,13 @@ int main() {
   }
 
   result = verify_point_spot_light_parse_failures_reject_scene();
+  if (result != 0) {
+    static_cast<void>(std::remove(kScenePath));
+    static_cast<void>(std::remove(kLargeScenePath));
+    return result;
+  }
+
+  result = verify_over_capacity_authored_data_rejected();
   if (result != 0) {
     static_cast<void>(std::remove(kScenePath));
     static_cast<void>(std::remove(kLargeScenePath));

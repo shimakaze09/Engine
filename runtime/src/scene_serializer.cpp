@@ -85,7 +85,10 @@ bool decode_scene_component(const core::JsonParser &parser,
   } else if constexpr (std::is_same_v<T, FoliagePatchComponent>) {
     return read_foliage_patch_component(parser, value, out);
   } else if constexpr (std::is_same_v<T, NameComponent>) {
-    return parser.copy_string(value, out->name, sizeof(out->name));
+    // Strict copy: an authored name that cannot round-trip through the
+    // component's fixed field fails the load instead of silently losing
+    // bytes a later save would make permanent.
+    return parser.copy_string_strict(value, out->name, sizeof(out->name));
   } else if constexpr (std::is_same_v<T, ScriptComponent>) {
     return parser.copy_string_strict(value, out->scriptPath,
                                      sizeof(out->scriptPath));
