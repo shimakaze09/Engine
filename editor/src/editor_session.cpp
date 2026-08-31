@@ -26,6 +26,7 @@
 #include <vector>
 
 #include "engine/core/atomic_file.h"
+#include "engine/core/file_read.h"
 #include "engine/core/cvar.h"
 #include "engine/core/engine_stats.h"
 #include "engine/core/json.h"
@@ -233,34 +234,18 @@ bool build_content_browser_state_path(char *out,
   return (written > 0) && (static_cast<std::size_t>(written) < capacity);
 }
 
-/// Reads a whole small file into a fixed buffer; false on overflow or I/O
-/// failure (mirrors editor_scene_document.cpp's recent-scenes reader).
-bool read_whole_small_file(const char *path, char *out, std::size_t capacity,
-                           std::size_t *outSize) noexcept {
-  std::FILE *file = nullptr;
-#ifdef _WIN32
-  if (fopen_s(&file, path, "rb") != 0) {
-    file = nullptr;
-  }
-#else
-  file = std::fopen(path, "rb");
-#endif
-  if (file == nullptr) {
-    return false;
-  }
-  const std::size_t readCount = std::fread(out, 1U, capacity - 1U, file);
-  const bool overflow = std::fgetc(file) != EOF;
-  const bool hitError = std::ferror(file) != 0;
-  std::fclose(file);
-  if (overflow || hitError) {
-    return false;
-  }
-  out[readCount] = '\0';
-  if (outSize != nullptr) {
-    *outSize = readCount;
-  }
-  return true;
-}
+/// Latched when a stored content-browser state file exists but could not be
+/// read (or outgrew the read buffer). Persisting is refused while it is
+/// set: the state file is editor-settings data under the authored-data
+/// rule, and the alternative is that the defaults adopted moments later
+/// are atomically committed over a file whose contents we failed to read.
+/// A genuine ENOENT stays the ordinary fresh-profile case and keeps
+/// persisting normally (the editor_layout latch pattern).
+bool g_contentBrowserLoadFailed = false;
+
+/// True once the refusal above has been logged, so a session that keeps
+/// navigating logs the reason once rather than once per navigation.
+bool g_contentBrowserRefusalLogged = false;
 
 } // namespace
 
@@ -269,9 +254,24 @@ void content_browser_state_set_directory_override_for_tests(
   std::snprintf(g_contentBrowserDirectoryOverride,
                sizeof(g_contentBrowserDirectoryOverride), "%s",
                (directory != nullptr) ? directory : "");
+  // A new override points at a different stored state, so any latch from
+  // the previous location is stale; the next load re-arms it if that
+  // state is also unreadable.
+  g_contentBrowserLoadFailed = false;
+  g_contentBrowserRefusalLogged = false;
 }
 
 void content_browser_state_persist() noexcept {
+  if (g_contentBrowserLoadFailed) {
+    if (!g_contentBrowserRefusalLogged) {
+      g_contentBrowserRefusalLogged = true;
+      core::log_message(
+          core::LogLevel::Warning, kContentBrowserLogChannel,
+          "not saving content browser state: the stored one could not be "
+          "read this session, and overwriting it would discard it");
+    }
+    return;
+  }
   const ContentBrowserState &cb = editor_session().contentBrowser;
 
   char directory[900] = {};
@@ -316,7 +316,19 @@ void content_browser_state_load_once() noexcept {
 
   char buffer[2048] = {};
   std::size_t size = 0U;
-  if (!read_whole_small_file(path, buffer, sizeof(buffer), &size)) {
+  const core::FileReadResult result =
+      core::read_whole_file(path, buffer, sizeof(buffer), &size);
+  if (result != core::FileReadResult::Ok) {
+    // Absent is the fresh-profile case: defaults, and persisting stays
+    // enabled so a first session still stores its state. A fault is
+    // latched instead — see g_contentBrowserLoadFailed.
+    if (result != core::FileReadResult::Absent) {
+      g_contentBrowserLoadFailed = true;
+      core::log_message(
+          core::LogLevel::Error, kContentBrowserLogChannel,
+          "stored content browser state could not be read; using defaults "
+          "and leaving the stored file untouched for this session");
+    }
     return;
   }
 

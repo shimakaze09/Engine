@@ -8,6 +8,7 @@
 #include <cstring>
 
 #include "engine/core/atomic_file.h"
+#include "engine/core/file_read.h"
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
 
@@ -23,19 +24,6 @@ bool build_save_path(const char *directory, char *out,
   const int written =
       std::snprintf(out, capacity, "%s/%s", directory, kSaveFileName);
   return (written > 0) && (static_cast<std::size_t>(written) < capacity);
-}
-
-/// Opens the save file, portably across CRTs.
-std::FILE *open_save_file(const char *path, const char *mode) noexcept {
-  std::FILE *file = nullptr;
-#ifdef _WIN32
-  if (fopen_s(&file, path, mode) != 0) {
-    file = nullptr;
-  }
-#else
-  file = std::fopen(path, mode);
-#endif
-  return file;
 }
 
 } // namespace
@@ -86,31 +74,25 @@ bool load_game_data_from(const char *directory, char *out,
     return false;
   }
 
-  std::FILE *file = open_save_file(path, "rb");
-  if (file == nullptr) {
-    return false;
-  }
-
-  const std::size_t read = std::fread(out, 1U, capacity - 1U, file);
-  const bool overflow = std::fgetc(file) != EOF;
-  // A stream error also returns EOF from fgetc, so overflow detection
-  // alone cannot tell a complete short file from one whose read failed
-  // part-way. Without this check an I/O error would be reported as a
-  // successful load of the bytes that did arrive, and the caller would
-  // treat a readable save as empty and overwrite it on the next write.
-  const bool hitError = std::ferror(file) != 0;
-  std::fclose(file);
-  if (overflow) {
+  // A read that fails part-way is Unreadable, never a successful empty
+  // load the caller would overwrite on the next write. Absent stays
+  // silent — no save yet is the ordinary first-run case.
+  std::size_t read = 0U;
+  const core::FileReadResult result =
+      core::read_whole_file(path, out, capacity, &read);
+  if (result == core::FileReadResult::TooLarge) {
     core::log_message(core::LogLevel::Error, "save",
                       "save file exceeds the read capacity");
     return false;
   }
-  if (hitError) {
+  if (result == core::FileReadResult::Unreadable) {
     core::log_message(core::LogLevel::Error, "save",
                       "failed to read the save file");
     return false;
   }
-  out[read] = '\0';
+  if (result != core::FileReadResult::Ok) {
+    return false;
+  }
   if (outLength != nullptr) {
     *outLength = read;
   }
