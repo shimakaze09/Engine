@@ -772,10 +772,12 @@ bool read_foliage_patch_component(
 
   if (parser.get_object_field(foliageObject, "meshAssetIds", &value) &&
       (value.type == core::JsonValue::Type::Array)) {
-    const std::size_t meshCount = parser.array_size(value);
-    const std::size_t count = (meshCount < FoliagePatchComponent::kMaxLods)
-                                  ? meshCount
-                                  : FoliagePatchComponent::kMaxLods;
+    // More LOD ids than the component can hold cannot round-trip: the
+    // load is refused whole rather than dropping the authored tail.
+    const std::size_t count = parser.array_size(value);
+    if (count > FoliagePatchComponent::kMaxLods) {
+      return false;
+    }
     for (std::size_t i = 0U; i < count; ++i) {
       core::JsonValue element{};
       if (!parser.get_array_element(value, i, &element) ||
@@ -816,20 +818,32 @@ bool read_foliage_patch_component(
 
   std::uint32_t requestedCount =
       static_cast<std::uint32_t>(FoliagePatchComponent::kMaxInstances);
-  if (parser.get_object_field(foliageObject, "instanceCount", &value) &&
-      !parser.as_uint(value, &requestedCount)) {
-    return false;
+  bool hasRequestedCount = false;
+  if (parser.get_object_field(foliageObject, "instanceCount", &value)) {
+    if (!parser.as_uint(value, &requestedCount)) {
+      return false;
+    }
+    hasRequestedCount = true;
   }
 
   core::JsonValue instancesValue{};
   if (parser.get_object_field(foliageObject, "instances", &instancesValue) &&
       (instancesValue.type == core::JsonValue::Type::Array)) {
-    std::size_t count = parser.array_size(instancesValue);
+    const std::size_t count = parser.array_size(instancesValue);
+    // Over-capacity or internally inconsistent instance data is refused
+    // whole: entries beyond the fixed capacity cannot round-trip, and a
+    // declared count that disagrees with the array in either direction
+    // means the document does not describe one authored set — silently
+    // normalizing would make whichever half is wrong permanent on the
+    // next save. A document without the count field keeps loading by the
+    // array alone (the count is derivable, so its absence is not a
+    // conflict).
     if (count > FoliagePatchComponent::kMaxInstances) {
-      count = FoliagePatchComponent::kMaxInstances;
+      return false;
     }
-    if (count > requestedCount) {
-      count = requestedCount;
+    if (hasRequestedCount &&
+        (static_cast<std::size_t>(requestedCount) != count)) {
+      return false;
     }
 
     for (std::size_t i = 0U; i < count; ++i) {
@@ -860,10 +874,11 @@ bool read_foliage_patch_component(
     }
     component.instanceCount = static_cast<std::uint32_t>(count);
   } else {
+    // No instances array: the declared count alone drives the patch, and
+    // one beyond capacity is refused rather than clamped.
     if (requestedCount >
         static_cast<std::uint32_t>(FoliagePatchComponent::kMaxInstances)) {
-      requestedCount =
-          static_cast<std::uint32_t>(FoliagePatchComponent::kMaxInstances);
+      return false;
     }
     component.instanceCount = requestedCount;
   }

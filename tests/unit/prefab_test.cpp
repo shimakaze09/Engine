@@ -488,6 +488,93 @@ int verify_prefab_save_refuses_unserializable_payloads() {
   return 0;
 }
 
+
+/// Overlong authored names must reject prefab instantiation whole (issue
+/// #387): a name past NameComponent's capacity fails the load and leaves
+/// the world without a partial entity, while a capacity-sized name
+/// instantiates byte-exact.
+int verify_overlong_prefab_name_rejected() {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 400;
+  }
+
+  // 32 'n's: one byte past the 31-char capacity.
+  const char *overlong =
+      "{\"version\":1,\"components\":{\"Transform\":{},"
+      "\"NameComponent\":{\"name\":"
+      "\"nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn\"}}}";
+  {
+    std::FILE *file = nullptr;
+#ifdef _WIN32
+    if (fopen_s(&file, kPrefabPath, "wb") != 0) {
+      file = nullptr;
+    }
+#else
+    file = std::fopen(kPrefabPath, "wb");
+#endif
+    if (file == nullptr) {
+      return 401;
+    }
+    const bool wrote =
+        std::fwrite(overlong, 1U, std::strlen(overlong), file) ==
+        std::strlen(overlong);
+    std::fclose(file);
+    if (!wrote) {
+      return 402;
+    }
+  }
+
+  const std::size_t before = world->alive_entity_count();
+  if (engine::runtime::instantiate_prefab(*world, kPrefabPath) !=
+      engine::runtime::kInvalidEntity) {
+    return 403;
+  }
+  if (world->alive_entity_count() != before) {
+    return 404;
+  }
+
+  // Boundary: exactly 31 characters instantiates with the name intact.
+  const char *boundary =
+      "{\"version\":1,\"components\":{\"Transform\":{},"
+      "\"NameComponent\":{\"name\":"
+      "\"nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn\"}}}";
+  {
+    std::FILE *file = nullptr;
+#ifdef _WIN32
+    if (fopen_s(&file, kPrefabPath, "wb") != 0) {
+      file = nullptr;
+    }
+#else
+    file = std::fopen(kPrefabPath, "wb");
+#endif
+    if (file == nullptr) {
+      return 405;
+    }
+    const bool wrote =
+        std::fwrite(boundary, 1U, std::strlen(boundary), file) ==
+        std::strlen(boundary);
+    std::fclose(file);
+    if (!wrote) {
+      return 406;
+    }
+  }
+
+  const engine::runtime::Entity instantiated =
+      engine::runtime::instantiate_prefab(*world, kPrefabPath);
+  if (instantiated == engine::runtime::kInvalidEntity) {
+    return 407;
+  }
+  engine::runtime::NameComponent name{};
+  if (!world->get_name_component(instantiated, &name) ||
+      (std::strlen(name.name) !=
+       engine::runtime::NameComponent::kMaxNameLength)) {
+    return 408;
+  }
+  return 0;
+}
+
 int main() {
   remove_prefab_file();
 
@@ -787,6 +874,12 @@ int main() {
   }
 
   result = verify_animation_prefab_round_trip();
+  if (result != 0) {
+    remove_prefab_file();
+    return result;
+  }
+
+  result = verify_overlong_prefab_name_rejected();
   if (result != 0) {
     remove_prefab_file();
     return result;

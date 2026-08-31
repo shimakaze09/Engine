@@ -55,7 +55,11 @@ bool decode_prefab_component(const core::JsonParser &parser,
   } else if constexpr (std::is_same_v<T, NameComponent>) {
     core::JsonValue nameValue{};
     if (parser.get_object_field(value, "name", &nameValue)) {
-      return parser.copy_string(nameValue, out->name, sizeof(out->name));
+      // Strict copy: an authored name that cannot round-trip through the
+      // component's fixed field fails the load instead of silently losing
+      // bytes a later save would make permanent.
+      return parser.copy_string_strict(nameValue, out->name,
+                                       sizeof(out->name));
     }
     return true;
   } else if constexpr (std::is_same_v<T, Collider>) {
