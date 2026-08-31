@@ -69,6 +69,15 @@ void unload_record_mesh(MeshAssetRecord *record,
   record->runtimeMesh = kInvalidMeshHandle;
 }
 
+/// Estimated payload size (positions/normals + optional UVs, 32-bit
+/// indices) for cache-budget accounting; streamed loads store exact sizes.
+std::uint64_t estimated_mesh_size_bytes(const GpuMesh &mesh) noexcept {
+  const std::uint64_t vertexFloats = mesh.hasUVs ? 8ULL : 6ULL;
+  return (static_cast<std::uint64_t>(mesh.vertexCount) * vertexFloats *
+          sizeof(float)) +
+         (static_cast<std::uint64_t>(mesh.indexCount) * sizeof(std::uint32_t));
+}
+
 void sync_requested_residency(AssetManager *manager,
                               AssetDatabase *database) noexcept {
   if ((manager == nullptr) || (database == nullptr)) {
@@ -126,6 +135,63 @@ bool process_load_like_request(AssetDatabase *database,
   }
 
   MeshAssetRecord &record = database->meshAssets[slot];
+
+  // A forced reload over a live Ready mesh is staged (the authored-data
+  // rule's failed-reload clause): the replacement is decoded and
+  // registered under temporary ownership first, and only a fully valid
+  // replacement retires the old mesh — exactly once, in the swap. Any
+  // failure (missing/malformed input, registry capacity) returns with the
+  // record byte-for-byte as it was: handle, state, source path, and
+  // residency accounting all still describe the last valid resource.
+  const bool stagedReload =
+      forceReload && (record.state == AssetState::Ready) &&
+      (record.runtimeMesh != kInvalidMeshHandle) && record.requestedResident &&
+      (record.refCount > 0U);
+  if (stagedReload) {
+    const char *replacementPath = (request.sourcePath[0] != '\0')
+                                      ? request.sourcePath.data()
+                                      : (has_source_path(record)
+                                             ? record.sourcePath.data()
+                                             : nullptr);
+    if (replacementPath == nullptr) {
+      core::log_message(core::LogLevel::Error, "assets",
+                        "mesh reload requested without source path; keeping "
+                        "the previous mesh");
+      return false;
+    }
+
+    GpuMesh replacementMesh{};
+    if (!load_mesh_from_file(replacementPath, &replacementMesh)) {
+      char message[640] = {};
+      std::snprintf(message, sizeof(message),
+                    "%s: mesh reload failed; keeping the previous mesh",
+                    replacementPath);
+      core::log_message(core::LogLevel::Error, "assets", message);
+      return false;
+    }
+
+    const MeshHandle replacementHandle =
+        register_gpu_mesh(registry, replacementMesh);
+    if (replacementHandle == kInvalidMeshHandle) {
+      unload_mesh(&replacementMesh);
+      char message[640] = {};
+      std::snprintf(message, sizeof(message),
+                    "%s: mesh registry is full; keeping the previous mesh",
+                    replacementPath);
+      core::log_message(core::LogLevel::Error, "assets", message);
+      return false;
+    }
+
+    unload_record_mesh(&record, registry);
+    copy_source_path(&record.sourcePath, replacementPath);
+    record.runtimeMesh = replacementHandle;
+    record.state = AssetState::Ready;
+    record.lastAccessFrame.store(database->currentFrame,
+                                 std::memory_order_relaxed);
+    record.sizeBytes = estimated_mesh_size_bytes(replacementMesh);
+    return true;
+  }
+
   if ((request.sourcePath[0] != '\0')) {
     copy_source_path(&record.sourcePath, request.sourcePath.data());
   }
@@ -185,13 +251,7 @@ bool process_load_like_request(AssetDatabase *database,
   record.state = AssetState::Ready;
   record.lastAccessFrame.store(database->currentFrame,
                                std::memory_order_relaxed);
-  // Estimated payload size (positions/normals + optional UVs, 32-bit
-  // indices) for cache-budget accounting; streamed loads store exact sizes.
-  const std::uint64_t vertexFloats = mesh.hasUVs ? 8ULL : 6ULL;
-  record.sizeBytes =
-      (static_cast<std::uint64_t>(mesh.vertexCount) * vertexFloats *
-       sizeof(float)) +
-      (static_cast<std::uint64_t>(mesh.indexCount) * sizeof(std::uint32_t));
+  record.sizeBytes = estimated_mesh_size_bytes(mesh);
   return true;
 }
 
