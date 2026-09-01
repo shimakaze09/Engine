@@ -9,6 +9,7 @@
 
 #include "../test_harness.h"
 #include "editor_layout.h"
+#include "engine/core/logging.h"
 #include "engine/core/platform.h"
 
 #include <imgui.h>
@@ -686,6 +687,100 @@ void check_unopenable_path_is_not_mistaken_for_absent(
 
 } // namespace
 
+namespace {
+
+/// Count of oversized-save refusal lines observed on the module's channel.
+std::size_t g_oversizedRefusalLogCount = 0U;
+
+/// Counts the oversized-save refusal diagnostic so the log-once contract
+/// is directly observable.
+void count_oversized_refusals(engine::core::LogLevel /*level*/,
+                              const char *channel, const char *message,
+                              void * /*userData*/) noexcept {
+  if ((channel != nullptr) && (message != nullptr) &&
+      (std::strcmp(channel, "editor.layout") == 0) &&
+      (std::strstr(message, "exceeds the storable size") != nullptr)) {
+    ++g_oversizedRefusalLogCount;
+  }
+}
+
+/// The oversized-*save* refusal follows the module's log-once rule (#324):
+/// a layout that has outgrown the storable cap re-raises the save on every
+/// settle, so the refusal must log once per session — not once per settle —
+/// exactly like the failed-load refusal and the load-side TooLarge path.
+/// Switching to a different profile re-arms the latch for one more line.
+void check_oversized_save_refusal_logs_once(TestContext &ctx) noexcept {
+  if (!engine::core::initialize_logging()) {
+    ctx.fail("oversized log-once: logging initializes");
+    return;
+  }
+  if (!engine::core::log_register_sink(&count_oversized_refusals, nullptr)) {
+    ctx.fail("oversized log-once: sink registers");
+    engine::core::shutdown_logging();
+    return;
+  }
+
+  std::string dir{};
+  if (!make_scratch_dir("oversized_log_once", &dir)) {
+    ctx.fail("oversized log-once: scratch directory");
+    engine::core::log_unregister_sink(&count_oversized_refusals, nullptr);
+    engine::core::shutdown_logging();
+    return;
+  }
+  editor_layout_set_directory_override_for_tests(dir.c_str());
+
+  begin_context(true);
+  // A settings document past the storable cap, built from window sections
+  // ImGui retains verbatim; the guard assert keeps the case from going
+  // vacuous if ImGui ever stopped retaining them.
+  std::string big{};
+  big.reserve(80U * 1024U);
+  int index = 0;
+  while (big.size() <= 66U * 1024U) {
+    char section[128] = {};
+    std::snprintf(section, sizeof(section),
+                  "[Window][OversizeProbe%d]\nPos=1,2\nSize=3,4\n"
+                  "Collapsed=0\n\n",
+                  index++);
+    big += section;
+  }
+  ImGui::LoadIniSettingsFromMemory(big.data(), big.size());
+  ctx.check(current_settings().size() > (64U * 1024U) - 1U,
+            "oversized log-once: the in-memory layout exceeds the cap");
+
+  g_oversizedRefusalLogCount = 0U;
+  ctx.check(!editor_layout_save(),
+            "oversized log-once: the first save is refused");
+  ctx.check(!editor_layout_save(),
+            "oversized log-once: the second save is refused");
+  ImGui::GetIO().WantSaveIniSettings = true;
+  editor_layout_save_if_dirty();
+  ctx.check(g_oversizedRefusalLogCount == 1U,
+            "oversized log-once: three refusals log exactly one line");
+
+  // A different directory is a different profile: the latch re-arms and
+  // the condition earns exactly one more line there.
+  std::string other{};
+  if (make_scratch_dir("oversized_log_once_other", &other)) {
+    editor_layout_set_directory_override_for_tests(other.c_str());
+    ctx.check(!editor_layout_save(),
+              "oversized log-once: the other profile's save is refused");
+    ctx.check(!editor_layout_save(),
+              "oversized log-once: its repeat is refused");
+    ctx.check(g_oversizedRefusalLogCount == 2U,
+              "oversized log-once: the new profile logs exactly once more");
+  } else {
+    ctx.fail("oversized log-once: second scratch directory");
+  }
+
+  end_context();
+  editor_layout_set_directory_override_for_tests("");
+  engine::core::log_unregister_sink(&count_oversized_refusals, nullptr);
+  engine::core::shutdown_logging();
+}
+
+} // namespace
+
 int main() {
   TestContext ctx{};
 
@@ -700,6 +795,7 @@ int main() {
   check_oversized_stored_layout_is_never_overwritten(ctx);
   check_unopenable_stored_layout_latches_and_survives(ctx);
   check_unopenable_path_is_not_mistaken_for_absent(ctx);
+  check_oversized_save_refusal_logs_once(ctx);
 
   return ctx.finish("editor_layout");
 }
