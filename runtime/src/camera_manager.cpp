@@ -83,16 +83,20 @@ bool CameraManager::push_camera(core::Entity ownerEntity,
     return false;
   }
 
+  // An existing owner's update adopts the whole caller payload — pose and
+  // lens alike, the projection kind and orthographic size included — as one
+  // struct copy so a field added to CameraEntry cannot be silently dropped
+  // from republish. Only the manager-owned slot state survives the copy:
+  // identity, activity, and the blend weight, which carries the entry's
+  // position in an in-flight priority blend across per-frame republishes.
   for (auto &cam : m_cameras) {
     if (cam.active && (cam.ownerEntity == ownerEntity)) {
-      cam.position = entry.position;
-      cam.target = entry.target;
-      cam.up = entry.up;
-      cam.fovRadians = entry.fovRadians;
-      cam.nearPlane = entry.nearPlane;
-      cam.farPlane = entry.farPlane;
+      const float blendWeight = cam.blendWeight;
+      cam = entry;
+      cam.ownerEntity = ownerEntity;
       cam.priority = priority;
-      cam.blendSpeed = entry.blendSpeed;
+      cam.blendWeight = blendWeight;
+      cam.active = true;
       return true;
     }
   }
