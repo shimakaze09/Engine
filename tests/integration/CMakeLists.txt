@@ -291,6 +291,15 @@ engine_add_test_executable(engine_integration_camera
     integration
 )
 
+engine_add_test_executable(engine_integration_camera_producer_removal
+    SOURCES
+    camera_producer_removal_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    LABELS
+    integration
+)
+
 engine_add_test_executable(engine_integration_camera_ingress_lua
     SOURCES
     camera_ingress_lua_test.cpp
