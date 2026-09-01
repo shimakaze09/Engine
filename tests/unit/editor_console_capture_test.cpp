@@ -4,14 +4,19 @@
 // registered sink, not a copied capture model.
 
 #include "editor_console_capture.h"
+#include "editor_session.h"
+#include "engine/editor/editor.h"
 #include "engine/renderer/shader_system.h"
 #include "engine/renderer/texture_loader.h"
 #include "engine/core/logging.h"
 #include "engine/runtime/world.h"
 #include "../test_harness.h"
 
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
+#include <system_error>
 #include <memory>
 #include <new>
 #include <thread>
@@ -338,6 +343,69 @@ void check_concurrent_ingest_is_safe() noexcept {
        "distinct concurrent messages are never collapsed together");
 }
 
+/// Moves the working directory to the nearest ancestor carrying the
+/// bundled editor font (the pipeline tests' asset-walk technique):
+/// initialize_editor loads it by relative path, and ImGui hard-asserts
+/// on a missing font file rather than reporting failure.
+bool set_working_directory_with_editor_font() noexcept {
+  std::error_code ec{};
+  const std::filesystem::path original = std::filesystem::current_path(ec);
+  if (ec) {
+    return false;
+  }
+  const std::filesystem::path candidates[] = {
+      original, original / "..", original / "../..", original / "../../..",
+      original / "../../../.."};
+  for (const std::filesystem::path &candidate : candidates) {
+    const std::filesystem::path normalized =
+        std::filesystem::weakly_canonical(candidate, ec);
+    if (ec) {
+      continue;
+    }
+    if (std::filesystem::exists(
+            normalized / "assets/fonts/Roboto-Medium.ttf", ec)) {
+      std::filesystem::current_path(normalized, ec);
+      return !ec;
+    }
+  }
+  return false;
+}
+
+/// EXPECTATION (#347): a failed initialize_editor releases the console
+/// sink it registered, so the next in-process editor bootstrap — after
+/// core shuts down and restarts logging, clearing the sink table — starts
+/// with a working Console capture instead of a stale registered flag that
+/// silently skips re-registration.
+void check_failed_editor_init_does_not_poison_capture_retry() noexcept {
+  if (!set_working_directory_with_editor_font()) {
+    check(false, "the bundled editor font could be located");
+    return;
+  }
+  // A non-null stand-in for the SDL window: initialize_editor only hands
+  // it to SDL calls that validate object identity (and to the ImGui
+  // backend, which the forced failure keeps unreached), so no window
+  // system is needed.
+  alignas(std::max_align_t) static char fakeWindow[512] = {};
+
+  editor_set_initialize_failure_for_tests(true);
+  const bool initResult = initialize_editor(&fakeWindow[0]);
+  editor_set_initialize_failure_for_tests(false);
+  check(!initResult, "forced editor initialization fails");
+
+  // The core restart that follows a failed editor bootstrap: logging goes
+  // down (clearing the sink table) and comes back up.
+  engine::core::shutdown_logging();
+  check(engine::core::initialize_logging(), "logging restarts for the retry");
+
+  // The retry registers capture again through the production entry point;
+  // a diagnostic logged afterwards must reach the Console.
+  console_capture_initialize();
+  log_message(LogLevel::Error, "engine", "post-retry diagnostic");
+  check(console_capture_entry_count() == 1U,
+       "the retried session captures diagnostics again");
+  console_capture_shutdown();
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -358,6 +426,8 @@ int main() {
   check_concurrent_ingest_is_safe();
 
   console_capture_shutdown();
+  check_failed_editor_init_does_not_poison_capture_retry();
+
   engine::core::shutdown_logging();
   return g_tests.finish("editor_console_capture_test");
 }
