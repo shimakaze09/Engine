@@ -1045,6 +1045,192 @@ bool test_evaluate_carries_projection_kind_and_size() noexcept {
          (evaluated.orthographicSize > 4.0F);
 }
 
+/// EXPECTATION (#394): re-pushing an existing owner adopts the whole new
+/// payload — the projection kind and orthographic size included — while
+/// preserving the slot's manager-owned blend weight, so a live
+/// perspective<->orthographic edit reaches evaluation instead of the slot
+/// keeping its original lens state forever.
+bool test_repush_updates_projection_kind_and_ortho_size() noexcept {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return false;
+  }
+  CameraManager &cm = world->camera_manager();
+
+  CameraEntry persp{};
+  persp.blendSpeed = 2.0F;
+  if (!cm.push_camera(kOwnerA, persp, 1.0F)) {
+    return false;
+  }
+
+  CameraEntry evaluated{};
+  cm.evaluate(0.1F, &evaluated);
+  if (evaluated.projection !=
+      static_cast<std::uint32_t>(CameraProjection::Perspective)) {
+    return false;
+  }
+
+  const CameraEntry *before = cm.active_camera();
+  if (before == nullptr) {
+    return false;
+  }
+  const float blendBefore = before->blendWeight;
+  if (!(blendBefore > 0.0F)) {
+    return false; // the evaluate above must have ramped the winner's weight
+  }
+
+  CameraEntry ortho = persp;
+  ortho.projection =
+      static_cast<std::uint32_t>(CameraProjection::Orthographic);
+  ortho.orthographicSize = 20.0F;
+  if (!cm.push_camera(kOwnerA, ortho, 2.0F)) {
+    return false;
+  }
+
+  const CameraEntry *after = cm.active_camera();
+  if (after == nullptr) {
+    return false;
+  }
+  if (after->projection !=
+      static_cast<std::uint32_t>(CameraProjection::Orthographic)) {
+    return false;
+  }
+  if (!nearly(after->orthographicSize, 20.0F) ||
+      !nearly(after->priority, 2.0F)) {
+    return false;
+  }
+  // The update must not restart an in-flight blend: the weight the slot had
+  // accumulated survives the re-push exactly.
+  if (after->blendWeight != blendBefore) {
+    return false;
+  }
+
+  // A long evaluate settles the blend; the evaluated camera carries the new
+  // kind instantly and converges on the new half-height.
+  cm.evaluate(10.0F, &evaluated);
+  if (evaluated.projection !=
+      static_cast<std::uint32_t>(CameraProjection::Orthographic)) {
+    return false;
+  }
+  if (!nearly(evaluated.orthographicSize, 20.0F)) {
+    return false;
+  }
+
+  // Repeated settled frames are deterministic: bit-identical lens output.
+  CameraEntry again{};
+  cm.evaluate(10.0F, &again);
+  if ((again.projection != evaluated.projection) ||
+      (again.orthographicSize != evaluated.orthographicSize)) {
+    return false;
+  }
+
+  // The reverse transition applies the same way: the kind snaps back to
+  // perspective on the next evaluate.
+  if (!cm.push_camera(kOwnerA, persp, 2.0F)) {
+    return false;
+  }
+  cm.evaluate(10.0F, &again);
+  return again.projection ==
+         static_cast<std::uint32_t>(CameraProjection::Perspective);
+}
+
+/// EXPECTATION (#394): editing an authored CameraComponent's projection
+/// kind and orthographic size on a live entity reaches the evaluated camera
+/// through the production republish path (update_persistent_cameras).
+bool test_camera_component_lens_edit_reaches_manager() noexcept {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return false;
+  }
+  const Entity entity = world->create_scene_object();
+  if (entity == kInvalidEntity) {
+    return false;
+  }
+
+  CameraComponent camera{};
+  camera.priority = 3.0F;
+  if (!world->add_camera_component(entity, camera)) {
+    return false;
+  }
+
+  update_persistent_cameras(*world, 1.0F);
+  CameraEntry evaluated{};
+  world->camera_manager().evaluate(10.0F, &evaluated);
+  if (evaluated.projection !=
+      static_cast<std::uint32_t>(CameraProjection::Perspective)) {
+    return false;
+  }
+
+  CameraComponent *ptr = world->get_camera_component_ptr(entity);
+  if (ptr == nullptr) {
+    return false;
+  }
+  ptr->projection =
+      static_cast<std::uint32_t>(CameraProjection::Orthographic);
+  ptr->orthographicSize = 12.0F;
+  update_persistent_cameras(*world, 1.0F);
+
+  const CameraEntry *active = world->camera_manager().active_camera();
+  if ((active == nullptr) ||
+      (active->projection !=
+       static_cast<std::uint32_t>(CameraProjection::Orthographic)) ||
+      !nearly(active->orthographicSize, 12.0F)) {
+    return false;
+  }
+  world->camera_manager().evaluate(10.0F, &evaluated);
+  return (evaluated.projection ==
+          static_cast<std::uint32_t>(CameraProjection::Orthographic)) &&
+         nearly(evaluated.orthographicSize, 12.0F);
+}
+
+/// EXPECTATION (#394): the spring-arm rig republishes lens edits the same
+/// way — changing the co-located CameraComponent's projection kind and
+/// half-height on a live rig reaches the manager entry on the next update.
+bool test_spring_arm_lens_edit_reaches_manager() noexcept {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return false;
+  }
+  const Entity entity = world->create_scene_object();
+  if (entity == kInvalidEntity) {
+    return false;
+  }
+
+  SpringArmComponent arm{};
+  arm.collisionEnabled = false;
+  if (!world->add_spring_arm(entity, arm)) {
+    return false;
+  }
+  CameraComponent camera{};
+  camera.priority = 7.0F;
+  if (!world->add_camera_component(entity, camera)) {
+    return false;
+  }
+
+  update_spring_arm_cameras(*world, 1.0F);
+  const CameraEntry *active = world->camera_manager().active_camera();
+  if ((active == nullptr) ||
+      (active->projection !=
+       static_cast<std::uint32_t>(CameraProjection::Perspective))) {
+    return false;
+  }
+
+  CameraComponent *ptr = world->get_camera_component_ptr(entity);
+  if (ptr == nullptr) {
+    return false;
+  }
+  ptr->projection =
+      static_cast<std::uint32_t>(CameraProjection::Orthographic);
+  ptr->orthographicSize = 30.0F;
+  update_spring_arm_cameras(*world, 1.0F);
+
+  active = world->camera_manager().active_camera();
+  return (active != nullptr) &&
+         (active->projection ==
+          static_cast<std::uint32_t>(CameraProjection::Orthographic)) &&
+         nearly(active->orthographicSize, 30.0F);
+}
+
 int main() {
   int failures = 0;
 
@@ -1093,6 +1279,12 @@ int main() {
       test_camera_component_with_spring_arm_uses_arm_pose_and_camera_lens);
   run("test_evaluate_carries_projection_kind_and_size",
       test_evaluate_carries_projection_kind_and_size);
+  run("test_repush_updates_projection_kind_and_ortho_size",
+      test_repush_updates_projection_kind_and_ortho_size);
+  run("test_camera_component_lens_edit_reaches_manager",
+      test_camera_component_lens_edit_reaches_manager);
+  run("test_spring_arm_lens_edit_reaches_manager",
+      test_spring_arm_lens_edit_reaches_manager);
   run("test_camera_component_disabled_suppresses_spring_arm_push",
       test_camera_component_disabled_suppresses_spring_arm_push);
   run("test_camera_component_survives_scene_reload",
