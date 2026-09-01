@@ -1032,7 +1032,20 @@ bool World::add_spring_arm(Entity entity,
 }
 
 bool World::remove_spring_arm(Entity entity) noexcept {
-  return remove_component_checked(m_springArms, entity, "remove_spring_arm");
+  const bool removed =
+      remove_component_checked(m_springArms, entity, "remove_spring_arm");
+  // The spring arm and a same-entity CameraComponent are the two producers
+  // that republish this owner's CameraManager entry each update; the update
+  // passes only visit producers that still exist, so a removal must revoke
+  // the entry itself once no producer remains — otherwise the published
+  // camera outlives its producers and keeps driving rendering, culling, and
+  // the audio listener from stale state. With a CameraComponent still
+  // present the entry stays: the component path republishes (and keeps the
+  // slot's blend continuity) on the very next update.
+  if (removed && !m_cameraComponents.contains(entity)) {
+    static_cast<void>(m_cameraManager.pop_camera(entity));
+  }
+  return removed;
 }
 
 bool World::get_spring_arm(Entity entity,
@@ -1064,8 +1077,16 @@ bool World::add_camera_component(Entity entity,
 }
 
 bool World::remove_camera_component(Entity entity) noexcept {
-  return remove_component_checked(m_cameraComponents, entity,
-                                  "remove_camera_component");
+  const bool removed = remove_component_checked(m_cameraComponents, entity,
+                                                "remove_camera_component");
+  // Mirror of remove_spring_arm's producer accounting: a still-present
+  // spring arm keeps publishing this owner (with its default lens once the
+  // component is gone), so the entry is revoked only when the removal left
+  // no producer at all.
+  if (removed && !m_springArms.contains(entity)) {
+    static_cast<void>(m_cameraManager.pop_camera(entity));
+  }
+  return removed;
 }
 
 bool World::get_camera_component(Entity entity,
