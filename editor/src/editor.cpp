@@ -70,6 +70,12 @@ namespace engine::editor {
 
 namespace {
 
+/// Test-only switch: makes the next initialize_editor fail at the ImGui
+/// backend step, after every earlier resource (console capture included)
+/// is acquired — the failure shape a windowed run reaches when a backend
+/// refuses, which headless tests cannot provoke for real.
+bool g_forceInitializeFailureForTests = false;
+
 void setup_default_dock_layout(ImGuiID dockspaceId) noexcept {
   ImGui::DockBuilderRemoveNode(dockspaceId);
   ImGui::DockBuilderAddNode(dockspaceId, ImGuiDockNodeFlags_DockSpace);
@@ -223,6 +229,10 @@ void apply_editor_style() noexcept {
 
 } // namespace
 
+void editor_set_initialize_failure_for_tests(bool fail) noexcept {
+  g_forceInitializeFailureForTests = fail;
+}
+
 /// Initializes the owning system for editor.
 bool initialize_editor(void *sdlWindow) noexcept {
   if (editor_session().initialized) {
@@ -279,14 +289,24 @@ bool initialize_editor(void *sdlWindow) noexcept {
 
   // The bgfx ImGui backend owns its device objects; the platform
   // window handle is all SDL needs (#296 dropped the dead GL-context
-  // parameter with the GL backend).
-  if (!ImGui_ImplSDL3_InitForOther(static_cast<SDL_Window *>(sdlWindow))) {
+  // parameter with the GL backend). A backend failure must release every
+  // resource acquired above — the console-capture sink included, whose
+  // registered flag would otherwise survive the core logging restart that
+  // follows a failed editor bootstrap and skip re-registration, silently
+  // losing Console diagnostics for the whole retry session. The test seam
+  // stands in for a backend failure on runs with no window system.
+  if (g_forceInitializeFailureForTests ||
+      !ImGui_ImplSDL3_InitForOther(static_cast<SDL_Window *>(sdlWindow))) {
     ImGui::DestroyContext();
+    console_capture_shutdown();
+    editor_session().sdlWindow = nullptr;
     return false;
   }
   if (!ImGui_ImplBgfx_Init()) {
     ImGui_ImplSDL3_Shutdown();
     ImGui::DestroyContext();
+    console_capture_shutdown();
+    editor_session().sdlWindow = nullptr;
     return false;
   }
 

@@ -216,6 +216,12 @@ void content_browser_state_persist() noexcept;
 void content_browser_state_set_directory_override_for_tests(
     const char *directory) noexcept;
 
+/// Test-only switch: when set, the next initialize_editor call fails at
+/// the ImGui backend step — after console capture and the other early
+/// resources are acquired — so headless tests can drive the acquisition
+/// rollback a real windowed backend failure reaches.
+void editor_set_initialize_failure_for_tests(bool fail) noexcept;
+
 /// Navigates the content browser to `folder` ("" = index root), recording
 /// history so back/forward can retrace it, and persists the new folder. A
 /// no-op when `folder` is already the current folder.
