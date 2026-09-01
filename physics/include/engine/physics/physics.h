@@ -61,9 +61,14 @@ using JointId = std::uint32_t;
 constexpr JointId kInvalidJointId = 0xFFFFFFFFU;
 
 // Collision callbacks ---------------------------------------------------------
-// pairData points to an array of [entityIndexA, entityIndexB, ...] uint32
-// pairs. pairCount is the number of pairs (not the element count).
-using CollisionDispatchFn = void (*)(const std::uint32_t *pairs,
+// pairs points to an array of [entityA, entityB, ...] generation-bearing
+// entity pairs. pairCount is the number of pairs (not the element count).
+// Full Entity values, not bare indices: dispatch runs after the World has
+// returned to its mutation phase, so a handler can destroy a participant
+// and a spawn can recycle its index before the next handler runs — the
+// recorded generation is what keeps a delivered event pinned to the
+// collider that produced it instead of the recycled replacement.
+using CollisionDispatchFn = void (*)(const Entity *pairs,
                                      std::size_t pairCount) noexcept;
 
 /// Sets the requested value for convex hull payload data.

@@ -16,30 +16,31 @@
 namespace {
 
 std::size_t g_pairCount = 0U;
-std::uint32_t g_pairEntityA = 0U;
-std::uint32_t g_pairEntityB = 0U;
+engine::runtime::Entity g_pairEntityA{};
+engine::runtime::Entity g_pairEntityB{};
 
 // Records the first collision pair so tests can assert exact entity ownership.
-void record_collision_pairs(const std::uint32_t *pairs,
+void record_collision_pairs(const engine::runtime::Entity *pairs,
                             std::size_t pairCount) noexcept {
   g_pairCount = pairCount;
-  g_pairEntityA = (pairCount > 0U) ? pairs[0] : 0U;
-  g_pairEntityB = (pairCount > 0U) ? pairs[1] : 0U;
+  g_pairEntityA = (pairCount > 0U) ? pairs[0] : engine::runtime::Entity{};
+  g_pairEntityB = (pairCount > 0U) ? pairs[1] : engine::runtime::Entity{};
 }
 
 // Clears callback state before resolving an isolated test world.
 void reset_collision_pairs() noexcept {
   g_pairCount = 0U;
-  g_pairEntityA = 0U;
-  g_pairEntityB = 0U;
+  g_pairEntityA = {};
+  g_pairEntityB = {};
 }
 
-// Reports whether the callback's first pair contains the requested entities.
+// Reports whether the callback's first pair contains the requested entities
+// (full identity: index and generation).
 [[nodiscard]] bool recorded_pair(engine::runtime::Entity first,
                                  engine::runtime::Entity second) noexcept {
   return g_pairCount == 1U &&
-         ((g_pairEntityA == first.index && g_pairEntityB == second.index) ||
-          (g_pairEntityA == second.index && g_pairEntityB == first.index));
+         ((g_pairEntityA == first && g_pairEntityB == second) ||
+          (g_pairEntityA == second && g_pairEntityB == first));
 }
 
 // Compares vectors exactly; all test transforms use binary-exact values.
@@ -113,7 +114,7 @@ void reset_collision_pairs() noexcept {
     std::fprintf(
         stderr,
         "rotated box details: resolved=%d pairs=%zu first=%u second=%u\n",
-        resolved ? 1 : 0, g_pairCount, g_pairEntityA, g_pairEntityB);
+        resolved ? 1 : 0, g_pairCount, g_pairEntityA.index, g_pairEntityB.index);
     return false;
   }
 
@@ -227,7 +228,8 @@ void reset_collision_pairs() noexcept {
   if (!resolved || !recorded_pair(child, obstacle)) {
     std::fprintf(stderr,
                  "compound details: resolved=%d pairs=%zu first=%u second=%u\n",
-                 resolved ? 1 : 0, g_pairCount, g_pairEntityA, g_pairEntityB);
+                 resolved ? 1 : 0, g_pairCount, g_pairEntityA.index,
+                 g_pairEntityB.index);
     return false;
   }
 

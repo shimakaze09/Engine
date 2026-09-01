@@ -59,20 +59,23 @@ bool insert_pair_key(PhysicsContext &ctx, std::uint64_t key) noexcept {
   return false;
 }
 
-void record_collision_pair(PhysicsWorldView &world, std::uint32_t idxA,
-                           std::uint32_t idxB) noexcept {
+void record_collision_pair(PhysicsWorldView &world, Entity entityA,
+                           Entity entityB) noexcept {
   PhysicsContext &ctx = world.physics_context();
   if (ctx.collisionPairCount >= kMaxCollisionPairs) {
     ++ctx.collisionPairDropCount;
     return;
   }
 
-  if (!insert_pair_key(ctx, make_pair_key(idxA, idxB))) {
+  // The dedupe key stays index-based: generations cannot change during a
+  // step (component mutation is phase-gated out), so indices are unique
+  // per entity for the whole recording pass.
+  if (!insert_pair_key(ctx, make_pair_key(entityA.index, entityB.index))) {
     return;
   }
 
-  ctx.collisionPairData[ctx.collisionPairCount * 2U] = idxA;
-  ctx.collisionPairData[ctx.collisionPairCount * 2U + 1U] = idxB;
+  ctx.collisionPairData[ctx.collisionPairCount * 2U] = entityA;
+  ctx.collisionPairData[ctx.collisionPairCount * 2U + 1U] = entityB;
   ++ctx.collisionPairCount;
 }
 
@@ -224,7 +227,7 @@ void resolve_pair_manifold(const PairContext &pair,
 /// Records the colliding pair, wakes sleeping bodies, and returns whether a
 /// positional/impulse response is required (false for static-static pairs).
 bool record_pair_and_wake(const PairContext &pair) noexcept {
-  record_collision_pair(pair.world, pair.entityA.index, pair.entityB.index);
+  record_collision_pair(pair.world, pair.entityA, pair.entityB);
   const float vA2 = (pair.bodyA != nullptr)
                         ? engine::math::length_sq(pair.bodyA->velocity)
                         : 0.0F;

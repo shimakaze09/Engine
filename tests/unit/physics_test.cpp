@@ -23,16 +23,17 @@ namespace {
 
 std::size_t g_dispatchedPairCount = 0U;
 // Captured copy of the dispatched pair list (first kMaxCollisionPairs).
-std::uint32_t g_dispatchedPairData[engine::physics::kMaxCollisionPairs * 2U];
+engine::runtime::Entity
+    g_dispatchedPairData[engine::physics::kMaxCollisionPairs * 2U];
 
-void test_collision_dispatch(const std::uint32_t *pairs,
+void test_collision_dispatch(const engine::runtime::Entity *pairs,
                              std::size_t pairCount) noexcept {
   g_dispatchedPairCount = pairCount;
   const std::size_t copyPairs = (pairCount < engine::physics::kMaxCollisionPairs)
                                     ? pairCount
                                     : engine::physics::kMaxCollisionPairs;
   std::memcpy(g_dispatchedPairData, pairs,
-              copyPairs * 2U * sizeof(std::uint32_t));
+              copyPairs * 2U * sizeof(engine::runtime::Entity));
 }
 
 int check_physics_cvars_register_after_core_cvars() {
@@ -1550,8 +1551,8 @@ int check_collision_bookkeeping_scale() {
   // duplicate unordered pair surviving the dedupe hash.
   bool seen[kBodies + 1U][kBodies + 1U] = {};
   for (std::size_t i = 0U; i < g_dispatchedPairCount; ++i) {
-    const std::uint32_t a = g_dispatchedPairData[i * 2U];
-    const std::uint32_t b = g_dispatchedPairData[(i * 2U) + 1U];
+    const std::uint32_t a = g_dispatchedPairData[i * 2U].index;
+    const std::uint32_t b = g_dispatchedPairData[(i * 2U) + 1U].index;
     if ((a < 1U) || (a > kBodies) || (b < 1U) || (b > kBodies) || (a == b)) {
       return 210;
     }
