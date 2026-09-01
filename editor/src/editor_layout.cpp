@@ -57,6 +57,12 @@ bool g_loadFailed = false;
 /// settling logs the reason once rather than once per settle.
 bool g_refusalLogged = false;
 
+/// The same log-once rule for the oversized-save refusal: a layout that
+/// has outgrown the storable cap re-raises WantSaveIniSettings on every
+/// settle for the rest of the session, so without a latch one condition
+/// becomes an identical error line every few seconds.
+bool g_oversizedLogged = false;
+
 /// Resolves the layout directory: the test override when set, otherwise
 /// the real per-user platform save directory.
 bool resolve_layout_directory(char *out, std::size_t capacity) noexcept {
@@ -95,6 +101,7 @@ bool editor_layout_initialize() noexcept {
   // one is stale; the load below re-arms it if the file is still unreadable.
   g_loadFailed = false;
   g_refusalLogged = false;
+  g_oversizedLogged = false;
   static_cast<void>(editor_layout_load());
   return true;
 }
@@ -168,8 +175,11 @@ bool editor_layout_save() noexcept {
     return false;
   }
   if (size > kMaxLayoutBytes - 1U) {
-    core::log_message(core::LogLevel::Error, kLogChannel,
-                      "editor layout exceeds the storable size; not saved");
+    if (!g_oversizedLogged) {
+      g_oversizedLogged = true;
+      core::log_message(core::LogLevel::Error, kLogChannel,
+                        "editor layout exceeds the storable size; not saved");
+    }
     return false;
   }
 
@@ -222,6 +232,7 @@ void editor_layout_set_directory_override_for_tests(
   // silently disable saving for the next case.
   g_loadFailed = false;
   g_refusalLogged = false;
+  g_oversizedLogged = false;
   if ((directory == nullptr) || (directory[0] == '\0')) {
     g_directoryOverride[0] = '\0';
     return;
