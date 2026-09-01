@@ -538,9 +538,17 @@ void select_entity(runtime::Entity entity, bool additive) noexcept {
                      : runtime::kInvalidEntity;
     return;
   }
-  if (session.selectedEntityCount < EditorSession::kMaxSelectedEntities) {
-    session.selectedEntities[session.selectedEntityCount++] = entity;
+  // The primary selection must always be a member of the retained set —
+  // the Inspector edits the set while the gizmo drives the primary, so a
+  // primary outside the set would let the two panels act on different
+  // entities. At capacity the pick is therefore refused whole (set and
+  // primary both unchanged) and the limit is surfaced to the console.
+  if (session.selectedEntityCount >= EditorSession::kMaxSelectedEntities) {
+    core::log_message(core::LogLevel::Warning, "editor",
+                      "selection is at capacity; entity not added");
+    return;
   }
+  session.selectedEntities[session.selectedEntityCount++] = entity;
   session.selectedEntity = entity;
 }
 

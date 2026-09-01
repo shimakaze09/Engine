@@ -350,6 +350,92 @@ int check_history_gated_while_playing() {
   return 0;
 }
 
+/// EXPECTATION (#350): the primary selection is always a member of the
+/// retained multi-selection. A pick that would grow the set past capacity
+/// is refused whole — set and primary both unchanged — so the Inspector's
+/// bulk target set and the gizmo target can never diverge; freeing a slot
+/// lets the same pick succeed normally.
+int check_selection_capacity_keeps_primary_in_set() {
+  using namespace engine::editor;
+  using namespace engine::runtime;
+
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 60;
+  }
+  editor_set_world(world.get());
+
+  constexpr std::size_t kCapacity = EditorSession::kMaxSelectedEntities;
+  Entity entities[kCapacity + 1U] = {};
+  for (std::size_t i = 0U; i <= kCapacity; ++i) {
+    entities[i] = world->create_scene_object();
+    if (entities[i] == kInvalidEntity) {
+      editor_set_world(nullptr);
+      return 61;
+    }
+  }
+
+  select_entity(entities[0], false);
+  for (std::size_t i = 1U; i < kCapacity; ++i) {
+    select_entity(entities[i], true);
+  }
+  const Entity lastInSet = entities[kCapacity - 1U];
+  if ((editor_session().selectedEntityCount != kCapacity) ||
+      (selected_entity() != lastInSet) || !is_entity_selected(lastInSet)) {
+    editor_set_world(nullptr);
+    return 62;
+  }
+
+  // The over-capacity pick changes nothing: not the set, not the primary.
+  const Entity overflow = entities[kCapacity];
+  select_entity(overflow, true);
+  if ((editor_session().selectedEntityCount != kCapacity) ||
+      is_entity_selected(overflow) || (selected_entity() != lastInSet) ||
+      !is_entity_selected(selected_entity())) {
+    editor_set_world(nullptr);
+    return 63;
+  }
+
+  // Repeating the refused pick stays stable.
+  select_entity(overflow, true);
+  if ((editor_session().selectedEntityCount != kCapacity) ||
+      is_entity_selected(overflow) || (selected_entity() != lastInSet)) {
+    editor_set_world(nullptr);
+    return 64;
+  }
+
+  // Ctrl-click deselecting the primary retargets it to a set member.
+  select_entity(lastInSet, true);
+  if ((editor_session().selectedEntityCount != kCapacity - 1U) ||
+      is_entity_selected(lastInSet) ||
+      (selected_entity() != entities[kCapacity - 2U]) ||
+      !is_entity_selected(selected_entity())) {
+    editor_set_world(nullptr);
+    return 65;
+  }
+
+  // With a slot free, the previously refused entity joins normally and
+  // becomes the primary.
+  select_entity(overflow, true);
+  if ((editor_session().selectedEntityCount != kCapacity) ||
+      !is_entity_selected(overflow) || (selected_entity() != overflow)) {
+    editor_set_world(nullptr);
+    return 66;
+  }
+
+  // A non-additive pick at capacity replaces the whole selection.
+  select_entity(overflow, false);
+  if ((editor_session().selectedEntityCount != 1U) ||
+      !is_entity_selected(overflow) || (selected_entity() != overflow)) {
+    editor_set_world(nullptr);
+    return 67;
+  }
+
+  clear_entity_selection();
+  editor_set_world(nullptr);
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -385,6 +471,12 @@ int main() {
   }
 
   result = check_history_gated_while_playing();
+  if (result != 0) {
+    std::fprintf(stderr, "editor_session_test failed: %d\n", result);
+    return result;
+  }
+
+  result = check_selection_capacity_keeps_primary_in_set();
   if (result != 0) {
     std::fprintf(stderr, "editor_session_test failed: %d\n", result);
     return result;
