@@ -33,6 +33,17 @@ engine::renderer::RenderDevice g_fakeDevice{};
 std::uint32_t g_nextProgram = 100U;
 std::uint32_t g_lastDestroyedProgram = 0U;
 std::uint32_t g_destroyedProgramCount = 0U;
+std::uint32_t g_linkAttemptCount = 0U;
+std::uint32_t g_shaderLogCount = 0U;
+
+/// Counts "shader"-channel diagnostics so the retry-storm regression can
+/// assert the per-frame poll stays silent for an unchanged bad generation.
+void counting_log_sink(engine::core::LogLevel /*level*/, const char *channel,
+                       const char * /*message*/, void * /*userData*/) noexcept {
+  if ((channel != nullptr) && (std::strcmp(channel, "shader") == 0)) {
+    ++g_shaderLogCount;
+  }
+}
 
 const char *cooked_profile() noexcept { return "spirv"; }
 
@@ -50,6 +61,7 @@ fake_create_program_binary(const void *vertData, std::ptrdiff_t vertSize,
                                 static_cast<std::size_t>(size));
     return text.find("FAILME") != std::string_view::npos;
   };
+  ++g_linkAttemptCount;
   if (broken(vertData, vertSize) || broken(fragData, fragSize)) {
     return engine::renderer::kInvalidDeviceProgram;
   }
@@ -201,6 +213,130 @@ int check_reload_swaps_program_and_signals_epoch() {
   return 0;
 }
 
+/// EXPECTATION (#391): a failed hot reload is attempted (and diagnosed)
+/// exactly once per watched-input generation — the per-frame poll must not
+/// repeat file reads, link attempts, or error logs for content already
+/// known bad. Each new generation (vertex-only, fragment-only, or both)
+/// earns exactly one new attempt, and a good recook recovers with one
+/// attempt after which the poll goes quiet again.
+int check_failed_reload_attempts_once_per_generation() {
+  configure_fake_device();
+  remove_files();
+  std::error_code ec{};
+  std::filesystem::create_directories(kCookedDir, ec);
+  if (ec) {
+    return 30;
+  }
+  if (!write_file(kVertBinFile, "cooked-vert-v1") ||
+      !write_file(kFragBinFile, "cooked-frag-v1")) {
+    return 31;
+  }
+  if (!engine::renderer::initialize_shader_system()) {
+    return 32;
+  }
+  if (!engine::core::log_register_sink(&counting_log_sink, nullptr)) {
+    return 33;
+  }
+
+  const engine::renderer::ShaderProgramHandle handle =
+      engine::renderer::load_shader_program(kVertVfsPath, kFragVfsPath);
+  if (handle == engine::renderer::kInvalidShaderProgram) {
+    return 34;
+  }
+  const engine::renderer::DeviceProgramHandle loaded =
+      engine::renderer::shader_device_program(handle);
+  const std::uint64_t epochLoaded = engine::renderer::shader_reload_epoch();
+
+  // One corrupt fragment generation: exactly one attempt however many
+  // frames poll it, and the diagnostics stop growing after the first poll.
+  if (!write_file(kFragBinFile, "FAILME") || !bump_mtime(kFragBinFile)) {
+    return 35;
+  }
+  g_linkAttemptCount = 0U;
+  engine::renderer::check_shader_reload();
+  const std::uint32_t logsAfterFirstPoll = g_shaderLogCount;
+  engine::renderer::check_shader_reload();
+  engine::renderer::check_shader_reload();
+  if (g_linkAttemptCount != 1U) {
+    return 36;
+  }
+  if (g_shaderLogCount != logsAfterFirstPoll) {
+    return 37;
+  }
+  if (engine::renderer::shader_device_program(handle) != loaded) {
+    return 38;
+  }
+  if (engine::renderer::shader_reload_epoch() != epochLoaded) {
+    return 39;
+  }
+
+  // The same bad content touched again is a new generation: one attempt.
+  if (!bump_mtime(kFragBinFile)) {
+    return 40;
+  }
+  g_linkAttemptCount = 0U;
+  engine::renderer::check_shader_reload();
+  engine::renderer::check_shader_reload();
+  if (g_linkAttemptCount != 1U) {
+    return 41;
+  }
+
+  // Vertex-only generation: one attempt.
+  if (!write_file(kVertBinFile, "FAILME") || !bump_mtime(kVertBinFile)) {
+    return 42;
+  }
+  g_linkAttemptCount = 0U;
+  engine::renderer::check_shader_reload();
+  engine::renderer::check_shader_reload();
+  if (g_linkAttemptCount != 1U) {
+    return 43;
+  }
+
+  // Both stages changed in one generation: still one attempt.
+  if (!bump_mtime(kVertBinFile) || !bump_mtime(kFragBinFile)) {
+    return 44;
+  }
+  g_linkAttemptCount = 0U;
+  engine::renderer::check_shader_reload();
+  engine::renderer::check_shader_reload();
+  if (g_linkAttemptCount != 1U) {
+    return 45;
+  }
+
+  // Recovery: a good recook relinks on one attempt, then the poll goes
+  // quiet — no further attempts for the now-current generation.
+  if (!write_file(kVertBinFile, "cooked-vert-v2") ||
+      !write_file(kFragBinFile, "cooked-frag-v2") ||
+      !bump_mtime(kVertBinFile) || !bump_mtime(kFragBinFile)) {
+    return 46;
+  }
+  g_linkAttemptCount = 0U;
+  engine::renderer::check_shader_reload();
+  const engine::renderer::DeviceProgramHandle recovered =
+      engine::renderer::shader_device_program(handle);
+  engine::renderer::check_shader_reload();
+  engine::renderer::check_shader_reload();
+  if (g_linkAttemptCount != 1U) {
+    return 47;
+  }
+  if ((recovered == loaded) ||
+      (recovered == engine::renderer::kInvalidDeviceProgram)) {
+    return 48;
+  }
+  if (engine::renderer::shader_device_program(handle) != recovered) {
+    return 49;
+  }
+  if (engine::renderer::shader_reload_epoch() != epochLoaded + 1U) {
+    return 50;
+  }
+
+  engine::renderer::destroy_shader_program(handle);
+  engine::core::log_unregister_sink(&counting_log_sink, nullptr);
+  engine::renderer::shutdown_shader_system();
+  remove_files();
+  return 0;
+}
+
 } // namespace
 
 namespace engine::renderer {
@@ -228,7 +364,10 @@ int main() {
     return 198;
   }
 
-  const int result = check_reload_swaps_program_and_signals_epoch();
+  int result = check_reload_swaps_program_and_signals_epoch();
+  if (result == 0) {
+    result = check_failed_reload_attempts_once_per_generation();
+  }
 
   engine::core::shutdown_vfs();
   engine::core::shutdown_logging();

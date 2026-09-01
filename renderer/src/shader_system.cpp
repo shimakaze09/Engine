@@ -59,6 +59,12 @@ struct ShaderEntry final {
   // check_shader_reload so a recook hot-reloads the program.
   char watchVertPath[kMaxPathLength * 2U] = {};
   char watchFragPath[kMaxPathLength * 2U] = {};
+  // Mtimes of the last *attempted* input generation, not the last success:
+  // a failed relink records them too, so a corrupt recook is diagnosed once
+  // and retried only when the cooked files change again — the poll runs
+  // every rendered frame and must not repeat file reads, link attempts, and
+  // error logs for content already known bad. deviceProgram independently
+  // keeps the last successful link across failed attempts.
   std::int64_t vertMtime = 0;
   std::int64_t fragMtime = 0;
 };
@@ -426,10 +432,15 @@ bool try_reload_entry(ShaderEntry &entry) noexcept {
       entry.vertPath, entry.fragPath, entry.defines, entry.defineCount,
       entry.watchVertPath, entry.watchFragPath);
   if (cooked == kInvalidDeviceProgram) {
+    // The failed generation is recorded as attempted so the per-frame
+    // watcher does not retry (and re-log) it every frame; the next recook
+    // moves the mtimes again and earns exactly one new attempt.
+    entry.vertMtime = core::vfs_file_mtime(entry.watchVertPath);
+    entry.fragMtime = core::vfs_file_mtime(entry.watchFragPath);
     char message[640] = {};
     std::snprintf(message, sizeof(message),
                   "%s %s: cooked shader binaries unavailable — keeping old "
-                  "program",
+                  "program until the cooked files change again",
                   entry.vertPath, entry.fragPath);
     core::log_message(core::LogLevel::Error, "shader", message);
     return false;
