@@ -166,7 +166,11 @@ EditorSession &editor_session() noexcept;
 /// selection still belongs to the attached world's current content epoch.
 bool is_entity_selected(runtime::Entity entity) noexcept;
 /// Selects an entity: replaces the selection, or toggles membership when
-/// additive (Ctrl-click). The primary selection follows the last pick.
+/// additive (Ctrl-click). The primary selection follows the last pick and
+/// is always a member of the retained set; a pick that would grow the set
+/// past kMaxSelectedEntities is refused whole (set and primary unchanged)
+/// with a console warning, so the Inspector's bulk target set and the
+/// gizmo target can never diverge.
 void select_entity(runtime::Entity entity, bool additive) noexcept;
 /// Clears the multi-selection and the primary selection.
 void clear_entity_selection() noexcept;
