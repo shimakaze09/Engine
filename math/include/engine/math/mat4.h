@@ -102,23 +102,51 @@ inline Mat4 transpose(const Mat4 &value) noexcept {
 #endif
 }
 
-/// Gauss-Jordan inverse with partial pivoting; returns false when the matrix
-/// is singular (pivot below epsilon) and leaves *out untouched.
+/// Gauss-Jordan inverse with partial pivoting. Returns false — leaving
+/// *out untouched — for non-finite input, an exactly singular pivot, or a
+/// computed inverse that fails the residual gate below. Singularity is
+/// judged by usability of the result rather than by any absolute pivot
+/// magnitude, so a transform with a finite nonzero axis scale of any
+/// magnitude (1e-7 as readily as 1e+7) inverts, while a matrix close
+/// enough to singular that its float inverse would be garbage is refused.
+/// The gate bounds max|M*inverse(M) - I| at 1e-3: orders of magnitude
+/// above the float-epsilon-scale residual of well-conditioned transforms,
+/// orders below the O(1)-and-up residual of a genuine float breakdown.
 inline bool inverse(const Mat4 &value, Mat4 *out) noexcept {
   if (out == nullptr) {
     return false;
   }
 
-  float m[4][8] = {{value.columns[0].x, value.columns[1].x, value.columns[2].x,
-                    value.columns[3].x, 1.0F, 0.0F, 0.0F, 0.0F},
-                   {value.columns[0].y, value.columns[1].y, value.columns[2].y,
-                    value.columns[3].y, 0.0F, 1.0F, 0.0F, 0.0F},
-                   {value.columns[0].z, value.columns[1].z, value.columns[2].z,
-                    value.columns[3].z, 0.0F, 0.0F, 1.0F, 0.0F},
-                   {value.columns[0].w, value.columns[1].w, value.columns[2].w,
-                    value.columns[3].w, 0.0F, 0.0F, 0.0F, 1.0F}};
+  // A non-finite entry poisons every downstream consumer; reject it here,
+  // where the contract is checkable, instead of letting NaN comparisons
+  // steer the elimination.
+  for (std::size_t col = 0U; col < 4U; ++col) {
+    const Vec4 &c = value.columns[col];
+    if (!std::isfinite(c.x) || !std::isfinite(c.y) || !std::isfinite(c.z) ||
+        !std::isfinite(c.w)) {
+      return false;
+    }
+  }
 
-  constexpr float kEpsilon = 1.0e-6F;
+  // Row-major copy of the input, kept for the residual gate at the end.
+  const float src[4][4] = {
+      {value.columns[0].x, value.columns[1].x, value.columns[2].x,
+       value.columns[3].x},
+      {value.columns[0].y, value.columns[1].y, value.columns[2].y,
+       value.columns[3].y},
+      {value.columns[0].z, value.columns[1].z, value.columns[2].z,
+       value.columns[3].z},
+      {value.columns[0].w, value.columns[1].w, value.columns[2].w,
+       value.columns[3].w}};
+
+  float m[4][8] = {{src[0][0], src[0][1], src[0][2], src[0][3],
+                    1.0F, 0.0F, 0.0F, 0.0F},
+                   {src[1][0], src[1][1], src[1][2], src[1][3],
+                    0.0F, 1.0F, 0.0F, 0.0F},
+                   {src[2][0], src[2][1], src[2][2], src[2][3],
+                    0.0F, 0.0F, 1.0F, 0.0F},
+                   {src[3][0], src[3][1], src[3][2], src[3][3],
+                    0.0F, 0.0F, 0.0F, 1.0F}};
 
   for (std::size_t col = 0U; col < 4U; ++col) {
     std::size_t pivotRow = col;
@@ -132,7 +160,11 @@ inline bool inverse(const Mat4 &value, Mat4 *out) noexcept {
       }
     }
 
-    if (pivot <= kEpsilon) {
+    // Only an exactly zero pivot is structural singularity; everything
+    // between zero and "too ill-conditioned for float" is caught by the
+    // residual gate on the finished inverse, which measures the actual
+    // damage instead of guessing from one pivot's magnitude.
+    if (pivot == 0.0F) {
       return false;
     }
 
@@ -144,7 +176,12 @@ inline bool inverse(const Mat4 &value, Mat4 *out) noexcept {
       }
     }
 
+    // A denormal pivot overflows its reciprocal to infinity; that is the
+    // same unusable-inverse outcome as a zero pivot, caught eagerly.
     const float invPivot = 1.0F / m[col][col];
+    if (!std::isfinite(invPivot)) {
+      return false;
+    }
     for (std::size_t j = 0U; j < 8U; ++j) {
       m[col][j] *= invPivot;
     }
@@ -154,13 +191,51 @@ inline bool inverse(const Mat4 &value, Mat4 *out) noexcept {
         continue;
       }
 
+      // Only an exact zero skips the elimination: a small-but-nonzero
+      // factor still carries real coupling for rows whose own scale is
+      // small, and dropping it would silently degrade their inverse.
       const float factor = m[row][col];
-      if (std::fabs(factor) <= kEpsilon) {
+      if (factor == 0.0F) {
         continue;
       }
 
       for (std::size_t j = 0U; j < 8U; ++j) {
         m[row][j] -= factor * m[col][j];
+      }
+    }
+  }
+
+  for (std::size_t row = 0U; row < 4U; ++row) {
+    for (std::size_t j = 4U; j < 8U; ++j) {
+      if (!std::isfinite(m[row][j])) {
+        return false;
+      }
+    }
+  }
+
+  // Residual gate: reject an inverse float precision could not actually
+  // deliver. The residual of M*inverse(M) against I is normalized by the
+  // magnitudes summed into each entry (a backward-error measure): entries
+  // built from large operands — a big translation against a big scale —
+  // legitimately carry rounding proportional to those operands, while a
+  // genuine breakdown loses all significance and lands at the normalized
+  // O(1) scale. The +1 floor keeps small-magnitude entries held to the
+  // absolute bound. m[r][4 + c] holds inverse(M)[r][c].
+  constexpr float kMaxResidual = 1.0e-3F;
+  for (std::size_t row = 0U; row < 4U; ++row) {
+    for (std::size_t col = 0U; col < 4U; ++col) {
+      float product = 0.0F;
+      float magnitude = 0.0F;
+      for (std::size_t k = 0U; k < 4U; ++k) {
+        const float term = src[row][k] * m[k][4U + col];
+        product += term;
+        magnitude += std::fabs(term);
+      }
+      const float expected = (row == col) ? 1.0F : 0.0F;
+      if (!std::isfinite(magnitude) ||
+          !(std::fabs(product - expected) <=
+            (kMaxResidual * (magnitude + 1.0F)))) {
+        return false;
       }
     }
   }

@@ -449,5 +449,84 @@ int main() {
     return 44;
   }
 
+  // Inverse conditioning (issue #389): singularity is judged by the
+  // usability of the computed inverse, not an absolute pivot cutoff, so a
+  // rotated TRS with a finite nonzero small axis scale stays invertible
+  // down to (and past) the old absolute 1e-6 pivot threshold. Tolerance
+  // justification: identity entries are O(1), so the absolute bound
+  // doubles as a relative one; the Gauss-Jordan residual measured at most
+  // ~1e-6 (about 8 float epsilons) across these cases, and 1e-5 leaves
+  // 10x headroom without ever accepting a wrong inverse.
+  {
+    const engine::math::Quat smallRot = engine::math::from_axis_angle(
+        engine::math::Vec3(0.3F, 0.8F, 0.52F), 0.9F);
+    const float smallScales[] = {1.0e-3F, 1.0e-6F, 1.0e-7F};
+    int code = 45;
+    for (const float smallScale : smallScales) {
+      const engine::math::Mat4 nonuniform = engine::math::compose_trs(
+          engine::math::Vec3(1.0F, 2.0F, 3.0F), smallRot,
+          engine::math::Vec3(smallScale, 1.0F, 2.0F));
+      engine::math::Mat4 smallInv{};
+      if (!engine::math::inverse(nonuniform, &smallInv)) {
+        return code;
+      }
+      if (!check_identity(engine::math::mul(nonuniform, smallInv), 1.0e-5F)) {
+        return code + 1;
+      }
+
+      const engine::math::Mat4 uniform = engine::math::compose_trs(
+          engine::math::Vec3(-4.0F, 0.5F, 9.0F), smallRot,
+          engine::math::Vec3(smallScale, smallScale, smallScale));
+      if (!engine::math::inverse(uniform, &smallInv)) {
+        return code + 2;
+      }
+      if (!check_identity(engine::math::mul(uniform, smallInv), 1.0e-5F)) {
+        return code + 3;
+      }
+      code += 4;
+    }
+  }
+
+  // True degeneracy and non-finite input stay rejected, and *out stays
+  // untouched on refusal.
+  {
+    const engine::math::Quat smallRot = engine::math::from_axis_angle(
+        engine::math::Vec3(0.0F, 1.0F, 0.0F), 0.4F);
+    const engine::math::Mat4 zeroScale = engine::math::compose_trs(
+        engine::math::Vec3(1.0F, 1.0F, 1.0F), smallRot,
+        engine::math::Vec3(0.0F, 1.0F, 1.0F));
+    engine::math::Mat4 sentinel = engine::math::identity();
+    sentinel.columns[3].x = 123.0F;
+    const engine::math::Mat4 sentinelCopy = sentinel;
+    if (engine::math::inverse(zeroScale, &sentinel)) {
+      return 57;
+    }
+
+    engine::math::Mat4 nanMatrix = engine::math::identity();
+    nanMatrix.columns[1].y = std::numeric_limits<float>::quiet_NaN();
+    if (engine::math::inverse(nanMatrix, &sentinel)) {
+      return 58;
+    }
+
+    engine::math::Mat4 infMatrix = engine::math::identity();
+    infMatrix.columns[2].z = std::numeric_limits<float>::infinity();
+    if (engine::math::inverse(infMatrix, &sentinel)) {
+      return 59;
+    }
+
+    for (std::size_t col = 0U; col < 4U; ++col) {
+      if (!nearly_equal(sentinel.columns[col].x, sentinelCopy.columns[col].x,
+                        0.0F) ||
+          !nearly_equal(sentinel.columns[col].y, sentinelCopy.columns[col].y,
+                        0.0F) ||
+          !nearly_equal(sentinel.columns[col].z, sentinelCopy.columns[col].z,
+                        0.0F) ||
+          !nearly_equal(sentinel.columns[col].w, sentinelCopy.columns[col].w,
+                        0.0F)) {
+        return 60;
+      }
+    }
+  }
+
   return 0;
 }

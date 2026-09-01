@@ -5,6 +5,7 @@
 #include "engine/math/vec4.h"
 #include "engine/physics/collider.h"
 
+#include <cmath>
 #include <cstdio>
 #include <limits>
 
@@ -183,6 +184,37 @@ affine_matrix(const engine::math::Vec3 &column0,
                "nonfinite transform is rejected");
 }
 
+/// A finite nonzero axis scale below the old absolute pivot cutoff (issue
+/// #389) is a valid authored transform: the collider must keep its world
+/// geometry — with a usable world-to-local inverse — instead of silently
+/// dropping out of collision and queries.
+[[nodiscard]] bool test_small_scale_transform() noexcept {
+  engine::math::Collider collider{};
+  collider.shape = engine::math::ColliderShape::AABB;
+  collider.halfExtents = engine::math::Vec3(1.0F, 1.0F, 1.0F);
+  const engine::math::Mat4 smallScale =
+      affine_matrix(engine::math::Vec3(1.0e-7F, 0.0F, 0.0F),
+                    engine::math::Vec3(0.0F, 1.0F, 0.0F),
+                    engine::math::Vec3(0.0F, 0.0F, 2.0F),
+                    engine::math::Vec3(5.0F, 6.0F, 7.0F));
+
+  engine::physics::ColliderWorldGeometry geometry{};
+  if (!check(engine::physics::make_collider_world_geometry(
+                 collider, smallScale, nullptr, &geometry),
+             "small-scale geometry builds")) {
+    return false;
+  }
+
+  // The inverse actually works: the world-space center round-trips to the
+  // local origin. Tolerance: the entries are O(1) after the transform pair,
+  // and the computed inverse's residual is a few float epsilons.
+  const engine::math::Vec4 local = engine::math::mul(
+      geometry.worldToLocal, engine::math::Vec4(5.0F, 6.0F, 7.0F, 1.0F));
+  return check(std::fabs(local.x) < 1.0e-4F && std::fabs(local.y) < 1.0e-4F &&
+                   std::fabs(local.z) < 1.0e-4F,
+               "small-scale world center maps back to the local origin");
+}
+
 } // namespace
 
 int main() {
@@ -197,7 +229,7 @@ int main() {
              "collider local rotation defaults to identity") ||
       !test_box_transform() || !test_sphere_ellipsoid() ||
       !test_rotated_capsule() || !test_signed_scaled_hull() ||
-      !test_invalid_transforms()) {
+      !test_invalid_transforms() || !test_small_scale_transform()) {
     return 1;
   }
   return 0;
