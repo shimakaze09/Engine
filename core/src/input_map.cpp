@@ -715,7 +715,13 @@ bool load_input_bindings_from_buffer(const char *buffer,
 
   {
     const std::size_t count = parser.array_size(actionsVal);
-    for (std::size_t i = 0; i < count && i < kMaxInputActions; ++i) {
+    if (count > kMaxInputActions) {
+      log_message(LogLevel::Error, kLogChannel,
+                  "load_input_bindings: actions array exceeds capacity; "
+                  "rejecting the document");
+      return false;
+    }
+    for (std::size_t i = 0; i < count; ++i) {
       JsonValue actionVal{};
       if (!parser.get_array_element(actionsVal, i, &actionVal) ||
           (actionVal.type != JsonValue::Type::Object)) {
@@ -735,7 +741,13 @@ bool load_input_bindings_from_buffer(const char *buffer,
       if (parser.get_object_field(actionVal, "bindings", &bindingsVal) &&
           (bindingsVal.type == JsonValue::Type::Array)) {
         const std::size_t bCount = parser.array_size(bindingsVal);
-        for (std::size_t b = 0; b < bCount && b < kMaxBindingsPerAction; ++b) {
+        if (bCount > kMaxBindingsPerAction) {
+          log_message(LogLevel::Error, kLogChannel,
+                      "load_input_bindings: an action's bindings exceed "
+                      "capacity; rejecting the document");
+          return false;
+        }
+        for (std::size_t b = 0; b < bCount; ++b) {
           JsonValue bVal{};
           if (!parser.get_array_element(bindingsVal, b, &bVal) ||
               (bVal.type != JsonValue::Type::Object)) {
@@ -788,7 +800,13 @@ bool load_input_bindings_from_buffer(const char *buffer,
 
   {
     const std::size_t count = parser.array_size(axesVal);
-    for (std::size_t i = 0; i < count && i < kMaxInputAxes; ++i) {
+    if (count > kMaxInputAxes) {
+      log_message(LogLevel::Error, kLogChannel,
+                  "load_input_bindings: axes array exceeds capacity; "
+                  "rejecting the document");
+      return false;
+    }
+    for (std::size_t i = 0; i < count; ++i) {
       JsonValue axisVal{};
       if (!parser.get_array_element(axesVal, i, &axisVal) ||
           (axisVal.type != JsonValue::Type::Object)) {
@@ -808,7 +826,13 @@ bool load_input_bindings_from_buffer(const char *buffer,
       if (parser.get_object_field(axisVal, "sources", &sourcesVal) &&
           (sourcesVal.type == JsonValue::Type::Array)) {
         const std::size_t sCount = parser.array_size(sourcesVal);
-        for (std::size_t s = 0; s < sCount && s < kMaxSourcesPerAxis; ++s) {
+        if (sCount > kMaxSourcesPerAxis) {
+          log_message(LogLevel::Error, kLogChannel,
+                      "load_input_bindings: an axis's sources exceed "
+                      "capacity; rejecting the document");
+          return false;
+        }
+        for (std::size_t s = 0; s < sCount; ++s) {
           JsonValue sVal{};
           if (!parser.get_array_element(sourcesVal, s, &sVal) ||
               (sVal.type != JsonValue::Type::Object)) {

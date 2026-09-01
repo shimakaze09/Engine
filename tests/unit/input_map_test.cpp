@@ -810,6 +810,150 @@ bool test_save_to_directory_destination_fails() noexcept {
   return ok && (leftovers == 0U);
 }
 
+/// Over-capacity authored documents are rejected whole (issue #385): a
+/// syntactically valid document with 65 actions, nine bindings on one
+/// action, 65 axes, or nine sources on one axis must fail the load and
+/// leave the live mappings untouched — silently dropping the overflow
+/// entries would let the next save make that loss permanent. Documents at
+/// exactly the four capacities still load and round-trip byte-identically.
+bool test_over_capacity_load_rejected_whole() noexcept {
+  if (!init_all()) {
+    return false;
+  }
+
+  InputBinding binding{};
+  binding.type = InputBindingType::Key;
+  binding.code = kKey_Space;
+  add_input_action("jump", &binding, 1U);
+
+  // One action carrying 65 sibling entries, nine bindings on one action,
+  // 65 axes, and nine sources on one axis, each in an otherwise valid
+  // document.
+  std::string overActions = "{\"actions\":[";
+  for (int i = 0; i < 65; ++i) {
+    char entry[64] = {};
+    std::snprintf(entry, sizeof(entry), "%s{\"name\":\"a%d\",\"bindings\":[]}",
+                  (i > 0) ? "," : "", i);
+    overActions += entry;
+  }
+  overActions += "],\"axes\":[]}";
+
+  std::string overBindings = "{\"actions\":[{\"name\":\"many\",\"bindings\":[";
+  for (int i = 0; i < 9; ++i) {
+    char entry[64] = {};
+    std::snprintf(entry, sizeof(entry), "%s{\"type\":0,\"code\":%d}",
+                  (i > 0) ? "," : "", 40 + i);
+    overBindings += entry;
+  }
+  overBindings += "]}],\"axes\":[]}";
+
+  std::string overAxes = "{\"actions\":[],\"axes\":[";
+  for (int i = 0; i < 65; ++i) {
+    char entry[64] = {};
+    std::snprintf(entry, sizeof(entry), "%s{\"name\":\"x%d\",\"sources\":[]}",
+                  (i > 0) ? "," : "", i);
+    overAxes += entry;
+  }
+  overAxes += "]}";
+
+  std::string overSources = "{\"actions\":[],\"axes\":[{\"name\":\"m\",\"sources\":[";
+  for (int i = 0; i < 9; ++i) {
+    char entry[96] = {};
+    std::snprintf(entry, sizeof(entry),
+                  "%s{\"type\":0,\"negative_key\":4,\"positive_key\":7,"
+                  "\"scale\":1.0}",
+                  (i > 0) ? "," : "");
+    overSources += entry;
+  }
+  overSources += "]}]}";
+
+  const std::string *rejected[] = {&overActions, &overBindings, &overAxes,
+                                   &overSources};
+  for (const std::string *doc : rejected) {
+    if (load_input_bindings_from_buffer(doc->c_str(), doc->size())) {
+      shutdown_all();
+      return false;
+    }
+  }
+
+  // The live mappings survived all four refusals.
+  begin_input_frame();
+  sim_key_down(kKey_Space);
+  end_input_frame();
+  const bool actionIntact = is_mapped_action_down("jump");
+  begin_input_frame();
+  sim_key_up(kKey_Space);
+  end_input_frame();
+  if (!actionIntact) {
+    shutdown_all();
+    return false;
+  }
+
+  // Exact-capacity boundary: fill all four capacities through the public
+  // API, save, reload, and save again — the two documents must be
+  // byte-identical, proving capacity-sized data loads whole and round-trips
+  // unchanged.
+  shutdown_input_mapper();
+  initialize_input_mapper();
+
+  InputBinding fullBindings[kMaxBindingsPerAction] = {};
+  for (std::size_t b = 0; b < kMaxBindingsPerAction; ++b) {
+    fullBindings[b].type = InputBindingType::Key;
+    fullBindings[b].code = static_cast<int>(30U + b);
+  }
+  InputAxisSource fullSources[kMaxSourcesPerAxis] = {};
+  for (std::size_t v = 0; v < kMaxSourcesPerAxis; ++v) {
+    fullSources[v].type = AxisSourceType::KeyPair;
+    fullSources[v].negativeKey = static_cast<int>(4U + v);
+    fullSources[v].positiveKey = static_cast<int>(20U + v);
+    fullSources[v].scale = 1.0F;
+  }
+  char name[16] = {};
+  for (std::size_t i = 0; i < kMaxInputActions; ++i) {
+    std::snprintf(name, sizeof(name), "act%zu", i);
+    if (!add_input_action(name, fullBindings,
+                          (i == 0U) ? kMaxBindingsPerAction : 1U)) {
+      shutdown_all();
+      return false;
+    }
+  }
+  for (std::size_t i = 0; i < kMaxInputAxes; ++i) {
+    std::snprintf(name, sizeof(name), "axis%zu", i);
+    if (!add_input_axis(name, fullSources,
+                        (i == 0U) ? kMaxSourcesPerAxis : 1U)) {
+      shutdown_all();
+      return false;
+    }
+  }
+
+  static char firstSave[128U * 1024U] = {};
+  static char secondSave[128U * 1024U] = {};
+  std::size_t firstSize = 0U;
+  std::size_t secondSize = 0U;
+  if (!save_input_bindings_to_buffer(firstSave, sizeof(firstSave),
+                                     &firstSize)) {
+    shutdown_all();
+    return false;
+  }
+
+  shutdown_input_mapper();
+  initialize_input_mapper();
+  if (!load_input_bindings_from_buffer(firstSave, firstSize)) {
+    shutdown_all();
+    return false;
+  }
+  if (!save_input_bindings_to_buffer(secondSave, sizeof(secondSave),
+                                     &secondSize)) {
+    shutdown_all();
+    return false;
+  }
+
+  const bool roundTripped = (firstSize == secondSize) &&
+                            (std::memcmp(firstSave, secondSave, firstSize) == 0);
+  shutdown_all();
+  return roundTripped;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -847,6 +991,8 @@ int main() {
       &test_save_failure_preserves_existing_file);
   run("save_to_directory_destination_fails",
       &test_save_to_directory_destination_fails);
+  run("over_capacity_load_rejected_whole",
+      &test_over_capacity_load_rejected_whole);
   run("null_and_edge_cases", &test_null_and_edge_cases);
 
   std::printf("--- %d passed, %d failed ---\n", passed, failed);
