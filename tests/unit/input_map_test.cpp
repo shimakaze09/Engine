@@ -954,6 +954,236 @@ bool test_over_capacity_load_rejected_whole() noexcept {
   return roundTripped;
 }
 
+/// Inert probe callbacks: registration succeeds only for an existing entry,
+/// and neither reads the (null) user data if the mapper later fires it.
+void probe_action_cb(const char * /*name*/, bool /*pressed*/,
+                     void * /*userData*/) noexcept {}
+void probe_axis_cb(const char * /*name*/, float /*value*/,
+                   void * /*userData*/) noexcept {}
+
+/// Returns whether the mapper holds an action under exactly `name`, using
+/// callback registration as the lookup probe.
+bool has_action_named(const char *name) noexcept {
+  return set_action_callback(name, &probe_action_cb, nullptr);
+}
+
+/// Returns whether the mapper holds an axis under exactly `name`.
+bool has_axis_named(const char *name) noexcept {
+  return set_axis_callback(name, &probe_axis_cb, nullptr);
+}
+
+/// Loads `doc` into a fresh mapper (init_all already ran).
+bool load_doc(const char *doc) noexcept {
+  return load_input_bindings_from_buffer(doc, std::strlen(doc));
+}
+
+/// Authored names carrying JSON escapes must load as their decoded text
+/// (issue #386): an escaped quote, a backslash, and a BMP \u escape are
+/// looked up by the logical name, the saved document escapes them exactly
+/// once, and load/save/load is byte-stable.
+bool test_escaped_names_decode_and_round_trip() noexcept {
+  if (!init_all()) {
+    return false;
+  }
+
+  // Decoded names: say "hi" | back\slash | jump<e-acute> (U+00E9, UTF-8
+  // C3 A9) | move<tab>x.
+  const char *doc =
+      "{\"actions\":["
+      "{\"name\":\"say \\\"hi\\\"\",\"bindings\":[{\"type\":0,\"code\":44}]},"
+      "{\"name\":\"back\\\\slash\",\"bindings\":[]},"
+      "{\"name\":\"jump\\u00e9\",\"bindings\":[]}"
+      "],\"axes\":["
+      "{\"name\":\"move\\tx\",\"sources\":[]},"
+      "{\"name\":\"axis\\u00e9\",\"sources\":[]}"
+      "]}";
+  if (!load_doc(doc)) {
+    shutdown_all();
+    return false;
+  }
+
+  const bool decodedLookup =
+      has_action_named("say \"hi\"") && has_action_named("back\\slash") &&
+      has_action_named("jump\xC3\xA9") && has_axis_named("move\tx") &&
+      has_axis_named("axis\xC3\xA9");
+  // The encoded token bytes must not be a runtime identity.
+  const bool encodedRejected = !has_action_named("say \\\"hi\\\"") &&
+                               !has_action_named("back\\\\slash") &&
+                               !has_action_named("jump\\u00e9") &&
+                               !has_axis_named("move\\tx");
+  if (!decodedLookup || !encodedRejected) {
+    shutdown_all();
+    return false;
+  }
+
+  // The decoded name reaches callbacks and polling by its logical text.
+  CallbackState cbState{};
+  set_action_callback("say \"hi\"", &action_cb, &cbState);
+  begin_input_frame();
+  sim_key_down(kKey_Space);
+  end_input_frame();
+  const bool polled = is_mapped_action_down("say \"hi\"");
+  begin_input_frame();
+  sim_key_up(kKey_Space);
+  end_input_frame();
+  if (!polled || (cbState.pressedCount != 1) ||
+      (std::strcmp(cbState.lastName, "say \"hi\"") != 0)) {
+    shutdown_all();
+    return false;
+  }
+
+  // Save escapes each name exactly once: the quote appears as \" (not
+  // \\\"), the backslash as \\ (not \\\\), and the UTF-8 bytes verbatim.
+  char firstSave[4096] = {};
+  std::size_t firstSize = 0U;
+  if (!save_input_bindings_to_buffer(firstSave, sizeof(firstSave),
+                                     &firstSize)) {
+    shutdown_all();
+    return false;
+  }
+  const bool escapedOnce =
+      (std::strstr(firstSave, "\"say \\\"hi\\\"\"") != nullptr) &&
+      (std::strstr(firstSave, "\\\\\\\"") == nullptr) &&
+      (std::strstr(firstSave, "\"back\\\\slash\"") != nullptr) &&
+      (std::strstr(firstSave, "\\\\\\\\") == nullptr) &&
+      (std::strstr(firstSave, "jump\xC3\xA9") != nullptr) &&
+      (std::strstr(firstSave, "\\u00e9") == nullptr);
+  if (!escapedOnce) {
+    shutdown_all();
+    return false;
+  }
+
+  // Load/save/load: byte-identical document and identical runtime names.
+  shutdown_input_mapper();
+  initialize_input_mapper();
+  char secondSave[4096] = {};
+  std::size_t secondSize = 0U;
+  if (!load_input_bindings_from_buffer(firstSave, firstSize) ||
+      !save_input_bindings_to_buffer(secondSave, sizeof(secondSave),
+                                     &secondSize)) {
+    shutdown_all();
+    return false;
+  }
+  const bool stable = (firstSize == secondSize) &&
+                      (std::memcmp(firstSave, secondSave, firstSize) == 0) &&
+                      has_action_named("say \"hi\"") &&
+                      has_action_named("back\\slash") &&
+                      has_action_named("jump\xC3\xA9") &&
+                      has_axis_named("move\tx") &&
+                      has_axis_named("axis\xC3\xA9");
+  shutdown_all();
+  return stable;
+}
+
+/// Malformed escapes in a name reject the whole load and leave the live
+/// mappings untouched (issue #386): an unknown escape, a short \u, a lone
+/// high surrogate, an unpaired low surrogate, and \u0000.
+bool test_malformed_escape_names_rejected() noexcept {
+  if (!init_all()) {
+    return false;
+  }
+
+  InputBinding binding{};
+  binding.type = InputBindingType::Key;
+  binding.code = kKey_Space;
+  add_input_action("jump", &binding, 1U);
+
+  const char *rejected[] = {
+      "{\"actions\":[{\"name\":\"bad\\x\",\"bindings\":[]}],\"axes\":[]}",
+      "{\"actions\":[{\"name\":\"bad\\u12\",\"bindings\":[]}],\"axes\":[]}",
+      "{\"actions\":[{\"name\":\"bad\\ud800\",\"bindings\":[]}],\"axes\":[]}",
+      "{\"actions\":[{\"name\":\"bad\\udc00\",\"bindings\":[]}],\"axes\":[]}",
+      "{\"actions\":[{\"name\":\"bad\\u0000\",\"bindings\":[]}],\"axes\":[]}",
+      "{\"actions\":[],\"axes\":[{\"name\":\"bad\\q\",\"sources\":[]}]}",
+      "{\"actions\":[],\"axes\":[{\"name\":\"\\ud800x\",\"sources\":[]}]}",
+  };
+  for (const char *doc : rejected) {
+    if (load_doc(doc)) {
+      shutdown_all();
+      return false;
+    }
+  }
+
+  begin_input_frame();
+  sim_key_down(kKey_Space);
+  end_input_frame();
+  const bool actionIntact = is_mapped_action_down("jump");
+  begin_input_frame();
+  sim_key_up(kKey_Space);
+  end_input_frame();
+  shutdown_all();
+  return actionIntact;
+}
+
+/// The name-length limit applies to the decoded text (issue #386): a name
+/// whose escaped form is longer than the slot but decodes to exactly
+/// kMaxInputNameLen bytes loads whole, one decoded byte more is refused
+/// (whether the overflow comes from an escape or a multi-byte \u), and an
+/// escape-only name that decodes to nothing is refused as empty.
+bool test_decoded_name_length_boundaries() noexcept {
+  if (!init_all()) {
+    return false;
+  }
+
+  // 61 plain bytes + \" + \" = 63 decoded (65 encoded); 62 + two escapes
+  // = 64 decoded.
+  std::string atLimit = "{\"actions\":[{\"name\":\"";
+  std::string overLimit = atLimit;
+  atLimit.append(kMaxInputNameLen - 2U, 'n');
+  overLimit.append(kMaxInputNameLen - 1U, 'n');
+  atLimit += "\\\"\\\"\",\"bindings\":[]}],\"axes\":[]}";
+  overLimit += "\\\"\\\"\",\"bindings\":[]}],\"axes\":[]}";
+
+  // 31 x U+00E9 (two UTF-8 bytes each) + one plain byte = 63 decoded; 32 x
+  // U+00E9 = 64 decoded, both far shorter than the slot when encoded.
+  std::string utf8AtLimit = "{\"actions\":[],\"axes\":[{\"name\":\"";
+  std::string utf8OverLimit = utf8AtLimit;
+  for (std::size_t i = 0U; i < 31U; ++i) {
+    utf8AtLimit += "\\u00e9";
+    utf8OverLimit += "\\u00e9";
+  }
+  utf8AtLimit += "n";
+  utf8OverLimit += "\\u00e9";
+  utf8AtLimit += "\",\"sources\":[]}]}";
+  utf8OverLimit += "\",\"sources\":[]}]}";
+
+  if (!load_doc(atLimit.c_str())) {
+    shutdown_all();
+    return false;
+  }
+  std::string expected(kMaxInputNameLen - 2U, 'n');
+  expected += "\"\"";
+  if (!has_action_named(expected.c_str())) {
+    shutdown_all();
+    return false;
+  }
+  if (!load_doc(utf8AtLimit.c_str())) {
+    shutdown_all();
+    return false;
+  }
+  std::string expectedAxis;
+  for (std::size_t i = 0U; i < 31U; ++i) {
+    expectedAxis += "\xC3\xA9";
+  }
+  expectedAxis += "n";
+  if (!has_axis_named(expectedAxis.c_str())) {
+    shutdown_all();
+    return false;
+  }
+
+  const std::string *rejected[] = {&overLimit, &utf8OverLimit};
+  for (const std::string *doc : rejected) {
+    if (load_doc(doc->c_str())) {
+      shutdown_all();
+      return false;
+    }
+  }
+  // The over-limit refusals left the last accepted document in place.
+  const bool intact = has_axis_named(expectedAxis.c_str());
+  shutdown_all();
+  return intact;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -993,6 +1223,12 @@ int main() {
       &test_save_to_directory_destination_fails);
   run("over_capacity_load_rejected_whole",
       &test_over_capacity_load_rejected_whole);
+  run("escaped_names_decode_and_round_trip",
+      &test_escaped_names_decode_and_round_trip);
+  run("malformed_escape_names_rejected",
+      &test_malformed_escape_names_rejected);
+  run("decoded_name_length_boundaries",
+      &test_decoded_name_length_boundaries);
   run("null_and_edge_cases", &test_null_and_edge_cases);
 
   std::printf("--- %d passed, %d failed ---\n", passed, failed);
