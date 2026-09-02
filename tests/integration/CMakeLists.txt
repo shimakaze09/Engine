@@ -165,6 +165,19 @@ engine_add_test_executable(engine_integration_scene_flow
     integration
 )
 
+engine_add_test_executable(engine_integration_scene_load_collision_dispatch
+    SOURCES
+    scene_load_collision_dispatch_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_scripting
+    engine_renderer
+    engine_physics
+    engine_core
+    LABELS
+    integration
+)
+
 engine_add_test_executable(engine_integration_island_template
     SOURCES
     island_template_test.cpp

@@ -176,10 +176,13 @@ struct ResolveScratch;
 struct PhysicsContext final {
   PhysicsContext() noexcept;
   /// Copies context data and deep-copies owned shape payloads; the
-  /// transient resolve scratch is deliberately not copied.
+  /// transient resolve scratch and the run-tier collisionDispatch are
+  /// deliberately not copied (a copy starts with no dispatch installed).
   PhysicsContext(const PhysicsContext &other) noexcept;
   /// Copies context data and deep-copies owned shape payloads; the
-  /// transient resolve scratch is deliberately not copied.
+  /// transient resolve scratch is deliberately not copied and the
+  /// destination keeps its own collisionDispatch (run-tier state, not
+  /// world content, so a scene commit cannot detach the live callbacks).
   PhysicsContext &operator=(const PhysicsContext &other) noexcept;
   // Out-of-line (ResolveScratch is incomplete here).
   PhysicsContext(PhysicsContext &&other) noexcept;
@@ -197,6 +200,8 @@ struct PhysicsContext final {
   // destroy/spawn and retarget the event to an unrelated entity.
   std::array<Entity, kMaxCollisionPairs * 2U> collisionPairData{};
   std::size_t collisionPairCount = 0U;
+  // Run-tier callback installed by the World's owner (the pipeline) for the
+  // life of the run; survives every content copy into this context.
   CollisionDispatchFn collisionDispatch = nullptr;
 
   // Frame-accumulated pairs (issue #103): every fixed step appends its kept
