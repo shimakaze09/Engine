@@ -49,6 +49,12 @@ struct DeferredMutation final {
   runtime::MovementAuthority movementAuthority =
       runtime::MovementAuthority::None;
   bool setMovementAuthority = false;
+  // World content epoch at queue time. A scene replacement assigns a fresh
+  // World over the live one and restarts entity generations, so the new
+  // scene's entity at the same index carries the same {index, generation}
+  // and is_alive alone cannot tell it from the queued target; the epoch
+  // is the identity that changes.
+  std::uint32_t contentEpoch = 0U;
 };
 
 constexpr std::size_t kMaxDeferredMutations = 2048U;
@@ -56,10 +62,18 @@ DeferredMutation g_deferredMutations[kMaxDeferredMutations]{};
 std::size_t g_deferredMutationCount = 0U;
 std::mutex g_deferredMutationMutex{};
 
-/// Queues one deferred mutation for the next safe flush point. The queue
-/// state is mutex-guarded; flush releases the lock around each apply so
-/// on_end_play callbacks queueing further mutations cannot deadlock.
+/// Content epoch of the bound World, or 0 when no World is bound.
+std::uint32_t bound_world_content_epoch() noexcept {
+  const ScriptingRuntimeBinding &binding = runtime_binding();
+  return (binding.world != nullptr) ? binding.world->content_epoch() : 0U;
+}
+
+/// Queues one deferred mutation for the next safe flush point, stamped
+/// with the bound World's current content epoch. The queue state is
+/// mutex-guarded; flush releases the lock around each apply so on_end_play
+/// callbacks queueing further mutations cannot deadlock.
 bool queue_deferred_mutation(const DeferredMutation &mutation) noexcept {
+  const std::uint32_t contentEpoch = bound_world_content_epoch();
   std::lock_guard<std::mutex> lock(g_deferredMutationMutex);
   if (g_deferredMutationCount >= kMaxDeferredMutations) {
     core::log_message(core::LogLevel::Error, "scripting",
@@ -68,6 +82,7 @@ bool queue_deferred_mutation(const DeferredMutation &mutation) noexcept {
   }
 
   g_deferredMutations[g_deferredMutationCount] = mutation;
+  g_deferredMutations[g_deferredMutationCount].contentEpoch = contentEpoch;
   ++g_deferredMutationCount;
   return true;
 }
@@ -85,15 +100,18 @@ enum class PendingRead : std::uint8_t { None, Value, Removed };
 /// Finds the newest queued mutation affecting entity's component of the
 /// given snapshot type; a queued destroy (or matching remove) wins over
 /// older snapshots so setters cannot resurrect the component (issue #105).
+/// Entries queued against an earlier content epoch belong to a replaced
+/// scene and are invisible here, exactly as the flush will drop them.
 PendingRead find_pending_snapshot(runtime::Entity entity,
                                   DeferredMutationType snapshotType,
                                   DeferredMutationType removeType,
                                   bool hasRemoveType,
                                   DeferredMutation *out) noexcept {
+  const std::uint32_t liveEpoch = bound_world_content_epoch();
   std::lock_guard<std::mutex> lock(g_deferredMutationMutex);
   for (std::size_t i = g_deferredMutationCount; i > 0U; --i) {
     const DeferredMutation &mutation = g_deferredMutations[i - 1U];
-    if (!(mutation.entity == entity)) {
+    if (!(mutation.entity == entity) || (mutation.contentEpoch != liveEpoch)) {
       continue;
     }
     if ((mutation.type == DeferredMutationType::DestroyEntity) ||
@@ -528,9 +546,11 @@ bool apply_or_queue_remove_spot_light_component(
 /// applying a destroy runs on_end_play, which may queue new mutations —
 /// those append past the snapshot and survive into the next flush. Each
 /// mutation is copied out under the queue lock and applied unlocked so
-/// re-entrant queueing cannot deadlock. Apply failures and mutations
-/// dropped because their target entity died are counted and reported in
-/// one summary log instead of being silently discarded.
+/// re-entrant queueing cannot deadlock. Apply failures, mutations dropped
+/// because their target entity died, and mutations queued before a scene
+/// replacement (whose target index may now belong to an unrelated entity
+/// of the new scene) are counted and reported in one summary log instead
+/// of being silently discarded.
 void flush_deferred_mutations() noexcept {
   const ScriptingRuntimeBinding &binding = runtime_binding();
   if ((binding.world == nullptr) || (binding.services == nullptr) ||
@@ -547,8 +567,10 @@ void flush_deferred_mutations() noexcept {
     return;
   }
 
+  const std::uint32_t liveEpoch = binding.world->content_epoch();
   std::size_t failedApplies = 0U;
   std::size_t deadTargets = 0U;
+  std::size_t staleEpochTargets = 0U;
   const auto note = [&failedApplies](bool applied) noexcept {
     if (!applied) {
       ++failedApplies;
@@ -560,6 +582,10 @@ void flush_deferred_mutations() noexcept {
     {
       std::lock_guard<std::mutex> lock(g_deferredMutationMutex);
       mutation = g_deferredMutations[i];
+    }
+    if (mutation.contentEpoch != liveEpoch) {
+      ++staleEpochTargets;
+      continue;
     }
     if (!is_deferred_entity_current(binding.world, mutation.entity)) {
       ++deadTargets;
@@ -650,12 +676,14 @@ void flush_deferred_mutations() noexcept {
     g_deferredMutationCount = appended;
   }
 
-  if ((failedApplies > 0U) || (deadTargets > 0U)) {
-    char buffer[128] = {};
+  if ((failedApplies > 0U) || (deadTargets > 0U) ||
+      (staleEpochTargets > 0U)) {
+    char buffer[192] = {};
     std::snprintf(buffer, sizeof(buffer),
                   "deferred mutation flush: %zu applies failed, %zu targets "
-                  "already destroyed",
-                  failedApplies, deadTargets);
+                  "already destroyed, %zu queued before a scene replacement "
+                  "and dropped",
+                  failedApplies, deadTargets, staleEpochTargets);
     core::log_message(core::LogLevel::Warning, "scripting", buffer);
   }
 }
