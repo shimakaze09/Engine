@@ -575,6 +575,123 @@ int verify_overlong_prefab_name_rejected() {
   return 0;
 }
 
+/// Reads the whole prefab file; empty on failure.
+std::size_t read_prefab_text(char *buffer, std::size_t capacity) noexcept {
+  std::FILE *file = nullptr;
+#ifdef _WIN32
+  if (fopen_s(&file, kPrefabPath, "rb") != 0) {
+    file = nullptr;
+  }
+#else
+  file = std::fopen(kPrefabPath, "rb");
+#endif
+  if (file == nullptr) {
+    return 0U;
+  }
+  const std::size_t read = std::fread(buffer, 1U, capacity - 1U, file);
+  std::fclose(file);
+  buffer[read] = '\0';
+  return read;
+}
+
+/// A prefab captured from a child entity must not carry its parent link
+/// (issue #412): the saved Transform row is a root, and an instance never
+/// adopts a parentId from the document even when the target scene owns an
+/// entity under that persistent id. Also pins that a root source stays a
+/// root and that the parent's own persistent id is untouched.
+int verify_child_prefab_instantiates_as_root() {
+  using namespace engine::runtime;
+
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 500;
+  }
+  const Entity parent = world->create_scene_object();
+  const Entity child = world->create_scene_object();
+  if ((parent == kInvalidEntity) || (child == kInvalidEntity)) {
+    return 501;
+  }
+  const engine::core::PersistentId parentId = world->persistent_id(parent);
+  Transform childTransform{};
+  if ((parentId == engine::core::kInvalidPersistentId) ||
+      !world->get_transform(child, &childTransform)) {
+    return 502;
+  }
+  childTransform.position = engine::math::Vec3(1.0F, 2.0F, 3.0F);
+  childTransform.parentId = parentId;
+  if (!world->add_transform(child, childTransform)) {
+    return 503;
+  }
+
+  remove_prefab_file();
+  if (!save_prefab(*world, child, kPrefabPath)) {
+    return 504;
+  }
+  // The document itself must not name the source parent: exactly the root
+  // value is written.
+  static char text[8192] = {};
+  if (read_prefab_text(text, sizeof(text)) == 0U) {
+    return 505;
+  }
+  char foreign[48] = {};
+  std::snprintf(foreign, sizeof(foreign), "\"parentId\":%u",
+                static_cast<unsigned>(parentId));
+  if ((std::strstr(text, "\"parentId\":0") == nullptr) ||
+      (std::strstr(text, foreign) != nullptr)) {
+    return 506;
+  }
+
+  // Instantiate into the scene that still owns the source parent's id: the
+  // instance is a root, with the rest of the Transform intact.
+  const Entity instance = instantiate_prefab(*world, kPrefabPath);
+  Transform instanceTransform{};
+  if ((instance == kInvalidEntity) ||
+      !world->get_transform(instance, &instanceTransform)) {
+    return 507;
+  }
+  if ((instanceTransform.parentId != engine::core::kInvalidPersistentId) ||
+      (instanceTransform.position.x != 1.0F) ||
+      (instanceTransform.position.y != 2.0F) ||
+      (instanceTransform.position.z != 3.0F)) {
+    return 508;
+  }
+
+  // A hand-authored (or pre-fix) document carrying a parentId that names a
+  // live entity here is normalized to a root rather than re-parented.
+  char authored[160] = {};
+  std::snprintf(authored, sizeof(authored),
+                "{\"version\":1,\"components\":{\"Transform\":{"
+                "\"position\":[4,5,6],\"parentId\":%u}}}",
+                static_cast<unsigned>(parentId));
+  if (!write_prefab_text(authored)) {
+    return 509;
+  }
+  const Entity normalized = instantiate_prefab(*world, kPrefabPath);
+  Transform normalizedTransform{};
+  if ((normalized == kInvalidEntity) ||
+      !world->get_transform(normalized, &normalizedTransform) ||
+      (normalizedTransform.parentId != engine::core::kInvalidPersistentId) ||
+      (normalizedTransform.position.x != 4.0F)) {
+    return 510;
+  }
+
+  // Boundary: a root source stays a root, and the parent entity keeps its
+  // own persistent id through every instantiate above.
+  remove_prefab_file();
+  if (!save_prefab(*world, parent, kPrefabPath)) {
+    return 511;
+  }
+  const Entity rootInstance = instantiate_prefab(*world, kPrefabPath);
+  Transform rootTransform{};
+  if ((rootInstance == kInvalidEntity) ||
+      !world->get_transform(rootInstance, &rootTransform) ||
+      (rootTransform.parentId != engine::core::kInvalidPersistentId) ||
+      (world->persistent_id(parent) != parentId)) {
+    return 512;
+  }
+  return 0;
+}
+
 int main() {
   remove_prefab_file();
 
@@ -886,6 +1003,12 @@ int main() {
   }
 
   result = verify_prefab_save_refuses_unserializable_payloads();
+  if (result != 0) {
+    remove_prefab_file();
+    return result;
+  }
+
+  result = verify_child_prefab_instantiates_as_root();
   if (result != 0) {
     remove_prefab_file();
     return result;
