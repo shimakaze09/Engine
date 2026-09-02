@@ -493,6 +493,156 @@ int check_recent_scenes_persist_and_prune() {
   return ok ? 0 : 5;
 }
 
+/// Writes `contents` to `path`; false on any failure.
+bool write_file_bytes(const char *path, const std::string &contents) noexcept {
+  std::FILE *file = nullptr;
+#ifdef _WIN32
+  if (fopen_s(&file, path, "wb") != 0) {
+    file = nullptr;
+  }
+#else
+  file = std::fopen(path, "wb");
+#endif
+  if (file == nullptr) {
+    return false;
+  }
+  const bool ok =
+      std::fwrite(contents.data(), 1U, contents.size(), file) == contents.size();
+  return (std::fclose(file) == 0) && ok;
+}
+
+/// Reads the whole file at `path`; empty when missing or unreadable.
+std::string read_file_bytes(const char *path) {
+  std::FILE *file = nullptr;
+#ifdef _WIN32
+  if (fopen_s(&file, path, "rb") != 0) {
+    file = nullptr;
+  }
+#else
+  file = std::fopen(path, "rb");
+#endif
+  if (file == nullptr) {
+    return {};
+  }
+  std::string bytes;
+  char chunk[4096] = {};
+  for (;;) {
+    const std::size_t read = std::fread(chunk, 1U, sizeof(chunk), file);
+    bytes.append(chunk, read);
+    if (read < sizeof(chunk)) {
+      break;
+    }
+  }
+  std::fclose(file);
+  return bytes;
+}
+
+/// EXPECTATION (issue #321): a recent-scenes file that exists but cannot be
+/// read this session (here: a valid list larger than the reader's fixed
+/// buffer) starts the session with an empty in-memory list and latches
+/// persistence off, so a later add updates the in-memory list but leaves
+/// the stored bytes exactly as they were. A stored path that is a
+/// directory (an unreadable file) latches the same way. A truly absent
+/// file still starts a fresh list that persists normally, and a readable
+/// file after the latch is cleared loads and persists again.
+int check_recent_scenes_unreadable_file_never_overwritten() {
+  if (!ensure_scratch_root()) {
+    return 1;
+  }
+  char recentDir[900] = {};
+  if (!make_scratch_path("recent_unreadable_dir", recentDir,
+                         sizeof(recentDir))) {
+    return 2;
+  }
+  std::error_code ec{};
+  std::filesystem::remove_all(std::filesystem::path(recentDir), ec);
+  std::filesystem::create_directories(std::filesystem::path(recentDir), ec);
+  if (ec) {
+    return 3;
+  }
+  char recentFile[1000] = {};
+  std::snprintf(recentFile, sizeof(recentFile), "%s/editor_recent_scenes.json",
+                recentDir);
+  char scenePath[1000] = {};
+  std::snprintf(scenePath, sizeof(scenePath), "%s/opened.json", recentDir);
+  if (!write_file_bytes(scenePath, "{}")) {
+    return 4;
+  }
+
+  // 1. TooLarge: a syntactically valid list whose bytes exceed the 8 KiB
+  //    reader buffer. Its entries all name the same existing scene so the
+  //    document would load fine through a bigger reader.
+  std::string oversized = "{\"scenes\":[";
+  while (oversized.size() < 9000U) {
+    oversized += "\"";
+    oversized += scenePath;
+    oversized += "\",";
+  }
+  oversized.pop_back();
+  oversized += "]}";
+  if (!write_file_bytes(recentFile, oversized)) {
+    return 5;
+  }
+
+  recent_scenes_set_directory_override_for_tests(recentDir);
+  bool ok = (recent_scene_count() == 0U);
+  recent_scenes_add(scenePath);
+  ok = ok && (recent_scene_count() == 1U) &&
+       (std::strcmp(recent_scene_at(0U), scenePath) == 0);
+  // The stored bytes are untouched by the add's persistence attempt.
+  ok = ok && (read_file_bytes(recentFile) == oversized);
+  if (!ok) {
+    recent_scenes_set_directory_override_for_tests("");
+    return 6;
+  }
+
+  // 2. Unreadable: the stored path is a directory. The session latches the
+  //    same way and the directory survives the add.
+  static_cast<void>(std::remove(recentFile));
+  std::filesystem::create_directories(std::filesystem::path(recentFile), ec);
+  if (ec) {
+    recent_scenes_set_directory_override_for_tests("");
+    return 7;
+  }
+  recent_scenes_set_directory_override_for_tests(recentDir);
+  ok = (recent_scene_count() == 0U);
+  recent_scenes_add(scenePath);
+  ok = ok && (recent_scene_count() == 1U) &&
+       std::filesystem::is_directory(std::filesystem::path(recentFile), ec);
+  std::filesystem::remove_all(std::filesystem::path(recentFile), ec);
+  if (!ok) {
+    recent_scenes_set_directory_override_for_tests("");
+    return 8;
+  }
+
+  // 3. Absent: no stored file starts a fresh list that persists normally.
+  recent_scenes_set_directory_override_for_tests(recentDir);
+  ok = (recent_scene_count() == 0U);
+  recent_scenes_add(scenePath);
+  const std::string persisted = read_file_bytes(recentFile);
+  ok = ok && (persisted.find(scenePath) != std::string::npos);
+  if (!ok) {
+    recent_scenes_set_directory_override_for_tests("");
+    return 9;
+  }
+
+  // 4. Recovery: the readable list written in step 3 loads on the next
+  //    session and keeps persisting (the latch was per unreadable file).
+  recent_scenes_set_directory_override_for_tests(recentDir);
+  ok = (recent_scene_count() == 1U) &&
+       (std::strcmp(recent_scene_at(0U), scenePath) == 0);
+  char secondScene[1000] = {};
+  std::snprintf(secondScene, sizeof(secondScene), "%s/second.json",
+                recentDir);
+  ok = ok && write_file_bytes(secondScene, "{}");
+  recent_scenes_add(secondScene);
+  ok = ok && (recent_scene_count() == 2U) &&
+       (read_file_bytes(recentFile).find(secondScene) != std::string::npos);
+
+  recent_scenes_set_directory_override_for_tests("");
+  return ok ? 0 : 10;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -520,6 +670,8 @@ int main() {
        &check_save_as_rejects_destination_outside_jail},
       {"check_recent_scenes_persist_and_prune",
        &check_recent_scenes_persist_and_prune},
+      {"check_recent_scenes_unreadable_file_never_overwritten",
+       &check_recent_scenes_unreadable_file_never_overwritten},
   };
 
   for (const auto &check : checks) {
