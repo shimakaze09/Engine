@@ -858,15 +858,16 @@ void dispatch_entity_scripts_end_for_transition() noexcept {
   if ((g_state == nullptr) || (runtime_binding().world == nullptr)) {
     return;
   }
-  // #198: close both reentrancy holes for the duration of this dispatch —
+  // Both reentrancy holes are closed for the duration of this dispatch:
   // g_endPlayDispatchDepth makes can_apply_mutations_now() defer (not
   // apply) any world mutation a handler triggers (spawn/destroy/etc.), and
   // the teardown-dispatch flag makes engine.load_scene/new_scene reject a
   // handler's own transition request instead of overwriting the one this
-  // dispatch is servicing. Deferred mutations queued here go stale once the
-  // replacement world commits (generation-checked, same as any other
-  // cross-transition Lua reference) and are simply dropped on the next
-  // flush.
+  // dispatch is servicing. Mutations deferred here carry the outgoing
+  // scene's content epoch; the replacement World restarts entity
+  // generations, so the epoch (not the handle's generation) is what makes
+  // the next flush drop them instead of retargeting the new scene's
+  // entities at the same indices.
   begin_scene_teardown_dispatch();
   ++g_endPlayDispatchDepth;
   dispatch_entity_scripts_end_impl(runtime_binding().world);
