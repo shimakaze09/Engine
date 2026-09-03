@@ -262,10 +262,24 @@ bool initialize_editor(void *sdlWindow) noexcept {
       ((displayScale > 0.0F) ? displayScale : 1.0F) *
       core::cvar_get_float("editor.ui_scale", 1.0F);
 
-  // Proper UI font (the 13px bitmap default reads as a debug tool). Falls
-  // back to the built-in font when the asset is missing.
-  const ImFont *editorFont = io.Fonts->AddFontFromFileTTF(
-      "assets/fonts/Roboto-Medium.ttf", 17.0F * uiScale);
+  // Proper UI font (the 13px bitmap default reads as a debug tool). The
+  // file is read here and handed to the atlas as memory: ImGui's own
+  // path-based loader asserts on an unreadable file in assert-enabled
+  // builds, which would turn a missing asset into an abort instead of the
+  // recoverable fallback below. The bytes are ImGui-allocated and the
+  // atlas takes ownership, so they live exactly as long as the font.
+  std::size_t fontBytes = 0U;
+  void *fontData =
+      ImFileLoadToMemory("assets/fonts/Roboto-Medium.ttf", "rb", &fontBytes);
+  const ImFont *editorFont = nullptr;
+  if ((fontData != nullptr) && (fontBytes > 0U) &&
+      (fontBytes <= static_cast<std::size_t>(
+                        std::numeric_limits<int>::max()))) {
+    editorFont = io.Fonts->AddFontFromMemoryTTF(
+        fontData, static_cast<int>(fontBytes), 17.0F * uiScale);
+  } else if (fontData != nullptr) {
+    IM_FREE(fontData);
+  }
   if (editorFont == nullptr) {
     core::log_message(core::LogLevel::Warning, "editor",
                       "editor font missing; using ImGui default");
