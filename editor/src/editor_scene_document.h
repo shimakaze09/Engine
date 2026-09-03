@@ -53,6 +53,12 @@ struct SceneDocumentState final {
   char recentScenes[kMaxRecentScenes][kMaxDocumentPathLength] = {};
   std::size_t recentSceneCount = 0U;
   bool recentScenesLoaded = false;
+  // Latched when the persisted list exists but could not be read (a read
+  // fault or a file past the fixed buffer): the in-memory list starts
+  // empty for the session, and automatic persistence is refused so the
+  // unread bytes are never replaced by that empty or reduced list. An
+  // absent file is not a fault and never sets this.
+  bool recentScenesLoadFailed = false;
 
   char lastSaveError[kMaxDocumentPathLength + 64U] = {};
 };

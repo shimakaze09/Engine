@@ -104,6 +104,12 @@ bool build_recent_scenes_path(char *out, std::size_t capacity) noexcept {
 
 void recent_scenes_persist() noexcept {
   const SceneDocumentState &doc = editor_session().document;
+  // The stored list was never read this session, so the in-memory list is
+  // not a superset of it; writing would replace bytes that may still be
+  // good. The diagnostic was logged once when the fault latched.
+  if (doc.recentScenesLoadFailed) {
+    return;
+  }
 
   char directory[900] = {};
   if (resolve_recent_scenes_directory(directory, sizeof(directory)) &&
@@ -532,6 +538,7 @@ void recent_scenes_load_once() noexcept {
   }
   doc.recentScenesLoaded = true;
   doc.recentSceneCount = 0U;
+  doc.recentScenesLoadFailed = false;
 
   char path[1024] = {};
   if (!build_recent_scenes_path(path, sizeof(path))) {
@@ -540,11 +547,28 @@ void recent_scenes_load_once() noexcept {
 
   char buffer[8192] = {};
   std::size_t size = 0U;
-  // Any non-Ok read leaves the in-memory recent list empty; a fault here is
-  // recoverable convenience data, and distinguishing it from absence is the
-  // reader's job (kept for diagnosis by callers that persist authored data).
-  if (core::read_whole_file(path, buffer, sizeof(buffer), &size) !=
-      core::FileReadResult::Ok) {
+  // Absent is the fresh-profile case and starts an empty list that persists
+  // normally. Any other non-Ok outcome means a stored list exists that this
+  // session could not read: the list stays empty in memory, but persistence
+  // is latched off so the unread file is preserved for a later session (or
+  // the user) instead of being replaced by an empty list.
+  const core::FileReadResult readResult =
+      core::read_whole_file(path, buffer, sizeof(buffer), &size);
+  if (readResult == core::FileReadResult::Absent) {
+    return;
+  }
+  if (readResult != core::FileReadResult::Ok) {
+    doc.recentScenesLoadFailed = true;
+    char message[1200] = {};
+    std::snprintf(message, sizeof(message),
+                  "recent scenes list could not be read (%s): %s; the list "
+                  "starts empty and will not be saved this session so the "
+                  "stored file is kept intact",
+                  (readResult == core::FileReadResult::TooLarge)
+                      ? "file larger than the 8 KiB reader buffer"
+                      : "read fault",
+                  path);
+    core::log_message(core::LogLevel::Warning, kLogChannel, message);
     return;
   }
 
@@ -661,9 +685,11 @@ void recent_scenes_set_directory_override_for_tests(
   std::snprintf(g_recentScenesDirectoryOverride,
                sizeof(g_recentScenesDirectoryOverride), "%s", directory);
   // A new directory invalidates the in-memory cache so the next accessor
-  // reloads from the (possibly now-empty) overridden location.
+  // reloads from the (possibly now-empty) overridden location; the load
+  // fault latch belongs to the file that was unreadable, so it clears too.
   editor_session().document.recentScenesLoaded = false;
   editor_session().document.recentSceneCount = 0U;
+  editor_session().document.recentScenesLoadFailed = false;
 }
 
 } // namespace engine::editor
