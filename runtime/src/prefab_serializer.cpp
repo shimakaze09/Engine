@@ -52,6 +52,25 @@ bool decode_prefab_component(const core::JsonParser &parser,
     return read_animation_component(parser, value, true, out);
   } else if (value.type != core::JsonValue::Type::Object) {
     return false;
+  } else if constexpr (std::is_same_v<T, Transform>) {
+    if (!read_reflected_component(parser, value,
+                                  component_descriptor(descs, out), out)) {
+      return false;
+    }
+    // A prefab instance is always a scene root: a parentId in the document
+    // names an entity of whatever scene the prefab was captured from, and
+    // the same number in the target scene is an unrelated entity (or
+    // nothing), so honoring it would silently re-parent the instance.
+    if (out->parentId != core::kInvalidPersistentId) {
+      char message[160] = {};
+      std::snprintf(message, sizeof(message),
+                    "instantiate_prefab: Transform parentId %u from the "
+                    "source scene is ignored; the instance is a root",
+                    static_cast<unsigned>(out->parentId));
+      core::log_message(core::LogLevel::Warning, "prefab", message);
+      out->parentId = core::kInvalidPersistentId;
+    }
+    return true;
   } else if constexpr (std::is_same_v<T, NameComponent>) {
     core::JsonValue nameValue{};
     if (parser.get_object_field(value, "name", &nameValue)) {
@@ -93,6 +112,14 @@ bool encode_prefab_component(core::JsonWriter &w, const char *key,
       w.write_string(key, component.scriptPath);
     }
     return true;
+  } else if constexpr (std::is_same_v<T, Transform>) {
+    // The template is a single entity, so its Transform row is written as
+    // a root: the source entity's parent link is a persistent id of the
+    // scene it was captured in and means nothing in any other scene.
+    Transform root = component;
+    root.parentId = core::kInvalidPersistentId;
+    return write_reflected_component(
+        w, key, component_descriptor(descs, &root), &root);
   } else if constexpr (std::is_same_v<T, AnimationComponent>) {
     write_animation_component(w, key, component);
     return true;
