@@ -88,8 +88,13 @@ PhysicsContext::PhysicsContext(const PhysicsContext &other) noexcept
   *this = other;
 }
 
+// collisionDispatch is left out of the copy on purpose (rationale below), so
+// the analyzer's "member not assigned in operator=" check is suppressed for
+// this definition.
+// cppcheck-suppress-begin operatorEqVarError
 PhysicsContext &
 PhysicsContext::operator=(const PhysicsContext &other) noexcept {
+  // cppcheck-suppress-end operatorEqVarError
   if (this == &other) {
     return *this;
   }
