@@ -165,6 +165,55 @@ void test_textures(TestContext &t) {
   t.check(dropped(dev) == afterDestroy + 1U, "stale texture bind dropped");
 }
 
+/// Wide uploads (regression test for #348): rows of exactly 65536 bytes,
+/// RGBA8 at 16384 wide and F32-staged RGBA16F at 8192 wide, go through
+/// texel creation, cpu-updatable creation, and a full-row update without
+/// a dropped operation. The Noop renderer cannot read texels back, so the
+/// row stride itself is not observable here; what this pins is that the
+/// device accepts the widths the loader admits and that every staged
+/// upload reaches bgfx (a wrapped 16-bit stride never rejected them, it
+/// corrupted them on a real backend).
+void test_wide_texture_uploads(TestContext &t) {
+  const RenderDevice *dev = render_device();
+  constexpr std::int32_t kWideRgba8 = 16384;
+  constexpr std::int32_t kWideRgba16f = 8192;
+  const std::vector<std::uint8_t> rgba8(
+      static_cast<std::size_t>(kWideRgba8) * 4U, 0x7FU);
+  const std::vector<float> rgba16f(static_cast<std::size_t>(kWideRgba16f) * 4U,
+                                   0.5f);
+
+  TextureDesc wide8{};
+  wide8.format = TextureFormat::RGBA8;
+  wide8.width = kWideRgba8;
+  wide8.height = 1;
+  wide8.pixels = rgba8.data();
+  const std::uint64_t before = dropped(dev);
+  const DeviceTextureHandle texels8 = dev->create_texture(wide8);
+  t.check(texels8.value != 0U, "16384-wide RGBA8 created with texels");
+
+  TextureDesc wide16{};
+  wide16.format = TextureFormat::RGBA16F;
+  wide16.pixelData = TexelData::F32;
+  wide16.width = kWideRgba16f;
+  wide16.height = 1;
+  wide16.pixels = rgba16f.data();
+  const DeviceTextureHandle texels16 = dev->create_texture(wide16);
+  t.check(texels16.value != 0U, "8192-wide RGBA16F created with texels");
+
+  TextureDesc updatable8 = wide8;
+  updatable8.pixels = nullptr;
+  updatable8.cpuUpdatable = true;
+  const DeviceTextureHandle updatable = dev->create_texture(updatable8);
+  t.check(updatable.value != 0U, "16384-wide cpu-updatable RGBA8 created");
+  dev->update_texture(updatable, rgba8.data(), kWideRgba8, 1);
+  t.check(dropped(dev) == before,
+          "65536-byte-row creations and update all reached bgfx");
+
+  dev->destroy_texture(texels8);
+  dev->destroy_texture(texels16);
+  dev->destroy_texture(updatable);
+}
+
 /// Render targets: empty-created color+depth attachments compose, a
 /// sampled (texel-created) texture is rejected as an attachment, and
 /// copy_depth between two depth-carrying targets is accepted.
@@ -730,6 +779,7 @@ int main() {
   test_lifecycle(t);
   test_buffers(t);
   test_textures(t);
+  test_wide_texture_uploads(t);
   test_render_targets(t);
   test_cpu_updatable_textures(t);
   test_texture_arrays(t);

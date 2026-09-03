@@ -181,6 +181,14 @@ void reset_views() noexcept {
 
 // --- Texel staging ---
 
+/// Row stride handed to bgfx for staged texels. stage_texels packs rows
+/// tightly, and this sentinel tells every backend to derive the stride
+/// from the rect's own width in 32-bit arithmetic. A stride computed here
+/// would be a 16-bit value that cannot represent a 65536-byte row (RGBA8
+/// at 16384 or RGBA16F at 8192 wide): it wraps to zero and the backend
+/// reads every row from the same offset.
+constexpr std::uint16_t kTightlyPackedPitch = UINT16_MAX;
+
 /// Stages one rectangle of client texels into bgfx-owned memory,
 /// applying the format's staging operation (half packing / RGBA
 /// widening). Returns nullptr when the size overflows bgfx's 32-bit
@@ -511,8 +519,6 @@ DeviceTextureHandle bgfx_create_texture(const TextureDesc &desc) noexcept {
     return kInvalidDeviceTexture;
   }
 
-  const std::uint16_t pitch = static_cast<std::uint16_t>(
-      desc.width * shape.dstBytesPerPixel);
   if ((desc.kind == TextureKind::Tex2D) && (desc.pixels != nullptr)) {
     const bgfx::Memory *mem =
         stage_texels(shape, desc.width, desc.height, desc.pixels);
@@ -520,7 +526,7 @@ DeviceTextureHandle bgfx_create_texture(const TextureDesc &desc) noexcept {
       bgfx::updateTexture2D(record.handle, 0U, 0U, 0U, 0U,
                             static_cast<std::uint16_t>(desc.width),
                             static_cast<std::uint16_t>(desc.height), mem,
-                            pitch);
+                            kTightlyPackedPitch);
     }
   } else if ((desc.kind == TextureKind::Cube) &&
              (desc.facePixels != nullptr)) {
@@ -534,7 +540,7 @@ DeviceTextureHandle bgfx_create_texture(const TextureDesc &desc) noexcept {
         bgfx::updateTextureCube(record.handle, 0U, face, 0U, 0U, 0U,
                                 static_cast<std::uint16_t>(desc.width),
                                 static_cast<std::uint16_t>(desc.width), mem,
-                                pitch);
+                                kTightlyPackedPitch);
       }
     }
   }
@@ -578,8 +584,7 @@ void bgfx_update_texture(DeviceTextureHandle texture, const void *pixels,
   }
   bgfx::updateTexture2D(
       record->handle, 0U, 0U, 0U, 0U, static_cast<std::uint16_t>(width),
-      static_cast<std::uint16_t>(height), mem,
-      static_cast<std::uint16_t>(width * shape.dstBytesPerPixel));
+      static_cast<std::uint16_t>(height), mem, kTightlyPackedPitch);
 }
 
 void bgfx_destroy_texture(DeviceTextureHandle texture) noexcept {
