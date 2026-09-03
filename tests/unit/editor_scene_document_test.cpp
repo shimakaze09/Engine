@@ -569,9 +569,11 @@ int check_recent_scenes_unreadable_file_never_overwritten() {
     return 4;
   }
 
-  // 1. TooLarge: a syntactically valid list whose bytes exceed the 8 KiB
-  //    reader buffer. Its entries all name the same existing scene so the
-  //    document would load fine through a bigger reader.
+  // 1. TooLarge: a list-shaped document whose bytes exceed the 8 KiB reader
+  //    buffer. The reader reports TooLarge before parsing, so these bytes
+  //    are never interpreted; the path is spliced in unescaped and the
+  //    document is only valid JSON where the path has no escapable
+  //    characters. What matters is that the bytes are exact and survive.
   std::string oversized = "{\"scenes\":[";
   while (oversized.size() < 9000U) {
     oversized += "\"";
@@ -616,28 +618,35 @@ int check_recent_scenes_unreadable_file_never_overwritten() {
   }
 
   // 3. Absent: no stored file starts a fresh list that persists normally.
+  //    Persistence is proven through the production reload path (a fresh
+  //    session reads the document back), not a byte search: the writer
+  //    escapes path separators, so the raw path is not a substring of the
+  //    stored bytes on every platform.
   recent_scenes_set_directory_override_for_tests(recentDir);
   ok = (recent_scene_count() == 0U);
   recent_scenes_add(scenePath);
-  const std::string persisted = read_file_bytes(recentFile);
-  ok = ok && (persisted.find(scenePath) != std::string::npos);
+  ok = ok && !read_file_bytes(recentFile).empty();
+  recent_scenes_set_directory_override_for_tests(recentDir);
+  ok = ok && (recent_scene_count() == 1U) &&
+       (std::strcmp(recent_scene_at(0U), scenePath) == 0);
   if (!ok) {
     recent_scenes_set_directory_override_for_tests("");
     return 9;
   }
 
-  // 4. Recovery: the readable list written in step 3 loads on the next
-  //    session and keeps persisting (the latch was per unreadable file).
-  recent_scenes_set_directory_override_for_tests(recentDir);
-  ok = (recent_scene_count() == 1U) &&
-       (std::strcmp(recent_scene_at(0U), scenePath) == 0);
+  // 4. Recovery: the readable list written in step 3 keeps persisting in
+  //    the session that loaded it (the latch was per unreadable file), so
+  //    a further add is visible to the session after that.
   char secondScene[1000] = {};
   std::snprintf(secondScene, sizeof(secondScene), "%s/second.json",
                 recentDir);
-  ok = ok && write_file_bytes(secondScene, "{}");
+  ok = write_file_bytes(secondScene, "{}");
   recent_scenes_add(secondScene);
+  ok = ok && (recent_scene_count() == 2U);
+  recent_scenes_set_directory_override_for_tests(recentDir);
   ok = ok && (recent_scene_count() == 2U) &&
-       (read_file_bytes(recentFile).find(secondScene) != std::string::npos);
+       (std::strcmp(recent_scene_at(0U), secondScene) == 0) &&
+       (std::strcmp(recent_scene_at(1U), scenePath) == 0);
 
   recent_scenes_set_directory_override_for_tests("");
   return ok ? 0 : 10;
