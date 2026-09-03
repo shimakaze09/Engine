@@ -12,10 +12,13 @@ engine_add_module_library(engine_audio
 
 # miniaudio is a single-header library — we only need its include path.
 # The implementation is compiled inside audio.cpp via MINIAUDIO_IMPLEMENTATION.
+# Pinned by commit SHA like every other FetchContent dependency: a tag can
+# be moved by the upstream, a commit cannot (tools/check_dependency_pins.py
+# enforces this).
 FetchContent_Declare(
     miniaudio
     GIT_REPOSITORY https://github.com/mackron/miniaudio.git
-    GIT_TAG 0.11.21
+    GIT_TAG 4a5b74bef029b3592c54b6048650ee5f972c1a48 # 0.11.21
     CONFIGURE_COMMAND ""
     BUILD_COMMAND ""
 )

@@ -20,7 +20,9 @@ scripting, miniaudio, ImGui editor. Goal: production level. Game authors work
 through Lua and the editor; engine contributors work in C++ under the rules
 below.
 
-Third-party (all SHA-pinned via FetchContent in the root CMakeLists.txt):
+Third-party (all SHA-pinned via FetchContent: the root CMakeLists.txt,
+plus miniaudio's declaration in audio/CMakeLists.txt, with
+`tools/check_dependency_pins.py` holding every pin to a commit SHA):
 SDL3 3.4.12, Lua 5.4.6, ImGui docking + ImGuizmo snapshots, cgltf 1.14
 (tools only), stb snapshot, miniaudio 0.11.21, bgfx v1.153 via the
 bgfx.cmake superproject (bundles bx/bimg; the only backend — default
@@ -143,6 +145,17 @@ is prohibited.
   migration requires a move.
 - **[OWNER]** No new third-party dependencies without confirmation; never ones
   requiring exceptions/RTTI in engine code.
+- **[CI][REVIEW]** Third-party code is content-addressed: every FetchContent
+  git dependency carries a 40-hex commit `GIT_TAG` (a `URL` download an
+  `URL_HASH`), and every remote GitHub Actions `uses:` reference pins a
+  commit SHA, so neither a cold build nor a privileged CI step can change
+  without a repository commit. `tools/check_dependency_pins.py` (#352) is
+  the mechanical gate, run in the static-analysis CI job beside the other
+  audits. It carries a shrinking allowlist of the action references still
+  on mutable tags (each keyed by its exact `uses:` text; an entry that no
+  longer matches anything is itself a finding), so the rule is [CI] for
+  FetchContent and for any action reference not on that list, and [REVIEW]
+  for the listed ones until the allowlist empties.
 - **[REVIEW]** Beginner-friendly APIs never justify incorrect internal
   semantics. Simplicity comes from presets, defaults, validation, diagnostics,
   undo/recovery, and progressive disclosure. Standard physics names such as
@@ -193,6 +206,7 @@ ctest --test-dir build --output-on-failure -R engine_bench_
 python tools/check_source_comments.py             # comment presence audit
 python tools/check_comment_quality.py             # comment quality audit
 python tools/check_module_deps.py                 # module dependency audit
+python tools/check_dependency_pins.py             # dependency pin audit
 cmake --build build --target analysis             # cppcheck / clang-tidy
 ```
 
@@ -521,7 +535,8 @@ directory-global by design.
   (deterministic cook, thumbnails, glTF mesh/skeleton/animation import,
   dependency graph), binding generator, asset generators (`gen_character`,
   `gen_props`, `gen_sounds`, `gen_island_scene`), comment audits, the
-  module dependency audit (`check_module_deps.py`, #311), CI
+  module dependency audit (`check_module_deps.py`, #311), the dependency
+  pin audit (`check_dependency_pins.py`, #352), CI
   helpers (the gates' own self-tests run as
   `engine_integration_tool_gates`). `tests/` — unit / integration /
   smoke (`gpu` label) / benchmark + `test_harness.h`.

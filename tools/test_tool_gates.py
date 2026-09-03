@@ -515,12 +515,144 @@ def test_module_dependency_gate():
           f"{sorted(deps.ENGINE_HELPER_KEYWORDS)})")
 
 
+def write_pin_fixture(root, cmake_body=None, workflow_body=None):
+    """Plants a minimal tree with one CMake listfile and one workflow."""
+    root.mkdir(parents=True, exist_ok=True)
+    if cmake_body is not None:
+        (root / "CMakeLists.txt").write_text(
+            "# Synthetic fixture for the dependency pin gate.\n" + cmake_body,
+            encoding="utf-8")
+    if workflow_body is not None:
+        workflows = root / ".github" / "workflows"
+        workflows.mkdir(parents=True, exist_ok=True)
+        (workflows / "ci.yml").write_text(
+            "# Synthetic fixture for the dependency pin gate.\n"
+            + workflow_body, encoding="utf-8")
+    return root
+
+
+PIN_SHA = "0123456789abcdef0123456789abcdef01234567"
+
+
+def test_dependency_pin_gate():
+    """The pin gate (issue #352) must accept only content-addressed
+    FetchContent declarations and SHA-pinned action references, ignore
+    what it should not audit, and hold its allowlist to exactly today's
+    mutable action tags."""
+    script = str(TOOLS / "check_dependency_pins.py")
+
+    def declare(tag_line):
+        return ("include(FetchContent)\n"
+                "FetchContent_Declare(\n"
+                "    dep\n"
+                "    GIT_REPOSITORY https://example.invalid/dep.git\n"
+                f"{tag_line}"
+                ")\n")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+
+        check(run([script, "--root", str(write_pin_fixture(
+            tmp / "clean", declare(f"    GIT_TAG {PIN_SHA} # v1.2\n"),
+            f"    steps:\n      - uses: actions/checkout@{PIN_SHA} # v6\n"
+        ))]) == 0,
+              "pins: a SHA-pinned tree passes")
+        check(run([script, "--root", str(write_pin_fixture(
+            tmp / "tag", declare("    GIT_TAG v1.2\n")))]) != 0,
+              "pins: a GIT_TAG naming a tag fails")
+        check(run([script, "--root", str(write_pin_fixture(
+            tmp / "variable", declare("    GIT_TAG ${DEP_TAG}\n")))]) != 0,
+              "pins: a GIT_TAG naming a variable fails")
+        check(run([script, "--root", str(write_pin_fixture(
+            tmp / "missing", declare("")))]) != 0,
+              "pins: a git declaration with no GIT_TAG fails")
+        check(run([script, "--root", str(write_pin_fixture(
+            tmp / "commented", declare(f"    # GIT_TAG {PIN_SHA}\n")))]) != 0,
+              "pins: a commented-out GIT_TAG is not a pin")
+        check(run([script, "--root", str(write_pin_fixture(
+            tmp / "quoted", declare(f'    GIT_TAG "{PIN_SHA}"\n')))]) == 0,
+              "pins: a quoted SHA is still a SHA")
+        check(run([script, "--root", str(write_pin_fixture(
+            tmp / "url_unhashed",
+            "FetchContent_Declare(dep URL https://example.invalid/d.zip)\n"
+        ))]) != 0,
+              "pins: a URL download without URL_HASH fails")
+        check(run([script, "--root", str(write_pin_fixture(
+            tmp / "url_hashed",
+            "FetchContent_Declare(dep URL https://example.invalid/d.zip\n"
+            f"    URL_HASH SHA256={PIN_SHA}{PIN_SHA[:24]})\n"))]) == 0,
+              "pins: a URL download with URL_HASH passes")
+        check(run([script, "--root", str(write_pin_fixture(
+            tmp / "source_dir",
+            "FetchContent_Declare(dep SOURCE_DIR ${CMAKE_SOURCE_DIR}/x)\n"
+        ))]) == 0,
+              "pins: a declaration that downloads nothing is not audited")
+
+        # A build tree's fetched CMake files are not this repository's
+        # declarations, whatever they pin.
+        build_tree = write_pin_fixture(tmp / "build_tree",
+                                       declare(f"    GIT_TAG {PIN_SHA}\n"))
+        write_pin_fixture(build_tree / "build" / "_deps" / "x-src",
+                          declare("    GIT_TAG main\n"))
+        check(run([script, "--root", str(build_tree)]) == 0,
+              "pins: fetched dependencies under build/ are skipped")
+
+        # Actions: the mutable tag is the finding; a local action and a
+        # commented-out step are not references the runner resolves.
+        check(run([script, "--root", str(write_pin_fixture(
+            tmp / "action_tag", workflow_body=(
+                "    steps:\n      - uses: actions/checkout@v6\n")))]) != 0,
+              "pins: an action referenced by tag fails outside the allowlist")
+        check(run([script, "--root", str(write_pin_fixture(
+            tmp / "action_none", workflow_body=(
+                "    steps:\n      - uses: actions/checkout\n")))]) != 0,
+              "pins: an action with no version reference fails")
+        check(run([script, "--root", str(write_pin_fixture(
+            tmp / "action_ok", workflow_body=(
+                "    steps:\n"
+                "      - uses: ./.github/actions/local\n"
+                "      # - uses: actions/checkout@v6\n"
+                f"      - uses: 'actions/checkout@{PIN_SHA}'\n"
+                "        with:\n          fetch-depth: 0\n")))]) == 0,
+              "pins: local, commented-out, and SHA-pinned actions pass")
+
+    # The real tree: green today, and the allowlist is load-bearing.
+    spec = importlib.util.spec_from_file_location(
+        "check_dependency_pins", TOOLS / "check_dependency_pins.py")
+    pins = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(pins)
+
+    argv = sys.argv
+    sys.argv = ["check_dependency_pins.py"]
+    try:
+        check(pins.main() == 0,
+              "pins: this checkout passes with its tracked allowlist")
+
+        excused = "actions/checkout@v6"
+        reason = pins.KNOWN_UNPINNED_ACTIONS.pop(excused)
+        check(pins.main() != 0,
+              "pins: an unexcused mutable action tag fails the gate")
+        pins.KNOWN_UNPINNED_ACTIONS[excused] = reason
+
+        stale = "example/nothing@v0"
+        pins.KNOWN_UNPINNED_ACTIONS[stale] = "stale fixture"
+        check(pins.main() != 0,
+              "pins: a stale allowlist entry fails the gate")
+        del pins.KNOWN_UNPINNED_ACTIONS[stale]
+
+        check(pins.main() == 0,
+              "pins: the allowlist is restored and the gate is green")
+    finally:
+        sys.argv = argv
+
+
 def main():
     test_coverage_gate()
     test_perf_gate_evaluate()
     test_metadata_path_check()
     test_binding_generator()
     test_module_dependency_gate()
+    test_dependency_pin_gate()
     if failures:
         print(f"\nFAILED ({len(failures)} failure(s))")
         return 1
