@@ -37,7 +37,11 @@ void shutdown_audio() noexcept;
 // Drive the audio engine pump.  Call once per frame.
 void update_audio() noexcept;
 
-// Load a sound from a VFS path (.wav, .mp3, .ogg, .flac).
+/// Loads a sound from a VFS path (.wav, .mp3, .ogg, .flac) into memory.
+/// Refused with a logged diagnostic naming the path when the file exceeds
+/// `audio.max_sound_file_bytes` (checked from file metadata before any of
+/// it is read) or its header claims more decoded PCM than
+/// `audio.max_decoded_pcm_bytes` (checked before the first frame decodes).
 SoundHandle load_sound(const char *virtualPath) noexcept;
 // Releases every loaded sound, live one-shot, and the streamed music while
 // the device stays up: sounds are run-scoped scene content and must not
@@ -95,7 +99,8 @@ bool play_sound_oneshot(SoundHandle handle, const PlayParams &params,
 /// Streams a music file on the Music bus; one track plays at a time and a
 /// new call replaces the current track. The virtual path resolves through
 /// the VFS to a loose OS file (archive-backed streaming is still pending);
-/// volume must be finite and >= 0 or the call fails.
+/// volume must be finite and >= 0 or the call fails, and a file larger than
+/// `audio.max_music_file_bytes` is refused before the stream opens.
 bool play_music(const char *virtualPath, float volume, bool loop) noexcept;
 /// Stops and releases the streamed music track.
 void stop_music() noexcept;

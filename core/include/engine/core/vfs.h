@@ -26,6 +26,12 @@ bool vfs_path_is_jailed(const char *virtualPath) noexcept;
 /// True when the virtual path resolves to an existing file.
 bool vfs_file_exists(const char *virtualPath) noexcept;
 
+/// Size in bytes of the regular file the virtual path resolves to; false
+/// when the path does not resolve or names something other than a regular
+/// file. Answers from file metadata without opening the file, so a caller
+/// can refuse an oversized input before any of it is read.
+bool vfs_file_size(const char *virtualPath, std::uint64_t *outSize) noexcept;
+
 // Read entire file into a heap-allocated buffer. Caller must call vfs_free().
 bool vfs_read_binary(const char *virtualPath,
                      void **outData,
