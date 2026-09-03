@@ -35,11 +35,14 @@ struct ChunkLoadArgs final {
   const char *path = nullptr;
 };
 
-/// Protected trampoline: loads the chunk file, re-raising the load error
-/// (syntax, I/O, or memory) so the wrapping pcall catches it.
+/// Protected trampoline: loads the chunk file as text only, re-raising the
+/// load error (syntax, I/O, memory, or a bytecode chunk) so the wrapping
+/// pcall catches it. Script sources are always text: Lua's undumper trusts
+/// its input, so a .lua file that begins with the bytecode signature is a
+/// load error, never a chunk.
 int chunk_load_trampoline(lua_State *state) noexcept {
   auto *args = static_cast<ChunkLoadArgs *>(lua_touserdata(state, 1));
-  if (luaL_loadfile(state, args->path) != LUA_OK) {
+  if (luaL_loadfilex(state, args->path, "t") != LUA_OK) {
     return lua_error(state);
   }
   return 1;
