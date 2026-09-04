@@ -1489,17 +1489,16 @@ int check_collision_bookkeeping_scale() {
   engine::runtime::set_collision_dispatch(*world, &test_collision_dispatch);
   g_dispatchedPairCount = 0U;
 
-  const auto start = std::chrono::steady_clock::now();
+  const auto start = std::chrono::steady_clock::now(); // wall-clock: diagnostic
   world->begin_update_phase();
   const bool stepped = engine::runtime::step_physics(*world, 1.0F / 60.0F);
   const bool resolved = engine::runtime::resolve_collisions(*world);
   world->commit_update_phase();
   world->begin_render_prep_phase();
   world->end_frame_phase();
+  const auto end = std::chrono::steady_clock::now(); // wall-clock: diagnostic
   const double elapsedMs =
-      std::chrono::duration<double, std::milli>(
-          std::chrono::steady_clock::now() - start)
-          .count();
+      std::chrono::duration<double, std::milli>(end - start).count();
 
   if (!stepped || !resolved) {
     return 203;
