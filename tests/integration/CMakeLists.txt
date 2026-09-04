@@ -668,6 +668,19 @@ engine_add_test_executable(engine_integration_scene_transition_end_play
     integration
 )
 
+# ---- #346: scene commits retire the camera interpolation history ----
+
+engine_add_test_executable(engine_integration_scene_commit_camera_history
+    SOURCES
+    scene_commit_camera_history_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_scripting
+    engine_renderer
+    LABELS
+    integration
+)
+
 # ---- #120: injected frame-stage fatal must map to FatalFrame ----
 
 engine_add_test_executable(engine_integration_run_fatal_frame
