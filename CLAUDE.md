@@ -630,7 +630,13 @@ directory-global by design.
   backend; device
   resources are owned by whichever system created them, destruction is
   immediate and idempotent, and `shutdown_render_device` invalidates every
-  outstanding handle. The command-buffer backend still initializes lazily
+  outstanding handle. Owners release before the device goes:
+  `engine::shutdown` closes the texture registry ahead of
+  `shutdown_renderer` (which releases the device last), and a registry
+  closed with no device live reports every owned texture it could not
+  release instead of dropping it silently
+  (`engine_integration_texture_owner_shutdown_order`). The command-buffer
+  backend still initializes lazily
   from the first flush, but only inside a lifetime its owner opened:
   `engine::bootstrap` calls `initialize_renderer`, `engine::shutdown`
   calls `shutdown_renderer`, and between the two a flush or probe bake is

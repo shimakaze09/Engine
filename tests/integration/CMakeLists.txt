@@ -38,6 +38,17 @@ engine_add_test_executable(engine_integration_texture_system_bootstrap
     gpu;integration
 )
 
+engine_add_test_executable(engine_integration_texture_owner_shutdown_order
+    SOURCES
+    texture_owner_shutdown_order_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_renderer
+    engine_core
+    LABELS
+    integration
+)
+
 engine_add_test_executable(engine_integration_pipeline_teardown_run_state
     SOURCES
     pipeline_teardown_run_state_test.cpp
