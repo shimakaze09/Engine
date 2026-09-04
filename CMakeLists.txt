@@ -415,6 +415,11 @@ if(CPPCHECK_EXE)
         # cppcheck assumes the returned DeviceProgramHandle (a plain
         # uint32) captures the variant source buffers passed to it (#165).
         --suppress=returnDanglingLifetime:*/renderer/src/shader_system.cpp
+        # Intentional: PhysicsContext::operator= leaves collisionDispatch
+        # untouched because the dispatch is run-tier state the engine
+        # installs on the live World, not world content a scene commit may
+        # overwrite (the rationale lives beside the definition).
+        --suppress=operatorEqVarError:*/physics/src/physics_payloads.cpp
         -i "${CMAKE_BINARY_DIR}/_deps"
         -i "${CMAKE_SOURCE_DIR}/tests"
         -i "${CMAKE_SOURCE_DIR}/tools"
