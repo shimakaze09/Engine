@@ -542,9 +542,15 @@ struct EnginePipeline::Impl final {
   double fpsWindowSeconds = 0.0;
   std::uint32_t fpsWindowFrames = 0U;
   float smoothedFps = 0.0F;
+  // Fixed-step camera history for render interpolation. Both samples were
+  // read from one World's content, identified by cameraSampleEpoch: a
+  // scene replacement discards that World, so the history is retired at
+  // the next camera stage instead of blending the replacement's first
+  // frame from a view no World owns any more.
   renderer::CameraState previousCameraSample{};
   renderer::CameraState currentCameraSample{};
   bool cameraSampleValid = false;
+  std::uint32_t cameraSampleEpoch = 0U;
   std::size_t updateStepCount = 0U;
   double frameMs = 0.0;
   double utilizationPct = 0.0;
@@ -1317,6 +1323,16 @@ void EnginePipeline::Impl::stage_camera() noexcept {
     return;
   }
 
+  // The World's content epoch changes only when a scene commit replaced
+  // its content (script load_scene/new_scene through the pending scene op,
+  // or a direct load); a failed load leaves it, and the history, intact.
+  const std::uint32_t contentEpoch = world->content_epoch();
+  const bool contentReplaced =
+      cameraSampleValid && (cameraSampleEpoch != contentEpoch);
+  if (contentReplaced) {
+    cameraSampleValid = false;
+  }
+
   runtime::update_spring_arm_cameras(*world,
                                      static_cast<float>(step_seconds()));
   runtime::update_persistent_cameras(*world,
@@ -1335,12 +1351,19 @@ void EnginePipeline::Impl::stage_camera() noexcept {
     cam.projection = evaluated.projection;
     cam.orthographicSize = evaluated.orthographicSize;
     renderer::set_active_camera(cam);
+  } else if (contentReplaced) {
+    // A replacement scene that publishes no camera of its own presents the
+    // renderer's default view; the outgoing scene's last camera is not a
+    // state this World ever established, and the audio listener follows
+    // whatever camera is active here.
+    renderer::set_active_camera(renderer::CameraState{});
   }
 
   previousCameraSample =
       cameraSampleValid ? currentCameraSample : renderer::get_active_camera();
   currentCameraSample = renderer::get_active_camera();
   cameraSampleValid = true;
+  cameraSampleEpoch = contentEpoch;
 }
 
 // ---------------------------------------------------------------------------
