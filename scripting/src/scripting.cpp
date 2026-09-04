@@ -322,10 +322,44 @@ void register_engine_bindings(lua_State *state) noexcept {
   lua_setglobal(state, "engine");
 }
 
+/// Sandbox `load`: forwards to the base library's load (upvalue 1) with the
+/// mode forced to "t", so precompiled bytecode is refused with Lua's own
+/// "attempt to load a binary chunk" error whatever mode the caller named.
+/// Lua's undumper trusts its input, so bytecode is never a safe chunk
+/// source for author content. The chunk and chunkname pass through; an
+/// explicit env (argument 4) is forwarded only when the caller supplied
+/// one, because forwarding nil in its place would set the chunk's _ENV to
+/// nil instead of leaving the global environment.
+int text_only_load(lua_State *state) noexcept {
+  const int argCount = lua_gettop(state);
+  lua_settop(state, 4);
+  lua_pushvalue(state, lua_upvalueindex(1));
+  lua_pushvalue(state, 1);
+  lua_pushvalue(state, 2);
+  lua_pushliteral(state, "t");
+  int forwarded = 3;
+  if (argCount >= 4) {
+    lua_pushvalue(state, 4);
+    forwarded = 4;
+  }
+  lua_call(state, forwarded, LUA_MULTRET);
+  return lua_gettop(state) - 4;
+}
+
 /// Protected trampoline: opens the safe library set and registers bindings.
 int open_libraries_trampoline(lua_State *state) noexcept {
   luaL_requiref(state, LUA_GNAME, luaopen_base, 1);
   lua_pop(state, 1);
+  // The base library's file loaders open OS paths straight through libc,
+  // outside every VFS jail check, so the sandbox keeps only the string
+  // loader, and that one text-only.
+  lua_pushnil(state);
+  lua_setglobal(state, "dofile");
+  lua_pushnil(state);
+  lua_setglobal(state, "loadfile");
+  lua_getglobal(state, "load");
+  lua_pushcclosure(state, &text_only_load, 1);
+  lua_setglobal(state, "load");
   luaL_requiref(state, LUA_COLIBNAME, luaopen_coroutine, 1);
   install_hooked_coroutine_library(state);
   lua_pop(state, 1);

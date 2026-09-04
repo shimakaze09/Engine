@@ -1,10 +1,12 @@
 // Verifies vfs test behavior for the Engine test suite.
 
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <string>
+#include <system_error>
 
 #include "engine/core/logging.h"
 #include "engine/core/vfs.h"
@@ -172,6 +174,42 @@ bool test_file_exists() noexcept {
   std::remove("_vfs_exist_test.dat");
   shutdown_vfs();
   return true;
+}
+
+/// vfs_file_size reports a regular file's exact byte count (zero included)
+/// from metadata, and refuses a directory, a missing file, an unmounted
+/// path, and a null output.
+bool test_file_size() noexcept {
+  namespace fs = std::filesystem;
+  if (!initialize_vfs()) {
+    return false;
+  }
+  if (!mount("root", ".")) {
+    shutdown_vfs();
+    return false;
+  }
+
+  const char *data = "12345";
+  bool ok = vfs_write_binary("root/_vfs_size_test.dat", data, 5U) &&
+            vfs_write_binary("root/_vfs_size_empty.dat", data, 0U);
+  std::error_code ec{};
+  fs::remove_all("_vfs_size_dir", ec);
+  ec.clear();
+  ok = ok && fs::create_directory("_vfs_size_dir", ec) && !ec;
+
+  std::uint64_t size = 99U;
+  ok = ok && vfs_file_size("root/_vfs_size_test.dat", &size) && (size == 5U);
+  ok = ok && vfs_file_size("root/_vfs_size_empty.dat", &size) && (size == 0U);
+  ok = ok && !vfs_file_size("root/_vfs_size_dir", &size);
+  ok = ok && !vfs_file_size("root/_vfs_size_missing.dat", &size);
+  ok = ok && !vfs_file_size("unmounted/_vfs_size_test.dat", &size);
+  ok = ok && !vfs_file_size("root/_vfs_size_test.dat", nullptr);
+
+  fs::remove_all("_vfs_size_dir", ec);
+  std::remove("_vfs_size_test.dat");
+  std::remove("_vfs_size_empty.dat");
+  shutdown_vfs();
+  return ok;
 }
 
 bool test_mtime() noexcept {
@@ -443,6 +481,9 @@ int main() {
   }
   if (!test_prefix_remount_cycles_and_nested()) {
     return 10;
+  }
+  if (!test_file_size()) {
+    return 11;
   }
   return 0;
 }

@@ -345,8 +345,9 @@ void check_concurrent_ingest_is_safe() noexcept {
 
 /// Moves the working directory to the nearest ancestor carrying the
 /// bundled editor font (the pipeline tests' asset-walk technique):
-/// initialize_editor loads it by relative path, and ImGui hard-asserts
-/// on a missing font file rather than reporting failure.
+/// initialize_editor loads it by relative path, and this test's subject
+/// is the sink retry, so the font stage runs with its real asset present
+/// rather than through the missing-font fallback.
 bool set_working_directory_with_editor_font() noexcept {
   std::error_code ec{};
   const std::filesystem::path original = std::filesystem::current_path(ec);

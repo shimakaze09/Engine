@@ -1,5 +1,6 @@
 // Integration tests for Lua sandboxing (P1-M2-G2).
-// Tests: restricted globals, CPU instruction limit, memory limit.
+// Tests: restricted globals, CPU instruction limit, memory limit, removed
+// file loaders, and text-only chunk loading.
 
 #include <cstdio>
 #include <cstring>
@@ -518,6 +519,136 @@ bool test_debug_blocked() noexcept {
   return result;
 }
 
+// -----------------------------------------------------------------------
+// 6. dofile/loadfile are absent and load is text-only (issue #409): the
+//    base library's file loaders open OS paths outside the VFS jail and
+//    load's default mode accepts bytecode, which Lua's undumper does not
+//    validate. The remaining load still runs text chunks with and without
+//    an explicit env, and rejects string.dump output under every mode.
+// -----------------------------------------------------------------------
+bool test_file_loaders_removed_and_load_text_only() noexcept {
+  engine::scripting::initialize_scripting();
+  auto world = std::unique_ptr<engine::runtime::World>(
+      new (std::nothrow) engine::runtime::World());
+  if (!world) {
+    return false;
+  }
+  engine::core::ServiceLocator serviceLocator{};
+  engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
+
+  engine::scripting::set_sandbox_enabled(true);
+
+  const char *code =
+      "assert(dofile == nil, 'dofile must not be available')\n"
+      "assert(loadfile == nil, 'loadfile must not be available')\n"
+      "assert(type(load) == 'function', 'load missing')\n"
+      "-- Text chunks still load: global env by default, explicit env when\n"
+      "-- given, and results plus errors pass through unchanged.\n"
+      "assert(load('return math.sqrt(16)')() == 4, 'text chunk broken')\n"
+      "assert(load('return x', 'envchunk', 't', {x = 5})() == 5,\n"
+      "       'explicit env ignored')\n"
+      "local none, err = load('return +', 'badchunk')\n"
+      "assert(none == nil and type(err) == 'string', 'syntax error lost')\n"
+      "-- Bytecode is refused whatever mode the caller names.\n"
+      "local dumped = string.dump(function() return 2 end)\n"
+      "for _, mode in ipairs({false, 'b', 'bt', 't'}) do\n"
+      "  local fn, why\n"
+      "  if mode then fn, why = load(dumped, 'dumped', mode)\n"
+      "  else fn, why = load(dumped, 'dumped') end\n"
+      "  assert(fn == nil, 'bytecode accepted under mode ' .. tostring(mode))\n"
+      "  assert(string.find(why, 'binary', 1, true), 'unexpected: ' .. why)\n"
+      "end\n"
+      "-- A reader-function chunk is subject to the same mode.\n"
+      "local served = false\n"
+      "local fn2 = load(function()\n"
+      "  if served then return nil end\n"
+      "  served = true\n"
+      "  return dumped\n"
+      "end)\n"
+      "assert(fn2 == nil, 'reader bytecode accepted')\n";
+
+  if (!write_script(code)) {
+    return false;
+  }
+  bool result = engine::scripting::load_script(kTempScript);
+  remove_script();
+  engine::scripting::shutdown_scripting();
+  return result;
+}
+
+// -----------------------------------------------------------------------
+// 7. A script file holding valid Lua 5.4 bytecode is refused by the
+//    engine's own chunk loader (issue #409): the file must fail to load and
+//    must not run. The bytes are the dump of `bytecode_marker = 1` under
+//    the engine's pinned Lua (64-bit little-endian layout, which every CI
+//    lane shares); an unreadable dump would also fail, so the marker global
+//    is the proof the chunk never executed.
+// -----------------------------------------------------------------------
+bool test_bytecode_script_file_refused() noexcept {
+  static const unsigned char kBytecode[] = {
+      0x1b, 0x4c, 0x75, 0x61, 0x54, 0x00, 0x19, 0x93, 0x0d, 0x0a, 0x1a,
+      0x0a, 0x04, 0x08, 0x08, 0x78, 0x56, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x28, 0x77, 0x40, 0x01, 0x80,
+      0x80, 0x80, 0x00, 0x01, 0x02, 0x83, 0x51, 0x00, 0x00, 0x00, 0x0f,
+      0x80, 0x00, 0x01, 0x46, 0x00, 0x01, 0x01, 0x82, 0x04, 0x90, 0x62,
+      0x79, 0x74, 0x65, 0x63, 0x6f, 0x64, 0x65, 0x5f, 0x6d, 0x61, 0x72,
+      0x6b, 0x65, 0x72, 0x03, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      0x00, 0x81, 0x01, 0x00, 0x00, 0x80, 0x80, 0x80, 0x80, 0x80};
+
+  engine::scripting::initialize_scripting();
+  auto world = std::unique_ptr<engine::runtime::World>(
+      new (std::nothrow) engine::runtime::World());
+  if (!world) {
+    return false;
+  }
+  engine::core::ServiceLocator serviceLocator{};
+  engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
+
+  engine::scripting::set_sandbox_enabled(true);
+
+  {
+    FILE *f = nullptr;
+#ifdef _WIN32
+    if (fopen_s(&f, kTempScript, "wb") != 0 || f == nullptr) {
+      engine::scripting::shutdown_scripting();
+      return false;
+    }
+#else
+    f = std::fopen(kTempScript, "wb");
+    if (f == nullptr) {
+      engine::scripting::shutdown_scripting();
+      return false;
+    }
+#endif
+    const bool wrote =
+        std::fwrite(kBytecode, 1U, sizeof(kBytecode), f) == sizeof(kBytecode);
+    std::fclose(f);
+    if (!wrote) {
+      remove_script();
+      engine::scripting::shutdown_scripting();
+      return false;
+    }
+  }
+
+  const bool refused = !engine::scripting::load_script(kTempScript);
+  remove_script();
+
+  // The chunk must not have executed: its only effect is the marker global.
+  const char *probe = "assert(bytecode_marker == nil, 'bytecode chunk ran')\n";
+  const bool markerAbsent =
+      write_script(probe) && engine::scripting::load_script(kTempScript);
+  remove_script();
+
+  // A text script still loads through the same loader afterwards.
+  const char *text = "text_marker = 1\n";
+  const bool textLoads =
+      write_script(text) && engine::scripting::load_script(kTempScript);
+  remove_script();
+
+  engine::scripting::shutdown_scripting();
+  return refused && markerAbsent && textLoads;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -543,6 +674,9 @@ int main() {
       {"memory_limit_enabled_post_init", test_memory_limit_enabled_post_init},
       {"memory_accounting_lifecycle", test_memory_accounting_lifecycle},
       {"debug_blocked", test_debug_blocked},
+      {"file_loaders_removed_and_load_text_only",
+       test_file_loaders_removed_and_load_text_only},
+      {"bytecode_script_file_refused", test_bytecode_script_file_refused},
   };
 
   for (const auto &tc : tests) {

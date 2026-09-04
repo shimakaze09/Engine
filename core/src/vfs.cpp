@@ -302,6 +302,35 @@ bool vfs_file_exists(const char *virtualPath) noexcept {
 #endif
 }
 
+bool vfs_file_size(const char *virtualPath, std::uint64_t *outSize) noexcept {
+  if (outSize == nullptr) {
+    return false;
+  }
+  char osPath[kMaxResolvedPathLength] = {};
+  if (resolve(virtualPath, osPath, sizeof(osPath)) == 0U) {
+    return false;
+  }
+#if defined(_WIN32)
+  WIN32_FILE_ATTRIBUTE_DATA data{};
+  if (GetFileAttributesExA(osPath, GetFileExInfoStandard, &data) == 0) {
+    return false;
+  }
+  if ((data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0U) {
+    return false;
+  }
+  *outSize = (static_cast<std::uint64_t>(data.nFileSizeHigh) << 32U) |
+             static_cast<std::uint64_t>(data.nFileSizeLow);
+  return true;
+#else
+  struct stat st{};
+  if ((stat(osPath, &st) != 0) || ((st.st_mode & S_IFREG) == 0)) {
+    return false;
+  }
+  *outSize = static_cast<std::uint64_t>(st.st_size);
+  return true;
+#endif
+}
+
 bool vfs_read_binary(const char *virtualPath, void **outData,
                      std::size_t *outSize) noexcept {
   if ((outData == nullptr) || (outSize == nullptr)) {

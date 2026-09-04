@@ -34,17 +34,18 @@ struct StagedBindings final {
   std::array<InputAxisMapping, kMaxInputAxes> axes{};
 };
 
-/// Copies a parsed entry name after validating presence and length; a
-/// missing, empty, or overlong name rejects the whole load instead of
-/// committing a truncated or blank identity (audit M-11).
+/// Decodes a parsed entry name into its fixed slot. The runtime identity is
+/// the authored text, so JSON escapes are resolved here (the writer escapes
+/// again on save, which keeps a document stable across load/save cycles). A
+/// missing, malformed, empty, or overlong decoded name rejects the whole
+/// load instead of committing a truncated or blank identity; `outName` is
+/// the slot's full kMaxInputNameLen + 1 bytes.
 bool parse_entry_name(const JsonParser &parser, const JsonValue &entry,
                       char *outName, const char *what) noexcept {
   JsonValue nameVal{};
-  const char *str = nullptr;
-  std::size_t strLen = 0U;
   if (!parser.get_object_field(entry, "name", &nameVal) ||
-      !parser.as_string(nameVal, &str, &strLen) || (strLen == 0U) ||
-      (strLen > kMaxInputNameLen)) {
+      !parser.copy_string_strict(nameVal, outName, kMaxInputNameLen + 1U) ||
+      (outName[0] == '\0')) {
     char msg[128] = {};
     std::snprintf(msg, sizeof(msg),
                   "load_input_bindings: %s entry has a missing/invalid name",
@@ -52,8 +53,6 @@ bool parse_entry_name(const JsonParser &parser, const JsonValue &entry,
     log_message(LogLevel::Error, kLogChannel, msg);
     return false;
   }
-  std::memcpy(outName, str, strLen);
-  outName[strLen] = '\0';
   return true;
 }
 

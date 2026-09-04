@@ -607,6 +607,124 @@ int main() {
     }
   }
 
+  // --- Test 8: a mutation an on_end_play handler defers during the
+  // transition must not reach the replacement scene (#411). Scene B's
+  // GoalB is allocated first in a fresh World, so it holds the same
+  // {index, generation} as scene A's StarterA; without the content-epoch
+  // stamp the next flush would move GoalB to the outgoing handler's
+  // target position. Also pins that the queue still serves the new scene
+  // afterwards: a mutation deferred against scene B's own epoch applies.
+  if (result == 0) {
+    Fixture fx{};
+    if (!fx.init()) {
+      std::puts("fixture init failed (test 8)");
+      result = 1;
+    } else {
+      const char *retargetScript =
+          "local M = {}\n"
+          "function M.on_begin_play(self)\n"
+          "    engine.load_scene(\"ep_scene_b.scene.json\")\n"
+          "end\n"
+          "function M.on_end_play(self)\n"
+          "    stale_move_queued = engine.set_position(self, 100, 200, 300)\n"
+          "end\n"
+          "return M\n";
+      const char *probe =
+          "function ep_assert_stale_move_queued()\n"
+          "    if stale_move_queued ~= true then\n"
+          "        error('on_end_play set_position was not accepted: ' ..\n"
+          "              tostring(stale_move_queued))\n"
+          "    end\n"
+          "end\n";
+      engine::runtime::Entity starter{};
+      if (!write_text_file(kReentrancyScript, retargetScript) ||
+          !add_scripted_entity(*fx.world, "StarterA", kReentrancyScript,
+                               &starter) ||
+          !write_text_file("ep_probe8.lua", probe) ||
+          !engine::scripting::load_script("ep_probe8.lua")) {
+        std::puts("test 8 setup failed");
+        result = 1;
+      } else {
+        dispatch_begin_play(*fx.world);
+        if (!engine::scripting::has_pending_scene_op()) {
+          std::puts("test 8: scene A did not request a transition");
+          result = 1;
+        } else if (!engine::runtime::process_pending_scene_op(*fx.world)) {
+          std::puts("test 8: pending scene op failed");
+          result = 1;
+        } else if (!engine::scripting::call_script_function(
+                       "ep_assert_stale_move_queued")) {
+          std::puts("test 8: the outgoing handler's mutation was refused");
+          result = 1;
+        }
+        const engine::runtime::Entity goal =
+            fx.world->find_entity_by_name("GoalB");
+        if ((result == 0) && (goal == engine::runtime::kInvalidEntity)) {
+          std::puts("test 8: scene B did not commit");
+          result = 1;
+        }
+        if ((result == 0) && (goal.index != starter.index)) {
+          std::puts("test 8: fixture assumption broken: GoalB does not "
+                    "reuse StarterA's entity index");
+          result = 1;
+        }
+        // The pipeline's next post-frame flush: the retained entry must be
+        // dropped, not applied to the recycled index.
+        if (result == 0) {
+          engine::scripting::flush_deferred_mutations();
+          engine::runtime::Transform goalTransform{};
+          if (!fx.world->get_transform(goal, &goalTransform)) {
+            std::puts("test 8: GoalB lost its transform");
+            result = 1;
+          } else if ((goalTransform.position.x != 0.0F) ||
+                     (goalTransform.position.y != 0.0F) ||
+                     (goalTransform.position.z != 0.0F)) {
+            std::puts("test 8: a stale deferred mutation retargeted the "
+                      "replacement scene's entity");
+            result = 1;
+          }
+        }
+        // Same-epoch boundary: a mutation deferred inside scene B's own
+        // end-play dispatch (the destroy of a sibling entity, whose handler
+        // moves GoalB) is still applied by the following flush.
+        if (result == 0) {
+          const char *deferInNewScene =
+              "local M = {}\n"
+              "function M.on_end_play(self)\n"
+              "    local goal = engine.find_entity_by_name(\"GoalB\")\n"
+              "    same_epoch_move = engine.set_position(goal, 7, 8, 9)\n"
+              "end\n"
+              "return M\n";
+          engine::runtime::Entity mover{};
+          if (!write_text_file(kSceneCScript, deferInNewScene) ||
+              !add_scripted_entity(*fx.world, "Mover", kSceneCScript,
+                                   &mover)) {
+            std::puts("test 8: mover setup failed");
+            result = 1;
+          } else {
+            dispatch_begin_play(*fx.world);
+            if (!destroy_with_end_play(*fx.world, mover)) {
+              std::puts("test 8: mover destroy failed");
+              result = 1;
+            } else {
+              engine::runtime::Transform goalTransform{};
+              if (!fx.world->get_transform(goal, &goalTransform) ||
+                  (goalTransform.position.x != 7.0F) ||
+                  (goalTransform.position.y != 8.0F) ||
+                  (goalTransform.position.z != 9.0F)) {
+                std::puts("test 8: a same-epoch deferred mutation was "
+                          "not applied");
+                result = 1;
+              }
+            }
+          }
+        }
+      }
+      static_cast<void>(std::remove("ep_probe8.lua"));
+      fx.shutdown();
+    }
+  }
+
   engine::scripting::shutdown_scripting();
   cleanup_files();
   return result;

@@ -4,8 +4,11 @@
 
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
+#include <cstdio>
 #include <cstring>
 
+#include "engine/core/cvar.h"
 #include "engine/core/logging.h"
 #include "engine/core/vfs.h"
 
@@ -91,6 +94,106 @@ struct AudioState final {
 };
 
 AudioState g_audio{};
+
+// Input budgets, cvar-configurable and enforced before the bytes they
+// bound exist in memory: a sound file is read whole and every decoder
+// over it parses untrusted bytes, so the bytes read are capped from the
+// file's metadata, and the PCM a header claims is capped from the
+// decoder's reported length before the first frame decodes. Streamed
+// music never sits in memory whole, so it carries only a file cap.
+constexpr int kDefaultMaxSoundFileBytes = 32 * 1024 * 1024;
+constexpr int kDefaultMaxMusicFileBytes = 512 * 1024 * 1024;
+constexpr int kDefaultMaxDecodedPcmBytes = 256 * 1024 * 1024;
+constexpr const char *kMaxSoundFileBytesCvar = "audio.max_sound_file_bytes";
+constexpr const char *kMaxMusicFileBytesCvar = "audio.max_music_file_bytes";
+constexpr const char *kMaxDecodedPcmBytesCvar = "audio.max_decoded_pcm_bytes";
+
+/// Registers the budget cvars; a later initialize_audio finds them already
+/// present, which registration reports as false and is not a failure.
+void register_budget_cvars() noexcept {
+  static_cast<void>(core::cvar_register_int(
+      kMaxSoundFileBytesCvar, kDefaultMaxSoundFileBytes,
+      "Largest file load_sound accepts (bytes); a larger file is refused "
+      "before any of it is read"));
+  static_cast<void>(core::cvar_register_int(
+      kMaxMusicFileBytesCvar, kDefaultMaxMusicFileBytes,
+      "Largest file play_music streams (bytes); a larger file is refused "
+      "before the stream opens"));
+  static_cast<void>(core::cvar_register_int(
+      kMaxDecodedPcmBytesCvar, kDefaultMaxDecodedPcmBytes,
+      "Largest decoded PCM a loaded sound's header may claim (bytes); a "
+      "larger sound is refused before decoding"));
+}
+
+/// Logs one audio diagnostic in the `<path>: <reason>` shape the editor
+/// console parses for its navigation actions.
+void log_path_error(const char *virtualPath, const char *reason) noexcept {
+  char message[1280] = {};
+  std::snprintf(message, sizeof(message), "%s: %s", virtualPath, reason);
+  core::log_message(core::LogLevel::Error, "audio", message);
+}
+
+/// The byte budget a cvar currently holds; a value below zero bounds
+/// nothing meaningful and is treated as zero.
+std::uint64_t budget_bytes(const char *cvarName, int fallback) noexcept {
+  const int budget = core::cvar_get_int(cvarName, fallback);
+  return (budget > 0) ? static_cast<std::uint64_t>(budget) : 0U;
+}
+
+/// Refuses a file larger than the named budget before any of it is read;
+/// the size comes from file metadata, so an oversized input costs no
+/// allocation. A missing or unreadable file is refused here as well.
+bool file_within_budget(const char *virtualPath, const char *cvarName,
+                        int fallback) noexcept {
+  std::uint64_t fileBytes = 0U;
+  if (!core::vfs_file_size(virtualPath, &fileBytes)) {
+    log_path_error(virtualPath, "sound file not found or unreadable");
+    return false;
+  }
+  const std::uint64_t limit = budget_bytes(cvarName, fallback);
+  if (fileBytes > limit) {
+    char reason[192] = {};
+    std::snprintf(reason, sizeof(reason),
+                  "file of %llu bytes exceeds %s (%llu)",
+                  static_cast<unsigned long long>(fileBytes), cvarName,
+                  static_cast<unsigned long long>(limit));
+    log_path_error(virtualPath, reason);
+    return false;
+  }
+  return true;
+}
+
+/// Refuses a decoder whose header claims more PCM than the budget before
+/// the first frame decodes: frames times the decoder's output frame size.
+/// A source that cannot report a length passes, since nothing in its
+/// header bounds it; the file cap is what limits such inputs.
+bool decoded_pcm_within_budget(ma_decoder &decoder,
+                               const char *virtualPath) noexcept {
+  ma_uint64 frames = 0U;
+  if (ma_decoder_get_length_in_pcm_frames(&decoder, &frames) != MA_SUCCESS) {
+    return true;
+  }
+  const std::uint64_t bytesPerFrame = static_cast<std::uint64_t>(
+      ma_get_bytes_per_frame(decoder.outputFormat, decoder.outputChannels));
+  const std::uint64_t limit =
+      budget_bytes(kMaxDecodedPcmBytesCvar, kDefaultMaxDecodedPcmBytes);
+  // The comparison divides rather than multiplies so a header claiming
+  // any frame count stays overflow-free.
+  if ((bytesPerFrame == 0U) ||
+      (static_cast<std::uint64_t>(frames) > (limit / bytesPerFrame))) {
+    char reason[224] = {};
+    std::snprintf(reason, sizeof(reason),
+                  "header claims %llu PCM frames of %llu bytes, exceeding %s "
+                  "(%llu)",
+                  static_cast<unsigned long long>(frames),
+                  static_cast<unsigned long long>(bytesPerFrame),
+                  kMaxDecodedPcmBytesCvar,
+                  static_cast<unsigned long long>(limit));
+    log_path_error(virtualPath, reason);
+    return false;
+  }
+  return true;
+}
 
 /// Releases one one-shot instance's playback resources.
 void reset_one_shot(OneShotInstance &instance) noexcept {
@@ -266,6 +369,7 @@ bool initialize_audio() noexcept {
   if (g_audio.initialized) {
     return true;
   }
+  register_budget_cvars();
 
   ma_engine_config config = ma_engine_config_init();
   config.noDevice = MA_FALSE;
@@ -398,11 +502,15 @@ SoundHandle load_sound(const char *virtualPath) noexcept {
     return kInvalidSound;
   }
 
+  if (!file_within_budget(virtualPath, kMaxSoundFileBytesCvar,
+                          kDefaultMaxSoundFileBytes)) {
+    return kInvalidSound;
+  }
+
   void *fileData = nullptr;
   std::size_t fileSize = 0U;
   if (!core::vfs_read_binary(virtualPath, &fileData, &fileSize)) {
-    core::log_message(
-        core::LogLevel::Error, "audio", "failed to read sound file via VFS");
+    log_path_error(virtualPath, "failed to read sound file via VFS");
     return kInvalidSound;
   }
 
@@ -416,8 +524,17 @@ SoundHandle load_sound(const char *virtualPath) noexcept {
   if (res != MA_SUCCESS) {
     core::vfs_free(fileData);
     entry.fileData = nullptr;
-    core::log_message(
-        core::LogLevel::Error, "audio", "failed to decode sound file");
+    log_path_error(virtualPath, "failed to decode sound file");
+    return kInvalidSound;
+  }
+
+  // The header is parsed but no frame is decoded yet: a claimed length
+  // beyond the PCM budget is refused here, before the sound (and every
+  // one-shot decoder later opened over the same bytes) can decode it.
+  if (!decoded_pcm_within_budget(entry.decoder, virtualPath)) {
+    ma_decoder_uninit(&entry.decoder);
+    core::vfs_free(fileData);
+    entry.fileData = nullptr;
     return kInvalidSound;
   }
 
@@ -592,10 +709,14 @@ bool play_music(const char *virtualPath, float volume, bool loop) noexcept {
     return false;
   }
 
+  if (!file_within_budget(virtualPath, kMaxMusicFileBytesCvar,
+                          kDefaultMaxMusicFileBytes)) {
+    return false;
+  }
+
   char osPath[1024] = {};
   if (!core::vfs_resolve_os_path(virtualPath, osPath, sizeof(osPath))) {
-    core::log_message(core::LogLevel::Error, "audio",
-                      "music path did not resolve");
+    log_path_error(virtualPath, "music path did not resolve");
     return false;
   }
 
@@ -603,8 +724,7 @@ bool play_music(const char *virtualPath, float volume, bool loop) noexcept {
   if (ma_sound_init_from_file(&g_audio.engine, osPath,
                               MA_SOUND_FLAG_STREAM, bus_group(AudioBus::Music),
                               nullptr, &g_audio.music) != MA_SUCCESS) {
-    core::log_message(core::LogLevel::Error, "audio",
-                      "failed to open music stream");
+    log_path_error(virtualPath, "failed to open music stream");
     return false;
   }
   g_audio.musicActive = true;

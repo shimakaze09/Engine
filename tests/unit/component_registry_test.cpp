@@ -86,6 +86,22 @@ bool components_equal(const Transform &a, const Transform &b) noexcept {
          (a.parentId == b.parentId);
 }
 
+/// The value a prefab instance carries for a source `value`: identity for
+/// every row except Transform. A prefab is a single-entity template, so its
+/// instance is always a root — the source parent's persistent id is never
+/// written or honored, even when the target scene owns an entity under
+/// that id (the scene round trip above keeps the parent link intact).
+template <typename Component>
+Component prefab_instance_value(const Component &value) noexcept {
+  return value;
+}
+
+Transform prefab_instance_value(const Transform &value) noexcept {
+  Transform root = value;
+  root.parentId = kInvalidPersistentId;
+  return root;
+}
+
 void make_test_value(RigidBody *out) noexcept {
   out->velocity = engine::math::Vec3(1.25F, -2.5F, 3.5F);
   out->acceleration = engine::math::Vec3(0.5F, 9.75F, -1.5F);
@@ -426,7 +442,10 @@ int verify_registry_round_trip(
   if (!((*target).*getComponent)(instance, &prefabValue)) {
     return 13;
   }
-  if (!components_equal(value, prefabValue)) {
+  // The target owns the source parent's persistent id on purpose: the
+  // prefab direction must still instantiate a root (see
+  // prefab_instance_value).
+  if (!components_equal(prefab_instance_value(value), prefabValue)) {
     return 14;
   }
 
