@@ -425,22 +425,40 @@ bool initialize_texture_system() noexcept {
   return true;
 }
 
-/// Shuts down the owning system for texture system.
+/// Shuts down the owning system for texture system. The registry owns the
+/// device object of every non-external slot, so it must close while the
+/// device is live: engine::shutdown closes it before the renderer releases
+/// the device. A close that finds no device still empties the registry but
+/// reports the textures it could no longer release, because a backend that
+/// does not reclaim children on device teardown would leak them.
 void shutdown_texture_system() noexcept {
   if (!g_texState.initialized) {
     return;
   }
 
   const RenderDevice *dev = render_device();
+  const bool canRelease = (dev != nullptr) && (dev->destroy_texture != nullptr);
+  std::size_t unreleased = 0U;
   for (std::size_t i = 0U; i < kMaxTextureSlots; ++i) {
     if (g_texState.slots[i].occupied &&
         (g_texState.slots[i].device != kInvalidDeviceTexture) &&
         !g_texState.slots[i].external) {
-      if ((dev != nullptr) && (dev->destroy_texture != nullptr)) {
+      if (canRelease) {
         dev->destroy_texture(g_texState.slots[i].device);
+      } else {
+        ++unreleased;
       }
     }
     reset_texture_slot(g_texState.slots[i]);
+  }
+
+  if (unreleased != 0U) {
+    char message[160] = {};
+    std::snprintf(message, sizeof(message),
+                  "texture registry closed after the render device: %zu "
+                  "owned texture(s) could not be released by their owner",
+                  unreleased);
+    core::log_message(core::LogLevel::Warning, "renderer", message);
   }
 
   g_texState.initialized = false;

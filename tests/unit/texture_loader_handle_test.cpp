@@ -1,5 +1,6 @@
 // Verifies texture handle generation prevents stale slot reuse.
 
+#include "engine/core/logging.h"
 #include "engine/core/vfs.h"
 #include "engine/renderer/render_device.h"
 #include "engine/renderer/texture_loader.h"
@@ -7,6 +8,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 
 namespace engine::renderer {
 namespace {
@@ -18,6 +20,9 @@ struct FakeTextureDevice final {
 
 FakeTextureDevice g_fake{};
 RenderDevice g_device{};
+// When set, render_device() answers as it does after shutdown_render_device:
+// no device is live.
+bool g_deviceAbsent = false;
 
 DeviceTextureHandle fake_create_texture(const TextureDesc &) noexcept {
   ++g_fake.aliveTextures;
@@ -35,11 +40,16 @@ void reset_fake_device() noexcept {
   g_device = RenderDevice{};
   g_device.create_texture = &fake_create_texture;
   g_device.destroy_texture = &fake_destroy_texture;
+  g_deviceAbsent = false;
 }
 
 } // namespace
 
-const RenderDevice *render_device() noexcept { return &g_device; }
+const RenderDevice *render_device() noexcept {
+  return g_deviceAbsent ? nullptr : &g_device;
+}
+
+void set_fake_device_absent(bool absent) noexcept { g_deviceAbsent = absent; }
 
 int fake_alive_textures() noexcept { return g_fake.aliveTextures; }
 
@@ -219,6 +229,106 @@ int check_external_texture_registration() {
 }
 
 
+/// Counts registry-closed-after-device warnings reaching the log.
+int g_unreleasedWarnings = 0;
+
+void count_unreleased_warning(engine::core::LogLevel level, const char *,
+                              const char *message, void *) noexcept {
+  if ((level == engine::core::LogLevel::Warning) && (message != nullptr) &&
+      (std::strstr(message, "texture registry closed after the render "
+                            "device") != nullptr)) {
+    ++g_unreleasedWarnings;
+  }
+}
+
+/// A registry closed while the device is live releases every owned texture
+/// silently; one closed after the device is gone can release nothing and
+/// must say so, once, with the count. External aliases never count either
+/// way.
+int check_shutdown_reports_textures_it_cannot_release() {
+  engine::renderer::reset_fake_device();
+  g_unreleasedWarnings = 0;
+  if (!engine::core::initialize_logging() ||
+      !engine::core::log_register_sink(&count_unreleased_warning, nullptr)) {
+    return 60;
+  }
+  int result = 0;
+  if (!engine::core::initialize_vfs() || !engine::core::mount("tex", ".") ||
+      !engine::core::vfs_write_binary(kTexturePath, kTinyPng,
+                                      sizeof(kTinyPng))) {
+    result = 61;
+  }
+
+  // Device live: two owned textures and one external alias close quietly.
+  if ((result == 0) && engine::renderer::initialize_texture_system()) {
+    const bool loaded =
+        (engine::renderer::load_texture(kTexturePath) !=
+         engine::renderer::kInvalidTextureHandle) &&
+        (engine::renderer::load_texture(kTexturePath) !=
+         engine::renderer::kInvalidTextureHandle) &&
+        (engine::renderer::register_external_texture(
+             engine::renderer::DeviceTextureHandle{77U}) !=
+         engine::renderer::kInvalidTextureHandle);
+    engine::renderer::shutdown_texture_system();
+    if (!loaded) {
+      result = 62;
+    } else if (engine::renderer::fake_alive_textures() != 0) {
+      result = 63;
+    } else if (g_unreleasedWarnings != 0) {
+      result = 64;
+    }
+  } else if (result == 0) {
+    result = 65;
+  }
+
+  // Device gone first: the same registry content cannot be released, and
+  // the close reports exactly the owned textures (the alias excluded).
+  if ((result == 0) && engine::renderer::initialize_texture_system()) {
+    const bool loaded =
+        (engine::renderer::load_texture(kTexturePath) !=
+         engine::renderer::kInvalidTextureHandle) &&
+        (engine::renderer::load_texture(kTexturePath) !=
+         engine::renderer::kInvalidTextureHandle) &&
+        (engine::renderer::register_external_texture(
+             engine::renderer::DeviceTextureHandle{77U}) !=
+         engine::renderer::kInvalidTextureHandle);
+    engine::renderer::set_fake_device_absent(true);
+    engine::renderer::shutdown_texture_system();
+    engine::renderer::set_fake_device_absent(false);
+    if (!loaded) {
+      result = 66;
+    } else if (engine::renderer::fake_alive_textures() != 2) {
+      result = 67;
+    } else if (g_unreleasedWarnings != 1) {
+      result = 68;
+    } else if (engine::renderer::register_external_texture(
+                   engine::renderer::DeviceTextureHandle{5U}) !=
+               engine::renderer::kInvalidTextureHandle) {
+      // The registry is closed regardless of what it could release.
+      result = 69;
+    }
+  } else if (result == 0) {
+    result = 70;
+  }
+
+  // An empty registry has nothing to report even without a device.
+  if ((result == 0) && engine::renderer::initialize_texture_system()) {
+    engine::renderer::set_fake_device_absent(true);
+    engine::renderer::shutdown_texture_system();
+    engine::renderer::set_fake_device_absent(false);
+    if (g_unreleasedWarnings != 1) {
+      result = 71;
+    }
+  } else if (result == 0) {
+    result = 72;
+  }
+
+  engine::core::shutdown_vfs();
+  engine::core::log_unregister_sink(&count_unreleased_warning, nullptr);
+  static_cast<void>(std::remove("texture_handle_reuse.png"));
+  return result;
+}
+
 /// Encoded generations wrap inside their 22-bit field without becoming zero.
 int check_texture_generation_wrap() noexcept {
   namespace codec = engine::renderer::texture_handle_detail;
@@ -255,6 +365,11 @@ int main() {
   const int externalResult = check_external_texture_registration();
   if (externalResult != 0) {
     return externalResult;
+  }
+
+  const int unreleasedResult = check_shutdown_reports_textures_it_cannot_release();
+  if (unreleasedResult != 0) {
+    return unreleasedResult;
   }
 
   return check_texture_handle_generation();

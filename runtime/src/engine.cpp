@@ -329,10 +329,14 @@ void shutdown() noexcept {
 
   shutdown_editor_bridge(bridge);
   runtime::reset_anim_controllers();
-  renderer::shutdown_renderer();
-  // Close the bootstrap-owned texture registry after the renderer unloads
-  // its capture handles; remaining GL objects die with the context below.
+  // The bootstrap-owned texture registry owns the device object behind
+  // every texture it loaded, so it closes while the device is still live;
+  // shutdown_renderer releases the device last. Scene-capture textures are
+  // registered as external aliases the registry never destroys, and their
+  // creator (the command-buffer backend) releases them inside
+  // shutdown_renderer, also ahead of the device.
   renderer::shutdown_texture_system();
+  renderer::shutdown_renderer();
   audio::shutdown_audio();
   scripting::dap_stop();
   scripting::shutdown_scripting();
