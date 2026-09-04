@@ -41,6 +41,7 @@ engine_add_module_library(engine_renderer
     src/post_process_stack.cpp
     src/render_settings.cpp
     src/render_device_null.cpp
+    src/screenshot_tga.cpp
     src/shader_system.cpp
     src/shadow_map.cpp
     src/texture_loader.cpp

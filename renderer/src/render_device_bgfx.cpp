@@ -18,6 +18,7 @@
 #include "engine/core/platform.h"
 #include "render_device_bgfx_context.h"
 #include "render_device_null.h"
+#include "screenshot_tga.h"
 
 #if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic push
@@ -129,38 +130,14 @@ public:
   void cacheWrite(std::uint64_t, const void *, std::uint32_t) override {}
   /// Writes bgfx's readback as an uncompressed TGA: the diagnostic
   /// screenshot path (ENGINE_BGFX_SCREENSHOT) needs zero image-codec
-  /// dependencies, and TGA holds BGRA rows natively.
+  /// dependencies, and TGA holds BGRA rows natively. The writer logs its
+  /// own failure, and bgfx offers no channel to return one here.
   void screenShot(const char *filePath, std::uint32_t width,
                   std::uint32_t height, std::uint32_t pitch,
                   bgfx::TextureFormat::Enum, const void *data,
                   std::uint32_t, bool yflip) override {
-    FILE *file = nullptr;
-#ifdef _WIN32
-    if (fopen_s(&file, filePath, "wb") != 0) {
-      file = nullptr;
-    }
-#else
-    file = std::fopen(filePath, "wb");
-#endif
-    if (file == nullptr) {
-      return;
-    }
-    std::uint8_t header[18] = {};
-    header[2] = 2; // uncompressed true-color
-    header[12] = static_cast<std::uint8_t>(width & 0xFFU);
-    header[13] = static_cast<std::uint8_t>((width >> 8U) & 0xFFU);
-    header[14] = static_cast<std::uint8_t>(height & 0xFFU);
-    header[15] = static_cast<std::uint8_t>((height >> 8U) & 0xFFU);
-    header[16] = 32;   // BGRA
-    header[17] = 0x20; // top-left origin
-    std::fwrite(header, 1U, sizeof(header), file);
-    const auto *rows = static_cast<const std::uint8_t *>(data);
-    for (std::uint32_t y = 0U; y < height; ++y) {
-      const std::uint32_t row = yflip ? (height - 1U - y) : y;
-      std::fwrite(rows + (static_cast<std::size_t>(row) * pitch), 1U,
-                  static_cast<std::size_t>(width) * 4U, file);
-    }
-    std::fclose(file);
+    static_cast<void>(
+        write_bgra_tga(filePath, width, height, pitch, data, yflip));
   }
   void captureBegin(std::uint32_t, std::uint32_t, std::uint32_t,
                     bgfx::TextureFormat::Enum, bool) override {}
