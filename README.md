@@ -271,11 +271,11 @@ Tool behavior:
 - Do not use exceptions, RTTI, `dynamic_cast`, or `typeid`
 - Mark a public real-time or leaf runtime API `noexcept` only when every
   operation it invokes is proven non-throwing; a recoverable `noexcept` path
-  must not allocate, touch the filesystem, or create threads, because under
-  the no-exception build a failure there terminates the process instead of
-  returning an error. Cold initialization, editor, tool, and filesystem work
-  uses staged transactions, explicit error results, and rollback (the
-  binding rule is in `CLAUDE.md`, "Hard rules")
+  must not call allocation, filesystem, or thread-creation operations that
+  can terminate under the no-exception build, because a failure there ends
+  the process instead of returning an error. Cold initialization, editor,
+  tool, and filesystem work uses staged transactions, explicit error results,
+  and rollback (the binding rule is in `CLAUDE.md`, "Hard rules")
 - Use explicit return values plus logging for runtime failures; prefer
   `std::expected<T, E>` in new APIs and never call `.value()` (with
   exceptions disabled it aborts — use `has_value()`/`operator*`/`error()`)
