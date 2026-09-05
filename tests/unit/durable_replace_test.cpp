@@ -19,6 +19,7 @@
 #include "engine/core/atomic_file.h"
 #include "engine/core/logging.h"
 
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <string>
@@ -709,6 +710,75 @@ void check_directory_creation_production(engine::tests::TestContext &ctx) {
   std::filesystem::remove_all(root, ec);
 }
 
+/// Reads a whole small file into a string; empty when it cannot be read.
+std::string read_small_file(const std::string &path) {
+  std::string contents{};
+  std::FILE *file = nullptr;
+#ifdef _WIN32
+  if (fopen_s(&file, path.c_str(), "rb") != 0) {
+    file = nullptr;
+  }
+#else
+  file = std::fopen(path.c_str(), "rb");
+#endif
+  if (file == nullptr) {
+    return contents;
+  }
+  char buffer[64] = {};
+  const std::size_t count = std::fread(buffer, 1U, sizeof(buffer), file);
+  static_cast<void>(std::fclose(file));
+  contents.assign(buffer, count);
+  return contents;
+}
+
+/// EXPECTATION: the production rename and remove primitives keep the
+/// contract the protocol relies on, over the caller's char buffer and a
+/// real filesystem: the rename replaces an existing destination in one
+/// step and consumes the staged temporary; a rename whose source is gone
+/// reports failure and leaves the destination as it was; removing the
+/// temporary succeeds once and reports false thereafter. These are the
+/// platform calls the protocol's commit and abort paths issue in place
+/// of std::filesystem, so their semantics are pinned here rather than
+/// inherited.
+void check_production_primitives(engine::tests::TestContext &ctx) {
+  const ReplaceOps &ops = engine::core::detail::production_replace_ops();
+  const std::filesystem::path root{"durable_primitive_test_dir"};
+  std::error_code ec{};
+  std::filesystem::remove_all(root, ec);
+  if (!std::filesystem::create_directory(root, ec) || ec) {
+    ctx.fail("the primitive case could not stage its directory");
+    return;
+  }
+
+  const std::string destination = (root / "scene.json").generic_string();
+  const std::string staged = (root / "scene.json.new").generic_string();
+  ctx.check(engine::core::atomic_write_file(destination.c_str(), "old", 3U),
+            "the primitive case staged its existing destination");
+  ctx.check(engine::core::atomic_write_file(staged.c_str(), "new", 3U),
+            "the primitive case staged its temporary");
+
+  ctx.check(ops.rename_file(staged.c_str(), destination.c_str()),
+            "the rename replaces an existing destination");
+  ctx.check(read_small_file(destination) == "new",
+            "the destination holds the staged payload after the rename");
+  ctx.check(!std::filesystem::exists(staged, ec),
+            "the rename consumed the staged temporary");
+
+  ctx.check(!ops.rename_file(staged.c_str(), destination.c_str()),
+            "a rename whose source is gone reports failure");
+  ctx.check(read_small_file(destination) == "new",
+            "a failed rename leaves the destination as it was");
+
+  ctx.check(ops.remove_file(destination.c_str()),
+            "removing a present file reports success");
+  ctx.check(!std::filesystem::exists(destination, ec),
+            "the removed file is gone");
+  ctx.check(!ops.remove_file(destination.c_str()),
+            "removing an absent file reports failure");
+
+  std::filesystem::remove_all(root, ec);
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -736,6 +806,7 @@ int main() {
   check_directory_creation_failure(ctx);
   check_directory_creation_path_shapes(ctx);
   check_directory_creation_production(ctx);
+  check_production_primitives(ctx);
 
   static_cast<void>(std::fclose(g_stagedFile));
   g_stagedFile = nullptr;
