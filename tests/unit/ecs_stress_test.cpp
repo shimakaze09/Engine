@@ -1,7 +1,8 @@
 // ECS stress test: creates entities up to the World capacity, attaches a
 // transform to each, and iterates them once through the flat visitor. The
-// contract asserted is that the iteration visits exactly the transforms
-// that were created. The timings it prints are diagnostic only: functional
+// contract asserted is that a fresh World creates exactly kMaxEntities
+// entities before refusing, and that the iteration visits exactly the
+// transforms that were created. The timings it prints are diagnostic only: functional
 // tests never gate on wall-clock thresholds, and the ECS iteration budget
 // lives in engine_bench_ecs_perf against tests/benchmark/perf_baseline.json.
 //
@@ -30,14 +31,18 @@ bool stress_create_and_iterate() noexcept {
   const std::size_t cap = World::kMaxEntities;
 
   // ---- creation ----
+  // A fresh World hands out exactly kMaxEntities entities (indices 1
+  // through kMaxEntities; index 0 is the invalid handle and is not part
+  // of the budget), so every create inside the capacity must succeed and
+  // the one after it must refuse.
   const auto t0 = Clock::now(); // wall-clock: diagnostic
   std::size_t created = 0U;
   for (std::size_t i = 0U; i < cap; ++i) {
     const Entity e = world->create_entity();
     if (e == kInvalidEntity) {
-      // World full: the capacity boundary, reached one below the nominal
-      // capacity because index 0 is the invalid handle.
-      break;
+      std::printf("FAIL: create_entity refused entity %zu inside capacity\n",
+                  i);
+      return false;
     }
     Transform t{};
     t.position = engine::math::Vec3(static_cast<float>(i), 0.0F, 0.0F);
@@ -48,6 +53,11 @@ bool stress_create_and_iterate() noexcept {
     ++created;
   }
   const auto t1 = Clock::now(); // wall-clock: diagnostic
+
+  if (world->create_entity() != kInvalidEntity) {
+    std::printf("FAIL: create_entity succeeded past the World capacity\n");
+    return false;
+  }
 
   // ---- flat iteration (visitor over all transforms) ----
   std::size_t visited = 0U;
@@ -67,8 +77,9 @@ bool stress_create_and_iterate() noexcept {
   std::printf("[ecs_stress] entities=%zu  create=%.2fms  iterate=%.2fms\n",
               visited, createMs, iterMs);
 
-  if (created == 0U) {
-    std::printf("FAIL: no entity could be created\n");
+  if (created != World::kMaxEntities) {
+    std::printf("FAIL: created %zu entities, capacity is %zu\n", created,
+                World::kMaxEntities);
     return false;
   }
   if (visited != created) {
