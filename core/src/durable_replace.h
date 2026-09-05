@@ -110,14 +110,19 @@ struct ReplaceOps {
   bool (*sync_directory)(DirectoryHandle handle) noexcept;
   /// Releases a handle from open_parent_directory.
   void (*close_directory)(DirectoryHandle handle) noexcept;
-  /// Discards the staged temporary after a failed replacement.
+  /// Discards the staged temporary after a failed or abandoned
+  /// replacement.
   bool (*remove_file)(const char *path) noexcept;
 };
 
 /// The operations the production commit path runs: mkdir (Windows:
-/// _mkdir), buffered-file flush, fsync (Windows: _commit), close,
-/// std::filesystem::rename, and — on POSIX — an O_RDONLY open plus fsync
-/// of the containing directory.
+/// _mkdir), buffered-file flush, fsync (Windows: _commit), close, rename
+/// (Windows: a replace-existing MoveFileEx), unlink (Windows:
+/// DeleteFile), and — on POSIX — an O_RDONLY open plus fsync of the
+/// containing directory. Each is the platform primitive over the
+/// caller's char buffer, so none allocates: the table serves noexcept
+/// commit and abort paths whose contract is to report failure, not to
+/// terminate.
 const ReplaceOps &production_replace_ops() noexcept;
 
 /// Creates every missing segment of directoryPath, syncing the parent

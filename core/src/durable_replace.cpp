@@ -2,20 +2,29 @@
 // companion, and the production syscall table behind both. The protocols
 // order the steps; the table supplies the platform primitives, including
 // the POSIX parent-directory fsync that makes a rename — and a freshly
-// created directory's own entry — durable.
+// created directory's own entry — durable. Every primitive takes the
+// caller's fixed char buffer straight to the platform call: the table
+// runs inside noexcept commit and abort paths, and a std::filesystem::path
+// conversion would allocate there, turning an allocation failure into
+// process termination under the no-exception build.
 
 #include "durable_replace.h"
 
 #include <cerrno>
 #include <cstring>
-#include <filesystem>
-#include <system_error>
 
 #ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <direct.h>
 #include <io.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <windows.h>
 #else
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -63,11 +72,17 @@ bool production_close_file(std::FILE *file) noexcept {
   return std::fclose(file) == 0;
 }
 
-/// Replaces the destination with the staged temporary in one step.
+/// Replaces the destination with the staged temporary in one step. The
+/// temporary is a sibling of the destination, so the move never crosses
+/// a volume: on Windows the replace-existing move is therefore always the
+/// atomic same-volume rename, and no copy fallback is requested because a
+/// copy could leave the destination half-written.
 bool production_rename_file(const char *from, const char *to) noexcept {
-  std::error_code renameError{};
-  std::filesystem::rename(from, to, renameError);
-  return !renameError;
+#ifdef _WIN32
+  return MoveFileExA(from, to, MOVEFILE_REPLACE_EXISTING) != 0;
+#else
+  return ::rename(from, to) == 0;
+#endif
 }
 
 /// Opens the directory that holds filePath so its entries can be
@@ -151,10 +166,14 @@ MakeDirectoryOutcome production_make_directory(const char *path) noexcept {
   return MakeDirectoryOutcome::Failed;
 }
 
-/// Discards the staged temporary.
+/// Discards the staged temporary; false when nothing was removed, an
+/// absent path included.
 bool production_remove_file(const char *path) noexcept {
-  std::error_code removeError{};
-  return std::filesystem::remove(path, removeError) && !removeError;
+#ifdef _WIN32
+  return DeleteFileA(path) != 0;
+#else
+  return ::unlink(path) == 0;
+#endif
 }
 
 } // namespace

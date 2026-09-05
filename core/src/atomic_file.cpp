@@ -14,8 +14,6 @@
 #include <atomic>
 #include <cstdio>
 #include <cstring>
-#include <filesystem>
-#include <system_error>
 
 #ifdef _WIN32
 #include <process.h>
@@ -138,8 +136,12 @@ void AtomicFileWriter::abort() noexcept {
     m_file = nullptr;
   }
   if (m_tempPath[0] != '\0') {
-    std::error_code removeError{};
-    std::filesystem::remove(m_tempPath, removeError);
+    // The same non-allocating primitive the commit protocol discards its
+    // temporary with; abort runs from the destructor, where a failed
+    // removal has no caller to report to and the destination is
+    // untouched either way.
+    static_cast<void>(
+        detail::production_replace_ops().remove_file(m_tempPath));
     m_tempPath[0] = '\0';
   }
   m_destinationPath[0] = '\0';
