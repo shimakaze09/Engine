@@ -3,10 +3,12 @@
 // engine.load_scene transition through process_pending_scene_op with a Lua
 // on_collision handler observing the pairs, the direct load_scene path
 // (editor File -> Load Scene), the buffer load_scene path (editor Stop
-// restore), engine.new_scene's reset_world, and repeated transitions.
-// Regression: the dispatch is run-tier state installed once per run, and a
-// staged World never carries one, so a commit that copied it from the staged
-// World silently detached every collision callback after the first load.
+// restore), engine.new_scene's reset_world, repeated transitions, and the
+// editor's own Play -> Stop -> Play drive with a Lua handler observing the
+// pair in the second play session. Regression: the dispatch is run-tier
+// state installed once per run, and a staged World never carries one, so a
+// commit that copied it from the staged World silently detached every
+// collision callback after the first load.
 
 #include <cstddef>
 #include <cstdio>
@@ -14,8 +16,10 @@
 #include <memory>
 #include <new>
 
+#include "editor_session.h"
 #include "engine/core/logging.h"
 #include "engine/core/service_locator.h"
+#include "engine/editor/editor.h"
 #include "engine/renderer/asset_database.h"
 #include "engine/renderer/asset_manager.h"
 #include "engine/runtime/engine_pipeline.h"
@@ -297,6 +301,90 @@ bool test_repeated_loads_and_no_dispatch_world() noexcept {
   return true;
 }
 
+/// Test 4: the editor's Play -> Stop -> Play drive through the production
+/// start_play_mode/stop_play_mode. The contact is authored in place so the
+/// first session cannot lose the dispatch to a load; Stop then restores the
+/// pre-play snapshot over the live World through the buffer load_scene
+/// path, and the Lua handler registered before the first Play must still
+/// observe the pair in the second play session.
+bool test_editor_play_stop_play_keeps_lua_handler() noexcept {
+  Fixture fx{};
+  if (!fx.init()) {
+    std::puts("test 4: fixture init failed");
+    return false;
+  }
+  engine::runtime::set_collision_dispatch(
+      *fx.world, &engine::scripting::dispatch_physics_callbacks);
+
+  const char *helper =
+      "collision_hits = 0\n"
+      "engine.on_collision_handler(function(a, b)\n"
+      "    collision_hits = collision_hits + 1\n"
+      "end)\n"
+      "function slcd_reset_hits()\n"
+      "    collision_hits = 0\n"
+      "end\n"
+      "function slcd_assert_hit()\n"
+      "    if collision_hits < 1 then\n"
+      "        error('on_collision never fired in this play session')\n"
+      "    end\n"
+      "end\n";
+  if (!write_text_file(kHelperScript, helper) ||
+      !engine::scripting::load_script(kHelperScript) ||
+      !author_contact_scene(*fx.world)) {
+    std::puts("test 4: helper script or scene setup failed");
+    fx.shutdown();
+    return false;
+  }
+
+  engine::editor::editor_set_world(fx.world.get());
+  engine::editor::editor_session().initialized = true;
+
+  bool ok = true;
+  engine::editor::start_play_mode();
+  if (engine::editor::editor_session().playState !=
+      engine::editor::PlayState::Playing) {
+    std::puts("test 4: first Play did not start");
+    ok = false;
+  } else if (!run_contact_frame(*fx.world) ||
+             !engine::scripting::call_script_function("slcd_assert_hit")) {
+    std::puts("test 4: Lua on_collision was not reached in the first session");
+    ok = false;
+  }
+
+  if (ok) {
+    engine::editor::stop_play_mode();
+    if ((engine::editor::editor_session().playState !=
+         engine::editor::PlayState::Stopped) ||
+        engine::editor::editor_session().worldRestoreFailed) {
+      std::puts("test 4: Stop did not restore the authored scene");
+      ok = false;
+    }
+  }
+
+  if (ok) {
+    static_cast<void>(
+        engine::scripting::call_script_function("slcd_reset_hits"));
+    engine::editor::start_play_mode();
+    if (engine::editor::editor_session().playState !=
+        engine::editor::PlayState::Playing) {
+      std::puts("test 4: second Play did not start");
+      ok = false;
+    } else if (!run_contact_frame(*fx.world) ||
+               !engine::scripting::call_script_function("slcd_assert_hit")) {
+      std::puts("test 4: Lua on_collision was not reached after Stop "
+                "restored the scene");
+      ok = false;
+    }
+    engine::editor::stop_play_mode();
+  }
+
+  engine::editor::editor_session().initialized = false;
+  engine::editor::editor_set_world(nullptr);
+  fx.shutdown();
+  return ok;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -330,6 +418,9 @@ int main() {
     result = 1;
   }
   if ((result == 0) && !test_repeated_loads_and_no_dispatch_world()) {
+    result = 1;
+  }
+  if ((result == 0) && !test_editor_play_stop_play_keeps_lua_handler()) {
     result = 1;
   }
 
