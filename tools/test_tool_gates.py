@@ -4,10 +4,11 @@
 # perf gate's evaluate() must reject non-finite or non-positive
 # measurements and baselines, the asset metadata path audit must flag
 # absolute developer paths while passing repo-relative ones (audit L-03),
-# and the Lua binding generator must reject
+# the Lua binding generator must reject
 # duplicate Lua names and invalid or reserved parameter identifiers
-# instead of emitting uncompilable or injected C++. Run from ctest as
-# engine_integration_tool_gates.
+# instead of emitting uncompilable or injected C++, and the test timing
+# audit must hold functional tests to classified clock reads only. Run
+# from ctest as engine_integration_tool_gates.
 
 import importlib.util
 import re
@@ -646,6 +647,74 @@ def test_dependency_pin_gate():
         sys.argv = argv
 
 
+def write_timing_fixture(root, relative, body):
+    """Plants one test source at `relative` under a synthetic tree root."""
+    path = root / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("// Synthetic fixture for the test timing gate.\n" + body,
+                    encoding="utf-8")
+    return root
+
+
+def test_test_timing_gate():
+    """The timing gate (issue #354) must reject an unclassified clock read
+    in a functional test, accept a read classified by a marker on its own
+    line or within the two lines above it, reject a marker with no read
+    beside it, ignore benchmark sources and sleeps, and pass this
+    checkout."""
+    script = str(TOOLS / "check_test_timing.py")
+    read = "  const auto t = std::chrono::steady_clock::now();\n"
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+
+        check(run([script, "--root", str(write_timing_fixture(
+            tmp / "unmarked", "tests/unit/a_test.cpp", read))]) != 0,
+              "timing: an unclassified clock read in a unit test fails")
+        check(run([script, "--root", str(write_timing_fixture(
+            tmp / "alias", "tests/integration/a_test.cpp",
+            "using Clock = std::chrono::high_resolution_clock;\n"
+            "  const auto t = Clock::now();\n"))]) != 0,
+              "timing: a read through a clock alias fails")
+        check(run([script, "--root", str(write_timing_fixture(
+            tmp / "same_line", "tests/unit/a_test.cpp",
+            "  const auto t = std::chrono::steady_clock::now();"
+            " // wall-clock: diagnostic\n"))]) == 0,
+              "timing: a same-line marker classifies the read")
+        check(run([script, "--root", str(write_timing_fixture(
+            tmp / "above", "tests/unit/a_test.cpp",
+            "  // wall-clock: harness-timeout\n"
+            "  auto deadline =\n"
+            "      std::chrono::steady_clock::now() + timeout;\n"))]) == 0,
+              "timing: a marker two lines above classifies the read")
+        check(run([script, "--root", str(write_timing_fixture(
+            tmp / "too_far", "tests/unit/a_test.cpp",
+            "  // wall-clock: harness-timeout\n"
+            "  int a = 0;\n"
+            "  int b = 0;\n"
+            + read))]) != 0,
+              "timing: a marker outside the two-line window classifies "
+              "nothing (both the read and the marker are findings)")
+        check(run([script, "--root", str(write_timing_fixture(
+            tmp / "stale", "tests/unit/a_test.cpp",
+            "  // wall-clock: diagnostic\n  int a = 0;\n"))]) != 0,
+              "timing: a marker with no read beside it fails")
+        check(run([script, "--root", str(write_timing_fixture(
+            tmp / "benchmark", "tests/benchmark/a_test.cpp", read))]) == 0,
+              "timing: benchmark sources are outside the gate")
+        check(run([script, "--root", str(write_timing_fixture(
+            tmp / "sleep", "tests/unit/a_test.cpp",
+            "  std::this_thread::sleep_for(std::chrono::milliseconds(1));\n"
+            "  // steady_clock::now() mentioned in prose is not a read\n"
+        ))]) == 0,
+              "timing: sleeping and prose mentions are not reads")
+        check(run([script, "--root", str(tmp / "empty")]) == 0,
+              "timing: a tree with no functional tests passes")
+
+    check(run([script]) == 0,
+          "timing: this checkout passes the gate")
+
+
 def main():
     test_coverage_gate()
     test_perf_gate_evaluate()
@@ -653,6 +722,7 @@ def main():
     test_binding_generator()
     test_module_dependency_gate()
     test_dependency_pin_gate()
+    test_test_timing_gate()
     if failures:
         print(f"\nFAILED ({len(failures)} failure(s))")
         return 1

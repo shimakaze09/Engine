@@ -1,8 +1,10 @@
-// ECS stress / performance benchmark test.
-// Exercises entity creation, transform addition, and flat iteration at the
-// maximum World capacity.  The test is registered as a CTest gate: if the
-// iteration loop exceeds the threshold the test fails, providing a regression
-// signal for hot-path regressions.
+// ECS stress test: creates entities up to the World capacity, attaches a
+// transform to each, and iterates them once through the flat visitor. The
+// contract asserted is that a fresh World creates exactly kMaxEntities
+// entities before refusing, and that the iteration visits exactly the
+// transforms that were created. The timings it prints are diagnostic only: functional
+// tests never gate on wall-clock thresholds, and the ECS iteration budget
+// lives in engine_bench_ecs_perf against tests/benchmark/perf_baseline.json.
 //
 // World capacity defaults to 65536 entities, and the 50k integration stress
 // test covers the raised-capacity path.
@@ -20,12 +22,7 @@ using Clock = std::chrono::high_resolution_clock;
 
 namespace {
 
-// Generous threshold: the tight inner loop must complete in under 500 ms even
-// on a slow CI host.  A real performance gate (< 2 ms) is enforced separately
-// via profiler benchmarks.
-constexpr double kThresholdMs = 500.0;
-
-bool bench_create_and_iterate() noexcept {
+bool stress_create_and_iterate() noexcept {
   auto world = std::unique_ptr<World>(new (std::nothrow) World());
   if (!world) {
     return false;
@@ -34,18 +31,33 @@ bool bench_create_and_iterate() noexcept {
   const std::size_t cap = World::kMaxEntities;
 
   // ---- creation ----
-  const auto t0 = Clock::now();
+  // A fresh World hands out exactly kMaxEntities entities (indices 1
+  // through kMaxEntities; index 0 is the invalid handle and is not part
+  // of the budget), so every create inside the capacity must succeed and
+  // the one after it must refuse.
+  const auto t0 = Clock::now(); // wall-clock: diagnostic
+  std::size_t created = 0U;
   for (std::size_t i = 0U; i < cap; ++i) {
     const Entity e = world->create_entity();
     if (e == kInvalidEntity) {
-      // World full – acceptable for the stress test
-      break;
+      std::printf("FAIL: create_entity refused entity %zu inside capacity\n",
+                  i);
+      return false;
     }
     Transform t{};
     t.position = engine::math::Vec3(static_cast<float>(i), 0.0F, 0.0F);
-    world->add_transform(e, t);
+    if (!world->add_transform(e, t)) {
+      std::printf("FAIL: add_transform refused entity %zu\n", i);
+      return false;
+    }
+    ++created;
   }
-  const auto t1 = Clock::now();
+  const auto t1 = Clock::now(); // wall-clock: diagnostic
+
+  if (world->create_entity() != kInvalidEntity) {
+    std::printf("FAIL: create_entity succeeded past the World capacity\n");
+    return false;
+  }
 
   // ---- flat iteration (visitor over all transforms) ----
   std::size_t visited = 0U;
@@ -55,7 +67,7 @@ bool bench_create_and_iterate() noexcept {
   };
   world->for_each_transform(visitor, &visited);
 
-  const auto t2 = Clock::now();
+  const auto t2 = Clock::now(); // wall-clock: diagnostic
 
   const double createMs =
       std::chrono::duration<double, std::milli>(t1 - t0).count();
@@ -65,10 +77,14 @@ bool bench_create_and_iterate() noexcept {
   std::printf("[ecs_stress] entities=%zu  create=%.2fms  iterate=%.2fms\n",
               visited, createMs, iterMs);
 
-  const double totalMs = createMs + iterMs;
-  if (totalMs > kThresholdMs) {
-    std::printf("BENCH FAIL: total %.2fms exceeded threshold %.0fms\n", totalMs,
-                kThresholdMs);
+  if (created != World::kMaxEntities) {
+    std::printf("FAIL: created %zu entities, capacity is %zu\n", created,
+                World::kMaxEntities);
+    return false;
+  }
+  if (visited != created) {
+    std::printf("FAIL: iterated %zu transforms, created %zu\n", visited,
+                created);
     return false;
   }
   return true;
@@ -78,7 +94,7 @@ bool bench_create_and_iterate() noexcept {
 
 /// Runs this executable or test program.
 int main() {
-  if (!bench_create_and_iterate()) {
+  if (!stress_create_and_iterate()) {
     return 1;
   }
   std::printf("PASS: ecs_stress\n");
