@@ -4,12 +4,19 @@
 // r_present_scene so the renderer presents the final image on the back
 // buffer — the web share page's boot path. Drives real
 // engine::bootstrap() + a full EnginePipeline run with a pre-registered
-// bridge that bootstrap has to displace.
+// bridge that bootstrap has to displace. The configured startup scene is
+// a contact scene whose script registers a Lua collision handler when it
+// begins play: player mode boots that scene through the deferred
+// engine.load_scene transition after the pipeline installed its collision
+// dispatch, and the handler must observe the pair on the frames that
+// follow (regression for #410).
 
 #include "engine/core/cvar.h"
 #include "engine/engine.h"
 #include "engine/runtime/editor_bridge.h"
 #include "engine/runtime/engine_pipeline.h"
+#include "engine/runtime/physics_bridge.h"
+#include "engine/runtime/scene_serializer.h"
 #include "engine/runtime/world.h"
 #include "engine/scripting/bindable_api.h"
 
@@ -18,11 +25,15 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <memory>
+#include <new>
 #include <thread>
 
 namespace {
 
 constexpr const char *kScriptPath = "player_mode_test.lua";
+constexpr const char *kCollisionScriptPath = "player_mode_collision.lua";
+constexpr const char *kCollisionScenePath = "player_mode_collision.scene.json";
 
 engine::runtime::World *g_world = nullptr;
 
@@ -80,26 +91,99 @@ constexpr const char *kScript =
     "end\n"
     "return M\n";
 
-bool write_script_file() noexcept {
+// Startup-scene script: registers a Lua collision handler when the scene
+// begins play and records the first pair it observes in game state. The
+// handler fires once so the later begin-play probe's state is not
+// overwritten by pairs reported on subsequent frames.
+constexpr const char *kCollisionScript =
+    "local M = {}\n"
+    "function M.on_begin_play(self)\n"
+    "    local seen = false\n"
+    "    engine.on_collision_handler(function(a, b)\n"
+    "        if not seen then\n"
+    "            seen = true\n"
+    "            engine.set_game_state(\"collision_seen\")\n"
+    "        end\n"
+    "    end)\n"
+    "end\n"
+    "return M\n";
+
+bool write_text_file(const char *path, const char *contents) noexcept {
   std::FILE *file = nullptr;
 #ifdef _WIN32
-  if (fopen_s(&file, kScriptPath, "wb") != 0) {
+  if (fopen_s(&file, path, "wb") != 0) {
     file = nullptr;
   }
 #else
-  file = std::fopen(kScriptPath, "wb");
+  file = std::fopen(path, "wb");
 #endif
   if (file == nullptr) {
     return false;
   }
-  const std::size_t length = std::char_traits<char>::length(kScript);
-  const std::size_t written = std::fwrite(kScript, 1U, length, file);
+  const std::size_t length = std::char_traits<char>::length(contents);
+  const std::size_t written = std::fwrite(contents, 1U, length, file);
   std::fclose(file);
   return written == length;
 }
 
+bool write_script_file() noexcept {
+  return write_text_file(kScriptPath, kScript) &&
+         write_text_file(kCollisionScriptPath, kCollisionScript);
+}
+
 void remove_script_file() noexcept {
   static_cast<void>(std::remove(kScriptPath));
+  static_cast<void>(std::remove(kCollisionScriptPath));
+  static_cast<void>(std::remove(kCollisionScenePath));
+}
+
+/// Authors the startup scene through the production serializer: a static
+/// unit block at the origin, a dynamic sphere overlapping its top face by
+/// 0.1 m under zero gravity (so the pair is reported on the first step),
+/// and the scripted entity that installs the collision handler.
+bool write_collision_scene() noexcept {
+  std::unique_ptr<engine::runtime::World> author(new (std::nothrow)
+                                                     engine::runtime::World());
+  if (author == nullptr) {
+    return false;
+  }
+  engine::runtime::set_gravity(*author, 0.0F, 0.0F, 0.0F);
+
+  engine::runtime::Transform blockTransform{};
+  const engine::runtime::Entity block =
+      author->create_scene_object(blockTransform);
+  engine::runtime::Transform sphereTransform{};
+  sphereTransform.position = engine::math::Vec3(0.0F, 0.9F, 0.0F);
+  const engine::runtime::Entity sphere =
+      author->create_scene_object(sphereTransform);
+  const engine::runtime::Entity scripted = author->create_scene_object();
+  if ((block == engine::runtime::kInvalidEntity) ||
+      (sphere == engine::runtime::kInvalidEntity) ||
+      (scripted == engine::runtime::kInvalidEntity)) {
+    return false;
+  }
+
+  engine::runtime::Collider blockCollider{};
+  blockCollider.halfExtents = engine::math::Vec3(0.5F, 0.5F, 0.5F);
+  engine::runtime::Collider sphereCollider{};
+  sphereCollider.shape = engine::runtime::ColliderShape::Sphere;
+  sphereCollider.halfExtents = engine::math::Vec3(0.5F, 0.5F, 0.5F);
+  engine::runtime::RigidBody body{};
+  body.inverseMass = 1.0F;
+  engine::runtime::ScriptComponent script{};
+  std::snprintf(script.scriptPath, sizeof(script.scriptPath), "%s",
+                kCollisionScriptPath);
+  return author->add_collider(block, blockCollider) &&
+         author->add_collider(sphere, sphereCollider) &&
+         author->add_rigid_body(sphere, body) &&
+         author->add_script_component(scripted, script) &&
+         engine::runtime::save_scene(*author, kCollisionScenePath);
+}
+
+/// True once the startup scene's handler has recorded a collision.
+bool collision_seen() noexcept {
+  const char *state = engine::scripting::bindable_get_game_state();
+  return (state != nullptr) && (std::strcmp(state, "collision_seen") == 0);
 }
 
 void set_player_env() noexcept {
@@ -125,8 +209,9 @@ int main() {
     std::fprintf(stderr, "FAIL: could not locate bundled assets\n");
     return 1;
   }
-  if (!write_script_file()) {
-    std::fprintf(stderr, "FAIL: write script file\n");
+  if (!write_script_file() || !write_collision_scene()) {
+    std::fprintf(stderr, "FAIL: write script and scene fixtures\n");
+    remove_script_file();
     return 1;
   }
 
@@ -143,6 +228,8 @@ int main() {
   // device stands in so the pipeline runs on every CI lane.
   engine::EngineConfig config{};
   config.core.platform.headless = true;
+  // The startup scene player mode boots through the deferred load.
+  config.editorScenePath = kCollisionScenePath;
   if (!engine::bootstrap(config)) {
     std::fprintf(stderr, "FAIL: bootstrap\n");
     remove_script_file();
@@ -170,6 +257,20 @@ int main() {
 
     CHECK(ticking_frame(pipeline), "settle frame 1");
     CHECK(ticking_frame(pipeline), "settle frame 2");
+
+    // The first frame commits the startup scene after its simulation; the
+    // scripted entity begins play on the next frame, and the contact is
+    // reported through the pipeline's dispatch on that frame's step. A
+    // few more frames are allowed so the check is about the dispatch, not
+    // the exact frame the handler lands on.
+    for (int frame = 0; (frame < 6) && !collision_seen(); ++frame) {
+      CHECK(ticking_frame(pipeline), "collision frame");
+    }
+    CHECK((g_world != nullptr) && (g_world->alive_entity_count() == 3U),
+          "the startup scene replaced the bootstrap content");
+    CHECK(collision_seen(),
+          "the startup scene's Lua collision handler observed the pair "
+          "through the dispatch installed before the scene loaded");
     if (g_world != nullptr) {
       const engine::runtime::Entity scripted = g_world->create_scene_object();
       CHECK(scripted != engine::runtime::kInvalidEntity, "spawn scripted");

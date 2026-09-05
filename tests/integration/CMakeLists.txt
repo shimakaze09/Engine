@@ -179,12 +179,17 @@ engine_add_test_executable(engine_integration_scene_flow
 engine_add_test_executable(engine_integration_scene_load_collision_dispatch
     SOURCES
     scene_load_collision_dispatch_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/editor/src
     PRIVATE_DEPS
+    engine_editor
     engine_runtime
     engine_scripting
     engine_renderer
     engine_physics
     engine_core
+    COMPILE_DEFINITIONS
+    SDL_MAIN_HANDLED
     LABELS
     integration
 )
