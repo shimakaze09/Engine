@@ -44,7 +44,14 @@ bool last_log_mentions(const char *needle) noexcept {
 
 /// Reads the whole output file; returns the byte count (0 when absent).
 std::size_t read_output(std::uint8_t *buffer, std::size_t capacity) noexcept {
-  std::FILE *file = std::fopen(kOutputPath, "rb");
+  std::FILE *file = nullptr;
+#ifdef _WIN32
+  if (fopen_s(&file, kOutputPath, "rb") != 0) {
+    file = nullptr;
+  }
+#else
+  file = std::fopen(kOutputPath, "rb");
+#endif
   if (file == nullptr) {
     return 0U;
   }
