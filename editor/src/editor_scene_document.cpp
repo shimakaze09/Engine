@@ -203,25 +203,60 @@ void continue_pending_action() noexcept {
   doc.pendingOpenPath[0] = '\0';
 }
 
-/// SDL_ShowOpenFileDialog/SDL_ShowSaveFileDialog callback: only publishes
-/// the result through the atomic handoff (see the SceneDocumentState
-/// comment); all filesystem work happens later on the main thread.
+/// SDL_ShowOpenFileDialog/SDL_ShowSaveFileDialog callback: publishes the
+/// result into the request's own record through the atomic handoff (see
+/// the SceneDialogRequest comment) and reads no session state, so a
+/// dialog that outlived its session writes nowhere the current session
+/// looks; all filesystem work happens later on the main thread.
 void scene_dialog_callback(void *userdata, const char *const *filelist,
                            int filter) noexcept {
   static_cast<void>(filter);
-  auto *session = static_cast<EditorSession *>(userdata);
-  if (session == nullptr) {
+  auto *request = static_cast<SceneDialogRequest *>(userdata);
+  if (request == nullptr) {
     return;
   }
-  SceneDocumentState &doc = session->document;
   if ((filelist == nullptr) || (filelist[0] == nullptr)) {
-    doc.dialogResultAccepted = false;
+    request->resultAccepted = false;
   } else {
-    std::snprintf(doc.dialogResultPath, sizeof(doc.dialogResultPath), "%s",
+    std::snprintf(request->resultPath, sizeof(request->resultPath), "%s",
                   filelist[0]);
-    doc.dialogResultAccepted = true;
+    request->resultAccepted = true;
   }
-  doc.dialogResultPending.store(true, std::memory_order_release);
+  request->resultPending.store(true, std::memory_order_release);
+}
+
+/// Stamps a free request record with the current generation and makes it
+/// the one the session waits on. A record is free when nothing is in
+/// flight on it, or when its callback has already delivered for a
+/// retired generation: nobody will consume that result and the callback
+/// has no store left to make. Null when the pool is exhausted by
+/// retired dialogs whose callbacks have not fired yet; the request is
+/// refused rather than aliasing a record a callback may still write.
+SceneDialogRequest *acquire_dialog_request(SceneDocumentState &doc,
+                                           SceneDialogKind kind) noexcept {
+  for (std::size_t i = 0U; i < kMaxSceneDialogRequests; ++i) {
+    SceneDialogRequest &request = doc.dialogRequests[i];
+    const bool inFlight = request.inFlight.load(std::memory_order_acquire);
+    const bool retiredAndDelivered =
+        inFlight && (request.generation != doc.dialogGeneration) &&
+        request.resultPending.load(std::memory_order_acquire);
+    if (inFlight && !retiredAndDelivered) {
+      continue;
+    }
+    request.generation = doc.dialogGeneration;
+    request.resultPath[0] = '\0';
+    request.resultAccepted = false;
+    request.resultPending.store(false, std::memory_order_relaxed);
+    request.inFlight.store(true, std::memory_order_release);
+    doc.activeDialogRequest = i;
+    doc.dialogPendingKind = kind;
+    return &request;
+  }
+  core::log_message(core::LogLevel::Warning, kLogChannel,
+                    "native file dialog refused: every request slot is held "
+                    "by a dialog from an earlier editor session that has not "
+                    "closed yet");
+  return nullptr;
 }
 
 void begin_save_scene_as_dialog() noexcept {
@@ -230,13 +265,16 @@ void begin_save_scene_as_dialog() noexcept {
   if (doc.dialogPendingKind != SceneDialogKind::None) {
     return; // one native dialog at a time
   }
-  doc.dialogPendingKind = SceneDialogKind::SaveAs;
-  doc.dialogResultPending.store(false, std::memory_order_relaxed);
+  SceneDialogRequest *request =
+      acquire_dialog_request(doc, SceneDialogKind::SaveAs);
+  if (request == nullptr) {
+    return;
+  }
 
   static const SDL_DialogFileFilter kFilters[] = {{"Scene", "json"}};
   const char *defaultLocation =
       doc.hasPath ? doc.path : editor_asset_root();
-  SDL_ShowSaveFileDialog(&scene_dialog_callback, &session, session.sdlWindow,
+  SDL_ShowSaveFileDialog(&scene_dialog_callback, request, session.sdlWindow,
                          kFilters, 1, defaultLocation);
 }
 
@@ -469,11 +507,14 @@ void request_open_scene_dialog() noexcept {
   if (doc.dialogPendingKind != SceneDialogKind::None) {
     return;
   }
-  doc.dialogPendingKind = SceneDialogKind::Open;
-  doc.dialogResultPending.store(false, std::memory_order_relaxed);
+  SceneDialogRequest *request =
+      acquire_dialog_request(doc, SceneDialogKind::Open);
+  if (request == nullptr) {
+    return;
+  }
 
   static const SDL_DialogFileFilter kFilters[] = {{"Scene", "json"}};
-  SDL_ShowOpenFileDialog(&scene_dialog_callback, &session, session.sdlWindow,
+  SDL_ShowOpenFileDialog(&scene_dialog_callback, request, session.sdlWindow,
                         kFilters, 1, editor_asset_root(), false);
 }
 
@@ -499,16 +540,24 @@ void request_save_scene_as() noexcept {
 
 void scene_document_poll_dialog_result() noexcept {
   SceneDocumentState &doc = editor_session().document;
-  if (!doc.dialogResultPending.load(std::memory_order_acquire)) {
+  if (doc.activeDialogRequest == kNoSceneDialogRequest) {
     return;
   }
-  doc.dialogResultPending.store(false, std::memory_order_relaxed);
+  SceneDialogRequest &request = doc.dialogRequests[doc.activeDialogRequest];
+  if (!request.resultPending.load(std::memory_order_acquire)) {
+    return;
+  }
 
   const SceneDialogKind kind = doc.dialogPendingKind;
   doc.dialogPendingKind = SceneDialogKind::None;
-  const bool accepted = doc.dialogResultAccepted;
+  doc.activeDialogRequest = kNoSceneDialogRequest;
+  const bool accepted = request.resultAccepted;
   char path[kMaxDocumentPathLength] = {};
-  std::snprintf(path, sizeof(path), "%s", doc.dialogResultPath);
+  std::snprintf(path, sizeof(path), "%s", request.resultPath);
+  // Consumed: the callback has made its last store, so the record is free
+  // for the next request.
+  request.resultPending.store(false, std::memory_order_relaxed);
+  request.inFlight.store(false, std::memory_order_release);
   const bool continues = doc.dialogContinuesPendingAction;
   doc.dialogContinuesPendingAction = false;
 
@@ -675,6 +724,41 @@ void scene_document_update_window_title() noexcept {
 
 void scene_document_reset_for_world_switch() noexcept {
   reset_document_identity(editor_session().document);
+}
+
+void scene_document_retire_dialogs() noexcept {
+  SceneDocumentState &doc = editor_session().document;
+  // The records themselves are left alone: a callback may still be about
+  // to write one, and the generation mismatch is what keeps that write
+  // from ever being consumed. Wraps after 2^32 retirements, which no
+  // process reaches.
+  ++doc.dialogGeneration;
+  if (doc.dialogGeneration == 0U) {
+    doc.dialogGeneration = 1U;
+  }
+  doc.activeDialogRequest = kNoSceneDialogRequest;
+  doc.dialogPendingKind = SceneDialogKind::None;
+  doc.dialogContinuesPendingAction = false;
+}
+
+void *scene_dialog_arm_for_tests(SceneDialogKind kind,
+                                 bool continuesPendingAction) noexcept {
+  SceneDocumentState &doc = editor_session().document;
+  if ((kind == SceneDialogKind::None) ||
+      (doc.dialogPendingKind != SceneDialogKind::None)) {
+    return nullptr;
+  }
+  SceneDialogRequest *request = acquire_dialog_request(doc, kind);
+  if (request != nullptr) {
+    doc.dialogContinuesPendingAction = continuesPendingAction;
+  }
+  return request;
+}
+
+void scene_dialog_deliver_for_tests(void *request, const char *path) noexcept {
+  // SDL reports a cancelled dialog as a list whose first entry is null.
+  const char *const files[2] = {path, nullptr};
+  scene_dialog_callback(request, files, -1);
 }
 
 void recent_scenes_set_directory_override_for_tests(

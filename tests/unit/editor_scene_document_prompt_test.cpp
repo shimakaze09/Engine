@@ -5,9 +5,12 @@
 // place (titled document) or resolves through the async Save As dialog
 // handoff (untitled document) before continuing the deferred action. A
 // failed Save keeps the prompt armed instead of silently losing the
-// pending action. ImGui draw code is out of scope here (exempt per
-// CLAUDE.md); every check below drives the production functions the
-// panel calls, not a copy.
+// pending action. It also pins the dialog-session boundary (audit #390):
+// a native dialog result that arrives after its session was retired is
+// discarded, a fresh dialog afterwards completes normally, and request
+// records are never reused while a callback may still write them. ImGui
+// draw code is out of scope here (exempt per CLAUDE.md); every check
+// below drives the production functions the panel calls, not a copy.
 
 #include "editor_commands.h"
 #include "editor_scene_document.h"
@@ -300,18 +303,19 @@ int check_dirty_new_save_as_continuation_via_simulated_dialog() {
   }
 
   // scene_document_prompt_choose_save() would call the real SDL Save As
-  // dialog here (untitled document); simulate its async result instead,
+  // dialog here (untitled document); arm the same request without the
+  // native call and deliver its result through the production callback,
   // exercising scene_document_poll_dialog_result()'s continuation branch
   // exactly as the real callback handoff would drive it.
   SceneDocumentState &doc = editor_session().document;
   doc.pendingAction = PendingSceneAction::New;
   doc.unsavedPromptOpen = true;
-  doc.dialogContinuesPendingAction = true;
-  doc.dialogPendingKind = SceneDialogKind::SaveAs;
-  std::snprintf(doc.dialogResultPath, sizeof(doc.dialogResultPath), "%s",
-               untitledSavePath);
-  doc.dialogResultAccepted = true;
-  doc.dialogResultPending.store(true, std::memory_order_release);
+  void *request = scene_dialog_arm_for_tests(SceneDialogKind::SaveAs, true);
+  if (request == nullptr) {
+    editor_set_world(nullptr);
+    return 9;
+  }
+  scene_dialog_deliver_for_tests(request, untitledSavePath);
 
   scene_document_poll_dialog_result();
 
@@ -422,6 +426,255 @@ int check_quit_gate_defers_while_dirty() {
   return ok ? 0 : 8;
 }
 
+/// Writes a scene holding one named entity to `path`; false on failure.
+bool write_scene_with_entity(const char *path, const char *name) noexcept {
+  static_cast<void>(std::remove(path));
+  std::unique_ptr<World> writer(new (std::nothrow) World());
+  return (writer != nullptr) &&
+         (add_named_entity(*writer, name) != kInvalidEntity) &&
+         save_scene(*writer, path);
+}
+
+/// EXPECTATION (audit #390): a native dialog result that arrives after
+/// the session that opened it was shut down is discarded — it neither
+/// opens the chosen scene into the later session's World nor saves the
+/// later session's World to the chosen path — and the later session
+/// waits on no dialog afterwards. Red on base: the callback published
+/// into process-global session storage and the next poll acted on it.
+int check_retired_dialog_result_is_discarded() {
+  if (!ensure_scratch_root()) {
+    return 1;
+  }
+  char staleOpen[512] = {};
+  char staleSave[512] = {};
+  if (!make_scratch_path("stale_open.json", staleOpen, sizeof(staleOpen)) ||
+      !make_scratch_path("stale_save.json", staleSave, sizeof(staleSave)) ||
+      !write_scene_with_entity(staleOpen, "FromRetiredSession")) {
+    return 2;
+  }
+  static_cast<void>(std::remove(staleSave));
+
+  // First session: an Open dialog is outstanding when the editor shuts
+  // down (shutdown_editor runs scene_document_retire_dialogs).
+  std::unique_ptr<World> first(new (std::nothrow) World());
+  if (first == nullptr) {
+    return 3;
+  }
+  editor_set_world(first.get());
+  void *staleOpenRequest =
+      scene_dialog_arm_for_tests(SceneDialogKind::Open, false);
+  if (staleOpenRequest == nullptr) {
+    editor_set_world(nullptr);
+    return 4;
+  }
+  scene_document_retire_dialogs();
+  editor_set_world(nullptr);
+
+  // Later session in the same process, then the delayed callback.
+  std::unique_ptr<World> later(new (std::nothrow) World());
+  if (later == nullptr) {
+    return 5;
+  }
+  editor_set_world(later.get());
+  scene_dialog_deliver_for_tests(staleOpenRequest, staleOpen);
+  scene_document_poll_dialog_result();
+  if ((later->find_entity_by_name("FromRetiredSession") != kInvalidEntity) ||
+      scene_document_has_path() ||
+      (editor_session().document.dialogPendingKind !=
+       SceneDialogKind::None)) {
+    editor_set_world(nullptr);
+    return 6;
+  }
+
+  // Same for Save As: the retired dialog's path must not receive the
+  // later session's World.
+  if (add_named_entity(*later, "LaterEntity") == kInvalidEntity) {
+    editor_set_world(nullptr);
+    return 7;
+  }
+  void *staleSaveRequest =
+      scene_dialog_arm_for_tests(SceneDialogKind::SaveAs, false);
+  if (staleSaveRequest == nullptr) {
+    editor_set_world(nullptr);
+    return 8;
+  }
+  scene_document_retire_dialogs();
+  editor_set_world(nullptr);
+
+  std::unique_ptr<World> third(new (std::nothrow) World());
+  if ((third == nullptr) ||
+      (add_named_entity(*third, "ThirdEntity") == kInvalidEntity)) {
+    return 9;
+  }
+  editor_set_world(third.get());
+  scene_dialog_deliver_for_tests(staleSaveRequest, staleSave);
+  scene_document_poll_dialog_result();
+  std::error_code ec{};
+  const bool ok = !std::filesystem::exists(staleSave, ec) &&
+                  !scene_document_has_path() &&
+                  (editor_session().document.dialogPendingKind ==
+                   SceneDialogKind::None);
+  editor_set_world(nullptr);
+  return ok ? 0 : 10;
+}
+
+/// EXPECTATION (audit #390): after a retirement a fresh dialog still
+/// completes normally, and a retired dialog's late result cannot hijack
+/// the fresh request even when it arrives while that request is
+/// outstanding — accepted and cancelled results alike.
+int check_fresh_dialog_after_retire_completes() {
+  if (!ensure_scratch_root()) {
+    return 1;
+  }
+  char stalePath[512] = {};
+  char freshPath[512] = {};
+  if (!make_scratch_path("stale_late.json", stalePath, sizeof(stalePath)) ||
+      !make_scratch_path("fresh_open.json", freshPath, sizeof(freshPath)) ||
+      !write_scene_with_entity(stalePath, "StaleLate") ||
+      !write_scene_with_entity(freshPath, "FreshOpen")) {
+    return 2;
+  }
+
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 3;
+  }
+  editor_set_world(world.get());
+  void *stale = scene_dialog_arm_for_tests(SceneDialogKind::Open, false);
+  if (stale == nullptr) {
+    editor_set_world(nullptr);
+    return 4;
+  }
+  scene_document_retire_dialogs();
+
+  void *fresh = scene_dialog_arm_for_tests(SceneDialogKind::Open, false);
+  if ((fresh == nullptr) || (fresh == stale)) {
+    editor_set_world(nullptr);
+    return 5;
+  }
+  // The retired dialog reports late, while the fresh one is outstanding.
+  scene_dialog_deliver_for_tests(stale, stalePath);
+  scene_document_poll_dialog_result();
+  if ((world->find_entity_by_name("StaleLate") != kInvalidEntity) ||
+      (editor_session().document.dialogPendingKind != SceneDialogKind::Open)) {
+    editor_set_world(nullptr);
+    return 6;
+  }
+  scene_dialog_deliver_for_tests(fresh, freshPath);
+  scene_document_poll_dialog_result();
+  if ((world->find_entity_by_name("FreshOpen") == kInvalidEntity) ||
+      (std::strcmp(scene_document_path(), freshPath) != 0)) {
+    editor_set_world(nullptr);
+    return 7;
+  }
+
+  // Cancelled results: a retired cancel must not cancel the later
+  // session's pending action, while the current session's cancel does.
+  request_scene_new();
+  void *staleCancel = scene_dialog_arm_for_tests(SceneDialogKind::SaveAs, true);
+  if (staleCancel == nullptr) {
+    editor_set_world(nullptr);
+    return 8;
+  }
+  scene_document_retire_dialogs();
+  editor_set_world(nullptr);
+
+  std::unique_ptr<World> later(new (std::nothrow) World());
+  if (later == nullptr) {
+    return 9;
+  }
+  editor_set_world(later.get());
+  const Entity entity = add_named_entity(*later, "Dirty");
+  if ((entity == kInvalidEntity) || !push_transform_edit(*later, entity)) {
+    editor_set_world(nullptr);
+    return 10;
+  }
+  request_scene_new();
+  if (!scene_document_prompt_open()) {
+    editor_set_world(nullptr);
+    return 11;
+  }
+  scene_dialog_deliver_for_tests(staleCancel, nullptr);
+  scene_document_poll_dialog_result();
+  if (!scene_document_prompt_open()) {
+    editor_set_world(nullptr);
+    return 12;
+  }
+  void *currentCancel =
+      scene_dialog_arm_for_tests(SceneDialogKind::SaveAs, true);
+  if (currentCancel == nullptr) {
+    editor_set_world(nullptr);
+    return 13;
+  }
+  scene_dialog_deliver_for_tests(currentCancel, nullptr);
+  scene_document_poll_dialog_result();
+  const bool ok = !scene_document_prompt_open() &&
+                  (later->alive_entity_count() != 0U);
+  editor_set_world(nullptr);
+  return ok ? 0 : 14;
+}
+
+/// EXPECTATION (audit #390): request records are never aliased while a
+/// callback may still write them. With every slot held by a retired
+/// dialog that has not reported, a new dialog is refused; once one of
+/// those dialogs reports, its slot is reclaimed and reused, and repeated
+/// retirements keep the pool usable.
+int check_request_pool_reclaims_delivered_retired_records() {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 1;
+  }
+  editor_set_world(world.get());
+
+  void *held[kMaxSceneDialogRequests] = {};
+  for (std::size_t i = 0U; i < kMaxSceneDialogRequests; ++i) {
+    held[i] = scene_dialog_arm_for_tests(SceneDialogKind::Open, false);
+    if (held[i] == nullptr) {
+      editor_set_world(nullptr);
+      return 2;
+    }
+    for (std::size_t j = 0U; j < i; ++j) {
+      if (held[j] == held[i]) {
+        editor_set_world(nullptr);
+        return 3;
+      }
+    }
+    scene_document_retire_dialogs();
+  }
+
+  if (scene_dialog_arm_for_tests(SceneDialogKind::Open, false) != nullptr) {
+    editor_set_world(nullptr);
+    return 4; // every slot is still owned by an unreported dialog
+  }
+
+  scene_dialog_deliver_for_tests(held[1], nullptr);
+  void *reclaimed = scene_dialog_arm_for_tests(SceneDialogKind::Open, false);
+  if (reclaimed != held[1]) {
+    editor_set_world(nullptr);
+    return 5;
+  }
+  scene_document_retire_dialogs();
+  scene_document_retire_dialogs();
+  if (scene_dialog_arm_for_tests(SceneDialogKind::Open, false) != nullptr) {
+    editor_set_world(nullptr);
+    return 6;
+  }
+  for (std::size_t i = 0U; i < kMaxSceneDialogRequests; ++i) {
+    scene_dialog_deliver_for_tests(held[i], nullptr);
+  }
+  void *fresh = scene_dialog_arm_for_tests(SceneDialogKind::Open, false);
+  if (fresh == nullptr) {
+    editor_set_world(nullptr);
+    return 7;
+  }
+  scene_dialog_deliver_for_tests(fresh, nullptr);
+  scene_document_poll_dialog_result();
+  const bool ok =
+      editor_session().document.dialogPendingKind == SceneDialogKind::None;
+  editor_set_world(nullptr);
+  return ok ? 0 : 8;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -445,6 +698,12 @@ int main() {
        &check_save_failure_keeps_prompt_armed},
       {"check_quit_gate_defers_while_dirty",
        &check_quit_gate_defers_while_dirty},
+      {"check_retired_dialog_result_is_discarded",
+       &check_retired_dialog_result_is_discarded},
+      {"check_fresh_dialog_after_retire_completes",
+       &check_fresh_dialog_after_retire_completes},
+      {"check_request_pool_reclaims_delivered_retired_records",
+       &check_request_pool_reclaims_delivered_retired_records},
   };
 
   for (const auto &check : checks) {

@@ -346,6 +346,9 @@ void shutdown_editor() noexcept {
   clear_thumbnail_cache();
   reset_material_editor();
   editor_session().commandHistory.clear();
+  // A native dialog this session left open may still deliver later; its
+  // result must not open or save a path in whatever session comes next.
+  scene_document_retire_dialogs();
 
   editor_session().initialized = false;
   editor_session().world = nullptr;
