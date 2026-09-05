@@ -21,15 +21,41 @@ enum class PendingSceneAction : std::uint8_t { None, New, OpenPath, Quit };
 /// Enumerates the outstanding native file dialog kind, if any.
 enum class SceneDialogKind : std::uint8_t { None, Open, SaveAs };
 
+/// Native dialog requests that can be outstanding at once across editor
+/// sessions. A request stays outstanding until its callback fires, and an
+/// OS dialog a retired session left open can fire long after that
+/// session ended, so the pool is sized for a few such stragglers.
+constexpr std::size_t kMaxSceneDialogRequests = 4U;
+/// activeDialogRequest value meaning the current session awaits no dialog.
+constexpr std::size_t kNoSceneDialogRequest = kMaxSceneDialogRequests;
+
+/// One native file dialog request: the userdata the SDL dialog callback
+/// receives, so a result can only ever land in the record of the request
+/// that produced it. The callback (same thread as the caller on
+/// Windows/macOS backends, a portal worker thread on some Linux desktop
+/// backends) writes resultPath/resultAccepted and then release-stores
+/// resultPending; the main thread reads them only after an acquire load
+/// of that flag, which is the record's only cross-thread contract. The
+/// main thread reuses a record only when it is not in flight, or when
+/// its callback has already fired for a generation that has since been
+/// retired — the callback's last store is resultPending, so such a record
+/// has no writer left.
+struct SceneDialogRequest final {
+  /// Session generation the request was issued under.
+  std::uint32_t generation = 0U;
+  char resultPath[kMaxDocumentPathLength] = {};
+  bool resultAccepted = false;
+  std::atomic<bool> resultPending{false};
+  std::atomic<bool> inFlight{false};
+};
+
 /// Owns scene-document identity, dirty bookkeeping, the unsaved-change
 /// confirm prompt, the recent-scenes list, and the async native file
-/// dialog handoff. Embedded in EditorSession. The dialog result fields are
-/// written from the SDL dialog callback (same thread as the caller on
-/// Windows/macOS backends, a portal worker thread on some Linux desktop
-/// backends) and consumed once per frame on the main thread; the
-/// std::atomic acquire/release pair on dialogResultPending is the only
-/// cross-thread contract; every other field it guards is written before
-/// the release store and read only after the acquire load succeeds.
+/// dialog handoff. Embedded in EditorSession. A dialog result reaches
+/// the document only through the request record the current session is
+/// waiting on: a retired session's dialog delivers into its own record,
+/// which no session polls, so it can never open or save a path chosen
+/// for a session that has already ended.
 struct SceneDocumentState final {
   char path[kMaxDocumentPathLength] = {};
   bool hasPath = false;
@@ -40,15 +66,23 @@ struct SceneDocumentState final {
   PendingSceneAction pendingAction = PendingSceneAction::None;
   char pendingOpenPath[kMaxDocumentPathLength] = {};
 
-  std::atomic<bool> dialogResultPending{false};
+  // Dialog-session generation: every request is stamped with it, and
+  // retiring the session (editor shutdown) advances it, so a request
+  // issued before the retirement can never be the one the current
+  // session waits on. Main-thread only; starts at 1 so a zero-initialized
+  // record is never current.
+  std::uint32_t dialogGeneration = 1U;
+  SceneDialogRequest dialogRequests[kMaxSceneDialogRequests]{};
+  // Index of the request the current session is waiting on, or
+  // kNoSceneDialogRequest; the poll consumes results from this record
+  // alone.
+  std::size_t activeDialogRequest = kNoSceneDialogRequest;
   SceneDialogKind dialogPendingKind = SceneDialogKind::None;
   // True when the outstanding SaveAs dialog exists only to satisfy a
   // pendingAction continuation armed from the unsaved-change prompt
   // (untitled document, user chose Save); false for a direct File > Save
   // As with no follow-up action.
   bool dialogContinuesPendingAction = false;
-  char dialogResultPath[kMaxDocumentPathLength] = {};
-  bool dialogResultAccepted = false;
 
   char recentScenes[kMaxRecentScenes][kMaxDocumentPathLength] = {};
   std::size_t recentSceneCount = 0U;
@@ -132,6 +166,23 @@ void request_save_scene_as() noexcept;
 /// Polls the async dialog result once per frame; must run on the main
 /// thread. No-op when no result is pending.
 void scene_document_poll_dialog_result() noexcept;
+/// Retires every native dialog request the session has issued: a result
+/// delivered for one of them afterwards lands in its own record and is
+/// never consumed, and the session waits on no dialog. Run by
+/// shutdown_editor; the OS dialog itself is not cancelled, because no
+/// platform promises a synchronous cancel.
+void scene_document_retire_dialogs() noexcept;
+
+/// Test-only: arms a dialog request of the given kind exactly as the
+/// production request functions do, minus the native SDL call, and
+/// returns the userdata the native callback would receive — nullptr when
+/// a dialog is already pending or the request pool is exhausted.
+void *scene_dialog_arm_for_tests(SceneDialogKind kind,
+                                 bool continuesPendingAction) noexcept;
+/// Test-only: delivers a native dialog result through the production
+/// callback for a request armed by scene_dialog_arm_for_tests; a null
+/// path is the cancelled dialog.
+void scene_dialog_deliver_for_tests(void *request, const char *path) noexcept;
 
 /// Recent-scenes list: MRU-ordered, persisted to the platform save
 /// directory, pruned of unreadable entries on load and on failed opens.
