@@ -58,8 +58,16 @@ bool vfs_write_text(const char *virtualPath,
 // Free a buffer returned by vfs_read_binary or vfs_read_text.
 void vfs_free(void *buffer) noexcept;
 
-// Return file modification time (platform epoch ticks), or 0 on failure.
+// Return the file's modification time in nanoseconds on the platform's
+// epoch (Unix epoch on POSIX, the FILETIME epoch on Windows), or 0 on
+// failure. Full platform precision, so two writes inside one second
+// compare unequal; values are for change detection, not for display.
 std::int64_t vfs_file_mtime(const char *virtualPath) noexcept;
+
+// The same modification time for an OS path that never went through a
+// mount (the script watcher's cwd-relative chunks); vfs_file_mtime is this
+// after resolution, so every watcher in the tree shares one reading.
+std::int64_t file_mtime_ns(const char *osPath) noexcept;
 
 // Resolve a virtual path to the underlying OS path. Returns false if the
 // virtual prefix is not mounted or the buffer is too small.

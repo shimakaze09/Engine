@@ -1,5 +1,6 @@
 // Verifies vfs test behavior for the Engine test suite.
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -233,6 +234,50 @@ bool test_mtime() noexcept {
   shutdown_vfs();
 
   return mtime > 0;
+}
+
+/// Two modification times inside one second compare unequal: the shader
+/// and script watchers detect a change by mtime inequality, so a recook or
+/// a save landing within a second of the previous one must not be missed.
+bool test_mtime_subsecond() noexcept {
+  namespace fs = std::filesystem;
+  if (!initialize_vfs()) {
+    return false;
+  }
+  if (!mount("root", ".")) {
+    shutdown_vfs();
+    return false;
+  }
+
+  const char *osPath = "_vfs_mtime_subsecond.dat";
+  const char *virtualPath = "root/_vfs_mtime_subsecond.dat";
+  bool ok = vfs_write_binary(virtualPath, "t", 1U);
+
+  // Pin the timestamps explicitly rather than racing two writes against
+  // the clock: a whole second, then 250 ms later.
+  std::error_code ec;
+  const auto base = fs::file_time_type::clock::now();
+  const auto wholeSecond =
+      fs::file_time_type(std::chrono::duration_cast<std::chrono::seconds>(
+          base.time_since_epoch()));
+  fs::last_write_time(osPath, wholeSecond, ec);
+  ok = ok && !ec;
+  const std::int64_t first = vfs_file_mtime(virtualPath);
+  fs::last_write_time(osPath, wholeSecond + std::chrono::milliseconds(250),
+                      ec);
+  ok = ok && !ec;
+  const std::int64_t second = vfs_file_mtime(virtualPath);
+
+  // Both paths to the reading agree, and the OS-path form matches.
+  ok = ok && (first > 0) && (second > 0) &&
+       ((second - first) == 250000000LL) &&
+       (file_mtime_ns(osPath) == second) && (file_mtime_ns("") == 0) &&
+       (file_mtime_ns(nullptr) == 0) &&
+       (file_mtime_ns("_vfs_mtime_missing.dat") == 0);
+
+  std::remove(osPath);
+  shutdown_vfs();
+  return ok;
 }
 
 /// Fault injection (audit P2-7): a write whose atomic rename cannot
@@ -484,6 +529,9 @@ int main() {
   }
   if (!test_file_size()) {
     return 11;
+  }
+  if (!test_mtime_subsecond()) {
+    return 12;
   }
   return 0;
 }

@@ -45,22 +45,12 @@ extern "C" {
 
 #include "engine/core/input.h"
 #include "engine/core/logging.h"
+#include "engine/core/vfs.h"
 #include "engine/core/string_util.h"
 #include "engine/math/quat.h"
 #include "engine/runtime/scripting_bridge.h"
 #include "engine/runtime/world.h"
 
-#if defined(_WIN32)
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#else
-#include <sys/stat.h>
-#endif
 
 namespace engine::scripting {
 
@@ -92,8 +82,6 @@ struct WatchedScript final {
 constexpr std::size_t kMaxWatchedScripts = 16U;
 WatchedScript g_watchedScripts[kMaxWatchedScripts] = {};
 std::size_t g_watchedScriptCount = 0U;
-
-std::int64_t get_file_mtime(const char *path) noexcept;
 
 /// Returns the Lua state owned by the scripting context.
 lua_State *lua_state() noexcept { return current_lua_state(); }
@@ -524,7 +512,7 @@ bool initialize_scripting() noexcept {
   set_debug_lua_state(state);
   configure_entity_script_bindings(
       state, EntityScriptBindingCallbacks{&push_entity_handle, &log_lua_error,
-                                          &refresh_lua_hook, &get_file_mtime});
+                                          &refresh_lua_hook, &core::file_mtime_ns});
 
   lua_pushcfunction(state, &open_libraries_trampoline);
   if (lua_pcall(state, 0, 0, 0) != LUA_OK) {
@@ -1101,38 +1089,6 @@ bool reload_script_transactionally(const char *path) noexcept {
   return true;
 }
 
-/// File mtime with nanosecond precision where the platform provides it,
-/// so sub-second writes are detected (st_mtime alone has 1-second
-/// granularity on many POSIX filesystems).
-std::int64_t get_file_mtime(const char *path) noexcept {
-  if ((path == nullptr) || (path[0] == '\0')) {
-    return 0;
-  }
-#if defined(_WIN32)
-  WIN32_FILE_ATTRIBUTE_DATA data{};
-  if (!GetFileAttributesExA(path, GetFileExInfoStandard, &data)) {
-    return 0;
-  }
-  ULARGE_INTEGER ul{};
-  ul.LowPart = data.ftLastWriteTime.dwLowDateTime;
-  ul.HighPart = data.ftLastWriteTime.dwHighDateTime;
-  return static_cast<std::int64_t>(ul.QuadPart);
-#else
-  struct stat st{};
-  if (stat(path, &st) != 0) {
-    return 0;
-  }
-#if defined(__APPLE__)
-  return static_cast<std::int64_t>(st.st_mtimespec.tv_sec) * 1000000000LL +
-         static_cast<std::int64_t>(st.st_mtimespec.tv_nsec);
-#elif defined(__linux__)
-  return static_cast<std::int64_t>(st.st_mtim.tv_sec) * 1000000000LL +
-         static_cast<std::int64_t>(st.st_mtim.tv_nsec);
-#else
-  return static_cast<std::int64_t>(st.st_mtime);
-#endif
-#endif
-}
 } // anonymous namespace
 
 /// Frame boundary: advances the frame index and refills the shared
@@ -1186,7 +1142,7 @@ void watch_script_file(const char *path) noexcept {
 
   for (std::size_t i = 0U; i < g_watchedScriptCount; ++i) {
     if (std::strcmp(g_watchedScripts[i].path, path) == 0) {
-      g_watchedScripts[i].mtime = get_file_mtime(path);
+      g_watchedScripts[i].mtime = core::file_mtime_ns(path);
       return;
     }
   }
@@ -1202,7 +1158,7 @@ void watch_script_file(const char *path) noexcept {
                         "watch_script_file")) {
     return;
   }
-  entry.mtime = get_file_mtime(path);
+  entry.mtime = core::file_mtime_ns(path);
   ++g_watchedScriptCount;
 }
 
@@ -1219,7 +1175,7 @@ std::size_t watched_script_count() noexcept { return g_watchedScriptCount; }
 void check_script_reload() noexcept {
   for (std::size_t i = 0U; i < g_watchedScriptCount; ++i) {
     WatchedScript &entry = g_watchedScripts[i];
-    const std::int64_t mtime = get_file_mtime(entry.path);
+    const std::int64_t mtime = core::file_mtime_ns(entry.path);
     if ((mtime == 0) || (mtime == entry.mtime)) {
       continue;
     }
