@@ -463,8 +463,13 @@ std::int64_t file_mtime_ns(const char *osPath) noexcept {
   ULARGE_INTEGER ticks{};
   ticks.LowPart = data.ftLastWriteTime.dwLowDateTime;
   ticks.HighPart = data.ftLastWriteTime.dwHighDateTime;
-  // FILETIME counts 100 ns intervals; 2^63 ns is far beyond any file date.
-  return static_cast<std::int64_t>(ticks.QuadPart) * 100LL;
+  // FILETIME counts 100 ns intervals since 1601; rebased to the Unix epoch
+  // before scaling, because 2^63 ns is only 292 years and a present-day
+  // date measured from 1601 overflows once multiplied by 100.
+  constexpr std::int64_t kUnixEpochInFileTimeTicks = 116444736000000000LL;
+  const std::int64_t sinceUnixEpoch =
+      static_cast<std::int64_t>(ticks.QuadPart) - kUnixEpochInFileTimeTicks;
+  return sinceUnixEpoch * 100LL;
 #else
   struct stat st{};
   if (stat(osPath, &st) != 0) {
