@@ -283,6 +283,102 @@ bool test_gamepad_button_state() noexcept {
   return true;
 }
 
+/// Two controllers occupy two slots keyed by their instance ids: the
+/// second controller's button lands on slot 1, slot 0 stays clean, a late
+/// event from a device that was never announced is dropped, removal
+/// frees exactly its slot, and the slot table refuses a fifth device.
+bool test_gamepad_slots_keyed_by_instance_id() noexcept {
+  if (!initialize_input()) {
+    return false;
+  }
+
+  bool ok = (connected_gamepad_count() == 0) && !is_gamepad_connected(0);
+
+  SDL_Event ev{};
+  ev.type = SDL_EVENT_GAMEPAD_ADDED;
+  ev.gdevice.which = 7U;
+  input_process_event(&ev);
+  ev.gdevice.which = 9U;
+  input_process_event(&ev);
+  ok = ok && (connected_gamepad_count() == 2) && is_gamepad_connected(0) &&
+       is_gamepad_connected(1) && !is_gamepad_connected(2);
+
+  // Button on the second controller only.
+  ev.type = SDL_EVENT_GAMEPAD_BUTTON_DOWN;
+  ev.gbutton.which = 9U;
+  ev.gbutton.button = SDL_GAMEPAD_BUTTON_SOUTH;
+  input_process_event(&ev);
+  ok = ok && is_gamepad_button_down(kGamepadButton_South, 1) &&
+       !is_gamepad_button_down(kGamepadButton_South, 0) &&
+       !is_gamepad_button_down(kGamepadButton_South);
+
+  // Axis on the first controller only.
+  ev.type = SDL_EVENT_GAMEPAD_AXIS_MOTION;
+  ev.gaxis.which = 7U;
+  ev.gaxis.axis = SDL_GAMEPAD_AXIS_LEFTX;
+  ev.gaxis.value = 20000;
+  input_process_event(&ev);
+  ok = ok && (gamepad_axis_value(kGamepadAxis_LeftX) > 0.0F) &&
+       (gamepad_axis_value(kGamepadAxis_LeftX, 8000, 1) == 0.0F);
+
+  // A device SDL never announced has no slot; its event changes nothing.
+  ev.type = SDL_EVENT_GAMEPAD_BUTTON_DOWN;
+  ev.gbutton.which = 42U;
+  ev.gbutton.button = SDL_GAMEPAD_BUTTON_EAST;
+  input_process_event(&ev);
+  ok = ok && !is_gamepad_button_down(kGamepadButton_East, 0) &&
+       !is_gamepad_button_down(kGamepadButton_East, 1) &&
+       (connected_gamepad_count() == 2);
+
+  // Removing the first controller frees slot 0 and leaves slot 1 as is.
+  ev.type = SDL_EVENT_GAMEPAD_REMOVED;
+  ev.gdevice.which = 7U;
+  input_process_event(&ev);
+  ok = ok && !is_gamepad_connected(0) && is_gamepad_connected(1) &&
+       (connected_gamepad_count() == 1) &&
+       is_gamepad_button_down(kGamepadButton_South, 1) &&
+       (gamepad_axis_value(kGamepadAxis_LeftX, 8000, 0) == 0.0F);
+
+  // The freed slot is reused by the next arrival; a re-announced id keeps
+  // its slot with fresh state; the table holds kMaxGamepads and refuses
+  // one more.
+  ev.type = SDL_EVENT_GAMEPAD_ADDED;
+  ev.gdevice.which = 11U;
+  input_process_event(&ev);
+  ok = ok && is_gamepad_connected(0) && (connected_gamepad_count() == 2);
+  ev.gdevice.which = 9U;
+  input_process_event(&ev);
+  ok = ok && (connected_gamepad_count() == 2) && is_gamepad_connected(1) &&
+       !is_gamepad_button_down(kGamepadButton_South, 1);
+  ev.type = SDL_EVENT_GAMEPAD_BUTTON_DOWN;
+  ev.gbutton.which = 9U;
+  ev.gbutton.button = SDL_GAMEPAD_BUTTON_SOUTH;
+  input_process_event(&ev);
+  ev.type = SDL_EVENT_GAMEPAD_ADDED;
+  ev.gdevice.which = 13U;
+  input_process_event(&ev);
+  ev.gdevice.which = 15U;
+  input_process_event(&ev);
+  ok = ok && (connected_gamepad_count() == kMaxGamepads);
+  ev.gdevice.which = 17U;
+  input_process_event(&ev);
+  ok = ok && (connected_gamepad_count() == kMaxGamepads);
+  ev.type = SDL_EVENT_GAMEPAD_BUTTON_DOWN;
+  ev.gbutton.which = 17U;
+  ev.gbutton.button = SDL_GAMEPAD_BUTTON_SOUTH;
+  input_process_event(&ev);
+  for (int slot = 0; slot < kMaxGamepads; ++slot) {
+    ok = ok && ((slot == 1) ==
+                is_gamepad_button_down(kGamepadButton_South, slot));
+  }
+
+  // Out-of-range slots are never connected.
+  ok = ok && !is_gamepad_connected(-1) && !is_gamepad_connected(kMaxGamepads);
+
+  shutdown_input();
+  return ok;
+}
+
 bool test_bounds_check() noexcept {
   if (!initialize_input()) {
     return false;
@@ -389,6 +485,8 @@ int main() {
   run("axis_value_from_key_events", &test_axis_value_from_key_events);
   run("gamepad_axis_deadzone", &test_gamepad_axis_deadzone);
   run("gamepad_button_state", &test_gamepad_button_state);
+  run("gamepad_slots_keyed_by_instance_id",
+      &test_gamepad_slots_keyed_by_instance_id);
   run("bounds_check", &test_bounds_check);
   run("touch_integrated_lifecycle", &test_touch_integrated_lifecycle);
 

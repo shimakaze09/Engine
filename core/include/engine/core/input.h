@@ -5,6 +5,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "engine/core/platform.h"
+
 namespace engine::core {
 
 // Scancode type. Values match SDL_SCANCODE_* from the SDL3 backend.
@@ -83,12 +85,50 @@ std::size_t gameplay_action_count() noexcept;
 std::size_t gameplay_axis_count() noexcept;
 
 // ----- Gamepad ------------------------------------------------------------
+// Up to kMaxGamepads controllers are tracked in the order they arrive;
+// `gamepad` is that slot index, and slot 0 is the first controller, so
+// single-controller callers omit it. A slot follows its device's hotplug
+// arrival and removal (the platform opens and closes the device behind
+// it), and its button and axis state is keyed to that device's instance
+// id, so a second controller never aliases the first.
 
-bool is_gamepad_connected() noexcept;
+/// True while a device occupies the slot.
+bool is_gamepad_connected(int gamepad = 0) noexcept;
+/// Number of slots a device currently occupies.
+int connected_gamepad_count() noexcept;
 /// Returns whether is gamepad button down.
-bool is_gamepad_button_down(int button) noexcept;
+bool is_gamepad_button_down(int button, int gamepad = 0) noexcept;
 // Returns normalized axis value in [-1, 1] with deadzone applied.
-float gamepad_axis_value(int axis, int deadzone = 8000) noexcept;
+float gamepad_axis_value(int axis, int deadzone = 8000,
+                         int gamepad = 0) noexcept;
+
+// Gamepad button and axis codes: the engine's own vocabulary for scripts
+// and persisted bindings. Their values match SDL_GAMEPAD_BUTTON_* and
+// SDL_GAMEPAD_AXIS_* (pinned by static_asserts in the input backend) so a
+// binding written before the names existed keeps its meaning.
+// clang-format off
+inline constexpr int kGamepadButton_South         =  0;
+inline constexpr int kGamepadButton_East          =  1;
+inline constexpr int kGamepadButton_West          =  2;
+inline constexpr int kGamepadButton_North         =  3;
+inline constexpr int kGamepadButton_Back          =  4;
+inline constexpr int kGamepadButton_Guide         =  5;
+inline constexpr int kGamepadButton_Start         =  6;
+inline constexpr int kGamepadButton_LeftStick     =  7;
+inline constexpr int kGamepadButton_RightStick    =  8;
+inline constexpr int kGamepadButton_LeftShoulder  =  9;
+inline constexpr int kGamepadButton_RightShoulder = 10;
+inline constexpr int kGamepadButton_DpadUp        = 11;
+inline constexpr int kGamepadButton_DpadDown      = 12;
+inline constexpr int kGamepadButton_DpadLeft      = 13;
+inline constexpr int kGamepadButton_DpadRight     = 14;
+inline constexpr int kGamepadAxis_LeftX           =  0;
+inline constexpr int kGamepadAxis_LeftY           =  1;
+inline constexpr int kGamepadAxis_RightX          =  2;
+inline constexpr int kGamepadAxis_RightY          =  3;
+inline constexpr int kGamepadAxis_LeftTrigger     =  4;
+inline constexpr int kGamepadAxis_RightTrigger    =  5;
+// clang-format on
 
 // ----- Input Events (for Event Bus subscribers) ----------------------------
 

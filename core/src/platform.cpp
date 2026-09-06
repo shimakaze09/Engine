@@ -9,6 +9,7 @@
 #include <SDL3/SDL.h>
 
 #include <cstdint>
+#include <array>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -39,6 +40,30 @@ bool g_platformRunning = false;
 SDL_Window *g_window = nullptr;
 SDL_GLContext g_glContext = nullptr;
 bool g_headless = false;
+bool g_gamepadSubsystem = false;
+
+/// One open controller: the instance id SDL announced it under and the
+/// handle its events are delivered through while open.
+struct OpenGamepad final {
+  std::uint32_t instanceId = 0U;
+  SDL_Gamepad *gamepad = nullptr;
+};
+std::array<OpenGamepad, static_cast<std::size_t>(kMaxGamepads)>
+    g_openGamepads{};
+
+/// Closes every open controller and the subsystem behind them.
+void shutdown_gamepads() noexcept {
+  for (OpenGamepad &entry : g_openGamepads) {
+    if (entry.gamepad != nullptr) {
+      SDL_CloseGamepad(entry.gamepad);
+    }
+    entry = OpenGamepad{};
+  }
+  if (g_gamepadSubsystem) {
+    SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
+    g_gamepadSubsystem = false;
+  }
+}
 bool g_externalRenderContext = false;
 
 constexpr std::size_t kPlatformPathMax = 1024U;
@@ -188,10 +213,12 @@ void shutdown_platform_resources() noexcept {
   }
   if (g_headless) {
     static_cast<void>(SDL_ResetHint(SDL_HINT_VIDEO_DRIVER));
+    static_cast<void>(SDL_ResetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS));
   }
   g_headless = false;
   g_externalRenderContext = false;
 
+  shutdown_gamepads();
   SDL_QuitSubSystem(SDL_INIT_VIDEO);
 }
 
@@ -208,11 +235,23 @@ bool initialize_platform_impl(int width, int height, const char *title,
   // CI runners with no display still initialize the video subsystem.
   if (headless) {
     static_cast<void>(SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy"));
+    // SDL drops controller events while no window has keyboard focus, and
+    // a hidden headless window never takes focus, so headless runs opt in
+    // to background delivery or would never see a gamepad edge.
+    static_cast<void>(
+        SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1"));
   }
 
   if (!SDL_InitSubSystem(SDL_INIT_VIDEO)) {
     log_sdl_error("failed to initialize SDL video subsystem");
     return false;
+  }
+
+  // Controllers are optional hardware: a platform without an input
+  // backend still runs, it just never announces a gamepad.
+  g_gamepadSubsystem = SDL_InitSubSystem(SDL_INIT_GAMEPAD);
+  if (!g_gamepadSubsystem) {
+    log_sdl_error("gamepad subsystem unavailable; controllers disabled");
   }
 
   // #196: headless skips every GL step — window without the OpenGL flag,
@@ -294,6 +333,45 @@ bool initialize_platform_impl(int width, int height, const char *title,
 }
 
 } // namespace
+
+bool platform_gamepads_available() noexcept { return g_gamepadSubsystem; }
+
+void platform_open_gamepad(std::uint32_t instanceId) noexcept {
+  if (!g_gamepadSubsystem) {
+    return;
+  }
+  OpenGamepad *free = nullptr;
+  for (OpenGamepad &entry : g_openGamepads) {
+    if ((entry.gamepad != nullptr) && (entry.instanceId == instanceId)) {
+      return;
+    }
+    if ((entry.gamepad == nullptr) && (free == nullptr)) {
+      free = &entry;
+    }
+  }
+  if (free == nullptr) {
+    log_message(LogLevel::Warning, "platform",
+                "gamepad ignored: every controller slot is in use");
+    return;
+  }
+  SDL_Gamepad *gamepad = SDL_OpenGamepad(instanceId);
+  if (gamepad == nullptr) {
+    log_sdl_error("failed to open gamepad; its input will not be delivered");
+    return;
+  }
+  free->instanceId = instanceId;
+  free->gamepad = gamepad;
+}
+
+void platform_close_gamepad(std::uint32_t instanceId) noexcept {
+  for (OpenGamepad &entry : g_openGamepads) {
+    if ((entry.gamepad != nullptr) && (entry.instanceId == instanceId)) {
+      SDL_CloseGamepad(entry.gamepad);
+      entry = OpenGamepad{};
+      return;
+    }
+  }
+}
 
 const char *non_empty_env(const char *name) noexcept {
 #if defined(_WIN32)

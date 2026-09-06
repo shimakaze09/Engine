@@ -3,8 +3,13 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 
 namespace engine::core {
+
+/// Gamepads the platform keeps open and the input layer tracks at once;
+/// a controller announced past this many is logged and ignored.
+inline constexpr int kMaxGamepads = 4;
 
 // Configuration for window creation.
 struct PlatformConfig final {
@@ -46,6 +51,24 @@ void render_drawable_size(int *outWidth, int *outHeight) noexcept;
 /// Environment variable value, or nullptr when unset or empty (the
 /// Windows path avoids the CRT getenv deprecation).
 const char *non_empty_env(const char *name) noexcept;
+
+// ----- Gamepad devices -------------------------------------------------------
+// The platform owns the OS-level gamepad subsystem and the open device
+// handles: SDL announces a controller and delivers its button and axis
+// events only for devices that were opened, so the input layer asks the
+// platform to open a device on its hotplug arrival and to close it on
+// removal. Device identity is the instance id the arrival event carries.
+
+/// True when the gamepad subsystem initialized with the platform; false
+/// when it is unavailable (then no device is ever opened and the input
+/// layer sees only synthetic events).
+bool platform_gamepads_available() noexcept;
+/// Opens the device behind an instance id so its events are delivered;
+/// a failure (subsystem unavailable, table full, device refused) is logged
+/// and leaves the device closed. Idempotent for an already open id.
+void platform_open_gamepad(std::uint32_t instanceId) noexcept;
+/// Closes the device behind an instance id; a no-op for an unknown id.
+void platform_close_gamepad(std::uint32_t instanceId) noexcept;
 /// Underlying SDL_Window* (opaque; platform/editor glue only).
 void *get_sdl_window() noexcept;
 /// Native window handle for external render backends (#138): X11 window

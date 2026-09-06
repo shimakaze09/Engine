@@ -46,13 +46,95 @@ struct MouseStateInternal final {
 
 MouseStateInternal g_mouse{};
 
+/// One controller slot, keyed to the SDL instance id it was announced
+/// under so a second controller's events never land on the first.
 struct GamepadStateInternal final {
   bool connected = false;
+  std::uint32_t instanceId = 0U;
   std::array<bool, kMaxGamepadButtons> buttons{};
   std::array<std::int16_t, kMaxGamepadAxes> axes{};
 };
 
-GamepadStateInternal g_gamepad{};
+std::array<GamepadStateInternal, static_cast<std::size_t>(kMaxGamepads)>
+    g_gamepads{};
+
+// The engine vocabulary must stay SDL's numbering: persisted bindings and
+// scripts written against the raw codes keep their meaning.
+static_assert(kGamepadButton_South == SDL_GAMEPAD_BUTTON_SOUTH);
+static_assert(kGamepadButton_East == SDL_GAMEPAD_BUTTON_EAST);
+static_assert(kGamepadButton_West == SDL_GAMEPAD_BUTTON_WEST);
+static_assert(kGamepadButton_North == SDL_GAMEPAD_BUTTON_NORTH);
+static_assert(kGamepadButton_Back == SDL_GAMEPAD_BUTTON_BACK);
+static_assert(kGamepadButton_Guide == SDL_GAMEPAD_BUTTON_GUIDE);
+static_assert(kGamepadButton_Start == SDL_GAMEPAD_BUTTON_START);
+static_assert(kGamepadButton_LeftStick == SDL_GAMEPAD_BUTTON_LEFT_STICK);
+static_assert(kGamepadButton_RightStick == SDL_GAMEPAD_BUTTON_RIGHT_STICK);
+static_assert(kGamepadButton_LeftShoulder == SDL_GAMEPAD_BUTTON_LEFT_SHOULDER);
+static_assert(kGamepadButton_RightShoulder ==
+              SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER);
+static_assert(kGamepadButton_DpadUp == SDL_GAMEPAD_BUTTON_DPAD_UP);
+static_assert(kGamepadButton_DpadDown == SDL_GAMEPAD_BUTTON_DPAD_DOWN);
+static_assert(kGamepadButton_DpadLeft == SDL_GAMEPAD_BUTTON_DPAD_LEFT);
+static_assert(kGamepadButton_DpadRight == SDL_GAMEPAD_BUTTON_DPAD_RIGHT);
+static_assert(kGamepadAxis_LeftX == SDL_GAMEPAD_AXIS_LEFTX);
+static_assert(kGamepadAxis_LeftY == SDL_GAMEPAD_AXIS_LEFTY);
+static_assert(kGamepadAxis_RightX == SDL_GAMEPAD_AXIS_RIGHTX);
+static_assert(kGamepadAxis_RightY == SDL_GAMEPAD_AXIS_RIGHTY);
+static_assert(kGamepadAxis_LeftTrigger == SDL_GAMEPAD_AXIS_LEFT_TRIGGER);
+static_assert(kGamepadAxis_RightTrigger == SDL_GAMEPAD_AXIS_RIGHT_TRIGGER);
+
+/// Slot holding the device with this instance id, or nullptr.
+GamepadStateInternal *find_gamepad(std::uint32_t instanceId) noexcept {
+  for (GamepadStateInternal &slot : g_gamepads) {
+    if (slot.connected && (slot.instanceId == instanceId)) {
+      return &slot;
+    }
+  }
+  return nullptr;
+}
+
+/// Records a device's arrival in its existing slot or the first free one
+/// and asks the platform to open it so its events are delivered. A device
+/// past the slot table is logged and left closed.
+void attach_gamepad(std::uint32_t instanceId) noexcept {
+  GamepadStateInternal *slot = find_gamepad(instanceId);
+  if (slot == nullptr) {
+    for (GamepadStateInternal &candidate : g_gamepads) {
+      if (!candidate.connected) {
+        slot = &candidate;
+        break;
+      }
+    }
+  }
+  if (slot == nullptr) {
+    log_message(LogLevel::Warning, "input",
+                "gamepad ignored: every controller slot is in use");
+    return;
+  }
+  *slot = GamepadStateInternal{};
+  slot->connected = true;
+  slot->instanceId = instanceId;
+  platform_open_gamepad(instanceId);
+}
+
+/// Releases a device's slot and closes the device behind it.
+void detach_gamepad(std::uint32_t instanceId) noexcept {
+  GamepadStateInternal *slot = find_gamepad(instanceId);
+  if (slot != nullptr) {
+    *slot = GamepadStateInternal{};
+  }
+  platform_close_gamepad(instanceId);
+}
+
+/// Slot for a query index, or nullptr when out of range or empty.
+const GamepadStateInternal *gamepad_slot(int gamepad) noexcept {
+  if ((gamepad < 0) || (gamepad >= kMaxGamepads)) {
+    return nullptr;
+  }
+  const GamepadStateInternal &slot =
+      g_gamepads[static_cast<std::size_t>(gamepad)];
+  return slot.connected ? &slot : nullptr;
+}
 
 struct ActionBinding final {
   char name[kMaxActionNameLength + 1U] = {};
@@ -116,7 +198,7 @@ bool initialize_input() noexcept {
   g_mouse = {};
   g_actions = {};
   g_axes = {};
-  g_gamepad = {};
+  g_gamepads = {};
   g_inputInitialized = true;
 
   static_cast<void>(initialize_input_mapper());
@@ -182,7 +264,7 @@ void shutdown_input() noexcept {
   g_mouse = {};
   g_actions = {};
   g_axes = {};
-  g_gamepad = {};
+  g_gamepads = {};
 }
 
 /// Begins the requested operation or profiling range for input frame.
@@ -247,26 +329,30 @@ void input_process_event(const void *nativeEvent) noexcept {
     g_mouse.scrollDelta += static_cast<int>(event->wheel.y);
     break;
   case SDL_EVENT_GAMEPAD_ADDED:
-    g_gamepad.connected = true;
+    attach_gamepad(static_cast<std::uint32_t>(event->gdevice.which));
     break;
   case SDL_EVENT_GAMEPAD_REMOVED:
-    g_gamepad.connected = false;
-    g_gamepad.buttons = {};
-    g_gamepad.axes = {};
+    detach_gamepad(static_cast<std::uint32_t>(event->gdevice.which));
     break;
   case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
   case SDL_EVENT_GAMEPAD_BUTTON_UP: {
+    // A device that was never announced (or was removed) has no slot;
+    // its late events are dropped rather than applied to another slot.
+    GamepadStateInternal *slot =
+        find_gamepad(static_cast<std::uint32_t>(event->gbutton.which));
     const int button = static_cast<int>(event->gbutton.button);
-    if ((button >= 0) && (button < kMaxGamepadButtons)) {
-      g_gamepad.buttons[static_cast<std::size_t>(button)] =
+    if ((slot != nullptr) && (button >= 0) && (button < kMaxGamepadButtons)) {
+      slot->buttons[static_cast<std::size_t>(button)] =
           (event->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN);
     }
     break;
   }
   case SDL_EVENT_GAMEPAD_AXIS_MOTION: {
+    GamepadStateInternal *slot =
+        find_gamepad(static_cast<std::uint32_t>(event->gaxis.which));
     const int axis = static_cast<int>(event->gaxis.axis);
-    if ((axis >= 0) && (axis < kMaxGamepadAxes)) {
-      g_gamepad.axes[static_cast<std::size_t>(axis)] = event->gaxis.value;
+    if ((slot != nullptr) && (axis >= 0) && (axis < kMaxGamepadAxes)) {
+      slot->axes[static_cast<std::size_t>(axis)] = event->gaxis.value;
     }
     break;
   }
@@ -463,24 +549,33 @@ float axis_value(const char *name) noexcept {
   return posDown ? 1.0F : -1.0F;
 }
 
-/// Returns whether is gamepad connected.
-bool is_gamepad_connected() noexcept { return g_gamepad.connected; }
-
-/// Returns whether is gamepad button down.
-bool is_gamepad_button_down(int button) noexcept {
-  if ((button < 0) || (button >= kMaxGamepadButtons) || !g_gamepad.connected) {
-    return false;
-  }
-  return g_gamepad.buttons[static_cast<std::size_t>(button)];
+bool is_gamepad_connected(int gamepad) noexcept {
+  return gamepad_slot(gamepad) != nullptr;
 }
 
-float gamepad_axis_value(int axis, int deadzone) noexcept {
-  if ((axis < 0) || (axis >= kMaxGamepadAxes) || !g_gamepad.connected) {
+int connected_gamepad_count() noexcept {
+  int count = 0;
+  for (const GamepadStateInternal &slot : g_gamepads) {
+    count += slot.connected ? 1 : 0;
+  }
+  return count;
+}
+
+bool is_gamepad_button_down(int button, int gamepad) noexcept {
+  const GamepadStateInternal *slot = gamepad_slot(gamepad);
+  if ((slot == nullptr) || (button < 0) || (button >= kMaxGamepadButtons)) {
+    return false;
+  }
+  return slot->buttons[static_cast<std::size_t>(button)];
+}
+
+float gamepad_axis_value(int axis, int deadzone, int gamepad) noexcept {
+  const GamepadStateInternal *slot = gamepad_slot(gamepad);
+  if ((slot == nullptr) || (axis < 0) || (axis >= kMaxGamepadAxes)) {
     return 0.0F;
   }
 
-  const int raw =
-      static_cast<int>(g_gamepad.axes[static_cast<std::size_t>(axis)]);
+  const int raw = static_cast<int>(slot->axes[static_cast<std::size_t>(axis)]);
   const int absRaw = (raw < 0) ? -raw : raw;
   const int dz = (deadzone < 0) ? 0 : deadzone;
   if (absRaw <= dz) {
