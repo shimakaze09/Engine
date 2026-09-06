@@ -308,34 +308,67 @@ static void test_pending_count() noexcept {
 }
 
 // --- Load callbacks must not execute inline on the frame thread. ---
+//
+// The load callback parks on a gate that the frame thread opens only after
+// update_asset_streaming has returned. An update that ran the callback
+// inline could not return before the gate opens, so the callback's bounded
+// wait expires and records the violation; no elapsed time is measured or
+// compared. The callback also records which thread ran it.
+static std::atomic<bool> g_gateOpen{false};
+static std::atomic<bool> g_gatedLoadRan{false};
+static std::atomic<bool> g_gatedLoadOnFrameThread{false};
+static std::atomic<bool> g_gatedLoadTimedOut{false};
+static std::thread::id g_frameThreadId{};
+
+static bool gated_load(AssetId, const char *, std::uint64_t *outSz,
+                       void *) noexcept {
+  g_gatedLoadOnFrameThread = (std::this_thread::get_id() == g_frameThreadId);
+  g_gatedLoadRan = true;
+  // Bounded by iteration count (about ten seconds of 1 ms sleeps), so an
+  // inline execution fails the test rather than deadlocking it.
+  std::size_t waits = 0U;
+  while (!g_gateOpen.load(std::memory_order_acquire)) {
+    if (++waits > 10000U) {
+      g_gatedLoadTimedOut = true;
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  if (outSz != nullptr) {
+    *outSz = 1024ULL;
+  }
+  return true;
+}
+
 static void test_load_callback_is_async() noexcept {
   engine::core::initialize_cvars();
   auto queue = std::make_unique<AssetStreamingQueue>();
   initialize_asset_streaming(queue.get());
 
-  auto slow_load = [](AssetId, const char *, std::uint64_t *outSz,
-                      void *) noexcept -> bool {
-    std::this_thread::sleep_for(std::chrono::milliseconds(40));
-    if (outSz != nullptr) {
-      *outSz = 1024ULL;
-    }
-    return true;
-  };
+  g_gateOpen = false;
+  g_gatedLoadRan = false;
+  g_gatedLoadOnFrameThread = false;
+  g_gatedLoadTimedOut = false;
+  g_frameThreadId = std::this_thread::get_id();
 
-  LoadHandle h = load_asset_async(queue.get(), make_id(0), "slow.mesh",
+  LoadHandle h = load_asset_async(queue.get(), make_id(0), "gated.mesh",
                                   LoadPriority::Normal);
-  const auto before = std::chrono::steady_clock::now();
   begin_streaming_frame(queue.get());
   static_cast<void>(
-      update_asset_streaming(queue.get(), +slow_load, &ok_upload, nullptr));
-  const auto after = std::chrono::steady_clock::now();
-  const auto elapsedMs =
-      std::chrono::duration_cast<std::chrono::milliseconds>(after - before)
-          .count();
-  CHECK(elapsedMs < 30, "update does not block on load callback");
+      update_asset_streaming(queue.get(), &gated_load, &ok_upload, nullptr));
+  // The gate is still closed here, so the load cannot have completed; an
+  // inline load would have exhausted its wait before update returned.
+  CHECK(!g_gatedLoadTimedOut,
+        "update returned without running the load callback to completion");
+  CHECK(!is_load_ready(queue.get(), h),
+        "the load is still in flight when update returns");
 
-  pump_until_terminal(queue.get(), h, +slow_load, &ok_upload, nullptr);
-  CHECK(is_load_ready(queue.get(), h), "slow load eventually ready");
+  g_gateOpen.store(true, std::memory_order_release);
+  pump_until_terminal(queue.get(), h, &gated_load, &ok_upload, nullptr);
+  CHECK(is_load_ready(queue.get(), h), "gated load eventually ready");
+  CHECK(g_gatedLoadRan, "the load callback ran");
+  CHECK(!g_gatedLoadOnFrameThread, "the load callback ran off the frame thread");
+  CHECK(!g_gatedLoadTimedOut, "the gate opened before the callback's wait expired");
 
   shutdown_asset_streaming(queue.get());
   engine::core::shutdown_cvars();

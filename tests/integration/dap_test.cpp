@@ -202,9 +202,13 @@ bool try_extract_dap_message(std::string *buffer,
 
 bool recv_dap_message(SocketHandle s, std::string *buffer, std::string *outBody,
                       int timeoutMs) noexcept {
+  // The socket wait is bounded so a debugger that never answers fails the
+  // test instead of hanging it; the elapsed time is never asserted.
+  // wall-clock: harness-timeout
   auto deadline =
       std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
 
+  // wall-clock: harness-timeout
   while (std::chrono::steady_clock::now() < deadline) {
     if (try_extract_dap_message(buffer, outBody)) {
       return true;

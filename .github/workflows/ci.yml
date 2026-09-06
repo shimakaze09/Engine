@@ -272,6 +272,9 @@ jobs:
       - name: Audit dependency pins
         run: python3 tools/check_dependency_pins.py
 
+      - name: Audit test timing
+        run: python3 tools/check_test_timing.py
+
       - name: Audit asset metadata paths
         run: python3 tools/ci/check_asset_metadata_paths.py
 

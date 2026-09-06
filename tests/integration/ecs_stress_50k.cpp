@@ -73,7 +73,7 @@ int main() {
     return 4;
   }
 
-  const auto begin = Clock::now();
+  const auto begin = Clock::now(); // wall-clock: diagnostic
   world->begin_update_phase();
   if (!world->update_transforms_range(0U, world->transform_count(),
                                       kStepSeconds)) {
@@ -89,7 +89,7 @@ int main() {
   }
   world->commit_update_phase();
   world->end_frame_phase();
-  const auto end = Clock::now();
+  const auto end = Clock::now(); // wall-clock: diagnostic
 
   const double simMs =
       std::chrono::duration<double, std::milli>(end - begin).count();

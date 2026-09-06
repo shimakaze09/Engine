@@ -6,7 +6,6 @@
 #include "engine/runtime/world.h"
 
 #include <array>
-#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <limits>
@@ -18,9 +17,6 @@ namespace {
 constexpr std::size_t kEntityCount = 10000U;
 constexpr int kUpdateSteps = 120;
 constexpr float kStepSeconds = 1.0F / 60.0F;
-// This is a correctness/integration test, not the dedicated perf gate.
-// Keep the budget loose enough for Debug CI hosts and sanitizer builds.
-constexpr auto kBudgetMs = 5000;
 constexpr std::size_t kMinChunkSize = 64U;
 constexpr std::size_t kChunkRange = 384U;
 constexpr std::size_t kMaxJobs = 512U;
@@ -467,8 +463,6 @@ int main() {
     return 6;
   }
 
-  const auto start = std::chrono::steady_clock::now();
-
   std::uint32_t seedA = 0xC0FFEE11U;
   std::uint32_t seedB = 0xA11CE55EU;
 
@@ -503,15 +497,6 @@ int main() {
   if (firstTransformA.position.x <= 0.0F) {
     engine::core::shutdown_core();
     return 11;
-  }
-
-  const auto end = std::chrono::steady_clock::now();
-  const auto elapsedMs =
-      std::chrono::duration_cast<std::chrono::milliseconds>(end - start)
-          .count();
-  if (elapsedMs > kBudgetMs) {
-    engine::core::shutdown_core();
-    return 12;
   }
 
   engine::core::shutdown_core();

@@ -116,7 +116,14 @@ is prohibited.
   relative tolerances plus invariants; arbitrary loose tolerances are
   forbidden. Functional tests never assert wall-clock timing or throughput —
   only dedicated `engine_bench_*` tests hold performance thresholds (gated
-  against `tests/benchmark/perf_baseline.json`).
+  against `tests/benchmark/perf_baseline.json`). The wall-clock half is
+  [CI]: `tools/check_test_timing.py` (#354) runs in the static-analysis
+  job and requires every clock read under `tests/unit`, `tests/integration`
+  and `tests/smoke` to carry a `// wall-clock: harness-timeout` (a bounded
+  wait for an external event whose elapsed value is never asserted) or
+  `// wall-clock: diagnostic` (printed only) marker, and rejects a marker
+  with no read beside it; nonblocking behavior is proven with gates and
+  latches, not elapsed time.
 - **[OWNER]** Existing behavioral tests are contracts, not append-only relics.
   They may change only when the old contract is defective or an intentional
   behavior/version migration is approved. The change explains old versus new
@@ -207,6 +214,7 @@ python tools/check_source_comments.py             # comment presence audit
 python tools/check_comment_quality.py             # comment quality audit
 python tools/check_module_deps.py                 # module dependency audit
 python tools/check_dependency_pins.py             # dependency pin audit
+python tools/check_test_timing.py                 # functional-test timing audit
 cmake --build build --target analysis             # cppcheck / clang-tidy
 ```
 
