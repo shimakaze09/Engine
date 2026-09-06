@@ -16,17 +16,19 @@ namespace engine::core {
 namespace {
 
 /// Logs one refused registration; a no-op until logging is initialized.
+/// Every directive is bounded and the buffer holds the sum of the bounds,
+/// so the message is never truncated (and the compiler can prove it).
 void log_drop(const char *what, const char *typeName,
               const char *fieldName, const char *reason) noexcept {
-  char message[256] = {};
+  char message[320] = {};
   if (fieldName != nullptr) {
     std::snprintf(message, sizeof(message),
-                  "reflection dropped %s '%.96s' of type '%.96s': %s", what,
-                  fieldName, (typeName != nullptr) ? typeName : "<null>",
-                  reason);
+                  "reflection dropped %.8s '%.96s' of type '%.96s': %.64s",
+                  what, fieldName,
+                  (typeName != nullptr) ? typeName : "<null>", reason);
   } else {
     std::snprintf(message, sizeof(message),
-                  "reflection dropped %s '%.96s': %s", what,
+                  "reflection dropped %.8s '%.96s': %.64s", what,
                   (typeName != nullptr) ? typeName : "<null>", reason);
   }
   log_message(LogLevel::Error, "reflect", message);
@@ -170,7 +172,7 @@ bool report_reflection_registration_drops() noexcept {
     return true;
   }
 
-  char message[160] = {};
+  char message[256] = {};
   std::snprintf(message, sizeof(message),
                 "reflection registration dropped %zu type(s) and %zu "
                 "field(s); the schema is incomplete (registry capacity %zu "
