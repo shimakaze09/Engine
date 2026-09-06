@@ -541,6 +541,16 @@ struct BackendState final {
   // model it named (0 is SkyModel::Hosek, the default).
   std::uint64_t skyModelStamp = 0U;
   SkyModel skyModel{};
+  // r_fog_mode and r_fog_color parsed the same way: each string is read
+  // under the registry lock only when its stamp moves, so the per-frame
+  // fog read takes no lock. Stamp 0 is an unregistered cvar, whose value
+  // is the DistanceFogSettings default held here; the backend reset
+  // zeroes both stamps, and a cvar reset advances every live stamp, so a
+  // cached parse can never outlive the registry it came from.
+  std::uint64_t fogModeStamp = 0U;
+  DistanceFogMode fogMode = DistanceFogSettings{}.mode;
+  std::uint64_t fogColorStamp = 0U;
+  math::Vec3 fogColor = DistanceFogSettings{}.color;
 
   // GPU skinning state: skinned G-buffer and shadow-depth program
   // variants plus the shared bone-palette uniform buffer they sample.

@@ -77,6 +77,8 @@ std::mutex g_mutex{};
 std::atomic<std::uint32_t> g_generation{1U};
 // By-name scans since the last reset; guarded by g_mutex.
 std::size_t g_nameLookups = 0U;
+// Locked string reads since the last reset; guarded by g_mutex.
+std::size_t g_stringReads = 0U;
 
 struct CVarInfoSnapshot final {
   char names[kMaxCVars][kMaxNameLen] = {};
@@ -109,6 +111,7 @@ void reset_table_unlocked() noexcept {
   }
   g_count = 0U;
   g_nameLookups = 0U;
+  g_stringReads = 0U;
   g_generation.fetch_add(1U, std::memory_order_acq_rel);
 }
 
@@ -297,6 +300,7 @@ float cvar_get_float(const char *name, float fallback) noexcept {
 
 const char *cvar_get_string(const char *name, const char *fallback) noexcept {
   std::lock_guard<std::mutex> lock(g_mutex);
+  ++g_stringReads;
   const int idx = find_cvar_unlocked(name);
   if ((idx < 0) || (entry_type(g_entries[idx]) != CVarType::String)) {
     return fallback;
@@ -396,6 +400,7 @@ float cvar_get_float(CVarHandle handle, float fallback) noexcept {
 
 const char *cvar_get_string(CVarHandle handle, const char *fallback) noexcept {
   std::lock_guard<std::mutex> lock(g_mutex);
+  ++g_stringReads;
   // Re-checked under the lock: a reset between the caller's liveness check
   // and this lock would otherwise hand back a recycled slot's string.
   const CVarEntry *entry = live_entry(handle);
@@ -419,6 +424,11 @@ std::uint64_t cvar_change_stamp(CVarHandle handle) noexcept {
 std::size_t cvar_name_lookup_count() noexcept {
   std::lock_guard<std::mutex> lock(g_mutex);
   return g_nameLookups;
+}
+
+std::size_t cvar_string_read_count() noexcept {
+  std::lock_guard<std::mutex> lock(g_mutex);
+  return g_stringReads;
 }
 
 CVarHandle CVarRef::handle() const noexcept {

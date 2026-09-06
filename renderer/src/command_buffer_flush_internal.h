@@ -101,9 +101,11 @@ void flush_debug_overlay(FrameFlushContext &ctx) noexcept;
 /// the editor overlay.
 void flush_post_chain(FrameFlushContext &ctx) noexcept;
 
-/// Reads the distance fog settings through the flush's cvar handles.
+/// Reads the distance fog settings through the flush's cvar handles; the
+/// two string cvars come from the backend's stamp-gated parse cache, so a
+/// steady-state call takes no lock.
 DistanceFogSettings
-distance_fog_settings_from_cvars(const FlushCVars &cvars) noexcept;
+distance_fog_settings_from_cvars(BackendState &backend) noexcept;
 
 /// Reads the height fog settings through the flush's cvar handles.
 HeightFogSettings

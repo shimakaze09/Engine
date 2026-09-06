@@ -140,6 +140,11 @@ std::uint64_t cvar_change_stamp(CVarHandle handle) noexcept;
 /// for tests and profiles: a hot path that holds handles adds nothing to
 /// it after its first frame.
 std::size_t cvar_name_lookup_count() noexcept;
+/// Number of string reads (by name or by handle) since the registry was
+/// last reset; every one takes the registry mutex. The same kind of
+/// diagnostic: a stamp-gated string consumer adds nothing to it while the
+/// cvar is unchanged.
+std::size_t cvar_string_read_count() noexcept;
 
 /// A cvar read site that holds its own handle: resolves the name on first
 /// use and again whenever the registry has been reset since, so every
