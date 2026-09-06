@@ -451,28 +451,46 @@ void vfs_free(void *buffer) noexcept {
   delete[] static_cast<std::byte *>(buffer);
 }
 
-std::int64_t vfs_file_mtime(const char *virtualPath) noexcept {
-  char osPath[kMaxResolvedPathLength] = {};
-  if (resolve(virtualPath, osPath, sizeof(osPath)) == 0U) {
+std::int64_t file_mtime_ns(const char *osPath) noexcept {
+  if ((osPath == nullptr) || (osPath[0] == '\0')) {
     return 0;
   }
-
 #if defined(_WIN32)
   WIN32_FILE_ATTRIBUTE_DATA data{};
   if (GetFileAttributesExA(osPath, GetFileExInfoStandard, &data) == 0) {
     return 0;
   }
-  LARGE_INTEGER li{};
-  li.LowPart = data.ftLastWriteTime.dwLowDateTime;
-  li.HighPart = static_cast<LONG>(data.ftLastWriteTime.dwHighDateTime);
-  return li.QuadPart;
+  ULARGE_INTEGER ticks{};
+  ticks.LowPart = data.ftLastWriteTime.dwLowDateTime;
+  ticks.HighPart = data.ftLastWriteTime.dwHighDateTime;
+  // FILETIME counts 100 ns intervals since 1601; rebased to the Unix epoch
+  // before scaling, because 2^63 ns is only 292 years and a present-day
+  // date measured from 1601 overflows once multiplied by 100.
+  constexpr std::int64_t kUnixEpochInFileTimeTicks = 116444736000000000LL;
+  const std::int64_t sinceUnixEpoch =
+      static_cast<std::int64_t>(ticks.QuadPart) - kUnixEpochInFileTimeTicks;
+  return sinceUnixEpoch * 100LL;
 #else
   struct stat st{};
   if (stat(osPath, &st) != 0) {
     return 0;
   }
-  return static_cast<std::int64_t>(st.st_mtime);
+#if defined(__APPLE__)
+  const timespec &modified = st.st_mtimespec;
+#else
+  const timespec &modified = st.st_mtim;
 #endif
+  return (static_cast<std::int64_t>(modified.tv_sec) * 1000000000LL) +
+         static_cast<std::int64_t>(modified.tv_nsec);
+#endif
+}
+
+std::int64_t vfs_file_mtime(const char *virtualPath) noexcept {
+  char osPath[kMaxResolvedPathLength] = {};
+  if (resolve(virtualPath, osPath, sizeof(osPath)) == 0U) {
+    return 0;
+  }
+  return file_mtime_ns(osPath);
 }
 
 bool vfs_resolve_os_path(const char *virtualPath, char *outBuffer,
