@@ -15,6 +15,7 @@
 #include "engine/core/cvar.h"
 #include "engine/core/logging.h"
 #include "engine/core/touch_input.h"
+#include "engine/core/vfs.h"
 #include "engine/core/service_locator.h"
 #include "engine/renderer/asset_database.h"
 #include "engine/renderer/asset_manager.h"
@@ -85,7 +86,15 @@ int main() {
   // Logging surfaces Lua tracebacks when a scripted verification fails.
   static_cast<void>(engine::core::initialize_logging());
 
+  // The async asset checks hand the bridge "assets/..." virtual paths,
+  // which it resolves through the mount before any consumer opens them.
+  if (!engine::core::initialize_vfs() ||
+      !engine::core::mount("assets", ".")) {
+    return 1;
+  }
+
   if (!engine::scripting::initialize_scripting()) {
+    engine::core::shutdown_vfs();
     return 1;
   }
 
@@ -1917,6 +1926,7 @@ int main() {
 
   engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
   engine::scripting::shutdown_scripting();
+  engine::core::shutdown_vfs();
   if (serviceLocator.get_service<engine::runtime::World>() != nullptr) {
     remove_script_file();
     return 93;

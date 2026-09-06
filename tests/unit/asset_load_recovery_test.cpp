@@ -229,13 +229,13 @@ int check_script_failed_load_retries(
 
   const char *script =
       "function request_failing_asset()\n"
-      "    last_handle = engine.load_asset_async('rtest_script.mesh', 2)\n"
+      "    last_handle = engine.load_asset_async('rtest/rtest_script.mesh', 2)\n"
       "    if last_handle == nil then\n"
       "        error('load_asset_async returned nil')\n"
       "    end\n"
       "end\n"
       "function request_ready_asset()\n"
-      "    ready_handle = engine.load_asset_async('rtest_ready.mesh', 2)\n"
+      "    ready_handle = engine.load_asset_async('rtest/rtest_ready.mesh', 2)\n"
       "    if ready_handle == nil then\n"
       "        error('load_asset_async returned nil')\n"
       "    end\n"
@@ -251,7 +251,7 @@ int check_script_failed_load_retries(
   }
 
   const engine::renderer::AssetId scriptAssetId =
-      engine::renderer::make_asset_id_from_path("rtest_script.mesh");
+      engine::renderer::make_asset_id_from_path("rtest/rtest_script.mesh");
 
   for (int attempt = 0; attempt < 3; ++attempt) {
     if (!engine::scripting::call_script_function("request_failing_asset")) {
@@ -270,7 +270,7 @@ int check_script_failed_load_retries(
     return finish(47);
   }
   const engine::renderer::AssetId readyAssetId =
-      engine::renderer::make_asset_id_from_path("rtest_ready.mesh");
+      engine::renderer::make_asset_id_from_path("rtest/rtest_ready.mesh");
   if (pump_to_terminal(queue, readyAssetId, &ok_load, &ok_upload) !=
       engine::content::LoadingState::Ready) {
     return finish(48);
