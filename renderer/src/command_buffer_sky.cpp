@@ -191,8 +191,10 @@ bool create_skybox_geometry(BackendState &backend,
   return true;
 }
 
-SkyModel selected_sky_model() noexcept {
-  const char *model = core::cvar_get_string("r_sky_model", "hosek");
+namespace {
+
+/// Parses an r_sky_model value; unknown spellings select Hosek.
+SkyModel parse_sky_model(const char *model) noexcept {
   if (cvar_string_equals(model, "cubemap")) {
     return SkyModel::Cubemap;
   }
@@ -203,6 +205,21 @@ SkyModel selected_sky_model() noexcept {
     return SkyModel::None;
   }
   return SkyModel::Hosek;
+}
+
+} // namespace
+
+SkyModel selected_sky_model() noexcept {
+  // Called several times per frame; the string is read (under the registry
+  // lock) only when the cvar's change stamp moved. Stamp 0 is an
+  // unregistered cvar, whose fallback is the cached default, Hosek.
+  BackendState &backend = backend_state();
+  const std::uint64_t stamp = backend.cvars.skyModel.change_stamp();
+  if (stamp != backend.skyModelStamp) {
+    backend.skyModel = parse_sky_model(backend.cvars.skyModel.get_string("hosek"));
+    backend.skyModelStamp = stamp;
+  }
+  return backend.skyModel;
 }
 
 DeviceTextureHandle
@@ -261,7 +278,7 @@ void draw_preetham_sky(const BackendState &backend, const RenderDevice *dev,
   }
 
   const math::Vec3 sunDir = preetham_sun_direction(lights);
-  const float turbidity = core::cvar_get_float("r_sky_turbidity", 3.0F);
+  const float turbidity = backend.cvars.skyTurbidity.get_float(3.0F);
 
   prepare_procedural_sky_draw(dev);
 
@@ -300,8 +317,8 @@ void draw_hosek_sky(const BackendState &backend, const RenderDevice *dev,
   }
 
   const math::Vec3 sunDir = preetham_sun_direction(lights);
-  const float turbidity = core::cvar_get_float("r_sky_turbidity", 3.0F);
-  const float groundAlbedo = core::cvar_get_float("r_sky_ground_albedo", 0.1F);
+  const float turbidity = backend.cvars.skyTurbidity.get_float(3.0F);
+  const float groundAlbedo = backend.cvars.skyGroundAlbedo.get_float(0.1F);
 
   prepare_procedural_sky_draw(dev);
 

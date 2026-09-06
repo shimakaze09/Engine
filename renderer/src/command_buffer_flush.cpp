@@ -144,8 +144,10 @@ void flush_renderer(CommandBufferView commandBufferView,
   const PassResources &passRes = get_pass_resources();
   const ReflectionProbeBakeSettings environmentBakeSettings =
       cvar_reflection_probe_bake_settings();
-  const DistanceFogSettings fogSettings = distance_fog_settings_from_cvars();
-  const HeightFogSettings heightFogSettings = height_fog_settings_from_cvars();
+  const DistanceFogSettings fogSettings =
+      distance_fog_settings_from_cvars(backend.cvars);
+  const HeightFogSettings heightFogSettings =
+      height_fog_settings_from_cvars(backend.cvars);
   static_cast<void>(ensure_brdf_lut(backend, dev, environmentBakeSettings));
 
   const DeviceTextureHandle envSkyboxTexture =
@@ -166,8 +168,8 @@ void flush_renderer(CommandBufferView commandBufferView,
       (backend.brdfLutTexture != kInvalidDeviceTexture);
 
   const bool useDeferred =
-      backend.deferredAvailable && core::cvar_get_bool("r_deferred", true);
-  const int gbufferDebugMode = core::cvar_get_int("r_gbuffer_debug", 0);
+      backend.deferredAvailable && backend.cvars.deferred.get_bool(true);
+  const int gbufferDebugMode = backend.cvars.gbufferDebug.get_int(0);
 
   const float aspect = static_cast<float>(backbufferWidth) /
                        static_cast<float>(backbufferHeight);

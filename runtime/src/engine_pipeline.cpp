@@ -24,6 +24,7 @@
 #include "engine/audio/audio.h"
 #include "engine/core/bootstrap.h"
 #include "engine/core/cvar.h"
+#include "engine/core/string_util.h"
 #include "engine/core/engine_stats.h"
 #include "engine/core/input.h"
 #include "engine/core/job_system.h"
@@ -534,6 +535,19 @@ struct EnginePipeline::Impl final {
   bool runFrameGraph = false;
   int appliedVsync = 1;
   renderer::DynamicResolutionState dynamicResolution{};
+  // Per-frame tuning cvars read through handles so the frame stages never
+  // scan the cvar table by name in steady state.
+  core::CVarRef vsyncCvar{"r_vsync"};
+  core::CVarRef renderScaleCvar{"r_render_scale"};
+  core::CVarRef dynamicResolutionCvar{"r_dynamic_resolution"};
+  core::CVarRef dynamicResolutionMinCvar{"r_dynamic_resolution_min"};
+  core::CVarRef maxFpsCvar{"r_max_fps"};
+  core::CVarRef cacheSizeMbCvar{"asset.cache_size_mb"};
+  // dbg_fail_frame_stage is consulted by every graph stage every frame;
+  // its string is re-read only when its change stamp moves.
+  core::CVarRef failFrameStageCvar{"dbg_fail_frame_stage"};
+  std::uint64_t failFrameStageStamp = 0U;
+  char failFrameStage[64] = {};
   double renderAlpha = 1.0;
   Clock::time_point previousFrameStart{};
   double wallFrameMs = 0.0;
@@ -1009,7 +1023,7 @@ void EnginePipeline::Impl::stage_assets() noexcept {
     core::release_render_context();
   }
 
-  const int cacheMb = core::cvar_get_int("asset.cache_size_mb", 512);
+  const int cacheMb = cacheSizeMbCvar.get_int(512);
   if (cacheMb > 0) {
     static_cast<void>(renderer::evict_mesh_assets_over_budget(
         assetDatabase.get(),
@@ -1063,11 +1077,17 @@ void EnginePipeline::Impl::stage_animation() noexcept {
 
 bool EnginePipeline::Impl::consume_injected_stage_failure(
     const char *stageName) noexcept {
-  const char *requested = core::cvar_get_string("dbg_fail_frame_stage", "");
-  if ((requested == nullptr) || (requested[0] == '\0') ||
-      (std::strcmp(requested, stageName) != 0)) {
+  const std::uint64_t stamp = failFrameStageCvar.change_stamp();
+  if (stamp != failFrameStageStamp) {
+    core::copy_string(failFrameStage, sizeof(failFrameStage),
+                      failFrameStageCvar.get_string(""));
+    failFrameStageStamp = stamp;
+  }
+  if ((failFrameStage[0] == '\0') ||
+      (std::strcmp(failFrameStage, stageName) != 0)) {
     return false;
   }
+  // The clear moves the stamp, so the next call re-reads the empty value.
   static_cast<void>(core::cvar_set_string("dbg_fail_frame_stage", ""));
   core::log_message(core::LogLevel::Error, "engine",
                     "injected frame-stage failure (dbg_fail_frame_stage)");
@@ -1537,8 +1557,8 @@ void EnginePipeline::Impl::stage_render() noexcept {
     return;
   }
 
-  const int requestedVsync = runtime::normalize_vsync_interval(
-      core::cvar_get_int("r_vsync", 1));
+  const int requestedVsync =
+      runtime::normalize_vsync_interval(vsyncCvar.get_int(1));
   if (requestedVsync != appliedVsync) {
     appliedVsync = requestedVsync;
     static_cast<void>(core::set_render_vsync(requestedVsync));
@@ -1548,17 +1568,16 @@ void EnginePipeline::Impl::stage_render() noexcept {
   // base scale times the dynamic controller's factor; the controller
   // steps against the presented frame budget (r_max_fps, else 60 Hz).
   {
-    const float baseScale =
-        core::cvar_get_float("r_render_scale", 1.0F);
+    const float baseScale = renderScaleCvar.get_float(1.0F);
     float dynamicFactor = 1.0F;
-    if (core::cvar_get_bool("r_dynamic_resolution", false)) {
-      const int maxFps = core::cvar_get_int("r_max_fps", 0);
+    if (dynamicResolutionCvar.get_bool(false)) {
+      const int maxFps = maxFpsCvar.get_int(0);
       const float targetMs = (maxFps > 0)
                                  ? (1000.0F / static_cast<float>(maxFps))
                                  : (1000.0F / 60.0F);
       dynamicFactor = renderer::dynamic_resolution_step(
           dynamicResolution, static_cast<float>(wallFrameMs), targetMs,
-          core::cvar_get_float("r_dynamic_resolution_min", 0.5F));
+          dynamicResolutionMinCvar.get_float(0.5F));
     } else {
       dynamicResolution = renderer::DynamicResolutionState{};
     }
@@ -1752,7 +1771,7 @@ void EnginePipeline::Impl::stage_frame_cleanup() noexcept {
 // ---------------------------------------------------------------------------
 
 void EnginePipeline::Impl::stage_frame_pacing() noexcept {
-  const int maxFps = core::cvar_get_int("r_max_fps", 0);
+  const int maxFps = maxFpsCvar.get_int(0);
   if (maxFps <= 0) {
     return;
   }

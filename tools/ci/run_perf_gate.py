@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Perf gate for Engine tooling: runs the ECS/physics benchmarks and
+# Perf gate for Engine tooling: runs the ECS/physics/cvar benchmarks and
 # compares against a baseline JSON. Measurements and baselines must be
 # positive and finite — NaN compares false against any allowance, so an
 # unchecked NaN measurement or baseline used to pass silently (audit
@@ -141,6 +141,12 @@ def main() -> int:
             args.attempts),
         "physics_dense_step_ms": measure_with_retries(
             physics_bench, "physics_dense_step_ms", baseline, args.threshold,
+            args.attempts),
+        # Handle-read cost over by-name cost: a ratio, so it holds on any
+        # runner, pinning the lock-free cvar path the frame hot paths use.
+        "cvar_handle_read_ratio": measure_with_retries(
+            find_executable(build_dir, "engine_bench_cvar_lookup"),
+            "cvar_handle_read_ratio", baseline, args.threshold,
             args.attempts),
     }
 

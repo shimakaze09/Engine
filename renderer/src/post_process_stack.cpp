@@ -10,17 +10,20 @@ namespace {
 
 PostProcessStack g_stack{};
 
+/// One pass's enable toggle. The reference resolves its cvar once and
+/// reads lock-free afterwards (this runs per pass per frame); a null name
+/// means the pass has no toggle and is always enabled.
 struct PassCVarBinding final {
   PostProcessPassId id;
-  const char *cvarName;
+  core::CVarRef cvar;
 };
 
-constexpr PassCVarBinding kPassCVars[] = {
-    {PostProcessPassId::Bloom, "r_bloom"},
-    {PostProcessPassId::SSAO, "r_ssao"},
-    {PostProcessPassId::AutoExposure, "r_auto_exposure"},
-    {PostProcessPassId::Tonemap, nullptr}, // always enabled
-    {PostProcessPassId::FXAA, "r_fxaa"},
+PassCVarBinding g_passCVars[] = {
+    {PostProcessPassId::Bloom, core::CVarRef("r_bloom")},
+    {PostProcessPassId::SSAO, core::CVarRef("r_ssao")},
+    {PostProcessPassId::AutoExposure, core::CVarRef("r_auto_exposure")},
+    {PostProcessPassId::Tonemap, core::CVarRef(nullptr)}, // always enabled
+    {PostProcessPassId::FXAA, core::CVarRef("r_fxaa")},
 };
 
 } // namespace
@@ -45,9 +48,9 @@ bool is_post_process_pass_enabled(PostProcessPassId id) noexcept {
     return false;
   }
 
-  for (const auto &binding : kPassCVars) {
-    if (binding.id == id && binding.cvarName != nullptr) {
-      return core::cvar_get_bool(binding.cvarName, true);
+  for (auto &binding : g_passCVars) {
+    if ((binding.id == id) && (binding.cvar.name() != nullptr)) {
+      return binding.cvar.get_bool(true);
     }
   }
 

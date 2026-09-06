@@ -81,7 +81,18 @@ float render_scale() noexcept { return g_renderScale; }
 
 void apply_quality_preset_if_changed() noexcept {
   static char lastApplied[16] = "";
-  const char *quality = core::cvar_get_string("r_quality", "");
+  // Runs once per frame at flush entry: the string is read (under the
+  // registry lock) only when the cvar's change stamp moved, so an
+  // unchanged preset costs one lock-free load. An unregistered cvar has
+  // stamp 0 and reads as "", the custom setting.
+  static core::CVarRef qualityCvar{"r_quality"};
+  static std::uint64_t lastStamp = 0U;
+  const std::uint64_t stamp = qualityCvar.change_stamp();
+  if (stamp == lastStamp) {
+    return;
+  }
+  lastStamp = stamp;
+  const char *quality = qualityCvar.get_string("");
   if ((quality == nullptr) ||
       (std::strncmp(quality, lastApplied, sizeof(lastApplied)) == 0)) {
     return;

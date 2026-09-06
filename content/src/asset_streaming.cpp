@@ -510,13 +510,11 @@ void begin_streaming_frame(AssetStreamingQueue *queue) noexcept {
 
   std::lock_guard<std::mutex> lock(queue->mutex);
 
-  const int budgetMb =
-      engine::core::cvar_get_int("asset.streaming_budget_mb", 256);
+  const int budgetMb = queue->streamingBudgetMbCvar.get_int(256);
   queue->streamingBudgetBytes =
       static_cast<std::uint64_t>(budgetMb > 0 ? budgetMb : 256) * 1024ULL *
       1024ULL;
-  const int uploadsPerFrame =
-      engine::core::cvar_get_int("asset.max_uploads_per_frame", 8);
+  const int uploadsPerFrame = queue->maxUploadsPerFrameCvar.get_int(8);
   queue->maxUploadsPerFrame =
       uploadsPerFrame > 0 ? static_cast<std::uint32_t>(uploadsPerFrame) : 8U;
 

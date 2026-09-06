@@ -1137,7 +1137,7 @@ bool initialize_render_device() noexcept {
   core::render_drawable_size(&width, &height);
   ctx.backBufferWidth = (width > 0) ? width : 1;
   ctx.backBufferHeight = (height > 0) ? height : 1;
-  ctx.backBufferVsync = (core::cvar_get_int("r_vsync", 1) != 0);
+  ctx.backBufferVsync = (ctx.vsyncCvar.get_int(1) != 0);
   init.resolution.width = static_cast<std::uint32_t>(ctx.backBufferWidth);
   init.resolution.height = static_cast<std::uint32_t>(ctx.backBufferHeight);
   init.resolution.reset =
@@ -1248,7 +1248,7 @@ void render_device_bgfx_frame() noexcept {
   int width = 0;
   int height = 0;
   core::render_drawable_size(&width, &height);
-  const bool vsync = (core::cvar_get_int("r_vsync", 1) != 0);
+  const bool vsync = (ctx.vsyncCvar.get_int(1) != 0);
   if ((width > 0) && (height > 0) &&
       ((width != ctx.backBufferWidth) || (height != ctx.backBufferHeight) ||
        (vsync != ctx.backBufferVsync))) {

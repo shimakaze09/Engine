@@ -24,3 +24,11 @@ engine_add_test_executable(engine_bench_instancing_batch
     PRIVATE_DEPS
     engine_renderer
 )
+
+engine_add_test_executable(engine_bench_cvar_lookup
+    LABELS benchmark
+    SOURCES
+    cvar_lookup_test.cpp
+    PRIVATE_DEPS
+    engine_core
+)

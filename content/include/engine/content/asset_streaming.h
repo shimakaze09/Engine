@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <mutex>
 
+#include "engine/core/cvar.h"
 #include "engine/core/native_thread.h"
 
 #include "engine/content/asset_metadata.h"
@@ -86,7 +87,10 @@ struct AssetStreamingQueue final {
   LoadRequest requests[kMaxRequests]{};
   std::size_t count = 0U;
 
-  // Budget CVars are read each frame:
+  // Budget cvars are read each frame through handles (no name scan on
+  // the frame path) into the two effective values below:
+  core::CVarRef streamingBudgetMbCvar{"asset.streaming_budget_mb"};
+  core::CVarRef maxUploadsPerFrameCvar{"asset.max_uploads_per_frame"};
   std::uint64_t streamingBudgetBytes = 256ULL * 1024ULL * 1024ULL; // 256 MB
   std::uint32_t maxUploadsPerFrame = 8U;
 
