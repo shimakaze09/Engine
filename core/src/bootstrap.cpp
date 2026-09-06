@@ -18,6 +18,7 @@
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
 #include "engine/core/profiler.h"
+#include "engine/core/reflect.h"
 #include "engine/core/vfs.h"
 
 namespace engine::core {
@@ -81,6 +82,12 @@ bool initialize_core(const CoreConfig &config) noexcept {
       break;
     }
     loggingInitialized = true;
+
+    // Static REFLECT_TYPE blocks ran before any log existed; this is the
+    // first point their refused registrations can be reported. A dropped
+    // type or field is a programmer error in the schema's capacity, not a
+    // recoverable runtime condition, so initialization continues.
+    static_cast<void>(report_reflection_registration_drops());
 
     // Core owns the cvar/console tables (#168): production registration no
     // longer relies on the zero-initialized fallback, and shutdown_core
