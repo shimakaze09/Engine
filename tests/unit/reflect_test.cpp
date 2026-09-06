@@ -3,7 +3,7 @@
 // type behaves the same, and a registration the fixed tables cannot hold is
 // refused, counted, and reported at core initialization instead of being
 // silently dropped (65th type, 17th field, field outside its type, field of
-// a refused type).
+// a refused type, null type name, zero-sized type, null field name).
 
 #include <cstddef>
 #include <cstdint>
@@ -164,6 +164,38 @@ int check_field_overflow() noexcept {
   return 0;
 }
 
+/// Malformed registrations are refused and counted, never stored: a null
+/// type name, a zero-sized type, and a null field name each leave the
+/// tables as they were and bump the drop counters.
+int check_malformed_registrations() noexcept {
+  using engine::core::TypeDescriptor;
+  using engine::core::TypeField;
+  static engine::core::TypeRegistry registry{};
+
+  if ((registry.register_type(nullptr, sizeof(float)) != nullptr) ||
+      (registry.dropped_type_count() != 1U) || (registry.type_count() != 0U)) {
+    return 50;
+  }
+  if ((registry.register_type("Empty", 0U) != nullptr) ||
+      (registry.dropped_type_count() != 2U) || (registry.type_count() != 0U) ||
+      (registry.find_type("Empty") != nullptr)) {
+    return 51;
+  }
+
+  // The null-name field is refused on a descriptor with room and inside the
+  // type, so the only reason left is the name; both counters record it.
+  TypeDescriptor *desc = registry.register_type("Named", sizeof(float));
+  if ((desc == nullptr) || (registry.type_count() != 1U) ||
+      registry.add_field(desc, nullptr, 0U, sizeof(float),
+                         TypeField::Kind::Float) ||
+      (desc->fieldCount != 0U) || (desc->droppedFieldCount != 1U) ||
+      (registry.dropped_field_count() != 1U) ||
+      (registry.dropped_type_count() != 2U)) {
+    return 52;
+  }
+  return 0;
+}
+
 /// The production macro path: SeventeenFields lands in the global registry
 /// with 16 fields and one recorded drop, and the boot-time report turns
 /// that count into a logged error once logging exists.
@@ -229,6 +261,9 @@ int main() {
     return rc;
   }
   if (const int rc = check_field_overflow(); rc != 0) {
+    return rc;
+  }
+  if (const int rc = check_malformed_registrations(); rc != 0) {
     return rc;
   }
   if (const int rc = check_macro_overflow_is_reported(); rc != 0) {
