@@ -435,6 +435,42 @@ int lua_engine_load_input_config(lua_State *state) noexcept {
   return 1;
 }
 
+/// Registers the gamepad button and axis codes on the existing engine
+/// table so scripts name controls instead of repeating backend numbers.
+void register_gamepad_constants(lua_State *state) noexcept {
+  set_engine_integer(state, "GAMEPAD_BUTTON_SOUTH", core::kGamepadButton_South);
+  set_engine_integer(state, "GAMEPAD_BUTTON_EAST", core::kGamepadButton_East);
+  set_engine_integer(state, "GAMEPAD_BUTTON_WEST", core::kGamepadButton_West);
+  set_engine_integer(state, "GAMEPAD_BUTTON_NORTH", core::kGamepadButton_North);
+  set_engine_integer(state, "GAMEPAD_BUTTON_BACK", core::kGamepadButton_Back);
+  set_engine_integer(state, "GAMEPAD_BUTTON_GUIDE", core::kGamepadButton_Guide);
+  set_engine_integer(state, "GAMEPAD_BUTTON_START", core::kGamepadButton_Start);
+  set_engine_integer(state, "GAMEPAD_BUTTON_LEFT_STICK",
+                     core::kGamepadButton_LeftStick);
+  set_engine_integer(state, "GAMEPAD_BUTTON_RIGHT_STICK",
+                     core::kGamepadButton_RightStick);
+  set_engine_integer(state, "GAMEPAD_BUTTON_LEFT_SHOULDER",
+                     core::kGamepadButton_LeftShoulder);
+  set_engine_integer(state, "GAMEPAD_BUTTON_RIGHT_SHOULDER",
+                     core::kGamepadButton_RightShoulder);
+  set_engine_integer(state, "GAMEPAD_BUTTON_DPAD_UP",
+                     core::kGamepadButton_DpadUp);
+  set_engine_integer(state, "GAMEPAD_BUTTON_DPAD_DOWN",
+                     core::kGamepadButton_DpadDown);
+  set_engine_integer(state, "GAMEPAD_BUTTON_DPAD_LEFT",
+                     core::kGamepadButton_DpadLeft);
+  set_engine_integer(state, "GAMEPAD_BUTTON_DPAD_RIGHT",
+                     core::kGamepadButton_DpadRight);
+  set_engine_integer(state, "GAMEPAD_AXIS_LEFT_X", core::kGamepadAxis_LeftX);
+  set_engine_integer(state, "GAMEPAD_AXIS_LEFT_Y", core::kGamepadAxis_LeftY);
+  set_engine_integer(state, "GAMEPAD_AXIS_RIGHT_X", core::kGamepadAxis_RightX);
+  set_engine_integer(state, "GAMEPAD_AXIS_RIGHT_Y", core::kGamepadAxis_RightY);
+  set_engine_integer(state, "GAMEPAD_AXIS_LEFT_TRIGGER",
+                     core::kGamepadAxis_LeftTrigger);
+  set_engine_integer(state, "GAMEPAD_AXIS_RIGHT_TRIGGER",
+                     core::kGamepadAxis_RightTrigger);
+}
+
 /// Registers key scancode constants on the existing engine table.
 void register_key_constants(lua_State *state) noexcept {
   set_engine_integer(state, "KEY_A", core::kKey_A);
@@ -517,6 +553,7 @@ void register_input_bindings(lua_State *state) noexcept {
                       &lua_engine_load_input_config);
 
   register_key_constants(state);
+  register_gamepad_constants(state);
 }
 
 } // namespace engine::scripting

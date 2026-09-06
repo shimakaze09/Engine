@@ -718,3 +718,13 @@ engine_add_test_executable(engine_integration_engine_config_strings
     LABELS
     integration
 )
+
+engine_add_test_executable(engine_integration_gamepad_hotplug
+    SOURCES
+    gamepad_hotplug_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_scripting
+    LABELS
+    integration
+)
