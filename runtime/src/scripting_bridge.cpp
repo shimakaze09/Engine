@@ -4,6 +4,7 @@
 
 #include "engine/audio/audio.h"
 #include "engine/core/logging.h"
+#include "engine/core/vfs.h"
 #include "engine/math/vec3.h"
 #include "engine/physics/physics.h"
 #include "engine/physics/physics_query.h"
@@ -598,8 +599,18 @@ std::uint32_t scripting_load_asset_async(const char *path,
     return kInvalidScriptAssetHandle;
   }
 
+  // The virtual path is the asset's identity; the bytes come from wherever
+  // the mount puts it. The streaming worker and the request queue open the
+  // path they are handed, so it must already be the OS path.
   const renderer::AssetId assetId = renderer::make_asset_id_from_path(path);
   if (assetId == renderer::kInvalidAssetId) {
+    return kInvalidScriptAssetHandle;
+  }
+  char osPath[512] = {};
+  if (!core::vfs_resolve_os_path(path, osPath, sizeof(osPath))) {
+    core::log_message(core::LogLevel::Error, "scripting",
+                      "load_asset_async: virtual path did not resolve to an "
+                      "OS path (is its mount registered?)");
     return kInvalidScriptAssetHandle;
   }
 
@@ -622,7 +633,7 @@ std::uint32_t scripting_load_asset_async(const char *path,
 
   if (g_scriptingAssetDatabaseService->streamingQueue != nullptr) {
     if (!renderer::request_mesh_asset_streaming_load(
-            g_scriptingAssetDatabaseService->database, assetId, path)) {
+            g_scriptingAssetDatabaseService->database, assetId, osPath)) {
       scriptHandle.occupied = false;
       scriptHandle.assetId = renderer::kInvalidAssetId;
       return kInvalidScriptAssetHandle;
@@ -630,7 +641,7 @@ std::uint32_t scripting_load_asset_async(const char *path,
 
     if (!alreadyReady) {
       const content::LoadHandle streamingHandle = content::load_asset_async(
-          g_scriptingAssetDatabaseService->streamingQueue, assetId, path,
+          g_scriptingAssetDatabaseService->streamingQueue, assetId, osPath,
           script_asset_priority(priority));
       if (!streamingHandle.valid()) {
         static_cast<void>(renderer::set_mesh_asset_state(
@@ -649,7 +660,7 @@ std::uint32_t scripting_load_asset_async(const char *path,
   if ((g_scriptingAssetDatabaseService->manager == nullptr) ||
       !renderer::queue_mesh_load(g_scriptingAssetDatabaseService->manager,
                                  g_scriptingAssetDatabaseService->database,
-                                 assetId, path)) {
+                                 assetId, osPath)) {
     auto &handle = g_scriptingAssetDatabaseService->scriptLoadHandles[slot];
     handle.occupied = false;
     handle.assetId = renderer::kInvalidAssetId;

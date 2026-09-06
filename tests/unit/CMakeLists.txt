@@ -1573,6 +1573,14 @@ engine_add_test_executable(engine_unit_asset_load_recovery
     engine_runtime
 )
 
+engine_add_test_executable(engine_unit_script_asset_path_resolution
+    SOURCES
+    script_asset_path_resolution_test.cpp
+    PRIVATE_DEPS
+    engine_scripting
+    engine_runtime
+)
+
 engine_add_test_executable(engine_unit_scene_path_length
     SOURCES
     scene_path_length_test.cpp
