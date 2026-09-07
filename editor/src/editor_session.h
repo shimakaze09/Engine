@@ -181,10 +181,17 @@ runtime::Entity selected_entity() noexcept;
 /// Drops selection entries whose entity died or whose world content epoch
 /// changed (scene load / world restore reset generations).
 void prune_entity_selection() noexcept;
-/// Undoes the last command only while the world accepts edits (never
-/// during play, after a failed restore, or outside the Input phase).
+/// Undo/redo address one document at a time: the material editor's own
+/// history while its panel is the undo target (open and the last regular
+/// window focused), otherwise the scene history. Scene undo/redo run only
+/// while the world accepts edits (never during play, after a failed
+/// restore, or outside the Input phase); the material record is not the
+/// world, so its history follows the panel's own gating.
+bool editor_history_can_undo() noexcept;
+bool editor_history_can_redo() noexcept;
+/// Undoes the last command of the addressed document.
 void editor_history_undo() noexcept;
-/// Redoes the last undone command under the same editability gate.
+/// Redoes the last undone command of the addressed document.
 void editor_history_redo() noexcept;
 
 /// Returns the configured editor scene path ("" when unset).

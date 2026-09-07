@@ -479,7 +479,19 @@ directory-global by design.
   is unchanged and still pinned by `editor_asset_spawn_name_test`; Rename/
   Move/Duplicate/Delete/Reimport/Find Dependencies stay disabled pending
   #150's asset identity and dependency graph), editor + debug cameras,
-  command history. Inspector metadata (issue #156):
+  command history. The material editor (`editor_material_edit`, drawn by
+  `editor_panels_material`) is a document of its own: it owns its undo
+  history and its dirty position (the history token the file on disk
+  matches) independently of the scene document, so a material edit never
+  reads as scene dirtiness and a scene save never clears an unsaved
+  material; undo/redo address whichever document is the undo target (the
+  material panel while it was the last regular window focused, menus and
+  popups excepted); quit gates on both documents and Save from the quit
+  prompt persists both, with any save failure keeping the prompt armed;
+  closing or switching a dirty material is gated by its own
+  Save/Discard/Cancel prompt, where Discard reverts the live record from
+  disk; New/Open replace the scene alone and leave the material document
+  untouched. Inspector metadata (issue #156):
   `editor_component_registry` generates `ComponentEditType`/
   `ComponentEditSnapshot`/capture-apply-remove dispatch from the runtime's
   `ENGINE_PERSISTENT_COMPONENT_TABLE` (X-macro over

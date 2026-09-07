@@ -140,16 +140,23 @@ bool scene_path_passes_jail(const char *path) noexcept;
 /// otherwise arm the unsaved-change prompt and defer.
 void request_scene_new() noexcept;
 void request_scene_open(const char *path) noexcept;
-/// True when the caller may proceed with an immediate quit (document was
-/// clean); false means the prompt was armed and the caller must not quit
-/// until the prompt resolves the pending PendingSceneAction::Quit.
+/// True when the caller may proceed with an immediate quit (the scene
+/// document and any open material document were both clean); false means
+/// the prompt was armed and the caller must not quit until the prompt
+/// resolves the pending PendingSceneAction::Quit.
 bool request_scene_quit() noexcept;
 
 /// True while the unsaved-change confirm prompt should be drawn.
 bool scene_document_prompt_open() noexcept;
-/// User chose Save from the confirm prompt (saves in place, or defers to
-/// a Save As dialog for an untitled document; the prompt stays armed on
-/// a save failure so the user can retry or cancel).
+/// True while the open prompt also stands for an unsaved material
+/// document: only the quit prompt does, because quit ends every document,
+/// whereas New/Open replace the scene alone. Save then persists the
+/// material as well; Discard abandons it along with the scene.
+bool scene_document_prompt_covers_material() noexcept;
+/// User chose Save from the confirm prompt: persists the material first
+/// when the prompt covers one, then the scene (in place, or through a Save
+/// As dialog for an untitled document); the prompt stays armed on any
+/// save failure so the user can retry or cancel.
 void scene_document_prompt_choose_save() noexcept;
 /// User chose Discard: proceeds with the pending action unsaved.
 void scene_document_prompt_choose_discard() noexcept;

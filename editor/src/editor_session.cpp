@@ -25,6 +25,7 @@
 #include <memory>
 #include <vector>
 
+#include "editor_material_edit.h"
 #include "engine/core/atomic_file.h"
 #include "engine/core/file_read.h"
 #include "engine/core/cvar.h"
@@ -593,13 +594,46 @@ void prune_entity_selection() noexcept {
   }
 }
 
+namespace {
+
+/// True while undo/redo address the material document: its panel is open
+/// and was the last regular window focused.
+bool material_owns_history() noexcept {
+  const MaterialEditorState &state = material_editor_state();
+  return state.open && state.undoTarget;
+}
+
+} // namespace
+
+bool editor_history_can_undo() noexcept {
+  if (material_owns_history()) {
+    return material_editor_history().can_undo();
+  }
+  return world_is_editable() && editor_session().commandHistory.can_undo();
+}
+
+bool editor_history_can_redo() noexcept {
+  if (material_owns_history()) {
+    return material_editor_history().can_redo();
+  }
+  return world_is_editable() && editor_session().commandHistory.can_redo();
+}
+
 void editor_history_undo() noexcept {
+  if (material_owns_history()) {
+    material_editor_history().undo();
+    return;
+  }
   if (world_is_editable()) {
     editor_session().commandHistory.undo();
   }
 }
 
 void editor_history_redo() noexcept {
+  if (material_owns_history()) {
+    material_editor_history().redo();
+    return;
+  }
   if (world_is_editable()) {
     editor_session().commandHistory.redo();
   }

@@ -4,6 +4,7 @@
 #include "editor_panels_main.h"
 
 #include "editor_commands.h"
+#include "editor_material_edit.h"
 #include "editor_panels_console.h"
 #include "editor_scene_document.h"
 #include "editor_session.h"
@@ -80,8 +81,23 @@ static void draw_unsaved_changes_prompt() noexcept {
 
   if (ImGui::BeginPopupModal(kPopupId, nullptr,
                             ImGuiWindowFlags_AlwaysAutoResize)) {
-    ImGui::Text("Save changes to \"%s\" before continuing?",
-               scene_document_display_name());
+    // The prompt names every document it stands for, so Save and Discard
+    // read as decisions about exactly those documents.
+    const bool sceneDirty = scene_document_is_dirty();
+    if (scene_document_prompt_covers_material()) {
+      const char *materialPath = material_editor_state().virtualPath;
+      if (sceneDirty) {
+        ImGui::Text("Save changes to \"%s\" and material \"%s\" before "
+                    "quitting?",
+                    scene_document_display_name(), materialPath);
+      } else {
+        ImGui::Text("Save changes to material \"%s\" before quitting?",
+                    materialPath);
+      }
+    } else {
+      ImGui::Text("Save changes to \"%s\" before continuing?",
+                  scene_document_display_name());
+    }
     const char *error = scene_document_last_error();
     if (error[0] != '\0') {
       ImGui::TextColored(ImVec4(0.9F, 0.35F, 0.35F, 1.0F), "%s", error);
@@ -159,10 +175,8 @@ void draw_main_menu_bar() noexcept {
   }
 
   if (ImGui::BeginMenu("Edit")) {
-    const bool canUndo =
-        world_is_editable() && editor_session().commandHistory.can_undo();
-    const bool canRedo =
-        world_is_editable() && editor_session().commandHistory.can_redo();
+    const bool canUndo = editor_history_can_undo();
+    const bool canRedo = editor_history_can_redo();
     if (!canUndo) {
       ImGui::BeginDisabled();
     }

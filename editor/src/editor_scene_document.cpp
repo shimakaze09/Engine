@@ -26,6 +26,7 @@
 #include "engine/runtime/world.h"
 
 #include "editor_commands.h"
+#include "editor_material_edit.h"
 #include "editor_session.h"
 
 namespace engine::editor {
@@ -464,7 +465,11 @@ void request_scene_open(const char *path) noexcept {
 }
 
 bool request_scene_quit() noexcept {
-  if (!scene_document_is_dirty()) {
+  // Quit ends every document at once, so the gate covers the material
+  // document too; New/Open replace only the scene and leave an open
+  // material (and its dirty state) untouched, so they gate on the scene
+  // alone.
+  if (!scene_document_is_dirty() && !material_editor_is_dirty()) {
     return true;
   }
   arm_pending_action(PendingSceneAction::Quit, nullptr);
@@ -475,8 +480,31 @@ bool scene_document_prompt_open() noexcept {
   return editor_session().document.unsavedPromptOpen;
 }
 
+bool scene_document_prompt_covers_material() noexcept {
+  const SceneDocumentState &doc = editor_session().document;
+  return doc.unsavedPromptOpen &&
+         (doc.pendingAction == PendingSceneAction::Quit) &&
+         material_editor_is_dirty();
+}
+
 void scene_document_prompt_choose_save() noexcept {
   SceneDocumentState &doc = editor_session().document;
+  if (scene_document_prompt_covers_material()) {
+    if (!save_material_editor()) {
+      // The prompt stays armed with the material's error, exactly as a
+      // failed scene save keeps it: nothing is quit while any covered
+      // document is still unsaved.
+      std::snprintf(doc.lastSaveError, sizeof(doc.lastSaveError), "%s",
+                    material_editor_state().lastSaveError);
+      return;
+    }
+    doc.lastSaveError[0] = '\0';
+  }
+  if (!scene_document_is_dirty()) {
+    // Only the material was unsaved; it is persisted now.
+    continue_pending_action();
+    return;
+  }
   if (doc.hasPath) {
     if (perform_scene_save()) {
       continue_pending_action();
