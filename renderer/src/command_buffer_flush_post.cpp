@@ -52,7 +52,7 @@ void flush_post_chain(FrameFlushContext &ctx) noexcept {
       (backend.bloomDownsampleProgram != kInvalidDeviceProgram) &&
       (backend.bloomUpsampleProgram != kInvalidDeviceProgram);
   const bool bloomEnabled =
-      bloomAvailable && core::cvar_get_bool("r_bloom") &&
+      bloomAvailable && backend.cvars.bloom.get_bool() &&
       ensure_bloom_resources(backend, drawableWidth, drawableHeight);
 
   if (bloomEnabled) {
@@ -73,7 +73,7 @@ void flush_post_chain(FrameFlushContext &ctx) noexcept {
     }
     if (backend.bloomThreshThresholdLoc.valid()) {
       dev->set_param_f32(backend.bloomThreshThresholdLoc,
-                             core::cvar_get_float("r_bloom_threshold"));
+                             backend.cvars.bloomThreshold.get_float());
     }
     dev->draw(backend.emptyGeometry, PrimitiveTopology::Triangles, 0, 3);
 
@@ -120,7 +120,7 @@ void flush_post_chain(FrameFlushContext &ctx) noexcept {
 
   const bool autoExposureEnabled =
       backend.autoExposureAvailable &&
-      core::cvar_get_bool("r_auto_exposure", true) &&
+      backend.cvars.autoExposure.get_bool(true) &&
       ensure_luminance_resources(backend, drawableWidth, drawableHeight);
   if (autoExposureEnabled) {
     gpu_profiler_begin_pass(GpuPassId::AutoExposure);
@@ -165,11 +165,9 @@ void flush_post_chain(FrameFlushContext &ctx) noexcept {
     // downsampling.
     // Adapt exposure: targetExposure = 1 / (2 * avgLuminance + epsilon).
     // We do temporal smoothing toward the target.
-    const float adaptSpeed =
-        core::cvar_get_float("r_auto_exposure_speed", 1.5F);
-    const float minExposure = core::cvar_get_float("r_auto_exposure_min", 0.1F);
-    const float maxExposure =
-        core::cvar_get_float("r_auto_exposure_max", 10.0F);
+    const float adaptSpeed = backend.cvars.autoExposureSpeed.get_float(1.5F);
+    const float minExposure = backend.cvars.autoExposureMin.get_float(0.1F);
+    const float maxExposure = backend.cvars.autoExposureMax.get_float(10.0F);
 
     // Simple temporal adaptation (no readback — use previous frame's
     // estimate). The mip chain drives the shader-side average; we use
@@ -189,7 +187,7 @@ void flush_post_chain(FrameFlushContext &ctx) noexcept {
 
   const float finalExposure = autoExposureEnabled
                                   ? backend.currentExposure
-                                  : core::cvar_get_float("r_exposure", 1.0F);
+                                  : backend.cvars.exposure.get_float(1.0F);
 
   gpu_profiler_begin_pass(GpuPassId::Tonemap);
   dev->bind_render_target(pass_resource_target(passRes.finalColor));
@@ -208,7 +206,7 @@ void flush_post_chain(FrameFlushContext &ctx) noexcept {
   }
   if (backend.tonemapOperatorLocation.valid()) {
     dev->set_param_i32(backend.tonemapOperatorLocation,
-                         core::cvar_get_int("r_tonemap_operator"));
+                         backend.cvars.tonemapOperator.get_int());
   }
 
   if (bloomEnabled) {
@@ -218,7 +216,7 @@ void flush_post_chain(FrameFlushContext &ctx) noexcept {
     }
     if (backend.tonemapBloomIntensityLoc.valid()) {
       dev->set_param_f32(backend.tonemapBloomIntensityLoc,
-                             core::cvar_get_float("r_bloom_intensity"));
+                             backend.cvars.bloomIntensity.get_float());
     }
     if (backend.tonemapBloomEnabledLoc.valid()) {
       dev->set_param_i32(backend.tonemapBloomEnabledLoc, 1);
@@ -240,7 +238,7 @@ void flush_post_chain(FrameFlushContext &ctx) noexcept {
 
   renderer_context().fxaaAppliedThisFrame = false;
   if ((backend.fxaaProgram != kInvalidDeviceProgram) &&
-      core::cvar_get_bool("r_fxaa")) {
+      backend.cvars.fxaa.get_bool()) {
     dev->bind_render_target(pass_resource_target(passRes.sceneColor));
     dev->set_viewport(0, 0, drawableWidth, drawableHeight);
     dev->apply_render_state(RenderState{DepthTest::Disabled, true,
@@ -275,7 +273,7 @@ void flush_post_chain(FrameFlushContext &ctx) noexcept {
   // Player mode (#138): no editor overlay follows, so the final image is
   // drawn onto the back buffer here (FXAA pings back into sceneColor;
   // otherwise the tonemapped LDR target is current).
-  if (core::cvar_get_bool("r_present_scene", false) &&
+  if (backend.cvars.presentScene.get_bool(false) &&
       (backend.presentBlitProgram != kInvalidDeviceProgram)) {
     dev->apply_render_state(RenderState{DepthTest::Disabled, true,
                                         BlendMode::Disabled, CullMode::Back});

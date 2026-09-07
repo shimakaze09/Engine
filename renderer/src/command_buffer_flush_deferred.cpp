@@ -335,7 +335,7 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
     gpu_profiler_end_pass(GpuPassId::GBuffer);
 
     const bool ssaoEnabled =
-        backend.ssaoAvailable && core::cvar_get_bool("r_ssao", true);
+        backend.ssaoAvailable && backend.cvars.ssao.get_bool(true);
     if (ssaoEnabled) {
       gpu_profiler_begin_pass(GpuPassId::SSAO);
       dev->bind_render_target(pass_resource_target(passRes.ssaoTexture));
@@ -376,10 +376,10 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
       }
       if (backend.ssaoRadiusLoc.valid())
         dev->set_param_f32(backend.ssaoRadiusLoc,
-                               core::cvar_get_float("r_ssao_radius"));
+                           backend.cvars.ssaoRadius.get_float());
       if (backend.ssaoBiasLoc.valid())
         dev->set_param_f32(backend.ssaoBiasLoc,
-                               core::cvar_get_float("r_ssao_bias"));
+                           backend.cvars.ssaoBias.get_float());
 
       if ((dev->set_param_vec4_array != nullptr) &&
           backend.ssaoSamplesParam.valid()) {

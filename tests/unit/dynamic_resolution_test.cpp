@@ -107,6 +107,22 @@ void test_quality_presets_apply() {
   static_cast<void>(core::cvar_set_string("r_quality", "bogus"));
   renderer::apply_quality_preset_if_changed();
   CHECK(!core::cvar_get_bool("r_ssao", true), "unknown preset is a no-op");
+
+  // Hot-path contract: with r_quality unchanged, the per-frame check
+  // scans the cvar table by name zero times (it compares the change
+  // stamp lock-free and reads the string only when it moved).
+  const std::size_t lookupsBefore = core::cvar_name_lookup_count();
+  for (int i = 0; i < 100; ++i) {
+    renderer::apply_quality_preset_if_changed();
+  }
+  CHECK(core::cvar_name_lookup_count() == lookupsBefore,
+        "unchanged preset does no by-name cvar lookups");
+
+  // A change is still applied on the very next call.
+  static_cast<void>(core::cvar_set_string("r_quality", "low"));
+  renderer::apply_quality_preset_if_changed();
+  CHECK(!core::cvar_get_bool("r_shadows", true),
+        "preset change after the quiet stretch still applies");
 }
 
 void test_render_scale_clamps() {

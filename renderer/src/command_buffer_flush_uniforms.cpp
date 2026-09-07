@@ -527,34 +527,49 @@ void unbind_pbr_ibl_textures(const RenderDevice *dev) noexcept {
   dev->bind_texture_slot(kIblBrdfLutUnit, kInvalidDeviceTexture);
 }
 
-DistanceFogSettings distance_fog_settings_from_cvars() noexcept {
+DistanceFogSettings
+distance_fog_settings_from_cvars(BackendState &backend) noexcept {
+  const FlushCVars &cvars = backend.cvars;
   DistanceFogSettings settings{};
-  settings.mode =
-      parse_distance_fog_mode(core::cvar_get_string("r_fog_mode", "exp2"));
-  settings.start = core::cvar_get_float("r_fog_start", settings.start);
-  settings.end = core::cvar_get_float("r_fog_end", settings.end);
-  settings.density = core::cvar_get_float("r_fog_density", settings.density);
 
-  math::Vec3 color = settings.color;
-  if (parse_distance_fog_color(
-          core::cvar_get_string("r_fog_color", "0.55 0.65 0.75"), &color)) {
-    settings.color = color;
+  // String cvars are read under the registry lock, so the flush re-parses
+  // each one only when its change stamp moved and otherwise serves the
+  // cached value; the fallbacks are the DistanceFogSettings defaults, the
+  // same values an unregistered cvar (stamp 0) leaves in the cache.
+  const std::uint64_t modeStamp = cvars.fogMode.change_stamp();
+  if (modeStamp != backend.fogModeStamp) {
+    backend.fogMode = parse_distance_fog_mode(cvars.fogMode.get_string("exp2"));
+    backend.fogModeStamp = modeStamp;
   }
+  settings.mode = backend.fogMode;
+
+  const std::uint64_t colorStamp = cvars.fogColor.change_stamp();
+  if (colorStamp != backend.fogColorStamp) {
+    math::Vec3 color = settings.color;
+    backend.fogColor =
+        parse_distance_fog_color(cvars.fogColor.get_string("0.55 0.65 0.75"),
+                                 &color)
+            ? color
+            : settings.color;
+    backend.fogColorStamp = colorStamp;
+  }
+  settings.color = backend.fogColor;
+
+  settings.start = cvars.fogStart.get_float(settings.start);
+  settings.end = cvars.fogEnd.get_float(settings.end);
+  settings.density = cvars.fogDensity.get_float(settings.density);
 
   return normalize_distance_fog_settings(settings);
 }
 
-HeightFogSettings height_fog_settings_from_cvars() noexcept {
+HeightFogSettings
+height_fog_settings_from_cvars(const FlushCVars &cvars) noexcept {
   HeightFogSettings settings{};
-  settings.enabled = core::cvar_get_bool("r_height_fog", settings.enabled);
-  settings.baseHeight =
-      core::cvar_get_float("r_height_fog_base", settings.baseHeight);
-  settings.density =
-      core::cvar_get_float("r_height_fog_density", settings.density);
-  settings.falloff =
-      core::cvar_get_float("r_height_fog_falloff", settings.falloff);
-  settings.stepCount =
-      core::cvar_get_int("r_height_fog_steps", settings.stepCount);
+  settings.enabled = cvars.heightFog.get_bool(settings.enabled);
+  settings.baseHeight = cvars.heightFogBase.get_float(settings.baseHeight);
+  settings.density = cvars.heightFogDensity.get_float(settings.density);
+  settings.falloff = cvars.heightFogFalloff.get_float(settings.falloff);
+  settings.stepCount = cvars.heightFogSteps.get_int(settings.stepCount);
   return normalize_height_fog_settings(settings);
 }
 

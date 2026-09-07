@@ -8,6 +8,7 @@
 #pragma once
 
 #include "device_slot_table.h"
+#include "engine/core/cvar.h"
 #include "engine/renderer/render_device.h"
 #include "render_device_bgfx_internal.h"
 
@@ -160,6 +161,9 @@ struct BgfxDeviceContext final {
   std::int32_t backBufferWidth = 0;
   std::int32_t backBufferHeight = 0;
   bool backBufferVsync = false;
+  // r_vsync is polled every present; the handle keeps that off the
+  // by-name path.
+  core::CVarRef vsyncCvar{"r_vsync"};
   // Backend-owned fullscreen triangle (#138 forward path): bgfx submits
   // require a vertex stream, so attribute-less engine draws bind this
   // three-vertex position stream instead (fullscreen.vs.sc reads it).

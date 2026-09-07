@@ -1,5 +1,6 @@
 // Verifies command buffer test behavior for the Engine test suite.
 
+#include "command_buffer_context.h"
 #include "command_buffer_flush_internal.h"
 #include "command_buffer_math.h"
 #include "engine/core/cvar.h"
@@ -429,6 +430,114 @@ int check_reflection_probe_bake_settings() {
   return 0;
 }
 
+/// The flush's fog read parses r_fog_mode and r_fog_color only when their
+/// change stamps move: repeated steady-state calls scan no name and return
+/// the cached parse, a set by name is seen by the next call, and a color
+/// that fails to parse falls back to the default rather than the last good
+/// value.
+int check_distance_fog_cvars_stamp_gated() {
+  using engine::renderer::DistanceFogMode;
+  using engine::renderer::DistanceFogSettings;
+
+  engine::core::shutdown_cvars();
+  if (!engine::core::initialize_cvars()) {
+    return 140;
+  }
+  // The whole fog set is registered, as the renderer does: an unresolved
+  // reference re-scans by name on every read, which would hide whether the
+  // string reads are the ones being gated.
+  if (!engine::core::cvar_register_string("r_fog_mode", "linear", "fog") ||
+      !engine::core::cvar_register_string("r_fog_color", "0.1 0.2 0.3",
+                                          "fog") ||
+      !engine::core::cvar_register_float("r_fog_start", 25.0F, "fog") ||
+      !engine::core::cvar_register_float("r_fog_end", 150.0F, "fog") ||
+      !engine::core::cvar_register_float("r_fog_density", 0.01F, "fog")) {
+    engine::core::shutdown_cvars();
+    return 141;
+  }
+
+  engine::renderer::BackendState &backend = engine::renderer::backend_state();
+  backend = engine::renderer::BackendState{};
+
+  DistanceFogSettings settings =
+      engine::renderer::distance_fog_settings_from_cvars(backend);
+  if ((settings.mode != DistanceFogMode::Linear) ||
+      (settings.color.x != 0.1F) || (settings.color.y != 0.2F) ||
+      (settings.color.z != 0.3F)) {
+    engine::core::shutdown_cvars();
+    return 142;
+  }
+  const std::uint64_t modeStamp = backend.fogModeStamp;
+  const std::uint64_t colorStamp = backend.fogColorStamp;
+  if ((modeStamp == 0U) || (colorStamp == 0U)) {
+    engine::core::shutdown_cvars();
+    return 143;
+  }
+
+  // Steady state: no name scan and no locked string read, only the cache.
+  const std::size_t lookupsBefore = engine::core::cvar_name_lookup_count();
+  const std::size_t stringReadsBefore =
+      engine::core::cvar_string_read_count();
+  for (int i = 0; i < 100; ++i) {
+    settings = engine::renderer::distance_fog_settings_from_cvars(backend);
+    if ((settings.mode != DistanceFogMode::Linear) ||
+        (settings.color.x != 0.1F)) {
+      engine::core::shutdown_cvars();
+      return 144;
+    }
+  }
+  if ((engine::core::cvar_name_lookup_count() != lookupsBefore) ||
+      (engine::core::cvar_string_read_count() != stringReadsBefore) ||
+      (backend.fogModeStamp != modeStamp) ||
+      (backend.fogColorStamp != colorStamp)) {
+    engine::core::shutdown_cvars();
+    return 145;
+  }
+
+  // Live tuning: a set by name moves the stamp and is seen by the next call,
+  // which re-reads exactly the two strings.
+  if (!engine::core::cvar_set_string("r_fog_mode", "exp") ||
+      !engine::core::cvar_set_string("r_fog_color", "0.4 0.5 0.6")) {
+    engine::core::shutdown_cvars();
+    return 146;
+  }
+  settings = engine::renderer::distance_fog_settings_from_cvars(backend);
+  if ((settings.mode != DistanceFogMode::Exp) || (settings.color.x != 0.4F) ||
+      (settings.color.y != 0.5F) || (settings.color.z != 0.6F) ||
+      (backend.fogModeStamp == modeStamp) ||
+      (backend.fogColorStamp == colorStamp) ||
+      (engine::core::cvar_string_read_count() != stringReadsBefore + 2U)) {
+    engine::core::shutdown_cvars();
+    return 147;
+  }
+
+  // A malformed color is the default, not the previous parse.
+  const DistanceFogSettings defaults{};
+  if (!engine::core::cvar_set_string("r_fog_color", "0.7 0.8")) {
+    engine::core::shutdown_cvars();
+    return 148;
+  }
+  settings = engine::renderer::distance_fog_settings_from_cvars(backend);
+  if ((settings.color.x != defaults.color.x) ||
+      (settings.color.y != defaults.color.y) ||
+      (settings.color.z != defaults.color.z)) {
+    engine::core::shutdown_cvars();
+    return 149;
+  }
+
+  // After a registry reset the handles are stale: the stamps read 0, the
+  // cache is rebuilt from the defaults, and nothing is scanned by name.
+  engine::core::shutdown_cvars();
+  settings = engine::renderer::distance_fog_settings_from_cvars(backend);
+  if ((settings.mode != defaults.mode) ||
+      (settings.color.x != defaults.color.x) ||
+      (backend.fogModeStamp != 0U) || (backend.fogColorStamp != 0U)) {
+    return 150;
+  }
+  backend = engine::renderer::BackendState{};
+  return 0;
+}
+
 int check_distance_fog_settings() {
   using engine::renderer::DistanceFogMode;
 
@@ -826,6 +935,10 @@ int main() {
     return result;
   }
   result = check_distance_fog_settings();
+  if (result != 0) {
+    return result;
+  }
+  result = check_distance_fog_cvars_stamp_gated();
   if (result != 0) {
     return result;
   }

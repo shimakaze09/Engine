@@ -61,14 +61,14 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
   const float nearP = ctx.nearP;
   const float farP = ctx.farP;
   const bool shadowEnabled = backend.shadowAvailable &&
-                             core::cvar_get_bool("r_shadows", true) &&
+                             backend.cvars.shadows.get_bool(true) &&
                              lights.directionalLightCount > 0U;
 
   CascadeSplits cascadeSplits{};
   bool directionalShadowCacheReused = false;
   if (shadowEnabled && (commandBufferView.data != nullptr) &&
       (opaqueCount > 0U)) {
-    const float lambda = core::cvar_get_float("r_shadow_lambda", 0.75F);
+    const float lambda = backend.cvars.shadowLambda.get_float(0.75F);
     cascadeSplits = compute_cascade_splits(nearP, farP, lambda);
 
     const math::Vec3 &lightDir = lights.directionalLights[0].direction;
@@ -93,14 +93,14 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
         cascadeSplits, lightMatrices);
     // Skinned poses change every frame, so cached maps would freeze a
     // character's shadow mid-animation.
-    const bool cacheEnabled = core::cvar_get_bool("r_shadow_cache", true) &&
+    const bool cacheEnabled = backend.cvars.shadowCache.get_bool(true) &&
                               (skin_palette_count() == 0U);
     directionalShadowCacheReused =
         cacheEnabled && backend.directionalShadowCacheValid &&
         (backend.directionalShadowCacheKey == cacheKey);
 
     if (directionalShadowCacheReused) {
-      if (core::cvar_get_bool("r_shadow_debug", false)) {
+      if (backend.cvars.shadowDebug.get_bool(false)) {
         core::log_message(core::LogLevel::Info, "renderer",
                           "reused directional shadow maps");
       }
@@ -191,7 +191,7 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
   }
 
   const bool doSpotShadows =
-      backend.spotShadowAvailable && core::cvar_get_bool("r_spot_shadows");
+      backend.spotShadowAvailable && backend.cvars.spotShadows.get_bool();
   if (doSpotShadows && (lights.spotLightCount > 0U)) {
     gpu_profiler_begin_pass(GpuPassId::SpotShadowMap);
 
@@ -217,7 +217,7 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
                 return a.distSq < b.distSq;
               });
     if ((spotCandidateCount > kMaxSpotShadowLights) &&
-        core::cvar_get_bool("r_shadow_debug")) {
+        backend.cvars.shadowDebug.get_bool()) {
       core::log_message(core::LogLevel::Warning, "shadow",
                         "spot shadow casters dropped: only 4 slots available");
     }
@@ -300,7 +300,7 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
   }
 
   const bool doPointShadows =
-      backend.pointShadowAvailable && core::cvar_get_bool("r_point_shadows");
+      backend.pointShadowAvailable && backend.cvars.pointShadows.get_bool();
   for (std::size_t i = 0U; i < kMaxPointShadowLights; ++i) {
     backend.pointShadowState.slots[i].lightIndex = -1;
   }
@@ -327,7 +327,7 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
                 return a.distSq < b.distSq;
               });
     if ((pointCandidateCount > kMaxPointShadowLights) &&
-        core::cvar_get_bool("r_shadow_debug")) {
+        backend.cvars.shadowDebug.get_bool()) {
       core::log_message(core::LogLevel::Warning, "shadow",
                         "point shadow casters dropped: only 4 slots available");
     }

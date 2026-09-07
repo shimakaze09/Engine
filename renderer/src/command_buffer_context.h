@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "engine/core/cvar.h"
 #include "engine/core/nothrow_buffer.h"
 #include "engine/math/mat4.h"
 #include "engine/math/vec4.h"
@@ -41,6 +42,54 @@ struct SceneCaptureTarget final {
   int width = 0;
   int height = 0;
 };
+
+/// The tuning cvars the flush passes read every frame, held as handle
+/// references so steady-state reads take no lock and scan no name: the
+/// flush is the hot path and must not contend with console writes. Live
+/// tuning is unchanged, since a set by name is visible to the next read.
+/// The table is renderer-owned state and resets with the backend, after
+/// which each reference re-resolves on its next use.
+struct FlushCVars final {
+  core::CVarRef deferred{"r_deferred"};
+  core::CVarRef gbufferDebug{"r_gbuffer_debug"};
+  core::CVarRef ssao{"r_ssao"};
+  core::CVarRef ssaoRadius{"r_ssao_radius"};
+  core::CVarRef ssaoBias{"r_ssao_bias"};
+  core::CVarRef bloom{"r_bloom"};
+  core::CVarRef bloomThreshold{"r_bloom_threshold"};
+  core::CVarRef bloomIntensity{"r_bloom_intensity"};
+  core::CVarRef autoExposure{"r_auto_exposure"};
+  core::CVarRef autoExposureSpeed{"r_auto_exposure_speed"};
+  core::CVarRef autoExposureMin{"r_auto_exposure_min"};
+  core::CVarRef autoExposureMax{"r_auto_exposure_max"};
+  core::CVarRef exposure{"r_exposure"};
+  core::CVarRef tonemapOperator{"r_tonemap_operator"};
+  core::CVarRef fxaa{"r_fxaa"};
+  core::CVarRef presentScene{"r_present_scene"};
+  core::CVarRef shadows{"r_shadows"};
+  core::CVarRef shadowLambda{"r_shadow_lambda"};
+  core::CVarRef shadowCache{"r_shadow_cache"};
+  core::CVarRef shadowDebug{"r_shadow_debug"};
+  core::CVarRef spotShadows{"r_spot_shadows"};
+  core::CVarRef pointShadows{"r_point_shadows"};
+  core::CVarRef fogMode{"r_fog_mode"};
+  core::CVarRef fogStart{"r_fog_start"};
+  core::CVarRef fogEnd{"r_fog_end"};
+  core::CVarRef fogDensity{"r_fog_density"};
+  core::CVarRef fogColor{"r_fog_color"};
+  core::CVarRef heightFog{"r_height_fog"};
+  core::CVarRef heightFogBase{"r_height_fog_base"};
+  core::CVarRef heightFogDensity{"r_height_fog_density"};
+  core::CVarRef heightFogFalloff{"r_height_fog_falloff"};
+  core::CVarRef heightFogSteps{"r_height_fog_steps"};
+  core::CVarRef skyModel{"r_sky_model"};
+  core::CVarRef skyTurbidity{"r_sky_turbidity"};
+  core::CVarRef skyGroundAlbedo{"r_sky_ground_albedo"};
+};
+
+// Defined in command_buffer_sky.h; the backend caches the parsed value of
+// r_sky_model so the per-frame selection reads no string.
+enum class SkyModel : std::uint8_t;
 
 /// Owns private GPU backend state for command buffer rendering.
 struct BackendState final {
@@ -485,6 +534,23 @@ struct BackendState final {
 
   // Scene capture render targets (slot i backs capture request i).
   std::array<SceneCaptureTarget, kMaxSceneCaptures> sceneCaptureTargets{};
+
+  // Per-frame tuning knobs, read through handles (see FlushCVars).
+  FlushCVars cvars{};
+  // r_sky_model parsed once per change: the stamp it was parsed at and the
+  // model it named (0 is SkyModel::Hosek, the default).
+  std::uint64_t skyModelStamp = 0U;
+  SkyModel skyModel{};
+  // r_fog_mode and r_fog_color parsed the same way: each string is read
+  // under the registry lock only when its stamp moves, so the per-frame
+  // fog read takes no lock. Stamp 0 is an unregistered cvar, whose value
+  // is the DistanceFogSettings default held here; the backend reset
+  // zeroes both stamps, and a cvar reset advances every live stamp, so a
+  // cached parse can never outlive the registry it came from.
+  std::uint64_t fogModeStamp = 0U;
+  DistanceFogMode fogMode = DistanceFogSettings{}.mode;
+  std::uint64_t fogColorStamp = 0U;
+  math::Vec3 fogColor = DistanceFogSettings{}.color;
 
   // GPU skinning state: skinned G-buffer and shadow-depth program
   // variants plus the shared bone-palette uniform buffer they sample.

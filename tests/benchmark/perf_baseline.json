@@ -1,5 +1,6 @@
 {
     "ecs_iterate_ms": 2.40,
     "physics_step_ms": 13.80,
-    "physics_dense_step_ms": 0.92
+    "physics_dense_step_ms": 0.92,
+    "cvar_handle_read_ratio": 0.10
 }

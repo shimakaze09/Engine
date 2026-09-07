@@ -405,6 +405,194 @@ static bool test_console_output_ring_buffer() noexcept {
   return true;
 }
 
+// ---- handle access ----
+
+/// A handle reads what the name reads, for every type, and sees a later
+/// set by name (live tuning).
+static bool test_cvar_handle_reads_match_name() noexcept {
+  initialize_cvars();
+  cvar_register_bool("h.b", true, "d");
+  cvar_register_int("h.i", 7, "d");
+  cvar_register_float("h.f", 2.5F, "d");
+  cvar_register_string("h.s", "abc", "d");
+
+  const CVarHandle hb = cvar_find("h.b");
+  const CVarHandle hi = cvar_find("h.i");
+  const CVarHandle hf = cvar_find("h.f");
+  const CVarHandle hs = cvar_find("h.s");
+  bool ok = hb.resolved() && hi.resolved() && hf.resolved() && hs.resolved();
+  ok = ok && cvar_handle_live(hb) && cvar_handle_live(hs);
+  ok = ok && cvar_get_bool(hb, false) && (cvar_get_int(hi, 0) == 7) &&
+       (cvar_get_float(hf, 0.0F) == 2.5F) &&
+       (std::strcmp(cvar_get_string(hs, ""), "abc") == 0);
+
+  // Registration stamps at 1; every set advances by one.
+  ok = ok && ((cvar_change_stamp(hi) & 0xFFFFFFFFULL) == 1U);
+  ok = ok && cvar_set_int("h.i", -3) && (cvar_get_int(hi, 0) == -3);
+  ok = ok && ((cvar_change_stamp(hi) & 0xFFFFFFFFULL) == 2U);
+  ok = ok && cvar_set_from_string("h.i", "11") && (cvar_get_int(hi, 0) == 11);
+  ok = ok && ((cvar_change_stamp(hi) & 0xFFFFFFFFULL) == 3U);
+  ok = ok && cvar_set_bool("h.b", false) && !cvar_get_bool(hb, true);
+  ok = ok && cvar_set_float("h.f", -0.125F) &&
+       (cvar_get_float(hf, 0.0F) == -0.125F);
+  const std::uint64_t stringStampBefore = cvar_change_stamp(hs);
+  ok = ok && cvar_set_string("h.s", "xyz") &&
+       (std::strcmp(cvar_get_string(hs, ""), "xyz") == 0) &&
+       (cvar_change_stamp(hs) == stringStampBefore + 1U);
+  // A rejected set moves nothing.
+  ok = ok && !cvar_set_from_string("h.i", "nope") &&
+       ((cvar_change_stamp(hi) & 0xFFFFFFFFULL) == 3U);
+
+  // Type mismatch and unknown names read as the fallback.
+  ok = ok && (cvar_get_int(hb, 42) == 42) && !cvar_get_bool(hi, false) &&
+       (std::strcmp(cvar_get_string(hi, "fb"), "fb") == 0);
+  const CVarHandle none = cvar_find("h.missing");
+  ok = ok && !none.resolved() && !cvar_handle_live(none) &&
+       (cvar_get_int(none, 9) == 9) && (cvar_change_stamp(none) == 0U);
+
+  shutdown_cvars();
+  return ok;
+}
+
+/// A handle from before a registry reset reads as its fallback afterwards,
+/// even when a different cvar now occupies the same slot; stamps never
+/// repeat across the reset.
+static bool test_cvar_handle_stale_after_reset() noexcept {
+  initialize_cvars();
+  cvar_register_int("old.first", 5, "d");
+  const CVarHandle stale = cvar_find("old.first");
+  const std::uint64_t oldStamp = cvar_change_stamp(stale);
+  bool ok = stale.resolved() && (cvar_get_int(stale, -1) == 5);
+
+  shutdown_cvars();
+  ok = ok && !cvar_handle_live(stale) && (cvar_get_int(stale, -1) == -1) &&
+       (cvar_change_stamp(stale) == 0U);
+
+  initialize_cvars();
+  // Slot 0 again, same type, different cvar: the stale handle must not
+  // alias it.
+  cvar_register_int("new.first", 99, "d");
+  const CVarHandle fresh = cvar_find("new.first");
+  ok = ok && (fresh.index == stale.index) &&
+       (fresh.generation != stale.generation);
+  ok = ok && !cvar_handle_live(stale) && (cvar_get_int(stale, -1) == -1) &&
+       (cvar_get_int(fresh, -1) == 99);
+  ok = ok && (cvar_change_stamp(fresh) != oldStamp) &&
+       (cvar_change_stamp(fresh) > oldStamp);
+
+  shutdown_cvars();
+  return ok;
+}
+
+/// A CVarRef resolves once and then reads without a name scan; it
+/// re-resolves after a reset, and an unknown name resolves once the cvar
+/// appears.
+static bool test_cvar_ref_steady_state_scans_nothing() noexcept {
+  initialize_cvars();
+  cvar_register_float("ref.f", 1.5F, "d");
+  cvar_register_string("ref.s", "one", "d");
+
+  CVarRef ref{"ref.f"};
+  bool ok = (ref.get_float(0.0F) == 1.5F);
+  const std::size_t afterResolve = cvar_name_lookup_count();
+  for (int i = 0; i < 1000; ++i) {
+    ok = ok && (ref.get_float(0.0F) == 1.5F);
+  }
+  ok = ok && (cvar_name_lookup_count() == afterResolve);
+  // By-name access is what the counter measures.
+  ok = ok && (cvar_get_float("ref.f", 0.0F) == 1.5F) &&
+       (cvar_name_lookup_count() == afterResolve + 1U);
+  // A set by name is visible on the next handle read.
+  ok = ok && cvar_set_float("ref.f", 3.0F) && (ref.get_float(0.0F) == 3.0F);
+
+  // String reads through the reference skip the scan too.
+  CVarRef sref{"ref.s"};
+  ok = ok && (std::strcmp(sref.get_string(""), "one") == 0);
+  const std::size_t afterStringResolve = cvar_name_lookup_count();
+  ok = ok && (std::strcmp(sref.get_string(""), "one") == 0) &&
+       (sref.change_stamp() != 0U) &&
+       (cvar_name_lookup_count() == afterStringResolve);
+
+  // Unknown name: fallback now, resolves once registered.
+  CVarRef late{"ref.late"};
+  ok = ok && (late.get_int(4) == 4) && (late.change_stamp() == 0U);
+  cvar_register_int("ref.late", 8, "d");
+  ok = ok && (late.get_int(4) == 8) && (late.change_stamp() != 0U);
+
+  // A null name never resolves and never scans.
+  CVarRef none{nullptr};
+  const std::size_t beforeNull = cvar_name_lookup_count();
+  ok = ok && (none.get_int(6) == 6) && (none.name() == nullptr) &&
+       (cvar_name_lookup_count() == beforeNull);
+
+  // Reset: the reference re-resolves against the new registration.
+  shutdown_cvars();
+  ok = ok && (ref.get_float(-1.0F) == -1.0F);
+  initialize_cvars();
+  cvar_register_float("ref.f", 7.0F, "d");
+  ok = ok && (ref.get_float(-1.0F) == 7.0F);
+
+  shutdown_cvars();
+  return ok;
+}
+
+/// Concurrent lock-free handle reads against by-name writers: every value
+/// a reader observes is one some writer stored (no torn scalars), and the
+/// stamp never runs backwards.
+static bool test_cvar_handle_reads_under_concurrent_writes() noexcept {
+  initialize_cvars();
+  cvar_register_float("race.f", 0.0F, "d");
+  cvar_register_int("race.i", 0, "d");
+  const CVarHandle hf = cvar_find("race.f");
+  const CVarHandle hi = cvar_find("race.i");
+
+  std::atomic<bool> ok{true};
+  std::atomic<bool> stop{false};
+  constexpr int kWrites = 2000;
+
+  std::thread writer([&ok, &stop]() noexcept {
+    for (int i = 0; i < kWrites; ++i) {
+      // Values whose float bit patterns are all distinct and easy to
+      // validate: whole numbers 0..kWrites.
+      if (!cvar_set_float("race.f", static_cast<float>(i)) ||
+          !cvar_set_int("race.i", i)) {
+        ok.store(false, std::memory_order_relaxed);
+      }
+    }
+    stop.store(true, std::memory_order_release);
+  });
+
+  constexpr int kReaders = 3;
+  std::thread readers[kReaders];
+  for (auto &reader : readers) {
+    reader = std::thread([&ok, &stop, hf, hi]() noexcept {
+      std::uint64_t lastStamp = 0U;
+      while (!stop.load(std::memory_order_acquire)) {
+        const float f = cvar_get_float(hf, -1.0F);
+        const int i = cvar_get_int(hi, -1);
+        const std::uint64_t stamp = cvar_change_stamp(hi);
+        if ((f < 0.0F) || (f > static_cast<float>(kWrites)) ||
+            (f != static_cast<float>(static_cast<int>(f))) || (i < 0) ||
+            (i >= kWrites) || (stamp < lastStamp)) {
+          ok.store(false, std::memory_order_relaxed);
+        }
+        lastStamp = stamp;
+      }
+    });
+  }
+
+  writer.join();
+  for (auto &reader : readers) {
+    reader.join();
+  }
+
+  const bool finalOk = (cvar_get_int(hi, -1) == kWrites - 1) &&
+                       (cvar_get_float(hf, -1.0F) ==
+                        static_cast<float>(kWrites - 1));
+  shutdown_cvars();
+  return ok.load(std::memory_order_relaxed) && finalOk;
+}
+
 static bool test_cvar_console_threaded_access() noexcept {
   initialize_cvars();
   cvar_register_int("thread.i", 0, "threaded int");
@@ -500,6 +688,12 @@ int main() {
       {"cvar_enumerate", test_cvar_enumerate},
       {"cvar_null_names_after_registration",
        test_cvar_null_names_after_registration},
+      {"cvar_handle_reads_match_name", test_cvar_handle_reads_match_name},
+      {"cvar_handle_stale_after_reset", test_cvar_handle_stale_after_reset},
+      {"cvar_ref_steady_state_scans_nothing",
+       test_cvar_ref_steady_state_scans_nothing},
+      {"cvar_handle_reads_under_concurrent_writes",
+       test_cvar_handle_reads_under_concurrent_writes},
       {"console_basic_execute", test_console_basic_execute},
       {"console_unknown_command", test_console_unknown_command},
       {"console_set_get_cvar", test_console_set_get_cvar},

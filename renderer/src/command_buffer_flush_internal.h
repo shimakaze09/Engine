@@ -101,11 +101,15 @@ void flush_debug_overlay(FrameFlushContext &ctx) noexcept;
 /// the editor overlay.
 void flush_post_chain(FrameFlushContext &ctx) noexcept;
 
-/// Reads the distance fog settings from their cvars.
-DistanceFogSettings distance_fog_settings_from_cvars() noexcept;
+/// Reads the distance fog settings through the flush's cvar handles; the
+/// two string cvars come from the backend's stamp-gated parse cache, so a
+/// steady-state call takes no lock.
+DistanceFogSettings
+distance_fog_settings_from_cvars(BackendState &backend) noexcept;
 
-/// Reads the height fog settings from their cvars.
-HeightFogSettings height_fog_settings_from_cvars() noexcept;
+/// Reads the height fog settings through the flush's cvar handles.
+HeightFogSettings
+height_fog_settings_from_cvars(const FlushCVars &cvars) noexcept;
 
 /// Uploads the environment IBL uniforms for the forward PBR program and
 /// binds its textures when enabled; every pbrProgram pass must call this so
