@@ -10,10 +10,20 @@ extern "C" {
 #include "lua.h"
 }
 
+#include <cmath>
 #include <cstddef>
 
 namespace engine::scripting {
 namespace {
+
+/// A timed wait is usable only when finite and non-negative: NaN makes the
+/// wake comparison false forever, +Inf never arrives, and a negative wait
+/// describes no wait at all. Every value in this domain is checked at both
+/// ingress points (engine.wait and a raw numeric yield) so a malformed wait
+/// can never turn a scheduler slot into one that never frees.
+bool wait_seconds_is_valid(float seconds) noexcept {
+  return std::isfinite(seconds) && (seconds >= 0.0F);
+}
 
 /// Identifies how a yielded coroutine decides when to resume.
 enum class WaitMode : std::uint8_t {
@@ -45,8 +55,10 @@ public:
   /// condition is ref'd under protection (this runs from the C-context
   /// scheduler tick where a raising luaL_ref would reach the panic
   /// handler); on ref failure the entry degrades to an immediate timed
-  /// wake.
-  void parse_yield(lua_State *state, lua_State *thread, int nresults,
+  /// wake. False when the yield carried a non-finite or negative wait: the
+  /// entry then holds no usable wake criterion and the caller releases it
+  /// instead of scheduling a coroutine that could never wake.
+  bool parse_yield(lua_State *state, lua_State *thread, int nresults,
                    CoroutineEntry &entry, float totalSeconds,
                    std::uint32_t frameIndex) noexcept {
     entry.mode = WaitMode::Time;
@@ -74,11 +86,31 @@ public:
       lua_pop(thread, nresults);
     } else if ((nresults >= 1) && (lua_isnumber(thread, -1) != 0)) {
       const float secs = static_cast<float>(lua_tonumber(thread, -1));
-      entry.wakeAt = totalSeconds + secs;
       lua_pop(thread, nresults);
+      if (!wait_seconds_is_valid(secs)) {
+        return false;
+      }
+      entry.wakeAt = totalSeconds + secs;
     } else if (nresults > 0) {
       lua_pop(thread, nresults);
     }
+    return true;
+  }
+
+  /// Reports a yield the scheduler refused (see parse_yield) through the
+  /// same channel a coroutine error takes, then frees the entry so the
+  /// slot and the thread's registry ref do not outlive the refusal.
+  void reject_yield(lua_State *state, CoroutineEntry &entry,
+                    CoroutineLogLuaErrorFn logLuaError) noexcept {
+    lua_pushstring(state, "coroutine yielded a non-finite or negative wait; "
+                          "wait expects a finite, non-negative number of "
+                          "seconds");
+    if (logLuaError != nullptr) {
+      logLuaError(state, "coroutine");
+    } else {
+      lua_pop(state, 1);
+    }
+    release_entry(state, entry);
   }
 
   /// Returns true when a wait-until condition allows the coroutine to resume.
@@ -182,6 +214,10 @@ int lua_engine_wait(lua_State *state) noexcept {
   const float secs = (lua_isnumber(state, 1) != 0)
                          ? static_cast<float>(lua_tonumber(state, 1))
                          : 0.0F;
+  if (!wait_seconds_is_valid(secs)) {
+    return luaL_error(state,
+                      "wait expects a finite, non-negative number of seconds");
+  }
   lua_pushnumber(state, static_cast<lua_Number>(secs));
   return lua_yield(state, 1);
 }
@@ -242,8 +278,12 @@ int start_lua_coroutine(lua_State *state, float totalSeconds,
       entry.thread = thread;
       entry.threadRef = threadRef;
       entry.active = true;
-      g_coroutineScheduler.parse_yield(state, thread, nresults, entry,
-                                       totalSeconds, frameIndex);
+      if (!g_coroutineScheduler.parse_yield(state, thread, nresults, entry,
+                                            totalSeconds, frameIndex)) {
+        g_coroutineScheduler.reject_yield(state, entry, logLuaError);
+        lua_pushnil(state);
+        return 1;
+      }
       lua_pushinteger(state, static_cast<lua_Integer>(i));
       return 1;
     }
@@ -299,8 +339,10 @@ void tick_lua_coroutines(lua_State *state, float totalSeconds,
     if (status == LUA_OK) {
       g_coroutineScheduler.release_entry(state, entry);
     } else if (status == LUA_YIELD) {
-      g_coroutineScheduler.parse_yield(state, entry.thread, nresults, entry,
-                                       totalSeconds, frameIndex);
+      if (!g_coroutineScheduler.parse_yield(state, entry.thread, nresults,
+                                            entry, totalSeconds, frameIndex)) {
+        g_coroutineScheduler.reject_yield(state, entry, logLuaError);
+      }
     } else {
       if (lua_isstring(entry.thread, -1) != 0) {
         lua_xmove(entry.thread, state, 1);

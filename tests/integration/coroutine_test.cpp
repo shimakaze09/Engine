@@ -1,6 +1,7 @@
 // Integration tests for the Lua coroutine scheduler (P1-M2-F).
 // Tests: wait(seconds), wait_frames(n), wait_until(condition),
-//        error handling, and clear.
+//        error handling, clear, and the refusal of non-finite or
+//        negative waits so they never hold a scheduler slot.
 
 #include <cstdio>
 #include <cstring>
@@ -414,6 +415,107 @@ bool test_clear() noexcept {
   return true;
 }
 
+// -----------------------------------------------------------------------
+// 7. Regression for #458: non-finite and negative waits never take a
+//    scheduler slot. Every slot's worth of NaN/+Inf/-Inf/negative waits
+//    (through engine.wait and through a raw numeric yield) is refused, so
+//    a full complement of valid coroutines still starts and completes
+//    afterwards; the refused ones never run their continuation.
+// -----------------------------------------------------------------------
+bool test_invalid_waits_do_not_consume_slots() noexcept {
+  engine::scripting::initialize_scripting();
+  auto world = std::unique_ptr<engine::runtime::World>(
+      new (std::nothrow) engine::runtime::World());
+  if (!world) {
+    return false;
+  }
+  engine::core::ServiceLocator serviceLocator{};
+  engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
+  engine::scripting::set_default_mesh_asset_id(1U);
+
+  // 40 engine.wait attempts and 8 raw yields exceed the scheduler's 32
+  // slots on their own; the 32 valid starts that follow can only succeed
+  // if none of them was kept.
+  const char *script =
+      "function on_start()\n"
+      "  local invalid = {0/0, 1/0, -1/0, -1}\n"
+      "  for round = 1, 10 do\n"
+      "    for _, seconds in ipairs(invalid) do\n"
+      "      engine.start_coroutine(function()\n"
+      "        engine.wait(seconds)\n"
+      "        local e = engine.spawn_entity()\n"
+      "        engine.set_name(e, 'invalid_done')\n"
+      "      end)\n"
+      "    end\n"
+      "  end\n"
+      "  for i = 1, 8 do\n"
+      "    engine.start_coroutine(function()\n"
+      "      coroutine.yield(0/0)\n"
+      "      local e = engine.spawn_entity()\n"
+      "      engine.set_name(e, 'raw_done')\n"
+      "    end)\n"
+      "  end\n"
+      "  for i = 1, 32 do\n"
+      "    engine.start_coroutine(function()\n"
+      "      engine.wait(0.1)\n"
+      "      local e = engine.spawn_entity()\n"
+      "      engine.set_name(e, 'valid_done')\n"
+      "    end)\n"
+      "  end\n"
+      "end\n"
+      "function on_tick_raw()\n"
+      "  -- A tracked coroutine that re-yields a bad wait later on is\n"
+      "  -- dropped at that yield, freeing its slot for the next start.\n"
+      "  engine.start_coroutine(function()\n"
+      "    engine.wait(0.1)\n"
+      "    coroutine.yield(-1)\n"
+      "    local e = engine.spawn_entity()\n"
+      "    engine.set_name(e, 'late_raw_done')\n"
+      "  end)\n"
+      "end\n";
+
+  if (!write_script(script) || !engine::scripting::load_script(kTempScript)) {
+    engine::scripting::shutdown_scripting();
+    remove_script();
+    return false;
+  }
+
+  engine::scripting::set_frame_time(0.0F, 0.0F);
+  engine::scripting::set_frame_index(0U);
+  engine::scripting::call_script_function("on_start");
+
+  engine::scripting::set_frame_time(0.2F, 0.2F);
+  engine::scripting::set_frame_index(1U);
+  engine::scripting::tick_coroutines();
+  bool ok = (count_named(world.get(), "valid_done") == 32) &&
+            (count_named(world.get(), "invalid_done") == 0) &&
+            (count_named(world.get(), "raw_done") == 0);
+
+  // Every slot is free again: a coroutine that turns bad mid-life is
+  // dropped at its bad yield, and the slot it held is reusable.
+  engine::scripting::call_script_function("on_tick_raw");
+  engine::scripting::set_frame_time(0.2F, 0.4F);
+  engine::scripting::set_frame_index(2U);
+  engine::scripting::tick_coroutines();
+  engine::scripting::set_frame_time(0.2F, 0.6F);
+  engine::scripting::set_frame_index(3U);
+  engine::scripting::tick_coroutines();
+  ok = ok && (count_named(world.get(), "late_raw_done") == 0);
+
+  engine::scripting::set_frame_time(0.0F, 0.6F);
+  engine::scripting::call_script_function("on_start");
+  engine::scripting::set_frame_time(0.2F, 0.8F);
+  engine::scripting::set_frame_index(4U);
+  engine::scripting::tick_coroutines();
+  ok = ok && (count_named(world.get(), "valid_done") == 64) &&
+       (count_named(world.get(), "invalid_done") == 0) &&
+       (count_named(world.get(), "raw_done") == 0);
+
+  engine::scripting::shutdown_scripting();
+  remove_script();
+  return ok;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -430,6 +532,8 @@ int main() {
       {"chained_waits", test_chained_waits},
       {"error_handling", test_error_handling},
       {"clear_coroutines", test_clear},
+      {"invalid_waits_do_not_consume_slots",
+       test_invalid_waits_do_not_consume_slots},
   };
 
   int failures = 0;
