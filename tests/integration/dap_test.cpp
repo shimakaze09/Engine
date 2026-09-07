@@ -1,6 +1,7 @@
 // Integration test for Lua DAP debugger (P1-M2-G1h).
 // Test: mock DAP client sets breakpoint, script pauses, stackTrace line
-// matches.
+// matches, a nonterminating evaluate ends in a bounded error response
+// while the session stays usable for a further evaluate and continue.
 
 #include <chrono>
 #include <cstdio>
@@ -254,6 +255,9 @@ struct ClientResult {
   bool connected = false;
   bool stoppedEventSeen = false;
   bool stackLineMatched = false;
+  bool firstEvaluateAnswered = false;
+  bool evaluateBoundedErrorSeen = false;
+  bool evaluateAfterwardsOk = false;
   bool continueAckSeen = false;
 };
 
@@ -346,6 +350,33 @@ void run_mock_dap_client(int breakpointLine, ClientResult *result) noexcept {
       if (body.find(lineToken) != std::string::npos) {
         result->stackLineMatched = true;
       }
+      // Regression for #454: an expression that never returns must come
+      // back as a bounded error response rather than holding the paused
+      // main thread (before the fix this request never got a reply).
+      if (!send_dap_request(
+              sock, seq++, "evaluate",
+              "{\"expression\":\"(function() while true do end end)()\"}")) {
+        break;
+      }
+      continue;
+    }
+
+    if (body.find("\"command\":\"evaluate\"") != std::string::npos) {
+      if (!result->firstEvaluateAnswered) {
+        result->firstEvaluateAnswered = true;
+        result->evaluateBoundedErrorSeen =
+            (body.find("instruction budget") != std::string::npos) &&
+            (body.find("\"type\":\"error\"") != std::string::npos);
+        // The session survives the bounded failure: the next evaluate
+        // computes normally on the same paused thread.
+        if (!send_dap_request(sock, seq++, "evaluate",
+                              "{\"expression\":\"20 + 22\"}")) {
+          break;
+        }
+        continue;
+      }
+      result->evaluateAfterwardsOk =
+          body.find("\"result\":\"42\"") != std::string::npos;
       if (!send_dap_request(sock, seq++, "continue", "{\"threadId\":1}")) {
         break;
       }
@@ -536,6 +567,9 @@ bool test_dap_breakpoint_pause() noexcept {
   }
 
   const int breakpointLine = 4; // value = value + 1
+  // The evaluation budget is the sandbox instruction limit; a small one
+  // keeps the nonterminating expression's refusal quick.
+  engine::scripting::set_instruction_limit(50000);
 
   if (!engine::scripting::dap_start(kDapPort)) {
     remove_script();
@@ -568,12 +602,18 @@ bool test_dap_breakpoint_pause() noexcept {
 
   const bool ok = callOk && clientResult.connected &&
                   clientResult.stoppedEventSeen &&
-                  clientResult.stackLineMatched && clientResult.continueAckSeen;
+                  clientResult.stackLineMatched &&
+                  clientResult.evaluateBoundedErrorSeen &&
+                  clientResult.evaluateAfterwardsOk &&
+                  clientResult.continueAckSeen;
   if (!ok) {
-    std::printf("\n    callOk=%d connected=%d stopped=%d line=%d continue=%d\n",
+    std::printf("\n    callOk=%d connected=%d stopped=%d line=%d "
+                "evalBounded=%d evalAfter=%d continue=%d\n",
                 callOk ? 1 : 0, clientResult.connected ? 1 : 0,
                 clientResult.stoppedEventSeen ? 1 : 0,
                 clientResult.stackLineMatched ? 1 : 0,
+                clientResult.evaluateBoundedErrorSeen ? 1 : 0,
+                clientResult.evaluateAfterwardsOk ? 1 : 0,
                 clientResult.continueAckSeen ? 1 : 0);
   }
   return ok;
