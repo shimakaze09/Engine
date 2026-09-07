@@ -148,7 +148,10 @@ void prime_ccd_snapshot(PhysicsWorldView &world) noexcept {
 bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
   const auto simToken = world.simulation_access_token();
   PhysicsContext &physicsCtx = world.physics_context();
-  if (deltaSeconds <= 0.0F) {
+  if (!step_delta_is_valid(deltaSeconds)) {
+    core::log_message(core::LogLevel::Error, "physics",
+                      "resolve_collisions rejected a non-finite or "
+                      "non-positive delta; bodies and contacts are unchanged");
     return false;
   }
 

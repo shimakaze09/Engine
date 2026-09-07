@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <new>
 
@@ -1389,6 +1390,154 @@ int check_bridge_phase_misuse_rejected() {
     return 186;
   }
 
+  return 0;
+}
+
+/// Exact field comparison of the body state the step entry points may
+/// write; used to prove a refused delta wrote nothing.
+bool rigid_body_state_equal(const engine::runtime::RigidBody &lhs,
+                            const engine::runtime::RigidBody &rhs) noexcept {
+  return (lhs.velocity.x == rhs.velocity.x) &&
+         (lhs.velocity.y == rhs.velocity.y) &&
+         (lhs.velocity.z == rhs.velocity.z) &&
+         (lhs.acceleration.x == rhs.acceleration.x) &&
+         (lhs.acceleration.y == rhs.acceleration.y) &&
+         (lhs.acceleration.z == rhs.acceleration.z) &&
+         (lhs.angularVelocity.x == rhs.angularVelocity.x) &&
+         (lhs.angularVelocity.y == rhs.angularVelocity.y) &&
+         (lhs.angularVelocity.z == rhs.angularVelocity.z) &&
+         (lhs.inverseMass == rhs.inverseMass) &&
+         (lhs.inverseInertia == rhs.inverseInertia) &&
+         (lhs.sleepFrameCount == rhs.sleepFrameCount) &&
+         (lhs.sleeping == rhs.sleeping);
+}
+
+bool transform_state_equal(const engine::runtime::Transform &lhs,
+                           const engine::runtime::Transform &rhs) noexcept {
+  return (lhs.position.x == rhs.position.x) &&
+         (lhs.position.y == rhs.position.y) &&
+         (lhs.position.z == rhs.position.z) &&
+         (lhs.rotation.x == rhs.rotation.x) &&
+         (lhs.rotation.y == rhs.rotation.y) &&
+         (lhs.rotation.z == rhs.rotation.z) &&
+         (lhs.rotation.w == rhs.rotation.w) &&
+         (lhs.scale.x == rhs.scale.x) && (lhs.scale.y == rhs.scale.y) &&
+         (lhs.scale.z == rhs.scale.z);
+}
+
+/// Regression for #452: the public runtime bridge refuses NaN, +Inf, -Inf,
+/// zero and negative deltas on every step entry point (whole step, range
+/// step, collision resolution) before any write, so body and transform
+/// state survive the refused step and its commit unchanged, and a valid
+/// step afterwards still integrates normally.
+int check_step_rejects_invalid_delta() {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 190;
+  }
+
+  world->end_frame_phase();
+  const engine::runtime::Entity mover = world->create_entity();
+  const engine::runtime::Entity floor = world->create_entity();
+  if ((mover == engine::runtime::kInvalidEntity) ||
+      (floor == engine::runtime::kInvalidEntity)) {
+    return 191;
+  }
+
+  engine::runtime::Transform moverT{};
+  moverT.position = engine::math::Vec3(0.25F, 1.5F, -0.75F);
+  engine::runtime::Transform floorT{};
+  floorT.position = engine::math::Vec3(0.0F, 0.0F, 0.0F);
+  engine::runtime::Collider box{};
+  box.halfExtents = engine::math::Vec3(0.5F, 0.5F, 0.5F);
+  engine::runtime::RigidBody moverBody{};
+  moverBody.inverseMass = 1.0F;
+  moverBody.velocity = engine::math::Vec3(1.0F, -2.0F, 3.0F);
+  moverBody.acceleration = engine::math::Vec3(0.5F, 0.0F, -0.5F);
+  moverBody.angularVelocity = engine::math::Vec3(0.1F, 0.2F, 0.3F);
+  engine::runtime::RigidBody floorBody{};
+  floorBody.inverseMass = 0.0F;
+  if (!world->add_transform(mover, moverT) ||
+      !world->add_transform(floor, floorT) ||
+      !world->add_collider(mover, box) || !world->add_collider(floor, box) ||
+      !world->add_rigid_body(mover, moverBody) ||
+      !world->add_rigid_body(floor, floorBody)) {
+    return 192;
+  }
+
+  const float invalidDeltas[] = {
+      std::numeric_limits<float>::quiet_NaN(),
+      std::numeric_limits<float>::infinity(),
+      -std::numeric_limits<float>::infinity(),
+      0.0F,
+      -1.0F / 60.0F,
+  };
+  for (const float delta : invalidDeltas) {
+    world->begin_update_phase();
+    const bool anyAccepted =
+        engine::runtime::step_physics(*world, delta) ||
+        engine::runtime::step_physics_range(*world, 0U,
+                                            world->transform_count(), delta) ||
+        engine::runtime::resolve_collisions(*world, delta);
+    world->commit_update_phase();
+    world->begin_render_prep_phase();
+    world->end_frame_phase();
+    if (anyAccepted) {
+      return 193;
+    }
+
+    engine::runtime::Transform afterT{};
+    engine::runtime::RigidBody afterBody{};
+    if (!world->get_transform(mover, &afterT) ||
+        !world->get_rigid_body(mover, &afterBody)) {
+      return 194;
+    }
+    if (!transform_state_equal(afterT, moverT) ||
+        !rigid_body_state_equal(afterBody, moverBody)) {
+      return 195;
+    }
+    engine::runtime::Transform floorAfterT{};
+    engine::runtime::RigidBody floorAfterBody{};
+    if (!world->get_transform(floor, &floorAfterT) ||
+        !world->get_rigid_body(floor, &floorAfterBody) ||
+        !transform_state_equal(floorAfterT, floorT) ||
+        !rigid_body_state_equal(floorAfterBody, floorBody)) {
+      return 196;
+    }
+  }
+
+  // The refusals left the world able to take a valid step: gravity and the
+  // authored velocity integrate, and every result stays finite.
+  world->begin_update_phase();
+  if (!engine::runtime::step_physics(*world, 1.0F / 60.0F) ||
+      !engine::runtime::resolve_collisions(*world, 1.0F / 60.0F)) {
+    world->end_frame_phase();
+    return 197;
+  }
+  world->commit_update_phase();
+  world->begin_render_prep_phase();
+  world->end_frame_phase();
+
+  engine::runtime::Transform steppedT{};
+  engine::runtime::RigidBody steppedBody{};
+  if (!world->get_transform(mover, &steppedT) ||
+      !world->get_rigid_body(mover, &steppedBody)) {
+    return 198;
+  }
+  if (!std::isfinite(steppedT.position.x) ||
+      !std::isfinite(steppedT.position.y) ||
+      !std::isfinite(steppedT.position.z) ||
+      !std::isfinite(steppedBody.velocity.x) ||
+      !std::isfinite(steppedBody.velocity.y) ||
+      !std::isfinite(steppedBody.velocity.z)) {
+    return 199;
+  }
+  if (!(steppedT.position.x > moverT.position.x) ||
+      !(steppedT.position.y < moverT.position.y) ||
+      !(steppedBody.velocity.y < moverBody.velocity.y)) {
+    return 200;
+  }
   return 0;
 }
 
@@ -3402,6 +3551,11 @@ int main() {
   }
 
   result = check_bridge_phase_misuse_rejected();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_step_rejects_invalid_delta();
   if (result != 0) {
     return result;
   }

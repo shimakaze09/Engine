@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstddef>
 
+#include "engine/core/logging.h"
 #include "engine/math/quat.h"
 #include "engine/math/vec3.h"
 #include "engine/physics/ccd.h"
@@ -45,6 +46,19 @@ bool step_physics_range(PhysicsWorldView &world, std::size_t startIndex,
 
   if (!world.get_transform_update_range(startIndex, count, &entities,
                                         &readTransforms, &writeTransforms)) {
+    return false;
+  }
+
+  if (!step_delta_is_valid(deltaSeconds)) {
+    // The commit that follows a step swaps the buffers, so "unchanged"
+    // means the write buffer must carry the read state forward for this
+    // range; nothing else (velocities included) is touched.
+    for (std::size_t i = 0U; i < count; ++i) {
+      writeTransforms[i] = readTransforms[i];
+    }
+    core::log_message(core::LogLevel::Error, "physics",
+                      "step_physics rejected a non-finite or non-positive "
+                      "delta; bodies and transforms are unchanged");
     return false;
   }
 
