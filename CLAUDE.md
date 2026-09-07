@@ -52,7 +52,10 @@ is prohibited.
   that can terminate under the no-exception build. Cold initialization,
   editor, tool, and filesystem work uses staged RAII transactions, explicit
   error results, and rollback. No silent failure and no process termination
-  for recoverable errors.
+  for recoverable errors. The README's quick-rule mirror of this rule is
+  held to its conditional wording by `tools/check_doc_policy.py` (#355),
+  run in the static-analysis CI job beside the other audits, so a rewrite
+  cannot quietly drop the condition again.
 - **[REVIEW]** No heap allocation on hot paths (ECS iteration, transform
   propagation, physics stepping, render prep, command buffers, streaming,
   input, jobs). Fixed-size/preallocated storage; no unordered containers,
@@ -215,6 +218,7 @@ python tools/check_comment_quality.py             # comment quality audit
 python tools/check_module_deps.py                 # module dependency audit
 python tools/check_dependency_pins.py             # dependency pin audit
 python tools/check_test_timing.py                 # functional-test timing audit
+python tools/check_doc_policy.py                  # documentation policy audit
 cmake --build build --target analysis             # cppcheck / clang-tidy
 ```
 
@@ -544,7 +548,8 @@ directory-global by design.
   dependency graph), binding generator, asset generators (`gen_character`,
   `gen_props`, `gen_sounds`, `gen_island_scene`), comment audits, the
   module dependency audit (`check_module_deps.py`, #311), the dependency
-  pin audit (`check_dependency_pins.py`, #352), CI
+  pin audit (`check_dependency_pins.py`, #352), the documentation policy
+  audit (`check_doc_policy.py`, #355), CI
   helpers (the gates' own self-tests run as
   `engine_integration_tool_gates`). `tests/` — unit / integration /
   smoke (`gpu` label) / benchmark + `test_harness.h`.
