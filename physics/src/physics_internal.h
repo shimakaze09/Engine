@@ -51,6 +51,15 @@ struct ResolveScratch final {
   std::array<bool, kMaxColliders> isOverflow{};
 };
 
+/// True when a step delta is usable: finite and strictly positive. NaN
+/// passes every ordering comparison and would integrate straight into
+/// velocities and positions; infinities and non-positive values describe
+/// no forward step at all. Every step entry point checks this before its
+/// first write so a malformed delta leaves body and World state untouched.
+inline bool step_delta_is_valid(float deltaSeconds) noexcept {
+  return std::isfinite(deltaSeconds) && (deltaSeconds > 0.0F);
+}
+
 /// Bodies below this energy for kSleepFramesRequired frames go to sleep;
 /// contacts wake a sleeper only when the other body exceeds it.
 constexpr float kSleepThreshold = 0.01F;
