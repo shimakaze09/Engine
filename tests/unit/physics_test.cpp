@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <new>
 
@@ -2611,6 +2612,296 @@ int check_invalid_shape_payloads_rejected() {
   return 0;
 }
 
+/// Casts straight down onto the entity at `x` and returns the exact hit
+/// record (found flag folded into distance = -1 when missed), so two casts
+/// against the same payload compare bit-for-bit.
+engine::runtime::PhysicsRaycastHit
+cast_down_at(const engine::runtime::World &world, float x) noexcept {
+  engine::runtime::PhysicsRaycastHit hit{};
+  if (!engine::runtime::raycast(world, engine::math::Vec3(x, 10.0F, 0.0F),
+                                engine::math::Vec3(0.0F, -1.0F, 0.0F),
+                                100.0F, &hit)) {
+    hit.distance = -1.0F;
+  }
+  return hit;
+}
+
+bool raycast_hits_equal(const engine::runtime::PhysicsRaycastHit &lhs,
+                        const engine::runtime::PhysicsRaycastHit &rhs) noexcept {
+  return (lhs.entity == rhs.entity) && (lhs.distance == rhs.distance) &&
+         (lhs.point.x == rhs.point.x) && (lhs.point.y == rhs.point.y) &&
+         (lhs.point.z == rhs.point.z) && (lhs.normal.x == rhs.normal.x) &&
+         (lhs.normal.y == rhs.normal.y) && (lhs.normal.z == rhs.normal.z);
+}
+
+/// Regression for #453: a hull or heightfield payload carrying non-finite
+/// geometry, a non-unit or non-bounding plane, unordered height bounds or
+/// negative local bounds is refused by the production setters, the
+/// previously installed payload survives untouched, and the production
+/// raycast against each entity returns the identical hit before and after
+/// every refusal. Finishes with a collision-resolution step that still
+/// pushes a body out of the (still valid) hull.
+int check_non_finite_shape_payloads_rejected() {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 540;
+  }
+  const float nan = std::numeric_limits<float>::quiet_NaN();
+  const float inf = std::numeric_limits<float>::infinity();
+
+  engine::math::Vec3 cubeVerts[8] = {
+      engine::math::Vec3(-0.5F, -0.5F, -0.5F),
+      engine::math::Vec3(0.5F, -0.5F, -0.5F),
+      engine::math::Vec3(0.5F, 0.5F, -0.5F),
+      engine::math::Vec3(-0.5F, 0.5F, -0.5F),
+      engine::math::Vec3(-0.5F, -0.5F, 0.5F),
+      engine::math::Vec3(0.5F, -0.5F, 0.5F),
+      engine::math::Vec3(0.5F, 0.5F, 0.5F),
+      engine::math::Vec3(-0.5F, 0.5F, 0.5F),
+  };
+  engine::physics::ConvexHullData validHull{};
+  if (!engine::physics::build_convex_hull(cubeVerts, 8U, validHull)) {
+    return 541;
+  }
+  engine::physics::HeightfieldData validHeightfield{};
+  validHeightfield.rows = 3U;
+  validHeightfield.columns = 3U;
+  validHeightfield.spacingX = 2.0F;
+  validHeightfield.spacingZ = 2.0F;
+  validHeightfield.minY = -1.0F;
+  validHeightfield.maxY = 1.0F;
+  validHeightfield.heights[4] = 0.5F;
+
+  world->end_frame_phase();
+  const engine::runtime::Entity hullEnt = world->create_entity();
+  const engine::runtime::Entity terrain = world->create_entity();
+  if ((hullEnt == engine::runtime::kInvalidEntity) ||
+      (terrain == engine::runtime::kInvalidEntity)) {
+    return 542;
+  }
+  engine::runtime::Transform hullT{};
+  hullT.position = engine::math::Vec3(0.0F, 0.0F, 0.0F);
+  engine::runtime::Transform terrainT{};
+  terrainT.position = engine::math::Vec3(20.0F, 0.0F, 0.0F);
+  engine::runtime::Collider hullCol{};
+  hullCol.shape = engine::runtime::ColliderShape::ConvexHull;
+  hullCol.halfExtents = validHull.localHalfExtents;
+  engine::runtime::Collider terrainCol{};
+  terrainCol.shape = engine::runtime::ColliderShape::Heightfield;
+  terrainCol.halfExtents = engine::math::Vec3(2.0F, 1.0F, 2.0F);
+  if (!world->add_transform(hullEnt, hullT) ||
+      !world->add_transform(terrain, terrainT) ||
+      !world->add_collider(hullEnt, hullCol) ||
+      !world->add_collider(terrain, terrainCol) ||
+      !engine::runtime::set_convex_hull_data(*world, hullEnt, validHull) ||
+      !engine::runtime::set_heightfield_data(*world, terrain,
+                                             validHeightfield)) {
+    return 543;
+  }
+
+  world->begin_update_phase();
+  world->commit_update_phase();
+  world->begin_render_prep_phase();
+  world->end_frame_phase();
+
+  const engine::runtime::PhysicsRaycastHit hullHit = cast_down_at(*world, 0.0F);
+  const engine::runtime::PhysicsRaycastHit terrainHit =
+      cast_down_at(*world, 20.0F);
+  if ((hullHit.entity != hullEnt) || (std::fabs(hullHit.distance - 9.5F) > 0.15F) ||
+      (terrainHit.entity != terrain) ||
+      (std::fabs(terrainHit.distance - 9.5F) > 0.15F)) {
+    return 544;
+  }
+
+  // Every mutation below targets an active element of a valid copy; the
+  // setter must refuse it and the installed payload must stay bit-for-bit
+  // the valid one (its counts, its first vertex, and the query it answers).
+  const auto hull_preserved = [&]() noexcept {
+    const engine::physics::ConvexHullData *installed =
+        engine::runtime::get_convex_hull_data(*world, hullEnt);
+    return (installed != nullptr) &&
+           (installed->planeCount == validHull.planeCount) &&
+           (installed->vertexCount == validHull.vertexCount) &&
+           (installed->vertices[0].x == validHull.vertices[0].x) &&
+           (installed->planes[0].distance == validHull.planes[0].distance) &&
+           raycast_hits_equal(cast_down_at(*world, 0.0F), hullHit);
+  };
+  const auto terrain_preserved = [&]() noexcept {
+    const engine::physics::HeightfieldData *installed =
+        engine::runtime::get_heightfield_data(*world, terrain);
+    return (installed != nullptr) && (installed->rows == 3U) &&
+           (installed->spacingX == 2.0F) && (installed->heights[4] == 0.5F) &&
+           raycast_hits_equal(cast_down_at(*world, 20.0F), terrainHit);
+  };
+
+  int code = 545;
+  {
+    engine::physics::ConvexHullData bad = validHull;
+    bad.vertices[validHull.vertexCount - 1U].y = nan;
+    if (engine::runtime::set_convex_hull_data(*world, hullEnt, bad) ||
+        !hull_preserved()) {
+      return code;
+    }
+    ++code;
+    bad = validHull;
+    bad.planes[0].normal.x = inf;
+    if (engine::runtime::set_convex_hull_data(*world, hullEnt, bad) ||
+        !hull_preserved()) {
+      return code;
+    }
+    ++code;
+    bad = validHull;
+    bad.planes[validHull.planeCount - 1U].distance = nan;
+    if (engine::runtime::set_convex_hull_data(*world, hullEnt, bad) ||
+        !hull_preserved()) {
+      return code;
+    }
+    ++code;
+    // A scaled normal is not a plane normal, and neither is a zero one.
+    bad = validHull;
+    bad.planes[0].normal = engine::math::mul(bad.planes[0].normal, 2.0F);
+    if (engine::runtime::set_convex_hull_data(*world, hullEnt, bad) ||
+        !hull_preserved()) {
+      return code;
+    }
+    ++code;
+    bad = validHull;
+    bad.planes[0].normal = engine::math::Vec3(0.0F, 0.0F, 0.0F);
+    if (engine::runtime::set_convex_hull_data(*world, hullEnt, bad) ||
+        !hull_preserved()) {
+      return code;
+    }
+    ++code;
+    // A plane that cuts through the vertex set does not bound the hull.
+    bad = validHull;
+    bad.planes[0].distance -= 0.25F;
+    if (engine::runtime::set_convex_hull_data(*world, hullEnt, bad) ||
+        !hull_preserved()) {
+      return code;
+    }
+    ++code;
+    bad = validHull;
+    bad.localCenter.z = nan;
+    if (engine::runtime::set_convex_hull_data(*world, hullEnt, bad) ||
+        !hull_preserved()) {
+      return code;
+    }
+    ++code;
+    bad = validHull;
+    bad.localHalfExtents.x = -bad.localHalfExtents.x;
+    if (engine::runtime::set_convex_hull_data(*world, hullEnt, bad) ||
+        !hull_preserved()) {
+      return code;
+    }
+    ++code;
+    // A NaN outside the active range is inert and must not be refused.
+    bad = validHull;
+    bad.vertices[validHull.vertexCount].x = nan;
+    bad.planes[validHull.planeCount].normal.y = nan;
+    if (!engine::runtime::set_convex_hull_data(*world, hullEnt, bad) ||
+        !hull_preserved()) {
+      return code;
+    }
+    ++code;
+  }
+
+  {
+    engine::physics::HeightfieldData bad = validHeightfield;
+    bad.heights[4] = nan;
+    if (engine::runtime::set_heightfield_data(*world, terrain, bad) ||
+        !terrain_preserved()) {
+      return code;
+    }
+    ++code;
+    bad = validHeightfield;
+    bad.heights[8] = -inf;
+    if (engine::runtime::set_heightfield_data(*world, terrain, bad) ||
+        !terrain_preserved()) {
+      return code;
+    }
+    ++code;
+    bad = validHeightfield;
+    bad.spacingX = nan;
+    if (engine::runtime::set_heightfield_data(*world, terrain, bad) ||
+        !terrain_preserved()) {
+      return code;
+    }
+    ++code;
+    bad = validHeightfield;
+    bad.spacingZ = inf;
+    if (engine::runtime::set_heightfield_data(*world, terrain, bad) ||
+        !terrain_preserved()) {
+      return code;
+    }
+    ++code;
+    bad = validHeightfield;
+    bad.minY = nan;
+    if (engine::runtime::set_heightfield_data(*world, terrain, bad) ||
+        !terrain_preserved()) {
+      return code;
+    }
+    ++code;
+    bad = validHeightfield;
+    bad.maxY = inf;
+    if (engine::runtime::set_heightfield_data(*world, terrain, bad) ||
+        !terrain_preserved()) {
+      return code;
+    }
+    ++code;
+    bad = validHeightfield;
+    bad.minY = 2.0F;
+    if (engine::runtime::set_heightfield_data(*world, terrain, bad) ||
+        !terrain_preserved()) {
+      return code;
+    }
+    ++code;
+    // A NaN sample past the active grid is inert and must not be refused.
+    bad = validHeightfield;
+    bad.heights[9] = nan;
+    if (!engine::runtime::set_heightfield_data(*world, terrain, bad) ||
+        !terrain_preserved()) {
+      return code;
+    }
+    ++code;
+  }
+
+  // Collision resolution still consumes the valid hull: a dynamic box
+  // dropped into it is pushed out.
+  const engine::runtime::Entity boxEnt = world->create_entity();
+  engine::runtime::Collider boxCol{};
+  boxCol.shape = engine::runtime::ColliderShape::AABB;
+  boxCol.halfExtents = engine::math::Vec3(0.5F, 0.5F, 0.5F);
+  engine::runtime::RigidBody boxBody{};
+  boxBody.inverseMass = 1.0F;
+  if ((boxEnt == engine::runtime::kInvalidEntity) ||
+      !world->add_transform(boxEnt, hullT) ||
+      !world->add_collider(boxEnt, boxCol) ||
+      !world->add_rigid_body(boxEnt, boxBody)) {
+    return 580;
+  }
+  world->begin_update_phase();
+  if (!world->update_transforms_range(0U, world->transform_count(), 0.0F) ||
+      !engine::runtime::resolve_collisions(*world)) {
+    world->end_frame_phase();
+    return 581;
+  }
+  world->commit_update_phase();
+  world->begin_render_prep_phase();
+  world->end_frame_phase();
+  engine::runtime::Transform outBox{};
+  if (!world->get_transform(boxEnt, &outBox)) {
+    return 582;
+  }
+  const float separation = std::fabs(outBox.position.x) +
+                           std::fabs(outBox.position.y) +
+                           std::fabs(outBox.position.z);
+  if (!std::isfinite(separation) || (separation < 0.1F)) {
+    return 583;
+  }
+  return 0;
+}
+
 // The built-in cylinder and pyramid primitives collide as convex hulls that
 // match their meshes: a cylinder has a flat top (not a capsule dome) and a
 // pyramid's empty corners do not collide (not a bounding box).
@@ -3512,6 +3803,11 @@ int main() {
   }
 
   result = check_invalid_shape_payloads_rejected();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_non_finite_shape_payloads_rejected();
   if (result != 0) {
     return result;
   }

@@ -3,6 +3,7 @@
 
 #include "engine/physics/physics.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstring>
@@ -269,23 +270,107 @@ void remove_heightfield_data(PhysicsContext &context, Entity entity) noexcept {
   }
 }
 
-bool validate_convex_hull_data(const ConvexHullData &hull) noexcept {
-  return (hull.vertexCount > 0U) &&
-         (hull.vertexCount <= ConvexHullData::kMaxVertices) &&
-         (hull.planeCount > 0U) &&
-         (hull.planeCount <= ConvexHullData::kMaxPlanes);
+namespace {
+
+bool vec3_is_finite(const math::Vec3 &value) noexcept {
+  return std::isfinite(value.x) && std::isfinite(value.y) &&
+         std::isfinite(value.z);
 }
 
-bool validate_heightfield_data(const HeightfieldData &heightfield) noexcept {
-  if ((heightfield.rows < 2U) || (heightfield.columns < 2U) ||
-      (heightfield.rows > HeightfieldData::kMaxResolution) ||
-      (heightfield.columns > HeightfieldData::kMaxResolution) ||
-      (heightfield.spacingX <= 0.0F) || (heightfield.spacingZ <= 0.0F)) {
+/// Squared-length slack for a plane normal to count as unit length. A
+/// float normalize lands within a few ulp (about 5e-7) of 1; this admits
+/// hand-authored normals normalized in float precision and rejects a zero
+/// or scaled normal by three orders of magnitude.
+constexpr float kUnitNormalToleranceSq = 1.0e-3F;
+
+/// Slack, relative to the plane offset's magnitude, for a hull vertex to
+/// count as on or behind a face plane. The builder places face vertices
+/// on their plane to float precision and keeps every other vertex inside
+/// by its 1e-6 visibility margin, so this only rejects planes that do not
+/// actually bound the vertex set.
+constexpr float kPlaneContainmentTolerance = 1.0e-3F;
+
+} // namespace
+
+/// The payload contract every consumer (support mapping, face-plane ray
+/// tests, contact clipping) relies on: counts inside the fixed tables,
+/// every active vertex and plane finite, every plane normal unit length
+/// with every active vertex on or behind it, and finite non-negative local
+/// bounds. A payload failing any of it is refused whole, before it can
+/// replace the previous valid one.
+bool validate_convex_hull_data(const ConvexHullData &hull) noexcept {
+  if ((hull.vertexCount == 0U) ||
+      (hull.vertexCount > ConvexHullData::kMaxVertices) ||
+      (hull.planeCount == 0U) || (hull.planeCount > ConvexHullData::kMaxPlanes)) {
     return false;
   }
 
-  return heightfield.rows <=
-         (HeightfieldData::kMaxSamples / heightfield.columns);
+  for (std::size_t index = 0U; index < hull.vertexCount; ++index) {
+    if (!vec3_is_finite(hull.vertices[index])) {
+      return false;
+    }
+  }
+
+  for (std::size_t planeIndex = 0U; planeIndex < hull.planeCount;
+       ++planeIndex) {
+    const ConvexHullData::Plane &plane = hull.planes[planeIndex];
+    if (!vec3_is_finite(plane.normal) || !std::isfinite(plane.distance)) {
+      return false;
+    }
+    const float lengthSq = math::dot(plane.normal, plane.normal);
+    if (std::fabs(lengthSq - 1.0F) > kUnitNormalToleranceSq) {
+      return false;
+    }
+    const float slack =
+        kPlaneContainmentTolerance * std::max(1.0F, std::fabs(plane.distance));
+    for (std::size_t index = 0U; index < hull.vertexCount; ++index) {
+      if ((math::dot(plane.normal, hull.vertices[index]) - plane.distance) >
+          slack) {
+        return false;
+      }
+    }
+  }
+
+  if (!vec3_is_finite(hull.localCenter) ||
+      !vec3_is_finite(hull.localHalfExtents) ||
+      (hull.localHalfExtents.x < 0.0F) || (hull.localHalfExtents.y < 0.0F) ||
+      (hull.localHalfExtents.z < 0.0F)) {
+    return false;
+  }
+  return true;
+}
+
+/// The heightfield contract: grid dimensions inside the fixed sample
+/// table, finite positive spacing (a NaN spacing passes an ordering
+/// comparison, so finiteness is checked explicitly), finite ordered
+/// minY/maxY, and every active sample finite. Refused whole, before it
+/// can replace the previous valid payload.
+bool validate_heightfield_data(const HeightfieldData &heightfield) noexcept {
+  if ((heightfield.rows < 2U) || (heightfield.columns < 2U) ||
+      (heightfield.rows > HeightfieldData::kMaxResolution) ||
+      (heightfield.columns > HeightfieldData::kMaxResolution)) {
+    return false;
+  }
+  if (!std::isfinite(heightfield.spacingX) ||
+      !std::isfinite(heightfield.spacingZ) ||
+      !(heightfield.spacingX > 0.0F) || !(heightfield.spacingZ > 0.0F)) {
+    return false;
+  }
+  if (!std::isfinite(heightfield.minY) || !std::isfinite(heightfield.maxY) ||
+      (heightfield.minY > heightfield.maxY)) {
+    return false;
+  }
+  if (heightfield.rows > (HeightfieldData::kMaxSamples / heightfield.columns)) {
+    return false;
+  }
+
+  const std::size_t sampleCount = heightfield.rows * heightfield.columns;
+  for (std::size_t index = 0U; index < sampleCount; ++index) {
+    if (!std::isfinite(heightfield.heights[index])) {
+      return false;
+    }
+  }
+  return true;
 }
 
 // Public accessors used by the runtime bridge.
