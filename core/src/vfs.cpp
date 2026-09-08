@@ -3,6 +3,7 @@
 #include "engine/core/vfs.h"
 
 #include <array>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <new>
@@ -331,15 +332,18 @@ bool vfs_file_size(const char *virtualPath, std::uint64_t *outSize) noexcept {
 #endif
 }
 
-bool vfs_read_binary(const char *virtualPath, void **outData,
-                     std::size_t *outSize) noexcept {
+VfsReadStatus vfs_read_binary_bounded(const char *virtualPath,
+                                      std::uint64_t maxBytes, void **outData,
+                                      std::size_t *outSize) noexcept {
   if ((outData == nullptr) || (outSize == nullptr)) {
-    return false;
+    return VfsReadStatus::IoError;
   }
+  *outData = nullptr;
+  *outSize = 0U;
 
   char osPath[kMaxResolvedPathLength] = {};
   if (resolve(virtualPath, osPath, sizeof(osPath)) == 0U) {
-    return false;
+    return VfsReadStatus::Unresolved;
   }
 
   FILE *file = nullptr;
@@ -351,28 +355,37 @@ bool vfs_read_binary(const char *virtualPath, void **outData,
   file = std::fopen(osPath, "rb");
 #endif
   if (file == nullptr) {
-    return false;
+    return VfsReadStatus::Unresolved;
   }
 
+  // The size comes from the handle the read below consumes, so a file
+  // replaced or grown after an earlier metadata check cannot slip a
+  // larger allocation past the bound: what is measured here is what is
+  // allocated and read.
   if (std::fseek(file, 0, SEEK_END) != 0) {
     std::fclose(file);
-    return false;
+    return VfsReadStatus::IoError;
   }
   const long fileSize = std::ftell(file);
   if (fileSize < 0) {
     std::fclose(file);
-    return false;
+    return VfsReadStatus::IoError;
   }
   if (std::fseek(file, 0, SEEK_SET) != 0) {
     std::fclose(file);
-    return false;
+    return VfsReadStatus::IoError;
   }
 
   const auto size = static_cast<std::size_t>(fileSize);
+  if (static_cast<std::uint64_t>(size) > maxBytes) {
+    std::fclose(file);
+    *outSize = size;
+    return VfsReadStatus::TooLarge;
+  }
   auto *buffer = new (std::nothrow) std::byte[size];
   if (buffer == nullptr) {
     std::fclose(file);
-    return false;
+    return VfsReadStatus::IoError;
   }
 
   if (size > 0U) {
@@ -380,14 +393,20 @@ bool vfs_read_binary(const char *virtualPath, void **outData,
     if (bytesRead != size) {
       delete[] buffer;
       std::fclose(file);
-      return false;
+      return VfsReadStatus::IoError;
     }
   }
 
   std::fclose(file);
   *outData = buffer;
   *outSize = size;
-  return true;
+  return VfsReadStatus::Ok;
+}
+
+bool vfs_read_binary(const char *virtualPath, void **outData,
+                     std::size_t *outSize) noexcept {
+  return vfs_read_binary_bounded(virtualPath, UINT64_MAX, outData,
+                                 outSize) == VfsReadStatus::Ok;
 }
 
 bool vfs_read_text(const char *virtualPath, char **outText,
