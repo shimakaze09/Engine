@@ -342,8 +342,12 @@ void draw_scene_viewport_panel() noexcept {
   editor_session().sceneViewportScreenPos = cursorScreenPos;
   editor_session().sceneViewportScreenSize = regionSize;
 
-  renderer::set_scene_viewport_size(static_cast<int>(regionSize.x),
-                                    static_cast<int>(regionSize.y));
+  // The panel rect is in logical points; the render target is sized in
+  // pixels so HiDPI displays get a native-resolution scene image.
+  const ImVec2 fbScale = ImGui::GetIO().DisplayFramebufferScale;
+  renderer::set_scene_viewport_size(
+      static_cast<int>(regionSize.x * fbScale.x),
+      static_cast<int>(regionSize.y * fbScale.y));
 
   const std::uint64_t texId =
       imgui_texture_id(renderer::get_scene_viewport_texture());
