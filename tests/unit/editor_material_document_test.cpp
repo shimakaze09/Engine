@@ -505,6 +505,46 @@ int check_scene_switch_leaves_material_document_alone() noexcept {
   return 0;
 }
 
+/// EXPECTATION: an edit the history could not record (the command
+/// allocation failed after the gesture already reached the live record)
+/// still reads as dirty and still arms the quit gate, even though the
+/// history cursor sits at the saved position; a save clears it, and so
+/// does a reload from disk. The flag is set through the state directly,
+/// the way finalize_pending_gesture sets it, since allocation failure
+/// cannot be injected into a nothrow new from a test.
+int check_unrecorded_edit_keeps_document_dirty() noexcept {
+  DocumentScope scope;
+  if (!scope.valid() || !scope.title_scene()) {
+    return 1;
+  }
+  open_material_editor(kVirtualPathA);
+  if (material_editor_is_dirty() || material_editor_history().can_undo()) {
+    return 2;
+  }
+  material_editor_state().unrecordedEdit = true;
+  if (!material_editor_is_dirty() || material_editor_history().can_undo()) {
+    return 3;
+  }
+  if (request_scene_quit() || !scene_document_prompt_covers_material()) {
+    return 4;
+  }
+  scene_document_prompt_choose_cancel();
+  if (!save_material_editor() || material_editor_is_dirty() ||
+      material_editor_state().unrecordedEdit) {
+    return 5;
+  }
+  if (!request_scene_quit()) {
+    return 6;
+  }
+
+  material_editor_state().unrecordedEdit = true;
+  if (!material_editor_is_dirty() || !reload_material_editor_from_disk() ||
+      material_editor_is_dirty() || material_editor_state().unrecordedEdit) {
+    return 7;
+  }
+  return 0;
+}
+
 /// EXPECTATION: undo/redo address the material history while the panel is
 /// the undo target and the scene history otherwise, and each document's
 /// stack is left alone by the other's undo.
@@ -595,6 +635,8 @@ int main() {
        &check_dirtiness_follows_undo_across_saved_position},
       {"check_scene_switch_leaves_material_document_alone",
        &check_scene_switch_leaves_material_document_alone},
+      {"check_unrecorded_edit_keeps_document_dirty",
+       &check_unrecorded_edit_keeps_document_dirty},
       {"check_undo_routes_to_the_target_document",
        &check_undo_routes_to_the_target_document},
   };

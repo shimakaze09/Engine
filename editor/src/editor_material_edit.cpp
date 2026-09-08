@@ -69,6 +69,17 @@ void finalize_pending_gesture() noexcept {
 
   auto *cmd = new (std::nothrow) MaterialEditCommand();
   if (cmd == nullptr) {
+    // The live record already carries the gesture (apply_frame wrote it
+    // every changed frame); without a command the history cannot account
+    // for it, so the document tracks it as dirty by hand.
+    g_state.unrecordedEdit = true;
+    char message[400] = {};
+    std::snprintf(message, sizeof(message),
+                  "material edit to %s could not be recorded for undo "
+                  "(out of memory); the document stays unsaved until "
+                  "saved or reloaded",
+                  g_state.virtualPath);
+    core::log_message(core::LogLevel::Error, kLogChannel, message);
     return;
   }
   cmd->materialId = g_state.materialId;
@@ -89,6 +100,7 @@ void adopt_loaded_state(const runtime::EditorMaterialState &loaded) noexcept {
   std::snprintf(g_state.parentVirtualPath, sizeof(g_state.parentVirtualPath),
                 "%s", loaded.parentVirtualPath);
   g_state.savedHistoryToken = g_history.current_token();
+  g_state.unrecordedEdit = false;
 }
 
 /// Loads `virtualPath` into a fresh state (history dropped): the previous
@@ -165,7 +177,7 @@ bool material_editor_is_dirty() noexcept {
   if (!g_state.open || !g_state.found) {
     return false;
   }
-  return g_state.gestureActive ||
+  return g_state.gestureActive || g_state.unrecordedEdit ||
          (g_history.current_token() != g_state.savedHistoryToken);
 }
 
@@ -215,6 +227,7 @@ void close_material_editor() noexcept {
   g_state.pendingOpenPath[0] = '\0';
   g_history.clear();
   g_state.savedHistoryToken = g_history.current_token();
+  g_state.unrecordedEdit = false;
 }
 
 bool material_editor_prompt_open() noexcept { return g_state.unsavedPromptOpen; }
@@ -296,6 +309,7 @@ bool save_material_editor() noexcept {
   }
   g_state.lastSaveError[0] = '\0';
   g_state.savedHistoryToken = g_history.current_token();
+  g_state.unrecordedEdit = false;
   return true;
 }
 

@@ -43,6 +43,13 @@ struct MaterialEditorState final {
   /// a save re-dirties, redo back to it re-cleans) or a gesture is live.
   std::uint64_t savedHistoryToken = 0U;
 
+  /// Sticky: a completed gesture changed the live record but no command
+  /// could be recorded for it (allocation failure), so the history cursor
+  /// alone can no longer prove the record matches its file. Keeps the
+  /// document dirty, and every gate armed, until a save or reload makes
+  /// the record match the file again; undo cannot reach such an edit.
+  bool unrecordedEdit = false;
+
   /// True while the panel is the undo target: it was the last regular
   /// window focused (menus and popups do not steal the target, so Edit >
   /// Undo reaches the material the user was just editing). Owned by the
