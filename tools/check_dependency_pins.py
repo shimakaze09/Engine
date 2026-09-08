@@ -14,20 +14,25 @@ Two checks, one root cause each:
   1. FetchContent declarations. Every `FetchContent_Declare(...)` that
      fetches from git must carry a `GIT_TAG` that is a full 40-hex commit
      SHA; a tag or branch name, a variable, or a missing `GIT_TAG` is a
-     finding. A declaration that downloads a `URL` must carry `URL_HASH`.
-     A declaration naming neither (a SOURCE_DIR override, say) downloads
-     nothing and is not audited.
+     finding. A declaration that downloads a `URL` must carry a literal
+     `URL_HASH` (`<ALGO>=<hex digest>` with the digest length the
+     algorithm produces); a variable, a generator expression, or a
+     malformed digest is a finding, since any of them lets the effective
+     hash change outside a repository commit. A declaration naming
+     neither (a SOURCE_DIR override, say) downloads nothing and is not
+     audited.
 
   2. GitHub Actions references. Every `uses:` in `.github/workflows/`
+     and in every composite action manifest under `.github/actions/`
      that names a remote action must pin it at a full 40-hex commit SHA.
      Local (`./...`) and `docker://` references are outside this check.
 
-Actions still referenced by a mutable tag today are listed in
+Actions still referenced by a mutable tag are listed in
 KNOWN_UNPINNED_ACTIONS with the issue that tracks them. The entry is the
 exact reference text, so pinning one action removes exactly one line. An
 entry that no longer matches anything is itself a finding, which keeps
-the list shrinking to empty. Adding an entry is not mechanically
-prevented; that half stays [REVIEW].
+the list at empty once it gets there. Adding an entry is not
+mechanically prevented; that half stays [REVIEW].
 
 Usage:
   python tools/check_dependency_pins.py            # report, exit 1 on findings
@@ -50,6 +55,23 @@ USES_RE = re.compile(r"^\s*(?:-\s+)?uses:\s*[\"']?([^\s\"'#]+)")
 CMAKE_SUFFIXES = {".cmake"}
 CMAKE_NAMES = {"CMakeLists.txt"}
 WORKFLOW_SUFFIXES = {".yml", ".yaml"}
+# A composite action's manifest is the one file name GitHub reads for it.
+ACTION_MANIFEST_NAMES = {"action.yml", "action.yaml"}
+# Hex digest length per algorithm CMake's URL_HASH accepts; a literal
+# `ALGO=<digest>` is the only form the gate credits.
+URL_HASH_DIGEST_LENGTHS = {
+    "MD5": 32,
+    "SHA1": 40,
+    "SHA224": 56,
+    "SHA256": 64,
+    "SHA384": 96,
+    "SHA512": 128,
+    "SHA3_224": 56,
+    "SHA3_256": 64,
+    "SHA3_384": 96,
+    "SHA3_512": 128,
+}
+URL_HASH_RE = re.compile(r"^([A-Za-z0-9_]+)=([0-9a-fA-F]+)$")
 # Build trees and fetched dependencies carry their own CMake files, which
 # are not this repository's declarations.
 SKIPPED_DIR_NAMES = {".git", "_deps"}
@@ -58,17 +80,9 @@ SKIPPED_DIR_PREFIXES = ("build",)
 # Remote actions this repository still references by a mutable tag. Each
 # entry is the exact `uses:` text; pinning it to the tag's commit SHA
 # deletes the entry in the same commit, and a stale entry fails the gate.
-KNOWN_UNPINNED_ACTIONS: dict[str, str] = {
-    "actions/cache@v5": "tracked: issue #352, pin to the tag's commit SHA",
-    "actions/checkout@v6": "tracked: issue #352, pin to the tag's commit SHA",
-    "actions/download-artifact@v7": (
-        "tracked: issue #352, pin to the tag's commit SHA"
-    ),
-    "actions/upload-artifact@v7": (
-        "tracked: issue #352, pin to the tag's commit SHA"
-    ),
-    "ilammy/msvc-dev-cmd@v1": "tracked: issue #352, pin to the tag's commit SHA",
-}
+# Empty: every reference is pinned, so any new mutable reference fails
+# unless it is deliberately added here with the issue that tracks it.
+KNOWN_UNPINNED_ACTIONS: dict[str, str] = {}
 
 
 class Finding:
@@ -102,15 +116,53 @@ def cmake_files(root: pathlib.Path) -> list[pathlib.Path]:
 
 
 def workflow_files(root: pathlib.Path) -> list[pathlib.Path]:
-    """Every workflow definition GitHub would execute for this repository."""
+    """Every file GitHub resolves `uses:` references from for this repository.
+
+    Workflows under `.github/workflows/` and the manifests of composite
+    actions anywhere under `.github/actions/`: a step a workflow reaches
+    through a local composite action runs the remote actions that
+    manifest names, with the same privileges, so they are audited alike.
+    """
+    found: list[pathlib.Path] = []
     workflows = root / ".github" / "workflows"
-    if not workflows.is_dir():
-        return []
-    return sorted(
-        path
-        for path in workflows.iterdir()
-        if path.is_file() and path.suffix.lower() in WORKFLOW_SUFFIXES
-    )
+    if workflows.is_dir():
+        found += [
+            path
+            for path in workflows.iterdir()
+            if path.is_file() and path.suffix.lower() in WORKFLOW_SUFFIXES
+        ]
+    actions = root / ".github" / "actions"
+    if actions.is_dir():
+        for directory, subdirectories, files in os.walk(actions):
+            subdirectories.sort()
+            found += [
+                pathlib.Path(directory) / name
+                for name in sorted(files)
+                if name.lower() in ACTION_MANIFEST_NAMES
+            ]
+    return sorted(found)
+
+
+def url_hash_finding(value: str | None) -> str | None:
+    """Why a URL_HASH argument does not pin the download; None when it does."""
+    if value is None:
+        return "URL download has no URL_HASH"
+    match = URL_HASH_RE.match(value)
+    if match is None:
+        return (
+            f"URL_HASH {value} is not a literal <ALGO>=<hex digest>; a "
+            "variable or generator expression can change outside a commit"
+        )
+    algorithm, digest = match.group(1).upper(), match.group(2)
+    expected = URL_HASH_DIGEST_LENGTHS.get(algorithm)
+    if expected is None:
+        return f"URL_HASH algorithm {algorithm} is not one CMake accepts"
+    if len(digest) != expected:
+        return (
+            f"URL_HASH {algorithm} digest has {len(digest)} hex characters; "
+            f"{algorithm} produces {expected}"
+        )
+    return None
 
 
 def read_text(path: pathlib.Path) -> str:
@@ -190,17 +242,19 @@ def check_fetchcontent(root: pathlib.Path) -> tuple[list[Finding], int]:
                     )
             elif "URL" in tokens:
                 audited += 1
-                if value_after(tokens, "URL_HASH") is None:
-                    findings.append(
-                        Finding(location, f"{name}: URL download has no URL_HASH")
-                    )
+                problem = url_hash_finding(value_after(tokens, "URL_HASH"))
+                if problem is not None:
+                    findings.append(Finding(location, f"{name}: {problem}"))
     return findings, audited
 
 
 def check_workflows(
     root: pathlib.Path, used: set[str], allowlisted: bool
 ) -> tuple[list[Finding], int]:
-    """Check 2: every remote action reference is pinned to a commit SHA."""
+    """Check 2: every remote action reference is pinned to a commit SHA.
+
+    Covers workflows and composite action manifests alike (workflow_files).
+    """
     findings: list[Finding] = []
     audited = 0
     for path in workflow_files(root):

@@ -46,11 +46,11 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       # ---- Cache FetchContent dependencies ----
       - name: Cache _deps
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: build/_deps
           key: deps-v2-${{ matrix.os }}-${{ hashFiles('CMakeLists.txt') }}
@@ -72,7 +72,7 @@ jobs:
       # Ninja + clang-cl needs the MSVC environment (headers/libs/link).
       - name: Set up MSVC environment (Windows)
         if: runner.os == 'Windows'
-        uses: ilammy/msvc-dev-cmd@v1
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
 
       # macOS skips the shaderc toolchain: tint's overloaded-CTAD pattern
       # does not compile under AppleClang, and the lane is headless-only
@@ -126,14 +126,14 @@ jobs:
 
       - name: Upload determinism hash
         if: matrix.config == 'Release'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: determinism-hash-${{ matrix.os }}
           path: determinism_hash.txt
 
       - name: Upload compile_commands.json
         if: matrix.os == 'ubuntu-24.04' && matrix.config == 'Debug'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: compile_commands
           path: build/compile_commands.json
@@ -162,10 +162,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Cache _deps
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: build/_deps
           # v3: the v2 Windows caches carry SDL3 FetchContent sub-builds
@@ -189,7 +189,7 @@ jobs:
       # the tier-1 Windows lane.
       - name: Set up MSVC environment (Windows)
         if: runner.os == 'Windows'
-        uses: ilammy/msvc-dev-cmd@v1
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
 
       - name: Configure
         run: >
@@ -212,7 +212,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Download all determinism hashes
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           pattern: determinism-hash-*
           merge-multiple: false
@@ -258,7 +258,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Audit source comments
         run: python3 tools/check_source_comments.py
@@ -292,7 +292,7 @@ jobs:
             libasound2-dev libpulse-dev
 
       - name: Cache _deps
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: build/_deps
           key: deps-ubuntu-24.04-${{ hashFiles('CMakeLists.txt') }}
@@ -328,7 +328,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       # clang-tidy 19+ is required: older clang reports __cpp_concepts as
       # 201907, which makes libstdc++ hide <expected> in C++23 mode.
@@ -354,7 +354,7 @@ jobs:
             libasound2-dev libpulse-dev
 
       - name: Cache _deps
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: build/_deps
           key: deps-ubuntu-24.04-${{ hashFiles('CMakeLists.txt') }}
@@ -399,7 +399,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Install Linux dependencies
         run: |
@@ -412,7 +412,7 @@ jobs:
             libasound2-dev libpulse-dev
 
       - name: Cache _deps
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: build/_deps
           key: deps-ubuntu-24.04-${{ hashFiles('CMakeLists.txt') }}
@@ -429,7 +429,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Install Linux dependencies
         run: |
@@ -442,7 +442,7 @@ jobs:
             libasound2-dev libpulse-dev
 
       - name: Cache _deps
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: build/_deps
           key: deps-ubuntu-24.04-${{ hashFiles('CMakeLists.txt') }}
@@ -472,7 +472,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Install Linux dependencies
         run: |
@@ -485,7 +485,7 @@ jobs:
             libasound2-dev libpulse-dev
 
       - name: Cache _deps
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: build/_deps
           key: deps-ubuntu-24.04-${{ hashFiles('CMakeLists.txt') }}
@@ -515,7 +515,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Install dependencies
         run: |
@@ -528,7 +528,7 @@ jobs:
             libasound2-dev libpulse-dev lcov
 
       - name: Cache _deps
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: build/_deps
           key: deps-ubuntu-24.04-${{ hashFiles('CMakeLists.txt') }}
@@ -560,7 +560,7 @@ jobs:
         run: genhtml --quiet coverage.info --output-directory coverage_html --title "Engine Coverage"
 
       - name: Upload coverage report
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: coverage-report
           path: coverage_html/
@@ -588,7 +588,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Install Linux dependencies
         run: |
@@ -601,7 +601,7 @@ jobs:
             libasound2-dev libpulse-dev
 
       - name: Cache _deps
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: build/_deps
           key: deps-ubuntu-24.04-${{ hashFiles('CMakeLists.txt') }}
@@ -637,7 +637,7 @@ jobs:
           --attempts 3
 
       - name: Upload benchmark results
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: benchmark-results
           path: bench_results/
