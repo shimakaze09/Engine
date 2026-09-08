@@ -697,6 +697,19 @@ engine_add_test_executable(engine_integration_scene_commit_camera_history
     integration
 )
 
+# ---- #451: a failed scene load is attempted once, not every frame ----
+
+engine_add_test_executable(engine_integration_scene_load_failure_consumed
+    SOURCES
+    scene_load_failure_consumed_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_scripting
+    engine_core
+    LABELS
+    integration
+)
+
 # ---- #120: injected frame-stage fatal must map to FatalFrame ----
 
 engine_add_test_executable(engine_integration_run_fatal_frame

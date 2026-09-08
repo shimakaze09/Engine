@@ -122,12 +122,20 @@ InputEventRoute process_editor_input_event(const EditorBridge *bridge,
 /// #93a/#93b: the World-owned TimerManager was already reset in step 1,
 /// but only these scripting-side calls drop the Lua registry refs and pool
 /// slots that point at it); (3) clear the pending op. A failed load skips
-/// every reset, including step 0, and leaves all state unchanged.
+/// every reset, including step 0, and leaves the World and every scripting
+/// state unchanged; only the request itself is consumed (see
+/// process_pending_scene_op).
 static void dispatch_outgoing_scene_end_play() noexcept {
   scripting::dispatch_entity_scripts_end_for_transition();
 }
 
-/// Processes a queued script scene operation, if one exists.
+/// Processes a queued script scene operation, if one exists. A request is
+/// attempted exactly once: a load that fails is consumed with one
+/// diagnostic naming the path, because the request carries no new
+/// evidence from one frame to the next and retrying it every active frame
+/// would repeat the same file open, parse and error at frame rate. The
+/// live World stays as it was; a script (or the player boot) re-requests
+/// the load when it has reason to expect a different outcome.
 bool process_pending_scene_op(World &world) noexcept {
   if (!scripting::has_pending_scene_op()) {
     return true;
@@ -141,8 +149,14 @@ bool process_pending_scene_op(World &world) noexcept {
                             &dispatch_outgoing_scene_end_play)) {
       processed = true;
     } else {
-      core::log_message(core::LogLevel::Error, "engine",
-                        "failed to process pending scene load");
+      char message[400] = {};
+      std::snprintf(message, sizeof(message),
+                    "failed to process pending scene load '%s'; the "
+                    "request is dropped and the current scene stays live",
+                    (scenePath != nullptr) ? scenePath : "");
+      core::log_message(core::LogLevel::Error, "engine", message);
+      scripting::clear_pending_scene_op();
+      return false;
     }
   } else if (scripting::pending_scene_op_is_new()) {
     runtime::reset_world(world, &dispatch_outgoing_scene_end_play);
