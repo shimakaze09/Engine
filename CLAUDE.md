@@ -158,11 +158,14 @@ is prohibited.
   commit SHA, so neither a cold build nor a privileged CI step can change
   without a repository commit. `tools/check_dependency_pins.py` (#352) is
   the mechanical gate, run in the static-analysis CI job beside the other
-  audits. It carries a shrinking allowlist of the action references still
-  on mutable tags (each keyed by its exact `uses:` text; an entry that no
-  longer matches anything is itself a finding), so the rule is [CI] for
-  FetchContent and for any action reference not on that list, and [REVIEW]
-  for the listed ones until the allowlist empties.
+  audits: it audits every workflow and every composite action manifest
+  under `.github/actions/`, and credits a `URL_HASH` only as a literal
+  `<ALGO>=<hex digest>` of the algorithm's length. Its allowlist of action
+  references still on mutable tags (each keyed by its exact `uses:` text;
+  an entry that no longer matches anything is itself a finding) emptied on
+  2026-09-08 when the last five references were pinned, so the rule is
+  [CI] for every declaration and reference; re-adding an allowlist entry is
+  not mechanically prevented and stays [REVIEW].
 - **[REVIEW]** Beginner-friendly APIs never justify incorrect internal
   semantics. Simplicity comes from presets, defaults, validation, diagnostics,
   undo/recovery, and progressive disclosure. Standard physics names such as

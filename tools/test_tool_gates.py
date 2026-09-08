@@ -582,7 +582,35 @@ def test_dependency_pin_gate():
             tmp / "url_hashed",
             "FetchContent_Declare(dep URL https://example.invalid/d.zip\n"
             f"    URL_HASH SHA256={PIN_SHA}{PIN_SHA[:24]})\n"))]) == 0,
-              "pins: a URL download with URL_HASH passes")
+              "pins: a URL download with a literal SHA256 URL_HASH passes")
+        check(run([script, "--root", str(write_pin_fixture(
+            tmp / "url_sha1",
+            "FetchContent_Declare(dep URL https://example.invalid/d.zip\n"
+            f"    URL_HASH SHA1={PIN_SHA})\n"))]) == 0,
+              "pins: a literal SHA1 URL_HASH of SHA1's length passes")
+        # A hash the build can re-key from outside the commit is no pin:
+        # a variable, a generator expression, a digest of the wrong
+        # length, or an algorithm CMake does not know.
+        check(run([script, "--root", str(write_pin_fixture(
+            tmp / "url_variable",
+            "FetchContent_Declare(dep URL https://example.invalid/d.zip\n"
+            "    URL_HASH ${DEP_HASH})\n"))]) != 0,
+              "pins: a URL_HASH naming a variable fails")
+        check(run([script, "--root", str(write_pin_fixture(
+            tmp / "url_genex",
+            "FetchContent_Declare(dep URL https://example.invalid/d.zip\n"
+            "    URL_HASH SHA256=$<TARGET_PROPERTY:dep,HASH>)\n"))]) != 0,
+              "pins: a URL_HASH carrying a generator expression fails")
+        check(run([script, "--root", str(write_pin_fixture(
+            tmp / "url_short",
+            "FetchContent_Declare(dep URL https://example.invalid/d.zip\n"
+            f"    URL_HASH SHA256={PIN_SHA})\n"))]) != 0,
+              "pins: a SHA256 URL_HASH with a SHA1-length digest fails")
+        check(run([script, "--root", str(write_pin_fixture(
+            tmp / "url_algorithm",
+            "FetchContent_Declare(dep URL https://example.invalid/d.zip\n"
+            f"    URL_HASH CRC32={PIN_SHA[:8]})\n"))]) != 0,
+              "pins: a URL_HASH algorithm CMake does not accept fails")
         check(run([script, "--root", str(write_pin_fixture(
             tmp / "source_dir",
             "FetchContent_Declare(dep SOURCE_DIR ${CMAKE_SOURCE_DIR}/x)\n"
@@ -617,7 +645,31 @@ def test_dependency_pin_gate():
                 "        with:\n          fetch-depth: 0\n")))]) == 0,
               "pins: local, commented-out, and SHA-pinned actions pass")
 
-    # The real tree: green today, and the allowlist is load-bearing.
+        # Composite actions: a workflow that reaches a remote action
+        # through a local composite manifest runs it with the same
+        # privileges, so the manifest is audited like a workflow, however
+        # deep under .github/actions/ it sits.
+        def write_composite(root, reference):
+            write_pin_fixture(root, workflow_body=(
+                "    steps:\n      - uses: ./.github/actions/nested/setup\n"))
+            action = root / ".github" / "actions" / "nested" / "setup"
+            action.mkdir(parents=True, exist_ok=True)
+            (action / "action.yml").write_text(
+                "name: setup\nruns:\n  using: composite\n  steps:\n"
+                f"    - uses: {reference}\n", encoding="utf-8")
+            return root
+
+        check(run([script, "--root", str(write_composite(
+            tmp / "composite_tag", "actions/checkout@v6"))]) != 0,
+              "pins: a mutable tag inside a composite action fails")
+        check(run([script, "--root", str(write_composite(
+            tmp / "composite_sha", f"actions/checkout@{PIN_SHA} # v6"))]) == 0,
+              "pins: a SHA-pinned composite action step passes")
+
+    # The real tree: green today, and the allowlist is load-bearing in
+    # both directions: it is empty (every reference is pinned), so a
+    # mutable reference fails unless an entry excuses it, and an entry
+    # that excuses nothing fails.
     spec = importlib.util.spec_from_file_location(
         "check_dependency_pins", TOOLS / "check_dependency_pins.py")
     pins = importlib.util.module_from_spec(spec)
@@ -627,13 +679,9 @@ def test_dependency_pin_gate():
     sys.argv = ["check_dependency_pins.py"]
     try:
         check(pins.main() == 0,
-              "pins: this checkout passes with its tracked allowlist")
-
-        excused = "actions/checkout@v6"
-        reason = pins.KNOWN_UNPINNED_ACTIONS.pop(excused)
-        check(pins.main() != 0,
-              "pins: an unexcused mutable action tag fails the gate")
-        pins.KNOWN_UNPINNED_ACTIONS[excused] = reason
+              "pins: this checkout passes the gate")
+        check(not pins.KNOWN_UNPINNED_ACTIONS,
+              "pins: this checkout has no allowlisted mutable action tags")
 
         stale = "example/nothing@v0"
         pins.KNOWN_UNPINNED_ACTIONS[stale] = "stale fixture"
