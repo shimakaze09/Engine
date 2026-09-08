@@ -105,17 +105,22 @@ void ImGui_ImplBgfx_RenderDrawData(ImDrawData *drawData) {
   }
   const float width = drawData->DisplaySize.x;
   const float height = drawData->DisplaySize.y;
-  if ((width <= 0.0F) || (height <= 0.0F)) {
+  // DisplaySize is in logical points; the back buffer (and every scissor
+  // below) is in pixels, FramebufferScale apart on HiDPI displays.
+  const float fbWidth = width * drawData->FramebufferScale.x;
+  const float fbHeight = height * drawData->FramebufferScale.y;
+  if ((fbWidth <= 0.0F) || (fbHeight <= 0.0F)) {
     return;
   }
 
   bgfx::setViewName(kImGuiViewId, "editor-imgui");
   bgfx::setViewMode(kImGuiViewId, bgfx::ViewMode::Sequential);
   bgfx::setViewFrameBuffer(kImGuiViewId, BGFX_INVALID_HANDLE);
-  bgfx::setViewRect(kImGuiViewId, 0, 0, static_cast<std::uint16_t>(width),
-                    static_cast<std::uint16_t>(height));
+  bgfx::setViewRect(kImGuiViewId, 0, 0, static_cast<std::uint16_t>(fbWidth),
+                    static_cast<std::uint16_t>(fbHeight));
 
-  // Column-major ortho: x [L,R] -> [-1,1], y [T,B] -> [1,-1], z [0,1].
+  // Column-major ortho over logical points: x [L,R] -> [-1,1],
+  // y [T,B] -> [1,-1], z [0,1]; the view rect above supplies the scale.
   const float L = drawData->DisplayPos.x;
   const float R = drawData->DisplayPos.x + width;
   const float T = drawData->DisplayPos.y;
