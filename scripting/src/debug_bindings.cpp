@@ -463,7 +463,13 @@ void apply_debug_lua_hook(lua_State *state) noexcept {
 void refresh_debug_lua_hook() noexcept { apply_debug_lua_hook(g_hookState); }
 
 int run_bounded_debug_chunk(lua_State *state, const char *chunk) noexcept {
-  if ((state == nullptr) || (chunk == nullptr)) {
+  if (state == nullptr) {
+    return LUA_ERRRUN;
+  }
+  if (chunk == nullptr) {
+    // Same shape as every other failure: the caller pops exactly one
+    // value whatever the status, so the refusal is the error message.
+    lua_pushliteral(state, "invalid debugger evaluation");
     return LUA_ERRRUN;
   }
   // The thread is anchored by the slot lua_newthread pushes on `state`

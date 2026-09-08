@@ -46,7 +46,10 @@ void refill_debug_instruction_budget() noexcept;
 void apply_debug_lua_hook(lua_State *state) noexcept;
 /// Runs `chunk` (Lua source) as a debugger evaluation and leaves exactly
 /// one value on `state`'s stack: the chunk's first result on LUA_OK,
-/// otherwise the error message. The chunk runs on a fresh Lua thread that
+/// otherwise the error message (a null `chunk` included, so callers pop
+/// one value on every status). A null `state` is the one exception: it
+/// returns LUA_ERRRUN with no stack to push on. The chunk runs on a fresh
+/// Lua thread that
 /// carries only an instruction-budget hook, for two reasons: Lua never
 /// calls hooks on a thread that is already inside a hook (which is where a
 /// paused script's debugger evaluates), so a budget on the paused thread
