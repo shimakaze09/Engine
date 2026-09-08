@@ -61,6 +61,11 @@ struct BgfxTextureRecord final {
   std::int32_t width = 0;
   std::int32_t height = 0;
   std::int32_t layers = 1; // Tex2DArray layer count; 1 otherwise
+  /// Mip levels the texture holds (1 = base level only). An attachment
+  /// may address only [0, mipLevels); the descriptor's request is clamped
+  /// to the full chain the base extent admits, since bgfx allocates the
+  /// whole chain whenever more than one level is asked for.
+  std::int32_t mipLevels = 1;
   bool renderTarget = false;
   bool immutable = false; // created with pixels: bgfx rejects updates
 };

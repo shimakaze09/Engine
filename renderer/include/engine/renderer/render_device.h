@@ -245,6 +245,8 @@ enum class CubeFace : std::int8_t {
 
 /// One render-target attachment: a texture level, plus the cube face
 /// when the texture is a cubemap or the layer when it is a Tex2DArray.
+/// mipLevel addresses a level the texture holds ([0, its mip count));
+/// face is one of the six named faces for a cubemap and None otherwise.
 struct RenderTargetAttachment final {
   DeviceTextureHandle texture{};
   CubeFace face = CubeFace::None;
@@ -256,8 +258,11 @@ inline constexpr std::size_t kMaxColorAttachments = 4U;
 
 /// Creation parameters for a render target. Attachments are fixed for
 /// the target's lifetime; completeness is validated at creation and
-/// creation fails (invalid handle) when the combination is unsupported.
-/// Depth-only targets are valid (shadow maps).
+/// creation fails (invalid handle, counted as a dropped operation) when
+/// the combination is unsupported: an attachment outside its texture's
+/// mip or face range, or attachments whose addressed levels differ in
+/// extent, never reach the backend. Depth-only targets are valid
+/// (shadow maps).
 struct RenderTargetDesc final {
   std::size_t colorCount = 0U;
   RenderTargetAttachment colors[kMaxColorAttachments] = {};
