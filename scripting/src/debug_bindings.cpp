@@ -57,6 +57,38 @@ bool g_sandboxEnabled = true;
 int g_instructionLimit = kDefaultInstructionLimit;
 std::int64_t g_frameBudgetRemaining = kDefaultInstructionLimit;
 bool g_instructionBudgetExhausted = false;
+/// Instructions the current debugger evaluation may still spend. Separate
+/// from the frame budget: an evaluation is debugger work performed while
+/// the frame is paused, so it neither draws on nor is limited by what the
+/// paused frame has left.
+std::int64_t g_evaluationBudgetRemaining = 0;
+
+/// Instruction budget for one debugger evaluation: the configured sandbox
+/// limit, or the default limit when the sandbox limit is disabled, because
+/// a debugger evaluation is never a legitimate place for unbounded work.
+int evaluation_budget() noexcept {
+  return (g_instructionLimit > 0) ? g_instructionLimit
+                                  : kDefaultInstructionLimit;
+}
+
+/// Count hook of a debugger-evaluation thread: charges the evaluation
+/// budget and raises once it is spent. It is the only hook that thread
+/// carries, so nothing here can reach the breakpoint machinery.
+void evaluation_budget_hook(lua_State *thread, lua_Debug *ar) noexcept {
+  if ((thread == nullptr) || (ar == nullptr) || (ar->event != LUA_HOOKCOUNT)) {
+    return;
+  }
+  g_evaluationBudgetRemaining -= kInstructionQuantum;
+  if (g_evaluationBudgetRemaining <= 0) {
+    g_evaluationBudgetRemaining = 0;
+    // luaL_error formats through lua_pushfstring, whose directives are
+    // limited to %d for integers; the budget is an int for that reason.
+    luaL_error(thread,
+               "debugger evaluation exceeded its instruction budget (%d "
+               "instructions)",
+               evaluation_budget());
+  }
+}
 
 /// Records one profiler sample for the requested function name.
 void profiler_record_sample(const char *name) noexcept {
@@ -119,8 +151,6 @@ void debugger_capture_watch_values(lua_State *state) noexcept {
     return;
   }
 
-  lua_sethook(state, nullptr, 0, 0);
-
   std::size_t writeOffset = 0U;
   for (std::size_t i = 0U; i < g_watchCount; ++i) {
     const char *expr = g_watchExprs[i];
@@ -137,13 +167,12 @@ void debugger_capture_watch_values(lua_State *state) noexcept {
     chunk[kWatchPrefixLength + exprLength] = ')';
     chunk[kWatchPrefixLength + exprLength + 1U] = '\0';
 
-    const int loadStatus = luaL_loadstring(state, chunk);
-    if (loadStatus != LUA_OK) {
+    const int callStatus = run_bounded_debug_chunk(state, chunk);
+    if (callStatus == LUA_ERRSYNTAX) {
       lua_pop(state, 1);
       continue;
     }
 
-    const int callStatus = lua_pcall(state, 0, 1, 0);
     const char *value = "<error>";
     char valueBuffer[128] = {};
     if (callStatus == LUA_OK) {
@@ -178,8 +207,6 @@ void debugger_capture_watch_values(lua_State *state) noexcept {
       }
     }
   }
-
-  refresh_debug_lua_hook();
 }
 
 /// Handles the Lua debug/profiler/sandbox hook callback.
@@ -434,6 +461,33 @@ void apply_debug_lua_hook(lua_State *state) noexcept {
 }
 
 void refresh_debug_lua_hook() noexcept { apply_debug_lua_hook(g_hookState); }
+
+int run_bounded_debug_chunk(lua_State *state, const char *chunk) noexcept {
+  if (state == nullptr) {
+    return LUA_ERRRUN;
+  }
+  if (chunk == nullptr) {
+    // Same shape as every other failure: the caller pops exactly one
+    // value whatever the status, so the refusal is the error message.
+    lua_pushliteral(state, "invalid debugger evaluation");
+    return LUA_ERRRUN;
+  }
+  // The thread is anchored by the slot lua_newthread pushes on `state`
+  // for as long as the evaluation runs; once its one result has been
+  // moved across, that slot is dropped and the thread is collectable.
+  lua_State *thread = lua_newthread(state);
+  lua_sethook(thread, &evaluation_budget_hook, LUA_MASKCOUNT,
+              kInstructionQuantum);
+  g_evaluationBudgetRemaining = evaluation_budget();
+
+  int status = luaL_loadstring(thread, chunk);
+  if (status == LUA_OK) {
+    status = lua_pcall(thread, 0, 1, 0);
+  }
+  lua_xmove(thread, state, 1);
+  lua_remove(state, -2);
+  return status;
+}
 
 void arm_debug_lua_hook(lua_State *state) noexcept {
   apply_debug_lua_hook(state);

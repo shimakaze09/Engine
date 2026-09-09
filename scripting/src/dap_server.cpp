@@ -3,6 +3,7 @@
 // https://microsoft.github.io/debug-adapter-protocol/
 
 #include "dap_server_internal.h"
+#include "debug_bindings.h"
 
 #include "engine/scripting/scripting.h"
 
@@ -695,31 +696,27 @@ void handle_evaluate(int requestSeq, lua_State *L,
   const char *typeName = "nil";
 
   if (L != nullptr && expr[0] != '\0') {
-      char chunk[600]{};
+    char chunk[600]{};
     std::snprintf(chunk, sizeof(chunk), "return (%s)", expr);
 
-    // Disable hooks during eval to avoid re-entry.
-    lua_sethook(L, nullptr, 0, 0);
-
-    const int loadStatus = luaL_loadstring(L, chunk);
-    if (loadStatus == LUA_OK) {
-      const int callStatus = lua_pcall(L, 0, 1, 0);
-      if (callStatus == LUA_OK) {
-        format_lua_value(L, -1, resultBuf, sizeof(resultBuf));
-        typeName = luaL_typename(L, -1);
-        lua_pop(L, 1);
-      } else {
-        const char *err = lua_tostring(L, -1);
-        std::snprintf(resultBuf, sizeof(resultBuf), "<error: %s>",
-                      err != nullptr ? err : "?");
-        typeName = "error";
-        lua_pop(L, 1);
-      }
-    } else {
-      lua_pop(L, 1);
+    // The expression runs under its own instruction budget on a thread
+    // with no debugger hooks (see run_bounded_debug_chunk), so it can
+    // neither hold the paused main thread nor re-enter the breakpoint
+    // machinery; the paused thread's hooks stay as they are.
+    const int status = run_bounded_debug_chunk(L, chunk);
+    if (status == LUA_OK) {
+      format_lua_value(L, -1, resultBuf, sizeof(resultBuf));
+      typeName = luaL_typename(L, -1);
+    } else if (status == LUA_ERRSYNTAX) {
       std::snprintf(resultBuf, sizeof(resultBuf), "<parse error>");
       typeName = "error";
+    } else {
+      const char *err = lua_tostring(L, -1);
+      std::snprintf(resultBuf, sizeof(resultBuf), "<error: %s>",
+                    err != nullptr ? err : "?");
+      typeName = "error";
     }
+    lua_pop(L, 1);
   }
 
   core::JsonWriter w;

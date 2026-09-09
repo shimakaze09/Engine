@@ -44,6 +44,20 @@ void refill_debug_instruction_budget() noexcept;
 /// Applies the current hook configuration to an explicit Lua thread; hooks
 /// are per-thread in Lua 5.4, so coroutines must arm them before resuming.
 void apply_debug_lua_hook(lua_State *state) noexcept;
+/// Runs `chunk` (Lua source) as a debugger evaluation and leaves exactly
+/// one value on `state`'s stack: the chunk's first result on LUA_OK,
+/// otherwise the error message (a null `chunk` included, so callers pop
+/// one value on every status). A null `state` is the one exception: it
+/// returns LUA_ERRRUN with no stack to push on. The chunk runs on a fresh
+/// Lua thread that
+/// carries only an instruction-budget hook, for two reasons: Lua never
+/// calls hooks on a thread that is already inside a hook (which is where a
+/// paused script's debugger evaluates), so a budget on the paused thread
+/// could not fire; and a thread without the debugger's line/call hooks
+/// cannot re-enter the breakpoint machinery. A nonterminating expression
+/// therefore ends in a bounded error instead of holding the main thread,
+/// and the paused thread's own hooks are never touched.
+int run_bounded_debug_chunk(lua_State *state, const char *chunk) noexcept;
 /// Clears transient debugger/profiler state.
 void reset_debug_bindings() noexcept;
 
