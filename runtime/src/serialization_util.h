@@ -152,7 +152,7 @@ component_descriptor(const ReflectedComponentDescriptors &descs,
   return *descs.camera;
 }
 
-/// Looks up every reflected component descriptor/// Looks up every reflected component descriptor/// Looks up every reflected component descriptor; logs under `logChannel`
+/// Looks up every reflected component descriptor; logs under `logChannel`
 /// and fails when any registration is missing.
 bool find_reflected_component_descriptors(
     ReflectedComponentDescriptors *outDescs, const char *logChannel) noexcept;

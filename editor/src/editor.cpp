@@ -298,8 +298,7 @@ bool initialize_editor(void *sdlWindow) noexcept {
       "Detach debug free-fly camera from game camera"));
 
   // The bgfx ImGui backend owns its device objects; the platform
-  // window handle is all SDL needs (#296 dropped the dead GL-context
-  // parameter with the GL backend). A backend failure must release every
+  // window handle is all SDL needs. A backend failure must release every
   // resource acquired above — the console-capture sink included, whose
   // registered flag would otherwise survive the core logging restart that
   // follows a failed editor bootstrap and skip re-registration, silently
