@@ -845,6 +845,137 @@ def test_doc_policy_gate():
           "doc policy: this checkout passes the gate")
 
 
+def write_comment_fixture(root, rel, body):
+    """Plants one source file under a fixture tree and returns the root."""
+    path = root / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body, encoding="utf-8")
+    return root
+
+
+def test_comment_quality_gate():
+    """The comment gate (issue #360) must flag each standard class, honor
+    the sanctioned markers and the tests/ exemptions, keep the filler
+    classes at zero tolerance, hold an allowlist to exact counts in both
+    directions, and pass this checkout."""
+    script = str(TOOLS / "check_comment_quality.py")
+    header = "// Purpose comment.\n"
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+
+        def case(name, rel, body):
+            return str(write_comment_fixture(tmp / name, rel, header + body))
+
+        check(run([script, "--root", case(
+            "clean", "core/src/a.cpp",
+            "// The registry exists for the process lifetime.\nint a;\n")]) == 0,
+              "comments: a standard-conforming comment passes")
+        check(run([script, "--root", case(
+            "issue", "core/src/a.cpp",
+            "// Rebuilt for the #301 shadow arrays.\nint a;\n")]) != 0,
+              "comments: an issue number outside a marker is a finding")
+        check(run([script, "--root", case(
+            "audit", "core/src/a.cpp",
+            "// Clamped on ingress (audit H-06).\nint a;\n")]) != 0,
+              "comments: an audit finding code is a finding")
+        check(run([script, "--root", case(
+            "todo_marker", "core/src/a.cpp",
+            "// TODO(#184): Remove the compatibility path.\nint a;\n")]) == 0,
+              "comments: TODO(#n) may cite its issue")
+        check(run([script, "--root", case(
+            "fixme_marker", "core/src/a.cpp",
+            "// FIXME(#231): Overflows past 32767 cells.\nint a;\n")]) == 0,
+              "comments: FIXME(#n) may cite its issue")
+        check(run([script, "--root", case(
+            "regression", "core/src/a.cpp",
+            "// Regression test for #417: deferred destroy skipped a slot.\n"
+            "int a;\n")]) == 0,
+              "comments: regression provenance may cite its issue")
+        check(run([script, "--root", case(
+            "tests_exempt", "tests/unit/a_test.cpp",
+            "// Pins the #301 unit map (formerly sampled out of bounds).\n"
+            "int a;\n")]) == 0,
+              "comments: tests/ is exempt from history and temporal classes")
+        check(run([script, "--root", case(
+            "temporal", "core/src/a.cpp",
+            "// Formerly a std::map; the array is faster here.\nint a;\n")]) != 0,
+              "comments: temporal language is a finding")
+        check(run([script, "--root", case(
+            "date", "core/src/a.cpp",
+            "// Flipped 2026-08-22 at parity.\nint a;\n")]) != 0,
+              "comments: a calendar date in a comment is a finding")
+        check(run([script, "--root", case(
+            "code", "core/src/a.cpp",
+            "// oldRenderer.Draw(mesh);\nint a;\n")]) != 0,
+              "comments: a commented-out call statement is a finding")
+        check(run([script, "--root", case(
+            "block_code", "core/src/a.cpp",
+            "/* legacy notes */\n// if (x) {\nint a;\n")]) != 0,
+              "comments: commented-out control flow is a finding")
+        check(run([script, "--root", case(
+            "prose_call", "core/src/a.cpp",
+            "// Calls reset() once per frame so the pool never grows.\n"
+            "int a;\n")]) == 0,
+              "comments: prose mentioning a call is not code")
+        check(run([script, "--root", case(
+            "vague", "core/src/a.cpp", "// TODO: fix this.\nint a;\n")]) != 0,
+              "comments: a TODO without an issue is a finding")
+        check(run([script, "--root", case(
+            "developer", "core/src/a.cpp",
+            "// I think this prevents a race.\nint a;\n")]) != 0,
+              "comments: uncertain first-person wording is a finding")
+        check(run([script, "--root", case(
+            "filler", "core/src/a.h",
+            "/// Handles frobnication.\nvoid frobnicate();\n")]) != 0,
+              "comments: the filler classes still fail")
+        check(run([script, "--root", str(write_comment_fixture(
+            tmp / "cmake_code", "CMakeLists.txt",
+            "# Build options.\n# set(ENGINE_OLD ON)\nproject(x)\n"))]) != 0,
+              "comments: a commented-out CMake command is a finding")
+        check(run([script, "--root", str(write_comment_fixture(
+            tmp / "cmake_issue", "cmake/A.cmake",
+            "# Pinned per #352.\nset(A 1)\n"))]) != 0,
+              "comments: CMake comments are held to the history class")
+        check(run([script, "--root", str(tmp / "empty")]) == 0,
+              "comments: an empty tree passes")
+
+        # Allowlist: exact counts in both directions.
+        listed = write_comment_fixture(
+            tmp / "listed", "core/src/a.cpp",
+            header + "// Rebuilt for #301.\n// See #302 as well.\nint a;\n")
+        exact = tmp / "exact.txt"
+        exact.write_text("core/src/a.cpp\thistory-reference\t2\n",
+                         encoding="utf-8")
+        check(run([script, "--root", str(listed), "--allowlist",
+                   str(exact)]) == 0,
+              "comments: an exact allowlist entry excuses its findings")
+        low = tmp / "low.txt"
+        low.write_text("core/src/a.cpp\thistory-reference\t1\n",
+                       encoding="utf-8")
+        check(run([script, "--root", str(listed), "--allowlist",
+                   str(low)]) != 0,
+              "comments: findings above the allowlisted count fail")
+        high = tmp / "high.txt"
+        high.write_text("core/src/a.cpp\thistory-reference\t3\n",
+                        encoding="utf-8")
+        code, output = run_captured([script, "--root", str(listed),
+                                     "--allowlist", str(high)])
+        check(code != 0 and "stale allowlist entry" in output,
+              "comments: an allowlist entry the file no longer fills is "
+              "itself a finding")
+        filler_listed = write_comment_fixture(
+            tmp / "filler_listed", "core/src/a.h",
+            header + "/// Handles frobnication.\nvoid frobnicate();\n")
+        bogus = tmp / "bogus.txt"
+        bogus.write_text("core/src/a.h\ttautology\t1\n", encoding="utf-8")
+        check(run([script, "--root", str(filler_listed), "--allowlist",
+                   str(bogus)]) != 0,
+              "comments: filler classes cannot be allowlisted")
+
+    check(run([script]) == 0, "comments: this checkout passes the gate")
+
+
 def main():
     test_coverage_gate()
     test_perf_gate_evaluate()
@@ -854,6 +985,7 @@ def main():
     test_dependency_pin_gate()
     test_test_timing_gate()
     test_doc_policy_gate()
+    test_comment_quality_gate()
     if failures:
         print(f"\nFAILED ({len(failures)} failure(s))")
         return 1
