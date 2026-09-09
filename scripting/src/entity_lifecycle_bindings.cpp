@@ -44,16 +44,6 @@ int lua_engine_log(lua_State *state) noexcept {
   return 0;
 }
 
-int lua_engine_get_entity_count(lua_State *state) noexcept {
-  const std::size_t count = (runtime_binding().world != nullptr &&
-                             runtime_binding().services != nullptr)
-                                ? runtime_binding().services->get_entity_count(
-                                      runtime_binding().world)
-                                : 0U;
-  lua_pushinteger(state, static_cast<lua_Integer>(count));
-  return 1;
-}
-
 int lua_engine_spawn_entity(lua_State *state) noexcept {
   if ((runtime_binding().world == nullptr) ||
       (runtime_binding().services == nullptr) || !can_apply_mutations_now()) {
@@ -91,21 +81,6 @@ int lua_engine_destroy_entity(lua_State *state) noexcept {
   return 1;
 }
 
-int lua_engine_is_alive(lua_State *state) noexcept {
-  if (runtime_binding().world == nullptr) {
-    lua_pushboolean(state, 0);
-    return 1;
-  }
-
-  runtime::Entity entity{};
-  if (!decode_lua_entity_handle(state, 1, &entity)) {
-    lua_pushboolean(state, 0);
-    return 1;
-  }
-
-  lua_pushboolean(state, runtime_binding().world->is_alive(entity) ? 1 : 0);
-  return 1;
-}
 
 int lua_engine_set_name(lua_State *state) noexcept {
   runtime::Entity entity{};
@@ -211,14 +186,10 @@ int lua_engine_clone_entity(lua_State *state) noexcept {
 void register_entity_lifecycle_bindings(lua_State *state) noexcept {
   lua_pushcfunction(state, &lua_engine_log);
   lua_setfield(state, -2, "log");
-  lua_pushcfunction(state, &lua_engine_get_entity_count);
-  lua_setfield(state, -2, "get_entity_count");
   lua_pushcfunction(state, &lua_engine_spawn_entity);
   lua_setfield(state, -2, "spawn_entity");
   lua_pushcfunction(state, &lua_engine_destroy_entity);
   lua_setfield(state, -2, "destroy_entity");
-  lua_pushcfunction(state, &lua_engine_is_alive);
-  lua_setfield(state, -2, "is_alive");
   lua_pushcfunction(state, &lua_engine_set_name);
   lua_setfield(state, -2, "set_name");
   lua_pushcfunction(state, &lua_engine_get_name);

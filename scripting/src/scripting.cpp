@@ -134,21 +134,6 @@ int global_call_trampoline(lua_State *state) noexcept {
   return 0;
 }
 
-int lua_engine_delta_time(lua_State *state) noexcept {
-  lua_pushnumber(state, static_cast<lua_Number>(g_deltaSeconds));
-  return 1;
-}
-
-int lua_engine_elapsed_time(lua_State *state) noexcept {
-  lua_pushnumber(state, static_cast<lua_Number>(g_totalSeconds));
-  return 1;
-}
-
-int lua_engine_frame_count(lua_State *state) noexcept {
-  lua_pushinteger(state, static_cast<lua_Integer>(g_frameIndex));
-  return 1;
-}
-
 int lua_engine_start_coroutine(lua_State *state) noexcept {
   return start_lua_coroutine(state, g_totalSeconds, g_frameIndex,
                              log_lua_error, arm_debug_lua_hook);
@@ -156,9 +141,9 @@ int lua_engine_start_coroutine(lua_State *state) noexcept {
 
 // --- Entity lifecycle completeness ---
 
-/// Registers the full Lua API on one global engine table; generated
-/// bindings are registered last and override a curated subset of the
-/// manual wrappers.
+/// Registers the full Lua API on one global engine table: the manual
+/// wrappers first, then the generated bindings; the two sets are disjoint
+/// (#473), so registration order carries no override semantics.
 void register_engine_bindings(lua_State *state) noexcept {
   lua_newtable(state);
 
@@ -166,12 +151,6 @@ void register_engine_bindings(lua_State *state) noexcept {
   register_body_bindings(state);
   register_mesh_material_bindings(state);
   register_physics_bindings(state);
-
-  lua_pushcfunction(state, &lua_engine_delta_time);
-  lua_setfield(state, -2, "delta_time");
-
-  lua_pushcfunction(state, &lua_engine_elapsed_time);
-  lua_setfield(state, -2, "elapsed_time");
 
   register_input_bindings(state);
 
@@ -182,14 +161,6 @@ void register_engine_bindings(lua_State *state) noexcept {
   lua_pushcfunction(state, &lua_engine_set_touch_mouse_emulation);
   lua_setfield(state, -2, "set_touch_mouse_emulation");
 
-  lua_pushcfunction(state, &lua_engine_set_game_mode);
-  lua_setfield(state, -2, "set_game_mode");
-  lua_pushcfunction(state, &lua_engine_get_game_mode);
-  lua_setfield(state, -2, "get_game_mode");
-  lua_pushcfunction(state, &lua_engine_set_game_state);
-  lua_setfield(state, -2, "set_game_state");
-  lua_pushcfunction(state, &lua_engine_get_game_state);
-  lua_setfield(state, -2, "get_game_state");
   lua_pushcfunction(state, &lua_engine_set_player_controller);
   lua_setfield(state, -2, "set_player_controller");
   lua_pushcfunction(state, &lua_engine_get_player_controller);
@@ -223,7 +194,6 @@ void register_engine_bindings(lua_State *state) noexcept {
   lua_pushcfunction(state, &lua_engine_game_state_clear);
   lua_setfield(state, -2, "game_state_clear");
 
-  register_cheat_status_bindings(state);
 
   lua_pushcfunction(state, &lua_engine_profiler_enable);
   lua_setfield(state, -2, "profiler_enable");
@@ -250,9 +220,6 @@ void register_engine_bindings(lua_State *state) noexcept {
   lua_setfield(state, -2, "debugger_last_watch_values");
 
   register_camera_bindings(state);
-
-  lua_pushcfunction(state, &lua_engine_frame_count);
-  lua_setfield(state, -2, "frame_count");
 
   register_audio_bindings(state);
 

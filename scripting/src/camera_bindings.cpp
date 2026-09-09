@@ -63,15 +63,6 @@ int lua_engine_set_camera_up(lua_State *state) noexcept {
   return 0;
 }
 
-int lua_engine_set_camera_fov(lua_State *state) noexcept {
-  if (!lua_isnumber(state, 1) || (runtime_binding().services == nullptr) ||
-      (runtime_binding().services->set_camera_fov == nullptr)) {
-    return 0;
-  }
-  runtime_binding().services->set_camera_fov(static_cast<float>(lua_tonumber(state, 1)));
-  return 0;
-}
-
 // -- Camera Manager Lua bindings ------------------------------------------
 
 // Engine.push_camera(entityIndex, posX,posY,posZ, tgtX,tgtY,tgtZ, priority
@@ -407,8 +398,6 @@ void register_camera_bindings(lua_State *state) noexcept {
   lua_setfield(state, -2, "set_camera_target");
   lua_pushcfunction(state, &lua_engine_set_camera_up);
   lua_setfield(state, -2, "set_camera_up");
-  lua_pushcfunction(state, &lua_engine_set_camera_fov);
-  lua_setfield(state, -2, "set_camera_fov");
   lua_pushcfunction(state, &lua_engine_push_camera);
   lua_setfield(state, -2, "push_camera");
   lua_pushcfunction(state, &lua_engine_pop_camera);
