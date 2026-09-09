@@ -17,6 +17,7 @@
 #include "engine/physics/collider.h"
 #include "engine/physics/convex_hull.h"
 #include "engine/physics/physics.h"
+#include "engine/physics/physics_material.h"
 #include "contact_clip.h"
 #include "contact_resolution.h"
 #include "physics_internal.h"
@@ -861,12 +862,8 @@ void narrow_phase_sphere_sphere(const PairContext &pair) noexcept {
   const engine::math::Vec3 contactNormal(nx, ny, nz);
   const engine::math::Vec3 contactPt = engine::math::mul(
       engine::math::add(mutableA->position, mutableB->position), 0.5F);
-  const float combinedRest =
-      std::max(pair.colliderA.restitution, pair.colliderB.restitution);
-  const float combinedStaticFric =
-      std::sqrt(pair.colliderA.staticFriction * pair.colliderB.staticFriction);
-  const float combinedDynFric = std::sqrt(pair.colliderA.dynamicFriction *
-                                          pair.colliderB.dynamicFriction);
+  const auto [combinedRest, combinedStaticFric, combinedDynFric] =
+      combine_contact_materials(pair.colliderA, pair.colliderB);
   const float appliedImpulse = apply_velocity_impulse(
       pair.bodyA, pair.bodyB, contactNormal, pair.invMassA, pair.invMassB,
       pair.invMassSum, engine::math::sub(contactPt, mutableA->position),
@@ -986,12 +983,8 @@ void narrow_phase_aabb_sphere(const PairContext &pair) noexcept {
 
   const engine::math::Vec3 aabbSphNormal(nx, ny, nz);
   const engine::math::Vec3 closestPt(cpx, cpy, cpz);
-  const float combinedRest =
-      std::max(pair.colliderA.restitution, pair.colliderB.restitution);
-  const float combinedStaticFric =
-      std::sqrt(pair.colliderA.staticFriction * pair.colliderB.staticFriction);
-  const float combinedDynFric = std::sqrt(pair.colliderA.dynamicFriction *
-                                          pair.colliderB.dynamicFriction);
+  const auto [combinedRest, combinedStaticFric, combinedDynFric] =
+      combine_contact_materials(pair.colliderA, pair.colliderB);
   const float appliedImpulse = apply_velocity_impulse(
       pair.bodyA, pair.bodyB, aabbSphNormal, pair.invMassA, pair.invMassB,
       pair.invMassSum, engine::math::sub(closestPt, mutableA->position),
@@ -1104,12 +1097,8 @@ void narrow_phase_aabb_aabb(const PairContext &pair) noexcept {
 
   const engine::math::Vec3 midPt = engine::math::mul(
       engine::math::add(mutableA->position, mutableB->position), 0.5F);
-  const float combinedRest =
-      std::max(colliderA.restitution, colliderB.restitution);
-  const float combinedStaticFric =
-      std::sqrt(colliderA.staticFriction * colliderB.staticFriction);
-  const float combinedDynFric =
-      std::sqrt(colliderA.dynamicFriction * colliderB.dynamicFriction);
+  const auto [combinedRest, combinedStaticFric, combinedDynFric] =
+      combine_contact_materials(colliderA, colliderB);
   const float appliedImpulse = apply_velocity_impulse(
       pair.bodyA, pair.bodyB, aabbNormal, pair.invMassA, pair.invMassB,
       pair.invMassSum, engine::math::sub(midPt, mutableA->position),

@@ -1,30 +1,41 @@
-// Declares physics material types and APIs for the Engine physics system.
+// Declares the contact-pair material combine rule every physics response
+// path shares (#475): friction is the geometric mean of the two surface
+// coefficients, restitution the larger of the two.
 
 #pragma once
 
+#include <algorithm>
 #include <cmath>
+
+#include "engine/math/component_types.h"
 
 namespace engine::physics {
 
-/// Surface response: static/dynamic friction, restitution, density.
-struct PhysicsMaterial final {
-  float staticFriction = 0.5F;
-  float dynamicFriction = 0.3F;
-  float restitution = 0.3F;
-  float density = 1.0F;
+/// Surface response of one contact pair, derived from both colliders.
+struct ContactMaterial final {
+  float restitution;
+  float staticFriction;
+  float dynamicFriction;
 };
 
-// Combine two materials at contact time: friction = sqrt(a * b),
-// restitution = max(a, b); density is zeroed (not meaningful for a pair).
-inline PhysicsMaterial combine_materials(const PhysicsMaterial &a,
-                                         const PhysicsMaterial &b) noexcept {
-  PhysicsMaterial result;
-  result.staticFriction = std::sqrt(a.staticFriction * b.staticFriction);
-  result.dynamicFriction = std::sqrt(a.dynamicFriction * b.dynamicFriction);
-  result.restitution =
-      (a.restitution > b.restitution) ? a.restitution : b.restitution;
-  result.density = 0.0F;
-  return result;
+/// Pair restitution: the bouncier surface wins.
+inline float combine_restitution(float a, float b) noexcept {
+  return std::max(a, b);
+}
+
+/// Pair friction: geometric mean of the two surface coefficients.
+inline float combine_friction(float a, float b) noexcept {
+  return std::sqrt(a * b);
+}
+
+/// Combines two colliders' surface parameters for their contact.
+inline ContactMaterial
+combine_contact_materials(const math::Collider &a,
+                          const math::Collider &b) noexcept {
+  return ContactMaterial{
+      combine_restitution(a.restitution, b.restitution),
+      combine_friction(a.staticFriction, b.staticFriction),
+      combine_friction(a.dynamicFriction, b.dynamicFriction)};
 }
 
 } // namespace engine::physics
