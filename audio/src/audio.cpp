@@ -97,10 +97,11 @@ AudioState g_audio{};
 
 // Input budgets, cvar-configurable and enforced before the bytes they
 // bound exist in memory: a sound file is read whole and every decoder
-// over it parses untrusted bytes, so the bytes read are capped from the
-// file's metadata, and the PCM a header claims is capped from the
-// decoder's reported length before the first frame decodes. Streamed
-// music never sits in memory whole, so it carries only a file cap.
+// over it parses untrusted bytes, so the bytes read are capped by the
+// bounded VFS read on the handle it consumes, and the PCM a header claims
+// is capped from the decoder's reported length before the first frame
+// decodes. Streamed music never sits in memory whole, so it carries only
+// a file cap, checked from metadata before the stream opens.
 constexpr int kDefaultMaxSoundFileBytes = 32 * 1024 * 1024;
 constexpr int kDefaultMaxMusicFileBytes = 512 * 1024 * 1024;
 constexpr int kDefaultMaxDecodedPcmBytes = 256 * 1024 * 1024;
@@ -142,7 +143,10 @@ std::uint64_t budget_bytes(const char *cvarName, int fallback) noexcept {
 
 /// Refuses a file larger than the named budget before any of it is read;
 /// the size comes from file metadata, so an oversized input costs no
-/// allocation. A missing or unreadable file is refused here as well.
+/// allocation. A missing or unreadable file is refused here as well. The
+/// streamed-music path uses this: its bytes are read by miniaudio's own
+/// file stream, never allocated whole, so metadata is the only bound
+/// available before the stream opens.
 bool file_within_budget(const char *virtualPath, const char *cvarName,
                         int fallback) noexcept {
   std::uint64_t fileBytes = 0U;
@@ -502,14 +506,32 @@ SoundHandle load_sound(const char *virtualPath) noexcept {
     return kInvalidSound;
   }
 
-  if (!file_within_budget(virtualPath, kMaxSoundFileBytesCvar,
-                          kDefaultMaxSoundFileBytes)) {
-    return kInvalidSound;
-  }
-
+  // The file cap is enforced by the read itself, on the size of the handle
+  // it consumes, so a file replaced or grown after a metadata check can
+  // never allocate past the budget.
   void *fileData = nullptr;
   std::size_t fileSize = 0U;
-  if (!core::vfs_read_binary(virtualPath, &fileData, &fileSize)) {
+  const std::uint64_t fileLimit =
+      budget_bytes(kMaxSoundFileBytesCvar, kDefaultMaxSoundFileBytes);
+  switch (core::vfs_read_binary_bounded(virtualPath, fileLimit, &fileData,
+                                        &fileSize)) {
+  case core::VfsReadStatus::Ok:
+    break;
+  case core::VfsReadStatus::TooLarge: {
+    char reason[192] = {};
+    std::snprintf(reason, sizeof(reason),
+                  "file of %llu bytes exceeds %s (%llu)",
+                  static_cast<unsigned long long>(fileSize),
+                  kMaxSoundFileBytesCvar,
+                  static_cast<unsigned long long>(fileLimit));
+    log_path_error(virtualPath, reason);
+    return kInvalidSound;
+  }
+  case core::VfsReadStatus::Unresolved:
+    log_path_error(virtualPath, "sound file not found or unreadable");
+    return kInvalidSound;
+  case core::VfsReadStatus::IoError:
+  default:
     log_path_error(virtualPath, "failed to read sound file via VFS");
     return kInvalidSound;
   }

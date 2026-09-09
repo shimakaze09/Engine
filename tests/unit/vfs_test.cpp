@@ -213,6 +213,58 @@ bool test_file_size() noexcept {
   return ok;
 }
 
+/// vfs_read_binary_bounded reads a file at or under the bound, refuses one
+/// over it with the measured size and no buffer, admits an empty file
+/// under a zero bound, and reports an unresolvable path distinctly.
+bool test_read_binary_bounded() noexcept {
+  if (!initialize_vfs()) {
+    return false;
+  }
+  if (!mount("root", ".")) {
+    shutdown_vfs();
+    return false;
+  }
+
+  const char *data = "12345";
+  bool ok = vfs_write_binary("root/_vfs_bounded_test.dat", data, 5U) &&
+            vfs_write_binary("root/_vfs_bounded_empty.dat", data, 0U);
+
+  void *buffer = nullptr;
+  std::size_t size = 99U;
+  ok = ok && (vfs_read_binary_bounded("root/_vfs_bounded_test.dat", 4U,
+                                      &buffer, &size) == VfsReadStatus::TooLarge);
+  ok = ok && (buffer == nullptr) && (size == 5U);
+
+  size = 99U;
+  ok = ok && (vfs_read_binary_bounded("root/_vfs_bounded_test.dat", 5U,
+                                      &buffer, &size) == VfsReadStatus::Ok);
+  ok = ok && (buffer != nullptr) && (size == 5U) &&
+       (std::memcmp(buffer, data, 5U) == 0);
+  vfs_free(buffer);
+  buffer = nullptr;
+
+  ok = ok && (vfs_read_binary_bounded("root/_vfs_bounded_empty.dat", 0U,
+                                      &buffer, &size) == VfsReadStatus::Ok);
+  ok = ok && (size == 0U);
+  vfs_free(buffer);
+  buffer = nullptr;
+
+  ok = ok && (vfs_read_binary_bounded("root/_vfs_bounded_missing.dat", 5U,
+                                      &buffer, &size) ==
+              VfsReadStatus::Unresolved);
+  ok = ok && (vfs_read_binary_bounded("unmounted/_vfs_bounded_test.dat", 5U,
+                                      &buffer, &size) ==
+              VfsReadStatus::Unresolved);
+  ok = ok && (vfs_read_binary_bounded("root/_vfs_bounded_test.dat", 5U,
+                                      nullptr, &size) == VfsReadStatus::IoError);
+  ok = ok && (buffer == nullptr);
+
+  std::remove("_vfs_bounded_test.dat");
+  std::remove("_vfs_bounded_empty.dat");
+  shutdown_vfs();
+  return ok;
+}
+
 bool test_mtime() noexcept {
   if (!initialize_vfs()) {
     return false;
@@ -532,6 +584,9 @@ int main() {
   }
   if (!test_mtime_subsecond()) {
     return 12;
+  }
+  if (!test_read_binary_bounded()) {
+    return 13;
   }
   return 0;
 }
