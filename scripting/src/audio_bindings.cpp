@@ -100,25 +100,6 @@ int lua_engine_stop_sound(lua_State *state) noexcept {
   return 0;
 }
 
-int lua_engine_stop_all_sounds(lua_State *state) noexcept {
-  static_cast<void>(state);
-  if ((runtime_binding().services != nullptr) && (runtime_binding().services->stop_all_sounds != nullptr)) {
-    runtime_binding().services->stop_all_sounds();
-  }
-  return 0;
-}
-
-int lua_engine_set_master_volume(lua_State *state) noexcept {
-  if (!lua_isnumber(state, 1)) {
-    return 0;
-  }
-  if ((runtime_binding().services != nullptr) && (runtime_binding().services->set_master_volume != nullptr)) {
-    const auto vol = static_cast<float>(lua_tonumber(state, 1));
-    runtime_binding().services->set_master_volume(vol);
-  }
-  return 0;
-}
-
 // engine.play_sound_at(sound, x, y, z [, volume]) → bool
 // Spatialized fire-and-forget one-shot on the sfx bus.
 int lua_engine_play_sound_at(lua_State *state) noexcept {
@@ -215,10 +196,6 @@ void register_audio_bindings(lua_State *state) noexcept {
   lua_setfield(state, -2, "play_sound");
   lua_pushcfunction(state, &lua_engine_stop_sound);
   lua_setfield(state, -2, "stop_sound");
-  lua_pushcfunction(state, &lua_engine_stop_all_sounds);
-  lua_setfield(state, -2, "stop_all_sounds");
-  lua_pushcfunction(state, &lua_engine_set_master_volume);
-  lua_setfield(state, -2, "set_master_volume");
   lua_pushcfunction(state, &lua_engine_play_sound_at);
   lua_setfield(state, -2, "play_sound_at");
   lua_pushcfunction(state, &lua_engine_set_bus_volume);

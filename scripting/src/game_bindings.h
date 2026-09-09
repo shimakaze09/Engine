@@ -10,14 +10,6 @@ struct lua_State;
 
 namespace engine::scripting {
 
-/// Lua binding: Lua engine.set_game_mode(name).
-int lua_engine_set_game_mode(lua_State *state) noexcept;
-/// Lua binding: Lua engine.get_game_mode().
-int lua_engine_get_game_mode(lua_State *state) noexcept;
-/// Lua binding: Lua engine.set_game_state(name).
-int lua_engine_set_game_state(lua_State *state) noexcept;
-/// Lua binding: Lua engine.get_game_state().
-int lua_engine_get_game_state(lua_State *state) noexcept;
 /// Lua binding: Lua engine.game_mode_start().
 int lua_engine_game_mode_start(lua_State *state) noexcept;
 /// Lua binding: Lua engine.game_mode_pause().
