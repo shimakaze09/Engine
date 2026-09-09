@@ -37,6 +37,7 @@
 #pragma GCC diagnostic pop
 #endif
 
+#include <algorithm>
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>
@@ -464,6 +465,21 @@ DeviceTextureHandle bgfx_create_texture(const TextureDesc &desc) noexcept {
   // mipLevels 0 asks for a runtime-generated chain, which bgfx cannot
   // do; the chain is allocated and generation moves to the cook.
   const bool hasMips = (desc.mipLevels != 1);
+  {
+    // bgfx allocates the whole chain down to 1x1 whenever mips are
+    // requested; the record keeps the count the caller may address, so
+    // an attachment past the last level is refused here rather than by
+    // the backend.
+    std::int32_t fullChain = 1;
+    for (std::int32_t extent = std::max(record.width, record.height);
+         extent > 1; extent /= 2) {
+      ++fullChain;
+    }
+    record.mipLevels =
+        hasMips ? ((desc.mipLevels == 0) ? fullChain
+                                         : std::min(desc.mipLevels, fullChain))
+                : 1;
+  }
   if (desc.mipLevels == 0) {
     static bool logged = false;
     if (!logged) {
@@ -807,6 +823,9 @@ bgfx_create_render_target(const RenderTargetDesc &desc) noexcept {
   bgfx::Attachment attachments[kMaxColorAttachments + 1U] = {};
   std::uint8_t count = 0U;
   BgfxTargetRecord record{};
+  // Every attachment renders at one extent; the first one fixes it.
+  std::int32_t targetWidth = 0;
+  std::int32_t targetHeight = 0;
 
   const auto append = [&](const RenderTargetAttachment &attachment,
                           const char *what) noexcept -> bool {
@@ -818,6 +837,31 @@ bgfx_create_render_target(const RenderTargetDesc &desc) noexcept {
     }
     const bool wantsFace = (texture->kind == TextureKind::Cube);
     if (wantsFace == (attachment.face == CubeFace::None)) {
+      drop_operation(what);
+      return false;
+    }
+    // The face selector is narrowed into bgfx's layer slot below, so a
+    // value cast from outside the enumeration must stop here.
+    if (wantsFace && ((static_cast<std::int32_t>(attachment.face) < 0) ||
+                      (static_cast<std::int32_t>(attachment.face) > 5))) {
+      drop_operation(what);
+      return false;
+    }
+    // Only a level the texture holds can be a target; the record's count
+    // is the clamped allocation, so this is the backend's real bound.
+    if ((attachment.mipLevel < 0) ||
+        (attachment.mipLevel >= texture->mipLevels)) {
+      drop_operation(what);
+      return false;
+    }
+    const std::int32_t width =
+        std::max(1, texture->width >> attachment.mipLevel);
+    const std::int32_t height =
+        std::max(1, texture->height >> attachment.mipLevel);
+    if (count == 0U) {
+      targetWidth = width;
+      targetHeight = height;
+    } else if ((width != targetWidth) || (height != targetHeight)) {
       drop_operation(what);
       return false;
     }

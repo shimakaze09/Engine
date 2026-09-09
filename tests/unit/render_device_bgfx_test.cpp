@@ -1,7 +1,8 @@
 // Verifies the bgfx render device backend (#138 Phases B/C) on the Noop
 // renderer: initialization/shutdown/re-initialization lifecycle, honest
 // capability flags, buffer/texture/geometry/render-target creation with
-// stale-handle and dropped-operation behavior, the program-less draw
+// stale-handle and dropped-operation behavior, attachment mip/face/extent
+// bounds, the program-less draw
 // contract, cooked-binary program linking with parameter/sampler
 // resolution (when the build cooked the proving shaders), and the pure
 // engine-to-bgfx translation (state bits, formats, sampler flags,
@@ -378,6 +379,99 @@ void test_texture_arrays(TestContext &t) {
   }
   dev->destroy_texture(plainDepth);
   dev->destroy_texture(array);
+  render_device_bgfx_frame();
+}
+
+/// Attachment bounds (regression test for #456): a mip level the texture
+/// does not hold (negative, past the single level, past an explicit
+/// chain) and a cube face cast from outside the enumeration are refused
+/// at the engine boundary as dropped operations, while the last level of
+/// an explicit chain and every named face attach; attachments whose
+/// addressed levels differ in extent are refused, and a mip whose extent
+/// matches a smaller sibling composes. The Noop renderer never sees the
+/// refused descriptors, so each refusal is observable only as the
+/// invalid handle plus the drop count.
+void test_attachment_bounds(TestContext &t) {
+  const RenderDevice *dev = render_device();
+
+  TextureDesc flatDesc{};
+  flatDesc.format = TextureFormat::RGBA8;
+  flatDesc.width = 8;
+  flatDesc.height = 8;
+  const DeviceTextureHandle flat = dev->create_texture(flatDesc);
+  TextureDesc chainDesc = flatDesc;
+  chainDesc.mipLevels = 3; // 8x8, 4x4, 2x2
+  const DeviceTextureHandle chain = dev->create_texture(chainDesc);
+  TextureDesc cubeDesc{};
+  cubeDesc.kind = TextureKind::Cube;
+  cubeDesc.format = TextureFormat::RGBA8;
+  cubeDesc.width = 8;
+  const DeviceTextureHandle cube = dev->create_texture(cubeDesc);
+  TextureDesc smallDepthDesc{};
+  smallDepthDesc.format = TextureFormat::Depth24;
+  smallDepthDesc.width = 4;
+  smallDepthDesc.height = 4;
+  const DeviceTextureHandle smallDepth = dev->create_texture(smallDepthDesc);
+  t.check((flat.value != 0U) && (chain.value != 0U) && (cube.value != 0U) &&
+              (smallDepth.value != 0U),
+          "bounds fixtures created empty");
+
+  const auto refused = [&](const RenderTargetDesc &desc) noexcept -> bool {
+    const std::uint64_t before = dropped(dev);
+    const RenderTargetHandle target = dev->create_render_target(desc);
+    return (target.value == 0U) && (dropped(dev) == before + 1U);
+  };
+  const auto accepted = [&](const RenderTargetDesc &desc) noexcept -> bool {
+    const std::uint64_t before = dropped(dev);
+    const RenderTargetHandle target = dev->create_render_target(desc);
+    const bool ok = (target.value != 0U) && (dropped(dev) == before);
+    dev->destroy_render_target(target);
+    return ok;
+  };
+
+  RenderTargetDesc desc{};
+  desc.colorCount = 1U;
+  desc.colors[0].texture = flat;
+  desc.colors[0].mipLevel = -1;
+  t.check(refused(desc), "negative mip level refused");
+  desc.colors[0].mipLevel = 1;
+  t.check(refused(desc), "mip past a single-level texture refused");
+  desc.colors[0].mipLevel = 0;
+  t.check(accepted(desc), "level 0 of a single-level texture attaches");
+
+  desc.colors[0].texture = chain;
+  desc.colors[0].mipLevel = 3;
+  t.check(refused(desc), "mip past an explicit chain refused");
+  desc.colors[0].mipLevel = 2;
+  t.check(accepted(desc), "the last level of an explicit chain attaches");
+
+  desc.colors[0].texture = cube;
+  desc.colors[0].mipLevel = 0;
+  bool facesOk = true;
+  for (int face = 0; face < 6; ++face) {
+    desc.colors[0].face = static_cast<CubeFace>(face);
+    facesOk = facesOk && accepted(desc);
+  }
+  t.check(facesOk, "every named cube face attaches");
+  desc.colors[0].face = static_cast<CubeFace>(6);
+  t.check(refused(desc), "cube face past NegativeZ refused");
+  desc.colors[0].face = static_cast<CubeFace>(-2);
+  t.check(refused(desc), "cube face below the enumeration refused");
+
+  // Extents: the addressed levels must agree; the chain's 4x4 level
+  // matches the 4x4 depth texture, its 8x8 base does not.
+  desc.colors[0].texture = chain;
+  desc.colors[0].face = CubeFace::None;
+  desc.colors[0].mipLevel = 0;
+  desc.depth.texture = smallDepth;
+  t.check(refused(desc), "attachments of different extents refused");
+  desc.colors[0].mipLevel = 1;
+  t.check(accepted(desc), "a mip matching the depth extent composes");
+
+  dev->destroy_texture(smallDepth);
+  dev->destroy_texture(cube);
+  dev->destroy_texture(chain);
+  dev->destroy_texture(flat);
   render_device_bgfx_frame();
 }
 
@@ -783,6 +877,7 @@ int main() {
   test_render_targets(t);
   test_cpu_updatable_textures(t);
   test_texture_arrays(t);
+  test_attachment_bounds(t);
   test_programs_and_draws(t);
 #ifdef ENGINE_TEST_COOKED_SHADER_DIR
   test_cooked_programs(t);
