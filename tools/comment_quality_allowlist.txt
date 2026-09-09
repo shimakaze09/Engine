@@ -44,7 +44,7 @@ core/src/touch_input.cpp	history-reference	2
 editor/CMakeLists.txt	history-reference	1
 editor/include/engine/editor/command_history.h	history-reference	1
 editor/src/debug_camera.cpp	history-reference	1
-editor/src/editor.cpp	history-reference	5
+editor/src/editor.cpp	history-reference	4
 editor/src/editor_asset_index.cpp	history-reference	1
 editor/src/editor_asset_index.h	history-reference	1
 editor/src/editor_commands.cpp	history-reference	6
@@ -73,6 +73,7 @@ editor/src/editor_panels_main.cpp	history-reference	4
 editor/src/editor_panels_material.cpp	history-reference	1
 editor/src/editor_panels_material.h	history-reference	1
 editor/src/editor_panels_viewport.cpp	history-reference	1
+editor/src/editor_reference_pickers.cpp	history-reference	3
 editor/src/editor_reference_pickers.h	history-reference	1
 editor/src/editor_scene_document.cpp	history-reference	2
 editor/src/editor_scene_document.h	history-reference	2
@@ -84,6 +85,7 @@ math/include/engine/math/ray.h	temporal-language	1
 math/include/engine/math/sphere.h	temporal-language	1
 physics/include/engine/physics/constraint_solver.h	history-reference	2
 physics/include/engine/physics/physics_context.h	history-reference	9
+physics/include/engine/physics/physics_material.h	history-reference	1
 physics/src/ccd.cpp	history-reference	2
 physics/src/contact_manifold.cpp	history-reference	1
 physics/src/contact_resolution.cpp	history-reference	5
@@ -113,9 +115,10 @@ renderer/include/engine/renderer/shadow_map.h	history-reference	2
 renderer/include/engine/renderer/texture_loader.h	history-reference	1
 renderer/src/asset_database.cpp	history-reference	1
 renderer/src/command_buffer.cpp	history-reference	4
+renderer/src/command_buffer_builder.cpp	history-reference	2
 renderer/src/command_buffer_capture.cpp	history-reference	1
 renderer/src/command_buffer_context.cpp	history-reference	2
-renderer/src/command_buffer_context.h	history-reference	13
+renderer/src/command_buffer_context.h	history-reference	14
 renderer/src/command_buffer_flush.cpp	history-reference	4
 renderer/src/command_buffer_flush_captures.cpp	history-reference	1
 renderer/src/command_buffer_flush_deferred.cpp	history-reference	6
@@ -195,7 +198,7 @@ scripting/src/physics_bindings.cpp	history-reference	5
 scripting/src/runtime_binding.cpp	history-reference	1
 scripting/src/scene_bindings.cpp	history-reference	3
 scripting/src/scene_bindings.h	history-reference	1
-scripting/src/scripting.cpp	history-reference	8
+scripting/src/scripting.cpp	history-reference	9
 tools/asset_packer/anim_cook.h	history-reference	1
 tools/asset_packer/cook_stamp.cpp	history-reference	5
 tools/asset_packer/cook_stamp.cpp	temporal-language	1
