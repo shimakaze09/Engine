@@ -1,9 +1,10 @@
 // Verifies the material editor's business logic (issue #160): opening
 // loads the resolved state, a field-edit gesture applies live immediately
-// and pushes exactly one undo step once the gesture ends, undo/redo round
-// trips through the live database record, Save persists to disk, Reload
-// discards unsaved edits and reflects the file, and closing the panel does
-// not discard already-applied live edits.
+// and pushes exactly one undo step (onto the material document's own
+// history) once the gesture ends, undo/redo round trips through the live
+// database record, Save persists to disk, Reload discards unsaved edits and
+// reflects the file, and the ungated close primitive does not discard
+// already-applied live edits.
 
 #include "editor_commands.h"
 #include "editor_material_edit.h"
@@ -145,11 +146,12 @@ int check_live_edit_and_undo() noexcept {
   if (!exactly_equal(state.buffer.roughness, 0.9F)) {
     return finish(14);
   }
-  if (!editor_session().commandHistory.can_undo()) {
-    return finish(15); // exactly one command should now sit on the stack
+  if (!material_editor_history().can_undo() ||
+      editor_session().commandHistory.can_undo()) {
+    return finish(15); // exactly one command, on the material's own stack
   }
 
-  if (!editor_session().commandHistory.undo()) {
+  if (!material_editor_history().undo()) {
     return finish(16);
   }
   if (!exactly_equal(
@@ -158,7 +160,7 @@ int check_live_edit_and_undo() noexcept {
     return finish(17); // undo restored the pre-gesture value
   }
 
-  if (!editor_session().commandHistory.redo()) {
+  if (!material_editor_history().redo()) {
     return finish(18);
   }
   if (!exactly_equal(
@@ -197,7 +199,7 @@ int check_save_and_reload() noexcept {
   state.buffer.roughness = 0.77F;
   material_editor_apply_frame(before, beforeSlots, true, false); // ends immediately
 
-  if (!save_material_editor() || state.dirty) {
+  if (!save_material_editor() || material_editor_is_dirty()) {
     return finish(23);
   }
 
@@ -207,7 +209,8 @@ int check_save_and_reload() noexcept {
       state.textureSlots;
   state.buffer.roughness = 0.11F;
   material_editor_apply_frame(beforeSecond, beforeSecondSlots, true, false);
-  if (!exactly_equal(state.buffer.roughness, 0.11F) || !state.dirty) {
+  if (!exactly_equal(state.buffer.roughness, 0.11F) ||
+      !material_editor_is_dirty()) {
     return finish(24);
   }
 
@@ -215,15 +218,18 @@ int check_save_and_reload() noexcept {
   if (!reload_material_editor_from_disk()) {
     return finish(25);
   }
-  if (!exactly_equal(state.buffer.roughness, 0.77F) || state.dirty) {
+  if (!exactly_equal(state.buffer.roughness, 0.77F) ||
+      material_editor_is_dirty()) {
     return finish(26);
   }
 
   return finish(0);
 }
 
-/// EXPECTATION: closing the panel does not revert an already-applied live
-/// edit (only the panel's own visibility changes).
+/// EXPECTATION: the ungated close primitive does not revert an
+/// already-applied live edit (only the panel's own visibility changes);
+/// the gated request_close_material_editor path is covered by
+/// engine_unit_editor_material_document.
 int check_close_keeps_live_edit() noexcept {
   if (!write_file(kOsPath, "{\"version\":2,\"roughness\":0.4}")) {
     return 30;
@@ -304,13 +310,14 @@ int check_world_clear_resets_editor() noexcept {
   // The pipeline-teardown path: the bridge rebinds the world to null.
   editor_set_world(nullptr);
 
-  if (state.open || state.gestureActive || state.dirty) {
+  if (state.open || state.gestureActive || material_editor_is_dirty()) {
     return finish(45);
   }
   if (state.materialId != engine::renderer::kInvalidAssetId) {
     return finish(46);
   }
-  if (editor_session().commandHistory.can_undo()) {
+  if (editor_session().commandHistory.can_undo() ||
+      material_editor_history().can_undo()) {
     return finish(47);
   }
 
