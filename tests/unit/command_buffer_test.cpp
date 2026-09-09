@@ -220,6 +220,46 @@ int check_static_mesh_batches() {
     return 98;
   }
 
+  // Every material field a pass uploads or binds must split a batch (#471):
+  // a batch uploads only its first command's material.
+  {
+    engine::renderer::DrawCommand base = make_command(1U, 7U);
+    base.mesh.id = 44U;
+    engine::renderer::DrawCommand variants[8];
+    for (auto &variant : variants) {
+      variant = base;
+    }
+    variants[0].material.alphaMode = engine::renderer::AlphaMode::Mask;
+    variants[1].material.alphaCutoff = 0.25F;
+    variants[2].material.uvTiling = engine::math::Vec2(2.0F, 2.0F);
+    variants[3].material.uvOffset = engine::math::Vec2(0.5F, 0.0F);
+    variants[4].material.metallicRoughnessTexture.id = 9U;
+    variants[5].material.emissiveTexture.id = 9U;
+    variants[6].material.occlusionTexture.id = 9U;
+    variants[7].material.opacityTexture.id = 9U;
+    for (std::size_t i = 0U; i < 8U; ++i) {
+      builder.reset();
+      engine::renderer::DrawCommand twin = base;
+      twin.entity = 8U;
+      if (!builder.submit(base) || !builder.submit(variants[i]) ||
+          !builder.submit(twin)) {
+        return 99;
+      }
+      builder.sort_by_key();
+      const std::size_t count = engine::renderer::build_static_mesh_batches(
+          builder.view(), 0U, builder.command_count(), batches, 4U);
+      // The two identical commands must stay adjacent (one batch of two)
+      // and the variant must sit alone.
+      if (count != 2U) {
+        return 100 + static_cast<int>(i);
+      }
+      if (!(((batches[0].count == 2U) && (batches[1].count == 1U)) ||
+            ((batches[0].count == 1U) && (batches[1].count == 2U)))) {
+        return 110 + static_cast<int>(i);
+      }
+    }
+  }
+
   return 0;
 }
 
