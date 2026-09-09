@@ -113,8 +113,8 @@ void record_program_param(BgfxProgramRecord *record,
 /// its entries into the program's parameter table (deduplicated by
 /// name). This is how the spirv sidecars donate uniform metadata for
 /// glsl/essl programs: the sidecar must never reach bgfx::createShader,
-/// because the GL backend would queue a real GL compile of the SPIR-V
-/// blob and fatal at the next frame.
+/// because bgfx's OpenGL renderer would queue a real GL compile of the
+/// SPIR-V blob and fatal at the next frame.
 void collect_sidecar_params(const void *data, std::ptrdiff_t size,
                             BgfxProgramRecord *record) noexcept {
   const auto *bytes = static_cast<const std::uint8_t *>(data);

@@ -1,9 +1,9 @@
 // Implements the bgfx render device backend (#138): resources, views,
-// render state, and draws over the engine RenderDevice table, with the
-// same generational slot tables, stale-handle detection, and
-// dropped-operation diagnostics as the GL backend (the program and
-// shader-parameter path lives in render_device_bgfx_programs.cpp; shared
-// records in render_device_bgfx_context.h). bgfx runs single-threaded —
+// render state, and draws over the engine RenderDevice table, with
+// generational slot tables, stale-handle detection, and
+// dropped-operation diagnostics (the program and shader-parameter path
+// lives in render_device_bgfx_programs.cpp; shared records in
+// render_device_bgfx_context.h). bgfx runs single-threaded —
 // windowed against the platform's native handles with the renderer from
 // r_bgfx_renderer, headless on Noop. Vertex data stages CPU-side until
 // its geometry/instance attachment realizes the dynamic buffer at the
@@ -1196,8 +1196,9 @@ bool initialize_render_device() noexcept {
                       "bgfx initialization failed");
     return false;
   }
-  // Backend-owned fullscreen triangle for attribute-less engine draws
-  // (the GL path synthesizes it from gl_VertexID; bgfx needs a stream).
+  // Backend-owned fullscreen triangle for attribute-less engine draws:
+  // bgfx submits nothing without a vertex stream, so the three vertices
+  // live here rather than being synthesized in the shader.
   {
     bgfx::VertexLayout layout{};
     layout.begin(bgfx::RendererType::Noop)
