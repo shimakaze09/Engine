@@ -1226,13 +1226,13 @@ int main() {
       remove_script_file();
       return 82;
     }
-    if (!engine::scripting::has_pending_scene_op() ||
-        !engine::scripting::pending_scene_op_is_load()) {
+    // The missing scene fails its one attempt and the request is
+    // consumed with it (#451); nothing is left for a later frame to retry.
+    if (engine::scripting::has_pending_scene_op()) {
       engine::scripting::shutdown_scripting();
       remove_script_file();
       return 83;
     }
-    engine::scripting::clear_pending_scene_op();
   }
 
   // =========================================================================

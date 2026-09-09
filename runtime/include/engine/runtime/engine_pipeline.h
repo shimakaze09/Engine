@@ -24,7 +24,10 @@ InputEventRoute process_editor_input_event(const EditorBridge *bridge,
                                            void *nativeEvent) noexcept;
 
 /// Processes a queued script scene operation, if one exists.
-/// Returns false when a pending operation exists but cannot be applied.
+/// Returns false when a pending operation exists but cannot be applied;
+/// the request is then consumed after that one attempt (one diagnostic,
+/// the live World untouched) rather than retried every frame, so a new
+/// outcome needs a new request.
 bool process_pending_scene_op(World &world) noexcept;
 } // namespace runtime
 

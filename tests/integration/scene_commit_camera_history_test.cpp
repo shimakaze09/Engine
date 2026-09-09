@@ -288,9 +288,8 @@ int main() {
 
   // --- Case 3: a failed load changes nothing. ---
   // The missing file fails inside load_scene, so the World, its epoch and
-  // the live camera history all survive; the request stays queued (the
-  // pipeline's retry policy for a failed op) and is dropped here so it
-  // cannot leak into the later cases.
+  // the live camera history all survive; the request is consumed by its
+  // one attempt (#451), so nothing leaks into the later cases.
   {
     const std::uint32_t epochBefore = g_world->content_epoch();
     CHECK(engine::scripting::request_scene_load(kMissingSceneFile),
@@ -305,7 +304,8 @@ int main() {
           "failed load: the live camera survives");
     CHECK(vec3_equal(rendered.position, kFarPosition),
           "failed load: rendering continues from the live camera");
-    engine::scripting::clear_pending_scene_op();
+    CHECK(!engine::scripting::has_pending_scene_op(),
+          "failed load: the request was consumed by its one attempt");
   }
 
   // --- Case 4: engine.new_scene empties the World; the default camera
