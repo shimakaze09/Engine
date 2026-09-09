@@ -6,9 +6,11 @@
 # absolute developer paths while passing repo-relative ones (audit L-03),
 # the Lua binding generator must reject
 # duplicate Lua names and invalid or reserved parameter identifiers
-# instead of emitting uncompilable or injected C++, and the test timing
-# audit must hold functional tests to classified clock reads only. Run
-# from ctest as engine_integration_tool_gates.
+# instead of emitting uncompilable or injected C++, the test timing
+# audit must hold functional tests to classified clock reads only, and
+# the documentation policy audit must hold the README's mirror of the
+# conditional noexcept rule to its conditional wording. Run from ctest as
+# engine_integration_tool_gates.
 
 import importlib.util
 import re
@@ -763,6 +765,86 @@ def test_test_timing_gate():
           "timing: this checkout passes the gate")
 
 
+def write_readme_fixture(root, noexcept_bullets):
+    """Plants a README whose contributor rules carry the given bullets."""
+    root.mkdir(parents=True, exist_ok=True)
+    body = ("# Fixture\n\n## Engine contributor rules\n\n"
+            "- Use C++23 only (no compiler extensions)\n"
+            + "".join(noexcept_bullets)
+            + "- Do not heap-allocate on hot paths\n")
+    (root / "README.md").write_text(body, encoding="utf-8")
+    return root
+
+
+CONDITIONAL_NOEXCEPT_BULLET = (
+    "- Mark a public real-time or leaf runtime API `noexcept` only when every\n"
+    "  operation it invokes is proven non-throwing; a recoverable `noexcept` "
+    "path\n"
+    "  must not call allocation, filesystem, or thread-creation operations "
+    "that\n"
+    "  can terminate under the no-exception build (the binding rule is in\n"
+    "  `CLAUDE.md`, \"Hard rules\")\n")
+
+
+def test_doc_policy_gate():
+    """The documentation policy gate (issue #355) must accept the README
+    bullet that mirrors the conditional noexcept rule clause for clause,
+    reject the unconditional wording the README once carried, reject a
+    bullet that dropped any clause or the pointer to the binding rule,
+    reject a missing or ambiguous mirror, and pass this checkout."""
+    script = str(TOOLS / "check_doc_policy.py")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+
+        check(run([script, "--root", str(write_readme_fixture(
+            tmp / "conditional", [CONDITIONAL_NOEXCEPT_BULLET]))]) == 0,
+              "doc policy: the conditional bullet, wrapped across lines, "
+              "passes")
+        # The wording the README carried before issue #355: a rule with
+        # no condition at all.
+        check(run([script, "--root", str(write_readme_fixture(
+            tmp / "unconditional",
+            ["- Keep engine API functions `noexcept`\n"]))]) != 0,
+              "doc policy: the unconditional wording fails")
+        check(run([script, "--root", str(write_readme_fixture(
+            tmp / "no_condition", [CONDITIONAL_NOEXCEPT_BULLET.replace(
+                "only when every", "when every")]))]) != 0,
+              "doc policy: dropping the 'only when' condition fails")
+        check(run([script, "--root", str(write_readme_fixture(
+            tmp / "no_terminate", [CONDITIONAL_NOEXCEPT_BULLET.replace(
+                "that\n  can terminate under the no-exception build",
+                "that\n  may fail")]))]) != 0,
+              "doc policy: dropping the termination clause fails")
+        check(run([script, "--root", str(write_readme_fixture(
+            tmp / "no_pointer", [CONDITIONAL_NOEXCEPT_BULLET.replace(
+                "`CLAUDE.md`", "the contract")]))]) != 0,
+              "doc policy: dropping the pointer to the binding rule fails")
+        check(run([script, "--root", str(write_readme_fixture(
+            tmp / "absent", []))]) != 0,
+              "doc policy: a README with no noexcept bullet fails")
+        check(run([script, "--root", str(write_readme_fixture(
+            tmp / "ambiguous", [CONDITIONAL_NOEXCEPT_BULLET,
+                                "- Also `noexcept` here\n"]))]) != 0,
+              "doc policy: two candidate bullets are ambiguous and fail")
+        # A bullet ends at a blank line; a later paragraph mentioning the
+        # rule is not part of it and cannot supply a missing clause.
+        (tmp / "split").mkdir()
+        (tmp / "split" / "README.md").write_text(
+            "# Fixture\n\n- Mark an API `noexcept` when it is safe\n\n"
+            "  only when every operation it invokes is proven non-throwing; "
+            "a recoverable `noexcept` path must not call allocation, "
+            "filesystem, or thread-creation operations that can terminate "
+            "under the no-exception build `CLAUDE.md`\n", encoding="utf-8")
+        check(run([script, "--root", str(tmp / "split")]) != 0,
+              "doc policy: text after a blank line does not join the bullet")
+        check(run([script, "--root", str(tmp / "missing")]) != 0,
+              "doc policy: a tree with no README fails")
+
+    check(run([script]) == 0,
+          "doc policy: this checkout passes the gate")
+
+
 def main():
     test_coverage_gate()
     test_perf_gate_evaluate()
@@ -771,6 +853,7 @@ def main():
     test_module_dependency_gate()
     test_dependency_pin_gate()
     test_test_timing_gate()
+    test_doc_policy_gate()
     if failures:
         print(f"\nFAILED ({len(failures)} failure(s))")
         return 1
