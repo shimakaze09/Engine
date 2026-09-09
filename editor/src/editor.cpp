@@ -289,10 +289,6 @@ bool initialize_editor(void *sdlWindow) noexcept {
   ImGui::GetStyle().ScaleAllSizes(uiScale);
 
   static_cast<void>(core::cvar_register_bool(
-      "r_showStats", true,
-      "Toggle in-game stats and profiling overlays in the editor"));
-
-  static_cast<void>(core::cvar_register_bool(
       "editor.show_console", true,
       "Toggle the editor Console panel (Window menu)"));
   console_capture_initialize();
