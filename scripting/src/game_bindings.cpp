@@ -58,32 +58,6 @@ bool set_game_state_name(const char *name) noexcept {
 
 } // namespace
 
-int lua_engine_set_game_mode(lua_State *state) noexcept {
-  const char *name = lua_tostring(state, 1);
-  lua_pushboolean(state, set_game_mode_name(name) ? 1 : 0);
-  return 1;
-}
-
-int lua_engine_get_game_mode(lua_State *state) noexcept {
-  if (runtime_binding().world != nullptr) {
-    lua_pushstring(state, runtime_binding().world->game_mode().name);
-  } else {
-    lua_pushstring(state, binding_state().gameMode);
-  }
-  return 1;
-}
-
-int lua_engine_set_game_state(lua_State *state) noexcept {
-  const char *name = lua_tostring(state, 1);
-  lua_pushboolean(state, set_game_state_name(name) ? 1 : 0);
-  return 1;
-}
-
-int lua_engine_get_game_state(lua_State *state) noexcept {
-  lua_pushstring(state, binding_state().gameState);
-  return 1;
-}
-
 int lua_engine_game_mode_start(lua_State *state) noexcept {
   if (runtime_binding().world == nullptr) {
     lua_pushboolean(state, 0);

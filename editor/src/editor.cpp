@@ -289,10 +289,6 @@ bool initialize_editor(void *sdlWindow) noexcept {
   ImGui::GetStyle().ScaleAllSizes(uiScale);
 
   static_cast<void>(core::cvar_register_bool(
-      "r_showStats", true,
-      "Toggle in-game stats and profiling overlays in the editor"));
-
-  static_cast<void>(core::cvar_register_bool(
       "editor.show_console", true,
       "Toggle the editor Console panel (Window menu)"));
   console_capture_initialize();
@@ -302,8 +298,7 @@ bool initialize_editor(void *sdlWindow) noexcept {
       "Detach debug free-fly camera from game camera"));
 
   // The bgfx ImGui backend owns its device objects; the platform
-  // window handle is all SDL needs (#296 dropped the dead GL-context
-  // parameter with the GL backend). A backend failure must release every
+  // window handle is all SDL needs. A backend failure must release every
   // resource acquired above — the console-capture sink included, whose
   // registered flag would otherwise survive the core logging restart that
   // follows a failed editor bootstrap and skip re-registration, silently

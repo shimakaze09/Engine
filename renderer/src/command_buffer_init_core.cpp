@@ -302,9 +302,8 @@ bool init_backend_core(BackendState &backend) noexcept {
   // 15 since the #301 shadow arrays), so any 16-unit device — WebGL2's
   // floor included — selects it; a rarer device under that budget
   // takes the reduced default, whose shadow=1 / constant-ambient paths
-  // stay correct.
-  // On GL the variant define is inert — its GLSL always carries the
-  // full sampling — so both backends load one canonical program.
+  // stay correct. The cook produces both variants from one source, so
+  // the choice is a program selection, not a separate shader.
   const bool forwardFullSamplers =
       dev->caps.maxTextureSamplers >
       static_cast<std::uint16_t>(kIblBrdfLutUnit);
@@ -337,11 +336,10 @@ bool init_backend_core(BackendState &backend) noexcept {
   }
 
   // Instanced forward sibling (soft-fail: batches fall back to
-  // per-command draws). Only backends without a runtime instancing
-  // toggle load it — the bgfx vertex ports carry no uUseInstancing, so
-  // instanced batches bind this program instead; its uniforms resolve
-  // through the backend's global-by-name registry, so no separate
-  // parameter family exists.
+  // per-command draws). The cooked vertex shaders carry no runtime
+  // instancing toggle, so instanced batches bind this program instead;
+  // its uniforms resolve through the backend's global-by-name registry,
+  // so no separate parameter family exists.
   if (!backend.pbrUseInstancingLocation.valid() && dev->caps.instancing) {
     const ShaderDefine instancedDefines[2] = {{"INSTANCED", "1"},
                                               {"PBR_FULL", "1"}};
@@ -389,8 +387,8 @@ bool init_backend_core(BackendState &backend) noexcept {
       "r_tonemap_operator", 1,
       "Tonemap operator (0=Reinhard, 1=ACES, 2=Uncharted2)");
 
-  // Attribute-less geometry for fullscreen triangles (the vertex shader
-  // synthesizes positions from gl_VertexID-style indices).
+  // Attribute-less geometry for fullscreen triangles: the backend
+  // supplies the three-vertex stream the fullscreen vertex shader reads.
   backend.emptyGeometry = (dev->create_geometry != nullptr)
                               ? dev->create_geometry(GeometryDesc{})
                               : kInvalidDeviceGeometry;

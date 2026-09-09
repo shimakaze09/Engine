@@ -14,6 +14,7 @@
 #include "engine/physics/constraint_solver.h"
 #include "engine/physics/physics.h"
 #include "engine/physics/physics_context.h"
+#include "engine/physics/physics_material.h"
 #include "engine/physics/physics_world_view.h"
 #include "contact_clip.h"
 #include "physics_internal.h"
@@ -87,12 +88,8 @@ void resolve_contact(PhysicsWorldView &world,
         engine::math::add(mutableB->position, engine::math::mul(normal, moveB));
   }
 
-  const float combinedRest =
-      std::max(colliderA.restitution, colliderB.restitution);
-  const float combinedStaticFric =
-      std::sqrt(colliderA.staticFriction * colliderB.staticFriction);
-  const float combinedDynFric =
-      std::sqrt(colliderA.dynamicFriction * colliderB.dynamicFriction);
+  const auto [combinedRest, combinedStaticFric, combinedDynFric] =
+      combine_contact_materials(colliderA, colliderB);
   const engine::math::Vec3 correctedCenterA =
       engine::math::sub(bodyCenterA, engine::math::mul(normal, moveA));
   const engine::math::Vec3 correctedCenterB =
@@ -251,7 +248,7 @@ void resolve_manifold_contact(
   const float approachSpeed0 =
       engine::math::dot(engine::math::sub(pointVelB0, pointVelA0), normal);
   const float combinedRest =
-      std::max(colliderA.restitution, colliderB.restitution);
+      combine_restitution(colliderA.restitution, colliderB.restitution);
   const float restitutionTarget =
       (-approachSpeed0 > kRestitutionSpeedThreshold)
           ? (combinedRest * -approachSpeed0)
@@ -381,9 +378,9 @@ void resolve_manifold_contact(
     }
   }
   const float combinedStaticFric =
-      std::sqrt(colliderA.staticFriction * colliderB.staticFriction);
+      combine_friction(colliderA.staticFriction, colliderB.staticFriction);
   const float combinedDynFric =
-      std::sqrt(colliderA.dynamicFriction * colliderB.dynamicFriction);
+      combine_friction(colliderA.dynamicFriction, colliderB.dynamicFriction);
   for (std::size_t pass = 0U; pass < 2U; ++pass) {
     for (std::size_t p = 0U; p < manifold.count; ++p) {
       if (accumulated[p] <= 0.0F) {

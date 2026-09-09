@@ -63,16 +63,6 @@ int lua_engine_remove_light(lua_State *state) noexcept {
   return 1;
 }
 
-int lua_engine_has_light(lua_State *state) noexcept {
-  runtime::Entity entity{};
-  if (!read_entity(state, 1, &entity)) {
-    lua_pushboolean(state, 0);
-    return 1;
-  }
-  lua_pushboolean(state, runtime_binding().world->has_light_component(entity) ? 1 : 0);
-  return 1;
-}
-
 int lua_engine_set_light_color(lua_State *state) noexcept {
   runtime::Entity entity{};
   math::Vec3 color{};
@@ -367,8 +357,6 @@ void register_light_bindings(lua_State *state) noexcept {
   lua_setfield(state, -2, "add_light");
   lua_pushcfunction(state, &lua_engine_remove_light);
   lua_setfield(state, -2, "remove_light");
-  lua_pushcfunction(state, &lua_engine_has_light);
-  lua_setfield(state, -2, "has_light");
   lua_pushcfunction(state, &lua_engine_set_light_color);
   lua_setfield(state, -2, "set_light_color");
   lua_pushcfunction(state, &lua_engine_get_light_color);

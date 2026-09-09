@@ -424,9 +424,9 @@ void log_shader_path_error(const char *path, const char *reason) noexcept {
 }
 
 bool try_reload_entry(ShaderEntry &entry) noexcept {
-  // Programs link exclusively from the shaderc cook (#296 closed the
-  // dead runtime source-compile fallback with the GL backend). The
-  // watched paths are the cooked binaries the successful link read, so
+  // Programs link exclusively from the shaderc cook; there is no
+  // runtime source-compile fallback (#296). The watched paths are the
+  // cooked binaries the successful link read, so
   // a recook hot-reloads; a failed load keeps the old program.
   const DeviceProgramHandle cooked = try_cooked_program(
       entry.vertPath, entry.fragPath, entry.defines, entry.defineCount,

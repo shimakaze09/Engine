@@ -16,8 +16,8 @@
 
 namespace engine::renderer::bgfx_backend {
 
-// Capacities mirror the GL backend so engine registries above the
-// device see identical headroom on both backends.
+// Fixed capacities of the device slot tables; the engine registries
+// above the device are sized within them.
 inline constexpr std::size_t kMaxDeviceBuffers = 8704U;
 inline constexpr std::size_t kMaxDeviceTextures = 1024U;
 inline constexpr std::size_t kMaxDevicePrograms = 128U;

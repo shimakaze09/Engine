@@ -2,7 +2,7 @@
 // without touching GL — creation returns monotonically increasing nonzero
 // handles, updates/binds/draws are no-ops, queries report ready with zero
 // timestamps. It deliberately models no stale-handle detection or
-// resource state (that is the GL backend's slot-table job); its only
+// resource state (that is the bgfx backend's slot-table job); its only
 // contract is that pipeline initialization and the frame stages complete
 // headlessly so backend-independent runtime behavior (FatalFrame
 // propagation, stage ordering) is testable on every CI lane.

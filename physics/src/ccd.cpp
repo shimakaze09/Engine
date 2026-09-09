@@ -2,7 +2,6 @@
 
 #include "engine/physics/ccd.h"
 
-#include "engine/core/cvar.h"
 #include "engine/math/aabb.h"
 #include "engine/math/ray.h"
 #include "engine/math/sphere.h"
@@ -13,6 +12,7 @@
 #include "engine/physics/convex_hull.h"
 #include "engine/physics/physics.h"
 #include "engine/physics/physics_context.h"
+#include "engine/physics/physics_material.h"
 #include "engine/physics/physics_world_view.h"
 #include "physics_internal.h"
 
@@ -183,11 +183,6 @@ math::Vec3 contact_point(const ColliderWorldGeometry &a,
 }
 
 } // namespace
-
-float ccd_velocity_threshold() noexcept {
-  return validated_ccd_threshold(
-      core::cvar_get_float("physics.ccd_threshold", 2.0F));
-}
 
 /// Bilateral advancement CCD (Erwin Coumans, GDC 2013): sweeps the moving
 /// collider through dt-normalized time, advancing by conservative separation
@@ -438,7 +433,7 @@ CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
     result.hitEntityIndex = bestHitEntity;
     result.targetVelocity = bestOtherVel;
     result.combinedRestitution =
-        std::max(collider.restitution, bestOtherRestitution);
+        combine_restitution(collider.restitution, bestOtherRestitution);
     // inverseMass is Input-phase-only state, safe to read beside the
     // parallel chunk jobs that only write velocities.
     const RigidBody *otherBody = (bestOtherOwner != kInvalidEntity)

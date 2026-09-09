@@ -99,7 +99,7 @@ ShaderProgramHandle load_configured_shader_variant(
   return load_shader_variant(desc);
 }
 
-/// Initializes the GL backend once: the hard-fail core first, then the
+/// Initializes the render backend once: the hard-fail core first, then the
 /// soft-fail environment, lighting, and post groups whose availability
 /// flags gate their passes.
 bool initialize_backend() noexcept {

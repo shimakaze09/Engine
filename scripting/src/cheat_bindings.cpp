@@ -19,18 +19,6 @@ namespace {
 bool g_godModeEnabled = false;
 bool g_noclipEnabled = false;
 
-/// Returns whether god mode is enabled to Lua.
-int lua_engine_is_god_mode(lua_State *state) noexcept {
-  lua_pushboolean(state, g_godModeEnabled ? 1 : 0);
-  return 1;
-}
-
-/// Returns whether noclip is enabled to Lua.
-int lua_engine_is_noclip(lua_State *state) noexcept {
-  lua_pushboolean(state, g_noclipEnabled ? 1 : 0);
-  return 1;
-}
-
 /// Toggles god mode from the console.
 void cmd_god(const char *const * /*args*/, int /*argCount*/,
              void * /*userData*/) noexcept {
@@ -121,13 +109,6 @@ void cmd_kill_all(const char *const * /*args*/, int /*argCount*/,
 }
 
 } // namespace
-
-void register_cheat_status_bindings(lua_State *state) noexcept {
-  lua_pushcfunction(state, &lua_engine_is_god_mode);
-  lua_setfield(state, -2, "is_god_mode");
-  lua_pushcfunction(state, &lua_engine_is_noclip);
-  lua_setfield(state, -2, "is_noclip");
-}
 
 void register_cheat_commands() noexcept {
   core::console_register_command("god", cmd_god, nullptr,

@@ -29,14 +29,36 @@ bool vec3_less(const math::Vec3 &lhs, const math::Vec3 &rhs) noexcept {
   return lhs.z < rhs.z;
 }
 
-/// Compares materials for static mesh instancing compatibility.
+/// Compares vec2 values exactly.
+bool vec2_equal(const math::Vec2 &lhs, const math::Vec2 &rhs) noexcept {
+  return (lhs.x == rhs.x) && (lhs.y == rhs.y);
+}
+
+/// Orders vec2 values lexicographically for stable command sorting.
+bool vec2_less(const math::Vec2 &lhs, const math::Vec2 &rhs) noexcept {
+  if (lhs.x != rhs.x) {
+    return lhs.x < rhs.x;
+  }
+  return lhs.y < rhs.y;
+}
+
+/// Compares materials for static mesh instancing compatibility. A batch
+/// uploads only its first command's material, so every field a pass
+/// uploads or binds must agree (#471).
 bool materials_equal(const Material &lhs, const Material &rhs) noexcept {
   return vec3_equal(lhs.albedo, rhs.albedo) &&
          vec3_equal(lhs.emissive, rhs.emissive) &&
          (lhs.roughness == rhs.roughness) && (lhs.metallic == rhs.metallic) &&
-         (lhs.opacity == rhs.opacity) &&
+         (lhs.opacity == rhs.opacity) && (lhs.alphaMode == rhs.alphaMode) &&
+         (lhs.alphaCutoff == rhs.alphaCutoff) &&
+         vec2_equal(lhs.uvTiling, rhs.uvTiling) &&
+         vec2_equal(lhs.uvOffset, rhs.uvOffset) &&
          (lhs.albedoTexture == rhs.albedoTexture) &&
-         (lhs.normalTexture == rhs.normalTexture);
+         (lhs.normalTexture == rhs.normalTexture) &&
+         (lhs.metallicRoughnessTexture == rhs.metallicRoughnessTexture) &&
+         (lhs.emissiveTexture == rhs.emissiveTexture) &&
+         (lhs.occlusionTexture == rhs.occlusionTexture) &&
+         (lhs.opacityTexture == rhs.opacityTexture);
 }
 
 /// Orders materials for stable opaque command sorting.
@@ -59,7 +81,33 @@ bool material_less(const Material &lhs, const Material &rhs) noexcept {
   if (lhs.albedoTexture.id != rhs.albedoTexture.id) {
     return lhs.albedoTexture.id < rhs.albedoTexture.id;
   }
-  return lhs.normalTexture.id < rhs.normalTexture.id;
+  if (lhs.normalTexture.id != rhs.normalTexture.id) {
+    return lhs.normalTexture.id < rhs.normalTexture.id;
+  }
+  // The remaining fields order after the legacy keys so materials that
+  // differ only here still land adjacent and batch (#471).
+  if (lhs.alphaMode != rhs.alphaMode) {
+    return lhs.alphaMode < rhs.alphaMode;
+  }
+  if (lhs.alphaCutoff != rhs.alphaCutoff) {
+    return lhs.alphaCutoff < rhs.alphaCutoff;
+  }
+  if (!vec2_equal(lhs.uvTiling, rhs.uvTiling)) {
+    return vec2_less(lhs.uvTiling, rhs.uvTiling);
+  }
+  if (!vec2_equal(lhs.uvOffset, rhs.uvOffset)) {
+    return vec2_less(lhs.uvOffset, rhs.uvOffset);
+  }
+  if (lhs.metallicRoughnessTexture.id != rhs.metallicRoughnessTexture.id) {
+    return lhs.metallicRoughnessTexture.id < rhs.metallicRoughnessTexture.id;
+  }
+  if (lhs.emissiveTexture.id != rhs.emissiveTexture.id) {
+    return lhs.emissiveTexture.id < rhs.emissiveTexture.id;
+  }
+  if (lhs.occlusionTexture.id != rhs.occlusionTexture.id) {
+    return lhs.occlusionTexture.id < rhs.occlusionTexture.id;
+  }
+  return lhs.opacityTexture.id < rhs.opacityTexture.id;
 }
 
 /// Returns whether two adjacent draw commands can share one instance batch.

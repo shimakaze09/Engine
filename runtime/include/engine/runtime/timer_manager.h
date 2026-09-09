@@ -13,10 +13,8 @@ inline constexpr TimerId kInvalidTimerId = 0U;
 
 /// Per-World timer manager with fixed-capacity storage.
 /// Stores only C++ callback pointers + user-data; Lua integration lives in the
-/// scripting layer which wraps this with luaL_ref bookkeeping.
-///
-/// Serialization helpers encode the minimal state (delay remaining, repeat
-/// flag, interval) so that timers survive scene save/load round-trips.
+/// scripting layer which wraps this with luaL_ref bookkeeping. Timers are
+/// runtime-only state and are never serialized (see the note below).
 class TimerManager final {
 public:
   static constexpr std::size_t kMaxTimers = 256U;

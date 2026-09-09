@@ -142,8 +142,14 @@ bool draw_entity_reference_picker(
     std::snprintf(previewText, sizeof(previewText), "<missing>");
   }
 
+  // One popup is open at a time, so one buffer per picker kind suffices,
+  // but it is reset whenever a popup appears so no instance inherits
+  // another's search text (#472).
   static char query[128] = {};
   if (ImGui::BeginCombo("##picker", previewText)) {
+    if (ImGui::IsWindowAppearing()) {
+      query[0] = '\0';
+    }
     ImGui::SetNextItemWidth(-1.0F);
     ImGui::InputTextWithHint("##search", "Search...", query, sizeof(query));
 
@@ -202,10 +208,16 @@ bool draw_asset_reference_picker(const char *label,
     }
   }
 
+  // One popup is open at a time, so one buffer per picker kind suffices,
+  // but it is reset whenever a popup appears so no instance inherits
+  // another's search text (#472).
   static char query[128] = {};
   const char *previewText =
       resolved ? displayPath : ((*value == 0ULL) ? "<none>" : "<missing>");
   if (ImGui::BeginCombo("##picker", previewText)) {
+    if (ImGui::IsWindowAppearing()) {
+      query[0] = '\0';
+    }
     ImGui::SetNextItemWidth(-1.0F);
     ImGui::InputTextWithHint("##search", "Search...", query, sizeof(query));
 
@@ -348,9 +360,15 @@ bool draw_path_reference_picker(const char *label, char *pathBuffer,
     }
   }
 
+  // One popup is open at a time, so one buffer per picker kind suffices,
+  // but it is reset whenever a popup appears so no instance inherits
+  // another's search text (#472).
   static char query[128] = {};
   const char *previewText = hasPath ? pathBuffer : "<none>";
   if (ImGui::BeginCombo("##picker", previewText)) {
+    if (ImGui::IsWindowAppearing()) {
+      query[0] = '\0';
+    }
     ImGui::SetNextItemWidth(-1.0F);
     ImGui::InputTextWithHint("##search", "Search...", query, sizeof(query));
 

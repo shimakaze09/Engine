@@ -616,7 +616,8 @@ struct RendererContext final {
   BackendState backend{};
 };
 
-/// Returns the default renderer context used by the legacy renderer API.
+/// Returns the process-wide renderer context the command-buffer API
+/// operates on (one renderer per process, #168).
 RendererContext &renderer_context() noexcept;
 
 /// Returns the backend state owned by the default renderer context.

@@ -46,8 +46,4 @@ CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
                                      const Transform &transform,
                                      float dt) noexcept;
 
-/// Returns the CCD velocity threshold (minimum speed to trigger CCD).
-/// Reads from CVar `physics.ccd_threshold`.
-float ccd_velocity_threshold() noexcept;
-
 } // namespace engine::physics
