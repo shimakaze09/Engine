@@ -274,11 +274,8 @@ void flush_renderer(CommandBufferView commandBufferView,
   frameStats.gpuSpotShadowMs = gpu_profiler_pass_ms(GpuPassId::SpotShadowMap);
   frameStats.gpuPointShadowMs = gpu_profiler_pass_ms(GpuPassId::PointShadowMap);
   frameStats.gpuAutoExposureMs = gpu_profiler_pass_ms(GpuPassId::AutoExposure);
-  renderer_context().lastFrameStats = frameStats;
-  frameStats.gpuGBufferMs = gpu_profiler_pass_ms(GpuPassId::GBuffer);
-  frameStats.gpuDeferredLightMs =
-      gpu_profiler_pass_ms(GpuPassId::DeferredLighting);
-  frameStats.gpuSsaoMs = gpu_profiler_pass_ms(GpuPassId::SSAO);
+  // The deferred path reports its own G-buffer/lighting/SSAO timings into
+  // ctx.frameStats; a forward frame leaves them at zero.
   renderer_context().lastFrameStats = frameStats;
 }
 
