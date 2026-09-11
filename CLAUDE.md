@@ -104,12 +104,30 @@ is prohibited.
   Lua/ImGui/ImGuizmo types. bgfx stays inside renderer impl (plus the
   editor's sanctioned ImGui backend); Lua inside scripting impl;
   editor-only behavior stays in `editor/` behind explicit bridges.
-- **[CI]** Every source/header file needs a real file-level purpose comment,
-  and declarations keep concise purpose comments. Both are CI-enforced:
-  `tools/check_source_comments.py` (presence) and
-  `tools/check_comment_quality.py` (no filler patterns; must stay at zero).
+- **[CI][REVIEW]** Comments follow the binding standard in
+  `docs/development/commenting-guidelines.md` (owner mandate, #360): they
+  describe the current design and why it must hold, never change history.
+  Issue and PR numbers appear in code comments only inside the sanctioned
+  markers `TODO(#n)` / `FIXME(#n)` and regression-provenance comments; the
+  other markers are `WORKAROUND:`, `HACK:`, `NOTE:`, `WARNING:`. Every
+  source/header file carries a real file-level purpose comment ([CI],
+  `tools/check_source_comments.py`). Declarations are documented by
+  complexity: public API in `include/` headers documents purpose,
+  ownership, failure behavior, and threading; private and self-evident
+  declarations carry no comment ([REVIEW]; owner decision 2026-09-09).
   Function-body comments are reserved for non-obvious invariants, ordering,
   units, ownership, or external constraints and explain why, not what.
+  `tools/check_comment_quality.py` is the mechanical gate: its filler
+  classes (tautology, template, misplaced doc comment) must stay at zero,
+  and its standard classes (history references, temporal language,
+  commented-out code, vague TODO/FIXME, developer language) carry a
+  per-file shrinking allowlist in `tools/comment_quality_allowlist.txt`
+  seeded from the tree as of 2026-09-09. A file whose count grows is red,
+  and an entry a file no longer fills is itself a finding, so each cleanup
+  PR deletes or lowers its own entries; the rule is [CI] for every file
+  and class not on that list and [REVIEW] for the listed ones until the
+  list empties. The `tests/` tree is exempt from the history and temporal
+  classes because regression provenance is encouraged there.
 - **[CI][REVIEW]** Changes to math/ECS/physics/renderer/scripting behavior
   require tests. Determinism-sensitive areas (world, serialization, physics,
   render-prep, Lua API) pair changes with determinism tests.
@@ -566,7 +584,11 @@ directory-global by design.
   pin audit (`check_dependency_pins.py`, #352), the documentation policy
   audit (`check_doc_policy.py`, #355), CI
   helpers (the gates' own self-tests run as
-  `engine_integration_tool_gates`). `tests/` — unit / integration /
+  `engine_integration_tool_gates`), and `comment_quality_allowlist.txt`
+  (the comment gate's shrinking per-file allowlist). `docs/development/`
+  — `commenting-guidelines.md`, the binding commenting standard (the one
+  standards document the repo carries; findings still live only on the
+  tracker). `tests/` — unit / integration /
   smoke (`gpu` label) / benchmark + `test_harness.h`.
   `.github/workflows/ci.yml` — 11 jobs: canonical-toolchain build matrix
   (3 OS × 2 configs; clang-cl via VS ClangCL / clang / AppleClang, issue
