@@ -12,6 +12,7 @@ extern "C" {
 #include "lua.h"
 }
 
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <limits>
@@ -510,34 +511,68 @@ void handle_stack_trace(int requestSeq, lua_State *L) noexcept {
   send_json_writer(w);
 }
 
+/// Refuses a request with a failure response carrying the reason; the
+/// session stays usable for the next request.
+void send_error_response(int requestSeq, const char *command,
+                         const char *message) noexcept {
+  core::JsonWriter w;
+  write_response_header(w, requestSeq, command, false);
+  w.write_string("message", message);
+  w.end_object();
+  send_json_writer(w);
+}
+
 // Three scopes are exposed per frame — Locals, Upvalues, Globals — and
 // variablesReference encodes (frameId * 3 + scopeType + 1) so
-// handle_variables can decode both from one integer.
-void handle_scopes(int requestSeq, int frameId) noexcept {
+// handle_variables can decode both from one integer. Both identifiers are
+// client-supplied protocol values and stay unsigned until they have been
+// checked: the encoding must fit the 32-bit reference and the frame must
+// exist on the paused stack, otherwise the request is refused rather than
+// narrowed into signed arithmetic that a large id would overflow.
+constexpr std::uint32_t kScopesPerFrame = 3U;
+constexpr std::uint32_t kMaxFrameId =
+    (UINT32_MAX - kScopesPerFrame) / kScopesPerFrame;
+
+/// True when frameId names a level of the paused thread's stack; the
+/// range check precedes the int narrowing lua_getstack requires.
+bool frame_exists(lua_State *L, std::uint32_t frameId) noexcept {
+  if ((L == nullptr) || (frameId > kMaxFrameId)) {
+    return false;
+  }
+  lua_Debug ar{};
+  return lua_getstack(L, static_cast<int>(frameId), &ar) != 0;
+}
+
+void handle_scopes(int requestSeq, std::uint32_t frameId,
+                   lua_State *L) noexcept {
+  if (!frame_exists(L, frameId)) {
+    send_error_response(requestSeq, "scopes",
+                        "frameId does not name a frame of the paused thread");
+    return;
+  }
+
   core::JsonWriter w;
   write_response_header(w, requestSeq, "scopes", true);
   w.write_key("body");
   w.begin_object();
   w.begin_array("scopes");
 
+  const std::uint32_t base = frameId * kScopesPerFrame;
   w.begin_object();
   w.write_string("name", "Locals");
-  w.write_uint("variablesReference",
-               static_cast<std::uint32_t>(frameId * 3 + 1));
+  w.write_uint("variablesReference", base + 1U);
   w.write_bool("expensive", false);
   w.end_object();
 
   w.begin_object();
   w.write_string("name", "Upvalues");
-  w.write_uint("variablesReference",
-               static_cast<std::uint32_t>(frameId * 3 + 2));
+  w.write_uint("variablesReference", base + 2U);
   w.write_bool("expensive", false);
   w.end_object();
 
   w.begin_object();
   w.write_string("name", "Globals");
-  w.write_uint("variablesReference",
-               static_cast<std::uint32_t>(frameId * 3 + 3));
+  w.write_uint("variablesReference", base + 3U);
   w.write_bool("expensive", true);
   w.end_object();
 
@@ -587,10 +622,29 @@ void format_lua_value(lua_State *L, int index, char *buf,
 }
 
 // Decodes handle_scopes' variablesReference back into frame and scope
-// (0 = locals, 1 = upvalues, 2 = globals) and lists that scope.
-void handle_variables(int requestSeq, int varRef, lua_State *L) noexcept {
-  const int frameId = (varRef - 1) / 3;
-  const int scopeType = (varRef - 1) % 3;
+// (0 = locals, 1 = upvalues, 2 = globals) and lists that scope. Zero is
+// DAP's "no children" sentinel and never a scope, and a reference whose
+// frame is not on the paused stack is refused, so the decode below never
+// runs on a value handle_scopes could not have issued.
+void handle_variables(int requestSeq, std::uint32_t varRef,
+                      lua_State *L) noexcept {
+  if (varRef == 0U) {
+    send_error_response(requestSeq, "variables",
+                        "variablesReference must be nonzero");
+    return;
+  }
+  const std::uint32_t encoded = varRef - 1U;
+  const std::uint32_t frameIdValue = encoded / kScopesPerFrame;
+  const std::uint32_t scopeType = encoded % kScopesPerFrame;
+  // Also rejects a null L: frame_exists needs a paused thread to walk.
+  if (!frame_exists(L, frameIdValue)) {
+    send_error_response(
+        requestSeq, "variables",
+        "variablesReference does not name a scope of the paused thread");
+    return;
+  }
+  // Bounded by kMaxFrameId through frame_exists, so the narrowing is exact.
+  const int frameId = static_cast<int>(frameIdValue);
 
   core::JsonWriter w;
   write_response_header(w, requestSeq, "variables", true);
@@ -598,9 +652,9 @@ void handle_variables(int requestSeq, int varRef, lua_State *L) noexcept {
   w.begin_object();
   w.begin_array("variables");
 
-  if (L != nullptr) {
+  {
     lua_Debug ar{};
-    if (scopeType == 0 && lua_getstack(L, frameId, &ar) != 0) {
+    if (scopeType == 0U && lua_getstack(L, frameId, &ar) != 0) {
       for (int n = 1;; ++n) {
         const char *name = lua_getlocal(L, &ar, n);
         if (name == nullptr) {
@@ -620,7 +674,7 @@ void handle_variables(int requestSeq, int varRef, lua_State *L) noexcept {
         w.end_object();
         lua_pop(L, 1);
       }
-    } else if (scopeType == 1 && lua_getstack(L, frameId, &ar) != 0) {
+    } else if (scopeType == 1U && lua_getstack(L, frameId, &ar) != 0) {
       lua_getinfo(L, "f", &ar);
       if (lua_isfunction(L, -1)) {
         for (int n = 1;; ++n) {
@@ -640,8 +694,8 @@ void handle_variables(int requestSeq, int varRef, lua_State *L) noexcept {
         }
       }
       lua_pop(L, 1); // pop the function
-    } else if (scopeType == 2) {
-          lua_pushglobaltable(L);
+    } else if (scopeType == 2U) {
+      lua_pushglobaltable(L);
       lua_pushnil(L);
       int count = 0;
       while (lua_next(L, -2) != 0) {
@@ -808,7 +862,7 @@ DapStepMode process_message(const char *body, std::size_t bodyLen, lua_State *L,
         parser.as_uint(*fid, &frameId);
       }
     }
-    handle_scopes(requestSeq, static_cast<int>(frameId));
+    handle_scopes(requestSeq, frameId, L);
   } else if (cmd_eq("variables")) {
     std::uint32_t varRef = 0U;
     if (argsVal != nullptr) {
@@ -818,7 +872,7 @@ DapStepMode process_message(const char *body, std::size_t bodyLen, lua_State *L,
         parser.as_uint(*vr, &varRef);
       }
     }
-    handle_variables(requestSeq, static_cast<int>(varRef), L);
+    handle_variables(requestSeq, varRef, L);
   } else if (cmd_eq("evaluate")) {
     handle_evaluate(requestSeq, L, parser, argsStorage);
   } else if (cmd_eq("continue")) {
@@ -858,11 +912,7 @@ DapStepMode process_message(const char *body, std::size_t bodyLen, lua_State *L,
     *outResume = true;
     return DapStepMode::Continue;
   } else {
-      core::JsonWriter w;
-    write_response_header(w, requestSeq, cmdStr, false);
-    w.write_string("message", "unsupported command");
-    w.end_object();
-    send_json_writer(w);
+    send_error_response(requestSeq, cmdStr, "unsupported command");
   }
 
   return DapStepMode::Continue;
