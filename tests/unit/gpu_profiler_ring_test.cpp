@@ -2,8 +2,10 @@
 // scripted result availability (audit M-06): a write slot whose queries
 // are still unresolved is skipped with back-pressure (droppedFrames) and
 // never re-issued, an end mark without a begin mark issues no timestamp,
-// out-of-range pass ids never alias the Scene slot, and delayed results
-// still resolve to exact durations once available.
+// out-of-range pass ids never alias the Scene slot, delayed results
+// still resolve to exact durations once available, and a pass that stops
+// running publishes zero once the frame without it resolves while a pass
+// whose results are merely late keeps its last measurement (#494).
 
 #include "engine/renderer/gpu_profiler.h"
 #include "engine/renderer/render_device.h"
@@ -151,6 +153,97 @@ void test_out_of_range_pass_does_not_alias_scene() noexcept {
   shutdown_gpu_profiler();
 }
 
+/// Runs one profiled frame with a Scene pass and, optionally, a Tonemap
+/// pass; each pass takes the given whole number of milliseconds.
+void run_frame_with_passes(std::uint64_t sceneMs, bool withTonemap,
+                           std::uint64_t tonemapMs) noexcept {
+  gpu_profiler_begin_frame();
+  g_nextTimestampNs = 0U;
+  gpu_profiler_begin_pass(GpuPassId::Scene);
+  g_nextTimestampNs = sceneMs * 1000000U;
+  gpu_profiler_end_pass(GpuPassId::Scene);
+  if (withTonemap) {
+    g_nextTimestampNs = 10000000U;
+    gpu_profiler_begin_pass(GpuPassId::Tonemap);
+    g_nextTimestampNs = 10000000U + tonemapMs * 1000000U;
+    gpu_profiler_end_pass(GpuPassId::Tonemap);
+  }
+}
+
+/// EXPECTATION (#494): the published duration belongs to the most recently
+/// resolved frame. A pass that issued no queries in that frame reads zero
+/// instead of holding the value an earlier frame measured, a pass that
+/// kept running keeps publishing its fresh value, and a pass that resumes
+/// publishes its new measurement. The ring resolves a frame two frames
+/// after it was written, so each expectation is read two frames on.
+void test_pass_that_stops_running_reads_zero() noexcept {
+  g_resultsAvailable = true;
+  CHECK(initialize_gpu_profiler(), "profiler initializes");
+
+  run_frame_with_passes(1U, true, 2U);  // frame 1: both passes
+  run_frame_with_passes(3U, false, 0U); // frame 2: tonemap stops
+  run_frame_with_passes(3U, false, 0U); // frame 3: resolves frame 1
+  CHECK(gpu_profiler_pass_ms(GpuPassId::Scene) == 1.0F,
+        "first frame's scene duration resolved");
+  CHECK(gpu_profiler_pass_ms(GpuPassId::Tonemap) == 2.0F,
+        "first frame's tonemap duration resolved");
+
+  run_frame_with_passes(3U, false, 0U); // frame 4: resolves frame 2
+  CHECK(gpu_profiler_pass_ms(GpuPassId::Scene) == 3.0F,
+        "the continuously running pass publishes the newer frame's value");
+  CHECK(gpu_profiler_pass_ms(GpuPassId::Tonemap) == 0.0F,
+        "a pass absent from the resolved frame reads zero, not its last "
+        "measurement");
+
+  run_frame_with_passes(4U, true, 5U); // frame 5: tonemap resumes
+  run_frame_with_passes(4U, true, 5U); // frame 6: resolves frame 4
+  CHECK(gpu_profiler_pass_ms(GpuPassId::Tonemap) == 0.0F,
+        "the frame before the resume still reads zero");
+  run_frame_with_passes(4U, true, 5U); // frame 7: resolves frame 5
+  CHECK(gpu_profiler_pass_ms(GpuPassId::Tonemap) == 5.0F,
+        "a pass that resumes publishes its new measurement");
+  CHECK(gpu_profiler_pass_ms(GpuPassId::Scene) == 4.0F,
+        "the running pass publishes the resumed frame's value");
+
+  shutdown_gpu_profiler();
+}
+
+/// EXPECTATION (#494 boundary): absence and lateness are different. A pass
+/// whose queries were submitted but whose GPU results have not landed keeps
+/// its last resolved value; only a frame that never issued the pass zeroes
+/// it. Once the late results land, the frame resolves to its own values.
+void test_late_results_keep_last_value() noexcept {
+  g_resultsAvailable = true;
+  CHECK(initialize_gpu_profiler(), "profiler initializes");
+
+  run_frame_with_passes(1U, true, 2U); // frame 1
+  run_frame_with_passes(6U, true, 7U); // frame 2: the frame that will be late
+  run_frame_with_passes(1U, true, 2U); // frame 3: resolves frame 1
+  CHECK(gpu_profiler_pass_ms(GpuPassId::Scene) == 1.0F, "scene resolved");
+  CHECK(gpu_profiler_pass_ms(GpuPassId::Tonemap) == 2.0F, "tonemap resolved");
+
+  // Frame 2's results are not ready when its slot comes up: both published
+  // values stay at frame 1's measurements instead of dropping to zero.
+  g_resultsAvailable = false;
+  gpu_profiler_begin_frame(); // frame 4: frame 2 pending, write slot blocked
+  CHECK(gpu_profiler_pass_ms(GpuPassId::Scene) == 1.0F,
+        "late scene results keep the last resolved value");
+  CHECK(gpu_profiler_pass_ms(GpuPassId::Tonemap) == 2.0F,
+        "late tonemap results keep the last resolved value");
+  CHECK(gpu_profiler_debug_stats().droppedFrames == 1U,
+        "the blocked write slot is counted as a dropped frame");
+
+  g_resultsAvailable = true;
+  gpu_profiler_begin_frame(); // frame 5: resolves frame 3 (1 ms / 2 ms)
+  gpu_profiler_begin_frame(); // frame 6: resolves the late frame 2
+  CHECK(gpu_profiler_pass_ms(GpuPassId::Scene) == 6.0F,
+        "delayed scene results resolve to their frame's value");
+  CHECK(gpu_profiler_pass_ms(GpuPassId::Tonemap) == 7.0F,
+        "delayed tonemap results resolve to their frame's value");
+
+  shutdown_gpu_profiler();
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -160,6 +253,8 @@ int main() {
   test_ring_backpressure_and_delayed_resolve();
   test_end_without_begin_is_ignored();
   test_out_of_range_pass_does_not_alias_scene();
+  test_pass_that_stops_running_reads_zero();
+  test_late_results_keep_last_value();
 
   std::printf("\n%s (%d failure(s))\n",
               g_failures == 0 ? "ALL PASSED" : "FAILED", g_failures);

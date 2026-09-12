@@ -23,13 +23,25 @@ struct QueryRange final {
   bool beginIssued = false;
 };
 
+/// One ring slot: the query ranges a frame wrote plus whether that frame's
+/// absent passes still have to be published. The published duration of a
+/// pass is the value measured in the most recent frame the ring resolved,
+/// and a pass that issued no queries in that frame publishes zero; the
+/// flag makes that zeroing happen exactly once per frame written into the
+/// slot, so a slot re-read while its GPU results are still pending cannot
+/// keep overwriting a newer frame's measurement with an older absence.
+struct QueryFrame final {
+  std::array<QueryRange, kPassCount> ranges{};
+  bool absentPassesPending = false;
+};
+
 struct GpuProfilerState final {
   bool initialized = false;
   bool supported = false;
   bool writeBlocked = false;
   std::size_t writeFrame = 0U;
   std::size_t readFrame = 0U;
-  std::array<std::array<QueryRange, kPassCount>, kFrameLag> queryFrames{};
+  std::array<QueryFrame, kFrameLag> queryFrames{};
   std::array<float, kPassCount> passDurationsMs{};
   GpuProfilerDebugStats debugStats{};
 };
@@ -59,9 +71,20 @@ void resolve_read_frame(const RenderDevice *dev) noexcept {
     return;
   }
 
-  auto &frameRanges = g_gpuProfiler.queryFrames[g_gpuProfiler.readFrame];
+  QueryFrame &frame = g_gpuProfiler.queryFrames[g_gpuProfiler.readFrame];
+  const bool publishAbsences = frame.absentPassesPending;
+  frame.absentPassesPending = false;
   for (std::size_t i = 0U; i < kPassCount; ++i) {
-    QueryRange &range = frameRanges[i];
+    QueryRange &range = frame.ranges[i];
+    if (!range.submitted) {
+      // The pass did not run in this frame, so its published duration is
+      // zero rather than whatever an earlier frame measured; a range that
+      // is submitted but not yet ready keeps the last value until it lands.
+      if (publishAbsences) {
+        g_gpuProfiler.passDurationsMs[i] = 0.0F;
+      }
+      continue;
+    }
     if (!query_range_ready(dev, range)) {
       continue;
     }
@@ -104,7 +127,7 @@ bool initialize_gpu_profiler() noexcept {
 
   for (std::size_t frame = 0U; frame < kFrameLag; ++frame) {
     for (std::size_t pass = 0U; pass < kPassCount; ++pass) {
-      QueryRange &range = g_gpuProfiler.queryFrames[frame][pass];
+      QueryRange &range = g_gpuProfiler.queryFrames[frame].ranges[pass];
       range.beginQuery = dev->create_timestamp_query();
       range.endQuery = dev->create_timestamp_query();
       if ((range.beginQuery == kInvalidDeviceQuery) ||
@@ -129,8 +152,8 @@ bool initialize_gpu_profiler() noexcept {
 void shutdown_gpu_profiler() noexcept {
   const RenderDevice *dev = render_device();
   if ((dev != nullptr) && (dev->destroy_timestamp_query != nullptr)) {
-    for (auto &frameRanges : g_gpuProfiler.queryFrames) {
-      for (QueryRange &range : frameRanges) {
+    for (QueryFrame &frame : g_gpuProfiler.queryFrames) {
+      for (QueryRange &range : frame.ranges) {
         if (range.beginQuery != kInvalidDeviceQuery) {
           dev->destroy_timestamp_query(range.beginQuery);
         }
@@ -160,9 +183,9 @@ void gpu_profiler_begin_frame() noexcept {
   g_gpuProfiler.writeFrame = (g_gpuProfiler.writeFrame + 1U) % kFrameLag;
   g_gpuProfiler.readFrame = (g_gpuProfiler.writeFrame + 1U) % kFrameLag;
 
-  auto &writeRanges = g_gpuProfiler.queryFrames[g_gpuProfiler.writeFrame];
+  QueryFrame &writeSlot = g_gpuProfiler.queryFrames[g_gpuProfiler.writeFrame];
   bool unresolved = false;
-  for (const QueryRange &range : writeRanges) {
+  for (const QueryRange &range : writeSlot.ranges) {
     unresolved = unresolved || range.submitted;
   }
   g_gpuProfiler.writeBlocked = unresolved;
@@ -170,10 +193,11 @@ void gpu_profiler_begin_frame() noexcept {
     ++g_gpuProfiler.debugStats.droppedFrames;
     return;
   }
-  for (QueryRange &range : writeRanges) {
+  for (QueryRange &range : writeSlot.ranges) {
     range.submitted = false;
     range.beginIssued = false;
   }
+  writeSlot.absentPassesPending = true;
 }
 
 void gpu_profiler_begin_pass(GpuPassId pass) noexcept {
@@ -198,7 +222,8 @@ void gpu_profiler_begin_pass(GpuPassId pass) noexcept {
   if (idx >= kPassCount) {
     return;
   }
-  QueryRange &range = g_gpuProfiler.queryFrames[g_gpuProfiler.writeFrame][idx];
+  QueryRange &range =
+      g_gpuProfiler.queryFrames[g_gpuProfiler.writeFrame].ranges[idx];
   dev->write_timestamp(range.beginQuery);
   range.beginIssued = true;
 }
@@ -225,7 +250,8 @@ void gpu_profiler_end_pass(GpuPassId pass) noexcept {
   if (idx >= kPassCount) {
     return;
   }
-  QueryRange &range = g_gpuProfiler.queryFrames[g_gpuProfiler.writeFrame][idx];
+  QueryRange &range =
+      g_gpuProfiler.queryFrames[g_gpuProfiler.writeFrame].ranges[idx];
   if (!range.beginIssued) {
     return;
   }

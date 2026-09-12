@@ -71,12 +71,11 @@ struct FrameFlushContext final {
   bool shadowEnabled = false;
   bool doSpotShadows = false;
   bool doPointShadows = false;
-  bool directionalShadowCacheReused = false;
   RendererFrameStats frameStats{};
 };
 
 /// Cascade, spot, and point shadow-map passes; writes the shadow feature
-/// toggles and the directional cache-reuse flag into the context.
+/// toggles into the context.
 void flush_shadow_passes(FrameFlushContext &ctx) noexcept;
 
 /// Scene-capture render-to-texture passes (forward-lit, no sky/shadow/post
