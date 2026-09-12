@@ -49,12 +49,13 @@ int lua_engine_add_capsule_collider(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
-  if (!lua_isnumber(state, 2) || !lua_isnumber(state, 3)) {
+  float halfHeight = 0.0F;
+  float radius = 0.0F;
+  if (!read_finite_number_arg(state, 2, &halfHeight) ||
+      !read_finite_number_arg(state, 3, &radius)) {
     lua_pushboolean(state, 0);
     return 1;
   }
-  const float halfHeight = static_cast<float>(lua_tonumber(state, 2));
-  const float radius = static_cast<float>(lua_tonumber(state, 3));
 
   runtime::Collider collider{};
   collider.shape = runtime::ColliderShape::Capsule;
@@ -88,11 +89,11 @@ int lua_engine_set_restitution(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
-  if (!lua_isnumber(state, 2)) {
+  float value = 0.0F;
+  if (!read_finite_number_arg(state, 2, &value)) {
     lua_pushboolean(state, 0);
     return 1;
   }
-  const float value = static_cast<float>(lua_tonumber(state, 2));
   runtime::Collider collider{};
   if (!latest_collider(entity, &collider)) {
     lua_pushboolean(state, 0);
@@ -111,12 +112,13 @@ int lua_engine_set_friction(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
-  if (!lua_isnumber(state, 2) || !lua_isnumber(state, 3)) {
+  float staticF = 0.0F;
+  float dynamicF = 0.0F;
+  if (!read_finite_number_arg(state, 2, &staticF) ||
+      !read_finite_number_arg(state, 3, &dynamicF)) {
     lua_pushboolean(state, 0);
     return 1;
   }
-  const float staticF = static_cast<float>(lua_tonumber(state, 2));
-  const float dynamicF = static_cast<float>(lua_tonumber(state, 3));
   runtime::Collider collider{};
   if (!latest_collider(entity, &collider)) {
     lua_pushboolean(state, 0);
@@ -177,24 +179,39 @@ int lua_engine_set_lock_rotation(lua_State *state) noexcept {
 // engine.create_physics_material(static_friction, dynamic_friction,
 //                                restitution, density) → table
 int lua_engine_create_physics_material(lua_State *state) noexcept {
-  if (!lua_isnumber(state, 1) || !lua_isnumber(state, 2) ||
-      !lua_isnumber(state, 3)) {
+  // Validated as finite floats (the precision the collider stores), but
+  // the table keeps the caller's own numbers so a script reading them back
+  // sees exactly what it passed.
+  float validated = 0.0F;
+  float density = 1.0F;
+  if (!read_finite_number_arg(state, 1, &validated) ||
+      !read_finite_number_arg(state, 2, &validated) ||
+      !read_finite_number_arg(state, 3, &validated) ||
+      !read_optional_finite_number_arg(state, 4, 1.0F, &density)) {
     lua_pushnil(state);
     return 1;
   }
   lua_createtable(state, 0, 4);
-  lua_pushnumber(state, lua_tonumber(state, 1));
+  lua_pushvalue(state, 1);
   lua_setfield(state, -2, "static_friction");
-  lua_pushnumber(state, lua_tonumber(state, 2));
+  lua_pushvalue(state, 2);
   lua_setfield(state, -2, "dynamic_friction");
-  lua_pushnumber(state, lua_tonumber(state, 3));
+  lua_pushvalue(state, 3);
   lua_setfield(state, -2, "restitution");
-  const float density = lua_isnumber(state, 4)
-                            ? static_cast<float>(lua_tonumber(state, 4))
-                            : 1.0F;
   lua_pushnumber(state, static_cast<lua_Number>(density));
   lua_setfield(state, -2, "density");
   return 1;
+}
+
+/// Reads one optional material-table field into `outValue`: an absent
+/// field leaves it untouched, a present field must be a finite number.
+bool read_material_field(lua_State *state, int tableIndex, const char *name,
+                         float *outValue) noexcept {
+  lua_getfield(state, tableIndex, name);
+  const bool ok = lua_isnil(state, -1) ||
+                  read_finite_number_arg(state, -1, outValue);
+  lua_pop(state, 1);
+  return ok;
 }
 
 // engine.set_collider_material(entity, material_table) → bool
@@ -214,29 +231,15 @@ int lua_engine_set_collider_material(lua_State *state) noexcept {
     return 1;
   }
 
-  lua_getfield(state, 2, "static_friction");
-  if (lua_isnumber(state, -1)) {
-    collider.staticFriction = static_cast<float>(lua_tonumber(state, -1));
+  if (!read_material_field(state, 2, "static_friction",
+                           &collider.staticFriction) ||
+      !read_material_field(state, 2, "dynamic_friction",
+                           &collider.dynamicFriction) ||
+      !read_material_field(state, 2, "restitution", &collider.restitution) ||
+      !read_material_field(state, 2, "density", &collider.density)) {
+    lua_pushboolean(state, 0);
+    return 1;
   }
-  lua_pop(state, 1);
-
-  lua_getfield(state, 2, "dynamic_friction");
-  if (lua_isnumber(state, -1)) {
-    collider.dynamicFriction = static_cast<float>(lua_tonumber(state, -1));
-  }
-  lua_pop(state, 1);
-
-  lua_getfield(state, 2, "restitution");
-  if (lua_isnumber(state, -1)) {
-    collider.restitution = static_cast<float>(lua_tonumber(state, -1));
-  }
-  lua_pop(state, 1);
-
-  lua_getfield(state, 2, "density");
-  if (lua_isnumber(state, -1)) {
-    collider.density = static_cast<float>(lua_tonumber(state, -1));
-  }
-  lua_pop(state, 1);
 
   const bool ok = apply_or_queue_collider(entity, collider);
   lua_pushboolean(state, ok ? 1 : 0);
@@ -287,18 +290,19 @@ int lua_engine_set_collision_mask(lua_State *state) noexcept {
   return 1;
 }
 
+// engine.set_gravity([x [, y [, z]]]); an omitted component is zero, a
+// present one must be a finite number or the whole call is rejected.
 int lua_engine_set_gravity(lua_State *state) noexcept {
   float x = 0.0F;
   float y = 0.0F;
   float z = 0.0F;
-  if (lua_isnumber(state, 1)) {
-    x = static_cast<float>(lua_tonumber(state, 1));
-  }
-  if (lua_isnumber(state, 2)) {
-    y = static_cast<float>(lua_tonumber(state, 2));
-  }
-  if (lua_isnumber(state, 3)) {
-    z = static_cast<float>(lua_tonumber(state, 3));
+  if (!read_optional_finite_number_arg(state, 1, 0.0F, &x) ||
+      !read_optional_finite_number_arg(state, 2, 0.0F, &y) ||
+      !read_optional_finite_number_arg(state, 3, 0.0F, &z)) {
+    core::log_message(core::LogLevel::Warning, "scripting",
+                      "set_gravity rejected: components must be finite "
+                      "numbers; gravity unchanged");
+    return 0;
   }
   if ((runtime_binding().services != nullptr) && (runtime_binding().services->set_gravity != nullptr)) {
     runtime_binding().services->set_gravity(runtime_binding().world, x, y, z);
@@ -326,24 +330,22 @@ int lua_engine_raycast(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
-  if (!lua_isnumber(state, 1) || !lua_isnumber(state, 2) ||
-      !lua_isnumber(state, 3) || !lua_isnumber(state, 4) ||
-      !lua_isnumber(state, 5) || !lua_isnumber(state, 6) ||
-      !lua_isnumber(state, 7)) {
+  math::Vec3 origin{};
+  math::Vec3 direction{};
+  float maxDist = 0.0F;
+  if (!read_vec3_args(state, 1, &origin) ||
+      !read_vec3_args(state, 4, &direction) ||
+      !read_finite_number_arg(state, 7, &maxDist)) {
     lua_pushnil(state);
     return 1;
   }
-  const float ox = static_cast<float>(lua_tonumber(state, 1));
-  const float oy = static_cast<float>(lua_tonumber(state, 2));
-  const float oz = static_cast<float>(lua_tonumber(state, 3));
-  const float dx = static_cast<float>(lua_tonumber(state, 4));
-  const float dy = static_cast<float>(lua_tonumber(state, 5));
-  const float dz = static_cast<float>(lua_tonumber(state, 6));
-  const float maxDist = static_cast<float>(lua_tonumber(state, 7));
 
   RuntimeRaycastHit hit{};
   if ((runtime_binding().services == nullptr) || (runtime_binding().services->raycast == nullptr) ||
-      !runtime_binding().services->raycast(runtime_binding().world, ox, oy, oz, dx, dy, dz, maxDist, &hit)) {
+      !runtime_binding().services->raycast(runtime_binding().world, origin.x,
+                                           origin.y, origin.z, direction.x,
+                                           direction.y, direction.z, maxDist,
+                                           &hit)) {
     lua_pushnil(state);
     return 1;
   }
@@ -365,20 +367,15 @@ int lua_engine_raycast_all(lua_State *state) noexcept {
     lua_newtable(state);
     return 1;
   }
-  if (!lua_isnumber(state, 1) || !lua_isnumber(state, 2) ||
-      !lua_isnumber(state, 3) || !lua_isnumber(state, 4) ||
-      !lua_isnumber(state, 5) || !lua_isnumber(state, 6) ||
-      !lua_isnumber(state, 7)) {
+  math::Vec3 origin{};
+  math::Vec3 direction{};
+  float maxDist = 0.0F;
+  if (!read_vec3_args(state, 1, &origin) ||
+      !read_vec3_args(state, 4, &direction) ||
+      !read_finite_number_arg(state, 7, &maxDist)) {
     lua_newtable(state);
     return 1;
   }
-  const float ox = static_cast<float>(lua_tonumber(state, 1));
-  const float oy = static_cast<float>(lua_tonumber(state, 2));
-  const float oz = static_cast<float>(lua_tonumber(state, 3));
-  const float dx = static_cast<float>(lua_tonumber(state, 4));
-  const float dy = static_cast<float>(lua_tonumber(state, 5));
-  const float dz = static_cast<float>(lua_tonumber(state, 6));
-  const float maxDist = static_cast<float>(lua_tonumber(state, 7));
   const std::uint32_t mask =
       lua_isnumber(state, 8)
           ? static_cast<std::uint32_t>(lua_tointeger(state, 8))
@@ -387,7 +384,8 @@ int lua_engine_raycast_all(lua_State *state) noexcept {
   constexpr std::size_t kMaxHits = 32U;
   RuntimeRaycastHit hits[kMaxHits]{};
   const std::size_t count = runtime_binding().services->raycast_all(
-      runtime_binding().world, ox, oy, oz, dx, dy, dz, maxDist, hits, kMaxHits, mask);
+      runtime_binding().world, origin.x, origin.y, origin.z, direction.x,
+      direction.y, direction.z, maxDist, hits, kMaxHits, mask);
 
   lua_createtable(state, static_cast<int>(count), 0);
   for (std::size_t i = 0U; i < count; ++i) {
@@ -420,15 +418,13 @@ int lua_engine_overlap_sphere(lua_State *state) noexcept {
     lua_newtable(state);
     return 1;
   }
-  if (!lua_isnumber(state, 1) || !lua_isnumber(state, 2) ||
-      !lua_isnumber(state, 3) || !lua_isnumber(state, 4)) {
+  math::Vec3 center{};
+  float radius = 0.0F;
+  if (!read_vec3_args(state, 1, &center) ||
+      !read_finite_number_arg(state, 4, &radius)) {
     lua_newtable(state);
     return 1;
   }
-  const float cx = static_cast<float>(lua_tonumber(state, 1));
-  const float cy = static_cast<float>(lua_tonumber(state, 2));
-  const float cz = static_cast<float>(lua_tonumber(state, 3));
-  const float radius = static_cast<float>(lua_tonumber(state, 4));
   const std::uint32_t mask =
       lua_isnumber(state, 5)
           ? static_cast<std::uint32_t>(lua_tointeger(state, 5))
@@ -437,7 +433,8 @@ int lua_engine_overlap_sphere(lua_State *state) noexcept {
   constexpr std::size_t kMaxResults = 64U;
   std::uint32_t indices[kMaxResults]{};
   const std::size_t count = runtime_binding().services->overlap_sphere(
-      runtime_binding().world, cx, cy, cz, radius, indices, kMaxResults, mask);
+      runtime_binding().world, center.x, center.y, center.z, radius, indices,
+      kMaxResults, mask);
 
   lua_createtable(state, static_cast<int>(count), 0);
   for (std::size_t i = 0U; i < count; ++i) {
@@ -454,18 +451,13 @@ int lua_engine_overlap_box(lua_State *state) noexcept {
     lua_newtable(state);
     return 1;
   }
-  if (!lua_isnumber(state, 1) || !lua_isnumber(state, 2) ||
-      !lua_isnumber(state, 3) || !lua_isnumber(state, 4) ||
-      !lua_isnumber(state, 5) || !lua_isnumber(state, 6)) {
+  math::Vec3 center{};
+  math::Vec3 halfExtents{};
+  if (!read_vec3_args(state, 1, &center) ||
+      !read_vec3_args(state, 4, &halfExtents)) {
     lua_newtable(state);
     return 1;
   }
-  const float cx = static_cast<float>(lua_tonumber(state, 1));
-  const float cy = static_cast<float>(lua_tonumber(state, 2));
-  const float cz = static_cast<float>(lua_tonumber(state, 3));
-  const float hx = static_cast<float>(lua_tonumber(state, 4));
-  const float hy = static_cast<float>(lua_tonumber(state, 5));
-  const float hz = static_cast<float>(lua_tonumber(state, 6));
   const std::uint32_t mask =
       lua_isnumber(state, 7)
           ? static_cast<std::uint32_t>(lua_tointeger(state, 7))
@@ -474,7 +466,8 @@ int lua_engine_overlap_box(lua_State *state) noexcept {
   constexpr std::size_t kMaxResults = 64U;
   std::uint32_t indices[kMaxResults]{};
   const std::size_t count = runtime_binding().services->overlap_box(
-      runtime_binding().world, cx, cy, cz, hx, hy, hz, indices, kMaxResults, mask);
+      runtime_binding().world, center.x, center.y, center.z, halfExtents.x,
+      halfExtents.y, halfExtents.z, indices, kMaxResults, mask);
 
   lua_createtable(state, static_cast<int>(count), 0);
   for (std::size_t i = 0U; i < count; ++i) {
@@ -512,21 +505,17 @@ int lua_engine_sweep_sphere(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
-  if (!lua_isnumber(state, 1) || !lua_isnumber(state, 2) ||
-      !lua_isnumber(state, 3) || !lua_isnumber(state, 4) ||
-      !lua_isnumber(state, 5) || !lua_isnumber(state, 6) ||
-      !lua_isnumber(state, 7) || !lua_isnumber(state, 8)) {
+  math::Vec3 origin{};
+  float radius = 0.0F;
+  math::Vec3 direction{};
+  float maxDist = 0.0F;
+  if (!read_vec3_args(state, 1, &origin) ||
+      !read_finite_number_arg(state, 4, &radius) ||
+      !read_vec3_args(state, 5, &direction) ||
+      !read_finite_number_arg(state, 8, &maxDist)) {
     lua_pushnil(state);
     return 1;
   }
-  const float ox = static_cast<float>(lua_tonumber(state, 1));
-  const float oy = static_cast<float>(lua_tonumber(state, 2));
-  const float oz = static_cast<float>(lua_tonumber(state, 3));
-  const float radius = static_cast<float>(lua_tonumber(state, 4));
-  const float dx = static_cast<float>(lua_tonumber(state, 5));
-  const float dy = static_cast<float>(lua_tonumber(state, 6));
-  const float dz = static_cast<float>(lua_tonumber(state, 7));
-  const float maxDist = static_cast<float>(lua_tonumber(state, 8));
   const std::uint32_t mask =
       lua_isnumber(state, 9)
           ? static_cast<std::uint32_t>(lua_tointeger(state, 9))
@@ -538,8 +527,10 @@ int lua_engine_sweep_sphere(lua_State *state) noexcept {
   }
 
   RuntimeRaycastHit hit{};
-  if (!runtime_binding().services->sweep_sphere(runtime_binding().world, ox, oy, oz, radius, dx, dy, dz,
-                                maxDist, &hit, mask, skipIndex)) {
+  if (!runtime_binding().services->sweep_sphere(
+          runtime_binding().world, origin.x, origin.y, origin.z, radius,
+          direction.x, direction.y, direction.z, maxDist, &hit, mask,
+          skipIndex)) {
     lua_pushnil(state);
     return 1;
   }
@@ -564,24 +555,17 @@ int lua_engine_sweep_box(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
-  if (!lua_isnumber(state, 1) || !lua_isnumber(state, 2) ||
-      !lua_isnumber(state, 3) || !lua_isnumber(state, 4) ||
-      !lua_isnumber(state, 5) || !lua_isnumber(state, 6) ||
-      !lua_isnumber(state, 7) || !lua_isnumber(state, 8) ||
-      !lua_isnumber(state, 9) || !lua_isnumber(state, 10)) {
+  math::Vec3 center{};
+  math::Vec3 halfExtents{};
+  math::Vec3 direction{};
+  float maxDist = 0.0F;
+  if (!read_vec3_args(state, 1, &center) ||
+      !read_vec3_args(state, 4, &halfExtents) ||
+      !read_vec3_args(state, 7, &direction) ||
+      !read_finite_number_arg(state, 10, &maxDist)) {
     lua_pushnil(state);
     return 1;
   }
-  const float cx = static_cast<float>(lua_tonumber(state, 1));
-  const float cy = static_cast<float>(lua_tonumber(state, 2));
-  const float cz = static_cast<float>(lua_tonumber(state, 3));
-  const float hx = static_cast<float>(lua_tonumber(state, 4));
-  const float hy = static_cast<float>(lua_tonumber(state, 5));
-  const float hz = static_cast<float>(lua_tonumber(state, 6));
-  const float dx = static_cast<float>(lua_tonumber(state, 7));
-  const float dy = static_cast<float>(lua_tonumber(state, 8));
-  const float dz = static_cast<float>(lua_tonumber(state, 9));
-  const float maxDist = static_cast<float>(lua_tonumber(state, 10));
   const std::uint32_t mask =
       lua_isnumber(state, 11)
           ? static_cast<std::uint32_t>(lua_tointeger(state, 11))
@@ -593,8 +577,10 @@ int lua_engine_sweep_box(lua_State *state) noexcept {
   }
 
   RuntimeRaycastHit hit{};
-  if (!runtime_binding().services->sweep_box(runtime_binding().world, cx, cy, cz, hx, hy, hz, dx, dy, dz,
-                             maxDist, &hit, mask, skipIndex)) {
+  if (!runtime_binding().services->sweep_box(
+          runtime_binding().world, center.x, center.y, center.z,
+          halfExtents.x, halfExtents.y, halfExtents.z, direction.x,
+          direction.y, direction.z, maxDist, &hit, mask, skipIndex)) {
     lua_pushnil(state);
     return 1;
   }
@@ -642,9 +628,11 @@ int lua_engine_add_distance_joint(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
-  const float dist = lua_isnumber(state, 3)
-                         ? static_cast<float>(lua_tonumber(state, 3))
-                         : 1.0F;
+  float dist = 1.0F;
+  if (!read_optional_finite_number_arg(state, 3, 1.0F, &dist)) {
+    lua_pushnil(state);
+    return 1;
+  }
   const std::uint32_t id = runtime_binding().services->add_distance_joint(
       runtime_binding().world, entityA.index, entityB.index, dist);
   return push_joint_result(state, id);
@@ -672,12 +660,21 @@ int lua_engine_add_hinge_joint(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
-  const auto px = static_cast<float>(luaL_optnumber(state, 3, 0.0));
-  const auto py = static_cast<float>(luaL_optnumber(state, 4, 0.0));
-  const auto pz = static_cast<float>(luaL_optnumber(state, 5, 0.0));
-  const auto ax = static_cast<float>(luaL_optnumber(state, 6, 0.0));
-  const auto ay = static_cast<float>(luaL_optnumber(state, 7, 1.0));
-  const auto az = static_cast<float>(luaL_optnumber(state, 8, 0.0));
+  float px = 0.0F;
+  float py = 0.0F;
+  float pz = 0.0F;
+  float ax = 0.0F;
+  float ay = 1.0F;
+  float az = 0.0F;
+  if (!read_optional_finite_number_arg(state, 3, 0.0F, &px) ||
+      !read_optional_finite_number_arg(state, 4, 0.0F, &py) ||
+      !read_optional_finite_number_arg(state, 5, 0.0F, &pz) ||
+      !read_optional_finite_number_arg(state, 6, 0.0F, &ax) ||
+      !read_optional_finite_number_arg(state, 7, 1.0F, &ay) ||
+      !read_optional_finite_number_arg(state, 8, 0.0F, &az)) {
+    lua_pushnil(state);
+    return 1;
+  }
   const std::uint32_t id = runtime_binding().services->add_hinge_joint(
       runtime_binding().world, entityA.index, entityB.index, px, py, pz, ax, ay, az);
   return push_joint_result(state, id);
@@ -694,9 +691,15 @@ int lua_engine_add_ball_socket_joint(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
-  const auto px = static_cast<float>(luaL_optnumber(state, 3, 0.0));
-  const auto py = static_cast<float>(luaL_optnumber(state, 4, 0.0));
-  const auto pz = static_cast<float>(luaL_optnumber(state, 5, 0.0));
+  float px = 0.0F;
+  float py = 0.0F;
+  float pz = 0.0F;
+  if (!read_optional_finite_number_arg(state, 3, 0.0F, &px) ||
+      !read_optional_finite_number_arg(state, 4, 0.0F, &py) ||
+      !read_optional_finite_number_arg(state, 5, 0.0F, &pz)) {
+    lua_pushnil(state);
+    return 1;
+  }
   const std::uint32_t id = runtime_binding().services->add_ball_socket_joint(
       runtime_binding().world, entityA.index, entityB.index, px, py, pz);
   return push_joint_result(state, id);
@@ -712,9 +715,15 @@ int lua_engine_add_slider_joint(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
-  const auto ax = static_cast<float>(luaL_optnumber(state, 3, 1.0));
-  const auto ay = static_cast<float>(luaL_optnumber(state, 4, 0.0));
-  const auto az = static_cast<float>(luaL_optnumber(state, 5, 0.0));
+  float ax = 1.0F;
+  float ay = 0.0F;
+  float az = 0.0F;
+  if (!read_optional_finite_number_arg(state, 3, 1.0F, &ax) ||
+      !read_optional_finite_number_arg(state, 4, 0.0F, &ay) ||
+      !read_optional_finite_number_arg(state, 5, 0.0F, &az)) {
+    lua_pushnil(state);
+    return 1;
+  }
   const std::uint32_t id = runtime_binding().services->add_slider_joint(
       runtime_binding().world, entityA.index, entityB.index, ax, ay, az);
   return push_joint_result(state, id);
@@ -730,9 +739,15 @@ int lua_engine_add_spring_joint(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
-  const auto rest = static_cast<float>(luaL_optnumber(state, 3, 1.0));
-  const auto stiff = static_cast<float>(luaL_optnumber(state, 4, 100.0));
-  const auto damp = static_cast<float>(luaL_optnumber(state, 5, 1.0));
+  float rest = 1.0F;
+  float stiff = 100.0F;
+  float damp = 1.0F;
+  if (!read_optional_finite_number_arg(state, 3, 1.0F, &rest) ||
+      !read_optional_finite_number_arg(state, 4, 100.0F, &stiff) ||
+      !read_optional_finite_number_arg(state, 5, 1.0F, &damp)) {
+    lua_pushnil(state);
+    return 1;
+  }
   const std::uint32_t id = runtime_binding().services->add_spring_joint(
       runtime_binding().world, entityA.index, entityB.index, rest, stiff, damp);
   return push_joint_result(state, id);
@@ -760,8 +775,13 @@ int lua_engine_set_joint_limits(lua_State *state) noexcept {
     return 1;
   }
   const auto id = static_cast<std::uint32_t>(lua_tointeger(state, 1));
-  const auto minL = static_cast<float>(luaL_optnumber(state, 2, 0.0));
-  const auto maxL = static_cast<float>(luaL_optnumber(state, 3, 0.0));
+  float minL = 0.0F;
+  float maxL = 0.0F;
+  if (!read_optional_finite_number_arg(state, 2, 0.0F, &minL) ||
+      !read_optional_finite_number_arg(state, 3, 0.0F, &maxL)) {
+    lua_pushnil(state);
+    return 1;
+  }
   const bool ok = runtime_binding().services->set_joint_limits(
       runtime_binding().world, id, minL, maxL);
   return push_joint_mutation_result(state, ok);

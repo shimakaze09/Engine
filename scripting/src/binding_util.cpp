@@ -99,6 +99,22 @@ bool read_finite_number_arg(lua_State *state, int index,
   return true;
 }
 
+/// Reads optional finite number args data: absence is the only way to get
+/// the default, so a present but invalid optional fails like a required
+/// argument would instead of being silently replaced.
+bool read_optional_finite_number_arg(lua_State *state, int index,
+                                     float defaultValue,
+                                     float *outValue) noexcept {
+  if (outValue == nullptr) {
+    return false;
+  }
+  if (lua_isnoneornil(state, index)) {
+    *outValue = defaultValue;
+    return true;
+  }
+  return read_finite_number_arg(state, index, outValue);
+}
+
 /// Copies a path or refuses over-long input so a truncated copy can never
 /// silently address a different file than the caller named.
 bool copy_path_strict(char *dst, std::size_t dstCapacity, const char *src,
