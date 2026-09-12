@@ -35,9 +35,14 @@ bool process_pending_scene_op(World &world) noexcept;
 ///
 /// Each frame is split into named stages (input, play transitions, timing,
 /// scripting, assets, hot-reload, audio, animation, simulation graph, camera,
-/// render-prep graph, post-frame, render, diagnostics, cleanup, pacing).
+/// render-prep graph, post-frame, measure, render, scene commit,
+/// diagnostics, cleanup, pacing).
 /// The camera stage runs between the last fixed step and render prep so
-/// culling and interpolation consume the frame's own camera.
+/// culling and interpolation consume the frame's own camera. A pending
+/// script scene operation commits only after the render stage has
+/// submitted the frame, so every scene-derived input to one submission
+/// (camera, prepared draws, lights, capture requests) comes from a single
+/// World content epoch.
 /// EnginePipeline owns the per-run resources
 /// (World, CommandBuffer, AssetDatabase, ...) and executes one frame at a time.
 ///

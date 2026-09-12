@@ -697,6 +697,19 @@ engine_add_test_executable(engine_integration_scene_commit_camera_history
     integration
 )
 
+# ---- #450: one render submission draws one World content epoch ----
+
+engine_add_test_executable(engine_integration_scene_commit_render_epoch
+    SOURCES
+    scene_commit_render_epoch_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_scripting
+    engine_renderer
+    LABELS
+    integration
+)
+
 # ---- #451: a failed scene load is attempted once, not every frame ----
 
 engine_add_test_executable(engine_integration_scene_load_failure_consumed
