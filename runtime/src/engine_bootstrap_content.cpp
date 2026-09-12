@@ -12,7 +12,6 @@
 #include "engine/core/logging.h"
 #include "engine/engine.h"
 #include "engine/renderer/material_loader.h"
-#include "engine/core/platform.h"
 #include "engine/core/vfs.h"
 #include "engine/renderer/asset_manager.h"
 #include "engine/renderer/mesh_loader.h"
@@ -79,15 +78,8 @@ bool load_bootstrap_meshes(renderer::AssetManager *assetManager,
             renderer::queue_mesh_load(assetManager, assetDatabase,
                                       out->bootstrap, meshPath);
   if (ok) {
-    if (!core::make_render_context_current()) {
-      core::log_message(
-          core::LogLevel::Error, "engine",
-          "failed to acquire render context for bootstrap mesh upload");
-      return false;
-    }
     ok = renderer::update_asset_manager(assetManager, assetDatabase,
                                         meshRegistry, 8U);
-    core::release_render_context();
     ok = ok && (renderer::mesh_asset_state(assetDatabase, out->bootstrap) ==
                 renderer::AssetState::Ready);
   }
@@ -97,71 +89,64 @@ bool load_bootstrap_meshes(renderer::AssetManager *assetManager,
     return false;
   }
 
-  if (!core::make_render_context_current()) {
-    core::log_message(
-        core::LogLevel::Warning, "engine",
-        "failed to acquire render context for procedural mesh upload");
-  } else {
-    renderer::GpuMesh m{};
-    if (renderer::build_plane_mesh(&m)) {
-      out->plane = register_builtin_mesh(meshRegistry, assetDatabase, m,
-                                         "builtin://plane");
-    }
-    m = renderer::GpuMesh{};
-    if (renderer::build_cube_mesh(&m)) {
-      out->cube = register_builtin_mesh(meshRegistry, assetDatabase, m,
-                                        "builtin://cube");
-    }
-    m = renderer::GpuMesh{};
-    if (renderer::build_sphere_mesh(&m)) {
-      out->sphere = register_builtin_mesh(meshRegistry, assetDatabase, m,
-                                          "builtin://sphere");
-    }
-    m = renderer::GpuMesh{};
-    if (renderer::build_cylinder_mesh(&m)) {
-      out->cylinder = register_builtin_mesh(meshRegistry, assetDatabase, m,
-                                            "builtin://cylinder");
-    }
-    m = renderer::GpuMesh{};
-    if (renderer::build_capsule_mesh(&m)) {
-      out->capsule = register_builtin_mesh(meshRegistry, assetDatabase, m,
-                                           "builtin://capsule");
-    }
-    m = renderer::GpuMesh{};
-    if (renderer::build_pyramid_mesh(&m)) {
-      out->pyramid = register_builtin_mesh(meshRegistry, assetDatabase, m,
-                                           "builtin://pyramid");
-    }
-    m = renderer::GpuMesh{};
-    if (renderer::build_grass_tuft_mesh(&m)) {
-      out->grass = register_builtin_mesh(meshRegistry, assetDatabase, m,
-                                         "builtin://grass");
-    }
+  renderer::GpuMesh m{};
+  if (renderer::build_plane_mesh(&m)) {
+    out->plane = register_builtin_mesh(meshRegistry, assetDatabase, m,
+                                       "builtin://plane");
+  }
+  m = renderer::GpuMesh{};
+  if (renderer::build_cube_mesh(&m)) {
+    out->cube = register_builtin_mesh(meshRegistry, assetDatabase, m,
+                                      "builtin://cube");
+  }
+  m = renderer::GpuMesh{};
+  if (renderer::build_sphere_mesh(&m)) {
+    out->sphere = register_builtin_mesh(meshRegistry, assetDatabase, m,
+                                        "builtin://sphere");
+  }
+  m = renderer::GpuMesh{};
+  if (renderer::build_cylinder_mesh(&m)) {
+    out->cylinder = register_builtin_mesh(meshRegistry, assetDatabase, m,
+                                          "builtin://cylinder");
+  }
+  m = renderer::GpuMesh{};
+  if (renderer::build_capsule_mesh(&m)) {
+    out->capsule = register_builtin_mesh(meshRegistry, assetDatabase, m,
+                                         "builtin://capsule");
+  }
+  m = renderer::GpuMesh{};
+  if (renderer::build_pyramid_mesh(&m)) {
+    out->pyramid = register_builtin_mesh(meshRegistry, assetDatabase, m,
+                                         "builtin://pyramid");
+  }
+  m = renderer::GpuMesh{};
+  if (renderer::build_grass_tuft_mesh(&m)) {
+    out->grass = register_builtin_mesh(meshRegistry, assetDatabase, m,
+                                       "builtin://grass");
+  }
 
-    // Bundled rigged character (cooked skinned .mesh loaded from disk).
-    {
-      char characterVirtualPath[512] = {};
-      std::snprintf(characterVirtualPath, sizeof(characterVirtualPath),
-                    "%s/character.mesh", active_config().assetMount);
-      char characterPath[512] = {};
-      if (core::vfs_resolve_os_path(characterVirtualPath, characterPath,
-                                    sizeof(characterPath))) {
-        const renderer::AssetId characterId =
-            renderer::make_asset_id_from_path(characterVirtualPath);
-        if (renderer::queue_mesh_load(assetManager, assetDatabase,
-                                      characterId, characterPath) &&
-            renderer::update_asset_manager(assetManager, assetDatabase,
-                                           meshRegistry, 8U) &&
-            (renderer::mesh_asset_state(assetDatabase, characterId) ==
-             renderer::AssetState::Ready)) {
-          out->character = characterId;
-        } else {
-          core::log_message(core::LogLevel::Warning, "engine",
-                            "rigged character mesh failed to load");
-        }
+  // Bundled rigged character (cooked skinned .mesh loaded from disk).
+  {
+    char characterVirtualPath[512] = {};
+    std::snprintf(characterVirtualPath, sizeof(characterVirtualPath),
+                  "%s/character.mesh", active_config().assetMount);
+    char characterPath[512] = {};
+    if (core::vfs_resolve_os_path(characterVirtualPath, characterPath,
+                                  sizeof(characterPath))) {
+      const renderer::AssetId characterId =
+          renderer::make_asset_id_from_path(characterVirtualPath);
+      if (renderer::queue_mesh_load(assetManager, assetDatabase,
+                                    characterId, characterPath) &&
+          renderer::update_asset_manager(assetManager, assetDatabase,
+                                         meshRegistry, 8U) &&
+          (renderer::mesh_asset_state(assetDatabase, characterId) ==
+           renderer::AssetState::Ready)) {
+        out->character = characterId;
+      } else {
+        core::log_message(core::LogLevel::Warning, "engine",
+                          "rigged character mesh failed to load");
       }
     }
-    core::release_render_context();
   }
 
   // Discover project material JSONs so MeshComponent.materialAssetId

@@ -26,7 +26,7 @@ core/include/engine/core/logging.h	history-reference	1
 core/include/engine/core/native_thread.h	history-reference	1
 core/include/engine/core/nothrow_buffer.h	history-reference	2
 core/include/engine/core/nothrow_buffer.h	temporal-language	1
-core/include/engine/core/platform.h	history-reference	3
+core/include/engine/core/platform.h	history-reference	1
 core/include/engine/core/service_locator.h	history-reference	1
 core/include/engine/core/sparse_set.h	history-reference	2
 core/include/engine/core/touch_input.h	history-reference	1
@@ -39,7 +39,7 @@ core/src/job_system.cpp	history-reference	5
 core/src/json_edit.cpp	history-reference	1
 core/src/logging.cpp	history-reference	1
 core/src/native_thread.cpp	history-reference	1
-core/src/platform.cpp	history-reference	3
+core/src/platform.cpp	history-reference	2
 core/src/touch_input.cpp	history-reference	2
 editor/CMakeLists.txt	history-reference	1
 editor/include/engine/editor/command_history.h	history-reference	1
@@ -109,7 +109,7 @@ renderer/include/engine/renderer/material_loader.h	commented-out-code	3
 renderer/include/engine/renderer/material_loader.h	history-reference	1
 renderer/include/engine/renderer/mesh_loader.h	history-reference	5
 renderer/include/engine/renderer/pass_resources.h	history-reference	1
-renderer/include/engine/renderer/render_device.h	history-reference	6
+renderer/include/engine/renderer/render_device.h	history-reference	5
 renderer/include/engine/renderer/shader_system.h	history-reference	1
 renderer/include/engine/renderer/shadow_map.h	history-reference	2
 renderer/include/engine/renderer/texture_loader.h	history-reference	1
@@ -164,7 +164,7 @@ runtime/include/engine/runtime/world_query.h	history-reference	1
 runtime/src/animation_assets.cpp	history-reference	5
 runtime/src/camera_manager.cpp	history-reference	1
 runtime/src/component_registry.h	history-reference	3
-runtime/src/engine.cpp	history-reference	6
+runtime/src/engine.cpp	history-reference	4
 runtime/src/engine_bootstrap_content.h	history-reference	1
 runtime/src/engine_pipeline.cpp	history-reference	17
 runtime/src/engine_pipeline.cpp	temporal-language	1

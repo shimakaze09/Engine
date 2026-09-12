@@ -1308,8 +1308,6 @@ void render_device_bgfx_frame() noexcept {
   reset_views();
 }
 
-bool render_backend_owns_swapchain() noexcept { return true; }
-
 void present_render_device() noexcept { render_device_bgfx_frame(); }
 
 } // namespace engine::renderer

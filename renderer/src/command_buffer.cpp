@@ -19,7 +19,6 @@
 
 #include "engine/core/cvar.h"
 #include "engine/core/logging.h"
-#include "engine/core/platform.h"
 #include "engine/math/mat4.h"
 #include "engine/math/transform.h"
 #include "engine/renderer/camera.h"
@@ -560,27 +559,15 @@ void shutdown_renderer() noexcept {
     // (#168) — otherwise the device and its swapchain outlive the engine
     // and the next initialization hands back the stale one (#326).
     if (render_device() != nullptr) {
-      // Making the context current is best effort here, unlike the warm
-      // path below: nothing but the device itself is being destroyed, and
-      // the device owns its own context under the swapchain-owning
-      // backend. A process with no window (a failed platform init) has no
-      // context to offer and must still not leak the device.
-      const bool contextCurrent = core::make_render_context_current();
       shutdown_render_device();
-      if (contextCurrent) {
-        core::release_render_context();
-      }
     }
     reset_renderer_public_state();
     return;
   }
 
-  if (core::make_render_context_current()) {
-    destroy_backend_resources(&backend);
-    shutdown_shader_system();
-    shutdown_render_device();
-    core::release_render_context();
-  }
+  destroy_backend_resources(&backend);
+  shutdown_shader_system();
+  shutdown_render_device();
 
   backend = BackendState{};
   reset_renderer_public_state();

@@ -289,10 +289,10 @@ directory-global by design.
 
 - `app/` — `engine_editor_app` entry point; whole-archives `engine_editor` so
   the editor bridge registers before bootstrap.
-- `core/` — bootstrap/config, platform (SDL glue, paths; #138:
-  `PlatformConfig.externalRenderContext` creates the window without an
-  OpenGL context for swapchain-owning backends and exposes native
-  window/display handles), logging, cvars,
+- `core/` — bootstrap/config, platform (SDL glue, paths; the window is
+  created without an OpenGL context — the bgfx backend owns device and
+  swapchain — and the platform exposes native window/display handles; the
+  GL context/swap/vsync helpers went with the GL backend), logging, cvars,
   console, event bus, input + input maps + touch, VFS, JSON, job system
   (frame graph), allocators (linear/pool), profiler, mem tracker, reflection,
   entity handle, service locator, shared utilities (`sparse_set.h`,
