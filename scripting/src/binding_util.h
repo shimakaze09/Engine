@@ -20,6 +20,14 @@ bool read_vec3_args(lua_State *state, int startIndex,
 bool read_finite_number_arg(lua_State *state, int index,
                             float *outValue) noexcept;
 
+/// Reads an optional finite number arg: an absent or nil arg yields
+/// defaultValue, a present arg must be a finite number. Fails on a present
+/// non-number or non-finite value so a garbage optional never silently
+/// becomes the default.
+bool read_optional_finite_number_arg(lua_State *state, int index,
+                                     float defaultValue,
+                                     float *outValue) noexcept;
+
 /// Copies a NUL-terminated path into a fixed buffer; refuses with one
 /// Error diagnostic (destination untouched) when the path does not fit.
 bool copy_path_strict(char *dst, std::size_t dstCapacity, const char *src,

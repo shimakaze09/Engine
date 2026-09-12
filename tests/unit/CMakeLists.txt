@@ -364,6 +364,14 @@ engine_add_test_executable(engine_unit_script_joint_result
     engine_runtime
 )
 
+engine_add_test_executable(engine_unit_script_physics_finite_args
+    SOURCES
+    script_physics_finite_args_test.cpp
+    PRIVATE_DEPS
+    engine_scripting
+    engine_runtime
+)
+
 engine_add_test_executable(engine_unit_script_acceleration
     SOURCES
     script_acceleration_test.cpp
