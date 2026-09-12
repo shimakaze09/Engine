@@ -611,6 +611,7 @@ struct EnginePipeline::Impl final {
   void stage_post_frame() noexcept;
   void stage_measure_frame() noexcept;
   void stage_render() noexcept;
+  void stage_scene_commit() noexcept;
   void stage_diagnostics() noexcept;
   void stage_frame_cleanup() noexcept;
   void stage_frame_pacing() noexcept;
@@ -805,6 +806,9 @@ bool EnginePipeline::Impl::execute_frame() noexcept {
 
   stage_measure_frame();
   stage_render();
+  if (runFrameGraph) {
+    stage_scene_commit();
+  }
   stage_diagnostics();
   stage_frame_cleanup();
   stage_frame_pacing();
@@ -1505,7 +1509,7 @@ bool EnginePipeline::Impl::stage_render_prep_graph() noexcept {
 }
 
 // ---------------------------------------------------------------------------
-// Stage: post-frame (collision callbacks, end-play, scene ops)
+// Stage: post-frame (collision callbacks, end-play, deferred mutations)
 // ---------------------------------------------------------------------------
 
 void EnginePipeline::Impl::stage_post_frame() noexcept {
@@ -1522,8 +1526,6 @@ void EnginePipeline::Impl::stage_post_frame() noexcept {
   }
 
   scripting::flush_deferred_mutations();
-
-  static_cast<void>(runtime::process_pending_scene_op(*world));
 }
 
 // ---------------------------------------------------------------------------
@@ -1637,6 +1639,25 @@ void EnginePipeline::Impl::stage_render() noexcept {
   if (interpolateCamera) {
     renderer::set_active_camera(currentCameraSample);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Stage: scene commit (pending script scene op)
+// ---------------------------------------------------------------------------
+
+// A queued load_scene/new_scene commits only after the frame's render
+// submission is complete. Every scene-derived input to one submitted frame
+// (the camera and render-prep command buffer built before this point, and
+// the lights and capture requests the render stage collects at flush time)
+// must come from one World content epoch; committing here keeps the
+// outgoing World live through the whole submission, and the replacement
+// World's first frame builds everything from itself, with stage_camera
+// retiring the camera history on the epoch change. The end-play dispatch
+// and deferred-mutation flush stay ahead of the render in stage_post_frame,
+// so a mutation a handler defers is still applied before this commit
+// decides what content the transition replaces.
+void EnginePipeline::Impl::stage_scene_commit() noexcept {
+  static_cast<void>(runtime::process_pending_scene_op(*world));
 }
 
 // ---------------------------------------------------------------------------

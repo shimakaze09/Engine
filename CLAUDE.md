@@ -432,13 +432,18 @@ directory-global by design.
   spawns describe a collider instead of building hull payloads of their
   own, and `World::has_convex_hull_payload` is the observable a spawn uses
   to see whether the fixed hull slots had room),
-  `EnginePipeline` (17 named frame stages, fixed 1/60 step, job-graph frame
+  `EnginePipeline` (18 named frame stages, fixed 1/60 step, job-graph frame
   split into a simulation graph and a render-prep graph; animation evaluates
   per fixed step BEFORE the simulation graph so render prep bakes
   current-frame palette slots; the camera stage runs spring arms, authored
   CameraComponent publishing, and camera evaluation between the last fixed
   step and render prep so culling and interpolation see the frame's camera;
-  frame pacing waits out r_max_fps as the final stage),
+  a pending script scene op commits in its own stage after the render
+  stage has submitted the frame, so every scene-derived input to one
+  submission — camera, prepared draws, lights, capture requests — comes
+  from a single World content epoch (#450, pinned by
+  `engine_integration_scene_commit_render_epoch`); frame pacing waits out
+  r_max_fps as the final stage),
   `World` ECS (15 component types on SparseSets, WorldPhase gating,
   double-buffered transforms, persistent ids; #166: the storage dispatch,
   removal list, and both serializer directions expand from the registry —
