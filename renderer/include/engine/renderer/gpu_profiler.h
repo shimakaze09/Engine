@@ -45,7 +45,11 @@ void gpu_profiler_begin_frame() noexcept;
 void gpu_profiler_begin_pass(GpuPassId pass) noexcept;
 /// Issues the end timestamp for a pass.
 void gpu_profiler_end_pass(GpuPassId pass) noexcept;
-/// Latest resolved pass duration in ms (0 until results land).
+/// Duration of the pass in ms as measured in the most recent frame whose
+/// results the ring resolved: 0 until results land, and 0 again once a
+/// frame in which the pass issued no queries resolves, so a pass that stops
+/// running (a disabled effect, a reused shadow cache, no lights of its kind)
+/// never keeps reporting its last measurement.
 float gpu_profiler_pass_ms(GpuPassId pass) noexcept;
 /// Snapshot of the profiler bookkeeping counters.
 GpuProfilerDebugStats gpu_profiler_debug_stats() noexcept;

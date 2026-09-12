@@ -401,7 +401,6 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
     gpu_profiler_end_pass(GpuPassId::PointShadowMap);
   }
   ctx.shadowEnabled = shadowEnabled;
-  ctx.directionalShadowCacheReused = directionalShadowCacheReused;
   ctx.doSpotShadows = doSpotShadows;
   ctx.doPointShadows = doPointShadows;
 }

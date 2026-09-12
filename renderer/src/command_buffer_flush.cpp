@@ -268,9 +268,7 @@ void flush_renderer(CommandBufferView commandBufferView,
   frameStats.gpuSceneMs = gpu_profiler_pass_ms(GpuPassId::Scene);
   frameStats.gpuTonemapMs = gpu_profiler_pass_ms(GpuPassId::Tonemap);
   frameStats.gpuBloomMs = gpu_profiler_pass_ms(GpuPassId::Bloom);
-  frameStats.gpuShadowMapMs = ctx.directionalShadowCacheReused
-                                  ? 0.0F
-                                  : gpu_profiler_pass_ms(GpuPassId::ShadowMap);
+  frameStats.gpuShadowMapMs = gpu_profiler_pass_ms(GpuPassId::ShadowMap);
   frameStats.gpuSpotShadowMs = gpu_profiler_pass_ms(GpuPassId::SpotShadowMap);
   frameStats.gpuPointShadowMs = gpu_profiler_pass_ms(GpuPassId::PointShadowMap);
   frameStats.gpuAutoExposureMs = gpu_profiler_pass_ms(GpuPassId::AutoExposure);
