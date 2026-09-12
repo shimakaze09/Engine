@@ -1,7 +1,10 @@
 // Integration test for Lua DAP debugger (P1-M2-G1h).
 // Test: mock DAP client sets breakpoint, script pauses, stackTrace line
-// matches, a nonterminating evaluate ends in a bounded error response
-// while the session stays usable for a further evaluate and continue.
+// matches, out-of-range and zero frame/variable references are refused
+// with failure responses while in-range ones list the paused frame's
+// scopes and locals (#457), a nonterminating evaluate ends in a bounded
+// error response while the session stays usable for a further evaluate
+// and continue.
 
 #include <chrono>
 #include <cstdio>
@@ -255,11 +258,94 @@ struct ClientResult {
   bool connected = false;
   bool stoppedEventSeen = false;
   bool stackLineMatched = false;
+  bool referenceBoundariesRejected = false;
+  bool validReferencesAccepted = false;
   bool firstEvaluateAnswered = false;
   bool evaluateBoundedErrorSeen = false;
   bool evaluateAfterwardsOk = false;
   bool continueAckSeen = false;
 };
+
+/// Sends one request while the thread is paused and waits for its own
+/// response, skipping any event delivered in between; false when the
+/// server disconnects or the bounded wait expires.
+bool exchange_request(SocketHandle sock, std::string *recvBuffer, int seq,
+                      const char *command, const char *argumentsJson,
+                      std::string *outBody) noexcept {
+  if (!send_dap_request(sock, seq, command, argumentsJson)) {
+    return false;
+  }
+  char seqToken[64] = {};
+  std::snprintf(seqToken, sizeof(seqToken), "\"request_seq\":%d,\"success\":",
+                seq);
+  for (int attempt = 0; attempt < 20; ++attempt) {
+    if (!recv_dap_message(sock, recvBuffer, outBody, 5000)) {
+      return false;
+    }
+    if (outBody->find(seqToken) != std::string::npos) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool response_failed(const std::string &body) noexcept {
+  return body.find("\"success\":false") != std::string::npos;
+}
+
+bool response_succeeded(const std::string &body) noexcept {
+  return body.find("\"success\":true") != std::string::npos;
+}
+
+/// Regression for #457: identifiers that would overflow the signed
+/// reference arithmetic, name no frame, or are DAP's zero sentinel come
+/// back as failure responses, and the in-range references for the paused
+/// frame still resolve to its three scopes and its locals. Every request
+/// is answered, so the session is intact for the evaluate that follows.
+bool probe_reference_boundaries(SocketHandle sock, std::string *recvBuffer,
+                                int *seq, ClientResult *result) noexcept {
+  std::string body;
+  bool rejected = true;
+  // Signed-boundary frame id: frameId * 3 + 1 overflows int.
+  rejected = exchange_request(sock, recvBuffer, (*seq)++, "scopes",
+                              "{\"frameId\":2147483647}", &body) &&
+             response_failed(body) && rejected;
+  // Maximum 32-bit frame id.
+  rejected = exchange_request(sock, recvBuffer, (*seq)++, "scopes",
+                              "{\"frameId\":4294967295}", &body) &&
+             response_failed(body) && rejected;
+  // In range for the arithmetic, but deeper than the paused stack.
+  rejected = exchange_request(sock, recvBuffer, (*seq)++, "scopes",
+                              "{\"frameId\":4096}", &body) &&
+             response_failed(body) && rejected;
+  // Zero is DAP's "no children" sentinel, never a scope.
+  rejected = exchange_request(sock, recvBuffer, (*seq)++, "variables",
+                              "{\"variablesReference\":0}", &body) &&
+             response_failed(body) && rejected;
+  // Maximum reference: decodes to a frame far beyond the stack.
+  rejected = exchange_request(sock, recvBuffer, (*seq)++, "variables",
+                              "{\"variablesReference\":4294967295}", &body) &&
+             response_failed(body) && rejected;
+  result->referenceBoundariesRejected = rejected;
+
+  bool accepted = true;
+  accepted = exchange_request(sock, recvBuffer, (*seq)++, "scopes",
+                              "{\"frameId\":0}", &body) &&
+             response_succeeded(body) &&
+             (body.find("\"variablesReference\":1,") != std::string::npos) &&
+             (body.find("\"variablesReference\":2,") != std::string::npos) &&
+             (body.find("\"variablesReference\":3,") != std::string::npos) &&
+             accepted;
+  // Reference 1 is frame 0's Locals scope; the paused function declares
+  // the local `value`.
+  accepted = exchange_request(sock, recvBuffer, (*seq)++, "variables",
+                              "{\"variablesReference\":1}", &body) &&
+             response_succeeded(body) &&
+             (body.find("\"name\":\"value\"") != std::string::npos) &&
+             accepted;
+  result->validReferencesAccepted = accepted;
+  return true;
+}
 
 /// Runs the configured command, loop, or tool for mock dap client.
 void run_mock_dap_client(int breakpointLine, ClientResult *result) noexcept {
@@ -349,6 +435,9 @@ void run_mock_dap_client(int breakpointLine, ClientResult *result) noexcept {
                     breakpointLine);
       if (body.find(lineToken) != std::string::npos) {
         result->stackLineMatched = true;
+      }
+      if (!probe_reference_boundaries(sock, &recvBuffer, &seq, result)) {
+        break;
       }
       // Regression for #454: an expression that never returns must come
       // back as a bounded error response rather than holding the paused
@@ -603,15 +692,20 @@ bool test_dap_breakpoint_pause() noexcept {
   const bool ok = callOk && clientResult.connected &&
                   clientResult.stoppedEventSeen &&
                   clientResult.stackLineMatched &&
+                  clientResult.referenceBoundariesRejected &&
+                  clientResult.validReferencesAccepted &&
                   clientResult.evaluateBoundedErrorSeen &&
                   clientResult.evaluateAfterwardsOk &&
                   clientResult.continueAckSeen;
   if (!ok) {
     std::printf("\n    callOk=%d connected=%d stopped=%d line=%d "
+                "refsRejected=%d refsAccepted=%d "
                 "evalBounded=%d evalAfter=%d continue=%d\n",
                 callOk ? 1 : 0, clientResult.connected ? 1 : 0,
                 clientResult.stoppedEventSeen ? 1 : 0,
                 clientResult.stackLineMatched ? 1 : 0,
+                clientResult.referenceBoundariesRejected ? 1 : 0,
+                clientResult.validReferencesAccepted ? 1 : 0,
                 clientResult.evaluateBoundedErrorSeen ? 1 : 0,
                 clientResult.evaluateAfterwardsOk ? 1 : 0,
                 clientResult.continueAckSeen ? 1 : 0);
