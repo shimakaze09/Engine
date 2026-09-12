@@ -191,10 +191,10 @@ constexpr std::size_t kMaxChunkJobs = 1024U;
 constexpr std::size_t kMaxPhaseJobs = kMaxUpdateStepsPerFrame * 2U + 4U;
 constexpr std::uint32_t kSliceDiagnosticsPeriodFrames = 60U;
 
-/// Production MaterialTextureLoadFn: the same synchronous GL texture loader
+/// Production MaterialTextureLoadFn: the same synchronous texture loader
 /// every other texture consumer (skybox, character textures) already calls.
-/// Only ever invoked from stage_assets, which has just confirmed a GL
-/// context is current.
+/// Only ever invoked from stage_assets, on the main thread that owns the
+/// render device.
 renderer::TextureHandle load_material_texture_production(
     const char *virtualPath, void * /*userData*/) noexcept {
   return renderer::load_texture(virtualPath);
@@ -547,11 +547,9 @@ struct EnginePipeline::Impl final {
   bool singleStepping = false;
   bool runPhysics = false;
   bool runFrameGraph = false;
-  int appliedVsync = 1;
   renderer::DynamicResolutionState dynamicResolution{};
   // Per-frame tuning cvars read through handles so the frame stages never
   // scan the cvar table by name in steady state.
-  core::CVarRef vsyncCvar{"r_vsync"};
   core::CVarRef renderScaleCvar{"r_render_scale"};
   core::CVarRef dynamicResolutionCvar{"r_dynamic_resolution"};
   core::CVarRef dynamicResolutionMinCvar{"r_dynamic_resolution_min"};
@@ -1019,27 +1017,20 @@ void EnginePipeline::Impl::stage_assets() noexcept {
     content::begin_streaming_frame(assetStreamingQueue.get());
   }
 
-  if (!core::make_render_context_current()) {
-    core::log_message(core::LogLevel::Warning, "assets",
-                      "skipping asset transitions: render context unavailable");
-  } else {
-    if ((assetStreamingQueue != nullptr) && (assetStreamingState != nullptr)) {
-      static_cast<void>(content::update_asset_streaming(
-          assetStreamingQueue.get(), &runtime_streaming_load_mesh,
-          &runtime_streaming_upload_mesh, assetStreamingState.get()));
-    }
-    sync_streaming_failures(&assetDatabaseService);
-
-    updatedAssets = renderer::update_asset_manager(
-        assetManager.get(), assetDatabase.get(), meshRegistry.get(), 16U);
-    // Not a hot path: cost is O(materials with an unresolved texture slot),
-    // which drains to zero once content is resident (see resolve_material_
-    // textures's header comment). Requires the GL context just confirmed
-    // current above.
-    static_cast<void>(renderer::resolve_material_textures(
-        assetDatabase.get(), &load_material_texture_production, nullptr));
-    core::release_render_context();
+  if ((assetStreamingQueue != nullptr) && (assetStreamingState != nullptr)) {
+    static_cast<void>(content::update_asset_streaming(
+        assetStreamingQueue.get(), &runtime_streaming_load_mesh,
+        &runtime_streaming_upload_mesh, assetStreamingState.get()));
   }
+  sync_streaming_failures(&assetDatabaseService);
+
+  updatedAssets = renderer::update_asset_manager(
+      assetManager.get(), assetDatabase.get(), meshRegistry.get(), 16U);
+  // Not a hot path: cost is O(materials with an unresolved texture slot),
+  // which drains to zero once content is resident (see resolve_material_
+  // textures's header comment).
+  static_cast<void>(renderer::resolve_material_textures(
+      assetDatabase.get(), &load_material_texture_production, nullptr));
 
   const int cacheMb = cacheSizeMbCvar.get_int(512);
   if (cacheMb > 0) {
@@ -1565,21 +1556,6 @@ void EnginePipeline::Impl::stage_measure_frame() noexcept {
 // ---------------------------------------------------------------------------
 
 void EnginePipeline::Impl::stage_render() noexcept {
-  if (!core::make_render_context_current()) {
-    core::log_message(core::LogLevel::Error, "editor",
-                      "failed to acquire render context for editor");
-    fatalError = true;
-    running = false;
-    return;
-  }
-
-  const int requestedVsync =
-      runtime::normalize_vsync_interval(vsyncCvar.get_int(1));
-  if (requestedVsync != appliedVsync) {
-    appliedVsync = requestedVsync;
-    static_cast<void>(core::set_render_vsync(requestedVsync));
-  }
-
   // Device reach (#138): the effective scene render scale is the user's
   // base scale times the dynamic controller's factor; the controller
   // steps against the presented frame budget (r_max_fps, else 60 Hz).
@@ -1634,7 +1610,6 @@ void EnginePipeline::Impl::stage_render() noexcept {
                    static_cast<float>(utilizationPct));
   }
   renderer::present_render_device();
-  core::release_render_context();
 
   if (interpolateCamera) {
     renderer::set_active_camera(currentCameraSample);

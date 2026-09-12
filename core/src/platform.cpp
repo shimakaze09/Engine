@@ -38,7 +38,6 @@ namespace {
 
 bool g_platformRunning = false;
 SDL_Window *g_window = nullptr;
-SDL_GLContext g_glContext = nullptr;
 bool g_headless = false;
 bool g_gamepadSubsystem = false;
 
@@ -64,8 +63,6 @@ void shutdown_gamepads() noexcept {
     g_gamepadSubsystem = false;
   }
 }
-bool g_externalRenderContext = false;
-
 constexpr std::size_t kPlatformPathMax = 1024U;
 constexpr char kDefaultOrganizationName[] = "Engine";
 constexpr char kDefaultApplicationName[] = "Engine";
@@ -201,12 +198,6 @@ void log_sdl_error(const char *message) noexcept {
 
 /// Shuts down the owning system for platform resources.
 void shutdown_platform_resources() noexcept {
-  if (g_glContext != nullptr) {
-    SDL_GL_MakeCurrent(g_window, nullptr);
-    SDL_GL_DestroyContext(g_glContext);
-    g_glContext = nullptr;
-  }
-
   if (g_window != nullptr) {
     SDL_DestroyWindow(g_window);
     g_window = nullptr;
@@ -216,7 +207,6 @@ void shutdown_platform_resources() noexcept {
     static_cast<void>(SDL_ResetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS));
   }
   g_headless = false;
-  g_externalRenderContext = false;
 
   shutdown_gamepads();
   SDL_QuitSubSystem(SDL_INIT_VIDEO);
@@ -224,8 +214,7 @@ void shutdown_platform_resources() noexcept {
 
 /// Initializes the owning system for platform impl.
 bool initialize_platform_impl(int width, int height, const char *title,
-                              bool vsync, bool headless,
-                              bool externalRenderContext) noexcept {
+                              bool headless) noexcept {
   if (g_window != nullptr) {
     g_platformRunning = true;
     return true;
@@ -254,8 +243,8 @@ bool initialize_platform_impl(int width, int height, const char *title,
     log_sdl_error("gamepad subsystem unavailable; controllers disabled");
   }
 
-  // #196: headless skips every GL step — window without the OpenGL flag,
-  // no context; the render-context helpers below no-op successfully.
+  // #196: headless is a hidden window on the dummy driver; the render
+  // device then stays on the null backend.
   if (headless) {
     g_window = SDL_CreateWindow(title, width, height, SDL_WINDOW_HIDDEN);
     if (g_window == nullptr) {
@@ -268,39 +257,11 @@ bool initialize_platform_impl(int width, int height, const char *title,
     return true;
   }
 
-  // #138: an external-context backend (bgfx) owns device and swapchain;
-  // the window is created without OpenGL and the backend reads the
-  // native handles. vsync is applied by the backend at its reset.
-  if (externalRenderContext) {
-    static_cast<void>(vsync);
-    g_window = SDL_CreateWindow(title, width, height,
-                                SDL_WINDOW_RESIZABLE |
-                                    SDL_WINDOW_HIGH_PIXEL_DENSITY);
-    if (g_window == nullptr) {
-      log_sdl_error("failed to create SDL window (external context)");
-      shutdown_platform_resources();
-      return false;
-    }
-    static_cast<void>(SDL_SetWindowPosition(g_window, SDL_WINDOWPOS_CENTERED,
-                                            SDL_WINDOWPOS_CENTERED));
-    g_externalRenderContext = true;
-    g_platformRunning = true;
-    return true;
-  }
-
-  if (!SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 4) ||
-      !SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 5) ||
-      !SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK,
-                           SDL_GL_CONTEXT_PROFILE_CORE) ||
-      !SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1) ||
-      !SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24)) {
-    log_sdl_error("failed to configure OpenGL context attributes");
-    shutdown_platform_resources();
-    return false;
-  }
-
+  // The render backend owns its device and swapchain: the window is
+  // created without an OpenGL context, the backend reads the native
+  // handles below, and vsync is applied by the backend at its reset.
   g_window = SDL_CreateWindow(title, width, height,
-                              SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE |
+                              SDL_WINDOW_RESIZABLE |
                                   SDL_WINDOW_HIGH_PIXEL_DENSITY);
   if (g_window == nullptr) {
     log_sdl_error("failed to create SDL window");
@@ -309,25 +270,6 @@ bool initialize_platform_impl(int width, int height, const char *title,
   }
   static_cast<void>(SDL_SetWindowPosition(g_window, SDL_WINDOWPOS_CENTERED,
                                           SDL_WINDOWPOS_CENTERED));
-
-  g_glContext = SDL_GL_CreateContext(g_window);
-  if (g_glContext == nullptr) {
-    log_sdl_error("failed to create OpenGL context");
-    shutdown_platform_resources();
-    return false;
-  }
-
-  if (!SDL_GL_MakeCurrent(g_window, g_glContext)) {
-    log_sdl_error("failed to make OpenGL context current");
-    shutdown_platform_resources();
-    return false;
-  }
-
-  if (!SDL_GL_SetSwapInterval(vsync ? 1 : 0)) {
-    log_sdl_error("failed to set swap interval");
-  }
-
-  SDL_GL_MakeCurrent(g_window, nullptr);
   g_platformRunning = true;
   return true;
 }
@@ -397,7 +339,7 @@ const char *non_empty_env(const char *name) noexcept {
 
 /// Initializes the owning system for platform.
 bool initialize_platform() noexcept {
-  return initialize_platform_impl(1280, 720, "engine", true, false, false);
+  return initialize_platform_impl(1280, 720, "engine", false);
 }
 
 /// Initializes the owning system for platform.
@@ -405,9 +347,7 @@ bool initialize_platform(const PlatformConfig &config) noexcept {
   const int w = (config.width > 0) ? config.width : 1280;
   const int h = (config.height > 0) ? config.height : 720;
   const char *title = (config.title != nullptr) ? config.title : "engine";
-  return initialize_platform_impl(w, h, title, config.vsync,
-                                  config.headless,
-                                  config.externalRenderContext);
+  return initialize_platform_impl(w, h, title, config.headless);
 }
 
 /// Shuts down the owning system for platform.
@@ -420,53 +360,6 @@ void shutdown_platform() noexcept {
 bool is_platform_running() noexcept { return g_platformRunning; }
 
 void request_platform_quit() noexcept { g_platformRunning = false; }
-
-bool make_render_context_current() noexcept {
-  if (g_headless || g_externalRenderContext) {
-    return true;
-  }
-  if ((g_window == nullptr) || (g_glContext == nullptr)) {
-    return false;
-  }
-
-  return SDL_GL_MakeCurrent(g_window, g_glContext);
-}
-
-void release_render_context() noexcept {
-  if (g_headless || g_externalRenderContext) {
-    return;
-  }
-  if (g_window != nullptr) {
-    static_cast<void>(SDL_GL_MakeCurrent(g_window, nullptr));
-  }
-}
-
-void swap_render_buffers() noexcept {
-  if (g_headless || g_externalRenderContext) {
-    return;
-  }
-  if (g_window != nullptr) {
-    SDL_GL_SwapWindow(g_window);
-  }
-}
-
-bool set_render_vsync(int interval) noexcept {
-  if (g_headless || g_externalRenderContext) {
-    return true;
-  }
-  if (g_window == nullptr) {
-    return false;
-  }
-  if (SDL_GL_SetSwapInterval(interval)) {
-    return true;
-  }
-  if ((interval == -1) && SDL_GL_SetSwapInterval(1)) {
-    log_sdl_error("adaptive vsync unavailable; fell back to vsync on");
-    return true;
-  }
-  log_sdl_error("failed to set swap interval");
-  return false;
-}
 
 void render_drawable_size(int *outWidth, int *outHeight) noexcept {
   if ((outWidth == nullptr) || (outHeight == nullptr)) {

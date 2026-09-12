@@ -33,20 +33,13 @@ namespace {
 constexpr std::size_t kFrameAllocatorBytes = 1024U * 1024U;
 EngineConfig g_activeConfig{};
 
-/// Shuts down editor GL resources while the platform context is current.
+/// Shuts down the editor bridge's device resources while the device is
+/// still live.
 void shutdown_editor_bridge(const runtime::EditorBridge *bridge) noexcept {
   if ((bridge == nullptr) || (bridge->shutdown == nullptr)) {
     return;
   }
-
-  if (!core::make_render_context_current()) {
-    core::log_message(core::LogLevel::Error, "editor",
-                      "failed to acquire render context for editor shutdown");
-    return;
-  }
-
   bridge->shutdown();
-  core::release_render_context();
 }
 
 } // namespace
@@ -70,13 +63,6 @@ bool bootstrap(const EngineConfig &config) noexcept {
     return false;
   }
   g_activeConfig = adopted;
-
-  // #138: a backend that owns its swapchain (bgfx) needs the platform
-  // window created without an OpenGL context; headless keeps priority.
-  if (!g_activeConfig.core.platform.headless) {
-    g_activeConfig.core.platform.externalRenderContext =
-        renderer::render_backend_owns_swapchain();
-  }
 
   if (!core::initialize_core(g_activeConfig.core)) {
     return false;
@@ -149,11 +135,12 @@ bool bootstrap(const EngineConfig &config) noexcept {
   // more, instead of one still latched off by the previous teardown.
   renderer::initialize_renderer();
 
-  // #138: the swapchain-owning backend initializes its device here,
-  // before the editor bridge — the bgfx ImGui renderer creates device
-  // objects during bridge init (initialize_render_device is idempotent,
-  // so the pipeline's later call is a no-op).
-  if (g_activeConfig.core.platform.externalRenderContext &&
+  // A windowed run initializes the swapchain-owning device here, before
+  // the editor bridge — the bgfx ImGui renderer creates device objects
+  // during bridge init (initialize_render_device is idempotent, so the
+  // pipeline's later call is a no-op). Headless runs keep the pipeline's
+  // lazy null-device initialization.
+  if (!g_activeConfig.core.platform.headless &&
       !renderer::initialize_render_device()) {
     core::log_message(core::LogLevel::Error, "renderer",
                       "render device initialization failed at bootstrap");
@@ -186,24 +173,13 @@ bool bootstrap(const EngineConfig &config) noexcept {
 
   const runtime::EditorBridge *bridge = runtime::editor_bridge();
   if ((bridge != nullptr) && (bridge->initialize != nullptr)) {
-    if (!core::make_render_context_current()) {
-      core::log_message(core::LogLevel::Error, "editor",
-                        "failed to acquire render context for editor init");
-      renderer::shutdown_renderer();
-      core::shutdown_core();
-      return false;
-    }
-
     if (!bridge->initialize(core::get_sdl_window())) {
       core::log_message(core::LogLevel::Error, "editor",
                         "failed to initialize editor bridge");
-      core::release_render_context();
       renderer::shutdown_renderer();
       core::shutdown_core();
       return false;
     }
-
-    core::release_render_context();
   }
 
   if (!scripting::initialize_scripting()) {

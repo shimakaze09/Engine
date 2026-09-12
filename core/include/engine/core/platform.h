@@ -16,15 +16,12 @@ struct PlatformConfig final {
   int width = 1280;
   int height = 720;
   const char *title = "engine";
-  bool vsync = true;
-  // #196: create the window without OpenGL (no context; render-context
-  // calls become no-op successes) so bootstrap completes on headless CI.
+  // Hidden window on SDL's dummy video driver, so bootstrap completes on a
+  // machine with no display; the render device then stays on the null
+  // backend. A visible window is created without an OpenGL context: the
+  // render backend owns its device and swapchain and reads the native
+  // handles below.
   bool headless = false;
-  // #138: create a visible window without an OpenGL context for render
-  // backends that own their device and swapchain (bgfx); the GL
-  // context/swap/vsync helpers become no-op successes and the native
-  // handles below feed the backend's platform data.
-  bool externalRenderContext = false;
 };
 
 /// Initializes the owning system for platform.
@@ -37,15 +34,6 @@ void shutdown_platform() noexcept;
 bool is_platform_running() noexcept;
 /// Requests the platform loop to exit after the current frame.
 void request_platform_quit() noexcept;
-/// Makes the GL context current on this thread; false when headless.
-bool make_render_context_current() noexcept;
-/// Releases the GL context from this thread.
-void release_render_context() noexcept;
-/// Swaps the window's front/back buffers.
-void swap_render_buffers() noexcept;
-/// Sets the present interval (0 off, 1 on, -1 adaptive; adaptive falls
-/// back to 1 when the driver rejects it). Requires a current GL context.
-bool set_render_vsync(int interval) noexcept;
 /// Drawable size in pixels (may differ from window size on HiDPI).
 void render_drawable_size(int *outWidth, int *outHeight) noexcept;
 /// Environment variable value, or nullptr when unset or empty (the
