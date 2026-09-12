@@ -413,7 +413,13 @@ directory-global by design.
   `play_sound_at` + 2D `play_sound_oneshot`), the camera-following 3D
   listener, and VFS-resolved loose-file streaming music (archive-backed
   streaming remains pending; `tools/gen_sounds.py` generates the
-  bundled placeholder WAVs in `assets/sounds/`).
+  bundled placeholder WAVs in `assets/sounds/`). Decode budgets (#425):
+  `audio.max_sound_file_bytes` (32 MiB) bounds the VFS read `load_sound`
+  consumes on the handle it reads from, `audio.max_decoded_pcm_bytes`
+  (256 MiB) caps the PCM a loaded sound's header may claim before the
+  first frame decodes, and `audio.max_music_file_bytes` (512 MiB) caps
+  the file `play_music` streams, checked from metadata before the stream
+  opens; a refusal logs `<path>: <reason>` with the numbers and the cvar.
 - `scripting/` — Lua runtime + sandbox (instruction/memory caps), DAP
   debugger, hot reload with state persist, generated bindings
   (`bindable_api.h` → binding generator), and domain binding TUs in `src/`
