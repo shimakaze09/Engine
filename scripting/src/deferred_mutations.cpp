@@ -476,7 +476,8 @@ bool apply_or_queue_point_light_component(
   }
 
   if (can_apply_mutations_now()) {
-    return binding.world->add_point_light_component(entity, component);
+    return binding.services->add_point_light_component_op(binding.world,
+                                                          entity, component);
   }
 
   DeferredMutation mutation{};
@@ -495,7 +496,8 @@ bool apply_or_queue_remove_point_light_component(
   }
 
   if (can_apply_mutations_now()) {
-    return binding.world->remove_point_light_component(entity);
+    return binding.services->remove_point_light_component_op(binding.world,
+                                                             entity);
   }
 
   DeferredMutation mutation{};
@@ -514,7 +516,8 @@ bool apply_or_queue_spot_light_component(
   }
 
   if (can_apply_mutations_now()) {
-    return binding.world->add_spot_light_component(entity, component);
+    return binding.services->add_spot_light_component_op(binding.world,
+                                                         entity, component);
   }
 
   DeferredMutation mutation{};
@@ -533,7 +536,8 @@ bool apply_or_queue_remove_spot_light_component(
   }
 
   if (can_apply_mutations_now()) {
-    return binding.world->remove_spot_light_component(entity);
+    return binding.services->remove_spot_light_component_op(binding.world,
+                                                            entity);
   }
 
   DeferredMutation mutation{};
@@ -651,18 +655,20 @@ void flush_deferred_mutations() noexcept {
           binding.world, mutation.entity.index));
       break;
     case DeferredMutationType::AddPointLightComponent:
-      note(binding.world->add_point_light_component(
-          mutation.entity, mutation.pointLightComponent));
+      note(binding.services->add_point_light_component_op(
+          binding.world, mutation.entity, mutation.pointLightComponent));
       break;
     case DeferredMutationType::RemovePointLightComponent:
-      note(binding.world->remove_point_light_component(mutation.entity));
+      note(binding.services->remove_point_light_component_op(
+          binding.world, mutation.entity));
       break;
     case DeferredMutationType::AddSpotLightComponent:
-      note(binding.world->add_spot_light_component(
-          mutation.entity, mutation.spotLightComponent));
+      note(binding.services->add_spot_light_component_op(
+          binding.world, mutation.entity, mutation.spotLightComponent));
       break;
     case DeferredMutationType::RemoveSpotLightComponent:
-      note(binding.world->remove_spot_light_component(mutation.entity));
+      note(binding.services->remove_spot_light_component_op(
+          binding.world, mutation.entity));
       break;
     }
   }
