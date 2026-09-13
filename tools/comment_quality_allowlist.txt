@@ -206,7 +206,7 @@ tools/asset_packer/dependency_graph.cpp	history-reference	3
 tools/asset_packer/main.cpp	history-reference	7
 tools/asset_packer/main.cpp	temporal-language	1
 tools/asset_packer/mesh_cook.cpp	history-reference	5
-tools/asset_packer/packer_shared.h	history-reference	11
+tools/asset_packer/packer_shared.h	history-reference	10
 tools/asset_packer/shader_cook.cpp	history-reference	4
 tools/asset_packer/shader_cook.h	history-reference	1
 tools/asset_packer/skeleton_import.cpp	history-reference	2

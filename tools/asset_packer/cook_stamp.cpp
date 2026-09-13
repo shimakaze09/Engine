@@ -144,6 +144,21 @@ std::uint64_t hash_import_settings(const ImportSettings &settings) {
   return hash;
 }
 
+std::uint64_t cook_settings_key(std::uint64_t importSettingsHash,
+                                const char *logicRevision) {
+  std::uint64_t hash = importSettingsHash;
+  if (logicRevision == nullptr) {
+    return hash;
+  }
+  // The terminator is fed too, so "a" + "b" and "ab" cannot collide.
+  const std::size_t length = std::strlen(logicRevision) + 1U;
+  for (std::size_t i = 0U; i < length; ++i) {
+    hash ^= static_cast<unsigned char>(logicRevision[i]);
+    hash *= kFnv64Prime;
+  }
+  return hash;
+}
+
 void sort_dependency_digests(std::vector<DependencyDigest> &digests) {
   std::sort(digests.begin(), digests.end(),
             [](const DependencyDigest &a, const DependencyDigest &b) {
@@ -387,6 +402,17 @@ bool read_cook_stamp(const char *outputPath, std::uint64_t *outSourceHash,
   while (std::fgets(line, static_cast<int>(sizeof(line)), file) != nullptr) {
     unsigned long long hash = 0ULL;
     unsigned int toolVersion = 0U;
+    unsigned int schema = 0U;
+    if (std::sscanf(line, "SCHEMA %u", &schema) == 1) {
+      // A newer schema's lines have meanings this reader does not know,
+      // so the stamp is unreadable rather than partially trusted: the
+      // caller recooks and writes a stamp it can read back.
+      if (schema > kCookStampSchema) {
+        std::fclose(file);
+        return false;
+      }
+      continue;
+    }
     if (std::sscanf(line, "TOOL_VERSION %u", &toolVersion) == 1) {
       if (outToolVersion != nullptr) {
         *outToolVersion = static_cast<std::uint32_t>(toolVersion);

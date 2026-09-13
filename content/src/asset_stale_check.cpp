@@ -9,6 +9,8 @@
 
 #include "engine/content/asset_staleness.h"
 
+#include "engine/content/cook_contract.h"
+
 #include <atomic>
 #include <cerrno>
 #include <cstdint>
@@ -252,9 +254,36 @@ bool is_presentation_output(const char *path) noexcept {
          (std::strstr(path, "\\.thumbnails\\") != nullptr);
 }
 
-/// Validates every OUTPUT line of the stamp text against the files on
-/// disk. Returns the verdict; logs the first contradiction with both the
-/// asset and the offending output so the diagnostic is actionable.
+/// Parses an unsigned decimal value after `prefix` on `line`; false when
+/// the line does not start with the prefix or carries no plain number.
+bool parse_prefixed_uint(const char *line, const char *prefix,
+                         std::uint32_t *outValue) noexcept {
+  const std::size_t prefixLength = std::strlen(prefix);
+  if (std::strncmp(line, prefix, prefixLength) != 0) {
+    return false;
+  }
+  const char *digits = line + prefixLength;
+  if ((*digits < '0') || (*digits > '9')) {
+    return false;
+  }
+  char *end = nullptr;
+  errno = 0;
+  const unsigned long value = std::strtoul(digits, &end, 10);
+  if ((errno != 0) || (end == digits) || (value > 0xFFFFFFFFUL)) {
+    return false;
+  }
+  *outValue = static_cast<std::uint32_t>(value);
+  return true;
+}
+
+/// Validates the stamp's contract lines and every OUTPUT line against
+/// the files on disk. A stamp declaring a newer schema than this build
+/// reads, or a tool version other than the one this build was cooked
+/// against, certifies nothing here: its outputs may be a format or an
+/// import semantics this loader does not expect, so the asset is refused
+/// until the tree is recooked. Returns the verdict; logs the first
+/// contradiction with both the asset and the offending line so the
+/// diagnostic is actionable.
 std::uint32_t validate_stamp_outputs(const char *cookedPath, char *text) noexcept {
   bool sawOutputLine = false;
   char *cursor = text;
@@ -265,6 +294,36 @@ std::uint32_t validate_stamp_outputs(const char *cookedPath, char *text) noexcep
     }
     char *line = cursor;
     cursor = (lineEnd != nullptr) ? (lineEnd + 1) : nullptr;
+
+    std::uint32_t declared = 0U;
+    if (parse_prefixed_uint(line, "SCHEMA ", &declared)) {
+      if (declared > kCookStampSchema) {
+        char message[640] = {};
+        std::snprintf(message, sizeof(message),
+                      "rejecting cooked asset %s: cook stamp schema %u is "
+                      "newer than this build reads (%u); re-run this "
+                      "build's asset packer",
+                      cookedPath, static_cast<unsigned int>(declared),
+                      static_cast<unsigned int>(kCookStampSchema));
+        core::log_message(core::LogLevel::Error, "assets", message);
+        return kVerdictRejected;
+      }
+      continue;
+    }
+    if (parse_prefixed_uint(line, "TOOL_VERSION ", &declared)) {
+      if (declared != kCookToolVersion) {
+        char message[640] = {};
+        std::snprintf(message, sizeof(message),
+                      "rejecting cooked asset %s: cooked by asset packer "
+                      "tool version %u, this build expects %u; re-run the "
+                      "asset packer",
+                      cookedPath, static_cast<unsigned int>(declared),
+                      static_cast<unsigned int>(kCookToolVersion));
+        core::log_message(core::LogLevel::Error, "assets", message);
+        return kVerdictRejected;
+      }
+      continue;
+    }
 
     if (std::strncmp(line, "OUTPUT ", 7U) != 0) {
       continue;
