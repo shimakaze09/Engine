@@ -25,6 +25,7 @@ extern "C" {
 #include "engine/core/logging.h"
 #include "engine/core/string_util.h"
 #include "engine/math/quat.h"
+#include "engine/math/vec3.h"
 #include "engine/runtime/scripting_bridge.h"
 #include "engine/runtime/world.h"
 
@@ -75,11 +76,10 @@ int lua_engine_play_sound(lua_State *state) noexcept {
   float volume = 1.0F;
   float pitch = 1.0F;
   bool loop = false;
-  if ((lua_gettop(state) >= 2) && lua_isnumber(state, 2)) {
-    volume = static_cast<float>(lua_tonumber(state, 2));
-  }
-  if ((lua_gettop(state) >= 3) && lua_isnumber(state, 3)) {
-    pitch = static_cast<float>(lua_tonumber(state, 3));
+  if (!read_optional_finite_number_arg(state, 2, 1.0F, &volume) ||
+      !read_optional_finite_number_arg(state, 3, 1.0F, &pitch)) {
+    lua_pushboolean(state, 0);
+    return 1;
   }
   if (lua_gettop(state) >= 4) {
     loop = lua_toboolean(state, 4) != 0;
@@ -103,8 +103,10 @@ int lua_engine_stop_sound(lua_State *state) noexcept {
 // engine.play_sound_at(sound, x, y, z [, volume]) → bool
 // Spatialized fire-and-forget one-shot on the sfx bus.
 int lua_engine_play_sound_at(lua_State *state) noexcept {
-  if (!lua_isnumber(state, 1) || !lua_isnumber(state, 2) ||
-      !lua_isnumber(state, 3) || !lua_isnumber(state, 4)) {
+  math::Vec3 position{};
+  float volume = 1.0F;
+  if (!lua_isnumber(state, 1) || !read_vec3_args(state, 2, &position) ||
+      !read_optional_finite_number_arg(state, 5, 1.0F, &volume)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -112,13 +114,8 @@ int lua_engine_play_sound_at(lua_State *state) noexcept {
   if ((runtime_binding().services != nullptr) &&
       (runtime_binding().services->play_sound_at != nullptr)) {
     const auto soundId = static_cast<std::uint32_t>(lua_tointeger(state, 1));
-    const auto x = static_cast<float>(lua_tonumber(state, 2));
-    const auto y = static_cast<float>(lua_tonumber(state, 3));
-    const auto z = static_cast<float>(lua_tonumber(state, 4));
-    const float volume =
-        lua_isnumber(state, 5) ? static_cast<float>(lua_tonumber(state, 5))
-                               : 1.0F;
-    ok = runtime_binding().services->play_sound_at(soundId, x, y, z, volume);
+    ok = runtime_binding().services->play_sound_at(
+        soundId, position.x, position.y, position.z, volume);
   }
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
@@ -126,7 +123,8 @@ int lua_engine_play_sound_at(lua_State *state) noexcept {
 
 // engine.set_bus_volume(bus, volume): bus is "master", "music", or "sfx".
 int lua_engine_set_bus_volume(lua_State *state) noexcept {
-  if (!lua_isstring(state, 1) || !lua_isnumber(state, 2)) {
+  float volume = 0.0F;
+  if (!lua_isstring(state, 1) || !read_finite_number_arg(state, 2, &volume)) {
     return 0;
   }
   const char *busName = lua_tostring(state, 1);
@@ -140,8 +138,7 @@ int lua_engine_set_bus_volume(lua_State *state) noexcept {
   }
   if ((runtime_binding().services != nullptr) &&
       (runtime_binding().services->set_bus_volume != nullptr)) {
-    runtime_binding().services->set_bus_volume(
-        bus, static_cast<float>(lua_tonumber(state, 2)));
+    runtime_binding().services->set_bus_volume(bus, volume);
   }
   return 0;
 }
@@ -157,12 +154,14 @@ int lua_engine_play_music(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
+  float volume = 1.0F;
+  if (!read_optional_finite_number_arg(state, 2, 1.0F, &volume)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
   bool ok = false;
   if ((runtime_binding().services != nullptr) &&
       (runtime_binding().services->play_music != nullptr)) {
-    const float volume =
-        lua_isnumber(state, 2) ? static_cast<float>(lua_tonumber(state, 2))
-                               : 1.0F;
     const bool loop = (lua_isboolean(state, 3) == 0) ||
                       (lua_toboolean(state, 3) != 0);
     ok = runtime_binding().services->play_music(path, volume, loop);
