@@ -372,17 +372,17 @@ engine_add_test_executable(engine_unit_script_physics_finite_args
     engine_runtime
 )
 
-engine_add_test_executable(engine_unit_script_audio_finite_args
+engine_add_test_executable(engine_unit_script_acceleration
     SOURCES
-    script_audio_finite_args_test.cpp
+    script_acceleration_test.cpp
     PRIVATE_DEPS
     engine_scripting
     engine_runtime
 )
 
-engine_add_test_executable(engine_unit_script_acceleration
+engine_add_test_executable(engine_unit_script_audio_finite_args
     SOURCES
-    script_acceleration_test.cpp
+    script_audio_finite_args_test.cpp
     PRIVATE_DEPS
     engine_scripting
     engine_runtime
