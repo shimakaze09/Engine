@@ -380,6 +380,14 @@ engine_add_test_executable(engine_unit_script_acceleration
     engine_runtime
 )
 
+engine_add_test_executable(engine_unit_script_audio_finite_args
+    SOURCES
+    script_audio_finite_args_test.cpp
+    PRIVATE_DEPS
+    engine_scripting
+    engine_runtime
+)
+
 engine_add_test_executable(engine_unit_input_config_lua
     SOURCES
     input_config_lua_test.cpp
