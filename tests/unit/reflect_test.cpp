@@ -3,13 +3,17 @@
 // type behaves the same, and a registration the fixed tables cannot hold is
 // refused, counted, and reported at core initialization instead of being
 // silently dropped (65th type, 17th field, field outside its type, field of
-// a refused type, null type name, zero-sized type, null field name).
+// a refused type, null type name, zero-sized type, null field name), and
+// every field carries a wire key separate from its member name (#177):
+// defaulted to the name, pinned by REFLECT_FIELD_KEY, unique per type, and
+// equal to the name for every runtime component so saved bytes are stable.
 
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 
+#include "engine/core/hash.h"
 #include "engine/core/logging.h"
 #include "engine/core/reflect.h"
 #include "engine/runtime/reflect_types.h"
@@ -233,6 +237,86 @@ int check_macro_overflow_is_reported() noexcept {
   return 0;
 }
 
+/// Wire keys (#177): a field's key defaults to its member name, an
+/// explicit key is stored verbatim with its FNV-1a-32 id, an empty key and
+/// a key already on the type are refused and counted, and both lookups
+/// find the field by key rather than by member name.
+int check_wire_keys() noexcept {
+  using engine::core::TypeDescriptor;
+  using engine::core::TypeField;
+  static engine::core::TypeRegistry registry{};
+  TypeDescriptor *desc = registry.register_type("Keyed", sizeof(float) * 4U);
+  if (desc == nullptr) {
+    return 60;
+  }
+
+  if (!registry.add_field(desc, "plain", 0U, sizeof(float),
+                          TypeField::Kind::Float)) {
+    return 61;
+  }
+  const TypeField *plain = desc->find_field("plain");
+  if ((plain == nullptr) || (plain->key == nullptr) ||
+      (std::strcmp(plain->key, "plain") != 0) ||
+      (plain->id != engine::core::fnv1a_32("plain"))) {
+    return 62; // default key is the member name, id hashes the key
+  }
+
+  if (!registry.add_field(desc, "renamedMember", sizeof(float), sizeof(float),
+                          TypeField::Kind::Float, "legacy_key")) {
+    return 63;
+  }
+  const TypeField *keyed = desc->find_field("renamedMember");
+  if ((keyed == nullptr) || (std::strcmp(keyed->key, "legacy_key") != 0) ||
+      (keyed->id != engine::core::fnv1a_32("legacy_key")) ||
+      (desc->find_field_by_key("legacy_key") != keyed) ||
+      (desc->find_field_by_id(engine::core::fnv1a_32("legacy_key")) !=
+       keyed) ||
+      (desc->find_field_by_key("renamedMember") != nullptr) ||
+      (desc->find_field("legacy_key") != nullptr)) {
+    return 64; // name and key are separate namespaces
+  }
+
+  // A second field on an existing key is refused whether it arrives as an
+  // explicit key or as a member name that happens to equal one; an empty
+  // key is refused outright.
+  if (registry.add_field(desc, "other", sizeof(float) * 2U, sizeof(float),
+                         TypeField::Kind::Float, "legacy_key") ||
+      registry.add_field(desc, "plain", sizeof(float) * 2U, sizeof(float),
+                         TypeField::Kind::Float) ||
+      registry.add_field(desc, "third", sizeof(float) * 2U, sizeof(float),
+                         TypeField::Kind::Float, "") ||
+      (desc->fieldCount != 2U) || (desc->droppedFieldCount != 3U) ||
+      (registry.dropped_field_count() != 3U)) {
+    return 65;
+  }
+  return 0;
+}
+
+/// Every field the runtime registers serializes under its member name
+/// today, so the wire-key switch changes no saved scene bytes; a rename
+/// from here on must declare REFLECT_FIELD_KEY with the old key.
+int check_runtime_keys_match_names() noexcept {
+  engine::runtime::ensure_runtime_reflection_registered();
+  const engine::core::TypeRegistry &registry =
+      engine::core::global_type_registry();
+  for (std::size_t t = 0U; t < registry.type_count(); ++t) {
+    const engine::core::TypeDescriptor *type = registry.type_at(t);
+    if ((type == nullptr) || (type->name == nullptr) ||
+        (std::strncmp(type->name, "engine::runtime::", 17U) != 0)) {
+      continue;
+    }
+    for (std::size_t f = 0U; f < type->fieldCount; ++f) {
+      const engine::core::TypeField &field = type->fields[f];
+      if ((field.key == nullptr) ||
+          (std::strcmp(field.key, field.name) != 0) ||
+          (field.id != engine::core::fnv1a_32(field.key))) {
+        return 70;
+      }
+    }
+  }
+  return 0;
+}
+
 } // namespace
 
 REFLECT_TYPE(SeventeenFields)
@@ -264,6 +348,12 @@ int main() {
     return rc;
   }
   if (const int rc = check_malformed_registrations(); rc != 0) {
+    return rc;
+  }
+  if (const int rc = check_wire_keys(); rc != 0) {
+    return rc;
+  }
+  if (const int rc = check_runtime_keys_match_names(); rc != 0) {
     return rc;
   }
   if (const int rc = check_macro_overflow_is_reported(); rc != 0) {

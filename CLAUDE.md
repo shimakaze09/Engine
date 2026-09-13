@@ -460,7 +460,12 @@ directory-global by design.
   `src/component_registry.h` X-macro table, compile-time cross-checked
   against `World::PersistentComponentTypes` and cross-validated per row by
   `engine_unit_component_registry`; shared `serialization_util` codecs;
-  reflection-backed components; registry row order is the serialized key
+  reflection-backed components — each reflected field serializes under
+  its wire key (`REFLECT_FIELD_KEY`, defaulting to the member name, with
+  an FNV-1a-32 `FieldId`), never under the C++ member name, so a member
+  rename declares the old key instead of migrating scenes (#177; every
+  runtime field's key equals its name today, pinned by
+  `engine_unit_reflect`); registry row order is the serialized key
   order of both formats; `AnimationComponent` persists its whole authored
   set — controller path plus `playing` and `playbackSpeed` (#253) —
   through one string-or-object codec both formats share: a component still

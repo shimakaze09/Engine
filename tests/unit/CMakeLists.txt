@@ -324,6 +324,16 @@ engine_add_test_executable(engine_unit_reflect
     engine_runtime
 )
 
+engine_add_test_executable(engine_unit_reflect_wire_key
+    SOURCES
+    reflect_wire_key_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/runtime/src
+    PRIVATE_DEPS
+    engine_core
+    engine_runtime
+)
+
 engine_add_test_executable(engine_unit_scripting
     SOURCES
     scripting_test.cpp
