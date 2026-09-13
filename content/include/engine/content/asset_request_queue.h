@@ -10,6 +10,7 @@
 #include <cstdint>
 
 #include "engine/content/asset_metadata.h"
+#include "engine/core/fixed_ring.h"
 
 namespace engine::content {
 
@@ -24,12 +25,13 @@ struct AssetRequest final {
 };
 
 /// Fixed transition-request ring drained by a per-type residency service.
+/// A full ring refuses rather than overwrites: dropping a queued
+/// transition silently would lose a residency change, so the refusal is
+/// counted in droppedRequests for the owner to report.
 struct AssetRequestQueue final {
   static constexpr std::size_t kMaxQueuedRequests = 1024U;
 
-  std::array<AssetRequest, kMaxQueuedRequests> requests{};
-  std::size_t requestHead = 0U;
-  std::size_t requestCount = 0U;
+  core::FixedRing<AssetRequest, kMaxQueuedRequests> requests{};
   std::uint32_t droppedRequests = 0U;
 };
 
@@ -38,6 +40,12 @@ void clear_asset_request_queue(AssetRequestQueue *queue) noexcept;
 
 /// Number of queued transitions.
 std::size_t pending_asset_request_count(const AssetRequestQueue *queue) noexcept;
+
+/// Queued transition `index` counted from the oldest (0); nullptr when
+/// out of range. Read-only inspection for diagnostics and tests; draining
+/// goes through pop_asset_request.
+const AssetRequest *pending_asset_request_at(const AssetRequestQueue *queue,
+                                             std::size_t index) noexcept;
 
 /// Enqueues a transition; false (and a once-per-overflow-episode warning,
 /// droppedRequests counting the total) when the ring is full.

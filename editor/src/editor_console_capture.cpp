@@ -3,6 +3,8 @@
 
 #include "editor_console_capture.h"
 
+#include "engine/core/fixed_ring.h"
+
 #include <array>
 #include <atomic>
 #include <cctype>
@@ -17,9 +19,10 @@ namespace {
 using Clock = std::chrono::steady_clock;
 
 std::mutex g_captureMutex{};
-std::array<ConsoleEntry, kMaxConsoleEntries> g_ring{};
-std::size_t g_head = 0U;  // index of oldest retained entry
-std::size_t g_count = 0U; // entries currently retained (<= capacity)
+/// Retained entries, oldest first; a full ring drops its oldest entry so
+/// the newest diagnostics are always the ones kept. Guarded by
+/// g_captureMutex.
+engine::core::FixedRing<ConsoleEntry, kMaxConsoleEntries> g_ring{};
 std::uint64_t g_nextSequence = 1U;
 std::uint64_t g_totalIngested = 0U;
 std::uint64_t g_sessionMarkerSeq = 0U;
@@ -255,27 +258,18 @@ void ingest_locked(ConsoleEntry candidate) noexcept {
   ++g_totalIngested;
   candidate.sequence = g_nextSequence++;
 
-  if (g_count > 0U) {
-    const std::size_t lastSlot = (g_head + g_count - 1U) % kMaxConsoleEntries;
-    ConsoleEntry &last = g_ring[lastSlot];
-    if ((last.level == candidate.level) &&
-       (std::strcmp(last.channel, candidate.channel) == 0) &&
-       (std::strcmp(last.message, candidate.message) == 0)) {
-      ++last.repeatCount;
-      last.sequence = candidate.sequence;
-      last.captureTimeMs = candidate.captureTimeMs;
-      last.frameIndex = candidate.frameIndex;
-      return; // collapsed; no new slot, no additional badge increment
-    }
+  ConsoleEntry *last = g_ring.back();
+  if ((last != nullptr) && (last->level == candidate.level) &&
+      (std::strcmp(last->channel, candidate.channel) == 0) &&
+      (std::strcmp(last->message, candidate.message) == 0)) {
+    ++last->repeatCount;
+    last->sequence = candidate.sequence;
+    last->captureTimeMs = candidate.captureTimeMs;
+    last->frameIndex = candidate.frameIndex;
+    return; // collapsed; no new slot, no additional badge increment
   }
 
-  const std::size_t writeSlot = (g_head + g_count) % kMaxConsoleEntries;
-  g_ring[writeSlot] = candidate;
-  if (g_count < kMaxConsoleEntries) {
-    ++g_count;
-  } else {
-    g_head = (g_head + 1U) % kMaxConsoleEntries; // drop oldest, ring is full
-  }
+  static_cast<void>(g_ring.push_overwrite(candidate));
 
   if (candidate.level >= core::LogLevel::Error) {
     g_unseenErrors.fetch_add(1U, std::memory_order_relaxed);
@@ -326,26 +320,13 @@ void console_capture_sink(core::LogLevel level, const char *channel,
 /// shutdown, and Clear so the three can never drift out of sync with each
 /// other about which counters "empty" resets. Called with the lock held.
 ///
-/// g_ring.fill(...) rather than `g_ring = {}`: ConsoleEntry is 784 bytes,
-/// so the whole 2048-entry ring is ~1.5MB. `g_ring = {}` binds a const
-/// std::array& (the implicit copy-assignment parameter) to a brace-init
-/// prvalue, which forces temporary materialization of the full ~1.5MB
-/// array; a compiler is free to elide that temp's storage but is not
-/// required to, and the windows-2025-vs2026-Release CI lane (clang-cl
-/// against the Microsoft STL, ~1MB default thread stack) segfaulted in
-/// engine_unit_editor_console_capture at the point this runs first
-/// (console_capture_initialize) while every Linux/macOS lane — including
-/// ASAN/UBSAN/TSAN — passed (libstdc++/libc++ elide the temp there, and
-/// their ~8MB default stack has slack either way). fill() only ever
-/// materializes one 784-byte element and assigns it member-wise, so no
-/// oversized temporary can exist regardless of what the STL/compiler
-/// elides. Not reproduced locally (only Linux toolchains are available
-/// here, which already elide the temp); fixed from static analysis of
-/// the object sizes plus the failure signature reported by CI.
+/// The ring is ~1.5MB (2048 entries of 784 bytes) and this runs on the
+/// caller's thread, which on Windows has a ~1MB default stack: the ring's
+/// clear() resets one element at a time and never materializes a
+/// whole-array temporary, so this stays safe on that stack whatever the
+/// compiler elides.
 void reset_state_locked() noexcept {
-  g_ring.fill(ConsoleEntry{});
-  g_head = 0U;
-  g_count = 0U;
+  g_ring.clear();
   g_nextSequence = 1U;
   g_totalIngested = 0U;
   g_sessionMarkerSeq = 0U;
@@ -389,7 +370,7 @@ void console_capture_begin_session() noexcept {
 
 std::size_t console_capture_entry_count() noexcept {
   std::lock_guard<std::mutex> lock(g_captureMutex);
-  return g_count;
+  return g_ring.size();
 }
 
 bool console_capture_get_entry(std::size_t index, ConsoleEntry *out) noexcept {
@@ -397,10 +378,11 @@ bool console_capture_get_entry(std::size_t index, ConsoleEntry *out) noexcept {
     return false;
   }
   std::lock_guard<std::mutex> lock(g_captureMutex);
-  if (index >= g_count) {
+  const ConsoleEntry *entry = g_ring.at(index);
+  if (entry == nullptr) {
     return false;
   }
-  *out = g_ring[(g_head + index) % kMaxConsoleEntries];
+  *out = *entry;
   return true;
 }
 
