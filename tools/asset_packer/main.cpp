@@ -364,7 +364,11 @@ int main(int argc, char **argv) {
 
   ImportSettings importSettings{};
   read_import_settings_from_meta(outputPath, &importSettings);
-  const std::uint64_t importSettingsHash = hash_import_settings(importSettings);
+  // The cook key pairs the settings with the mesh cook's logic revision,
+  // so a logic change recooks (and re-rasterizes the thumbnail, which
+  // derives from the same cooked geometry) without a settings edit.
+  const std::uint64_t importSettingsHash = cook_settings_key(
+      hash_import_settings(importSettings), kMeshCookLogicRevision);
 
   // Sort dependencies by path for deterministic output.
   sort_dependency_digests(dependencyDigests);
