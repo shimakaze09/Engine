@@ -20,6 +20,8 @@ class World;
 struct MeshComponent;
 struct NameComponent;
 struct LightComponent;
+struct PointLightComponent;
+struct SpotLightComponent;
 struct ScriptComponent;
 /// Enumerates world phase values used by the engine.
 enum class WorldPhase : std::uint8_t;
@@ -123,6 +125,21 @@ struct RuntimeServices final {
       const runtime::LightComponent &component) noexcept = nullptr;
   bool (*remove_light_component_op)(
       runtime::World *world, std::uint32_t entityIndex) noexcept = nullptr;
+  /// The point/spot light ops take the whole entity handle: the World's
+  /// own liveness check then rejects a handle whose generation has been
+  /// recycled, instead of the bridge re-resolving the index to whichever
+  /// entity holds it now. Every bridge op is meant to carry the full
+  /// handle this way; the index-taking ops above predate that contract.
+  bool (*add_point_light_component_op)(
+      runtime::World *world, runtime::Entity entity,
+      const runtime::PointLightComponent &component) noexcept = nullptr;
+  bool (*remove_point_light_component_op)(
+      runtime::World *world, runtime::Entity entity) noexcept = nullptr;
+  bool (*add_spot_light_component_op)(
+      runtime::World *world, runtime::Entity entity,
+      const runtime::SpotLightComponent &component) noexcept = nullptr;
+  bool (*remove_spot_light_component_op)(
+      runtime::World *world, runtime::Entity entity) noexcept = nullptr;
   bool (*add_script_component_op)(
       runtime::World *world, std::uint32_t entityIndex,
       const runtime::ScriptComponent &component) noexcept = nullptr;

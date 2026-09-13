@@ -372,6 +372,14 @@ engine_add_test_executable(engine_unit_script_physics_finite_args
     engine_runtime
 )
 
+engine_add_test_executable(engine_unit_script_light_bridge
+    SOURCES
+    script_light_bridge_test.cpp
+    PRIVATE_DEPS
+    engine_scripting
+    engine_runtime
+)
+
 engine_add_test_executable(engine_unit_script_acceleration
     SOURCES
     script_acceleration_test.cpp
