@@ -18,10 +18,13 @@ void warn_if_cooked_asset_stale(const char *cookedPath) noexcept;
 /// the stamp certifies must exist with matching content bytes, so a torn
 /// or mixed cook (new mesh beside an old sidecar, or the reverse) is
 /// rejected instead of silently loaded. Presentation outputs under
-/// .thumbnails/ only warn. A missing stamp or a pre-manifest schema is
-/// accepted after a once-per-asset notice — never-certified content
-/// (hand-placed or legacy) stays loadable. Verdicts are cached per path
-/// for the session; safe from the streaming worker.
+/// .thumbnails/ only warn. A stamp declaring a newer schema than
+/// cook_contract.h's, or a TOOL_VERSION other than its, is rejected: it
+/// certifies outputs of a format or import semantics this build was not
+/// cooked against. A missing stamp or a pre-manifest schema is accepted
+/// after a once-per-asset notice — never-certified content (hand-placed
+/// or legacy) stays loadable. Verdicts are cached per path for the
+/// session; safe from the streaming worker.
 bool cooked_asset_generation_ok(const char *cookedPath) noexcept;
 
 /// Clears the once-per-asset warning memory and the per-session

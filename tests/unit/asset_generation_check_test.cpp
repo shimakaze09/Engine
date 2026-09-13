@@ -3,7 +3,9 @@
 // the files on disk (hash mismatch, missing essential output, malformed
 // manifest line) rejects the load, presentation-only thumbnail drift and
 // never-certified assets (no stamp, pre-manifest stamp) stay loadable,
-// and verdicts cache per session until the test-only reset.
+// verdicts cache per session until the test-only reset, and a stamp from
+// another tool version or a newer stamp schema rejects even with intact
+// outputs (#424).
 
 #include <array>
 #include <cstddef>
@@ -101,6 +103,14 @@ bool write_stamp(const char *meshPath, const char *outputLines) noexcept {
     return false;
   }
   return write_bytes(stampPath, text, static_cast<std::size_t>(written));
+}
+
+/// Writes a stamp for `meshPath` from complete text, so a case can vary
+/// the contract lines the SCHEMA-3 writer above fixes.
+bool write_stamp_text(const char *meshPath, const char *text) noexcept {
+  char stampPath[512] = {};
+  std::snprintf(stampPath, sizeof(stampPath), "%s.cookstamp", meshPath);
+  return write_bytes(stampPath, text, std::strlen(text));
 }
 
 void remove_with_stamp(const char *meshPath) noexcept {
@@ -292,6 +302,80 @@ int check_uncertified_assets_stay_loadable() {
   return result;
 }
 
+/// A stamp whose contract lines disagree with this build certifies
+/// nothing (#424): a TOOL_VERSION other than the one the build was cooked
+/// against, or a SCHEMA newer than the reader, rejects the load even when
+/// every listed output hash is intact; a pre-manifest SCHEMA 2 stamp
+/// without a TOOL_VERSION line stays on the legacy accept path.
+int check_foreign_contract_rejects() {
+  constexpr const char *kMesh = "gen_check_contract.mesh";
+  remove_with_stamp(kMesh);
+  if (!write_valid_mesh(kMesh)) {
+    return 560;
+  }
+  std::uint64_t meshHash = 0ULL;
+  if (!hash_file(kMesh, &meshHash)) {
+    return 561;
+  }
+
+  char text[1024] = {};
+  std::snprintf(text, sizeof(text),
+                "SCHEMA 3\nTOOL_VERSION 2\nSOURCE_HASH 0000000000000001\n"
+                "IMPORT_HASH 0000000000000002\nPLATFORM TestPlat\n"
+                "OUTPUT %016llx %s\n",
+                static_cast<unsigned long long>(meshHash), kMesh);
+  if (!write_stamp_text(kMesh, text)) {
+    return 562;
+  }
+  if (engine::content::cooked_asset_generation_ok(kMesh) || load_mesh(kMesh)) {
+    remove_with_stamp(kMesh);
+    return 563; // another tool version's cook must be refused
+  }
+
+  engine::content::reset_cooked_asset_stale_warnings();
+  std::snprintf(text, sizeof(text),
+                "SCHEMA 4\nTOOL_VERSION 3\nSOURCE_HASH 0000000000000001\n"
+                "IMPORT_HASH 0000000000000002\nPLATFORM TestPlat\n"
+                "OUTPUT %016llx %s\n",
+                static_cast<unsigned long long>(meshHash), kMesh);
+  if (!write_stamp_text(kMesh, text)) {
+    return 564;
+  }
+  if (engine::content::cooked_asset_generation_ok(kMesh) || load_mesh(kMesh)) {
+    remove_with_stamp(kMesh);
+    return 565; // a newer stamp schema must be refused
+  }
+
+  engine::content::reset_cooked_asset_stale_warnings();
+  if (!write_stamp_text(kMesh, "SCHEMA 2\nSOURCE_HASH 0000000000000001\n"
+                               "IMPORT_HASH 0000000000000002\n")) {
+    return 566;
+  }
+  if (!engine::content::cooked_asset_generation_ok(kMesh) ||
+      !load_mesh(kMesh)) {
+    remove_with_stamp(kMesh);
+    return 567; // pre-manifest legacy stamps stay loadable
+  }
+
+  engine::content::reset_cooked_asset_stale_warnings();
+  std::snprintf(text, sizeof(text),
+                "SCHEMA 3\nTOOL_VERSION 3\nSOURCE_HASH 0000000000000001\n"
+                "IMPORT_HASH 0000000000000002\nPLATFORM TestPlat\n"
+                "OUTPUT %016llx %s\n",
+                static_cast<unsigned long long>(meshHash), kMesh);
+  if (!write_stamp_text(kMesh, text)) {
+    return 568;
+  }
+  if (!engine::content::cooked_asset_generation_ok(kMesh) ||
+      !load_mesh(kMesh)) {
+    remove_with_stamp(kMesh);
+    return 569; // the current contract still loads
+  }
+
+  remove_with_stamp(kMesh);
+  return 0;
+}
+
 } // namespace
 
 // mesh_loader.cpp compiles standalone into this suite (same recipe as
@@ -327,5 +411,10 @@ int main() {
   if (result != 0) {
     return result;
   }
-  return check_uncertified_assets_stay_loadable();
+  result = check_uncertified_assets_stay_loadable();
+  if (result != 0) {
+    return result;
+  }
+  engine::content::reset_cooked_asset_stale_warnings();
+  return check_foreign_contract_rejects();
 }

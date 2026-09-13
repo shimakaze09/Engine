@@ -12,6 +12,7 @@
 #include <cgltf.h>
 
 #include "dependency_graph.h"
+#include "engine/content/cook_contract.h"
 
 /// Interleaved vertex/index payload extracted from one glTF primitive.
 struct PrimitiveData final {
@@ -38,13 +39,18 @@ struct OutputRecord final {
   std::uint64_t hash = 0ULL;
 };
 
-/// Importer contract version baked into every cook stamp: bump whenever
-/// the cooked output format or import semantics change, so existing
-/// outputs recook once instead of silently keeping stale bytes (audit
-/// H-20). Stamps written before this key existed read as version 0 and
-/// therefore always recook. Version 3 introduced the output manifest
-/// (issue #55); pre-manifest stamps recook once through this gate.
-inline constexpr std::uint32_t kCookToolVersion = 3U;
+/// The stamp schema and importer tool version are the content module's
+/// cook contract, shared with the runtime validator; the packer only
+/// consumes them.
+using engine::content::kCookStampSchema;
+using engine::content::kCookToolVersion;
+
+/// Revision of the mesh cook's own logic, folded into the cook key beside
+/// the import settings so a behavioural change in extraction, up-axis
+/// rotation, normal generation, or scaling recooks an existing tree even
+/// though the source bytes and settings are unchanged. Bump on any such
+/// change; kCookToolVersion covers output format changes.
+inline constexpr const char *kMeshCookLogicRevision = "mesh-cook-logic-1";
 
 #ifndef ENGINE_COOK_PLATFORM
 #define ENGINE_COOK_PLATFORM "Unknown"
@@ -81,6 +87,12 @@ bool build_dependency_digests(const std::vector<std::string> &dependencyPaths,
                               std::vector<DependencyDigest> *outDigests);
 /// Order-independent hash of the import settings block.
 std::uint64_t hash_import_settings(const ImportSettings &settings);
+/// Folds a cook-logic revision into a settings hash to form the key the
+/// stamp records as IMPORT_HASH: the same settings under a different
+/// revision yield a different key, so should_repack recooks after a
+/// logic change. A null revision leaves the hash unchanged.
+std::uint64_t cook_settings_key(std::uint64_t importSettingsHash,
+                                const char *logicRevision);
 /// Sorts digests by path for deterministic stamp layout.
 void sort_dependency_digests(std::vector<DependencyDigest> &digests);
 /// Reads import settings from the output's .meta.json when present.

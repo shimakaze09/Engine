@@ -7,7 +7,8 @@
 // stale-manifest entries are retired at commit and a failed retirement
 // blocks; a failed thumbnail regeneration retires the previous
 // generation's thumbnail and checksum instead of re-certifying them
-// (audit #211).
+// (audit #211); the cook key folds the mesh cook's logic revision and a
+// newer stamp schema recooks (#424).
 
 #include "packer_shared.h"
 
@@ -341,7 +342,73 @@ int check_retire_stale_thumbnail() {
   return 0;
 }
 
+/// EXPECTATION (#424): the cook key folds the cook-logic revision beside
+/// the import settings, so a stamp written under one revision recooks
+/// under another with identical settings; and a stamp declaring a newer
+/// schema than this packer reads recooks instead of certifying outputs
+/// through lines the reader cannot interpret.
+int check_logic_revision_and_schema_gate_recook() {
+  remove_files();
+  if (!write_file(kOutputPath, "cooked-bytes")) {
+    return 701;
+  }
+
+  const std::uint64_t sourceHash = 0x1122334455667788ULL;
+  const std::uint64_t settingsHash = 0x99AABBCCDDEEFF00ULL;
+  const std::vector<DependencyDigest> dependencies{};
+  const std::vector<std::string> outputs{kOutputPath};
+
+  const std::uint64_t keyA = cook_settings_key(settingsHash, "logic-a");
+  const std::uint64_t keyB = cook_settings_key(settingsHash, "logic-b");
+  if ((keyA == keyB) || (keyA == settingsHash) ||
+      (cook_settings_key(settingsHash, nullptr) != settingsHash) ||
+      (cook_settings_key(settingsHash, "logic-a") != keyA)) {
+    return 702;
+  }
+
+  if (!write_cook_stamp(kOutputPath, sourceHash, dependencies, keyA,
+                        kPlatform, outputs)) {
+    remove_files();
+    return 703;
+  }
+  if (should_repack(kOutputPath, sourceHash, dependencies, keyA, kPlatform)) {
+    remove_files();
+    return 704; // same settings, same revision: up to date
+  }
+  if (!should_repack(kOutputPath, sourceHash, dependencies, keyB, kPlatform)) {
+    remove_files();
+    return 705; // same settings, new revision: recook
+  }
+
+  char futureStamp[512] = {};
+  std::snprintf(futureStamp, sizeof(futureStamp),
+                "SCHEMA %u\n"
+                "TOOL_VERSION %u\n"
+                "SOURCE_HASH 1122334455667788\n"
+                "IMPORT_HASH %016llx\n"
+                "PLATFORM TestPlat\n"
+                "OUTPUT 0000000000000001 %s\n",
+                static_cast<unsigned int>(kCookStampSchema + 1U),
+                static_cast<unsigned int>(kCookToolVersion),
+                static_cast<unsigned long long>(keyA), kOutputPath);
+  if (!write_file(kStampPath, futureStamp)) {
+    remove_files();
+    return 706;
+  }
+  if (!should_repack(kOutputPath, sourceHash, dependencies, keyA, kPlatform)) {
+    remove_files();
+    return 707; // a newer schema is unreadable, not partially trusted
+  }
+
+  remove_files();
+  return 0;
+}
+
 int main() {
+  const int contractResult = check_logic_revision_and_schema_gate_recook();
+  if (contractResult != 0) {
+    return contractResult;
+  }
   const int retireResult = check_retire_stale_thumbnail();
   if (retireResult != 0) {
     return retireResult;
