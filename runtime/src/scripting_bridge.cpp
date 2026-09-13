@@ -990,6 +990,43 @@ bool scripting_remove_light_component_op(runtime::World *world,
   return world->remove_light_component(entity);
 }
 
+// The point/spot light ops forward the caller's handle unchanged so the
+// World's generation check decides liveness (a stale handle is refused,
+// never re-targeted to the index's current occupant).
+bool scripting_add_point_light_component_op(
+    runtime::World *world, runtime::Entity entity,
+    const runtime::PointLightComponent &component) noexcept {
+  if (world == nullptr) {
+    return false;
+  }
+  return world->add_point_light_component(entity, component);
+}
+
+bool scripting_remove_point_light_component_op(
+    runtime::World *world, runtime::Entity entity) noexcept {
+  if (world == nullptr) {
+    return false;
+  }
+  return world->remove_point_light_component(entity);
+}
+
+bool scripting_add_spot_light_component_op(
+    runtime::World *world, runtime::Entity entity,
+    const runtime::SpotLightComponent &component) noexcept {
+  if (world == nullptr) {
+    return false;
+  }
+  return world->add_spot_light_component(entity, component);
+}
+
+bool scripting_remove_spot_light_component_op(
+    runtime::World *world, runtime::Entity entity) noexcept {
+  if (world == nullptr) {
+    return false;
+  }
+  return world->remove_spot_light_component(entity);
+}
+
 bool scripting_add_script_component_op(
     runtime::World *world, std::uint32_t entityIndex,
     const runtime::ScriptComponent &component) noexcept {
@@ -1039,6 +1076,10 @@ const scripting::RuntimeServices kScriptingRuntimeServices = {
     &scripting_add_name_component_op,
     &scripting_add_light_component_op,
     &scripting_remove_light_component_op,
+    &scripting_add_point_light_component_op,
+    &scripting_remove_point_light_component_op,
+    &scripting_add_spot_light_component_op,
+    &scripting_remove_spot_light_component_op,
     &scripting_add_script_component_op,
     &scripting_remove_script_component_op,
     &scripting_set_gravity,
