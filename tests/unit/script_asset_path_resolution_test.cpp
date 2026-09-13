@@ -250,17 +250,17 @@ void run_checks(engine::tests::TestContext &ctx,
   bool sawQueuedRequest = false;
   bool queuedPathResolved = false;
   const std::string expectedQueued = forward_slashes(mountDir + "/queued.mesh");
-  for (std::size_t i = 0U; i < manager->requestCount; ++i) {
-    const std::size_t slot =
-        (manager->requestHead + i) %
-        engine::content::AssetRequestQueue::kMaxQueuedRequests;
-    const engine::content::AssetRequest &request = manager->requests[slot];
-    if (request.id != queuedId) {
+  const std::size_t queuedCount =
+      engine::content::pending_asset_request_count(manager.get());
+  for (std::size_t i = 0U; i < queuedCount; ++i) {
+    const engine::content::AssetRequest *request =
+        engine::content::pending_asset_request_at(manager.get(), i);
+    if ((request == nullptr) || (request->id != queuedId)) {
       continue;
     }
     sawQueuedRequest = true;
     queuedPathResolved =
-        forward_slashes(request.sourcePath.data()) == expectedQueued;
+        forward_slashes(request->sourcePath.data()) == expectedQueued;
   }
   ctx.check(sawQueuedRequest, "manager queue holds the request");
   ctx.check(queuedPathResolved, "manager request carries the OS path");

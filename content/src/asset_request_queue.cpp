@@ -31,9 +31,7 @@ void clear_asset_request_queue(AssetRequestQueue *queue) noexcept {
     return;
   }
 
-  queue->requests.fill(AssetRequest{});
-  queue->requestHead = 0U;
-  queue->requestCount = 0U;
+  queue->requests.clear();
   queue->droppedRequests = 0U;
 }
 
@@ -44,7 +42,16 @@ std::size_t pending_asset_request_count(
     return 0U;
   }
 
-  return queue->requestCount;
+  return queue->requests.size();
+}
+
+const AssetRequest *pending_asset_request_at(const AssetRequestQueue *queue,
+                                             std::size_t index) noexcept {
+  if (queue == nullptr) {
+    return nullptr;
+  }
+
+  return queue->requests.at(index);
 }
 
 /// Enqueues a transition; warns once per overflow episode.
@@ -54,7 +61,7 @@ bool push_asset_request(AssetRequestQueue *queue, AssetRequestType type,
     return false;
   }
 
-  if (queue->requestCount >= queue->requests.size()) {
+  if (queue->requests.full()) {
     ++queue->droppedRequests;
     if (queue->droppedRequests == 1U) {
       core::log_message(core::LogLevel::Warning, "assets",
@@ -64,30 +71,21 @@ bool push_asset_request(AssetRequestQueue *queue, AssetRequestType type,
     return false;
   }
 
-  const std::size_t slot =
-      (queue->requestHead + queue->requestCount) % queue->requests.size();
-  AssetRequest &request = queue->requests[slot];
-  request = AssetRequest{};
+  AssetRequest request{};
   request.type = type;
   request.id = id;
   copy_source_path(&request.sourcePath, sourcePath);
-  ++queue->requestCount;
-  return true;
+  return queue->requests.push(request);
 }
 
 /// Pops the oldest transition; false when the ring is empty.
 bool pop_asset_request(AssetRequestQueue *queue,
                        AssetRequest *outRequest) noexcept {
-  if ((queue == nullptr) || (outRequest == nullptr) ||
-      (queue->requestCount == 0U)) {
+  if (queue == nullptr) {
     return false;
   }
 
-  *outRequest = queue->requests[queue->requestHead];
-  queue->requests[queue->requestHead] = AssetRequest{};
-  queue->requestHead = (queue->requestHead + 1U) % queue->requests.size();
-  --queue->requestCount;
-  return true;
+  return queue->requests.pop(outRequest);
 }
 
 /// True when a transition of this type is already queued for the id.
@@ -97,11 +95,10 @@ bool has_pending_asset_request(const AssetRequestQueue *queue,
     return false;
   }
 
-  for (std::size_t i = 0U; i < queue->requestCount; ++i) {
-    const std::size_t slot =
-        (queue->requestHead + i) % queue->requests.size();
-    const AssetRequest &request = queue->requests[slot];
-    if ((request.id == id) && (request.type == type)) {
+  for (std::size_t i = 0U; i < queue->requests.size(); ++i) {
+    const AssetRequest *request = queue->requests.at(i);
+    if ((request != nullptr) && (request->id == id) &&
+        (request->type == type)) {
       return true;
     }
   }
