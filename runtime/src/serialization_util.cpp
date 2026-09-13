@@ -292,7 +292,7 @@ bool write_reflected_component(core::JsonWriter &writer,
 
   for (std::size_t i = 0U; i < descriptor.fieldCount; ++i) {
     const core::TypeField &field = descriptor.fields[i];
-    if (field.name == nullptr) {
+    if (field.key == nullptr) {
       continue;
     }
 
@@ -303,7 +303,7 @@ bool write_reflected_component(core::JsonWriter &writer,
         return false;
       }
 
-      writer.write_float(field.name, *value);
+      writer.write_float(field.key, *value);
       break;
     }
     case core::TypeField::Kind::Uint32: {
@@ -313,7 +313,7 @@ bool write_reflected_component(core::JsonWriter &writer,
         return false;
       }
 
-      writer.write_uint(field.name, *value);
+      writer.write_uint(field.key, *value);
       break;
     }
     case core::TypeField::Kind::Bool: {
@@ -322,7 +322,7 @@ bool write_reflected_component(core::JsonWriter &writer,
         return false;
       }
 
-      writer.write_bool(field.name, *value);
+      writer.write_bool(field.key, *value);
       break;
     }
     case core::TypeField::Kind::Vec2: {
@@ -332,7 +332,7 @@ bool write_reflected_component(core::JsonWriter &writer,
         return false;
       }
 
-      write_vec2(writer, field.name, *value);
+      write_vec2(writer, field.key, *value);
       break;
     }
     case core::TypeField::Kind::Vec3: {
@@ -342,7 +342,7 @@ bool write_reflected_component(core::JsonWriter &writer,
         return false;
       }
 
-      write_vec3(writer, field.name, *value);
+      write_vec3(writer, field.key, *value);
       break;
     }
     case core::TypeField::Kind::Vec4: {
@@ -352,7 +352,7 @@ bool write_reflected_component(core::JsonWriter &writer,
         return false;
       }
 
-      write_vec4(writer, field.name, *value);
+      write_vec4(writer, field.key, *value);
       break;
     }
     case core::TypeField::Kind::Quat: {
@@ -362,7 +362,7 @@ bool write_reflected_component(core::JsonWriter &writer,
         return false;
       }
 
-      write_quat(writer, field.name, *value);
+      write_quat(writer, field.key, *value);
       break;
     }
     case core::TypeField::Kind::Int32:
@@ -390,12 +390,12 @@ bool read_reflected_component(const core::JsonParser &parser,
 
   for (std::size_t i = 0U; i < descriptor.fieldCount; ++i) {
     const core::TypeField &field = descriptor.fields[i];
-    if (field.name == nullptr) {
+    if (field.key == nullptr) {
       continue;
     }
 
     core::JsonValue fieldValue{};
-    if (!parser.get_object_field(componentObject, field.name, &fieldValue)) {
+    if (!parser.get_object_field(componentObject, field.key, &fieldValue)) {
       continue;
     }
 

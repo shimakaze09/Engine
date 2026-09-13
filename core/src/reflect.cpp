@@ -6,6 +6,7 @@
 
 #include "engine/core/reflect.h"
 
+#include "engine/core/hash.h"
 #include "engine/core/logging.h"
 
 #include <cstdio>
@@ -38,14 +39,24 @@ void log_drop(const char *what, const char *typeName,
 
 bool TypeDescriptor::add_field(const char *fieldName, std::size_t fieldOffset,
                                std::size_t fieldSize,
-                               TypeField::Kind fieldKind) noexcept {
+                               TypeField::Kind fieldKind,
+                               const char *fieldKey) noexcept {
+  const char *key = (fieldKey != nullptr) ? fieldKey : fieldName;
+  const FieldId id = (key != nullptr) ? fnv1a_32(key) : 0U;
   const char *reason = nullptr;
   if (fieldName == nullptr) {
     reason = "null field name";
+  } else if (key[0] == '\0') {
+    reason = "empty wire key";
   } else if ((fieldOffset > size) || (fieldSize > (size - fieldOffset))) {
     reason = "field lies outside the type";
   } else if (fieldCount >= fields.size()) {
     reason = "field table is full";
+  } else if ((find_field_by_key(key) != nullptr) ||
+             (find_field_by_id(id) != nullptr)) {
+    // Two fields on one wire key (or one 32-bit id) could never both round
+    // trip, so the second is a schema error rather than a silent shadow.
+    reason = "duplicate wire key";
   }
 
   if (reason != nullptr) {
@@ -56,6 +67,8 @@ bool TypeDescriptor::add_field(const char *fieldName, std::size_t fieldOffset,
 
   TypeField &field = fields[fieldCount++];
   field.name = fieldName;
+  field.key = key;
+  field.id = id;
   field.offset = fieldOffset;
   field.size = fieldSize;
   field.kind = fieldKind;
@@ -72,6 +85,32 @@ TypeDescriptor::find_field(const char *fieldName) const noexcept {
     const TypeField &field = fields[i];
     if ((field.name != nullptr) && (std::strcmp(field.name, fieldName) == 0)) {
       return &field;
+    }
+  }
+
+  return nullptr;
+}
+
+const TypeField *
+TypeDescriptor::find_field_by_key(const char *fieldKey) const noexcept {
+  if ((fieldKey == nullptr) || (fieldCount == 0U)) {
+    return nullptr;
+  }
+
+  for (std::size_t i = 0U; i < fieldCount; ++i) {
+    const TypeField &field = fields[i];
+    if ((field.key != nullptr) && (std::strcmp(field.key, fieldKey) == 0)) {
+      return &field;
+    }
+  }
+
+  return nullptr;
+}
+
+const TypeField *TypeDescriptor::find_field_by_id(FieldId fieldId) const noexcept {
+  for (std::size_t i = 0U; i < fieldCount; ++i) {
+    if (fields[i].id == fieldId) {
+      return &fields[i];
     }
   }
 
@@ -111,7 +150,8 @@ TypeDescriptor *TypeRegistry::register_type(const char *name,
 
 bool TypeRegistry::add_field(TypeDescriptor *descriptor, const char *fieldName,
                              std::size_t fieldOffset, std::size_t fieldSize,
-                             TypeField::Kind fieldKind) noexcept {
+                             TypeField::Kind fieldKind,
+                             const char *fieldKey) noexcept {
   if (descriptor == nullptr) {
     // The type itself was refused; its fields can only be counted here.
     ++droppedFieldCount;
@@ -119,7 +159,8 @@ bool TypeRegistry::add_field(TypeDescriptor *descriptor, const char *fieldName,
     return false;
   }
 
-  if (!descriptor->add_field(fieldName, fieldOffset, fieldSize, fieldKind)) {
+  if (!descriptor->add_field(fieldName, fieldOffset, fieldSize, fieldKind,
+                             fieldKey)) {
     ++droppedFieldCount;
     return false;
   }

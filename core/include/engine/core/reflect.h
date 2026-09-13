@@ -3,6 +3,8 @@
 // tables are bounded by design; a registration the tables cannot hold is
 // refused, counted, and logged rather than silently dropped, so a type or
 // field that never reaches the schema is observable by tests and at boot.
+// Every field carries a wire key (and its FNV-1a id) separate from the C++
+// member name, so serialized output depends on the declared key alone.
 
 #pragma once
 
@@ -12,9 +14,21 @@
 
 namespace engine::core {
 
+/// Stable identity of a field's wire key: FNV-1a-32 of the key text, so a
+/// field can be addressed without a string compare and the id survives a
+/// C++ member rename the way the key does.
+using FieldId = std::uint32_t;
+
 // TypeField describes one field of a reflected struct.
 struct TypeField final {
+  /// C++ member name: what tooling displays and what editor metadata
+  /// resolves against. Renaming the member changes it.
   const char *name = nullptr;
+  /// Wire key: the JSON key the serializers write and read this field
+  /// under. Independent of the member name so a rename never changes
+  /// saved scenes; defaults to the member name when no key is declared.
+  const char *key = nullptr;
+  FieldId id = 0U;
   std::size_t offset = 0U;
   std::size_t size = 0U;
   /// Enumerates kind values used by the engine.
@@ -43,12 +57,20 @@ struct TypeDescriptor final {
   std::size_t droppedFieldCount = 0U;
 
   /// Appends a field; false (and counted in droppedFieldCount) when the
-  /// table is full, the name is null, or the field lies outside the type.
+  /// table is full, the name is null, the field lies outside the type, the
+  /// key is empty, or the key (or its id) repeats one already registered
+  /// on this type — two fields sharing a wire key could never both round
+  /// trip. A null fieldKey uses the member name as the key.
   bool add_field(const char *fieldName, std::size_t fieldOffset,
-                 std::size_t fieldSize, TypeField::Kind fieldKind) noexcept;
+                 std::size_t fieldSize, TypeField::Kind fieldKind,
+                 const char *fieldKey = nullptr) noexcept;
 
   // O(fieldCount) string lookup; migrate to field IDs if this becomes hot.
   const TypeField *find_field(const char *fieldName) const noexcept;
+  /// O(fieldCount) lookup by wire key.
+  const TypeField *find_field_by_key(const char *fieldKey) const noexcept;
+  /// O(fieldCount) lookup by wire-key id.
+  const TypeField *find_field_by_id(FieldId fieldId) const noexcept;
 
   template <typename T>
   /// Typed pointer to the field inside instance (nullptr on size mismatch).
@@ -102,10 +124,12 @@ struct TypeRegistry final {
   /// second registration of the same name returns the existing descriptor.
   TypeDescriptor *register_type(const char *name, std::size_t size) noexcept;
   /// Appends a field to a descriptor this registry owns; false (counted in
-  /// droppedFieldCount and logged) when the descriptor is null or full.
+  /// droppedFieldCount and logged) when the descriptor is null or refuses
+  /// the field. A null fieldKey uses the member name as the wire key.
   bool add_field(TypeDescriptor *descriptor, const char *fieldName,
                  std::size_t fieldOffset, std::size_t fieldSize,
-                 TypeField::Kind fieldKind) noexcept;
+                 TypeField::Kind fieldKind,
+                 const char *fieldKey = nullptr) noexcept;
   // O(typeCount) string lookup; migrate to type IDs if this becomes hot.
   const TypeDescriptor *find_type(const char *name) const noexcept;
   /// Number of registered types.
@@ -143,11 +167,20 @@ bool report_reflection_registration_drops() noexcept;
             ::engine::core::global_type_registry().register_type(typeName,     \
                                                                   sizeof(T));
 
+// REFLECT_FIELD serializes under the member name; REFLECT_FIELD_KEY pins an
+// explicit wire key so the member can be renamed without a scene
+// migration (the key is what saved files carry).
 #define REFLECT_FIELD(FieldName, KindEnum)                                     \
   static_cast<void>(::engine::core::global_type_registry().add_field(          \
       desc, #FieldName, offsetof(T, FieldName),                                \
       sizeof(decltype(T::FieldName)),                                          \
       ::engine::core::TypeField::Kind::KindEnum));
+
+#define REFLECT_FIELD_KEY(FieldName, WireKey, KindEnum)                        \
+  static_cast<void>(::engine::core::global_type_registry().add_field(          \
+      desc, #FieldName, offsetof(T, FieldName),                                \
+      sizeof(decltype(T::FieldName)),                                          \
+      ::engine::core::TypeField::Kind::KindEnum, WireKey));
 
 #define REFLECT_END()                                                          \
   return true;                                                                 \
