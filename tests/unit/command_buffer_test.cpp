@@ -2,6 +2,7 @@
 
 #include "command_buffer_context.h"
 #include "command_buffer_flush_internal.h"
+#include "command_buffer_ibl.h"
 #include "command_buffer_math.h"
 #include "engine/core/cvar.h"
 #include "engine/math/transform.h"
@@ -431,6 +432,104 @@ int check_environment_texture_getters() {
   }
 
   engine::core::shutdown_cvars();
+  return 0;
+}
+
+/// The flush's IBL reads (the bake sizes and the three enable gates) go
+/// through the backend's handle references: once resolved, repeated
+/// steady-state reads scan no name, a set by name is seen by the next read,
+/// and a registry reset falls back to the defaults without a scan.
+int check_environment_cvars_handle_gated() {
+  using engine::renderer::ReflectionProbeBakeSettings;
+
+  engine::core::shutdown_cvars();
+  if (!engine::core::initialize_cvars()) {
+    return 160;
+  }
+  if (!engine::core::cvar_register_string("r_sky_model", "cubemap", "sky") ||
+      !engine::core::cvar_register_bool("r_env_prefilter", true, "ibl") ||
+      !engine::core::cvar_register_int("r_env_prefilter_size", 128, "ibl") ||
+      !engine::core::cvar_register_int("r_env_prefilter_mips", 5, "ibl") ||
+      !engine::core::cvar_register_bool("r_env_irradiance", true, "ibl") ||
+      !engine::core::cvar_register_int("r_env_irradiance_size", 32, "ibl") ||
+      !engine::core::cvar_register_bool("r_env_brdf_lut", true, "ibl") ||
+      !engine::core::cvar_register_int("r_env_brdf_lut_size", 512, "ibl")) {
+    engine::core::shutdown_cvars();
+    return 161;
+  }
+
+  engine::renderer::BackendState &backend = engine::renderer::backend_state();
+  backend = engine::renderer::BackendState{};
+
+  // First reads resolve the references; the getters' textures stay
+  // invalid because nothing was baked.
+  ReflectionProbeBakeSettings settings =
+      engine::renderer::cvar_reflection_probe_bake_settings(backend.cvars);
+  if ((settings.prefilteredFaceSize != 128U) ||
+      (settings.prefilteredMipLevels != 5U) ||
+      (settings.irradianceFaceSize != 32U) || (settings.brdfLutSize != 512U)) {
+    engine::core::shutdown_cvars();
+    return 162;
+  }
+  static constexpr engine::renderer::DeviceTextureHandle kNoTexture{};
+  auto getters_invalid = []() {
+    return (engine::renderer::get_prefiltered_environment_texture() ==
+            kNoTexture) &&
+           (engine::renderer::get_irradiance_environment_texture() ==
+            kNoTexture) &&
+           (engine::renderer::get_brdf_lut_texture() == kNoTexture);
+  };
+  if (!getters_invalid()) {
+    engine::core::shutdown_cvars();
+    return 163;
+  }
+
+  // Steady state: one frame's worth of IBL reads, repeated, scans no name.
+  const std::size_t lookupsBefore = engine::core::cvar_name_lookup_count();
+  for (int i = 0; i < 100; ++i) {
+    settings =
+        engine::renderer::cvar_reflection_probe_bake_settings(backend.cvars);
+    if ((settings.prefilteredFaceSize != 128U) || !getters_invalid()) {
+      engine::core::shutdown_cvars();
+      return 164;
+    }
+  }
+  if (engine::core::cvar_name_lookup_count() != lookupsBefore) {
+    engine::core::shutdown_cvars();
+    return 165;
+  }
+
+  // Live tuning: a set by name is seen by the next read (the size through
+  // the settings, the gate through the getter, which now refuses even
+  // though the sky model still selects the cubemap path).
+  if (!engine::core::cvar_set_int("r_env_prefilter_size", 64) ||
+      !engine::core::cvar_set_int("r_env_irradiance_size", 16) ||
+      !engine::core::cvar_set_bool("r_env_brdf_lut", false)) {
+    engine::core::shutdown_cvars();
+    return 166;
+  }
+  settings =
+      engine::renderer::cvar_reflection_probe_bake_settings(backend.cvars);
+  if ((settings.prefilteredFaceSize != 64U) ||
+      (settings.irradianceFaceSize != 16U) ||
+      (engine::renderer::get_brdf_lut_texture() != kNoTexture)) {
+    engine::core::shutdown_cvars();
+    return 167;
+  }
+
+  // A registry reset leaves the references stale: every read falls back
+  // to its default instead of aliasing a recycled slot.
+  engine::core::shutdown_cvars();
+  settings =
+      engine::renderer::cvar_reflection_probe_bake_settings(backend.cvars);
+  if ((settings.prefilteredFaceSize != 128U) ||
+      (settings.prefilteredMipLevels != 5U) ||
+      (settings.irradianceFaceSize != 32U) || (settings.brdfLutSize != 512U) ||
+      !getters_invalid()) {
+    backend = engine::renderer::BackendState{};
+    return 168;
+  }
+  backend = engine::renderer::BackendState{};
   return 0;
 }
 
@@ -967,6 +1066,10 @@ int main() {
     return result;
   }
   result = check_environment_texture_getters();
+  if (result != 0) {
+    return result;
+  }
+  result = check_environment_cvars_handle_gated();
   if (result != 0) {
     return result;
   }
