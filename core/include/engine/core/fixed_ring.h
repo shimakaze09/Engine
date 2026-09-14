@@ -1,7 +1,7 @@
-// Fixed-capacity FIFO ring shared by engine systems that previously carried
-// their own head/count arithmetic: elements enter at the back, leave from
-// the front, and live in one preallocated array, so a queue on a hot or
-// lock-held path never allocates. Push either refuses when full (bounded
+// Fixed-capacity FIFO ring for engine systems that need a bounded queue
+// without allocating: elements enter at the back, leave from the front,
+// and live in one preallocated array, so a queue on a hot or lock-held
+// path never allocates. Push either refuses when full (bounded
 // work queues, where a drop must be counted by the owner) or overwrites the
 // oldest element (retained histories, where the newest entries matter).
 
