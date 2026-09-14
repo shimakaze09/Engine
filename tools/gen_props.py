@@ -9,6 +9,8 @@ import os
 import struct
 import sys
 
+from gltf_writer import GltfBufferBuilder
+
 OUT_DIR = sys.argv[1] if len(sys.argv) > 1 else "assets/props"
 
 
@@ -190,32 +192,9 @@ def build_props():
 
 
 def write_gltf(name, builder):
-    blob = bytearray()
-    buffer_views = []
-    accessors = []
-
-    def align(n):
-        while len(blob) % n:
-            blob.append(0)
-
-    def add_view(data, target=None):
-        align(4)
-        offset = len(blob)
-        blob.extend(data)
-        view = {"buffer": 0, "byteOffset": offset, "byteLength": len(data)}
-        if target:
-            view["target"] = target
-        buffer_views.append(view)
-        return len(buffer_views) - 1
-
-    def add_accessor(view, ctype, count, atype, vmin=None, vmax=None):
-        acc = {"bufferView": view, "componentType": ctype, "count": count,
-               "type": atype}
-        if vmin is not None:
-            acc["min"] = vmin
-            acc["max"] = vmax
-        accessors.append(acc)
-        return len(accessors) - 1
+    buffer = GltfBufferBuilder()
+    add_view = buffer.add_view
+    add_accessor = buffer.add_accessor
 
     positions = builder.positions
     normals = builder.normals
@@ -242,9 +221,9 @@ def write_gltf(name, builder):
             "attributes": {"POSITION": a_pos, "NORMAL": a_nrm},
             "indices": a_idx,
         }]}],
-        "buffers": [{"uri": bin_name, "byteLength": len(blob)}],
-        "bufferViews": buffer_views,
-        "accessors": accessors,
+        "buffers": [{"uri": bin_name, "byteLength": len(buffer.blob)}],
+        "bufferViews": buffer.buffer_views,
+        "accessors": buffer.accessors,
     }
 
     gltf_path = f"{OUT_DIR}/{name}.gltf"
@@ -255,7 +234,7 @@ def write_gltf(name, builder):
         f.flush()
         os.fsync(f.fileno())
     with open(bin_path + ".tmp", "wb") as f:
-        f.write(bytes(blob))
+        f.write(bytes(buffer.blob))
         f.flush()
         os.fsync(f.fileno())
     print(f"staged {gltf_path} ({len(positions)} verts, "
