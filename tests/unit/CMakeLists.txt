@@ -74,6 +74,13 @@ engine_add_test_executable(engine_unit_fixed_hash_table
     engine_core
 )
 
+engine_add_test_executable(engine_unit_fixed_ring
+    SOURCES
+    fixed_ring_test.cpp
+    PRIVATE_DEPS
+    engine_core
+)
+
 engine_add_test_executable(engine_unit_math
     SOURCES
     math_test.cpp
