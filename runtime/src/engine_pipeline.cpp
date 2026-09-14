@@ -63,7 +63,6 @@
 #include "engine_runtime_streaming.h"
 #include "engine/runtime/world.h"
 #include "engine/scripting/scripting.h"
-#include "spatial_transform_util.h"
 
 namespace engine {
 

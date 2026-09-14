@@ -15,7 +15,6 @@
 #include "engine/physics/collider.h"
 #include "engine/renderer/command_buffer.h"
 #include "engine/physics/physics.h"
-#include "spatial_transform_util.h"
 
 namespace engine::runtime {
 
@@ -184,7 +183,7 @@ void render_prep_chunk_job(void *userData) noexcept {
     if (meshComponent != nullptr) {
       const Collider *collider = jobData->world->get_collider_ptr(entities[i]);
       math::Vec3 center = transforms[i].position;
-      math::Vec3 half = detail::transformed_aabb_half_extents(
+      math::Vec3 half = math::transform_aabb_half_extents(
           transforms[i].matrix, math::Vec3(0.5F, 0.5F, 0.5F));
       if (collider != nullptr) {
         const physics::ConvexHullData *hull =

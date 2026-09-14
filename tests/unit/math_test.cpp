@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <limits>
 
+#include "engine/math/aabb.h"
 #include "engine/math/mat4.h"
 #include "engine/math/quat.h"
 #include "engine/math/ray.h"
@@ -58,6 +59,41 @@ bool nearly_equal_angle(float a, float b, float epsilon) {
   }
 
   return std::fabs(delta) <= epsilon;
+}
+
+/// A direction rotated by a unit quaternion keeps its authored magnitude:
+/// a quarter turn about +Z carries (2, 0, 0) onto (0, 2, 0). Tolerance
+/// 1e-4 absolute on O(1) components, the float rounding of the Rodrigues
+/// form, so a scaled or mirrored result cannot pass.
+bool check_rotate_vector_preserves_magnitude() {
+  constexpr float kHalfPi = 1.57079632679F;
+  const engine::math::Quat rotation = engine::math::from_axis_angle(
+      engine::math::Vec3(0.0F, 0.0F, 1.0F), kHalfPi);
+  const engine::math::Vec3 direction =
+      engine::math::rotate_vector(engine::math::Vec3(2.0F, 0.0F, 0.0F),
+                                  rotation);
+  return nearly_equal(direction.x, 0.0F, 1.0e-4F) &&
+         nearly_equal(direction.y, 2.0F, 1.0e-4F) &&
+         nearly_equal(direction.z, 0.0F, 1.0e-4F);
+}
+
+/// Conservative transformed half extents include world rotation,
+/// non-uniform scale, and negative scale signs: a quarter turn about +Z
+/// with scale (-2, 3, 4) maps local half extents (1, 2, 3) onto world
+/// (6, 2, 12), the |x| of the mirrored axis included. Same 1e-4 absolute
+/// tolerance as the rotation check, for the same reason.
+bool check_transform_aabb_half_extents() {
+  constexpr float kHalfPi = 1.57079632679F;
+  const engine::math::Mat4 world = engine::math::compose_trs(
+      engine::math::Vec3(10.0F, 20.0F, 30.0F),
+      engine::math::from_axis_angle(engine::math::Vec3(0.0F, 0.0F, 1.0F),
+                                    kHalfPi),
+      engine::math::Vec3(-2.0F, 3.0F, 4.0F));
+  const engine::math::Vec3 half = engine::math::transform_aabb_half_extents(
+      world, engine::math::Vec3(1.0F, 2.0F, 3.0F));
+  return nearly_equal(half.x, 6.0F, 1.0e-4F) &&
+         nearly_equal(half.y, 2.0F, 1.0e-4F) &&
+         nearly_equal(half.z, 12.0F, 1.0e-4F);
 }
 
 } // namespace
@@ -526,6 +562,13 @@ int main() {
         return 60;
       }
     }
+  }
+
+  if (!check_rotate_vector_preserves_magnitude()) {
+    return 61;
+  }
+  if (!check_transform_aabb_half_extents()) {
+    return 62;
   }
 
   return 0;
