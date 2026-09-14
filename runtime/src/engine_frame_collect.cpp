@@ -5,8 +5,8 @@
 
 #include <cstddef>
 
+#include "engine/math/quat.h"
 #include "engine/runtime/world.h"
-#include "spatial_transform_util.h"
 
 namespace engine {
 
@@ -106,8 +106,7 @@ collect_scene_lights(const runtime::World &world) noexcept {
         auto &dl =
             sceneLights.directionalLights[sceneLights.directionalLightCount];
         dl.direction = (wt != nullptr)
-                           ? runtime::detail::rotate_local_direction(
-                                 wt->rotation, lc->direction)
+                           ? math::rotate_vector(lc->direction, wt->rotation)
                            : lc->direction;
         dl.color = lc->color;
         dl.intensity = lc->intensity;
@@ -162,9 +161,9 @@ collect_scene_lights(const runtime::World &world) noexcept {
         world.get_world_transform_read_ptr(slEntity);
     auto &sl = sceneLights.spotLights[sceneLights.spotLightCount];
     sl.position = (wt != nullptr) ? wt->position : math::Vec3(0.0F, 0.0F, 0.0F);
-    sl.direction = (wt != nullptr) ? runtime::detail::rotate_local_direction(
-                                         wt->rotation, slc->direction)
-                                   : slc->direction;
+    sl.direction = (wt != nullptr)
+                       ? math::rotate_vector(slc->direction, wt->rotation)
+                       : slc->direction;
     sl.color = slc->color;
     sl.intensity = slc->intensity;
     sl.radius = slc->radius;

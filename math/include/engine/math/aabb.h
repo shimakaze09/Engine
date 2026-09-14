@@ -3,6 +3,9 @@
 
 #pragma once
 
+#include <cmath>
+
+#include "engine/math/mat4.h"
 #include "engine/math/vec3.h"
 
 namespace engine::math {
@@ -58,6 +61,30 @@ constexpr Vec3 aabb_center(const AABB &box) noexcept {
 constexpr Vec3 aabb_half_extents(const AABB &box) noexcept {
   return Vec3((box.max.x - box.min.x) * 0.5F, (box.max.y - box.min.y) * 0.5F,
               (box.max.z - box.min.z) * 0.5F);
+}
+
+/// Conservative world-axis half extents of a local box centered on the
+/// origin after the whole affine world matrix is applied: each world axis
+/// takes the sum of the absolute contributions of the three local axes
+/// (rotation, non-uniform scale, and negative scale signs included), the
+/// tightest axis-aligned box that contains the rotated one without
+/// visiting its corners. Callers that need the box center transform it
+/// separately.
+inline Vec3 transform_aabb_half_extents(const Mat4 &worldMatrix,
+                                        const Vec3 &localHalfExtents) noexcept {
+  const float halfX = std::fabs(localHalfExtents.x);
+  const float halfY = std::fabs(localHalfExtents.y);
+  const float halfZ = std::fabs(localHalfExtents.z);
+
+  return Vec3((std::fabs(worldMatrix.columns[0].x) * halfX) +
+                  (std::fabs(worldMatrix.columns[1].x) * halfY) +
+                  (std::fabs(worldMatrix.columns[2].x) * halfZ),
+              (std::fabs(worldMatrix.columns[0].y) * halfX) +
+                  (std::fabs(worldMatrix.columns[1].y) * halfY) +
+                  (std::fabs(worldMatrix.columns[2].y) * halfZ),
+              (std::fabs(worldMatrix.columns[0].z) * halfX) +
+                  (std::fabs(worldMatrix.columns[1].z) * halfY) +
+                  (std::fabs(worldMatrix.columns[2].z) * halfZ));
 }
 
 } // namespace engine::math

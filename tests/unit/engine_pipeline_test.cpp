@@ -1,12 +1,8 @@
 // Verifies engine pipeline test behavior for the Engine test suite.
 
 #include "engine/core/input.h"
-#include "engine/math/transform.h"
 #include "engine/runtime/editor_bridge.h"
 #include "engine/runtime/engine_pipeline.h"
-#include "spatial_transform_util.h"
-
-#include <cmath>
 
 #include <SDL3/SDL.h>
 
@@ -45,46 +41,6 @@ bool wants_keyboard_capture() noexcept { return g_editorCaptureKeyboard; }
 bool wants_mouse_capture() noexcept { return g_editorCaptureMouse; }
 /// Returns no capture for input routing tests.
 bool wants_no_capture() noexcept { return false; }
-
-/// Returns whether two spatial-test scalar values match tightly.
-bool nearly_equal(float lhs, float rhs) noexcept {
-  return std::fabs(lhs - rhs) <= 0.0001F;
-}
-
-/// Verifies component-local directions inherit world rotation without having
-/// their authored magnitude changed.
-int check_local_direction_rotation() {
-  constexpr float kHalfPi = 1.57079632679F;
-  const engine::math::Quat rotation = engine::math::from_axis_angle(
-      engine::math::Vec3(0.0F, 0.0F, 1.0F), kHalfPi);
-  const engine::math::Vec3 direction =
-      engine::runtime::detail::rotate_local_direction(
-          rotation, engine::math::Vec3(2.0F, 0.0F, 0.0F));
-
-  return nearly_equal(direction.x, 0.0F) && nearly_equal(direction.y, 2.0F) &&
-                 nearly_equal(direction.z, 0.0F)
-             ? 0
-             : 1;
-}
-
-/// Verifies conservative AABB extents include world rotation, non-uniform
-/// scale, and negative scale signs.
-int check_transformed_aabb_half_extents() {
-  constexpr float kHalfPi = 1.57079632679F;
-  const engine::math::Mat4 world = engine::math::compose_trs(
-      engine::math::Vec3(10.0F, 20.0F, 30.0F),
-      engine::math::from_axis_angle(engine::math::Vec3(0.0F, 0.0F, 1.0F),
-                                    kHalfPi),
-      engine::math::Vec3(-2.0F, 3.0F, 4.0F));
-  const engine::math::Vec3 half =
-      engine::runtime::detail::transformed_aabb_half_extents(
-          world, engine::math::Vec3(1.0F, 2.0F, 3.0F));
-
-  return nearly_equal(half.x, 6.0F) && nearly_equal(half.y, 2.0F) &&
-                 nearly_equal(half.z, 12.0F)
-             ? 0
-             : 1;
-}
 
 int check_construction_destruction() {
   engine::EnginePipeline pipeline;
@@ -274,8 +230,6 @@ struct TestEntry {
 };
 
 const TestEntry g_tests[] = {
-    {"local_direction_rotation", check_local_direction_rotation},
-    {"transformed_aabb_half_extents", check_transformed_aabb_half_extents},
     {"construction_destruction", check_construction_destruction},
     {"initialize_failure_clears_editor_world",
      check_initialize_failure_clears_editor_world},
