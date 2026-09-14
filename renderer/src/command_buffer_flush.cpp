@@ -143,7 +143,7 @@ void flush_renderer(CommandBufferView commandBufferView,
 
   const PassResources &passRes = get_pass_resources();
   const ReflectionProbeBakeSettings environmentBakeSettings =
-      cvar_reflection_probe_bake_settings();
+      cvar_reflection_probe_bake_settings(backend.cvars);
   const DistanceFogSettings fogSettings =
       distance_fog_settings_from_cvars(backend);
   const HeightFogSettings heightFogSettings =

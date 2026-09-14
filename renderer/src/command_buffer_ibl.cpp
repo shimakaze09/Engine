@@ -46,8 +46,9 @@ int cubemap_mip_size(int faceSize, int mipLevel) noexcept {
   return size;
 }
 
-std::uint32_t positive_cvar_u32(const char *name, int fallback) noexcept {
-  const int value = core::cvar_get_int(name, fallback);
+std::uint32_t positive_cvar_u32(const core::CVarRef &cvar,
+                                int fallback) noexcept {
+  const int value = cvar.get_int(fallback);
   return (value > 0) ? static_cast<std::uint32_t>(value) : 0U;
 }
 
@@ -115,15 +116,13 @@ void cubemap_capture_views(std::array<math::Mat4, 6> &outViews) noexcept {
 
 } // namespace
 
-ReflectionProbeBakeSettings cvar_reflection_probe_bake_settings() noexcept {
+ReflectionProbeBakeSettings
+cvar_reflection_probe_bake_settings(const FlushCVars &cvars) noexcept {
   ReflectionProbeBakeSettings settings{};
-  settings.prefilteredFaceSize =
-      positive_cvar_u32("r_env_prefilter_size", 128);
-  settings.prefilteredMipLevels =
-      positive_cvar_u32("r_env_prefilter_mips", 5);
-  settings.irradianceFaceSize =
-      positive_cvar_u32("r_env_irradiance_size", 32);
-  settings.brdfLutSize = positive_cvar_u32("r_env_brdf_lut_size", 512);
+  settings.prefilteredFaceSize = positive_cvar_u32(cvars.envPrefilterSize, 128);
+  settings.prefilteredMipLevels = positive_cvar_u32(cvars.envPrefilterMips, 5);
+  settings.irradianceFaceSize = positive_cvar_u32(cvars.envIrradianceSize, 32);
+  settings.brdfLutSize = positive_cvar_u32(cvars.envBrdfLutSize, 512);
   return normalize_reflection_probe_bake_settings(settings);
 }
 
@@ -151,7 +150,7 @@ ensure_prefiltered_environment(BackendState &backend, const RenderDevice *dev,
                                DeviceTextureHandle sourceCubemap,
                                ReflectionProbeBakeSettings settings) noexcept {
   if (!backend.environmentPrefilterAvailable ||
-      !core::cvar_get_bool("r_env_prefilter", true) ||
+      !backend.cvars.envPrefilter.get_bool(true) ||
       (sourceCubemap == kInvalidDeviceTexture) || !bake_device_ready(dev)) {
     return kInvalidDeviceTexture;
   }
@@ -275,7 +274,7 @@ ensure_irradiance_environment(BackendState &backend, const RenderDevice *dev,
                               DeviceTextureHandle sourceCubemap,
                               ReflectionProbeBakeSettings settings) noexcept {
   if (!backend.environmentIrradianceAvailable ||
-      !core::cvar_get_bool("r_env_irradiance", true) ||
+      !backend.cvars.envIrradiance.get_bool(true) ||
       (sourceCubemap == kInvalidDeviceTexture) || !bake_device_ready(dev)) {
     return kInvalidDeviceTexture;
   }
@@ -379,7 +378,7 @@ DeviceTextureHandle
 ensure_brdf_lut(BackendState &backend, const RenderDevice *dev,
                 ReflectionProbeBakeSettings settings) noexcept {
   if (!backend.environmentBrdfLutAvailable ||
-      !core::cvar_get_bool("r_env_brdf_lut", true) || !bake_device_ready(dev)) {
+      !backend.cvars.envBrdfLut.get_bool(true) || !bake_device_ready(dev)) {
     return kInvalidDeviceTexture;
   }
 
@@ -434,26 +433,29 @@ ensure_brdf_lut(BackendState &backend, const RenderDevice *dev,
 }
 
 DeviceTextureHandle get_prefiltered_environment_texture() noexcept {
+  const BackendState &backend = backend_state();
   if ((selected_sky_model() != SkyModel::Cubemap) ||
-      !core::cvar_get_bool("r_env_prefilter", true)) {
+      !backend.cvars.envPrefilter.get_bool(true)) {
     return kInvalidDeviceTexture;
   }
-  return backend_state().prefilteredEnvironmentTexture;
+  return backend.prefilteredEnvironmentTexture;
 }
 
 DeviceTextureHandle get_irradiance_environment_texture() noexcept {
+  const BackendState &backend = backend_state();
   if ((selected_sky_model() != SkyModel::Cubemap) ||
-      !core::cvar_get_bool("r_env_irradiance", true)) {
+      !backend.cvars.envIrradiance.get_bool(true)) {
     return kInvalidDeviceTexture;
   }
-  return backend_state().irradianceEnvironmentTexture;
+  return backend.irradianceEnvironmentTexture;
 }
 
 DeviceTextureHandle get_brdf_lut_texture() noexcept {
-  if (!core::cvar_get_bool("r_env_brdf_lut", true)) {
+  const BackendState &backend = backend_state();
+  if (!backend.cvars.envBrdfLut.get_bool(true)) {
     return kInvalidDeviceTexture;
   }
-  return backend_state().brdfLutTexture;
+  return backend.brdfLutTexture;
 }
 
 ReflectionProbeBakeResult

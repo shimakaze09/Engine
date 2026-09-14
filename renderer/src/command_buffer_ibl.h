@@ -12,8 +12,11 @@
 
 namespace engine::renderer {
 
-/// Reads the r_env_* cvars into normalized ReflectionProbeBakeSettings.
-ReflectionProbeBakeSettings cvar_reflection_probe_bake_settings() noexcept;
+/// Reads the r_env_* size cvars through the flush's handle references into
+/// normalized ReflectionProbeBakeSettings; a per-frame read, so it scans no
+/// name and takes no lock once the references have resolved.
+ReflectionProbeBakeSettings
+cvar_reflection_probe_bake_settings(const FlushCVars &cvars) noexcept;
 /// Prefilters sourceCubemap into the cached specular environment map and
 /// returns it (invalid when unavailable). Re-bakes when the source cubemap
 /// or bake settings change.

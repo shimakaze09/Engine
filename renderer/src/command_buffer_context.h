@@ -85,6 +85,15 @@ struct FlushCVars final {
   core::CVarRef skyModel{"r_sky_model"};
   core::CVarRef skyTurbidity{"r_sky_turbidity"};
   core::CVarRef skyGroundAlbedo{"r_sky_ground_albedo"};
+  // The IBL bake gates and sizes: read at the top of every flush to decide
+  // whether the cached environment maps and BRDF LUT are current.
+  core::CVarRef envPrefilter{"r_env_prefilter"};
+  core::CVarRef envPrefilterSize{"r_env_prefilter_size"};
+  core::CVarRef envPrefilterMips{"r_env_prefilter_mips"};
+  core::CVarRef envIrradiance{"r_env_irradiance"};
+  core::CVarRef envIrradianceSize{"r_env_irradiance_size"};
+  core::CVarRef envBrdfLut{"r_env_brdf_lut"};
+  core::CVarRef envBrdfLutSize{"r_env_brdf_lut_size"};
 };
 
 // Defined in command_buffer_sky.h; the backend caches the parsed value of
