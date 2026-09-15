@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 #include <new>
 
 #include "engine/core/atomic_file.h"
@@ -470,6 +471,80 @@ void vfs_free(void *buffer) noexcept {
   delete[] static_cast<std::byte *>(buffer);
 }
 
+std::int64_t file_time_ns_from_unix(std::int64_t seconds,
+                                    std::int64_t nanoseconds) noexcept {
+  constexpr std::int64_t kNsPerSecond = 1000000000LL;
+  constexpr std::int64_t kMaxNs = std::numeric_limits<std::int64_t>::max();
+  constexpr std::int64_t kMinNs = std::numeric_limits<std::int64_t>::min();
+  // Whole seconds carried by the nanosecond field move into the second
+  // count first, leaving a remainder in [0, 1e9), so the bound checks
+  // below compare against the exact edge second and its remainder.
+  std::int64_t carry = nanoseconds / kNsPerSecond;
+  std::int64_t remainder = nanoseconds % kNsPerSecond;
+  if (remainder < 0) {
+    remainder += kNsPerSecond;
+    carry -= 1;
+  }
+  if ((carry > 0) && (seconds > (kMaxNs - carry))) {
+    return kMaxNs;
+  }
+  if ((carry < 0) && (seconds < (kMinNs - carry))) {
+    return kMinNs;
+  }
+  seconds += carry;
+
+  // Positive edge: the last whole second in range and the remainder that
+  // still fits inside it.
+  constexpr std::int64_t kMaxWholeSeconds = kMaxNs / kNsPerSecond;
+  constexpr std::int64_t kMaxEdgeRemainder = kMaxNs % kNsPerSecond;
+  if ((seconds > kMaxWholeSeconds) ||
+      ((seconds == kMaxWholeSeconds) && (remainder > kMaxEdgeRemainder))) {
+    return kMaxNs;
+  }
+  // Negative edge: integer division truncates toward zero, so the second
+  // below the truncated floor is still partly in range once the remainder
+  // reaches the gap between that floor and INT64_MIN.
+  constexpr std::int64_t kMinWholeSeconds = kMinNs / kNsPerSecond;
+  constexpr std::int64_t kMinEdgeRemainder =
+      kNsPerSecond - ((kMinWholeSeconds * kNsPerSecond) - kMinNs);
+  if (seconds < (kMinWholeSeconds - 1)) {
+    return kMinNs;
+  }
+  if (seconds == (kMinWholeSeconds - 1)) {
+    return (remainder < kMinEdgeRemainder)
+               ? kMinNs
+               : kMinNs + (remainder - kMinEdgeRemainder);
+  }
+  return (seconds * kNsPerSecond) + remainder;
+}
+
+std::int64_t file_time_ns_from_filetime(std::uint64_t ticks) noexcept {
+  // FILETIME counts 100 ns intervals since 1601; rebased to the Unix epoch
+  // before scaling, because 2^63 ns is only 292 years and a present-day
+  // date measured from 1601 overflows once multiplied by 100.
+  constexpr std::uint64_t kUnixEpochInFileTimeTicks = 116444736000000000ULL;
+  constexpr std::uint64_t kNsPerTick = 100U;
+  constexpr std::int64_t kMaxNs = std::numeric_limits<std::int64_t>::max();
+  constexpr std::int64_t kMinNs = std::numeric_limits<std::int64_t>::min();
+  if (ticks >= kUnixEpochInFileTimeTicks) {
+    const std::uint64_t sinceEpoch = ticks - kUnixEpochInFileTimeTicks;
+    if (sinceEpoch > (static_cast<std::uint64_t>(kMaxNs) / kNsPerTick)) {
+      return kMaxNs;
+    }
+    return static_cast<std::int64_t>(sinceEpoch * kNsPerTick);
+  }
+  // Before 1970: the magnitude below INT64_MIN is one more than INT64_MAX,
+  // so the tick budget is computed from the positive side and the result
+  // negated only after the scaling is known to fit.
+  const std::uint64_t beforeEpoch = kUnixEpochInFileTimeTicks - ticks;
+  constexpr std::uint64_t kMaxTicksBeforeEpoch =
+      (static_cast<std::uint64_t>(kMaxNs) + 1U) / kNsPerTick;
+  if (beforeEpoch > kMaxTicksBeforeEpoch) {
+    return kMinNs;
+  }
+  return -static_cast<std::int64_t>(beforeEpoch * kNsPerTick);
+}
+
 std::int64_t file_mtime_ns(const char *osPath) noexcept {
   if ((osPath == nullptr) || (osPath[0] == '\0')) {
     return 0;
@@ -482,13 +557,7 @@ std::int64_t file_mtime_ns(const char *osPath) noexcept {
   ULARGE_INTEGER ticks{};
   ticks.LowPart = data.ftLastWriteTime.dwLowDateTime;
   ticks.HighPart = data.ftLastWriteTime.dwHighDateTime;
-  // FILETIME counts 100 ns intervals since 1601; rebased to the Unix epoch
-  // before scaling, because 2^63 ns is only 292 years and a present-day
-  // date measured from 1601 overflows once multiplied by 100.
-  constexpr std::int64_t kUnixEpochInFileTimeTicks = 116444736000000000LL;
-  const std::int64_t sinceUnixEpoch =
-      static_cast<std::int64_t>(ticks.QuadPart) - kUnixEpochInFileTimeTicks;
-  return sinceUnixEpoch * 100LL;
+  return file_time_ns_from_filetime(ticks.QuadPart);
 #else
   struct stat st{};
   if (stat(osPath, &st) != 0) {
@@ -499,8 +568,8 @@ std::int64_t file_mtime_ns(const char *osPath) noexcept {
 #else
   const timespec &modified = st.st_mtim;
 #endif
-  return (static_cast<std::int64_t>(modified.tv_sec) * 1000000000LL) +
-         static_cast<std::int64_t>(modified.tv_nsec);
+  return file_time_ns_from_unix(static_cast<std::int64_t>(modified.tv_sec),
+                                static_cast<std::int64_t>(modified.tv_nsec));
 #endif
 }
 

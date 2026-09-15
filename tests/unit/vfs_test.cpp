@@ -6,11 +6,25 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <limits>
 #include <string>
 #include <system_error>
 
 #include "engine/core/logging.h"
 #include "engine/core/vfs.h"
+
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
+#include <fcntl.h>
+#include <sys/stat.h>
+#endif
 
 using namespace engine::core;
 
@@ -332,6 +346,151 @@ bool test_mtime_subsecond() noexcept {
   return ok;
 }
 
+/// The range conversions behind file_mtime_ns saturate at both ends of
+/// the signed nanosecond count instead of wrapping: the edge second and
+/// its remainder are exact, one nanosecond past either edge is the bound,
+/// and the nanosecond field folds whole seconds and negative values in.
+bool test_mtime_range_conversion() noexcept {
+  constexpr std::int64_t kMax = std::numeric_limits<std::int64_t>::max();
+  constexpr std::int64_t kMin = std::numeric_limits<std::int64_t>::min();
+  bool ok = true;
+
+  // POSIX seconds + nanoseconds.
+  ok = ok && (file_time_ns_from_unix(0, 0) == 0);
+  ok = ok && (file_time_ns_from_unix(1, 5) == 1000000005LL);
+  ok = ok && (file_time_ns_from_unix(-1, 500000000) == -500000000LL);
+  ok = ok && (file_time_ns_from_unix(9223372036LL, 854775807) == kMax);
+  ok = ok && (file_time_ns_from_unix(9223372036LL, 854775808) == kMax);
+  ok = ok && (file_time_ns_from_unix(9223372037LL, 0) == kMax);
+  ok = ok && (file_time_ns_from_unix(13569465600LL, 0) == kMax); // 2400-01-01
+  ok = ok && (file_time_ns_from_unix(kMax, kMax) == kMax);
+  ok = ok && (file_time_ns_from_unix(-9223372036LL, 0) ==
+              -9223372036000000000LL);
+  ok = ok && (file_time_ns_from_unix(-9223372037LL, 145224192) == kMin);
+  ok = ok && (file_time_ns_from_unix(-9223372037LL, 145224193) == kMin + 1);
+  ok = ok && (file_time_ns_from_unix(-9223372037LL, 145224191) == kMin);
+  ok = ok && (file_time_ns_from_unix(-9223372038LL, 999999999) == kMin);
+  ok = ok && (file_time_ns_from_unix(kMin, kMin) == kMin);
+  // Whole seconds and negative values in the nanosecond field fold in.
+  ok = ok && (file_time_ns_from_unix(0, 2500000000LL) == 2500000000LL);
+  ok = ok && (file_time_ns_from_unix(5, -7000000000LL) == -2000000000LL);
+  ok = ok && (file_time_ns_from_unix(0, -1) == -1);
+  ok = ok && (file_time_ns_from_unix(9223372035LL, 1999999999LL) == kMax);
+
+  // Windows FILETIME ticks (100 ns since 1601-01-01).
+  constexpr std::uint64_t kEpochTicks = 116444736000000000ULL;
+  ok = ok && (file_time_ns_from_filetime(kEpochTicks) == 0);
+  ok = ok && (file_time_ns_from_filetime(kEpochTicks + 1U) == 100);
+  ok = ok && (file_time_ns_from_filetime(kEpochTicks - 1U) == -100);
+  ok = ok && (file_time_ns_from_filetime(kEpochTicks + 92233720368547758ULL) ==
+              9223372036854775800LL);
+  ok = ok && (file_time_ns_from_filetime(kEpochTicks + 92233720368547759ULL) ==
+              kMax);
+  ok = ok && (file_time_ns_from_filetime(
+                  std::numeric_limits<std::uint64_t>::max()) == kMax);
+  ok = ok && (file_time_ns_from_filetime(kEpochTicks - 92233720368547758ULL) ==
+              -9223372036854775800LL);
+  ok = ok && (file_time_ns_from_filetime(kEpochTicks - 92233720368547759ULL) ==
+              kMin);
+  ok = ok && (file_time_ns_from_filetime(0U) == kMin); // 1601-01-01
+  return ok;
+}
+
+/// Stamps a file's modification time straight through the OS, bypassing
+/// the engine, and reports whether the filesystem stored exactly that
+/// stamp (a filesystem with a narrower timestamp range clamps or refuses
+/// a far-future date, which the caller then treats as untestable here).
+bool stamp_mtime_unix(const char *osPath, std::int64_t seconds,
+                      std::int64_t nanoseconds) noexcept {
+#if defined(_WIN32)
+  HANDLE file = CreateFileA(osPath, FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ,
+                            nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL,
+                            nullptr);
+  if (file == INVALID_HANDLE_VALUE) {
+    return false;
+  }
+  ULARGE_INTEGER ticks{};
+  ticks.QuadPart = 116444736000000000ULL +
+                   (static_cast<std::uint64_t>(seconds) * 10000000ULL) +
+                   (static_cast<std::uint64_t>(nanoseconds) / 100ULL);
+  FILETIME stamp{};
+  stamp.dwLowDateTime = ticks.LowPart;
+  stamp.dwHighDateTime = ticks.HighPart;
+  const bool set = SetFileTime(file, nullptr, nullptr, &stamp) != 0;
+  CloseHandle(file);
+  if (!set) {
+    return false;
+  }
+  WIN32_FILE_ATTRIBUTE_DATA data{};
+  if (GetFileAttributesExA(osPath, GetFileExInfoStandard, &data) == 0) {
+    return false;
+  }
+  return (data.ftLastWriteTime.dwLowDateTime == stamp.dwLowDateTime) &&
+         (data.ftLastWriteTime.dwHighDateTime == stamp.dwHighDateTime);
+#else
+  timespec times[2] = {};
+  times[0].tv_nsec = UTIME_OMIT;
+  times[1].tv_sec = static_cast<time_t>(seconds);
+  times[1].tv_nsec = static_cast<long>(nanoseconds);
+  if (utimensat(AT_FDCWD, osPath, times, 0) != 0) {
+    return false;
+  }
+  struct stat st{};
+  if (stat(osPath, &st) != 0) {
+    return false;
+  }
+#if defined(__APPLE__)
+  const timespec &modified = st.st_mtimespec;
+#else
+  const timespec &modified = st.st_mtim;
+#endif
+  return (static_cast<std::int64_t>(modified.tv_sec) == seconds) &&
+         (static_cast<std::int64_t>(modified.tv_nsec) == nanoseconds);
+#endif
+}
+
+/// A real file stamped in the far future reads through the production
+/// path as the saturated bound, never a wrapped value, and a file stamped
+/// at the last representable date reads exactly. A filesystem that cannot
+/// store the far-future stamp (its own timestamp range ends earlier) skips
+/// that half; the in-range stamp is asserted everywhere.
+bool test_mtime_far_future() noexcept {
+  if (!initialize_vfs()) {
+    return false;
+  }
+  if (!mount("root", ".")) {
+    shutdown_vfs();
+    return false;
+  }
+
+  const char *osPath = "_vfs_mtime_far_future.dat";
+  const char *virtualPath = "root/_vfs_mtime_far_future.dat";
+  bool ok = vfs_write_binary(virtualPath, "t", 1U);
+
+  // 2200-01-01T00:00:00.1234567Z: inside the range, read back exactly on
+  // every platform (the fraction is a whole number of Windows 100 ns ticks,
+  // the coarsest stamp precision the header promises).
+  ok = ok && stamp_mtime_unix(osPath, 7258118400LL, 123456700LL);
+  ok = ok && (vfs_file_mtime(virtualPath) == 7258118400123456700LL);
+  ok = ok && (file_mtime_ns(osPath) == 7258118400123456700LL);
+
+  // 2400-01-01T00:00:00.5Z: beyond the range, reads as the upper bound
+  // wherever the filesystem stores it (ext4 and NTFS do).
+  if (stamp_mtime_unix(osPath, 13569465600LL, 500000000LL)) {
+    constexpr std::int64_t kMax = std::numeric_limits<std::int64_t>::max();
+    ok = ok && (vfs_file_mtime(virtualPath) == kMax);
+    ok = ok && (file_mtime_ns(osPath) == kMax);
+  } else {
+    std::printf("vfs mtime far-future: filesystem cannot store a "
+                "year-2400 stamp; saturation covered by the pure "
+                "conversion test only\n");
+  }
+
+  std::remove(osPath);
+  shutdown_vfs();
+  return ok;
+}
+
 /// Fault injection (audit P2-7): a write whose atomic rename cannot
 /// replace its destination (a directory) fails, a pre-existing sibling
 /// file written earlier keeps its bytes after a failed overwrite of a
@@ -587,6 +746,12 @@ int main() {
   }
   if (!test_read_binary_bounded()) {
     return 13;
+  }
+  if (!test_mtime_range_conversion()) {
+    return 14;
+  }
+  if (!test_mtime_far_future()) {
+    return 15;
   }
   return 0;
 }

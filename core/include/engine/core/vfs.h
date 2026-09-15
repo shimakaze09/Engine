@@ -81,13 +81,29 @@ void vfs_free(void *buffer) noexcept;
 // Return the file's modification time in nanoseconds since the Unix epoch
 // on every platform, or 0 on failure. Full platform precision (nanoseconds
 // on POSIX, 100 ns on Windows), so two writes inside one second compare
-// unequal; values are for change detection, not for display.
+// unequal; values are for change detection, not for display. The
+// representable range is what a signed 64-bit nanosecond count holds,
+// about 292 years either side of 1970 (1677-09-21 to 2262-04-11); a file
+// stamped outside it (an archive-preserved or skewed timestamp) reads as
+// the nearer bound, INT64_MIN or INT64_MAX, never a wrapped value, so it
+// still compares as present, keeps its ordering against in-range stamps,
+// and two stamps beyond the same bound compare equal.
 std::int64_t vfs_file_mtime(const char *virtualPath) noexcept;
 
 // The same modification time for an OS path that never went through a
 // mount (the script watcher's cwd-relative chunks); vfs_file_mtime is this
 // after resolution, so every watcher in the tree shares one reading.
 std::int64_t file_mtime_ns(const char *osPath) noexcept;
+
+// The range conversions behind file_mtime_ns, exposed so their saturation
+// boundaries are testable exactly on every platform: a POSIX
+// seconds + nanoseconds pair, and a Windows FILETIME tick count (100 ns
+// intervals since 1601-01-01). Both saturate to INT64_MIN / INT64_MAX
+// instead of overflowing; the nanosecond field may carry any value and
+// is folded in with the same saturation.
+std::int64_t file_time_ns_from_unix(std::int64_t seconds,
+                                    std::int64_t nanoseconds) noexcept;
+std::int64_t file_time_ns_from_filetime(std::uint64_t ticks) noexcept;
 
 // Resolve a virtual path to the underlying OS path. Returns false if the
 // virtual prefix is not mounted or the buffer is too small.
