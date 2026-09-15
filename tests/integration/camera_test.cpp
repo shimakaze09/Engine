@@ -106,9 +106,9 @@ bool test_blend_interpolation() noexcept {
 
   cm.push_camera(kOwnerA, entry, 1.0F);
 
-  math::Vec3 pos{}, tgt{}, up{};
-  float fov = 0.0F, nearP = 0.0F, farP = 0.0F;
-  cm.evaluate(0.0F, &pos, &tgt, &up, &fov, &nearP, &farP);
+  CameraEntry evaluated{};
+  const math::Vec3 &pos = evaluated.position;
+  cm.evaluate(0.0F, &evaluated);
   if (pos.x != 10.0F) {
     return false;
   }
@@ -119,7 +119,7 @@ bool test_blend_interpolation() noexcept {
   entry2.blendSpeed = 5.0F;
   cm.push_camera(kOwnerB, entry2, 10.0F);
 
-  cm.evaluate(0.1F, &pos, &tgt, &up, &fov, &nearP, &farP);
+  cm.evaluate(0.1F, &evaluated);
   // Position should be moving toward 20 but not there yet.
   if ((pos.x <= 10.0F) || (pos.x >= 20.0F)) {
     return false;
@@ -140,13 +140,13 @@ bool test_camera_shake_nonzero_during_and_zero_after() noexcept {
   cm.add_shake(1.0F, 15.0F, 0.5F, 2.0F);
 
   // First evaluate (snaps, dt=0 for snap, then apply shake).
-  math::Vec3 pos{}, tgt{}, up{};
-  float fov = 0.0F, nearP = 0.0F, farP = 0.0F;
+  CameraEntry evaluated{};
+  const math::Vec3 &pos = evaluated.position;
 
   // Evaluate one step to snap camera.
-  cm.evaluate(0.0F, &pos, &tgt, &up, &fov, &nearP, &farP);
+  cm.evaluate(0.0F, &evaluated);
 
-  cm.evaluate(0.1F, &pos, &tgt, &up, &fov, &nearP, &farP);
+  cm.evaluate(0.1F, &evaluated);
 
   // At least one shake axis should be nonzero.
   const float shakeLen =
@@ -161,7 +161,7 @@ bool test_camera_shake_nonzero_during_and_zero_after() noexcept {
   }
 
   // Advance past duration (0.5s total).
-  cm.evaluate(0.5F, &pos, &tgt, &up, &fov, &nearP, &farP);
+  cm.evaluate(0.5F, &evaluated);
 
   // Shake should be expired.
   if (cm.shake_count() != 0U) {
@@ -196,10 +196,10 @@ bool test_multiple_shakes_additive() noexcept {
   }
 
   // Evaluate snap + time step.
-  math::Vec3 pos{}, tgt{}, up{};
-  float fov = 0.0F, nearP = 0.0F, farP = 0.0F;
-  cm.evaluate(0.0F, &pos, &tgt, &up, &fov, &nearP, &farP);
-  cm.evaluate(0.05F, &pos, &tgt, &up, &fov, &nearP, &farP);
+  CameraEntry evaluated{};
+  const math::Vec3 &pos = evaluated.position;
+  cm.evaluate(0.0F, &evaluated);
+  cm.evaluate(0.05F, &evaluated);
 
   // Offsets should be nonzero (additive of two shakes).
   const float len = std::sqrt(pos.x * pos.x + pos.y * pos.y + pos.z * pos.z);
@@ -228,14 +228,18 @@ bool test_camera_shake_large_phase_is_finite_and_deterministic() noexcept {
     return false;
   }
 
-  math::Vec3 posA{}, targetA{}, upA{};
-  math::Vec3 posB{}, targetB{}, upB{};
-  float fovA = 0.0F, nearA = 0.0F, farA = 0.0F;
-  float fovB = 0.0F, nearB = 0.0F, farB = 0.0F;
-  first.evaluate(0.0F, &posA, &targetA, &upA, &fovA, &nearA, &farA);
-  second.evaluate(0.0F, &posB, &targetB, &upB, &fovB, &nearB, &farB);
-  first.evaluate(0.25F, &posA, &targetA, &upA, &fovA, &nearA, &farA);
-  second.evaluate(0.25F, &posB, &targetB, &upB, &fovB, &nearB, &farB);
+  CameraEntry evalA{};
+  CameraEntry evalB{};
+  first.evaluate(0.0F, &evalA);
+  second.evaluate(0.0F, &evalB);
+  first.evaluate(0.25F, &evalA);
+  second.evaluate(0.25F, &evalB);
+  const math::Vec3 &posA = evalA.position;
+  const math::Vec3 &posB = evalB.position;
+  const math::Vec3 &targetA = evalA.target;
+  const math::Vec3 &targetB = evalB.target;
+  const math::Vec3 &upA = evalA.up;
+  const math::Vec3 &upB = evalB.up;
 
   if (!std::isfinite(posA.x) || !std::isfinite(posA.y) ||
       !std::isfinite(posA.z) || !std::isfinite(targetA.x) ||
@@ -246,8 +250,9 @@ bool test_camera_shake_large_phase_is_finite_and_deterministic() noexcept {
   return (posA.x == posB.x) && (posA.y == posB.y) && (posA.z == posB.z) &&
          (targetA.x == targetB.x) && (targetA.y == targetB.y) &&
          (targetA.z == targetB.z) && (upA.x == upB.x) && (upA.y == upB.y) &&
-         (upA.z == upB.z) && (fovA == fovB) && (nearA == nearB) &&
-         (farA == farB);
+         (upA.z == upB.z) && (evalA.fovRadians == evalB.fovRadians) &&
+         (evalA.nearPlane == evalB.nearPlane) &&
+         (evalA.farPlane == evalB.farPlane);
 }
 
 bool test_destroyed_owner_removes_camera() noexcept {
@@ -375,13 +380,11 @@ bool test_manager_rejects_invalid_parameters() noexcept {
     }
   }
 
-  math::Vec3 position{};
-  math::Vec3 target{};
-  math::Vec3 up{};
-  float fov = 0.0F;
-  float nearPlane = 0.0F;
-  float farPlane = 0.0F;
-  cm.evaluate(10.0F, &position, &target, &up, &fov, &nearPlane, &farPlane);
+  CameraEntry evaluated{};
+  cm.evaluate(10.0F, &evaluated);
+  const math::Vec3 &position = evaluated.position;
+  const math::Vec3 &target = evaluated.target;
+  const float fov = evaluated.fovRadians;
   if (!std::isfinite(position.x) || !std::isfinite(position.y) ||
       !std::isfinite(position.z) || !std::isfinite(target.x) ||
       !std::isfinite(fov) || !nearly(position.x, 3.0F) ||

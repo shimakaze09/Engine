@@ -149,7 +149,6 @@ renderer/src/shadow_map.cpp	history-reference	3
 renderer/src/texture_loader.cpp	history-reference	4
 runtime/include/engine/engine.h	history-reference	1
 runtime/include/engine/runtime/animation.h	history-reference	1
-runtime/include/engine/runtime/camera_manager.h	history-reference	1
 runtime/include/engine/runtime/editor_bridge.h	history-reference	2
 runtime/include/engine/runtime/entity_pool.h	history-reference	1
 runtime/include/engine/runtime/game_binding_state.h	history-reference	2
@@ -162,7 +161,6 @@ runtime/include/engine/runtime/world.h	history-reference	8
 runtime/include/engine/runtime/world_component_types.h	history-reference	3
 runtime/include/engine/runtime/world_query.h	history-reference	1
 runtime/src/animation_assets.cpp	history-reference	5
-runtime/src/camera_manager.cpp	history-reference	1
 runtime/src/component_registry.h	history-reference	3
 runtime/src/engine.cpp	history-reference	4
 runtime/src/engine_bootstrap_content.h	history-reference	1

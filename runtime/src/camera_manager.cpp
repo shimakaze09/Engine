@@ -209,28 +209,7 @@ float CameraManager::noise1d(float t) noexcept {
   return v0 + s * (v1 - v0);
 }
 
-void CameraManager::evaluate(float dt, math::Vec3 *outPosition,
-                             math::Vec3 *outTarget, math::Vec3 *outUp,
-                             float *outFov, float *outNear,
-                             float *outFar) noexcept {
-  if ((outPosition == nullptr) || (outTarget == nullptr) ||
-      (outUp == nullptr) || (outFov == nullptr) || (outNear == nullptr) ||
-      (outFar == nullptr)) {
-    return;
-  }
-
-  CameraEntry evaluated{};
-  evaluate(dt, &evaluated);
-  *outPosition = evaluated.position;
-  *outTarget = evaluated.target;
-  *outUp = evaluated.up;
-  *outFov = evaluated.fovRadians;
-  *outNear = evaluated.nearPlane;
-  *outFar = evaluated.farPlane;
-}
-
-/// Struct-filling primary (#221): also carries the projection kind and
-/// orthographic size. The kind never interpolates — the winning camera's
+/// The projection kind never interpolates — the winning camera's
 /// projection applies instantly (there is no meaningful matrix blend
 /// between perspective and orthographic) while orthographicSize lerps
 /// exactly like fovRadians, its perspective analogue.

@@ -71,16 +71,10 @@ public:
   bool add_shake(float amplitude, float frequency, float duration,
                  float decay) noexcept;
 
-  /// Evaluate the final camera state for this frame. Advances blend weights
-  /// and shake timers by @p dt. Writes the resulting camera values into the
-  /// output parameters.
-  void evaluate(float dt, math::Vec3 *outPosition, math::Vec3 *outTarget,
-                math::Vec3 *outUp, float *outFov, float *outNear,
-                float *outFar) noexcept;
-
-  /// Evaluate into one struct, including the projection kind and ortho size
-  /// (#221); the out-param overload above delegates here and drops the lens
-  /// extras for its legacy callers.
+  /// Evaluate the final camera state for this frame into one struct:
+  /// advances blend weights and shake timers by @p dt and writes the pose,
+  /// lens, projection kind, and orthographic size the frame renders with.
+  /// A null output evaluates nothing (no time advances).
   void evaluate(float dt, CameraEntry *outCamera) noexcept;
 
   /// Clear all cameras and shakes.
