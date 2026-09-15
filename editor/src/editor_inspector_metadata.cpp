@@ -31,10 +31,10 @@ constexpr FieldMetadata kFieldMetadataTable[] = {
      "Analytic collider shapes only; convex hull and heightfield shapes "
      "are set by primitive spawn/import, not this combo.", nullptr, 0.0F,
      0.0F, 0.0F, InspectorWidget::Enum, false, false, kColliderShapeLabels,
-     3U},
+     3U, true},
     {"engine::runtime::LightComponent", "type", "Type", "Light", nullptr,
      nullptr, 0.0F, 0.0F, 0.0F, InspectorWidget::Enum, false, false,
-     kLightTypeLabels, 2U},
+     kLightTypeLabels, 2U, true},
     {"engine::runtime::Transform", "position", "Position", "Transform",
      "World-relative position of the object's local origin.", "m", 0.05F,
      0.0F, 0.0F, InspectorWidget::Drag, false, false},
@@ -224,6 +224,13 @@ const FieldMetadata *find_field_metadata(const char *typeName,
   return nullptr;
 }
 
+const FieldMetadata *field_metadata_rows(std::size_t *outCount) noexcept {
+  if (outCount != nullptr) {
+    *outCount = sizeof(kFieldMetadataTable) / sizeof(kFieldMetadataTable[0]);
+  }
+  return kFieldMetadataTable;
+}
+
 const ComponentMetadata *find_component_metadata(const char *typeName) noexcept {
   if (typeName == nullptr) {
     return nullptr;
@@ -234,6 +241,15 @@ const ComponentMetadata *find_component_metadata(const char *typeName) noexcept 
     }
   }
   return nullptr;
+}
+
+const ComponentMetadata *
+component_metadata_rows(std::size_t *outCount) noexcept {
+  if (outCount != nullptr) {
+    *outCount =
+        sizeof(kComponentMetadataTable) / sizeof(kComponentMetadataTable[0]);
+  }
+  return kComponentMetadataTable;
 }
 
 math::Vec3 euler_degrees_from_quat(const math::Quat &rotation) noexcept {
