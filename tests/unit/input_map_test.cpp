@@ -1184,6 +1184,106 @@ bool test_decoded_name_length_boundaries() noexcept {
   return intact;
 }
 
+/// Field-level strictness (issue #314): a binding or axis-source field
+/// that is present but malformed rejects the whole document and leaves
+/// the current bindings untouched, so a default can never be committed
+/// and re-saved in place of the authored value; an absent field still
+/// takes the struct default and a well-formed value still loads.
+bool test_malformed_field_load_preserves_bindings() noexcept {
+  if (!init_all()) {
+    return false;
+  }
+
+  InputBinding binding{};
+  binding.type = InputBindingType::Key;
+  binding.code = kKey_Space;
+  add_input_action("jump", &binding, 1U);
+
+  const char *rejected[] = {
+      // binding fields: wrong type, null, negative where unsigned
+      "{\"actions\":[{\"name\":\"a\",\"bindings\":[{\"type\":\"Key\","
+      "\"code\":1}]}],\"axes\":[]}",
+      "{\"actions\":[{\"name\":\"a\",\"bindings\":[{\"type\":0,"
+      "\"code\":\"32\"}]}],\"axes\":[]}",
+      "{\"actions\":[{\"name\":\"a\",\"bindings\":[{\"type\":0,\"code\":1,"
+      "\"axis_threshold\":null}]}],\"axes\":[]}",
+      "{\"actions\":[{\"name\":\"a\",\"bindings\":[{\"type\":0,\"code\":1,"
+      "\"axis_scale\":true}]}],\"axes\":[]}",
+      "{\"actions\":[{\"name\":\"a\",\"bindings\":[{\"type\":-1,"
+      "\"code\":1}]}],\"axes\":[]}",
+      // bindings present but not an array
+      "{\"actions\":[{\"name\":\"a\",\"bindings\":5}],\"axes\":[]}",
+      "{\"actions\":[{\"name\":\"a\",\"bindings\":{}}],\"axes\":[]}",
+      // axis-source fields
+      "{\"actions\":[],\"axes\":[{\"name\":\"m\",\"sources\":[{\"type\":"
+      "\"KeyPair\"}]}]}",
+      "{\"actions\":[],\"axes\":[{\"name\":\"m\",\"sources\":[{\"type\":0,"
+      "\"negative_key\":null}]}]}",
+      "{\"actions\":[],\"axes\":[{\"name\":\"m\",\"sources\":[{\"type\":0,"
+      "\"positive_key\":\"D\"}]}]}",
+      "{\"actions\":[],\"axes\":[{\"name\":\"m\",\"sources\":[{\"type\":0,"
+      "\"axis_index\":1.5}]}]}",
+      "{\"actions\":[],\"axes\":[{\"name\":\"m\",\"sources\":[{\"type\":0,"
+      "\"scale\":\"1\"}]}]}",
+      "{\"actions\":[],\"axes\":[{\"name\":\"m\",\"sources\":[{\"type\":0,"
+      "\"dead_zone\":[]}]}]}",
+      // sources present but not an array
+      "{\"actions\":[],\"axes\":[{\"name\":\"m\",\"sources\":{}}]}",
+  };
+  for (const char *doc : rejected) {
+    if (load_input_bindings_from_buffer(doc, std::strlen(doc))) {
+      shutdown_all();
+      return false;
+    }
+  }
+
+  // Every refusal left the current bindings in place.
+  begin_input_frame();
+  sim_key_down(kKey_Space);
+  end_input_frame();
+  const bool actionIntact = is_mapped_action_down("jump");
+  begin_input_frame();
+  sim_key_up(kKey_Space);
+  end_input_frame();
+  if (!actionIntact) {
+    shutdown_all();
+    return false;
+  }
+
+  // Absent fields take the struct defaults (a Key binding with code -1
+  // never fires; a KeyPair source with no keys reads 0), and well-formed
+  // fields still load and drive input.
+  char accepted[512] = {};
+  std::snprintf(accepted, sizeof(accepted),
+                "{\"actions\":[{\"name\":\"bare\",\"bindings\":[{}]},"
+                "{\"name\":\"full\",\"bindings\":[{\"type\":0,\"code\":%d,"
+                "\"axis_threshold\":0.5,\"axis_scale\":1.0}]}],"
+                "\"axes\":[{\"name\":\"bare_axis\",\"sources\":[{}]},"
+                "{\"name\":\"move_x\",\"sources\":[{\"type\":0,"
+                "\"negative_key\":%d,\"positive_key\":%d,\"axis_index\":0,"
+                "\"scale\":1.0,\"dead_zone\":0.15}]}]}",
+                kKey_Space, kKey_A, kKey_D);
+  if (!load_input_bindings_from_buffer(accepted, std::strlen(accepted))) {
+    shutdown_all();
+    return false;
+  }
+  begin_input_frame();
+  sim_key_down(kKey_Space);
+  sim_key_down(kKey_D);
+  end_input_frame();
+  const bool fullDown = is_mapped_action_down("full");
+  const bool bareDown = is_mapped_action_down("bare");
+  const float moveX = mapped_axis_value("move_x");
+  const float bareAxis = mapped_axis_value("bare_axis");
+  begin_input_frame();
+  sim_key_up(kKey_Space);
+  sim_key_up(kKey_D);
+  end_input_frame();
+
+  shutdown_all();
+  return fullDown && !bareDown && (moveX == 1.0F) && (bareAxis == 0.0F);
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -1229,6 +1329,8 @@ int main() {
       &test_malformed_escape_names_rejected);
   run("decoded_name_length_boundaries",
       &test_decoded_name_length_boundaries);
+  run("malformed_field_load_preserves_bindings",
+      &test_malformed_field_load_preserves_bindings);
   run("null_and_edge_cases", &test_null_and_edge_cases);
 
   std::printf("--- %d passed, %d failed ---\n", passed, failed);
