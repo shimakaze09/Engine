@@ -133,18 +133,15 @@ int main() {
     failure = 6;
   }
   if (failure == 0) {
-    engine::math::Vec3 position{};
-    engine::math::Vec3 target{};
-    engine::math::Vec3 up{};
-    float fov = 0.0F;
-    float nearPlane = 0.0F;
-    float farPlane = 0.0F;
-    world->camera_manager().evaluate(10.0F, &position, &target, &up, &fov,
-                                     &nearPlane, &farPlane);
+    engine::runtime::CameraEntry evaluated{};
+    world->camera_manager().evaluate(10.0F, &evaluated);
+    const engine::math::Vec3 &position = evaluated.position;
+    const engine::math::Vec3 &target = evaluated.target;
     if (!std::isfinite(position.x) || !std::isfinite(position.y) ||
         !std::isfinite(position.z) || !std::isfinite(target.x) ||
-        !std::isfinite(fov) || !std::isfinite(nearPlane) ||
-        !std::isfinite(farPlane)) {
+        !std::isfinite(evaluated.fovRadians) ||
+        !std::isfinite(evaluated.nearPlane) ||
+        !std::isfinite(evaluated.farPlane)) {
       failure = 7;
     }
   }
