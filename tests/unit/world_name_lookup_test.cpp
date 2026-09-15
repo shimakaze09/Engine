@@ -188,6 +188,46 @@ int test_churn(World &world) {
   return 0;
 }
 
+/// A name at the capacity bound (kMaxNameLength characters) is accepted
+/// and found under its full spelling; a name array filled past it (no
+/// terminator inside the fixed capacity) is refused, the entity's existing
+/// name survives, and nothing becomes findable under a cut spelling.
+int test_overlong_name_refused(World &world) {
+  const Entity entity = spawn_named(world, "keep");
+  if (entity == kInvalidEntity) {
+    return 60;
+  }
+
+  NameComponent overlong{};
+  std::memset(overlong.name, 'n', sizeof(overlong.name));
+  if (world.add_name_component(entity, overlong)) {
+    return 61;
+  }
+  if (world.find_entity_by_name("keep") != entity) {
+    return 62;
+  }
+  char cut[NameComponent::kMaxNameLength + 1U] = {};
+  std::memset(cut, 'n', NameComponent::kMaxNameLength);
+  if (world.find_entity_by_name(cut) != kInvalidEntity) {
+    return 63;
+  }
+
+  NameComponent atBound{};
+  std::memset(atBound.name, 'b', NameComponent::kMaxNameLength);
+  if (!world.add_name_component(entity, atBound)) {
+    return 64;
+  }
+  if ((world.find_entity_by_name(atBound.name) != entity) ||
+      (world.find_entity_by_name("keep") != kInvalidEntity)) {
+    return 65;
+  }
+
+  if (!world.destroy_entity(entity)) {
+    return 66;
+  }
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -201,6 +241,7 @@ int main() {
       test_basic_lookup(*world), test_rename(*world),
       test_remove(*world),       test_destroy(*world),
       test_duplicate_names(*world), test_churn(*world),
+      test_overlong_name_refused(*world),
   };
 
   for (const int result : results) {

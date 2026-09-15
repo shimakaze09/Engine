@@ -36,6 +36,17 @@ bool finite_quat(const math::Quat &value) noexcept {
          std::isfinite(value.z) && std::isfinite(value.w);
 }
 
+/// Logs the refusal of an identity-bearing string (a looked-up name or an
+/// asset path) that exceeds its component's fixed capacity.
+void log_identity_overflow(const char *operation, const char *field,
+                           std::size_t maxLength) noexcept {
+  char message[160] = {};
+  std::snprintf(message, sizeof(message),
+                "%s: %s exceeds %u characters or is unterminated; rejected",
+                operation, field, static_cast<unsigned int>(maxLength));
+  core::log_message(core::LogLevel::Error, "world", message);
+}
+
 /// Ingress validation (audit H-06): rejects non-finite transform fields so
 /// NaN can never enter propagation, physics, or rendering.
 bool validate_transform_ingress(const Transform &transform) noexcept {
@@ -622,8 +633,16 @@ bool World::add_name_component(Entity entity,
     return false;
   }
 
+  // The name is a lookup identity, so an over-long one is refused rather
+  // than truncated: a cut name would be findable under a spelling the
+  // author never wrote, and the entity's existing name stays in place.
   NameComponent safe{};
-  core::copy_string(safe.name, sizeof(safe.name), component.name);
+  if (!core::copy_string_strict(safe.name, sizeof(safe.name),
+                                component.name)) {
+    log_identity_overflow("add_name_component", "name",
+                          NameComponent::kMaxNameLength);
+    return false;
+  }
 
   // A re-add overwrites the previous name; drop its lookup entry first.
   NameComponent previous{};
@@ -964,9 +983,15 @@ bool World::add_script_component(Entity entity,
     return false;
   }
 
+  // A path is an identity: a truncated copy would name a different file
+  // (or none), so an over-long one is refused and nothing is added.
   ScriptComponent safe{};
-  core::copy_string(safe.scriptPath, sizeof(safe.scriptPath),
-                    component.scriptPath);
+  if (!core::copy_string_strict(safe.scriptPath, sizeof(safe.scriptPath),
+                                component.scriptPath)) {
+    log_identity_overflow("add_script_component", "scriptPath",
+                          ScriptComponent::kMaxPathLength);
+    return false;
+  }
 
   return m_scriptComponents.add(entity, safe);
 }
@@ -997,9 +1022,15 @@ bool World::add_animation_component(
     return false;
   }
 
+  // Same identity rule as the script path: refuse, never truncate.
   AnimationComponent safe = component;
-  core::copy_string(safe.controllerPath, sizeof(safe.controllerPath),
-                    component.controllerPath);
+  if (!core::copy_string_strict(safe.controllerPath,
+                                sizeof(safe.controllerPath),
+                                component.controllerPath)) {
+    log_identity_overflow("add_animation_component", "controllerPath",
+                          AnimationComponent::kMaxPathLength);
+    return false;
+  }
 
   return m_animationComponents.add(entity, safe);
 }
