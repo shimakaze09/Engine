@@ -1,12 +1,16 @@
 // Verifies the Inspector's semantic metadata tables and the pure Euler-
 // degrees<->quaternion round-trip helpers (issue #156): field/component
 // metadata lookups hit for annotated rows and miss safely for unknown
-// ones, and the Euler round trip is exact away from the pitch = +-90 deg
-// gimbal pole and stays a valid (renormalized) rotation at the pole.
+// ones, every metadata row resolves against the runtime reflection schema
+// (#177 item 4), and the Euler round trip is exact away from the pitch =
+// +-90 deg gimbal pole and stays a valid (renormalized) rotation at the
+// pole.
 
 #include "editor_inspector_metadata.h"
 
+#include "engine/core/reflect.h"
 #include "engine/math/quat.h"
+#include "engine/runtime/reflect_types.h"
 
 #include <cmath>
 #include <cstdio>
@@ -191,6 +195,84 @@ int check_euler_yaw_only() noexcept {
   return 0;
 }
 
+/// EXPECTATION (#177 item 4): every metadata row resolves against the
+/// runtime reflection schema by proof rather than by review. A field row
+/// names a registered type and, unless it declares a custom drawer, a
+/// registered field of that type; a custom-drawer row must not shadow a
+/// reflected field (the flag would then be stale); no (type, field) key
+/// appears twice (first-match lookup would hide the second); and every
+/// component row names a registered type.
+int check_metadata_rows_resolve_to_schema() noexcept {
+  engine::runtime::ensure_runtime_reflection_registered();
+  const engine::core::TypeRegistry &registry =
+      engine::core::global_type_registry();
+
+  std::size_t fieldRowCount = 0U;
+  const FieldMetadata *fieldRows =
+      engine::editor::field_metadata_rows(&fieldRowCount);
+  if ((fieldRows == nullptr) || (fieldRowCount == 0U)) {
+    return 1;
+  }
+  std::size_t customDrawn = 0U;
+  for (std::size_t i = 0U; i < fieldRowCount; ++i) {
+    const FieldMetadata &row = fieldRows[i];
+    if ((row.typeName == nullptr) || (row.fieldName == nullptr)) {
+      std::fprintf(stderr, "row %zu has a null key\n", i);
+      return 2;
+    }
+    const engine::core::TypeDescriptor *type =
+        registry.find_type(row.typeName);
+    if (type == nullptr) {
+      std::fprintf(stderr, "row %s.%s names an unregistered type\n",
+                   row.typeName, row.fieldName);
+      return 3;
+    }
+    const engine::core::TypeField *field = type->find_field(row.fieldName);
+    if (row.customDrawer) {
+      ++customDrawn;
+      if (field != nullptr) {
+        std::fprintf(stderr, "custom-drawer row %s.%s shadows a reflected "
+                             "field\n",
+                     row.typeName, row.fieldName);
+        return 4;
+      }
+    } else if (field == nullptr) {
+      std::fprintf(stderr, "row %s.%s names no reflected field\n",
+                   row.typeName, row.fieldName);
+      return 5;
+    }
+    for (std::size_t j = 0U; j < i; ++j) {
+      if ((std::strcmp(fieldRows[j].typeName, row.typeName) == 0) &&
+          (std::strcmp(fieldRows[j].fieldName, row.fieldName) == 0)) {
+        std::fprintf(stderr, "row %s.%s is duplicated\n", row.typeName,
+                     row.fieldName);
+        return 6;
+      }
+    }
+  }
+  // The custom-drawn set is exactly the two enum fields TypeField::Kind
+  // cannot describe (Collider.shape, LightComponent.type).
+  if (customDrawn != 2U) {
+    return 7;
+  }
+
+  std::size_t componentRowCount = 0U;
+  const ComponentMetadata *componentRows =
+      engine::editor::component_metadata_rows(&componentRowCount);
+  if ((componentRows == nullptr) || (componentRowCount == 0U)) {
+    return 8;
+  }
+  for (std::size_t i = 0U; i < componentRowCount; ++i) {
+    if ((componentRows[i].typeName == nullptr) ||
+        (registry.find_type(componentRows[i].typeName) == nullptr)) {
+      std::fprintf(stderr, "component row %zu names an unregistered type\n",
+                   i);
+      return 9;
+    }
+  }
+  return 0;
+}
+
 /// Layer names cover the full advertised slot count and reject out-of-
 /// range indices instead of reading past the table.
 int check_layer_names_bounded() noexcept {
@@ -224,6 +306,7 @@ int main() {
       {"euler_identity", check_euler_identity},
       {"euler_yaw_only", check_euler_yaw_only},
       {"layer_names_bounded", check_layer_names_bounded},
+      {"metadata_rows_resolve_to_schema", check_metadata_rows_resolve_to_schema},
   };
   for (const Case &c : cases) {
     const int result = c.fn();

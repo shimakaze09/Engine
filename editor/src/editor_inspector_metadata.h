@@ -46,19 +46,26 @@ struct FieldMetadata final {
   bool advanced = false; // hidden unless the Inspector's Advanced view is on
   bool readOnly = false;
   // widget == Enum: display strings indexed by the field's integer value.
-  // Field is not required to be a reflected core::TypeField -- the two
-  // current consumers (Collider.shape, LightComponent.type) are drawn by a
-  // custom combo ahead of the generic loop and look this table up directly
-  // by the same (typeName, fieldName) key, since TypeField::Kind has no
-  // Enum case.
   const char *const *enumLabels = nullptr;
   std::size_t enumLabelCount = 0U;
+  // A row whose field is not a reflected core::TypeField: it is drawn by a
+  // custom widget ahead of the generic loop (which looks this table up by
+  // the same (typeName, fieldName) key) because TypeField::Kind cannot
+  // describe the field. Every other row must name a registered field, and
+  // a custom-drawn row must not shadow one; engine_unit_editor_inspector_
+  // metadata checks both against the runtime schema, so a row cannot
+  // silently drift away from the member it annotates.
+  bool customDrawer = false;
 };
 
 /// Looks up field metadata for (typeName, fieldName); nullptr on a miss (the
 /// caller falls back to Auto-widget defaults, never to hiding the field).
 const FieldMetadata *find_field_metadata(const char *typeName,
                                          const char *fieldName) noexcept;
+
+/// Every field-metadata row in table order, for whole-table audits (the
+/// schema-resolution test); the count is written to outCount.
+const FieldMetadata *field_metadata_rows(std::size_t *outCount) noexcept;
 
 /// Semantic metadata for one persistent component type: how the Inspector
 /// labels its section header and groups it in the Add Component menu.
@@ -73,6 +80,11 @@ struct ComponentMetadata final {
 /// ("engine::runtime::Transform", ...); nullptr on a miss (the caller falls
 /// back to the raw C++ type name so no component becomes unlabeled).
 const ComponentMetadata *find_component_metadata(const char *typeName) noexcept;
+
+/// Every component-metadata row in table order, for whole-table audits; the
+/// count is written to outCount.
+const ComponentMetadata *
+component_metadata_rows(std::size_t *outCount) noexcept;
 
 /// Converts a rotation to pitch/yaw/roll degrees for display, using the same
 /// axis convention as math::to_euler (pitch about +X, yaw about +Y, roll
