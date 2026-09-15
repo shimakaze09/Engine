@@ -467,10 +467,12 @@ bool test_mtime_far_future() noexcept {
   const char *virtualPath = "root/_vfs_mtime_far_future.dat";
   bool ok = vfs_write_binary(virtualPath, "t", 1U);
 
-  // 2200-01-01T00:00:00.123456789Z: inside the range, read back exactly.
-  ok = ok && stamp_mtime_unix(osPath, 7258118400LL, 123456789LL);
-  ok = ok && (vfs_file_mtime(virtualPath) == 7258118400123456789LL);
-  ok = ok && (file_mtime_ns(osPath) == 7258118400123456789LL);
+  // 2200-01-01T00:00:00.1234567Z: inside the range, read back exactly on
+  // every platform (the fraction is a whole number of Windows 100 ns ticks,
+  // the coarsest stamp precision the header promises).
+  ok = ok && stamp_mtime_unix(osPath, 7258118400LL, 123456700LL);
+  ok = ok && (vfs_file_mtime(virtualPath) == 7258118400123456700LL);
+  ok = ok && (file_mtime_ns(osPath) == 7258118400123456700LL);
 
   // 2400-01-01T00:00:00.5Z: beyond the range, reads as the upper bound
   // wherever the filesystem stores it (ext4 and NTFS do).
