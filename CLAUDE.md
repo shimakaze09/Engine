@@ -729,6 +729,19 @@ directory-global by design.
   duplicate call sites in the same series; if a safe full migration is too
   broad, enumerate the remaining sites and keep the deduplication finding
   explicitly open.
+- Fixed-capacity string policy (#418 item 2): an identity-bearing field —
+  a name that is hashed or looked up, an asset, script, or controller
+  path — rejects input that does not fit whole (`core::copy_string_strict`
+  and the JSON parser's `copy_string_strict`), with a logged diagnostic
+  and the destination unchanged; a display-only field may truncate with a
+  warning; log and scratch buffers may truncate silently
+  (`core::copy_string`). The World's `add_name_component`,
+  `add_script_component`, and `add_animation_component` ingress sites
+  follow the reject rule (pinned by `engine_unit_world_name_lookup` and
+  `engine_unit_runtime_world`); the remaining truncating identity sites
+  (`content::write_metadata_path`, the shader-system and texture-loader
+  path copies, the animation registry's controller source path) stay
+  tracked on #418.
 
 ## Working conventions
 

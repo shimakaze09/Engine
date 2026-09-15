@@ -1,6 +1,7 @@
 // Verifies runtime world test behavior for the Engine test suite.
 
 #include <cmath>
+#include <cstring>
 #include <limits>
 #include <memory>
 #include <new>
@@ -818,6 +819,60 @@ int verify_destroy_removes_script_component() {
   return 0;
 }
 
+/// EXPECTATION (#418 item 2): script and animation-controller paths are
+/// identities, so a path array filled past kMaxPathLength (no terminator
+/// inside the fixed capacity) is refused with no component added, while a
+/// path of exactly kMaxPathLength characters is stored whole.
+int verify_identity_paths_refuse_overflow() {
+  using namespace engine::runtime;
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 160;
+  }
+  const Entity entity = world->create_entity();
+  if (entity == kInvalidEntity) {
+    return 161;
+  }
+
+  ScriptComponent overlongScript{};
+  std::memset(overlongScript.scriptPath, 'p', sizeof(overlongScript.scriptPath));
+  if (world->add_script_component(entity, overlongScript) ||
+      (world->get_script_component_ptr(entity) != nullptr)) {
+    return 162;
+  }
+  ScriptComponent boundScript{};
+  std::memset(boundScript.scriptPath, 'p', ScriptComponent::kMaxPathLength);
+  if (!world->add_script_component(entity, boundScript)) {
+    return 163;
+  }
+  const ScriptComponent *storedScript = world->get_script_component_ptr(entity);
+  if ((storedScript == nullptr) ||
+      (std::strcmp(storedScript->scriptPath, boundScript.scriptPath) != 0)) {
+    return 164;
+  }
+
+  AnimationComponent overlongAnim{};
+  std::memset(overlongAnim.controllerPath, 'c',
+              sizeof(overlongAnim.controllerPath));
+  if (world->add_animation_component(entity, overlongAnim) ||
+      (world->get_animation_component_ptr(entity) != nullptr)) {
+    return 165;
+  }
+  AnimationComponent boundAnim{};
+  std::memset(boundAnim.controllerPath, 'c', AnimationComponent::kMaxPathLength);
+  if (!world->add_animation_component(entity, boundAnim)) {
+    return 166;
+  }
+  const AnimationComponent *storedAnim =
+      world->get_animation_component_ptr(entity);
+  if ((storedAnim == nullptr) ||
+      (std::strcmp(storedAnim->controllerPath, boundAnim.controllerPath) !=
+       0)) {
+    return 167;
+  }
+  return 0;
+}
+
 /// EXPECTATION (audit H-06): component and gravity ingress rejects
 /// non-finite, non-positive-extent, and negative-mass/material values with
 /// the destination unchanged, while valid values keep being accepted.
@@ -1124,6 +1179,11 @@ int main() {
   }
 
   result = verify_destroy_removes_script_component();
+  if (result != 0) {
+    return result;
+  }
+
+  result = verify_identity_paths_refuse_overflow();
   if (result != 0) {
     return result;
   }
