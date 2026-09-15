@@ -58,8 +58,8 @@
 
 namespace {
 
-/// Human-readable name for a cgltf result in a diagnostic; the numeric
-/// value for any result the enumeration adds later.
+/// Human-readable name for a cgltf result in a diagnostic; a fixed
+/// placeholder for any result the enumeration adds later.
 const char *cgltf_result_name(cgltf_result result) {
   switch (result) {
   case cgltf_result_success:
