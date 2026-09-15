@@ -58,6 +58,35 @@
 
 namespace {
 
+/// Human-readable name for a cgltf result in a diagnostic; a fixed
+/// placeholder for any result the enumeration adds later.
+const char *cgltf_result_name(cgltf_result result) {
+  switch (result) {
+  case cgltf_result_success:
+    return "success";
+  case cgltf_result_data_too_short:
+    return "data too short";
+  case cgltf_result_unknown_format:
+    return "unknown format";
+  case cgltf_result_invalid_json:
+    return "invalid json";
+  case cgltf_result_invalid_gltf:
+    return "invalid gltf";
+  case cgltf_result_invalid_options:
+    return "invalid options";
+  case cgltf_result_file_not_found:
+    return "file not found";
+  case cgltf_result_io_error:
+    return "io error";
+  case cgltf_result_out_of_memory:
+    return "out of memory";
+  case cgltf_result_legacy_gltf:
+    return "legacy gltf";
+  default:
+    return "unrecognized result";
+  }
+}
+
 void print_usage() {
   std::fprintf(stderr,
                "usage: asset_packer <input.gltf|input.glb> <output.mesh> "
@@ -410,6 +439,17 @@ int main(int argc, char **argv) {
     std::fprintf(stderr, "error: failed to load glTF buffers\n");
     cgltf_free(data);
     return 3;
+  }
+
+  // cgltf's accessor reads trust the document's counts and offsets; only
+  // validation checks them against the loaded buffer sizes, so without it
+  // an accessor that overruns its view cooks bytes from beyond the buffer.
+  const cgltf_result validateResult = cgltf_validate(data);
+  if (validateResult != cgltf_result_success) {
+    std::fprintf(stderr, "error: glTF failed validation (%s): %s\n",
+                 cgltf_result_name(validateResult), inputPath);
+    cgltf_free(data);
+    return 7;
   }
 
   if ((data->meshes_count == 0U) || (data->meshes[0].primitives_count == 0U) ||
