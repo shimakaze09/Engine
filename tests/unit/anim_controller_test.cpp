@@ -11,6 +11,7 @@
 #include <limits>
 #include <memory>
 #include <new>
+#include <string>
 #include <vector>
 
 #include "anim_cook.h"
@@ -37,6 +38,10 @@ constexpr const char *kControllerVirtualPath =
     "animctrl/anim_controller_test.animctrl.json";
 constexpr const char *kReverseControllerVirtualPath =
     "animctrl/anim_controller_test.reverse.animctrl.json";
+constexpr const char *kNamesControllerPath =
+    "anim_controller_test.names.animctrl.json";
+constexpr const char *kNamesControllerVirtualPath =
+    "animctrl/anim_controller_test.names.animctrl.json";
 constexpr float kFixedDt = 1.0F / 60.0F;
 
 /// Removes a temporary test file when it exists.
@@ -53,6 +58,7 @@ void cleanup_files() noexcept {
   remove_file(kWalkPath);
   remove_file(kControllerPath);
   remove_file(kReverseControllerPath);
+  remove_file(kNamesControllerPath);
 }
 
 /// Writes a text file for the controller JSON fixture.
@@ -431,6 +437,81 @@ int check_missing_controller() {
   return 0;
 }
 
+/// Writes a one-clip, one-state controller whose clip/state name, event
+/// name and initial-state name are the given strings, then acquires it
+/// fresh (the registry is reset first so the path is re-parsed).
+std::uint32_t acquire_named_controller(const std::string &clipName,
+                                       const std::string &eventName,
+                                       const std::string &initialName) {
+  const std::string document =
+      "{\"skeleton\":\"animctrl/anim_controller_test.skel\","
+      "\"clips\":[{\"name\":\"" +
+      clipName +
+      "\",\"path\":\"animctrl/anim_controller_test.walk.anim\"}],"
+      "\"initial\":\"" +
+      initialName + "\",\"states\":[{\"name\":\"" + clipName +
+      "\",\"clip\":\"" + clipName +
+      "\",\"loop\":true}],"
+      "\"events\":[{\"clip\":\"" +
+      clipName + "\",\"time\":0.1,\"name\":\"" + eventName + "\"}]}";
+  if (!write_text(kNamesControllerPath, document.c_str())) {
+    return kInvalidAnimSlot;
+  }
+  engine::runtime::reset_anim_controllers();
+  return engine::runtime::acquire_anim_controller(kNamesControllerVirtualPath);
+}
+
+/// EXPECTATION (issue #314): a controller name the reader's buffer cannot
+/// hold refuses the whole controller instead of being truncated and then
+/// hashed under the truncated spelling. Clip, state and initial-state
+/// names hold at most 63 characters and event names at most
+/// AnimEvent::kMaxNameLength; a name exactly at each bound still loads
+/// and hashes as written, one past it refuses the load.
+int check_overlong_names_refused() {
+  const std::string clipAtBound(63U, 'c');
+  const std::string clipPastBound(64U, 'c');
+  const std::string eventAtBound(engine::runtime::AnimEvent::kMaxNameLength,
+                                 'e');
+  const std::string eventPastBound(
+      engine::runtime::AnimEvent::kMaxNameLength + 1U, 'e');
+
+  const std::uint32_t atBound =
+      acquire_named_controller(clipAtBound, eventAtBound, clipAtBound);
+  if (atBound == kInvalidAnimSlot) {
+    std::puts("names at the bound failed to load");
+    return 1;
+  }
+  const engine::runtime::AnimControllerData *controller =
+      engine::runtime::get_anim_controller(atBound);
+  if ((controller == nullptr) ||
+      (controller->clipNameHashes[0] !=
+       engine::core::fnv1a_32(clipAtBound.c_str())) ||
+      (controller->events[0].nameHash !=
+       engine::core::fnv1a_32(eventAtBound.c_str())) ||
+      (std::strcmp(controller->events[0].name, eventAtBound.c_str()) != 0)) {
+    std::puts("names at the bound did not hash as written");
+    return 1;
+  }
+
+  if (acquire_named_controller(clipPastBound, eventAtBound, clipPastBound) !=
+      kInvalidAnimSlot) {
+    std::puts("a 64-character clip/state name was accepted");
+    return 1;
+  }
+  if (acquire_named_controller(clipAtBound, eventPastBound, clipAtBound) !=
+      kInvalidAnimSlot) {
+    std::puts("an event name past kMaxNameLength was accepted");
+    return 1;
+  }
+  if (acquire_named_controller(clipAtBound, eventAtBound, clipPastBound) !=
+      kInvalidAnimSlot) {
+    std::puts("a 64-character initial-state name was accepted");
+    return 1;
+  }
+  engine::runtime::reset_anim_controllers();
+  return 0;
+}
+
 /// EXPECTATION (audit H-17): non-finite or extreme playback speeds cannot
 /// hang update_animations — an infinite speed resets the state time to
 /// zero, and a huge finite speed wraps in constant time to a finite state
@@ -738,6 +819,9 @@ int main() {
   }
   if (result == 0) {
     result = check_missing_controller();
+  }
+  if (result == 0) {
+    result = check_overlong_names_refused();
   }
   if (result == 0) {
     result = check_extreme_speed_cannot_hang();

@@ -56,6 +56,64 @@ bool parse_entry_name(const JsonParser &parser, const JsonValue &entry,
   return true;
 }
 
+/// Logs the one shape of field rejection the optional readers below share.
+void log_malformed_field(const char *what, const char *key) noexcept {
+  char msg[160] = {};
+  std::snprintf(msg, sizeof(msg),
+                "load_input_bindings: %s field '%s' is malformed; rejecting "
+                "the document",
+                what, key);
+  log_message(LogLevel::Error, kLogChannel, msg);
+}
+
+/// Reads an optional unsigned field: absent leaves `*out` at its default and
+/// succeeds; present-but-malformed fails so the load rejects the document
+/// instead of committing a default in place of what the author wrote.
+bool read_optional_uint_field(const JsonParser &parser, const JsonValue &entry,
+                              const char *key, std::uint32_t *out,
+                              const char *what) noexcept {
+  JsonValue field{};
+  if (!parser.get_object_field(entry, key, &field)) {
+    return true;
+  }
+  if (!parser.as_uint(field, out)) {
+    log_malformed_field(what, key);
+    return false;
+  }
+  return true;
+}
+
+/// Float counterpart of read_optional_uint_field with the same contract.
+bool read_optional_float_field(const JsonParser &parser,
+                               const JsonValue &entry, const char *key,
+                               float *out, const char *what) noexcept {
+  JsonValue field{};
+  if (!parser.get_object_field(entry, key, &field)) {
+    return true;
+  }
+  if (!parser.as_float(field, out)) {
+    log_malformed_field(what, key);
+    return false;
+  }
+  return true;
+}
+
+/// Reads an optional array field: absent yields an empty array and
+/// succeeds; a present value of any other type fails the load.
+bool read_optional_array_field(const JsonParser &parser,
+                               const JsonValue &entry, const char *key,
+                               JsonValue *out, const char *what) noexcept {
+  *out = JsonValue{};
+  if (!parser.get_object_field(entry, key, out)) {
+    return true;
+  }
+  if (out->type != JsonValue::Type::Array) {
+    log_malformed_field(what, key);
+    return false;
+  }
+  return true;
+}
+
 // Current-frame mouse delta (accumulated).
 float g_mouseDeltaX = 0.0F;
 float g_mouseDeltaY = 0.0F;
@@ -736,9 +794,16 @@ bool load_input_bindings_from_buffer(const char *buffer,
         return false;
       }
 
+      // Every binding field is optional (the struct default applies) but
+      // never lenient: a present value that fails to parse rejects the
+      // document, so a default can never be committed and re-saved in
+      // place of an authored value.
       JsonValue bindingsVal{};
-      if (parser.get_object_field(actionVal, "bindings", &bindingsVal) &&
-          (bindingsVal.type == JsonValue::Type::Array)) {
+      if (!read_optional_array_field(parser, actionVal, "bindings",
+                                     &bindingsVal, "action")) {
+        return false;
+      }
+      {
         const std::size_t bCount = parser.array_size(bindingsVal);
         if (bCount > kMaxBindingsPerAction) {
           log_message(LogLevel::Error, kLogChannel,
@@ -756,32 +821,25 @@ bool load_input_bindings_from_buffer(const char *buffer,
           }
 
           InputBinding binding{};
-          std::uint32_t uval = 0;
-          float fval = 0.0F;
-
-          JsonValue field{};
-          if (parser.get_object_field(bVal, "type", &field) &&
-              parser.as_uint(field, &uval)) {
-            if (uval > static_cast<std::uint32_t>(
-                           InputBindingType::GamepadAxis)) {
-              log_message(LogLevel::Error, kLogChannel,
-                          "load_input_bindings: binding type out of range");
-              return false;
-            }
-            binding.type = static_cast<InputBindingType>(uval);
+          std::uint32_t type = static_cast<std::uint32_t>(binding.type);
+          std::uint32_t code = static_cast<std::uint32_t>(binding.code);
+          if (!read_optional_uint_field(parser, bVal, "type", &type,
+                                        "binding") ||
+              !read_optional_uint_field(parser, bVal, "code", &code,
+                                        "binding") ||
+              !read_optional_float_field(parser, bVal, "axis_threshold",
+                                         &binding.axisThreshold, "binding") ||
+              !read_optional_float_field(parser, bVal, "axis_scale",
+                                         &binding.axisScale, "binding")) {
+            return false;
           }
-          if (parser.get_object_field(bVal, "code", &field) &&
-              parser.as_uint(field, &uval)) {
-            binding.code = static_cast<int>(uval);
+          if (type > static_cast<std::uint32_t>(InputBindingType::GamepadAxis)) {
+            log_message(LogLevel::Error, kLogChannel,
+                        "load_input_bindings: binding type out of range");
+            return false;
           }
-          if (parser.get_object_field(bVal, "axis_threshold", &field) &&
-              parser.as_float(field, &fval)) {
-            binding.axisThreshold = fval;
-          }
-          if (parser.get_object_field(bVal, "axis_scale", &field) &&
-              parser.as_float(field, &fval)) {
-            binding.axisScale = fval;
-          }
+          binding.type = static_cast<InputBindingType>(type);
+          binding.code = static_cast<int>(code);
 
           action.bindings[action.bindingCount] = binding;
           ++action.bindingCount;
@@ -821,9 +879,14 @@ bool load_input_bindings_from_buffer(const char *buffer,
         return false;
       }
 
+      // Source fields follow the binding-field contract above: optional,
+      // never lenient.
       JsonValue sourcesVal{};
-      if (parser.get_object_field(axisVal, "sources", &sourcesVal) &&
-          (sourcesVal.type == JsonValue::Type::Array)) {
+      if (!read_optional_array_field(parser, axisVal, "sources", &sourcesVal,
+                                     "axis")) {
+        return false;
+      }
+      {
         const std::size_t sCount = parser.array_size(sourcesVal);
         if (sCount > kMaxSourcesPerAxis) {
           log_message(LogLevel::Error, kLogChannel,
@@ -841,40 +904,35 @@ bool load_input_bindings_from_buffer(const char *buffer,
           }
 
           InputAxisSource src{};
-          std::uint32_t uval = 0;
-          float fval = 0.0F;
-
-          JsonValue field{};
-          if (parser.get_object_field(sVal, "type", &field) &&
-              parser.as_uint(field, &uval)) {
-            if (uval >
-                static_cast<std::uint32_t>(AxisSourceType::MouseDeltaY)) {
-              log_message(LogLevel::Error, kLogChannel,
-                          "load_input_bindings: axis source type out of range");
-              return false;
-            }
-            src.type = static_cast<AxisSourceType>(uval);
+          std::uint32_t type = static_cast<std::uint32_t>(src.type);
+          std::uint32_t negativeKey =
+              static_cast<std::uint32_t>(src.negativeKey);
+          std::uint32_t positiveKey =
+              static_cast<std::uint32_t>(src.positiveKey);
+          std::uint32_t axisIndex = static_cast<std::uint32_t>(src.axisIndex);
+          if (!read_optional_uint_field(parser, sVal, "type", &type,
+                                        "axis source") ||
+              !read_optional_uint_field(parser, sVal, "negative_key",
+                                        &negativeKey, "axis source") ||
+              !read_optional_uint_field(parser, sVal, "positive_key",
+                                        &positiveKey, "axis source") ||
+              !read_optional_uint_field(parser, sVal, "axis_index",
+                                        &axisIndex, "axis source") ||
+              !read_optional_float_field(parser, sVal, "scale", &src.scale,
+                                         "axis source") ||
+              !read_optional_float_field(parser, sVal, "dead_zone",
+                                         &src.deadZone, "axis source")) {
+            return false;
           }
-          if (parser.get_object_field(sVal, "negative_key", &field) &&
-              parser.as_uint(field, &uval)) {
-            src.negativeKey = static_cast<int>(uval);
+          if (type > static_cast<std::uint32_t>(AxisSourceType::MouseDeltaY)) {
+            log_message(LogLevel::Error, kLogChannel,
+                        "load_input_bindings: axis source type out of range");
+            return false;
           }
-          if (parser.get_object_field(sVal, "positive_key", &field) &&
-              parser.as_uint(field, &uval)) {
-            src.positiveKey = static_cast<int>(uval);
-          }
-          if (parser.get_object_field(sVal, "axis_index", &field) &&
-              parser.as_uint(field, &uval)) {
-            src.axisIndex = static_cast<int>(uval);
-          }
-          if (parser.get_object_field(sVal, "scale", &field) &&
-              parser.as_float(field, &fval)) {
-            src.scale = fval;
-          }
-          if (parser.get_object_field(sVal, "dead_zone", &field) &&
-              parser.as_float(field, &fval)) {
-            src.deadZone = fval;
-          }
+          src.type = static_cast<AxisSourceType>(type);
+          src.negativeKey = static_cast<int>(negativeKey);
+          src.positiveKey = static_cast<int>(positiveKey);
+          src.axisIndex = static_cast<int>(axisIndex);
 
           axis.sources[axis.sourceCount] = src;
           ++axis.sourceCount;

@@ -71,13 +71,31 @@ std::uint32_t find_state(const AnimControllerData &controller,
   return kInvalidAnimSlot;
 }
 
-/// Reads a required string field into a bounded buffer.
+/// Reads a required string field into a bounded buffer. A value the buffer
+/// cannot hold fails the read instead of truncating: every string this
+/// reader serves is hashed or used as a path, so a truncated copy would
+/// silently address a different name than the author wrote.
 bool read_string_field(const core::JsonParser &parser,
                        const core::JsonValue &object, const char *field,
                        char *out, std::size_t outSize) noexcept {
   core::JsonValue value{};
-  return parser.get_object_field(object, field, &value) &&
-         parser.copy_string(value, out, outSize);
+  if (!parser.get_object_field(object, field, &value)) {
+    char message[160] = {};
+    std::snprintf(message, sizeof(message),
+                  "controller field '%s' is missing", field);
+    core::log_message(core::LogLevel::Error, "animation", message);
+    return false;
+  }
+  if (!parser.copy_string_strict(value, out, outSize)) {
+    char message[160] = {};
+    std::snprintf(message, sizeof(message),
+                  "controller field '%s' is not a string of at most %u "
+                  "characters",
+                  field, static_cast<unsigned int>(outSize - 1U));
+    core::log_message(core::LogLevel::Error, "animation", message);
+    return false;
+  }
+  return true;
 }
 
 /// Parses the "clips" array: name + cooked .anim path per element.
@@ -279,17 +297,26 @@ bool parse_controller(const char *virtualPath,
         parse_controller_states(parser, *root, controller) &&
         parse_controller_transitions(parser, *root, controller) &&
         parse_controller_events(parser, *root, controller)) {
+      // "initial" is optional (state 0 when absent) but, once present,
+      // must be a state name the buffer can hold, like every other name.
       char initial[64] = {};
       controller.initialState = 0U;
-      if (read_string_field(parser, *root, "initial", initial,
-                            sizeof(initial))) {
-        const std::uint32_t found =
-            find_state(controller, core::fnv1a_32(initial));
-        if (found != kInvalidAnimSlot) {
-          controller.initialState = found;
+      core::JsonValue initialValue{};
+      const bool hasInitial =
+          parser.get_object_field(*root, "initial", &initialValue);
+      if (!hasInitial || read_string_field(parser, *root, "initial", initial,
+                                           sizeof(initial))) {
+        if (hasInitial) {
+          const std::uint32_t found =
+              find_state(controller, core::fnv1a_32(initial));
+          if (found != kInvalidAnimSlot) {
+            controller.initialState = found;
+          }
         }
+        ok = true;
+      } else {
+        log_controller_error(virtualPath, "invalid controller document");
       }
-      ok = true;
     } else {
       log_controller_error(virtualPath, "invalid controller document");
     }
