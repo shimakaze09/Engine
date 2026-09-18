@@ -85,6 +85,50 @@ bool test_pool_acquire_release() {
   return true;
 }
 
+// #569: a release advances the slot's generation, so a handle cached
+// before the release never addresses the slot's next acquirer. On base the
+// re-acquired handle was bit-identical to the released one.
+bool test_pool_release_bumps_generation() {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (!world)
+    return false;
+  EntityPool pool;
+  if (!pool.init(world.get(), 1U)) {
+    return false;
+  }
+  const Entity first = pool.acquire();
+  if ((first == kInvalidEntity) || !pool.release(first)) {
+    std::fprintf(stderr, "FAIL: acquire/release of the single slot\n");
+    return false;
+  }
+  const Entity second = pool.acquire();
+  if (second == kInvalidEntity) {
+    std::fprintf(stderr, "FAIL: re-acquire\n");
+    return false;
+  }
+  if ((second.index != first.index) ||
+      (second.generation == first.generation)) {
+    std::fprintf(stderr,
+                 "FAIL: re-acquired handle must reuse the slot under a new "
+                 "generation (first %u/%u, second %u/%u)\n",
+                 first.index, first.generation, second.index,
+                 second.generation);
+    return false;
+  }
+  if (world->is_alive(first) || !world->is_alive(second)) {
+    std::fprintf(stderr, "FAIL: the released handle must be stale and the "
+                         "re-acquired one live\n");
+    return false;
+  }
+  // The stale handle can neither release the slot nor be told apart from
+  // an outsider; the live one releases normally.
+  if (pool.release(first) || !pool.release(second)) {
+    std::fprintf(stderr, "FAIL: stale release accepted or live refused\n");
+    return false;
+  }
+  return true;
+}
+
 bool test_pool_handle_reuse() {
   std::unique_ptr<World> world(new (std::nothrow) World());
   if (!world)
@@ -643,8 +687,13 @@ bool test_pool_release_destroys_children() {
     std::fprintf(stderr, "FAIL: child survived the parent's recycle\n");
     return false;
   }
-  if (!world->is_alive(parent)) {
-    std::fprintf(stderr, "FAIL: recycled parent died\n");
+  // The recycle retired the parent's handle (#569) but its slot stays
+  // allocated under the next generation.
+  const Entity recycled = world->find_entity_by_index(parent.index);
+  if (world->is_alive(parent) || !world->is_alive(recycled) ||
+      (recycled.generation == parent.generation)) {
+    std::fprintf(stderr, "FAIL: recycled parent slot must stay allocated "
+                         "under a new generation\n");
     return false;
   }
   return true;
@@ -774,6 +823,7 @@ int main() {
       {"pool_init", test_pool_init},
       {"pool_acquire_release", test_pool_acquire_release},
       {"pool_handle_reuse_100", test_pool_handle_reuse},
+      {"pool_release_bumps_generation", test_pool_release_bumps_generation},
       {"pool_double_init", test_pool_double_init},
       {"pool_release_unknown", test_pool_release_unknown},
       {"pool_release_stale_generation", test_pool_release_stale_generation},

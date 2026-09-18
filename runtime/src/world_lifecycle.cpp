@@ -294,8 +294,8 @@ void World::flush_deferred_destroys() noexcept {
   m_pendingDestroyCount = 0U;
 }
 
-bool World::recycle_entity(Entity entity) noexcept {
-  if (!is_valid_entity(entity)) {
+bool World::recycle_entity(Entity entity, Entity *outRecycled) noexcept {
+  if ((outRecycled == nullptr) || !is_valid_entity(entity)) {
     return false;
   }
   if ((m_phase != WorldPhase::Input) && (m_phase != WorldPhase::BeginPlay) &&
@@ -331,6 +331,17 @@ bool World::recycle_entity(Entity entity) noexcept {
   }
 
   remove_all_components(entity);
+
+  // The slot stays alive but under a new generation, so the handle the
+  // pool hands out next is distinct from every handle held before this
+  // recycle and those stale handles fail is_valid_entity (#569). Same
+  // wrap rule as destroy: zero is the invalid encoding.
+  const std::uint32_t index = entity.index;
+  ++m_entityGenerations[index];
+  if (m_entityGenerations[index] == 0U) {
+    m_entityGenerations[index] = 1U;
+  }
+  *outRecycled = Entity{index, m_entityGenerations[index]};
   return true;
 }
 

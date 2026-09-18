@@ -851,8 +851,11 @@ private:
   /// never survive their parent's teardown) and every component is
   /// removed. Deliberately fires no EndPlay — recycling is immediate
   /// teardown for transient pooled entities; use destroy_entity when
-  /// lifecycle callbacks must run.
-  bool recycle_entity(Entity entity) noexcept;
+  /// lifecycle callbacks must run. The slot's generation advances and the
+  /// live handle is written to outRecycled: every handle held before the
+  /// recycle is stale from here on, so a cached handle can never silently
+  /// address the slot's next acquirer (#569).
+  bool recycle_entity(Entity entity, Entity *outRecycled) noexcept;
   /// Re-arms BeginPlay for a recycled dormant entity being activated, so
   /// components attached after acquisition receive their lifecycle
   /// callbacks like a fresh entity; mutation phases only.
