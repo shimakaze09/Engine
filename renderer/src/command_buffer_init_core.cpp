@@ -258,7 +258,20 @@ bool resolve_tonemap_program_state(BackendState &backend,
   return ok;
 }
 
+/// Releases the render device on a backend-init failure only when that
+/// initialization opened it. A device bootstrap opened for a windowed run
+/// already carries the editor overlay's device objects; tearing it down
+/// from under them left the overlay submitting to a bgfx that was gone
+/// (#578). The device then stays up for its owner, which releases it in
+/// shutdown_renderer.
+void release_device_if_opened(bool backendOpenedDevice) noexcept {
+  if (backendOpenedDevice) {
+    shutdown_render_device();
+  }
+}
+
 bool init_backend_core(BackendState &backend) noexcept {
+  const bool backendOpenedDevice = (render_device() == nullptr);
   if (!initialize_render_device()) {
     core::log_message(core::LogLevel::Error, "renderer",
                       "failed to initialize render device");
@@ -269,7 +282,7 @@ bool init_backend_core(BackendState &backend) noexcept {
   if (!initialize_shader_system()) {
     core::log_message(core::LogLevel::Error, "renderer",
                       "failed to initialize shader system");
-    shutdown_render_device();
+    release_device_if_opened(backendOpenedDevice);
     reset_backend_on_failure();
     return false;
   }
@@ -283,7 +296,7 @@ bool init_backend_core(BackendState &backend) noexcept {
     core::log_message(core::LogLevel::Error, "renderer",
                       "failed to load default shader program");
     shutdown_shader_system();
-    shutdown_render_device();
+    release_device_if_opened(backendOpenedDevice);
     reset_backend_on_failure();
     return false;
   }
@@ -292,7 +305,7 @@ bool init_backend_core(BackendState &backend) noexcept {
   if (!resolve_default_program_state(backend, dev)) {
     destroy_shader_program(defaultShaderHandle);
     shutdown_shader_system();
-    shutdown_render_device();
+    release_device_if_opened(backendOpenedDevice);
     reset_backend_on_failure();
     return false;
   }
@@ -318,7 +331,7 @@ bool init_backend_core(BackendState &backend) noexcept {
                       "failed to load PBR shader program");
     destroy_shader_program(defaultShaderHandle);
     shutdown_shader_system();
-    shutdown_render_device();
+    release_device_if_opened(backendOpenedDevice);
     reset_backend_on_failure();
     return false;
   }
@@ -330,7 +343,7 @@ bool init_backend_core(BackendState &backend) noexcept {
     destroy_shader_program(pbrShaderHandle);
     destroy_shader_program(defaultShaderHandle);
     shutdown_shader_system();
-    shutdown_render_device();
+    release_device_if_opened(backendOpenedDevice);
     reset_backend_on_failure();
     return false;
   }
@@ -365,7 +378,7 @@ bool init_backend_core(BackendState &backend) noexcept {
     destroy_shader_program(pbrShaderHandle);
     destroy_shader_program(defaultShaderHandle);
     shutdown_shader_system();
-    shutdown_render_device();
+    release_device_if_opened(backendOpenedDevice);
     reset_backend_on_failure();
     return false;
   }
@@ -378,7 +391,7 @@ bool init_backend_core(BackendState &backend) noexcept {
     destroy_shader_program(pbrShaderHandle);
     destroy_shader_program(defaultShaderHandle);
     shutdown_shader_system();
-    shutdown_render_device();
+    release_device_if_opened(backendOpenedDevice);
     reset_backend_on_failure();
     return false;
   }
@@ -399,7 +412,7 @@ bool init_backend_core(BackendState &backend) noexcept {
     destroy_shader_program(pbrShaderHandle);
     destroy_shader_program(defaultShaderHandle);
     shutdown_shader_system();
-    shutdown_render_device();
+    release_device_if_opened(backendOpenedDevice);
     reset_backend_on_failure();
     return false;
   }

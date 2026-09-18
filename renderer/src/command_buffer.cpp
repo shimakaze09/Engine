@@ -547,20 +547,26 @@ void shutdown_renderer() noexcept {
   g_shutDownRefusalLogged = false;
 
   BackendState &backend = backend_state();
-  if (!backend.initialized && !backend.failed) {
+  if (!backend.initialized) {
     // No backend resources exist yet, but capture slots may hold texture-
     // system handles that would go stale across a texture-system restart.
     destroy_scene_capture_targets(backend, nullptr);
     backend.sceneCaptureTargets = {};
     // The device's lifetime is its own, not this backend's: bootstrap
-    // creates it directly for swapchain-owning backends (#138), and a run
-    // that never flushes reaches teardown with the backend still cold.
-    // Releasing it here is the module owner closing what was opened
-    // (#168) — otherwise the device and its swapchain outlive the engine
-    // and the next initialization hands back the stale one (#326).
+    // creates it directly for swapchain-owning backends (#138), a run
+    // that never flushes reaches teardown with the backend still cold,
+    // and a backend that failed to build leaves a bootstrap-opened device
+    // in place (#578). Releasing it here is the module owner closing what
+    // was opened (#168) — otherwise the device and its swapchain outlive
+    // the engine and the next initialization hands back the stale one
+    // (#326).
     if (render_device() != nullptr) {
       shutdown_render_device();
     }
+    // A failed backend has already unwound its shader system; clearing the
+    // state here is what lets the next lifetime build the backend again
+    // rather than inherit the latched failure.
+    backend = BackendState{};
     reset_renderer_public_state();
     return;
   }

@@ -9,6 +9,8 @@
 
 #include "imgui_impl_bgfx.h"
 
+#include "engine/renderer/render_device.h"
+
 #include <imgui.h>
 
 #if defined(__GNUC__) || defined(__clang__)
@@ -83,6 +85,15 @@ bool ImGui_ImplBgfx_Init() {
 }
 
 void ImGui_ImplBgfx_Shutdown() {
+  // Once the render device is gone, bgfx::shutdown has reclaimed every
+  // handle this backend holds; destroying them again would call into a
+  // bgfx that no longer exists (#578).
+  if (engine::renderer::render_device() == nullptr) {
+    g_fontTexture = BGFX_INVALID_HANDLE;
+    g_sampler = BGFX_INVALID_HANDLE;
+    g_program = BGFX_INVALID_HANDLE;
+    return;
+  }
   if (bgfx::isValid(g_fontTexture)) {
     bgfx::destroy(g_fontTexture);
     g_fontTexture = BGFX_INVALID_HANDLE;
@@ -100,7 +111,11 @@ void ImGui_ImplBgfx_Shutdown() {
 void ImGui_ImplBgfx_NewFrame() {}
 
 void ImGui_ImplBgfx_RenderDrawData(ImDrawData *drawData) {
-  if ((drawData == nullptr) || !bgfx::isValid(g_program)) {
+  // A device that failed after this backend initialized leaves g_program
+  // looking valid while bgfx itself is shut down (#578); the device query
+  // is the only truth about whether a submit is possible.
+  if ((drawData == nullptr) || !bgfx::isValid(g_program) ||
+      (engine::renderer::render_device() == nullptr)) {
     return;
   }
   const float width = drawData->DisplaySize.x;

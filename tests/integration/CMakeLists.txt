@@ -816,3 +816,22 @@ engine_add_test_executable(engine_integration_gamepad_hotplug
     LABELS
     integration
 )
+
+# #578: a renderer backend that fails after the device came up must end the
+# run as a fatal frame, not crash the editor overlay. SDL's dummy video
+# driver gives a window with no native handle, which selects bgfx's Noop
+# renderer, so the windowed bootstrap and the editor bridge come up without
+# a display and the test runs in every CI lane.
+engine_add_test_executable(engine_integration_renderer_backend_failure
+    SOURCES
+    renderer_backend_failure_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    LABELS
+    integration
+)
+target_link_libraries(engine_integration_renderer_backend_failure PRIVATE
+    $<LINK_LIBRARY:WHOLE_ARCHIVE,engine_editor>
+)
+set_tests_properties(engine_integration_renderer_backend_failure PROPERTIES
+    ENVIRONMENT "SDL_VIDEODRIVER=dummy")
