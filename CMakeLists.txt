@@ -157,6 +157,42 @@ endif()
 
 message(STATUS "ENGINE_TARGET_PLATFORM: ${ENGINE_TARGET_PLATFORM}")
 
+# ---- Directory-global compile flags ----
+# Declared before the first FetchContent_MakeAvailable so they reach the
+# third-party targets too. add_compile_options applies only to targets
+# created after the call, and a fetched dependency snapshots the
+# directory's options when its subdirectory is added: with these blocks
+# below the bgfx and SDL3 fetches, the sanitizer and determinism flags
+# reached lua, imgui, cgltf and stb but silently skipped the two largest
+# third-party targets, so the ASAN/UBSAN lane was not instrumenting them.
+option(ENGINE_DETERMINISTIC_FLOATS "Enable strict floating-point determinism flags" ON)
+if(ENGINE_DETERMINISTIC_FLOATS)
+    if(MSVC)
+        add_compile_options(/fp:strict)
+    else()
+        add_compile_options(-ffp-contract=off -fno-fast-math)
+        if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+            add_compile_options(-fexcess-precision=standard)
+        endif()
+
+# ---- Sanitizer lane (ASAN + UBSAN; GCC/Clang only) ----
+# Enable with: cmake -S . -B build -DENGINE_SANITIZERS=ON
+option(ENGINE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
+if(ENGINE_SANITIZERS)
+    if(MSVC)
+        message(WARNING "ENGINE_SANITIZERS is not supported with MSVC; option ignored.")
+    else()
+        # vptr needs RTTI on both sides of a virtual call. The engine builds
+        # without RTTI, so the check misreports engine objects handed to
+        # third-party interfaces (bgfx::CallbackI) now that these flags reach
+        # the third-party targets; it cannot verify anything here.
+        add_compile_options(-fsanitize=address,undefined -fno-sanitize=vptr
+                            -fno-omit-frame-pointer)
+        add_link_options(-fsanitize=address,undefined -fno-sanitize=vptr)
+        message(STATUS "ENGINE_SANITIZERS: ASAN + UBSAN enabled")
+    endif()
+endif()
+
 set(ENGINE_ASSET_SOURCE_DIR "${CMAKE_SOURCE_DIR}/assets" CACHE PATH
     "Asset directory synced for local editor/runtime builds")
 set(ENGINE_ASSET_OUTPUT_DIR "${CMAKE_BINARY_DIR}/assets" CACHE PATH
@@ -291,7 +327,6 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-option(ENGINE_DETERMINISTIC_FLOATS "Enable strict floating-point determinism flags" ON)
 set(ENGINE_MAX_ENTITIES "65536" CACHE STRING "Maximum runtime world entities (compile-time constant)")
 
 if(NOT ENGINE_MAX_ENTITIES MATCHES "^[0-9]+$" OR
@@ -301,14 +336,6 @@ endif()
 
 add_compile_definitions(ENGINE_MAX_ENTITIES=${ENGINE_MAX_ENTITIES})
 
-if(ENGINE_DETERMINISTIC_FLOATS)
-    if(MSVC)
-        add_compile_options(/fp:strict)
-    else()
-        add_compile_options(-ffp-contract=off -fno-fast-math)
-        if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-            add_compile_options(-fexcess-precision=standard)
-        endif()
     endif()
     message(STATUS "ENGINE_DETERMINISTIC_FLOATS: strict floating-point flags enabled")
 endif()
@@ -352,18 +379,6 @@ elseif(ENGINE_TARGET_PLATFORM STREQUAL "Web")
     add_compile_definitions(ENGINE_PLATFORM_WEB=1)
 endif()
 
-# ---- Sanitizer lane (ASAN + UBSAN; GCC/Clang only) ----
-# Enable with: cmake -S . -B build -DENGINE_SANITIZERS=ON
-option(ENGINE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
-if(ENGINE_SANITIZERS)
-    if(MSVC)
-        message(WARNING "ENGINE_SANITIZERS is not supported with MSVC; option ignored.")
-    else()
-        add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
-        add_link_options(-fsanitize=address,undefined)
-        message(STATUS "ENGINE_SANITIZERS: ASAN + UBSAN enabled")
-    endif()
-endif()
 
 # ---- Static analysis target (cppcheck) ----
 # Run with: cmake --build build --target analysis
