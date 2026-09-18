@@ -172,7 +172,12 @@ consumes the engine only through sanctioned bridge APIs — never core or
 runtime internals.
 
 Every script-reachable filesystem path is VFS-jailed as defence in depth:
-relative, forward slashes, no drive designators, no `..`.
+relative, forward slashes, no drive designators, no `..`. Script chunks
+and their hot-reload watches resolve through the VFS mount when the
+path's prefix is mounted, so scripts load from the configured asset root;
+a path under no mount is read relative to the working directory (the
+form tests use), still inside the jail. `dofile` and `loadfile` are
+absent from the sandbox and `load` accepts text only.
 
 ## Shared code
 

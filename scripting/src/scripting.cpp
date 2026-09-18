@@ -1099,6 +1099,17 @@ std::size_t active_timer_ref_count() noexcept {
 
 std::size_t active_entity_pool_count() noexcept { return pool_slot_count(); }
 
+/// Modification time of a watched script read where its chunk is loaded
+/// from: through the mount when the path is mounted (#409), so a script
+/// under an asset root away from the cwd hot-reloads like one beside it.
+std::int64_t script_file_mtime_ns(const char *path) noexcept {
+  char osPath[1024] = {};
+  if (!resolve_script_os_path(path, osPath, sizeof(osPath))) {
+    return 0;
+  }
+  return core::file_mtime_ns(osPath);
+}
+
 /// Adds a script to the hot-reload watch table (or refreshes its mtime when
 /// already watched). Watching a new file no longer drops earlier watches;
 /// the table is capped and overflow is logged.
@@ -1109,7 +1120,7 @@ void watch_script_file(const char *path) noexcept {
 
   for (std::size_t i = 0U; i < g_watchedScriptCount; ++i) {
     if (std::strcmp(g_watchedScripts[i].path, path) == 0) {
-      g_watchedScripts[i].mtime = core::file_mtime_ns(path);
+      g_watchedScripts[i].mtime = script_file_mtime_ns(path);
       return;
     }
   }
@@ -1125,7 +1136,7 @@ void watch_script_file(const char *path) noexcept {
                         "watch_script_file")) {
     return;
   }
-  entry.mtime = core::file_mtime_ns(path);
+  entry.mtime = script_file_mtime_ns(path);
   ++g_watchedScriptCount;
 }
 
@@ -1142,7 +1153,7 @@ std::size_t watched_script_count() noexcept { return g_watchedScriptCount; }
 void check_script_reload() noexcept {
   for (std::size_t i = 0U; i < g_watchedScriptCount; ++i) {
     WatchedScript &entry = g_watchedScripts[i];
-    const std::int64_t mtime = core::file_mtime_ns(entry.path);
+    const std::int64_t mtime = script_file_mtime_ns(entry.path);
     if ((mtime == 0) || (mtime == entry.mtime)) {
       continue;
     }

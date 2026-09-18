@@ -470,6 +470,15 @@ engine_add_test_executable(engine_unit_json_navigation
     engine_core
 )
 
+engine_add_test_executable(engine_unit_script_mount_resolution
+    SOURCES
+    script_mount_resolution_test.cpp
+    PRIVATE_DEPS
+    engine_scripting
+    engine_runtime
+    engine_core
+)
+
 engine_add_test_executable(engine_unit_input_config_lua
     SOURCES
     input_config_lua_test.cpp
