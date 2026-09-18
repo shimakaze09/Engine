@@ -75,6 +75,15 @@ void World::begin_update_step() noexcept {
   }
   physics::refresh_step_cvar_cache(physics_context());
   physics::prime_ccd_snapshot(*this);
+  // The composed world transforms still describe the last frame's final
+  // pose; the previous step committed new local transforms without
+  // propagating them. Recompose before snapshotting so the history is the
+  // pose one step behind the current one, not one frame behind (#566).
+  if (!propagate_world_transforms()) {
+    core::log_message(
+        core::LogLevel::Warning, "runtime",
+        "transform cycle detected; using deterministic root fallback");
+  }
   snapshot_world_transform_history();
   m_updateSwapPending = true;
 }

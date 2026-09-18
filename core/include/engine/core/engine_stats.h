@@ -24,6 +24,11 @@ struct EngineStats final {
   /// Point and spot lights submitted with last frame's draw list; both
   /// are collected from the same mutation epoch (#569).
   std::uint32_t sceneLights = 0U;
+  /// Fixed simulation steps last frame ran (0 while paused or stopped).
+  std::uint32_t fixedSteps = 0U;
+  /// Blend factor render prep used between the previous and current step
+  /// poses (1 when the frame presented the current pose unblended).
+  float interpolationAlpha = 1.0F;
 };
 
 /// Resets this object back to its reusable empty state for engine stats

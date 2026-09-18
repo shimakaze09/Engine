@@ -584,7 +584,10 @@ public:
   /// buffer.
   void begin_update_phase() noexcept;
   /// Serial begin of each catch-up fixed step: refreshes the physics
-  /// per-step cvar cache and snapshots TRS history before chunk jobs run.
+  /// per-step cvar cache, recomposes the world transforms from the
+  /// previous step's committed state and snapshots them as TRS history
+  /// before chunk jobs run, so render interpolation on a multi-step frame
+  /// blends the last two steps rather than the last two frames (#566).
   void begin_update_step() noexcept;
   /// Publishes the written transform state as the new read state (swap).
   void commit_update_phase() noexcept;

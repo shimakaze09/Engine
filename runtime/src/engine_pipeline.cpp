@@ -1798,6 +1798,8 @@ void EnginePipeline::Impl::stage_diagnostics() noexcept {
   frameStats.droppedDrawCommands = lastDroppedDrawCommands;
   frameStats.sceneLights = static_cast<std::uint32_t>(
       frameSceneLights.pointLightCount + frameSceneLights.spotLightCount);
+  frameStats.fixedSteps = static_cast<std::uint32_t>(updateStepCount);
+  frameStats.interpolationAlpha = static_cast<float>(renderAlpha);
   core::set_engine_stats(frameStats);
 
   if (logTraceThisFrame) {
