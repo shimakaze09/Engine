@@ -87,7 +87,11 @@ assumption stands.
   one compound body owned by their nearest rigid-body ancestor. Collision
   and queries consume the composed world pose.
 - Destroying an entity destroys its whole transform subtree; deferred
-  destruction queues the subtree so EndPlay fires for every member.
+  destruction queues the subtree so EndPlay fires for every member. The
+  World keeps a child index (parent/child/sibling links per transform,
+  rebuilt by propagation and maintained by add/remove/teardown), so
+  subtree collection, cascade destroy and child enumeration cost the
+  subtree, never the world (#517).
 
 ## Frame
 

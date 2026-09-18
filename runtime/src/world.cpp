@@ -553,12 +553,15 @@ bool World::propagate_world_transforms() noexcept {
     node.firstChild = 0U;
     node.lastChild = 0U;
     node.nextSibling = 0U;
+    node.prevSibling = 0U;
     node.traversalState = 0U;
     node.present = false;
     node.localDirty = false;
+    node.orphan = false;
   }
 
   m_transformActiveCount = 0U;
+  std::size_t orphanCount = 0U;
 
   const std::size_t transformCount = m_transforms.count();
   for (std::size_t denseIndex = 0U; denseIndex < transformCount; ++denseIndex) {
@@ -580,9 +583,11 @@ bool World::propagate_world_transforms() noexcept {
     node.firstChild = 0U;
     node.lastChild = 0U;
     node.nextSibling = 0U;
+    node.prevSibling = 0U;
     node.traversalState = 0U;
     node.present = true;
     node.localDirty = false;
+    node.orphan = false;
 
     const Transform &local =
         m_transforms.component_at(denseIndex, m_readStateIndex);
@@ -602,6 +607,10 @@ bool World::propagate_world_transforms() noexcept {
     }
 
     node.parentIndex = parentIndex;
+    if ((local.parentId != kInvalidPersistentId) && (parentIndex == 0U)) {
+      node.orphan = true;
+      ++orphanCount;
+    }
 
     const bool cacheValid = node.cacheValid;
     const bool localChanged =
@@ -661,8 +670,14 @@ bool World::propagate_world_transforms() noexcept {
 
     const std::uint32_t lastChild = m_transformNodes[parentIndex].lastChild;
     m_transformNodes[lastChild].nextSibling = index;
+    m_transformNodes[index].prevSibling = lastChild;
     m_transformNodes[parentIndex].lastChild = index;
   }
+  // The pass just rebuilt the child index from every authored parent id,
+  // so the lifecycle paths can walk it until the next structural change
+  // that the incremental maintenance cannot resolve (#517).
+  m_hierarchyOrphanCount = orphanCount;
+  m_hierarchyLinksStale = false;
 
   auto enqueue_node = [this](std::uint32_t entityIndex, bool inheritedDirty,
                              std::size_t *ioQueueTail) noexcept {

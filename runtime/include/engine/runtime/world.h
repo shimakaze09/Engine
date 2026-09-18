@@ -670,24 +670,45 @@ public:
   }
 
   // Invoke fn(Entity) for every alive member of the entity's transform
-  // subtree — descendants first, the root last, matching deferred-destroy
-  // queue order. Must not create or destroy entities while iterating.
+  // subtree — descendants first (ascending entity index), the root last,
+  // matching deferred-destroy queue order. Must not create or destroy
+  // entities while iterating. Costs the subtree (#517).
   template <typename Fn> void for_each_subtree_member(Entity root,
                                                       Fn &&fn) noexcept {
     if (!is_valid_entity(root)) {
       return;
     }
-    if (mark_hierarchy_descendants(root) > 0U) {
-      const std::uint32_t upperBound = m_nextEntityIndex;
-      for (std::uint32_t index = 1U; index < upperBound; ++index) {
-        if (m_cascadeMarks[index] && (index != root.index) &&
-            m_entityAlive[index]) {
-          fn(Entity{index, m_entityGenerations[index]});
-        }
+    const std::size_t count = mark_hierarchy_descendants(root);
+    for (std::size_t i = 0U; i < count; ++i) {
+      const std::uint32_t index = m_cascadeMarked[i];
+      if (m_entityAlive[index]) {
+        fn(Entity{index, m_entityGenerations[index]});
       }
     }
+    clear_cascade_marks();
     fn(root);
   }
+
+  // Invoke fn(Entity) for every alive direct child of the entity's
+  // transform, in child-link order (transform insertion order). Costs the
+  // children (#517). Must not create or destroy entities while iterating.
+  template <typename Fn> void for_each_child(Entity parent, Fn &&fn) noexcept {
+    if (!is_valid_entity(parent)) {
+      return;
+    }
+    ensure_hierarchy_links();
+    for (std::uint32_t child = m_transformNodes[parent.index].firstChild;
+         child != 0U; child = m_transformNodes[child].nextSibling) {
+      ++m_hierarchyVisits;
+      if (m_entityAlive[child]) {
+        fn(Entity{child, m_entityGenerations[child]});
+      }
+    }
+  }
+
+  /// Hierarchy nodes touched so far by subtree walks, child walks and
+  /// link rebuilds (diagnostics; tests bound a subtree operation by it).
+  std::uint64_t hierarchy_visits() const noexcept { return m_hierarchyVisits; }
 
   // Iterate entities pending deferred destruction (read-only snapshot).
   template <typename Fn> void for_each_pending_destroy(Fn &&fn) const noexcept {
@@ -879,10 +900,30 @@ private:
   bool destroy_single_entity(Entity entity) noexcept;
   /// Queues exactly one entity for deferred destruction, deduplicated.
   bool queue_single_deferred_destroy(Entity entity) noexcept;
-  /// Marks root's live descendants in m_cascadeMarks; returns the count.
+  /// Marks root's live descendants in m_cascadeMarks and lists them in
+  /// m_cascadeMarked (ascending index); returns the count. Walks the
+  /// child index, so it costs the subtree; the caller clears the marks
+  /// with clear_cascade_marks once its operation completes (#517).
   std::size_t mark_hierarchy_descendants(Entity root) noexcept;
+  /// Clears the marks the last mark_hierarchy_descendants set.
+  void clear_cascade_marks() noexcept;
+  /// Rebuilds the child index from every transform when it is stale.
+  void ensure_hierarchy_links() noexcept;
+  /// Rebuilds parent and child links from every transform's authored
+  /// parent id (the propagation pass does the same as part of its work).
+  void rebuild_hierarchy_links() noexcept;
+  /// Links a transform that was just added or replaced under its
+  /// resolved parent (or as a root / orphan), keeping the index fresh.
+  void link_transform_node(std::uint32_t index, PersistentId parentId,
+                           bool hadTransform) noexcept;
+  /// Unlinks a transform that is going away: leaves its parent's child
+  /// list and releases its children as roots, except children marked
+  /// for the cascade that is destroying them too.
+  void unlink_transform_node(std::uint32_t index) noexcept;
   /// Flushes queued work to the backing runtime system for deferred destroys.
   void flush_deferred_destroys() noexcept;
+  /// Empties the deferred-destroy queue and its per-index membership.
+  void clear_pending_destroy_queue() noexcept;
   /// Maps a persistent id to its entity index; false when the table is full.
   bool insert_persistent_index(PersistentId persistentId,
                                std::uint32_t entityIndex) noexcept;
@@ -1056,11 +1097,15 @@ private:
     math::Vec3 position{};
     math::Quat rotation{}; // alignas(16)
     math::Vec3 scale{1.0F, 1.0F, 1.0F};
-    // Resolved runtime tree links, rebuilt every propagation pass.
+    // Resolved runtime tree links: the persistent child index (#517).
+    // Rebuilt by every propagation pass and by rebuild_hierarchy_links,
+    // and maintained incrementally by add_transform, remove_transform and
+    // entity teardown in between, so subtree walks cost the subtree.
     std::uint32_t parentIndex = 0U;
     std::uint32_t firstChild = 0U;
     std::uint32_t lastChild = 0U;
     std::uint32_t nextSibling = 0U;
+    std::uint32_t prevSibling = 0U;
     // Previous-frame parent info for cache-change detection.
     PersistentId cachedParentId = kInvalidPersistentId;
     std::uint32_t cachedParentIndex = 0U;
@@ -1068,8 +1113,27 @@ private:
     bool present = false;
     bool localDirty = false;
     bool cacheValid = false;
+    // A present node whose authored parent id resolves to no transform:
+    // it is linked as a root until the parent appears.
+    bool orphan = false;
     std::uint8_t traversalState = 0U;
   };
+  // True until the next rebuild: the incremental maintenance cannot know
+  // which orphans a newly transformed entity adopts, so it flags instead.
+  bool m_hierarchyLinksStale = true;
+  std::size_t m_hierarchyOrphanCount = 0U;
+  // Subtree members marked by the last mark_hierarchy_descendants, as a
+  // list so clearing costs the subtree, not the entity range.
+  std::array<std::uint32_t, kMaxEntities + 1U> m_cascadeMarked{};
+  std::size_t m_cascadeMarkedCount = 0U;
+  std::uint32_t m_cascadeMarkRoot = 0U;
+  // Per-index membership of the deferred-destroy queue (with the queued
+  // generation) so queuing dedupes in O(1) instead of scanning the queue.
+  std::array<bool, kMaxEntities + 1U> m_pendingDestroyQueued{};
+  std::array<std::uint32_t, kMaxEntities + 1U> m_pendingDestroyQueuedGeneration{};
+  // Hierarchy nodes touched by subtree walks and link rebuilds; tests
+  // assert subtree operations cost the subtree, not the world.
+  std::uint64_t m_hierarchyVisits = 0U;
 
   TransformSet m_transforms{};
   WorldTransformSet m_worldTransforms{};

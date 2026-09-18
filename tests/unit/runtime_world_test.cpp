@@ -1279,6 +1279,138 @@ int verify_reset_world_phase_independent() {
   return 0;
 }
 
+/// EXPECTATION (#517): subtree operations cost the subtree, not the world.
+/// In a world of many unrelated roots, destroying one root with K
+/// descendants, enumerating a subtree, listing an entity's children and
+/// queuing a deferred subtree destroy each touch O(K) hierarchy nodes as
+/// counted by the World's own visit counter; and the cascade still
+/// destroys exactly the subtree.
+int verify_subtree_operations_cost_the_subtree() {
+  using namespace engine::runtime;
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 260;
+  }
+  constexpr std::size_t kBystanders = 4096U;
+  constexpr std::size_t kChildren = 32U;
+  constexpr std::size_t kGrandchildren = 2U; // per child
+  constexpr std::size_t kSubtree = kChildren * (1U + kGrandchildren);
+  for (std::size_t i = 0U; i < kBystanders; ++i) {
+    if (world->create_scene_object() == kInvalidEntity) {
+      return 261;
+    }
+  }
+  const Entity root = world->create_scene_object();
+  const Entity other = world->create_scene_object();
+  if ((root == kInvalidEntity) || (other == kInvalidEntity)) {
+    return 262;
+  }
+  for (std::size_t c = 0U; c < kChildren; ++c) {
+    Transform childT{};
+    childT.parentId = world->persistent_id(root);
+    const Entity child = world->create_scene_object(childT);
+    if (child == kInvalidEntity) {
+      return 263;
+    }
+    for (std::size_t g = 0U; g < kGrandchildren; ++g) {
+      Transform grandT{};
+      grandT.parentId = world->persistent_id(child);
+      if (world->create_scene_object(grandT) == kInvalidEntity) {
+        return 264;
+      }
+    }
+  }
+  Transform otherChildT{};
+  otherChildT.parentId = world->persistent_id(other);
+  if (world->create_scene_object(otherChildT) == kInvalidEntity) {
+    return 265;
+  }
+  // One propagation settles the child index the way a frame would.
+  world->begin_render_prep_phase();
+  world->end_frame_phase();
+  const std::size_t aliveBefore = world->alive_entity_count();
+
+  // Budget: every hierarchy node of the subtree may be touched a few
+  // times (marking, per-node unlink, sibling steps); the world has 4096+
+  // unrelated transforms that must never be scanned.
+  constexpr std::uint64_t kBudget = 6U * kSubtree + 64U;
+
+  std::uint64_t before = world->hierarchy_visits();
+  std::size_t members = 0U;
+  world->for_each_subtree_member(root,
+                                 [&members](Entity) noexcept { ++members; });
+  std::uint64_t visits = world->hierarchy_visits() - before;
+  if ((members != kSubtree + 1U) || (visits > kBudget)) {
+    std::fprintf(stderr,
+                 "FAIL: subtree enumeration visited %llu nodes for %zu "
+                 "members (budget %llu)\n",
+                 static_cast<unsigned long long>(visits), members,
+                 static_cast<unsigned long long>(kBudget));
+    return 266;
+  }
+
+  before = world->hierarchy_visits();
+  std::size_t children = 0U;
+  world->for_each_child(root, [&children](Entity) noexcept { ++children; });
+  visits = world->hierarchy_visits() - before;
+  if ((children != kChildren) || (visits > kChildren)) {
+    std::fprintf(stderr, "FAIL: child listing visited %llu nodes for %zu\n",
+                 static_cast<unsigned long long>(visits), children);
+    return 267;
+  }
+
+  // Deferred queue during Simulation: the subtree is queued in O(K).
+  world->begin_update_phase();
+  before = world->hierarchy_visits();
+  if (!world->destroy_entity(root)) {
+    return 268;
+  }
+  visits = world->hierarchy_visits() - before;
+  if ((world->pending_destroy_count() != kSubtree + 1U) || (visits > kBudget)) {
+    std::fprintf(stderr,
+                 "FAIL: deferred subtree destroy visited %llu nodes, queued "
+                 "%zu\n",
+                 static_cast<unsigned long long>(visits),
+                 world->pending_destroy_count());
+    return 269;
+  }
+  // Re-queuing a queued entity is O(1) and a no-op.
+  if (!world->destroy_entity(root) ||
+      (world->pending_destroy_count() != kSubtree + 1U)) {
+    return 270;
+  }
+  world->begin_transform_phase();
+  world->end_frame_phase();
+  // The flush (EndPlay) tears the subtree down in O(K).
+  before = world->hierarchy_visits();
+  world->begin_end_play_phase();
+  world->end_end_play_phase();
+  visits = world->hierarchy_visits() - before;
+  if ((world->alive_entity_count() != aliveBefore - kSubtree - 1U) ||
+      world->is_alive(root) || !world->is_alive(other) || (visits > kBudget)) {
+    std::fprintf(stderr,
+                 "FAIL: flushed cascade visited %llu nodes; alive %zu of "
+                 "%zu\n",
+                 static_cast<unsigned long long>(visits),
+                 world->alive_entity_count(), aliveBefore);
+    return 271;
+  }
+
+  // Immediate destroy of the other root and its child, after the index
+  // was maintained incrementally through the flush: still O(K).
+  before = world->hierarchy_visits();
+  if (!world->destroy_entity(other)) {
+    return 272;
+  }
+  visits = world->hierarchy_visits() - before;
+  if ((visits > 32U) || (world->alive_entity_count() != kBystanders)) {
+    std::fprintf(stderr, "FAIL: immediate destroy visited %llu nodes\n",
+                 static_cast<unsigned long long>(visits));
+    return 273;
+  }
+  return 0;
+}
+
 int main() {
   int result = verify_raw_and_scene_object_creation();
   if (result != 0) {
@@ -1321,6 +1453,11 @@ int main() {
   }
 
   result = verify_persistent_index_rebuild_drops_dying_entity();
+  if (result != 0) {
+    return result;
+  }
+
+  result = verify_subtree_operations_cost_the_subtree();
   if (result != 0) {
     return result;
   }

@@ -4,6 +4,8 @@
 
 #include "engine/runtime/world.h"
 
+#include <algorithm>
+
 #include "engine/core/hash.h"
 #include "engine/core/logging.h"
 #include "engine/core/string_util.h"
@@ -121,40 +123,219 @@ World::create_entity_with_persistent_id(PersistentId persistentId) noexcept {
 }
 
 std::size_t World::mark_hierarchy_descendants(Entity root) noexcept {
-  m_cascadeMarks.fill(false);
+  clear_cascade_marks();
+  ensure_hierarchy_links();
+  m_cascadeMarkRoot = root.index;
   m_cascadeMarks[root.index] = true;
 
-  // Fixpoint marking: a transform whose resolved parent index is marked
-  // joins the subtree. Pass count is bounded by hierarchy depth, and cycles
-  // terminate because the mark set only grows.
-  std::size_t markedCount = 0U;
-  bool changed = true;
-  while (changed) {
-    changed = false;
-    const std::size_t transformCount = m_transforms.count();
-    for (std::size_t denseIndex = 0U; denseIndex < transformCount;
-         ++denseIndex) {
-      const Entity entity = m_transforms.entity_at(denseIndex);
-      if (m_cascadeMarks[entity.index] || !m_entityAlive[entity.index]) {
+  // Depth-first over the child index; the marks make a cycle terminate.
+  // The propagation queue array is free here: no propagation pass runs
+  // while a mutation-phase operation walks the hierarchy.
+  std::size_t stackTop = 0U;
+  m_transformQueueIndices[stackTop++] = root.index;
+  while (stackTop > 0U) {
+    const std::uint32_t current = m_transformQueueIndices[--stackTop];
+    for (std::uint32_t child = m_transformNodes[current].firstChild;
+         child != 0U; child = m_transformNodes[child].nextSibling) {
+      ++m_hierarchyVisits;
+      if (m_cascadeMarks[child] || !m_entityAlive[child]) {
         continue;
       }
-
-      const Transform &local =
-          m_transforms.component_at(denseIndex, m_readStateIndex);
-      if (local.parentId == kInvalidPersistentId) {
-        continue;
-      }
-
-      const std::uint32_t parentIndex = find_persistent_index(local.parentId);
-      if ((parentIndex != 0U) && m_cascadeMarks[parentIndex]) {
-        m_cascadeMarks[entity.index] = true;
-        ++markedCount;
-        changed = true;
+      m_cascadeMarks[child] = true;
+      m_cascadeMarked[m_cascadeMarkedCount++] = child;
+      if (stackTop < m_transformQueueIndices.size()) {
+        m_transformQueueIndices[stackTop++] = child;
       }
     }
   }
 
-  return markedCount;
+  // Ascending index keeps the order every consumer had before the index
+  // existed (deferred EndPlay order, editor delete records).
+  std::sort(m_cascadeMarked.data(),
+            m_cascadeMarked.data() + m_cascadeMarkedCount);
+  return m_cascadeMarkedCount;
+}
+
+void World::clear_cascade_marks() noexcept {
+  for (std::size_t i = 0U; i < m_cascadeMarkedCount; ++i) {
+    m_cascadeMarks[m_cascadeMarked[i]] = false;
+  }
+  m_cascadeMarks[m_cascadeMarkRoot] = false;
+  m_cascadeMarkedCount = 0U;
+  m_cascadeMarkRoot = 0U;
+}
+
+void World::ensure_hierarchy_links() noexcept {
+  if (m_hierarchyLinksStale) {
+    rebuild_hierarchy_links();
+  }
+}
+
+void World::rebuild_hierarchy_links() noexcept {
+  for (std::size_t i = 0U; i < m_transformActiveCount; ++i) {
+    TransformNode &node = m_transformNodes[m_transformActiveIndices[i]];
+    node.parentIndex = 0U;
+    node.firstChild = 0U;
+    node.lastChild = 0U;
+    node.nextSibling = 0U;
+    node.prevSibling = 0U;
+    node.present = false;
+    node.orphan = false;
+  }
+  m_transformActiveCount = 0U;
+  m_hierarchyOrphanCount = 0U;
+
+  const std::size_t transformCount = m_transforms.count();
+  for (std::size_t denseIndex = 0U; denseIndex < transformCount; ++denseIndex) {
+    const Entity entity = m_transforms.entity_at(denseIndex);
+    ++m_hierarchyVisits;
+    if (!is_valid_entity(entity) ||
+        (m_transformActiveCount >= m_transformActiveIndices.size())) {
+      continue;
+    }
+    m_transformActiveIndices[m_transformActiveCount++] = entity.index;
+    TransformNode &node = m_transformNodes[entity.index];
+    node.parentIndex = 0U;
+    node.firstChild = 0U;
+    node.lastChild = 0U;
+    node.nextSibling = 0U;
+    node.prevSibling = 0U;
+    node.present = true;
+    node.orphan = false;
+  }
+  for (std::size_t i = 0U; i < m_transformActiveCount; ++i) {
+    const std::uint32_t index = m_transformActiveIndices[i];
+    const Entity entity{index, m_entityGenerations[index]};
+    const Transform *local = m_transforms.get_ptr(entity, m_readStateIndex);
+    if ((local == nullptr) || (local->parentId == kInvalidPersistentId)) {
+      continue;
+    }
+    const std::uint32_t parentIndex = find_persistent_index(local->parentId);
+    TransformNode &node = m_transformNodes[index];
+    if ((parentIndex == 0U) || (parentIndex == index) ||
+        !m_entityAlive[parentIndex] || !m_transformNodes[parentIndex].present) {
+      node.orphan = true;
+      ++m_hierarchyOrphanCount;
+      continue;
+    }
+    node.parentIndex = parentIndex;
+    TransformNode &parent = m_transformNodes[parentIndex];
+    if (parent.firstChild == 0U) {
+      parent.firstChild = index;
+    } else {
+      m_transformNodes[parent.lastChild].nextSibling = index;
+      node.prevSibling = parent.lastChild;
+    }
+    parent.lastChild = index;
+  }
+  m_hierarchyLinksStale = false;
+}
+
+void World::link_transform_node(std::uint32_t index, PersistentId parentId,
+                                bool hadTransform) noexcept {
+  if (m_hierarchyLinksStale) {
+    return;
+  }
+  TransformNode &node = m_transformNodes[index];
+  if (node.present) {
+    // Reparent: leave the old parent's list; the children stay attached.
+    TransformNode &oldParent = m_transformNodes[node.parentIndex];
+    if (node.parentIndex != 0U) {
+      if (node.prevSibling != 0U) {
+        m_transformNodes[node.prevSibling].nextSibling = node.nextSibling;
+      } else if (oldParent.firstChild == index) {
+        oldParent.firstChild = node.nextSibling;
+      }
+      if (node.nextSibling != 0U) {
+        m_transformNodes[node.nextSibling].prevSibling = node.prevSibling;
+      } else if (oldParent.lastChild == index) {
+        oldParent.lastChild = node.prevSibling;
+      }
+    }
+    if (node.orphan && (m_hierarchyOrphanCount > 0U)) {
+      --m_hierarchyOrphanCount;
+    }
+  }
+  node.present = true;
+  node.orphan = false;
+  node.parentIndex = 0U;
+  node.nextSibling = 0U;
+  node.prevSibling = 0U;
+
+  std::uint32_t parentIndex = 0U;
+  if (parentId != kInvalidPersistentId) {
+    const std::uint32_t resolved = find_persistent_index(parentId);
+    if ((resolved != 0U) && (resolved != index) && m_entityAlive[resolved] &&
+        m_transformNodes[resolved].present) {
+      parentIndex = resolved;
+    } else {
+      node.orphan = true;
+      ++m_hierarchyOrphanCount;
+    }
+  }
+  if (parentIndex != 0U) {
+    node.parentIndex = parentIndex;
+    TransformNode &parent = m_transformNodes[parentIndex];
+    if (parent.firstChild == 0U) {
+      parent.firstChild = index;
+    } else {
+      m_transformNodes[parent.lastChild].nextSibling = index;
+      node.prevSibling = parent.lastChild;
+    }
+    parent.lastChild = index;
+  }
+  // A transform that just appeared may be the parent an orphan authored;
+  // the next walk rebuilds rather than guess.
+  if (!hadTransform && (m_hierarchyOrphanCount > 0U)) {
+    m_hierarchyLinksStale = true;
+  }
+}
+
+void World::unlink_transform_node(std::uint32_t index) noexcept {
+  TransformNode &node = m_transformNodes[index];
+  if (m_hierarchyLinksStale || !node.present) {
+    return;
+  }
+  if (node.parentIndex != 0U) {
+    TransformNode &parent = m_transformNodes[node.parentIndex];
+    if (node.prevSibling != 0U) {
+      m_transformNodes[node.prevSibling].nextSibling = node.nextSibling;
+    } else if (parent.firstChild == index) {
+      parent.firstChild = node.nextSibling;
+    }
+    if (node.nextSibling != 0U) {
+      m_transformNodes[node.nextSibling].prevSibling = node.prevSibling;
+    } else if (parent.lastChild == index) {
+      parent.lastChild = node.prevSibling;
+    }
+  }
+  // Children the current cascade is destroying too are left for their own
+  // teardown; any other child loses its parent and waits as an orphan.
+  for (std::uint32_t child = node.firstChild; child != 0U;) {
+    const std::uint32_t next = m_transformNodes[child].nextSibling;
+    ++m_hierarchyVisits;
+    if (!m_cascadeMarks[child]) {
+      TransformNode &childNode = m_transformNodes[child];
+      childNode.parentIndex = 0U;
+      childNode.nextSibling = 0U;
+      childNode.prevSibling = 0U;
+      if (!childNode.orphan) {
+        childNode.orphan = true;
+        ++m_hierarchyOrphanCount;
+      }
+    }
+    child = next;
+  }
+  if (node.orphan && (m_hierarchyOrphanCount > 0U)) {
+    --m_hierarchyOrphanCount;
+  }
+  node.parentIndex = 0U;
+  node.firstChild = 0U;
+  node.lastChild = 0U;
+  node.nextSibling = 0U;
+  node.prevSibling = 0U;
+  node.present = false;
+  node.orphan = false;
 }
 
 bool World::destroy_entity_immediate(Entity entity) noexcept {
@@ -164,19 +345,18 @@ bool World::destroy_entity_immediate(Entity entity) noexcept {
 
   // Children never survive their parent: destroy the whole subtree so no
   // orphan snaps to its local offset.
-  if (mark_hierarchy_descendants(entity) > 0U) {
-    const std::uint32_t upperBound = m_nextEntityIndex;
-    for (std::uint32_t index = 1U; index < upperBound; ++index) {
-      if (!m_cascadeMarks[index] || (index == entity.index) ||
-          !m_entityAlive[index]) {
-        continue;
-      }
+  const std::size_t descendantCount = mark_hierarchy_descendants(entity);
+  for (std::size_t i = 0U; i < descendantCount; ++i) {
+    const std::uint32_t index = m_cascadeMarked[i];
+    if (m_entityAlive[index]) {
       static_cast<void>(
           destroy_single_entity(Entity{index, m_entityGenerations[index]}));
     }
   }
 
-  return destroy_single_entity(entity);
+  const bool destroyed = destroy_single_entity(entity);
+  clear_cascade_marks();
+  return destroyed;
 }
 
 void World::remove_all_components(Entity entity) noexcept {
@@ -190,6 +370,7 @@ void World::remove_all_components(Entity entity) noexcept {
   m_cameraManager.on_entity_destroyed(entity);
 
   physics::remove_shape_payloads(m_physicsContext, entity);
+  unlink_transform_node(entity.index);
   // Every set is removed via the storage table so a new component cannot be
   // stranded on a dead slot and inherited by the index's next entity
   // (#166 W2 drift rank 1); removal order across sets is immaterial.
@@ -248,26 +429,25 @@ bool World::destroy_single_entity(Entity entity) noexcept {
 bool World::queue_deferred_destroy(Entity entity) noexcept {
   // Children join the deferred queue too, so their EndPlay callbacks fire
   // before the flush removes the subtree.
-  if (mark_hierarchy_descendants(entity) > 0U) {
-    const std::uint32_t upperBound = m_nextEntityIndex;
-    for (std::uint32_t index = 1U; index < upperBound; ++index) {
-      if (!m_cascadeMarks[index] || (index == entity.index) ||
-          !m_entityAlive[index]) {
-        continue;
-      }
+  const std::size_t descendantCount = mark_hierarchy_descendants(entity);
+  for (std::size_t i = 0U; i < descendantCount; ++i) {
+    const std::uint32_t index = m_cascadeMarked[i];
+    if (m_entityAlive[index]) {
       static_cast<void>(queue_single_deferred_destroy(
           Entity{index, m_entityGenerations[index]}));
     }
   }
+  clear_cascade_marks();
 
   return queue_single_deferred_destroy(entity);
 }
 
 bool World::queue_single_deferred_destroy(Entity entity) noexcept {
-  for (std::size_t i = 0U; i < m_pendingDestroyCount; ++i) {
-    if (m_pendingDestroyEntities[i] == entity) {
-      return true;
-    }
+  // Per-index membership dedupes in O(1) (#517); a different generation
+  // on the same index is a different entity and is queued as well.
+  if (m_pendingDestroyQueued[entity.index] &&
+      (m_pendingDestroyQueuedGeneration[entity.index] == entity.generation)) {
+    return true;
   }
 
   if (m_pendingDestroyCount >= m_pendingDestroyEntities.size()) {
@@ -276,7 +456,16 @@ bool World::queue_single_deferred_destroy(Entity entity) noexcept {
 
   m_pendingDestroyEntities[m_pendingDestroyCount] = entity;
   ++m_pendingDestroyCount;
+  m_pendingDestroyQueued[entity.index] = true;
+  m_pendingDestroyQueuedGeneration[entity.index] = entity.generation;
   return true;
+}
+
+void World::clear_pending_destroy_queue() noexcept {
+  for (std::size_t i = 0U; i < m_pendingDestroyCount; ++i) {
+    m_pendingDestroyQueued[m_pendingDestroyEntities[i].index] = false;
+  }
+  m_pendingDestroyCount = 0U;
 }
 
 void World::flush_deferred_destroys() noexcept {
@@ -291,7 +480,7 @@ void World::flush_deferred_destroys() noexcept {
     }
   }
 
-  m_pendingDestroyCount = 0U;
+  clear_pending_destroy_queue();
 }
 
 bool World::recycle_entity(Entity entity, Entity *outRecycled) noexcept {
@@ -313,24 +502,23 @@ bool World::recycle_entity(Entity entity, Entity *outRecycled) noexcept {
     if (m_cascadeMarks[pending.index] && is_valid_entity(pending)) {
       core::log_message(core::LogLevel::Warning, "world",
                         "recycle_entity refused: destroy already queued");
+      clear_cascade_marks();
       return false;
     }
   }
 
   // Children never survive their parent's teardown; the pool owns only
   // the root, so descendants are fully destroyed, not recycled.
-  if (descendantCount > 0U) {
-    const std::uint32_t upperBound = m_nextEntityIndex;
-    for (std::uint32_t index = 1U; index < upperBound; ++index) {
-      if (m_cascadeMarks[index] && (index != entity.index) &&
-          m_entityAlive[index]) {
-        static_cast<void>(destroy_single_entity(
-            Entity{index, m_entityGenerations[index]}));
-      }
+  for (std::size_t i = 0U; i < descendantCount; ++i) {
+    const std::uint32_t index = m_cascadeMarked[i];
+    if (m_entityAlive[index]) {
+      static_cast<void>(
+          destroy_single_entity(Entity{index, m_entityGenerations[index]}));
     }
   }
 
   remove_all_components(entity);
+  clear_cascade_marks();
 
   // The slot stays alive but under a new generation, so the handle the
   // pool hands out next is distinct from every handle held before this
@@ -381,7 +569,8 @@ void World::reset_all_entities() noexcept {
 
   // A destroy queued by a pre-reset Simulation step must not fire into
   // the replacement content after the reset.
-  m_pendingDestroyCount = 0U;
+  clear_pending_destroy_queue();
+  m_hierarchyLinksStale = true;
 }
 
 bool World::destroy_entity(Entity entity) noexcept {

@@ -296,6 +296,7 @@ bool World::add_transform(Entity entity, const Transform &transform) noexcept {
     }
     return false;
   }
+  link_transform_node(entity.index, transform.parentId, hadTransform);
   return true;
 }
 
@@ -304,6 +305,7 @@ bool World::remove_transform(Entity entity) noexcept {
     return false;
   }
 
+  unlink_transform_node(entity.index);
   const bool removed = m_transforms.remove(entity);
   static_cast<void>(m_worldTransforms.remove(entity));
   reset_transform_cache(entity.index);

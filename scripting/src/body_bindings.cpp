@@ -479,25 +479,6 @@ int lua_engine_get_parent(lua_State *state) noexcept {
   return 1;
 }
 
-/// Collects one entity into the Lua child table when its parent id matches.
-struct ChildCollectContext final {
-  lua_State *state = nullptr;
-  runtime::PersistentId parentId = runtime::kInvalidPersistentId;
-  int childCount = 0;
-};
-
-void collect_child_visitor(runtime::Entity entity,
-                           const runtime::Transform &transform,
-                           void *userData) noexcept {
-  auto *context = static_cast<ChildCollectContext *>(userData);
-  if (transform.parentId != context->parentId) {
-    return;
-  }
-  ++context->childCount;
-  push_entity_handle(context->state, entity);
-  lua_rawseti(context->state, -2, context->childCount);
-}
-
 int lua_engine_get_children(lua_State *state) noexcept {
   runtime::Entity parent{};
   if (!read_entity(state, 1, &parent)) {
@@ -506,14 +487,20 @@ int lua_engine_get_children(lua_State *state) noexcept {
   }
 
   runtime::World *const world = runtime_binding().world;
-  const runtime::PersistentId parentId = world->persistent_id(parent);
   lua_newtable(state);
-  if (parentId == runtime::kInvalidPersistentId) {
+  if (!world->is_alive(parent)) {
     return 1;
   }
 
-  ChildCollectContext context{state, parentId, 0};
-  world->for_each_transform(&collect_child_visitor, &context);
+  // The World's child index answers in O(children), not O(transforms)
+  // (#517), in child-link order.
+  int childCount = 0;
+  world->for_each_child(parent, [state, &childCount](
+                                    runtime::Entity child) noexcept {
+    ++childCount;
+    push_entity_handle(state, child);
+    lua_rawseti(state, -2, childCount);
+  });
   return 1;
 }
 
