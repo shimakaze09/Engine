@@ -715,6 +715,115 @@ bool test_dap_breakpoint_pause() noexcept {
 
 } // namespace
 
+/// Regression for #539: a setBreakpoints list longer than the parser's
+/// pointer scratch used to be cut short silently (the missing entries
+/// were neither set nor reported), so every entry must come back, and an
+/// entry the breakpoint store cannot hold answers verified:false instead
+/// of claiming success.
+bool test_dap_large_breakpoint_list() noexcept {
+  constexpr std::size_t kBreakpoints = 700U;
+  if (!engine::scripting::dap_start(kDapPort)) {
+    return false;
+  }
+  if (!init_client_socket_platform()) {
+    engine::scripting::dap_stop();
+    return false;
+  }
+  SocketHandle sock = kInvalidSocket;
+  if (!connect_to_dap_server(&sock) || !wait_for_dap_client(true)) {
+    close_socket_safe(sock);
+    shutdown_client_socket_platform();
+    engine::scripting::dap_stop();
+    return false;
+  }
+
+  std::string body = "{\"seq\":1,\"type\":\"request\",\"command\":"
+                     "\"setBreakpoints\",\"arguments\":{\"source\":{\"path\":"
+                     "\"dap_many_breakpoints.lua\"},\"breakpoints\":[";
+  char entry[32] = {};
+  for (std::size_t i = 0U; i < kBreakpoints; ++i) {
+    std::snprintf(entry, sizeof(entry), "%s{\"line\":%zu}", (i == 0U) ? "" : ",",
+                  i + 1U);
+    body += entry;
+  }
+  body += "]}}";
+  char header[64] = {};
+  const int headerLen =
+      std::snprintf(header, sizeof(header), "Content-Length: %zu\r\n\r\n",
+                    body.size());
+  bool sent = (headerLen > 0) &&
+              send_all(sock, header, static_cast<std::size_t>(headerLen)) &&
+              send_all(sock, body.data(), body.size());
+
+  // The server reads and answers on dap_poll, so poll between short
+  // bounded waits until the response arrives.
+  std::string recvBuffer;
+  std::string response;
+  bool answered = false;
+  for (int attempt = 0; sent && !answered && (attempt < 200); ++attempt) {
+    engine::scripting::dap_poll();
+    std::string message;
+    if (recv_dap_message(sock, &recvBuffer, &message, 20) &&
+        (message.find("\"command\":\"setBreakpoints\"") != std::string::npos)) {
+      response = message;
+      answered = true;
+    }
+  }
+
+  // Breakpoints outlive the session, so hand the store back before the
+  // next check: an empty list for the same source replaces them.
+  const char *clearArgs = "{\"source\":{\"path\":\"dap_many_breakpoints.lua\"},"
+                          "\"breakpoints\":[]}";
+  bool cleared = false;
+  if (answered && send_dap_request(sock, 2, "setBreakpoints", clearArgs)) {
+    for (int attempt = 0; !cleared && (attempt < 200); ++attempt) {
+      engine::scripting::dap_poll();
+      std::string message;
+      if (recv_dap_message(sock, &recvBuffer, &message, 20) &&
+          (message.find("\"request_seq\":2,") != std::string::npos)) {
+        cleared = true;
+      }
+    }
+  }
+
+  engine::scripting::dap_stop();
+  close_socket_safe(sock);
+  shutdown_client_socket_platform();
+  if (!answered || !cleared) {
+    std::printf(answered ? "(breakpoints not cleared) "
+                         : "(no setBreakpoints response) ");
+    return false;
+  }
+
+  std::size_t entries = 0U;
+  std::size_t verified = 0U;
+  std::size_t unverified = 0U;
+  for (std::size_t pos = response.find("\"line\":"); pos != std::string::npos;
+       pos = response.find("\"line\":", pos + 1U)) {
+    ++entries;
+  }
+  for (std::size_t pos = response.find("\"verified\":true");
+       pos != std::string::npos;
+       pos = response.find("\"verified\":true", pos + 1U)) {
+    ++verified;
+  }
+  for (std::size_t pos = response.find("\"verified\":false");
+       pos != std::string::npos;
+       pos = response.find("\"verified\":false", pos + 1U)) {
+    ++unverified;
+  }
+  // The store holds far fewer than 700, so some are refused; every entry
+  // is answered and none is claimed beyond what the store took.
+  const bool ok = (entries == kBreakpoints) &&
+                  ((verified + unverified) == kBreakpoints) &&
+                  (verified >= 1U) && (unverified >= 1U);
+  if (!ok) {
+    std::printf("(entries=%zu verified=%zu unverified=%zu) ", entries,
+                verified, unverified);
+  }
+  return ok;
+}
+
 /// Runs this executable or test program.
 int main() {
   std::printf("  dap_test::restart_clears_session ... ");
@@ -733,10 +842,15 @@ int main() {
   const bool unknownOk = test_dap_unknown_command_echo();
   std::printf(unknownOk ? "PASS\n" : "FAIL\n");
 
+  std::printf("  dap_test::large_breakpoint_list ... ");
+  const bool largeListOk = test_dap_large_breakpoint_list();
+  std::printf(largeListOk ? "PASS\n" : "FAIL\n");
+
   std::printf("  dap_test::breakpoint_pause ... ");
   const bool breakpointOk = test_dap_breakpoint_pause();
   std::printf(breakpointOk ? "PASS\n" : "FAIL\n");
-  return (restartOk && oversizedOk && overflowOk && unknownOk && breakpointOk)
+  return (restartOk && oversizedOk && overflowOk && unknownOk && largeListOk &&
+          breakpointOk)
              ? 0
              : 1;
 }

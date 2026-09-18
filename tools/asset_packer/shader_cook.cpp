@@ -190,18 +190,21 @@ bool read_manifest(const char *manifestPath,
     std::fprintf(stderr, "shader cook: manifest lists no shaders\n");
     return false;
   }
+  // The manifest is as long as the author makes it, so its entries are
+  // walked by value rather than through the parser's bounded pointer
+  // scratch, which a larger manifest exhausted into a silent refusal
+  // (#539).
   for (std::size_t i = 0U; i < count; ++i) {
-    const engine::core::JsonValue *entry =
-        parser.get_array_element(*shaders, i);
-    if (entry == nullptr) {
+    engine::core::JsonValue entry{};
+    if (!parser.get_array_element(*shaders, i, &entry)) {
+      std::fprintf(stderr, "shader cook: entry %zu is unreadable\n", i);
       return false;
     }
     ShaderEntry shader{};
     char buffer[256] = {};
-    const engine::core::JsonValue *field =
-        parser.get_object_field(*entry, "source");
-    if ((field == nullptr) ||
-        !parser.copy_string(*field, buffer, sizeof(buffer))) {
+    engine::core::JsonValue field{};
+    if (!parser.get_object_field(entry, "source", &field) ||
+        !parser.copy_string(field, buffer, sizeof(buffer))) {
       std::fprintf(stderr, "shader cook: entry %zu missing source\n", i);
       return false;
     }
@@ -213,9 +216,8 @@ bool read_manifest(const char *manifestPath,
                    i, shader.source.c_str());
       return false;
     }
-    field = parser.get_object_field(*entry, "type");
-    if ((field == nullptr) ||
-        !parser.copy_string(*field, buffer, sizeof(buffer))) {
+    if (!parser.get_object_field(entry, "type", &field) ||
+        !parser.copy_string(field, buffer, sizeof(buffer))) {
       std::fprintf(stderr, "shader cook: entry %zu missing type\n", i);
       return false;
     }
@@ -229,9 +231,8 @@ bool read_manifest(const char *manifestPath,
                    i);
       return false;
     }
-    field = parser.get_object_field(*entry, "output");
-    if ((field == nullptr) ||
-        !parser.copy_string(*field, buffer, sizeof(buffer))) {
+    if (!parser.get_object_field(entry, "output", &field) ||
+        !parser.copy_string(field, buffer, sizeof(buffer))) {
       std::fprintf(stderr, "shader cook: entry %zu missing output\n", i);
       return false;
     }
@@ -243,26 +244,25 @@ bool read_manifest(const char *manifestPath,
                    i, shader.output.c_str());
       return false;
     }
-    const engine::core::JsonValue *variants =
-        parser.get_object_field(*entry, "variants");
-    if (variants == nullptr) {
+    engine::core::JsonValue variants{};
+    if (!parser.get_object_field(entry, "variants", &variants)) {
       std::fprintf(stderr, "shader cook: entry %zu missing variants\n", i);
       return false;
     }
-    const std::size_t variantCount = parser.array_size(*variants);
+    const std::size_t variantCount = parser.array_size(variants);
     for (std::size_t v = 0U; v < variantCount; ++v) {
-      const engine::core::JsonValue *variant =
-          parser.get_array_element(*variants, v);
-      if (variant == nullptr) {
+      engine::core::JsonValue variant{};
+      if (!parser.get_array_element(variants, v, &variant)) {
+        std::fprintf(stderr, "shader cook: entry %zu variant %zu unreadable\n",
+                     i, v);
         return false;
       }
       std::vector<std::string> defines;
-      const std::size_t defineCount = parser.array_size(*variant);
+      const std::size_t defineCount = parser.array_size(variant);
       for (std::size_t d = 0U; d < defineCount; ++d) {
-        const engine::core::JsonValue *define =
-            parser.get_array_element(*variant, d);
-        if ((define == nullptr) ||
-            !parser.copy_string(*define, buffer, sizeof(buffer))) {
+        engine::core::JsonValue define{};
+        if (!parser.get_array_element(variant, d, &define) ||
+            !parser.copy_string(define, buffer, sizeof(buffer))) {
           std::fprintf(stderr,
                        "shader cook: entry %zu variant %zu malformed\n", i,
                        v);

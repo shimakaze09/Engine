@@ -478,6 +478,13 @@ engine_add_test_executable(engine_unit_json_navigation
     engine_core
 )
 
+engine_add_test_executable(engine_unit_json_scratch
+    SOURCES
+    json_scratch_test.cpp
+    PRIVATE_DEPS
+    engine_core
+)
+
 engine_add_test_executable(engine_unit_script_mount_resolution
     SOURCES
     script_mount_resolution_test.cpp

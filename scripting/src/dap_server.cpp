@@ -429,22 +429,27 @@ void handle_set_breakpoints(int requestSeq, const core::JsonParser &parser,
   w.begin_object();
   w.begin_array("breakpoints");
 
+  // The client decides the list length, so it is walked by value: the
+  // parser's pointer scratch would run out part way through a long list
+  // and the rest would silently read as absent (#539). Each entry reports
+  // whether the debugger actually holds it, so a list past the breakpoint
+  // store's capacity answers verified:false instead of claiming success.
   if (bpArray != nullptr) {
     const std::size_t count = parser.array_size(*bpArray);
     for (std::size_t i = 0U; i < count; ++i) {
-      const core::JsonValue *bp = parser.get_array_element(*bpArray, i);
-      if (bp == nullptr) {
+      core::JsonValue bp{};
+      if (!parser.get_array_element(*bpArray, i, &bp)) {
         continue;
       }
-      const core::JsonValue *lineVal = parser.get_object_field(*bp, "line");
+      core::JsonValue lineVal{};
       std::uint32_t line = 0U;
-      if (lineVal != nullptr) {
-        parser.as_uint(*lineVal, &line);
+      if (parser.get_object_field(bp, "line", &lineVal)) {
+        parser.as_uint(lineVal, &line);
       }
-      static_cast<void>(
-          debugger_add_breakpoint(srcPath, static_cast<int>(line)));
+      const bool verified =
+          debugger_add_breakpoint(srcPath, static_cast<int>(line));
       w.begin_object();
-      w.write_bool("verified", true);
+      w.write_bool("verified", verified);
       w.write_uint("line", line);
       w.end_object();
     }

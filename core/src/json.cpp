@@ -2,6 +2,8 @@
 
 #include "engine/core/json.h"
 
+#include "engine/core/logging.h"
+
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -934,6 +936,7 @@ bool JsonParser::parse(const char *input, std::size_t length) noexcept {
   m_hasRoot = false;
   m_root = JsonValue{};
   m_scratchCursor = 0U;
+  m_scratchExhausted = false;
   m_arrayMemos.fill(ArrayMemo{});
   m_arrayElementScans = 0U;
 
@@ -967,6 +970,13 @@ const JsonValue *JsonParser::root() const noexcept {
 const JsonValue *
 JsonParser::push_scratch(const JsonValue &value) const noexcept {
   if (m_scratchCursor >= m_scratch.size()) {
+    if (!m_scratchExhausted) {
+      m_scratchExhausted = true;
+      log_message(LogLevel::Warning, "json",
+                  "JsonParser scratch exhausted: a pointer-returning "
+                  "navigation past kScratchSlots reads as a missing value; "
+                  "walk long documents with the by-value overloads");
+    }
     return nullptr;
   }
 

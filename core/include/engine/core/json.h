@@ -158,7 +158,12 @@ public:
   const JsonValue *root() const noexcept;
 
   // Pointer-returning navigation helpers are transient: do not keep returned
-  // pointers across additional pointer-returning navigation calls.
+  // pointers across additional pointer-returning navigation calls. They
+  // draw on a fixed scratch ring of kScratchSlots values that parse()
+  // resets; past it they return nullptr like a missing field, so an
+  // unbounded walk (every element of an authored array) uses the by-value
+  // overloads, which never touch the ring (#539).
+  static constexpr std::size_t kScratchSlots = 1024U;
   const JsonValue *get_object_field(const JsonValue &object,
                                     const char *fieldName) const noexcept;
   /// Finds a field by name in an object; false when missing.
@@ -180,6 +185,10 @@ public:
   std::size_t array_element_scans() const noexcept {
     return m_arrayElementScans;
   }
+  /// True once a pointer-returning navigation call since parse() found
+  /// the scratch ring full and returned nullptr; the first such call also
+  /// logs a warning, once per parse.
+  bool scratch_exhausted() const noexcept { return m_scratchExhausted; }
 
   /// Numeric value as float; false for non-numbers.
   bool as_float(const JsonValue &value, float *outValue) const noexcept;
@@ -220,8 +229,9 @@ private:
   std::size_t m_length = 0U;
   JsonValue m_root{};
   bool m_hasRoot = false;
-  mutable std::array<JsonValue, 1024U> m_scratch{};
+  mutable std::array<JsonValue, kScratchSlots> m_scratch{};
   mutable std::size_t m_scratchCursor = 0U;
+  mutable bool m_scratchExhausted = false;
   // Sequential-access memos for get_array_element: the lazy representation
   // rescans an array from its opening bracket, which made per-index walks
   // quadratic (31 s to iterate an 8k-entity scene, audit N-17); resuming
