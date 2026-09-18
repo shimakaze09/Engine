@@ -1463,6 +1463,7 @@ if(ENGINE_BUILD_TOOLS)
         SOURCES
         animation_import_test.cpp
         ${CMAKE_SOURCE_DIR}/tools/asset_packer/animation_import.cpp
+        ${CMAKE_SOURCE_DIR}/tools/asset_packer/gltf_bounds.cpp
         ${CMAKE_SOURCE_DIR}/tools/asset_packer/cgltf_impl.cpp
         PRIVATE_INCLUDE_DIRS
         ${CMAKE_SOURCE_DIR}/tools/asset_packer
@@ -1502,6 +1503,7 @@ if(ENGINE_BUILD_TOOLS)
         ${CMAKE_SOURCE_DIR}/tools/asset_packer/thumbnail_generate.cpp
         ${CMAKE_SOURCE_DIR}/tools/asset_packer/thumbnail_resample.cpp
         ${CMAKE_SOURCE_DIR}/tools/asset_packer/mesh_cook.cpp
+        ${CMAKE_SOURCE_DIR}/tools/asset_packer/gltf_bounds.cpp
         ${CMAKE_SOURCE_DIR}/tools/asset_packer/cook_stamp.cpp
         ${CMAKE_SOURCE_DIR}/tools/asset_packer/dependency_graph.cpp
         ${CMAKE_SOURCE_DIR}/tools/asset_packer/cgltf_impl.cpp
@@ -1535,6 +1537,7 @@ if(ENGINE_BUILD_TOOLS)
         SOURCES
         skinned_mesh_cook_test.cpp
         ${CMAKE_SOURCE_DIR}/tools/asset_packer/mesh_cook.cpp
+        ${CMAKE_SOURCE_DIR}/tools/asset_packer/gltf_bounds.cpp
         ${CMAKE_SOURCE_DIR}/tools/asset_packer/cook_stamp.cpp
         ${CMAKE_SOURCE_DIR}/tools/asset_packer/dependency_graph.cpp
         ${CMAKE_SOURCE_DIR}/tools/asset_packer/cgltf_impl.cpp

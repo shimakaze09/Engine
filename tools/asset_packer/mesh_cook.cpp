@@ -18,6 +18,7 @@
 #include "engine/math/vec3.h"
 #include "engine/physics/collider.h"
 #include "engine/physics/convex_hull.h"
+#include "gltf_bounds.h"
 
 std::size_t primitive_stride_floats(const PrimitiveData &data) {
   if (data.hasSkin) {
@@ -25,6 +26,7 @@ std::size_t primitive_stride_floats(const PrimitiveData &data) {
   }
   return data.hasUVs ? 8U : 6U;
 }
+
 
 void apply_up_axis_to_primitive(PrimitiveData *data, int upAxis) {
   if ((data == nullptr) || ((upAxis != 0) && (upAxis != 2))) {
@@ -223,6 +225,10 @@ bool extract_primitive(const cgltf_primitive *primitive,
   outData->hasSkin = hasSkin;
   const std::size_t strideFloats = primitive_stride_floats(*outData);
 
+  if (!accessor_count_is_cookable(positions, strideFloats, "POSITION")) {
+    return false;
+  }
+
   const std::size_t vertexCount = static_cast<std::size_t>(positions->count);
   outData->interleavedVertices.assign(vertexCount * strideFloats, 0.0F);
 
@@ -290,6 +296,10 @@ bool extract_primitive(const cgltf_primitive *primitive,
   }
 
   if (primitive->indices != nullptr) {
+    if (!accessor_count_is_cookable(primitive->indices, 1U, "index")) {
+      return false;
+    }
+
     const std::size_t indexCount =
         static_cast<std::size_t>(primitive->indices->count);
     outData->indices.assign(indexCount, 0U);

@@ -442,6 +442,36 @@ if(ENGINE_BUILD_TOOLS)
         PROPERTIES LABELS integration
     )
 
+    # Issue #526: an accessor with no bufferView is unbounded, so sizing a
+    # buffer from its count wraps (heap overflow) or asks for terabytes.
+    # Both fixtures carry the same defect; the small one proves the rule is
+    # "cannot be bounded", not "the count is large".
+    add_test(
+        NAME engine_integration_asset_packer_rejects_unbounded_accessor
+        COMMAND ${CMAKE_COMMAND}
+            "-DASSET_PACKER=$<TARGET_FILE:asset_packer>"
+            "-DINPUT=${CMAKE_SOURCE_DIR}/tests/data/unbounded_accessor.gltf"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/unbounded_accessor.mesh"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/asset_packer_unbounded_accessor_test.cmake
+    )
+    set_tests_properties(
+        engine_integration_asset_packer_rejects_unbounded_accessor
+        PROPERTIES LABELS integration
+    )
+
+    add_test(
+        NAME engine_integration_asset_packer_rejects_unbounded_accessor_small
+        COMMAND ${CMAKE_COMMAND}
+            "-DASSET_PACKER=$<TARGET_FILE:asset_packer>"
+            "-DINPUT=${CMAKE_SOURCE_DIR}/tests/data/unbounded_accessor_small.gltf"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/unbounded_accessor_small.mesh"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/asset_packer_unbounded_accessor_test.cmake
+    )
+    set_tests_properties(
+        engine_integration_asset_packer_rejects_unbounded_accessor_small
+        PROPERTIES LABELS integration
+    )
+
     add_test(
         NAME engine_integration_asset_packer_bin_dependency
         COMMAND ${CMAKE_COMMAND}

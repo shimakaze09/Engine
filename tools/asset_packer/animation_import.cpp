@@ -2,6 +2,8 @@
 
 #include "animation_import.h"
 
+#include "gltf_bounds.h"
+
 #include <array>
 #include <cmath>
 #include <cstdio>
@@ -371,7 +373,8 @@ bool parse_gltf_animation(const cgltf_data *data, std::size_t animationIndex,
     const cgltf_accessor *input = sampler.input;
     const cgltf_accessor *output = sampler.output;
     if ((input == nullptr) || (input->type != cgltf_type_scalar) ||
-        (input->count == 0U)) {
+        (input->count == 0U) ||
+        !accessor_count_is_cookable(input, 1U, "animation sampler input")) {
       set_result(outResult, AnimationImportResult::InvalidInputAccessor);
       return false;
     }
@@ -380,9 +383,12 @@ bool parse_gltf_animation(const cgltf_data *data, std::size_t animationIndex,
         convert_interpolation(sampler.interpolation);
     const std::size_t sampleMultiplier =
         interpolation == AnimInterpolation::CubicSpline ? 3U : 1U;
+    // input->count is bounded above, so the product below cannot wrap and
+    // make a mismatched output accessor compare equal.
     if ((output == nullptr) ||
         (output->type != output_type_for_target(target)) ||
-        (output->count != input->count * sampleMultiplier)) {
+        (output->count != input->count * sampleMultiplier) ||
+        !accessor_count_is_cookable(output, 1U, "animation sampler output")) {
       set_result(outResult, AnimationImportResult::InvalidOutputAccessor);
       return false;
     }

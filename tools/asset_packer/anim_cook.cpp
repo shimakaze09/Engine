@@ -4,6 +4,7 @@
 
 #include "anim_cook.h"
 
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 
@@ -219,6 +220,20 @@ bool write_anim_clip_asset(const char *outputPath, const AnimClip &clip,
     core::AnimClipAssetTrack record{};
     pack_track(track, jointRemap[track.joint], &record, &payload);
     records.push_back(record);
+  }
+
+  // Per-accessor counts are bounded at import, but the payload accumulates
+  // across every track, so the totals are checked here rather than assumed:
+  // a truncating cast would write a header describing less data than the
+  // file carries, and the loader would read the remainder as the next
+  // record.
+  if ((records.size() > static_cast<std::size_t>(UINT32_MAX)) ||
+      (payload.size() > static_cast<std::size_t>(UINT32_MAX))) {
+    std::fprintf(stderr,
+                 "error: animation clip exceeds supported format limits "
+                 "(%zu track(s), %zu payload float(s))\n",
+                 records.size(), payload.size());
+    return false;
   }
 
   core::AnimClipAssetHeader header{};

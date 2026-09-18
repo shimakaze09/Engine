@@ -26,6 +26,7 @@ struct PrimitiveData final {
 /// (uv slot always present), 8 with UVs, 6 bare.
 std::size_t primitive_stride_floats(const PrimitiveData &data);
 
+
 /// One dependency path with its content hash, for cook-stamp comparison.
 struct DependencyDigest final {
   std::string path{};
