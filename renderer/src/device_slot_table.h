@@ -16,11 +16,24 @@ namespace engine::renderer::device_slot_detail {
 /// Fixed-capacity generational resource table. Payload must be default-
 /// constructible; Capacity counts usable slots (slot 0 stays reserved as
 /// the invalid handle encoding).
-template <typename Payload, std::size_t Capacity> class DeviceSlotTable final {
+///
+/// SlotBits defaults to the narrowest field that addresses Capacity, which
+/// leaves the widest generation field the 32-bit handle can carry. A test
+/// may widen it to shrink the generation field instead, so the wrap branch
+/// in next_generation is reachable in a handful of cycles rather than 2^31;
+/// production instantiations leave it defaulted.
+template <typename Payload, std::size_t Capacity,
+          unsigned SlotBits = std::bit_width(Capacity - 1U)>
+class DeviceSlotTable final {
 public:
   static_assert(Capacity >= 2U, "capacity must leave a usable slot");
+  static_assert(SlotBits >= std::bit_width(Capacity - 1U),
+                "slot field must address every slot");
+  static_assert(SlotBits <= 28U,
+                "generation field must keep at least four bits, or stale "
+                "handles would alias within a few releases");
 
-  static constexpr unsigned kSlotBits = std::bit_width(Capacity - 1U);
+  static constexpr unsigned kSlotBits = SlotBits;
   static constexpr std::uint32_t kSlotMask = (1U << kSlotBits) - 1U;
   static constexpr std::uint32_t kGenerationMask =
       std::numeric_limits<std::uint32_t>::max() >> kSlotBits;
