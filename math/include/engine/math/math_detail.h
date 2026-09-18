@@ -4,11 +4,19 @@
 #pragma once
 
 // SSE2 detection: MSVC x64 always has SSE2; GCC/Clang define __SSE2__.
+// A translation unit may predefine ENGINE_MATH_SSE2=0 to force the scalar
+// paths on a machine that has SSE2; that is how the parity suite compiles
+// both implementations and compares them bit for bit. Predefining 1 on a
+// target without SSE2 is not supported.
+#ifndef ENGINE_MATH_SSE2
 #if defined(__SSE2__) || (defined(_MSC_VER) && defined(_M_X64))
 #define ENGINE_MATH_SSE2 1
-#include <emmintrin.h>
 #else
 #define ENGINE_MATH_SSE2 0
+#endif
+#endif
+#if ENGINE_MATH_SSE2
+#include <emmintrin.h>
 #endif
 
 namespace engine::math::detail {

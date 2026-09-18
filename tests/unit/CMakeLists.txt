@@ -105,6 +105,34 @@ engine_add_test_executable(engine_unit_device_slot_table
     engine_core
 )
 
+# Math SIMD/scalar parity: one battery built twice, once taking the SSE2
+# paths the host provides and once forced scalar, compared line for line
+# by script. On a host without SSE2 the script reports itself skipped.
+engine_add_executable_target(engine_test_math_parity_native
+    SOURCES
+    math_parity_battery.cpp
+    PRIVATE_DEPS
+    engine_math
+)
+engine_add_executable_target(engine_test_math_parity_scalar
+    SOURCES
+    math_parity_battery.cpp
+    PRIVATE_DEPS
+    engine_math
+    COMPILE_DEFINITIONS
+    ENGINE_MATH_SSE2=0
+)
+add_test(
+    NAME engine_unit_math_parity
+    COMMAND ${CMAKE_COMMAND}
+        "-DNATIVE=$<TARGET_FILE:engine_test_math_parity_native>"
+        "-DSCALAR=$<TARGET_FILE:engine_test_math_parity_scalar>"
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/math_parity_test.cmake
+)
+set_tests_properties(engine_unit_math_parity PROPERTIES
+    LABELS unit
+    SKIP_REGULAR_EXPRESSION "SKIPPED:")
+
 # bgfx backend device suite (#138 Phases B/C): runs headlessly on
 # bgfx's Noop renderer. When the build also cooks the proving shaders
 # (tools on), the suite exercises cooked program linking against those
