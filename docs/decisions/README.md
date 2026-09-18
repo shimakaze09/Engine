@@ -20,3 +20,6 @@ history.
 | [0007](0007-defect-budget.md) | A defect budget replaces open-ended auditing | 2026-09-18 |
 | [0008](0008-evidence-before-status.md) | No status claim without named evidence | 2026-09-18 |
 | [0009](0009-net-negative-documentation.md) | Documentation is net-negative | 2026-09-18 |
+| [0010](0010-handles-bump-on-release.md) | A generational handle always bumps on release | 2026-09-18 |
+| [0011](0011-budgets-check-the-handle.md) | An input budget is enforced on the handle that is read | 2026-09-18 |
+| [0012](0012-defect-budget-is-a-flow-rule.md) | The defect budget is a flow rule, not a ceiling | 2026-09-18 |

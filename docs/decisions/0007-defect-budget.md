@@ -23,6 +23,11 @@ were being discovered by code reading instead.
 
 1. **Budget, not zero.** P0 and P1 stay at zero. P2 stays under an
    owner-set ceiling. P3 is unbounded and not audited.
+   *(Superseded by [0012](0012-defect-budget-is-a-flow-rule.md): counting
+   the tracker showed P0 at 4 and P1 at 27, so "stay at zero" described no
+   reachable near-term state, and a hard count would have recreated the
+   under-classification incentive this triage had just removed. The budget
+   is now a flow rule plus a promotion rule.)*
 2. **No broad audit campaign while P0/P1 are non-empty.** Audits produce
    volume, not information, once the systemic classes are already known.
 3. **Running the product is a required source of defects.** The acceptance

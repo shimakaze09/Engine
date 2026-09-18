@@ -115,11 +115,16 @@ Calling a rule enforced without one of these three is prohibited.
   dated human observation beside it. "Verified", "landed" and
   "production-ready" name the commit, the evidence, the platform and the
   date, or they are not written.
-- **[OWNER]** Defect budget: P0 and P1 stay at zero; P2 stays under an
-  owner-set ceiling; P3 is unbounded and not audited. Zero open findings
-  is not a reachable state for an engine, and pursuing it starves the
-  foundation work. Do not open a broad audit campaign while P0/P1 are
-  non-empty.
+- **[OWNER]** Defect budget, as flow rather than a count: **P0 is
+  stop-the-line** — while one is open it is the work. **P1 and P2 may not
+  grow** month over month. **P3 is unbounded and not audited**, and never
+  justifies a change of its own. Do not open a broad audit campaign while
+  P0 or P1 is non-empty. Severity is assigned per row, never per batch;
+  **anything observed happening in real use is at least P2** whatever it
+  was filed as; and a budget never justifies a downgrade — moving a
+  severity down needs the same evidence as any other contract change. Zero
+  open findings is not a reachable state for an engine, and pursuing it
+  starves the foundation work.
 
 ## Working conventions
 
