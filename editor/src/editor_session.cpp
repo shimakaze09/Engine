@@ -27,6 +27,7 @@
 
 #include "editor_commands.h"
 #include "editor_material_edit.h"
+#include "editor_multi_edit.h"
 #include "engine/core/atomic_file.h"
 #include "engine/core/file_read.h"
 #include "engine/core/cvar.h"
@@ -635,6 +636,7 @@ void editor_history_undo() noexcept {
   }
   if (world_is_editable()) {
     inspector_commit_pending_edit();
+    multi_edit_commit_gesture();
     gizmo_commit_gesture();
     editor_session().commandHistory.undo();
   }
@@ -647,6 +649,7 @@ void editor_history_redo() noexcept {
   }
   if (world_is_editable()) {
     inspector_commit_pending_edit();
+    multi_edit_commit_gesture();
     gizmo_commit_gesture();
     editor_session().commandHistory.redo();
   }
@@ -672,6 +675,7 @@ void start_play_mode() noexcept {
     // snapshot so Stop restores a state the history accounts for; a
     // gizmo drag cannot span Play, so it is dropped.
     inspector_commit_pending_edit();
+    multi_edit_commit_gesture();
     gizmo_abandon_gesture();
     if (!capture_play_snapshot()) {
       core::log_message(core::LogLevel::Error, "editor",

@@ -40,6 +40,7 @@ struct SessionWorldScope final {
 
   ~SessionWorldScope() noexcept {
     EditorSession &session = editor_session();
+    multi_edit_commit_gesture();
     clear_entity_selection();
     session.commandHistory.clear();
     session.world = previousWorld;
@@ -210,6 +211,131 @@ int check_batch_field_edit_single_command_preserves_sibling_field() noexcept {
     return 32;
   }
 
+  return 0;
+}
+
+/// EXPECTATION (#548): a drag over a multi-selection is one gesture, one
+/// undo step. Every staged frame reaches every selected entity at once and
+/// leaves the still-mixed sibling field alone, nothing is recorded while
+/// the drag runs, the commit records exactly one command whose undo
+/// restores each entity's own pre-drag value, and staging a different
+/// field commits the open gesture first.
+int check_drag_gesture_records_one_command() noexcept {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 90;
+  }
+  SessionWorldScope scope(world.get());
+
+  const Entity first = make_rigid_body_entity(*world, 1.0F, 10.0F);
+  const Entity second = make_rigid_body_entity(*world, 2.0F, 20.0F);
+  const Entity third = make_rigid_body_entity(*world, 3.0F, 30.0F);
+  if ((first == engine::runtime::kInvalidEntity) ||
+      (second == engine::runtime::kInvalidEntity) ||
+      (third == engine::runtime::kInvalidEntity)) {
+    return 91;
+  }
+  select_entity(first, false);
+  select_entity(second, true);
+  select_entity(third, true);
+
+  const engine::core::TypeField *massField = rigid_body_field("inverseMass");
+  const engine::core::TypeField *inertiaField =
+      rigid_body_field("inverseInertia");
+  if ((massField == nullptr) || (inertiaField == nullptr)) {
+    return 92;
+  }
+  ComponentEditSnapshot representative{};
+  if (!selection_representative_component(ComponentEditType::RigidBody,
+                                          &representative)) {
+    return 93;
+  }
+
+  // A 70-frame drag: more frames than the history holds entries.
+  constexpr int kFrames = 70;
+  for (int frame = 1; frame <= kFrames; ++frame) {
+    representative.rigidBody.inverseMass = static_cast<float>(frame);
+    if (!multi_edit_stage_field(ComponentEditType::RigidBody,
+                                massField->offset, massField->size,
+                                representative)) {
+      return 94;
+    }
+    if (editor_session().commandHistory.can_undo()) {
+      return 95; // nothing is recorded while the drag is open
+    }
+    if (frame == 33) {
+      RigidBody mid{};
+      if (!world->get_rigid_body(second, &mid) || (mid.inverseMass != 33.0F) ||
+          (mid.inverseInertia != 20.0F)) {
+        return 96; // each frame is live on every member, siblings intact
+      }
+    }
+  }
+  if (!multi_edit_has_gesture()) {
+    return 97;
+  }
+  multi_edit_commit_gesture();
+  if (multi_edit_has_gesture() || !editor_session().commandHistory.can_undo()) {
+    return 98;
+  }
+
+  RigidBody a{};
+  RigidBody b{};
+  RigidBody c{};
+  if (!world->get_rigid_body(first, &a) || !world->get_rigid_body(second, &b) ||
+      !world->get_rigid_body(third, &c) || (a.inverseMass != 70.0F) ||
+      (b.inverseMass != 70.0F) || (c.inverseMass != 70.0F) ||
+      (a.inverseInertia != 10.0F) || (b.inverseInertia != 20.0F) ||
+      (c.inverseInertia != 30.0F)) {
+    return 99;
+  }
+  // Exactly one entry: one undo restores every pre-drag value and empties
+  // the history.
+  if (!editor_session().commandHistory.undo() ||
+      editor_session().commandHistory.can_undo()) {
+    return 100;
+  }
+  if (!world->get_rigid_body(first, &a) || !world->get_rigid_body(second, &b) ||
+      !world->get_rigid_body(third, &c) || (a.inverseMass != 1.0F) ||
+      (b.inverseMass != 2.0F) || (c.inverseMass != 3.0F)) {
+    return 101;
+  }
+  if (!editor_session().commandHistory.redo() ||
+      !world->get_rigid_body(third, &c) || (c.inverseMass != 70.0F)) {
+    return 102;
+  }
+
+  // A drag on another field commits the open one first: two more entries.
+  representative.rigidBody.inverseMass = 5.0F;
+  representative.rigidBody.inverseInertia = 7.0F;
+  if (!multi_edit_stage_field(ComponentEditType::RigidBody, massField->offset,
+                              massField->size, representative)) {
+    return 103;
+  }
+  if (!multi_edit_stage_field(ComponentEditType::RigidBody,
+                              inertiaField->offset, inertiaField->size,
+                              representative)) {
+    return 104;
+  }
+  multi_edit_commit_gesture();
+  if (!world->get_rigid_body(second, &b) || (b.inverseMass != 5.0F) ||
+      (b.inverseInertia != 7.0F)) {
+    return 105;
+  }
+  if (!editor_session().commandHistory.undo() ||
+      !world->get_rigid_body(second, &b) || (b.inverseMass != 5.0F) ||
+      (b.inverseInertia != 20.0F)) {
+    return 106; // the inertia gesture undoes alone
+  }
+  if (!editor_session().commandHistory.undo() ||
+      !world->get_rigid_body(second, &b) || (b.inverseMass != 70.0F)) {
+    return 107; // then the mass gesture
+  }
+  if (!editor_session().commandHistory.undo() ||
+      editor_session().commandHistory.can_undo() ||
+      !world->get_rigid_body(second, &b) || (b.inverseMass != 2.0F)) {
+    return 108; // then the original drag; nothing else was recorded
+  }
   return 0;
 }
 
@@ -522,6 +648,8 @@ int main() {
        &check_batch_field_edit_single_command_preserves_sibling_field},
       {"check_batch_edit_rolls_back_on_partial_failure",
        &check_batch_edit_rolls_back_on_partial_failure},
+      {"check_drag_gesture_records_one_command",
+       &check_drag_gesture_records_one_command},
       {"check_batch_remove_single_command_undo_redo",
        &check_batch_remove_single_command_undo_redo},
       {"check_inventory_covers_registry_and_lists_camera",

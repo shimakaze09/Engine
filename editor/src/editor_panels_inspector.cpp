@@ -419,6 +419,8 @@ void draw_inspector_panel() noexcept {
     ImGui::End();
     return;
   }
+  // A multi-selection drag whose selection shrank commits the same way.
+  multi_edit_commit_gesture();
 
   const runtime::Entity entity = selected_entity();
   if ((editor_session().world == nullptr) ||

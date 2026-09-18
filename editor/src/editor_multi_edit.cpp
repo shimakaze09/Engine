@@ -18,6 +18,7 @@
 #include "editor_inspector_metadata.h"
 #include "editor_panels_inspector_generic.h"
 #include "editor_session.h"
+#include "engine/core/logging.h"
 #include "engine/core/reflect.h"
 #include "engine/runtime/world.h"
 
@@ -178,11 +179,174 @@ private:
   }
 };
 
+/// Open multi-selection drag: the field, the selection it started on, and
+/// every member's pre-gesture component (the undo endpoint).
+struct MultiEditGesture final {
+  bool active = false;
+  ComponentEditType type = ComponentEditType::Transform;
+  std::size_t fieldOffset = 0U;
+  std::size_t fieldSize = 0U;
+  std::array<MultiEditEntry, EditorSession::kMaxSelectedEntities> entries{};
+  std::size_t entryCount = 0U;
+};
+
+/// Process-wide multi-edit gesture behind multi_edit_stage_field.
+MultiEditGesture g_multiGesture{};
+
+/// True when the gesture was opened on exactly the current selection.
+bool gesture_matches_selection(const MultiEditGesture &gesture,
+                               const EditorSession &session) noexcept {
+  if (gesture.entryCount != session.selectedEntityCount) {
+    return false;
+  }
+  for (std::size_t i = 0U; i < gesture.entryCount; ++i) {
+    if (gesture.entries[i].entity != session.selectedEntities[i]) {
+      return false;
+    }
+  }
+  return true;
+}
+
 } // namespace
+
+bool multi_edit_stage_field(ComponentEditType type, std::size_t fieldOffset,
+                            std::size_t fieldSize,
+                            const ComponentEditSnapshot &fieldSource) noexcept {
+  EditorSession &session = editor_session();
+  runtime::World *const world = session.world;
+  if ((world == nullptr) || (session.selectedEntityCount == 0U)) {
+    return false;
+  }
+  const void *sourceMember = component_member_ptr(type, fieldSource);
+  if (sourceMember == nullptr) {
+    return false;
+  }
+  const auto *sourceBytes =
+      static_cast<const std::byte *>(sourceMember) + fieldOffset;
+
+  MultiEditGesture &gesture = g_multiGesture;
+  if (gesture.active &&
+      ((gesture.type != type) || (gesture.fieldOffset != fieldOffset) ||
+       (gesture.fieldSize != fieldSize) ||
+       !gesture_matches_selection(gesture, session))) {
+    multi_edit_commit_gesture();
+  }
+  if (!gesture.active) {
+    // Open on the whole selection or not at all: an entity that cannot
+    // be captured has no undo endpoint.
+    std::size_t captured = 0U;
+    for (; captured < session.selectedEntityCount; ++captured) {
+      MultiEditEntry &entry = gesture.entries[captured];
+      const runtime::Entity entity = session.selectedEntities[captured];
+      if (!world->is_alive(entity) ||
+          !capture_component_snapshot(type, entity, &entry.before)) {
+        return false;
+      }
+      entry.entity = entity;
+      entry.persistentId = world->persistent_id(entity);
+      entry.beforeExists = true;
+      entry.afterExists = true;
+    }
+    gesture.active = true;
+    gesture.type = type;
+    gesture.fieldOffset = fieldOffset;
+    gesture.fieldSize = fieldSize;
+    gesture.entryCount = captured;
+    inspector_commit_pending_edit();
+  }
+
+  // This frame's value lands on every member or on none: each member's
+  // current value is parked in `after` so a refused write can roll the
+  // members already touched back to it.
+  std::size_t applied = 0U;
+  bool ok = true;
+  for (; applied < gesture.entryCount; ++applied) {
+    MultiEditEntry &entry = gesture.entries[applied];
+    if (!world->is_alive(entry.entity) ||
+        !capture_component_snapshot(type, entry.entity, &entry.after)) {
+      ok = false;
+      break;
+    }
+    ComponentEditSnapshot staged = entry.after;
+    void *stagedMember = component_member_ptr(type, &staged);
+    if (stagedMember == nullptr) {
+      ok = false;
+      break;
+    }
+    std::memcpy(static_cast<std::byte *>(stagedMember) + fieldOffset,
+                sourceBytes, fieldSize);
+    if (!apply_component_snapshot(type, entry.entity, true, staged)) {
+      ok = false;
+      break;
+    }
+  }
+  if (ok) {
+    return true;
+  }
+  for (std::size_t i = 0U; i < applied; ++i) {
+    MultiEditEntry &entry = gesture.entries[i];
+    static_cast<void>(
+        apply_component_snapshot(type, entry.entity, true, entry.after));
+  }
+  return false;
+}
+
+void multi_edit_commit_gesture() noexcept {
+  MultiEditGesture &gesture = g_multiGesture;
+  if (!gesture.active) {
+    return;
+  }
+  gesture.active = false;
+  EditorSession &session = editor_session();
+  runtime::World *const world = session.world;
+  if (world == nullptr) {
+    return;
+  }
+
+  auto *cmd = new (std::nothrow) MultiComponentEditCommand();
+  if (cmd == nullptr) {
+    // The drag already reached the world frame by frame; without a
+    // command the history cannot account for it, so the document tracks
+    // it as dirty by hand and says so (#567).
+    core::log_message(core::LogLevel::Error, "editor",
+                      "multi-edit gesture could not be recorded: out of "
+                      "memory; the edit stays applied but is not undoable");
+    session.document.unrecordedEdit = true;
+    return;
+  }
+  cmd->type = gesture.type;
+  bool changed = false;
+  for (std::size_t i = 0U; i < gesture.entryCount; ++i) {
+    MultiEditEntry entry = gesture.entries[i];
+    // A member destroyed mid-drag has nothing left to restore.
+    if (!world->is_alive(entry.entity) ||
+        !capture_component_snapshot(gesture.type, entry.entity,
+                                    &entry.after)) {
+      continue;
+    }
+    if (std::memcmp(&entry.before, &entry.after, sizeof(entry.before)) != 0) {
+      changed = true;
+    }
+    cmd->entries[cmd->entryCount++] = entry;
+  }
+  if (!changed) {
+    delete cmd;
+    return;
+  }
+  inspector_commit_pending_edit();
+  // execute re-applies the values the drag already wrote; a refused
+  // record leaves the applied drag as an unrecorded edit.
+  if (!session.commandHistory.execute(cmd)) {
+    session.document.unrecordedEdit = true;
+  }
+}
+
+bool multi_edit_has_gesture() noexcept { return g_multiGesture.active; }
 
 bool apply_multi_field_edit(ComponentEditType type, std::size_t fieldOffset,
                             std::size_t fieldSize,
                             const ComponentEditSnapshot &fieldSource) noexcept {
+  multi_edit_commit_gesture();
   EditorSession &session = editor_session();
   runtime::World *const world = session.world;
   if ((world == nullptr) || (session.selectedEntityCount == 0U)) {
@@ -233,6 +397,7 @@ bool apply_multi_field_edit(ComponentEditType type, std::size_t fieldOffset,
 }
 
 bool apply_multi_component_remove(ComponentEditType type) noexcept {
+  multi_edit_commit_gesture();
   EditorSession &session = editor_session();
   runtime::World *const world = session.world;
   if ((world == nullptr) || (session.selectedEntityCount == 0U)) {
@@ -382,9 +547,11 @@ void draw_multi_component_section(const MultiSectionDesc &desc) noexcept {
       const core::TypeField &field = typeDesc->fields[i];
       const bool mixed =
           selection_field_is_mixed(desc.type, field.offset, field.size);
+      // Drag widgets report a change every frame of the drag; the frames
+      // are staged and recorded as one command once no item is active.
       if (draw_reflected_field(desc.typeName, field.name, component,
                                mixed ? " (mixed)" : nullptr, false)) {
-        static_cast<void>(apply_multi_field_edit(
+        static_cast<void>(multi_edit_stage_field(
             desc.type, field.offset, field.size, representative));
       }
     }
@@ -430,6 +597,9 @@ void draw_multi_select_inspector_panel() noexcept {
   }
   if (!anyCommon) {
     ImGui::TextDisabled("Selected entities share no editable component.");
+  }
+  if (multi_edit_has_gesture() && !ImGui::IsAnyItemActive()) {
+    multi_edit_commit_gesture();
   }
 }
 
