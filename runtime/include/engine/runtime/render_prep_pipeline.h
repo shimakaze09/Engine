@@ -14,6 +14,26 @@
 
 namespace engine::runtime {
 
+/// What the shadow and capture passes can see beyond the main camera
+/// (#524): a draw the camera frustum culls still enters the frame, in the
+/// auxiliary list, when sweeping its bounds along the directional light
+/// by `sweepDistance` reaches the camera frustum, when a shadow-casting
+/// local light's range overlaps it, or when a capture camera sees it.
+struct RenderPrepAuxiliaryInputs final {
+  struct LocalCaster final {
+    math::Vec3 position{};
+    float radius = 0.0F;
+  };
+  bool directionalShadow = false;
+  math::Vec3 lightDirection = math::Vec3(0.0F, -1.0F, 0.0F);
+  float sweepDistance = 0.0F;
+  std::size_t localCasterCount = 0U;
+  std::array<LocalCaster, renderer::kMaxPointLights + renderer::kMaxSpotLights>
+      localCasters{};
+  std::size_t captureCount = 0U;
+  std::array<math::Mat4, renderer::kMaxSceneCaptures> captureViewProjections{};
+};
+
 /// Inputs for one render-prep chunk job (world span -> local buffer).
 struct RenderPrepChunkJobData final {
   const World *world = nullptr;
@@ -29,11 +49,15 @@ struct RenderPrepChunkJobData final {
   std::atomic<std::uint32_t> *droppedDrawCommands = nullptr;
   math::Mat4 viewProjection{};
   float interpolationAlpha = 1.0F;
+  /// Null disables the auxiliary list (camera-culled draws are dropped).
+  const RenderPrepAuxiliaryInputs *auxiliary = nullptr;
 };
 
 /// Inputs for the merge job combining per-thread buffers.
 struct MergeCommandsJobData final {
   renderer::CommandBufferBuilder *merged = nullptr;
+  /// Receives the commands without kPassCamera; null drops them.
+  renderer::CommandBufferBuilder *mergedAuxiliary = nullptr;
   renderer::CommandBufferBuilder *localBuffers = nullptr;
   std::size_t threadCount = 0U;
   std::atomic<bool> *frameGraphFailed = nullptr;
@@ -52,6 +76,9 @@ struct RenderPrepPipelineContext final {
   MergeCommandsJobData mergeCommandsJobData{};
 };
 
+/// `mergedAuxiliaryBuffer` and `auxiliary` together enable the auxiliary
+/// list of camera-culled draws for the shadow and capture passes (#524);
+/// either null keeps the frame camera-only.
 bool enqueue_render_prep_pipeline(
     RenderPrepPipelineContext *context, const World *world,
     renderer::CommandBufferBuilder *mergedCommandBuffer,
@@ -62,6 +89,8 @@ bool enqueue_render_prep_pipeline(
     std::atomic<std::uint32_t> *droppedDrawCommands,
     std::size_t frameThreadCount, std::size_t chunkSize,
     const math::Mat4 &viewProjection, float interpolationAlpha,
-    core::JobHandle *outMergeHandle) noexcept;
+    core::JobHandle *outMergeHandle,
+    renderer::CommandBufferBuilder *mergedAuxiliaryBuffer = nullptr,
+    const RenderPrepAuxiliaryInputs *auxiliary = nullptr) noexcept;
 
 } // namespace engine::runtime

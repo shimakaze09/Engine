@@ -86,6 +86,12 @@ assumption stands.
 - Dynamic rigid bodies must be hierarchy roots; descendant colliders form
   one compound body owned by their nearest rigid-body ancestor. Collision
   and queries consume the composed world pose.
+- Render prep culls the draw list against the main camera, and keeps a
+  culled draw in a separate auxiliary list, tagged per pass, when sweeping
+  it along the directional light reaches the view, a shadow-casting local
+  light's range overlaps it, or a capture camera sees it; the shadow and
+  capture passes consume both lists, the main passes only the first
+  (#524).
 - Destroying an entity destroys its whole transform subtree; deferred
   destruction queues the subtree so EndPlay fires for every member. The
   World keeps a child index (parent/child/sibling links per transform,

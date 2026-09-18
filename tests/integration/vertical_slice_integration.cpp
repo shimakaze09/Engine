@@ -198,7 +198,7 @@ bool run_render_prep_pipeline(
           pipelineContext, world, commandBuffer, assetDatabase, meshRegistry,
           renderPrepPhaseHandle, renderPhaseHandle, &frameGraphFailed,
           &droppedDrawCommands, frameThreadCount, 256U, vpMatrix, 1.0F,
-          &mergeHandle)) {
+          &mergeHandle, nullptr, nullptr)) {
     static_cast<void>(engine::core::end_frame_graph());
     world->end_frame_phase();
     return false;

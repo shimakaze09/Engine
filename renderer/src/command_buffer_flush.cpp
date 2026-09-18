@@ -71,7 +71,8 @@ sanitize_scene_light_counts(const SceneLightData &lights,
 
 void flush_renderer(CommandBufferView commandBufferView,
                     const GpuMeshRegistry *registry, float timeSeconds,
-                    const SceneLightData &rawLights) noexcept {
+                    const SceneLightData &rawLights,
+                    CommandBufferView auxiliaryView) noexcept {
   if (!initialize_backend()) {
     return;
   }
@@ -252,6 +253,16 @@ void flush_renderer(CommandBufferView commandBufferView,
   ctx.backbufferWidth = backbufferWidth;
   ctx.backbufferHeight = backbufferHeight;
   ctx.frameStats = frameStats;
+  if ((auxiliaryView.data != nullptr) && (auxiliaryView.count > 0U)) {
+    ctx.auxiliaryView = auxiliaryView;
+    for (std::size_t i = 0U; i < auxiliaryView.count; ++i) {
+      if ((auxiliaryView.data[i].sortKey.value & kDrawKeyTransparentBit) !=
+          0U) {
+        break;
+      }
+      ctx.auxiliaryOpaqueCount = i + 1U;
+    }
+  }
 
   flush_shadow_passes(ctx);
   flush_scene_captures(ctx);

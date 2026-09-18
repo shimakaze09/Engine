@@ -227,8 +227,9 @@ math::Mat4 compute_cascade_matrix(const math::Mat4 &viewMatrix,
     maxZ = std::max(maxZ, lsCorner.z);
   }
 
-  // Extend the near plane to catch shadow casters behind the frustum.
-  constexpr float kShadowNearExtend = 50.0F;
+  // Extend the near plane to catch shadow casters behind the frustum;
+  // render prep keeps casters up to this far away in the caster list.
+  constexpr float kShadowNearExtend = kShadowCasterSweepDistance;
 
   const float minX = -radius;
   const float maxX = radius;

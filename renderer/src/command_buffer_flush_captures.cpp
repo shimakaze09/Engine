@@ -73,7 +73,8 @@ void flush_scene_captures(FrameFlushContext &ctx) noexcept {
     dev->clear(ClearFlags::ColorDepth, kClearRed, kClearGreen, kClearBlue,
                1.0F);
 
-    if ((commandBufferView.data == nullptr) || (totalCount == 0U)) {
+    if (((commandBufferView.data == nullptr) || (totalCount == 0U)) &&
+        (ctx.auxiliaryView.count == 0U)) {
       continue;
     }
 
@@ -134,11 +135,21 @@ void flush_scene_captures(FrameFlushContext &ctx) noexcept {
         backend.pbrUvTilingLocation,
         backend.pbrUvOffsetLocation};
 
-    auto drawCaptureRange = [&](std::size_t start, std::size_t end) {
+    // Commands render prep culled for the main camera but flagged for
+    // this capture ride in the auxiliary list (#524).
+    const std::uint16_t captureBit = static_cast<std::uint16_t>(
+        kPassCaptureBase << static_cast<unsigned int>(captureIndex));
+    auto drawCaptureRange = [&](const CommandBufferView &view,
+                                std::size_t start, std::size_t end,
+                                std::uint16_t requiredMask) {
       DeviceTextureHandle boundAlbedoTexture{};
       DeviceTextureHandle boundMaterialTex[4] = {};
-      for (std::size_t i = start; i < end; ++i) {
-        const DrawCommand &command = commandBufferView.data[i];
+      for (std::size_t i = start; (view.data != nullptr) && (i < end); ++i) {
+        const DrawCommand &command = view.data[i];
+        if ((requiredMask != 0U) &&
+            ((command.passMask & requiredMask) == 0U)) {
+          continue;
+        }
         const GpuMesh *mesh = lookup_gpu_mesh(registry, command.mesh);
         if ((mesh == nullptr) || (mesh->geometry == kInvalidDeviceGeometry) ||
             (mesh->vertexCount == 0U)) {
@@ -213,12 +224,19 @@ void flush_scene_captures(FrameFlushContext &ctx) noexcept {
       }
     };
 
-    drawCaptureRange(0U, opaqueCount);
+    const std::size_t auxiliaryTotal =
+        static_cast<std::size_t>(ctx.auxiliaryView.count);
+    drawCaptureRange(commandBufferView, 0U, opaqueCount, 0U);
+    drawCaptureRange(ctx.auxiliaryView, 0U, ctx.auxiliaryOpaqueCount,
+                     captureBit);
 
-    if (opaqueCount < totalCount) {
+    if ((opaqueCount < totalCount) ||
+        (ctx.auxiliaryOpaqueCount < auxiliaryTotal)) {
       dev->apply_render_state(RenderState{DepthTest::Less, false,
                                           BlendMode::Alpha, CullMode::None});
-      drawCaptureRange(opaqueCount, totalCount);
+      drawCaptureRange(commandBufferView, opaqueCount, totalCount, 0U);
+      drawCaptureRange(ctx.auxiliaryView, ctx.auxiliaryOpaqueCount,
+                       auxiliaryTotal, captureBit);
       dev->apply_render_state(RenderState{DepthTest::Less, true,
                                           BlendMode::Disabled,
                                           CullMode::Back});

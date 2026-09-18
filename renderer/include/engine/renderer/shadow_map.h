@@ -14,6 +14,11 @@ namespace engine::renderer {
 
 /// Number of cascades for directional light CSM.
 inline constexpr std::size_t kShadowCascadeCount = 4U;
+/// How far behind a cascade's light-space slab casters are still
+/// rendered: the light projection's near plane is pushed back by this
+/// much, and render prep sweeps each camera-culled draw this far along the
+/// light direction to decide whether it can shadow the view (#524).
+inline constexpr float kShadowCasterSweepDistance = 50.0F;
 
 /// Directional shadow map resolution (square). Every cascade renders at
 /// this size: the cascades live as layers of one Tex2DArray (issue

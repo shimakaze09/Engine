@@ -885,6 +885,17 @@ engine_add_test_executable(engine_integration_pipeline_light_epoch
     integration
 )
 
+engine_add_test_executable(engine_integration_pipeline_offscreen_caster
+    SOURCES
+    pipeline_offscreen_caster_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_renderer
+    engine_core
+    LABELS
+    integration
+)
+
 engine_add_test_executable(engine_integration_pipeline_interpolation_history
     SOURCES
     pipeline_interpolation_history_test.cpp

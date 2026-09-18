@@ -72,7 +72,30 @@ struct FrameFlushContext final {
   bool doSpotShadows = false;
   bool doPointShadows = false;
   RendererFrameStats frameStats{};
+  // Camera-culled commands the shadow and capture passes still draw,
+  // sorted like the main list (opaque first) and tagged by passMask (#524).
+  CommandBufferView auxiliaryView{};
+  std::size_t auxiliaryOpaqueCount = 0U;
 };
+
+/// Visits every opaque shadow caster of the frame: the camera-visible
+/// opaque range, then the auxiliary opaque commands flagged as casters.
+template <typename Fn>
+void for_each_shadow_caster(const FrameFlushContext &ctx, Fn &&fn) noexcept {
+  if (ctx.commandBufferView.data != nullptr) {
+    for (std::size_t i = 0U; i < ctx.opaqueCount; ++i) {
+      fn(ctx.commandBufferView.data[i]);
+    }
+  }
+  if (ctx.auxiliaryView.data != nullptr) {
+    for (std::size_t i = 0U; i < ctx.auxiliaryOpaqueCount; ++i) {
+      const DrawCommand &command = ctx.auxiliaryView.data[i];
+      if ((command.passMask & kPassShadowCaster) != 0U) {
+        fn(command);
+      }
+    }
+  }
+}
 
 /// Cascade, spot, and point shadow-map passes; writes the shadow feature
 /// toggles into the context.

@@ -4,6 +4,7 @@
 // into it; six faces for a point light), an unflagged light gets none, and
 // the flush reports the passes as active for the lighting binds. Until
 // #522 no producer set the flag, so these passes never ran in any scene.
+// Auxiliary (camera-culled) casters are drawn into the same passes (#524).
 
 #include "command_buffer_context.h"
 #include "command_buffer_flush_internal.h"
@@ -251,6 +252,29 @@ void test_flagged_point_light_renders_six_faces() noexcept {
   CHECK(g_log.drawsOnTargets == 12U, "both draws rendered into every face");
 }
 
+/// EXPECTATION (#524): casters render prep culled for the camera but kept
+/// in the auxiliary list are drawn into the depth passes too, and an
+/// auxiliary command flagged only for a capture is not.
+void test_auxiliary_casters_are_drawn() noexcept {
+  reset_backend();
+  reset_fake_device();
+  DrawCommand auxiliary[2] = {};
+  auxiliary[0].mesh = MeshHandle{3U};
+  auxiliary[0].passMask = kPassShadowCaster;
+  auxiliary[1].mesh = MeshHandle{4U};
+  auxiliary[1].passMask = kPassCaptureBase;
+  SceneLightData lights{};
+  lights.spotLightCount = 1U;
+  lights.spotLights[0].castShadow = true;
+  FrameFlushContext ctx = make_context(lights);
+  ctx.auxiliaryView = {auxiliary, 2U};
+  ctx.auxiliaryOpaqueCount = 2U;
+  flush_shadow_passes(ctx);
+  CHECK(g_log.drawsOnTargets == 3U,
+        "two visible draws plus the off-screen caster rendered into depth");
+  CHECK(g_log.drawsOnBackBuffer == 0U, "nothing drawn to the back buffer");
+}
+
 /// EXPECTATION: the cvar gate still holds — with r_point_shadows off a
 /// flagged light renders nothing and the pass reports inactive.
 void test_cvar_gate_still_disables() noexcept {
@@ -282,6 +306,7 @@ int main() {
   test_unflagged_lights_cast_nothing();
   test_flagged_spot_light_renders_depth();
   test_flagged_point_light_renders_six_faces();
+  test_auxiliary_casters_are_drawn();
   test_cvar_gate_still_disables();
 
   if (g_failures != 0) {

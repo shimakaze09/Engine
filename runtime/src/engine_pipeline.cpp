@@ -39,6 +39,7 @@
 #include "engine/renderer/asset_manager.h"
 #include "engine/content/asset_streaming.h"
 #include "engine/renderer/camera.h"
+#include "engine/renderer/shadow_map.h"
 #include "engine/renderer/command_buffer.h"
 #include "engine/renderer/dynamic_resolution.h"
 #include "engine/renderer/render_device.h"
@@ -503,6 +504,9 @@ struct EnginePipeline::Impl final {
   runtime::GameBindingState gameBindingState{};
   std::unique_ptr<runtime::World> world;
   std::unique_ptr<renderer::CommandBufferBuilder> commandBuffer;
+  /// Camera-culled draws the shadow and capture passes still need (#524).
+  std::unique_ptr<renderer::CommandBufferBuilder> auxiliaryCommandBuffer;
+  runtime::RenderPrepAuxiliaryInputs frameAuxiliaryInputs{};
   std::unique_ptr<renderer::GpuMeshRegistry> meshRegistry;
   std::unique_ptr<renderer::AssetDatabase> assetDatabase;
   std::unique_ptr<renderer::AssetManager> assetManager;
@@ -635,6 +639,7 @@ struct EnginePipeline::Impl final {
   void stage_measure_frame() noexcept;
   void stage_render() noexcept;
   void collect_frame_scene_data() noexcept;
+  void build_auxiliary_inputs() noexcept;
   void stage_scene_commit() noexcept;
   void stage_diagnostics() noexcept;
   void stage_frame_cleanup() noexcept;
@@ -654,13 +659,16 @@ bool EnginePipeline::Impl::initialize(std::uint32_t maxFrameCount) noexcept {
 
   world.reset(new (std::nothrow) runtime::World());
   commandBuffer.reset(new (std::nothrow) renderer::CommandBufferBuilder());
+  auxiliaryCommandBuffer.reset(new (std::nothrow)
+                                   renderer::CommandBufferBuilder());
   meshRegistry.reset(new (std::nothrow) renderer::GpuMeshRegistry());
   assetDatabase.reset(new (std::nothrow) renderer::AssetDatabase());
   assetManager.reset(new (std::nothrow) renderer::AssetManager());
   assetStreamingQueue.reset(new (std::nothrow) content::AssetStreamingQueue());
   assetStreamingState.reset(new (std::nothrow) RuntimeAssetStreamingState());
 
-  if (!world || !commandBuffer || !meshRegistry || !assetDatabase ||
+  if (!world || !commandBuffer || !auxiliaryCommandBuffer || !meshRegistry ||
+      !assetDatabase ||
       !assetManager || !assetStreamingQueue || !assetStreamingState) {
     core::log_message(core::LogLevel::Error, "engine",
                       "failed to allocate runtime frame state");
@@ -1476,6 +1484,12 @@ bool EnginePipeline::Impl::stage_render_prep_graph() noexcept {
         math::mul(renderer::camera_projection_matrix(cam, vpAspect),
                   math::look_at(cam.position, cam.target, cam.up));
 
+    // Lights and captures are collected now, in the same mutation epoch
+    // the draw list is built in (#569), so render prep can keep the
+    // camera-culled draws the shadow and capture passes need (#524).
+    collect_frame_scene_data();
+    build_auxiliary_inputs();
+
     if (!runtime::enqueue_render_prep_pipeline(
             &frameContext->renderPrepPipeline, world.get(), commandBuffer.get(),
             assetDatabase.get(), meshRegistry.get(), renderPrepPhaseHandle,
@@ -1483,7 +1497,8 @@ bool EnginePipeline::Impl::stage_render_prep_graph() noexcept {
             &frameContext->droppedDrawCommands, frameThreadCount, kChunkSize,
             vpMatrix,
             isPlaying ? static_cast<float>(renderAlpha) : 1.0F,
-            &mergeHandle)) {
+            &mergeHandle, auxiliaryCommandBuffer.get(),
+            &frameAuxiliaryInputs)) {
       graphFailed = true;
     }
   }
@@ -1537,17 +1552,60 @@ bool EnginePipeline::Impl::stage_render_prep_graph() noexcept {
     return false;
   }
 
-  collect_frame_scene_data();
   return true;
 }
 
-/// Snapshots the lights and capture requests the draw list was built
+/// Snapshots the lights and capture requests the draw list is built
 /// against, before the post-frame flush can change the world (#569).
 void EnginePipeline::Impl::collect_frame_scene_data() noexcept {
   frameSceneLights = collect_scene_lights(*world);
   frameCaptureRequestCount = collect_scene_captures(
       *world, frameCaptureRequests.data(), renderer::kMaxSceneCaptures);
   frameCollectionValid = true;
+}
+
+/// Derives what render prep must keep beyond the camera frustum from the
+/// collected lights and captures (#524).
+void EnginePipeline::Impl::build_auxiliary_inputs() noexcept {
+  runtime::RenderPrepAuxiliaryInputs &inputs = frameAuxiliaryInputs;
+  inputs = runtime::RenderPrepAuxiliaryInputs{};
+  if (frameSceneLights.directionalLightCount > 0U) {
+    const math::Vec3 &direction = frameSceneLights.directionalLights[0].direction;
+    const float length = math::length(direction);
+    if (length > 1.0e-6F) {
+      inputs.directionalShadow = true;
+      inputs.lightDirection = math::mul(direction, 1.0F / length);
+      inputs.sweepDistance = renderer::kShadowCasterSweepDistance;
+    }
+  }
+  for (std::size_t i = 0U; i < frameSceneLights.pointLightCount; ++i) {
+    const renderer::PointLightData &light = frameSceneLights.pointLights[i];
+    if (light.castShadow &&
+        (inputs.localCasterCount < inputs.localCasters.size())) {
+      inputs.localCasters[inputs.localCasterCount++] = {light.position,
+                                                        light.radius};
+    }
+  }
+  for (std::size_t i = 0U; i < frameSceneLights.spotLightCount; ++i) {
+    const renderer::SpotLightData &light = frameSceneLights.spotLights[i];
+    if (light.castShadow &&
+        (inputs.localCasterCount < inputs.localCasters.size())) {
+      inputs.localCasters[inputs.localCasterCount++] = {light.position,
+                                                        light.radius};
+    }
+  }
+  for (std::size_t i = 0U; i < frameCaptureRequestCount; ++i) {
+    const renderer::SceneCaptureRequest &request = frameCaptureRequests[i];
+    const float aspect =
+        (request.height > 0U)
+            ? (static_cast<float>(request.width) /
+               static_cast<float>(request.height))
+            : 1.0F;
+    inputs.captureViewProjections[inputs.captureCount++] = math::mul(
+        renderer::camera_projection_matrix(request.camera, aspect),
+        math::look_at(request.camera.position, request.camera.target,
+                      request.camera.up));
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1656,7 +1714,7 @@ void EnginePipeline::Impl::stage_render() noexcept {
 
   renderer::flush_renderer(commandBuffer->view(), meshRegistry.get(),
                            static_cast<float>(simulationTimeSeconds),
-                           frameSceneLights);
+                           frameSceneLights, auxiliaryCommandBuffer->view());
   frameCollectionValid = false;
 
   if ((bridge != nullptr) && (bridge->render != nullptr)) {
@@ -1798,6 +1856,20 @@ void EnginePipeline::Impl::stage_diagnostics() noexcept {
   frameStats.droppedDrawCommands = lastDroppedDrawCommands;
   frameStats.sceneLights = static_cast<std::uint32_t>(
       frameSceneLights.pointLightCount + frameSceneLights.spotLightCount);
+  frameStats.drawCommands =
+      static_cast<std::uint32_t>(commandBuffer->command_count());
+  {
+    const renderer::CommandBufferView auxiliary = auxiliaryCommandBuffer->view();
+    std::uint32_t casters = 0U;
+    std::uint32_t captureOnly = 0U;
+    for (std::uint32_t i = 0U; i < auxiliary.count; ++i) {
+      const std::uint16_t mask = auxiliary.data[i].passMask;
+      casters += ((mask & renderer::kPassShadowCaster) != 0U) ? 1U : 0U;
+      captureOnly += (mask >= renderer::kPassCaptureBase) ? 1U : 0U;
+    }
+    frameStats.offscreenShadowCasters = casters;
+    frameStats.captureOnlyDraws = captureOnly;
+  }
   frameStats.fixedSteps = static_cast<std::uint32_t>(updateStepCount);
   frameStats.interpolationAlpha = static_cast<float>(renderAlpha);
   core::set_engine_stats(frameStats);

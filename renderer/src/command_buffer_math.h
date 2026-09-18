@@ -23,7 +23,9 @@ math::Mat4 compute_mvp(const math::Mat4 &model,
 std::uint64_t directional_shadow_cache_key(
     CommandBufferView commandBufferView, std::size_t opaqueCount,
     const DirectionalLightData &light, const CascadeSplits &splits,
-    const std::array<math::Mat4, kShadowCascadeCount> &matrices) noexcept;
+    const std::array<math::Mat4, kShadowCascadeCount> &matrices,
+    CommandBufferView auxiliaryView = {},
+    std::size_t auxiliaryOpaqueCount = 0U) noexcept;
 
 /// Extracts a 3x3 normal matrix from a model matrix into column-major storage.
 void extract_normal_matrix(const math::Mat4 &model,

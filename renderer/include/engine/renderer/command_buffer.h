@@ -53,6 +53,15 @@ struct DrawKey final {
   std::uint64_t value = 0U;
 };
 
+/// Which passes a draw command feeds (#524). Camera-visible commands
+/// carry kPassCamera in the main list; commands render prep culled for
+/// the camera but that a shadow sweep or a capture camera can see travel
+/// in the auxiliary list with the passes that want them.
+inline constexpr std::uint16_t kPassCamera = 1U;
+inline constexpr std::uint16_t kPassShadowCaster = 2U;
+/// Bit for scene capture `i` is kPassCaptureBase << i.
+inline constexpr std::uint16_t kPassCaptureBase = 4U;
+
 // Field order is cache-conscious: sort key, hot per-draw identity, and
 // material are first. modelMatrix is appended last because it is only
 // read once per draw call after the mesh/material state has been set.
@@ -66,6 +75,7 @@ struct DrawCommand final {
   float foliageWindPhase = 0.0F;
   std::uint32_t foliageLodIndex = 0U;
   std::uint32_t skinPalette = kInvalidSkinPalette;
+  std::uint16_t passMask = kPassCamera;
   math::Mat4 modelMatrix = math::Mat4();
 };
 
@@ -254,9 +264,12 @@ struct RendererFrameStats final {
 };
 
 /// Flushes queued work to the backing runtime system for renderer.
+/// `auxiliaryView` carries the camera-culled commands the shadow and
+/// capture passes still draw, each tagged by passMask (#524).
 void flush_renderer(CommandBufferView commandBufferView,
                     const GpuMeshRegistry *registry, float timeSeconds,
-                    const SceneLightData &lights) noexcept;
+                    const SceneLightData &lights,
+                    CommandBufferView auxiliaryView = {}) noexcept;
 /// Opens a renderer lifetime, re-arming the lazy backend initialization
 /// that shutdown_renderer latched off. The backend itself is still built
 /// on demand by the first flush, so this call creates no device
