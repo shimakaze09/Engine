@@ -184,7 +184,10 @@ relative, forward slashes, no drive designators, no `..`.
 
 ## Modules
 
-One line each. The code is the detail.
+One line each: **where code lives, not what works.** A subsystem named
+here may be partly or wholly unreachable — the tracker is the source of
+truth for that, and the test list for what is actually held to a contract.
+The code is the detail.
 
 | Module | Responsibility |
 | --- | --- |
