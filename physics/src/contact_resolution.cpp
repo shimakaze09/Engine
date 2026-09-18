@@ -381,6 +381,12 @@ void resolve_manifold_contact(
       combine_friction(colliderA.staticFriction, colliderB.staticFriction);
   const float combinedDynFric =
       combine_friction(colliderA.dynamicFriction, colliderB.dynamicFriction);
+  // Friction accumulates per point across both passes so the step's total
+  // tangential impulse at a point stays inside its cone: within
+  // accumulated[p] * static it sticks, beyond it the total is clamped to
+  // accumulated[p] * dynamic. Two independent passes let a sliding
+  // faceted contact take up to twice the cone (#537 item 1).
+  engine::math::Vec3 accumulatedTangent[ClippedManifold::kMaxPoints] = {};
   for (std::size_t pass = 0U; pass < 2U; ++pass) {
     for (std::size_t p = 0U; p < manifold.count; ++p) {
       if (accumulated[p] <= 0.0F) {
@@ -418,12 +424,23 @@ void resolve_manifold_contact(
       if (effectiveMass <= 0.0F) {
         continue;
       }
-      float frictionImpulse = tangentSpeed / effectiveMass;
-      if (frictionImpulse >= accumulated[p] * combinedStaticFric) {
-        frictionImpulse = accumulated[p] * combinedDynFric;
+      const float frictionImpulse = tangentSpeed / effectiveMass;
+      engine::math::Vec3 total = engine::math::add(
+          accumulatedTangent[p], engine::math::mul(tangent, frictionImpulse));
+      const float totalLength = std::sqrt(engine::math::length_sq(total));
+      if (totalLength > accumulated[p] * combinedStaticFric) {
+        const float slidingLimit = accumulated[p] * combinedDynFric;
+        total = (totalLength > 0.0F)
+                    ? engine::math::mul(total, slidingLimit / totalLength)
+                    : zero;
       }
-      const engine::math::Vec3 impulseVec =
-          engine::math::mul(tangent, -frictionImpulse);
+      const engine::math::Vec3 delta =
+          engine::math::sub(total, accumulatedTangent[p]);
+      accumulatedTangent[p] = total;
+      if (engine::math::length_sq(delta) <= 0.0F) {
+        continue;
+      }
+      const engine::math::Vec3 impulseVec = engine::math::mul(delta, -1.0F);
       if ((bodyA != nullptr) && (invMassA > 0.0F)) {
         bodyA->velocity = engine::math::sub(
             bodyA->velocity, engine::math::mul(impulseVec, invMassA));
