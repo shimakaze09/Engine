@@ -549,6 +549,16 @@ struct EnginePipeline::Impl final {
   // Draw-command overflow is reported once per run, not once per frame.
   bool droppedDrawsLogged = false;
   std::uint32_t lastDroppedDrawCommands = 0U;
+  // Lights and captures are collected right after render prep, in the same
+  // mutation epoch as the draw list; stage_render used to collect them
+  // after the post-frame flush, so one submission carried draws from
+  // before the flush and lights from after it, and a draw could name an
+  // index the flush had already recycled (#569).
+  renderer::SceneLightData frameSceneLights{};
+  std::array<renderer::SceneCaptureRequest, renderer::kMaxSceneCaptures>
+      frameCaptureRequests{};
+  std::size_t frameCaptureRequestCount = 0U;
+  bool frameCollectionValid = false;
   // Distinguishes fatal loop exits from graceful stops for engine::run (#96).
   bool fatalError = false;
   LoopPlayState previousPlayState = LoopPlayState::Playing;
@@ -624,6 +634,7 @@ struct EnginePipeline::Impl final {
   void stage_post_frame() noexcept;
   void stage_measure_frame() noexcept;
   void stage_render() noexcept;
+  void collect_frame_scene_data() noexcept;
   void stage_scene_commit() noexcept;
   void stage_diagnostics() noexcept;
   void stage_frame_cleanup() noexcept;
@@ -1526,7 +1537,17 @@ bool EnginePipeline::Impl::stage_render_prep_graph() noexcept {
     return false;
   }
 
+  collect_frame_scene_data();
   return true;
+}
+
+/// Snapshots the lights and capture requests the draw list was built
+/// against, before the post-frame flush can change the world (#569).
+void EnginePipeline::Impl::collect_frame_scene_data() noexcept {
+  frameSceneLights = collect_scene_lights(*world);
+  frameCaptureRequestCount = collect_scene_captures(
+      *world, frameCaptureRequests.data(), renderer::kMaxSceneCaptures);
+  frameCollectionValid = true;
 }
 
 // ---------------------------------------------------------------------------
@@ -1624,16 +1645,19 @@ void EnginePipeline::Impl::stage_render() noexcept {
     bridge->new_frame();
   }
 
-  const renderer::SceneLightData sceneLights = collect_scene_lights(*world);
-
-  renderer::SceneCaptureRequest captureRequests[renderer::kMaxSceneCaptures]{};
-  const std::size_t captureRequestCount = collect_scene_captures(
-      *world, captureRequests, renderer::kMaxSceneCaptures);
-  renderer::set_scene_capture_requests(captureRequests, captureRequestCount);
+  // A frame without the frame graph (nothing ran render prep) has had no
+  // flush since the last submission either, so collecting here keeps the
+  // single-epoch rule.
+  if (!frameCollectionValid) {
+    collect_frame_scene_data();
+  }
+  renderer::set_scene_capture_requests(frameCaptureRequests.data(),
+                                       frameCaptureRequestCount);
 
   renderer::flush_renderer(commandBuffer->view(), meshRegistry.get(),
                            static_cast<float>(simulationTimeSeconds),
-                           sceneLights);
+                           frameSceneLights);
+  frameCollectionValid = false;
 
   if ((bridge != nullptr) && (bridge->render != nullptr)) {
     bridge->render(static_cast<float>(frameMs),
@@ -1772,6 +1796,8 @@ void EnginePipeline::Impl::stage_diagnostics() noexcept {
   frameStats.gpuTonemapMs = rendererStats.gpuTonemapMs;
   frameStats.jobUtilizationPct = static_cast<float>(utilizationPct);
   frameStats.droppedDrawCommands = lastDroppedDrawCommands;
+  frameStats.sceneLights = static_cast<std::uint32_t>(
+      frameSceneLights.pointLightCount + frameSceneLights.spotLightCount);
   core::set_engine_stats(frameStats);
 
   if (logTraceThisFrame) {

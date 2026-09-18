@@ -857,3 +857,15 @@ engine_add_test_executable(engine_integration_pipeline_draw_overflow
     LABELS
     integration
 )
+
+# #569: draws and lights in one submission come from one mutation epoch.
+engine_add_test_executable(engine_integration_pipeline_light_epoch
+    SOURCES
+    pipeline_light_epoch_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_scripting
+    engine_core
+    LABELS
+    integration
+)

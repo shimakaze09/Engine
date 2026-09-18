@@ -21,6 +21,9 @@ struct EngineStats final {
   /// Draws render prep could not fit into a command buffer last frame; a
   /// nonzero value means the frame was drawn incomplete (#519).
   std::uint32_t droppedDrawCommands = 0U;
+  /// Point and spot lights submitted with last frame's draw list; both
+  /// are collected from the same mutation epoch (#569).
+  std::uint32_t sceneLights = 0U;
 };
 
 /// Resets this object back to its reusable empty state for engine stats
