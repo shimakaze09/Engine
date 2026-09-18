@@ -1,0 +1,144 @@
+#!/usr/bin/env python3
+"""Audit first-party C++ for hand-written copies of a consolidated primitive.
+
+A primitive that exists once in `core` but is re-implemented at a call
+site stops being one primitive: the copies drift, and the drift is silent
+because a hash with the wrong seed, or a slot table with a different wrap
+rule, still appears to work. The FNV-1a seed was already mistyped in two
+copies (a digit dropped from the 64-bit offset) without anything noticing.
+
+Each consolidation adds one rule here, so the merge it performed cannot be
+undone by the next call site that needs the same thing. Rules name the
+canonical owner and the evidence of a copy — usually a magic constant,
+since a copied algorithm carries the original's numbers.
+
+Scope is deliberately non-test first-party code. A test may legitimately
+want the arithmetic without the contract (`scheduler_stress` uses these
+multipliers as CPU work, not as a hash), and migrating the test tree is
+tracked separately on #484. Python copies are out of reach of a C++
+primitive and are tracked there too.
+
+Usage:
+  python tools/check_duplicate_primitives.py            # report, exit 1 on findings
+  python tools/check_duplicate_primitives.py --root DIR # audit an alternate tree
+"""
+
+from __future__ import annotations
+
+import argparse
+import pathlib
+import re
+import sys
+
+CPP_SUFFIXES = {".cpp", ".cc", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".inl"}
+
+# First-party roots holding production and tool code. `tests` is excluded;
+# see the module docstring.
+AUDITED_ROOTS = (
+    "app",
+    "audio",
+    "content",
+    "core",
+    "editor",
+    "math",
+    "physics",
+    "renderer",
+    "runtime",
+    "scripting",
+    "tools",
+)
+
+
+class Rule:
+    """One consolidated primitive and the evidence that it was copied."""
+
+    def __init__(self, name: str, owner: str, pattern: str, remedy: str) -> None:
+        self.name = name
+        self.owner = owner
+        self.pattern = re.compile(pattern)
+        self.remedy = remedy
+
+
+RULES: tuple[Rule, ...] = (
+    Rule(
+        name="FNV-1a hashing",
+        owner="core/include/engine/core/hash.h",
+        # The 32- and 64-bit offsets and primes, plus the truncated offset
+        # that copy-paste has already produced in this tree. The bounds are
+        # digit-only lookarounds, not \b: a literal carries a ULL suffix, so
+        # a trailing \b never matches (digit and 'U' are both word
+        # characters) and the rule would pass over every real copy.
+        pattern=r"(?<![0-9])(14695981039346656037|1099511628211|2166136261"
+        r"|16777619|1469598103934665603)(?![0-9])",
+        remedy="include engine/core/hash.h and use fnv1a_32/fnv1a_64 or "
+        "their _append forms",
+    ),
+)
+
+
+def audited_files(root: pathlib.Path) -> list[pathlib.Path]:
+    """Returns every first-party C++ source under the audited roots."""
+    files: list[pathlib.Path] = []
+    for name in AUDITED_ROOTS:
+        directory = root / name
+        if not directory.is_dir():
+            continue
+        files.extend(
+            path
+            for path in directory.rglob("*")
+            if path.is_file() and path.suffix.lower() in CPP_SUFFIXES
+        )
+    return sorted(files)
+
+
+def check_file(path: pathlib.Path, rel: str) -> list[str]:
+    """Returns one finding per copied-primitive hit in the file."""
+    findings: list[str] = []
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return findings
+
+    for rule in RULES:
+        if rel == rule.owner:
+            continue
+        for number, line in enumerate(lines, 1):
+            if rule.pattern.search(line):
+                findings.append(
+                    f"  {rel}:{number}: re-implements {rule.name}, which "
+                    f"{rule.owner} owns; {rule.remedy}"
+                )
+    return findings
+
+
+def main() -> int:
+    """Runs the audit and reports findings; exit 1 when any exist."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--root",
+        default=str(pathlib.Path(__file__).resolve().parents[1]),
+        help="repository root to audit (defaults to this checkout)",
+    )
+    args = parser.parse_args()
+    root = pathlib.Path(args.root).resolve()
+
+    findings: list[str] = []
+    files = audited_files(root)
+    for path in files:
+        findings.extend(check_file(path, path.relative_to(root).as_posix()))
+
+    if findings:
+        print("duplicate-primitive audit failed:")
+        for finding in findings:
+            print(finding)
+        return 1
+
+    print(
+        f"duplicate-primitive audit passed: {len(files)} file(s), "
+        f"{len(RULES)} consolidated primitive(s) checked"
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

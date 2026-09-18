@@ -278,6 +278,9 @@ jobs:
       - name: Audit error handling
         run: python3 tools/check_error_handling.py
 
+      - name: Audit duplicate primitives
+        run: python3 tools/check_duplicate_primitives.py
+
       - name: Audit asset metadata paths
         run: python3 tools/ci/check_asset_metadata_paths.py
 

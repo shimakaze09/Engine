@@ -24,12 +24,10 @@
 #include <vector>
 
 #include "engine/core/atomic_file.h"
+#include "engine/core/hash.h"
 #include "engine/core/json.h"
 
 namespace {
-
-constexpr std::uint64_t kFnv64Offset = 14695981039346656037ULL;
-constexpr std::uint64_t kFnv64Prime = 1099511628211ULL;
 
 // Cook-logic revision, folded into the settings hash. The stamp's other
 // inputs cover only what the cook reads, so a change to what the cook
@@ -68,15 +66,15 @@ struct ShaderEntry final {
   std::vector<std::vector<std::string>> variants{};
 };
 
-/// FNV-1a over a string, continuing from a running hash.
+/// FNV-1a over a string, continuing from a running hash, then one 0xFF
+/// separator byte so adjacent fields cannot alias: without it, hashing
+/// ("ab", "c") and ("a", "bc") would fold to the same settings hash and a
+/// manifest edit that only moved a boundary would not force a recook.
 std::uint64_t fnv_append(std::uint64_t hash, const char *text) {
   for (const char *c = text; *c != '\0'; ++c) {
-    hash ^= static_cast<std::uint8_t>(*c);
-    hash *= kFnv64Prime;
+    hash = engine::core::fnv1a_64_append(hash, static_cast<std::uint8_t>(*c));
   }
-  hash ^= 0xFFU; // separator so field boundaries stay distinct
-  hash *= kFnv64Prime;
-  return hash;
+  return engine::core::fnv1a_64_append(hash, 0xFFU);
 }
 
 /// Deterministic variant key: sorted defines joined with '-', or
@@ -596,7 +594,7 @@ int run_shader_cook(int argc, char **argv) {
   // Settings analog: the cook-logic revision, the requested profile set,
   // and every variant define participate in the cook key, so a logic,
   // profile, or variant change recooks.
-  std::uint64_t settingsHash = kFnv64Offset;
+  std::uint64_t settingsHash = engine::core::kFnv1a64Offset;
   settingsHash = fnv_append(settingsHash, kCookLogicRevision);
   settingsHash = fnv_append(settingsHash, profilesCsv.c_str());
   for (const ShaderEntry &entry : entries) {

@@ -12,6 +12,7 @@
 #include <stb_image_write.h>
 
 #include "engine/core/atomic_file.h"
+#include "engine/core/hash.h"
 #include "thumbnail_resample.h"
 
 // E.g. ".thumbnails/foo.png" -> ".thumbnails/foo.checksum"; shared with
@@ -290,12 +291,12 @@ bool build_thumbnail_path(const char *outputPath, char *thumbPath,
 static std::uint64_t combine_thumbnail_hash(std::uint64_t srcHash,
                                             std::uint64_t settingsHash)
     noexcept {
-  std::uint64_t hash = 1469598103934665603ULL;
+  std::uint64_t hash = engine::core::kFnv1a64Offset;
   const std::uint64_t inputs[2] = {srcHash, settingsHash};
   for (std::uint64_t input : inputs) {
     for (std::size_t byteIndex = 0U; byteIndex < 8U; ++byteIndex) {
-      hash ^= (input >> (byteIndex * 8U)) & 0xFFULL;
-      hash *= 1099511628211ULL;
+      hash = engine::core::fnv1a_64_append(
+          hash, static_cast<std::uint8_t>((input >> (byteIndex * 8U)) & 0xFFU));
     }
   }
   return hash;

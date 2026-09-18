@@ -897,6 +897,60 @@ def test_error_handling_gate():
           "error handling: this checkout passes the gate")
 
 
+def test_duplicate_primitive_gate():
+    """The duplicate-primitive gate must reject a re-implemented primitive
+    in first-party C++, accept the canonical owner, leave the test tree
+    alone, and — the case that broke the first draft — still match a
+    literal carrying a ULL suffix."""
+    script = str(TOOLS / "check_duplicate_primitives.py")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+
+        def case(name, rel, body):
+            return str(write_comment_fixture(tmp / name, rel, body))
+
+        check(run([script, "--root", case(
+            "copy", "core/src/a.cpp",
+            "// Purpose.\nconstexpr auto p = 1099511628211ULL;\n")]) != 0,
+              "duplicate primitives: a copied FNV prime is a finding")
+        # A trailing \b cannot match here: digit and 'U' are both word
+        # characters, so the first draft of this rule passed over every
+        # real copy in the tree.
+        check(run([script, "--root", case(
+            "suffixed", "tools/t/a.cpp",
+            "// Purpose.\nauto h = 14695981039346656037ULL;\n")]) != 0,
+              "duplicate primitives: a ULL-suffixed literal still matches")
+        check(run([script, "--root", case(
+            "truncated", "core/src/a.cpp",
+            "// Purpose.\nauto h = 1469598103934665603ULL;\n")]) != 0,
+              "duplicate primitives: the mistyped offset is a finding too")
+        check(run([script, "--root", case(
+            "longer", "core/src/a.cpp",
+            "// Purpose.\nauto h = 210995116282113ULL;\n")]) == 0,
+              "duplicate primitives: a longer number containing the prime "
+              "is not a finding")
+        check(run([script, "--root", case(
+            "clean", "core/src/a.cpp",
+            "// Purpose.\nauto h = core::fnv1a_64(\"x\");\n")]) == 0,
+              "duplicate primitives: using the primitive passes")
+        check(run([script, "--root", case(
+            "tests_exempt", "tests/integration/a.cpp",
+            "// Purpose.\nauto h = 1099511628211ULL;\n")]) == 0,
+              "duplicate primitives: the test tree is out of scope")
+        owner = write_comment_fixture(
+            tmp / "owner", "core/include/engine/core/hash.h",
+            "// Purpose.\nconstexpr auto p = 1099511628211ULL;\n")
+        check(run([script, "--root", str(owner)]) == 0,
+              "duplicate primitives: the canonical owner may hold the "
+              "constants")
+        check(run([script, "--root", str(tmp / "empty")]) == 0,
+              "duplicate primitives: an empty tree passes")
+
+    check(run([script]) == 0,
+          "duplicate primitives: this checkout passes the gate")
+
+
 def main():
     test_coverage_gate()
     test_perf_gate_evaluate()
@@ -907,6 +961,7 @@ def main():
     test_test_timing_gate()
     test_comment_quality_gate()
     test_error_handling_gate()
+    test_duplicate_primitive_gate()
     if failures:
         print(f"\nFAILED ({len(failures)} failure(s))")
         return 1

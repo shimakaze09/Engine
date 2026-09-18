@@ -15,12 +15,8 @@
 #include <vector>
 
 #include "engine/core/atomic_file.h"
+#include "engine/core/hash.h"
 #include "engine/core/json.h"
-
-namespace {
-constexpr std::uint64_t kFnv64Offset = 14695981039346656037ULL;
-constexpr std::uint64_t kFnv64Prime = 1099511628211ULL;
-} // namespace
 
 bool file_exists(const char *path) {
   if (path == nullptr) {
@@ -77,7 +73,7 @@ std::uint64_t hash_file_contents(const char *path, bool *ok) {
     return 0ULL;
   }
 
-  std::uint64_t hash = kFnv64Offset;
+  std::uint64_t hash = engine::core::kFnv1a64Offset;
   unsigned char buffer[4096] = {};
   while (true) {
     const std::size_t bytesRead = std::fread(buffer, 1U, sizeof(buffer), file);
@@ -85,8 +81,7 @@ std::uint64_t hash_file_contents(const char *path, bool *ok) {
       break;
     }
     for (std::size_t i = 0U; i < bytesRead; ++i) {
-      hash ^= static_cast<std::uint64_t>(buffer[i]);
-      hash *= kFnv64Prime;
+      hash = engine::core::fnv1a_64_append(hash, buffer[i]);
     }
   }
 
@@ -128,12 +123,11 @@ bool build_dependency_digests(const std::vector<std::string> &dependencyPaths,
 }
 
 std::uint64_t hash_import_settings(const ImportSettings &settings) {
-  std::uint64_t hash = kFnv64Offset;
+  std::uint64_t hash = engine::core::kFnv1a64Offset;
   auto feed = [&](const void *data, std::size_t size) {
     const auto *bytes = static_cast<const unsigned char *>(data);
     for (std::size_t i = 0U; i < size; ++i) {
-      hash ^= static_cast<std::uint64_t>(bytes[i]);
-      hash *= kFnv64Prime;
+      hash = engine::core::fnv1a_64_append(hash, bytes[i]);
     }
   };
   feed(&settings.meshIndex, sizeof(settings.meshIndex));
@@ -153,8 +147,8 @@ std::uint64_t cook_settings_key(std::uint64_t importSettingsHash,
   // The terminator is fed too, so "a" + "b" and "ab" cannot collide.
   const std::size_t length = std::strlen(logicRevision) + 1U;
   for (std::size_t i = 0U; i < length; ++i) {
-    hash ^= static_cast<unsigned char>(logicRevision[i]);
-    hash *= kFnv64Prime;
+    hash = engine::core::fnv1a_64_append(
+        hash, static_cast<unsigned char>(logicRevision[i]));
   }
   return hash;
 }
