@@ -895,6 +895,16 @@ engine_add_test_executable(engine_integration_pipeline_light_epoch
     integration
 )
 
+engine_add_test_executable(engine_integration_pipeline_hot_reload_cadence
+    SOURCES
+    pipeline_hot_reload_cadence_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_core
+    LABELS
+    integration
+)
+
 engine_add_test_executable(engine_integration_pipeline_offscreen_caster
     SOURCES
     pipeline_offscreen_caster_test.cpp

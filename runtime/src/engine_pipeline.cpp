@@ -182,6 +182,10 @@ bool process_pending_scene_op(World &world) noexcept {
 namespace {
 
 constexpr double kFixedDeltaSeconds = 1.0 / 60.0;
+// Shader and watched-script timestamps are polled on this cadence, not
+// every frame: up to 128 shader entries plus every watched script is a
+// stat storm at frame rate, and only an attached editor can act on it.
+constexpr double kHotReloadPollIntervalSeconds = 0.25;
 constexpr std::size_t kChunkSize = 256U;
 constexpr std::size_t kMaxUpdateStepsPerFrame = 8U;
 static_assert(kMaxUpdateStepsPerFrame <= physics::kMaxCollisionFrameSteps,
@@ -597,6 +601,12 @@ struct EnginePipeline::Impl final {
   double fpsWindowSeconds = 0.0;
   std::uint32_t fpsWindowFrames = 0U;
   float smoothedFps = 0.0F;
+  // Process memory is sampled on the FPS window, not per frame: reading it
+  // opens /proc on Linux (#528).
+  float memoryUsedMbSample = -1.0F;
+  // Starts due so the first editor frame polls, then one poll per interval.
+  double hotReloadDueSeconds = kHotReloadPollIntervalSeconds;
+  std::uint32_t frameHotReloadPolls = 0U;
   // Fixed-step camera history for render interpolation. Both samples were
   // read from one World's content, identified by cameraSampleEpoch: a
   // scene replacement discards that World, so the history is retired at
@@ -1084,6 +1094,16 @@ void EnginePipeline::Impl::stage_assets() noexcept {
 // ---------------------------------------------------------------------------
 
 void EnginePipeline::Impl::stage_hot_reload() noexcept {
+  frameHotReloadPolls = 0U;
+  if (runtime::editor_bridge() == nullptr) {
+    return; // a player has nothing to reload into
+  }
+  hotReloadDueSeconds += wallFrameMs / 1000.0;
+  if (hotReloadDueSeconds < kHotReloadPollIntervalSeconds) {
+    return;
+  }
+  hotReloadDueSeconds = 0.0;
+  frameHotReloadPolls = 1U;
   renderer::check_shader_reload();
   scripting::check_script_reload();
 }
@@ -1834,6 +1854,10 @@ void EnginePipeline::Impl::stage_diagnostics() noexcept {
   const double presentedMs = (wallFrameMs > 0.0) ? wallFrameMs : frameMs;
   fpsWindowSeconds += presentedMs / 1000.0;
   ++fpsWindowFrames;
+  if ((fpsWindowSeconds >= 0.5) || (memoryUsedMbSample < 0.0F)) {
+    memoryUsedMbSample = static_cast<float>(
+        static_cast<double>(core::process_memory_bytes()) / (1024.0 * 1024.0));
+  }
   if (fpsWindowSeconds >= 0.5) {
     smoothedFps = static_cast<float>(static_cast<double>(fpsWindowFrames) /
                                      fpsWindowSeconds);
@@ -1848,8 +1872,7 @@ void EnginePipeline::Impl::stage_diagnostics() noexcept {
   frameStats.drawCalls = rendererStats.drawCalls;
   frameStats.triCount = rendererStats.triangleCount;
   frameStats.entityCount = aliveCount;
-  frameStats.memoryUsedMb = static_cast<float>(
-      static_cast<double>(core::process_memory_bytes()) / (1024.0 * 1024.0));
+  frameStats.memoryUsedMb = memoryUsedMbSample;
   frameStats.gpuSceneMs = rendererStats.gpuSceneMs;
   frameStats.gpuTonemapMs = rendererStats.gpuTonemapMs;
   frameStats.jobUtilizationPct = static_cast<float>(utilizationPct);
@@ -1869,6 +1892,7 @@ void EnginePipeline::Impl::stage_diagnostics() noexcept {
     }
     frameStats.offscreenShadowCasters = casters;
     frameStats.captureOnlyDraws = captureOnly;
+    frameStats.hotReloadPolls = frameHotReloadPolls;
   }
   frameStats.fixedSteps = static_cast<std::uint32_t>(updateStepCount);
   frameStats.interpolationAlpha = static_cast<float>(renderAlpha);

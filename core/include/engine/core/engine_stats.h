@@ -31,6 +31,10 @@ struct EngineStats final {
   std::uint32_t drawCommands = 0U;
   std::uint32_t offscreenShadowCasters = 0U;
   std::uint32_t captureOnlyDraws = 0U;
+  /// Hot-reload polls the frame ran over the watched shaders and scripts:
+  /// at most one per poll interval while an editor is attached, none in a
+  /// player (#528).
+  std::uint32_t hotReloadPolls = 0U;
   /// Fixed simulation steps last frame ran (0 while paused or stopped).
   std::uint32_t fixedSteps = 0U;
   /// Blend factor render prep used between the previous and current step
