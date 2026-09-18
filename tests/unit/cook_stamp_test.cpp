@@ -8,7 +8,9 @@
 // blocks; a failed thumbnail regeneration retires the previous
 // generation's thumbnail and checksum instead of re-certifying them
 // (audit #211); the cook key folds the mesh cook's logic revision and a
-// newer stamp schema recooks (#424).
+// newer stamp schema recooks (#424); paths are recorded relative to the
+// stamp, retirement never leaves the stamp's directory, and an overlong
+// path refuses the stamp (#527).
 
 #include "packer_shared.h"
 
@@ -26,6 +28,9 @@ constexpr const char *kOutputPath = "cook_stamp_test_output.mesh";
 constexpr const char *kStampPath = "cook_stamp_test_output.mesh.cookstamp";
 constexpr const char *kSidecarPath = "cook_stamp_test_output.skel";
 constexpr const char *kStaleDirPath = "cook_stamp_test_output.staledir";
+constexpr const char *kNestedDir = "cook_stamp_test_dir";
+constexpr const char *kVictimPath = "cook_stamp_test_victim.txt";
+constexpr const char *kDepPath = "cook_stamp_test_dep.bin";
 
 bool write_file(const char *path, const char *text) {
   FILE *file = nullptr;
@@ -49,8 +54,210 @@ void remove_files() {
   static_cast<void>(std::remove(kOutputPath));
   static_cast<void>(std::remove(kStampPath));
   static_cast<void>(std::remove(kSidecarPath));
+  static_cast<void>(std::remove(kVictimPath));
+  static_cast<void>(std::remove(kDepPath));
   std::error_code ignored{};
   std::filesystem::remove_all(kStaleDirPath, ignored);
+  std::filesystem::remove_all(kNestedDir, ignored);
+}
+
+/// Reads a whole text file; empty on failure.
+std::string read_text(const char *path) {
+  FILE *file = nullptr;
+#ifdef _WIN32
+  if (fopen_s(&file, path, "rb") != 0) {
+    file = nullptr;
+  }
+#else
+  file = std::fopen(path, "rb");
+#endif
+  if (file == nullptr) {
+    return std::string{};
+  }
+  std::string text{};
+  char buffer[512] = {};
+  std::size_t got = 0U;
+  while ((got = std::fread(buffer, 1U, sizeof(buffer), file)) > 0U) {
+    text.append(buffer, got);
+  }
+  std::fclose(file);
+  return text;
+}
+
+/// EXPECTATION (#527): a stamp records its outputs and dependencies
+/// relative to its own directory, so the same stamp certifies the same
+/// files from any working directory; on base the invocation paths were
+/// recorded verbatim and a different working directory saw every
+/// output as missing.
+int check_stamp_paths_are_relative_to_the_stamp() {
+  remove_files();
+  std::error_code ec{};
+  std::filesystem::create_directories(kNestedDir, ec);
+  const std::string output = std::string(kNestedDir) + "/rel.mesh";
+  const std::string sidecar = std::string(kNestedDir) + "/rel.skel";
+  if (ec || !write_file(output.c_str(), "cooked") ||
+      !write_file(sidecar.c_str(), "skeleton") ||
+      !write_file(kDepPath, "dependency")) {
+    remove_files();
+    return 801;
+  }
+  std::vector<DependencyDigest> dependencies{};
+  if (!build_dependency_digests({kDepPath}, &dependencies)) {
+    remove_files();
+    return 802;
+  }
+  const std::uint64_t sourceHash = 0x1122334455667788ULL;
+  const std::uint64_t importHash = 0x99AABBCCDDEEFF00ULL;
+  const std::vector<std::string> outputs{output, sidecar};
+  if (!write_cook_stamp(output.c_str(), sourceHash, dependencies, importHash,
+                        kPlatform, outputs)) {
+    remove_files();
+    return 803;
+  }
+  const std::string stamp = read_text((output + ".cookstamp").c_str());
+  if ((stamp.find(" rel.mesh\n") == std::string::npos) ||
+      (stamp.find(" rel.skel\n") == std::string::npos) ||
+      (stamp.find(" ../cook_stamp_test_dep.bin\n") == std::string::npos) ||
+      (stamp.find("cook_stamp_test_dir/rel.mesh") != std::string::npos)) {
+    std::fprintf(stderr, "stamp paths are not stamp-relative:\n%s",
+                 stamp.c_str());
+    remove_files();
+    return 804;
+  }
+  if (should_repack(output.c_str(), sourceHash, dependencies, importHash,
+                    kPlatform, true)) {
+    remove_files();
+    return 805;
+  }
+
+  // The same stamp, read from a different working directory through
+  // absolute paths, still certifies the same files.
+  const std::filesystem::path home = std::filesystem::current_path(ec);
+  const std::filesystem::path absOutput =
+      std::filesystem::absolute(output, ec);
+  const std::filesystem::path absDep = std::filesystem::absolute(kDepPath, ec);
+  std::filesystem::current_path(std::filesystem::path(kNestedDir), ec);
+  if (ec) {
+    remove_files();
+    return 806;
+  }
+  std::vector<DependencyDigest> absDependencies = dependencies;
+  absDependencies[0].path = absDep.string();
+  const bool repackElsewhere =
+      should_repack(absOutput.string().c_str(), sourceHash, absDependencies,
+                    importHash, kPlatform, true);
+  const std::vector<std::string> onlyMesh{absOutput.string()};
+  const bool retired =
+      remove_stale_outputs(absOutput.string().c_str(), onlyMesh);
+  std::filesystem::current_path(home, ec);
+  if (repackElsewhere) {
+    std::fprintf(stderr, "stamp did not certify its outputs from another "
+                         "working directory\n");
+    remove_files();
+    return 807;
+  }
+  if (!retired || file_exists(sidecar.c_str()) || !file_exists(output.c_str())) {
+    remove_files();
+    return 808;
+  }
+  remove_files();
+  return 0;
+}
+
+/// EXPECTATION (#527): a manifest entry that leaves the stamp's
+/// directory, or any entry of a legacy (pre-schema-4) manifest, is never
+/// removed; the escaping stamp is corrupt and recooks. On base
+/// remove_stale_outputs deleted whatever path the stamp named.
+int check_manifest_never_removes_outside_the_stamp_directory() {
+  remove_files();
+  std::error_code ec{};
+  std::filesystem::create_directories(kNestedDir, ec);
+  const std::string output = std::string(kNestedDir) + "/esc.mesh";
+  const std::string stampPath = output + ".cookstamp";
+  if (ec || !write_file(output.c_str(), "cooked") ||
+      !write_file(kVictimPath, "not yours")) {
+    remove_files();
+    return 811;
+  }
+  char text[512] = {};
+  std::snprintf(text, sizeof(text),
+                "SCHEMA %u\nTOOL_VERSION %u\nSOURCE_HASH 1122334455667788\n"
+                "IMPORT_HASH 99aabbccddeeff00\nPLATFORM TestPlat\n"
+                "OUTPUT 0000000000000001 ../cook_stamp_test_victim.txt\n"
+                "OUTPUT 0000000000000002 esc.mesh\n",
+                static_cast<unsigned int>(kCookStampSchema),
+                static_cast<unsigned int>(kCookToolVersion));
+  if (!write_file(stampPath.c_str(), text)) {
+    remove_files();
+    return 812;
+  }
+  const std::vector<std::string> current{output};
+  if (!remove_stale_outputs(output.c_str(), current) ||
+      !file_exists(kVictimPath)) {
+    std::fprintf(stderr, "an escaping manifest entry was removed\n");
+    remove_files();
+    return 813;
+  }
+  const std::vector<DependencyDigest> noDependencies{};
+  if (!should_repack(output.c_str(), 0x1122334455667788ULL, noDependencies,
+                     0x99AABBCCDDEEFF00ULL, kPlatform)) {
+    remove_files();
+    return 814; // an escaping manifest is corrupt, so it recooks
+  }
+
+  // Legacy manifest: its paths carry no containment, so nothing is retired.
+  std::snprintf(text, sizeof(text),
+                "SCHEMA 3\nTOOL_VERSION 3\nSOURCE_HASH 1122334455667788\n"
+                "IMPORT_HASH 99aabbccddeeff00\nPLATFORM TestPlat\n"
+                "OUTPUT 0000000000000001 %s\n"
+                "OUTPUT 0000000000000002 %s\n",
+                kVictimPath, kOutputPath);
+  if (!write_file(kOutputPath, "cooked") || !write_file(kStampPath, text)) {
+    remove_files();
+    return 815;
+  }
+  const std::vector<std::string> onlyOutput{kOutputPath};
+  if (!remove_stale_outputs(kOutputPath, onlyOutput) ||
+      !file_exists(kVictimPath)) {
+    std::fprintf(stderr, "a legacy manifest entry was removed\n");
+    remove_files();
+    return 816;
+  }
+  remove_files();
+  return 0;
+}
+
+/// EXPECTATION (#527): an output path that would not fit a stamp line
+/// refuses the stamp; on base the line was truncated and recorded, so a
+/// prefix-named file was certified and later retired instead.
+int check_overlong_output_path_refuses_the_stamp() {
+  remove_files();
+  std::error_code ec{};
+  std::filesystem::path deep(kNestedDir);
+  const std::string segment(200U, 'p');
+  for (int level = 0; level < 5; ++level) {
+    deep /= segment;
+  }
+  std::filesystem::create_directories(deep, ec);
+  const std::string output = std::string(kNestedDir) + "/owner.mesh";
+  const std::string longOutput = (deep / "long.mesh").string();
+  if (ec || !write_file(output.c_str(), "cooked") ||
+      !write_file(longOutput.c_str(), "far away")) {
+    remove_files();
+    return 821;
+  }
+  const std::vector<DependencyDigest> noDependencies{};
+  const std::vector<std::string> outputs{output, longOutput};
+  const bool written =
+      write_cook_stamp(output.c_str(), 0x1122334455667788ULL, noDependencies,
+                       0x99AABBCCDDEEFF00ULL, kPlatform, outputs);
+  if (written || file_exists((output + ".cookstamp").c_str())) {
+    std::fprintf(stderr, "an overlong output path was stamped\n");
+    remove_files();
+    return 822;
+  }
+  remove_files();
+  return 0;
 }
 
 /// EXPECTATION (audit H-20): the recook decision covers tool-version
@@ -292,12 +499,13 @@ int check_output_manifest_owns_output_set() {
   }
   char undeletableStamp[512] = {};
   std::snprintf(undeletableStamp, sizeof(undeletableStamp),
-                "SCHEMA 3\n"
+                "SCHEMA %u\n"
                 "TOOL_VERSION %u\n"
                 "SOURCE_HASH 1122334455667788\n"
                 "IMPORT_HASH 99aabbccddeeff00\n"
                 "OUTPUT 0000000000000001 %s\n"
                 "OUTPUT 0000000000000002 %s\n",
+                static_cast<unsigned int>(kCookStampSchema),
                 static_cast<unsigned int>(kCookToolVersion), kOutputPath,
                 kStaleDirPath);
   if (!write_file(kStampPath, undeletableStamp)) {
@@ -421,5 +629,18 @@ int main() {
   if (platformResult != 0) {
     return platformResult;
   }
-  return check_output_manifest_owns_output_set();
+  const int manifestResult = check_output_manifest_owns_output_set();
+  if (manifestResult != 0) {
+    return manifestResult;
+  }
+  const int relativeResult = check_stamp_paths_are_relative_to_the_stamp();
+  if (relativeResult != 0) {
+    return relativeResult;
+  }
+  const int containmentResult =
+      check_manifest_never_removes_outside_the_stamp_directory();
+  if (containmentResult != 0) {
+    return containmentResult;
+  }
+  return check_overlong_output_path_refuses_the_stamp();
 }

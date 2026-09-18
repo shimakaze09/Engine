@@ -45,6 +45,7 @@ struct OutputRecord final {
 /// consumes them.
 using engine::content::kCookStampSchema;
 using engine::content::kCookToolVersion;
+using engine::content::kMaxCookStampLineBytes;
 
 /// Revision of the mesh cook's own logic, folded into the cook key beside
 /// the import settings so a behavioural change in extraction, up-axis
@@ -103,6 +104,9 @@ bool read_import_settings_from_meta(const char *outputPath,
 /// digests, and the output manifest hashed from the committed files;
 /// an unreadable listed output fails the write so the stamp can never
 /// certify an output set it could not fingerprint (issue #55).
+/// Schema 4 records every dependency and output path relative to the
+/// stamp's directory; an output outside it, or a line that would not fit
+/// kMaxCookStampLineBytes, refuses the stamp instead of truncating (#527).
 bool write_cook_stamp(const char *outputPath, std::uint64_t sourceHash,
                       const std::vector<DependencyDigest> &dependencies,
                       std::uint64_t importSettingsHash,
@@ -120,6 +124,9 @@ bool is_valid_platform_tag(const char *platformTag);
 /// Deletes previous-manifest outputs the current cook no longer
 /// produces (renamed/removed clips, hull-less recooks); a failed
 /// deletion returns false and must block the new stamp (issue #55).
+/// Only schema-4 manifests are retired, only inside the stamp's
+/// directory and only regular files; a legacy manifest is left alone and
+/// an escaping or non-file entry blocks (#527).
 bool remove_stale_outputs(const char *outputPath,
                           const std::vector<std::string> &currentOutputs);
 /// Deletes pre-manifest orphan sidecars unaccounted for by any cookstamp manifest.

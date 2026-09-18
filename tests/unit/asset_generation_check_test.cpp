@@ -3,17 +3,25 @@
 // the files on disk (hash mismatch, missing essential output, malformed
 // manifest line) rejects the load, presentation-only thumbnail drift and
 // never-certified assets (no stamp, pre-manifest stamp) stay loadable,
-// verdicts cache per session until the test-only reset, and a stamp from
+// verdicts cache per session until the test-only reset, a stamp from
 // another tool version or a newer stamp schema rejects even with intact
-// outputs (#424).
+// outputs (#424), a schema-4 manifest resolves relative to its stamp from
+// any working directory and never outside it, and a non-regular file is
+// refused without being opened (#527).
 
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
+#include <string>
+#ifndef _WIN32
+#include <sys/stat.h>
+#endif
 
 #include "engine/content/asset_staleness.h"
+#include "engine/content/cook_contract.h"
 #include "engine/core/hash.h"
 #include "engine/core/mesh_asset.h"
 #include "engine/renderer/mesh_loader.h"
@@ -96,8 +104,10 @@ bool write_stamp(const char *meshPath, const char *outputLines) noexcept {
   char text[2048] = {};
   const int written = std::snprintf(
       text, sizeof(text),
-      "SCHEMA 3\nTOOL_VERSION 3\nSOURCE_HASH 0000000000000001\n"
+      "SCHEMA %u\nTOOL_VERSION %u\nSOURCE_HASH 0000000000000001\n"
       "IMPORT_HASH 0000000000000002\nPLATFORM TestPlat\n%s",
+      static_cast<unsigned int>(engine::content::kCookStampSchema),
+      static_cast<unsigned int>(engine::content::kCookToolVersion),
       outputLines);
   if ((written <= 0) || (written >= static_cast<int>(sizeof(text)))) {
     return false;
@@ -320,9 +330,12 @@ int check_foreign_contract_rejects() {
 
   char text[1024] = {};
   std::snprintf(text, sizeof(text),
-                "SCHEMA 3\nTOOL_VERSION 2\nSOURCE_HASH 0000000000000001\n"
+                "SCHEMA %u\nTOOL_VERSION %u\nSOURCE_HASH 0000000000000001\n"
                 "IMPORT_HASH 0000000000000002\nPLATFORM TestPlat\n"
                 "OUTPUT %016llx %s\n",
+                static_cast<unsigned int>(engine::content::kCookStampSchema),
+                static_cast<unsigned int>(engine::content::kCookToolVersion -
+                                          1U),
                 static_cast<unsigned long long>(meshHash), kMesh);
   if (!write_stamp_text(kMesh, text)) {
     return 562;
@@ -334,9 +347,12 @@ int check_foreign_contract_rejects() {
 
   engine::content::reset_cooked_asset_stale_warnings();
   std::snprintf(text, sizeof(text),
-                "SCHEMA 4\nTOOL_VERSION 3\nSOURCE_HASH 0000000000000001\n"
+                "SCHEMA %u\nTOOL_VERSION %u\nSOURCE_HASH 0000000000000001\n"
                 "IMPORT_HASH 0000000000000002\nPLATFORM TestPlat\n"
                 "OUTPUT %016llx %s\n",
+                static_cast<unsigned int>(engine::content::kCookStampSchema +
+                                          1U),
+                static_cast<unsigned int>(engine::content::kCookToolVersion),
                 static_cast<unsigned long long>(meshHash), kMesh);
   if (!write_stamp_text(kMesh, text)) {
     return 564;
@@ -359,9 +375,11 @@ int check_foreign_contract_rejects() {
 
   engine::content::reset_cooked_asset_stale_warnings();
   std::snprintf(text, sizeof(text),
-                "SCHEMA 3\nTOOL_VERSION 3\nSOURCE_HASH 0000000000000001\n"
+                "SCHEMA %u\nTOOL_VERSION %u\nSOURCE_HASH 0000000000000001\n"
                 "IMPORT_HASH 0000000000000002\nPLATFORM TestPlat\n"
                 "OUTPUT %016llx %s\n",
+                static_cast<unsigned int>(engine::content::kCookStampSchema),
+                static_cast<unsigned int>(engine::content::kCookToolVersion),
                 static_cast<unsigned long long>(meshHash), kMesh);
   if (!write_stamp_text(kMesh, text)) {
     return 568;
@@ -376,6 +394,127 @@ int check_foreign_contract_rejects() {
   return 0;
 }
 
+
+/// EXPECTATION (#527): a schema-4 manifest names its outputs relative to
+/// the stamp, so the certified asset loads from any working directory
+/// through its absolute path; a manifest naming a path that leaves the
+/// stamp's directory is corrupt and rejects even when the file it points
+/// at is intact. On base the recorded path was opened relative to the
+/// process working directory and the stamp certified nothing elsewhere.
+int check_relative_manifest_loads_from_any_cwd() {
+  constexpr const char *kDir = "gen_check_cwd";
+  constexpr const char *kElsewhere = "gen_check_elsewhere";
+  std::error_code ec{};
+  std::filesystem::remove_all(kDir, ec);
+  std::filesystem::remove_all(kElsewhere, ec);
+  std::filesystem::create_directories(kDir, ec);
+  std::filesystem::create_directories(kElsewhere, ec);
+  const std::string mesh = std::string(kDir) + "/rel.mesh";
+  const std::string victim = "gen_check_victim.mesh";
+  if (ec || !write_valid_mesh(mesh.c_str()) ||
+      !write_valid_mesh(victim.c_str())) {
+    return 570;
+  }
+  std::uint64_t meshHash = 0ULL;
+  if (!hash_file(mesh.c_str(), &meshHash)) {
+    return 571;
+  }
+  char outputs[512] = {};
+  std::snprintf(outputs, sizeof(outputs), "OUTPUT %016llx rel.mesh\n",
+                static_cast<unsigned long long>(meshHash));
+  if (!write_stamp(mesh.c_str(), outputs)) {
+    return 572;
+  }
+  const std::filesystem::path home = std::filesystem::current_path(ec);
+  const std::string absMesh = std::filesystem::absolute(mesh, ec).string();
+  std::filesystem::current_path(std::filesystem::path(kElsewhere), ec);
+  if (ec) {
+    return 573;
+  }
+  engine::content::reset_cooked_asset_stale_warnings();
+  const bool okElsewhere =
+      engine::content::cooked_asset_generation_ok(absMesh.c_str()) &&
+      load_mesh(absMesh.c_str());
+  std::filesystem::current_path(home, ec);
+  int result = 0;
+  if (!okElsewhere) {
+    std::fprintf(stderr, "certified asset did not load from another "
+                         "working directory\n");
+    result = 574;
+  }
+
+  // An escaping entry rejects even though the victim it names is intact.
+  if (result == 0) {
+    engine::content::reset_cooked_asset_stale_warnings();
+    std::snprintf(outputs, sizeof(outputs),
+                  "OUTPUT %016llx rel.mesh\nOUTPUT %016llx ../%s\n",
+                  static_cast<unsigned long long>(meshHash),
+                  static_cast<unsigned long long>(meshHash), victim.c_str());
+    if (!write_stamp(mesh.c_str(), outputs)) {
+      result = 575;
+    } else if (engine::content::cooked_asset_generation_ok(mesh.c_str()) ||
+               load_mesh(mesh.c_str())) {
+      std::fprintf(stderr, "a manifest leaving the stamp directory was "
+                           "accepted\n");
+      result = 576;
+    }
+  }
+  remove_with_stamp(mesh.c_str());
+  static_cast<void>(std::remove(victim.c_str()));
+  std::filesystem::remove_all(kDir, ec);
+  std::filesystem::remove_all(kElsewhere, ec);
+  return result;
+}
+
+/// EXPECTATION (#527): a stamp or sidecar naming something that is not
+/// a regular file is refused without opening it, so the load path can
+/// never block on a device or FIFO. On base hash_file_bytes opened the
+/// FIFO and waited for a writer forever.
+int check_non_regular_files_are_refused_promptly() {
+#ifdef _WIN32
+  return 0;
+#else
+  constexpr const char *kMesh = "gen_check_fifo.mesh";
+  constexpr const char *kFifo = "gen_check_fifo.mesh.hull";
+  constexpr const char *kMeta = "gen_check_fifo.mesh.meta.json";
+  remove_with_stamp(kMesh);
+  static_cast<void>(std::remove(kFifo));
+  static_cast<void>(std::remove(kMeta));
+  if (!write_valid_mesh(kMesh) || (mkfifo(kFifo, 0600) != 0)) {
+    return 580;
+  }
+  std::uint64_t meshHash = 0ULL;
+  if (!hash_file(kMesh, &meshHash)) {
+    return 581;
+  }
+  char outputs[512] = {};
+  std::snprintf(outputs, sizeof(outputs),
+                "OUTPUT %016llx %s\nOUTPUT 0000000000000001 %s\n",
+                static_cast<unsigned long long>(meshHash), kMesh, kFifo);
+  int result = 0;
+  if (!write_stamp(kMesh, outputs)) {
+    result = 582;
+  } else if (engine::content::cooked_asset_generation_ok(kMesh) ||
+             load_mesh(kMesh)) {
+    result = 583; // a FIFO is not a cooked output
+  }
+  // The staleness sidecar naming a device returns without reading it.
+  const char metaText[] =
+      "{\"source\":\"/dev/zero\",\"sourceContentHash\":\"0000000000000001\"}";
+  if ((result == 0) &&
+      !write_bytes(kMeta, metaText, sizeof(metaText) - 1U)) {
+    result = 584;
+  }
+  if (result == 0) {
+    engine::content::reset_cooked_asset_stale_warnings();
+    engine::content::warn_if_cooked_asset_stale(kMesh);
+  }
+  remove_with_stamp(kMesh);
+  static_cast<void>(std::remove(kFifo));
+  static_cast<void>(std::remove(kMeta));
+  return result;
+#endif
+}
 } // namespace
 
 // mesh_loader.cpp compiles standalone into this suite (same recipe as
@@ -416,5 +555,15 @@ int main() {
     return result;
   }
   engine::content::reset_cooked_asset_stale_warnings();
-  return check_foreign_contract_rejects();
+  result = check_foreign_contract_rejects();
+  if (result != 0) {
+    return result;
+  }
+  engine::content::reset_cooked_asset_stale_warnings();
+  result = check_relative_manifest_loads_from_any_cwd();
+  if (result != 0) {
+    return result;
+  }
+  engine::content::reset_cooked_asset_stale_warnings();
+  return check_non_regular_files_are_refused_promptly();
 }

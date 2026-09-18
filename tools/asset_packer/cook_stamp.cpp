@@ -5,6 +5,7 @@
 #include "packer_shared.h"
 
 #include "engine/content/asset_metadata.h"
+#include "engine/content/cook_contract.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -60,6 +61,15 @@ std::uint64_t hash_file_contents(const char *path, bool *ok) {
   if (path == nullptr) {
     return 0ULL;
   }
+  // Only regular files are fingerprinted: a device or FIFO named by a
+  // stamp or sidecar would otherwise be read until it ends, which a
+  // device never does (#527).
+  std::error_code statusError{};
+  if (!std::filesystem::is_regular_file(std::filesystem::path(path),
+                                        statusError) ||
+      statusError) {
+    return 0ULL;
+  }
 
   FILE *file = nullptr;
 #ifdef _WIN32
@@ -95,6 +105,76 @@ std::uint64_t hash_file_contents(const char *path, bool *ok) {
   }
   return hash;
 }
+
+namespace {
+
+/// The directory the stamp of `outputPath` lives in ("." for a bare name).
+std::filesystem::path stamp_directory(const char *outputPath) {
+  const std::filesystem::path parent =
+      std::filesystem::path(outputPath).parent_path();
+  return parent.empty() ? std::filesystem::path(".") : parent;
+}
+
+/// One absolute, lexically normalized, `/`-separated spelling of an OS
+/// path so two invocations naming the same file compare equal whatever
+/// form each used.
+std::string normalized_os_path(const std::string &path) {
+  std::error_code ec{};
+  const std::filesystem::path absolute =
+      std::filesystem::absolute(std::filesystem::path(path), ec);
+  if (ec) {
+    return std::filesystem::path(path).lexically_normal().generic_string();
+  }
+  return absolute.lexically_normal().generic_string();
+}
+
+/// Rewrites an invoked OS path relative to the stamp's directory, the
+/// form a schema-4 stamp records (#527); empty when it cannot be
+/// expressed.
+std::string stamp_relative_path(const char *outputPath,
+                                const std::string &path) {
+  std::error_code ec{};
+  const std::filesystem::path base =
+      std::filesystem::absolute(stamp_directory(outputPath), ec)
+          .lexically_normal();
+  if (ec) {
+    return std::string{};
+  }
+  const std::filesystem::path target =
+      std::filesystem::absolute(std::filesystem::path(path), ec)
+          .lexically_normal();
+  if (ec) {
+    return std::string{};
+  }
+  return target.lexically_relative(base).generic_string();
+}
+
+/// Joins a schema-4 recorded path back under the stamp's directory.
+std::string stamp_joined_path(const char *outputPath,
+                              const std::string &recorded) {
+  const std::filesystem::path base = stamp_directory(outputPath);
+  if (base == std::filesystem::path(".")) {
+    return std::filesystem::path(recorded).lexically_normal().string();
+  }
+  return (base / std::filesystem::path(recorded)).lexically_normal().string();
+}
+
+/// Appends one stamp line, refusing anything the readers would not take
+/// back whole (#527: a truncated path names a different file).
+bool append_stamp_line(std::string *stamp, const std::string &line) {
+  if ((line.size() + 1U) > kMaxCookStampLineBytes) {
+    std::fprintf(stderr,
+                 "error: cook stamp line exceeds %zu bytes; the path is "
+                 "too long to certify: %s\n",
+                 kMaxCookStampLineBytes, line.c_str());
+    return false;
+  }
+  *stamp += line;
+  *stamp += '\n';
+  return true;
+}
+
+} // namespace
 
 /// Builds the requested runtime data for dependency digests.
 bool build_dependency_digests(const std::vector<std::string> &dependencyPaths,
@@ -306,9 +386,13 @@ bool write_cook_stamp(const char *outputPath, std::uint64_t sourceHash,
 
   // The stamp is the cook's commit marker (written after every output),
   // so it must itself land atomically or not at all (audit H-20).
+  // Schema 4 records every path relative to the stamp's own directory,
+  // so the stamp certifies the same files from any working directory,
+  // and an output must live inside that directory (#527).
   std::string stamp{};
-  char line[1024] = {};
-  std::snprintf(line, sizeof(line), "SCHEMA 3\nTOOL_VERSION %u\n",
+  char line[128] = {};
+  std::snprintf(line, sizeof(line), "SCHEMA %u\nTOOL_VERSION %u\n",
+                static_cast<unsigned int>(kCookStampSchema),
                 static_cast<unsigned int>(kCookToolVersion));
   stamp += line;
   std::snprintf(line, sizeof(line), "SOURCE_HASH %016llx\n",
@@ -320,25 +404,47 @@ bool write_cook_stamp(const char *outputPath, std::uint64_t sourceHash,
   std::snprintf(line, sizeof(line), "PLATFORM %s\n", platformTag);
   stamp += line;
   for (const DependencyDigest &dependency : dependencies) {
-    std::snprintf(line, sizeof(line), "DEP_HASH %016llx %s\n",
-                  static_cast<unsigned long long>(dependency.hash),
-                  dependency.path.c_str());
-    stamp += line;
+    const std::string relative =
+        stamp_relative_path(outputPath, dependency.path);
+    if (relative.empty()) {
+      std::fprintf(stderr,
+                   "error: dependency path cannot be recorded relative to "
+                   "the cook stamp: %s\n",
+                   dependency.path.c_str());
+      return false;
+    }
+    char hashText[17] = {};
+    format_hex_u64(dependency.hash, hashText);
+    if (!append_stamp_line(&stamp, std::string("DEP_HASH ") + hashText +
+                                       " " + relative)) {
+      return false;
+    }
   }
   for (const std::string &producedPath : outputPaths) {
+    const std::string relative = stamp_relative_path(outputPath, producedPath);
+    if (!engine::content::cook_stamp_path_is_contained(relative.c_str())) {
+      std::fprintf(stderr,
+                   "error: cooked output lies outside the cook stamp's "
+                   "directory and cannot be certified: %s\n",
+                   producedPath.c_str());
+      return false;
+    }
     bool hashOk = false;
     const std::uint64_t producedHash =
         hash_file_contents(producedPath.c_str(), &hashOk);
     if (!hashOk) {
       std::fprintf(stderr,
-                   "error: cooked output missing at stamp time: %s\n",
+                   "error: cooked output missing or not a regular file at "
+                   "stamp time: %s\n",
                    producedPath.c_str());
       return false;
     }
-    std::snprintf(line, sizeof(line), "OUTPUT %016llx %s\n",
-                  static_cast<unsigned long long>(producedHash),
-                  producedPath.c_str());
-    stamp += line;
+    char hashText[17] = {};
+    format_hex_u64(producedHash, hashText);
+    if (!append_stamp_line(&stamp, std::string("OUTPUT ") + hashText + " " +
+                                       relative)) {
+      return false;
+    }
   }
 
   return engine::core::atomic_write_file(stampPath, stamp.data(),
@@ -355,7 +461,7 @@ bool read_cook_stamp(const char *outputPath, std::uint64_t *outSourceHash,
                      std::uint64_t *outImportSettingsHash,
                      std::uint32_t *outToolVersion,
                      std::vector<OutputRecord> *outOutputs,
-                     std::string *outPlatformTag) {
+                     std::string *outPlatformTag, std::uint32_t *outSchema) {
   if ((outSourceHash == nullptr) || (outDependencies == nullptr)) {
     return false;
   }
@@ -392,18 +498,37 @@ bool read_cook_stamp(const char *outputPath, std::uint64_t *outSourceHash,
     outPlatformTag->clear();
   }
 
-  char line[1024] = {};
+  // Schema 4 paths are stamp-relative and OUTPUT paths contained; a
+  // legacy stamp's paths are its invocation paths, kept verbatim only so
+  // the tool-version gate can recook it — they are never retired (#527).
+  std::uint32_t schema = 0U;
+  if (outSchema != nullptr) {
+    *outSchema = 0U;
+  }
+  char line[kMaxCookStampLineBytes] = {};
   while (std::fgets(line, static_cast<int>(sizeof(line)), file) != nullptr) {
+    const std::size_t lineLength = std::strlen(line);
+    if ((lineLength > 0U) && (line[lineLength - 1U] != '\n') &&
+        (std::feof(file) == 0)) {
+      // Longer than the writer emits: a truncated path would name a
+      // different file, so the stamp is corrupt and recooks.
+      std::fclose(file);
+      return false;
+    }
     unsigned long long hash = 0ULL;
     unsigned int toolVersion = 0U;
-    unsigned int schema = 0U;
-    if (std::sscanf(line, "SCHEMA %u", &schema) == 1) {
+    unsigned int declaredSchema = 0U;
+    if (std::sscanf(line, "SCHEMA %u", &declaredSchema) == 1) {
       // A newer schema's lines have meanings this reader does not know,
       // so the stamp is unreadable rather than partially trusted: the
       // caller recooks and writes a stamp it can read back.
-      if (schema > kCookStampSchema) {
+      if (declaredSchema > kCookStampSchema) {
         std::fclose(file);
         return false;
+      }
+      schema = declaredSchema;
+      if (outSchema != nullptr) {
+        *outSchema = schema;
       }
       continue;
     }
@@ -433,21 +558,31 @@ bool read_cook_stamp(const char *outputPath, std::uint64_t *outSourceHash,
       continue;
     }
 
-    char depPath[900] = {};
-    if (std::sscanf(line, "DEP_HASH %llx %899[^\n]", &hash, depPath) == 2) {
+    char depPath[kMaxCookStampLineBytes] = {};
+    if (std::sscanf(line, "DEP_HASH %llx %1023[^\n]", &hash, depPath) == 2) {
       DependencyDigest dep{};
-      dep.path = depPath;
+      dep.path = (schema >= 4U) ? stamp_joined_path(outputPath, depPath)
+                                : std::string(depPath);
       dep.hash = static_cast<std::uint64_t>(hash);
       outDependencies->push_back(dep);
       continue;
     }
 
-    if ((std::sscanf(line, "OUTPUT %llx %899[^\n]", &hash, depPath) == 2) &&
-        (outOutputs != nullptr)) {
-      OutputRecord record{};
-      record.path = depPath;
-      record.hash = static_cast<std::uint64_t>(hash);
-      outOutputs->push_back(record);
+    if (std::sscanf(line, "OUTPUT %llx %1023[^\n]", &hash, depPath) == 2) {
+      if ((schema >= 4U) &&
+          !engine::content::cook_stamp_path_is_contained(depPath)) {
+        // An output outside the stamp's directory was never written by
+        // this packer: corrupt, so nothing it names is trusted or removed.
+        std::fclose(file);
+        return false;
+      }
+      if (outOutputs != nullptr) {
+        OutputRecord record{};
+        record.path = (schema >= 4U) ? stamp_joined_path(outputPath, depPath)
+                                     : std::string(depPath);
+        record.hash = static_cast<std::uint64_t>(hash);
+        outOutputs->push_back(record);
+      }
     }
   }
 
@@ -462,7 +597,8 @@ bool dependency_digests_equal(const std::vector<DependencyDigest> &a,
   }
 
   for (std::size_t i = 0U; i < a.size(); ++i) {
-    if ((a[i].hash != b[i].hash) || (a[i].path != b[i].path)) {
+    if ((a[i].hash != b[i].hash) ||
+        (normalized_os_path(a[i].path) != normalized_os_path(b[i].path))) {
       return false;
     }
   }
@@ -491,7 +627,7 @@ bool should_repack(const char *outputPath, std::uint64_t sourceHash,
   std::string previousPlatformTag{};
   if (!read_cook_stamp(outputPath, &previousSourceHash, &previousDependencies,
                        &previousImportHash, &previousToolVersion,
-                       &previousOutputs, &previousPlatformTag)) {
+                       &previousOutputs, &previousPlatformTag, nullptr)) {
     return true;
   }
 
@@ -543,22 +679,66 @@ bool remove_stale_outputs(const char *outputPath,
   std::uint64_t previousSourceHash = 0ULL;
   std::vector<DependencyDigest> previousDependencies{};
   std::vector<OutputRecord> previousOutputs{};
+  std::uint32_t previousSchema = 0U;
   if (!read_cook_stamp(outputPath, &previousSourceHash, &previousDependencies,
-                       nullptr, nullptr, &previousOutputs, nullptr)) {
+                       nullptr, nullptr, &previousOutputs, nullptr,
+                       &previousSchema)) {
+    return true;
+  }
+  if (previousSchema < 4U) {
+    // A legacy manifest's paths were whatever the old invocation named,
+    // with no containment; retiring them could delete anything (#527).
+    // The tool-version recook re-certifies the set; strays are the
+    // orphan sweep's, which only reaches same-base siblings.
+    std::printf("legacy cook stamp: stale outputs not retired: %s\n",
+                outputPath);
     return true;
   }
 
+  const std::filesystem::path stampDir =
+      std::filesystem::absolute(stamp_directory(outputPath)).lexically_normal();
+  std::vector<std::string> currentNormalized{};
+  currentNormalized.reserve(currentOutputs.size());
+  for (const std::string &current : currentOutputs) {
+    currentNormalized.push_back(normalized_os_path(current));
+  }
+
   for (const OutputRecord &record : previousOutputs) {
+    const std::string normalized = normalized_os_path(record.path);
     const bool stillProduced =
-        std::find(currentOutputs.begin(), currentOutputs.end(), record.path) !=
-        currentOutputs.end();
+        std::find(currentNormalized.begin(), currentNormalized.end(),
+                  normalized) != currentNormalized.end();
     if (stillProduced) {
       continue;
     }
+    // The reader already refused an escaping path; this re-checks the
+    // joined result so no removal can ever reach outside the stamp's
+    // directory, and never removes anything but a regular file.
+    const std::filesystem::path candidate(normalized);
+    std::string stampDirText = stampDir.generic_string();
+    while (!stampDirText.empty() && (stampDirText.back() == '/')) {
+      stampDirText.pop_back();
+    }
+    stampDirText += "/";
+    if (normalized.compare(0U, stampDirText.size(), stampDirText) != 0) {
+      std::fprintf(stderr,
+                   "error: stale cooked output outside the stamp "
+                   "directory; not removed: %s\n",
+                   record.path.c_str());
+      return false;
+    }
+    std::error_code kindError{};
+    if (std::filesystem::exists(candidate, kindError) && !kindError &&
+        !std::filesystem::is_regular_file(candidate, kindError)) {
+      std::fprintf(stderr,
+                   "error: stale cooked output is not a regular file; not "
+                   "removed: %s\n",
+                   record.path.c_str());
+      return false;
+    }
     std::error_code removeError{};
     const bool removed =
-        std::filesystem::remove(std::filesystem::path(record.path),
-                                removeError);
+        std::filesystem::remove(candidate, removeError);
     if (removeError) {
       std::fprintf(stderr, "error: failed to remove stale cooked output: %s\n",
                    record.path.c_str());
@@ -619,7 +799,7 @@ bool sweep_orphan_outputs(const char *outputPath) {
   std::vector<DependencyDigest> stampDependencies{};
   std::vector<OutputRecord> stampOutputs{};
   if (!read_cook_stamp(outputPath, &stampSourceHash, &stampDependencies,
-                       nullptr, nullptr, &stampOutputs, nullptr) ||
+                       nullptr, nullptr, &stampOutputs, nullptr, nullptr) ||
       stampOutputs.empty()) {
     std::fprintf(stderr,
                  "error: orphan sweep needs a manifest-bearing cook stamp: "
@@ -658,7 +838,7 @@ bool sweep_orphan_outputs(const char *outputPath) {
       std::vector<OutputRecord> siblingOutputs{};
       if (read_cook_stamp(ownerPath.c_str(), &siblingSourceHash,
                           &siblingDependencies, nullptr, nullptr,
-                          &siblingOutputs, nullptr)) {
+                          &siblingOutputs, nullptr, nullptr)) {
         for (const OutputRecord &record : siblingOutputs) {
           protectedNames.push_back(manifest_entry_filename(record.path));
         }
