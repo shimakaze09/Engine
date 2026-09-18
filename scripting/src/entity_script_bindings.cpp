@@ -63,8 +63,10 @@ lua_State *g_state = nullptr;
 EntityScriptBindingCallbacks g_callbacks{};
 EntityScriptModule g_entityScriptModules[kMaxEntityScriptModules]{};
 std::size_t g_entityScriptModuleCount = 0U;
-// Advances once per dispatch_entity_scripts_update so a module's file is
-// polled at most once per frame, not once per scripted entity (#528).
+// Advances once per dispatch pass (update, start, begin/end play) so a
+// module's file is polled at most once per pass, not once per scripted
+// entity (#528); a later pass in the same frame polls again, which keeps
+// a script that appears between passes visible to the next one.
 std::uint64_t g_modulePollSerial = 1U;
 std::uint64_t g_mtimePolls = 0U;
 bool g_moduleCapacityWarned = false;
@@ -740,6 +742,7 @@ void dispatch_entity_scripts_start() noexcept {
   if ((g_state == nullptr) || (runtime_binding().world == nullptr)) {
     return;
   }
+  ++g_modulePollSerial;
 
   runtime::World *world = runtime_binding().world;
   const std::size_t count = snapshot_script_dispatch_order();
@@ -766,6 +769,7 @@ void dispatch_entity_scripts_begin_play(runtime::World *world) noexcept {
   if ((g_state == nullptr) || (world == nullptr)) {
     return;
   }
+  ++g_modulePollSerial;
 
   world->for_each_needs_begin_play([world](runtime::Entity entity) noexcept {
     char path[kScriptPathSize] = {};
@@ -800,6 +804,7 @@ void dispatch_entity_scripts_end_play(runtime::World *world) noexcept {
   if ((g_state == nullptr) || (world == nullptr)) {
     return;
   }
+  ++g_modulePollSerial;
 
   world->for_each_pending_destroy([world](runtime::Entity entity) noexcept {
     dispatch_entity_end_play(world, entity);
@@ -869,6 +874,7 @@ void dispatch_entity_scripts_end() noexcept {
   if ((g_state == nullptr) || (runtime_binding().world == nullptr)) {
     return;
   }
+  ++g_modulePollSerial;
   dispatch_entity_scripts_end_impl(runtime_binding().world);
 }
 
@@ -876,6 +882,7 @@ void dispatch_entity_scripts_end_for_transition() noexcept {
   if ((g_state == nullptr) || (runtime_binding().world == nullptr)) {
     return;
   }
+  ++g_modulePollSerial;
   // Both reentrancy holes are closed for the duration of this dispatch:
   // g_endPlayDispatchDepth makes can_apply_mutations_now() defer (not
   // apply) any world mutation a handler triggers (spawn/destroy/etc.), and
