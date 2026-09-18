@@ -173,6 +173,10 @@ struct PhysicsShapeStore final {
 // physics_internal.h so only physics TUs see its layout.
 struct ResolveScratch;
 
+/// Gravity of a world that no scene has authored; a scene stores gravity
+/// only when it differs from this, and reset_world returns to it.
+inline constexpr math::Vec3 kDefaultGravity{0.0F, -9.8F, 0.0F};
+
 struct PhysicsContext final {
   PhysicsContext() noexcept;
   /// Copies context data and deep-copies owned shape payloads; the
@@ -189,7 +193,7 @@ struct PhysicsContext final {
   PhysicsContext &operator=(PhysicsContext &&other) noexcept;
   ~PhysicsContext();
 
-  math::Vec3 gravity = math::Vec3(0.0F, -9.8F, 0.0F);
+  math::Vec3 gravity = kDefaultGravity;
   // Slot table lives in shapeStore; joint-adding code must never let
   // jointCount go nonzero without a live store (see joint_handle.h).
   std::size_t jointCount = 0U;

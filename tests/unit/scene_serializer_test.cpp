@@ -737,6 +737,91 @@ int verify_reset_world_clears_scene_state() {
   return verify_non_entity_scene_state_cleared(*world);
 }
 
+/// Regression for #530: a joint dies with either of its bodies, so a
+/// destroyed jointed entity never leaves a stale active joint that refuses
+/// every later save, and reset_world returns gravity and the joint store
+/// to a fresh world's state the way a load_scene commit does.
+int verify_joints_die_with_bodies_and_reset_clears_physics() {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 440;
+  }
+  const engine::runtime::Entity first = world->create_scene_object();
+  const engine::runtime::Entity second = world->create_scene_object();
+  const engine::runtime::Entity third = world->create_scene_object();
+  if ((first == engine::runtime::kInvalidEntity) ||
+      (second == engine::runtime::kInvalidEntity) ||
+      (third == engine::runtime::kInvalidEntity)) {
+    return 441;
+  }
+  const engine::math::Vec3 pivot(0.0F, 0.0F, 0.0F);
+  const engine::math::Vec3 axis(0.0F, 1.0F, 0.0F);
+  const engine::physics::JointId doomed =
+      engine::runtime::add_hinge_joint(*world, first, second, pivot, axis);
+  const engine::physics::JointId survivor =
+      engine::runtime::add_distance_joint(*world, second, third, 1.0F);
+  if ((doomed == engine::physics::kInvalidJointId) ||
+      (survivor == engine::physics::kInvalidJointId)) {
+    return 442;
+  }
+  if (engine::runtime::collect_scene_save_blockers(*world).activeJoints != 2U) {
+    return 443;
+  }
+
+  // Destroying one body retires exactly the joints attached to it.
+  if (!world->destroy_entity(first)) {
+    return 444;
+  }
+  if (engine::runtime::collect_scene_save_blockers(*world).activeJoints != 1U) {
+    return 445; // the dead body's joint must no longer count as state
+  }
+  if (engine::runtime::remove_joint(*world, doomed)) {
+    return 446; // its id must already be stale
+  }
+  if (!engine::runtime::remove_joint(*world, survivor)) {
+    return 447; // the unrelated joint is untouched
+  }
+  std::array<char, engine::core::JsonWriter::kBufferBytes> buffer{};
+  std::size_t size = 0U;
+  if (!engine::runtime::save_scene(*world, buffer.data(), buffer.size(),
+                                   &size)) {
+    return 448; // no live joint remains, so the save must succeed
+  }
+
+  // reset_world drops authored gravity and every joint, and a JointId held
+  // across the reset stays stale.
+  const engine::physics::JointId reset =
+      engine::runtime::add_distance_joint(*world, second, third, 2.0F);
+  if (reset == engine::physics::kInvalidJointId) {
+    return 449;
+  }
+  engine::runtime::set_gravity(*world, 1.0F, 2.0F, 3.0F);
+  engine::runtime::reset_world(*world);
+  if (world->physics_context().jointCount != 0U) {
+    return 450;
+  }
+  if (engine::runtime::collect_scene_save_blockers(*world).activeJoints != 0U) {
+    return 451;
+  }
+  engine::math::Vec3 gravity(0.0F, 0.0F, 0.0F);
+  if (!engine::runtime::get_gravity(*world, &gravity.x, &gravity.y,
+                                    &gravity.z) ||
+      (gravity.x != engine::physics::kDefaultGravity.x) ||
+      (gravity.y != engine::physics::kDefaultGravity.y) ||
+      (gravity.z != engine::physics::kDefaultGravity.z)) {
+    return 452; // gravity must return to the default
+  }
+  if (engine::runtime::remove_joint(*world, reset)) {
+    return 453;
+  }
+  if (!engine::runtime::save_scene(*world, buffer.data(), buffer.size(),
+                                   &size)) {
+    return 454;
+  }
+  return 0;
+}
+
 /// Verifies that loading a scene replaces stale non-entity world state.
 int verify_load_scene_replaces_existing_scene_state(
     const std::array<char, engine::core::JsonWriter::kBufferBytes> &buffer,
@@ -2068,6 +2153,13 @@ int main() {
   }
 
   result = verify_reset_world_clears_scene_state();
+  if (result != 0) {
+    static_cast<void>(std::remove(kScenePath));
+    static_cast<void>(std::remove(kLargeScenePath));
+    return result;
+  }
+
+  result = verify_joints_die_with_bodies_and_reset_clears_physics();
   if (result != 0) {
     static_cast<void>(std::remove(kScenePath));
     static_cast<void>(std::remove(kLargeScenePath));

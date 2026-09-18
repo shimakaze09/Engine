@@ -767,6 +767,40 @@ bool remove_joint(PhysicsWorldView &world, JointId id) noexcept {
   }
   return true;
 }
+
+void remove_joints_for_entity(PhysicsContext &context, Entity entity) noexcept {
+  PhysicsShapeStore *store = context.shapeStore.get();
+  if ((store == nullptr) || (context.jointCount == 0U)) {
+    return;
+  }
+  auto &joints = store->joints;
+  for (std::size_t i = 0U; i < context.jointCount; ++i) {
+    PhysicsJointSlot &joint = joints[i];
+    if (joint.active &&
+        ((joint.entityA == entity) || (joint.entityB == entity))) {
+      retire_joint_slot(joint);
+    }
+  }
+  while ((context.jointCount > 0U) && !joints[context.jointCount - 1U].active) {
+    --context.jointCount;
+  }
+}
+
+void reset_physics_content(PhysicsContext &context) noexcept {
+  context.gravity = kDefaultGravity;
+  PhysicsShapeStore *store = context.shapeStore.get();
+  if (store != nullptr) {
+    // Retire rather than clear so a JointId held across the reset stays
+    // stale instead of resolving to a joint the next scene creates.
+    for (std::size_t i = 0U; i < context.jointCount; ++i) {
+      if (store->joints[i].active) {
+        retire_joint_slot(store->joints[i]);
+      }
+    }
+  }
+  context.jointCount = 0U;
+}
+
 void wake_body(PhysicsWorldView &world, Entity entity) noexcept {
   RigidBody *body = world.get_rigid_body_ptr(entity);
   if (body != nullptr) {

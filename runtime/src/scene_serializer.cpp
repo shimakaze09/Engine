@@ -18,6 +18,7 @@
 #include "engine/math/vec2.h"
 #include "engine/math/vec3.h"
 #include "engine/math/vec4.h"
+#include "engine/physics/physics.h"
 #include "engine/runtime/physics_bridge.h"
 #include "engine/runtime/reflect_types.h"
 #include "engine/runtime/serialization_keys.h"
@@ -291,7 +292,7 @@ bool copy_world_contents(const World &sourceWorld,
 
   // World gravity rides the commit copy like the components do.
   if (success) {
-    math::Vec3 gravity(0.0F, -9.8F, 0.0F);
+    math::Vec3 gravity = physics::kDefaultGravity;
     if (get_gravity(sourceWorld, &gravity.x, &gravity.y, &gravity.z)) {
       set_gravity(targetWorld, gravity.x, gravity.y, gravity.z);
     }
@@ -343,9 +344,11 @@ bool serialize_scene_to_writer(const World &world,
 
   // World gravity is authored state; written only when it differs from the
   // default so existing scenes stay byte-identical.
-  math::Vec3 gravity(0.0F, -9.8F, 0.0F);
+  math::Vec3 gravity = physics::kDefaultGravity;
   static_cast<void>(get_gravity(world, &gravity.x, &gravity.y, &gravity.z));
-  if ((gravity.x != 0.0F) || (gravity.y != -9.8F) || (gravity.z != 0.0F)) {
+  if ((gravity.x != physics::kDefaultGravity.x) ||
+      (gravity.y != physics::kDefaultGravity.y) ||
+      (gravity.z != physics::kDefaultGravity.z)) {
     write_vec3(writer, kGravityKey, gravity);
   }
 
@@ -448,8 +451,10 @@ SceneSaveBlockers collect_scene_save_blockers(const World &world) noexcept {
 /// alive, this is where process_pending_scene_op dispatches on_end_play —
 /// then entities, the phase-independent destructive teardown, so component
 /// removal releases its physics/camera bookkeeping while those managers
-/// still exist, then timers, cameras, game mode, the content epoch, and
-/// last the animation controller registry, which must only reset once no
+/// still exist, then the scene-authored physics state (gravity and joints,
+/// which load_scene replaces through the commit copy and a reset must
+/// match, #530), timers, cameras, game mode, the content epoch, and last
+/// the animation controller registry, which must only reset once no
 /// component can still hold a controllerSlot into it.
 void reset_world(World &world, SceneTeardownHook beforeTeardown) noexcept {
   if (beforeTeardown != nullptr) {
@@ -461,6 +466,7 @@ void reset_world(World &world, SceneTeardownHook beforeTeardown) noexcept {
                       "reset_world left surviving entities");
   }
 
+  physics::reset_physics_content(world.physics_context());
   world.timer_manager().clear();
   world.camera_manager().clear();
   world.game_mode().reset();

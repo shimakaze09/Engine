@@ -370,6 +370,7 @@ void World::remove_all_components(Entity entity) noexcept {
   m_cameraManager.on_entity_destroyed(entity);
 
   physics::remove_shape_payloads(m_physicsContext, entity);
+  physics::remove_joints_for_entity(m_physicsContext, entity);
   unlink_transform_node(entity.index);
   // Every set is removed via the storage table so a new component cannot be
   // stranded on a dead slot and inherited by the index's next entity
