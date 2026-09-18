@@ -109,9 +109,22 @@ bool is_hidden_from_index(const std::filesystem::path &path) noexcept {
          has_suffix(filename.c_str(), ".checksum");
 }
 
+/// Copies `text` into a fixed field; false (field cleared) when it does
+/// not fit whole.
+bool copy_whole(char *out, std::size_t capacity,
+                const std::string &text) noexcept {
+  if (text.size() >= capacity) {
+    out[0] = '\0';
+    return false;
+  }
+  std::memcpy(out, text.c_str(), text.size() + 1U);
+  return true;
+}
+
 /// Builds the VFS virtual path ("<mount>/<relative>") for an indexed entry;
 /// leaves outPath empty when the entry falls outside the configured root.
-void make_virtual_path(const std::filesystem::path &entryPath,
+/// False only when the path does not fit the field whole.
+bool make_virtual_path(const std::filesystem::path &entryPath,
                        const std::filesystem::path &root, char *outPath,
                        std::size_t capacity) noexcept {
   outPath[0] = '\0';
@@ -119,11 +132,17 @@ void make_virtual_path(const std::filesystem::path &entryPath,
   const std::filesystem::path relative =
       std::filesystem::relative(entryPath, root, ec);
   if (ec || relative.empty() || (*relative.begin() == "..")) {
-    return;
+    return true;
   }
   const std::string generic = relative.generic_string();
-  std::snprintf(outPath, capacity, "%s/%s", active_config().assetMount,
-               generic.c_str());
+  const int written = std::snprintf(outPath, capacity, "%s/%s",
+                                    active_config().assetMount,
+                                    generic.c_str());
+  if ((written < 0) || (static_cast<std::size_t>(written) >= capacity)) {
+    outPath[0] = '\0';
+    return false;
+  }
+  return true;
 }
 
 /// Recursively appends indexable files under `dir` into g_index.
@@ -158,17 +177,30 @@ void walk_directory(const std::filesystem::path &dir,
       continue;
     }
 
+    // Every path field is an identity the browser resolves through (open,
+    // spawn, metadata, thumbnail), so an entry that does not fit whole is
+    // skipped with a diagnostic rather than indexed under a truncated
+    // name that resolves to a different file (#567).
     AssetIndexEntry indexed{};
     const std::string osPathStr = entry.path().string();
-    std::snprintf(indexed.osPath, sizeof(indexed.osPath), "%s",
-                 osPathStr.c_str());
     const std::string folderStr = entry.path().parent_path().generic_string();
-    std::snprintf(indexed.folder, sizeof(indexed.folder), "%s",
-                 folderStr.c_str());
     const std::string nameStr = entry.path().filename().string();
-    std::snprintf(indexed.name, sizeof(indexed.name), "%s", nameStr.c_str());
-    make_virtual_path(entry.path(), root, indexed.virtualPath,
-                      sizeof(indexed.virtualPath));
+    if (!copy_whole(indexed.osPath, sizeof(indexed.osPath), osPathStr) ||
+        !copy_whole(indexed.folder, sizeof(indexed.folder), folderStr) ||
+        !copy_whole(indexed.name, sizeof(indexed.name), nameStr) ||
+        !make_virtual_path(entry.path(), root, indexed.virtualPath,
+                           sizeof(indexed.virtualPath))) {
+      char message[256] = {};
+      std::snprintf(message, sizeof(message),
+                    "asset skipped: path does not fit the index (%zu bytes, "
+                    "name %zu bytes): ...%s",
+                    osPathStr.size(), nameStr.size(),
+                    osPathStr.c_str() +
+                        ((osPathStr.size() > 120U) ? (osPathStr.size() - 120U)
+                                                   : 0U));
+      core::log_message(core::LogLevel::Warning, "editor", message);
+      continue;
+    }
     indexed.kind = classify_asset_kind(indexed.osPath);
 
     std::error_code thumbEc{};

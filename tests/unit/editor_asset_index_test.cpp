@@ -481,6 +481,81 @@ int check_mesh_open_spawns_through_production_path() {
 
 } // namespace
 
+/// EXPECTATION (#567 row 4): an entry whose OS path, folder, name or
+/// virtual path does not fit its index field whole is skipped with a
+/// diagnostic, never indexed under a truncated identity; an entry that
+/// fits exactly is indexed. On base every field was truncated and the
+/// entry indexed anyway, so open/spawn/meta/thumbnail resolved to the
+/// wrong file.
+int check_overlong_paths_are_skipped() {
+  if (!rebuild_scratch_tree()) {
+    return 1;
+  }
+  char root[900] = {};
+  if (!scratch_root(root, sizeof(root))) {
+    return 2;
+  }
+  // Names of kMaxAssetIndexName - 1 bytes (fits) and kMaxAssetIndexName
+  // bytes (one past), both ending in ".mesh".
+  std::string fitting(kMaxAssetIndexName - 1U - 5U, 'n');
+  fitting += ".mesh";
+  std::string overlong(kMaxAssetIndexName - 5U, 'o');
+  overlong += ".mesh";
+  // A folder chain deep enough that the OS path passes kMaxAssetIndexPath
+  // while staying well inside the walk's depth limit.
+  std::filesystem::path deep(root);
+  const std::string segment(60U, 'd');
+  for (int level = 0; level < 9; ++level) {
+    deep /= segment;
+  }
+  std::error_code ec{};
+  std::filesystem::create_directories(deep, ec);
+  if (ec) {
+    return 3;
+  }
+  const std::string fittingPath = std::string(root) + "/" + fitting;
+  const std::string overlongPath = std::string(root) + "/" + overlong;
+  const std::string deepPath = (deep / "deep.mesh").string();
+  if (deepPath.size() < kMaxAssetIndexPath) {
+    return 4;
+  }
+  if (!write_text_file(fittingPath.c_str(), "fits") ||
+      !write_text_file(overlongPath.c_str(), "one past") ||
+      !write_text_file(deepPath.c_str(), "too deep")) {
+    return 5;
+  }
+  if (!rebuild_asset_index()) {
+    return 6;
+  }
+  if (find_entry_by_leaf(fitting.c_str()) == nullptr) {
+    std::fprintf(stderr, "entry at exactly the name capacity was not indexed\n");
+    return 7;
+  }
+  if (find_entry_by_leaf(overlong.c_str()) != nullptr) {
+    std::fprintf(stderr, "entry one past the name capacity was indexed\n");
+    return 8;
+  }
+  const std::size_t count = asset_index_count();
+  for (std::size_t i = 0U; i < count; ++i) {
+    const AssetIndexEntry *entry = asset_index_entry(i);
+    if ((entry != nullptr) && (std::strcmp(entry->name, "deep.mesh") == 0)) {
+      std::fprintf(stderr, "entry past the path capacity was indexed under "
+                           "a truncated path\n");
+      return 9;
+    }
+    if ((entry != nullptr) &&
+        (std::strlen(entry->name) == (kMaxAssetIndexName - 1U)) &&
+        (entry->name[0] == 'o')) {
+      std::fprintf(stderr, "overlong name indexed truncated\n");
+      return 10;
+    }
+  }
+  if (find_entry_by_leaf("thing.mesh") == nullptr) {
+    return 11; // the rest of the tree is still indexed
+  }
+  return 0;
+}
+
 /// Runs this executable or test program.
 int main() {
   struct NamedCheck {
@@ -499,6 +574,7 @@ int main() {
        &check_scene_open_routes_through_unsaved_gate},
       {"check_mesh_open_spawns_through_production_path",
        &check_mesh_open_spawns_through_production_path},
+      {"check_overlong_paths_are_skipped", &check_overlong_paths_are_skipped},
   };
 
   for (const auto &check : checks) {
