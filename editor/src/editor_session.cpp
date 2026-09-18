@@ -98,6 +98,18 @@ load_thumbnail_texture(const char *assetPath) noexcept {
   if (editor_session().thumbnailCount >= kMaxThumbnails) {
     return renderer::kInvalidDeviceTexture;
   }
+  // A thumbnail that cannot be produced is remembered as such, so a
+  // missing or corrupt file is not opened and decoded again every frame
+  // the row is visible (#528); clear_thumbnail_cache forgets it.
+  const auto remember_missing = [assetPath]() noexcept {
+    auto &entry = editor_session().thumbnailCache[editor_session().thumbnailCount];
+    std::snprintf(entry.path, sizeof(entry.path), "%s", assetPath);
+    entry.texture = renderer::kInvalidDeviceTexture;
+    entry.width = 0;
+    entry.height = 0;
+    ++editor_session().thumbnailCount;
+    return renderer::kInvalidDeviceTexture;
+  };
 
   std::string assetStr(assetPath);
   std::size_t lastSlash = assetStr.find_last_of("/\\");
@@ -120,7 +132,7 @@ load_thumbnail_texture(const char *assetPath) noexcept {
   fp = std::fopen(thumbPath.c_str(), "rb");
 #endif
   if (fp == nullptr) {
-    return renderer::kInvalidDeviceTexture;
+    return remember_missing();
   }
   std::fseek(fp, 0, SEEK_END);
   const long fileLen = std::ftell(fp);
@@ -129,14 +141,14 @@ load_thumbnail_texture(const char *assetPath) noexcept {
       (static_cast<unsigned long>(fileLen) >
        static_cast<unsigned long>(std::numeric_limits<int>::max()))) {
     std::fclose(fp);
-    return renderer::kInvalidDeviceTexture;
+    return remember_missing();
   }
   std::vector<unsigned char> fileData(static_cast<std::size_t>(fileLen));
   const std::size_t bytesRead =
       std::fread(fileData.data(), 1U, fileData.size(), fp);
   std::fclose(fp);
   if (bytesRead != fileData.size()) {
-    return renderer::kInvalidDeviceTexture;
+    return remember_missing();
   }
 
   int w = 0;
@@ -146,7 +158,7 @@ load_thumbnail_texture(const char *assetPath) noexcept {
   unsigned char *pixels = stbi_load_from_memory(
       fileData.data(), stbSize, &w, &h, &channels, 4);
   if (pixels == nullptr) {
-    return renderer::kInvalidDeviceTexture;
+    return remember_missing();
   }
 
   // Routed through the renderer's RenderDevice (audit #206) instead of
@@ -176,9 +188,9 @@ load_thumbnail_texture(const char *assetPath) noexcept {
     entry.width = w;
     entry.height = h;
     ++editor_session().thumbnailCount;
+    return tex;
   }
-
-  return tex;
+  return remember_missing();
 }
 
 /// Releases cached thumbnail textures owned by the editor through the
