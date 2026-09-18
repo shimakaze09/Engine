@@ -228,6 +228,7 @@ bool apply_multi_field_edit(ComponentEditType type, std::size_t fieldOffset,
     entry.after = after;
   }
 
+  inspector_commit_pending_edit();
   return session.commandHistory.execute(cmd);
 }
 
@@ -265,6 +266,7 @@ bool apply_multi_component_remove(ComponentEditType type) noexcept {
     entry.afterExists = false;
   }
 
+  inspector_commit_pending_edit();
   return session.commandHistory.execute(cmd);
 }
 

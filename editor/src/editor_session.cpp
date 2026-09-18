@@ -25,6 +25,7 @@
 #include <memory>
 #include <vector>
 
+#include "editor_commands.h"
 #include "editor_material_edit.h"
 #include "engine/core/atomic_file.h"
 #include "engine/core/file_read.h"
@@ -624,12 +625,17 @@ bool editor_history_can_redo() noexcept {
   return world_is_editable() && editor_session().commandHistory.can_redo();
 }
 
+// An open gesture (inspector drag, gizmo drag) is recorded before the
+// history moves, so its command can never land on top of an intervening
+// undo with a snapshot from before it (#567).
 void editor_history_undo() noexcept {
   if (material_owns_history()) {
     material_editor_history().undo();
     return;
   }
   if (world_is_editable()) {
+    inspector_commit_pending_edit();
+    gizmo_commit_gesture();
     editor_session().commandHistory.undo();
   }
 }
@@ -640,6 +646,8 @@ void editor_history_redo() noexcept {
     return;
   }
   if (world_is_editable()) {
+    inspector_commit_pending_edit();
+    gizmo_commit_gesture();
     editor_session().commandHistory.redo();
   }
 }
@@ -660,6 +668,11 @@ void start_play_mode() noexcept {
   }
 
   if (editor_session().playState == PlayState::Stopped) {
+    // Authored edits still open as gestures are recorded before the
+    // snapshot so Stop restores a state the history accounts for; a
+    // gizmo drag cannot span Play, so it is dropped.
+    inspector_commit_pending_edit();
+    gizmo_abandon_gesture();
     if (!capture_play_snapshot()) {
       core::log_message(core::LogLevel::Error, "editor",
                         "failed to capture pre-play scene snapshot");
@@ -721,6 +734,10 @@ void stop_play_mode() noexcept {
   editor_session().playState = PlayState::Stopped;
   editor_session().stepRequested = false;
   editor_session().worldRestoreFailed = !restored;
+  // Whatever the restore did to the contents, a gesture opened against
+  // the play-time world must not record against the restored one.
+  inspector_abandon_pending_edit();
+  gizmo_abandon_gesture();
 
   if (restored) {
     // Authored state is back; any "Apply to authored value" queued during

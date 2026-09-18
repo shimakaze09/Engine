@@ -213,6 +213,37 @@ void inspector_abandon_pending_edit() noexcept;
 /// True when an inspector edit gesture is pending.
 bool inspector_has_pending_edit() noexcept;
 
+/// Records a completed direct transform write (the viewport gizmo drag)
+/// as one undoable command from `before` to `after`; a pending inspector
+/// gesture is committed first so no command ever executes across an open
+/// gesture (#567). False when the world is unbound or the command could
+/// not be recorded, in which case nothing is applied.
+bool execute_transform_edit(runtime::Entity entity,
+                            const runtime::Transform &before,
+                            const runtime::Transform &after) noexcept;
+
+/// Viewport gizmo gesture, fed once per frame with the entity under the
+/// gizmo, whether ImGuizmo is manipulating it, and that entity's local
+/// transform before this frame's manipulation is applied. Opens on the
+/// first manipulating frame, recording the target identity with its
+/// pre-drag transform; closes on the first non-manipulating frame (or a
+/// target change) as one transform edit against the recorded target, so
+/// a start transform can never pair with whatever entity is selected at
+/// release (#567).
+void gizmo_track_gesture(runtime::Entity target, bool manipulating,
+                         const runtime::Transform &current) noexcept;
+/// Closes an open gizmo gesture now, recording it against its own target.
+void gizmo_commit_gesture() noexcept;
+/// Drops the gizmo gesture without recording it: the world's contents are
+/// being replaced (scene switch, Play, Stop, world rebind).
+void gizmo_abandon_gesture() noexcept;
+/// True while a gizmo gesture is open.
+bool gizmo_has_gesture() noexcept;
+
+/// Test hook: the next `count` command allocations fail as if out of
+/// memory, so the refuse and unrecorded-edit paths are exercisable (#567).
+void editor_commands_inject_allocation_failures(std::size_t count) noexcept;
+
 /// Returns the default-valued snapshot used when adding a component.
 ComponentEditSnapshot default_component_snapshot(
     runtime::Entity entity, ComponentEditType type) noexcept;

@@ -429,7 +429,7 @@ void editor_set_world(runtime::World *world) noexcept {
     inspector_abandon_pending_edit();
     reset_material_editor();
     editor_session().commandHistory.clear();
-    editor_session().gizmoWasUsing = false;
+    gizmo_abandon_gesture();
     clear_entity_selection();
     editor_session().playState = PlayState::Stopped;
     editor_session().stepRequested = false;

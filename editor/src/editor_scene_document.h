@@ -61,6 +61,10 @@ struct SceneDocumentState final {
   bool hasPath = false;
   char displayName[kMaxDocumentDisplayNameLength] = "Untitled Scene";
   std::uint64_t savedHistoryToken = 0U;
+  // A world mutation the history could not record (command allocation
+  // failed after the edit reached the world): the document reads dirty
+  // until a save or a content replacement clears it (#567).
+  bool unrecordedEdit = false;
 
   bool unsavedPromptOpen = false;
   PendingSceneAction pendingAction = PendingSceneAction::None;

@@ -49,6 +49,7 @@ void reset_document_identity(SceneDocumentState &doc) noexcept {
   doc.hasPath = false;
   std::snprintf(doc.displayName, sizeof(doc.displayName), "Untitled Scene");
   doc.savedHistoryToken = 0U;
+  doc.unrecordedEdit = false;
   doc.unsavedPromptOpen = false;
   doc.pendingAction = PendingSceneAction::None;
   doc.pendingOpenPath[0] = '\0';
@@ -74,8 +75,10 @@ void set_display_name_from_path(SceneDocumentState &doc,
 void reset_session_for_scene_switch() noexcept {
   EditorSession &session = editor_session();
   inspector_abandon_pending_edit();
+  gizmo_abandon_gesture();
   clear_entity_selection();
   session.commandHistory.clear();
+  session.document.unrecordedEdit = false;
   session.worldRestoreFailed = false;
   session.hasPlaySnapshot = false;
   session.playSnapshotSize = 0U;
@@ -296,8 +299,9 @@ bool scene_document_has_path() noexcept {
 
 bool scene_document_is_dirty() noexcept {
   const EditorSession &session = editor_session();
-  return session.commandHistory.current_token() !=
-         session.document.savedHistoryToken;
+  return session.document.unrecordedEdit ||
+         (session.commandHistory.current_token() !=
+          session.document.savedHistoryToken);
 }
 
 const char *scene_document_last_error() noexcept {
@@ -335,6 +339,7 @@ bool perform_scene_open(const char *path) noexcept {
   session.document.hasPath = true;
   set_display_name_from_path(session.document, path);
   session.document.savedHistoryToken = session.commandHistory.current_token();
+  session.document.unrecordedEdit = false;
   session.document.unsavedPromptOpen = false;
   session.document.pendingAction = PendingSceneAction::None;
   session.document.pendingOpenPath[0] = '\0';
@@ -391,6 +396,7 @@ bool perform_scene_save() noexcept {
     return false;
   }
   session.document.savedHistoryToken = session.commandHistory.current_token();
+  session.document.unrecordedEdit = false;
   session.document.lastSaveError[0] = '\0';
   return true;
 }
@@ -460,6 +466,7 @@ bool perform_scene_save_as(const char *path) noexcept {
   session.document.hasPath = true;
   set_display_name_from_path(session.document, path);
   session.document.savedHistoryToken = session.commandHistory.current_token();
+  session.document.unrecordedEdit = false;
   session.document.lastSaveError[0] = '\0';
   recent_scenes_add(path);
   return true;
