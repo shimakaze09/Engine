@@ -354,6 +354,10 @@ struct DeviceCaps final {
 /// upstream (stale handle, bad descriptor) that the backend refused.
 struct DeviceDebugStats final {
   std::uint64_t droppedOperations = 0U;
+  /// Draws whose stream-access vertex or instance data was handed to the
+  /// backend as per-draw transient data rather than a shared buffer
+  /// update, so every batch in a frame draws its own upload (#523).
+  std::uint64_t transientStreamUploads = 0U;
 };
 
 /// Function table over the active backend; null entries mean the entry is

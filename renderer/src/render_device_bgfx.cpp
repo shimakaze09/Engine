@@ -279,7 +279,7 @@ DeviceBufferHandle bgfx_create_buffer(const BufferDesc &desc) noexcept {
 bool bgfx_realize_vertex_buffer(BgfxBufferRecord *record,
                                 std::int32_t strideBytes,
                                 const VertexLayout *engineLayout) noexcept {
-  if (bgfx::isValid(record->vertex)) {
+  if (bgfx::isValid(record->vertex) || record->streamLayoutValid) {
     return record->strideBytes == strideBytes;
   }
   if (strideBytes <= 0) {
@@ -292,6 +292,14 @@ bool bgfx_realize_vertex_buffer(BgfxBufferRecord *record,
     }
   } else {
     bgfx_stride_layout(strideBytes, &strideLayout);
+  }
+  if (record->access == BufferAccess::Stream) {
+    // Stream data stays CPU-side and is re-supplied as transient data on
+    // every draw (#523); only the layout and stride are fixed here.
+    record->streamLayout = strideLayout;
+    record->streamLayoutValid = true;
+    record->strideBytes = strideBytes;
+    return true;
   }
   const std::uint32_t count = static_cast<std::uint32_t>(
       (record->sizeBytes > strideBytes) ? (record->sizeBytes / strideBytes)
@@ -693,6 +701,36 @@ bool bgfx_set_geometry_instance_stream(DeviceGeometryHandle geometry,
   return true;
 }
 
+/// Binds a stream-access vertex buffer's CPU copy as this draw's own
+/// transient vertex data (#523): valid for the frame, never shared with
+/// another draw's update. False (drop recorded) when the request exceeds
+/// the staged bytes or bgfx's per-frame transient budget.
+bool bgfx_bind_transient_vertices(const BgfxBufferRecord &vertex,
+                                  std::int32_t firstVertex,
+                                  std::uint32_t count) noexcept {
+  const std::int64_t stride = vertex.strideBytes;
+  const std::int64_t begin = static_cast<std::int64_t>(firstVertex) * stride;
+  const std::int64_t bytes = static_cast<std::int64_t>(count) * stride;
+  if ((vertex.staging == nullptr) || (firstVertex < 0) || (count == 0U) ||
+      ((begin + bytes) > static_cast<std::int64_t>(vertex.sizeBytes))) {
+    drop_operation("draw: stream vertex range exceeds staged data");
+    return false;
+  }
+  if (bgfx::getAvailTransientVertexBuffer(count, vertex.streamLayout) <
+      count) {
+    drop_operation("draw: transient vertex budget exhausted this frame");
+    return false;
+  }
+  bgfx::TransientVertexBuffer transient{};
+  bgfx::allocTransientVertexBuffer(&transient, count, vertex.streamLayout);
+  std::memcpy(transient.data,
+              static_cast<const unsigned char *>(vertex.staging) + begin,
+              static_cast<std::size_t>(bytes));
+  bgfx::setVertexBuffer(0U, &transient, 0U, count);
+  ++device_context().stats.transientStreamUploads;
+  return true;
+}
+
 /// Applies the geometry's streams for one draw; false (with the drop
 /// recorded) when a referenced buffer went stale. Attribute-less
 /// geometry binds the backend-owned fullscreen triangle stream.
@@ -707,14 +745,21 @@ bool bgfx_apply_geometry(const BgfxGeometryRecord &record,
     return true;
   }
   BgfxBufferRecord *vertex = ctx.buffers.resolve(record.vertexBuffer);
-  if ((vertex == nullptr) || !bgfx::isValid(vertex->vertex)) {
-    drop_operation("draw: stale or unrealized vertex buffer");
+  if (vertex == nullptr) {
+    drop_operation("draw: stale vertex buffer");
     return false;
   }
   std::uint32_t count = static_cast<std::uint32_t>(vertexCount);
   if ((vertexCount <= 0) && (record.vertexStride > 0)) {
     count = static_cast<std::uint32_t>(vertex->sizeBytes /
                                        record.vertexStride);
+  }
+  if (vertex->streamLayoutValid) {
+    return bgfx_bind_transient_vertices(*vertex, firstVertex, count);
+  }
+  if (!bgfx::isValid(vertex->vertex)) {
+    drop_operation("draw: unrealized vertex buffer");
+    return false;
   }
   bgfx::setVertexBuffer(0U, vertex->vertex,
                         static_cast<std::uint32_t>(firstVertex), count);
@@ -793,7 +838,8 @@ void bgfx_draw_indexed_instanced(DeviceGeometryHandle geometry,
   BgfxBufferRecord *index = ctx.buffers.resolve(record->indexBuffer);
   BgfxBufferRecord *stream = ctx.buffers.resolve(record->instanceBuffer);
   if ((index == nullptr) || !bgfx::isValid(index->index) ||
-      (stream == nullptr) || !bgfx::isValid(stream->vertex)) {
+      (stream == nullptr) ||
+      (!bgfx::isValid(stream->vertex) && !stream->streamLayoutValid)) {
     drop_operation("draw_indexed_instanced: stale buffer");
     bgfx::discard();
     return;
@@ -804,8 +850,38 @@ void bgfx_draw_indexed_instanced(DeviceGeometryHandle geometry,
   }
   bgfx::setIndexBuffer(index->index, 0U,
                        static_cast<std::uint32_t>(indexCount));
-  bgfx::setInstanceDataBuffer(stream->vertex, 0U,
-                              static_cast<std::uint32_t>(instanceCount));
+  if (stream->streamLayoutValid) {
+    // Per-draw transient instance data (#523): the batch's matrices are
+    // copied out of the CPU stream now, so a later batch's update to the
+    // same engine buffer cannot reach this draw.
+    const std::uint32_t instances = static_cast<std::uint32_t>(instanceCount);
+    const std::int64_t bytes =
+        static_cast<std::int64_t>(instances) * stream->strideBytes;
+    if ((stream->staging == nullptr) || (instanceCount <= 0) ||
+        (bytes > static_cast<std::int64_t>(stream->sizeBytes)) ||
+        (stream->strideBytes > 0xFFFF)) {
+      drop_operation("draw_indexed_instanced: instance range exceeds staged "
+                     "data");
+      bgfx::discard();
+      return;
+    }
+    const std::uint16_t stride = static_cast<std::uint16_t>(stream->strideBytes);
+    if (bgfx::getAvailInstanceDataBuffer(instances, stride) < instances) {
+      drop_operation("draw_indexed_instanced: transient instance budget "
+                     "exhausted this frame");
+      bgfx::discard();
+      return;
+    }
+    bgfx::InstanceDataBuffer instanceData{};
+    bgfx::allocInstanceDataBuffer(&instanceData, instances, stride);
+    std::memcpy(instanceData.data, stream->staging,
+                static_cast<std::size_t>(bytes));
+    bgfx::setInstanceDataBuffer(&instanceData);
+    ++ctx.stats.transientStreamUploads;
+  } else {
+    bgfx::setInstanceDataBuffer(stream->vertex, 0U,
+                                static_cast<std::uint32_t>(instanceCount));
+  }
   bgfx_submit_draw(
       bgfx_state_bits(ctx.currentState, PrimitiveTopology::Triangles));
 }

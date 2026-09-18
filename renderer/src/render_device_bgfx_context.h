@@ -49,6 +49,14 @@ struct BgfxBufferRecord final {
   void *staging = nullptr;
   bgfx::DynamicVertexBufferHandle vertex = BGFX_INVALID_HANDLE;
   bgfx::DynamicIndexBufferHandle index = BGFX_INVALID_HANDLE;
+  // Stream-access vertex data never becomes a bgfx dynamic buffer: bgfx
+  // applies dynamic-buffer updates once per frame before any submit, so
+  // several per-batch updates to one handle would all draw the last one
+  // (#523). The CPU copy in `staging` is instead handed to bgfx as
+  // transient vertex or instance data at each draw, using the layout
+  // recorded at attachment.
+  bgfx::VertexLayout streamLayout{};
+  bool streamLayoutValid = false;
 };
 
 /// bgfx texture behind one engine texture handle, with the creation
