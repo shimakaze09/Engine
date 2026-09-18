@@ -52,6 +52,10 @@ public:
   void write_key(const char *key) noexcept;
   /// Writes float data.
   void write_float(const char *key, float value) noexcept;
+  /// Writes a double at round-trip precision (%.17g); non-finite fails.
+  void write_double(const char *key, double value) noexcept;
+  /// Writes a signed 64-bit integer.
+  void write_int64(const char *key, std::int64_t value) noexcept;
   /// Writes uint data.
   void write_uint(const char *key, std::uint32_t value) noexcept;
   /// Writes uint64 data.
@@ -106,6 +110,10 @@ private:
   bool append_escaped(const char *value) noexcept;
   /// Appends a float in round-trip-stable decimal form.
   bool append_float(float value) noexcept;
+  /// Appends a double in round-trip-stable decimal form.
+  bool append_double(double value) noexcept;
+  /// Appends a signed 64-bit integer.
+  bool append_int64(std::int64_t value) noexcept;
   /// Appends an unsigned 32-bit integer.
   bool append_uint(std::uint32_t value) noexcept;
   /// Appends an unsigned 64-bit integer.
@@ -169,6 +177,12 @@ public:
 
   /// Numeric value as float; false for non-numbers.
   bool as_float(const JsonValue &value, float *outValue) const noexcept;
+  /// Numeric value as double; false for non-numbers or non-finite results.
+  bool as_double(const JsonValue &value, double *outValue) const noexcept;
+  /// Numeric value as int64; false unless the token is an integer literal
+  /// (digits with an optional leading minus, no fraction or exponent) in
+  /// range, so an integer written by write_int64 reads back exactly.
+  bool as_int64(const JsonValue &value, std::int64_t *outValue) const noexcept;
   /// Reads exactly expectedCount floats from a JSON array; the element
   /// count must match exactly and every element must be a number.
   bool as_float_array(const JsonValue &value, float *outValues,

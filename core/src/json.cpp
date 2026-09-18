@@ -673,6 +673,35 @@ bool JsonWriter::append_float(float value) noexcept {
   return append_bytes(numberBuffer, static_cast<std::size_t>(written));
 }
 
+bool JsonWriter::append_double(double value) noexcept {
+  if (!std::isfinite(value)) {
+    m_failed = true;
+    return false;
+  }
+
+  char numberBuffer[32] = {};
+  const int written =
+      std::snprintf(numberBuffer, sizeof(numberBuffer), "%.17g", value);
+  if ((written <= 0) || (written >= static_cast<int>(sizeof(numberBuffer)))) {
+    m_failed = true;
+    return false;
+  }
+
+  return append_bytes(numberBuffer, static_cast<std::size_t>(written));
+}
+
+bool JsonWriter::append_int64(std::int64_t value) noexcept {
+  char numberBuffer[32] = {};
+  const int written = std::snprintf(numberBuffer, sizeof(numberBuffer), "%lld",
+                                    static_cast<long long>(value));
+  if ((written <= 0) || (written >= static_cast<int>(sizeof(numberBuffer)))) {
+    m_failed = true;
+    return false;
+  }
+
+  return append_bytes(numberBuffer, static_cast<std::size_t>(written));
+}
+
 bool JsonWriter::append_uint(std::uint32_t value) noexcept {
   char numberBuffer[16] = {};
   const int written =
@@ -811,6 +840,22 @@ void JsonWriter::write_key(const char *key) noexcept {
 void JsonWriter::write_float(const char *key, float value) noexcept {
   write_key(key);
   write_float_value(value);
+}
+
+void JsonWriter::write_double(const char *key, double value) noexcept {
+  write_key(key);
+  if (!begin_value()) {
+    return;
+  }
+  static_cast<void>(append_double(value));
+}
+
+void JsonWriter::write_int64(const char *key, std::int64_t value) noexcept {
+  write_key(key);
+  if (!begin_value()) {
+    return;
+  }
+  static_cast<void>(append_int64(value));
 }
 
 void JsonWriter::write_uint(const char *key, std::uint32_t value) noexcept {
@@ -1156,6 +1201,74 @@ bool JsonParser::as_float(const JsonValue &value,
   }
 
   *outValue = parsed;
+  return true;
+}
+
+bool JsonParser::as_double(const JsonValue &value,
+                           double *outValue) const noexcept {
+  if ((outValue == nullptr) || (value.type != JsonValue::Type::Number) ||
+      (value.begin == nullptr) || (value.end == nullptr) ||
+      (value.end <= value.begin)) {
+    return false;
+  }
+
+  const std::size_t length = static_cast<std::size_t>(value.end - value.begin);
+  if (length >= 64U) {
+    return false;
+  }
+
+  char buffer[64] = {};
+  std::memcpy(buffer, value.begin, length);
+  buffer[length] = '\0';
+
+  char *parseEnd = nullptr;
+  const double parsed = std::strtod(buffer, &parseEnd);
+  if (parseEnd != (buffer + static_cast<std::ptrdiff_t>(length)) ||
+      !std::isfinite(parsed)) {
+    return false;
+  }
+
+  *outValue = parsed;
+  return true;
+}
+
+bool JsonParser::as_int64(const JsonValue &value,
+                          std::int64_t *outValue) const noexcept {
+  if ((outValue == nullptr) || (value.type != JsonValue::Type::Number) ||
+      (value.begin == nullptr) || (value.end == nullptr) ||
+      (value.end <= value.begin)) {
+    return false;
+  }
+
+  const char *cursor = value.begin;
+  const bool negative = (*cursor == '-');
+  if (negative) {
+    ++cursor;
+    if (cursor >= value.end) {
+      return false;
+    }
+  }
+
+  // Accumulate as a magnitude so INT64_MIN parses without overflow.
+  std::uint64_t magnitude = 0U;
+  const std::uint64_t limit = negative
+                                  ? (static_cast<std::uint64_t>(INT64_MAX) + 1U)
+                                  : static_cast<std::uint64_t>(INT64_MAX);
+  while (cursor < value.end) {
+    if (!is_digit(*cursor)) {
+      return false; // a fraction or exponent: not an integer literal
+    }
+    const std::uint64_t digit = static_cast<std::uint64_t>(*cursor - '0');
+    if ((magnitude > (limit / 10U)) ||
+        ((magnitude == (limit / 10U)) && (digit > (limit % 10U)))) {
+      return false;
+    }
+    magnitude = (magnitude * 10U) + digit;
+    ++cursor;
+  }
+
+  *outValue = negative ? static_cast<std::int64_t>(0U - magnitude)
+                       : static_cast<std::int64_t>(magnitude);
   return true;
 }
 
