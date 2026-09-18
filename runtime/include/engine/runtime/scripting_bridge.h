@@ -150,14 +150,17 @@ struct RuntimeServices final {
                       float z) noexcept = nullptr;
   bool (*get_gravity)(runtime::World *world, float *outX, float *outY,
                       float *outZ) noexcept = nullptr;
+  /// Ray queries take the same skipEntityIndex as the sweeps (0 for none):
+  /// that entity's colliders and the compound colliders it owns are excluded.
   bool (*raycast)(runtime::World *world, float ox, float oy, float oz, float dx,
                   float dy, float dz, float maxDistance,
-                  RuntimeRaycastHit *outHit) noexcept = nullptr;
+                  RuntimeRaycastHit *outHit,
+                  std::uint32_t skipEntityIndex) noexcept = nullptr;
   std::size_t (*raycast_all)(runtime::World *world, float ox, float oy,
                              float oz, float dx, float dy, float dz,
                              float maxDistance, RuntimeRaycastHit *outHits,
-                             std::size_t maxHits,
-                             std::uint32_t mask) noexcept = nullptr;
+                             std::size_t maxHits, std::uint32_t mask,
+                             std::uint32_t skipEntityIndex) noexcept = nullptr;
   std::size_t (*overlap_sphere)(runtime::World *world, float cx, float cy,
                                 float cz, float radius,
                                 std::uint32_t *outEntityIndices,

@@ -571,6 +571,82 @@ int test_sweep_sphere_skip_entity() noexcept {
   return 0;
 }
 
+// Raycast skip parity (#537 item 3): skipEntity excludes the entity's own
+// collider plus the compound colliders it owns, in raycast and raycast_all
+// alike, so a ground probe from a compound root does not hit its own child.
+int test_raycast_skip_entity() noexcept {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 1;
+  }
+
+  Transform selfLocal{};
+  const Entity self = world->create_scene_object(selfLocal);
+  Collider selfCol{};
+  selfCol.halfExtents = math::Vec3(0.5F, 0.5F, 0.5F);
+  engine::runtime::RigidBody body{};
+  body.inverseMass = 1.0F;
+  if (!world->add_collider(self, selfCol) || !world->add_rigid_body(self, body)) {
+    return 2;
+  }
+
+  Transform childLocal{};
+  childLocal.position = math::Vec3(2.0F, 0.0F, 0.0F);
+  childLocal.parentId = world->persistent_id(self);
+  const Entity child = world->create_scene_object(childLocal);
+  Collider childCol{};
+  childCol.halfExtents = math::Vec3(0.5F, 0.5F, 0.5F);
+  if (!world->add_collider(child, childCol)) {
+    return 3;
+  }
+
+  const Entity wall = make_box(*world, math::Vec3(6.0F, 0.0F, 0.0F),
+                               math::Vec3(0.5F, 2.0F, 2.0F));
+  world->begin_transform_phase();
+  world->end_frame_phase();
+
+  // From inside the root, +X: without a skip the compound body (the root
+  // itself or the child's face at 1.5) is hit first; skipping the root
+  // must skip its child too, leaving the wall face at 5.5.
+  PhysicsRaycastHit hit{};
+  if (!physics::raycast(*world, math::Vec3(0.0F, 0.0F, 0.0F),
+                        math::Vec3(1.0F, 0.0F, 0.0F), 20.0F, &hit) ||
+      (hit.entity == wall)) {
+    std::printf("FAIL raycast_skip_entity: default ray missed the compound\n");
+    return 4;
+  }
+  if (!physics::raycast(*world, math::Vec3(0.0F, 0.0F, 0.0F),
+                        math::Vec3(1.0F, 0.0F, 0.0F), 20.0F, &hit, self)) {
+    std::printf("FAIL raycast_skip_entity: no hit past the compound\n");
+    return 5;
+  }
+  if ((hit.entity != wall) || (std::fabs(hit.distance - 5.5F) > 0.0001F)) {
+    std::printf("FAIL raycast_skip_entity: hit entity %u at %.3f (expected "
+                "the wall at 5.5)\n",
+                hit.entity.index, hit.distance);
+    return 6;
+  }
+
+  PhysicsRaycastHit hits[8]{};
+  const std::size_t all = physics::raycast_all(
+      *world, math::Vec3(-3.0F, 0.0F, 0.0F), math::Vec3(1.0F, 0.0F, 0.0F),
+      20.0F, hits, 8U);
+  if (all != 3U) {
+    std::printf("FAIL raycast_skip_entity: raycast_all count=%zu (expected 3)\n",
+                all);
+    return 7;
+  }
+  const std::size_t skipped = physics::raycast_all(
+      *world, math::Vec3(-3.0F, 0.0F, 0.0F), math::Vec3(1.0F, 0.0F, 0.0F),
+      20.0F, hits, 8U, 0xFFFFFFFFU, self);
+  if ((skipped != 1U) || (hits[0].entity != wall)) {
+    std::printf("FAIL raycast_skip_entity: raycast_all with skip count=%zu\n",
+                skipped);
+    return 8;
+  }
+  return 0;
+}
+
 // Sweep-box skip parity (#99): skipEntity excludes the entity's own collider
 // plus compound colliders it owns, while other colliders still hit.
 int test_sweep_box_skip_entity() noexcept {
@@ -728,6 +804,7 @@ int main() {
       {"parented_trs_collider_queries", test_parented_trs_collider_queries},
       {"sweep_sphere_skip_entity", test_sweep_sphere_skip_entity},
       {"sweep_box_skip_entity", test_sweep_box_skip_entity},
+      {"raycast_skip_entity", test_raycast_skip_entity},
       {"raycast_hits_hugely_scaled_colliders",
        test_raycast_hits_hugely_scaled_colliders},
   };

@@ -242,14 +242,18 @@ bool scripting_get_gravity(runtime::World *world, float *outX, float *outY,
 
 bool scripting_raycast(runtime::World *world, float ox, float oy, float oz,
                        float dx, float dy, float dz, float maxDistance,
-                       scripting::RuntimeRaycastHit *outHit) noexcept {
+                       scripting::RuntimeRaycastHit *outHit,
+                       std::uint32_t skipEntityIndex) noexcept {
   if ((world == nullptr) || (outHit == nullptr)) {
     return false;
   }
 
+  const runtime::Entity skipEntity =
+      (skipEntityIndex != 0U) ? world->find_entity_by_index(skipEntityIndex)
+                              : runtime::kInvalidEntity;
   runtime::PhysicsRaycastHit hit{};
   if (!runtime::raycast(*world, math::Vec3(ox, oy, oz), math::Vec3(dx, dy, dz),
-                        maxDistance, &hit)) {
+                        maxDistance, &hit, skipEntity)) {
     return false;
   }
 
@@ -268,17 +272,20 @@ std::size_t scripting_raycast_all(runtime::World *world, float ox, float oy,
                                   float oz, float dx, float dy, float dz,
                                   float maxDistance,
                                   scripting::RuntimeRaycastHit *outHits,
-                                  std::size_t maxHits,
-                                  std::uint32_t mask) noexcept {
+                                  std::size_t maxHits, std::uint32_t mask,
+                                  std::uint32_t skipEntityIndex) noexcept {
   if ((world == nullptr) || (outHits == nullptr) || (maxHits == 0U)) {
     return 0U;
   }
   constexpr std::size_t kLocalMax = 32U;
   const std::size_t cap = maxHits < kLocalMax ? maxHits : kLocalMax;
+  const runtime::Entity skipEntity =
+      (skipEntityIndex != 0U) ? world->find_entity_by_index(skipEntityIndex)
+                              : runtime::kInvalidEntity;
   runtime::PhysicsRaycastHit hits[kLocalMax]{};
-  const std::size_t count = runtime::raycast_all(*world, math::Vec3(ox, oy, oz),
-                                                 math::Vec3(dx, dy, dz),
-                                                 maxDistance, hits, cap, mask);
+  const std::size_t count = runtime::raycast_all(
+      *world, math::Vec3(ox, oy, oz), math::Vec3(dx, dy, dz), maxDistance,
+      hits, cap, mask, skipEntity);
   for (std::size_t i = 0U; i < count; ++i) {
     outHits[i].entityIndex = hits[i].entity.index;
     outHits[i].distance = hits[i].distance;

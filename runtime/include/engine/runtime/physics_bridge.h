@@ -42,6 +42,7 @@ void dispatch_collision_callbacks(World &world) noexcept;
 
 /// Closest-hit raycast using a normalized copy of direction; false when
 /// maxDistance is not finite and positive or nothing is hit within it.
+/// skipEntity excludes that entity and the compound colliders it owns.
 bool raycast(const World &world, const math::Vec3 &origin,
              const math::Vec3 &direction, float maxDistance,
              PhysicsRaycastHit *outHit,
@@ -101,11 +102,13 @@ const physics::HeightfieldData *get_heightfield_data(
 
 // Physics queries (P1-M3-D)
 /// Returns the nearest maxHits intersections sorted by distance, normalizing
-/// direction internally; maxDistance must be finite and positive.
+/// direction internally; maxDistance must be finite and positive. skipEntity
+/// follows the raycast rule.
 std::size_t raycast_all(const World &world, const math::Vec3 &origin,
                         const math::Vec3 &direction, float maxDistance,
                         PhysicsRaycastHit *outHits, std::size_t maxHits,
-                        std::uint32_t mask = 0xFFFFFFFFU) noexcept;
+                        std::uint32_t mask = 0xFFFFFFFFU,
+                        Entity skipEntity = kInvalidEntity) noexcept;
 
 /// Collects entity indices overlapping the sphere (mask-filtered);
 /// returns the hit count.

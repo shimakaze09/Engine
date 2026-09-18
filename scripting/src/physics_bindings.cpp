@@ -325,6 +325,12 @@ int lua_engine_get_gravity(lua_State *state) noexcept {
   return 3;
 }
 
+bool read_optional_skip_entity(lua_State *state, int index,
+                               std::uint32_t *outSkipIndex) noexcept;
+
+// engine.raycast(ox,oy,oz, dx,dy,dz, max_dist [, skip_entity])
+// skip_entity excludes that entity's colliders and any compound-body
+// colliders it owns, as the sweeps do (#537).
 int lua_engine_raycast(lua_State *state) noexcept {
   if (runtime_binding().world == nullptr) {
     lua_pushnil(state);
@@ -333,9 +339,11 @@ int lua_engine_raycast(lua_State *state) noexcept {
   math::Vec3 origin{};
   math::Vec3 direction{};
   float maxDist = 0.0F;
+  std::uint32_t skipIndex = 0U;
   if (!read_vec3_args(state, 1, &origin) ||
       !read_vec3_args(state, 4, &direction) ||
-      !read_finite_number_arg(state, 7, &maxDist)) {
+      !read_finite_number_arg(state, 7, &maxDist) ||
+      !read_optional_skip_entity(state, 8, &skipIndex)) {
     lua_pushnil(state);
     return 1;
   }
@@ -345,7 +353,7 @@ int lua_engine_raycast(lua_State *state) noexcept {
       !runtime_binding().services->raycast(runtime_binding().world, origin.x,
                                            origin.y, origin.z, direction.x,
                                            direction.y, direction.z, maxDist,
-                                           &hit)) {
+                                           &hit, skipIndex)) {
     lua_pushnil(state);
     return 1;
   }
@@ -360,7 +368,8 @@ int lua_engine_raycast(lua_State *state) noexcept {
   return 8;
 }
 
-// engine.raycast_all(ox,oy,oz, dx,dy,dz, max_dist [, mask]) → table of hits
+// engine.raycast_all(ox,oy,oz, dx,dy,dz, max_dist [, mask [, skip_entity]])
+// → table of hits; skip_entity follows the raycast rule.
 int lua_engine_raycast_all(lua_State *state) noexcept {
   if ((runtime_binding().world == nullptr) || (runtime_binding().services == nullptr) ||
       (runtime_binding().services->raycast_all == nullptr)) {
@@ -380,12 +389,17 @@ int lua_engine_raycast_all(lua_State *state) noexcept {
       lua_isnumber(state, 8)
           ? static_cast<std::uint32_t>(lua_tointeger(state, 8))
           : 0xFFFFFFFFU;
+  std::uint32_t skipIndex = 0U;
+  if (!read_optional_skip_entity(state, 9, &skipIndex)) {
+    lua_newtable(state);
+    return 1;
+  }
 
   constexpr std::size_t kMaxHits = 32U;
   RuntimeRaycastHit hits[kMaxHits]{};
   const std::size_t count = runtime_binding().services->raycast_all(
       runtime_binding().world, origin.x, origin.y, origin.z, direction.x,
-      direction.y, direction.z, maxDist, hits, kMaxHits, mask);
+      direction.y, direction.z, maxDist, hits, kMaxHits, mask, skipIndex);
 
   lua_createtable(state, static_cast<int>(count), 0);
   for (std::size_t i = 0U; i < count; ++i) {
@@ -477,7 +491,7 @@ int lua_engine_overlap_box(lua_State *state) noexcept {
   return 1;
 }
 
-/// Decodes the optional trailing skip-entity argument for a sweep binding.
+/// Decodes the optional trailing skip-entity argument for a query binding.
 /// Returns false when a present argument is not a live entity handle.
 bool read_optional_skip_entity(lua_State *state, int index,
                                std::uint32_t *outSkipIndex) noexcept {
@@ -488,7 +502,7 @@ bool read_optional_skip_entity(lua_State *state, int index,
   runtime::Entity skipEntity{};
   if (!read_entity(state, index, &skipEntity)) {
     core::log_message(core::LogLevel::Warning, "scripting",
-                      "sweep skip entity is invalid or stale");
+                      "query skip entity is invalid or stale");
     return false;
   }
   *outSkipIndex = skipEntity.index;

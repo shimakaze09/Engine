@@ -279,9 +279,9 @@ const physics::HeightfieldData *get_heightfield_data(const World &world,
 std::size_t raycast_all(const World &world, const math::Vec3 &origin,
                         const math::Vec3 &direction, float maxDistance,
                         PhysicsRaycastHit *outHits, std::size_t maxHits,
-                        std::uint32_t mask) noexcept {
+                        std::uint32_t mask, Entity skipEntity) noexcept {
   return physics::raycast_all(world, origin, direction, maxDistance, outHits,
-                              maxHits, mask);
+                              maxHits, mask, skipEntity);
 }
 
 std::size_t overlap_sphere(const World &world, const math::Vec3 &center,
