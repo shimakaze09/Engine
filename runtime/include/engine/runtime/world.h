@@ -364,9 +364,6 @@ public:
                           NameComponent *outComponent) const noexcept;
   /// Pointer to the entity's name component, or nullptr when the handle is
   /// stale or the component is absent (no logging).
-  NameComponent *get_name_component_ptr(Entity entity) noexcept;
-  /// Pointer to the entity's name component, or nullptr when the handle is
-  /// stale or the component is absent (no logging).
   const NameComponent *get_name_component_ptr(Entity entity) const noexcept;
   /// Finds the matching object or resource for entity by name.
   Entity find_entity_by_name(const char *name) const noexcept;
@@ -922,7 +919,12 @@ private:
   template <typename Set, typename Component>
   bool get_component_checked(const Set &set, Entity entity, Component *out,
                              const char *label) const noexcept;
-  /// Liveness-guarded SparseSet pointer lookup (silent on miss).
+  /// Liveness-guarded SparseSet pointer lookup (silent on miss). The
+  /// mutable form is the owning system's write path in the phase that
+  /// system runs (animation, camera, spring arm, render prep); it is not
+  /// phase-gated like add/remove and the Transform write path, and it
+  /// maintains no derived table — a component with derived state (the
+  /// name lookup) exposes no mutable pointer at all (#569).
   template <typename Set>
   auto *get_component_ptr_checked(Set &set, Entity entity) noexcept {
     if (!is_valid_entity(entity)) {

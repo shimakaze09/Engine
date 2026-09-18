@@ -72,8 +72,12 @@ assumption stands.
   validates World identity. Generation reuse must not silently alias a
   stale handle within the supported lifetime; capacity and wrap behavior
   require explicit tests.
-- Component mutation is legal only in `WorldPhase::Input`. Writable
-  transforms during Simulation require the `SimulationAccessToken`. Never
+- Adding and removing components is legal only in a mutation phase
+  (`WorldPhase::Input`, `BeginPlay`, `EndPlay`). Writable transforms
+  during Simulation require the `SimulationAccessToken`; every other
+  component's mutable pointer is its owning system's write path in the
+  phase that system runs and maintains no derived table, so a component
+  with derived state (the name lookup) exposes no mutable pointer. Never
   break transform double-buffering or persistent-id behavior.
 - User-facing objects are created through `create_scene_object` and always
   own a non-removable Transform; `create_entity` is the internal bare-ECS

@@ -688,10 +688,6 @@ bool World::get_name_component(Entity entity,
                                "get_name_component");
 }
 
-NameComponent *World::get_name_component_ptr(Entity entity) noexcept {
-  return get_component_ptr_checked(m_nameComponents, entity);
-}
-
 const NameComponent *
 World::get_name_component_ptr(Entity entity) const noexcept {
   return get_component_ptr_checked(m_nameComponents, entity);
