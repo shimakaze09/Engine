@@ -132,6 +132,11 @@ void watch_script_file(const char *path) noexcept;
 /// Count of scripts currently in the hot-reload watch table; unchanged by
 /// a rejected (over-long or jailed) watch_script_file call.
 std::size_t watched_script_count() noexcept;
+/// File-timestamp polls the entity script module cache has made since
+/// scripting initialized. A dispatch frame polls each cached module at
+/// most once however many entities share it (#528); tests pin the cadence
+/// with the delta between frames.
+std::uint64_t entity_script_mtime_polls() noexcept;
 
 // Reload changed watched scripts atomically; failed execution restores all
 // previous top-level global bindings.
