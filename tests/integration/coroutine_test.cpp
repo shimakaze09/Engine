@@ -519,6 +519,93 @@ bool test_invalid_waits_do_not_consume_slots() noexcept {
 } // namespace
 
 /// Runs this executable or test program.
+/// Regression for issue #521: a timer armed from inside a coroutine must
+/// not make that coroutine's thread the state later timers dispatch on.
+///
+/// start_coroutine resumes immediately, so engine.set_timeout called from a
+/// coroutine body runs on the coroutine's lua_State. The binding used to
+/// cache that thread, and a second timer firing later in the SAME
+/// TimerManager::tick then ran lua_pcall on it — a thread that had since
+/// yielded, whose stack Lua only guards with an api_check in debug builds.
+/// The same cached pointer was used for luaL_unref after the coroutine
+/// finished and its thread was collected.
+///
+/// The scenario is built exactly that way: timer1's callback starts a
+/// coroutine that arms a third timer and then yields, and timer2 fires
+/// after it within the same tick.
+bool test_timer_armed_in_coroutine_does_not_capture_its_thread() noexcept {
+  engine::scripting::initialize_scripting();
+  auto world = std::unique_ptr<engine::runtime::World>(
+      new (std::nothrow) engine::runtime::World());
+  if (!world) {
+    return false;
+  }
+  engine::core::ServiceLocator serviceLocator{};
+  engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
+  engine::scripting::set_default_mesh_asset_id(1U);
+
+  const char *script =
+      "local armed = nil\n"
+      "function on_start()\n"
+      // The body arms a timer and returns without yielding, so the
+      // coroutine finishes during start_coroutine's immediate resume and
+      // its thread is unref'd — while the base revision still held that
+      // thread pointer as the timer ref state.
+      "  engine.start_coroutine(function()\n"
+      "    armed = engine.set_timeout(function()\n"
+      "      local e = engine.spawn_entity()\n"
+      "      engine.set_name(e, 'armed_fired')\n"
+      "    end, 100.0)\n"
+      "  end)\n"
+      "end\n"
+      "function on_collect()\n"
+      "  collectgarbage('collect')\n"
+      "  collectgarbage('collect')\n"
+      "end\n"
+      // Reached before any timer tick, so the base revision had not yet
+      // reset its cached state: luaL_unref ran on the freed thread.
+      "function on_cancel()\n"
+      "  engine.cancel_timer(armed)\n"
+      "end\n";
+
+  if (!write_script(script) || !engine::scripting::load_script(kTempScript)) {
+    engine::scripting::shutdown_scripting();
+    remove_script();
+    return false;
+  }
+
+  engine::scripting::set_frame_time(0.0F, 0.0F);
+  engine::scripting::set_frame_index(0U);
+  engine::scripting::call_script_function("on_start");
+
+  // Let the scheduler drop the finished coroutine's entry, then collect.
+  engine::scripting::set_frame_time(0.016F, 0.016F);
+  engine::scripting::set_frame_index(1U);
+  engine::scripting::tick_coroutines();
+  engine::scripting::call_script_function("on_collect");
+
+  bool ok = engine::scripting::active_timer_ref_count() == 1U;
+
+  // Deliberately no tick_timers() before this: the base revision reset its
+  // cached state at the top of each timer tick, so a tick here would hide
+  // the defect.
+  engine::scripting::call_script_function("on_cancel");
+  ok = ok && (engine::scripting::active_timer_ref_count() == 0U);
+
+  // The cancelled timer must not fire afterwards.
+  engine::scripting::set_frame_time(200.0F, 200.0F);
+  engine::scripting::set_frame_index(2U);
+  engine::scripting::tick_timers();
+  ok = ok && (count_named(world.get(), "armed_fired") == 0);
+
+  engine::scripting::clear_timers();
+  ok = ok && (engine::scripting::active_timer_ref_count() == 0U);
+
+  engine::scripting::shutdown_scripting();
+  remove_script();
+  return ok;
+}
+
 int main() {
   struct TestCase {
     const char *name;
@@ -534,6 +621,8 @@ int main() {
       {"clear_coroutines", test_clear},
       {"invalid_waits_do_not_consume_slots",
        test_invalid_waits_do_not_consume_slots},
+      {"timer_armed_in_coroutine_does_not_capture_its_thread",
+       test_timer_armed_in_coroutine_does_not_capture_its_thread},
   };
 
   int failures = 0;
