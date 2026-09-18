@@ -2288,9 +2288,13 @@ int check_heightfield_vs_sphere_collision() {
     return 448;
   }
 
-  // Sphere should have been pushed up.  Its center should be at least at
-  // y >= radius (0.5) minus some tolerance.
-  if (outSph.position.y < 0.3F) {
+  // Derived, not tolerated: the sphere starts at y = -0.3 with r = 0.5 on a
+  // flat field at y = 0, so the overlap is 0.8, and contact resolution
+  // moves a dynamic body by the whole overlap against a static one. One
+  // resolve therefore lands the centre at exactly y = 0.5 up to float
+  // rounding on -0.3; 1e-4 is ~1000 ulps of headroom. The previous bound
+  // (y >= 0.3) accepted a body left 40% of its radius inside the terrain.
+  if (std::fabs(outSph.position.y - 0.5F) > 1.0e-4F) {
     return 449;
   }
 
@@ -2438,8 +2442,10 @@ int check_raycast_hits_heightfield() {
   if (!found) {
     return 455;
   }
-  // Should hit at y=0, so distance ≈ 10.
-  if (std::fabs(hit.distance - 10.0F) > 0.5F) {
+  // Exact hit at y=0 from y=10 straight down: t = 10. A ray-plane solve is
+  // one division; 1e-4 is ~100 ulps at this magnitude. The previous 0.5
+  // would have accepted a hit anywhere within half a metre of the surface.
+  if (std::fabs(hit.distance - 10.0F) > 1.0e-4F) {
     return 456;
   }
   // Normal should point up.

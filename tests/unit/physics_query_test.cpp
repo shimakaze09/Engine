@@ -83,8 +83,12 @@ int test_raycast_all_3_spheres() noexcept {
     }
   }
 
-  // First hit should be near x=1.5 (sphere at x=2 with radius 0.5).
-  if (std::fabs(hits[0U].distance - 1.5F) > 0.2F) {
+  // First hit is analytically exact: an axis-aligned ray from the origin
+  // meets the sphere at x=2 r=0.5 at t = 1.5. The quadratic solve costs a
+  // handful of ulps at this magnitude (ulp ≈ 1.2e-7), so 1e-5 is ~80 ulps
+  // of headroom; the previous 0.2 could not have caught a hit on the far
+  // side of the sphere (t = 2.5 was only 1.0 away).
+  if (std::fabs(hits[0U].distance - 1.5F) > 1.0e-5F) {
     std::printf("FAIL raycast_all_3_spheres: first hit dist=%.3f\n",
                 hits[0U].distance);
     return 4;
