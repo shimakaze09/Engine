@@ -5,6 +5,7 @@
 #include <limits>
 #include <memory>
 #include <new>
+#include <vector>
 
 #include "engine/physics/physics.h"
 #include "engine/runtime/physics_bridge.h"
@@ -310,6 +311,56 @@ int verify_hierarchical_transform_propagation() {
 
   world->begin_render_phase();
   world->end_frame_phase();
+  return 0;
+}
+
+/// #516: erase_persistent_index rebuilds the index from the alive arrays
+/// once tombstones pass a quarter of capacity. On base the entity being
+/// destroyed was still marked alive during that rebuild, so its id was
+/// re-inserted as it was erased and could never be created again; a
+/// surviving child's parentId then resolved to whatever next took the index.
+/// Every destroy here is followed by re-creating the same id, so whichever
+/// destroy triggers the rebuild is checked.
+int verify_persistent_index_rebuild_drops_dying_entity() {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 240;
+  }
+
+  constexpr std::uint32_t kBaseId = 700000U;
+  // Create every id first and destroy them all afterwards: with no insert
+  // between the erases nothing reclaims a tombstone, so the count passes
+  // the capacity / 4 threshold inside the destroy loop and exactly one
+  // destroy runs the rebuild. Interleaving create and destroy would let
+  // each re-create reclaim the tombstone it just left and never rebuild.
+  const std::size_t count =
+      (engine::runtime::World::kPersistentIndexCapacity / 4U) + 64U;
+  std::vector<engine::runtime::Entity> entities(count);
+  for (std::size_t i = 0U; i < count; ++i) {
+    entities[i] = world->create_entity_with_persistent_id(
+        kBaseId + static_cast<std::uint32_t>(i));
+    if (entities[i] == engine::runtime::kInvalidEntity) {
+      return 241;
+    }
+  }
+  for (std::size_t i = 0U; i < count; ++i) {
+    if (!world->destroy_entity(entities[i])) {
+      return 242;
+    }
+  }
+  for (std::size_t i = 0U; i < count; ++i) {
+    const engine::runtime::PersistentId id =
+        kBaseId + static_cast<std::uint32_t>(i);
+    if (world->find_entity_by_persistent_id(id) !=
+        engine::runtime::kInvalidEntity) {
+      return 243;
+    }
+    if (world->create_entity_with_persistent_id(id) ==
+        engine::runtime::kInvalidEntity) {
+      return 244; // the destroyed id is still in the index
+    }
+  }
   return 0;
 }
 
@@ -1194,6 +1245,11 @@ int main() {
   }
 
   result = verify_persistent_index_tombstones();
+  if (result != 0) {
+    return result;
+  }
+
+  result = verify_persistent_index_rebuild_drops_dying_entity();
   if (result != 0) {
     return result;
   }

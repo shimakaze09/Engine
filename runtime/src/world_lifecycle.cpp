@@ -214,7 +214,13 @@ bool World::destroy_single_entity(Entity entity) noexcept {
   remove_all_components(entity);
 
   const std::uint32_t index = entity.index;
-  erase_persistent_index(m_entityPersistentIds[index]);
+  // The entity leaves the alive arrays before its persistent id leaves the
+  // index: erase_persistent_index may rebuild the index from those arrays
+  // once tombstones dominate, and a rebuild that still saw this entity as
+  // alive re-inserted the id it was erasing (#516). The stale mapping then
+  // blocked re-creating the id and let a surviving child's parentId resolve
+  // to whichever entity next took this index.
+  const PersistentId persistentId = m_entityPersistentIds[index];
   m_entityAlive[index] = false;
   if (!m_entityBeginPlayFired[index] && (m_beginPlayPendingCount > 0U)) {
     --m_beginPlayPendingCount;
@@ -224,6 +230,7 @@ bool World::destroy_single_entity(Entity entity) noexcept {
   if (m_aliveEntityCount > 0U) {
     --m_aliveEntityCount;
   }
+  erase_persistent_index(persistentId);
 
   ++m_entityGenerations[index];
   if (m_entityGenerations[index] == 0U) {
