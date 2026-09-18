@@ -590,6 +590,20 @@ if(ENGINE_BUILD_TOOLS)
             SKIP_REGULAR_EXPRESSION "SKIPPED:"
     )
 
+    add_test(
+        NAME engine_integration_asset_packer_double_cook
+        COMMAND ${CMAKE_COMMAND}
+            "-DASSET_PACKER=$<TARGET_FILE:asset_packer>"
+            "-DSRC_GLTF=${CMAKE_SOURCE_DIR}/assets/character.gltf"
+            "-DSRC_BIN=${CMAKE_SOURCE_DIR}/assets/character.bin"
+            "-DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/double_cook_work"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/asset_packer_double_cook_test.cmake
+    )
+    set_tests_properties(
+        engine_integration_asset_packer_double_cook
+        PROPERTIES LABELS integration
+    )
+
     engine_add_executable_target(asset_stale_load_host
         SOURCES
         asset_stale_load_test.cpp

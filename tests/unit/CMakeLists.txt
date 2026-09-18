@@ -1229,19 +1229,6 @@ engine_add_test_executable(engine_unit_lru_cache
     engine_content
 )
 
-# ---- P1-M4-E: Deterministic Cooking ----
-
-engine_add_test_executable(engine_unit_deterministic_cook
-    SOURCES
-    deterministic_cook_test.cpp
-    PRIVATE_DEPS
-    engine_core
-)
-
-if(WIN32)
-    target_compile_definitions(engine_unit_deterministic_cook PRIVATE _CRT_SECURE_NO_WARNINGS)
-endif()
-
 engine_add_test_executable(engine_unit_import_settings
     SOURCES
     import_settings_test.cpp
