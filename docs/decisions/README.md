@@ -23,3 +23,4 @@ history.
 | [0010](0010-handles-bump-on-release.md) | A generational handle always bumps on release | 2026-09-18 |
 | [0011](0011-budgets-check-the-handle.md) | An input budget is enforced on the handle that is read | 2026-09-18 |
 | [0012](0012-defect-budget-is-a-flow-rule.md) | The defect budget is a flow rule, not a ceiling | 2026-09-18 |
+| [0013](0013-malformed-authored-fields-refuse-the-load.md) | A malformed authored field refuses the load | 2026-09-18 |

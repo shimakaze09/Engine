@@ -928,6 +928,94 @@ int verify_foliage_parse_failures_reject_scene() {
 }
 
 
+/// Regression for #314: the four float fields that used to discard their
+/// parse result must refuse a present-but-malformed value like every
+/// sibling field in the same readers.
+///
+/// Before the fix a `"roughness": "0.5"` loaded as the component default
+/// with no diagnostic, and the next save persisted that default over the
+/// authored value — so opening and saving a hand-edited or bit-rotted
+/// scene destroyed the original field. Absent must still take the default,
+/// which is what makes the strictness safe to adopt.
+int verify_material_and_light_float_fields_reject_malformed() {
+  struct Case {
+    const char *json;
+    int code;
+  };
+
+  const Case malformed[] = {
+      {"{\"version\":2,\"entities\":[{\"components\":{"
+       "\"MeshComponent\":{\"meshAssetId\":7,\"roughness\":\"0.5\"}}}]}",
+       431},
+      {"{\"version\":2,\"entities\":[{\"components\":{"
+       "\"MeshComponent\":{\"meshAssetId\":7,\"metallic\":\"shiny\"}}}]}",
+       432},
+      {"{\"version\":2,\"entities\":[{\"components\":{"
+       "\"MeshComponent\":{\"meshAssetId\":7,\"opacity\":null}}}]}",
+       433},
+      {"{\"version\":2,\"entities\":[{\"components\":{"
+       "\"MeshComponent\":{\"meshAssetId\":7,\"roughness\":true}}}]}",
+       434},
+      {"{\"version\":2,\"entities\":[{\"components\":{"
+       "\"LightComponent\":{\"intensity\":\"bright\"}}}]}",
+       435},
+  };
+
+  for (const Case &testCase : malformed) {
+    std::unique_ptr<engine::runtime::World> world(
+        new (std::nothrow) engine::runtime::World());
+    if (world == nullptr) {
+      return testCase.code;
+    }
+    if (engine::runtime::load_scene(*world, testCase.json,
+                                    std::strlen(testCase.json))) {
+      return testCase.code;
+    }
+    // Refusal leaves the destination untouched.
+    if (world->alive_entity_count() != 0U) {
+      return testCase.code;
+    }
+  }
+
+  // Present and valid still round-trips.
+  constexpr const char *kValidScene =
+      "{\"version\":2,\"entities\":[{\"components\":{"
+      "\"MeshComponent\":{\"meshAssetId\":7,\"roughness\":0.25,"
+      "\"metallic\":0.75,\"opacity\":0.5}}}]}";
+  std::unique_ptr<engine::runtime::World> validWorld(
+      new (std::nothrow) engine::runtime::World());
+  if (validWorld == nullptr) {
+    return 436;
+  }
+  if (!engine::runtime::load_scene(*validWorld, kValidScene,
+                                   std::strlen(kValidScene))) {
+    return 437;
+  }
+  if (validWorld->alive_entity_count() != 1U) {
+    return 438;
+  }
+
+  // Absent keeps the component default: strictness applies to a present
+  // value only, so existing scenes that omit these fields still load.
+  constexpr const char *kAbsentScene =
+      "{\"version\":2,\"entities\":[{\"components\":{"
+      "\"MeshComponent\":{\"meshAssetId\":7}}}]}";
+  std::unique_ptr<engine::runtime::World> absentWorld(
+      new (std::nothrow) engine::runtime::World());
+  if (absentWorld == nullptr) {
+    return 439;
+  }
+  if (!engine::runtime::load_scene(*absentWorld, kAbsentScene,
+                                   std::strlen(kAbsentScene))) {
+    return 440;
+  }
+  if (absentWorld->alive_entity_count() != 1U) {
+    return 441;
+  }
+
+  return 0;
+}
+
 /// Over-capacity authored data must reject the load whole (issue #387): an
 /// overlong entity name, a fourth foliage LOD id, more instances than the
 /// fixed capacity, an instanceCount disagreeing with the instances array,
@@ -2005,6 +2093,11 @@ int main() {
   if (result != 0) {
     static_cast<void>(std::remove(kScenePath));
     static_cast<void>(std::remove(kLargeScenePath));
+    return result;
+  }
+
+  result = verify_material_and_light_float_fields_reject_malformed();
+  if (result != 0) {
     return result;
   }
 
