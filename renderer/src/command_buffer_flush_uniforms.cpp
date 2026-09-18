@@ -91,6 +91,79 @@ void apply_pbr_ibl_uniforms(const BackendState &backend,
   }
 }
 
+namespace {
+
+/// Which scene lights fill the forward program's fixed arrays: the
+/// kForwardMax* nearest the active camera, ties broken by index, so the
+/// lit set is a function of the scene rather than of creation order
+/// (#565). Entries are indices into the scene arrays, nearest first.
+struct ForwardLightSelection final {
+  std::array<std::uint32_t, kForwardMaxPointLights> point{};
+  std::size_t pointCount = 0U;
+  std::array<std::uint32_t, kForwardMaxSpotLights> spot{};
+  std::size_t spotCount = 0U;
+};
+
+template <typename Light>
+std::size_t select_nearest(const Light *lights, std::size_t count,
+                           std::size_t limit, const math::Vec3 &eye,
+                           std::uint32_t *out) noexcept {
+  std::array<std::uint32_t, kMaxPointLights> order{};
+  const std::size_t total = std::min(count, order.size());
+  for (std::size_t i = 0U; i < total; ++i) {
+    order[i] = static_cast<std::uint32_t>(i);
+  }
+  const auto distSq = [&](std::uint32_t index) noexcept {
+    const math::Vec3 &p = lights[index].position;
+    const float dx = p.x - eye.x;
+    const float dy = p.y - eye.y;
+    const float dz = p.z - eye.z;
+    return (dx * dx) + (dy * dy) + (dz * dz);
+  };
+  const std::size_t selected = std::min(total, limit);
+  std::partial_sort(order.data(), order.data() + selected,
+                    order.data() + total,
+                    [&](std::uint32_t a, std::uint32_t b) noexcept {
+                      const float da = distSq(a);
+                      const float db = distSq(b);
+                      return (da < db) || ((da == db) && (a < b));
+                    });
+  for (std::size_t i = 0U; i < selected; ++i) {
+    out[i] = order[i];
+  }
+  return selected;
+}
+
+ForwardLightSelection select_forward_lights(const SceneLightData &lights) noexcept {
+  ForwardLightSelection selection{};
+  const math::Vec3 eye = renderer_context().activeCamera.position;
+  selection.pointCount = select_nearest(
+      lights.pointLights.data(), std::min(lights.pointLightCount, kMaxPointLights),
+      kForwardMaxPointLights, eye, selection.point.data());
+  selection.spotCount = select_nearest(
+      lights.spotLights.data(), std::min(lights.spotLightCount, kMaxSpotLights),
+      kForwardMaxSpotLights, eye, selection.spot.data());
+  return selection;
+}
+
+/// The forward shader matches a shadow slot against its loop position
+/// over the uploaded lights, so a slot's scene index maps to that
+/// position, or -1 when its light was not among the nearest.
+float forward_slot_index(const std::uint32_t *selected, std::size_t count,
+                         int lightIndex) noexcept {
+  if (lightIndex < 0) {
+    return -1.0F;
+  }
+  for (std::size_t i = 0U; i < count; ++i) {
+    if (selected[i] == static_cast<std::uint32_t>(lightIndex)) {
+      return static_cast<float>(i);
+    }
+  }
+  return -1.0F;
+}
+
+} // namespace
+
 void upload_pbr_lighting_uniforms(const BackendState &backend,
                                   const RenderDevice *dev,
                                   const SceneLightData &lights) noexcept {
@@ -125,8 +198,8 @@ void upload_pbr_lighting_uniforms(const BackendState &backend,
                               static_cast<std::int32_t>(dirCount));
   }
 
-  const std::size_t pointCount =
-      std::min(lights.pointLightCount, kForwardMaxPointLights);
+  const ForwardLightSelection selection = select_forward_lights(lights);
+  const std::size_t pointCount = selection.pointCount;
   if (backend.pbrPointLightCountLocation.valid()) {
     dev->set_param_i32(backend.pbrPointLightCountLocation,
                          static_cast<std::int32_t>(pointCount));
@@ -135,7 +208,7 @@ void upload_pbr_lighting_uniforms(const BackendState &backend,
     float posRadius[kForwardMaxPointLights * 4U] = {};
     float colorIntensity[kForwardMaxPointLights * 4U] = {};
     for (std::size_t i = 0U; i < pointCount; ++i) {
-      const auto &pl = lights.pointLights[i];
+      const auto &pl = lights.pointLights[selection.point[i]];
       posRadius[i * 4U + 0U] = pl.position.x;
       posRadius[i * 4U + 1U] = pl.position.y;
       posRadius[i * 4U + 2U] = pl.position.z;
@@ -152,8 +225,7 @@ void upload_pbr_lighting_uniforms(const BackendState &backend,
                               static_cast<std::int32_t>(pointCount));
   }
 
-  const std::size_t spotCount =
-      std::min(lights.spotLightCount, kForwardMaxSpotLights);
+  const std::size_t spotCount = selection.spotCount;
   if (backend.pbrSpotLightCountLocation.valid()) {
     dev->set_param_i32(backend.pbrSpotLightCountLocation,
                          static_cast<std::int32_t>(spotCount));
@@ -164,7 +236,7 @@ void upload_pbr_lighting_uniforms(const BackendState &backend,
     float colorIntensity[kForwardMaxSpotLights * 4U] = {};
     float params[kForwardMaxSpotLights * 4U] = {};
     for (std::size_t i = 0U; i < spotCount; ++i) {
-      const auto &sl = lights.spotLights[i];
+      const auto &sl = lights.spotLights[selection.spot[i]];
       posRadius[i * 4U + 0U] = sl.position.x;
       posRadius[i * 4U + 1U] = sl.position.y;
       posRadius[i * 4U + 2U] = sl.position.z;
@@ -441,6 +513,9 @@ void bind_pbr_shadow_uniforms(const BackendState &backend,
     dev->set_param_i32(backend.pbrSpotShadowMapArrayLoc,
                        kSpotShadowArrayUnit);
   }
+  // Slot indices are scene indices; the forward shader compares them
+  // against its position in the uploaded (nearest) light arrays (#565).
+  const ForwardLightSelection selection = select_forward_lights(lights);
   float spotMatrices[kMaxSpotShadowLights * 16U] = {};
   float spotLightIdx[4] = {};
   for (std::size_t s = 0U; s < kMaxSpotShadowLights; ++s) {
@@ -448,7 +523,8 @@ void bind_pbr_shadow_uniforms(const BackendState &backend,
     std::memcpy(&spotMatrices[s * 16U],
                 &slot.lightViewProjection.columns[0].x,
                 sizeof(float) * 16U);
-    spotLightIdx[s] = static_cast<float>(slot.lightIndex);
+    spotLightIdx[s] = forward_slot_index(selection.spot.data(),
+                                         selection.spotCount, slot.lightIndex);
   }
   if ((dev->set_param_mat4_array != nullptr) &&
       backend.pbrSpotShadowMatrixParam.valid()) {
@@ -484,7 +560,8 @@ void bind_pbr_shadow_uniforms(const BackendState &backend,
     pointPosFar[s * 4U + 1U] = lightPos.y;
     pointPosFar[s * 4U + 2U] = lightPos.z;
     pointPosFar[s * 4U + 3U] = slot.farPlane;
-    pointLightIdx[s] = static_cast<float>(slot.lightIndex);
+    pointLightIdx[s] = forward_slot_index(
+        selection.point.data(), selection.pointCount, slot.lightIndex);
   }
   if ((dev->set_param_vec4_array != nullptr) &&
       backend.pbrPointShadowPosFarParam.valid()) {

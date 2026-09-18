@@ -1278,6 +1278,21 @@ engine_add_test_executable(engine_unit_light_collect_cast_shadow
     engine_runtime
 )
 
+engine_add_test_executable(engine_unit_forward_light_selection
+    SOURCES
+    forward_light_selection_test.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_flush_uniforms.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_context.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_math.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/render_settings.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/renderer/include
+    ${CMAKE_SOURCE_DIR}/renderer/src
+    PRIVATE_DEPS
+    engine_core
+    engine_math
+)
+
 engine_add_test_executable(engine_unit_shadow_caster_flush
     SOURCES
     shadow_caster_flush_test.cpp
