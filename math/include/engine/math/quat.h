@@ -138,9 +138,14 @@ inline bool to_axis_angle(const Quat &value, Vec3 *outAxis,
   }
 
   const Quat normalized = normalize(value);
-  const float angle =
-      2.0F * std::acos(detail::clamp_scalar(normalized.w, -1.0F, 1.0F));
-  const float sinHalf = std::sqrt(1.0F - (normalized.w * normalized.w));
+  // Clamped once and used for both derivations: a w that rounded past ±1
+  // would otherwise reach acos clamped but sqrt(1 - w²) unclamped, and a
+  // negative radicand yields a NaN axis. Not reproduced through normalize()
+  // on x86-64 (402,560 near-unit inputs at -O0 and -O2), so this is
+  // defence-in-depth for other toolchains, not a fix to observed output.
+  const float w = detail::clamp_scalar(normalized.w, -1.0F, 1.0F);
+  const float angle = 2.0F * std::acos(w);
+  const float sinHalf = std::sqrt(1.0F - (w * w));
 
   if (sinHalf <= 1.0e-6F) {
     *outAxis = Vec3(1.0F, 0.0F, 0.0F);
