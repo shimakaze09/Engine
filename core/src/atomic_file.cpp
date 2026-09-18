@@ -115,13 +115,21 @@ bool AtomicFileWriter::commit() noexcept {
 
   // The replacement already happened, so the save is not reportable as a
   // failure — only its power-loss resistance is degraded, and that must
-  // not pass silently.
-  if (outcome == detail::ReplaceOutcome::ReplacedNotDurable) {
+  // not pass silently. Both degraded outcomes are reported: a platform
+  // that offers no directory-sync primitive leaves the entry exactly as
+  // undurable as one whose sync failed, and saying nothing would make
+  // that the one degradation the log never shows.
+  if ((outcome == detail::ReplaceOutcome::ReplacedNotDurable) ||
+      (outcome == detail::ReplaceOutcome::ReplacedDurabilityUnavailable)) {
+    const char *reason =
+        (outcome == detail::ReplaceOutcome::ReplacedNotDurable)
+            ? "could not sync its directory entry"
+            : "has no directory-sync primitive on this platform";
     char message[1152] = {};
     std::snprintf(message, sizeof(message),
-                  "wrote '%s' but could not sync its directory entry: the "
-                  "file is in place and may not survive power loss",
-                  m_destinationPath);
+                  "wrote '%s' but %s: the file is in place and may not "
+                  "survive power loss",
+                  m_destinationPath, reason);
     log_message(LogLevel::Error, "core.atomic_file", message);
   }
 
@@ -174,13 +182,19 @@ bool create_directories_durably(const char *directoryPath) noexcept {
 
   // The directory is in place, so this is not reportable as a failure —
   // only the power-loss resistance of its own entry is degraded, and
-  // that must not pass silently.
-  if (outcome == detail::CreateDirectoryOutcome::CreatedNotDurable) {
+  // that must not pass silently. Both degraded outcomes are reported,
+  // for the reason the commit path reports both.
+  if ((outcome == detail::CreateDirectoryOutcome::CreatedNotDurable) ||
+      (outcome == detail::CreateDirectoryOutcome::CreatedDurabilityUnavailable)) {
+    const char *reason =
+        (outcome == detail::CreateDirectoryOutcome::CreatedNotDurable)
+            ? "could not sync its directory entry"
+            : "has no directory-sync primitive on this platform";
     char message[1152] = {};
     std::snprintf(message, sizeof(message),
-                  "created '%s' but could not sync its directory entry: the "
-                  "directory is in place and may not survive power loss",
-                  directoryPath);
+                  "created '%s' but %s: the directory is in place and may "
+                  "not survive power loss",
+                  directoryPath, reason);
     log_message(LogLevel::Error, "core.atomic_file", message);
   }
   return true;
