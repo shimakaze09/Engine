@@ -165,8 +165,9 @@ bool sanitize_mesh_component_ingress(MeshComponent &component) noexcept {
 // Rebuilds the canonical primitive hull recorded in Collider::hullSource so
 // every collider install path (scene/prefab load, world copy, editor undo,
 // script spawn) restores the payload the component cannot carry itself. On
-// failure the component stays as authored and narrow phase falls back to box
-// behavior — loudly, never silently.
+// failure the component stays as authored and physics treats the
+// payload-less hull as the axis-aligned box of its half extents
+// (make_collider_world_geometry, #520) — loudly, never silently.
 void install_provenance_hull(physics::PhysicsContext &context, Entity entity,
                              const Collider &collider) noexcept {
   if ((collider.shape != ColliderShape::ConvexHull) ||
@@ -180,7 +181,8 @@ void install_provenance_hull(physics::PhysicsContext &context, Entity entity,
     char message[128] = {};
     std::snprintf(message, sizeof(message),
                   "convex hull rebuild failed for entity %u (source %u) — "
-                  "collider falls back to box behavior",
+                  "collider collides as the axis-aligned box of its half "
+                  "extents",
                   entity.index,
                   static_cast<unsigned>(collider.hullSource));
     core::log_message(core::LogLevel::Warning, "world", message);

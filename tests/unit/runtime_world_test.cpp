@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "engine/physics/physics.h"
+#include "engine/physics/physics_context.h"
 #include "engine/runtime/physics_bridge.h"
 #include "engine/runtime/scene_serializer.h"
 #include "engine/runtime/world.h"
@@ -360,6 +361,76 @@ int verify_persistent_index_rebuild_drops_dying_entity() {
         engine::runtime::kInvalidEntity) {
       return 244; // the destroyed id is still in the index
     }
+  }
+  return 0;
+}
+
+/// #520: once the kMaxConvexHulls payload slots are taken, a further
+/// provenance-hull collider installs without a payload. It must still
+/// collide and answer queries — as the axis-aligned box of its half extents,
+/// which is what the install-time log promises — rather than vanish from
+/// every pair and query as a ghost. Driven through World::add_collider and
+/// the production raycast.
+int verify_hull_slot_exhaustion_collides_as_box() {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 250;
+  }
+
+  constexpr std::size_t kCount = engine::physics::kMaxConvexHulls + 1U;
+  constexpr float kSpacing = 4.0F;
+  engine::runtime::Entity first = engine::runtime::kInvalidEntity;
+  engine::runtime::Entity last = engine::runtime::kInvalidEntity;
+  for (std::size_t i = 0U; i < kCount; ++i) {
+    engine::runtime::Transform transform{};
+    transform.position =
+        engine::math::Vec3(kSpacing * static_cast<float>(i), 0.0F, 0.0F);
+    const engine::runtime::Entity entity =
+        world->create_scene_object(transform);
+    engine::runtime::Collider collider{};
+    collider.shape = engine::runtime::ColliderShape::ConvexHull;
+    collider.hullSource = engine::runtime::HullSource::Cylinder;
+    collider.halfExtents = engine::math::Vec3(0.5F, 0.5F, 0.5F);
+    if ((entity == engine::runtime::kInvalidEntity) ||
+        !world->add_collider(entity, collider)) {
+      return 251;
+    }
+    if (i == 0U) {
+      first = entity;
+    }
+    last = entity;
+  }
+  // Precondition of the case: the first hull got a payload, the one past
+  // capacity did not.
+  if (!world->has_convex_hull_payload(first) ||
+      world->has_convex_hull_payload(last)) {
+    return 252;
+  }
+
+  world->begin_update_phase();
+  world->commit_update_phase();
+  world->begin_render_prep_phase();
+  world->end_frame_phase();
+
+  engine::runtime::PhysicsRaycastHit hit{};
+  const float lastX = kSpacing * static_cast<float>(kCount - 1U);
+  if (!engine::runtime::raycast(*world, engine::math::Vec3(lastX, 10.0F, 0.0F),
+                                engine::math::Vec3(0.0F, -1.0F, 0.0F), 100.0F,
+                                &hit) ||
+      (hit.entity != last)) {
+    return 253; // the payload-less hull is a ghost to queries
+  }
+  // The box stands in for the hull exactly: a ray straight down from y=10
+  // onto a half extent of 0.5 meets the top face at distance 9.5.
+  if (hit.distance != 9.5F) {
+    return 254;
+  }
+  if (!engine::runtime::raycast(*world, engine::math::Vec3(0.0F, 10.0F, 0.0F),
+                                engine::math::Vec3(0.0F, -1.0F, 0.0F), 100.0F,
+                                &hit) ||
+      (hit.entity != first)) {
+    return 255;
   }
   return 0;
 }
@@ -1250,6 +1321,11 @@ int main() {
   }
 
   result = verify_persistent_index_rebuild_drops_dying_entity();
+  if (result != 0) {
+    return result;
+  }
+
+  result = verify_hull_slot_exhaustion_collides_as_box();
   if (result != 0) {
     return result;
   }
