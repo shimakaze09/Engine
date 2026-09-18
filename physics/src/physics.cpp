@@ -40,6 +40,27 @@ constexpr std::uint32_t kSpatialHashEmpty = 0xFFFFFFFFU;
 
 constexpr std::uint8_t kSleepFramesRequired = 60U;
 
+// The inverse mass a body answers a contact with. A sleeping body is
+// static to every response path -- positional correction, speculative
+// contacts and the impulse solve alike -- unless its partner is fast
+// enough for record_pair_and_wake to wake it in this same response, in
+// which case it answers with its real mass (#537 item 2). The relaxation
+// pass zeroes sleepers the same way; without this the primary response
+// pushed a sleeper every step while it stayed marked asleep.
+float effective_inverse_mass(const RigidBody *body,
+                             const RigidBody *partner) noexcept {
+  if (body == nullptr) {
+    return kStaticInverseMass;
+  }
+  if (!body->sleeping) {
+    return body->inverseMass;
+  }
+  const bool wokenByPartner =
+      (partner != nullptr) &&
+      (engine::math::length_sq(partner->velocity) > kSleepThreshold);
+  return wokenByPartner ? body->inverseMass : kStaticInverseMass;
+}
+
 // Advances a stamp generation, clearing the stamps on wrap so stale marks
 // can never read as current.
 void begin_generation(std::uint32_t *generation, std::uint32_t *stamps,
@@ -452,10 +473,8 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
         RigidBody *bodyB = (bodyEntityB != kInvalidEntity)
                                ? world.get_rigid_body_ptr(bodyEntityB)
                                : nullptr;
-        const float invMassA =
-            (bodyA != nullptr) ? bodyA->inverseMass : kStaticInverseMass;
-        const float invMassB =
-            (bodyB != nullptr) ? bodyB->inverseMass : kStaticInverseMass;
+        const float invMassA = effective_inverse_mass(bodyA, bodyB);
+        const float invMassB = effective_inverse_mass(bodyB, bodyA);
         const float invMassSum = invMassA + invMassB;
 
         const auto shapeA = colliderA.shape;

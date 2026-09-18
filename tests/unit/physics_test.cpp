@@ -774,6 +774,105 @@ int check_manifold_friction_respects_cone() {
   return 0;
 }
 
+/// Regression for #537 item 2: a sleeping body is static to every response
+/// path, so a slow pusher (below the wake threshold) is stopped by it like
+/// a wall and the sleeper keeps zero velocity and its pose; a fast pusher
+/// still wakes it and moves it.
+int check_sleeping_body_is_static_to_slow_push() {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 920;
+  }
+  world->end_frame_phase();
+
+  const engine::runtime::Entity crate = world->create_entity();
+  const engine::runtime::Entity pusher = world->create_entity();
+  if ((crate == engine::runtime::kInvalidEntity) ||
+      (pusher == engine::runtime::kInvalidEntity)) {
+    return 921;
+  }
+  engine::runtime::Transform crateT{};
+  engine::runtime::Transform pusherT{};
+  pusherT.position = engine::math::Vec3(-0.99F, 0.0F, 0.0F); // 1 cm overlap
+  engine::runtime::Collider box{};
+  box.halfExtents = engine::math::Vec3(0.5F, 0.5F, 0.5F);
+  box.restitution = 0.0F;
+  engine::runtime::RigidBody crateBody{};
+  crateBody.inverseMass = 1.0F;
+  engine::runtime::RigidBody pusherBody{};
+  pusherBody.inverseMass = 1.0F;
+  pusherBody.velocity = engine::math::Vec3(0.05F, 0.0F, 0.0F);
+  if (!world->add_transform(crate, crateT) ||
+      !world->add_transform(pusher, pusherT) ||
+      !world->add_collider(crate, box) || !world->add_collider(pusher, box) ||
+      !world->add_rigid_body(crate, crateBody) ||
+      !world->add_rigid_body(pusher, pusherBody)) {
+    return 922;
+  }
+  engine::runtime::RigidBody *asleep = world->get_rigid_body_ptr(crate);
+  if (asleep == nullptr) {
+    return 923;
+  }
+  asleep->sleeping = true;
+  asleep->sleepFrameCount = 60U;
+
+  const auto step = [&world]() noexcept -> bool {
+    world->begin_update_phase();
+    const bool ok =
+        world->update_transforms_range(0U, world->transform_count(), 0.0F) &&
+        engine::runtime::resolve_collisions(*world);
+    if (!ok) {
+      world->end_frame_phase();
+      return false;
+    }
+    world->commit_update_phase();
+    world->begin_render_prep_phase();
+    world->end_frame_phase();
+    return true;
+  };
+  if (!step()) {
+    return 924;
+  }
+
+  engine::runtime::RigidBody outCrate{};
+  engine::runtime::RigidBody outPusher{};
+  engine::runtime::Transform outCrateT{};
+  if (!world->get_rigid_body(crate, &outCrate) ||
+      !world->get_rigid_body(pusher, &outPusher) ||
+      !world->get_transform(crate, &outCrateT)) {
+    return 925;
+  }
+  if (!outCrate.sleeping) {
+    return 926; // a slow push is below the wake threshold
+  }
+  if ((outCrate.velocity.x != 0.0F) || (outCrate.velocity.y != 0.0F) ||
+      (outCrate.velocity.z != 0.0F)) {
+    return 927; // a body that stays asleep has exactly zero velocity
+  }
+  if (outCrateT.position.x != 0.0F) {
+    return 928; // and is not displaced by the positional correction
+  }
+  if (outPusher.velocity.x > 0.0F) {
+    return 929; // the pusher is stopped as by a wall
+  }
+
+  // A fast pusher wakes the crate and moves it (the first step's
+  // correction separated the pair, so the overlap is restored first).
+  engine::runtime::RigidBody *awakePusher = world->get_rigid_body_ptr(pusher);
+  if ((awakePusher == nullptr) || !world->add_transform(pusher, pusherT)) {
+    return 930;
+  }
+  awakePusher->velocity = engine::math::Vec3(1.0F, 0.0F, 0.0F);
+  if (!step() || !world->get_rigid_body(crate, &outCrate)) {
+    return 931;
+  }
+  if (outCrate.sleeping || (outCrate.velocity.x <= 0.0F)) {
+    return 932;
+  }
+  return 0;
+}
+
 int check_raycast_hits_aabb() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -3875,6 +3974,11 @@ int main() {
   }
 
   result = check_manifold_friction_respects_cone();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_sleeping_body_is_static_to_slow_push();
   if (result != 0) {
     return result;
   }
