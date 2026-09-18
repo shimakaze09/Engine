@@ -104,6 +104,11 @@ constexpr FieldMetadata kFieldMetadataTable[] = {
     {"engine::runtime::PointLightComponent", "radius", "Range", "Light",
      "Distance in meters at which the light's contribution reaches zero.",
      "m", 0.05F, 0.0F, 0.0F, InspectorWidget::Drag, false, false},
+    {"engine::runtime::PointLightComponent", "castShadow", "Cast Shadow",
+     "Light",
+     "Renders a cubemap shadow for this light; the four nearest casters "
+     "shadow each frame.",
+     nullptr, 0.0F, 0.0F, 0.0F, InspectorWidget::Auto, false, false},
 
     {"engine::runtime::SpotLightComponent", "color", "Color", "Light",
      nullptr, nullptr, 0.0F, 0.0F, 0.0F, InspectorWidget::Color, false,
@@ -117,6 +122,11 @@ constexpr FieldMetadata kFieldMetadataTable[] = {
     {"engine::runtime::SpotLightComponent", "outerConeAngle", "Outer Cone",
      "Light", "Falloff cone half-angle; must be >= Inner Cone.", "deg", 1.0F,
      0.0F, 90.0F, InspectorWidget::AngleDegrees, false, false},
+    {"engine::runtime::SpotLightComponent", "castShadow", "Cast Shadow",
+     "Light",
+     "Renders a shadow map for this light; the four nearest casters shadow "
+     "each frame.",
+     nullptr, 0.0F, 0.0F, 0.0F, InspectorWidget::Auto, false, false},
 
     {"engine::runtime::LightComponent", "color", "Color", "Light", nullptr,
      nullptr, 0.0F, 0.0F, 0.0F, InspectorWidget::Color, false, false},

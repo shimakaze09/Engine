@@ -1269,6 +1269,32 @@ engine_add_test_executable(engine_unit_import_settings
 
 # ---- P1-M5: Deferred Rendering ----
 
+engine_add_test_executable(engine_unit_light_collect_cast_shadow
+    SOURCES
+    light_collect_cast_shadow_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/runtime/src
+    PRIVATE_DEPS
+    engine_runtime
+)
+
+engine_add_test_executable(engine_unit_shadow_caster_flush
+    SOURCES
+    shadow_caster_flush_test.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_flush_shadows.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_context.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_math.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/render_settings.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/shadow_map.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/pass_resources.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/renderer/include
+    ${CMAKE_SOURCE_DIR}/renderer/src
+    PRIVATE_DEPS
+    engine_core
+    engine_math
+)
+
 engine_add_test_executable(engine_unit_deferred_light_component
     SOURCES
     deferred_light_component_test.cpp

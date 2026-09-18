@@ -62,6 +62,9 @@ struct PointLightComponent final {
   math::Vec3 color = math::Vec3(1.0F, 1.0F, 1.0F);
   float intensity = 1.0F;
   float radius = 10.0F;
+  /// Renders a cubemap depth pass for this light when set; the four
+  /// nearest flagged lights cast per frame (#522).
+  bool castShadow = false;
 };
 
 /// Spot light: color, direction, cone angles (radians), and radius.
@@ -72,6 +75,9 @@ struct SpotLightComponent final {
   float radius = 10.0F;
   float innerConeAngle = 0.3491F; // ~20 degrees in radians
   float outerConeAngle = 0.5236F; // ~30 degrees in radians
+  /// Renders a depth pass for this light when set; the four nearest
+  /// flagged lights cast per frame (#522).
+  bool castShadow = false;
 };
 
 /// IBL reflection probe: bake resolutions, influence shape, bake flag.
