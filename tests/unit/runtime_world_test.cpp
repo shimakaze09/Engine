@@ -435,7 +435,11 @@ int verify_hull_slot_exhaustion_collides_as_box() {
   return 0;
 }
 
-int verify_transform_cycle_is_stable() {
+/// Regression for #531: a parent id that names the entity itself, one of
+/// its descendants, or closes a loop is refused at add_transform with the
+/// destination unchanged, while a parent that does not exist yet (a scene
+/// forward reference) still roots the child until it appears.
+int verify_transform_cycles_are_rejected() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
   if (world == nullptr) {
@@ -444,39 +448,80 @@ int verify_transform_cycle_is_stable() {
 
   const engine::runtime::Entity first = world->create_entity();
   const engine::runtime::Entity second = world->create_entity();
+  const engine::runtime::Entity third = world->create_entity();
+  const engine::runtime::Entity fourth = world->create_entity();
+  const engine::runtime::Entity fifth = world->create_entity();
   if ((first == engine::runtime::kInvalidEntity) ||
-      (second == engine::runtime::kInvalidEntity)) {
+      (second == engine::runtime::kInvalidEntity) ||
+      (third == engine::runtime::kInvalidEntity) ||
+      (fourth == engine::runtime::kInvalidEntity) ||
+      (fifth == engine::runtime::kInvalidEntity)) {
     return 41;
   }
 
-  engine::runtime::Transform firstTransform{};
-  firstTransform.position = engine::math::Vec3(1.0F, 0.0F, 0.0F);
-  firstTransform.parentId = world->persistent_id(second);
-  if (!world->add_transform(first, firstTransform)) {
+  // Self-parent.
+  engine::runtime::Transform transform{};
+  transform.parentId = world->persistent_id(first);
+  if (world->add_transform(first, transform)) {
     return 42;
   }
-
-  engine::runtime::Transform secondTransform{};
-  secondTransform.position = engine::math::Vec3(0.0F, 1.0F, 0.0F);
-  secondTransform.parentId = world->persistent_id(first);
-  if (!world->add_transform(second, secondTransform)) {
-    return 43;
+  if (world->get_transform_read_ptr(first) != nullptr) {
+    return 43; // the refused add must leave nothing behind
   }
 
-  world->begin_render_prep_phase();
-
-  if (world->get_world_transform_read_ptr(first) == nullptr) {
+  // Two-cycle: first under second is fine, second under first closes it.
+  transform.parentId = world->persistent_id(second);
+  if (!world->add_transform(first, transform)) {
     return 44;
   }
-
-  if (world->get_world_transform_read_ptr(second) == nullptr) {
+  transform.parentId = world->persistent_id(first);
+  if (world->add_transform(second, transform)) {
     return 45;
   }
-
-  if (world->world_transform_count() != 2U) {
+  transform.parentId = engine::runtime::kInvalidPersistentId;
+  if (!world->add_transform(second, transform)) {
     return 46;
   }
 
+  // N-cycle: second > first > third > fourth, then second under fourth.
+  transform.parentId = world->persistent_id(first);
+  if (!world->add_transform(third, transform)) {
+    return 47;
+  }
+  transform.parentId = world->persistent_id(third);
+  if (!world->add_transform(fourth, transform)) {
+    return 48;
+  }
+  transform.parentId = world->persistent_id(fourth);
+  if (world->add_transform(second, transform)) {
+    return 49;
+  }
+  const engine::runtime::Transform *kept = world->get_transform_read_ptr(second);
+  if ((kept == nullptr) ||
+      (kept->parentId != engine::runtime::kInvalidPersistentId)) {
+    return 50; // the refused reparent must keep the previous transform
+  }
+
+  // A parent that does not exist yet is a forward reference, not a cycle.
+  transform.parentId = 987654321U;
+  if (!world->add_transform(fifth, transform)) {
+    return 51;
+  }
+
+  // With no cycle possible, a cascade destroys exactly the true subtree.
+  if (!world->destroy_entity(third)) {
+    return 52;
+  }
+  if (world->is_alive(third) || world->is_alive(fourth) ||
+      !world->is_alive(first) || !world->is_alive(second) ||
+      !world->is_alive(fifth)) {
+    return 53;
+  }
+
+  world->begin_render_prep_phase();
+  if (world->world_transform_count() != 3U) {
+    return 54;
+  }
   world->begin_render_phase();
   world->end_frame_phase();
   return 0;
@@ -1467,7 +1512,7 @@ int main() {
     return result;
   }
 
-  result = verify_transform_cycle_is_stable();
+  result = verify_transform_cycles_are_rejected();
   if (result != 0) {
     return result;
   }

@@ -937,6 +937,10 @@ private:
   void reset_transform_cache(std::uint32_t entityIndex) noexcept;
   /// Rebuilds parent links and recomputes dirty world transforms.
   bool propagate_world_transforms() noexcept;
+  /// True when adopting parentId would close a cycle: it names the entity
+  /// itself, one of its descendants, or a chain that already loops (#531).
+  bool parent_would_form_cycle(Entity entity,
+                               PersistentId parentId) const noexcept;
   /// Composes one transform hierarchy from the requested local-state buffer.
   bool build_physics_transform(
       Entity entity, std::size_t stateIndex,

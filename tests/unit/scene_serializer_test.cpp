@@ -822,6 +822,45 @@ int verify_joints_die_with_bodies_and_reset_clears_physics() {
   return 0;
 }
 
+/// Regression for #531: a scene whose transforms parent each other in a
+/// loop is refused as a whole, whichever order the entities are listed in,
+/// while a forward reference to a later entity loads.
+int verify_cyclic_scene_is_refused() {
+  constexpr const char *kCyclicScene =
+      "{\"version\":2,\"entities\":["
+      "{\"persistentId\":1,\"components\":{\"Transform\":{\"parentId\":2}}},"
+      "{\"persistentId\":2,\"components\":{\"Transform\":{\"parentId\":3}}},"
+      "{\"persistentId\":3,\"components\":{\"Transform\":{\"parentId\":1}}}]}";
+  constexpr const char *kForwardScene =
+      "{\"version\":2,\"entities\":["
+      "{\"persistentId\":1,\"components\":{\"Transform\":{\"parentId\":2}}},"
+      "{\"persistentId\":2,\"components\":{\"Transform\":{}}}]}";
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 460;
+  }
+  if (engine::runtime::load_scene(*world, kCyclicScene,
+                                  std::strlen(kCyclicScene))) {
+    return 461;
+  }
+  if (world->alive_entity_count() != 0U) {
+    return 462; // a refused load leaves the world as it was
+  }
+  if (!engine::runtime::load_scene(*world, kForwardScene,
+                                   std::strlen(kForwardScene))) {
+    return 463;
+  }
+  const engine::runtime::Entity child =
+      world->find_entity_by_persistent_id(1U);
+  const engine::runtime::Transform *transform =
+      world->get_transform_read_ptr(child);
+  if ((transform == nullptr) || (transform->parentId != 2U)) {
+    return 464;
+  }
+  return 0;
+}
+
 /// Verifies that loading a scene replaces stale non-entity world state.
 int verify_load_scene_replaces_existing_scene_state(
     const std::array<char, engine::core::JsonWriter::kBufferBytes> &buffer,
@@ -2160,6 +2199,13 @@ int main() {
   }
 
   result = verify_joints_die_with_bodies_and_reset_clears_physics();
+  if (result != 0) {
+    static_cast<void>(std::remove(kScenePath));
+    static_cast<void>(std::remove(kLargeScenePath));
+    return result;
+  }
+
+  result = verify_cyclic_scene_is_refused();
   if (result != 0) {
     static_cast<void>(std::remove(kScenePath));
     static_cast<void>(std::remove(kLargeScenePath));

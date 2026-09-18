@@ -281,6 +281,13 @@ bool World::add_transform(Entity entity, const Transform &transform) noexcept {
     return false;
   }
 
+  if (parent_would_form_cycle(entity, transform.parentId)) {
+    core::log_message(core::LogLevel::Error, "world",
+                      "add_transform rejected: parent is the entity itself "
+                      "or one of its descendants");
+    return false;
+  }
+
   const bool hadTransform = m_transforms.contains(entity);
   if (!m_transforms.add(entity, transform)) {
     return false;

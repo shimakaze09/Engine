@@ -455,6 +455,36 @@ bool World::is_valid_entity(Entity entity) const noexcept {
   return m_entityGenerations[entity.index] == entity.generation;
 }
 
+bool World::parent_would_form_cycle(Entity entity,
+                                    PersistentId parentId) const noexcept {
+  // Follows authored parent ids upward from the candidate parent. A
+  // dangling id ends the walk: the child is rooted until that parent
+  // appears, and whichever member is added last sees the whole loop, so
+  // no cycle survives ingress. A walk longer than the transform count can
+  // only mean the chain already loops, which is refused as well.
+  const std::size_t bound = m_transforms.count() + 1U;
+  const std::size_t stateIndex = query_state_index();
+  for (std::size_t steps = 0U; parentId != kInvalidPersistentId; ++steps) {
+    if (steps > bound) {
+      return true;
+    }
+    const std::uint32_t index = find_persistent_index(parentId);
+    if ((index == 0U) || !m_entityAlive[index]) {
+      return false;
+    }
+    if (index == entity.index) {
+      return true;
+    }
+    const Entity ancestor{index, m_entityGenerations[index]};
+    const Transform *local = m_transforms.get_ptr(ancestor, stateIndex);
+    if (local == nullptr) {
+      return false;
+    }
+    parentId = local->parentId;
+  }
+  return false;
+}
+
 bool World::build_physics_transform(
     Entity entity, std::size_t stateIndex,
     physics::PhysicsTransform *outTransform) const noexcept {
