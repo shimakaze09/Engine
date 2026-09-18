@@ -464,8 +464,50 @@ float advance_state_time(const AnimControllerData &controller,
 
 } // namespace
 
+namespace {
+
+/// Paths whose controller failed to load this episode (#532): a component
+/// keeps asking every fixed step while its slot is invalid, and each
+/// attempt re-read and re-parsed the controller, skeleton and clips and
+/// logged again. One entry per possible controller; the set clears with
+/// the registry (scene transitions) so a fixed asset loads on the next
+/// episode, and a changed path is a different key.
+std::uint32_t g_failedControllerHashes[kMaxAnimControllers]{};
+std::size_t g_failedControllerCount = 0U;
+
+bool controller_load_failed_before(std::uint32_t pathHash) noexcept {
+  for (std::size_t i = 0U; i < g_failedControllerCount; ++i) {
+    if (g_failedControllerHashes[i] == pathHash) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void remember_failed_controller(std::uint32_t pathHash) noexcept {
+  if (controller_load_failed_before(pathHash)) {
+    return;
+  }
+  if (g_failedControllerCount < kMaxAnimControllers) {
+    g_failedControllerHashes[g_failedControllerCount++] = pathHash;
+  } else {
+    // More distinct broken paths than controller slots: the oldest is
+    // forgotten and may log once more.
+    for (std::size_t i = 1U; i < kMaxAnimControllers; ++i) {
+      g_failedControllerHashes[i - 1U] = g_failedControllerHashes[i];
+    }
+    g_failedControllerHashes[kMaxAnimControllers - 1U] = pathHash;
+  }
+}
+
+} // namespace
+
 std::uint32_t acquire_anim_controller(const char *virtualPath) noexcept {
   if ((virtualPath == nullptr) || (virtualPath[0] == '\0')) {
+    return kInvalidAnimSlot;
+  }
+  const std::uint32_t pathHash = core::fnv1a_32(virtualPath);
+  if (controller_load_failed_before(pathHash)) {
     return kInvalidAnimSlot;
   }
 
@@ -481,6 +523,7 @@ std::uint32_t acquire_anim_controller(const char *virtualPath) noexcept {
   }
   if (freeSlot == kInvalidAnimSlot) {
     log_controller_error(virtualPath, "controller slots exhausted");
+    remember_failed_controller(pathHash);
     return kInvalidAnimSlot;
   }
 
@@ -488,9 +531,11 @@ std::uint32_t acquire_anim_controller(const char *virtualPath) noexcept {
                                                      AnimControllerData());
   if (controller == nullptr) {
     log_controller_error(virtualPath, "controller allocation failed");
+    remember_failed_controller(pathHash);
     return kInvalidAnimSlot;
   }
   if (!parse_controller(virtualPath, *controller)) {
+    remember_failed_controller(pathHash);
     return kInvalidAnimSlot;
   }
   core::copy_string(controller->sourcePath, sizeof(controller->sourcePath),
@@ -511,6 +556,7 @@ void reset_anim_controllers() noexcept {
   for (std::unique_ptr<AnimControllerData> &controller : g_controllers) {
     controller.reset();
   }
+  g_failedControllerCount = 0U;
   g_firedEventCount = 0U;
   g_pendingParamCount = 0U;
 }
