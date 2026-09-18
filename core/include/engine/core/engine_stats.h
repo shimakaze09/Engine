@@ -18,6 +18,9 @@ struct EngineStats final {
   float gpuSceneMs = 0.0F;
   float gpuTonemapMs = 0.0F;
   float jobUtilizationPct = 0.0F;
+  /// Draws render prep could not fit into a command buffer last frame; a
+  /// nonzero value means the frame was drawn incomplete (#519).
+  std::uint32_t droppedDrawCommands = 0U;
 };
 
 /// Resets this object back to its reusable empty state for engine stats

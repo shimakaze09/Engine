@@ -107,17 +107,21 @@ std::uint64_t build_draw_sort_key(const renderer::Material &material,
 
 void mark_graph_failed(std::atomic<bool> *frameGraphFailed) noexcept;
 
-/// Submits work to the owning buffer or system for render command.
+/// Submits a draw to the thread's buffer. A full buffer drops the draw and
+/// counts it; it is a per-frame degradation the pipeline reports once and
+/// surfaces in EngineStats, never a graph failure — treating it as one
+/// made more than kMaxDrawCommands visible draws a fatal run exit (#519).
 bool submit_render_command(renderer::CommandBufferBuilder &localBuffer,
                            const renderer::DrawCommand &command,
-                           std::atomic<bool> *frameGraphFailed) noexcept {
+                           std::atomic<std::uint32_t> *droppedDrawCommands)
+    noexcept {
   if (localBuffer.submit(command)) {
     return true;
   }
 
-  core::log_message(core::LogLevel::Error, "render_prep",
-                    "command buffer full; entity dropped from frame");
-  mark_graph_failed(frameGraphFailed);
+  if (droppedDrawCommands != nullptr) {
+    droppedDrawCommands->fetch_add(1U, std::memory_order_relaxed);
+  }
   return false;
 }
 
@@ -277,10 +281,10 @@ void render_prep_chunk_job(void *userData) noexcept {
             command.sortKey.value =
                 build_draw_sort_key(command.material, runtimeMesh, center, vp);
 
-            if (!submit_render_command(localBuffer, command,
-                                       jobData->frameGraphFailed)) {
-              return;
-            }
+            // Counted and skipped: every later submit into a full buffer
+            // fails the same way, so the count stays exact.
+            static_cast<void>(submit_render_command(
+                localBuffer, command, jobData->droppedDrawCommands));
           }
         }
       }
@@ -355,10 +359,8 @@ void render_prep_chunk_job(void *userData) noexcept {
       command.sortKey.value =
           build_draw_sort_key(command.material, runtimeMesh, center, vp);
 
-      if (!submit_render_command(localBuffer, command,
-                                 jobData->frameGraphFailed)) {
-        return;
-      }
+      static_cast<void>(submit_render_command(
+          localBuffer, command, jobData->droppedDrawCommands));
     }
   }
 }
@@ -373,8 +375,15 @@ void merge_command_buffers_job(void *userData) noexcept {
   jobData->merged->reset();
   for (std::size_t i = 0U; i < jobData->threadCount; ++i) {
     if (!jobData->merged->append_from(jobData->localBuffers[i])) {
-      mark_graph_failed(jobData->frameGraphFailed);
-      return;
+      // The merged buffer has the capacity of one thread's buffer, so the
+      // sum of the locals can exceed it; the buffer that does not fit is
+      // dropped whole and counted, and the frame draws what did fit (#519).
+      if (jobData->droppedDrawCommands != nullptr) {
+        jobData->droppedDrawCommands->fetch_add(
+            static_cast<std::uint32_t>(
+                jobData->localBuffers[i].command_count()),
+            std::memory_order_relaxed);
+      }
     }
   }
   jobData->merged->sort_by_key();
@@ -398,9 +407,10 @@ bool enqueue_render_prep_pipeline(
     renderer::AssetDatabase *assetDatabase,
     const renderer::GpuMeshRegistry *meshRegistry,
     core::JobHandle renderPrepPhaseHandle, core::JobHandle renderPhaseHandle,
-    std::atomic<bool> *frameGraphFailed, std::size_t frameThreadCount,
-    std::size_t chunkSize, const math::Mat4 &viewProjection,
-    float interpolationAlpha,
+    std::atomic<bool> *frameGraphFailed,
+    std::atomic<std::uint32_t> *droppedDrawCommands,
+    std::size_t frameThreadCount, std::size_t chunkSize,
+    const math::Mat4 &viewProjection, float interpolationAlpha,
     core::JobHandle *outMergeHandle) noexcept {
   if ((context == nullptr) || (world == nullptr) ||
       (mergedCommandBuffer == nullptr) || (assetDatabase == nullptr) ||
@@ -447,6 +457,7 @@ bool enqueue_render_prep_pipeline(
     prepData.assetDatabase = assetDatabase;
     prepData.meshRegistry = meshRegistry;
     prepData.frameGraphFailed = frameGraphFailed;
+    prepData.droppedDrawCommands = droppedDrawCommands;
     prepData.viewProjection = viewProjection;
     prepData.interpolationAlpha = interpolationAlpha;
 
@@ -473,6 +484,7 @@ bool enqueue_render_prep_pipeline(
       context->localCommandBuffers.data();
   context->mergeCommandsJobData.threadCount = frameThreadCount;
   context->mergeCommandsJobData.frameGraphFailed = frameGraphFailed;
+  context->mergeCommandsJobData.droppedDrawCommands = droppedDrawCommands;
 
   core::Job mergeJob{};
   mergeJob.function = &merge_command_buffers_job;

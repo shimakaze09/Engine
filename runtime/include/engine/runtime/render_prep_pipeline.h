@@ -24,6 +24,9 @@ struct RenderPrepChunkJobData final {
   renderer::AssetDatabase *assetDatabase = nullptr;
   const renderer::GpuMeshRegistry *meshRegistry = nullptr;
   std::atomic<bool> *frameGraphFailed = nullptr;
+  /// Draws that did not fit a buffer this frame; a full buffer degrades
+  /// the frame, it does not fail the graph (#519).
+  std::atomic<std::uint32_t> *droppedDrawCommands = nullptr;
   math::Mat4 viewProjection{};
   float interpolationAlpha = 1.0F;
 };
@@ -34,6 +37,7 @@ struct MergeCommandsJobData final {
   renderer::CommandBufferBuilder *localBuffers = nullptr;
   std::size_t threadCount = 0U;
   std::atomic<bool> *frameGraphFailed = nullptr;
+  std::atomic<std::uint32_t> *droppedDrawCommands = nullptr;
 };
 
 /// Preallocated buffers and job bookkeeping for render prep.
@@ -54,9 +58,10 @@ bool enqueue_render_prep_pipeline(
     renderer::AssetDatabase *assetDatabase,
     const renderer::GpuMeshRegistry *meshRegistry,
     core::JobHandle renderPrepPhaseHandle, core::JobHandle renderPhaseHandle,
-    std::atomic<bool> *frameGraphFailed, std::size_t frameThreadCount,
-    std::size_t chunkSize, const math::Mat4 &viewProjection,
-    float interpolationAlpha,
+    std::atomic<bool> *frameGraphFailed,
+    std::atomic<std::uint32_t> *droppedDrawCommands,
+    std::size_t frameThreadCount, std::size_t chunkSize,
+    const math::Mat4 &viewProjection, float interpolationAlpha,
     core::JobHandle *outMergeHandle) noexcept;
 
 } // namespace engine::runtime

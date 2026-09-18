@@ -247,6 +247,9 @@ struct FrameContext final {
   std::array<WorldPhaseJobData, kMaxPhaseJobs> phaseJobData{};
   ResolveCollisionsJobData resolveCollisionsJobData{};
   std::atomic<bool> frameGraphFailed = false;
+  /// Draws render prep could not fit this frame (#519); read after the
+  /// graph drains, reported once per run and published in EngineStats.
+  std::atomic<std::uint32_t> droppedDrawCommands = 0U;
 };
 
 // ---------------------------------------------------------------------------
@@ -543,6 +546,9 @@ struct EnginePipeline::Impl final {
   std::uint32_t frameIndex = 0U;
   std::uint32_t maxFrames = 0U;
   bool running = true;
+  // Draw-command overflow is reported once per run, not once per frame.
+  bool droppedDrawsLogged = false;
+  std::uint32_t lastDroppedDrawCommands = 0U;
   // Distinguishes fatal loop exits from graceful stops for engine::run (#96).
   bool fatalError = false;
   LoopPlayState previousPlayState = LoopPlayState::Playing;
@@ -1124,6 +1130,7 @@ bool EnginePipeline::Impl::stage_simulation_graph() noexcept {
     return false;
   }
   frameContext->frameGraphFailed.store(false, std::memory_order_release);
+  frameContext->droppedDrawCommands.store(0U, std::memory_order_release);
   if (updateStepCount == 0U) {
     return true;
   }
@@ -1462,7 +1469,8 @@ bool EnginePipeline::Impl::stage_render_prep_graph() noexcept {
             &frameContext->renderPrepPipeline, world.get(), commandBuffer.get(),
             assetDatabase.get(), meshRegistry.get(), renderPrepPhaseHandle,
             renderPhaseHandle, &frameContext->frameGraphFailed,
-            frameThreadCount, kChunkSize, vpMatrix,
+            &frameContext->droppedDrawCommands, frameThreadCount, kChunkSize,
+            vpMatrix,
             isPlaying ? static_cast<float>(renderAlpha) : 1.0F,
             &mergeHandle)) {
       graphFailed = true;
@@ -1489,6 +1497,19 @@ bool EnginePipeline::Impl::stage_render_prep_graph() noexcept {
 
   // end_frame_graph needs the whole graph drained, not one handle (#109).
   core::wait_all();
+  lastDroppedDrawCommands =
+      frameContext->droppedDrawCommands.load(std::memory_order_acquire);
+  if ((lastDroppedDrawCommands > 0U) && !droppedDrawsLogged) {
+    droppedDrawsLogged = true;
+    char dropMessage[192] = {};
+    std::snprintf(dropMessage, sizeof(dropMessage),
+                  "render prep dropped %u draws: more visible draws than a "
+                  "command buffer holds, the frame is drawn incomplete "
+                  "(reported once per run; EngineStats.droppedDrawCommands "
+                  "carries the per-frame count)",
+                  lastDroppedDrawCommands);
+    core::log_message(core::LogLevel::Warning, "render_prep", dropMessage);
+  }
   const bool frameJobsFailed =
       frameContext->frameGraphFailed.load(std::memory_order_acquire);
   if (!core::end_frame_graph()) {
@@ -1750,6 +1771,7 @@ void EnginePipeline::Impl::stage_diagnostics() noexcept {
   frameStats.gpuSceneMs = rendererStats.gpuSceneMs;
   frameStats.gpuTonemapMs = rendererStats.gpuTonemapMs;
   frameStats.jobUtilizationPct = static_cast<float>(utilizationPct);
+  frameStats.droppedDrawCommands = lastDroppedDrawCommands;
   core::set_engine_stats(frameStats);
 
   if (logTraceThisFrame) {

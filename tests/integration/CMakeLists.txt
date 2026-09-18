@@ -845,3 +845,15 @@ engine_add_test_executable(engine_integration_pipeline_full_world_catchup
     LABELS
     integration
 )
+
+# #519: draw-command overflow degrades the frame instead of ending the run.
+engine_add_test_executable(engine_integration_pipeline_draw_overflow
+    SOURCES
+    pipeline_draw_overflow_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_renderer
+    engine_core
+    LABELS
+    integration
+)
