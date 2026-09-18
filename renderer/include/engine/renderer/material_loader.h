@@ -8,8 +8,8 @@
 // texture *references* are resolved the same way (to path-derived AssetIds,
 // inherited down the parent chain like every other field), but the GPU
 // TextureHandle behind each reference is filled in later by
-// resolve_material_textures, since that requires a live GL context and must
-// never run on a per-frame hot path.
+// resolve_material_textures, since that requires a live render device and
+// must never run on a per-frame hot path.
 //
 // Schema v1 (all fields optional unless noted) is preserved exactly:
 //   {
@@ -23,7 +23,7 @@
 //   }
 // A v1 file (version absent or 1) never parses the v2-only fields below,
 // even if present in the JSON, so existing content's behavior cannot change
-// out from under it (CLAUDE.md staged-migration rule).
+// out from under it.
 //
 // Schema v2 adds explicit alpha handling, UV transform, and texture-slot
 // references, additive over v1:
@@ -45,10 +45,9 @@
 //     }
 //   }
 // Normal-map textures are intentionally not part of the schema: the vertex
-// format carries no tangent basis yet, so a normal-map slot would be a
-// texture reference no shader pass ever samples (explicitly cut by
-// issue #160's "no partially implemented slot" rule) until a follow-up adds
-// tangent-space vertex data.
+// format carries no tangent basis, so a normal-map slot would be a texture
+// reference no shader pass ever samples. A slot is added only once a pass
+// consumes it, which needs tangent-space vertex data first.
 // Parsing is strict: a present-but-malformed field rejects the load.
 
 #pragma once
@@ -99,8 +98,8 @@ std::size_t load_material_assets_in_directory(
 
 /// Loads one texture from a VFS virtual path and returns its handle
 /// (kInvalidTextureHandle on failure); the production texture-loader
-/// callback resolve_material_textures is driven with. A GL context must be
-/// current.
+/// callback resolve_material_textures is driven with. A live render device
+/// is required.
 using MaterialTextureLoadFn = TextureHandle (*)(const char *virtualPath,
                                                  void *userData) noexcept;
 

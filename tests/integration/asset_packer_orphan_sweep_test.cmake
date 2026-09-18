@@ -8,6 +8,24 @@ if(NOT DEFINED ASSET_PACKER OR NOT DEFINED SRC_GLTF OR NOT DEFINED SRC_BIN
     message(FATAL_ERROR "ASSET_PACKER, SRC_GLTF, SRC_BIN, WORKDIR required")
 endif()
 
+# The delete-boundary case below revokes write permission on the work
+# directory so an orphan cannot be removed. Root bypasses the permission
+# bits (CAP_DAC_OVERRIDE), so the removal succeeds and the case cannot be
+# exercised at all; detect that and skip it explicitly rather than
+# reporting a pass the environment did not earn.
+set(privileged_user FALSE)
+if(NOT CMAKE_HOST_WIN32)
+    execute_process(
+        COMMAND id -u
+        OUTPUT_VARIABLE host_uid
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+    if(host_uid STREQUAL "0")
+        set(privileged_user TRUE)
+    endif()
+endif()
+
 if(EXISTS "${WORKDIR}")
     file(CHMOD "${WORKDIR}" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
 endif()
@@ -106,7 +124,7 @@ endif()
 
 # Fault injection (delete boundary, POSIX): an undeletable orphan must
 # fail the sweep with a nonzero exit while the cook itself stays valid.
-if(NOT CMAKE_HOST_WIN32)
+if(NOT CMAKE_HOST_WIN32 AND NOT privileged_user)
     file(WRITE "${WORKDIR}/coin.old.anim" "undeletable orphan")
     file(CHMOD "${WORKDIR}" PERMISSIONS OWNER_READ OWNER_EXECUTE)
     execute_process(
@@ -138,6 +156,15 @@ if(NOT CMAKE_HOST_WIN32)
         message(FATAL_ERROR
             "failed sweep invalidated the cook stamp: ${after_output}")
     endif()
+endif()
+
+if(privileged_user)
+    message(STATUS
+        "SKIPPED: the delete-boundary case — an undeletable orphan must fail "
+        "the sweep with a diagnostic while leaving the cook valid — cannot "
+        "run as root, because CAP_DAC_OVERRIDE bypasses the directory "
+        "permissions it depends on. Every other case in this test ran and "
+        "passed. Run as an unprivileged user to cover that boundary.")
 endif()
 
 file(REMOVE_RECURSE "${WORKDIR}")

@@ -275,8 +275,8 @@ jobs:
       - name: Audit test timing
         run: python3 tools/check_test_timing.py
 
-      - name: Audit documentation policy
-        run: python3 tools/check_doc_policy.py
+      - name: Audit error handling
+        run: python3 tools/check_error_handling.py
 
       - name: Audit asset metadata paths
         run: python3 tools/ci/check_asset_metadata_paths.py

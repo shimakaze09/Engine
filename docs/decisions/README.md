@@ -1,0 +1,22 @@
+# Decision records
+
+One file per decision, with the date it was made and why. Append-only: a
+decision that no longer holds is superseded by a new record that links back
+to it, never edited in place.
+
+This is the only place in the repository where dates belong. The rules live
+in `CLAUDE.md`, the invariants in `docs/architecture.md`, the direction in
+`docs/vision.md`, and open work on the GitHub tracker — none of them carry
+history.
+
+| # | Decision | Date |
+| --- | --- | --- |
+| [0001](0001-bgfx-as-the-rhi.md) | bgfx is the rendering backend | 2026-07-19 |
+| [0002](0002-macos-is-a-test-lane.md) | macOS is a build and headless-test lane, not an editor target | 2026-08-09 |
+| [0003](0003-script-trust-model.md) | v0.x scripts are author-local and trusted, but VFS-jailed | 2026-08-09 |
+| [0004](0004-engine-first.md) | The engine is the product; templates are fixtures | 2026-08-25 |
+| [0005](0005-comments-by-complexity.md) | Declarations are documented by complexity | 2026-09-09 |
+| [0006](0006-foundation-work-runs-serially.md) | Foundation work runs serially, and overlap never selects work | 2026-09-18 |
+| [0007](0007-defect-budget.md) | A defect budget replaces open-ended auditing | 2026-09-18 |
+| [0008](0008-evidence-before-status.md) | No status claim without named evidence | 2026-09-18 |
+| [0009](0009-net-negative-documentation.md) | Documentation is net-negative | 2026-09-18 |

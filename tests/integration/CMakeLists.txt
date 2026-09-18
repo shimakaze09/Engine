@@ -552,7 +552,12 @@ if(ENGINE_BUILD_TOOLS)
     )
     set_tests_properties(
         engine_integration_asset_packer_orphan_sweep
-        PROPERTIES LABELS integration
+        PROPERTIES
+            LABELS integration
+            # The delete-boundary case needs an unprivileged user; as root it
+            # reports itself skipped rather than passing silently, so the
+            # missing coverage is visible in the ctest summary.
+            SKIP_REGULAR_EXPRESSION "SKIPPED:"
     )
 
     engine_add_executable_target(asset_stale_load_host

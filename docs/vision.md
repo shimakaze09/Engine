@@ -1,0 +1,94 @@
+# Product vision
+
+Priorities derive from this document. It states direction, not status —
+no feature is described as working here. Integration state lives on the
+GitHub tracker; decisions and their dates live in `docs/decisions/`.
+
+## The goal
+
+A production-level game engine with two co-equal halves:
+
+**Unreal-level scene rendering with Unity/Godot-level ease of use.**
+
+Both halves are engine qualities. Rendering depth is earned through
+correct, scalable foundations; ease of use through disciplined APIs,
+presets and diagnostics. Neither is pursued by patching around the other.
+
+Beginner ease comes from strong defaults, presets, templates, validation,
+guidance, undo and recovery — never from weaker correctness, hidden
+ambiguity or nonstandard semantics. Advanced users must be able to inspect,
+profile, override and scale the same systems rather than graduating to a
+different architecture.
+
+## Reference engines are a bar, not a blueprint
+
+Understand each mechanism from first principles and improve on it. Never
+import a reference engine's known defects for familiarity's sake.
+
+The canonical example: Unity's nondeterministic script execution order is
+explicitly rejected. Deterministic stepping, ordered lifecycle dispatch and
+registry-defined ordering are invariants here, and any future scheduling
+feature must preserve an explicit, deterministic, author-visible order.
+
+## Priorities, in order
+
+1. Correctness and user-data safety.
+2. A clear beginner creation loop.
+3. Scalable, physically coherent rendering, physics and runtime
+   foundations.
+4. Measured performance budgets and quality tiers.
+5. A commercial-grade editor with built-in blockout and starter content.
+6. One-click sharing.
+
+Device reach is delivered through explicit quality tiers and fallbacks, not
+by capping the high-end path.
+
+## The engine is the product
+
+The bundled templates and sample content are integration and test
+fixtures, not deliverables. They stay in the tree because they exercise the
+whole stack at once, and because a creation loop nobody runs is a creation
+loop nobody has verified.
+
+Template and script content bugs are fixed only when their root cause is an
+engine defect — and then the fix lands in the engine with a
+production-path regression, never as a content or script workaround.
+
+## Slices
+
+Each slice is done when its acceptance demo passes, not when its feature
+list is exhausted.
+
+**The slice plays.** A small third-person collect-a-thon is built *in the
+editor* from the bundled kit, played start to finish with sound, and feels
+smooth at 60 Hz simulation. This demo is the engine's own regression test
+for the creation loop: run it, and the defects a human hits become the
+queue.
+
+**Runs everywhere.** The same content plays from a shared web link in a
+browser, and an iOS runtime boots it. Gated on the RHI migration; web
+export is the headline differentiator.
+
+**The hour test.** Five external testers with no game-dev background each
+produce and share a playable variation of a template in under an hour,
+unassisted.
+
+Sequencing: content before replatform. Porting a stabilized renderer is far
+cheaper than porting a moving target, and the hour test cannot be validated
+until the creation loop exists.
+
+Platforms follow the vision: Windows and Linux editor first, web export
+after the RHI migration, an iOS/iPadOS runtime proof. A macOS editor
+remains likely; macOS game shipping and Android remain product decisions
+rather than commitments.
+
+## Parking lot
+
+Cut from v1, not canceled: advanced rendering (lightmap baking, SSR,
+volumetrics, advanced post), particles, a 2D engine, networking, splines,
+data tables, foliage painting, CSG, haptics and input replay, XR, AI and
+navigation, animation retargeting and root motion, a timeline/sequencer,
+user-authored shaders, a plugin system.
+
+Parallel lanes stay live throughout: documentation, extended test coverage
+including golden-image renderer tests, and the devops pipeline.
