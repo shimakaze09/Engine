@@ -469,11 +469,13 @@ private:
       return;
     }
 
+    // A cycle is a recoverable graph failure, reported through
+    // end_frame_graph like every other dispatch failure; it is not a
+    // programmer error to assert on, because cyclic input reaches dispatch
+    // from content (transform-hierarchy cycles pass ingress, #531) and an
+    // assert here was process termination for it (#570).
     const bool graphAcyclic = validate_graph_acyclic();
     if (!graphAcyclic) {
-#ifndef NDEBUG
-      assert(false && "job graph contains a cycle");
-#endif
       m_graphDispatchFailed.store(true, std::memory_order_release);
       m_graphDispatched = true;
       m_pendingJobs.store(0U, std::memory_order_release);

@@ -6,6 +6,7 @@
 #include "engine/content/metadata_store.h"
 
 #include <cstddef>
+#include <cstring>
 #include <cstdint>
 #include <cstdio>
 
@@ -93,6 +94,20 @@ bool register_asset_metadata(MetadataStore *store,
       (metadata.tagCount > AssetMetadata::kMaxTags) ||
       (metadata.dependencyCount > AssetMetadata::kMaxDependencies)) {
     return false;
+  }
+
+  // The fixed-width strings are compared with strcmp downstream
+  // (asset_metadata_has_tag), so a caller-filled array without a
+  // terminator is refused here rather than read past its end there (#570).
+  if (std::memchr(metadata.filePath.data(), '\0', metadata.filePath.size()) ==
+      nullptr) {
+    return false;
+  }
+  for (std::size_t i = 0U; i < metadata.tagCount; ++i) {
+    if (std::memchr(metadata.tags[i].data(), '\0',
+                    AssetMetadata::kMaxTagLength) == nullptr) {
+      return false;
+    }
   }
 
   const std::size_t slot =

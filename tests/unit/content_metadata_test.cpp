@@ -120,6 +120,23 @@ int main() {
   CHECK(find_asset_metadata(store.get(), scriptId) == nullptr,
         "clear empties the table");
 
+  // #570: the fixed-width tag and path fields are compared with strcmp, so
+  // a caller-filled array without a terminator must be refused at
+  // registration, leaving the store unchanged.
+  AssetMetadata unterminatedTag =
+      make_meta(meshId, AssetTypeTag::Mesh, "assets/props/rock.mesh");
+  unterminatedTag.tagCount = 1U;
+  unterminatedTag.tags[0].fill('a');
+  CHECK(!register_asset_metadata(store.get(), unterminatedTag),
+        "a tag without a terminator is refused");
+  AssetMetadata unterminatedPath =
+      make_meta(meshId, AssetTypeTag::Mesh, "assets/props/rock.mesh");
+  unterminatedPath.filePath.fill('p');
+  CHECK(!register_asset_metadata(store.get(), unterminatedPath),
+        "a path without a terminator is refused");
+  CHECK(find_asset_metadata(store.get(), meshId) == nullptr,
+        "a refused registration leaves the store unchanged");
+
   if (g_failures != 0) {
     std::fprintf(stderr, "%d failure(s)\n", g_failures);
     return 1;

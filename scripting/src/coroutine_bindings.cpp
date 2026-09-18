@@ -25,6 +25,24 @@ bool wait_seconds_is_valid(float seconds) noexcept {
   return std::isfinite(seconds) && (seconds >= 0.0F);
 }
 
+/// Trampoline for push_message_protected: runs inside a pcall so the
+/// string allocation can fail without raising into the panic handler.
+int push_message_trampoline(lua_State *state) {
+  lua_pushstring(state, static_cast<const char *>(lua_touserdata(state, 1)));
+  return 1;
+}
+
+/// Pushes a fixed diagnostic message through a protected frame. The error
+/// and rejection paths below run on the main state outside any pcall, and
+/// at the sandbox memory cap an unprotected lua_pushstring raises straight
+/// into the panic handler and aborts (#570). Returns false with nothing
+/// pushed when the push itself failed; the failure is logged by the frame.
+bool push_message_protected(lua_State *state, const char *message) noexcept {
+  return protected_c_operation(
+      state, &push_message_trampoline,
+      const_cast<void *>(static_cast<const void *>(message)), 1, "coroutine");
+}
+
 /// Identifies how a yielded coroutine decides when to resume.
 enum class WaitMode : std::uint8_t {
   Time,
@@ -102,13 +120,14 @@ public:
   /// slot and the thread's registry ref do not outlive the refusal.
   void reject_yield(lua_State *state, CoroutineEntry &entry,
                     CoroutineLogLuaErrorFn logLuaError) noexcept {
-    lua_pushstring(state, "coroutine yielded a non-finite or negative wait; "
-                          "wait expects a finite, non-negative number of "
-                          "seconds");
-    if (logLuaError != nullptr) {
-      logLuaError(state, "coroutine");
-    } else {
-      lua_pop(state, 1);
+    if (push_message_protected(
+            state, "coroutine yielded a non-finite or negative wait; wait "
+                   "expects a finite, non-negative number of seconds")) {
+      if (logLuaError != nullptr) {
+        logLuaError(state, "coroutine");
+      } else {
+        lua_pop(state, 1);
+      }
     }
     release_entry(state, entry);
   }
@@ -344,12 +363,16 @@ void tick_lua_coroutines(lua_State *state, float totalSeconds,
         g_coroutineScheduler.reject_yield(state, entry, logLuaError);
       }
     } else {
+      bool haveMessage = true;
       if (lua_isstring(entry.thread, -1) != 0) {
         lua_xmove(entry.thread, state, 1);
       } else {
-        lua_pushstring(state, "coroutine error (non-string)");
+        haveMessage =
+            push_message_protected(state, "coroutine error (non-string)");
       }
-      if (logLuaError != nullptr) {
+      if (!haveMessage) {
+        // The protected push already logged why it failed.
+      } else if (logLuaError != nullptr) {
         logLuaError(state, "coroutine");
       } else {
         lua_pop(state, 1);

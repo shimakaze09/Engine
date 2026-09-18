@@ -367,6 +367,75 @@ bool test_error_handling() noexcept {
 }
 
 // -----------------------------------------------------------------------
+// #570: a coroutine error raised at the sandbox memory cap is reported and
+// the coroutine released without terminating the process. The dispatcher's
+// message for a non-string error object is allocated through a protected
+// frame; on base the unprotected lua_pushstring raised into the panic
+// handler and aborted inside tick_coroutines.
+// -----------------------------------------------------------------------
+bool test_error_at_memory_cap() noexcept {
+  engine::scripting::initialize_scripting();
+  auto world = std::unique_ptr<engine::runtime::World>(
+      new (std::nothrow) engine::runtime::World());
+  if (!world) {
+    return false;
+  }
+  engine::core::ServiceLocator serviceLocator{};
+  engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
+  engine::scripting::set_default_mesh_asset_id(1U);
+
+  const bool previousSandbox = engine::scripting::is_sandbox_enabled();
+  const std::size_t previousMemoryLimit =
+      engine::scripting::get_memory_limit();
+  engine::scripting::set_sandbox_enabled(true);
+
+  // The coroutine parks twice, then raises a non-string error so the
+  // dispatcher has to allocate its own message. Between the two ticks the
+  // test pins the memory cap to the bytes in use, so that allocation is
+  // the first one over the cap: filling the VM from the script instead
+  // leaves a slack below the last failed request, and the emergency
+  // collection the allocator runs before giving up can free more.
+  const char *script =
+      "function on_start()\n"
+      "  engine.start_coroutine(function()\n"
+      "    engine.wait(0.1)\n"
+      "    engine.wait(0.1)\n"
+      "    error(true)\n"
+      "  end)\n"
+      "end\n"
+      "function settle()\n"
+      "  collectgarbage('collect')\n"
+      "  collectgarbage('collect')\n"
+      "end\n";
+
+  bool ok = write_script(script) && engine::scripting::load_script(kTempScript);
+  if (ok) {
+    engine::scripting::set_frame_time(0.0F, 0.0F);
+    engine::scripting::set_frame_index(0U);
+    engine::scripting::call_script_function("on_start");
+    engine::scripting::set_frame_index(1U);
+    engine::scripting::set_frame_time(0.2F, 0.2F);
+    engine::scripting::tick_coroutines();
+
+    // With no garbage left, neither the resume's incremental step nor the
+    // emergency collection the allocator tries before failing can free
+    // room for the dispatcher's message.
+    engine::scripting::call_script_function("settle");
+    engine::scripting::set_memory_limit(engine::scripting::get_memory_used());
+    engine::scripting::set_frame_index(2U);
+    engine::scripting::set_frame_time(0.2F, 0.4F);
+    // Returning from this call is the assertion; base aborts inside it.
+    engine::scripting::tick_coroutines();
+  }
+
+  engine::scripting::set_memory_limit(previousMemoryLimit);
+  engine::scripting::set_sandbox_enabled(previousSandbox);
+  engine::scripting::shutdown_scripting();
+  remove_script();
+  return ok;
+}
+
+// -----------------------------------------------------------------------
 // 6. clear_coroutines — all pending coroutines are discarded
 // -----------------------------------------------------------------------
 bool test_clear() noexcept {
@@ -618,6 +687,7 @@ int main() {
       {"wait_until", test_wait_until},
       {"chained_waits", test_chained_waits},
       {"error_handling", test_error_handling},
+      {"error_at_memory_cap", test_error_at_memory_cap},
       {"clear_coroutines", test_clear},
       {"invalid_waits_do_not_consume_slots",
        test_invalid_waits_do_not_consume_slots},
