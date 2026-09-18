@@ -8,6 +8,10 @@ namespace engine::core {
 
 using JobFunction = void (*)(void *) noexcept;
 
+/// Jobs one frame graph can hold; a submit past this returns an invalid
+/// handle. Public so a producer can size its per-frame tables against it.
+inline constexpr std::size_t kMaxJobs = 8192U;
+
 /// One unit of work: function pointer plus opaque data.
 struct Job final {
   JobFunction function = nullptr;

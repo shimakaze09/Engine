@@ -22,7 +22,6 @@ namespace engine::core {
 namespace {
 
 constexpr std::uint32_t kMaxWorkers = 15U;
-constexpr std::size_t kMaxJobs = 8192U;
 constexpr std::size_t kMaxEdges = 65536U;
 constexpr std::uint32_t kInvalidIndex = 0xFFFFFFFFU;
 constexpr std::uint32_t kIndexBits = 13U;

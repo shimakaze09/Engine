@@ -835,3 +835,13 @@ target_link_libraries(engine_integration_renderer_backend_failure PRIVATE
 )
 set_tests_properties(engine_integration_renderer_backend_failure PROPERTIES
     ENVIRONMENT "SDL_VIDEODRIVER=dummy")
+
+# #518: a world at entity capacity survives a maximum catch-up frame.
+engine_add_test_executable(engine_integration_pipeline_full_world_catchup
+    SOURCES
+    pipeline_full_world_catchup_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    LABELS
+    integration
+)

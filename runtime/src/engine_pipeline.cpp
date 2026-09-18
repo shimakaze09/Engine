@@ -186,8 +186,18 @@ constexpr std::size_t kMaxUpdateStepsPerFrame = 8U;
 static_assert(kMaxUpdateStepsPerFrame <= physics::kMaxCollisionFrameSteps,
               "the frame collision buffer must cover every catch-up step so "
               "accumulation alone never drops callbacks (#103)");
-constexpr std::size_t kMaxChunkJobs = 1024U;
+// One frame assembles every catch-up step's chunk jobs into one table per
+// kind and never resets the cursor between steps, so each table holds
+// kMaxUpdateStepsPerFrame steps of a full world (#518). A fixed 1024
+// overflowed on the fifth step at 65,536 transforms and turned one long
+// frame on a large scene into a fatal run exit.
+constexpr std::size_t kChunksPerStep =
+    (runtime::World::kMaxEntities + kChunkSize - 1U) / kChunkSize;
+constexpr std::size_t kMaxChunkJobs = kMaxUpdateStepsPerFrame * kChunksPerStep;
 constexpr std::size_t kMaxPhaseJobs = kMaxUpdateStepsPerFrame * 2U + 4U;
+static_assert((2U * kMaxChunkJobs) + kMaxPhaseJobs <= core::kMaxJobs,
+              "a full-capacity world across every catch-up step must fit "
+              "one frame graph");
 constexpr std::uint32_t kSliceDiagnosticsPeriodFrames = 60U;
 
 /// Production MaterialTextureLoadFn: the same synchronous texture loader
