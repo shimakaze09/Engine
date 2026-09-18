@@ -11,6 +11,7 @@
 #include "engine/core/cvar.h"
 #include "engine/core/logging.h"
 #include "engine/core/vfs.h"
+#include "sound_handle.h"
 
 // Silence warnings from miniaudio in third-party code.
 #if defined(__clang__)
@@ -45,19 +46,6 @@
 namespace engine::audio {
 
 namespace {
-
-constexpr std::size_t kMaxSounds = 256U;
-constexpr unsigned kSoundSlotBits = 9U;
-constexpr std::uint32_t kSoundSlotMask = (1U << kSoundSlotBits) - 1U;
-// A handle packs (generation << kSoundSlotBits) | slotToken into 32 bits, so
-// the generation counter must wrap within the bits that survive the encode or
-// old slots would eventually mint handles that never validate.
-constexpr std::uint32_t kSoundGenerationBits = 32U - kSoundSlotBits;
-constexpr std::uint32_t kSoundGenerationMask =
-    (1U << kSoundGenerationBits) - 1U;
-
-static_assert(kMaxSounds < (1U << kSoundSlotBits),
-              "slot tokens (slot + 1) must fit the handle slot bits");
 
 struct SoundEntry final {
   bool active = false;
@@ -317,16 +305,6 @@ bool start_one_shot(SoundEntry *entry, std::size_t sourceSlot,
     return false;
   }
   return true;
-}
-
-/// Advances a generation counter within the handle-encodable width,
-/// skipping zero.
-std::uint32_t next_sound_generation(std::uint32_t generation) noexcept {
-  generation = (generation + 1U) & kSoundGenerationMask;
-  if (generation == 0U) {
-    generation = 1U;
-  }
-  return generation;
 }
 
 /// Builds an externally visible handle for a live sound slot.

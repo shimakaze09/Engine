@@ -902,9 +902,15 @@ engine_add_test_executable(engine_unit_shader_system
 engine_add_test_executable(engine_unit_audio
     SOURCES
     audio_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/audio/src
     PRIVATE_DEPS
     engine_audio
 )
+# Device-dependent checks report SKIPPED: when no audio device initializes,
+# so ctest shows the run as skipped rather than counting them as passes.
+set_tests_properties(engine_unit_audio PROPERTIES
+    SKIP_REGULAR_EXPRESSION "SKIPPED:")
 
 engine_add_test_executable(engine_unit_texture_loader
     SOURCES

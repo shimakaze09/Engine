@@ -13,8 +13,38 @@
 #include "../test_harness.h"
 #include "engine/core/cvar.h"
 #include "engine/core/vfs.h"
+#include "sound_handle.h"
 
 static engine::tests::TestContext g_tests;
+
+/// The generation counter must visit every nonzero value of its field and
+/// never mint zero, the invalid encoding: a counter that reset to zero
+/// would hand out handles that decode as invalid, and one that overflowed
+/// would corrupt the slot bits. Driven on the pure function because the
+/// eight-million-load alternative is not a unit test.
+static void test_sound_generation_wraps_skipping_zero() noexcept {
+  using engine::audio::kSoundGenerationMask;
+  using engine::audio::next_sound_generation;
+  static_assert(next_sound_generation(0U) == 1U);
+  static_assert(next_sound_generation(kSoundGenerationMask - 1U) ==
+                kSoundGenerationMask);
+  static_assert(next_sound_generation(kSoundGenerationMask) == 1U);
+
+  std::uint32_t generation = 1U;
+  std::uint32_t steps = 0U;
+  bool sawInvalid = false;
+  bool sawOverflow = false;
+  do {
+    generation = next_sound_generation(generation);
+    ++steps;
+    sawInvalid = sawInvalid || (generation == 0U);
+    sawOverflow = sawOverflow || (generation > kSoundGenerationMask);
+  } while ((generation != 1U) && (steps <= kSoundGenerationMask));
+  g_tests.check(!sawInvalid, "generation counter never mints zero");
+  g_tests.check(!sawOverflow, "generation counter stays inside its field");
+  g_tests.check(steps == kSoundGenerationMask,
+                "generation period visits every nonzero value exactly once");
+}
 
 #define TEST_ASSERT(cond)                                                      \
   do {                                                                         \
@@ -125,7 +155,7 @@ static void test_extended_api_without_init() {
 static void test_bus_volume_roundtrip() {
   using namespace engine::audio;
   if (!initialize_audio()) {
-    g_tests.check(true, "bus volume roundtrip (skipped, no device)");
+    g_tests.skip("bus volume roundtrip (no audio device)");
     return;
   }
 
@@ -181,7 +211,7 @@ static void test_out_of_range_bus_rejected() {
 static void test_master_volume_stored() {
   using namespace engine::audio;
   if (!initialize_audio()) {
-    g_tests.check(true, "master volume stored (skipped, no device)");
+    g_tests.skip("master volume stored (no audio device)");
     return;
   }
 
@@ -210,7 +240,7 @@ static void test_master_volume_stored() {
 static void test_invalid_inputs_rejected() {
   using namespace engine::audio;
   if (!initialize_audio()) {
-    g_tests.check(true, "invalid inputs rejected (skipped, no device)");
+    g_tests.skip("invalid inputs rejected (no audio device)");
     return;
   }
 
@@ -315,7 +345,7 @@ static void test_decode_budgets() {
   if (!initialize_audio()) {
     engine::core::shutdown_vfs();
     fs::remove_all(scratch, ec);
-    g_tests.check(true, "decode budgets (skipped, no device)");
+    g_tests.skip("decode budgets (no audio device)");
     return;
   }
 
@@ -380,6 +410,62 @@ static void test_decode_budgets() {
   g_tests.check(true, "decode budgets");
 }
 
+/// Live-handle registry boundaries: an unloaded handle is stale (it no
+/// longer plays, and the reloaded slot mints a different handle that does
+/// not revive it), the registry admits exactly kMaxSounds live sounds and
+/// refuses the next load, and unload_all_sounds invalidates every handle.
+/// Reported skipped, not passed, when no audio device initializes.
+static void test_registry_boundaries() {
+  using namespace engine::audio;
+  namespace fs = std::filesystem;
+  std::error_code ec;
+  const fs::path scratch =
+      fs::current_path(ec) / "engine_audio_registry_test";
+  fs::remove_all(scratch, ec);
+  fs::create_directories(scratch, ec);
+  TEST_ASSERT(!ec);
+  TEST_ASSERT(write_wav(scratch / "tone.wav", 220U, 440U));
+  TEST_ASSERT(engine::core::initialize_vfs());
+  TEST_ASSERT(engine::core::mount("audioreg", scratch.string().c_str()));
+  if (!initialize_audio()) {
+    engine::core::shutdown_vfs();
+    fs::remove_all(scratch, ec);
+    g_tests.skip("registry boundaries (no audio device)");
+    return;
+  }
+
+  const SoundHandle first = load_sound("audioreg/tone.wav");
+  g_tests.check(first != kInvalidSound, "fixture loads");
+  unload_sound(first);
+  g_tests.check(!play_sound(first, {}), "unloaded handle no longer plays");
+  const SoundHandle reloaded = load_sound("audioreg/tone.wav");
+  g_tests.check(reloaded != kInvalidSound, "slot reloads after unload");
+  g_tests.check(reloaded.id != first.id, "reloaded slot mints a new handle");
+  g_tests.check(!play_sound(first, {}),
+                "stale handle stays rejected after its slot is reused");
+
+  std::size_t live = 1U;
+  while (live < engine::audio::kMaxSounds) {
+    if (load_sound("audioreg/tone.wav") == kInvalidSound) {
+      break;
+    }
+    ++live;
+  }
+  g_tests.check(live == engine::audio::kMaxSounds,
+                "registry fills to exactly kMaxSounds live sounds");
+  g_tests.check(load_sound("audioreg/tone.wav") == kInvalidSound,
+                "load past the registry capacity is refused");
+  unload_all_sounds();
+  g_tests.check(!play_sound(reloaded, {}),
+                "unload_all_sounds invalidates live handles");
+  g_tests.check(load_sound("audioreg/tone.wav") != kInvalidSound,
+                "registry accepts loads again after unload_all_sounds");
+
+  shutdown_audio();
+  engine::core::shutdown_vfs();
+  fs::remove_all(scratch, ec);
+}
+
 /// Runs this executable or test program.
 int main() {
   RUN_TEST(test_double_init_and_shutdown);
@@ -395,6 +481,9 @@ int main() {
   RUN_TEST(test_master_volume_stored);
   RUN_TEST(test_invalid_inputs_rejected);
   RUN_TEST(test_decode_budgets);
+  RUN_TEST(test_registry_boundaries);
+
+  test_sound_generation_wraps_skipping_zero();
 
   return g_tests.finish("Audio tests");
 }
