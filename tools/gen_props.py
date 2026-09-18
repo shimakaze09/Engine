@@ -9,6 +9,7 @@ import os
 import struct
 import sys
 
+from gen_common import publish_set
 from gltf_writer import GltfBufferBuilder
 
 OUT_DIR = sys.argv[1] if len(sys.argv) > 1 else "assets/props"
@@ -242,14 +243,14 @@ def write_gltf(name, builder):
     return [(gltf_path + ".tmp", gltf_path), (bin_path + ".tmp", bin_path)]
 
 
-# Stage every prop's .gltf/.bin pair, then commit the whole set atomically
-# so an interrupted run can never leave a mixed-generation prop pack
-# (audit M-27).
+# Stage every prop's .gltf/.bin pair, then publish the whole set behind
+# the directory manifest the asset packer validates against, so an
+# interrupted run can never be cooked as a mixed-generation prop pack
+# (audit M-27, #351).
 os.makedirs(OUT_DIR, exist_ok=True)
 props = build_props()
 staged = []
 for prop_name in sorted(props):
     staged.extend(write_gltf(prop_name, props[prop_name]))
-for tmp_path, final_path in staged:
-    os.replace(tmp_path, final_path)
+publish_set(staged)
 print(f"generated {len(props)} props")

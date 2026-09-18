@@ -1575,6 +1575,18 @@ if(ENGINE_BUILD_TOOLS)
         _CRT_SECURE_NO_WARNINGS
     )
 
+    engine_add_test_executable(engine_unit_generated_manifest
+        SOURCES
+        generated_manifest_test.cpp
+        ${CMAKE_SOURCE_DIR}/tools/asset_packer/generated_manifest.cpp
+        PRIVATE_INCLUDE_DIRS
+        ${CMAKE_SOURCE_DIR}/tools/asset_packer
+        PRIVATE_DEPS
+        engine_core
+        COMPILE_DEFINITIONS
+        _CRT_SECURE_NO_WARNINGS
+    )
+
     engine_add_test_executable(engine_unit_thumbnail_paths
         SOURCES
         thumbnail_paths_test.cpp

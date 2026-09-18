@@ -106,7 +106,8 @@ bool is_hidden_from_index(const std::filesystem::path &path) noexcept {
   const std::string filename = path.filename().string();
   return has_suffix(filename.c_str(), ".meta.json") ||
          has_suffix(filename.c_str(), ".cookstamp") ||
-         has_suffix(filename.c_str(), ".checksum");
+         has_suffix(filename.c_str(), ".checksum") ||
+         (filename == "generated.manifest.json");
 }
 
 /// Copies `text` into a fixed field; false (field cleared) when it does

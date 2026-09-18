@@ -9,11 +9,14 @@ import struct
 import sys
 import wave
 
+from gen_common import publish_set
+
 OUT_DIR = sys.argv[1] if len(sys.argv) > 1 else "assets/sounds"
 RATE = 22050
 
-# (tmp, final) pairs staged by write_wav and committed atomically at the
-# end so an interrupted run can never leave truncated WAVs (audit M-27).
+# (tmp, final) pairs staged by write_wav and published as one set behind
+# the directory manifest at the end, so an interrupted run can never leave
+# truncated WAVs or a half-replaced set (audit M-27, #351).
 STAGED = []
 
 
@@ -237,6 +240,5 @@ write_wav(f"{OUT_DIR}/lose.wav", lose())
 write_wav(f"{OUT_DIR}/chirp.wav", chirp())
 write_wav(f"{OUT_DIR}/wind.wav", wind())
 write_wav(f"{OUT_DIR}/waves.wav", waves())
-for tmp_path, final_path in STAGED:
-    os.replace(tmp_path, final_path)
+publish_set(STAGED)
 print(f"committed {len(STAGED)} sounds")

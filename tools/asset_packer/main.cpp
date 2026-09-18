@@ -54,6 +54,7 @@
 #include "skeleton_import.h"
 #include "thumbnail_resample.h"
 
+#include "generated_manifest.h"
 #include "packer_shared.h"
 
 namespace {
@@ -401,6 +402,27 @@ int main(int argc, char **argv) {
 
   // Sort dependencies by path for deterministic output.
   sort_dependency_digests(dependencyDigests);
+
+  // #351: a generated source (or dependency) is cooked only when its
+  // directory manifest certifies these exact bytes; the generators write
+  // that manifest last, so a source that disagrees with it belongs to an
+  // interrupted publish and would cook as a mixed generation.
+  {
+    char refusal[1024] = {};
+    if (!generated_source_certified(inputPath, sourceHash, refusal,
+                                    sizeof(refusal))) {
+      std::fprintf(stderr, "error: %s\n", refusal);
+      return 21;
+    }
+    for (const DependencyDigest &dependency : dependencyDigests) {
+      if (!generated_source_certified(dependency.path.c_str(),
+                                      dependency.hash, refusal,
+                                      sizeof(refusal))) {
+        std::fprintf(stderr, "error: %s\n", refusal);
+        return 21;
+      }
+    }
+  }
 
   if (!forceRepack && !should_repack(outputPath, sourceHash, dependencyDigests,
                                      importSettingsHash, platformTag,

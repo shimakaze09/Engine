@@ -1,0 +1,13 @@
+{
+ "files": {
+  "character.bin": {
+   "bytes": 9660,
+   "fnv1a64": "9483021311390001"
+  },
+  "character.gltf": {
+   "bytes": 5283,
+   "fnv1a64": "3aa15e09bf85a07f"
+  }
+ },
+ "schema": 1
+}

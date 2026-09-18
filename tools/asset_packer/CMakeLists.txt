@@ -4,6 +4,8 @@ engine_add_executable_target(asset_packer
     SOURCES
     main.cpp
     cook_stamp.cpp
+    generated_manifest.cpp
+    generated_manifest.h
     mesh_cook.cpp
     process_run.cpp
     process_run.h

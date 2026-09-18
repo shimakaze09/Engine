@@ -402,6 +402,21 @@ if(Python3_Interpreter_FOUND)
 endif()
 
 if(ENGINE_BUILD_TOOLS)
+    if(Python3_Interpreter_FOUND)
+        # #351: an interrupted generator publish is never cooked as a
+        # mixed generation (production gen_props.py + asset_packer).
+        add_test(
+            NAME engine_integration_generator_atomic_publish
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_SOURCE_DIR}/tools/test_gen_publish.py
+                $<TARGET_FILE:asset_packer>
+        )
+        set_tests_properties(
+            engine_integration_generator_atomic_publish
+            PROPERTIES LABELS integration
+        )
+    endif()
+
     add_test(
         NAME engine_integration_asset_packer_rejects_corrupt_texture
         COMMAND ${CMAKE_COMMAND}
