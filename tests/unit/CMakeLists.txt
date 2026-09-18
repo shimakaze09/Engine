@@ -463,6 +463,13 @@ engine_add_test_executable(engine_unit_save_data_bindings
     engine_runtime
 )
 
+engine_add_test_executable(engine_unit_json_navigation
+    SOURCES
+    json_navigation_test.cpp
+    PRIVATE_DEPS
+    engine_core
+)
+
 engine_add_test_executable(engine_unit_input_config_lua
     SOURCES
     input_config_lua_test.cpp

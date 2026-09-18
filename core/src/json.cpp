@@ -934,10 +934,8 @@ bool JsonParser::parse(const char *input, std::size_t length) noexcept {
   m_hasRoot = false;
   m_root = JsonValue{};
   m_scratchCursor = 0U;
-  m_arrayMemoBegin = nullptr;
-  m_arrayMemoEnd = nullptr;
-  m_arrayMemoCursor = nullptr;
-  m_arrayMemoIndex = 0U;
+  m_arrayMemos.fill(ArrayMemo{});
+  m_arrayElementScans = 0U;
 
   if ((input == nullptr) || (length == 0U)) {
     return false;
@@ -1067,10 +1065,17 @@ bool JsonParser::get_array_element(const JsonValue &array, std::size_t index,
   const char *cursor = array.begin + 1;
   const char *end = array.end - 1;
   std::size_t currentIndex = 0U;
-  if ((m_arrayMemoBegin == array.begin) && (m_arrayMemoEnd == array.end) &&
-      (m_arrayMemoCursor != nullptr) && (index >= m_arrayMemoIndex)) {
-    cursor = m_arrayMemoCursor;
-    currentIndex = m_arrayMemoIndex;
+  ArrayMemo *memo = nullptr;
+  for (ArrayMemo &candidate : m_arrayMemos) {
+    if ((candidate.begin == array.begin) && (candidate.end == array.end)) {
+      memo = &candidate;
+      break;
+    }
+  }
+  if ((memo != nullptr) && (memo->cursor != nullptr) &&
+      (index >= memo->index)) {
+    cursor = memo->cursor;
+    currentIndex = memo->index;
   } else {
     skip_whitespace(cursor, end);
   }
@@ -1083,6 +1088,7 @@ bool JsonParser::get_array_element(const JsonValue &array, std::size_t index,
     if (!parse_value(cursor, end, &value, 1U)) {
       return false;
     }
+    ++m_arrayElementScans;
 
     if (currentIndex == index) {
       *outValue = value;
@@ -1091,10 +1097,27 @@ bool JsonParser::get_array_element(const JsonValue &array, std::size_t index,
         ++cursor;
         skip_whitespace(cursor, end);
       }
-      m_arrayMemoBegin = array.begin;
-      m_arrayMemoEnd = array.end;
-      m_arrayMemoCursor = cursor;
-      m_arrayMemoIndex = index + 1U;
+      if (memo == nullptr) {
+        // Take a free entry, else evict the one spanning the fewest bytes:
+        // nested walks are over small inner arrays, and evicting by
+        // recency would let a stream of them push out the enclosing
+        // array's memo — the outer entity loop went quadratic again that
+        // way (#515).
+        memo = &m_arrayMemos[0];
+        for (ArrayMemo &candidate : m_arrayMemos) {
+          if (candidate.begin == nullptr) {
+            memo = &candidate;
+            break;
+          }
+          if ((candidate.end - candidate.begin) < (memo->end - memo->begin)) {
+            memo = &candidate;
+          }
+        }
+      }
+      memo->begin = array.begin;
+      memo->end = array.end;
+      memo->cursor = cursor;
+      memo->index = index + 1U;
       return true;
     }
 
