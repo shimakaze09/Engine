@@ -330,7 +330,13 @@ math::Mat4 compute_spot_shadow_matrix(const math::Vec3 &position,
 
   const math::Mat4 lightView = math::look_at(position, target, up);
 
-  const float fov = outerConeAngle * 2.0F + 0.05F;
+  // A wide spotlight is ordinary authoring; past ~pi the perspective's
+  // tan(fov / 2) flips sign and the matrix degenerates (#565), so the
+  // frustum is capped short of that. kMaxSpotShadowFov (~166 degrees)
+  // keeps tan finite; a cone wider than the map's frustum shadows its
+  // rim from the cap.
+  constexpr float kMaxSpotShadowFov = 2.9F;
+  const float fov = std::min(outerConeAngle * 2.0F + 0.05F, kMaxSpotShadowFov);
   constexpr float kNearPlane = 0.1F;
   const float farPlane = std::max(radius, 1.0F);
 

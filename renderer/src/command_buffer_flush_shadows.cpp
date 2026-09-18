@@ -214,7 +214,10 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
     }
     std::sort(spotCandidates.data(), spotCandidates.data() + spotCandidateCount,
               [](const ShadowCandidate &a, const ShadowCandidate &b) noexcept {
-                return a.distSq < b.distSq;
+                // Ties break on the light index so slot assignment is a function of
+                // the scene, not of creation order (#565).
+                return (a.distSq < b.distSq) ||
+                       ((a.distSq == b.distSq) && (a.lightIndex < b.lightIndex));
               });
     if ((spotCandidateCount > kMaxSpotShadowLights) &&
         backend.cvars.shadowDebug.get_bool()) {
@@ -324,7 +327,10 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
     std::sort(pointCandidates.data(),
               pointCandidates.data() + pointCandidateCount,
               [](const ShadowCandidate &a, const ShadowCandidate &b) noexcept {
-                return a.distSq < b.distSq;
+                // Ties break on the light index so slot assignment is a function of
+                // the scene, not of creation order (#565).
+                return (a.distSq < b.distSq) ||
+                       ((a.distSq == b.distSq) && (a.lightIndex < b.lightIndex));
               });
     if ((pointCandidateCount > kMaxPointShadowLights) &&
         backend.cvars.shadowDebug.get_bool()) {

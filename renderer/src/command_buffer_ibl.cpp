@@ -400,7 +400,7 @@ ensure_brdf_lut(BackendState &backend, const RenderDevice *dev,
   lutDesc.width = lutSize;
   lutDesc.height = lutSize;
   lutDesc.filter = TextureFilter::Linear;
-  lutDesc.wrap = TextureWrap::Repeat;
+  lutDesc.wrap = TextureWrap::ClampEdge;
   const DeviceTextureHandle lutTexture = dev->create_texture(lutDesc);
   if (lutTexture == kInvalidDeviceTexture) {
     return kInvalidDeviceTexture;

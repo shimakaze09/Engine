@@ -145,7 +145,7 @@ bool ensure_scene_capture_target(BackendState &backend,
   colorDesc.width = width;
   colorDesc.height = height;
   colorDesc.filter = TextureFilter::Linear;
-  colorDesc.wrap = TextureWrap::Repeat;
+  colorDesc.wrap = TextureWrap::ClampEdge;
   target.colorTexture = dev->create_texture(colorDesc);
   if (target.colorTexture == kInvalidDeviceTexture) {
     core::log_message(core::LogLevel::Error, kCaptureLogChannel,
@@ -160,7 +160,7 @@ bool ensure_scene_capture_target(BackendState &backend,
   depthDesc.width = width;
   depthDesc.height = height;
   depthDesc.filter = TextureFilter::Nearest;
-  depthDesc.wrap = TextureWrap::Repeat;
+  depthDesc.wrap = TextureWrap::ClampEdge;
   target.depthTexture = dev->create_texture(depthDesc);
   if (target.depthTexture == kInvalidDeviceTexture) {
     core::log_message(core::LogLevel::Error, kCaptureLogChannel,

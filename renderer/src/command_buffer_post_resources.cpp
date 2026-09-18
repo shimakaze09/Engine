@@ -48,7 +48,7 @@ DeviceTextureHandle create_post_chain_texture(const RenderDevice *dev, int w,
   desc.width = w;
   desc.height = h;
   desc.filter = TextureFilter::Linear;
-  desc.wrap = TextureWrap::Repeat;
+  desc.wrap = TextureWrap::ClampEdge;
   return dev->create_texture(desc);
 }
 
@@ -242,7 +242,7 @@ DeviceTextureHandle create_ssao_noise_texture() noexcept {
   desc.width = 4;
   desc.height = 4;
   desc.filter = TextureFilter::Linear;
-  desc.wrap = TextureWrap::Repeat;
+  desc.wrap = TextureWrap::ClampEdge;
   desc.pixelData = TexelData::F32;
   desc.pixels = noise;
   return dev->create_texture(desc);
