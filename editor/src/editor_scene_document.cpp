@@ -306,7 +306,7 @@ const char *scene_document_last_error() noexcept {
 
 bool perform_scene_new() noexcept {
   EditorSession &session = editor_session();
-  if (!world_is_editable()) {
+  if (!world_can_load_scene()) {
     return false;
   }
 
@@ -318,7 +318,7 @@ bool perform_scene_new() noexcept {
 
 bool perform_scene_open(const char *path) noexcept {
   EditorSession &session = editor_session();
-  if ((path == nullptr) || (path[0] == '\0') || !world_is_editable()) {
+  if ((path == nullptr) || (path[0] == '\0') || !world_can_load_scene()) {
     return false;
   }
 
@@ -368,7 +368,22 @@ void set_save_failure_message(EditorSession &session,
 
 bool perform_scene_save() noexcept {
   EditorSession &session = editor_session();
-  if (!session.document.hasPath || !world_is_editable()) {
+  // Every refusal states its reason: the quit prompt's Save button reads
+  // lastSaveError, and a silent false looked like a button that did
+  // nothing (#525).
+  if (!session.document.hasPath) {
+    std::snprintf(session.document.lastSaveError,
+                  sizeof(session.document.lastSaveError),
+                  "the scene has no path yet; use Save As");
+    return false;
+  }
+  if (!world_is_editable()) {
+    std::snprintf(session.document.lastSaveError,
+                  sizeof(session.document.lastSaveError),
+                  session.worldRestoreFailed
+                      ? "the Stop restore failed; use Save As to export the "
+                        "preserved world, or New/Open to replace it"
+                      : "the scene cannot be saved while playing");
     return false;
   }
   if (!runtime::save_scene(*session.world, session.document.path)) {
@@ -418,8 +433,16 @@ bool scene_path_passes_jail(const char *path) noexcept {
 
 bool perform_scene_save_as(const char *path) noexcept {
   EditorSession &session = editor_session();
-  if ((path == nullptr) || (path[0] == '\0') || !world_is_editable()) {
+  if ((path == nullptr) || (path[0] == '\0') || !world_can_load_scene()) {
     return false;
+  }
+  if (session.worldRestoreFailed) {
+    // The export is the recovery path (#525); the author is told what the
+    // file will hold, since it is the preserved play world, not the scene
+    // as it was before Play.
+    core::log_message(core::LogLevel::Warning, "editor",
+                      "Save As after a failed Stop restore exports the "
+                      "preserved play-mode world, not the pre-Play scene");
   }
   if (!scene_path_passes_jail(path)) {
     std::snprintf(session.document.lastSaveError,

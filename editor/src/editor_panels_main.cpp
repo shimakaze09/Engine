@@ -130,8 +130,12 @@ void draw_main_menu_bar() noexcept {
   }
 
   if (ImGui::BeginMenu("File")) {
+    // Replacing or exporting the world stays available after a failed
+    // Stop restore (#525); only overwriting the open scene in place needs
+    // the fully editable world.
+    const bool loadable = world_can_load_scene();
     const bool editable = world_is_editable();
-    if (!editable) {
+    if (!loadable) {
       ImGui::BeginDisabled();
     }
 
@@ -160,14 +164,20 @@ void draw_main_menu_bar() noexcept {
 
     ImGui::Separator();
 
+    if (!editable && loadable) {
+      ImGui::BeginDisabled();
+    }
     if (ImGui::MenuItem("Save", "Ctrl+S")) {
       request_save_scene();
+    }
+    if (!editable && loadable) {
+      ImGui::EndDisabled();
     }
     if (ImGui::MenuItem("Save As...")) {
       request_save_scene_as();
     }
 
-    if (!editable) {
+    if (!loadable) {
       ImGui::EndDisabled();
     }
 

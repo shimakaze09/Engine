@@ -431,8 +431,13 @@ bool world_is_editable() noexcept {
          (editor_session().world->current_phase() == runtime::WorldPhase::Input);
 }
 
+// Everything world_is_editable requires except the restore latch: after a
+// failed Stop restore the preserved world must still be replaceable (New,
+// Open) and exportable (Save As), because that is the recovery path the
+// Inspector advertises; gating those on the latch bricked the editor (#525).
 bool world_can_load_scene() noexcept {
   return (editor_session().world != nullptr) &&
+         (editor_session().playState == PlayState::Stopped) &&
          (editor_session().world->current_phase() == runtime::WorldPhase::Input);
 }
 

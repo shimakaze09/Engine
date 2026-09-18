@@ -5,6 +5,7 @@
 // historical path.
 
 #include "editor_commands.h"
+#include "editor_scene_document.h"
 #include "editor_session.h"
 #include "engine/editor/editor.h"
 #include "engine/runtime/scene_serializer.h"
@@ -169,6 +170,20 @@ int check_malformed_snapshot_preserves_world() {
       (editor_session().selectedEntityCount != 0U)) {
     editor_set_world(nullptr);
     return 25;
+  }
+
+  // #525: the advertised recovery must work. With the latch set, Save
+  // states why it refused instead of silently returning false, and New
+  // (the same gate as Open) replaces the preserved world and clears the
+  // latch. On base every document operation was gated on the latch, so
+  // the editor could only be quit.
+  if (perform_scene_save() || (scene_document_last_error()[0] == '\0')) {
+    editor_set_world(nullptr);
+    return 26;
+  }
+  if (!perform_scene_new() || editor_session().worldRestoreFailed) {
+    editor_set_world(nullptr);
+    return 27;
   }
 
   editor_set_world(nullptr);
