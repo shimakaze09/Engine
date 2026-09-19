@@ -562,9 +562,6 @@ void reset_run_state() noexcept {
 void set_frame_time(float deltaSeconds, float totalSeconds) noexcept {
   g_deltaSeconds = deltaSeconds;
   g_totalSeconds = totalSeconds;
-  if (dap_is_running()) {
-    dap_poll();
-  }
 }
 
 /// Loads the requested resource for script.

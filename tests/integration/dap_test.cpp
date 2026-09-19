@@ -9,12 +9,16 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <memory>
 #include <new>
 #include <string>
 #include <thread>
 
 #include "engine/core/service_locator.h"
+#include "engine/engine.h"
+#include "engine/runtime/editor_bridge.h"
+#include "engine/runtime/engine_pipeline.h"
 #include "engine/runtime/scripting_bridge.h"
 #include "engine/runtime/world.h"
 #include "engine/scripting/dap_server.h"
@@ -677,8 +681,11 @@ bool test_dap_breakpoint_pause() noexcept {
     return false;
   }
 
+  // The transport is serviced by the pipeline's scripting stage in
+  // production; this harness polls it directly between frames.
   for (int i = 0; i < 100; ++i) {
     engine::scripting::set_frame_time(0.016F, 0.016F * static_cast<float>(i));
+    engine::scripting::dap_poll();
     std::this_thread::sleep_for(std::chrono::milliseconds(5));
   }
 
@@ -824,6 +831,103 @@ bool test_dap_large_breakpoint_list() noexcept {
   return ok;
 }
 
+bool stopped_bridge_is_playing() noexcept { return false; }
+bool stopped_bridge_is_paused() noexcept { return false; }
+
+/// Walks upward from the current path until the bundled assets are found.
+bool set_working_directory_with_assets() noexcept {
+  const std::filesystem::path original = std::filesystem::current_path();
+  const std::filesystem::path candidates[] = {
+      original, original / "..", original / "../..", original / "../../..",
+      original / "../../../.."};
+  for (const std::filesystem::path &candidate : candidates) {
+    std::error_code ec{};
+    const std::filesystem::path normalized =
+        std::filesystem::weakly_canonical(candidate, ec);
+    if (ec) {
+      continue;
+    }
+    if (std::filesystem::exists(normalized / "assets/main.lua", ec) &&
+        std::filesystem::exists(normalized / "assets/shaders/bgfx/shaders.json",
+                                ec)) {
+      std::filesystem::current_path(normalized, ec);
+      return !ec;
+    }
+  }
+  return false;
+}
+
+/// Regression for #540: the transport was serviced only from
+/// set_frame_time, which the pipeline calls while playing, so a client
+/// could connect before Play but never get its initialize answered. The
+/// production pipeline (headless, editor bridge reporting Stopped) must
+/// answer initialize and setBreakpoints in the same handshake without a
+/// Play, and drain both in one frame.
+bool test_dap_attach_while_stopped() noexcept {
+  if (!set_working_directory_with_assets()) {
+    std::printf("(assets not found) ");
+    return false;
+  }
+  engine::runtime::EditorBridge bridge{};
+  bridge.is_playing = &stopped_bridge_is_playing;
+  bridge.is_paused = &stopped_bridge_is_paused;
+  engine::runtime::set_editor_bridge(&bridge);
+  engine::EngineConfig config{};
+  config.core.platform.headless = true;
+  if (!engine::bootstrap(config)) {
+    engine::runtime::set_editor_bridge(nullptr);
+    std::printf("(bootstrap failed) ");
+    return false;
+  }
+  bool ok = false;
+  {
+    engine::EnginePipeline pipeline;
+    if (pipeline.initialize(0U) && engine::scripting::dap_start(kDapPort) &&
+        init_client_socket_platform()) {
+      SocketHandle sock = kInvalidSocket;
+      if (connect_to_dap_server(&sock)) {
+        // Both requests are on the wire before any frame runs.
+        const bool sent =
+            send_dap_request(sock, 1, "initialize", "{\"adapterID\":\"t\"}") &&
+            send_dap_request(sock, 2, "setBreakpoints",
+                             "{\"source\":{\"path\":\"dap_stopped.lua\"},"
+                             "\"breakpoints\":[{\"line\":1}]}");
+        std::string recvBuffer;
+        bool initAnswered = false;
+        bool breakpointsAnswered = false;
+        for (int frame = 0; sent && (frame < 30) &&
+                            !(initAnswered && breakpointsAnswered);
+             ++frame) {
+          if (!pipeline.execute_frame()) {
+            break;
+          }
+          std::string body;
+          while (recv_dap_message(sock, &recvBuffer, &body, 20)) {
+            if (body.find("\"request_seq\":1,") != std::string::npos) {
+              initAnswered = true;
+            }
+            if (body.find("\"request_seq\":2,") != std::string::npos) {
+              breakpointsAnswered = true;
+            }
+          }
+        }
+        ok = initAnswered && breakpointsAnswered;
+        if (!ok) {
+          std::printf("(initialize %d, setBreakpoints %d) ",
+                      initAnswered ? 1 : 0, breakpointsAnswered ? 1 : 0);
+        }
+        close_socket_safe(sock);
+      }
+      shutdown_client_socket_platform();
+    }
+    engine::scripting::dap_stop();
+    pipeline.teardown();
+  }
+  engine::shutdown();
+  engine::runtime::set_editor_bridge(nullptr);
+  return ok;
+}
+
 /// Runs this executable or test program.
 int main() {
   std::printf("  dap_test::restart_clears_session ... ");
@@ -849,8 +953,12 @@ int main() {
   std::printf("  dap_test::breakpoint_pause ... ");
   const bool breakpointOk = test_dap_breakpoint_pause();
   std::printf(breakpointOk ? "PASS\n" : "FAIL\n");
+
+  std::printf("  dap_test::attach_while_stopped ... ");
+  const bool attachOk = test_dap_attach_while_stopped();
+  std::printf(attachOk ? "PASS\n" : "FAIL\n");
   return (restartOk && oversizedOk && overflowOk && unknownOk && largeListOk &&
-          breakpointOk)
+          breakpointOk && attachOk)
              ? 0
              : 1;
 }

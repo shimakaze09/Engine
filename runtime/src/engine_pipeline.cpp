@@ -63,6 +63,7 @@
 #include "engine_frame_collect.h"
 #include "engine_runtime_streaming.h"
 #include "engine/runtime/world.h"
+#include "engine/scripting/dap_server.h"
 #include "engine/scripting/scripting.h"
 
 namespace engine {
@@ -1058,6 +1059,9 @@ void EnginePipeline::Impl::stage_scripting() noexcept {
   // The debugger transport is serviced every frame whatever the play
   // state, so a client can attach and set breakpoints before Play or
   // disconnect while paused (#540).
+  if (scripting::dap_is_running()) {
+    scripting::dap_poll();
+  }
   if (isPlaying && (updateStepCount > 0U)) {
     scripting::set_frame_time(static_cast<float>(step_seconds()),
                               static_cast<float>(simulationTimeSeconds));

@@ -1019,17 +1019,30 @@ void dap_poll() noexcept {
   if (state.clientSocket != kBadSocket) {
     platform_set_nonblocking(state.clientSocket);
     recv_into_buffer();
-    const char *body = nullptr;
-    std::size_t bodyLen = 0U;
-    std::size_t consumed = 0U;
-    const DapMessageExtractResult extractResult =
-        try_extract_message(&body, &bodyLen, &consumed);
-    if (extractResult == DapMessageExtractResult::Complete) {
-      bool resume = false;
-      process_message(body, bodyLen, nullptr, &resume);
-      consume_recv_buffer(consumed);
-    } else if (extractResult == DapMessageExtractResult::Invalid) {
-      close_dap_client(state);
+    // Every complete frame in the buffer is answered this poll, so a
+    // handshake (initialize, setBreakpoints, configurationDone) does not
+    // need one engine frame per message (#540). Bounded so a client that
+    // floods requests cannot hold the frame.
+    constexpr int kMaxMessagesPerPoll = 64;
+    for (int handled = 0; handled < kMaxMessagesPerPoll; ++handled) {
+      if (state.clientSocket == kBadSocket) {
+        break;
+      }
+      const char *body = nullptr;
+      std::size_t bodyLen = 0U;
+      std::size_t consumed = 0U;
+      const DapMessageExtractResult extractResult =
+          try_extract_message(&body, &bodyLen, &consumed);
+      if (extractResult == DapMessageExtractResult::Complete) {
+        bool resume = false;
+        process_message(body, bodyLen, nullptr, &resume);
+        consume_recv_buffer(consumed);
+        continue;
+      }
+      if (extractResult == DapMessageExtractResult::Invalid) {
+        close_dap_client(state);
+      }
+      break;
     }
   }
 }
