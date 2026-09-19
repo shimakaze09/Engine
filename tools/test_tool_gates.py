@@ -897,6 +897,74 @@ def test_error_handling_gate():
           "error handling: this checkout passes the gate")
 
 
+def test_portable_fopen_gate():
+    """The portable-fopen gate must reject a bare fopen that a Windows lane
+    would compile, accept one in a branch Windows skips, ignore comments,
+    strings and look-alike names, and pass this checkout."""
+    script = str(TOOLS / "check_portable_fopen.py")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+
+        def case(name, rel, body):
+            return str(write_comment_fixture(tmp / name, rel, body))
+
+        check(run([script, "--root", case(
+            "bare", "tests/unit/a_test.cpp",
+            "// Purpose.\nvoid f() { std::FILE *g = std::fopen(p, \"wb\"); }\n")]) != 0,
+              "portable fopen: a bare std::fopen in a test is a finding")
+        check(run([script, "--root", case(
+            "engine", "core/src/a.cpp",
+            "// Purpose.\nvoid f() { FILE *g = fopen(p, \"rb\"); }\n")]) != 0,
+              "portable fopen: engine code is audited, unqualified too")
+        check(run([script, "--root", case(
+            "winbranch", "core/src/a.cpp",
+            "// Purpose.\n#ifdef _WIN32\nFILE *g = fopen(p, m);\n#endif\n")]) != 0,
+              "portable fopen: the Windows branch itself is still a finding")
+        check(run([script, "--root", case(
+            "idiom", "tests/unit/a_test.cpp",
+            "// Purpose.\n#ifdef _WIN32\nfopen_s(&g, p, m);\n#else\n"
+            "g = std::fopen(p, m);\n#endif\n")]) == 0,
+              "portable fopen: the fopen_s/#else idiom passes")
+        check(run([script, "--root", case(
+            "msc", "tests/benchmark/a_test.cpp",
+            "// Purpose.\n#if defined(_MSC_VER)\nfopen_s(&g, p, m);\n#else\n"
+            "g = std::fopen(p, m);\n#endif\n")]) == 0,
+              "portable fopen: _MSC_VER selects the Windows branch as well")
+        check(run([script, "--root", case(
+            "negated", "core/src/a.cpp",
+            "// Purpose.\n#ifndef _WIN32\ng = std::fopen(p, m);\n#endif\n")]) == 0,
+              "portable fopen: the body of a negated conditional passes")
+        check(run([script, "--root", case(
+            "afterelse", "core/src/a.cpp",
+            "// Purpose.\n#ifndef _WIN32\nint x;\n#else\ng = std::fopen(p, m);\n#endif\n")]) != 0,
+              "portable fopen: the #else of a negated conditional is Windows")
+        check(run([script, "--root", case(
+            "linux", "core/src/a.cpp",
+            "// Purpose.\n#if defined(_WIN32)\nint x;\n#elif defined(__linux__)\n"
+            "g = std::fopen(p, m);\n#endif\n")]) == 0,
+              "portable fopen: a branch that requires another platform passes")
+        check(run([script, "--root", case(
+            "afterendif", "core/src/a.cpp",
+            "// Purpose.\n#ifdef _WIN32\nint x;\n#else\nint y;\n#endif\n"
+            "FILE *g = std::fopen(p, m);\n")]) != 0,
+              "portable fopen: a call after the #endif is unguarded again")
+        check(run([script, "--root", case(
+            "lookalike", "core/src/a.cpp",
+            "// Never call fopen( here.\nvoid f() { fopen_s(&g, p, m); my_fopen(p); "
+            "log(\"fopen(\"); }\n")]) == 0,
+              "portable fopen: comments, strings and look-alike names pass")
+        check(run([script, "--root", case(
+            "tools", "tools/asset_packer/a.cpp",
+            "// Purpose.\nvoid f() { FILE *g = std::fopen(p, m); }\n")]) == 0,
+              "portable fopen: tools/ is outside the audited roots")
+        check(run([script, "--root", str(tmp / "empty")]) == 0,
+              "portable fopen: an empty tree passes")
+
+    check(run([script]) == 0,
+          "portable fopen: this checkout passes the gate")
+
+
 def test_duplicate_primitive_gate():
     """The duplicate-primitive gate must reject a re-implemented primitive
     in first-party C++, accept the canonical owner, leave the test tree
@@ -961,6 +1029,7 @@ def main():
     test_test_timing_gate()
     test_comment_quality_gate()
     test_error_handling_gate()
+    test_portable_fopen_gate()
     test_duplicate_primitive_gate()
     if failures:
         print(f"\nFAILED ({len(failures)} failure(s))")

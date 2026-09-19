@@ -278,6 +278,9 @@ jobs:
       - name: Audit error handling
         run: python3 tools/check_error_handling.py
 
+      - name: Audit portable fopen
+        run: python3 tools/check_portable_fopen.py
+
       - name: Audit duplicate primitives
         run: python3 tools/check_duplicate_primitives.py
 
