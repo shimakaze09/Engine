@@ -5,7 +5,7 @@
 // instance receives every write, the fallback is untouched while bound,
 // and unbinding restores the fallback's values unchanged.
 
-#include "engine/runtime/game_binding_state.h"
+#include "engine/scripting/game_binding_state.h"
 #include "engine/scripting/bindable_api.h"
 #include "engine/scripting/scripting.h"
 
@@ -33,7 +33,7 @@ bool state_is(const char *expected) noexcept {
 
 /// Runs this executable or test program.
 int main() {
-  using engine::runtime::GameBindingState;
+  using engine::scripting::GameBindingState;
   using engine::scripting::bind_game_state;
   using engine::scripting::bindable_set_game_state;
 

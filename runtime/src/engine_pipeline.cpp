@@ -49,7 +49,7 @@
 #include "engine/renderer/shader_system.h"
 #include "engine/renderer/texture_loader.h"
 #include "engine/runtime/editor_bridge.h"
-#include "engine/runtime/game_binding_state.h"
+#include "engine/scripting/game_binding_state.h"
 #include "engine/runtime/physics_bridge.h"
 #include "engine/runtime/render_prep_pipeline.h"
 #include "engine/runtime/scene_serializer.h"
@@ -524,7 +524,7 @@ struct EnginePipeline::Impl final {
   // --- Owned resources ---
   core::ServiceLocator serviceLocator{};
   runtime::EngineServiceRegistry serviceRegistry;
-  runtime::GameBindingState gameBindingState{};
+  scripting::GameBindingState gameBindingState{};
   std::unique_ptr<runtime::World> world;
   std::unique_ptr<renderer::CommandBufferBuilder> commandBuffer;
   /// Camera-culled draws the shadow and capture passes still need.

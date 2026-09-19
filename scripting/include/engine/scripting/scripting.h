@@ -9,10 +9,11 @@
 
 namespace engine::runtime {
 class World;
-struct GameBindingState;
 } // namespace engine::runtime
 
 namespace engine::scripting {
+
+struct GameBindingState;
 
 /// Function-pointer bridge the runtime installs so the animation Lua
 /// bindings reach the animation system without an upward link dependency
@@ -207,7 +208,7 @@ void reset_run_state() noexcept;
 // Lua game bindings act on. While unbound they fall back to a
 // scripting-local instance so standalone/test use keeps working; the bound
 // pointer must outlive every dispatch, including editor Stop's VM recycle.
-void bind_game_state(runtime::GameBindingState *state) noexcept;
+void bind_game_state(GameBindingState *state) noexcept;
 
 // --- Sandbox configuration ---
 // Enable or disable the Lua sandbox (restricted globals, CPU/memory limits).

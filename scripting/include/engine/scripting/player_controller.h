@@ -1,4 +1,4 @@
-// Declares player controller types and APIs for the Engine runtime world.
+// Declares player controller types and APIs the Lua game bindings act on.
 
 #pragma once
 
@@ -9,7 +9,7 @@
 
 #include "engine/core/entity.h"
 
-namespace engine::runtime {
+namespace engine::scripting {
 
 // Maps input to actions on the controlled entity. One per player.
 // The PlayerController owns the mapping between a player slot and the entity
@@ -100,4 +100,4 @@ struct PlayerControllerArray final {
   }
 };
 
-} // namespace engine::runtime
+} // namespace engine::scripting

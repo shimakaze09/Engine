@@ -212,25 +212,8 @@ KNOWN_VIOLATIONS: dict[tuple[str, str], str] = {
 # enforced with no exception below.
 _SCRIPTING_UPWARD_INCLUDES: dict[str, tuple[str, ...]] = {
     "engine/runtime/entity_pool.h": ("entity_pool_bindings.cpp",),
-    "engine/runtime/game_binding_state.h": ("game_bindings.cpp",),
     "engine/runtime/game_mode.h": ("game_bindings.cpp",),
-    "engine/runtime/game_state.h": ("game_bindings.cpp",),
-    "engine/runtime/player_controller.h": ("game_bindings.cpp",),
     "engine/runtime/primitive_collider.h": ("mesh_material_bindings.cpp",),
-    "engine/runtime/scripting_bridge.h": (
-        "asset_bindings.cpp",
-        "audio_bindings.cpp",
-        "body_bindings.cpp",
-        "camera_bindings.cpp",
-        "deferred_mutations.cpp",
-        "entity_lifecycle_bindings.cpp",
-        "light_bindings.cpp",
-        "mesh_material_bindings.cpp",
-        "persist_bindings.cpp",
-        "physics_bindings.cpp",
-        "runtime_binding.h",
-        "scripting.cpp",
-    ),
     "engine/runtime/timer_manager.h": ("timer_bindings.cpp",),
     "engine/runtime/world.h": (
         "asset_bindings.cpp",

@@ -477,8 +477,8 @@ def test_module_dependency_gate():
         # Dropping an entry must turn the site it excused red, which is
         # what makes the gate red on the base revision of each #309/#310
         # fix rather than merely documenting the debt.
-        excused = ("scripting/src/scripting.cpp",
-                   "engine/runtime/scripting_bridge.h")
+        excused = ("editor/src/editor_component_registry.h",
+                   "component_registry.h")
         reason = deps.KNOWN_VIOLATIONS.pop(excused)
         check(deps.main() != 0,
               "module deps: an unexcused tracked violation fails the gate")

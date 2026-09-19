@@ -3,7 +3,7 @@
 #include "deferred_mutations.h"
 
 #include "engine/core/logging.h"
-#include "engine/runtime/scripting_bridge.h"
+#include "engine/scripting/runtime_services.h"
 #include "engine/scripting/scripting.h"
 #include "entity_script_bindings.h"
 #include "runtime_binding.h"

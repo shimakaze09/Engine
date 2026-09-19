@@ -6,8 +6,8 @@
 #include <new>
 
 #include "engine/runtime/game_mode.h"
-#include "engine/runtime/game_state.h"
-#include "engine/runtime/player_controller.h"
+#include "engine/scripting/game_state.h"
+#include "engine/scripting/player_controller.h"
 #include "engine/runtime/world.h"
 #include "../test_harness.h"
 
@@ -140,7 +140,7 @@ static bool test_game_mode_reset() noexcept {
 }
 
 static bool test_game_state_numbers() noexcept {
-  engine::runtime::GameState gs;
+  engine::scripting::GameState gs;
   check(gs.set_number("score", 42.0F), "set_number score");
   check(gs.set_number("health", 100.0F), "set_number health");
   check(gs.entryCount == 2U, "entryCount 2");
@@ -158,7 +158,7 @@ static bool test_game_state_numbers() noexcept {
 }
 
 static bool test_game_state_strings() noexcept {
-  engine::runtime::GameState gs;
+  engine::scripting::GameState gs;
   check(gs.set_string("checkpoint", "level3_start"), "set_string");
   check(gs.has("checkpoint"), "has checkpoint");
   check(!gs.is_number("checkpoint"), "is_number false for string");
@@ -177,7 +177,7 @@ static bool test_game_state_strings() noexcept {
 }
 
 static bool test_game_state_remove_and_clear() noexcept {
-  engine::runtime::GameState gs;
+  engine::scripting::GameState gs;
   gs.set_number("a", 1.0F);
   gs.set_number("b", 2.0F);
   gs.set_string("c", "hello");
@@ -201,7 +201,7 @@ static bool test_game_state_remove_and_clear() noexcept {
 // success for an entry the full-string lookups can never reach, and repeated
 // writes of such a key would consume slots for unreachable entries.
 static bool test_game_state_key_length_boundary() noexcept {
-  using engine::runtime::GameState;
+  using engine::scripting::GameState;
   GameState gs;
 
   // 31 characters + NUL fills the slot exactly; one more cannot fit.
@@ -247,7 +247,7 @@ static bool test_game_state_key_length_boundary() noexcept {
 // overwrites existing keys, refuses new ones, and refuses over-long keys
 // without disturbing stored entries.
 static bool test_game_state_capacity_boundary() noexcept {
-  using engine::runtime::GameState;
+  using engine::scripting::GameState;
   GameState gs;
 
   char key[16] = {};
@@ -331,7 +331,7 @@ static bool test_game_mode_rule_key_length_boundary() noexcept {
 }
 
 static bool test_player_controller_array() noexcept {
-  engine::runtime::PlayerControllerArray pca;
+  engine::scripting::PlayerControllerArray pca;
   constexpr engine::runtime::Entity kEntityA{42U, 1U};
   constexpr engine::runtime::Entity kEntityARecycled{42U, 2U};
   constexpr engine::runtime::Entity kEntityB{99U, 1U};
@@ -371,7 +371,7 @@ static bool test_player_controller_array() noexcept {
 static bool test_game_state_persists_across_worlds() noexcept {
   // GameState is separate from World — verify it survives World
   // reconstruction.
-  engine::runtime::GameState gs;
+  engine::scripting::GameState gs;
   gs.set_number("level", 5.0F);
   gs.set_string("name", "player1");
 

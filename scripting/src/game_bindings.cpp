@@ -11,10 +11,8 @@ extern "C" {
 #include <cstddef>
 #include <cstdio>
 
-#include "engine/runtime/game_binding_state.h"
+#include "engine/scripting/game_binding_state.h"
 #include "engine/runtime/game_mode.h"
-#include "engine/runtime/game_state.h"
-#include "engine/runtime/player_controller.h"
 #include "engine/runtime/world.h"
 #include "runtime_binding.h"
 
@@ -22,15 +20,15 @@ namespace engine::scripting {
 namespace {
 
 constexpr std::size_t kMaxPlayerControllers =
-    runtime::GameBindingState::kMaxPlayerControllers;
+    GameBindingState::kMaxPlayerControllers;
 
 // Pipeline-owned when bound; the fallback keeps standalone/test
 // use (no pipeline) working with identical semantics.
-runtime::GameBindingState g_fallbackState{};
-runtime::GameBindingState *g_boundState = nullptr;
+GameBindingState g_fallbackState{};
+GameBindingState *g_boundState = nullptr;
 
 /// Returns the state instance the game bindings currently act on.
-runtime::GameBindingState &binding_state() noexcept {
+GameBindingState &binding_state() noexcept {
   return (g_boundState != nullptr) ? *g_boundState : g_fallbackState;
 }
 
@@ -262,7 +260,7 @@ void reset_game_bindings() noexcept {
 }
 
 /// Binds the pipeline-owned state; nullptr restores the fallback.
-void bind_game_state(runtime::GameBindingState *state) noexcept {
+void bind_game_state(GameBindingState *state) noexcept {
   g_boundState = state;
 }
 

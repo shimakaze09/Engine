@@ -19,7 +19,7 @@ extern "C" {
 
 #include "engine/core/json.h"
 #include "engine/core/logging.h"
-#include "engine/runtime/scripting_bridge.h"
+#include "engine/scripting/runtime_services.h"
 
 namespace engine::scripting {
 namespace {
