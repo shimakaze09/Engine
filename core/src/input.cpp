@@ -314,6 +314,11 @@ void input_process_event(const void *nativeEvent) noexcept {
   }
   case SDL_EVENT_MOUSE_BUTTON_DOWN:
   case SDL_EVENT_MOUSE_BUTTON_UP: {
+    // A button event carries the cursor too: a touch-emulated tap is a
+    // press and release with no motion between, so the position must
+    // land here or the press reads a stale cursor (#538).
+    g_mouse.x = static_cast<int>(event->button.x);
+    g_mouse.y = static_cast<int>(event->button.y);
     const int button = static_cast<int>(event->button.button) - 1;
     if ((button >= 0) && (button < kMaxMouseButtons)) {
       const bool down = (event->type == SDL_EVENT_MOUSE_BUTTON_DOWN);
