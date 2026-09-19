@@ -14,7 +14,6 @@
 #include <atomic>
 #include <cstdio>
 #include <cstring>
-#include <filesystem>
 
 #ifdef _WIN32
 #include <process.h>
@@ -50,29 +49,50 @@ namespace {
 /// Follows a symlinked destination to the file it names (a bounded
 /// chain, relative targets resolved against the link's directory), so
 /// the replacement lands on that file and the link survives (#572). A
-/// destination that is not a link, or a chain that cannot be read,
-/// resolves to itself.
+/// destination that is not a link resolves to itself; a chain deeper
+/// than eight hops is refused. Fixed buffers only: begin() is noexcept
+/// and must not allocate. Windows has no readlink and a symlink there
+/// needs a handle-based query, so the destination is used as given and
+/// a symlinked destination is replaced by a file (issue #572).
 bool resolve_symlinked_destination(const char *destinationPath, char *out,
                                    std::size_t outCapacity) noexcept {
-  std::error_code ec{};
-  std::filesystem::path current(destinationPath);
-  for (int hop = 0; (hop < 8) && std::filesystem::is_symlink(current, ec) && !ec;
-       ++hop) {
-    std::filesystem::path target = std::filesystem::read_symlink(current, ec);
-    if (ec) {
-      break;
-    }
-    if (target.is_relative()) {
-      target = current.parent_path() / target;
-    }
-    current = target;
-  }
-  const std::string resolved = current.string();
-  if (resolved.size() >= outCapacity) {
+  const std::size_t givenLength = std::strlen(destinationPath);
+  if (givenLength >= outCapacity) {
     return false;
   }
-  std::memcpy(out, resolved.c_str(), resolved.size() + 1U);
+  std::memcpy(out, destinationPath, givenLength + 1U);
+#ifndef _WIN32
+  char target[1024] = {};
+  for (int hop = 0; hop < 8; ++hop) {
+    const ssize_t targetLength = ::readlink(out, target, sizeof(target) - 1U);
+    if (targetLength < 0) {
+      return true; // not a link (or not readable): the path stands
+    }
+    target[targetLength] = '\0';
+    if (target[0] == '/') {
+      if (static_cast<std::size_t>(targetLength) >= outCapacity) {
+        return false;
+      }
+      std::memcpy(out, target, static_cast<std::size_t>(targetLength) + 1U);
+      continue;
+    }
+    const char *slash = std::strrchr(out, '/');
+    const std::size_t directoryLength =
+        (slash != nullptr) ? static_cast<std::size_t>(slash - out) + 1U : 0U;
+    char joined[1024] = {};
+    const int written =
+        std::snprintf(joined, sizeof(joined), "%.*s%s",
+                      static_cast<int>(directoryLength), out, target);
+    if ((written <= 0) || (static_cast<std::size_t>(written) >= sizeof(joined)) ||
+        (static_cast<std::size_t>(written) >= outCapacity)) {
+      return false;
+    }
+    std::memcpy(out, joined, static_cast<std::size_t>(written) + 1U);
+  }
+  return ::readlink(out, target, sizeof(target) - 1U) < 0;
+#else
   return true;
+#endif
 }
 
 /// Carries the destination's permission bits onto the staged temporary
