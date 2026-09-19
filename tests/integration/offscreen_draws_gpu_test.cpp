@@ -42,7 +42,7 @@ int run(engine::EnginePipeline &pipeline, World &world) noexcept {
   using engine::tests::capture_presented_frame;
   using engine::tests::settle_frames;
 
-  static_cast<void>(engine::core::cvar_set_string("r_fog_mode", "off"));
+  engine::tests::checked(engine::core::cvar_set_string("r_fog_mode", "off"), "r_fog_mode");
   engine::runtime::Transform floorTransform{};
   floorTransform.scale = engine::math::Vec3(60.0F, 1.0F, 60.0F);
   const Entity sun = world.create_scene_object();
@@ -54,16 +54,9 @@ int run(engine::EnginePipeline &pipeline, World &world) noexcept {
   if ((engine::tests::add_builtin_mesh(world, "builtin://plane", floorTransform,
                                        engine::math::Vec3(1.0F, 1.0F, 1.0F)) ==
        kInvalidEntity) ||
-      (sun == kInvalidEntity) ||
+      (sun == kInvalidEntity) || !world.add_light_component(sun, sunLight) ||
       !engine::tests::look_from(world, engine::math::Vec3(0.0F, 6.0F, 10.0F),
                                 engine::math::Vec3(0.0F, 0.0F, 0.0F))) {
-    return 10;
-  }
-  // The sun arrives a few frames after the rest. A scene that is whole on
-  // the pipeline's first frame renders its cascades wrongly and the cache
-  // keeps them (issue #579); that defect is not this test's subject, and
-  // meeting it here would fail both frames alike.
-  if (!settle_frames(pipeline, 5) || !world.add_light_component(sun, sunLight)) {
     return 10;
   }
 

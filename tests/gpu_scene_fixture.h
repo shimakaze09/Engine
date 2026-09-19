@@ -36,6 +36,7 @@ using GpuSceneBody = int (*)(engine::EnginePipeline &pipeline,
 namespace detail {
 
 inline engine::runtime::World *g_fixtureWorld = nullptr;
+inline bool g_cvarRefused = false;
 
 inline void capture_world(engine::runtime::World *world) noexcept {
   g_fixtureWorld = world;
@@ -67,6 +68,17 @@ inline bool enter_asset_directory() noexcept {
 }
 
 } // namespace detail
+
+/// Records the outcome of a cvar set made by a test body. A refused set —
+/// a misspelt name, or one not registered yet — would leave the test
+/// running in a configuration it does not describe, so the fixture fails
+/// the test when any was refused, whatever the body returns.
+inline void checked(bool accepted, const char *what) noexcept {
+  if (!accepted) {
+    std::fprintf(stderr, "FAIL: cvar set refused: %s\n", what);
+    detail::g_cvarRefused = true;
+  }
+}
 
 /// Adds a scene object drawing one of the built-in meshes ("builtin://cube",
 /// "builtin://plane", ...). kInvalidEntity when the World refuses either
@@ -118,9 +130,12 @@ inline bool settle_frames(engine::EnginePipeline &pipeline,
   return true;
 }
 
-/// Boots the engine windowed, empties the World, runs body, and tears
-/// everything down. Exit codes 1 to 4 are the fixture's own: assets not
-/// found, bootstrap, pipeline initialization, no World.
+/// Boots the engine windowed, runs one frame, empties the World, runs
+/// body, and tears everything down. Exit codes 1 to 6 are the fixture's
+/// own: assets not found, bootstrap, pipeline initialization, no World, a
+/// cvar the fixture could not set, a cvar the body could not set. The
+/// frame that runs first is what registers the renderer's cvars, so a body
+/// can set them from its first line; it does so through checked().
 inline int run_gpu_scene_test(const char *name, GpuSceneBody body) noexcept {
   if (!detail::enter_asset_directory()) {
     return 1;
@@ -147,18 +162,36 @@ inline int run_gpu_scene_test(const char *name, GpuSceneBody body) noexcept {
         std::printf("SKIPPED: no render device with cooked programs\n");
         result = 0;
       } else if (detail::g_fixtureWorld != nullptr) {
+        // The renderer registers most of its cvars when its backend builds
+        // itself, which is on the first flush, and a set on a name that is
+        // not registered yet is refused. So one frame runs before anything
+        // is configured, and every set is checked: a refused one would
+        // leave the test running in a configuration it does not describe.
+        //
         // A frame must depend on nothing but the scene and whatever the
         // test varies: auto exposure adapts over frames, so two captures
         // of one scene would differ. Outside player mode the back buffer
         // is left black for the editor's overlay; r_present_scene is what
         // puts the final image where the readback looks.
-        static_cast<void>(core::cvar_set_bool("r_auto_exposure", false));
-        static_cast<void>(core::cvar_set_int("r_vsync", 0));
-        static_cast<void>(core::cvar_set_int("r_max_fps", 0));
-        static_cast<void>(core::cvar_set_bool("r_deferred", true));
-        static_cast<void>(core::cvar_set_bool("r_present_scene", true));
-        engine::runtime::reset_world(*detail::g_fixtureWorld);
-        result = body(pipeline, *detail::g_fixtureWorld);
+        const bool configured =
+            pipeline.execute_frame() &&
+            core::cvar_set_bool("r_auto_exposure", false) &&
+            core::cvar_set_int("r_vsync", 0) &&
+            core::cvar_set_int("r_max_fps", 0) &&
+            core::cvar_set_bool("r_deferred", true) &&
+            core::cvar_set_bool("r_present_scene", true);
+        if (!configured) {
+          std::fprintf(stderr, "FAIL: the fixture could not configure the "
+                               "renderer's cvars\n");
+          result = 5;
+        } else {
+          engine::runtime::reset_world(*detail::g_fixtureWorld);
+          detail::g_cvarRefused = false;
+          result = body(pipeline, *detail::g_fixtureWorld);
+          if ((result == 0) && detail::g_cvarRefused) {
+            result = 6;
+          }
+        }
       }
     }
     pipeline.teardown();

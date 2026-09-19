@@ -114,8 +114,7 @@ int run(engine::EnginePipeline &pipeline, World &world) noexcept {
   using engine::tests::mean_abs_difference;
   using engine::tests::settle_frames;
 
-  static_cast<void>(
-      engine::core::cvar_set_int("r_tile_table_max_dimension", 0));
+  engine::tests::checked(engine::core::cvar_set_int("r_tile_table_max_dimension", 0), "r_tile_table_max_dimension");
   Entity red = kInvalidEntity;
   Entity green = kInvalidEntity;
   if (!build_scene(world, &red, &green)) {
@@ -136,13 +135,13 @@ int run(engine::EnginePipeline &pipeline, World &world) noexcept {
   // The G-buffer view exists only on the deferred path, so an image that
   // does not change when it is switched on was drawn by the forward path,
   // where there is no tile table to wrap.
-  static_cast<void>(engine::core::cvar_set_int("r_gbuffer_debug", 1));
+  engine::tests::checked(engine::core::cvar_set_int("r_gbuffer_debug", 1), "r_gbuffer_debug");
   CapturedFrame gbufferView{};
   if (!settle_frames(pipeline) ||
       !capture_presented_frame(pipeline, "tile_wrap_g.tga", &gbufferView)) {
     return 12;
   }
-  static_cast<void>(engine::core::cvar_set_int("r_gbuffer_debug", 0));
+  engine::tests::checked(engine::core::cvar_set_int("r_gbuffer_debug", 0), "r_gbuffer_debug");
   if (mean_abs_difference(unwrapped, gbufferView, 0U, 0U, w, h) < 4.0) {
     std::printf("SKIPPED: the deferred path is not active on this device\n");
     return 0;
@@ -158,15 +157,13 @@ int run(engine::EnginePipeline &pipeline, World &world) noexcept {
 
   // 512 texels hold ten 50-texel tiles, so a drawable's tile columns wrap
   // onto many short rows and both lights' tiles move off their old rows.
-  static_cast<void>(
-      engine::core::cvar_set_int("r_tile_table_max_dimension", 512));
+  engine::tests::checked(engine::core::cvar_set_int("r_tile_table_max_dimension", 512), "r_tile_table_max_dimension");
   CapturedFrame wrapped{};
   if (!settle_frames(pipeline) ||
       !capture_presented_frame(pipeline, "tile_wrap_b.tga", &wrapped)) {
     return 14;
   }
-  static_cast<void>(
-      engine::core::cvar_set_int("r_tile_table_max_dimension", 0));
+  engine::tests::checked(engine::core::cvar_set_int("r_tile_table_max_dimension", 0), "r_tile_table_max_dimension");
 
   if (!world.remove_point_light_component(red) ||
       !world.remove_point_light_component(green)) {

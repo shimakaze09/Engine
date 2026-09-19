@@ -25,13 +25,13 @@ int run(engine::EnginePipeline &pipeline, World &world) noexcept {
   using engine::tests::mean_abs_difference;
   using engine::tests::settle_frames;
 
-  static_cast<void>(engine::core::cvar_set_string("r_fog_mode", "off"));
-  static_cast<void>(engine::core::cvar_set_bool("r_bloom", true));
-  static_cast<void>(engine::core::cvar_set_bool("r_fxaa", true));
+  engine::tests::checked(engine::core::cvar_set_string("r_fog_mode", "off"), "r_fog_mode");
+  engine::tests::checked(engine::core::cvar_set_bool("r_bloom", true), "r_bloom");
+  engine::tests::checked(engine::core::cvar_set_bool("r_fxaa", true), "r_fxaa");
   // Default intensity keeps a leak near one level; this makes a wrapped tap
   // worth many, without changing where taps land.
-  static_cast<void>(engine::core::cvar_set_float("r_bloom_intensity", 2.0F));
-  static_cast<void>(engine::core::cvar_set_float("r_bloom_threshold", 0.8F));
+  engine::tests::checked(engine::core::cvar_set_float("r_bloom_intensity", 2.0F), "r_bloom_intensity");
+  engine::tests::checked(engine::core::cvar_set_float("r_bloom_threshold", 0.8F), "r_bloom_threshold");
 
   const Entity sun = world.create_scene_object();
   engine::runtime::LightComponent sunLight{};

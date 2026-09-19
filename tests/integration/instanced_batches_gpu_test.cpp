@@ -82,7 +82,7 @@ int run(engine::EnginePipeline &pipeline, World &world) noexcept {
   using engine::tests::settle_frames;
 
   // Distance fog would fade both groups toward the same grey.
-  static_cast<void>(engine::core::cvar_set_string("r_fog_mode", "off"));
+  engine::tests::checked(engine::core::cvar_set_string("r_fog_mode", "off"), "r_fog_mode");
   const engine::runtime::Entity sun = world.create_scene_object();
   engine::runtime::LightComponent sunLight{};
   sunLight.direction = engine::math::Vec3(-0.2F, -0.6F, -1.0F);
@@ -99,8 +99,7 @@ int run(engine::EnginePipeline &pipeline, World &world) noexcept {
   const bool deferredModes[2] = {true, false};
   CapturedFrame empty[2]{};
   for (int mode = 0; mode < 2; ++mode) {
-    static_cast<void>(
-        engine::core::cvar_set_bool("r_deferred", deferredModes[mode]));
+    engine::tests::checked(engine::core::cvar_set_bool("r_deferred", deferredModes[mode]), "r_deferred");
     if (!settle_frames(pipeline, 20) ||
         !capture_presented_frame(pipeline, "instanced_empty.tga",
                                  &empty[mode])) {
@@ -123,7 +122,7 @@ int run(engine::EnginePipeline &pipeline, World &world) noexcept {
   for (int mode = 0; mode < 2; ++mode) {
     const bool deferred = deferredModes[mode];
     const char *label = deferred ? "deferred" : "forward";
-    static_cast<void>(engine::core::cvar_set_bool("r_deferred", deferred));
+    engine::tests::checked(engine::core::cvar_set_bool("r_deferred", deferred), "r_deferred");
     CapturedFrame frame{};
     if (!settle_frames(pipeline, 20) ||
         !capture_presented_frame(pipeline,
@@ -160,7 +159,7 @@ int run(engine::EnginePipeline &pipeline, World &world) noexcept {
       result = deferred ? 21 : 31;
     }
   }
-  static_cast<void>(engine::core::cvar_set_bool("r_deferred", true));
+  engine::tests::checked(engine::core::cvar_set_bool("r_deferred", true), "r_deferred");
   return result;
 }
 
