@@ -160,7 +160,7 @@ engine_add_test_executable(engine_integration_pipeline_tick_cadence
     engine_runtime
     engine_scripting
     LABELS
-    gpu;integration
+    integration
 )
 
 engine_add_test_executable(engine_integration_texture_system_bootstrap

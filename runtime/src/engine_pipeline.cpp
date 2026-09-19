@@ -568,6 +568,9 @@ struct EnginePipeline::Impl final {
   Clock::time_point lastMetricsLogTime{};
   double accumulator = 0.0;
   double simulationTimeSeconds = 0.0;
+  // Frame delta source: negative reads the wall clock, otherwise every
+  // playing frame accumulates exactly this many seconds (tests, replay).
+  double frameDeltaOverrideSeconds = -1.0;
 
   // --- Loop state ---
   std::uint32_t frameIndex = 0U;
@@ -1040,11 +1043,14 @@ void EnginePipeline::Impl::stage_play_transitions() noexcept {
 void EnginePipeline::Impl::stage_timing() noexcept {
   if (isPlaying && !singleStepping) {
     const auto now = Clock::now();
+    const double frameDelta =
+        (frameDeltaOverrideSeconds >= 0.0)
+            ? frameDeltaOverrideSeconds
+            : std::chrono::duration<double>(now - previousTick).count();
     // Snapped so vsync-at-fixed-rate frames drain exactly one step
     // instead of alternating 0/2 on measurement noise (frame_pacing).
-    accumulator += runtime::snap_delta_to_fixed_step(
-        std::chrono::duration<double>(now - previousTick).count(),
-        kFixedDeltaSeconds);
+    accumulator +=
+        runtime::snap_delta_to_fixed_step(frameDelta, kFixedDeltaSeconds);
     previousTick = now;
   } else {
     previousTick = frameStart;
@@ -2063,6 +2069,7 @@ bool EnginePipeline::initialize(std::uint32_t maxFrames) noexcept {
   if (!m_impl) {
     return false;
   }
+  m_impl->frameDeltaOverrideSeconds = m_frameDeltaOverrideSeconds;
   if (!m_impl->initialize(maxFrames)) {
     // Initialization stops at its first failure, which may be past the point
     // where the run published; closing regardless keeps that independent of
@@ -2084,6 +2091,27 @@ bool EnginePipeline::had_fatal_error() const noexcept {
 
 runtime::World *EnginePipeline::world() noexcept {
   return m_impl ? m_impl->world.get() : nullptr;
+}
+
+bool EnginePipeline::set_frame_delta_override(double seconds) noexcept {
+  if (!(seconds >= 0.0) || !std::isfinite(seconds)) {
+    core::log_message(core::LogLevel::Warning, "engine",
+                      "frame delta override refused: not a finite, "
+                      "non-negative number of seconds");
+    return false;
+  }
+  m_frameDeltaOverrideSeconds = seconds;
+  if (m_impl) {
+    m_impl->frameDeltaOverrideSeconds = seconds;
+  }
+  return true;
+}
+
+void EnginePipeline::clear_frame_delta_override() noexcept {
+  m_frameDeltaOverrideSeconds = -1.0;
+  if (m_impl) {
+    m_impl->frameDeltaOverrideSeconds = -1.0;
+  }
 }
 
 void EnginePipeline::teardown() noexcept {

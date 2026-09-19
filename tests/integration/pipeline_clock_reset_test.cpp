@@ -16,11 +16,9 @@
 #include "engine/runtime/world.h"
 #include "engine/scripting/bindable_api.h"
 
-#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
-#include <thread>
 
 namespace {
 
@@ -115,11 +113,11 @@ void remove_script_file() noexcept {
   static_cast<void>(std::remove(kScriptPath));
 }
 
-/// Runs one playing frame guaranteed to simulate at least one fixed step
-/// (see pipeline_tick_cadence_test.cpp on the wall-clock accumulator).
+/// Runs one playing frame that simulates exactly one fixed step: the frame
+/// delta comes from the pipeline's override, not the wall clock.
 bool ticking_frame(engine::EnginePipeline &pipeline) noexcept {
-  std::this_thread::sleep_for(std::chrono::milliseconds(20));
-  return pipeline.execute_frame();
+  return pipeline.set_frame_delta_override(1.0 / 60.0) &&
+         pipeline.execute_frame();
 }
 
 /// Compares the live game-state label against an expected value.

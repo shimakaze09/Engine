@@ -79,6 +79,15 @@ public:
   /// and tests; null before initialize() and after teardown().
   runtime::World *world() noexcept;
 
+  /// Replaces the wall clock as the source of each playing frame's delta:
+  /// every frame accumulates exactly `seconds` until the override is
+  /// cleared, so a test or a replay simulates the same fixed-step counts
+  /// on every machine. Survives initialize() and teardown(). Refused
+  /// (false, nothing changes) for a negative or non-finite value.
+  bool set_frame_delta_override(double seconds) noexcept;
+  /// Returns the frame delta to the wall clock.
+  void clear_frame_delta_override() noexcept;
+
   /// Release per-run resources.  Safe to call even if initialize() failed,
   /// and safe to call repeatedly.  Destruction and a replacing initialize()
   /// release the same resources, so calling this is a matter of choosing
@@ -88,6 +97,9 @@ public:
 private:
   struct Impl;
   std::unique_ptr<Impl> m_impl;
+  // Negative means the wall clock; kept outside the run so it outlives a
+  // teardown and reaches the next initialize().
+  double m_frameDeltaOverrideSeconds = -1.0;
 };
 
 } // namespace engine
