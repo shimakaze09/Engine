@@ -510,18 +510,31 @@ int check_overlong_paths_are_skipped() {
   }
   std::error_code ec{};
   std::filesystem::create_directories(deep, ec);
-  if (ec) {
-    return 3;
-  }
   const std::string fittingPath = std::string(root) + "/" + fitting;
   const std::string overlongPath = std::string(root) + "/" + overlong;
   const std::string deepPath = (deep / "deep.mesh").string();
   if (deepPath.size() < kMaxAssetIndexPath) {
     return 4;
   }
+  bool deepCaseRuns = !ec;
+#ifdef _WIN32
+  // Windows refuses a path past MAX_PATH (260), well short of the index's
+  // 512-byte path capacity, so the file the path half of this case needs
+  // cannot exist here and the walk can never meet one. The name half
+  // needs no long path and still runs.
+  if (!deepCaseRuns) {
+    std::printf("editor_asset_index_test: path-capacity case not run: this "
+                "filesystem refuses the %zu-byte path it needs\n",
+                deepPath.size());
+  }
+#else
+  if (!deepCaseRuns) {
+    return 3;
+  }
+#endif
   if (!write_text_file(fittingPath.c_str(), "fits") ||
       !write_text_file(overlongPath.c_str(), "one past") ||
-      !write_text_file(deepPath.c_str(), "too deep")) {
+      (deepCaseRuns && !write_text_file(deepPath.c_str(), "too deep"))) {
     return 5;
   }
   if (!rebuild_asset_index()) {
