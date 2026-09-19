@@ -189,7 +189,7 @@ static int lua_engine_get_point_light(lua_State *state) noexcept {
     return 1;
   }
   runtime::PointLightComponent comp{};
-  if (!runtime_binding().world->get_point_light_component(entity, &comp)) {
+  if (!latest_point_light_component(entity, &comp)) {
     lua_pushnil(state);
     return 1;
   }
@@ -214,7 +214,8 @@ static int lua_engine_set_point_light(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
-  if (!runtime_binding().world->has_point_light_component(entity)) {
+  runtime::PointLightComponent existing{};
+  if (!latest_point_light_component(entity, &existing)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -291,7 +292,7 @@ static int lua_engine_get_spot_light(lua_State *state) noexcept {
     return 1;
   }
   runtime::SpotLightComponent comp{};
-  if (!runtime_binding().world->get_spot_light_component(entity, &comp)) {
+  if (!latest_spot_light_component(entity, &comp)) {
     lua_pushnil(state);
     return 1;
   }
@@ -321,7 +322,8 @@ static int lua_engine_set_spot_light(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
-  if (!runtime_binding().world->has_spot_light_component(entity)) {
+  runtime::SpotLightComponent existing{};
+  if (!latest_spot_light_component(entity, &existing)) {
     lua_pushboolean(state, 0);
     return 1;
   }

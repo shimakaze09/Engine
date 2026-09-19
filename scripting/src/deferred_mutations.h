@@ -33,6 +33,16 @@ bool latest_mesh_component(runtime::Entity entity,
 bool latest_light_component(runtime::Entity entity,
                             runtime::LightComponent *outComponent) noexcept;
 
+/// Reads the entity's point light through any pending queued write, so an
+/// add followed by a get or set inside on_begin_play sees the light
+/// (#574).
+bool latest_point_light_component(
+    runtime::Entity entity, runtime::PointLightComponent *outComponent) noexcept;
+
+/// Reads the entity's spot light through any pending queued write.
+bool latest_spot_light_component(
+    runtime::Entity entity, runtime::SpotLightComponent *outComponent) noexcept;
+
 /// Applies or queues entity destruction based on the current World phase.
 bool apply_or_queue_destroy_entity(runtime::Entity entity) noexcept;
 

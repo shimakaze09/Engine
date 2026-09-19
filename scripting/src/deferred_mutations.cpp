@@ -241,6 +241,52 @@ bool latest_light_component(runtime::Entity entity,
   return binding.world->get_light_component(entity, outComponent);
 }
 
+bool latest_point_light_component(
+    runtime::Entity entity,
+    runtime::PointLightComponent *outComponent) noexcept {
+  const ScriptingRuntimeBinding &binding = runtime_binding();
+  if ((binding.world == nullptr) || (outComponent == nullptr)) {
+    return false;
+  }
+  DeferredMutation pending{};
+  switch (find_pending_snapshot(entity,
+                                DeferredMutationType::AddPointLightComponent,
+                                DeferredMutationType::RemovePointLightComponent,
+                                true, &pending)) {
+  case PendingRead::Value:
+    *outComponent = pending.pointLightComponent;
+    return true;
+  case PendingRead::Removed:
+    return false;
+  case PendingRead::None:
+    break;
+  }
+  return binding.world->get_point_light_component(entity, outComponent);
+}
+
+bool latest_spot_light_component(
+    runtime::Entity entity,
+    runtime::SpotLightComponent *outComponent) noexcept {
+  const ScriptingRuntimeBinding &binding = runtime_binding();
+  if ((binding.world == nullptr) || (outComponent == nullptr)) {
+    return false;
+  }
+  DeferredMutation pending{};
+  switch (find_pending_snapshot(entity,
+                                DeferredMutationType::AddSpotLightComponent,
+                                DeferredMutationType::RemoveSpotLightComponent,
+                                true, &pending)) {
+  case PendingRead::Value:
+    *outComponent = pending.spotLightComponent;
+    return true;
+  case PendingRead::Removed:
+    return false;
+  case PendingRead::None:
+    break;
+  }
+  return binding.world->get_spot_light_component(entity, outComponent);
+}
+
 /// Returns whether script-driven world mutations may run immediately.
 bool can_apply_mutations_now() noexcept {
   const ScriptingRuntimeBinding &binding = runtime_binding();
