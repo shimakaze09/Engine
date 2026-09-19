@@ -84,7 +84,7 @@ bool initialize_touch_input() noexcept;
 /// Shuts down the owning system for touch input.
 void shutdown_touch_input() noexcept;
 // Drops every touch/gesture callback registration (script-owned userData);
-// part of the run-scoped input reset (#168, core::clear_gameplay_bindings).
+// part of the run-scoped input reset.
 void clear_touch_callbacks() noexcept;
 
 /// Converts touch process event into the target representation.

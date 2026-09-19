@@ -38,7 +38,7 @@ enum class PlayState : std::uint8_t { Stopped, Playing, Paused };
 
 // Thumbnail cache: maps a file path to a device texture handle owned by
 // the editor (created/destroyed through the engine-facing RenderDevice
-// contract; the editor never touches GL types directly, per audit #206).
+// contract; the editor never touches GL types directly).
 struct ThumbnailEntry final {
   char path[512] = {};
   renderer::DeviceTextureHandle texture{};
@@ -85,7 +85,7 @@ struct EditorSession final {
   // Set by the toolbar Step button while paused; the runtime consumes it
   // through the editor bridge to simulate exactly one fixed step.
   bool stepRequested = false;
-  // Explicit opt-in (issue #159): while Playing/Paused, on lets the
+  // Explicit opt-in: while Playing/Paused, on lets the
   // Inspector write straight to the running world through editor_live_edit
   // instead of showing runtime values read-only. Never implies undo --
   // live edits stay outside command history regardless of this flag.
@@ -98,7 +98,7 @@ struct EditorSession final {
   // into any other world.
   const runtime::World *playSnapshotWorld = nullptr;
   bool worldRestoreFailed = false;
-  // One-shot ENGINE_EDITOR_AUTOPLAY latch (#249): session-scoped so a
+  // One-shot ENGINE_EDITOR_AUTOPLAY latch: session-scoped so a
   // second editor session in one process autoplays again.
   bool autoplayConsumed = false;
   EditorCamera editorCamera{};

@@ -214,7 +214,7 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
     std::sort(spotCandidates.data(), spotCandidates.data() + spotCandidateCount,
               [](const ShadowCandidate &a, const ShadowCandidate &b) noexcept {
                 // Ties break on the light index so slot assignment is a function of
-                // the scene, not of creation order (#565).
+                // the scene, not of creation order.
                 return (a.distSq < b.distSq) ||
                        ((a.distSq == b.distSq) && (a.lightIndex < b.lightIndex));
               });
@@ -326,7 +326,7 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
               pointCandidates.data() + pointCandidateCount,
               [](const ShadowCandidate &a, const ShadowCandidate &b) noexcept {
                 // Ties break on the light index so slot assignment is a function of
-                // the scene, not of creation order (#565).
+                // the scene, not of creation order.
                 return (a.distSq < b.distSq) ||
                        ((a.distSq == b.distSq) && (a.lightIndex < b.lightIndex));
               });

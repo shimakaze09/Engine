@@ -44,7 +44,7 @@ int lua_engine_get_position(lua_State *state) noexcept {
     return 1;
   }
 
-  // #125: read through any same-frame queued transform write so a script
+  // Read through any same-frame queued transform write so a script
   // that sets then immediately gets sees its own write, not stale
   // committed state.
   runtime::Transform transform{};
@@ -160,7 +160,7 @@ math::Vec3 current_world_gravity() noexcept {
 }
 
 /// Stores the additive acceleration term, waking the body when the term
-/// changes; identical rewrites leave a sleeping body asleep (issue #102).
+/// changes; identical rewrites leave a sleeping body asleep.
 void store_acceleration_and_wake(runtime::RigidBody *rigidBody,
                                  const math::Vec3 &acceleration) noexcept {
   if ((rigidBody->acceleration.x != acceleration.x) ||
@@ -492,8 +492,8 @@ int lua_engine_get_children(lua_State *state) noexcept {
     return 1;
   }
 
-  // The World's child index answers in O(children), not O(transforms)
-  // (#517), in child-link order.
+  // The World's child index answers in O(children), not O(transforms),
+  // in child-link order.
   int childCount = 0;
   world->for_each_child(parent, [state, &childCount](
                                     runtime::Entity child) noexcept {

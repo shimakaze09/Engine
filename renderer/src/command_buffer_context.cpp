@@ -37,8 +37,8 @@ void reset_backend_on_failure() noexcept {
 }
 
 
-/// The one projection builder shared by every active-camera consumer
-/// (#221): perspective from fovRadians, orthographic from the half-height
+/// The one projection builder shared by every active-camera consumer:
+/// perspective from fovRadians, orthographic from the half-height
 /// orthographicSize, both with the historical fov/near/far fallbacks.
 /// Device clip/texture conventions (defaults when no device); here in
 /// the context TU so the slim per-TU test harnesses that link
@@ -74,7 +74,7 @@ math::Mat4 camera_projection_matrix(const CameraState &camera,
              : math::perspective(fov, safeAspect, nearP, farP);
 }
 
-/// Sky pass lens (#221): perspective directional sampling regardless of the
+/// Sky pass lens: perspective directional sampling regardless of the
 /// camera's projection kind (see command_buffer_flush_internal.h).
 math::Mat4 sky_projection_matrix(const CameraState &camera,
                                  float aspect) noexcept {

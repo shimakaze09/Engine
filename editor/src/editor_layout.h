@@ -1,4 +1,4 @@
-// Declares the editor's dock/window layout persistence (issue #313): the
+// Declares the editor's dock/window layout persistence: the
 // engine owns the layout file instead of ImGui's default writer, staging
 // it atomically into the per-user save directory rather than truncating
 // an imgui.ini in whatever directory the editor was launched from.

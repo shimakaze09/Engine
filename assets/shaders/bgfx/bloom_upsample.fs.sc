@@ -1,7 +1,6 @@
 $input v_texcoord0
 
-// Dual-Kawase 9-tap tent upsample (bgfx port of bloom_upsample.frag,
-// #138).
+// Dual-Kawase 9-tap tent upsample.
 
 #include <bgfx_shader.sh>
 

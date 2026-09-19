@@ -88,8 +88,8 @@ component_metadata_rows(std::size_t *outCount) noexcept;
 
 /// Converts a rotation to pitch/yaw/roll degrees for display, using the same
 /// axis convention as math::to_euler (pitch about +X, yaw about +Y, roll
-/// about +Z; q = qy(yaw) * qx(pitch) * qz(roll)). Round-trip policy (issue
-/// #156): storage stays the normalized quaternion; this is a presentation
+/// about +Z; q = qy(yaw) * qx(pitch) * qz(roll)). Round-trip policy:
+/// storage stays the normalized quaternion; this is a presentation
 /// projection recomputed fresh from the quaternion every call, not a staged
 /// value, so a quat->degrees->quat round trip always reconstructs the
 /// identical rotation (verified in editor_inspector_metadata_test.cpp),
@@ -104,13 +104,13 @@ math::Vec3 euler_degrees_from_quat(const math::Quat &rotation) noexcept;
 math::Quat quat_from_euler_degrees(const math::Vec3 &degrees) noexcept;
 
 /// Number of named collision-layer bit slots the LayerMask widget offers.
-/// Named per-project layers are issue #163 scope (gameplay tags/named
+/// Named per-project layers are scope (gameplay tags/named
 /// collision layers); until that lands, the widget still replaces raw
 /// integer entry with per-bit checkboxes labeled by slot index so the
 /// author never has to compute a bitmask by hand.
 inline constexpr std::size_t kInspectorLayerCount = 32U;
 /// Returns the display label for collision-layer bit `index` ("Layer N"
-/// until issue #163 adds a project-level name table); nullptr when index is
+/// until adds a project-level name table); nullptr when index is
 /// out of range.
 const char *inspector_layer_name(std::uint32_t index) noexcept;
 

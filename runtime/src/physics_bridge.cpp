@@ -199,7 +199,7 @@ physics::JointId add_fixed_joint(World &world, Entity entityA,
   return physics::add_fixed_joint(world, entityA, entityB);
 }
 
-/// Sets the requested value for joint limits; false (issue #126) outside
+/// Sets the requested value for joint limits; false outside
 /// the Input phase or when the physics-level set rejects the id/limits.
 bool set_joint_limits(World &world, physics::JointId id, float minLimit,
                       float maxLimit) noexcept {
@@ -209,7 +209,7 @@ bool set_joint_limits(World &world, physics::JointId id, float minLimit,
   return physics::set_joint_limits(world, id, minLimit, maxLimit);
 }
 
-/// Removes the given joint; false (issue #126) outside the Input phase or
+/// Removes the given joint; false outside the Input phase or
 /// when the id no longer names a live joint.
 bool remove_joint(World &world, physics::JointId id) noexcept {
   if (!require_phase(world, WorldPhase::Input, "remove_joint")) {

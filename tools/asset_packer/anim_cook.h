@@ -21,8 +21,7 @@ std::string sanitize_clip_name(const std::string &name, std::size_t index);
 
 /// Derives the sanitized output name for clip `index` and records it in
 /// usedNames; false when it collides with an earlier clip's sanitized
-/// name, which would silently overwrite that clip's cooked output
-/// (audit H-20).
+/// name, which would silently overwrite that clip's cooked output.
 bool derive_unique_clip_name(const std::string &clipName, std::size_t index,
                              std::unordered_set<std::string> *usedNames,
                              std::string *outName);

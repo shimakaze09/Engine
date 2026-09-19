@@ -1,6 +1,6 @@
 $input v_dir
 
-// Skybox cubemap sample (bgfx port of skybox.frag, #138).
+// Skybox cubemap sample.
 
 #include <bgfx_shader.sh>
 

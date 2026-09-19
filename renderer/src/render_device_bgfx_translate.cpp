@@ -1,5 +1,5 @@
 // Implements the pure engine-to-bgfx descriptor translation declared in
-// render_device_bgfx_internal.h (#138 Phase B): render-state bits,
+// render_device_bgfx_internal.h: render-state bits,
 // texture format/staging shapes, sampler and clear flags, and vertex
 // semantic/layout mapping. Kept free of device state so the unit suite
 // pins the mapping without initializing bgfx.

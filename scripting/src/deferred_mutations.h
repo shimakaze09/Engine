@@ -11,7 +11,7 @@ bool can_apply_mutations_now() noexcept;
 
 // Read-through component reads: read-modify-write setters must see the
 // newest queued snapshot, or later deferred writes clobber earlier ones
-// with stale state (issue #105). A queued destroy/removal reads as absent.
+// with stale state. A queued destroy/removal reads as absent.
 
 /// Reads the entity's transform through any pending queued write.
 bool latest_transform(runtime::Entity entity,
@@ -34,8 +34,7 @@ bool latest_light_component(runtime::Entity entity,
                             runtime::LightComponent *outComponent) noexcept;
 
 /// Reads the entity's point light through any pending queued write, so an
-/// add followed by a get or set inside on_begin_play sees the light
-/// (#574).
+/// add followed by a get or set inside on_begin_play sees the light.
 bool latest_point_light_component(
     runtime::Entity entity, runtime::PointLightComponent *outComponent) noexcept;
 

@@ -89,7 +89,7 @@ void draw_camera_frustum_wireframe(const renderer::CameraState &frozenCamera,
   const math::Mat4 view = math::look_at(frozenCamera.position,
                                         frozenCamera.target, frozenCamera.up);
   // Shares the renderer's projection builder so the frozen-camera gizmo
-  // draws the true frustum shape for orthographic cameras too (#221).
+  // draws the true frustum shape for orthographic cameras too.
   const math::Mat4 proj =
       renderer::camera_projection_matrix(frozenCamera, aspectRatio);
   const math::Mat4 vp = math::mul(proj, view);

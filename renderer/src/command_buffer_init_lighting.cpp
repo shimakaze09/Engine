@@ -73,7 +73,7 @@ bool resolve_gbuffer_program_state(BackendState &backend,
   backend.gbufRoughnessLoc = dev->shader_param(gbufProg, "uRoughness");
   backend.gbufAOLoc = dev->shader_param(gbufProg, "uAO");
   backend.gbufEmissiveLoc = dev->shader_param(gbufProg, "uEmissive");
-  // issue #160: texture-backed PBR material slots — all optional, like the
+  //: texture-backed PBR material slots — all optional, like the
   // albedo texture above (a dropped uniform just means uHasXTexture stays
   // unset and the fragment shader falls back to scalar-only).
   backend.gbufHasMetallicRoughnessTextureLoc =
@@ -108,7 +108,7 @@ bool resolve_gbuffer_program_state(BackendState &backend,
 // off), IBL, SSAO, and every shadow family behind their enable flags, plus
 // uTileCountY/uScreenSize, which the shader does not read today — a
 // conforming compiler may strip them, so requiring them let real drivers
-// disable the whole deferred path (issue #95).
+// disable the whole deferred path.
 bool resolve_deferred_light_program_state(BackendState &backend,
                                           const RenderDevice *dev) noexcept {
   backend.deferredLightProgram =
@@ -177,8 +177,8 @@ bool resolve_deferred_light_program_state(BackendState &backend,
 
   backend.dlShadowEnabledLoc =
       dev->shader_param(dlProg, "uShadowEnabled");
-  // #138 flat vocabulary (shared with the pbr forward path): one
-  // Tex2DArray sampler per shadow kind (#301), one mat4 array per
+  // Flat vocabulary (shared with the pbr forward path): one
+  // Tex2DArray sampler per shadow kind, one mat4 array per
   // shadow kind, packed vec4 payloads.
   backend.dlShadowMapArrayLoc =
       dev->shader_param(dlProg, "uShadowMapArray");
@@ -316,7 +316,7 @@ bool resolve_gbuffer_skinned_program_state(BackendState &backend,
   backend.gbufSkinnedAOLoc = dev->shader_param(skinnedProg, "uAO");
   backend.gbufSkinnedEmissiveLoc =
       dev->shader_param(skinnedProg, "uEmissive");
-  // issue #160: texture-backed PBR material slots, same optional-uniform
+  //: texture-backed PBR material slots, same optional-uniform
   // contract as the static G-buffer program above.
   backend.gbufSkinnedHasMetallicRoughnessTextureLoc =
       dev->shader_param(skinnedProg, "uHasMetallicRoughnessTexture");
@@ -412,8 +412,8 @@ void init_backend_lighting(BackendState &backend,
   bool deferredOk = true;
 
   // Capability gate before any deferred program exists: the deferred
-  // lighting unit map tops out at kIblBrdfLutUnit (15 since the #301
-  // shadow arrays, so 16-unit devices — WebGL2's floor — now pass),
+  // lighting unit map tops out at kIblBrdfLutUnit (15, so 16-unit
+  // devices — WebGL2's floor — pass),
   // and creating programs a device cannot run is not survivable
   // everywhere (WebGL2's MRT limits fail at compile, fatal under bgfx).
   {
@@ -607,7 +607,7 @@ void init_backend_lighting(BackendState &backend,
   }
 
   // GPU skinning (soft-fail: skinned meshes render in bind pose). The
-  // #138 shared vocabulary uploads palettes as plain mat4 arrays into
+  // shared vocabulary uploads palettes as plain mat4 arrays into
   // each skinned program, so no uniform buffer (and no
   // caps.uniformBlocks dependency) remains.
   {

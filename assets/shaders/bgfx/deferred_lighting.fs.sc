@@ -1,12 +1,12 @@
 $input v_texcoord0
 
-// Deferred lighting fragment stage (bgfx port of deferred_lighting.frag,
-// #138): Cook-Torrance shading of the G-buffer with tile-culled point/
+// Deferred lighting fragment stage: Cook-Torrance shading of the
+// G-buffer with tile-culled point/
 // spot lights fetched from the R32F light-data and tile textures
 // (texelFetch; layouts match light_culling.h). Sampler stages are baked
 // to the flush's unit assignment (G-buffer 0-3, tile 4, SSAO 5, light
 // data 6, cascade array 7, spot array 8, point cubes 9-12 — max
-// register 12, inside DXBC's 16-sampler cap; #301) with full
+// register 12, inside DXBC's 16-sampler cap) with full
 // CSM/spot/point shadow sampling. IBL sampling still awaits the environment textures'
 // arrival under this backend: ambient takes the constant-term branch.
 // Scalar and integer GL uniforms become vec4 read through .x.
@@ -50,7 +50,7 @@ SAMPLER2D(uGBufferEmissive, 2);
 SAMPLER2D(uGBufferDepth, 3);
 SAMPLER2D(uTileLightTex, 4);
 SAMPLER2D(uSsaoTexture, 5);
-// #301 unit map: the cascade and spot sets are Tex2DArrays (one
+// Unit map: the cascade and spot sets are Tex2DArrays (one
 // register each), so the deferred map tops out at register 12 and fits
 // DXBC's 16-sampler cap and WebGL2's 16-unit floor.
 SAMPLER2D(uLightDataTex, 6);

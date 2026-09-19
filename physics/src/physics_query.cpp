@@ -628,7 +628,7 @@ float aabb_separation_distance(const math::AABB &a,
 }
 
 /// Conservative-advancement sweep of a convex query geometry against one
-/// target's REAL shape (H-08: the AABB-only sweep reported false hits on
+/// target's REAL shape (an AABB-only sweep reports false hits on
 /// sphere/capsule/hull corners). Each iteration advances by a proven
 /// lower bound on the remaining travel — the larger of the AABB gap and
 /// the support-projected axial gap — so impacts are never overshot and

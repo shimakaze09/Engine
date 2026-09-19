@@ -185,7 +185,7 @@ struct RuntimeServices final {
                     std::uint32_t skipEntityIndex) noexcept = nullptr;
   /// Joint constructors return the joint id or 0 for every failure —
   /// invalid entities, invalid parameters, self-joints, and a full joint
-  /// table all share the one sentinel (issue #100).
+  /// table all share the one sentinel.
   std::uint32_t (*add_distance_joint)(runtime::World *world,
                                       std::uint32_t entityIndexA,
                                       std::uint32_t entityIndexB,
@@ -213,7 +213,7 @@ struct RuntimeServices final {
   std::uint32_t (*add_fixed_joint)(
       runtime::World *world, std::uint32_t entityIndexA,
       std::uint32_t entityIndexB) noexcept = nullptr;
-  // false (issue #126) on a stale/invalid joint id, wrong joint type,
+  // false on a stale/invalid joint id, wrong joint type,
   // out-of-range limits, or outside the Input phase, so a script can tell a
   // dropped write from an applied one.
   bool (*set_joint_limits)(runtime::World *world, std::uint32_t jointId,

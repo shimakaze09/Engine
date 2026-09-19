@@ -257,7 +257,7 @@ bool initialize_asset_streaming(AssetStreamingQueue *queue) noexcept {
   }
 
   // Spawn through NativeThread so an OS refusal rolls the worker set
-  // back instead of terminating the no-exception build (audit H-14).
+  // back instead of terminating the no-exception build.
   for (std::size_t i = 0U; i < queue->workerThreads.size(); ++i) {
     if (!queue->workerThreads[i].spawn(&streaming_worker_entry, queue)) {
       core::log_message(core::LogLevel::Error, "asset_streaming",

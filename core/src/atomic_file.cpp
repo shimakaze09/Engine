@@ -48,12 +48,12 @@ namespace {
 
 /// Follows a symlinked destination to the file it names (a bounded
 /// chain, relative targets resolved against the link's directory), so
-/// the replacement lands on that file and the link survives (#572). A
+/// the replacement lands on that file and the link survives. A
 /// destination that is not a link resolves to itself; a chain deeper
 /// than eight hops is refused. Fixed buffers only: begin() is noexcept
 /// and must not allocate. Windows has no readlink and a symlink there
 /// needs a handle-based query, so the destination is used as given and
-/// a symlinked destination is replaced by a file (issue #572).
+/// a symlinked destination is replaced by a file.
 bool resolve_symlinked_destination(const char *destinationPath, char *out,
                                    std::size_t outCapacity) noexcept {
   const std::size_t givenLength = std::strlen(destinationPath);
@@ -97,7 +97,7 @@ bool resolve_symlinked_destination(const char *destinationPath, char *out,
 
 /// Carries the destination's permission bits onto the staged temporary
 /// before any byte is written, so a file the author restricted (chmod
-/// 600) comes back restricted (#572). Best effort: a destination that
+/// 600) comes back restricted. Best effort: a destination that
 /// does not exist yet takes the process default, and Windows has no
 /// equivalent bits on the temporary.
 void inherit_destination_mode(const char *destination, std::FILE *file) noexcept {

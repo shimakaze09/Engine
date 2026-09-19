@@ -54,7 +54,7 @@ std::uint32_t positive_cvar_u32(const core::CVarRef &cvar,
 
 /// Returns the device to the engine's ambient scene state after an
 /// offscreen bake: back buffer bound, opaque-scene render state. The
-/// frame passes re-apply their own viewport before drawing (audit M-05).
+/// frame passes re-apply their own viewport before drawing.
 void restore_scene_state(const RenderDevice *dev) noexcept {
   dev->bind_render_target(kBackBufferTarget);
   dev->apply_render_state(RenderState{DepthTest::Less, true,

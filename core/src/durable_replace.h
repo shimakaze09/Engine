@@ -1,5 +1,5 @@
 // Declares the durable-replacement protocol every authored-file commit
-// runs (audit #338): the staged payload is flushed, synced and closed,
+// runs: the staged payload is flushed, synced and closed,
 // renamed over the destination, and the directory holding that entry is
 // synced, so the rename itself survives power loss instead of only the
 // bytes behind it. Its companion covers the step before — creating the

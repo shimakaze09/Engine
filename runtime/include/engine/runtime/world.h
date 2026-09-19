@@ -32,9 +32,7 @@ namespace engine::runtime {
 // deliberately absent: its set is double-buffered and every access must
 // pick the phase-correct state index, so each generated site keeps one
 // hand-written Transform branch. A supported type missing from this table
-// is a compile error at the dispatch sites, never a silent empty result
-// (#166 W2 — this replaces three hand-maintained 16-way if-constexpr
-// chains and the hand-written removal list).
+// is a compile error at the dispatch sites, never a silent empty result.
 #define ENGINE_WORLD_UNIFORM_STORAGE_TABLE(X)                                  \
   X(WorldTransform, m_worldTransforms)                                         \
   X(RigidBody, m_rigidBodies)                                                  \
@@ -141,7 +139,7 @@ public:
       ;
 
   /// Compile-time proof every persistent type reaches generated storage
-  /// dispatch — Transform's special-cased branch or a table row (#166 W2);
+  /// dispatch — Transform's special-cased branch or a table row;
   /// asserted at namespace scope below the class (a consteval member
   /// cannot run inside its own class body).
   template <typename... Cs>
@@ -173,9 +171,9 @@ public:
   /// immediately in any phase with no per-entity failure mode, and drops
   /// queued deferred destroys so they cannot fire into replacement
   /// content. Reset/scene-replacement use only — EndPlay ordering and
-  /// phase gating deliberately do not apply (audit H-18); callers must
+  /// phase gating deliberately do not apply; callers must
   /// follow with mark_content_replaced so retained handles and surviving
-  /// EntityPools expire against the new contents (#57).
+  /// EntityPools expire against the new contents.
   void reset_all_entities() noexcept;
   /// Returns whether is alive.
   bool is_alive(Entity entity) const noexcept;
@@ -587,7 +585,7 @@ public:
   /// per-step cvar cache, recomposes the world transforms from the
   /// previous step's committed state and snapshots them as TRS history
   /// before chunk jobs run, so render interpolation on a multi-step frame
-  /// blends the last two steps rather than the last two frames (#566).
+  /// blends the last two steps rather than the last two frames.
   void begin_update_step() noexcept;
   /// Publishes the written transform state as the new read state (swap).
   void commit_update_phase() noexcept;
@@ -672,7 +670,7 @@ public:
   // Invoke fn(Entity) for every alive member of the entity's transform
   // subtree — descendants first (ascending entity index), the root last,
   // matching deferred-destroy queue order. Must not create or destroy
-  // entities while iterating. Costs the subtree (#517).
+  // entities while iterating. Costs the subtree.
   template <typename Fn> void for_each_subtree_member(Entity root,
                                                       Fn &&fn) noexcept {
     if (!is_valid_entity(root)) {
@@ -691,7 +689,7 @@ public:
 
   // Invoke fn(Entity) for every alive direct child of the entity's
   // transform, in child-link order (transform insertion order). Costs the
-  // children (#517). Must not create or destroy entities while iterating.
+  // children. Must not create or destroy entities while iterating.
   template <typename Fn> void for_each_child(Entity parent, Fn &&fn) noexcept {
     if (!is_valid_entity(parent)) {
       return;
@@ -814,7 +812,7 @@ private:
       core::SparseSet<Entity, MeshComponent, kMaxEntities, kMaxMeshComponents>;
   using NameComponentSet =
       core::SparseSet<Entity, NameComponent, kMaxEntities, kMaxNameComponents>;
-  // #167: pools whose dense capacity sits far below kMaxEntities use the
+  // Pools whose dense capacity sits far below kMaxEntities use the
   // compact hash-indexed layout so each stops paying a 256 KB
   // entity-indexed sparse table; ubiquitous pools above keep the O(1)
   // sparse array. Dense iteration order is identical across both layouts.
@@ -860,9 +858,9 @@ private:
 
   // EntityPool is the sole client of the recycle/activate lifecycle
   // primitives: they bypass EndPlay by design, so no other caller may
-  // reach them (PR #52 review — the public surface was itself a bypass).
+  // reach them.
   friend class EntityPool;
-  // The variadic for_each machinery (world_query.h, #166 W3) reaches the
+  // The variadic for_each machinery reaches the
   // private table-generated dispatch through this single friend.
   friend struct detail::WorldQuery;
 
@@ -875,7 +873,7 @@ private:
   /// lifecycle callbacks must run. The slot's generation advances and the
   /// live handle is written to outRecycled: every handle held before the
   /// recycle is stale from here on, so a cached handle can never silently
-  /// address the slot's next acquirer (#569).
+  /// address the slot's next acquirer.
   bool recycle_entity(Entity entity, Entity *outRecycled) noexcept;
   /// Re-arms BeginPlay for a recycled dormant entity being activated, so
   /// components attached after acquisition receive their lifecycle
@@ -903,7 +901,7 @@ private:
   /// Marks root's live descendants in m_cascadeMarks and lists them in
   /// m_cascadeMarked (ascending index); returns the count. Walks the
   /// child index, so it costs the subtree; the caller clears the marks
-  /// with clear_cascade_marks once its operation completes (#517).
+  /// with clear_cascade_marks once its operation completes.
   std::size_t mark_hierarchy_descendants(Entity root) noexcept;
   /// Clears the marks the last mark_hierarchy_descendants set.
   void clear_cascade_marks() noexcept;
@@ -938,7 +936,7 @@ private:
   /// Rebuilds parent links and recomputes dirty world transforms.
   bool propagate_world_transforms() noexcept;
   /// True when adopting parentId would close a cycle: it names the entity
-  /// itself, one of its descendants, or a chain that already loops (#531).
+  /// itself, one of its descendants, or a chain that already loops.
   bool parent_would_form_cycle(Entity entity,
                                PersistentId parentId) const noexcept;
   /// Composes one transform hierarchy from the requested local-state buffer.
@@ -972,7 +970,7 @@ private:
   /// system runs (animation, camera, spring arm, render prep); it is not
   /// phase-gated like add/remove and the Transform write path, and it
   /// maintains no derived table — a component with derived state (the
-  /// name lookup) exposes no mutable pointer at all (#569).
+  /// name lookup) exposes no mutable pointer at all.
   template <typename Set>
   auto *get_component_ptr_checked(Set &set, Entity entity) noexcept {
     if (!is_valid_entity(entity)) {
@@ -1101,7 +1099,7 @@ private:
     math::Vec3 position{};
     math::Quat rotation{}; // alignas(16)
     math::Vec3 scale{1.0F, 1.0F, 1.0F};
-    // Resolved runtime tree links: the persistent child index (#517).
+    // Resolved runtime tree links: the persistent child index.
     // Rebuilt by every propagation pass and by rebuild_hierarchy_links,
     // and maintained incrementally by add_transform, remove_transform and
     // entity teardown in between, so subtree walks cost the subtree.
@@ -1196,7 +1194,7 @@ private:
   bool m_updateSwapPending = false;
 };
 
-// The #166 W2 coverage gate: a persistent registry row (or the runtime-only
+// Storage coverage gate: a persistent registry row (or the runtime-only
 // WorldTransform set) without a storage-table row fails here, never as a
 // silently empty query result.
 static_assert(World::storage_covers(

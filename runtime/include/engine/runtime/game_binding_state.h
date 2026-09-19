@@ -1,6 +1,6 @@
 // Run-scoped game-facing scripting state: the cross-scene persistent
 // key/value store, player controller bindings, and the game mode/state
-// labels. EnginePipeline owns one instance per run (#168 M3) and binds it
+// labels. EnginePipeline owns one instance per run and binds it
 // into the scripting game bindings for the run's lifetime; standalone
 // (test) use without a pipeline falls back to a scripting-local instance.
 
@@ -28,7 +28,7 @@ struct GameBindingState final {
   PlayerControllerArray playerControllers{};
 
   // The label defaults are written by the constructor: MSVC left char-array
-  // NSDMIs of a brace-initialized static instance zeroed (PR #242 CI lane),
+  // NSDMIs of a brace-initialized static instance zeroed,
   // so the defaults must not rely on that pattern.
   constexpr GameBindingState() noexcept {
     copy_label(gameMode, "default");

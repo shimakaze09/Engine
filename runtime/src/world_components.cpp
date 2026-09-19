@@ -47,14 +47,14 @@ void log_identity_overflow(const char *operation, const char *field,
   core::log_message(core::LogLevel::Error, "world", message);
 }
 
-/// Ingress validation (audit H-06): rejects non-finite transform fields so
+/// Ingress validation: rejects non-finite transform fields so
 /// NaN can never enter propagation, physics, or rendering.
 bool validate_transform_ingress(const Transform &transform) noexcept {
   return finite_vec3(transform.position) && finite_quat(transform.rotation) &&
          finite_vec3(transform.scale);
 }
 
-/// Ingress validation (audit H-06): rigid body fields must be finite and
+/// Ingress validation: rigid body fields must be finite and
 /// the inverse mass/inertia non-negative.
 bool validate_rigid_body_ingress(const RigidBody &rigidBody) noexcept {
   return finite_vec3(rigidBody.velocity) &&
@@ -66,7 +66,7 @@ bool validate_rigid_body_ingress(const RigidBody &rigidBody) noexcept {
          (rigidBody.inverseInertia >= 0.0F);
 }
 
-/// Ingress clamping (audit P-5, H-06 remainder): accept-and-clamp values
+/// Ingress clamping: accept-and-clamp values
 /// that are finite but outside the solver's stable envelope, warning so
 /// nothing changes silently. Restitution is combined with max(a, b) and
 /// multiplied into the approach speed, so e > 1 injects energy on every
@@ -113,7 +113,7 @@ bool sanitize_collider_ingress(Collider &collider) noexcept {
   return changed;
 }
 
-/// Ingress validation (audit H-06): collider geometry must be finite with
+/// Ingress validation: collider geometry must be finite with
 /// strictly positive extents, and material terms finite and non-negative.
 bool validate_collider_ingress(const Collider &collider) noexcept {
   return finite_vec3(collider.localPosition) &&
@@ -129,7 +129,7 @@ bool validate_collider_ingress(const Collider &collider) noexcept {
          std::isfinite(collider.density) && (collider.density >= 0.0F);
 }
 
-/// Ingress validation (audit M-21/X-1): mesh material factors must be
+/// Ingress validation: mesh material factors must be
 /// finite. NaN opacity is the sharp edge — render prep classifies a draw as
 /// transparent with `opacity < 1.0F`, which NaN fails, and the depth term of
 /// the sort key converts a float to uint16_t, so a NaN that reaches the key
@@ -167,7 +167,7 @@ bool sanitize_mesh_component_ingress(MeshComponent &component) noexcept {
 // script spawn) restores the payload the component cannot carry itself. On
 // failure the component stays as authored and physics treats the
 // payload-less hull as the axis-aligned box of its half extents
-// (make_collider_world_geometry, #520) — loudly, never silently.
+// — loudly, never silently.
 void install_provenance_hull(physics::PhysicsContext &context, Entity entity,
                              const Collider &collider) noexcept {
   if ((collider.shape != ColliderShape::ConvexHull) ||
@@ -397,7 +397,7 @@ bool World::add_rigid_body(Entity entity, const RigidBody &rigidBody) noexcept {
   if (!m_rigidBodies.add(entity, sanitized)) {
     return false;
   }
-  // New owner velocities must reach the next step's CCD snapshot (issue #106).
+  // New owner velocities must reach the next step's CCD snapshot.
   m_physicsContext.ccdSnapshotDirty = true;
   return true;
 }
@@ -503,7 +503,7 @@ bool World::add_collider(Entity entity, const Collider &collider) noexcept {
   physics::prune_incompatible_shape_payloads(m_physicsContext, entity,
                                              sanitized.shape);
   install_provenance_hull(m_physicsContext, entity, sanitized);
-  // New colliders have no snapshot entry until the next resolve (issue #106).
+  // New colliders have no snapshot entry until the next resolve.
   m_physicsContext.ccdSnapshotDirty = true;
   return true;
 }

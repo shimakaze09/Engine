@@ -229,7 +229,7 @@ void write_event_header(core::JsonWriter &w, const char *event) noexcept {
 
 // ---------- Transport ----------
 
-// A frame is written whole or the client is dropped (#576): the socket is
+// A frame is written whole or the client is dropped: the socket is
 // non-blocking, so a large response (a variables tree) could stop at
 // EAGAIN half way and leave a torn frame the client cannot recover from.
 // A stalled client is waited on within this budget per frame, then closed.
@@ -493,7 +493,7 @@ void handle_set_breakpoints(int requestSeq, const core::JsonParser &parser,
 
   // The client decides the list length, so it is walked by value: the
   // parser's pointer scratch would run out part way through a long list
-  // and the rest would silently read as absent (#539). Each entry reports
+  // and the rest would silently read as absent. Each entry reports
   // whether the debugger actually holds it, so a list past the breakpoint
   // store's capacity answers verified:false instead of claiming success.
   if (bpArray != nullptr) {
@@ -1087,7 +1087,7 @@ void dap_poll() noexcept {
     recv_into_buffer();
     // Every complete frame in the buffer is answered this poll, so a
     // handshake (initialize, setBreakpoints, configurationDone) does not
-    // need one engine frame per message (#540). Bounded so a client that
+    // need one engine frame per message. Bounded so a client that
     // floods requests cannot hold the frame.
     constexpr int kMaxMessagesPerPoll = 64;
     for (int handled = 0; handled < kMaxMessagesPerPoll; ++handled) {

@@ -53,7 +53,7 @@ struct DrawKey final {
   std::uint64_t value = 0U;
 };
 
-/// Which passes a draw command feeds (#524). Camera-visible commands
+/// Which passes a draw command feeds. Camera-visible commands
 /// carry kPassCamera in the main list; commands render prep culled for
 /// the camera but that a shadow sweep or a capture camera can see travel
 /// in the auxiliary list with the passes that want them.
@@ -265,7 +265,7 @@ struct RendererFrameStats final {
 
 /// Flushes queued work to the backing runtime system for renderer.
 /// `auxiliaryView` carries the camera-culled commands the shadow and
-/// capture passes still draw, each tagged by passMask (#524).
+/// capture passes still draw, each tagged by passMask.
 void flush_renderer(CommandBufferView commandBufferView,
                     const GpuMeshRegistry *registry, float timeSeconds,
                     const SceneLightData &lights,
@@ -275,8 +275,8 @@ void flush_renderer(CommandBufferView commandBufferView,
 /// on demand by the first flush, so this call creates no device
 /// resources; it exists because the module's owner — engine::bootstrap,
 /// which pairs it with shutdown_renderer — is the only thing that can
-/// distinguish a new lifetime from a stray flush after teardown (#168:
-/// no global may lazily resurrect a subsystem). Calling it twice, or
+/// distinguish a new lifetime from a stray flush after teardown (no
+/// global may lazily resurrect a subsystem). Calling it twice, or
 /// without an intervening shutdown, is harmless.
 void initialize_renderer() noexcept;
 /// Shuts down the owning system for renderer. Every later flush, probe
@@ -340,7 +340,7 @@ RendererFrameStats renderer_get_last_frame_stats() noexcept;
 // Resets the per-run public renderer state (active camera, scene viewport,
 // last frame stats, capture requests, skybox binding) without touching the
 // backend; EnginePipeline::teardown calls it so no run residue survives
-// into a later run (#168), and shutdown_renderer already calls it.
+// into a later run, and shutdown_renderer already calls it.
 void reset_renderer_public_state() noexcept;
 
 } // namespace engine::renderer

@@ -1,4 +1,4 @@
-// Implements the editor's ImGui renderer for the bgfx backend (#138),
+// Implements the editor's ImGui renderer for the bgfx backend,
 // adapted from bgfx's examples/common/imgui renderer (BSD-2, Branimir
 // Karadzic): transient vertex/index buffers per draw list, per-command
 // scissors, alpha blending, and the embedded precompiled ocornut-imgui
@@ -87,7 +87,7 @@ bool ImGui_ImplBgfx_Init() {
 void ImGui_ImplBgfx_Shutdown() {
   // Once the render device is gone, bgfx::shutdown has reclaimed every
   // handle this backend holds; destroying them again would call into a
-  // bgfx that no longer exists (#578).
+  // bgfx that no longer exists.
   if (engine::renderer::render_device() == nullptr) {
     g_fontTexture = BGFX_INVALID_HANDLE;
     g_sampler = BGFX_INVALID_HANDLE;
@@ -112,7 +112,7 @@ void ImGui_ImplBgfx_NewFrame() {}
 
 void ImGui_ImplBgfx_RenderDrawData(ImDrawData *drawData) {
   // A device that failed after this backend initialized leaves g_program
-  // looking valid while bgfx itself is shut down (#578); the device query
+  // looking valid while bgfx itself is shut down; the device query
   // is the only truth about whether a submit is possible.
   if ((drawData == nullptr) || !bgfx::isValid(g_program) ||
       (engine::renderer::render_device() == nullptr)) {

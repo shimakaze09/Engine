@@ -59,7 +59,7 @@ void platform_open_gamepad(std::uint32_t instanceId) noexcept;
 void platform_close_gamepad(std::uint32_t instanceId) noexcept;
 /// Underlying SDL_Window* (opaque; platform/editor glue only).
 void *get_sdl_window() noexcept;
-/// Native window handle for external render backends (#138): X11 window
+/// Native window handle for external render backends: X11 window
 /// id / Wayland wl_surface / Win32 HWND / Cocoa NSWindow, null when
 /// headless or before initialization.
 void *platform_native_window_handle() noexcept;

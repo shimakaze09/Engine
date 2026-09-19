@@ -155,7 +155,7 @@ bool make_collider_world_geometry(
   // when it was installed, which World::add_collider logs — collides and
   // answers queries as the axis-aligned box of its half extents. Refusing
   // it removed the entity from every pair and every query while the log
-  // promised a box fallback (#520). A payload that is present but
+  // promised a box fallback. A payload that is present but
   // malformed is still refused.
   math::ColliderShape shape = collider.shape;
   if (collider.shape == math::ColliderShape::ConvexHull) {

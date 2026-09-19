@@ -1,6 +1,6 @@
 // Implements the editor's scene-document identity, dirty-state tracking,
 // and file-operation state machine (New/Open/Save/Save As, recent scenes,
-// unsaved-change gating, async native file dialogs; issue #158).
+// unsaved-change gating, async native file dialogs; ).
 
 #include "editor_scene_document.h"
 
@@ -349,7 +349,7 @@ bool perform_scene_open(const char *path) noexcept {
 }
 
 /// Composes the failed-save status message: state the scene format cannot
-/// represent gets its precise counts (#208); anything else was a write
+/// represent gets its precise counts; anything else was a write
 /// failure on the destination path.
 void set_save_failure_message(EditorSession &session,
                               const char *path) noexcept {
@@ -375,7 +375,7 @@ bool perform_scene_save() noexcept {
   EditorSession &session = editor_session();
   // Every refusal states its reason: the quit prompt's Save button reads
   // lastSaveError, and a silent false looked like a button that did
-  // nothing (#525).
+  // nothing.
   if (!session.document.hasPath) {
     std::snprintf(session.document.lastSaveError,
                   sizeof(session.document.lastSaveError),
@@ -443,7 +443,7 @@ bool perform_scene_save_as(const char *path) noexcept {
     return false;
   }
   if (session.worldRestoreFailed) {
-    // The export is the recovery path (#525); the author is told what the
+    // The export is the recovery path; the author is told what the
     // file will hold, since it is the preserved play world, not the scene
     // as it was before Play.
     core::log_message(core::LogLevel::Warning, "editor",

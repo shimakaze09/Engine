@@ -23,8 +23,8 @@ enum class AlphaMode : std::uint8_t { Opaque = 0U, Mask = 1U, Blend = 2U };
 /// texture for this slot" (authoring omitted it, or it failed to load and
 /// the material falls back to its scalar parameters). normalTexture stays
 /// reserved: tangent-space vectors are not part of the vertex format yet,
-/// so no pass samples it (issue #160 cut line: never expose a texture slot
-/// a shader silently ignores).
+/// so no pass samples it. A texture slot a shader silently ignores is
+/// never exposed.
 struct Material final {
   math::Vec3 albedo = math::Vec3(1.0F, 1.0F, 1.0F);
   math::Vec3 emissive = math::Vec3(0.0F, 0.0F, 0.0F);

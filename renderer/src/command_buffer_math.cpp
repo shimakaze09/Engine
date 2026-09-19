@@ -82,7 +82,7 @@ std::uint64_t directional_shadow_cache_key(
     hash = hash_u64(hash, command.foliageLodIndex);
     hash = hash_mat4(hash, command.modelMatrix);
   }
-  // Off-screen casters shape the maps just as visible ones do (#524).
+  // Off-screen casters shape the maps just as visible ones do.
   for (std::size_t i = 0U;
        (auxiliaryView.data != nullptr) && (i < auxiliaryOpaqueCount); ++i) {
     const DrawCommand &command = auxiliaryView.data[i];

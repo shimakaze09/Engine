@@ -37,9 +37,8 @@ set(_ENGINE_UNIMPLEMENTED_PLATFORMS Android iOS)
 if(_ENGINE_EARLY_TARGET IN_LIST _ENGINE_UNIMPLEMENTED_PLATFORMS)
     message(FATAL_ERROR
         "ENGINE_TARGET_PLATFORM='${_ENGINE_EARLY_TARGET}' has no toolchain, "
-        "renderer backend, or dependency graph in this repo yet — it is "
-        "gated on the v0.5 bgfx replatform (RHI migration) per CLAUDE.md's "
-        "roadmap. Configuring for it would pass this check and then fail "
+        "renderer backend, or dependency graph in this repo yet. "
+        "Configuring for it would pass this check and then fail "
         "later during dependency discovery, compilation, or linking instead "
         "of here with a clear reason. Supported targets today: Win64, "
         "Linux, macOS (build + headless-test lane), Web (Emscripten).")
@@ -80,24 +79,18 @@ find_package(Threads REQUIRED)
 # Valid values: Win64 Linux macOS Android iOS Web
 # Default auto-detected from CMake's current host/target when not specified.
 #
-# Support matrix (target platform x toolchain x renderer backend), per
-# CLAUDE.md's documented platform policy (audit #178 — configure used to
-# accept every value in _ENGINE_VALID_PLATFORMS regardless of whether this
-# repo can actually build for it, so a mismatched or unimplemented target
-# passed initial parsing and then failed deep in dependency discovery,
-# compilation, or linking instead of here):
+# Support matrix (target platform x toolchain x renderer backend). A
+# mismatched or unimplemented target is rejected here, before dependency
+# discovery, compilation or linking can fail on it:
 #   Win64  - native only (no cross-compile toolchain is wired up in this
-#            repo). Desktop OpenGL 4.5 renderer, full editor + runtime.
-#            Primary lane alongside Linux.
-#   Linux  - native only. Desktop OpenGL 4.5 renderer, full editor + runtime.
-#   macOS  - native only. Build + headless-test lane ONLY (owner decision
-#            2026-08-09, issue #82): Apple caps OpenGL at 4.1 while
-#            default.frag requires GLSL 450, so the interactive GL renderer
-#            does not run there until the v0.5 bgfx replatform. Configure
-#            succeeds (the AppleClang conformance lane needs it) but warns.
-#   Android, iOS, Web - no toolchain, renderer backend, or dependency graph
-#            exists for these yet; gated on the v0.5 bgfx replatform (RHI
-#            migration) per the roadmap. Configure fails fast below.
+#            repo). Full editor + runtime. Primary lane alongside Linux.
+#   Linux  - native only. Full editor + runtime.
+#   macOS  - native only. Build + headless-test lane ONLY
+#            (docs/decisions/0002): AppleClang conformance, no editor
+#            target and no GPU verification. Configure succeeds but warns.
+#   Web    - Emscripten runtime build; see below.
+#   Android, iOS - no toolchain or dependency graph exists for these yet.
+#            Configure fails fast below.
 #
 # Validation, unimplemented-platform, no-toolchain-Web, and host-mismatch
 # rejection all run in the pre-project block above so a rejected
@@ -111,7 +104,7 @@ endif()
 
 set_property(CACHE ENGINE_TARGET_PLATFORM PROPERTY STRINGS Win64 Linux macOS Android iOS Web)
 
-# Web (#138): requires the Emscripten toolchain (emcmake) and the bgfx
+# Web: requires the Emscripten toolchain (emcmake) and the bgfx
 # backend — the runtime ships as wasm with the share-ready HTML shell;
 # tests/tools stay host-side.
 if(ENGINE_TARGET_PLATFORM STREQUAL "Web")
@@ -149,10 +142,8 @@ endif()
 if(ENGINE_TARGET_PLATFORM STREQUAL "macOS")
     message(WARNING
         "ENGINE_TARGET_PLATFORM=macOS is a build + headless-test lane only "
-        "(owner decision 2026-08-09, issue #82): OpenGL is capped at 4.1 on "
-        "this platform while default.frag requires GLSL 450, so the "
-        "interactive GL renderer does not run here until the v0.5 bgfx "
-        "replatform. Use Win64 or Linux to run the live renderer.")
+        "(docs/decisions/0002): no editor target and no GPU verification. "
+        "Use Win64 or Linux to run the live renderer.")
 endif()
 
 message(STATUS "ENGINE_TARGET_PLATFORM: ${ENGINE_TARGET_PLATFORM}")
@@ -201,18 +192,16 @@ set(ENGINE_ASSET_SOURCE_DIR "${CMAKE_SOURCE_DIR}/assets" CACHE PATH
 set(ENGINE_ASSET_OUTPUT_DIR "${CMAKE_BINARY_DIR}/assets" CACHE PATH
     "Build-tree asset directory used by local editor/runtime builds")
 
-# v0.5 replatform (#138, decision 2026-07-19): the render backend option.
-# bgfx is the engine's only render backend (owner decision 2026-08-21,
-# #138: the legacy GL backend was deleted after the replatform reached
-# parity). The cache variable survives so existing -D invocations keep
-# working; any value other than bgfx is rejected.
+# The render backend option. bgfx is the engine's only render backend
+# (docs/decisions/0001). The cache variable survives so existing -D
+# invocations keep working; any value other than bgfx is rejected.
 set(ENGINE_RENDERER_BACKEND "bgfx" CACHE STRING
-    "Render backend: bgfx (the only backend, v0.5 replatform #138)")
+    "Render backend: bgfx (the only backend)")
 set_property(CACHE ENGINE_RENDERER_BACKEND PROPERTY STRINGS bgfx)
 if(NOT ENGINE_RENDERER_BACKEND STREQUAL "bgfx")
     message(FATAL_ERROR
-        "ENGINE_RENDERER_BACKEND must be 'bgfx' (the GL backend was "
-        "deleted, #138); got '${ENGINE_RENDERER_BACKEND}'")
+        "ENGINE_RENDERER_BACKEND must be 'bgfx' (the only backend); "
+        "got '${ENGINE_RENDERER_BACKEND}'")
 endif()
 
 # bgfx dependency (bx/bimg via the bgfx.cmake superproject).
@@ -222,9 +211,8 @@ include(FetchContent)
     # backend passes this count VERBATIM to VS/PS/CSSetSamplers, whose
     # slot table is hard-capped at 16 — the former 32 overran the
     # driver's table and crashed (silent 0xC0000005) on the first D3D11
-    # frame (#301 hardware runs; Vulkan clamps, D3D12 never uses it as
-    # an API count). The engine's unit map fits: it tops out at
-    # register 15 since the #301 shadow arrays.
+    # frame (Vulkan clamps, D3D12 never uses it as an API count). The
+    # engine's unit map fits: it tops out at register 15.
     set(BGFX_CONFIG_MAX_TEXTURE_SAMPLERS 16 CACHE STRING
         "bgfx sampler stages (D3D11 SetSamplers hard cap; unit map tops at 15)"
         FORCE)
@@ -427,7 +415,7 @@ if(CPPCHECK_EXE)
         --suppress=duplInheritedMember:*/runtime/src/world.cpp
         # False positive: create_program is an opaque function pointer, so
         # cppcheck assumes the returned DeviceProgramHandle (a plain
-        # uint32) captures the variant source buffers passed to it (#165).
+        # uint32) captures the variant source buffers passed to it.
         --suppress=returnDanglingLifetime:*/renderer/src/shader_system.cpp
         # Intentional: PhysicsContext::operator= leaves collisionDispatch
         # untouched because the dispatch is run-tier state the engine
@@ -609,12 +597,12 @@ if(ENGINE_BUILD_TOOLS)
     add_subdirectory(tools)
 endif()
 
-# bgfx shader cook (#138 Phase C): when the bgfx backend and tools are
+# bgfx shader cook: when the bgfx backend and tools are
 # both built, the packer cooks the manifest's shader variants per
 # profile into the build-tree asset dir with shaderc from the fetched
 # superproject; the cook stamp keeps incremental builds a no-op.
 if(ENGINE_BUILD_TOOLS AND ENGINE_BGFX_SHADERC AND TARGET copy_assets)
-    # Win64 also cooks DXBC (dx11) — the #301 shadow-array unit map fits
+    # Win64 also cooks DXBC (dx11) — the shadow-array unit map fits
     # its 16-sampler cap and shaderc's DXBC backend needs a Windows host.
     set(_ENGINE_SHADER_PROFILES "glsl,essl,spirv")
     if(ENGINE_TARGET_PLATFORM STREQUAL "Win64")

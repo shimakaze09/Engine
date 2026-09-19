@@ -36,7 +36,7 @@ constexpr std::uint32_t kGenerationMask = (1U << kGenerationBits) - 1U;
 static_assert(kMaxJobs <= (1ULL << kIndexBits),
               "job indices must fit the handle index bits");
 
-// Ready-queue capacity invariant (issue #71): a node enters the ready queue
+// Ready-queue capacity invariant: a node enters the ready queue
 // at most once — either at dispatch with zero remaining dependencies or on
 // its unique last-dependency-retired transition in execute_job — so queue
 // occupancy never exceeds the graph's node count, which submit_job caps at
@@ -104,7 +104,7 @@ public:
     }
 
     // Spawn through NativeThread so an OS refusal rolls this worker set
-    // back instead of terminating the no-exception build (audit H-14).
+    // back instead of terminating the no-exception build.
     for (std::uint32_t i = 0U; i < m_workerCount; ++i) {
       auto *start = new (std::nothrow) WorkerStart{this, i + 1U};
       const bool spawned = (start != nullptr) &&
@@ -291,7 +291,7 @@ public:
 
   // Waiting helps globally: the caller drains any ready job from the current
   // graph while it waits, whatever thread it is, and never mutates the
-  // caller's thread-local worker index (audit M-12).
+  // caller's thread-local worker index.
   void wait_for_handle(JobHandle handle) noexcept {
     if (!is_initialized()) {
       return;
@@ -318,7 +318,7 @@ public:
         break;
       }
 
-      // Handle-specific exit (#109): whole-graph draining is wait_all's job.
+      // Handle-specific exit: whole-graph draining is wait_all's job.
       if (is_completed_fast(nodeIndex)) {
         break;
       }
@@ -471,8 +471,8 @@ private:
     // A cycle is a recoverable graph failure, reported through
     // end_frame_graph like every other dispatch failure; it is not a
     // programmer error to assert on, because cyclic input reaches dispatch
-    // from content (transform-hierarchy cycles pass ingress, #531) and an
-    // assert here was process termination for it (#570).
+    // from content and an
+    // assert here was process termination for it.
     const bool graphAcyclic = validate_graph_acyclic();
     if (!graphAcyclic) {
       m_graphDispatchFailed.store(true, std::memory_order_release);
@@ -540,8 +540,8 @@ private:
     }
   }
 
-  // Defense in depth for the statically-impossible ready-queue overflow
-  // (issue #71): the dropped job can never execute, so fail the graph the
+  // Defense in depth for the statically-impossible ready-queue overflow:
+  // the dropped job can never execute, so fail the graph the
   // way dispatch failure does — loudly, releasing the dropped job's pending
   // count and waking every waiter so nothing polls forever. Transitive
   // dependents of the dropped job keep their pending counts; waiters bail

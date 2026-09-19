@@ -1,4 +1,4 @@
-// Declares the editor's searchable reference-picker widgets (issue #156):
+// Declares the editor's searchable reference-picker widgets:
 // an entity picker backed by the live World's names/liveness and an asset
 // picker backed by the asset database, both with a broken-reference state
 // (missing/stale ids render a warning with repair/clear actions instead of

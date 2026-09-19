@@ -78,7 +78,7 @@ void World::begin_update_step() noexcept {
   // The composed world transforms still describe the last frame's final
   // pose; the previous step committed new local transforms without
   // propagating them. Recompose before snapshotting so the history is the
-  // pose one step behind the current one, not one frame behind (#566).
+  // pose one step behind the current one, not one frame behind.
   if (!propagate_world_transforms()) {
     core::log_message(
         core::LogLevel::Warning, "runtime",
@@ -705,7 +705,7 @@ bool World::propagate_world_transforms() noexcept {
   }
   // The pass just rebuilt the child index from every authored parent id,
   // so the lifecycle paths can walk it until the next structural change
-  // that the incremental maintenance cannot resolve (#517).
+  // that the incremental maintenance cannot resolve.
   m_hierarchyOrphanCount = orphanCount;
   m_hierarchyLinksStale = false;
 

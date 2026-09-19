@@ -16,7 +16,7 @@ namespace {
 
 SceneOp g_pendingSceneOp = SceneOp::None;
 char g_pendingScenePath[kPendingScenePathCapacity] = {};
-/// Re-entrancy guard for the #198 outgoing-scene on_end_play dispatch: set
+/// Re-entrancy guard for the outgoing-scene on_end_play dispatch: set
 /// only while dispatch_entity_scripts_end_for_transition() is running.
 bool g_teardownDispatchActive = false;
 
@@ -43,7 +43,7 @@ int lua_engine_save_scene(lua_State *state) noexcept {
 
 /// Defers a scene load request until the runtime can safely process it.
 int lua_engine_load_scene(lua_State *state) noexcept {
-  // #198: a handler running inside the outgoing scene's own on_end_play
+  // A handler running inside the outgoing scene's own on_end_play
   // dispatch cannot be allowed to overwrite the pending op the dispatch was
   // launched to service — reject and warn rather than corrupt it.
   if (g_teardownDispatchActive) {
@@ -71,7 +71,7 @@ int lua_engine_load_scene(lua_State *state) noexcept {
 /// Defers a new-scene request until the runtime can safely process it.
 int lua_engine_new_scene(lua_State *state) noexcept {
   static_cast<void>(state);
-  // #198: see lua_engine_load_scene — same reentrancy rejection.
+  // See lua_engine_load_scene — same reentrancy rejection.
   if (g_teardownDispatchActive) {
     core::log_message(core::LogLevel::Warning, "scripting",
                       "engine.new_scene ignored: called from on_end_play "

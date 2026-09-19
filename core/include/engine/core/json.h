@@ -133,8 +133,8 @@ private:
 
 /// Replaces (or inserts) the value of one top-level field in a JSON
 /// object document while preserving every other byte — unknown and
-/// forward-compatible fields, ordering, and formatting all survive
-/// (audit H-21). The document and `valueText` are both validated with
+/// forward-compatible fields, ordering, and formatting all survive.
+/// The document and `valueText` are both validated with
 /// JsonParser before any splice; documents whose top-level keys contain
 /// escape sequences are refused (keys match as raw bytes, and a decoded
 /// alias of `fieldName` could otherwise duplicate), and `fieldName` is
@@ -162,7 +162,7 @@ public:
   // draw on a fixed scratch ring of kScratchSlots values that parse()
   // resets; past it they return nullptr like a missing field, so an
   // unbounded walk (every element of an authored array) uses the by-value
-  // overloads, which never touch the ring (#539).
+  // overloads, which never touch the ring.
   static constexpr std::size_t kScratchSlots = 1024U;
   const JsonValue *get_object_field(const JsonValue &object,
                                     const char *fieldName) const noexcept;
@@ -234,12 +234,12 @@ private:
   mutable bool m_scratchExhausted = false;
   // Sequential-access memos for get_array_element: the lazy representation
   // rescans an array from its opening bracket, which made per-index walks
-  // quadratic (31 s to iterate an 8k-entity scene, audit N-17); resuming
-  // from the last returned element makes ascending walks amortized O(1).
+  // quadratic; resuming from the last returned element makes ascending
+  // walks amortized O(1).
   // One entry per recently walked array, because a single entry was
   // evicted by every nested walk — each Transform's position array — which
-  // made the outer entity loop quadratic again for every real scene
-  // (#515). Keyed by the array's byte range; a full table evicts the
+  // made the outer entity loop quadratic again for every real scene.
+  // Keyed by the array's byte range; a full table evicts the
   // entry spanning the fewest bytes, never the enclosing array.
   // Single-threaded like the scratch ring; invalidated by parse().
   struct ArrayMemo final {

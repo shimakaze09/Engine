@@ -1,6 +1,6 @@
 $input v_texcoord0
 
-// Split-sum BRDF integration LUT (bgfx port of brdf_lut.frag, #138):
+// Split-sum BRDF integration LUT:
 // 512-sample GGX importance sum writing scale/bias to RG.
 
 #include <bgfx_shader.sh>

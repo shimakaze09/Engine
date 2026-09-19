@@ -195,8 +195,8 @@ math::Vec3 contact_point(const ColliderWorldGeometry &a,
 /// range and stored entity equal in index AND generation), so sparse-set
 /// reorders between the publish and this sweep cannot mismatch entries:
 /// snapshot AABBs — tested against this body's bounds expanded by the
-/// pair's RELATIVE displacement plus positional-correction slop (issue
-/// #106: expanding by own motion only rejected head-on closers) — cull
+/// pair's RELATIVE displacement plus positional-correction slop (expanding
+/// by own motion only would reject head-on closers) — cull
 /// most pairs before the expensive geometry build, and candidate
 /// velocities come from the snapshot because reading live
 /// RigidBody::velocity races with the parallel integration chunks. Steps
@@ -312,7 +312,7 @@ CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
       continue;
     }
 
-    // Gate on RELATIVE motion (issue #106): expanding only by this body's
+    // Gate on RELATIVE motion: expanding only by this body's
     // displacement rejected head-on pairs whose individual paths fall
     // short of each other's snapshot bounds while their relative paths
     // cross completely within the step.
@@ -444,8 +444,8 @@ CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
     // Reproduces the TARGET's own two-part entry gate (speed threshold AND
     // travel-vs-extent) instead of only the speed half: a target fast enough
     // to pass the speed gate can still be gated out of its own sweep by a
-    // large collider whose travel this step never exceeds half its extent
-    // (issue #122a). Undercounting that left the target's own sweep never
+    // large collider whose travel this step never exceeds half its extent.
+    // Undercounting that left the target's own sweep never
     // applying its symmetric share while this sweep assumed it would --
     // a one-sided, momentum-violating impulse. Matching both gates here
     // means a target that truly won't sweep falls through to the slow-target

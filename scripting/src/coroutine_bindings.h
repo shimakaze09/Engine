@@ -38,7 +38,7 @@ void clear_lua_coroutines(lua_State *state) noexcept;
 /// Replaces coroutine.create and coroutine.resume (and reimplements
 /// coroutine.wrap on top of the replacements) so every Lua thread is armed
 /// with the CURRENT shared debug/sandbox hook before every resume, not just
-/// ones started through engine.start_coroutine (issue #115b). Lua's
+/// ones started through engine.start_coroutine. Lua's
 /// lua_newthread already copies hook state from the creating thread, so the
 /// gap the resume wrapper closes is staleness: a thread created before
 /// sandboxing was configured (or before a later reconfiguration) otherwise

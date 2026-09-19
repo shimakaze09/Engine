@@ -1,4 +1,4 @@
-// Implements the null render device backend (#196): every entry succeeds
+// Implements the null render device backend: every entry succeeds
 // without touching GL — creation returns monotonically increasing nonzero
 // handles, updates/binds/draws are no-ops, queries report ready with zero
 // timestamps. It deliberately models no stale-handle detection or

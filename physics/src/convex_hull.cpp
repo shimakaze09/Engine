@@ -469,7 +469,7 @@ struct EpaFace {
 // Plane from the face vertices with the normal oriented away from the origin.
 // Reports false for a zero-area face: its cross product cannot be normalized,
 // so both the normal and the plane distance would be meaningless and would
-// poison the closest-face search (issue #72, finding 2).
+// poison the closest-face search.
 [[nodiscard]] bool
 epa_face_plane(EpaFace &f,
                const std::array<MinkowskiPoint, kEpaMaxVertices> &verts,
@@ -582,7 +582,7 @@ void seed_bipyramid(EpaSeed &seed, std::uint16_t apex0, std::uint16_t apex1,
 
 // Finds the live face nearest the origin. Reports false when the polytope
 // holds no live face with a finite distance, which means expansion corrupted
-// it and no depth may be trusted (issue #72, finding 2 — the old code
+// it and no depth may be trusted (, finding 2 — the old code
 // returned its 1e30 sentinel as the penetration depth).
 [[nodiscard]] bool
 epa_closest_face(const std::array<EpaFace, kEpaMaxFaces> &faces,
@@ -873,7 +873,7 @@ void seed_from_triangle(EpaSeed &seed, const MinkowskiPoint &a,
 }
 
 // Recovers a contact when GJK stops without a tetrahedron. Exactly
-// axis-aligned pairs are the reachable case (issue #72): both support
+// axis-aligned pairs are the reachable case: both support
 // functions resolve a zero direction component to the same corner, so the
 // component cancels in every Minkowski sample, the samples stay collinear
 // or coplanar, and no tetrahedron can form even though the origin is

@@ -18,12 +18,12 @@ namespace engine::renderer {
 
 namespace {
 
-/// Square Depth24 shadow array (#301): one texture holds every cascade
+/// Square Depth24 shadow array: one texture holds every cascade
 /// or spot slot as a layer, so the shaders sample the whole set through
 /// a single register (DXBC caps sampler registers at 16). Point
 /// sampling: the shaders take their own PCF taps and compare depths
 /// explicitly, and WebGL2 treats linear-filtered depth textures as
-/// incomplete (all-zero samples, #293); ClampEdge so border PCF taps
+/// incomplete; ClampEdge so border PCF taps
 /// never wrap to the map's opposite edge.
 DeviceTextureHandle create_shadow_depth_array(const RenderDevice *dev,
                                               int resolution,
@@ -58,7 +58,7 @@ RenderTargetHandle create_depth_layer_target(const RenderDevice *dev,
 } // namespace
 
 int shadow_cascade_resolution(std::size_t cascadeIndex) noexcept {
-  // Uniform since the cascades became one texture array (#301): array
+  // Uniform since the cascades became one texture array: array
   // layers share dimensions, so every cascade renders at full size.
   static_cast<void>(cascadeIndex);
   return kShadowMapResolution;
@@ -332,7 +332,7 @@ math::Mat4 compute_spot_shadow_matrix(const math::Vec3 &position,
   const math::Mat4 lightView = math::look_at(position, target, up);
 
   // A wide spotlight is ordinary authoring; past ~pi the perspective's
-  // tan(fov / 2) flips sign and the matrix degenerates (#565), so the
+  // tan(fov / 2) flips sign and the matrix degenerates, so the
   // frustum is capped short of that. kMaxSpotShadowFov (~166 degrees)
   // keeps tan finite; a cone wider than the map's frustum shadows its
   // rim from the cap.

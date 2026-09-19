@@ -19,7 +19,7 @@
 #pragma clang diagnostic ignored "-Wtautological-constant-out-of-range-compare"
 #pragma clang diagnostic ignored "-Wunused-but-set-variable"
 // miniaudio's Emscripten backend uses EM_JS ($-identifiers), legacy
-// version macros, and unused callback params (#138 web target).
+// version macros, and unused callback params.
 #pragma clang diagnostic ignored "-Wdollar-in-identifier-extension"
 #pragma clang diagnostic ignored "-Wdeprecated-pragma"
 #pragma clang diagnostic ignored "-Wunused-parameter"
@@ -199,14 +199,14 @@ void reset_one_shot(OneShotInstance &instance) noexcept {
 
 /// True when every component is a finite float; positions and listener
 /// vectors cross the public API boundary and a NaN would silently poison
-/// the spatializer (audit M-29).
+/// the spatializer.
 bool finite_vec(const math::Vec3 &v) noexcept {
   return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
 }
 
 /// Validates playback params: volume finite and non-negative, pitch finite
 /// and positive (miniaudio requires pitch > 0). Invalid params reject the
-/// playback call (audit M-29).
+/// playback call.
 bool valid_play_params(const PlayParams &params) noexcept {
   if (!std::isfinite(params.volume) || (params.volume < 0.0F) ||
       !std::isfinite(params.pitch) || (params.pitch <= 0.0F)) {
@@ -219,8 +219,7 @@ bool valid_play_params(const PlayParams &params) noexcept {
 
 /// Rejects enum values outside the declared buses before any array
 /// indexing — AudioBus arrives across the public API boundary and a
-/// caller-forged value would otherwise write past busVolumes (audit
-/// H-22).
+/// caller-forged value would otherwise write past busVolumes.
 bool bus_valid(AudioBus bus) noexcept {
   return static_cast<std::uint8_t>(bus) <=
          static_cast<std::uint8_t>(AudioBus::Sfx);
@@ -364,8 +363,7 @@ bool initialize_audio() noexcept {
   }
 
   // Both groups or neither: a partial pair would leak the first group,
-  // because shutdown releases them only when busesReady is set (audit
-  // H-22).
+  // because shutdown releases them only when busesReady is set.
   const bool musicGroupReady =
       ma_sound_group_init(&g_audio.engine, 0U, nullptr, &g_audio.musicGroup) ==
       MA_SUCCESS;
@@ -599,8 +597,7 @@ void stop_sound(SoundHandle handle) noexcept {
 }
 
 /// Stops everything that can be audible: direct playback of every loaded
-/// sound, every pooled one-shot instance, and the streamed music track
-/// (audit M-29 — the name is now literal).
+/// sound, every pooled one-shot instance, and the streamed music track.
 void stop_all() noexcept {
   if (!g_audio.initialized) {
     return;
@@ -618,8 +615,7 @@ void stop_all() noexcept {
 }
 
 /// Master volume routes through the Master bus so the stored value,
-/// clamping, and validation stay consistent with set_bus_volume
-/// (audit M-29).
+/// clamping, and validation stay consistent with set_bus_volume.
 void set_master_volume(float volume) noexcept {
   set_bus_volume(AudioBus::Master, volume);
 }

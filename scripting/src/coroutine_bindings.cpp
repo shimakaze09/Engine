@@ -35,7 +35,7 @@ int push_message_trampoline(lua_State *state) {
 /// Pushes a fixed diagnostic message through a protected frame. The error
 /// and rejection paths below run on the main state outside any pcall, and
 /// at the sandbox memory cap an unprotected lua_pushstring raises straight
-/// into the panic handler and aborts (#570). Returns false with nothing
+/// into the panic handler and aborts. Returns false with nothing
 /// pushed when the push itself failed; the failure is logged by the frame.
 bool push_message_protected(lua_State *state, const char *message) noexcept {
   return protected_c_operation(

@@ -23,7 +23,7 @@ namespace engine::runtime {
 /// the camera never lags through geometry; lag smoothing still governs how
 /// the arm extends back toward the authored length. A CameraComponent on
 /// the same entity supplies the lens (fov/near/far) and priority/blendSpeed
-/// -- the standard authored third-person rig (issue #161) -- and an
+/// -- the standard authored third-person rig -- and an
 /// explicitly disabled one (active == false) suppresses the push entirely;
 /// with no CameraComponent authored the previous hardcoded lens/priority
 /// stay exactly as before, so existing spring-arm-only scenes are unchanged.

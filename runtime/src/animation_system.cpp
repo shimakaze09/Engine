@@ -466,7 +466,7 @@ float advance_state_time(const AnimControllerData &controller,
 
 namespace {
 
-/// Paths whose controller failed to load this episode (#532): a component
+/// Paths whose controller failed to load this episode: a component
 /// keeps asking every fixed step while its slot is invalid, and each
 /// attempt re-read and re-parsed the controller, skeleton and clips and
 /// logged again. One entry per possible controller; the set clears with

@@ -31,7 +31,7 @@ constexpr std::size_t kMaxSaveJsonBytes = 16U * 1024U;
 // Save and load share one width per field: the loader copies into buffers
 // of exactly these sizes and refuses anything that does not fit, so the
 // writer refuses the same values up front instead of producing a file the
-// loader will reject (#568). Both counts include the terminator.
+// loader will reject. Both counts include the terminator.
 constexpr std::size_t kMaxSaveKeyBytes = 128U;
 constexpr std::size_t kMaxSaveTextBytes = 256U;
 
@@ -242,7 +242,7 @@ int lua_engine_load_data(lua_State *state) noexcept {
     }
     // Strict copies: a key or string the buffer cannot hold is a corrupt
     // or hand-edited save and refuses the load, never a truncated value
-    // handed back under the cut spelling (#568).
+    // handed back under the cut spelling.
     if (!parser.copy_string_strict(keyValue, key, sizeof(key))) {
       return refuse_load(state, i, "has a key that is not a string of at "
                                    "most 127 bytes");

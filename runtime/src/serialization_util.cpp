@@ -282,7 +282,7 @@ constexpr const char *kSceneCaptureTypeName =
     "engine::runtime::SceneCaptureComponent";
 constexpr const char *kCameraTypeName = "engine::runtime::CameraComponent";
 
-// Object-shape field names for AnimationComponent (issue #253). Named
+// Object-shape field names for AnimationComponent. Named
 // rather than repeated as literals because the writer and reader below are
 // the only two places they appear, and a silent divergence between them is
 // the drift this codec exists to close.
@@ -517,7 +517,7 @@ bool read_reflected_component(const core::JsonParser &parser,
 //    documented in reflect_types.cpp). AnimationComponent's authored
 //    bool/float therefore ride its hand-written codec rather than the
 //    reflected path, since one unrepresentable field takes the whole type
-//    off it (issue #253).
+// off it.
 
 void write_mesh_component(core::JsonWriter &writer,
                           const MeshComponent &component) noexcept {

@@ -44,7 +44,7 @@ constexpr std::uint8_t kSleepFramesRequired = 60U;
 // static to every response path -- positional correction, speculative
 // contacts and the impulse solve alike -- unless its partner is fast
 // enough for record_pair_and_wake to wake it in this same response, in
-// which case it answers with its real mass (#537 item 2). The relaxation
+// which case it answers with its real mass. The relaxation
 // pass zeroes sleepers the same way; without this the primary response
 // pushed a sleeper every step while it stayed marked asleep.
 float effective_inverse_mass(const RigidBody *body,
@@ -192,12 +192,11 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
     return false;
   }
 
-  // Broadphase dedupe stamps live in the heap-backed shape store (issue
-  // #129); fetched once so the per-collider loop below never re-derefs the
-  // unique_ptr.
+  // Broadphase dedupe stamps live in the heap-backed shape store; fetched
+  // once so the per-collider loop below never re-derefs the unique_ptr.
   PhysicsShapeStore *const shapeStorePtr = physicsCtx.shapeStore.get();
 
-  // #170: the workspace is context-owned — allocated once per physics
+  // The workspace is context-owned — allocated once per physics
   // context on its first resolve (never per step, never per thread) and
   // freed with the World.
   if (physicsCtx.resolveScratch == nullptr) {
@@ -614,7 +613,7 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
     physicsCtx.broadphaseOverflowActive = false;
   }
 
-  // Append this step's kept pairs to the frame buffer in step order (#103).
+  // Append this step's kept pairs to the frame buffer in step order.
   std::uint32_t frameAppendDropCount = 0U;
   for (std::size_t i = 0U; i < physicsCtx.collisionPairCount; ++i) {
     if (physicsCtx.frameCollisionPairCount >=
@@ -645,7 +644,7 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
     physicsCtx.collisionPairOverflowActive = false;
   }
 
-  // Extra outer passes over this frame's cached contacts (issue #123):
+  // Extra outer passes over this frame's cached contacts:
   // propagates corrections through contact chains (stacks) within this step
   // instead of leaving convergence to accumulate one frame at a time via
   // warm start alone. Runs before joints solve, mirroring the primary
@@ -725,7 +724,7 @@ void set_collision_dispatch(PhysicsWorldView &world,
 }
 
 // Drains the frame-accumulated pairs so every catch-up step's callbacks
-// reach the dispatch in step order once per rendered frame (#103).
+// reach the dispatch in step order once per rendered frame.
 void dispatch_collision_callbacks(PhysicsWorldView &world) noexcept {
   PhysicsContext &ctx = world.physics_context();
   if ((ctx.collisionDispatch != nullptr) &&

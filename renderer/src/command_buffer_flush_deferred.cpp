@@ -219,7 +219,7 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
         } else if (!hasAlbedoTex &&
                    (boundAlbedoTex != backend.fallbackTexture2D)) {
           // Fallback, not nothing: WebGL rejects draws whose declared
-          // samplers still reference the pass's render target (#293).
+          // samplers still reference the pass's render target.
           dev->bind_texture_slot(0U, backend.fallbackTexture2D);
           boundAlbedoTex = backend.fallbackTexture2D;
         }
@@ -447,8 +447,8 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
       tileBufferSize = tileLayout.texelCount;
     }
     if (backend.tileBuffer.size() < tileBufferSize) {
-      // A failed grow leaves the buffer at zero capacity (audit #204:
-      // nothrow instead of a terminating std::vector throw); the
+      // A failed grow leaves the buffer at zero capacity instead of
+      // terminating the process; the
       // dataSize < requiredSize check inside cull_lights_tiled below
       // already treats an undersized buffer as a graceful cull failure.
       static_cast<void>(backend.tileBuffer.allocate(tileBufferSize));
@@ -591,7 +591,7 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
 
       // Bind G-Buffer textures on slots 0-3, tile on slot 4, SSAO on
       // slot 5, per-light data on slot 6 (the shadow arrays and point
-      // cubes hold 7-12, IBL 13-15; #301).
+      // cubes hold 7-12, IBL 13-15).
       dev->bind_texture_slot(0U, pass_resource_texture(passRes.gbufferAlbedo));
       dev->bind_texture_slot(1U, pass_resource_texture(passRes.gbufferNormal));
       dev->bind_texture_slot(2U,
@@ -664,10 +664,10 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
       if (backend.dlSsaoEnabledLoc.valid())
         dev->set_param_i32(backend.dlSsaoEnabledLoc, ssaoEnabled ? 1 : 0);
 
-      // #138 flat vocabulary: per-slot samplers, one mat4 array per
+      // Flat vocabulary: per-slot samplers, one mat4 array per
       // shadow kind, splits/indices/pos+far as packed vec4 payloads.
       {
-        // #301 array samplers: one Tex2DArray for all cascades. The
+        // Array samplers: one Tex2DArray for all cascades. The
         // disabled state still binds the array fallback: Vulkan-family
         // backends need every declared sampler descriptor valid at
         // draw (same rule as the forward flush).
@@ -844,7 +844,7 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
                               &renderer_context().activeCamera.position.x);
       }
       if (backend.dlCameraForwardOrthoLoc.valid()) {
-        // xyz = normalized view direction, w = 1 when orthographic (#221):
+        // xyz = normalized view direction, w = 1 when orthographic:
         // the shader switches its view vector to the constant camera
         // forward under ortho — parallel rays have no per-pixel eye vector.
         const CameraState &activeCam = renderer_context().activeCamera;

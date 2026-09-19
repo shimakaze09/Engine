@@ -41,7 +41,7 @@ bool file_exists(const char *path) {
 }
 
 /// Writes a complete text buffer through a staged atomic replacement so
-/// interrupted cooks cannot leave truncated outputs (audit H-20).
+/// interrupted cooks cannot leave truncated outputs.
 bool write_text_file(const char *path, const char *text, std::size_t textSize) {
   if ((path == nullptr) || (text == nullptr)) {
     return false;
@@ -63,7 +63,7 @@ std::uint64_t hash_file_contents(const char *path, bool *ok) {
   }
   // Only regular files are fingerprinted: a device or FIFO named by a
   // stamp or sidecar would otherwise be read until it ends, which a
-  // device never does (#527).
+  // device never does.
   std::error_code statusError{};
   if (!std::filesystem::is_regular_file(std::filesystem::path(path),
                                         statusError) ||
@@ -129,7 +129,7 @@ std::string normalized_os_path(const std::string &path) {
 }
 
 /// Rewrites an invoked OS path relative to the stamp's directory, the
-/// form a schema-4 stamp records (#527); empty when it cannot be
+/// form a schema-4 stamp records; empty when it cannot be
 /// expressed.
 std::string stamp_relative_path(const char *outputPath,
                                 const std::string &path) {
@@ -160,7 +160,7 @@ std::string stamp_joined_path(const char *outputPath,
 }
 
 /// Appends one stamp line, refusing anything the readers would not take
-/// back whole (#527: a truncated path names a different file).
+/// back whole.
 bool append_stamp_line(std::string *stamp, const std::string &line) {
   if ((line.size() + 1U) > kMaxCookStampLineBytes) {
     std::fprintf(stderr,
@@ -385,10 +385,10 @@ bool write_cook_stamp(const char *outputPath, std::uint64_t sourceHash,
   }
 
   // The stamp is the cook's commit marker (written after every output),
-  // so it must itself land atomically or not at all (audit H-20).
+  // so it must itself land atomically or not at all.
   // Schema 4 records every path relative to the stamp's own directory,
   // so the stamp certifies the same files from any working directory,
-  // and an output must live inside that directory (#527).
+  // and an output must live inside that directory.
   std::string stamp{};
   char line[128] = {};
   std::snprintf(line, sizeof(line), "SCHEMA %u\nTOOL_VERSION %u\n",
@@ -511,7 +511,7 @@ bool read_cook_stamp(const char *outputPath, std::uint64_t *outSourceHash,
 
   // Schema 4 paths are stamp-relative and OUTPUT paths contained; a
   // legacy stamp's paths are its invocation paths, kept verbatim only so
-  // the tool-version gate can recook it — they are never retired (#527).
+  // the tool-version gate can recook it — they are never retired.
   std::uint32_t schema = 0U;
   if (outSchema != nullptr) {
     *outSchema = 0U;
@@ -618,8 +618,8 @@ bool dependency_digests_equal(const std::vector<DependencyDigest> &a,
 }
 
 /// Returns whether the output set must be recooked. A current-version
-/// stamp without a manifest never certifies a cook (issue #55: legacy
-/// or tampered stamps recook instead of hiding missing sidecars), and
+/// stamp without a manifest never certifies a cook (legacy or tampered
+/// stamps recook instead of hiding missing sidecars), and
 /// every manifest-listed output must exist — verifyOutputHashes
 /// additionally re-hashes each one against its recorded fingerprint.
 bool should_repack(const char *outputPath, std::uint64_t sourceHash,
@@ -682,7 +682,7 @@ bool should_repack(const char *outputPath, std::uint64_t sourceHash,
 /// Retires previous-manifest outputs the current cook no longer
 /// produces, after the new outputs committed and before the new stamp:
 /// a failed deletion must block the stamp so it can never certify an
-/// output set still containing stale files (issue #55). Pre-manifest
+/// output set still containing stale files. Pre-manifest
 /// stamps list nothing, so their strays are out of reach here and are
 /// retired by the one-time tool-version recook only going forward.
 bool remove_stale_outputs(const char *outputPath,
@@ -698,7 +698,7 @@ bool remove_stale_outputs(const char *outputPath,
   }
   if (previousSchema < 4U) {
     // A legacy manifest's paths were whatever the old invocation named,
-    // with no containment; retiring them could delete anything (#527).
+    // with no containment; retiring them could delete anything.
     // The tool-version recook re-certifies the set; strays are the
     // orphan sweep's, which only reaches same-base siblings.
     std::printf("legacy cook stamp: stale outputs not retired: %s\n",
@@ -935,7 +935,7 @@ bool sweep_orphan_outputs(const char *outputPath) {
 }
 
 // Cooked ids must agree byte-for-byte with the runtime's — one shared
-// implementation instead of a drifting duplicate (#171 C2, #172).
+// implementation instead of a drifting duplicate.
 std::uint64_t hash_path_to_asset_id(const char *path) {
   return engine::content::make_asset_id_from_path(path);
 }

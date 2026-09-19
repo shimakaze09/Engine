@@ -277,7 +277,7 @@ math::Quat quat_from_euler_degrees(const math::Vec3 &degrees) noexcept {
 
 const char *inspector_layer_name(std::uint32_t index) noexcept {
   // Fixed literal table (no lazy static init, no per-call formatting) until
-  // issue #163 replaces these placeholder names with project-authored ones.
+  // replaces these placeholder names with project-authored ones.
   static constexpr const char *kNames[kInspectorLayerCount] = {
       "Layer 0",  "Layer 1",  "Layer 2",  "Layer 3",  "Layer 4",  "Layer 5",
       "Layer 6",  "Layer 7",  "Layer 8",  "Layer 9",  "Layer 10", "Layer 11",

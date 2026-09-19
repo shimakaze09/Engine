@@ -1,4 +1,4 @@
-// Implements the bgfx render device backend (#138): resources, views,
+// Implements the bgfx render device backend: resources, views,
 // render state, and draws over the engine RenderDevice table, with
 // generational slot tables, stale-handle detection, and
 // dropped-operation diagnostics (the program and shader-parameter path
@@ -295,7 +295,7 @@ bool bgfx_realize_vertex_buffer(BgfxBufferRecord *record,
   }
   if (record->access == BufferAccess::Stream) {
     // Stream data stays CPU-side and is re-supplied as transient data on
-    // every draw (#523); only the layout and stride are fixed here.
+    // every draw; only the layout and stride are fixed here.
     record->streamLayout = strideLayout;
     record->streamLayoutValid = true;
     record->strideBytes = strideBytes;
@@ -434,7 +434,7 @@ DeviceTextureHandle bgfx_create_texture(const TextureDesc &desc) noexcept {
   // callers all have a fallback) instead of reaching the backend API —
   // D3D rejects >16384 with E_INVALIDARG and bgfx's own guard lets a
   // single oversized axis through (found on a 4K fullscreen drawable
-  // by the one-row-per-tile culling texture, #301 hardware runs).
+  // by the one-row-per-tile culling texture).
   {
     const auto maxDim =
         static_cast<std::int32_t>(bgfx::getCaps()->limits.maxTextureSize);
@@ -495,7 +495,7 @@ DeviceTextureHandle bgfx_create_texture(const TextureDesc &desc) noexcept {
       core::log_message(core::LogLevel::Info, "render_device",
                         "bgfx backend: runtime mip generation "
                         "unavailable; levels beyond 0 stay empty until "
-                        "the cook supplies them (#138 Phase C)");
+                        "the cook supplies them");
     }
   }
 
@@ -702,7 +702,7 @@ bool bgfx_set_geometry_instance_stream(DeviceGeometryHandle geometry,
 }
 
 /// Binds a stream-access vertex buffer's CPU copy as this draw's own
-/// transient vertex data (#523): valid for the frame, never shared with
+/// transient vertex data: valid for the frame, never shared with
 /// another draw's update. False (drop recorded) when the request exceeds
 /// the staged bytes or bgfx's per-frame transient budget.
 bool bgfx_bind_transient_vertices(const BgfxBufferRecord &vertex,
@@ -851,7 +851,7 @@ void bgfx_draw_indexed_instanced(DeviceGeometryHandle geometry,
   bgfx::setIndexBuffer(index->index, 0U,
                        static_cast<std::uint32_t>(indexCount));
   if (stream->streamLayoutValid) {
-    // Per-draw transient instance data (#523): the batch's matrices are
+    // Per-draw transient instance data: the batch's matrices are
     // copied out of the CPU stream now, so a later batch's update to the
     // same engine buffer cannot reach this draw.
     const std::uint32_t instances = static_cast<std::uint32_t>(instanceCount);
@@ -1066,8 +1066,7 @@ void bgfx_set_viewport(std::int32_t x, std::int32_t y, std::int32_t w,
     drop_operation("set_viewport: negative extent");
     return;
   }
-  // GL's viewport origin is bottom-left, bgfx's is top-left; the flip
-  // becomes observable (and is resolved) when Phase D ports the passes.
+  // The rect is passed through in bgfx's top-left origin convention.
   bgfx::setViewRect(ctx.currentView, static_cast<std::uint16_t>(x),
                     static_cast<std::uint16_t>(y),
                     static_cast<std::uint16_t>(w),
@@ -1097,8 +1096,8 @@ std::uint64_t bgfx_timestamp_value(DeviceQueryHandle) noexcept { return 0U; }
 std::uint64_t bgfx_native_texture_id(DeviceTextureHandle texture) noexcept {
   BgfxTextureRecord *record =
       device_context().textures.resolve(texture.value);
-  // The bgfx handle index is what a bgfx-backed UI renderer consumes
-  // (the ImGui bgfx backend arrives with Phase D).
+  // The bgfx handle index is what the editor's ImGui bgfx backend
+  // consumes.
   return (record != nullptr) ? static_cast<std::uint64_t>(record->handle.idx)
                              : 0U;
 }
@@ -1195,7 +1194,7 @@ bool initialize_render_device() noexcept {
     return true;
   }
 
-  // #196 parity: the null backend stays selectable so headless pipeline
+  // The null backend stays selectable so headless pipeline
   // tests behave identically on either compiled backend.
   if (core::cvar_get_bool("r_null_device", false)) {
     fill_null_render_device(&ctx.device);
@@ -1242,7 +1241,7 @@ bool initialize_render_device() noexcept {
   } else {
 #ifdef _WIN32
     // "auto" picks Vulkan explicitly on Windows: it is the proven
-    // backend on the canonical spirv cook. The #301 shadow-array unit
+    // backend on the canonical spirv cook. The shadow-array unit
     // map fits DXBC and Windows builds cook the dx11 profile, so the
     // D3D backends are runnable — but they stay explicit d3d11/d3d12
     // opt-ins until verified, an owner call to flip.

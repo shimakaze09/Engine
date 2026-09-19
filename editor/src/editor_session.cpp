@@ -100,7 +100,7 @@ load_thumbnail_texture(const char *assetPath) noexcept {
   }
   // A thumbnail that cannot be produced is remembered as such, so a
   // missing or corrupt file is not opened and decoded again every frame
-  // the row is visible (#528); clear_thumbnail_cache forgets it.
+  // the row is visible; clear_thumbnail_cache forgets it.
   const auto remember_missing = [assetPath]() noexcept {
     auto &entry = editor_session().thumbnailCache[editor_session().thumbnailCount];
     std::snprintf(entry.path, sizeof(entry.path), "%s", assetPath);
@@ -161,7 +161,7 @@ load_thumbnail_texture(const char *assetPath) noexcept {
     return remember_missing();
   }
 
-  // Routed through the renderer's RenderDevice (audit #206) instead of
+  // Routed through the renderer's RenderDevice instead of
   // calling glGenTextures/glTexImage2D directly: the graphics API stays
   // inside the renderer backend, and the editor only ever sees the opaque
   // device texture handle create_texture returns.
@@ -194,7 +194,7 @@ load_thumbnail_texture(const char *assetPath) noexcept {
 }
 
 /// Releases cached thumbnail textures owned by the editor through the
-/// renderer's RenderDevice (audit #206).
+/// renderer's RenderDevice.
 void clear_thumbnail_cache() noexcept {
   const renderer::RenderDevice *device = renderer::render_device();
   for (std::size_t i = 0U; i < editor_session().thumbnailCount; ++i) {
@@ -448,7 +448,7 @@ bool world_is_editable() noexcept {
 // Everything world_is_editable requires except the restore latch: after a
 // failed Stop restore the preserved world must still be replaceable (New,
 // Open) and exportable (Save As), because that is the recovery path the
-// Inspector advertises; gating those on the latch bricked the editor (#525).
+// Inspector advertises; gating those on the latch bricked the editor.
 bool world_can_load_scene() noexcept {
   return (editor_session().world != nullptr) &&
          (editor_session().playState == PlayState::Stopped) &&
@@ -640,7 +640,7 @@ bool editor_history_can_redo() noexcept {
 
 // An open gesture (inspector drag, gizmo drag) is recorded before the
 // history moves, so its command can never land on top of an intervening
-// undo with a snapshot from before it (#567).
+// undo with a snapshot from before it.
 void editor_history_undo() noexcept {
   if (material_owns_history()) {
     material_editor_history().undo();
@@ -757,7 +757,7 @@ void stop_play_mode() noexcept {
 
   if (restored) {
     // Authored state is back; any "Apply to authored value" queued during
-    // Play now replays as ordinary undoable edits against it (issue #159)
+    // Play now replays as ordinary undoable edits against it
     // instead of the transient live-edit values that just got discarded
     // by the restore above. Also drops every live-edit baseline -- a new
     // Play session starts tracking fresh regardless.

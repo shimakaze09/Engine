@@ -1,6 +1,6 @@
 // Fixed-capacity sparse-set component storage keyed by entity index, with
 // optional generation validation when the entity type carries a generation.
-// Two lookup layouts share one interface (#167): SparseSet's full
+// Two lookup layouts share one interface: SparseSet's full
 // entity-indexed table for ubiquitous components, and CompactSparseSet's
 // fixed hash index for pools whose dense capacity is far below the entity
 // capacity, so rare components stop paying MaxEntities-sized lookup arrays.
@@ -248,8 +248,8 @@ private:
 };
 
 /// Dense component storage with the SparseSet interface but a fixed
-/// hash-table lookup index instead of a MaxEntities-sized sparse array
-/// (#167): rare component pools pay memory proportional to their own
+/// hash-table lookup index instead of a MaxEntities-sized sparse array:
+/// rare component pools pay memory proportional to their own
 /// capacity. Lookups stay bounded (linear probing over a 4x-capacity
 /// table); removal tombstones are compacted by a bounded rebuild from the
 /// dense arrays once they could degrade probing, so long-lived worlds

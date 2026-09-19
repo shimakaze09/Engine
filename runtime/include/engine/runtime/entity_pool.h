@@ -16,8 +16,8 @@ namespace engine::runtime {
 /// allocated, avoiding the overhead of full create/destroy cycles, but the
 /// handle does not survive the release: recycling advances the slot's
 /// generation, the pool keeps the new handle, and every handle held before
-/// the release is stale (#569).
-/// Ownership contract (#57): the pool records the World's content epoch at
+/// the release is stale.
+/// Ownership contract: the pool records the World's content epoch at
 /// init. When the world's entire contents are replaced (scene load commit,
 /// reset_world), the epoch advances and the pool expires: every operation
 /// fails closed (invalid entity / false / zero), the slots and free list are

@@ -136,7 +136,7 @@ bool copy_path_strict(char *dst, std::size_t dstCapacity, const char *src,
   return true;
 }
 
-/// Jails script-facing filesystem paths as defence-in-depth (issue #83).
+/// Jails script-facing filesystem paths as defence-in-depth.
 bool script_path_in_jail(const char *path, const char *context) noexcept {
   if (core::vfs_path_is_jailed(path)) {
     return true;

@@ -1,4 +1,4 @@
-// Declares the packer's bgfx shader cook mode (#138 Phase C): manifest-
+// Declares the packer's bgfx shader cook mode: manifest-
 // driven shaderc invocation producing deterministic per-profile shader
 // binaries certified by the shared cook-stamp machinery.
 

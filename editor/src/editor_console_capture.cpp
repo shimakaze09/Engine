@@ -1,5 +1,5 @@
 // Implements the editor Console's bounded log capture, filtering, duplicate
-// collapse, and best-effort source/entity navigation metadata (issue #155).
+// collapse, and best-effort source/entity navigation metadata.
 
 #include "editor_console_capture.h"
 
@@ -28,7 +28,7 @@ std::uint64_t g_totalIngested = 0U;
 std::uint64_t g_sessionMarkerSeq = 0U;
 // The capture epoch, read lock-free by the sink from any logging thread
 // and written by console_capture_initialize under the mutex; atomic so
-// the two never race (#576). Any value the sink reads is a valid epoch:
+// the two never race. Any value the sink reads is a valid epoch:
 // a re-initialize only re-bases later timestamps.
 std::atomic<Clock::rep> g_captureStartTicks{0};
 bool g_sinkRegistered = false;
@@ -68,8 +68,7 @@ void copy_truncated(char *dst, std::size_t dstCapacity, const char *src,
   }
 }
 
-/// True when `c` may appear inside a relative VFS-jailed asset/script path
-/// (issue #83 jail rules: relative, forward slashes, no drive letters).
+/// True when `c` may appear inside a relative VFS-jailed asset/script path.
 bool is_path_char(char c) noexcept {
   return (std::isalnum(static_cast<unsigned char>(c)) != 0) || (c == '/') ||
         (c == '_') || (c == '-') || (c == '.');
@@ -282,7 +281,7 @@ void ingest_locked(ConsoleEntry candidate) noexcept {
   }
 }
 
-/// The registered core logging sink (issue #155's capture hook). All
+/// The registered core logging sink. All
 /// parsing work happens before the lock is taken so the critical section
 /// stays a fixed-size copy/compare, matching the lock-light contract.
 void console_capture_sink(core::LogLevel level, const char *channel,

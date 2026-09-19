@@ -1,9 +1,9 @@
 // Public cross-module entry point for the runtime cooked-asset staleness
-// diagnostic (issue #81, extended to skeleton/animation callers by #91): the
-// CAS table and .meta.json sidecar reader stay implemented in the module-
-// private asset_stale_check.cpp; this header is the one public declaration
-// so every cooked-asset consumer (renderer mesh/texture loaders, runtime
-// .skel/.anim loaders) routes through the same once-per-asset check.
+// diagnostic: the CAS table and .meta.json sidecar reader stay
+// implemented in the module-private asset_stale_check.cpp; this header is
+// the one public declaration so every cooked-asset consumer (renderer
+// mesh/texture loaders, runtime .skel/.anim loaders) routes through the
+// same once-per-asset check.
 
 #pragma once
 
@@ -14,7 +14,7 @@ namespace engine::content {
 void warn_if_cooked_asset_stale(const char *cookedPath) noexcept;
 
 /// Validates the cooked asset's generation against its .cookstamp output
-/// manifest before a load accepts it (audit #211): every essential output
+/// manifest before a load accepts it: every essential output
 /// the stamp certifies must exist with matching content bytes, so a torn
 /// or mixed cook (new mesh beside an old sidecar, or the reverse) is
 /// rejected instead of silently loaded. Presentation outputs under

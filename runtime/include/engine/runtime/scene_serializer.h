@@ -12,11 +12,11 @@ class World;
 /// replaces (load_scene) or clears (reset_world) the live world's content,
 /// while the outgoing entities and their script modules are still alive
 /// and callable; used by process_pending_scene_op to dispatch on_end_play
-/// to the outgoing scene before teardown (#198). Never called on a failed
+/// to the outgoing scene before teardown. Never called on a failed
 /// load — a failure leaves the outgoing world untouched and unreported.
 using SceneTeardownHook = void (*)() noexcept;
 
-/// Live world state the scene format cannot represent (#208): counts of
+/// Live world state the scene format cannot represent: counts of
 /// provenance-free convex-hull payloads, heightfield payloads, and active
 /// physics joints. A save with any nonzero count is refused before the
 /// destination file or buffer is touched, so a success result is never

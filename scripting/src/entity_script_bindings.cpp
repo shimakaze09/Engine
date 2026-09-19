@@ -65,7 +65,7 @@ EntityScriptModule g_entityScriptModules[kMaxEntityScriptModules]{};
 std::size_t g_entityScriptModuleCount = 0U;
 // Advances once per dispatch pass (update, start, begin/end play) so a
 // module's file is polled at most once per pass, not once per scripted
-// entity (#528); a later pass in the same frame polls again, which keeps
+// entity; a later pass in the same frame polls again, which keeps
 // a script that appears between passes visible to the next one.
 std::uint64_t g_modulePollSerial = 1U;
 std::uint64_t g_mtimePolls = 0U;
@@ -856,7 +856,7 @@ void dispatch_entity_scripts_end_impl(runtime::World *world) noexcept {
     char path[kScriptPathSize] = {};
     // An entity that never received on_begin_play (spawned in the final
     // tick, begin-play still pending) gets no on_end_play either, like
-    // the destroy path (#534): the hooks pair or neither fires.
+    // the destroy path: the hooks pair or neither fires.
     if (!world->is_alive(entity) || !world->has_begun_play(entity) ||
         !copy_entity_script_path(world, entity, path)) {
       continue;

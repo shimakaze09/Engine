@@ -1,4 +1,4 @@
-// Declares the generic asset transition-request queue (#171 C3): the fixed
+// Declares the generic asset transition-request queue: the fixed
 // ring of load/unload/reload requests split out of the renderer's asset
 // manager, usable by any per-type residency service with no renderer
 // dependency.

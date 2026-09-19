@@ -59,7 +59,7 @@
 
 namespace engine::editor {
 
-/// Draws the Save/Discard/Cancel confirm modal (issue #158) that gates
+/// Draws the Save/Discard/Cancel confirm modal that gates
 /// New/Open/quit while the document is dirty; the decision itself is
 /// production logic in editor_scene_document.cpp/scene_document_prompt_*,
 /// this function only presents it.
@@ -131,7 +131,7 @@ void draw_main_menu_bar() noexcept {
 
   if (ImGui::BeginMenu("File")) {
     // Replacing or exporting the world stays available after a failed
-    // Stop restore (#525); only overwriting the open scene in place needs
+    // Stop restore; only overwriting the open scene in place needs
     // the fully editable world.
     const bool loadable = world_can_load_scene();
     const bool editable = world_is_editable();
@@ -218,11 +218,11 @@ void draw_main_menu_bar() noexcept {
     ImGui::EndMenu();
   }
 
-  // Non-spamming status indicator (issue #155): Fatal/high-severity errors
+  // Non-spamming status indicator: Fatal/high-severity errors
   // stay visible in the menu bar even while the Console panel is closed.
   draw_console_status_indicator();
 
-  // Document status (issue #158): name plus a dirty marker, right-aligned
+  // Document status: name plus a dirty marker, right-aligned
   // in the menu bar; scene_document_update_window_title mirrors the same
   // state into the OS title bar once per frame.
   char status[160] = {};
@@ -267,7 +267,7 @@ void draw_toolbar() noexcept {
   // One-shot automation hook: ENGINE_EDITOR_AUTOPLAY=1 enters play mode on
   // the first eligible frame (scripted verification runs use it; interactive
   // sessions never set the variable). The latch lives on the session
-  // (#249) so a later editor session in the same process re-arms.
+  // so a later editor session in the same process re-arms.
   if (!editor_session().autoplayConsumed && canPlay &&
       (editor_session().playState == PlayState::Stopped)) {
     const char *autoplay = core::non_empty_env("ENGINE_EDITOR_AUTOPLAY");

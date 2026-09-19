@@ -178,7 +178,7 @@ bool texture_input_size_fits_stb(std::size_t fileSize,
 
 namespace {
 
-// Decoded-image budgets (audit #210), enforced from the encoded header
+// Decoded-image budgets, enforced from the encoded header
 // before any full decode — file size is no proxy for decoded size, since
 // a compressible or hostile header can expand far beyond its bytes on
 // disk. 16384 matches the common GL max texture size; 512 MiB bounds one
@@ -189,7 +189,7 @@ constexpr int kMaxDecodedTextureDimension = 16384;
 constexpr std::uint64_t kMaxDecodedTextureBytes = 512ULL << 20U;
 
 /// Logs one texture diagnostic in the `<path>: <reason>` shape the editor
-/// console parses for its Open/Select navigation actions (#217).
+/// console parses for its Open/Select navigation actions.
 void log_texture_path_error(const char *path, const char *reason) noexcept {
   char message[640] = {};
   std::snprintf(message, sizeof(message), "%s: %s",
@@ -505,7 +505,7 @@ TextureHandle load_texture(const char *virtualPath) noexcept {
     return kInvalidTextureHandle;
   }
 
-  // #210: reject over-budget decodes from the header, before stb
+  // Reject over-budget decodes from the header, before stb
   // allocates the full decoded image.
   const bool decodeAsHdr = stbi_is_hdr_from_memory(fileBytes, stbFileSize) != 0;
   if (!texture_decode_within_budget(fileBytes, stbFileSize, decodeAsHdr, 0,
@@ -626,7 +626,7 @@ TextureHandle load_hdr_equirect_cubemap(const char *virtualPath,
     return kInvalidTextureHandle;
   }
 
-  // #210: the conversion holds the decoded source and six faces at once.
+  // The conversion holds the decoded source and six faces at once.
   // The source decode is budgeted here from the header; faceSize is
   // already capped at kMaxCubemapFaceSize above, so the transient total is
   // bounded by construction at kMaxDecodedTextureBytes source + ~1.5 GiB

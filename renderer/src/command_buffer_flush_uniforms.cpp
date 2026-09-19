@@ -95,8 +95,8 @@ namespace {
 
 /// Which scene lights fill the forward program's fixed arrays: the
 /// kForwardMax* nearest the active camera, ties broken by index, so the
-/// lit set is a function of the scene rather than of creation order
-/// (#565). Entries are indices into the scene arrays, nearest first.
+/// lit set is a function of the scene rather than of creation order.
+/// Entries are indices into the scene arrays, nearest first.
 struct ForwardLightSelection final {
   std::array<std::uint32_t, kForwardMaxPointLights> point{};
   std::size_t pointCount = 0U;
@@ -167,7 +167,7 @@ float forward_slot_index(const std::uint32_t *selected, std::size_t count,
 void upload_pbr_lighting_uniforms(const BackendState &backend,
                                   const RenderDevice *dev,
                                   const SceneLightData &lights) noexcept {
-  // #138 flat array vocabulary: pack per-light vec4 elements into fixed
+  // Flat array vocabulary: pack per-light vec4 elements into fixed
   // scratch and upload each array in one set_param_vec4_array call.
   if (dev->set_param_vec4_array == nullptr) {
     return;
@@ -405,7 +405,7 @@ void upload_material_texture_slots(
     }
     // Absent slots bind the fallback, never nothing: a stale binding
     // of the pass's own render target trips WebGL's declaration-based
-    // feedback-loop rejection and silently drops the draw (#293).
+    // feedback-loop rejection and silently drops the draw.
     const DeviceTextureHandle desired = has ? deviceTex : fallbackTex;
     if (desired != *boundTex) {
       dev->bind_texture_slot(slot, desired);
@@ -471,7 +471,7 @@ void bind_pbr_shadow_uniforms(const BackendState &backend,
     return;
   }
 
-  // #138 flat vocabulary, #301 array samplers: the cascade and spot
+  // Flat vocabulary, array samplers: the cascade and spot
   // sets each bind one Tex2DArray (layer = slot); matrices go up as one
   // mat4 array, splits/light indices/pos+far as packed vec4 payloads.
   // The disabled state still binds the array fallback: Vulkan-family
@@ -514,7 +514,7 @@ void bind_pbr_shadow_uniforms(const BackendState &backend,
                        kSpotShadowArrayUnit);
   }
   // Slot indices are scene indices; the forward shader compares them
-  // against its position in the uploaded (nearest) light arrays (#565).
+  // against its position in the uploaded (nearest) light arrays.
   const ForwardLightSelection selection = select_forward_lights(lights);
   float spotMatrices[kMaxSpotShadowLights * 16U] = {};
   float spotLightIdx[4] = {};
@@ -679,8 +679,7 @@ bool upload_instance_matrices(BackendState &backend, const RenderDevice *dev,
   }
 
   if (backend.instanceAttributes.size() < batch.count) {
-    // A failed grow reports failure instead of terminating (audit #204:
-    // nothrow instead of a terminating std::vector throw); the caller
+    // A failed grow reports failure instead of terminating; the caller
     // already falls back to per-command (non-instanced) draws whenever this
     // function returns false, so a transient allocation failure degrades
     // this batch to individual draw calls rather than crashing the process.

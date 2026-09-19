@@ -45,7 +45,7 @@ void update_audio() noexcept;
 SoundHandle load_sound(const char *virtualPath) noexcept;
 // Releases every loaded sound, live one-shot, and the streamed music while
 // the device stays up: sounds are run-scoped scene content and must not
-// survive EnginePipeline::teardown into a later run (#168).
+// survive EnginePipeline::teardown into a later run.
 void unload_all_sounds() noexcept;
 /// Releases the sound's slot; the handle becomes stale.
 void unload_sound(SoundHandle handle) noexcept;

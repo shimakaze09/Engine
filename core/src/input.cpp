@@ -45,7 +45,7 @@ struct MouseStateInternal final {
 };
 
 MouseStateInternal g_mouse{};
-// Fraction of a wheel notch not yet reported (#538).
+// Fraction of a wheel notch not yet reported.
 float g_wheelCarry = 0.0F;
 
 /// One controller slot, keyed to the SDL instance id it was announced
@@ -228,7 +228,7 @@ bool initialize_input() noexcept {
 /// Shuts down the owning system for input, including the touch subsystem
 /// whose events and frames route through the general input entry points.
 /// Clears run-scoped gameplay registrations; device state and the
-/// persisted input map stay untouched (#168).
+/// persisted input map stay untouched.
 void clear_gameplay_bindings() noexcept {
   g_actions = {};
   g_axes = {};
@@ -320,7 +320,7 @@ void input_process_event(const void *nativeEvent) noexcept {
   case SDL_EVENT_MOUSE_BUTTON_UP: {
     // A button event carries the cursor too: a touch-emulated tap is a
     // press and release with no motion between, so the position must
-    // land here or the press reads a stale cursor (#538).
+    // land here or the press reads a stale cursor.
     g_mouse.x = static_cast<int>(event->button.x);
     g_mouse.y = static_cast<int>(event->button.y);
     const int button = static_cast<int>(event->button.button) - 1;
@@ -337,7 +337,7 @@ void input_process_event(const void *nativeEvent) noexcept {
   case SDL_EVENT_MOUSE_WHEEL: {
     // Precise trackpads scroll in fractions of a notch; the fraction is
     // carried across events so it is counted once it adds up to a notch
-    // instead of truncating to nothing (#538).
+    // instead of truncating to nothing.
     g_wheelCarry += event->wheel.y;
     const int notches = static_cast<int>(g_wheelCarry);
     g_mouse.scrollDelta += notches;

@@ -3,7 +3,7 @@
 // descriptors, shader parameters, render state, and capabilities. The
 // vocabulary here describes engine intent; GL/bgfx mechanics (VAOs,
 // uniform locations, texture units, FBO ids) stay inside backend
-// implementations and must not appear in this header (#165).
+// implementations and must not appear in this header.
 
 #pragma once
 
@@ -332,7 +332,7 @@ struct DeviceCaps final {
   bool cookedPrograms = false;  // create_program_binary from cooked shaders
   // Fragment sampler units the device actually supports; passes whose
   // unit map exceeds this must fall back (the deferred+IBL vocabulary
-  // tops out at unit 15 since the #301 shadow arrays, inside WebGL2's
+  // tops out at unit 15, inside WebGL2's
   // 16-unit floor and DXBC's 16-register cap).
   std::uint16_t maxTextureSamplers = 16U;
   // Largest width or height a 2-D texture may have; create_texture
@@ -362,7 +362,7 @@ struct DeviceDebugStats final {
   std::uint64_t droppedOperations = 0U;
   /// Draws whose stream-access vertex or instance data was handed to the
   /// backend as per-draw transient data rather than a shared buffer
-  /// update, so every batch in a frame draws its own upload (#523).
+  /// update, so every batch in a frame draws its own upload.
   std::uint64_t transientStreamUploads = 0U;
 };
 
@@ -403,7 +403,7 @@ struct RenderDevice final {
   void (*bind_texture_slot)(std::uint32_t slot,
                             DeviceTextureHandle texture) noexcept = nullptr;
 
-  // Links a program from cooked shader binaries (#138 Phase C): opaque
+  // Links a program from cooked shader binaries: opaque
   // backend-cooked bytes in, program handle out. Requires
   // caps.cookedPrograms; source-compiling backends leave it null.
   DeviceProgramHandle (*create_program_binary)(
@@ -416,7 +416,7 @@ struct RenderDevice final {
   const char *(*cooked_program_profile)() noexcept = nullptr;
   // GLSL-family cooked binaries carry no embedded uniform table; when
   // this entry is set the loader passes the program's spirv siblings as
-  // introspection sidecars alongside the consumable binaries (#138).
+  // introspection sidecars alongside the consumable binaries.
   DeviceProgramHandle (*create_program_binary_introspected)(
       const void *vertexData, std::ptrdiff_t vertexSize,
       const void *fragmentData, std::ptrdiff_t fragmentSize,
@@ -445,7 +445,7 @@ struct RenderDevice final {
       nullptr;
   void (*set_param_vec4)(ShaderParam param, const float *value) noexcept =
       nullptr;
-  // Array parameters (#138): count contiguous vec4/mat4 elements into
+  // Array parameters: count contiguous vec4/mat4 elements into
   // the resolved array uniform; defined no-ops for invalid params.
   void (*set_param_vec4_array)(ShaderParam param, const float *values,
                                std::int32_t count) noexcept = nullptr;

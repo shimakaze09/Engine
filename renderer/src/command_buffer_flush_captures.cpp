@@ -116,7 +116,7 @@ void flush_scene_captures(FrameFlushContext &ctx) noexcept {
       dev->set_param_i32(backend.pbrAlbedoMapLocation, 0);
     }
 
-    // issue #160: scene captures share pbrProgram (and its GL uniform
+    //: scene captures share pbrProgram (and its GL uniform
     // state) with the main forward pass, so every draw here must set these
     // uniforms itself even when a capture's own materials never use them —
     // otherwise a capture would silently keep whatever texture the last
@@ -136,7 +136,7 @@ void flush_scene_captures(FrameFlushContext &ctx) noexcept {
         backend.pbrUvOffsetLocation};
 
     // Commands render prep culled for the main camera but flagged for
-    // this capture ride in the auxiliary list (#524).
+    // this capture ride in the auxiliary list.
     const std::uint16_t captureBit = static_cast<std::uint16_t>(
         kPassCaptureBase << static_cast<unsigned int>(captureIndex));
     auto drawCaptureRange = [&](const CommandBufferView &view,

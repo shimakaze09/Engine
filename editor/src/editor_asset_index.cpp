@@ -1,6 +1,6 @@
 // Implements the editor's cached content-browser asset index: cold
 // filesystem walk, extension/content-sniff classification, and
-// change-driven filter caching (issue #157).
+// change-driven filter caching.
 
 #include "editor_asset_index.h"
 
@@ -181,7 +181,7 @@ void walk_directory(const std::filesystem::path &dir,
     // Every path field is an identity the browser resolves through (open,
     // spawn, metadata, thumbnail), so an entry that does not fit whole is
     // skipped with a diagnostic rather than indexed under a truncated
-    // name that resolves to a different file (#567).
+    // name that resolves to a different file.
     AssetIndexEntry indexed{};
     const std::string osPathStr = entry.path().string();
     const std::string folderStr = entry.path().parent_path().generic_string();

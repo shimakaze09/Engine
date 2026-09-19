@@ -84,7 +84,7 @@ const ConvexHullData *get_hull_data_ptr(const PhysicsContext &context,
 void remove_shape_payloads(PhysicsContext &context, Entity entity) noexcept;
 /// Retires every joint attached to an entity that is leaving the world, so
 /// a joint never outlives a body: the solver would skip it, but it would
-/// still count as unserializable state and block every later save (#530).
+/// still count as unserializable state and block every later save.
 void remove_joints_for_entity(PhysicsContext &context, Entity entity) noexcept;
 /// Returns the scene-authored physics state — gravity and every joint — to
 /// what a fresh world carries, keeping the run-tier collision dispatch.

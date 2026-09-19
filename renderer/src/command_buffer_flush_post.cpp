@@ -278,7 +278,7 @@ void flush_post_chain(FrameFlushContext &ctx) noexcept {
   dev->apply_render_state(RenderState{DepthTest::Less, true,
                                       BlendMode::Disabled, CullMode::Back});
 
-  // Player mode (#138): no editor overlay follows, so the final image is
+  // Player mode: no editor overlay follows, so the final image is
   // drawn onto the back buffer here (FXAA pings back into sceneColor;
   // otherwise the tonemapped LDR target is current).
   if (backend.cvars.presentScene.get_bool(false) &&

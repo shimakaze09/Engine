@@ -202,8 +202,7 @@ bool cull_lights_tiled(const SceneLightData &lightData, const float *viewMatrix,
                                  static_cast<int>(kMaxSpotLights));
 
   // Lights a tile's fixed slots could not hold are dropped per tile; the
-  // drop is reported once per run instead of silently dimming the tile
-  // (#565).
+  // drop is reported once per run instead of silently dimming the tile.
   std::size_t droppedPairs = 0U;
   for (int ty = 0; ty < tileCountY; ++ty) {
     for (int tx = 0; tx < tileCountX; ++tx) {

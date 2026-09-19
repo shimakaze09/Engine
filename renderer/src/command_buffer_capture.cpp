@@ -137,7 +137,7 @@ bool ensure_scene_capture_target(BackendState &backend,
   }
 
   // Single-level LDR color: the capture pass renders mip 0 only, so a
-  // generated chain would freeze stale data (issue #229); material
+  // generated chain would freeze stale data; material
   // sampling clamps to the rendered level instead.
   TextureDesc colorDesc{};
   colorDesc.kind = TextureKind::Tex2D;

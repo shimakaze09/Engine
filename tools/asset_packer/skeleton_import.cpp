@@ -56,8 +56,8 @@ std::uint32_t find_joint_index(const cgltf_skin &skin,
 }
 
 /// Composes a joint's local matrix relative to its nearest joint ancestor,
-/// mathematically flattening any non-joint intermediary nodes between them
-/// (audit M-26: their transforms used to be silently dropped). Reports the
+/// mathematically flattening any non-joint intermediary nodes between them.
+/// Reports the
 /// joint ancestor (nullptr for a root) through outJointAncestor; false when
 /// the ancestor walk exceeds the sanity depth cap.
 bool compose_joint_local(const cgltf_skin &skin, const cgltf_node *jointNode,
@@ -90,8 +90,8 @@ bool compose_joint_local(const cgltf_skin &skin, const cgltf_node *jointNode,
 /// (scale from column lengths, rotation from the scale-normalized linear
 /// block). Rejects transforms a TRS decomposition cannot represent —
 /// negative determinant (mirroring), degenerate zero-scale axes, and
-/// shear beyond exporter noise — instead of emitting a corrupt rotation
-/// (audit M-26). The 1e-3 orthogonality tolerance admits float exporter
+/// shear beyond exporter noise — instead of emitting a corrupt rotation.
+/// The 1e-3 orthogonality tolerance admits float exporter
 /// round-off while catching real shear.
 bool decompose_rest_pose(const math::Mat4 &matrix, math::Vec3 *outTranslation,
                          math::Quat *outRotation,

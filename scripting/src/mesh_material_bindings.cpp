@@ -151,7 +151,7 @@ int lua_engine_spawn_shape(lua_State *state) noexcept {
   // Hull provenance is resolved by the runtime tier that owns collider
   // installation: it sizes and tags the collider, and World::add_collider
   // rebuilds the payload from that tag, so a script spawn never builds or
-  // carries a physics hull of its own (issue #310).
+  // carries a physics hull of its own.
   const bool hasHull = runtime::apply_primitive_hull(hullSource, &collider);
 
   runtime::World &world = *runtime_binding().world;
@@ -164,7 +164,7 @@ int lua_engine_spawn_shape(lua_State *state) noexcept {
   }
 
   // Every insertion below is checked so a partially constructed entity is
-  // rolled back instead of leaking to Lua as a success (issue #108).
+  // rolled back instead of leaking to Lua as a success.
   const char *failedStep = nullptr;
 
   runtime::RigidBody rigidBody{};
@@ -231,7 +231,7 @@ int lua_engine_set_albedo(lua_State *state) noexcept {
   return 1;
 }
 
-// #125: get_albedo/get_mesh/get_roughness/get_metallic/get_opacity read
+// get_albedo/get_mesh/get_roughness/get_metallic/get_opacity read
 // through any same-frame queued mesh-component write instead of only the
 // committed snapshot (copied out, mirroring the latest_mesh_component
 // helper's value semantics rather than the old pointer-into-World read).

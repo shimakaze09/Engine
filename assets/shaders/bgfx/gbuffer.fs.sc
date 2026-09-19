@@ -1,6 +1,6 @@
 $input v_worldpos, v_normal, v_texcoord0
 
-// G-buffer fragment stage (bgfx port of gbuffer.frag, #138): writes the
+// G-buffer fragment stage: writes the
 // three MRT targets (albedo+metallic, packed normal+roughness,
 // emissive+AO) from the five material texture slots (baked stages 0-4
 // matching the flush's unit assignment) with the opaque-path alpha-test

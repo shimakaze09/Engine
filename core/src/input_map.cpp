@@ -84,7 +84,7 @@ bool read_optional_uint_field(const JsonParser &parser, const JsonValue &entry,
   return true;
 }
 
-// Numeric bounds a persisted document must respect (#538): a scancode,
+// Numeric bounds a persisted document must respect: a scancode,
 // gamepad button or axis index never exceeds this, a dead zone is a
 // fraction, and a scale past this is a typo, not a setting. A document
 // outside them is refused whole, so no field can later be cast to int
@@ -306,7 +306,7 @@ bool add_input_action(const char *name, const InputBinding *bindings,
   InputAction *existing = find_mapped_action(name);
   if (existing != nullptr) {
     if (existing->persisted) {
-      return true; // the user's bindings outrank a script default (#538)
+      return true; // the user's bindings outrank a script default
     }
     existing->bindingCount = count;
     for (std::uint32_t i = 0; i < count; ++i) {

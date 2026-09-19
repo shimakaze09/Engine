@@ -15,9 +15,8 @@ namespace engine::core {
 /// allocate/assign are the only growth paths and report failure instead of
 /// terminating, so recoverable out-of-memory keeps normal load-failure
 /// semantics under the no-exception build while the buffer stays the single
-/// source of allocation truth (originally the renderer's mesh_loader.h
-/// MeshBuffer<T>, audit H-11; generalized to core so runtime's animation
-/// payload loader can share it, audit #174).
+/// source of allocation truth. Lives in core so the renderer's mesh loader
+/// and runtime's animation payload loader share one allocate/assign contract.
 template <typename T>
 class NothrowBuffer final {
  public:

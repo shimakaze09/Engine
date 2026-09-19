@@ -10,7 +10,7 @@
 namespace engine::core {
 
 /// Streams one atomic replacement in checked chunks, so large payloads
-/// commit without being double-buffered in memory (review item 9):
+/// commit without being double-buffered in memory:
 /// begin opens a uniquely named sibling temporary, write appends checked
 /// chunks (any failure aborts and removes the temporary), commit
 /// flushes, syncs, closes, and atomically renames over the destination.
@@ -36,7 +36,7 @@ public:
   /// exposes a directory-sync primitive — a parent-directory sync, so
   /// the new directory entry is durable and not just the bytes behind
   /// it. Windows exposes no such primitive and its durable-rename
-  /// equivalent is not yet implemented (issue #358), so the entry's
+  /// equivalent is not yet implemented, so the entry's
   /// durability there is whatever the filesystem provides on its own.
   /// False leaves the previous destination intact with the temporary
   /// removed. True once the rename has committed: a failure to sync the
@@ -56,7 +56,7 @@ private:
 /// Writes the payload to a uniquely named sibling temporary file (flushed,
 /// synced, and closed with every step checked), atomically renames it
 /// over the destination, and — where the platform exposes a
-/// directory-sync primitive, which Windows does not (issue #358) — syncs
+/// directory-sync primitive, which Windows does not — syncs
 /// the containing directory so the entry survives power loss; on any
 /// failure before the rename the previous destination file is left
 /// intact and the temporary is removed. Concurrent writers never share a

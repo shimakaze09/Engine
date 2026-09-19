@@ -134,7 +134,7 @@ void watch_script_file(const char *path) noexcept;
 std::size_t watched_script_count() noexcept;
 /// File-timestamp polls the entity script module cache has made since
 /// scripting initialized. A dispatch frame polls each cached module at
-/// most once however many entities share it (#528); tests pin the cadence
+/// most once however many entities share it; tests pin the cadence
 /// with the delta between frames.
 std::uint64_t entity_script_mtime_polls() noexcept;
 
@@ -149,9 +149,7 @@ void check_script_reload() noexcept;
 // legacy on_start/on_update/on_end names remain fallbacks. `self` is an opaque,
 // generation-checked handle. Multiple entities may share the same script file.
 //
-// on_tick cadence (audit #176, corrects the prior "once per simulation step"
-// claim to match the always-intentional EnginePipeline::stage_scripting
-// behavior, audit M-01): on_tick is a per-rendered-frame callback, not a
+// on_tick cadence: on_tick is a per-rendered-frame callback, not a
 // per-fixed-step one. It fires exactly once per frame that advanced
 // simulation, with dt equal to the total time simulated that frame — the sum
 // of every catch-up fixed step folded into it, not one call per step. A
@@ -187,8 +185,8 @@ void dispatch_entity_scripts_end() noexcept;
 
 // Call module.on_end_play(self) for every entity with a ScriptComponent in
 // the outgoing world, immediately before a script-driven scene transition
-// (engine.load_scene/engine.new_scene) commits its replacement content
-// (#198); same dispatch as dispatch_entity_scripts_end() but additionally
+// (engine.load_scene/engine.new_scene) commits its replacement content;
+// same dispatch as dispatch_entity_scripts_end but additionally
 // rejects a handler's own load_scene/new_scene call and defers rather than
 // applies any world mutation the handler triggers, so a reentrant handler
 // cannot corrupt the transition already in flight. Call once from
@@ -202,11 +200,11 @@ void clear_entity_script_modules() noexcept;
 // Reset every run-scoped scripting state (entity scripts, pools, timers,
 // coroutines, deferred mutations, game state, watched scripts) while the VM
 // stays alive; EnginePipeline::teardown calls it so no run residue survives
-// into a later pipeline run (#168).
+// into a later pipeline run.
 void reset_run_state() noexcept;
 
 // Bind (or with nullptr unbind) the pipeline-owned game-binding state the
-// Lua game bindings act on (#168 M3). While unbound they fall back to a
+// Lua game bindings act on. While unbound they fall back to a
 // scripting-local instance so standalone/test use keeps working; the bound
 // pointer must outlive every dispatch, including editor Stop's VM recycle.
 void bind_game_state(runtime::GameBindingState *state) noexcept;

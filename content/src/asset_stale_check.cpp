@@ -1,9 +1,9 @@
 // Implements the runtime cooked-asset trust checks: the staleness
 // diagnostic (reads the .meta.json sidecar's source path + content hash,
-// re-hashes the source, and logs a once-per-asset warning on mismatch,
-// issue #81) and the cook-generation validation (audit #211: verifies the
-// .cookstamp output manifest against the files on disk so a torn or mixed
-// cook is rejected before a load accepts it). Both run on the CPU load
+// re-hashes the source, and logs a once-per-asset warning on mismatch)
+// and the cook-generation validation (verifies the .cookstamp output
+// manifest against the files on disk so a torn or mixed cook is rejected
+// before a load accepts it). Both run on the CPU load
 // path only (sync loads and the streaming worker), never per frame; the
 // once-per-asset memories are fixed lock-free tables.
 
@@ -59,14 +59,14 @@ bool try_mark_checked(std::uint64_t pathHash) noexcept {
 }
 
 /// Largest file the load path re-hashes; a stamp or sidecar naming
-/// something bigger is refused rather than read (#527).
+/// something bigger is refused rather than read.
 constexpr std::uintmax_t kMaxHashedFileBytes = 512ULL * 1024ULL * 1024ULL;
 
 /// FNV-1a of the file bytes, matching the packer's source-content hash.
 /// Only a regular file within kMaxHashedFileBytes is opened: a device,
 /// FIFO or directory named by a stamp or sidecar would otherwise block
 /// the streaming worker (and editor shutdown, which joins it) forever, so
-/// the read is also bounded by the size observed up front (#527).
+/// the read is also bounded by the size observed up front.
 bool hash_file_bytes(const char *path, std::uint64_t *outHash) noexcept {
   if ((path == nullptr) || (outHash == nullptr)) {
     return false;
@@ -210,7 +210,7 @@ bool read_meta_source_record(const char *cookedPath,
   return parse_hex_u64(hashText, outSourceHash);
 }
 
-// ---- Cook-generation validation (audit #211) ------------------------------
+// ---- Cook-generation validation ------------------------------
 
 constexpr std::size_t kMaxStampFileBytes = 1024U * 1024U;
 constexpr std::size_t kMaxVerdictEntries = 512U;
@@ -314,7 +314,7 @@ std::uint32_t validate_stamp_outputs(const char *cookedPath, char *text) noexcep
   bool sawOutputLine = false;
   bool sawToolVersion = false;
   std::uint32_t schema = 0U;
-  // Schema-4 paths join under the stamp's directory (#527).
+  // Schema-4 paths join under the stamp's directory.
   const char *stampDirEnd = std::strrchr(cookedPath, '/');
   const char *stampDirEndBackslash = std::strrchr(cookedPath, '\\');
   if ((stampDirEndBackslash != nullptr) &&
@@ -407,7 +407,7 @@ std::uint32_t validate_stamp_outputs(const char *cookedPath, char *text) noexcep
     // never outside it; a legacy schema recorded the packer's invocation
     // path, which the TOOL_VERSION gate above has already refused for
     // every stamp this build did not cook. Either way the file is
-    // addressed only after it passed the containment rule (#527).
+    // addressed only after it passed the containment rule.
     char joinedPath[512] = {};
     const char *outputPath = recordedPath;
     if (schema >= 4U) {
@@ -466,7 +466,7 @@ std::uint32_t validate_stamp_outputs(const char *cookedPath, char *text) noexcep
 
   // From schema 3 on the packer always writes TOOL_VERSION; a stamp that
   // declares that schema without it is torn or hand-edited and certifies
-  // nothing (#571). Older schemas predate the line and stay on the legacy
+  // nothing. Older schemas predate the line and stay on the legacy
   // accept path.
   if ((schema >= 3U) && !sawToolVersion) {
     char message[640] = {};

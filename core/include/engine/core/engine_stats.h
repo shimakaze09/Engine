@@ -19,21 +19,21 @@ struct EngineStats final {
   float gpuTonemapMs = 0.0F;
   float jobUtilizationPct = 0.0F;
   /// Draws render prep could not fit into a command buffer last frame; a
-  /// nonzero value means the frame was drawn incomplete (#519).
+  /// nonzero value means the frame was drawn incomplete.
   std::uint32_t droppedDrawCommands = 0U;
   /// Point and spot lights submitted with last frame's draw list; both
-  /// are collected from the same mutation epoch (#569).
+  /// are collected from the same mutation epoch.
   std::uint32_t sceneLights = 0U;
   /// Draw commands the main camera saw last frame, and the camera-culled
   /// commands render prep kept for the shadow passes (a sweep along the
   /// light reaches the view, or a casting local light's range) and for
-  /// scene captures (a capture camera sees them) (#524).
+  /// scene captures (a capture camera sees them).
   std::uint32_t drawCommands = 0U;
   std::uint32_t offscreenShadowCasters = 0U;
   std::uint32_t captureOnlyDraws = 0U;
   /// Hot-reload polls the frame ran over the watched shaders and scripts:
   /// at most one per poll interval while an editor is attached, none in a
-  /// player (#528).
+  /// player.
   std::uint32_t hotReloadPolls = 0U;
   /// Fixed simulation steps last frame ran (0 while paused or stopped).
   std::uint32_t fixedSteps = 0U;

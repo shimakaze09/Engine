@@ -165,7 +165,7 @@ void emit_collider_hull(const math::Mat4 &localToWorld,
 }
 
 // Shows the selected entity's authored CameraComponent as a frustum
-// wireframe (issue #161): derives the same pose/lens update_persistent_
+// wireframe: derives the same pose/lens update_persistent_
 // cameras would publish (runtime::camera_component_pose keeps the -Z-
 // forward/+Y-up convention in one place) and reuses the existing frozen-
 // game-camera frustum drawer, so the gizmo always matches what the entity

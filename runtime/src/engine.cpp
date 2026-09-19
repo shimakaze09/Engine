@@ -100,7 +100,7 @@ bool bootstrap(const EngineConfig &config) noexcept {
       "r_bgfx_trace", false,
       "bgfx backend only: route bgfx trace output into the engine log"));
 
-  // Device reach (#138 v0.5): render scale, its dynamic controller,
+  // Device reach: render scale, its dynamic controller,
   // and the named quality tiers.
   static_cast<void>(core::cvar_register_float(
       "r_render_scale", 1.0F,
@@ -154,7 +154,7 @@ bool bootstrap(const EngineConfig &config) noexcept {
     return false;
   }
 
-  // Player mode (#138): the pure gameplay loop for shared creations —
+  // Player mode: the pure gameplay loop for shared creations —
   // clearing the bridge before its init makes the pipeline treat the run
   // as always-playing, and r_present_scene has the renderer draw the
   // final image to the back buffer in the editor overlay's place.
@@ -215,7 +215,7 @@ bool bootstrap(const EngineConfig &config) noexcept {
     return false;
   }
 
-  // Bootstrap owns the texture registry's lifetime (#234); every production
+  // Bootstrap owns the texture registry's lifetime; every production
   // texture consumer is gated on it and engine::shutdown tears it down.
   if (!renderer::initialize_texture_system()) {
     core::log_message(core::LogLevel::Error, "renderer",
@@ -239,8 +239,8 @@ const EngineConfig &active_config() noexcept { return g_activeConfig; }
 #if defined(ENGINE_PLATFORM_WEB)
 namespace {
 
-/// Browser frame callback (#138 web): one engine frame per
-/// requestAnimationFrame tick, tearing the pipeline down when the loop
+/// Browser frame callback: one engine frame per requestAnimationFrame
+/// tick, tearing the pipeline down when the loop
 /// ends (the pipeline outlives run()'s unwound stack as a static).
 void web_frame(void *arg) noexcept {
   auto *pipeline = static_cast<EnginePipeline *>(arg);

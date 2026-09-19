@@ -17,14 +17,12 @@ inline constexpr std::size_t kShadowCascadeCount = 4U;
 /// How far behind a cascade's light-space slab casters are still
 /// rendered: the light projection's near plane is pushed back by this
 /// much, and render prep sweeps each camera-culled draw this far along the
-/// light direction to decide whether it can shadow the view (#524).
+/// light direction to decide whether it can shadow the view.
 inline constexpr float kShadowCasterSweepDistance = 50.0F;
 
 /// Directional shadow map resolution (square). Every cascade renders at
-/// this size: the cascades live as layers of one Tex2DArray (issue
-/// #301 — one sampler register for all four), and array layers share
-/// dimensions, so the former half-resolution far cascades now render
-/// full size.
+/// this size: the cascades live as layers of one Tex2DArray (one sampler
+/// register for all four), and array layers share dimensions.
 inline constexpr int kShadowMapResolution = 2048;
 
 /// Cascade split distances computed from camera near/far and a log/uniform
@@ -68,7 +66,7 @@ CascadeSplits compute_cascade_splits(float nearClip, float farClip,
 /// @param cascadeNear    Near split distance for this cascade.
 /// @param cascadeFar     Far split distance for this cascade.
 /// @param shadowMapSize  Cascade shadow texture size for stable snapping.
-/// projNear/projFar are passed explicitly (#221): recovering them from the
+/// projNear/projFar are passed explicitly: recovering them from the
 /// matrix used perspective-only algebra that produced silently wrong
 /// cascade slabs for an orthographic camera.
 math::Mat4 compute_cascade_matrix(const math::Mat4 &viewMatrix,

@@ -14,8 +14,8 @@
 
 namespace engine::runtime {
 
-/// What the shadow and capture passes can see beyond the main camera
-/// (#524): a draw the camera frustum culls still enters the frame, in the
+/// What the shadow and capture passes can see beyond the main camera:
+/// a draw the camera frustum culls still enters the frame, in the
 /// auxiliary list, when sweeping its bounds along the directional light
 /// by `sweepDistance` reaches the camera frustum, when a shadow-casting
 /// local light's range overlaps it, or when a capture camera sees it.
@@ -45,7 +45,7 @@ struct RenderPrepChunkJobData final {
   const renderer::GpuMeshRegistry *meshRegistry = nullptr;
   std::atomic<bool> *frameGraphFailed = nullptr;
   /// Draws that did not fit a buffer this frame; a full buffer degrades
-  /// the frame, it does not fail the graph (#519).
+  /// the frame, it does not fail the graph.
   std::atomic<std::uint32_t> *droppedDrawCommands = nullptr;
   math::Mat4 viewProjection{};
   float interpolationAlpha = 1.0F;
@@ -77,7 +77,7 @@ struct RenderPrepPipelineContext final {
 };
 
 /// `mergedAuxiliaryBuffer` and `auxiliary` together enable the auxiliary
-/// list of camera-culled draws for the shadow and capture passes (#524);
+/// list of camera-culled draws for the shadow and capture passes;
 /// either null keeps the frame camera-only.
 bool enqueue_render_prep_pipeline(
     RenderPrepPipelineContext *context, const World *world,

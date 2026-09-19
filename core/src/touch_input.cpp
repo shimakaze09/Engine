@@ -82,7 +82,7 @@ bool g_twoFingerTracking = false;
 
 /// Live drawable extent for mouse emulation; touch coordinates are
 /// normalized so the emulated cursor must scale by the real surface size,
-/// not a hard-coded resolution (audit M-11).
+/// not a hard-coded resolution.
 void emulated_mouse_extent(float *outWidth, float *outHeight) noexcept {
   int width = 0;
   int height = 0;
@@ -297,7 +297,7 @@ void shutdown_touch_input() noexcept {
   g_mouseEmulation = false;
 }
 
-/// Drops every touch/gesture callback registration (run-scoped, #168).
+/// Drops every touch/gesture callback registration.
 void clear_touch_callbacks() noexcept {
   g_touchCallbacks = {};
   g_gestureCallbacks = {};
@@ -410,7 +410,7 @@ void touch_process_event(const void *nativeEvent) noexcept {
   // An OS-cancelled touch (palm rejection, a system gesture, an app
   // switch) ends like a lift: the slot is released, listeners see
   // Cancelled, and the emulated button comes up, so no finger can stay
-  // held forever (#538). No tap or swipe is recognized from it.
+  // held forever. No tap or swipe is recognized from it.
   case SDL_EVENT_FINGER_CANCELED:
   case SDL_EVENT_FINGER_UP: {
     const bool cancelled = (event->type == SDL_EVENT_FINGER_CANCELED);

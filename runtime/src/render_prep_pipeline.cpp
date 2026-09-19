@@ -73,7 +73,7 @@ bool aabb_culled_by_frustum(const FrustumPlane planes[6],
 /// Conservative test of the box swept along `sweep` (a direction scaled
 /// by the sweep distance) against the frustum: the swept solid lies
 /// entirely outside a plane only when the box's near corner plus the
-/// sweep's reach toward the plane still falls behind it (#524).
+/// sweep's reach toward the plane still falls behind it.
 bool swept_aabb_culled_by_frustum(const FrustumPlane planes[6],
                                   const math::Vec3 &center,
                                   const math::Vec3 &half,
@@ -210,7 +210,7 @@ void mark_graph_failed(std::atomic<bool> *frameGraphFailed) noexcept;
 /// Submits a draw to the thread's buffer. A full buffer drops the draw and
 /// counts it; it is a per-frame degradation the pipeline reports once and
 /// surfaces in EngineStats, never a graph failure — treating it as one
-/// made more than kMaxDrawCommands visible draws a fatal run exit (#519).
+/// made more than kMaxDrawCommands visible draws a fatal run exit.
 bool submit_render_command(renderer::CommandBufferBuilder &localBuffer,
                            const renderer::DrawCommand &command,
                            std::atomic<std::uint32_t> *droppedDrawCommands)
@@ -494,10 +494,10 @@ void merge_command_buffers_job(void *userData) noexcept {
     for (std::uint32_t c = 0U; c < local.count; ++c) {
       const renderer::DrawCommand &command = local.data[c];
       // Camera-visible commands feed the main list; the rest go to the
-      // auxiliary list for the shadow and capture passes (#524). Either
+      // auxiliary list for the shadow and capture passes. Either
       // merged buffer has the capacity of one thread's buffer, so the sum
       // of the locals can exceed it; a command that does not fit is
-      // dropped and counted, and the frame draws what did fit (#519).
+      // dropped and counted, and the frame draws what did fit.
       renderer::CommandBufferBuilder *target =
           ((command.passMask & renderer::kPassCamera) != 0U)
               ? jobData->merged

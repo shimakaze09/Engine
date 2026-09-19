@@ -1,7 +1,7 @@
 // Implements byte-preserving JSON document edits: replacing or inserting
 // one top-level field while leaving every other byte untouched, so tools
 // that understand only part of a schema cannot destroy the fields other
-// tools rely on (audit H-21).
+// tools rely on.
 
 #include "engine/core/json.h"
 
@@ -98,7 +98,7 @@ bool json_replace_top_level_field(const char *documentText,
     return false;
   }
 
-  // Contract hardening (review item 8): both inputs must fully parse
+  // Contract hardening: both inputs must fully parse
   // before any splice — a malformed document (including mismatched
   // container delimiters the byte scanner alone would tolerate as
   // balanced depth) or an invalid replacement value is rejected. The
@@ -179,8 +179,7 @@ bool json_replace_top_level_field(const char *documentText,
     const std::size_t keyLength = keyClose - 1U - keyBegin;
     // Keys are matched as raw bytes (the engine parser does the same);
     // an escape-spelled key could alias the target after decoding, so
-    // such documents are refused rather than risking a duplicate field
-    // (review item 8).
+    // such documents are refused rather than risking a duplicate field.
     if (std::memchr(documentText + keyBegin, '\\', keyLength) != nullptr) {
       return false;
     }

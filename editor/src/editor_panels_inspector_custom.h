@@ -1,4 +1,4 @@
-// Declares the Inspector's per-component custom drawers (issue #156): the
+// Declares the Inspector's per-component custom drawers: the
 // components whose authoring-relevant fields are not representable by the
 // generic reflected-field loop (64-bit asset ids, VFS paths, fixed arrays)
 // keep a dedicated, typed drawer instead of forcing those fields through

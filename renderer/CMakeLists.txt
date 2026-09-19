@@ -1,7 +1,7 @@
 # Configures renderer build settings for the Engine repository.
 
-# bgfx is the only render backend (#138; the legacy GL device was
-# deleted at parity): the device TU, its program/uniform path, and the
+# bgfx is the only render backend: the device TU, its program/uniform
+# path, and the
 # pure translation TU. The null backend stays available for headless.
 engine_add_module_library(engine_renderer
     SOURCES

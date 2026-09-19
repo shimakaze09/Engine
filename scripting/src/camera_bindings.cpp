@@ -219,7 +219,7 @@ int lua_engine_get_spring_arm(lua_State *state) noexcept {
   return 6;
 }
 
-// -- Authored CameraComponent Lua bindings (issue #161) --------------------
+// -- Authored CameraComponent Lua bindings --------------------
 // Pose always comes from the entity's Transform (never supplied here); these
 // bindings only touch fov/near/far/priority/blendSpeed/active so behaviour
 // scripts can enable/disable/select/blend authored cameras by stable entity
@@ -248,7 +248,7 @@ int lua_engine_add_camera_component(lua_State *state) noexcept {
   if (lua_isboolean(state, 7)) {
     camera.active = (lua_toboolean(state, 7) != 0);
   }
-  // Optional projection kind + orthographic half-height (#221); an unknown
+  // Optional projection kind + orthographic half-height; an unknown
   // kind string is rejected rather than silently treated as perspective.
   if (lua_isstring(state, 8)) {
     const char *kind = lua_tostring(state, 8);
@@ -270,7 +270,6 @@ int lua_engine_add_camera_component(lua_State *state) noexcept {
 
 // Engine.get_camera_component(entityIndex) -> fovRadians, nearPlane,
 // farPlane, priority, blendSpeed, active, projection, orthographicSize | nil
-// (projection is "perspective" or "orthographic", #221)
 int lua_engine_get_camera_component(lua_State *state) noexcept {
   if (runtime_binding().world == nullptr) {
     lua_pushnil(state);

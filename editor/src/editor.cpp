@@ -9,8 +9,8 @@
 
 #include <SDL3/SDL.h>
 
-// The editor's ImGui renderer is the bgfx backend (#138 — bgfx is the
-// engine's only render backend); the stock SDL3 platform backend is
+// The editor's ImGui renderer is the bgfx backend (bgfx is the engine's
+// only render backend); the stock SDL3 platform backend is
 // shared with it.
 #include "imgui_impl_bgfx.h"
 #include "backends/imgui_impl_sdl3.h"
@@ -251,7 +251,7 @@ bool initialize_editor(void *sdlWindow) noexcept {
 
   // Before any frame: takes layout persistence off ImGui's truncating
   // ini writer and restores the stored layout, so the docking flag above
-  // is already set when the dock settings are parsed (issue #313).
+  // is already set when the dock settings are parsed.
   static_cast<void>(editor_layout_initialize());
 
   static_cast<void>(core::cvar_register_float(
@@ -456,7 +456,7 @@ bool editor_consume_step_request() noexcept {
   return true;
 }
 
-/// Runtime quit-request bridge hook (issue #158): true lets the runtime
+/// Runtime quit-request bridge hook: true lets the runtime
 /// quit immediately (document was clean); false means the unsaved-change
 /// prompt was armed instead, and the runtime must not quit until it
 /// resolves PendingSceneAction::Quit (Discard, or a successful Save).
@@ -464,7 +464,7 @@ bool editor_handle_quit_request() noexcept {
   if (!editor_session().initialized) {
     return true; // no editor session bound: nothing to protect
   }
-  // #241: window-close during play routes through the Stop flow first, so
+  // Window-close during play routes through the Stop flow first, so
   // on_end_play dispatch and the authored-world restore behave exactly
   // like the Stop button before the unsaved-change check below runs.
   if (editor_session().playState != PlayState::Stopped) {

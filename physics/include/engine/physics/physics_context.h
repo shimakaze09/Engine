@@ -104,7 +104,7 @@ struct PhysicsJointSlot final {
 
 /// Stores large shape payloads owned by a physics context.
 struct PhysicsShapeStore final {
-  // Joint slot table and broadphase dedupe stamps (issue #129): moved off
+  // Joint slot table and broadphase dedupe stamps: moved off
   // PhysicsContext itself, which a Windows main-red incident found sat ~8 KB
   // under the platform's 1 MB default thread stack when stack-constructed.
   std::array<PhysicsJointSlot, kMaxPhysicsJoints> joints{};
@@ -137,7 +137,7 @@ struct PhysicsShapeStore final {
   // jobs are integrating concurrently.
   std::array<math::Vec3, kMaxColliders> ccdColliderVelocities{};
 
-  // Persistent contact-manifold cache (issue #110): world-scoped so
+  // Persistent contact-manifold cache: world-scoped so
   // separate worlds never share warm-start state; entries are keyed by
   // full Entity so index reuse cannot inherit stale impulses.
   std::array<ContactManifold, kMaxContactManifolds> contactManifolds{};
@@ -169,7 +169,7 @@ struct PhysicsShapeStore final {
 
 /// World-owned physics storage: gravity, joints, pair/stamp scratch,
 /// and hull/heightfield payloads.
-// Transient collision-resolve workspace (~19 MB, #170); defined in
+// Transient collision-resolve workspace; defined in
 // physics_internal.h so only physics TUs see its layout.
 struct ResolveScratch;
 
@@ -208,7 +208,7 @@ struct PhysicsContext final {
   // life of the run; survives every content copy into this context.
   CollisionDispatchFn collisionDispatch = nullptr;
 
-  // Frame-accumulated pairs (issue #103): every fixed step appends its kept
+  // Frame-accumulated pairs: every fixed step appends its kept
   // pairs in step order and dispatch drains once per rendered frame, so a
   // pair persisting across substeps repeats once per substep. Drops are
   // counted per rendered frame (per-step caps plus append overflow).
@@ -236,7 +236,7 @@ struct PhysicsContext final {
   // True until resolve_collisions publishes a snapshot (fresh world, scene
   // load) or after Input-phase collider/body adds: the serial begin-step
   // path then primes a conservative snapshot so the first sweep sees
-  // moving targets instead of a static world (issue #106).
+  // moving targets instead of a static world.
   bool ccdSnapshotDirty = true;
 
   // Monotonic resolve counter stamping manifold-cache use for eviction.
@@ -267,16 +267,16 @@ struct PhysicsContext final {
   float blockedWarnStepsCvar = 30.0F;
   int solverIterationsCvar = 8;
   // Extra outer passes over the persistent contact-manifold cache after the
-  // primary narrow-phase resolve (issue #123): propagates corrections
+  // primary narrow-phase resolve: propagates corrections
   // through contact chains (stacks) within one step instead of leaving them
-  // for next step's warm start. 0 disables and reproduces the pre-#123
-  // single-pass behavior.
+  // for next step's warm start. 0 disables and gives single-pass
+  // behavior.
   int contactRelaxationIterationsCvar = 4;
 
   // Heap-backed so large heightfield buffers do not inflate World stack size.
   std::unique_ptr<PhysicsShapeStore> shapeStore;
 
-  // Resolve workspace (#170): lazily heap-allocated by the first
+  // Resolve workspace: lazily heap-allocated by the first
   // resolve_collisions on this context and freed with it — one bounded
   // block per live physics context, never per worker thread (the old
   // thread_local ownership retained ~19 MB in every worker that ever ran
@@ -284,7 +284,7 @@ struct PhysicsContext final {
   std::unique_ptr<ResolveScratch> resolveScratch{};
 };
 
-// Compile-time regrowth guard for issue #129: PhysicsContext used to sit at
+// Compile-time regrowth guard: PhysicsContext used to sit at
 // ~1,016 KB (joints[4096] + testedStamps[65536] dominated), ~8 KB under
 // Windows' 1 MB default thread stack, and a stack-constructed instance (the
 // manifold suite's original fixture) segfaulted there across four CI runs.

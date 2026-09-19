@@ -34,7 +34,7 @@ struct DependencyDigest final {
 };
 
 /// One manifest-listed cooked output with the content hash recorded when
-/// the stamp committed the cook (issue #55).
+/// the stamp committed the cook.
 struct OutputRecord final {
   std::string path{};
   std::uint64_t hash = 0ULL;
@@ -58,7 +58,7 @@ inline constexpr const char *kMeshCookLogicRevision = "mesh-cook-logic-1";
 #define ENGINE_COOK_PLATFORM "Unknown"
 #endif
 
-/// Default target-platform tag in the cook key (issue #81): stamps for one
+/// Default target-platform tag in the cook key: stamps for one
 /// platform never certify a cook for another; overridable via --platform.
 inline constexpr const char *kCookPlatformTag = ENGINE_COOK_PLATFORM;
 
@@ -103,10 +103,10 @@ bool read_import_settings_from_meta(const char *outputPath,
 /// Writes the cook stamp recording source/settings hashes, dependency
 /// digests, and the output manifest hashed from the committed files;
 /// an unreadable listed output fails the write so the stamp can never
-/// certify an output set it could not fingerprint (issue #55).
+/// certify an output set it could not fingerprint.
 /// Schema 4 records every dependency and output path relative to the
 /// stamp's directory; an output outside it, or a line that would not fit
-/// kMaxCookStampLineBytes, refuses the stamp instead of truncating (#527).
+/// kMaxCookStampLineBytes, refuses the stamp instead of truncating.
 bool write_cook_stamp(const char *outputPath, std::uint64_t sourceHash,
                       const std::vector<DependencyDigest> &dependencies,
                       std::uint64_t importSettingsHash,
@@ -123,10 +123,10 @@ bool should_repack(const char *outputPath, std::uint64_t sourceHash,
 bool is_valid_platform_tag(const char *platformTag);
 /// Deletes previous-manifest outputs the current cook no longer
 /// produces (renamed/removed clips, hull-less recooks); a failed
-/// deletion returns false and must block the new stamp (issue #55).
+/// deletion returns false and must block the new stamp.
 /// Only schema-4 manifests are retired, only inside the stamp's
 /// directory and only regular files; a legacy manifest is left alone and
-/// an escaping or non-file entry blocks (#527).
+/// an escaping or non-file entry blocks.
 bool remove_stale_outputs(const char *outputPath,
                           const std::vector<std::string> &currentOutputs);
 /// Deletes pre-manifest orphan sidecars unaccounted for by any cookstamp manifest.
@@ -134,12 +134,10 @@ bool sweep_orphan_outputs(const char *outputPath);
 
 /// Rotates positions and normals from the declared source up axis
 /// (0 = X-up, 2 = Z-up) into engine Y-up; 1 and unknown values no-op.
-/// Proper rotations only, so triangle winding is preserved (audit H-20:
-/// the setting was hashed but never applied).
+/// Proper rotations only, so triangle winding is preserved.
 void apply_up_axis_to_primitive(PrimitiveData *data, int upAxis);
 /// Recomputes per-vertex normals as area-weighted face-normal averages
-/// over the primitive's triangles (audit H-20: the setting was hashed
-/// but never applied).
+/// over the primitive's triangles.
 void generate_normals_for_primitive(PrimitiveData *data);
 /// Uniform scale applied in place to an extracted primitive.
 void apply_scale_to_primitive(PrimitiveData *data, float scaleFactor);
@@ -177,20 +175,20 @@ bool extract_gltf_dependencies(const cgltf_data *data, const char *inputPath,
                                std::vector<DependencyDigest> *autoDepDigests);
 
 /// Thumbnail output path beside the cooked asset (.thumbnails/<name>.png).
-/// False (audit #212) when the destination would not fit the buffer — the
+/// False when the destination would not fit the buffer — the
 /// path is never silently redirected to the working directory; outThumb
 /// is cleared on failure.
 bool build_thumbnail_path(const char *outputPath, char *thumbPath,
                           std::size_t thumbPathSize) noexcept;
 /// Checksum sidecar path for a thumbnail (".../foo.png" ->
-/// false on truncation with the buffer cleared (audit #212).
+/// false on truncation with the buffer cleared.
 /// ".../foo.checksum"), shared so the cook manifest can list it.
 bool build_thumbnail_checksum_path(const char *thumbPath, char *checksumPath,
                                    std::size_t size) noexcept;
 /// Deletes a cooked asset's thumbnail and checksum sidecar (paths built by
 /// the helpers below) so a failed regeneration cannot leave a previous
-/// generation's thumbnail to be certified into the fresh cook stamp
-/// (audit #211). Absent files count as retired; false only when a present
+/// generation's thumbnail to be certified into the fresh cook stamp.
+/// Absent files count as retired; false only when a present
 /// file cannot be removed.
 bool retire_stale_thumbnail(const char *thumbPath, const char *checksumPath);
 /// Renders/copies a texture asset thumbnail; skipped when up to date.
@@ -198,7 +196,7 @@ bool generate_texture_thumbnail(const char *inputPath,
                                 const char *outputPath) noexcept;
 /// Rasterizes a mesh thumbnail; skipped only when both the source bytes
 /// and the import-settings hash match the stored sidecar, so a settings
-/// change (scale, mesh/primitive index) regenerates it (audit M-28).
+/// change (scale, mesh/primitive index) regenerates it.
 bool generate_mesh_thumbnail(const char *inputPath, const char *outputPath,
                              const PrimitiveData &data,
                              std::uint64_t importSettingsHash);

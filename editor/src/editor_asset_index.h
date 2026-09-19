@@ -1,7 +1,7 @@
 // Declares the editor's cached content-browser asset index: a one-time
 // filesystem walk with per-entry type classification, change-driven filter
 // caching, and folder navigation queries. Keeps editor_panels_assets.cpp
-// free of per-frame directory walks or O(assets) string scans (issue #157).
+// free of per-frame directory walks or O(assets) string scans.
 
 #pragma once
 

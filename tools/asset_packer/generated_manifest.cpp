@@ -1,4 +1,4 @@
-// Implements the packer's generated-source certification (#351): reads
+// Implements the packer's generated-source certification: reads
 // the directory's generated.manifest.json and compares the listed size and
 // FNV-1a 64 hash against the bytes about to be cooked.
 

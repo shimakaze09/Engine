@@ -1,7 +1,7 @@
 $input a_position, a_normal, a_texcoord0
 $output v_worldpos, v_normal, v_texcoord0
 
-// PBR forward vertex stage (bgfx port of pbr.vert, #138): the
+// PBR forward vertex stage: the
 // non-instanced path incl. foliage wind (roots pinned at local y = 0,
 // quadratic bend toward the tips). Instanced foliage rendering under
 // bgfx lands with the deferred/instancing unit, so this port carries no

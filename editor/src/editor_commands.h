@@ -44,7 +44,7 @@ struct TransformEditCommand final : EditorCommand {
 
 // ComponentEditType, ComponentEditSnapshot, capture_component_snapshot, and
 // apply_component_snapshot are generated from the persistent-component
-// registry in editor_component_registry.h (issue #156) so a new registry row
+// registry in editor_component_registry.h so a new registry row
 // automatically gains an inspector edit slot instead of requiring a matching
 // hand-written branch in every one of these switches.
 
@@ -161,7 +161,7 @@ runtime::Entity execute_asset_spawn(const char *virtualPath,
 /// Dispatches the content browser's typed double-click/Open action for
 /// `entry` through its production entry point: a mesh spawns at the
 /// editor camera's focus point (mirroring execute_primitive_spawn's
-/// placement) and becomes the selection; a scene routes through the #158
+/// placement) and becomes the selection; a scene routes through the
 /// gated open flow (request_scene_open), which may defer behind the
 /// unsaved-change prompt instead of switching immediately; every other
 /// kind only updates the browser selection since no dedicated editor
@@ -216,7 +216,7 @@ bool inspector_has_pending_edit() noexcept;
 /// Records a completed direct transform write (the viewport gizmo drag)
 /// as one undoable command from `before` to `after`; a pending inspector
 /// gesture is committed first so no command ever executes across an open
-/// gesture (#567). False when the world is unbound or the command could
+/// gesture. False when the world is unbound or the command could
 /// not be recorded, in which case nothing is applied.
 bool execute_transform_edit(runtime::Entity entity,
                             const runtime::Transform &before,
@@ -229,7 +229,7 @@ bool execute_transform_edit(runtime::Entity entity,
 /// pre-drag transform; closes on the first non-manipulating frame (or a
 /// target change) as one transform edit against the recorded target, so
 /// a start transform can never pair with whatever entity is selected at
-/// release (#567).
+/// release.
 void gizmo_track_gesture(runtime::Entity target, bool manipulating,
                          const runtime::Transform &current) noexcept;
 /// Closes an open gizmo gesture now, recording it against its own target.
@@ -241,7 +241,7 @@ void gizmo_abandon_gesture() noexcept;
 bool gizmo_has_gesture() noexcept;
 
 /// Test hook: the next `count` command allocations fail as if out of
-/// memory, so the refuse and unrecorded-edit paths are exercisable (#567).
+/// memory, so the refuse and unrecorded-edit paths are exercisable.
 void editor_commands_inject_allocation_failures(std::size_t count) noexcept;
 
 /// Returns the default-valued snapshot used when adding a component.

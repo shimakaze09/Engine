@@ -1,6 +1,6 @@
 $input v_texcoord0
 
-// Depth-seed pass (#138): copies the G-buffer depth into the bound
+// Depth-seed pass: copies the G-buffer depth into the bound
 // target's depth attachment through a fullscreen draw. Backends without
 // a depth blit (bgfx's Vulkan and WebGL paths report
 // caps.depthBlit=false) seed the scene target's depth this way before

@@ -1,6 +1,6 @@
 $input v_texcoord0
 
-// SSAO hemisphere-kernel stage (bgfx port of ssao.frag, #138): the
+// SSAO hemisphere-kernel stage: the
 // kernel arrives as the flat vec4 array shared with GLSL (xyz used);
 // sampler stages baked to the flush's unit assignment (depth 0,
 // normal 1, noise 2). Scalar GL uniforms become vec4 read through .x.

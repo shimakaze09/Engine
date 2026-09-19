@@ -1,5 +1,5 @@
 // Implements the editor Console panel: log view, filters, and the
-// non-spamming status indicator shown while the panel is closed (#155).
+// non-spamming status indicator shown while the panel is closed.
 
 #include "editor_panels_console.h"
 
@@ -52,7 +52,7 @@ ImVec4 level_color(core::LogLevel level) noexcept {
 /// Sets `editor_session().selectedAssetPath` to `path` so the Assets panel
 /// highlights and inspects it — the "navigate to source" action for script
 /// and asset diagnostics (there is no OS text-editor integration yet; this
-/// is the documented fallback per issue #155's scope).
+/// is the documented fallback scope).
 void select_asset_in_browser(const char *path) noexcept {
   std::snprintf(editor_session().selectedAssetPath,
                sizeof(editor_session().selectedAssetPath), "%s", path);

@@ -47,7 +47,7 @@ struct InputAction final {
   bool occupied = false;
   /// True once the user rebound the action or a loaded bindings document
   /// restored it: a script registering the same name afterwards supplies
-  /// a default and leaves these bindings alone (#538).
+  /// a default and leaves these bindings alone.
   bool persisted = false;
 };
 
@@ -104,7 +104,7 @@ bool initialize_input_mapper() noexcept;
 void shutdown_input_mapper() noexcept;
 // Drops every action/axis callback registration (script-owned userData)
 // while keeping the persisted key mappings; part of the run-scoped input
-// reset (#168, see core::clear_gameplay_bindings).
+// reset.
 void clear_action_callbacks() noexcept;
 
 // ---------------------------------------------------------------------------

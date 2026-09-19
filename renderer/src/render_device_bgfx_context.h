@@ -1,4 +1,4 @@
-// Private shared state of the bgfx render device backend (#138): the
+// Private shared state of the bgfx render device backend: the
 // resource records, generational slot tables, and device context used by
 // the backend's translation units (render_device_bgfx.cpp for resources,
 // views, and draws; render_device_bgfx_programs.cpp for cooked program
@@ -26,7 +26,7 @@ inline constexpr std::size_t kMaxDeviceTargets = 256U;
 // Matches BGFX_CONFIG_MAX_TEXTURE_SAMPLERS=16 set by the build: bgfx's
 // D3D11 backend hands that count straight to *SetSamplers (hard 16-slot
 // API), so the config must never exceed 16 — and the engine unit map
-// tops out at register 15 since the #301 shadow arrays.
+// tops out at register 15.
 inline constexpr std::size_t kMaxTextureSlots = 16U;
 // Sized for the largest engine program: the PBR_FULL forward variant
 // carries ~50 material/light/fog uniforms plus 15 shadow/IBL samplers
@@ -51,8 +51,8 @@ struct BgfxBufferRecord final {
   bgfx::DynamicIndexBufferHandle index = BGFX_INVALID_HANDLE;
   // Stream-access vertex data never becomes a bgfx dynamic buffer: bgfx
   // applies dynamic-buffer updates once per frame before any submit, so
-  // several per-batch updates to one handle would all draw the last one
-  // (#523). The CPU copy in `staging` is instead handed to bgfx as
+  // several per-batch updates to one handle would all draw the last one.
+  // The CPU copy in `staging` is instead handed to bgfx as
   // transient vertex or instance data at each draw, using the layout
   // recorded at attachment.
   bgfx::VertexLayout streamLayout{};
@@ -169,7 +169,7 @@ struct BgfxDeviceContext final {
   std::uint16_t currentView = 0U;
   std::uint16_t viewsUsed = 0U;
   std::uint32_t boundTextures[kMaxTextureSlots] = {};
-  // Swapchain reset tracking (#138 platform bring-up): the frame hook
+  // Swapchain reset tracking: the frame hook
   // re-resets bgfx when the drawable size or vsync intent changes.
   std::int32_t backBufferWidth = 0;
   std::int32_t backBufferHeight = 0;
@@ -177,7 +177,7 @@ struct BgfxDeviceContext final {
   // r_vsync is polled every present; the handle keeps that off the
   // by-name path.
   core::CVarRef vsyncCvar{"r_vsync"};
-  // Backend-owned fullscreen triangle (#138 forward path): bgfx submits
+  // Backend-owned fullscreen triangle: bgfx submits
   // require a vertex stream, so attribute-less engine draws bind this
   // three-vertex position stream instead (fullscreen.vs.sc reads it).
   bgfx::DynamicVertexBufferHandle fullscreenVertex = BGFX_INVALID_HANDLE;

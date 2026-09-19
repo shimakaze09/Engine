@@ -1,4 +1,4 @@
-// Declares multi-entity Inspector support (issue #159): which persistent
+// Declares multi-entity Inspector support: which persistent
 // components the current selection shares, per-field mixed-value detection,
 // and the single undoable command that applies one field's new value to
 // every selected entity at once without disturbing any other (possibly
@@ -62,7 +62,7 @@ bool apply_multi_field_edit(ComponentEditType type, std::size_t fieldOffset,
                             std::size_t fieldSize,
                             const ComponentEditSnapshot &fieldSource) noexcept;
 
-/// Stages one frame of a multi-selection field drag (#548). The first call
+/// Stages one frame of a multi-selection field drag. The first call
 /// of a gesture captures every selected entity's component as the undo
 /// endpoint; every call writes the field to every selected entity at once
 /// (atomically, like apply_multi_field_edit), so the drag is live without
@@ -94,11 +94,11 @@ bool apply_multi_component_remove(ComponentEditType type) noexcept;
 bool multi_edit_section_listed(ComponentEditType type) noexcept;
 
 /// True when `type` is explicitly deferred from per-field multi-edit (the
-/// custom-drawer components tracked by issue #223). Every registry edit
+/// custom-drawer components tracked). Every registry edit
 /// type is exactly one of listed or deferred, enforced at compile time.
 bool multi_edit_type_deferred(ComponentEditType type) noexcept;
 
-/// Draws the Inspector's multi-selection body (issue #159): one section per
+/// Draws the Inspector's multi-selection body: one section per
 /// component common to every selected entity, each reflected field shown
 /// with a "(mixed)" suffix when the selection disagrees on its value, plus
 /// the shared Delete-selected and identity summary. No-ops when the

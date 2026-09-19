@@ -1,5 +1,5 @@
 // Declares the packer's check of generated sources against the
-// generated.manifest.json their generator publishes last (#351): the
+// generated.manifest.json their generator publishes last: the
 // manifest is the consumer commit boundary, so a source whose bytes
 // disagree with it belongs to an interrupted publish and is never cooked.
 

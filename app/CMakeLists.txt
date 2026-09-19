@@ -17,7 +17,7 @@ target_link_libraries(engine_editor_app
     $<LINK_LIBRARY:WHOLE_ARCHIVE,engine_editor>
 )
 
-# Web (#138): ship as an .html page from the share shell with the synced
+# Web: ship as an .html page from the share shell with the synced
 # asset tree preloaded into the wasm FS. Cooked bgfx shader binaries
 # come from a host cook: shaderc cannot build under Emscripten, so
 # ENGINE_WEB_COOKED_DIR names a native build's cooked output

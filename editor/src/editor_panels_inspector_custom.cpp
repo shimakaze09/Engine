@@ -338,7 +338,7 @@ bool contains_ci_local(const char *haystack, const char *needle) noexcept {
 
 /// One Add Component menu candidate, gathered from the persistent-component
 /// registry so a new registry row appears here without a matching manual
-/// branch (issue #156).
+/// branch.
 struct AddMenuEntry final {
   ComponentEditType type = ComponentEditType::Transform;
   const char *displayName = nullptr;

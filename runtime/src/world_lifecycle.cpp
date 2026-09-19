@@ -373,8 +373,8 @@ void World::remove_all_components(Entity entity) noexcept {
   physics::remove_joints_for_entity(m_physicsContext, entity);
   unlink_transform_node(entity.index);
   // Every set is removed via the storage table so a new component cannot be
-  // stranded on a dead slot and inherited by the index's next entity
-  // (#166 W2 drift rank 1); removal order across sets is immaterial.
+  // stranded on a dead slot and inherited by the index's next entity;
+  // removal order across sets is immaterial.
   static_cast<void>(m_transforms.remove(entity));
 #define ENGINE_WUS_REMOVE(Type, member)                                        \
   static_cast<void>((member).remove(entity));
@@ -399,7 +399,7 @@ bool World::destroy_single_entity(Entity entity) noexcept {
   // The entity leaves the alive arrays before its persistent id leaves the
   // index: erase_persistent_index may rebuild the index from those arrays
   // once tombstones dominate, and a rebuild that still saw this entity as
-  // alive re-inserted the id it was erasing (#516). The stale mapping then
+  // alive re-inserted the id it was erasing. The stale mapping then
   // blocked re-creating the id and let a surviving child's parentId resolve
   // to whichever entity next took this index.
   const PersistentId persistentId = m_entityPersistentIds[index];
@@ -444,7 +444,7 @@ bool World::queue_deferred_destroy(Entity entity) noexcept {
 }
 
 bool World::queue_single_deferred_destroy(Entity entity) noexcept {
-  // Per-index membership dedupes in O(1) (#517); a different generation
+  // Per-index membership dedupes in O(1); a different generation
   // on the same index is a different entity and is queued as well.
   if (m_pendingDestroyQueued[entity.index] &&
       (m_pendingDestroyQueuedGeneration[entity.index] == entity.generation)) {
@@ -523,7 +523,7 @@ bool World::recycle_entity(Entity entity, Entity *outRecycled) noexcept {
 
   // The slot stays alive but under a new generation, so the handle the
   // pool hands out next is distinct from every handle held before this
-  // recycle and those stale handles fail is_valid_entity (#569). Same
+  // recycle and those stale handles fail is_valid_entity. Same
   // wrap rule as destroy: zero is the invalid encoding.
   const std::uint32_t index = entity.index;
   ++m_entityGenerations[index];

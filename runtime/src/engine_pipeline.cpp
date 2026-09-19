@@ -109,14 +109,14 @@ InputEventRoute process_editor_input_event(const EditorBridge *bridge,
   return InputEventRoute::Gameplay;
 }
 
-/// Declared scene-transition reset order (audit H-16, extended by #198):
+/// Declared scene-transition reset order:
 /// (0) on_end_play — load_scene/reset_world call this back once the
 /// transition is guaranteed to commit but before it destructively touches
 /// the outgoing world, so every outgoing scripted entity still alive and
 /// callable receives on_end_play, matching editor Stop and pre-existing
 /// destroy-driven EndPlay; (1) commit the replacement world — staged
 /// load_scene or reset_world, which already resets the world-owned
-/// managers in the H-18 order; (2) clear the outgoing scene's coroutines,
+/// managers in their declared order; (2) clear the outgoing scene's coroutines,
 /// timer callback refs, entity pools, and per-entity script modules so no
 /// stale entity identity or Lua reference can act on the new world
 /// (globals persist by contract as the cross-scene handoff channel;
@@ -194,7 +194,7 @@ static_assert(kMaxUpdateStepsPerFrame <= physics::kMaxCollisionFrameSteps,
               "accumulation alone never drops callbacks (#103)");
 // One frame assembles every catch-up step's chunk jobs into one table per
 // kind and never resets the cursor between steps, so each table holds
-// kMaxUpdateStepsPerFrame steps of a full world (#518). A fixed 1024
+// kMaxUpdateStepsPerFrame steps of a full world. A fixed 1024
 // overflowed on the fifth step at 65,536 transforms and turned one long
 // frame on a large scene into a fatal run exit.
 constexpr std::size_t kChunksPerStep =
@@ -259,7 +259,7 @@ struct FrameContext final {
   std::array<WorldPhaseJobData, kMaxPhaseJobs> phaseJobData{};
   ResolveCollisionsJobData resolveCollisionsJobData{};
   std::atomic<bool> frameGraphFailed = false;
-  /// Draws render prep could not fit this frame (#519); read after the
+  /// Draws render prep could not fit this frame; read after the
   /// graph drains, reported once per run and published in EngineStats.
   std::atomic<std::uint32_t> droppedDrawCommands = 0U;
 };
@@ -294,7 +294,7 @@ renderer::CameraState interpolate_camera_state(
   // The ortho half-height lerps like fov, its perspective analogue, only
   // when the kind is stable across the pair; the projection kind itself
   // snaps with `out = current` (near/far precedent above) — there is no
-  // meaningful blend between perspective and orthographic matrices (#221).
+  // meaningful blend between perspective and orthographic matrices.
   if (previous.projection == current.projection) {
     out.orthographicSize =
         previous.orthographicSize +
@@ -450,15 +450,15 @@ bool process_input_events_with_editor() noexcept {
     const runtime::InputEventRoute route =
         runtime::process_editor_input_event(bridge, &event);
     if (route == runtime::InputEventRoute::QuitRequested) {
-      // Issue #158: the editor gets a chance to defer the quit behind its
-      // own unsaved-change confirm flow; a null hook or a bound-but-clean
-      // document both proceed immediately, matching the pre-#158 behavior.
+      // The editor gets a chance to defer the quit behind its own
+      // unsaved-change confirm flow; a null hook or a bound-but-clean
+      // document both proceed immediately.
       const bool proceedNow = (bridge == nullptr) ||
                               (bridge->handle_quit_request == nullptr) ||
                               bridge->handle_quit_request();
       if (proceedNow) {
-        // #241 (owner decision 2026-08-19): a quit that ends a live play
-        // session dispatches on_end_play exactly like editor Stop and
+        // A quit that ends a live play session dispatches on_end_play
+        // exactly like editor Stop and
         // scene transitions. The editor's quit hook has already routed
         // through the Stop flow (play state reads Stopped here, and
         // stage_play_transitions dispatches later this frame); only a
@@ -466,7 +466,7 @@ bool process_input_events_with_editor() noexcept {
         // stop routing — takes this direct dispatch.
         // A still-playing session ends in stage_play_transitions, as a
         // Stop: the end hooks run there and no tick, physics step or
-        // collision callback of the session follows them (#534).
+        // collision callback of the session follows them.
         quitRequested = true;
         core::request_platform_quit();
       }
@@ -527,7 +527,7 @@ struct EnginePipeline::Impl final {
   runtime::GameBindingState gameBindingState{};
   std::unique_ptr<runtime::World> world;
   std::unique_ptr<renderer::CommandBufferBuilder> commandBuffer;
-  /// Camera-culled draws the shadow and capture passes still need (#524).
+  /// Camera-culled draws the shadow and capture passes still need.
   std::unique_ptr<renderer::CommandBufferBuilder> auxiliaryCommandBuffer;
   runtime::RenderPrepAuxiliaryInputs frameAuxiliaryInputs{};
   std::unique_ptr<renderer::GpuMeshRegistry> meshRegistry;
@@ -580,13 +580,13 @@ struct EnginePipeline::Impl final {
   // mutation epoch as the draw list; stage_render used to collect them
   // after the post-frame flush, so one submission carried draws from
   // before the flush and lights from after it, and a draw could name an
-  // index the flush had already recycled (#569).
+  // index the flush had already recycled.
   renderer::SceneLightData frameSceneLights{};
   std::array<renderer::SceneCaptureRequest, renderer::kMaxSceneCaptures>
       frameCaptureRequests{};
   std::size_t frameCaptureRequestCount = 0U;
   bool frameCollectionValid = false;
-  // Distinguishes fatal loop exits from graceful stops for engine::run (#96).
+  // Distinguishes fatal loop exits from graceful stops for engine::run.
   bool fatalError = false;
   LoopPlayState previousPlayState = LoopPlayState::Playing;
   std::size_t previousAliveCount = 0U;
@@ -623,7 +623,7 @@ struct EnginePipeline::Impl final {
   std::uint32_t fpsWindowFrames = 0U;
   float smoothedFps = 0.0F;
   // Process memory is sampled on the FPS window, not per frame: reading it
-  // opens /proc on Linux (#528).
+  // opens /proc on Linux.
   float memoryUsedMbSample = -1.0F;
   // Starts due so the first editor frame polls, then one poll per interval.
   double hotReloadDueSeconds = kHotReloadPollIntervalSeconds;
@@ -676,7 +676,7 @@ struct EnginePipeline::Impl final {
   /// evaluate_cameras_for_step as a phase-job hook; context is the Impl.
   static void camera_step_hook(void *context) noexcept;
   bool stage_render_prep_graph() noexcept;
-  // True once when dbg_fail_frame_stage names this stage (test seam, #120).
+  // True once when dbg_fail_frame_stage names this stage.
   bool consume_injected_stage_failure(const char *stageName) noexcept;
   void stage_post_frame() noexcept;
   void stage_measure_frame() noexcept;
@@ -760,7 +760,7 @@ bool EnginePipeline::Impl::initialize(std::uint32_t maxFrameCount) noexcept {
   runtime::set_editor_asset_service(&assetDatabaseService);
 
   runtime::bind_scripting_runtime(world.get(), serviceLocator);
-  // The run's game-binding state is pipeline-owned (#168 M3); the binding
+  // The run's game-binding state is pipeline-owned; the binding
   // survives editor Stop's VM recycle because this Impl outlives it.
   scripting::bind_game_state(&gameBindingState);
   if ((bridge != nullptr) && (bridge->set_world != nullptr)) {
@@ -817,7 +817,7 @@ bool EnginePipeline::Impl::initialize(std::uint32_t maxFrameCount) noexcept {
   previousAliveCount = world->alive_entity_count();
   core::reset_engine_stats();
 
-  // Player mode (#138): boot the configured startup scene through the
+  // Player mode: boot the configured startup scene through the
   // deferred transition engine.load_scene uses — a failed load logs and
   // keeps the bootstrap scene rather than corrupting the run.
   if (active_config().playerMode) {
@@ -838,7 +838,7 @@ bool EnginePipeline::Impl::execute_frame() noexcept {
   core::profiler_begin_frame();
   // Published before any stage runs so every log_message call this frame
   // (including early stages ahead of stage_scripting) tags itself with the
-  // right index for the editor Console's frame-context column (issue #155).
+  // right index for the editor Console's frame-context column.
   core::log_set_frame_index(frameIndex);
   // The Lua-visible frame index is published at the same point, for the same
   // reason: begin-play and start callbacks dispatch in stage_play_transitions,
@@ -914,7 +914,7 @@ void EnginePipeline::Impl::teardown() noexcept {
       bridge->set_world(nullptr);
     }
 
-    // Run-scoped residue must not leak into a later pipeline run (#168): the
+    // Run-scoped residue must not leak into a later pipeline run: the
     // scripting run state and the animation controller registry are reset
     // while the VM and bindings are still alive, before anything unbinds,
     // then the engine-tier subsystems drop their run-scoped content (script
@@ -957,7 +957,7 @@ void EnginePipeline::Impl::stage_input() noexcept {
 void EnginePipeline::Impl::stage_play_transitions() noexcept {
   playState = query_editor_play_state();
   if (quitRequested && (playState != LoopPlayState::Stopped)) {
-    // Quit ends a live session exactly like Stop (#241): on_end_play
+    // Quit ends a live session exactly like Stop: on_end_play
     // runs once, here, and the frame continues as Stopped, so nothing of
     // the session runs after its end hooks. The scripting VM is not
     // recycled the way Stop does; teardown owns it from here.
@@ -1065,7 +1065,7 @@ void EnginePipeline::Impl::stage_timing() noexcept {
 // ---------------------------------------------------------------------------
 // Stage: scripting
 //
-// Cadence contract (audit M-01). Two classes of system exist in this frame:
+// Cadence contract. Two classes of system exist in this frame:
 //   * per-fixed-step: transform propagation, physics, collision resolve,
 //     animation, spring arms and camera evaluation each run exactly
 //     updateStepCount times with kFixedDeltaSeconds apiece, so their
@@ -1090,7 +1090,7 @@ void EnginePipeline::Impl::stage_timing() noexcept {
 void EnginePipeline::Impl::stage_scripting() noexcept {
   // The debugger transport is serviced every frame whatever the play
   // state, so a client can attach and set breakpoints before Play or
-  // disconnect while paused (#540).
+  // disconnect while paused.
   if (scripting::dap_is_running()) {
     scripting::dap_poll();
   }
@@ -1189,7 +1189,7 @@ void EnginePipeline::Impl::stage_animation() noexcept {
 }
 
 // ---------------------------------------------------------------------------
-// Fault-injection seam (issue #120): dbg_fail_frame_stage forces the named
+// Fault-injection seam: dbg_fail_frame_stage forces the named
 // graph stage to report a fatal failure through its production return path.
 // The cvar self-clears so the injected failure fires exactly once per set.
 // ---------------------------------------------------------------------------
@@ -1436,7 +1436,7 @@ bool EnginePipeline::Impl::stage_simulation_graph() noexcept {
     return false;
   }
 
-  // end_frame_graph needs the whole graph drained, not one handle (#109).
+  // end_frame_graph needs the whole graph drained, not one handle.
   core::wait_all();
   const bool stepJobsFailed =
       frameContext->frameGraphFailed.load(std::memory_order_acquire);
@@ -1586,14 +1586,14 @@ bool EnginePipeline::Impl::stage_render_prep_graph() noexcept {
         (vpH > 0) ? (static_cast<float>(vpW) / static_cast<float>(vpH)) : 1.0F;
     const renderer::CameraState cam = renderer::get_active_camera();
     // Shares the flush path's projection builder so CPU culling can never
-    // disagree with the GPU frustum (#221).
+    // disagree with the GPU frustum.
     const math::Mat4 vpMatrix =
         math::mul(renderer::camera_projection_matrix(cam, vpAspect),
                   math::look_at(cam.position, cam.target, cam.up));
 
     // Lights and captures are collected now, in the same mutation epoch
-    // the draw list is built in (#569), so render prep can keep the
-    // camera-culled draws the shadow and capture passes need (#524).
+    // the draw list is built in, so render prep can keep the
+    // camera-culled draws the shadow and capture passes need.
     collect_frame_scene_data();
     build_auxiliary_inputs();
 
@@ -1628,7 +1628,7 @@ bool EnginePipeline::Impl::stage_render_prep_graph() noexcept {
     return false;
   }
 
-  // end_frame_graph needs the whole graph drained, not one handle (#109).
+  // end_frame_graph needs the whole graph drained, not one handle.
   core::wait_all();
   lastDroppedDrawCommands =
       frameContext->droppedDrawCommands.load(std::memory_order_acquire);
@@ -1663,7 +1663,7 @@ bool EnginePipeline::Impl::stage_render_prep_graph() noexcept {
 }
 
 /// Snapshots the lights and capture requests the draw list is built
-/// against, before the post-frame flush can change the world (#569).
+/// against, before the post-frame flush can change the world.
 void EnginePipeline::Impl::collect_frame_scene_data() noexcept {
   frameSceneLights = collect_scene_lights(*world);
   frameCaptureRequestCount = collect_scene_captures(
@@ -1672,7 +1672,7 @@ void EnginePipeline::Impl::collect_frame_scene_data() noexcept {
 }
 
 /// Derives what render prep must keep beyond the camera frustum from the
-/// collected lights and captures (#524).
+/// collected lights and captures.
 void EnginePipeline::Impl::build_auxiliary_inputs() noexcept {
   runtime::RenderPrepAuxiliaryInputs &inputs = frameAuxiliaryInputs;
   inputs = runtime::RenderPrepAuxiliaryInputs{};
@@ -1772,7 +1772,7 @@ void EnginePipeline::Impl::stage_measure_frame() noexcept {
 // ---------------------------------------------------------------------------
 
 void EnginePipeline::Impl::stage_render() noexcept {
-  // Device reach (#138): the effective scene render scale is the user's
+  // Device reach: the effective scene render scale is the user's
   // base scale times the dynamic controller's factor; the controller
   // steps against the presented frame budget (r_max_fps, else 60 Hz).
   {

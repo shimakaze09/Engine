@@ -19,7 +19,7 @@ namespace engine::content {
 /// (working-directory relative). Schema 4 records every DEP_HASH and
 /// OUTPUT path relative to the stamp's own directory with `/` separators,
 /// so a stamp certifies the same files from any working directory, and
-/// an OUTPUT path must stay inside that directory (#527). The one
+/// an OUTPUT path must stay inside that directory. The one
 /// exception is a DEP_HASH on another volume than the stamp, which has
 /// no relative form — Windows drives share no root — and is recorded by
 /// its normalized absolute path: still the same file from any working
@@ -41,7 +41,7 @@ inline constexpr std::uint32_t kCookToolVersion = 4U;
 /// Longest stamp line the writer emits and either reader accepts,
 /// terminator included. A path that would not fit is refused at write
 /// time and a line that does not fit at read time is a corrupt stamp;
-/// neither side ever truncates a path (#527).
+/// neither side ever truncates a path.
 inline constexpr std::size_t kMaxCookStampLineBytes = 1024U;
 
 /// True when a schema-4 stamp path can be joined under the stamp's

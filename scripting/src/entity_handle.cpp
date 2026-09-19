@@ -12,7 +12,7 @@ namespace {
 // Handle layout inside a positive 63-bit Lua integer: entity index in the
 // low bits, generation above it, and the bound world's content epoch on
 // top so handles retained across a whole-world replacement are rejected
-// even when index and generation collide (audit C-03).
+// even when index and generation collide.
 constexpr unsigned kLuaEntityIndexBits = 20U;
 constexpr unsigned kLuaEntityGenerationBits = 26U;
 constexpr unsigned kLuaEntityEpochBits = 17U;

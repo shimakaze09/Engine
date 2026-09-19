@@ -1,4 +1,4 @@
-// Declares the null render device backend (#196): a RenderDevice function
+// Declares the null render device backend: a RenderDevice function
 // table whose entries succeed without any GL so pipeline initialization
 // and the frame stages run on headless CI lanes. Test/CI-only, selected
 // via the r_null_device cvar in initialize_render_device.

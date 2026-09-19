@@ -1,4 +1,4 @@
-// Declares the Assets panel's import-settings sidecar cache (#528): the
+// Declares the Assets panel's import-settings sidecar cache: the
 // selected asset's .meta.json is read and parsed once per selection, or
 // after the panel rewrites it, instead of once per drawn frame.
 

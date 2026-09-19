@@ -1112,7 +1112,7 @@ bool JsonParser::get_array_element(const JsonValue &array, std::size_t index,
         // nested walks are over small inner arrays, and evicting by
         // recency would let a stream of them push out the enclosing
         // array's memo — the outer entity loop went quadratic again that
-        // way (#515).
+        // way.
         memo = &m_arrayMemos[0];
         for (ArrayMemo &candidate : m_arrayMemos) {
           if (candidate.begin == nullptr) {

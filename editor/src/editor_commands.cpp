@@ -84,12 +84,12 @@ struct PendingInspectorEdit final {
 /// Process-wide pending gesture behind the inspector_*_edit functions.
 static PendingInspectorEdit g_pendingInspectorEdit{};
 
-/// Outstanding injected allocation failures (test hook, #567).
+/// Outstanding injected allocation failures.
 static std::size_t g_injectedAllocationFailures = 0U;
 
 /// Every command allocation funnels through here so the out-of-memory
 /// paths below are reachable from a test; a failed allocation is never a
-/// license to mutate the world outside the history (#567).
+/// license to mutate the world outside the history.
 template <typename Command> static Command *allocate_command() noexcept {
   if (g_injectedAllocationFailures > 0U) {
     --g_injectedAllocationFailures;
@@ -201,7 +201,7 @@ void inspector_commit_pending_edit() noexcept {
   if (cmd == nullptr) {
     // The gesture already reached the world frame by frame; without a
     // command the history cannot account for it, so the document tracks
-    // it as dirty by hand and says so (#567).
+    // it as dirty by hand and says so.
     editor_session().document.unrecordedEdit = true;
     core::log_message(core::LogLevel::Error, "editor",
                       "inspector edit could not be recorded for undo (out "
@@ -405,7 +405,7 @@ bool EntityCreateCommand::execute() noexcept {
     make_default_entity_name(entity.index, &name);
   }
   // Any failed insertion rolls the whole creation back so the history
-  // never records a partially constructed entity (issue #117).
+  // never records a partially constructed entity.
   bool ok = world->add_name_component(entity, name);
   if (ok && hasMesh) {
     ok = world->add_mesh_component(entity, mesh);
@@ -444,8 +444,8 @@ bool EntityCreateCommand::undo() noexcept {
 /// capacity). Builds a single parentId -> children index up front (one
 /// world.for_each_alive pass) instead of rescanning every alive entity
 /// per BFS member, so a subtree of S members in a world of N entities
-/// costs O(N log N + S log N) rather than the former O(S * N) (issue
-/// #86 L-01); the per-parent child order is unchanged (ascending entity
+/// costs O(N log N + S log N) rather than O(S * N); the per-parent child
+/// order is unchanged (ascending entity
 /// index), so member order is identical to the prior full-scan walk.
 static std::size_t collect_subtree_members(runtime::World &world,
                                            runtime::Entity root,
@@ -524,7 +524,7 @@ bool EntityDeleteCommand::undo() noexcept {
   // All-or-nothing restore: `restored` tracks how many members exist so a
   // mid-subtree failure (entity or component capacity, stale ids) can
   // destroy exactly what this undo created and report failure with the
-  // world back in its pre-undo state (issue #117).
+  // world back in its pre-undo state.
   std::size_t restored = 0U;
   bool ok = true;
   for (std::size_t i = 0U; ok && (i < recordCount); ++i) {
@@ -604,8 +604,8 @@ static void make_asset_spawn_name(const char *virtualPath,
   const int written =
       std::snprintf(outName->name, sizeof(outName->name), "%s", stem);
   // A long asset filename still spawns (naming is cosmetic, not fatal) but
-  // must not clip into NameComponent::kMaxNameLength silently (issue #86
-  // L-07): surface it once so the author can see why the entity name was
+  // must not clip into NameComponent::kMaxNameLength silently: surface
+  // it once so the author can see why the entity name was
   // shortened instead of it just quietly not matching the file.
   if ((written < 0) || (static_cast<std::size_t>(written) >= sizeof(outName->name))) {
     char message[256] = {};
@@ -672,7 +672,7 @@ bool execute_asset_open(const AssetIndexEntry &entry) noexcept {
   }
   case AssetOpenAction::OpenScene:
     // Gated: proceeds immediately when the current document is clean, or
-    // arms the unsaved-change prompt and defers (#158's contract).
+    // arms the unsaved-change prompt and defers.
     request_scene_open(entry.osPath);
     return true;
   case AssetOpenAction::EditMaterial:
@@ -770,7 +770,7 @@ runtime::Entity execute_primitive_spawn(EditorPrimitive primitive) noexcept {
   command->colliderComponent.localPosition = desc.colliderLocalPosition;
   // The authored fallback above stands when the primitive names no hull;
   // otherwise the runtime sizes and tags the collider from the one hull
-  // provenance every install path rebuilds from (issue #310).
+  // provenance every install path rebuilds from.
   static_cast<void>(runtime::apply_primitive_hull(
       desc.hullSource, &command->colliderComponent));
   if (!editor_session().commandHistory.execute(command)) {

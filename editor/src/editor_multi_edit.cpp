@@ -307,7 +307,7 @@ void multi_edit_commit_gesture() noexcept {
   if (cmd == nullptr) {
     // The drag already reached the world frame by frame; without a
     // command the history cannot account for it, so the document tracks
-    // it as dirty by hand and says so (#567).
+    // it as dirty by hand and says so.
     core::log_message(core::LogLevel::Error, "editor",
                       "multi-edit gesture could not be recorded: out of "
                       "memory; the edit stays applied but is not undoable");
@@ -441,7 +441,7 @@ namespace {
 /// same set editor_panels_inspector.cpp routes through
 /// draw_reflected_component_fields for a single entity); components with a
 /// custom drawer are out of scope for per-field multi-edit and are declared
-/// in kMultiEditDeferredTypes below (issue #223), with a compile-time guard
+/// in kMultiEditDeferredTypes below, with a compile-time guard
 /// proving the two lists cover the registry exactly.
 struct MultiSectionDesc final {
   ComponentEditType type;
@@ -464,8 +464,8 @@ constexpr MultiSectionDesc kMultiSections[] = {
     {ComponentEditType::Camera, kCameraTypeName, "Camera", true},
 };
 
-// Custom-drawer components explicitly deferred from per-field multi-edit
-// (issue #223's scope); declared once so the guard below can prove every
+// Custom-drawer components explicitly deferred from per-field multi-edit;
+// declared once so the guard below can prove every
 // registry-generated ComponentEditType is either sectioned or deferred.
 constexpr ComponentEditType kMultiEditDeferredTypes[] = {
     ComponentEditType::Name,         ComponentEditType::Mesh,
@@ -493,7 +493,7 @@ constexpr bool multi_deferred_row_exists(ComponentEditType type) noexcept {
 
 /// Every registry-generated edit type must appear in exactly one of the
 /// two lists, so a new persistent component cannot silently be omitted
-/// from the multi Inspector the way Camera was (issue #225).
+/// from the multi Inspector the way Camera was.
 constexpr bool multi_edit_inventory_complete() noexcept {
   for (std::size_t t = 0U; t < kComponentEditTypeCount; ++t) {
     const auto type = static_cast<ComponentEditType>(t);

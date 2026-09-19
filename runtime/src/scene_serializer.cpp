@@ -50,7 +50,7 @@ bool log_scene_error(const char *message) noexcept {
 }
 
 
-// ---- Registry-driven component codec (#166 W5) ----------------------------
+// ---- Registry-driven component codec ----------------------------
 // Membership and row order for both serializer directions expand from
 // ENGINE_PERSISTENT_COMPONENT_TABLE; only each type's wire shape lives
 // below. A new registry row without a descriptor/decode/encode path fails
@@ -58,7 +58,7 @@ bool log_scene_error(const char *message) noexcept {
 // scene format.
 
 /// Scene key for a row: the registry key, except NameComponent's
-/// pre-registry bare "name" field (kept byte-stable; migration is #252).
+/// pre-registry bare "name" field.
 template <typename T>
 const char *scene_component_key(const char *registryKey) noexcept {
   if constexpr (std::is_same_v<T, NameComponent>) {
@@ -288,7 +288,7 @@ bool copy_world_contents(const World &sourceWorld,
   });
 
   // Timers deliberately do not ride the commit copy: they are runtime-only
-  // state a freshly staged world never carries (issue #209).
+  // state a freshly staged world never carries.
 
   // World gravity rides the commit copy like the components do.
   if (success) {
@@ -313,9 +313,8 @@ bool serialize_scene_to_writer(const World &world,
     return false;
   }
 
-  // A save must not claim success while dropping live authored state
-  // (audit #208, supersedes H-01's warn-then-succeed): refuse before the
-  // destination file or buffer is touched.
+  // A save must not claim success while dropping live authored state:
+  // refuse before the destination file or buffer is touched.
   const SceneSaveBlockers blockers = collect_scene_save_blockers(world);
   if ((blockers.customHullPayloads > 0U) ||
       (blockers.heightfieldPayloads > 0U) || (blockers.activeJoints > 0U)) {
@@ -389,7 +388,7 @@ bool serialize_scene_to_writer(const World &world,
   writer.end_array();
 
   // Timers are runtime-only, per-scene state and are deliberately not
-  // serialized (issue #209): a callback has no stable identity the format
+  // serialized: a callback has no stable identity the format
   // could restore, and the canonical load path clears the scripting timer
   // registry anyway. Scripts re-arm their timers in on_begin_play.
   writer.end_object();
@@ -405,7 +404,7 @@ bool serialize_scene_to_writer(const World &world,
 
 } // namespace
 
-/// Collects the live state save_scene would refuse to drop (#208). Hull
+/// Collects the live state save_scene would refuse to drop. Hull
 /// payloads with builder provenance rebuild from the serialized descriptor
 /// on every install path, so only provenance-free payloads count.
 SceneSaveBlockers collect_scene_save_blockers(const World &world) noexcept {
@@ -446,14 +445,14 @@ SceneSaveBlockers collect_scene_save_blockers(const World &world) noexcept {
 }
 
 /// Resets this object back to its reusable empty state for world.
-/// Declared reset order (audit H-18, extended by #198): beforeTeardown
-/// first — while the outgoing entities and their script modules are still
+/// Declared reset order: beforeTeardown first — while the outgoing
+/// entities and their script modules are still
 /// alive, this is where process_pending_scene_op dispatches on_end_play —
 /// then entities, the phase-independent destructive teardown, so component
 /// removal releases its physics/camera bookkeeping while those managers
 /// still exist, then the scene-authored physics state (gravity and joints,
 /// which load_scene replaces through the commit copy and a reset must
-/// match, #530), timers, cameras, game mode, the content epoch, and last
+/// match), timers, cameras, game mode, the content epoch, and last
 /// the animation controller registry, which must only reset once no
 /// component can still hold a controllerSlot into it.
 void reset_world(World &world, SceneTeardownHook beforeTeardown) noexcept {
@@ -543,7 +542,7 @@ bool load_scene(World &world, const char *path,
   return load_scene(world, fileBuffer.get(), fileSize, beforeTeardown);
 }
 
-/// Loads the requested resource for scene. Declared reset order (#198):
+/// Loads the requested resource for scene. Declared reset order:
 /// every validation and staging step below runs on a scratch World and
 /// never touches the caller's world, so a failure returns false with the
 /// outgoing scene completely untouched and beforeTeardown never called;
@@ -617,7 +616,7 @@ bool load_scene(World &world, const char *buffer, std::size_t size,
     set_gravity(*stagedWorld, gravity.x, gravity.y, gravity.z);
   }
 
-  // Legacy "timers" blocks (scenes saved before issue #209) are ignored:
+  // Legacy "timers" blocks are ignored:
   // the serialized timing carried no callback identity, so a restored
   // timer could never fire on the production load path — it was cleared or
   // dropped inert. Timers are runtime-only state; scripts re-arm them in
@@ -656,7 +655,7 @@ bool load_scene(World &world, const char *buffer, std::size_t size,
 
   // Staging fully succeeded and passed its invariant checks, so the
   // transition is now guaranteed to commit: dispatch on_end_play to the
-  // still-alive outgoing world before it is overwritten (#198).
+  // still-alive outgoing world before it is overwritten.
   if (beforeTeardown != nullptr) {
     beforeTeardown();
   }

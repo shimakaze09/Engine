@@ -1,7 +1,7 @@
 $input a_position, a_normal
 $output v_normal
 
-// Default vertex stage (bgfx port of default.vert, #138). Uniform names
+// Default vertex stage. Uniform names
 // match the GL source so flush parameter lookups resolve unchanged.
 
 #include <bgfx_shader.sh>

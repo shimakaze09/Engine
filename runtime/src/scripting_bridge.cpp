@@ -383,7 +383,7 @@ bool scripting_sweep_box(runtime::World *world, float cx, float cy, float cz,
 }
 
 /// Folds the native kInvalidJointId onto the bridge's single 0 failure
-/// sentinel; valid ids always carry a non-zero generation (issue #100).
+/// sentinel; valid ids always carry a non-zero generation.
 std::uint32_t normalize_joint_id(physics::JointId id) noexcept {
   return (id == physics::kInvalidJointId) ? 0U
                                           : static_cast<std::uint32_t>(id);

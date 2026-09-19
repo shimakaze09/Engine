@@ -1,4 +1,4 @@
-// Declares the editor Console panel (issue #155): log view, filters, and
+// Declares the editor Console panel: log view, filters, and
 // the non-spamming status indicator shown while the panel is closed.
 
 #pragma once

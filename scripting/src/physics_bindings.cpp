@@ -33,7 +33,7 @@ namespace engine::scripting {
 
 namespace {
 
-/// One captured pre-lock inverse inertia, generation-checked (issue #80).
+/// One captured pre-lock inverse inertia, generation-checked.
 struct LockRotationCapture final {
   core::Entity owner = core::kInvalidEntity;
   float inverseInertia = 1.0F;
@@ -134,7 +134,7 @@ int lua_engine_set_friction(lua_State *state) noexcept {
 
 // engine.set_lock_rotation(entity, locked) → bool
 // Freezes the body's rotational response, capturing its inverse inertia;
-// unlock restores exactly the captured value (owner decision, issue #80).
+// unlock restores exactly the captured value.
 // Without a capture, unlock of a locked body falls back to the 1.0 default
 // (pre-capture legacy) and unlock of an unlocked body leaves it unchanged.
 int lua_engine_set_lock_rotation(lua_State *state) noexcept {
@@ -330,7 +330,7 @@ bool read_optional_skip_entity(lua_State *state, int index,
 
 // engine.raycast(ox,oy,oz, dx,dy,dz, max_dist [, skip_entity])
 // skip_entity excludes that entity's colliders and any compound-body
-// colliders it owns, as the sweeps do (#537).
+// colliders it owns, as the sweeps do.
 int lua_engine_raycast(lua_State *state) noexcept {
   if (runtime_binding().world == nullptr) {
     lua_pushnil(state);
@@ -610,7 +610,7 @@ int lua_engine_sweep_box(lua_State *state) noexcept {
 }
 
 /// Pushes a joint constructor result: nil for the unified 0 failure
-/// sentinel, the id otherwise (issue #100 contract).
+/// sentinel, the id otherwise.
 int push_joint_result(lua_State *state, std::uint32_t id) noexcept {
   if (id == 0U) {
     lua_pushnil(state);
@@ -620,8 +620,8 @@ int push_joint_result(lua_State *state, std::uint32_t id) noexcept {
   return 1;
 }
 
-/// Pushes the nil-on-failure result the joint constructors settled on
-/// (issue #126): true on success, nil (not false) so a stale id, an
+/// Pushes the nil-on-failure result the joint constructors settled on:
+/// true on success, nil (not false) so a stale id, an
 /// unbound service, or a rejected write are all indistinguishable failures
 /// from the caller's perspective, same as a failed constructor.
 int push_joint_mutation_result(lua_State *state, bool ok) noexcept {
@@ -801,7 +801,7 @@ int lua_engine_set_joint_limits(lua_State *state) noexcept {
   return push_joint_mutation_result(state, ok);
 }
 
-// #125: get_half_extents/get_restitution/get_friction read through any
+// get_half_extents/get_restitution/get_friction read through any
 // same-frame queued collider write instead of only the committed snapshot.
 int lua_engine_get_half_extents(lua_State *state) noexcept {
   runtime::Entity entity{};

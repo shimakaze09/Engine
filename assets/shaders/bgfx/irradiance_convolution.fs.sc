@@ -1,7 +1,6 @@
 $input v_dir
 
-// Cosine-hemisphere irradiance convolution (bgfx port of
-// irradiance_convolution.frag, #138).
+// Cosine-hemisphere irradiance convolution.
 
 #include <bgfx_shader.sh>
 

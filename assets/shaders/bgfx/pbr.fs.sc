@@ -1,12 +1,12 @@
 $input v_worldpos, v_normal, v_texcoord0
 
-// PBR forward fragment stage (bgfx port of pbr.frag, #138): Cook-
-// Torrance direct lighting over the flat light-array vocabulary, the
+// PBR forward fragment stage: Cook-Torrance direct lighting over the
+// flat light-array vocabulary, the
 // five material texture slots (baked stages 0-4 matching the flush's
 // unit assignment), alpha modes, and distance/height fog. The PBR_FULL
 // variant adds cascade/spot/point shadow sampling and split-sum IBL on
-// the shared unit map (arrays 7-8, point cubes 9-12, IBL 13-15; #301) —
-// the map tops out at register 15, so any 16-unit device (incl.
+// the shared unit map, which tops out at register 15, so any 16-unit
+// device (incl.
 // WebGL2's floor) selects it. Scalar and integer GL uniforms become
 // vec4 read through .x.
 
@@ -100,7 +100,7 @@ uniform vec4 u_spotLightParams[MAX_SPOT_LIGHTS];
     texture2DArrayLod(_s, vec3(_uv, _layer), 0.0).r
 #endif
 
-// #301 unit map: the cascade and spot sets are Tex2DArrays (one
+// Unit map: the cascade and spot sets are Tex2DArrays (one
 // register each), so the whole PBR_FULL map tops out at register 15
 // and fits DXBC's 16-sampler cap and WebGL2's 16-unit floor.
 SAMPLER2DARRAY(uShadowMapArray, 7);

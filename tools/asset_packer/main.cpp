@@ -117,7 +117,7 @@ std::string cooked_output_base(const char *outputPath) {
 /// Cooks skin 0 and every animation into "<base>.skel" and
 /// "<base>.<clip>.anim" beside the mesh output, filling outJointRemap for
 /// skinned vertex extraction and appending every committed path to
-/// outCookedPaths for the stamp's output manifest (issue #55); returns 0
+/// outCookedPaths for the stamp's output manifest; returns 0
 /// on success or the packer exit code (14 skeleton, 15 animation).
 int cook_skeletal_assets(const cgltf_data *data, const char *outputPath,
                          std::vector<std::uint32_t> *outJointRemap,
@@ -194,7 +194,7 @@ bool ensure_directory_exists(const char *dirPath) {
     return false;
   }
   // Every missing level, durably, through core's one directory-creation
-  // path (#571): the old single mkdir failed for `build/new/nested/cooked`.
+  // path: the old single mkdir failed for `build/new/nested/cooked`.
   return engine::core::create_directories_durably(dirPath);
 }
 
@@ -208,7 +208,7 @@ bool ensure_directory_exists(const char *dirPath) {
 
 /// Runs this executable or test program.
 int main(int argc, char **argv) {
-  // The bgfx shader cook mode (#138 Phase C) has its own argument shape;
+  // The bgfx shader cook mode has its own argument shape;
   // dispatch before the glTF flow's positional parsing.
   for (int i = 1; i < argc; ++i) {
     if (std::strcmp(argv[i], "--shader-manifest") == 0) {
@@ -343,8 +343,8 @@ int main(int argc, char **argv) {
 
   // External glTF payloads (.bin buffers, images) must force a recook
   // even when no --graph is supplied: dependency correctness is an
-  // invariant of the cooker, the graph only persists the relationships
-  // (PR #51 review). A parse failure here is not fatal — the cook path
+  // invariant of the cooker, the graph only persists the relationships.
+  // A parse failure here is not fatal — the cook path
   // below reports it with its usual diagnostics.
   {
     const char *ext = std::strrchr(inputPath, '.');
@@ -392,7 +392,7 @@ int main(int argc, char **argv) {
   // Sort dependencies by path for deterministic output.
   sort_dependency_digests(dependencyDigests);
 
-  // #351: a generated source (or dependency) is cooked only when its
+  // A generated source (or dependency) is cooked only when its
   // directory manifest certifies these exact bytes; the generators write
   // that manifest last, so a source that disagrees with it belongs to an
   // interrupted publish and would cook as a mixed generation.
@@ -488,8 +488,7 @@ int main(int argc, char **argv) {
           : 0U;
   const cgltf_mesh &selectedMesh = data->meshes[meshIdx];
   // Only mesh 0 is validated at load; a meta-selected mesh needs its own
-  // primitive check or primitives[0] below indexes an empty array
-  // (audit H-19).
+  // primitive check or primitives[0] below indexes an empty array.
   if (selectedMesh.primitives_count == 0U) {
     std::fprintf(stderr,
                  "error: selected mesh %zu has no primitives "
@@ -615,7 +614,7 @@ int main(int argc, char **argv) {
     cookedOutputs.push_back(hullPath);
   }
 
-  // #212: the builders are fallible — an overlong destination refuses
+  // The builders are fallible — an overlong destination refuses
   // instead of redirecting into the working directory. With no buildable
   // path there is nothing to retire or certify.
   char thumbPath[512] = {};
@@ -629,7 +628,7 @@ int main(int argc, char **argv) {
                                                 importSettingsHash)) {
     std::fprintf(stderr, "warning: mesh thumbnail generation failed: %s\n",
                  outputPath);
-    // #211: a failed regeneration must not leave the previous generation's
+    // A failed regeneration must not leave the previous generation's
     // thumbnail behind for the fresh stamp below to certify as current; a
     // stale file that cannot be retired blocks the stamp entirely.
     if (thumbPathsOk && !retire_stale_thumbnail(thumbPath, thumbChecksumPath)) {
@@ -659,7 +658,7 @@ int main(int argc, char **argv) {
   // The stamp is the cook's commit marker: written only after every
   // output above landed (and stale outputs of the previous manifest were
   // retired), so any interruption leaves no fresh stamp and the next run
-  // recooks the full output set (audit H-20, issue #55).
+  // recooks the full output set.
   if (!write_cook_stamp(outputPath, sourceHash, dependencyDigests,
                         importSettingsHash, platformTag, cookedOutputs)) {
     std::fprintf(stderr, "error: failed to write cook stamp\n");

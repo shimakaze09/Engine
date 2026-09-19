@@ -1,7 +1,7 @@
 // Owns runtime binding state and service-locator registration for scripting.
 // Locator entries follow last-writer-wins on bind; unbind only removes an
 // entry this binding still owns (the registered pointer is unchanged), so a
-// newer provider registered by someone else is never clobbered (audit M-14).
+// newer provider registered by someone else is never clobbered.
 
 #include "runtime_binding.h"
 

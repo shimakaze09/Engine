@@ -1,8 +1,8 @@
 $input a_position, a_normal, a_texcoord0, i_data0, i_data1, i_data2, i_data3, i_data4
 $output v_worldpos, v_normal, v_texcoord0
 
-// Instanced PBR forward vertex stage (#138 instancing unit): the model
-// matrix arrives as four instance-stream columns (i_data0..3, the
+// Instanced PBR forward vertex stage: the model matrix arrives as four
+// instance-stream columns (i_data0..3, the
 // flush's InstanceAttributes layout) and the per-instance foliage
 // payload as i_data4 (.x wind phase). The normal matrix is the
 // inverse-transpose of the instance model's upper 3x3, computed via the

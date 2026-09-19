@@ -1,9 +1,9 @@
-// Implements the packer's bgfx shader cook (#138 Phase C): reads the
+// Implements the packer's bgfx shader cook: reads the
 // shader manifest (sources, stages, output stems, variant define sets),
 // invokes bgfx shaderc per variant and platform profile, stages each
 // binary through an atomic replace, and commits the whole output set
 // under one cook stamp so interruption can never certify a mixed
-// generation (#211). Inputs are digested (manifest, sources, varying
+// generation. Inputs are digested (manifest, sources, varying
 // table, shaderc's shared include headers) and the cook's own logic
 // revision joins the settings hash, so should_repack skips
 // byte-identical cooks while any input edit or cook-behavior change
@@ -52,7 +52,7 @@ constexpr ShaderProfile kKnownProfiles[] = {
     {"spirv", "linux", "spirv"},
     {"metal", "osx", "metal"},
     // dx11 cooks only on a Windows host: shaderc's DXBC backend needs
-    // d3dcompiler. The #301 shadow-array unit map fits DXBC's
+    // d3dcompiler. The shadow-array unit map fits DXBC's
     // 16-sampler cap, so Windows builds cook it by default.
     {"dx11", "windows", "s_5_0"},
 };
@@ -192,8 +192,7 @@ bool read_manifest(const char *manifestPath,
   }
   // The manifest is as long as the author makes it, so its entries are
   // walked by value rather than through the parser's bounded pointer
-  // scratch, which a larger manifest exhausted into a silent refusal
-  // (#539).
+  // scratch, which a larger manifest exhausted into a silent refusal.
   for (std::size_t i = 0U; i < count; ++i) {
     engine::core::JsonValue entry{};
     if (!parser.get_array_element(*shaders, i, &entry)) {
@@ -509,7 +508,7 @@ int run_shader_cook(int argc, char **argv) {
     return 1;
   }
 
-  // #290: the stamp records output paths verbatim, so a relative
+  // The stamp records output paths verbatim, so a relative
   // --shader-out must never build path strings that mismatch a prior
   // absolute run's records — the stale sweep would then delete the
   // whole just-cooked set before the stamp hashes it. Anchor the out

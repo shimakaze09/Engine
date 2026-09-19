@@ -99,7 +99,7 @@ enum class PendingRead : std::uint8_t { None, Value, Removed };
 
 /// Finds the newest queued mutation affecting entity's component of the
 /// given snapshot type; a queued destroy (or matching remove) wins over
-/// older snapshots so setters cannot resurrect the component (issue #105).
+/// older snapshots so setters cannot resurrect the component.
 /// Entries queued against an earlier content epoch belong to a replaced
 /// scene and are invisible here, exactly as the flush will drop them.
 PendingRead find_pending_snapshot(runtime::Entity entity,

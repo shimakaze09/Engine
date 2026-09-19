@@ -1,7 +1,7 @@
 // Implements the editor content browser panel: cached-index folder/search
 // views, type filters, typed Open dispatch, drag-spawn, and the mesh/gltf
 // import settings inspector. Split out of editor.cpp (REVIEW_FINDINGS A3);
-// rebuilt on the index/filter-cache backend for issue #157.
+// rebuilt on the index/filter-cache backend.
 
 #include "editor_panels_assets.h"
 
@@ -65,7 +65,7 @@ void draw_import_settings_inspector(const char *assetPath) noexcept {
     return;
   }
 
-  // The sidecar is read once per selection, not per frame (#528).
+  // The sidecar is read once per selection, not per frame.
   const ImportSettingsDocument *doc = import_settings_for_asset(assetPath);
   if (doc == nullptr) {
     return;
@@ -124,8 +124,8 @@ void draw_import_settings_inspector(const char *assetPath) noexcept {
   // Parse-update-preserve: splice only the importSettings value into the
   // original document so schema, output mappings, and unknown
   // forward-compatible fields survive, validate the result, and replace
-  // the file atomically (audit H-21; the old path truncated the meta to
-  // an importSettings-only stub with fopen "wb").
+  // the file atomically. Rewriting the meta as an importSettings-only
+  // stub would drop every other field.
   char newSettings[512] = {};
   std::snprintf(newSettings, sizeof(newSettings),
                 "{\n"
@@ -218,7 +218,7 @@ bool file_contains_substring(const char *path, const char *needle) noexcept {
 /// path; explicitly user-triggered from the context menu (never per frame)
 /// and bounded by the index size, so the O(scenes) file scan is acceptable
 /// here even though it would not be on a draw-loop hot path. A lightweight
-/// stand-in for #150's authoritative dependency graph, which will index
+/// stand-in authoritative dependency graph, which will index
 /// usages for every asset kind instead of scene-file substring search.
 void run_find_usages(const AssetIndexEntry &target) noexcept {
   g_findUsages = FindUsagesState{};
@@ -265,9 +265,8 @@ void draw_find_usages_popup() noexcept {
 
 /// Context menu for one browsed entry. Open/Show in Folder/Copy
 /// Reference/Find Usages are implemented against production entry points;
-/// Rename/Move/Duplicate/Delete/Reimport/Find Dependencies stay disabled
-/// (issue #157 depends on #150's stable asset identity and dependency
-/// graph for those to be safe — see the destructive-action cut line).
+/// Rename/Move/Duplicate/Delete/Reimport/Find Dependencies stay disabled:
+/// they need a stable asset identity and dependency graph to be safe.
 void draw_context_menu(const AssetIndexEntry &entry) noexcept {
   if (!ImGui::BeginPopupContextItem()) {
     return;
