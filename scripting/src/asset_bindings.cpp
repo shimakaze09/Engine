@@ -8,6 +8,7 @@
 #include "deferred_mutations.h"
 #include "entity_handle.h"
 #include "lua_state.h"
+#include "reload_transaction.h"
 #include "runtime_binding.h"
 
 extern "C" {
@@ -76,6 +77,7 @@ int lua_engine_instantiate(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
+  reload_note_created_entity(entity);
   push_entity_handle(state, entity);
   return 1;
 }

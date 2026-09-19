@@ -7,6 +7,7 @@
 #include "deferred_mutations.h"
 #include "entity_handle.h"
 #include "lua_state.h"
+#include "reload_transaction.h"
 #include "runtime_binding.h"
 
 extern "C" {
@@ -57,7 +58,12 @@ int lua_engine_unload_sound(lua_State *state) noexcept {
   }
   if ((runtime_binding().services != nullptr) && (runtime_binding().services->unload_sound != nullptr)) {
     const auto id = static_cast<std::uint32_t>(lua_tointeger(state, 1));
-    runtime_binding().services->unload_sound(id);
+    StagedAudioOp staged{};
+    staged.kind = StagedAudioOp::Kind::UnloadSound;
+    staged.id = id;
+    if (!reload_stage_audio(staged)) {
+      runtime_binding().services->unload_sound(id);
+    }
   }
   return 0;
 }
@@ -83,7 +89,16 @@ int lua_engine_play_sound(lua_State *state) noexcept {
   if (lua_gettop(state) >= 4) {
     loop = lua_toboolean(state, 4) != 0;
   }
-  const bool ok = runtime_binding().services->play_sound(id, volume, pitch, loop);
+  StagedAudioOp staged{};
+  staged.kind = StagedAudioOp::Kind::PlaySound;
+  staged.id = id;
+  staged.a = volume;
+  staged.b = pitch;
+  staged.flag = loop;
+  const bool ok =
+      reload_transaction_open()
+          ? reload_stage_audio(staged)
+          : runtime_binding().services->play_sound(id, volume, pitch, loop);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
@@ -94,7 +109,12 @@ int lua_engine_stop_sound(lua_State *state) noexcept {
   }
   if ((runtime_binding().services != nullptr) && (runtime_binding().services->stop_sound != nullptr)) {
     const auto id = static_cast<std::uint32_t>(lua_tointeger(state, 1));
-    runtime_binding().services->stop_sound(id);
+    StagedAudioOp staged{};
+    staged.kind = StagedAudioOp::Kind::StopSound;
+    staged.id = id;
+    if (!reload_stage_audio(staged)) {
+      runtime_binding().services->stop_sound(id);
+    }
   }
   return 0;
 }
@@ -113,8 +133,17 @@ int lua_engine_play_sound_at(lua_State *state) noexcept {
   if ((runtime_binding().services != nullptr) &&
       (runtime_binding().services->play_sound_at != nullptr)) {
     const auto soundId = static_cast<std::uint32_t>(lua_tointeger(state, 1));
-    ok = runtime_binding().services->play_sound_at(
-        soundId, position.x, position.y, position.z, volume);
+    StagedAudioOp staged{};
+    staged.kind = StagedAudioOp::Kind::PlaySoundAt;
+    staged.id = soundId;
+    staged.a = position.x;
+    staged.b = position.y;
+    staged.c = position.z;
+    staged.d = volume;
+    ok = reload_transaction_open()
+             ? reload_stage_audio(staged)
+             : runtime_binding().services->play_sound_at(
+                   soundId, position.x, position.y, position.z, volume);
   }
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
@@ -137,7 +166,13 @@ int lua_engine_set_bus_volume(lua_State *state) noexcept {
   }
   if ((runtime_binding().services != nullptr) &&
       (runtime_binding().services->set_bus_volume != nullptr)) {
-    runtime_binding().services->set_bus_volume(bus, volume);
+    StagedAudioOp staged{};
+    staged.kind = StagedAudioOp::Kind::SetBusVolume;
+    staged.id = bus;
+    staged.a = volume;
+    if (!reload_stage_audio(staged)) {
+      runtime_binding().services->set_bus_volume(bus, volume);
+    }
   }
   return 0;
 }
@@ -163,7 +198,21 @@ int lua_engine_play_music(lua_State *state) noexcept {
       (runtime_binding().services->play_music != nullptr)) {
     const bool loop = (lua_isboolean(state, 3) == 0) ||
                       (lua_toboolean(state, 3) != 0);
-    ok = runtime_binding().services->play_music(path, volume, loop);
+    if (reload_transaction_open()) {
+      StagedAudioOp staged{};
+      staged.kind = StagedAudioOp::Kind::PlayMusic;
+      staged.a = volume;
+      staged.flag = loop;
+      // The jail already bounded the path; a longer one is refused rather
+      // than replayed truncated.
+      ok = (std::strlen(path) <= StagedAudioOp::kMaxPathLength);
+      if (ok) {
+        std::snprintf(staged.path, sizeof(staged.path), "%s", path);
+        ok = reload_stage_audio(staged);
+      }
+    } else {
+      ok = runtime_binding().services->play_music(path, volume, loop);
+    }
   }
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
@@ -174,7 +223,11 @@ int lua_engine_stop_music(lua_State *state) noexcept {
   static_cast<void>(state);
   if ((runtime_binding().services != nullptr) &&
       (runtime_binding().services->stop_music != nullptr)) {
-    runtime_binding().services->stop_music();
+    StagedAudioOp staged{};
+    staged.kind = StagedAudioOp::Kind::StopMusic;
+    if (!reload_stage_audio(staged)) {
+      runtime_binding().services->stop_music();
+    }
   }
   return 0;
 }

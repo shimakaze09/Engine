@@ -9,6 +9,7 @@
 #include "entity_handle.h"
 #include "game_bindings.h"
 #include "lua_state.h"
+#include "reload_transaction.h"
 #include "runtime_binding.h"
 
 extern "C" {
@@ -44,7 +45,7 @@ int lua_engine_log(lua_State *state) noexcept {
 }
 
 int lua_engine_spawn_entity(lua_State *state) noexcept {
-  if (!runtime_bound() || !can_apply_mutations_now()) {
+  if (!can_create_entities_now()) {
     lua_pushnil(state);
     return 1;
   }
@@ -57,6 +58,7 @@ int lua_engine_spawn_entity(lua_State *state) noexcept {
     return 1;
   }
 
+  reload_note_created_entity(entity);
   push_entity_handle(state, entity);
   return 1;
 }
@@ -153,7 +155,7 @@ int lua_engine_find_by_name(lua_State *state) noexcept {
 int lua_engine_clone_entity(lua_State *state) noexcept {
   if (!runtime_bound() ||
       (runtime_binding().services->clone_entity_op == nullptr) ||
-      !can_apply_mutations_now()) {
+      !can_create_entities_now()) {
     lua_pushnil(state);
     return 1;
   }
@@ -170,6 +172,7 @@ int lua_engine_clone_entity(lua_State *state) noexcept {
     return 1;
   }
 
+  reload_note_created_entity(clone);
   push_entity_handle(state, clone);
   return 1;
 }

@@ -2,7 +2,10 @@
 
 #include "entity_pool_bindings.h"
 
+#include "engine/core/logging.h"
+
 #include "entity_handle.h"
+#include "reload_transaction.h"
 #include "runtime_binding.h"
 
 #include <cstddef>
@@ -75,6 +78,14 @@ int lua_engine_pool_create(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
+  // A pool seeds entities the reload scope cannot take back, so a chunk
+  // under reload is refused rather than left half-committed.
+  if (reload_transaction_open()) {
+    core::log_message(core::LogLevel::Warning, "scripting",
+                      "pool_create is refused while a script hot reload runs");
+    lua_pushnil(state);
+    return 1;
+  }
 
   const lua_Integer count = lua_tointeger(state, 1);
   if ((count <= 0) ||
@@ -122,6 +133,7 @@ int lua_engine_pool_spawn(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
+  reload_note_pool_acquire(slot, entity);
 
   push_entity_handle(state, entity);
   return 1;
@@ -146,8 +158,9 @@ int lua_engine_pool_release(lua_State *state) noexcept {
     return 1;
   }
 
-  const bool ok = runtime_binding().services->entity_pool_release(
-      runtime_binding().world, slot, entity);
+  const bool ok = reload_stage_pool_release(slot, entity) ||
+                  runtime_binding().services->entity_pool_release(
+                      runtime_binding().world, slot, entity);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }

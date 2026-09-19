@@ -398,6 +398,16 @@ engine_add_test_executable(engine_integration_hotreload_scene_op_rollback
     integration
 )
 
+engine_add_test_executable(engine_integration_hotreload_transaction
+    SOURCES
+    hotreload_transaction_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_scripting
+    LABELS
+    integration
+)
+
 engine_add_test_executable(engine_integration_script_module_poll_cadence
     SOURCES
     script_module_poll_cadence_test.cpp

@@ -12,6 +12,7 @@ extern "C" {
 
 #include <cstddef>
 
+#include "reload_transaction.h"
 #include "runtime_binding.h"
 
 namespace engine::scripting {
@@ -150,6 +151,7 @@ TimerId register_lua_timer(lua_State *state, float seconds,
   }
 
   release_timer_ref(g_timerLuaRefs[slot], timer_main_state(state));
+  reload_note_timer_created(id);
 
   // The callback is on the calling thread's stack, so the ref is taken
   // there; the resulting registry ref is VM-global and is released from
@@ -202,24 +204,30 @@ int lua_engine_cancel_timer(lua_State *state) noexcept {
   }
 
   const auto id = static_cast<TimerId>(lua_tointeger(state, 1));
-  if (id == kInvalidTimerId) {
+  if ((id == kInvalidTimerId) || reload_stage_timer_cancel(id)) {
     return 0;
   }
+  cancel_lua_timer(id);
+  return 0;
+}
 
+void cancel_lua_timer(std::uint32_t timerId) noexcept {
+  if ((timerId == kInvalidTimerId) || !runtime_bound()) {
+    return;
+  }
   const RuntimeServices &services = *runtime_binding().services;
   runtime::World *const world = runtime_binding().world;
-  const std::size_t slot = services.timer_slot_for_id(world, id);
+  const std::size_t slot = services.timer_slot_for_id(world, timerId);
   if (slot >= kMaxTimerRefs) {
-    return 0;
+    return;
   }
 
-  services.timer_cancel(world, id);
-  lua_State *refState = timer_main_state(state);
+  services.timer_cancel(world, timerId);
+  lua_State *refState = timer_main_state(nullptr);
   LuaTimerRef &timerRef = g_timerLuaRefs[slot];
-  if (timerRef.ownerId == id) {
+  if (timerRef.ownerId == timerId) {
     release_timer_ref(timerRef, refState);
   }
-  return 0;
 }
 
 void clear_lua_timer_bindings(lua_State *fallbackState) noexcept {

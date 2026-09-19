@@ -3,6 +3,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 
 struct lua_State;
 
@@ -14,6 +15,10 @@ int lua_engine_set_timeout(lua_State *state) noexcept;
 int lua_engine_set_interval(lua_State *state) noexcept;
 /// Lua binding: Lua engine.cancel_timer(timer_id).
 int lua_engine_cancel_timer(lua_State *state) noexcept;
+
+/// Cancels one Lua timer by id and releases its callback ref; a no-op for
+/// an id that names no live timer.
+void cancel_lua_timer(std::uint32_t timerId) noexcept;
 
 /// Releases Lua timer refs and clears the bound world's timers.
 void clear_lua_timer_bindings(lua_State *fallbackState) noexcept;

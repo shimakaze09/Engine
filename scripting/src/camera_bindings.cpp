@@ -187,8 +187,7 @@ int lua_engine_add_spring_arm(lua_State *state) noexcept {
   if (lua_isboolean(state, 7)) {
     arm.collisionEnabled = (lua_toboolean(state, 7) != 0);
   }
-  const bool ok = runtime_binding().services->add_spring_arm_op(
-      runtime_binding().world, entity, arm);
+  const bool ok = apply_or_queue_spring_arm(entity, arm);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
@@ -206,8 +205,7 @@ int lua_engine_get_spring_arm(lua_State *state) noexcept {
     return 1;
   }
   runtime::SpringArmComponent arm{};
-  if (!runtime_binding().services->get_spring_arm_op(
-          runtime_binding().world, entity, &arm)) {
+  if (!latest_spring_arm(entity, &arm)) {
     lua_pushnil(state);
     return 1;
   }
@@ -264,8 +262,7 @@ int lua_engine_add_camera_component(lua_State *state) noexcept {
   if (lua_isnumber(state, 9)) {
     camera.orthographicSize = static_cast<float>(lua_tonumber(state, 9));
   }
-  const bool ok = runtime_binding().services->add_camera_component_op(
-      runtime_binding().world, entity, camera);
+  const bool ok = apply_or_queue_camera_component(entity, camera);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
@@ -283,8 +280,7 @@ int lua_engine_get_camera_component(lua_State *state) noexcept {
     return 1;
   }
   runtime::CameraComponent camera{};
-  if (!runtime_binding().services->get_camera_component_op(
-          runtime_binding().world, entity, &camera)) {
+  if (!latest_camera_component(entity, &camera)) {
     lua_pushnil(state);
     return 1;
   }
@@ -315,8 +311,7 @@ int lua_engine_remove_camera_component(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
-  const bool ok = runtime_binding().services->remove_camera_component_op(
-      runtime_binding().world, entity);
+  const bool ok = apply_or_queue_remove_camera_component(entity);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
@@ -333,13 +328,11 @@ bool set_camera_component_field(runtime::Entity entity,
     return false;
   }
   runtime::CameraComponent camera{};
-  if (!runtime_binding().services->get_camera_component_op(
-          runtime_binding().world, entity, &camera)) {
+  if (!latest_camera_component(entity, &camera)) {
     return false;
   }
   apply(camera);
-  return runtime_binding().services->add_camera_component_op(
-      runtime_binding().world, entity, camera);
+  return apply_or_queue_camera_component(entity, camera);
 }
 
 // Engine.set_camera_component_active(entityIndex, active) -> bool

@@ -25,6 +25,7 @@
 #include "mesh_material_bindings.h"
 #include "persist_bindings.h"
 #include "physics_bindings.h"
+#include "reload_transaction.h"
 #include "runtime_binding.h"
 #include "scene_bindings.h"
 #include "timer_bindings.h"
@@ -1003,15 +1004,15 @@ void restore_global_bindings(lua_State *state, int snapshotReference) noexcept {
                                           "hot_reload globals restore"));
 }
 
-/// Executes a reload, rolling back a failed chunk's top-level Lua bindings
-/// and the deferred scene request it queued. The scene request rolls back
-/// with them because it outlives the chunk: the runtime commits it after the
-/// frame, so a chunk that asks for a new scene and then fails would destroy
-/// the live World on the strength of bindings that were just discarded.
-/// A prior request the chunk overwrote is restored for the same reason —
-/// the failed chunk is not entitled to redirect a transition already queued.
-/// TODO(#343): timer, audio, and ECS mutations a failed chunk performed are
-/// not rolled back.
+/// Executes a reload as one transaction. The rule: a chunk's externally
+/// visible effects commit only when it returns without error and within
+/// its instruction budget; until then they are staged and a failure
+/// discards them. Staged: top-level Lua bindings (snapshot), the deferred
+/// scene request, World component writes (the deferred queue), entities
+/// created and pool entities acquired (recorded, undone on failure),
+/// timers set (recorded) and cancelled (held), and audio calls (held).
+/// Not staged, by design: joints, gravity, game mode, the camera stack,
+/// sound loading, and pool creation (refused under reload).
 bool reload_script_transactionally(const char *path) noexcept {
   lua_State *state = lua_state();
   if ((state == nullptr) || (path == nullptr)) {
@@ -1030,9 +1031,17 @@ bool reload_script_transactionally(const char *path) noexcept {
   // Captured after the chunk is loaded and before it runs: loading executes
   // no chunk code, so this is the request as it stood before the reload.
   const PendingSceneOpCheckpoint sceneOpCheckpoint = capture_pending_scene_op();
+  if (!begin_reload_transaction()) {
+    core::log_message(core::LogLevel::Error, "scripting",
+                      "hot_reload: a reload is already in progress");
+    lua_pop(state, 1);
+    luaL_unref(state, LUA_REGISTRYINDEX, snapshotReference);
+    return false;
+  }
   arm_debug_lua_hook(state);
   if (lua_pcall(state, 0, 0, 0) != LUA_OK) {
     log_lua_error("hot_reload");
+    rollback_reload_transaction();
     restore_global_bindings(state, snapshotReference);
     restore_pending_scene_op(sceneOpCheckpoint);
     luaL_unref(state, LUA_REGISTRYINDEX, snapshotReference);
@@ -1042,12 +1051,14 @@ bool reload_script_transactionally(const char *path) noexcept {
   if (debug_instruction_budget_exhausted()) {
     core::log_message(core::LogLevel::Error, "scripting",
                       "hot_reload: CPU instruction budget exhausted");
+    rollback_reload_transaction();
     restore_global_bindings(state, snapshotReference);
     restore_pending_scene_op(sceneOpCheckpoint);
     luaL_unref(state, LUA_REGISTRYINDEX, snapshotReference);
     return false;
   }
 
+  commit_reload_transaction();
   luaL_unref(state, LUA_REGISTRYINDEX, snapshotReference);
   return true;
 }
