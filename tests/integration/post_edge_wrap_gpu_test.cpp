@@ -87,9 +87,24 @@ int run(engine::EnginePipeline &pipeline, World &world) noexcept {
   const double leftGlow = mean_abs_difference(empty, bright, 0U, 0U, strip, h);
   const double rightLeak =
       mean_abs_difference(empty, bright, w - strip, 0U, w, h);
+  // The strip mean catches a wide glow. A one-pixel tap past the border —
+  // FXAA's neighbour read, the first bloom downsample — changes only the
+  // outermost column, which a forty-column mean dilutes to nothing, so the
+  // worst single column is measured as well.
+  double worstColumn = 0.0;
+  double worstColumnNoise = 0.0;
+  for (std::uint32_t x = w - strip; x < w; ++x) {
+    const double column = mean_abs_difference(empty, bright, x, 0U, x + 1U, h);
+    const double columnNoise =
+        mean_abs_difference(empty, emptyAgain, x, 0U, x + 1U, h);
+    worstColumn = (column > worstColumn) ? column : worstColumn;
+    worstColumnNoise =
+        (columnNoise > worstColumnNoise) ? columnNoise : worstColumnNoise;
+  }
   std::printf("post_edge_wrap_gpu_test: %ux%u left edge changed by %.3f "
-              "levels, right edge by %.3f (frame-to-frame %.3f)\n",
-              w, h, leftGlow, rightLeak, noise);
+              "levels, right edge by %.3f (frame-to-frame %.3f), worst right "
+              "column by %.3f (frame-to-frame %.3f)\n",
+              w, h, leftGlow, rightLeak, noise, worstColumn, worstColumnNoise);
 
   int result = 0;
   // The slab has to be bright at the border, or there is nothing to leak.
@@ -107,6 +122,13 @@ int run(engine::EnginePipeline &pipeline, World &world) noexcept {
                          "right edge by %.3f levels; the post chain wraps\n",
                  rightLeak);
     result = 21;
+  }
+  if (worstColumn > (worstColumnNoise + 0.5)) {
+    std::fprintf(stderr, "FAIL: a bright object at the left edge changed one "
+                         "column at the right edge by %.3f levels; a pass "
+                         "target wraps\n",
+                 worstColumn);
+    result = 22;
   }
   return result;
 }
