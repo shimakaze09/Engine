@@ -30,7 +30,14 @@ constexpr std::size_t kEntities = 200U;
 constexpr int kFrames = 10;
 
 bool write_file(const char *path, const char *contents) noexcept {
-  std::FILE *file = std::fopen(path, "wb");
+  std::FILE *file = nullptr;
+#ifdef _WIN32
+  if (fopen_s(&file, path, "wb") != 0) {
+    file = nullptr;
+  }
+#else
+  file = std::fopen(path, "wb");
+#endif
   if (file == nullptr) {
     return false;
   }

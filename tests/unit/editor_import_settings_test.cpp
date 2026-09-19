@@ -25,7 +25,14 @@ int g_failures = 0;
   } while (false)
 
 bool write_file(const std::string &path, const char *text) {
-  std::FILE *file = std::fopen(path.c_str(), "wb");
+  std::FILE *file = nullptr;
+#ifdef _WIN32
+  if (fopen_s(&file, path.c_str(), "wb") != 0) {
+    file = nullptr;
+  }
+#else
+  file = std::fopen(path.c_str(), "wb");
+#endif
   if (file == nullptr) {
     return false;
   }
