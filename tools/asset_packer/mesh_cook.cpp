@@ -673,10 +673,27 @@ bool extract_gltf_dependencies(const cgltf_data *data, const char *inputPath,
     if (image->uri == nullptr) {
       return; // Embedded texture (buffer view), no external dep.
     }
+    if (std::strncmp(image->uri, "data:", 5U) == 0) {
+      return; // Inline payload: no file to watch (#571).
+    }
     if (!seenImages.insert(image).second) {
       return;
     }
-    addExternalFile(image->uri);
+    // The URI is percent-encoded; the file on disk is not, so a texture
+    // named "my tex.png" must be hashed under its decoded name or an edit
+    // to it never triggers a recook (#571).
+    char decodedUri[1024] = {};
+    const int copied =
+        std::snprintf(decodedUri, sizeof(decodedUri), "%s", image->uri);
+    if ((copied <= 0) || (copied >= static_cast<int>(sizeof(decodedUri)))) {
+      std::fprintf(stderr,
+                   "warning: image uri too long to track as a dependency: "
+                   "%s\n",
+                   image->uri);
+      return;
+    }
+    cgltf_decode_uri(decodedUri);
+    addExternalFile(decodedUri);
   };
 
   // External buffer payloads (.bin) carry the actual vertex data; a

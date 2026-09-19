@@ -24,6 +24,7 @@ namespace {
 constexpr const char *kGltfPath = "skinned_mesh_cook_test.gltf";
 constexpr const char *kBinPath = "skinned_mesh_cook_test.bin";
 constexpr const char *kMeshPath = "skinned_mesh_cook_test.mesh";
+constexpr const char *kTexturePath = "skinned_mesh_cook_test tex.png";
 
 /// When set, the fixture's first position is NaN (#571 finiteness row).
 bool g_poisonPosition = false;
@@ -140,6 +141,7 @@ void cleanup_fixture_files() noexcept {
   remove_file(kGltfPath);
   remove_file(kBinPath);
   remove_file(kMeshPath);
+  remove_file(kTexturePath);
 }
 
 /// EXPECTATION (#571): a non-finite vertex position is refused at
@@ -160,6 +162,351 @@ int check_non_finite_position_rejected() {
   cgltf_free(data);
   if (extracted) {
     std::puts("a NaN position was accepted");
+    return 1;
+  }
+  return 0;
+}
+
+/// EXPECTATION (#571): an image URI is percent-encoded in the glTF but
+/// plain on disk; the dependency is registered and hashed under the
+/// decoded name, so an edit to that texture forces a recook.
+int check_percent_encoded_image_dependency() {
+  if (!write_skinned_fixture_bin() ||
+      !write_binary_file(kTexturePath, "png-bytes", 9U)) {
+    return 1;
+  }
+  const char *gltf =
+      "{"
+      "\"asset\":{\"version\":\"2.0\"},"
+      "\"buffers\":[{\"uri\":\"skinned_mesh_cook_test.bin\","
+      "\"byteLength\":144}],"
+      "\"bufferViews\":[{\"buffer\":0,\"byteOffset\":0,\"byteLength\":36}],"
+      "\"accessors\":[{\"bufferView\":0,\"componentType\":5126,\"count\":3,"
+      "\"type\":\"VEC3\"}],"
+      "\"images\":[{\"uri\":\"skinned_mesh_cook_test%20tex.png\"},"
+      "{\"uri\":\"data:image/png;base64,AAAA\"}],"
+      "\"textures\":[{\"source\":0},{\"source\":1}],"
+      "\"materials\":[{\"pbrMetallicRoughness\":{"
+      "\"baseColorTexture\":{\"index\":0},"
+      "\"metallicRoughnessTexture\":{\"index\":1}}}],"
+      "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0},"
+      "\"material\":0}]}]"
+      "}";
+  if (!write_binary_file(kGltfPath, gltf, std::strlen(gltf))) {
+    return 1;
+  }
+  cgltf_options options{};
+  cgltf_data *data = nullptr;
+  if ((cgltf_parse_file(&options, kGltfPath, &data) != cgltf_result_success) ||
+      (data == nullptr) ||
+      (cgltf_load_buffers(&options, data, kGltfPath) != cgltf_result_success)) {
+    std::puts("textured fixture failed to parse");
+    return 1;
+  }
+  engine::tools::DependencyGraph graph{};
+  std::vector<DependencyDigest> digests{};
+  const std::uint64_t meshAssetId = hash_path_to_asset_id(kGltfPath);
+  const bool extracted = extract_gltf_dependencies(data, kGltfPath,
+                                                   meshAssetId, &graph,
+                                                   &digests);
+  cgltf_free(data);
+  if (!extracted) {
+    std::puts("dependency extraction failed");
+    return 1;
+  }
+  bool decodedDigested = false;
+  for (const DependencyDigest &digest : digests) {
+    if (digest.path.find("%20") != std::string::npos) {
+      std::puts("the image was registered under its encoded name");
+      return 1;
+    }
+    if (digest.path.find("data:") != std::string::npos) {
+      std::puts("an inline data: image was registered as a file");
+      return 1;
+    }
+    if ((digest.path.find(kTexturePath) != std::string::npos) &&
+        (digest.hash != 0ULL)) {
+      decodedDigested = true;
+    }
+  }
+  if (!decodedDigested) {
+    std::puts("the decoded texture path was not hashed as a dependency");
+    return 1;
+  }
+  return 0;
+}
+
+/// EXPECTATION: with the reorder remap {2, 1, 0}, the skinned extraction
+/// produces the 16-float layout with a zeroed uv slot, joint indices
+/// remapped per vertex ((2,1,0,2), (0,0,0,0), (1,2,2,2) as exact floats),
+/// and weights renormalized ((0.5,0.25,0.25,0), (0.5,0.5,0,0), (1,0,0,0)).
+int check_skinned_extraction() {
+  cgltf_data *data = nullptr;
+  const cgltf_primitive *primitive = nullptr;
+  if (!load_fixture_primitive(&data, &primitive)) {
+    std::puts("fixture setup failed");
+    return 1;
+  }
+
+  const std::vector<std::uint32_t> remap = {2U, 1U, 0U};
+  PrimitiveData cooked{};
+  const bool extracted = extract_primitive(primitive, &cooked, &remap);
+  cgltf_free(data);
+  if (!extracted) {
+    std::puts("skinned extraction failed");
+    return 1;
+  }
+  if (!cooked.hasSkin || cooked.hasUVs ||
+      (primitive_stride_floats(cooked) != 16U) ||
+      (cooked.interleavedVertices.size() != 48U)) {
+    std::puts("skinned layout mismatch");
+    return 1;
+  }
+
+  const std::array<float, 8U> expectedJointsWeights[3] = {
+      {2.0F, 1.0F, 0.0F, 2.0F, 0.5F, 0.25F, 0.25F, 0.0F},
+      {0.0F, 0.0F, 0.0F, 0.0F, 0.5F, 0.5F, 0.0F, 0.0F},
+      {1.0F, 2.0F, 2.0F, 2.0F, 1.0F, 0.0F, 0.0F, 0.0F}};
+  for (std::size_t v = 0U; v < 3U; ++v) {
+    const float *vertex = &cooked.interleavedVertices[v * 16U];
+    if ((vertex[6U] != 0.0F) || (vertex[7U] != 0.0F)) {
+      std::puts("uv slot not zero-filled");
+      return 1;
+    }
+    for (std::size_t c = 0U; c < 8U; ++c) {
+      if (vertex[8U + c] != expectedJointsWeights[v][c]) {
+        std::puts("joint/weight data mismatch");
+        return 1;
+      }
+    }
+  }
+  if ((cooked.interleavedVertices[16U + 0U] != 1.0F) ||
+      (cooked.interleavedVertices[16U + 5U] != 1.0F)) {
+    std::puts("position/normal data mismatch");
+    return 1;
+  }
+  return 0;
+}
+
+/// EXPECTATION: without a joint remap the same primitive cooks to the
+/// bare 6-float layout — skinning is strictly opt-in.
+int check_unskinned_without_remap() {
+  cgltf_data *data = nullptr;
+  const cgltf_primitive *primitive = nullptr;
+  if (!load_fixture_primitive(&data, &primitive)) {
+    std::puts("fixture setup failed");
+    return 1;
+  }
+
+  PrimitiveData cooked{};
+  const bool extracted = extract_primitive(primitive, &cooked, nullptr);
+  cgltf_free(data);
+  if (!extracted) {
+    std::puts("unskinned extraction failed");
+    return 1;
+  }
+  if (cooked.hasSkin || (primitive_stride_floats(cooked) != 6U) ||
+      (cooked.interleavedVertices.size() != 18U)) {
+    std::puts("unskinned layout mismatch");
+    return 1;
+  }
+  return 0;
+}
+
+/// EXPECTATION: a vertex joint index outside the remap fails the
+/// extraction instead of writing a bogus palette index.
+int check_out_of_range_joint_rejected() {
+  cgltf_data *data = nullptr;
+  const cgltf_primitive *primitive = nullptr;
+  if (!load_fixture_primitive(&data, &primitive)) {
+    std::puts("fixture setup failed");
+    return 1;
+  }
+
+  const std::vector<std::uint32_t> shortRemap = {1U, 0U};
+  PrimitiveData cooked{};
+  const bool extracted = extract_primitive(primitive, &cooked, &shortRemap);
+  cgltf_free(data);
+  if (extracted) {
+    std::puts("out-of-range joint was accepted");
+    return 1;
+  }
+  return 0;
+}
+
+/// EXPECTATION: writing skinned primitive data produces a v3 header with
+/// the exact vertex count and file size (16 + 48 * 4 bytes).
+int check_v3_mesh_file_header() {
+  cgltf_data *data = nullptr;
+  const cgltf_primitive *primitive = nullptr;
+  if (!load_fixture_primitive(&data, &primitive)) {
+    std::puts("fixture setup failed");
+    return 1;
+  }
+
+  const std::vector<std::uint32_t> remap = {2U, 1U, 0U};
+  PrimitiveData cooked{};
+  const bool extracted = extract_primitive(primitive, &cooked, &remap);
+  cgltf_free(data);
+  if (!extracted || !write_mesh_file(kMeshPath, cooked)) {
+    std::puts("skinned mesh write failed");
+    return 1;
+  }
+
+  FILE *file = nullptr;
+#ifdef _WIN32
+  if (fopen_s(&file, kMeshPath, "rb") != 0) {
+    file = nullptr;
+  }
+#else
+  file = std::fopen(kMeshPath, "rb");
+#endif
+  if (file == nullptr) {
+    std::puts("could not reopen cooked mesh");
+    return 1;
+  }
+  engine::core::MeshAssetHeader header{};
+  const bool readOk = std::fread(&header, sizeof(header), 1U, file) == 1U;
+  static_cast<void>(std::fseek(file, 0, SEEK_END));
+  const long fileSize = std::ftell(file);
+  std::fclose(file);
+  if (!readOk) {
+    std::puts("could not read cooked mesh header");
+    return 1;
+  }
+  if ((header.magic != engine::core::kMeshAssetMagic) ||
+      (header.version != engine::core::kMeshAssetVersion3) ||
+      (header.vertexCount != 3U) || (header.indexCount != 0U) ||
+      (fileSize != static_cast<long>(sizeof(header) + (48U * 4U)))) {
+    std::puts("cooked mesh header mismatch");
+    return 1;
+  }
+  return 0;
+}
+
+/// EXPECTATION (review item 1): a glTF primitive without a NORMAL
+/// accessor extracts when normal generation will follow — normals come
+/// out zeroed, and generation then produces exact face normals — while
+/// the default path still rejects the missing accessor.
+int check_missing_normals_with_generation() {
+  cgltf_data *data = nullptr;
+  const cgltf_primitive *primitive = nullptr;
+  if (!load_fixture_primitive(&data, &primitive)) {
+    std::puts("fixture setup failed");
+    return 1;
+  }
+
+  for (cgltf_size i = 0U; i < primitive->attributes_count; ++i) {
+    if (data->meshes[0].primitives[0].attributes[i].type ==
+        cgltf_attribute_type_normal) {
+      data->meshes[0].primitives[0].attributes[i].type =
+          cgltf_attribute_type_invalid;
+    }
+  }
+
+  PrimitiveData rejected{};
+  if (extract_primitive(primitive, &rejected, nullptr, false)) {
+    cgltf_free(data);
+    std::puts("missing NORMAL accepted without generation");
+    return 1;
+  }
+
+  PrimitiveData extracted{};
+  const bool ok = extract_primitive(primitive, &extracted, nullptr, true);
+  cgltf_free(data);
+  if (!ok) {
+    std::puts("missing NORMAL rejected despite generation");
+    return 1;
+  }
+  const std::size_t stride = primitive_stride_floats(extracted);
+  const std::size_t vertexCount =
+      extracted.interleavedVertices.size() / stride;
+  for (std::size_t v = 0U; v < vertexCount; ++v) {
+    const std::size_t base = v * stride;
+    if ((extracted.interleavedVertices[base + 3U] != 0.0F) ||
+        (extracted.interleavedVertices[base + 4U] != 0.0F) ||
+        (extracted.interleavedVertices[base + 5U] != 0.0F)) {
+      std::puts("missing NORMAL did not zero the normal fields");
+      return 1;
+    }
+  }
+
+  generate_normals_for_primitive(&extracted);
+  bool anyUnit = false;
+  for (std::size_t v = 0U; v < vertexCount; ++v) {
+    const std::size_t base = v * stride;
+    const float x = extracted.interleavedVertices[base + 3U];
+    const float y = extracted.interleavedVertices[base + 4U];
+    const float z = extracted.interleavedVertices[base + 5U];
+    const float lengthSquared = (x * x) + (y * y) + (z * z);
+    if ((lengthSquared < 0.99F) || (lengthSquared > 1.01F)) {
+      std::puts("generated normal is not unit length");
+      return 1;
+    }
+    anyUnit = true;
+  }
+  return anyUnit ? 0 : 1;
+}
+
+/// EXPECTATION (review item 3): a hull write failure is reported so the
+/// cook cannot stamp a missing sidecar complete — injected here by
+/// occupying the .hull path with a directory — while structurally
+/// hull-less geometry (too few vertices) reports success.
+int check_hull_write_failure_reported() {
+  PrimitiveData tetrahedron{};
+  tetrahedron.interleavedVertices = {
+      0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F,
+      0.0F, 1.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 1.0F, 0.0F};
+
+  const char *blockedOutput = "hull_block_test.mesh";
+  const char *blockedHullPath = "hull_block_test.mesh.hull";
+  std::error_code ec{};
+  std::filesystem::remove_all(blockedHullPath, ec);
+  if (!std::filesystem::create_directory(blockedHullPath, ec) || ec) {
+    std::puts("could not stage hull-path blocker");
+    return 1;
+  }
+  const bool blocked = cook_and_write_convex_hull(blockedOutput, tetrahedron);
+  std::filesystem::remove_all(blockedHullPath, ec);
+  if (blocked) {
+    std::puts("blocked hull write reported success");
+    return 1;
+  }
+
+  PrimitiveData degenerate{};
+  degenerate.interleavedVertices = {0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F};
+  if (!cook_and_write_convex_hull("hull_skip_test.mesh", degenerate)) {
+    std::puts("structurally hull-less geometry reported failure");
+    return 1;
+  }
+  return 0;
+}
+
+/// EXPECTATION (audit H-19): a non-triangle primitive mode is rejected
+/// by extraction instead of cooking its data as if it were a triangle
+/// list; the same primitive extracts fine as triangles.
+int check_non_triangle_mode_rejected() {
+  cgltf_data *data = nullptr;
+  const cgltf_primitive *primitive = nullptr;
+  if (!load_fixture_primitive(&data, &primitive)) {
+    std::puts("fixture setup failed");
+    return 1;
+  }
+
+  data->meshes[0].primitives[0].type = cgltf_primitive_type_line_strip;
+  PrimitiveData rejected{};
+  if (extract_primitive(primitive, &rejected, nullptr)) {
+    cgltf_free(data);
+    std::puts("line-strip primitive was accepted");
+    return 1;
+  }
+
+  data->meshes[0].primitives[0].type = cgltf_primitive_type_triangles;
+  PrimitiveData accepted{};
+  const bool ok = extract_primitive(primitive, &accepted, nullptr);
+  cgltf_free(data);
+  if (!ok) {
+    std::puts("triangle primitive was rejected");
     return 1;
   }
   return 0;
@@ -334,6 +681,9 @@ int main() {
   }
   if (result == 0) {
     result = check_non_finite_position_rejected();
+  }
+  if (result == 0) {
+    result = check_percent_encoded_image_dependency();
   }
   if (result == 0) {
     result = check_external_buffer_becomes_dependency();
