@@ -2,7 +2,7 @@
 
 #pragma once
 
-#include "engine/runtime/world.h"
+#include "engine/scripting/runtime_services.h"
 
 namespace engine::scripting {
 

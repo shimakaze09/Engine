@@ -28,7 +28,6 @@ extern "C" {
 #include "engine/core/string_util.h"
 #include "engine/math/quat.h"
 #include "engine/scripting/runtime_services.h"
-#include "engine/runtime/world.h"
 
 namespace engine::scripting {
 
@@ -287,7 +286,7 @@ int lua_engine_wake_body(lua_State *state) noexcept {
     return 0;
   }
   if ((runtime_binding().services != nullptr) && (runtime_binding().services->wake_body != nullptr)) {
-    runtime_binding().services->wake_body(runtime_binding().world, entity.index);
+    runtime_binding().services->wake_body(runtime_binding().world, entity);
   }
   return 0;
 }
@@ -302,7 +301,7 @@ int lua_engine_is_sleeping(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
-  lua_pushboolean(state, runtime_binding().services->is_sleeping(runtime_binding().world, entity.index) ? 1 : 0);
+  lua_pushboolean(state, runtime_binding().services->is_sleeping(runtime_binding().world, entity) ? 1 : 0);
   return 1;
 }
 
@@ -441,7 +440,6 @@ int lua_engine_set_parent(lua_State *state) noexcept {
     return 1;
   }
 
-  runtime::World *const world = runtime_binding().world;
   runtime::PersistentId parentId = runtime::kInvalidPersistentId;
   if (!lua_isnoneornil(state, 2)) {
     runtime::Entity parent{};
@@ -449,7 +447,8 @@ int lua_engine_set_parent(lua_State *state) noexcept {
       lua_pushboolean(state, 0);
       return 1;
     }
-    parentId = world->persistent_id(parent);
+    parentId = runtime_binding().services->persistent_id(
+        runtime_binding().world, parent);
     if (parentId == runtime::kInvalidPersistentId) {
       lua_pushboolean(state, 0);
       return 1;
@@ -485,9 +484,24 @@ int lua_engine_get_parent(lua_State *state) noexcept {
     return 1;
   }
 
-  push_entity_handle(state, runtime_binding().world->find_entity_by_persistent_id(
-                                transform.parentId));
+  push_entity_handle(state,
+                     runtime_binding().services->find_entity_by_persistent_id(
+                         runtime_binding().world, transform.parentId));
   return 1;
+}
+
+/// Bridge visitor state for get_children: the table under construction.
+struct ChildTableFill final {
+  lua_State *state = nullptr;
+  int childCount = 0;
+};
+
+/// Appends one child's handle to the table being filled.
+void child_table_visit(core::Entity child, void *context) noexcept {
+  auto *fill = static_cast<ChildTableFill *>(context);
+  ++fill->childCount;
+  push_entity_handle(fill->state, child);
+  lua_rawseti(fill->state, -2, fill->childCount);
 }
 
 int lua_engine_get_children(lua_State *state) noexcept {
@@ -497,21 +511,13 @@ int lua_engine_get_children(lua_State *state) noexcept {
     return 1;
   }
 
-  runtime::World *const world = runtime_binding().world;
   lua_newtable(state);
-  if (!world->is_alive(parent)) {
-    return 1;
-  }
-
   // The World's child index answers in O(children), not O(transforms),
   // in child-link order.
-  int childCount = 0;
-  world->for_each_child(parent, [state, &childCount](
-                                    runtime::Entity child) noexcept {
-    ++childCount;
-    push_entity_handle(state, child);
-    lua_rawseti(state, -2, childCount);
-  });
+  ChildTableFill fill{};
+  fill.state = state;
+  runtime_binding().services->for_each_child(runtime_binding().world, parent,
+                                             &child_table_visit, &fill);
   return 1;
 }
 

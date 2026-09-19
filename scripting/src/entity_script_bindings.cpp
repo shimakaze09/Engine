@@ -18,7 +18,6 @@ extern "C" {
 #include <cstring>
 
 #include "engine/core/logging.h"
-#include "engine/runtime/world.h"
 #include "runtime_binding.h"
 
 namespace engine::scripting {
@@ -116,20 +115,35 @@ void push_entity_handle(lua_State *state, core::Entity entity) noexcept {
 /// given array, in dense component order, so walk loops survive callbacks
 /// that destroy or create scripted entities mid-iteration (swap-and-pop
 /// invalidation); entities created after the snapshot are excluded.
+/// Bridge visitor state for snapshot_scripted_entities.
+struct ScriptedSnapshot final {
+  core::Entity *out = nullptr;
+  std::size_t count = 0U;
+};
+
+/// Records one scripted entity into the snapshot while capacity remains.
+void snapshot_scripted_visit(core::Entity entity,
+                             const runtime::ScriptComponent &sc,
+                             void *context) noexcept {
+  auto *snapshot = static_cast<ScriptedSnapshot *>(context);
+  if ((sc.scriptPath[0] == '\0') ||
+      (snapshot->count >= kMaxScriptDispatchEntries)) {
+    return;
+  }
+  snapshot->out[snapshot->count] = entity;
+  ++snapshot->count;
+}
+
 std::size_t snapshot_scripted_entities(
     core::Entity (&out)[kMaxScriptDispatchEntries]) noexcept {
-  std::size_t count = 0U;
-  runtime_binding().world->for_each<runtime::ScriptComponent>(
-      [&count, &out](runtime::Entity entity,
-                     const runtime::ScriptComponent &sc) noexcept {
-        if ((sc.scriptPath[0] == '\0') ||
-            (count >= kMaxScriptDispatchEntries)) {
-          return;
-        }
-        out[count] = entity;
-        ++count;
-      });
-  return count;
+  if (!runtime_bound()) {
+    return 0U;
+  }
+  ScriptedSnapshot snapshot{};
+  snapshot.out = out;
+  runtime_binding().services->for_each_scripted_entity(
+      runtime_binding().world, &snapshot_scripted_visit, &snapshot);
+  return snapshot.count;
 }
 
 /// Snapshots scripted entities into the tick/start/end dispatch order.
@@ -142,12 +156,20 @@ std::size_t snapshot_script_dispatch_order() noexcept {
 /// false when the component is missing or the path is empty.
 bool copy_entity_script_path(runtime::World *world, runtime::Entity entity,
                              char (&outPath)[kScriptPathSize]) noexcept {
-  const auto *sc = world->get_script_component_ptr(entity);
-  if ((sc == nullptr) || (sc->scriptPath[0] == '\0')) {
+  runtime::ScriptComponent sc{};
+  if (!runtime_bound() ||
+      !runtime_binding().services->get_script_component_op(world, entity,
+                                                           &sc) ||
+      (sc.scriptPath[0] == '\0')) {
     return false;
   }
-  std::snprintf(outPath, sizeof(outPath), "%s", sc->scriptPath);
+  std::snprintf(outPath, sizeof(outPath), "%s", sc.scriptPath);
   return true;
+}
+
+/// True when `entity` is live in `world`; the bridge answers.
+bool world_entity_alive(runtime::World *world, runtime::Entity entity) noexcept {
+  return runtime_bound() && runtime_binding().services->is_alive(world, entity);
 }
 
 /// Returns whether this exact entity generation has faulted.
@@ -249,7 +271,7 @@ int module_save_state_trampoline(lua_State *state) noexcept {
 void capture_entity_saved_state(std::size_t moduleSlot,
                                 const EntityScriptModule &mod) noexcept {
   clear_entity_saved_state_for_module(moduleSlot);
-  if ((g_state == nullptr) || (runtime_binding().world == nullptr) ||
+  if ((g_state == nullptr) || !runtime_bound() ||
       (mod.registryRef == LUA_NOREF)) {
     return;
   }
@@ -273,7 +295,7 @@ void capture_entity_saved_state(std::size_t moduleSlot,
     const core::Entity entity = order[i];
     char path[kScriptPathSize] = {};
     if ((entity.index == 0U) || (entity.index >= kMaxFaultedEntities) ||
-        !world->is_alive(entity) ||
+        !world_entity_alive(world, entity) ||
         !copy_entity_script_path(world, entity, path) ||
         (std::strcmp(path, modPath) != 0)) {
       continue;
@@ -634,7 +656,7 @@ ReloadHookResult call_module_reload_hook(int moduleRef, runtime::Entity entity,
 /// nest with itself (only C callers reach it), so one buffer suffices.
 void dispatch_pending_entity_reloads() noexcept {
   if (!g_hasPendingEntityReloads || (g_state == nullptr) ||
-      (runtime_binding().world == nullptr)) {
+      !runtime_bound()) {
     return;
   }
 
@@ -653,7 +675,7 @@ void dispatch_pending_entity_reloads() noexcept {
     for (std::size_t j = 0U; j < count; ++j) {
       const core::Entity entity = g_reloadDispatchOrder[j];
       char path[kScriptPathSize] = {};
-      if (!world->is_alive(entity) ||
+      if (!world_entity_alive(world, entity) ||
           !copy_entity_script_path(world, entity, path) ||
           (std::strcmp(path, modPath) != 0)) {
         continue;
@@ -693,7 +715,8 @@ void dispatch_pending_entity_reloads() noexcept {
 /// Fires on_end_play for one entity when it has a script and began play.
 void dispatch_entity_end_play(runtime::World *world,
                               runtime::Entity entity) noexcept {
-  if (!world->has_begun_play(entity)) {
+  if (!runtime_bound() ||
+      !runtime_binding().services->has_begun_play(world, entity)) {
     return;
   }
   char path[kScriptPathSize] = {};
@@ -708,6 +731,29 @@ void dispatch_entity_end_play(runtime::World *world,
   static_cast<void>(
       call_module_function(ref, "on_end_play", "on_end", entity, false, 0.0F));
   --g_endPlayDispatchDepth;
+}
+
+/// Bridge visitor: fires on_end_play for one entity of the walked set.
+void end_play_visit(core::Entity entity, void *context) noexcept {
+  dispatch_entity_end_play(static_cast<runtime::World *>(context), entity);
+}
+
+/// Bridge visitor: begins play for one entity that still needs it.
+void begin_play_visit(core::Entity entity, void *context) noexcept {
+  auto *world = static_cast<runtime::World *>(context);
+  const RuntimeServices &services = *runtime_binding().services;
+  char path[kScriptPathSize] = {};
+  if (!copy_entity_script_path(world, entity, path) ||
+      entity_is_faulted(entity)) {
+    services.mark_begin_play_done(world, entity);
+    return;
+  }
+  const int ref = get_or_load_entity_script_module(path);
+  if (ref == LUA_NOREF) {
+    return;
+  }
+  services.mark_begin_play_done(world, entity);
+  call_module_function(ref, "on_begin_play", "on_start", entity, false, 0.0F);
 }
 
 } // namespace
@@ -739,7 +785,7 @@ int lua_engine_require(lua_State *state) noexcept {
 }
 
 void dispatch_entity_scripts_start() noexcept {
-  if ((g_state == nullptr) || (runtime_binding().world == nullptr)) {
+  if ((g_state == nullptr) || !runtime_bound()) {
     return;
   }
   ++g_modulePollSerial;
@@ -749,7 +795,7 @@ void dispatch_entity_scripts_start() noexcept {
   for (std::size_t i = 0U; i < count; ++i) {
     const runtime::Entity entity = g_scriptDispatchOrder[i];
     char path[kScriptPathSize] = {};
-    if (!world->is_alive(entity) ||
+    if (!world_entity_alive(world, entity) ||
         !copy_entity_script_path(world, entity, path) ||
         entity_is_faulted(entity)) {
       continue;
@@ -759,62 +805,47 @@ void dispatch_entity_scripts_start() noexcept {
     if (ref == LUA_NOREF) {
       continue;
     }
-    world->mark_begin_play_done(entity);
+    runtime_binding().services->mark_begin_play_done(world, entity);
     call_module_function(ref, "on_begin_play", "on_start", entity, false,
                          0.0F);
   }
 }
 
 void dispatch_entity_scripts_begin_play(runtime::World *world) noexcept {
-  if ((g_state == nullptr) || (world == nullptr)) {
+  if ((g_state == nullptr) || (world == nullptr) || !runtime_bound()) {
     return;
   }
   ++g_modulePollSerial;
 
-  world->for_each_needs_begin_play([world](runtime::Entity entity) noexcept {
-    char path[kScriptPathSize] = {};
-    if (!copy_entity_script_path(world, entity, path) ||
-        entity_is_faulted(entity)) {
-      world->mark_begin_play_done(entity);
-      return;
-    }
-    const int ref = get_or_load_entity_script_module(path);
-    if (ref == LUA_NOREF) {
-      return;
-    }
-    world->mark_begin_play_done(entity);
-    call_module_function(ref, "on_begin_play", "on_start", entity, false, 0.0F);
-  });
+  runtime_binding().services->for_each_needs_begin_play(world, &begin_play_visit,
+                                                        world);
 }
 
 bool in_end_play_dispatch() noexcept { return g_endPlayDispatchDepth > 0; }
 
 void dispatch_entity_subtree_end_play(runtime::World *world,
                                       runtime::Entity entity) noexcept {
-  if ((g_state == nullptr) || (world == nullptr)) {
+  if ((g_state == nullptr) || (world == nullptr) || !runtime_bound()) {
     return;
   }
-  world->for_each_subtree_member(entity,
-                                 [world](runtime::Entity member) noexcept {
-                                   dispatch_entity_end_play(world, member);
-                                 });
+  runtime_binding().services->for_each_subtree_member(world, entity,
+                                                      &end_play_visit, world);
 }
 
 void dispatch_entity_scripts_end_play(runtime::World *world) noexcept {
-  if ((g_state == nullptr) || (world == nullptr)) {
+  if ((g_state == nullptr) || (world == nullptr) || !runtime_bound()) {
     return;
   }
   ++g_modulePollSerial;
 
-  world->for_each_pending_destroy([world](runtime::Entity entity) noexcept {
-    dispatch_entity_end_play(world, entity);
-  });
+  runtime_binding().services->for_each_pending_destroy(world, &end_play_visit,
+                                                       world);
 }
 
 std::uint64_t entity_script_mtime_polls() noexcept { return g_mtimePolls; }
 
 void dispatch_entity_scripts_update(float dt) noexcept {
-  if ((g_state == nullptr) || (runtime_binding().world == nullptr)) {
+  if ((g_state == nullptr) || !runtime_bound()) {
     return;
   }
 
@@ -826,7 +857,7 @@ void dispatch_entity_scripts_update(float dt) noexcept {
   for (std::size_t i = 0U; i < count; ++i) {
     const runtime::Entity entity = g_scriptDispatchOrder[i];
     char path[kScriptPathSize] = {};
-    if (!world->is_alive(entity) ||
+    if (!world_entity_alive(world, entity) ||
         !copy_entity_script_path(world, entity, path)) {
       continue;
     }
@@ -836,7 +867,7 @@ void dispatch_entity_scripts_update(float dt) noexcept {
       continue;
     }
     dispatch_pending_entity_reloads();
-    if (!world->is_alive(entity) || entity_is_faulted(entity)) {
+    if (!world_entity_alive(world, entity) || entity_is_faulted(entity)) {
       continue;
     }
     call_module_function(ref, "on_tick", "on_update", entity, true, dt);
@@ -857,7 +888,8 @@ void dispatch_entity_scripts_end_impl(runtime::World *world) noexcept {
     // An entity that never received on_begin_play (spawned in the final
     // tick, begin-play still pending) gets no on_end_play either, like
     // the destroy path: the hooks pair or neither fires.
-    if (!world->is_alive(entity) || !world->has_begun_play(entity) ||
+    if (!world_entity_alive(world, entity) ||
+        !runtime_binding().services->has_begun_play(world, entity) ||
         !copy_entity_script_path(world, entity, path)) {
       continue;
     }
@@ -874,7 +906,7 @@ void dispatch_entity_scripts_end_impl(runtime::World *world) noexcept {
 } // namespace
 
 void dispatch_entity_scripts_end() noexcept {
-  if ((g_state == nullptr) || (runtime_binding().world == nullptr)) {
+  if ((g_state == nullptr) || !runtime_bound()) {
     return;
   }
   ++g_modulePollSerial;
@@ -882,7 +914,7 @@ void dispatch_entity_scripts_end() noexcept {
 }
 
 void dispatch_entity_scripts_end_for_transition() noexcept {
-  if ((g_state == nullptr) || (runtime_binding().world == nullptr)) {
+  if ((g_state == nullptr) || !runtime_bound()) {
     return;
   }
   ++g_modulePollSerial;

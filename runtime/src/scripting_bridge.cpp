@@ -1,4 +1,7 @@
-// Implements scripting bridge behavior for the Engine runtime world.
+// Implements the runtime side of the scripting bridge: every operation in
+// the RuntimeServices table scripting declares, forwarding the caller's
+// entity handle unchanged so the World's own generation check decides
+// liveness, plus the entity pools and the install into the locators.
 
 #include "engine/runtime/scripting_bridge.h"
 
@@ -13,7 +16,9 @@
 #include "engine/content/asset_streaming.h"
 #include "engine/renderer/camera.h"
 #include "engine/runtime/animation_system.h"
+#include "engine/runtime/entity_pool.h"
 #include "engine/runtime/physics_bridge.h"
+#include "engine/runtime/primitive_collider.h"
 #include "engine/runtime/prefab_serializer.h"
 #include "engine/runtime/save_data.h"
 #include "engine/runtime/scene_serializer.h"
@@ -159,32 +164,41 @@ void scripting_set_camera_fov(float fovRadians) noexcept {
   renderer::set_active_camera(camera);
 }
 
+static_assert(scripting::kMaxWorldEntities == runtime::World::kMaxEntities,
+              "scripting's entity capacity must match the World's");
+static_assert(scripting::kMaxTimerSlots == runtime::TimerManager::kMaxTimers,
+              "scripting's timer slot count must match the timer manager's");
+static_assert(scripting::kMaxEntityPoolSize ==
+                  runtime::EntityPool::kMaxPoolSize,
+              "scripting's pool size must match the entity pool's");
+static_assert(static_cast<int>(scripting::GameModeState::WaitingToStart) ==
+                      static_cast<int>(runtime::GameMode::State::WaitingToStart) &&
+                  static_cast<int>(scripting::GameModeState::InProgress) ==
+                      static_cast<int>(runtime::GameMode::State::InProgress) &&
+                  static_cast<int>(scripting::GameModeState::Paused) ==
+                      static_cast<int>(runtime::GameMode::State::Paused) &&
+                  static_cast<int>(scripting::GameModeState::Ended) ==
+                      static_cast<int>(runtime::GameMode::State::Ended),
+              "scripting's game mode states must mirror the runtime's");
+
 // Camera manager bridge functions
-bool scripting_push_camera(runtime::World *world, std::uint32_t entityIndex,
+bool scripting_push_camera(runtime::World *world, runtime::Entity entity,
                            float posX, float posY, float posZ, float tgtX,
                            float tgtY, float tgtZ, float priority,
                            float blendSpeed) noexcept {
-  if (world == nullptr) {
+  if ((world == nullptr) || !world->is_alive(entity)) {
     return false;
   }
   runtime::CameraEntry entry{};
   entry.position = math::Vec3(posX, posY, posZ);
   entry.target = math::Vec3(tgtX, tgtY, tgtZ);
   entry.blendSpeed = blendSpeed;
-  const runtime::Entity entity = world->find_entity_by_index(entityIndex);
-  if (entity == runtime::kInvalidEntity) {
-    return false;
-  }
   return world->camera_manager().push_camera(entity, entry, priority);
 }
 
 bool scripting_pop_camera(runtime::World *world,
-                          std::uint32_t entityIndex) noexcept {
-  if (world == nullptr) {
-    return false;
-  }
-  const runtime::Entity entity = world->find_entity_by_index(entityIndex);
-  if (entity == runtime::kInvalidEntity) {
+                          runtime::Entity entity) noexcept {
+  if ((world == nullptr) || !world->is_alive(entity)) {
     return false;
   }
   return world->camera_manager().pop_camera(entity);
@@ -240,24 +254,10 @@ bool scripting_get_gravity(runtime::World *world, float *outX, float *outY,
   return runtime::get_gravity(*world, outX, outY, outZ);
 }
 
-bool scripting_raycast(runtime::World *world, float ox, float oy, float oz,
-                       float dx, float dy, float dz, float maxDistance,
-                       scripting::RuntimeRaycastHit *outHit,
-                       std::uint32_t skipEntityIndex) noexcept {
-  if ((world == nullptr) || (outHit == nullptr)) {
-    return false;
-  }
-
-  const runtime::Entity skipEntity =
-      (skipEntityIndex != 0U) ? world->find_entity_by_index(skipEntityIndex)
-                              : runtime::kInvalidEntity;
-  runtime::PhysicsRaycastHit hit{};
-  if (!runtime::raycast(*world, math::Vec3(ox, oy, oz), math::Vec3(dx, dy, dz),
-                        maxDistance, &hit, skipEntity)) {
-    return false;
-  }
-
-  outHit->entityIndex = hit.entity.index;
+/// Mirrors a physics raycast hit into the bridge's flat hit record.
+void copy_raycast_hit(const runtime::PhysicsRaycastHit &hit,
+                      scripting::RuntimeRaycastHit *outHit) noexcept {
+  outHit->entity = hit.entity;
   outHit->distance = hit.distance;
   outHit->pointX = hit.point.x;
   outHit->pointY = hit.point.y;
@@ -265,6 +265,35 @@ bool scripting_raycast(runtime::World *world, float ox, float oy, float oz,
   outHit->normalX = hit.normal.x;
   outHit->normalY = hit.normal.y;
   outHit->normalZ = hit.normal.z;
+}
+
+/// Mirrors a sweep hit into the bridge's flat hit record; the sweep names
+/// its entity by index, resolved to the live handle here.
+void copy_sweep_hit(const runtime::World &world, const physics::SweepHit &hit,
+                    scripting::RuntimeRaycastHit *outHit) noexcept {
+  outHit->entity = world.find_entity_by_index(hit.entityIndex);
+  outHit->distance = hit.distance;
+  outHit->pointX = hit.contactPoint.x;
+  outHit->pointY = hit.contactPoint.y;
+  outHit->pointZ = hit.contactPoint.z;
+  outHit->normalX = hit.normal.x;
+  outHit->normalY = hit.normal.y;
+  outHit->normalZ = hit.normal.z;
+}
+
+bool scripting_raycast(runtime::World *world, float ox, float oy, float oz,
+                       float dx, float dy, float dz, float maxDistance,
+                       scripting::RuntimeRaycastHit *outHit,
+                       runtime::Entity skipEntity) noexcept {
+  if ((world == nullptr) || (outHit == nullptr)) {
+    return false;
+  }
+  runtime::PhysicsRaycastHit hit{};
+  if (!runtime::raycast(*world, math::Vec3(ox, oy, oz), math::Vec3(dx, dy, dz),
+                        maxDistance, &hit, skipEntity)) {
+    return false;
+  }
+  copy_raycast_hit(hit, outHit);
   return true;
 }
 
@@ -273,55 +302,66 @@ std::size_t scripting_raycast_all(runtime::World *world, float ox, float oy,
                                   float maxDistance,
                                   scripting::RuntimeRaycastHit *outHits,
                                   std::size_t maxHits, std::uint32_t mask,
-                                  std::uint32_t skipEntityIndex) noexcept {
+                                  runtime::Entity skipEntity) noexcept {
   if ((world == nullptr) || (outHits == nullptr) || (maxHits == 0U)) {
     return 0U;
   }
   constexpr std::size_t kLocalMax = 32U;
   const std::size_t cap = maxHits < kLocalMax ? maxHits : kLocalMax;
-  const runtime::Entity skipEntity =
-      (skipEntityIndex != 0U) ? world->find_entity_by_index(skipEntityIndex)
-                              : runtime::kInvalidEntity;
   runtime::PhysicsRaycastHit hits[kLocalMax]{};
   const std::size_t count = runtime::raycast_all(
       *world, math::Vec3(ox, oy, oz), math::Vec3(dx, dy, dz), maxDistance,
       hits, cap, mask, skipEntity);
   for (std::size_t i = 0U; i < count; ++i) {
-    outHits[i].entityIndex = hits[i].entity.index;
-    outHits[i].distance = hits[i].distance;
-    outHits[i].pointX = hits[i].point.x;
-    outHits[i].pointY = hits[i].point.y;
-    outHits[i].pointZ = hits[i].point.z;
-    outHits[i].normalX = hits[i].normal.x;
-    outHits[i].normalY = hits[i].normal.y;
-    outHits[i].normalZ = hits[i].normal.z;
+    copy_raycast_hit(hits[i], &outHits[i]);
   }
   return count;
 }
 
+/// Resolves the index results of an overlap query to live handles.
+std::size_t resolve_overlap_entities(const runtime::World &world,
+                                     const std::uint32_t *indices,
+                                     std::size_t count,
+                                     runtime::Entity *outEntities) noexcept {
+  for (std::size_t i = 0U; i < count; ++i) {
+    outEntities[i] = world.find_entity_by_index(indices[i]);
+  }
+  return count;
+}
+
+constexpr std::size_t kMaxOverlapResults = 64U;
+
 std::size_t scripting_overlap_sphere(runtime::World *world, float cx, float cy,
                                      float cz, float radius,
-                                     std::uint32_t *outEntityIndices,
+                                     runtime::Entity *outEntities,
                                      std::size_t maxResults,
                                      std::uint32_t mask) noexcept {
-  if (world == nullptr) {
+  if ((world == nullptr) || (outEntities == nullptr)) {
     return 0U;
   }
-  return runtime::overlap_sphere(*world, math::Vec3(cx, cy, cz), radius,
-                                 outEntityIndices, maxResults, mask);
+  std::uint32_t indices[kMaxOverlapResults]{};
+  const std::size_t cap =
+      maxResults < kMaxOverlapResults ? maxResults : kMaxOverlapResults;
+  const std::size_t count = runtime::overlap_sphere(
+      *world, math::Vec3(cx, cy, cz), radius, indices, cap, mask);
+  return resolve_overlap_entities(*world, indices, count, outEntities);
 }
 
 std::size_t scripting_overlap_box(runtime::World *world, float cx, float cy,
                                   float cz, float hx, float hy, float hz,
-                                  std::uint32_t *outEntityIndices,
+                                  runtime::Entity *outEntities,
                                   std::size_t maxResults,
                                   std::uint32_t mask) noexcept {
-  if (world == nullptr) {
+  if ((world == nullptr) || (outEntities == nullptr)) {
     return 0U;
   }
-  return runtime::overlap_box(*world, math::Vec3(cx, cy, cz),
-                              math::Vec3(hx, hy, hz), outEntityIndices,
-                              maxResults, mask);
+  std::uint32_t indices[kMaxOverlapResults]{};
+  const std::size_t cap =
+      maxResults < kMaxOverlapResults ? maxResults : kMaxOverlapResults;
+  const std::size_t count =
+      runtime::overlap_box(*world, math::Vec3(cx, cy, cz),
+                           math::Vec3(hx, hy, hz), indices, cap, mask);
+  return resolve_overlap_entities(*world, indices, count, outEntities);
 }
 
 bool scripting_sweep_sphere(runtime::World *world, float ox, float oy, float oz,
@@ -329,27 +369,17 @@ bool scripting_sweep_sphere(runtime::World *world, float ox, float oy, float oz,
                             float maxDistance,
                             scripting::RuntimeRaycastHit *outHit,
                             std::uint32_t mask,
-                            std::uint32_t skipEntityIndex) noexcept {
+                            runtime::Entity skipEntity) noexcept {
   if ((world == nullptr) || (outHit == nullptr)) {
     return false;
   }
-  const runtime::Entity skipEntity =
-      (skipEntityIndex != 0U) ? world->find_entity_by_index(skipEntityIndex)
-                              : runtime::kInvalidEntity;
   physics::SweepHit sh{};
   if (!runtime::sweep_sphere(*world, math::Vec3(ox, oy, oz), radius,
                              math::Vec3(dx, dy, dz), maxDistance, &sh, mask,
                              skipEntity)) {
     return false;
   }
-  outHit->entityIndex = sh.entityIndex;
-  outHit->distance = sh.distance;
-  outHit->pointX = sh.contactPoint.x;
-  outHit->pointY = sh.contactPoint.y;
-  outHit->pointZ = sh.contactPoint.z;
-  outHit->normalX = sh.normal.x;
-  outHit->normalY = sh.normal.y;
-  outHit->normalZ = sh.normal.z;
+  copy_sweep_hit(*world, sh, outHit);
   return true;
 }
 
@@ -358,27 +388,17 @@ bool scripting_sweep_box(runtime::World *world, float cx, float cy, float cz,
                          float dz, float maxDistance,
                          scripting::RuntimeRaycastHit *outHit,
                          std::uint32_t mask,
-                         std::uint32_t skipEntityIndex) noexcept {
+                         runtime::Entity skipEntity) noexcept {
   if ((world == nullptr) || (outHit == nullptr)) {
     return false;
   }
-  const runtime::Entity skipEntity =
-      (skipEntityIndex != 0U) ? world->find_entity_by_index(skipEntityIndex)
-                              : runtime::kInvalidEntity;
   physics::SweepHit sh{};
   if (!runtime::sweep_box(*world, math::Vec3(cx, cy, cz),
                           math::Vec3(hx, hy, hz), math::Vec3(dx, dy, dz),
                           maxDistance, &sh, mask, skipEntity)) {
     return false;
   }
-  outHit->entityIndex = sh.entityIndex;
-  outHit->distance = sh.distance;
-  outHit->pointX = sh.contactPoint.x;
-  outHit->pointY = sh.contactPoint.y;
-  outHit->pointZ = sh.contactPoint.z;
-  outHit->normalX = sh.normal.x;
-  outHit->normalY = sh.normal.y;
-  outHit->normalZ = sh.normal.z;
+  copy_sweep_hit(*world, sh, outHit);
   return true;
 }
 
@@ -389,16 +409,21 @@ std::uint32_t normalize_joint_id(physics::JointId id) noexcept {
                                           : static_cast<std::uint32_t>(id);
 }
 
+/// True when both joint endpoints are live in `world`.
+bool joint_endpoints_alive(const runtime::World *world,
+                           runtime::Entity entityA,
+                           runtime::Entity entityB) noexcept {
+  return (world != nullptr) && world->is_alive(entityA) &&
+         world->is_alive(entityB);
+}
+
 std::uint32_t scripting_add_distance_joint(runtime::World *world,
-                                           std::uint32_t entityIndexA,
-                                           std::uint32_t entityIndexB,
+                                           runtime::Entity entityA,
+                                           runtime::Entity entityB,
                                            float distance) noexcept {
-  if ((world == nullptr) || (entityIndexA == 0U) || (entityIndexB == 0U)) {
+  if (!joint_endpoints_alive(world, entityA, entityB)) {
     return 0U;
   }
-
-  const runtime::Entity entityA = world->find_entity_by_index(entityIndexA);
-  const runtime::Entity entityB = world->find_entity_by_index(entityIndexB);
   return normalize_joint_id(
       runtime::add_distance_joint(*world, entityA, entityB, distance));
 }
@@ -412,16 +437,14 @@ bool scripting_remove_joint(runtime::World *world,
 }
 
 std::uint32_t scripting_add_hinge_joint(runtime::World *world,
-                                        std::uint32_t entityIndexA,
-                                        std::uint32_t entityIndexB,
-                                        float pivotX, float pivotY,
-                                        float pivotZ, float axisX, float axisY,
+                                        runtime::Entity entityA,
+                                        runtime::Entity entityB, float pivotX,
+                                        float pivotY, float pivotZ,
+                                        float axisX, float axisY,
                                         float axisZ) noexcept {
-  if ((world == nullptr) || (entityIndexA == 0U) || (entityIndexB == 0U)) {
+  if (!joint_endpoints_alive(world, entityA, entityB)) {
     return 0U;
   }
-  const runtime::Entity entityA = world->find_entity_by_index(entityIndexA);
-  const runtime::Entity entityB = world->find_entity_by_index(entityIndexB);
   const math::Vec3 pivot(pivotX, pivotY, pivotZ);
   const math::Vec3 axis(axisX, axisY, axisZ);
   return normalize_joint_id(
@@ -429,57 +452,48 @@ std::uint32_t scripting_add_hinge_joint(runtime::World *world,
 }
 
 std::uint32_t scripting_add_ball_socket_joint(runtime::World *world,
-                                              std::uint32_t entityIndexA,
-                                              std::uint32_t entityIndexB,
+                                              runtime::Entity entityA,
+                                              runtime::Entity entityB,
                                               float pivotX, float pivotY,
                                               float pivotZ) noexcept {
-  if ((world == nullptr) || (entityIndexA == 0U) || (entityIndexB == 0U)) {
+  if (!joint_endpoints_alive(world, entityA, entityB)) {
     return 0U;
   }
-  const runtime::Entity entityA = world->find_entity_by_index(entityIndexA);
-  const runtime::Entity entityB = world->find_entity_by_index(entityIndexB);
   const math::Vec3 pivot(pivotX, pivotY, pivotZ);
   return normalize_joint_id(
       runtime::add_ball_socket_joint(*world, entityA, entityB, pivot));
 }
 
 std::uint32_t scripting_add_slider_joint(runtime::World *world,
-                                         std::uint32_t entityIndexA,
-                                         std::uint32_t entityIndexB,
-                                         float axisX, float axisY,
-                                         float axisZ) noexcept {
-  if ((world == nullptr) || (entityIndexA == 0U) || (entityIndexB == 0U)) {
+                                         runtime::Entity entityA,
+                                         runtime::Entity entityB, float axisX,
+                                         float axisY, float axisZ) noexcept {
+  if (!joint_endpoints_alive(world, entityA, entityB)) {
     return 0U;
   }
-  const runtime::Entity entityA = world->find_entity_by_index(entityIndexA);
-  const runtime::Entity entityB = world->find_entity_by_index(entityIndexB);
   const math::Vec3 axis(axisX, axisY, axisZ);
   return normalize_joint_id(
       runtime::add_slider_joint(*world, entityA, entityB, axis));
 }
 
 std::uint32_t scripting_add_spring_joint(runtime::World *world,
-                                         std::uint32_t entityIndexA,
-                                         std::uint32_t entityIndexB,
+                                         runtime::Entity entityA,
+                                         runtime::Entity entityB,
                                          float restLength, float stiffness,
                                          float damping) noexcept {
-  if ((world == nullptr) || (entityIndexA == 0U) || (entityIndexB == 0U)) {
+  if (!joint_endpoints_alive(world, entityA, entityB)) {
     return 0U;
   }
-  const runtime::Entity entityA = world->find_entity_by_index(entityIndexA);
-  const runtime::Entity entityB = world->find_entity_by_index(entityIndexB);
   return normalize_joint_id(runtime::add_spring_joint(
       *world, entityA, entityB, restLength, stiffness, damping));
 }
 
 std::uint32_t scripting_add_fixed_joint(runtime::World *world,
-                                        std::uint32_t entityIndexA,
-                                        std::uint32_t entityIndexB) noexcept {
-  if ((world == nullptr) || (entityIndexA == 0U) || (entityIndexB == 0U)) {
+                                        runtime::Entity entityA,
+                                        runtime::Entity entityB) noexcept {
+  if (!joint_endpoints_alive(world, entityA, entityB)) {
     return 0U;
   }
-  const runtime::Entity entityA = world->find_entity_by_index(entityIndexA);
-  const runtime::Entity entityB = world->find_entity_by_index(entityIndexB);
   return normalize_joint_id(
       runtime::add_fixed_joint(*world, entityA, entityB));
 }
@@ -494,21 +508,19 @@ bool scripting_set_joint_limits(runtime::World *world, std::uint32_t jointId,
 }
 
 void scripting_wake_body(runtime::World *world,
-                         std::uint32_t entityIndex) noexcept {
-  if ((world == nullptr) || (entityIndex == 0U)) {
+                         runtime::Entity entity) noexcept {
+  if ((world == nullptr) || !world->is_alive(entity)) {
     return;
   }
-
-  runtime::wake_body(*world, world->find_entity_by_index(entityIndex));
+  runtime::wake_body(*world, entity);
 }
 
 bool scripting_is_sleeping(runtime::World *world,
-                           std::uint32_t entityIndex) noexcept {
-  if ((world == nullptr) || (entityIndex == 0U)) {
+                           runtime::Entity entity) noexcept {
+  if ((world == nullptr) || !world->is_alive(entity)) {
     return false;
   }
-
-  return runtime::is_sleeping(*world, world->find_entity_by_index(entityIndex));
+  return runtime::is_sleeping(*world, entity);
 }
 
 std::uint32_t scripting_load_sound(const char *path) noexcept {
@@ -575,26 +587,18 @@ bool scripting_save_scene(const runtime::World *world,
   return (world != nullptr) && runtime::save_scene(*world, path);
 }
 
-bool scripting_save_prefab(const runtime::World *world,
-                           std::uint32_t entityIndex,
+bool scripting_save_prefab(const runtime::World *world, runtime::Entity entity,
                            const char *path) noexcept {
-  if ((world == nullptr) || (entityIndex == 0U)) {
-    return false;
-  }
-
-  const runtime::Entity entity = world->find_entity_by_index(entityIndex);
-  return (entity != runtime::kInvalidEntity) &&
+  return (world != nullptr) && world->is_alive(entity) &&
          runtime::save_prefab(*world, entity, path);
 }
 
-std::uint32_t scripting_instantiate_prefab(runtime::World *world,
-                                           const char *path) noexcept {
+runtime::Entity scripting_instantiate_prefab(runtime::World *world,
+                                             const char *path) noexcept {
   if (world == nullptr) {
-    return 0U;
+    return runtime::kInvalidEntity;
   }
-
-  const runtime::Entity entity = runtime::instantiate_prefab(*world, path);
-  return entity.index;
+  return runtime::instantiate_prefab(*world, path);
 }
 
 /// Queues a mesh asset load through runtime-owned asset services.
@@ -709,39 +713,137 @@ bool scripting_is_asset_ready(std::uint32_t handleIndex) noexcept {
   return databaseReady;
 }
 
-// World query operations needed by Lua bindings
-runtime::WorldPhase
-scripting_get_current_phase(runtime::World *world) noexcept {
-  if (world == nullptr) {
-    return runtime::WorldPhase::Input;
-  }
-  return world->current_phase();
+// World identity, lookup and iteration.
+bool scripting_is_input_phase(runtime::World *world) noexcept {
+  return (world != nullptr) &&
+         (world->current_phase() == runtime::WorldPhase::Input);
 }
 
-std::uint32_t scripting_get_entity_index(runtime::World *world,
-                                         std::uint32_t entityIndex) noexcept {
-  if (world == nullptr) {
-    return 0U;
-  }
-  const runtime::Entity entity = world->find_entity_by_index(entityIndex);
-  return (entity != runtime::kInvalidEntity) ? entity.index : 0U;
+bool scripting_is_alive(runtime::World *world,
+                        runtime::Entity entity) noexcept {
+  return (world != nullptr) && world->is_alive(entity);
 }
 
-std::uint32_t scripting_get_entity_count(runtime::World *world) noexcept {
-  if (world == nullptr) {
-    return 0U;
-  }
-
-  const std::size_t count = world->alive_entity_count();
-  return static_cast<std::uint32_t>(count);
+std::uint32_t scripting_content_epoch(runtime::World *world) noexcept {
+  return (world != nullptr) ? world->content_epoch() : 0U;
 }
 
-std::uint32_t scripting_create_scene_object_op(runtime::World *world) noexcept {
+std::size_t scripting_alive_entity_count(runtime::World *world) noexcept {
+  return (world != nullptr) ? world->alive_entity_count() : 0U;
+}
+
+runtime::Entity scripting_find_entity_by_index(runtime::World *world,
+                                               std::uint32_t index) noexcept {
+  return (world != nullptr) ? world->find_entity_by_index(index)
+                            : runtime::kInvalidEntity;
+}
+
+runtime::Entity scripting_find_entity_by_name(runtime::World *world,
+                                              const char *name) noexcept {
+  return ((world != nullptr) && (name != nullptr))
+             ? world->find_entity_by_name(name)
+             : runtime::kInvalidEntity;
+}
+
+runtime::Entity scripting_find_entity_by_persistent_id(
+    runtime::World *world, runtime::PersistentId persistentId) noexcept {
+  return (world != nullptr) ? world->find_entity_by_persistent_id(persistentId)
+                            : runtime::kInvalidEntity;
+}
+
+runtime::PersistentId scripting_persistent_id(runtime::World *world,
+                                              runtime::Entity entity) noexcept {
+  return (world != nullptr) ? world->persistent_id(entity)
+                            : runtime::kInvalidPersistentId;
+}
+
+runtime::Entity
+scripting_create_scene_object_op(runtime::World *world,
+                                 const runtime::Transform *transform) noexcept {
   if (world == nullptr) {
-    return 0U;
+    return runtime::kInvalidEntity;
   }
-  const runtime::Entity entity = world->create_scene_object();
-  return entity.index;
+  return (transform != nullptr) ? world->create_scene_object(*transform)
+                                : world->create_scene_object();
+}
+
+void scripting_for_each_alive(runtime::World *world,
+                              scripting::EntityVisitFn visit,
+                              void *context) noexcept {
+  if ((world == nullptr) || (visit == nullptr)) {
+    return;
+  }
+  world->for_each_alive(
+      [visit, context](runtime::Entity entity) noexcept { visit(entity, context); });
+}
+
+void scripting_for_each_child(runtime::World *world, runtime::Entity parent,
+                              scripting::EntityVisitFn visit,
+                              void *context) noexcept {
+  if ((world == nullptr) || (visit == nullptr)) {
+    return;
+  }
+  world->for_each_child(parent, [visit, context](runtime::Entity child) noexcept {
+    visit(child, context);
+  });
+}
+
+void scripting_for_each_subtree_member(runtime::World *world,
+                                       runtime::Entity root,
+                                       scripting::EntityVisitFn visit,
+                                       void *context) noexcept {
+  if ((world == nullptr) || (visit == nullptr)) {
+    return;
+  }
+  world->for_each_subtree_member(
+      root, [visit, context](runtime::Entity member) noexcept {
+        visit(member, context);
+      });
+}
+
+void scripting_for_each_needs_begin_play(runtime::World *world,
+                                         scripting::EntityVisitFn visit,
+                                         void *context) noexcept {
+  if ((world == nullptr) || (visit == nullptr)) {
+    return;
+  }
+  world->for_each_needs_begin_play(
+      [visit, context](runtime::Entity entity) noexcept { visit(entity, context); });
+}
+
+void scripting_for_each_pending_destroy(runtime::World *world,
+                                        scripting::EntityVisitFn visit,
+                                        void *context) noexcept {
+  if ((world == nullptr) || (visit == nullptr)) {
+    return;
+  }
+  world->for_each_pending_destroy(
+      [visit, context](runtime::Entity entity) noexcept { visit(entity, context); });
+}
+
+void scripting_for_each_scripted_entity(runtime::World *world,
+                                        scripting::ScriptedEntityVisitFn visit,
+                                        void *context) noexcept {
+  if ((world == nullptr) || (visit == nullptr)) {
+    return;
+  }
+  world->for_each<runtime::ScriptComponent>(
+      [visit, context](runtime::Entity entity,
+                       const runtime::ScriptComponent &script) noexcept {
+        visit(entity, script, context);
+      });
+}
+
+bool scripting_has_begun_play(runtime::World *world,
+                              runtime::Entity entity) noexcept {
+  return (world != nullptr) && world->has_begun_play(entity);
+}
+
+void scripting_mark_begin_play_done(runtime::World *world,
+                                    runtime::Entity entity) noexcept {
+  if (world != nullptr) {
+    world->mark_begin_play_done(entity);
+  }
 }
 
 /// Writes "<source> (clone)" into destination, truncating the prefix rather
@@ -798,19 +900,15 @@ bool clone_component(
 /// instead of being forgotten by a hand-maintained list. The clone is
 /// transactional: the first failed component copy destroys the partial
 /// clone so no half-built entity is ever handed back.
-std::uint32_t scripting_clone_entity_op(runtime::World *world,
-                                        std::uint32_t sourceIndex) noexcept {
-  if (world == nullptr) {
-    return 0U;
-  }
-  const runtime::Entity source = world->find_entity_by_index(sourceIndex);
-  if (!world->is_alive(source)) {
-    return 0U;
+runtime::Entity scripting_clone_entity_op(runtime::World *world,
+                                          runtime::Entity source) noexcept {
+  if ((world == nullptr) || !world->is_alive(source)) {
+    return runtime::kInvalidEntity;
   }
 
   const runtime::Entity clone = world->create_scene_object();
   if (clone == runtime::kInvalidEntity) {
-    return 0U;
+    return runtime::kInvalidEntity;
   }
 
   bool success = true;
@@ -835,296 +933,481 @@ std::uint32_t scripting_clone_entity_op(runtime::World *world,
     static_cast<void>(world->destroy_entity(clone));
     core::log_message(core::LogLevel::Warning, "runtime",
                       "clone_entity rolled back: component copy failed");
-    return 0U;
+    return runtime::kInvalidEntity;
   }
-  return clone.index;
+  return clone;
 }
 
+// Component reads. Each forwards the handle unchanged; the World's own
+// liveness check refuses a stale one.
 const runtime::Transform *
 scripting_get_transform_read_ptr(runtime::World *world,
-                                 std::uint32_t entityIndex) noexcept {
-  if (world == nullptr) {
-    return nullptr;
-  }
-  const runtime::Entity entity = world->find_entity_by_index(entityIndex);
-  return world->get_transform_read_ptr(entity);
+                                 runtime::Entity entity) noexcept {
+  return (world != nullptr) ? world->get_transform_read_ptr(entity) : nullptr;
 }
 
-bool scripting_get_transform_op(runtime::World *world,
-                                std::uint32_t entityIndex,
+bool scripting_get_transform_op(runtime::World *world, runtime::Entity entity,
                                 runtime::Transform *outTransform) noexcept {
-  if ((world == nullptr) || (outTransform == nullptr)) {
-    return false;
-  }
-  const runtime::Entity entity = world->find_entity_by_index(entityIndex);
-  return world->get_transform(entity, outTransform);
+  return (world != nullptr) && (outTransform != nullptr) &&
+         world->get_transform(entity, outTransform);
 }
 
-bool scripting_get_rigid_body_op(runtime::World *world,
-                                 std::uint32_t entityIndex,
+bool scripting_get_rigid_body_op(runtime::World *world, runtime::Entity entity,
                                  runtime::RigidBody *outRigidBody) noexcept {
-  if ((world == nullptr) || (outRigidBody == nullptr)) {
-    return false;
-  }
-  const runtime::Entity entity = world->find_entity_by_index(entityIndex);
-  return world->get_rigid_body(entity, outRigidBody);
+  return (world != nullptr) && (outRigidBody != nullptr) &&
+         world->get_rigid_body(entity, outRigidBody);
 }
 
 const runtime::MeshComponent *
 scripting_get_mesh_component_ptr(runtime::World *world,
-                                 std::uint32_t entityIndex) noexcept {
-  if (world == nullptr) {
-    return nullptr;
-  }
-  const runtime::Entity entity = world->find_entity_by_index(entityIndex);
-  return world->get_mesh_component_ptr(entity);
+                                 runtime::Entity entity) noexcept {
+  return (world != nullptr) ? world->get_mesh_component_ptr(entity) : nullptr;
 }
 
 bool scripting_get_mesh_component_op(
-    runtime::World *world, std::uint32_t entityIndex,
+    runtime::World *world, runtime::Entity entity,
     runtime::MeshComponent *outComponent) noexcept {
-  if ((world == nullptr) || (outComponent == nullptr)) {
-    return false;
-  }
-  const runtime::Entity entity = world->find_entity_by_index(entityIndex);
-  return world->get_mesh_component(entity, outComponent);
+  return (world != nullptr) && (outComponent != nullptr) &&
+         world->get_mesh_component(entity, outComponent);
 }
 
 bool scripting_get_name_component_op(
-    runtime::World *world, std::uint32_t entityIndex,
+    runtime::World *world, runtime::Entity entity,
     runtime::NameComponent *outComponent) noexcept {
-  if ((world == nullptr) || (outComponent == nullptr)) {
-    return false;
-  }
-  const runtime::Entity entity = world->find_entity_by_index(entityIndex);
-  return world->get_name_component(entity, outComponent);
+  return (world != nullptr) && (outComponent != nullptr) &&
+         world->get_name_component(entity, outComponent);
 }
 
-bool scripting_get_collider_op(runtime::World *world, std::uint32_t entityIndex,
+bool scripting_get_collider_op(runtime::World *world, runtime::Entity entity,
                                runtime::Collider *outCollider) noexcept {
-  if ((world == nullptr) || (outCollider == nullptr)) {
-    return false;
-  }
-  const runtime::Entity entity = world->find_entity_by_index(entityIndex);
-  return world->get_collider(entity, outCollider);
+  return (world != nullptr) && (outCollider != nullptr) &&
+         world->get_collider(entity, outCollider);
 }
 
-// World mutation operations (called from deferred mutation queue)
+bool scripting_get_light_component_op(
+    runtime::World *world, runtime::Entity entity,
+    runtime::LightComponent *outComponent) noexcept {
+  return (world != nullptr) && (outComponent != nullptr) &&
+         world->get_light_component(entity, outComponent);
+}
+
+bool scripting_has_light_component(runtime::World *world,
+                                   runtime::Entity entity) noexcept {
+  return (world != nullptr) && world->has_light_component(entity);
+}
+
+bool scripting_get_point_light_component_op(
+    runtime::World *world, runtime::Entity entity,
+    runtime::PointLightComponent *outComponent) noexcept {
+  return (world != nullptr) && (outComponent != nullptr) &&
+         world->get_point_light_component(entity, outComponent);
+}
+
+bool scripting_get_spot_light_component_op(
+    runtime::World *world, runtime::Entity entity,
+    runtime::SpotLightComponent *outComponent) noexcept {
+  return (world != nullptr) && (outComponent != nullptr) &&
+         world->get_spot_light_component(entity, outComponent);
+}
+
+bool scripting_get_script_component_op(
+    runtime::World *world, runtime::Entity entity,
+    runtime::ScriptComponent *outComponent) noexcept {
+  return (world != nullptr) && (outComponent != nullptr) &&
+         world->get_script_component(entity, outComponent);
+}
+
+bool scripting_get_spring_arm_op(
+    runtime::World *world, runtime::Entity entity,
+    runtime::SpringArmComponent *outComponent) noexcept {
+  return (world != nullptr) && (outComponent != nullptr) &&
+         world->get_spring_arm(entity, outComponent);
+}
+
+bool scripting_get_camera_component_op(
+    runtime::World *world, runtime::Entity entity,
+    runtime::CameraComponent *outComponent) noexcept {
+  return (world != nullptr) && (outComponent != nullptr) &&
+         world->get_camera_component(entity, outComponent);
+}
+
+bool scripting_has_convex_hull_payload(runtime::World *world,
+                                       runtime::Entity entity) noexcept {
+  return (world != nullptr) && world->has_convex_hull_payload(entity);
+}
+
+// World mutation operations (also called from the deferred mutation queue).
 bool scripting_destroy_entity_op(runtime::World *world,
-                                 std::uint32_t entityIndex) noexcept {
-  if (world == nullptr) {
-    return false;
-  }
-  const runtime::Entity entity = world->find_entity_by_index(entityIndex);
-  return world->destroy_entity(entity);
+                                 runtime::Entity entity) noexcept {
+  return (world != nullptr) && world->destroy_entity(entity);
 }
 
-bool scripting_add_transform_op(runtime::World *world,
-                                std::uint32_t entityIndex,
+bool scripting_add_transform_op(runtime::World *world, runtime::Entity entity,
                                 const runtime::Transform &transform) noexcept {
-  if (world == nullptr) {
-    return false;
-  }
-  const runtime::Entity entity = world->find_entity_by_index(entityIndex);
-  return world->add_transform(entity, transform);
+  return (world != nullptr) && world->add_transform(entity, transform);
 }
 
 bool scripting_set_movement_authority_op(
-    runtime::World *world, std::uint32_t entityIndex,
+    runtime::World *world, runtime::Entity entity,
     runtime::MovementAuthority authority) noexcept {
-  if (world == nullptr) {
-    return false;
-  }
-  const runtime::Entity entity = world->find_entity_by_index(entityIndex);
-  return world->set_movement_authority(entity, authority);
+  return (world != nullptr) && world->set_movement_authority(entity, authority);
 }
 
-bool scripting_add_rigid_body_op(runtime::World *world,
-                                 std::uint32_t entityIndex,
+bool scripting_add_rigid_body_op(runtime::World *world, runtime::Entity entity,
                                  const runtime::RigidBody &rigidBody) noexcept {
-  if (world == nullptr) {
-    return false;
-  }
-  const runtime::Entity entity = world->find_entity_by_index(entityIndex);
-  return world->add_rigid_body(entity, rigidBody);
+  return (world != nullptr) && world->add_rigid_body(entity, rigidBody);
 }
 
-bool scripting_add_collider_op(runtime::World *world, std::uint32_t entityIndex,
+bool scripting_add_collider_op(runtime::World *world, runtime::Entity entity,
                                const runtime::Collider &collider) noexcept {
-  if (world == nullptr) {
-    return false;
-  }
-  const runtime::Entity entity = world->find_entity_by_index(entityIndex);
-  return world->add_collider(entity, collider);
+  return (world != nullptr) && world->add_collider(entity, collider);
 }
 
 bool scripting_add_mesh_component_op(
-    runtime::World *world, std::uint32_t entityIndex,
+    runtime::World *world, runtime::Entity entity,
     const runtime::MeshComponent &component) noexcept {
-  if (world == nullptr) {
-    return false;
-  }
-  const runtime::Entity entity = world->find_entity_by_index(entityIndex);
-  return world->add_mesh_component(entity, component);
+  return (world != nullptr) && world->add_mesh_component(entity, component);
 }
 
 bool scripting_add_name_component_op(
-    runtime::World *world, std::uint32_t entityIndex,
+    runtime::World *world, runtime::Entity entity,
     const runtime::NameComponent &component) noexcept {
-  if (world == nullptr) {
-    return false;
-  }
-  const runtime::Entity entity = world->find_entity_by_index(entityIndex);
-  return world->add_name_component(entity, component);
+  return (world != nullptr) && world->add_name_component(entity, component);
 }
 
 bool scripting_add_light_component_op(
-    runtime::World *world, std::uint32_t entityIndex,
+    runtime::World *world, runtime::Entity entity,
     const runtime::LightComponent &component) noexcept {
-  if (world == nullptr) {
-    return false;
-  }
-  const runtime::Entity entity = world->find_entity_by_index(entityIndex);
-  return world->add_light_component(entity, component);
+  return (world != nullptr) && world->add_light_component(entity, component);
 }
 
 bool scripting_remove_light_component_op(runtime::World *world,
-                                         std::uint32_t entityIndex) noexcept {
-  if (world == nullptr) {
-    return false;
-  }
-  const runtime::Entity entity = world->find_entity_by_index(entityIndex);
-  return world->remove_light_component(entity);
+                                         runtime::Entity entity) noexcept {
+  return (world != nullptr) && world->remove_light_component(entity);
 }
 
-// The point/spot light ops forward the caller's handle unchanged so the
-// World's generation check decides liveness (a stale handle is refused,
-// never re-targeted to the index's current occupant).
 bool scripting_add_point_light_component_op(
     runtime::World *world, runtime::Entity entity,
     const runtime::PointLightComponent &component) noexcept {
-  if (world == nullptr) {
-    return false;
-  }
-  return world->add_point_light_component(entity, component);
+  return (world != nullptr) &&
+         world->add_point_light_component(entity, component);
 }
 
 bool scripting_remove_point_light_component_op(
     runtime::World *world, runtime::Entity entity) noexcept {
-  if (world == nullptr) {
-    return false;
-  }
-  return world->remove_point_light_component(entity);
+  return (world != nullptr) && world->remove_point_light_component(entity);
 }
 
 bool scripting_add_spot_light_component_op(
     runtime::World *world, runtime::Entity entity,
     const runtime::SpotLightComponent &component) noexcept {
-  if (world == nullptr) {
-    return false;
-  }
-  return world->add_spot_light_component(entity, component);
+  return (world != nullptr) &&
+         world->add_spot_light_component(entity, component);
 }
 
 bool scripting_remove_spot_light_component_op(
     runtime::World *world, runtime::Entity entity) noexcept {
-  if (world == nullptr) {
-    return false;
-  }
-  return world->remove_spot_light_component(entity);
+  return (world != nullptr) && world->remove_spot_light_component(entity);
 }
 
 bool scripting_add_script_component_op(
-    runtime::World *world, std::uint32_t entityIndex,
+    runtime::World *world, runtime::Entity entity,
     const runtime::ScriptComponent &component) noexcept {
-  if (world == nullptr) {
-    return false;
-  }
-  const runtime::Entity entity = world->find_entity_by_index(entityIndex);
-  return world->add_script_component(entity, component);
+  return (world != nullptr) && world->add_script_component(entity, component);
 }
 
 bool scripting_remove_script_component_op(runtime::World *world,
-                                          std::uint32_t entityIndex) noexcept {
-  if (world == nullptr) {
-    return false;
-  }
-  const runtime::Entity entity = world->find_entity_by_index(entityIndex);
-  return world->remove_script_component(entity);
+                                          runtime::Entity entity) noexcept {
+  return (world != nullptr) && world->remove_script_component(entity);
 }
 
-const scripting::RuntimeServices kScriptingRuntimeServices = {
-    &scripting_set_camera_position,
-    &scripting_set_camera_target,
-    &scripting_set_camera_up,
-    &scripting_set_camera_fov,
-    &scripting_push_camera,
-    &scripting_pop_camera,
-    &scripting_get_active_camera,
-    &scripting_camera_shake,
-    &scripting_get_current_phase,
-    &scripting_get_entity_index,
-    &scripting_get_entity_count,
-    &scripting_create_scene_object_op,
-    &scripting_clone_entity_op,
-    &scripting_get_transform_read_ptr,
-    &scripting_get_transform_op,
-    &scripting_get_rigid_body_op,
-    &scripting_get_mesh_component_ptr,
-    &scripting_get_mesh_component_op,
-    &scripting_get_name_component_op,
-    &scripting_get_collider_op,
-    &scripting_destroy_entity_op,
-    &scripting_add_transform_op,
-    &scripting_set_movement_authority_op,
-    &scripting_add_rigid_body_op,
-    &scripting_add_collider_op,
-    &scripting_add_mesh_component_op,
-    &scripting_add_name_component_op,
-    &scripting_add_light_component_op,
-    &scripting_remove_light_component_op,
-    &scripting_add_point_light_component_op,
-    &scripting_remove_point_light_component_op,
-    &scripting_add_spot_light_component_op,
-    &scripting_remove_spot_light_component_op,
-    &scripting_add_script_component_op,
-    &scripting_remove_script_component_op,
-    &scripting_set_gravity,
-    &scripting_get_gravity,
-    &scripting_raycast,
-    &scripting_raycast_all,
-    &scripting_overlap_sphere,
-    &scripting_overlap_box,
-    &scripting_sweep_sphere,
-    &scripting_sweep_box,
-    &scripting_add_distance_joint,
-    &scripting_add_hinge_joint,
-    &scripting_add_ball_socket_joint,
-    &scripting_add_slider_joint,
-    &scripting_add_spring_joint,
-    &scripting_add_fixed_joint,
-    &scripting_set_joint_limits,
-    &scripting_remove_joint,
-    &scripting_wake_body,
-    &scripting_is_sleeping,
-    &scripting_load_sound,
-    &scripting_unload_sound,
-    &scripting_play_sound,
-    &scripting_stop_sound,
-    &scripting_stop_all_sounds,
-    &scripting_set_master_volume,
-    &scripting_play_sound_at,
-    &scripting_set_bus_volume,
-    &scripting_play_music,
-    &scripting_stop_music,
-    &scripting_save_game_data,
-    &scripting_load_game_data,
-    &scripting_save_scene,
-    &scripting_save_prefab,
-    &scripting_instantiate_prefab,
-    &scripting_load_asset_async,
-    &scripting_is_asset_ready,
-};
+bool scripting_add_spring_arm_op(
+    runtime::World *world, runtime::Entity entity,
+    const runtime::SpringArmComponent &component) noexcept {
+  return (world != nullptr) && world->add_spring_arm(entity, component);
+}
+
+bool scripting_add_camera_component_op(
+    runtime::World *world, runtime::Entity entity,
+    const runtime::CameraComponent &component) noexcept {
+  return (world != nullptr) && world->add_camera_component(entity, component);
+}
+
+bool scripting_remove_camera_component_op(runtime::World *world,
+                                          runtime::Entity entity) noexcept {
+  return (world != nullptr) && world->remove_camera_component(entity);
+}
+
+bool scripting_apply_primitive_hull(math::HullSource source,
+                                    runtime::Collider *collider) noexcept {
+  return (collider != nullptr) && runtime::apply_primitive_hull(source, collider);
+}
+
+// Game mode, owned by the World.
+const char *scripting_game_mode_name(runtime::World *world) noexcept {
+  return (world != nullptr) ? world->game_mode().name : "";
+}
+
+bool scripting_set_game_mode_name(runtime::World *world,
+                                  const char *name) noexcept {
+  if ((world == nullptr) || (name == nullptr)) {
+    return false;
+  }
+  std::snprintf(world->game_mode().name, runtime::GameMode::kMaxNameLength,
+                "%s", name);
+  return true;
+}
+
+bool scripting_game_mode_start(runtime::World *world) noexcept {
+  return (world != nullptr) && world->game_mode().start();
+}
+
+bool scripting_game_mode_pause(runtime::World *world) noexcept {
+  return (world != nullptr) && world->game_mode().pause();
+}
+
+bool scripting_game_mode_end(runtime::World *world) noexcept {
+  return (world != nullptr) && world->game_mode().end();
+}
+
+scripting::GameModeState
+scripting_game_mode_state(runtime::World *world) noexcept {
+  if (world == nullptr) {
+    return scripting::GameModeState::WaitingToStart;
+  }
+  return static_cast<scripting::GameModeState>(world->game_mode().state);
+}
+
+bool scripting_game_mode_set_rule(runtime::World *world, const char *key,
+                                  const char *value) noexcept {
+  return (world != nullptr) && world->game_mode().set_rule(key, value);
+}
+
+const char *scripting_game_mode_get_rule(runtime::World *world,
+                                         const char *key) noexcept {
+  return (world != nullptr) ? world->game_mode().get_rule(key) : nullptr;
+}
+
+std::uint32_t scripting_game_mode_max_players(runtime::World *world) noexcept {
+  return (world != nullptr) ? world->game_mode().maxPlayers : 0U;
+}
+
+void scripting_set_game_mode_max_players(runtime::World *world,
+                                         std::uint32_t maxPlayers) noexcept {
+  if (world != nullptr) {
+    world->game_mode().maxPlayers = maxPlayers;
+  }
+}
+
+// Timers, owned by the World.
+std::uint32_t scripting_timer_set(runtime::World *world, float seconds,
+                                  bool repeat,
+                                  scripting::TimerCallbackFn callback,
+                                  void *userData) noexcept {
+  if ((world == nullptr) || (callback == nullptr)) {
+    return runtime::kInvalidTimerId;
+  }
+  runtime::TimerManager &timers = world->timer_manager();
+  return repeat ? timers.set_interval(seconds, callback, userData)
+                : timers.set_timeout(seconds, callback, userData);
+}
+
+void scripting_timer_cancel(runtime::World *world,
+                            std::uint32_t timerId) noexcept {
+  if (world != nullptr) {
+    world->timer_manager().cancel(timerId);
+  }
+}
+
+std::size_t scripting_timer_slot_for_id(runtime::World *world,
+                                        std::uint32_t timerId) noexcept {
+  return (world != nullptr) ? world->timer_manager().slot_for_id(timerId)
+                            : runtime::TimerManager::kInvalidTimerSlot;
+}
+
+bool scripting_timer_slot_state(runtime::World *world, std::size_t slot,
+                                bool *outRepeat, bool *outActive) noexcept {
+  if ((world == nullptr) || (slot >= runtime::TimerManager::kMaxTimers) ||
+      (outRepeat == nullptr) || (outActive == nullptr)) {
+    return false;
+  }
+  const runtime::TimerManager::Entry &entry =
+      world->timer_manager().entry_at(slot);
+  *outRepeat = entry.repeat;
+  *outActive = entry.active;
+  return true;
+}
+
+void scripting_timer_clear(runtime::World *world) noexcept {
+  if (world != nullptr) {
+    world->timer_manager().clear();
+  }
+}
+
+std::size_t scripting_timer_tick(runtime::World *world,
+                                 float deltaSeconds) noexcept {
+  return (world != nullptr) ? world->timer_manager().tick(deltaSeconds) : 0U;
+}
+
+// Entity pools the Lua pool bindings address by slot. Each pool records
+// the World it was seeded from and expires with that World's contents.
+runtime::EntityPool g_scriptEntityPools[scripting::kMaxEntityPools]{};
+
+bool scripting_entity_pool_init(runtime::World *world, std::size_t slot,
+                                std::size_t count) noexcept {
+  if ((world == nullptr) || (slot >= scripting::kMaxEntityPools)) {
+    return false;
+  }
+  return g_scriptEntityPools[slot].init(world, count);
+}
+
+runtime::Entity scripting_entity_pool_acquire(runtime::World *world,
+                                              std::size_t slot) noexcept {
+  if ((world == nullptr) || (slot >= scripting::kMaxEntityPools)) {
+    return runtime::kInvalidEntity;
+  }
+  return g_scriptEntityPools[slot].acquire();
+}
+
+bool scripting_entity_pool_release(runtime::World *world, std::size_t slot,
+                                   runtime::Entity entity) noexcept {
+  if ((world == nullptr) || (slot >= scripting::kMaxEntityPools)) {
+    return false;
+  }
+  return g_scriptEntityPools[slot].release(entity);
+}
+
+void scripting_entity_pool_reset_all() noexcept {
+  for (runtime::EntityPool &pool : g_scriptEntityPools) {
+    pool = runtime::EntityPool{};
+  }
+}
+
+/// Assembles the table by member name so a reordered or added operation
+/// can never be bound to the wrong slot.
+scripting::RuntimeServices make_scripting_runtime_services() noexcept {
+  scripting::RuntimeServices s{};
+  s.set_camera_position = &scripting_set_camera_position;
+  s.set_camera_target = &scripting_set_camera_target;
+  s.set_camera_up = &scripting_set_camera_up;
+  s.set_camera_fov = &scripting_set_camera_fov;
+  s.push_camera_op = &scripting_push_camera;
+  s.pop_camera_op = &scripting_pop_camera;
+  s.get_active_camera_op = &scripting_get_active_camera;
+  s.camera_shake_op = &scripting_camera_shake;
+  s.is_input_phase = &scripting_is_input_phase;
+  s.is_alive = &scripting_is_alive;
+  s.content_epoch = &scripting_content_epoch;
+  s.alive_entity_count = &scripting_alive_entity_count;
+  s.find_entity_by_index = &scripting_find_entity_by_index;
+  s.find_entity_by_name = &scripting_find_entity_by_name;
+  s.find_entity_by_persistent_id = &scripting_find_entity_by_persistent_id;
+  s.persistent_id = &scripting_persistent_id;
+  s.create_scene_object_op = &scripting_create_scene_object_op;
+  s.clone_entity_op = &scripting_clone_entity_op;
+  s.for_each_alive = &scripting_for_each_alive;
+  s.for_each_child = &scripting_for_each_child;
+  s.for_each_subtree_member = &scripting_for_each_subtree_member;
+  s.for_each_needs_begin_play = &scripting_for_each_needs_begin_play;
+  s.for_each_pending_destroy = &scripting_for_each_pending_destroy;
+  s.for_each_scripted_entity = &scripting_for_each_scripted_entity;
+  s.has_begun_play = &scripting_has_begun_play;
+  s.mark_begin_play_done = &scripting_mark_begin_play_done;
+  s.get_transform_read_ptr = &scripting_get_transform_read_ptr;
+  s.get_transform_op = &scripting_get_transform_op;
+  s.get_rigid_body_op = &scripting_get_rigid_body_op;
+  s.get_mesh_component_ptr = &scripting_get_mesh_component_ptr;
+  s.get_mesh_component_op = &scripting_get_mesh_component_op;
+  s.get_name_component_op = &scripting_get_name_component_op;
+  s.get_collider_op = &scripting_get_collider_op;
+  s.get_light_component_op = &scripting_get_light_component_op;
+  s.has_light_component = &scripting_has_light_component;
+  s.get_point_light_component_op = &scripting_get_point_light_component_op;
+  s.get_spot_light_component_op = &scripting_get_spot_light_component_op;
+  s.get_script_component_op = &scripting_get_script_component_op;
+  s.get_spring_arm_op = &scripting_get_spring_arm_op;
+  s.get_camera_component_op = &scripting_get_camera_component_op;
+  s.has_convex_hull_payload = &scripting_has_convex_hull_payload;
+  s.destroy_entity_op = &scripting_destroy_entity_op;
+  s.add_transform_op = &scripting_add_transform_op;
+  s.set_movement_authority_op = &scripting_set_movement_authority_op;
+  s.add_rigid_body_op = &scripting_add_rigid_body_op;
+  s.add_collider_op = &scripting_add_collider_op;
+  s.add_mesh_component_op = &scripting_add_mesh_component_op;
+  s.add_name_component_op = &scripting_add_name_component_op;
+  s.add_light_component_op = &scripting_add_light_component_op;
+  s.remove_light_component_op = &scripting_remove_light_component_op;
+  s.add_point_light_component_op = &scripting_add_point_light_component_op;
+  s.remove_point_light_component_op =
+      &scripting_remove_point_light_component_op;
+  s.add_spot_light_component_op = &scripting_add_spot_light_component_op;
+  s.remove_spot_light_component_op = &scripting_remove_spot_light_component_op;
+  s.add_script_component_op = &scripting_add_script_component_op;
+  s.remove_script_component_op = &scripting_remove_script_component_op;
+  s.add_spring_arm_op = &scripting_add_spring_arm_op;
+  s.add_camera_component_op = &scripting_add_camera_component_op;
+  s.remove_camera_component_op = &scripting_remove_camera_component_op;
+  s.apply_primitive_hull = &scripting_apply_primitive_hull;
+  s.game_mode_name = &scripting_game_mode_name;
+  s.set_game_mode_name = &scripting_set_game_mode_name;
+  s.game_mode_start = &scripting_game_mode_start;
+  s.game_mode_pause = &scripting_game_mode_pause;
+  s.game_mode_end = &scripting_game_mode_end;
+  s.game_mode_state = &scripting_game_mode_state;
+  s.game_mode_set_rule = &scripting_game_mode_set_rule;
+  s.game_mode_get_rule = &scripting_game_mode_get_rule;
+  s.game_mode_max_players = &scripting_game_mode_max_players;
+  s.set_game_mode_max_players = &scripting_set_game_mode_max_players;
+  s.timer_set = &scripting_timer_set;
+  s.timer_cancel = &scripting_timer_cancel;
+  s.timer_slot_for_id = &scripting_timer_slot_for_id;
+  s.timer_slot_state = &scripting_timer_slot_state;
+  s.timer_clear = &scripting_timer_clear;
+  s.timer_tick = &scripting_timer_tick;
+  s.entity_pool_init = &scripting_entity_pool_init;
+  s.entity_pool_acquire = &scripting_entity_pool_acquire;
+  s.entity_pool_release = &scripting_entity_pool_release;
+  s.entity_pool_reset_all = &scripting_entity_pool_reset_all;
+  s.set_gravity = &scripting_set_gravity;
+  s.get_gravity = &scripting_get_gravity;
+  s.raycast = &scripting_raycast;
+  s.raycast_all = &scripting_raycast_all;
+  s.overlap_sphere = &scripting_overlap_sphere;
+  s.overlap_box = &scripting_overlap_box;
+  s.sweep_sphere = &scripting_sweep_sphere;
+  s.sweep_box = &scripting_sweep_box;
+  s.add_distance_joint = &scripting_add_distance_joint;
+  s.add_hinge_joint = &scripting_add_hinge_joint;
+  s.add_ball_socket_joint = &scripting_add_ball_socket_joint;
+  s.add_slider_joint = &scripting_add_slider_joint;
+  s.add_spring_joint = &scripting_add_spring_joint;
+  s.add_fixed_joint = &scripting_add_fixed_joint;
+  s.set_joint_limits = &scripting_set_joint_limits;
+  s.remove_joint = &scripting_remove_joint;
+  s.wake_body = &scripting_wake_body;
+  s.is_sleeping = &scripting_is_sleeping;
+  s.load_sound = &scripting_load_sound;
+  s.unload_sound = &scripting_unload_sound;
+  s.play_sound = &scripting_play_sound;
+  s.stop_sound = &scripting_stop_sound;
+  s.stop_all_sounds = &scripting_stop_all_sounds;
+  s.set_master_volume = &scripting_set_master_volume;
+  s.play_sound_at = &scripting_play_sound_at;
+  s.set_bus_volume = &scripting_set_bus_volume;
+  s.play_music = &scripting_play_music;
+  s.stop_music = &scripting_stop_music;
+  s.save_game_data = &scripting_save_game_data;
+  s.load_game_data = &scripting_load_game_data;
+  s.save_scene = &scripting_save_scene;
+  s.save_prefab = &scripting_save_prefab;
+  s.instantiate_prefab = &scripting_instantiate_prefab;
+  s.load_asset_async = &scripting_load_asset_async;
+  s.is_asset_ready = &scripting_is_asset_ready;
+  return s;
+}
+
+const scripting::RuntimeServices kScriptingRuntimeServices =
+    make_scripting_runtime_services();
 
 } // namespace
 

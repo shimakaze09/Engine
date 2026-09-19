@@ -66,7 +66,7 @@ void set_animation_script_bridge(
 // Queued and applied at the next fixed-step animation update, so scripts
 // may call it from any callback without breaking phase gating.
 int lua_engine_set_anim_param(lua_State *state) noexcept {
-  runtime::Entity entity{};
+  core::Entity entity{};
   if (!read_entity(state, 1, &entity) || (lua_isstring(state, 2) == 0) ||
       (lua_isnumber(state, 3) == 0)) {
     lua_pushboolean(state, 0);

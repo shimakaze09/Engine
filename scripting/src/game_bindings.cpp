@@ -12,8 +12,6 @@ extern "C" {
 #include <cstdio>
 
 #include "engine/scripting/game_binding_state.h"
-#include "engine/runtime/game_mode.h"
-#include "engine/runtime/world.h"
 #include "runtime_binding.h"
 
 namespace engine::scripting {
@@ -38,9 +36,9 @@ bool set_game_mode_name(const char *name) noexcept {
     return false;
   }
   std::snprintf(binding_state().gameMode, sizeof(binding_state().gameMode), "%s", name);
-  if (runtime_binding().world != nullptr) {
-    std::snprintf(runtime_binding().world->game_mode().name,
-                  runtime::GameMode::kMaxNameLength, "%s", name);
+  if (runtime_bound()) {
+    static_cast<void>(runtime_binding().services->set_game_mode_name(
+        runtime_binding().world, name));
   }
   return true;
 }
@@ -57,39 +55,48 @@ bool set_game_state_name(const char *name) noexcept {
 } // namespace
 
 int lua_engine_game_mode_start(lua_State *state) noexcept {
-  if (runtime_binding().world == nullptr) {
+  if (!runtime_bound()) {
     lua_pushboolean(state, 0);
     return 1;
   }
-  lua_pushboolean(state, runtime_binding().world->game_mode().start() ? 1 : 0);
+  lua_pushboolean(state, runtime_binding().services->game_mode_start(
+                            runtime_binding().world)
+                            ? 1
+                            : 0);
   return 1;
 }
 
 int lua_engine_game_mode_pause(lua_State *state) noexcept {
-  if (runtime_binding().world == nullptr) {
+  if (!runtime_bound()) {
     lua_pushboolean(state, 0);
     return 1;
   }
-  lua_pushboolean(state, runtime_binding().world->game_mode().pause() ? 1 : 0);
+  lua_pushboolean(state, runtime_binding().services->game_mode_pause(
+                            runtime_binding().world)
+                            ? 1
+                            : 0);
   return 1;
 }
 
 int lua_engine_game_mode_end(lua_State *state) noexcept {
-  if (runtime_binding().world == nullptr) {
+  if (!runtime_bound()) {
     lua_pushboolean(state, 0);
     return 1;
   }
-  lua_pushboolean(state, runtime_binding().world->game_mode().end() ? 1 : 0);
+  lua_pushboolean(state, runtime_binding().services->game_mode_end(
+                            runtime_binding().world)
+                            ? 1
+                            : 0);
   return 1;
 }
 
 int lua_engine_game_mode_state(lua_State *state) noexcept {
-  if (runtime_binding().world == nullptr) {
+  if (!runtime_bound()) {
     lua_pushstring(state, "none");
     return 1;
   }
-  using S = runtime::GameMode::State;
-  switch (runtime_binding().world->game_mode().state) {
+  using S = GameModeState;
+  switch (runtime_binding().services->game_mode_state(runtime_binding().world)) {
   case S::WaitingToStart:
     lua_pushstring(state, "waiting_to_start");
     break;
@@ -107,7 +114,7 @@ int lua_engine_game_mode_state(lua_State *state) noexcept {
 }
 
 int lua_engine_game_mode_set_rule(lua_State *state) noexcept {
-  if (runtime_binding().world == nullptr) {
+  if (!runtime_bound()) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -117,18 +124,21 @@ int lua_engine_game_mode_set_rule(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
-  lua_pushboolean(
-      state, runtime_binding().world->game_mode().set_rule(key, value) ? 1 : 0);
+  lua_pushboolean(state, runtime_binding().services->game_mode_set_rule(
+                             runtime_binding().world, key, value)
+                             ? 1
+                             : 0);
   return 1;
 }
 
 int lua_engine_game_mode_get_rule(lua_State *state) noexcept {
-  if (runtime_binding().world == nullptr) {
+  if (!runtime_bound()) {
     lua_pushnil(state);
     return 1;
   }
   const char *key = lua_tostring(state, 1);
-  const char *value = runtime_binding().world->game_mode().get_rule(key);
+  const char *value = runtime_binding().services->game_mode_get_rule(
+      runtime_binding().world, key);
   if (value != nullptr) {
     lua_pushstring(state, value);
   } else {
@@ -138,17 +148,18 @@ int lua_engine_game_mode_get_rule(lua_State *state) noexcept {
 }
 
 int lua_engine_game_mode_max_players(lua_State *state) noexcept {
-  if (runtime_binding().world == nullptr) {
+  if (!runtime_bound()) {
     lua_pushinteger(state, 0);
     return 1;
   }
   if ((lua_gettop(state) >= 1) && (lua_isnumber(state, 1) != 0)) {
     const auto n = static_cast<std::uint32_t>(lua_tointeger(state, 1));
-    runtime_binding().world->game_mode().maxPlayers = n;
+    runtime_binding().services->set_game_mode_max_players(
+        runtime_binding().world, n);
   }
-  lua_pushinteger(
-      state,
-      static_cast<lua_Integer>(runtime_binding().world->game_mode().maxPlayers));
+  lua_pushinteger(state, static_cast<lua_Integer>(
+                             runtime_binding().services->game_mode_max_players(
+                                 runtime_binding().world)));
   return 1;
 }
 
@@ -271,8 +282,8 @@ bool bindable_set_game_mode(const char *name) noexcept {
 const char *bindable_get_game_state() noexcept { return binding_state().gameState; }
 
 const char *bindable_get_game_mode() noexcept {
-  if (runtime_binding().world != nullptr) {
-    return runtime_binding().world->game_mode().name;
+  if (runtime_bound()) {
+    return runtime_binding().services->game_mode_name(runtime_binding().world);
   }
   return binding_state().gameMode;
 }
@@ -329,9 +340,8 @@ int lua_engine_get_player_controller(lua_State *state) noexcept {
 
   const auto idx = static_cast<std::uint8_t>(player);
   const runtime::Entity entity = get_player_controller_entity(idx);
-  if ((entity == runtime::kInvalidEntity) ||
-      (runtime_binding().world == nullptr) ||
-      !runtime_binding().world->is_alive(entity)) {
+  if ((entity == runtime::kInvalidEntity) || !runtime_bound() ||
+      !runtime_binding().services->is_alive(runtime_binding().world, entity)) {
     lua_pushinteger(state, 0);
     return 1;
   }

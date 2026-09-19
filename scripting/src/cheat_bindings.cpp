@@ -11,7 +11,6 @@
 #include <cstdlib>
 
 #include "engine/core/console.h"
-#include "engine/runtime/world.h"
 
 namespace engine::scripting {
 namespace {
@@ -40,16 +39,15 @@ void cmd_spawn(const char *const *args, int argCount,
     core::console_print("Usage: spawn <prefab> [x y z]");
     return;
   }
-  if ((runtime_binding().world == nullptr) ||
-      (runtime_binding().services == nullptr) ||
+  if (!runtime_bound() ||
       (runtime_binding().services->instantiate_prefab == nullptr)) {
     core::console_print("Cannot spawn: world not ready");
     return;
   }
-  const std::uint32_t entityIndex =
+  const runtime::Entity spawned =
       runtime_binding().services->instantiate_prefab(runtime_binding().world,
                                                     args[1]);
-  if (entityIndex == 0U) {
+  if (spawned == runtime::kInvalidEntity) {
     core::console_print("Spawn failed (prefab not found?)");
     return;
   }
@@ -61,11 +59,11 @@ void cmd_spawn(const char *const *args, int argCount,
     transform.position.z = static_cast<float>(std::atof(args[4]));
     transform.scale = {1.0F, 1.0F, 1.0F};
     transform.rotation = {0.0F, 0.0F, 0.0F, 1.0F};
-    runtime_binding().services->add_transform_op(
-        runtime_binding().world, entityIndex, transform);
+    runtime_binding().services->add_transform_op(runtime_binding().world,
+                                                 spawned, transform);
   }
   char buffer[64] = {};
-  std::snprintf(buffer, sizeof(buffer), "Spawned entity %u", entityIndex);
+  std::snprintf(buffer, sizeof(buffer), "Spawned entity %u", spawned.index);
   core::console_print(buffer);
 }
 
@@ -73,28 +71,31 @@ void cmd_spawn(const char *const *args, int argCount,
 /// the world's alive-count delta, so cascaded subtree members are included,
 /// queued (deferred) destroys are not double-reported, and rejected destroy
 /// operations surface as failures instead of inflating the count.
+/// Bridge visitor for kill_all: destroys every non-player entity, counting
+/// the destroy ops the World refused.
+void kill_all_visit(core::Entity entity, void *context) noexcept {
+  if (is_player_controller_entity(entity)) {
+    return;
+  }
+  if (!runtime_binding().services->destroy_entity_op(runtime_binding().world,
+                                                     entity)) {
+    ++*static_cast<std::size_t *>(context);
+  }
+}
+
 void cmd_kill_all(const char *const * /*args*/, int /*argCount*/,
                   void * /*userData*/) noexcept {
-  if ((runtime_binding().world == nullptr) ||
-      (runtime_binding().services == nullptr) ||
+  if (!runtime_bound() ||
       (runtime_binding().services->destroy_entity_op == nullptr)) {
     core::console_print("Cannot kill_all: world not ready");
     return;
   }
-  const std::size_t aliveBefore =
-      runtime_binding().world->alive_entity_count();
+  const RuntimeServices &services = *runtime_binding().services;
+  runtime::World *const world = runtime_binding().world;
+  const std::size_t aliveBefore = services.alive_entity_count(world);
   std::size_t failedOps = 0U;
-  runtime_binding().world->for_each_alive(
-      [&failedOps](runtime::Entity entity) noexcept {
-        if (is_player_controller_entity(entity)) {
-          return;
-        }
-        if (!runtime_binding().services->destroy_entity_op(
-                runtime_binding().world, entity.index)) {
-          ++failedOps;
-        }
-      });
-  const std::size_t aliveAfter = runtime_binding().world->alive_entity_count();
+  services.for_each_alive(world, &kill_all_visit, &failedOps);
+  const std::size_t aliveAfter = services.alive_entity_count(world);
   const std::size_t destroyed =
       (aliveBefore > aliveAfter) ? (aliveBefore - aliveAfter) : 0U;
   char buffer[96] = {};

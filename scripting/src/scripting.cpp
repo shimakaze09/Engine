@@ -49,7 +49,6 @@ extern "C" {
 #include "engine/core/string_util.h"
 #include "engine/math/quat.h"
 #include "engine/scripting/runtime_services.h"
-#include "engine/runtime/world.h"
 
 
 namespace engine::scripting {
@@ -376,12 +375,11 @@ float bindable_elapsed_time() noexcept { return g_totalSeconds; }
 int bindable_frame_count() noexcept { return static_cast<int>(g_frameIndex); }
 
 int bindable_get_entity_count() noexcept {
-  if ((runtime_binding().world == nullptr) ||
-      (runtime_binding().services == nullptr)) {
+  if (!runtime_bound()) {
     return 0;
   }
   return static_cast<int>(
-      runtime_binding().services->get_entity_count(runtime_binding().world));
+      runtime_binding().services->alive_entity_count(runtime_binding().world));
 }
 
 bool bindable_is_gamepad_connected() noexcept {
@@ -417,24 +415,25 @@ float bindable_get_axis_value(const char *name) noexcept {
 }
 
 bool bindable_is_alive(std::uint64_t entity) noexcept {
-  if (runtime_binding().world == nullptr) {
+  if (!runtime_bound()) {
     return false;
   }
   runtime::Entity decoded{};
   return decode_entity_handle_value(entity, &decoded) &&
-         runtime_binding().world->is_alive(decoded);
+         runtime_binding().services->is_alive(runtime_binding().world, decoded);
 }
 
 bool bindable_has_light(std::uint64_t entity) noexcept {
-  if (runtime_binding().world == nullptr) {
+  if (!runtime_bound()) {
     return false;
   }
   runtime::Entity decoded{};
   if (!decode_entity_handle_value(entity, &decoded) ||
-      !runtime_binding().world->is_alive(decoded)) {
+      !runtime_binding().services->is_alive(runtime_binding().world, decoded)) {
     return false;
   }
-  return runtime_binding().world->has_light_component(decoded);
+  return runtime_binding().services->has_light_component(
+      runtime_binding().world, decoded);
 }
 
 void bindable_set_camera_fov(float fov) noexcept {

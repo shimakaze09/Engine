@@ -58,47 +58,10 @@ bool write_file_at(const char *path, const char *contents) noexcept {
   return true;
 }
 
-// Minimal RuntimeServices wiring so Lua entity operations reach the world.
-engine::runtime::World *g_testWorld = nullptr;
-
-engine::runtime::WorldPhase get_phase(engine::runtime::World *w) noexcept {
-  return (w != nullptr) ? w->current_phase()
-                        : engine::runtime::WorldPhase::Input;
-}
-
-/// Creates a scene object for the Lua-facing spawn operation.
-std::uint32_t create_scene_object(engine::runtime::World *w) noexcept {
-  return (w != nullptr) ? w->create_scene_object().index : 0U;
-}
-
-/// Destroys the entity currently occupying the requested index.
-bool destroy_entity(engine::runtime::World *w, std::uint32_t idx) noexcept {
-  if (w == nullptr) {
-    return false;
-  }
-  return w->destroy_entity(w->find_entity_by_index(idx));
-}
-
-std::uint32_t get_entity_count(engine::runtime::World *w) noexcept {
-  return (w != nullptr) ? static_cast<std::uint32_t>(w->alive_entity_count())
-                        : 0U;
-}
-
-/// Builds the requested runtime data for test services.
-engine::scripting::RuntimeServices build_test_services() noexcept {
-  engine::scripting::RuntimeServices svc{};
-  svc.get_current_phase = &get_phase;
-  svc.create_scene_object_op = &create_scene_object;
-  svc.destroy_entity_op = &destroy_entity;
-  svc.get_entity_count = &get_entity_count;
-  return svc;
-}
-
 /// Owns one scripting session bound to a fresh world for a test case.
 struct ScriptingSession final {
   std::unique_ptr<engine::runtime::World> world;
   engine::core::ServiceLocator serviceLocator{};
-  engine::scripting::RuntimeServices services{};
   bool ok = false;
 
   ScriptingSession() noexcept {
@@ -110,10 +73,7 @@ struct ScriptingSession final {
     if (world == nullptr) {
       return;
     }
-    g_testWorld = world.get();
     engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
-    services = build_test_services();
-    engine::scripting::bind_runtime_services(&services, serviceLocator);
     engine::scripting::set_sandbox_enabled(true);
     ok = true;
   }
@@ -122,7 +82,6 @@ struct ScriptingSession final {
     engine::scripting::set_instruction_limit(1000000);
     engine::scripting::clear_entity_script_modules();
     engine::scripting::shutdown_scripting();
-    g_testWorld = nullptr;
   }
 };
 

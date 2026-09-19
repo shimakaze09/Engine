@@ -5,11 +5,12 @@
 // working.
 
 #include "engine/core/json.h"
+#include "engine/core/service_locator.h"
 #include "engine/runtime/scene_serializer.h"
+#include "engine/runtime/scripting_bridge.h"
 #include "engine/runtime/world.h"
 #include "engine/scripting/bindable_api.h"
 #include "entity_handle_value.h"
-#include "runtime_binding.h"
 
 #include <array>
 #include <cstdio>
@@ -31,9 +32,10 @@ int check_handle_rejected_after_world_replacement() {
   if (world == nullptr) {
     return 1;
   }
-  runtime_binding().world = world.get();
-  const auto finish = [](int result) noexcept {
-    runtime_binding().world = nullptr;
+  engine::core::ServiceLocator locator{};
+  bind_scripting_runtime(world.get(), locator);
+  const auto finish = [&locator](int result) noexcept {
+    unbind_scripting_runtime(locator);
     return result;
   };
 
@@ -126,9 +128,10 @@ int check_encode_requires_live_entity() {
   if (world == nullptr) {
     return 30;
   }
-  runtime_binding().world = world.get();
-  const auto finish = [](int result) noexcept {
-    runtime_binding().world = nullptr;
+  engine::core::ServiceLocator locator{};
+  bind_scripting_runtime(world.get(), locator);
+  const auto finish = [&locator](int result) noexcept {
+    unbind_scripting_runtime(locator);
     return result;
   };
 
@@ -147,7 +150,7 @@ int check_encode_requires_live_entity() {
     return finish(34);
   }
 
-  runtime_binding().world = nullptr;
+  unbind_scripting_runtime(locator);
   const Entity fresh{1U, 1U};
   if (encode_entity_handle_value(fresh, &handle)) {
     return finish(35);
@@ -167,9 +170,10 @@ int check_epoch_wrap_documented_alias() {
   if (world == nullptr) {
     return 40;
   }
-  runtime_binding().world = world.get();
-  const auto finish = [](int result) noexcept {
-    runtime_binding().world = nullptr;
+  engine::core::ServiceLocator locator{};
+  bind_scripting_runtime(world.get(), locator);
+  const auto finish = [&locator](int result) noexcept {
+    unbind_scripting_runtime(locator);
     return result;
   };
 

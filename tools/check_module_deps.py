@@ -205,52 +205,9 @@ KNOWN_VIOLATIONS: dict[tuple[str, str], str] = {
     ): "sanctioned: issue #156 Inspector metadata generated from the runtime registry",
 }
 
-# Every scripting TU that reaches upward into runtime (issue #309).
-# Enumerated by header so each migrated call site deletes its own line.
-# The sideways physics edge these once shared (issue #310) is gone: no
-# scripting TU includes engine/physics/ any more, so that direction is
-# enforced with no exception below.
-_SCRIPTING_UPWARD_INCLUDES: dict[str, tuple[str, ...]] = {
-    "engine/runtime/entity_pool.h": ("entity_pool_bindings.cpp",),
-    "engine/runtime/game_mode.h": ("game_bindings.cpp",),
-    "engine/runtime/primitive_collider.h": ("mesh_material_bindings.cpp",),
-    "engine/runtime/timer_manager.h": ("timer_bindings.cpp",),
-    "engine/runtime/world.h": (
-        "asset_bindings.cpp",
-        "audio_bindings.cpp",
-        "body_bindings.cpp",
-        "camera_bindings.cpp",
-        "cheat_bindings.cpp",
-        "deferred_mutations.h",
-        "entity_handle.h",
-        "entity_handle_value.h",
-        "entity_lifecycle_bindings.cpp",
-        "entity_pool_bindings.cpp",
-        "entity_script_bindings.cpp",
-        "entity_script_bindings.h",
-        "game_bindings.cpp",
-        "light_bindings.cpp",
-        "mesh_material_bindings.cpp",
-        "physics_bindings.cpp",
-        "scripting.cpp",
-        "timer_bindings.cpp",
-    ),
-}
-
-for _header, _sources in _SCRIPTING_UPWARD_INCLUDES.items():
-    for _source in _sources:
-        KNOWN_VIOLATIONS[(f"scripting/src/{_source}", _header)] = (
-            "tracked: issue #309 scripting bridge migration"
-        )
-
 # Hand-wired foreign include directories that exist today:
 # (CMakeLists path, granted module, granted subdirectory).
 KNOWN_CMAKE_GRANTS: dict[tuple[str, str, str], str] = {
-    (
-        "scripting/CMakeLists.txt",
-        "runtime",
-        "include",
-    ): "tracked: issue #309 — the grant that enables the upward includes above",
     (
         "editor/CMakeLists.txt",
         "runtime",

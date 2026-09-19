@@ -29,7 +29,7 @@ static_assert(kLuaEntityIndexBits + kLuaEntityGenerationBits +
                       kLuaEntityEpochBits ==
                   63U,
               "handle layout must fit a positive lua_Integer");
-static_assert(static_cast<std::uint64_t>(runtime::World::kMaxEntities) <=
+static_assert(static_cast<std::uint64_t>(kMaxWorldEntities) <=
                   kLuaEntityIndexMask,
               "entity index field too small for the configured capacity");
 
@@ -37,11 +37,11 @@ static_assert(static_cast<std::uint64_t>(runtime::World::kMaxEntities) <=
 /// first time the raw epoch exceeds the field, the weakened stale-handle
 /// guarantee is announced instead of masking silently.
 std::uint64_t bound_world_epoch() noexcept {
-  const runtime::World *world = runtime_binding().world;
-  if (world == nullptr) {
+  if (!runtime_bound()) {
     return 0ULL;
   }
-  const std::uint32_t epoch = world->content_epoch();
+  const std::uint32_t epoch =
+      runtime_binding().services->content_epoch(runtime_binding().world);
   static bool warnedExhausted = false;
   if ((static_cast<std::uint64_t>(epoch) > kLuaEntityEpochMask) &&
       !warnedExhausted) {
@@ -55,11 +55,10 @@ std::uint64_t bound_world_epoch() noexcept {
 
 } // namespace
 
-bool encode_entity_handle_value(runtime::Entity entity,
+bool encode_entity_handle_value(core::Entity entity,
                                 std::uint64_t *outHandle) noexcept {
   if ((outHandle == nullptr) || (entity.index == 0U) ||
-      (entity.index >
-       static_cast<std::uint32_t>(runtime::World::kMaxEntities)) ||
+      (entity.index > static_cast<std::uint32_t>(kMaxWorldEntities)) ||
       (entity.generation == 0U)) {
     return false;
   }
@@ -69,8 +68,8 @@ bool encode_entity_handle_value(runtime::Entity entity,
   if (encodedGeneration > kLuaEntityGenerationMask) {
     return false;
   }
-  const runtime::World *world = runtime_binding().world;
-  if ((world == nullptr) || !world->is_alive(entity)) {
+  if (!runtime_bound() ||
+      !runtime_binding().services->is_alive(runtime_binding().world, entity)) {
     return false;
   }
   *outHandle = (bound_world_epoch() << kLuaEntityEpochShift) |
@@ -79,7 +78,7 @@ bool encode_entity_handle_value(runtime::Entity entity,
   return *outHandle != 0ULL;
 }
 
-bool encode_lua_entity_handle(runtime::Entity entity,
+bool encode_lua_entity_handle(core::Entity entity,
                               lua_Integer *outHandle) noexcept {
   if (outHandle == nullptr) {
     return false;
@@ -96,7 +95,7 @@ bool encode_lua_entity_handle(runtime::Entity entity,
   return true;
 }
 
-void push_entity_handle(lua_State *state, runtime::Entity entity) noexcept {
+void push_entity_handle(lua_State *state, core::Entity entity) noexcept {
   lua_Integer handle = 0;
   if (!encode_lua_entity_handle(entity, &handle)) {
     lua_pushnil(state);
@@ -106,22 +105,9 @@ void push_entity_handle(lua_State *state, runtime::Entity entity) noexcept {
   lua_pushinteger(state, handle);
 }
 
-runtime::Entity entity_from_index(std::uint32_t entityIndex) noexcept {
-  if (runtime_binding().world == nullptr) {
-    return runtime::kInvalidEntity;
-  }
-  return runtime_binding().world->find_entity_by_index(entityIndex);
-}
-
-void push_entity_handle_from_index(lua_State *state,
-                                   std::uint32_t entityIndex) noexcept {
-  push_entity_handle(state, entity_from_index(entityIndex));
-}
-
 bool decode_entity_handle_value(std::uint64_t rawHandle,
-                                runtime::Entity *outEntity) noexcept {
-  if ((outEntity == nullptr) || (rawHandle == 0ULL) ||
-      (runtime_binding().world == nullptr)) {
+                                core::Entity *outEntity) noexcept {
+  if ((outEntity == nullptr) || (rawHandle == 0ULL) || !runtime_bound()) {
     return false;
   }
 
@@ -132,19 +118,18 @@ bool decode_entity_handle_value(std::uint64_t rawHandle,
   const std::uint64_t encodedEpoch =
       (rawHandle >> kLuaEntityEpochShift) & kLuaEntityEpochMask;
   if ((entityIndex == 0U) ||
-      (entityIndex >
-       static_cast<std::uint32_t>(runtime::World::kMaxEntities)) ||
+      (entityIndex > static_cast<std::uint32_t>(kMaxWorldEntities)) ||
       (encodedEpoch != bound_world_epoch())) {
     return false;
   }
 
-  *outEntity = runtime::Entity{
+  *outEntity = core::Entity{
       entityIndex, static_cast<std::uint32_t>(encodedGeneration + 1ULL)};
   return true;
 }
 
 bool decode_lua_entity_handle(lua_State *state, int index,
-                              runtime::Entity *outEntity) noexcept {
+                              core::Entity *outEntity) noexcept {
   if ((outEntity == nullptr) || !lua_isnumber(state, index)) {
     return false;
   }
@@ -159,14 +144,14 @@ bool decode_lua_entity_handle(lua_State *state, int index,
 }
 
 bool read_entity(lua_State *state, int index,
-                 runtime::Entity *outEntity) noexcept {
-  if ((runtime_binding().world == nullptr) || (outEntity == nullptr)) {
+                 core::Entity *outEntity) noexcept {
+  if (!runtime_bound() || (outEntity == nullptr)) {
     return false;
   }
 
-  runtime::Entity decoded{};
+  core::Entity decoded{};
   if (!decode_lua_entity_handle(state, index, &decoded) ||
-      !runtime_binding().world->is_alive(decoded)) {
+      !runtime_binding().services->is_alive(runtime_binding().world, decoded)) {
     return false;
   }
 

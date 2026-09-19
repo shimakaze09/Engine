@@ -27,7 +27,6 @@ extern "C" {
 #include "engine/core/string_util.h"
 #include "engine/math/quat.h"
 #include "engine/scripting/runtime_services.h"
-#include "engine/runtime/world.h"
 
 namespace engine::scripting {
 
@@ -68,7 +67,7 @@ int lua_engine_set_camera_up(lua_State *state) noexcept {
 // Engine.push_camera(entityIndex, posX,posY,posZ, tgtX,tgtY,tgtZ, priority
 // [, blendSpeed])
 int lua_engine_push_camera(lua_State *state) noexcept {
-  if ((runtime_binding().world == nullptr) || (runtime_binding().services == nullptr) ||
+  if (!runtime_bound() ||
       (runtime_binding().services->push_camera_op == nullptr)) {
     lua_pushboolean(state, 0);
     return 1;
@@ -90,7 +89,7 @@ int lua_engine_push_camera(lua_State *state) noexcept {
     blendSpeed = static_cast<float>(lua_tonumber(state, 9));
   }
   const bool ok =
-      runtime_binding().services->push_camera_op(runtime_binding().world, entity.index, posX, posY, posZ, tgtX,
+      runtime_binding().services->push_camera_op(runtime_binding().world, entity, posX, posY, posZ, tgtX,
                                  tgtY, tgtZ, priority, blendSpeed);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
@@ -98,7 +97,7 @@ int lua_engine_push_camera(lua_State *state) noexcept {
 
 // Engine.pop_camera(entityIndex)
 int lua_engine_pop_camera(lua_State *state) noexcept {
-  if ((runtime_binding().world == nullptr) || (runtime_binding().services == nullptr) ||
+  if (!runtime_bound() ||
       (runtime_binding().services->pop_camera_op == nullptr)) {
     lua_pushboolean(state, 0);
     return 1;
@@ -108,14 +107,14 @@ int lua_engine_pop_camera(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
-  const bool ok = runtime_binding().services->pop_camera_op(runtime_binding().world, entity.index);
+  const bool ok = runtime_binding().services->pop_camera_op(runtime_binding().world, entity);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
 
 // Engine.get_active_camera() -> posX,posY,posZ, tgtX,tgtY,tgtZ, fov | nil
 int lua_engine_get_active_camera(lua_State *state) noexcept {
-  if ((runtime_binding().world == nullptr) || (runtime_binding().services == nullptr) ||
+  if (!runtime_bound() ||
       (runtime_binding().services->get_active_camera_op == nullptr)) {
     lua_pushnil(state);
     return 1;
@@ -144,7 +143,7 @@ int lua_engine_get_active_camera(lua_State *state) noexcept {
 
 // Engine.camera_shake(amplitude, frequency, duration [, decay])
 int lua_engine_camera_shake(lua_State *state) noexcept {
-  if ((runtime_binding().world == nullptr) || (runtime_binding().services == nullptr) ||
+  if (!runtime_bound() ||
       (runtime_binding().services->camera_shake_op == nullptr)) {
     lua_pushboolean(state, 0);
     return 1;
@@ -167,7 +166,7 @@ int lua_engine_camera_shake(lua_State *state) noexcept {
 // Engine.add_spring_arm(entityIndex, armLength, offsetX, offsetY, offsetZ
 // [, lagSpeed] [, collisionEnabled])
 int lua_engine_add_spring_arm(lua_State *state) noexcept {
-  if (runtime_binding().world == nullptr) {
+  if (!runtime_bound()) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -188,7 +187,8 @@ int lua_engine_add_spring_arm(lua_State *state) noexcept {
   if (lua_isboolean(state, 7)) {
     arm.collisionEnabled = (lua_toboolean(state, 7) != 0);
   }
-  const bool ok = runtime_binding().world->add_spring_arm(entity, arm);
+  const bool ok = runtime_binding().services->add_spring_arm_op(
+      runtime_binding().world, entity, arm);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
@@ -196,7 +196,7 @@ int lua_engine_add_spring_arm(lua_State *state) noexcept {
 // Engine.get_spring_arm(entityIndex) -> armLength, currentLength, offX, offY,
 // offZ, lagSpeed | nil
 int lua_engine_get_spring_arm(lua_State *state) noexcept {
-  if (runtime_binding().world == nullptr) {
+  if (!runtime_bound()) {
     lua_pushnil(state);
     return 1;
   }
@@ -206,7 +206,8 @@ int lua_engine_get_spring_arm(lua_State *state) noexcept {
     return 1;
   }
   runtime::SpringArmComponent arm{};
-  if (!runtime_binding().world->get_spring_arm(entity, &arm)) {
+  if (!runtime_binding().services->get_spring_arm_op(
+          runtime_binding().world, entity, &arm)) {
     lua_pushnil(state);
     return 1;
   }
@@ -228,7 +229,7 @@ int lua_engine_get_spring_arm(lua_State *state) noexcept {
 // Engine.add_camera_component(entityIndex, fovRadians, nearPlane, farPlane,
 // priority [, blendSpeed] [, active]) -> bool
 int lua_engine_add_camera_component(lua_State *state) noexcept {
-  if (runtime_binding().world == nullptr) {
+  if (!runtime_bound()) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -263,7 +264,8 @@ int lua_engine_add_camera_component(lua_State *state) noexcept {
   if (lua_isnumber(state, 9)) {
     camera.orthographicSize = static_cast<float>(lua_tonumber(state, 9));
   }
-  const bool ok = runtime_binding().world->add_camera_component(entity, camera);
+  const bool ok = runtime_binding().services->add_camera_component_op(
+      runtime_binding().world, entity, camera);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
@@ -271,7 +273,7 @@ int lua_engine_add_camera_component(lua_State *state) noexcept {
 // Engine.get_camera_component(entityIndex) -> fovRadians, nearPlane,
 // farPlane, priority, blendSpeed, active, projection, orthographicSize | nil
 int lua_engine_get_camera_component(lua_State *state) noexcept {
-  if (runtime_binding().world == nullptr) {
+  if (!runtime_bound()) {
     lua_pushnil(state);
     return 1;
   }
@@ -281,7 +283,8 @@ int lua_engine_get_camera_component(lua_State *state) noexcept {
     return 1;
   }
   runtime::CameraComponent camera{};
-  if (!runtime_binding().world->get_camera_component(entity, &camera)) {
+  if (!runtime_binding().services->get_camera_component_op(
+          runtime_binding().world, entity, &camera)) {
     lua_pushnil(state);
     return 1;
   }
@@ -303,7 +306,7 @@ int lua_engine_get_camera_component(lua_State *state) noexcept {
 
 // Engine.remove_camera_component(entityIndex) -> bool
 int lua_engine_remove_camera_component(lua_State *state) noexcept {
-  if (runtime_binding().world == nullptr) {
+  if (!runtime_bound()) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -312,7 +315,8 @@ int lua_engine_remove_camera_component(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
-  const bool ok = runtime_binding().world->remove_camera_component(entity);
+  const bool ok = runtime_binding().services->remove_camera_component_op(
+      runtime_binding().world, entity);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
@@ -325,15 +329,17 @@ int lua_engine_remove_camera_component(lua_State *state) noexcept {
 template <typename ApplyFn>
 bool set_camera_component_field(runtime::Entity entity,
                                 ApplyFn &&apply) noexcept {
-  if (runtime_binding().world == nullptr) {
+  if (!runtime_bound()) {
     return false;
   }
   runtime::CameraComponent camera{};
-  if (!runtime_binding().world->get_camera_component(entity, &camera)) {
+  if (!runtime_binding().services->get_camera_component_op(
+          runtime_binding().world, entity, &camera)) {
     return false;
   }
   apply(camera);
-  return runtime_binding().world->add_camera_component(entity, camera);
+  return runtime_binding().services->add_camera_component_op(
+      runtime_binding().world, entity, camera);
 }
 
 // Engine.set_camera_component_active(entityIndex, active) -> bool

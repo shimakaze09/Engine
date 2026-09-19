@@ -528,6 +528,22 @@ engine_add_test_executable(engine_unit_runtime_binding
     engine_runtime
 )
 
+# Links scripting without the runtime: the boundary's link evidence.
+engine_add_test_executable(engine_unit_scripting_link
+    SOURCES
+    scripting_link_test.cpp
+    PRIVATE_DEPS
+    engine_scripting
+)
+
+engine_add_test_executable(engine_unit_script_bridge_handle
+    SOURCES
+    script_bridge_handle_test.cpp
+    PRIVATE_DEPS
+    engine_scripting
+    engine_runtime
+)
+
 engine_add_test_executable(engine_unit_game_binding_state
     SOURCES
     game_binding_state_test.cpp

@@ -28,7 +28,6 @@ extern "C" {
 #include "engine/core/string_util.h"
 #include "engine/math/quat.h"
 #include "engine/scripting/runtime_services.h"
-#include "engine/runtime/world.h"
 
 namespace engine::scripting {
 
@@ -45,21 +44,20 @@ int lua_engine_log(lua_State *state) noexcept {
 }
 
 int lua_engine_spawn_entity(lua_State *state) noexcept {
-  if ((runtime_binding().world == nullptr) ||
-      (runtime_binding().services == nullptr) || !can_apply_mutations_now()) {
+  if (!runtime_bound() || !can_apply_mutations_now()) {
     lua_pushnil(state);
     return 1;
   }
 
-  const std::uint32_t entityIndex =
+  const runtime::Entity entity =
       runtime_binding().services->create_scene_object_op(
-          runtime_binding().world);
-  if (entityIndex == 0U) {
+          runtime_binding().world, nullptr);
+  if (entity == runtime::kInvalidEntity) {
     lua_pushnil(state);
     return 1;
   }
 
-  push_entity_handle_from_index(state, entityIndex);
+  push_entity_handle(state, entity);
   return 1;
 }
 
@@ -120,7 +118,7 @@ int lua_engine_get_name(lua_State *state) noexcept {
   runtime::NameComponent component{};
   if ((runtime_binding().services == nullptr) ||
       !runtime_binding().services->get_name_component_op(
-          runtime_binding().world, entity.index, &component)) {
+          runtime_binding().world, entity, &component)) {
     lua_pushnil(state);
     return 1;
   }
@@ -130,7 +128,7 @@ int lua_engine_get_name(lua_State *state) noexcept {
 }
 
 int lua_engine_find_by_name(lua_State *state) noexcept {
-  if (runtime_binding().world == nullptr || !lua_isstring(state, 1)) {
+  if (!runtime_bound() || !lua_isstring(state, 1)) {
     lua_pushnil(state);
     return 1;
   }
@@ -141,7 +139,8 @@ int lua_engine_find_by_name(lua_State *state) noexcept {
   }
 
   const runtime::Entity found =
-      runtime_binding().world->find_entity_by_name(searchName);
+      runtime_binding().services->find_entity_by_name(runtime_binding().world,
+                                                      searchName);
 
   if (found == runtime::kInvalidEntity) {
     lua_pushnil(state);
@@ -152,8 +151,7 @@ int lua_engine_find_by_name(lua_State *state) noexcept {
 }
 
 int lua_engine_clone_entity(lua_State *state) noexcept {
-  if ((runtime_binding().world == nullptr) ||
-      (runtime_binding().services == nullptr) ||
+  if (!runtime_bound() ||
       (runtime_binding().services->clone_entity_op == nullptr) ||
       !can_apply_mutations_now()) {
     lua_pushnil(state);
@@ -165,15 +163,14 @@ int lua_engine_clone_entity(lua_State *state) noexcept {
     return 1;
   }
 
-  const std::uint32_t cloneIndex = runtime_binding().services->clone_entity_op(
-      runtime_binding().world, source.index);
-  if (cloneIndex == 0U) {
+  const runtime::Entity clone = runtime_binding().services->clone_entity_op(
+      runtime_binding().world, source);
+  if (clone == runtime::kInvalidEntity) {
     lua_pushnil(state);
     return 1;
   }
 
-  push_entity_handle(
-      state, runtime_binding().world->find_entity_by_index(cloneIndex));
+  push_entity_handle(state, clone);
   return 1;
 }
 

@@ -50,8 +50,6 @@ engine_add_module_library(engine_scripting
     ${ENGINE_BINDGEN_OUTPUT}
     PUBLIC_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    PRIVATE_INCLUDE_DIRS
-    ${CMAKE_SOURCE_DIR}/runtime/include
     PUBLIC_DEPS
     engine_core
     engine_math
@@ -60,12 +58,6 @@ engine_add_module_library(engine_scripting
     # hard rule keeps Lua types out of them — so nothing upstream should
     # be able to include lua.h through scripting's usage requirements.
     engine_lua
-    # Not scripting's own dependency: no scripting TU includes or calls
-    # engine/physics. This carries the physics include paths that
-    # runtime's public headers need — world.h includes physics_world_view.h
-    # — under the runtime-include grant above, and is deleted with that
-    # grant when the bridge migration lands.
-    engine_physics
     PCH src/pch.h
 )
 

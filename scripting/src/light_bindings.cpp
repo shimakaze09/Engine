@@ -27,7 +27,6 @@ extern "C" {
 #include "engine/core/string_util.h"
 #include "engine/math/quat.h"
 #include "engine/scripting/runtime_services.h"
-#include "engine/runtime/world.h"
 
 namespace engine::scripting {
 
