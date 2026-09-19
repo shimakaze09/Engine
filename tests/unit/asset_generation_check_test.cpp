@@ -288,6 +288,37 @@ int check_thumbnail_drift_stays_loadable() {
   return result;
 }
 
+/// A current-schema stamp that declares no TOOL_VERSION certifies nothing
+/// (#571): only a pre-manifest schema predates the line.
+int check_stamp_without_tool_version_rejects() {
+  constexpr const char *kMesh = "gen_check_no_tool_version.mesh";
+  remove_with_stamp(kMesh);
+  if (!write_valid_mesh(kMesh)) {
+    return 580;
+  }
+  std::uint64_t meshHash = 0ULL;
+  if (!hash_file(kMesh, &meshHash)) {
+    return 581;
+  }
+  char text[1024] = {};
+  std::snprintf(text, sizeof(text),
+                "SCHEMA %u\nSOURCE_HASH 0000000000000001\n"
+                "IMPORT_HASH 0000000000000002\nPLATFORM TestPlat\n"
+                "OUTPUT %016llx %s\n",
+                static_cast<unsigned int>(engine::content::kCookStampSchema),
+                static_cast<unsigned long long>(meshHash), kMesh);
+  if (!write_stamp_text(kMesh, text)) {
+    return 582;
+  }
+  const int result =
+      (engine::content::cooked_asset_generation_ok(kMesh) || load_mesh(kMesh))
+          ? 583
+          : 0;
+  remove_with_stamp(kMesh);
+  engine::content::reset_cooked_asset_stale_warnings();
+  return result;
+}
+
 /// Never-certified content stays loadable: no stamp at all, and a
 /// pre-manifest stamp with no OUTPUT lines.
 int check_uncertified_assets_stay_loadable() {
@@ -555,6 +586,11 @@ int main() {
     return result;
   }
   engine::content::reset_cooked_asset_stale_warnings();
+  result = check_stamp_without_tool_version_rejects();
+  if (result != 0) {
+    return result;
+  }
+
   result = check_foreign_contract_rejects();
   if (result != 0) {
     return result;

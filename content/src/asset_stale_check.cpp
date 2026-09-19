@@ -312,6 +312,7 @@ bool parse_prefixed_uint(const char *line, const char *prefix,
 /// diagnostic is actionable.
 std::uint32_t validate_stamp_outputs(const char *cookedPath, char *text) noexcept {
   bool sawOutputLine = false;
+  bool sawToolVersion = false;
   std::uint32_t schema = 0U;
   // Schema-4 paths join under the stamp's directory (#527).
   const char *stampDirEnd = std::strrchr(cookedPath, '/');
@@ -361,6 +362,7 @@ std::uint32_t validate_stamp_outputs(const char *cookedPath, char *text) noexcep
       continue;
     }
     if (parse_prefixed_uint(line, "TOOL_VERSION ", &declared)) {
+      sawToolVersion = true;
       if (declared != kCookToolVersion) {
         char message[640] = {};
         std::snprintf(message, sizeof(message),
@@ -458,6 +460,20 @@ std::uint32_t validate_stamp_outputs(const char *cookedPath, char *text) noexcep
                   "(interrupted or mixed cook; re-run the asset packer)",
                   cookedPath, outputPath,
                   hashed ? "does not match its cook stamp" : "is missing");
+    core::log_message(core::LogLevel::Error, "assets", message);
+    return kVerdictRejected;
+  }
+
+  // From schema 3 on the packer always writes TOOL_VERSION; a stamp that
+  // declares that schema without it is torn or hand-edited and certifies
+  // nothing (#571). Older schemas predate the line and stay on the legacy
+  // accept path.
+  if ((schema >= 3U) && !sawToolVersion) {
+    char message[640] = {};
+    std::snprintf(message, sizeof(message),
+                  "rejecting cooked asset %s: cook stamp schema %u declares "
+                  "no TOOL_VERSION (re-run the asset packer)",
+                  cookedPath, static_cast<unsigned int>(schema));
     core::log_message(core::LogLevel::Error, "assets", message);
     return kVerdictRejected;
   }
