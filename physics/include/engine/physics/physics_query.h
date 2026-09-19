@@ -24,7 +24,9 @@ struct SweepHit final {
 
 // ------ Query Functions------------------------------------------------------
 
-/// Returns the nearest ray intersection while optionally skipping one entity.
+/// Returns the nearest ray intersection. skipEntity excludes that entity's
+/// collider and every compound collider it owns (the sweeps' rule), so a
+/// probe from a body's root never hits its own children at t = 0.
 bool raycast(const PhysicsWorldView &world, const math::Vec3 &origin,
              const math::Vec3 &direction, float maxDistance,
              PhysicsRaycastHit *outHit,
@@ -32,11 +34,13 @@ bool raycast(const PhysicsWorldView &world, const math::Vec3 &origin,
 
 /// Returns the nearest maxHits ray intersections sorted by distance.
 /// Direction is normalized internally; maxDistance must be finite and
-/// positive. Respects the collision mask.
+/// positive. Respects the collision mask and the same skipEntity rule as
+/// raycast.
 std::size_t raycast_all(const PhysicsWorldView &world, const math::Vec3 &origin,
                         const math::Vec3 &direction, float maxDistance,
                         PhysicsRaycastHit *outHits, std::size_t maxHits,
-                        std::uint32_t mask = 0xFFFFFFFFU) noexcept;
+                        std::uint32_t mask = 0xFFFFFFFFU,
+                        Entity skipEntity = kInvalidEntity) noexcept;
 
 // Overlap queries — return entity indices.
 std::size_t overlap_sphere(const PhysicsWorldView &world,

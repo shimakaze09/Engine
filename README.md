@@ -4,7 +4,21 @@ An open-source C++23 game engine.
 
 The repository is not production-complete yet. Game authors primarily work through Lua scripts and the editor. Engine contributors extend core systems in C++ under strict performance, safety, and correctness constraints.
 
-The engine itself is the product (owner decision 2026-08-25): the bundled Island Hopper template and sample content are integration/test fixtures, not deliverables. Current work prioritizes engine robustness, module-boundary cleanup, and audit-driven hardening over template-driven features; see the product vision and roadmap in `CLAUDE.md`.
+The engine itself is the product: the bundled Island Hopper template and sample content are integration/test fixtures, not deliverables. Current work prioritizes engine robustness and foundations over template-driven features.
+
+## Documentation map
+
+Each fact has one home. Nothing mirrors anything else.
+
+| Where | What |
+| --- | --- |
+| [`CLAUDE.md`](CLAUDE.md) | The contributor contract: the rules a change must satisfy |
+| [`docs/architecture.md`](docs/architecture.md) | Invariants a change must preserve, and what each module owns |
+| [`docs/vision.md`](docs/vision.md) | Product direction and priorities |
+| [`docs/decisions/`](docs/decisions/) | One record per decision, with its date and rationale |
+| [`.claude/skills/`](.claude/skills/) | Procedures: verifying a change, closing a finding, commenting, serialization, consolidating a primitive, stewarding a pull request |
+| GitHub tracker | Open scope — findings, bugs, tech debt |
+| The code | Current behavior |
 
 ## What this repository contains
 
@@ -25,49 +39,30 @@ The engine itself is the product (owner decision 2026-08-25): the bundled Island
 
 ## Source commenting standard
 
-Every tracked source, script, shader, build, and test file should start with a short file-level comment explaining its role. Every class, struct, enum, and function added or changed in future work should also keep a concise purpose comment close to its declaration or definition. Update the comment when behavior changes.
+Every tracked source, script, shader, build, and test file starts with a short file-level comment explaining its role. Public declarations in `include/` headers document purpose, ownership, failure behavior, and threading; private and self-evident declarations carry no comment.
 
-Two audit tools enforce this in CI: `tools/check_source_comments.py` checks comment presence, and `tools/check_comment_quality.py` flags machine-generated filler patterns; both must report zero findings.
+The standard is in `.claude/skills/comment/`. `tools/check_source_comments.py` enforces file-level comment presence and `tools/check_comment_quality.py` rejects filler, misplaced doc comments, commented-out code, and untracked TODOs; both must report zero findings.
 
-## Current verified state
+## What state the engine is in
 
-The engine has strong foundations, but it is still being delivered milestone by milestone.
+There is no feature-status list in this repository, by decision
+([0008](docs/decisions/0008-evidence-before-status.md)). Status labels
+applied to code that nobody had run produced an inventory of features that
+did not actually work — a post-processing stage that rendered every frame
+and was never read, shadow types no producer could enable. So, instead:
 
-Verified working areas in the current tree include:
+- **The test suite is the inventory.** `ctest --test-dir build -N` lists
+  every contract the engine currently holds itself to. That list, not a
+  document, is what "works" means here.
+- **Open scope lives on the GitHub tracker.** It is the only source of
+  truth for what is broken, missing, or deferred.
+- **On-screen renderer behavior is not covered by CI.** No CI lane draws a
+  frame, and every lane but the canonical matrix builds with the shader
+  cook off. A rendering feature is only as verified as the last time
+  somebody ran the editor and looked at it.
 
-- Core systems such as logging, CVars, debug draw, job system, event bus, VFS, and math primitives
-- Runtime ECS/world simulation with SparseSet storage, double-buffered transforms, scene serialization, persistent IDs, and 65,536-entity capacity
-- Hybrid deferred/forward rendering on the bgfx backend (Vulkan proven on
-  desktop, WebGL2 for the web target; D3D11/12 are explicit opt-ins) with
-  G-buffer resources, deferred lighting for opaque geometry, forward
-  transparency, PBR shaders, frustum culling, mesh loading, and editor
-  integration; shaders are shaderc-cooked `.sc` sources
-- Physics systems including rigid bodies, collider shapes, spatial broadphase,
-  CCD/speculative contacts, joints, materials, and query APIs — colliders
-  follow the transform hierarchy (child colliders form compound bodies owned
-  by their nearest rigid-body ancestor), and the built-in cylinder/pyramid
-  shapes collide as mesh-matched convex hulls
-- Scene-object model with parenting (`set_parent`/`get_children` from Lua),
-  cascade destruction of transform subtrees, and non-removable Name/Transform
-  identity in the editor
-- Render-to-texture scene captures with material binding, JSON material
-  assets with parent-chain overrides, and a depth-tested debug-line pass for
-  shape-accurate collider overlays
-- Editor play/pause/stop flow, gizmo transforms, and transform undo support
-- Audio playback via miniaudio with wav/mp3/ogg/flac support plus volume, pitch, and loop control
-- Lua module loading, traceback-based error reporting, generated and hand-written bindings, per-World timers, coroutine helpers, sandbox controls, and hot-reload coverage
-- GitHub Actions CI for multi-platform build/test, determinism comparison,
-  `cppcheck`, `clang-tidy`, sanitizers, coverage, and benchmark gates
-
-The engine is no longer forward-only; the deferred path is active behind
-`r_deferred` with forward fallback/transparency. Large roadmap items such as
-full animation production, game UI runtime, platform packaging, project
-workflow/commandlets, and release operations remain open in the roadmap
-section of `CLAUDE.md`, the single project document for contributor rules,
-the repository map, and roadmap status — though template-driven feature
-slices are suspended under the 2026-08-25 engine-first pivot in favor of
-the hardening queue. The 2026-07 production-hardening campaign (27
-correctness/performance/structure findings) is complete.
+The engine builds, runs an editor, simulates a deterministic world, and
+plays the bundled template. It is not production-complete.
 
 ## Tech stack
 
@@ -94,7 +89,9 @@ Most third-party dependencies are fetched automatically via CMake `FetchContent`
 - `editor/`: editor integration, camera, command history
 - `assets/`: scripts, shaders, and sample content
 - `tests/`: unit, integration, smoke, and benchmark tests
-- `tools/`: asset packer (glTF/GLB → `.mesh`), Lua binding generator, source-comment audits, CI helpers
+- `tools/`: asset packer (glTF/GLB → `.mesh`), Lua binding generator, audit gates and their self-tests, CI helpers
+- `docs/`: architecture invariants, product vision, decision records
+- `.claude/skills/`: the procedures agents and contributors follow
 - `.github/workflows/`: CI definitions
 
 ## Build prerequisites
@@ -149,6 +146,31 @@ the GCC compatibility flows and the sanitizer lanes. A generic
 `cmake -S . -B build` with the environment-default compiler may work but is
 not a supported configuration; CI validates the canonical presets plus the
 MSVC/GCC compatibility lanes.
+
+### Build options
+
+| Option | Default | Effect |
+| --- | --- | --- |
+| `ENGINE_TARGET_PLATFORM` | host | `Win64`, `Linux`, `macOS`, `Android`, `iOS`, `Web` |
+| `ENGINE_RENDERER_BACKEND` | `bgfx` | The only accepted value; the variable survives so existing `-D` invocations keep working (see [decision 0001](docs/decisions/0001-bgfx-as-the-rhi.md)) |
+| `ENGINE_BGFX_SHADERC` | `ON` | Builds `shaderc` and cooks the shader manifest. Lanes that never consume cooked binaries turn it off, and the cooked test sections skip |
+| `ENGINE_MAX_ENTITIES` | `65536` | ECS fixed capacity |
+| `ENGINE_DETERMINISTIC_FLOATS` | `ON` | `/fp:strict` / `-ffp-contract=off` |
+| `ENGINE_SANITIZERS` | `OFF` | ASAN/UBSAN or TSAN, per the sanitizer presets |
+| `ENGINE_BUILD_TESTS` | `ON` | CTest suites |
+| `ENGINE_BUILD_TOOLS` | `ON` | `asset_packer` and the generators |
+
+Sanitizer flags are declared before the first `FetchContent_MakeAvailable`,
+so they instrument bgfx and SDL3 as well as the engine's own targets;
+`add_compile_options` applies only to targets created after it. The
+determinism flags are declared after those two fetches: they cover the
+engine and the Lua VM, which the simulation depends on, and not bgfx or
+SDL3. The per-target warning and conformance flags are applied by
+`engine_apply_strict_compile_options` in `cmake/EngineHelpers.cmake`, so
+third-party `FetchContent` targets never inherit those.
+
+On Linux, bgfx's CMake requires the OpenGL and X11/Wayland development
+headers; `.github/scripts/install-linux-deps.sh` installs the set CI uses.
 
 Run the app after build:
 
@@ -206,7 +228,9 @@ runs eleven jobs:
   with headless-safe CTest filtering
 - MSVC (Windows) and GCC (Linux) Release compatibility lanes (build + test)
 - Cross-platform determinism hash comparison
-- `cppcheck` static analysis (plus the source comment audit)
+- `cppcheck` static analysis plus the audit gates (source comments, comment
+  quality, module dependencies, dependency pins, test timing, error
+  handling, asset metadata paths)
 - `clang-tidy` with warnings-as-errors
 - A dedicated `-Werror` build check
 - ASAN/UBSAN and TSAN sanitizer lanes
@@ -266,24 +290,16 @@ Tool behavior:
 
 ## Engine contributor rules
 
-- Use C++23 only (no compiler extensions); features must compile on every CI
-  lane, including AppleClang
-- Do not use exceptions, RTTI, `dynamic_cast`, or `typeid`
-- Mark a public real-time or leaf runtime API `noexcept` only when every
-  operation it invokes is proven non-throwing; a recoverable `noexcept` path
-  must not call allocation, filesystem, or thread-creation operations that
-  can terminate under the no-exception build, because a failure there ends
-  the process instead of returning an error. Cold initialization, editor,
-  tool, and filesystem work uses staged transactions, explicit error results,
-  and rollback (the binding rule is in `CLAUDE.md`, "Hard rules")
-- Use explicit return values plus logging for runtime failures; prefer
-  `std::expected<T, E>` in new APIs and never call `.value()` (with
-  exceptions disabled it aborts — use `has_value()`/`operator*`/`error()`)
-- Keep dependency flow strictly downward; do not introduce upward or sideways cycles
-- Do not heap-allocate on hot paths
-- Keep public headers self-contained and free of SDL, bgfx, Lua, and ImGui types
+The binding rules live in [`CLAUDE.md`](CLAUDE.md) — read it before
+changing engine code. It is deliberately the only copy: a summary here
+would drift from it, and a contributor following a looser restatement of a
+safety rule is how the rule gets broken.
 
-If you modify core behavior in math, ECS/runtime, physics, renderer/mesh loading, reflection, or scripting, add or update tests in `tests/`.
+In outline, and not a substitute for reading it: C++23 with no exceptions
+or RTTI, `std::expected` for new error paths, dependency flow strictly
+downward, no heap allocation on hot paths, self-contained public headers,
+authored data written through staged atomic replacement, and tests required
+for any change to math, ECS, physics, renderer, or scripting behavior.
 
 ## Troubleshooting
 

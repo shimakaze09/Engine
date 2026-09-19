@@ -52,6 +52,10 @@ public:
   void write_key(const char *key) noexcept;
   /// Writes float data.
   void write_float(const char *key, float value) noexcept;
+  /// Writes a double at round-trip precision (%.17g); non-finite fails.
+  void write_double(const char *key, double value) noexcept;
+  /// Writes a signed 64-bit integer.
+  void write_int64(const char *key, std::int64_t value) noexcept;
   /// Writes uint data.
   void write_uint(const char *key, std::uint32_t value) noexcept;
   /// Writes uint64 data.
@@ -106,6 +110,10 @@ private:
   bool append_escaped(const char *value) noexcept;
   /// Appends a float in round-trip-stable decimal form.
   bool append_float(float value) noexcept;
+  /// Appends a double in round-trip-stable decimal form.
+  bool append_double(double value) noexcept;
+  /// Appends a signed 64-bit integer.
+  bool append_int64(std::int64_t value) noexcept;
   /// Appends an unsigned 32-bit integer.
   bool append_uint(std::uint32_t value) noexcept;
   /// Appends an unsigned 64-bit integer.
@@ -125,8 +133,8 @@ private:
 
 /// Replaces (or inserts) the value of one top-level field in a JSON
 /// object document while preserving every other byte — unknown and
-/// forward-compatible fields, ordering, and formatting all survive
-/// (audit H-21). The document and `valueText` are both validated with
+/// forward-compatible fields, ordering, and formatting all survive.
+/// The document and `valueText` are both validated with
 /// JsonParser before any splice; documents whose top-level keys contain
 /// escape sequences are refused (keys match as raw bytes, and a decoded
 /// alias of `fieldName` could otherwise duplicate), and `fieldName` is
@@ -150,7 +158,12 @@ public:
   const JsonValue *root() const noexcept;
 
   // Pointer-returning navigation helpers are transient: do not keep returned
-  // pointers across additional pointer-returning navigation calls.
+  // pointers across additional pointer-returning navigation calls. They
+  // draw on a fixed scratch ring of kScratchSlots values that parse()
+  // resets; past it they return nullptr like a missing field, so an
+  // unbounded walk (every element of an authored array) uses the by-value
+  // overloads, which never touch the ring.
+  static constexpr std::size_t kScratchSlots = 1024U;
   const JsonValue *get_object_field(const JsonValue &object,
                                     const char *fieldName) const noexcept;
   /// Finds a field by name in an object; false when missing.
@@ -166,9 +179,25 @@ public:
 
   /// Number of elements in an array value (0 for non-arrays).
   std::size_t array_size(const JsonValue &array) const noexcept;
+  /// Elements parsed by get_array_element to reach requested indices since
+  /// parse(); an ascending walk over N elements, nested walks included,
+  /// costs O(N) of these. The unit tests pin the scaling with it.
+  std::size_t array_element_scans() const noexcept {
+    return m_arrayElementScans;
+  }
+  /// True once a pointer-returning navigation call since parse() found
+  /// the scratch ring full and returned nullptr; the first such call also
+  /// logs a warning, once per parse.
+  bool scratch_exhausted() const noexcept { return m_scratchExhausted; }
 
   /// Numeric value as float; false for non-numbers.
   bool as_float(const JsonValue &value, float *outValue) const noexcept;
+  /// Numeric value as double; false for non-numbers or non-finite results.
+  bool as_double(const JsonValue &value, double *outValue) const noexcept;
+  /// Numeric value as int64; false unless the token is an integer literal
+  /// (digits with an optional leading minus, no fraction or exponent) in
+  /// range, so an integer written by write_int64 reads back exactly.
+  bool as_int64(const JsonValue &value, std::int64_t *outValue) const noexcept;
   /// Reads exactly expectedCount floats from a JSON array; the element
   /// count must match exactly and every element must be a number.
   bool as_float_array(const JsonValue &value, float *outValues,
@@ -200,17 +229,28 @@ private:
   std::size_t m_length = 0U;
   JsonValue m_root{};
   bool m_hasRoot = false;
-  mutable std::array<JsonValue, 1024U> m_scratch{};
+  mutable std::array<JsonValue, kScratchSlots> m_scratch{};
   mutable std::size_t m_scratchCursor = 0U;
-  // Sequential-access memo for get_array_element: the lazy representation
+  mutable bool m_scratchExhausted = false;
+  // Sequential-access memos for get_array_element: the lazy representation
   // rescans an array from its opening bracket, which made per-index walks
-  // quadratic (31 s to iterate an 8k-entity scene, audit N-17); resuming
-  // from the last returned element makes ascending walks amortized O(1).
+  // quadratic; resuming from the last returned element makes ascending
+  // walks amortized O(1).
+  // One entry per recently walked array, because a single entry was
+  // evicted by every nested walk — each Transform's position array — which
+  // made the outer entity loop quadratic again for every real scene.
+  // Keyed by the array's byte range; a full table evicts the
+  // entry spanning the fewest bytes, never the enclosing array.
   // Single-threaded like the scratch ring; invalidated by parse().
-  mutable const char *m_arrayMemoBegin = nullptr;
-  mutable const char *m_arrayMemoEnd = nullptr;
-  mutable const char *m_arrayMemoCursor = nullptr;
-  mutable std::size_t m_arrayMemoIndex = 0U;
+  struct ArrayMemo final {
+    const char *begin = nullptr;
+    const char *end = nullptr;
+    const char *cursor = nullptr;
+    std::size_t index = 0U;
+  };
+  static constexpr std::size_t kArrayMemoEntries = 8U;
+  mutable std::array<ArrayMemo, kArrayMemoEntries> m_arrayMemos{};
+  mutable std::size_t m_arrayElementScans = 0U;
 };
 
 } // namespace engine::core

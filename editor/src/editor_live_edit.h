@@ -1,4 +1,4 @@
-// Declares play-mode live-edit support (issue #159): an explicit opt-in
+// Declares play-mode live-edit support: an explicit opt-in
 // path for transient edits to a running World, kept out of undo history,
 // plus the "Apply to authored value" queue Stop replays as an ordinary
 // undoable edit once the authored scene is restored.
@@ -26,7 +26,7 @@ bool live_edit_available() noexcept;
 /// revert_live_component_edit has something to restore. False when live
 /// editing is unavailable, the world rejected the value, or the baseline
 /// budget is exhausted — an edit whose advertised Revert cannot be
-/// provided is refused before mutation (audit #224); the world is left
+/// provided is refused before mutation; the world is left
 /// unchanged in every failure case.
 bool apply_live_component_edit(runtime::Entity entity, ComponentEditType type,
                                const ComponentEditSnapshot &after) noexcept;

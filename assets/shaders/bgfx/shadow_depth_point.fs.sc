@@ -1,7 +1,6 @@
 $input v_worldpos
 
-// Point-shadow linear-distance depth (bgfx port of
-// shadow_depth_point.frag, #138). Scalar GL uniforms become vec4 read
+// Point-shadow linear-distance depth. Scalar uniforms are vec4 read
 // through .x/.xyz.
 
 #include <bgfx_shader.sh>

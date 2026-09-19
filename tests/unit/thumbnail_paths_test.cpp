@@ -83,6 +83,66 @@ PrimitiveData make_triangle() {
   return data;
 }
 
+/// Regression for #571: the rasterizer keeps the surface nearest the +Z
+/// viewer. A lit front face over a dark back face must render bright at
+/// the centre; the old depth test kept the far, back-lit face.
+int check_nearest_surface_wins() {
+  remove_all(kWorkDir);
+  std::error_code ec{};
+  std::filesystem::create_directories(kWorkDir, ec);
+  if (ec) {
+    return 131;
+  }
+  const std::string sourcePath = std::string(kWorkDir) + "/depth.gltf";
+  const std::string outputPath = std::string(kWorkDir) + "/depth.mesh";
+  if (!write_file(sourcePath.c_str(), "source-bytes")) {
+    return 132;
+  }
+  PrimitiveData data{};
+  data.hasUVs = false;
+  data.hasSkin = false;
+  const float vertices[36] = {
+      // Back face at z = -1, normal away from the light (dark).
+      -3.0F, -3.0F, -1.0F, 0.0F, 0.0F, -1.0F, //
+      3.0F,  -3.0F, -1.0F, 0.0F, 0.0F, -1.0F, //
+      0.0F,  3.0F,  -1.0F, 0.0F, 0.0F, -1.0F, //
+      // Front face at z = +1, normal toward the viewer (bright).
+      -3.0F, -3.0F, 1.0F,  0.0F, 0.0F, 1.0F,  //
+      3.0F,  -3.0F, 1.0F,  0.0F, 0.0F, 1.0F,  //
+      0.0F,  3.0F,  1.0F,  0.0F, 0.0F, 1.0F,  //
+  };
+  data.interleavedVertices.assign(vertices, vertices + 36);
+  if (!generate_mesh_thumbnail(sourcePath.c_str(), outputPath.c_str(), data,
+                               3U)) {
+    return 133;
+  }
+  char thumbPath[512] = {};
+  if (!build_thumbnail_path(outputPath.c_str(), thumbPath,
+                            sizeof(thumbPath))) {
+    return 134;
+  }
+  int width = 0;
+  int height = 0;
+  int channels = 0;
+  unsigned char *pixels =
+      stbi_load(thumbPath, &width, &height, &channels, 4);
+  if (pixels == nullptr) {
+    return 135;
+  }
+  const int centre = ((height / 2) * width + (width / 2)) * 4;
+  const unsigned char shade = pixels[centre];
+  stbi_image_free(pixels);
+  remove_all(kWorkDir);
+  // Front face: ambient 0.15 + 0.85 * 0.73 = 0.77 of 255; back face:
+  // ambient alone, 38.
+  if (shade < 150U) {
+    std::printf("centre shade %u: the far face was kept\n",
+                static_cast<unsigned>(shade));
+    return 136;
+  }
+  return 0;
+}
+
 /// Overlong destinations are refused with a cleared buffer — never
 /// redirected into the working directory where assets could collide.
 int check_overlong_destination_refused() {
@@ -235,6 +295,10 @@ int main() {
     return result;
   }
   result = check_publication_and_skip_gate();
+  if (result != 0) {
+    return result;
+  }
+  result = check_nearest_surface_wins();
   if (result != 0) {
     return result;
   }

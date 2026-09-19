@@ -84,6 +84,35 @@ struct PendingInspectorEdit final {
 /// Process-wide pending gesture behind the inspector_*_edit functions.
 static PendingInspectorEdit g_pendingInspectorEdit{};
 
+/// Outstanding injected allocation failures.
+static std::size_t g_injectedAllocationFailures = 0U;
+
+/// Every command allocation funnels through here so the out-of-memory
+/// paths below are reachable from a test; a failed allocation is never a
+/// license to mutate the world outside the history.
+template <typename Command> static Command *allocate_command() noexcept {
+  if (g_injectedAllocationFailures > 0U) {
+    --g_injectedAllocationFailures;
+    return nullptr;
+  }
+  return new (std::nothrow) Command();
+}
+
+void editor_commands_inject_allocation_failures(std::size_t count) noexcept {
+  g_injectedAllocationFailures = count;
+}
+
+/// Open viewport gizmo drag: the target's identity and pre-drag transform.
+struct GizmoGesture final {
+  bool active = false;
+  runtime::Entity entity{};
+  runtime::PersistentId persistentId = runtime::kInvalidPersistentId;
+  runtime::Transform start{};
+};
+
+/// Process-wide gizmo gesture behind gizmo_track_gesture.
+static GizmoGesture g_gizmoGesture{};
+
 /// Repairs state a raw field write could corrupt before it reaches the
 /// world: a changed controller path drops the cached controller binding
 /// and state-machine position, and an editable non-zero rotation is
@@ -168,8 +197,16 @@ void inspector_commit_pending_edit() noexcept {
   if (!capture_component_snapshot(pending.type, target, &current)) {
     return;
   }
-  auto *cmd = new (std::nothrow) ComponentEditCommand();
+  auto *cmd = allocate_command<ComponentEditCommand>();
   if (cmd == nullptr) {
+    // The gesture already reached the world frame by frame; without a
+    // command the history cannot account for it, so the document tracks
+    // it as dirty by hand and says so.
+    editor_session().document.unrecordedEdit = true;
+    core::log_message(core::LogLevel::Error, "editor",
+                      "inspector edit could not be recorded for undo (out "
+                      "of memory); the scene stays unsaved until saved or "
+                      "reloaded");
     return;
   }
   cmd->entity = pending.entity;
@@ -197,9 +234,11 @@ void execute_component_add(runtime::Entity entity, ComponentEditType type,
   ComponentEditSnapshot before{};
   const bool beforeExists = capture_component_snapshot(type, entity, &before);
 
-  auto *cmd = new (std::nothrow) ComponentEditCommand();
+  auto *cmd = allocate_command<ComponentEditCommand>();
   if (cmd == nullptr) {
-    static_cast<void>(apply_component_snapshot(type, entity, true, after));
+    core::log_message(core::LogLevel::Error, "editor",
+                      "component add refused: it could not be recorded for "
+                      "undo (out of memory)");
     return;
   }
 
@@ -224,9 +263,11 @@ void execute_component_remove(runtime::Entity entity,
     return;
   }
 
-  auto *cmd = new (std::nothrow) ComponentEditCommand();
+  auto *cmd = allocate_command<ComponentEditCommand>();
   if (cmd == nullptr) {
-    static_cast<void>(apply_component_snapshot(type, entity, false, before));
+    core::log_message(core::LogLevel::Error, "editor",
+                      "component remove refused: it could not be recorded "
+                      "for undo (out of memory)");
     return;
   }
 
@@ -277,6 +318,7 @@ bool execute_reparent(runtime::Entity child,
       (child == newParent)) {
     return false;
   }
+  inspector_commit_pending_edit();
 
   runtime::PersistentId afterId = runtime::kInvalidPersistentId;
   if (newParent != runtime::kInvalidEntity) {
@@ -329,8 +371,11 @@ bool execute_reparent(runtime::Entity child,
   }
   static_cast<void>(apply_parent_id(child, before.parentId));
 
-  auto *command = new (std::nothrow) ReparentCommand();
+  auto *command = allocate_command<ReparentCommand>();
   if (command == nullptr) {
+    core::log_message(core::LogLevel::Error, "editor",
+                      "reparent refused: it could not be recorded for undo "
+                      "(out of memory)");
     return false;
   }
   command->child = child;
@@ -360,7 +405,7 @@ bool EntityCreateCommand::execute() noexcept {
     make_default_entity_name(entity.index, &name);
   }
   // Any failed insertion rolls the whole creation back so the history
-  // never records a partially constructed entity (issue #117).
+  // never records a partially constructed entity.
   bool ok = world->add_name_component(entity, name);
   if (ok && hasMesh) {
     ok = world->add_mesh_component(entity, mesh);
@@ -399,8 +444,8 @@ bool EntityCreateCommand::undo() noexcept {
 /// capacity). Builds a single parentId -> children index up front (one
 /// world.for_each_alive pass) instead of rescanning every alive entity
 /// per BFS member, so a subtree of S members in a world of N entities
-/// costs O(N log N + S log N) rather than the former O(S * N) (issue
-/// #86 L-01); the per-parent child order is unchanged (ascending entity
+/// costs O(N log N + S log N) rather than O(S * N); the per-parent child
+/// order is unchanged (ascending entity
 /// index), so member order is identical to the prior full-scan walk.
 static std::size_t collect_subtree_members(runtime::World &world,
                                            runtime::Entity root,
@@ -479,7 +524,7 @@ bool EntityDeleteCommand::undo() noexcept {
   // All-or-nothing restore: `restored` tracks how many members exist so a
   // mid-subtree failure (entity or component capacity, stale ids) can
   // destroy exactly what this undo created and report failure with the
-  // world back in its pre-undo state (issue #117).
+  // world back in its pre-undo state.
   std::size_t restored = 0U;
   bool ok = true;
   for (std::size_t i = 0U; ok && (i < recordCount); ++i) {
@@ -530,15 +575,12 @@ runtime::Entity execute_entity_create() noexcept {
   if (world == nullptr) {
     return runtime::kInvalidEntity;
   }
-  auto *command = new (std::nothrow) EntityCreateCommand();
+  auto *command = allocate_command<EntityCreateCommand>();
   if (command == nullptr) {
-    const runtime::Entity entity = world->create_scene_object();
-    if (entity != runtime::kInvalidEntity) {
-      runtime::NameComponent nameComponent{};
-      make_default_entity_name(entity.index, &nameComponent);
-      static_cast<void>(world->add_name_component(entity, nameComponent));
-    }
-    return entity;
+    core::log_message(core::LogLevel::Error, "editor",
+                      "entity create refused: it could not be recorded for "
+                      "undo (out of memory)");
+    return runtime::kInvalidEntity;
   }
   if (!editor_session().commandHistory.execute(command)) {
     return runtime::kInvalidEntity;
@@ -562,8 +604,8 @@ static void make_asset_spawn_name(const char *virtualPath,
   const int written =
       std::snprintf(outName->name, sizeof(outName->name), "%s", stem);
   // A long asset filename still spawns (naming is cosmetic, not fatal) but
-  // must not clip into NameComponent::kMaxNameLength silently (issue #86
-  // L-07): surface it once so the author can see why the entity name was
+  // must not clip into NameComponent::kMaxNameLength silently: surface
+  // it once so the author can see why the entity name was
   // shortened instead of it just quietly not matching the file.
   if ((written < 0) || (static_cast<std::size_t>(written) >= sizeof(outName->name))) {
     char message[256] = {};
@@ -592,18 +634,12 @@ runtime::Entity execute_asset_spawn(
     return runtime::kInvalidEntity;
   }
 
-  auto *command = new (std::nothrow) EntityCreateCommand();
+  auto *command = allocate_command<EntityCreateCommand>();
   if (command == nullptr) {
-    const runtime::Entity entity = world->create_scene_object(transform);
-    if (entity != runtime::kInvalidEntity) {
-      runtime::NameComponent nameComponent{};
-      make_asset_spawn_name(virtualPath, &nameComponent);
-      static_cast<void>(world->add_name_component(entity, nameComponent));
-      runtime::MeshComponent meshComponent{};
-      meshComponent.meshAssetId = assetId;
-      static_cast<void>(world->add_mesh_component(entity, meshComponent));
-    }
-    return entity;
+    core::log_message(core::LogLevel::Error, "editor",
+                      "asset spawn refused: it could not be recorded for "
+                      "undo (out of memory)");
+    return runtime::kInvalidEntity;
   }
 
   command->transform = transform;
@@ -636,7 +672,7 @@ bool execute_asset_open(const AssetIndexEntry &entry) noexcept {
   }
   case AssetOpenAction::OpenScene:
     // Gated: proceeds immediately when the current document is clean, or
-    // arms the unsaved-change prompt and defers (#158's contract).
+    // arms the unsaved-change prompt and defers.
     request_scene_open(entry.osPath);
     return true;
   case AssetOpenAction::EditMaterial:
@@ -714,7 +750,7 @@ runtime::Entity execute_primitive_spawn(EditorPrimitive primitive) noexcept {
     return runtime::kInvalidEntity;
   }
 
-  auto *command = new (std::nothrow) EntityCreateCommand();
+  auto *command = allocate_command<EntityCreateCommand>();
   if (command == nullptr) {
     return runtime::kInvalidEntity;
   }
@@ -734,7 +770,7 @@ runtime::Entity execute_primitive_spawn(EditorPrimitive primitive) noexcept {
   command->colliderComponent.localPosition = desc.colliderLocalPosition;
   // The authored fallback above stands when the primitive names no hull;
   // otherwise the runtime sizes and tags the collider from the one hull
-  // provenance every install path rebuilds from (issue #310).
+  // provenance every install path rebuilds from.
   static_cast<void>(runtime::apply_primitive_hull(
       desc.hullSource, &command->colliderComponent));
   if (!editor_session().commandHistory.execute(command)) {
@@ -762,7 +798,7 @@ build_entity_delete_command(runtime::Entity entity) noexcept {
   if (count == 0U) {
     return nullptr;
   }
-  auto *command = new (std::nothrow) EntityDeleteCommand();
+  auto *command = allocate_command<EntityDeleteCommand>();
   if (command == nullptr) {
     return nullptr;
   }
@@ -789,11 +825,83 @@ bool execute_entity_delete(runtime::Entity entity) noexcept {
   inspector_commit_pending_edit();
   EntityDeleteCommand *const command = build_entity_delete_command(entity);
   if (command == nullptr) {
-    return (editor_session().world != nullptr) &&
-           editor_session().world->destroy_entity(entity);
+    core::log_message(core::LogLevel::Error, "editor",
+                      "entity delete refused: it could not be recorded for "
+                      "undo (out of memory or not alive)");
+    return false;
   }
   return editor_session().commandHistory.execute(command);
 }
+
+bool execute_transform_edit(runtime::Entity entity,
+                            const runtime::Transform &before,
+                            const runtime::Transform &after) noexcept {
+  runtime::World *const world = editor_session().world;
+  if ((world == nullptr) || !world->is_alive(entity)) {
+    return false;
+  }
+  inspector_commit_pending_edit();
+  auto *cmd = allocate_command<TransformEditCommand>();
+  if (cmd == nullptr) {
+    core::log_message(core::LogLevel::Error, "editor",
+                      "transform edit refused: it could not be recorded for "
+                      "undo (out of memory)");
+    return false;
+  }
+  cmd->entity = entity;
+  cmd->persistentId = world->persistent_id(entity);
+  cmd->oldTransform = before;
+  cmd->newTransform = after;
+  return editor_session().commandHistory.execute(cmd);
+}
+
+void gizmo_commit_gesture() noexcept {
+  GizmoGesture &gesture = g_gizmoGesture;
+  if (!gesture.active) {
+    return;
+  }
+  gesture.active = false;
+  runtime::World *const world = editor_session().world;
+  if (world == nullptr) {
+    return;
+  }
+  const runtime::Entity target =
+      resolve_command_target(gesture.entity, gesture.persistentId);
+  runtime::Transform current{};
+  if (!world->is_alive(target) || !world->get_transform(target, &current)) {
+    core::log_message(core::LogLevel::Warning, "editor",
+                      "gizmo edit dropped: its target no longer exists");
+    return;
+  }
+  // The drag wrote the world frame by frame; recording the gesture
+  // against the recorded target is what makes it undoable. A refused
+  // record leaves the applied drag as an unrecorded edit.
+  if (!execute_transform_edit(target, gesture.start, current)) {
+    editor_session().document.unrecordedEdit = true;
+  }
+}
+
+void gizmo_track_gesture(runtime::Entity target, bool manipulating,
+                         const runtime::Transform &current) noexcept {
+  GizmoGesture &gesture = g_gizmoGesture;
+  if (gesture.active && (!manipulating || (target != gesture.entity))) {
+    gizmo_commit_gesture();
+  }
+  if (manipulating && !gesture.active) {
+    runtime::World *const world = editor_session().world;
+    if ((world == nullptr) || !world->is_alive(target)) {
+      return;
+    }
+    gesture.active = true;
+    gesture.entity = target;
+    gesture.persistentId = world->persistent_id(target);
+    gesture.start = current;
+  }
+}
+
+void gizmo_abandon_gesture() noexcept { g_gizmoGesture.active = false; }
+
+bool gizmo_has_gesture() noexcept { return g_gizmoGesture.active; }
 
 ComponentEditSnapshot default_component_snapshot(
     runtime::Entity entity, ComponentEditType type) noexcept {

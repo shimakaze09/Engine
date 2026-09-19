@@ -1,4 +1,4 @@
-// Implements the null render device backend (#196): every entry succeeds
+// Implements the null render device backend: every entry succeeds
 // without touching GL — creation returns monotonically increasing nonzero
 // handles, updates/binds/draws are no-ops, queries report ready with zero
 // timestamps. It deliberately models no stale-handle detection or
@@ -138,6 +138,9 @@ void fill_null_render_device(RenderDevice *device) noexcept {
   device->caps.depthBlit = true;
   // Generous so headless tests exercise the full pass list.
   device->caps.maxTextureSamplers = 32U;
+  // The desktop floor, so headless runs lay tables out the way a D3D
+  // device would.
+  device->caps.maxTextureDimension = 16384;
 
   device->create_buffer = &null_create_buffer;
   device->update_buffer = &null_update_buffer;

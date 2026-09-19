@@ -52,7 +52,7 @@ void set_editor_asset_service(EngineAssetDatabaseService *service) noexcept;
 std::uint64_t editor_request_mesh_asset(const char *virtualPath) noexcept;
 
 /// One asset-picker search hit: a stable id plus its registered display
-/// path, so the Inspector's asset reference pickers (issue #156) can search
+/// path, so the Inspector's asset reference pickers can search
 /// and select by name/path instead of a raw numeric id.
 struct EditorAssetSearchResult final {
   content::AssetId assetId = content::kInvalidAssetId;
@@ -74,7 +74,7 @@ std::size_t editor_query_assets(content::AssetTypeTag typeTag,
 bool editor_asset_display_path(std::uint64_t assetId, char *outPath,
                                std::size_t outPathSize) noexcept;
 
-// --- Material editor bridge (issue #160) ---
+// --- Material editor bridge ---
 //
 // The material editor panel (editor/) never touches renderer::AssetDatabase
 // directly -- it goes through these functions, matching the asset-picker

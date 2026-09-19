@@ -215,7 +215,7 @@ bool read_foliage_patch_component(const core::JsonParser &parser,
 // --- AnimationComponent ----------------------------------------------------
 
 /// Writes the animation component under `key`, carrying every authored
-/// field (issue #253). A component whose `playing`/`playbackSpeed` still
+/// field. A component whose `playing`/`playbackSpeed` still
 /// hold their defaults writes the bare controller-path string the format
 /// has always used, so files that author no non-default value stay
 /// byte-identical; only a component that the string shape cannot represent

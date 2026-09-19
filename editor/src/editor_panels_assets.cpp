@@ -1,7 +1,7 @@
 // Implements the editor content browser panel: cached-index folder/search
 // views, type filters, typed Open dispatch, drag-spawn, and the mesh/gltf
 // import settings inspector. Split out of editor.cpp (REVIEW_FINDINGS A3);
-// rebuilt on the index/filter-cache backend for issue #157.
+// rebuilt on the index/filter-cache backend.
 
 #include "editor_panels_assets.h"
 
@@ -29,6 +29,7 @@
 #include <limits>
 #include <vector>
 
+#include "editor_import_settings.h"
 #include "engine/core/atomic_file.h"
 #include "engine/core/json.h"
 #include "engine/core/logging.h"
@@ -64,104 +65,29 @@ void draw_import_settings_inspector(const char *assetPath) noexcept {
     return;
   }
 
-  // Resolve meta path: <assetPath>.meta.json
-  char metaPath[1024] = {};
-  std::snprintf(metaPath, sizeof(metaPath), "%s.meta.json", assetPath);
-
-  std::FILE *metaFile = nullptr;
-#ifdef _WIN32
-  if (fopen_s(&metaFile, metaPath, "rb") != 0) {
-    metaFile = nullptr;
+  // The sidecar is read once per selection, not per frame.
+  const ImportSettingsDocument *doc = import_settings_for_asset(assetPath);
+  if (doc == nullptr) {
+    return;
   }
-#else
-  metaFile = std::fopen(metaPath, "rb");
-#endif
-  if (metaFile == nullptr) {
+  switch (doc->state) {
+  case ImportSettingsDocument::State::Missing:
     ImGui::TextDisabled("No .meta.json found");
     return;
-  }
-
-  std::fseek(metaFile, 0, SEEK_END);
-  const long fileSize = std::ftell(metaFile);
-  std::fseek(metaFile, 0, SEEK_SET);
-
-  if (fileSize <= 0 || fileSize > 65536) {
-    std::fclose(metaFile);
+  case ImportSettingsDocument::State::Unreadable:
     return;
-  }
-
-  std::vector<char> metaBuffer(static_cast<std::size_t>(fileSize) + 1U, '\0');
-  const std::size_t readCount = std::fread(
-      metaBuffer.data(), 1U, static_cast<std::size_t>(fileSize), metaFile);
-  std::fclose(metaFile);
-  metaBuffer[readCount] = '\0';
-
-  core::JsonParser parser{};
-  if (!parser.parse(metaBuffer.data(), readCount)) {
-    ImGui::TextDisabled("Failed to parse .meta.json");
+  case ImportSettingsDocument::State::Malformed:
+    ImGui::TextDisabled("Invalid .meta.json");
     return;
+  case ImportSettingsDocument::State::Valid:
+    break;
   }
 
-  const core::JsonValue *root = parser.root();
-  if ((root == nullptr) || (root->type != core::JsonValue::Type::Object)) {
-    ImGui::TextDisabled("Invalid .meta.json structure");
-    return;
-  }
-
-  int meshIndex = 0;
-  int primitiveIndex = 0;
-  float scaleFactor = 1.0F;
-  int upAxis = 1;
-  bool generateNormals = false;
-
-  const core::JsonValue *importObj =
-      parser.get_object_field(*root, "importSettings");
-  if ((importObj != nullptr) &&
-      (importObj->type == core::JsonValue::Type::Object)) {
-    {
-      const core::JsonValue *v =
-          parser.get_object_field(*importObj, "meshIndex");
-      if (v != nullptr) {
-        std::uint32_t tmp = 0U;
-        if (parser.as_uint(*v, &tmp)) {
-          meshIndex = static_cast<int>(tmp);
-        }
-      }
-    }
-    {
-      const core::JsonValue *v =
-          parser.get_object_field(*importObj, "primitiveIndex");
-      if (v != nullptr) {
-        std::uint32_t tmp = 0U;
-        if (parser.as_uint(*v, &tmp)) {
-          primitiveIndex = static_cast<int>(tmp);
-        }
-      }
-    }
-    {
-      const core::JsonValue *v =
-          parser.get_object_field(*importObj, "scaleFactor");
-      if (v != nullptr) {
-        parser.as_float(*v, &scaleFactor);
-      }
-    }
-    {
-      const core::JsonValue *v = parser.get_object_field(*importObj, "upAxis");
-      if (v != nullptr) {
-        std::uint32_t tmp = 1U;
-        if (parser.as_uint(*v, &tmp)) {
-          upAxis = static_cast<int>(tmp);
-        }
-      }
-    }
-    {
-      const core::JsonValue *v =
-          parser.get_object_field(*importObj, "generateNormals");
-      if (v != nullptr) {
-        parser.as_bool(*v, &generateNormals);
-      }
-    }
-  }
+  int meshIndex = doc->meshIndex;
+  int primitiveIndex = doc->primitiveIndex;
+  float scaleFactor = doc->scaleFactor;
+  int upAxis = doc->upAxis;
+  bool generateNormals = doc->generateNormals;
 
   ImGui::Separator();
   if (!ImGui::CollapsingHeader("Import Settings",
@@ -198,8 +124,8 @@ void draw_import_settings_inspector(const char *assetPath) noexcept {
   // Parse-update-preserve: splice only the importSettings value into the
   // original document so schema, output mappings, and unknown
   // forward-compatible fields survive, validate the result, and replace
-  // the file atomically (audit H-21; the old path truncated the meta to
-  // an importSettings-only stub with fopen "wb").
+  // the file atomically. Rewriting the meta as an importSettings-only
+  // stub would drop every other field.
   char newSettings[512] = {};
   std::snprintf(newSettings, sizeof(newSettings),
                 "{\n"
@@ -217,7 +143,7 @@ void draw_import_settings_inspector(const char *assetPath) noexcept {
   static char updatedDocument[80U * 1024U];
   std::size_t updatedLength = 0U;
   bool staged = core::json_replace_top_level_field(
-      metaBuffer.data(), readCount, "importSettings", newSettings,
+      doc->document, doc->documentLength, "importSettings", newSettings,
       updatedDocument, sizeof(updatedDocument), &updatedLength);
   if (staged) {
     core::JsonParser validator{};
@@ -226,8 +152,13 @@ void draw_import_settings_inspector(const char *assetPath) noexcept {
              (validator.root()->type == core::JsonValue::Type::Object);
   }
   if (staged) {
+    char metaPath[1024] = {};
+    std::snprintf(metaPath, sizeof(metaPath), "%s.meta.json", assetPath);
     staged = core::atomic_write_file(metaPath, updatedDocument, updatedLength);
   }
+  // Whether or not the write landed, the next frame re-reads the sidecar
+  // as it is on disk.
+  invalidate_import_settings_cache();
   if (!staged) {
     core::log_message(core::LogLevel::Error, "editor",
                       "import settings save failed — .meta.json preserved");
@@ -287,7 +218,7 @@ bool file_contains_substring(const char *path, const char *needle) noexcept {
 /// path; explicitly user-triggered from the context menu (never per frame)
 /// and bounded by the index size, so the O(scenes) file scan is acceptable
 /// here even though it would not be on a draw-loop hot path. A lightweight
-/// stand-in for #150's authoritative dependency graph, which will index
+/// stand-in authoritative dependency graph, which will index
 /// usages for every asset kind instead of scene-file substring search.
 void run_find_usages(const AssetIndexEntry &target) noexcept {
   g_findUsages = FindUsagesState{};
@@ -334,9 +265,8 @@ void draw_find_usages_popup() noexcept {
 
 /// Context menu for one browsed entry. Open/Show in Folder/Copy
 /// Reference/Find Usages are implemented against production entry points;
-/// Rename/Move/Duplicate/Delete/Reimport/Find Dependencies stay disabled
-/// (issue #157 depends on #150's stable asset identity and dependency
-/// graph for those to be safe — see the destructive-action cut line).
+/// Rename/Move/Duplicate/Delete/Reimport/Find Dependencies stay disabled:
+/// they need a stable asset identity and dependency graph to be safe.
 void draw_context_menu(const AssetIndexEntry &entry) noexcept {
   if (!ImGui::BeginPopupContextItem()) {
     return;

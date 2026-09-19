@@ -77,27 +77,49 @@ bool production_close_file(std::FILE *file) noexcept {
 /// a volume: on Windows the replace-existing move is therefore always the
 /// atomic same-volume rename, and no copy fallback is requested because a
 /// copy could leave the destination half-written.
+///
+/// MOVEFILE_WRITE_THROUGH holds the call until the move is on the disk,
+/// which is what makes the new directory entry durable without the
+/// parent-directory sync POSIX needs. Its documented caveat — that the
+/// flush is guaranteed for a move performed as a copy and delete — does
+/// not narrow the guarantee here: MOVEFILE_COPY_ALLOWED is deliberately
+/// absent, so this is always the same-volume rename the general
+/// statement covers.
 bool production_rename_file(const char *from, const char *to) noexcept {
 #ifdef _WIN32
-  return MoveFileExA(from, to, MOVEFILE_REPLACE_EXISTING) != 0;
+  return MoveFileExA(from, to,
+                     MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
 #else
   return ::rename(from, to) == 0;
 #endif
 }
 
 /// Opens the directory that holds filePath so its entries can be
-/// synced; on Windows no such primitive exists, so the protocol is told
-/// durability is unavailable rather than being handed a fake success.
+/// synced. A Windows directory handle requires FILE_FLAG_BACKUP_SEMANTICS,
+/// and FlushFileBuffers requires write access on the handle it is given,
+/// so the open asks for GENERIC_WRITE: a read-only handle opens and then
+/// refuses the flush, which would report a degradation the filesystem
+/// never had. Sharing stays wide so holding the handle never blocks
+/// another writer working in the same directory. A directory the caller
+/// may not write — a drive root, a protected system path — refuses the
+/// open, and the protocol reports that as a degraded outcome rather than
+/// a failed save.
 DirectoryHandle production_open_parent_directory(const char *filePath) noexcept {
-#ifdef _WIN32
-  static_cast<void>(filePath);
-  return kDirectoryDurabilityUnavailable;
-#else
   char directory[1024] = {};
   if (!parent_directory_of(directory, sizeof(directory), filePath)) {
     return kInvalidDirectoryHandle;
   }
 
+#ifdef _WIN32
+  const HANDLE handle =
+      CreateFileA(directory, GENERIC_WRITE,
+                  FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                  nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+  if (handle == INVALID_HANDLE_VALUE) {
+    return kInvalidDirectoryHandle;
+  }
+  return reinterpret_cast<DirectoryHandle>(handle);
+#else
   int fd = -1;
   do {
     fd = ::open(directory, O_RDONLY | O_CLOEXEC | O_DIRECTORY);
@@ -107,11 +129,11 @@ DirectoryHandle production_open_parent_directory(const char *filePath) noexcept 
 }
 
 /// Forces the directory's entries — the renamed destination among them
-/// — to storage.
+/// — to storage. A network filesystem may refuse the request outright,
+/// which is reported as a degradation rather than retried or ignored.
 bool production_sync_directory(DirectoryHandle handle) noexcept {
 #ifdef _WIN32
-  static_cast<void>(handle);
-  return false;
+  return FlushFileBuffers(reinterpret_cast<HANDLE>(handle)) != 0;
 #else
   int result = 0;
   do {
@@ -124,7 +146,7 @@ bool production_sync_directory(DirectoryHandle handle) noexcept {
 /// Releases the directory handle.
 void production_close_directory(DirectoryHandle handle) noexcept {
 #ifdef _WIN32
-  static_cast<void>(handle);
+  static_cast<void>(CloseHandle(reinterpret_cast<HANDLE>(handle)));
 #else
   static_cast<void>(::close(static_cast<int>(handle)));
 #endif
@@ -197,6 +219,35 @@ bool parent_directory_of(char *dst, std::size_t dstCapacity,
     }
   }
 
+#ifdef _WIN32
+  // "C:/x" holds its entry in the drive's root. Copying the prefix would
+  // yield "C:", which names that drive's current directory instead — a
+  // different directory, whose sync would prove nothing about this entry
+  // while still reporting success.
+  if (found && (separator == 2U) && (filePath[1] == ':')) {
+    if (dstCapacity < 4U) {
+      return false;
+    }
+    dst[0] = filePath[0];
+    dst[1] = ':';
+    dst[2] = filePath[2];
+    dst[3] = '\0';
+    return true;
+  }
+  // "C:x" is drive-relative with no separator: the entry lands in that
+  // drive's current directory, which "." would only name when C: is also
+  // the current drive.
+  if (!found && (filePath[0] != '\0') && (filePath[1] == ':')) {
+    if (dstCapacity < 3U) {
+      return false;
+    }
+    dst[0] = filePath[0];
+    dst[1] = ':';
+    dst[2] = '\0';
+    return true;
+  }
+#endif
+
   if (!found) {
     // A bare file name is created in the working directory, which is
     // the directory whose entry must be synced.
@@ -220,12 +271,20 @@ bool parent_directory_of(char *dst, std::size_t dstCapacity,
 }
 
 const ReplaceOps &production_replace_ops() noexcept {
-  static const ReplaceOps ops{
-      &production_make_directory,        &production_flush_file,
-      &production_sync_file,             &production_close_file,
-      &production_rename_file,           &production_open_parent_directory,
-      &production_sync_directory,        &production_close_directory,
-      &production_remove_file};
+  static const ReplaceOps ops{&production_make_directory,
+                              &production_flush_file,
+                              &production_sync_file,
+                              &production_close_file,
+                              &production_rename_file,
+                              &production_open_parent_directory,
+                              &production_sync_directory,
+                              &production_close_directory,
+                              &production_remove_file,
+#ifdef _WIN32
+                              true};
+#else
+                              false};
+#endif
   return ops;
 }
 
@@ -245,6 +304,29 @@ durable_create_directories(const char *directoryPath,
   bool notDurable = false;
   bool durabilityUnavailable = false;
 
+  // A Windows UNC path opens with two separators, and its first two
+  // segments are the server and the share. Neither is a directory any
+  // process can create: the server segment alone is not even a complete
+  // path, so mkdir refuses it with something other than EEXIST and the
+  // walk would report the whole path unreachable. The share root is the
+  // already-existing ancestor the walk starts from, exactly as a drive
+  // designator is on a local path.
+  //
+  // The two other prefixes that open with two separators are excluded by
+  // their first segment: "\\?\" (extended length) and "\\.\" (device).
+  // Their second segment is a real directory, so skipping it would step
+  // over a segment that has to be created. They are not supported here
+  // and still report Failed, which is the honest answer; silently not
+  // creating part of the path would not be.
+  std::size_t rootSegmentsToSkip = 0U;
+#ifdef _WIN32
+  if ((length > 2U) && is_path_separator(directoryPath[0]) &&
+      is_path_separator(directoryPath[1]) && (directoryPath[2] != '?') &&
+      (directoryPath[2] != '.')) {
+    rootSegmentsToSkip = 2U;
+  }
+#endif
+
   for (std::size_t i = 0U; i <= length; ++i) {
     const char c = directoryPath[i];
     // The separator set is the one parent_directory_of resolves against,
@@ -258,8 +340,12 @@ durable_create_directories(const char *directoryPath,
       // Index 0 names no segment (a leading separator is the root), a
       // repeated separator repeats the segment just handled, and a
       // drive designator is not a directory that can be created.
-      const bool namesSegment =
+      bool namesSegment =
           (i > 0U) && (previous != ':') && !is_path_separator(previous);
+      if (namesSegment && (rootSegmentsToSkip > 0U)) {
+        --rootSegmentsToSkip;
+        namesSegment = false;
+      }
       if (namesSegment) {
         partial[i] = '\0';
         const MakeDirectoryOutcome made = ops.make_directory(partial);
@@ -335,6 +421,14 @@ ReplaceOutcome durable_replace(std::FILE *file, const char *tempPath,
   // Past this point the destination already holds the new payload and
   // the previous file is gone, so no later failure may report Failed —
   // the caller would take it as "the old file is still intact".
+  if (ops.rename_is_durable) {
+    // The rename put the entry on storage itself, so there is nothing
+    // left for a parent sync to establish. Syncing anyway would turn a
+    // filesystem that refuses the request — a network share does — into
+    // a reported degradation of a replacement that is already durable.
+    return ReplaceOutcome::Durable;
+  }
+
   const DirectoryHandle directory = ops.open_parent_directory(destinationPath);
   if (directory == kDirectoryDurabilityUnavailable) {
     return ReplaceOutcome::ReplacedDurabilityUnavailable;

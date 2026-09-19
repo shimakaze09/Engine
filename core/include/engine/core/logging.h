@@ -42,7 +42,7 @@ void log_set_frame_index(std::uint32_t frameIndex) noexcept;
 std::uint32_t log_current_frame_index() noexcept;
 
 // ---------------------------------------------------------------------------
-// Generic sink registration (issue #155): lets an editor-safe consumer
+// Generic sink registration: lets an editor-safe consumer
 // observe every log_message call without a second logging backend. Sinks
 // are invoked synchronously and in registration order from whatever thread
 // called log_message, including for LogLevel::Fatal (dispatched before the

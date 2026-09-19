@@ -436,6 +436,129 @@ bool test_rebind_action() noexcept {
   return true;
 }
 
+/// EXPECTATION (#538 item 1): a binding the user rebound, and every entry a
+/// loaded bindings document restores, outranks a script registering the
+/// same name again; the registration reports success and changes nothing.
+/// A name the user never touched is still overwritten (script defaults).
+bool test_persisted_bindings_outrank_script_defaults() noexcept {
+  if (!init_all()) {
+    return false;
+  }
+  InputBinding space{};
+  space.type = InputBindingType::Key;
+  space.code = kKey_Space;
+  InputBinding w{};
+  w.type = InputBindingType::Key;
+  w.code = kKey_W;
+  add_input_action("jump", &space, 1U);
+  if (!rebind_action("jump", 0U, w)) {
+    shutdown_all();
+    return false;
+  }
+  // The script's default registration runs again (the next Play).
+  if (!add_input_action("jump", &space, 1U)) {
+    shutdown_all();
+    return false;
+  }
+  begin_input_frame();
+  sim_key_down(kKey_Space);
+  end_input_frame();
+  if (is_mapped_action_down("jump")) {
+    shutdown_all();
+    return false; // the default overwrote the user's rebinding
+  }
+  begin_input_frame();
+  sim_key_up(kKey_Space);
+  sim_key_down(kKey_W);
+  end_input_frame();
+  if (!is_mapped_action_down("jump")) {
+    shutdown_all();
+    return false;
+  }
+  begin_input_frame();
+  sim_key_up(kKey_W);
+  end_input_frame();
+
+  // Restored from a document: the same precedence.
+  static char buffer[8192] = {};
+  std::size_t size = 0U;
+  if (!save_input_bindings_to_buffer(buffer, sizeof(buffer), &size)) {
+    shutdown_all();
+    return false;
+  }
+  shutdown_all();
+  if (!init_all() || !load_input_bindings_from_buffer(buffer, size)) {
+    shutdown_all();
+    return false;
+  }
+  if (!add_input_action("jump", &space, 1U)) {
+    shutdown_all();
+    return false;
+  }
+  begin_input_frame();
+  sim_key_down(kKey_Space);
+  end_input_frame();
+  const bool overwritten = is_mapped_action_down("jump");
+  begin_input_frame();
+  sim_key_up(kKey_Space);
+  end_input_frame();
+
+  // An entry the user never touched still takes the script default.
+  add_input_action("crouch", &space, 1U);
+  add_input_action("crouch", &w, 1U);
+  begin_input_frame();
+  sim_key_down(kKey_W);
+  end_input_frame();
+  const bool defaulted = is_mapped_action_down("crouch");
+  shutdown_all();
+  return !overwritten && defaulted;
+}
+
+/// EXPECTATION (#538 item 2): a document whose numbers are outside what
+/// the mapper can hold is refused whole, and the current bindings stay.
+bool test_out_of_range_numbers_rejected() noexcept {
+  if (!init_all()) {
+    return false;
+  }
+  InputBinding binding{};
+  binding.type = InputBindingType::Key;
+  binding.code = kKey_Space;
+  add_input_action("jump", &binding, 1U);
+
+  const char *rejected[] = {
+      "{\"actions\":[],\"axes\":[{\"name\":\"m\",\"sources\":[{\"type\":2,"
+      "\"dead_zone\":1e30}]}]}",
+      "{\"actions\":[],\"axes\":[{\"name\":\"m\",\"sources\":[{\"type\":2,"
+      "\"dead_zone\":-0.5}]}]}",
+      "{\"actions\":[],\"axes\":[{\"name\":\"m\",\"sources\":[{\"type\":0,"
+      "\"negative_key\":4000000000}]}]}",
+      "{\"actions\":[],\"axes\":[{\"name\":\"m\",\"sources\":[{\"type\":0,"
+      "\"scale\":1e9}]}]}",
+      "{\"actions\":[{\"name\":\"a\",\"bindings\":[{\"type\":0,"
+      "\"code\":4000000000}]}],\"axes\":[]}",
+      "{\"actions\":[{\"name\":\"a\",\"bindings\":[{\"type\":2,\"code\":1,"
+      "\"axis_threshold\":50.0}]}],\"axes\":[]}",
+  };
+  for (const char *doc : rejected) {
+    if (load_input_bindings_from_buffer(doc, std::strlen(doc))) {
+      shutdown_all();
+      return false;
+    }
+  }
+  begin_input_frame();
+  sim_key_down(kKey_Space);
+  end_input_frame();
+  const bool kept = is_mapped_action_down("jump");
+  // A document within range still loads.
+  const char *accepted =
+      "{\"actions\":[],\"axes\":[{\"name\":\"m\",\"sources\":[{\"type\":2,"
+      "\"axis_index\":1,\"scale\":-1.0,\"dead_zone\":0.25}]}]}";
+  const bool loaded = load_input_bindings_from_buffer(accepted,
+                                                      std::strlen(accepted));
+  shutdown_all();
+  return kept && loaded;
+}
+
 bool test_save_load_roundtrip() noexcept {
   if (!init_all()) {
     return false;
@@ -1310,6 +1433,9 @@ int main() {
   run("axis_callback", &test_axis_callback);
   run("remove_action", &test_remove_action);
   run("rebind_action", &test_rebind_action);
+  run("persisted_bindings_outrank_script_defaults",
+      &test_persisted_bindings_outrank_script_defaults);
+  run("out_of_range_numbers_rejected", &test_out_of_range_numbers_rejected);
   run("save_load_roundtrip", &test_save_load_roundtrip);
   run("file_round_trip_and_default_path",
       &test_file_round_trip_and_default_path);

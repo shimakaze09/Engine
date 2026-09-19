@@ -1,8 +1,8 @@
 $input a_position, a_normal, a_texcoord0, i_data0, i_data1, i_data2, i_data3, i_data4
 $output v_worldpos, v_normal, v_texcoord0
 
-// Instanced G-buffer vertex stage (#138 instancing unit): instance
-// model columns in i_data0..3, per-instance foliage phase in i_data4.x
+// Instanced G-buffer vertex stage: instance model columns in i_data0..3,
+// per-instance foliage phase in i_data4.x
 // (the flush's InstanceAttributes layout). Normal matrix via the
 // cofactor/determinant inverse-transpose (no inverse() on HLSL-path
 // shaderc). Shares gbuffer.fs.sc; separate source because shaderc

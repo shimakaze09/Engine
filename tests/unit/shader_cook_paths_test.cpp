@@ -106,6 +106,40 @@ bool write_source_dir(const fs::path &sources, const std::string &source,
          write_text(sources / "shaders.json", manifest_text(source, output));
 }
 
+/// Runs the cook like run_cook, capturing the packer's stderr into a file
+/// so a refusal's diagnostic can be asserted.
+int run_cook_capture(const std::string &manifest, const std::string &outDir,
+                     const std::string &include, const std::string &errPath) {
+  std::string command = quoted(ENGINE_TEST_ASSET_PACKER) +
+                        " --shader-manifest " + quoted(manifest) +
+                        " --shader-out " + quoted(outDir) + " --shaderc " +
+                        quoted(ENGINE_TEST_FAKE_SHADERC) +
+                        " --shader-include " + quoted(include) +
+                        " --profiles glsl 2> " + quoted(errPath);
+#ifdef _WIN32
+  command = "\"" + command + "\"";
+#endif
+  return std::system(command.c_str());
+}
+
+/// Builds a manifest of `count` well-formed entries with the entry at
+/// `brokenIndex` missing its "type"; long enough that walking it through
+/// the parser's pointer scratch would run out before the broken entry.
+std::string long_manifest_text(std::size_t count, std::size_t brokenIndex) {
+  std::string text = "{\n  \"shaders\": [\n";
+  for (std::size_t i = 0U; i < count; ++i) {
+    text += (i == 0U) ? "    {" : ",\n    {";
+    text += "\"source\": \"probe.vs.sc\", ";
+    if (i != brokenIndex) {
+      text += "\"type\": \"vertex\", ";
+    }
+    text += "\"output\": \"probe" + std::to_string(i) +
+            ".vert\", \"variants\": [[\"A\"], [\"B\"]]}";
+  }
+  text += "\n  ]\n}\n";
+  return text;
+}
+
 /// Asserts one refused manifest: nonzero exit, no compiler launch, and no
 /// cook stamp under the output directory.
 void check_refused(TestContext &t, const fs::path &scratch,
@@ -241,10 +275,50 @@ int main() {
     const int exitCode = run_cook((sources / "shaders.json").string(),
                                   outDir.string(), include.string());
     t.check(exitCode == 0, "a plain-filename manifest cooks");
+  }
+
+  // --- An output directory several levels deep is created (#571). ---
+  {
+    const fs::path sources = scratch / "sources_nested";
+    const fs::path outDir = scratch / "out_nested" / "a" / "b" / "cooked";
+    set_argv_log((scratch / "nested_argv.txt").string());
+    if (!write_source_dir(sources, "probe.vs.sc", "probe.vert")) {
+      t.fail("nested manifest written");
+      return t.finish("shader_cook_paths");
+    }
+    const int exitCode = run_cook((sources / "shaders.json").string(),
+                                  outDir.string(), include.string());
+    t.check(exitCode == 0, "a nested output directory is created and cooked");
+    t.check(fs::is_directory(outDir), "every missing level exists");
     t.check(fs::exists(outDir / "probe.vert.default.glsl.bin"),
             "the cooked output commits inside the output root");
   }
 
   fs::remove_all(scratch, ignored);
+  // --- A manifest longer than the parser's pointer scratch (#539) is walked
+  // to the end: the malformed late entry is named, not silently refused.
+  {
+    const fs::path sources = scratch / "sources_long";
+    const fs::path outDir = scratch / "out_long";
+    const fs::path errPath = scratch / "long_stderr.txt";
+    fs::create_directories(sources, ignored);
+    constexpr std::size_t kEntries = 300U;
+    constexpr std::size_t kBroken = 280U;
+    if (!write_text(sources / "varying.def.sc", "vec4 v_color : COLOR0;\n") ||
+        !write_text(sources / "probe.vs.sc", "// stub source\n") ||
+        !write_text(sources / "shaders.json",
+                    long_manifest_text(kEntries, kBroken))) {
+      t.fail("long manifest written");
+    } else {
+      const int exitCode =
+          run_cook_capture((sources / "shaders.json").string(),
+                           outDir.string(), include.string(), errPath.string());
+      t.check(exitCode != 0, "long: the malformed entry refuses the cook");
+      const std::string diagnostics = read_text(errPath);
+      t.check(diagnostics.find("entry 280 missing type") != std::string::npos,
+              "long: the refusal names the malformed entry");
+    }
+  }
+
   return t.finish("shader_cook_paths");
 }

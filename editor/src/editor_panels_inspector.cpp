@@ -4,7 +4,7 @@
 // Component menu. Split out of editor.cpp (REVIEW_FINDINGS A3); the
 // per-component field/dispatch code moved out to
 // editor_panels_inspector_generic.cpp/editor_panels_inspector_custom.cpp
-// (issue #156) to keep this TU an orchestrator, not a growing branch list.
+// to keep this TU an orchestrator, not a growing branch list.
 
 #include "editor_panels_inspector.h"
 
@@ -35,9 +35,8 @@ namespace engine::editor {
 namespace {
 
 /// True while the Inspector's progressive-disclosure Advanced/Debug toggle
-/// is on: raw ids/paths and metadata-marked advanced fields become visible
-/// (issue #156 acceptance: "raw IDs/paths remain inspectable in an
-/// Advanced/Debug view"). Process-wide like the rest of the panel's static
+/// is on: raw ids/paths and metadata-marked advanced fields become
+/// visible. Process-wide like the rest of the panel's static
 /// UI state (g_pendingInspectorEdit in editor_commands.cpp).
 bool g_showAdvanced = false;
 
@@ -68,7 +67,7 @@ void draw_live_edit_row(runtime::Entity entity, ComponentEditType type) noexcept
   // Re-queueing an already-queued pair replaces in place and never
   // allocates, so only a first-time queue request is blocked by a full
   // queue; the disabled button plus the reason line below make the failed
-  // state actionable instead of a silently ignored click (audit #224).
+  // state actionable instead of a silently ignored click.
   const bool alreadyQueued = has_pending_apply_to_authored(entity, type);
   const bool queueFull = pending_apply_to_authored_count() >=
                          pending_apply_to_authored_capacity();
@@ -99,9 +98,9 @@ void draw_live_edit_row(runtime::Entity entity, ComponentEditType type) noexcept
 /// section; `drawFn` is `bool(Component&)`. Fields render disabled unless
 /// `authoredEditable` (Stopped, routes edits through command history) or
 /// `liveEditable` (Playing/Paused with the opt-in live-edit toggle on,
-/// routes edits straight to the running world and never touches undo --
-/// issue #159); the remove-component action stays authored-only since
-/// removing a component is a structural edit, not a value tweak.
+/// routes edits straight to the running world and never touches undo);
+/// the remove-component action stays authored-only since removing a
+/// component is a structural edit, not a value tweak.
 template <typename Component, typename DrawFn>
 void draw_component_section(runtime::Entity entity, ComponentEditType type,
                             const char *sectionLabel,
@@ -115,7 +114,7 @@ void draw_component_section(runtime::Entity entity, ComponentEditType type,
   }
   const Component before = snapshot.*member;
   // A first-touch live edit needs a free baseline slot before it may
-  // mutate the world (audit #224); when the budget is exhausted the
+  // mutate the world; when the budget is exhausted the
   // fields lock with a reason instead of accepting edits that would
   // silently lose their advertised Revert.
   const bool liveBudgetBlocked =
@@ -152,8 +151,8 @@ void draw_component_section(runtime::Entity entity, ComponentEditType type,
       // The author opted in to live edit, but this specific component's
       // caller passed liveEditable=false (a custom-drawer type out of
       // per-field batch/live scope) -- say so instead of leaving the
-      // disabled fields unexplained (issue #159 acceptance: unsupported
-      // fields stay read-only with a reason).
+      // disabled fields unexplained: unsupported fields stay read-only
+      // with a reason.
       ImGui::TextDisabled(
           "Read-only: live edit not yet supported for this component "
           "(Stop to edit).");
@@ -187,7 +186,7 @@ void draw_component_section(runtime::Entity entity, ComponentEditType type,
 /// SpringArm) -- the custom-drawer sections below (Mesh, FoliagePatch,
 /// Script, Animation, SceneCapture) manage their own sub-widget structural
 /// edits (asset picks, foliage instance add/remove) that are out of scope
-/// for issue #159's live-edit path and stay Stop-only, always read-only
+/// live-edit path and stay Stop-only, always read-only
 /// during Play regardless of the toggle.
 void draw_component_sections(runtime::Entity entity, bool authoredEditable,
                              bool liveEditable) noexcept {
@@ -337,8 +336,8 @@ void draw_component_sections(runtime::Entity entity, bool authoredEditable,
       &ComponentEditSnapshot::camera, authoredEditable, liveEditable, true,
       [entity](runtime::CameraComponent &c) {
         // Projection is a reflected uint32 whose Enum metadata drives a
-        // named combo inside the generic loop (shared with multi-edit,
-        // issue #225), so no hand-drawn selector precedes it.
+        // named combo inside the generic loop (shared with multi-edit),
+        // so no hand-drawn selector precedes it.
         bool modified = draw_reflected_component_fields(
             "engine::runtime::CameraComponent", &c, g_showAdvanced);
 
@@ -409,7 +408,7 @@ void draw_inspector_panel() noexcept {
     ImGui::Separator();
   }
 
-  // Multi-selection (issue #159): common components across every selected
+  // Multi-selection: common components across every selected
   // entity, mixed-value fields flagged, batch edits as one undoable
   // command. A pending single-entity gesture from before the selection
   // grew must still commit instead of being silently dropped.
@@ -419,6 +418,8 @@ void draw_inspector_panel() noexcept {
     ImGui::End();
     return;
   }
+  // A multi-selection drag whose selection shrank commits the same way.
+  multi_edit_commit_gesture();
 
   const runtime::Entity entity = selected_entity();
   if ((editor_session().world == nullptr) ||
@@ -431,7 +432,7 @@ void draw_inspector_panel() noexcept {
 
   // authoredEditable: Stopped, edits route through command history as
   // usual. liveEditable: Playing/Paused with the opt-in live-edit toggle
-  // on (issue #159) -- edits write straight to the running world and
+  // on -- edits write straight to the running world and
   // never touch undo/dirty state. The two are mutually exclusive (Stopped
   // implies liveEditable is false) so callers never need to pick between
   // them for a single field.
@@ -466,7 +467,7 @@ void draw_inspector_panel() noexcept {
   if (hasNameComponent) {
     // The name is entity identity, not a removable behavior -- it can be
     // edited but never deleted from the inspector. Renaming stays
-    // authored-only: it is not part of issue #159's live-edit scope.
+    // authored-only: it is not part live-edit scope.
     const runtime::NameComponent nameBefore = nameComponent;
     bool nameChanged = false;
     if (!authoredEditable) {

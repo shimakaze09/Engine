@@ -1,5 +1,5 @@
 // Declares the contact-pair material combine rule every physics response
-// path shares (#475): friction is the geometric mean of the two surface
+// path shares: friction is the geometric mean of the two surface
 // coefficients, restitution the larger of the two.
 
 #pragma once

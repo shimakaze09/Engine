@@ -47,7 +47,7 @@ public:
   /// Number of currently active timers.
   std::size_t active_count() const noexcept;
 
-  // Timers are runtime-only, per-scene state (issue #209): they are never
+  // Timers are runtime-only, per-scene state: they are never
   // serialized — a callback has no stable cross-process identity — and
   // scripts re-arm their timers in on_begin_play after a scene loads. The
   // scene transition path clears this manager explicitly.

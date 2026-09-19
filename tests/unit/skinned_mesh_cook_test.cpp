@@ -12,6 +12,7 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <limits>
 #include <vector>
 
 #include <cgltf.h>
@@ -23,6 +24,10 @@ namespace {
 constexpr const char *kGltfPath = "skinned_mesh_cook_test.gltf";
 constexpr const char *kBinPath = "skinned_mesh_cook_test.bin";
 constexpr const char *kMeshPath = "skinned_mesh_cook_test.mesh";
+constexpr const char *kTexturePath = "skinned_mesh_cook_test tex.png";
+
+/// When set, the fixture's first position is NaN (#571 finiteness row).
+bool g_poisonPosition = false;
 
 /// Removes a temporary test file when it exists.
 void remove_file(const char *path) noexcept {
@@ -55,8 +60,11 @@ bool write_binary_file(const char *path, const void *data,
 /// positions, normals, ushort joint indices, and float weights.
 bool write_skinned_fixture_bin() noexcept {
   std::vector<std::uint8_t> bin(144U, 0U);
-  const std::array<float, 9U> positions = {0.0F, 0.0F, 0.0F, 1.0F, 0.0F,
-                                           0.0F, 0.0F, 1.0F, 0.0F};
+  std::array<float, 9U> positions = {0.0F, 0.0F, 0.0F, 1.0F, 0.0F,
+                                     0.0F, 0.0F, 1.0F, 0.0F};
+  if (g_poisonPosition) {
+    positions[0U] = std::numeric_limits<float>::quiet_NaN();
+  }
   const std::array<float, 9U> normals = {0.0F, 0.0F, 1.0F, 0.0F, 0.0F,
                                          1.0F, 0.0F, 0.0F, 1.0F};
   const std::array<std::uint16_t, 12U> joints = {0U, 1U, 2U, 0U, 2U, 2U,
@@ -133,6 +141,99 @@ void cleanup_fixture_files() noexcept {
   remove_file(kGltfPath);
   remove_file(kBinPath);
   remove_file(kMeshPath);
+  remove_file(kTexturePath);
+}
+
+/// EXPECTATION (#571): a non-finite vertex position is refused at
+/// extraction, before it can reach the thumbnail rasterizer's int cast or
+/// the hull builder.
+int check_non_finite_position_rejected() {
+  g_poisonPosition = true;
+  cgltf_data *data = nullptr;
+  const cgltf_primitive *primitive = nullptr;
+  const bool loaded = load_fixture_primitive(&data, &primitive);
+  g_poisonPosition = false;
+  if (!loaded) {
+    std::puts("poisoned fixture setup failed");
+    return 1;
+  }
+  PrimitiveData cooked{};
+  const bool extracted = extract_primitive(primitive, &cooked, nullptr);
+  cgltf_free(data);
+  if (extracted) {
+    std::puts("a NaN position was accepted");
+    return 1;
+  }
+  return 0;
+}
+
+/// EXPECTATION (#571): an image URI is percent-encoded in the glTF but
+/// plain on disk; the dependency is registered and hashed under the
+/// decoded name, so an edit to that texture forces a recook.
+int check_percent_encoded_image_dependency() {
+  if (!write_skinned_fixture_bin() ||
+      !write_binary_file(kTexturePath, "png-bytes", 9U)) {
+    return 1;
+  }
+  const char *gltf =
+      "{"
+      "\"asset\":{\"version\":\"2.0\"},"
+      "\"buffers\":[{\"uri\":\"skinned_mesh_cook_test.bin\","
+      "\"byteLength\":144}],"
+      "\"bufferViews\":[{\"buffer\":0,\"byteOffset\":0,\"byteLength\":36}],"
+      "\"accessors\":[{\"bufferView\":0,\"componentType\":5126,\"count\":3,"
+      "\"type\":\"VEC3\"}],"
+      "\"images\":[{\"uri\":\"skinned_mesh_cook_test%20tex.png\"},"
+      "{\"uri\":\"data:image/png;base64,AAAA\"}],"
+      "\"textures\":[{\"source\":0},{\"source\":1}],"
+      "\"materials\":[{\"pbrMetallicRoughness\":{"
+      "\"baseColorTexture\":{\"index\":0},"
+      "\"metallicRoughnessTexture\":{\"index\":1}}}],"
+      "\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0},"
+      "\"material\":0}]}]"
+      "}";
+  if (!write_binary_file(kGltfPath, gltf, std::strlen(gltf))) {
+    return 1;
+  }
+  cgltf_options options{};
+  cgltf_data *data = nullptr;
+  if ((cgltf_parse_file(&options, kGltfPath, &data) != cgltf_result_success) ||
+      (data == nullptr) ||
+      (cgltf_load_buffers(&options, data, kGltfPath) != cgltf_result_success)) {
+    std::puts("textured fixture failed to parse");
+    return 1;
+  }
+  engine::tools::DependencyGraph graph{};
+  std::vector<DependencyDigest> digests{};
+  const std::uint64_t meshAssetId = hash_path_to_asset_id(kGltfPath);
+  const bool extracted = extract_gltf_dependencies(data, kGltfPath,
+                                                   meshAssetId, &graph,
+                                                   &digests);
+  cgltf_free(data);
+  if (!extracted) {
+    std::puts("dependency extraction failed");
+    return 1;
+  }
+  bool decodedDigested = false;
+  for (const DependencyDigest &digest : digests) {
+    if (digest.path.find("%20") != std::string::npos) {
+      std::puts("the image was registered under its encoded name");
+      return 1;
+    }
+    if (digest.path.find("data:") != std::string::npos) {
+      std::puts("an inline data: image was registered as a file");
+      return 1;
+    }
+    if ((digest.path.find(kTexturePath) != std::string::npos) &&
+        (digest.hash != 0ULL)) {
+      decodedDigested = true;
+    }
+  }
+  if (!decodedDigested) {
+    std::puts("the decoded texture path was not hashed as a dependency");
+    return 1;
+  }
+  return 0;
 }
 
 /// EXPECTATION: with the reorder remap {2, 1, 0}, the skinned extraction
@@ -577,6 +678,12 @@ int main() {
   }
   if (result == 0) {
     result = check_v3_mesh_file_header();
+  }
+  if (result == 0) {
+    result = check_non_finite_position_rejected();
+  }
+  if (result == 0) {
+    result = check_percent_encoded_image_dependency();
   }
   if (result == 0) {
     result = check_external_buffer_becomes_dependency();

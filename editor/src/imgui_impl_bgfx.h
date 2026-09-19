@@ -1,4 +1,4 @@
-// Declares the editor's ImGui renderer (#138): the stock ImGui
+// Declares the editor's ImGui renderer: the stock ImGui
 // backend Init/Shutdown/NewFrame/RenderDrawData quartet, submitting
 // ImGui draw data through bgfx into a dedicated late view. The editor
 // links bgfx directly here — the sanctioned UI-integration exception to

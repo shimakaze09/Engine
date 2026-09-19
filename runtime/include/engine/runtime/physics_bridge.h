@@ -42,6 +42,7 @@ void dispatch_collision_callbacks(World &world) noexcept;
 
 /// Closest-hit raycast using a normalized copy of direction; false when
 /// maxDistance is not finite and positive or nothing is hit within it.
+/// skipEntity excludes that entity and the compound colliders it owns.
 bool raycast(const World &world, const math::Vec3 &origin,
              const math::Vec3 &direction, float maxDistance,
              PhysicsRaycastHit *outHit,
@@ -71,11 +72,11 @@ physics::JointId add_spring_joint(World &world, Entity entityA, Entity entityB,
 physics::JointId add_fixed_joint(World &world, Entity entityA,
                                  Entity entityB) noexcept;
 /// Sets ordered joint limits: twist radians within [-pi, pi] on hinges,
-/// travel distance on sliders; false (issue #126) on a stale/invalid id,
+/// travel distance on sliders; false on a stale/invalid id,
 /// wrong joint type, out-of-range limits, or outside the Input phase.
 bool set_joint_limits(World &world, physics::JointId id, float minLimit,
                       float maxLimit) noexcept;
-/// Releases the joint slot; false (issue #126) when the id no longer names
+/// Releases the joint slot; false when the id no longer names
 /// a live joint or the call is outside the Input phase. Safe with
 /// kInvalidJointId (reports false, does not crash).
 bool remove_joint(World &world, physics::JointId id) noexcept;
@@ -101,11 +102,13 @@ const physics::HeightfieldData *get_heightfield_data(
 
 // Physics queries (P1-M3-D)
 /// Returns the nearest maxHits intersections sorted by distance, normalizing
-/// direction internally; maxDistance must be finite and positive.
+/// direction internally; maxDistance must be finite and positive. skipEntity
+/// follows the raycast rule.
 std::size_t raycast_all(const World &world, const math::Vec3 &origin,
                         const math::Vec3 &direction, float maxDistance,
                         PhysicsRaycastHit *outHits, std::size_t maxHits,
-                        std::uint32_t mask = 0xFFFFFFFFU) noexcept;
+                        std::uint32_t mask = 0xFFFFFFFFU,
+                        Entity skipEntity = kInvalidEntity) noexcept;
 
 /// Collects entity indices overlapping the sphere (mask-filtered);
 /// returns the hit count.

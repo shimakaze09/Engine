@@ -1,6 +1,6 @@
 // Implements the world-scoped persistent contact-manifold cache: pair
 // lookup keyed by full Entity identity, contact matching/reduction, and
-// frame-stamped eviction (issue #110 moved it off a process-global store).
+// frame-stamped eviction.
 
 #include "engine/physics/constraint_solver.h"
 

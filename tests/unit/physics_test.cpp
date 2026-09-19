@@ -696,6 +696,183 @@ int check_friction_slows_sliding() {
   return 0;
 }
 
+/// Regression for #537 item 1: the manifold path's two friction passes
+/// accumulate per point, so a sliding box loses at most mu times the
+/// normal impulse it received this step (the cone), the same bound the
+/// single-point path already honours. Measured on the body's own velocity
+/// change: the tangential loss against the normal gain, both from impulses
+/// on the same mass.
+int check_manifold_friction_respects_cone() {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 910;
+  }
+  world->end_frame_phase();
+
+  const engine::runtime::Entity floor = world->create_entity();
+  const engine::runtime::Entity slider = world->create_entity();
+  if ((floor == engine::runtime::kInvalidEntity) ||
+      (slider == engine::runtime::kInvalidEntity)) {
+    return 911;
+  }
+  engine::runtime::Transform floorT{};
+  engine::runtime::Transform sliderT{};
+  sliderT.position = engine::math::Vec3(0.0F, 0.59F, 0.0F); // 1 cm into the top
+  engine::runtime::Collider floorCol{};
+  floorCol.halfExtents = engine::math::Vec3(5.0F, 0.5F, 5.0F);
+  engine::runtime::Collider sliderCol{};
+  sliderCol.halfExtents = engine::math::Vec3(0.5F, 0.1F, 0.5F);
+  constexpr float kMu = 0.5F;
+  for (engine::runtime::Collider *col : {&floorCol, &sliderCol}) {
+    col->restitution = 0.0F;
+    col->staticFriction = kMu;
+    col->dynamicFriction = kMu;
+  }
+  engine::runtime::RigidBody floorBody{};
+  floorBody.inverseMass = 0.0F;
+  engine::runtime::RigidBody sliderBody{};
+  sliderBody.inverseMass = 1.0F;
+  sliderBody.velocity = engine::math::Vec3(10.0F, -1.0F, 0.0F);
+  if (!world->add_transform(floor, floorT) ||
+      !world->add_transform(slider, sliderT) ||
+      !world->add_collider(floor, floorCol) ||
+      !world->add_collider(slider, sliderCol) ||
+      !world->add_rigid_body(floor, floorBody) ||
+      !world->add_rigid_body(slider, sliderBody)) {
+    return 912;
+  }
+
+  world->begin_update_phase();
+  if (!world->update_transforms_range(0U, world->transform_count(), 0.0F) ||
+      !engine::runtime::resolve_collisions(*world)) {
+    world->end_frame_phase();
+    return 913;
+  }
+  world->commit_update_phase();
+  world->begin_render_prep_phase();
+  world->end_frame_phase();
+
+  engine::runtime::RigidBody out{};
+  if (!world->get_rigid_body(slider, &out)) {
+    return 914;
+  }
+  const float normalGain = out.velocity.y - sliderBody.velocity.y;
+  const float tangentLoss = sliderBody.velocity.x - out.velocity.x;
+  if ((normalGain <= 0.0F) || (tangentLoss <= 0.0F)) {
+    return 915; // the contact must both support and brake the slider
+  }
+  // Coulomb cone per step: |sum of tangential impulses| <= mu * sum of
+  // normal impulses. 1e-5 relative covers float accumulation only.
+  if (tangentLoss > kMu * normalGain * (1.0F + 1.0e-5F)) {
+    std::printf("manifold friction outside the cone: lost %.6f tangential "
+                "for %.6f normal (mu %.2f)\n",
+                static_cast<double>(tangentLoss),
+                static_cast<double>(normalGain), static_cast<double>(kMu));
+    return 916;
+  }
+  return 0;
+}
+
+/// Regression for #537 item 2: a sleeping body is static to every response
+/// path, so a slow pusher (below the wake threshold) is stopped by it like
+/// a wall and the sleeper keeps zero velocity and its pose; a fast pusher
+/// still wakes it and moves it.
+int check_sleeping_body_is_static_to_slow_push() {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 920;
+  }
+  world->end_frame_phase();
+
+  const engine::runtime::Entity crate = world->create_entity();
+  const engine::runtime::Entity pusher = world->create_entity();
+  if ((crate == engine::runtime::kInvalidEntity) ||
+      (pusher == engine::runtime::kInvalidEntity)) {
+    return 921;
+  }
+  engine::runtime::Transform crateT{};
+  engine::runtime::Transform pusherT{};
+  pusherT.position = engine::math::Vec3(-0.99F, 0.0F, 0.0F); // 1 cm overlap
+  engine::runtime::Collider box{};
+  box.halfExtents = engine::math::Vec3(0.5F, 0.5F, 0.5F);
+  box.restitution = 0.0F;
+  engine::runtime::RigidBody crateBody{};
+  crateBody.inverseMass = 1.0F;
+  engine::runtime::RigidBody pusherBody{};
+  pusherBody.inverseMass = 1.0F;
+  pusherBody.velocity = engine::math::Vec3(0.05F, 0.0F, 0.0F);
+  if (!world->add_transform(crate, crateT) ||
+      !world->add_transform(pusher, pusherT) ||
+      !world->add_collider(crate, box) || !world->add_collider(pusher, box) ||
+      !world->add_rigid_body(crate, crateBody) ||
+      !world->add_rigid_body(pusher, pusherBody)) {
+    return 922;
+  }
+  engine::runtime::RigidBody *asleep = world->get_rigid_body_ptr(crate);
+  if (asleep == nullptr) {
+    return 923;
+  }
+  asleep->sleeping = true;
+  asleep->sleepFrameCount = 60U;
+
+  const auto step = [&world]() noexcept -> bool {
+    world->begin_update_phase();
+    const bool ok =
+        world->update_transforms_range(0U, world->transform_count(), 0.0F) &&
+        engine::runtime::resolve_collisions(*world);
+    if (!ok) {
+      world->end_frame_phase();
+      return false;
+    }
+    world->commit_update_phase();
+    world->begin_render_prep_phase();
+    world->end_frame_phase();
+    return true;
+  };
+  if (!step()) {
+    return 924;
+  }
+
+  engine::runtime::RigidBody outCrate{};
+  engine::runtime::RigidBody outPusher{};
+  engine::runtime::Transform outCrateT{};
+  if (!world->get_rigid_body(crate, &outCrate) ||
+      !world->get_rigid_body(pusher, &outPusher) ||
+      !world->get_transform(crate, &outCrateT)) {
+    return 925;
+  }
+  if (!outCrate.sleeping) {
+    return 926; // a slow push is below the wake threshold
+  }
+  if ((outCrate.velocity.x != 0.0F) || (outCrate.velocity.y != 0.0F) ||
+      (outCrate.velocity.z != 0.0F)) {
+    return 927; // a body that stays asleep has exactly zero velocity
+  }
+  if (outCrateT.position.x != 0.0F) {
+    return 928; // and is not displaced by the positional correction
+  }
+  if (outPusher.velocity.x > 0.0F) {
+    return 929; // the pusher is stopped as by a wall
+  }
+
+  // A fast pusher wakes the crate and moves it (the first step's
+  // correction separated the pair, so the overlap is restored first).
+  engine::runtime::RigidBody *awakePusher = world->get_rigid_body_ptr(pusher);
+  if ((awakePusher == nullptr) || !world->add_transform(pusher, pusherT)) {
+    return 930;
+  }
+  awakePusher->velocity = engine::math::Vec3(1.0F, 0.0F, 0.0F);
+  if (!step() || !world->get_rigid_body(crate, &outCrate)) {
+    return 931;
+  }
+  if (outCrate.sleeping || (outCrate.velocity.x <= 0.0F)) {
+    return 932;
+  }
+  return 0;
+}
+
 int check_raycast_hits_aabb() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -2288,9 +2465,13 @@ int check_heightfield_vs_sphere_collision() {
     return 448;
   }
 
-  // Sphere should have been pushed up.  Its center should be at least at
-  // y >= radius (0.5) minus some tolerance.
-  if (outSph.position.y < 0.3F) {
+  // Derived, not tolerated: the sphere starts at y = -0.3 with r = 0.5 on a
+  // flat field at y = 0, so the overlap is 0.8, and contact resolution
+  // moves a dynamic body by the whole overlap against a static one. One
+  // resolve therefore lands the centre at exactly y = 0.5 up to float
+  // rounding on -0.3; 1e-4 is ~1000 ulps of headroom. The previous bound
+  // (y >= 0.3) accepted a body left 40% of its radius inside the terrain.
+  if (std::fabs(outSph.position.y - 0.5F) > 1.0e-4F) {
     return 449;
   }
 
@@ -2438,8 +2619,10 @@ int check_raycast_hits_heightfield() {
   if (!found) {
     return 455;
   }
-  // Should hit at y=0, so distance ≈ 10.
-  if (std::fabs(hit.distance - 10.0F) > 0.5F) {
+  // Exact hit at y=0 from y=10 straight down: t = 10. A ray-plane solve is
+  // one division; 1e-4 is ~100 ulps at this magnitude. The previous 0.5
+  // would have accepted a hit anywhere within half a metre of the surface.
+  if (std::fabs(hit.distance - 10.0F) > 1.0e-4F) {
     return 456;
   }
   // Normal should point up.
@@ -3786,6 +3969,16 @@ int main() {
   }
 
   result = check_friction_slows_sliding();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_manifold_friction_respects_cone();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_sleeping_body_is_static_to_slow_push();
   if (result != 0) {
     return result;
   }

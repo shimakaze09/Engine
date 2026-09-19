@@ -1,9 +1,9 @@
 // Implements the runtime cooked-asset trust checks: the staleness
 // diagnostic (reads the .meta.json sidecar's source path + content hash,
-// re-hashes the source, and logs a once-per-asset warning on mismatch,
-// issue #81) and the cook-generation validation (audit #211: verifies the
-// .cookstamp output manifest against the files on disk so a torn or mixed
-// cook is rejected before a load accepts it). Both run on the CPU load
+// re-hashes the source, and logs a once-per-asset warning on mismatch)
+// and the cook-generation validation (verifies the .cookstamp output
+// manifest against the files on disk so a torn or mixed cook is rejected
+// before a load accepts it). Both run on the CPU load
 // path only (sync loads and the streaming worker), never per frame; the
 // once-per-asset memories are fixed lock-free tables.
 
@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <memory>
 #include <new>
 
@@ -57,9 +58,29 @@ bool try_mark_checked(std::uint64_t pathHash) noexcept {
   return false;
 }
 
+/// Largest file the load path re-hashes; a stamp or sidecar naming
+/// something bigger is refused rather than read.
+constexpr std::uintmax_t kMaxHashedFileBytes = 512ULL * 1024ULL * 1024ULL;
+
 /// FNV-1a of the file bytes, matching the packer's source-content hash.
+/// Only a regular file within kMaxHashedFileBytes is opened: a device,
+/// FIFO or directory named by a stamp or sidecar would otherwise block
+/// the streaming worker (and editor shutdown, which joins it) forever, so
+/// the read is also bounded by the size observed up front.
 bool hash_file_bytes(const char *path, std::uint64_t *outHash) noexcept {
   if ((path == nullptr) || (outHash == nullptr)) {
+    return false;
+  }
+  std::error_code statusError{};
+  const std::filesystem::file_status status =
+      std::filesystem::status(std::filesystem::path(path), statusError);
+  if (statusError || !std::filesystem::is_regular_file(status)) {
+    return false;
+  }
+  std::error_code sizeError{};
+  const std::uintmax_t fileSize =
+      std::filesystem::file_size(std::filesystem::path(path), sizeError);
+  if (sizeError || (fileSize > kMaxHashedFileBytes)) {
     return false;
   }
 
@@ -77,11 +98,16 @@ bool hash_file_bytes(const char *path, std::uint64_t *outHash) noexcept {
 
   std::uint64_t hash = core::kFnv1a64Offset;
   unsigned char buffer[4096] = {};
-  while (true) {
-    const std::size_t bytesRead = std::fread(buffer, 1U, sizeof(buffer), file);
+  std::uintmax_t remaining = fileSize;
+  while (remaining > 0U) {
+    const std::size_t want = (remaining < sizeof(buffer))
+                                 ? static_cast<std::size_t>(remaining)
+                                 : sizeof(buffer);
+    const std::size_t bytesRead = std::fread(buffer, 1U, want, file);
     if (bytesRead == 0U) {
       break;
     }
+    remaining -= bytesRead;
     for (std::size_t i = 0U; i < bytesRead; ++i) {
       hash = core::fnv1a_64_append(hash, buffer[i]);
     }
@@ -184,7 +210,7 @@ bool read_meta_source_record(const char *cookedPath,
   return parse_hex_u64(hashText, outSourceHash);
 }
 
-// ---- Cook-generation validation (audit #211) ------------------------------
+// ---- Cook-generation validation ------------------------------
 
 constexpr std::size_t kMaxStampFileBytes = 1024U * 1024U;
 constexpr std::size_t kMaxVerdictEntries = 512U;
@@ -286,6 +312,19 @@ bool parse_prefixed_uint(const char *line, const char *prefix,
 /// diagnostic is actionable.
 std::uint32_t validate_stamp_outputs(const char *cookedPath, char *text) noexcept {
   bool sawOutputLine = false;
+  bool sawToolVersion = false;
+  std::uint32_t schema = 0U;
+  // Schema-4 paths join under the stamp's directory.
+  const char *stampDirEnd = std::strrchr(cookedPath, '/');
+  const char *stampDirEndBackslash = std::strrchr(cookedPath, '\\');
+  if ((stampDirEndBackslash != nullptr) &&
+      ((stampDirEnd == nullptr) || (stampDirEndBackslash > stampDirEnd))) {
+    stampDirEnd = stampDirEndBackslash;
+  }
+  const std::size_t stampDirLength =
+      (stampDirEnd != nullptr)
+          ? static_cast<std::size_t>(stampDirEnd - cookedPath)
+          : 0U;
   char *cursor = text;
   while ((cursor != nullptr) && (*cursor != '\0')) {
     char *lineEnd = std::strchr(cursor, '\n');
@@ -294,9 +333,21 @@ std::uint32_t validate_stamp_outputs(const char *cookedPath, char *text) noexcep
     }
     char *line = cursor;
     cursor = (lineEnd != nullptr) ? (lineEnd + 1) : nullptr;
+    if (std::strlen(line) + 1U > kMaxCookStampLineBytes) {
+      // Longer than the writer ever emits: a truncated or hand-edited
+      // stamp, never a path to open.
+      char message[640] = {};
+      std::snprintf(message, sizeof(message),
+                    "rejecting cooked asset: cook-stamp line exceeds %zu "
+                    "bytes (re-run the asset packer): %s",
+                    kMaxCookStampLineBytes, cookedPath);
+      core::log_message(core::LogLevel::Error, "assets", message);
+      return kVerdictRejected;
+    }
 
     std::uint32_t declared = 0U;
     if (parse_prefixed_uint(line, "SCHEMA ", &declared)) {
+      schema = declared;
       if (declared > kCookStampSchema) {
         char message[640] = {};
         std::snprintf(message, sizeof(message),
@@ -311,6 +362,7 @@ std::uint32_t validate_stamp_outputs(const char *cookedPath, char *text) noexcep
       continue;
     }
     if (parse_prefixed_uint(line, "TOOL_VERSION ", &declared)) {
+      sawToolVersion = true;
       if (declared != kCookToolVersion) {
         char message[640] = {};
         std::snprintf(message, sizeof(message),
@@ -350,7 +402,43 @@ std::uint32_t validate_stamp_outputs(const char *cookedPath, char *text) noexcep
       core::log_message(core::LogLevel::Error, "assets", message);
       return kVerdictRejected;
     }
-    const char *outputPath = hashStart + 17;
+    const char *recordedPath = hashStart + 17;
+    // Schema 4 records the path relative to the stamp's directory and
+    // never outside it; a legacy schema recorded the packer's invocation
+    // path, which the TOOL_VERSION gate above has already refused for
+    // every stamp this build did not cook. Either way the file is
+    // addressed only after it passed the containment rule.
+    char joinedPath[512] = {};
+    const char *outputPath = recordedPath;
+    if (schema >= 4U) {
+      if (!cook_stamp_path_is_contained(recordedPath)) {
+        char message[640] = {};
+        std::snprintf(message, sizeof(message),
+                      "rejecting cooked asset %s: stamped output path "
+                      "leaves the stamp directory (corrupt cook stamp; "
+                      "re-run the asset packer): %s",
+                      cookedPath, recordedPath);
+        core::log_message(core::LogLevel::Error, "assets", message);
+        return kVerdictRejected;
+      }
+      const int written =
+          (stampDirLength > 0U)
+              ? std::snprintf(joinedPath, sizeof(joinedPath), "%.*s/%s",
+                              static_cast<int>(stampDirLength), cookedPath,
+                              recordedPath)
+              : std::snprintf(joinedPath, sizeof(joinedPath), "%s",
+                              recordedPath);
+      if ((written <= 0) || (written >= static_cast<int>(sizeof(joinedPath)))) {
+        char message[640] = {};
+        std::snprintf(message, sizeof(message),
+                      "rejecting cooked asset %s: stamped output path does "
+                      "not fit (re-run the asset packer)",
+                      cookedPath);
+        core::log_message(core::LogLevel::Error, "assets", message);
+        return kVerdictRejected;
+      }
+      outputPath = joinedPath;
+    }
 
     std::uint64_t currentHash = 0ULL;
     const bool hashed = hash_file_bytes(outputPath, &currentHash);
@@ -372,6 +460,20 @@ std::uint32_t validate_stamp_outputs(const char *cookedPath, char *text) noexcep
                   "(interrupted or mixed cook; re-run the asset packer)",
                   cookedPath, outputPath,
                   hashed ? "does not match its cook stamp" : "is missing");
+    core::log_message(core::LogLevel::Error, "assets", message);
+    return kVerdictRejected;
+  }
+
+  // From schema 3 on the packer always writes TOOL_VERSION; a stamp that
+  // declares that schema without it is torn or hand-edited and certifies
+  // nothing. Older schemas predate the line and stay on the legacy
+  // accept path.
+  if ((schema >= 3U) && !sawToolVersion) {
+    char message[640] = {};
+    std::snprintf(message, sizeof(message),
+                  "rejecting cooked asset %s: cook stamp schema %u declares "
+                  "no TOOL_VERSION (re-run the asset packer)",
+                  cookedPath, static_cast<unsigned int>(schema));
     core::log_message(core::LogLevel::Error, "assets", message);
     return kVerdictRejected;
   }

@@ -1,5 +1,5 @@
 // Declares the editor Console's bounded log capture, filtering, duplicate
-// collapse, and best-effort source/entity navigation metadata (issue #155).
+// collapse, and best-effort source/entity navigation metadata.
 // Panel-draw-code exempt: every symbol here is testable without ImGui.
 
 #pragma once
@@ -23,7 +23,7 @@ enum class ConsoleSourceCategory : std::uint8_t { Engine, Script };
 enum class ConsoleReferenceKind : std::uint8_t { None, ScriptLocation, AssetPath };
 
 /// Hard bound on captured entries; the ring drops the oldest entry once
-/// full rather than growing (issue #155 storage-bound requirement). At
+/// full rather than growing. At
 /// worst case (every field's static size) this is a few MB, acceptable for
 /// an editor-only in-memory tool, never written to disk or streamed.
 constexpr std::size_t kMaxConsoleEntries = 2048U;
@@ -101,8 +101,8 @@ bool console_capture_get_entry(std::size_t index, ConsoleEntry *out) noexcept;
 /// tests and the UI distinguish "ring wrapped" from "nothing logged yet."
 std::uint64_t console_capture_total_ingested() noexcept;
 
-/// Badge counters for surfacing severity while the panel is closed
-/// (issue #155's non-spamming status indicator). Counts entries at or
+/// Badge counters for surfacing severity while the panel is closed.
+/// Counts entries at or
 /// above the given level ingested since the last console_capture_mark_seen
 /// call (each repeat of a collapsed entry still increments this once).
 std::uint32_t console_capture_unseen_error_count() noexcept;

@@ -1,5 +1,5 @@
-// Implements the dynamic-resolution controller and quality presets
-// (#138 v0.5 device reach): the frame-time stepper is pure state-in/
+// Implements the dynamic-resolution controller and quality presets:
+// the frame-time stepper is pure state-in/
 // state-out so its convergence, recovery, and hysteresis are unit
 // tested; the effective scale and preset tracking are renderer-owned.
 

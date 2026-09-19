@@ -34,7 +34,7 @@ void set_debug_lua_state(lua_State *state) noexcept;
 /// Refreshes debugger/profiler/sandbox hooks on the owning Lua state.
 void refresh_debug_lua_hook() noexcept;
 /// Arms hooks for an engine-side dispatch boundary; the shared per-frame
-/// instruction budget is NOT reset here (issue #84: one budget per frame).
+/// instruction budget is NOT reset here.
 void arm_debug_lua_hook(lua_State *state) noexcept;
 /// True once this frame's shared instruction budget is exhausted.
 bool debug_instruction_budget_exhausted() noexcept;

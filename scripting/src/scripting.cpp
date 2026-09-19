@@ -142,8 +142,8 @@ int lua_engine_start_coroutine(lua_State *state) noexcept {
 // --- Entity lifecycle completeness ---
 
 /// Registers the full Lua API on one global engine table: the manual
-/// wrappers first, then the generated bindings; the two sets are disjoint
-/// (#473), so registration order carries no override semantics.
+/// wrappers first, then the generated bindings; the two sets are disjoint,
+/// so registration order carries no override semantics.
 void register_engine_bindings(lua_State *state) noexcept {
   lua_newtable(state);
 
@@ -562,9 +562,6 @@ void reset_run_state() noexcept {
 void set_frame_time(float deltaSeconds, float totalSeconds) noexcept {
   g_deltaSeconds = deltaSeconds;
   g_totalSeconds = totalSeconds;
-  if (dap_is_running()) {
-    dap_poll();
-  }
 }
 
 /// Loads the requested resource for script.
@@ -670,8 +667,8 @@ struct GlobalsSnapshotArgs final {
   int ref = LUA_NOREF;
 };
 
-// Rollback covers tables (and, since #115a, their metatables) reachable
-// from _G through table fields down to this depth, plus (#199) the
+// Rollback covers tables reachable
+// from _G through table fields down to this depth, plus the
 // upvalue cells of every Lua closure met during that walk; deeper tables,
 // C-closure upvalues, userdata, and registry-only state stay shared and
 // are not rolled back. Upvalue restore is cell-identity based: Lua joins
@@ -685,11 +682,11 @@ constexpr std::size_t kMaxReloadSnapshotDepth = 8U;
 /// Replaces the table on top of the stack with its snapshot copy,
 /// recording orig->copy in memo and copy->orig in rev; cycles reuse the
 /// memoized copy, and depth/stack limits fall back to a shared reference.
-/// Also records the table's metatable identity in metaIndex (#115a) and
+/// Also records the table's metatable identity in metaIndex and
 /// walks into it the same way, so a failed reload that swaps, clears, or
 /// mutates a metatable (a common OOP class-table pattern) rolls back too.
 /// Lua closures met along the walk are collected into closuresIndex
-/// (fn -> true) for the upvalue snapshot pass (#199).
+/// (fn -> true) for the upvalue snapshot pass.
 void deep_snapshot_table(lua_State *state, int memoIndex, int revIndex,
                          int metaIndex, int closuresIndex,
                          std::size_t depth) noexcept {
@@ -736,7 +733,7 @@ void deep_snapshot_table(lua_State *state, int memoIndex, int revIndex,
                           depth + 1U);
     } else if ((lua_isfunction(state, -1) != 0) &&
                (lua_iscfunction(state, -1) == 0)) {
-      // #199: remember every reachable Lua closure (dedup in the hash
+      // Remember every reachable Lua closure (dedup in the hash
       // part, ordered in the array part — the upvalue pass appends while
       // iterating, so no lua_next runs over a growing table); C closures
       // stay owned by their bindings.
@@ -788,7 +785,7 @@ int snapshot_globals_trampoline(lua_State *state) noexcept {
                       0U);
   lua_pop(state, 1);
 
-  // #199: snapshot every collected closure's upvalue cells. Cells are
+  // Snapshot every collected closure's upvalue cells. Cells are
   // keyed by lua_upvalueid identity so a cell shared across closures is
   // recorded (and later restored) exactly once; a table-valued cell is
   // additionally deep-snapshotted so its contents roll back in place.
@@ -946,10 +943,10 @@ int restore_globals_trampoline(lua_State *state) noexcept {
     lua_pop(state, 1);
   }
 
-  // #199: restore each snapshotted upvalue cell exactly once through any
+  // Restore each snapshotted upvalue cell exactly once through any
   // one recorded holder — lua_setupvalue writes through the shared cell,
   // so every closure aliasing it sees the restored value and the sharing
-  // relationship itself is untouched. Pre-#199 snapshots carry no
+  // relationship itself is untouched. Older snapshots carry no
   // holders/cells slots and skip this pass.
   lua_rawgeti(state, containerIndex, 4);
   const int cellsIndex = lua_absindex(state, -1);
@@ -1059,7 +1056,7 @@ bool reload_script_transactionally(const char *path) noexcept {
 } // anonymous namespace
 
 /// Frame boundary: advances the frame index and refills the shared
-/// per-frame Lua instruction budget (issue #84, one budget per frame).
+/// per-frame Lua instruction budget.
 void set_frame_index(std::uint32_t frameIndex) noexcept {
   g_frameIndex = frameIndex;
   refill_debug_instruction_budget();
@@ -1067,13 +1064,13 @@ void set_frame_index(std::uint32_t frameIndex) noexcept {
 
 void tick_timers() noexcept { tick_lua_timers(lua_state(), g_deltaSeconds); }
 
-// H-16 remainder (#93a): scene transitions reset the World's TimerManager
-// (reset_world/load_scene) but that layer cannot reach the scripting-side
-// Lua registry refs, so a transition mid-flight left them pinned, retaining
-// closures (and any old-world entity handles their upvalues captured) past
-// the outgoing scene's lifetime. Mirror clear_coroutines(): the engine
-// pipeline calls this at the same transition point so no stale timer ref
-// survives into the replacement world.
+// Scene transitions reset the World's TimerManager (reset_world/load_scene)
+// but that layer cannot reach the scripting-side Lua registry refs, which
+// would otherwise stay pinned, retaining closures (and any old-world entity
+// handles their upvalues captured) past the outgoing scene's lifetime. The
+// engine pipeline calls this at the same transition point as
+// clear_coroutines() so no stale timer ref survives into the replacement
+// world.
 void clear_timers() noexcept { clear_lua_timer_bindings(lua_state()); }
 
 void tick_coroutines() noexcept {
@@ -1083,11 +1080,11 @@ void tick_coroutines() noexcept {
 
 void clear_coroutines() noexcept { clear_lua_coroutines(lua_state()); }
 
-// H-16 remainder (#93b): entity pools created from Lua were never retired
-// at a scene transition, only at full VM shutdown, so every transition that
-// used the pool API leaked one of the fixed 16 slots and left any pool id a
-// script still held pointing at a slot whose world content had moved on.
-// The engine pipeline now calls this at the same transition point as
+// Entity pools created from Lua are retired at every scene transition,
+// not only at VM shutdown: otherwise each transition that used the pool
+// API would leak one of the fixed 16 slots and leave any pool id a script
+// still held pointing at a slot whose world content had moved on. The
+// engine pipeline calls this at the same transition point as
 // clear_coroutines(); the returned pool ids carry the creating world's
 // content epoch (entity_pool_bindings.cpp), so a stale id from before the
 // reset is rejected instead of aliasing a same-numbered replacement pool.
@@ -1099,6 +1096,17 @@ std::size_t active_timer_ref_count() noexcept {
 
 std::size_t active_entity_pool_count() noexcept { return pool_slot_count(); }
 
+/// Modification time of a watched script read where its chunk is loaded
+/// from: through the mount when the path is mounted, so a script
+/// under an asset root away from the cwd hot-reloads like one beside it.
+std::int64_t script_file_mtime_ns(const char *path) noexcept {
+  char osPath[1024] = {};
+  if (!resolve_script_os_path(path, osPath, sizeof(osPath))) {
+    return 0;
+  }
+  return core::file_mtime_ns(osPath);
+}
+
 /// Adds a script to the hot-reload watch table (or refreshes its mtime when
 /// already watched). Watching a new file no longer drops earlier watches;
 /// the table is capped and overflow is logged.
@@ -1109,7 +1117,7 @@ void watch_script_file(const char *path) noexcept {
 
   for (std::size_t i = 0U; i < g_watchedScriptCount; ++i) {
     if (std::strcmp(g_watchedScripts[i].path, path) == 0) {
-      g_watchedScripts[i].mtime = core::file_mtime_ns(path);
+      g_watchedScripts[i].mtime = script_file_mtime_ns(path);
       return;
     }
   }
@@ -1125,12 +1133,12 @@ void watch_script_file(const char *path) noexcept {
                         "watch_script_file")) {
     return;
   }
-  entry.mtime = core::file_mtime_ns(path);
+  entry.mtime = script_file_mtime_ns(path);
   ++g_watchedScriptCount;
 }
 
 // #115c: portable rejection proof for watch_script_file's copy_path_strict
-// call (issue #80/77e6dfe) — unlike require/load_scene/add_script_component,
+// call — unlike require/load_scene/add_script_component,
 // watching a path never reads the file at registration time, so proving
 // rejection needs no on-disk fixture at the truncated length and sidesteps
 // the Windows MAX_PATH staging problem that left this call site's rejection
@@ -1142,7 +1150,7 @@ std::size_t watched_script_count() noexcept { return g_watchedScriptCount; }
 void check_script_reload() noexcept {
   for (std::size_t i = 0U; i < g_watchedScriptCount; ++i) {
     WatchedScript &entry = g_watchedScripts[i];
-    const std::int64_t mtime = core::file_mtime_ns(entry.path);
+    const std::int64_t mtime = script_file_mtime_ns(entry.path);
     if ((mtime == 0) || (mtime == entry.mtime)) {
       continue;
     }

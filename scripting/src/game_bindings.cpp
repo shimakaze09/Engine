@@ -24,7 +24,7 @@ namespace {
 constexpr std::size_t kMaxPlayerControllers =
     runtime::GameBindingState::kMaxPlayerControllers;
 
-// Pipeline-owned when bound (#168 M3); the fallback keeps standalone/test
+// Pipeline-owned when bound; the fallback keeps standalone/test
 // use (no pipeline) working with identical semantics.
 runtime::GameBindingState g_fallbackState{};
 runtime::GameBindingState *g_boundState = nullptr;
@@ -261,7 +261,7 @@ void reset_game_bindings() noexcept {
   binding_state().playerControllers.reset();
 }
 
-/// Binds the pipeline-owned state (#168 M3); nullptr restores the fallback.
+/// Binds the pipeline-owned state; nullptr restores the fallback.
 void bind_game_state(runtime::GameBindingState *state) noexcept {
   g_boundState = state;
 }

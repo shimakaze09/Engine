@@ -9,12 +9,16 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <memory>
 #include <new>
 #include <string>
 #include <thread>
 
 #include "engine/core/service_locator.h"
+#include "engine/engine.h"
+#include "engine/runtime/editor_bridge.h"
+#include "engine/runtime/engine_pipeline.h"
 #include "engine/runtime/scripting_bridge.h"
 #include "engine/runtime/world.h"
 #include "engine/scripting/dap_server.h"
@@ -98,8 +102,11 @@ void shutdown_client_socket_platform() noexcept {
 #endif
 }
 
-/// Connects a client socket to the local DAP server with a short retry window.
-bool connect_to_dap_server(SocketHandle *outSock) noexcept {
+/// Connects a client socket to the local DAP server with a short retry
+/// window; a non-zero receiveBufferBytes shrinks the client's receive
+/// window first so a large server response cannot be absorbed unread.
+bool connect_to_dap_server(SocketHandle *outSock,
+                           int receiveBufferBytes = 0) noexcept {
   if (outSock == nullptr) {
     return false;
   }
@@ -108,6 +115,12 @@ bool connect_to_dap_server(SocketHandle *outSock) noexcept {
   SocketHandle sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
   if (sock == kInvalidSocket) {
     return false;
+  }
+  if (receiveBufferBytes > 0) {
+    static_cast<void>(setsockopt(
+        sock, SOL_SOCKET, SO_RCVBUF,
+        reinterpret_cast<const char *>(&receiveBufferBytes),
+        sizeof(receiveBufferBytes)));
   }
 
   sockaddr_in addr{};
@@ -677,8 +690,11 @@ bool test_dap_breakpoint_pause() noexcept {
     return false;
   }
 
+  // The transport is serviced by the pipeline's scripting stage in
+  // production; this harness polls it directly between frames.
   for (int i = 0; i < 100; ++i) {
     engine::scripting::set_frame_time(0.016F, 0.016F * static_cast<float>(i));
+    engine::scripting::dap_poll();
     std::this_thread::sleep_for(std::chrono::milliseconds(5));
   }
 
@@ -715,6 +731,325 @@ bool test_dap_breakpoint_pause() noexcept {
 
 } // namespace
 
+/// Regression for #539: a setBreakpoints list longer than the parser's
+/// pointer scratch used to be cut short silently (the missing entries
+/// were neither set nor reported), so every entry must come back, and an
+/// entry the breakpoint store cannot hold answers verified:false instead
+/// of claiming success.
+bool test_dap_large_breakpoint_list() noexcept {
+  constexpr std::size_t kBreakpoints = 700U;
+  if (!engine::scripting::dap_start(kDapPort)) {
+    return false;
+  }
+  if (!init_client_socket_platform()) {
+    engine::scripting::dap_stop();
+    return false;
+  }
+  SocketHandle sock = kInvalidSocket;
+  if (!connect_to_dap_server(&sock) || !wait_for_dap_client(true)) {
+    close_socket_safe(sock);
+    shutdown_client_socket_platform();
+    engine::scripting::dap_stop();
+    return false;
+  }
+
+  std::string body = "{\"seq\":1,\"type\":\"request\",\"command\":"
+                     "\"setBreakpoints\",\"arguments\":{\"source\":{\"path\":"
+                     "\"dap_many_breakpoints.lua\"},\"breakpoints\":[";
+  char entry[32] = {};
+  for (std::size_t i = 0U; i < kBreakpoints; ++i) {
+    std::snprintf(entry, sizeof(entry), "%s{\"line\":%zu}", (i == 0U) ? "" : ",",
+                  i + 1U);
+    body += entry;
+  }
+  body += "]}}";
+  char header[64] = {};
+  const int headerLen =
+      std::snprintf(header, sizeof(header), "Content-Length: %zu\r\n\r\n",
+                    body.size());
+  bool sent = (headerLen > 0) &&
+              send_all(sock, header, static_cast<std::size_t>(headerLen)) &&
+              send_all(sock, body.data(), body.size());
+
+  // The server reads and answers on dap_poll, so poll between short
+  // bounded waits until the response arrives.
+  std::string recvBuffer;
+  std::string response;
+  bool answered = false;
+  for (int attempt = 0; sent && !answered && (attempt < 200); ++attempt) {
+    engine::scripting::dap_poll();
+    std::string message;
+    if (recv_dap_message(sock, &recvBuffer, &message, 20) &&
+        (message.find("\"command\":\"setBreakpoints\"") != std::string::npos)) {
+      response = message;
+      answered = true;
+    }
+  }
+
+  // Breakpoints outlive the session, so hand the store back before the
+  // next check: an empty list for the same source replaces them.
+  const char *clearArgs = "{\"source\":{\"path\":\"dap_many_breakpoints.lua\"},"
+                          "\"breakpoints\":[]}";
+  bool cleared = false;
+  if (answered && send_dap_request(sock, 2, "setBreakpoints", clearArgs)) {
+    for (int attempt = 0; !cleared && (attempt < 200); ++attempt) {
+      engine::scripting::dap_poll();
+      std::string message;
+      if (recv_dap_message(sock, &recvBuffer, &message, 20) &&
+          (message.find("\"request_seq\":2,") != std::string::npos)) {
+        cleared = true;
+      }
+    }
+  }
+
+  engine::scripting::dap_stop();
+  close_socket_safe(sock);
+  shutdown_client_socket_platform();
+  if (!answered || !cleared) {
+    std::printf(answered ? "(breakpoints not cleared) "
+                         : "(no setBreakpoints response) ");
+    return false;
+  }
+
+  std::size_t entries = 0U;
+  std::size_t verified = 0U;
+  std::size_t unverified = 0U;
+  for (std::size_t pos = response.find("\"line\":"); pos != std::string::npos;
+       pos = response.find("\"line\":", pos + 1U)) {
+    ++entries;
+  }
+  for (std::size_t pos = response.find("\"verified\":true");
+       pos != std::string::npos;
+       pos = response.find("\"verified\":true", pos + 1U)) {
+    ++verified;
+  }
+  for (std::size_t pos = response.find("\"verified\":false");
+       pos != std::string::npos;
+       pos = response.find("\"verified\":false", pos + 1U)) {
+    ++unverified;
+  }
+  // The store holds far fewer than 700, so some are refused; every entry
+  // is answered and none is claimed beyond what the store took.
+  const bool ok = (entries == kBreakpoints) &&
+                  ((verified + unverified) == kBreakpoints) &&
+                  (verified >= 1U) && (unverified >= 1U);
+  if (!ok) {
+    std::printf("(entries=%zu verified=%zu unverified=%zu) ", entries,
+                verified, unverified);
+  }
+  return ok;
+}
+
+bool stopped_bridge_is_playing() noexcept { return false; }
+bool stopped_bridge_is_paused() noexcept { return false; }
+
+/// Walks upward from the current path until the bundled assets are found.
+bool set_working_directory_with_assets() noexcept {
+  const std::filesystem::path original = std::filesystem::current_path();
+  const std::filesystem::path candidates[] = {
+      original, original / "..", original / "../..", original / "../../..",
+      original / "../../../.."};
+  for (const std::filesystem::path &candidate : candidates) {
+    std::error_code ec{};
+    const std::filesystem::path normalized =
+        std::filesystem::weakly_canonical(candidate, ec);
+    if (ec) {
+      continue;
+    }
+    if (std::filesystem::exists(normalized / "assets/main.lua", ec) &&
+        std::filesystem::exists(normalized / "assets/shaders/bgfx/shaders.json",
+                                ec)) {
+      std::filesystem::current_path(normalized, ec);
+      return !ec;
+    }
+  }
+  return false;
+}
+
+/// Regression for #540: the transport was serviced only from
+/// set_frame_time, which the pipeline calls while playing, so a client
+/// could connect before Play but never get its initialize answered. The
+/// production pipeline (headless, editor bridge reporting Stopped) must
+/// answer initialize and setBreakpoints in the same handshake without a
+/// Play, and drain both in one frame.
+bool test_dap_attach_while_stopped() noexcept {
+  if (!set_working_directory_with_assets()) {
+    std::printf("(assets not found) ");
+    return false;
+  }
+  engine::runtime::EditorBridge bridge{};
+  bridge.is_playing = &stopped_bridge_is_playing;
+  bridge.is_paused = &stopped_bridge_is_paused;
+  engine::runtime::set_editor_bridge(&bridge);
+  engine::EngineConfig config{};
+  config.core.platform.headless = true;
+  if (!engine::bootstrap(config)) {
+    engine::runtime::set_editor_bridge(nullptr);
+    std::printf("(bootstrap failed) ");
+    return false;
+  }
+  bool ok = false;
+  {
+    engine::EnginePipeline pipeline;
+    if (pipeline.initialize(0U) && engine::scripting::dap_start(kDapPort) &&
+        init_client_socket_platform()) {
+      SocketHandle sock = kInvalidSocket;
+      if (connect_to_dap_server(&sock)) {
+        // Both requests are on the wire before any frame runs.
+        const bool sent =
+            send_dap_request(sock, 1, "initialize", "{\"adapterID\":\"t\"}") &&
+            send_dap_request(sock, 2, "setBreakpoints",
+                             "{\"source\":{\"path\":\"dap_stopped.lua\"},"
+                             "\"breakpoints\":[{\"line\":1}]}");
+        std::string recvBuffer;
+        bool initAnswered = false;
+        bool breakpointsAnswered = false;
+        for (int frame = 0; sent && (frame < 30) &&
+                            !(initAnswered && breakpointsAnswered);
+             ++frame) {
+          if (!pipeline.execute_frame()) {
+            break;
+          }
+          std::string body;
+          while (recv_dap_message(sock, &recvBuffer, &body, 20)) {
+            if (body.find("\"request_seq\":1,") != std::string::npos) {
+              initAnswered = true;
+            }
+            if (body.find("\"request_seq\":2,") != std::string::npos) {
+              breakpointsAnswered = true;
+            }
+          }
+        }
+        ok = initAnswered && breakpointsAnswered;
+        if (!ok) {
+          std::printf("(initialize %d, setBreakpoints %d) ",
+                      initAnswered ? 1 : 0, breakpointsAnswered ? 1 : 0);
+        }
+        close_socket_safe(sock);
+      }
+      shutdown_client_socket_platform();
+    }
+    engine::scripting::dap_stop();
+    pipeline.teardown();
+  }
+  engine::shutdown();
+  engine::runtime::set_editor_bridge(nullptr);
+  return ok;
+}
+
+/// Regression for #576 row 1: the client socket is non-blocking, so a
+/// response larger than what the kernel accepts at once used to stop at
+/// the first EAGAIN with a half-written frame on the wire and the
+/// handler none the wiser. The client here keeps a tiny receive window and
+/// only starts reading after the server has begun sending; it must then
+/// receive the whole frame, or find the session closed, never a torn
+/// frame.
+bool test_dap_large_response_never_truncated() noexcept {
+  constexpr std::size_t kBreakpoints = 2000U;
+  if (!engine::scripting::dap_start(kDapPort)) {
+    return false;
+  }
+  if (!init_client_socket_platform()) {
+    engine::scripting::dap_stop();
+    return false;
+  }
+  SocketHandle sock = kInvalidSocket;
+  if (!connect_to_dap_server(&sock, 2048) || !wait_for_dap_client(true)) {
+    close_socket_safe(sock);
+    shutdown_client_socket_platform();
+    engine::scripting::dap_stop();
+    return false;
+  }
+
+  std::string body = "{\"seq\":1,\"type\":\"request\",\"command\":"
+                     "\"setBreakpoints\",\"arguments\":{\"source\":{\"path\":"
+                     "\"dap_big_response.lua\"},\"breakpoints\":[";
+  char entry[32] = {};
+  for (std::size_t i = 0U; i < kBreakpoints; ++i) {
+    std::snprintf(entry, sizeof(entry), "%s{\"line\":%zu}", (i == 0U) ? "" : ",",
+                  i + 1U);
+    body += entry;
+  }
+  body += "]}}";
+  char header[64] = {};
+  const int headerLen =
+      std::snprintf(header, sizeof(header), "Content-Length: %zu\r\n\r\n",
+                    body.size());
+  const bool sent = (headerLen > 0) &&
+                    send_all(sock, header, static_cast<std::size_t>(headerLen)) &&
+                    send_all(sock, body.data(), body.size());
+
+  // The reader starts late and drains slowly, and the first three writes
+  // are forced to report would-block; the server's send must either wait
+  // and finish the frame or close the session.
+  engine::scripting::dap_inject_would_block(3);
+  enum class Outcome { Complete, Closed, Torn, TimedOut };
+  Outcome outcome = Outcome::TimedOut;
+  std::string received;
+  std::thread reader([&]() {
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    std::string buffer;
+    std::string frame;
+    if (recv_dap_message(sock, &buffer, &frame, 6000)) {
+      received = frame;
+      outcome = Outcome::Complete;
+      return;
+    }
+    // recv_dap_message returns false on a closed socket or on timeout: a
+    // readable socket that yields nothing is the peer's close.
+    fd_set rfds;
+    FD_ZERO(&rfds);
+    FD_SET(sock, &rfds);
+    timeval tv{};
+    tv.tv_usec = 100 * 1000;
+#if defined(_WIN32)
+    const bool readable = select(0, &rfds, nullptr, nullptr, &tv) > 0;
+#else
+    const bool readable = select(sock + 1, &rfds, nullptr, nullptr, &tv) > 0;
+#endif
+    char probe = 0;
+    const bool closed = readable && (recv(sock, &probe, 1, 0) <= 0);
+    if (!buffer.empty()) {
+      outcome = Outcome::Torn;
+    } else {
+      outcome = closed ? Outcome::Closed : Outcome::TimedOut;
+    }
+  });
+  for (int attempt = 0; sent && (attempt < 400); ++attempt) {
+    engine::scripting::dap_poll();
+    if (!engine::scripting::dap_has_client()) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  reader.join();
+
+  bool ok = false;
+  if (outcome == Outcome::Complete) {
+    std::size_t entries = 0U;
+    for (std::size_t pos = received.find("\"line\":"); pos != std::string::npos;
+         pos = received.find("\"line\":", pos + 1U)) {
+      ++entries;
+    }
+    ok = entries == kBreakpoints;
+    if (!ok) {
+      std::printf("(complete frame with %zu entries) ", entries);
+    }
+  } else if (outcome == Outcome::Closed) {
+    ok = true; // a dropped session is the other acceptable outcome
+  } else {
+    std::printf(outcome == Outcome::Torn ? "(torn frame on the wire) "
+                                         : "(no frame and no close) ");
+  }
+
+  // Release the store for later checks, on a fresh session if this one
+  // was dropped.
+  engine::scripting::dap_stop();
+  close_socket_safe(sock);
+  shutdown_client_socket_platform();
+  return ok;
+}
+
 /// Runs this executable or test program.
 int main() {
   std::printf("  dap_test::restart_clears_session ... ");
@@ -733,10 +1068,23 @@ int main() {
   const bool unknownOk = test_dap_unknown_command_echo();
   std::printf(unknownOk ? "PASS\n" : "FAIL\n");
 
+  std::printf("  dap_test::large_breakpoint_list ... ");
+  const bool largeListOk = test_dap_large_breakpoint_list();
+  std::printf(largeListOk ? "PASS\n" : "FAIL\n");
+
   std::printf("  dap_test::breakpoint_pause ... ");
   const bool breakpointOk = test_dap_breakpoint_pause();
   std::printf(breakpointOk ? "PASS\n" : "FAIL\n");
-  return (restartOk && oversizedOk && overflowOk && unknownOk && breakpointOk)
+
+  std::printf("  dap_test::attach_while_stopped ... ");
+  const bool attachOk = test_dap_attach_while_stopped();
+  std::printf(attachOk ? "PASS\n" : "FAIL\n");
+
+  std::printf("  dap_test::large_response_never_truncated ... ");
+  const bool untornOk = test_dap_large_response_never_truncated();
+  std::printf(untornOk ? "PASS\n" : "FAIL\n");
+  return (restartOk && oversizedOk && overflowOk && unknownOk && largeListOk &&
+          breakpointOk && attachOk && untornOk)
              ? 0
              : 1;
 }

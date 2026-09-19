@@ -52,14 +52,18 @@ inline Vec4 mul(const Mat4 &lhs, const Vec4 &rhs) noexcept {
   _mm_store_ps(&out.x, result);
   return out;
 #else
-  return Vec4((lhs.columns[0].x * rhs.x) + (lhs.columns[1].x * rhs.y) +
-                  (lhs.columns[2].x * rhs.z) + (lhs.columns[3].x * rhs.w),
-              (lhs.columns[0].y * rhs.x) + (lhs.columns[1].y * rhs.y) +
-                  (lhs.columns[2].y * rhs.z) + (lhs.columns[3].y * rhs.w),
-              (lhs.columns[0].z * rhs.x) + (lhs.columns[1].z * rhs.y) +
-                  (lhs.columns[2].z * rhs.z) + (lhs.columns[3].z * rhs.w),
-              (lhs.columns[0].w * rhs.x) + (lhs.columns[1].w * rhs.y) +
-                  (lhs.columns[2].w * rhs.z) + (lhs.columns[3].w * rhs.w));
+  // Same pairwise association as the SSE2 branch, (c0·x + c1·y) + (c2·z +
+  // c3·w), so a scalar build rounds identically to an SSE2 build and a
+  // transform hashes the same on both; a left-to-right sum differs in the
+  // last bit for ordinary inputs, which engine_unit_math_parity pins.
+  return Vec4(((lhs.columns[0].x * rhs.x) + (lhs.columns[1].x * rhs.y)) +
+                  ((lhs.columns[2].x * rhs.z) + (lhs.columns[3].x * rhs.w)),
+              ((lhs.columns[0].y * rhs.x) + (lhs.columns[1].y * rhs.y)) +
+                  ((lhs.columns[2].y * rhs.z) + (lhs.columns[3].y * rhs.w)),
+              ((lhs.columns[0].z * rhs.x) + (lhs.columns[1].z * rhs.y)) +
+                  ((lhs.columns[2].z * rhs.z) + (lhs.columns[3].z * rhs.w)),
+              ((lhs.columns[0].w * rhs.x) + (lhs.columns[1].w * rhs.y)) +
+                  ((lhs.columns[2].w * rhs.z) + (lhs.columns[3].w * rhs.w)));
 #endif
 }
 

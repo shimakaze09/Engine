@@ -2,9 +2,12 @@
 
 #include "engine/renderer/light_culling.h"
 
+#include "engine/core/logging.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 
 namespace engine::renderer {
@@ -121,6 +124,42 @@ std::size_t compute_tile_buffer_size(int screenW, int screenH) noexcept {
          static_cast<std::size_t>(kTileDataWidth);
 }
 
+bool compute_tile_texture_layout(int tileCountX, int tileCountY,
+                                 int maxTextureDimension,
+                                 TileTextureLayout &outLayout) noexcept {
+  outLayout = TileTextureLayout{};
+  if ((tileCountX <= 0) || (tileCountY <= 0)) {
+    return false;
+  }
+  const std::int64_t tilesThatFit =
+      static_cast<std::int64_t>(maxTextureDimension) / kTileDataWidth;
+  if (tilesThatFit < 1) {
+    return false;
+  }
+
+  // A grid that fits keeps tilesPerRow == tileCountX, which makes the
+  // texture row the screen tile row: the common case stays the layout a
+  // frame capture is easiest to read, and only an oversized drawable
+  // wraps.
+  const std::int64_t tilesPerRow =
+      (static_cast<std::int64_t>(tileCountX) < tilesThatFit)
+          ? static_cast<std::int64_t>(tileCountX)
+          : tilesThatFit;
+  const std::int64_t totalTiles = static_cast<std::int64_t>(tileCountX) *
+                                  static_cast<std::int64_t>(tileCountY);
+  const std::int64_t rows = (totalTiles + tilesPerRow - 1) / tilesPerRow;
+  if (rows > static_cast<std::int64_t>(maxTextureDimension)) {
+    return false;
+  }
+
+  outLayout.tilesPerRow = static_cast<int>(tilesPerRow);
+  outLayout.width = static_cast<int>(tilesPerRow * kTileDataWidth);
+  outLayout.height = static_cast<int>(rows);
+  outLayout.texelCount = static_cast<std::size_t>(outLayout.width) *
+                         static_cast<std::size_t>(outLayout.height);
+  return true;
+}
+
 bool cull_lights_tiled(const SceneLightData &lightData, const float *viewMatrix,
                        const float *projMatrix, int screenW, int screenH,
                        TileLightData &outData) noexcept {
@@ -162,6 +201,9 @@ bool cull_lights_tiled(const SceneLightData &lightData, const float *viewMatrix,
   const int spotCount = std::min(static_cast<int>(lightData.spotLightCount),
                                  static_cast<int>(kMaxSpotLights));
 
+  // Lights a tile's fixed slots could not hold are dropped per tile; the
+  // drop is reported once per run instead of silently dimming the tile.
+  std::size_t droppedPairs = 0U;
   for (int ty = 0; ty < tileCountY; ++ty) {
     for (int tx = 0; tx < tileCountX; ++tx) {
       const int tileIdx = ty * tileCountX + tx;
@@ -180,11 +222,14 @@ bool cull_lights_tiled(const SceneLightData &lightData, const float *viewMatrix,
       extract_frustum_planes(tileVP, tileFrustum);
 
       int tilePointCount = 0;
-      for (int li = 0;
-           li < pointCount && tilePointCount < kMaxPointLightsPerTile; ++li) {
+      for (int li = 0; li < pointCount; ++li) {
         const auto &pl = lightData.pointLights[li];
         if (sphere_in_frustum(tileFrustum, pl.position.x, pl.position.y,
                               pl.position.z, pl.radius)) {
+          if (tilePointCount >= kMaxPointLightsPerTile) {
+            ++droppedPairs;
+            continue;
+          }
           tileRow[1 + tilePointCount] = static_cast<float>(li);
           ++tilePointCount;
         }
@@ -193,16 +238,34 @@ bool cull_lights_tiled(const SceneLightData &lightData, const float *viewMatrix,
 
       const int spotBase = 1 + kMaxPointLightsPerTile;
       int tileSpotCount = 0;
-      for (int li = 0; li < spotCount && tileSpotCount < kMaxSpotLightsPerTile;
-           ++li) {
+      for (int li = 0; li < spotCount; ++li) {
         const auto &sl = lightData.spotLights[li];
         if (sphere_in_frustum(tileFrustum, sl.position.x, sl.position.y,
                               sl.position.z, sl.radius)) {
+          if (tileSpotCount >= kMaxSpotLightsPerTile) {
+            ++droppedPairs;
+            continue;
+          }
           tileRow[spotBase + 1 + tileSpotCount] = static_cast<float>(li);
           ++tileSpotCount;
         }
       }
       tileRow[spotBase] = static_cast<float>(tileSpotCount);
+    }
+  }
+
+  if (droppedPairs > 0U) {
+    static bool warnedTileOverflow = false;
+    if (!warnedTileOverflow) {
+      warnedTileOverflow = true;
+      char message[160] = {};
+      std::snprintf(message, sizeof(message),
+                    "tile light cap reached: %zu light/tile pairs dropped "
+                    "this frame (%d point, %d spot per tile); further drops "
+                    "are not logged",
+                    droppedPairs, kMaxPointLightsPerTile,
+                    kMaxSpotLightsPerTile);
+      core::log_message(core::LogLevel::Warning, "renderer", message);
     }
   }
 

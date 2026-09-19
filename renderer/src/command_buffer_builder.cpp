@@ -44,7 +44,7 @@ bool vec2_less(const math::Vec2 &lhs, const math::Vec2 &rhs) noexcept {
 
 /// Compares materials for static mesh instancing compatibility. A batch
 /// uploads only its first command's material, so every field a pass
-/// uploads or binds must agree (#471).
+/// uploads or binds must agree.
 bool materials_equal(const Material &lhs, const Material &rhs) noexcept {
   return vec3_equal(lhs.albedo, rhs.albedo) &&
          vec3_equal(lhs.emissive, rhs.emissive) &&
@@ -85,7 +85,7 @@ bool material_less(const Material &lhs, const Material &rhs) noexcept {
     return lhs.normalTexture.id < rhs.normalTexture.id;
   }
   // The remaining fields order after the legacy keys so materials that
-  // differ only here still land adjacent and batch (#471).
+  // differ only here still land adjacent and batch.
   if (lhs.alphaMode != rhs.alphaMode) {
     return lhs.alphaMode < rhs.alphaMode;
   }

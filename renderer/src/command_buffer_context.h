@@ -52,6 +52,7 @@ struct SceneCaptureTarget final {
 struct FlushCVars final {
   core::CVarRef deferred{"r_deferred"};
   core::CVarRef gbufferDebug{"r_gbuffer_debug"};
+  core::CVarRef tileTableMaxDimension{"r_tile_table_max_dimension"};
   core::CVarRef ssao{"r_ssao"};
   core::CVarRef ssaoRadius{"r_ssao_radius"};
   core::CVarRef ssaoBias{"r_ssao_bias"};
@@ -107,7 +108,7 @@ struct BackendState final {
 
   // Snapshot of shader_reload_epoch() the cached program ids and uniform
   // locations below were resolved against; a mismatch at flush time
-  // triggers refresh_backend_program_state (audit H-09).
+  // triggers refresh_backend_program_state.
   std::uint64_t programCacheEpoch = 0U;
 
   // Fallback shader (kept for compatibility).
@@ -142,7 +143,7 @@ struct BackendState final {
   ShaderParam pbrHasAlbedoTextureLocation{};
   ShaderParam pbrAlbedoMapLocation{};
   ShaderParam pbrOpacityLocation{};
-  // issue #160: texture-backed PBR material slots (forward program).
+  //: texture-backed PBR material slots (forward program).
   ShaderParam pbrEmissiveLocation{};
   ShaderParam pbrHasMetallicRoughnessTextureLocation{};
   ShaderParam pbrMetallicRoughnessMapLocation{};
@@ -172,7 +173,7 @@ struct BackendState final {
   ShaderParam pbrHeightFogDensityLocation{};
   ShaderParam pbrHeightFogFalloffLocation{};
   ShaderParam pbrHeightFogStepCountLocation{};
-  // Lights (#138 flat array vocabulary shared by both backends: packed
+  // Lights (flat array vocabulary: packed
   // vec4 element arrays uploaded through set_param_vec4_array).
   ShaderParam pbrDirLightCountLocation{};
   ShaderParam pbrDirLightDirectionParam{};     // vec4[N]: xyz direction
@@ -186,9 +187,9 @@ struct BackendState final {
   ShaderParam pbrSpotLightColorParam{};        // vec4[N]: rgb color, w intensity
   ShaderParam pbrSpotLightParamsParam{};       // vec4[N]: x outerCone
 
-  // PBR forward shadow uniforms (#138: matrices as one mat4 array;
-  // cascade splits and shadow-light indices packed into single vec4s;
-  // #301: the cascade and spot maps are Tex2DArrays behind one sampler
+  // PBR forward shadow uniforms (matrices as one mat4 array; cascade
+  // splits and shadow-light indices packed into single vec4s; the
+  // cascade and spot maps are Tex2DArrays behind one sampler
   // each; only the point cubes stay per-slot).
   ShaderParam pbrShadowEnabledLoc{};
   ShaderParam pbrShadowMapArrayLoc{};
@@ -217,7 +218,7 @@ struct BackendState final {
   ShaderParam fxaaTexelSizeLocation{};
 
   // Present blit: player mode's final-image draw to the back buffer
-  // (r_present_scene, #138) — the editor overlay otherwise carries the
+  // — the editor overlay otherwise carries the
   // scene texture to the swapchain.
   ShaderProgramHandle presentBlitShaderHandle{};
   DeviceProgramHandle presentBlitProgram{};
@@ -232,7 +233,7 @@ struct BackendState final {
   DeviceTextureHandle fallbackTexture2D{};
   DeviceTextureHandle fallbackCubemap{};
   // Descriptor-validity stand-in for the shadow array samplers when
-  // shadows are disabled (#301): array samplers need an array texture.
+  // shadows are disabled: array samplers need an array texture.
   DeviceTextureHandle fallbackTexture2DArray{};
 
   // Skybox shader and cube geometry.
@@ -325,7 +326,7 @@ struct BackendState final {
   ShaderParam gbufRoughnessLoc{};
   ShaderParam gbufAOLoc{};
   ShaderParam gbufEmissiveLoc{};
-  // issue #160: texture-backed PBR material slots (static G-buffer program).
+  //: texture-backed PBR material slots (static G-buffer program).
   ShaderParam gbufHasMetallicRoughnessTextureLoc{};
   ShaderParam gbufMetallicRoughnessTextureLoc{};
   ShaderParam gbufHasEmissiveTextureLoc{};
@@ -353,6 +354,7 @@ struct BackendState final {
   ShaderParam dlTileLightTexLoc{};
   ShaderParam dlTileCountXLoc{};
   ShaderParam dlTileCountYLoc{};
+  ShaderParam dlTileTableRowTilesLoc{};
   ShaderParam dlInvProjectionLoc{};
   ShaderParam dlInvViewLoc{};
   ShaderParam dlDirLightDirLoc{};
@@ -398,12 +400,12 @@ struct BackendState final {
   // Tile light texture (cpu-updatable, uploaded each frame by CPU
   // culling). 2-D layout: one texel row per tile ROW, kTileDataWidth
   // texels per tile along x — one row per tile overflowed D3D's 16384
-  // dimension cap at 4K (#301 hardware runs). The allocated dimensions
+  // dimension cap at 4K. The allocated dimensions
   // are tracked so any viewport change recreates it.
   DeviceTextureHandle tileLightTex{};
   int tileLightTexWidth = 0;
   int tileLightTexHeight = 0;
-  // Grow-only nothrow-allocating scratch buffer (audit #204): a failed grow
+  // Grow-only nothrow-allocating scratch buffer: a failed grow
   // leaves this at zero capacity instead of terminating, and the downstream
   // dataSize < requiredSize check in cull_lights_tiled already degrades
   // gracefully (deferred lighting renders without local lights that frame).
@@ -414,7 +416,7 @@ struct BackendState final {
   DeviceTextureHandle lightDataTex{};
   std::array<float, kLightDataBufferSize> lightDataBuffer{};
   DeviceBufferHandle instanceMatrixBuffer{};
-  // Grow-only nothrow-allocating scratch buffers (audit #204): a failed grow
+  // Grow-only nothrow-allocating scratch buffers: a failed grow
   // leaves the buffer empty instead of terminating; callers already treat a
   // too-small capacity as a safe degrade (fewer/no batches, non-instanced
   // draw fallback) rather than a correctness requirement on exact sizing.
@@ -566,7 +568,7 @@ struct BackendState final {
   // lastUploadedBonePalette dedupes uploads within one flush (palette
   // contents are per-frame, so flush start resets it to invalid).
   bool skinningAvailable = false;
-  // #138: palettes upload as plain mat4 arrays (set_param_mat4_array) —
+  // Palettes upload as plain mat4 arrays (set_param_mat4_array) —
   // per-program uniform state, so each skinned program caches its last
   // palette separately.
   ShaderParam gbufSkinnedBonesParam{};   // mat4[kMaxSkinPaletteJoints]
@@ -589,7 +591,7 @@ struct BackendState final {
   ShaderParam gbufSkinnedRoughnessLoc{};
   ShaderParam gbufSkinnedAOLoc{};
   ShaderParam gbufSkinnedEmissiveLoc{};
-  // issue #160: texture-backed PBR material slots (skinned G-buffer
+  //: texture-backed PBR material slots (skinned G-buffer
   // program). Shares gbuffer.frag with the static program, so the uniform
   // names match; only the cached locations differ per linked program.
   ShaderParam gbufSkinnedHasMetallicRoughnessTextureLoc{};
@@ -626,7 +628,7 @@ struct RendererContext final {
 };
 
 /// Returns the process-wide renderer context the command-buffer API
-/// operates on (one renderer per process, #168).
+/// operates on.
 RendererContext &renderer_context() noexcept;
 
 /// Returns the backend state owned by the default renderer context.

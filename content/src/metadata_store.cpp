@@ -1,11 +1,11 @@
 // Implements the generic asset metadata store and asset-id constructors
-// for the Engine content system (#171 C2: split out of the renderer's
-// AssetDatabase; the table and its tag/dependency/query logic moved
-// verbatim, renderer-free).
+// for the Engine content system: the table and its tag/dependency/query
+// logic, renderer-free.
 
 #include "engine/content/metadata_store.h"
 
 #include <cstddef>
+#include <cstring>
 #include <cstdint>
 #include <cstdio>
 
@@ -93,6 +93,20 @@ bool register_asset_metadata(MetadataStore *store,
       (metadata.tagCount > AssetMetadata::kMaxTags) ||
       (metadata.dependencyCount > AssetMetadata::kMaxDependencies)) {
     return false;
+  }
+
+  // The fixed-width strings are compared with strcmp downstream
+  // (asset_metadata_has_tag), so a caller-filled array without a
+  // terminator is refused here rather than read past its end there.
+  if (std::memchr(metadata.filePath.data(), '\0', metadata.filePath.size()) ==
+      nullptr) {
+    return false;
+  }
+  for (std::size_t i = 0U; i < metadata.tagCount; ++i) {
+    if (std::memchr(metadata.tags[i].data(), '\0',
+                    AssetMetadata::kMaxTagLength) == nullptr) {
+      return false;
+    }
   }
 
   const std::size_t slot =
@@ -391,7 +405,7 @@ bool load_with_dependencies(MetadataStore *store, AssetId rootId,
   return load_with_deps_recursive(traversal, rootId, 0U);
 }
 
-// --- Asset identity constructors (#172: the one shared id hash) ---
+// --- Asset identity constructors ---
 
 /// FNV-1a over the path with separators canonicalized to '/' so the same
 /// asset hashes identically on every platform.

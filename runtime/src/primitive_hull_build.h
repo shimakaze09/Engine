@@ -1,6 +1,6 @@
 // Declares the runtime-private map from a collider's hull provenance to the
 // physics builder that produces its canonical payload, so the mapping exists
-// once for both the collider description (#310) and the install-path rebuild.
+// once for both the collider description and the install-path rebuild.
 
 #pragma once
 

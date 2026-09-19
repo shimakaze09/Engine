@@ -124,7 +124,7 @@ bool create_gpu_resources(PassResourceState *outState, int width,
   const auto h32 = static_cast<std::int32_t>(height);
 
   // Render-target textures are single-level: only mip 0 is ever rendered,
-  // so a generated chain would hold stale data forever (issue #229). Every
+  // so a generated chain would hold stale data forever. Every
   // consumer samples them 1:1 with linear filtering.
   const auto makeTexture = [&](TextureFormat format) noexcept {
     TextureDesc desc{};
@@ -133,10 +133,10 @@ bool create_gpu_resources(PassResourceState *outState, int width,
     desc.width = w32;
     desc.height = h32;
     desc.filter = TextureFilter::Linear;
-    desc.wrap = TextureWrap::Repeat;
+    desc.wrap = TextureWrap::ClampEdge;
     // R32F and depth: exact fetches/comparisons, and WebGL2 treats
     // these formats with linear filtering as incomplete (all-zero
-    // samples — #293), so they must stay point-sampled.
+    // samples), so they must stay point-sampled.
     if ((format == TextureFormat::R32F) ||
         (format == TextureFormat::Depth24)) {
       desc.filter = TextureFilter::Nearest;

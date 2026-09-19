@@ -199,7 +199,7 @@ physics::JointId add_fixed_joint(World &world, Entity entityA,
   return physics::add_fixed_joint(world, entityA, entityB);
 }
 
-/// Sets the requested value for joint limits; false (issue #126) outside
+/// Sets the requested value for joint limits; false outside
 /// the Input phase or when the physics-level set rejects the id/limits.
 bool set_joint_limits(World &world, physics::JointId id, float minLimit,
                       float maxLimit) noexcept {
@@ -209,7 +209,7 @@ bool set_joint_limits(World &world, physics::JointId id, float minLimit,
   return physics::set_joint_limits(world, id, minLimit, maxLimit);
 }
 
-/// Removes the given joint; false (issue #126) outside the Input phase or
+/// Removes the given joint; false outside the Input phase or
 /// when the id no longer names a live joint.
 bool remove_joint(World &world, physics::JointId id) noexcept {
   if (!require_phase(world, WorldPhase::Input, "remove_joint")) {
@@ -279,9 +279,9 @@ const physics::HeightfieldData *get_heightfield_data(const World &world,
 std::size_t raycast_all(const World &world, const math::Vec3 &origin,
                         const math::Vec3 &direction, float maxDistance,
                         PhysicsRaycastHit *outHits, std::size_t maxHits,
-                        std::uint32_t mask) noexcept {
+                        std::uint32_t mask, Entity skipEntity) noexcept {
   return physics::raycast_all(world, origin, direction, maxDistance, outHits,
-                              maxHits, mask);
+                              maxHits, mask, skipEntity);
 }
 
 std::size_t overlap_sphere(const World &world, const math::Vec3 &center,

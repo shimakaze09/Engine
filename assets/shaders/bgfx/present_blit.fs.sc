@@ -1,6 +1,6 @@
 $input v_texcoord0
 
-// Present pass (#138): samples the post chain's final image onto the
+// Present pass: samples the post chain's final image onto the
 // back buffer as a fullscreen draw. Player mode uses it in place of the
 // editor's ImGui viewport image, which is the path that otherwise
 // carries the scene texture to the swapchain.

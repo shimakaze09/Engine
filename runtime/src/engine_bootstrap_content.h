@@ -14,7 +14,7 @@ namespace content {
 struct AssetRequestQueue;
 }
 namespace renderer {
-// The queue container is content-owned (#171 C3); this keeps the
+// The queue container is content-owned; this keeps the
 // established renderer service vocabulary in the signatures below.
 using AssetManager = content::AssetRequestQueue;
 struct GpuMeshRegistry;

@@ -219,7 +219,7 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
         } else if (!hasAlbedoTex &&
                    (boundAlbedoTex != backend.fallbackTexture2D)) {
           // Fallback, not nothing: WebGL rejects draws whose declared
-          // samplers still reference the pass's render target (#293).
+          // samplers still reference the pass's render target.
           dev->bind_texture_slot(0U, backend.fallbackTexture2D);
           boundAlbedoTex = backend.fallbackTexture2D;
         }
@@ -420,11 +420,35 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
       gpu_profiler_end_pass(GpuPassId::SSAO);
     }
 
-    const std::size_t tileBufferSize =
+    // The table's shape is settled before the buffer is sized: a wrapped
+    // table ends in a partial row, and the upload covers the whole
+    // rectangle, so the buffer must reach past the last tile to the end
+    // of that row. The padding is never addressed — the shader's flat
+    // tile index stays inside the grid — it only has to exist.
+    // The diagnostic cvar can only lower the limit: a wrapped table is
+    // reachable natively only on a drawable wider than any common
+    // display, so this is how that layout is exercised on one.
+    int tileTableLimit = static_cast<int>(dev->caps.maxTextureDimension);
+    const int tileTableLimitOverride =
+        backend.cvars.tileTableMaxDimension.get_int(0);
+    if ((tileTableLimitOverride > 0) &&
+        (tileTableLimitOverride < tileTableLimit)) {
+      tileTableLimit = tileTableLimitOverride;
+    }
+    TileTextureLayout tileLayout{};
+    const bool tileLayoutValid = compute_tile_texture_layout(
+        (drawableWidth + kTileSize - 1) / kTileSize,
+        (drawableHeight + kTileSize - 1) / kTileSize, tileTableLimit,
+        tileLayout);
+
+    std::size_t tileBufferSize =
         compute_tile_buffer_size(drawableWidth, drawableHeight);
+    if (tileLayoutValid && (tileLayout.texelCount > tileBufferSize)) {
+      tileBufferSize = tileLayout.texelCount;
+    }
     if (backend.tileBuffer.size() < tileBufferSize) {
-      // A failed grow leaves the buffer at zero capacity (audit #204:
-      // nothrow instead of a terminating std::vector throw); the
+      // A failed grow leaves the buffer at zero capacity instead of
+      // terminating the process; the
       // dataSize < requiredSize check inside cull_lights_tiled below
       // already treats an undersized buffer as a graceful cull failure.
       static_cast<void>(backend.tileBuffer.allocate(tileBufferSize));
@@ -434,15 +458,22 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
     tileData.data = backend.tileBuffer.data();
     tileData.dataSize = backend.tileBuffer.size();
 
+    // A table that cannot be laid out inside the device's texture limit
+    // is the same outcome as a failed cull: no tile table this frame.
     const bool tileDataValid =
+        tileLayoutValid &&
         cull_lights_tiled(lights, &viewMat.columns[0].x, &projMat.columns[0].x,
                           drawableWidth, drawableHeight, tileData);
     if (!tileDataValid) {
       static bool warnedCullFailure = false;
       if (!warnedCullFailure) {
-        core::log_message(core::LogLevel::Warning, "renderer",
-                          "tiled light culling failed; deferred lighting "
-                          "renders without local lights");
+        char message[192] = {};
+        std::snprintf(message, sizeof(message),
+                      "tiled light culling failed for a %dx%d drawable "
+                      "(texture limit %d); deferred lighting renders without "
+                      "local lights",
+                      drawableWidth, drawableHeight, tileTableLimit);
+        core::log_message(core::LogLevel::Warning, "renderer", message);
         warnedCullFailure = true;
       }
       if (backend.tileLightTex != kInvalidDeviceTexture) {
@@ -452,13 +483,12 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
         backend.tileLightTexHeight = 0;
       }
     } else {
-      // 2-D tile layout: the flat CPU buffer (tileIdx * kTileDataWidth)
-      // reinterprets exactly as tileCountY rows of tileCountX tiles, so
-      // no repacking — only the texture shape and the shader's
-      // addressing changed (one row per tile overflowed D3D's 16384
-      // dimension cap at 4K).
-      const int tileTexWidth = tileData.tileCountX * kTileDataWidth;
-      const int tileTexHeight = tileData.tileCountY;
+      // The flat CPU buffer (tileIdx * kTileDataWidth) reinterprets
+      // exactly as rows of tilesPerRow tiles, so nothing is repacked:
+      // the layout only chooses the rectangle, and the shader recovers
+      // the row from the flat tile index with the same tilesPerRow.
+      const int tileTexWidth = tileLayout.width;
+      const int tileTexHeight = tileLayout.height;
       if ((backend.tileLightTex != kInvalidDeviceTexture) &&
           ((tileTexWidth != backend.tileLightTexWidth) ||
            (tileTexHeight != backend.tileLightTexHeight))) {
@@ -561,7 +591,7 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
 
       // Bind G-Buffer textures on slots 0-3, tile on slot 4, SSAO on
       // slot 5, per-light data on slot 6 (the shadow arrays and point
-      // cubes hold 7-12, IBL 13-15; #301).
+      // cubes hold 7-12, IBL 13-15).
       dev->bind_texture_slot(0U, pass_resource_texture(passRes.gbufferAlbedo));
       dev->bind_texture_slot(1U, pass_resource_texture(passRes.gbufferNormal));
       dev->bind_texture_slot(2U,
@@ -634,10 +664,10 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
       if (backend.dlSsaoEnabledLoc.valid())
         dev->set_param_i32(backend.dlSsaoEnabledLoc, ssaoEnabled ? 1 : 0);
 
-      // #138 flat vocabulary: per-slot samplers, one mat4 array per
+      // Flat vocabulary: per-slot samplers, one mat4 array per
       // shadow kind, splits/indices/pos+far as packed vec4 payloads.
       {
-        // #301 array samplers: one Tex2DArray for all cascades. The
+        // Array samplers: one Tex2DArray for all cascades. The
         // disabled state still binds the array fallback: Vulkan-family
         // backends need every declared sampler descriptor valid at
         // draw (same rule as the forward flush).
@@ -762,6 +792,9 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
         dev->set_param_i32(backend.dlTileCountXLoc, tileData.tileCountX);
       if (backend.dlTileCountYLoc.valid())
         dev->set_param_i32(backend.dlTileCountYLoc, tileData.tileCountY);
+      if (backend.dlTileTableRowTilesLoc.valid())
+        dev->set_param_i32(backend.dlTileTableRowTilesLoc,
+                           tileLayout.tilesPerRow);
 
       math::Mat4 invProj{};
       if (math::inverse(projMat, &invProj)) {
@@ -811,7 +844,7 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
                               &renderer_context().activeCamera.position.x);
       }
       if (backend.dlCameraForwardOrthoLoc.valid()) {
-        // xyz = normalized view direction, w = 1 when orthographic (#221):
+        // xyz = normalized view direction, w = 1 when orthographic:
         // the shader switches its view vector to the constant camera
         // forward under ortho — parallel rays have no per-pixel eye vector.
         const CameraState &activeCam = renderer_context().activeCamera;

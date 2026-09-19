@@ -6,6 +6,7 @@ engine_add_module_library(engine_editor
     src/debug_camera.cpp
     src/editor.cpp
     src/editor_asset_index.cpp
+    src/editor_import_settings.cpp
     src/editor_commands.cpp
     src/editor_console_capture.cpp
     src/editor_component_registry.cpp
@@ -41,7 +42,7 @@ engine_add_module_library(engine_editor
 )
 # The editor's ImGui renderer is the bgfx one (imgui_impl_bgfx.cpp,
 # using bgfx's embedded ocornut-imgui shaders) — bgfx is the engine's
-# only render backend (#138).
+# only render backend.
 target_sources(engine_editor PRIVATE src/imgui_impl_bgfx.cpp)
 target_link_libraries(engine_editor PRIVATE bgfx bx bimg)
 target_include_directories(engine_editor PRIVATE

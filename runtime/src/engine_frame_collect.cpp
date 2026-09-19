@@ -144,6 +144,7 @@ collect_scene_lights(const runtime::World &world) noexcept {
     pl.color = plc->color;
     pl.intensity = plc->intensity;
     pl.radius = plc->radius;
+    pl.castShadow = plc->castShadow;
     ++sceneLights.pointLightCount;
   }
 
@@ -169,6 +170,7 @@ collect_scene_lights(const runtime::World &world) noexcept {
     sl.radius = slc->radius;
     sl.innerConeAngle = slc->innerConeAngle;
     sl.outerConeAngle = slc->outerConeAngle;
+    sl.castShadow = slc->castShadow;
     ++sceneLights.spotLightCount;
   }
 

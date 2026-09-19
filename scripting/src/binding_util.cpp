@@ -136,7 +136,7 @@ bool copy_path_strict(char *dst, std::size_t dstCapacity, const char *src,
   return true;
 }
 
-/// Jails script-facing filesystem paths as defence-in-depth (issue #83).
+/// Jails script-facing filesystem paths as defence-in-depth.
 bool script_path_in_jail(const char *path, const char *context) noexcept {
   if (core::vfs_path_is_jailed(path)) {
     return true;
@@ -202,13 +202,35 @@ bool protected_c_operation(lua_State *state, LuaDispatchFn trampoline,
   return true;
 }
 
+bool resolve_script_os_path(const char *path, char *out,
+                            std::size_t outCapacity) noexcept {
+  if ((path == nullptr) || (out == nullptr) || (outCapacity == 0U)) {
+    return false;
+  }
+  if (core::vfs_resolve_os_path(path, out, outCapacity)) {
+    return true;
+  }
+  const std::size_t length = std::strlen(path);
+  if (length >= outCapacity) {
+    return false;
+  }
+  std::memcpy(out, path, length + 1U);
+  return true;
+}
+
 bool protected_load_chunk(lua_State *state, const char *path,
                           const char *context) noexcept {
   if ((state == nullptr) || (path == nullptr)) {
     return false;
   }
+  char osPath[1024] = {};
+  if (!resolve_script_os_path(path, osPath, sizeof(osPath))) {
+    core::log_message(core::LogLevel::Error, "scripting",
+                      "script path too long to resolve");
+    return false;
+  }
   ChunkLoadArgs args{};
-  args.path = path;
+  args.path = osPath;
   return protected_c_operation(state, &chunk_load_trampoline, &args, 1,
                                context);
 }

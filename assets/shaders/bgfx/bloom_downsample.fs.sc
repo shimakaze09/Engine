@@ -1,7 +1,6 @@
 $input v_texcoord0
 
-// Dual-Kawase 5-tap downsample (bgfx port of bloom_downsample.frag,
-// #138).
+// Dual-Kawase 5-tap downsample.
 
 #include <bgfx_shader.sh>
 

@@ -1,6 +1,6 @@
 $input v_texcoord0
 
-// FXAA 3.11 quality stage (bgfx port of fxaa.frag, #138): luma-guided
+// FXAA 3.11 quality stage: luma-guided
 // edge-end search with the correct-variation guard. GL textureOffset
 // calls become explicit texel-size offsets (identical sampling — the
 // offsets are whole texels at the same mip). The edge-end search

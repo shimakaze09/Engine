@@ -44,8 +44,8 @@ void init_backend_lighting(BackendState &backend,
 void init_backend_post(BackendState &backend,
                        const RenderDevice *dev) noexcept;
 
-// Per-program resolvers shared by initialization and hot-reload refresh
-// (audit H-09): each re-reads the device program from its stored handle
+// Per-program resolvers shared by initialization and hot-reload refresh:
+// each re-reads the device program from its stored handle
 // and re-queries every cached shader param (and uniform-block binding
 // where the program uses one). Every queried name is classified REQUIRED
 // (looked up through required_param; the pass cannot render meaningfully
@@ -143,7 +143,7 @@ bool resolve_shadow_depth_skinned_program_state(
 bool resolve_fxaa_program_state(BackendState &backend,
                                 const RenderDevice *dev) noexcept;
 
-/// Player-mode present blit program (r_present_scene, #138).
+/// Player-mode present blit program.
 bool resolve_present_blit_program_state(BackendState &backend,
                                         const RenderDevice *dev) noexcept;
 

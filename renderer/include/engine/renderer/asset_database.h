@@ -14,7 +14,7 @@
 
 namespace engine::renderer {
 
-// The asset identity/metadata vocabulary is content-owned (#171); these
+// The asset identity/metadata vocabulary is content-owned; these
 // re-exports keep the renderer's established names for its own headers
 // and remaining mixed consumers (the C4 renderer shims are deleted).
 using content::AssetId;
@@ -123,7 +123,7 @@ struct AssetDatabase final {
   std::array<MaterialAssetRecord, kMaxMaterialAssets> materialAssets{};
   std::array<bool, kMaxMaterialAssets> materialOccupied{};
 
-  // The generic identity/tag/dependency table is content-owned (#171 C2);
+  // The generic identity/tag/dependency table is content-owned;
   // this database embeds one store and delegates the metadata API to it.
   static constexpr std::size_t kMaxMetadata =
       content::MetadataStore::kMaxMetadata;
@@ -157,7 +157,7 @@ std::size_t evict_mesh_assets_over_budget(AssetDatabase *database,
 /// Inserts or updates a mesh record; false when the table is full. Records
 /// registered here are already Ready with no streaming reload path
 /// (builtin/synchronous meshes), so they are pinned: counted against the
-/// cache budget but never evicted (audit M-28).
+/// cache budget but never evicted.
 bool register_mesh_asset(AssetDatabase *database, AssetId id,
                          const char *sourcePath,
                          MeshHandle runtimeMesh) noexcept;

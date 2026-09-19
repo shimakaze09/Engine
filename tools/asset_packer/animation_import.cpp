@@ -2,6 +2,8 @@
 
 #include "animation_import.h"
 
+#include "gltf_bounds.h"
+
 #include <array>
 #include <cmath>
 #include <cstdio>
@@ -209,8 +211,7 @@ bool decode_track_values(const cgltf_accessor *output,
 }
 
 /// Validates decoded key times: finite, non-negative, and non-decreasing,
-/// so runtime binary search over sorted keys stays well-defined (audit
-/// M-26).
+/// so runtime binary search over sorted keys stays well-defined.
 bool validate_track_times(const std::vector<float> &times) noexcept {
   float previous = 0.0F;
   for (std::size_t i = 0U; i < times.size(); ++i) {
@@ -226,8 +227,8 @@ bool validate_track_times(const std::vector<float> &times) noexcept {
   return true;
 }
 
-/// Reports whether every decoded sample and tangent is finite (audit
-/// M-26: NaN/Inf samples used to cook silently and poison runtime poses).
+/// Reports whether every decoded sample and tangent is finite; NaN/Inf
+/// samples would otherwise cook silently and poison runtime poses.
 bool track_values_finite(const AnimTrack &track) noexcept {
   const auto vec3Finite = [](const std::vector<math::Vec3> &values) noexcept {
     for (const math::Vec3 &value : values) {
@@ -371,7 +372,8 @@ bool parse_gltf_animation(const cgltf_data *data, std::size_t animationIndex,
     const cgltf_accessor *input = sampler.input;
     const cgltf_accessor *output = sampler.output;
     if ((input == nullptr) || (input->type != cgltf_type_scalar) ||
-        (input->count == 0U)) {
+        (input->count == 0U) ||
+        !accessor_count_is_cookable(input, 1U, "animation sampler input")) {
       set_result(outResult, AnimationImportResult::InvalidInputAccessor);
       return false;
     }
@@ -380,9 +382,12 @@ bool parse_gltf_animation(const cgltf_data *data, std::size_t animationIndex,
         convert_interpolation(sampler.interpolation);
     const std::size_t sampleMultiplier =
         interpolation == AnimInterpolation::CubicSpline ? 3U : 1U;
+    // input->count is bounded above, so the product below cannot wrap and
+    // make a mismatched output accessor compare equal.
     if ((output == nullptr) ||
         (output->type != output_type_for_target(target)) ||
-        (output->count != input->count * sampleMultiplier)) {
+        (output->count != input->count * sampleMultiplier) ||
+        !accessor_count_is_cookable(output, 1U, "animation sampler output")) {
       set_result(outResult, AnimationImportResult::InvalidOutputAccessor);
       return false;
     }

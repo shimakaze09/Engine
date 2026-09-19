@@ -107,7 +107,7 @@ struct EmitDepthScope final {
   }
 };
 
-/// Release-enforced recursion cap (audit M-11): a handler chain deeper than
+/// Release-enforced recursion cap: a handler chain deeper than
 /// kMaxEmitDepth drops the emit with a diagnostic instead of relying on a
 /// debug-only assertion while the stack unwinds toward overflow.
 bool emit_depth_available() noexcept {

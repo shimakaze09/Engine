@@ -40,6 +40,27 @@ constexpr std::uint32_t kSpatialHashEmpty = 0xFFFFFFFFU;
 
 constexpr std::uint8_t kSleepFramesRequired = 60U;
 
+// The inverse mass a body answers a contact with. A sleeping body is
+// static to every response path -- positional correction, speculative
+// contacts and the impulse solve alike -- unless its partner is fast
+// enough for record_pair_and_wake to wake it in this same response, in
+// which case it answers with its real mass. The relaxation
+// pass zeroes sleepers the same way; without this the primary response
+// pushed a sleeper every step while it stayed marked asleep.
+float effective_inverse_mass(const RigidBody *body,
+                             const RigidBody *partner) noexcept {
+  if (body == nullptr) {
+    return kStaticInverseMass;
+  }
+  if (!body->sleeping) {
+    return body->inverseMass;
+  }
+  const bool wokenByPartner =
+      (partner != nullptr) &&
+      (engine::math::length_sq(partner->velocity) > kSleepThreshold);
+  return wokenByPartner ? body->inverseMass : kStaticInverseMass;
+}
+
 // Advances a stamp generation, clearing the stamps on wrap so stale marks
 // can never read as current.
 void begin_generation(std::uint32_t *generation, std::uint32_t *stamps,
@@ -171,12 +192,11 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
     return false;
   }
 
-  // Broadphase dedupe stamps live in the heap-backed shape store (issue
-  // #129); fetched once so the per-collider loop below never re-derefs the
-  // unique_ptr.
+  // Broadphase dedupe stamps live in the heap-backed shape store; fetched
+  // once so the per-collider loop below never re-derefs the unique_ptr.
   PhysicsShapeStore *const shapeStorePtr = physicsCtx.shapeStore.get();
 
-  // #170: the workspace is context-owned — allocated once per physics
+  // The workspace is context-owned — allocated once per physics
   // context on its first resolve (never per step, never per thread) and
   // freed with the World.
   if (physicsCtx.resolveScratch == nullptr) {
@@ -452,10 +472,8 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
         RigidBody *bodyB = (bodyEntityB != kInvalidEntity)
                                ? world.get_rigid_body_ptr(bodyEntityB)
                                : nullptr;
-        const float invMassA =
-            (bodyA != nullptr) ? bodyA->inverseMass : kStaticInverseMass;
-        const float invMassB =
-            (bodyB != nullptr) ? bodyB->inverseMass : kStaticInverseMass;
+        const float invMassA = effective_inverse_mass(bodyA, bodyB);
+        const float invMassB = effective_inverse_mass(bodyB, bodyA);
         const float invMassSum = invMassA + invMassB;
 
         const auto shapeA = colliderA.shape;
@@ -595,7 +613,7 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
     physicsCtx.broadphaseOverflowActive = false;
   }
 
-  // Append this step's kept pairs to the frame buffer in step order (#103).
+  // Append this step's kept pairs to the frame buffer in step order.
   std::uint32_t frameAppendDropCount = 0U;
   for (std::size_t i = 0U; i < physicsCtx.collisionPairCount; ++i) {
     if (physicsCtx.frameCollisionPairCount >=
@@ -626,7 +644,7 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
     physicsCtx.collisionPairOverflowActive = false;
   }
 
-  // Extra outer passes over this frame's cached contacts (issue #123):
+  // Extra outer passes over this frame's cached contacts:
   // propagates corrections through contact chains (stacks) within this step
   // instead of leaving convergence to accumulate one frame at a time via
   // warm start alone. Runs before joints solve, mirroring the primary
@@ -706,7 +724,7 @@ void set_collision_dispatch(PhysicsWorldView &world,
 }
 
 // Drains the frame-accumulated pairs so every catch-up step's callbacks
-// reach the dispatch in step order once per rendered frame (#103).
+// reach the dispatch in step order once per rendered frame.
 void dispatch_collision_callbacks(PhysicsWorldView &world) noexcept {
   PhysicsContext &ctx = world.physics_context();
   if ((ctx.collisionDispatch != nullptr) &&
@@ -767,6 +785,40 @@ bool remove_joint(PhysicsWorldView &world, JointId id) noexcept {
   }
   return true;
 }
+
+void remove_joints_for_entity(PhysicsContext &context, Entity entity) noexcept {
+  PhysicsShapeStore *store = context.shapeStore.get();
+  if ((store == nullptr) || (context.jointCount == 0U)) {
+    return;
+  }
+  auto &joints = store->joints;
+  for (std::size_t i = 0U; i < context.jointCount; ++i) {
+    PhysicsJointSlot &joint = joints[i];
+    if (joint.active &&
+        ((joint.entityA == entity) || (joint.entityB == entity))) {
+      retire_joint_slot(joint);
+    }
+  }
+  while ((context.jointCount > 0U) && !joints[context.jointCount - 1U].active) {
+    --context.jointCount;
+  }
+}
+
+void reset_physics_content(PhysicsContext &context) noexcept {
+  context.gravity = kDefaultGravity;
+  PhysicsShapeStore *store = context.shapeStore.get();
+  if (store != nullptr) {
+    // Retire rather than clear so a JointId held across the reset stays
+    // stale instead of resolving to a joint the next scene creates.
+    for (std::size_t i = 0U; i < context.jointCount; ++i) {
+      if (store->joints[i].active) {
+        retire_joint_slot(store->joints[i]);
+      }
+    }
+  }
+  context.jointCount = 0U;
+}
+
 void wake_body(PhysicsWorldView &world, Entity entity) noexcept {
   RigidBody *body = world.get_rigid_body_ptr(entity);
   if (body != nullptr) {

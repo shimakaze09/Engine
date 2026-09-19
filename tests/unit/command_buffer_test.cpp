@@ -929,6 +929,16 @@ int check_skin_palette_store() {
   if (engine::renderer::skin_palette_count() != 0U) {
     return 114;
   }
+
+  // Stored palettes are public renderer state and gate the directional
+  // shadow cache off while present, so the public-state reset that runs
+  // on teardown must clear them or a run that ended with skinned meshes
+  // leaves the next run's cache disabled (#575 row 3).
+  engine::renderer::set_skin_palettes(palettes, 2U);
+  engine::renderer::reset_renderer_public_state();
+  if (engine::renderer::skin_palette_count() != 0U) {
+    return 115;
+  }
   return 0;
 }
 

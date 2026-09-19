@@ -8,6 +8,7 @@
 #include "engine/core/platform.h"
 
 #include <array>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -81,6 +82,20 @@ bool read_optional_uint_field(const JsonParser &parser, const JsonValue &entry,
     return false;
   }
   return true;
+}
+
+// Numeric bounds a persisted document must respect: a scancode,
+// gamepad button or axis index never exceeds this, a dead zone is a
+// fraction, and a scale past this is a typo, not a setting. A document
+// outside them is refused whole, so no field can later be cast to int
+// out of range.
+constexpr std::uint32_t kMaxInputCode = 4096U;
+constexpr float kMaxInputScale = 1000.0F;
+
+/// True for a key, button or axis index the mapper can hold: within the
+/// bound, or the struct's own "unset" sentinel (-1) an absent field keeps.
+bool input_code_in_range(std::uint32_t code) noexcept {
+  return (code <= kMaxInputCode) || (code == static_cast<std::uint32_t>(-1));
 }
 
 /// Float counterpart of read_optional_uint_field with the same contract.
@@ -290,6 +305,9 @@ bool add_input_action(const char *name, const InputBinding *bindings,
 
   InputAction *existing = find_mapped_action(name);
   if (existing != nullptr) {
+    if (existing->persisted) {
+      return true; // the user's bindings outrank a script default
+    }
     existing->bindingCount = count;
     for (std::uint32_t i = 0; i < count; ++i) {
       existing->bindings[i] = bindings[i];
@@ -334,6 +352,9 @@ bool add_input_axis(const char *name, const InputAxisSource *sources,
 
   InputAxisMapping *existing = find_mapped_axis(name);
   if (existing != nullptr) {
+    if (existing->persisted) {
+      return true;
+    }
     existing->sourceCount = count;
     for (std::uint32_t i = 0; i < count; ++i) {
       existing->sources[i] = sources[i];
@@ -481,11 +502,13 @@ bool rebind_action(const char *actionName, std::uint32_t bindingIndex,
         (a->bindingCount < kMaxBindingsPerAction)) {
       a->bindings[a->bindingCount] = newBinding;
       ++a->bindingCount;
+      a->persisted = true;
       return true;
     }
     return false;
   }
   a->bindings[bindingIndex] = newBinding;
+  a->persisted = true;
   return true;
 }
 
@@ -789,6 +812,7 @@ bool load_input_bindings_from_buffer(const char *buffer,
 
       InputAction action{};
       action.occupied = true;
+      action.persisted = true;
 
       if (!parse_entry_name(parser, actionVal, action.name, "action")) {
         return false;
@@ -838,6 +862,14 @@ bool load_input_bindings_from_buffer(const char *buffer,
                         "load_input_bindings: binding type out of range");
             return false;
           }
+          if (!input_code_in_range(code) ||
+              (std::fabs(binding.axisThreshold) > 1.0F) ||
+              (std::fabs(binding.axisScale) > kMaxInputScale)) {
+            log_message(LogLevel::Error, kLogChannel,
+                        "load_input_bindings: binding code, threshold or "
+                        "scale out of range; rejecting the document");
+            return false;
+          }
           binding.type = static_cast<InputBindingType>(type);
           binding.code = static_cast<int>(code);
 
@@ -874,6 +906,7 @@ bool load_input_bindings_from_buffer(const char *buffer,
 
       InputAxisMapping axis{};
       axis.occupied = true;
+      axis.persisted = true;
 
       if (!parse_entry_name(parser, axisVal, axis.name, "axis")) {
         return false;
@@ -927,6 +960,16 @@ bool load_input_bindings_from_buffer(const char *buffer,
           if (type > static_cast<std::uint32_t>(AxisSourceType::MouseDeltaY)) {
             log_message(LogLevel::Error, kLogChannel,
                         "load_input_bindings: axis source type out of range");
+            return false;
+          }
+          if (!input_code_in_range(negativeKey) ||
+              !input_code_in_range(positiveKey) ||
+              !input_code_in_range(axisIndex) ||
+              (std::fabs(src.scale) > kMaxInputScale) ||
+              (src.deadZone < 0.0F) || (src.deadZone > 1.0F)) {
+            log_message(LogLevel::Error, kLogChannel,
+                        "load_input_bindings: axis source key, index, scale "
+                        "or dead zone out of range; rejecting the document");
             return false;
           }
           src.type = static_cast<AxisSourceType>(type);

@@ -70,6 +70,106 @@ bool aabb_culled_by_frustum(const FrustumPlane planes[6],
   return false;
 }
 
+/// Conservative test of the box swept along `sweep` (a direction scaled
+/// by the sweep distance) against the frustum: the swept solid lies
+/// entirely outside a plane only when the box's near corner plus the
+/// sweep's reach toward the plane still falls behind it.
+bool swept_aabb_culled_by_frustum(const FrustumPlane planes[6],
+                                  const math::Vec3 &center,
+                                  const math::Vec3 &half,
+                                  const math::Vec3 &sweep) noexcept {
+  for (int p = 0; p < 6; ++p) {
+    const FrustumPlane &plane = planes[p];
+    const float px = center.x + (plane.a >= 0.0F ? half.x : -half.x);
+    const float py = center.y + (plane.b >= 0.0F ? half.y : -half.y);
+    const float pz = center.z + (plane.c >= 0.0F ? half.z : -half.z);
+    const float along = (plane.a * sweep.x) + (plane.b * sweep.y) +
+                        (plane.c * sweep.z);
+    const float reach = (along > 0.0F) ? along : 0.0F;
+    if ((plane.a * px + plane.b * py + plane.c * pz + plane.d + reach) <
+        0.0F) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/// Whether a sphere overlaps the axis-aligned box.
+bool aabb_intersects_sphere(const math::Vec3 &center, const math::Vec3 &half,
+                            const math::Vec3 &spherePos,
+                            float radius) noexcept {
+  const float dx = std::fmax(std::fabs(spherePos.x - center.x) - half.x, 0.0F);
+  const float dy = std::fmax(std::fabs(spherePos.y - center.y) - half.y, 0.0F);
+  const float dz = std::fmax(std::fabs(spherePos.z - center.z) - half.z, 0.0F);
+  return ((dx * dx) + (dy * dy) + (dz * dz)) <= (radius * radius);
+}
+
+/// Per-job view of the auxiliary inputs with each capture's frustum
+/// planes extracted once.
+struct AuxiliaryCulling final {
+  const RenderPrepAuxiliaryInputs *inputs = nullptr;
+  math::Vec3 sweep{};
+  FrustumPlane capturePlanes[renderer::kMaxSceneCaptures][6] = {};
+};
+
+void prepare_auxiliary_culling(const RenderPrepAuxiliaryInputs *inputs,
+                               AuxiliaryCulling *out) noexcept {
+  out->inputs = inputs;
+  if (inputs == nullptr) {
+    return;
+  }
+  out->sweep = math::mul(inputs->lightDirection, inputs->sweepDistance);
+  const std::size_t captureCount =
+      (inputs->captureCount < renderer::kMaxSceneCaptures)
+          ? inputs->captureCount
+          : renderer::kMaxSceneCaptures;
+  for (std::size_t i = 0U; i < captureCount; ++i) {
+    extract_frustum_planes(inputs->captureViewProjections[i],
+                           out->capturePlanes[i]);
+  }
+}
+
+/// Which auxiliary passes want a draw the camera culled: zero drops it.
+std::uint16_t auxiliary_pass_mask(const AuxiliaryCulling &aux,
+                                  const FrustumPlane cameraPlanes[6],
+                                  const math::Vec3 &center,
+                                  const math::Vec3 &half) noexcept {
+  if (aux.inputs == nullptr) {
+    return 0U;
+  }
+  std::uint16_t mask = 0U;
+  if (aux.inputs->directionalShadow &&
+      !swept_aabb_culled_by_frustum(cameraPlanes, center, half, aux.sweep)) {
+    mask |= renderer::kPassShadowCaster;
+  }
+  if ((mask & renderer::kPassShadowCaster) == 0U) {
+    const std::size_t casterCount =
+        (aux.inputs->localCasterCount < aux.inputs->localCasters.size())
+            ? aux.inputs->localCasterCount
+            : aux.inputs->localCasters.size();
+    for (std::size_t i = 0U; i < casterCount; ++i) {
+      const RenderPrepAuxiliaryInputs::LocalCaster &caster =
+          aux.inputs->localCasters[i];
+      if (aabb_intersects_sphere(center, half, caster.position,
+                                 caster.radius)) {
+        mask |= renderer::kPassShadowCaster;
+        break;
+      }
+    }
+  }
+  const std::size_t captureCount =
+      (aux.inputs->captureCount < renderer::kMaxSceneCaptures)
+          ? aux.inputs->captureCount
+          : renderer::kMaxSceneCaptures;
+  for (std::size_t i = 0U; i < captureCount; ++i) {
+    if (!aabb_culled_by_frustum(aux.capturePlanes[i], center, half)) {
+      mask |= static_cast<std::uint16_t>(renderer::kPassCaptureBase
+                                         << static_cast<unsigned int>(i));
+    }
+  }
+  return mask;
+}
+
 /// Builds the 64-bit draw sort key, MSB→LSB:
 /// transparent:1 | shader:7 (0 = PBR, the only shader) | texture:20 |
 /// mesh:20 | depth:16.
@@ -107,17 +207,21 @@ std::uint64_t build_draw_sort_key(const renderer::Material &material,
 
 void mark_graph_failed(std::atomic<bool> *frameGraphFailed) noexcept;
 
-/// Submits work to the owning buffer or system for render command.
+/// Submits a draw to the thread's buffer. A full buffer drops the draw and
+/// counts it; it is a per-frame degradation the pipeline reports once and
+/// surfaces in EngineStats, never a graph failure — treating it as one
+/// made more than kMaxDrawCommands visible draws a fatal run exit.
 bool submit_render_command(renderer::CommandBufferBuilder &localBuffer,
                            const renderer::DrawCommand &command,
-                           std::atomic<bool> *frameGraphFailed) noexcept {
+                           std::atomic<std::uint32_t> *droppedDrawCommands)
+    noexcept {
   if (localBuffer.submit(command)) {
     return true;
   }
 
-  core::log_message(core::LogLevel::Error, "render_prep",
-                    "command buffer full; entity dropped from frame");
-  mark_graph_failed(frameGraphFailed);
+  if (droppedDrawCommands != nullptr) {
+    droppedDrawCommands->fetch_add(1U, std::memory_order_relaxed);
+  }
   return false;
 }
 
@@ -176,6 +280,8 @@ void render_prep_chunk_job(void *userData) noexcept {
   const math::Mat4 &vp = jobData->viewProjection;
   FrustumPlane frustumPlanes[6];
   extract_frustum_planes(vp, frustumPlanes);
+  AuxiliaryCulling auxiliary{};
+  prepare_auxiliary_culling(jobData->auxiliary, &auxiliary);
 
   for (std::size_t i = 0U; i < jobData->count; ++i) {
     const MeshComponent *meshComponent =
@@ -199,7 +305,11 @@ void render_prep_chunk_job(void *userData) noexcept {
         }
       }
 
-      if (!aabb_culled_by_frustum(frustumPlanes, center, half)) {
+      const std::uint16_t passMask =
+          aabb_culled_by_frustum(frustumPlanes, center, half)
+              ? auxiliary_pass_mask(auxiliary, frustumPlanes, center, half)
+              : renderer::kPassCamera;
+      if (passMask != 0U) {
         const renderer::MeshHandle runtimeMesh = renderer::resolve_mesh_asset(
             jobData->assetDatabase, meshComponent->meshAssetId);
         if (runtimeMesh != renderer::kInvalidMeshHandle) {
@@ -276,11 +386,12 @@ void render_prep_chunk_job(void *userData) noexcept {
             }
             command.sortKey.value =
                 build_draw_sort_key(command.material, runtimeMesh, center, vp);
+            command.passMask = passMask;
 
-            if (!submit_render_command(localBuffer, command,
-                                       jobData->frameGraphFailed)) {
-              return;
-            }
+            // Counted and skipped: every later submit into a full buffer
+            // fails the same way, so the count stays exact.
+            static_cast<void>(submit_render_command(
+                localBuffer, command, jobData->droppedDrawCommands));
           }
         }
       }
@@ -336,13 +447,18 @@ void render_prep_chunk_job(void *userData) noexcept {
       const math::Vec3 center(center4.x, center4.y, center4.z);
       const math::Vec3 half(0.5F * safeScale, 0.5F * safeScale,
                             0.5F * safeScale);
-      if (aabb_culled_by_frustum(frustumPlanes, center, half)) {
+      const std::uint16_t passMask =
+          aabb_culled_by_frustum(frustumPlanes, center, half)
+              ? auxiliary_pass_mask(auxiliary, frustumPlanes, center, half)
+              : renderer::kPassCamera;
+      if (passMask == 0U) {
         continue;
       }
 
       renderer::DrawCommand command{};
       command.entity = entities[i].index;
       command.mesh = runtimeMesh;
+      command.passMask = passMask;
       command.material.albedo = foliage->albedo;
       command.material.roughness = foliage->roughness;
       command.material.metallic = foliage->metallic;
@@ -355,10 +471,8 @@ void render_prep_chunk_job(void *userData) noexcept {
       command.sortKey.value =
           build_draw_sort_key(command.material, runtimeMesh, center, vp);
 
-      if (!submit_render_command(localBuffer, command,
-                                 jobData->frameGraphFailed)) {
-        return;
-      }
+      static_cast<void>(submit_render_command(
+          localBuffer, command, jobData->droppedDrawCommands));
     }
   }
 }
@@ -371,13 +485,36 @@ void merge_command_buffers_job(void *userData) noexcept {
   }
 
   jobData->merged->reset();
+  if (jobData->mergedAuxiliary != nullptr) {
+    jobData->mergedAuxiliary->reset();
+  }
+  std::uint32_t dropped = 0U;
   for (std::size_t i = 0U; i < jobData->threadCount; ++i) {
-    if (!jobData->merged->append_from(jobData->localBuffers[i])) {
-      mark_graph_failed(jobData->frameGraphFailed);
-      return;
+    const renderer::CommandBufferView local = jobData->localBuffers[i].view();
+    for (std::uint32_t c = 0U; c < local.count; ++c) {
+      const renderer::DrawCommand &command = local.data[c];
+      // Camera-visible commands feed the main list; the rest go to the
+      // auxiliary list for the shadow and capture passes. Either
+      // merged buffer has the capacity of one thread's buffer, so the sum
+      // of the locals can exceed it; a command that does not fit is
+      // dropped and counted, and the frame draws what did fit.
+      renderer::CommandBufferBuilder *target =
+          ((command.passMask & renderer::kPassCamera) != 0U)
+              ? jobData->merged
+              : jobData->mergedAuxiliary;
+      if ((target == nullptr) || !target->submit(command)) {
+        ++dropped;
+      }
     }
   }
+  if ((dropped > 0U) && (jobData->droppedDrawCommands != nullptr)) {
+    jobData->droppedDrawCommands->fetch_add(dropped,
+                                            std::memory_order_relaxed);
+  }
   jobData->merged->sort_by_key();
+  if (jobData->mergedAuxiliary != nullptr) {
+    jobData->mergedAuxiliary->sort_by_key();
+  }
 }
 
 bool link_dependency(core::JobHandle prerequisite,
@@ -398,10 +535,13 @@ bool enqueue_render_prep_pipeline(
     renderer::AssetDatabase *assetDatabase,
     const renderer::GpuMeshRegistry *meshRegistry,
     core::JobHandle renderPrepPhaseHandle, core::JobHandle renderPhaseHandle,
-    std::atomic<bool> *frameGraphFailed, std::size_t frameThreadCount,
-    std::size_t chunkSize, const math::Mat4 &viewProjection,
-    float interpolationAlpha,
-    core::JobHandle *outMergeHandle) noexcept {
+    std::atomic<bool> *frameGraphFailed,
+    std::atomic<std::uint32_t> *droppedDrawCommands,
+    std::size_t frameThreadCount, std::size_t chunkSize,
+    const math::Mat4 &viewProjection, float interpolationAlpha,
+    core::JobHandle *outMergeHandle,
+    renderer::CommandBufferBuilder *mergedAuxiliaryBuffer,
+    const RenderPrepAuxiliaryInputs *auxiliary) noexcept {
   if ((context == nullptr) || (world == nullptr) ||
       (mergedCommandBuffer == nullptr) || (assetDatabase == nullptr) ||
       (meshRegistry == nullptr) || (chunkSize == 0U) ||
@@ -447,8 +587,11 @@ bool enqueue_render_prep_pipeline(
     prepData.assetDatabase = assetDatabase;
     prepData.meshRegistry = meshRegistry;
     prepData.frameGraphFailed = frameGraphFailed;
+    prepData.droppedDrawCommands = droppedDrawCommands;
     prepData.viewProjection = viewProjection;
     prepData.interpolationAlpha = interpolationAlpha;
+    prepData.auxiliary =
+        (mergedAuxiliaryBuffer != nullptr) ? auxiliary : nullptr;
 
     core::Job renderPrepJob{};
     renderPrepJob.function = &render_prep_chunk_job;
@@ -469,10 +612,13 @@ bool enqueue_render_prep_pipeline(
   }
 
   context->mergeCommandsJobData.merged = mergedCommandBuffer;
+  context->mergeCommandsJobData.mergedAuxiliary =
+      (auxiliary != nullptr) ? mergedAuxiliaryBuffer : nullptr;
   context->mergeCommandsJobData.localBuffers =
       context->localCommandBuffers.data();
   context->mergeCommandsJobData.threadCount = frameThreadCount;
   context->mergeCommandsJobData.frameGraphFailed = frameGraphFailed;
+  context->mergeCommandsJobData.droppedDrawCommands = droppedDrawCommands;
 
   core::Job mergeJob{};
   mergeJob.function = &merge_command_buffers_job;

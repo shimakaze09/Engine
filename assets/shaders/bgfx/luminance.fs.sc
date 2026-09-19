@@ -1,6 +1,6 @@
 $input v_texcoord0
 
-// Log-luminance reduction source (bgfx port of luminance.frag, #138).
+// Log-luminance reduction source.
 
 #include <bgfx_shader.sh>
 

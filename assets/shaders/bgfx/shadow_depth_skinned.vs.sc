@@ -1,7 +1,7 @@
 $input a_position, a_indices, a_weight
 
-// SKINNED shadow depth vertex stage (bgfx port of shadow_depth.vert's
-// SKINNED variant, #138): linear-blend skinning from the uBones array,
+// SKINNED shadow depth vertex stage: linear-blend skinning from the
+// uBones array,
 // then the CPU-combined light MVP. Separate source because shaderc
 // cannot guard $input lines.
 

@@ -100,21 +100,44 @@ void test_clear_invalidates_all_handles() noexcept {
 }
 
 void test_generation_wrap_skips_zero() noexcept {
-  DeviceSlotTable<Payload, 2U> table{}; // 1 usable slot, 31 generation bits
+  // 28 slot bits leave a 4-bit generation field (mask 15), so the wrap in
+  // next_generation runs on the 15th release instead of the 2^31st. The
+  // default instantiation cannot reach it in any test.
+  using NarrowTable = DeviceSlotTable<Payload, 2U, 28U>;
+  static_assert(NarrowTable::kSlotBits == 28U);
+  constexpr std::uint32_t kGenerationMask = 0xFU;
+  NarrowTable table{};
 
-  // Drive one slot through several generations; each cycle's handle must
-  // be nonzero and the previous cycle's handle must be stale.
+  // 40 cycles crosses the wrap twice. Every handle must be nonzero, every
+  // generation field must stay inside [1, mask] (zero is the invalid
+  // encoding and must never be issued), and each cycle's handle must be
+  // stale by the next one — including across the wrap, where a table that
+  // reset to zero instead of one would hand out a handle that decodes as
+  // invalid, and one that skipped the wrap would overflow into the slot
+  // bits. Aliasing after a full 15-cycle period is the documented limit
+  // of a 4-bit field, not a defect, so it is not asserted either way.
   std::uint32_t previous = 0U;
-  for (int cycle = 0; cycle < 8; ++cycle) {
+  bool sawWrap = false;
+  std::uint32_t previousGeneration = 0U;
+  for (int cycle = 0; cycle < 40; ++cycle) {
     const std::uint32_t handle = table.allocate(Payload{0U});
     CHECK(handle != 0U, "cycled slot allocates");
+    const std::uint32_t generation = handle >> NarrowTable::kSlotBits;
+    CHECK((generation >= 1U) && (generation <= kGenerationMask),
+          "generation field stays inside [1, mask]");
     if (previous != 0U) {
       CHECK(table.resolve(previous) == nullptr,
             "previous cycle's handle is stale");
+      if (generation < previousGeneration) {
+        sawWrap = true;
+        CHECK(generation == 1U, "wrapped generation restarts at one");
+      }
     }
     CHECK(table.release(handle), "cycled slot releases");
     previous = handle;
+    previousGeneration = generation;
   }
+  CHECK(sawWrap, "40 cycles drove the generation field through its wrap");
 }
 
 } // namespace

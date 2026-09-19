@@ -1,0 +1,65 @@
+{
+ "files": {
+  "alarm.wav": {
+   "bytes": 22094,
+   "fnv1a64": "c171b13ad88685e9"
+  },
+  "ambient.wav": {
+   "bytes": 352844,
+   "fnv1a64": "eff4b6bdb925ed44"
+  },
+  "bounce.wav": {
+   "bytes": 7100,
+   "fnv1a64": "8221e764c56b70e5"
+  },
+  "chirp.wav": {
+   "bytes": 7100,
+   "fnv1a64": "50e56b9362b02fe4"
+  },
+  "click.wav": {
+   "bytes": 2248,
+   "fnv1a64": "6422ee6dc01d0590"
+  },
+  "footstep.wav": {
+   "bytes": 4012,
+   "fnv1a64": "eec3c1876218a6e3"
+  },
+  "jump.wav": {
+   "bytes": 8864,
+   "fnv1a64": "697b2b0c12ddb5a4"
+  },
+  "land.wav": {
+   "bytes": 7100,
+   "fnv1a64": "ae2d68f9dbb2e1e8"
+  },
+  "lose.wav": {
+   "bytes": 38852,
+   "fnv1a64": "f73e2950b3224970"
+  },
+  "pickup.wav": {
+   "bytes": 7982,
+   "fnv1a64": "31b0c76eb6fff229"
+  },
+  "splash.wav": {
+   "bytes": 19888,
+   "fnv1a64": "3021c5c2fc51079e"
+  },
+  "waves.wav": {
+   "bytes": 264644,
+   "fnv1a64": "4a5e174ee924ce4c"
+  },
+  "whoosh.wav": {
+   "bytes": 13274,
+   "fnv1a64": "bbc3f2efd43d4fb1"
+  },
+  "win.wav": {
+   "bytes": 28268,
+   "fnv1a64": "193c5140833670fa"
+  },
+  "wind.wav": {
+   "bytes": 264644,
+   "fnv1a64": "c450a484646cf56d"
+  }
+ },
+ "schema": 1
+}

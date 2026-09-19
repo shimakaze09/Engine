@@ -159,7 +159,7 @@ bool runtime_streaming_upload_mesh(renderer::AssetId assetId,
                                       renderer::AssetState::Ready,
                                       meshHandle)) {
     // Roll back through the public unload path (not raw slot indexing) so
-    // the registry's generation bump still fires (audit #173).
+    // the registry's generation bump still fires.
     renderer::unload_gpu_mesh(state->meshRegistry, meshHandle);
     return false;
   }

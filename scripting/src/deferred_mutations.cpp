@@ -99,7 +99,7 @@ enum class PendingRead : std::uint8_t { None, Value, Removed };
 
 /// Finds the newest queued mutation affecting entity's component of the
 /// given snapshot type; a queued destroy (or matching remove) wins over
-/// older snapshots so setters cannot resurrect the component (issue #105).
+/// older snapshots so setters cannot resurrect the component.
 /// Entries queued against an earlier content epoch belong to a replaced
 /// scene and are invisible here, exactly as the flush will drop them.
 PendingRead find_pending_snapshot(runtime::Entity entity,
@@ -239,6 +239,52 @@ bool latest_light_component(runtime::Entity entity,
     break;
   }
   return binding.world->get_light_component(entity, outComponent);
+}
+
+bool latest_point_light_component(
+    runtime::Entity entity,
+    runtime::PointLightComponent *outComponent) noexcept {
+  const ScriptingRuntimeBinding &binding = runtime_binding();
+  if ((binding.world == nullptr) || (outComponent == nullptr)) {
+    return false;
+  }
+  DeferredMutation pending{};
+  switch (find_pending_snapshot(entity,
+                                DeferredMutationType::AddPointLightComponent,
+                                DeferredMutationType::RemovePointLightComponent,
+                                true, &pending)) {
+  case PendingRead::Value:
+    *outComponent = pending.pointLightComponent;
+    return true;
+  case PendingRead::Removed:
+    return false;
+  case PendingRead::None:
+    break;
+  }
+  return binding.world->get_point_light_component(entity, outComponent);
+}
+
+bool latest_spot_light_component(
+    runtime::Entity entity,
+    runtime::SpotLightComponent *outComponent) noexcept {
+  const ScriptingRuntimeBinding &binding = runtime_binding();
+  if ((binding.world == nullptr) || (outComponent == nullptr)) {
+    return false;
+  }
+  DeferredMutation pending{};
+  switch (find_pending_snapshot(entity,
+                                DeferredMutationType::AddSpotLightComponent,
+                                DeferredMutationType::RemoveSpotLightComponent,
+                                true, &pending)) {
+  case PendingRead::Value:
+    *outComponent = pending.spotLightComponent;
+    return true;
+  case PendingRead::Removed:
+    return false;
+  case PendingRead::None:
+    break;
+  }
+  return binding.world->get_spot_light_component(entity, outComponent);
 }
 
 /// Returns whether script-driven world mutations may run immediately.

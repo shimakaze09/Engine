@@ -103,6 +103,78 @@ int verify_instantiate_rejects_malformed_component() {
   return 0;
 }
 
+/// Regression for #314, prefab half: the component readers are shared with
+/// the scene serializer, so a present-but-malformed float must refuse this
+/// format too. The scene half lives in engine_unit_scene_serializer; both
+/// are here because one codec change silently altered both formats.
+int verify_malformed_float_field_refuses_prefab() {
+  struct FieldCase final {
+    const char *json;
+    int code;
+  };
+
+  constexpr FieldCase kCases[] = {
+      {"{\"version\":1,\"components\":{"
+       "\"MeshComponent\":{\"meshAssetId\":7,\"roughness\":\"0.5\"}}}",
+       450},
+      {"{\"version\":1,\"components\":{"
+       "\"MeshComponent\":{\"meshAssetId\":7,\"opacity\":null}}}",
+       451},
+      {"{\"version\":1,\"components\":{"
+       "\"LightComponent\":{\"intensity\":\"bright\"}}}",
+       452},
+  };
+
+  for (const FieldCase &testCase : kCases) {
+    remove_prefab_file();
+    if (!write_prefab_text(testCase.json)) {
+      remove_prefab_file();
+      return testCase.code;
+    }
+
+    std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                      engine::runtime::World());
+    if (world == nullptr) {
+      remove_prefab_file();
+      return testCase.code;
+    }
+
+    const std::size_t aliveBefore = world->alive_entity_count();
+    const engine::runtime::Entity entity =
+        engine::runtime::instantiate_prefab(*world, kPrefabPath);
+    remove_prefab_file();
+    if ((entity != engine::runtime::kInvalidEntity) ||
+        (world->alive_entity_count() != aliveBefore)) {
+      return testCase.code;
+    }
+  }
+
+  // The same document without the malformed field still instantiates, so
+  // the refusal is about the value and not the component.
+  remove_prefab_file();
+  constexpr const char *kValid =
+      "{\"version\":1,\"components\":{"
+      "\"MeshComponent\":{\"meshAssetId\":7,\"roughness\":0.25}}}";
+  if (!write_prefab_text(kValid)) {
+    remove_prefab_file();
+    return 453;
+  }
+  std::unique_ptr<engine::runtime::World> validWorld(
+      new (std::nothrow) engine::runtime::World());
+  if (validWorld == nullptr) {
+    remove_prefab_file();
+    return 454;
+  }
+  const engine::runtime::Entity valid =
+      engine::runtime::instantiate_prefab(*validWorld, kPrefabPath);
+  remove_prefab_file();
+  if (valid == engine::runtime::kInvalidEntity) {
+    return 455;
+  }
+
+  return 0;
+}
+
 /// Regression for #332: instantiate_prefab must gate on the document's
 /// schema revision. Covers the revisions this build accepts, the future
 /// and malformed values it must refuse, and the requirement that a refusal
@@ -1005,6 +1077,11 @@ int main() {
   result = verify_prefab_save_refuses_unserializable_payloads();
   if (result != 0) {
     remove_prefab_file();
+    return result;
+  }
+
+  result = verify_malformed_float_field_refuses_prefab();
+  if (result != 0) {
     return result;
   }
 

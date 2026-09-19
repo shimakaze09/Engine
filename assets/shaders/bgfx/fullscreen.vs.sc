@@ -1,11 +1,9 @@
 $input a_position
 $output v_texcoord0
 
-// Fullscreen triangle vertex stage (bgfx port of fullscreen.vert, #138
-// Phase C). The GL source derives the triangle from gl_VertexID; bgfx
-// submits require a vertex stream, so this port reads the triangle
-// positions (-1,-1)/(3,-1)/(-1,3) from a three-vertex buffer the pass
-// supplies when Phase D ports the post stack.
+// Fullscreen triangle vertex stage. bgfx submits require a vertex
+// stream, so this reads the triangle positions (-1,-1)/(3,-1)/(-1,3)
+// from a three-vertex buffer the pass supplies.
 
 #include <bgfx_shader.sh>
 

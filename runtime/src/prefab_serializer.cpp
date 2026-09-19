@@ -18,7 +18,7 @@
 
 namespace engine::runtime {
 
-// ---- Registry-driven component codec (#166 W5) ----------------------------
+// ---- Registry-driven component codec ----------------------------
 // Row membership and order for both prefab directions expand from
 // ENGINE_PERSISTENT_COMPONENT_TABLE; each type's prefab wire shape lives
 // in the decode/encode pair below (default: object-shaped reflected codec;
@@ -159,8 +159,8 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
     return false;
   }
 
-  // A save must not claim success while dropping live authored state
-  // (audit #208): heightfield samples and provenance-free custom hull
+  // A save must not claim success while dropping live authored state:
+  // heightfield samples and provenance-free custom hull
   // payloads have no prefab representation, so their save is refused
   // before the destination is touched. Builder-provenance hulls rebuild
   // from the serialized descriptor on instantiate and stay savable.

@@ -18,12 +18,12 @@ constexpr std::size_t kMaxEntityPools = 16U;
 runtime::EntityPool g_entityPools[kMaxEntityPools]{};
 std::size_t g_entityPoolCount = 0U;
 
-// Lua-visible pool id layout (#93b): slot index in the low bits, the
+// Lua-visible pool id layout: slot index in the low bits, the
 // creating world's content epoch above it, mirroring the entity-handle
-// scheme in entity_handle.cpp. reset_entity_pool_bindings() now runs on
+// scheme in entity_handle.cpp. reset_entity_pool_bindings() runs on
 // every scene transition (engine_pipeline's process_pending_scene_op) to
-// reclaim pool slots instead of leaking one per transition; the epoch field
-// is what keeps that reclaim safe — a poolId a script held across the
+// reclaim pool slots; the epoch field is what keeps that reclaim safe — a
+// poolId a script held across the
 // transition decodes to the epoch it was created under, so it is rejected
 // rather than silently aliasing a same-numbered pool the new scene creates.
 constexpr unsigned kPoolSlotBits = 8U;

@@ -1,6 +1,6 @@
 $input v_texcoord0
 
-// SSAO 5x5 box blur (bgfx port of ssao_blur.frag, #138).
+// SSAO 5x5 box blur.
 
 #include <bgfx_shader.sh>
 

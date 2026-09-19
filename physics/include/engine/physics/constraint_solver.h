@@ -37,7 +37,7 @@ struct ContactManifold final {
   std::size_t contactCount = 0U;
   std::uint32_t lastFrameUsed = 0U;
   // Scalar inverse inertia the ORIGINATING resolve (clipped-manifold or
-  // single-point) actually used for each endpoint, so issue #123's outer
+  // single-point) actually used for each endpoint, so outer
   // relaxation pass re-solves the same point-relative quantity the primary
   // resolve converged instead of guessing a possibly-mismatched value
   // (clipped manifolds use a box-tensor approximation; single-point paths
@@ -86,7 +86,7 @@ JointId add_spring_joint(PhysicsWorldView &world, Entity entityA,
 JointId add_fixed_joint(PhysicsWorldView &world, Entity entityA,
                         Entity entityB) noexcept;
 
-/// Sets finite ordered limits on a live hinge or slider; false (issue #126)
+/// Sets finite ordered limits on a live hinge or slider; false
 /// on a stale/invalid id, wrong joint type, or out-of-range limits, with the
 /// joint left unchanged. Hinge limits are twist radians and must lie within
 /// [-pi, pi] (the wrapped twist measurement cannot enforce multi-turn

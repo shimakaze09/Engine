@@ -2,7 +2,7 @@
 // no-exception build. std::thread's constructor reports resource
 // failure by throwing, which this build converts into process
 // termination, so subsystem initialization spawns workers through this
-// wrapper and rolls back partial worker sets instead (audit H-14).
+// wrapper and rolls back partial worker sets instead.
 
 #pragma once
 

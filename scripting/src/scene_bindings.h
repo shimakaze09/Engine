@@ -42,7 +42,7 @@ PendingSceneOpCheckpoint capture_pending_scene_op() noexcept;
 void restore_pending_scene_op(
     const PendingSceneOpCheckpoint &checkpoint) noexcept;
 
-/// Marks that a scene-transition on_end_play dispatch (#198) is running so
+/// Marks that a scene-transition on_end_play dispatch is running so
 /// a handler's own load_scene/new_scene request is rejected with a logged
 /// warning instead of silently corrupting the transition already
 /// committing. Called only from

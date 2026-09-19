@@ -212,7 +212,7 @@ bool load_mesh_data_from_file(const char *path, CpuMeshData *outData,
     *outSizeBytes = 0ULL;
   }
 
-  // #211: a torn or mixed cook generation is rejected, not loaded; the
+  // A torn or mixed cook generation is rejected, not loaded; the
   // staleness warning only applies to an accepted generation.
   if (!content::cooked_asset_generation_ok(path)) {
     return false;
@@ -613,8 +613,7 @@ void unload_gpu_mesh(GpuMeshRegistry *registry, MeshHandle handle) noexcept {
   registry->occupied[slot] = false;
   registry->meshes[slot] = GpuMesh{};
   // Bump the generation on release so any handle still pointing at this
-  // slot fails lookup instead of aliasing the next mesh loaded here
-  // (audit #173).
+  // slot fails lookup instead of aliasing the next mesh loaded here.
   registry->generations[slot] =
       mesh_handle_detail::next_generation(registry->generations[slot]);
 }

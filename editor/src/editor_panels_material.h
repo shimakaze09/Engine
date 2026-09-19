@@ -1,4 +1,4 @@
-// Declares the material editor panel (issue #160): scalar/vector params,
+// Declares the material editor panel: scalar/vector params,
 // alpha mode, UV transform, and texture-slot pickers for the currently
 // open material asset, with undoable live viewport feedback.
 

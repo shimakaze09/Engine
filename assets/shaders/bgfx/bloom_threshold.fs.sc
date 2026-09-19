@@ -1,6 +1,6 @@
 $input v_texcoord0
 
-// Bloom threshold stage (bgfx port of bloom_threshold.frag, #138).
+// Bloom threshold stage.
 // Scalar GL uniforms become vec4 read through .x.
 
 #include <bgfx_shader.sh>

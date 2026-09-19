@@ -4,6 +4,7 @@
 
 #include "anim_cook.h"
 
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 
@@ -175,7 +176,7 @@ bool write_skeleton_asset(const char *outputPath, const Skeleton &skeleton) {
   core::SkeletonAssetHeader header{};
   header.jointCount = static_cast<std::uint32_t>(skeleton.joints.size());
 
-  // Streamed atomic commit (review item 9): records go straight to the
+  // Streamed atomic commit: records go straight to the
   // staged temporary, so nothing is double-buffered and an interrupted
   // cook still cannot leave a truncated .skel behind.
   core::AtomicFileWriter writer{};
@@ -221,12 +222,26 @@ bool write_anim_clip_asset(const char *outputPath, const AnimClip &clip,
     records.push_back(record);
   }
 
+  // Per-accessor counts are bounded at import, but the payload accumulates
+  // across every track, so the totals are checked here rather than assumed:
+  // a truncating cast would write a header describing less data than the
+  // file carries, and the loader would read the remainder as the next
+  // record.
+  if ((records.size() > static_cast<std::size_t>(UINT32_MAX)) ||
+      (payload.size() > static_cast<std::size_t>(UINT32_MAX))) {
+    std::fprintf(stderr,
+                 "error: animation clip exceeds supported format limits "
+                 "(%zu track(s), %zu payload float(s))\n",
+                 records.size(), payload.size());
+    return false;
+  }
+
   core::AnimClipAssetHeader header{};
   header.trackCount = static_cast<std::uint32_t>(records.size());
   header.payloadFloatCount = static_cast<std::uint32_t>(payload.size());
   header.durationSeconds = clip.durationSeconds;
 
-  // Streamed atomic commit (review item 9): the resident records and
+  // Streamed atomic commit: the resident records and
   // payload spans go straight to the staged temporary without another
   // contiguous copy.
   core::AtomicFileWriter writer{};

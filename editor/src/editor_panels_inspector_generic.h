@@ -1,5 +1,5 @@
-// Declares the Inspector's generic, metadata-driven reflected-field drawer
-// (issue #156): walks core::TypeRegistry for a component type and renders
+// Declares the Inspector's generic, metadata-driven reflected-field drawer:
+// walks core::TypeRegistry for a component type and renders
 // each field using editor_inspector_metadata's semantic hints instead of a
 // per-Kind raw-value widget.
 
@@ -20,7 +20,7 @@ bool draw_reflected_component_fields(const char *typeName, void *instance,
 
 /// Draws exactly one reflected field of `typeName` at `instance` by field
 /// name, using the same per-Kind widgets and metadata hints as
-/// draw_reflected_component_fields; the multi-select Inspector (issue #159)
+/// draw_reflected_component_fields; the multi-select Inspector
 /// calls this once per field on a scratch representative instance instead
 /// of the whole-component loop, so it can tell which single field changed
 /// and never clobbers a sibling field that is still mixed across the

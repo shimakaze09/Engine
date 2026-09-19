@@ -120,6 +120,16 @@ void sim_finger_move(SDL_FingerID fingerId, float x, float y, float dx,
   input_process_event(&ev);
 }
 
+void sim_finger_cancel(SDL_FingerID fingerId, float x, float y) noexcept {
+  SDL_Event ev{};
+  ev.type = SDL_EVENT_FINGER_CANCELED;
+  ev.tfinger.fingerID = fingerId;
+  ev.tfinger.x = x;
+  ev.tfinger.y = y;
+  ev.tfinger.pressure = 0.0F;
+  input_process_event(&ev);
+}
+
 void sim_finger_up(SDL_FingerID fingerId, float x, float y) noexcept {
   SDL_Event ev{};
   ev.type = SDL_EVENT_FINGER_UP;
@@ -385,10 +395,21 @@ bool test_mouse_emulation() noexcept {
   sim_finger_down(1, 0.5F, 0.5F);
   end_input_frame();
 
-  // Mouse button 0 (left) should be down.
+  // Mouse button 0 (left) should be down, and the press already carries
+  // the cursor (#538 item 4): a tap is a press with no motion before it.
   if (!is_mouse_button_down(0)) {
     shutdown_all();
     return false;
+  }
+  {
+    int pressW = 0;
+    int pressH = 0;
+    render_drawable_size(&pressW, &pressH);
+    const MouseState atPress = mouse_state();
+    if ((atPress.x != (pressW / 2)) || (atPress.y != (pressH / 2))) {
+      shutdown_all();
+      return false;
+    }
   }
 
   // The emulated cursor scales by the live drawable size, never a
@@ -413,6 +434,56 @@ bool test_mouse_emulation() noexcept {
   set_touch_mouse_emulation(false);
   shutdown_all();
   return true;
+}
+
+/// Records the phase of every touch event a test receives.
+struct CancelProbe final {
+  int cancelled = 0;
+  int ended = 0;
+};
+void cancel_probe_cb(const TouchEvent &event, void *userData) noexcept {
+  auto *probe = static_cast<CancelProbe *>(userData);
+  if (event.phase == TouchPhase::Cancelled) {
+    ++probe->cancelled;
+  } else if (event.phase == TouchPhase::Ended) {
+    ++probe->ended;
+  }
+}
+
+/// EXPECTATION (#538 item 3): an OS-cancelled finger releases its slot,
+/// reaches listeners as Cancelled (not Ended), lifts the emulated button,
+/// and leaves room for the next touch.
+bool test_finger_cancel_releases_slot() noexcept {
+  if (!init_all()) {
+    return false;
+  }
+  set_touch_mouse_emulation(true);
+  CancelProbe probe{};
+  if (!register_touch_callback(&cancel_probe_cb, &probe)) {
+    shutdown_all();
+    return false;
+  }
+  begin_input_frame();
+  sim_finger_down(7, 0.5F, 0.5F);
+  end_input_frame();
+  if ((active_touch_count() != 1U) || !is_mouse_button_down(0)) {
+    shutdown_all();
+    return false;
+  }
+  begin_input_frame();
+  sim_finger_cancel(7, 0.5F, 0.5F);
+  end_input_frame();
+  const bool released = (active_touch_count() == 0U);
+  const bool buttonUp = !is_mouse_button_down(0);
+  const bool sawCancel = (probe.cancelled == 1) && (probe.ended == 0);
+  // The slot is reusable.
+  begin_input_frame();
+  sim_finger_down(7, 0.25F, 0.25F);
+  end_input_frame();
+  const bool reusable = (active_touch_count() == 1U);
+  unregister_touch_callback(&cancel_probe_cb, &probe);
+  shutdown_all();
+  return released && buttonUp && sawCancel && reusable;
 }
 
 bool test_callback_register_unregister() noexcept {
@@ -497,6 +568,7 @@ int main() {
   run("swipe_gesture", &test_swipe_gesture);
   run("pinch_gesture", &test_pinch_gesture);
   run("mouse_emulation", &test_mouse_emulation);
+  run("finger_cancel_releases_slot", &test_finger_cancel_releases_slot);
   run("callback_register_unregister", &test_callback_register_unregister);
   run("null_edge_cases", &test_null_edge_cases);
 

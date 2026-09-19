@@ -9,7 +9,7 @@
 
 namespace engine::content {
 
-// Canonical 64-bit asset identity (issue #172 tracks GUID identity).
+// Canonical 64-bit asset identity.
 using AssetId = std::uint64_t;
 inline constexpr AssetId kInvalidAssetId = 0ULL;
 
@@ -17,7 +17,7 @@ inline constexpr AssetId kInvalidAssetId = 0ULL;
 enum class AssetState : std::uint8_t { Unloaded, Loading, Ready, Failed };
 
 /// 64-bit FNV-1a id from the canonicalized path (separators normalized to
-/// '/'); the one identity constructor shared by runtime and tools (#172).
+/// '/'); the one identity constructor shared by runtime and tools.
 AssetId make_asset_id_from_path(const char *path) noexcept;
 
 /// 64-bit content-hash id from the file bytes. When the file cannot be
@@ -90,7 +90,7 @@ inline bool asset_metadata_has_tag(const AssetMetadata *metadata,
 
 /// Adds a tag; false when full, args are invalid, or the tag text exceeds
 /// kMaxTagLength-1 characters (a truncated tag would silently alias
-/// queries, audit M-28).
+/// queries).
 inline bool asset_metadata_add_tag(AssetMetadata *metadata,
                                    const char *tag) noexcept {
   if ((metadata == nullptr) || (tag == nullptr) ||

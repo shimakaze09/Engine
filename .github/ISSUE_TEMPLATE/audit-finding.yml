@@ -1,9 +1,19 @@
-# Issue form for audit findings: severity, area, evidence, failure scenario, and closure requirements per the CLAUDE.md contract.
+# Issue form for audit findings: severity, area, evidence, failure scenario, and closure requirements per the close-finding skill.
 name: Audit finding
 description: A defect found by a code audit or review sweep (correctness, safety, security, determinism)
 title: "[Audit] <short defect statement>"
 labels: ["audit"]
 body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing: if this defect is one instance of a concept implemented
+        in several places, file the **consolidation** instead — name every
+        implementation and the gate that prevents the next copy. Instance
+        fixes on a duplicated primitive increase the work remaining.
+
+        P3 hygiene does not justify an issue of its own unless it is
+        genuinely blocking. See the defect budget (decision 0007).
   - type: dropdown
     id: severity
     attributes:
@@ -53,7 +63,7 @@ body:
     id: closure
     attributes:
       label: Closure requirements
-      description: Per CLAUDE.md's finding-closure contract — the regression that must be red on base and green on the fix, plus required boundary/fault-injection coverage. Partial fixes must link a follow-up issue for the remaining scope.
+      description: "Per the close-finding skill, tiered by severity. P0/P1: the regression that must be red on base and green on the fix, plus required boundary/fault-injection coverage. P2: a test that would have caught it. P3: none — fix it inside a change that already touches these files. Partial fixes link a follow-up issue for the remaining scope."
     validations:
       required: true
   - type: input

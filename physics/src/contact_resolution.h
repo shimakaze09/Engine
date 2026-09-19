@@ -33,7 +33,7 @@ float apply_velocity_impulse(RigidBody *bodyA, RigidBody *bodyB,
 /// Resolve a collision between two shapes given contact normal, overlap, and
 /// the contact point: positional correction plus velocity impulse. Also
 /// registers the pair as a 1-point entry in the persistent manifold cache
-/// (issue #123) keyed by the COLLIDER entities (compound children can differ
+/// keyed by the COLLIDER entities (compound children can differ
 /// from the owning body), so single-point contacts participate in
 /// relax_cached_contacts' outer iteration alongside clipped manifolds.
 void resolve_contact(PhysicsWorldView &world,
@@ -67,7 +67,7 @@ void record_single_point_contact_cache(
 /// primary narrow-phase resolve touched this frame, re-solving each cached
 /// point's normal impulse against the pair's CURRENT velocities. Lets
 /// corrections propagate through contact chains (stacks) within one step
-/// instead of only across successive frames' warm starts (issue #123).
+/// instead of only across successive frames' warm starts.
 /// Iterates the O(1) manifold cache's dense array directly -- never a
 /// per-pair scan.
 void relax_cached_contacts(
@@ -79,7 +79,7 @@ void relax_cached_contacts(
 /// including against static geometry; per-point Coulomb friction also
 /// brakes twist about the contact normal. Impulses warm-start from and
 /// write back to the pair's persistent manifold, keyed by the collider
-/// entities (issue #110).
+/// entities.
 void resolve_manifold_contact(
     PhysicsWorldView &world,
     const PhysicsWorldView::SimulationAccessToken &simToken,

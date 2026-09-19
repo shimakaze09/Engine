@@ -88,7 +88,10 @@ inline float dot(const Vec4 &lhs, const Vec4 &rhs) noexcept {
   __m128 b = _mm_load_ps(&rhs.x);
   return detail::sse2_hsum(_mm_mul_ps(a, b));
 #else
-  return (lhs.x * rhs.x) + (lhs.y * rhs.y) + (lhs.z * rhs.z) + (lhs.w * rhs.w);
+  // Pairwise, matching sse2_hsum's (xx + yy) + (zz + ww), so scalar and
+  // SSE2 builds round identically; engine_unit_math_parity pins this.
+  return ((lhs.x * rhs.x) + (lhs.y * rhs.y)) +
+         ((lhs.z * rhs.z) + (lhs.w * rhs.w));
 #endif
 }
 

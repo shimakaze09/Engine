@@ -194,7 +194,7 @@ CMAKE_CURRENT_VARIABLES = frozenset(
 #
 # Direction and private-header findings: (source file, included path).
 KNOWN_VIOLATIONS: dict[tuple[str, str], str] = {
-    # Sanctioned exception, recorded in CLAUDE.md rather than pending a
+    # Sanctioned exception, recorded in docs/architecture.md rather than pending a
     # fix: the editor generates its Inspector dispatch from the runtime's
     # X-macro component table so a new persistent component cannot skip
     # the Inspector (issue #156). Kept here, not hard-coded, so it stays

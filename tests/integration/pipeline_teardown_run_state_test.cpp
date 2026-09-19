@@ -178,6 +178,12 @@ int main() {
         engine::audio::load_sound("assets/sounds/pickup.wav");
     CHECK(probeSound != engine::audio::kInvalidSound, "load probe sound");
     CHECK(engine::audio::play_sound(probeSound, {}), "probe sound plays");
+    // A stored skin palette is renderer state that survives past the frame
+    // it was flushed in and gates the directional shadow cache off while
+    // any palette is present (#575 row 3).
+    engine::renderer::SkinPalette probePalette{};
+    probePalette.jointCount = 1U;
+    engine::renderer::set_skin_palettes(&probePalette, 1U);
     CHECK(ticking_frame(pipeline), "run A rendered frame");
 
     // Guard asserts: the run really dirtied every probe before teardown.
@@ -188,6 +194,8 @@ int main() {
     CHECK(engine::core::gameplay_axis_count() > 0U, "axes registered");
     CHECK(engine::renderer::renderer_get_last_frame_stats().drawCalls > 0U,
           "run A rendered draw calls");
+    CHECK(engine::renderer::skin_palette_count() == 1U,
+          "run A stored a skin palette");
 
     pipeline.teardown();
 
@@ -204,6 +212,8 @@ int main() {
           "teardown unloaded the scene sound");
     CHECK(engine::renderer::renderer_get_last_frame_stats().drawCalls == 0U,
           "teardown resets the public renderer state");
+    CHECK(engine::renderer::skin_palette_count() == 0U,
+          "teardown clears stored skin palettes");
   }
 
   // --- Run B: a second run in the same process starts and stays clean. ---

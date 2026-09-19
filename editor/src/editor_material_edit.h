@@ -99,7 +99,7 @@ bool material_editor_is_dirty() noexcept;
 // Discards the whole material editor state — open panel, buffer, asset id,
 // undo history, and any in-progress gesture — without pushing history.
 // Called on world rebind and editor shutdown, where the referenced asset
-// service is going away (#168); user-driven close goes through
+// service is going away; user-driven close goes through
 // request_close_material_editor.
 void reset_material_editor() noexcept;
 

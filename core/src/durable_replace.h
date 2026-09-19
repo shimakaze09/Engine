@@ -1,5 +1,5 @@
 // Declares the durable-replacement protocol every authored-file commit
-// runs (audit #338): the staged payload is flushed, synced and closed,
+// runs: the staged payload is flushed, synced and closed,
 // renamed over the destination, and the directory holding that entry is
 // synced, so the rename itself survives power loss instead of only the
 // bytes behind it. Its companion covers the step before — creating the
@@ -34,16 +34,18 @@ enum class ReplaceOutcome : std::uint8_t {
   ReplacedNotDurable,
   /// Renamed on a platform that exposes no directory-sync primitive, so
   /// the entry's durability is whatever the filesystem provides on its
-  /// own. Windows takes this path: its durable-rename equivalent
-  /// (MOVEFILE_WRITE_THROUGH / ReplaceFile) is not implemented here and
-  /// stays open scope on audit #338.
+  /// own. No supported platform reports this today; the branch stays
+  /// because a table may still declare the primitive absent, and the
+  /// protocol must keep saying so rather than claiming durability.
   ReplacedDurabilityUnavailable,
   /// The destination was never touched and the temporary was removed.
   Failed,
 };
 
 /// Directory handle held only between DirectoryOpen and DirectoryClose.
-using DirectoryHandle = int;
+/// Wide enough for a pointer because the Windows primitive is a HANDLE;
+/// the POSIX one is a file descriptor.
+using DirectoryHandle = std::intptr_t;
 /// Returned by open_parent_directory when the directory could not be
 /// opened; the replacement stands but is not proven durable.
 inline constexpr DirectoryHandle kInvalidDirectoryHandle = -1;
@@ -78,8 +80,8 @@ enum class CreateDirectoryOutcome : std::uint8_t {
   CreatedNotDurable,
   /// Segments were created on a platform that exposes no directory-sync
   /// primitive, so their entries' durability is whatever the filesystem
-  /// provides on its own. Windows takes this path, as it does for the
-  /// rename.
+  /// provides on its own. No supported platform reports this today; the
+  /// branch stays for a table that declares the primitive absent.
   CreatedDurabilityUnavailable,
   /// A segment could not be created, so the destination directory does
   /// not exist and no commit into it can succeed.
@@ -113,16 +115,25 @@ struct ReplaceOps {
   /// Discards the staged temporary after a failed or abandoned
   /// replacement.
   bool (*remove_file)(const char *path) noexcept;
+  /// True when rename_file itself lands the new directory entry on
+  /// storage, so the replacement is durable the moment it returns and
+  /// the parent-directory sync that POSIX needs afterwards would prove
+  /// nothing further. Windows sets it: MOVEFILE_WRITE_THROUGH does not
+  /// return until the move is on the disk. It governs only the
+  /// replacement — creating a directory has no equivalent flag, so that
+  /// half syncs the parent on both platforms.
+  bool rename_is_durable;
 };
 
 /// The operations the production commit path runs: mkdir (Windows:
 /// _mkdir), buffered-file flush, fsync (Windows: _commit), close, rename
-/// (Windows: a replace-existing MoveFileEx), unlink (Windows:
-/// DeleteFile), and — on POSIX — an O_RDONLY open plus fsync of the
-/// containing directory. Each is the platform primitive over the
-/// caller's char buffer, so none allocates: the table serves noexcept
-/// commit and abort paths whose contract is to report failure, not to
-/// terminate.
+/// (Windows: a replace-existing, write-through MoveFileEx), unlink
+/// (Windows: DeleteFile), and an open plus sync of the containing
+/// directory — O_RDONLY and fsync on POSIX, a writable
+/// FILE_FLAG_BACKUP_SEMANTICS handle and FlushFileBuffers on Windows.
+/// Each is the platform primitive over the caller's char buffer, so none
+/// allocates: the table serves noexcept commit and abort paths whose
+/// contract is to report failure, not to terminate.
 const ReplaceOps &production_replace_ops() noexcept;
 
 /// Creates every missing segment of directoryPath, syncing the parent
@@ -152,15 +163,14 @@ ReplaceOutcome durable_replace(std::FILE *file, const char *tempPath,
 /// names a bare file and "/" when it sits at the root. False (with dst
 /// left empty) when the arguments are null or the result does not fit.
 ///
-/// Resolves POSIX path shapes, which is all the protocol asks of it
-/// today: only the POSIX branch of open_parent_directory calls it. It
-/// splits on the platform's separators but does not model Windows
-/// roots, so the Windows implementation (issue #358) must supply its
-/// own handling for at least these shapes rather than inherit this one:
-/// "C:/x" yields "C:", the drive's current directory rather than its
-/// root; "C:x" has no separator and yields "."  — the current directory
-/// of a possibly different drive; and a UNC "\\server\share\x" yields
-/// "\\server\share", which is not a syncable directory handle.
+/// Resolves the Windows root shapes as well as POSIX ones, because both
+/// branches of open_parent_directory call it. On Windows "C:/x" yields
+/// "C:/" — the drive's root, not the bare "C:" that names the drive's
+/// current directory — and "C:x" yields "C:", that drive's current
+/// directory rather than the current drive's. A UNC "\\server\share\x"
+/// yields "\\server\share": the share root does hold the entry, and
+/// whether it can be opened and synced is the filesystem's answer to
+/// give, reported as a degraded outcome rather than assumed.
 bool parent_directory_of(char *dst, std::size_t dstCapacity,
                          const char *filePath) noexcept;
 
