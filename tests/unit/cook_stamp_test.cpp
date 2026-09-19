@@ -251,12 +251,11 @@ int check_overlong_output_path_refuses_the_stamp() {
     // (260), macOS past PATH_MAX (1024) — cannot hold the file this case
     // needs. Calling the writer anyway would prove nothing: it would
     // refuse the stamp for the missing output, not for the line length.
-    const bool pathTooLong =
-        (ec == std::errc::filename_too_long) || (errno == ENAMETOOLONG);
 #ifdef _WIN32
     const bool refusedByFilesystem = true;
 #else
-    const bool refusedByFilesystem = pathTooLong;
+    const bool refusedByFilesystem =
+        (ec == std::errc::filename_too_long) || (errno == ENAMETOOLONG);
 #endif
     if (refusedByFilesystem) {
       std::printf("cook_stamp_test: overlong-output case not run: this "
