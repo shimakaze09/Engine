@@ -1321,6 +1321,22 @@ engine_add_test_executable(engine_unit_forward_light_selection
     engine_math
 )
 
+# Compiles the resource TUs directly so the test's render_device() is the
+# device they create through.
+engine_add_test_executable(engine_unit_render_target_wrap
+    SOURCES
+    render_target_wrap_test.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_post_resources.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_context.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/pass_resources.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/renderer/include
+    ${CMAKE_SOURCE_DIR}/renderer/src
+    PRIVATE_DEPS
+    engine_core
+    engine_math
+)
+
 engine_add_test_executable(engine_unit_shadow_caster_flush
     SOURCES
     shadow_caster_flush_test.cpp
