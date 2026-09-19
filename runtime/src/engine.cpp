@@ -297,8 +297,11 @@ bool bootstrap(const EngineConfig &config) noexcept {
     }
   }
 
+  audio::AudioConfig audioConfig{};
+  audioConfig.nullDevice = g_activeConfig.audioNullDevice ||
+                           g_activeConfig.core.platform.headless;
   if (consume_injected_failure(BootstrapStage::Audio) ||
-      !audio::initialize_audio()) {
+      !audio::initialize_audio(audioConfig)) {
     core::log_message(core::LogLevel::Error, "audio",
                       "failed to initialize audio");
     return fail_bootstrap();

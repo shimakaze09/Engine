@@ -3,6 +3,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 
 #include "engine/core/allocator.h"
 #include "engine/core/platform.h"
@@ -13,6 +14,9 @@ namespace engine::core {
 struct CoreConfig final {
   std::size_t frameAllocatorBytes = 1024U * 1024U;
   bool initializePlatform = true;
+  /// Job-system worker threads beside the main thread; 0 picks one per
+  /// hardware thread minus the main thread.
+  std::uint32_t workerThreads = 0U;
   PlatformConfig platform{};
 };
 

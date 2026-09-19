@@ -11,7 +11,9 @@
 #include <cstring>
 #include <filesystem>
 
+#include "engine/audio/audio.h"
 #include "engine/core/bootstrap.h"
+#include "engine/core/job_system.h"
 #include "engine/engine.h"
 #include "engine/runtime/editor_bridge.h"
 
@@ -171,6 +173,20 @@ int main() {
     check(g_bridgeInitialized == initialized,
           "the refused bootstrap opened nothing");
     engine::shutdown();
+  }
+
+  // --- Headless is honoured by every tier the config can reach ---
+  {
+    engine::EngineConfig config = headless_config(false);
+    config.core.workerThreads = 1U;
+    check(engine::bootstrap(config), "headless bootstrap with one worker");
+    check(engine::core::thread_count() == 2U,
+          "the configured worker count is the job system's (plus main)");
+    check(engine::audio::audio_uses_null_device(),
+          "headless mixes audio into no device");
+    engine::shutdown();
+    check(!engine::audio::audio_uses_null_device(),
+          "shutdown closes the device-less audio engine");
   }
 
   // --- Exit codes name every outcome distinctly ---

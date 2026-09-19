@@ -142,7 +142,9 @@ bool initialize_core(const CoreConfig &config) noexcept {
 
     const std::uint32_t hardwareThreads = std::thread::hardware_concurrency();
     const std::uint32_t workerThreads =
-        (hardwareThreads > 1U) ? (hardwareThreads - 1U) : 0U;
+        (config.workerThreads > 0U)
+            ? config.workerThreads
+            : ((hardwareThreads > 1U) ? (hardwareThreads - 1U) : 0U);
     if (!initialize_job_system(workerThreads)) {
       failureMessage = "failed to initialize job system";
       break;

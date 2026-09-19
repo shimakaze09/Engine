@@ -199,6 +199,7 @@ engine_add_test_executable(engine_integration_engine_bootstrap_rollback
     engine_bootstrap_rollback_test.cpp
     PRIVATE_DEPS
     engine_runtime
+    engine_audio
     LABELS
     integration
 )

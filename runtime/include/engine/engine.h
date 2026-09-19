@@ -23,6 +23,9 @@ struct EngineConfig final {
   /// to the back buffer. ENGINE_PLAYER=1 in the environment also enables
   /// it (the web share page's default).
   bool playerMode = false;
+  /// Mix audio into no device; a headless platform forces this on, the
+  /// way it forces the null render device.
+  bool audioNullDevice = false;
 };
 
 /// Outcome of engine::run for process exit-code mapping.
