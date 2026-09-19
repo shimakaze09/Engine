@@ -14,10 +14,12 @@
 #include <atomic>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 
 #ifdef _WIN32
 #include <process.h>
 #else
+#include <sys/stat.h>
 #include <unistd.h>
 #endif
 
@@ -43,6 +45,55 @@ unsigned long current_process_id() noexcept {
 
 AtomicFileWriter::~AtomicFileWriter() noexcept { abort(); }
 
+namespace {
+
+/// Follows a symlinked destination to the file it names (a bounded
+/// chain, relative targets resolved against the link's directory), so
+/// the replacement lands on that file and the link survives (#572). A
+/// destination that is not a link, or a chain that cannot be read,
+/// resolves to itself.
+bool resolve_symlinked_destination(const char *destinationPath, char *out,
+                                   std::size_t outCapacity) noexcept {
+  std::error_code ec{};
+  std::filesystem::path current(destinationPath);
+  for (int hop = 0; (hop < 8) && std::filesystem::is_symlink(current, ec) && !ec;
+       ++hop) {
+    std::filesystem::path target = std::filesystem::read_symlink(current, ec);
+    if (ec) {
+      break;
+    }
+    if (target.is_relative()) {
+      target = current.parent_path() / target;
+    }
+    current = target;
+  }
+  const std::string resolved = current.string();
+  if (resolved.size() >= outCapacity) {
+    return false;
+  }
+  std::memcpy(out, resolved.c_str(), resolved.size() + 1U);
+  return true;
+}
+
+/// Carries the destination's permission bits onto the staged temporary
+/// before any byte is written, so a file the author restricted (chmod
+/// 600) comes back restricted (#572). Best effort: a destination that
+/// does not exist yet takes the process default, and Windows has no
+/// equivalent bits on the temporary.
+void inherit_destination_mode(const char *destination, std::FILE *file) noexcept {
+#ifdef _WIN32
+  static_cast<void>(destination);
+  static_cast<void>(file);
+#else
+  struct stat info{};
+  if ((::stat(destination, &info) == 0) && S_ISREG(info.st_mode)) {
+    static_cast<void>(::fchmod(fileno(file), info.st_mode & 07777U));
+  }
+#endif
+}
+
+} // namespace
+
 // Member state is committed only after every validation and the open
 // succeed, so a refused begin can never arm cleanup with a truncated
 // path that aliases the destination or an unrelated file.
@@ -52,11 +103,8 @@ bool AtomicFileWriter::begin(const char *destinationPath) noexcept {
   }
 
   char destination[sizeof(m_destinationPath)] = {};
-  const int destinationFormatted =
-      std::snprintf(destination, sizeof(destination), "%s", destinationPath);
-  if ((destinationFormatted <= 0) ||
-      (static_cast<std::size_t>(destinationFormatted) >=
-       sizeof(destination))) {
+  if (!resolve_symlinked_destination(destinationPath, destination,
+                                     sizeof(destination))) {
     return false;
   }
 
@@ -64,7 +112,7 @@ bool AtomicFileWriter::begin(const char *destinationPath) noexcept {
       g_tempSerial.fetch_add(1U, std::memory_order_relaxed);
   char temp[sizeof(m_tempPath)] = {};
   const int tempFormatted =
-      std::snprintf(temp, sizeof(temp), "%s.new.%lu.%u", destinationPath,
+      std::snprintf(temp, sizeof(temp), "%s.new.%lu.%u", destination,
                     current_process_id(), serial);
   if ((tempFormatted <= 0) ||
       (static_cast<std::size_t>(tempFormatted) >= sizeof(temp))) {
@@ -82,6 +130,7 @@ bool AtomicFileWriter::begin(const char *destinationPath) noexcept {
   if (file == nullptr) {
     return false;
   }
+  inherit_destination_mode(destination, file);
 
   std::memcpy(m_destinationPath, destination, sizeof(m_destinationPath));
   std::memcpy(m_tempPath, temp, sizeof(m_tempPath));

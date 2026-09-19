@@ -11,6 +11,10 @@
 #include <memory>
 #include <string>
 
+#ifndef _WIN32
+#include <sys/stat.h>
+#endif
+
 namespace {
 
 constexpr const char *kPath = "atomic_file_test_tmp.json";
@@ -123,6 +127,84 @@ int check_failed_write_preserves_destination() {
 /// EXPECTATION: a rename that cannot replace its destination (a
 /// directory) fails, leaves the destination untouched, and removes the
 /// temporary.
+#ifndef _WIN32
+/// EXPECTATION (#572): a destination the author restricted keeps its
+/// permission bits across a replacement, and an abandoned replacement
+/// (written, never renamed) leaves both its bytes and its bits alone.
+int check_destination_mode_survives() {
+  cleanup();
+  if (!engine::core::atomic_write_file(kPath, "secret", 6U) ||
+      (::chmod(kPath, 0600) != 0)) {
+    return 60;
+  }
+  if (!engine::core::atomic_write_file(kPath, "secret v2", 9U)) {
+    return 61;
+  }
+  struct stat info{};
+  if ((::stat(kPath, &info) != 0) || ((info.st_mode & 0777U) != 0600U)) {
+    std::printf("mode after replacement: %o (expected 600)\n",
+                static_cast<unsigned>(info.st_mode & 0777U));
+    return 62;
+  }
+  if (read_all(kPath) != "secret v2") {
+    return 63;
+  }
+  {
+    engine::core::AtomicFileWriter writer{};
+    if (!writer.begin(kPath) || !writer.write("abandoned", 9U)) {
+      return 64;
+    }
+    writer.abort();
+  }
+  if ((::stat(kPath, &info) != 0) || ((info.st_mode & 0777U) != 0600U) ||
+      (read_all(kPath) != "secret v2") ||
+      (leftover_temporaries(kTempPrefix) != 0U)) {
+    return 65;
+  }
+  return 0;
+}
+
+/// EXPECTATION (#572): a symlinked destination is written through: the
+/// target receives the bytes, the link stays a link, and no temporary is
+/// left beside either.
+int check_symlink_written_through() {
+  cleanup();
+  const char *target = "atomic_file_test_link_target.json";
+  const char *link = "atomic_file_test_link.json";
+  std::error_code ec{};
+  std::filesystem::remove(target, ec);
+  std::filesystem::remove(link, ec);
+  if (!engine::core::atomic_write_file(target, "old", 3U)) {
+    return 70;
+  }
+  std::filesystem::create_symlink(target, link, ec);
+  if (ec) {
+    return 71;
+  }
+  const bool wrote = engine::core::atomic_write_file(link, "through", 7U);
+  const bool stillLink = std::filesystem::is_symlink(link, ec) && !ec;
+  const std::string targetBytes = read_all(target);
+  const std::size_t leftovers =
+      leftover_temporaries("atomic_file_test_link.json.new") +
+      leftover_temporaries("atomic_file_test_link_target.json.new");
+  std::filesystem::remove(link, ec);
+  std::filesystem::remove(target, ec);
+  if (!wrote) {
+    return 72;
+  }
+  if (!stillLink) {
+    return 73; // the link was replaced by a plain file
+  }
+  if (targetBytes != "through") {
+    return 74;
+  }
+  if (leftovers != 0U) {
+    return 75;
+  }
+  return 0;
+}
+#endif
+
 int check_rename_failure_cleans_temporary() {
   const char *directoryTarget = "atomic_file_test_dir_target";
   std::error_code ec{};
@@ -289,6 +371,14 @@ int check_overlong_temp_path_leaves_destination() {
 
 int main() {
   int result = check_fresh_write();
+#ifndef _WIN32
+  if (result == 0) {
+    result = check_destination_mode_survives();
+  }
+  if (result == 0) {
+    result = check_symlink_written_through();
+  }
+#endif
   if (result == 0) {
     result = check_overwrite();
   }
