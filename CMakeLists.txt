@@ -148,29 +148,12 @@ endif()
 
 message(STATUS "ENGINE_TARGET_PLATFORM: ${ENGINE_TARGET_PLATFORM}")
 
-# ---- Directory-global compile flags ----
-# Declared before the first FetchContent_MakeAvailable so they reach the
-# third-party targets too. add_compile_options applies only to targets
-# created after the call, and a fetched dependency snapshots the
-# directory's options when its subdirectory is added: with these blocks
-# below the bgfx and SDL3 fetches, the sanitizer and determinism flags
-# reached lua, imgui, cgltf and stb but silently skipped the two largest
-# third-party targets, so the ASAN/UBSAN lane was not instrumenting them.
-option(ENGINE_DETERMINISTIC_FLOATS "Enable strict floating-point determinism flags" ON)
-if(ENGINE_DETERMINISTIC_FLOATS)
-    if(MSVC)
-        add_compile_options(/fp:strict)
-    else()
-        add_compile_options(-ffp-contract=off -fno-fast-math)
-        if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-            add_compile_options(-fexcess-precision=standard)
-        endif()
-    endif()
-    message(STATUS "ENGINE_DETERMINISTIC_FLOATS: strict floating-point flags enabled")
-endif()
-
 # ---- Sanitizer lane (ASAN + UBSAN; GCC/Clang only) ----
 # Enable with: cmake -S . -B build -DENGINE_SANITIZERS=ON
+# Declared before the first FetchContent_MakeAvailable so the
+# instrumentation reaches bgfx and SDL3 too: add_compile_options applies
+# only to targets created after the call, and a fetched dependency
+# snapshots the directory's options when its subdirectory is added.
 option(ENGINE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 if(ENGINE_SANITIZERS)
     if(MSVC)
@@ -326,6 +309,24 @@ if(NOT ENGINE_MAX_ENTITIES MATCHES "^[0-9]+$" OR
 endif()
 
 add_compile_definitions(ENGINE_MAX_ENTITIES=${ENGINE_MAX_ENTITIES})
+
+# Strict floating point is the simulation's contract, so it covers the
+# engine and the Lua VM that game scripts run on, which are declared after
+# this point. bgfx and SDL3 are fetched above it on purpose: neither feeds
+# the simulation, and MSVC's C front end rejects SDL's static float
+# initializers under /fp:strict.
+option(ENGINE_DETERMINISTIC_FLOATS "Enable strict floating-point determinism flags" ON)
+if(ENGINE_DETERMINISTIC_FLOATS)
+    if(MSVC)
+        add_compile_options(/fp:strict)
+    else()
+        add_compile_options(-ffp-contract=off -fno-fast-math)
+        if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+            add_compile_options(-fexcess-precision=standard)
+        endif()
+    endif()
+    message(STATUS "ENGINE_DETERMINISTIC_FLOATS: strict floating-point flags enabled")
+endif()
 
 if(MSVC)
     foreach(_engine_flag_var

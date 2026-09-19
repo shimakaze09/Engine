@@ -160,12 +160,14 @@ MSVC/GCC compatibility lanes.
 | `ENGINE_BUILD_TESTS` | `ON` | CTest suites |
 | `ENGINE_BUILD_TOOLS` | `ON` | `asset_packer` and the generators |
 
-Determinism and sanitizer flags are declared before the first
-`FetchContent_MakeAvailable`, so they reach the third-party targets as
-well as the engine's own — `add_compile_options` applies only to targets
-created after it. The per-target warning and conformance flags are applied
-by `engine_apply_strict_compile_options` in `cmake/EngineHelpers.cmake`,
-so third-party `FetchContent` targets never inherit those.
+Sanitizer flags are declared before the first `FetchContent_MakeAvailable`,
+so they instrument bgfx and SDL3 as well as the engine's own targets;
+`add_compile_options` applies only to targets created after it. The
+determinism flags are declared after those two fetches: they cover the
+engine and the Lua VM, which the simulation depends on, and not bgfx or
+SDL3. The per-target warning and conformance flags are applied by
+`engine_apply_strict_compile_options` in `cmake/EngineHelpers.cmake`, so
+third-party `FetchContent` targets never inherit those.
 
 On Linux, bgfx's CMake requires the OpenGL and X11/Wayland development
 headers; `.github/scripts/install-linux-deps.sh` installs the set CI uses.
