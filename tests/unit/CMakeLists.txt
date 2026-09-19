@@ -1366,6 +1366,7 @@ engine_add_test_executable(engine_unit_light_culling
     light_culling_test.cpp
     PRIVATE_DEPS
     engine_renderer
+    engine_core
     engine_math
 )
 

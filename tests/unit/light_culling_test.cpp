@@ -2,8 +2,11 @@
 
 #include <cmath>
 #include <cstddef>
+#include <cstdio>
+#include <cstring>
 #include <vector>
 
+#include "engine/core/logging.h"
 #include "engine/renderer/command_buffer.h"
 #include "engine/math/transform.h"
 #include "engine/renderer/light_culling.h"
@@ -738,10 +741,91 @@ int verify_tile_texture_layout() {
   return 0;
 }
 
-} // namespace
+// ---------------------------------------------------------------------------
+// Test 9: The per-tile cap — a tile holds 32 point and 16 spot lights
+// (issue #565 row 3). Past that a light is dropped from that tile, which
+// dims it; on base nothing said so.
+// ---------------------------------------------------------------------------
 
-/// Runs this executable or test program.
-int main() {
+/// Counts the culler's tile-cap report among the log lines of a run.
+struct TileCapLog final {
+  int reports = 0;
+};
+
+void count_tile_cap_reports(engine::core::LogLevel level, const char *channel,
+                            const char *message, void *userData) noexcept {
+  auto *log = static_cast<TileCapLog *>(userData);
+  if ((log != nullptr) && (level == engine::core::LogLevel::Warning) &&
+      (channel != nullptr) && (std::strcmp(channel, "renderer") == 0) &&
+      (message != nullptr) &&
+      (std::strstr(message, "tile light cap reached") != nullptr)) {
+    ++log->reports;
+  }
+}
+
+/// Forty point lights and twenty spot lights, all centred in front of a
+/// one-tile view with a radius that covers it: eight point and four spot
+/// lights past what the tile holds.
+int verify_tile_cap_keeps_the_first_lights() {
+  engine::renderer::SceneLightData lights{};
+  lights.pointLightCount = 40U;
+  lights.spotLightCount = 20U;
+  for (std::size_t i = 0U; i < 40U; ++i) {
+    lights.pointLights[i].position = engine::math::Vec3(0.0F, 0.0F, -5.0F);
+    lights.pointLights[i].radius = 50.0F;
+  }
+  for (std::size_t i = 0U; i < 20U; ++i) {
+    lights.spotLights[i].position = engine::math::Vec3(0.0F, 0.0F, -5.0F);
+    lights.spotLights[i].radius = 50.0F;
+  }
+
+  constexpr int kSize = engine::renderer::kTileSize; // exactly one tile
+  const float view[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+  const float proj[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, -1, -1, 0, 0, -1, 0};
+  std::vector<float> buffer(
+      engine::renderer::compute_tile_buffer_size(kSize, kSize), -1.0F);
+  engine::renderer::TileLightData tiles{};
+  tiles.data = buffer.data();
+  tiles.dataSize = buffer.size();
+
+  // Twice: the report is for the run, not for every frame that overflows.
+  for (int frame = 0; frame < 2; ++frame) {
+    if (!engine::renderer::cull_lights_tiled(lights, view, proj, kSize, kSize,
+                                             tiles)) {
+      return 900;
+    }
+  }
+  if (tiles.totalTiles != 1) {
+    return 901;
+  }
+
+  // The tile is full, not overfull, and holds the lowest-indexed lights in
+  // order: which lights a crowded tile keeps is a function of the scene.
+  const int pointCap = engine::renderer::kMaxPointLightsPerTile;
+  const int spotCap = engine::renderer::kMaxSpotLightsPerTile;
+  if (static_cast<int>(buffer[0]) != pointCap) {
+    return 902;
+  }
+  for (int i = 0; i < pointCap; ++i) {
+    if (static_cast<int>(buffer[static_cast<std::size_t>(1 + i)]) != i) {
+      return 903;
+    }
+  }
+  const std::size_t spotBase = static_cast<std::size_t>(1 + pointCap);
+  if (static_cast<int>(buffer[spotBase]) != spotCap) {
+    return 904;
+  }
+  for (int i = 0; i < spotCap; ++i) {
+    if (static_cast<int>(buffer[spotBase + 1U + static_cast<std::size_t>(i)]) !=
+        i) {
+      return 905;
+    }
+  }
+  return 0;
+}
+
+/// Every case but the tile cap's, in the order they have always run.
+int run_cases() {
   int result = verify_empty_scene_culling();
   if (result != 0) {
     return result;
@@ -778,4 +862,45 @@ int main() {
   }
 
   return verify_tile_texture_layout();
+}
+
+} // namespace
+
+/// Runs this executable or test program.
+int main() {
+  // The tile-cap report is latched for the run, and the stress case below
+  // overflows tiles too, so the sink listens from the start and the count
+  // is taken at the end: however many cases and frames overflowed, the run
+  // says so exactly once.
+  TileCapLog tileCapLog{};
+  const bool loggingReady = engine::core::initialize_logging();
+  const bool sinkReady =
+      loggingReady &&
+      engine::core::log_register_sink(&count_tile_cap_reports, &tileCapLog);
+
+  int result = run_cases();
+  if (result == 0) {
+    result = verify_tile_cap_keeps_the_first_lights();
+  }
+
+  if (sinkReady) {
+    engine::core::log_unregister_sink(&count_tile_cap_reports, &tileCapLog);
+  }
+  if (loggingReady) {
+    engine::core::shutdown_logging();
+  }
+  if (result != 0) {
+    return result;
+  }
+  if (!sinkReady) {
+    return 910;
+  }
+  // On base the drop was silent: zero reports.
+  if (tileCapLog.reports != 1) {
+    std::fprintf(stderr, "light_culling_test: the tile cap was reported %d "
+                         "times in the run, expected once\n",
+                 tileCapLog.reports);
+    return 911;
+  }
+  return 0;
 }
