@@ -431,7 +431,7 @@ jobs:
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DENGINE_BGFX_SHADERC=OFF
 
       - name: Build (will fail on any warning due to -Werror)
-        run: cmake --build build --config Release --parallel
+        run: cmake --build build --config Release --parallel 4
 
   sanitizers:
     name: ASAN+UBSAN
@@ -466,7 +466,7 @@ jobs:
           -DENGINE_BUILD_TESTS=ON
 
       - name: Build
-        run: cmake --build build --parallel
+        run: cmake --build build --parallel 4
 
       - name: Test under sanitizers
         env:
@@ -511,7 +511,7 @@ jobs:
           -DENGINE_BUILD_TESTS=ON
 
       - name: Build
-        run: cmake --build build --parallel
+        run: cmake --build build --parallel 4
 
       - name: Test under TSAN
         env:
@@ -554,7 +554,7 @@ jobs:
           -DENGINE_BUILD_TESTS=ON
 
       - name: Build
-        run: cmake --build build --parallel
+        run: cmake --build build --parallel 4
 
       - name: Test
         run: ctest --test-dir build --output-on-failure --timeout 120 --label-exclude gpu
