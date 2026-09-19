@@ -17,7 +17,8 @@ updates the comments that describe it.
 Two mechanical gates back this up:
 `tools/check_source_comments.py` (file-level comment presence) and
 `tools/check_comment_quality.py` (filler patterns, commented-out code,
-untracked TODOs). Both must report zero findings. Everything else here is
+untracked TODOs, issue numbers outside a tracked marker). Both must report
+zero findings. Everything else here is
 judgement, checked in review.
 
 ## Required
@@ -92,7 +93,9 @@ better name or a smaller function instead.
 ## Markers
 
 Exactly six, and issue numbers appear in code only inside the first two
-(plus regression provenance in tests):
+(plus regression provenance in tests). A comment names what the code does
+and why it must hold; a reader with only the source cannot follow an
+issue number, and the tracker already holds it. The gate rejects it:
 
 | Marker | Use |
 | --- | --- |

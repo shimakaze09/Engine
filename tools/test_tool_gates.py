@@ -776,9 +776,9 @@ def write_comment_fixture(root, rel, body):
 def test_comment_quality_gate():
     """The comment gate must flag every objective class — filler, doc
     comments attached to the wrong line, commented-out code, untracked
-    TODOs — accept prose and tracked markers, keep a documented data
-    format out of the commented-out-code class, and pass this checkout
-    with no allowlist."""
+    TODOs, issue numbers outside a tracked marker — accept prose and
+    tracked markers, keep a documented data format out of the
+    commented-out-code class, and pass this checkout with no allowlist."""
     script = str(TOOLS / "check_comment_quality.py")
     header = "// Purpose comment.\n"
 
@@ -834,15 +834,38 @@ def test_comment_quality_gate():
             tmp / "cmake_code", "CMakeLists.txt",
             "# Build options.\n# set(ENGINE_OLD ON)\nproject(x)\n"))]) != 0,
               "comments: a commented-out CMake command is a finding")
-        # Comment prose — issue numbers, dates, loose wording — is
-        # authoring-time guidance in the `comment` skill, not a gate. A
-        # shared per-file allowlist for it serialized every concurrent
-        # change on one file (docs/decisions/0006, 0009).
+        # Comment prose — dates, loose wording, history — is authoring-time
+        # guidance in the `comment` skill, not a gate. A shared per-file
+        # allowlist for it serialized every concurrent change on one file
+        # (docs/decisions/0006, 0009).
         check(run([script, "--root", case(
             "prose", "core/src/a.cpp",
-            "// Rebuilt for the #301 arrays; formerly a map, 2026-08-22.\n"
+            "// Rebuilt as arrays; formerly a map, 2026-08-22.\n"
             "int a;\n")]) == 0,
               "comments: comment prose is not mechanically policed")
+        # An issue number is the one prose token a machine can judge: outside
+        # TODO(#n)/FIXME(#n) it points a reader at the tracker instead of
+        # describing the code, and the rule needs no allowlist.
+        check(run([script, "--root", case(
+            "issue_ref", "core/src/a.cpp",
+            "// Rebuilt for the #301 arrays.\nint a;\n")]) != 0,
+              "comments: an issue number outside a tracked marker is a finding")
+        check(run([script, "--root", case(
+            "issue_ref_doc", "core/include/engine/core/a.h",
+            "/// Bounded since #86 L-01.\nvoid f();\n")]) != 0,
+              "comments: an issue number in a doc comment is a finding")
+        check(run([script, "--root", str(write_comment_fixture(
+            tmp / "issue_ref_cmake", "CMakeLists.txt",
+            "# Pinned per #310.\nproject(x)\n"))]) != 0,
+              "comments: an issue number in a CMake comment is a finding")
+        check(run([script, "--root", case(
+            "issue_ref_test", "tests/unit/a_test.cpp",
+            "// Regression for #301: the map must stay bounded.\nint a;\n")]) == 0,
+              "comments: a test may cite the issue it reproduces")
+        check(run([script, "--root", case(
+            "small_number", "core/src/a.cpp",
+            "// Slot #3 is the fallback.\nint a;\n")]) == 0,
+              "comments: a one-digit ordinal is not an issue reference")
         check(run([script, "--root", str(tmp / "empty")]) == 0,
               "comments: an empty tree passes")
 

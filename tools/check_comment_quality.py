@@ -11,6 +11,9 @@ for meaning, so it has no allowlist and every finding is a defect:
   misplaced-initlist   /// directly above a constructor init-list line
   commented-out-code    statements or CMake commands committed as comments
   vague-todo           TODO/FIXME without a tracked issue
+  issue-reference      an issue number outside TODO(#n)/FIXME(#n), in any
+                       file not under tests/ (a regression test may cite
+                       the issue it reproduces)
 
 Comment *prose* quality — whether a comment narrates history, reads as a
 temporary note, or is worded loosely — is authoring-time guidance in the
@@ -81,6 +84,11 @@ CMAKE_CODE_RE = re.compile(
 
 # A tracked marker cites its issue; a bare TODO/FIXME is untracked work.
 VAGUE_TODO_RE = re.compile(r"\b(TODO|FIXME)\b(?!\(#\d+\))")
+
+# Anywhere else an issue number is history, not a description of the code:
+# a reader of the source cannot follow it, and the tracker already holds
+# it. Tests are exempt so a regression test can name what it reproduces.
+ISSUE_REF_RE = re.compile(r"(?<!TODO\()(?<!FIXME\()#\d{2,}\b")
 
 
 @dataclass(frozen=True)
@@ -179,6 +187,7 @@ def audit_file(path: pathlib.Path, rel: str) -> list[Finding]:
     cmake = is_cmake(path)
     if not cmake:
         findings.extend(audit_doc_comments(lines, rel))
+    in_tests = rel.startswith("tests/")
 
     comments = cmake_comment_lines(lines) if cmake else cpp_comment_lines(lines)
     for index, text, full in comments:
@@ -193,6 +202,10 @@ def audit_file(path: pathlib.Path, rel: str) -> list[Finding]:
             )
         if VAGUE_TODO_RE.search(text):
             findings.append(Finding(rel, line_no, "vague-todo", text.strip()))
+        if not in_tests and ISSUE_REF_RE.search(text):
+            findings.append(
+                Finding(rel, line_no, "issue-reference", text.strip())
+            )
     return findings
 
 
