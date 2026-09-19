@@ -514,6 +514,51 @@ bool test_persisted_bindings_outrank_script_defaults() noexcept {
   return !overwritten && defaulted;
 }
 
+/// EXPECTATION (#538 item 2): a document whose numbers are outside what
+/// the mapper can hold is refused whole, and the current bindings stay.
+bool test_out_of_range_numbers_rejected() noexcept {
+  if (!init_all()) {
+    return false;
+  }
+  InputBinding binding{};
+  binding.type = InputBindingType::Key;
+  binding.code = kKey_Space;
+  add_input_action("jump", &binding, 1U);
+
+  const char *rejected[] = {
+      "{\"actions\":[],\"axes\":[{\"name\":\"m\",\"sources\":[{\"type\":2,"
+      "\"dead_zone\":1e30}]}]}",
+      "{\"actions\":[],\"axes\":[{\"name\":\"m\",\"sources\":[{\"type\":2,"
+      "\"dead_zone\":-0.5}]}]}",
+      "{\"actions\":[],\"axes\":[{\"name\":\"m\",\"sources\":[{\"type\":0,"
+      "\"negative_key\":4000000000}]}]}",
+      "{\"actions\":[],\"axes\":[{\"name\":\"m\",\"sources\":[{\"type\":0,"
+      "\"scale\":1e9}]}]}",
+      "{\"actions\":[{\"name\":\"a\",\"bindings\":[{\"type\":0,"
+      "\"code\":4000000000}]}],\"axes\":[]}",
+      "{\"actions\":[{\"name\":\"a\",\"bindings\":[{\"type\":2,\"code\":1,"
+      "\"axis_threshold\":50.0}]}],\"axes\":[]}",
+  };
+  for (const char *doc : rejected) {
+    if (load_input_bindings_from_buffer(doc, std::strlen(doc))) {
+      shutdown_all();
+      return false;
+    }
+  }
+  begin_input_frame();
+  sim_key_down(kKey_Space);
+  end_input_frame();
+  const bool kept = is_mapped_action_down("jump");
+  // A document within range still loads.
+  const char *accepted =
+      "{\"actions\":[],\"axes\":[{\"name\":\"m\",\"sources\":[{\"type\":2,"
+      "\"axis_index\":1,\"scale\":-1.0,\"dead_zone\":0.25}]}]}";
+  const bool loaded = load_input_bindings_from_buffer(accepted,
+                                                      std::strlen(accepted));
+  shutdown_all();
+  return kept && loaded;
+}
+
 bool test_save_load_roundtrip() noexcept {
   if (!init_all()) {
     return false;
@@ -1390,6 +1435,7 @@ int main() {
   run("rebind_action", &test_rebind_action);
   run("persisted_bindings_outrank_script_defaults",
       &test_persisted_bindings_outrank_script_defaults);
+  run("out_of_range_numbers_rejected", &test_out_of_range_numbers_rejected);
   run("save_load_roundtrip", &test_save_load_roundtrip);
   run("file_round_trip_and_default_path",
       &test_file_round_trip_and_default_path);
