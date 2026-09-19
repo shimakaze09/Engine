@@ -407,16 +407,24 @@ void touch_process_event(const void *nativeEvent) noexcept {
     break;
   }
 
+  // An OS-cancelled touch (palm rejection, a system gesture, an app
+  // switch) ends like a lift: the slot is released, listeners see
+  // Cancelled, and the emulated button comes up, so no finger can stay
+  // held forever (#538). No tap or swipe is recognized from it.
+  case SDL_EVENT_FINGER_CANCELED:
   case SDL_EVENT_FINGER_UP: {
+    const bool cancelled = (event->type == SDL_EVENT_FINGER_CANCELED);
     const auto fingerId = static_cast<std::int64_t>(event->tfinger.fingerID);
     ActiveTouch *touch = find_touch(fingerId);
     if (touch != nullptr) {
       touch->x = event->tfinger.x;
       touch->y = event->tfinger.y;
-      touch->phase = TouchPhase::Ended;
+      touch->phase = cancelled ? TouchPhase::Cancelled : TouchPhase::Ended;
 
-      try_recognize_tap(*touch);
-      try_recognize_swipe(*touch);
+      if (!cancelled) {
+        try_recognize_tap(*touch);
+        try_recognize_swipe(*touch);
+      }
 
       touch->active = false;
     }
@@ -431,7 +439,7 @@ void touch_process_event(const void *nativeEvent) noexcept {
     te.x = event->tfinger.x;
     te.y = event->tfinger.y;
     te.pressure = 0.0F;
-    te.phase = TouchPhase::Ended;
+    te.phase = cancelled ? TouchPhase::Cancelled : TouchPhase::Ended;
     fire_touch_callbacks(te);
 
     if (g_mouseEmulation && (touch == &g_touches[0])) {
