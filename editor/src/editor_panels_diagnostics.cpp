@@ -130,8 +130,8 @@ void draw_stats_panel(const core::EngineStats &stats) noexcept {
               static_cast<double>(stats.jobUtilizationPct));
 
   ImGui::Separator();
-  // Scene-wide authored-camera status (issue #161 acceptance: "reports
-  // conflicts/no-camera states clearly"), independent of any selection --
+  // Scene-wide authored-camera status (conflicts and the no-camera
+  // state), independent of any selection --
   // computed from CameraComponents directly so it reads correctly in Edit
   // mode too, not only while CameraManager is populated during Play.
   if (editor_session().world != nullptr) {

@@ -1,6 +1,6 @@
 // Implements the editor's scene-document identity, dirty-state tracking,
 // and file-operation state machine (New/Open/Save/Save As, recent scenes,
-// unsaved-change gating, async native file dialogs; issue #158).
+// unsaved-change gating, async native file dialogs; ).
 
 #include "editor_scene_document.h"
 
@@ -49,6 +49,7 @@ void reset_document_identity(SceneDocumentState &doc) noexcept {
   doc.hasPath = false;
   std::snprintf(doc.displayName, sizeof(doc.displayName), "Untitled Scene");
   doc.savedHistoryToken = 0U;
+  doc.unrecordedEdit = false;
   doc.unsavedPromptOpen = false;
   doc.pendingAction = PendingSceneAction::None;
   doc.pendingOpenPath[0] = '\0';
@@ -74,8 +75,10 @@ void set_display_name_from_path(SceneDocumentState &doc,
 void reset_session_for_scene_switch() noexcept {
   EditorSession &session = editor_session();
   inspector_abandon_pending_edit();
+  gizmo_abandon_gesture();
   clear_entity_selection();
   session.commandHistory.clear();
+  session.document.unrecordedEdit = false;
   session.worldRestoreFailed = false;
   session.hasPlaySnapshot = false;
   session.playSnapshotSize = 0U;
@@ -296,8 +299,9 @@ bool scene_document_has_path() noexcept {
 
 bool scene_document_is_dirty() noexcept {
   const EditorSession &session = editor_session();
-  return session.commandHistory.current_token() !=
-         session.document.savedHistoryToken;
+  return session.document.unrecordedEdit ||
+         (session.commandHistory.current_token() !=
+          session.document.savedHistoryToken);
 }
 
 const char *scene_document_last_error() noexcept {
@@ -306,7 +310,7 @@ const char *scene_document_last_error() noexcept {
 
 bool perform_scene_new() noexcept {
   EditorSession &session = editor_session();
-  if (!world_is_editable()) {
+  if (!world_can_load_scene()) {
     return false;
   }
 
@@ -318,7 +322,7 @@ bool perform_scene_new() noexcept {
 
 bool perform_scene_open(const char *path) noexcept {
   EditorSession &session = editor_session();
-  if ((path == nullptr) || (path[0] == '\0') || !world_is_editable()) {
+  if ((path == nullptr) || (path[0] == '\0') || !world_can_load_scene()) {
     return false;
   }
 
@@ -335,6 +339,7 @@ bool perform_scene_open(const char *path) noexcept {
   session.document.hasPath = true;
   set_display_name_from_path(session.document, path);
   session.document.savedHistoryToken = session.commandHistory.current_token();
+  session.document.unrecordedEdit = false;
   session.document.unsavedPromptOpen = false;
   session.document.pendingAction = PendingSceneAction::None;
   session.document.pendingOpenPath[0] = '\0';
@@ -344,7 +349,7 @@ bool perform_scene_open(const char *path) noexcept {
 }
 
 /// Composes the failed-save status message: state the scene format cannot
-/// represent gets its precise counts (#208); anything else was a write
+/// represent gets its precise counts; anything else was a write
 /// failure on the destination path.
 void set_save_failure_message(EditorSession &session,
                               const char *path) noexcept {
@@ -368,7 +373,22 @@ void set_save_failure_message(EditorSession &session,
 
 bool perform_scene_save() noexcept {
   EditorSession &session = editor_session();
-  if (!session.document.hasPath || !world_is_editable()) {
+  // Every refusal states its reason: the quit prompt's Save button reads
+  // lastSaveError, and a silent false looked like a button that did
+  // nothing.
+  if (!session.document.hasPath) {
+    std::snprintf(session.document.lastSaveError,
+                  sizeof(session.document.lastSaveError),
+                  "the scene has no path yet; use Save As");
+    return false;
+  }
+  if (!world_is_editable()) {
+    std::snprintf(session.document.lastSaveError,
+                  sizeof(session.document.lastSaveError),
+                  session.worldRestoreFailed
+                      ? "the Stop restore failed; use Save As to export the "
+                        "preserved world, or New/Open to replace it"
+                      : "the scene cannot be saved while playing");
     return false;
   }
   if (!runtime::save_scene(*session.world, session.document.path)) {
@@ -376,6 +396,7 @@ bool perform_scene_save() noexcept {
     return false;
   }
   session.document.savedHistoryToken = session.commandHistory.current_token();
+  session.document.unrecordedEdit = false;
   session.document.lastSaveError[0] = '\0';
   return true;
 }
@@ -418,8 +439,16 @@ bool scene_path_passes_jail(const char *path) noexcept {
 
 bool perform_scene_save_as(const char *path) noexcept {
   EditorSession &session = editor_session();
-  if ((path == nullptr) || (path[0] == '\0') || !world_is_editable()) {
+  if ((path == nullptr) || (path[0] == '\0') || !world_can_load_scene()) {
     return false;
+  }
+  if (session.worldRestoreFailed) {
+    // The export is the recovery path; the author is told what the
+    // file will hold, since it is the preserved play world, not the scene
+    // as it was before Play.
+    core::log_message(core::LogLevel::Warning, "editor",
+                      "Save As after a failed Stop restore exports the "
+                      "preserved play-mode world, not the pre-Play scene");
   }
   if (!scene_path_passes_jail(path)) {
     std::snprintf(session.document.lastSaveError,
@@ -437,6 +466,7 @@ bool perform_scene_save_as(const char *path) noexcept {
   session.document.hasPath = true;
   set_display_name_from_path(session.document, path);
   session.document.savedHistoryToken = session.commandHistory.current_token();
+  session.document.unrecordedEdit = false;
   session.document.lastSaveError[0] = '\0';
   recent_scenes_add(path);
   return true;

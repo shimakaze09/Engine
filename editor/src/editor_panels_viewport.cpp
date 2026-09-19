@@ -165,7 +165,7 @@ void emit_collider_hull(const math::Mat4 &localToWorld,
 }
 
 // Shows the selected entity's authored CameraComponent as a frustum
-// wireframe (issue #161): derives the same pose/lens update_persistent_
+// wireframe: derives the same pose/lens update_persistent_
 // cameras would publish (runtime::camera_component_pose keeps the -Z-
 // forward/+Y-up convention in one place) and reuses the existing frozen-
 // game-camera frustum drawer, so the gizmo always matches what the entity
@@ -447,10 +447,11 @@ void draw_scene_viewport_panel() noexcept {
         &viewMat.columns[0].x, &projMat.columns[0].x, editor_session().gizmoOp,
         ImGuizmo::LOCAL, &modelMat.columns[0].x, nullptr, snap);
 
-      const bool gizmoUsing = ImGuizmo::IsUsing();
-    if (gizmoUsing && !editor_session().gizmoWasUsing) {
-      editor_session().gizmoStartTransform = transform;
-    }
+    // Fed the pre-manipulation transform so an opening gesture records
+    // the pose the drag started from; the closing frame reads the final
+    // pose from the world itself.
+    const bool gizmoUsing = ImGuizmo::IsUsing();
+    gizmo_track_gesture(selectedEntity, gizmoUsing, transform);
 
     if (manipulated) {
       const math::Mat4 *parentWorldMatrix = nullptr;
@@ -480,19 +481,6 @@ void draw_scene_viewport_panel() noexcept {
       }
     }
 
-    if (!gizmoUsing && editor_session().gizmoWasUsing) {
-      auto *cmd = new (std::nothrow) TransformEditCommand();
-      if (cmd != nullptr) {
-        cmd->entity = selectedEntity;
-        cmd->persistentId =
-            editor_session().world->persistent_id(selectedEntity);
-        cmd->oldTransform = editor_session().gizmoStartTransform;
-        editor_session().world->get_transform(selectedEntity,
-                                              &cmd->newTransform);
-        editor_session().commandHistory.execute(cmd);
-      }
-    }
-    editor_session().gizmoWasUsing = gizmoUsing;
   }
 
   // Camera input: only when stopped/paused, viewport hovered, gizmo not active.

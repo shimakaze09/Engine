@@ -1,6 +1,6 @@
 $input v_texcoord0
 
-// G-buffer debug view (bgfx port of gbuffer_debug.frag, #138): channel
+// G-buffer debug view: channel
 // visualization of the deferred targets, selected by r_gbuffer_debug.
 
 #include <bgfx_shader.sh>

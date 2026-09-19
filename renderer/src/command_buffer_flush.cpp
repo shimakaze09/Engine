@@ -71,7 +71,8 @@ sanitize_scene_light_counts(const SceneLightData &lights,
 
 void flush_renderer(CommandBufferView commandBufferView,
                     const GpuMeshRegistry *registry, float timeSeconds,
-                    const SceneLightData &rawLights) noexcept {
+                    const SceneLightData &rawLights,
+                    CommandBufferView auxiliaryView) noexcept {
   if (!initialize_backend()) {
     return;
   }
@@ -86,8 +87,7 @@ void flush_renderer(CommandBufferView commandBufferView,
   const RenderDevice *dev = render_device();
 
   // A hot reload replaced device program objects, so every cached program
-  // handle and shader param must be re-resolved before any pass binds one
-  // (audit H-09).
+  // handle and shader param must be re-resolved before any pass binds one.
   const std::uint64_t reloadEpoch = shader_reload_epoch();
   if (backend.programCacheEpoch != reloadEpoch) {
     refresh_backend_program_state(backend, dev);
@@ -116,7 +116,7 @@ void flush_renderer(CommandBufferView commandBufferView,
     backbufferHeight = 1;
   }
 
-  // Device reach (#138): scene passes render at the effective render
+  // Device reach: scene passes render at the effective render
   // scale and the final present upsamples; the back buffer (and the
   // camera aspect, to avoid rounding drift) stays at full size.
   const float renderScale = render_scale();
@@ -130,7 +130,7 @@ void flush_renderer(CommandBufferView commandBufferView,
       backend.lastHeight != drawableHeight) {
     // Record the size only when the targets actually exist at it, so a
     // failed create/resize retries next frame instead of rendering into
-    // stale or missing targets forever (audit H-12).
+    // stale or missing targets forever.
     const bool resourcesReady =
         (backend.lastWidth == 0 && backend.lastHeight == 0)
             ? initialize_pass_resources(drawableWidth, drawableHeight)
@@ -207,8 +207,8 @@ void flush_renderer(CommandBufferView commandBufferView,
     }
   }
   if (backend.staticMeshBatches.size() < opaqueCount) {
-    // A failed grow leaves the buffer empty (audit #204: nothrow instead of
-    // a terminating std::vector throw); build_static_mesh_batches already
+    // A failed grow leaves the buffer empty instead of terminating the
+    // process; build_static_mesh_batches already
     // treats zero capacity as "produce zero batches" so opaque instancing
     // degrades to no batching this frame instead of crashing the process.
     if (!backend.staticMeshBatches.allocate(opaqueCount)) {
@@ -252,6 +252,16 @@ void flush_renderer(CommandBufferView commandBufferView,
   ctx.backbufferWidth = backbufferWidth;
   ctx.backbufferHeight = backbufferHeight;
   ctx.frameStats = frameStats;
+  if ((auxiliaryView.data != nullptr) && (auxiliaryView.count > 0U)) {
+    ctx.auxiliaryView = auxiliaryView;
+    for (std::size_t i = 0U; i < auxiliaryView.count; ++i) {
+      if ((auxiliaryView.data[i].sortKey.value & kDrawKeyTransparentBit) !=
+          0U) {
+        break;
+      }
+      ctx.auxiliaryOpaqueCount = i + 1U;
+    }
+  }
 
   flush_shadow_passes(ctx);
   flush_scene_captures(ctx);

@@ -1,6 +1,6 @@
 $input v_dir
 
-// Preetham analytic sky (bgfx port of preetham_sky.frag, #138). Scalar
+// Preetham analytic sky. Scalar
 // GL uniforms become vec4 read through .x/.xyz.
 
 #include <bgfx_shader.sh>

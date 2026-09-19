@@ -1,4 +1,4 @@
-// Implements the bgfx backend's program path (#138 Phase C): linking
+// Implements the bgfx backend's program path: linking
 // cooked shader binaries into programs with an introspected,
 // name-addressable parameter table, the shader-parameter setters
 // (scalar/vec values pad to bgfx's vec4 uniform model), and sampler

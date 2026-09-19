@@ -367,6 +367,75 @@ bool test_error_handling() noexcept {
 }
 
 // -----------------------------------------------------------------------
+// #570: a coroutine error raised at the sandbox memory cap is reported and
+// the coroutine released without terminating the process. The dispatcher's
+// message for a non-string error object is allocated through a protected
+// frame; on base the unprotected lua_pushstring raised into the panic
+// handler and aborted inside tick_coroutines.
+// -----------------------------------------------------------------------
+bool test_error_at_memory_cap() noexcept {
+  engine::scripting::initialize_scripting();
+  auto world = std::unique_ptr<engine::runtime::World>(
+      new (std::nothrow) engine::runtime::World());
+  if (!world) {
+    return false;
+  }
+  engine::core::ServiceLocator serviceLocator{};
+  engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
+  engine::scripting::set_default_mesh_asset_id(1U);
+
+  const bool previousSandbox = engine::scripting::is_sandbox_enabled();
+  const std::size_t previousMemoryLimit =
+      engine::scripting::get_memory_limit();
+  engine::scripting::set_sandbox_enabled(true);
+
+  // The coroutine parks twice, then raises a non-string error so the
+  // dispatcher has to allocate its own message. Between the two ticks the
+  // test pins the memory cap to the bytes in use, so that allocation is
+  // the first one over the cap: filling the VM from the script instead
+  // leaves a slack below the last failed request, and the emergency
+  // collection the allocator runs before giving up can free more.
+  const char *script =
+      "function on_start()\n"
+      "  engine.start_coroutine(function()\n"
+      "    engine.wait(0.1)\n"
+      "    engine.wait(0.1)\n"
+      "    error(true)\n"
+      "  end)\n"
+      "end\n"
+      "function settle()\n"
+      "  collectgarbage('collect')\n"
+      "  collectgarbage('collect')\n"
+      "end\n";
+
+  bool ok = write_script(script) && engine::scripting::load_script(kTempScript);
+  if (ok) {
+    engine::scripting::set_frame_time(0.0F, 0.0F);
+    engine::scripting::set_frame_index(0U);
+    engine::scripting::call_script_function("on_start");
+    engine::scripting::set_frame_index(1U);
+    engine::scripting::set_frame_time(0.2F, 0.2F);
+    engine::scripting::tick_coroutines();
+
+    // With no garbage left, neither the resume's incremental step nor the
+    // emergency collection the allocator tries before failing can free
+    // room for the dispatcher's message.
+    engine::scripting::call_script_function("settle");
+    engine::scripting::set_memory_limit(engine::scripting::get_memory_used());
+    engine::scripting::set_frame_index(2U);
+    engine::scripting::set_frame_time(0.2F, 0.4F);
+    // Returning from this call is the assertion; base aborts inside it.
+    engine::scripting::tick_coroutines();
+  }
+
+  engine::scripting::set_memory_limit(previousMemoryLimit);
+  engine::scripting::set_sandbox_enabled(previousSandbox);
+  engine::scripting::shutdown_scripting();
+  remove_script();
+  return ok;
+}
+
+// -----------------------------------------------------------------------
 // 6. clear_coroutines — all pending coroutines are discarded
 // -----------------------------------------------------------------------
 bool test_clear() noexcept {
@@ -519,6 +588,93 @@ bool test_invalid_waits_do_not_consume_slots() noexcept {
 } // namespace
 
 /// Runs this executable or test program.
+/// Regression for issue #521: a timer armed from inside a coroutine must
+/// not make that coroutine's thread the state later timers dispatch on.
+///
+/// start_coroutine resumes immediately, so engine.set_timeout called from a
+/// coroutine body runs on the coroutine's lua_State. The binding used to
+/// cache that thread, and a second timer firing later in the SAME
+/// TimerManager::tick then ran lua_pcall on it — a thread that had since
+/// yielded, whose stack Lua only guards with an api_check in debug builds.
+/// The same cached pointer was used for luaL_unref after the coroutine
+/// finished and its thread was collected.
+///
+/// The scenario is built exactly that way: timer1's callback starts a
+/// coroutine that arms a third timer and then yields, and timer2 fires
+/// after it within the same tick.
+bool test_timer_armed_in_coroutine_does_not_capture_its_thread() noexcept {
+  engine::scripting::initialize_scripting();
+  auto world = std::unique_ptr<engine::runtime::World>(
+      new (std::nothrow) engine::runtime::World());
+  if (!world) {
+    return false;
+  }
+  engine::core::ServiceLocator serviceLocator{};
+  engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
+  engine::scripting::set_default_mesh_asset_id(1U);
+
+  const char *script =
+      "local armed = nil\n"
+      "function on_start()\n"
+      // The body arms a timer and returns without yielding, so the
+      // coroutine finishes during start_coroutine's immediate resume and
+      // its thread is unref'd — while the base revision still held that
+      // thread pointer as the timer ref state.
+      "  engine.start_coroutine(function()\n"
+      "    armed = engine.set_timeout(function()\n"
+      "      local e = engine.spawn_entity()\n"
+      "      engine.set_name(e, 'armed_fired')\n"
+      "    end, 100.0)\n"
+      "  end)\n"
+      "end\n"
+      "function on_collect()\n"
+      "  collectgarbage('collect')\n"
+      "  collectgarbage('collect')\n"
+      "end\n"
+      // Reached before any timer tick, so the base revision had not yet
+      // reset its cached state: luaL_unref ran on the freed thread.
+      "function on_cancel()\n"
+      "  engine.cancel_timer(armed)\n"
+      "end\n";
+
+  if (!write_script(script) || !engine::scripting::load_script(kTempScript)) {
+    engine::scripting::shutdown_scripting();
+    remove_script();
+    return false;
+  }
+
+  engine::scripting::set_frame_time(0.0F, 0.0F);
+  engine::scripting::set_frame_index(0U);
+  engine::scripting::call_script_function("on_start");
+
+  // Let the scheduler drop the finished coroutine's entry, then collect.
+  engine::scripting::set_frame_time(0.016F, 0.016F);
+  engine::scripting::set_frame_index(1U);
+  engine::scripting::tick_coroutines();
+  engine::scripting::call_script_function("on_collect");
+
+  bool ok = engine::scripting::active_timer_ref_count() == 1U;
+
+  // Deliberately no tick_timers() before this: the base revision reset its
+  // cached state at the top of each timer tick, so a tick here would hide
+  // the defect.
+  engine::scripting::call_script_function("on_cancel");
+  ok = ok && (engine::scripting::active_timer_ref_count() == 0U);
+
+  // The cancelled timer must not fire afterwards.
+  engine::scripting::set_frame_time(200.0F, 200.0F);
+  engine::scripting::set_frame_index(2U);
+  engine::scripting::tick_timers();
+  ok = ok && (count_named(world.get(), "armed_fired") == 0);
+
+  engine::scripting::clear_timers();
+  ok = ok && (engine::scripting::active_timer_ref_count() == 0U);
+
+  engine::scripting::shutdown_scripting();
+  remove_script();
+  return ok;
+}
+
 int main() {
   struct TestCase {
     const char *name;
@@ -531,9 +687,12 @@ int main() {
       {"wait_until", test_wait_until},
       {"chained_waits", test_chained_waits},
       {"error_handling", test_error_handling},
+      {"error_at_memory_cap", test_error_at_memory_cap},
       {"clear_coroutines", test_clear},
       {"invalid_waits_do_not_consume_slots",
        test_invalid_waits_do_not_consume_slots},
+      {"timer_armed_in_coroutine_does_not_capture_its_thread",
+       test_timer_armed_in_coroutine_does_not_capture_its_thread},
   };
 
   int failures = 0;

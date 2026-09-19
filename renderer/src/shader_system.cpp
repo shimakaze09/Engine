@@ -234,8 +234,8 @@ void remove_variants_for_handle(ShaderProgramHandle handle) noexcept {
   }
 }
 
-/// Builds the cooked shader binary path beside a source path (#138
-/// Phase C): "<dir>/bgfx/cooked/<file>.<variantKey>.<profile>.bin",
+/// Builds the cooked shader binary path beside a source path:
+/// "<dir>/bgfx/cooked/<file>.<variantKey>.<profile>.bin",
 /// where variantKey is the entry's define names sorted and joined with
 /// '-' ("default" when none). False when a define carries a value (the
 /// cook keys flag defines only) or the result would not fit.
@@ -331,7 +331,7 @@ bool read_cooked_stage(const char *sourcePath,
   return false;
 }
 
-/// Cooked-binary program path (#138 Phase C): loads both stages'
+/// Cooked-binary program path: loads both stages'
 /// cooked binaries for the backend's profile through the VFS and links
 /// them via create_program_binary. Invalid when the backend does not
 /// consume cooked programs or a binary is missing (the caller falls
@@ -368,9 +368,9 @@ DeviceProgramHandle try_cooked_program(const char *vertPath,
   // GLSL-family binaries embed no uniform table, and dx11 (DXBC)
   // tables are incomplete: fxc strips the SamplerState of any texture
   // read only through Load/texelFetch, so the tile/light-data samplers
-  // vanished and the deferred path disabled itself on D3D (#301
-  // hardware run). Both hand the spirv siblings to the backend as
-  // introspection sidecars — spirv stays the canonical table (#138).
+  // vanish and the deferred path would disable itself on D3D. Both
+  // hand the spirv siblings to the backend as
+  // introspection sidecars — spirv stays the canonical table.
   const bool needsSidecar = (std::strcmp(profile, "glsl") == 0) ||
                             (std::strcmp(profile, "essl") == 0) ||
                             (std::strcmp(profile, "dx11") == 0);
@@ -415,7 +415,7 @@ DeviceProgramHandle try_cooked_program(const char *vertPath,
 }
 
 /// Logs one shader diagnostic in the `<path>: <reason>` shape the editor
-/// console parses for its Open/Select navigation actions (#217).
+/// console parses for its Open/Select navigation actions.
 void log_shader_path_error(const char *path, const char *reason) noexcept {
   char message[640] = {};
   std::snprintf(message, sizeof(message), "%s: %s",
@@ -425,7 +425,7 @@ void log_shader_path_error(const char *path, const char *reason) noexcept {
 
 bool try_reload_entry(ShaderEntry &entry) noexcept {
   // Programs link exclusively from the shaderc cook; there is no
-  // runtime source-compile fallback (#296). The watched paths are the
+  // runtime source-compile fallback. The watched paths are the
   // cooked binaries the successful link read, so
   // a recook hot-reloads; a failed load keeps the old program.
   const DeviceProgramHandle cooked = try_cooked_program(

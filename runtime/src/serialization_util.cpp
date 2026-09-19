@@ -5,6 +5,7 @@
 
 #include "serialization_util.h"
 
+#include <cstdio>
 #include <new>
 
 #include "engine/core/atomic_file.h"
@@ -13,6 +14,45 @@
 #include "engine/runtime/serialization_keys.h"
 
 namespace engine::runtime {
+namespace {
+
+/// These codecs serve both the scene and the prefab serializer, so their
+/// refusals carry a channel of their own rather than either format's.
+constexpr const char *kSerializationLogChannel = "serialization";
+
+/// Reads an optional float field strictly: absent leaves the caller's
+/// default, present-and-valid assigns, present-but-malformed refuses and
+/// names the field.
+///
+/// Four fields used to discard the parse result instead — the only ones in
+/// these readers that did. A hand-edited or bit-rotted `"roughness": "0.5"`
+/// loaded as the default with no diagnostic, and the next save persisted
+/// that default over the authored value, so the original was destroyed by
+/// opening and saving the file.
+bool read_optional_float_strict(const core::JsonParser &parser,
+                                const core::JsonValue &object, const char *key,
+                                float *out) noexcept {
+  core::JsonValue value{};
+  if (!parser.get_object_field(object, key, &value)) {
+    return true;
+  }
+  if (parser.as_float(value, out)) {
+    return true;
+  }
+
+  // Naming the field is what keeps the refusal recoverable: the author has
+  // to know which one to correct, and the document is otherwise unchanged.
+  char message[160] = {};
+  static_cast<void>(std::snprintf(
+      message, sizeof(message),
+      "'%s' is present but not a number; refusing the load rather than "
+      "substituting a default that would overwrite it on the next save",
+      key));
+  core::log_message(core::LogLevel::Error, kSerializationLogChannel, message);
+  return false;
+}
+
+} // namespace
 
 bool schema_version_supported(const core::JsonParser &parser,
                               const core::JsonValue &root,
@@ -242,7 +282,7 @@ constexpr const char *kSceneCaptureTypeName =
     "engine::runtime::SceneCaptureComponent";
 constexpr const char *kCameraTypeName = "engine::runtime::CameraComponent";
 
-// Object-shape field names for AnimationComponent (issue #253). Named
+// Object-shape field names for AnimationComponent. Named
 // rather than repeated as literals because the writer and reader below are
 // the only two places they appear, and a silent divergence between them is
 // the drift this codec exists to close.
@@ -477,7 +517,7 @@ bool read_reflected_component(const core::JsonParser &parser,
 //    documented in reflect_types.cpp). AnimationComponent's authored
 //    bool/float therefore ride its hand-written codec rather than the
 //    reflected path, since one unrepresentable field takes the whole type
-//    off it (issue #253).
+// off it.
 
 void write_mesh_component(core::JsonWriter &writer,
                           const MeshComponent &component) noexcept {
@@ -536,19 +576,13 @@ bool read_mesh_component(const core::JsonParser &parser,
     }
   }
 
-  core::JsonValue roughnessValue{};
-  if (parser.get_object_field(meshObject, "roughness", &roughnessValue)) {
-    static_cast<void>(parser.as_float(roughnessValue, &component.roughness));
-  }
-
-  core::JsonValue metallicValue{};
-  if (parser.get_object_field(meshObject, "metallic", &metallicValue)) {
-    static_cast<void>(parser.as_float(metallicValue, &component.metallic));
-  }
-
-  core::JsonValue opacityValue{};
-  if (parser.get_object_field(meshObject, "opacity", &opacityValue)) {
-    static_cast<void>(parser.as_float(opacityValue, &component.opacity));
+  if (!read_optional_float_strict(parser, meshObject, "roughness",
+                                  &component.roughness) ||
+      !read_optional_float_strict(parser, meshObject, "metallic",
+                                  &component.metallic) ||
+      !read_optional_float_strict(parser, meshObject, "opacity",
+                                  &component.opacity)) {
+    return false;
   }
 
   core::JsonValue captureSourceValue{};
@@ -598,9 +632,9 @@ bool read_light_component(const core::JsonParser &parser,
     }
   }
 
-  core::JsonValue intensityValue{};
-  if (parser.get_object_field(lightObject, "intensity", &intensityValue)) {
-    static_cast<void>(parser.as_float(intensityValue, &component.intensity));
+  if (!read_optional_float_strict(parser, lightObject, "intensity",
+                                  &component.intensity)) {
+    return false;
   }
 
   core::JsonValue typeValue{};

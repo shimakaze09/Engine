@@ -17,7 +17,7 @@ void register_entity_pool_bindings(lua_State *state) noexcept;
 void reset_entity_pool_bindings() noexcept;
 
 /// Count of allocated Lua-created entity pool slots (test/production
-/// introspection for #93b: a scene transition must drain this to zero).
+/// introspectionb: a scene transition must drain this to zero).
 std::size_t pool_slot_count() noexcept;
 
 } // namespace engine::scripting

@@ -14,7 +14,7 @@ body:
         - Design / architecture debt
         - Documentation gap
         - Tooling / CI gap
-        - Duplication (open migration per CLAUDE.md)
+        - Duplication (one concept, several implementations — see the consolidate-primitive skill)
     validations:
       required: true
   - type: dropdown

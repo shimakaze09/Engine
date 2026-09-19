@@ -1,5 +1,5 @@
 // Declares the variadic multi-component query machinery behind
-// World::for_each (#166 W3): smallest-set selection, per-entity probing of
+// World::for_each: smallest-set selection, per-entity probing of
 // the remaining component types, and the typed re-dispatch. Split from
 // world.h so the storage type keeps entity/component/lifecycle state and
 // this header keeps the query metaprogramming; World befriends WorldQuery,

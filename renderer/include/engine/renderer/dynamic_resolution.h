@@ -1,5 +1,5 @@
 // Declares the dynamic-resolution controller and quality-preset entry
-// points (#138 v0.5 device reach): a pure frame-time-driven scale
+// points: a pure frame-time-driven scale
 // stepper the runtime advances each frame, the renderer-owned effective
 // render scale the flush sizes its scene passes by, and the r_quality
 // preset bundles.

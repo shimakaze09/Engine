@@ -1,8 +1,7 @@
 $input v_texcoord0
 
-// Tonemap + bloom-composite fragment stage (bgfx port of tonemap.frag,
-// #138 Phase C). Uniform names match the GL source; scalar and integer
-// GL uniforms become vec4 (bgfx's uniform model) read through .x, and
+// Tonemap + bloom-composite fragment stage. Scalar and integer
+// uniforms are vec4 (bgfx's uniform model) read through .x, and
 // the baked sampler stages (scene 0, bloom 1) must match the stages the
 // flush assigns through set_param_i32.
 

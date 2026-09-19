@@ -219,12 +219,13 @@ void make_test_value(PointLightComponent *out) noexcept {
   out->color = engine::math::Vec3(0.25F, 0.5F, 0.75F);
   out->intensity = 3.5F;
   out->radius = 12.5F;
+  out->castShadow = true;
 }
 
 bool components_equal(const PointLightComponent &a,
                       const PointLightComponent &b) noexcept {
   return vec3_equal(a.color, b.color) && (a.intensity == b.intensity) &&
-         (a.radius == b.radius);
+         (a.radius == b.radius) && (a.castShadow == b.castShadow);
 }
 
 void make_test_value(SpotLightComponent *out) noexcept {
@@ -234,6 +235,7 @@ void make_test_value(SpotLightComponent *out) noexcept {
   out->radius = 15.25F;
   out->innerConeAngle = 0.25F;
   out->outerConeAngle = 0.75F;
+  out->castShadow = true;
 }
 
 bool components_equal(const SpotLightComponent &a,
@@ -241,7 +243,8 @@ bool components_equal(const SpotLightComponent &a,
   return vec3_equal(a.color, b.color) && vec3_equal(a.direction, b.direction) &&
          (a.intensity == b.intensity) && (a.radius == b.radius) &&
          (a.innerConeAngle == b.innerConeAngle) &&
-         (a.outerConeAngle == b.outerConeAngle);
+         (a.outerConeAngle == b.outerConeAngle) &&
+         (a.castShadow == b.castShadow);
 }
 
 void make_test_value(ReflectionProbeComponent *out) noexcept {

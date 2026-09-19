@@ -12,10 +12,11 @@
 #include <stb_image_write.h>
 
 #include "engine/core/atomic_file.h"
+#include "engine/core/hash.h"
 #include "thumbnail_resample.h"
 
 // E.g. ".thumbnails/foo.png" -> ".thumbnails/foo.checksum"; shared with
-// main so the cook manifest can list the sidecar (issue #55).
+// main so the cook manifest can list the sidecar.
 bool build_thumbnail_checksum_path(const char *thumbPath, char *checksumPath,
                                    std::size_t size) noexcept {
   if ((thumbPath == nullptr) || (checksumPath == nullptr) || (size == 0U)) {
@@ -59,7 +60,7 @@ static bool read_thumbnail_checksum(const char *checksumPath,
 }
 
 // Write checksum to sidecar file via staged atomic replacement so an
-// interrupted write can never leave a truncated sidecar (audit #212).
+// interrupted write can never leave a truncated sidecar.
 static bool write_thumbnail_checksum(const char *checksumPath,
                                      std::uint64_t hash) noexcept {
   char text[32] = {};
@@ -80,8 +81,7 @@ static void append_png_bytes(void *context, void *data, int size) {
 }
 
 // Encodes the pixels in memory and lands the PNG with staged atomic
-// replacement so an interrupted write can never publish a torn image
-// (audit #212).
+// replacement so an interrupted write can never publish a torn image.
 static bool write_thumbnail_png(const char *thumbPath,
                                 const std::uint8_t *pixels, int size,
                                 int channels) noexcept {
@@ -128,7 +128,7 @@ bool generate_texture_thumbnail(const char *inputPath,
     }
   }
 
-  // #210: budget the decode from the header before stb allocates the full
+  // Budget the decode from the header before stb allocates the full
   // image — file size is no proxy for decoded size. 16384 matches the
   // runtime loader's dimension cap; 512 MiB bounds the RGBA working copy.
   constexpr int kMaxSourceDimension = 16384;
@@ -254,7 +254,7 @@ bool build_thumbnail_path(const char *outputPath, char *thumbPath,
   }
 
   // An overlong destination is an error, never a silent redirect into the
-  // working directory where unrelated assets could collide (audit #212).
+  // working directory where unrelated assets could collide.
   char thumbDir[512] = {};
   if (lastSlash != nullptr) {
     const std::size_t dirLen = static_cast<std::size_t>(lastSlash - outputPath);
@@ -286,16 +286,16 @@ bool build_thumbnail_path(const char *outputPath, char *thumbPath,
 }
 
 // Folds the import-settings hash into the source-content hash so the
-// skip-gate sidecar reflects every semantic thumbnail input (audit M-28).
+// skip-gate sidecar reflects every semantic thumbnail input.
 static std::uint64_t combine_thumbnail_hash(std::uint64_t srcHash,
                                             std::uint64_t settingsHash)
     noexcept {
-  std::uint64_t hash = 1469598103934665603ULL;
+  std::uint64_t hash = engine::core::kFnv1a64Offset;
   const std::uint64_t inputs[2] = {srcHash, settingsHash};
   for (std::uint64_t input : inputs) {
     for (std::size_t byteIndex = 0U; byteIndex < 8U; ++byteIndex) {
-      hash ^= (input >> (byteIndex * 8U)) & 0xFFULL;
-      hash *= 1099511628211ULL;
+      hash = engine::core::fnv1a_64_append(
+          hash, static_cast<std::uint8_t>((input >> (byteIndex * 8U)) & 0xFFU));
     }
   }
   return hash;
@@ -333,8 +333,11 @@ bool generate_mesh_thumbnail(const char *inputPath, const char *outputPath,
   constexpr int kChannels = 4;
   std::vector<std::uint8_t> pixels(
       static_cast<std::size_t>(kThumbSize * kThumbSize * kChannels), 0U);
+  // The view looks down -Z from +Z, so the nearest surface has the
+  // largest z: the buffer starts far away and a fragment wins when it is
+  // nearer.
   std::vector<float> depth(static_cast<std::size_t>(kThumbSize * kThumbSize),
-                           1e30F);
+                           -1e30F);
 
   const std::size_t strideFloats = primitive_stride_floats(data);
   const std::size_t vertexCount =
@@ -507,7 +510,7 @@ bool generate_mesh_thumbnail(const char *inputPath, const char *outputPath,
           }
           const std::size_t idx =
               static_cast<std::size_t>(py * kThumbSize + px);
-          if (z < depth[idx]) {
+          if (z > depth[idx]) {
             depth[idx] = z;
             const std::size_t pi = idx * kChannels;
             pixels[pi + 0U] = color;
@@ -548,7 +551,7 @@ bool generate_mesh_thumbnail(const char *inputPath, const char *outputPath,
 
   // The PNG/checksum pair publishes as a unit: a failed checksum write
   // fails the publication so the cook driver retires the pair instead of
-  // certifying it (audit #212).
+  // certifying it.
   if (inputPath != nullptr) {
     bool hashOk = false;
     const std::uint64_t srcHash = hash_file_contents(inputPath, &hashOk);

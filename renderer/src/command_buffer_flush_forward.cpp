@@ -2,7 +2,7 @@
 // and the depth-tested debug overlay both paths share; the overlay draws
 // lines directly and wire spheres as three tessellated great circles
 // through the same line pipeline, while text primitives log a one-time
-// unsupported diagnostic (audit M-08).
+// unsupported diagnostic.
 #include "engine/renderer/command_buffer.h"
 
 #include "command_buffer_capture.h"
@@ -89,7 +89,7 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
     if (backend.pbrCameraForwardOrthoLocation.valid()) {
       // xyz = normalized view direction, w = 1 when orthographic: the
       // shaders switch the view vector to the constant camera forward
-      // under ortho (#221) — parallel rays have no per-pixel eye vector.
+      // under ortho — parallel rays have no per-pixel eye vector.
       const CameraState &activeCam = renderer_context().activeCamera;
       const math::Vec3 fwd = math::normalize(
           math::sub(activeCam.target, activeCam.position));
@@ -202,7 +202,7 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
       } else if (!hasAlbedoTex &&
                  (*boundAlbedoTexture != backend.fallbackTexture2D)) {
         // Fallback, not nothing: WebGL rejects draws whose declared
-        // samplers still reference the pass's render target (#293).
+        // samplers still reference the pass's render target.
         dev->bind_texture_slot(0U, backend.fallbackTexture2D);
         *boundAlbedoTexture = backend.fallbackTexture2D;
       }

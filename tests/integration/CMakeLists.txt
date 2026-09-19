@@ -18,6 +18,141 @@ engine_add_test_executable(engine_integration_pipeline_camera_prep
     gpu;integration
 )
 
+# Reads presented pixels back through the bgfx backend's private readback
+# hook, so it reaches into renderer/src the way the renderer unit suites do.
+engine_add_test_executable(engine_integration_deferred_tile_wrap_gpu
+    SOURCES
+    deferred_tile_wrap_gpu_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/renderer/src
+    PRIVATE_DEPS
+    engine_runtime
+    engine_renderer
+    engine_content
+    LABELS
+    gpu;integration
+)
+set_tests_properties(engine_integration_deferred_tile_wrap_gpu PROPERTIES
+    SKIP_REGULAR_EXPRESSION "SKIPPED:")
+# The default backend on Windows is Vulkan, whose texture limit on current
+# hardware is above the 16384 of D3D11 and D3D12 that the 7680-wide case
+# is about, so the same executable runs a second time where that limit is
+# the real one.
+if(WIN32)
+    add_test(NAME engine_integration_deferred_tile_wrap_gpu_d3d11
+        COMMAND engine_integration_deferred_tile_wrap_gpu)
+    set_tests_properties(engine_integration_deferred_tile_wrap_gpu_d3d11
+        PROPERTIES
+        LABELS "gpu;integration"
+        ENVIRONMENT "ENGINE_CVAR_r_bgfx_renderer=d3d11"
+        SKIP_REGULAR_EXPRESSION "SKIPPED:")
+endif()
+
+engine_add_test_executable(engine_integration_instanced_batches_gpu
+    SOURCES
+    instanced_batches_gpu_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/renderer/src
+    PRIVATE_DEPS
+    engine_runtime
+    engine_renderer
+    engine_content
+    LABELS
+    gpu;integration
+)
+set_tests_properties(engine_integration_instanced_batches_gpu PROPERTIES
+    SKIP_REGULAR_EXPRESSION "SKIPPED:")
+
+engine_add_test_executable(engine_integration_local_light_shadows_gpu
+    SOURCES
+    local_light_shadows_gpu_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/renderer/src
+    PRIVATE_DEPS
+    engine_runtime
+    engine_renderer
+    engine_content
+    LABELS
+    gpu;integration
+)
+set_tests_properties(engine_integration_local_light_shadows_gpu PROPERTIES
+    SKIP_REGULAR_EXPRESSION "SKIPPED:")
+
+engine_add_test_executable(engine_integration_offscreen_draws_gpu
+    SOURCES
+    offscreen_draws_gpu_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/renderer/src
+    PRIVATE_DEPS
+    engine_runtime
+    engine_renderer
+    engine_content
+    LABELS
+    gpu;integration
+)
+set_tests_properties(engine_integration_offscreen_draws_gpu PROPERTIES
+    SKIP_REGULAR_EXPRESSION "SKIPPED:")
+
+engine_add_test_executable(engine_integration_first_frame_shadows_gpu
+    SOURCES
+    first_frame_shadows_gpu_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/renderer/src
+    PRIVATE_DEPS
+    engine_runtime
+    engine_renderer
+    engine_content
+    LABELS
+    gpu;integration
+)
+set_tests_properties(engine_integration_first_frame_shadows_gpu PROPERTIES
+    SKIP_REGULAR_EXPRESSION "SKIPPED:")
+
+engine_add_test_executable(engine_integration_post_edge_wrap_gpu
+    SOURCES
+    post_edge_wrap_gpu_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/renderer/src
+    PRIVATE_DEPS
+    engine_runtime
+    engine_renderer
+    engine_content
+    LABELS
+    gpu;integration
+)
+set_tests_properties(engine_integration_post_edge_wrap_gpu PROPERTIES
+    SKIP_REGULAR_EXPRESSION "SKIPPED:")
+
+engine_add_test_executable(engine_integration_brdf_lut_values_gpu
+    SOURCES
+    brdf_lut_values_gpu_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/renderer/src
+    PRIVATE_DEPS
+    engine_runtime
+    engine_renderer
+    engine_content
+    LABELS
+    gpu;integration
+)
+set_tests_properties(engine_integration_brdf_lut_values_gpu PROPERTIES
+    SKIP_REGULAR_EXPRESSION "SKIPPED:")
+
+engine_add_test_executable(engine_integration_brdf_lut_edge_gpu
+    SOURCES
+    brdf_lut_edge_gpu_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/renderer/src
+    PRIVATE_DEPS
+    engine_runtime
+    engine_renderer
+    engine_content
+    LABELS
+    gpu;integration
+)
+set_tests_properties(engine_integration_brdf_lut_edge_gpu PROPERTIES
+    SKIP_REGULAR_EXPRESSION "SKIPPED:")
+
 engine_add_test_executable(engine_integration_pipeline_tick_cadence
     SOURCES
     pipeline_tick_cadence_test.cpp
@@ -263,6 +398,16 @@ engine_add_test_executable(engine_integration_hotreload_scene_op_rollback
     integration
 )
 
+engine_add_test_executable(engine_integration_script_module_poll_cadence
+    SOURCES
+    script_module_poll_cadence_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_scripting
+    LABELS
+    integration
+)
+
 engine_add_test_executable(engine_integration_script_module_cache
     SOURCES
     script_module_cache_test.cpp
@@ -402,6 +547,21 @@ if(Python3_Interpreter_FOUND)
 endif()
 
 if(ENGINE_BUILD_TOOLS)
+    if(Python3_Interpreter_FOUND)
+        # #351: an interrupted generator publish is never cooked as a
+        # mixed generation (production gen_props.py + asset_packer).
+        add_test(
+            NAME engine_integration_generator_atomic_publish
+            COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_SOURCE_DIR}/tools/test_gen_publish.py
+                $<TARGET_FILE:asset_packer>
+        )
+        set_tests_properties(
+            engine_integration_generator_atomic_publish
+            PROPERTIES LABELS integration
+        )
+    endif()
+
     add_test(
         NAME engine_integration_asset_packer_rejects_corrupt_texture
         COMMAND ${CMAKE_COMMAND}
@@ -439,6 +599,36 @@ if(ENGINE_BUILD_TOOLS)
     )
     set_tests_properties(
         engine_integration_asset_packer_rejects_short_accessor
+        PROPERTIES LABELS integration
+    )
+
+    # Issue #526: an accessor with no bufferView is unbounded, so sizing a
+    # buffer from its count wraps (heap overflow) or asks for terabytes.
+    # Both fixtures carry the same defect; the small one proves the rule is
+    # "cannot be bounded", not "the count is large".
+    add_test(
+        NAME engine_integration_asset_packer_rejects_unbounded_accessor
+        COMMAND ${CMAKE_COMMAND}
+            "-DASSET_PACKER=$<TARGET_FILE:asset_packer>"
+            "-DINPUT=${CMAKE_SOURCE_DIR}/tests/data/unbounded_accessor.gltf"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/unbounded_accessor.mesh"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/asset_packer_unbounded_accessor_test.cmake
+    )
+    set_tests_properties(
+        engine_integration_asset_packer_rejects_unbounded_accessor
+        PROPERTIES LABELS integration
+    )
+
+    add_test(
+        NAME engine_integration_asset_packer_rejects_unbounded_accessor_small
+        COMMAND ${CMAKE_COMMAND}
+            "-DASSET_PACKER=$<TARGET_FILE:asset_packer>"
+            "-DINPUT=${CMAKE_SOURCE_DIR}/tests/data/unbounded_accessor_small.gltf"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/unbounded_accessor_small.mesh"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/asset_packer_unbounded_accessor_test.cmake
+    )
+    set_tests_properties(
+        engine_integration_asset_packer_rejects_unbounded_accessor_small
         PROPERTIES LABELS integration
     )
 
@@ -552,6 +742,25 @@ if(ENGINE_BUILD_TOOLS)
     )
     set_tests_properties(
         engine_integration_asset_packer_orphan_sweep
+        PROPERTIES
+            LABELS integration
+            # The delete-boundary case needs an unprivileged user; as root it
+            # reports itself skipped rather than passing silently, so the
+            # missing coverage is visible in the ctest summary.
+            SKIP_REGULAR_EXPRESSION "SKIPPED:"
+    )
+
+    add_test(
+        NAME engine_integration_asset_packer_double_cook
+        COMMAND ${CMAKE_COMMAND}
+            "-DASSET_PACKER=$<TARGET_FILE:asset_packer>"
+            "-DSRC_GLTF=${CMAKE_SOURCE_DIR}/assets/character.gltf"
+            "-DSRC_BIN=${CMAKE_SOURCE_DIR}/assets/character.bin"
+            "-DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/double_cook_work"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/asset_packer_double_cook_test.cmake
+    )
+    set_tests_properties(
+        engine_integration_asset_packer_double_cook
         PROPERTIES LABELS integration
     )
 
@@ -764,6 +973,103 @@ engine_add_test_executable(engine_integration_gamepad_hotplug
     PRIVATE_DEPS
     engine_runtime
     engine_scripting
+    LABELS
+    integration
+)
+
+# #578: a renderer backend that fails after the device came up must end the
+# run as a fatal frame, not crash the editor overlay. SDL's dummy video
+# driver gives a window with no native handle, which selects bgfx's Noop
+# renderer, so the windowed bootstrap and the editor bridge come up without
+# a display and the test runs in every CI lane.
+engine_add_test_executable(engine_integration_renderer_backend_failure
+    SOURCES
+    renderer_backend_failure_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    LABELS
+    integration
+)
+target_link_libraries(engine_integration_renderer_backend_failure PRIVATE
+    $<LINK_LIBRARY:WHOLE_ARCHIVE,engine_editor>
+)
+set_tests_properties(engine_integration_renderer_backend_failure PROPERTIES
+    ENVIRONMENT "SDL_VIDEODRIVER=dummy")
+
+# #518: a world at entity capacity survives a maximum catch-up frame.
+engine_add_test_executable(engine_integration_pipeline_full_world_catchup
+    SOURCES
+    pipeline_full_world_catchup_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    LABELS
+    integration
+)
+
+# #519: draw-command overflow degrades the frame instead of ending the run.
+engine_add_test_executable(engine_integration_pipeline_draw_overflow
+    SOURCES
+    pipeline_draw_overflow_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_renderer
+    engine_core
+    LABELS
+    integration
+)
+
+# #569: draws and lights in one submission come from one mutation epoch.
+engine_add_test_executable(engine_integration_pipeline_light_epoch
+    SOURCES
+    pipeline_light_epoch_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_scripting
+    engine_core
+    LABELS
+    integration
+)
+
+engine_add_test_executable(engine_integration_pipeline_hot_reload_cadence
+    SOURCES
+    pipeline_hot_reload_cadence_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_core
+    LABELS
+    integration
+)
+
+engine_add_test_executable(engine_integration_pipeline_offscreen_caster
+    SOURCES
+    pipeline_offscreen_caster_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_renderer
+    engine_core
+    LABELS
+    integration
+)
+
+engine_add_test_executable(engine_integration_pipeline_camera_step_cadence
+    SOURCES
+    pipeline_camera_step_cadence_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_renderer
+    engine_core
+    LABELS
+    integration
+)
+set_tests_properties(engine_integration_pipeline_camera_step_cadence PROPERTIES
+    SKIP_REGULAR_EXPRESSION "SKIPPED:")
+
+engine_add_test_executable(engine_integration_pipeline_interpolation_history
+    SOURCES
+    pipeline_interpolation_history_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_core
     LABELS
     integration
 )

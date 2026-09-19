@@ -1,6 +1,6 @@
 // Implements engine stats behavior for the Engine core engine. A mutex
 // guards the published snapshot so the header's thread-safety promise holds
-// for concurrent producers and consumers (audit M-13); calls are frame-level
+// for concurrent producers and consumers; calls are frame-level
 // and never on a per-entity hot path.
 
 #include "engine/core/engine_stats.h"

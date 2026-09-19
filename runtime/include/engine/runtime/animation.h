@@ -75,7 +75,7 @@ struct AnimTrackDesc final {
 /// buffer (allocated at load time; evaluation only reads it). payload is a
 /// move-only nothrow buffer (not std::vector) so a load whose file-derived
 /// float count cannot be allocated fails cleanly instead of terminating
-/// under the no-exception build (audit #174); AnimationClip is therefore
+/// under the no-exception build; AnimationClip is therefore
 /// move-only too — every producer (loader, controller registry slots)
 /// already writes through an out-param or moves rather than copies.
 struct AnimationClip final {

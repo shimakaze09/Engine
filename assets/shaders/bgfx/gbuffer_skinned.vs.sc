@@ -1,8 +1,8 @@
 $input a_position, a_normal, a_texcoord0, a_indices, a_weight
 $output v_worldpos, v_normal, v_texcoord0
 
-// SKINNED G-buffer vertex stage (bgfx port of gbuffer.vert's SKINNED
-// variant, #138): four-joint linear-blend skinning from the uBones
+// SKINNED G-buffer vertex stage: four-joint linear-blend skinning from
+// the uBones
 // mat4 array (uploaded via set_param_mat4_array), then the shared
 // non-instanced path incl. foliage wind. Cooked as gbuffer.vert's
 // SKINNED variant; shaderc cannot guard $input lines, hence the

@@ -413,7 +413,7 @@ void narrow_phase_affine_heightfield(
 /// Heightfield vs Sphere/AABB/Capsule: sweeps the terrain triangles under the
 /// object footprint and resolves against the deepest penetration. Convex
 /// hulls always route through the affine path: the fast path would model
-/// them as their declared-halfExtents box (an H-08 shape degradation),
+/// them as their declared-halfExtents box (a shape degradation),
 /// while the affine path consumes the hull's real support function.
 void narrow_phase_heightfield(const PairContext &pair) noexcept {
   const bool aIsHF = (pair.colliderA.shape == ColliderShape::Heightfield);
@@ -600,7 +600,7 @@ support_affine_collider(const void *shapeData,
 /// Generic GJK/EPA path for convex shapes carrying any affine hierarchy TRS.
 /// Faceted pairs (box/hull) resolve through a clipped multi-point manifold so
 /// resting contacts get face support; other shapes keep the EPA point.
-/// EPA output is validated before use (H-08): a degenerate polytope can
+/// EPA output is validated before use: a degenerate polytope can
 /// report a non-finite or absurd depth and an unnormalized normal, and an
 /// unchecked positional correction of that size teleports both bodies.
 /// The normal must be finite and near-unit or the contact is skipped for
@@ -645,7 +645,7 @@ void narrow_phase_convex_gjk(const PairContext &pair) noexcept {
   }
   // EPA's contact point averages polytope vertices, which can land tens of
   // metres away when a small shape rests on a large face; the single-point
-  // resolver now consumes it as an angular lever arm (issue #111), so
+  // resolver now consumes it as an angular lever arm, so
   // project the smaller shape's deepest support point instead.
   const float extentSqA = engine::math::length_sq(halfA);
   const float extentSqB = engine::math::length_sq(halfB);

@@ -55,9 +55,11 @@ math::Mat4 compute_mvp(const math::Mat4 &model,
 std::uint64_t directional_shadow_cache_key(
     CommandBufferView commandBufferView, std::size_t opaqueCount,
     const DirectionalLightData &light, const CascadeSplits &splits,
-    const std::array<math::Mat4, kShadowCascadeCount> &matrices) noexcept {
+    const std::array<math::Mat4, kShadowCascadeCount> &matrices,
+    CommandBufferView auxiliaryView, std::size_t auxiliaryOpaqueCount) noexcept {
   std::uint64_t hash = core::kFnv1a64Offset;
   hash = hash_u64(hash, static_cast<std::uint64_t>(opaqueCount));
+  hash = hash_u64(hash, static_cast<std::uint64_t>(auxiliaryOpaqueCount));
   hash = hash_vec3(hash, light.direction);
   hash = hash_vec3(hash, light.color);
   hash = hash_float(hash, light.intensity);
@@ -77,6 +79,18 @@ std::uint64_t directional_shadow_cache_key(
     hash = hash_float(hash, command.foliageWindStrength);
     hash = hash_float(hash, command.foliageWindFrequency);
     hash = hash_float(hash, command.foliageWindPhase);
+    hash = hash_u64(hash, command.foliageLodIndex);
+    hash = hash_mat4(hash, command.modelMatrix);
+  }
+  // Off-screen casters shape the maps just as visible ones do.
+  for (std::size_t i = 0U;
+       (auxiliaryView.data != nullptr) && (i < auxiliaryOpaqueCount); ++i) {
+    const DrawCommand &command = auxiliaryView.data[i];
+    if ((command.passMask & kPassShadowCaster) == 0U) {
+      continue;
+    }
+    hash = hash_u64(hash, command.entity);
+    hash = hash_u64(hash, command.mesh.id);
     hash = hash_u64(hash, command.foliageLodIndex);
     hash = hash_mat4(hash, command.modelMatrix);
   }

@@ -43,7 +43,7 @@ namespace {
 /// with `backend = BackendState{}`, which clears both the initialized and
 /// failed flags — without this latch those two states are identical, and
 /// a flush issued after teardown re-runs full initialization against a
-/// destroyed device and shader system. Ownership contract (#168): no
+/// destroyed device and shader system. Ownership contract: no
 /// global may lazily resurrect a subsystem.
 bool g_shutDown = false;
 
@@ -142,7 +142,7 @@ namespace {
 /// Recomputes one family's availability from this reload's reflection
 /// result and its (reload-invariant) resource readiness, logging only on
 /// transitions so a broken edit warns once and a corrected reload
-/// restores the feature (review item 7: flags used to latch false).
+/// restores the feature.
 void recompute_availability(bool *availability, bool reflectionOk,
                             bool resourcesReady, const char *familyName) {
   const bool nowAvailable = reflectionOk && resourcesReady;
@@ -547,20 +547,25 @@ void shutdown_renderer() noexcept {
   g_shutDownRefusalLogged = false;
 
   BackendState &backend = backend_state();
-  if (!backend.initialized && !backend.failed) {
+  if (!backend.initialized) {
     // No backend resources exist yet, but capture slots may hold texture-
     // system handles that would go stale across a texture-system restart.
     destroy_scene_capture_targets(backend, nullptr);
     backend.sceneCaptureTargets = {};
     // The device's lifetime is its own, not this backend's: bootstrap
-    // creates it directly for swapchain-owning backends (#138), and a run
-    // that never flushes reaches teardown with the backend still cold.
-    // Releasing it here is the module owner closing what was opened
-    // (#168) — otherwise the device and its swapchain outlive the engine
-    // and the next initialization hands back the stale one (#326).
+    // creates it directly for swapchain-owning backends, a run
+    // that never flushes reaches teardown with the backend still cold,
+    // and a backend that failed to build leaves a bootstrap-opened device
+    // in place. Releasing it here is the module owner closing what
+    // was opened — otherwise the device and its swapchain outlive
+    // the engine and the next initialization hands back the stale one.
     if (render_device() != nullptr) {
       shutdown_render_device();
     }
+    // A failed backend has already unwound its shader system; clearing the
+    // state here is what lets the next lifetime build the backend again
+    // rather than inherit the latched failure.
+    backend = BackendState{};
     reset_renderer_public_state();
     return;
   }

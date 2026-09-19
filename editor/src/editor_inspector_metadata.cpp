@@ -104,6 +104,11 @@ constexpr FieldMetadata kFieldMetadataTable[] = {
     {"engine::runtime::PointLightComponent", "radius", "Range", "Light",
      "Distance in meters at which the light's contribution reaches zero.",
      "m", 0.05F, 0.0F, 0.0F, InspectorWidget::Drag, false, false},
+    {"engine::runtime::PointLightComponent", "castShadow", "Cast Shadow",
+     "Light",
+     "Renders a cubemap shadow for this light; the four nearest casters "
+     "shadow each frame.",
+     nullptr, 0.0F, 0.0F, 0.0F, InspectorWidget::Auto, false, false},
 
     {"engine::runtime::SpotLightComponent", "color", "Color", "Light",
      nullptr, nullptr, 0.0F, 0.0F, 0.0F, InspectorWidget::Color, false,
@@ -117,6 +122,11 @@ constexpr FieldMetadata kFieldMetadataTable[] = {
     {"engine::runtime::SpotLightComponent", "outerConeAngle", "Outer Cone",
      "Light", "Falloff cone half-angle; must be >= Inner Cone.", "deg", 1.0F,
      0.0F, 90.0F, InspectorWidget::AngleDegrees, false, false},
+    {"engine::runtime::SpotLightComponent", "castShadow", "Cast Shadow",
+     "Light",
+     "Renders a shadow map for this light; the four nearest casters shadow "
+     "each frame.",
+     nullptr, 0.0F, 0.0F, 0.0F, InspectorWidget::Auto, false, false},
 
     {"engine::runtime::LightComponent", "color", "Color", "Light", nullptr,
      nullptr, 0.0F, 0.0F, 0.0F, InspectorWidget::Color, false, false},
@@ -267,7 +277,7 @@ math::Quat quat_from_euler_degrees(const math::Vec3 &degrees) noexcept {
 
 const char *inspector_layer_name(std::uint32_t index) noexcept {
   // Fixed literal table (no lazy static init, no per-call formatting) until
-  // issue #163 replaces these placeholder names with project-authored ones.
+  // replaces these placeholder names with project-authored ones.
   static constexpr const char *kNames[kInspectorLayerCount] = {
       "Layer 0",  "Layer 1",  "Layer 2",  "Layer 3",  "Layer 4",  "Layer 5",
       "Layer 6",  "Layer 7",  "Layer 8",  "Layer 9",  "Layer 10", "Layer 11",

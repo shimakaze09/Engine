@@ -990,10 +990,11 @@ int check_primitive_spawn_rebuilds_hull() noexcept {
   return finish(0);
 }
 
-/// Deleting an entity whose parent links form a cycle (corrupted data
-/// reachable through production add_transform calls) must terminate,
-/// capture each member exactly once, and round-trip through undo.
-int check_delete_capture_terminates_on_parent_cycle() noexcept {
+/// A parent cycle cannot be built any more: add_transform refuses the
+/// closing link (#531), so the delete capture sees a plain parent/child
+/// pair. The capture must still take exactly the true subtree and
+/// round-trip through undo after the refused link.
+int check_delete_capture_after_refused_parent_cycle() noexcept {
   using engine::editor::EntityDeleteCommand;
   using engine::runtime::Entity;
   using engine::runtime::Transform;
@@ -1022,12 +1023,14 @@ int check_delete_capture_terminates_on_parent_cycle() noexcept {
   linkA.parentId = world->persistent_id(b);
   Transform linkB{};
   linkB.parentId = world->persistent_id(a);
-  if (!world->add_transform(a, linkA) || !world->add_transform(b, linkB)) {
-    return finish(172);
+  if (!world->add_transform(a, linkA) || world->add_transform(b, linkB)) {
+    return finish(172); // the closing link must be refused
   }
 
+  // Deleting the root b takes its child a with it; deleting a alone
+  // leaves b.
   EntityDeleteCommand *const command =
-      engine::editor::build_entity_delete_command(a);
+      engine::editor::build_entity_delete_command(b);
   if ((command == nullptr) || (command->recordCount != 2U)) {
     delete command;
     return finish(173);
@@ -1042,6 +1045,17 @@ int check_delete_capture_terminates_on_parent_cycle() noexcept {
   history.undo();
   if (world->alive_entity_count() != 2U) {
     return finish(175);
+  }
+
+  EntityDeleteCommand *const leaf = engine::editor::build_entity_delete_command(
+      world->find_entity_by_persistent_id(linkB.parentId));
+  if ((leaf == nullptr) || (leaf->recordCount != 1U)) {
+    delete leaf;
+    return finish(176);
+  }
+  history.execute(leaf);
+  if (world->alive_entity_count() != 1U) {
+    return finish(177);
   }
 
   return finish(0);
@@ -1462,7 +1476,7 @@ int main() {
     return result;
   }
 
-  result = check_delete_capture_terminates_on_parent_cycle();
+  result = check_delete_capture_after_refused_parent_cycle();
   if (result != 0) {
     std::fprintf(stderr, "command_history_test failed: %d\n", result);
     return result;

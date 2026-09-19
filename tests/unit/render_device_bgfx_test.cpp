@@ -3,7 +3,8 @@
 // capability flags, buffer/texture/geometry/render-target creation with
 // stale-handle and dropped-operation behavior, attachment mip/face/extent
 // bounds, the program-less draw
-// contract, cooked-binary program linking with parameter/sampler
+// contract, per-draw transient data for stream-access buffers (#523),
+// cooked-binary program linking with parameter/sampler
 // resolution (when the build cooked the proving shaders), and the pure
 // engine-to-bgfx translation (state bits, formats, sampler flags,
 // vertex layouts) pinned exactly.
@@ -513,6 +514,102 @@ void test_programs_and_draws(TestContext &t) {
   render_device_bgfx_frame();
 }
 
+/// Stream-access buffers (#523): every draw carries its own transient
+/// copy of the CPU stream, so two batches that update one engine buffer
+/// in one frame each draw their own data instead of both drawing the
+/// last update. Observed through the device's transient-upload count on
+/// the Noop renderer (the draws themselves drop for want of a cooked
+/// program, after the stream data was already bound).
+void test_stream_buffers(TestContext &t) {
+  const RenderDevice *dev = render_device();
+  const float vertices[9] = {};
+  BufferDesc vertexDesc{};
+  vertexDesc.usage = BufferUsage::Vertex;
+  vertexDesc.sizeBytes = sizeof(vertices);
+  vertexDesc.data = vertices;
+  const DeviceBufferHandle vertex = dev->create_buffer(vertexDesc);
+  const std::uint32_t indices[3] = {0U, 1U, 2U};
+  BufferDesc indexDesc{};
+  indexDesc.usage = BufferUsage::Index;
+  indexDesc.sizeBytes = sizeof(indices);
+  indexDesc.data = indices;
+  const DeviceBufferHandle index = dev->create_buffer(indexDesc);
+  GeometryDesc geometryDesc{};
+  geometryDesc.vertexBuffer = vertex;
+  geometryDesc.indexBuffer = index;
+  geometryDesc.layout.strideBytes = 12;
+  geometryDesc.layout.attributeCount = 1U;
+  geometryDesc.layout.attributes[0] = {VertexSemantic::Position, 3, 0};
+  const DeviceGeometryHandle geometry = dev->create_geometry(geometryDesc);
+  t.check(geometry.value != 0U, "indexed geometry created");
+
+  BufferDesc streamDesc{};
+  streamDesc.usage = BufferUsage::Vertex;
+  streamDesc.access = BufferAccess::Stream;
+  const DeviceBufferHandle stream = dev->create_buffer(streamDesc);
+  t.check(stream.value != 0U, "stream buffer created empty");
+  VertexLayout instanceLayout{};
+  instanceLayout.strideBytes = 16;
+  instanceLayout.attributeCount = 1U;
+  instanceLayout.attributes[0] = {VertexSemantic::InstanceModel0, 4, 0};
+  t.check(dev->set_geometry_instance_stream(geometry, stream, instanceLayout),
+          "stream attaches as the instance stream");
+
+  const std::uint64_t uploadsBefore = dev->debug_stats().transientStreamUploads;
+  const std::uint64_t droppedBefore = dropped(dev);
+  const float batchA[8] = {1.0F, 1.0F, 1.0F, 1.0F, 1.0F, 1.0F, 1.0F, 1.0F};
+  const float batchB[4] = {2.0F, 2.0F, 2.0F, 2.0F};
+  dev->update_buffer(stream, batchA, sizeof(batchA));
+  dev->draw_indexed_instanced(geometry, 3, 2);
+  dev->update_buffer(stream, batchB, sizeof(batchB));
+  dev->draw_indexed_instanced(geometry, 3, 1);
+  t.check(dev->debug_stats().transientStreamUploads == uploadsBefore + 2U,
+          "each instanced batch bound its own transient instance data");
+  t.check(dropped(dev) == droppedBefore + 2U,
+          "only the program-less submits dropped");
+
+  // An instance count past the staged bytes is refused, never read past.
+  dev->draw_indexed_instanced(geometry, 3, 3);
+  t.check(dropped(dev) == droppedBefore + 3U,
+          "instance range past the staged data dropped");
+  t.check(dev->debug_stats().transientStreamUploads == uploadsBefore + 2U,
+          "no transient upload for the refused range");
+
+  // A stream-access buffer as a geometry's own vertex stream (the debug
+  // line path) also draws from a per-draw transient copy.
+  BufferDesc lineDesc{};
+  lineDesc.usage = BufferUsage::Vertex;
+  lineDesc.access = BufferAccess::Stream;
+  const DeviceBufferHandle lines = dev->create_buffer(lineDesc);
+  GeometryDesc lineGeometryDesc{};
+  lineGeometryDesc.vertexBuffer = lines;
+  lineGeometryDesc.layout.strideBytes = 12;
+  lineGeometryDesc.layout.attributeCount = 1U;
+  lineGeometryDesc.layout.attributes[0] = {VertexSemantic::Position, 3, 0};
+  const DeviceGeometryHandle lineGeometry =
+      dev->create_geometry(lineGeometryDesc);
+  t.check(lineGeometry.value != 0U, "stream vertex geometry created");
+  const float segment[6] = {0.0F, 0.0F, 0.0F, 1.0F, 1.0F, 1.0F};
+  dev->update_buffer(lines, segment, sizeof(segment));
+  const std::uint64_t lineDropped = dropped(dev);
+  dev->draw(lineGeometry, PrimitiveTopology::Lines, 0, 2);
+  t.check(dev->debug_stats().transientStreamUploads == uploadsBefore + 3U,
+          "stream vertex draw bound transient vertices");
+  t.check(dropped(dev) == lineDropped + 1U,
+          "only the program-less submit dropped");
+  dev->draw(lineGeometry, PrimitiveTopology::Lines, 0, 4);
+  t.check(dropped(dev) == lineDropped + 2U,
+          "vertex range past the staged data dropped");
+
+  dev->destroy_geometry(lineGeometry);
+  dev->destroy_buffer(lines);
+  dev->destroy_geometry(geometry);
+  dev->destroy_buffer(stream);
+  dev->destroy_buffer(index);
+  dev->destroy_buffer(vertex);
+  render_device_bgfx_frame();
+}
+
 #ifdef ENGINE_TEST_COOKED_SHADER_DIR
 /// Whole-file byte read; empty on failure (ifstream: clang-cl flags
 /// fopen behind -Wdeprecated-declarations under -Werror).
@@ -877,6 +974,7 @@ int main() {
   test_texture_arrays(t);
   test_attachment_bounds(t);
   test_programs_and_draws(t);
+  test_stream_buffers(t);
 #ifdef ENGINE_TEST_COOKED_SHADER_DIR
   test_cooked_programs(t);
   test_cooked_variant_stage_fallback(t);

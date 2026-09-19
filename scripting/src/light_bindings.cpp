@@ -81,7 +81,7 @@ int lua_engine_set_light_color(lua_State *state) noexcept {
   return 1;
 }
 
-// #125: get_light_color/get_light_intensity read through any same-frame
+// get_light_color/get_light_intensity read through any same-frame
 // queued light-component write instead of only the committed snapshot.
 int lua_engine_get_light_color(lua_State *state) noexcept {
   runtime::Entity entity{};
@@ -152,7 +152,8 @@ int lua_engine_set_light_direction(lua_State *state) noexcept {
 
 // --- PointLightComponent bindings ---
 
-// Lua: engine.add_point_light(entity, r, g, b, intensity, radius) → boolean
+// Lua: engine.add_point_light(entity, r, g, b, intensity, radius
+//                             [, cast_shadow]) → boolean
 static int lua_engine_add_point_light(lua_State *state) noexcept {
   if (lua_gettop(state) < 6) {
     lua_pushboolean(state, 0);
@@ -169,12 +170,14 @@ static int lua_engine_add_point_light(lua_State *state) noexcept {
   comp.color.z = static_cast<float>(luaL_checknumber(state, 4));
   comp.intensity = static_cast<float>(luaL_checknumber(state, 5));
   comp.radius = static_cast<float>(luaL_checknumber(state, 6));
+  comp.castShadow = lua_toboolean(state, 7) != 0;
   const bool ok = apply_or_queue_point_light_component(entity, comp);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
 
-// Lua: engine.get_point_light(entity) → r, g, b, intensity, radius or nil
+// Lua: engine.get_point_light(entity) → r, g, b, intensity, radius,
+//                                       cast_shadow or nil
 static int lua_engine_get_point_light(lua_State *state) noexcept {
   if (lua_gettop(state) < 1) {
     lua_pushnil(state);
@@ -186,7 +189,7 @@ static int lua_engine_get_point_light(lua_State *state) noexcept {
     return 1;
   }
   runtime::PointLightComponent comp{};
-  if (!runtime_binding().world->get_point_light_component(entity, &comp)) {
+  if (!latest_point_light_component(entity, &comp)) {
     lua_pushnil(state);
     return 1;
   }
@@ -195,10 +198,12 @@ static int lua_engine_get_point_light(lua_State *state) noexcept {
   lua_pushnumber(state, static_cast<lua_Number>(comp.color.z));
   lua_pushnumber(state, static_cast<lua_Number>(comp.intensity));
   lua_pushnumber(state, static_cast<lua_Number>(comp.radius));
-  return 5;
+  lua_pushboolean(state, comp.castShadow ? 1 : 0);
+  return 6;
 }
 
-// Lua: engine.set_point_light(entity, r, g, b, intensity, radius) → boolean
+// Lua: engine.set_point_light(entity, r, g, b, intensity, radius
+//                             [, cast_shadow]) → boolean
 static int lua_engine_set_point_light(lua_State *state) noexcept {
   if (lua_gettop(state) < 6) {
     lua_pushboolean(state, 0);
@@ -209,7 +214,8 @@ static int lua_engine_set_point_light(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
-  if (!runtime_binding().world->has_point_light_component(entity)) {
+  runtime::PointLightComponent existing{};
+  if (!latest_point_light_component(entity, &existing)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -219,6 +225,7 @@ static int lua_engine_set_point_light(lua_State *state) noexcept {
   comp.color.z = static_cast<float>(luaL_checknumber(state, 4));
   comp.intensity = static_cast<float>(luaL_checknumber(state, 5));
   comp.radius = static_cast<float>(luaL_checknumber(state, 6));
+  comp.castShadow = lua_toboolean(state, 7) != 0;
   const bool ok = apply_or_queue_point_light_component(entity, comp);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
@@ -243,7 +250,7 @@ static int lua_engine_remove_point_light(lua_State *state) noexcept {
 // --- SpotLightComponent bindings ---
 
 // Lua: engine.add_spot_light(entity, r, g, b, dx, dy, dz, intensity, radius,
-//                            innerAngle, outerAngle) → boolean
+//                            innerAngle, outerAngle [, cast_shadow]) → boolean
 static int lua_engine_add_spot_light(lua_State *state) noexcept {
   if (lua_gettop(state) < 11) {
     lua_pushboolean(state, 0);
@@ -265,13 +272,15 @@ static int lua_engine_add_spot_light(lua_State *state) noexcept {
   comp.radius = static_cast<float>(luaL_checknumber(state, 9));
   comp.innerConeAngle = static_cast<float>(luaL_checknumber(state, 10));
   comp.outerConeAngle = static_cast<float>(luaL_checknumber(state, 11));
+  comp.castShadow = lua_toboolean(state, 12) != 0;
   const bool ok = apply_or_queue_spot_light_component(entity, comp);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
 
 // Lua: engine.get_spot_light(entity) → r, g, b, dx, dy, dz, intensity, radius,
-//                                      innerAngle, outerAngle or nil
+//                                      innerAngle, outerAngle, cast_shadow
+//                                      or nil
 static int lua_engine_get_spot_light(lua_State *state) noexcept {
   if (lua_gettop(state) < 1) {
     lua_pushnil(state);
@@ -283,7 +292,7 @@ static int lua_engine_get_spot_light(lua_State *state) noexcept {
     return 1;
   }
   runtime::SpotLightComponent comp{};
-  if (!runtime_binding().world->get_spot_light_component(entity, &comp)) {
+  if (!latest_spot_light_component(entity, &comp)) {
     lua_pushnil(state);
     return 1;
   }
@@ -297,11 +306,12 @@ static int lua_engine_get_spot_light(lua_State *state) noexcept {
   lua_pushnumber(state, static_cast<lua_Number>(comp.radius));
   lua_pushnumber(state, static_cast<lua_Number>(comp.innerConeAngle));
   lua_pushnumber(state, static_cast<lua_Number>(comp.outerConeAngle));
-  return 10;
+  lua_pushboolean(state, comp.castShadow ? 1 : 0);
+  return 11;
 }
 
 // Lua: engine.set_spot_light(entity, r, g, b, dx, dy, dz, intensity, radius,
-//                            innerAngle, outerAngle) → boolean
+//                            innerAngle, outerAngle [, cast_shadow]) → boolean
 static int lua_engine_set_spot_light(lua_State *state) noexcept {
   if (lua_gettop(state) < 11) {
     lua_pushboolean(state, 0);
@@ -312,7 +322,8 @@ static int lua_engine_set_spot_light(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
-  if (!runtime_binding().world->has_spot_light_component(entity)) {
+  runtime::SpotLightComponent existing{};
+  if (!latest_spot_light_component(entity, &existing)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -327,6 +338,7 @@ static int lua_engine_set_spot_light(lua_State *state) noexcept {
   comp.radius = static_cast<float>(luaL_checknumber(state, 9));
   comp.innerConeAngle = static_cast<float>(luaL_checknumber(state, 10));
   comp.outerConeAngle = static_cast<float>(luaL_checknumber(state, 11));
+  comp.castShadow = lua_toboolean(state, 12) != 0;
   const bool ok = apply_or_queue_spot_light_component(entity, comp);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;

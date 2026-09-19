@@ -21,7 +21,7 @@ constexpr float kClearRed = 0.18F;
 constexpr float kClearGreen = 0.28F;
 constexpr float kClearBlue = 0.60F;
 
-// Shared texture unit map (#301): the whole forward/deferred set fits
+// Shared texture unit map: the whole forward/deferred set fits
 // in 16 sampler registers (DXBC's hard cap, also WebGL2's floor).
 // Units 0-4 are per-pass (forward material maps / deferred G-buffer +
 // tile), 5 the deferred SSAO input, then the shared tail below. The
@@ -72,7 +72,30 @@ struct FrameFlushContext final {
   bool doSpotShadows = false;
   bool doPointShadows = false;
   RendererFrameStats frameStats{};
+  // Camera-culled commands the shadow and capture passes still draw,
+  // sorted like the main list (opaque first) and tagged by passMask.
+  CommandBufferView auxiliaryView{};
+  std::size_t auxiliaryOpaqueCount = 0U;
 };
+
+/// Visits every opaque shadow caster of the frame: the camera-visible
+/// opaque range, then the auxiliary opaque commands flagged as casters.
+template <typename Fn>
+void for_each_shadow_caster(const FrameFlushContext &ctx, Fn &&fn) noexcept {
+  if (ctx.commandBufferView.data != nullptr) {
+    for (std::size_t i = 0U; i < ctx.opaqueCount; ++i) {
+      fn(ctx.commandBufferView.data[i]);
+    }
+  }
+  if (ctx.auxiliaryView.data != nullptr) {
+    for (std::size_t i = 0U; i < ctx.auxiliaryOpaqueCount; ++i) {
+      const DrawCommand &command = ctx.auxiliaryView.data[i];
+      if ((command.passMask & kPassShadowCaster) != 0U) {
+        fn(command);
+      }
+    }
+  }
+}
 
 /// Cascade, spot, and point shadow-map passes; writes the shadow feature
 /// toggles into the context.
@@ -127,7 +150,7 @@ void upload_pbr_lighting_uniforms(const BackendState &backend,
 /// Returns lights with point/spot counts clamped to the fixed array
 /// capacities: valid counts pass the original through untouched, while
 /// oversized public counts fill and return `storage` so no flush pass can
-/// index the light arrays out of bounds (audit H-10).
+/// index the light arrays out of bounds.
 const SceneLightData &
 sanitize_scene_light_counts(const SceneLightData &lights,
                             SceneLightData &storage) noexcept;
@@ -153,7 +176,7 @@ void upload_gbuffer_foliage_uniforms(const BackendState &backend,
                                      const DrawCommand &command) noexcept;
 
 /// Cached uniform locations for one program variant's texture-backed PBR
-/// material slots (issue #160): metallicRoughness/emissive/occlusion/
+/// material slots: metallicRoughness/emissive/occlusion/
 /// opacity samplers plus alpha-mode/cutoff and the UV transform. Albedo
 /// keeps its own pre-existing per-program loc pair (every program already
 /// had it before this issue).
@@ -172,7 +195,7 @@ struct MaterialTextureUniformLocs final {
   ShaderParam uvOffset{};
 };
 
-/// Uploads the four texture-backed material slots issue #160 adds (bound
+/// Uploads the four texture-backed material slots adds (bound
 /// to texture slots 1-4; slot 0 stays each program's pre-existing albedo
 /// slot) plus the UV transform and alpha-mode/cutoff uniforms.
 /// boundMaterialTex[0..3] tracks the last-bound device texture per slot
@@ -224,8 +247,8 @@ bool upload_bone_palette(BackendState &backend, const RenderDevice *dev,
                          std::uint32_t *lastUploaded) noexcept;
 
 /// Uploads every uniform the bound skinned G-buffer program needs for one
-/// draw (camera, material, model) and rebinds unit 0 plus units 1-4 (issue
-/// #160's texture-backed material slots) to the command's textures,
+/// draw (camera, material, model) and rebinds unit 0 plus units 1-4 (the
+/// texture-backed material slots) to the command's textures,
 /// keeping the caller's binding caches in sync.
 void upload_skinned_gbuffer_uniforms(
     const BackendState &backend, const RenderDevice *dev,
@@ -234,7 +257,7 @@ void upload_skinned_gbuffer_uniforms(
     const float *normalMatrix, DeviceTextureHandle *inOutBoundAlbedoTex,
     DeviceTextureHandle inOutBoundMaterialTex[4]) noexcept;
 
-/// #221: the sky is direction-only; an orthographic camera's parallel rays
+/// The sky is direction-only; an orthographic camera's parallel rays
 /// would all sample one sky direction, so the sky pass keeps perspective
 /// directional sampling (the camera's fov lens) while geometry renders
 /// orthographically.

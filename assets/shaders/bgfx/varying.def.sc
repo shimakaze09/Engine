@@ -1,5 +1,5 @@
 // Shared shaderc varying/attribute declarations for the Engine's bgfx
-// shader ports (#138 Phase C): every .sc in this directory compiles
+// shader ports: every.sc in this directory compiles
 // against this table, so attribute semantics stay aligned with the
 // backend's VertexSemantic -> bgfx::Attrib mapping.
 

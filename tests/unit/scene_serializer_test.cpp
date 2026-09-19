@@ -737,6 +737,130 @@ int verify_reset_world_clears_scene_state() {
   return verify_non_entity_scene_state_cleared(*world);
 }
 
+/// Regression for #530: a joint dies with either of its bodies, so a
+/// destroyed jointed entity never leaves a stale active joint that refuses
+/// every later save, and reset_world returns gravity and the joint store
+/// to a fresh world's state the way a load_scene commit does.
+int verify_joints_die_with_bodies_and_reset_clears_physics() {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 440;
+  }
+  const engine::runtime::Entity first = world->create_scene_object();
+  const engine::runtime::Entity second = world->create_scene_object();
+  const engine::runtime::Entity third = world->create_scene_object();
+  if ((first == engine::runtime::kInvalidEntity) ||
+      (second == engine::runtime::kInvalidEntity) ||
+      (third == engine::runtime::kInvalidEntity)) {
+    return 441;
+  }
+  const engine::math::Vec3 pivot(0.0F, 0.0F, 0.0F);
+  const engine::math::Vec3 axis(0.0F, 1.0F, 0.0F);
+  const engine::physics::JointId doomed =
+      engine::runtime::add_hinge_joint(*world, first, second, pivot, axis);
+  const engine::physics::JointId survivor =
+      engine::runtime::add_distance_joint(*world, second, third, 1.0F);
+  if ((doomed == engine::physics::kInvalidJointId) ||
+      (survivor == engine::physics::kInvalidJointId)) {
+    return 442;
+  }
+  if (engine::runtime::collect_scene_save_blockers(*world).activeJoints != 2U) {
+    return 443;
+  }
+
+  // Destroying one body retires exactly the joints attached to it.
+  if (!world->destroy_entity(first)) {
+    return 444;
+  }
+  if (engine::runtime::collect_scene_save_blockers(*world).activeJoints != 1U) {
+    return 445; // the dead body's joint must no longer count as state
+  }
+  if (engine::runtime::remove_joint(*world, doomed)) {
+    return 446; // its id must already be stale
+  }
+  if (!engine::runtime::remove_joint(*world, survivor)) {
+    return 447; // the unrelated joint is untouched
+  }
+  std::array<char, engine::core::JsonWriter::kBufferBytes> buffer{};
+  std::size_t size = 0U;
+  if (!engine::runtime::save_scene(*world, buffer.data(), buffer.size(),
+                                   &size)) {
+    return 448; // no live joint remains, so the save must succeed
+  }
+
+  // reset_world drops authored gravity and every joint, and a JointId held
+  // across the reset stays stale.
+  const engine::physics::JointId reset =
+      engine::runtime::add_distance_joint(*world, second, third, 2.0F);
+  if (reset == engine::physics::kInvalidJointId) {
+    return 449;
+  }
+  engine::runtime::set_gravity(*world, 1.0F, 2.0F, 3.0F);
+  engine::runtime::reset_world(*world);
+  if (world->physics_context().jointCount != 0U) {
+    return 450;
+  }
+  if (engine::runtime::collect_scene_save_blockers(*world).activeJoints != 0U) {
+    return 451;
+  }
+  engine::math::Vec3 gravity(0.0F, 0.0F, 0.0F);
+  if (!engine::runtime::get_gravity(*world, &gravity.x, &gravity.y,
+                                    &gravity.z) ||
+      (gravity.x != engine::physics::kDefaultGravity.x) ||
+      (gravity.y != engine::physics::kDefaultGravity.y) ||
+      (gravity.z != engine::physics::kDefaultGravity.z)) {
+    return 452; // gravity must return to the default
+  }
+  if (engine::runtime::remove_joint(*world, reset)) {
+    return 453;
+  }
+  if (!engine::runtime::save_scene(*world, buffer.data(), buffer.size(),
+                                   &size)) {
+    return 454;
+  }
+  return 0;
+}
+
+/// Regression for #531: a scene whose transforms parent each other in a
+/// loop is refused as a whole, whichever order the entities are listed in,
+/// while a forward reference to a later entity loads.
+int verify_cyclic_scene_is_refused() {
+  constexpr const char *kCyclicScene =
+      "{\"version\":2,\"entities\":["
+      "{\"persistentId\":1,\"components\":{\"Transform\":{\"parentId\":2}}},"
+      "{\"persistentId\":2,\"components\":{\"Transform\":{\"parentId\":3}}},"
+      "{\"persistentId\":3,\"components\":{\"Transform\":{\"parentId\":1}}}]}";
+  constexpr const char *kForwardScene =
+      "{\"version\":2,\"entities\":["
+      "{\"persistentId\":1,\"components\":{\"Transform\":{\"parentId\":2}}},"
+      "{\"persistentId\":2,\"components\":{\"Transform\":{}}}]}";
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 460;
+  }
+  if (engine::runtime::load_scene(*world, kCyclicScene,
+                                  std::strlen(kCyclicScene))) {
+    return 461;
+  }
+  if (world->alive_entity_count() != 0U) {
+    return 462; // a refused load leaves the world as it was
+  }
+  if (!engine::runtime::load_scene(*world, kForwardScene,
+                                   std::strlen(kForwardScene))) {
+    return 463;
+  }
+  const engine::runtime::Entity child =
+      world->find_entity_by_persistent_id(1U);
+  const engine::runtime::Transform *transform =
+      world->get_transform_read_ptr(child);
+  if ((transform == nullptr) || (transform->parentId != 2U)) {
+    return 464;
+  }
+  return 0;
+}
+
 /// Verifies that loading a scene replaces stale non-entity world state.
 int verify_load_scene_replaces_existing_scene_state(
     const std::array<char, engine::core::JsonWriter::kBufferBytes> &buffer,
@@ -927,6 +1051,94 @@ int verify_foliage_parse_failures_reject_scene() {
   return 0;
 }
 
+
+/// Regression for #314: the four float fields that used to discard their
+/// parse result must refuse a present-but-malformed value like every
+/// sibling field in the same readers.
+///
+/// Before the fix a `"roughness": "0.5"` loaded as the component default
+/// with no diagnostic, and the next save persisted that default over the
+/// authored value — so opening and saving a hand-edited or bit-rotted
+/// scene destroyed the original field. Absent must still take the default,
+/// which is what makes the strictness safe to adopt.
+int verify_material_and_light_float_fields_reject_malformed() {
+  struct Case {
+    const char *json;
+    int code;
+  };
+
+  const Case malformed[] = {
+      {"{\"version\":2,\"entities\":[{\"components\":{"
+       "\"MeshComponent\":{\"meshAssetId\":7,\"roughness\":\"0.5\"}}}]}",
+       431},
+      {"{\"version\":2,\"entities\":[{\"components\":{"
+       "\"MeshComponent\":{\"meshAssetId\":7,\"metallic\":\"shiny\"}}}]}",
+       432},
+      {"{\"version\":2,\"entities\":[{\"components\":{"
+       "\"MeshComponent\":{\"meshAssetId\":7,\"opacity\":null}}}]}",
+       433},
+      {"{\"version\":2,\"entities\":[{\"components\":{"
+       "\"MeshComponent\":{\"meshAssetId\":7,\"roughness\":true}}}]}",
+       434},
+      {"{\"version\":2,\"entities\":[{\"components\":{"
+       "\"LightComponent\":{\"intensity\":\"bright\"}}}]}",
+       435},
+  };
+
+  for (const Case &testCase : malformed) {
+    std::unique_ptr<engine::runtime::World> world(
+        new (std::nothrow) engine::runtime::World());
+    if (world == nullptr) {
+      return testCase.code;
+    }
+    if (engine::runtime::load_scene(*world, testCase.json,
+                                    std::strlen(testCase.json))) {
+      return testCase.code;
+    }
+    // Refusal leaves the destination untouched.
+    if (world->alive_entity_count() != 0U) {
+      return testCase.code;
+    }
+  }
+
+  // Present and valid still round-trips.
+  constexpr const char *kValidScene =
+      "{\"version\":2,\"entities\":[{\"components\":{"
+      "\"MeshComponent\":{\"meshAssetId\":7,\"roughness\":0.25,"
+      "\"metallic\":0.75,\"opacity\":0.5}}}]}";
+  std::unique_ptr<engine::runtime::World> validWorld(
+      new (std::nothrow) engine::runtime::World());
+  if (validWorld == nullptr) {
+    return 436;
+  }
+  if (!engine::runtime::load_scene(*validWorld, kValidScene,
+                                   std::strlen(kValidScene))) {
+    return 437;
+  }
+  if (validWorld->alive_entity_count() != 1U) {
+    return 438;
+  }
+
+  // Absent keeps the component default: strictness applies to a present
+  // value only, so existing scenes that omit these fields still load.
+  constexpr const char *kAbsentScene =
+      "{\"version\":2,\"entities\":[{\"components\":{"
+      "\"MeshComponent\":{\"meshAssetId\":7}}}]}";
+  std::unique_ptr<engine::runtime::World> absentWorld(
+      new (std::nothrow) engine::runtime::World());
+  if (absentWorld == nullptr) {
+    return 439;
+  }
+  if (!engine::runtime::load_scene(*absentWorld, kAbsentScene,
+                                   std::strlen(kAbsentScene))) {
+    return 440;
+  }
+  if (absentWorld->alive_entity_count() != 1U) {
+    return 441;
+  }
+
+  return 0;
+}
 
 /// Over-capacity authored data must reject the load whole (issue #387): an
 /// overlong entity name, a fourth foliage LOD id, more instances than the
@@ -1986,6 +2198,20 @@ int main() {
     return result;
   }
 
+  result = verify_joints_die_with_bodies_and_reset_clears_physics();
+  if (result != 0) {
+    static_cast<void>(std::remove(kScenePath));
+    static_cast<void>(std::remove(kLargeScenePath));
+    return result;
+  }
+
+  result = verify_cyclic_scene_is_refused();
+  if (result != 0) {
+    static_cast<void>(std::remove(kScenePath));
+    static_cast<void>(std::remove(kLargeScenePath));
+    return result;
+  }
+
   result =
       verify_load_scene_replaces_existing_scene_state(sceneBuffer, sceneSize);
   if (result != 0) {
@@ -2005,6 +2231,11 @@ int main() {
   if (result != 0) {
     static_cast<void>(std::remove(kScenePath));
     static_cast<void>(std::remove(kLargeScenePath));
+    return result;
+  }
+
+  result = verify_material_and_light_float_fields_reject_malformed();
+  if (result != 0) {
     return result;
   }
 

@@ -1,7 +1,7 @@
 # Configures core build settings for the Engine repository.
 
 # Generates the engine package/version header from the root project()
-# VERSION (issue #86 L-06); the module's public include dir carries the
+# VERSION; the module's public include dir carries the
 # generated tree so `#include "engine/core/engine_version.h"` resolves the
 # same way whether the header is hand-written or generated.
 configure_file(

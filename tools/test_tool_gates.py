@@ -765,86 +765,6 @@ def test_test_timing_gate():
           "timing: this checkout passes the gate")
 
 
-def write_readme_fixture(root, noexcept_bullets):
-    """Plants a README whose contributor rules carry the given bullets."""
-    root.mkdir(parents=True, exist_ok=True)
-    body = ("# Fixture\n\n## Engine contributor rules\n\n"
-            "- Use C++23 only (no compiler extensions)\n"
-            + "".join(noexcept_bullets)
-            + "- Do not heap-allocate on hot paths\n")
-    (root / "README.md").write_text(body, encoding="utf-8")
-    return root
-
-
-CONDITIONAL_NOEXCEPT_BULLET = (
-    "- Mark a public real-time or leaf runtime API `noexcept` only when every\n"
-    "  operation it invokes is proven non-throwing; a recoverable `noexcept` "
-    "path\n"
-    "  must not call allocation, filesystem, or thread-creation operations "
-    "that\n"
-    "  can terminate under the no-exception build (the binding rule is in\n"
-    "  `CLAUDE.md`, \"Hard rules\")\n")
-
-
-def test_doc_policy_gate():
-    """The documentation policy gate (issue #355) must accept the README
-    bullet that mirrors the conditional noexcept rule clause for clause,
-    reject the unconditional wording the README once carried, reject a
-    bullet that dropped any clause or the pointer to the binding rule,
-    reject a missing or ambiguous mirror, and pass this checkout."""
-    script = str(TOOLS / "check_doc_policy.py")
-
-    with tempfile.TemporaryDirectory() as tmp:
-        tmp = Path(tmp)
-
-        check(run([script, "--root", str(write_readme_fixture(
-            tmp / "conditional", [CONDITIONAL_NOEXCEPT_BULLET]))]) == 0,
-              "doc policy: the conditional bullet, wrapped across lines, "
-              "passes")
-        # The wording the README carried before issue #355: a rule with
-        # no condition at all.
-        check(run([script, "--root", str(write_readme_fixture(
-            tmp / "unconditional",
-            ["- Keep engine API functions `noexcept`\n"]))]) != 0,
-              "doc policy: the unconditional wording fails")
-        check(run([script, "--root", str(write_readme_fixture(
-            tmp / "no_condition", [CONDITIONAL_NOEXCEPT_BULLET.replace(
-                "only when every", "when every")]))]) != 0,
-              "doc policy: dropping the 'only when' condition fails")
-        check(run([script, "--root", str(write_readme_fixture(
-            tmp / "no_terminate", [CONDITIONAL_NOEXCEPT_BULLET.replace(
-                "that\n  can terminate under the no-exception build",
-                "that\n  may fail")]))]) != 0,
-              "doc policy: dropping the termination clause fails")
-        check(run([script, "--root", str(write_readme_fixture(
-            tmp / "no_pointer", [CONDITIONAL_NOEXCEPT_BULLET.replace(
-                "`CLAUDE.md`", "the contract")]))]) != 0,
-              "doc policy: dropping the pointer to the binding rule fails")
-        check(run([script, "--root", str(write_readme_fixture(
-            tmp / "absent", []))]) != 0,
-              "doc policy: a README with no noexcept bullet fails")
-        check(run([script, "--root", str(write_readme_fixture(
-            tmp / "ambiguous", [CONDITIONAL_NOEXCEPT_BULLET,
-                                "- Also `noexcept` here\n"]))]) != 0,
-              "doc policy: two candidate bullets are ambiguous and fail")
-        # A bullet ends at a blank line; a later paragraph mentioning the
-        # rule is not part of it and cannot supply a missing clause.
-        (tmp / "split").mkdir()
-        (tmp / "split" / "README.md").write_text(
-            "# Fixture\n\n- Mark an API `noexcept` when it is safe\n\n"
-            "  only when every operation it invokes is proven non-throwing; "
-            "a recoverable `noexcept` path must not call allocation, "
-            "filesystem, or thread-creation operations that can terminate "
-            "under the no-exception build `CLAUDE.md`\n", encoding="utf-8")
-        check(run([script, "--root", str(tmp / "split")]) != 0,
-              "doc policy: text after a blank line does not join the bullet")
-        check(run([script, "--root", str(tmp / "missing")]) != 0,
-              "doc policy: a tree with no README fails")
-
-    check(run([script]) == 0,
-          "doc policy: this checkout passes the gate")
-
-
 def write_comment_fixture(root, rel, body):
     """Plants one source file under a fixture tree and returns the root."""
     path = root / rel
@@ -854,10 +774,11 @@ def write_comment_fixture(root, rel, body):
 
 
 def test_comment_quality_gate():
-    """The comment gate (issue #360) must flag each standard class, honor
-    the sanctioned markers and the tests/ exemptions, keep the filler
-    classes at zero tolerance, hold an allowlist to exact counts in both
-    directions, and pass this checkout."""
+    """The comment gate must flag every objective class — filler, doc
+    comments attached to the wrong line, commented-out code, untracked
+    TODOs, issue numbers outside a tracked marker — accept prose and
+    tracked markers, keep a documented data format out of the
+    commented-out-code class, and pass this checkout with no allowlist."""
     script = str(TOOLS / "check_comment_quality.py")
     header = "// Purpose comment.\n"
 
@@ -872,14 +793,6 @@ def test_comment_quality_gate():
             "// The registry exists for the process lifetime.\nint a;\n")]) == 0,
               "comments: a standard-conforming comment passes")
         check(run([script, "--root", case(
-            "issue", "core/src/a.cpp",
-            "// Rebuilt for the #301 shadow arrays.\nint a;\n")]) != 0,
-              "comments: an issue number outside a marker is a finding")
-        check(run([script, "--root", case(
-            "audit", "core/src/a.cpp",
-            "// Clamped on ingress (audit H-06).\nint a;\n")]) != 0,
-              "comments: an audit finding code is a finding")
-        check(run([script, "--root", case(
             "todo_marker", "core/src/a.cpp",
             "// TODO(#184): Remove the compatibility path.\nint a;\n")]) == 0,
               "comments: TODO(#n) may cite its issue")
@@ -888,23 +801,8 @@ def test_comment_quality_gate():
             "// FIXME(#231): Overflows past 32767 cells.\nint a;\n")]) == 0,
               "comments: FIXME(#n) may cite its issue")
         check(run([script, "--root", case(
-            "regression", "core/src/a.cpp",
-            "// Regression test for #417: deferred destroy skipped a slot.\n"
-            "int a;\n")]) == 0,
-              "comments: regression provenance may cite its issue")
-        check(run([script, "--root", case(
-            "tests_exempt", "tests/unit/a_test.cpp",
-            "// Pins the #301 unit map (formerly sampled out of bounds).\n"
-            "int a;\n")]) == 0,
-              "comments: tests/ is exempt from history and temporal classes")
-        check(run([script, "--root", case(
-            "temporal", "core/src/a.cpp",
-            "// Formerly a std::map; the array is faster here.\nint a;\n")]) != 0,
-              "comments: temporal language is a finding")
-        check(run([script, "--root", case(
-            "date", "core/src/a.cpp",
-            "// Flipped 2026-08-22 at parity.\nint a;\n")]) != 0,
-              "comments: a calendar date in a comment is a finding")
+            "vague", "core/src/a.cpp", "// TODO: fix this.\nint a;\n")]) != 0,
+              "comments: a TODO without an issue is a finding")
         check(run([script, "--root", case(
             "code", "core/src/a.cpp",
             "// oldRenderer.Draw(mesh);\nint a;\n")]) != 0,
@@ -918,62 +816,230 @@ def test_comment_quality_gate():
             "// Calls reset() once per frame so the pool never grows.\n"
             "int a;\n")]) == 0,
               "comments: prose mentioning a call is not code")
+        # A documented JSON or data format closes its braces in prose, so a
+        # lone closing brace is not evidence that code was commented out.
         check(run([script, "--root", case(
-            "vague", "core/src/a.cpp", "// TODO: fix this.\nint a;\n")]) != 0,
-              "comments: a TODO without an issue is a finding")
-        check(run([script, "--root", case(
-            "developer", "core/src/a.cpp",
-            "// I think this prevents a race.\nint a;\n")]) != 0,
-              "comments: uncertain first-person wording is a finding")
+            "schema", "core/src/a.h",
+            "// Schema:\n//   {\n//     \"version\": 1\n//   }\nint a;\n")]) == 0,
+              "comments: a documented data format is not commented-out code")
         check(run([script, "--root", case(
             "filler", "core/src/a.h",
             "/// Handles frobnication.\nvoid frobnicate();\n")]) != 0,
-              "comments: the filler classes still fail")
+              "comments: a tautology template is a finding")
+        check(run([script, "--root", case(
+            "misplaced", "core/src/a.h",
+            "class A {\n /// Owns nothing.\n public:\n  int x;\n};\n")]) != 0,
+              "comments: a doc comment above an access specifier is a finding")
         check(run([script, "--root", str(write_comment_fixture(
             tmp / "cmake_code", "CMakeLists.txt",
             "# Build options.\n# set(ENGINE_OLD ON)\nproject(x)\n"))]) != 0,
               "comments: a commented-out CMake command is a finding")
+        # Comment prose — dates, loose wording, history — is authoring-time
+        # guidance in the `comment` skill, not a gate. A shared per-file
+        # allowlist for it serialized every concurrent change on one file
+        # (docs/decisions/0006, 0009).
+        check(run([script, "--root", case(
+            "prose", "core/src/a.cpp",
+            "// Rebuilt as arrays; formerly a map, 2026-08-22.\n"
+            "int a;\n")]) == 0,
+              "comments: comment prose is not mechanically policed")
+        # An issue number is the one prose token a machine can judge: outside
+        # TODO(#n)/FIXME(#n) it points a reader at the tracker instead of
+        # describing the code, and the rule needs no allowlist.
+        check(run([script, "--root", case(
+            "issue_ref", "core/src/a.cpp",
+            "// Rebuilt for the #301 arrays.\nint a;\n")]) != 0,
+              "comments: an issue number outside a tracked marker is a finding")
+        check(run([script, "--root", case(
+            "issue_ref_doc", "core/include/engine/core/a.h",
+            "/// Bounded since #86 L-01.\nvoid f();\n")]) != 0,
+              "comments: an issue number in a doc comment is a finding")
         check(run([script, "--root", str(write_comment_fixture(
-            tmp / "cmake_issue", "cmake/A.cmake",
-            "# Pinned per #352.\nset(A 1)\n"))]) != 0,
-              "comments: CMake comments are held to the history class")
+            tmp / "issue_ref_cmake", "CMakeLists.txt",
+            "# Pinned per #310.\nproject(x)\n"))]) != 0,
+              "comments: an issue number in a CMake comment is a finding")
+        check(run([script, "--root", case(
+            "issue_ref_test", "tests/unit/a_test.cpp",
+            "// Regression for #301: the map must stay bounded.\nint a;\n")]) == 0,
+              "comments: a test may cite the issue it reproduces")
+        check(run([script, "--root", case(
+            "small_number", "core/src/a.cpp",
+            "// Slot #3 is the fallback.\nint a;\n")]) == 0,
+              "comments: a one-digit ordinal is not an issue reference")
         check(run([script, "--root", str(tmp / "empty")]) == 0,
               "comments: an empty tree passes")
 
-        # Allowlist: exact counts in both directions.
-        listed = write_comment_fixture(
-            tmp / "listed", "core/src/a.cpp",
-            header + "// Rebuilt for #301.\n// See #302 as well.\nint a;\n")
-        exact = tmp / "exact.txt"
-        exact.write_text("core/src/a.cpp\thistory-reference\t2\n",
-                         encoding="utf-8")
-        check(run([script, "--root", str(listed), "--allowlist",
-                   str(exact)]) == 0,
-              "comments: an exact allowlist entry excuses its findings")
-        low = tmp / "low.txt"
-        low.write_text("core/src/a.cpp\thistory-reference\t1\n",
-                       encoding="utf-8")
-        check(run([script, "--root", str(listed), "--allowlist",
-                   str(low)]) != 0,
-              "comments: findings above the allowlisted count fail")
-        high = tmp / "high.txt"
-        high.write_text("core/src/a.cpp\thistory-reference\t3\n",
-                        encoding="utf-8")
-        code, output = run_captured([script, "--root", str(listed),
-                                     "--allowlist", str(high)])
-        check(code != 0 and "stale allowlist entry" in output,
-              "comments: an allowlist entry the file no longer fills is "
-              "itself a finding")
-        filler_listed = write_comment_fixture(
-            tmp / "filler_listed", "core/src/a.h",
-            header + "/// Handles frobnication.\nvoid frobnicate();\n")
-        bogus = tmp / "bogus.txt"
-        bogus.write_text("core/src/a.h\ttautology\t1\n", encoding="utf-8")
-        check(run([script, "--root", str(filler_listed), "--allowlist",
-                   str(bogus)]) != 0,
-              "comments: filler classes cannot be allowlisted")
+    check(run([script]) == 0,
+          "comments: this checkout passes the gate with no allowlist")
 
-    check(run([script]) == 0, "comments: this checkout passes the gate")
+
+def test_error_handling_gate():
+    """The error-handling gate must reject `.value()` in first-party C++,
+    ignore it inside a comment, ignore trees outside the audited module
+    roots, and pass this checkout."""
+    script = str(TOOLS / "check_error_handling.py")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+
+        def case(name, rel, body):
+            return str(write_comment_fixture(tmp / name, rel, body))
+
+        check(run([script, "--root", case(
+            "call", "core/src/a.cpp",
+            "// Purpose.\nint f() { return e.value(); }\n")]) != 0,
+              "error handling: a .value() call is a finding")
+        check(run([script, "--root", case(
+            "spaced", "core/src/a.cpp",
+            "// Purpose.\nint f() { return e . value ( ); }\n")]) != 0,
+              "error handling: whitespace does not hide the call")
+        check(run([script, "--root", case(
+            "header", "renderer/include/engine/renderer/a.h",
+            "// Purpose.\ninline int f() { return e.value(); }\n")]) != 0,
+              "error handling: public headers are audited too")
+        check(run([script, "--root", case(
+            "comment", "core/src/a.cpp",
+            "// Never call .value() here.\nint f() { return *e; }\n")]) == 0,
+              "error handling: .value() named in a comment is not a finding")
+        check(run([script, "--root", case(
+            "block", "core/src/a.cpp",
+            "/* .value() aborts */\nint f() { return *e; }\n")]) == 0,
+              "error handling: a block comment is stripped too")
+        check(run([script, "--root", case(
+            "safe", "core/src/a.cpp",
+            "// Purpose.\nint f() { return e.has_value() ? *e : 0; }\n")]) == 0,
+              "error handling: the safe accessors pass")
+        check(run([script, "--root", case(
+            "outside", "tests/unit/a_test.cpp",
+            "// Purpose.\nint f() { return e.value(); }\n")]) == 0,
+              "error handling: trees outside the audited roots are ignored")
+        check(run([script, "--root", str(tmp / "empty")]) == 0,
+              "error handling: an empty tree passes")
+
+    check(run([script]) == 0,
+          "error handling: this checkout passes the gate")
+
+
+def test_portable_fopen_gate():
+    """The portable-fopen gate must reject a bare fopen that a Windows lane
+    would compile, accept one in a branch Windows skips, ignore comments,
+    strings and look-alike names, and pass this checkout."""
+    script = str(TOOLS / "check_portable_fopen.py")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+
+        def case(name, rel, body):
+            return str(write_comment_fixture(tmp / name, rel, body))
+
+        check(run([script, "--root", case(
+            "bare", "tests/unit/a_test.cpp",
+            "// Purpose.\nvoid f() { std::FILE *g = std::fopen(p, \"wb\"); }\n")]) != 0,
+              "portable fopen: a bare std::fopen in a test is a finding")
+        check(run([script, "--root", case(
+            "engine", "core/src/a.cpp",
+            "// Purpose.\nvoid f() { FILE *g = fopen(p, \"rb\"); }\n")]) != 0,
+              "portable fopen: engine code is audited, unqualified too")
+        check(run([script, "--root", case(
+            "winbranch", "core/src/a.cpp",
+            "// Purpose.\n#ifdef _WIN32\nFILE *g = fopen(p, m);\n#endif\n")]) != 0,
+              "portable fopen: the Windows branch itself is still a finding")
+        check(run([script, "--root", case(
+            "idiom", "tests/unit/a_test.cpp",
+            "// Purpose.\n#ifdef _WIN32\nfopen_s(&g, p, m);\n#else\n"
+            "g = std::fopen(p, m);\n#endif\n")]) == 0,
+              "portable fopen: the fopen_s/#else idiom passes")
+        check(run([script, "--root", case(
+            "msc", "tests/benchmark/a_test.cpp",
+            "// Purpose.\n#if defined(_MSC_VER)\nfopen_s(&g, p, m);\n#else\n"
+            "g = std::fopen(p, m);\n#endif\n")]) == 0,
+              "portable fopen: _MSC_VER selects the Windows branch as well")
+        check(run([script, "--root", case(
+            "negated", "core/src/a.cpp",
+            "// Purpose.\n#ifndef _WIN32\ng = std::fopen(p, m);\n#endif\n")]) == 0,
+              "portable fopen: the body of a negated conditional passes")
+        check(run([script, "--root", case(
+            "afterelse", "core/src/a.cpp",
+            "// Purpose.\n#ifndef _WIN32\nint x;\n#else\ng = std::fopen(p, m);\n#endif\n")]) != 0,
+              "portable fopen: the #else of a negated conditional is Windows")
+        check(run([script, "--root", case(
+            "linux", "core/src/a.cpp",
+            "// Purpose.\n#if defined(_WIN32)\nint x;\n#elif defined(__linux__)\n"
+            "g = std::fopen(p, m);\n#endif\n")]) == 0,
+              "portable fopen: a branch that requires another platform passes")
+        check(run([script, "--root", case(
+            "afterendif", "core/src/a.cpp",
+            "// Purpose.\n#ifdef _WIN32\nint x;\n#else\nint y;\n#endif\n"
+            "FILE *g = std::fopen(p, m);\n")]) != 0,
+              "portable fopen: a call after the #endif is unguarded again")
+        check(run([script, "--root", case(
+            "lookalike", "core/src/a.cpp",
+            "// Never call fopen( here.\nvoid f() { fopen_s(&g, p, m); my_fopen(p); "
+            "log(\"fopen(\"); }\n")]) == 0,
+              "portable fopen: comments, strings and look-alike names pass")
+        check(run([script, "--root", case(
+            "tools", "tools/asset_packer/a.cpp",
+            "// Purpose.\nvoid f() { FILE *g = std::fopen(p, m); }\n")]) == 0,
+              "portable fopen: tools/ is outside the audited roots")
+        check(run([script, "--root", str(tmp / "empty")]) == 0,
+              "portable fopen: an empty tree passes")
+
+    check(run([script]) == 0,
+          "portable fopen: this checkout passes the gate")
+
+
+def test_duplicate_primitive_gate():
+    """The duplicate-primitive gate must reject a re-implemented primitive
+    in first-party C++, accept the canonical owner, leave the test tree
+    alone, and — the case that broke the first draft — still match a
+    literal carrying a ULL suffix."""
+    script = str(TOOLS / "check_duplicate_primitives.py")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+
+        def case(name, rel, body):
+            return str(write_comment_fixture(tmp / name, rel, body))
+
+        check(run([script, "--root", case(
+            "copy", "core/src/a.cpp",
+            "// Purpose.\nconstexpr auto p = 1099511628211ULL;\n")]) != 0,
+              "duplicate primitives: a copied FNV prime is a finding")
+        # A trailing \b cannot match here: digit and 'U' are both word
+        # characters, so the first draft of this rule passed over every
+        # real copy in the tree.
+        check(run([script, "--root", case(
+            "suffixed", "tools/t/a.cpp",
+            "// Purpose.\nauto h = 14695981039346656037ULL;\n")]) != 0,
+              "duplicate primitives: a ULL-suffixed literal still matches")
+        check(run([script, "--root", case(
+            "truncated", "core/src/a.cpp",
+            "// Purpose.\nauto h = 1469598103934665603ULL;\n")]) != 0,
+              "duplicate primitives: the mistyped offset is a finding too")
+        check(run([script, "--root", case(
+            "longer", "core/src/a.cpp",
+            "// Purpose.\nauto h = 210995116282113ULL;\n")]) == 0,
+              "duplicate primitives: a longer number containing the prime "
+              "is not a finding")
+        check(run([script, "--root", case(
+            "clean", "core/src/a.cpp",
+            "// Purpose.\nauto h = core::fnv1a_64(\"x\");\n")]) == 0,
+              "duplicate primitives: using the primitive passes")
+        check(run([script, "--root", case(
+            "tests_exempt", "tests/integration/a.cpp",
+            "// Purpose.\nauto h = 1099511628211ULL;\n")]) == 0,
+              "duplicate primitives: the test tree is out of scope")
+        owner = write_comment_fixture(
+            tmp / "owner", "core/include/engine/core/hash.h",
+            "// Purpose.\nconstexpr auto p = 1099511628211ULL;\n")
+        check(run([script, "--root", str(owner)]) == 0,
+              "duplicate primitives: the canonical owner may hold the "
+              "constants")
+        check(run([script, "--root", str(tmp / "empty")]) == 0,
+              "duplicate primitives: an empty tree passes")
+
+    check(run([script]) == 0,
+          "duplicate primitives: this checkout passes the gate")
 
 
 def main():
@@ -984,8 +1050,10 @@ def main():
     test_module_dependency_gate()
     test_dependency_pin_gate()
     test_test_timing_gate()
-    test_doc_policy_gate()
     test_comment_quality_gate()
+    test_error_handling_gate()
+    test_portable_fopen_gate()
+    test_duplicate_primitive_gate()
     if failures:
         print(f"\nFAILED ({len(failures)} failure(s))")
         return 1

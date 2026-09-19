@@ -35,8 +35,17 @@ bool copy_path_strict(char *dst, std::size_t dstCapacity, const char *src,
 
 /// True when a script-supplied filesystem path stays inside the VFS jail
 /// (relative, no "..", no drive/backslash); refusal logs one Error naming
-/// the call site per the H-15 defence-in-depth decision (issue #83).
+/// the call site.
 bool script_path_in_jail(const char *path, const char *context) noexcept;
+
+/// Resolves a script path to the OS path its chunk is read from: through
+/// the VFS mount when the path's prefix is mounted, so scripts load from
+/// the configured asset root rather than from wherever the process was
+/// launched; a path under no mount keeps its cwd-relative spelling,
+/// which is what tests and tooling that write scripts beside the binary
+/// rely on. False when the resolved path does not fit outCapacity.
+bool resolve_script_os_path(const char *path, char *out,
+                            std::size_t outCapacity) noexcept;
 
 /// Logs the Lua error on top of the stack with a traceback, then pops it.
 void log_lua_error(const char *context) noexcept;
@@ -49,7 +58,7 @@ void log_lua_error(lua_State *state, const char *context) noexcept;
 using LuaDispatchFn = int (*)(lua_State *state);
 
 /// Runs an engine-to-Lua dispatch inside one protected call charged against
-/// the shared per-frame instruction budget (issue #84): pushes the
+/// the shared per-frame instruction budget: pushes the
 /// trampoline and args (both allocation-free), pcalls with nresults, and
 /// logs errors — including a budget exhausted by a latched
 /// instruction-limit trip. Returns success with the results on the stack.

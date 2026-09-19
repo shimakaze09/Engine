@@ -1,4 +1,4 @@
-// Declares the generic asset metadata store (#171 C2): the fixed-slot
+// Declares the generic asset metadata store: the fixed-slot
 // identity/tag/dependency table split out of the renderer's AssetDatabase,
 // usable by any asset class with no renderer dependency.
 

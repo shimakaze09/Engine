@@ -1,7 +1,7 @@
 $input a_position
 $output v_dir
 
-// Skybox vertex stage (bgfx port of skybox.vert, #138): the view's
+// Skybox vertex stage: the view's
 // rotation only (translation dropped via w = 0) and depth pinned to the
 // far plane through clip.xyww. u_viewMat, not u_view — bgfx reserves
 // the latter as a predefined uniform.

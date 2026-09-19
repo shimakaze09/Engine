@@ -30,7 +30,7 @@ struct CameraState final {
 // flush path's sanitization (fov/near/far/ortho-size fallbacks). Every
 // consumer of the active camera's projection — the GL flush, render-prep
 // CPU culling, scene captures, the editor's frustum gizmo — must build
-// through this one helper so they can never disagree (#221).
+// through this one helper so they can never disagree.
 math::Mat4 camera_projection_matrix(const CameraState &camera,
                                     float aspect) noexcept;
 

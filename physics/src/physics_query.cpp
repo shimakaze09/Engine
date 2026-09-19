@@ -628,7 +628,7 @@ float aabb_separation_distance(const math::AABB &a,
 }
 
 /// Conservative-advancement sweep of a convex query geometry against one
-/// target's REAL shape (H-08: the AABB-only sweep reported false hits on
+/// target's REAL shape (an AABB-only sweep reports false hits on
 /// sphere/capsule/hull corners). Each iteration advances by a proven
 /// lower bound on the remaining travel — the larger of the AABB gap and
 /// the support-projected axial gap — so impacts are never overshot and
@@ -720,7 +720,9 @@ bool raycast(const PhysicsWorldView &world, const math::Vec3 &origin,
   float closestDistance = maxDistance;
   bool found = false;
   for (std::size_t i = 0U; i < count; ++i) {
-    if (entities[i] == skipEntity) {
+    if ((skipEntity != kInvalidEntity) &&
+        ((entities[i] == skipEntity) ||
+         (world.rigid_body_owner(entities[i]) == skipEntity))) {
       continue;
     }
     ColliderWorldGeometry geometry{};
@@ -759,7 +761,7 @@ bool raycast(const PhysicsWorldView &world, const math::Vec3 &origin,
 std::size_t raycast_all(const PhysicsWorldView &world, const math::Vec3 &origin,
                         const math::Vec3 &direction, float maxDistance,
                         PhysicsRaycastHit *outHits, std::size_t maxHits,
-                        std::uint32_t mask) noexcept {
+                        std::uint32_t mask, Entity skipEntity) noexcept {
   if ((outHits == nullptr) || (maxHits == 0U)) {
     return 0U;
   }
@@ -787,6 +789,11 @@ std::size_t raycast_all(const PhysicsWorldView &world, const math::Vec3 &origin,
   for (std::size_t i = 0U; i < count; ++i) {
     const Collider &col = colliders[i];
     if (!passes_mask(col, mask)) {
+      continue;
+    }
+    if ((skipEntity != kInvalidEntity) &&
+        ((entities[i] == skipEntity) ||
+         (world.rigid_body_owner(entities[i]) == skipEntity))) {
       continue;
     }
 

@@ -38,7 +38,7 @@ struct PendingAuthoredApply final {
 
 // Both tables are keyed by (PersistentId, ComponentEditType) and persist
 // across selection changes until Revert/cancel/Stop, so their budget is
-// independent of the simultaneous-selection capacity (audit #224): one
+// independent of the simultaneous-selection capacity: one
 // entity consumes one slot per live-editable component type it touches,
 // and sequentially edited entities accumulate. 128 pairs covers e.g. 16
 // entities times 8 component types in one session at ~313 KB of static
@@ -115,7 +115,7 @@ bool apply_live_component_edit(runtime::Entity entity, ComponentEditType type,
   if (find_baseline(id, type) == nullptr) {
     // The baseline is acquired BEFORE the mutation: a live edit whose
     // advertised Revert cannot be provided must be refused up front, not
-    // applied with the affordance silently missing (audit #224).
+    // applied with the affordance silently missing.
     ComponentEditSnapshot current{};
     if (!capture_component_snapshot(type, entity, &current)) {
       return false;

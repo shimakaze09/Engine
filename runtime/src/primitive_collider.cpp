@@ -1,6 +1,6 @@
 // Implements the built-in primitives' hull provenance: the one map from a
 // HullSource to its physics builder, and the collider description every
-// spawn path (script, editor) derives from it (#310).
+// spawn path (script, editor) derives from it.
 
 #include "engine/runtime/primitive_collider.h"
 

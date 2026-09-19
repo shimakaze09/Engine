@@ -14,7 +14,7 @@
 namespace engine::physics {
 
 // Broadphase spatial-hash shape shared by the resolve scratch below and
-// physics.cpp's grid passes (moved from physics.cpp for #170).
+// physics.cpp's grid passes.
 constexpr std::size_t kSpatialHashBuckets = 4096U;
 
 // Linked-list node for the broadphase spatial hash grid.
@@ -28,7 +28,7 @@ struct SpatialNode final {
 constexpr std::size_t kMaxNodes = kMaxColliders * 8U;
 
 // Scratch buffers for resolve_collisions (~19 MB). Heap-backed and owned
-// by the PhysicsContext (#170) — never a plain thread_local array: ~19 MB
+// by the PhysicsContext — never a plain thread_local array: ~19 MB
 // of static TLS is carved out of every new thread's stack allocation on
 // glibc, which starves threads created with small explicit stacks (Mesa's
 // GL driver workers overflowed and crashed the editor on startup exactly

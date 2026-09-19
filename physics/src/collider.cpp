@@ -151,14 +151,26 @@ bool make_collider_world_geometry(
     return false;
   }
 
+  // A ConvexHull collider with no payload — the hull slots were exhausted
+  // when it was installed, which World::add_collider logs — collides and
+  // answers queries as the axis-aligned box of its half extents. Refusing
+  // it removed the entity from every pair and every query while the log
+  // promised a box fallback. A payload that is present but
+  // malformed is still refused.
+  math::ColliderShape shape = collider.shape;
   if (collider.shape == math::ColliderShape::ConvexHull) {
-    if (convexHull == nullptr || convexHull->vertexCount == 0U ||
-        convexHull->vertexCount > ConvexHullData::kMaxVertices) {
-      return false;
-    }
-    for (std::size_t index = 0U; index < convexHull->vertexCount; ++index) {
-      if (!finite(convexHull->vertices[index])) {
+    if (convexHull == nullptr) {
+      shape = math::ColliderShape::AABB;
+    } else {
+      if (convexHull->vertexCount == 0U ||
+          convexHull->vertexCount > ConvexHullData::kMaxVertices) {
         return false;
+      }
+      for (std::size_t index = 0U; index < convexHull->vertexCount;
+           ++index) {
+        if (!finite(convexHull->vertices[index])) {
+          return false;
+        }
       }
     }
   }
@@ -177,11 +189,12 @@ bool make_collider_world_geometry(
 
   geometry.center =
       transform_point(geometry.localToWorld, math::Vec3(0.0F, 0.0F, 0.0F));
-  geometry.shape = collider.shape;
+  geometry.shape = shape;
   geometry.halfExtents = math::Vec3(std::fabs(collider.halfExtents.x),
                                     std::fabs(collider.halfExtents.y),
                                     std::fabs(collider.halfExtents.z));
-  geometry.convexHull = convexHull;
+  geometry.convexHull =
+      (shape == math::ColliderShape::ConvexHull) ? convexHull : nullptr;
 
   const math::Vec3 positiveX =
       collider_support_point(geometry, math::Vec3(1.0F, 0.0F, 0.0F));

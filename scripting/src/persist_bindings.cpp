@@ -11,9 +11,14 @@ extern "C" {
 #include "lua.h"
 }
 
+#include <cmath>
 #include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
 
 #include "engine/core/json.h"
+#include "engine/core/logging.h"
 #include "engine/runtime/scripting_bridge.h"
 
 namespace engine::scripting {
@@ -23,6 +28,36 @@ int g_persistRef = LUA_NOREF;
 
 constexpr std::size_t kMaxSaveKeys = 64U;
 constexpr std::size_t kMaxSaveJsonBytes = 16U * 1024U;
+// Save and load share one width per field: the loader copies into buffers
+// of exactly these sizes and refuses anything that does not fit, so the
+// writer refuses the same values up front instead of producing a file the
+// loader will reject. Both counts include the terminator.
+constexpr std::size_t kMaxSaveKeyBytes = 128U;
+constexpr std::size_t kMaxSaveTextBytes = 256U;
+
+/// Logs why engine.save_data refused the table; the script sees false.
+void log_save_refusal(const char *key, const char *reason) noexcept {
+  char message[256] = {};
+  std::snprintf(message, sizeof(message),
+                "engine.save_data refused: %s%s%s; nothing was written",
+                reason, (key != nullptr) ? " at key " : "",
+                (key != nullptr) ? key : "");
+  core::log_message(core::LogLevel::Error, "scripting", message);
+}
+
+/// Logs why engine.load_data refused the document and returns nil to the
+/// script; a malformed field refuses the load rather than substituting.
+int refuse_load(lua_State *state, std::size_t entryIndex,
+                const char *reason) noexcept {
+  char message[192] = {};
+  std::snprintf(message, sizeof(message),
+                "engine.load_data refused the save: entry %zu %s", entryIndex,
+                reason);
+  core::log_message(core::LogLevel::Error, "scripting", message);
+  lua_pop(state, 1);
+  lua_pushnil(state);
+  return 1;
+}
 
 } // namespace
 
@@ -80,28 +115,74 @@ int lua_engine_save_data(lua_State *state) noexcept {
   bool valid = true;
   lua_pushnil(state);
   while (lua_next(state, 1) != 0) {
-    if ((lua_type(state, -2) != LUA_TSTRING) || (keyCount >= kMaxSaveKeys)) {
+    if (lua_type(state, -2) != LUA_TSTRING) {
+      log_save_refusal(nullptr, "a key is not a string");
       valid = false;
       lua_pop(state, 2);
       break;
     }
-    const char *key = lua_tostring(state, -2);
+    std::size_t keyLength = 0U;
+    const char *key = lua_tolstring(state, -2, &keyLength);
+    if (keyCount >= kMaxSaveKeys) {
+      log_save_refusal(key, "more than 64 keys");
+      valid = false;
+      lua_pop(state, 2);
+      break;
+    }
+    if ((keyLength >= kMaxSaveKeyBytes) || (std::strlen(key) != keyLength)) {
+      log_save_refusal(nullptr, "a key is longer than 127 bytes or holds an "
+                                "embedded NUL");
+      valid = false;
+      lua_pop(state, 2);
+      break;
+    }
     const int valueType = lua_type(state, -1);
-    writer.begin_object();
-    writer.write_string("k", key);
+    const char *reason = nullptr;
     if (valueType == LUA_TNUMBER) {
-      writer.write_float("v", static_cast<float>(lua_tonumber(state, -1)));
+      if (lua_isinteger(state, -1) != 0) {
+        writer.begin_object();
+        writer.write_string("k", key);
+        writer.write_int64("v",
+                           static_cast<std::int64_t>(lua_tointeger(state, -1)));
+        writer.end_object();
+      } else {
+        const double number = static_cast<double>(lua_tonumber(state, -1));
+        if (!std::isfinite(number)) {
+          reason = "the number is not finite";
+        } else {
+          writer.begin_object();
+          writer.write_string("k", key);
+          writer.write_double("v", number);
+          writer.end_object();
+        }
+      }
     } else if (valueType == LUA_TSTRING) {
-      writer.write_string("v", lua_tostring(state, -1));
+      std::size_t textLength = 0U;
+      const char *text = lua_tolstring(state, -1, &textLength);
+      if ((textLength >= kMaxSaveTextBytes) ||
+          (std::strlen(text) != textLength)) {
+        reason = "the string is longer than 255 bytes or holds an embedded "
+                 "NUL";
+      } else {
+        writer.begin_object();
+        writer.write_string("k", key);
+        writer.write_string("v", text);
+        writer.end_object();
+      }
     } else if (valueType == LUA_TBOOLEAN) {
+      writer.begin_object();
+      writer.write_string("k", key);
       writer.write_bool("v", lua_toboolean(state, -1) != 0);
-    } else {
-      valid = false;
       writer.end_object();
+    } else {
+      reason = "the value is not a number, string or boolean";
+    }
+    if (reason != nullptr) {
+      log_save_refusal(key, reason);
+      valid = false;
       lua_pop(state, 2);
       break;
     }
-    writer.end_object();
     ++keyCount;
     lua_pop(state, 1);
   }
@@ -153,26 +234,46 @@ int lua_engine_load_data(lua_State *state) noexcept {
     core::JsonValue entry{};
     core::JsonValue keyValue{};
     core::JsonValue value{};
-    char key[128] = {};
+    char key[kMaxSaveKeyBytes] = {};
     if (!parser.get_array_element(entries, i, &entry) ||
         !parser.get_object_field(entry, "k", &keyValue) ||
-        !parser.copy_string(keyValue, key, sizeof(key)) ||
         !parser.get_object_field(entry, "v", &value)) {
-      continue;
+      return refuse_load(state, i, "is not a {k, v} object");
     }
-    float number = 0.0F;
+    // Strict copies: a key or string the buffer cannot hold is a corrupt
+    // or hand-edited save and refuses the load, never a truncated value
+    // handed back under the cut spelling.
+    if (!parser.copy_string_strict(keyValue, key, sizeof(key))) {
+      return refuse_load(state, i, "has a key that is not a string of at "
+                                   "most 127 bytes");
+    }
+    std::int64_t integer = 0;
+    double number = 0.0;
     bool flag = false;
-    char text[256] = {};
-    if (value.type == core::JsonValue::Type::Number &&
-        parser.as_float(value, &number)) {
-      lua_pushnumber(state, static_cast<lua_Number>(number));
-    } else if (value.type == core::JsonValue::Type::Bool &&
-               parser.as_bool(value, &flag)) {
+    char text[kMaxSaveTextBytes] = {};
+    if (value.type == core::JsonValue::Type::Number) {
+      // Integer literals read back as Lua integers, everything else as
+      // the double the writer produced at round-trip precision.
+      if (parser.as_int64(value, &integer)) {
+        lua_pushinteger(state, static_cast<lua_Integer>(integer));
+      } else if (parser.as_double(value, &number)) {
+        lua_pushnumber(state, static_cast<lua_Number>(number));
+      } else {
+        return refuse_load(state, i, "has a number that does not parse");
+      }
+    } else if (value.type == core::JsonValue::Type::Bool) {
+      if (!parser.as_bool(value, &flag)) {
+        return refuse_load(state, i, "has a boolean that does not parse");
+      }
       lua_pushboolean(state, flag ? 1 : 0);
-    } else if (parser.copy_string(value, text, sizeof(text))) {
+    } else if (value.type == core::JsonValue::Type::String) {
+      if (!parser.copy_string_strict(value, text, sizeof(text))) {
+        return refuse_load(state, i, "has a string longer than 255 bytes");
+      }
       lua_pushstring(state, text);
     } else {
-      continue;
+      return refuse_load(state, i, "has a value that is not a number, "
+                                   "string or boolean");
     }
     lua_setfield(state, -2, key);
   }

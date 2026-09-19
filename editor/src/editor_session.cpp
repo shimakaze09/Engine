@@ -25,7 +25,9 @@
 #include <memory>
 #include <vector>
 
+#include "editor_commands.h"
 #include "editor_material_edit.h"
+#include "editor_multi_edit.h"
 #include "engine/core/atomic_file.h"
 #include "engine/core/file_read.h"
 #include "engine/core/cvar.h"
@@ -96,6 +98,18 @@ load_thumbnail_texture(const char *assetPath) noexcept {
   if (editor_session().thumbnailCount >= kMaxThumbnails) {
     return renderer::kInvalidDeviceTexture;
   }
+  // A thumbnail that cannot be produced is remembered as such, so a
+  // missing or corrupt file is not opened and decoded again every frame
+  // the row is visible; clear_thumbnail_cache forgets it.
+  const auto remember_missing = [assetPath]() noexcept {
+    auto &entry = editor_session().thumbnailCache[editor_session().thumbnailCount];
+    std::snprintf(entry.path, sizeof(entry.path), "%s", assetPath);
+    entry.texture = renderer::kInvalidDeviceTexture;
+    entry.width = 0;
+    entry.height = 0;
+    ++editor_session().thumbnailCount;
+    return renderer::kInvalidDeviceTexture;
+  };
 
   std::string assetStr(assetPath);
   std::size_t lastSlash = assetStr.find_last_of("/\\");
@@ -118,7 +132,7 @@ load_thumbnail_texture(const char *assetPath) noexcept {
   fp = std::fopen(thumbPath.c_str(), "rb");
 #endif
   if (fp == nullptr) {
-    return renderer::kInvalidDeviceTexture;
+    return remember_missing();
   }
   std::fseek(fp, 0, SEEK_END);
   const long fileLen = std::ftell(fp);
@@ -127,14 +141,14 @@ load_thumbnail_texture(const char *assetPath) noexcept {
       (static_cast<unsigned long>(fileLen) >
        static_cast<unsigned long>(std::numeric_limits<int>::max()))) {
     std::fclose(fp);
-    return renderer::kInvalidDeviceTexture;
+    return remember_missing();
   }
   std::vector<unsigned char> fileData(static_cast<std::size_t>(fileLen));
   const std::size_t bytesRead =
       std::fread(fileData.data(), 1U, fileData.size(), fp);
   std::fclose(fp);
   if (bytesRead != fileData.size()) {
-    return renderer::kInvalidDeviceTexture;
+    return remember_missing();
   }
 
   int w = 0;
@@ -144,10 +158,10 @@ load_thumbnail_texture(const char *assetPath) noexcept {
   unsigned char *pixels = stbi_load_from_memory(
       fileData.data(), stbSize, &w, &h, &channels, 4);
   if (pixels == nullptr) {
-    return renderer::kInvalidDeviceTexture;
+    return remember_missing();
   }
 
-  // Routed through the renderer's RenderDevice (audit #206) instead of
+  // Routed through the renderer's RenderDevice instead of
   // calling glGenTextures/glTexImage2D directly: the graphics API stays
   // inside the renderer backend, and the editor only ever sees the opaque
   // device texture handle create_texture returns.
@@ -174,13 +188,13 @@ load_thumbnail_texture(const char *assetPath) noexcept {
     entry.width = w;
     entry.height = h;
     ++editor_session().thumbnailCount;
+    return tex;
   }
-
-  return tex;
+  return remember_missing();
 }
 
 /// Releases cached thumbnail textures owned by the editor through the
-/// renderer's RenderDevice (audit #206).
+/// renderer's RenderDevice.
 void clear_thumbnail_cache() noexcept {
   const renderer::RenderDevice *device = renderer::render_device();
   for (std::size_t i = 0U; i < editor_session().thumbnailCount; ++i) {
@@ -431,8 +445,13 @@ bool world_is_editable() noexcept {
          (editor_session().world->current_phase() == runtime::WorldPhase::Input);
 }
 
+// Everything world_is_editable requires except the restore latch: after a
+// failed Stop restore the preserved world must still be replaceable (New,
+// Open) and exportable (Save As), because that is the recovery path the
+// Inspector advertises; gating those on the latch bricked the editor.
 bool world_can_load_scene() noexcept {
   return (editor_session().world != nullptr) &&
+         (editor_session().playState == PlayState::Stopped) &&
          (editor_session().world->current_phase() == runtime::WorldPhase::Input);
 }
 
@@ -619,12 +638,18 @@ bool editor_history_can_redo() noexcept {
   return world_is_editable() && editor_session().commandHistory.can_redo();
 }
 
+// An open gesture (inspector drag, gizmo drag) is recorded before the
+// history moves, so its command can never land on top of an intervening
+// undo with a snapshot from before it.
 void editor_history_undo() noexcept {
   if (material_owns_history()) {
     material_editor_history().undo();
     return;
   }
   if (world_is_editable()) {
+    inspector_commit_pending_edit();
+    multi_edit_commit_gesture();
+    gizmo_commit_gesture();
     editor_session().commandHistory.undo();
   }
 }
@@ -635,6 +660,9 @@ void editor_history_redo() noexcept {
     return;
   }
   if (world_is_editable()) {
+    inspector_commit_pending_edit();
+    multi_edit_commit_gesture();
+    gizmo_commit_gesture();
     editor_session().commandHistory.redo();
   }
 }
@@ -655,6 +683,12 @@ void start_play_mode() noexcept {
   }
 
   if (editor_session().playState == PlayState::Stopped) {
+    // Authored edits still open as gestures are recorded before the
+    // snapshot so Stop restores a state the history accounts for; a
+    // gizmo drag cannot span Play, so it is dropped.
+    inspector_commit_pending_edit();
+    multi_edit_commit_gesture();
+    gizmo_abandon_gesture();
     if (!capture_play_snapshot()) {
       core::log_message(core::LogLevel::Error, "editor",
                         "failed to capture pre-play scene snapshot");
@@ -716,10 +750,14 @@ void stop_play_mode() noexcept {
   editor_session().playState = PlayState::Stopped;
   editor_session().stepRequested = false;
   editor_session().worldRestoreFailed = !restored;
+  // Whatever the restore did to the contents, a gesture opened against
+  // the play-time world must not record against the restored one.
+  inspector_abandon_pending_edit();
+  gizmo_abandon_gesture();
 
   if (restored) {
     // Authored state is back; any "Apply to authored value" queued during
-    // Play now replays as ordinary undoable edits against it (issue #159)
+    // Play now replays as ordinary undoable edits against it
     // instead of the transient live-edit values that just got discarded
     // by the restore above. Also drops every live-edit baseline -- a new
     // Play session starts tracking fresh regardless.

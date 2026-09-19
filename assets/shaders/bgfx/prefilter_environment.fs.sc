@@ -1,7 +1,6 @@
 $input v_dir
 
-// GGX prefiltered environment convolution (bgfx port of
-// prefilter_environment.frag, #138). Scalar GL uniforms become vec4
+// GGX prefiltered environment convolution. Scalar uniforms are vec4
 // read through .x.
 
 #include <bgfx_shader.sh>

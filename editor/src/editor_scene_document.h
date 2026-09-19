@@ -1,7 +1,7 @@
 // Declares the editor's scene-document identity, dirty-state tracking, and
 // file-operation state machine (New/Open/Save/Save As, recent scenes,
 // unsaved-change gating, async native file dialogs) used by the main menu
-// panel and the runtime quit bridge (issue #158).
+// panel and the runtime quit bridge.
 
 #pragma once
 
@@ -61,6 +61,10 @@ struct SceneDocumentState final {
   bool hasPath = false;
   char displayName[kMaxDocumentDisplayNameLength] = "Untitled Scene";
   std::uint64_t savedHistoryToken = 0U;
+  // A world mutation the history could not record (command allocation
+  // failed after the edit reached the world): the document reads dirty
+  // until a save or a content replacement clears it.
+  bool unrecordedEdit = false;
 
   bool unsavedPromptOpen = false;
   PendingSceneAction pendingAction = PendingSceneAction::None;
@@ -130,7 +134,7 @@ bool perform_scene_save() noexcept;
 bool perform_scene_save_as(const char *path) noexcept;
 
 /// True when `path`'s parent directory resolves inside `root` — the
-/// stand-in project jail until #137 lands true project roots. Pure/
+/// stand-in project jail until true project roots exist. Pure/
 /// testable core behind scene_path_passes_jail().
 bool scene_path_passes_jail_under(const char *path, const char *root) noexcept;
 /// scene_path_passes_jail_under(path, editor_asset_root()).

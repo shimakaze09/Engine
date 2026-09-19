@@ -1,4 +1,4 @@
-# Configures the generic content/asset module (#171): identity, metadata,
+# Configures the generic content/asset module: identity, metadata,
 # streaming, staleness, and LRU bookkeeping with no renderer dependency.
 
 engine_add_module_library(engine_content

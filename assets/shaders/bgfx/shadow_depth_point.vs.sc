@@ -1,8 +1,8 @@
 $input a_position
 $output v_worldpos
 
-// Point-shadow depth vertex stage (bgfx port of shadow_depth_point.vert,
-// #138). u_modelMatrix, not u_model — bgfx reserves the latter.
+// Point-shadow depth vertex stage. u_modelMatrix, not u_model — bgfx
+// reserves the latter.
 
 #include <bgfx_shader.sh>
 

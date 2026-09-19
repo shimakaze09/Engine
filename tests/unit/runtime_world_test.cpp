@@ -5,8 +5,10 @@
 #include <limits>
 #include <memory>
 #include <new>
+#include <vector>
 
 #include "engine/physics/physics.h"
+#include "engine/physics/physics_context.h"
 #include "engine/runtime/physics_bridge.h"
 #include "engine/runtime/scene_serializer.h"
 #include "engine/runtime/world.h"
@@ -313,7 +315,131 @@ int verify_hierarchical_transform_propagation() {
   return 0;
 }
 
-int verify_transform_cycle_is_stable() {
+/// #516: erase_persistent_index rebuilds the index from the alive arrays
+/// once tombstones pass a quarter of capacity. On base the entity being
+/// destroyed was still marked alive during that rebuild, so its id was
+/// re-inserted as it was erased and could never be created again; a
+/// surviving child's parentId then resolved to whatever next took the index.
+/// Every destroy here is followed by re-creating the same id, so whichever
+/// destroy triggers the rebuild is checked.
+int verify_persistent_index_rebuild_drops_dying_entity() {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 240;
+  }
+
+  constexpr std::uint32_t kBaseId = 700000U;
+  // Create every id first and destroy them all afterwards: with no insert
+  // between the erases nothing reclaims a tombstone, so the count passes
+  // the capacity / 4 threshold inside the destroy loop and exactly one
+  // destroy runs the rebuild. Interleaving create and destroy would let
+  // each re-create reclaim the tombstone it just left and never rebuild.
+  const std::size_t count =
+      (engine::runtime::World::kPersistentIndexCapacity / 4U) + 64U;
+  std::vector<engine::runtime::Entity> entities(count);
+  for (std::size_t i = 0U; i < count; ++i) {
+    entities[i] = world->create_entity_with_persistent_id(
+        kBaseId + static_cast<std::uint32_t>(i));
+    if (entities[i] == engine::runtime::kInvalidEntity) {
+      return 241;
+    }
+  }
+  for (std::size_t i = 0U; i < count; ++i) {
+    if (!world->destroy_entity(entities[i])) {
+      return 242;
+    }
+  }
+  for (std::size_t i = 0U; i < count; ++i) {
+    const engine::runtime::PersistentId id =
+        kBaseId + static_cast<std::uint32_t>(i);
+    if (world->find_entity_by_persistent_id(id) !=
+        engine::runtime::kInvalidEntity) {
+      return 243;
+    }
+    if (world->create_entity_with_persistent_id(id) ==
+        engine::runtime::kInvalidEntity) {
+      return 244; // the destroyed id is still in the index
+    }
+  }
+  return 0;
+}
+
+/// #520: once the kMaxConvexHulls payload slots are taken, a further
+/// provenance-hull collider installs without a payload. It must still
+/// collide and answer queries — as the axis-aligned box of its half extents,
+/// which is what the install-time log promises — rather than vanish from
+/// every pair and query as a ghost. Driven through World::add_collider and
+/// the production raycast.
+int verify_hull_slot_exhaustion_collides_as_box() {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 250;
+  }
+
+  constexpr std::size_t kCount = engine::physics::kMaxConvexHulls + 1U;
+  constexpr float kSpacing = 4.0F;
+  engine::runtime::Entity first = engine::runtime::kInvalidEntity;
+  engine::runtime::Entity last = engine::runtime::kInvalidEntity;
+  for (std::size_t i = 0U; i < kCount; ++i) {
+    engine::runtime::Transform transform{};
+    transform.position =
+        engine::math::Vec3(kSpacing * static_cast<float>(i), 0.0F, 0.0F);
+    const engine::runtime::Entity entity =
+        world->create_scene_object(transform);
+    engine::runtime::Collider collider{};
+    collider.shape = engine::runtime::ColliderShape::ConvexHull;
+    collider.hullSource = engine::runtime::HullSource::Cylinder;
+    collider.halfExtents = engine::math::Vec3(0.5F, 0.5F, 0.5F);
+    if ((entity == engine::runtime::kInvalidEntity) ||
+        !world->add_collider(entity, collider)) {
+      return 251;
+    }
+    if (i == 0U) {
+      first = entity;
+    }
+    last = entity;
+  }
+  // Precondition of the case: the first hull got a payload, the one past
+  // capacity did not.
+  if (!world->has_convex_hull_payload(first) ||
+      world->has_convex_hull_payload(last)) {
+    return 252;
+  }
+
+  world->begin_update_phase();
+  world->commit_update_phase();
+  world->begin_render_prep_phase();
+  world->end_frame_phase();
+
+  engine::runtime::PhysicsRaycastHit hit{};
+  const float lastX = kSpacing * static_cast<float>(kCount - 1U);
+  if (!engine::runtime::raycast(*world, engine::math::Vec3(lastX, 10.0F, 0.0F),
+                                engine::math::Vec3(0.0F, -1.0F, 0.0F), 100.0F,
+                                &hit) ||
+      (hit.entity != last)) {
+    return 253; // the payload-less hull is a ghost to queries
+  }
+  // The box stands in for the hull exactly: a ray straight down from y=10
+  // onto a half extent of 0.5 meets the top face at distance 9.5.
+  if (hit.distance != 9.5F) {
+    return 254;
+  }
+  if (!engine::runtime::raycast(*world, engine::math::Vec3(0.0F, 10.0F, 0.0F),
+                                engine::math::Vec3(0.0F, -1.0F, 0.0F), 100.0F,
+                                &hit) ||
+      (hit.entity != first)) {
+    return 255;
+  }
+  return 0;
+}
+
+/// Regression for #531: a parent id that names the entity itself, one of
+/// its descendants, or closes a loop is refused at add_transform with the
+/// destination unchanged, while a parent that does not exist yet (a scene
+/// forward reference) still roots the child until it appears.
+int verify_transform_cycles_are_rejected() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
   if (world == nullptr) {
@@ -322,39 +448,80 @@ int verify_transform_cycle_is_stable() {
 
   const engine::runtime::Entity first = world->create_entity();
   const engine::runtime::Entity second = world->create_entity();
+  const engine::runtime::Entity third = world->create_entity();
+  const engine::runtime::Entity fourth = world->create_entity();
+  const engine::runtime::Entity fifth = world->create_entity();
   if ((first == engine::runtime::kInvalidEntity) ||
-      (second == engine::runtime::kInvalidEntity)) {
+      (second == engine::runtime::kInvalidEntity) ||
+      (third == engine::runtime::kInvalidEntity) ||
+      (fourth == engine::runtime::kInvalidEntity) ||
+      (fifth == engine::runtime::kInvalidEntity)) {
     return 41;
   }
 
-  engine::runtime::Transform firstTransform{};
-  firstTransform.position = engine::math::Vec3(1.0F, 0.0F, 0.0F);
-  firstTransform.parentId = world->persistent_id(second);
-  if (!world->add_transform(first, firstTransform)) {
+  // Self-parent.
+  engine::runtime::Transform transform{};
+  transform.parentId = world->persistent_id(first);
+  if (world->add_transform(first, transform)) {
     return 42;
   }
-
-  engine::runtime::Transform secondTransform{};
-  secondTransform.position = engine::math::Vec3(0.0F, 1.0F, 0.0F);
-  secondTransform.parentId = world->persistent_id(first);
-  if (!world->add_transform(second, secondTransform)) {
-    return 43;
+  if (world->get_transform_read_ptr(first) != nullptr) {
+    return 43; // the refused add must leave nothing behind
   }
 
-  world->begin_render_prep_phase();
-
-  if (world->get_world_transform_read_ptr(first) == nullptr) {
+  // Two-cycle: first under second is fine, second under first closes it.
+  transform.parentId = world->persistent_id(second);
+  if (!world->add_transform(first, transform)) {
     return 44;
   }
-
-  if (world->get_world_transform_read_ptr(second) == nullptr) {
+  transform.parentId = world->persistent_id(first);
+  if (world->add_transform(second, transform)) {
     return 45;
   }
-
-  if (world->world_transform_count() != 2U) {
+  transform.parentId = engine::runtime::kInvalidPersistentId;
+  if (!world->add_transform(second, transform)) {
     return 46;
   }
 
+  // N-cycle: second > first > third > fourth, then second under fourth.
+  transform.parentId = world->persistent_id(first);
+  if (!world->add_transform(third, transform)) {
+    return 47;
+  }
+  transform.parentId = world->persistent_id(third);
+  if (!world->add_transform(fourth, transform)) {
+    return 48;
+  }
+  transform.parentId = world->persistent_id(fourth);
+  if (world->add_transform(second, transform)) {
+    return 49;
+  }
+  const engine::runtime::Transform *kept = world->get_transform_read_ptr(second);
+  if ((kept == nullptr) ||
+      (kept->parentId != engine::runtime::kInvalidPersistentId)) {
+    return 50; // the refused reparent must keep the previous transform
+  }
+
+  // A parent that does not exist yet is a forward reference, not a cycle.
+  transform.parentId = 987654321U;
+  if (!world->add_transform(fifth, transform)) {
+    return 51;
+  }
+
+  // With no cycle possible, a cascade destroys exactly the true subtree.
+  if (!world->destroy_entity(third)) {
+    return 52;
+  }
+  if (world->is_alive(third) || world->is_alive(fourth) ||
+      !world->is_alive(first) || !world->is_alive(second) ||
+      !world->is_alive(fifth)) {
+    return 53;
+  }
+
+  world->begin_render_prep_phase();
+  if (world->world_transform_count() != 3U) {
+    return 54;
+  }
   world->begin_render_phase();
   world->end_frame_phase();
   return 0;
@@ -1157,6 +1324,138 @@ int verify_reset_world_phase_independent() {
   return 0;
 }
 
+/// EXPECTATION (#517): subtree operations cost the subtree, not the world.
+/// In a world of many unrelated roots, destroying one root with K
+/// descendants, enumerating a subtree, listing an entity's children and
+/// queuing a deferred subtree destroy each touch O(K) hierarchy nodes as
+/// counted by the World's own visit counter; and the cascade still
+/// destroys exactly the subtree.
+int verify_subtree_operations_cost_the_subtree() {
+  using namespace engine::runtime;
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 260;
+  }
+  constexpr std::size_t kBystanders = 4096U;
+  constexpr std::size_t kChildren = 32U;
+  constexpr std::size_t kGrandchildren = 2U; // per child
+  constexpr std::size_t kSubtree = kChildren * (1U + kGrandchildren);
+  for (std::size_t i = 0U; i < kBystanders; ++i) {
+    if (world->create_scene_object() == kInvalidEntity) {
+      return 261;
+    }
+  }
+  const Entity root = world->create_scene_object();
+  const Entity other = world->create_scene_object();
+  if ((root == kInvalidEntity) || (other == kInvalidEntity)) {
+    return 262;
+  }
+  for (std::size_t c = 0U; c < kChildren; ++c) {
+    Transform childT{};
+    childT.parentId = world->persistent_id(root);
+    const Entity child = world->create_scene_object(childT);
+    if (child == kInvalidEntity) {
+      return 263;
+    }
+    for (std::size_t g = 0U; g < kGrandchildren; ++g) {
+      Transform grandT{};
+      grandT.parentId = world->persistent_id(child);
+      if (world->create_scene_object(grandT) == kInvalidEntity) {
+        return 264;
+      }
+    }
+  }
+  Transform otherChildT{};
+  otherChildT.parentId = world->persistent_id(other);
+  if (world->create_scene_object(otherChildT) == kInvalidEntity) {
+    return 265;
+  }
+  // One propagation settles the child index the way a frame would.
+  world->begin_render_prep_phase();
+  world->end_frame_phase();
+  const std::size_t aliveBefore = world->alive_entity_count();
+
+  // Budget: every hierarchy node of the subtree may be touched a few
+  // times (marking, per-node unlink, sibling steps); the world has 4096+
+  // unrelated transforms that must never be scanned.
+  constexpr std::uint64_t kBudget = 6U * kSubtree + 64U;
+
+  std::uint64_t before = world->hierarchy_visits();
+  std::size_t members = 0U;
+  world->for_each_subtree_member(root,
+                                 [&members](Entity) noexcept { ++members; });
+  std::uint64_t visits = world->hierarchy_visits() - before;
+  if ((members != kSubtree + 1U) || (visits > kBudget)) {
+    std::fprintf(stderr,
+                 "FAIL: subtree enumeration visited %llu nodes for %zu "
+                 "members (budget %llu)\n",
+                 static_cast<unsigned long long>(visits), members,
+                 static_cast<unsigned long long>(kBudget));
+    return 266;
+  }
+
+  before = world->hierarchy_visits();
+  std::size_t children = 0U;
+  world->for_each_child(root, [&children](Entity) noexcept { ++children; });
+  visits = world->hierarchy_visits() - before;
+  if ((children != kChildren) || (visits > kChildren)) {
+    std::fprintf(stderr, "FAIL: child listing visited %llu nodes for %zu\n",
+                 static_cast<unsigned long long>(visits), children);
+    return 267;
+  }
+
+  // Deferred queue during Simulation: the subtree is queued in O(K).
+  world->begin_update_phase();
+  before = world->hierarchy_visits();
+  if (!world->destroy_entity(root)) {
+    return 268;
+  }
+  visits = world->hierarchy_visits() - before;
+  if ((world->pending_destroy_count() != kSubtree + 1U) || (visits > kBudget)) {
+    std::fprintf(stderr,
+                 "FAIL: deferred subtree destroy visited %llu nodes, queued "
+                 "%zu\n",
+                 static_cast<unsigned long long>(visits),
+                 world->pending_destroy_count());
+    return 269;
+  }
+  // Re-queuing a queued entity is O(1) and a no-op.
+  if (!world->destroy_entity(root) ||
+      (world->pending_destroy_count() != kSubtree + 1U)) {
+    return 270;
+  }
+  world->begin_transform_phase();
+  world->end_frame_phase();
+  // The flush (EndPlay) tears the subtree down in O(K).
+  before = world->hierarchy_visits();
+  world->begin_end_play_phase();
+  world->end_end_play_phase();
+  visits = world->hierarchy_visits() - before;
+  if ((world->alive_entity_count() != aliveBefore - kSubtree - 1U) ||
+      world->is_alive(root) || !world->is_alive(other) || (visits > kBudget)) {
+    std::fprintf(stderr,
+                 "FAIL: flushed cascade visited %llu nodes; alive %zu of "
+                 "%zu\n",
+                 static_cast<unsigned long long>(visits),
+                 world->alive_entity_count(), aliveBefore);
+    return 271;
+  }
+
+  // Immediate destroy of the other root and its child, after the index
+  // was maintained incrementally through the flush: still O(K).
+  before = world->hierarchy_visits();
+  if (!world->destroy_entity(other)) {
+    return 272;
+  }
+  visits = world->hierarchy_visits() - before;
+  if ((visits > 32U) || (world->alive_entity_count() != kBystanders)) {
+    std::fprintf(stderr, "FAIL: immediate destroy visited %llu nodes\n",
+                 static_cast<unsigned long long>(visits));
+    return 273;
+  }
+  return 0;
+}
+
 int main() {
   int result = verify_raw_and_scene_object_creation();
   if (result != 0) {
@@ -1198,7 +1497,22 @@ int main() {
     return result;
   }
 
-  result = verify_transform_cycle_is_stable();
+  result = verify_persistent_index_rebuild_drops_dying_entity();
+  if (result != 0) {
+    return result;
+  }
+
+  result = verify_subtree_operations_cost_the_subtree();
+  if (result != 0) {
+    return result;
+  }
+
+  result = verify_hull_slot_exhaustion_collides_as_box();
+  if (result != 0) {
+    return result;
+  }
+
+  result = verify_transform_cycles_are_rejected();
   if (result != 0) {
     return result;
   }

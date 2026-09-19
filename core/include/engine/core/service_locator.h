@@ -79,6 +79,6 @@ private:
 };
 
 // Deliberately no process-global locator instance: the only live locator is
-// EnginePipeline's, owned and torn down with the run (#168).
+// EnginePipeline's, owned and torn down with the run.
 
 } // namespace engine::core

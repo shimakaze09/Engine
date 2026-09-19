@@ -41,7 +41,7 @@ void resolve_pbr_light_uniforms(BackendState &backend,
                                 const RenderDevice *dev) noexcept {
   const DeviceProgramHandle prog = backend.pbrProgram;
 
-  // #138 flat array vocabulary: packed vec4 element arrays shared by the
+  // Flat array vocabulary: packed vec4 element arrays shared by the
   // GLSL and bgfx shader ports, uploaded via set_param_vec4_array.
   backend.pbrDirLightCountLocation =
       dev->shader_param(prog, "u_dirLightCount");
@@ -159,7 +159,7 @@ bool resolve_pbr_program_state(BackendState &backend,
       dev->shader_param(pbrProgram, "u_albedoMap");
   backend.pbrOpacityLocation =
       required_param(&ok, dev, pbrProgram, "u_opacity");
-  // issue #160: texture-backed PBR material slots — all optional, same
+  //: texture-backed PBR material slots — all optional, same
   // fallback contract as u_hasAlbedoTexture above.
   backend.pbrEmissiveLocation = dev->shader_param(pbrProgram, "u_emissive");
   backend.pbrHasMetallicRoughnessTextureLocation =
@@ -258,7 +258,20 @@ bool resolve_tonemap_program_state(BackendState &backend,
   return ok;
 }
 
+/// Releases the render device on a backend-init failure only when that
+/// initialization opened it. A device bootstrap opened for a windowed run
+/// already carries the editor overlay's device objects; tearing it down
+/// from under them left the overlay submitting to a bgfx that was gone.
+/// The device then stays up for its owner, which releases it in
+/// shutdown_renderer.
+void release_device_if_opened(bool backendOpenedDevice) noexcept {
+  if (backendOpenedDevice) {
+    shutdown_render_device();
+  }
+}
+
 bool init_backend_core(BackendState &backend) noexcept {
+  const bool backendOpenedDevice = (render_device() == nullptr);
   if (!initialize_render_device()) {
     core::log_message(core::LogLevel::Error, "renderer",
                       "failed to initialize render device");
@@ -269,7 +282,7 @@ bool init_backend_core(BackendState &backend) noexcept {
   if (!initialize_shader_system()) {
     core::log_message(core::LogLevel::Error, "renderer",
                       "failed to initialize shader system");
-    shutdown_render_device();
+    release_device_if_opened(backendOpenedDevice);
     reset_backend_on_failure();
     return false;
   }
@@ -283,7 +296,7 @@ bool init_backend_core(BackendState &backend) noexcept {
     core::log_message(core::LogLevel::Error, "renderer",
                       "failed to load default shader program");
     shutdown_shader_system();
-    shutdown_render_device();
+    release_device_if_opened(backendOpenedDevice);
     reset_backend_on_failure();
     return false;
   }
@@ -292,14 +305,14 @@ bool init_backend_core(BackendState &backend) noexcept {
   if (!resolve_default_program_state(backend, dev)) {
     destroy_shader_program(defaultShaderHandle);
     shutdown_shader_system();
-    shutdown_render_device();
+    release_device_if_opened(backendOpenedDevice);
     reset_backend_on_failure();
     return false;
   }
 
   // Load PBR shader. The PBR_FULL variant carries forward shadow and
   // IBL sampling on the shared unit map (tops out at kIblBrdfLutUnit,
-  // 15 since the #301 shadow arrays), so any 16-unit device — WebGL2's
+  // 15), so any 16-unit device — WebGL2's
   // floor included — selects it; a rarer device under that budget
   // takes the reduced default, whose shadow=1 / constant-ambient paths
   // stay correct. The cook produces both variants from one source, so
@@ -318,7 +331,7 @@ bool init_backend_core(BackendState &backend) noexcept {
                       "failed to load PBR shader program");
     destroy_shader_program(defaultShaderHandle);
     shutdown_shader_system();
-    shutdown_render_device();
+    release_device_if_opened(backendOpenedDevice);
     reset_backend_on_failure();
     return false;
   }
@@ -330,7 +343,7 @@ bool init_backend_core(BackendState &backend) noexcept {
     destroy_shader_program(pbrShaderHandle);
     destroy_shader_program(defaultShaderHandle);
     shutdown_shader_system();
-    shutdown_render_device();
+    release_device_if_opened(backendOpenedDevice);
     reset_backend_on_failure();
     return false;
   }
@@ -365,7 +378,7 @@ bool init_backend_core(BackendState &backend) noexcept {
     destroy_shader_program(pbrShaderHandle);
     destroy_shader_program(defaultShaderHandle);
     shutdown_shader_system();
-    shutdown_render_device();
+    release_device_if_opened(backendOpenedDevice);
     reset_backend_on_failure();
     return false;
   }
@@ -378,7 +391,7 @@ bool init_backend_core(BackendState &backend) noexcept {
     destroy_shader_program(pbrShaderHandle);
     destroy_shader_program(defaultShaderHandle);
     shutdown_shader_system();
-    shutdown_render_device();
+    release_device_if_opened(backendOpenedDevice);
     reset_backend_on_failure();
     return false;
   }
@@ -399,7 +412,7 @@ bool init_backend_core(BackendState &backend) noexcept {
     destroy_shader_program(pbrShaderHandle);
     destroy_shader_program(defaultShaderHandle);
     shutdown_shader_system();
-    shutdown_render_device();
+    release_device_if_opened(backendOpenedDevice);
     reset_backend_on_failure();
     return false;
   }

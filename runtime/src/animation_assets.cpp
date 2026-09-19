@@ -2,8 +2,7 @@
 // .skel skeletons and .anim clips read through the VFS and validated
 // against the shared binary formats before evaluation ever touches them;
 // each load also routes through the shared cooked-asset staleness check
-// (issue #91) and the cook-generation gate (audit #211) via its owning
-// mesh's sidecars.
+// and the cook-generation gate via its owning mesh's sidecars.
 
 #include "engine/runtime/animation.h"
 
@@ -29,7 +28,7 @@ namespace {
 // that is expensive but unallocatable on a constrained device). 8M floats
 // (32 MiB) comfortably covers any authored clip while giving hostile or
 // corrupt headers a small-file rejection path that never reaches
-// allocation (audit #174).
+// allocation.
 constexpr std::uint32_t kMaxAnimPayloadFloats = 8U * 1024U * 1024U;
 
 /// Logs one load failure with its virtual path.
@@ -95,7 +94,7 @@ bool owning_mesh_virtual_path(const char *virtualPath, char *outPath,
 }
 
 /// Routes a cooked .skel/.anim load through the shared once-per-asset
-/// staleness check (issue #91) and the cook-generation gate (#211) by
+/// staleness check and the cook-generation gate by
 /// resolving and reusing the owning mesh's sidecars — skeletons and clips
 /// are outputs of the mesh's cook, so its stamp certifies them. Returns
 /// false when that generation is torn or mixed; stays silent and accepts
@@ -238,7 +237,7 @@ bool load_animation_clip_asset(const char *virtualPath,
           base + sizeof(header));
       // Nothrow allocation: an unallocatable (but header/size-validated)
       // payload is a recoverable load failure, never process termination
-      // under the no-exception build (audit #174).
+      // under the no-exception build.
       if (!clip.payload.allocate(header.payloadFloatCount)) {
         static_cast<void>(fail(virtualPath, "clip payload allocation failed"));
       } else {
@@ -282,8 +281,7 @@ bool load_animation_clip_asset(const char *virtualPath,
 
         if (tracksValid) {
           // Move, not copy: payload is a move-only nothrow buffer, so
-          // publishing the decoded clip never allocates a second time
-          // (audit #174).
+          // publishing the decoded clip never allocates a second time.
           *outClip = std::move(clip);
           ok = true;
         } else {

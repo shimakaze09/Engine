@@ -45,6 +45,10 @@ struct InputAction final {
   ActionCallback callback = nullptr;
   void *userData = nullptr;
   bool occupied = false;
+  /// True once the user rebound the action or a loaded bindings document
+  /// restored it: a script registering the same name afterwards supplies
+  /// a default and leaves these bindings alone.
+  bool persisted = false;
 };
 
 // ---------------------------------------------------------------------------
@@ -86,6 +90,9 @@ struct InputAxisMapping final {
   AxisCallback callback = nullptr;
   void *userData = nullptr;
   bool occupied = false;
+  /// As InputAction::persisted: a restored or user-edited axis keeps its
+  /// sources when a script registers the name again.
+  bool persisted = false;
 };
 
 // ---------------------------------------------------------------------------
@@ -97,7 +104,7 @@ bool initialize_input_mapper() noexcept;
 void shutdown_input_mapper() noexcept;
 // Drops every action/axis callback registration (script-owned userData)
 // while keeping the persisted key mappings; part of the run-scoped input
-// reset (#168, see core::clear_gameplay_bindings).
+// reset.
 void clear_action_callbacks() noexcept;
 
 // ---------------------------------------------------------------------------

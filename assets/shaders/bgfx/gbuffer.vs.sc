@@ -1,7 +1,7 @@
 $input a_position, a_normal, a_texcoord0
 $output v_worldpos, v_normal, v_texcoord0
 
-// G-buffer vertex stage (bgfx port of gbuffer.vert, #138): the
+// G-buffer vertex stage: the
 // non-instanced, non-skinned path incl. foliage wind. Instanced and
 // SKINNED variants land with the instancing and skinning units (the
 // flush gates both on this backend until then). Scalar GL uniforms

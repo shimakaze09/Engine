@@ -7,6 +7,7 @@ import os
 import struct
 import sys
 
+from gen_common import publish_set
 from gltf_writer import GltfBufferBuilder
 
 OUT_GLTF = sys.argv[1] if len(sys.argv) > 1 else "assets/character.gltf"
@@ -193,8 +194,9 @@ gltf = {
     "animations": gltf_animations,
 }
 
-# Stage both outputs, then commit atomically so an interrupted run can
-# never leave a mixed-generation .gltf/.bin pair (audit M-27).
+# Stage both outputs, then publish them behind the directory manifest the
+# asset packer validates against, so an interrupted run can never be
+# cooked as a mixed-generation .gltf/.bin pair (audit M-27, #351).
 with open(OUT_BIN + ".tmp", "wb") as f:
     f.write(bytes(buffer.blob))
     f.flush()
@@ -203,8 +205,7 @@ with open(OUT_GLTF + ".tmp", "w", newline="\n") as f:
     json.dump(gltf, f, separators=(",", ":"))
     f.flush()
     os.fsync(f.fileno())
-os.replace(OUT_BIN + ".tmp", OUT_BIN)
-os.replace(OUT_GLTF + ".tmp", OUT_GLTF)
+publish_set([(OUT_BIN + ".tmp", OUT_BIN), (OUT_GLTF + ".tmp", OUT_GLTF)])
 print(f"wrote {OUT_GLTF} ({vcount} verts, {icount} indices, "
       f"{len(JOINTS)} joints, {len(gltf_animations)} clips, "
       f"bin {len(buffer.blob)} bytes)")

@@ -2,6 +2,8 @@
 
 #include "input_bindings.h"
 
+#include "binding_util.h"
+
 extern "C" {
 #include "lua.h"
 }
@@ -383,7 +385,7 @@ int lua_engine_rebind_action(lua_State *state) noexcept {
 /// Confines a script-supplied config name strictly under the save directory.
 bool resolve_input_config_path(const char *name, char *out,
                                std::size_t capacity) noexcept {
-  if (!core::vfs_path_is_jailed(name)) {
+  if (!script_path_in_jail(name, "input config")) {
     return false;
   }
   char saveDir[512] = {};

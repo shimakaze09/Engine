@@ -1,4 +1,4 @@
-// Implements the bgfx render device backend (#138): resources, views,
+// Implements the bgfx render device backend: resources, views,
 // render state, and draws over the engine RenderDevice table, with
 // generational slot tables, stale-handle detection, and
 // dropped-operation diagnostics (the program and shader-parameter path
@@ -279,7 +279,7 @@ DeviceBufferHandle bgfx_create_buffer(const BufferDesc &desc) noexcept {
 bool bgfx_realize_vertex_buffer(BgfxBufferRecord *record,
                                 std::int32_t strideBytes,
                                 const VertexLayout *engineLayout) noexcept {
-  if (bgfx::isValid(record->vertex)) {
+  if (bgfx::isValid(record->vertex) || record->streamLayoutValid) {
     return record->strideBytes == strideBytes;
   }
   if (strideBytes <= 0) {
@@ -292,6 +292,14 @@ bool bgfx_realize_vertex_buffer(BgfxBufferRecord *record,
     }
   } else {
     bgfx_stride_layout(strideBytes, &strideLayout);
+  }
+  if (record->access == BufferAccess::Stream) {
+    // Stream data stays CPU-side and is re-supplied as transient data on
+    // every draw; only the layout and stride are fixed here.
+    record->streamLayout = strideLayout;
+    record->streamLayoutValid = true;
+    record->strideBytes = strideBytes;
+    return true;
   }
   const std::uint32_t count = static_cast<std::uint32_t>(
       (record->sizeBytes > strideBytes) ? (record->sizeBytes / strideBytes)
@@ -426,7 +434,7 @@ DeviceTextureHandle bgfx_create_texture(const TextureDesc &desc) noexcept {
   // callers all have a fallback) instead of reaching the backend API —
   // D3D rejects >16384 with E_INVALIDARG and bgfx's own guard lets a
   // single oversized axis through (found on a 4K fullscreen drawable
-  // by the one-row-per-tile culling texture, #301 hardware runs).
+  // by the one-row-per-tile culling texture).
   {
     const auto maxDim =
         static_cast<std::int32_t>(bgfx::getCaps()->limits.maxTextureSize);
@@ -487,7 +495,7 @@ DeviceTextureHandle bgfx_create_texture(const TextureDesc &desc) noexcept {
       core::log_message(core::LogLevel::Info, "render_device",
                         "bgfx backend: runtime mip generation "
                         "unavailable; levels beyond 0 stay empty until "
-                        "the cook supplies them (#138 Phase C)");
+                        "the cook supplies them");
     }
   }
 
@@ -693,6 +701,36 @@ bool bgfx_set_geometry_instance_stream(DeviceGeometryHandle geometry,
   return true;
 }
 
+/// Binds a stream-access vertex buffer's CPU copy as this draw's own
+/// transient vertex data: valid for the frame, never shared with
+/// another draw's update. False (drop recorded) when the request exceeds
+/// the staged bytes or bgfx's per-frame transient budget.
+bool bgfx_bind_transient_vertices(const BgfxBufferRecord &vertex,
+                                  std::int32_t firstVertex,
+                                  std::uint32_t count) noexcept {
+  const std::int64_t stride = vertex.strideBytes;
+  const std::int64_t begin = static_cast<std::int64_t>(firstVertex) * stride;
+  const std::int64_t bytes = static_cast<std::int64_t>(count) * stride;
+  if ((vertex.staging == nullptr) || (firstVertex < 0) || (count == 0U) ||
+      ((begin + bytes) > static_cast<std::int64_t>(vertex.sizeBytes))) {
+    drop_operation("draw: stream vertex range exceeds staged data");
+    return false;
+  }
+  if (bgfx::getAvailTransientVertexBuffer(count, vertex.streamLayout) <
+      count) {
+    drop_operation("draw: transient vertex budget exhausted this frame");
+    return false;
+  }
+  bgfx::TransientVertexBuffer transient{};
+  bgfx::allocTransientVertexBuffer(&transient, count, vertex.streamLayout);
+  std::memcpy(transient.data,
+              static_cast<const unsigned char *>(vertex.staging) + begin,
+              static_cast<std::size_t>(bytes));
+  bgfx::setVertexBuffer(0U, &transient, 0U, count);
+  ++device_context().stats.transientStreamUploads;
+  return true;
+}
+
 /// Applies the geometry's streams for one draw; false (with the drop
 /// recorded) when a referenced buffer went stale. Attribute-less
 /// geometry binds the backend-owned fullscreen triangle stream.
@@ -707,14 +745,21 @@ bool bgfx_apply_geometry(const BgfxGeometryRecord &record,
     return true;
   }
   BgfxBufferRecord *vertex = ctx.buffers.resolve(record.vertexBuffer);
-  if ((vertex == nullptr) || !bgfx::isValid(vertex->vertex)) {
-    drop_operation("draw: stale or unrealized vertex buffer");
+  if (vertex == nullptr) {
+    drop_operation("draw: stale vertex buffer");
     return false;
   }
   std::uint32_t count = static_cast<std::uint32_t>(vertexCount);
   if ((vertexCount <= 0) && (record.vertexStride > 0)) {
     count = static_cast<std::uint32_t>(vertex->sizeBytes /
                                        record.vertexStride);
+  }
+  if (vertex->streamLayoutValid) {
+    return bgfx_bind_transient_vertices(*vertex, firstVertex, count);
+  }
+  if (!bgfx::isValid(vertex->vertex)) {
+    drop_operation("draw: unrealized vertex buffer");
+    return false;
   }
   bgfx::setVertexBuffer(0U, vertex->vertex,
                         static_cast<std::uint32_t>(firstVertex), count);
@@ -793,7 +838,8 @@ void bgfx_draw_indexed_instanced(DeviceGeometryHandle geometry,
   BgfxBufferRecord *index = ctx.buffers.resolve(record->indexBuffer);
   BgfxBufferRecord *stream = ctx.buffers.resolve(record->instanceBuffer);
   if ((index == nullptr) || !bgfx::isValid(index->index) ||
-      (stream == nullptr) || !bgfx::isValid(stream->vertex)) {
+      (stream == nullptr) ||
+      (!bgfx::isValid(stream->vertex) && !stream->streamLayoutValid)) {
     drop_operation("draw_indexed_instanced: stale buffer");
     bgfx::discard();
     return;
@@ -804,8 +850,38 @@ void bgfx_draw_indexed_instanced(DeviceGeometryHandle geometry,
   }
   bgfx::setIndexBuffer(index->index, 0U,
                        static_cast<std::uint32_t>(indexCount));
-  bgfx::setInstanceDataBuffer(stream->vertex, 0U,
-                              static_cast<std::uint32_t>(instanceCount));
+  if (stream->streamLayoutValid) {
+    // Per-draw transient instance data: the batch's matrices are
+    // copied out of the CPU stream now, so a later batch's update to the
+    // same engine buffer cannot reach this draw.
+    const std::uint32_t instances = static_cast<std::uint32_t>(instanceCount);
+    const std::int64_t bytes =
+        static_cast<std::int64_t>(instances) * stream->strideBytes;
+    if ((stream->staging == nullptr) || (instanceCount <= 0) ||
+        (bytes > static_cast<std::int64_t>(stream->sizeBytes)) ||
+        (stream->strideBytes > 0xFFFF)) {
+      drop_operation("draw_indexed_instanced: instance range exceeds staged "
+                     "data");
+      bgfx::discard();
+      return;
+    }
+    const std::uint16_t stride = static_cast<std::uint16_t>(stream->strideBytes);
+    if (bgfx::getAvailInstanceDataBuffer(instances, stride) < instances) {
+      drop_operation("draw_indexed_instanced: transient instance budget "
+                     "exhausted this frame");
+      bgfx::discard();
+      return;
+    }
+    bgfx::InstanceDataBuffer instanceData{};
+    bgfx::allocInstanceDataBuffer(&instanceData, instances, stride);
+    std::memcpy(instanceData.data, stream->staging,
+                static_cast<std::size_t>(bytes));
+    bgfx::setInstanceDataBuffer(&instanceData);
+    ++ctx.stats.transientStreamUploads;
+  } else {
+    bgfx::setInstanceDataBuffer(stream->vertex, 0U,
+                                static_cast<std::uint32_t>(instanceCount));
+  }
   bgfx_submit_draw(
       bgfx_state_bits(ctx.currentState, PrimitiveTopology::Triangles));
 }
@@ -990,8 +1066,7 @@ void bgfx_set_viewport(std::int32_t x, std::int32_t y, std::int32_t w,
     drop_operation("set_viewport: negative extent");
     return;
   }
-  // GL's viewport origin is bottom-left, bgfx's is top-left; the flip
-  // becomes observable (and is resolved) when Phase D ports the passes.
+  // The rect is passed through in bgfx's top-left origin convention.
   bgfx::setViewRect(ctx.currentView, static_cast<std::uint16_t>(x),
                     static_cast<std::uint16_t>(y),
                     static_cast<std::uint16_t>(w),
@@ -1021,8 +1096,8 @@ std::uint64_t bgfx_timestamp_value(DeviceQueryHandle) noexcept { return 0U; }
 std::uint64_t bgfx_native_texture_id(DeviceTextureHandle texture) noexcept {
   BgfxTextureRecord *record =
       device_context().textures.resolve(texture.value);
-  // The bgfx handle index is what a bgfx-backed UI renderer consumes
-  // (the ImGui bgfx backend arrives with Phase D).
+  // The bgfx handle index is what the editor's ImGui bgfx backend
+  // consumes.
   return (record != nullptr) ? static_cast<std::uint64_t>(record->handle.idx)
                              : 0U;
 }
@@ -1044,6 +1119,13 @@ void fill_bgfx_render_device(RenderDevice *device) noexcept {
   // 16-unit floor through this, gating the deferred pass off on web.
   device->caps.maxTextureSamplers = static_cast<std::uint16_t>(
       bgfx::getCaps()->limits.maxTextureSamplers);
+  {
+    const auto reported =
+        static_cast<std::int32_t>(bgfx::getCaps()->limits.maxTextureSize);
+    if (reported > 0) {
+      device->caps.maxTextureDimension = reported;
+    }
+  }
   // bgfx reports the live API's conventions: homogeneousDepth means the
   // GL [-1, 1] clip range; the engine's projection builders key off
   // these instead of assuming GL.
@@ -1112,7 +1194,7 @@ bool initialize_render_device() noexcept {
     return true;
   }
 
-  // #196 parity: the null backend stays selectable so headless pipeline
+  // The null backend stays selectable so headless pipeline
   // tests behave identically on either compiled backend.
   if (core::cvar_get_bool("r_null_device", false)) {
     fill_null_render_device(&ctx.device);
@@ -1159,7 +1241,7 @@ bool initialize_render_device() noexcept {
   } else {
 #ifdef _WIN32
     // "auto" picks Vulkan explicitly on Windows: it is the proven
-    // backend on the canonical spirv cook. The #301 shadow-array unit
+    // backend on the canonical spirv cook. The shadow-array unit
     // map fits DXBC and Windows builds cook the dx11 profile, so the
     // D3D backends are runnable — but they stay explicit d3d11/d3d12
     // opt-ins until verified, an owner call to flip.
@@ -1271,10 +1353,33 @@ const RenderDevice *render_device() noexcept {
   return &device_context().device;
 }
 
+namespace {
+
+/// The one pending readback request; empty when none is pending.
+char g_requestedScreenshotPath[512] = {};
+
+} // namespace
+
+bool render_device_bgfx_request_screenshot(const char *path) noexcept {
+  if (path == nullptr) {
+    return false;
+  }
+  const std::size_t length = std::strlen(path);
+  if ((length == 0U) || (length >= sizeof(g_requestedScreenshotPath))) {
+    return false;
+  }
+  std::memcpy(g_requestedScreenshotPath, path, length + 1U);
+  return true;
+}
+
 void render_device_bgfx_frame() noexcept {
   BgfxDeviceContext &ctx = device_context();
   if (!ctx.initialized || (ctx.mode != BgfxBackendMode::Bgfx)) {
     return;
+  }
+  if (g_requestedScreenshotPath[0] != '\0') {
+    bgfx::requestScreenShot(BGFX_INVALID_HANDLE, g_requestedScreenshotPath);
+    g_requestedScreenshotPath[0] = '\0';
   }
   // Diagnostic capture: with ENGINE_BGFX_SCREENSHOT=<path.tga> in the
   // environment, the presented back buffer is written there every ~2
@@ -1288,8 +1393,15 @@ void render_device_bgfx_frame() noexcept {
       bgfx::requestScreenShot(BGFX_INVALID_HANDLE, screenshotPath);
     }
   }
+  bgfx::frame();
   // Re-reset the swapchain when the drawable or vsync intent changed
   // (r_vsync applies live, matching the GL path's swap-interval cvar).
+  // Only here, between one frame's submit and the next frame's first bind:
+  // bgfx::reset points every view back at the back buffer, so a reset
+  // issued while a frame's views are claimed sends each of its passes
+  // there and leaves their targets unwritten — and whatever is rendered
+  // once and then cached, the shadow cascades and the BRDF lookup among
+  // them, keeps the missing result.
   int width = 0;
   int height = 0;
   core::render_drawable_size(&width, &height);
@@ -1304,7 +1416,6 @@ void render_device_bgfx_frame() noexcept {
                 static_cast<std::uint32_t>(height),
                 vsync ? BGFX_RESET_VSYNC : BGFX_RESET_NONE);
   }
-  bgfx::frame();
   reset_views();
 }
 

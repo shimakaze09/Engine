@@ -1,0 +1,173 @@
+{
+ "files": {
+  "barrel.bin": {
+   "bytes": 4968,
+   "fnv1a64": "da1beb72257e6729"
+  },
+  "barrel.gltf": {
+   "bytes": 1132,
+   "fnv1a64": "628cbf6f1afcaccb"
+  },
+  "bush.bin": {
+   "bytes": 1944,
+   "fnv1a64": "3d414d11b9145bcd"
+  },
+  "bush.gltf": {
+   "bytes": 1089,
+   "fnv1a64": "dbef8deb5d5e56b5"
+  },
+  "coin.bin": {
+   "bytes": 1992,
+   "fnv1a64": "f861730af68cfd55"
+  },
+  "coin.gltf": {
+   "bytes": 1091,
+   "fnv1a64": "b33ad618bcfc59db"
+  },
+  "crate.bin": {
+   "bytes": 1296,
+   "fnv1a64": "f04f63cb60644edd"
+  },
+  "crate.gltf": {
+   "bytes": 1094,
+   "fnv1a64": "59189787ecf4e7c2"
+  },
+  "fence_post.bin": {
+   "bytes": 648,
+   "fnv1a64": "fda598099aa287a5"
+  },
+  "fence_post.gltf": {
+   "bytes": 1105,
+   "fnv1a64": "434be845877d8c2d"
+  },
+  "fence_rail.bin": {
+   "bytes": 648,
+   "fnv1a64": "77b111fdac8ae865"
+  },
+  "fence_rail.gltf": {
+   "bytes": 1104,
+   "fnv1a64": "f3bc10817a2e0c49"
+  },
+  "flag_banner.bin": {
+   "bytes": 648,
+   "fnv1a64": "5f97b349be197405"
+  },
+  "flag_banner.gltf": {
+   "bytes": 1128,
+   "fnv1a64": "fbc6f17792caaa53"
+  },
+  "flag_pole.bin": {
+   "bytes": 1320,
+   "fnv1a64": "e18bdb103e0d7189"
+  },
+  "flag_pole.gltf": {
+   "bytes": 1105,
+   "fnv1a64": "e58b53a32e34fb14"
+  },
+  "gem.bin": {
+   "bytes": 624,
+   "fnv1a64": "aa4060f669fbc50d"
+  },
+  "gem.gltf": {
+   "bytes": 1080,
+   "fnv1a64": "a8aa4fe38d06afb5"
+  },
+  "log.bin": {
+   "bytes": 1488,
+   "fnv1a64": "3e5083e0fe2ecec0"
+  },
+  "log.gltf": {
+   "bytes": 1133,
+   "fnv1a64": "cae422e4e347db11"
+  },
+  "mushroom.bin": {
+   "bytes": 2388,
+   "fnv1a64": "11ecd16fae9916ab"
+  },
+  "mushroom.gltf": {
+   "bytes": 1147,
+   "fnv1a64": "5705a945f17ab190"
+  },
+  "pillar.bin": {
+   "bytes": 2952,
+   "fnv1a64": "d9692105ccca773d"
+  },
+  "pillar.gltf": {
+   "bytes": 1103,
+   "fnv1a64": "ebf7e0ef4d1f2ff0"
+  },
+  "plank.bin": {
+   "bytes": 648,
+   "fnv1a64": "7d091bb473a26d05"
+  },
+  "plank.gltf": {
+   "bytes": 1087,
+   "fnv1a64": "6b5ccd2915dfbef4"
+  },
+  "platform_round.bin": {
+   "bytes": 2328,
+   "fnv1a64": "c966a5c8dca3c545"
+  },
+  "platform_round.gltf": {
+   "bytes": 1150,
+   "fnv1a64": "a198e1f5fc503231"
+  },
+  "platform_square.bin": {
+   "bytes": 648,
+   "fnv1a64": "9fe49d586e5b84dd"
+  },
+  "platform_square.gltf": {
+   "bytes": 1116,
+   "fnv1a64": "e432b5c62177b5d1"
+  },
+  "rock_large.bin": {
+   "bytes": 1944,
+   "fnv1a64": "6d92d8e89b3e5695"
+  },
+  "rock_large.gltf": {
+   "bytes": 1110,
+   "fnv1a64": "5a443c2182acf1eb"
+  },
+  "rock_small.bin": {
+   "bytes": 1296,
+   "fnv1a64": "c50d904c70adeb79"
+  },
+  "rock_small.gltf": {
+   "bytes": 1138,
+   "fnv1a64": "b2fa255653e955b4"
+  },
+  "signpost.bin": {
+   "bytes": 1296,
+   "fnv1a64": "3c41acc21dddf46d"
+  },
+  "signpost.gltf": {
+   "bytes": 1101,
+   "fnv1a64": "23db258f5d0c2dc8"
+  },
+  "stairs.bin": {
+   "bytes": 2592,
+   "fnv1a64": "23d3ef47a808ad7d"
+  },
+  "stairs.gltf": {
+   "bytes": 1112,
+   "fnv1a64": "4b586a1ff14fa543"
+  },
+  "tree_canopy.bin": {
+   "bytes": 1068,
+   "fnv1a64": "e64f04b45d782ee5"
+  },
+  "tree_canopy.gltf": {
+   "bytes": 1138,
+   "fnv1a64": "d11d4a2774f3f98a"
+  },
+  "tree_trunk.bin": {
+   "bytes": 1320,
+   "fnv1a64": "e8730bcca485fbdd"
+  },
+  "tree_trunk.gltf": {
+   "bytes": 1108,
+   "fnv1a64": "8b177392c0193e5a"
+  }
+ },
+ "schema": 1
+}

@@ -33,7 +33,7 @@ TextureHandle load_hdr_equirect_cubemap(const char *virtualPath,
 bool texture_input_size_fits_stb(std::size_t fileSize,
                                  int *outStbSize) noexcept;
 /// Preflights an encoded image header against the decoded-size budget
-/// (audit #210) without decoding: false for an unreadable header,
+/// without decoding: false for an unreadable header,
 /// dimensions over the 16384 cap, or a decoded byte total over 512 MiB
 /// (HDR decodes to 32-bit floats; forcedChannels overrides the header's
 /// channel count when the decode will force one, 0 keeps the header's).

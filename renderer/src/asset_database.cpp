@@ -709,7 +709,7 @@ bool release_texture_asset(AssetDatabase *database, AssetId id) noexcept {
   return true;
 }
 
-// --- Metadata management (#171 C2): thin delegators into the
+// --- Metadata management: thin delegators into the
 // content-owned MetadataStore embedded in this database. ---
 
 bool register_asset_metadata(AssetDatabase *database,

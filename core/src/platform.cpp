@@ -220,7 +220,7 @@ bool initialize_platform_impl(int width, int height, const char *title,
     return true;
   }
 
-  // #196: headless is self-contained — force SDL's dummy video driver so
+  // Headless is self-contained — force SDL's dummy video driver so
   // CI runners with no display still initialize the video subsystem.
   if (headless) {
     static_cast<void>(SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "dummy"));
@@ -243,7 +243,7 @@ bool initialize_platform_impl(int width, int height, const char *title,
     log_sdl_error("gamepad subsystem unavailable; controllers disabled");
   }
 
-  // #196: headless is a hidden window on the dummy driver; the render
+  // Headless is a hidden window on the dummy driver; the render
   // device then stays on the null backend.
   if (headless) {
     g_window = SDL_CreateWindow(title, width, height, SDL_WINDOW_HIDDEN);

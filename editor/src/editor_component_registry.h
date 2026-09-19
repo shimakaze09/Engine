@@ -14,8 +14,8 @@ namespace engine::editor {
 // ENGINE_PERSISTENT_COMPONENT_TABLE (runtime/src/component_registry.h) so a
 // new persistent component type automatically gains an inspector edit slot;
 // forgetting the ENGINE_ICR_ALIAS_<Type>/ENGINE_ICR_MEMBER_<Type> pair for a
-// new row is a compile error (unresolved token), not a silent gap (issue
-// #156). The alias tables exist only to keep the pre-existing, already
+// new row is a compile error (unresolved token), not a silent gap. The
+// alias tables exist only to keep the pre-existing, already
 // call-site-stable enumerator/member names (Mesh, Light, springArm, ...)
 // instead of forcing every reference to the full C++ type name.
 #define ENGINE_ICR_ALIAS(Type) ENGINE_ICR_ALIAS_##Type

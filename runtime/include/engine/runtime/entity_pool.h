@@ -12,9 +12,12 @@ namespace engine::runtime {
 
 /// Pre-allocated entity pool for high-frequency spawn/release patterns.
 /// Entities in the pool are created once and recycled via a free list.
-/// Released entities have all components removed but their handle stays valid,
-/// avoiding the overhead of full create/destroy cycles.
-/// Ownership contract (#57): the pool records the World's content epoch at
+/// A released entity has all components removed and its slot stays
+/// allocated, avoiding the overhead of full create/destroy cycles, but the
+/// handle does not survive the release: recycling advances the slot's
+/// generation, the pool keeps the new handle, and every handle held before
+/// the release is stale.
+/// Ownership contract: the pool records the World's content epoch at
 /// init. When the world's entire contents are replaced (scene load commit,
 /// reset_world), the epoch advances and the pool expires: every operation
 /// fails closed (invalid entity / false / zero), the slots and free list are
@@ -89,13 +92,16 @@ public:
   /// recycle (wrong phase, or a deferred destroy is already queued for
   /// it). The full handle must match so stale-generation handles cannot
   /// free a slot, cleanup runs through the World's guarded recycle
-  /// operation, and the slot is only published free after cleanup
-  /// completes so a reused entity can never inherit state.
+  /// operation — which advances the generation and hands the slot's new
+  /// handle back for the next acquire — and the slot is only published
+  /// free after cleanup completes so a reused entity can never inherit
+  /// state.
   inline bool release(Entity entity) noexcept {
     expire_if_content_replaced();
     for (std::size_t i = 0U; i < m_capacity; ++i) {
       if ((m_entities[i] == entity) && m_inUse[i]) {
-        if ((m_world == nullptr) || !m_world->recycle_entity(entity)) {
+        if ((m_world == nullptr) ||
+            !m_world->recycle_entity(entity, &m_entities[i])) {
           return false;
         }
         m_inUse[i] = false;

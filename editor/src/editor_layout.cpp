@@ -1,4 +1,4 @@
-// Implements the editor's dock/window layout persistence (issue #313).
+// Implements the editor's dock/window layout persistence.
 // ImGui's default ini writer truncates its destination in place and
 // resolves it against the launch working directory, so a crash during
 // its flush loses the whole layout and launching from elsewhere silently

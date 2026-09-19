@@ -4,6 +4,8 @@ engine_add_executable_target(asset_packer
     SOURCES
     main.cpp
     cook_stamp.cpp
+    generated_manifest.cpp
+    generated_manifest.h
     mesh_cook.cpp
     process_run.cpp
     process_run.h
@@ -16,6 +18,8 @@ engine_add_executable_target(asset_packer
     anim_cook.h
     animation_import.h
     cgltf_impl.cpp
+    gltf_bounds.cpp
+    gltf_bounds.h
     dependency_graph.cpp
     dependency_graph.h
     skeleton_import.cpp

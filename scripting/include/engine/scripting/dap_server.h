@@ -21,4 +21,10 @@ bool dap_has_client() noexcept;
 // Poll for new connections (non-blocking). Call once per frame.
 void dap_poll() noexcept;
 
+/// Test seam: once a frame's first write has gone out, the next
+/// `count` socket writes report would-block before any byte moves, so a
+/// short write is forced mid-frame against the production send path
+/// without depending on kernel buffer sizes.
+void dap_inject_would_block(int count) noexcept;
+
 } // namespace engine::scripting

@@ -16,6 +16,7 @@
 
 #include "anim_cook.h"
 #include "engine/core/hash.h"
+#include "engine/core/logging.h"
 #include "engine/core/vfs.h"
 #include "engine/renderer/command_buffer.h"
 #include "engine/runtime/world.h"
@@ -404,6 +405,17 @@ int check_reset_releases_slots() {
 
 /// EXPECTATION: a missing controller path leaves the component unbound and
 /// publishes zero palettes instead of crashing.
+int g_animationErrors = 0;
+
+/// Counts Error lines on the animation channel while registered.
+void count_animation_errors(engine::core::LogLevel level, const char *channel,
+                            const char *, void *) noexcept {
+  if ((level == engine::core::LogLevel::Error) &&
+      (std::strcmp(channel, "animation") == 0)) {
+    ++g_animationErrors;
+  }
+}
+
 int check_missing_controller() {
   engine::runtime::reset_anim_controllers();
   std::unique_ptr<engine::runtime::World> world(
@@ -422,7 +434,18 @@ int check_missing_controller() {
     return 1;
   }
 
+  // Three fixed steps: the failed load is attempted and logged once per
+  // episode, not once per step (#532).
+  g_animationErrors = 0;
+  static_cast<void>(engine::core::initialize_logging());
+  const bool sinkOk =
+      engine::core::log_register_sink(&count_animation_errors, nullptr);
   engine::runtime::update_animations(*world, kFixedDt);
+  engine::runtime::update_animations(*world, kFixedDt);
+  engine::runtime::update_animations(*world, kFixedDt);
+  if (sinkOk) {
+    engine::core::log_unregister_sink(&count_animation_errors, nullptr);
+  }
   const AnimationComponent *bound =
       world->get_animation_component_ptr(entity);
   if ((bound == nullptr) || (bound->controllerSlot != kInvalidAnimSlot) ||
@@ -432,6 +455,23 @@ int check_missing_controller() {
   }
   if (engine::renderer::skin_palette_count() != 0U) {
     std::puts("palette count should be zero");
+    return 1;
+  }
+  if (!sinkOk || (g_animationErrors != 1)) {
+    std::printf("missing controller logged %d error(s) over three steps "
+                "(expected exactly 1)\n",
+                g_animationErrors);
+    return 1;
+  }
+  // A registry reset starts a new episode: the load is attempted again.
+  engine::runtime::reset_anim_controllers();
+  g_animationErrors = 0;
+  if (engine::core::log_register_sink(&count_animation_errors, nullptr)) {
+    engine::runtime::update_animations(*world, kFixedDt);
+    engine::core::log_unregister_sink(&count_animation_errors, nullptr);
+  }
+  if (g_animationErrors != 1) {
+    std::puts("reset must re-arm the failed controller load");
     return 1;
   }
   return 0;

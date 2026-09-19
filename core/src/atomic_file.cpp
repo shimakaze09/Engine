@@ -18,6 +18,7 @@
 #ifdef _WIN32
 #include <process.h>
 #else
+#include <sys/stat.h>
 #include <unistd.h>
 #endif
 
@@ -43,6 +44,76 @@ unsigned long current_process_id() noexcept {
 
 AtomicFileWriter::~AtomicFileWriter() noexcept { abort(); }
 
+namespace {
+
+/// Follows a symlinked destination to the file it names (a bounded
+/// chain, relative targets resolved against the link's directory), so
+/// the replacement lands on that file and the link survives. A
+/// destination that is not a link resolves to itself; a chain deeper
+/// than eight hops is refused. Fixed buffers only: begin() is noexcept
+/// and must not allocate. Windows has no readlink and a symlink there
+/// needs a handle-based query, so the destination is used as given and
+/// a symlinked destination is replaced by a file.
+bool resolve_symlinked_destination(const char *destinationPath, char *out,
+                                   std::size_t outCapacity) noexcept {
+  const std::size_t givenLength = std::strlen(destinationPath);
+  if (givenLength >= outCapacity) {
+    return false;
+  }
+  std::memcpy(out, destinationPath, givenLength + 1U);
+#ifndef _WIN32
+  char target[1024] = {};
+  for (int hop = 0; hop < 8; ++hop) {
+    const ssize_t targetLength = ::readlink(out, target, sizeof(target) - 1U);
+    if (targetLength < 0) {
+      return true; // not a link (or not readable): the path stands
+    }
+    target[targetLength] = '\0';
+    if (target[0] == '/') {
+      if (static_cast<std::size_t>(targetLength) >= outCapacity) {
+        return false;
+      }
+      std::memcpy(out, target, static_cast<std::size_t>(targetLength) + 1U);
+      continue;
+    }
+    const char *slash = std::strrchr(out, '/');
+    const std::size_t directoryLength =
+        (slash != nullptr) ? static_cast<std::size_t>(slash - out) + 1U : 0U;
+    char joined[1024] = {};
+    const int written =
+        std::snprintf(joined, sizeof(joined), "%.*s%s",
+                      static_cast<int>(directoryLength), out, target);
+    if ((written <= 0) || (static_cast<std::size_t>(written) >= sizeof(joined)) ||
+        (static_cast<std::size_t>(written) >= outCapacity)) {
+      return false;
+    }
+    std::memcpy(out, joined, static_cast<std::size_t>(written) + 1U);
+  }
+  return ::readlink(out, target, sizeof(target) - 1U) < 0;
+#else
+  return true;
+#endif
+}
+
+/// Carries the destination's permission bits onto the staged temporary
+/// before any byte is written, so a file the author restricted (chmod
+/// 600) comes back restricted. Best effort: a destination that
+/// does not exist yet takes the process default, and Windows has no
+/// equivalent bits on the temporary.
+void inherit_destination_mode(const char *destination, std::FILE *file) noexcept {
+#ifdef _WIN32
+  static_cast<void>(destination);
+  static_cast<void>(file);
+#else
+  struct stat info{};
+  if ((::stat(destination, &info) == 0) && S_ISREG(info.st_mode)) {
+    static_cast<void>(::fchmod(fileno(file), info.st_mode & 07777U));
+  }
+#endif
+}
+
+} // namespace
+
 // Member state is committed only after every validation and the open
 // succeed, so a refused begin can never arm cleanup with a truncated
 // path that aliases the destination or an unrelated file.
@@ -52,11 +123,8 @@ bool AtomicFileWriter::begin(const char *destinationPath) noexcept {
   }
 
   char destination[sizeof(m_destinationPath)] = {};
-  const int destinationFormatted =
-      std::snprintf(destination, sizeof(destination), "%s", destinationPath);
-  if ((destinationFormatted <= 0) ||
-      (static_cast<std::size_t>(destinationFormatted) >=
-       sizeof(destination))) {
+  if (!resolve_symlinked_destination(destinationPath, destination,
+                                     sizeof(destination))) {
     return false;
   }
 
@@ -64,7 +132,7 @@ bool AtomicFileWriter::begin(const char *destinationPath) noexcept {
       g_tempSerial.fetch_add(1U, std::memory_order_relaxed);
   char temp[sizeof(m_tempPath)] = {};
   const int tempFormatted =
-      std::snprintf(temp, sizeof(temp), "%s.new.%lu.%u", destinationPath,
+      std::snprintf(temp, sizeof(temp), "%s.new.%lu.%u", destination,
                     current_process_id(), serial);
   if ((tempFormatted <= 0) ||
       (static_cast<std::size_t>(tempFormatted) >= sizeof(temp))) {
@@ -82,6 +150,7 @@ bool AtomicFileWriter::begin(const char *destinationPath) noexcept {
   if (file == nullptr) {
     return false;
   }
+  inherit_destination_mode(destination, file);
 
   std::memcpy(m_destinationPath, destination, sizeof(m_destinationPath));
   std::memcpy(m_tempPath, temp, sizeof(m_tempPath));
@@ -115,13 +184,21 @@ bool AtomicFileWriter::commit() noexcept {
 
   // The replacement already happened, so the save is not reportable as a
   // failure — only its power-loss resistance is degraded, and that must
-  // not pass silently.
-  if (outcome == detail::ReplaceOutcome::ReplacedNotDurable) {
+  // not pass silently. Both degraded outcomes are reported: a platform
+  // that offers no directory-sync primitive leaves the entry exactly as
+  // undurable as one whose sync failed, and saying nothing would make
+  // that the one degradation the log never shows.
+  if ((outcome == detail::ReplaceOutcome::ReplacedNotDurable) ||
+      (outcome == detail::ReplaceOutcome::ReplacedDurabilityUnavailable)) {
+    const char *reason =
+        (outcome == detail::ReplaceOutcome::ReplacedNotDurable)
+            ? "could not sync its directory entry"
+            : "has no directory-sync primitive on this platform";
     char message[1152] = {};
     std::snprintf(message, sizeof(message),
-                  "wrote '%s' but could not sync its directory entry: the "
-                  "file is in place and may not survive power loss",
-                  m_destinationPath);
+                  "wrote '%s' but %s: the file is in place and may not "
+                  "survive power loss",
+                  m_destinationPath, reason);
     log_message(LogLevel::Error, "core.atomic_file", message);
   }
 
@@ -174,13 +251,19 @@ bool create_directories_durably(const char *directoryPath) noexcept {
 
   // The directory is in place, so this is not reportable as a failure —
   // only the power-loss resistance of its own entry is degraded, and
-  // that must not pass silently.
-  if (outcome == detail::CreateDirectoryOutcome::CreatedNotDurable) {
+  // that must not pass silently. Both degraded outcomes are reported,
+  // for the reason the commit path reports both.
+  if ((outcome == detail::CreateDirectoryOutcome::CreatedNotDurable) ||
+      (outcome == detail::CreateDirectoryOutcome::CreatedDurabilityUnavailable)) {
+    const char *reason =
+        (outcome == detail::CreateDirectoryOutcome::CreatedNotDurable)
+            ? "could not sync its directory entry"
+            : "has no directory-sync primitive on this platform";
     char message[1152] = {};
     std::snprintf(message, sizeof(message),
-                  "created '%s' but could not sync its directory entry: the "
-                  "directory is in place and may not survive power loss",
-                  directoryPath);
+                  "created '%s' but %s: the directory is in place and may "
+                  "not survive power loss",
+                  directoryPath, reason);
     log_message(LogLevel::Error, "core.atomic_file", message);
   }
   return true;

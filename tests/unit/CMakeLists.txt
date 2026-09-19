@@ -46,6 +46,13 @@ engine_add_test_executable(engine_unit_job_ready_queue_capacity
     engine_core
 )
 
+engine_add_test_executable(engine_unit_job_graph_cycle
+    SOURCES
+    job_graph_cycle_test.cpp
+    PRIVATE_DEPS
+    engine_core
+)
+
 engine_add_test_executable(engine_unit_job_wait_tls
     SOURCES
     job_wait_tls_test.cpp
@@ -104,6 +111,34 @@ engine_add_test_executable(engine_unit_device_slot_table
     PRIVATE_DEPS
     engine_core
 )
+
+# Math SIMD/scalar parity: one battery built twice, once taking the SSE2
+# paths the host provides and once forced scalar, compared line for line
+# by script. On a host without SSE2 the script reports itself skipped.
+engine_add_executable_target(engine_test_math_parity_native
+    SOURCES
+    math_parity_battery.cpp
+    PRIVATE_DEPS
+    engine_math
+)
+engine_add_executable_target(engine_test_math_parity_scalar
+    SOURCES
+    math_parity_battery.cpp
+    PRIVATE_DEPS
+    engine_math
+    COMPILE_DEFINITIONS
+    ENGINE_MATH_SSE2=0
+)
+add_test(
+    NAME engine_unit_math_parity
+    COMMAND ${CMAKE_COMMAND}
+        "-DNATIVE=$<TARGET_FILE:engine_test_math_parity_native>"
+        "-DSCALAR=$<TARGET_FILE:engine_test_math_parity_scalar>"
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/math_parity_test.cmake
+)
+set_tests_properties(engine_unit_math_parity PROPERTIES
+    LABELS unit
+    SKIP_REGULAR_EXPRESSION "SKIPPED:")
 
 # bgfx backend device suite (#138 Phases B/C): runs headlessly on
 # bgfx's Noop renderer. When the build also cooks the proving shaders
@@ -396,6 +431,14 @@ engine_add_test_executable(engine_unit_script_physics_finite_args
     engine_runtime
 )
 
+engine_add_test_executable(engine_unit_script_raycast_skip
+    SOURCES
+    script_raycast_skip_test.cpp
+    PRIVATE_DEPS
+    engine_scripting
+    engine_runtime
+)
+
 engine_add_test_executable(engine_unit_script_light_bridge
     SOURCES
     script_light_bridge_test.cpp
@@ -418,6 +461,37 @@ engine_add_test_executable(engine_unit_script_audio_finite_args
     PRIVATE_DEPS
     engine_scripting
     engine_runtime
+)
+
+engine_add_test_executable(engine_unit_save_data_bindings
+    SOURCES
+    save_data_bindings_test.cpp
+    PRIVATE_DEPS
+    engine_scripting
+    engine_runtime
+)
+
+engine_add_test_executable(engine_unit_json_navigation
+    SOURCES
+    json_navigation_test.cpp
+    PRIVATE_DEPS
+    engine_core
+)
+
+engine_add_test_executable(engine_unit_json_scratch
+    SOURCES
+    json_scratch_test.cpp
+    PRIVATE_DEPS
+    engine_core
+)
+
+engine_add_test_executable(engine_unit_script_mount_resolution
+    SOURCES
+    script_mount_resolution_test.cpp
+    PRIVATE_DEPS
+    engine_scripting
+    engine_runtime
+    engine_core
 )
 
 engine_add_test_executable(engine_unit_input_config_lua
@@ -874,6 +948,19 @@ engine_add_test_executable(engine_unit_editor_component_registry
     SDL_MAIN_HANDLED
 )
 
+engine_add_test_executable(engine_unit_editor_import_settings
+    SOURCES
+    editor_import_settings_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/editor/include
+    ${CMAKE_SOURCE_DIR}/editor/src
+    ${CMAKE_SOURCE_DIR}/runtime/src
+    PRIVATE_DEPS
+    engine_editor
+    COMPILE_DEFINITIONS
+    SDL_MAIN_HANDLED
+)
+
 engine_add_test_executable(engine_unit_editor_asset_index
     SOURCES
     editor_asset_index_test.cpp
@@ -902,9 +989,15 @@ engine_add_test_executable(engine_unit_shader_system
 engine_add_test_executable(engine_unit_audio
     SOURCES
     audio_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/audio/src
     PRIVATE_DEPS
     engine_audio
 )
+# Device-dependent checks report SKIPPED: when no audio device initializes,
+# so ctest shows the run as skipped rather than counting them as passes.
+set_tests_properties(engine_unit_audio PROPERTIES
+    SKIP_REGULAR_EXPRESSION "SKIPPED:")
 
 engine_add_test_executable(engine_unit_texture_loader
     SOURCES
@@ -1195,19 +1288,6 @@ engine_add_test_executable(engine_unit_lru_cache
     engine_content
 )
 
-# ---- P1-M4-E: Deterministic Cooking ----
-
-engine_add_test_executable(engine_unit_deterministic_cook
-    SOURCES
-    deterministic_cook_test.cpp
-    PRIVATE_DEPS
-    engine_core
-)
-
-if(WIN32)
-    target_compile_definitions(engine_unit_deterministic_cook PRIVATE _CRT_SECURE_NO_WARNINGS)
-endif()
-
 engine_add_test_executable(engine_unit_import_settings
     SOURCES
     import_settings_test.cpp
@@ -1216,6 +1296,64 @@ engine_add_test_executable(engine_unit_import_settings
 )
 
 # ---- P1-M5: Deferred Rendering ----
+
+engine_add_test_executable(engine_unit_light_collect_cast_shadow
+    SOURCES
+    light_collect_cast_shadow_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/runtime/src
+    PRIVATE_DEPS
+    engine_runtime
+)
+
+engine_add_test_executable(engine_unit_forward_light_selection
+    SOURCES
+    forward_light_selection_test.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_flush_uniforms.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_context.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_math.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/render_settings.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/renderer/include
+    ${CMAKE_SOURCE_DIR}/renderer/src
+    PRIVATE_DEPS
+    engine_core
+    engine_math
+)
+
+# Compiles the resource TUs directly so the test's render_device() is the
+# device they create through.
+engine_add_test_executable(engine_unit_render_target_wrap
+    SOURCES
+    render_target_wrap_test.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_capture.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_post_resources.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_context.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/pass_resources.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/renderer/include
+    ${CMAKE_SOURCE_DIR}/renderer/src
+    PRIVATE_DEPS
+    engine_core
+    engine_math
+)
+
+engine_add_test_executable(engine_unit_shadow_caster_flush
+    SOURCES
+    shadow_caster_flush_test.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_flush_shadows.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_context.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_math.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/render_settings.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/shadow_map.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/pass_resources.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/renderer/include
+    ${CMAKE_SOURCE_DIR}/renderer/src
+    PRIVATE_DEPS
+    engine_core
+    engine_math
+)
 
 engine_add_test_executable(engine_unit_deferred_light_component
     SOURCES
@@ -1229,6 +1367,7 @@ engine_add_test_executable(engine_unit_light_culling
     light_culling_test.cpp
     PRIVATE_DEPS
     engine_renderer
+    engine_core
     engine_math
 )
 
@@ -1463,6 +1602,7 @@ if(ENGINE_BUILD_TOOLS)
         SOURCES
         animation_import_test.cpp
         ${CMAKE_SOURCE_DIR}/tools/asset_packer/animation_import.cpp
+        ${CMAKE_SOURCE_DIR}/tools/asset_packer/gltf_bounds.cpp
         ${CMAKE_SOURCE_DIR}/tools/asset_packer/cgltf_impl.cpp
         PRIVATE_INCLUDE_DIRS
         ${CMAKE_SOURCE_DIR}/tools/asset_packer
@@ -1496,12 +1636,25 @@ if(ENGINE_BUILD_TOOLS)
         _CRT_SECURE_NO_WARNINGS
     )
 
+    engine_add_test_executable(engine_unit_generated_manifest
+        SOURCES
+        generated_manifest_test.cpp
+        ${CMAKE_SOURCE_DIR}/tools/asset_packer/generated_manifest.cpp
+        PRIVATE_INCLUDE_DIRS
+        ${CMAKE_SOURCE_DIR}/tools/asset_packer
+        PRIVATE_DEPS
+        engine_core
+        COMPILE_DEFINITIONS
+        _CRT_SECURE_NO_WARNINGS
+    )
+
     engine_add_test_executable(engine_unit_thumbnail_paths
         SOURCES
         thumbnail_paths_test.cpp
         ${CMAKE_SOURCE_DIR}/tools/asset_packer/thumbnail_generate.cpp
         ${CMAKE_SOURCE_DIR}/tools/asset_packer/thumbnail_resample.cpp
         ${CMAKE_SOURCE_DIR}/tools/asset_packer/mesh_cook.cpp
+        ${CMAKE_SOURCE_DIR}/tools/asset_packer/gltf_bounds.cpp
         ${CMAKE_SOURCE_DIR}/tools/asset_packer/cook_stamp.cpp
         ${CMAKE_SOURCE_DIR}/tools/asset_packer/dependency_graph.cpp
         ${CMAKE_SOURCE_DIR}/tools/asset_packer/cgltf_impl.cpp
@@ -1535,6 +1688,7 @@ if(ENGINE_BUILD_TOOLS)
         SOURCES
         skinned_mesh_cook_test.cpp
         ${CMAKE_SOURCE_DIR}/tools/asset_packer/mesh_cook.cpp
+        ${CMAKE_SOURCE_DIR}/tools/asset_packer/gltf_bounds.cpp
         ${CMAKE_SOURCE_DIR}/tools/asset_packer/cook_stamp.cpp
         ${CMAKE_SOURCE_DIR}/tools/asset_packer/dependency_graph.cpp
         ${CMAKE_SOURCE_DIR}/tools/asset_packer/cgltf_impl.cpp

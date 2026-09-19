@@ -1,5 +1,5 @@
 // Pure engine-to-bgfx descriptor translation for the bgfx render device
-// backend (#138 Phase B): render-state bits, texture formats and texel
+// backend: render-state bits, texture formats and texel
 // staging shapes, sampler and clear flags, and vertex semantic/layout
 // mapping. Everything here is side-effect free so unit tests can pin the
 // mapping without initializing bgfx; the stateful backend lives in

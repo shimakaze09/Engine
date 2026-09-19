@@ -1,4 +1,4 @@
-// Authoritative persistent-component registry (audit N-16). One X-macro row
+// Authoritative persistent-component registry. One X-macro row
 // per serialized component type binds the C++ type, its stable serialized
 // name, and the World get/add/remove accessor triple. world_component_counts_match
 // and copy_world_contents in scene_serializer.cpp and the codec
@@ -6,12 +6,12 @@
 // table, and the static_asserts below fail the build whenever the table and
 // World::PersistentComponentTypes disagree in either direction — a component
 // type cannot join the World's serializable set without a registry row, and a
-// row cannot outlive its World type. Issue #156 also expands this table to
+// row cannot outlive its World type. also expands this table to
 // generate the editor Inspector's component-edit type/snapshot/dispatch code
 // (editor_component_registry.h), so RemoveFn keeps the row a complete
 // get/add/remove triple instead of requiring a second lookup elsewhere.
 //
-// Adding a persistent component (#166): add the type to
+// Adding a persistent component: add the type to
 // World::PersistentComponentTypes, one row here, one row in world.h's
 // ENGINE_WORLD_UNIFORM_STORAGE_TABLE (plus the SparseSet member/alias/
 // capacity it names), reflection registration, and — only when the type

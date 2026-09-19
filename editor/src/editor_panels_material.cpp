@@ -52,9 +52,8 @@ bool draw_scalar_fields(renderer::Material &params) noexcept {
 }
 
 /// Draws every texture-slot picker; returns true if any changed. Pickers
-/// share the #157/#218 searchable asset-reference widget (issue #160
-/// acceptance: texture slots use the same picker as every other asset
-/// reference, not a raw path field).
+/// share the searchable asset-reference widget, so texture slots use the
+/// same picker as every other asset reference, not a raw path field.
 bool draw_texture_slot_fields(renderer::MaterialTextureSlots &slots) noexcept {
   bool changed = false;
   changed |= draw_asset_reference_picker(

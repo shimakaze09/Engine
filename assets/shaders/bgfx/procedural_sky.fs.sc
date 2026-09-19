@@ -1,6 +1,6 @@
 $input v_dir
 
-// Procedural scatter sky (bgfx port of procedural_sky.frag, #138):
+// Procedural scatter sky:
 // Rayleigh/Mie-style gradient with a sun disc and halo. Scalar GL
 // uniforms become vec4 read through .x/.xyz.
 

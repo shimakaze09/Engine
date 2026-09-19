@@ -1,12 +1,12 @@
 $input v_texcoord0
 
-// Deferred lighting fragment stage (bgfx port of deferred_lighting.frag,
-// #138): Cook-Torrance shading of the G-buffer with tile-culled point/
+// Deferred lighting fragment stage: Cook-Torrance shading of the
+// G-buffer with tile-culled point/
 // spot lights fetched from the R32F light-data and tile textures
 // (texelFetch; layouts match light_culling.h). Sampler stages are baked
 // to the flush's unit assignment (G-buffer 0-3, tile 4, SSAO 5, light
 // data 6, cascade array 7, spot array 8, point cubes 9-12 — max
-// register 12, inside DXBC's 16-sampler cap; #301) with full
+// register 12, inside DXBC's 16-sampler cap) with full
 // CSM/spot/point shadow sampling. IBL sampling still awaits the environment textures'
 // arrival under this backend: ambient takes the constant-term branch.
 // Scalar and integer GL uniforms become vec4 read through .x.
@@ -50,7 +50,7 @@ SAMPLER2D(uGBufferEmissive, 2);
 SAMPLER2D(uGBufferDepth, 3);
 SAMPLER2D(uTileLightTex, 4);
 SAMPLER2D(uSsaoTexture, 5);
-// #301 unit map: the cascade and spot sets are Tex2DArrays (one
+// Unit map: the cascade and spot sets are Tex2DArrays (one
 // register each), so the deferred map tops out at register 12 and fits
 // DXBC's 16-sampler cap and WebGL2's 16-unit floor.
 SAMPLER2D(uLightDataTex, 6);
@@ -69,6 +69,7 @@ uniform vec4 uDirLightColor;      // .xyz
 uniform vec4 uCameraPos;          // .xyz
 uniform vec4 uCameraForwardOrtho; // xyz forward, w 1 when orthographic
 uniform vec4 uTileCountX;         // .x
+uniform vec4 uTileTableRowTiles;  // .x tiles per row of the tile table
 uniform vec4 uScreenSize;         // .xy (tile row flip on y-down APIs)
 uniform vec4 uPointLightCount;    // .x
 uniform vec4 uSpotLightCount;     // .x
@@ -409,20 +410,26 @@ void main() {
 #else
     int tileY = int(uScreenSize.y - gl_FragCoord.y) / 16;
 #endif
-    // 2-D tile table (#301 hardware runs): one texel row per tile ROW
-    // with kTileDataWidth texels per tile along x — one texture row per
-    // tile overflowed D3D's 16384 dimension cap at 4K.
-    int tileBase = tileX * TILE_DATA_WIDTH;
+    // The tile table is the flat, row-major tile array cut into texture
+    // rows of uTileTableRowTiles tiles (TileTextureLayout, CPU side). The
+    // row length is not the screen's tile-column count: a table as wide
+    // as the screen passes the 16384 texture dimension cap on a drawable
+    // wider than about 5232 px. Whole-number division recovers the row;
+    // the max() keeps an unset uniform from dividing by zero.
+    int tileFlat = tileY * int(uTileCountX.x) + tileX;
+    int tileRowTiles = max(int(uTileTableRowTiles.x), 1);
+    int tileRow = tileFlat / tileRowTiles;
+    int tileBase = (tileFlat - tileRow * tileRowTiles) * TILE_DATA_WIDTH;
 
     int pointLightCount = int(uPointLightCount.x);
     int tilePointCount =
-        int(texelFetch(uTileLightTex, ivec2(tileBase, tileY), 0).r);
+        int(texelFetch(uTileLightTex, ivec2(tileBase, tileRow), 0).r);
     for (int i = 0; i < TILE_MAX_POINT_LIGHTS; ++i) {
         if (i >= tilePointCount) {
             break;
         }
         int lightIdx =
-            int(texelFetch(uTileLightTex, ivec2(tileBase + 1 + i, tileY), 0).r);
+            int(texelFetch(uTileLightTex, ivec2(tileBase + 1 + i, tileRow), 0).r);
         if ((lightIdx < 0) || (lightIdx >= pointLightCount)) {
             continue;
         }
@@ -446,13 +453,13 @@ void main() {
     int spotLightCount = int(uSpotLightCount.x);
     int spotOffset = TILE_MAX_POINT_LIGHTS + 1;
     int tileSpotCount =
-        int(texelFetch(uTileLightTex, ivec2(tileBase + spotOffset, tileY), 0).r);
+        int(texelFetch(uTileLightTex, ivec2(tileBase + spotOffset, tileRow), 0).r);
     for (int i = 0; i < 16; ++i) {
         if (i >= tileSpotCount) {
             break;
         }
         int lightIdx = int(
-            texelFetch(uTileLightTex, ivec2(tileBase + spotOffset + 1 + i, tileY), 0)
+            texelFetch(uTileLightTex, ivec2(tileBase + spotOffset + 1 + i, tileRow), 0)
                 .r);
         if ((lightIdx < 0) || (lightIdx >= spotLightCount)) {
             continue;

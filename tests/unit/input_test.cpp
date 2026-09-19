@@ -75,6 +75,25 @@ bool test_mouse_state_defaults() noexcept {
   return true;
 }
 
+/// EXPECTATION (#538): fractional wheel steps from a precise trackpad add
+/// up to whole notches instead of truncating to nothing.
+bool test_wheel_accumulates_fractions() noexcept {
+  if (!initialize_input()) {
+    return false;
+  }
+  SDL_Event ev{};
+  ev.type = SDL_EVENT_MOUSE_WHEEL;
+  ev.wheel.y = 0.5F;
+  begin_input_frame();
+  input_process_event(&ev);
+  input_process_event(&ev);
+  input_process_event(&ev);
+  end_input_frame();
+  const int notches = mouse_state().scrollDelta;
+  shutdown_input();
+  return notches == 1;
+}
+
 bool test_action_register() noexcept {
   if (!initialize_input()) {
     return false;
@@ -488,6 +507,7 @@ int main() {
   run("gamepad_slots_keyed_by_instance_id",
       &test_gamepad_slots_keyed_by_instance_id);
   run("bounds_check", &test_bounds_check);
+  run("wheel_accumulates_fractions", &test_wheel_accumulates_fractions);
   run("touch_integrated_lifecycle", &test_touch_integrated_lifecycle);
 
   std::printf("--- %d passed, %d failed ---\n", passed, failed);

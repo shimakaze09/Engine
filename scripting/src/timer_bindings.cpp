@@ -3,6 +3,7 @@
 #include "timer_bindings.h"
 
 #include "binding_util.h"
+#include "lua_state.h"
 
 extern "C" {
 #include "lauxlib.h"
@@ -27,7 +28,6 @@ struct LuaTimerRef final {
 
 LuaTimerRef g_timerLuaRefs[kMaxTimerRefs];
 bool g_timerRefsInit = false;
-lua_State *g_timerLuaState = nullptr;
 
 /// Initializes Lua timer reference storage on first use.
 void ensure_timer_refs_init() noexcept {
@@ -41,9 +41,19 @@ void ensure_timer_refs_init() noexcept {
   g_timerRefsInit = true;
 }
 
-/// Returns the Lua state that owns timer registry refs.
-lua_State *timer_ref_state(lua_State *fallbackState) noexcept {
-  return (g_timerLuaState != nullptr) ? g_timerLuaState : fallbackState;
+/// Returns the state timer refs are released on and callbacks dispatched
+/// on. Never the calling thread.
+///
+/// `set_timeout` and `set_interval` are reachable from inside a coroutine —
+/// `start_lua_coroutine` resumes immediately, so a binding called there
+/// receives the coroutine's thread — and that thread may be suspended, or
+/// finished and collected, by the time the timer fires or its ref is
+/// released. Registry refs are VM-global, so the main state can release any
+/// of them, and dispatching there never resumes a suspended coroutine's
+/// stack. The argument is used only before the VM records a main state.
+lua_State *timer_main_state(lua_State *fallbackState) noexcept {
+  lua_State *mainState = current_lua_state();
+  return (mainState != nullptr) ? mainState : fallbackState;
 }
 
 /// Releases one Lua timer callback ref and clears its timer ownership.
@@ -73,7 +83,8 @@ int timer_call_trampoline(lua_State *state) noexcept {
 /// Invokes a Lua callback for a fired runtime timer.
 void lua_timer_callback(runtime::TimerId id, void *userData) noexcept {
   (void)userData;
-  if ((g_timerLuaState == nullptr) || (id == runtime::kInvalidTimerId) ||
+  lua_State *const mainState = timer_main_state(nullptr);
+  if ((mainState == nullptr) || (id == runtime::kInvalidTimerId) ||
       (runtime_binding().world == nullptr)) {
     return;
   }
@@ -93,7 +104,7 @@ void lua_timer_callback(runtime::TimerId id, void *userData) noexcept {
   TimerCallArgs args{};
   args.registryRef = firedRef.registryRef;
   static_cast<void>(protected_engine_dispatch(
-      g_timerLuaState, &timer_call_trampoline, &args, 0, "timer"));
+      mainState, &timer_call_trampoline, &args, 0, "timer"));
 
   if (runtime_binding().world == nullptr) {
     return;
@@ -106,7 +117,7 @@ void lua_timer_callback(runtime::TimerId id, void *userData) noexcept {
   if (!wasRepeating || !stillCurrent) {
     LuaTimerRef &currentRef = g_timerLuaRefs[slot];
     if (currentRef.ownerId == id) {
-      release_timer_ref(currentRef, g_timerLuaState);
+      release_timer_ref(currentRef, mainState);
     }
   }
 }
@@ -133,10 +144,11 @@ runtime::TimerId register_lua_timer(lua_State *state, float seconds,
     return runtime::kInvalidTimerId;
   }
 
-  lua_State *refState = timer_ref_state(state);
-  release_timer_ref(g_timerLuaRefs[slot], refState);
+  release_timer_ref(g_timerLuaRefs[slot], timer_main_state(state));
 
-  g_timerLuaState = state;
+  // The callback is on the calling thread's stack, so the ref is taken
+  // there; the resulting registry ref is VM-global and is released from
+  // the main state.
   lua_pushvalue(state, 1);
   g_timerLuaRefs[slot].ownerId = id;
   g_timerLuaRefs[slot].registryRef = luaL_ref(state, LUA_REGISTRYINDEX);
@@ -196,7 +208,7 @@ int lua_engine_cancel_timer(lua_State *state) noexcept {
   }
 
   timerManager.cancel(id);
-  lua_State *refState = timer_ref_state(state);
+  lua_State *refState = timer_main_state(state);
   LuaTimerRef &timerRef = g_timerLuaRefs[slot];
   if (timerRef.ownerId == id) {
     release_timer_ref(timerRef, refState);
@@ -207,7 +219,7 @@ int lua_engine_cancel_timer(lua_State *state) noexcept {
 void clear_lua_timer_bindings(lua_State *fallbackState) noexcept {
   ensure_timer_refs_init();
 
-  lua_State *refState = timer_ref_state(fallbackState);
+  lua_State *refState = timer_main_state(fallbackState);
   for (auto &timerRef : g_timerLuaRefs) {
     release_timer_ref(timerRef, refState);
   }
@@ -215,7 +227,6 @@ void clear_lua_timer_bindings(lua_State *fallbackState) noexcept {
   if (runtime_binding().world != nullptr) {
     runtime_binding().world->timer_manager().clear();
   }
-  g_timerLuaState = nullptr;
 }
 
 std::size_t active_lua_timer_ref_count() noexcept {
@@ -234,7 +245,6 @@ void tick_lua_timers(lua_State *state, float deltaSeconds) noexcept {
     return;
   }
 
-  g_timerLuaState = state;
   ensure_timer_refs_init();
   runtime_binding().world->timer_manager().tick(deltaSeconds);
 }

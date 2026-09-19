@@ -160,6 +160,14 @@ struct Fixture final {
 
 } // namespace
 
+/// Begins play for the world's pending entities (on_end_play pairs with
+/// on_begin_play, #534) and then calls the named script function.
+bool begin_play_then(engine::runtime::World &world,
+                     const char *function) noexcept {
+  dispatch_begin_play(world);
+  return engine::scripting::call_script_function(function);
+}
+
 /// Runs this executable or test program.
 int main() {
   cleanup_files();
@@ -353,6 +361,11 @@ int main() {
           break;
         }
       }
+      // on_end_play pairs with on_begin_play (#534): the outgoing
+      // entities must have begun play to be ended.
+      if (setupOk) {
+        dispatch_begin_play(*fx.world);
+      }
       const char *helper =
           "function ep_request_load()\n"
           "    engine.load_scene(\"ep_scene_b.scene.json\")\n"
@@ -472,8 +485,7 @@ int main() {
         if (!add_scripted_entity(*fx.world, name, kCounterScript)) {
           std::printf("test 5: entity setup failed at iter %d\n", i);
           result = 1;
-        } else if (!engine::scripting::call_script_function(
-                       "ep_iter_new_scene")) {
+        } else if (!begin_play_then(*fx.world, "ep_iter_new_scene")) {
           std::printf("test 5: transition trigger failed at iter %d\n", i);
           result = 1;
         } else if (!engine::runtime::process_pending_scene_op(*fx.world)) {

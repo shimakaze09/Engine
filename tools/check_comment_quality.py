@@ -1,44 +1,32 @@
 #!/usr/bin/env python3
-"""Audit tracked C++ and CMake sources for comments that break the
-commenting standard (docs/development/commenting-guidelines.md).
+"""Audit tracked C++ and CMake sources for objectively bad comments.
 
-Complements check_source_comments.py (which enforces file-level comment
-PRESENCE). Two tiers of finding:
+Complements check_source_comments.py, which enforces file-level comment
+PRESENCE. This gate checks only what a machine can judge without reading
+for meaning, so it has no allowlist and every finding is a defect:
 
-Zero-tolerance (never allowlisted; C++ doc comments only):
   tautology            /// Handles <identifier>.
   template             machine-template stems that carry no information
   misplaced-access     /// directly above public:/private:/protected:
   misplaced-initlist   /// directly above a constructor init-list line
+  commented-out-code    statements or CMake commands committed as comments
+  vague-todo           TODO/FIXME without a tracked issue
+  issue-reference      an issue number outside TODO(#n)/FIXME(#n), in any
+                       file not under tests/ (a regression test may cite
+                       the issue it reproduces)
 
-Standard classes (allowlisted per file while the sweep shrinks them):
-  history-reference    issue/PR numbers or audit finding codes in a comment
-                       outside the sanctioned TODO(#n)/FIXME(#n) markers and
-                       regression-provenance comments (guideline 36, 37, 42,
-                       57, 82); the tests/ tree is exempt because regression
-                       provenance is encouraged there
-  temporal-language    words that describe history or temporary perception
-                       instead of the current design (guideline 72); tests/
-                       exempt because a test legitimately narrates a sequence
-  commented-out-code   statements or CMake commands committed as comments
-                       (guideline 41)
-  vague-todo           TODO/FIXME without a tracked issue (guideline 36, 37)
-  developer-language   personal, emotional, or uncertain wording
-                       (guideline 73, 74, 75)
-
-The allowlist (tools/comment_quality_allowlist.txt) records, per file and
-class, exactly how many findings the tree still carries. A file whose
-count grows is red; a file whose count shrinks without the entry being
-updated is also red (a stale entry is itself a finding), so every
-cleanup deletes or lowers its own entries. The allowlist applies only to
-this repository's checkout; --root fixtures run without one unless
---allowlist names a file.
+Comment *prose* quality — whether a comment narrates history, reads as a
+temporary note, or is worded loosely — is authoring-time guidance in the
+`comment` skill, not a merge gate. Policing it mechanically required a
+shared per-file allowlist that every change had to edit, which serialized
+all concurrent work on one file and made the gate a scheduling
+bottleneck rather than a quality signal (docs/decisions/0006, 0009).
 
 Usage:
   python tools/check_comment_quality.py            # report, exit 1 if findings
-  python tools/check_comment_quality.py --summary  # counts per file only
-  python tools/check_comment_quality.py --limit 50 # cap detailed lines printed
-  python tools/check_comment_quality.py --root DIR [--allowlist FILE]
+  python tools/check_comment_quality.py --summary   # counts per file only
+  python tools/check_comment_quality.py --limit 50  # cap detailed lines
+  python tools/check_comment_quality.py --root DIR  # audit a fixture tree
 """
 
 from __future__ import annotations
@@ -51,17 +39,6 @@ import sys
 from dataclasses import dataclass
 
 CPP_SUFFIXES = {".cpp", ".cc", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".inl"}
-
-ALLOWLIST_NAME = "comment_quality_allowlist.txt"
-
-ZERO_TOLERANCE = ("tautology", "template", "misplaced-access", "misplaced-initlist")
-STANDARD_CLASSES = (
-    "history-reference",
-    "temporal-language",
-    "commented-out-code",
-    "vague-todo",
-    "developer-language",
-)
 
 # /// Handles <words>.  — tautology template; never a real explanation.
 HANDLES_RE = re.compile(r"^\s*///\s*Handles\s+[\w :+<>,=~\-\[\]().]*\.?\s*$")
@@ -88,30 +65,14 @@ DOC_LINE_RE = re.compile(r"^\s*///")
 # above a line starting with ':' or inside parentheses is misplaced.
 INIT_LIST_RE = re.compile(r"^\s*:\s*\w+\(")
 
-# Sanctioned markers: a line carrying one may cite issues freely.
-SANCTIONED_MARKER_RE = re.compile(r"\b(TODO|FIXME)\(#\d+\)")
-REGRESSION_RE = re.compile(r"\bregression\b", re.IGNORECASE)
-
-# History references: issue/PR numbers and audit finding codes.
-ISSUE_REF_RE = re.compile(r"(?<![\w/&])#\d+\b|\bPR\s+#?\d+\b")
-AUDIT_CODE_RE = re.compile(r"\b(audit|finding)s?\s+[A-Z]{1,2}-\d{1,3}\b")
-
-# Temporal language: unambiguous history words and calendar dates.
-# "previously" is deliberately absent: "a previously registered service"
-# describes call ordering, not history.
-TEMPORAL_RE = re.compile(
-    r"\b(formerly|for now|used to be|going forward|in the future|"
-    r"historically|originally|as of 20\d\d)\b|\b20\d\d-\d\d-\d\d\b|\blanded\b",
-    re.IGNORECASE,
-)
-
-# Commented-out C++: control flow, jump statements, call statements, a
-# stray closing brace, or a preprocessor include living inside a comment.
+# Commented-out C++: control flow, jump statements, call statements, or a
+# preprocessor include living inside a comment. A lone closing brace is
+# deliberately absent: it carries almost no evidence that code was commented
+# out, and it false-positives on every documented JSON or data-format example.
 CPP_CODE_RES = [
     re.compile(r"^\s*//\s*(if|for|while|switch)\s*\(.*\)\s*\{?\s*$"),
     re.compile(r"^\s*//\s*(return|break|continue)\b[^;]*;\s*$"),
     re.compile(r"^\s*//\s*[A-Za-z_][\w:.]*(->\w+)*\(.*\)\s*;\s*$"),
-    re.compile(r"^\s*//\s*\}\s*(else\s*\{)?\s*$"),
     re.compile(r"^\s*//\s*#include\s*[<\"]"),
 ]
 # Commented-out CMake: a command invocation behind '#'.
@@ -121,13 +82,13 @@ CMAKE_CODE_RE = re.compile(
     r"cmake_minimum_required|FetchContent_\w+)\s*\([^)]"
 )
 
+# A tracked marker cites its issue; a bare TODO/FIXME is untracked work.
 VAGUE_TODO_RE = re.compile(r"\b(TODO|FIXME)\b(?!\(#\d+\))")
 
-DEVELOPER_RE = re.compile(
-    r"\bI think\b|\bI believe\b|\bI'm not sure\b|\bnot sure\b|\bprobably\b|"
-    r"\bmaybe\b|\bstupid\b|\bhorrible\b|\bsucks\b|\bdumb\b|\bcrap\b",
-    re.IGNORECASE,
-)
+# Anywhere else an issue number is history, not a description of the code:
+# a reader of the source cannot follow it, and the tracker already holds
+# it. Tests are exempt so a regression test can name what it reproduces.
+ISSUE_REF_RE = re.compile(r"(?<!TODO\()(?<!FIXME\()#\d{2,}\b")
 
 
 @dataclass(frozen=True)
@@ -224,24 +185,13 @@ def audit_file(path: pathlib.Path, rel: str) -> list[Finding]:
         return findings
 
     cmake = is_cmake(path)
-    in_tests = rel.startswith("tests/")
-
     if not cmake:
-        findings.extend(audit_zero_tolerance(lines, rel))
+        findings.extend(audit_doc_comments(lines, rel))
+    in_tests = rel.startswith("tests/")
 
     comments = cmake_comment_lines(lines) if cmake else cpp_comment_lines(lines)
     for index, text, full in comments:
         line_no = index + 1
-        marker = SANCTIONED_MARKER_RE.search(text) is not None
-        if not in_tests and not marker and not REGRESSION_RE.search(text):
-            if ISSUE_REF_RE.search(text) or AUDIT_CODE_RE.search(text):
-                findings.append(
-                    Finding(rel, line_no, "history-reference", text.strip())
-                )
-        if not in_tests and not marker and TEMPORAL_RE.search(text):
-            findings.append(
-                Finding(rel, line_no, "temporal-language", text.strip())
-            )
         if cmake:
             code = CMAKE_CODE_RE.match(full) is not None
         else:
@@ -252,15 +202,15 @@ def audit_file(path: pathlib.Path, rel: str) -> list[Finding]:
             )
         if VAGUE_TODO_RE.search(text):
             findings.append(Finding(rel, line_no, "vague-todo", text.strip()))
-        if DEVELOPER_RE.search(text):
+        if not in_tests and ISSUE_REF_RE.search(text):
             findings.append(
-                Finding(rel, line_no, "developer-language", text.strip())
+                Finding(rel, line_no, "issue-reference", text.strip())
             )
     return findings
 
 
-def audit_zero_tolerance(lines: list[str], rel: str) -> list[Finding]:
-    """Returns the never-allowlisted doc-comment findings for a C++ file."""
+def audit_doc_comments(lines: list[str], rel: str) -> list[Finding]:
+    """Returns the filler and misplacement findings for a C++ file."""
     findings: list[Finding] = []
     for index, line in enumerate(lines):
         stripped = line.rstrip()
@@ -289,73 +239,15 @@ def audit_zero_tolerance(lines: list[str], rel: str) -> list[Finding]:
     return findings
 
 
-def load_allowlist(path: pathlib.Path) -> dict[tuple[str, str], int]:
-    """Parses '<path>\\t<class>\\t<count>' lines; '#' lines are comments."""
-    allow: dict[tuple[str, str], int] = {}
-    for raw in path.read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        parts = line.split("\t")
-        if len(parts) != 3 or parts[1] not in STANDARD_CLASSES:
-            raise SystemExit(f"malformed allowlist line in {path}: {raw!r}")
-        allow[(parts[0], parts[1])] = int(parts[2])
-    return allow
-
-
-def apply_allowlist(
-    findings: list[Finding], allow: dict[tuple[str, str], int]
-) -> tuple[list[Finding], int, list[str]]:
-    """Excuses allowlisted counts; reports excess and stale entries.
-
-    Returns (remaining findings, excused count, stale-entry messages). Per
-    (file, class) the first N findings are excused; a file with fewer
-    findings than its entry is stale and must have the entry lowered.
-    """
-    counts: dict[tuple[str, str], int] = {}
-    for f in findings:
-        counts[(f.path, f.category)] = counts.get((f.path, f.category), 0) + 1
-
-    stale: list[str] = []
-    for key, allowed in sorted(allow.items()):
-        actual = counts.get(key, 0)
-        if actual < allowed:
-            stale.append(
-                f"stale allowlist entry: {key[0]}\t{key[1]}\t{allowed} "
-                f"(the file now carries {actual}; lower or delete the entry)"
-            )
-
-    remaining: list[Finding] = []
-    excused = 0
-    seen: dict[tuple[str, str], int] = {}
-    for f in findings:
-        key = (f.path, f.category)
-        if f.category in ZERO_TOLERANCE:
-            remaining.append(f)
-            continue
-        used = seen.get(key, 0)
-        if used < allow.get(key, 0):
-            seen[key] = used + 1
-            excused += 1
-        else:
-            remaining.append(f)
-    return remaining, excused, stale
-
-
 def main() -> int:
     """Runs the audit and reports findings; exit 1 when any exist."""
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--summary", action="store_true")
     parser.add_argument("--limit", type=int, default=200)
     parser.add_argument(
         "--root",
         type=pathlib.Path,
-        help="audit this tree instead of the repository (no git, no allowlist)",
-    )
-    parser.add_argument(
-        "--allowlist",
-        type=pathlib.Path,
-        help="allowlist file (default: tools/%s for the repository)" % ALLOWLIST_NAME,
+        help="audit this tree instead of the repository (no git required)",
     )
     args = parser.parse_args()
 
@@ -363,39 +255,25 @@ def main() -> int:
     root = args.root.resolve() if args.root else repo_root
     files = tracked_files(root) if root == repo_root else walked_files(root)
 
-    allowlist_path = args.allowlist
-    if allowlist_path is None and root == repo_root:
-        allowlist_path = repo_root / "tools" / ALLOWLIST_NAME
-    allow = (
-        load_allowlist(allowlist_path)
-        if allowlist_path is not None and allowlist_path.is_file()
-        else {}
-    )
-
     findings: list[Finding] = []
     for path in files:
         rel = path.relative_to(root).as_posix()
         findings.extend(audit_file(path, rel))
 
-    remaining, excused, stale = apply_allowlist(findings, allow)
-
     printed = 0
     per_file: dict[str, int] = {}
-    for f in remaining:
+    for f in findings:
         per_file[f.path] = per_file.get(f.path, 0) + 1
         if not args.summary and printed < args.limit:
             print(f"{f.path}:{f.line}: [{f.category}] {f.text}")
             printed += 1
-    for message in stale:
-        print(message)
 
     if args.summary:
         for rel in sorted(per_file, key=per_file.get, reverse=True):
             print(f"{per_file[rel]:5d}  {rel}")
 
-    total = len(remaining) + len(stale)
-    print(f"\ncomment quality findings: {total} ({excused} allowlisted)")
-    return 1 if total > 0 else 0
+    print(f"\ncomment quality findings: {len(findings)}")
+    return 1 if findings else 0
 
 
 if __name__ == "__main__":

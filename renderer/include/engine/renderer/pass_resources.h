@@ -44,7 +44,7 @@ bool initialize_pass_resources(int width, int height) noexcept;
 void shutdown_pass_resources() noexcept;
 /// Recreates size-dependent targets for the new drawable size; false when
 /// recreation failed and the previous valid targets were kept so the
-/// caller can retry at the next size change (audit H-12).
+/// caller can retry at the next size change.
 bool resize_pass_resources(int width, int height) noexcept;
 
 /// Current pass-resource set.

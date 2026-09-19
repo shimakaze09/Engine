@@ -75,6 +75,15 @@ void World::begin_update_step() noexcept {
   }
   physics::refresh_step_cvar_cache(physics_context());
   physics::prime_ccd_snapshot(*this);
+  // The composed world transforms still describe the last frame's final
+  // pose; the previous step committed new local transforms without
+  // propagating them. Recompose before snapshotting so the history is the
+  // pose one step behind the current one, not one frame behind.
+  if (!propagate_world_transforms()) {
+    core::log_message(
+        core::LogLevel::Warning, "runtime",
+        "transform cycle detected; using deterministic root fallback");
+  }
   snapshot_world_transform_history();
   m_updateSwapPending = true;
 }
@@ -446,6 +455,36 @@ bool World::is_valid_entity(Entity entity) const noexcept {
   return m_entityGenerations[entity.index] == entity.generation;
 }
 
+bool World::parent_would_form_cycle(Entity entity,
+                                    PersistentId parentId) const noexcept {
+  // Follows authored parent ids upward from the candidate parent. A
+  // dangling id ends the walk: the child is rooted until that parent
+  // appears, and whichever member is added last sees the whole loop, so
+  // no cycle survives ingress. A walk longer than the transform count can
+  // only mean the chain already loops, which is refused as well.
+  const std::size_t bound = m_transforms.count() + 1U;
+  const std::size_t stateIndex = query_state_index();
+  for (std::size_t steps = 0U; parentId != kInvalidPersistentId; ++steps) {
+    if (steps > bound) {
+      return true;
+    }
+    const std::uint32_t index = find_persistent_index(parentId);
+    if ((index == 0U) || !m_entityAlive[index]) {
+      return false;
+    }
+    if (index == entity.index) {
+      return true;
+    }
+    const Entity ancestor{index, m_entityGenerations[index]};
+    const Transform *local = m_transforms.get_ptr(ancestor, stateIndex);
+    if (local == nullptr) {
+      return false;
+    }
+    parentId = local->parentId;
+  }
+  return false;
+}
+
 bool World::build_physics_transform(
     Entity entity, std::size_t stateIndex,
     physics::PhysicsTransform *outTransform) const noexcept {
@@ -544,12 +583,15 @@ bool World::propagate_world_transforms() noexcept {
     node.firstChild = 0U;
     node.lastChild = 0U;
     node.nextSibling = 0U;
+    node.prevSibling = 0U;
     node.traversalState = 0U;
     node.present = false;
     node.localDirty = false;
+    node.orphan = false;
   }
 
   m_transformActiveCount = 0U;
+  std::size_t orphanCount = 0U;
 
   const std::size_t transformCount = m_transforms.count();
   for (std::size_t denseIndex = 0U; denseIndex < transformCount; ++denseIndex) {
@@ -571,9 +613,11 @@ bool World::propagate_world_transforms() noexcept {
     node.firstChild = 0U;
     node.lastChild = 0U;
     node.nextSibling = 0U;
+    node.prevSibling = 0U;
     node.traversalState = 0U;
     node.present = true;
     node.localDirty = false;
+    node.orphan = false;
 
     const Transform &local =
         m_transforms.component_at(denseIndex, m_readStateIndex);
@@ -593,6 +637,10 @@ bool World::propagate_world_transforms() noexcept {
     }
 
     node.parentIndex = parentIndex;
+    if ((local.parentId != kInvalidPersistentId) && (parentIndex == 0U)) {
+      node.orphan = true;
+      ++orphanCount;
+    }
 
     const bool cacheValid = node.cacheValid;
     const bool localChanged =
@@ -652,8 +700,14 @@ bool World::propagate_world_transforms() noexcept {
 
     const std::uint32_t lastChild = m_transformNodes[parentIndex].lastChild;
     m_transformNodes[lastChild].nextSibling = index;
+    m_transformNodes[index].prevSibling = lastChild;
     m_transformNodes[parentIndex].lastChild = index;
   }
+  // The pass just rebuilt the child index from every authored parent id,
+  // so the lifecycle paths can walk it until the next structural change
+  // that the incremental maintenance cannot resolve.
+  m_hierarchyOrphanCount = orphanCount;
+  m_hierarchyLinksStale = false;
 
   auto enqueue_node = [this](std::uint32_t entityIndex, bool inheritedDirty,
                              std::size_t *ioQueueTail) noexcept {

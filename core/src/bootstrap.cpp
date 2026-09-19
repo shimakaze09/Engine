@@ -89,7 +89,7 @@ bool initialize_core(const CoreConfig &config) noexcept {
     // recoverable runtime condition, so initialization continues.
     static_cast<void>(report_reflection_registration_drops());
 
-    // Core owns the cvar/console tables (#168): production registration no
+    // Core owns the cvar/console tables: production registration no
     // longer relies on the zero-initialized fallback, and shutdown_core
     // clears both so a later bootstrap starts from defaults.
     if (!initialize_cvars()) {
@@ -137,7 +137,7 @@ bool initialize_core(const CoreConfig &config) noexcept {
     profilerInitialized = true;
 
     // Fixed-storage queue whose init cannot fail today; tracked anyway so
-    // the failure rollback below stays symmetric with shutdown_core (#235).
+    // the failure rollback below stays symmetric with shutdown_core.
     debugDrawInitialized = initialize_debug_draw();
 
     const std::uint32_t hardwareThreads = std::thread::hardware_concurrency();

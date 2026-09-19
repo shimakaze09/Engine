@@ -1,6 +1,6 @@
 $input v_normal
 
-// Default fragment stage (bgfx port of default.frag, #138): the simple
+// Default fragment stage: the simple
 // pulsing-lambert fallback material. Scalar GL uniforms become vec4
 // read through .x/.xyz per bgfx's uniform model.
 

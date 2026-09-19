@@ -48,7 +48,7 @@ DeviceTextureHandle create_post_chain_texture(const RenderDevice *dev, int w,
   desc.width = w;
   desc.height = h;
   desc.filter = TextureFilter::Linear;
-  desc.wrap = TextureWrap::Repeat;
+  desc.wrap = TextureWrap::ClampEdge;
   return dev->create_texture(desc);
 }
 
@@ -242,6 +242,12 @@ DeviceTextureHandle create_ssao_noise_texture() noexcept {
   desc.width = 4;
   desc.height = 4;
   desc.filter = TextureFilter::Linear;
+  // The one post-chain texture that has to repeat: the SSAO pass tiles
+  // these sixteen rotation vectors across the screen, sampling at
+  // uv * (drawable / 4), so that neighbouring pixels turn the kernel
+  // differently and the blur averages the pattern out. Clamped, every
+  // pixel past the first four reads the same edge texel and the whole
+  // screen shares one kernel orientation.
   desc.wrap = TextureWrap::Repeat;
   desc.pixelData = TexelData::F32;
   desc.pixels = noise;

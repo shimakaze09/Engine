@@ -13,7 +13,7 @@ namespace engine::renderer {
 /// (Re)allocates the bloom mip chain when the drawable size changes.
 /// Transactional: any creation failure releases the partial chain, records
 /// the failed size so the retry happens on resize instead of every frame,
-/// and returns false; true means the full chain is ready (audit N-10).
+/// and returns false; true means the full chain is ready.
 bool ensure_bloom_resources(BackendState &b, int width, int height) noexcept;
 /// Releases the bloom mip chain textures and framebuffers.
 void destroy_bloom_resources(BackendState &b) noexcept;

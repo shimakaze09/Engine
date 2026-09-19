@@ -1,5 +1,5 @@
 // Declares the renderer's mesh residency service: queues mesh transition
-// requests into the content-owned AssetRequestQueue (#171 C3) and applies
+// requests into the content-owned AssetRequestQueue and applies
 // them against the asset database's mesh records and the GPU mesh registry.
 
 #pragma once
@@ -12,7 +12,7 @@
 
 namespace engine::renderer {
 
-// The queue container and request vocabulary are content-owned (#171 C3);
+// The queue container and request vocabulary are content-owned;
 // these names keep the renderer's established service vocabulary working.
 using content::AssetRequest;
 using content::AssetRequestType;

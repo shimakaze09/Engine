@@ -2,8 +2,11 @@
 
 #include <cmath>
 #include <cstddef>
+#include <cstdio>
+#include <cstring>
 #include <vector>
 
+#include "engine/core/logging.h"
 #include "engine/renderer/command_buffer.h"
 #include "engine/math/transform.h"
 #include "engine/renderer/light_culling.h"
@@ -539,10 +542,290 @@ int verify_cull_failure_zeroes_output() {
   return 0;
 }
 
-} // namespace
+// ---------------------------------------------------------------------------
+// Test 8: Tile table layout — the GPU table stays inside the device's
+// texture dimension limit at any drawable size (issue #565 row 5). A table
+// as wide as the screen's tile columns passes 16384 texels once the
+// drawable is wider than about 5232 px, and the deferred path then loses
+// every local light.
+// ---------------------------------------------------------------------------
 
-/// Runs this executable or test program.
-int main() {
+/// Tile columns or rows for a drawable extent, as the culler counts them.
+int tiles_for(int pixels) {
+  return (pixels + engine::renderer::kTileSize - 1) /
+         engine::renderer::kTileSize;
+}
+
+/// Walks every tile of a grid through the addressing the deferred shader
+/// uses — flat index, whole-number division by tilesPerRow — and checks it
+/// lands on the texel the flat CPU buffer holds for that tile, inside the
+/// rectangle. Returns false at the first tile that does not.
+bool layout_addresses_every_tile(
+    int tileCountX, int tileCountY,
+    const engine::renderer::TileTextureLayout &layout) {
+  const long long width = layout.width;
+  for (int y = 0; y < tileCountY; ++y) {
+    for (int x = 0; x < tileCountX; ++x) {
+      const long long flat = static_cast<long long>(y) * tileCountX + x;
+      const long long row = flat / layout.tilesPerRow;
+      const long long column =
+          (flat - row * layout.tilesPerRow) * engine::renderer::kTileDataWidth;
+      if ((row < 0) || (row >= layout.height)) {
+        return false;
+      }
+      if ((column + engine::renderer::kTileDataWidth) > width) {
+        return false;
+      }
+      // The buffer is uploaded unrepacked, so the texel's linear offset
+      // has to be the tile's offset in the flat array.
+      if ((row * width + column) !=
+          (flat * engine::renderer::kTileDataWidth)) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+int verify_tile_texture_layout() {
+  using engine::renderer::compute_tile_texture_layout;
+  using engine::renderer::kTileDataWidth;
+  using engine::renderer::TileTextureLayout;
+  constexpr int kDesktopLimit = 16384;
+
+  // A grid that fits keeps one texture row per screen tile row, with no
+  // padding: 1080p and native 4K are laid out as they always were.
+  {
+    const int sizes[2][2] = {{1920, 1080}, {3840, 2160}};
+    for (const auto &size : sizes) {
+      const int tilesX = tiles_for(size[0]);
+      const int tilesY = tiles_for(size[1]);
+      TileTextureLayout layout{};
+      if (!compute_tile_texture_layout(tilesX, tilesY, kDesktopLimit, layout)) {
+        return 800;
+      }
+      if ((layout.tilesPerRow != tilesX) || (layout.height != tilesY) ||
+          (layout.width != tilesX * kTileDataWidth)) {
+        return 801;
+      }
+      if (layout.texelCount != static_cast<std::size_t>(tilesX) *
+                                   static_cast<std::size_t>(tilesY) *
+                                   static_cast<std::size_t>(kTileDataWidth)) {
+        return 802;
+      }
+    }
+  }
+
+  // The exact boundary: 327 tile columns is 16350 texels and fits; 328 is
+  // 16400 and must wrap.
+  {
+    TileTextureLayout fits{};
+    if (!compute_tile_texture_layout(327, 100, kDesktopLimit, fits) ||
+        (fits.tilesPerRow != 327) || (fits.width != 16350) ||
+        (fits.height != 100)) {
+      return 810;
+    }
+    TileTextureLayout wraps{};
+    if (!compute_tile_texture_layout(328, 100, kDesktopLimit, wraps)) {
+      return 811;
+    }
+    // 32800 tiles in rows of 327: 100 full rows and one of 100 tiles.
+    if ((wraps.tilesPerRow != 327) || (wraps.width != 16350) ||
+        (wraps.height != 101)) {
+      return 812;
+    }
+    if (!layout_addresses_every_tile(328, 100, wraps)) {
+      return 813;
+    }
+  }
+
+  // The reported case: 4K at r_render_scale 1.5 is a 5760x3240 drawable,
+  // 360x203 tiles. One texture row per screen row would be 18000 texels
+  // wide, which is what the device refused.
+  {
+    const int tilesX = tiles_for(5760);
+    const int tilesY = tiles_for(3240);
+    if ((tilesX != 360) || (tilesY != 203) ||
+        (tilesX * kTileDataWidth <= kDesktopLimit)) {
+      return 820;
+    }
+    TileTextureLayout layout{};
+    if (!compute_tile_texture_layout(tilesX, tilesY, kDesktopLimit, layout)) {
+      return 821;
+    }
+    if ((layout.width > kDesktopLimit) || (layout.height > kDesktopLimit)) {
+      return 822;
+    }
+    // 73080 tiles in rows of 327: 223 full rows and one of 159.
+    if ((layout.tilesPerRow != 327) || (layout.width != 16350) ||
+        (layout.height != 224)) {
+      return 823;
+    }
+    // The last row is partial, so the rectangle is larger than the tile
+    // data and the upload buffer has to be padded up to it.
+    const std::size_t tileFloats = static_cast<std::size_t>(tilesX) *
+                                   static_cast<std::size_t>(tilesY) *
+                                   static_cast<std::size_t>(kTileDataWidth);
+    if ((layout.texelCount != static_cast<std::size_t>(16350) * 224U) ||
+        (layout.texelCount <= tileFloats)) {
+      return 824;
+    }
+    if (!layout_addresses_every_tile(tilesX, tilesY, layout)) {
+      return 825;
+    }
+  }
+
+  // 8K, and a device with a smaller limit than the desktop one: the row
+  // length follows the limit it is given, not a constant.
+  {
+    TileTextureLayout eightK{};
+    if (!compute_tile_texture_layout(tiles_for(7680), tiles_for(4320),
+                                     kDesktopLimit, eightK) ||
+        (eightK.width > kDesktopLimit) || (eightK.height > kDesktopLimit) ||
+        !layout_addresses_every_tile(tiles_for(7680), tiles_for(4320),
+                                     eightK)) {
+      return 830;
+    }
+    TileTextureLayout small{};
+    if (!compute_tile_texture_layout(tiles_for(1920), tiles_for(1080), 4096,
+                                     small)) {
+      return 831;
+    }
+    // 4096 / 50 = 81 tiles across; 120x68 = 8160 tiles is 101 rows.
+    if ((small.tilesPerRow != 81) || (small.width != 4050) ||
+        (small.height != 101) ||
+        !layout_addresses_every_tile(tiles_for(1920), tiles_for(1080),
+                                     small)) {
+      return 832;
+    }
+  }
+
+  // One tile, and a single row that exactly fills the limit's tile count.
+  {
+    TileTextureLayout one{};
+    if (!compute_tile_texture_layout(1, 1, kDesktopLimit, one) ||
+        (one.tilesPerRow != 1) || (one.width != kTileDataWidth) ||
+        (one.height != 1) ||
+        (one.texelCount != static_cast<std::size_t>(kTileDataWidth))) {
+      return 840;
+    }
+  }
+
+  // Refusals leave the output zeroed so a caller cannot size a texture
+  // from a stale layout: no tiles, a limit too small for one tile across,
+  // and a table that would wrap past the limit's height.
+  {
+    const int refused[4][3] = {
+        {0, 10, kDesktopLimit},
+        {10, 0, kDesktopLimit},
+        {10, 10, kTileDataWidth - 1},
+        // 50-texel limit: one tile per row, so 10x10 tiles need 100 rows.
+        {10, 10, kTileDataWidth},
+    };
+    for (const auto &entry : refused) {
+      TileTextureLayout layout{};
+      layout.tilesPerRow = 7;
+      layout.width = 7;
+      layout.height = 7;
+      layout.texelCount = 7U;
+      if (compute_tile_texture_layout(entry[0], entry[1], entry[2], layout)) {
+        return 850;
+      }
+      if ((layout.tilesPerRow != 0) || (layout.width != 0) ||
+          (layout.height != 0) || (layout.texelCount != 0U)) {
+        return 851;
+      }
+    }
+  }
+
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Test 9: The per-tile cap — a tile holds 32 point and 16 spot lights
+// (issue #565 row 3). Past that a light is dropped from that tile, which
+// dims it; on base nothing said so.
+// ---------------------------------------------------------------------------
+
+/// Counts the culler's tile-cap report among the log lines of a run.
+struct TileCapLog final {
+  int reports = 0;
+};
+
+void count_tile_cap_reports(engine::core::LogLevel level, const char *channel,
+                            const char *message, void *userData) noexcept {
+  auto *log = static_cast<TileCapLog *>(userData);
+  if ((log != nullptr) && (level == engine::core::LogLevel::Warning) &&
+      (channel != nullptr) && (std::strcmp(channel, "renderer") == 0) &&
+      (message != nullptr) &&
+      (std::strstr(message, "tile light cap reached") != nullptr)) {
+    ++log->reports;
+  }
+}
+
+/// Forty point lights and twenty spot lights, all centred in front of a
+/// one-tile view with a radius that covers it: eight point and four spot
+/// lights past what the tile holds.
+int verify_tile_cap_keeps_the_first_lights() {
+  engine::renderer::SceneLightData lights{};
+  lights.pointLightCount = 40U;
+  lights.spotLightCount = 20U;
+  for (std::size_t i = 0U; i < 40U; ++i) {
+    lights.pointLights[i].position = engine::math::Vec3(0.0F, 0.0F, -5.0F);
+    lights.pointLights[i].radius = 50.0F;
+  }
+  for (std::size_t i = 0U; i < 20U; ++i) {
+    lights.spotLights[i].position = engine::math::Vec3(0.0F, 0.0F, -5.0F);
+    lights.spotLights[i].radius = 50.0F;
+  }
+
+  constexpr int kSize = engine::renderer::kTileSize; // exactly one tile
+  const float view[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+  const float proj[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, -1, -1, 0, 0, -1, 0};
+  std::vector<float> buffer(
+      engine::renderer::compute_tile_buffer_size(kSize, kSize), -1.0F);
+  engine::renderer::TileLightData tiles{};
+  tiles.data = buffer.data();
+  tiles.dataSize = buffer.size();
+
+  // Twice: the report is for the run, not for every frame that overflows.
+  for (int frame = 0; frame < 2; ++frame) {
+    if (!engine::renderer::cull_lights_tiled(lights, view, proj, kSize, kSize,
+                                             tiles)) {
+      return 900;
+    }
+  }
+  if (tiles.totalTiles != 1) {
+    return 901;
+  }
+
+  // The tile is full, not overfull, and holds the lowest-indexed lights in
+  // order: which lights a crowded tile keeps is a function of the scene.
+  const int pointCap = engine::renderer::kMaxPointLightsPerTile;
+  const int spotCap = engine::renderer::kMaxSpotLightsPerTile;
+  if (static_cast<int>(buffer[0]) != pointCap) {
+    return 902;
+  }
+  for (int i = 0; i < pointCap; ++i) {
+    if (static_cast<int>(buffer[static_cast<std::size_t>(1 + i)]) != i) {
+      return 903;
+    }
+  }
+  const std::size_t spotBase = static_cast<std::size_t>(1 + pointCap);
+  if (static_cast<int>(buffer[spotBase]) != spotCap) {
+    return 904;
+  }
+  for (int i = 0; i < spotCap; ++i) {
+    if (static_cast<int>(buffer[spotBase + 1U + static_cast<std::size_t>(i)]) !=
+        i) {
+      return 905;
+    }
+  }
+  return 0;
+}
+
+/// Every case but the tile cap's, in the order they have always run.
+int run_cases() {
   int result = verify_empty_scene_culling();
   if (result != 0) {
     return result;
@@ -573,5 +856,51 @@ int main() {
     return result;
   }
 
-  return verify_cull_failure_zeroes_output();
+  result = verify_cull_failure_zeroes_output();
+  if (result != 0) {
+    return result;
+  }
+
+  return verify_tile_texture_layout();
+}
+
+} // namespace
+
+/// Runs this executable or test program.
+int main() {
+  // The tile-cap report is latched for the run, and the stress case below
+  // overflows tiles too, so the sink listens from the start and the count
+  // is taken at the end: however many cases and frames overflowed, the run
+  // says so exactly once.
+  TileCapLog tileCapLog{};
+  const bool loggingReady = engine::core::initialize_logging();
+  const bool sinkReady =
+      loggingReady &&
+      engine::core::log_register_sink(&count_tile_cap_reports, &tileCapLog);
+
+  int result = run_cases();
+  if (result == 0) {
+    result = verify_tile_cap_keeps_the_first_lights();
+  }
+
+  if (sinkReady) {
+    engine::core::log_unregister_sink(&count_tile_cap_reports, &tileCapLog);
+  }
+  if (loggingReady) {
+    engine::core::shutdown_logging();
+  }
+  if (result != 0) {
+    return result;
+  }
+  if (!sinkReady) {
+    return 910;
+  }
+  // On base the drop was silent: zero reports.
+  if (tileCapLog.reports != 1) {
+    std::fprintf(stderr, "light_culling_test: the tile cap was reported %d "
+                         "times in the run, expected once\n",
+                 tileCapLog.reports);
+    return 911;
+  }
+  return 0;
 }

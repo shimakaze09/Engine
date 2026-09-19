@@ -153,7 +153,7 @@ bool step_physics_range(PhysicsWorldView &world, std::size_t startIndex,
                               engine::math::mul(displacement, safeToi));
 
         // Impulse in relative normal space with the pair's combined
-        // restitution and inverse-mass split (issue #98). Static targets
+        // restitution and inverse-mass split. Static targets
         // take the full material response; fast dynamic targets apply the
         // symmetric share through their own sweep; slow dynamic targets
         // get a position clamp only, leaving the momentum exchange to the

@@ -1,4 +1,4 @@
-// Declares the runtime component types (#166 W1): the component PODs and
+// Declares the runtime component types: the component PODs and
 // their enums, extracted verbatim from world.h — they have no dependency
 // on the World storage type and every consumer keeps reaching them
 // through world.h's include.
@@ -62,6 +62,9 @@ struct PointLightComponent final {
   math::Vec3 color = math::Vec3(1.0F, 1.0F, 1.0F);
   float intensity = 1.0F;
   float radius = 10.0F;
+  /// Renders a cubemap depth pass for this light when set; the four
+  /// nearest flagged lights cast per frame.
+  bool castShadow = false;
 };
 
 /// Spot light: color, direction, cone angles (radians), and radius.
@@ -72,6 +75,9 @@ struct SpotLightComponent final {
   float radius = 10.0F;
   float innerConeAngle = 0.3491F; // ~20 degrees in radians
   float outerConeAngle = 0.5236F; // ~30 degrees in radians
+  /// Renders a depth pass for this light when set; the four nearest
+  /// flagged lights cast per frame.
+  bool castShadow = false;
 };
 
 /// IBL reflection probe: bake resolutions, influence shape, bake flag.
@@ -186,7 +192,7 @@ struct AnimationComponent final {
 enum class CameraProjection : std::uint32_t { Perspective = 0U,
                                               Orthographic = 1U };
 
-/// First-class authored camera (issue #161). Pose is never stored here: it
+/// First-class authored camera. Pose is never stored here: it
 /// comes from the entity's world transform (looks along the rotated -Z
 /// axis, up is the rotated +Y axis, matching SceneCaptureComponent's
 /// convention) so authoring a camera never duplicates Transform state.
@@ -194,7 +200,7 @@ enum class CameraProjection : std::uint32_t { Perspective = 0U,
 /// World's CameraManager priority stack every frame, so an authored camera
 /// participates in the same priority/blend/shake model Lua-pushed and
 /// spring-arm cameras already use -- it is not a second camera stack.
-/// `projection` selects the render path's real projection (#221): the
+/// `projection` selects the render path's real projection: the
 /// flush, render-prep culling, cascaded shadows, and lighting all honor
 /// Orthographic (half-height `orthographicSize`), while the sky pass keeps
 /// perspective directional sampling — parallel rays would all sample one

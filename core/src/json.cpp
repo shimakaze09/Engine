@@ -2,6 +2,8 @@
 
 #include "engine/core/json.h"
 
+#include "engine/core/logging.h"
+
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -673,6 +675,35 @@ bool JsonWriter::append_float(float value) noexcept {
   return append_bytes(numberBuffer, static_cast<std::size_t>(written));
 }
 
+bool JsonWriter::append_double(double value) noexcept {
+  if (!std::isfinite(value)) {
+    m_failed = true;
+    return false;
+  }
+
+  char numberBuffer[32] = {};
+  const int written =
+      std::snprintf(numberBuffer, sizeof(numberBuffer), "%.17g", value);
+  if ((written <= 0) || (written >= static_cast<int>(sizeof(numberBuffer)))) {
+    m_failed = true;
+    return false;
+  }
+
+  return append_bytes(numberBuffer, static_cast<std::size_t>(written));
+}
+
+bool JsonWriter::append_int64(std::int64_t value) noexcept {
+  char numberBuffer[32] = {};
+  const int written = std::snprintf(numberBuffer, sizeof(numberBuffer), "%lld",
+                                    static_cast<long long>(value));
+  if ((written <= 0) || (written >= static_cast<int>(sizeof(numberBuffer)))) {
+    m_failed = true;
+    return false;
+  }
+
+  return append_bytes(numberBuffer, static_cast<std::size_t>(written));
+}
+
 bool JsonWriter::append_uint(std::uint32_t value) noexcept {
   char numberBuffer[16] = {};
   const int written =
@@ -813,6 +844,22 @@ void JsonWriter::write_float(const char *key, float value) noexcept {
   write_float_value(value);
 }
 
+void JsonWriter::write_double(const char *key, double value) noexcept {
+  write_key(key);
+  if (!begin_value()) {
+    return;
+  }
+  static_cast<void>(append_double(value));
+}
+
+void JsonWriter::write_int64(const char *key, std::int64_t value) noexcept {
+  write_key(key);
+  if (!begin_value()) {
+    return;
+  }
+  static_cast<void>(append_int64(value));
+}
+
 void JsonWriter::write_uint(const char *key, std::uint32_t value) noexcept {
   write_key(key);
   write_uint_value(value);
@@ -889,10 +936,9 @@ bool JsonParser::parse(const char *input, std::size_t length) noexcept {
   m_hasRoot = false;
   m_root = JsonValue{};
   m_scratchCursor = 0U;
-  m_arrayMemoBegin = nullptr;
-  m_arrayMemoEnd = nullptr;
-  m_arrayMemoCursor = nullptr;
-  m_arrayMemoIndex = 0U;
+  m_scratchExhausted = false;
+  m_arrayMemos.fill(ArrayMemo{});
+  m_arrayElementScans = 0U;
 
   if ((input == nullptr) || (length == 0U)) {
     return false;
@@ -924,6 +970,13 @@ const JsonValue *JsonParser::root() const noexcept {
 const JsonValue *
 JsonParser::push_scratch(const JsonValue &value) const noexcept {
   if (m_scratchCursor >= m_scratch.size()) {
+    if (!m_scratchExhausted) {
+      m_scratchExhausted = true;
+      log_message(LogLevel::Warning, "json",
+                  "JsonParser scratch exhausted: a pointer-returning "
+                  "navigation past kScratchSlots reads as a missing value; "
+                  "walk long documents with the by-value overloads");
+    }
     return nullptr;
   }
 
@@ -1022,10 +1075,17 @@ bool JsonParser::get_array_element(const JsonValue &array, std::size_t index,
   const char *cursor = array.begin + 1;
   const char *end = array.end - 1;
   std::size_t currentIndex = 0U;
-  if ((m_arrayMemoBegin == array.begin) && (m_arrayMemoEnd == array.end) &&
-      (m_arrayMemoCursor != nullptr) && (index >= m_arrayMemoIndex)) {
-    cursor = m_arrayMemoCursor;
-    currentIndex = m_arrayMemoIndex;
+  ArrayMemo *memo = nullptr;
+  for (ArrayMemo &candidate : m_arrayMemos) {
+    if ((candidate.begin == array.begin) && (candidate.end == array.end)) {
+      memo = &candidate;
+      break;
+    }
+  }
+  if ((memo != nullptr) && (memo->cursor != nullptr) &&
+      (index >= memo->index)) {
+    cursor = memo->cursor;
+    currentIndex = memo->index;
   } else {
     skip_whitespace(cursor, end);
   }
@@ -1038,6 +1098,7 @@ bool JsonParser::get_array_element(const JsonValue &array, std::size_t index,
     if (!parse_value(cursor, end, &value, 1U)) {
       return false;
     }
+    ++m_arrayElementScans;
 
     if (currentIndex == index) {
       *outValue = value;
@@ -1046,10 +1107,27 @@ bool JsonParser::get_array_element(const JsonValue &array, std::size_t index,
         ++cursor;
         skip_whitespace(cursor, end);
       }
-      m_arrayMemoBegin = array.begin;
-      m_arrayMemoEnd = array.end;
-      m_arrayMemoCursor = cursor;
-      m_arrayMemoIndex = index + 1U;
+      if (memo == nullptr) {
+        // Take a free entry, else evict the one spanning the fewest bytes:
+        // nested walks are over small inner arrays, and evicting by
+        // recency would let a stream of them push out the enclosing
+        // array's memo — the outer entity loop went quadratic again that
+        // way.
+        memo = &m_arrayMemos[0];
+        for (ArrayMemo &candidate : m_arrayMemos) {
+          if (candidate.begin == nullptr) {
+            memo = &candidate;
+            break;
+          }
+          if ((candidate.end - candidate.begin) < (memo->end - memo->begin)) {
+            memo = &candidate;
+          }
+        }
+      }
+      memo->begin = array.begin;
+      memo->end = array.end;
+      memo->cursor = cursor;
+      memo->index = index + 1U;
       return true;
     }
 
@@ -1156,6 +1234,74 @@ bool JsonParser::as_float(const JsonValue &value,
   }
 
   *outValue = parsed;
+  return true;
+}
+
+bool JsonParser::as_double(const JsonValue &value,
+                           double *outValue) const noexcept {
+  if ((outValue == nullptr) || (value.type != JsonValue::Type::Number) ||
+      (value.begin == nullptr) || (value.end == nullptr) ||
+      (value.end <= value.begin)) {
+    return false;
+  }
+
+  const std::size_t length = static_cast<std::size_t>(value.end - value.begin);
+  if (length >= 64U) {
+    return false;
+  }
+
+  char buffer[64] = {};
+  std::memcpy(buffer, value.begin, length);
+  buffer[length] = '\0';
+
+  char *parseEnd = nullptr;
+  const double parsed = std::strtod(buffer, &parseEnd);
+  if (parseEnd != (buffer + static_cast<std::ptrdiff_t>(length)) ||
+      !std::isfinite(parsed)) {
+    return false;
+  }
+
+  *outValue = parsed;
+  return true;
+}
+
+bool JsonParser::as_int64(const JsonValue &value,
+                          std::int64_t *outValue) const noexcept {
+  if ((outValue == nullptr) || (value.type != JsonValue::Type::Number) ||
+      (value.begin == nullptr) || (value.end == nullptr) ||
+      (value.end <= value.begin)) {
+    return false;
+  }
+
+  const char *cursor = value.begin;
+  const bool negative = (*cursor == '-');
+  if (negative) {
+    ++cursor;
+    if (cursor >= value.end) {
+      return false;
+    }
+  }
+
+  // Accumulate as a magnitude so INT64_MIN parses without overflow.
+  std::uint64_t magnitude = 0U;
+  const std::uint64_t limit = negative
+                                  ? (static_cast<std::uint64_t>(INT64_MAX) + 1U)
+                                  : static_cast<std::uint64_t>(INT64_MAX);
+  while (cursor < value.end) {
+    if (!is_digit(*cursor)) {
+      return false; // a fraction or exponent: not an integer literal
+    }
+    const std::uint64_t digit = static_cast<std::uint64_t>(*cursor - '0');
+    if ((magnitude > (limit / 10U)) ||
+        ((magnitude == (limit / 10U)) && (digit > (limit % 10U)))) {
+      return false;
+    }
+    magnitude = (magnitude * 10U) + digit;
+    ++cursor;
+  }
+
+  *outValue = negative ? static_cast<std::int64_t>(0U - magnitude)
+                       : static_cast<std::int64_t>(magnitude);
   return true;
 }
 

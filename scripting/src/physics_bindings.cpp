@@ -33,7 +33,7 @@ namespace engine::scripting {
 
 namespace {
 
-/// One captured pre-lock inverse inertia, generation-checked (issue #80).
+/// One captured pre-lock inverse inertia, generation-checked.
 struct LockRotationCapture final {
   core::Entity owner = core::kInvalidEntity;
   float inverseInertia = 1.0F;
@@ -134,7 +134,7 @@ int lua_engine_set_friction(lua_State *state) noexcept {
 
 // engine.set_lock_rotation(entity, locked) → bool
 // Freezes the body's rotational response, capturing its inverse inertia;
-// unlock restores exactly the captured value (owner decision, issue #80).
+// unlock restores exactly the captured value.
 // Without a capture, unlock of a locked body falls back to the 1.0 default
 // (pre-capture legacy) and unlock of an unlocked body leaves it unchanged.
 int lua_engine_set_lock_rotation(lua_State *state) noexcept {
@@ -325,6 +325,12 @@ int lua_engine_get_gravity(lua_State *state) noexcept {
   return 3;
 }
 
+bool read_optional_skip_entity(lua_State *state, int index,
+                               std::uint32_t *outSkipIndex) noexcept;
+
+// engine.raycast(ox,oy,oz, dx,dy,dz, max_dist [, skip_entity])
+// skip_entity excludes that entity's colliders and any compound-body
+// colliders it owns, as the sweeps do.
 int lua_engine_raycast(lua_State *state) noexcept {
   if (runtime_binding().world == nullptr) {
     lua_pushnil(state);
@@ -333,9 +339,11 @@ int lua_engine_raycast(lua_State *state) noexcept {
   math::Vec3 origin{};
   math::Vec3 direction{};
   float maxDist = 0.0F;
+  std::uint32_t skipIndex = 0U;
   if (!read_vec3_args(state, 1, &origin) ||
       !read_vec3_args(state, 4, &direction) ||
-      !read_finite_number_arg(state, 7, &maxDist)) {
+      !read_finite_number_arg(state, 7, &maxDist) ||
+      !read_optional_skip_entity(state, 8, &skipIndex)) {
     lua_pushnil(state);
     return 1;
   }
@@ -345,7 +353,7 @@ int lua_engine_raycast(lua_State *state) noexcept {
       !runtime_binding().services->raycast(runtime_binding().world, origin.x,
                                            origin.y, origin.z, direction.x,
                                            direction.y, direction.z, maxDist,
-                                           &hit)) {
+                                           &hit, skipIndex)) {
     lua_pushnil(state);
     return 1;
   }
@@ -360,7 +368,8 @@ int lua_engine_raycast(lua_State *state) noexcept {
   return 8;
 }
 
-// engine.raycast_all(ox,oy,oz, dx,dy,dz, max_dist [, mask]) → table of hits
+// engine.raycast_all(ox,oy,oz, dx,dy,dz, max_dist [, mask [, skip_entity]])
+// → table of hits; skip_entity follows the raycast rule.
 int lua_engine_raycast_all(lua_State *state) noexcept {
   if ((runtime_binding().world == nullptr) || (runtime_binding().services == nullptr) ||
       (runtime_binding().services->raycast_all == nullptr)) {
@@ -380,12 +389,17 @@ int lua_engine_raycast_all(lua_State *state) noexcept {
       lua_isnumber(state, 8)
           ? static_cast<std::uint32_t>(lua_tointeger(state, 8))
           : 0xFFFFFFFFU;
+  std::uint32_t skipIndex = 0U;
+  if (!read_optional_skip_entity(state, 9, &skipIndex)) {
+    lua_newtable(state);
+    return 1;
+  }
 
   constexpr std::size_t kMaxHits = 32U;
   RuntimeRaycastHit hits[kMaxHits]{};
   const std::size_t count = runtime_binding().services->raycast_all(
       runtime_binding().world, origin.x, origin.y, origin.z, direction.x,
-      direction.y, direction.z, maxDist, hits, kMaxHits, mask);
+      direction.y, direction.z, maxDist, hits, kMaxHits, mask, skipIndex);
 
   lua_createtable(state, static_cast<int>(count), 0);
   for (std::size_t i = 0U; i < count; ++i) {
@@ -477,7 +491,7 @@ int lua_engine_overlap_box(lua_State *state) noexcept {
   return 1;
 }
 
-/// Decodes the optional trailing skip-entity argument for a sweep binding.
+/// Decodes the optional trailing skip-entity argument for a query binding.
 /// Returns false when a present argument is not a live entity handle.
 bool read_optional_skip_entity(lua_State *state, int index,
                                std::uint32_t *outSkipIndex) noexcept {
@@ -488,7 +502,7 @@ bool read_optional_skip_entity(lua_State *state, int index,
   runtime::Entity skipEntity{};
   if (!read_entity(state, index, &skipEntity)) {
     core::log_message(core::LogLevel::Warning, "scripting",
-                      "sweep skip entity is invalid or stale");
+                      "query skip entity is invalid or stale");
     return false;
   }
   *outSkipIndex = skipEntity.index;
@@ -596,7 +610,7 @@ int lua_engine_sweep_box(lua_State *state) noexcept {
 }
 
 /// Pushes a joint constructor result: nil for the unified 0 failure
-/// sentinel, the id otherwise (issue #100 contract).
+/// sentinel, the id otherwise.
 int push_joint_result(lua_State *state, std::uint32_t id) noexcept {
   if (id == 0U) {
     lua_pushnil(state);
@@ -606,8 +620,8 @@ int push_joint_result(lua_State *state, std::uint32_t id) noexcept {
   return 1;
 }
 
-/// Pushes the nil-on-failure result the joint constructors settled on
-/// (issue #126): true on success, nil (not false) so a stale id, an
+/// Pushes the nil-on-failure result the joint constructors settled on:
+/// true on success, nil (not false) so a stale id, an
 /// unbound service, or a rejected write are all indistinguishable failures
 /// from the caller's perspective, same as a failed constructor.
 int push_joint_mutation_result(lua_State *state, bool ok) noexcept {
@@ -787,7 +801,7 @@ int lua_engine_set_joint_limits(lua_State *state) noexcept {
   return push_joint_mutation_result(state, ok);
 }
 
-// #125: get_half_extents/get_restitution/get_friction read through any
+// get_half_extents/get_restitution/get_friction read through any
 // same-frame queued collider write instead of only the committed snapshot.
 int lua_engine_get_half_extents(lua_State *state) noexcept {
   runtime::Entity entity{};

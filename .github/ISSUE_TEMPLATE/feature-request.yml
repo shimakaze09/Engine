@@ -7,12 +7,12 @@ body:
   - type: dropdown
     id: slice
     attributes:
-      label: Roadmap slice
-      description: Which acceptance slice this serves (per CLAUDE.md); parking-lot items are cut from v1, not canceled.
+      label: Slice
+      description: Which acceptance slice this serves (see docs/vision.md); parking-lot items are cut from v1, not canceled. A slice is done when its demo passes, not when its feature list is exhausted.
       options:
-        - v0.1 — the slice plays
-        - v0.5 — runs everywhere
-        - v1.0 — the hour test
+        - The slice plays
+        - Runs everywhere
+        - The hour test
         - Parking lot (post-1.0)
     validations:
       required: true

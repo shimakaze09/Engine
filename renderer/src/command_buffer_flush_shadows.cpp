@@ -66,8 +66,7 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
 
   CascadeSplits cascadeSplits{};
   bool directionalShadowCacheReused = false;
-  if (shadowEnabled && (commandBufferView.data != nullptr) &&
-      (opaqueCount > 0U)) {
+  if (shadowEnabled && ((opaqueCount + ctx.auxiliaryOpaqueCount) > 0U)) {
     const float lambda = backend.cvars.shadowLambda.get_float(0.75F);
     cascadeSplits = compute_cascade_splits(nearP, farP, lambda);
 
@@ -90,7 +89,8 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
 
     const std::uint64_t cacheKey = directional_shadow_cache_key(
         commandBufferView, opaqueCount, lights.directionalLights[0],
-        cascadeSplits, lightMatrices);
+        cascadeSplits, lightMatrices, ctx.auxiliaryView,
+        ctx.auxiliaryOpaqueCount);
     // Skinned poses change every frame, so cached maps would freeze a
     // character's shadow mid-animation.
     const bool cacheEnabled = backend.cvars.shadowCache.get_bool(true) &&
@@ -120,13 +120,12 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
 
         dev->bind_program(backend.shadowDepthProgram);
 
-        for (std::size_t i = 0U; i < opaqueCount; ++i) {
-          const DrawCommand &command = commandBufferView.data[i];
+        for_each_shadow_caster(ctx, [&](const DrawCommand &command) noexcept {
           const GpuMesh *mesh = lookup_gpu_mesh(registry, command.mesh);
           if ((mesh == nullptr) ||
               (mesh->geometry == kInvalidDeviceGeometry) ||
               (mesh->vertexCount == 0U)) {
-            continue;
+            return;
           }
 
           const math::Mat4 lightMvp = math::mul(lightVP, command.modelMatrix);
@@ -176,7 +175,7 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
           if (skinnedDraw) {
             dev->bind_program(backend.shadowDepthProgram);
           }
-        }
+        });
 
         dev->bind_program(kInvalidDeviceProgram);
       }
@@ -214,7 +213,10 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
     }
     std::sort(spotCandidates.data(), spotCandidates.data() + spotCandidateCount,
               [](const ShadowCandidate &a, const ShadowCandidate &b) noexcept {
-                return a.distSq < b.distSq;
+                // Ties break on the light index so slot assignment is a function of
+                // the scene, not of creation order.
+                return (a.distSq < b.distSq) ||
+                       ((a.distSq == b.distSq) && (a.lightIndex < b.lightIndex));
               });
     if ((spotCandidateCount > kMaxSpotShadowLights) &&
         backend.cvars.shadowDebug.get_bool()) {
@@ -244,11 +246,10 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
                                           CullMode::Back});
       dev->clear(ClearFlags::ColorDepth, 1.0F, 1.0F, 1.0F, 1.0F);
 
-      for (std::size_t ci = 0U; ci < opaqueCount; ++ci) {
-        const DrawCommand &cmd = commandBufferView.data[ci];
+      for_each_shadow_caster(ctx, [&](const DrawCommand &cmd) noexcept {
         const GpuMesh *mesh = lookup_gpu_mesh(registry, cmd.mesh);
         if ((mesh == nullptr) || (mesh->geometry == kInvalidDeviceGeometry)) {
-          continue;
+          return;
         }
 
         const math::Mat4 mvp =
@@ -292,7 +293,7 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
         if (skinnedDraw) {
           dev->bind_program(backend.shadowDepthProgram);
         }
-      }
+      });
     }
 
     dev->bind_program(kInvalidDeviceProgram);
@@ -324,7 +325,10 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
     std::sort(pointCandidates.data(),
               pointCandidates.data() + pointCandidateCount,
               [](const ShadowCandidate &a, const ShadowCandidate &b) noexcept {
-                return a.distSq < b.distSq;
+                // Ties break on the light index so slot assignment is a function of
+                // the scene, not of creation order.
+                return (a.distSq < b.distSq) ||
+                       ((a.distSq == b.distSq) && (a.lightIndex < b.lightIndex));
               });
     if ((pointCandidateCount > kMaxPointShadowLights) &&
         backend.cvars.shadowDebug.get_bool()) {
@@ -366,12 +370,11 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
                                             CullMode::Back});
         dev->clear(ClearFlags::ColorDepth, 1.0F, 1.0F, 1.0F, 1.0F);
 
-        for (std::size_t ci = 0U; ci < opaqueCount; ++ci) {
-          const DrawCommand &cmd = commandBufferView.data[ci];
+        for_each_shadow_caster(ctx, [&](const DrawCommand &cmd) noexcept {
           const GpuMesh *mesh = lookup_gpu_mesh(registry, cmd.mesh);
           if ((mesh == nullptr) ||
               (mesh->geometry == kInvalidDeviceGeometry)) {
-            continue;
+            return;
           }
 
           // The point shader multiplies u_lightMVP by the world-space
@@ -393,7 +396,7 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
             dev->draw(mesh->geometry, PrimitiveTopology::Triangles, 0,
                       static_cast<std::int32_t>(mesh->vertexCount));
           }
-        }
+        });
       }
     }
 

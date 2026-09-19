@@ -1,5 +1,5 @@
 // Declares the canonical collider description for the engine's built-in
-// primitive shapes (#310), so a spawn path derives its hull provenance from
+// primitive shapes, so a spawn path derives its hull provenance from
 // the runtime tier that owns collider installation instead of building
 // physics payloads of its own.
 

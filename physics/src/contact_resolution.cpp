@@ -38,7 +38,7 @@ void maybe_wake_pair(RigidBody *bodyA, RigidBody *bodyB, float vA2,
 // 1 m/s approach speed: slow pushing/resting contacts absorb fully, or
 // driven bodies would pump bounce energy every step and ratchet airborne.
 // Every dynamic endpoint with rotational inertia carries its angular
-// Jacobian row — including against static geometry (issue #111) — so the
+// Jacobian row — including against static geometry — so the
 // normal row is the full J = [-n, -(rA x n), n, (rB x n)] and friction
 // applies torque through the contact lever arm, letting off-center static
 // impacts rotate the body and floor friction roll a sliding sphere.
@@ -52,7 +52,7 @@ float apply_velocity_impulse(RigidBody *bodyA, RigidBody *bodyB,
 
 // Resolve a collision between two shapes given contact normal, overlap, and
 // the contact point.  Applies positional correction and velocity impulse,
-// then registers a 1-point manifold cache entry (issue #123) so this pair
+// then registers a 1-point manifold cache entry so this pair
 // warm-starts and joins relax_cached_contacts' outer iteration.
 void resolve_contact(PhysicsWorldView &world,
                      const PhysicsWorldView::SimulationAccessToken &simToken,
@@ -381,6 +381,12 @@ void resolve_manifold_contact(
       combine_friction(colliderA.staticFriction, colliderB.staticFriction);
   const float combinedDynFric =
       combine_friction(colliderA.dynamicFriction, colliderB.dynamicFriction);
+  // Friction accumulates per point across both passes so the step's total
+  // tangential impulse at a point stays inside its cone: within
+  // accumulated[p] * static it sticks, beyond it the total is clamped to
+  // accumulated[p] * dynamic. Two independent passes let a sliding
+  // faceted contact take up to twice the cone.
+  engine::math::Vec3 accumulatedTangent[ClippedManifold::kMaxPoints] = {};
   for (std::size_t pass = 0U; pass < 2U; ++pass) {
     for (std::size_t p = 0U; p < manifold.count; ++p) {
       if (accumulated[p] <= 0.0F) {
@@ -418,12 +424,23 @@ void resolve_manifold_contact(
       if (effectiveMass <= 0.0F) {
         continue;
       }
-      float frictionImpulse = tangentSpeed / effectiveMass;
-      if (frictionImpulse >= accumulated[p] * combinedStaticFric) {
-        frictionImpulse = accumulated[p] * combinedDynFric;
+      const float frictionImpulse = tangentSpeed / effectiveMass;
+      engine::math::Vec3 total = engine::math::add(
+          accumulatedTangent[p], engine::math::mul(tangent, frictionImpulse));
+      const float totalLength = std::sqrt(engine::math::length_sq(total));
+      if (totalLength > accumulated[p] * combinedStaticFric) {
+        const float slidingLimit = accumulated[p] * combinedDynFric;
+        total = (totalLength > 0.0F)
+                    ? engine::math::mul(total, slidingLimit / totalLength)
+                    : zero;
       }
-      const engine::math::Vec3 impulseVec =
-          engine::math::mul(tangent, -frictionImpulse);
+      const engine::math::Vec3 delta =
+          engine::math::sub(total, accumulatedTangent[p]);
+      accumulatedTangent[p] = total;
+      if (engine::math::length_sq(delta) <= 0.0F) {
+        continue;
+      }
+      const engine::math::Vec3 impulseVec = engine::math::mul(delta, -1.0F);
       if ((bodyA != nullptr) && (invMassA > 0.0F)) {
         bodyA->velocity = engine::math::sub(
             bodyA->velocity, engine::math::mul(impulseVec, invMassA));
@@ -449,7 +466,7 @@ void resolve_manifold_contact(
   if (cached != nullptr) {
     // Write the solved state back so the next step's solve seeds from it;
     // stale points fall away because the whole set is replaced. Also record
-    // the box-tensor invInertia this resolve actually used (issue #123) so
+    // the box-tensor invInertia this resolve actually used so
     // the outer relaxation pass re-solves the same point-relative quantity
     // instead of re-deriving a possibly different value.
     cached->contactCount = manifold.count;
@@ -656,7 +673,7 @@ float apply_velocity_impulse(RigidBody *bodyA, RigidBody *bodyB,
   return 0.0F;
 }
 
-// Extra outer pass over one cached manifold's points (issue #123): re-solves
+// Extra outer pass over one cached manifold's points: re-solves
 // each point's normal impulse against the pair's CURRENT point-relative
 // velocities (which earlier pairs in this same pass may have already
 // changed), continuing to accumulate from where the primary resolve (or an
@@ -724,7 +741,7 @@ void relax_one_manifold(
   // only single-point manifolds (contactCount == 1, whether from a
   // single-point path or a clip that degenerated to one point) get the
   // angular term; multi-point manifolds stay linear-only here, matching the
-  // MOST helpful and safe subset for issue #123's dominant case (flat
+  // MOST helpful and safe subset dominant case (flat
   // resting stacks).
   const bool singlePoint = manifold.contactCount == 1U;
   const float invInertiaA =

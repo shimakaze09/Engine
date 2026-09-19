@@ -193,10 +193,12 @@ bool run_render_prep_pipeline(
                                 cam.farPlane),
       engine::math::look_at(cam.position, cam.target, cam.up));
 
+  std::atomic<std::uint32_t> droppedDrawCommands{0U};
   if (!engine::runtime::enqueue_render_prep_pipeline(
           pipelineContext, world, commandBuffer, assetDatabase, meshRegistry,
           renderPrepPhaseHandle, renderPhaseHandle, &frameGraphFailed,
-          frameThreadCount, 256U, vpMatrix, 1.0F, &mergeHandle)) {
+          &droppedDrawCommands, frameThreadCount, 256U, vpMatrix, 1.0F,
+          &mergeHandle, nullptr, nullptr)) {
     static_cast<void>(engine::core::end_frame_graph());
     world->end_frame_phase();
     return false;

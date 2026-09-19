@@ -1,9 +1,8 @@
 $input a_position, a_color0
 $output v_color0
 
-// Transforms depth-tested debug line vertices (bgfx port of
-// debug_line.vert, #138 Phase C). Uniform names match the GL source so
-// the flush code's parameter lookups resolve unchanged.
+// Transforms depth-tested debug line vertices. Uniform names match the
+// flush code's parameter lookups.
 
 #include <bgfx_shader.sh>
 

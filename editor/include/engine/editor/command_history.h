@@ -10,7 +10,7 @@ namespace engine::editor {
 // Abstract editor command. Each operation reports whether it fully
 // applied; a false return promises the world was left unchanged (commands
 // roll back their own partial work), so the history cursor only moves on
-// complete transitions (issue #117).
+// complete transitions.
 struct EditorCommand {
   virtual ~EditorCommand() = default;  // OK to have vtable here (editor only)
   /// Applies the edit; false when it could not (fully) apply.

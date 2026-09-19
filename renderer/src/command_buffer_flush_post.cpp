@@ -264,13 +264,21 @@ void flush_post_chain(FrameFlushContext &ctx) noexcept {
     renderer_context().fxaaAppliedThisFrame = true;
   }
 
+  // The back buffer is the window, whatever size the scene was rendered
+  // at: ctx.backbuffer* follows a scene-viewport override, and a viewport
+  // of that size on the real back buffer would present one corner of the
+  // image, enlarged.
+  int windowWidth = ctx.backbufferWidth;
+  int windowHeight = ctx.backbufferHeight;
+  core::render_drawable_size(&windowWidth, &windowHeight);
   dev->bind_render_target(kBackBufferTarget);
-  dev->set_viewport(0, 0, ctx.backbufferWidth, ctx.backbufferHeight);
+  dev->set_viewport(0, 0, (windowWidth > 0) ? windowWidth : 1,
+                    (windowHeight > 0) ? windowHeight : 1);
   dev->clear(ClearFlags::ColorDepth, 0.0F, 0.0F, 0.0F, 1.0F);
   dev->apply_render_state(RenderState{DepthTest::Less, true,
                                       BlendMode::Disabled, CullMode::Back});
 
-  // Player mode (#138): no editor overlay follows, so the final image is
+  // Player mode: no editor overlay follows, so the final image is
   // drawn onto the back buffer here (FXAA pings back into sceneColor;
   // otherwise the tonemapped LDR target is current).
   if (backend.cvars.presentScene.get_bool(false) &&

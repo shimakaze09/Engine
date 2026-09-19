@@ -1,7 +1,6 @@
 // Implements NativeThread over _beginthreadex/pthread_create so worker
 // spawning reports OS resource failure as a return value; std::thread's
-// throwing constructor would terminate the no-exception build instead
-// (audit H-14).
+// throwing constructor would terminate the no-exception build instead.
 
 #include "engine/core/native_thread.h"
 

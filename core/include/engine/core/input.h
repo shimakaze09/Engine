@@ -75,7 +75,7 @@ float axis_value(const char *name) noexcept;
 // Clears run-scoped gameplay registrations — script-registered actions and
 // axes plus the action/touch callback tables that carry script-owned
 // userData — while keeping device state and the persisted input map.
-// EnginePipeline::teardown calls it so no binding outlives its run (#168).
+// EnginePipeline::teardown calls it so no binding outlives its run.
 void clear_gameplay_bindings() noexcept;
 
 // Introspection: live action/axis registrations. Exercised by the

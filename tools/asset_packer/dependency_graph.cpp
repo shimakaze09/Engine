@@ -16,7 +16,7 @@ namespace engine::tools {
 namespace {
 
 /// Staged atomic replacement so an interrupted write cannot truncate the
-/// shared dependency-graph file (audit H-20).
+/// shared dependency-graph file.
 bool write_text_file(const char *path, const char *text,
                      std::size_t textSize) noexcept {
   if ((path == nullptr) || (text == nullptr)) {
@@ -136,7 +136,7 @@ bool read_asset_id_field(const engine::core::JsonParser &parser,
 }
 
 /// Copies an id set ascending so callers see a deterministic order and
-/// truncation keeps the smallest ids (L-02, issue #86).
+/// truncation keeps the smallest ids.
 std::size_t copy_ids_sorted(
     const std::unordered_set<DependencyGraph::AssetId> &ids,
     DependencyGraph::AssetId *outIds, std::size_t maxIds) noexcept {
@@ -429,7 +429,7 @@ bool has_cycle(const DependencyGraph *graph) noexcept {
 /// Kahn's algorithm over all nodes (including leaf dependencies that
 /// appear only as edge targets), dependencies before dependents; the
 /// min-heap emits ready ties smallest id first so the order is unique
-/// and deterministic (L-02, issue #86).
+/// and deterministic.
 std::size_t topological_sort(const DependencyGraph *graph,
                              DependencyGraph::AssetId *outIds,
                              std::size_t maxIds) noexcept {

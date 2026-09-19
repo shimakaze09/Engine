@@ -37,6 +37,9 @@ struct EntityScriptModule final {
   std::int64_t lastFailedMtime = 0;
   std::uint8_t loadAttempts = 0U;
   bool reloaded = false;
+  // Dispatch frame (g_modulePollSerial) whose timestamp poll this entry
+  // already took; the next entity sharing the module reuses the answer.
+  std::uint64_t polledSerial = 0U;
 };
 
 constexpr std::size_t kMaxEntityScriptModules = 32U;
@@ -60,6 +63,12 @@ lua_State *g_state = nullptr;
 EntityScriptBindingCallbacks g_callbacks{};
 EntityScriptModule g_entityScriptModules[kMaxEntityScriptModules]{};
 std::size_t g_entityScriptModuleCount = 0U;
+// Advances once per dispatch pass (update, start, begin/end play) so a
+// module's file is polled at most once per pass, not once per scripted
+// entity; a later pass in the same frame polls again, which keeps
+// a script that appears between passes visible to the next one.
+std::uint64_t g_modulePollSerial = 1U;
+std::uint64_t g_mtimePolls = 0U;
 bool g_moduleCapacityWarned = false;
 bool g_hasPendingEntityReloads = false;
 core::Entity g_entityFaulted[kMaxFaultedEntities]{};
@@ -74,6 +83,7 @@ std::size_t g_captureDepth = 0U;
 
 /// Returns the file modification timestamp from the configured callback.
 std::int64_t file_mtime(const char *path) noexcept {
+  ++g_mtimePolls;
   return (g_callbacks.fileMtime != nullptr) ? g_callbacks.fileMtime(path) : 0;
 }
 
@@ -340,6 +350,7 @@ int attempt_module_load(const char *path) noexcept {
 /// Retries a never-loaded (negative) cache entry within its attempt budget.
 int retry_negative_module_entry(EntityScriptModule &mod,
                                 const char *path) noexcept {
+  mod.polledSerial = g_modulePollSerial;
   const std::int64_t currentMtime = file_mtime(path);
   if (currentMtime != mod.lastFailedMtime) {
     mod.loadAttempts = 0U;
@@ -406,6 +417,12 @@ int get_or_load_entity_script_module(const char *path) noexcept {
   for (std::size_t i = 0U; i < g_entityScriptModuleCount; ++i) {
     if (std::strcmp(g_entityScriptModules[i].path, path) == 0) {
       EntityScriptModule &mod = g_entityScriptModules[i];
+      if (mod.polledSerial == g_modulePollSerial) {
+        // Already polled this frame: the answer stands for every entity
+        // sharing the module (LUA_NOREF for a negative entry).
+        return mod.registryRef;
+      }
+      mod.polledSerial = g_modulePollSerial;
       if (mod.registryRef == LUA_NOREF) {
         return retry_negative_module_entry(mod, path);
       }
@@ -725,6 +742,7 @@ void dispatch_entity_scripts_start() noexcept {
   if ((g_state == nullptr) || (runtime_binding().world == nullptr)) {
     return;
   }
+  ++g_modulePollSerial;
 
   runtime::World *world = runtime_binding().world;
   const std::size_t count = snapshot_script_dispatch_order();
@@ -751,6 +769,7 @@ void dispatch_entity_scripts_begin_play(runtime::World *world) noexcept {
   if ((g_state == nullptr) || (world == nullptr)) {
     return;
   }
+  ++g_modulePollSerial;
 
   world->for_each_needs_begin_play([world](runtime::Entity entity) noexcept {
     char path[kScriptPathSize] = {};
@@ -785,17 +804,21 @@ void dispatch_entity_scripts_end_play(runtime::World *world) noexcept {
   if ((g_state == nullptr) || (world == nullptr)) {
     return;
   }
+  ++g_modulePollSerial;
 
   world->for_each_pending_destroy([world](runtime::Entity entity) noexcept {
     dispatch_entity_end_play(world, entity);
   });
 }
 
+std::uint64_t entity_script_mtime_polls() noexcept { return g_mtimePolls; }
+
 void dispatch_entity_scripts_update(float dt) noexcept {
   if ((g_state == nullptr) || (runtime_binding().world == nullptr)) {
     return;
   }
 
+  ++g_modulePollSerial;
   dispatch_pending_entity_reloads();
 
   runtime::World *world = runtime_binding().world;
@@ -831,7 +854,10 @@ void dispatch_entity_scripts_end_impl(runtime::World *world) noexcept {
   for (std::size_t i = 0U; i < count; ++i) {
     const runtime::Entity entity = g_scriptDispatchOrder[i];
     char path[kScriptPathSize] = {};
-    if (!world->is_alive(entity) ||
+    // An entity that never received on_begin_play (spawned in the final
+    // tick, begin-play still pending) gets no on_end_play either, like
+    // the destroy path: the hooks pair or neither fires.
+    if (!world->is_alive(entity) || !world->has_begun_play(entity) ||
         !copy_entity_script_path(world, entity, path)) {
       continue;
     }
@@ -851,6 +877,7 @@ void dispatch_entity_scripts_end() noexcept {
   if ((g_state == nullptr) || (runtime_binding().world == nullptr)) {
     return;
   }
+  ++g_modulePollSerial;
   dispatch_entity_scripts_end_impl(runtime_binding().world);
 }
 
@@ -858,6 +885,7 @@ void dispatch_entity_scripts_end_for_transition() noexcept {
   if ((g_state == nullptr) || (runtime_binding().world == nullptr)) {
     return;
   }
+  ++g_modulePollSerial;
   // Both reentrancy holes are closed for the duration of this dispatch:
   // g_endPlayDispatchDepth makes can_apply_mutations_now() defer (not
   // apply) any world mutation a handler triggers (spawn/destroy/etc.), and

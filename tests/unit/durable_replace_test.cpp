@@ -20,6 +20,9 @@
 #include "engine/core/logging.h"
 
 #include <cstdio>
+#ifdef _WIN32
+#include <share.h>
+#endif
 #include <cstring>
 #include <filesystem>
 #include <string>
@@ -70,6 +73,10 @@ struct Recorder final {
   /// to already exist names it in existingPath.
   MakeDirectoryOutcome makeResult = MakeDirectoryOutcome::Created;
   std::string existingPath;
+  /// Whether the table claims its rename lands the entry on storage.
+  /// The fault cases leave it false so they keep exercising the
+  /// parent-directory sync that POSIX depends on.
+  bool renameIsDurable = false;
 
   /// Records the step and reports whether it is the injected failure.
   bool run(Step step) {
@@ -165,7 +172,8 @@ ReplaceOps recording_ops() noexcept {
                     &fake_open_directory,
                     &fake_sync_directory,
                     &fake_close_directory,
-                    &fake_remove};
+                    &fake_remove,
+                    g_recorder.renameIsDurable};
 }
 
 /// Resets the recorder before a case and returns the staged file.
@@ -355,6 +363,27 @@ void check_parent_directory_resolution(engine::tests::TestContext &ctx) {
                 (std::strcmp(buffer, "/") == 0),
             "a root-level path resolves to the root directory");
 
+#ifdef _WIN32
+  // A drive-rooted path holds its entry in the root, not in the drive's
+  // current directory. The difference is not cosmetic: "C:" names a
+  // directory that can be opened and synced successfully, so resolving
+  // to it would sync an unrelated directory and report the save durable
+  // on the strength of it (issue #358).
+  ctx.check(parent_directory_of(buffer, sizeof(buffer), "C:/scene.json") &&
+                (std::strcmp(buffer, "C:/") == 0),
+            "a drive-rooted path resolves to the drive root");
+  ctx.check(parent_directory_of(buffer, sizeof(buffer), "C:\\scene.json") &&
+                (std::strcmp(buffer, "C:\\") == 0),
+            "a backslash drive-rooted path keeps its separator");
+  ctx.check(parent_directory_of(buffer, sizeof(buffer), "C:scene.json") &&
+                (std::strcmp(buffer, "C:") == 0),
+            "a drive-relative path resolves to that drive's directory");
+  ctx.check(parent_directory_of(buffer, sizeof(buffer),
+                                "\\\\server\\share\\scene.json") &&
+                (std::strcmp(buffer, "\\\\server\\share") == 0),
+            "a UNC path resolves to the share root that holds the entry");
+#endif
+
   char tiny[3] = {};
   ctx.check(!parent_directory_of(tiny, sizeof(tiny), "assets/scene.json") &&
                 (tiny[0] == '\0'),
@@ -412,12 +441,12 @@ void check_production_path(engine::tests::TestContext &ctx) {
   ctx.check(log.errors == 0,
             "the real parent-directory sync reported no degradation");
 
-  // `wrote && log.errors == 0` isolates Durable only where the platform
-  // has a directory-sync primitive: ReplacedDurabilityUnavailable also
-  // commits true and logs nothing, so on Windows the assertions above
-  // would hold with no sync attempted at all. Assert the production
-  // ops' exact outcome per platform, so the day Windows gains a real
-  // primitive (issue #358) this case fails until it is updated.
+  // `wrote && log.errors == 0` is not on its own evidence of a sync: a
+  // durability-unavailable outcome once committed true and logged
+  // nothing too. It no longer can — that outcome is logged since #358,
+  // so log.errors above would catch it — but the exact outcome is still
+  // asserted, because it is the only assertion that distinguishes a
+  // real sync from a platform that quietly stopped attempting one.
   const std::string outcomeTemp =
       (directory / "outcome.json.staged").generic_string();
   const std::string outcomeDestination =
@@ -441,15 +470,98 @@ void check_production_path(engine::tests::TestContext &ctx) {
       durable_replace(staged, outcomeTemp.c_str(), outcomeDestination.c_str(),
                       engine::core::detail::production_replace_ops());
 
-#ifdef _WIN32
-  ctx.check(outcome == ReplaceOutcome::ReplacedDurabilityUnavailable,
-            "Windows reports the durability primitive as unavailable");
-#else
+  // Both platforms now reach Durable, by different routes: POSIX syncs
+  // the parent after the rename, Windows uses a write-through move that
+  // lands the entry itself (issue #358).
   ctx.check(outcome == ReplaceOutcome::Durable,
-            "the production ops sync the real parent directory");
-#endif
+            "the production ops report a durable replacement");
   ctx.check(std::filesystem::exists(outcomeDestination, ec),
             "the production ops replaced the destination");
+
+  std::filesystem::remove_all(directory, ec);
+}
+
+/// EXPECTATION (audit #358): the boundaries a save actually meets on the
+/// production path — a destination that is absent, one that is present,
+/// the same destination replaced over and over, and one another handle
+/// holds open. The last is the authored-data case that matters: whatever
+/// the platform decides, a replacement that does not commit must leave
+/// the previous file's bytes exactly as they were.
+void check_production_replacement_boundaries(engine::tests::TestContext &ctx) {
+  const std::filesystem::path directory{"durable_replace_boundary_dir"};
+  std::error_code ec{};
+  std::filesystem::remove_all(directory, ec);
+  if (!std::filesystem::create_directory(directory, ec) || ec) {
+    ctx.fail("the boundary case could not stage its directory");
+    return;
+  }
+  const std::string destination = (directory / "authored.json").generic_string();
+
+  // Absent, then present, then repeated: each commit must land its own
+  // payload, so a stale read would show up as the wrong byte count.
+  bool everyCommitLanded = true;
+  for (int i = 0; i < 4; ++i) {
+    const std::string payload(static_cast<std::size_t>(i) + 1U, 'x');
+    if (!engine::core::atomic_write_file(destination.c_str(), payload.data(),
+                                         payload.size())) {
+      everyCommitLanded = false;
+      break;
+    }
+    if (std::filesystem::file_size(destination, ec) != payload.size()) {
+      everyCommitLanded = false;
+      break;
+    }
+  }
+  ctx.check(everyCommitLanded,
+            "absent, present and repeated replacement each land their payload");
+
+  // No staged temporary may outlive a committed replacement.
+  std::size_t leftovers = 0U;
+  for (const auto &entry : std::filesystem::directory_iterator(directory, ec)) {
+    if (entry.path().filename().generic_string().find(".new.") !=
+        std::string::npos) {
+      ++leftovers;
+    }
+  }
+  ctx.check(leftovers == 0U, "repeated replacement leaves no staged temporary");
+
+  // A destination another handle holds with no sharing granted. Windows
+  // refuses the move; POSIX renames over it. Either way the file that is
+  // there afterwards must be a whole, valid one.
+  const char *guarded = "guarded-payload";
+  const bool seeded = engine::core::atomic_write_file(
+      destination.c_str(), guarded, std::strlen(guarded));
+  ctx.check(seeded, "the held-open case seeded its destination");
+
+#ifdef _WIN32
+  std::FILE *held = _fsopen(destination.c_str(), "rb", _SH_DENYRW);
+  if (held == nullptr) {
+    ctx.fail("the held-open case could not hold the destination");
+  } else {
+    const char *replacement = "replacement";
+    const bool wrote = engine::core::atomic_write_file(
+        destination.c_str(), replacement, std::strlen(replacement));
+    std::fclose(held);
+    ctx.check(!wrote,
+              "a replacement blocked by an open handle reports failure");
+    ctx.check(std::filesystem::file_size(destination, ec) ==
+                  std::strlen(guarded),
+              "the previous authored file survives a blocked replacement");
+    std::size_t staged = 0U;
+    for (const auto &entry : std::filesystem::directory_iterator(directory, ec)) {
+      if (entry.path().filename().generic_string().find(".new.") !=
+          std::string::npos) {
+        ++staged;
+      }
+    }
+    ctx.check(staged == 0U, "a blocked replacement discards its temporary");
+  }
+#else
+  const char *replacement = "replacement";
+  ctx.check(engine::core::atomic_write_file(destination.c_str(), replacement,
+                                            std::strlen(replacement)),
+            "POSIX renames over a destination another handle holds open");
+#endif
 
   std::filesystem::remove_all(directory, ec);
 }
@@ -679,13 +791,11 @@ void check_directory_creation_production(engine::tests::TestContext &ctx) {
   const CreateDirectoryOutcome created = durable_create_directories(
       nested.c_str(), engine::core::detail::production_replace_ops());
 
-#ifdef _WIN32
-  ctx.check(created == CreateDirectoryOutcome::CreatedDurabilityUnavailable,
-            "Windows reports the directory-sync primitive as unavailable");
-#else
+  // The working directory the suite runs in is writable on both
+  // platforms, so each created segment's parent can be opened and
+  // synced (issue #358 supplied the Windows primitive).
   ctx.check(created == CreateDirectoryOutcome::Durable,
             "the production ops sync each created directory's parent");
-#endif
   ctx.check(std::filesystem::is_directory(nested, ec),
             "the production ops created the whole path");
 
@@ -779,6 +889,104 @@ void check_production_primitives(engine::tests::TestContext &ctx) {
   std::filesystem::remove_all(root, ec);
 }
 
+/// EXPECTATION (audit #358): a table whose rename lands the entry on
+/// storage reports Durable without opening or syncing the parent. The
+/// distinction matters beyond saving two calls: a network share refuses
+/// the directory sync outright, so attempting it would downgrade a
+/// replacement the rename already made durable into a reported
+/// degradation.
+void check_rename_is_durable_skips_directory_sync(
+    engine::tests::TestContext &ctx) {
+  std::FILE *file = begin_case();
+  g_recorder.renameIsDurable = true;
+  const ReplaceOps ops = recording_ops();
+
+  const ReplaceOutcome outcome =
+      durable_replace(file, "stage.tmp", "dest.json", ops);
+
+  ctx.check(outcome == ReplaceOutcome::Durable,
+            "a self-durable rename reports a durable replacement");
+  ctx.check(steps_are({Step::FileFlush, Step::FileSync, Step::FileClose,
+                       Step::Rename}),
+            "a self-durable rename issues no directory step");
+  ctx.check(g_recorder.renamed, "the rename still committed");
+
+  // The claim governs only a rename that succeeded: a failed one still
+  // leaves the destination untouched and reports the failure.
+  std::FILE *second = begin_case();
+  g_recorder.renameIsDurable = true;
+  g_recorder.fail_at(Step::Rename);
+  const ReplaceOps failingOps = recording_ops();
+  const ReplaceOutcome failed =
+      durable_replace(second, "stage.tmp", "dest.json", failingOps);
+  ctx.check(failed == ReplaceOutcome::Failed,
+            "a failed self-durable rename still reports failure");
+  ctx.check(g_recorder.temporaryRemoved,
+            "a failed self-durable rename discards the temporary");
+}
+
+/// EXPECTATION (audit #358, folded from #572): the two segments of a
+/// Windows UNC root are stepped over rather than created. Neither can
+/// be: the server segment alone is not a complete path and mkdir
+/// refuses it with something other than EEXIST, which the walk reads as
+/// "this path cannot be reached" — so before this, a save under a
+/// redirected roaming profile created nothing and saved nothing.
+void check_unc_root_segments_are_skipped(engine::tests::TestContext &ctx) {
+#ifdef _WIN32
+  begin_case();
+  const ReplaceOps ops = recording_ops();
+
+  const CreateDirectoryOutcome outcome = durable_create_directories(
+      "\\\\server\\share\\profile\\saves", ops);
+
+  ctx.check(outcome == CreateDirectoryOutcome::Durable,
+            "a UNC path creates its segments instead of reporting Failed");
+  ctx.check(g_recorder.createdPaths ==
+                std::vector<std::string>{"\\\\server\\share\\profile",
+                                         "\\\\server\\share\\profile\\saves"},
+            "the server and share segments are never handed to mkdir");
+
+  // A forward-slash UNC path is the same root and is skipped the same
+  // way; Windows accepts either separator.
+  begin_case();
+  const ReplaceOps slashOps = recording_ops();
+  static_cast<void>(
+      durable_create_directories("//server/share/profile", slashOps));
+  ctx.check(g_recorder.createdPaths ==
+                std::vector<std::string>{"//server/share/profile"},
+            "a forward-slash UNC root is skipped the same way");
+
+  // A path with only the root names nothing to create at all.
+  begin_case();
+  const ReplaceOps rootOps = recording_ops();
+  const CreateDirectoryOutcome rootOnly =
+      durable_create_directories("\\\\server\\share", rootOps);
+  ctx.check(rootOnly == CreateDirectoryOutcome::AlreadyExists,
+            "a bare UNC share root creates nothing");
+  ctx.check(g_recorder.createdPaths.empty(),
+            "a bare UNC share root issues no mkdir");
+
+  // The extended-length and device prefixes also open with two
+  // separators, but their second segment is a real directory. Skipping
+  // it would step over a segment the save needs created, so they are
+  // excluded from the UNC rule: the first segment is still offered to
+  // mkdir, which refuses it, and the walk reports that rather than
+  // quietly creating only part of the path.
+  begin_case();
+  const ReplaceOps extendedOps = recording_ops();
+  g_recorder.makeResult = MakeDirectoryOutcome::Failed;
+  const CreateDirectoryOutcome extended =
+      durable_create_directories("\\\\?\\C:\\Users\\hopper", extendedOps);
+  ctx.check(extended == CreateDirectoryOutcome::Failed,
+            "an extended-length prefix is refused, not partly created");
+  ctx.check(g_recorder.createdPaths ==
+                std::vector<std::string>{"\\\\?"},
+            "an extended-length prefix never skips a real segment");
+#else
+  static_cast<void>(ctx);
+#endif
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -799,6 +1007,7 @@ int main() {
   check_null_arguments(ctx);
   check_parent_directory_resolution(ctx);
   check_production_path(ctx);
+  check_production_replacement_boundaries(ctx);
   check_directory_creation_ordering(ctx);
   check_directory_creation_already_exists(ctx);
   check_directory_creation_partial(ctx);
@@ -806,6 +1015,8 @@ int main() {
   check_directory_creation_failure(ctx);
   check_directory_creation_path_shapes(ctx);
   check_directory_creation_production(ctx);
+  check_rename_is_durable_skips_directory_sync(ctx);
+  check_unc_root_segments_are_skipped(ctx);
   check_production_primitives(ctx);
 
   static_cast<void>(std::fclose(g_stagedFile));

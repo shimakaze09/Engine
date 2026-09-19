@@ -1,6 +1,5 @@
 // Implements the generic asset transition-request queue for the Engine
-// content system (#171 C3: the ring and its push/pop/pending logic moved
-// verbatim from the renderer's asset manager).
+// content system: the ring and its push/pop/pending logic.
 
 #include "engine/content/asset_request_queue.h"
 

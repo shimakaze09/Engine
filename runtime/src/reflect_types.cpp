@@ -76,6 +76,7 @@ REFLECT_TYPE(engine::runtime::PointLightComponent)
 REFLECT_FIELD(color, Vec3)
 REFLECT_FIELD(intensity, Float)
 REFLECT_FIELD(radius, Float)
+REFLECT_FIELD(castShadow, Bool)
 REFLECT_END()
 
 REFLECT_TYPE(engine::runtime::SpotLightComponent)
@@ -85,6 +86,7 @@ REFLECT_FIELD(intensity, Float)
 REFLECT_FIELD(radius, Float)
 REFLECT_FIELD(innerConeAngle, Float)
 REFLECT_FIELD(outerConeAngle, Float)
+REFLECT_FIELD(castShadow, Bool)
 REFLECT_END()
 
 REFLECT_TYPE(engine::runtime::ReflectionProbeComponent)
@@ -126,7 +128,7 @@ REFLECT_END()
 
 REFLECT_TYPE(engine::runtime::MeshComponent)
 static_cast<void>(desc);
-// Intentionally registers a zero-field descriptor (issue #156): the asset-id
+// Intentionally registers a zero-field descriptor: the asset-id
 // fields are 64-bit and TypeField::Kind has no Uint64 case, and albedo/
 // roughness/metallic/opacity/sceneCaptureSourceId are edited through the
 // editor's typed asset/entity pickers rather than the generic field loop.

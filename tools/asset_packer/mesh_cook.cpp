@@ -18,6 +18,7 @@
 #include "engine/math/vec3.h"
 #include "engine/physics/collider.h"
 #include "engine/physics/convex_hull.h"
+#include "gltf_bounds.h"
 
 std::size_t primitive_stride_floats(const PrimitiveData &data) {
   if (data.hasSkin) {
@@ -25,6 +26,7 @@ std::size_t primitive_stride_floats(const PrimitiveData &data) {
   }
   return data.hasUVs ? 8U : 6U;
 }
+
 
 void apply_up_axis_to_primitive(PrimitiveData *data, int upAxis) {
   if ((data == nullptr) || ((upAxis != 0) && (upAxis != 2))) {
@@ -167,7 +169,7 @@ bool extract_primitive(const cgltf_primitive *primitive,
   }
 
   // The cooked format and the index/normal pipeline assume triangle
-  // lists; other modes would cook silently wrong geometry (audit H-19).
+  // lists; other modes would cook silently wrong geometry.
   if (primitive->type != cgltf_primitive_type_triangles) {
     std::fprintf(stderr,
                  "error: primitive mode %d unsupported — only triangle "
@@ -184,8 +186,7 @@ bool extract_primitive(const cgltf_primitive *primitive,
       find_attribute_accessor(primitive, cgltf_attribute_type_texcoord);
   // A missing NORMAL accessor is acceptable only when the caller will
   // generate normals afterwards; the fields stay zero-initialized until
-  // then (review item 1: generateNormals' primary use case is sources
-  // without normals).
+  // then (generateNormals exists for sources without normals).
   if ((positions == nullptr) ||
       ((normals == nullptr) && !allowMissingNormals)) {
     std::fprintf(stderr,
@@ -223,6 +224,10 @@ bool extract_primitive(const cgltf_primitive *primitive,
   outData->hasSkin = hasSkin;
   const std::size_t strideFloats = primitive_stride_floats(*outData);
 
+  if (!accessor_count_is_cookable(positions, strideFloats, "POSITION")) {
+    return false;
+  }
+
   const std::size_t vertexCount = static_cast<std::size_t>(positions->count);
   outData->interleavedVertices.assign(vertexCount * strideFloats, 0.0F);
 
@@ -239,6 +244,19 @@ bool extract_primitive(const cgltf_primitive *primitive,
          !cgltf_accessor_read_float(normals, static_cast<cgltf_size>(i),
                                     normal.data(), normal.size()))) {
       std::fprintf(stderr, "error: failed to decode vertex attributes\n");
+      return false;
+    }
+
+    // A non-finite position is not a mesh: it would be cast to int by the
+    // thumbnail rasterizer (undefined) and fed to the hull builder.
+    if (!std::isfinite(position[0U]) || !std::isfinite(position[1U]) ||
+        !std::isfinite(position[2U]) ||
+        ((normals != nullptr) &&
+         (!std::isfinite(normal[0U]) || !std::isfinite(normal[1U]) ||
+          !std::isfinite(normal[2U])))) {
+      std::fprintf(stderr,
+                   "error: vertex %zu has a non-finite position or normal\n",
+                   i);
       return false;
     }
 
@@ -290,6 +308,10 @@ bool extract_primitive(const cgltf_primitive *primitive,
   }
 
   if (primitive->indices != nullptr) {
+    if (!accessor_count_is_cookable(primitive->indices, 1U, "index")) {
+      return false;
+    }
+
     const std::size_t indexCount =
         static_cast<std::size_t>(primitive->indices->count);
     outData->indices.assign(indexCount, 0U);
@@ -339,7 +361,7 @@ bool write_mesh_file(const char *outputPath, const PrimitiveData &data) {
   header.vertexCount = static_cast<std::uint32_t>(vertexCount);
   header.indexCount = static_cast<std::uint32_t>(data.indices.size());
 
-  // Streamed atomic commit (review item 9): chunks go straight to the
+  // Streamed atomic commit: chunks go straight to the
   // staged temporary, so the resident payload is never double-buffered.
   const std::size_t vertexBytes =
       data.interleavedVertices.size() * sizeof(float);
@@ -362,7 +384,7 @@ bool write_mesh_file(const char *outputPath, const PrimitiveData &data) {
 
 /// Relativizes a cook path against the working directory with forward
 /// slashes so tracked metadata never embeds a developer machine's absolute
-/// paths (audit L-03); paths outside the working tree stay as given.
+/// paths; paths outside the working tree stay as given.
 static std::string portable_metadata_path(const char *path) {
   namespace fs = std::filesystem;
   const fs::path input{path != nullptr ? path : ""};
@@ -490,8 +512,7 @@ bool cook_and_write_convex_hull(const char *outputPath,
   // Structurally hull-less geometry is not a cook failure — the mesh is
   // valid without a sidecar — but a hull from an earlier cook of this
   // asset must not survive under the fresh stamp, so the stale sidecar
-  // is removed and a failed removal blocks the commit marker
-  // (PR #51 review).
+  // is removed and a failed removal blocks the commit marker.
   auto removeStaleHull = [&hullPath]() {
     std::error_code removeError{};
     std::filesystem::remove(hullPath, removeError);
@@ -532,7 +553,7 @@ bool cook_and_write_convex_hull(const char *outputPath,
   // Header: magic (4 bytes) + planeCount (4) + vertexCount (4) + localCenter
   // (12) + localHalfExtents (12) = 36 bytes; then 16-byte planes and
   // 12-byte vertices. Assembled in memory and committed atomically so an
-  // interrupted cook cannot leave a truncated hull (audit H-20).
+  // interrupted cook cannot leave a truncated hull.
   constexpr std::uint32_t kHullMagic = 0x48554C4CU; // 'HULL'
   const std::uint32_t planeCount32 =
       static_cast<std::uint32_t>(hull.planeCount);
@@ -650,14 +671,31 @@ bool extract_gltf_dependencies(const cgltf_data *data, const char *inputPath,
     if (image->uri == nullptr) {
       return; // Embedded texture (buffer view), no external dep.
     }
+    if (std::strncmp(image->uri, "data:", 5U) == 0) {
+      return; // Inline payload: no file to watch.
+    }
     if (!seenImages.insert(image).second) {
       return;
     }
-    addExternalFile(image->uri);
+    // The URI is percent-encoded; the file on disk is not, so a texture
+    // named "my tex.png" must be hashed under its decoded name or an edit
+    // to it never triggers a recook.
+    char decodedUri[1024] = {};
+    const int copied =
+        std::snprintf(decodedUri, sizeof(decodedUri), "%s", image->uri);
+    if ((copied <= 0) || (copied >= static_cast<int>(sizeof(decodedUri)))) {
+      std::fprintf(stderr,
+                   "warning: image uri too long to track as a dependency: "
+                   "%s\n",
+                   image->uri);
+      return;
+    }
+    cgltf_decode_uri(decodedUri);
+    addExternalFile(decodedUri);
   };
 
   // External buffer payloads (.bin) carry the actual vertex data; a
-  // payload edit without a .gltf change must still recook (audit H-20).
+  // payload edit without a.gltf change must still recook.
   for (cgltf_size bi = 0U; bi < data->buffers_count; ++bi) {
     const cgltf_buffer &buffer = data->buffers[bi];
     if ((buffer.uri == nullptr) ||
