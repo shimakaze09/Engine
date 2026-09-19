@@ -84,11 +84,27 @@ static bool platform_set_blocking(SocketHandle s) noexcept {
   return ioctlsocket(s, static_cast<long>(FIONBIO), &mode) == 0;
 }
 
+static bool platform_send_would_block() noexcept {
+  return WSAGetLastError() == WSAEWOULDBLOCK;
+}
+
+static bool platform_wait_writable(SocketHandle s, int timeoutMs) noexcept {
+  fd_set wfds;
+  FD_ZERO(&wfds);
+  FD_SET(s, &wfds);
+  timeval tv{};
+  tv.tv_sec = timeoutMs / 1000;
+  tv.tv_usec = (timeoutMs % 1000) * 1000;
+  return select(0, nullptr, &wfds, nullptr, &tv) > 0;
+}
+
 #else
 #include <errno.h>
 #include <fcntl.h>
 #include <netinet/in.h>
+#include <sys/select.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <unistd.h>
 using SocketHandle = int;
 static constexpr SocketHandle kBadSocket = -1;
@@ -110,6 +126,20 @@ static bool platform_set_nonblocking(SocketHandle s) noexcept {
 static bool platform_set_blocking(SocketHandle s) noexcept {
   const int flags = fcntl(s, F_GETFL, 0);
   return fcntl(s, F_SETFL, flags & ~O_NONBLOCK) != -1;
+}
+
+static bool platform_send_would_block() noexcept {
+  return (errno == EAGAIN) || (errno == EWOULDBLOCK);
+}
+
+static bool platform_wait_writable(SocketHandle s, int timeoutMs) noexcept {
+  fd_set wfds;
+  FD_ZERO(&wfds);
+  FD_SET(s, &wfds);
+  timeval tv{};
+  tv.tv_sec = timeoutMs / 1000;
+  tv.tv_usec = (timeoutMs % 1000) * 1000;
+  return select(s + 1, nullptr, &wfds, nullptr, &tv) > 0;
 }
 
 #endif
@@ -199,6 +229,48 @@ void write_event_header(core::JsonWriter &w, const char *event) noexcept {
 
 // ---------- Transport ----------
 
+// A frame is written whole or the client is dropped (#576): the socket is
+// non-blocking, so a large response (a variables tree) could stop at
+// EAGAIN half way and leave a torn frame the client cannot recover from.
+// A stalled client is waited on within this budget per frame, then closed.
+constexpr int kSendBudgetMs = 1000;
+constexpr int kSendWaitSliceMs = 50;
+int g_injectedWouldBlocks = 0;
+// The injection fires only once a frame's first write has gone out, so
+// the forced short write lands mid-frame, where a torn frame would show.
+bool g_injectionArmed = false;
+
+/// Sends every byte, waiting for the socket to drain while `budgetMs`
+/// lasts; false on a hard error or when the budget is spent.
+bool send_all_bounded(SocketHandle s, const char *data, std::size_t len,
+                      int *budgetMs) noexcept {
+  std::size_t sent = 0U;
+  while (sent < len) {
+    if (g_injectionArmed && (g_injectedWouldBlocks > 0)) {
+      --g_injectedWouldBlocks;
+      if (*budgetMs <= 0) {
+        return false;
+      }
+      *budgetMs -= kSendWaitSliceMs;
+      static_cast<void>(platform_wait_writable(s, kSendWaitSliceMs));
+      continue;
+    }
+    const auto n = send(s, data + sent, static_cast<int>(len - sent), 0);
+    if (n > 0) {
+      sent += static_cast<std::size_t>(n);
+      g_injectionArmed = true;
+      continue;
+    }
+    if ((n < 0) && platform_send_would_block() && (*budgetMs > 0)) {
+      *budgetMs -= kSendWaitSliceMs;
+      static_cast<void>(platform_wait_writable(s, kSendWaitSliceMs));
+      continue;
+    }
+    return false;
+  }
+  return true;
+}
+
 bool send_dap_message(const char *json, std::size_t len) noexcept {
   DapServerState &state = dap_server_state();
   if (state.clientSocket == kBadSocket) {
@@ -210,26 +282,16 @@ bool send_dap_message(const char *json, std::size_t len) noexcept {
   if (headerLen <= 0) {
     return false;
   }
-  const auto hLen = static_cast<std::size_t>(headerLen);
-  std::size_t sent = 0U;
-  while (sent < hLen) {
-    const auto n =
-        send(state.clientSocket, header + sent,
-             static_cast<int>(hLen - sent), 0);
-    if (n <= 0) {
-      return false;
-    }
-    sent += static_cast<std::size_t>(n);
-  }
-  sent = 0U;
-  while (sent < len) {
-    const auto n =
-        send(state.clientSocket, json + sent, static_cast<int>(len - sent),
-             0);
-    if (n <= 0) {
-      return false;
-    }
-    sent += static_cast<std::size_t>(n);
+  int budgetMs = kSendBudgetMs;
+  g_injectionArmed = false;
+  if (!send_all_bounded(state.clientSocket, header,
+                        static_cast<std::size_t>(headerLen), &budgetMs) ||
+      !send_all_bounded(state.clientSocket, json, len, &budgetMs)) {
+    core::log_message(core::LogLevel::Warning, "dap",
+                      "DAP client did not accept a response in time; the "
+                      "session is closed so the protocol cannot desync");
+    close_dap_client(state);
+    return false;
   }
   return true;
 }
@@ -1001,6 +1063,10 @@ bool dap_is_running() noexcept {
 
 bool dap_has_client() noexcept {
   return dap_server_state().clientSocket != kBadSocket;
+}
+
+void dap_inject_would_block(int count) noexcept {
+  g_injectedWouldBlocks = (count > 0) ? count : 0;
 }
 
 void dap_poll() noexcept {

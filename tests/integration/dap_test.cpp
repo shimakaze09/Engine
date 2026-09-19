@@ -102,8 +102,11 @@ void shutdown_client_socket_platform() noexcept {
 #endif
 }
 
-/// Connects a client socket to the local DAP server with a short retry window.
-bool connect_to_dap_server(SocketHandle *outSock) noexcept {
+/// Connects a client socket to the local DAP server with a short retry
+/// window; a non-zero receiveBufferBytes shrinks the client's receive
+/// window first so a large server response cannot be absorbed unread.
+bool connect_to_dap_server(SocketHandle *outSock,
+                           int receiveBufferBytes = 0) noexcept {
   if (outSock == nullptr) {
     return false;
   }
@@ -112,6 +115,12 @@ bool connect_to_dap_server(SocketHandle *outSock) noexcept {
   SocketHandle sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
   if (sock == kInvalidSocket) {
     return false;
+  }
+  if (receiveBufferBytes > 0) {
+    static_cast<void>(setsockopt(
+        sock, SOL_SOCKET, SO_RCVBUF,
+        reinterpret_cast<const char *>(&receiveBufferBytes),
+        sizeof(receiveBufferBytes)));
   }
 
   sockaddr_in addr{};
@@ -928,6 +937,119 @@ bool test_dap_attach_while_stopped() noexcept {
   return ok;
 }
 
+/// Regression for #576 row 1: the client socket is non-blocking, so a
+/// response larger than what the kernel accepts at once used to stop at
+/// the first EAGAIN with a half-written frame on the wire and the
+/// handler none the wiser. The client here keeps a tiny receive window and
+/// only starts reading after the server has begun sending; it must then
+/// receive the whole frame, or find the session closed, never a torn
+/// frame.
+bool test_dap_large_response_never_truncated() noexcept {
+  constexpr std::size_t kBreakpoints = 2000U;
+  if (!engine::scripting::dap_start(kDapPort)) {
+    return false;
+  }
+  if (!init_client_socket_platform()) {
+    engine::scripting::dap_stop();
+    return false;
+  }
+  SocketHandle sock = kInvalidSocket;
+  if (!connect_to_dap_server(&sock, 2048) || !wait_for_dap_client(true)) {
+    close_socket_safe(sock);
+    shutdown_client_socket_platform();
+    engine::scripting::dap_stop();
+    return false;
+  }
+
+  std::string body = "{\"seq\":1,\"type\":\"request\",\"command\":"
+                     "\"setBreakpoints\",\"arguments\":{\"source\":{\"path\":"
+                     "\"dap_big_response.lua\"},\"breakpoints\":[";
+  char entry[32] = {};
+  for (std::size_t i = 0U; i < kBreakpoints; ++i) {
+    std::snprintf(entry, sizeof(entry), "%s{\"line\":%zu}", (i == 0U) ? "" : ",",
+                  i + 1U);
+    body += entry;
+  }
+  body += "]}}";
+  char header[64] = {};
+  const int headerLen =
+      std::snprintf(header, sizeof(header), "Content-Length: %zu\r\n\r\n",
+                    body.size());
+  const bool sent = (headerLen > 0) &&
+                    send_all(sock, header, static_cast<std::size_t>(headerLen)) &&
+                    send_all(sock, body.data(), body.size());
+
+  // The reader starts late and drains slowly, and the first three writes
+  // are forced to report would-block; the server's send must either wait
+  // and finish the frame or close the session.
+  engine::scripting::dap_inject_would_block(3);
+  enum class Outcome { Complete, Closed, Torn, TimedOut };
+  Outcome outcome = Outcome::TimedOut;
+  std::string received;
+  std::thread reader([&]() {
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    std::string buffer;
+    std::string frame;
+    if (recv_dap_message(sock, &buffer, &frame, 6000)) {
+      received = frame;
+      outcome = Outcome::Complete;
+      return;
+    }
+    // recv_dap_message returns false on a closed socket or on timeout: a
+    // readable socket that yields nothing is the peer's close.
+    fd_set rfds;
+    FD_ZERO(&rfds);
+    FD_SET(sock, &rfds);
+    timeval tv{};
+    tv.tv_usec = 100 * 1000;
+#if defined(_WIN32)
+    const bool readable = select(0, &rfds, nullptr, nullptr, &tv) > 0;
+#else
+    const bool readable = select(sock + 1, &rfds, nullptr, nullptr, &tv) > 0;
+#endif
+    char probe = 0;
+    const bool closed = readable && (recv(sock, &probe, 1, 0) <= 0);
+    if (!buffer.empty()) {
+      outcome = Outcome::Torn;
+    } else {
+      outcome = closed ? Outcome::Closed : Outcome::TimedOut;
+    }
+  });
+  for (int attempt = 0; sent && (attempt < 400); ++attempt) {
+    engine::scripting::dap_poll();
+    if (!engine::scripting::dap_has_client()) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  reader.join();
+
+  bool ok = false;
+  if (outcome == Outcome::Complete) {
+    std::size_t entries = 0U;
+    for (std::size_t pos = received.find("\"line\":"); pos != std::string::npos;
+         pos = received.find("\"line\":", pos + 1U)) {
+      ++entries;
+    }
+    ok = entries == kBreakpoints;
+    if (!ok) {
+      std::printf("(complete frame with %zu entries) ", entries);
+    }
+  } else if (outcome == Outcome::Closed) {
+    ok = true; // a dropped session is the other acceptable outcome
+  } else {
+    std::printf(outcome == Outcome::Torn ? "(torn frame on the wire) "
+                                         : "(no frame and no close) ");
+  }
+
+  // Release the store for later checks, on a fresh session if this one
+  // was dropped.
+  engine::scripting::dap_stop();
+  close_socket_safe(sock);
+  shutdown_client_socket_platform();
+  return ok;
+}
+
 /// Runs this executable or test program.
 int main() {
   std::printf("  dap_test::restart_clears_session ... ");
@@ -957,8 +1079,12 @@ int main() {
   std::printf("  dap_test::attach_while_stopped ... ");
   const bool attachOk = test_dap_attach_while_stopped();
   std::printf(attachOk ? "PASS\n" : "FAIL\n");
+
+  std::printf("  dap_test::large_response_never_truncated ... ");
+  const bool untornOk = test_dap_large_response_never_truncated();
+  std::printf(untornOk ? "PASS\n" : "FAIL\n");
   return (restartOk && oversizedOk && overflowOk && unknownOk && largeListOk &&
-          breakpointOk && attachOk)
+          breakpointOk && attachOk && untornOk)
              ? 0
              : 1;
 }
