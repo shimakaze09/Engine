@@ -212,7 +212,13 @@ bool World::add_component_checked(Set &set, Entity entity,
     return false;
   }
 
-  return set.add(entity, component);
+  // The phase and the handle passed, so the set can only refuse for want
+  // of a slot; a silent refusal here reads as a lost write upstream.
+  if (!set.add(entity, component)) {
+    log_component_error(label, "component storage is full");
+    return false;
+  }
+  return true;
 }
 
 template <typename Set>

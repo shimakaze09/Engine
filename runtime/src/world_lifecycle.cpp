@@ -56,6 +56,8 @@ World::create_entity_with_persistent_id(PersistentId persistentId) noexcept {
 
   if ((persistentId != kInvalidPersistentId) &&
       (find_persistent_index(persistentId) != 0U)) {
+    core::log_message(core::LogLevel::Error, "world",
+                      "create_entity refused: persistent id already in use");
     return kInvalidEntity;
   }
 
@@ -65,6 +67,8 @@ World::create_entity_with_persistent_id(PersistentId persistentId) noexcept {
     index = m_freeEntityIndices[m_freeEntityCount];
   } else {
     if (m_nextEntityIndex > static_cast<std::uint32_t>(kMaxEntities)) {
+      core::log_message(core::LogLevel::Error, "world",
+                        "create_entity refused: entity capacity is full");
       return kInvalidEntity;
     }
 
