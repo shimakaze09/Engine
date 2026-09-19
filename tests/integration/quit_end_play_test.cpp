@@ -11,6 +11,7 @@
 #include "engine/runtime/engine_pipeline.h"
 #include "engine/runtime/world.h"
 #include "engine/scripting/bindable_api.h"
+#include "engine/scripting/scripting.h"
 
 #include <SDL3/SDL.h>
 
@@ -70,16 +71,50 @@ bool set_working_directory_with_assets() noexcept {
 }
 
 // on_begin_play marks the session live; on_end_play marks the quit-time
-// dispatch this regression exists to prove.
+// dispatch this regression exists to prove; a tick after the end hook
+// records the ordering defect of #534.
 constexpr const char *kScript =
     "local M = {}\n"
     "function M.on_begin_play(self)\n"
     "    engine.set_game_state(\"in_progress\")\n"
     "end\n"
+    "function M.on_tick(self, dt)\n"
+    "    if g_session_ended then\n"
+    "        engine.set_game_state(\"tick_after_end\")\n"
+    "    end\n"
+    "end\n"
     "function M.on_end_play(self)\n"
+    "    g_session_ended = true\n"
     "    engine.set_game_state(\"ended\")\n"
     "end\n"
     "return M\n";
+
+// An entity spawned in the final tick never begins play, so it must not
+// end it either (#534); either hook sets a global the driver reads.
+constexpr const char *kOrphanScriptPath = "quit_end_play_orphan.lua";
+constexpr const char *kOrphanScript =
+    "local M = {}\n"
+    "function M.on_begin_play(self) g_orphan_began = true end\n"
+    "function M.on_end_play(self) g_orphan_ended = true end\n"
+    "return M\n";
+constexpr const char *kDriverScriptPath = "quit_end_play_driver.lua";
+constexpr const char *kDriverScript =
+    "function orphan_hooks_paired()\n"
+    "    if (g_orphan_began == true) ~= (g_orphan_ended == true) then\n"
+    "        error('orphan received one hook without the other')\n"
+    "    end\n"
+    "end\n";
+
+bool write_text_file(const char *path, const char *text) noexcept {
+  std::FILE *file = std::fopen(path, "wb");
+  if (file == nullptr) {
+    return false;
+  }
+  const std::size_t length = std::char_traits<char>::length(text);
+  const std::size_t written = std::fwrite(text, 1U, length, file);
+  std::fclose(file);
+  return written == length;
+}
 
 bool write_script_file() noexcept {
   std::FILE *file = nullptr;
@@ -101,6 +136,8 @@ bool write_script_file() noexcept {
 
 void remove_script_file() noexcept {
   static_cast<void>(std::remove(kScriptPath));
+  static_cast<void>(std::remove(kOrphanScriptPath));
+  static_cast<void>(std::remove(kDriverScriptPath));
 }
 
 /// Runs one playing frame guaranteed to simulate at least one fixed step
@@ -161,23 +198,42 @@ int main() {
   CHECK(ticking_frame(pipeline), "script frame 2");
   CHECK(game_state_is("in_progress"), "session is live before quit");
 
+  // Spawned now, its begin-play is pending until the next transition
+  // stage, which the quit turns into a Stop.
+  CHECK(write_text_file(kOrphanScriptPath, kOrphanScript) &&
+            write_text_file(kDriverScriptPath, kDriverScript) &&
+            engine::scripting::load_script(kDriverScriptPath),
+        "orphan and driver scripts written");
+  const engine::runtime::Entity orphan = g_world->create_scene_object();
+  CHECK(orphan != engine::runtime::kInvalidEntity, "spawn orphan");
+  engine::runtime::ScriptComponent orphanScript{};
+  std::snprintf(orphanScript.scriptPath, sizeof(orphanScript.scriptPath),
+                "%s", kOrphanScriptPath);
+  CHECK(g_world->add_script_component(orphan, orphanScript),
+        "attach orphan script");
+
   // The production quit path: a real SDL_EVENT_QUIT through stage_input.
   SDL_Event quitEvent{};
   quitEvent.type = SDL_EVENT_QUIT;
   CHECK(SDL_PushEvent(&quitEvent), "push quit event");
 
   // The loop must terminate on its own within a bounded number of frames.
+  // Each frame is a ticking one, so a tick that wrongly followed the end
+  // hook would be observed.
   bool exited = false;
   for (int i = 0; i < 10; ++i) {
-    if (!pipeline.execute_frame()) {
+    if (!ticking_frame(pipeline)) {
       exited = true;
       break;
     }
   }
   CHECK(exited, "quit terminates the frame loop");
 
-  // The regression proper: on_end_play ran on the way out.
-  CHECK(game_state_is("ended"), "quit dispatched on_end_play");
+  // The regression proper: on_end_play ran on the way out, and nothing of
+  // the session (its on_tick) ran after it (#534).
+  CHECK(game_state_is("ended"), "quit dispatched on_end_play, last");
+  CHECK(engine::scripting::call_script_function("orphan_hooks_paired"),
+        "an entity spawned in the final tick gets both hooks or neither");
 
   pipeline.teardown();
   engine::shutdown();

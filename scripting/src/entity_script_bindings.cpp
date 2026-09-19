@@ -854,7 +854,10 @@ void dispatch_entity_scripts_end_impl(runtime::World *world) noexcept {
   for (std::size_t i = 0U; i < count; ++i) {
     const runtime::Entity entity = g_scriptDispatchOrder[i];
     char path[kScriptPathSize] = {};
-    if (!world->is_alive(entity) ||
+    // An entity that never received on_begin_play (spawned in the final
+    // tick, begin-play still pending) gets no on_end_play either, like
+    // the destroy path (#534): the hooks pair or neither fires.
+    if (!world->is_alive(entity) || !world->has_begun_play(entity) ||
         !copy_entity_script_path(world, entity, path)) {
       continue;
     }

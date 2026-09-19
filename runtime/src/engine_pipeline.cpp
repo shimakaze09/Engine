@@ -423,7 +423,9 @@ LoopPlayState query_editor_play_state() noexcept {
   return LoopPlayState::Stopped;
 }
 
-void process_input_events_with_editor() noexcept {
+/// Returns whether the events included a quit that ends a live session.
+bool process_input_events_with_editor() noexcept {
+  bool quitRequested = false;
   core::begin_input_frame();
 
   const runtime::EditorBridge *bridge = runtime::editor_bridge();
@@ -447,9 +449,10 @@ void process_input_events_with_editor() noexcept {
         // stage_play_transitions dispatches later this frame); only a
         // still-playing session — standalone runtime, or a bridge with no
         // stop routing — takes this direct dispatch.
-        if (query_editor_play_state() == LoopPlayState::Playing) {
-          scripting::dispatch_entity_scripts_end();
-        }
+        // A still-playing session ends in stage_play_transitions, as a
+        // Stop: the end hooks run there and no tick, physics step or
+        // collision callback of the session follows them (#534).
+        quitRequested = true;
         core::request_platform_quit();
       }
       continue;
@@ -462,6 +465,7 @@ void process_input_events_with_editor() noexcept {
   }
 
   core::end_input_frame();
+  return quitRequested;
 }
 
 // ---------------------------------------------------------------------------
@@ -598,6 +602,8 @@ struct EnginePipeline::Impl final {
   double wallFrameMs = 0.0;
   // Windowed FPS readout: instantaneous 1/dt swings +-4 FPS on 1 ms of
   // present jitter, so the overlay publishes a half-second average.
+  // Set by the quit event; stage_play_transitions turns it into a Stop.
+  bool quitRequested = false;
   double fpsWindowSeconds = 0.0;
   std::uint32_t fpsWindowFrames = 0U;
   float smoothedFps = 0.0F;
@@ -912,7 +918,9 @@ void EnginePipeline::Impl::teardown() noexcept {
 // ---------------------------------------------------------------------------
 
 void EnginePipeline::Impl::stage_input() noexcept {
-  process_input_events_with_editor();
+  if (process_input_events_with_editor()) {
+    quitRequested = true;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -921,6 +929,15 @@ void EnginePipeline::Impl::stage_input() noexcept {
 
 void EnginePipeline::Impl::stage_play_transitions() noexcept {
   playState = query_editor_play_state();
+  if (quitRequested && (playState != LoopPlayState::Stopped)) {
+    // Quit ends a live session exactly like Stop (#241): on_end_play
+    // runs once, here, and the frame continues as Stopped, so nothing of
+    // the session runs after its end hooks. The scripting VM is not
+    // recycled the way Stop does; teardown owns it from here.
+    scripting::dispatch_entity_scripts_end();
+    playState = LoopPlayState::Stopped;
+    previousPlayState = LoopPlayState::Stopped;
+  }
 
   if ((playState == LoopPlayState::Playing) &&
       (previousPlayState == LoopPlayState::Stopped)) {
@@ -1038,6 +1055,9 @@ void EnginePipeline::Impl::stage_timing() noexcept {
 // ---------------------------------------------------------------------------
 
 void EnginePipeline::Impl::stage_scripting() noexcept {
+  // The debugger transport is serviced every frame whatever the play
+  // state, so a client can attach and set breakpoints before Play or
+  // disconnect while paused (#540).
   if (isPlaying && (updateStepCount > 0U)) {
     scripting::set_frame_time(static_cast<float>(step_seconds()),
                               static_cast<float>(simulationTimeSeconds));
