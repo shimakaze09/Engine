@@ -1326,6 +1326,7 @@ engine_add_test_executable(engine_unit_forward_light_selection
 engine_add_test_executable(engine_unit_render_target_wrap
     SOURCES
     render_target_wrap_test.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_capture.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_post_resources.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_context.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/pass_resources.cpp

@@ -1,6 +1,7 @@
-// Verifies the wrap mode each post-chain and pass texture is created with
-// (issue #565 row 1), through a recording device over the production
-// resource code. The rule has two halves and they pull opposite ways:
+// Verifies the wrap mode each post-chain, pass and capture texture is
+// created with (issue #565 row 1), through a recording device over the
+// production resource code. The rule has two halves and they pull opposite
+// ways:
 //
 //   * A target that a later pass samples by screen position clamps at its
 //     edges. Bloom, FXAA and SSAO all tap a little past a pixel's own
@@ -16,11 +17,13 @@
 // (engine_integration_post_edge_wrap_gpu, ..._brdf_lut_edge_gpu); this
 // suite is what holds each creation site on every platform.
 
+#include "command_buffer_capture.h"
 #include "command_buffer_context.h"
 #include "command_buffer_post_resources.h"
 
 #include "engine/renderer/pass_resources.h"
 #include "engine/renderer/render_device.h"
+#include "engine/renderer/texture_loader.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -70,8 +73,16 @@ void reset_recording() noexcept {
 
 } // namespace
 
-// Link seam for the resource TUs: the device they create through.
+// Link seams for the resource TUs: the device they create through, and
+// the texture system the capture targets publish their colour to.
 const RenderDevice *render_device() noexcept { return &g_device; }
+TextureHandle register_external_texture(DeviceTextureHandle) noexcept {
+  return TextureHandle{};
+}
+bool update_external_texture(TextureHandle, DeviceTextureHandle) noexcept {
+  return true;
+}
+void unload_texture(TextureHandle) noexcept {}
 
 } // namespace engine::renderer
 
@@ -137,6 +148,19 @@ void test_pass_resources_clamp() noexcept {
   shutdown_pass_resources();
 }
 
+/// EXPECTATION: a scene capture's colour and depth clamp. A material
+/// samples the colour with linear filtering, and at u or v = 0 a repeating
+/// texture blends the opposite border into the edge of the picture.
+void test_scene_capture_target_clamps() noexcept {
+  reset_recording();
+  BackendState backend{};
+  CHECK(ensure_scene_capture_target(backend, &g_device, 0U, 256, 256),
+        "the capture target allocates");
+  CHECK(g_createdCount == 2U, "a colour and a depth texture");
+  CHECK(count_without_wrap(TextureWrap::ClampEdge) == 0U,
+        "the capture's textures clamp at their edges");
+}
+
 /// EXPECTATION: the SSAO rotation noise is the exception: 4x4 and
 /// repeating, because the pass tiles it.
 void test_ssao_noise_repeats() noexcept {
@@ -159,6 +183,7 @@ int main() {
   test_bloom_chain_clamps();
   test_luminance_chain_clamps();
   test_pass_resources_clamp();
+  test_scene_capture_target_clamps();
   test_ssao_noise_repeats();
   if (g_failures != 0) {
     std::fprintf(stderr, "render_target_wrap_test: %d failure(s)\n",
