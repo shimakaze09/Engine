@@ -23,6 +23,8 @@
 
 #include <cgltf.h>
 
+#include "engine/core/atomic_file.h"
+
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wmissing-field-initializers"
@@ -191,22 +193,9 @@ bool ensure_directory_exists(const char *dirPath) {
   if (dirPath == nullptr) {
     return false;
   }
-
-#ifdef _WIN32
-  // CreateDirectoryA returns 0 if it fails; ERROR_ALREADY_EXISTS is OK.
-  // Use _mkdir from direct.h as a simpler portable option.
-  struct _stat st{};
-  if (_stat(dirPath, &st) == 0) {
-    return true;
-  }
-  return _mkdir(dirPath) == 0;
-#else
-  struct stat st{};
-  if (stat(dirPath, &st) == 0) {
-    return true;
-  }
-  return mkdir(dirPath, 0755) == 0;
-#endif
+  // Every missing level, durably, through core's one directory-creation
+  // path (#571): the old single mkdir failed for `build/new/nested/cooked`.
+  return engine::core::create_directories_durably(dirPath);
 }
 
 // ---------------------------------------------------------------------------

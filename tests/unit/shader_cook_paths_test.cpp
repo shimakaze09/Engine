@@ -275,6 +275,21 @@ int main() {
     const int exitCode = run_cook((sources / "shaders.json").string(),
                                   outDir.string(), include.string());
     t.check(exitCode == 0, "a plain-filename manifest cooks");
+  }
+
+  // --- An output directory several levels deep is created (#571). ---
+  {
+    const fs::path sources = scratch / "sources_nested";
+    const fs::path outDir = scratch / "out_nested" / "a" / "b" / "cooked";
+    set_argv_log((scratch / "nested_argv.txt").string());
+    if (!write_source_dir(sources, "probe.vs.sc", "probe.vert")) {
+      t.fail("nested manifest written");
+      return t.finish("shader_cook_paths");
+    }
+    const int exitCode = run_cook((sources / "shaders.json").string(),
+                                  outDir.string(), include.string());
+    t.check(exitCode == 0, "a nested output directory is created and cooked");
+    t.check(fs::is_directory(outDir), "every missing level exists");
     t.check(fs::exists(outDir / "probe.vert.default.glsl.bin"),
             "the cooked output commits inside the output root");
   }
