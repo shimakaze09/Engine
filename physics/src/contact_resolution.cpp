@@ -12,6 +12,7 @@
 
 #include "engine/math/vec3.h"
 #include "engine/physics/constraint_solver.h"
+#include "engine/physics/inertia.h"
 #include "engine/physics/physics.h"
 #include "engine/physics/physics_context.h"
 #include "engine/physics/physics_material.h"
@@ -47,6 +48,8 @@ float apply_velocity_impulse(RigidBody *bodyA, RigidBody *bodyB,
                              float invMassB, float invMassSum,
                              const engine::math::Vec3 &contactOffsetA,
                              const engine::math::Vec3 &contactOffsetB,
+                             const engine::math::Quat &rotationA,
+                             const engine::math::Quat &rotationB,
                              float restitution, float staticFric,
                              float dynamicFric) noexcept;
 
@@ -59,7 +62,9 @@ void resolve_contact(PhysicsWorldView &world,
                      Entity colliderEntityA, Entity colliderEntityB,
                      Entity bodyEntityA, Entity bodyEntityB,
                      const engine::math::Vec3 &bodyCenterA,
-                     const engine::math::Vec3 &bodyCenterB, RigidBody *bodyA,
+                     const engine::math::Vec3 &bodyCenterB,
+                     const engine::math::Quat &bodyRotationA,
+                     const engine::math::Quat &bodyRotationB, RigidBody *bodyA,
                      RigidBody *bodyB, float invMassA, float invMassB,
                      float invMassSum, const engine::math::Vec3 &normal,
                      float overlap, const engine::math::Vec3 &contactPt,
@@ -97,14 +102,17 @@ void resolve_contact(PhysicsWorldView &world,
   const float appliedImpulse = apply_velocity_impulse(
       bodyA, bodyB, normal, invMassA, invMassB, invMassSum,
       engine::math::sub(contactPt, correctedCenterA),
-      engine::math::sub(contactPt, correctedCenterB), combinedRest,
-      combinedStaticFric, combinedDynFric);
+      engine::math::sub(contactPt, correctedCenterB), bodyRotationA,
+      bodyRotationB, combinedRest, combinedStaticFric, combinedDynFric);
 
   PhysicsContext &physicsCtx = world.physics_context();
-  // Matches apply_velocity_impulse's own convention: RigidBody::
-  // inverseInertia directly, zero for a static or non-rotating endpoint.
-  const float invInertiaA = (bodyA != nullptr) ? bodyA->inverseInertia : 0.0F;
-  const float invInertiaB = (bodyB != nullptr) ? bodyB->inverseInertia : 0.0F;
+  // Matches apply_velocity_impulse's own convention: the body's tensor,
+  // zero for a static endpoint.
+  const engine::math::Vec3 zeroInertia(0.0F, 0.0F, 0.0F);
+  const engine::math::Vec3 invInertiaA =
+      (bodyA != nullptr) ? bodyA->inverseInertia : zeroInertia;
+  const engine::math::Vec3 invInertiaB =
+      (bodyB != nullptr) ? bodyB->inverseInertia : zeroInertia;
   record_single_point_contact_cache(physicsCtx, colliderEntityA,
                                     colliderEntityB, contactPt, normal,
                                     overlap, appliedImpulse, invInertiaA,
@@ -117,8 +125,9 @@ void resolve_contact(PhysicsWorldView &world,
 void record_single_point_contact_cache(
     PhysicsContext &context, Entity colliderEntityA, Entity colliderEntityB,
     const engine::math::Vec3 &contactPt, const engine::math::Vec3 &normal,
-    float penetration, float accumulatedImpulse, float invInertiaA,
-    float invInertiaB, std::uint32_t frameNumber) noexcept {
+    float penetration, float accumulatedImpulse,
+    const engine::math::Vec3 &invInertiaA,
+    const engine::math::Vec3 &invInertiaB, std::uint32_t frameNumber) noexcept {
   ContactManifold *cached =
       manifold_acquire(context, colliderEntityA, colliderEntityB, frameNumber);
   if (cached == nullptr) {
@@ -138,23 +147,6 @@ void record_single_point_contact_cache(
 
 // Sequential-impulse iterations over one clipped contact manifold.
 constexpr std::size_t kManifoldSolverIterations = 8U;
-
-// Scalar inverse inertia derived from the collider's box dimensions
-// (axis-averaged box tensor: a unit cube of mass 1 answers 6). The manifold
-// path uses this instead of RigidBody::inverseInertia, whose 1.0 default
-// makes every box right itself in slow motion; the stored field remains the
-// knob for the legacy single-point paths and joints.
-float box_scalar_inverse_inertia(const Collider &collider,
-                                 float invMass) noexcept {
-  const float hx = std::fabs(collider.halfExtents.x);
-  const float hy = std::fabs(collider.halfExtents.y);
-  const float hz = std::fabs(collider.halfExtents.z);
-  const float extentSq = (hx * hx) + (hy * hy) + (hz * hz);
-  if ((invMass <= 0.0F) || (extentSq <= 1.0e-6F)) {
-    return 0.0F;
-  }
-  return invMass * 4.5F / extentSq;
-}
 
 // Clamps the body's angular speed to the global cap.
 void clamp_angular_speed(RigidBody *body) noexcept {
@@ -182,8 +174,10 @@ void resolve_manifold_contact(
     const PhysicsWorldView::SimulationAccessToken &simToken,
     Entity colliderEntityA, Entity colliderEntityB, Entity bodyEntityA,
     Entity bodyEntityB, const engine::math::Vec3 &bodyCenterA,
-    const engine::math::Vec3 &bodyCenterB, RigidBody *bodyA, RigidBody *bodyB,
-    float invMassA, float invMassB, float invMassSum,
+    const engine::math::Vec3 &bodyCenterB,
+    const engine::math::Quat &bodyRotationA,
+    const engine::math::Quat &bodyRotationB, RigidBody *bodyA,
+    RigidBody *bodyB, float invMassA, float invMassB, float invMassSum,
     const engine::math::Vec3 &normal, const ClippedManifold &manifold,
     const Collider &colliderA, const Collider &colliderB) noexcept {
   if ((manifold.count == 0U) || (invMassSum <= 0.0F)) {
@@ -223,16 +217,13 @@ void resolve_manifold_contact(
       engine::math::sub(bodyCenterA, engine::math::mul(normal, moveA));
   const engine::math::Vec3 centerB =
       engine::math::add(bodyCenterB, engine::math::mul(normal, moveB));
-  const float invInertiaA =
-      ((bodyA != nullptr) && (bodyA->inverseInertia > 0.0F))
-          ? box_scalar_inverse_inertia(colliderA, invMassA)
-          : 0.0F;
-  const float invInertiaB =
-      ((bodyB != nullptr) && (bodyB->inverseInertia > 0.0F))
-          ? box_scalar_inverse_inertia(colliderB, invMassB)
-          : 0.0F;
-
   const engine::math::Vec3 zero(0.0F, 0.0F, 0.0F);
+  const engine::math::Vec3 invInertiaA =
+      ((bodyA != nullptr) && (invMassA > 0.0F)) ? bodyA->inverseInertia : zero;
+  const engine::math::Vec3 invInertiaB =
+      ((bodyB != nullptr) && (invMassB > 0.0F)) ? bodyB->inverseInertia : zero;
+  const bool rotA = math::has_rotational_dof(invInertiaA);
+  const bool rotB = math::has_rotational_dof(invInertiaB);
   const engine::math::Vec3 rA0 =
       engine::math::sub(manifold.points[deepestIndex], centerA);
   const engine::math::Vec3 rB0 =
@@ -300,21 +291,21 @@ void resolve_manifold_contact(
       if ((bodyA != nullptr) && (invMassA > 0.0F)) {
         bodyA->velocity = engine::math::sub(
             bodyA->velocity, engine::math::mul(impulseVec, invMassA));
-        if (invInertiaA > 0.0F) {
+        if (rotA) {
           bodyA->angularVelocity = engine::math::sub(
               bodyA->angularVelocity,
-              engine::math::mul(engine::math::cross(rA, impulseVec),
-                                invInertiaA));
+              apply_inverse_inertia(invInertiaA, bodyRotationA,
+                                    engine::math::cross(rA, impulseVec)));
         }
       }
       if ((bodyB != nullptr) && (invMassB > 0.0F)) {
         bodyB->velocity = engine::math::add(
             bodyB->velocity, engine::math::mul(impulseVec, invMassB));
-        if (invInertiaB > 0.0F) {
+        if (rotB) {
           bodyB->angularVelocity = engine::math::add(
               bodyB->angularVelocity,
-              engine::math::mul(engine::math::cross(rB, impulseVec),
-                                invInertiaB));
+              apply_inverse_inertia(invInertiaB, bodyRotationB,
+                                    engine::math::cross(rB, impulseVec)));
         }
       }
     }
@@ -339,10 +330,8 @@ void resolve_manifold_contact(
       const float target = (p == deepestIndex) ? restitutionTarget : 0.0F;
       const float effectiveMass =
           invMassSum +
-          invInertiaA *
-              engine::math::length_sq(engine::math::cross(rA, normal)) +
-          invInertiaB *
-              engine::math::length_sq(engine::math::cross(rB, normal));
+          angular_effective_inverse_mass(invInertiaA, bodyRotationA, rA, normal) +
+          angular_effective_inverse_mass(invInertiaB, bodyRotationB, rB, normal);
       if (effectiveMass <= 0.0F) {
         continue;
       }
@@ -358,21 +347,21 @@ void resolve_manifold_contact(
       if ((bodyA != nullptr) && (invMassA > 0.0F)) {
         bodyA->velocity = engine::math::sub(
             bodyA->velocity, engine::math::mul(impulseVec, invMassA));
-        if (invInertiaA > 0.0F) {
+        if (rotA) {
           bodyA->angularVelocity = engine::math::sub(
               bodyA->angularVelocity,
-              engine::math::mul(engine::math::cross(rA, impulseVec),
-                                invInertiaA));
+              apply_inverse_inertia(invInertiaA, bodyRotationA,
+                                    engine::math::cross(rA, impulseVec)));
         }
       }
       if ((bodyB != nullptr) && (invMassB > 0.0F)) {
         bodyB->velocity = engine::math::add(
             bodyB->velocity, engine::math::mul(impulseVec, invMassB));
-        if (invInertiaB > 0.0F) {
+        if (rotB) {
           bodyB->angularVelocity = engine::math::add(
               bodyB->angularVelocity,
-              engine::math::mul(engine::math::cross(rB, impulseVec),
-                                invInertiaB));
+              apply_inverse_inertia(invInertiaB, bodyRotationB,
+                                    engine::math::cross(rB, impulseVec)));
         }
       }
     }
@@ -417,10 +406,8 @@ void resolve_manifold_contact(
           engine::math::div(tangentVel, tangentSpeed);
       const float effectiveMass =
           invMassSum +
-          invInertiaA *
-              engine::math::length_sq(engine::math::cross(rA, tangent)) +
-          invInertiaB *
-              engine::math::length_sq(engine::math::cross(rB, tangent));
+          angular_effective_inverse_mass(invInertiaA, bodyRotationA, rA, tangent) +
+          angular_effective_inverse_mass(invInertiaB, bodyRotationB, rB, tangent);
       if (effectiveMass <= 0.0F) {
         continue;
       }
@@ -444,21 +431,21 @@ void resolve_manifold_contact(
       if ((bodyA != nullptr) && (invMassA > 0.0F)) {
         bodyA->velocity = engine::math::sub(
             bodyA->velocity, engine::math::mul(impulseVec, invMassA));
-        if (invInertiaA > 0.0F) {
+        if (rotA) {
           bodyA->angularVelocity = engine::math::sub(
               bodyA->angularVelocity,
-              engine::math::mul(engine::math::cross(rA, impulseVec),
-                                invInertiaA));
+              apply_inverse_inertia(invInertiaA, bodyRotationA,
+                                    engine::math::cross(rA, impulseVec)));
         }
       }
       if ((bodyB != nullptr) && (invMassB > 0.0F)) {
         bodyB->velocity = engine::math::add(
             bodyB->velocity, engine::math::mul(impulseVec, invMassB));
-        if (invInertiaB > 0.0F) {
+        if (rotB) {
           bodyB->angularVelocity = engine::math::add(
               bodyB->angularVelocity,
-              engine::math::mul(engine::math::cross(rB, impulseVec),
-                                invInertiaB));
+              apply_inverse_inertia(invInertiaB, bodyRotationB,
+                                    engine::math::cross(rB, impulseVec)));
         }
       }
     }
@@ -466,9 +453,8 @@ void resolve_manifold_contact(
   if (cached != nullptr) {
     // Write the solved state back so the next step's solve seeds from it;
     // stale points fall away because the whole set is replaced. Also record
-    // the box-tensor invInertia this resolve actually used so
-    // the outer relaxation pass re-solves the same point-relative quantity
-    // instead of re-deriving a possibly different value.
+    // the inverse inertia this resolve actually used so the outer relaxation
+    // pass re-solves the same point-relative quantity.
     cached->contactCount = manifold.count;
     for (std::size_t p = 0U; p < manifold.count; ++p) {
       ManifoldContact &c = cached->contacts[p];
@@ -542,6 +528,8 @@ float apply_velocity_impulse(RigidBody *bodyA, RigidBody *bodyB,
                              float invMassB, float invMassSum,
                              const engine::math::Vec3 &contactOffsetA,
                              const engine::math::Vec3 &contactOffsetB,
+                             const engine::math::Quat &rotationA,
+                             const engine::math::Quat &rotationB,
                              float restitution, float staticFric,
                              float dynamicFric) noexcept {
   const engine::math::Vec3 zeroVec(0.0F, 0.0F, 0.0F);
@@ -551,10 +539,12 @@ float apply_velocity_impulse(RigidBody *bodyA, RigidBody *bodyB,
       (bodyA != nullptr) ? bodyA->angularVelocity : zeroVec;
   const engine::math::Vec3 angVelB =
       (bodyB != nullptr) ? bodyB->angularVelocity : zeroVec;
-  const float invInertiaA = (bodyA != nullptr) ? bodyA->inverseInertia : 0.0F;
-  const float invInertiaB = (bodyB != nullptr) ? bodyB->inverseInertia : 0.0F;
-  const bool angularA = (invMassA > 0.0F) && (invInertiaA > 0.0F);
-  const bool angularB = (invMassB > 0.0F) && (invInertiaB > 0.0F);
+  const engine::math::Vec3 invInertiaA =
+      (bodyA != nullptr) ? bodyA->inverseInertia : zeroVec;
+  const engine::math::Vec3 invInertiaB =
+      (bodyB != nullptr) ? bodyB->inverseInertia : zeroVec;
+  const bool angularA = (invMassA > 0.0F) && math::has_rotational_dof(invInertiaA);
+  const bool angularB = (invMassB > 0.0F) && math::has_rotational_dof(invInertiaB);
   const engine::math::Vec3 pointVelA = engine::math::add(
       velA, angularA ? engine::math::cross(angVelA, contactOffsetA) : zeroVec);
   const engine::math::Vec3 pointVelB = engine::math::add(
@@ -566,14 +556,12 @@ float apply_velocity_impulse(RigidBody *bodyA, RigidBody *bodyB,
         (-relVelAlongNormal > kRestitutionSpeedThreshold) ? restitution : 0.0F;
     const float effectiveMass =
         invMassSum +
-        (angularA ? invInertiaA * engine::math::length_sq(
-                                      engine::math::cross(contactOffsetA,
-                                                          normal))
-                  : 0.0F) +
-        (angularB ? invInertiaB * engine::math::length_sq(
-                                      engine::math::cross(contactOffsetB,
-                                                          normal))
-                  : 0.0F);
+        (angularA ? angular_effective_inverse_mass(
+                            invInertiaA, rotationA, contactOffsetA, normal)
+                      : 0.0F) +
+        (angularB ? angular_effective_inverse_mass(
+                            invInertiaB, rotationB, contactOffsetB, normal)
+                      : 0.0F);
     const float impulseMagnitude =
         -(1.0F + effectiveRestitution) * relVelAlongNormal / effectiveMass;
     const engine::math::Vec3 impulseVec =
@@ -585,8 +573,8 @@ float apply_velocity_impulse(RigidBody *bodyA, RigidBody *bodyB,
       if (angularA) {
         bodyA->angularVelocity = engine::math::sub(
             bodyA->angularVelocity,
-            engine::math::mul(engine::math::cross(contactOffsetA, impulseVec),
-                              invInertiaA));
+            apply_inverse_inertia(invInertiaA, rotationA,
+                                  engine::math::cross(contactOffsetA, impulseVec)));
       }
     }
     if ((bodyB != nullptr) && (invMassB > 0.0F)) {
@@ -596,8 +584,8 @@ float apply_velocity_impulse(RigidBody *bodyA, RigidBody *bodyB,
       if (angularB) {
         bodyB->angularVelocity = engine::math::add(
             bodyB->angularVelocity,
-            engine::math::mul(engine::math::cross(contactOffsetB, impulseVec),
-                              invInertiaB));
+            apply_inverse_inertia(invInertiaB, rotationB,
+                                  engine::math::cross(contactOffsetB, impulseVec)));
       }
     }
 
@@ -629,14 +617,12 @@ float apply_velocity_impulse(RigidBody *bodyA, RigidBody *bodyB,
           engine::math::div(tangentVel, tangentSpeed);
       const float frictionEffectiveMass =
           invMassSum +
-          (angularA ? invInertiaA * engine::math::length_sq(
-                                        engine::math::cross(contactOffsetA,
-                                                            tangent))
-                    : 0.0F) +
-          (angularB ? invInertiaB * engine::math::length_sq(
-                                        engine::math::cross(contactOffsetB,
-                                                            tangent))
-                    : 0.0F);
+          (angularA ? angular_effective_inverse_mass(
+                            invInertiaA, rotationA, contactOffsetA, tangent)
+                      : 0.0F) +
+          (angularB ? angular_effective_inverse_mass(
+                            invInertiaB, rotationB, contactOffsetB, tangent)
+                      : 0.0F);
       float frictionImpulse = tangentSpeed / frictionEffectiveMass;
       if (frictionImpulse >= impulseMagnitude * staticFric) {
         frictionImpulse = impulseMagnitude * dynamicFric;
@@ -649,9 +635,8 @@ float apply_velocity_impulse(RigidBody *bodyA, RigidBody *bodyB,
         if (angularA) {
           bodyA->angularVelocity = engine::math::sub(
               bodyA->angularVelocity,
-              engine::math::mul(engine::math::cross(contactOffsetA,
-                                                    frictionVec),
-                                invInertiaA));
+              apply_inverse_inertia(invInertiaA, rotationA,
+                                  engine::math::cross(contactOffsetA, frictionVec)));
         }
       }
       if ((bodyB != nullptr) && (invMassB > 0.0F)) {
@@ -660,9 +645,8 @@ float apply_velocity_impulse(RigidBody *bodyA, RigidBody *bodyB,
         if (angularB) {
           bodyB->angularVelocity = engine::math::add(
               bodyB->angularVelocity,
-              engine::math::mul(engine::math::cross(contactOffsetB,
-                                                    frictionVec),
-                                invInertiaB));
+              apply_inverse_inertia(invInertiaB, rotationB,
+                                  engine::math::cross(contactOffsetB, frictionVec)));
         }
       }
     }
@@ -681,11 +665,10 @@ float apply_velocity_impulse(RigidBody *bodyA, RigidBody *bodyB,
 // sub-passes) before moving on so this pair reaches its own local
 // equilibrium given whatever the rest of this outer iteration already
 // changed. Angular response (point velocity via cross(angularVelocity, r),
-// using ContactManifold::invInertiaA/B -- the SAME per-endpoint value the
-// originating resolve used, box-tensor for a clip vs RigidBody::
-// inverseInertia directly for a single-point path, never re-derived here)
-// applies only to single-point manifolds; see the invInertiaA/B comment
-// below for why multi-point manifolds stay linear-only.
+// using the inverse inertia the originating resolve recorded on the
+// manifold, never re-derived here) applies only to single-point manifolds;
+// see the invInertiaA/B comment below for why multi-point manifolds stay
+// linear-only.
 void relax_one_manifold(
     PhysicsWorldView &world,
     const PhysicsWorldView::SimulationAccessToken &simToken,
@@ -744,10 +727,16 @@ void relax_one_manifold(
   // MOST helpful and safe subset dominant case (flat
   // resting stacks).
   const bool singlePoint = manifold.contactCount == 1U;
-  const float invInertiaA =
-      ((invMassA > 0.0F) && singlePoint) ? manifold.invInertiaA : 0.0F;
-  const float invInertiaB =
-      ((invMassB > 0.0F) && singlePoint) ? manifold.invInertiaB : 0.0F;
+  const engine::math::Vec3 invInertiaA =
+      ((invMassA > 0.0F) && singlePoint) ? manifold.invInertiaA : zero;
+  const engine::math::Vec3 invInertiaB =
+      ((invMassB > 0.0F) && singlePoint) ? manifold.invInertiaB : zero;
+  const engine::math::Quat bodyRotationA =
+      haveA ? engine::math::normalize(transformA.rotation) : engine::math::Quat();
+  const engine::math::Quat bodyRotationB =
+      haveB ? engine::math::normalize(transformB.rotation) : engine::math::Quat();
+  const bool rotA = math::has_rotational_dof(invInertiaA);
+  const bool rotB = math::has_rotational_dof(invInertiaB);
   // correcting them one pass each (rather than to convergence) lets later
   // points in the SAME manifold re-perturb earlier ones every outer
   // iteration -- reproduced as visible stack creep/rotation jitter while
@@ -783,10 +772,8 @@ void relax_one_manifold(
       }
       const float effectiveMass =
           invMassSum +
-          invInertiaA *
-              engine::math::length_sq(engine::math::cross(rA, c.normal)) +
-          invInertiaB *
-              engine::math::length_sq(engine::math::cross(rB, c.normal));
+          angular_effective_inverse_mass(invInertiaA, bodyRotationA, rA, c.normal) +
+          angular_effective_inverse_mass(invInertiaB, bodyRotationB, rB, c.normal);
       if (effectiveMass <= 0.0F) {
         continue;
       }
@@ -802,21 +789,21 @@ void relax_one_manifold(
       if ((bodyA != nullptr) && (invMassA > 0.0F)) {
         bodyA->velocity = engine::math::sub(
             bodyA->velocity, engine::math::mul(impulseVec, invMassA));
-        if (invInertiaA > 0.0F) {
+        if (rotA) {
           bodyA->angularVelocity = engine::math::sub(
               bodyA->angularVelocity,
-              engine::math::mul(engine::math::cross(rA, impulseVec),
-                                invInertiaA));
+              apply_inverse_inertia(invInertiaA, bodyRotationA,
+                                    engine::math::cross(rA, impulseVec)));
         }
       }
       if ((bodyB != nullptr) && (invMassB > 0.0F)) {
         bodyB->velocity = engine::math::add(
             bodyB->velocity, engine::math::mul(impulseVec, invMassB));
-        if (invInertiaB > 0.0F) {
+        if (rotB) {
           bodyB->angularVelocity = engine::math::add(
               bodyB->angularVelocity,
-              engine::math::mul(engine::math::cross(rB, impulseVec),
-                                invInertiaB));
+              apply_inverse_inertia(invInertiaB, bodyRotationB,
+                                    engine::math::cross(rB, impulseVec)));
         }
       }
     }

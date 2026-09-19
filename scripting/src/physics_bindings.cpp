@@ -36,7 +36,7 @@ namespace {
 /// One captured pre-lock inverse inertia, generation-checked.
 struct LockRotationCapture final {
   core::Entity owner = core::kInvalidEntity;
-  float inverseInertia = 1.0F;
+  math::Vec3 inverseInertia = math::default_inverse_inertia();
 };
 
 constexpr std::size_t kMaxLockCaptures = ENGINE_MAX_ENTITIES + 1U;
@@ -158,17 +158,19 @@ int lua_engine_set_lock_rotation(lua_State *state) noexcept {
   }
   LockRotationCapture &capture = g_lockRotationCaptures[entity.index];
   if (locked) {
-    if (rigidBody.inverseInertia != 0.0F) {
+    if (math::has_rotational_dof(rigidBody.inverseInertia)) {
       capture.owner = entity;
       capture.inverseInertia = rigidBody.inverseInertia;
     }
-    rigidBody.inverseInertia = 0.0F;
+    rigidBody.inverseInertia = math::Vec3(0.0F, 0.0F, 0.0F);
     rigidBody.angularVelocity = math::Vec3(0.0F, 0.0F, 0.0F);
   } else if (capture.owner == entity) {
     rigidBody.inverseInertia = capture.inverseInertia;
     capture = LockRotationCapture{};
-  } else if (rigidBody.inverseInertia == 0.0F) {
-    rigidBody.inverseInertia = 1.0F;
+  } else if (!math::has_rotational_dof(rigidBody.inverseInertia)) {
+    // Nothing to restore: hand the body back to the default so the world
+    // derives its tensor from the colliders again.
+    rigidBody.inverseInertia = math::default_inverse_inertia();
   }
 
   const bool ok = apply_or_queue_rigid_body(entity, rigidBody);

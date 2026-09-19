@@ -2,8 +2,8 @@
 // solver: world-space anchor levers, generalized-inverse-mass point
 // projection, anchor relative-velocity removal through the 3x3 anchor mass
 // matrix, and inertia-split relative orientation / angular-velocity
-// corrections. All helpers treat the engine's scalar inverse inertia as an
-// isotropic tensor, matching the contact solver.
+// corrections. All helpers apply each body's diagonal inverse inertia
+// tensor through its world rotation, matching the contact solver.
 
 #pragma once
 

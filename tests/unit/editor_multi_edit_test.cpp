@@ -19,6 +19,11 @@
 
 namespace {
 
+/// True when every inverse inertia axis holds exactly `value`.
+bool uniform_inertia(const engine::math::Vec3 &inertia, float value) noexcept {
+  return (inertia.x == value) && (inertia.y == value) && (inertia.z == value);
+}
+
 using namespace engine::editor;
 using engine::runtime::CameraComponent;
 using engine::runtime::Entity;
@@ -55,7 +60,8 @@ Entity make_rigid_body_entity(World &world, float inverseMass,
   }
   RigidBody body{};
   body.inverseMass = inverseMass;
-  body.inverseInertia = inverseInertia;
+  body.inverseInertia =
+      engine::math::Vec3(inverseInertia, inverseInertia, inverseInertia);
   if (!world.add_rigid_body(entity, body)) {
     return engine::runtime::kInvalidEntity;
   }
@@ -185,8 +191,8 @@ int check_batch_field_edit_single_command_preserves_sibling_field() noexcept {
       (c.inverseMass != 42.0F)) {
     return 28; // the edited field must land uniformly on every entity
   }
-  if ((a.inverseInertia != 10.0F) || (b.inverseInertia != 20.0F) ||
-      (c.inverseInertia != 30.0F)) {
+  if (!uniform_inertia(a.inverseInertia, 10.0F) || !uniform_inertia(b.inverseInertia, 20.0F) ||
+      !uniform_inertia(c.inverseInertia, 30.0F)) {
     return 29; // the untouched, still-mixed sibling field must survive
   }
 
@@ -266,7 +272,7 @@ int check_drag_gesture_records_one_command() noexcept {
     if (frame == 33) {
       RigidBody mid{};
       if (!world->get_rigid_body(second, &mid) || (mid.inverseMass != 33.0F) ||
-          (mid.inverseInertia != 20.0F)) {
+          !uniform_inertia(mid.inverseInertia, 20.0F)) {
         return 96; // each frame is live on every member, siblings intact
       }
     }
@@ -285,8 +291,8 @@ int check_drag_gesture_records_one_command() noexcept {
   if (!world->get_rigid_body(first, &a) || !world->get_rigid_body(second, &b) ||
       !world->get_rigid_body(third, &c) || (a.inverseMass != 70.0F) ||
       (b.inverseMass != 70.0F) || (c.inverseMass != 70.0F) ||
-      (a.inverseInertia != 10.0F) || (b.inverseInertia != 20.0F) ||
-      (c.inverseInertia != 30.0F)) {
+      !uniform_inertia(a.inverseInertia, 10.0F) || !uniform_inertia(b.inverseInertia, 20.0F) ||
+      !uniform_inertia(c.inverseInertia, 30.0F)) {
     return 99;
   }
   // Exactly one entry: one undo restores every pre-drag value and empties
@@ -307,7 +313,7 @@ int check_drag_gesture_records_one_command() noexcept {
 
   // A drag on another field commits the open one first: two more entries.
   representative.rigidBody.inverseMass = 5.0F;
-  representative.rigidBody.inverseInertia = 7.0F;
+  representative.rigidBody.inverseInertia = engine::math::Vec3(7.0F, 7.0F, 7.0F);
   if (!multi_edit_stage_field(ComponentEditType::RigidBody, massField->offset,
                               massField->size, representative)) {
     return 103;
@@ -319,12 +325,12 @@ int check_drag_gesture_records_one_command() noexcept {
   }
   multi_edit_commit_gesture();
   if (!world->get_rigid_body(second, &b) || (b.inverseMass != 5.0F) ||
-      (b.inverseInertia != 7.0F)) {
+      !uniform_inertia(b.inverseInertia, 7.0F)) {
     return 105;
   }
   if (!editor_session().commandHistory.undo() ||
       !world->get_rigid_body(second, &b) || (b.inverseMass != 5.0F) ||
-      (b.inverseInertia != 20.0F)) {
+      !uniform_inertia(b.inverseInertia, 20.0F)) {
     return 106; // the inertia gesture undoes alone
   }
   if (!editor_session().commandHistory.undo() ||

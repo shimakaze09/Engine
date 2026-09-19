@@ -16,6 +16,7 @@ extern "C" {
 #include "lualib.h"
 }
 
+#include <cmath>
 #include <cstdint>
 #include <cstddef>
 #include <cstdio>
@@ -412,7 +413,17 @@ int lua_engine_set_inverse_mass(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
+  const float previousInverseMass = rigidBody.inverseMass;
   rigidBody.inverseMass = static_cast<float>(lua_tonumber(state, 2));
+  // The inverse inertia scales with the inverse mass for a fixed shape, so
+  // a mass change keeps the body's rotational response consistent. A body
+  // leaving the static state keeps its default and derives on apply.
+  if ((previousInverseMass > 0.0F) && (rigidBody.inverseMass > 0.0F) &&
+      std::isfinite(rigidBody.inverseMass) &&
+      !math::has_default_inverse_inertia(rigidBody.inverseInertia)) {
+    rigidBody.inverseInertia = math::mul(
+        rigidBody.inverseInertia, rigidBody.inverseMass / previousInverseMass);
+  }
   const bool ok = apply_or_queue_rigid_body(entity, rigidBody);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;

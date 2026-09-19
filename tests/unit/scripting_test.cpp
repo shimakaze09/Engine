@@ -29,6 +29,11 @@
 
 namespace {
 
+/// True when every inverse inertia axis holds exactly `value`.
+bool uniform_inertia(const engine::math::Vec3 &inertia, float value) noexcept {
+  return (inertia.x == value) && (inertia.y == value) && (inertia.z == value);
+}
+
 constexpr const char *kTempScriptPath = "scripting_test.lua";
 
 bool open_file_for_write(const char *path, FILE **outFile) noexcept {
@@ -319,9 +324,10 @@ int main() {
     engine::scripting::shutdown_scripting();
     return 132;
   }
-  lockedBody->inverseInertia = 0.25F;
+  lockedBody->inverseInertia = engine::math::Vec3(0.25F, 0.25F, 0.25F);
   if (!engine::scripting::call_script_function("verify_lock_rotation") ||
-      (world->get_rigid_body_ptr(lockEntity)->inverseInertia != 0.0F)) {
+      !uniform_inertia(world->get_rigid_body_ptr(lockEntity)->inverseInertia,
+                       0.0F)) {
     remove_script_file();
     engine::scripting::shutdown_scripting();
     return 133;
@@ -331,14 +337,16 @@ int main() {
     engine::scripting::shutdown_scripting();
     return 134;
   }
-  if (world->get_rigid_body_ptr(lockEntity)->inverseInertia != 0.25F) {
+  if (!uniform_inertia(world->get_rigid_body_ptr(lockEntity)->inverseInertia,
+                       0.25F)) {
     remove_script_file();
     engine::scripting::shutdown_scripting();
     return 135;
   }
   if (!engine::scripting::call_script_function("verify_lock_rotation") ||
       !engine::scripting::call_script_function("verify_unlock_rotation") ||
-      (world->get_rigid_body_ptr(lockEntity)->inverseInertia != 0.25F)) {
+      !uniform_inertia(world->get_rigid_body_ptr(lockEntity)->inverseInertia,
+                       0.25F)) {
     remove_script_file();
     engine::scripting::shutdown_scripting();
     return 136;

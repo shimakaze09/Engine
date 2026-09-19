@@ -40,7 +40,7 @@ Entity make_free_body(World &w, const math::Vec3 &pos, const math::Quat &rot,
 
   RigidBody rb{};
   rb.inverseMass = invMass;
-  rb.inverseInertia = invInertia;
+  rb.inverseInertia = engine::math::Vec3(invInertia, invInertia, invInertia);
   w.add_rigid_body(e, rb);
   return e;
 }

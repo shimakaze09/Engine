@@ -31,7 +31,11 @@ namespace engine::runtime {
 namespace {
 
 constexpr const char *kSceneLogChannel = "scene";
-constexpr std::uint32_t kCurrentSceneVersion = 2U;
+// Revision 3 writes RigidBody inverseInertia as a 3-element array; older
+// revisions wrote one number, read as the same value on every axis.
+constexpr std::uint32_t kCurrentSceneVersion = 3U;
+constexpr std::uint32_t kLastScalarInertiaSceneVersion = 2U;
+constexpr const char *kInverseInertiaKey = "inverseInertia";
 constexpr const char *kEntitiesKey = "entities";
 constexpr const char *kComponentsKey = "components";
 constexpr const char *kPersistentIdKey = "persistentId";
@@ -76,7 +80,7 @@ template <typename T>
 bool decode_scene_component(const core::JsonParser &parser,
                             const core::JsonValue &value,
                             const ReflectedComponentDescriptors &descs,
-                            T *out) noexcept {
+                            std::uint32_t documentVersion, T *out) noexcept {
   if constexpr (std::is_same_v<T, Collider>) {
     return read_collider_component(parser, value, out);
   } else if constexpr (std::is_same_v<T, MeshComponent>) {
@@ -95,7 +99,16 @@ bool decode_scene_component(const core::JsonParser &parser,
                                      sizeof(out->scriptPath));
   } else if constexpr (std::is_same_v<T, AnimationComponent>) {
     return read_animation_component(parser, value, false, out);
+  } else if constexpr (std::is_same_v<T, RigidBody>) {
+    ReflectedReadOptions options{};
+    if (documentVersion <= kLastScalarInertiaSceneVersion) {
+      options.uniformScalarVec3Key = kInverseInertiaKey;
+    }
+    return read_reflected_component(parser, value,
+                                    component_descriptor(descs, out), out,
+                                    options);
   } else {
+    static_cast<void>(documentVersion);
     return read_reflected_component(parser, value,
                                     component_descriptor(descs, out), out);
   }
@@ -139,6 +152,7 @@ bool encode_scene_component(core::JsonWriter &writer, const char *key,
 bool deserialize_scene_entities(const core::JsonParser &parser,
                                 const core::JsonValue &entities,
                                 const ReflectedComponentDescriptors &descs,
+                                std::uint32_t documentVersion,
                                 World &targetWorld) noexcept {
   const std::size_t entityCount = parser.array_size(entities);
   for (std::size_t i = 0U; i < entityCount; ++i) {
@@ -188,7 +202,8 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
     if (parser.get_object_field(components, scene_component_key<Type>(Key),    \
                                 &value)) {                                     \
       Type component{};                                                        \
-      if (!decode_scene_component(parser, value, descs, &component) ||         \
+      if (!decode_scene_component(parser, value, descs, documentVersion,       \
+                                  &component) ||                               \
           !targetWorld.AddFn(entity, component)) {                             \
         rowError = "failed to load " #Type;                                    \
       }                                                                        \
@@ -577,8 +592,9 @@ bool load_scene(World &world, const char *buffer, std::size_t size,
     return false;
   }
 
+  std::uint32_t documentVersion = kCurrentSceneVersion;
   if (!schema_version_supported(parser, *root, kCurrentSceneVersion, "scene",
-                                kSceneLogChannel)) {
+                                kSceneLogChannel, &documentVersion)) {
     return false;
   }
 
@@ -602,7 +618,8 @@ bool load_scene(World &world, const char *buffer, std::size_t size,
     return false;
   }
 
-  if (!deserialize_scene_entities(parser, entities, descs, *stagedWorld)) {
+  if (!deserialize_scene_entities(parser, entities, descs, documentVersion,
+                                  *stagedWorld)) {
     return false;
   }
 

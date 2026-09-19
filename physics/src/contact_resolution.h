@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include "engine/math/quat.h"
 #include "engine/math/vec3.h"
 #include "engine/physics/physics.h"
 #include "engine/physics/physics_world_view.h"
@@ -22,11 +23,15 @@ void maybe_wake_pair(RigidBody *bodyA, RigidBody *bodyB, float vA2,
 /// driven bodies would pump bounce energy every step and ratchet airborne.
 /// Returns the applied normal impulse magnitude (0 when separating), so
 /// callers can seed the persistent manifold cache for single-point paths.
+/// rotationA/B are the unit body rotations the inverse inertia tensors
+/// apply through (identity for static geometry).
 float apply_velocity_impulse(RigidBody *bodyA, RigidBody *bodyB,
                              const engine::math::Vec3 &normal, float invMassA,
                              float invMassB, float invMassSum,
                              const engine::math::Vec3 &contactOffsetA,
                              const engine::math::Vec3 &contactOffsetB,
+                             const engine::math::Quat &rotationA,
+                             const engine::math::Quat &rotationB,
                              float restitution, float staticFric,
                              float dynamicFric) noexcept;
 
@@ -41,7 +46,9 @@ void resolve_contact(PhysicsWorldView &world,
                      Entity colliderEntityA, Entity colliderEntityB,
                      Entity bodyEntityA, Entity bodyEntityB,
                      const engine::math::Vec3 &bodyCenterA,
-                     const engine::math::Vec3 &bodyCenterB, RigidBody *bodyA,
+                     const engine::math::Vec3 &bodyCenterB,
+                     const engine::math::Quat &bodyRotationA,
+                     const engine::math::Quat &bodyRotationB, RigidBody *bodyA,
                      RigidBody *bodyB, float invMassA, float invMassB,
                      float invMassSum, const engine::math::Vec3 &normal,
                      float overlap, const engine::math::Vec3 &contactPt,
@@ -51,16 +58,16 @@ void resolve_contact(PhysicsWorldView &world,
 /// Writes (or updates) a 1-point manifold cache entry for a single-point
 /// contact path (sphere/capsule fast paths, degenerate-clip fallbacks) so it
 /// warm-starts and participates in the outer relaxation pass like clipped
-/// manifolds. invInertiaA/B must match apply_velocity_impulse's own
-/// convention (RigidBody::inverseInertia directly, zero when static or
-/// non-rotating) so relax_cached_contacts re-solves the same point-relative
-/// quantity the primary resolve converged. A no-op when the heap-backed
-/// shape store is unavailable.
+/// manifolds. invInertiaA/B are the body-space tensors the resolve used
+/// (zero when static or non-rotating) so relax_cached_contacts re-solves
+/// the same point-relative quantity the primary resolve converged. A no-op
+/// when the heap-backed shape store is unavailable.
 void record_single_point_contact_cache(
     PhysicsContext &context, Entity colliderEntityA, Entity colliderEntityB,
     const engine::math::Vec3 &contactPt, const engine::math::Vec3 &normal,
-    float penetration, float accumulatedImpulse, float invInertiaA,
-    float invInertiaB, std::uint32_t frameNumber) noexcept;
+    float penetration, float accumulatedImpulse,
+    const engine::math::Vec3 &invInertiaA,
+    const engine::math::Vec3 &invInertiaB, std::uint32_t frameNumber) noexcept;
 
 /// Runs the configured number of extra outer passes (physics.
 /// contact_relaxation_iterations, 0 disables) over every manifold the
@@ -85,8 +92,10 @@ void resolve_manifold_contact(
     const PhysicsWorldView::SimulationAccessToken &simToken,
     Entity colliderEntityA, Entity colliderEntityB, Entity bodyEntityA,
     Entity bodyEntityB, const engine::math::Vec3 &bodyCenterA,
-    const engine::math::Vec3 &bodyCenterB, RigidBody *bodyA, RigidBody *bodyB,
-    float invMassA, float invMassB, float invMassSum,
+    const engine::math::Vec3 &bodyCenterB,
+    const engine::math::Quat &bodyRotationA,
+    const engine::math::Quat &bodyRotationB, RigidBody *bodyA,
+    RigidBody *bodyB, float invMassA, float invMassB, float invMassSum,
     const engine::math::Vec3 &normal, const ClippedManifold &manifold,
     const Collider &colliderA, const Collider &colliderB) noexcept;
 

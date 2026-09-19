@@ -214,6 +214,7 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
   auto &geometries = resolveScratch->geometries;
   auto &bodyOwners = resolveScratch->bodyOwners;
   auto &bodyCenters = resolveScratch->bodyCenters;
+  auto &bodyRotations = resolveScratch->bodyRotations;
   auto &geometryValid = resolveScratch->geometryValid;
   auto &posX = resolveScratch->posX;
   auto &posY = resolveScratch->posY;
@@ -233,6 +234,7 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
                                      &geometries[i]);
     bodyOwners[i] = kInvalidEntity;
     bodyCenters[i] = engine::math::Vec3(0.0F, 0.0F, 0.0F);
+    bodyRotations[i] = engine::math::Quat();
     posX[i] = 0.0F;
     posY[i] = 0.0F;
     posZ[i] = 0.0F;
@@ -257,6 +259,7 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
       continue;
     }
     bodyCenters[i] = bodyTransform.position;
+    bodyRotations[i] = engine::math::normalize(bodyTransform.rotation);
   }
 
   physicsCtx.ccdColliderCount = 0U;
@@ -526,6 +529,8 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
                                engine::math::Vec3(bx, by, bz),
                                bodyCenters[i],
                                bodyCenters[j],
+                               bodyRotations[i],
+                               bodyRotations[j],
                                requiresAffineNarrowPhase,
                                speculativeDt};
 

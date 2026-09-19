@@ -8,6 +8,7 @@
 
 #include "engine/core/logging.h"
 #include "engine/math/quat.h"
+#include "engine/physics/inertia.h"
 #include "engine/math/vec3.h"
 #include "engine/physics/ccd.h"
 #include "engine/physics/physics.h"
@@ -196,7 +197,7 @@ bool step_physics_range(PhysicsWorldView &world, std::size_t startIndex,
       }
     }
 
-    if ((body != nullptr) && (body->inverseInertia > 0.0F)) {
+    if ((body != nullptr) && math::has_rotational_dof(body->inverseInertia)) {
       const float angSpeedSq = engine::math::length_sq(body->angularVelocity);
       if (angSpeedSq > 1e-12F) {
         const float angSpeed = std::sqrt(angSpeedSq);

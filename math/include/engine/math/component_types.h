@@ -33,10 +33,35 @@ struct RigidBody final {
   Vec3 acceleration = Vec3(0.0F, 0.0F, 0.0F);
   Vec3 angularVelocity = Vec3(0.0F, 0.0F, 0.0F);
   float inverseMass = 1.0F;
-  float inverseInertia = 1.0F;
+  /// Body-space diagonal inverse inertia tensor (1 / I about each body
+  /// axis). Zero on an axis locks rotation about it. A body still at the
+  /// default (1, 1, 1) has its tensor derived from collider geometry when a
+  /// collider is installed on it.
+  Vec3 inverseInertia = Vec3(1.0F, 1.0F, 1.0F);
   std::uint8_t sleepFrameCount = 0U;
   bool sleeping = false;
 };
+
+/// Inverse inertia a freshly constructed RigidBody carries: the value every
+/// creation path treats as "not yet derived", replaced from collider
+/// geometry when a collider is installed on the body.
+[[nodiscard]] constexpr Vec3 default_inverse_inertia() noexcept {
+  return Vec3(1.0F, 1.0F, 1.0F);
+}
+
+/// True when the body still carries default_inverse_inertia().
+[[nodiscard]] inline bool
+has_default_inverse_inertia(const Vec3 &inverseInertia) noexcept {
+  return (inverseInertia.x == 1.0F) && (inverseInertia.y == 1.0F) &&
+         (inverseInertia.z == 1.0F);
+}
+
+/// True when any axis can rotate (some component of the inverse inertia
+/// is positive); a locked or static body answers false.
+[[nodiscard]] inline bool has_rotational_dof(const Vec3 &inverseInertia) noexcept {
+  return (inverseInertia.x > 0.0F) || (inverseInertia.y > 0.0F) ||
+         (inverseInertia.z > 0.0F);
+}
 
 /// Enumerates collider shape values used by the engine.
 enum class ColliderShape : std::uint8_t {

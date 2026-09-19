@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "engine/math/quat.h"
 #include "engine/math/vec3.h"
 #include "engine/physics/collider.h"
 #include "engine/physics/physics.h"
@@ -34,6 +35,10 @@ struct PairContext final {
   engine::math::Vec3 posB;
   engine::math::Vec3 bodyCenterA;
   engine::math::Vec3 bodyCenterB;
+  // Unit rotations of the owning bodies (identity for static geometry), the
+  // frame the bodies' inverse inertia tensors are applied in.
+  engine::math::Quat bodyRotationA;
+  engine::math::Quat bodyRotationB;
   bool requiresAffineNarrowPhase;
   float speculativeDt;
 };

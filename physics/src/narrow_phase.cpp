@@ -207,7 +207,8 @@ void resolve_pair_contact(const PairContext &pair,
                           const engine::math::Vec3 &contactPoint) noexcept {
   resolve_contact(pair.world, pair.simToken, pair.entityA, pair.entityB,
                   pair.bodyEntityA, pair.bodyEntityB, pair.bodyCenterA,
-                  pair.bodyCenterB, pair.bodyA, pair.bodyB, pair.invMassA,
+                  pair.bodyCenterB, pair.bodyRotationA, pair.bodyRotationB,
+                  pair.bodyA, pair.bodyB, pair.invMassA,
                   pair.invMassB, pair.invMassSum, normal, overlap,
                   contactPoint, pair.colliderA, pair.colliderB);
 }
@@ -219,7 +220,8 @@ void resolve_pair_manifold(const PairContext &pair,
                            const ClippedManifold &manifold) noexcept {
   resolve_manifold_contact(pair.world, pair.simToken, pair.entityA,
                            pair.entityB, pair.bodyEntityA, pair.bodyEntityB,
-                           pair.bodyCenterA, pair.bodyCenterB, pair.bodyA,
+                           pair.bodyCenterA, pair.bodyCenterB,
+                           pair.bodyRotationA, pair.bodyRotationB, pair.bodyA,
                            pair.bodyB, pair.invMassA, pair.invMassB,
                            pair.invMassSum, normal, manifold, pair.colliderA,
                            pair.colliderB);
@@ -867,13 +869,15 @@ void narrow_phase_sphere_sphere(const PairContext &pair) noexcept {
   const float appliedImpulse = apply_velocity_impulse(
       pair.bodyA, pair.bodyB, contactNormal, pair.invMassA, pair.invMassB,
       pair.invMassSum, engine::math::sub(contactPt, mutableA->position),
-      engine::math::sub(contactPt, mutableB->position), combinedRest,
-      combinedStaticFric, combinedDynFric);
+      engine::math::sub(contactPt, mutableB->position), pair.bodyRotationA,
+      pair.bodyRotationB, combinedRest, combinedStaticFric, combinedDynFric);
   record_single_point_contact_cache(
       pair.physicsCtx, pair.entityA, pair.entityB, contactPt, contactNormal,
       overlap, appliedImpulse,
-      (pair.bodyA != nullptr) ? pair.bodyA->inverseInertia : 0.0F,
-      (pair.bodyB != nullptr) ? pair.bodyB->inverseInertia : 0.0F,
+      (pair.bodyA != nullptr) ? pair.bodyA->inverseInertia
+          : engine::math::Vec3(0.0F, 0.0F, 0.0F),
+      (pair.bodyB != nullptr) ? pair.bodyB->inverseInertia
+          : engine::math::Vec3(0.0F, 0.0F, 0.0F),
       pair.physicsCtx.solverFrameNumber);
 }
 
@@ -988,13 +992,15 @@ void narrow_phase_aabb_sphere(const PairContext &pair) noexcept {
   const float appliedImpulse = apply_velocity_impulse(
       pair.bodyA, pair.bodyB, aabbSphNormal, pair.invMassA, pair.invMassB,
       pair.invMassSum, engine::math::sub(closestPt, mutableA->position),
-      engine::math::sub(closestPt, mutableB->position), combinedRest,
-      combinedStaticFric, combinedDynFric);
+      engine::math::sub(closestPt, mutableB->position), pair.bodyRotationA,
+      pair.bodyRotationB, combinedRest, combinedStaticFric, combinedDynFric);
   record_single_point_contact_cache(
       pair.physicsCtx, pair.entityA, pair.entityB, closestPt, aabbSphNormal,
       overlap, appliedImpulse,
-      (pair.bodyA != nullptr) ? pair.bodyA->inverseInertia : 0.0F,
-      (pair.bodyB != nullptr) ? pair.bodyB->inverseInertia : 0.0F,
+      (pair.bodyA != nullptr) ? pair.bodyA->inverseInertia
+          : engine::math::Vec3(0.0F, 0.0F, 0.0F),
+      (pair.bodyB != nullptr) ? pair.bodyB->inverseInertia
+          : engine::math::Vec3(0.0F, 0.0F, 0.0F),
       pair.physicsCtx.solverFrameNumber);
 }
 
@@ -1102,13 +1108,15 @@ void narrow_phase_aabb_aabb(const PairContext &pair) noexcept {
   const float appliedImpulse = apply_velocity_impulse(
       pair.bodyA, pair.bodyB, aabbNormal, pair.invMassA, pair.invMassB,
       pair.invMassSum, engine::math::sub(midPt, mutableA->position),
-      engine::math::sub(midPt, mutableB->position), combinedRest,
-      combinedStaticFric, combinedDynFric);
+      engine::math::sub(midPt, mutableB->position), pair.bodyRotationA,
+      pair.bodyRotationB, combinedRest, combinedStaticFric, combinedDynFric);
   record_single_point_contact_cache(
       pair.physicsCtx, pair.entityA, pair.entityB, midPt, aabbNormal,
       pushAmount, appliedImpulse,
-      (pair.bodyA != nullptr) ? pair.bodyA->inverseInertia : 0.0F,
-      (pair.bodyB != nullptr) ? pair.bodyB->inverseInertia : 0.0F,
+      (pair.bodyA != nullptr) ? pair.bodyA->inverseInertia
+          : engine::math::Vec3(0.0F, 0.0F, 0.0F),
+      (pair.bodyB != nullptr) ? pair.bodyB->inverseInertia
+          : engine::math::Vec3(0.0F, 0.0F, 0.0F),
       pair.physicsCtx.solverFrameNumber);
 }
 

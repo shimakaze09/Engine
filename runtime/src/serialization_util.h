@@ -52,7 +52,8 @@ inline constexpr const char *kSchemaVersionKey = "version";
 bool schema_version_supported(const core::JsonParser &parser,
                               const core::JsonValue &root,
                               std::uint32_t currentVersion, const char *noun,
-                              const char *channel) noexcept;
+                              const char *channel,
+                              std::uint32_t *outVersion = nullptr) noexcept;
 
 // --- Vector / quaternion JSON fields (fixed-size float arrays) -------------
 
@@ -163,12 +164,20 @@ bool write_reflected_component(core::JsonWriter &writer,
                                const char *componentName,
                                const core::TypeDescriptor &descriptor,
                                const void *instance) noexcept;
+/// Reader options for a document revision older than the current one.
+struct ReflectedReadOptions final {
+  /// Key of a Vec3 field the older revision wrote as one number applied to
+  /// every axis; nullptr reads every Vec3 strictly as a 3-element array.
+  const char *uniformScalarVec3Key = nullptr;
+};
+
 /// Reads reflected fields into `instance`; missing fields keep the caller's
 /// defaults, present-but-malformed fields fail the read.
 bool read_reflected_component(const core::JsonParser &parser,
                               const core::JsonValue &componentObject,
                               const core::TypeDescriptor &descriptor,
-                              void *instance) noexcept;
+                              void *instance,
+                              const ReflectedReadOptions &options = {}) noexcept;
 
 // --- MeshComponent / LightComponent ----------------------------------------
 

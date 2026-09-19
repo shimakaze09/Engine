@@ -9,6 +9,7 @@
 #include "engine/core/logging.h"
 #include "engine/core/string_util.h"
 #include "engine/math/transform.h"
+#include "engine/physics/inertia.h"
 #include "engine/physics/physics.h"
 #include "engine/runtime/reflect_types.h"
 #include "primitive_hull_build.h"
@@ -54,16 +55,16 @@ bool validate_transform_ingress(const Transform &transform) noexcept {
          finite_vec3(transform.scale);
 }
 
-/// Ingress validation: rigid body fields must be finite and
-/// the inverse mass/inertia non-negative.
+/// Ingress validation: rigid body fields must be finite and the inverse
+/// mass and every inverse inertia axis non-negative.
 bool validate_rigid_body_ingress(const RigidBody &rigidBody) noexcept {
+  const math::Vec3 &inertia = rigidBody.inverseInertia;
   return finite_vec3(rigidBody.velocity) &&
          finite_vec3(rigidBody.acceleration) &&
          finite_vec3(rigidBody.angularVelocity) &&
          std::isfinite(rigidBody.inverseMass) &&
-         (rigidBody.inverseMass >= 0.0F) &&
-         std::isfinite(rigidBody.inverseInertia) &&
-         (rigidBody.inverseInertia >= 0.0F);
+         (rigidBody.inverseMass >= 0.0F) && finite_vec3(inertia) &&
+         (inertia.x >= 0.0F) && (inertia.y >= 0.0F) && (inertia.z >= 0.0F);
 }
 
 /// Ingress clamping: accept-and-clamp values
@@ -91,10 +92,15 @@ bool sanitize_rigid_body_ingress(RigidBody &rigidBody) noexcept {
                   physics::kMaxAngularSpeed / std::sqrt(angSpeedSq));
     changed = true;
   }
-  if (rigidBody.inverseInertia > physics::kMaxInverseInertia) {
-    rigidBody.inverseInertia = physics::kMaxInverseInertia;
-    changed = true;
-  }
+  const auto clamp_inertia_axis = [&changed](float &axis) noexcept {
+    if (axis > physics::kMaxInverseInertia) {
+      axis = physics::kMaxInverseInertia;
+      changed = true;
+    }
+  };
+  clamp_inertia_axis(rigidBody.inverseInertia.x);
+  clamp_inertia_axis(rigidBody.inverseInertia.y);
+  clamp_inertia_axis(rigidBody.inverseInertia.z);
   return changed;
 }
 
@@ -394,6 +400,12 @@ bool World::add_rigid_body(Entity entity, const RigidBody &rigidBody) noexcept {
                   entity.index);
     core::log_message(core::LogLevel::Warning, "world", message);
   }
+  // A body that has not authored its tensor takes the one its colliders
+  // describe; colliders installed later derive it through add_collider.
+  if (math::has_default_inverse_inertia(sanitized.inverseInertia)) {
+    sanitized.inverseInertia =
+        derived_inverse_inertia(entity, sanitized.inverseMass);
+  }
   if (!m_rigidBodies.add(entity, sanitized)) {
     return false;
   }
@@ -476,6 +488,49 @@ World::rigid_body_owner(Entity colliderEntity,
   return find_rigid_body_owner(colliderEntity, m_writeStateIndex);
 }
 
+math::Vec3 World::derived_inverse_inertia(Entity body,
+                                          float inverseMass) noexcept {
+  if (!(inverseMass > 0.0F) || !is_valid_entity(body)) {
+    return math::default_inverse_inertia();
+  }
+  physics::InertiaAccumulator accumulator{};
+  const Collider *own = m_colliders.get_ptr(body);
+  if (own != nullptr) {
+    physics::accumulate_collider_inertia(
+        &accumulator, *own, math::Vec3(0.0F, 0.0F, 0.0F), math::Quat());
+  }
+  for_each_child(body, [&](Entity child) noexcept {
+    const Collider *childCollider = m_colliders.get_ptr(child);
+    const Transform *local = m_transforms.get_ptr(child, m_readStateIndex);
+    if ((childCollider == nullptr) || (local == nullptr)) {
+      return;
+    }
+    physics::accumulate_collider_inertia(&accumulator, *childCollider,
+                                         local->position, local->rotation);
+  });
+  if (!(accumulator.weightSum > 0.0F)) {
+    return math::default_inverse_inertia();
+  }
+  return physics::finish_inverse_inertia(accumulator, inverseMass);
+}
+
+void World::rederive_inverse_inertia(Entity body,
+                                     const math::Vec3 &beforeChange) noexcept {
+  RigidBody *rigidBody = m_rigidBodies.get_ptr(body);
+  if ((rigidBody == nullptr) || !(rigidBody->inverseMass > 0.0F)) {
+    return;
+  }
+  const math::Vec3 &current = rigidBody->inverseInertia;
+  const bool derived = math::has_default_inverse_inertia(current) ||
+                       ((current.x == beforeChange.x) &&
+                        (current.y == beforeChange.y) &&
+                        (current.z == beforeChange.z));
+  if (derived) {
+    rigidBody->inverseInertia =
+        derived_inverse_inertia(body, rigidBody->inverseMass);
+  }
+}
+
 bool World::add_collider(Entity entity, const Collider &collider) noexcept {
   if (!validate_collider_ingress(collider)) {
     core::log_message(
@@ -493,6 +548,15 @@ bool World::add_collider(Entity entity, const Collider &collider) noexcept {
                   entity.index);
     core::log_message(core::LogLevel::Warning, "world", message);
   }
+  // The owner's tensor before this collider joins decides whether it was
+  // derived (and follows the new geometry) or authored (and stays).
+  const Entity owner = find_rigid_body_owner(entity, m_readStateIndex);
+  math::Vec3 ownerInertiaBefore = math::default_inverse_inertia();
+  if (owner != kInvalidEntity) {
+    const RigidBody *ownerBody = m_rigidBodies.get_ptr(owner);
+    ownerInertiaBefore = derived_inverse_inertia(
+        owner, (ownerBody != nullptr) ? ownerBody->inverseMass : 0.0F);
+  }
   if (!add_component_checked(m_colliders, entity, sanitized, "add_collider")) {
     return false;
   }
@@ -503,6 +567,9 @@ bool World::add_collider(Entity entity, const Collider &collider) noexcept {
   physics::prune_incompatible_shape_payloads(m_physicsContext, entity,
                                              sanitized.shape);
   install_provenance_hull(m_physicsContext, entity, sanitized);
+  if (owner != kInvalidEntity) {
+    rederive_inverse_inertia(owner, ownerInertiaBefore);
+  }
   // New colliders have no snapshot entry until the next resolve.
   m_physicsContext.ccdSnapshotDirty = true;
   return true;
@@ -513,9 +580,19 @@ bool World::remove_collider(Entity entity) noexcept {
     return false;
   }
 
+  const Entity owner = find_rigid_body_owner(entity, m_readStateIndex);
+  math::Vec3 ownerInertiaBefore = math::default_inverse_inertia();
+  if (owner != kInvalidEntity) {
+    const RigidBody *ownerBody = m_rigidBodies.get_ptr(owner);
+    ownerInertiaBefore = derived_inverse_inertia(
+        owner, (ownerBody != nullptr) ? ownerBody->inverseMass : 0.0F);
+  }
   const bool removed = m_colliders.remove(entity);
   if (removed) {
     physics::remove_shape_payloads(m_physicsContext, entity);
+    if (owner != kInvalidEntity) {
+      rederive_inverse_inertia(owner, ownerInertiaBefore);
+    }
   }
   return removed;
 }

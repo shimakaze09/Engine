@@ -946,6 +946,15 @@ private:
   /// Resolves a nearest body owner from one transform state buffer.
   Entity find_rigid_body_owner(Entity entity,
                                std::size_t stateIndex) const noexcept;
+  /// Inverse inertia derived from the colliders on `body` and its direct
+  /// children for a body of `inverseMass`; the default tensor when nothing
+  /// contributes or the body is static.
+  math::Vec3 derived_inverse_inertia(Entity body, float inverseMass) noexcept;
+  /// Replaces the owner body's tensor when it was derived (still default, or
+  /// equal to `beforeChange`, the derivation over the collider set before
+  /// the change) so authored tensors survive collider edits.
+  void rederive_inverse_inertia(Entity body,
+                                const math::Vec3 &beforeChange) noexcept;
   /// Transform state buffer index reads should use in the current phase.
   std::size_t query_state_index() const noexcept;
   // Shared guard/log/dispatch bodies behind the per-component add/remove/get

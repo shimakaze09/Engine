@@ -55,7 +55,9 @@ constexpr FieldMetadata kFieldMetadataTable[] = {
      "1 / mass in kg^-1. 0 means infinite mass (static or kinematic).",
      "1/kg", 0.01F, 0.0F, 1000.0F, InspectorWidget::Drag, false, false},
     {"engine::runtime::RigidBody", "inverseInertia", "Inverse Inertia",
-     "Physics", "1 / rotational inertia about the body's principal axis.",
+     "Physics",
+     "1 / rotational inertia about each body axis. 0 locks that axis; "
+     "(1, 1, 1) is replaced by the value derived from the colliders.",
      nullptr, 0.01F, 0.0F, 1000.0F, InspectorWidget::Drag, false, false},
     {"engine::runtime::RigidBody", "velocity", "Velocity", "Physics",
      "Linear velocity in m/s.", "m/s", 0.05F, 0.0F, 0.0F,
