@@ -33,6 +33,12 @@ namespace engine::tests {
 using GpuSceneBody = int (*)(engine::EnginePipeline &pipeline,
                              engine::runtime::World &world);
 
+/// Authors the scene the pipeline's very first frame draws. Most tests
+/// build theirs in the body, after that frame; a test about what the first
+/// frame itself leaves behind passes one of these instead. False fails the
+/// test.
+using GpuFirstFrameScene = bool (*)(engine::runtime::World &world);
+
 namespace detail {
 
 inline engine::runtime::World *g_fixtureWorld = nullptr;
@@ -136,7 +142,13 @@ inline bool settle_frames(engine::EnginePipeline &pipeline,
 /// cvar the fixture could not set, a cvar the body could not set. The
 /// frame that runs first is what registers the renderer's cvars, so a body
 /// can set them from its first line; it does so through checked().
-inline int run_gpu_scene_test(const char *name, GpuSceneBody body) noexcept {
+///
+/// With firstFrameScene the World is emptied and that scene authored before
+/// the first frame instead, and the body receives it as drawn: exit code 7
+/// is a first-frame scene that could not be built.
+inline int
+run_gpu_scene_test(const char *name, GpuSceneBody body,
+                   GpuFirstFrameScene firstFrameScene = nullptr) noexcept {
   if (!detail::enter_asset_directory()) {
     return 1;
   }
@@ -173,19 +185,34 @@ inline int run_gpu_scene_test(const char *name, GpuSceneBody body) noexcept {
         // of one scene would differ. Outside player mode the back buffer
         // is left black for the editor's overlay; r_present_scene is what
         // puts the final image where the readback looks.
+        bool firstSceneBuilt = true;
+        if (firstFrameScene != nullptr) {
+          engine::runtime::reset_world(*detail::g_fixtureWorld);
+          firstSceneBuilt = firstFrameScene(*detail::g_fixtureWorld);
+        }
+        //
+        // The three that bootstrap registers are set before that frame, as
+        // a game's loaded settings would be, so it already runs unthrottled
+        // — and, r_vsync having left its boot value, it is also a frame on
+        // which the device resets its swapchain.
         const bool configured =
+            firstSceneBuilt && core::cvar_set_int("r_vsync", 0) &&
+            core::cvar_set_int("r_max_fps", 0) &&
+            core::cvar_set_bool("r_present_scene", true) &&
             pipeline.execute_frame() &&
             core::cvar_set_bool("r_auto_exposure", false) &&
-            core::cvar_set_int("r_vsync", 0) &&
-            core::cvar_set_int("r_max_fps", 0) &&
-            core::cvar_set_bool("r_deferred", true) &&
-            core::cvar_set_bool("r_present_scene", true);
-        if (!configured) {
+            core::cvar_set_bool("r_deferred", true);
+        if (!firstSceneBuilt) {
+          std::fprintf(stderr, "FAIL: the first-frame scene was refused\n");
+          result = 7;
+        } else if (!configured) {
           std::fprintf(stderr, "FAIL: the fixture could not configure the "
                                "renderer's cvars\n");
           result = 5;
         } else {
-          engine::runtime::reset_world(*detail::g_fixtureWorld);
+          if (firstFrameScene == nullptr) {
+            engine::runtime::reset_world(*detail::g_fixtureWorld);
+          }
           detail::g_cvarRefused = false;
           result = body(pipeline, *detail::g_fixtureWorld);
           if ((result == 0) && detail::g_cvarRefused) {

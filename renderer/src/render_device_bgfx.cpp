@@ -1393,8 +1393,15 @@ void render_device_bgfx_frame() noexcept {
       bgfx::requestScreenShot(BGFX_INVALID_HANDLE, screenshotPath);
     }
   }
+  bgfx::frame();
   // Re-reset the swapchain when the drawable or vsync intent changed
   // (r_vsync applies live, matching the GL path's swap-interval cvar).
+  // Only here, between one frame's submit and the next frame's first bind:
+  // bgfx::reset points every view back at the back buffer, so a reset
+  // issued while a frame's views are claimed sends each of its passes
+  // there and leaves their targets unwritten — and whatever is rendered
+  // once and then cached, the shadow cascades and the BRDF lookup among
+  // them, keeps the missing result.
   int width = 0;
   int height = 0;
   core::render_drawable_size(&width, &height);
@@ -1409,7 +1416,6 @@ void render_device_bgfx_frame() noexcept {
                 static_cast<std::uint32_t>(height),
                 vsync ? BGFX_RESET_VSYNC : BGFX_RESET_NONE);
   }
-  bgfx::frame();
   reset_views();
 }
 
