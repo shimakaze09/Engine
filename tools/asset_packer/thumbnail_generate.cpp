@@ -334,8 +334,12 @@ bool generate_mesh_thumbnail(const char *inputPath, const char *outputPath,
   constexpr int kChannels = 4;
   std::vector<std::uint8_t> pixels(
       static_cast<std::size_t>(kThumbSize * kThumbSize * kChannels), 0U);
+  // The view looks down -Z from +Z, so the nearest surface has the
+  // largest z: the buffer starts far away and a fragment wins when it is
+  // nearer (#571; the old test kept the farthest surface and lit its back
+  // face).
   std::vector<float> depth(static_cast<std::size_t>(kThumbSize * kThumbSize),
-                           1e30F);
+                           -1e30F);
 
   const std::size_t strideFloats = primitive_stride_floats(data);
   const std::size_t vertexCount =
@@ -508,7 +512,7 @@ bool generate_mesh_thumbnail(const char *inputPath, const char *outputPath,
           }
           const std::size_t idx =
               static_cast<std::size_t>(py * kThumbSize + px);
-          if (z < depth[idx]) {
+          if (z > depth[idx]) {
             depth[idx] = z;
             const std::size_t pi = idx * kChannels;
             pixels[pi + 0U] = color;
