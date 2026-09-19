@@ -25,7 +25,15 @@ constexpr const char *kVirtualPath = "assets/mount_resolution.lua";
 /// Writes the script, then moves its mtime forward so a rewrite is seen
 /// as a change without sleeping across a filesystem timestamp tick.
 bool write_script(const std::filesystem::path &path, int value) noexcept {
-  std::FILE *file = std::fopen(path.string().c_str(), "wb");
+  const std::string native = path.string();
+  std::FILE *file = nullptr;
+#ifdef _WIN32
+  if (fopen_s(&file, native.c_str(), "wb") != 0) {
+    file = nullptr;
+  }
+#else
+  file = std::fopen(native.c_str(), "wb");
+#endif
   if (file == nullptr) {
     return false;
   }

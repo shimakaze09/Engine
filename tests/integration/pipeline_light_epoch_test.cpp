@@ -92,7 +92,14 @@ bool author_contact_pair(engine::runtime::World &world) noexcept {
 }
 
 bool write_script_file() noexcept {
-  std::FILE *file = std::fopen(kScriptPath, "wb");
+  std::FILE *file = nullptr;
+#ifdef _WIN32
+  if (fopen_s(&file, kScriptPath, "wb") != 0) {
+    file = nullptr;
+  }
+#else
+  file = std::fopen(kScriptPath, "wb");
+#endif
   if (file == nullptr) {
     return false;
   }

@@ -84,9 +84,7 @@ int main() {
     // Fill the world to capacity with transformed entities: every one is
     // a chunk-job participant, so each fixed step needs the full chunk
     // count.
-    std::size_t created = 0U;
     while (g_world->create_scene_object() != engine::runtime::kInvalidEntity) {
-      ++created;
     }
     const std::size_t transforms = g_world->transform_count();
     if (transforms < (engine::runtime::World::kMaxEntities - 64U)) {
