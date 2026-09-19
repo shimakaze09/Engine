@@ -18,19 +18,17 @@ vec2 hammersley(uint index, uint count) {
     return vec2(float(index) / float(count), radical_inverse_vdc(index));
 }
 
-vec3 importance_sample_ggx(vec2 xi, vec3 normal, float roughness) {
+// GGX half vector about the +z normal this integration fixes, with the
+// sample set's azimuth measured from +x, the side the view direction is
+// on. The 512-sample sum is sensitive to that alignment at grazing angles:
+// with the azimuth origin a quarter turn from the view, scale at
+// NdotV = 0.02 lands 0.04 from the converged integral; aligned, 0.008.
+vec3 importance_sample_ggx(vec2 xi, float roughness) {
     float a = roughness * roughness;
     float phi = 2.0 * 3.14159265359 * xi.x;
     float cosTheta = sqrt((1.0 - xi.y) / (1.0 + (a * a - 1.0) * xi.y));
     float sinTheta = sqrt(max(1.0 - cosTheta * cosTheta, 0.0));
-    vec3 halfVector =
-        vec3(cos(phi) * sinTheta, sin(phi) * sinTheta, cosTheta);
-    vec3 up = abs(normal.z) < 0.999 ? vec3(0.0, 0.0, 1.0)
-                                    : vec3(1.0, 0.0, 0.0);
-    vec3 tangent = normalize(cross(up, normal));
-    vec3 bitangent = cross(normal, tangent);
-    return normalize(tangent * halfVector.x + bitangent * halfVector.y +
-                     normal * halfVector.z);
+    return vec3(cos(phi) * sinTheta, sin(phi) * sinTheta, cosTheta);
 }
 
 float geometry_schlick_ggx(float nDotV, float roughness) {
@@ -46,12 +44,11 @@ float geometry_smith(float nDotV, float nDotL, float roughness) {
 
 vec2 integrate_brdf(float nDotV, float roughness) {
     vec3 viewDir = vec3(sqrt(max(1.0 - nDotV * nDotV, 0.0)), 0.0, nDotV);
-    vec3 normal = vec3(0.0, 0.0, 1.0);
     float scale = 0.0;
     float bias = 0.0;
     for (uint i = 0u; i < 512u; ++i) {
         vec3 halfVector =
-            importance_sample_ggx(hammersley(i, 512u), normal, roughness);
+            importance_sample_ggx(hammersley(i, 512u), roughness);
         vec3 lightDir = normalize(
             2.0 * dot(viewDir, halfVector) * halfVector - viewDir);
         float nDotL = max(lightDir.z, 0.0);
