@@ -45,6 +45,8 @@ struct MouseStateInternal final {
 };
 
 MouseStateInternal g_mouse{};
+// Fraction of a wheel notch not yet reported (#538).
+float g_wheelCarry = 0.0F;
 
 /// One controller slot, keyed to the SDL instance id it was announced
 /// under so a second controller's events never land on the first.
@@ -196,6 +198,7 @@ bool initialize_input() noexcept {
   g_keyState = {};
   g_prevKeyState = {};
   g_mouse = {};
+  g_wheelCarry = 0.0F;
   g_actions = {};
   g_axes = {};
   g_gamepads = {};
@@ -262,6 +265,7 @@ void shutdown_input() noexcept {
   g_keyState = {};
   g_prevKeyState = {};
   g_mouse = {};
+  g_wheelCarry = 0.0F;
   g_actions = {};
   g_axes = {};
   g_gamepads = {};
@@ -330,9 +334,16 @@ void input_process_event(const void *nativeEvent) noexcept {
     }
     break;
   }
-  case SDL_EVENT_MOUSE_WHEEL:
-    g_mouse.scrollDelta += static_cast<int>(event->wheel.y);
+  case SDL_EVENT_MOUSE_WHEEL: {
+    // Precise trackpads scroll in fractions of a notch; the fraction is
+    // carried across events so it is counted once it adds up to a notch
+    // instead of truncating to nothing (#538).
+    g_wheelCarry += event->wheel.y;
+    const int notches = static_cast<int>(g_wheelCarry);
+    g_mouse.scrollDelta += notches;
+    g_wheelCarry -= static_cast<float>(notches);
     break;
+  }
   case SDL_EVENT_GAMEPAD_ADDED:
     attach_gamepad(static_cast<std::uint32_t>(event->gdevice.which));
     break;
