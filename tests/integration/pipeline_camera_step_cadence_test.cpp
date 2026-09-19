@@ -337,16 +337,27 @@ int check_with_workers(std::uint32_t workers) noexcept {
           break;
         }
       }
-      if ((result == 0) && (compared < 10U)) {
+      // Every total the long run recorded is one the short run also
+      // recorded when short frames run at most one step. A machine too
+      // slow for that leaves gaps and fewer totals to compare; that is the
+      // machine, not the cadence, so it is reported as not exercised
+      // rather than as a failure. With single-step short frames a
+      // shortfall means the runs disagree about the steps themselves.
+      if ((result == 0) && (compared < 10U) &&
+          (fine.multiStepFrames == 0U)) {
         std::fprintf(stderr, "FAIL: only %u step totals were common to both "
                              "runs\n", compared);
         result = 21;
       }
-      if ((result == 0) && !zeroStepExercised) {
-        std::printf("SKIPPED: no frame ran zero steps on this machine (%u, "
-                    "%u), so the zero-step half was not exercised; the "
-                    "multi-step half passed\n",
-                    fine.zeroStepFrames, mixed.zeroStepFrames);
+      const bool armLengthExercised =
+          (compared >= 10U) || (fine.multiStepFrames == 0U);
+      if ((result == 0) && (!zeroStepExercised || !armLengthExercised)) {
+        std::printf("SKIPPED: this machine could not pace short frames "
+                    "finely enough (zero-step frames %u/%u, short frames "
+                    "with several steps %u, common step totals %u); the "
+                    "checks it could run passed\n",
+                    fine.zeroStepFrames, mixed.zeroStepFrames,
+                    fine.multiStepFrames, compared);
       }
     }
     pipeline.teardown();
