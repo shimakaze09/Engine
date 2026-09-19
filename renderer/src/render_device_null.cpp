@@ -138,6 +138,9 @@ void fill_null_render_device(RenderDevice *device) noexcept {
   device->caps.depthBlit = true;
   // Generous so headless tests exercise the full pass list.
   device->caps.maxTextureSamplers = 32U;
+  // The desktop floor, so headless runs lay tables out the way a D3D
+  // device would.
+  device->caps.maxTextureDimension = 16384;
 
   device->create_buffer = &null_create_buffer;
   device->update_buffer = &null_update_buffer;

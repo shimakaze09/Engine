@@ -420,8 +420,32 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
       gpu_profiler_end_pass(GpuPassId::SSAO);
     }
 
-    const std::size_t tileBufferSize =
+    // The table's shape is settled before the buffer is sized: a wrapped
+    // table ends in a partial row, and the upload covers the whole
+    // rectangle, so the buffer must reach past the last tile to the end
+    // of that row. The padding is never addressed — the shader's flat
+    // tile index stays inside the grid — it only has to exist.
+    // The diagnostic cvar can only lower the limit: a wrapped table is
+    // reachable natively only on a drawable wider than any common
+    // display, so this is how that layout is exercised on one.
+    int tileTableLimit = static_cast<int>(dev->caps.maxTextureDimension);
+    const int tileTableLimitOverride =
+        backend.cvars.tileTableMaxDimension.get_int(0);
+    if ((tileTableLimitOverride > 0) &&
+        (tileTableLimitOverride < tileTableLimit)) {
+      tileTableLimit = tileTableLimitOverride;
+    }
+    TileTextureLayout tileLayout{};
+    const bool tileLayoutValid = compute_tile_texture_layout(
+        (drawableWidth + kTileSize - 1) / kTileSize,
+        (drawableHeight + kTileSize - 1) / kTileSize, tileTableLimit,
+        tileLayout);
+
+    std::size_t tileBufferSize =
         compute_tile_buffer_size(drawableWidth, drawableHeight);
+    if (tileLayoutValid && (tileLayout.texelCount > tileBufferSize)) {
+      tileBufferSize = tileLayout.texelCount;
+    }
     if (backend.tileBuffer.size() < tileBufferSize) {
       // A failed grow leaves the buffer at zero capacity (audit #204:
       // nothrow instead of a terminating std::vector throw); the
@@ -434,15 +458,22 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
     tileData.data = backend.tileBuffer.data();
     tileData.dataSize = backend.tileBuffer.size();
 
+    // A table that cannot be laid out inside the device's texture limit
+    // is the same outcome as a failed cull: no tile table this frame.
     const bool tileDataValid =
+        tileLayoutValid &&
         cull_lights_tiled(lights, &viewMat.columns[0].x, &projMat.columns[0].x,
                           drawableWidth, drawableHeight, tileData);
     if (!tileDataValid) {
       static bool warnedCullFailure = false;
       if (!warnedCullFailure) {
-        core::log_message(core::LogLevel::Warning, "renderer",
-                          "tiled light culling failed; deferred lighting "
-                          "renders without local lights");
+        char message[192] = {};
+        std::snprintf(message, sizeof(message),
+                      "tiled light culling failed for a %dx%d drawable "
+                      "(texture limit %d); deferred lighting renders without "
+                      "local lights",
+                      drawableWidth, drawableHeight, tileTableLimit);
+        core::log_message(core::LogLevel::Warning, "renderer", message);
         warnedCullFailure = true;
       }
       if (backend.tileLightTex != kInvalidDeviceTexture) {
@@ -452,13 +483,12 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
         backend.tileLightTexHeight = 0;
       }
     } else {
-      // 2-D tile layout: the flat CPU buffer (tileIdx * kTileDataWidth)
-      // reinterprets exactly as tileCountY rows of tileCountX tiles, so
-      // no repacking — only the texture shape and the shader's
-      // addressing changed (one row per tile overflowed D3D's 16384
-      // dimension cap at 4K).
-      const int tileTexWidth = tileData.tileCountX * kTileDataWidth;
-      const int tileTexHeight = tileData.tileCountY;
+      // The flat CPU buffer (tileIdx * kTileDataWidth) reinterprets
+      // exactly as rows of tilesPerRow tiles, so nothing is repacked:
+      // the layout only chooses the rectangle, and the shader recovers
+      // the row from the flat tile index with the same tilesPerRow.
+      const int tileTexWidth = tileLayout.width;
+      const int tileTexHeight = tileLayout.height;
       if ((backend.tileLightTex != kInvalidDeviceTexture) &&
           ((tileTexWidth != backend.tileLightTexWidth) ||
            (tileTexHeight != backend.tileLightTexHeight))) {
@@ -762,6 +792,9 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
         dev->set_param_i32(backend.dlTileCountXLoc, tileData.tileCountX);
       if (backend.dlTileCountYLoc.valid())
         dev->set_param_i32(backend.dlTileCountYLoc, tileData.tileCountY);
+      if (backend.dlTileTableRowTilesLoc.valid())
+        dev->set_param_i32(backend.dlTileTableRowTilesLoc,
+                           tileLayout.tilesPerRow);
 
       math::Mat4 invProj{};
       if (math::inverse(projMat, &invProj)) {

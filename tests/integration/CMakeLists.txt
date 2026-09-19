@@ -18,6 +18,36 @@ engine_add_test_executable(engine_integration_pipeline_camera_prep
     gpu;integration
 )
 
+# Reads presented pixels back through the bgfx backend's private readback
+# hook, so it reaches into renderer/src the way the renderer unit suites do.
+engine_add_test_executable(engine_integration_deferred_tile_wrap_gpu
+    SOURCES
+    deferred_tile_wrap_gpu_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/renderer/src
+    PRIVATE_DEPS
+    engine_runtime
+    engine_renderer
+    engine_content
+    LABELS
+    gpu;integration
+)
+set_tests_properties(engine_integration_deferred_tile_wrap_gpu PROPERTIES
+    SKIP_REGULAR_EXPRESSION "SKIPPED:")
+# The default backend on Windows is Vulkan, whose texture limit on current
+# hardware is above the 16384 of D3D11 and D3D12 that the 7680-wide case
+# is about, so the same executable runs a second time where that limit is
+# the real one.
+if(WIN32)
+    add_test(NAME engine_integration_deferred_tile_wrap_gpu_d3d11
+        COMMAND engine_integration_deferred_tile_wrap_gpu)
+    set_tests_properties(engine_integration_deferred_tile_wrap_gpu_d3d11
+        PROPERTIES
+        LABELS "gpu;integration"
+        ENVIRONMENT "ENGINE_CVAR_r_bgfx_renderer=d3d11"
+        SKIP_REGULAR_EXPRESSION "SKIPPED:")
+endif()
+
 engine_add_test_executable(engine_integration_pipeline_tick_cadence
     SOURCES
     pipeline_tick_cadence_test.cpp

@@ -335,6 +335,12 @@ struct DeviceCaps final {
   // tops out at unit 15 since the #301 shadow arrays, inside WebGL2's
   // 16-unit floor and DXBC's 16-register cap).
   std::uint16_t maxTextureSamplers = 16U;
+  // Largest width or height a 2-D texture may have; create_texture
+  // refuses anything past it. A table whose size follows the drawable —
+  // the tiled-culling lookup — lays itself out against this so a large
+  // drawable wraps onto more rows instead of failing to exist. The
+  // default is the D3D11/12 limit, the smallest among the desktop APIs.
+  std::int32_t maxTextureDimension = 16384;
   // Depth attachments copy between render targets through copy_depth;
   // false means the backend cannot blit depth (bgfx's Vulkan/WebGL
   // paths) and the caller must seed depth with a draw instead.

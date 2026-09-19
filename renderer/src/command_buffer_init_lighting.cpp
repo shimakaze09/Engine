@@ -127,6 +127,11 @@ bool resolve_deferred_light_program_state(BackendState &backend,
       required_param(&ok, dev, dlProg, "uTileLightTex");
   backend.dlTileCountXLoc = required_param(&ok, dev, dlProg, "uTileCountX");
   backend.dlTileCountYLoc = dev->shader_param(dlProg, "uTileCountY");
+  // Required: the shader divides the flat tile index by it to find the
+  // table row, so a binding that never resolved would address every tile
+  // past the first row wrongly rather than fail visibly.
+  backend.dlTileTableRowTilesLoc =
+      required_param(&ok, dev, dlProg, "uTileTableRowTiles");
   backend.dlInvProjectionLoc =
       required_param(&ok, dev, dlProg, "uInvProjection");
   backend.dlInvViewLoc = required_param(&ok, dev, dlProg, "uInvView");
@@ -378,6 +383,12 @@ void init_backend_lighting(BackendState &backend,
       "r_gbuffer_debug", 0,
       "G-Buffer debug mode (0=off, 1=albedo, 2=normals, "
       "3=metallic, 4=roughness, 5=emissive, 6=AO, 7=depth)");
+  core::cvar_register_int(
+      "r_tile_table_max_dimension", 0,
+      "Diagnostic: lay the tiled-light table out as if the device's texture "
+      "limit were this many texels (0 = the device's own limit; never "
+      "raises it). Reproduces a 6K/8K drawable's wrapped table on an "
+      "ordinary display");
   core::cvar_register_string("r_fog_mode", "exp2",
                              "Distance fog mode: off, linear, exp, exp2");
   core::cvar_register_float("r_fog_start", 25.0F,

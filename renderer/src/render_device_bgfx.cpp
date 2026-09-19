@@ -1120,6 +1120,13 @@ void fill_bgfx_render_device(RenderDevice *device) noexcept {
   // 16-unit floor through this, gating the deferred pass off on web.
   device->caps.maxTextureSamplers = static_cast<std::uint16_t>(
       bgfx::getCaps()->limits.maxTextureSamplers);
+  {
+    const auto reported =
+        static_cast<std::int32_t>(bgfx::getCaps()->limits.maxTextureSize);
+    if (reported > 0) {
+      device->caps.maxTextureDimension = reported;
+    }
+  }
   // bgfx reports the live API's conventions: homogeneousDepth means the
   // GL [-1, 1] clip range; the engine's projection builders key off
   // these instead of assuming GL.

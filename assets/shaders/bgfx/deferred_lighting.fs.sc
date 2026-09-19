@@ -69,6 +69,7 @@ uniform vec4 uDirLightColor;      // .xyz
 uniform vec4 uCameraPos;          // .xyz
 uniform vec4 uCameraForwardOrtho; // xyz forward, w 1 when orthographic
 uniform vec4 uTileCountX;         // .x
+uniform vec4 uTileTableRowTiles;  // .x tiles per row of the tile table
 uniform vec4 uScreenSize;         // .xy (tile row flip on y-down APIs)
 uniform vec4 uPointLightCount;    // .x
 uniform vec4 uSpotLightCount;     // .x
@@ -409,20 +410,26 @@ void main() {
 #else
     int tileY = int(uScreenSize.y - gl_FragCoord.y) / 16;
 #endif
-    // 2-D tile table (#301 hardware runs): one texel row per tile ROW
-    // with kTileDataWidth texels per tile along x — one texture row per
-    // tile overflowed D3D's 16384 dimension cap at 4K.
-    int tileBase = tileX * TILE_DATA_WIDTH;
+    // The tile table is the flat, row-major tile array cut into texture
+    // rows of uTileTableRowTiles tiles (TileTextureLayout, CPU side). The
+    // row length is not the screen's tile-column count: a table as wide
+    // as the screen passes the 16384 texture dimension cap on a drawable
+    // wider than about 5232 px. Whole-number division recovers the row;
+    // the max() keeps an unset uniform from dividing by zero.
+    int tileFlat = tileY * int(uTileCountX.x) + tileX;
+    int tileRowTiles = max(int(uTileTableRowTiles.x), 1);
+    int tileRow = tileFlat / tileRowTiles;
+    int tileBase = (tileFlat - tileRow * tileRowTiles) * TILE_DATA_WIDTH;
 
     int pointLightCount = int(uPointLightCount.x);
     int tilePointCount =
-        int(texelFetch(uTileLightTex, ivec2(tileBase, tileY), 0).r);
+        int(texelFetch(uTileLightTex, ivec2(tileBase, tileRow), 0).r);
     for (int i = 0; i < TILE_MAX_POINT_LIGHTS; ++i) {
         if (i >= tilePointCount) {
             break;
         }
         int lightIdx =
-            int(texelFetch(uTileLightTex, ivec2(tileBase + 1 + i, tileY), 0).r);
+            int(texelFetch(uTileLightTex, ivec2(tileBase + 1 + i, tileRow), 0).r);
         if ((lightIdx < 0) || (lightIdx >= pointLightCount)) {
             continue;
         }
@@ -446,13 +453,13 @@ void main() {
     int spotLightCount = int(uSpotLightCount.x);
     int spotOffset = TILE_MAX_POINT_LIGHTS + 1;
     int tileSpotCount =
-        int(texelFetch(uTileLightTex, ivec2(tileBase + spotOffset, tileY), 0).r);
+        int(texelFetch(uTileLightTex, ivec2(tileBase + spotOffset, tileRow), 0).r);
     for (int i = 0; i < 16; ++i) {
         if (i >= tileSpotCount) {
             break;
         }
         int lightIdx = int(
-            texelFetch(uTileLightTex, ivec2(tileBase + spotOffset + 1 + i, tileY), 0)
+            texelFetch(uTileLightTex, ivec2(tileBase + spotOffset + 1 + i, tileRow), 0)
                 .r);
         if ((lightIdx < 0) || (lightIdx >= spotLightCount)) {
             continue;

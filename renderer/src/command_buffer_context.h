@@ -52,6 +52,7 @@ struct SceneCaptureTarget final {
 struct FlushCVars final {
   core::CVarRef deferred{"r_deferred"};
   core::CVarRef gbufferDebug{"r_gbuffer_debug"};
+  core::CVarRef tileTableMaxDimension{"r_tile_table_max_dimension"};
   core::CVarRef ssao{"r_ssao"};
   core::CVarRef ssaoRadius{"r_ssao_radius"};
   core::CVarRef ssaoBias{"r_ssao_bias"};
@@ -353,6 +354,7 @@ struct BackendState final {
   ShaderParam dlTileLightTexLoc{};
   ShaderParam dlTileCountXLoc{};
   ShaderParam dlTileCountYLoc{};
+  ShaderParam dlTileTableRowTilesLoc{};
   ShaderParam dlInvProjectionLoc{};
   ShaderParam dlInvViewLoc{};
   ShaderParam dlDirLightDirLoc{};

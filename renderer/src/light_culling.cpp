@@ -124,6 +124,42 @@ std::size_t compute_tile_buffer_size(int screenW, int screenH) noexcept {
          static_cast<std::size_t>(kTileDataWidth);
 }
 
+bool compute_tile_texture_layout(int tileCountX, int tileCountY,
+                                 int maxTextureDimension,
+                                 TileTextureLayout &outLayout) noexcept {
+  outLayout = TileTextureLayout{};
+  if ((tileCountX <= 0) || (tileCountY <= 0)) {
+    return false;
+  }
+  const std::int64_t tilesThatFit =
+      static_cast<std::int64_t>(maxTextureDimension) / kTileDataWidth;
+  if (tilesThatFit < 1) {
+    return false;
+  }
+
+  // A grid that fits keeps tilesPerRow == tileCountX, which makes the
+  // texture row the screen tile row: the common case stays the layout a
+  // frame capture is easiest to read, and only an oversized drawable
+  // wraps.
+  const std::int64_t tilesPerRow =
+      (static_cast<std::int64_t>(tileCountX) < tilesThatFit)
+          ? static_cast<std::int64_t>(tileCountX)
+          : tilesThatFit;
+  const std::int64_t totalTiles = static_cast<std::int64_t>(tileCountX) *
+                                  static_cast<std::int64_t>(tileCountY);
+  const std::int64_t rows = (totalTiles + tilesPerRow - 1) / tilesPerRow;
+  if (rows > static_cast<std::int64_t>(maxTextureDimension)) {
+    return false;
+  }
+
+  outLayout.tilesPerRow = static_cast<int>(tilesPerRow);
+  outLayout.width = static_cast<int>(tilesPerRow * kTileDataWidth);
+  outLayout.height = static_cast<int>(rows);
+  outLayout.texelCount = static_cast<std::size_t>(outLayout.width) *
+                         static_cast<std::size_t>(outLayout.height);
+  return true;
+}
+
 bool cull_lights_tiled(const SceneLightData &lightData, const float *viewMatrix,
                        const float *projMatrix, int screenW, int screenH,
                        TileLightData &outData) noexcept {
