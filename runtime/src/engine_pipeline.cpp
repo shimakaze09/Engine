@@ -236,6 +236,12 @@ struct PhysicsChunkJobData final {
 
 struct WorldPhaseJobData final {
   runtime::World *world = nullptr;
+  // Work the pipeline needs done inside a phase job, after the World's own
+  // part of it: the per-step camera evaluation rides the step job this
+  // way, so it sees that step's transforms without a job of its own in
+  // the graph. Null for every other phase job.
+  void (*afterPhase)(void *context) noexcept = nullptr;
+  void *afterPhaseContext = nullptr;
 };
 
 struct ResolveCollisionsJobData final {
@@ -343,6 +349,9 @@ void begin_update_step_job(void *userData) noexcept {
   auto *jobData = static_cast<WorldPhaseJobData *>(userData);
   if ((jobData != nullptr) && (jobData->world != nullptr)) {
     jobData->world->begin_update_step();
+    if (jobData->afterPhase != nullptr) {
+      jobData->afterPhase(jobData->afterPhaseContext);
+    }
   }
 }
 
@@ -381,10 +390,11 @@ bool link_dependency(core::JobHandle prerequisite,
 }
 
 /// Submits work to the owning buffer or system for world phase job.
-core::JobHandle submit_world_phase_job(FrameContext *frameContext,
-                                       runtime::World *world,
-                                       std::size_t *phaseJobCursor,
-                                       core::JobFunction function) noexcept {
+core::JobHandle submit_world_phase_job(
+    FrameContext *frameContext, runtime::World *world,
+    std::size_t *phaseJobCursor, core::JobFunction function,
+    void (*afterPhase)(void *context) noexcept = nullptr,
+    void *afterPhaseContext = nullptr) noexcept {
   if ((frameContext == nullptr) || (world == nullptr) ||
       (phaseJobCursor == nullptr) ||
       (*phaseJobCursor >= frameContext->phaseJobData.size())) {
@@ -394,6 +404,10 @@ core::JobHandle submit_world_phase_job(FrameContext *frameContext,
   WorldPhaseJobData &jobData = frameContext->phaseJobData[*phaseJobCursor];
   ++(*phaseJobCursor);
   jobData.world = world;
+  // Assigned on every submit: the slots are reused across frames, and a
+  // hook left over from another job would run where it has no business.
+  jobData.afterPhase = afterPhase;
+  jobData.afterPhaseContext = afterPhaseContext;
 
   core::Job job{};
   job.function = function;
@@ -614,11 +628,14 @@ struct EnginePipeline::Impl final {
   // Starts due so the first editor frame polls, then one poll per interval.
   double hotReloadDueSeconds = kHotReloadPollIntervalSeconds;
   std::uint32_t frameHotReloadPolls = 0U;
-  // Fixed-step camera history for render interpolation. Both samples were
-  // read from one World's content, identified by cameraSampleEpoch: a
-  // scene replacement discards that World, so the history is retired at
-  // the next camera stage instead of blending the replacement's first
-  // frame from a view no World owns any more.
+  // Fixed-step camera history for render interpolation: the camera as
+  // evaluated for the last fixed step and for the one before it, exactly
+  // one step apart, because render prep blends them by the same one-step
+  // fraction it blends entity poses by. Both samples were read from one
+  // World's content, identified by cameraSampleEpoch: a scene replacement
+  // discards that World, so the history is retired at the next camera
+  // stage instead of blending the replacement's first frame from a view
+  // no World owns any more.
   renderer::CameraState previousCameraSample{};
   renderer::CameraState currentCameraSample{};
   bool cameraSampleValid = false;
@@ -649,6 +666,15 @@ struct EnginePipeline::Impl final {
   void stage_animation() noexcept;
   bool stage_simulation_graph() noexcept;
   void stage_camera() noexcept;
+  /// Advances spring arms, authored cameras and the camera blend by one
+  /// fixed step against the World's composed transforms as they stand, and
+  /// pushes the result onto the interpolation pair. Runs once per fixed
+  /// step, with the transforms of that step: from the step job that
+  /// recomposes them for every step but a frame's last, and from the
+  /// camera stage for the last.
+  void evaluate_cameras_for_step(float deltaSeconds) noexcept;
+  /// evaluate_cameras_for_step as a phase-job hook; context is the Impl.
+  static void camera_step_hook(void *context) noexcept;
   bool stage_render_prep_graph() noexcept;
   // True once when dbg_fail_frame_stage names this stage (test seam, #120).
   bool consume_injected_stage_failure(const char *stageName) noexcept;
@@ -1040,19 +1066,25 @@ void EnginePipeline::Impl::stage_timing() noexcept {
 // Stage: scripting
 //
 // Cadence contract (audit M-01). Two classes of system exist in this frame:
-//   * per-fixed-step: transform propagation, physics, collision resolve, and
-//     animation each run exactly updateStepCount times with kFixedDeltaSeconds
-//     apiece, so their integration is independent of the render rate.
-//   * per-frame: entity script on_tick, Lua timers, coroutines, spring arms,
-//     and camera evaluation run once per rendered frame. They are dispatched
-//     once — re-entrant script dispatch per catch-up step would multiply
-//     gameplay callbacks and their deferred mutations — but they receive
-//     step_seconds(), the total time simulated this frame, so their dt equals
-//     the time the world actually advanced. Passing the bare fixed delta made
-//     timers and script-driven motion run slow whenever catch-up stepped more
-//     than once.
-// Spring-arm/camera work runs in stage_camera, between the last fixed step
-// and render prep, so culling and interpolation see this frame's camera.
+//   * per-fixed-step: transform propagation, physics, collision resolve,
+//     animation, spring arms and camera evaluation each run exactly
+//     updateStepCount times with kFixedDeltaSeconds apiece, so their
+//     integration is independent of the render rate. The camera belongs
+//     here because its blend and the arm's lag are single lerps per call —
+//     one call with twice the delta is not two calls with one — and because
+//     render prep interpolates the view by the same one-step fraction as
+//     every entity, which only lines up when the two camera samples are one
+//     step apart like the two entity poses.
+//   * per-frame: entity script on_tick, Lua timers and coroutines run once
+//     per rendered frame. They are dispatched once — re-entrant script
+//     dispatch per catch-up step would multiply gameplay callbacks and their
+//     deferred mutations — but they receive step_seconds(), the total time
+//     simulated this frame, so their dt equals the time the world actually
+//     advanced. Passing the bare fixed delta made timers and script-driven
+//     motion run slow whenever catch-up stepped more than once.
+// A frame's last camera evaluation runs in stage_camera, between the last
+// fixed step and render prep, so culling and interpolation see this
+// frame's camera; the earlier steps' run inside the simulation graph.
 // ---------------------------------------------------------------------------
 
 void EnginePipeline::Impl::stage_scripting() noexcept {
@@ -1231,9 +1263,16 @@ bool EnginePipeline::Impl::stage_simulation_graph() noexcept {
 
     core::JobHandle beginStepHandle{};
     if (step > 0U) {
-      beginStepHandle =
-          submit_world_phase_job(frameContext.get(), world.get(),
-                                 &phaseJobCursor, &begin_update_step_job);
+      // The step job has just recomposed the transforms of the step
+      // before this one, which is the pose the camera has to be evaluated
+      // against for that step. It runs between that step's commit and
+      // this step's work, so nothing else touches the World, the camera
+      // manager or the sample pair while it does, and the main thread is
+      // waiting on the graph.
+      beginStepHandle = submit_world_phase_job(
+          frameContext.get(), world.get(), &phaseJobCursor,
+          &begin_update_step_job,
+          isPlaying ? &EnginePipeline::Impl::camera_step_hook : nullptr, this);
       if (!core::is_valid_handle(beginStepHandle)) {
         graphFailed = true;
         break;
@@ -1424,6 +1463,38 @@ bool EnginePipeline::Impl::stage_simulation_graph() noexcept {
 // per-frame cadence contract above stage_scripting applies)
 // ---------------------------------------------------------------------------
 
+void EnginePipeline::Impl::camera_step_hook(void *context) noexcept {
+  auto *self = static_cast<EnginePipeline::Impl *>(context);
+  if (self != nullptr) {
+    self->evaluate_cameras_for_step(static_cast<float>(kFixedDeltaSeconds));
+  }
+}
+
+void EnginePipeline::Impl::evaluate_cameras_for_step(
+    float deltaSeconds) noexcept {
+  runtime::update_spring_arm_cameras(*world, deltaSeconds);
+  runtime::update_persistent_cameras(*world, deltaSeconds);
+  runtime::CameraEntry evaluated{};
+  world->camera_manager().evaluate(deltaSeconds, &evaluated);
+  if (world->camera_manager().camera_count() > 0U) {
+    renderer::CameraState cam{};
+    cam.position = evaluated.position;
+    cam.target = evaluated.target;
+    cam.up = evaluated.up;
+    cam.fovRadians = evaluated.fovRadians;
+    cam.nearPlane = evaluated.nearPlane;
+    cam.farPlane = evaluated.farPlane;
+    cam.projection = evaluated.projection;
+    cam.orthographicSize = evaluated.orthographicSize;
+    renderer::set_active_camera(cam);
+  }
+
+  previousCameraSample =
+      cameraSampleValid ? currentCameraSample : renderer::get_active_camera();
+  currentCameraSample = renderer::get_active_camera();
+  cameraSampleValid = true;
+}
+
 void EnginePipeline::Impl::stage_camera() noexcept {
   world->begin_transform_phase();
 
@@ -1439,38 +1510,30 @@ void EnginePipeline::Impl::stage_camera() noexcept {
       cameraSampleValid && (cameraSampleEpoch != contentEpoch);
   if (contentReplaced) {
     cameraSampleValid = false;
+    if (world->camera_manager().camera_count() == 0U) {
+      // A replacement scene that publishes no camera of its own presents
+      // the renderer's default view; the outgoing scene's last camera is
+      // not a state this World ever established, and the audio listener
+      // follows whatever camera is active here.
+      renderer::set_active_camera(renderer::CameraState{});
+    }
   }
 
-  runtime::update_spring_arm_cameras(*world,
-                                     static_cast<float>(step_seconds()));
-  runtime::update_persistent_cameras(*world,
-                                     static_cast<float>(step_seconds()));
-  runtime::CameraEntry evaluated{};
-  world->camera_manager().evaluate(static_cast<float>(step_seconds()),
-                                   &evaluated);
-  if (world->camera_manager().camera_count() > 0U) {
-    renderer::CameraState cam{};
-    cam.position = evaluated.position;
-    cam.target = evaluated.target;
-    cam.up = evaluated.up;
-    cam.fovRadians = evaluated.fovRadians;
-    cam.nearPlane = evaluated.nearPlane;
-    cam.farPlane = evaluated.farPlane;
-    cam.projection = evaluated.projection;
-    cam.orthographicSize = evaluated.orthographicSize;
-    renderer::set_active_camera(cam);
-  } else if (contentReplaced) {
-    // A replacement scene that publishes no camera of its own presents the
-    // renderer's default view; the outgoing scene's last camera is not a
-    // state this World ever established, and the audio listener follows
-    // whatever camera is active here.
-    renderer::set_active_camera(renderer::CameraState{});
+  // The camera advances with the simulation: once per fixed step, with the
+  // fixed delta, against that step's transforms. The steps before the last
+  // were evaluated inside the graph; this is the last one's, now that its
+  // transforms are composed. A frame that ran no step leaves the camera
+  // and the sample pair alone and lets the render alpha carry the view
+  // between them, as it carries every entity: evaluating here anyway
+  // would collapse the pair onto one pose and hold the camera still for a
+  // frame while the world kept moving under it. Without a valid pair
+  // there is nothing to carry, so that frame still evaluates, with no
+  // time passing.
+  if (updateStepCount > 0U) {
+    evaluate_cameras_for_step(static_cast<float>(kFixedDeltaSeconds));
+  } else if (!cameraSampleValid) {
+    evaluate_cameras_for_step(0.0F);
   }
-
-  previousCameraSample =
-      cameraSampleValid ? currentCameraSample : renderer::get_active_camera();
-  currentCameraSample = renderer::get_active_camera();
-  cameraSampleValid = true;
   cameraSampleEpoch = contentEpoch;
 }
 

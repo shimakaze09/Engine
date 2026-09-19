@@ -1006,6 +1006,19 @@ engine_add_test_executable(engine_integration_pipeline_offscreen_caster
     integration
 )
 
+engine_add_test_executable(engine_integration_pipeline_camera_step_cadence
+    SOURCES
+    pipeline_camera_step_cadence_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_renderer
+    engine_core
+    LABELS
+    integration
+)
+set_tests_properties(engine_integration_pipeline_camera_step_cadence PROPERTIES
+    SKIP_REGULAR_EXPRESSION "SKIPPED:")
+
 engine_add_test_executable(engine_integration_pipeline_interpolation_history
     SOURCES
     pipeline_interpolation_history_test.cpp
