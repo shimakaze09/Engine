@@ -404,8 +404,19 @@ bool write_cook_stamp(const char *outputPath, std::uint64_t sourceHash,
   std::snprintf(line, sizeof(line), "PLATFORM %s\n", platformTag);
   stamp += line;
   for (const DependencyDigest &dependency : dependencies) {
-    const std::string relative =
-        stamp_relative_path(outputPath, dependency.path);
+    // A dependency on another volume has no path relative to the stamp:
+    // Windows drives share no root, so a project on one drive cooking
+    // against sources or an SDK on another could not write a stamp at
+    // all. Such a dependency is recorded by its normalized absolute path.
+    // That keeps what a dependency line has to guarantee — it names the
+    // same file from any working directory — and needs no containment,
+    // because a dependency is only ever read and hashed, never removed.
+    // The reader's join already yields an absolute operand unchanged.
+    // Outputs stay strict below: they are what retirement deletes.
+    std::string relative = stamp_relative_path(outputPath, dependency.path);
+    if (relative.empty()) {
+      relative = normalized_os_path(dependency.path);
+    }
     if (relative.empty()) {
       std::fprintf(stderr,
                    "error: dependency path cannot be recorded relative to "

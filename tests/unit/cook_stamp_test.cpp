@@ -244,7 +244,18 @@ int check_overlong_output_path_refuses_the_stamp() {
   if (ec || !write_file(output.c_str(), "cooked") ||
       !write_file(longOutput.c_str(), "far away")) {
     remove_files();
+#ifdef _WIN32
+    // Windows refuses a path past MAX_PATH (260) long before it reaches
+    // the 1024-byte stamp line, so the file this case needs cannot exist
+    // here. Calling the writer anyway would prove nothing: it would
+    // refuse the stamp for the missing output, not for the line length.
+    std::printf("cook_stamp_test: overlong-output case not run: this "
+                "filesystem refuses the %zu-byte path it needs\n",
+                longOutput.size());
+    return 0;
+#else
     return 821;
+#endif
   }
   const std::vector<DependencyDigest> noDependencies{};
   const std::vector<std::string> outputs{output, longOutput};
@@ -257,6 +268,135 @@ int check_overlong_output_path_refuses_the_stamp() {
     return 822;
   }
   remove_files();
+  return 0;
+}
+
+/// EXPECTATION (#527): the containment rule refuses every spelling that
+/// leaves the stamp's directory, the Windows ones included. The rule is a
+/// pure string function, so these forms are checked on every platform
+/// rather than only where they are dangerous: a stamp written on one
+/// machine is read on another.
+int check_containment_rule_refuses_escaping_forms() {
+  using engine::content::cook_stamp_path_is_contained;
+  const char *contained[] = {
+      "rel.mesh",
+      "sub/rel.mesh",
+      "sub\\rel.mesh",
+      ".thumbnails/rel.png",
+      // A name that merely starts with dots is a name, not a parent step.
+      "...hidden/rel.mesh",
+      "..rel.mesh",
+  };
+  for (const char *path : contained) {
+    if (!cook_stamp_path_is_contained(path)) {
+      std::fprintf(stderr, "an in-directory path was refused: %s\n", path);
+      return 901;
+    }
+  }
+  const char *escaping[] = {
+      "",
+      // Parent steps, with either separator and mixed.
+      "..",
+      "../victim",
+      "..\\victim",
+      "sub/../../victim",
+      "sub\\..\\..\\victim",
+      "sub/..\\../victim",
+      // A current-directory step is refused too: it has no reason to be in
+      // a path the packer wrote.
+      "./rel.mesh",
+      "sub/./rel.mesh",
+      // Rooted: POSIX root, Windows current-drive root, UNC.
+      "/victim",
+      "\\victim",
+      "//server/share/victim",
+      "\\\\server\\share\\victim",
+      // Drive-qualified: absolute, and the drive-relative form that names
+      // another drive's current directory.
+      "C:/victim",
+      "C:\\victim",
+      "c:victim",
+      "Z:victim",
+      // An empty segment.
+      "sub//rel.mesh",
+      "sub/",
+  };
+  for (const char *path : escaping) {
+    if (cook_stamp_path_is_contained(path)) {
+      std::fprintf(stderr, "an escaping path was accepted: [%s]\n", path);
+      return 902;
+    }
+  }
+  if (cook_stamp_path_is_contained(nullptr)) {
+    return 903;
+  }
+  return 0;
+}
+
+/// EXPECTATION (#527 on Windows): a dependency on another volume than the
+/// stamp still stamps. No path relative to the stamp exists between two
+/// drives, so on base the writer refused the stamp and the cook failed
+/// outright — a project on one drive with sources or an SDK on another.
+/// The dependency is recorded by its absolute path, which reads back as
+/// the same file, and outputs stay contained. POSIX has one root, so the
+/// case cannot arise there.
+int check_dependency_on_another_volume_is_stamped() {
+#ifdef _WIN32
+  remove_files();
+  if (!write_file(kOutputPath, "cooked")) {
+    return 911;
+  }
+  // The writer takes the digest as given and never opens a dependency, so
+  // the other drive need not exist: pick a letter that is not this one.
+  std::error_code ec{};
+  const std::string here =
+      std::filesystem::absolute(kOutputPath, ec).root_name().string();
+  const std::string otherDrive = ((here == "Q:") || (here == "q:")) ? "R:" : "Q:";
+  std::vector<DependencyDigest> dependencies{};
+  DependencyDigest dep{};
+  dep.path = otherDrive + "\\sdk\\include\\shared.sh";
+  dep.hash = 0x0102030405060708ULL;
+  dependencies.push_back(dep);
+
+  const std::uint64_t sourceHash = 0x1122334455667788ULL;
+  const std::uint64_t importHash = 0x99AABBCCDDEEFF00ULL;
+  const std::vector<std::string> outputs{kOutputPath};
+  if (!write_cook_stamp(kOutputPath, sourceHash, dependencies, importHash,
+                        kPlatform, outputs)) {
+    std::fprintf(stderr, "a dependency on another volume refused the stamp\n");
+    remove_files();
+    return 912;
+  }
+  const std::string stamp = read_text(kStampPath);
+  const std::string recorded = " " + otherDrive + "/sdk/include/shared.sh\n";
+  if (stamp.find(recorded) == std::string::npos) {
+    std::fprintf(stderr, "the dependency was not recorded absolute:\n%s",
+                 stamp.c_str());
+    remove_files();
+    return 913;
+  }
+  // The same dependency, however it is spelled, certifies the cook; a
+  // different file on that volume does not.
+  if (should_repack(kOutputPath, sourceHash, dependencies, importHash,
+                    kPlatform)) {
+    remove_files();
+    return 914;
+  }
+  std::vector<DependencyDigest> respelled = dependencies;
+  respelled[0].path = otherDrive + "/sdk/include/../include/shared.sh";
+  if (should_repack(kOutputPath, sourceHash, respelled, importHash,
+                    kPlatform)) {
+    remove_files();
+    return 915;
+  }
+  std::vector<DependencyDigest> moved = dependencies;
+  moved[0].path = otherDrive + "\\sdk\\include\\other.sh";
+  if (!should_repack(kOutputPath, sourceHash, moved, importHash, kPlatform)) {
+    remove_files();
+    return 916;
+  }
+  remove_files();
+#endif
   return 0;
 }
 
@@ -642,5 +782,13 @@ int main() {
   if (containmentResult != 0) {
     return containmentResult;
   }
-  return check_overlong_output_path_refuses_the_stamp();
+  const int overlongResult = check_overlong_output_path_refuses_the_stamp();
+  if (overlongResult != 0) {
+    return overlongResult;
+  }
+  const int ruleResult = check_containment_rule_refuses_escaping_forms();
+  if (ruleResult != 0) {
+    return ruleResult;
+  }
+  return check_dependency_on_another_volume_is_stamped();
 }

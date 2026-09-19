@@ -19,7 +19,11 @@ namespace engine::content {
 /// (working-directory relative). Schema 4 records every DEP_HASH and
 /// OUTPUT path relative to the stamp's own directory with `/` separators,
 /// so a stamp certifies the same files from any working directory, and
-/// an OUTPUT path must stay inside that directory (#527). A stamp
+/// an OUTPUT path must stay inside that directory (#527). The one
+/// exception is a DEP_HASH on another volume than the stamp, which has
+/// no relative form — Windows drives share no root — and is recorded by
+/// its normalized absolute path: still the same file from any working
+/// directory, and a dependency is only read, never removed. A stamp
 /// declaring a higher schema was written by a newer packer whose lines
 /// this reader cannot interpret, so it certifies nothing here; a lower or
 /// absent schema is a legacy stamp that recooks.
