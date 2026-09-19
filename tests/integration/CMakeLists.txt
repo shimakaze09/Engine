@@ -108,6 +108,21 @@ engine_add_test_executable(engine_integration_post_edge_wrap_gpu
 set_tests_properties(engine_integration_post_edge_wrap_gpu PROPERTIES
     SKIP_REGULAR_EXPRESSION "SKIPPED:")
 
+engine_add_test_executable(engine_integration_brdf_lut_edge_gpu
+    SOURCES
+    brdf_lut_edge_gpu_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/renderer/src
+    PRIVATE_DEPS
+    engine_runtime
+    engine_renderer
+    engine_content
+    LABELS
+    gpu;integration
+)
+set_tests_properties(engine_integration_brdf_lut_edge_gpu PROPERTIES
+    SKIP_REGULAR_EXPRESSION "SKIPPED:")
+
 engine_add_test_executable(engine_integration_pipeline_tick_cadence
     SOURCES
     pipeline_tick_cadence_test.cpp
