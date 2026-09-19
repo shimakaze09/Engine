@@ -174,6 +174,9 @@ if(ENGINE_DETERMINISTIC_FLOATS)
         if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
             add_compile_options(-fexcess-precision=standard)
         endif()
+    endif()
+    message(STATUS "ENGINE_DETERMINISTIC_FLOATS: strict floating-point flags enabled")
+endif()
 
 # ---- Sanitizer lane (ASAN + UBSAN; GCC/Clang only) ----
 # Enable with: cmake -S . -B build -DENGINE_SANITIZERS=ON
@@ -335,10 +338,6 @@ if(NOT ENGINE_MAX_ENTITIES MATCHES "^[0-9]+$" OR
 endif()
 
 add_compile_definitions(ENGINE_MAX_ENTITIES=${ENGINE_MAX_ENTITIES})
-
-    endif()
-    message(STATUS "ENGINE_DETERMINISTIC_FLOATS: strict floating-point flags enabled")
-endif()
 
 if(MSVC)
     foreach(_engine_flag_var
