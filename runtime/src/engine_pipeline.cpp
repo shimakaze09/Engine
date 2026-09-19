@@ -1634,7 +1634,8 @@ bool EnginePipeline::Impl::stage_render_prep_graph() noexcept {
       frameContext->droppedDrawCommands.load(std::memory_order_acquire);
   if ((lastDroppedDrawCommands > 0U) && !droppedDrawsLogged) {
     droppedDrawsLogged = true;
-    char dropMessage[192] = {};
+    // Sized for the text plus a full ten-digit count.
+    char dropMessage[256] = {};
     std::snprintf(dropMessage, sizeof(dropMessage),
                   "render prep dropped %u draws: more visible draws than a "
                   "command buffer holds, the frame is drawn incomplete "
