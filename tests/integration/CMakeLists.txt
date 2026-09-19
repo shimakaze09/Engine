@@ -194,6 +194,15 @@ engine_add_test_executable(engine_integration_pipeline_teardown_run_state
     gpu;integration
 )
 
+engine_add_test_executable(engine_integration_engine_bootstrap_rollback
+    SOURCES
+    engine_bootstrap_rollback_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    LABELS
+    integration
+)
+
 engine_add_test_executable(engine_integration_pipeline_clock_reset
     SOURCES
     pipeline_clock_reset_test.cpp
