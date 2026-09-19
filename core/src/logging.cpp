@@ -164,6 +164,67 @@ void shutdown_logging() noexcept {
   g_sinks = {};
 }
 
+const char *log_channel_name(LogChannel channel) noexcept {
+  switch (channel) {
+  case LogChannel::Engine:
+    return "engine";
+  case LogChannel::Runtime:
+    return "runtime";
+  case LogChannel::World:
+    return "world";
+  case LogChannel::Renderer:
+    return "renderer";
+  case LogChannel::RenderDevice:
+    return "render_device";
+  case LogChannel::RenderPrep:
+    return "render_prep";
+  case LogChannel::Shader:
+    return "shader";
+  case LogChannel::Shadow:
+    return "shadow";
+  case LogChannel::ShadowMap:
+    return "shadow_map";
+  case LogChannel::PassResources:
+    return "pass_resources";
+  case LogChannel::Bgfx:
+    return "bgfx";
+  case LogChannel::Scripting:
+    return "scripting";
+  case LogChannel::Dap:
+    return "dap";
+  case LogChannel::Editor:
+    return "editor";
+  case LogChannel::Assets:
+    return "assets";
+  case LogChannel::AssetStreaming:
+    return "asset_streaming";
+  case LogChannel::Streaming:
+    return "streaming";
+  case LogChannel::Save:
+    return "save";
+  case LogChannel::Prefab:
+    return "prefab";
+  case LogChannel::Audio:
+    return "audio";
+  case LogChannel::Physics:
+    return "physics";
+  case LogChannel::Animation:
+    return "animation";
+  case LogChannel::EntityPool:
+    return "entity_pool";
+  case LogChannel::Jobs:
+    return "jobs";
+  case LogChannel::Slice:
+    return "slice";
+  }
+  return "engine";
+}
+
+void log_message(LogLevel level, LogChannel channel,
+                 const char *message) noexcept {
+  log_message(level, log_channel_name(channel), message);
+}
+
 void log_message(LogLevel level,
                  const char *channel,
                  const char *message) noexcept {

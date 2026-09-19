@@ -244,10 +244,12 @@ std::uint32_t parse_entity_index_hint(const char *message) noexcept {
   return kConsoleNoEntityHint;
 }
 
-/// True when `channel` names a scripting diagnostic (see log_lua_error and
-/// its callers, all of which log under the "scripting" channel).
+/// True when `channel` is the scripting channel; the name is the enum's,
+/// so a call site cannot spell its way out of the Script filter.
 ConsoleSourceCategory classify_category(const char *channel) noexcept {
-  if ((channel != nullptr) && (std::strcmp(channel, "scripting") == 0)) {
+  if ((channel != nullptr) &&
+      (std::strcmp(channel,
+                   core::log_channel_name(core::LogChannel::Scripting)) == 0)) {
     return ConsoleSourceCategory::Script;
   }
   return ConsoleSourceCategory::Engine;

@@ -55,7 +55,7 @@ void log_field_refused(const char *context, const char *field) noexcept {
                 "%s: field '%s' missing, non-integer, or out of range; "
                 "registration refused",
                 context, field);
-  core::log_message(core::LogLevel::Error, "Scripting", message);
+  core::log_message(core::LogLevel::Error, "scripting", message);
 }
 
 /// Reads one integer field on the table at tableIndex; a missing field uses
@@ -403,7 +403,7 @@ bool resolve_lua_config_path(const char *name, char *out,
     return core::input_bindings_default_path(out, capacity);
   }
   if (!resolve_input_config_path(name, out, capacity)) {
-    core::log_message(core::LogLevel::Error, "Scripting",
+    core::log_message(core::LogLevel::Error, "scripting",
                       "input config path refused: must be a relative "
                       "name under the save directory");
     return false;

@@ -536,6 +536,13 @@ engine_add_test_executable(engine_unit_scripting_link
     engine_scripting
 )
 
+engine_add_test_executable(engine_unit_log_channel
+    SOURCES
+    log_channel_test.cpp
+    PRIVATE_DEPS
+    engine_core
+)
+
 engine_add_test_executable(engine_unit_script_bridge_handle
     SOURCES
     script_bridge_handle_test.cpp

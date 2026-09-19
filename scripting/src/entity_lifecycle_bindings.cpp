@@ -40,7 +40,7 @@ int lua_engine_log(lua_State *state) noexcept {
     message = "";
   }
 
-  core::log_message(core::LogLevel::Info, "script", message);
+  core::log_message(core::LogLevel::Info, "scripting", message);
   return 0;
 }
 
