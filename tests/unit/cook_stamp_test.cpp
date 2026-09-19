@@ -14,11 +14,13 @@
 
 #include "packer_shared.h"
 
+#include <cerrno>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <string>
+#include <system_error>
 #include <vector>
 
 namespace {
@@ -238,24 +240,31 @@ int check_overlong_output_path_refuses_the_stamp() {
   for (int level = 0; level < 5; ++level) {
     deep /= segment;
   }
+  errno = 0;
   std::filesystem::create_directories(deep, ec);
   const std::string output = std::string(kNestedDir) + "/owner.mesh";
   const std::string longOutput = (deep / "long.mesh").string();
   if (ec || !write_file(output.c_str(), "cooked") ||
       !write_file(longOutput.c_str(), "far away")) {
     remove_files();
-#ifdef _WIN32
-    // Windows refuses a path past MAX_PATH (260) long before it reaches
-    // the 1024-byte stamp line, so the file this case needs cannot exist
-    // here. Calling the writer anyway would prove nothing: it would
+    // A filesystem that refuses the path itself — Windows past MAX_PATH
+    // (260), macOS past PATH_MAX (1024) — cannot hold the file this case
+    // needs. Calling the writer anyway would prove nothing: it would
     // refuse the stamp for the missing output, not for the line length.
-    std::printf("cook_stamp_test: overlong-output case not run: this "
-                "filesystem refuses the %zu-byte path it needs\n",
-                longOutput.size());
-    return 0;
+    const bool pathTooLong =
+        (ec == std::errc::filename_too_long) || (errno == ENAMETOOLONG);
+#ifdef _WIN32
+    const bool refusedByFilesystem = true;
 #else
-    return 821;
+    const bool refusedByFilesystem = pathTooLong;
 #endif
+    if (refusedByFilesystem) {
+      std::printf("cook_stamp_test: overlong-output case not run: this "
+                  "filesystem refuses the %zu-byte path it needs\n",
+                  longOutput.size());
+      return 0;
+    }
+    return 821;
   }
   const std::vector<DependencyDigest> noDependencies{};
   const std::vector<std::string> outputs{output, longOutput};
