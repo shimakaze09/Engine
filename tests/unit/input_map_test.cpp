@@ -436,6 +436,84 @@ bool test_rebind_action() noexcept {
   return true;
 }
 
+/// EXPECTATION (#538 item 1): a binding the user rebound, and every entry a
+/// loaded bindings document restores, outranks a script registering the
+/// same name again; the registration reports success and changes nothing.
+/// A name the user never touched is still overwritten (script defaults).
+bool test_persisted_bindings_outrank_script_defaults() noexcept {
+  if (!init_all()) {
+    return false;
+  }
+  InputBinding space{};
+  space.type = InputBindingType::Key;
+  space.code = kKey_Space;
+  InputBinding w{};
+  w.type = InputBindingType::Key;
+  w.code = kKey_W;
+  add_input_action("jump", &space, 1U);
+  if (!rebind_action("jump", 0U, w)) {
+    shutdown_all();
+    return false;
+  }
+  // The script's default registration runs again (the next Play).
+  if (!add_input_action("jump", &space, 1U)) {
+    shutdown_all();
+    return false;
+  }
+  begin_input_frame();
+  sim_key_down(kKey_Space);
+  end_input_frame();
+  if (is_mapped_action_down("jump")) {
+    shutdown_all();
+    return false; // the default overwrote the user's rebinding
+  }
+  begin_input_frame();
+  sim_key_up(kKey_Space);
+  sim_key_down(kKey_W);
+  end_input_frame();
+  if (!is_mapped_action_down("jump")) {
+    shutdown_all();
+    return false;
+  }
+  begin_input_frame();
+  sim_key_up(kKey_W);
+  end_input_frame();
+
+  // Restored from a document: the same precedence.
+  static char buffer[8192] = {};
+  std::size_t size = 0U;
+  if (!save_input_bindings_to_buffer(buffer, sizeof(buffer), &size)) {
+    shutdown_all();
+    return false;
+  }
+  shutdown_all();
+  if (!init_all() || !load_input_bindings_from_buffer(buffer, size)) {
+    shutdown_all();
+    return false;
+  }
+  if (!add_input_action("jump", &space, 1U)) {
+    shutdown_all();
+    return false;
+  }
+  begin_input_frame();
+  sim_key_down(kKey_Space);
+  end_input_frame();
+  const bool overwritten = is_mapped_action_down("jump");
+  begin_input_frame();
+  sim_key_up(kKey_Space);
+  end_input_frame();
+
+  // An entry the user never touched still takes the script default.
+  add_input_action("crouch", &space, 1U);
+  add_input_action("crouch", &w, 1U);
+  begin_input_frame();
+  sim_key_down(kKey_W);
+  end_input_frame();
+  const bool defaulted = is_mapped_action_down("crouch");
+  shutdown_all();
+  return !overwritten && defaulted;
+}
+
 bool test_save_load_roundtrip() noexcept {
   if (!init_all()) {
     return false;
@@ -1310,6 +1388,8 @@ int main() {
   run("axis_callback", &test_axis_callback);
   run("remove_action", &test_remove_action);
   run("rebind_action", &test_rebind_action);
+  run("persisted_bindings_outrank_script_defaults",
+      &test_persisted_bindings_outrank_script_defaults);
   run("save_load_roundtrip", &test_save_load_roundtrip);
   run("file_round_trip_and_default_path",
       &test_file_round_trip_and_default_path);

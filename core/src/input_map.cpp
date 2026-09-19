@@ -290,6 +290,9 @@ bool add_input_action(const char *name, const InputBinding *bindings,
 
   InputAction *existing = find_mapped_action(name);
   if (existing != nullptr) {
+    if (existing->persisted) {
+      return true; // the user's bindings outrank a script default (#538)
+    }
     existing->bindingCount = count;
     for (std::uint32_t i = 0; i < count; ++i) {
       existing->bindings[i] = bindings[i];
@@ -334,6 +337,9 @@ bool add_input_axis(const char *name, const InputAxisSource *sources,
 
   InputAxisMapping *existing = find_mapped_axis(name);
   if (existing != nullptr) {
+    if (existing->persisted) {
+      return true;
+    }
     existing->sourceCount = count;
     for (std::uint32_t i = 0; i < count; ++i) {
       existing->sources[i] = sources[i];
@@ -481,11 +487,13 @@ bool rebind_action(const char *actionName, std::uint32_t bindingIndex,
         (a->bindingCount < kMaxBindingsPerAction)) {
       a->bindings[a->bindingCount] = newBinding;
       ++a->bindingCount;
+      a->persisted = true;
       return true;
     }
     return false;
   }
   a->bindings[bindingIndex] = newBinding;
+  a->persisted = true;
   return true;
 }
 
@@ -789,6 +797,7 @@ bool load_input_bindings_from_buffer(const char *buffer,
 
       InputAction action{};
       action.occupied = true;
+      action.persisted = true;
 
       if (!parse_entry_name(parser, actionVal, action.name, "action")) {
         return false;
@@ -874,6 +883,7 @@ bool load_input_bindings_from_buffer(const char *buffer,
 
       InputAxisMapping axis{};
       axis.occupied = true;
+      axis.persisted = true;
 
       if (!parse_entry_name(parser, axisVal, axis.name, "axis")) {
         return false;
