@@ -26,7 +26,11 @@ engine::core::FixedRing<ConsoleEntry, kMaxConsoleEntries> g_ring{};
 std::uint64_t g_nextSequence = 1U;
 std::uint64_t g_totalIngested = 0U;
 std::uint64_t g_sessionMarkerSeq = 0U;
-Clock::time_point g_captureStart{};
+// The capture epoch, read lock-free by the sink from any logging thread
+// and written by console_capture_initialize under the mutex; atomic so
+// the two never race (#576). Any value the sink reads is a valid epoch:
+// a re-initialize only re-bases later timestamps.
+std::atomic<Clock::rep> g_captureStartTicks{0};
 bool g_sinkRegistered = false;
 
 std::atomic<std::uint32_t> g_unseenErrors{0U};
@@ -291,9 +295,11 @@ void console_capture_sink(core::LogLevel level, const char *channel,
   copy_truncated(candidate.message, sizeof(candidate.message), message,
                 &candidate.truncated);
   candidate.frameIndex = core::log_current_frame_index();
+  const Clock::time_point captureStart{Clock::duration(
+      g_captureStartTicks.load(std::memory_order_relaxed))};
   candidate.captureTimeMs = static_cast<std::uint64_t>(
       std::chrono::duration_cast<std::chrono::milliseconds>(
-          Clock::now() - g_captureStart)
+          Clock::now() - captureStart)
           .count());
 
   char scriptPath[kConsolePathCapacity] = {};
@@ -340,7 +346,8 @@ void console_capture_initialize() noexcept {
   {
     std::lock_guard<std::mutex> lock(g_captureMutex);
     reset_state_locked();
-    g_captureStart = Clock::now();
+    g_captureStartTicks.store(Clock::now().time_since_epoch().count(),
+                              std::memory_order_relaxed);
   }
 
   if (!g_sinkRegistered) {
