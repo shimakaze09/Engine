@@ -275,6 +275,84 @@ void test_auxiliary_casters_are_drawn() noexcept {
   CHECK(g_log.drawsOnBackBuffer == 0U, "nothing drawn to the back buffer");
 }
 
+/// EXPECTATION (#565 row 3): the four shadow slots go to the four casters
+/// nearest the camera, in order of distance, whatever order the lights were
+/// created in. Here distance falls as the index rises, so the slots must
+/// hold the highest indices, nearest first.
+void test_slots_go_to_the_nearest_casters() noexcept {
+  reset_backend();
+  reset_fake_device();
+  const engine::math::Vec3 camera = renderer_context().activeCamera.position;
+  SceneLightData lights{};
+  lights.spotLightCount = 10U;
+  lights.pointLightCount = 10U;
+  for (std::size_t i = 0U; i < 10U; ++i) {
+    const float distance = 40.0F - 3.0F * static_cast<float>(i);
+    lights.spotLights[i].castShadow = true;
+    lights.spotLights[i].radius = 12.0F;
+    lights.spotLights[i].position =
+        engine::math::Vec3(camera.x + distance, camera.y, camera.z);
+    lights.pointLights[i].castShadow = true;
+    lights.pointLights[i].radius = 12.0F;
+    lights.pointLights[i].position =
+        engine::math::Vec3(camera.x, camera.y + distance, camera.z);
+  }
+  FrameFlushContext ctx = make_context(lights);
+  flush_shadow_passes(ctx);
+  for (int s = 0; s < 4; ++s) {
+    CHECK(g_backend.spotShadowState.slots[s].lightIndex == (9 - s),
+          "spot slots hold the nearest casters, nearest first");
+    CHECK(g_backend.pointShadowState.slots[s].lightIndex == (9 - s),
+          "point slots hold the nearest casters, nearest first");
+  }
+}
+
+/// EXPECTATION (#565 row 3): casters at exactly the same distance take the
+/// slots in index order, so which lights cast is a function of the scene
+/// and not of how a particular std::sort happens to order equal keys. The
+/// even-indexed lights all sit at one point, so their distances are the
+/// same float, and they are the nearest; the odd-indexed ones are scattered
+/// further out. Interleaving them is what makes the sort move things: a
+/// range of nothing but equal keys is left untouched by the libraries
+/// tried, and would pass with or without a tie-break. On base the
+/// comparator looked at distance alone.
+void test_equidistant_casters_take_slots_in_index_order() noexcept {
+  reset_backend();
+  reset_fake_device();
+  const engine::math::Vec3 camera = renderer_context().activeCamera.position;
+  SceneLightData lights{};
+  lights.spotLightCount = static_cast<std::uint32_t>(kMaxSpotLights);
+  lights.pointLightCount = static_cast<std::uint32_t>(kMaxPointLights);
+  const auto place = [&camera](std::size_t index) noexcept {
+    if ((index % 2U) == 0U) {
+      return engine::math::Vec3(camera.x + 3.0F, camera.y, camera.z);
+    }
+    // A fixed scramble of the odd indices over 10 to 73 metres, all
+    // further than the tied group at 3.
+    const float distance =
+        10.0F + static_cast<float>((index * 37U + 11U) % 64U);
+    return engine::math::Vec3(camera.x, camera.y + distance, camera.z);
+  };
+  for (std::size_t i = 0U; i < kMaxSpotLights; ++i) {
+    lights.spotLights[i].castShadow = true;
+    lights.spotLights[i].radius = 12.0F;
+    lights.spotLights[i].position = place(i);
+  }
+  for (std::size_t i = 0U; i < kMaxPointLights; ++i) {
+    lights.pointLights[i].castShadow = true;
+    lights.pointLights[i].radius = 12.0F;
+    lights.pointLights[i].position = place(i);
+  }
+  FrameFlushContext ctx = make_context(lights);
+  flush_shadow_passes(ctx);
+  for (int s = 0; s < 4; ++s) {
+    CHECK(g_backend.spotShadowState.slots[s].lightIndex == (2 * s),
+          "tied spot casters take the slots in index order");
+    CHECK(g_backend.pointShadowState.slots[s].lightIndex == (2 * s),
+          "tied point casters take the slots in index order");
+  }
+}
+
 /// EXPECTATION: the cvar gate still holds — with r_point_shadows off a
 /// flagged light renders nothing and the pass reports inactive.
 void test_cvar_gate_still_disables() noexcept {
@@ -307,6 +385,8 @@ int main() {
   test_flagged_spot_light_renders_depth();
   test_flagged_point_light_renders_six_faces();
   test_auxiliary_casters_are_drawn();
+  test_slots_go_to_the_nearest_casters();
+  test_equidistant_casters_take_slots_in_index_order();
   test_cvar_gate_still_disables();
 
   if (g_failures != 0) {
