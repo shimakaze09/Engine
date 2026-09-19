@@ -14,4 +14,13 @@ namespace engine::renderer {
 /// initialization and for the null backend.
 void render_device_bgfx_frame() noexcept;
 
+/// Asks for the presented back buffer to be written to path as a TGA by
+/// the next render_device_bgfx_frame, through bgfx's readback. The file
+/// appears a frame or two later, once bgfx hands the pixels back, so a
+/// caller runs further frames and then looks for it. The path is copied;
+/// one that does not fit, or a null one, is refused and nothing is
+/// requested. This is how a gpu-labelled test reads pixels: the engine
+/// has no other readback.
+bool render_device_bgfx_request_screenshot(const char *path) noexcept;
+
 } // namespace engine::renderer

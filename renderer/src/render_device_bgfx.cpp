@@ -1347,10 +1347,33 @@ const RenderDevice *render_device() noexcept {
   return &device_context().device;
 }
 
+namespace {
+
+/// The one pending readback request; empty when none is pending.
+char g_requestedScreenshotPath[512] = {};
+
+} // namespace
+
+bool render_device_bgfx_request_screenshot(const char *path) noexcept {
+  if (path == nullptr) {
+    return false;
+  }
+  const std::size_t length = std::strlen(path);
+  if ((length == 0U) || (length >= sizeof(g_requestedScreenshotPath))) {
+    return false;
+  }
+  std::memcpy(g_requestedScreenshotPath, path, length + 1U);
+  return true;
+}
+
 void render_device_bgfx_frame() noexcept {
   BgfxDeviceContext &ctx = device_context();
   if (!ctx.initialized || (ctx.mode != BgfxBackendMode::Bgfx)) {
     return;
+  }
+  if (g_requestedScreenshotPath[0] != '\0') {
+    bgfx::requestScreenShot(BGFX_INVALID_HANDLE, g_requestedScreenshotPath);
+    g_requestedScreenshotPath[0] = '\0';
   }
   // Diagnostic capture: with ENGINE_BGFX_SCREENSHOT=<path.tga> in the
   // environment, the presented back buffer is written there every ~2
