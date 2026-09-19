@@ -248,6 +248,19 @@ bool extract_primitive(const cgltf_primitive *primitive,
       return false;
     }
 
+    // A non-finite position is not a mesh: it would be cast to int by the
+    // thumbnail rasterizer (undefined) and fed to the hull builder (#571).
+    if (!std::isfinite(position[0U]) || !std::isfinite(position[1U]) ||
+        !std::isfinite(position[2U]) ||
+        ((normals != nullptr) &&
+         (!std::isfinite(normal[0U]) || !std::isfinite(normal[1U]) ||
+          !std::isfinite(normal[2U])))) {
+      std::fprintf(stderr,
+                   "error: vertex %zu has a non-finite position or normal\n",
+                   i);
+      return false;
+    }
+
     const std::size_t base = i * strideFloats;
     outData->interleavedVertices[base + 0U] = position[0U];
     outData->interleavedVertices[base + 1U] = position[1U];
