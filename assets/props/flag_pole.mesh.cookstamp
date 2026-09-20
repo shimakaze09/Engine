@@ -5,7 +5,7 @@ IMPORT_HASH 2755be6c6a924f10
 PLATFORM Linux
 DEP_HASH e18bdb103e0d7189 flag_pole.bin
 OUTPUT abf95e8124062ce3 flag_pole.mesh
-OUTPUT 39e24f61cc452368 flag_pole.mesh.meta
+OUTPUT 39e24f61cc452368 flag_pole.mesh.cookmeta
 OUTPUT f82b0290bc443818 flag_pole.mesh.hull
 OUTPUT d9ad99a29a8b6a3f .thumbnails/flag_pole.mesh.png
 OUTPUT f3fd589d96281b01 .thumbnails/flag_pole.mesh.checksum

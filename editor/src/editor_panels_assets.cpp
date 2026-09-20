@@ -43,7 +43,7 @@ namespace engine::editor {
 namespace {
 
 /// Draw import settings inspector for mesh assets.
-/// Reads the .meta sidecar, displays current import settings, and
+/// Reads the .cookmeta sidecar, displays current import settings, and
 /// allows editing. On modification only the importSettings field is
 /// spliced into the existing document (every other field survives) and
 /// the file is replaced atomically; the packer detects the changed
@@ -72,12 +72,12 @@ void draw_import_settings_inspector(const char *assetPath) noexcept {
   }
   switch (doc->state) {
   case ImportSettingsDocument::State::Missing:
-    ImGui::TextDisabled("No .meta found");
+    ImGui::TextDisabled("No .cookmeta found");
     return;
   case ImportSettingsDocument::State::Unreadable:
     return;
   case ImportSettingsDocument::State::Malformed:
-    ImGui::TextDisabled("Invalid .meta");
+    ImGui::TextDisabled("Invalid .cookmeta");
     return;
   case ImportSettingsDocument::State::Valid:
     break;
@@ -153,7 +153,7 @@ void draw_import_settings_inspector(const char *assetPath) noexcept {
   }
   if (staged) {
     char metaPath[1024] = {};
-    std::snprintf(metaPath, sizeof(metaPath), "%s.meta", assetPath);
+    std::snprintf(metaPath, sizeof(metaPath), "%s.cookmeta", assetPath);
     staged = core::atomic_write_file(metaPath, updatedDocument, updatedLength);
   }
   // Whether or not the write landed, the next frame re-reads the sidecar
@@ -161,7 +161,7 @@ void draw_import_settings_inspector(const char *assetPath) noexcept {
   invalidate_import_settings_cache();
   if (!staged) {
     core::log_message(core::LogLevel::Error, "editor",
-                      "import settings save failed — .meta preserved");
+                      "import settings save failed — .cookmeta preserved");
   }
 }
 

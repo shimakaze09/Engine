@@ -5,7 +5,7 @@ IMPORT_HASH 2755be6c6a924f10
 PLATFORM Linux
 DEP_HASH 3d414d11b9145bcd bush.bin
 OUTPUT c2b85e210c373767 bush.mesh
-OUTPUT 1bf9639a98d6d605 bush.mesh.meta
+OUTPUT 1bf9639a98d6d605 bush.mesh.cookmeta
 OUTPUT 011114cafea7dae8 bush.mesh.hull
 OUTPUT 9b6ee3f96251957a .thumbnails/bush.mesh.png
 OUTPUT 083546fb98be4440 .thumbnails/bush.mesh.checksum

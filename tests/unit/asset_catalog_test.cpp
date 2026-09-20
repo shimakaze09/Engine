@@ -50,7 +50,7 @@ bool build_tree() noexcept {
       "props/coin.mesh",      // Mesh, cooked form
       "props/coin.gltf",      // Mesh source: skipped
       "props/coin.mesh.hull", // no table suffix: skipped
-      "props/coin.mesh.meta", // no table suffix: skipped
+      "props/coin.mesh.cookmeta", // no table suffix: skipped
       "textures/Grass.PNG",   // Texture, case kept in the path
       "scripts/hop.lua",      // Script
       "anim/walk.anim",       // Animation (derived)
@@ -180,7 +180,7 @@ void test_walk(engine::content::MetadataStore *store) noexcept {
         "each of the three is queryable by its type");
   check((find_by_path(*store, "kit/props/coin.gltf") == nullptr) &&
             (find_by_path(*store, "kit/props/coin.mesh.hull") == nullptr) &&
-            (find_by_path(*store, "kit/props/coin.mesh.meta") ==
+            (find_by_path(*store, "kit/props/coin.mesh.cookmeta") ==
              nullptr) &&
             (find_by_path(*store, "kit/notes.txt") == nullptr),
         "a cooked type's source, sidecars and unclassified files are absent");

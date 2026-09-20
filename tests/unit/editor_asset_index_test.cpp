@@ -106,7 +106,7 @@ bool rebuild_scratch_tree() noexcept {
       !make_scratch_path("thing.mat", materialPath, sizeof(materialPath)) ||
       !make_scratch_path("thing.animctrl", controllerPath,
                          sizeof(controllerPath)) ||
-      !make_scratch_path("thing.mesh.meta", metaPath,
+      !make_scratch_path("thing.mesh.cookmeta", metaPath,
                          sizeof(metaPath)) ||
       !make_scratch_path("sub/nested.mesh", subMeshPath,
                          sizeof(subMeshPath))) {
@@ -151,7 +151,7 @@ const AssetIndexEntry *find_entry_by_leaf(const char *leaf) noexcept {
 
 /// EXPECTATION: rebuild_asset_index classifies every scratch file kind
 /// from its suffix alone — no file is opened to guess a kind — hides the
-/// .meta sidecar from the index, and bumps the generation counter.
+/// .cookmeta sidecar from the index, and bumps the generation counter.
 int check_rebuild_classifies_and_hides_sidecars() {
   if (!rebuild_scratch_tree()) {
     return 1;
@@ -175,7 +175,7 @@ int check_rebuild_classifies_and_hides_sidecars() {
   const AssetIndexEntry *material = find_entry_by_leaf("thing.mat");
   const AssetIndexEntry *controller = find_entry_by_leaf("thing.animctrl");
   const AssetIndexEntry *nested = find_entry_by_leaf("sub/nested.mesh");
-  const AssetIndexEntry *meta = find_entry_by_leaf("thing.mesh.meta");
+  const AssetIndexEntry *meta = find_entry_by_leaf("thing.mesh.cookmeta");
 
   if ((mesh == nullptr) || (mesh->kind != engine::content::AssetTypeTag::Mesh)) {
     return 5;
@@ -200,7 +200,7 @@ int check_rebuild_classifies_and_hides_sidecars() {
     return 11;
   }
   if (meta != nullptr) {
-    return 12; // .meta sidecars must never appear in the index
+    return 12; // .cookmeta sidecars must never appear in the index
   }
   if (mesh->virtualPath[0] == '\0') {
     return 13; // must resolve a VFS virtual path under the mount root

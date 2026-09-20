@@ -5,7 +5,7 @@ IMPORT_HASH 2755be6c6a924f10
 PLATFORM Linux
 DEP_HASH e64f04b45d782ee5 tree_canopy.bin
 OUTPUT 97cb3a8572f3c225 tree_canopy.mesh
-OUTPUT 026ec73ae37e4474 tree_canopy.mesh.meta
+OUTPUT 026ec73ae37e4474 tree_canopy.mesh.cookmeta
 OUTPUT f950c88e9586ca20 tree_canopy.mesh.hull
 OUTPUT 487adea1bb7e9741 .thumbnails/tree_canopy.mesh.png
 OUTPUT 92d653d3711c8d3b .thumbnails/tree_canopy.mesh.checksum

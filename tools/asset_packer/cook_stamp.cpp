@@ -250,7 +250,7 @@ bool read_import_settings_from_meta(const char *outputPath,
 
   char metadataPath[512] = {};
   const int pathResult = std::snprintf(metadataPath, sizeof(metadataPath),
-                                       "%s.meta", outputPath);
+                                       "%s.cookmeta", outputPath);
   if ((pathResult <= 0) ||
       (pathResult >= static_cast<int>(sizeof(metadataPath)))) {
     return false;
@@ -868,7 +868,7 @@ bool sweep_orphan_outputs(const char *outputPath) {
 
   // Everything a mesh cook leaves beside its output: the derived asset
   // types' cooked forms (from the type table) plus the cook's own sidecars.
-  std::vector<const char *> sweptSuffixes = {".hull", ".meta"};
+  std::vector<const char *> sweptSuffixes = {".hull", ".cookmeta"};
   for (std::size_t i = 0U; i < engine::content::kAssetTypeCount; ++i) {
     const engine::content::AssetTypeDescriptor &row =
         engine::content::asset_type_descriptor(
@@ -908,7 +908,7 @@ bool sweep_orphan_outputs(const char *outputPath) {
         entryName.substr(0U, entryName.size() - std::strlen(matchedSuffix));
     std::string owningMesh{};
     if ((std::strcmp(matchedSuffix, ".hull") == 0) ||
-        (std::strcmp(matchedSuffix, ".meta") == 0)) {
+        (std::strcmp(matchedSuffix, ".cookmeta") == 0)) {
       owningMesh = stem;
     } else if (std::strcmp(matchedSuffix, ".skel") == 0) {
       owningMesh = stem + ".mesh";

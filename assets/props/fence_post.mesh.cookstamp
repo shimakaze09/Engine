@@ -5,7 +5,7 @@ IMPORT_HASH 2755be6c6a924f10
 PLATFORM Linux
 DEP_HASH fda598099aa287a5 fence_post.bin
 OUTPUT 916a3b2dfbf6db1f fence_post.mesh
-OUTPUT 69cedde047f3f664 fence_post.mesh.meta
+OUTPUT 69cedde047f3f664 fence_post.mesh.cookmeta
 OUTPUT 4311dcd84acf9c98 fence_post.mesh.hull
 OUTPUT 00b514ff07e65f9b .thumbnails/fence_post.mesh.png
 OUTPUT e8a66fcc857935d9 .thumbnails/fence_post.mesh.checksum

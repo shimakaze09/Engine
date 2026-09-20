@@ -48,7 +48,7 @@ struct AssetIndexEntry final {
 
 /// Rebuilds the process-wide asset index by walking editor_asset_root()
 /// once. Cold path: called on explicit rescan and editor startup, never
-/// per frame. Skips sidecar/internal files (.meta, .cookstamp,
+/// per frame. Skips sidecar/internal files (.cookmeta, .cookstamp,
 /// .checksum) and the .thumbnails cache directories. False when the asset
 /// root does not exist (the index is cleared either way).
 bool rebuild_asset_index() noexcept;

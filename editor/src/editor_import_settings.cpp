@@ -34,13 +34,13 @@ void read_int_field(const core::JsonParser &parser,
   }
 }
 
-/// Reads `<assetPath>.meta` into the cache's document.
+/// Reads `<assetPath>.cookmeta` into the cache's document.
 void read_sidecar(const char *assetPath, ImportSettingsDocument *out) noexcept {
   *out = ImportSettingsDocument{};
   ++g_cache.reads;
 
   char metaPath[1024] = {};
-  std::snprintf(metaPath, sizeof(metaPath), "%s.meta", assetPath);
+  std::snprintf(metaPath, sizeof(metaPath), "%s.cookmeta", assetPath);
   std::FILE *metaFile = nullptr;
 #ifdef _WIN32
   if (fopen_s(&metaFile, metaPath, "rb") != 0) {

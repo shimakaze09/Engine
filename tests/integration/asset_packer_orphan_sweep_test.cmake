@@ -81,7 +81,7 @@ endif()
 if(EXISTS "${WORKDIR}/coin.skel")
     message(FATAL_ERROR "pre-manifest orphan coin.skel survived the sweep")
 endif()
-foreach(kept "coin.mesh" "coin.mesh.meta" "coin.mesh.cookstamp"
+foreach(kept "coin.mesh" "coin.mesh.cookmeta" "coin.mesh.cookstamp"
         "tree.hull" "coin.extra.mesh" "coin.extra.mesh.hull"
         "coin.extra.walk.anim")
     if(NOT EXISTS "${WORKDIR}/${kept}")

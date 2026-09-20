@@ -5,7 +5,7 @@ IMPORT_HASH 2755be6c6a924f10
 PLATFORM Linux
 DEP_HASH 23d3ef47a808ad7d stairs.bin
 OUTPUT 2353abe010d78133 stairs.mesh
-OUTPUT c365610a5e92a889 stairs.mesh.meta
+OUTPUT c365610a5e92a889 stairs.mesh.cookmeta
 OUTPUT fd417a9f0c77934b stairs.mesh.hull
 OUTPUT 4c80228995cfc835 .thumbnails/stairs.mesh.png
 OUTPUT 144b123261322f0e .thumbnails/stairs.mesh.checksum

@@ -1,5 +1,5 @@
 # Verifies the up-to-date check covers every manifest-listed output
-# (issue #55): a deleted .skel or .meta sidecar must force a recook
+# (issue #55): a deleted .skel or .cookmeta sidecar must force a recook
 # that regenerates it instead of being skipped because the .mesh alone
 # still matches the stamp.
 
@@ -47,7 +47,7 @@ if(NOT EXISTS "${WORKDIR}/character.skel")
     message(FATAL_ERROR "recook did not regenerate character.skel")
 endif()
 
-file(REMOVE "${output}.meta")
+file(REMOVE "${output}.cookmeta")
 
 execute_process(
     COMMAND "${ASSET_PACKER}" "${input}" "${output}"
@@ -56,14 +56,14 @@ execute_process(
     ERROR_VARIABLE meta_error
 )
 if(NOT result EQUAL 0)
-    message(FATAL_ERROR "recook after .meta delete failed: ${meta_error}")
+    message(FATAL_ERROR "recook after .cookmeta delete failed: ${meta_error}")
 endif()
 if(meta_output MATCHES "asset up-to-date; skipped recook")
     message(FATAL_ERROR
-        "deleted .meta did not force a recook: ${meta_output}")
+        "deleted .cookmeta did not force a recook: ${meta_output}")
 endif()
-if(NOT EXISTS "${output}.meta")
-    message(FATAL_ERROR "recook did not regenerate the .meta sidecar")
+if(NOT EXISTS "${output}.cookmeta")
+    message(FATAL_ERROR "recook did not regenerate the .cookmeta sidecar")
 endif()
 
 execute_process(

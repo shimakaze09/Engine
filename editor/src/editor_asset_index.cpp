@@ -65,7 +65,7 @@ bool is_hidden_from_index(const std::filesystem::path &path) noexcept {
     return true;
   }
   const std::string filename = path.filename().string();
-  return has_suffix(filename.c_str(), ".meta") ||
+  return has_suffix(filename.c_str(), ".cookmeta") ||
          has_suffix(filename.c_str(), ".cookstamp") ||
          has_suffix(filename.c_str(), ".checksum") ||
          (filename == "generated.manifest");

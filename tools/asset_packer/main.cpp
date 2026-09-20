@@ -493,7 +493,7 @@ int main(int argc, char **argv) {
   if (selectedMesh.primitives_count == 0U) {
     std::fprintf(stderr,
                  "error: selected mesh %zu has no primitives "
-                 "(importSettings.meshIndex in %s.meta)\n",
+                 "(importSettings.meshIndex in %s.cookmeta)\n",
                  static_cast<std::size_t>(meshIdx), outputPath);
     cgltf_free(data);
     return 5;
@@ -602,7 +602,7 @@ int main(int argc, char **argv) {
     std::fprintf(stderr, "error: failed to write metadata sidecar\n");
     return 12;
   }
-  cookedOutputs.push_back(std::string(outputPath) + ".meta");
+  cookedOutputs.push_back(std::string(outputPath) + ".cookmeta");
 
   // Hull-less geometry reports success; only a write failure blocks the
   // stamp below so a broken sidecar can never be certified complete.
@@ -672,7 +672,7 @@ int main(int argc, char **argv) {
 
   std::printf(
       "packed mesh: vertices=%zu indices=%zu uvs=%s skin=%s -> %s "
-      "(+ .meta)\n",
+      "(+ .cookmeta)\n",
       primitiveData.interleavedVertices.size() /
           primitive_stride_floats(primitiveData),
       primitiveData.indices.size(), primitiveData.hasUVs ? "yes" : "no",

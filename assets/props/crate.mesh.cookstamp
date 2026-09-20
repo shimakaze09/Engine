@@ -5,7 +5,7 @@ IMPORT_HASH 2755be6c6a924f10
 PLATFORM Linux
 DEP_HASH f04f63cb60644edd crate.bin
 OUTPUT 65616304a1a9903b crate.mesh
-OUTPUT 3e44856362c5fb3e crate.mesh.meta
+OUTPUT 3e44856362c5fb3e crate.mesh.cookmeta
 OUTPUT cdf060eed910e7b8 crate.mesh.hull
 OUTPUT 9ba4e63d48fcc8a0 .thumbnails/crate.mesh.png
 OUTPUT aa6070537d59ccfe .thumbnails/crate.mesh.checksum

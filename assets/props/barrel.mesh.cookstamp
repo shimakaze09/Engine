@@ -5,7 +5,7 @@ IMPORT_HASH 2755be6c6a924f10
 PLATFORM Linux
 DEP_HASH da1beb72257e6729 barrel.bin
 OUTPUT 760c984d5c2b3b7c barrel.mesh
-OUTPUT 243e40bf685fd02c barrel.mesh.meta
+OUTPUT 243e40bf685fd02c barrel.mesh.cookmeta
 OUTPUT 99d5540acc22b734 barrel.mesh.hull
 OUTPUT a9f05fa1a7b1571c .thumbnails/barrel.mesh.png
 OUTPUT 14166b76057c68c0 .thumbnails/barrel.mesh.checksum

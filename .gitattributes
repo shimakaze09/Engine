@@ -28,7 +28,7 @@
 *.skel binary
 *.cookstamp -text
 *.checksum -text
-*.meta -text
+*.cookmeta -text
 
 # Authored documents whose suffix names the kind, not the format (the
 # asset type table's convention). They hold JSON today, so tell GitHub and
@@ -40,4 +40,4 @@
 *.mat linguist-language=JSON
 *.animctrl linguist-language=JSON
 *.manifest linguist-language=JSON
-*.meta linguist-language=JSON
+*.cookmeta linguist-language=JSON

@@ -91,7 +91,7 @@ int main() {
   ctx.check(ct::classify_asset_path("hub.scene.txt").tag ==
                 ct::AssetTypeTag::Unknown,
             "a kind name mid-path does not classify whatever follows it");
-  ctx.check(ct::classify_asset_path("props/coin.mesh.meta").tag ==
+  ctx.check(ct::classify_asset_path("props/coin.mesh.cookmeta").tag ==
                 ct::AssetTypeTag::Unknown,
             "a sidecar is not the asset it sits beside");
   ctx.check(ct::classify_asset_path("anim/walk.animat").tag ==

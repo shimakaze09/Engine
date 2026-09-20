@@ -54,7 +54,7 @@ int main() {
   const std::string mesh = dir + "/thing.mesh";
   const std::string other = dir + "/other.mesh";
   CHECK(write_file(mesh, "binary"), "asset written");
-  CHECK(write_file(mesh + ".meta",
+  CHECK(write_file(mesh + ".cookmeta",
                    "{\"schema\":1,\"importSettings\":{\"meshIndex\":2,"
                    "\"primitiveIndex\":3,\"scaleFactor\":0.5,\"upAxis\":2,"
                    "\"generateNormals\":true},\"outputs\":{}}"),

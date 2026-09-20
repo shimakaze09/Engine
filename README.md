@@ -286,7 +286,7 @@ Tool behavior:
 
 - Deterministic cook: identical inputs produce byte-identical outputs
 - Imports glTF meshes plus skeletons and animation clips
-- Writes engine mesh binary (`.mesh`) and metadata sidecar (`.meta`)
+- Writes engine mesh binary (`.mesh`) and metadata sidecar (`.cookmeta`)
 - Generates asset thumbnails and maintains the asset dependency graph
 
 ## Engine contributor rules

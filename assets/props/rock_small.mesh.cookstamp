@@ -5,7 +5,7 @@ IMPORT_HASH 2755be6c6a924f10
 PLATFORM Linux
 DEP_HASH c50d904c70adeb79 rock_small.bin
 OUTPUT e28e69ba5f608807 rock_small.mesh
-OUTPUT 0dfe569d306e0e62 rock_small.mesh.meta
+OUTPUT 0dfe569d306e0e62 rock_small.mesh.cookmeta
 OUTPUT a73bf92092ff7fb0 rock_small.mesh.hull
 OUTPUT e7558674e3328e54 .thumbnails/rock_small.mesh.png
 OUTPUT 16bacc558a1e47f5 .thumbnails/rock_small.mesh.checksum

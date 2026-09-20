@@ -5,7 +5,7 @@ IMPORT_HASH 2755be6c6a924f10
 PLATFORM Linux
 DEP_HASH f861730af68cfd55 coin.bin
 OUTPUT 4bf3ac429b207be3 coin.mesh
-OUTPUT b9740235b5571ccd coin.mesh.meta
+OUTPUT b9740235b5571ccd coin.mesh.cookmeta
 OUTPUT a3936b41ab788aaf coin.mesh.hull
 OUTPUT 1ce35b1bfb2d7102 .thumbnails/coin.mesh.png
 OUTPUT d5ad203373972222 .thumbnails/coin.mesh.checksum
