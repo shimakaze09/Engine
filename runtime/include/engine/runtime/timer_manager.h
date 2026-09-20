@@ -47,6 +47,9 @@ public:
   /// Number of currently active timers.
   std::size_t active_count() const noexcept;
 
+  /// Seconds ticked since the last clear; the clock fireAt is measured on.
+  float elapsed_seconds() const noexcept { return m_elapsed; }
+
   // Timers are runtime-only, per-scene state: they are never
   // serialized — a callback has no stable cross-process identity — and
   // scripts re-arm their timers in on_begin_play after a scene loads. The

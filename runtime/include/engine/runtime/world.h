@@ -186,6 +186,16 @@ public:
   /// Number of live alive entity components.
   std::size_t alive_entity_count() const noexcept;
 
+  /// One 64-bit fold over the simulation state in dense storage order:
+  /// every alive entity's index, generation and persistent id; each
+  /// transform's TRS bits and parent; each rigid body's velocities and
+  /// sleep state; the collision pairs of the last step; the active timers;
+  /// and each animation component's state-machine position and times.
+  /// Two worlds with equal hashes hold the same simulation state bit for
+  /// bit, so this is the observable determinism tests and CI compare.
+  /// Reads the committed state; never call it during Simulation.
+  std::uint64_t state_hash() const noexcept;
+
   /// Content epoch: advances every time this world's entire contents are
   /// replaced (scene load commit, reset), so externally retained entity
   /// handles from the previous contents can be rejected even when index

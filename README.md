@@ -227,7 +227,8 @@ runs eleven jobs:
   toolchains (`clang-cl` via the VS ClangCL toolset, `clang++`, AppleClang),
   with headless-safe CTest filtering
 - MSVC (Windows) and GCC (Linux) Release compatibility lanes (build + test)
-- Cross-platform determinism hash comparison
+- Determinism hash comparison across every platform and build
+  configuration, through the production pipeline
 - `cppcheck` static analysis plus the audit gates (source comments, comment
   quality, module dependencies, dependency pins, test timing, error
   handling, asset metadata paths)

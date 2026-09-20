@@ -30,6 +30,7 @@ engine_add_module_library(engine_runtime
     src/world.cpp
     src/world_components.cpp
     src/world_lifecycle.cpp
+    src/world_state_hash.cpp
     PUBLIC_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     PUBLIC_DEPS

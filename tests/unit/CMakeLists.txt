@@ -606,6 +606,14 @@ engine_add_test_executable(engine_unit_world_capacity_diagnostics
     engine_runtime
 )
 
+engine_add_test_executable(engine_unit_world_state_hash
+    SOURCES
+    world_state_hash_test.cpp
+    PRIVATE_DEPS
+    engine_core
+    engine_runtime
+)
+
 engine_add_test_executable(engine_unit_editor_asset_request
     SOURCES
     editor_asset_request_test.cpp

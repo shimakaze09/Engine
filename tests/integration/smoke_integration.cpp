@@ -7,7 +7,6 @@
 
 #include <array>
 #include <cstdint>
-#include <cstring>
 #include <limits>
 #include <memory>
 #include <new>
@@ -376,53 +375,6 @@ bool parallel_update(engine::runtime::World *world, float deltaSeconds,
   return true;
 }
 
-std::uint64_t hash_world_state(engine::runtime::World *world) {
-  if (world == nullptr) {
-    return 0U;
-  }
-
-  const std::size_t transformCount = world->transform_count();
-  const engine::runtime::Entity *entities = nullptr;
-  const engine::runtime::Transform *transforms = nullptr;
-
-  world->begin_render_prep_phase();
-  const bool readable =
-      world->read_transform_range(0U, transformCount, &entities, &transforms);
-  world->end_frame_phase();
-  if (!readable) {
-    return 0U;
-  }
-
-  std::uint64_t hash = 1469598103934665603ULL;
-  auto mix_u32 = [&hash](std::uint32_t value) {
-    hash ^= static_cast<std::uint64_t>(value);
-    hash *= 1099511628211ULL;
-  };
-  auto mix_float = [&mix_u32](float value) {
-    std::uint32_t bits = 0U;
-    std::memcpy(&bits, &value, sizeof(bits));
-    mix_u32(bits);
-  };
-  for (std::size_t i = 0U; i < transformCount; ++i) {
-    const engine::runtime::Transform &transform = transforms[i];
-
-    mix_u32(entities[i].index);
-    mix_u32(entities[i].generation);
-    mix_float(transform.position.x);
-    mix_float(transform.position.y);
-    mix_float(transform.position.z);
-    mix_float(transform.rotation.x);
-    mix_float(transform.rotation.y);
-    mix_float(transform.rotation.z);
-    mix_float(transform.rotation.w);
-    mix_float(transform.scale.x);
-    mix_float(transform.scale.y);
-    mix_float(transform.scale.z);
-  }
-
-  return hash;
-}
-
 } // namespace
 
 /// Runs this executable or test program.
@@ -480,8 +432,8 @@ int main() {
     }
   }
 
-  const std::uint64_t hashA = hash_world_state(&g_worldA);
-  const std::uint64_t hashB = hash_world_state(&g_worldB);
+  const std::uint64_t hashA = g_worldA.state_hash();
+  const std::uint64_t hashB = g_worldB.state_hash();
 
   engine::runtime::Transform firstTransformA{};
   if (!g_worldA.get_transform(firstEntityA, &firstTransformA)) {
