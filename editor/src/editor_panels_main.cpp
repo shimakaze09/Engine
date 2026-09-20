@@ -224,12 +224,23 @@ void draw_main_menu_bar() noexcept {
 
   // Document status: name plus a dirty marker, right-aligned
   // in the menu bar; scene_document_update_window_title mirrors the same
-  // state into the OS title bar once per frame.
+  // state into the OS title bar once per frame. A failed save stands
+  // beside it until the next save succeeds: File > Save As opens no
+  // prompt, so this is where its refusal is seen.
   char status[160] = {};
   std::snprintf(status, sizeof(status), "%s%s", scene_document_display_name(),
                scene_document_is_dirty() ? " *" : "");
+  const char *saveError = scene_document_last_error();
   const float statusWidth = ImGui::CalcTextSize(status).x;
-  ImGui::SameLine(ImGui::GetWindowWidth() - statusWidth - 16.0F);
+  float errorWidth = 0.0F;
+  if (saveError[0] != '\0') {
+    errorWidth = ImGui::CalcTextSize(saveError).x + 24.0F;
+  }
+  ImGui::SameLine(ImGui::GetWindowWidth() - statusWidth - errorWidth - 16.0F);
+  if (saveError[0] != '\0') {
+    ImGui::TextColored(ImVec4(0.9F, 0.35F, 0.35F, 1.0F), "%s", saveError);
+    ImGui::SameLine();
+  }
   ImGui::TextUnformatted(status);
 
   ImGui::EndMainMenuBar();

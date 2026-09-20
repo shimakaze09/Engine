@@ -2,12 +2,14 @@
 // "Untitled Scene" identity, dirty tracking driven by CommandHistory's
 // token (including the undo-to-saved-marker-clears-dirty contract),
 // New/Open/Save/Save As through the production editor-session paths,
-// failed-load state preservation, the asset-root jail check, and the
-// recent-scenes list (MRU order, dedupe, and pruning invalid entries).
+// failed-load state preservation, the asset-root jail check, the Error
+// line and status every failed save leaves, and the recent-scenes list
+// (MRU order, dedupe, and pruning invalid entries).
 
 #include "editor_commands.h"
 #include "editor_scene_document.h"
 #include "editor_session.h"
+#include "engine/core/logging.h"
 #include "engine/core/platform.h"
 #include "engine/editor/editor.h"
 #include "engine/runtime/scene_serializer.h"
@@ -419,6 +421,94 @@ int check_save_as_rejects_destination_outside_jail() {
   return ok ? 0 : 7;
 }
 
+int g_editorErrorLines = 0;
+char g_lastEditorError[512] = {};
+
+void count_editor_errors(engine::core::LogLevel level, const char *channel,
+                         const char *message, void *) noexcept {
+  if ((level != engine::core::LogLevel::Error) || (channel == nullptr) ||
+      (std::strcmp(channel, "editor") != 0) || (message == nullptr)) {
+    return;
+  }
+  ++g_editorErrorLines;
+  std::snprintf(g_lastEditorError, sizeof(g_lastEditorError), "%s", message);
+}
+
+/// EXPECTATION: every refused or failed save logs exactly one Error line
+/// naming the reason and leaves the same reason in the document status,
+/// so a Save As that wrote nothing is never silent: a destination outside
+/// the asset root, a destination whose directory does not exist, and a
+/// Save with no path yet.
+int check_save_failures_log_an_error() {
+  if (!ensure_scratch_root()) {
+    return 1;
+  }
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 2;
+  }
+  editor_set_world(world.get());
+  if (add_named_entity(*world, "Unsaved") == kInvalidEntity) {
+    editor_set_world(nullptr);
+    return 3;
+  }
+  g_editorErrorLines = 0;
+  g_lastEditorError[0] = '\0';
+  if (!engine::core::initialize_logging() ||
+      !engine::core::log_register_sink(&count_editor_errors, nullptr)) {
+    editor_set_world(nullptr);
+    return 4;
+  }
+  const auto finish = [](int result) noexcept {
+    engine::core::log_unregister_sink(&count_editor_errors, nullptr);
+    engine::core::shutdown_logging();
+    editor_set_world(nullptr);
+    return result;
+  };
+
+  char tempDir[480] = {};
+  if (!engine::core::platform_get_temp_dir(tempDir, sizeof(tempDir))) {
+    return finish(5);
+  }
+  char outsidePath[1000] = {};
+  std::snprintf(outsidePath, sizeof(outsidePath), "%s/escaped_save.json",
+               tempDir);
+  if (perform_scene_save_as(outsidePath) || (g_editorErrorLines != 1) ||
+      (std::strstr(g_lastEditorError, "outside the project asset root") ==
+       nullptr) ||
+      (std::strstr(scene_document_last_error(),
+                   "outside the project asset root") == nullptr)) {
+    return finish(6);
+  }
+
+  char missingDirPath[1000] = {};
+  if (!make_scratch_path("no_such_directory/unwritable.json", missingDirPath,
+                         sizeof(missingDirPath))) {
+    return finish(7);
+  }
+  if (perform_scene_save_as(missingDirPath) || (g_editorErrorLines != 2) ||
+      (std::strstr(g_lastEditorError, "failed to write") == nullptr) ||
+      (std::strstr(scene_document_last_error(), "failed to write") ==
+       nullptr)) {
+    return finish(8);
+  }
+
+  if (perform_scene_save() || (g_editorErrorLines != 3) ||
+      (std::strstr(g_lastEditorError, "no path yet") == nullptr)) {
+    return finish(9);
+  }
+
+  // A successful save clears the status.
+  char scenePath[512] = {};
+  if (!make_scratch_path("logged_then_saved.json", scenePath,
+                         sizeof(scenePath)) ||
+      !perform_scene_save_as(scenePath) || (g_editorErrorLines != 3) ||
+      (scene_document_last_error()[0] != '\0')) {
+    return finish(10);
+  }
+  return finish(0);
+}
+
 /// EXPECTATION: recent scenes are MRU-ordered, de-duplicated on re-add,
 /// survive a simulated restart (reload from the persisted file), and
 /// silently drop an entry pointing at a deleted file.
@@ -677,6 +767,8 @@ int main() {
        &check_jail_validates_destination_root},
       {"check_save_as_rejects_destination_outside_jail",
        &check_save_as_rejects_destination_outside_jail},
+      {"check_save_failures_log_an_error",
+       &check_save_failures_log_an_error},
       {"check_recent_scenes_persist_and_prune",
        &check_recent_scenes_persist_and_prune},
       {"check_recent_scenes_unreadable_file_never_overwritten",

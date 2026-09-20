@@ -371,6 +371,18 @@ void set_save_failure_message(EditorSession &session,
                 path);
 }
 
+/// Every failed save is said twice: the status stays in lastSaveError
+/// for the menu bar and the unsaved-changes prompt, and one Error line
+/// goes to the log, so a Save As that wrote nothing is never read as
+/// "saved" from a title that merely kept its dirty marker.
+bool report_save_failure(EditorSession &session) noexcept {
+  char message[sizeof(session.document.lastSaveError) + 32U] = {};
+  std::snprintf(message, sizeof(message), "scene save failed: %s",
+                session.document.lastSaveError);
+  core::log_message(core::LogLevel::Error, "editor", message);
+  return false;
+}
+
 bool perform_scene_save() noexcept {
   EditorSession &session = editor_session();
   // Every refusal states its reason: the quit prompt's Save button reads
@@ -380,7 +392,7 @@ bool perform_scene_save() noexcept {
     std::snprintf(session.document.lastSaveError,
                   sizeof(session.document.lastSaveError),
                   "the scene has no path yet; use Save As");
-    return false;
+    return report_save_failure(session);
   }
   if (!world_is_editable()) {
     std::snprintf(session.document.lastSaveError,
@@ -389,11 +401,11 @@ bool perform_scene_save() noexcept {
                       ? "the Stop restore failed; use Save As to export the "
                         "preserved world, or New/Open to replace it"
                       : "the scene cannot be saved while playing");
-    return false;
+    return report_save_failure(session);
   }
   if (!runtime::save_scene(*session.world, session.document.path)) {
     set_save_failure_message(session, session.document.path);
-    return false;
+    return report_save_failure(session);
   }
   session.document.savedHistoryToken = session.commandHistory.current_token();
   session.document.unrecordedEdit = false;
@@ -439,8 +451,17 @@ bool scene_path_passes_jail(const char *path) noexcept {
 
 bool perform_scene_save_as(const char *path) noexcept {
   EditorSession &session = editor_session();
-  if ((path == nullptr) || (path[0] == '\0') || !world_can_load_scene()) {
-    return false;
+  if ((path == nullptr) || (path[0] == '\0')) {
+    std::snprintf(session.document.lastSaveError,
+                  sizeof(session.document.lastSaveError),
+                  "Save As needs a destination path");
+    return report_save_failure(session);
+  }
+  if (!world_can_load_scene()) {
+    std::snprintf(session.document.lastSaveError,
+                  sizeof(session.document.lastSaveError),
+                  "the scene cannot be exported while playing");
+    return report_save_failure(session);
   }
   if (session.worldRestoreFailed) {
     // The export is the recovery path; the author is told what the
@@ -453,12 +474,12 @@ bool perform_scene_save_as(const char *path) noexcept {
   if (!scene_path_passes_jail(path)) {
     std::snprintf(session.document.lastSaveError,
                   sizeof(session.document.lastSaveError),
-                  "destination is outside the project asset root");
-    return false;
+                  "destination %s is outside the project asset root", path);
+    return report_save_failure(session);
   }
   if (!runtime::save_scene(*session.world, path)) {
     set_save_failure_message(session, path);
-    return false;
+    return report_save_failure(session);
   }
 
   std::snprintf(session.document.path, sizeof(session.document.path), "%s",
