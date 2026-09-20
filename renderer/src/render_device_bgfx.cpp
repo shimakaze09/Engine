@@ -1111,6 +1111,8 @@ DeviceDebugStats bgfx_debug_stats() noexcept {
 /// and timestamp queries do not exist in bgfx's model.
 void fill_bgfx_render_device(RenderDevice *device) noexcept {
   *device = RenderDevice{};
+  std::snprintf(device->name, sizeof(device->name), "bgfx/%s",
+                bgfx::getRendererName(bgfx::getRendererType()));
   device->caps.instancing = true;
   device->caps.uniformBlocks = false;
   device->caps.timestampQueries = false;

@@ -1,4 +1,8 @@
-// Declares gpu profiler types and APIs for the Engine renderer system.
+// Declares the GPU profiler: per-pass GPU timings read back through the
+// render device's timestamp queries. A device without timestamp queries
+// (the bgfx backend exposes none in its model; bgfx keeps per-view GPU
+// timers that this profiler does not read yet) reports the profiler
+// unsupported once at Info, and every per-pass timing then reads 0.
 
 #pragma once
 
