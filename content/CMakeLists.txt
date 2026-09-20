@@ -5,6 +5,7 @@ engine_add_module_library(engine_content
     SOURCES
     src/asset_catalog.cpp
     src/asset_identity.cpp
+    src/asset_sidecar.cpp
     src/asset_request_queue.cpp
     src/asset_stale_check.cpp
     src/asset_streaming.cpp

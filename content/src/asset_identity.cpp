@@ -178,6 +178,24 @@ bool asset_guid_precedes(const AssetGuid &a, const AssetGuid &b) noexcept {
   return a.low < b.low;
 }
 
+std::uint64_t asset_local_id(const char *subName) noexcept {
+  if ((subName == nullptr) || (subName[0] == '\0')) {
+    return 0U;
+  }
+  std::uint64_t hash = core::kFnv1a64Offset;
+  for (const unsigned char *cursor =
+           reinterpret_cast<const unsigned char *>(subName);
+       *cursor != 0U; ++cursor) {
+    hash = core::fnv1a_64_append(hash, static_cast<std::uint8_t>(*cursor));
+  }
+  // Zero is the primary asset's reserved id, so the one name that would
+  // land on it is nudged rather than being made to mean "the main asset".
+  if (hash == 0U) {
+    hash = 1ULL;
+  }
+  return hash;
+}
+
 PathKey make_path_key(const char *virtualPath) noexcept {
   char canonical[core::kMaxVirtualPathLength] = {};
   if (!core::canonical_virtual_path(virtualPath, canonical,

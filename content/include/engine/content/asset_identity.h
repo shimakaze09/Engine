@@ -86,6 +86,40 @@ std::uint64_t asset_guid_hash(const AssetGuid &guid) noexcept;
 /// one GUID: that collision is an error to report, not to resolve.
 bool asset_guid_precedes(const AssetGuid &a, const AssetGuid &b) noexcept;
 
+/// Names one asset among the several a single source file can produce.
+/// One glTF here yields a mesh, a skeleton and several clips, and its
+/// import settings select a mesh and primitive inside it, so a GUID
+/// naming the file cannot on its own name "the walk clip of character".
+/// `guid` identifies the source, `localId` the asset within it — the same
+/// split Unity makes with its {guid, fileID} pairs.
+///
+/// localId 0 is the source's primary asset, which is the only one most
+/// sources have. Sub-assets take asset_local_id, so the value is derived
+/// from the name rather than assigned from a counter: it stays the same
+/// across recooks, across machines, and across a rebuild from scratch.
+struct AssetRef final {
+  AssetGuid guid{};
+  std::uint64_t localId = 0U;
+
+  friend constexpr bool operator==(const AssetRef &, const AssetRef &) = default;
+};
+
+/// The primary asset of `guid`.
+constexpr AssetRef asset_ref_primary(const AssetGuid &guid) noexcept {
+  return AssetRef{guid, 0U};
+}
+
+/// True when the reference names an asset at all.
+constexpr bool asset_ref_is_valid(const AssetRef &ref) noexcept {
+  return asset_guid_is_valid(ref.guid);
+}
+
+/// The stable local id of a sub-asset named `subName` — the part of a
+/// cooked output's name after its source's stem, such as "walk.anim" for
+/// "character.walk.anim" produced from "character.gltf". Returns 0 for a
+/// null or empty name, which is the primary asset's id.
+std::uint64_t asset_local_id(const char *subName) noexcept;
+
 // --- PathKey -----------------------------------------------------------
 
 /// Key derived from an asset's canonical virtual path. Transitional: it
