@@ -333,6 +333,15 @@ std::uint32_t validate_stamp_outputs(const char *cookedPath, char *text) noexcep
     }
     char *line = cursor;
     cursor = (lineEnd != nullptr) ? (lineEnd + 1) : nullptr;
+    // A CR before the line feed belongs to the terminator. The packer
+    // writes LF, but a stamp is a text file a checkout may rewrite —
+    // Git for Windows does by default — and a CR kept as the last byte of
+    // a recorded path names a file that does not exist. What the stamp
+    // certifies is unaffected: every output is still hashed below.
+    const std::size_t lineLength = std::strlen(line);
+    if ((lineLength > 0U) && (line[lineLength - 1U] == '\r')) {
+      line[lineLength - 1U] = '\0';
+    }
     if (std::strlen(line) + 1U > kMaxCookStampLineBytes) {
       // Longer than the writer ever emits: a truncated or hand-edited
       // stamp, never a path to open.

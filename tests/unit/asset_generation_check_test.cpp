@@ -6,8 +6,9 @@
 // verdicts cache per session until the test-only reset, a stamp from
 // another tool version or a newer stamp schema rejects even with intact
 // outputs (#424), a schema-4 manifest resolves relative to its stamp from
-// any working directory and never outside it, and a non-regular file is
-// refused without being opened (#527).
+// any working directory and never outside it, a non-regular file is
+// refused without being opened (#527), and a stamp whose lines end in
+// CR LF certifies exactly what its LF form does.
 
 #include <array>
 #include <cstddef>
@@ -454,6 +455,53 @@ int check_non_regular_files_are_refused_promptly() {
   return result;
 #endif
 }
+
+/// A stamp whose lines end in CR LF certifies exactly what the same stamp
+/// with LF does. Git for Windows converts a committed text file to CR LF on
+/// checkout by default, so every stamp in a cloned project arrives this
+/// way; read as part of the line, the CR became the last byte of each
+/// recorded output path and every certified asset was refused as missing.
+int check_crlf_stamp_certifies_like_lf() {
+  constexpr const char *kMesh = "gen_check_crlf.mesh";
+  remove_with_stamp(kMesh);
+  if (!write_valid_mesh(kMesh)) {
+    return 580;
+  }
+  std::uint64_t meshHash = 0ULL;
+  if (!hash_file(kMesh, &meshHash)) {
+    return 581;
+  }
+  char text[1024] = {};
+  std::snprintf(text, sizeof(text),
+                "SCHEMA %u\r\nTOOL_VERSION %u\r\nSOURCE_HASH 0000000000000001\r\n"
+                "IMPORT_HASH 0000000000000002\r\nPLATFORM TestPlat\r\n"
+                "OUTPUT %016llx %s\r\n",
+                static_cast<unsigned int>(engine::content::kCookStampSchema),
+                static_cast<unsigned int>(engine::content::kCookToolVersion),
+                static_cast<unsigned long long>(meshHash), kMesh);
+  if (!write_stamp_text(kMesh, text)) {
+    return 582;
+  }
+  engine::content::reset_cooked_asset_stale_warnings();
+  if (!engine::content::cooked_asset_generation_ok(kMesh) ||
+      !load_mesh(kMesh)) {
+    return 583; // an intact generation must load whatever ends its lines
+  }
+
+  // The line ending is all that is forgiven: the same stamp over changed
+  // bytes still rejects.
+  engine::content::reset_cooked_asset_stale_warnings();
+  const char junk[] = "not the certified bytes";
+  if (!write_bytes(kMesh, junk, sizeof(junk) - 1U)) {
+    return 584;
+  }
+  if (engine::content::cooked_asset_generation_ok(kMesh) || load_mesh(kMesh)) {
+    return 585;
+  }
+  remove_with_stamp(kMesh);
+  return 0;
+}
+
 } // namespace
 
 // mesh_loader.cpp compiles standalone into this suite (same recipe as
@@ -509,5 +557,10 @@ int main() {
     return result;
   }
   engine::content::reset_cooked_asset_stale_warnings();
-  return check_non_regular_files_are_refused_promptly();
+  result = check_non_regular_files_are_refused_promptly();
+  if (result != 0) {
+    return result;
+  }
+  engine::content::reset_cooked_asset_stale_warnings();
+  return check_crlf_stamp_certifies_like_lf();
 }
