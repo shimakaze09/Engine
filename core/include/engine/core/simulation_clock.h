@@ -15,7 +15,14 @@ inline constexpr double kFixedDeltaSeconds = 1.0 / 60.0;
 /// Where the simulation stands at the moment of publication. A run starts
 /// at the zero clock; every field is derived from the fixed step and the
 /// frame count, never from the wall clock, so a replay that feeds the same
-/// frame deltas reproduces the same clocks.
+/// frame deltas reproduces the same clocks. Published twice per frame:
+/// at frame start with the new frameIndex and the step fields at zero
+/// (the steps are not decided yet), and once the steps are decided with
+/// stepsThisFrame, deltaSeconds, simulationSeconds, tickIndex and
+/// renderAlpha for this frame. A paused or zero-step frame publishes zero
+/// steps and delta with renderAlpha 1; a single-step frame one step; a
+/// catch-up frame N steps with the summed delta and the remainder as
+/// renderAlpha.
 struct SimulationClock final {
   /// Fixed steps simulated since the run (or the current play) began.
   std::uint64_t tickIndex = 0U;

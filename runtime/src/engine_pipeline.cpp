@@ -845,6 +845,10 @@ bool EnginePipeline::Impl::execute_frame() noexcept {
   // reason: begin-play and start callbacks dispatch in stage_play_transitions,
   // ahead of stage_scripting, and engine.frame_count() there must name the
   // frame those callbacks run in — not the previous frame's publication.
+  // This frame's steps are not decided yet, so the step fields say so
+  // instead of repeating the previous frame's.
+  clock.stepsThisFrame = 0U;
+  clock.deltaSeconds = 0.0;
   scripting::set_simulation_clock(clock);
   PROFILE_SCOPE("engine_frame");
   frameStart = Clock::now();
@@ -1043,14 +1047,18 @@ void EnginePipeline::Impl::stage_play_transitions() noexcept {
 void EnginePipeline::Impl::stage_timing() noexcept {
   if (isPlaying && !singleStepping) {
     const auto now = Clock::now();
-    const double frameDelta =
-        (frameDeltaOverrideSeconds >= 0.0)
-            ? frameDeltaOverrideSeconds
-            : std::chrono::duration<double>(now - previousTick).count();
-    // Snapped so vsync-at-fixed-rate frames drain exactly one step
-    // instead of alternating 0/2 on measurement noise (frame_pacing).
-    accumulator +=
-        runtime::snap_delta_to_fixed_step(frameDelta, core::kFixedDeltaSeconds);
+    if (frameDeltaOverrideSeconds >= 0.0) {
+      // An injected delta is exact by definition: it is the input a test
+      // or a replay chose, so it enters the accumulator untouched.
+      accumulator += frameDeltaOverrideSeconds;
+    } else {
+      // A measured delta is snapped so vsync-at-fixed-rate frames drain
+      // exactly one step instead of alternating 0/2 on measurement noise
+      // (frame_pacing).
+      accumulator += runtime::snap_delta_to_fixed_step(
+          std::chrono::duration<double>(now - previousTick).count(),
+          core::kFixedDeltaSeconds);
+    }
     previousTick = now;
   } else {
     previousTick = frameStart;
@@ -1068,6 +1076,9 @@ void EnginePipeline::Impl::stage_timing() noexcept {
   clock.renderAlpha = (isPlaying && !singleStepping)
                           ? accumulator / core::kFixedDeltaSeconds
                           : 1.0;
+  // Every frame publishes its decided steps, a paused or zero-step frame
+  // included, so a script reading the clock always sees this frame's.
+  scripting::set_simulation_clock(clock);
 }
 
 // ---------------------------------------------------------------------------
@@ -1103,7 +1114,6 @@ void EnginePipeline::Impl::stage_scripting() noexcept {
     scripting::dap_poll();
   }
   if (isPlaying && (clock.stepsThisFrame > 0U)) {
-    scripting::set_simulation_clock(clock);
     scripting::tick_timers();
     scripting::tick_coroutines();
     scripting::dispatch_entity_scripts_update(
