@@ -1,7 +1,8 @@
 // Pins that the World names capacity exhaustion instead of failing
 // silently: a component add refused for want of a slot, an entity created
 // past kMaxEntities, and a duplicate persistent id each return their
-// failure value and log exactly one error, so a lost write is never mute.
+// failure value, log exactly one error and leave their category in
+// last_refusal, so a lost write is never mute or anonymous.
 
 #include <cstdio>
 #include <cstring>
@@ -68,6 +69,26 @@ int main() {
                                             rt::SceneCaptureComponent{}),
         "the add one past capacity is refused");
   check(g_fullErrors == 1, "the refused add logs exactly one error");
+  check(world->last_refusal().kind ==
+            engine::core::FailureKind::CapacityExhausted,
+        "the refused add is named as capacity exhaustion");
+  check(!world->add_scene_capture_component(rt::Entity{60000U, 7U},
+                                            rt::SceneCaptureComponent{}) &&
+            (world->last_refusal().kind ==
+             engine::core::FailureKind::NotFound),
+        "an add on a dead entity is named as not found");
+  world->begin_update_phase();
+  check(!world->add_name_component(onePast, rt::NameComponent{}) &&
+            (world->last_refusal().kind ==
+             engine::core::FailureKind::InvariantViolated),
+        "an add outside the Input phase is named as an invariant violation");
+  world->end_frame_phase();
+  rt::NameComponent longName{};
+  std::memset(longName.name, 'n', sizeof(longName.name));
+  check(!world->add_name_component(onePast, longName) &&
+            (world->last_refusal().kind ==
+             engine::core::FailureKind::InvalidArgument),
+        "an identity field that does not fit is named as an invalid argument");
 
   // --- A duplicate persistent id is named ---
   const rt::Entity first = world->create_entity_with_persistent_id(4242U);
@@ -75,6 +96,9 @@ int main() {
   check(world->create_entity_with_persistent_id(4242U) == rt::kInvalidEntity,
         "the duplicate persistent id is refused");
   check(g_duplicateErrors == 1, "the duplicate logs exactly one error");
+  check(world->last_refusal().kind ==
+            engine::core::FailureKind::InvalidArgument,
+        "the duplicate is named as an invalid argument");
 
   // --- Entity capacity is named ---
   std::size_t created = world->alive_entity_count();
@@ -89,6 +113,9 @@ int main() {
   check(world->create_entity() == rt::kInvalidEntity,
         "the create one past capacity is refused");
   check(g_capacityErrors == 1, "the refused create logs exactly one error");
+  check(world->last_refusal().kind ==
+            engine::core::FailureKind::CapacityExhausted,
+        "the refused create is named as capacity exhaustion");
 
   engine::core::log_unregister_sink(&count_world_errors, nullptr);
   engine::core::shutdown_logging();

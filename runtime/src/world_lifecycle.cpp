@@ -51,6 +51,7 @@ World::create_entity_with_persistent_id(PersistentId persistentId) noexcept {
   if (!is_mutation_phase()) {
     core::log_message(core::LogLevel::Error, "world",
                       "create_entity requires Input phase");
+    note_refusal(core::FailureKind::InvariantViolated);
     return kInvalidEntity;
   }
 
@@ -58,6 +59,7 @@ World::create_entity_with_persistent_id(PersistentId persistentId) noexcept {
       (find_persistent_index(persistentId) != 0U)) {
     core::log_message(core::LogLevel::Error, "world",
                       "create_entity refused: persistent id already in use");
+    note_refusal(core::FailureKind::InvalidArgument);
     return kInvalidEntity;
   }
 
@@ -69,6 +71,7 @@ World::create_entity_with_persistent_id(PersistentId persistentId) noexcept {
     if (m_nextEntityIndex > static_cast<std::uint32_t>(kMaxEntities)) {
       core::log_message(core::LogLevel::Error, "world",
                         "create_entity refused: entity capacity is full");
+      note_refusal(core::FailureKind::CapacityExhausted);
       return kInvalidEntity;
     }
 
@@ -103,6 +106,9 @@ World::create_entity_with_persistent_id(PersistentId persistentId) noexcept {
     } while (m_nextPersistentId != startCandidate);
 
     if (persistentId == kInvalidPersistentId) {
+      core::log_message(core::LogLevel::Error, "world",
+                        "create_entity refused: persistent ids exhausted");
+      note_refusal(core::FailureKind::CapacityExhausted, 1U);
       return kInvalidEntity;
     }
   }
@@ -118,6 +124,9 @@ World::create_entity_with_persistent_id(PersistentId persistentId) noexcept {
       m_freeEntityIndices[m_freeEntityCount] = index;
       ++m_freeEntityCount;
     }
+    core::log_message(core::LogLevel::Error, "world",
+                      "create_entity refused: persistent id table is full");
+    note_refusal(core::FailureKind::CapacityExhausted, 2U);
     return kInvalidEntity;
   }
   ++m_aliveEntityCount;

@@ -197,25 +197,26 @@ public:
     return true;
   }
 
-  bool end_graph() noexcept {
+  Status end_graph() noexcept {
     if (!is_initialized()) {
-      return false;
+      return Status::fail(FailureKind::InvariantViolated, 1U);
     }
 
     std::lock_guard<std::mutex> lock(m_graphMutex);
     if (!m_graphActive) {
-      return false;
+      return Status::fail(FailureKind::InvariantViolated, 2U);
     }
 
     if (m_pendingJobs.load(std::memory_order_acquire) != 0U) {
-      return false;
+      return Status::fail(FailureKind::InvariantViolated, 3U);
     }
 
     const bool dispatchFailed =
         m_graphDispatchFailed.load(std::memory_order_acquire);
     reset_graph_state_locked();
     m_graphActive = false;
-    return !dispatchFailed;
+    return dispatchFailed ? Status::fail(FailureKind::InvariantViolated, 4U)
+                          : Status::ok();
   }
 
   JobHandle submit_job(Job job) noexcept {
@@ -804,7 +805,7 @@ bool is_job_system_initialized() noexcept {
 bool begin_frame_graph() noexcept { return g_jobSystem.begin_graph(); }
 
 /// Ends the requested operation or profiling range for frame graph.
-bool end_frame_graph() noexcept { return g_jobSystem.end_graph(); }
+Status end_frame_graph() noexcept { return g_jobSystem.end_graph(); }
 
 /// Submits work to the owning buffer or system.
 JobHandle submit(Job job) noexcept { return g_jobSystem.submit_job(job); }

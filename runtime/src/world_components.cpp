@@ -199,42 +199,34 @@ void install_provenance_hull(physics::PhysicsContext &context, Entity entity,
 
 
 template <typename Set, typename Component>
-bool World::add_component_checked(Set &set, Entity entity,
-                                  const Component &component,
-                                  const char *label) noexcept {
-  if (!is_mutation_phase()) {
-    log_component_error(label, "requires Input phase");
-    return false;
-  }
-
-  if (!is_valid_entity(entity)) {
-    log_component_error(label, "requires a live entity");
-    return false;
+core::Status World::add_component_checked(Set &set, Entity entity,
+                                          const Component &component,
+                                          const char *label) noexcept {
+  if (!check_component_mutation(entity, label)) {
+    return m_lastRefusal;
   }
 
   // The phase and the handle passed, so the set can only refuse for want
   // of a slot; a silent refusal here reads as a lost write upstream.
   if (!set.add(entity, component)) {
     log_component_error(label, "component storage is full");
-    return false;
+    note_refusal(core::FailureKind::CapacityExhausted);
+    return m_lastRefusal;
   }
-  return true;
+  return core::Status::ok();
 }
 
 template <typename Set>
 bool World::remove_component_checked(Set &set, Entity entity,
                                      const char *label) noexcept {
-  if (!is_mutation_phase()) {
-    log_component_error(label, "requires Input phase");
+  if (!check_component_mutation(entity, label)) {
     return false;
   }
-
-  if (!is_valid_entity(entity)) {
-    log_component_error(label, "requires a live entity");
+  if (!set.remove(entity)) {
+    note_refusal(core::FailureKind::NotFound, 1U);
     return false;
   }
-
-  return set.remove(entity);
+  return true;
 }
 
 template <typename Set, typename Component>
@@ -256,11 +248,13 @@ bool World::check_component_mutation(Entity entity,
                                      const char *label) noexcept {
   if (!is_mutation_phase()) {
     log_component_error(label, "requires Input phase");
+    note_refusal(core::FailureKind::InvariantViolated);
     return false;
   }
 
   if (!is_valid_entity(entity)) {
     log_component_error(label, "requires a live entity");
+    note_refusal(core::FailureKind::NotFound);
     return false;
   }
 
@@ -302,12 +296,14 @@ bool World::add_transform(Entity entity, const Transform &transform) noexcept {
 
   const bool hadTransform = m_transforms.contains(entity);
   if (!m_transforms.add(entity, transform)) {
+    note_refusal(core::FailureKind::CapacityExhausted);
     return false;
   }
 
   const WorldTransform world = world_transform_from_local(transform);
   m_transformNodes[entity.index].cacheValid = false;
   if (!m_worldTransforms.add(entity, world)) {
+    note_refusal(core::FailureKind::CapacityExhausted);
     // Keep the two sets consistent: a fresh insert that cannot get its world
     // transform must not leave a local transform behind.
     if (!hadTransform) {
@@ -413,6 +409,7 @@ bool World::add_rigid_body(Entity entity, const RigidBody &rigidBody) noexcept {
         derived_inverse_inertia(entity, sanitized.inverseMass);
   }
   if (!m_rigidBodies.add(entity, sanitized)) {
+    note_refusal(core::FailureKind::CapacityExhausted);
     return false;
   }
   // New owner velocities must reach the next step's CCD snapshot.
@@ -628,8 +625,8 @@ bool World::add_mesh_component(Entity entity,
                   entity.index);
     core::log_message(core::LogLevel::Warning, "world", message);
   }
-  return add_component_checked(m_meshComponents, entity, sanitized,
-                               "add_mesh_component");
+  return static_cast<bool>(add_component_checked(m_meshComponents, entity, sanitized,
+                               "add_mesh_component"));
 }
 
 bool World::remove_mesh_component(Entity entity) noexcept {
@@ -674,7 +671,11 @@ bool World::add_foliage_patch_component(
     }
   }
 
-  return m_foliagePatches.add(entity, safe);
+  if (!m_foliagePatches.add(entity, safe)) {
+    note_refusal(core::FailureKind::CapacityExhausted);
+    return false;
+  }
+  return true;
 }
 
 bool World::remove_foliage_patch_component(Entity entity) noexcept {
@@ -735,6 +736,7 @@ bool World::add_name_component(Entity entity,
                                 component.name)) {
     log_identity_overflow("add_name_component", "name",
                           NameComponent::kMaxNameLength);
+    note_refusal(core::FailureKind::InvalidArgument);
     return false;
   }
 
@@ -743,6 +745,9 @@ bool World::add_name_component(Entity entity,
   const bool hadName = m_nameComponents.get(entity, &previous);
 
   const bool ok = m_nameComponents.add(entity, safe);
+  if (!ok) {
+    note_refusal(core::FailureKind::CapacityExhausted);
+  }
   if (ok) {
     if (hadName && (previous.name[0] != '\0') &&
         (std::strcmp(previous.name, safe.name) != 0)) {
@@ -819,8 +824,8 @@ Entity World::find_entity_by_name(const char *name) const noexcept {
 
 bool World::add_light_component(Entity entity,
                                 const LightComponent &component) noexcept {
-  return add_component_checked(m_lightComponents, entity, component,
-                               "add_light_component");
+  return static_cast<bool>(add_component_checked(m_lightComponents, entity, component,
+                               "add_light_component"));
 }
 
 bool World::remove_light_component(Entity entity) noexcept {
@@ -862,8 +867,8 @@ Entity World::light_entity_at(std::size_t index) const noexcept {
 
 bool World::add_point_light_component(
     Entity entity, const PointLightComponent &component) noexcept {
-  return add_component_checked(m_pointLights, entity, component,
-                               "add_point_light_component");
+  return static_cast<bool>(add_component_checked(m_pointLights, entity, component,
+                               "add_point_light_component"));
 }
 
 bool World::remove_point_light_component(Entity entity) noexcept {
@@ -902,8 +907,8 @@ Entity World::point_light_entity_at(std::size_t index) const noexcept {
 
 bool World::add_spot_light_component(
     Entity entity, const SpotLightComponent &component) noexcept {
-  return add_component_checked(m_spotLights, entity, component,
-                               "add_spot_light_component");
+  return static_cast<bool>(add_component_checked(m_spotLights, entity, component,
+                               "add_spot_light_component"));
 }
 
 bool World::remove_spot_light_component(Entity entity) noexcept {
@@ -942,8 +947,8 @@ Entity World::spot_light_entity_at(std::size_t index) const noexcept {
 
 bool World::add_reflection_probe_component(
     Entity entity, const ReflectionProbeComponent &component) noexcept {
-  return add_component_checked(m_reflectionProbes, entity, component,
-                               "add_reflection_probe_component");
+  return static_cast<bool>(add_component_checked(m_reflectionProbes, entity, component,
+                               "add_reflection_probe_component"));
 }
 
 bool World::remove_reflection_probe_component(Entity entity) noexcept {
@@ -999,8 +1004,8 @@ World::get_reflection_probe_component_ptr(Entity entity) const noexcept {
 
 bool World::add_scene_capture_component(
     Entity entity, const SceneCaptureComponent &component) noexcept {
-  return add_component_checked(m_sceneCaptures, entity, component,
-                               "add_scene_capture_component");
+  return static_cast<bool>(add_component_checked(m_sceneCaptures, entity, component,
+                               "add_scene_capture_component"));
 }
 
 bool World::remove_scene_capture_component(Entity entity) noexcept {
@@ -1080,10 +1085,15 @@ bool World::add_script_component(Entity entity,
                                 component.scriptPath)) {
     log_identity_overflow("add_script_component", "scriptPath",
                           ScriptComponent::kMaxPathLength);
+    note_refusal(core::FailureKind::InvalidArgument);
     return false;
   }
 
-  return m_scriptComponents.add(entity, safe);
+  if (!m_scriptComponents.add(entity, safe)) {
+    note_refusal(core::FailureKind::CapacityExhausted);
+    return false;
+  }
+  return true;
 }
 
 bool World::remove_script_component(Entity entity) noexcept {
@@ -1119,10 +1129,15 @@ bool World::add_animation_component(
                                 component.controllerPath)) {
     log_identity_overflow("add_animation_component", "controllerPath",
                           AnimationComponent::kMaxPathLength);
+    note_refusal(core::FailureKind::InvalidArgument);
     return false;
   }
 
-  return m_animationComponents.add(entity, safe);
+  if (!m_animationComponents.add(entity, safe)) {
+    note_refusal(core::FailureKind::CapacityExhausted);
+    return false;
+  }
+  return true;
 }
 
 bool World::remove_animation_component(Entity entity) noexcept {
@@ -1148,8 +1163,8 @@ World::get_animation_component_ptr(Entity entity) const noexcept {
 
 bool World::add_spring_arm(Entity entity,
                            const SpringArmComponent &component) noexcept {
-  return add_component_checked(m_springArms, entity, component,
-                               "add_spring_arm");
+  return static_cast<bool>(add_component_checked(m_springArms, entity, component,
+                               "add_spring_arm"));
 }
 
 bool World::remove_spring_arm(Entity entity) noexcept {
@@ -1193,8 +1208,8 @@ World::get_spring_arm_ptr(Entity entity) const noexcept {
 
 bool World::add_camera_component(Entity entity,
                                  const CameraComponent &component) noexcept {
-  return add_component_checked(m_cameraComponents, entity, component,
-                               "add_camera_component");
+  return static_cast<bool>(add_component_checked(m_cameraComponents, entity, component,
+                               "add_camera_component"));
 }
 
 bool World::remove_camera_component(Entity entity) noexcept {

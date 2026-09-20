@@ -5,6 +5,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "engine/core/status.h"
+
 namespace engine::core {
 
 /// Initializes the owning system for vfs.
@@ -32,36 +34,29 @@ bool vfs_file_exists(const char *virtualPath) noexcept;
 /// can refuse an oversized input before any of it is read.
 bool vfs_file_size(const char *virtualPath, std::uint64_t *outSize) noexcept;
 
-// Read entire file into a heap-allocated buffer. Caller must call vfs_free().
-bool vfs_read_binary(const char *virtualPath,
-                     void **outData,
-                     std::size_t *outSize) noexcept;
-
-/// Outcome of a bounded read: the one status a caller acts on differently
-/// from a plain failure is TooLarge, which names a file that exists and
-/// reads fine but exceeds the caller's budget.
-enum class VfsReadStatus : std::uint8_t {
-  Ok,
-  Unresolved, // the path does not resolve or the file cannot be opened
-  TooLarge,   // the file exceeds maxBytes; nothing was allocated
-  IoError,    // the size query, allocation, or read failed
-};
+/// Reads the whole file into a heap-allocated buffer. Caller must call
+/// vfs_free() on success. Same categories as vfs_read_binary_bounded.
+Status vfs_read_binary(const char *virtualPath, void **outData,
+                       std::size_t *outSize) noexcept;
 
 /// Reads the whole file into a heap-allocated buffer only when it holds
 /// at most maxBytes. The size is taken from the open handle the read then
 /// consumes, so the bound applies to the bytes actually allocated and
 /// read, not to metadata that could change before the read opens the
-/// file. On TooLarge, *outSize carries the measured size (for diagnostics)
-/// and *outData stays null. Caller must call vfs_free() on success.
-VfsReadStatus vfs_read_binary_bounded(const char *virtualPath,
-                                      std::uint64_t maxBytes, void **outData,
-                                      std::size_t *outSize) noexcept;
+/// file. Categories: InvalidArgument for a null out pointer; NotFound when
+/// the path does not resolve or the file cannot be opened;
+/// CapacityExhausted when the file exceeds maxBytes, with *outSize
+/// carrying the measured size and *outData null; IoFailed when the size
+/// query, the allocation or the read fails. Caller must call vfs_free()
+/// on success.
+Status vfs_read_binary_bounded(const char *virtualPath, std::uint64_t maxBytes,
+                               void **outData, std::size_t *outSize) noexcept;
 
-// Read entire text file into a null-terminated heap buffer. Caller must call
-// vfs_free().
-bool vfs_read_text(const char *virtualPath,
-                   char **outText,
-                   std::size_t *outSize) noexcept;
+/// Reads the whole text file into a null-terminated heap buffer. Caller
+/// must call vfs_free() on success. Same categories as
+/// vfs_read_binary_bounded.
+Status vfs_read_text(const char *virtualPath, char **outText,
+                     std::size_t *outSize) noexcept;
 
 /// Atomically replaces the resolved path via a staged sibling write;
 /// false on any IO failure (incl. close-flush), previous file kept.

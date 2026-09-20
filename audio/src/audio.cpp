@@ -506,10 +506,11 @@ SoundHandle load_sound(const char *virtualPath) noexcept {
   const std::uint64_t fileLimit =
       budget_bytes(kMaxSoundFileBytesCvar, kDefaultMaxSoundFileBytes);
   switch (core::vfs_read_binary_bounded(virtualPath, fileLimit, &fileData,
-                                        &fileSize)) {
-  case core::VfsReadStatus::Ok:
+                                        &fileSize)
+              .kind) {
+  case core::FailureKind::Ok:
     break;
-  case core::VfsReadStatus::TooLarge: {
+  case core::FailureKind::CapacityExhausted: {
     char reason[192] = {};
     std::snprintf(reason, sizeof(reason),
                   "file of %llu bytes exceeds %s (%llu)",
@@ -519,10 +520,10 @@ SoundHandle load_sound(const char *virtualPath) noexcept {
     log_path_error(virtualPath, reason);
     return kInvalidSound;
   }
-  case core::VfsReadStatus::Unresolved:
+  case core::FailureKind::NotFound:
     log_path_error(virtualPath, "sound file not found or unreadable");
     return kInvalidSound;
-  case core::VfsReadStatus::IoError:
+  case core::FailureKind::IoFailed:
   default:
     log_path_error(virtualPath, "failed to read sound file via VFS");
     return kInvalidSound;

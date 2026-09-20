@@ -33,6 +33,14 @@ int main() {
   engine::core::Job job{};
   job.function = &noop_job;
 
+  // Ending a graph that was never begun is a contract violation the
+  // status names, not a silent false.
+  if (engine::core::end_frame_graph().kind !=
+      engine::core::FailureKind::InvariantViolated) {
+    std::fprintf(stderr, "FAIL: ending without a graph is not named\n");
+    return finish(7);
+  }
+
   if (!engine::core::begin_frame_graph()) {
     return finish(2);
   }

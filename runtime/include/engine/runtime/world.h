@@ -12,6 +12,7 @@
 #include "engine/core/entity.h"
 #include "engine/core/fixed_hash_table.h"
 #include "engine/core/sparse_set.h"
+#include "engine/core/status.h"
 #include "engine/math/component_types.h"
 #include "engine/math/mat4.h"
 #include "engine/math/quat.h"
@@ -185,6 +186,15 @@ public:
   PersistentId persistent_id(Entity entity) const noexcept;
   /// Number of live alive entity components.
   std::size_t alive_entity_count() const noexcept;
+
+  /// Why the last refused entity creation, component add or remove was
+  /// refused, so a caller that got `false` or an invalid entity can tell:
+  /// InvariantViolated outside the Input phase, NotFound for a dead
+  /// entity, InvalidArgument for a persistent id already in use or an
+  /// identity field that does not fit, CapacityExhausted when the entity
+  /// table or the component's storage is full. Successes leave it as it
+  /// was; it starts as Ok.
+  core::Status last_refusal() const noexcept { return m_lastRefusal; }
 
   /// One 64-bit fold over the simulation state in dense storage order:
   /// every alive entity's index, generation and persistent id; each
@@ -971,11 +981,17 @@ private:
   // wrappers. Defined in world.cpp; every instantiation lives there.
   /// Phase + liveness guard used by component mutators with extra logic.
   bool check_component_mutation(Entity entity, const char *label) noexcept;
-  /// Phase + liveness guarded SparseSet insert; logs failures under `label`.
+  /// Records why a mutation was refused (see last_refusal).
+  void note_refusal(core::FailureKind kind,
+                    std::uint32_t detail = 0U) noexcept {
+    m_lastRefusal = core::Status::fail(kind, detail);
+  }
+  /// Phase + liveness guarded SparseSet insert; logs failures under `label`
+  /// and records a refusal in last_refusal.
   template <typename Set, typename Component>
-  bool add_component_checked(Set &set, Entity entity,
-                             const Component &component,
-                             const char *label) noexcept;
+  core::Status add_component_checked(Set &set, Entity entity,
+                                     const Component &component,
+                                     const char *label) noexcept;
   /// Phase + liveness guarded SparseSet remove; logs failures under `label`.
   template <typename Set>
   bool remove_component_checked(Set &set, Entity entity,
@@ -1087,6 +1103,7 @@ private:
   }
 
   WorldPhase m_phase = WorldPhase::Input;
+  core::Status m_lastRefusal{};
   std::uint32_t m_nextEntityIndex = 1U;
   PersistentId m_nextPersistentId = 1U;
   std::uint32_t m_contentEpoch = 0U;
