@@ -14,6 +14,7 @@
 #include "engine/runtime/reflect_types.h"
 #include "primitive_hull_build.h"
 #include "world_internal.h"
+#include "engine/core/diagnostic.h"
 
 #include <array>
 #include <cassert>
@@ -174,7 +175,18 @@ bool sanitize_mesh_component_ingress(MeshComponent &component) noexcept {
 // failure the component stays as authored and physics treats the
 // payload-less hull as the axis-aligned box of its half extents
 // — loudly, never silently.
+/// Logs a world warning about one entity, with the entity's persistent id
+/// carried in the record so the console can find it after a reload.
+void log_entity_warning(PersistentId persistentId,
+                        const char *message) noexcept {
+  core::Diagnostic record =
+      core::make_diagnostic(core::LogLevel::Warning, "world", message);
+  record.entityPersistentId = persistentId;
+  core::log_diagnostic(record);
+}
+
 void install_provenance_hull(physics::PhysicsContext &context, Entity entity,
+                             PersistentId persistentId,
                              const Collider &collider) noexcept {
   if ((collider.shape != ColliderShape::ConvexHull) ||
       (collider.hullSource == HullSource::None)) {
@@ -191,7 +203,7 @@ void install_provenance_hull(physics::PhysicsContext &context, Entity entity,
                   "extents",
                   entity.index,
                   static_cast<unsigned>(collider.hullSource));
-    core::log_message(core::LogLevel::Warning, "world", message);
+    log_entity_warning(persistentId, message);
   }
 }
 
@@ -400,7 +412,7 @@ bool World::add_rigid_body(Entity entity, const RigidBody &rigidBody) noexcept {
                   "add_rigid_body clamped out-of-range velocity or inverse "
                   "inertia for entity %u",
                   entity.index);
-    core::log_message(core::LogLevel::Warning, "world", message);
+    log_entity_warning(m_entityPersistentIds[entity.index], message);
   }
   // A body that has not authored its tensor takes the one its colliders
   // describe; colliders installed later derive it through add_collider.
@@ -549,7 +561,7 @@ bool World::add_collider(Entity entity, const Collider &collider) noexcept {
                   "add_collider clamped restitution or dynamic friction for "
                   "entity %u",
                   entity.index);
-    core::log_message(core::LogLevel::Warning, "world", message);
+    log_entity_warning(m_entityPersistentIds[entity.index], message);
   }
   // The owner's tensor before this collider joins decides whether it was
   // derived (and follows the new geometry) or authored (and stays).
@@ -569,7 +581,8 @@ bool World::add_collider(Entity entity, const Collider &collider) noexcept {
   // shape can never leave a stale hull or heightfield resident.
   physics::prune_incompatible_shape_payloads(m_physicsContext, entity,
                                              sanitized.shape);
-  install_provenance_hull(m_physicsContext, entity, sanitized);
+  install_provenance_hull(m_physicsContext, entity,
+                          m_entityPersistentIds[entity.index], sanitized);
   if (owner != kInvalidEntity) {
     rederive_inverse_inertia(owner, ownerInertiaBefore);
   }
@@ -623,7 +636,7 @@ bool World::add_mesh_component(Entity entity,
     std::snprintf(message, sizeof(message),
                   "add_mesh_component clamped material factors for entity %u",
                   entity.index);
-    core::log_message(core::LogLevel::Warning, "world", message);
+    log_entity_warning(m_entityPersistentIds[entity.index], message);
   }
   return static_cast<bool>(add_component_checked(m_meshComponents, entity, sanitized,
                                "add_mesh_component"));

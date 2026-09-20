@@ -183,7 +183,7 @@ public:
   /// Finds the matching object or resource for entity by persistent id.
   Entity find_entity_by_persistent_id(PersistentId persistentId) const noexcept;
   /// Serialization-stable id of a live entity; kInvalidPersistentId when dead.
-  PersistentId persistent_id(Entity entity) const noexcept;
+  PersistentId persistent_id(Entity entity) const noexcept override;
   /// Number of live alive entity components.
   std::size_t alive_entity_count() const noexcept;
 

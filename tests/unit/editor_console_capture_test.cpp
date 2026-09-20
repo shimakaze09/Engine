@@ -1,13 +1,16 @@
 // Verifies the editor Console's log capture, filtering, duplicate collapse,
 // bounded overflow, and source/entity navigation metadata (issue #155).
-// Exercises the production path: real core::log_message calls through the
-// registered sink, not a copied capture model.
+// Exercises the production path: real core::log_message and
+// core::log_diagnostic calls through the registered sink, not a copied
+// capture model; navigation comes from the record's fields, never from
+// the message text.
 
 #include "editor_console_capture.h"
 #include "editor_session.h"
 #include "engine/editor/editor.h"
 #include "engine/renderer/shader_system.h"
 #include "engine/renderer/texture_loader.h"
+#include "engine/core/diagnostic.h"
 #include "engine/core/logging.h"
 #include "engine/runtime/world.h"
 #include "../test_harness.h"
@@ -158,41 +161,63 @@ void check_filtering() noexcept {
        "entry after begin_session included");
 }
 
-/// EXPECTATION: a Lua-shaped error message ("<path>:<line>: ...", the exact
-/// text binding_util's log_lua_error produces) yields ScriptLocation
-/// navigation metadata with the right path and 1-based line.
+/// EXPECTATION: a diagnostic record carrying a path and a line (what
+/// binding_util's log_lua_error emits) yields ScriptLocation navigation
+/// metadata with that path and 1-based line; a plain log line with the
+/// same text yields none, because the console no longer parses text.
 void check_script_location_navigation() noexcept {
   console_capture_clear();
 
+  constexpr const char *kText =
+      "lua error (on_tick): assets/scripts/island_player.lua:42: "
+      "attempt to index nil value (local 'x')\nstack traceback:\n\t"
+      "[C]: in ?";
+  engine::core::Diagnostic record =
+      engine::core::make_diagnostic(LogLevel::Error, "scripting", kText);
+  engine::core::diagnostic_set_path(&record,
+                                    "assets/scripts/island_player.lua");
+  record.line = 42;
+  engine::core::log_diagnostic(record);
+  // A different text, or the capture would collapse it into the entry above.
   log_message(LogLevel::Error, "scripting",
-             "lua error (on_tick): assets/scripts/island_player.lua:42: "
-             "attempt to index nil value (local 'x')\nstack traceback:\n\t"
-             "[C]: in ?");
+              "lua error (on_tick): assets/scripts/island_player.lua:42: "
+              "attempt to index nil value (local 'y')");
 
   ConsoleEntry entry{};
   check(console_capture_get_entry(0U, &entry), "get lua error entry");
   check(entry.referenceKind == ConsoleReferenceKind::ScriptLocation,
-       "lua error parsed as a script location");
+       "a record with a path and line is a script location");
   check(std::strcmp(entry.referencePath,
                     "assets/scripts/island_player.lua") == 0,
-       "script path parsed correctly");
-  check(entry.referenceLine == 42, "script line parsed correctly");
+       "the script path is the record's");
+  check(entry.referenceLine == 42, "the script line is the record's");
+  check(std::strcmp(entry.message, kText) == 0,
+       "the message text is unchanged by the record");
+
+  check(console_capture_get_entry(1U, &entry), "get plain text entry");
+  check(entry.referenceKind == ConsoleReferenceKind::None,
+       "the same text without a record carries no navigation");
 }
 
-/// EXPECTATION: a "<path>: <reason>" diagnostic (the animation loader's
-/// fail() shape) yields AssetPath navigation metadata.
+/// EXPECTATION: the "<path>: <reason>" line every asset loader emits
+/// through log_path_diagnostic yields AssetPath navigation metadata from
+/// the record's path.
 void check_asset_path_navigation() noexcept {
   console_capture_clear();
 
-  log_message(LogLevel::Error, "animation",
-             "assets/character.anim: file too short");
+  engine::core::log_path_diagnostic(LogLevel::Error, "animation",
+                                    "assets/character.anim",
+                                    "file too short");
 
   ConsoleEntry entry{};
   check(console_capture_get_entry(0U, &entry), "get asset diagnostic entry");
   check(entry.referenceKind == ConsoleReferenceKind::AssetPath,
-       "asset diagnostic parsed as an asset path");
+       "a record with a path alone is an asset path");
   check(std::strcmp(entry.referencePath, "assets/character.anim") == 0,
-       "asset path parsed correctly, trailing colon trimmed");
+       "the asset path is the record's");
+  check(std::strcmp(entry.message, "assets/character.anim: file too short") ==
+            0,
+       "the text line keeps the loader's shape");
 }
 
 /// EXPECTATION (#217): the production texture and shader load failures
@@ -230,10 +255,12 @@ void check_production_diagnostics_navigate() noexcept {
        "shader diagnostic names the failed path");
 }
 
-/// EXPECTATION: an "entity <n>" diagnostic yields an entity-index hint that
+/// EXPECTATION: a diagnostic record naming an entity by persistent id
 /// resolves to the real, currently alive entity through the production
-/// World API — and refuses to resolve once that entity is destroyed.
-void check_entity_hint_navigation() noexcept {
+/// World API, refuses once that entity is destroyed, and resolves again
+/// to the entity a reload re-creates under the same persistent id even
+/// though its index changed; a plain "entity <n>" text carries nothing.
+void check_entity_navigation() noexcept {
   using engine::runtime::Entity;
   using engine::runtime::kInvalidEntity;
   using engine::runtime::World;
@@ -248,30 +275,54 @@ void check_entity_hint_navigation() noexcept {
 
   const Entity spawned = world->create_scene_object();
   check(spawned != kInvalidEntity, "entity spawned");
+  const engine::runtime::PersistentId persistentId =
+      world->persistent_id(spawned);
 
   char message[64] = {};
   std::snprintf(message, sizeof(message), "Spawned entity %u",
                spawned.index);
-  log_message(LogLevel::Info, "cheat", message);
+  engine::core::Diagnostic record =
+      engine::core::make_diagnostic(LogLevel::Info, "cheat", message);
+  record.entityPersistentId = persistentId;
+  engine::core::log_diagnostic(record);
+  char plainMessage[64] = {};
+  std::snprintf(plainMessage, sizeof(plainMessage), "Spawned entity %u again",
+               spawned.index);
+  log_message(LogLevel::Info, "cheat", plainMessage);
 
   ConsoleEntry entry{};
   check(console_capture_get_entry(0U, &entry), "get spawn entry");
-  check(entry.entityIndexHint == spawned.index,
-       "entity index hint parsed correctly");
+  check(entry.entityPersistentId == persistentId,
+       "the entry carries the record's persistent id");
+  ConsoleEntry plain{};
+  check(console_capture_get_entry(1U, &plain), "get plain spawn entry");
+  check(plain.entityPersistentId == engine::runtime::kInvalidPersistentId,
+       "the same text without a record names no entity");
 
   const Entity resolved =
-      console_capture_resolve_entity_hint(entry.entityIndexHint, world.get());
-  check(resolved == spawned, "hint resolves to the live entity");
+      console_capture_resolve_entity(entry.entityPersistentId, world.get());
+  check(resolved == spawned, "the id resolves to the live entity");
 
-  check(console_capture_resolve_entity_hint(entry.entityIndexHint,
-                                            nullptr) == kInvalidEntity,
+  check(console_capture_resolve_entity(entry.entityPersistentId, nullptr) ==
+            kInvalidEntity,
        "resolution refuses a null world (unsafe)");
 
   world->destroy_entity(spawned);
-  const Entity afterDestroy =
-      console_capture_resolve_entity_hint(entry.entityIndexHint, world.get());
-  check(afterDestroy == kInvalidEntity,
-       "resolution refuses a destroyed entity's stale index");
+  check(console_capture_resolve_entity(entry.entityPersistentId,
+                                       world.get()) == kInvalidEntity,
+       "resolution refuses a destroyed entity");
+
+  // A scene reload: a decoy takes the old index first, then the authored
+  // entity comes back under its persistent id at a different index.
+  const Entity decoy = world->create_scene_object();
+  const Entity reloaded =
+      world->create_scene_object_with_persistent_id(persistentId);
+  check((decoy != kInvalidEntity) && (reloaded != kInvalidEntity) &&
+            (reloaded.index != spawned.index),
+       "the reload placed the entity at a new index");
+  check(console_capture_resolve_entity(entry.entityPersistentId,
+                                       world.get()) == reloaded,
+       "the entry resolves to the reloaded entity, not the decoy");
 }
 
 /// EXPECTATION: unseen badge counters increment on Warning/Error ingest,
@@ -421,7 +472,7 @@ int main() {
   check_script_location_navigation();
   check_asset_path_navigation();
   check_production_diagnostics_navigate();
-  check_entity_hint_navigation();
+  check_entity_navigation();
   check_unseen_badge_counters();
   check_frame_index_context();
   check_concurrent_ingest_is_safe();

@@ -68,9 +68,9 @@ void navigate_to_entry(const ConsoleEntry &entry) noexcept {
     select_asset_in_browser(entry.referencePath);
     return;
   }
-  if (entry.entityIndexHint != kConsoleNoEntityHint) {
-    const runtime::Entity resolved = console_capture_resolve_entity_hint(
-        entry.entityIndexHint, editor_session().world);
+  if (entry.entityPersistentId != runtime::kInvalidPersistentId) {
+    const runtime::Entity resolved = console_capture_resolve_entity(
+        entry.entityPersistentId, editor_session().world);
     if (resolved != runtime::kInvalidEntity) {
       select_entity(resolved, false);
     }
@@ -117,7 +117,7 @@ void draw_entry_row(const ConsoleEntry &entry, std::size_t rowIndex) noexcept {
 
   const bool hasNavigation =
       (entry.referenceKind != ConsoleReferenceKind::None) ||
-      (entry.entityIndexHint != kConsoleNoEntityHint);
+      (entry.entityPersistentId != runtime::kInvalidPersistentId);
   if (ImGui::Selectable(label, false,
                         ImGuiSelectableFlags_AllowDoubleClick)) {
     if (hasNavigation && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
@@ -153,9 +153,9 @@ void draw_entry_row(const ConsoleEntry &entry, std::size_t rowIndex) noexcept {
         ImGui::SetClipboardText(entry.referencePath);
       }
     }
-    if (entry.entityIndexHint != kConsoleNoEntityHint) {
-      const runtime::Entity resolved = console_capture_resolve_entity_hint(
-          entry.entityIndexHint, editor_session().world);
+    if (entry.entityPersistentId != runtime::kInvalidPersistentId) {
+      const runtime::Entity resolved = console_capture_resolve_entity(
+          entry.entityPersistentId, editor_session().world);
       const bool canSelect = (resolved != runtime::kInvalidEntity);
       if (!canSelect) {
         ImGui::BeginDisabled();

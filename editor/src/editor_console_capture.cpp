@@ -1,8 +1,10 @@
 // Implements the editor Console's bounded log capture, filtering, duplicate
-// collapse, and best-effort source/entity navigation metadata.
+// collapse, and the navigation metadata each entry takes from its
+// diagnostic record.
 
 #include "editor_console_capture.h"
 
+#include "engine/core/diagnostic.h"
 #include "engine/core/fixed_ring.h"
 
 #include <array>
@@ -68,182 +70,6 @@ void copy_truncated(char *dst, std::size_t dstCapacity, const char *src,
   }
 }
 
-/// True when `c` may appear inside a relative VFS-jailed asset/script path.
-bool is_path_char(char c) noexcept {
-  return (std::isalnum(static_cast<unsigned char>(c)) != 0) || (c == '/') ||
-        (c == '_') || (c == '-') || (c == '.');
-}
-
-/// Scans `message` for the standard Lua chunk-error shape "<path>:<line>:"
-/// (produced by Lua itself for every loaded chunk, surfaced verbatim by
-/// binding_util's log_lua_error). Returns true and fills path/line on a
-/// match; a miss leaves outPath empty and outLine at -1.
-bool parse_script_location(const char *message, char *outPath,
-                           std::size_t outPathCapacity,
-                           int *outLine) noexcept {
-  outPath[0] = '\0';
-  *outLine = -1;
-  if (message == nullptr) {
-    return false;
-  }
-
-  constexpr char kMarker[] = ".lua:";
-  const char *hit = std::strstr(message, kMarker);
-  if (hit == nullptr) {
-    return false;
-  }
-  const char *extEnd = hit + 4; // position of ':' right after ".lua"
-
-  const char *start = hit;
-  while ((start > message) && is_path_char(*(start - 1))) {
-    --start;
-  }
-  if (start == extEnd) {
-    return false; // no path characters before the extension
-  }
-
-  const char *digits = extEnd + 1;
-  if ((*digits < '0') || (*digits > '9')) {
-    return false;
-  }
-  long line = 0;
-  const char *cursor = digits;
-  while ((*cursor >= '0') && (*cursor <= '9')) {
-    line = (line * 10) + (*cursor - '0');
-    ++cursor;
-    if (line > 1000000000L) {
-      break; // guard against a corrupt/adversarial digit run
-    }
-  }
-
-  const std::size_t pathLen = static_cast<std::size_t>(extEnd - start);
-  const std::size_t copyLen =
-      (pathLen < outPathCapacity) ? pathLen : (outPathCapacity - 1U);
-  std::memcpy(outPath, start, copyLen);
-  outPath[copyLen] = '\0';
-  *outLine = static_cast<int>(line);
-  return true;
-}
-
-/// Best-effort scan for a whitespace-delimited token that looks like a
-/// relative asset path (contains '/' and a short trailing extension).
-/// Heuristic over unstructured message text — see the class comment on
-/// ConsoleReferenceKind for why this can miss legitimate references.
-bool parse_asset_path(const char *message, char *outPath,
-                      std::size_t outPathCapacity) noexcept {
-  outPath[0] = '\0';
-  if (message == nullptr) {
-    return false;
-  }
-
-  const char *cursor = message;
-  while (*cursor != '\0') {
-    while ((*cursor != '\0') &&
-          ((std::isspace(static_cast<unsigned char>(*cursor)) != 0) ||
-           (*cursor == '(') || (*cursor == ')') || (*cursor == '\'') ||
-           (*cursor == '"'))) {
-      ++cursor;
-    }
-    const char *tokenStart = cursor;
-    while (is_path_char(*cursor)) {
-      ++cursor;
-    }
-    const char *tokenEnd = cursor;
-    while ((*cursor != '\0') &&
-          (std::isspace(static_cast<unsigned char>(*cursor)) == 0) &&
-          (*cursor != '(') && (*cursor != ')')) {
-      ++cursor; // skip trailing punctuation (e.g. a sentence's ':' or ',')
-    }
-
-    while ((tokenEnd > tokenStart) &&
-          ((*(tokenEnd - 1) == '.') || (*(tokenEnd - 1) == ':'))) {
-      --tokenEnd; // trim trailing punctuation glued onto the path token
-    }
-
-    const std::size_t tokenLen = static_cast<std::size_t>(tokenEnd - tokenStart);
-    if (tokenLen >= 3U) {
-      bool hasSlash = false;
-      bool hasDotWithExt = false;
-      for (std::size_t i = 0U; i < tokenLen; ++i) {
-        if (tokenStart[i] == '/') {
-          hasSlash = true;
-        }
-        if ((tokenStart[i] == '.') && (tokenLen - i >= 2U) &&
-            (tokenLen - i <= 6U)) {
-          hasDotWithExt = true;
-        }
-      }
-      if (hasSlash && hasDotWithExt) {
-        const std::size_t copyLen =
-            (tokenLen < outPathCapacity) ? tokenLen : (outPathCapacity - 1U);
-        std::memcpy(outPath, tokenStart, copyLen);
-        outPath[copyLen] = '\0';
-        return true;
-      }
-    }
-
-    if (*cursor == '\0') {
-      break;
-    }
-  }
-  return false;
-}
-
-/// Best-effort scan for "entity <digits>" (case-insensitive), the shape
-/// used by cheat/spawn diagnostics today. A hint only — resolved against
-/// the live World at click time, never trusted as an alive guarantee.
-std::uint32_t parse_entity_index_hint(const char *message) noexcept {
-  if (message == nullptr) {
-    return kConsoleNoEntityHint;
-  }
-  constexpr char kWord[] = "entity";
-  constexpr std::size_t kWordLen = sizeof(kWord) - 1U;
-  const std::size_t len = std::strlen(message);
-  for (std::size_t i = 0U; i + kWordLen <= len; ++i) {
-    bool matches = true;
-    for (std::size_t j = 0U; j < kWordLen; ++j) {
-      if (std::tolower(static_cast<unsigned char>(message[i + j])) !=
-          kWord[j]) {
-        matches = false;
-        break;
-      }
-    }
-    if (!matches) {
-      continue;
-    }
-    std::size_t cursor = i + kWordLen;
-    while ((cursor < len) &&
-          (std::isspace(static_cast<unsigned char>(message[cursor])) != 0)) {
-      ++cursor;
-    }
-    // Skip an optional connector such as "entity index=7" or "entity #7".
-    while ((cursor < len) &&
-          ((message[cursor] == '=') || (message[cursor] == '#') ||
-           (message[cursor] == ':'))) {
-      ++cursor;
-    }
-    while ((cursor < len) &&
-          (std::isspace(static_cast<unsigned char>(message[cursor])) != 0)) {
-      ++cursor;
-    }
-    if ((cursor >= len) || (message[cursor] < '0') ||
-       (message[cursor] > '9')) {
-      continue;
-    }
-    std::uint64_t value = 0U;
-    while ((cursor < len) && (message[cursor] >= '0') &&
-          (message[cursor] <= '9')) {
-      value = (value * 10U) + static_cast<std::uint64_t>(message[cursor] - '0');
-      ++cursor;
-      if (value >= kConsoleNoEntityHint) {
-        return kConsoleNoEntityHint; // overflow guard; not a plausible index
-      }
-    }
-    return static_cast<std::uint32_t>(value);
-  }
-  return kConsoleNoEntityHint;
-}
-
 /// True when `channel` is the scripting channel; the name is the enum's,
 /// so a call site cannot spell its way out of the Script filter.
 ConsoleSourceCategory classify_category(const char *channel) noexcept {
@@ -283,19 +109,19 @@ void ingest_locked(ConsoleEntry candidate) noexcept {
   }
 }
 
-/// The registered core logging sink. All
-/// parsing work happens before the lock is taken so the critical section
-/// stays a fixed-size copy/compare, matching the lock-light contract.
-void console_capture_sink(core::LogLevel level, const char *channel,
-                          const char *message, void * /*userData*/) noexcept {
+/// The registered core diagnostic sink. The entry is built before the
+/// lock is taken so the critical section stays a fixed-size copy/compare,
+/// matching the lock-light contract.
+void console_capture_sink(const core::Diagnostic &record,
+                          void * /*userData*/) noexcept {
   ConsoleEntry candidate{};
-  candidate.level = level;
-  candidate.category = classify_category(channel);
-  copy_truncated(candidate.channel, sizeof(candidate.channel), channel,
+  candidate.level = record.level;
+  candidate.category = classify_category(record.channel);
+  copy_truncated(candidate.channel, sizeof(candidate.channel), record.channel,
                 nullptr);
-  copy_truncated(candidate.message, sizeof(candidate.message), message,
+  copy_truncated(candidate.message, sizeof(candidate.message), record.message,
                 &candidate.truncated);
-  candidate.frameIndex = core::log_current_frame_index();
+  candidate.frameIndex = record.frame;
   const Clock::time_point captureStart{Clock::duration(
       g_captureStartTicks.load(std::memory_order_relaxed))};
   candidate.captureTimeMs = static_cast<std::uint64_t>(
@@ -303,21 +129,16 @@ void console_capture_sink(core::LogLevel level, const char *channel,
           Clock::now() - captureStart)
           .count());
 
-  char scriptPath[kConsolePathCapacity] = {};
-  int scriptLine = -1;
-  if (parse_script_location(candidate.message, scriptPath,
-                            sizeof(scriptPath), &scriptLine)) {
-    candidate.referenceKind = ConsoleReferenceKind::ScriptLocation;
-    std::memcpy(candidate.referencePath, scriptPath, sizeof(scriptPath));
-    candidate.referenceLine = scriptLine;
-  } else {
-    char assetPath[kConsolePathCapacity] = {};
-    if (parse_asset_path(candidate.message, assetPath, sizeof(assetPath))) {
-      candidate.referenceKind = ConsoleReferenceKind::AssetPath;
-      std::memcpy(candidate.referencePath, assetPath, sizeof(assetPath));
-    }
+  static_assert(sizeof(candidate.referencePath) >= sizeof(record.path),
+                "an entry holds a whole record path");
+  if (record.path[0] != '\0') {
+    std::memcpy(candidate.referencePath, record.path, sizeof(record.path));
+    candidate.referenceLine = record.line;
+    candidate.referenceKind = (record.line >= 0)
+                                  ? ConsoleReferenceKind::ScriptLocation
+                                  : ConsoleReferenceKind::AssetPath;
   }
-  candidate.entityIndexHint = parse_entity_index_hint(candidate.message);
+  candidate.entityPersistentId = record.entityPersistentId;
 
   std::lock_guard<std::mutex> lock(g_captureMutex);
   ingest_locked(candidate);
@@ -353,13 +174,13 @@ void console_capture_initialize() noexcept {
 
   if (!g_sinkRegistered) {
     g_sinkRegistered =
-        core::log_register_sink(&console_capture_sink, nullptr);
+        core::log_register_diagnostic_sink(&console_capture_sink, nullptr);
   }
 }
 
 void console_capture_shutdown() noexcept {
   if (g_sinkRegistered) {
-    core::log_unregister_sink(&console_capture_sink, nullptr);
+    core::log_unregister_diagnostic_sink(&console_capture_sink, nullptr);
     g_sinkRegistered = false;
   }
   std::lock_guard<std::mutex> lock(g_captureMutex);
@@ -498,14 +319,16 @@ bool console_filter_matches(const ConsoleFilter &filter,
 }
 
 runtime::Entity
-console_capture_resolve_entity_hint(std::uint32_t entityIndexHint,
-                                    const runtime::World *world) noexcept {
-  if ((world == nullptr) || (entityIndexHint == kConsoleNoEntityHint)) {
+console_capture_resolve_entity(runtime::PersistentId entityPersistentId,
+                               const runtime::World *world) noexcept {
+  if ((world == nullptr) ||
+      (entityPersistentId == runtime::kInvalidPersistentId)) {
     return runtime::kInvalidEntity;
   }
-  // find_entity_by_index already refuses a dead/unknown index (world_
-  // lifecycle.cpp), so a returned handle is safe to select immediately.
-  return world->find_entity_by_index(entityIndexHint);
+  // The persistent id names the authored entity, so a reload that
+  // re-creates it under a new index still resolves, and a destroyed one
+  // does not.
+  return world->find_entity_by_persistent_id(entityPersistentId);
 }
 
 } // namespace engine::editor

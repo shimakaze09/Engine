@@ -4,12 +4,15 @@
 // failure value, log exactly one error and leave their category in
 // last_refusal, so a lost write is never mute or anonymous.
 
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <memory>
 #include <new>
 
+#include "engine/core/diagnostic.h"
 #include "engine/core/logging.h"
+#include "engine/math/vec3.h"
 #include "engine/runtime/world.h"
 
 namespace {
@@ -20,6 +23,16 @@ int g_failures = 0;
 int g_fullErrors = 0;
 int g_capacityErrors = 0;
 int g_duplicateErrors = 0;
+std::uint32_t g_lastWorldEntityId = 0U;
+
+/// Remembers which entity the last world warning record was about.
+void note_world_record(const engine::core::Diagnostic &record,
+                       void *) noexcept {
+  if ((record.level == engine::core::LogLevel::Warning) &&
+      (std::strcmp(record.channel, "world") == 0)) {
+    g_lastWorldEntityId = record.entityPersistentId;
+  }
+}
 
 void check(bool condition, const char *name) noexcept {
   if (!condition) {
@@ -51,6 +64,9 @@ int main() {
   check(engine::core::initialize_logging(), "initialize logging");
   check(engine::core::log_register_sink(&count_world_errors, nullptr),
         "register sink");
+  check(engine::core::log_register_diagnostic_sink(&note_world_record,
+                                                   nullptr),
+        "register record sink");
   std::unique_ptr<rt::World> world(new (std::nothrow) rt::World());
   if (world == nullptr) {
     return 1;
@@ -90,6 +106,16 @@ int main() {
              engine::core::FailureKind::InvalidArgument),
         "an identity field that does not fit is named as an invalid argument");
 
+  // --- A warning about one entity names it by persistent id ---
+  {
+    const rt::Entity fast = world->create_scene_object();
+    rt::RigidBody body{};
+    body.velocity = engine::math::Vec3(1.0e9F, 0.0F, 0.0F);
+    check(world->add_rigid_body(fast, body), "a clamped body still adds");
+    check(g_lastWorldEntityId == world->persistent_id(fast),
+          "the clamp warning's record names the entity by persistent id");
+  }
+
   // --- A duplicate persistent id is named ---
   const rt::Entity first = world->create_entity_with_persistent_id(4242U);
   check(first != rt::kInvalidEntity, "first persistent id is taken");
@@ -117,6 +143,7 @@ int main() {
             engine::core::FailureKind::CapacityExhausted,
         "the refused create is named as capacity exhaustion");
 
+  engine::core::log_unregister_diagnostic_sink(&note_world_record, nullptr);
   engine::core::log_unregister_sink(&count_world_errors, nullptr);
   engine::core::shutdown_logging();
   if (g_failures != 0) {

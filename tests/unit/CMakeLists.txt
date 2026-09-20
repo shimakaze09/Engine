@@ -405,6 +405,14 @@ engine_add_test_executable(engine_unit_scripting
     engine_runtime
 )
 
+engine_add_test_executable(engine_unit_lua_error_diagnostic
+    SOURCES
+    lua_error_diagnostic_test.cpp
+    PRIVATE_DEPS
+    engine_scripting
+    engine_core
+)
+
 engine_add_test_executable(engine_unit_collision_event_identity
     SOURCES
     collision_event_identity_test.cpp

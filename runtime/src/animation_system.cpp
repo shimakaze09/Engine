@@ -18,6 +18,7 @@
 #include "engine/core/vfs.h"
 #include "engine/renderer/command_buffer.h"
 #include "engine/runtime/world.h"
+#include "engine/core/diagnostic.h"
 
 namespace engine::runtime {
 
@@ -41,12 +42,10 @@ constexpr std::size_t kMaxPendingAnimParams = 64U;
 PendingAnimParam g_pendingParams[kMaxPendingAnimParams]{};
 std::size_t g_pendingParamCount = 0U;
 
-/// Logs one controller load failure with its path.
+/// Logs one controller load failure with its path carried in the record.
 void log_controller_error(const char *path, const char *reason) noexcept {
-  char message[224] = {};
-  std::snprintf(message, sizeof(message), "%s: %s",
-                (path != nullptr) ? path : "(null)", reason);
-  core::log_message(core::LogLevel::Error, "animation", message);
+  core::log_path_diagnostic(core::LogLevel::Error, core::LogChannel::Animation,
+                            path, reason);
 }
 
 /// Index of the named clip in the controller; kInvalidAnimSlot when absent.

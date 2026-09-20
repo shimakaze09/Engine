@@ -15,6 +15,7 @@
 #include "engine/math/vec3.h"
 #include "engine/physics/physics.h"
 #include "engine/physics/physics_context.h"
+#include "engine/core/diagnostic.h"
 
 namespace engine::physics {
 
@@ -170,7 +171,11 @@ void report_blocked_bodies(PhysicsWorldView &world,
                     entityIndex, static_cast<double>(commandedSpeed),
                     static_cast<double>(achievedPerSecond), threshold);
     }
-    core::log_message(core::LogLevel::Warning, "physics", message);
+    core::Diagnostic record =
+        core::make_diagnostic(core::LogLevel::Warning, "physics", message);
+    record.kind = core::FailureKind::Degraded;
+    record.entityPersistentId = world.persistent_id(entity);
+    core::log_diagnostic(record);
   }
 }
 

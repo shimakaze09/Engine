@@ -34,6 +34,7 @@
 #define MINIAUDIO_IMPLEMENTATION
 #define MA_NO_GENERATION
 #include "miniaudio.h"
+#include "engine/core/diagnostic.h"
 
 #if defined(__clang__)
 #pragma clang diagnostic pop
@@ -118,9 +119,8 @@ void register_budget_cvars() noexcept {
 /// Logs one audio diagnostic in the `<path>: <reason>` shape the editor
 /// console parses for its navigation actions.
 void log_path_error(const char *virtualPath, const char *reason) noexcept {
-  char message[1280] = {};
-  std::snprintf(message, sizeof(message), "%s: %s", virtualPath, reason);
-  core::log_message(core::LogLevel::Error, "audio", message);
+  core::log_path_diagnostic(core::LogLevel::Error, core::LogChannel::Audio,
+                            virtualPath, reason);
 }
 
 /// The byte budget a cvar currently holds; a value below zero bounds
