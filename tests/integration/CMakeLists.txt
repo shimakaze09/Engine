@@ -696,6 +696,31 @@ if(ENGINE_BUILD_TOOLS)
         PROPERTIES LABELS integration
     )
 
+    # A driver that reaches the Assets panel's real save entry point, so
+    # the editor-to-cook test edits a setting the way an author does
+    # rather than by writing the sidecar bytes itself.
+    add_executable(editor_import_settings_writer
+        editor_import_settings_writer.cpp)
+    target_include_directories(editor_import_settings_writer PRIVATE
+        ${CMAKE_SOURCE_DIR}/editor/src)
+    target_link_libraries(editor_import_settings_writer PRIVATE
+        engine_editor engine_content engine_core)
+
+    add_test(
+        NAME engine_integration_editor_settings_reach_cook
+        COMMAND ${CMAKE_COMMAND}
+            "-DASSET_PACKER=$<TARGET_FILE:asset_packer>"
+            "-DSETTINGS_WRITER=$<TARGET_FILE:editor_import_settings_writer>"
+            "-DSRC_GLTF=${CMAKE_SOURCE_DIR}/assets/props/coin.gltf"
+            "-DSRC_BIN=${CMAKE_SOURCE_DIR}/assets/props/coin.bin"
+            "-DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/editor_settings_work"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/editor_settings_reach_cook_test.cmake
+    )
+    set_tests_properties(
+        engine_integration_editor_settings_reach_cook
+        PROPERTIES LABELS integration
+    )
+
     add_test(
         NAME engine_integration_asset_packer_thumbnail_settings
         COMMAND ${CMAKE_COMMAND}

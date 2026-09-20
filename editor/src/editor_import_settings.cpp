@@ -1,113 +1,106 @@
-// Implements the import-settings sidecar cache declared in
-// editor_import_settings.h.
+// Implements the Assets panel's import-settings cache over the authored
+// sidecar reader and writer in content, so the panel and the cook agree
+// on where settings live by construction rather than by convention.
 
 #include "editor_import_settings.h"
 
-#include <cstdio>
 #include <cstring>
 
-#include "engine/core/json.h"
+#include "engine/content/asset_sidecar.h"
 
 namespace engine::editor {
 
 namespace {
 
-/// The one cached sidecar: the asset it belongs to and the parsed text.
+/// The last asset read, its document, and the read counter the tests
+/// use to pin one read per selection rather than one per frame.
 struct ImportSettingsCache final {
-  bool valid = false;
   char assetPath[1024] = {};
   ImportSettingsDocument document{};
-  std::uint64_t reads = 0U;
+  bool valid = false;
+  std::uint64_t reads = 0ULL;
 };
 
 ImportSettingsCache g_cache{};
 
-/// Reads one optional integer field of the importSettings object.
-void read_int_field(const core::JsonParser &parser,
-                    const core::JsonValue &object, const char *name,
-                    int *out) noexcept {
-  core::JsonValue value{};
-  std::uint32_t parsed = 0U;
-  if (parser.get_object_field(object, name, &value) &&
-      parser.as_uint(value, &parsed)) {
-    *out = static_cast<int>(parsed);
+/// Maps a sidecar read outcome onto the panel's document state.
+ImportSettingsDocument::State
+state_for(content::SidecarReadResult result) noexcept {
+  switch (result) {
+  case content::SidecarReadResult::Ok:
+    return ImportSettingsDocument::State::Valid;
+  case content::SidecarReadResult::Absent:
+    return ImportSettingsDocument::State::Missing;
+  case content::SidecarReadResult::Unreadable:
+    return ImportSettingsDocument::State::Unreadable;
+  case content::SidecarReadResult::Malformed:
+    return ImportSettingsDocument::State::Malformed;
   }
+  return ImportSettingsDocument::State::Malformed;
 }
 
-/// Reads `<assetPath>.cookmeta` into the cache's document.
-void read_sidecar(const char *assetPath, ImportSettingsDocument *out) noexcept {
-  *out = ImportSettingsDocument{};
+void read_into_cache(const char *assetPath) noexcept {
   ++g_cache.reads;
+  g_cache.document = ImportSettingsDocument{};
 
-  char metaPath[1024] = {};
-  std::snprintf(metaPath, sizeof(metaPath), "%s.cookmeta", assetPath);
-  std::FILE *metaFile = nullptr;
-#ifdef _WIN32
-  if (fopen_s(&metaFile, metaPath, "rb") != 0) {
-    metaFile = nullptr;
-  }
-#else
-  metaFile = std::fopen(metaPath, "rb");
-#endif
-  if (metaFile == nullptr) {
-    out->state = ImportSettingsDocument::State::Missing;
+  content::AssetSidecar sidecar{};
+  const content::SidecarReadResult result =
+      content::read_asset_sidecar(assetPath, &sidecar);
+  g_cache.document.state = state_for(result);
+  if (result != content::SidecarReadResult::Ok) {
     return;
   }
-  std::fseek(metaFile, 0, SEEK_END);
-  const long fileSize = std::ftell(metaFile);
-  std::fseek(metaFile, 0, SEEK_SET);
-  if ((fileSize <= 0) ||
-      (static_cast<unsigned long>(fileSize) >
-       ImportSettingsDocument::kMaxDocumentBytes)) {
-    std::fclose(metaFile);
-    out->state = ImportSettingsDocument::State::Unreadable;
-    return;
-  }
-  const std::size_t readCount = std::fread(
-      out->document, 1U, static_cast<std::size_t>(fileSize), metaFile);
-  std::fclose(metaFile);
-  out->document[readCount] = '\0';
-  out->documentLength = readCount;
-
-  core::JsonParser parser{};
-  if (!parser.parse(out->document, readCount) || (parser.root() == nullptr) ||
-      (parser.root()->type != core::JsonValue::Type::Object)) {
-    out->state = ImportSettingsDocument::State::Malformed;
-    return;
-  }
-  out->state = ImportSettingsDocument::State::Valid;
-  core::JsonValue importObj{};
-  if (!parser.get_object_field(*parser.root(), "importSettings", &importObj) ||
-      (importObj.type != core::JsonValue::Type::Object)) {
-    return; // defaults stand for a sidecar without import settings
-  }
-  read_int_field(parser, importObj, "meshIndex", &out->meshIndex);
-  read_int_field(parser, importObj, "primitiveIndex", &out->primitiveIndex);
-  core::JsonValue value{};
-  if (parser.get_object_field(importObj, "scaleFactor", &value)) {
-    parser.as_float(value, &out->scaleFactor);
-  }
-  read_int_field(parser, importObj, "upAxis", &out->upAxis);
-  if (parser.get_object_field(importObj, "generateNormals", &value)) {
-    parser.as_bool(value, &out->generateNormals);
-  }
+  g_cache.document.hasSettings = sidecar.hasMeshImport;
+  g_cache.document.settings = sidecar.meshImport;
 }
 
 } // namespace
 
 const ImportSettingsDocument *
 import_settings_for_asset(const char *assetPath) noexcept {
-  if ((assetPath == nullptr) || (assetPath[0] == '\0') ||
-      (std::strlen(assetPath) >= sizeof(g_cache.assetPath))) {
+  if ((assetPath == nullptr) || (assetPath[0] == '\0')) {
     return nullptr;
   }
+  const std::size_t length = std::strlen(assetPath);
+  if (length >= sizeof(g_cache.assetPath)) {
+    return nullptr;
+  }
+
   if (g_cache.valid && (std::strcmp(g_cache.assetPath, assetPath) == 0)) {
     return &g_cache.document;
   }
-  std::snprintf(g_cache.assetPath, sizeof(g_cache.assetPath), "%s", assetPath);
-  read_sidecar(assetPath, &g_cache.document);
+
+  std::memcpy(g_cache.assetPath, assetPath, length + 1U);
+  read_into_cache(assetPath);
   g_cache.valid = true;
   return &g_cache.document;
+}
+
+bool save_import_settings(
+    const char *assetPath,
+    const content::MeshImportSettings &settings) noexcept {
+  if ((assetPath == nullptr) || (assetPath[0] == '\0')) {
+    return false;
+  }
+
+  // Read first, so the write carries the asset's existing identity
+  // forward. A sidecar that is absent or will not read is left alone:
+  // minting one here would give the asset an identity nobody imported,
+  // and overwriting one would replace an identity references point at.
+  content::AssetSidecar sidecar{};
+  if (content::read_asset_sidecar(assetPath, &sidecar) !=
+      content::SidecarReadResult::Ok) {
+    invalidate_import_settings_cache();
+    return false;
+  }
+  sidecar.hasMeshImport = true;
+  sidecar.meshImport = settings;
+
+  const bool written = content::write_asset_sidecar(assetPath, sidecar);
+  // Whether or not the write landed, the next frame re-reads the sidecar
+  // as it is on disk.
+  invalidate_import_settings_cache();
+  return written;
 }
 
 void invalidate_import_settings_cache() noexcept { g_cache.valid = false; }
