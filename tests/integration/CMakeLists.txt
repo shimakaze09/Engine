@@ -224,6 +224,16 @@ engine_add_test_executable(engine_integration_acceptance_sequence
     integration
 )
 
+engine_add_test_executable(engine_integration_coin_run_acceptance
+    SOURCES
+    coin_run_acceptance_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_scripting
+    LABELS
+    integration
+)
+
 engine_add_test_executable(engine_integration_player_mode
     SOURCES
     player_mode_test.cpp
