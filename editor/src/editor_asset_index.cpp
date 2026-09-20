@@ -11,6 +11,8 @@
 #include <filesystem>
 #include <string>
 
+#include "engine/core/file_read.h"
+#include "engine/core/json.h"
 #include "engine/core/logging.h"
 #include "engine/engine.h"
 
@@ -31,6 +33,14 @@ bool g_built = false;
 // asset_index_child_folders means this root, since entry.folder stores the
 // real root path (not an empty sentinel) for top-level files.
 std::string g_rootOsPath{};
+
+// Accumulated across one recursive walk so the rebuild reports legacy
+// names once for the whole tree: a project authored before the rename
+// would otherwise log a warning per file, and the author's next step is
+// the same either way. Reset by rebuild_asset_index.
+std::size_t g_legacyCount = 0U;
+std::string g_legacyExample{};
+const char *g_legacyExampleSuffix = nullptr;
 
 /// Resolves the "" == index root sentinel to the real root OS path.
 const char *resolve_folder(const char *requested) noexcept {
@@ -55,6 +65,54 @@ void lower_ascii(char *text) noexcept {
     *c = static_cast<char>(
         std::tolower(static_cast<unsigned char>(*c)));
   }
+}
+
+/// Distinguishes scene/material/animation-controller documents that were
+/// authored as a bare ".json", by their top-level keys (the schemas
+/// documented on save_scene, load_material_asset and the controller
+/// loader). This is the compatibility revision's migration path for a
+/// project written before a suffix named the kind, and the only place the
+/// index opens a file. It goes away with the legacy suffix table; writers
+/// never emit a bare ".json" asset document.
+content::AssetTypeTag classify_legacy_json_by_content(const char *osPath) noexcept {
+  char buffer[16U * 1024U] = {};
+  std::size_t size = 0U;
+  // Every non-Ok outcome — absent, unreadable, or larger than the sniff
+  // buffer — classifies as Other: the index never writes the file back, so
+  // a conservative kind is the whole cost of a fault here.
+  if (core::read_whole_file(osPath, buffer, sizeof(buffer), &size) !=
+      core::FileReadResult::Ok) {
+    return content::AssetTypeTag::Unknown;
+  }
+  core::JsonParser parser{};
+  if (!parser.parse(buffer, size)) {
+    return content::AssetTypeTag::Unknown;
+  }
+  const core::JsonValue *root = parser.root();
+  if ((root == nullptr) || (root->type != core::JsonValue::Type::Object)) {
+    return content::AssetTypeTag::Unknown;
+  }
+  if (parser.get_object_field(*root, "entities") != nullptr) {
+    return content::AssetTypeTag::Scene;
+  }
+  if ((parser.get_object_field(*root, "states") != nullptr) &&
+      (parser.get_object_field(*root, "clips") != nullptr)) {
+    return content::AssetTypeTag::AnimationController;
+  }
+  if ((parser.get_object_field(*root, "albedo") != nullptr) ||
+      (parser.get_object_field(*root, "roughness") != nullptr) ||
+      (parser.get_object_field(*root, "metallic") != nullptr) ||
+      (parser.get_object_field(*root, "parent") != nullptr)) {
+    return content::AssetTypeTag::Material;
+  }
+  return content::AssetTypeTag::Unknown;
+}
+
+/// The suffix a kind's documents are written with today, for the rename a
+/// legacy-named file needs; nullptr when the kind has no authored form.
+const char *recommended_suffix(content::AssetTypeTag tag) noexcept {
+  const content::AssetTypeDescriptor &row = content::asset_type_descriptor(tag);
+  return (row.sourceSuffixCount > 0U) ? row.sourceSuffixes[0] : nullptr;
 }
 
 /// True for sidecar/internal files the browser hides from authors
@@ -168,7 +226,15 @@ void walk_directory(const std::filesystem::path &dir,
       core::log_message(core::LogLevel::Warning, "editor", message);
       continue;
     }
-    indexed.kind = classify_asset_kind(indexed.osPath, &indexed.isSource);
+    indexed.kind = classify_asset_kind(indexed.osPath, &indexed.isSource,
+                                       &indexed.legacyName);
+    if (indexed.legacyName) {
+      ++g_legacyCount;
+      if (g_legacyExample.empty()) {
+        g_legacyExample = osPathStr;
+        g_legacyExampleSuffix = recommended_suffix(indexed.kind);
+      }
+    }
 
     std::error_code thumbEc{};
     const std::filesystem::path thumbPath =
@@ -203,19 +269,48 @@ bool AssetFilterState::operator==(const AssetFilterState &other) const noexcept 
 }
 
 content::AssetTypeTag classify_asset_kind(const char *osPath,
-                                          bool *outIsSource) noexcept {
+                                          bool *outIsSource,
+                                          bool *outLegacy) noexcept {
   const content::AssetClassification bySuffix =
       content::classify_asset_path(osPath);
   if (outIsSource != nullptr) {
     *outIsSource = bySuffix.source;
   }
-  return bySuffix.tag;
+  if (outLegacy != nullptr) {
+    *outLegacy = bySuffix.legacy;
+  }
+  if (bySuffix.tag != content::AssetTypeTag::Unknown) {
+    return bySuffix.tag;
+  }
+
+  // Last resort, and only within the compatibility revision: a document
+  // authored as a bare ".json" before a suffix named the kind.
+  char lowerPath[kMaxAssetIndexPath] = {};
+  std::snprintf(lowerPath, sizeof(lowerPath), "%s", osPath);
+  lower_ascii(lowerPath);
+  if (!has_suffix(lowerPath, ".json")) {
+    return content::AssetTypeTag::Unknown;
+  }
+  const content::AssetTypeTag sniffed = classify_legacy_json_by_content(osPath);
+  if (sniffed == content::AssetTypeTag::Unknown) {
+    return content::AssetTypeTag::Unknown;
+  }
+  if (outIsSource != nullptr) {
+    *outIsSource = true;
+  }
+  if (outLegacy != nullptr) {
+    *outLegacy = true;
+  }
+  return sniffed;
 }
 
 bool rebuild_asset_index() noexcept {
   g_index.clear();
   g_built = true;
   ++g_generation;
+  g_legacyCount = 0U;
+  g_legacyExample.clear();
+  g_legacyExampleSuffix = nullptr;
 
   const std::filesystem::path root(active_config().editorAssetRoot);
   g_rootOsPath = root.generic_string();
@@ -227,6 +322,20 @@ bool rebuild_asset_index() noexcept {
   }
 
   walk_directory(root, root, 0U);
+
+  if (g_legacyCount > 0U) {
+    char message[512] = {};
+    std::snprintf(message, sizeof(message),
+                  "%zu asset(s) carry a superseded name and were classified "
+                  "anyway; rename them so the suffix names the kind (for "
+                  "example '%s' -> '%s'). The old names, and the content "
+                  "sniff for bare '.json' documents, stop working after this "
+                  "revision.",
+                  g_legacyCount, g_legacyExample.c_str(),
+                  (g_legacyExampleSuffix != nullptr) ? g_legacyExampleSuffix
+                                                     : "the kind's suffix");
+    core::log_message(core::LogLevel::Warning, kLogChannel, message);
+  }
   return true;
 }
 

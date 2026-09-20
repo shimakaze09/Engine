@@ -43,6 +43,11 @@ struct AssetIndexEntry final {
   /// True for the authored source of a cooked type (a .gltf beside its
   /// .mesh): browsable, but not the form the runtime loads.
   bool isSource = false;
+  /// True when the kind came from a superseded name — a legacy suffix, or
+  /// a bare ".json" document classified by its content. The entry is
+  /// browsable as usual; the rebuild reports how many there were so the
+  /// author can rename them within the compatibility revision.
+  bool legacyName = false;
   bool hasThumbnail = false;
 };
 
@@ -65,11 +70,16 @@ bool asset_index_built() noexcept;
 /// bumps the generation so every dependent cache recomputes.
 void asset_index_reset() noexcept;
 
-/// Classifies one file through the asset type table's suffixes alone; the
-/// walk never opens a file to guess its kind. Sets *outIsSource when the
-/// suffix is a cooked type's authored source form. Exposed for tests.
+/// Classifies one file in three steps: a current kind suffix, then a
+/// superseded suffix, then — only for a bare ".json" that no suffix names
+/// — a top-level-key content sniff. Sets *outIsSource when the suffix is
+/// a cooked type's authored source form, and *outLegacy for anything the
+/// last two steps classified. The sniff is the compatibility revision's
+/// migration path and the only case that opens a file; it goes away with
+/// the legacy suffixes. Exposed for tests.
 content::AssetTypeTag classify_asset_kind(const char *osPath,
-                                          bool *outIsSource = nullptr) noexcept;
+                                          bool *outIsSource = nullptr,
+                                          bool *outLegacy = nullptr) noexcept;
 
 /// Search/filter/navigation request evaluated against the index.
 struct AssetFilterState final {

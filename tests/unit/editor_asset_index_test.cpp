@@ -100,6 +100,10 @@ bool rebuild_scratch_tree() noexcept {
   char metaPath[1024] = {};
   char legacyScenePath[1024] = {};
   char legacyMetaPath[1024] = {};
+  char bareScenePath[1024] = {};
+  char bareMaterialPath[1024] = {};
+  char bareControllerPath[1024] = {};
+  char bareNothingPath[1024] = {};
   char subMeshPath[1024] = {};
   if (!make_scratch_path("thing.mesh", meshPath, sizeof(meshPath)) ||
       !make_scratch_path("thing.png", texPath, sizeof(texPath)) ||
@@ -114,6 +118,14 @@ bool rebuild_scratch_tree() noexcept {
                          sizeof(legacyScenePath)) ||
       !make_scratch_path("legacy.mesh.meta.json", legacyMetaPath,
                          sizeof(legacyMetaPath)) ||
+      !make_scratch_path("bare_scene.json", bareScenePath,
+                         sizeof(bareScenePath)) ||
+      !make_scratch_path("bare_material.json", bareMaterialPath,
+                         sizeof(bareMaterialPath)) ||
+      !make_scratch_path("bare_controller.json", bareControllerPath,
+                         sizeof(bareControllerPath)) ||
+      !make_scratch_path("bare_nothing.json", bareNothingPath,
+                         sizeof(bareNothingPath)) ||
       !make_scratch_path("sub/nested.mesh", subMeshPath,
                          sizeof(subMeshPath))) {
     return false;
@@ -130,6 +142,14 @@ bool rebuild_scratch_tree() noexcept {
          write_text_file(metaPath, "{\"importSettings\":{}}") &&
          write_text_file(legacyScenePath, "{\"entities\":[],\"version\":1}") &&
          write_text_file(legacyMetaPath, "{\"importSettings\":{}}") &&
+         // Bare ".json" documents from before a suffix named the kind:
+         // classified by the migration-only content sniff.
+         write_text_file(bareScenePath, "{\"version\":5,\"entities\":[]}") &&
+         write_text_file(bareMaterialPath,
+                         "{\"version\":1,\"roughness\":0.5}") &&
+         write_text_file(bareControllerPath,
+                         "{\"states\":{},\"clips\":{},\"initial\":\"idle\"}") &&
+         write_text_file(bareNothingPath, "{\"unrelated\":true}") &&
          write_text_file(subMeshPath, "nested mesh");
 }
 
@@ -224,6 +244,43 @@ int check_rebuild_classifies_and_hides_sidecars() {
   }
   if (find_entry_by_leaf("legacy.mesh.meta.json") != nullptr) {
     return 15; // the superseded sidecar name must stay hidden too
+  }
+  if (!legacyScene->legacyName) {
+    return 16; // a legacy suffix is reported as legacy
+  }
+  if (mesh->legacyName || scene->legacyName) {
+    return 17; // a current name is never reported as legacy
+  }
+
+  // The bare ".json" documents the previous editor classified by content:
+  // still classified for the compatibility revision, and marked legacy.
+  const AssetIndexEntry *bareScene = find_entry_by_leaf("bare_scene.json");
+  const AssetIndexEntry *bareMaterial =
+      find_entry_by_leaf("bare_material.json");
+  const AssetIndexEntry *bareController =
+      find_entry_by_leaf("bare_controller.json");
+  const AssetIndexEntry *bareNothing = find_entry_by_leaf("bare_nothing.json");
+  if ((bareScene == nullptr) ||
+      (bareScene->kind != engine::content::AssetTypeTag::Scene) ||
+      !bareScene->legacyName) {
+    return 18;
+  }
+  if ((bareMaterial == nullptr) ||
+      (bareMaterial->kind != engine::content::AssetTypeTag::Material) ||
+      !bareMaterial->legacyName) {
+    return 19;
+  }
+  if ((bareController == nullptr) ||
+      (bareController->kind !=
+       engine::content::AssetTypeTag::AnimationController) ||
+      !bareController->legacyName) {
+    return 20;
+  }
+  // A ".json" whose keys name no kind stays Other, and is not legacy.
+  if ((bareNothing == nullptr) ||
+      (bareNothing->kind != engine::content::AssetTypeTag::Unknown) ||
+      bareNothing->legacyName) {
+    return 21;
   }
   return 0;
 }
