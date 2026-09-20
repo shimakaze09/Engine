@@ -196,14 +196,16 @@ public:
   /// was; it starts as Ok.
   core::Status last_refusal() const noexcept { return m_lastRefusal; }
 
-  /// One 64-bit fold over the simulation state in dense storage order:
-  /// every alive entity's index, generation and persistent id; each
-  /// transform's TRS bits and parent; each rigid body's velocities and
-  /// sleep state; the collision pairs of the last step; the active timers;
-  /// and each animation component's state-machine position and times.
-  /// Two worlds with equal hashes hold the same simulation state bit for
-  /// bit, so this is the observable determinism tests and CI compare.
-  /// Reads the committed state; never call it during Simulation.
+  /// One 64-bit fold over the state the determinism scenarios compare, in
+  /// dense storage order: every alive entity's index, generation and
+  /// persistent id; each transform's TRS bits and parent; each rigid
+  /// body's velocities and sleep state; world gravity; the collision
+  /// pairs of the last step; the active timers; and each animation
+  /// component's state-machine position and times. It does not fold
+  /// masses, inertia, colliders, joints, materials or script state, so
+  /// equal hashes mean the observed subset evolved identically, not that
+  /// two worlds are the same world. Reads the committed state; never call
+  /// it during Simulation.
   std::uint64_t state_hash() const noexcept;
 
   /// Content epoch: advances every time this world's entire contents are

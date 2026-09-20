@@ -1,6 +1,7 @@
-// Implements World::state_hash: one fold over the simulation state in dense
-// storage order, so every determinism test and the CI cross-platform
-// compare read the same observable instead of each hashing its own subset.
+// Implements World::state_hash: one fold over the subset of simulation
+// state the determinism scenarios compare, in dense storage order, so every
+// determinism test and the CI cross-platform compare read the same
+// observable instead of each hashing its own subset.
 
 #include "engine/runtime/world.h"
 
@@ -76,6 +77,7 @@ std::uint64_t World::state_hash() const noexcept {
   }
 
   const physics::PhysicsContext &physics = m_physicsContext;
+  h.vec3(physics.gravity);
   h.u32(static_cast<std::uint32_t>(physics.collisionPairCount));
   for (std::size_t i = 0U; i < physics.collisionPairCount * 2U; ++i) {
     h.entity(physics.collisionPairData[i]);
