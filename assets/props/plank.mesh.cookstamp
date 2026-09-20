@@ -1,10 +1,12 @@
-SCHEMA 4
+SCHEMA 5
 TOOL_VERSION 4
 SOURCE_HASH 6b5ccd2915dfbef4
 IMPORT_HASH 2755be6c6a924f10
 PLATFORM Linux
+SOURCE_GUID 1b60fae5-b83f-4193-8be4-d6a84f172662
 DEP_HASH 7d091bb473a26d05 plank.bin
 OUTPUT 2d2323a68363c51f plank.mesh
+ASSET 432408a2e33116bc plank.mesh
 OUTPUT 0e2d668fd9f4f2fd plank.mesh.cookmeta
 OUTPUT 9587a0fe176e04b3 plank.mesh.hull
 OUTPUT 52a3e484ffb59b5a .thumbnails/plank.mesh.png

@@ -1,10 +1,12 @@
-SCHEMA 4
+SCHEMA 5
 TOOL_VERSION 4
 SOURCE_HASH cae422e4e347db11
 IMPORT_HASH 2755be6c6a924f10
 PLATFORM Linux
+SOURCE_GUID 77dd680c-0c1d-4ba8-8571-58b8817c2fcf
 DEP_HASH 3e5083e0fe2ecec0 log.bin
 OUTPUT 478095d4ac1b4b04 log.mesh
+ASSET 432408a2e33116bc log.mesh
 OUTPUT 4561b91168ad0f9d log.mesh.cookmeta
 OUTPUT 329dc08b19aafa7a log.mesh.hull
 OUTPUT a799140aaf2e1b79 .thumbnails/log.mesh.png

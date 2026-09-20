@@ -1,10 +1,12 @@
-SCHEMA 4
+SCHEMA 5
 TOOL_VERSION 4
 SOURCE_HASH 5a443c2182acf1eb
 IMPORT_HASH 2755be6c6a924f10
 PLATFORM Linux
+SOURCE_GUID 9d97fb9b-10b8-406a-abfa-c260417c5693
 DEP_HASH 6d92d8e89b3e5695 rock_large.bin
 OUTPUT a7b21e3ad7e6a837 rock_large.mesh
+ASSET 432408a2e33116bc rock_large.mesh
 OUTPUT 1c53bd9156dcc02c rock_large.mesh.cookmeta
 OUTPUT a2a95df7e2ae2c08 rock_large.mesh.hull
 OUTPUT 43f77dc6c003ab63 .thumbnails/rock_large.mesh.png

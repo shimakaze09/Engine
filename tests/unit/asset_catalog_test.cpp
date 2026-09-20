@@ -218,6 +218,38 @@ void test_overlong_prefix(engine::content::MetadataStore *store) noexcept {
         "a refused walk leaves the store as it was");
 }
 
+/// Writes the cook stamp that records which source produced which
+/// outputs. The catalog reads provenance from here rather than guessing
+/// from filenames, so a fixture with cooked outputs needs one.
+bool write_stamp(const std::filesystem::path &root, const char *stampRelative,
+                 const engine::content::AssetGuid &sourceGuid,
+                 std::initializer_list<const char *> outputs) noexcept {
+  char guidText[engine::content::kAssetGuidTextLength + 1U] = {};
+  if (!engine::content::format_asset_guid(sourceGuid, guidText,
+                                          sizeof(guidText))) {
+    return false;
+  }
+  const std::filesystem::path stampPath = root / stampRelative;
+  std::error_code ec{};
+  std::filesystem::create_directories(stampPath.parent_path(), ec);
+  std::ofstream out(stampPath, std::ios::binary);
+  out << "SCHEMA 5\nSOURCE_GUID " << guidText << "\n";
+  for (const char *output : outputs) {
+    // The local id is the output's name after the source's stem, which
+    // is what the cook computes and writes.
+    const std::string name(output);
+    const std::size_t dot = name.find('.');
+    const std::string localName =
+        (dot == std::string::npos) ? name : name.substr(dot + 1U);
+    char localText[17] = {};
+    std::snprintf(localText, sizeof(localText), "%016llx",
+                  static_cast<unsigned long long>(
+                      engine::content::asset_local_id(localName.c_str())));
+    out << "ASSET " << localText << " " << output << "\n";
+  }
+  return out.good();
+}
+
 /// Gives `relative` an authored sidecar and returns the GUID it got.
 engine::content::AssetGuid identify(const std::filesystem::path &root,
                                     const char *relative) noexcept {
@@ -248,7 +280,8 @@ void test_identity_survives_relocation() noexcept {
                      write_file(root / "chars/hero.mesh") &&
                      write_file(root / "chars/hero.skel") &&
                      write_file(root / "chars/hero.walk.anim") &&
-                     write_file(root / "scripts/hop.lua");
+                     write_file(root / "scripts/hop.lua") &&
+                     write_file(root / "scripts/dash.lua");
   if (!built) {
     g_tests.fail("the identity tree could be written");
     return;
@@ -257,6 +290,10 @@ void test_identity_survives_relocation() noexcept {
   const engine::content::AssetGuid coin = identify(root, "props/coin.gltf");
   const engine::content::AssetGuid hero = identify(root, "chars/hero.gltf");
   const engine::content::AssetGuid script = identify(root, "scripts/hop.lua");
+  check(write_stamp(root, "props/coin.mesh.cookstamp", coin, {"coin.mesh"}) &&
+            write_stamp(root, "chars/hero.mesh.cookstamp", hero,
+                        {"hero.mesh", "hero.skel", "hero.walk.anim"}),
+        "the cooks recorded which source produced which outputs");
   check(engine::content::asset_guid_is_valid(coin) &&
             engine::content::asset_guid_is_valid(hero) &&
             engine::content::asset_guid_is_valid(script),
@@ -381,10 +418,14 @@ void test_identity_survives_relocation() noexcept {
                                        script)) != nullptr,
         "an edit does not change the GUID");
 
-  // A copied sidecar is two assets claiming one identity: reported, never
-  // resolved by picking one.
-  std::filesystem::copy_file(root / "props/coin.gltf.meta",
-                             root / "chars/hero.gltf.meta",
+  // A copied sidecar is two assets claiming one identity: reported,
+  // never resolved by picking one. Copied between two scripts, because
+  // those are catalogued directly — a duplicated mesh SOURCE sidecar
+  // only reaches the catalog once a recook rewrites the stamps, and the
+  // CI identity gate catches that pair at the sidecars themselves.
+  static_cast<void>(identify(root, "scripts/dash.lua"));
+  std::filesystem::copy_file(root / "gameplay/Jump.lua.meta",
+                             root / "scripts/dash.lua.meta",
                              std::filesystem::copy_options::overwrite_existing,
                              ec);
   static_cast<void>(walk(store.get()));
@@ -393,6 +434,97 @@ void test_identity_survives_relocation() noexcept {
       engine::content::find_duplicate_guid_records(store.get(), records, 8U);
   check(!ec && (duplicates >= 2U),
         "a copied sidecar is reported as a duplicate identity");
+
+  std::filesystem::remove_all(kRoot, ec);
+}
+
+/// Indexing fails closed on every way an identity can be missing,
+/// duplicated or unportable, and says which paths are at fault. Catching
+/// these at index time is the point: CI catches them before they are
+/// committed, but a project assembled on a machine never went through
+/// CI, and a nil identity accepted here becomes a reference that
+/// resolves to nothing much later with nothing to say why.
+void test_identity_validation_fails_closed() noexcept {
+  constexpr const char *kRoot = "asset_catalog_validation_root";
+  constexpr const char *kPrefix = "kit";
+  std::error_code ec{};
+
+  const auto walk = [&](engine::content::MetadataStore *store) noexcept {
+    engine::content::clear_metadata_store(store);
+    return engine::content::register_mounted_assets(store, kPrefix, kRoot);
+  };
+  std::unique_ptr<engine::content::MetadataStore> store(
+      new (std::nothrow) engine::content::MetadataStore());
+  if (store == nullptr) {
+    g_tests.fail("the validation store could be allocated");
+    return;
+  }
+
+  const auto reset = [&]() noexcept {
+    std::filesystem::remove_all(kRoot, ec);
+    return write_file(std::filesystem::path(kRoot) / "scripts/hop.lua");
+  };
+
+  // A clean mount indexes cleanly; without this the failures below could
+  // all be some unrelated fault.
+  check(reset(), "the validation tree is written");
+  static_cast<void>(identify(std::filesystem::path(kRoot), "scripts/hop.lua"));
+  engine::content::MountRegistration walkResult = walk(store.get());
+  check(walkResult.ok && (walkResult.unidentified == 0U) &&
+            (walkResult.duplicateRefs == 0U) &&
+            (walkResult.caseCollisions == 0U),
+        "a mount whose assets all have identities indexes cleanly");
+
+  // 1: a source with no sidecar at all.
+  check(reset(), "the validation tree is rewritten");
+  walkResult = walk(store.get());
+  check(!walkResult.ok && (walkResult.unidentified == 1U),
+        "a source with no sidecar fails the index");
+
+  // 2 and 3: a sidecar that will not read, and one that is malformed.
+  const char *badDocuments[] = {
+      "{ not json at all",
+      "{\"schemaVersion\":9999,"
+      "\"guid\":\"11111111-1111-4111-8111-111111111111\"}",
+  };
+  for (const char *document : badDocuments) {
+    check(reset(), "the validation tree is rewritten");
+    std::ofstream bad(std::filesystem::path(kRoot) / "scripts/hop.lua.meta",
+                      std::ios::binary);
+    bad << document;
+    bad.close();
+    walkResult = walk(store.get());
+    check(!walkResult.ok && (walkResult.unidentified == 1U),
+          "a sidecar that will not read fails the index");
+  }
+
+  // 4: two assets claiming one identity, with neither chosen.
+  check(reset(), "the validation tree is rewritten");
+  check(write_file(std::filesystem::path(kRoot) / "scripts/dash.lua"),
+        "a second script is written");
+  static_cast<void>(identify(std::filesystem::path(kRoot), "scripts/hop.lua"));
+  std::filesystem::copy_file(
+      std::filesystem::path(kRoot) / "scripts/hop.lua.meta",
+      std::filesystem::path(kRoot) / "scripts/dash.lua.meta",
+      std::filesystem::copy_options::overwrite_existing, ec);
+  walkResult = walk(store.get());
+  check(!ec && !walkResult.ok && (walkResult.duplicateRefs == 2U),
+        "two assets claiming one identity fail the index, both named");
+  check(walkResult.registered == 2U,
+        "both are still registered, so the caller can show the project");
+
+  // 5: two paths differing only by case.
+  check(reset(), "the validation tree is rewritten");
+  const bool cased =
+      write_file(std::filesystem::path(kRoot) / "scripts/Hop.lua");
+  static_cast<void>(identify(std::filesystem::path(kRoot), "scripts/hop.lua"));
+  static_cast<void>(identify(std::filesystem::path(kRoot), "scripts/Hop.lua"));
+  if (cased && std::filesystem::exists(
+                   std::filesystem::path(kRoot) / "scripts/Hop.lua")) {
+    walkResult = walk(store.get());
+    check(!walkResult.ok && (walkResult.caseCollisions == 2U),
+          "two paths differing only by case fail the index, both named");
+  }
 
   std::filesystem::remove_all(kRoot, ec);
 }
@@ -420,6 +552,7 @@ int main() {
   test_walk(store.get());
   test_overlong_prefix(store.get());
   test_identity_survives_relocation();
+  test_identity_validation_fails_closed();
 
   remove_tree();
   return g_tests.finish("asset catalog tests");

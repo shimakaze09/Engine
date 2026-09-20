@@ -1,10 +1,12 @@
-SCHEMA 4
+SCHEMA 5
 TOOL_VERSION 4
 SOURCE_HASH f3bc10817a2e0c49
 IMPORT_HASH 2755be6c6a924f10
 PLATFORM Linux
+SOURCE_GUID fd9d2695-0d7f-432e-9f87-ec1c78ac0a83
 DEP_HASH 77b111fdac8ae865 fence_rail.bin
 OUTPUT e473c8b31f5c1277 fence_rail.mesh
+ASSET 432408a2e33116bc fence_rail.mesh
 OUTPUT a5ed1aaaffa607d4 fence_rail.mesh.cookmeta
 OUTPUT 060326448b751528 fence_rail.mesh.hull
 OUTPUT d26d119c8cf033c3 .thumbnails/fence_rail.mesh.png

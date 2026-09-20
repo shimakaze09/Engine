@@ -1,10 +1,12 @@
-SCHEMA 4
+SCHEMA 5
 TOOL_VERSION 4
 SOURCE_HASH 5705a945f17ab190
 IMPORT_HASH 2755be6c6a924f10
 PLATFORM Linux
+SOURCE_GUID 0a4354b0-f3c6-4086-9fb8-a14e61e121f3
 DEP_HASH 11ecd16fae9916ab mushroom.bin
 OUTPUT a5f8ca22a4139e87 mushroom.mesh
+ASSET 432408a2e33116bc mushroom.mesh
 OUTPUT 72edca25b9d5e940 mushroom.mesh.cookmeta
 OUTPUT 650744432c0ad81b mushroom.mesh.hull
 OUTPUT 6e89529f8122b3ea .thumbnails/mushroom.mesh.png

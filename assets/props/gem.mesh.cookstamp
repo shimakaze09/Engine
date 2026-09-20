@@ -1,10 +1,12 @@
-SCHEMA 4
+SCHEMA 5
 TOOL_VERSION 4
 SOURCE_HASH a8aa4fe38d06afb5
 IMPORT_HASH 2755be6c6a924f10
 PLATFORM Linux
+SOURCE_GUID 31ea8c88-1729-4512-9dee-34df3e9f7d40
 DEP_HASH aa4060f669fbc50d gem.bin
 OUTPUT cc83e0d6d14a6a1b gem.mesh
+ASSET 432408a2e33116bc gem.mesh
 OUTPUT 7cb302227622e221 gem.mesh.cookmeta
 OUTPUT b8516516becdd8d7 gem.mesh.hull
 OUTPUT bf6d6940f9ea0141 .thumbnails/gem.mesh.png

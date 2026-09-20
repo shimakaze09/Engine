@@ -1,10 +1,12 @@
-SCHEMA 4
+SCHEMA 5
 TOOL_VERSION 4
 SOURCE_HASH 8b177392c0193e5a
 IMPORT_HASH 2755be6c6a924f10
 PLATFORM Linux
+SOURCE_GUID 2314d3d3-f9df-4b4c-b97a-9c824cbfc820
 DEP_HASH e8730bcca485fbdd tree_trunk.bin
 OUTPUT 594a2a30ab47c11b tree_trunk.mesh
+ASSET 432408a2e33116bc tree_trunk.mesh
 OUTPUT 89ca0a9c53c77fb9 tree_trunk.mesh.cookmeta
 OUTPUT b7fcebe94358f8a0 tree_trunk.mesh.hull
 OUTPUT f1f5e5d3e6371cb0 .thumbnails/tree_trunk.mesh.png

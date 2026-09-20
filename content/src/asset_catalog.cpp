@@ -9,8 +9,10 @@
 #include <cstdio>
 #include <filesystem>
 #include <string>
+#include <vector>
 
 #include "engine/content/asset_metadata.h"
+#include "engine/content/asset_provenance.h"
 #include "engine/content/asset_sidecar.h"
 #include "engine/content/asset_type_table.h"
 #include "engine/core/diagnostic.h"
@@ -44,71 +46,151 @@ bool is_runtime_form(const AssetClassification &classification) noexcept {
 /// A source-policy asset carries its own sidecar, so it is the primary
 /// asset of its own GUID. A cooked or derived output has no sidecar —
 /// it is regenerable and belongs to the source that made it — so its
-/// identity is that source's GUID plus the local id naming it among the
-/// source's outputs. One glTF here yields a mesh, a skeleton and three
-/// clips, which is exactly the case a bare GUID cannot express.
+/// identity is whatever the cook recorded for it. The relationship is
+/// never inferred from the filename: "hero.mesh" beside both
+/// "hero.gltf" and "hero.glb" has two equally plausible producers, and
+/// picking one silently binds every reference to the wrong asset.
 ///
-/// Returns a nil ref when no sidecar answers: the asset is still
-/// catalogued and still reachable by path, it just has no persistent
-/// identity until it is imported.
+/// Returns a nil ref when nothing answers: the asset is still
+/// catalogued and still reachable by path, and the caller reports it.
 AssetRef resolve_authored_ref(const std::filesystem::path &osPath,
-                              const AssetClassification &classification)
-    noexcept {
-  AssetSidecar sidecar{};
-
+                              const std::string &relativePath,
+                              const AssetClassification &classification,
+                              const ProvenanceIndex &provenance,
+                              const char **outWhy) noexcept {
   if (classification.source) {
-    if (read_asset_sidecar(osPath.string().c_str(), &sidecar) !=
-        SidecarReadResult::Ok) {
+    AssetSidecar sidecar{};
+    switch (read_asset_sidecar(osPath.string().c_str(), &sidecar)) {
+    case SidecarReadResult::Ok:
+      return asset_ref_primary(sidecar.guid);
+    case SidecarReadResult::Absent:
+      *outWhy = "has no .meta sidecar, so it has no identity; import it "
+                "(asset_packer --init-meta) rather than leaving references "
+                "to it unresolvable";
+      return AssetRef{};
+    case SidecarReadResult::Unreadable:
+      *outWhy = "has a .meta sidecar that cannot be read; repair it rather "
+                "than letting the asset index without an identity";
+      return AssetRef{};
+    case SidecarReadResult::Malformed:
+      *outWhy = "has a malformed .meta sidecar; repair it rather than "
+                "letting the asset index without an identity";
       return AssetRef{};
     }
-    return asset_ref_primary(sidecar.guid);
+    return AssetRef{};
   }
 
-  // A cooked output is named "<source stem>.<rest>", where the rest is
-  // everything the source produced it as: "mesh", "skel", "walk.anim".
-  // The producing source is found by trying every type's source suffixes
-  // against progressively shorter stems, longest first, so "a.b.mesh"
-  // prefers a source named "a.b" over one named "a".
-  const std::string filename = osPath.filename().string();
-  const std::filesystem::path directory = osPath.parent_path();
-  std::size_t dot = filename.rfind('.');
-  while (dot != std::string::npos) {
-    const std::string stem = filename.substr(0U, dot);
-    if (stem.empty()) {
-      break;
+  const AssetRef fromCook =
+      provenance_for_output(provenance, relativePath.c_str());
+  if (!asset_ref_is_valid(fromCook)) {
+    *outWhy = "is a cooked output no cook stamp claims, so which source "
+              "produced it is unknown; recook it rather than guessing from "
+              "its filename";
+  }
+  return fromCook;
+}
+
+/// One registered file, kept for the identity validation the walk runs
+/// once it has seen the whole mount.
+struct RegisteredEntry final {
+  std::string virtualPath{};
+  AssetRef ref{};
+};
+
+/// Names every path in every set of entries that share an AssetRef, and
+/// returns how many entries were involved. Never picks a winner: a
+/// duplicate identity is an error to repair, and choosing between them
+/// would silently rebind references somebody already wrote.
+std::size_t report_duplicate_refs(
+    const std::vector<RegisteredEntry> &entries) noexcept {
+  std::size_t offenders = 0U;
+  for (std::size_t i = 0U; i < entries.size(); ++i) {
+    if (!asset_ref_is_valid(entries[i].ref)) {
+      continue;
     }
-    // Every type's source suffixes, not just the classified type's: a
-    // ".anim" classifies as Animation, which is Derived and so has no
-    // source suffix of its own, yet the clip really was produced by a
-    // ".gltf" on the Mesh row.
-    for (std::size_t typeIndex = 0U; typeIndex < kAssetTypeCount;
-         ++typeIndex) {
-      const AssetTypeDescriptor &row =
-          asset_type_descriptor(static_cast<AssetTypeTag>(typeIndex));
-      for (std::size_t i = 0U; i < row.sourceSuffixCount; ++i) {
-        const std::filesystem::path candidate =
-            directory / (stem + row.sourceSuffixes[i]);
-        std::error_code ec{};
-        if (!std::filesystem::is_regular_file(candidate, ec) || ec) {
-          continue;
-        }
-        if (read_asset_sidecar(candidate.string().c_str(), &sidecar) !=
-            SidecarReadResult::Ok) {
-          return AssetRef{};
-        }
-        // The rest of the name, cooked suffix included: "mesh" and
-        // "skel" of one source are two assets, so dropping the suffix
-        // here would collapse them onto one reference.
-        return AssetRef{sidecar.guid,
-                        asset_local_id(filename.substr(dot + 1U).c_str())};
+    bool first = true;
+    std::size_t inThisSet = 0U;
+    for (std::size_t j = 0U; j < entries.size(); ++j) {
+      if ((j == i) || !(entries[j].ref == entries[i].ref)) {
+        continue;
+      }
+      if (j < i) {
+        // Already reported as part of an earlier entry's set.
+        first = false;
+        break;
+      }
+      ++inThisSet;
+    }
+    if (!first || (inThisSet == 0U)) {
+      continue;
+    }
+    char guidText[kAssetGuidTextLength + 1U] = {};
+    static_cast<void>(
+        format_asset_guid(entries[i].ref.guid, guidText, sizeof(guidText)));
+    char message[256] = {};
+    std::snprintf(message, sizeof(message),
+                  "asset catalog: %s (local id %016llx) is claimed by more "
+                  "than one asset; repair the duplicate rather than letting "
+                  "references resolve to whichever indexed last",
+                  guidText,
+                  static_cast<unsigned long long>(entries[i].ref.localId));
+    core::log_message(core::LogLevel::Error, "assets", message);
+    for (const RegisteredEntry &entry : entries) {
+      if (entry.ref == entries[i].ref) {
+        core::log_path_diagnostic(core::LogLevel::Error, "assets",
+                                  entry.virtualPath.c_str(),
+                                  "asset catalog: claims that identity");
+        ++offenders;
       }
     }
-    if (dot == 0U) {
-      break;
-    }
-    dot = filename.rfind('.', dot - 1U);
   }
-  return AssetRef{};
+  return offenders;
+}
+
+/// Names every path that differs from another only by letter case, and
+/// returns how many were involved.
+std::size_t report_case_collisions(
+    const std::vector<RegisteredEntry> &entries) noexcept {
+  const auto folded = [](const std::string &text) noexcept {
+    std::string lowered = text;
+    for (char &ch : lowered) {
+      if ((ch >= 'A') && (ch <= 'Z')) {
+        ch = static_cast<char>(ch - 'A' + 'a');
+      }
+    }
+    return lowered;
+  };
+  std::size_t offenders = 0U;
+  for (std::size_t i = 0U; i < entries.size(); ++i) {
+    const std::string lowered = folded(entries[i].virtualPath);
+    bool first = true;
+    std::size_t matches = 0U;
+    for (std::size_t j = 0U; j < entries.size(); ++j) {
+      if ((j == i) || (folded(entries[j].virtualPath) != lowered)) {
+        continue;
+      }
+      if (j < i) {
+        first = false;
+        break;
+      }
+      ++matches;
+    }
+    if (!first || (matches == 0U)) {
+      continue;
+    }
+    for (const RegisteredEntry &entry : entries) {
+      if (folded(entry.virtualPath) != lowered) {
+        continue;
+      }
+      core::log_path_diagnostic(
+          core::LogLevel::Error, "assets", entry.virtualPath.c_str(),
+          "asset catalog: differs from another asset only by letter case, "
+          "so this project is one file on Windows and macOS and two on "
+          "Linux; rename one of them");
+      ++offenders;
+    }
+  }
+  return offenders;
 }
 
 /// Thumbnail caches and dot-files are never assets.
@@ -144,6 +226,15 @@ MountRegistration register_mounted_assets(MetadataStore *store,
                               "until their assets load by path");
     return result;
   }
+
+  // Read once for the whole walk: the stamps say which source produced
+  // each cooked output, and re-reading them per file would be O(n^2).
+  static ProvenanceIndex provenance{};
+  static_cast<void>(build_provenance_index(osRoot, &provenance));
+
+  // Collected so identity can be validated across the whole mount once
+  // the walk has seen every asset, rather than per file.
+  std::vector<RegisteredEntry> registered{};
 
   const std::filesystem::recursive_directory_iterator end{};
   for (; it != end; it.increment(ec)) {
@@ -189,7 +280,9 @@ MountRegistration register_mounted_assets(MetadataStore *store,
     }
     metadata.assetId = make_asset_id_from_path(metadata.filePath.data());
     metadata.typeTag = classification.tag;
-    metadata.ref = resolve_authored_ref(entry.path(), classification);
+    const char *unidentifiedWhy = nullptr;
+    metadata.ref = resolve_authored_ref(entry.path(), generic, classification,
+                                        provenance, &unidentifiedWhy);
     if (metadata.assetId == kInvalidAssetId) {
       ++result.refused;
       continue;
@@ -207,7 +300,22 @@ MountRegistration register_mounted_assets(MetadataStore *store,
       continue;
     }
     ++result.registered;
+    registered.push_back(
+        RegisteredEntry{std::string(metadata.filePath.data()), metadata.ref});
+    if (unidentifiedWhy != nullptr) {
+      char problem[320] = {};
+      std::snprintf(problem, sizeof(problem), "asset catalog: this asset %s",
+                    unidentifiedWhy);
+      core::log_path_diagnostic(core::LogLevel::Error, "assets",
+                                metadata.filePath.data(), problem);
+      ++result.unidentified;
+    }
   }
+
+  result.duplicateRefs = report_duplicate_refs(registered);
+  result.caseCollisions = report_case_collisions(registered);
+  result.ok = (result.unidentified == 0U) && (result.duplicateRefs == 0U) &&
+              (result.caseCollisions == 0U);
 
   char message[192] = {};
   std::snprintf(message, sizeof(message),
@@ -216,6 +324,16 @@ MountRegistration register_mounted_assets(MetadataStore *store,
                 result.registered, result.alreadyKnown, result.skipped,
                 result.refused, mountPrefix);
   core::log_message(core::LogLevel::Info, "assets", message);
+  if (!result.ok) {
+    char failure[256] = {};
+    std::snprintf(failure, sizeof(failure),
+                  "asset catalog: '%s' did not index cleanly: %zu without an "
+                  "identity, %zu claiming a duplicate, %zu colliding only by "
+                  "case. Every offending path is named above.",
+                  mountPrefix, result.unidentified, result.duplicateRefs,
+                  result.caseCollisions);
+    core::log_message(core::LogLevel::Error, "assets", failure);
+  }
   return result;
 }
 

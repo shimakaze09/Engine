@@ -113,7 +113,16 @@ bool read_authored_import_settings(const char *sourcePath,
 /// Schema 4 records every dependency and output path relative to the
 /// stamp's directory; an output outside it, or a line that would not fit
 /// kMaxCookStampLineBytes, refuses the stamp instead of truncating.
-bool write_cook_stamp(const char *outputPath, std::uint64_t sourceHash,
+/// Writes the cook's commit marker. `sourcePath` is the asset that was
+/// cooked: the stamp records its GUID and, for each output that is a
+/// runtime asset form, the local id naming that output among the
+/// source's several. That is the provenance the catalog reads, so a
+/// cooked file's producer is a fact the cook recorded rather than a
+/// guess from its filename — which is ambiguous the moment a tree holds
+/// both "hero.gltf" and "hero.glb", or both "hero.gltf" and
+/// "hero.walk.gltf".
+bool write_cook_stamp(const char *outputPath, const char *sourcePath,
+                      std::uint64_t sourceHash,
                       const std::vector<DependencyDigest> &dependencies,
                       std::uint64_t importSettingsHash,
                       const char *platformTag,

@@ -1,10 +1,12 @@
-SCHEMA 4
+SCHEMA 5
 TOOL_VERSION 4
 SOURCE_HASH 434be845877d8c2d
 IMPORT_HASH 2755be6c6a924f10
 PLATFORM Linux
+SOURCE_GUID 2c6ddbc1-2b5a-49f1-a2d1-2d6d8f077ca4
 DEP_HASH fda598099aa287a5 fence_post.bin
 OUTPUT 916a3b2dfbf6db1f fence_post.mesh
+ASSET 432408a2e33116bc fence_post.mesh
 OUTPUT 69cedde047f3f664 fence_post.mesh.cookmeta
 OUTPUT 4311dcd84acf9c98 fence_post.mesh.hull
 OUTPUT 00b514ff07e65f9b .thumbnails/fence_post.mesh.png

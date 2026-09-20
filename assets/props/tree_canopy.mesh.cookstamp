@@ -1,10 +1,12 @@
-SCHEMA 4
+SCHEMA 5
 TOOL_VERSION 4
 SOURCE_HASH d11d4a2774f3f98a
 IMPORT_HASH 2755be6c6a924f10
 PLATFORM Linux
+SOURCE_GUID cf4639ff-0ada-4c21-9791-9f02716f94a0
 DEP_HASH e64f04b45d782ee5 tree_canopy.bin
 OUTPUT 97cb3a8572f3c225 tree_canopy.mesh
+ASSET 432408a2e33116bc tree_canopy.mesh
 OUTPUT 026ec73ae37e4474 tree_canopy.mesh.cookmeta
 OUTPUT f950c88e9586ca20 tree_canopy.mesh.hull
 OUTPUT 487adea1bb7e9741 .thumbnails/tree_canopy.mesh.png

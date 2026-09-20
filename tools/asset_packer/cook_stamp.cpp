@@ -5,6 +5,7 @@
 #include "packer_shared.h"
 
 #include "engine/content/asset_metadata.h"
+#include "engine/content/asset_identity.h"
 #include "engine/content/asset_sidecar.h"
 #include "engine/content/cook_contract.h"
 
@@ -285,7 +286,8 @@ bool is_valid_platform_tag(const char *platformTag) {
   return std::strlen(platformTag) < 64U;
 }
 
-bool write_cook_stamp(const char *outputPath, std::uint64_t sourceHash,
+bool write_cook_stamp(const char *outputPath, const char *sourcePath,
+                      std::uint64_t sourceHash,
                       const std::vector<DependencyDigest> &dependencies,
                       std::uint64_t importSettingsHash,
                       const char *platformTag,
@@ -318,6 +320,28 @@ bool write_cook_stamp(const char *outputPath, std::uint64_t sourceHash,
   stamp += line;
   std::snprintf(line, sizeof(line), "PLATFORM %s\n", platformTag);
   stamp += line;
+
+  // The producing source's identity, so the catalog reads a cooked
+  // output's provenance instead of inferring it from the filename.
+  // A source with no sidecar has no identity to record; the cook still
+  // runs, and the catalog reports the output as unidentified.
+  engine::content::AssetSidecar sidecar{};
+  const bool haveSourceGuid =
+      (sourcePath != nullptr) &&
+      (engine::content::read_asset_sidecar(sourcePath, &sidecar) ==
+       engine::content::SidecarReadResult::Ok);
+  std::string sourceStem{};
+  if (haveSourceGuid) {
+    char guidText[engine::content::kAssetGuidTextLength + 1U] = {};
+    if (!engine::content::format_asset_guid(sidecar.guid, guidText,
+                                            sizeof(guidText))) {
+      return false;
+    }
+    if (!append_stamp_line(&stamp, std::string("SOURCE_GUID ") + guidText)) {
+      return false;
+    }
+    sourceStem = std::filesystem::path(sourcePath).stem().string();
+  }
   for (const DependencyDigest &dependency : dependencies) {
     // A dependency on another volume has no path relative to the stamp:
     // Windows drives share no root, so a project on one drive cooking
@@ -368,6 +392,34 @@ bool write_cook_stamp(const char *outputPath, std::uint64_t sourceHash,
     char hashText[17] = {};
     format_hex_u64(producedHash, hashText);
     if (!append_stamp_line(&stamp, std::string("OUTPUT ") + hashText + " " +
+                                       relative)) {
+      return false;
+    }
+
+    // An output that is a runtime asset form gets its local id recorded
+    // beside it. Derived from the name here, at cook time, where the
+    // source is known for certain; the catalog never re-derives it.
+    if (!haveSourceGuid) {
+      continue;
+    }
+    const engine::content::AssetClassification outputKind =
+        engine::content::classify_asset_path(relative.c_str());
+    if ((outputKind.tag == engine::content::AssetTypeTag::Unknown) ||
+        outputKind.source) {
+      continue;
+    }
+    const std::string outputName =
+        std::filesystem::path(relative).filename().string();
+    if ((outputName.size() <= (sourceStem.size() + 1U)) ||
+        (outputName.compare(0U, sourceStem.size(), sourceStem) != 0) ||
+        (outputName[sourceStem.size()] != '.')) {
+      continue;
+    }
+    char localText[17] = {};
+    format_hex_u64(engine::content::asset_local_id(
+                       outputName.substr(sourceStem.size() + 1U).c_str()),
+                   localText);
+    if (!append_stamp_line(&stamp, std::string("ASSET ") + localText + " " +
                                        relative)) {
       return false;
     }
@@ -445,10 +497,14 @@ bool read_cook_stamp(const char *outputPath, std::uint64_t *outSourceHash,
     unsigned int toolVersion = 0U;
     unsigned int declaredSchema = 0U;
     if (std::sscanf(line, "SCHEMA %u", &declaredSchema) == 1) {
-      // A newer schema's lines have meanings this reader does not know,
-      // so the stamp is unreadable rather than partially trusted: the
-      // caller recooks and writes a stamp it can read back.
-      if (declaredSchema > kCookStampSchema) {
+      // Any schema but this build's is unreadable rather than partially
+      // trusted, and the caller recooks to get a stamp it can read back.
+      // Newer is obvious: its lines have meanings this reader does not
+      // know. Older matters just as much now that the stamp carries the
+      // provenance the catalog resolves cooked outputs through — an
+      // older stamp simply does not have it, and accepting one would
+      // leave those outputs unidentified with nothing to say why.
+      if (declaredSchema != kCookStampSchema) {
         std::fclose(file);
         return false;
       }

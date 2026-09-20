@@ -1,10 +1,12 @@
-SCHEMA 4
+SCHEMA 5
 TOOL_VERSION 4
 SOURCE_HASH a198e1f5fc503231
 IMPORT_HASH 2755be6c6a924f10
 PLATFORM Linux
+SOURCE_GUID b18011ca-5219-4db9-a4cf-84499fc117c5
 DEP_HASH c966a5c8dca3c545 platform_round.bin
 OUTPUT e9f4e2ce4f799b43 platform_round.mesh
+ASSET 432408a2e33116bc platform_round.mesh
 OUTPUT f424fcef345cf5ef platform_round.mesh.cookmeta
 OUTPUT 78e3b97f3284f09f platform_round.mesh.hull
 OUTPUT aec7779e60b101ce .thumbnails/platform_round.mesh.png

@@ -666,7 +666,8 @@ int main(int argc, char **argv) {
   // output above landed (and stale outputs of the previous manifest were
   // retired), so any interruption leaves no fresh stamp and the next run
   // recooks the full output set.
-  if (!write_cook_stamp(outputPath, sourceHash, dependencyDigests,
+  if (!write_cook_stamp(outputPath, inputPath, sourceHash,
+                        dependencyDigests,
                         importSettingsHash, platformTag, cookedOutputs)) {
     std::fprintf(stderr, "error: failed to write cook stamp\n");
     return 13;

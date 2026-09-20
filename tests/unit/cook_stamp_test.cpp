@@ -111,7 +111,8 @@ int check_stamp_paths_are_relative_to_the_stamp() {
   const std::uint64_t sourceHash = 0x1122334455667788ULL;
   const std::uint64_t importHash = 0x99AABBCCDDEEFF00ULL;
   const std::vector<std::string> outputs{output, sidecar};
-  if (!write_cook_stamp(output.c_str(), sourceHash, dependencies, importHash,
+  if (!write_cook_stamp(output.c_str(), nullptr,
+                   sourceHash, dependencies, importHash,
                         kPlatform, outputs)) {
     remove_files();
     return 803;
@@ -268,7 +269,8 @@ int check_overlong_output_path_refuses_the_stamp() {
   const std::vector<DependencyDigest> noDependencies{};
   const std::vector<std::string> outputs{output, longOutput};
   const bool written =
-      write_cook_stamp(output.c_str(), 0x1122334455667788ULL, noDependencies,
+      write_cook_stamp(output.c_str(), nullptr,
+                   0x1122334455667788ULL, noDependencies,
                        0x99AABBCCDDEEFF00ULL, kPlatform, outputs);
   if (written || file_exists((output + ".cookstamp").c_str())) {
     std::fprintf(stderr, "an overlong output path was stamped\n");
@@ -369,7 +371,8 @@ int check_dependency_on_another_volume_is_stamped() {
   const std::uint64_t sourceHash = 0x1122334455667788ULL;
   const std::uint64_t importHash = 0x99AABBCCDDEEFF00ULL;
   const std::vector<std::string> outputs{kOutputPath};
-  if (!write_cook_stamp(kOutputPath, sourceHash, dependencies, importHash,
+  if (!write_cook_stamp(kOutputPath, nullptr,
+                   sourceHash, dependencies, importHash,
                         kPlatform, outputs)) {
     std::fprintf(stderr, "a dependency on another volume refused the stamp\n");
     remove_files();
@@ -433,7 +436,8 @@ int check_tool_version_gates_recook() {
   }
 
   const std::vector<std::string> outputs{kOutputPath};
-  if (!write_cook_stamp(kOutputPath, sourceHash, dependencies, importHash,
+  if (!write_cook_stamp(kOutputPath, nullptr,
+                   sourceHash, dependencies, importHash,
                         kPlatform, outputs)) {
     remove_files();
     return 403;
@@ -528,7 +532,8 @@ int check_platform_tag_gates_recook() {
   const std::vector<DependencyDigest> dependencies{};
   const std::vector<std::string> outputs{kOutputPath};
 
-  if (!write_cook_stamp(kOutputPath, sourceHash, dependencies, importHash,
+  if (!write_cook_stamp(kOutputPath, nullptr,
+                   sourceHash, dependencies, importHash,
                         kPlatform, outputs)) {
     remove_files();
     return 602;
@@ -562,7 +567,8 @@ int check_platform_tag_gates_recook() {
     return 606;
   }
 
-  if (write_cook_stamp(kOutputPath, sourceHash, dependencies, importHash,
+  if (write_cook_stamp(kOutputPath, nullptr,
+                   sourceHash, dependencies, importHash,
                        "bad tag", outputs) != false) {
     remove_files();
     return 607;
@@ -595,7 +601,8 @@ int check_output_manifest_owns_output_set() {
   const std::vector<DependencyDigest> dependencies{};
   const std::vector<std::string> outputs{kOutputPath, kSidecarPath};
 
-  if (!write_cook_stamp(kOutputPath, sourceHash, dependencies, importHash,
+  if (!write_cook_stamp(kOutputPath, nullptr,
+                   sourceHash, dependencies, importHash,
                         kPlatform, outputs)) {
     remove_files();
     return 502;
@@ -722,7 +729,8 @@ int check_logic_revision_and_schema_gate_recook() {
     return 702;
   }
 
-  if (!write_cook_stamp(kOutputPath, sourceHash, dependencies, keyA,
+  if (!write_cook_stamp(kOutputPath, nullptr,
+                   sourceHash, dependencies, keyA,
                         kPlatform, outputs)) {
     remove_files();
     return 703;

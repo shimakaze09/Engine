@@ -1,10 +1,12 @@
-SCHEMA 4
+SCHEMA 5
 TOOL_VERSION 4
 SOURCE_HASH dbef8deb5d5e56b5
 IMPORT_HASH 2755be6c6a924f10
 PLATFORM Linux
+SOURCE_GUID d583c08c-22e9-4fee-abee-7d0071804469
 DEP_HASH 3d414d11b9145bcd bush.bin
 OUTPUT c2b85e210c373767 bush.mesh
+ASSET 432408a2e33116bc bush.mesh
 OUTPUT 1bf9639a98d6d605 bush.mesh.cookmeta
 OUTPUT 011114cafea7dae8 bush.mesh.hull
 OUTPUT 9b6ee3f96251957a .thumbnails/bush.mesh.png

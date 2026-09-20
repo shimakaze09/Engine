@@ -1,10 +1,12 @@
-SCHEMA 4
+SCHEMA 5
 TOOL_VERSION 4
 SOURCE_HASH b2fa255653e955b4
 IMPORT_HASH 2755be6c6a924f10
 PLATFORM Linux
+SOURCE_GUID c659e8df-e320-4adf-a05a-157a00c29630
 DEP_HASH c50d904c70adeb79 rock_small.bin
 OUTPUT e28e69ba5f608807 rock_small.mesh
+ASSET 432408a2e33116bc rock_small.mesh
 OUTPUT 0dfe569d306e0e62 rock_small.mesh.cookmeta
 OUTPUT a73bf92092ff7fb0 rock_small.mesh.hull
 OUTPUT e7558674e3328e54 .thumbnails/rock_small.mesh.png

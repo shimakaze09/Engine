@@ -1,10 +1,12 @@
-SCHEMA 4
+SCHEMA 5
 TOOL_VERSION 4
 SOURCE_HASH 628cbf6f1afcaccb
 IMPORT_HASH 2755be6c6a924f10
 PLATFORM Linux
+SOURCE_GUID c7f6aab7-3315-490c-9c43-9e5cc7466068
 DEP_HASH da1beb72257e6729 barrel.bin
 OUTPUT 760c984d5c2b3b7c barrel.mesh
+ASSET 432408a2e33116bc barrel.mesh
 OUTPUT 243e40bf685fd02c barrel.mesh.cookmeta
 OUTPUT 99d5540acc22b734 barrel.mesh.hull
 OUTPUT a9f05fa1a7b1571c .thumbnails/barrel.mesh.png

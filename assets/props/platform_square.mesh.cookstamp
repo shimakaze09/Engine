@@ -1,10 +1,12 @@
-SCHEMA 4
+SCHEMA 5
 TOOL_VERSION 4
 SOURCE_HASH e432b5c62177b5d1
 IMPORT_HASH 2755be6c6a924f10
 PLATFORM Linux
+SOURCE_GUID cd16eb58-97de-4b55-bf55-aa193a64392c
 DEP_HASH 9fe49d586e5b84dd platform_square.bin
 OUTPUT f5fb367d0ebcc867 platform_square.mesh
+ASSET 432408a2e33116bc platform_square.mesh
 OUTPUT 31f0ec799e931575 platform_square.mesh.cookmeta
 OUTPUT d796cdb66134c0ec platform_square.mesh.hull
 OUTPUT 82d91682aeabdaa1 .thumbnails/platform_square.mesh.png

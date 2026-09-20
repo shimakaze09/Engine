@@ -1,10 +1,12 @@
-SCHEMA 4
+SCHEMA 5
 TOOL_VERSION 4
 SOURCE_HASH fbc6f17792caaa53
 IMPORT_HASH 2755be6c6a924f10
 PLATFORM Linux
+SOURCE_GUID d9c47a7e-ef99-47b1-81a2-0941c8ce7e5b
 DEP_HASH 5f97b349be197405 flag_banner.bin
 OUTPUT 773e2a56dd17d8ef flag_banner.mesh
+ASSET 432408a2e33116bc flag_banner.mesh
 OUTPUT 3cf8c14dd152333b flag_banner.mesh.cookmeta
 OUTPUT 1d94786231bae354 flag_banner.mesh.hull
 OUTPUT 31da08d31a70b3eb .thumbnails/flag_banner.mesh.png
