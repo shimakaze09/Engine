@@ -7,6 +7,8 @@
 #include <cstdint>
 #include <cstring>
 
+#include "engine/content/asset_type_table.h"
+
 namespace engine::content {
 
 // Canonical 64-bit asset identity.
@@ -24,18 +26,6 @@ AssetId make_asset_id_from_path(const char *path) noexcept;
 /// opened or a read error would leave a partial hash, falls back to the
 /// canonicalized path hash with a logged warning.
 AssetId make_asset_id_from_file(const char *path) noexcept;
-
-/// Enumerates asset type tag values used by the engine.
-enum class AssetTypeTag : std::uint8_t {
-  Unknown = 0,
-  Mesh,
-  Texture,
-  Script,
-  Audio,
-  Prefab,
-  Shader,
-  Material
-};
 
 /// Mesh import options (scale, up axis, normal generation).
 struct MeshImportSettings final {

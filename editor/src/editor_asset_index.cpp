@@ -62,7 +62,7 @@ void lower_ascii(char *text) noexcept {
 /// Distinguishes scene/material/animation-controller ".json" documents by
 /// their top-level keys (schemas already documented on save_scene,
 /// load_material_asset, and the .animctrl loader respectively).
-AssetKind classify_json_by_content(const char *osPath) noexcept {
+content::AssetTypeTag classify_json_by_content(const char *osPath) noexcept {
   char buffer[16U * 1024U] = {};
   std::size_t size = 0U;
   // Every non-Ok outcome — absent, unreadable, or larger than the sniff
@@ -70,30 +70,30 @@ AssetKind classify_json_by_content(const char *osPath) noexcept {
   // a conservative kind is the whole cost of a fault here.
   if (core::read_whole_file(osPath, buffer, sizeof(buffer), &size) !=
       core::FileReadResult::Ok) {
-    return AssetKind::Other;
+    return content::AssetTypeTag::Unknown;
   }
   core::JsonParser parser{};
   if (!parser.parse(buffer, size)) {
-    return AssetKind::Other;
+    return content::AssetTypeTag::Unknown;
   }
   const core::JsonValue *root = parser.root();
   if ((root == nullptr) || (root->type != core::JsonValue::Type::Object)) {
-    return AssetKind::Other;
+    return content::AssetTypeTag::Unknown;
   }
   if (parser.get_object_field(*root, "entities") != nullptr) {
-    return AssetKind::Scene;
+    return content::AssetTypeTag::Scene;
   }
   if ((parser.get_object_field(*root, "states") != nullptr) &&
       (parser.get_object_field(*root, "clips") != nullptr)) {
-    return AssetKind::AnimationController;
+    return content::AssetTypeTag::AnimationController;
   }
   if ((parser.get_object_field(*root, "albedo") != nullptr) ||
       (parser.get_object_field(*root, "roughness") != nullptr) ||
       (parser.get_object_field(*root, "metallic") != nullptr) ||
       (parser.get_object_field(*root, "parent") != nullptr)) {
-    return AssetKind::Material;
+    return content::AssetTypeTag::Material;
   }
-  return AssetKind::Other;
+  return content::AssetTypeTag::Unknown;
 }
 
 /// True for sidecar/internal files the browser hides from authors
@@ -202,7 +202,7 @@ void walk_directory(const std::filesystem::path &dir,
       core::log_message(core::LogLevel::Warning, "editor", message);
       continue;
     }
-    indexed.kind = classify_asset_kind(indexed.osPath);
+    indexed.kind = classify_asset_kind(indexed.osPath, &indexed.isSource);
 
     std::error_code thumbEc{};
     const std::filesystem::path thumbPath =
@@ -236,60 +236,23 @@ bool AssetFilterState::operator==(const AssetFilterState &other) const noexcept 
          (flatSearch == other.flatSearch);
 }
 
-AssetKind classify_asset_kind(const char *osPath) noexcept {
+content::AssetTypeTag classify_asset_kind(const char *osPath,
+                                          bool *outIsSource) noexcept {
+  const content::AssetClassification bySuffix =
+      content::classify_asset_path(osPath);
+  if (outIsSource != nullptr) {
+    *outIsSource = bySuffix.source;
+  }
+  if (bySuffix.tag != content::AssetTypeTag::Unknown) {
+    return bySuffix.tag;
+  }
   char lowerPath[kMaxAssetIndexPath] = {};
   std::snprintf(lowerPath, sizeof(lowerPath), "%s", osPath);
   lower_ascii(lowerPath);
-
-  if (has_suffix(lowerPath, ".animctrl.json")) {
-    return AssetKind::AnimationController;
-  }
-  if (has_suffix(lowerPath, ".mesh")) {
-    return AssetKind::Mesh;
-  }
-  if (has_suffix(lowerPath, ".png") || has_suffix(lowerPath, ".jpg") ||
-      has_suffix(lowerPath, ".jpeg") || has_suffix(lowerPath, ".tga") ||
-      has_suffix(lowerPath, ".dds") || has_suffix(lowerPath, ".ktx2")) {
-    return AssetKind::Texture;
-  }
-  if (has_suffix(lowerPath, ".lua")) {
-    return AssetKind::Script;
-  }
-  if (has_suffix(lowerPath, ".wav") || has_suffix(lowerPath, ".ogg") ||
-      has_suffix(lowerPath, ".mp3")) {
-    return AssetKind::Sound;
-  }
-  if (has_suffix(lowerPath, ".anim") || has_suffix(lowerPath, ".skel")) {
-    return AssetKind::Animation;
-  }
   if (has_suffix(lowerPath, ".json")) {
     return classify_json_by_content(osPath);
   }
-  return AssetKind::Other;
-}
-
-const char *asset_kind_label(AssetKind kind) noexcept {
-  switch (kind) {
-  case AssetKind::Mesh:
-    return "Mesh";
-  case AssetKind::Texture:
-    return "Texture";
-  case AssetKind::Material:
-    return "Material";
-  case AssetKind::Script:
-    return "Script";
-  case AssetKind::Scene:
-    return "Scene";
-  case AssetKind::Animation:
-    return "Animation";
-  case AssetKind::AnimationController:
-    return "Anim Controller";
-  case AssetKind::Sound:
-    return "Sound";
-  case AssetKind::Other:
-  default:
-    return "Other";
-  }
+  return content::AssetTypeTag::Unknown;
 }
 
 bool rebuild_asset_index() noexcept {
@@ -404,23 +367,22 @@ bool refresh_child_folder_cache(const char *folder,
   return true;
 }
 
-AssetOpenAction resolve_asset_open_action(AssetKind kind) noexcept {
-  switch (kind) {
-  case AssetKind::Mesh:
-    return AssetOpenAction::SpawnMesh;
-  case AssetKind::Scene:
-    return AssetOpenAction::OpenScene;
-  case AssetKind::Material:
-    return AssetOpenAction::EditMaterial;
-  case AssetKind::Texture:
-  case AssetKind::Script:
-  case AssetKind::Animation:
-  case AssetKind::AnimationController:
-  case AssetKind::Sound:
-  case AssetKind::Other:
-  default:
+AssetOpenAction resolve_asset_open_action(content::AssetTypeTag kind,
+                                          bool isSource) noexcept {
+  if (isSource) {
     return AssetOpenAction::SelectOnly;
   }
+  switch (content::asset_type_descriptor(kind).action) {
+  case content::AssetPrimaryAction::Instantiate:
+    return AssetOpenAction::SpawnMesh;
+  case content::AssetPrimaryAction::OpenDocument:
+    return AssetOpenAction::OpenScene;
+  case content::AssetPrimaryAction::EditInPlace:
+    return AssetOpenAction::EditMaterial;
+  case content::AssetPrimaryAction::Select:
+    break;
+  }
+  return AssetOpenAction::SelectOnly;
 }
 
 } // namespace engine::editor

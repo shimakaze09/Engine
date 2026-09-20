@@ -657,7 +657,7 @@ bool execute_asset_open(const AssetIndexEntry &entry) noexcept {
                sizeof(editor_session().selectedAssetPath), "%s",
                entry.osPath);
 
-  switch (resolve_asset_open_action(entry.kind)) {
+  switch (resolve_asset_open_action(entry.kind, entry.isSource)) {
   case AssetOpenAction::SpawnMesh: {
     const renderer::CameraState cam =
         editor_camera_state(editor_session().editorCamera);

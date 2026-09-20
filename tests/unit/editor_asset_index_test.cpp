@@ -176,26 +176,26 @@ int check_rebuild_classifies_and_hides_sidecars() {
   const AssetIndexEntry *nested = find_entry_by_leaf("sub/nested.mesh");
   const AssetIndexEntry *meta = find_entry_by_leaf("thing.mesh.meta.json");
 
-  if ((mesh == nullptr) || (mesh->kind != AssetKind::Mesh)) {
+  if ((mesh == nullptr) || (mesh->kind != engine::content::AssetTypeTag::Mesh)) {
     return 5;
   }
-  if ((tex == nullptr) || (tex->kind != AssetKind::Texture)) {
+  if ((tex == nullptr) || (tex->kind != engine::content::AssetTypeTag::Texture)) {
     return 6;
   }
-  if ((script == nullptr) || (script->kind != AssetKind::Script)) {
+  if ((script == nullptr) || (script->kind != engine::content::AssetTypeTag::Script)) {
     return 7;
   }
-  if ((scene == nullptr) || (scene->kind != AssetKind::Scene)) {
+  if ((scene == nullptr) || (scene->kind != engine::content::AssetTypeTag::Scene)) {
     return 8;
   }
-  if ((material == nullptr) || (material->kind != AssetKind::Material)) {
+  if ((material == nullptr) || (material->kind != engine::content::AssetTypeTag::Material)) {
     return 9;
   }
   if ((controller == nullptr) ||
-      (controller->kind != AssetKind::AnimationController)) {
+      (controller->kind != engine::content::AssetTypeTag::AnimationController)) {
     return 10;
   }
-  if ((nested == nullptr) || (nested->kind != AssetKind::Mesh)) {
+  if ((nested == nullptr) || (nested->kind != engine::content::AssetTypeTag::Mesh)) {
     return 11;
   }
   if (meta != nullptr) {
@@ -210,17 +210,37 @@ int check_rebuild_classifies_and_hides_sidecars() {
 /// EXPECTATION: classify_asset_kind is consistent standalone (exposed for
 /// direct testing, not only through a full rebuild).
 int check_classify_asset_kind_direct() {
-  if (classify_asset_kind("x.mesh") != AssetKind::Mesh) {
+  if (classify_asset_kind("x.mesh") != engine::content::AssetTypeTag::Mesh) {
     return 1;
   }
-  if (classify_asset_kind("x.WAV") != AssetKind::Sound) {
+  if (classify_asset_kind("x.WAV") != engine::content::AssetTypeTag::Audio) {
     return 2; // extension match is case-insensitive
   }
-  if (classify_asset_kind("x.skel") != AssetKind::Animation) {
+  if (classify_asset_kind("x.skel") != engine::content::AssetTypeTag::Animation) {
     return 3;
   }
-  if (classify_asset_kind("x.unknownext") != AssetKind::Other) {
+  if (classify_asset_kind("x.unknownext") != engine::content::AssetTypeTag::Unknown) {
     return 4;
+  }
+  // The authored source of a cooked type classifies as that type, flagged
+  // as source, and opening it only selects: the runtime loads the .mesh.
+  bool isSource = false;
+  if ((classify_asset_kind("x.gltf", &isSource) !=
+       engine::content::AssetTypeTag::Mesh) ||
+      !isSource) {
+    return 5;
+  }
+  if (resolve_asset_open_action(engine::content::AssetTypeTag::Mesh, true) !=
+      AssetOpenAction::SelectOnly) {
+    return 6;
+  }
+  if ((classify_asset_kind("x.mesh", &isSource) !=
+       engine::content::AssetTypeTag::Mesh) ||
+      isSource) {
+    return 7;
+  }
+  if (classify_asset_kind("x.sc") != engine::content::AssetTypeTag::Shader) {
+    return 8;
   }
   return 0;
 }
@@ -280,7 +300,7 @@ int check_filter_cache_change_driven_and_boundaries() {
     return 10;
   }
   const AssetIndexEntry *matched = asset_index_entry(cache.matches[0]);
-  if ((matched == nullptr) || (matched->kind != AssetKind::Mesh)) {
+  if ((matched == nullptr) || (matched->kind != engine::content::AssetTypeTag::Mesh)) {
     return 11;
   }
 
@@ -297,26 +317,26 @@ int check_filter_cache_change_driven_and_boundaries() {
 
 /// EXPECTATION: resolve_asset_open_action's kind->action mapping is exact.
 int check_resolve_asset_open_action_mapping() {
-  if (resolve_asset_open_action(AssetKind::Mesh) !=
+  if (resolve_asset_open_action(engine::content::AssetTypeTag::Mesh) !=
       AssetOpenAction::SpawnMesh) {
     return 1;
   }
-  if (resolve_asset_open_action(AssetKind::Scene) !=
+  if (resolve_asset_open_action(engine::content::AssetTypeTag::Scene) !=
       AssetOpenAction::OpenScene) {
     return 2;
   }
   // Issue #160: Material's typed Open now routes to the material editor
   // panel instead of merely selecting the asset.
-  if (resolve_asset_open_action(AssetKind::Material) !=
+  if (resolve_asset_open_action(engine::content::AssetTypeTag::Material) !=
       AssetOpenAction::EditMaterial) {
     return 4;
   }
-  const AssetKind selectOnlyKinds[] = {
-      AssetKind::Texture,   AssetKind::Script,
-      AssetKind::Animation, AssetKind::AnimationController,
-      AssetKind::Sound,     AssetKind::Other,
+  const engine::content::AssetTypeTag selectOnlyKinds[] = {
+      engine::content::AssetTypeTag::Texture,   engine::content::AssetTypeTag::Script,
+      engine::content::AssetTypeTag::Animation, engine::content::AssetTypeTag::AnimationController,
+      engine::content::AssetTypeTag::Audio,     engine::content::AssetTypeTag::Unknown,
   };
-  for (const AssetKind kind : selectOnlyKinds) {
+  for (const engine::content::AssetTypeTag kind : selectOnlyKinds) {
     if (resolve_asset_open_action(kind) != AssetOpenAction::SelectOnly) {
       return 3;
     }
@@ -395,7 +415,7 @@ int check_scene_open_routes_through_unsaved_gate() {
   }
 
   AssetIndexEntry targetEntry{};
-  targetEntry.kind = AssetKind::Scene;
+  targetEntry.kind = engine::content::AssetTypeTag::Scene;
   std::snprintf(targetEntry.osPath, sizeof(targetEntry.osPath), "%s",
                targetPath);
   std::snprintf(targetEntry.name, sizeof(targetEntry.name), "gate_target.json");
@@ -460,7 +480,7 @@ int check_mesh_open_spawns_through_production_path() {
   editor_set_world(world.get());
 
   AssetIndexEntry entry{};
-  entry.kind = AssetKind::Mesh;
+  entry.kind = engine::content::AssetTypeTag::Mesh;
   std::snprintf(entry.virtualPath, sizeof(entry.virtualPath),
                "%s/thing.mesh", kMountPrefix);
   std::snprintf(entry.osPath, sizeof(entry.osPath), "thing.mesh");

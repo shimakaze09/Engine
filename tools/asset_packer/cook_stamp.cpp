@@ -18,6 +18,7 @@
 #include "engine/core/atomic_file.h"
 #include "engine/core/hash.h"
 #include "engine/core/json.h"
+#include "engine/content/asset_type_table.h"
 
 bool file_exists(const char *path) {
   if (path == nullptr) {
@@ -865,8 +866,20 @@ bool sweep_orphan_outputs(const char *outputPath) {
     return false;
   }
 
-  static constexpr const char *kSweptSuffixes[] = {".anim", ".skel", ".hull",
-                                                   ".meta.json"};
+  // Everything a mesh cook leaves beside its output: the derived asset
+  // types' cooked forms (from the type table) plus the cook's own sidecars.
+  std::vector<const char *> sweptSuffixes = {".hull", ".meta.json"};
+  for (std::size_t i = 0U; i < engine::content::kAssetTypeCount; ++i) {
+    const engine::content::AssetTypeDescriptor &row =
+        engine::content::asset_type_descriptor(
+            static_cast<engine::content::AssetTypeTag>(i));
+    if (row.policy != engine::content::AssetSourcePolicy::Derived) {
+      continue;
+    }
+    for (std::size_t j = 0U; j < row.cookedSuffixCount; ++j) {
+      sweptSuffixes.push_back(row.cookedSuffixes[j]);
+    }
+  }
   std::vector<std::string> orphanNames{};
   scanError.clear();
   for (std::filesystem::directory_iterator
@@ -878,7 +891,7 @@ bool sweep_orphan_outputs(const char *outputPath) {
       continue;
     }
     const char *matchedSuffix = nullptr;
-    for (const char *suffix : kSweptSuffixes) {
+    for (const char *suffix : sweptSuffixes) {
       if (name_ends_with(entryName, suffix)) {
         matchedSuffix = suffix;
         break;
