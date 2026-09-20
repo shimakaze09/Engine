@@ -39,12 +39,23 @@ void capture(engine::core::LogLevel, const char *channel, const char *message,
       (g_reportCount >= kMaxLines)) {
     return;
   }
-  Report &report = g_reports[g_reportCount];
-  char bitsText[16] = {};
-  if (std::sscanf(message + 8, "%31s %15s", report.name, bitsText) != 2) {
+  // Parsed by hand rather than with sscanf, which the MSVC runtime
+  // deprecates and the Windows lanes reject under /WX.
+  const char *cursor = message + 8;
+  const char *space = std::strchr(cursor, ' ');
+  Report report{};
+  if ((space == nullptr) || (space == cursor) ||
+      (static_cast<std::size_t>(space - cursor) >= sizeof(report.name))) {
     return;
   }
-  report.bits = static_cast<std::uint32_t>(std::strtoul(bitsText, nullptr, 16));
+  std::memcpy(report.name, cursor, static_cast<std::size_t>(space - cursor));
+  char *end = nullptr;
+  const unsigned long parsed = std::strtoul(space + 1, &end, 16);
+  if ((end == (space + 1)) || (*end != '\0')) {
+    return;
+  }
+  report.bits = static_cast<std::uint32_t>(parsed);
+  g_reports[g_reportCount] = report;
   ++g_reportCount;
 }
 
