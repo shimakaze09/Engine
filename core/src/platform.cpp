@@ -267,6 +267,21 @@ bool initialize_platform_impl(int width, int height, const char *title,
     shutdown_platform_resources();
     return false;
   }
+  // The configured size is meant in the display's own scale: on a
+  // platform whose window units are pixels (Windows, X11) a 200 %
+  // display would otherwise open a 1280x720 window holding a 640x360
+  // UI. Where window units already follow the display scale (macOS
+  // points) the two readings agree and nothing changes.
+  const float displayScale = SDL_GetWindowDisplayScale(g_window);
+  const float pixelDensity = SDL_GetWindowPixelDensity(g_window);
+  if ((displayScale > 0.0F) && (pixelDensity > 0.0F)) {
+    const float factor = displayScale / pixelDensity;
+    if (factor > 1.01F) {
+      static_cast<void>(SDL_SetWindowSize(
+          g_window, static_cast<int>(static_cast<float>(width) * factor),
+          static_cast<int>(static_cast<float>(height) * factor)));
+    }
+  }
   static_cast<void>(SDL_SetWindowPosition(g_window, SDL_WINDOWPOS_CENTERED,
                                           SDL_WINDOWPOS_CENTERED));
   g_platformRunning = true;

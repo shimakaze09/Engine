@@ -10,6 +10,7 @@
 
 #include "imgui.h"
 
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 
@@ -73,15 +74,28 @@ void draw_tooltip(const FieldMetadata *meta) noexcept {
   }
 }
 
+/// Width of each of `count` component fields drawn on the label's row:
+/// the row's remaining width shared equally, so a widened Inspector
+/// shows more digits instead of the same three.
+float component_field_width(int count) noexcept {
+  const float spacing = ImGui::GetStyle().ItemInnerSpacing.x;
+  const float available = ImGui::GetContentRegionAvail().x -
+                          (spacing * static_cast<float>(count - 1));
+  const float each = std::floor(available / static_cast<float>(count));
+  return (each < 48.0F) ? 48.0F : each;
+}
+
 void draw_vec2_field(const char *label, math::Vec2 &value,
                      bool *modified) noexcept {
   ImGui::PushID(label);
   ImGui::TextUnformatted(label);
   ImGui::SameLine();
-  ImGui::SetNextItemWidth(80.0F);
+  const float spacing = ImGui::GetStyle().ItemInnerSpacing.x;
+  const float width = component_field_width(2);
+  ImGui::SetNextItemWidth(width);
   mark_modified(modified, inspector_input_float("##x", &value.x));
-  ImGui::SameLine();
-  ImGui::SetNextItemWidth(80.0F);
+  ImGui::SameLine(0.0F, spacing);
+  ImGui::SetNextItemWidth(width);
   mark_modified(modified, inspector_input_float("##y", &value.y));
   ImGui::PopID();
 }
@@ -91,13 +105,15 @@ void draw_vec3_field(const char *label, math::Vec3 &value,
   ImGui::PushID(label);
   ImGui::TextUnformatted(label);
   ImGui::SameLine();
-  ImGui::SetNextItemWidth(80.0F);
+  const float spacing = ImGui::GetStyle().ItemInnerSpacing.x;
+  const float width = component_field_width(3);
+  ImGui::SetNextItemWidth(width);
   mark_modified(modified, inspector_input_float("##x", &value.x));
-  ImGui::SameLine();
-  ImGui::SetNextItemWidth(80.0F);
+  ImGui::SameLine(0.0F, spacing);
+  ImGui::SetNextItemWidth(width);
   mark_modified(modified, inspector_input_float("##y", &value.y));
-  ImGui::SameLine();
-  ImGui::SetNextItemWidth(80.0F);
+  ImGui::SameLine(0.0F, spacing);
+  ImGui::SetNextItemWidth(width);
   mark_modified(modified, inspector_input_float("##z", &value.z));
   ImGui::PopID();
 }
@@ -107,16 +123,18 @@ void draw_vec4_field(const char *label, math::Vec4 &value,
   ImGui::PushID(label);
   ImGui::TextUnformatted(label);
   ImGui::SameLine();
-  ImGui::SetNextItemWidth(70.0F);
+  const float spacing = ImGui::GetStyle().ItemInnerSpacing.x;
+  const float width = component_field_width(4);
+  ImGui::SetNextItemWidth(width);
   mark_modified(modified, inspector_input_float("##x", &value.x));
-  ImGui::SameLine();
-  ImGui::SetNextItemWidth(70.0F);
+  ImGui::SameLine(0.0F, spacing);
+  ImGui::SetNextItemWidth(width);
   mark_modified(modified, inspector_input_float("##y", &value.y));
-  ImGui::SameLine();
-  ImGui::SetNextItemWidth(70.0F);
+  ImGui::SameLine(0.0F, spacing);
+  ImGui::SetNextItemWidth(width);
   mark_modified(modified, inspector_input_float("##z", &value.z));
-  ImGui::SameLine();
-  ImGui::SetNextItemWidth(70.0F);
+  ImGui::SameLine(0.0F, spacing);
+  ImGui::SetNextItemWidth(width);
   mark_modified(modified, inspector_input_float("##w", &value.w));
   ImGui::PopID();
 }
@@ -126,16 +144,18 @@ void draw_quat_raw_field(const char *label, math::Quat &value,
   ImGui::PushID(label);
   ImGui::TextUnformatted(label);
   ImGui::SameLine();
-  ImGui::SetNextItemWidth(70.0F);
+  const float spacing = ImGui::GetStyle().ItemInnerSpacing.x;
+  const float width = component_field_width(4);
+  ImGui::SetNextItemWidth(width);
   mark_modified(modified, inspector_input_float("##x", &value.x));
-  ImGui::SameLine();
-  ImGui::SetNextItemWidth(70.0F);
+  ImGui::SameLine(0.0F, spacing);
+  ImGui::SetNextItemWidth(width);
   mark_modified(modified, inspector_input_float("##y", &value.y));
-  ImGui::SameLine();
-  ImGui::SetNextItemWidth(70.0F);
+  ImGui::SameLine(0.0F, spacing);
+  ImGui::SetNextItemWidth(width);
   mark_modified(modified, inspector_input_float("##z", &value.z));
-  ImGui::SameLine();
-  ImGui::SetNextItemWidth(70.0F);
+  ImGui::SameLine(0.0F, spacing);
+  ImGui::SetNextItemWidth(width);
   mark_modified(modified, inspector_input_float("##w", &value.w));
   ImGui::PopID();
 }

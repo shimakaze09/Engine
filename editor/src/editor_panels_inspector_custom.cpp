@@ -394,6 +394,11 @@ void draw_add_component_menu(runtime::Entity entity, bool editable) noexcept {
     return;
   }
   char *filter = editor_session().inspector.addComponentFilter;
+  // A search starts empty each time the menu opens; the text of the
+  // last search would otherwise filter the next one before it is typed.
+  if (ImGui::IsWindowAppearing()) {
+    filter[0] = '\0';
+  }
   ImGui::SetNextItemWidth(-1.0F);
   ImGui::InputTextWithHint(
       "##addcompfilter", "Search...", filter,
