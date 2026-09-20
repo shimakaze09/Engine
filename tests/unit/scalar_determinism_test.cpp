@@ -87,9 +87,25 @@ void test_tracks_libm() noexcept {
     }
   }
   check(atan2Ok, "det_atan2 tracks atan2 in every quadrant and on the axes");
-  check(bits(engine::math::det_atan2(0.0F, -0.0F)) == bits(std::atan2(0.0F, -0.0F)) &&
-            bits(engine::math::det_atan2(-0.0F, 0.0F)) == bits(std::atan2(-0.0F, 0.0F)),
-        "det_atan2 keeps the signed-zero conventions");
+  // The C standard's signed-zero results, pinned as exact bits rather than
+  // compared with libm: atan2(+0, -0) = +pi, atan2(-0, -0) = -pi,
+  // atan2(+0, +0) = +0, atan2(-0, +0) = -0. libm itself is not the same
+  // at these points on every platform, which is the reason this set
+  // exists.
+  const bool signedZeroOk =
+      (bits(engine::math::det_atan2(0.0F, -0.0F)) == bits(engine::math::kDetPi)) &&
+      (bits(engine::math::det_atan2(-0.0F, -0.0F)) == bits(-engine::math::kDetPi)) &&
+      (bits(engine::math::det_atan2(0.0F, 0.0F)) == 0x00000000U) &&
+      (bits(engine::math::det_atan2(-0.0F, 0.0F)) == 0x80000000U);
+  if (!signedZeroOk) {
+    std::printf("  atan2(+0,-0) %08X atan2(-0,-0) %08X atan2(+0,+0) %08X "
+                "atan2(-0,+0) %08X\n",
+                bits(engine::math::det_atan2(0.0F, -0.0F)),
+                bits(engine::math::det_atan2(-0.0F, -0.0F)),
+                bits(engine::math::det_atan2(0.0F, 0.0F)),
+                bits(engine::math::det_atan2(-0.0F, 0.0F)));
+  }
+  check(signedZeroOk, "det_atan2 keeps the signed-zero conventions");
 
   bool asinOk = true;
   bool acosOk = true;
