@@ -8,6 +8,7 @@
 
 #include "editor_commands.h"
 #include "editor_scene_document.h"
+#include "editor_scene_document_fixture.h"
 #include "editor_session.h"
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
@@ -27,6 +28,10 @@ namespace {
 
 using namespace engine::editor;
 using namespace engine::runtime;
+
+/// Routes every case's recent-scenes persistence to scratch; armed in
+/// main before the first document operation.
+engine::tests::RecentScenesGuard g_recentGuard;
 
 /// Absolute path to the scratch root, nested under the real editor asset
 /// root ("assets", relative to the test's working directory) so
@@ -544,7 +549,7 @@ int check_recent_scenes_persist_and_prune() {
     file = std::fopen(path, "wb");
 #endif
     if (file == nullptr) {
-      recent_scenes_set_directory_override_for_tests("");
+      g_recentGuard.rearm();
       return 4;
     }
     std::fputs("{}", file);
@@ -579,7 +584,7 @@ int check_recent_scenes_persist_and_prune() {
   }
   ok = ok && foundA && !foundB;
 
-  recent_scenes_set_directory_override_for_tests("");
+  g_recentGuard.rearm();
   return ok ? 0 : 5;
 }
 
@@ -684,7 +689,7 @@ int check_recent_scenes_unreadable_file_never_overwritten() {
   // The stored bytes are untouched by the add's persistence attempt.
   ok = ok && (read_file_bytes(recentFile) == oversized);
   if (!ok) {
-    recent_scenes_set_directory_override_for_tests("");
+    g_recentGuard.rearm();
     return 6;
   }
 
@@ -693,7 +698,7 @@ int check_recent_scenes_unreadable_file_never_overwritten() {
   static_cast<void>(std::remove(recentFile));
   std::filesystem::create_directories(std::filesystem::path(recentFile), ec);
   if (ec) {
-    recent_scenes_set_directory_override_for_tests("");
+    g_recentGuard.rearm();
     return 7;
   }
   recent_scenes_set_directory_override_for_tests(recentDir);
@@ -703,7 +708,7 @@ int check_recent_scenes_unreadable_file_never_overwritten() {
        std::filesystem::is_directory(std::filesystem::path(recentFile), ec);
   std::filesystem::remove_all(std::filesystem::path(recentFile), ec);
   if (!ok) {
-    recent_scenes_set_directory_override_for_tests("");
+    g_recentGuard.rearm();
     return 8;
   }
 
@@ -720,7 +725,7 @@ int check_recent_scenes_unreadable_file_never_overwritten() {
   ok = ok && (recent_scene_count() == 1U) &&
        (std::strcmp(recent_scene_at(0U), scenePath) == 0);
   if (!ok) {
-    recent_scenes_set_directory_override_for_tests("");
+    g_recentGuard.rearm();
     return 9;
   }
 
@@ -738,7 +743,7 @@ int check_recent_scenes_unreadable_file_never_overwritten() {
        (std::strcmp(recent_scene_at(0U), secondScene) == 0) &&
        (std::strcmp(recent_scene_at(1U), scenePath) == 0);
 
-  recent_scenes_set_directory_override_for_tests("");
+  g_recentGuard.rearm();
   return ok ? 0 : 10;
 }
 
@@ -775,15 +780,29 @@ int main() {
        &check_recent_scenes_unreadable_file_never_overwritten},
   };
 
+  char recentScratch[1000] = {};
+  if (!ensure_scratch_root() ||
+      !make_scratch_path("recent_scenes_fixture", recentScratch,
+                         sizeof(recentScratch)) ||
+      !g_recentGuard.arm(recentScratch)) {
+    std::fprintf(stderr, "editor_scene_document_test: the recent-scenes "
+                         "guard could not be armed\n");
+    return 98;
+  }
+
   for (const auto &check : checks) {
     const int result = check.fn();
     if (result != 0) {
       std::fprintf(stderr, "editor_scene_document_test: %s failed: %d\n",
                    check.name, result);
+      static_cast<void>(g_recentGuard.disarm());
       return result;
     }
   }
 
+  if (!g_recentGuard.disarm()) {
+    return 99;
+  }
   std::printf("editor_scene_document_test: all tests passed\n");
   return 0;
 }
