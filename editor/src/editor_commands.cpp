@@ -831,6 +831,198 @@ build_entity_delete_command(runtime::Entity entity) noexcept {
   return command;
 }
 
+/// Writes a name no live entity holds into `name`: the source name, or
+/// it with " (2)", " (3)" and so on appended, cut to fit the component.
+void make_unique_entity_name(const runtime::World &world,
+                             runtime::NameComponent *name) noexcept {
+  if (name->name[0] == '\0') {
+    return;
+  }
+  if (world.find_entity_by_name(name->name) == runtime::kInvalidEntity) {
+    return;
+  }
+  // A base that already ends in " (n)" is extended rather than parsed, so
+  // "Coin (2)" duplicates to "Coin (2) (2)": the authored text is kept
+  // whole, which matters more here than a tidy sequence.
+  char base[sizeof(name->name)] = {};
+  std::snprintf(base, sizeof(base), "%s", name->name);
+  for (unsigned suffix = 2U; suffix < 1000U; ++suffix) {
+    char candidate[sizeof(name->name)] = {};
+    // Trim the base so the suffix always fits: a name that cannot take
+    // one whole would otherwise be a truncated copy of another entity's.
+    char suffixText[12] = {};
+    std::snprintf(suffixText, sizeof(suffixText), " (%u)", suffix);
+    const std::size_t suffixLength = std::strlen(suffixText);
+    const std::size_t room = sizeof(candidate) - 1U - suffixLength;
+    std::size_t baseLength = std::strlen(base);
+    if (baseLength > room) {
+      baseLength = room;
+    }
+    std::memcpy(candidate, base, baseLength);
+    std::memcpy(candidate + baseLength, suffixText, suffixLength + 1U);
+    if (world.find_entity_by_name(candidate) == runtime::kInvalidEntity) {
+      std::snprintf(name->name, sizeof(name->name), "%s", candidate);
+      return;
+    }
+  }
+}
+
+bool EntityDuplicateCommand::execute() noexcept {
+  runtime::World *const world = editor_session().world;
+  if ((world == nullptr) || (recordCount == 0U)) {
+    return false;
+  }
+  constexpr std::size_t transformSlot =
+      static_cast<std::size_t>(ComponentEditType::Transform);
+  constexpr std::size_t nameSlot =
+      static_cast<std::size_t>(ComponentEditType::Name);
+
+  std::size_t created = 0U;
+  bool ok = true;
+  for (std::size_t i = 0U; ok && (i < recordCount); ++i) {
+    EntityDuplicateRecord &record = records[i];
+    ComponentEditSnapshot components = record.components;
+    // Internal parent links point at the copies, not the originals; the
+    // root's link is left as captured, so it stays under the same parent.
+    if (record.parentRecord != EntityDuplicateRecord::kNoParentRecord) {
+      components.transform.parentId = records[record.parentRecord].persistentId;
+    }
+    if ((i == 0U) && record.present[nameSlot]) {
+      make_unique_entity_name(*world, &components.name);
+      record.components.name = components.name;
+    }
+    const runtime::Entity entity =
+        (record.persistentId == runtime::kInvalidPersistentId)
+            ? (record.present[transformSlot]
+                   ? world->create_scene_object(components.transform)
+                   : world->create_entity())
+            : (record.present[transformSlot]
+                   ? world->create_scene_object_with_persistent_id(
+                         record.persistentId, components.transform)
+                   : world->create_entity_with_persistent_id(
+                         record.persistentId));
+    if (entity == runtime::kInvalidEntity) {
+      ok = false;
+      break;
+    }
+    record.persistentId = world->persistent_id(entity);
+    ++created;
+    for (std::size_t typeIndex = 0U; typeIndex < kComponentEditTypeCount;
+         ++typeIndex) {
+      if (!record.present[typeIndex] || (typeIndex == transformSlot)) {
+        continue;
+      }
+      if (!apply_component_snapshot(static_cast<ComponentEditType>(typeIndex),
+                                    entity, true, components)) {
+        ok = false;
+        break;
+      }
+    }
+  }
+  if (!ok) {
+    for (std::size_t i = created; i > 0U; --i) {
+      const runtime::Entity member =
+          world->find_entity_by_persistent_id(records[i - 1U].persistentId);
+      if (member != runtime::kInvalidEntity) {
+        static_cast<void>(world->destroy_entity(member));
+      }
+    }
+    core::log_message(core::LogLevel::Error, "editor",
+                      "entity duplicate could not create the copy — rolled "
+                      "back");
+    return false;
+  }
+  return true;
+}
+
+bool EntityDuplicateCommand::undo() noexcept {
+  runtime::World *const world = editor_session().world;
+  if ((world == nullptr) || (recordCount == 0U)) {
+    return false;
+  }
+  // The root's destroy takes its whole transform subtree, which is every
+  // member this command created.
+  const runtime::Entity root =
+      world->find_entity_by_persistent_id(records[0].persistentId);
+  if (root == runtime::kInvalidEntity) {
+    return false;
+  }
+  return world->destroy_entity(root);
+}
+
+EntityDuplicateCommand *
+build_entity_duplicate_command(runtime::Entity entity) noexcept {
+  runtime::World *const world = editor_session().world;
+  if ((world == nullptr) || !world->is_alive(entity)) {
+    return nullptr;
+  }
+  const std::size_t capacity = world->alive_entity_count();
+  std::unique_ptr<runtime::Entity[]> members(
+      new (std::nothrow) runtime::Entity[capacity]);
+  std::unique_ptr<bool[]> visited(
+      new (std::nothrow) bool[runtime::World::kMaxEntities + 1U]());
+  if ((members == nullptr) || (visited == nullptr)) {
+    return nullptr;
+  }
+  const std::size_t count = collect_subtree_members(
+      *world, entity, members.get(), capacity, visited.get());
+  if (count == 0U) {
+    return nullptr;
+  }
+  auto *command = allocate_command<EntityDuplicateCommand>();
+  if (command == nullptr) {
+    return nullptr;
+  }
+  command->records.reset(new (std::nothrow) EntityDuplicateRecord[count]);
+  if (command->records == nullptr) {
+    delete command;
+    return nullptr;
+  }
+  for (std::size_t i = 0U; i < count; ++i) {
+    EntityDuplicateRecord &record = command->records[i];
+    for (std::size_t typeIndex = 0U; typeIndex < kComponentEditTypeCount;
+         ++typeIndex) {
+      record.present[typeIndex] = capture_component_snapshot(
+          static_cast<ComponentEditType>(typeIndex), members[i],
+          &record.components);
+    }
+    if (i == 0U) {
+      continue;
+    }
+    // collect_subtree_members walks parents before children, so the
+    // parent of every member past the root is already recorded.
+    const runtime::PersistentId parentId = record.components.transform.parentId;
+    for (std::size_t candidate = 0U; candidate < i; ++candidate) {
+      if (world->persistent_id(members[candidate]) == parentId) {
+        record.parentRecord = candidate;
+        break;
+      }
+    }
+  }
+  command->recordCount = count;
+  return command;
+}
+
+runtime::Entity execute_entity_duplicate(runtime::Entity entity) noexcept {
+  runtime::World *const world = editor_session().world;
+  if (world == nullptr) {
+    return runtime::kInvalidEntity;
+  }
+  inspector_commit_pending_edit();
+  EntityDuplicateCommand *const command =
+      build_entity_duplicate_command(entity);
+  if (command == nullptr) {
+    core::log_message(core::LogLevel::Error, "editor",
+                      "entity duplicate refused: it could not be recorded "
+                      "for undo (out of memory or not alive)");
+    return runtime::kInvalidEntity;
+  }
+  if (!editor_session().commandHistory.execute(command)) {
+    return runtime::kInvalidEntity;
+  }
+  return world->find_entity_by_persistent_id(command->records[0].persistentId);
+}
+
 bool execute_entity_delete(runtime::Entity entity) noexcept {
   inspector_commit_pending_edit();
   EntityDeleteCommand *const command = build_entity_delete_command(entity);

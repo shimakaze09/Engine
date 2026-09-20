@@ -207,6 +207,23 @@ void draw_main_menu_bar() noexcept {
       ImGui::EndDisabled();
     }
 
+    ImGui::Separator();
+    const runtime::Entity selection = selected_entity();
+    const bool canDuplicate =
+        world_is_editable() && (selection != runtime::kInvalidEntity);
+    if (!canDuplicate) {
+      ImGui::BeginDisabled();
+    }
+    if (ImGui::MenuItem("Duplicate", "Ctrl+D")) {
+      const runtime::Entity copy = execute_entity_duplicate(selection);
+      if (copy != runtime::kInvalidEntity) {
+        select_entity(copy, false);
+      }
+    }
+    if (!canDuplicate) {
+      ImGui::EndDisabled();
+    }
+
     ImGui::EndMenu();
   }
 
@@ -435,6 +452,31 @@ static void draw_entity_node(runtime::Entity entity,
   if (ImGui::IsItemClicked(ImGuiMouseButton_Left) &&
       !ImGui::IsItemToggledOpen()) {
     select_entity(entity, ImGui::GetIO().KeyCtrl);
+  }
+
+  if (ImGui::BeginPopupContextItem(label)) {
+    // A right-click selects the row first, so the actions below and the
+    // Edit menu's act on the same entity.
+    if (!is_entity_selected(entity) && (selected_entity() != entity)) {
+      select_entity(entity, false);
+    }
+    const bool editable = world_is_editable();
+    if (!editable) {
+      ImGui::BeginDisabled();
+    }
+    if (ImGui::MenuItem("Duplicate", "Ctrl+D")) {
+      const runtime::Entity copy = execute_entity_duplicate(entity);
+      if (copy != runtime::kInvalidEntity) {
+        select_entity(copy, false);
+      }
+    }
+    if (ImGui::MenuItem("Delete", "Del")) {
+      static_cast<void>(execute_entity_delete(entity));
+    }
+    if (!editable) {
+      ImGui::EndDisabled();
+    }
+    ImGui::EndPopup();
   }
 
   if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {

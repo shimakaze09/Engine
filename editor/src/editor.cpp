@@ -394,6 +394,15 @@ void editor_new_frame() noexcept {
     if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_S)) {
       request_save_scene();
     }
+    if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_D)) {
+      const runtime::Entity selection = selected_entity();
+      if (world_is_editable() && (selection != runtime::kInvalidEntity)) {
+        const runtime::Entity copy = execute_entity_duplicate(selection);
+        if (copy != runtime::kInvalidEntity) {
+          select_entity(copy, false);
+        }
+      }
+    }
     if (ImGui::IsKeyPressed(ImGuiKey_W)) {
       editor_session().gizmoOp = ImGuizmo::TRANSLATE;
     }
