@@ -99,7 +99,8 @@ void print_usage() {
                "[--platform <tag>]\n"
                "   or: asset_packer --shader-manifest <shaders.manifest> "
                "--shader-out <dir> --shaderc <path> "
-               "--shader-include <dir> [--profiles <csv>] [--force]\n");
+               "--shader-include <dir> [--profiles <csv>] [--force]\n"
+               "   or: asset_packer --init-meta <assets-dir>\n");
 }
 
 /// Strips the mesh output's extension so cooked skeletal assets land
@@ -214,6 +215,9 @@ int main(int argc, char **argv) {
   for (int i = 1; i < argc; ++i) {
     if (std::strcmp(argv[i], "--shader-manifest") == 0) {
       return run_shader_cook(argc, argv);
+    }
+    if (std::strcmp(argv[i], "--init-meta") == 0) {
+      return run_init_meta(argc, argv);
     }
   }
   if (argc < 3) {
@@ -382,8 +386,10 @@ int main(int argc, char **argv) {
     }
   }
 
+  // From the source's authored sidecar. The cooked record is derived and
+  // regenerable, so it can never be where an author's settings live.
   ImportSettings importSettings{};
-  read_import_settings_from_meta(outputPath, &importSettings);
+  static_cast<void>(read_authored_import_settings(inputPath, &importSettings));
   // The cook key pairs the settings with the mesh cook's logic revision,
   // so a logic change recooks (and re-rasterizes the thumbnail, which
   // derives from the same cooked geometry) without a settings edit.

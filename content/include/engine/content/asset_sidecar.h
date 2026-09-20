@@ -21,6 +21,7 @@
 #include <cstdint>
 
 #include "engine/content/asset_identity.h"
+#include "engine/content/asset_metadata.h"
 
 namespace engine::content {
 
@@ -42,6 +43,12 @@ struct AssetSidecar final {
   /// be renamed without breaking what hangs off it, and so per-folder
   /// import settings have somewhere to live.
   bool folder = false;
+  /// How this source is cooked, when it is a mesh source. Authored: the
+  /// cook reads it from here and never writes it back, so deleting every
+  /// cooked output loses nothing an author typed. Absent for a source
+  /// with no settings of its own, which then cooks at the defaults.
+  bool hasMeshImport = false;
+  MeshImportSettings meshImport{};
 };
 
 /// Why a sidecar read did not produce a sidecar.

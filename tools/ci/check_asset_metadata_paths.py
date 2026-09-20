@@ -21,6 +21,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 # serialization format). A new authored document kind is added here, or it
 # leaves this audit silently.
 TRACKED_PATTERNS = (
+    "assets/**/*.meta",
     "assets/**/*.cookmeta",
     "assets/**/*.cookstamp",
     "assets/**/*.scene",

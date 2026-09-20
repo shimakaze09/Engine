@@ -27,18 +27,27 @@ AssetId make_asset_id_from_path(const char *path) noexcept;
 /// canonicalized path hash with a logged warning.
 AssetId make_asset_id_from_file(const char *path) noexcept;
 
-/// Mesh import options (scale, up axis, normal generation).
+/// How a mesh source is turned into a cooked mesh: which primitive of
+/// the source to take, and how to orient and scale it. Authored data —
+/// it lives in the source's ".meta" sidecar, it is what a human edits in
+/// the Inspector, and it is part of the cook key, so changing any field
+/// recooks the asset.
+///
+/// This is the one definition. The packer had its own copy with the two
+/// sub-asset selectors and this one had neither, which meant the type a
+/// caller reached for decided whether "import settings" could name a
+/// primitive at all.
 struct MeshImportSettings final {
+  /// Which mesh of a source that holds several.
+  std::int32_t meshIndex = 0;
+  /// Which primitive of that mesh.
+  std::int32_t primitiveIndex = 0;
   float scaleFactor = 1.0F;
-  std::uint8_t upAxis = 1U; // 0=X, 1=Y, 2=Z
+  std::int32_t upAxis = 1; // 0=X, 1=Y, 2=Z
   bool generateNormals = false;
-};
 
-/// Texture import options (format, mips, sRGB).
-struct TextureImportSettings final {
-  std::uint8_t format = 0U; // 0=auto
-  bool generateMips = true;
-  bool sRGB = true;
+  friend constexpr bool operator==(const MeshImportSettings &,
+                                   const MeshImportSettings &) = default;
 };
 
 /// Stores asset metadata used by the engine.
@@ -59,9 +68,6 @@ struct AssetMetadata final {
 
   std::array<AssetId, kMaxDependencies> dependencies{};
   std::size_t dependencyCount = 0U;
-
-  MeshImportSettings meshSettings{};
-  TextureImportSettings textureSettings{};
 };
 
 /// True when the metadata carries the tag.

@@ -5,6 +5,7 @@
 #include "packer_shared.h"
 
 #include "engine/content/asset_metadata.h"
+#include "engine/content/asset_sidecar.h"
 #include "engine/content/cook_contract.h"
 
 #include <algorithm>
@@ -241,108 +242,21 @@ void sort_dependency_digests(std::vector<DependencyDigest> &digests) {
             });
 }
 
-/// Reads import settings from meta data.
-bool read_import_settings_from_meta(const char *outputPath,
-                                    ImportSettings *outSettings) {
-  if ((outputPath == nullptr) || (outSettings == nullptr)) {
+/// Reads the authored import settings out of the source's sidecar.
+bool read_authored_import_settings(const char *sourcePath,
+                                   ImportSettings *outSettings) {
+  if ((sourcePath == nullptr) || (outSettings == nullptr)) {
     return false;
   }
-
-  char metadataPath[512] = {};
-  const int pathResult = std::snprintf(metadataPath, sizeof(metadataPath),
-                                       "%s.cookmeta", outputPath);
-  if ((pathResult <= 0) ||
-      (pathResult >= static_cast<int>(sizeof(metadataPath)))) {
+  engine::content::AssetSidecar sidecar{};
+  if (engine::content::read_asset_sidecar(sourcePath, &sidecar) !=
+      engine::content::SidecarReadResult::Ok) {
     return false;
   }
-
-  FILE *file = nullptr;
-#ifdef _WIN32
-  if (fopen_s(&file, metadataPath, "rb") != 0) {
-    file = nullptr;
-  }
-#else
-  file = std::fopen(metadataPath, "rb");
-#endif
-  if (file == nullptr) {
+  if (!sidecar.hasMeshImport) {
     return false;
   }
-
-  std::fseek(file, 0, SEEK_END);
-  const long fileSize = std::ftell(file);
-  std::fseek(file, 0, SEEK_SET);
-  if (fileSize <= 0 || fileSize > 1024 * 1024) {
-    std::fclose(file);
-    return false;
-  }
-
-  std::vector<char> buffer(static_cast<std::size_t>(fileSize) + 1U, '\0');
-  const std::size_t readBytes =
-      std::fread(buffer.data(), 1U, static_cast<std::size_t>(fileSize), file);
-  std::fclose(file);
-  if (readBytes != static_cast<std::size_t>(fileSize)) {
-    return false;
-  }
-
-  engine::core::JsonParser parser{};
-  if (!parser.parse(buffer.data(), readBytes)) {
-    return false;
-  }
-
-  const engine::core::JsonValue *root = parser.root();
-  if ((root == nullptr) ||
-      (root->type != engine::core::JsonValue::Type::Object)) {
-    return false;
-  }
-
-  const engine::core::JsonValue *importObj =
-      parser.get_object_field(*root, "importSettings");
-  if ((importObj == nullptr) ||
-      (importObj->type != engine::core::JsonValue::Type::Object)) {
-    return false;
-  }
-
-  float scaleFactor = 1.0F;
-  std::uint32_t meshIndex = 0U;
-  std::uint32_t primitiveIndex = 0U;
-  std::uint32_t upAxis = 1U;
-  bool generateNormals = false;
-
-  const engine::core::JsonValue *scaleVal =
-      parser.get_object_field(*importObj, "scaleFactor");
-  if (scaleVal != nullptr) {
-    parser.as_float(*scaleVal, &scaleFactor);
-  }
-
-  const engine::core::JsonValue *meshVal =
-      parser.get_object_field(*importObj, "meshIndex");
-  if (meshVal != nullptr) {
-    parser.as_uint(*meshVal, &meshIndex);
-  }
-
-  const engine::core::JsonValue *primVal =
-      parser.get_object_field(*importObj, "primitiveIndex");
-  if (primVal != nullptr) {
-    parser.as_uint(*primVal, &primitiveIndex);
-  }
-
-  const engine::core::JsonValue *upVal =
-      parser.get_object_field(*importObj, "upAxis");
-  if (upVal != nullptr) {
-    parser.as_uint(*upVal, &upAxis);
-  }
-
-  const engine::core::JsonValue *normVal =
-      parser.get_object_field(*importObj, "generateNormals");
-  if (normVal != nullptr) {
-    parser.as_bool(*normVal, &generateNormals);
-  }
-
-  outSettings->scaleFactor = scaleFactor;
-  outSettings->meshIndex = static_cast<int>(meshIndex);
-  outSettings->primitiveIndex = static_cast<int>(primitiveIndex);
-  outSettings->upAxis = static_cast<int>(upAxis);
-  outSettings->generateNormals = generateNormals;
+  *outSettings = sidecar.meshImport;
   return true;
 }
 

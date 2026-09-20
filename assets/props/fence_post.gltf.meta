@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "guid": "2c6ddbc1-2b5a-49f1-a2d1-2d6d8f077ca4",
+  "importSettings": {
+    "meshIndex": 0,
+    "primitiveIndex": 0,
+    "scaleFactor": 1,
+    "upAxis": 1,
+    "generateNormals": false
+  }
+}

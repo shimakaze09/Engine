@@ -41,3 +41,4 @@
 *.animctrl linguist-language=JSON
 *.manifest linguist-language=JSON
 *.cookmeta linguist-language=JSON
+*.meta linguist-language=JSON

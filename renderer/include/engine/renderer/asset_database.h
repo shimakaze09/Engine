@@ -21,8 +21,6 @@ using content::AssetId;
 using content::kInvalidAssetId;
 using content::AssetState;
 using content::AssetTypeTag;
-using content::MeshImportSettings;
-using content::TextureImportSettings;
 using content::AssetMetadata;
 using content::asset_metadata_has_tag;
 using content::asset_metadata_add_tag;

@@ -4,6 +4,7 @@
 
 #include "engine/content/asset_sidecar.h"
 
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 
@@ -17,6 +18,47 @@ namespace {
 
 constexpr const char *kLogChannel = "assets";
 constexpr const char *kSidecarSuffix = ".meta";
+
+/// Reads one optional field of an object, leaving `*out` at its default
+/// when the field is absent; false only when it is present and will not
+/// read as the expected type.
+bool read_int_field(const core::JsonParser &parser,
+                    const core::JsonValue &object, const char *name,
+                    std::int32_t *out) noexcept {
+  core::JsonValue field{};
+  if (!parser.get_object_field(object, name, &field)) {
+    return true;
+  }
+  std::int64_t wide = 0;
+  if (!parser.as_int64(field, &wide)) {
+    return false;
+  }
+  if ((wide < INT32_MIN) || (wide > INT32_MAX)) {
+    return false;
+  }
+  *out = static_cast<std::int32_t>(wide);
+  return true;
+}
+
+bool read_float_field(const core::JsonParser &parser,
+                      const core::JsonValue &object, const char *name,
+                      float *out) noexcept {
+  core::JsonValue field{};
+  if (!parser.get_object_field(object, name, &field)) {
+    return true;
+  }
+  return parser.as_float(field, out);
+}
+
+bool read_bool_field(const core::JsonParser &parser,
+                     const core::JsonValue &object, const char *name,
+                     bool *out) noexcept {
+  core::JsonValue field{};
+  if (!parser.get_object_field(object, name, &field)) {
+    return true;
+  }
+  return parser.as_bool(field, out);
+}
 
 /// Reports a sidecar the reader could not use, naming the file so the
 /// author can go and look at it.
@@ -134,9 +176,42 @@ SidecarReadResult read_asset_sidecar(const char *assetOsPath,
     }
   }
 
+  // Import settings are optional: a source with none cooks at the
+  // defaults. Present-but-malformed is refused rather than defaulted,
+  // because silently cooking at the defaults would throw away what the
+  // author typed and look like it worked.
+  MeshImportSettings meshImport{};
+  bool hasMeshImport = false;
+  const core::JsonValue *settings =
+      parser.get_object_field(*root, "importSettings");
+  if (settings != nullptr) {
+    if (settings->type != core::JsonValue::Type::Object) {
+      log_sidecar_problem(path, "has an importSettings that is not an object");
+      return SidecarReadResult::Malformed;
+    }
+    const core::JsonValue settingsValue = *settings;
+    if (!read_int_field(parser, settingsValue, "meshIndex",
+                        &meshImport.meshIndex) ||
+        !read_int_field(parser, settingsValue, "primitiveIndex",
+                        &meshImport.primitiveIndex) ||
+        !read_int_field(parser, settingsValue, "upAxis",
+                        &meshImport.upAxis) ||
+        !read_float_field(parser, settingsValue, "scaleFactor",
+                          &meshImport.scaleFactor) ||
+        !read_bool_field(parser, settingsValue, "generateNormals",
+                         &meshImport.generateNormals)) {
+      log_sidecar_problem(path, "has an importSettings field that will not "
+                                "read; the settings are not guessed at");
+      return SidecarReadResult::Malformed;
+    }
+    hasMeshImport = true;
+  }
+
   out->schemaVersion = version;
   out->guid = guid;
   out->folder = folder;
+  out->hasMeshImport = hasMeshImport;
+  out->meshImport = meshImport;
   return SidecarReadResult::Ok;
 }
 
@@ -159,20 +234,50 @@ bool write_asset_sidecar(const char *assetOsPath,
   // Hand-built rather than routed through JsonWriter: the whole point of
   // the layout is one field per line, so a merge between two branches
   // that both imported assets resolves per field.
-  char document[512] = {};
-  int written = 0;
-  if (sidecar.folder) {
-    written = std::snprintf(document, sizeof(document),
-                            "{\n  \"schemaVersion\": %u,\n  \"guid\": "
-                            "\"%s\",\n  \"folder\": true\n}\n",
-                            kAssetSidecarSchemaVersion, guidText);
-  } else {
-    written = std::snprintf(
-        document, sizeof(document),
-        "{\n  \"schemaVersion\": %u,\n  \"guid\": \"%s\"\n}\n",
-        kAssetSidecarSchemaVersion, guidText);
+  char document[768] = {};
+  int written = std::snprintf(
+      document, sizeof(document),
+      "{\n  \"schemaVersion\": %u,\n  \"guid\": \"%s\"",
+      kAssetSidecarSchemaVersion, guidText);
+  if (written <= 0) {
+    return false;
   }
-  if ((written <= 0) || (static_cast<std::size_t>(written) >= sizeof(document))) {
+  auto append = [&](const char *format, auto... args) noexcept {
+    if (written < 0) {
+      return;
+    }
+    const int more =
+        std::snprintf(document + written,
+                      sizeof(document) - static_cast<std::size_t>(written),
+                      format, args...);
+    if ((more < 0) || (static_cast<std::size_t>(written + more) >=
+                       sizeof(document))) {
+      written = -1;
+      return;
+    }
+    written += more;
+  };
+  if (sidecar.folder) {
+    append("%s", ",\n  \"folder\": true");
+  }
+  if (sidecar.hasMeshImport) {
+    // One field per line here too: a merge between two branches that each
+    // tuned one setting resolves to both edits rather than one winning.
+    append(",\n  \"importSettings\": {"
+           "\n    \"meshIndex\": %d,"
+           "\n    \"primitiveIndex\": %d,"
+           "\n    \"scaleFactor\": %.9g,"
+           "\n    \"upAxis\": %d,"
+           "\n    \"generateNormals\": %s"
+           "\n  }",
+           static_cast<int>(sidecar.meshImport.meshIndex),
+           static_cast<int>(sidecar.meshImport.primitiveIndex),
+           static_cast<double>(sidecar.meshImport.scaleFactor),
+           static_cast<int>(sidecar.meshImport.upAxis),
+           sidecar.meshImport.generateNormals ? "true" : "false");
+  }
+  append("%s", "\n}\n");
+  if (written <= 0) {
     return false;
   }
 
