@@ -12,6 +12,7 @@
 #include "coroutine_bindings.h"
 #include "debug_bindings.h"
 #include "deferred_mutations.h"
+#include "deterministic_math_library.h"
 #include "engine/scripting/bindable_api.h"
 #include "engine/scripting/dap_server.h"
 #include "entity_handle.h"
@@ -322,6 +323,9 @@ int open_libraries_trampoline(lua_State *state) noexcept {
   lua_pop(state, 1);
   luaL_requiref(state, LUA_MATHLIBNAME, luaopen_math, 1);
   lua_pop(state, 1);
+  // The transcendentals go through the deterministic scalar set, never
+  // the C library, so script-driven state matches across platforms.
+  install_deterministic_math(state);
   luaL_requiref(state, LUA_UTF8LIBNAME, luaopen_utf8, 1);
   lua_pop(state, 1);
   register_engine_bindings(state);

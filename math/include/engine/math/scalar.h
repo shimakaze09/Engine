@@ -1,12 +1,12 @@
-// Deterministic scalar transcendentals for the simulation: sin, cos, exp,
-// atan, atan2, asin and acos evaluated with IEEE add, multiply, divide and
-// sqrt only (plus the exact ldexp, fabs and copysign), so every platform
-// and compiler under the engine's strict float flags produces the same
-// bits. libm's versions are not correctly rounded and differ between
-// glibc, UCRT and libSystem, so the fixed step and the quaternion helpers
-// call these instead. Accuracy is a few ulp over the simulation's ranges;
-// arguments beyond about 8192 radians lose range-reduction precision but
-// stay deterministic.
+// Deterministic scalar transcendentals for the simulation: sin, cos, tan,
+// exp, log, atan, atan2, asin and acos evaluated with IEEE add, multiply,
+// divide and sqrt only (plus the exact ldexp, frexp, fabs and copysign),
+// so every platform and compiler under the engine's strict float flags
+// produces the same bits. libm's versions are not correctly rounded and
+// differ between glibc, UCRT and libSystem, so the fixed step, the
+// quaternion helpers and the Lua math table call these instead. Accuracy
+// is a few ulp over the simulation's ranges; arguments beyond about 8192
+// radians lose range-reduction precision but stay deterministic.
 
 #pragma once
 
@@ -116,6 +116,46 @@ inline float det_cos(float x) noexcept {
   default:
     return detail::sin_reduced(r);
   }
+}
+
+/// Deterministic tan as the quotient of the deterministic sin and cos;
+/// grows without bound toward odd multiples of pi/2 as the quotient does.
+inline float det_tan(float x) noexcept { return det_sin(x) / det_cos(x); }
+
+/// Deterministic natural log: NaN for negative or NaN input, -infinity at
+/// zero, infinity at infinity. The mantissa is centered on 1 and its log
+/// taken as 2 atanh((m - 1) / (m + 1)) by the series to the 15th power,
+/// with the exponent's multiple of ln 2 added in two exact pieces.
+inline float det_log(float x) noexcept {
+  if (std::isnan(x) || (x < 0.0F)) {
+    return std::numeric_limits<float>::quiet_NaN();
+  }
+  if (x == 0.0F) {
+    return -std::numeric_limits<float>::infinity();
+  }
+  if (std::isinf(x)) {
+    return x;
+  }
+  int exponent = 0;
+  float m = std::frexp(x, &exponent);
+  // frexp gives m in [0.5, 1); shifting the lower half up centers the
+  // series on 1, so |s| stays below 0.172.
+  if (m < 0.70710678118654752F) {
+    m *= 2.0F;
+    exponent -= 1;
+  }
+  const float s = (m - 1.0F) / (m + 1.0F);
+  const float s2 = s * s;
+  float p = 1.0F / 15.0F;
+  p = (p * s2) + (1.0F / 13.0F);
+  p = (p * s2) + (1.0F / 11.0F);
+  p = (p * s2) + (1.0F / 9.0F);
+  p = (p * s2) + (1.0F / 7.0F);
+  p = (p * s2) + (1.0F / 5.0F);
+  p = (p * s2) + (1.0F / 3.0F);
+  p = (p * s2) + 1.0F;
+  const float e = static_cast<float>(exponent);
+  return ((e * detail::kLn2Hi) + (e * detail::kLn2Lo)) + (2.0F * (s * p));
 }
 
 /// Deterministic exp: e^x, overflowing to infinity and underflowing to

@@ -427,6 +427,15 @@ engine_add_test_executable(engine_unit_lua_error_diagnostic
     engine_core
 )
 
+engine_add_test_executable(engine_unit_lua_deterministic_math
+    SOURCES
+    lua_deterministic_math_test.cpp
+    PRIVATE_DEPS
+    engine_scripting
+    engine_math
+    engine_core
+)
+
 engine_add_test_executable(engine_unit_collision_event_identity
     SOURCES
     collision_event_identity_test.cpp
