@@ -466,6 +466,96 @@ static void test_registry_boundaries() {
   fs::remove_all(scratch, ec);
 }
 
+/// EXPECTATION (#600): a positional sound keeps its full volume out to
+/// the distance a third-person camera sits from the character it follows,
+/// falls off by the inverse model past that, and a sound too far to be
+/// heard is refused rather than taking one of the fixed instance slots.
+void test_positional_attenuation() noexcept {
+  using namespace engine::audio;
+  PlayParams params{};
+  g_tests.check(params.minDistance == kDefaultMinAudibleDistance,
+                "the default minimum distance is the kit camera's distance");
+  g_tests.check(params.rolloff == kDefaultRolloff,
+                "the default rolloff is the inverse law");
+
+  // A footstep at the followed character's feet, heard from the camera
+  // 7.4 m away: full gain, where the mixer's own 1 m default would have
+  // left it at about 0.135.
+  g_tests.check(distance_gain(7.4F, params) == 1.0F,
+                "a sound at the followed entity plays at full gain");
+  g_tests.check(distance_gain(0.0F, params) == 1.0F,
+                "a sound at the listener plays at full gain");
+  // Past the minimum distance the inverse model applies exactly:
+  // 8 / (8 + 1 * (24 - 8)) = 1/3.
+  g_tests.check(distance_gain(24.0F, params) == (1.0F / 3.0F),
+                "three times the minimum distance is a third of the gain");
+  PlayParams tight{};
+  tight.minDistance = 1.0F;
+  g_tests.check(distance_gain(2.0F, tight) == 0.5F,
+                "a sound authored to fall off from a metre does");
+  PlayParams flat{};
+  flat.rolloff = 0.0F;
+  g_tests.check(distance_gain(1000.0F, flat) == 1.0F,
+                "zero rolloff never attenuates");
+  PlayParams broken{};
+  broken.minDistance = 0.0F;
+  g_tests.check(distance_gain(10.0F, broken) == 1.0F,
+                "an invalid minimum distance reports no attenuation");
+
+  // Out-of-range attenuation params are refused like the other play
+  // params, before any instance exists.
+  g_tests.check(!play_sound_at(kInvalidSound, engine::math::Vec3(0, 0, 0),
+                               broken),
+                "an invalid minimum distance is refused");
+
+  namespace fs = std::filesystem;
+  std::error_code ec{};
+  const fs::path scratch = fs::current_path(ec) / "engine_audio_gain_test";
+  fs::remove_all(scratch, ec);
+  fs::create_directories(scratch, ec);
+  TEST_ASSERT(!ec);
+  TEST_ASSERT(write_wav(scratch / "tone.wav", 220U, 440U));
+  TEST_ASSERT(engine::core::initialize_vfs());
+  TEST_ASSERT(engine::core::mount("audiogain", scratch.string().c_str()));
+  const auto finish = [&scratch]() noexcept {
+    unload_all_sounds();
+    shutdown_audio();
+    engine::core::shutdown_vfs();
+    std::error_code removeError{};
+    fs::remove_all(scratch, removeError);
+  };
+  if (!initialize_audio()) {
+    engine::core::shutdown_vfs();
+    fs::remove_all(scratch, ec);
+    g_tests.skip("inaudible one-shots are culled (no audio device)");
+    return;
+  }
+  set_listener(engine::math::Vec3(0.0F, 0.0F, 0.0F),
+               engine::math::Vec3(0.0F, 0.0F, -1.0F),
+               engine::math::Vec3(0.0F, 1.0F, 0.0F));
+  const SoundHandle handle = load_sound("audiogain/tone.wav");
+  if (handle == kInvalidSound) {
+    finish();
+    g_tests.check(false, "the gain fixture loads");
+    return;
+  }
+  PlayParams audible{};
+  g_tests.check(play_sound_at(handle, engine::math::Vec3(0.0F, 0.0F, -5.0F),
+                              audible),
+                "a sound within earshot starts");
+  // 8 / (8 + (100000 - 8)) is far below the audible floor.
+  g_tests.check(!play_sound_at(handle,
+                               engine::math::Vec3(0.0F, 0.0F, -100000.0F),
+                               audible),
+                "a sound too far to hear never takes an instance slot");
+  PlayParams silent{};
+  silent.volume = 0.0F;
+  g_tests.check(!play_sound_at(handle, engine::math::Vec3(0.0F, 0.0F, -1.0F),
+                               silent),
+                "a silent sound never takes an instance slot");
+  finish();
+}
+
 /// Runs this executable or test program.
 int main() {
   RUN_TEST(test_double_init_and_shutdown);
@@ -480,6 +570,7 @@ int main() {
   RUN_TEST(test_out_of_range_bus_rejected);
   RUN_TEST(test_master_volume_stored);
   RUN_TEST(test_invalid_inputs_rejected);
+  RUN_TEST(test_positional_attenuation);
   RUN_TEST(test_decode_budgets);
   RUN_TEST(test_registry_boundaries);
 

@@ -1828,6 +1828,11 @@ void EnginePipeline::Impl::stage_render() noexcept {
         static_cast<float>(clock.renderAlpha)));
   }
 
+  // The listener sits at the camera, so panning matches what is on
+  // screen. A third-person camera is then metres from the character it
+  // follows, which is why a positional sound keeps full volume out to
+  // audio::kDefaultMinAudibleDistance instead of falling off from one
+  // metre as the mixer's own default would.
   const renderer::CameraState listenerCamera = renderer::get_active_camera();
   audio::set_listener(
       listenerCamera.position,
