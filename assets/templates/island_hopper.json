@@ -1618,7 +1618,7 @@
     "RigidBody": {
      "acceleration": [
       0.0,
-      9.8,
+      0.0,
       0.0
      ],
      "angularVelocity": [
@@ -1626,6 +1626,7 @@
       0.0,
       0.0
      ],
+     "gravityScale": 0.0,
      "inverseInertia": 0.0,
      "inverseMass": 0.001,
      "sleeping": false,
@@ -1700,7 +1701,7 @@
     "RigidBody": {
      "acceleration": [
       0.0,
-      9.8,
+      0.0,
       0.0
      ],
      "angularVelocity": [
@@ -1708,6 +1709,7 @@
       0.0,
       0.0
      ],
+     "gravityScale": 0.0,
      "inverseInertia": 0.0,
      "inverseMass": 1.0,
      "sleeping": false,
@@ -1924,6 +1926,7 @@
       0.0,
       0.0
      ],
+     "gravityScale": 1.0,
      "inverseInertia": 0.0,
      "inverseMass": 1.0,
      "sleeping": false,

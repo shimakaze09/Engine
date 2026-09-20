@@ -26,6 +26,9 @@ namespace {
 // array; revision 1 wrote one number, read as the same value on every axis.
 constexpr std::uint32_t kLastImplicitInertiaPrefabVersion = 2U;
 constexpr std::uint32_t kLastScalarInertiaPrefabVersion = 1U;
+// Before the gravity scale (revision 4) a body was held against gravity
+// by an authored acceleration equal to its opposite.
+constexpr std::uint32_t kLastAccelerationCancelsGravityPrefabVersion = 3U;
 constexpr const char *kInverseInertiaKey = "inverseInertia";
 
 } // namespace
@@ -114,6 +117,11 @@ bool decode_prefab_component(const core::JsonParser &parser,
     if (documentVersion <= kLastImplicitInertiaPrefabVersion) {
       out->inertiaAuthored = true;
     }
+    // A prefab carries no gravity of its own; the cancelled value can
+    // only have meant the default the scenes of that revision ran with.
+    if (documentVersion <= kLastAccelerationCancelsGravityPrefabVersion) {
+      migrate_cancelled_gravity(out, physics::kDefaultGravity);
+    }
     return true;
   } else {
     static_cast<void>(documentVersion);
@@ -171,7 +179,7 @@ bool encode_prefab_component(core::JsonWriter &w, const char *key,
 namespace {
 
 constexpr const char *kPrefabLogChannel = "prefab";
-constexpr std::uint32_t kPrefabVersion = 3U;
+constexpr std::uint32_t kPrefabVersion = 4U;
 
 // File IO and vec/quat/foliage JSON helpers are shared with the scene
 // serializer via serialization_util.h.

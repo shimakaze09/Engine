@@ -828,8 +828,8 @@ void test_scene_round_trip() noexcept {
   check(parser.parse(buffer.get(), size) && (parser.root() != nullptr) &&
             parser.get_object_field(*parser.root(), "version",
                                     &versionValue) &&
-            parser.as_uint(versionValue, &version) && (version == 4U),
-        "saved scene carries revision 4");
+            parser.as_uint(versionValue, &version) && (version == 5U),
+        "saved scene carries revision 5");
   check(std::strstr(buffer.get(), "\"inverseInertia\":[") != nullptr,
         "saved scene writes the tensor as an array");
 

@@ -630,7 +630,7 @@ int verify_scene_version_in_buffer(
     return 65;
   }
 
-  if (version != 4U) {
+  if (version != 5U) {
     return 66;
   }
 

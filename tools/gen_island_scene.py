@@ -86,23 +86,19 @@ def capsule_collider(radius, half_height, local):
     return collider
 
 
-# World gravity the runtime applies on top of RigidBody.acceleration
-# (PhysicsContext default); a gravity-disabled body must cancel it.
-WORLD_GRAVITY_Y = -9.8
-
-
 def dynamic_body(gravity=True, inverse_mass=1.0):
-    # RigidBody.acceleration is ADDITIONAL acceleration on top of world
-    # gravity (physics_step adds ctx.gravity to it): zero keeps normal
-    # gravity, and -gravity holds a scripted/driven body in place.
+    # RigidBody.gravityScale is how much of the world's gravity the body
+    # feels: 1 the full pull, 0 none, so a scripted/driven body is held
+    # in place by its own authored switch rather than by an acceleration
+    # that happens to cancel the world's gravity value.
     return {
         "velocity": [0.0, 0.0, 0.0],
-        "acceleration": [0.0, 0.0, 0.0] if gravity
-        else [0.0, -WORLD_GRAVITY_Y, 0.0],
+        "acceleration": [0.0, 0.0, 0.0],
         "angularVelocity": [0.0, 0.0, 0.0],
         "inverseMass": inverse_mass,
         "inverseInertia": 0.0,
         "sleeping": False,
+        "gravityScale": 1.0 if gravity else 0.0,
     }
 
 

@@ -5,6 +5,7 @@
 
 #include "serialization_util.h"
 
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <new>
@@ -1006,6 +1007,31 @@ bool read_animation_component(const core::JsonParser &parser,
   // never carries land on their defaults rather than on stale values.
   *outComponent = component;
   return true;
+}
+
+bool legacy_acceleration_cancels_gravity(const RigidBody &body,
+                                         const math::Vec3 &gravity) noexcept {
+  if (body.inverseMass <= 0.0F) {
+    return false;
+  }
+  const auto cancels = [](float acceleration, float pull) noexcept {
+    const float scale = (std::fabs(pull) > 1.0F) ? std::fabs(pull) : 1.0F;
+    return std::fabs(acceleration + pull) <= (1.0e-3F * scale);
+  };
+  const bool anyPull =
+      (gravity.x != 0.0F) || (gravity.y != 0.0F) || (gravity.z != 0.0F);
+  return anyPull && cancels(body.acceleration.x, gravity.x) &&
+         cancels(body.acceleration.y, gravity.y) &&
+         cancels(body.acceleration.z, gravity.z);
+}
+
+void migrate_cancelled_gravity(RigidBody *body,
+                               const math::Vec3 &gravity) noexcept {
+  if ((body == nullptr) || !legacy_acceleration_cancels_gravity(*body, gravity)) {
+    return;
+  }
+  body->gravityScale = 0.0F;
+  body->acceleration = math::Vec3(0.0F, 0.0F, 0.0F);
 }
 
 } // namespace engine::runtime
