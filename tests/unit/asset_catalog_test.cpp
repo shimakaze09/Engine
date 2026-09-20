@@ -43,6 +43,27 @@ bool write_file(const std::filesystem::path &path) noexcept {
   return out.good();
 }
 
+/// True when the filesystem holding `directory` tells two names apart by
+/// letter case. Linux does; macOS and Windows normally do not, and there
+/// a case-only rename is a no-op and two names differing only by case
+/// are one file. The identity contract is the same on all three — the
+/// GUID survives a case-only rename — but which spelling survives it is
+/// the filesystem's answer, so the cases below ask instead of assuming.
+bool case_sensitive_under(const std::filesystem::path &directory) noexcept {
+  std::error_code ec{};
+  std::filesystem::create_directories(directory, ec);
+  const std::filesystem::path written = directory / ".casing_probe";
+  const std::filesystem::path recased = directory / ".CASING_PROBE";
+  std::filesystem::remove(written, ec);
+  std::filesystem::remove(recased, ec);
+  if (!write_file(written)) {
+    return false;
+  }
+  const bool distinct = !std::filesystem::exists(recased, ec) && !ec;
+  std::filesystem::remove(written, ec);
+  return distinct;
+}
+
 /// The tree: ten runtime forms, six entries the walk must skip.
 bool build_tree() noexcept {
   const std::filesystem::path root(kRoot);
@@ -392,18 +413,23 @@ void test_identity_survives_relocation() noexcept {
              0),
         "a move keeps the GUID and moves where it resolves to");
 
-  // A case-only rename is still the same asset.
+  // A case-only rename is still the same asset. Where the filesystem
+  // tells case apart the file really becomes "Jump.lua"; where it does
+  // not the rename is a no-op and "jump.lua" is still the name. The GUID
+  // resolving to whichever name survived is the contract either way.
+  const bool caseSensitive = case_sensitive_under(root / "gameplay");
   std::filesystem::rename(root / "gameplay/jump.lua",
                           root / "gameplay/Jump.lua", ec);
   std::filesystem::rename(root / "gameplay/jump.lua.meta",
                           root / "gameplay/Jump.lua.meta", ec);
+  const char *const survivingPath =
+      caseSensitive ? "kit/gameplay/Jump.lua" : "kit/gameplay/jump.lua";
   static_cast<void>(walk(store.get()));
   const engine::content::AssetMetadata *recased =
       find_asset_metadata_by_ref(store.get(),
                                  engine::content::asset_ref_primary(script));
   check(!ec && (recased != nullptr) &&
-            (std::strcmp(recased->filePath.data(), "kit/gameplay/Jump.lua") ==
-             0),
+            (std::strcmp(recased->filePath.data(), survivingPath) == 0),
         "a case-only rename keeps the GUID");
 
   // Editing the bytes changes the content hash and nothing else.
@@ -424,8 +450,10 @@ void test_identity_survives_relocation() noexcept {
   // only reaches the catalog once a recook rewrites the stamps, and the
   // CI identity gate catches that pair at the sidecars themselves.
   static_cast<void>(identify(root, "scripts/dash.lua"));
-  std::filesystem::copy_file(root / "gameplay/Jump.lua.meta",
-                             root / "scripts/dash.lua.meta",
+  const std::filesystem::path survivingSidecar =
+      root / (caseSensitive ? "gameplay/Jump.lua.meta"
+                            : "gameplay/jump.lua.meta");
+  std::filesystem::copy_file(survivingSidecar, root / "scripts/dash.lua.meta",
                              std::filesystem::copy_options::overwrite_existing,
                              ec);
   static_cast<void>(walk(store.get()));
@@ -513,14 +541,21 @@ void test_identity_validation_fails_closed() noexcept {
   check(walkResult.registered == 2U,
         "both are still registered, so the caller can show the project");
 
-  // 5: two paths differing only by case.
+  // 5: two paths differing only by case. Constructible only where the
+  // filesystem keeps the two names apart, which is the whole point of
+  // the diagnostic: on macOS and Windows they are already one file, and
+  // the project that builds there is the one that breaks for a Linux
+  // teammate. So the Linux lane is where this is proven, and asking the
+  // filesystem is how the case stays honest rather than vacuous
+  // elsewhere — an exists() probe would answer yes to either spelling.
   check(reset(), "the validation tree is rewritten");
-  const bool cased =
-      write_file(std::filesystem::path(kRoot) / "scripts/Hop.lua");
-  static_cast<void>(identify(std::filesystem::path(kRoot), "scripts/hop.lua"));
-  static_cast<void>(identify(std::filesystem::path(kRoot), "scripts/Hop.lua"));
-  if (cased && std::filesystem::exists(
-                   std::filesystem::path(kRoot) / "scripts/Hop.lua")) {
+  if (case_sensitive_under(std::filesystem::path(kRoot) / "scripts")) {
+    check(write_file(std::filesystem::path(kRoot) / "scripts/Hop.lua"),
+          "a second casing of one script is written");
+    static_cast<void>(
+        identify(std::filesystem::path(kRoot), "scripts/hop.lua"));
+    static_cast<void>(
+        identify(std::filesystem::path(kRoot), "scripts/Hop.lua"));
     walkResult = walk(store.get());
     check(!walkResult.ok && (walkResult.caseCollisions == 2U),
           "two paths differing only by case fail the index, both named");
