@@ -96,6 +96,13 @@ jobs:
       - name: Test
         run: ctest --test-dir build --build-config ${{ matrix.config }} --output-on-failure --timeout 120 --label-exclude gpu
 
+      # ---- The bundled scene loads through the production loader with
+      # every reference resolving; a dangling one fails here, not for an
+      # author.
+      - name: Validate bundled scenes
+        if: runner.os == 'Linux'
+        run: build/tools/engine_validate/engine_validate assets/scene.json
+
       # ---- Determinism hash artifact: every platform and configuration
       # must produce one World::state_hash through the production pipeline.
       - name: Run determinism hash

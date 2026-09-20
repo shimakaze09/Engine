@@ -11,8 +11,10 @@
 #include <memory>
 #include <new>
 
+#include "engine/core/diagnostic.h"
 #include "engine/core/json.h"
 #include "engine/core/logging.h"
+#include "engine/core/vfs.h"
 #include "engine/core/reflect.h"
 #include "engine/math/quat.h"
 #include "engine/math/vec2.h"
@@ -51,6 +53,71 @@ bool log_scene_error(const char *message) noexcept {
   }
 
   return false;
+}
+
+/// Records one reference finding in the report (when given) and logs it
+/// as a warning naming the entity and field.
+void report_reference(core::ValidationReport *report, const char *code,
+                      const char *field, const char *key,
+                      PersistentId entityPersistentId,
+                      const char *what) noexcept {
+  if (report != nullptr) {
+    static_cast<void>(report->add(core::ValidationSeverity::Warning, code,
+                                  key, entityPersistentId));
+  }
+  char message[320] = {};
+  std::snprintf(message, sizeof(message), "%s (entity %u, %s = %s)", what,
+                entityPersistentId, field, key);
+  core::Diagnostic record = core::make_diagnostic(core::LogLevel::Warning,
+                                                  kSceneLogChannel, message);
+  record.kind = core::FailureKind::NotFound;
+  record.entityPersistentId = entityPersistentId;
+  std::snprintf(record.field, sizeof(record.field), "%s", field);
+  core::log_diagnostic(record);
+}
+
+/// True when the path sits under a mounted prefix and names no file; an
+/// unmounted prefix cannot be judged and is left alone.
+bool mounted_path_missing(const char *path) noexcept {
+  char osPath[1024] = {};
+  return core::vfs_resolve_os_path(path, osPath, sizeof(osPath)) &&
+         !core::vfs_file_exists(path);
+}
+
+/// Checks every reference the staged scene carries and records the ones
+/// that resolve to nothing. The scene still loads: a dangling parent
+/// roots its child, a missing script or controller stays authored, and
+/// the report says so.
+void validate_scene_references(const World &staged,
+                               core::ValidationReport *report) noexcept {
+  staged.for_each_alive([&](Entity entity) noexcept {
+    const PersistentId id = staged.persistent_id(entity);
+    Transform transform{};
+    if (staged.get_transform(entity, &transform) &&
+        (transform.parentId != kInvalidPersistentId) &&
+        (staged.find_entity_by_persistent_id(transform.parentId) ==
+         kInvalidEntity)) {
+      char key[32] = {};
+      std::snprintf(key, sizeof(key), "%u", transform.parentId);
+      report_reference(report, "dangling_parent", "parentId", key, id,
+                       "scene parent names no entity; child loads as a root");
+    }
+    const ScriptComponent *script = staged.get_script_component_ptr(entity);
+    if ((script != nullptr) && (script->scriptPath[0] != '\0') &&
+        mounted_path_missing(script->scriptPath)) {
+      report_reference(report, "missing_script", "scriptPath",
+                       script->scriptPath, id,
+                       "scene script path names no file");
+    }
+    const AnimationComponent *animation =
+        staged.get_animation_component_ptr(entity);
+    if ((animation != nullptr) && (animation->controllerPath[0] != '\0') &&
+        mounted_path_missing(animation->controllerPath)) {
+      report_reference(report, "missing_controller", "controllerPath",
+                       animation->controllerPath, id,
+                       "scene animation controller path names no file");
+    }
+  });
 }
 
 
@@ -539,7 +606,8 @@ bool save_scene(const World &world, char *buffer, std::size_t capacity,
 
 /// Loads the requested resource for scene.
 bool load_scene(World &world, const char *path,
-                SceneTeardownHook beforeTeardown) noexcept {
+                SceneTeardownHook beforeTeardown,
+                core::ValidationReport *outReport) noexcept {
   if (path == nullptr) {
     core::log_message(core::LogLevel::Error, kSceneLogChannel,
                       "load_scene called with null path");
@@ -554,7 +622,8 @@ bool load_scene(World &world, const char *path,
     return false;
   }
 
-  return load_scene(world, fileBuffer.get(), fileSize, beforeTeardown);
+  return load_scene(world, fileBuffer.get(), fileSize, beforeTeardown,
+                    outReport);
 }
 
 /// Loads the requested resource for scene. Declared reset order:
@@ -565,7 +634,11 @@ bool load_scene(World &world, const char *path,
 /// does beforeTeardown fire (outgoing entities and modules still alive)
 /// immediately before the destructive `world = *committedWorld` commit.
 bool load_scene(World &world, const char *buffer, std::size_t size,
-                SceneTeardownHook beforeTeardown) noexcept {
+                SceneTeardownHook beforeTeardown,
+                core::ValidationReport *outReport) noexcept {
+  if (outReport != nullptr) {
+    *outReport = core::ValidationReport{};
+  }
   if ((buffer == nullptr) || (size == 0U)) {
     core::log_message(core::LogLevel::Error, kSceneLogChannel,
                       "load_scene called with invalid input buffer");
@@ -622,6 +695,7 @@ bool load_scene(World &world, const char *buffer, std::size_t size,
                                   *stagedWorld)) {
     return false;
   }
+  validate_scene_references(*stagedWorld, outReport);
 
   // World gravity: optional root field, default when absent.
   core::JsonValue gravityValue{};

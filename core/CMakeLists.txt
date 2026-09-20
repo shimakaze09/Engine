@@ -36,6 +36,7 @@ engine_add_module_library(engine_core
     src/service_locator.cpp
     src/touch_input.cpp
     src/vfs.cpp
+    src/validation_report.cpp
     PUBLIC_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_BINARY_DIR}/generated
