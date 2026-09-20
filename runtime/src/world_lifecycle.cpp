@@ -379,6 +379,12 @@ void World::remove_all_components(Entity entity) noexcept {
 
   NameComponent removedName{};
   const bool hadName = m_nameComponents.get(entity, &removedName);
+  // A dying collider leaves the body that owned it; resolved before the
+  // hierarchy link goes so the owner is still reachable.
+  const Entity inertiaOwner =
+      (m_colliders.get_ptr(entity) != nullptr)
+          ? find_rigid_body_owner(entity, m_readStateIndex)
+          : kInvalidEntity;
 
   m_cameraManager.on_entity_destroyed(entity);
 
@@ -398,6 +404,9 @@ void World::remove_all_components(Entity entity) noexcept {
   reset_transform_cache(entity.index);
   if (hadName && (removedName.name[0] != '\0')) {
     name_lookup_erase(core::fnv1a_32(removedName.name), entity.index);
+  }
+  if ((inertiaOwner != kInvalidEntity) && (inertiaOwner != entity)) {
+    rederive_inverse_inertia(inertiaOwner);
   }
 }
 

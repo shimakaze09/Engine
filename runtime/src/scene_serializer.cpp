@@ -33,9 +33,13 @@ namespace engine::runtime {
 namespace {
 
 constexpr const char *kSceneLogChannel = "scene";
-// Revision 3 writes RigidBody inverseInertia as a 3-element array; older
-// revisions wrote one number, read as the same value on every axis.
-constexpr std::uint32_t kCurrentSceneVersion = 3U;
+// Revision 4 writes RigidBody inertia provenance (inertiaAuthored); every
+// older revision always wrote a numeric inverseInertia, which is kept as
+// the authored value. Revision 3 writes inverseInertia as a 3-element
+// array; older revisions wrote one number, read as the same value on
+// every axis.
+constexpr std::uint32_t kCurrentSceneVersion = 4U;
+constexpr std::uint32_t kLastImplicitInertiaSceneVersion = 3U;
 constexpr std::uint32_t kLastScalarInertiaSceneVersion = 2U;
 constexpr const char *kInverseInertiaKey = "inverseInertia";
 constexpr const char *kEntitiesKey = "entities";
@@ -171,9 +175,18 @@ bool decode_scene_component(const core::JsonParser &parser,
     if (documentVersion <= kLastScalarInertiaSceneVersion) {
       options.uniformScalarVec3Key = kInverseInertiaKey;
     }
-    return read_reflected_component(parser, value,
-                                    component_descriptor(descs, out), out,
-                                    options);
+    if (!read_reflected_component(parser, value,
+                                  component_descriptor(descs, out), out,
+                                  options)) {
+      return false;
+    }
+    // An older revision carried no provenance and always wrote the
+    // tensor, so its number is what the scene simulated with: authored,
+    // never reinterpreted from the value.
+    if (documentVersion <= kLastImplicitInertiaSceneVersion) {
+      out->inertiaAuthored = true;
+    }
+    return true;
   } else {
     static_cast<void>(documentVersion);
     return read_reflected_component(parser, value,

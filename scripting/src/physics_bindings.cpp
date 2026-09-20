@@ -33,10 +33,12 @@ namespace engine::scripting {
 
 namespace {
 
-/// One captured pre-lock inverse inertia, generation-checked.
+/// One captured pre-lock inverse inertia with its provenance,
+/// generation-checked.
 struct LockRotationCapture final {
   core::Entity owner = core::kInvalidEntity;
   math::Vec3 inverseInertia = math::default_inverse_inertia();
+  bool inertiaAuthored = false;
 };
 
 constexpr std::size_t kMaxLockCaptures = ENGINE_MAX_ENTITIES + 1U;
@@ -161,16 +163,19 @@ int lua_engine_set_lock_rotation(lua_State *state) noexcept {
     if (math::has_rotational_dof(rigidBody.inverseInertia)) {
       capture.owner = entity;
       capture.inverseInertia = rigidBody.inverseInertia;
+      capture.inertiaAuthored = rigidBody.inertiaAuthored;
     }
+    // A lock is an authored tensor: the derivation must not undo it.
     rigidBody.inverseInertia = math::Vec3(0.0F, 0.0F, 0.0F);
+    rigidBody.inertiaAuthored = true;
     rigidBody.angularVelocity = math::Vec3(0.0F, 0.0F, 0.0F);
   } else if (capture.owner == entity) {
     rigidBody.inverseInertia = capture.inverseInertia;
+    rigidBody.inertiaAuthored = capture.inertiaAuthored;
     capture = LockRotationCapture{};
   } else if (!math::has_rotational_dof(rigidBody.inverseInertia)) {
-    // Nothing to restore: hand the body back to the default so the world
-    // derives its tensor from the colliders again.
-    rigidBody.inverseInertia = math::default_inverse_inertia();
+    // Nothing to restore: hand the body back to the derivation.
+    rigidBody.inertiaAuthored = false;
   }
 
   const bool ok = apply_or_queue_rigid_body(entity, rigidBody);

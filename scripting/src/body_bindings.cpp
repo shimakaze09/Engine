@@ -414,12 +414,11 @@ int lua_engine_set_inverse_mass(lua_State *state) noexcept {
   }
   const float previousInverseMass = rigidBody.inverseMass;
   rigidBody.inverseMass = static_cast<float>(lua_tonumber(state, 2));
-  // The inverse inertia scales with the inverse mass for a fixed shape, so
-  // a mass change keeps the body's rotational response consistent. A body
-  // leaving the static state keeps its default and derives on apply.
+  // An authored inverse inertia scales with the inverse mass for a fixed
+  // shape, so a mass change keeps the body's rotational response
+  // consistent; an automatic one is re-derived on apply.
   if ((previousInverseMass > 0.0F) && (rigidBody.inverseMass > 0.0F) &&
-      std::isfinite(rigidBody.inverseMass) &&
-      !math::has_default_inverse_inertia(rigidBody.inverseInertia)) {
+      std::isfinite(rigidBody.inverseMass) && rigidBody.inertiaAuthored) {
     rigidBody.inverseInertia = math::mul(
         rigidBody.inverseInertia, rigidBody.inverseMass / previousInverseMass);
   }

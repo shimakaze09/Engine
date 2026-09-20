@@ -56,9 +56,16 @@ constexpr FieldMetadata kFieldMetadataTable[] = {
      "1/kg", 0.01F, 0.0F, 1000.0F, InspectorWidget::Drag, false, false},
     {"engine::runtime::RigidBody", "inverseInertia", "Inverse Inertia",
      "Physics",
-     "1 / rotational inertia about each body axis. 0 locks that axis; "
-     "(1, 1, 1) is replaced by the value derived from the colliders.",
+     "1 / rotational inertia about each body axis. 0 locks that axis. "
+     "Editing it marks the tensor authored; otherwise it is derived from "
+     "the colliders the body owns.",
      nullptr, 0.01F, 0.0F, 1000.0F, InspectorWidget::Drag, false, false},
+    {"engine::runtime::RigidBody", "inertiaAuthored", "Authored Inertia",
+     "Physics",
+     "On: the inverse inertia above is content and kept as typed. Off: "
+     "the engine derives it from the body's colliders and rewrites it when "
+     "they change.",
+     nullptr, 0.0F, 0.0F, 0.0F, InspectorWidget::Auto, false, false},
     {"engine::runtime::RigidBody", "velocity", "Velocity", "Physics",
      "Linear velocity in m/s.", "m/s", 0.05F, 0.0F, 0.0F,
      InspectorWidget::Drag, true, false},

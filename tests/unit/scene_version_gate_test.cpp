@@ -42,16 +42,17 @@ struct VersionCase final {
   bool accepted;
 };
 
-// Revision 3 is what this build writes and revisions 1 and 2 still load;
+// Revision 4 is what this build writes and revisions 1 to 3 still load;
 // an absent key is the documented legacy revision 1. Everything else — zero,
 // future, negative, fractional, out-of-range, or a non-integer JSON type —
 // must be refused.
 constexpr VersionCase kCases[] = {
+    {"{\"version\":4,\"entities\":[]}", true},
     {"{\"version\":3,\"entities\":[]}", true},
     {"{\"version\":2,\"entities\":[]}", true},
     {"{\"version\":1,\"entities\":[]}", true},
     {"{\"entities\":[]}", true},
-    {"{\"version\":4,\"entities\":[]}", false},
+    {"{\"version\":5,\"entities\":[]}", false},
     {"{\"version\":999,\"entities\":[]}", false},
     {"{\"version\":0,\"entities\":[]}", false},
     {"{\"version\":-1,\"entities\":[]}", false},

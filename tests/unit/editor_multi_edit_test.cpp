@@ -62,6 +62,7 @@ Entity make_rigid_body_entity(World &world, float inverseMass,
   body.inverseMass = inverseMass;
   body.inverseInertia =
       engine::math::Vec3(inverseInertia, inverseInertia, inverseInertia);
+  body.inertiaAuthored = true;
   if (!world.add_rigid_body(entity, body)) {
     return engine::runtime::kInvalidEntity;
   }

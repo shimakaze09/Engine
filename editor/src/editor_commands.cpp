@@ -133,6 +133,16 @@ static void sanitize_staged_component(ComponentEditType type,
     }
     return;
   }
+  if (type == ComponentEditType::RigidBody) {
+    // Typing a tensor is authoring it; unticking "authored" hands it back
+    // to the derivation.
+    const math::Vec3 &was = before.rigidBody.inverseInertia;
+    const math::Vec3 &now = after->rigidBody.inverseInertia;
+    if ((was.x != now.x) || (was.y != now.y) || (was.z != now.z)) {
+      after->rigidBody.inertiaAuthored = true;
+    }
+    return;
+  }
   if (type == ComponentEditType::Transform) {
     math::Quat &rotation = after->transform.rotation;
     const float lengthSq =

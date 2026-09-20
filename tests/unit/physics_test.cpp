@@ -319,6 +319,7 @@ int check_angular_velocity_integration() {
   body.inverseMass = 0.0F; // static so no gravity drift
   body.inverseInertia =
       engine::math::Vec3(1.0F, 1.0F, 1.0F);
+  body.inertiaAuthored = true;
   body.angularVelocity = engine::math::Vec3(0.0F, 3.14159F, 0.0F);
   if (!world->add_rigid_body(entity, body)) {
     return 33;
@@ -376,10 +377,12 @@ int check_angular_impulse_from_collision() {
   bodyA.inverseMass = 1.0F;
   bodyA.inverseInertia =
       engine::math::Vec3(1.0F, 1.0F, 1.0F);
+  bodyA.inertiaAuthored = true;
   engine::runtime::RigidBody bodyB{};
   bodyB.inverseMass = 1.0F;
   bodyB.inverseInertia =
       engine::math::Vec3(1.0F, 1.0F, 1.0F);
+  bodyB.inertiaAuthored = true;
   bodyB.velocity = engine::math::Vec3(-2.0F, 0.0F, 0.0F); // approaching A
 
   if (!world->add_transform(a, tA) || !world->add_transform(b, tB)) {
@@ -445,6 +448,7 @@ int check_zero_inverse_inertia_prevents_rotation() {
   body.inverseMass = 0.0F;
   body.inverseInertia =
       engine::math::Vec3(0.0F, 0.0F, 0.0F); // rotation locked
+  body.inertiaAuthored = true;
   body.angularVelocity = engine::math::Vec3(0.0F, 5.0F, 0.0F);
   if (!world->add_rigid_body(entity, body)) {
     return 53;
@@ -3634,6 +3638,7 @@ int check_angular_effective_mass_no_overshoot() {
   boxRB.inverseMass = 1.0F;
   boxRB.inverseInertia =
       engine::math::Vec3(1.0F, 1.0F, 1.0F);
+  boxRB.inertiaAuthored = true;
   world->add_rigid_body(boxEntity, boxRB);
 
   const auto sphereEntity = world->create_entity();
@@ -3648,6 +3653,7 @@ int check_angular_effective_mass_no_overshoot() {
   sphRB.inverseMass = 1.0F;
   sphRB.inverseInertia =
       engine::math::Vec3(1.0F, 1.0F, 1.0F);
+  sphRB.inertiaAuthored = true;
   sphRB.velocity = engine::math::Vec3(-0.5F, 0.0F, 0.0F);
   world->add_rigid_body(sphereEntity, sphRB);
 

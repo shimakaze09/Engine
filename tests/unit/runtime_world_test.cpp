@@ -1090,6 +1090,7 @@ int verify_physics_ingress_validation() {
   goodBody.inverseMass = 0.0F;
   goodBody.inverseInertia =
       engine::math::Vec3(0.0F, 0.0F, 0.0F);
+  goodBody.inertiaAuthored = true;
   if (!world->add_rigid_body(entity, goodBody)) {
     return 907;
   }
@@ -1223,6 +1224,7 @@ int verify_physics_ingress_clamps() {
   hotBody.inverseMass = 1.0F;
   hotBody.inverseInertia =
       engine::math::Vec3(1.0e6F, 1.0e6F, 1.0e6F);
+  hotBody.inertiaAuthored = true;
   hotBody.velocity = engine::math::Vec3(600.0F, 800.0F, 0.0F);
   hotBody.angularVelocity = engine::math::Vec3(0.0F, 24.0F, 0.0F);
   RigidBody storedBody{};
@@ -1243,6 +1245,7 @@ int verify_physics_ingress_clamps() {
   boundaryBody.inverseMass = 1.0F;
   boundaryBody.inverseInertia =
       engine::math::Vec3(engine::physics::kMaxInverseInertia, engine::physics::kMaxInverseInertia, engine::physics::kMaxInverseInertia);
+  boundaryBody.inertiaAuthored = true;
   boundaryBody.velocity =
       engine::math::Vec3(0.0F, 0.0F, engine::physics::kMaxLinearSpeed);
   if (!world->add_rigid_body(entity, boundaryBody) ||

@@ -185,14 +185,15 @@ int verify_instantiate_validates_schema_version() {
     bool accepted;
   };
 
-  // Revision 2 is what this build writes and revision 1 still loads. A
-  // document omitting the key reads as revision 1, so hand-authored prefabs
-  // still load.
+  // Revision 3 is what this build writes and revisions 1 and 2 still load.
+  // A document omitting the key reads as revision 1, so hand-authored
+  // prefabs still load.
   constexpr VersionCase kCases[] = {
+      {"{\"version\":3,\"components\":{}}", true},
       {"{\"version\":2,\"components\":{}}", true},
       {"{\"version\":1,\"components\":{}}", true},
       {"{\"components\":{}}", true},
-      {"{\"version\":3,\"components\":{}}", false},
+      {"{\"version\":4,\"components\":{}}", false},
       {"{\"version\":999,\"components\":{}}", false},
       {"{\"version\":0,\"components\":{}}", false},
       {"{\"version\":-1,\"components\":{}}", false},

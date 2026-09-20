@@ -307,6 +307,14 @@ bool World::add_transform(Entity entity, const Transform &transform) noexcept {
   }
 
   const bool hadTransform = m_transforms.contains(entity);
+  // A placement or parent change moves the subtree's colliders within (or
+  // between) the bodies that own them; a bare leaf moves no geometry.
+  const bool movesGeometry =
+      (m_colliders.get_ptr(entity) != nullptr) ||
+      (hadTransform && (m_transformNodes[entity.index].firstChild != 0U));
+  const Entity ownerBefore = (movesGeometry && hadTransform)
+                                 ? find_rigid_body_owner(entity, m_readStateIndex)
+                                 : kInvalidEntity;
   if (!m_transforms.add(entity, transform)) {
     note_refusal(core::FailureKind::CapacityExhausted);
     return false;
@@ -324,6 +332,15 @@ bool World::add_transform(Entity entity, const Transform &transform) noexcept {
     return false;
   }
   link_transform_node(entity.index, transform.parentId, hadTransform);
+  if (movesGeometry) {
+    if (ownerBefore != kInvalidEntity) {
+      rederive_inverse_inertia(ownerBefore);
+    }
+    const Entity ownerAfter = find_rigid_body_owner(entity, m_readStateIndex);
+    if ((ownerAfter != kInvalidEntity) && (ownerAfter != ownerBefore)) {
+      rederive_inverse_inertia(ownerAfter);
+    }
+  }
   return true;
 }
 
@@ -332,10 +349,15 @@ bool World::remove_transform(Entity entity) noexcept {
     return false;
   }
 
+  const Entity owner = find_rigid_body_owner(entity, m_readStateIndex);
   unlink_transform_node(entity.index);
   const bool removed = m_transforms.remove(entity);
   static_cast<void>(m_worldTransforms.remove(entity));
   reset_transform_cache(entity.index);
+  // Detached from the hierarchy, the subtree's colliders leave their owner.
+  if ((owner != kInvalidEntity) && (owner != entity)) {
+    rederive_inverse_inertia(owner);
+  }
   return removed;
 }
 
@@ -414,15 +436,23 @@ bool World::add_rigid_body(Entity entity, const RigidBody &rigidBody) noexcept {
                   entity.index);
     log_entity_warning(m_entityPersistentIds[entity.index], message);
   }
-  // A body that has not authored its tensor takes the one its colliders
-  // describe; colliders installed later derive it through add_collider.
-  if (math::has_default_inverse_inertia(sanitized.inverseInertia)) {
+  // An automatic tensor is the geometry's, whatever value arrived with the
+  // body; an authored one is content.
+  if (!sanitized.inertiaAuthored) {
     sanitized.inverseInertia =
         derived_inverse_inertia(entity, sanitized.inverseMass);
   }
+  // A new body takes its subtree's colliders away from the body that
+  // owned them until now.
+  const bool hadBody = m_rigidBodies.contains(entity);
+  const Entity previousOwner =
+      hadBody ? kInvalidEntity : find_rigid_body_owner(entity, m_readStateIndex);
   if (!m_rigidBodies.add(entity, sanitized)) {
     note_refusal(core::FailureKind::CapacityExhausted);
     return false;
+  }
+  if (previousOwner != kInvalidEntity) {
+    rederive_inverse_inertia(previousOwner);
   }
   // New owner velocities must reach the next step's CCD snapshot.
   m_physicsContext.ccdSnapshotDirty = true;
@@ -430,7 +460,12 @@ bool World::add_rigid_body(Entity entity, const RigidBody &rigidBody) noexcept {
 }
 
 bool World::remove_rigid_body(Entity entity) noexcept {
-  return remove_component_checked(m_rigidBodies, entity, "remove_rigid_body");
+  if (!remove_component_checked(m_rigidBodies, entity, "remove_rigid_body")) {
+    return false;
+  }
+  // The subtree's colliders now belong to the next body up.
+  rederive_owner_inertia(entity);
+  return true;
 }
 
 bool World::get_rigid_body(Entity entity,
@@ -515,13 +550,8 @@ math::Vec3 World::derived_inverse_inertia(Entity body,
         &accumulator, *own, math::Vec3(0.0F, 0.0F, 0.0F), math::Quat());
   }
   for_each_child(body, [&](Entity child) noexcept {
-    const Collider *childCollider = m_colliders.get_ptr(child);
-    const Transform *local = m_transforms.get_ptr(child, m_readStateIndex);
-    if ((childCollider == nullptr) || (local == nullptr)) {
-      return;
-    }
-    physics::accumulate_collider_inertia(&accumulator, *childCollider,
-                                         local->position, local->rotation);
+    accumulate_owned_collider_inertia(body, child, math::Vec3(0.0F, 0.0F, 0.0F),
+                                      math::Quat(), &accumulator, 0U);
   });
   if (!(accumulator.weightSum > 0.0F)) {
     return math::default_inverse_inertia();
@@ -529,20 +559,48 @@ math::Vec3 World::derived_inverse_inertia(Entity body,
   return physics::finish_inverse_inertia(accumulator, inverseMass);
 }
 
-void World::rederive_inverse_inertia(Entity body,
-                                     const math::Vec3 &beforeChange) noexcept {
-  RigidBody *rigidBody = m_rigidBodies.get_ptr(body);
-  if ((rigidBody == nullptr) || !(rigidBody->inverseMass > 0.0F)) {
+void World::accumulate_owned_collider_inertia(
+    Entity body, Entity entity, const math::Vec3 &offset,
+    const math::Quat &rotation, physics::InertiaAccumulator *out,
+    std::size_t depth) noexcept {
+  // Bounded like every hierarchy walk: a chain deeper than the entity
+  // count cannot exist without a cycle, which add_transform refuses.
+  if ((depth >= kMaxEntities) || (m_rigidBodies.get_ptr(entity) != nullptr)) {
     return;
   }
-  const math::Vec3 &current = rigidBody->inverseInertia;
-  const bool derived = math::has_default_inverse_inertia(current) ||
-                       ((current.x == beforeChange.x) &&
-                        (current.y == beforeChange.y) &&
-                        (current.z == beforeChange.z));
-  if (derived) {
-    rigidBody->inverseInertia =
-        derived_inverse_inertia(body, rigidBody->inverseMass);
+  const Transform *local = m_transforms.get_ptr(entity, m_readStateIndex);
+  if (local == nullptr) {
+    return;
+  }
+  const math::Quat unitRotation = math::normalize(rotation);
+  const math::Vec3 placement = math::add(
+      offset, math::rotate_vector(local->position, unitRotation));
+  const math::Quat orientation =
+      math::mul(unitRotation, math::normalize(local->rotation));
+  const Collider *collider = m_colliders.get_ptr(entity);
+  if (collider != nullptr) {
+    physics::accumulate_collider_inertia(out, *collider, placement,
+                                         orientation);
+  }
+  for_each_child(entity, [&](Entity child) noexcept {
+    accumulate_owned_collider_inertia(body, child, placement, orientation, out,
+                                      depth + 1U);
+  });
+}
+
+void World::rederive_inverse_inertia(Entity body) noexcept {
+  RigidBody *rigidBody = m_rigidBodies.get_ptr(body);
+  if ((rigidBody == nullptr) || rigidBody->inertiaAuthored) {
+    return;
+  }
+  rigidBody->inverseInertia =
+      derived_inverse_inertia(body, rigidBody->inverseMass);
+}
+
+void World::rederive_owner_inertia(Entity entity) noexcept {
+  const Entity owner = find_rigid_body_owner(entity, m_readStateIndex);
+  if (owner != kInvalidEntity) {
+    rederive_inverse_inertia(owner);
   }
 }
 
@@ -563,15 +621,6 @@ bool World::add_collider(Entity entity, const Collider &collider) noexcept {
                   entity.index);
     log_entity_warning(m_entityPersistentIds[entity.index], message);
   }
-  // The owner's tensor before this collider joins decides whether it was
-  // derived (and follows the new geometry) or authored (and stays).
-  const Entity owner = find_rigid_body_owner(entity, m_readStateIndex);
-  math::Vec3 ownerInertiaBefore = math::default_inverse_inertia();
-  if (owner != kInvalidEntity) {
-    const RigidBody *ownerBody = m_rigidBodies.get_ptr(owner);
-    ownerInertiaBefore = derived_inverse_inertia(
-        owner, (ownerBody != nullptr) ? ownerBody->inverseMass : 0.0F);
-  }
   if (!add_component_checked(m_colliders, entity, sanitized, "add_collider")) {
     return false;
   }
@@ -583,9 +632,7 @@ bool World::add_collider(Entity entity, const Collider &collider) noexcept {
                                              sanitized.shape);
   install_provenance_hull(m_physicsContext, entity,
                           m_entityPersistentIds[entity.index], sanitized);
-  if (owner != kInvalidEntity) {
-    rederive_inverse_inertia(owner, ownerInertiaBefore);
-  }
+  rederive_owner_inertia(entity);
   // New colliders have no snapshot entry until the next resolve.
   m_physicsContext.ccdSnapshotDirty = true;
   return true;
@@ -596,19 +643,10 @@ bool World::remove_collider(Entity entity) noexcept {
     return false;
   }
 
-  const Entity owner = find_rigid_body_owner(entity, m_readStateIndex);
-  math::Vec3 ownerInertiaBefore = math::default_inverse_inertia();
-  if (owner != kInvalidEntity) {
-    const RigidBody *ownerBody = m_rigidBodies.get_ptr(owner);
-    ownerInertiaBefore = derived_inverse_inertia(
-        owner, (ownerBody != nullptr) ? ownerBody->inverseMass : 0.0F);
-  }
   const bool removed = m_colliders.remove(entity);
   if (removed) {
     physics::remove_shape_payloads(m_physicsContext, entity);
-    if (owner != kInvalidEntity) {
-      rederive_inverse_inertia(owner, ownerInertiaBefore);
-    }
+    rederive_owner_inertia(entity);
   }
   return removed;
 }

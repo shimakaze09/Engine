@@ -20,8 +20,11 @@ namespace engine::runtime {
 
 namespace {
 
-// Revision 2 writes RigidBody inverseInertia as a 3-element array; revision
-// 1 wrote one number, read as the same value on every axis.
+// Revision 3 writes RigidBody inertia provenance (inertiaAuthored); every
+// older revision always wrote a numeric inverseInertia, which is kept as
+// the authored value. Revision 2 writes inverseInertia as a 3-element
+// array; revision 1 wrote one number, read as the same value on every axis.
+constexpr std::uint32_t kLastImplicitInertiaPrefabVersion = 2U;
 constexpr std::uint32_t kLastScalarInertiaPrefabVersion = 1U;
 constexpr const char *kInverseInertiaKey = "inverseInertia";
 
@@ -103,9 +106,15 @@ bool decode_prefab_component(const core::JsonParser &parser,
     if (documentVersion <= kLastScalarInertiaPrefabVersion) {
       options.uniformScalarVec3Key = kInverseInertiaKey;
     }
-    return read_reflected_component(parser, value,
-                                    component_descriptor(descs, out), out,
-                                    options);
+    if (!read_reflected_component(parser, value,
+                                  component_descriptor(descs, out), out,
+                                  options)) {
+      return false;
+    }
+    if (documentVersion <= kLastImplicitInertiaPrefabVersion) {
+      out->inertiaAuthored = true;
+    }
+    return true;
   } else {
     static_cast<void>(documentVersion);
     return read_reflected_component(parser, value,
@@ -162,7 +171,7 @@ bool encode_prefab_component(core::JsonWriter &w, const char *key,
 namespace {
 
 constexpr const char *kPrefabLogChannel = "prefab";
-constexpr std::uint32_t kPrefabVersion = 2U;
+constexpr std::uint32_t kPrefabVersion = 3U;
 
 // File IO and vec/quat/foliage JSON helpers are shared with the scene
 // serializer via serialization_util.h.

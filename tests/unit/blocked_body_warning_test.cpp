@@ -73,6 +73,7 @@ DrivenBoxWorld make_driven_box_world(bool withWall) noexcept {
   boxBody.inverseMass = 0.001F;
   boxBody.inverseInertia =
       engine::math::Vec3(0.0F, 0.0F, 0.0F);
+  boxBody.inertiaAuthored = true;
   if ((setup.box == engine::runtime::kInvalidEntity) ||
       !setup.world->add_collider(setup.box, boxCollider) ||
       !setup.world->add_rigid_body(setup.box, boxBody)) {

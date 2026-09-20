@@ -326,6 +326,7 @@ int main() {
     return 132;
   }
   lockedBody->inverseInertia = engine::math::Vec3(0.25F, 0.25F, 0.25F);
+  lockedBody->inertiaAuthored = true;
   if (!engine::scripting::call_script_function("verify_lock_rotation") ||
       !uniform_inertia(world->get_rigid_body_ptr(lockEntity)->inverseInertia,
                        0.0F)) {

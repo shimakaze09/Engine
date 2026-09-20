@@ -17,6 +17,7 @@
 #include "engine/math/mat4.h"
 #include "engine/math/quat.h"
 #include "engine/math/vec3.h"
+#include "engine/physics/inertia.h"
 #include "engine/physics/physics_world_view.h"
 #include "engine/runtime/animation.h"
 #include "engine/runtime/world_component_types.h"
@@ -968,15 +969,24 @@ private:
   /// Resolves a nearest body owner from one transform state buffer.
   Entity find_rigid_body_owner(Entity entity,
                                std::size_t stateIndex) const noexcept;
-  /// Inverse inertia derived from the colliders on `body` and its direct
-  /// children for a body of `inverseMass`; the default tensor when nothing
-  /// contributes or the body is static.
+  /// Inverse inertia derived from the colliders `body` owns: its own and
+  /// every descendant's whose nearest rigid-body ancestor is `body`, the
+  /// same ownership collision resolves through rigid_body_owner. The
+  /// default tensor when nothing contributes or the body is static.
   math::Vec3 derived_inverse_inertia(Entity body, float inverseMass) noexcept;
-  /// Replaces the owner body's tensor when it was derived (still default, or
-  /// equal to `beforeChange`, the derivation over the collider set before
-  /// the change) so authored tensors survive collider edits.
-  void rederive_inverse_inertia(Entity body,
-                                const math::Vec3 &beforeChange) noexcept;
+  /// Adds the colliders of `entity`'s subtree that `body` owns, each placed
+  /// by its transform composed down from the body; stops at descendants
+  /// that carry their own rigid body.
+  void accumulate_owned_collider_inertia(Entity body, Entity entity,
+                                         const math::Vec3 &offset,
+                                         const math::Quat &rotation,
+                                         physics::InertiaAccumulator *out,
+                                         std::size_t depth) noexcept;
+  /// Rewrites an automatic body's tensor from the geometry it owns now;
+  /// an authored body or a non-body is left alone.
+  void rederive_inverse_inertia(Entity body) noexcept;
+  /// Rederives the body that owns `entity`'s subtree, when there is one.
+  void rederive_owner_inertia(Entity entity) noexcept;
   /// Transform state buffer index reads should use in the current phase.
   std::size_t query_state_index() const noexcept;
   // Shared guard/log/dispatch bodies behind the per-component add/remove/get

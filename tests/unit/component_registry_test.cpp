@@ -108,6 +108,7 @@ void make_test_value(RigidBody *out) noexcept {
   out->angularVelocity = engine::math::Vec3(0.25F, 0.5F, -0.75F);
   out->inverseMass = 0.5F;
   out->inverseInertia = engine::math::Vec3(0.25F, 0.5F, 0.125F);
+  out->inertiaAuthored = true;
   out->sleeping = true;
 }
 
@@ -117,6 +118,7 @@ bool components_equal(const RigidBody &a, const RigidBody &b) noexcept {
          vec3_equal(a.angularVelocity, b.angularVelocity) &&
          (a.inverseMass == b.inverseMass) &&
          vec3_equal(a.inverseInertia, b.inverseInertia) &&
+         (a.inertiaAuthored == b.inertiaAuthored) &&
          (a.sleeping == b.sleeping);
 }
 

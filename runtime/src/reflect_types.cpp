@@ -26,6 +26,7 @@ REFLECT_FIELD(acceleration, Vec3)
 REFLECT_FIELD(angularVelocity, Vec3)
 REFLECT_FIELD(inverseMass, Float)
 REFLECT_FIELD(inverseInertia, Vec3)
+REFLECT_FIELD(inertiaAuthored, Bool)
 REFLECT_FIELD(sleeping, Bool)
 REFLECT_END()
 

@@ -299,6 +299,7 @@ void test_world_derives_on_collider_install() noexcept {
   RigidBody authoredBody{};
   authoredBody.inverseMass = 1.0F;
   authoredBody.inverseInertia = math::Vec3(0.0F, 4.0F, 0.0F);
+  authoredBody.inertiaAuthored = true;
   check(world->add_transform(authored, transform) &&
             world->add_rigid_body(authored, authoredBody) &&
             world->add_collider(authored, box) &&
@@ -310,7 +311,7 @@ void test_world_derives_on_collider_install() noexcept {
   const Entity bare =
       make_body(*world, math::Vec3(30.0F, 0.0F, 0.0F), 1.0F, nullptr);
   check(world->get_rigid_body(bare, &stored) &&
-            math::has_default_inverse_inertia(stored.inverseInertia),
+            vec_exact(stored.inverseInertia, math::default_inverse_inertia()),
         "a body without colliders keeps the default tensor");
 
   // A static body never derives: it keeps the default so a later mass
@@ -318,7 +319,7 @@ void test_world_derives_on_collider_install() noexcept {
   const Entity fixed =
       make_body(*world, math::Vec3(40.0F, 0.0F, 0.0F), 0.0F, &box);
   check(world->get_rigid_body(fixed, &stored) &&
-            math::has_default_inverse_inertia(stored.inverseInertia),
+            vec_exact(stored.inverseInertia, math::default_inverse_inertia()),
         "a static body keeps the default tensor");
 
   // Replacing a derived body's collider re-derives; removing it returns
@@ -334,7 +335,7 @@ void test_world_derives_on_collider_install() noexcept {
         "replacing the collider keeps an authored tensor");
   check(world->remove_collider(bodyThenCollider) &&
             world->get_rigid_body(bodyThenCollider, &stored) &&
-            math::has_default_inverse_inertia(stored.inverseInertia),
+            vec_exact(stored.inverseInertia, math::default_inverse_inertia()),
         "removing the only collider restores the default");
 }
 
@@ -365,6 +366,128 @@ void test_world_compound_children() noexcept {
             vec_near(stored.inverseInertia,
                      math::Vec3(3.0F, 3.0F / 7.0F, 3.0F / 7.0F)),
         "child colliders combine into the owner's tensor as they arrive");
+}
+
+/// Ownership follows the same ancestor walk collision uses: a collider any
+/// depth below the body counts, placed by the transforms composed down
+/// from the body; a descendant with its own body owns its subtree.
+void test_world_ownership_depth_and_placement() noexcept {
+  std::unique_ptr<World> world = make_world();
+  if (world == nullptr) {
+    check(false, "world allocation");
+    return;
+  }
+  const Entity root =
+      make_body(*world, math::Vec3(0.0F, 0.0F, 0.0F), 0.5F, nullptr);
+  // An empty intermediate at +1 on X, its child at +0 -> the cube sits at
+  // +1; a second empty at -1 with a child at +0 -> the cube sits at -1.
+  // Same geometry as the compound-children case, one level deeper.
+  const float offsets[2] = {1.0F, -1.0F};
+  Entity cubes[2] = {};
+  for (std::size_t i = 0U; i < 2U; ++i) {
+    const Entity middle = world->create_entity();
+    Transform transform{};
+    transform.position = math::Vec3(offsets[i], 0.0F, 0.0F);
+    transform.parentId = world->persistent_id(root);
+    const Entity cube = world->create_entity();
+    Transform cubeTransform{};
+    cubeTransform.parentId = world->persistent_id(middle);
+    if (!world->add_transform(middle, transform) ||
+        !world->add_transform(cube, cubeTransform) ||
+        !world->add_collider(cube, make_box(0.5F, 0.5F, 0.5F))) {
+      check(false, "grandchild collider setup");
+      return;
+    }
+    cubes[i] = cube;
+  }
+  RigidBody stored{};
+  check(world->get_rigid_body(root, &stored) &&
+            vec_near(stored.inverseInertia,
+                     math::Vec3(3.0F, 3.0F / 7.0F, 3.0F / 7.0F)),
+        "grandchild colliders count through the ancestor walk");
+
+  // Moving a grandchild re-derives: both cubes at the origin make one
+  // double-weight unit cube, I = 2/6 -> inverse 3 about every axis.
+  Transform moved{};
+  moved.parentId = world->persistent_id(root);
+  for (const Entity cube : cubes) {
+    Transform local{};
+    if (!world->get_transform(cube, &local)) {
+      check(false, "grandchild transform read");
+      return;
+    }
+    local.position = math::Vec3(0.0F, 0.0F, 0.0F);
+    if (!world->add_transform(cube, local)) {
+      check(false, "grandchild transform write");
+      return;
+    }
+  }
+  // The intermediates still sit at +-1, so re-home each cube at the root.
+  for (const Entity cube : cubes) {
+    if (!world->add_transform(cube, moved)) {
+      check(false, "grandchild reparent to root");
+      return;
+    }
+  }
+  check(world->get_rigid_body(root, &stored) &&
+            vec_near(stored.inverseInertia, math::Vec3(3.0F, 3.0F, 3.0F)),
+        "moving and reparenting owned colliders re-derives the owner");
+
+  // Reparenting a cube under a second body moves its geometry between
+  // owners: the root (mass 2) keeps one unit cube, I = 2/6 -> inverse 3;
+  // the other body (mass 1) gains one, I = 1/6 -> inverse 6.
+  const Entity other =
+      make_body(*world, math::Vec3(10.0F, 0.0F, 0.0F), 1.0F, nullptr);
+  Transform underOther{};
+  underOther.parentId = world->persistent_id(other);
+  check(world->add_transform(cubes[1], underOther) &&
+            world->get_rigid_body(root, &stored) &&
+            vec_near(stored.inverseInertia, math::Vec3(3.0F, 3.0F, 3.0F)),
+        "the previous owner loses a reparented collider");
+  check(world->get_rigid_body(other, &stored) &&
+            vec_near(stored.inverseInertia, math::Vec3(6.0F, 6.0F, 6.0F)),
+        "the new owner gains a reparented collider");
+
+  // Destroying the remaining owned cube returns the root to the default.
+  check(world->destroy_entity(cubes[0]) &&
+            world->get_rigid_body(root, &stored) &&
+            vec_exact(stored.inverseInertia, math::default_inverse_inertia()),
+        "destroying the last owned collider re-derives the owner");
+}
+
+/// Provenance is explicit: an authored tensor equal to the default is kept
+/// beside a collider, and handing a body back to automatic re-derives.
+void test_world_provenance_is_explicit() noexcept {
+  std::unique_ptr<World> world = make_world();
+  if (world == nullptr) {
+    check(false, "world allocation");
+    return;
+  }
+  const Entity entity = world->create_entity();
+  Transform transform{};
+  RigidBody body{};
+  body.inverseMass = 1.0F;
+  body.inverseInertia = math::default_inverse_inertia();
+  body.inertiaAuthored = true;
+  RigidBody stored{};
+  check(world->add_transform(entity, transform) &&
+            world->add_rigid_body(entity, body) &&
+            world->add_collider(entity, make_box(0.5F, 0.5F, 0.5F)) &&
+            world->get_rigid_body(entity, &stored) &&
+            vec_exact(stored.inverseInertia, math::default_inverse_inertia()) &&
+            stored.inertiaAuthored,
+        "an authored default-looking tensor is never derived over");
+  body.inertiaAuthored = false;
+  check(world->add_rigid_body(entity, body) &&
+            world->get_rigid_body(entity, &stored) &&
+            vec_near(stored.inverseInertia, math::Vec3(6.0F, 6.0F, 6.0F)) &&
+            !stored.inertiaAuthored,
+        "switching a body to automatic derives from its collider");
+  body.inverseMass = 2.0F;
+  check(world->add_rigid_body(entity, body) &&
+            world->get_rigid_body(entity, &stored) &&
+            vec_near(stored.inverseInertia, math::Vec3(12.0F, 12.0F, 12.0F)),
+        "a mass change re-derives an automatic tensor");
 }
 
 // ---- Behaviour through the fixed step --------------------------------------
@@ -474,6 +597,7 @@ TiltRun run_tilted_cube(const math::Vec3 &inverseInertia) noexcept {
   RigidBody body{};
   body.inverseMass = 1.0F;
   body.inverseInertia = inverseInertia;
+  body.inertiaAuthored = true;
   if (!world->add_transform(cube, transform) ||
       !world->add_rigid_body(cube, body) ||
       !world->add_collider(cube, make_box(0.5F, 0.5F, 0.5F))) {
@@ -552,6 +676,28 @@ constexpr const char *kSceneV3Array =
     "\"Transform\":{\"position\":[0.0,0.0,0.0]},"
     "\"RigidBody\":{\"inverseMass\":1.0,\"inverseInertia\":[0.25,0.5,0.125]}}"
     "}]}";
+constexpr const char *kSceneV3DefaultArrayWithCollider =
+    "{\"version\":3,\"entities\":[{\"persistentId\":7,\"components\":{"
+    "\"Transform\":{\"position\":[0,0,0]},"
+    "\"Collider\":{\"halfExtents\":[0.5,0.5,0.5]},"
+    "\"RigidBody\":{\"inverseMass\":1.0,\"inverseInertia\":[1,1,1]}}}]}";
+constexpr const char *kSceneV4AutomaticWithCollider =
+    "{\"version\":4,\"entities\":[{\"persistentId\":7,\"components\":{"
+    "\"Transform\":{\"position\":[0,0,0]},"
+    "\"Collider\":{\"halfExtents\":[0.5,0.5,0.5]},"
+    "\"RigidBody\":{\"inverseMass\":1.0,\"inverseInertia\":[1,1,1],"
+    "\"inertiaAuthored\":false}}}]}";
+constexpr const char *kSceneV4AuthoredWithCollider =
+    "{\"version\":4,\"entities\":[{\"persistentId\":7,\"components\":{"
+    "\"Transform\":{\"position\":[0,0,0]},"
+    "\"Collider\":{\"halfExtents\":[0.5,0.5,0.5]},"
+    "\"RigidBody\":{\"inverseMass\":1.0,\"inverseInertia\":[1,1,1],"
+    "\"inertiaAuthored\":true}}}]}";
+constexpr const char *kSceneV4NoProvenanceWithCollider =
+    "{\"version\":4,\"entities\":[{\"persistentId\":7,\"components\":{"
+    "\"Transform\":{\"position\":[0,0,0]},"
+    "\"Collider\":{\"halfExtents\":[0.5,0.5,0.5]},"
+    "\"RigidBody\":{\"inverseMass\":1.0,\"inverseInertia\":[1,1,1]}}}]}";
 constexpr const char *kSceneV3ShortArray =
     "{\"version\":3,\"entities\":[{\"persistentId\":7,\"components\":{"
     "\"Transform\":{\"position\":[0.0,0.0,0.0]},"
@@ -578,12 +724,36 @@ void test_scene_migration() noexcept {
   check(load_scene_body(kSceneV1Scalar, &body) &&
             vec_exact(body.inverseInertia, math::Vec3(0.0F, 0.0F, 0.0F)),
         "scene v1 scalar zero stays a locked body");
+  // Older revisions always wrote the number the scene simulated with, so
+  // it stays that number, authored: a default-looking 1 is never read as
+  // "derive from the collider".
   check(load_scene_body(kSceneV2DefaultWithCollider, &body) &&
-            vec_near(body.inverseInertia, math::Vec3(6.0F, 6.0F, 6.0F)),
-        "scene v2 default scalar derives from the collider on load");
+            vec_exact(body.inverseInertia, math::Vec3(1.0F, 1.0F, 1.0F)) &&
+            body.inertiaAuthored,
+        "scene v2 default scalar is kept as the authored value");
   check(load_scene_body(kSceneV3Array, &body) &&
-            vec_exact(body.inverseInertia, math::Vec3(0.25F, 0.5F, 0.125F)),
-        "scene v3 array loads per axis");
+            vec_exact(body.inverseInertia, math::Vec3(0.25F, 0.5F, 0.125F)) &&
+            body.inertiaAuthored,
+        "scene v3 array loads per axis, authored");
+  check(load_scene_body(kSceneV3DefaultArrayWithCollider, &body) &&
+            vec_exact(body.inverseInertia, math::Vec3(1.0F, 1.0F, 1.0F)) &&
+            body.inertiaAuthored,
+        "scene v3 default array with a collider is kept as authored");
+  // The current revision carries provenance: an automatic body derives from
+  // its collider on load whatever number the document holds, an authored
+  // one keeps its number.
+  check(load_scene_body(kSceneV4AutomaticWithCollider, &body) &&
+            vec_near(body.inverseInertia, math::Vec3(6.0F, 6.0F, 6.0F)) &&
+            !body.inertiaAuthored,
+        "scene v4 automatic body derives from the collider on load");
+  check(load_scene_body(kSceneV4AuthoredWithCollider, &body) &&
+            vec_exact(body.inverseInertia, math::Vec3(1.0F, 1.0F, 1.0F)) &&
+            body.inertiaAuthored,
+        "scene v4 authored body keeps its number beside a collider");
+  check(load_scene_body(kSceneV4NoProvenanceWithCollider, &body) &&
+            vec_near(body.inverseInertia, math::Vec3(6.0F, 6.0F, 6.0F)) &&
+            !body.inertiaAuthored,
+        "scene v4 without the provenance key is automatic");
 
   // The current revision reads the field strictly; a refused load leaves
   // the destination untouched.
@@ -618,12 +788,28 @@ void test_scene_round_trip() noexcept {
   RigidBody body{};
   body.inverseMass = 1.0F;
   body.inverseInertia = math::Vec3(0.25F, 0.5F, 0.125F);
+  body.inertiaAuthored = true;
   if (!source->add_transform(entity, transform) ||
       !source->add_rigid_body(entity, body)) {
     check(false, "round-trip source setup");
     return;
   }
   const engine::runtime::PersistentId id = source->persistent_id(entity);
+  // A second, automatic body with a collider: its provenance must survive
+  // the trip so the loaded world derives it rather than trusting the number.
+  const Entity automatic = source->create_scene_object();
+  RigidBody automaticBody{};
+  automaticBody.inverseMass = 1.0F;
+  Transform automaticTransform{};
+  automaticTransform.position = math::Vec3(5.0F, 0.0F, 0.0F);
+  if (!source->add_transform(automatic, automaticTransform) ||
+      !source->add_rigid_body(automatic, automaticBody) ||
+      !source->add_collider(automatic, make_box(0.5F, 0.5F, 0.5F))) {
+    check(false, "round-trip automatic source setup");
+    return;
+  }
+  const engine::runtime::PersistentId automaticId =
+      source->persistent_id(automatic);
 
   std::unique_ptr<char[]> buffer(
       new (std::nothrow) char[engine::core::JsonWriter::kBufferBytes]);
@@ -642,8 +828,8 @@ void test_scene_round_trip() noexcept {
   check(parser.parse(buffer.get(), size) && (parser.root() != nullptr) &&
             parser.get_object_field(*parser.root(), "version",
                                     &versionValue) &&
-            parser.as_uint(versionValue, &version) && (version == 3U),
-        "saved scene carries revision 3");
+            parser.as_uint(versionValue, &version) && (version == 4U),
+        "saved scene carries revision 4");
   check(std::strstr(buffer.get(), "\"inverseInertia\":[") != nullptr,
         "saved scene writes the tensor as an array");
 
@@ -657,8 +843,16 @@ void test_scene_round_trip() noexcept {
   const Entity loadedEntity = loaded->find_entity_by_persistent_id(id);
   check(ok && (loadedEntity != engine::runtime::kInvalidEntity) &&
             loaded->get_rigid_body(loadedEntity, &restored) &&
-            vec_exact(restored.inverseInertia, body.inverseInertia),
-        "scene round trip restores the tensor exactly");
+            vec_exact(restored.inverseInertia, body.inverseInertia) &&
+            restored.inertiaAuthored,
+        "scene round trip restores the authored tensor exactly");
+  const Entity loadedAutomatic =
+      loaded->find_entity_by_persistent_id(automaticId);
+  check(ok && (loadedAutomatic != engine::runtime::kInvalidEntity) &&
+            loaded->get_rigid_body(loadedAutomatic, &restored) &&
+            !restored.inertiaAuthored &&
+            vec_near(restored.inverseInertia, math::Vec3(6.0F, 6.0F, 6.0F)),
+        "scene round trip keeps an automatic body automatic and derived");
 
   // Byte-identical re-save.
   std::unique_ptr<char[]> second(
@@ -742,6 +936,8 @@ int main() {
   test_world_application();
   test_world_derives_on_collider_install();
   test_world_compound_children();
+  test_world_ownership_depth_and_placement();
+  test_world_provenance_is_explicit();
   test_joint_respects_locked_axis();
   test_contact_respects_locked_axis();
   test_scene_migration();
