@@ -44,8 +44,9 @@ struct StateHasher final {
 
 } // namespace
 
-std::uint64_t World::state_hash() const noexcept {
+std::uint64_t World::state_hash(StateHashSections *outSections) const noexcept {
   StateHasher h{};
+  StateHashSections sections{};
 
   // Every section starts with its count so an empty section and a missing
   // one never fold to the same value.
@@ -54,6 +55,7 @@ std::uint64_t World::state_hash() const noexcept {
     h.entity(entity);
     h.u32(m_entityPersistentIds[entity.index]);
   });
+  sections.entities = h.hash;
 
   const std::size_t stateIndex = query_state_index();
   h.u32(static_cast<std::uint32_t>(m_transforms.count()));
@@ -65,6 +67,7 @@ std::uint64_t World::state_hash() const noexcept {
     h.vec3(transform.scale);
     h.u32(transform.parentId);
   }
+  sections.transforms = h.hash;
 
   h.u32(static_cast<std::uint32_t>(m_rigidBodies.count()));
   for (std::size_t i = 0U; i < m_rigidBodies.count(); ++i) {
@@ -75,6 +78,7 @@ std::uint64_t World::state_hash() const noexcept {
     h.u32(body.sleepFrameCount);
     h.u32(body.sleeping ? 1U : 0U);
   }
+  sections.rigidBodies = h.hash;
 
   const physics::PhysicsContext &physics = m_physicsContext;
   h.vec3(physics.gravity);
@@ -82,6 +86,7 @@ std::uint64_t World::state_hash() const noexcept {
   for (std::size_t i = 0U; i < physics.collisionPairCount * 2U; ++i) {
     h.entity(physics.collisionPairData[i]);
   }
+  sections.physics = h.hash;
 
   h.u32(static_cast<std::uint32_t>(m_timerManager.active_count()));
   h.f32(m_timerManager.elapsed_seconds());
@@ -95,6 +100,7 @@ std::uint64_t World::state_hash() const noexcept {
     h.f32(entry.interval);
     h.u32(entry.repeat ? 1U : 0U);
   }
+  sections.timers = h.hash;
 
   h.u32(static_cast<std::uint32_t>(m_animationComponents.count()));
   for (std::size_t i = 0U; i < m_animationComponents.count(); ++i) {
@@ -117,6 +123,10 @@ std::uint64_t World::state_hash() const noexcept {
     }
   }
 
+  sections.animation = h.hash;
+  if (outSections != nullptr) {
+    *outSections = sections;
+  }
   return h.hash;
 }
 

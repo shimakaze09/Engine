@@ -111,7 +111,8 @@ bool populate_world(engine::runtime::World &world,
 /// for kFrameCount frames of exactly one fixed step each, and reports the
 /// world's state hash and the first body's final height.
 bool run_pipeline(std::uint32_t workerThreads, std::uint64_t *outHash,
-                  float *outFirstBodyY) noexcept {
+                  float *outFirstBodyY,
+                  engine::runtime::StateHashSections *outSections) noexcept {
   engine::EngineConfig config{};
   config.core.platform.headless = true;
   config.core.workerThreads = workerThreads;
@@ -136,7 +137,7 @@ bool run_pipeline(std::uint32_t workerThreads, std::uint64_t *outHash,
     }
     engine::runtime::Transform transform{};
     if (ok && world->get_transform(firstBody, &transform)) {
-      *outHash = world->state_hash();
+      *outHash = world->state_hash(outSections);
       *outFirstBodyY = transform.position.y;
     } else {
       ok = false;
@@ -160,8 +161,10 @@ int main() {
   std::uint64_t hashB = 0U;
   float firstBodyYA = 0.0F;
   float firstBodyYB = 0.0F;
-  const bool ran = run_pipeline(1U, &hashA, &firstBodyYA) &&
-                   run_pipeline(4U, &hashB, &firstBodyYB);
+  engine::runtime::StateHashSections sectionsA{};
+  engine::runtime::StateHashSections sectionsB{};
+  const bool ran = run_pipeline(1U, &hashA, &firstBodyYA, &sectionsA) &&
+                   run_pipeline(4U, &hashB, &firstBodyYB, &sectionsB);
   static_cast<void>(std::remove(kMainScriptPath));
   if (!ran) {
     std::printf("FAIL: determinism pipeline run\n");
@@ -184,6 +187,16 @@ int main() {
     return 3;
   }
 
+  // The running fold after each section, so two platforms that disagree
+  // can see which section diverged first; the final line is what CI reads.
+  std::printf("[determinism] fold entities=%llu transforms=%llu "
+              "bodies=%llu physics=%llu timers=%llu animation=%llu\n",
+              static_cast<unsigned long long>(sectionsA.entities),
+              static_cast<unsigned long long>(sectionsA.transforms),
+              static_cast<unsigned long long>(sectionsA.rigidBodies),
+              static_cast<unsigned long long>(sectionsA.physics),
+              static_cast<unsigned long long>(sectionsA.timers),
+              static_cast<unsigned long long>(sectionsA.animation));
   std::printf("[determinism] hash=%llu\n",
               static_cast<unsigned long long>(hashA));
   return 0;

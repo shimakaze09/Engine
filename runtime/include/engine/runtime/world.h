@@ -92,6 +92,18 @@ inline constexpr bool kTupleContainsV<C, std::tuple<Ts...>> =
 
 /// Fixed-capacity ECS world: entity lifetimes, component storage, phase
 /// gating, and the physics-facing world view.
+/// The fold's running value after each section of state_hash, so a
+/// divergence between two runs or platforms is localised to the section
+/// that first differs.
+struct StateHashSections final {
+  std::uint64_t entities = 0U;
+  std::uint64_t transforms = 0U;
+  std::uint64_t rigidBodies = 0U;
+  std::uint64_t physics = 0U;
+  std::uint64_t timers = 0U;
+  std::uint64_t animation = 0U;
+};
+
 class World final : public physics::PhysicsWorldView {
 public:
   static constexpr std::size_t kMaxEntities = ENGINE_MAX_ENTITIES;
@@ -207,7 +219,7 @@ public:
   /// equal hashes mean the observed subset evolved identically, not that
   /// two worlds are the same world. Reads the committed state; never call
   /// it during Simulation.
-  std::uint64_t state_hash() const noexcept;
+  std::uint64_t state_hash(StateHashSections *outSections = nullptr) const noexcept;
 
   /// Content epoch: advances every time this world's entire contents are
   /// replaced (scene load commit, reset), so externally retained entity
