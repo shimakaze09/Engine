@@ -532,8 +532,8 @@ void apply_env_override(CVarEntry &entry) noexcept {
   envName[out] = '\0';
   // GetEnvironmentVariableA under the hood on Windows — std::getenv is
   // a -Werror deprecation there.
-  const char *value = non_empty_env(envName);
-  if (value == nullptr) {
+  char value[512] = {};
+  if (!non_empty_env(envName, value, sizeof(value))) {
     return;
   }
   bool ok = false;
@@ -562,12 +562,14 @@ void apply_env_override(CVarEntry &entry) noexcept {
     }
     break;
   }
-  case CVarType::String:
-    if (std::strlen(value) < kMaxStringValLen) {
-      std::snprintf(entry.str, kMaxStringValLen, "%s", value);
+  case CVarType::String: {
+    const std::size_t length = std::strlen(value);
+    if (length < kMaxStringValLen) {
+      std::memcpy(entry.str, value, length + 1U);
       ok = true;
     }
     break;
+  }
   }
   if (!ok) {
     log_parse_rejection(entry.name, value, "environment override");

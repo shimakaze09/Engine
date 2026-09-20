@@ -36,9 +36,12 @@ bool is_platform_running() noexcept;
 void request_platform_quit() noexcept;
 /// Drawable size in pixels (may differ from window size on HiDPI).
 void render_drawable_size(int *outWidth, int *outHeight) noexcept;
-/// Environment variable value, or nullptr when unset or empty (the
-/// Windows path avoids the CRT getenv deprecation).
-const char *non_empty_env(const char *name) noexcept;
+/// Copies the environment variable's value into `out`; false, with `out`
+/// emptied, when the variable is unset or empty, or the value does not
+/// fit `capacity` whole. The caller owns the bytes, so two lookups on
+/// one thread never alias (the Windows path reads through the Win32
+/// API, avoiding the CRT getenv deprecation).
+bool non_empty_env(const char *name, char *out, std::size_t capacity) noexcept;
 
 // ----- Gamepad devices -------------------------------------------------------
 // The platform owns the OS-level gamepad subsystem and the open device

@@ -1386,10 +1386,17 @@ void render_device_bgfx_frame() noexcept {
   // seconds through bgfx's readback — visual verification on hosts
   // whose compositors block external capture, and in CI.
   {
-    static const char *screenshotPath =
-        core::non_empty_env("ENGINE_BGFX_SCREENSHOT");
+    // Read once and kept in this frame function's own storage: the
+    // variable is looked up at the first frame and never again.
+    static char screenshotPath[1024] = {};
+    static bool screenshotPathResolved = false;
     static std::uint32_t frameCounter = 0U;
-    if ((screenshotPath != nullptr) && ((frameCounter++ % 120U) == 60U)) {
+    if (!screenshotPathResolved) {
+      screenshotPathResolved = true;
+      static_cast<void>(core::non_empty_env(
+          "ENGINE_BGFX_SCREENSHOT", screenshotPath, sizeof(screenshotPath)));
+    }
+    if ((screenshotPath[0] != '\0') && ((frameCounter++ % 120U) == 60U)) {
       bgfx::requestScreenShot(BGFX_INVALID_HANDLE, screenshotPath);
     }
   }

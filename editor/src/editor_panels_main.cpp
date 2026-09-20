@@ -270,9 +270,11 @@ void draw_toolbar() noexcept {
   // so a later editor session in the same process re-arms.
   if (!editor_session().autoplayConsumed && canPlay &&
       (editor_session().playState == PlayState::Stopped)) {
-    const char *autoplay = core::non_empty_env("ENGINE_EDITOR_AUTOPLAY");
+    char autoplay[8] = {};
     editor_session().autoplayConsumed = true;
-    if ((autoplay != nullptr) && (autoplay[0] == '1')) {
+    if (core::non_empty_env("ENGINE_EDITOR_AUTOPLAY", autoplay,
+                            sizeof(autoplay)) &&
+        (autoplay[0] == '1')) {
       start_play_mode();
     }
   }
