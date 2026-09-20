@@ -26,6 +26,15 @@ namespace engine::content {
 
 /// Fixed-capacity map from a cooked output's path, relative to the root
 /// it was indexed under, to the AssetRef the cook recorded for it.
+///
+/// Over a megabyte, so it never goes on a stack: Windows gives a thread
+/// 1 MiB by default where Linux gives 8 MiB, and one of these is larger
+/// than the whole Windows allowance. Copying and moving are deleted so
+/// that stays a compile error rather than a crash only one platform
+/// shows — including the `*index = ProvenanceIndex{}` spelling of a
+/// reset, whose temporary is what a build_provenance_index caller would
+/// otherwise pay for. Declare one at namespace scope, in a heap
+/// allocation, or as a member of something already there.
 struct ProvenanceIndex final {
   static constexpr std::size_t kMaxOutputs = 4096U;
   static constexpr std::size_t kMaxPathLength = 260U;
@@ -40,6 +49,13 @@ struct ProvenanceIndex final {
   /// Outputs a stamp named that did not fit the index; a walk that
   /// reports any of these is incomplete and says so.
   std::size_t overflowed = 0U;
+
+  ProvenanceIndex() = default;
+  ProvenanceIndex(const ProvenanceIndex &) = delete;
+  ProvenanceIndex(ProvenanceIndex &&) = delete;
+  ProvenanceIndex &operator=(const ProvenanceIndex &) = delete;
+  ProvenanceIndex &operator=(ProvenanceIndex &&) = delete;
+  ~ProvenanceIndex() = default;
 };
 
 /// Reads every "*.cookstamp" under `osRoot` and records what each one

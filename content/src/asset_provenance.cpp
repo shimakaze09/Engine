@@ -130,7 +130,10 @@ bool build_provenance_index(const char *osRoot,
   if ((osRoot == nullptr) || (osRoot[0] == '\0') || (out == nullptr)) {
     return false;
   }
-  *out = ProvenanceIndex{};
+  // Only the counters are reset: entries past `count` are unreachable,
+  // and clearing all of them would mean a megabyte of writes per mount.
+  out->count = 0U;
+  out->overflowed = 0U;
 
   std::error_code ec{};
   const std::filesystem::path root(osRoot);

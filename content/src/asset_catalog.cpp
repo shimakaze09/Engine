@@ -8,6 +8,7 @@
 
 #include <cstdio>
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -229,8 +230,12 @@ MountRegistration register_mounted_assets(MetadataStore *store,
 
   // Read once for the whole walk: the stamps say which source produced
   // each cooked output, and re-reading them per file would be O(n^2).
-  static ProvenanceIndex provenance{};
-  static_cast<void>(build_provenance_index(osRoot, &provenance));
+  // Heap, because the index is larger than a Windows thread's whole
+  // default stack; this walk is cold filesystem work that already
+  // allocates, and the index is freed with the walk rather than held for
+  // the process's life.
+  const auto provenance = std::make_unique<ProvenanceIndex>();
+  static_cast<void>(build_provenance_index(osRoot, provenance.get()));
 
   // Collected so identity can be validated across the whole mount once
   // the walk has seen every asset, rather than per file.
@@ -282,7 +287,7 @@ MountRegistration register_mounted_assets(MetadataStore *store,
     metadata.typeTag = classification.tag;
     const char *unidentifiedWhy = nullptr;
     metadata.ref = resolve_authored_ref(entry.path(), generic, classification,
-                                        provenance, &unidentifiedWhy);
+                                        *provenance, &unidentifiedWhy);
     if (metadata.assetId == kInvalidAssetId) {
       ++result.refused;
       continue;
