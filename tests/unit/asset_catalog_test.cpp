@@ -4,7 +4,9 @@
 // table; hidden entries and non-asset files are skipped; a record already
 // in the store is kept whole; a second walk registers nothing; a prefix
 // that pushes a path past the record refuses the file and leaves the
-// store untouched; null arguments and a missing root do nothing.
+// store untouched; null arguments and a missing root do nothing; and a
+// mount authored before the kind-suffix rename is still catalogued, with
+// its superseded names counted.
 
 #include <cstddef>
 #include <cstring>
@@ -216,6 +218,50 @@ void test_overlong_prefix(engine::content::MetadataStore *store) noexcept {
         "a refused walk leaves the store as it was");
 }
 
+/// A separate root so the counts above stay about the current scheme: a
+/// mount authored before the rename is still catalogued, and the walk
+/// reports how many files carry a superseded name.
+void test_legacy_names(engine::content::MetadataStore *store) noexcept {
+  using engine::content::AssetTypeTag;
+  constexpr const char *kLegacyRoot = "asset_catalog_test_legacy";
+  constexpr const char *kLegacyPrefix = "old";
+
+  std::error_code ec{};
+  std::filesystem::remove_all(kLegacyRoot, ec);
+  const char *files[] = {
+      "levels/hub.scene.json",   // legacy Scene
+      "props/crate.prefab.json", // legacy Prefab
+      "ctrl/hero.animctrl.json", // legacy AnimationController
+      "props/coin.mesh",         // current Mesh, not legacy
+  };
+  bool written = true;
+  for (const char *file : files) {
+    written = written && write_file(std::filesystem::path(kLegacyRoot) / file);
+  }
+  if (!written) {
+    g_tests.fail("the legacy asset tree could be written");
+    return;
+  }
+
+  const engine::content::MountRegistration walk =
+      engine::content::register_mounted_assets(store, kLegacyPrefix,
+                                               kLegacyRoot);
+  check(walk.registered == 4U, "a legacy-named mount is still catalogued");
+  check(walk.legacyNamed == 3U,
+        "the three superseded names are counted, the current one is not");
+  check(has_path_and_type(*store, "old/levels/hub.scene.json",
+                          AssetTypeTag::Scene),
+        "a legacy scene is typed Scene under its own name");
+  check(has_path_and_type(*store, "old/props/crate.prefab.json",
+                          AssetTypeTag::Prefab),
+        "a legacy prefab is typed Prefab");
+  check(has_path_and_type(*store, "old/ctrl/hero.animctrl.json",
+                          AssetTypeTag::AnimationController),
+        "a legacy controller is typed AnimationController");
+
+  std::filesystem::remove_all(kLegacyRoot, ec);
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -238,6 +284,7 @@ int main() {
   test_invalid_arguments(store.get());
   test_walk(store.get());
   test_overlong_prefix(store.get());
+  test_legacy_names(store.get());
 
   remove_tree();
   return g_tests.finish("asset catalog tests");

@@ -65,10 +65,15 @@ bool is_hidden_from_index(const std::filesystem::path &path) noexcept {
     return true;
   }
   const std::string filename = path.filename().string();
+  // The superseded sidecar and manifest names stay hidden too: a project
+  // cooked before the rename must not suddenly show its bookkeeping
+  // files as browsable assets.
   return has_suffix(filename.c_str(), ".meta") ||
+         has_suffix(filename.c_str(), ".meta.json") ||
          has_suffix(filename.c_str(), ".cookstamp") ||
          has_suffix(filename.c_str(), ".checksum") ||
-         (filename == "generated.manifest");
+         (filename == "generated.manifest") ||
+         (filename == "generated.manifest.json");
 }
 
 /// Copies `text` into a fixed field; false (field cleared) when it does

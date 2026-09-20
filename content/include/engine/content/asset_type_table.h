@@ -92,16 +92,43 @@ const AssetTypeDescriptor &asset_type_descriptor(AssetTypeTag tag) noexcept;
 /// Display label of a tag ("Mesh", "Anim Controller", ...).
 const char *asset_type_label(AssetTypeTag tag) noexcept;
 
+// The suffixes the kind-named scheme replaced, accepted for one revision
+// so a project authored before the rename still classifies rather than
+// falling to Other. Row: X(oldSuffix, Tag, newSuffix). Writers only ever
+// emit the new form. A scene or material named with a bare ".json" cannot
+// be told from any other JSON by name and so is not listed: it still
+// loads by explicit path, it only shows as Other in the browser until it
+// is renamed.
+#define ENGINE_ASSET_LEGACY_SUFFIX_TABLE(X)                                    \
+  X(".scene.json", Scene, ".scene")                                            \
+  X(".prefab.json", Prefab, ".prefab")                                         \
+  X(".mat.json", Material, ".mat")                                             \
+  X(".animctrl.json", AnimationController, ".animctrl")
+
 /// What a path's suffix says about it.
 struct AssetClassification final {
   AssetTypeTag tag = AssetTypeTag::Unknown;
   /// True when the suffix is the type's authored source form rather than
   /// its cooked or derived form.
   bool source = false;
+  /// True when the match came from the legacy table above: the record is
+  /// typed as usual, and the caller says so once so the author can
+  /// rename. asset_legacy_replacement_suffix names the new suffix.
+  bool legacy = false;
 };
 
-/// Classifies a path by the longest table suffix it ends with, ignoring
-/// case; Unknown when no row's suffix matches or the path is null.
+/// Classifies a path by the longest suffix it ends with, ignoring case:
+/// the table's kind suffixes first, then the legacy names above. Unknown
+/// when nothing matches or the path is null.
 AssetClassification classify_asset_path(const char *path) noexcept;
+
+/// The suffix `path` should be renamed to when it carries a legacy one,
+/// else nullptr. Stable storage; never owned by the caller.
+const char *asset_legacy_replacement_suffix(const char *path) noexcept;
+
+/// The sidecar suffix superseded by ".meta". A cook that finds no ".meta"
+/// beside an output falls back to this one so an author's import settings
+/// survive the rename instead of being silently recooked from defaults.
+inline constexpr const char *kLegacyImportSettingsSuffix = ".meta.json";
 
 } // namespace engine::content

@@ -73,16 +73,30 @@ bool ends_with_ignoring_case(const char *path, std::size_t pathLength,
 /// Records `suffix` as the best match so far when it is longer than the
 /// current best.
 void consider(const char *path, std::size_t pathLength, const char *suffix,
-              AssetTypeTag tag, bool source, std::size_t *bestLength,
-              AssetClassification *best) noexcept {
+              AssetTypeTag tag, bool source, bool legacy,
+              std::size_t *bestLength, AssetClassification *best) noexcept {
   const std::size_t length = std::strlen(suffix);
   if ((length > *bestLength) &&
       ends_with_ignoring_case(path, pathLength, suffix)) {
     *bestLength = length;
     best->tag = tag;
     best->source = source;
+    best->legacy = legacy;
   }
 }
+
+/// One legacy row in data form.
+struct LegacySuffix final {
+  const char *suffix;
+  AssetTypeTag tag;
+  const char *replacement;
+};
+
+#define ENGINE_ASSET_LEGACY_ROW(oldSuffix, Tag, newSuffix)                     \
+  LegacySuffix{oldSuffix, AssetTypeTag::Tag, newSuffix},
+constexpr LegacySuffix kLegacySuffixes[] = {
+    ENGINE_ASSET_LEGACY_SUFFIX_TABLE(ENGINE_ASSET_LEGACY_ROW)};
+#undef ENGINE_ASSET_LEGACY_ROW
 
 } // namespace
 
@@ -107,15 +121,35 @@ AssetClassification classify_asset_path(const char *path) noexcept {
   std::size_t bestLength = 0U;
   for (const AssetTypeDescriptor &row : kDescriptors) {
     for (std::size_t i = 0U; i < row.sourceSuffixCount; ++i) {
-      consider(path, pathLength, row.sourceSuffixes[i], row.tag, true,
+      consider(path, pathLength, row.sourceSuffixes[i], row.tag, true, false,
                &bestLength, &best);
     }
     for (std::size_t i = 0U; i < row.cookedSuffixCount; ++i) {
-      consider(path, pathLength, row.cookedSuffixes[i], row.tag, false,
+      consider(path, pathLength, row.cookedSuffixes[i], row.tag, false, false,
                &bestLength, &best);
     }
   }
+  // A legacy name is strictly longer than the kind suffix it replaced
+  // (".scene.json" against ".scene"), so the same longest-match rule
+  // picks it without a kind suffix ever losing to one.
+  for (const LegacySuffix &row : kLegacySuffixes) {
+    consider(path, pathLength, row.suffix, row.tag, true, true, &bestLength,
+             &best);
+  }
   return best;
+}
+
+const char *asset_legacy_replacement_suffix(const char *path) noexcept {
+  if (path == nullptr) {
+    return nullptr;
+  }
+  const std::size_t pathLength = std::strlen(path);
+  for (const LegacySuffix &row : kLegacySuffixes) {
+    if (ends_with_ignoring_case(path, pathLength, row.suffix)) {
+      return row.replacement;
+    }
+  }
+  return nullptr;
 }
 
 } // namespace engine::content

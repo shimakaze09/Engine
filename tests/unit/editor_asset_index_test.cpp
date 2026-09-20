@@ -98,6 +98,8 @@ bool rebuild_scratch_tree() noexcept {
   char materialPath[1024] = {};
   char controllerPath[1024] = {};
   char metaPath[1024] = {};
+  char legacyScenePath[1024] = {};
+  char legacyMetaPath[1024] = {};
   char subMeshPath[1024] = {};
   if (!make_scratch_path("thing.mesh", meshPath, sizeof(meshPath)) ||
       !make_scratch_path("thing.png", texPath, sizeof(texPath)) ||
@@ -108,6 +110,10 @@ bool rebuild_scratch_tree() noexcept {
                          sizeof(controllerPath)) ||
       !make_scratch_path("thing.mesh.meta", metaPath,
                          sizeof(metaPath)) ||
+      !make_scratch_path("legacy.scene.json", legacyScenePath,
+                         sizeof(legacyScenePath)) ||
+      !make_scratch_path("legacy.mesh.meta.json", legacyMetaPath,
+                         sizeof(legacyMetaPath)) ||
       !make_scratch_path("sub/nested.mesh", subMeshPath,
                          sizeof(subMeshPath))) {
     return false;
@@ -122,6 +128,8 @@ bool rebuild_scratch_tree() noexcept {
          write_text_file(controllerPath,
                          "{\"states\":{},\"clips\":{},\"initial\":\"idle\"}") &&
          write_text_file(metaPath, "{\"importSettings\":{}}") &&
+         write_text_file(legacyScenePath, "{\"entities\":[],\"version\":1}") &&
+         write_text_file(legacyMetaPath, "{\"importSettings\":{}}") &&
          write_text_file(subMeshPath, "nested mesh");
 }
 
@@ -204,6 +212,18 @@ int check_rebuild_classifies_and_hides_sidecars() {
   }
   if (mesh->virtualPath[0] == '\0') {
     return 13; // must resolve a VFS virtual path under the mount root
+  }
+
+  // A project authored before the kind-suffix rename: its scene still
+  // classifies, and its sidecar stays hidden rather than becoming a
+  // browsable asset.
+  const AssetIndexEntry *legacyScene = find_entry_by_leaf("legacy.scene.json");
+  if ((legacyScene == nullptr) ||
+      (legacyScene->kind != engine::content::AssetTypeTag::Scene)) {
+    return 14;
+  }
+  if (find_entry_by_leaf("legacy.mesh.meta.json") != nullptr) {
+    return 15; // the superseded sidecar name must stay hidden too
   }
   return 0;
 }

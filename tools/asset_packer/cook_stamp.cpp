@@ -248,24 +248,45 @@ bool read_import_settings_from_meta(const char *outputPath,
     return false;
   }
 
-  char metadataPath[512] = {};
-  const int pathResult = std::snprintf(metadataPath, sizeof(metadataPath),
-                                       "%s.meta", outputPath);
-  if ((pathResult <= 0) ||
-      (pathResult >= static_cast<int>(sizeof(metadataPath)))) {
-    return false;
-  }
-
+  // ".meta" first, then the superseded ".meta.json". Without the
+  // fallback a project cooked before the rename would read no settings
+  // and recook from defaults, silently discarding the author's mesh
+  // index, scale factor and up axis.
   FILE *file = nullptr;
+  bool fromLegacyName = false;
+  for (const char *suffix : {".meta", ".meta.json"}) {
+    char metadataPath[512] = {};
+    const int pathResult = std::snprintf(metadataPath, sizeof(metadataPath),
+                                         "%s%s", outputPath, suffix);
+    if ((pathResult <= 0) ||
+        (pathResult >= static_cast<int>(sizeof(metadataPath)))) {
+      return false;
+    }
 #ifdef _WIN32
-  if (fopen_s(&file, metadataPath, "rb") != 0) {
-    file = nullptr;
-  }
+    if (fopen_s(&file, metadataPath, "rb") != 0) {
+      file = nullptr;
+    }
 #else
-  file = std::fopen(metadataPath, "rb");
+    file = std::fopen(metadataPath, "rb");
 #endif
+    if (file != nullptr) {
+      break;
+    }
+    fromLegacyName = true;
+  }
   if (file == nullptr) {
     return false;
+  }
+  if (fromLegacyName) {
+    // The cook writes the new name and never the old one, so the settings
+    // carry over on this run. The stale file is left in place rather than
+    // deleted: it still has an owning mesh, so it is not an orphan, and a
+    // cook has no business removing a file it did not write.
+    std::fprintf(stderr,
+                 "import settings read from the superseded '%s.meta.json'; "
+                 "the cook writes '%s.meta' from now on, so delete the old "
+                 "file once this run has published\n",
+                 outputPath, outputPath);
   }
 
   std::fseek(file, 0, SEEK_END);
