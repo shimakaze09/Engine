@@ -35,6 +35,8 @@ were being discovered by code reading instead.
    the queue ahead of anything found by reading code.
 4. **A P3 never justifies a change of its own.** Fix it inside a change
    already touching those files, or close it as `wont-fix`.
+   *(Superseded by [0014](0014-severity-is-impact.md): a P3 stands alone
+   for bounded structural value, and age never closes one.)*
 
 ## Consequences
 

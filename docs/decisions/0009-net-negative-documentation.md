@@ -41,6 +41,10 @@ that nothing ever came out.
    document never mirrors another, and no gate exists to keep two prose
    documents consistent — the mirror is deleted instead.
 
+*(Amended by [0014](0014-severity-is-impact.md): rules 1 and 2 are
+temporary through the current correction pass; rule 5 and a new-subsystem
+allowance are permanent.)*
+
 ## Consequences
 
 - Prose quality moves from merge-time gates to authoring-time guidance.

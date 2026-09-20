@@ -12,18 +12,18 @@ body:
         implementation and the gate that prevents the next copy. Instance
         fixes on a duplicated primitive increase the work remaining.
 
-        P3 hygiene does not justify an issue of its own unless it is
-        genuinely blocking. See the defect budget (decision 0007).
+        P3 hygiene is fixed inside a change already touching its files;
+        file it alone only for bounded structural value (decision 0014).
   - type: dropdown
     id: severity
     attributes:
       label: Severity
-      description: P0 crash/corruption/security, P1 serious correctness, P2 robustness/performance, P3 maintainability
+      description: Severity is impact, never visibility (decision 0014).
       options:
-        - P0 — crash, data loss, memory safety, security
-        - P1 — serious correctness or architectural defect
-        - P2 — robustness, determinism, or performance defect
-        - P3 — maintainability or minor cleanup
+        - P0 — data loss or corruption, unrecoverable project damage, critical crash
+        - P1 — major correctness or stability failure, or an important workflow that cannot reliably complete
+        - P2 — user-visible functional defect, or a workflow materially obstructed but recoverable
+        - P3 — low-impact debt, hygiene or cosmetics
     validations:
       required: true
   - type: dropdown
@@ -63,7 +63,7 @@ body:
     id: closure
     attributes:
       label: Closure requirements
-      description: "Per the close-finding skill, tiered by severity. P0/P1: the regression that must be red on base and green on the fix, plus required boundary/fault-injection coverage. P2: a test that would have caught it. P3: none — fix it inside a change that already touches these files. Partial fixes link a follow-up issue for the remaining scope."
+      description: "Per the close-finding skill, tiered by severity. P0/P1: the regression that must be red on base and green on the fix, plus required boundary/fault-injection coverage. P2: a test that would have caught it. P3: none — fixed inside a change that already touches these files, or alone for bounded structural value. Partial fixes link a follow-up issue for the remaining scope."
     validations:
       required: true
   - type: input

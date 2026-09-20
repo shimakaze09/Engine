@@ -197,9 +197,10 @@ absent from the sandbox and `load` accepts text only.
 
 - Private headers in `src/` are the established pattern for module-internal
   APIs. Keep using them; do not move them into `include/`.
-- Shared utilities go in `core`. One concept has one implementation: see
-  the `consolidate-primitive` skill before writing a second copy of a
-  handle table, hash, string copy, ring, file reader or path check.
+- Shared utilities go in `core`. One concept with one owner, lifetime and
+  failure model has one implementation: see the `consolidate-primitive`
+  skill before writing a second handle table, hash, string copy, ring,
+  file reader or path check.
 
 ## Modules
 

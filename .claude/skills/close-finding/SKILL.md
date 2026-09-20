@@ -50,17 +50,16 @@ problem that will cause defects.
 - Boundary cases for the specific boundary involved, not the full matrix.
 - No new linked issue required unless scope is genuinely left open.
 
-## P3 — fix inline or close it
+## P3 — fix inline, or alone when the value is structural
 
 Hygiene, duplication, dead code, naming, stale comments, an unused API.
 
-- Fix it inside a change that already touches those files, with the
-  existing tests passing. A P3 does not justify a change of its own, a
-  regression suite, or a scope table.
-- If nothing has touched it in a month, close it as `wont-fix`. Carrying
-  a P3 indefinitely costs more than the defect.
-- **Never open a change whose only content is a P3.** The selection cost,
-  the review cost and the merge-conflict cost exceed the value.
+- Normally fixed inside a change that already touches those files, with
+  the existing tests passing: no regression suite, no scope table.
+- A change of its own is allowed when the value is bounded and structural:
+  deleting a substantial obsolete API or dead code, unblocking a
+  migration, removing recurring noise, or a cleanup cheaper than carrying.
+- Age triggers triage or an icebox label, never a close.
 
 ## Consolidations are a different shape
 
@@ -80,11 +79,3 @@ Only for P0/P1/P2. State, per referenced finding, one of:
 Never write "all", "never", "complete", "production-ready" or "closed"
 beyond what the tests demonstrate. A reviewer rejects a claim broader than
 its evidence, and a contradicting audit reopens it immediately.
-
-## Selecting what to work on
-
-Pick by severity and by whether the fix is at the layer that owns the
-defect. Never pick by which files are free of other in-flight work — that
-selects against every structural fix, because structural fixes touch many
-files by nature. If the right work overlaps concurrent work, pause the
-concurrent work.
