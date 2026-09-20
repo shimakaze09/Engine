@@ -26,6 +26,7 @@ python tools/check_source_comments.py
 python tools/check_comment_quality.py
 python tools/check_module_deps.py
 python tools/check_dependency_pins.py
+python tools/check_content_attributes.py
 python tools/check_test_timing.py
 ```
 

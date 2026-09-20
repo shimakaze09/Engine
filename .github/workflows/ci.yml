@@ -278,6 +278,9 @@ jobs:
       - name: Audit dependency pins
         run: python3 tools/check_dependency_pins.py
 
+      - name: Audit content attributes
+        run: python3 tools/check_content_attributes.py
+
       - name: Audit test timing
         run: python3 tools/check_test_timing.py
 

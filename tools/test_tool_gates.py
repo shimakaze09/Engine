@@ -697,6 +697,72 @@ def test_dependency_pin_gate():
         sys.argv = argv
 
 
+def write_attribute_fixture(root, attributes, tracked):
+    """A throwaway git work tree with the given .gitattributes text and
+    the given tracked files staged (no commit or identity needed)."""
+    root.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "-C", str(root), "init", "-q"], check=True,
+                   capture_output=True)
+    if attributes is not None:
+        (root / ".gitattributes").write_text(attributes, encoding="utf-8")
+    for relative in tracked:
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"x\n")
+    subprocess.run(["git", "-C", str(root), "add", "-A"], check=True,
+                   capture_output=True)
+    return root
+
+
+def test_content_attributes_gate():
+    """The attributes gate (issue #590) must hold every tracked
+    content-hashed file to `text` unset, accept both `-text` and the
+    `binary` macro, ignore untracked and unhashed files, fail when git
+    cannot answer, and pass on this checkout."""
+    script = str(TOOLS / "check_content_attributes.py")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+
+        check(run([script, "--root", str(write_attribute_fixture(
+            tmp / "clean", "*.gltf -text\n*.mesh binary\n*.meta.json -text\n",
+            ["props/coin.gltf", "props/coin.mesh",
+             "props/coin.mesh.meta.json", "scene.json"]))]) == 0,
+              "attributes: -text and binary marks on every hashed file pass")
+
+        check(run([script, "--root", str(write_attribute_fixture(
+            tmp / "missing", "*.mesh binary\n",
+            ["props/coin.gltf", "props/coin.mesh"]))]) != 0,
+              "attributes: a hashed suffix with no attribute fails")
+
+        check(run([script, "--root", str(write_attribute_fixture(
+            tmp / "no_file", None, ["props/coin.gltf"]))]) != 0,
+              "attributes: a tree without .gitattributes fails")
+
+        check(run([script, "--root", str(write_attribute_fixture(
+            tmp / "marked_text", "*.gltf text\n", ["props/coin.gltf"]))]) != 0,
+              "attributes: a hashed file marked text fails")
+
+        check(run([script, "--root", str(write_attribute_fixture(
+            tmp / "sidecar", "*.gltf -text\n*.json -text\n*.meta.json text\n",
+            ["props/coin.gltf", "props/coin.mesh.meta.json"]))]) != 0,
+              "attributes: a later text mark on a sidecar suffix fails")
+
+        untracked = write_attribute_fixture(
+            tmp / "untracked", "*.gltf -text\n", ["props/coin.gltf"])
+        (untracked / "stray.mesh").write_bytes(b"x\n")
+        check(run([script, "--root", str(untracked)]) == 0,
+              "attributes: an untracked hashed file is not audited")
+
+        plain = tmp / "plain"
+        plain.mkdir()
+        check(run([script, "--root", str(plain)]) != 0,
+              "attributes: a directory that is not a work tree fails")
+
+    check(run([script, "--root", str(TOOLS.parent)]) == 0,
+          "attributes: this checkout passes the gate")
+
+
 def write_timing_fixture(root, relative, body):
     """Plants one test source at `relative` under a synthetic tree root."""
     path = root / relative
@@ -1049,6 +1115,7 @@ def main():
     test_binding_generator()
     test_module_dependency_gate()
     test_dependency_pin_gate()
+    test_content_attributes_gate()
     test_test_timing_gate()
     test_comment_quality_gate()
     test_error_handling_gate()
