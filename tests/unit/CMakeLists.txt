@@ -109,6 +109,13 @@ engine_add_test_executable(engine_unit_math
     engine_math
 )
 
+engine_add_test_executable(engine_unit_scalar_determinism
+    SOURCES
+    scalar_determinism_test.cpp
+    PRIVATE_DEPS
+    engine_math
+)
+
 engine_add_test_executable(engine_unit_device_slot_table
     SOURCES
     device_slot_table_test.cpp

@@ -1,5 +1,8 @@
 // Rotation quaternion (x, y, z, w) with conversions to/from axis-angle,
 // Euler angles, and Mat4, defined inline for hot transform/physics paths.
+// Every trigonometric evaluation goes through the deterministic scalar
+// set, so a rotation integrated on one platform matches another bit for
+// bit.
 
 #pragma once
 
@@ -7,6 +10,7 @@
 
 #include "engine/math/mat4.h"
 #include "engine/math/math_detail.h"
+#include "engine/math/scalar.h"
 #include "engine/math/vec3.h"
 
 namespace engine::math {
@@ -105,12 +109,12 @@ inline Quat slerp(const Quat &from, const Quat &to, float t) noexcept {
     return normalize(lerpResult);
   }
 
-  const float theta = std::acos(detail::clamp_scalar(cosTheta, -1.0F, 1.0F));
-  const float sinTheta = std::sin(theta);
+  const float theta = det_acos(detail::clamp_scalar(cosTheta, -1.0F, 1.0F));
+  const float sinTheta = det_sin(theta);
   const float invSinTheta = (sinTheta != 0.0F) ? (1.0F / sinTheta) : 0.0F;
 
-  const float scaleFrom = std::sin((1.0F - t) * theta) * invSinTheta;
-  const float scaleTo = std::sin(t * theta) * invSinTheta;
+  const float scaleFrom = det_sin((1.0F - t) * theta) * invSinTheta;
+  const float scaleTo = det_sin(t * theta) * invSinTheta;
 
   return Quat(from.x * scaleFrom + end.x * scaleTo,
               from.y * scaleFrom + end.y * scaleTo,
@@ -127,10 +131,10 @@ inline Quat from_axis_angle(const Vec3 &axis, float radians) noexcept {
 
   const Vec3 normalizedAxis = normalize(axis);
   const float halfAngle = 0.5F * radians;
-  const float sinHalf = std::sin(halfAngle);
+  const float sinHalf = det_sin(halfAngle);
 
   return Quat(normalizedAxis.x * sinHalf, normalizedAxis.y * sinHalf,
-              normalizedAxis.z * sinHalf, std::cos(halfAngle));
+              normalizedAxis.z * sinHalf, det_cos(halfAngle));
 }
 
 /// Extracts the rotation axis and angle; identity maps to the +X axis.
@@ -147,7 +151,7 @@ inline bool to_axis_angle(const Quat &value, Vec3 *outAxis,
   // on x86-64 (402,560 near-unit inputs at -O0 and -O2), so this is
   // defence-in-depth for other toolchains, not a fix to observed output.
   const float w = detail::clamp_scalar(normalized.w, -1.0F, 1.0F);
-  const float angle = 2.0F * std::acos(w);
+  const float angle = 2.0F * det_acos(w);
   const float sinHalf = std::sqrt(1.0F - (w * w));
 
   if (sinHalf <= 1.0e-6F) {
@@ -228,12 +232,12 @@ constexpr Vec3 rotate_vector(const Vec3 &v, const Quat &q) noexcept {
 // Euler convention: pitch is rotation about +X, yaw about +Y, roll about +Z.
 // Composition order is q = qy(yaw) * qx(pitch) * qz(roll).
 inline Quat from_euler(float pitchRad, float yawRad, float rollRad) noexcept {
-  const float cy = std::cos(yawRad * 0.5F);
-  const float sy = std::sin(yawRad * 0.5F);
-  const float cp = std::cos(pitchRad * 0.5F);
-  const float sp = std::sin(pitchRad * 0.5F);
-  const float cr = std::cos(rollRad * 0.5F);
-  const float sr = std::sin(rollRad * 0.5F);
+  const float cy = det_cos(yawRad * 0.5F);
+  const float sy = det_sin(yawRad * 0.5F);
+  const float cp = det_cos(pitchRad * 0.5F);
+  const float sp = det_sin(pitchRad * 0.5F);
+  const float cr = det_cos(rollRad * 0.5F);
+  const float sr = det_sin(rollRad * 0.5F);
 
   return Quat(cy * sp * cr + sy * cp * sr, sy * cp * cr - cy * sp * sr,
               cy * cp * sr - sy * sp * cr, cy * cp * cr + sy * sp * sr);
@@ -266,7 +270,7 @@ inline bool to_euler(const Quat &q, float *outPitch, float *outYaw,
   } else if (sinPitch < -1.0F) {
     sinPitch = -1.0F;
   }
-  *outPitch = std::asin(sinPitch);
+  *outPitch = det_asin(sinPitch);
 
   if (std::fabs(sinPitch) > 0.999999F) {
     // Gimbal lock: R[0][0]/R[0][1] (unlike the general-case pair below)
@@ -275,14 +279,14 @@ inline bool to_euler(const Quat &q, float *outPitch, float *outYaw,
     // roll reconstructs q exactly (the (yaw, roll) split itself is not
     // recoverable, matching the documented ambiguity above).
     const float sign = (sinPitch >= 0.0F) ? 1.0F : -1.0F;
-    *outYaw = sign * std::atan2(2.0F * ((q.x * q.y) - (q.w * q.z)),
+    *outYaw = sign * det_atan2(2.0F * ((q.x * q.y) - (q.w * q.z)),
                                1.0F - (2.0F * ((q.y * q.y) + (q.z * q.z))));
     *outRoll = 0.0F;
   } else {
-    *outYaw = std::atan2(2.0F * ((q.x * q.z) + (q.w * q.y)),
-                         1.0F - (2.0F * ((q.x * q.x) + (q.y * q.y))));
-    *outRoll = std::atan2(2.0F * ((q.x * q.y) + (q.w * q.z)),
-                          1.0F - (2.0F * ((q.x * q.x) + (q.z * q.z))));
+    *outYaw = det_atan2(2.0F * ((q.x * q.z) + (q.w * q.y)),
+                        1.0F - (2.0F * ((q.x * q.x) + (q.y * q.y))));
+    *outRoll = det_atan2(2.0F * ((q.x * q.y) + (q.w * q.z)),
+                         1.0F - (2.0F * ((q.x * q.x) + (q.z * q.z))));
   }
 
   return true;

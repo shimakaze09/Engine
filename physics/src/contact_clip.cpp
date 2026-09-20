@@ -6,6 +6,7 @@
 #include "contact_clip.h"
 
 #include "engine/math/mat4.h"
+#include "engine/math/scalar.h"
 #include "engine/math/vec4.h"
 
 #include <cmath>
@@ -89,8 +90,8 @@ void order_polygon(FacePolygon *face) noexcept {
   float angles[kMaxFaceVertices]{};
   for (std::size_t i = 0U; i < face->count; ++i) {
     const math::Vec3 offset = math::sub(face->vertices[i], centroid);
-    angles[i] =
-        std::atan2(math::dot(offset, bitangent), math::dot(offset, tangent));
+    angles[i] = math::det_atan2(math::dot(offset, bitangent),
+                                math::dot(offset, tangent));
   }
   for (std::size_t i = 1U; i < face->count; ++i) {
     const float angle = angles[i];
