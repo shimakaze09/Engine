@@ -5,6 +5,8 @@
 #include <cstring>
 #include <string>
 
+#include "engine/core/platform.h"
+
 // Include the dependency graph header directly from the tools directory.
 // The test links against the dependency_graph.cpp object.
 #include "dependency_graph.h"
@@ -13,15 +15,11 @@ namespace {
 
 // Helper: create a temp file path for graph serialization tests.
 bool make_temp_graph_path(char *outPath, std::size_t outSize) {
-#ifdef _WIN32
-  const char *tmpDir = std::getenv("TEMP");
-  if (tmpDir == nullptr) {
-    tmpDir = ".";
+  char tmpDir[1024] = {};
+  if (!engine::core::platform_get_temp_dir(tmpDir, sizeof(tmpDir))) {
+    return std::snprintf(outPath, outSize, "dep_graph_test.json") > 0;
   }
   return std::snprintf(outPath, outSize, "%s/dep_graph_test.json", tmpDir) > 0;
-#else
-  return std::snprintf(outPath, outSize, "/tmp/dep_graph_test.json") > 0;
-#endif
 }
 
 bool read_text_file(const char *path, std::string *outText) {

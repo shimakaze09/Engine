@@ -987,9 +987,10 @@ def test_error_handling_gate():
 
 
 def test_portable_fopen_gate():
-    """The portable-fopen gate must reject a bare fopen that a Windows lane
-    would compile, accept one in a branch Windows skips, ignore comments,
-    strings and look-alike names, and pass this checkout."""
+    """The portability gate must reject a bare call to any deprecated CRT
+    function that a Windows lane would compile, accept one in a branch
+    Windows skips, ignore comments, strings and look-alike names, and pass
+    this checkout."""
     script = str(TOOLS / "check_portable_fopen.py")
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -1047,6 +1048,33 @@ def test_portable_fopen_gate():
             "tools", "tools/asset_packer/a.cpp",
             "// Purpose.\nvoid f() { FILE *g = std::fopen(p, m); }\n")]) == 0,
               "portable fopen: tools/ is outside the audited roots")
+        # The rest of the deprecated family the MSVC CRT rejects, which
+        # cost a Windows lane once (a test's std::sscanf).
+        check(run([script, "--root", case(
+            "sscanf", "tests/unit/a_test.cpp",
+            "// Purpose.\nvoid f() { std::sscanf(t, \"%d\", &v); }\n")]) != 0,
+              "portable fopen: a bare std::sscanf is a finding")
+        check(run([script, "--root", case(
+            "sprintf", "core/src/a.cpp",
+            "// Purpose.\nvoid f() { sprintf(buffer, \"%d\", v); }\n")]) != 0,
+              "portable fopen: sprintf is a finding")
+        check(run([script, "--root", case(
+            "strcpy", "core/src/a.cpp",
+            "// Purpose.\nvoid f() { strcpy(dst, src); }\n")]) != 0,
+              "portable fopen: strcpy is a finding")
+        check(run([script, "--root", case(
+            "getenv", "core/src/a.cpp",
+            "// Purpose.\nvoid f() { const char *v = std::getenv(\"HOME\"); }\n")]) != 0,
+              "portable fopen: getenv is a finding")
+        check(run([script, "--root", case(
+            "sscanf_guarded", "core/src/a.cpp",
+            "// Purpose.\n#ifndef _WIN32\nstd::sscanf(t, \"%d\", &v);\n#endif\n")]) == 0,
+              "portable fopen: a guarded sscanf passes")
+        check(run([script, "--root", case(
+            "safe_family", "core/src/a.cpp",
+            "// Purpose.\nvoid f() { std::snprintf(b, n, \"%d\", v); "
+            "sscanf_s(t, \"%d\", &v); my_strcpy(d, s); }\n")]) == 0,
+              "portable fopen: the safe variants and look-alikes pass")
         check(run([script, "--root", str(tmp / "empty")]) == 0,
               "portable fopen: an empty tree passes")
 

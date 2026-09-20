@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Audit first-party C++ for fopen calls the Windows lanes cannot build.
+"""Audit first-party C++ for CRT calls the Windows lanes cannot build.
 
-The MSVC C runtime marks `fopen` deprecated in favour of `fopen_s`, and the
-engine builds with warnings as errors, so a bare `std::fopen` compiles on
+The MSVC C runtime marks a family of standard functions deprecated in
+favour of its `_s` variants — `fopen`, `sscanf`, `sprintf`, `strcpy`,
+`getenv` and the rest of AUDITED_CALLS — and the engine builds with
+warnings as errors, so a bare `std::fopen` or `std::sscanf` compiles on
 Linux and macOS and fails on every Windows lane. The tree's idiom is to
-open through `fopen_s` under `_WIN32` and keep `fopen` for the other
-branch:
+call the `_s` variant under `_WIN32` and keep the standard one for the
+other branch:
 
     #ifdef _WIN32
       if (fopen_s(&file, path, "wb") != 0) { file = nullptr; }
@@ -15,18 +17,21 @@ branch:
 
 A contributor on Linux gets no signal when they forget it — the break
 appears only on a Windows build they may never run — so this gate gives
-that signal everywhere: an `fopen` call is a finding unless it sits in a
-preprocessor branch that Windows does not compile — the `#else` of a
-`_WIN32` or `_MSC_VER` conditional, the body of a negated one, or a branch
-that requires another platform (`__linux__`, `__APPLE__`, ...). Comments
-and string literals are stripped before matching.
+that signal everywhere: a call to an audited function is a finding unless
+it sits in a preprocessor branch that Windows does not compile — the
+`#else` of a `_WIN32` or `_MSC_VER` conditional, the body of a negated
+one, or a branch that requires another platform (`__linux__`,
+`__APPLE__`, ...). Comments and string literals are stripped before
+matching. Where no `_s` variant fits, the fix is to avoid the function:
+the tree parses by hand rather than calling `sscanf`, and reads the
+environment through `core::non_empty_env` rather than `getenv`.
 
 `tools/` is not audited: the asset packer defines
 `_CRT_SECURE_NO_WARNINGS` for its own target, so the deprecation does not
 reach it.
 
-The tree carries zero such calls, so the gate starts at zero and has no
-allowlist.
+The tree carries zero such calls outside a non-Windows branch, so the
+gate starts at zero and has no allowlist.
 
 Usage:
   python tools/check_portable_fopen.py            # report, exit 1 on findings
@@ -65,9 +70,32 @@ WINDOWS_MACRO = re.compile(r"\b(_WIN32|_WIN64|_MSC_VER)\b")
 OTHER_PLATFORM_MACRO = re.compile(
     r"\b(__linux__|__APPLE__|__unix__|__ANDROID__|__EMSCRIPTEN__)\b")
 
-# `fopen(` not preceded by an identifier character, so fopen_s, _wfopen and
-# my_fopen do not match while fopen and std::fopen do.
-FOPEN_CALL = re.compile(r"(?<![A-Za-z0-9_])fopen\s*\(")
+# The functions the MSVC CRT deprecates that first-party code could
+# plausibly reach, each with what to use instead. Every name is matched
+# only when it is not preceded by an identifier character, so fopen_s,
+# _wfopen and my_fopen do not match while fopen and std::fopen do.
+AUDITED_CALLS = {
+    "fopen": "fopen_s under _WIN32",
+    "freopen": "freopen_s under _WIN32",
+    "sscanf": "hand parsing, or sscanf_s under _WIN32",
+    "scanf": "hand parsing, or scanf_s under _WIN32",
+    "fscanf": "hand parsing, or fscanf_s under _WIN32",
+    "sprintf": "snprintf, which is not deprecated",
+    "vsprintf": "vsnprintf, which is not deprecated",
+    "strcpy": "a bounded copy (core::copy_string, memcpy with a length)",
+    "strcat": "a bounded append",
+    "strtok": "an explicit scan, or strtok_s under _WIN32",
+    "getenv": "core::non_empty_env",
+    "asctime": "a fixed-size format of your own",
+    "ctime": "a fixed-size format of your own",
+    "localtime": "localtime_s under _WIN32",
+    "gmtime": "gmtime_s under _WIN32",
+    "tmpnam": "core::platform_get_temp_dir plus a name of your own",
+    "strerror": "an explicit message, or strerror_s under _WIN32",
+}
+AUDITED_CALL_PATTERNS = tuple(
+    (name, replacement, re.compile(r"(?<![A-Za-z0-9_])" + name + r"\s*\("))
+    for name, replacement in AUDITED_CALLS.items())
 CONDITIONAL = re.compile(r"^\s*#\s*(if|ifdef|ifndef|elif|else|endif)\b(.*)$")
 
 
@@ -127,7 +155,7 @@ def classify_branch(directive: str, condition: str) -> tuple[bool, bool]:
     return (False, False)
 
 
-def audit_file(path: pathlib.Path) -> list[tuple[int, str]]:
+def audit_file(path: pathlib.Path) -> list[tuple[int, str, str, str]]:
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
@@ -157,9 +185,13 @@ def audit_file(path: pathlib.Path) -> list[tuple[int, str]]:
             elif directive == "endif" and frames:
                 frames.pop()
             continue
-        if FOPEN_CALL.search(line) and not windows_skips(frames):
-            shown = original[number - 1].strip() if number <= len(original) else ""
-            findings.append((number, shown))
+        if windows_skips(frames):
+            continue
+        for name, replacement, pattern in AUDITED_CALL_PATTERNS:
+            if pattern.search(line):
+                shown = (original[number - 1].strip()
+                         if number <= len(original) else "")
+                findings.append((number, name, replacement, shown))
     return findings
 
 
@@ -179,11 +211,11 @@ def main() -> int:
         for path in sorted(base.rglob("*")):
             if path.suffix not in CPP_SUFFIXES or not path.is_file():
                 continue
-            for number, shown in audit_file(path):
+            for number, name, replacement, shown in audit_file(path):
                 rel = path.relative_to(root).as_posix()
-                print(f"{rel}:{number}: fopen is deprecated under the MSVC CRT "
-                      f"and fails the Windows build; open through fopen_s "
-                      f"under _WIN32: {shown}")
+                print(f"{rel}:{number}: {name} is deprecated under the MSVC "
+                      f"CRT and fails the Windows build; use {replacement}: "
+                      f"{shown}")
                 total += 1
 
     if total:
