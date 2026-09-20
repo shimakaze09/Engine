@@ -495,3 +495,11 @@ assets/.thumbnails/
 assets/*.cookstamp
 assets/*.meta.json
 assets/*.hull
+
+# Scratch trees the editor suites create under the real asset root: the
+# asset index and scene-document tests must walk a directory below
+# editorAssetRoot, so their fixtures land here and are never content.
+/assets/engine_asset_index_test/
+/assets/engine_scene_document_test/
+/assets/engine_scene_document_prompt_test/
+/assets/engine_scene_document_play_mode_test/
