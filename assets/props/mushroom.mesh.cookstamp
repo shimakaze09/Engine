@@ -5,7 +5,7 @@ IMPORT_HASH 2755be6c6a924f10
 PLATFORM Linux
 DEP_HASH 11ecd16fae9916ab mushroom.bin
 OUTPUT a5f8ca22a4139e87 mushroom.mesh
-OUTPUT 72edca25b9d5e940 mushroom.mesh.meta.json
+OUTPUT 72edca25b9d5e940 mushroom.mesh.meta
 OUTPUT 650744432c0ad81b mushroom.mesh.hull
 OUTPUT 6e89529f8122b3ea .thumbnails/mushroom.mesh.png
 OUTPUT ed26885e52404491 .thumbnails/mushroom.mesh.checksum

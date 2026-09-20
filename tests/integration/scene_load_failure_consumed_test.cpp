@@ -27,9 +27,9 @@
 
 namespace {
 
-constexpr const char *kValidSceneFile = "slfc_valid.scene.json";
-constexpr const char *kMissingSceneFile = "slfc_missing.scene.json";
-constexpr const char *kMalformedSceneFile = "slfc_malformed.scene.json";
+constexpr const char *kValidSceneFile = "slfc_valid.scene";
+constexpr const char *kMissingSceneFile = "slfc_missing.scene";
+constexpr const char *kMalformedSceneFile = "slfc_malformed.scene";
 constexpr const char *kFailureMarker = "failed to process pending scene load";
 
 engine::runtime::World *g_world = nullptr;
@@ -77,7 +77,7 @@ bool set_working_directory_with_assets() noexcept {
       continue;
     }
     if (std::filesystem::exists(normalized / "assets/main.lua", ec) &&
-        std::filesystem::exists(normalized / "assets/shaders/bgfx/shaders.json",
+        std::filesystem::exists(normalized / "assets/shaders/bgfx/shaders.manifest",
                                 ec)) {
       std::filesystem::current_path(normalized, ec);
       return !ec;

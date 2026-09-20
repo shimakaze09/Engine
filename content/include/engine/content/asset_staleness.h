@@ -1,5 +1,5 @@
 // Public cross-module entry point for the runtime cooked-asset staleness
-// diagnostic: the CAS table and .meta.json sidecar reader stay
+// diagnostic: the CAS table and .meta sidecar reader stay
 // implemented in the module-private asset_stale_check.cpp; this header is
 // the one public declaration so every cooked-asset consumer (renderer
 // mesh/texture loaders, runtime .skel/.anim loaders) routes through the

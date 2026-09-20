@@ -266,7 +266,7 @@ bool test_pool_release_removes_every_component() {
   std::snprintf(name.name, sizeof(name.name), "%s", "Pooled");
   AnimationComponent animation{};
   std::snprintf(animation.controllerPath, sizeof(animation.controllerPath),
-                "%s", "assets/character.animctrl.json");
+                "%s", "assets/character.animctrl");
   if (!world->add_transform(entity, transform) ||
       !world->add_rigid_body(entity, RigidBody{}) ||
       !world->add_collider(entity, Collider{}) ||

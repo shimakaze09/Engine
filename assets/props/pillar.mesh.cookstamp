@@ -5,7 +5,7 @@ IMPORT_HASH 2755be6c6a924f10
 PLATFORM Linux
 DEP_HASH d9692105ccca773d pillar.bin
 OUTPUT f6c3bab9d324556b pillar.mesh
-OUTPUT fbbd4a53155fa198 pillar.mesh.meta.json
+OUTPUT fbbd4a53155fa198 pillar.mesh.meta
 OUTPUT 68764531bffdb473 pillar.mesh.hull
 OUTPUT bdea30996a76a6c1 .thumbnails/pillar.mesh.png
 OUTPUT c9ab7f9a5004a791 .thumbnails/pillar.mesh.checksum

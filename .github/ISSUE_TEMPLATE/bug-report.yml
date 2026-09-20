@@ -10,7 +10,7 @@ body:
       label: Reproduction steps
       description: Minimal steps from a fresh checkout or the shipped template. Include the scene/asset/script if content-dependent.
       placeholder: |
-        1. File → Load Scene → assets/scene.json
+        1. File → Load Scene → assets/main.scene
         2. Press Play
         3. ...
     validations:

@@ -103,7 +103,7 @@ bool write_source_dir(const fs::path &sources, const std::string &source,
   fs::create_directories(sources, ignored);
   return write_text(sources / "varying.def.sc", "vec4 v_color : COLOR0;\n") &&
          write_text(sources / "probe.vs.sc", "// stub source\n") &&
-         write_text(sources / "shaders.json", manifest_text(source, output));
+         write_text(sources / "shaders.manifest", manifest_text(source, output));
 }
 
 /// Runs the cook like run_cook, capturing the packer's stderr into a file
@@ -153,7 +153,7 @@ void check_refused(TestContext &t, const fs::path &scratch,
     t.fail((label + ": manifest written").c_str());
     return;
   }
-  const int exitCode = run_cook((sources / "shaders.json").string(),
+  const int exitCode = run_cook((sources / "shaders.manifest").string(),
                                 outDir.string(), include.string());
   t.check(exitCode != 0, (label + ": the cook refuses the manifest").c_str());
   t.check(!fs::exists(argvLog),
@@ -195,7 +195,7 @@ int main() {
       t.fail("traversing-output manifest written");
       return t.finish("shader_cook_paths");
     }
-    const int exitCode = run_cook((sources / "shaders.json").string(),
+    const int exitCode = run_cook((sources / "shaders.manifest").string(),
                                   outDir.string(), include.string());
     t.check(exitCode != 0, "a traversing output fails the cook");
     t.check(!fs::exists(argvLog),
@@ -224,7 +224,7 @@ int main() {
       t.fail("absolute-output manifest written");
       return t.finish("shader_cook_paths");
     }
-    const int exitCode = run_cook((sources / "shaders.json").string(),
+    const int exitCode = run_cook((sources / "shaders.manifest").string(),
                                   outDir.string(), include.string());
     t.check(exitCode != 0, "an absolute output fails the cook");
     t.check(!fs::exists(argvLog),
@@ -272,7 +272,7 @@ int main() {
       t.fail("plain manifest written");
       return t.finish("shader_cook_paths");
     }
-    const int exitCode = run_cook((sources / "shaders.json").string(),
+    const int exitCode = run_cook((sources / "shaders.manifest").string(),
                                   outDir.string(), include.string());
     t.check(exitCode == 0, "a plain-filename manifest cooks");
   }
@@ -286,7 +286,7 @@ int main() {
       t.fail("nested manifest written");
       return t.finish("shader_cook_paths");
     }
-    const int exitCode = run_cook((sources / "shaders.json").string(),
+    const int exitCode = run_cook((sources / "shaders.manifest").string(),
                                   outDir.string(), include.string());
     t.check(exitCode == 0, "a nested output directory is created and cooked");
     t.check(fs::is_directory(outDir), "every missing level exists");
@@ -306,12 +306,12 @@ int main() {
     constexpr std::size_t kBroken = 280U;
     if (!write_text(sources / "varying.def.sc", "vec4 v_color : COLOR0;\n") ||
         !write_text(sources / "probe.vs.sc", "// stub source\n") ||
-        !write_text(sources / "shaders.json",
+        !write_text(sources / "shaders.manifest",
                     long_manifest_text(kEntries, kBroken))) {
       t.fail("long manifest written");
     } else {
       const int exitCode =
-          run_cook_capture((sources / "shaders.json").string(),
+          run_cook_capture((sources / "shaders.manifest").string(),
                            outDir.string(), include.string(), errPath.string());
       t.check(exitCode != 0, "long: the malformed entry refuses the cook");
       const std::string diagnostics = read_text(errPath);

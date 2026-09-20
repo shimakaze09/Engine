@@ -5,7 +5,7 @@ IMPORT_HASH 2755be6c6a924f10
 PLATFORM Linux
 DEP_HASH 9fe49d586e5b84dd platform_square.bin
 OUTPUT f5fb367d0ebcc867 platform_square.mesh
-OUTPUT 31f0ec799e931575 platform_square.mesh.meta.json
+OUTPUT 31f0ec799e931575 platform_square.mesh.meta
 OUTPUT d796cdb66134c0ec platform_square.mesh.hull
 OUTPUT 82d91682aeabdaa1 .thumbnails/platform_square.mesh.png
 OUTPUT c4047386f7be8263 .thumbnails/platform_square.mesh.checksum

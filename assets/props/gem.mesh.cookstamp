@@ -5,7 +5,7 @@ IMPORT_HASH 2755be6c6a924f10
 PLATFORM Linux
 DEP_HASH aa4060f669fbc50d gem.bin
 OUTPUT cc83e0d6d14a6a1b gem.mesh
-OUTPUT 7cb302227622e221 gem.mesh.meta.json
+OUTPUT 7cb302227622e221 gem.mesh.meta
 OUTPUT b8516516becdd8d7 gem.mesh.hull
 OUTPUT bf6d6940f9ea0141 .thumbnails/gem.mesh.png
 OUTPUT 2d841dc04da5fa47 .thumbnails/gem.mesh.checksum

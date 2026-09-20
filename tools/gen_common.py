@@ -1,6 +1,6 @@
 # Shared publish primitive for the bundled-asset generators (#351): a set
 # of staged files is committed by replacing each final path, then writing
-# the directory's generated.manifest.json last. The manifest names every
+# the directory's generated.manifest last. The manifest names every
 # published file with its byte size and FNV-1a 64 hash and is the consumer
 # commit boundary: the asset packer refuses to cook a listed source whose
 # bytes disagree with it, so an interrupted publish (new files beside the
@@ -10,7 +10,7 @@
 import json
 import os
 
-MANIFEST_NAME = "generated.manifest.json"
+MANIFEST_NAME = "generated.manifest"
 MANIFEST_SCHEMA = 1
 
 # Test hook: after this many replacements the publish raises, leaving the

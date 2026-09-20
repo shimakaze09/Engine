@@ -50,7 +50,7 @@ HASHED_SUFFIXES = (
     ".skel",
     ".cookstamp",
     ".checksum",
-    ".meta.json",
+    ".meta",
 )
 
 

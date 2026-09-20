@@ -33,7 +33,7 @@ namespace {
 
 constexpr const char *kScriptPath = "player_mode_test.lua";
 constexpr const char *kCollisionScriptPath = "player_mode_collision.lua";
-constexpr const char *kCollisionScenePath = "player_mode_collision.scene.json";
+constexpr const char *kCollisionScenePath = "player_mode_collision.scene";
 
 engine::runtime::World *g_world = nullptr;
 
@@ -71,7 +71,7 @@ bool set_working_directory_with_assets() noexcept {
     }
 
     if (std::filesystem::exists(normalized / "assets/main.lua", ec) &&
-        std::filesystem::exists(normalized / "assets/shaders/bgfx/shaders.json",
+        std::filesystem::exists(normalized / "assets/shaders/bgfx/shaders.manifest",
                                 ec)) {
       std::filesystem::current_path(normalized, ec);
       return !ec;

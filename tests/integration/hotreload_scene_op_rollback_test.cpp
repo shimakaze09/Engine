@@ -24,8 +24,8 @@ namespace sc = engine::scripting;
 namespace rt = engine::runtime;
 
 constexpr const char *kScriptPath = "hotreload_scene_op_rollback_test.lua";
-constexpr const char *kQueuedScene = "queued_scene.json";
-constexpr const char *kHijackScene = "hijack_scene.json";
+constexpr const char *kQueuedScene = "queued_scene.scene";
+constexpr const char *kHijackScene = "hijack_scene.scene";
 
 /// Writes the watched script file.
 bool write_script(const char *code) noexcept {
@@ -65,7 +65,7 @@ constexpr const char *kFailingNewScene = "Marker = 'failed'\n"
 /// original request must survive intact, path included.
 constexpr const char *kFailingHijack =
     "Marker = 'failed'\n"
-    "engine.load_scene('hijack_scene.json')\n"
+    "engine.load_scene('hijack_scene.scene')\n"
     "error('intentional reload failure')\n";
 
 /// A reload that queues nothing and fails: nothing may appear from nowhere.

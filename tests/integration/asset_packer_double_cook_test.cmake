@@ -62,7 +62,7 @@ foreach(rel ${first_files})
         set(saw_skeleton TRUE)
     elseif(rel MATCHES "\\.anim$")
         set(saw_clip TRUE)
-    elseif(rel MATCHES "\\.meta\\.json$")
+    elseif(rel MATCHES "\\.meta$")
         set(saw_metadata TRUE)
     endif()
     execute_process(

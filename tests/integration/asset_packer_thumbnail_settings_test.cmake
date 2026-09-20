@@ -1,5 +1,5 @@
 # Verifies a recook triggered by an import-settings change (scaleFactor
-# edit in the .meta.json sidecar) also regenerates the thumbnail (audit
+# edit in the .meta sidecar) also regenerates the thumbnail (audit
 # M-28): the thumbnail skip-gate used to hash only the source bytes, so a
 # settings-driven recook re-listed a stale PNG in the cook manifest.
 
@@ -27,7 +27,7 @@ if(NOT cook_output MATCHES "generated thumbnail")
     message(FATAL_ERROR "initial cook did not generate a thumbnail")
 endif()
 
-file(WRITE "${output}.meta.json"
+file(WRITE "${output}.meta"
     "{\"importSettings\":{\"scaleFactor\":2.0}}")
 
 execute_process(

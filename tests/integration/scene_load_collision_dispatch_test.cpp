@@ -33,7 +33,7 @@
 namespace {
 
 constexpr const char *kHelperScript = "slcd_helper.lua";
-constexpr const char *kContactSceneFile = "slcd_contact.scene.json";
+constexpr const char *kContactSceneFile = "slcd_contact.scene";
 constexpr float kFixedDt = 1.0F / 60.0F;
 
 /// Pairs delivered to the C++ recording dispatch since the last reset.
@@ -173,7 +173,7 @@ bool test_lua_handler_after_pending_scene_load() noexcept {
       "    collision_hits = collision_hits + 1\n"
       "end)\n"
       "function slcd_request_load()\n"
-      "    engine.load_scene(\"slcd_contact.scene.json\")\n"
+      "    engine.load_scene(\"slcd_contact.scene\")\n"
       "end\n"
       "function slcd_assert_hit()\n"
       "    if collision_hits < 1 then\n"

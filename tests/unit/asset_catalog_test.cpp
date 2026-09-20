@@ -41,25 +41,28 @@ bool write_file(const std::filesystem::path &path) noexcept {
   return out.good();
 }
 
-/// The tree: seven runtime forms, six entries the walk must skip.
+/// The tree: ten runtime forms, six entries the walk must skip.
 bool build_tree() noexcept {
   const std::filesystem::path root(kRoot);
   std::error_code ec{};
   std::filesystem::remove_all(root, ec);
   const char *files[] = {
-      "props/coin.mesh",          // Mesh, cooked form
-      "props/coin.gltf",          // Mesh source: skipped
-      "props/coin.mesh.hull",     // no table suffix: skipped
-      "props/coin.mesh.meta.json", // no table suffix: skipped
-      "textures/Grass.PNG",       // Texture, case kept in the path
-      "scripts/hop.lua",          // Script
-      "anim/walk.anim",           // Animation (derived)
-      "anim/walk.skel",           // Animation (derived)
-      "ctrl/hero.animctrl.json",  // AnimationController
-      ".thumbnails/coin.png",     // hidden directory: skipped
-      "notes.txt",                // no table suffix: skipped
-      ".hidden.mesh",             // dot-file: skipped
-      "sub/deep/log.mesh",        // Mesh, nested
+      "props/coin.mesh",      // Mesh, cooked form
+      "props/coin.gltf",      // Mesh source: skipped
+      "props/coin.mesh.hull", // no table suffix: skipped
+      "props/coin.mesh.meta", // no table suffix: skipped
+      "textures/Grass.PNG",   // Texture, case kept in the path
+      "scripts/hop.lua",      // Script
+      "anim/walk.anim",       // Animation (derived)
+      "anim/walk.skel",       // Animation (derived)
+      "ctrl/hero.animctrl",   // AnimationController
+      "levels/hub.scene",     // Scene
+      "props/crate.prefab",   // Prefab
+      "mats/brass.mat",       // Material
+      ".thumbnails/coin.png", // hidden directory: skipped
+      "notes.txt",            // no table suffix: skipped
+      ".hidden.mesh",         // dot-file: skipped
+      "sub/deep/log.mesh",    // Mesh, nested
   };
   for (const char *file : files) {
     if (!write_file(root / file)) {
@@ -136,7 +139,7 @@ void test_walk(engine::content::MetadataStore *store) noexcept {
 
   const engine::content::MountRegistration first =
       engine::content::register_mounted_assets(store, kPrefix, kRoot);
-  check(first.registered == 6U, "six runtime forms are registered");
+  check(first.registered == 9U, "nine runtime forms are registered");
   check(first.alreadyKnown == 1U, "the pre-registered mesh is already known");
   check(first.skipped == 6U, "six entries are skipped");
   check(first.refused == 0U, "nothing is refused");
@@ -158,12 +161,26 @@ void test_walk(engine::content::MetadataStore *store) noexcept {
             has_path_and_type(*store, "kit/anim/walk.skel",
                               AssetTypeTag::Animation),
         "derived animation outputs are typed Animation");
-  check(has_path_and_type(*store, "kit/ctrl/hero.animctrl.json",
+  check(has_path_and_type(*store, "kit/ctrl/hero.animctrl",
                           AssetTypeTag::AnimationController),
         "a controller is typed AnimationController");
+  // The three kinds the catalog could not list at all while their table
+  // rows carried no suffix: a reference picker for them showed nothing.
+  check(has_path_and_type(*store, "kit/levels/hub.scene", AssetTypeTag::Scene),
+        "a scene is catalogued as Scene");
+  check(has_path_and_type(*store, "kit/props/crate.prefab",
+                          AssetTypeTag::Prefab),
+        "a prefab is catalogued as Prefab");
+  check(has_path_and_type(*store, "kit/mats/brass.mat",
+                          AssetTypeTag::Material),
+        "a material is catalogued as Material");
+  check((count_of_type(*store, AssetTypeTag::Scene) == 1U) &&
+            (count_of_type(*store, AssetTypeTag::Prefab) == 1U) &&
+            (count_of_type(*store, AssetTypeTag::Material) == 1U),
+        "each of the three is queryable by its type");
   check((find_by_path(*store, "kit/props/coin.gltf") == nullptr) &&
             (find_by_path(*store, "kit/props/coin.mesh.hull") == nullptr) &&
-            (find_by_path(*store, "kit/props/coin.mesh.meta.json") ==
+            (find_by_path(*store, "kit/props/coin.mesh.meta") ==
              nullptr) &&
             (find_by_path(*store, "kit/notes.txt") == nullptr),
         "a cooked type's source, sidecars and unclassified files are absent");
@@ -177,7 +194,7 @@ void test_walk(engine::content::MetadataStore *store) noexcept {
 
   const engine::content::MountRegistration second =
       engine::content::register_mounted_assets(store, kPrefix, kRoot);
-  check((second.registered == 0U) && (second.alreadyKnown == 7U) &&
+  check((second.registered == 0U) && (second.alreadyKnown == 10U) &&
             (second.skipped == 6U) && (second.refused == 0U),
         "a second walk registers nothing and knows every runtime form");
 }
@@ -192,7 +209,7 @@ void test_overlong_prefix(engine::content::MetadataStore *store) noexcept {
   const engine::content::MountRegistration walk =
       engine::content::register_mounted_assets(store, prefix.c_str(), kRoot);
   check((walk.registered == 0U) && (walk.alreadyKnown == 0U) &&
-            (walk.refused == 7U) && (walk.skipped == 6U),
+            (walk.refused == 10U) && (walk.skipped == 6U),
         "a prefix that pushes every path past the record refuses each one");
   check(count_of_type(*store, engine::content::AssetTypeTag::Mesh) ==
             meshesBefore,

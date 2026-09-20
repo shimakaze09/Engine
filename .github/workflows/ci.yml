@@ -101,7 +101,7 @@ jobs:
       # author.
       - name: Validate bundled scenes
         if: runner.os == 'Linux'
-        run: build/tools/engine_validate/engine_validate assets/scene.json
+        run: build/tools/engine_validate/engine_validate assets/main.scene
 
       # ---- Determinism hash artifact: every platform and configuration
       # must produce one World::state_hash through the production pipeline.

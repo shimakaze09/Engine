@@ -497,7 +497,7 @@ int run_shader_cook(int argc, char **argv) {
   if ((manifestPath == nullptr) || (outDir == nullptr) ||
       (shadercPath == nullptr) || (includeDir == nullptr)) {
     std::fprintf(stderr,
-                 "usage: asset_packer --shader-manifest <shaders.json> "
+                 "usage: asset_packer --shader-manifest <shaders.manifest> "
                  "--shader-out <dir> --shaderc <path> --shader-include "
                  "<bgfx src dir> [--profiles glsl,essl,spirv] [--force] "
                  "[--platform <tag>]\n");

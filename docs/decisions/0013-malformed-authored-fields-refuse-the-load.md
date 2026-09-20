@@ -49,7 +49,7 @@ fields keep loading.
 - Both formats are affected, because the readers are shared. Regressions
   cover scene and prefab separately.
 - The remaining lenient readers listed on the same finding —
-  the packer's import-settings reader and the editor's `.meta.json`
+  the packer's import-settings reader and the editor's `.meta`
   reader — follow the same rule. The editor's should move onto one shared
   import-settings schema rather than becoming a fourth copy.
 - The general form of this — `read_optional_*` helpers that return false

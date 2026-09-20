@@ -99,18 +99,18 @@ def test_metadata_path_check():
 
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
-        windows_abs = tmp / "windows.meta.json"
+        windows_abs = tmp / "windows.meta"
         windows_abs.write_text(
             '{"source":"D:\\\\dev\\\\Engine\\\\assets\\\\a.gltf"}',
             encoding="utf-8")
-        unix_abs = tmp / "unix.meta.json"
+        unix_abs = tmp / "unix.meta"
         unix_abs.write_text('{"source":"/home/dev/Engine/assets/a.gltf"}',
                             encoding="utf-8")
-        relative = tmp / "relative.meta.json"
+        relative = tmp / "relative.meta"
         relative.write_text('{"source":"assets/props/a.gltf",'
                             '"output":"assets/props/a.mesh"}',
                             encoding="utf-8")
-        scheme = tmp / "scheme.meta.json"
+        scheme = tmp / "scheme.meta"
         scheme.write_text('{"source":"asset://props/a.gltf"}',
                           encoding="utf-8")
 
@@ -725,9 +725,9 @@ def test_content_attributes_gate():
         tmp = Path(tmp)
 
         check(run([script, "--root", str(write_attribute_fixture(
-            tmp / "clean", "*.gltf -text\n*.mesh binary\n*.meta.json -text\n",
+            tmp / "clean", "*.gltf -text\n*.mesh binary\n*.meta -text\n",
             ["props/coin.gltf", "props/coin.mesh",
-             "props/coin.mesh.meta.json", "scene.json"]))]) == 0,
+             "props/coin.mesh.meta", "scene.json"]))]) == 0,
               "attributes: -text and binary marks on every hashed file pass")
 
         check(run([script, "--root", str(write_attribute_fixture(
@@ -744,8 +744,8 @@ def test_content_attributes_gate():
               "attributes: a hashed file marked text fails")
 
         check(run([script, "--root", str(write_attribute_fixture(
-            tmp / "sidecar", "*.gltf -text\n*.json -text\n*.meta.json text\n",
-            ["props/coin.gltf", "props/coin.mesh.meta.json"]))]) != 0,
+            tmp / "sidecar", "*.gltf -text\n*.json -text\n*.meta text\n",
+            ["props/coin.gltf", "props/coin.mesh.meta"]))]) != 0,
               "attributes: a later text mark on a sidecar suffix fails")
 
         untracked = write_attribute_fixture(

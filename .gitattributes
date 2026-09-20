@@ -28,4 +28,16 @@
 *.skel binary
 *.cookstamp -text
 *.checksum -text
-*.meta.json -text
+*.meta -text
+
+# Authored documents whose suffix names the kind, not the format (the
+# asset type table's convention). They hold JSON today, so tell GitHub and
+# every editor that reads .gitattributes how to highlight them; the format
+# can change here without touching a single reference. These are ordinary
+# text files: nothing hashes their bytes, so they must NOT be listed above.
+*.scene linguist-language=JSON
+*.prefab linguist-language=JSON
+*.mat linguist-language=JSON
+*.animctrl linguist-language=JSON
+*.manifest linguist-language=JSON
+*.meta linguist-language=JSON

@@ -1,5 +1,5 @@
 // Declares the Assets panel's import-settings sidecar cache: the
-// selected asset's .meta.json is read and parsed once per selection, or
+// selected asset's .meta is read and parsed once per selection, or
 // after the panel rewrites it, instead of once per drawn frame.
 
 #pragma once
@@ -12,7 +12,7 @@ namespace engine::editor {
 /// One asset's import sidecar as the panel last read it.
 struct ImportSettingsDocument final {
   enum class State : std::uint8_t {
-    Missing,    // no <asset>.meta.json beside the asset
+    Missing,    // no <asset>.meta beside the asset
     Unreadable, // present but empty, oversized or not readable
     Malformed,  // read but not a JSON object
     Valid
@@ -30,7 +30,7 @@ struct ImportSettingsDocument final {
   std::size_t documentLength = 0U;
 };
 
-/// Returns the sidecar document for `<assetPath>.meta.json`, reading the
+/// Returns the sidecar document for `<assetPath>.meta`, reading the
 /// file only when assetPath differs from the previous call's or the cache
 /// was invalidated; nullptr for a null or empty path. The pointer stays
 /// valid until the next call.

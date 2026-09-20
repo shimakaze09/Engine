@@ -1876,7 +1876,7 @@
   },
   {
    "components": {
-    "AnimationComponent": "assets/character.animctrl.json",
+    "AnimationComponent": "assets/character.animctrl",
     "Collider": {
      "collisionLayer": 1,
      "collisionMask": 4294967295,

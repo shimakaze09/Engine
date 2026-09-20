@@ -1,7 +1,8 @@
 // Verifies the content-browser asset index (issue #157): cold rebuild
-// classifies every file kind correctly (including content-sniffed
-// ambiguous ".json" scene/material/animation-controller documents) and
-// skips sidecar/internal files; the filter cache only recomputes on an
+// classifies every file kind from its suffix alone — scene, material and
+// animation-controller documents included, none of which is opened to
+// guess its kind — and skips sidecar/internal files; the filter cache
+// only recomputes on an
 // actual filter or generation change and handles the empty-query and
 // no-match boundaries; typed-action kind routing is pure and correct; and
 // execute_asset_open dispatches through real production entry points —
@@ -101,12 +102,11 @@ bool rebuild_scratch_tree() noexcept {
   if (!make_scratch_path("thing.mesh", meshPath, sizeof(meshPath)) ||
       !make_scratch_path("thing.png", texPath, sizeof(texPath)) ||
       !make_scratch_path("thing.lua", scriptPath, sizeof(scriptPath)) ||
-      !make_scratch_path("thing_scene.json", scenePath, sizeof(scenePath)) ||
-      !make_scratch_path("thing_material.json", materialPath,
-                         sizeof(materialPath)) ||
-      !make_scratch_path("thing.animctrl.json", controllerPath,
+      !make_scratch_path("thing.scene", scenePath, sizeof(scenePath)) ||
+      !make_scratch_path("thing.mat", materialPath, sizeof(materialPath)) ||
+      !make_scratch_path("thing.animctrl", controllerPath,
                          sizeof(controllerPath)) ||
-      !make_scratch_path("thing.mesh.meta.json", metaPath,
+      !make_scratch_path("thing.mesh.meta", metaPath,
                          sizeof(metaPath)) ||
       !make_scratch_path("sub/nested.mesh", subMeshPath,
                          sizeof(subMeshPath))) {
@@ -150,8 +150,8 @@ const AssetIndexEntry *find_entry_by_leaf(const char *leaf) noexcept {
 }
 
 /// EXPECTATION: rebuild_asset_index classifies every scratch file kind
-/// correctly (including content-sniffed ambiguous .json files), hides the
-/// .meta.json sidecar from the index, and bumps the generation counter.
+/// from its suffix alone — no file is opened to guess a kind — hides the
+/// .meta sidecar from the index, and bumps the generation counter.
 int check_rebuild_classifies_and_hides_sidecars() {
   if (!rebuild_scratch_tree()) {
     return 1;
@@ -171,11 +171,11 @@ int check_rebuild_classifies_and_hides_sidecars() {
   const AssetIndexEntry *mesh = find_entry_by_leaf("thing.mesh");
   const AssetIndexEntry *tex = find_entry_by_leaf("thing.png");
   const AssetIndexEntry *script = find_entry_by_leaf("thing.lua");
-  const AssetIndexEntry *scene = find_entry_by_leaf("thing_scene.json");
-  const AssetIndexEntry *material = find_entry_by_leaf("thing_material.json");
-  const AssetIndexEntry *controller = find_entry_by_leaf("thing.animctrl.json");
+  const AssetIndexEntry *scene = find_entry_by_leaf("thing.scene");
+  const AssetIndexEntry *material = find_entry_by_leaf("thing.mat");
+  const AssetIndexEntry *controller = find_entry_by_leaf("thing.animctrl");
   const AssetIndexEntry *nested = find_entry_by_leaf("sub/nested.mesh");
-  const AssetIndexEntry *meta = find_entry_by_leaf("thing.mesh.meta.json");
+  const AssetIndexEntry *meta = find_entry_by_leaf("thing.mesh.meta");
 
   if ((mesh == nullptr) || (mesh->kind != engine::content::AssetTypeTag::Mesh)) {
     return 5;
@@ -200,7 +200,7 @@ int check_rebuild_classifies_and_hides_sidecars() {
     return 11;
   }
   if (meta != nullptr) {
-    return 12; // .meta.json sidecars must never appear in the index
+    return 12; // .meta sidecars must never appear in the index
   }
   if (mesh->virtualPath[0] == '\0') {
     return 13; // must resolve a VFS virtual path under the mount root

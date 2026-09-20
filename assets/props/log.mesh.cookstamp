@@ -5,7 +5,7 @@ IMPORT_HASH 2755be6c6a924f10
 PLATFORM Linux
 DEP_HASH 3e5083e0fe2ecec0 log.bin
 OUTPUT 478095d4ac1b4b04 log.mesh
-OUTPUT 4561b91168ad0f9d log.mesh.meta.json
+OUTPUT 4561b91168ad0f9d log.mesh.meta
 OUTPUT 329dc08b19aafa7a log.mesh.hull
 OUTPUT a799140aaf2e1b79 .thumbnails/log.mesh.png
 OUTPUT 54e1ed954970795c .thumbnails/log.mesh.checksum

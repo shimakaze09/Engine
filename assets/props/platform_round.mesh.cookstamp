@@ -5,7 +5,7 @@ IMPORT_HASH 2755be6c6a924f10
 PLATFORM Linux
 DEP_HASH c966a5c8dca3c545 platform_round.bin
 OUTPUT e9f4e2ce4f799b43 platform_round.mesh
-OUTPUT f424fcef345cf5ef platform_round.mesh.meta.json
+OUTPUT f424fcef345cf5ef platform_round.mesh.meta
 OUTPUT 78e3b97f3284f09f platform_round.mesh.hull
 OUTPUT aec7779e60b101ce .thumbnails/platform_round.mesh.png
 OUTPUT ee981015613b1e86 .thumbnails/platform_round.mesh.checksum

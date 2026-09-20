@@ -66,12 +66,32 @@ int main() {
             "an empty path is Unknown");
   ctx.check(ct::classify_asset_path("noext").tag == ct::AssetTypeTag::Unknown,
             "a path without a suffix is Unknown");
+  // The three kinds that used to need their bytes read to be told apart:
+  // a suffix names the kind, so the name alone decides.
+  ctx.check(ct::classify_asset_path("levels/hub.scene").tag ==
+                ct::AssetTypeTag::Scene,
+            "a scene is classified by its .scene suffix");
+  ctx.check(ct::classify_asset_path("props/crate.prefab").tag ==
+                ct::AssetTypeTag::Prefab,
+            "a prefab is classified by its .prefab suffix");
+  ctx.check(ct::classify_asset_path("mats/brass.mat").tag ==
+                ct::AssetTypeTag::Material,
+            "a material is classified by its .mat suffix");
+  ctx.check(ct::classify_asset_path("hero.animctrl").tag ==
+                ct::AssetTypeTag::AnimationController,
+            "a controller is classified by its .animctrl suffix");
   ctx.check(ct::classify_asset_path("scene.json").tag ==
                 ct::AssetTypeTag::Unknown,
-            "a bare .json document is not classified by name");
-  ctx.check(ct::classify_asset_path("hero.animctrl.json").tag ==
-                ct::AssetTypeTag::AnimationController,
-            "the longest matching suffix wins");
+            "the serialization format never names a kind: .json is Unknown");
+  ctx.check(ct::classify_asset_path("hub.scene.json").tag ==
+                ct::AssetTypeTag::Unknown,
+            "a kind suffix only counts at the end of the path");
+  ctx.check(ct::classify_asset_path("props/coin.mesh.meta").tag ==
+                ct::AssetTypeTag::Unknown,
+            "a sidecar is not the asset it sits beside");
+  ctx.check(ct::classify_asset_path("anim/walk.animat").tag ==
+                ct::AssetTypeTag::Unknown,
+            "a suffix matches on its dot, not on trailing letters");
   ctx.check(ct::classify_asset_path(".mesh").tag == ct::AssetTypeTag::Mesh,
             "a path that is only the suffix still matches");
   ctx.check(ct::classify_asset_path("mesh").tag == ct::AssetTypeTag::Unknown,

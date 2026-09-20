@@ -1,4 +1,4 @@
-# Generates assets/templates/island_hopper.json — the Island Hopper starter
+# Generates assets/templates/island_hopper.scene — the Island Hopper starter
 # template scene in the engine's scene-serializer v2 format: island blockout
 # from builtin primitives, bundled props (trees, rocks, crates, dock), eight
 # coins + a bonus gem, hop platforms with a moving platform and falling-rock
@@ -9,7 +9,7 @@ import json
 import os
 import sys
 
-OUT_PATH = sys.argv[1] if len(sys.argv) > 1 else "assets/templates/island_hopper.json"
+OUT_PATH = sys.argv[1] if len(sys.argv) > 1 else "assets/templates/island_hopper.scene"
 
 FNV_OFFSET = 14695981039346656037
 FNV_PRIME = 1099511628211
@@ -205,7 +205,7 @@ entity("Player", (0.0, 0.15, 5.0), mesh="assets/character.mesh",
        collider=capsule_collider(0.30, 0.60, (0.0, 0.95, 0.0)),
        body=dynamic_body(),
        script="assets/scripts/island_player.lua",
-       anim="assets/character.animctrl.json")
+       anim="assets/character.animctrl")
 entity("IslandController", (0.0, 0.0, 0.0),
        script="assets/scripts/island_hopper.lua")
 

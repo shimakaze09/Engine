@@ -51,7 +51,7 @@ bool load_mesh(const char *path) noexcept {
 /// caches until the test-only reset revalidates the repaired state.
 int check_certified_and_mixed_generation() {
   constexpr const char *kMesh = "gen_check_certified.mesh";
-  constexpr const char *kMeta = "gen_check_certified.mesh.meta.json";
+  constexpr const char *kMeta = "gen_check_certified.mesh.meta";
   remove_with_stamp(kMesh);
   static_cast<void>(std::remove(kMeta));
 
@@ -416,7 +416,7 @@ int check_non_regular_files_are_refused_promptly() {
 #else
   constexpr const char *kMesh = "gen_check_fifo.mesh";
   constexpr const char *kFifo = "gen_check_fifo.mesh.hull";
-  constexpr const char *kMeta = "gen_check_fifo.mesh.meta.json";
+  constexpr const char *kMeta = "gen_check_fifo.mesh.meta";
   remove_with_stamp(kMesh);
   static_cast<void>(std::remove(kFifo));
   static_cast<void>(std::remove(kMeta));

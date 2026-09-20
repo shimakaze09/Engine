@@ -62,7 +62,7 @@ inline constexpr const char *kMeshCookLogicRevision = "mesh-cook-logic-1";
 /// platform never certify a cook for another; overridable via --platform.
 inline constexpr const char *kCookPlatformTag = ENGINE_COOK_PLATFORM;
 
-/// Import settings read from an asset's .meta.json sidecar.
+/// Import settings read from an asset's .meta sidecar.
 struct ImportSettings final {
   int meshIndex = 0;
   int primitiveIndex = 0;
@@ -97,7 +97,7 @@ std::uint64_t cook_settings_key(std::uint64_t importSettingsHash,
                                 const char *logicRevision);
 /// Sorts digests by path for deterministic stamp layout.
 void sort_dependency_digests(std::vector<DependencyDigest> &digests);
-/// Reads import settings from the output's .meta.json when present.
+/// Reads import settings from the output's .meta when present.
 bool read_import_settings_from_meta(const char *outputPath,
                                     ImportSettings *outSettings);
 /// Writes the cook stamp recording source/settings hashes, dependency
@@ -152,7 +152,7 @@ bool extract_primitive(const cgltf_primitive *primitive,
                        bool allowMissingNormals = false);
 /// Writes the cooked .mesh file.
 bool write_mesh_file(const char *outputPath, const PrimitiveData &data);
-/// Writes the .meta.json metadata sidecar.
+/// Writes the .meta metadata sidecar.
 bool write_metadata_file(const char *inputPath, const char *outputPath,
                          const PrimitiveData &data,
                          std::uint64_t sourceHash,

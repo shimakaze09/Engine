@@ -14,7 +14,7 @@
 // Schema v1 (all fields optional unless noted) is preserved exactly:
 //   {
 //     "version": 1,                       // absent or 1 both mean v1
-//     "parent": "assets/materials/x.json",
+//     "parent": "assets/materials/x.mat",
 //     "albedo": [r, g, b],
 //     "emissive": [r, g, b],
 //     "roughness": 0.5,

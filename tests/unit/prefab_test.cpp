@@ -409,7 +409,7 @@ int verify_spring_arm_prefab_round_trip() {
 int verify_animation_prefab_round_trip() {
   using namespace engine::runtime;
 
-  constexpr const char *kControllerPath = "assets/character.animctrl.json";
+  constexpr const char *kControllerPath = "assets/character.animctrl";
 
   std::unique_ptr<World> world(new (std::nothrow) World());
   if (world == nullptr) {
@@ -449,7 +449,7 @@ int verify_animation_prefab_round_trip() {
   // cannot express -- every prefab authored before the object shape.
   if (!write_prefab_text("{\"version\":1,\"components\":{"
                          "\"AnimationComponent\":"
-                         "\"assets/character.animctrl.json\"}}")) {
+                         "\"assets/character.animctrl\"}}")) {
     return 103;
   }
   const Entity legacy = instantiate_prefab(*world, kPrefabPath);

@@ -153,7 +153,7 @@ bool draw_animation_component_fields(
     runtime::AnimationComponent &animation) noexcept {
   bool modified = draw_path_reference_picker(
       "Controller Path", animation.controllerPath,
-      sizeof(animation.controllerPath), ".json");
+      sizeof(animation.controllerPath), ".animctrl");
   mark_modified(&modified, ImGui::Checkbox("Playing", &animation.playing));
   mark_modified(&modified,
                 inspector_drag_float("Playback Speed",

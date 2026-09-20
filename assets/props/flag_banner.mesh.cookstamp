@@ -5,7 +5,7 @@ IMPORT_HASH 2755be6c6a924f10
 PLATFORM Linux
 DEP_HASH 5f97b349be197405 flag_banner.bin
 OUTPUT 773e2a56dd17d8ef flag_banner.mesh
-OUTPUT 3cf8c14dd152333b flag_banner.mesh.meta.json
+OUTPUT 3cf8c14dd152333b flag_banner.mesh.meta
 OUTPUT 1d94786231bae354 flag_banner.mesh.hull
 OUTPUT 31da08d31a70b3eb .thumbnails/flag_banner.mesh.png
 OUTPUT e60c22ccd9399d73 .thumbnails/flag_banner.mesh.checksum

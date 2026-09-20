@@ -97,7 +97,7 @@ void print_usage() {
                "[--dep <dependency_path>]... [--graph <asset_deps.json>] "
                "[--force] [--verify] [--sweep-orphans] "
                "[--platform <tag>]\n"
-               "   or: asset_packer --shader-manifest <shaders.json> "
+               "   or: asset_packer --shader-manifest <shaders.manifest> "
                "--shader-out <dir> --shaderc <path> "
                "--shader-include <dir> [--profiles <csv>] [--force]\n");
 }
@@ -493,7 +493,7 @@ int main(int argc, char **argv) {
   if (selectedMesh.primitives_count == 0U) {
     std::fprintf(stderr,
                  "error: selected mesh %zu has no primitives "
-                 "(importSettings.meshIndex in %s.meta.json)\n",
+                 "(importSettings.meshIndex in %s.meta)\n",
                  static_cast<std::size_t>(meshIdx), outputPath);
     cgltf_free(data);
     return 5;
@@ -602,7 +602,7 @@ int main(int argc, char **argv) {
     std::fprintf(stderr, "error: failed to write metadata sidecar\n");
     return 12;
   }
-  cookedOutputs.push_back(std::string(outputPath) + ".meta.json");
+  cookedOutputs.push_back(std::string(outputPath) + ".meta");
 
   // Hull-less geometry reports success; only a write failure blocks the
   // stamp below so a broken sidecar can never be certified complete.
@@ -672,7 +672,7 @@ int main(int argc, char **argv) {
 
   std::printf(
       "packed mesh: vertices=%zu indices=%zu uvs=%s skin=%s -> %s "
-      "(+ .meta.json)\n",
+      "(+ .meta)\n",
       primitiveData.interleavedVertices.size() /
           primitive_stride_floats(primitiveData),
       primitiveData.indices.size(), primitiveData.hasUVs ? "yes" : "no",
