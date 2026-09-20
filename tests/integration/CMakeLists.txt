@@ -214,6 +214,16 @@ engine_add_test_executable(engine_integration_pipeline_clock_reset
     integration
 )
 
+engine_add_test_executable(engine_integration_acceptance_sequence
+    SOURCES
+    acceptance_sequence_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_scripting
+    LABELS
+    integration
+)
+
 engine_add_test_executable(engine_integration_player_mode
     SOURCES
     player_mode_test.cpp
