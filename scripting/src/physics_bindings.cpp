@@ -8,6 +8,7 @@
 #include "deferred_mutations.h"
 #include "entity_handle.h"
 #include "lua_state.h"
+#include "reload_transaction.h"
 #include "runtime_binding.h"
 
 extern "C" {
@@ -26,17 +27,18 @@ extern "C" {
 #include "engine/core/logging.h"
 #include "engine/core/string_util.h"
 #include "engine/math/quat.h"
-#include "engine/runtime/scripting_bridge.h"
-#include "engine/runtime/world.h"
+#include "engine/scripting/runtime_services.h"
 
 namespace engine::scripting {
 
 namespace {
 
-/// One captured pre-lock inverse inertia, generation-checked.
+/// One captured pre-lock inverse inertia with its provenance,
+/// generation-checked.
 struct LockRotationCapture final {
   core::Entity owner = core::kInvalidEntity;
-  float inverseInertia = 1.0F;
+  math::Vec3 inverseInertia = math::default_inverse_inertia();
+  bool inertiaAuthored = false;
 };
 
 constexpr std::size_t kMaxLockCaptures = ENGINE_MAX_ENTITIES + 1U;
@@ -158,17 +160,22 @@ int lua_engine_set_lock_rotation(lua_State *state) noexcept {
   }
   LockRotationCapture &capture = g_lockRotationCaptures[entity.index];
   if (locked) {
-    if (rigidBody.inverseInertia != 0.0F) {
+    if (math::has_rotational_dof(rigidBody.inverseInertia)) {
       capture.owner = entity;
       capture.inverseInertia = rigidBody.inverseInertia;
+      capture.inertiaAuthored = rigidBody.inertiaAuthored;
     }
-    rigidBody.inverseInertia = 0.0F;
+    // A lock is an authored tensor: the derivation must not undo it.
+    rigidBody.inverseInertia = math::Vec3(0.0F, 0.0F, 0.0F);
+    rigidBody.inertiaAuthored = true;
     rigidBody.angularVelocity = math::Vec3(0.0F, 0.0F, 0.0F);
   } else if (capture.owner == entity) {
     rigidBody.inverseInertia = capture.inverseInertia;
+    rigidBody.inertiaAuthored = capture.inertiaAuthored;
     capture = LockRotationCapture{};
-  } else if (rigidBody.inverseInertia == 0.0F) {
-    rigidBody.inverseInertia = 1.0F;
+  } else if (!math::has_rotational_dof(rigidBody.inverseInertia)) {
+    // Nothing to restore: hand the body back to the derivation.
+    rigidBody.inertiaAuthored = false;
   }
 
   const bool ok = apply_or_queue_rigid_body(entity, rigidBody);
@@ -304,7 +311,9 @@ int lua_engine_set_gravity(lua_State *state) noexcept {
                       "numbers; gravity unchanged");
     return 0;
   }
-  if ((runtime_binding().services != nullptr) && (runtime_binding().services->set_gravity != nullptr)) {
+  if ((runtime_binding().services != nullptr) &&
+      (runtime_binding().services->set_gravity != nullptr) &&
+      !reload_refuses("set_gravity")) {
     runtime_binding().services->set_gravity(runtime_binding().world, x, y, z);
   }
   return 0;
@@ -326,24 +335,24 @@ int lua_engine_get_gravity(lua_State *state) noexcept {
 }
 
 bool read_optional_skip_entity(lua_State *state, int index,
-                               std::uint32_t *outSkipIndex) noexcept;
+                               runtime::Entity *outSkipEntity) noexcept;
 
 // engine.raycast(ox,oy,oz, dx,dy,dz, max_dist [, skip_entity])
 // skip_entity excludes that entity's colliders and any compound-body
 // colliders it owns, as the sweeps do.
 int lua_engine_raycast(lua_State *state) noexcept {
-  if (runtime_binding().world == nullptr) {
+  if (!runtime_bound()) {
     lua_pushnil(state);
     return 1;
   }
   math::Vec3 origin{};
   math::Vec3 direction{};
   float maxDist = 0.0F;
-  std::uint32_t skipIndex = 0U;
+  runtime::Entity skipEntity = runtime::kInvalidEntity;
   if (!read_vec3_args(state, 1, &origin) ||
       !read_vec3_args(state, 4, &direction) ||
       !read_finite_number_arg(state, 7, &maxDist) ||
-      !read_optional_skip_entity(state, 8, &skipIndex)) {
+      !read_optional_skip_entity(state, 8, &skipEntity)) {
     lua_pushnil(state);
     return 1;
   }
@@ -353,11 +362,11 @@ int lua_engine_raycast(lua_State *state) noexcept {
       !runtime_binding().services->raycast(runtime_binding().world, origin.x,
                                            origin.y, origin.z, direction.x,
                                            direction.y, direction.z, maxDist,
-                                           &hit, skipIndex)) {
+                                           &hit, skipEntity)) {
     lua_pushnil(state);
     return 1;
   }
-  push_entity_handle_from_index(state, hit.entityIndex);
+  push_entity_handle(state, hit.entity);
   lua_pushnumber(state, static_cast<lua_Number>(hit.distance));
   lua_pushnumber(state, static_cast<lua_Number>(hit.pointX));
   lua_pushnumber(state, static_cast<lua_Number>(hit.pointY));
@@ -371,7 +380,7 @@ int lua_engine_raycast(lua_State *state) noexcept {
 // engine.raycast_all(ox,oy,oz, dx,dy,dz, max_dist [, mask [, skip_entity]])
 // → table of hits; skip_entity follows the raycast rule.
 int lua_engine_raycast_all(lua_State *state) noexcept {
-  if ((runtime_binding().world == nullptr) || (runtime_binding().services == nullptr) ||
+  if (!runtime_bound() ||
       (runtime_binding().services->raycast_all == nullptr)) {
     lua_newtable(state);
     return 1;
@@ -389,8 +398,8 @@ int lua_engine_raycast_all(lua_State *state) noexcept {
       lua_isnumber(state, 8)
           ? static_cast<std::uint32_t>(lua_tointeger(state, 8))
           : 0xFFFFFFFFU;
-  std::uint32_t skipIndex = 0U;
-  if (!read_optional_skip_entity(state, 9, &skipIndex)) {
+  runtime::Entity skipEntity = runtime::kInvalidEntity;
+  if (!read_optional_skip_entity(state, 9, &skipEntity)) {
     lua_newtable(state);
     return 1;
   }
@@ -399,12 +408,12 @@ int lua_engine_raycast_all(lua_State *state) noexcept {
   RuntimeRaycastHit hits[kMaxHits]{};
   const std::size_t count = runtime_binding().services->raycast_all(
       runtime_binding().world, origin.x, origin.y, origin.z, direction.x,
-      direction.y, direction.z, maxDist, hits, kMaxHits, mask, skipIndex);
+      direction.y, direction.z, maxDist, hits, kMaxHits, mask, skipEntity);
 
   lua_createtable(state, static_cast<int>(count), 0);
   for (std::size_t i = 0U; i < count; ++i) {
     lua_createtable(state, 0, 8);
-    push_entity_handle_from_index(state, hits[i].entityIndex);
+    push_entity_handle(state, hits[i].entity);
     lua_setfield(state, -2, "entity");
     lua_pushnumber(state, static_cast<lua_Number>(hits[i].distance));
     lua_setfield(state, -2, "distance");
@@ -427,7 +436,7 @@ int lua_engine_raycast_all(lua_State *state) noexcept {
 
 // engine.overlap_sphere(cx,cy,cz, radius [, mask]) → table of entity indices
 int lua_engine_overlap_sphere(lua_State *state) noexcept {
-  if ((runtime_binding().world == nullptr) || (runtime_binding().services == nullptr) ||
+  if (!runtime_bound() ||
       (runtime_binding().services->overlap_sphere == nullptr)) {
     lua_newtable(state);
     return 1;
@@ -445,14 +454,14 @@ int lua_engine_overlap_sphere(lua_State *state) noexcept {
           : 0xFFFFFFFFU;
 
   constexpr std::size_t kMaxResults = 64U;
-  std::uint32_t indices[kMaxResults]{};
+  runtime::Entity entities[kMaxResults]{};
   const std::size_t count = runtime_binding().services->overlap_sphere(
-      runtime_binding().world, center.x, center.y, center.z, radius, indices,
+      runtime_binding().world, center.x, center.y, center.z, radius, entities,
       kMaxResults, mask);
 
   lua_createtable(state, static_cast<int>(count), 0);
   for (std::size_t i = 0U; i < count; ++i) {
-    push_entity_handle_from_index(state, indices[i]);
+    push_entity_handle(state, entities[i]);
     lua_rawseti(state, -2, static_cast<int>(i + 1U));
   }
   return 1;
@@ -460,7 +469,7 @@ int lua_engine_overlap_sphere(lua_State *state) noexcept {
 
 // engine.overlap_box(cx,cy,cz, hx,hy,hz [, mask]) → table of entity indices
 int lua_engine_overlap_box(lua_State *state) noexcept {
-  if ((runtime_binding().world == nullptr) || (runtime_binding().services == nullptr) ||
+  if (!runtime_bound() ||
       (runtime_binding().services->overlap_box == nullptr)) {
     lua_newtable(state);
     return 1;
@@ -478,14 +487,14 @@ int lua_engine_overlap_box(lua_State *state) noexcept {
           : 0xFFFFFFFFU;
 
   constexpr std::size_t kMaxResults = 64U;
-  std::uint32_t indices[kMaxResults]{};
+  runtime::Entity entities[kMaxResults]{};
   const std::size_t count = runtime_binding().services->overlap_box(
       runtime_binding().world, center.x, center.y, center.z, halfExtents.x,
-      halfExtents.y, halfExtents.z, indices, kMaxResults, mask);
+      halfExtents.y, halfExtents.z, entities, kMaxResults, mask);
 
   lua_createtable(state, static_cast<int>(count), 0);
   for (std::size_t i = 0U; i < count; ++i) {
-    push_entity_handle_from_index(state, indices[i]);
+    push_entity_handle(state, entities[i]);
     lua_rawseti(state, -2, static_cast<int>(i + 1U));
   }
   return 1;
@@ -494,8 +503,8 @@ int lua_engine_overlap_box(lua_State *state) noexcept {
 /// Decodes the optional trailing skip-entity argument for a query binding.
 /// Returns false when a present argument is not a live entity handle.
 bool read_optional_skip_entity(lua_State *state, int index,
-                               std::uint32_t *outSkipIndex) noexcept {
-  *outSkipIndex = 0U;
+                               runtime::Entity *outSkipEntity) noexcept {
+  *outSkipEntity = runtime::kInvalidEntity;
   if (lua_isnoneornil(state, index)) {
     return true;
   }
@@ -505,7 +514,7 @@ bool read_optional_skip_entity(lua_State *state, int index,
                       "query skip entity is invalid or stale");
     return false;
   }
-  *outSkipIndex = skipEntity.index;
+  *outSkipEntity = skipEntity;
   return true;
 }
 
@@ -514,7 +523,7 @@ bool read_optional_skip_entity(lua_State *state, int index,
 // skip_entity excludes that entity's colliders and any compound-body
 // colliders it owns from the sweep.
 int lua_engine_sweep_sphere(lua_State *state) noexcept {
-  if ((runtime_binding().world == nullptr) || (runtime_binding().services == nullptr) ||
+  if (!runtime_bound() ||
       (runtime_binding().services->sweep_sphere == nullptr)) {
     lua_pushnil(state);
     return 1;
@@ -534,8 +543,8 @@ int lua_engine_sweep_sphere(lua_State *state) noexcept {
       lua_isnumber(state, 9)
           ? static_cast<std::uint32_t>(lua_tointeger(state, 9))
           : 0xFFFFFFFFU;
-  std::uint32_t skipIndex = 0U;
-  if (!read_optional_skip_entity(state, 10, &skipIndex)) {
+  runtime::Entity skipEntity = runtime::kInvalidEntity;
+  if (!read_optional_skip_entity(state, 10, &skipEntity)) {
     lua_pushnil(state);
     return 1;
   }
@@ -544,11 +553,11 @@ int lua_engine_sweep_sphere(lua_State *state) noexcept {
   if (!runtime_binding().services->sweep_sphere(
           runtime_binding().world, origin.x, origin.y, origin.z, radius,
           direction.x, direction.y, direction.z, maxDist, &hit, mask,
-          skipIndex)) {
+          skipEntity)) {
     lua_pushnil(state);
     return 1;
   }
-  push_entity_handle_from_index(state, hit.entityIndex);
+  push_entity_handle(state, hit.entity);
   lua_pushnumber(state, static_cast<lua_Number>(hit.distance));
   lua_pushnumber(state, static_cast<lua_Number>(hit.pointX));
   lua_pushnumber(state, static_cast<lua_Number>(hit.pointY));
@@ -564,7 +573,7 @@ int lua_engine_sweep_sphere(lua_State *state) noexcept {
 // skip_entity excludes that entity's colliders and any compound-body
 // colliders it owns from the sweep.
 int lua_engine_sweep_box(lua_State *state) noexcept {
-  if ((runtime_binding().world == nullptr) || (runtime_binding().services == nullptr) ||
+  if (!runtime_bound() ||
       (runtime_binding().services->sweep_box == nullptr)) {
     lua_pushnil(state);
     return 1;
@@ -584,8 +593,8 @@ int lua_engine_sweep_box(lua_State *state) noexcept {
       lua_isnumber(state, 11)
           ? static_cast<std::uint32_t>(lua_tointeger(state, 11))
           : 0xFFFFFFFFU;
-  std::uint32_t skipIndex = 0U;
-  if (!read_optional_skip_entity(state, 12, &skipIndex)) {
+  runtime::Entity skipEntity = runtime::kInvalidEntity;
+  if (!read_optional_skip_entity(state, 12, &skipEntity)) {
     lua_pushnil(state);
     return 1;
   }
@@ -594,11 +603,11 @@ int lua_engine_sweep_box(lua_State *state) noexcept {
   if (!runtime_binding().services->sweep_box(
           runtime_binding().world, center.x, center.y, center.z,
           halfExtents.x, halfExtents.y, halfExtents.z, direction.x,
-          direction.y, direction.z, maxDist, &hit, mask, skipIndex)) {
+          direction.y, direction.z, maxDist, &hit, mask, skipEntity)) {
     lua_pushnil(state);
     return 1;
   }
-  push_entity_handle_from_index(state, hit.entityIndex);
+  push_entity_handle(state, hit.entity);
   lua_pushnumber(state, static_cast<lua_Number>(hit.distance));
   lua_pushnumber(state, static_cast<lua_Number>(hit.pointX));
   lua_pushnumber(state, static_cast<lua_Number>(hit.pointY));
@@ -610,11 +619,13 @@ int lua_engine_sweep_box(lua_State *state) noexcept {
 }
 
 /// Pushes a joint constructor result: nil for the unified 0 failure
-/// sentinel, the id otherwise.
+/// sentinel, the id otherwise. A joint added under a hot reload is
+/// recorded so a failed reload removes it again.
 int push_joint_result(lua_State *state, std::uint32_t id) noexcept {
   if (id == 0U) {
     lua_pushnil(state);
   } else {
+    reload_note_joint_created(id);
     lua_pushinteger(state, static_cast<lua_Integer>(id));
   }
   return 1;
@@ -647,15 +658,20 @@ int lua_engine_add_distance_joint(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
+  if (reload_staging(ReloadEffect::JointCreate) == ReloadStaging::Refused) {
+    lua_pushnil(state);
+    return 1;
+  }
   const std::uint32_t id = runtime_binding().services->add_distance_joint(
-      runtime_binding().world, entityA.index, entityB.index, dist);
+      runtime_binding().world, entityA, entityB, dist);
   return push_joint_result(state, id);
 }
 
 // engine.remove_joint(jointId) → true | nil
 int lua_engine_remove_joint(lua_State *state) noexcept {
   if (!lua_isnumber(state, 1) || (runtime_binding().services == nullptr) ||
-      (runtime_binding().services->remove_joint == nullptr)) {
+      (runtime_binding().services->remove_joint == nullptr) ||
+      reload_refuses("remove_joint")) {
     lua_pushnil(state);
     return 1;
   }
@@ -689,8 +705,12 @@ int lua_engine_add_hinge_joint(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
+  if (reload_staging(ReloadEffect::JointCreate) == ReloadStaging::Refused) {
+    lua_pushnil(state);
+    return 1;
+  }
   const std::uint32_t id = runtime_binding().services->add_hinge_joint(
-      runtime_binding().world, entityA.index, entityB.index, px, py, pz, ax, ay, az);
+      runtime_binding().world, entityA, entityB, px, py, pz, ax, ay, az);
   return push_joint_result(state, id);
 }
 
@@ -714,8 +734,12 @@ int lua_engine_add_ball_socket_joint(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
+  if (reload_staging(ReloadEffect::JointCreate) == ReloadStaging::Refused) {
+    lua_pushnil(state);
+    return 1;
+  }
   const std::uint32_t id = runtime_binding().services->add_ball_socket_joint(
-      runtime_binding().world, entityA.index, entityB.index, px, py, pz);
+      runtime_binding().world, entityA, entityB, px, py, pz);
   return push_joint_result(state, id);
 }
 
@@ -738,8 +762,12 @@ int lua_engine_add_slider_joint(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
+  if (reload_staging(ReloadEffect::JointCreate) == ReloadStaging::Refused) {
+    lua_pushnil(state);
+    return 1;
+  }
   const std::uint32_t id = runtime_binding().services->add_slider_joint(
-      runtime_binding().world, entityA.index, entityB.index, ax, ay, az);
+      runtime_binding().world, entityA, entityB, ax, ay, az);
   return push_joint_result(state, id);
 }
 
@@ -762,8 +790,12 @@ int lua_engine_add_spring_joint(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
+  if (reload_staging(ReloadEffect::JointCreate) == ReloadStaging::Refused) {
+    lua_pushnil(state);
+    return 1;
+  }
   const std::uint32_t id = runtime_binding().services->add_spring_joint(
-      runtime_binding().world, entityA.index, entityB.index, rest, stiff, damp);
+      runtime_binding().world, entityA, entityB, rest, stiff, damp);
   return push_joint_result(state, id);
 }
 
@@ -776,15 +808,20 @@ int lua_engine_add_fixed_joint(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
+  if (reload_staging(ReloadEffect::JointCreate) == ReloadStaging::Refused) {
+    lua_pushnil(state);
+    return 1;
+  }
   const std::uint32_t id =
-      runtime_binding().services->add_fixed_joint(runtime_binding().world, entityA.index, entityB.index);
+      runtime_binding().services->add_fixed_joint(runtime_binding().world, entityA, entityB);
   return push_joint_result(state, id);
 }
 
 // engine.set_joint_limits(jointId, minLimit, maxLimit) → true | nil
 int lua_engine_set_joint_limits(lua_State *state) noexcept {
   if (!lua_isnumber(state, 1) || (runtime_binding().services == nullptr) ||
-      (runtime_binding().services->set_joint_limits == nullptr)) {
+      (runtime_binding().services->set_joint_limits == nullptr) ||
+      reload_refuses("set_joint_limits")) {
     lua_pushnil(state);
     return 1;
   }

@@ -12,6 +12,7 @@
 #include "engine/runtime/scripting_bridge.h"
 #include "engine/runtime/world.h"
 #include "engine/scripting/scripting.h"
+#include "../scripting_clock.h"
 
 namespace {
 
@@ -189,7 +190,7 @@ bool test_coroutine_instruction_limit() noexcept {
   // The runaway exhausted this frame's budget; a frame boundary refills it
   // so the next coroutine can start (the migrated one-budget-per-frame
   // contract; the old per-resume budget needed no refill here).
-  engine::scripting::set_frame_index(1U);
+  engine::tests::publish_frame_index(1U);
 
   const char *yielding = "resumed_id = engine.start_coroutine(function()\n"
                          "  engine.wait(0)\n"
@@ -207,8 +208,8 @@ bool test_coroutine_instruction_limit() noexcept {
 
   // The second coroutine yields, then loops forever on its scheduler
   // resume: tick_coroutines must terminate it and return.
-  engine::scripting::set_frame_index(2U);
-  engine::scripting::set_frame_time(1.0F, 1.0F);
+  engine::tests::publish_frame_index(2U);
+  engine::tests::publish_frame_time(1.0F, 1.0F);
   engine::scripting::tick_coroutines();
 
   engine::scripting::set_instruction_limit(1000000);
@@ -356,11 +357,11 @@ bool test_coroutine_budget_shared_per_frame() noexcept {
   bool result = engine::scripting::load_script(kTempScript);
   remove_script();
 
-  engine::scripting::set_frame_index(1U);
-  engine::scripting::set_frame_time(1.0F, 1.0F);
+  engine::tests::publish_frame_index(1U);
+  engine::tests::publish_frame_time(1.0F, 1.0F);
   engine::scripting::tick_coroutines();
 
-  engine::scripting::set_frame_index(2U);
+  engine::tests::publish_frame_index(2U);
   result = engine::scripting::call_script_function("check_shared") && result;
 
   engine::scripting::set_instruction_limit(1000000);

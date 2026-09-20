@@ -97,6 +97,15 @@ public:
   virtual MovementAuthority
   movement_authority(Entity entity) const noexcept = 0;
 
+  // --- Identity -------------------------------------------------------------
+  /// Serialization-stable id of a live entity, for diagnostics that must
+  /// name an entity in a way that survives a reload; kInvalidPersistentId
+  /// when the view has none.
+  virtual PersistentId persistent_id(Entity entity) const noexcept {
+    static_cast<void>(entity);
+    return kInvalidPersistentId;
+  }
+
   // --- Physics context (gravity, joints, collision pairs) -------------------
   virtual PhysicsContext &physics_context() noexcept = 0;
   virtual const PhysicsContext &physics_context() const noexcept = 0;

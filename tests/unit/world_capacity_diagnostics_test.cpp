@@ -1,0 +1,154 @@
+// Pins that the World names capacity exhaustion instead of failing
+// silently: a component add refused for want of a slot, an entity created
+// past kMaxEntities, and a duplicate persistent id each return their
+// failure value, log exactly one error and leave their category in
+// last_refusal, so a lost write is never mute or anonymous.
+
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <memory>
+#include <new>
+
+#include "engine/core/diagnostic.h"
+#include "engine/core/logging.h"
+#include "engine/math/vec3.h"
+#include "engine/runtime/world.h"
+
+namespace {
+
+namespace rt = engine::runtime;
+
+int g_failures = 0;
+int g_fullErrors = 0;
+int g_capacityErrors = 0;
+int g_duplicateErrors = 0;
+std::uint32_t g_lastWorldEntityId = 0U;
+
+/// Remembers which entity the last world warning record was about.
+void note_world_record(const engine::core::Diagnostic &record,
+                       void *) noexcept {
+  if ((record.level == engine::core::LogLevel::Warning) &&
+      (std::strcmp(record.channel, "world") == 0)) {
+    g_lastWorldEntityId = record.entityPersistentId;
+  }
+}
+
+void check(bool condition, const char *name) noexcept {
+  if (!condition) {
+    std::printf("FAIL: %s\n", name);
+    ++g_failures;
+  }
+}
+
+void count_world_errors(engine::core::LogLevel level, const char *channel,
+                        const char *message, void *) noexcept {
+  if ((level != engine::core::LogLevel::Error) ||
+      (std::strcmp(channel, "world") != 0)) {
+    return;
+  }
+  if (std::strstr(message, "component storage is full") != nullptr) {
+    ++g_fullErrors;
+  }
+  if (std::strstr(message, "entity capacity is full") != nullptr) {
+    ++g_capacityErrors;
+  }
+  if (std::strstr(message, "persistent id already in use") != nullptr) {
+    ++g_duplicateErrors;
+  }
+}
+
+} // namespace
+
+int main() {
+  check(engine::core::initialize_logging(), "initialize logging");
+  check(engine::core::log_register_sink(&count_world_errors, nullptr),
+        "register sink");
+  check(engine::core::log_register_diagnostic_sink(&note_world_record,
+                                                   nullptr),
+        "register record sink");
+  std::unique_ptr<rt::World> world(new (std::nothrow) rt::World());
+  if (world == nullptr) {
+    return 1;
+  }
+
+  // --- A component set at capacity refuses with one logged error ---
+  for (std::size_t i = 0U; i < rt::World::kMaxSceneCaptureComponents; ++i) {
+    const rt::Entity entity = world->create_scene_object();
+    check(world->add_scene_capture_component(entity,
+                                             rt::SceneCaptureComponent{}),
+          "scene capture adds up to capacity");
+  }
+  check(g_fullErrors == 0, "adds within capacity log nothing");
+  const rt::Entity onePast = world->create_scene_object();
+  check(!world->add_scene_capture_component(onePast,
+                                            rt::SceneCaptureComponent{}),
+        "the add one past capacity is refused");
+  check(g_fullErrors == 1, "the refused add logs exactly one error");
+  check(world->last_refusal().kind ==
+            engine::core::FailureKind::CapacityExhausted,
+        "the refused add is named as capacity exhaustion");
+  check(!world->add_scene_capture_component(rt::Entity{60000U, 7U},
+                                            rt::SceneCaptureComponent{}) &&
+            (world->last_refusal().kind ==
+             engine::core::FailureKind::NotFound),
+        "an add on a dead entity is named as not found");
+  world->begin_update_phase();
+  check(!world->add_name_component(onePast, rt::NameComponent{}) &&
+            (world->last_refusal().kind ==
+             engine::core::FailureKind::InvariantViolated),
+        "an add outside the Input phase is named as an invariant violation");
+  world->end_frame_phase();
+  rt::NameComponent longName{};
+  std::memset(longName.name, 'n', sizeof(longName.name));
+  check(!world->add_name_component(onePast, longName) &&
+            (world->last_refusal().kind ==
+             engine::core::FailureKind::InvalidArgument),
+        "an identity field that does not fit is named as an invalid argument");
+
+  // --- A warning about one entity names it by persistent id ---
+  {
+    const rt::Entity fast = world->create_scene_object();
+    rt::RigidBody body{};
+    body.velocity = engine::math::Vec3(1.0e9F, 0.0F, 0.0F);
+    check(world->add_rigid_body(fast, body), "a clamped body still adds");
+    check(g_lastWorldEntityId == world->persistent_id(fast),
+          "the clamp warning's record names the entity by persistent id");
+  }
+
+  // --- A duplicate persistent id is named ---
+  const rt::Entity first = world->create_entity_with_persistent_id(4242U);
+  check(first != rt::kInvalidEntity, "first persistent id is taken");
+  check(world->create_entity_with_persistent_id(4242U) == rt::kInvalidEntity,
+        "the duplicate persistent id is refused");
+  check(g_duplicateErrors == 1, "the duplicate logs exactly one error");
+  check(world->last_refusal().kind ==
+            engine::core::FailureKind::InvalidArgument,
+        "the duplicate is named as an invalid argument");
+
+  // --- Entity capacity is named ---
+  std::size_t created = world->alive_entity_count();
+  while (created < rt::World::kMaxEntities) {
+    if (world->create_entity() == rt::kInvalidEntity) {
+      break;
+    }
+    ++created;
+  }
+  check(created == rt::World::kMaxEntities, "the world fills to capacity");
+  check(g_capacityErrors == 0, "creates within capacity log nothing");
+  check(world->create_entity() == rt::kInvalidEntity,
+        "the create one past capacity is refused");
+  check(g_capacityErrors == 1, "the refused create logs exactly one error");
+  check(world->last_refusal().kind ==
+            engine::core::FailureKind::CapacityExhausted,
+        "the refused create is named as capacity exhaustion");
+
+  engine::core::log_unregister_diagnostic_sink(&note_world_record, nullptr);
+  engine::core::log_unregister_sink(&count_world_errors, nullptr);
+  engine::core::shutdown_logging();
+  if (g_failures != 0) {
+    std::printf("world capacity diagnostics: %d failure(s)\n", g_failures);
+    return 1;
+  }
+  return 0;
+}

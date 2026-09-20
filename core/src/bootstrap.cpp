@@ -10,6 +10,7 @@
 #include "engine/core/console.h"
 #include "engine/core/cvar.h"
 #include "engine/core/debug_draw.h"
+#include "engine/core/engine_stats.h"
 #include "engine/core/engine_version.h"
 #include "engine/core/event_bus.h"
 #include "engine/core/input.h"
@@ -142,7 +143,9 @@ bool initialize_core(const CoreConfig &config) noexcept {
 
     const std::uint32_t hardwareThreads = std::thread::hardware_concurrency();
     const std::uint32_t workerThreads =
-        (hardwareThreads > 1U) ? (hardwareThreads - 1U) : 0U;
+        (config.workerThreads > 0U)
+            ? config.workerThreads
+            : ((hardwareThreads > 1U) ? (hardwareThreads - 1U) : 0U);
     if (!initialize_job_system(workerThreads)) {
       failureMessage = "failed to initialize job system";
       break;
@@ -258,6 +261,9 @@ void shutdown_core() noexcept {
     g_threadFrameAllocators[i].reset();
   }
 
+  // The published stats snapshot is run-scoped; a later core in this
+  // process must not read the previous run's numbers before its own.
+  reset_engine_stats();
   g_coreInitialized = false;
 }
 

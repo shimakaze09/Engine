@@ -11,8 +11,10 @@
 #include <memory>
 #include <new>
 
+#include "engine/core/diagnostic.h"
 #include "engine/core/json.h"
 #include "engine/core/logging.h"
+#include "engine/core/vfs.h"
 #include "engine/core/reflect.h"
 #include "engine/math/quat.h"
 #include "engine/math/vec2.h"
@@ -31,7 +33,15 @@ namespace engine::runtime {
 namespace {
 
 constexpr const char *kSceneLogChannel = "scene";
-constexpr std::uint32_t kCurrentSceneVersion = 2U;
+// Revision 4 writes RigidBody inertia provenance (inertiaAuthored); every
+// older revision always wrote a numeric inverseInertia, which is kept as
+// the authored value. Revision 3 writes inverseInertia as a 3-element
+// array; older revisions wrote one number, read as the same value on
+// every axis.
+constexpr std::uint32_t kCurrentSceneVersion = 4U;
+constexpr std::uint32_t kLastImplicitInertiaSceneVersion = 3U;
+constexpr std::uint32_t kLastScalarInertiaSceneVersion = 2U;
+constexpr const char *kInverseInertiaKey = "inverseInertia";
 constexpr const char *kEntitiesKey = "entities";
 constexpr const char *kComponentsKey = "components";
 constexpr const char *kPersistentIdKey = "persistentId";
@@ -47,6 +57,71 @@ bool log_scene_error(const char *message) noexcept {
   }
 
   return false;
+}
+
+/// Records one reference finding in the report (when given) and logs it
+/// as a warning naming the entity and field.
+void report_reference(core::ValidationReport *report, const char *code,
+                      const char *field, const char *key,
+                      PersistentId entityPersistentId,
+                      const char *what) noexcept {
+  if (report != nullptr) {
+    static_cast<void>(report->add(core::ValidationSeverity::Warning, code,
+                                  key, entityPersistentId));
+  }
+  char message[320] = {};
+  std::snprintf(message, sizeof(message), "%s (entity %u, %s = %s)", what,
+                entityPersistentId, field, key);
+  core::Diagnostic record = core::make_diagnostic(core::LogLevel::Warning,
+                                                  kSceneLogChannel, message);
+  record.kind = core::FailureKind::NotFound;
+  record.entityPersistentId = entityPersistentId;
+  std::snprintf(record.field, sizeof(record.field), "%s", field);
+  core::log_diagnostic(record);
+}
+
+/// True when the path sits under a mounted prefix and names no file; an
+/// unmounted prefix cannot be judged and is left alone.
+bool mounted_path_missing(const char *path) noexcept {
+  char osPath[1024] = {};
+  return core::vfs_resolve_os_path(path, osPath, sizeof(osPath)) &&
+         !core::vfs_file_exists(path);
+}
+
+/// Checks every reference the staged scene carries and records the ones
+/// that resolve to nothing. The scene still loads: a dangling parent
+/// roots its child, a missing script or controller stays authored, and
+/// the report says so.
+void validate_scene_references(const World &staged,
+                               core::ValidationReport *report) noexcept {
+  staged.for_each_alive([&](Entity entity) noexcept {
+    const PersistentId id = staged.persistent_id(entity);
+    Transform transform{};
+    if (staged.get_transform(entity, &transform) &&
+        (transform.parentId != kInvalidPersistentId) &&
+        (staged.find_entity_by_persistent_id(transform.parentId) ==
+         kInvalidEntity)) {
+      char key[32] = {};
+      std::snprintf(key, sizeof(key), "%u", transform.parentId);
+      report_reference(report, "dangling_parent", "parentId", key, id,
+                       "scene parent names no entity; child loads as a root");
+    }
+    const ScriptComponent *script = staged.get_script_component_ptr(entity);
+    if ((script != nullptr) && (script->scriptPath[0] != '\0') &&
+        mounted_path_missing(script->scriptPath)) {
+      report_reference(report, "missing_script", "scriptPath",
+                       script->scriptPath, id,
+                       "scene script path names no file");
+    }
+    const AnimationComponent *animation =
+        staged.get_animation_component_ptr(entity);
+    if ((animation != nullptr) && (animation->controllerPath[0] != '\0') &&
+        mounted_path_missing(animation->controllerPath)) {
+      report_reference(report, "missing_controller", "controllerPath",
+                       animation->controllerPath, id,
+                       "scene animation controller path names no file");
+    }
+  });
 }
 
 
@@ -76,7 +151,7 @@ template <typename T>
 bool decode_scene_component(const core::JsonParser &parser,
                             const core::JsonValue &value,
                             const ReflectedComponentDescriptors &descs,
-                            T *out) noexcept {
+                            std::uint32_t documentVersion, T *out) noexcept {
   if constexpr (std::is_same_v<T, Collider>) {
     return read_collider_component(parser, value, out);
   } else if constexpr (std::is_same_v<T, MeshComponent>) {
@@ -95,7 +170,25 @@ bool decode_scene_component(const core::JsonParser &parser,
                                      sizeof(out->scriptPath));
   } else if constexpr (std::is_same_v<T, AnimationComponent>) {
     return read_animation_component(parser, value, false, out);
+  } else if constexpr (std::is_same_v<T, RigidBody>) {
+    ReflectedReadOptions options{};
+    if (documentVersion <= kLastScalarInertiaSceneVersion) {
+      options.uniformScalarVec3Key = kInverseInertiaKey;
+    }
+    if (!read_reflected_component(parser, value,
+                                  component_descriptor(descs, out), out,
+                                  options)) {
+      return false;
+    }
+    // An older revision carried no provenance and always wrote the
+    // tensor, so its number is what the scene simulated with: authored,
+    // never reinterpreted from the value.
+    if (documentVersion <= kLastImplicitInertiaSceneVersion) {
+      out->inertiaAuthored = true;
+    }
+    return true;
   } else {
+    static_cast<void>(documentVersion);
     return read_reflected_component(parser, value,
                                     component_descriptor(descs, out), out);
   }
@@ -139,6 +232,7 @@ bool encode_scene_component(core::JsonWriter &writer, const char *key,
 bool deserialize_scene_entities(const core::JsonParser &parser,
                                 const core::JsonValue &entities,
                                 const ReflectedComponentDescriptors &descs,
+                                std::uint32_t documentVersion,
                                 World &targetWorld) noexcept {
   const std::size_t entityCount = parser.array_size(entities);
   for (std::size_t i = 0U; i < entityCount; ++i) {
@@ -188,7 +282,8 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
     if (parser.get_object_field(components, scene_component_key<Type>(Key),    \
                                 &value)) {                                     \
       Type component{};                                                        \
-      if (!decode_scene_component(parser, value, descs, &component) ||         \
+      if (!decode_scene_component(parser, value, descs, documentVersion,       \
+                                  &component) ||                               \
           !targetWorld.AddFn(entity, component)) {                             \
         rowError = "failed to load " #Type;                                    \
       }                                                                        \
@@ -524,7 +619,8 @@ bool save_scene(const World &world, char *buffer, std::size_t capacity,
 
 /// Loads the requested resource for scene.
 bool load_scene(World &world, const char *path,
-                SceneTeardownHook beforeTeardown) noexcept {
+                SceneTeardownHook beforeTeardown,
+                core::ValidationReport *outReport) noexcept {
   if (path == nullptr) {
     core::log_message(core::LogLevel::Error, kSceneLogChannel,
                       "load_scene called with null path");
@@ -539,7 +635,8 @@ bool load_scene(World &world, const char *path,
     return false;
   }
 
-  return load_scene(world, fileBuffer.get(), fileSize, beforeTeardown);
+  return load_scene(world, fileBuffer.get(), fileSize, beforeTeardown,
+                    outReport);
 }
 
 /// Loads the requested resource for scene. Declared reset order:
@@ -550,7 +647,11 @@ bool load_scene(World &world, const char *path,
 /// does beforeTeardown fire (outgoing entities and modules still alive)
 /// immediately before the destructive `world = *committedWorld` commit.
 bool load_scene(World &world, const char *buffer, std::size_t size,
-                SceneTeardownHook beforeTeardown) noexcept {
+                SceneTeardownHook beforeTeardown,
+                core::ValidationReport *outReport) noexcept {
+  if (outReport != nullptr) {
+    *outReport = core::ValidationReport{};
+  }
   if ((buffer == nullptr) || (size == 0U)) {
     core::log_message(core::LogLevel::Error, kSceneLogChannel,
                       "load_scene called with invalid input buffer");
@@ -577,8 +678,9 @@ bool load_scene(World &world, const char *buffer, std::size_t size,
     return false;
   }
 
+  std::uint32_t documentVersion = kCurrentSceneVersion;
   if (!schema_version_supported(parser, *root, kCurrentSceneVersion, "scene",
-                                kSceneLogChannel)) {
+                                kSceneLogChannel, &documentVersion)) {
     return false;
   }
 
@@ -602,9 +704,11 @@ bool load_scene(World &world, const char *buffer, std::size_t size,
     return false;
   }
 
-  if (!deserialize_scene_entities(parser, entities, descs, *stagedWorld)) {
+  if (!deserialize_scene_entities(parser, entities, descs, documentVersion,
+                                  *stagedWorld)) {
     return false;
   }
+  validate_scene_references(*stagedWorld, outReport);
 
   // World gravity: optional root field, default when absent.
   core::JsonValue gravityValue{};

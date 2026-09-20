@@ -39,6 +39,11 @@ bool editor_layout_save() noexcept;
 /// flag; runs once per frame in place of ImGui's own periodic writer.
 void editor_layout_save_if_dirty() noexcept;
 
+/// Clears the session's refusal latches (a stored layout that could not
+/// be read, and the log-once flags) so the next editor session judges
+/// its own load. The test directory override is not a latch and stays.
+void editor_layout_reset() noexcept;
+
 /// Test-only override for the layout directory; an empty string restores
 /// the real per-user save directory. Exists so tests never read or write
 /// the real user's save directory.

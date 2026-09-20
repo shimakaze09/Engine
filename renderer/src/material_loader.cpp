@@ -18,6 +18,7 @@
 #include "engine/core/vfs.h"
 #include "engine/math/vec2.h"
 #include "engine/math/vec3.h"
+#include "engine/core/diagnostic.h"
 
 namespace engine::renderer {
 
@@ -29,11 +30,9 @@ constexpr std::uint32_t kMaxMaterialVersion = 2U;
 
 /// Logs a material load failure with the offending path; always false.
 bool log_material_error(const char *virtualPath, const char *message) noexcept {
-  char buffer[512] = {};
-  std::snprintf(buffer, sizeof(buffer), "%s: %s",
-                (virtualPath != nullptr) ? virtualPath : "<null>",
-                (message != nullptr) ? message : "unknown error");
-  core::log_message(core::LogLevel::Error, kMaterialLogChannel, buffer);
+  core::log_path_diagnostic(core::LogLevel::Error, kMaterialLogChannel,
+                            (virtualPath != nullptr) ? virtualPath : "<null>",
+                            message);
   return false;
 }
 

@@ -1,4 +1,4 @@
-// Declares game state types and APIs for the Engine runtime world.
+// Declares game state types and APIs the Lua game bindings act on.
 
 #pragma once
 
@@ -8,7 +8,7 @@
 #include <cstdio>
 #include <cstring>
 
-namespace engine::runtime {
+namespace engine::scripting {
 
 // Persistent cross-scene data: score, inventory, checkpoints, etc.
 // Separate from World lifetime — survives scene transitions.
@@ -178,4 +178,4 @@ private:
   }
 };
 
-} // namespace engine::runtime
+} // namespace engine::scripting

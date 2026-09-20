@@ -15,6 +15,11 @@
 
 namespace {
 
+/// True when every inverse inertia axis holds exactly `value`.
+bool uniform_inertia(const engine::math::Vec3 &inertia, float value) noexcept {
+  return (inertia.x == value) && (inertia.y == value) && (inertia.z == value);
+}
+
 bool nearly_equal(float lhs, float rhs) {
   return std::fabs(lhs - rhs) <= 0.0001F;
 }
@@ -1083,7 +1088,9 @@ int verify_physics_ingress_validation() {
   }
   RigidBody goodBody{};
   goodBody.inverseMass = 0.0F;
-  goodBody.inverseInertia = 0.0F;
+  goodBody.inverseInertia =
+      engine::math::Vec3(0.0F, 0.0F, 0.0F);
+  goodBody.inertiaAuthored = true;
   if (!world->add_rigid_body(entity, goodBody)) {
     return 907;
   }
@@ -1215,13 +1222,16 @@ int verify_physics_ingress_clamps() {
 
   RigidBody hotBody{};
   hotBody.inverseMass = 1.0F;
-  hotBody.inverseInertia = 1.0e6F;
+  hotBody.inverseInertia =
+      engine::math::Vec3(1.0e6F, 1.0e6F, 1.0e6F);
+  hotBody.inertiaAuthored = true;
   hotBody.velocity = engine::math::Vec3(600.0F, 800.0F, 0.0F);
   hotBody.angularVelocity = engine::math::Vec3(0.0F, 24.0F, 0.0F);
   RigidBody storedBody{};
   if (!world->add_rigid_body(entity, hotBody) ||
       !world->get_rigid_body(entity, &storedBody) ||
-      (storedBody.inverseInertia != engine::physics::kMaxInverseInertia) ||
+      !uniform_inertia(storedBody.inverseInertia,
+                       engine::physics::kMaxInverseInertia) ||
       (storedBody.velocity.x != 300.0F) || (storedBody.velocity.y != 400.0F) ||
       (storedBody.velocity.z != 0.0F) ||
       (storedBody.angularVelocity.y != 12.0F)) {
@@ -1233,13 +1243,16 @@ int verify_physics_ingress_clamps() {
 
   RigidBody boundaryBody{};
   boundaryBody.inverseMass = 1.0F;
-  boundaryBody.inverseInertia = engine::physics::kMaxInverseInertia;
+  boundaryBody.inverseInertia =
+      engine::math::Vec3(engine::physics::kMaxInverseInertia, engine::physics::kMaxInverseInertia, engine::physics::kMaxInverseInertia);
+  boundaryBody.inertiaAuthored = true;
   boundaryBody.velocity =
       engine::math::Vec3(0.0F, 0.0F, engine::physics::kMaxLinearSpeed);
   if (!world->add_rigid_body(entity, boundaryBody) ||
       !world->get_rigid_body(entity, &storedBody) ||
       (storedBody.velocity.z != engine::physics::kMaxLinearSpeed) ||
-      (storedBody.inverseInertia != engine::physics::kMaxInverseInertia)) {
+      !uniform_inertia(storedBody.inverseInertia,
+                       engine::physics::kMaxInverseInertia)) {
     return 927;
   }
 

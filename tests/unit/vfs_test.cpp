@@ -246,31 +246,35 @@ bool test_read_binary_bounded() noexcept {
   void *buffer = nullptr;
   std::size_t size = 99U;
   ok = ok && (vfs_read_binary_bounded("root/_vfs_bounded_test.dat", 4U,
-                                      &buffer, &size) == VfsReadStatus::TooLarge);
+                                      &buffer, &size).kind ==
+              FailureKind::CapacityExhausted);
   ok = ok && (buffer == nullptr) && (size == 5U);
 
   size = 99U;
   ok = ok && (vfs_read_binary_bounded("root/_vfs_bounded_test.dat", 5U,
-                                      &buffer, &size) == VfsReadStatus::Ok);
+                                      &buffer, &size).kind ==
+              FailureKind::Ok);
   ok = ok && (buffer != nullptr) && (size == 5U) &&
        (std::memcmp(buffer, data, 5U) == 0);
   vfs_free(buffer);
   buffer = nullptr;
 
   ok = ok && (vfs_read_binary_bounded("root/_vfs_bounded_empty.dat", 0U,
-                                      &buffer, &size) == VfsReadStatus::Ok);
+                                      &buffer, &size).kind ==
+              FailureKind::Ok);
   ok = ok && (size == 0U);
   vfs_free(buffer);
   buffer = nullptr;
 
   ok = ok && (vfs_read_binary_bounded("root/_vfs_bounded_missing.dat", 5U,
-                                      &buffer, &size) ==
-              VfsReadStatus::Unresolved);
+                                      &buffer, &size).kind ==
+              FailureKind::NotFound);
   ok = ok && (vfs_read_binary_bounded("unmounted/_vfs_bounded_test.dat", 5U,
-                                      &buffer, &size) ==
-              VfsReadStatus::Unresolved);
+                                      &buffer, &size).kind ==
+              FailureKind::NotFound);
   ok = ok && (vfs_read_binary_bounded("root/_vfs_bounded_test.dat", 5U,
-                                      nullptr, &size) == VfsReadStatus::IoError);
+                                      nullptr, &size).kind ==
+              FailureKind::InvalidArgument);
   ok = ok && (buffer == nullptr);
 
   std::remove("_vfs_bounded_test.dat");

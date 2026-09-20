@@ -2,16 +2,19 @@
 // solvers. Position corrections follow the position-based rigid-body form:
 // for a constraint row with Jacobian J the correction is
 // lambda = -C / (J M^-1 J^T) applied through M^-1 J^T, where M^-1 holds the
-// scalar inverse masses and isotropic scalar inverse inertias. Velocity
-// projections apply the momentum-conserving impulse that removes exactly
-// the requested relative-velocity component, so equality constraints stop
-// re-violating under integration while free DOFs (the null space of each
-// projection) keep their motion.
+// scalar inverse masses and the bodies' world-space inverse inertia
+// tensors. Velocity projections apply the momentum-conserving impulse that
+// removes exactly the requested relative-velocity component, so equality
+// constraints stop re-violating under integration while free DOFs (the
+// null space of each projection) keep their motion. Every 3x3 solve goes
+// through the same rank-aware pseudo-inverse, so a locked axis in any
+// orientation contributes nothing and takes nothing.
 
 #include "joint_projection.h"
 
 #include "engine/math/quat.h"
 #include "engine/math/vec3.h"
+#include "engine/physics/inertia.h"
 
 #include <cmath>
 
@@ -19,66 +22,140 @@ namespace engine::physics {
 
 constexpr float kJointEpsilon = 1.0e-6F;
 
-/// Solves the symmetric positive-definite 3x3 system K x = b by Cholesky
-/// factorization with pivots checked RELATIVE to the matrix scale (largest
-/// diagonal entry), so validity does not depend on absolute mass units:
-/// a matrix built from tiny inverse masses (very heavy bodies) still
-/// solves, while a genuinely rank-deficient matrix is rejected at any
-/// scale. Returns false when K is not positive definite at working
-/// precision.
-static bool solve_spd3(const float k[3][3], const math::Vec3 &b,
+/// Diagonalizes the symmetric 3x3 matrix `k` by cyclic Jacobi rotations:
+/// `eigenvalues[i]` pairs with the unit column `eigenvectors[.][i]`. A
+/// fixed sweep count keeps the work bounded and the result deterministic;
+/// float precision is reached in far fewer sweeps for a 3x3.
+static void eigen_symmetric3(const float k[3][3], float eigenvalues[3],
+                             float eigenvectors[3][3]) noexcept {
+  constexpr int kMaxSweeps = 16;
+  float a[3][3] = {{k[0][0], k[0][1], k[0][2]},
+                   {k[1][0], k[1][1], k[1][2]},
+                   {k[2][0], k[2][1], k[2][2]}};
+  float v[3][3] = {{1.0F, 0.0F, 0.0F}, {0.0F, 1.0F, 0.0F}, {0.0F, 0.0F, 1.0F}};
+  for (int sweep = 0; sweep < kMaxSweeps; ++sweep) {
+    const float off = (a[0][1] * a[0][1]) + (a[0][2] * a[0][2]) +
+                      (a[1][2] * a[1][2]);
+    if (off == 0.0F) {
+      break;
+    }
+    for (int p = 0; p < 2; ++p) {
+      for (int q = p + 1; q < 3; ++q) {
+        const float apq = a[p][q];
+        if (apq == 0.0F) {
+          continue;
+        }
+        const float theta = (a[q][q] - a[p][p]) / (2.0F * apq);
+        const float t = ((theta >= 0.0F) ? 1.0F : -1.0F) /
+                        (std::fabs(theta) + std::sqrt((theta * theta) + 1.0F));
+        const float c = 1.0F / std::sqrt((t * t) + 1.0F);
+        const float s = t * c;
+        // Rotate rows and columns p and q of a, keeping it symmetric.
+        for (int r = 0; r < 3; ++r) {
+          const float arp = a[r][p];
+          const float arq = a[r][q];
+          a[r][p] = (c * arp) - (s * arq);
+          a[r][q] = (s * arp) + (c * arq);
+        }
+        for (int col = 0; col < 3; ++col) {
+          const float apc = a[p][col];
+          const float aqc = a[q][col];
+          a[p][col] = (c * apc) - (s * aqc);
+          a[q][col] = (s * apc) + (c * aqc);
+        }
+        for (int r = 0; r < 3; ++r) {
+          const float vrp = v[r][p];
+          const float vrq = v[r][q];
+          v[r][p] = (c * vrp) - (s * vrq);
+          v[r][q] = (s * vrp) + (c * vrq);
+        }
+      }
+    }
+  }
+  for (int i = 0; i < 3; ++i) {
+    eigenvalues[i] = a[i][i];
+    for (int r = 0; r < 3; ++r) {
+      eigenvectors[r][i] = v[r][i];
+    }
+  }
+}
+
+/// Solves K x = b for a symmetric positive semi-definite K through its
+/// pseudo-inverse: x = sum over the eigenpairs whose eigenvalue is above
+/// a floor RELATIVE to the largest (so validity does not depend on
+/// absolute mass units) of (v . b / w) v. The part of b outside K's range
+/// is the motion the bodies cannot perform, and it is left alone rather
+/// than approximated axis by axis. False only when K is zero at working
+/// precision: nothing can move.
+static bool solve_psd3(const float k[3][3], const math::Vec3 &b,
                        math::Vec3 *out) noexcept {
-  constexpr float kRelativePivotEpsilon = 1.0e-7F;
-  const float maxDiag =
-      (k[0][0] > k[1][1]) ? ((k[0][0] > k[2][2]) ? k[0][0] : k[2][2])
-                          : ((k[1][1] > k[2][2]) ? k[1][1] : k[2][2]);
-  if (maxDiag <= 0.0F) {
+  constexpr float kRelativeEigenvalueEpsilon = 1.0e-6F;
+  float w[3] = {};
+  float v[3][3] = {};
+  eigen_symmetric3(k, w, v);
+  float wMax = 0.0F;
+  for (const float eigenvalue : w) {
+    if (eigenvalue > wMax) {
+      wMax = eigenvalue;
+    }
+  }
+  if (wMax <= 0.0F) {
     return false;
   }
-  const float pivotFloor = kRelativePivotEpsilon * maxDiag;
-
-  const float d0 = k[0][0];
-  if (d0 <= pivotFloor) {
-    return false;
+  const float floor = kRelativeEigenvalueEpsilon * wMax;
+  *out = math::Vec3(0.0F, 0.0F, 0.0F);
+  for (int i = 0; i < 3; ++i) {
+    if (w[i] <= floor) {
+      continue;
+    }
+    const math::Vec3 axis(v[0][i], v[1][i], v[2][i]);
+    const float coefficient = math::dot(axis, b) / w[i];
+    *out = math::add(*out, math::mul(axis, coefficient));
   }
-  const float l00 = std::sqrt(d0);
-  const float l10 = k[0][1] / l00;
-  const float l20 = k[0][2] / l00;
-
-  const float d1 = k[1][1] - (l10 * l10);
-  if (d1 <= pivotFloor) {
-    return false;
-  }
-  const float l11 = std::sqrt(d1);
-  const float l21 = (k[1][2] - (l20 * l10)) / l11;
-
-  const float d2 = k[2][2] - (l20 * l20) - (l21 * l21);
-  if (d2 <= pivotFloor) {
-    return false;
-  }
-  const float l22 = std::sqrt(d2);
-
-  const float y0 = b.x / l00;
-  const float y1 = (b.y - (l10 * y0)) / l11;
-  const float y2 = (b.z - (l20 * y0) - (l21 * y1)) / l22;
-
-  out->z = y2 / l22;
-  out->y = (y1 - (l21 * out->z)) / l11;
-  out->x = (y0 - (l10 * out->y) - (l20 * out->z)) / l00;
   return true;
 }
 
-/// Adds one body's anchor mass contribution i(|r|^2 I - r r^T) + m^-1 I.
+/// Applies a row-major 3x3 matrix to a vector.
+static math::Vec3 mat3_mul(const float m[3][3], const math::Vec3 &v) noexcept {
+  return math::Vec3((m[0][0] * v.x) + (m[0][1] * v.y) + (m[0][2] * v.z),
+                    (m[1][0] * v.x) + (m[1][1] * v.y) + (m[1][2] * v.z),
+                    (m[2][0] * v.x) + (m[2][1] * v.y) + (m[2][2] * v.z));
+}
+
+/// World-space inverse inertia of endpoint A or B at its current
+/// orientation; zero for a locked or static endpoint.
+static void endpoint_inverse_inertia(const JointSolveContext &ctx, bool sideA,
+                                     float out[3][3]) noexcept {
+  const math::Vec3 &inverseInertia = sideA ? ctx.invInertiaA : ctx.invInertiaB;
+  const Transform *transform = sideA ? ctx.tA : ctx.tB;
+  inverse_inertia_world(inverseInertia, math::normalize(transform->rotation),
+                        out);
+}
+
+/// Adds one body's anchor mass contribution m^-1 I + S^T I_w^-1 S, where S
+/// is the cross-product matrix of the lever (S v = lever x v).
 static void accumulate_anchor_mass(float k[3][3], float invMass,
-                                   float invInertia,
+                                   const float inverseInertia[3][3],
                                    const math::Vec3 &lever) noexcept {
-  const float leverSq = math::length_sq(lever);
-  k[0][0] += invMass + (invInertia * (leverSq - (lever.x * lever.x)));
-  k[1][1] += invMass + (invInertia * (leverSq - (lever.y * lever.y)));
-  k[2][2] += invMass + (invInertia * (leverSq - (lever.z * lever.z)));
-  k[0][1] -= invInertia * lever.x * lever.y;
-  k[0][2] -= invInertia * lever.x * lever.z;
-  k[1][2] -= invInertia * lever.y * lever.z;
+  const float s[3][3] = {{0.0F, -lever.z, lever.y},
+                         {lever.z, 0.0F, -lever.x},
+                         {-lever.y, lever.x, 0.0F}};
+  // t = I_w^-1 S, then k += S^T t = -S t.
+  float t[3][3] = {};
+  for (int row = 0; row < 3; ++row) {
+    for (int col = 0; col < 3; ++col) {
+      t[row][col] = (inverseInertia[row][0] * s[0][col]) +
+                    (inverseInertia[row][1] * s[1][col]) +
+                    (inverseInertia[row][2] * s[2][col]);
+    }
+  }
+  for (int row = 0; row < 3; ++row) {
+    for (int col = 0; col < 3; ++col) {
+      k[row][col] -= (s[row][0] * t[0][col]) + (s[row][1] * t[1][col]) +
+                     (s[row][2] * t[2][col]);
+    }
+    k[row][row] += invMass;
+  }
 }
 
 math::Vec3 joint_world_lever(const Transform &transform,
@@ -108,11 +185,12 @@ float project_point_position(JointSolveContext &ctx, const math::Vec3 &leverA,
   }
 
   const math::Vec3 dir = math::div(error, errorLen);
-  const math::Vec3 armA = math::cross(leverA, dir);
-  const math::Vec3 armB = math::cross(leverB, dir);
-  const float invMassSum = ctx.invMassA + ctx.invMassB +
-                           (ctx.invInertiaA * math::length_sq(armA)) +
-                           (ctx.invInertiaB * math::length_sq(armB));
+  const math::Quat rotA = math::normalize(ctx.tA->rotation);
+  const math::Quat rotB = math::normalize(ctx.tB->rotation);
+  const float invMassSum =
+      ctx.invMassA + ctx.invMassB +
+      angular_effective_inverse_mass(ctx.invInertiaA, rotA, leverA, dir) +
+      angular_effective_inverse_mass(ctx.invInertiaB, rotB, leverB, dir);
   if (invMassSum <= 0.0F) {
     return 0.0F;
   }
@@ -122,11 +200,14 @@ float project_point_position(JointSolveContext &ctx, const math::Vec3 &leverA,
   ctx.tA->position =
       math::add(ctx.tA->position, math::mul(impulse, ctx.invMassA));
   apply_orientation_delta(
-      *ctx.tA, math::mul(math::cross(leverA, impulse), ctx.invInertiaA));
+      *ctx.tA, apply_inverse_inertia(ctx.invInertiaA, rotA,
+                                     math::cross(leverA, impulse)));
   ctx.tB->position =
       math::sub(ctx.tB->position, math::mul(impulse, ctx.invMassB));
   apply_orientation_delta(
-      *ctx.tB, math::mul(math::cross(leverB, impulse), -ctx.invInertiaB));
+      *ctx.tB, math::mul(apply_inverse_inertia(ctx.invInertiaB, rotB,
+                                               math::cross(leverB, impulse)),
+                         -1.0F));
   return lambda;
 }
 
@@ -153,17 +234,18 @@ float project_point_velocity(JointSolveContext &ctx, const math::Vec3 &leverA,
     return 0.0F;
   }
 
+  float inertiaA[3][3] = {};
+  float inertiaB[3][3] = {};
+  endpoint_inverse_inertia(ctx, true, inertiaA);
+  endpoint_inverse_inertia(ctx, false, inertiaB);
   float k[3][3] = {{0.0F, 0.0F, 0.0F},
                    {0.0F, 0.0F, 0.0F},
                    {0.0F, 0.0F, 0.0F}};
-  accumulate_anchor_mass(k, ctx.invMassA, ctx.invInertiaA, leverA);
-  accumulate_anchor_mass(k, ctx.invMassB, ctx.invInertiaB, leverB);
-  k[1][0] = k[0][1];
-  k[2][0] = k[0][2];
-  k[2][1] = k[1][2];
+  accumulate_anchor_mass(k, ctx.invMassA, inertiaA, leverA);
+  accumulate_anchor_mass(k, ctx.invMassB, inertiaB, leverB);
 
   math::Vec3 impulse{};
-  if (!solve_spd3(k, remove, &impulse)) {
+  if (!solve_psd3(k, remove, &impulse)) {
     return 0.0F;
   }
 
@@ -172,53 +254,86 @@ float project_point_velocity(JointSolveContext &ctx, const math::Vec3 &leverA,
                                     math::mul(impulse, ctx.invMassA));
     ctx.bodyA->angularVelocity =
         math::add(ctx.bodyA->angularVelocity,
-                  math::mul(math::cross(leverA, impulse), ctx.invInertiaA));
+                  mat3_mul(inertiaA, math::cross(leverA, impulse)));
   }
   if (ctx.bodyB != nullptr) {
     ctx.bodyB->velocity = math::sub(ctx.bodyB->velocity,
                                     math::mul(impulse, ctx.invMassB));
     ctx.bodyB->angularVelocity =
         math::sub(ctx.bodyB->angularVelocity,
-                  math::mul(math::cross(leverB, impulse), ctx.invInertiaB));
+                  mat3_mul(inertiaB, math::cross(leverB, impulse)));
   }
   return math::length(impulse);
 }
 
+/// Splits a relative angular quantity between the endpoints: solves
+/// (I_A^-1 + I_B^-1) lambda = total and hands each side its own share
+/// I^-1 lambda, so a body that cannot rotate about an axis takes none of
+/// that axis and the other body takes it all. False when neither side can
+/// rotate.
+static bool split_by_inertia(const JointSolveContext &ctx,
+                             const math::Vec3 &total, math::Vec3 *outShareA,
+                             math::Vec3 *outShareB,
+                             math::Vec3 *outLambda) noexcept {
+  float inertiaA[3][3] = {};
+  float inertiaB[3][3] = {};
+  endpoint_inverse_inertia(ctx, true, inertiaA);
+  endpoint_inverse_inertia(ctx, false, inertiaB);
+  float sum[3][3] = {};
+  for (int row = 0; row < 3; ++row) {
+    for (int col = 0; col < 3; ++col) {
+      sum[row][col] = inertiaA[row][col] + inertiaB[row][col];
+    }
+  }
+  math::Vec3 lambda{};
+  if (!solve_psd3(sum, total, &lambda)) {
+    return false;
+  }
+  *outShareA = mat3_mul(inertiaA, lambda);
+  *outShareB = mat3_mul(inertiaB, lambda);
+  *outLambda = lambda;
+  return true;
+}
+
 float apply_relative_orientation_delta(JointSolveContext &ctx,
                                        const math::Vec3 &rotVec) noexcept {
-  const float invInertiaSum = ctx.invInertiaA + ctx.invInertiaB;
   const float angleSq = math::length_sq(rotVec);
-  if ((invInertiaSum <= 0.0F) ||
-      (angleSq <= kJointEpsilon * kJointEpsilon)) {
+  if (angleSq <= kJointEpsilon * kJointEpsilon) {
+    return 0.0F;
+  }
+  math::Vec3 shareA{};
+  math::Vec3 shareB{};
+  math::Vec3 lambda{};
+  if (!split_by_inertia(ctx, rotVec, &shareA, &shareB, &lambda)) {
     return 0.0F;
   }
 
-  apply_orientation_delta(*ctx.tB,
-                          math::mul(rotVec, ctx.invInertiaB / invInertiaSum));
-  apply_orientation_delta(*ctx.tA,
-                          math::mul(rotVec, -ctx.invInertiaA / invInertiaSum));
+  apply_orientation_delta(*ctx.tB, shareB);
+  apply_orientation_delta(*ctx.tA, math::mul(shareA, -1.0F));
   return std::sqrt(angleSq);
 }
 
 float project_relative_angular_velocity(JointSolveContext &ctx,
                                         const math::Vec3 &remove) noexcept {
-  const float invInertiaSum = ctx.invInertiaA + ctx.invInertiaB;
-  if ((invInertiaSum <= 0.0F) ||
-      (math::length_sq(remove) <= kJointEpsilon * kJointEpsilon)) {
+  if (math::length_sq(remove) <= kJointEpsilon * kJointEpsilon) {
+    return 0.0F;
+  }
+  math::Vec3 shareA{};
+  math::Vec3 shareB{};
+  math::Vec3 lambda{};
+  if (!split_by_inertia(ctx, remove, &shareA, &shareB, &lambda)) {
     return 0.0F;
   }
 
   if (ctx.bodyB != nullptr) {
     ctx.bodyB->angularVelocity =
-        math::sub(ctx.bodyB->angularVelocity,
-                  math::mul(remove, ctx.invInertiaB / invInertiaSum));
+        math::sub(ctx.bodyB->angularVelocity, shareB);
   }
   if (ctx.bodyA != nullptr) {
     ctx.bodyA->angularVelocity =
-        math::add(ctx.bodyA->angularVelocity,
-                  math::mul(remove, ctx.invInertiaA / invInertiaSum));
+        math::add(ctx.bodyA->angularVelocity, shareA);
   }
-  return math::length(remove) / invInertiaSum;
+  return math::length(lambda);
 }
 
 math::Vec3 relative_orientation_correction(

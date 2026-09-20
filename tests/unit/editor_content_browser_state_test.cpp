@@ -6,6 +6,7 @@
 // the file the session had just failed to read. Absent stays the ordinary
 // fresh-profile case and keeps persisting enabled.
 
+#include "editor_asset_index.h"
 #include "editor_session.h"
 
 #include <cstdint>
@@ -100,6 +101,40 @@ int main() {
   check(std::strcmp(editor_session().contentBrowser.filter.folder,
                     "props") == 0,
         "stored folder restored");
+
+  // A mask written before the type count was recorded covered nine types;
+  // the types added since must come back visible, and a hidden legacy bit
+  // must stay hidden.
+  const fs::path legacyDir = root / "legacy";
+  check(fs::create_directories(legacyDir, ec) && !ec, "create legacy dir");
+  check(write_file(legacyDir / kStateFileName,
+                   "{\"folder\":\"props\",\"typeMask\":510}"),
+        "write legacy state fixture");
+  rebind_state_directory(legacyDir);
+  editor_session().contentBrowser.filter = {};
+  content_browser_state_load_once();
+  check(editor_session().contentBrowser.filter.typeMask ==
+            (kAssetKindMaskAll & ~1U),
+        "a legacy mask keeps its hidden type and shows every newer type");
+
+  // A mask written with the current width is taken as it is.
+  const fs::path currentDir = root / "current";
+  check(fs::create_directories(currentDir, ec) && !ec, "create current dir");
+  {
+    char stored[128] = {};
+    std::snprintf(stored, sizeof(stored),
+                  "{\"folder\":\"\",\"typeMask\":%u,\"typeMaskKinds\":%u}",
+                  static_cast<unsigned>(kAssetKindMaskAll & ~2U),
+                  static_cast<unsigned>(engine::content::kAssetTypeCount));
+    check(write_file(currentDir / kStateFileName, stored),
+          "write current-width state fixture");
+  }
+  rebind_state_directory(currentDir);
+  editor_session().contentBrowser.filter = {};
+  content_browser_state_load_once();
+  check(editor_session().contentBrowser.filter.typeMask ==
+            (kAssetKindMaskAll & ~2U),
+        "a current-width mask is restored exactly");
 
   // The fault case: a stored state file larger than the loader's fixed
   // buffer cannot round-trip, so the session must adopt defaults WITHOUT

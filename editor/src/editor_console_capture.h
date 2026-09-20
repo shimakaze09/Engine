@@ -1,5 +1,6 @@
 // Declares the editor Console's bounded log capture, filtering, duplicate
-// collapse, and best-effort source/entity navigation metadata.
+// collapse, and the source/entity navigation metadata each entry carries
+// from its diagnostic record.
 // Panel-draw-code exempt: every symbol here is testable without ImGui.
 
 #pragma once
@@ -16,10 +17,9 @@ namespace engine::editor {
 /// panel filters and colors entries by this in addition to severity.
 enum class ConsoleSourceCategory : std::uint8_t { Engine, Script };
 
-/// What kind of file reference, if any, was parsed out of an entry's
-/// message text. Parsing is a best-effort heuristic over already-formatted
-/// diagnostic strings (there is no structured error-context channel today),
-/// so callers must treat a match as a navigation hint, not a guarantee.
+/// What kind of file reference, if any, the entry's diagnostic record
+/// carried: a script location when the producer named a path and a line,
+/// an asset path when it named a path alone.
 enum class ConsoleReferenceKind : std::uint8_t { None, ScriptLocation, AssetPath };
 
 /// Hard bound on captured entries; the ring drops the oldest entry once
@@ -34,11 +34,8 @@ constexpr std::size_t kMaxConsoleEntries = 2048U;
 /// authored user data, so the atomic-write contract does not apply.
 constexpr std::size_t kConsoleMessageCapacity = 512U;
 constexpr std::size_t kConsoleChannelCapacity = 32U;
-/// Fixed capacity for a parsed script or asset path reference.
+/// Fixed capacity for a script or asset path reference.
 constexpr std::size_t kConsolePathCapacity = 192U;
-
-/// Sentinel meaning "no entity index was parsed from this entry's message."
-constexpr std::uint32_t kConsoleNoEntityHint = 0xFFFFFFFFU;
 
 /// One captured, storage-bounded diagnostic line plus its collapse and
 /// navigation metadata. Every field is fixed-size: no owned heap memory.
@@ -68,10 +65,11 @@ struct ConsoleEntry final {
   /// no line number was found.
   int referenceLine = -1;
 
-  /// Entity index parsed from the message text, or kConsoleNoEntityHint.
-  /// A hint only: resolving it to a live Entity requires re-checking the
-  /// attached World at click time (see console_capture_resolve_entity_hint).
-  std::uint32_t entityIndexHint = kConsoleNoEntityHint;
+  /// Persistent id of the entity the diagnostic is about, or
+  /// kInvalidPersistentId. Resolved against the attached World at click
+  /// time (see console_capture_resolve_entity), so it stays valid across a
+  /// scene reload that re-creates the entity under the same id.
+  runtime::PersistentId entityPersistentId = runtime::kInvalidPersistentId;
 };
 
 /// Installs the capture sink with core logging (idempotent) and resets all
@@ -135,13 +133,13 @@ struct ConsoleFilter final {
 bool console_filter_matches(const ConsoleFilter &filter,
                             const ConsoleEntry &entry) noexcept;
 
-/// Resolves an entity-index navigation hint against the given world: an
-/// entity is "safe" to select only when the world pointer is non-null and
-/// the index still names a currently alive entity (index reuse across a
-/// scene load or entity destruction must not silently select the wrong
-/// object). Returns runtime::kInvalidEntity when unsafe or unresolved.
+/// Resolves an entry's entity against the given world by persistent id:
+/// an entity is safe to select only when the world pointer is non-null and
+/// an alive entity carries that id (a destroyed entity, or an index reused
+/// by another, must not be selected in its place). Returns
+/// runtime::kInvalidEntity when unsafe or unresolved.
 runtime::Entity
-console_capture_resolve_entity_hint(std::uint32_t entityIndexHint,
-                                    const runtime::World *world) noexcept;
+console_capture_resolve_entity(runtime::PersistentId entityPersistentId,
+                               const runtime::World *world) noexcept;
 
 } // namespace engine::editor

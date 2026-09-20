@@ -12,9 +12,11 @@ extern "C" {
 }
 
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 
+#include "engine/core/diagnostic.h"
 #include "engine/core/logging.h"
 #include "engine/core/vfs.h"
 
@@ -28,6 +30,40 @@ int traceback_trampoline(lua_State *state) noexcept {
   const char *message = static_cast<const char *>(lua_touserdata(state, 1));
   luaL_traceback(state, state, message, 1);
   return 1;
+}
+
+/// Reads the "<chunk>:<line>:" prefix Lua's luaL_where puts on a runtime
+/// or syntax error into the record's path and line. The chunk is the
+/// script's path as loaded; the first colon followed by digits and another
+/// colon ends it, so a drive letter ("C:/...") is never mistaken for it.
+void fill_lua_where(const char *message, core::Diagnostic *record) noexcept {
+  if (message == nullptr) {
+    return;
+  }
+  for (const char *colon = std::strchr(message, ':'); colon != nullptr;
+       colon = std::strchr(colon + 1, ':')) {
+    const char *digits = colon + 1;
+    if ((*digits < '0') || (*digits > '9')) {
+      continue;
+    }
+    std::int32_t line = 0;
+    const char *cursor = digits;
+    while ((*cursor >= '0') && (*cursor <= '9') && (line < 100000000)) {
+      line = (line * 10) + (*cursor - '0');
+      ++cursor;
+    }
+    if ((*cursor != ':') || (colon == message)) {
+      continue;
+    }
+    const std::size_t pathLength = static_cast<std::size_t>(colon - message);
+    if (pathLength >= sizeof(record->path)) {
+      return;
+    }
+    std::memcpy(record->path, message, pathLength);
+    record->path[pathLength] = '\0';
+    record->line = line;
+    return;
+  }
 }
 
 /// Carries a chunk path into the protected load trampoline.
@@ -182,7 +218,11 @@ void log_lua_error(lua_State *state, const char *context) noexcept {
   } else {
     std::snprintf(logBuffer, sizeof(logBuffer), "lua error: %s", trace);
   }
-  core::log_message(core::LogLevel::Error, "scripting", logBuffer);
+  core::Diagnostic record =
+      core::make_diagnostic(core::LogLevel::Error, "scripting", logBuffer);
+  record.kind = core::FailureKind::InvariantViolated;
+  fill_lua_where(message, &record);
+  core::log_diagnostic(record);
   lua_pop(state, 2);
 }
 

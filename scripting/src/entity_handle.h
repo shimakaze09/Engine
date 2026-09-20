@@ -4,7 +4,7 @@
 
 #include <cstdint>
 
-#include "engine/runtime/world.h"
+#include "engine/core/entity.h"
 #include "entity_handle_value.h"
 
 extern "C" {
@@ -14,25 +14,18 @@ extern "C" {
 namespace engine::scripting {
 
 /// Encodes a runtime entity into Lua's numeric handle format.
-bool encode_lua_entity_handle(runtime::Entity entity,
+bool encode_lua_entity_handle(core::Entity entity,
                               lua_Integer *outHandle) noexcept;
 
 /// Pushes a runtime entity as a Lua handle, or nil when invalid.
-void push_entity_handle(lua_State *state, runtime::Entity entity) noexcept;
-
-/// Returns the current live entity for an index, or invalid.
-runtime::Entity entity_from_index(std::uint32_t entityIndex) noexcept;
-
-/// Pushes the current live entity for an index as a Lua handle.
-void push_entity_handle_from_index(lua_State *state,
-                                   std::uint32_t entityIndex) noexcept;
+void push_entity_handle(lua_State *state, core::Entity entity) noexcept;
 
 /// Decodes a Lua stack value as an entity handle without checking liveness.
 bool decode_lua_entity_handle(lua_State *state, int index,
-                              runtime::Entity *outEntity) noexcept;
+                              core::Entity *outEntity) noexcept;
 
 /// Reads a live entity handle from Lua.
 bool read_entity(lua_State *state, int index,
-                 runtime::Entity *outEntity) noexcept;
+                 core::Entity *outEntity) noexcept;
 
 } // namespace engine::scripting

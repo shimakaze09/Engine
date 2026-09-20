@@ -28,6 +28,7 @@
 
 #include "joint_solvers.h"
 
+#include "engine/math/scalar.h"
 #include "engine/math/vec3.h"
 
 #include <cmath>
@@ -64,8 +65,8 @@ static bool measure_twist(const math::Vec3 &axis, const math::Vec3 &refA,
       (math::length_sq(planarB) <= kHingeEpsilon * kHingeEpsilon)) {
     return false;
   }
-  *outAngle = std::atan2(math::dot(math::cross(planarA, planarB), axis),
-                         math::dot(planarA, planarB));
+  *outAngle = math::det_atan2(math::dot(math::cross(planarA, planarB), axis),
+                              math::dot(planarA, planarB));
   return true;
 }
 
@@ -80,7 +81,7 @@ float solve_hinge_joint(JointSolveContext &ctx,
   const math::Vec3 misalign = math::cross(axisB, axisA);
   const float misalignLen = math::length(misalign);
   if (misalignLen > kHingeEpsilon) {
-    const float angle = std::atan2(misalignLen, math::dot(axisB, axisA));
+    const float angle = math::det_atan2(misalignLen, math::dot(axisB, axisA));
     apply_relative_orientation_delta(
         ctx, math::mul(math::div(misalign, misalignLen), angle));
   } else if (math::dot(axisB, axisA) < 0.0F) {

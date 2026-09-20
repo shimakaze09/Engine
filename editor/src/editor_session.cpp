@@ -56,6 +56,7 @@
 #include "editor_live_edit.h"
 #include "engine/editor/command_history.h"
 #include "engine/editor/debug_camera.h"
+#include "engine/content/asset_type_table.h"
 
 #include <stb_image.h>
 
@@ -304,6 +305,10 @@ void content_browser_state_persist() noexcept {
   writer.begin_object();
   writer.write_string("folder", cb.filter.folder);
   writer.write_uint("typeMask", cb.filter.typeMask);
+  // How many type bits the mask was written with, so a later session with
+  // more asset types shows the new ones instead of reading them as hidden.
+  writer.write_uint("typeMaskKinds",
+                    static_cast<std::uint32_t>(content::kAssetTypeCount));
   writer.end_object();
   if (writer.failed()) {
     core::log_message(core::LogLevel::Error, kContentBrowserLogChannel,
@@ -368,7 +373,20 @@ void content_browser_state_load_once() noexcept {
   if (maskValue != nullptr) {
     std::uint32_t mask = kAssetKindMaskAll;
     if (parser.as_uint(*maskValue, &mask) && (mask != 0U)) {
-      cb.filter.typeMask = mask & kAssetKindMaskAll;
+      // Files written before the width was recorded carried the nine
+      // original types; every type added since is visible until the
+      // author hides it.
+      constexpr std::uint32_t kLegacyTypeKinds = 9U;
+      std::uint32_t knownKinds = kLegacyTypeKinds;
+      const core::JsonValue *kindsValue =
+          parser.get_object_field(*root, "typeMaskKinds");
+      if (kindsValue != nullptr) {
+        static_cast<void>(parser.as_uint(*kindsValue, &knownKinds));
+      }
+      const std::uint32_t knownBits =
+          (knownKinds >= 32U) ? 0xFFFFFFFFU : ((1U << knownKinds) - 1U);
+      cb.filter.typeMask =
+          (mask | (kAssetKindMaskAll & ~knownBits)) & kAssetKindMaskAll;
     }
   }
 }

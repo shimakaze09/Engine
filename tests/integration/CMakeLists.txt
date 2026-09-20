@@ -160,7 +160,7 @@ engine_add_test_executable(engine_integration_pipeline_tick_cadence
     engine_runtime
     engine_scripting
     LABELS
-    gpu;integration
+    integration
 )
 
 engine_add_test_executable(engine_integration_texture_system_bootstrap
@@ -194,9 +194,29 @@ engine_add_test_executable(engine_integration_pipeline_teardown_run_state
     gpu;integration
 )
 
+engine_add_test_executable(engine_integration_engine_bootstrap_rollback
+    SOURCES
+    engine_bootstrap_rollback_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_audio
+    LABELS
+    integration
+)
+
 engine_add_test_executable(engine_integration_pipeline_clock_reset
     SOURCES
     pipeline_clock_reset_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_scripting
+    LABELS
+    integration
+)
+
+engine_add_test_executable(engine_integration_acceptance_sequence
+    SOURCES
+    acceptance_sequence_test.cpp
     PRIVATE_DEPS
     engine_runtime
     engine_scripting
@@ -391,6 +411,16 @@ engine_add_test_executable(engine_integration_hotreload_rollback
 engine_add_test_executable(engine_integration_hotreload_scene_op_rollback
     SOURCES
     hotreload_scene_op_rollback_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_scripting
+    LABELS
+    integration
+)
+
+engine_add_test_executable(engine_integration_hotreload_transaction
+    SOURCES
+    hotreload_transaction_test.cpp
     PRIVATE_DEPS
     engine_runtime
     engine_scripting

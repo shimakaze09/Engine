@@ -333,18 +333,17 @@ bool vfs_file_size(const char *virtualPath, std::uint64_t *outSize) noexcept {
 #endif
 }
 
-VfsReadStatus vfs_read_binary_bounded(const char *virtualPath,
-                                      std::uint64_t maxBytes, void **outData,
-                                      std::size_t *outSize) noexcept {
+Status vfs_read_binary_bounded(const char *virtualPath, std::uint64_t maxBytes,
+                               void **outData, std::size_t *outSize) noexcept {
   if ((outData == nullptr) || (outSize == nullptr)) {
-    return VfsReadStatus::IoError;
+    return Status::fail(FailureKind::InvalidArgument);
   }
   *outData = nullptr;
   *outSize = 0U;
 
   char osPath[kMaxResolvedPathLength] = {};
   if (resolve(virtualPath, osPath, sizeof(osPath)) == 0U) {
-    return VfsReadStatus::Unresolved;
+    return Status::fail(FailureKind::NotFound);
   }
 
   FILE *file = nullptr;
@@ -356,7 +355,7 @@ VfsReadStatus vfs_read_binary_bounded(const char *virtualPath,
   file = std::fopen(osPath, "rb");
 #endif
   if (file == nullptr) {
-    return VfsReadStatus::Unresolved;
+    return Status::fail(FailureKind::NotFound);
   }
 
   // The size comes from the handle the read below consumes, so a file
@@ -365,28 +364,28 @@ VfsReadStatus vfs_read_binary_bounded(const char *virtualPath,
   // allocated and read.
   if (std::fseek(file, 0, SEEK_END) != 0) {
     std::fclose(file);
-    return VfsReadStatus::IoError;
+    return Status::fail(FailureKind::IoFailed);
   }
   const long fileSize = std::ftell(file);
   if (fileSize < 0) {
     std::fclose(file);
-    return VfsReadStatus::IoError;
+    return Status::fail(FailureKind::IoFailed);
   }
   if (std::fseek(file, 0, SEEK_SET) != 0) {
     std::fclose(file);
-    return VfsReadStatus::IoError;
+    return Status::fail(FailureKind::IoFailed);
   }
 
   const auto size = static_cast<std::size_t>(fileSize);
   if (static_cast<std::uint64_t>(size) > maxBytes) {
     std::fclose(file);
     *outSize = size;
-    return VfsReadStatus::TooLarge;
+    return Status::fail(FailureKind::CapacityExhausted);
   }
   auto *buffer = new (std::nothrow) std::byte[size];
   if (buffer == nullptr) {
     std::fclose(file);
-    return VfsReadStatus::IoError;
+    return Status::fail(FailureKind::IoFailed);
   }
 
   if (size > 0U) {
@@ -394,32 +393,32 @@ VfsReadStatus vfs_read_binary_bounded(const char *virtualPath,
     if (bytesRead != size) {
       delete[] buffer;
       std::fclose(file);
-      return VfsReadStatus::IoError;
+      return Status::fail(FailureKind::IoFailed);
     }
   }
 
   std::fclose(file);
   *outData = buffer;
   *outSize = size;
-  return VfsReadStatus::Ok;
+  return Status::ok();
 }
 
-bool vfs_read_binary(const char *virtualPath, void **outData,
+Status vfs_read_binary(const char *virtualPath, void **outData,
+                       std::size_t *outSize) noexcept {
+  return vfs_read_binary_bounded(virtualPath, UINT64_MAX, outData, outSize);
+}
+
+Status vfs_read_text(const char *virtualPath, char **outText,
                      std::size_t *outSize) noexcept {
-  return vfs_read_binary_bounded(virtualPath, UINT64_MAX, outData,
-                                 outSize) == VfsReadStatus::Ok;
-}
-
-bool vfs_read_text(const char *virtualPath, char **outText,
-                   std::size_t *outSize) noexcept {
   if ((outText == nullptr) || (outSize == nullptr)) {
-    return false;
+    return Status::fail(FailureKind::InvalidArgument);
   }
 
   void *rawData = nullptr;
   std::size_t rawSize = 0U;
-  if (!vfs_read_binary(virtualPath, &rawData, &rawSize)) {
-    return false;
+  const Status read = vfs_read_binary(virtualPath, &rawData, &rawSize);
+  if (!read) {
+    return read;
   }
 
   // Re-allocate with null terminator using the same allocation type used by
@@ -427,7 +426,7 @@ bool vfs_read_text(const char *virtualPath, char **outText,
   auto *textBufferBytes = new (std::nothrow) std::byte[rawSize + 1U];
   if (textBufferBytes == nullptr) {
     vfs_free(rawData);
-    return false;
+    return Status::fail(FailureKind::IoFailed);
   }
 
   auto *textBuffer = reinterpret_cast<char *>(textBufferBytes);
@@ -438,7 +437,7 @@ bool vfs_read_text(const char *virtualPath, char **outText,
 
   *outText = textBuffer;
   *outSize = rawSize;
-  return true;
+  return Status::ok();
 }
 
 bool vfs_write_binary(const char *virtualPath, const void *data,

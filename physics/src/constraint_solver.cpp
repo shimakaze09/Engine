@@ -456,12 +456,13 @@ void solve_constraints(PhysicsWorldView &world, float deltaSeconds) noexcept {
       solveCtx.bodyB = bodyB;
       solveCtx.invMassA = (bodyA != nullptr) ? bodyA->inverseMass : 0.0F;
       solveCtx.invMassB = (bodyB != nullptr) ? bodyB->inverseMass : 0.0F;
+      const math::Vec3 lockedInertia(0.0F, 0.0F, 0.0F);
       solveCtx.invInertiaA = ((bodyA != nullptr) && (bodyA->inverseMass > 0.0F))
                                  ? bodyA->inverseInertia
-                                 : 0.0F;
+                                 : lockedInertia;
       solveCtx.invInertiaB = ((bodyB != nullptr) && (bodyB->inverseMass > 0.0F))
                                  ? bodyB->inverseInertia
-                                 : 0.0F;
+                                 : lockedInertia;
 
       Transform scratchA{};
       Transform scratchB{};

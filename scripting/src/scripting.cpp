@@ -25,6 +25,7 @@
 #include "mesh_material_bindings.h"
 #include "persist_bindings.h"
 #include "physics_bindings.h"
+#include "reload_transaction.h"
 #include "runtime_binding.h"
 #include "scene_bindings.h"
 #include "timer_bindings.h"
@@ -48,8 +49,7 @@ extern "C" {
 #include "engine/core/vfs.h"
 #include "engine/core/string_util.h"
 #include "engine/math/quat.h"
-#include "engine/runtime/scripting_bridge.h"
-#include "engine/runtime/world.h"
+#include "engine/scripting/runtime_services.h"
 
 
 namespace engine::scripting {
@@ -57,20 +57,17 @@ namespace engine::scripting {
 void register_generated_bindings(lua_State *L) noexcept;
 namespace {
 
-float g_deltaSeconds = 0.0F;
-float g_totalSeconds = 0.0F;
-std::uint32_t g_frameIndex = 0U;
+core::SimulationClock g_clock{};
 
-/// Returns the Lua-visible clocks (delta/elapsed/frame index) to their
-/// initial values. Run-scoped: a run's end must zero them so a later run's
-/// begin-play/start callbacks — which fire before the pipeline's first
-/// per-frame publication — cannot observe the previous run's time. Ordinary
-/// scene transitions keep the VM and the run alive and never come through
-/// here, so clocks stay continuous across engine.load_scene.
+/// Publishes the zero clock. Run-scoped: a run's end must zero it so a
+/// later run's begin-play/start callbacks — which fire before the
+/// pipeline's first per-frame publication — cannot observe the previous
+/// run's time. Ordinary scene transitions keep the VM and the run alive
+/// and never come through here, so the clock stays continuous across
+/// engine.load_scene.
 void reset_clock_bindings() noexcept {
-  g_deltaSeconds = 0.0F;
-  g_totalSeconds = 0.0F;
-  g_frameIndex = 0U;
+  g_clock = core::SimulationClock{};
+  refill_debug_instruction_budget();
 }
 
 /// One hot-reload watch entry: a script path and its last known mtime.
@@ -135,7 +132,8 @@ int global_call_trampoline(lua_State *state) noexcept {
 }
 
 int lua_engine_start_coroutine(lua_State *state) noexcept {
-  return start_lua_coroutine(state, g_totalSeconds, g_frameIndex,
+  return start_lua_coroutine(state, static_cast<float>(g_clock.simulationSeconds),
+                             g_clock.frameIndex,
                              log_lua_error, arm_debug_lua_hook);
 }
 
@@ -369,19 +367,24 @@ void *scripting_lua_alloc(void * /*ud*/, void *ptr, std::size_t osize,
   return newPtr;
 }
 
-float bindable_delta_time() noexcept { return g_deltaSeconds; }
+float bindable_delta_time() noexcept {
+  return static_cast<float>(g_clock.deltaSeconds);
+}
 
-float bindable_elapsed_time() noexcept { return g_totalSeconds; }
+float bindable_elapsed_time() noexcept {
+  return static_cast<float>(g_clock.simulationSeconds);
+}
 
-int bindable_frame_count() noexcept { return static_cast<int>(g_frameIndex); }
+int bindable_frame_count() noexcept {
+  return static_cast<int>(g_clock.frameIndex);
+}
 
 int bindable_get_entity_count() noexcept {
-  if ((runtime_binding().world == nullptr) ||
-      (runtime_binding().services == nullptr)) {
+  if (!runtime_bound()) {
     return 0;
   }
   return static_cast<int>(
-      runtime_binding().services->get_entity_count(runtime_binding().world));
+      runtime_binding().services->alive_entity_count(runtime_binding().world));
 }
 
 bool bindable_is_gamepad_connected() noexcept {
@@ -417,24 +420,25 @@ float bindable_get_axis_value(const char *name) noexcept {
 }
 
 bool bindable_is_alive(std::uint64_t entity) noexcept {
-  if (runtime_binding().world == nullptr) {
+  if (!runtime_bound()) {
     return false;
   }
   runtime::Entity decoded{};
   return decode_entity_handle_value(entity, &decoded) &&
-         runtime_binding().world->is_alive(decoded);
+         runtime_binding().services->is_alive(runtime_binding().world, decoded);
 }
 
 bool bindable_has_light(std::uint64_t entity) noexcept {
-  if (runtime_binding().world == nullptr) {
+  if (!runtime_bound()) {
     return false;
   }
   runtime::Entity decoded{};
   if (!decode_entity_handle_value(entity, &decoded) ||
-      !runtime_binding().world->is_alive(decoded)) {
+      !runtime_binding().services->is_alive(runtime_binding().world, decoded)) {
     return false;
   }
-  return runtime_binding().world->has_light_component(decoded);
+  return runtime_binding().services->has_light_component(
+      runtime_binding().world, decoded);
 }
 
 void bindable_set_camera_fov(float fov) noexcept {
@@ -495,26 +499,17 @@ bool initialize_scripting() noexcept {
   return true;
 }
 
-/// Shuts down the owning system for scripting.
+/// Shuts down the owning system for scripting: the run-scoped state goes
+/// first, while the VM is still alive to release its references, then the
+/// VM and the aliases that belong to whoever destroyed it.
 void shutdown_scripting() noexcept {
-  lua_State *state = lua_state();
-  clear_touch_gesture_callbacks(state);
-
-  if (state != nullptr) {
-    clear_persist_bindings(state);
-    reset_entity_script_bindings();
-    clear_lua_timer_bindings(state);
-    clear_collision_handlers(state);
-    clear_anim_event_handlers(state);
-    clear_lua_coroutines(state);
+  reset_run_state();
+  if (lua_state() != nullptr) {
     shutdown_lua_state();
   }
 
   g_memoryUsed = 0U;
   clear_runtime_binding();
-  reset_mesh_material_bindings();
-  clear_deferred_mutations();
-  reset_scene_bindings();
   reset_debug_bindings();
   set_debug_lua_state(nullptr);
   // Cleared here rather than in reset_entity_script_bindings: that reset
@@ -522,14 +517,6 @@ void shutdown_scripting() noexcept {
   // survive. The alias belongs to whoever destroyed the VM, so it is
   // cleared beside the sibling debug alias, after shutdown_lua_state.
   clear_entity_script_bindings();
-  reset_cheat_bindings();
-  reset_entity_pool_bindings();
-  reset_game_bindings();
-  reset_clock_bindings();
-  for (WatchedScript &watchedScript : g_watchedScripts) {
-    watchedScript = {};
-  }
-  g_watchedScriptCount = 0U;
 }
 
 /// Resets run-scoped scripting state without touching the VM, the debug/DAP
@@ -556,12 +543,6 @@ void reset_run_state() noexcept {
     watchedScript = {};
   }
   g_watchedScriptCount = 0U;
-}
-
-/// Sets the requested value for frame time.
-void set_frame_time(float deltaSeconds, float totalSeconds) noexcept {
-  g_deltaSeconds = deltaSeconds;
-  g_totalSeconds = totalSeconds;
 }
 
 /// Loads the requested resource for script.
@@ -1004,65 +985,85 @@ void restore_global_bindings(lua_State *state, int snapshotReference) noexcept {
                                           "hot_reload globals restore"));
 }
 
-/// Executes a reload, rolling back a failed chunk's top-level Lua bindings
-/// and the deferred scene request it queued. The scene request rolls back
-/// with them because it outlives the chunk: the runtime commits it after the
-/// frame, so a chunk that asks for a new scene and then fails would destroy
-/// the live World on the strength of bindings that were just discarded.
-/// A prior request the chunk overwrote is restored for the same reason —
-/// the failed chunk is not entitled to redirect a transition already queued.
-/// TODO(#343): timer, audio, and ECS mutations a failed chunk performed are
-/// not rolled back.
-bool reload_script_transactionally(const char *path) noexcept {
+/// Executes a reload as one transaction. The rule: a chunk's externally
+/// visible effects commit only when it returns without error and within
+/// its instruction budget; until then they are staged and a failure
+/// discards them. The top-level Lua bindings (snapshot) and the deferred
+/// scene request are staged here; every other effect belongs to the
+/// reload scope, whose header lists what it records, holds, queues and
+/// refuses. RolledBack: the chunk failed and nothing of it remains.
+/// Committed: every effect applied once. CommitFailed: the chunk's
+/// bindings are in place but at least one staged effect could not apply
+/// at commit (logged with the count).
+enum class ReloadOutcome : std::uint8_t { Committed, RolledBack, CommitFailed };
+
+ReloadOutcome reload_script_transactionally(const char *path) noexcept {
   lua_State *state = lua_state();
   if ((state == nullptr) || (path == nullptr)) {
-    return false;
+    return ReloadOutcome::RolledBack;
   }
 
   if (!protected_load_chunk(state, path, "hot_reload")) {
-    return false;
+    return ReloadOutcome::RolledBack;
   }
 
   int snapshotReference = LUA_NOREF;
   if (!snapshot_global_bindings(state, &snapshotReference)) {
     lua_pop(state, 1);
-    return false;
+    return ReloadOutcome::RolledBack;
   }
   // Captured after the chunk is loaded and before it runs: loading executes
   // no chunk code, so this is the request as it stood before the reload.
   const PendingSceneOpCheckpoint sceneOpCheckpoint = capture_pending_scene_op();
-  arm_debug_lua_hook(state);
-  if (lua_pcall(state, 0, 0, 0) != LUA_OK) {
-    log_lua_error("hot_reload");
-    restore_global_bindings(state, snapshotReference);
-    restore_pending_scene_op(sceneOpCheckpoint);
+  if (!begin_reload_transaction()) {
+    core::log_message(core::LogLevel::Error, "scripting",
+                      "hot_reload: a reload is already in progress");
+    lua_pop(state, 1);
     luaL_unref(state, LUA_REGISTRYINDEX, snapshotReference);
-    return false;
+    return ReloadOutcome::RolledBack;
   }
-
-  if (debug_instruction_budget_exhausted()) {
+  arm_debug_lua_hook(state);
+  bool failed = (lua_pcall(state, 0, 0, 0) != LUA_OK);
+  if (failed) {
+    log_lua_error("hot_reload");
+  } else if (debug_instruction_budget_exhausted()) {
     core::log_message(core::LogLevel::Error, "scripting",
                       "hot_reload: CPU instruction budget exhausted");
+    failed = true;
+  }
+  if (failed) {
+    rollback_reload_transaction();
+  }
+  const ReloadCommit commit =
+      failed ? ReloadCommit::Refused : commit_reload_transaction();
+  if (commit == ReloadCommit::Refused) {
     restore_global_bindings(state, snapshotReference);
     restore_pending_scene_op(sceneOpCheckpoint);
     luaL_unref(state, LUA_REGISTRYINDEX, snapshotReference);
-    return false;
+    return ReloadOutcome::RolledBack;
   }
-
   luaL_unref(state, LUA_REGISTRYINDEX, snapshotReference);
-  return true;
+  return (commit == ReloadCommit::Applied) ? ReloadOutcome::Committed
+                                           : ReloadOutcome::CommitFailed;
 }
 
 } // anonymous namespace
 
-/// Frame boundary: advances the frame index and refills the shared
-/// per-frame Lua instruction budget.
-void set_frame_index(std::uint32_t frameIndex) noexcept {
-  g_frameIndex = frameIndex;
-  refill_debug_instruction_budget();
+void set_simulation_clock(const core::SimulationClock &clock) noexcept {
+  // A new frame index is the frame boundary the shared per-frame Lua
+  // instruction budget is measured against.
+  const bool frameBoundary = (clock.frameIndex != g_clock.frameIndex);
+  g_clock = clock;
+  if (frameBoundary) {
+    refill_debug_instruction_budget();
+  }
 }
 
-void tick_timers() noexcept { tick_lua_timers(lua_state(), g_deltaSeconds); }
+const core::SimulationClock &simulation_clock() noexcept { return g_clock; }
+
+void tick_timers() noexcept {
+  tick_lua_timers(lua_state(), static_cast<float>(g_clock.deltaSeconds));
+}
 
 // Scene transitions reset the World's TimerManager (reset_world/load_scene)
 // but that layer cannot reach the scripting-side Lua registry refs, which
@@ -1074,8 +1075,8 @@ void tick_timers() noexcept { tick_lua_timers(lua_state(), g_deltaSeconds); }
 void clear_timers() noexcept { clear_lua_timer_bindings(lua_state()); }
 
 void tick_coroutines() noexcept {
-  tick_lua_coroutines(lua_state(), g_totalSeconds, g_frameIndex, log_lua_error,
-                      arm_debug_lua_hook);
+  tick_lua_coroutines(lua_state(), static_cast<float>(g_clock.simulationSeconds),
+                      g_clock.frameIndex, log_lua_error, arm_debug_lua_hook);
 }
 
 void clear_coroutines() noexcept { clear_lua_coroutines(lua_state()); }
@@ -1158,9 +1159,18 @@ void check_script_reload() noexcept {
     entry.mtime = mtime;
     core::log_message(core::LogLevel::Info, "scripting",
                       "hot-reloading script");
-    if (!reload_script_transactionally(entry.path)) {
+    switch (reload_script_transactionally(entry.path)) {
+    case ReloadOutcome::Committed:
+      break;
+    case ReloadOutcome::RolledBack:
       core::log_message(core::LogLevel::Warning, "scripting",
                         "hot-reload failed; keeping previous version");
+      break;
+    case ReloadOutcome::CommitFailed:
+      core::log_message(core::LogLevel::Error, "scripting",
+                        "hot-reload committed; some of its effects did not "
+                        "apply");
+      break;
     }
   }
 }

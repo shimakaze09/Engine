@@ -9,10 +9,12 @@
 #include "engine/core/logging.h"
 #include "engine/core/string_util.h"
 #include "engine/math/transform.h"
+#include "engine/physics/inertia.h"
 #include "engine/physics/physics.h"
 #include "engine/runtime/reflect_types.h"
 #include "primitive_hull_build.h"
 #include "world_internal.h"
+#include "engine/core/diagnostic.h"
 
 #include <array>
 #include <cassert>
@@ -54,16 +56,16 @@ bool validate_transform_ingress(const Transform &transform) noexcept {
          finite_vec3(transform.scale);
 }
 
-/// Ingress validation: rigid body fields must be finite and
-/// the inverse mass/inertia non-negative.
+/// Ingress validation: rigid body fields must be finite and the inverse
+/// mass and every inverse inertia axis non-negative.
 bool validate_rigid_body_ingress(const RigidBody &rigidBody) noexcept {
+  const math::Vec3 &inertia = rigidBody.inverseInertia;
   return finite_vec3(rigidBody.velocity) &&
          finite_vec3(rigidBody.acceleration) &&
          finite_vec3(rigidBody.angularVelocity) &&
          std::isfinite(rigidBody.inverseMass) &&
-         (rigidBody.inverseMass >= 0.0F) &&
-         std::isfinite(rigidBody.inverseInertia) &&
-         (rigidBody.inverseInertia >= 0.0F);
+         (rigidBody.inverseMass >= 0.0F) && finite_vec3(inertia) &&
+         (inertia.x >= 0.0F) && (inertia.y >= 0.0F) && (inertia.z >= 0.0F);
 }
 
 /// Ingress clamping: accept-and-clamp values
@@ -91,10 +93,15 @@ bool sanitize_rigid_body_ingress(RigidBody &rigidBody) noexcept {
                   physics::kMaxAngularSpeed / std::sqrt(angSpeedSq));
     changed = true;
   }
-  if (rigidBody.inverseInertia > physics::kMaxInverseInertia) {
-    rigidBody.inverseInertia = physics::kMaxInverseInertia;
-    changed = true;
-  }
+  const auto clamp_inertia_axis = [&changed](float &axis) noexcept {
+    if (axis > physics::kMaxInverseInertia) {
+      axis = physics::kMaxInverseInertia;
+      changed = true;
+    }
+  };
+  clamp_inertia_axis(rigidBody.inverseInertia.x);
+  clamp_inertia_axis(rigidBody.inverseInertia.y);
+  clamp_inertia_axis(rigidBody.inverseInertia.z);
   return changed;
 }
 
@@ -168,7 +175,18 @@ bool sanitize_mesh_component_ingress(MeshComponent &component) noexcept {
 // failure the component stays as authored and physics treats the
 // payload-less hull as the axis-aligned box of its half extents
 // — loudly, never silently.
+/// Logs a world warning about one entity, with the entity's persistent id
+/// carried in the record so the console can find it after a reload.
+void log_entity_warning(PersistentId persistentId,
+                        const char *message) noexcept {
+  core::Diagnostic record =
+      core::make_diagnostic(core::LogLevel::Warning, "world", message);
+  record.entityPersistentId = persistentId;
+  core::log_diagnostic(record);
+}
+
 void install_provenance_hull(physics::PhysicsContext &context, Entity entity,
+                             PersistentId persistentId,
                              const Collider &collider) noexcept {
   if ((collider.shape != ColliderShape::ConvexHull) ||
       (collider.hullSource == HullSource::None)) {
@@ -185,7 +203,7 @@ void install_provenance_hull(physics::PhysicsContext &context, Entity entity,
                   "extents",
                   entity.index,
                   static_cast<unsigned>(collider.hullSource));
-    core::log_message(core::LogLevel::Warning, "world", message);
+    log_entity_warning(persistentId, message);
   }
 }
 
@@ -193,36 +211,34 @@ void install_provenance_hull(physics::PhysicsContext &context, Entity entity,
 
 
 template <typename Set, typename Component>
-bool World::add_component_checked(Set &set, Entity entity,
-                                  const Component &component,
-                                  const char *label) noexcept {
-  if (!is_mutation_phase()) {
-    log_component_error(label, "requires Input phase");
-    return false;
+core::Status World::add_component_checked(Set &set, Entity entity,
+                                          const Component &component,
+                                          const char *label) noexcept {
+  if (!check_component_mutation(entity, label)) {
+    return m_lastRefusal;
   }
 
-  if (!is_valid_entity(entity)) {
-    log_component_error(label, "requires a live entity");
-    return false;
+  // The phase and the handle passed, so the set can only refuse for want
+  // of a slot; a silent refusal here reads as a lost write upstream.
+  if (!set.add(entity, component)) {
+    log_component_error(label, "component storage is full");
+    note_refusal(core::FailureKind::CapacityExhausted);
+    return m_lastRefusal;
   }
-
-  return set.add(entity, component);
+  return core::Status::ok();
 }
 
 template <typename Set>
 bool World::remove_component_checked(Set &set, Entity entity,
                                      const char *label) noexcept {
-  if (!is_mutation_phase()) {
-    log_component_error(label, "requires Input phase");
+  if (!check_component_mutation(entity, label)) {
     return false;
   }
-
-  if (!is_valid_entity(entity)) {
-    log_component_error(label, "requires a live entity");
+  if (!set.remove(entity)) {
+    note_refusal(core::FailureKind::NotFound, 1U);
     return false;
   }
-
-  return set.remove(entity);
+  return true;
 }
 
 template <typename Set, typename Component>
@@ -244,11 +260,13 @@ bool World::check_component_mutation(Entity entity,
                                      const char *label) noexcept {
   if (!is_mutation_phase()) {
     log_component_error(label, "requires Input phase");
+    note_refusal(core::FailureKind::InvariantViolated);
     return false;
   }
 
   if (!is_valid_entity(entity)) {
     log_component_error(label, "requires a live entity");
+    note_refusal(core::FailureKind::NotFound);
     return false;
   }
 
@@ -289,13 +307,23 @@ bool World::add_transform(Entity entity, const Transform &transform) noexcept {
   }
 
   const bool hadTransform = m_transforms.contains(entity);
+  // A placement or parent change moves the subtree's colliders within (or
+  // between) the bodies that own them; a bare leaf moves no geometry.
+  const bool movesGeometry =
+      (m_colliders.get_ptr(entity) != nullptr) ||
+      (hadTransform && (m_transformNodes[entity.index].firstChild != 0U));
+  const Entity ownerBefore = (movesGeometry && hadTransform)
+                                 ? find_rigid_body_owner(entity, m_readStateIndex)
+                                 : kInvalidEntity;
   if (!m_transforms.add(entity, transform)) {
+    note_refusal(core::FailureKind::CapacityExhausted);
     return false;
   }
 
   const WorldTransform world = world_transform_from_local(transform);
   m_transformNodes[entity.index].cacheValid = false;
   if (!m_worldTransforms.add(entity, world)) {
+    note_refusal(core::FailureKind::CapacityExhausted);
     // Keep the two sets consistent: a fresh insert that cannot get its world
     // transform must not leave a local transform behind.
     if (!hadTransform) {
@@ -304,6 +332,15 @@ bool World::add_transform(Entity entity, const Transform &transform) noexcept {
     return false;
   }
   link_transform_node(entity.index, transform.parentId, hadTransform);
+  if (movesGeometry) {
+    if (ownerBefore != kInvalidEntity) {
+      rederive_inverse_inertia(ownerBefore);
+    }
+    const Entity ownerAfter = find_rigid_body_owner(entity, m_readStateIndex);
+    if ((ownerAfter != kInvalidEntity) && (ownerAfter != ownerBefore)) {
+      rederive_inverse_inertia(ownerAfter);
+    }
+  }
   return true;
 }
 
@@ -312,10 +349,15 @@ bool World::remove_transform(Entity entity) noexcept {
     return false;
   }
 
+  const Entity owner = find_rigid_body_owner(entity, m_readStateIndex);
   unlink_transform_node(entity.index);
   const bool removed = m_transforms.remove(entity);
   static_cast<void>(m_worldTransforms.remove(entity));
   reset_transform_cache(entity.index);
+  // Detached from the hierarchy, the subtree's colliders leave their owner.
+  if ((owner != kInvalidEntity) && (owner != entity)) {
+    rederive_inverse_inertia(owner);
+  }
   return removed;
 }
 
@@ -392,10 +434,25 @@ bool World::add_rigid_body(Entity entity, const RigidBody &rigidBody) noexcept {
                   "add_rigid_body clamped out-of-range velocity or inverse "
                   "inertia for entity %u",
                   entity.index);
-    core::log_message(core::LogLevel::Warning, "world", message);
+    log_entity_warning(m_entityPersistentIds[entity.index], message);
   }
+  // An automatic tensor is the geometry's, whatever value arrived with the
+  // body; an authored one is content.
+  if (!sanitized.inertiaAuthored) {
+    sanitized.inverseInertia =
+        derived_inverse_inertia(entity, sanitized.inverseMass);
+  }
+  // A new body takes its subtree's colliders away from the body that
+  // owned them until now.
+  const bool hadBody = m_rigidBodies.contains(entity);
+  const Entity previousOwner =
+      hadBody ? kInvalidEntity : find_rigid_body_owner(entity, m_readStateIndex);
   if (!m_rigidBodies.add(entity, sanitized)) {
+    note_refusal(core::FailureKind::CapacityExhausted);
     return false;
+  }
+  if (previousOwner != kInvalidEntity) {
+    rederive_inverse_inertia(previousOwner);
   }
   // New owner velocities must reach the next step's CCD snapshot.
   m_physicsContext.ccdSnapshotDirty = true;
@@ -403,7 +460,12 @@ bool World::add_rigid_body(Entity entity, const RigidBody &rigidBody) noexcept {
 }
 
 bool World::remove_rigid_body(Entity entity) noexcept {
-  return remove_component_checked(m_rigidBodies, entity, "remove_rigid_body");
+  if (!remove_component_checked(m_rigidBodies, entity, "remove_rigid_body")) {
+    return false;
+  }
+  // The subtree's colliders now belong to the next body up.
+  rederive_owner_inertia(entity);
+  return true;
 }
 
 bool World::get_rigid_body(Entity entity,
@@ -476,6 +538,72 @@ World::rigid_body_owner(Entity colliderEntity,
   return find_rigid_body_owner(colliderEntity, m_writeStateIndex);
 }
 
+math::Vec3 World::derived_inverse_inertia(Entity body,
+                                          float inverseMass) noexcept {
+  if (!(inverseMass > 0.0F) || !is_valid_entity(body)) {
+    return math::default_inverse_inertia();
+  }
+  physics::InertiaAccumulator accumulator{};
+  const Collider *own = m_colliders.get_ptr(body);
+  if (own != nullptr) {
+    physics::accumulate_collider_inertia(
+        &accumulator, *own, math::Vec3(0.0F, 0.0F, 0.0F), math::Quat());
+  }
+  for_each_child(body, [&](Entity child) noexcept {
+    accumulate_owned_collider_inertia(body, child, math::Vec3(0.0F, 0.0F, 0.0F),
+                                      math::Quat(), &accumulator, 0U);
+  });
+  if (!(accumulator.weightSum > 0.0F)) {
+    return math::default_inverse_inertia();
+  }
+  return physics::finish_inverse_inertia(accumulator, inverseMass);
+}
+
+void World::accumulate_owned_collider_inertia(
+    Entity body, Entity entity, const math::Vec3 &offset,
+    const math::Quat &rotation, physics::InertiaAccumulator *out,
+    std::size_t depth) noexcept {
+  // Bounded like every hierarchy walk: a chain deeper than the entity
+  // count cannot exist without a cycle, which add_transform refuses.
+  if ((depth >= kMaxEntities) || (m_rigidBodies.get_ptr(entity) != nullptr)) {
+    return;
+  }
+  const Transform *local = m_transforms.get_ptr(entity, m_readStateIndex);
+  if (local == nullptr) {
+    return;
+  }
+  const math::Quat unitRotation = math::normalize(rotation);
+  const math::Vec3 placement = math::add(
+      offset, math::rotate_vector(local->position, unitRotation));
+  const math::Quat orientation =
+      math::mul(unitRotation, math::normalize(local->rotation));
+  const Collider *collider = m_colliders.get_ptr(entity);
+  if (collider != nullptr) {
+    physics::accumulate_collider_inertia(out, *collider, placement,
+                                         orientation);
+  }
+  for_each_child(entity, [&](Entity child) noexcept {
+    accumulate_owned_collider_inertia(body, child, placement, orientation, out,
+                                      depth + 1U);
+  });
+}
+
+void World::rederive_inverse_inertia(Entity body) noexcept {
+  RigidBody *rigidBody = m_rigidBodies.get_ptr(body);
+  if ((rigidBody == nullptr) || rigidBody->inertiaAuthored) {
+    return;
+  }
+  rigidBody->inverseInertia =
+      derived_inverse_inertia(body, rigidBody->inverseMass);
+}
+
+void World::rederive_owner_inertia(Entity entity) noexcept {
+  const Entity owner = find_rigid_body_owner(entity, m_readStateIndex);
+  if (owner != kInvalidEntity) {
+    rederive_inverse_inertia(owner);
+  }
+}
+
 bool World::add_collider(Entity entity, const Collider &collider) noexcept {
   if (!validate_collider_ingress(collider)) {
     core::log_message(
@@ -491,7 +619,7 @@ bool World::add_collider(Entity entity, const Collider &collider) noexcept {
                   "add_collider clamped restitution or dynamic friction for "
                   "entity %u",
                   entity.index);
-    core::log_message(core::LogLevel::Warning, "world", message);
+    log_entity_warning(m_entityPersistentIds[entity.index], message);
   }
   if (!add_component_checked(m_colliders, entity, sanitized, "add_collider")) {
     return false;
@@ -502,7 +630,9 @@ bool World::add_collider(Entity entity, const Collider &collider) noexcept {
   // shape can never leave a stale hull or heightfield resident.
   physics::prune_incompatible_shape_payloads(m_physicsContext, entity,
                                              sanitized.shape);
-  install_provenance_hull(m_physicsContext, entity, sanitized);
+  install_provenance_hull(m_physicsContext, entity,
+                          m_entityPersistentIds[entity.index], sanitized);
+  rederive_owner_inertia(entity);
   // New colliders have no snapshot entry until the next resolve.
   m_physicsContext.ccdSnapshotDirty = true;
   return true;
@@ -516,6 +646,7 @@ bool World::remove_collider(Entity entity) noexcept {
   const bool removed = m_colliders.remove(entity);
   if (removed) {
     physics::remove_shape_payloads(m_physicsContext, entity);
+    rederive_owner_inertia(entity);
   }
   return removed;
 }
@@ -543,10 +674,10 @@ bool World::add_mesh_component(Entity entity,
     std::snprintf(message, sizeof(message),
                   "add_mesh_component clamped material factors for entity %u",
                   entity.index);
-    core::log_message(core::LogLevel::Warning, "world", message);
+    log_entity_warning(m_entityPersistentIds[entity.index], message);
   }
-  return add_component_checked(m_meshComponents, entity, sanitized,
-                               "add_mesh_component");
+  return static_cast<bool>(add_component_checked(m_meshComponents, entity, sanitized,
+                               "add_mesh_component"));
 }
 
 bool World::remove_mesh_component(Entity entity) noexcept {
@@ -591,7 +722,11 @@ bool World::add_foliage_patch_component(
     }
   }
 
-  return m_foliagePatches.add(entity, safe);
+  if (!m_foliagePatches.add(entity, safe)) {
+    note_refusal(core::FailureKind::CapacityExhausted);
+    return false;
+  }
+  return true;
 }
 
 bool World::remove_foliage_patch_component(Entity entity) noexcept {
@@ -652,6 +787,7 @@ bool World::add_name_component(Entity entity,
                                 component.name)) {
     log_identity_overflow("add_name_component", "name",
                           NameComponent::kMaxNameLength);
+    note_refusal(core::FailureKind::InvalidArgument);
     return false;
   }
 
@@ -660,6 +796,9 @@ bool World::add_name_component(Entity entity,
   const bool hadName = m_nameComponents.get(entity, &previous);
 
   const bool ok = m_nameComponents.add(entity, safe);
+  if (!ok) {
+    note_refusal(core::FailureKind::CapacityExhausted);
+  }
   if (ok) {
     if (hadName && (previous.name[0] != '\0') &&
         (std::strcmp(previous.name, safe.name) != 0)) {
@@ -736,8 +875,8 @@ Entity World::find_entity_by_name(const char *name) const noexcept {
 
 bool World::add_light_component(Entity entity,
                                 const LightComponent &component) noexcept {
-  return add_component_checked(m_lightComponents, entity, component,
-                               "add_light_component");
+  return static_cast<bool>(add_component_checked(m_lightComponents, entity, component,
+                               "add_light_component"));
 }
 
 bool World::remove_light_component(Entity entity) noexcept {
@@ -779,8 +918,8 @@ Entity World::light_entity_at(std::size_t index) const noexcept {
 
 bool World::add_point_light_component(
     Entity entity, const PointLightComponent &component) noexcept {
-  return add_component_checked(m_pointLights, entity, component,
-                               "add_point_light_component");
+  return static_cast<bool>(add_component_checked(m_pointLights, entity, component,
+                               "add_point_light_component"));
 }
 
 bool World::remove_point_light_component(Entity entity) noexcept {
@@ -819,8 +958,8 @@ Entity World::point_light_entity_at(std::size_t index) const noexcept {
 
 bool World::add_spot_light_component(
     Entity entity, const SpotLightComponent &component) noexcept {
-  return add_component_checked(m_spotLights, entity, component,
-                               "add_spot_light_component");
+  return static_cast<bool>(add_component_checked(m_spotLights, entity, component,
+                               "add_spot_light_component"));
 }
 
 bool World::remove_spot_light_component(Entity entity) noexcept {
@@ -859,8 +998,8 @@ Entity World::spot_light_entity_at(std::size_t index) const noexcept {
 
 bool World::add_reflection_probe_component(
     Entity entity, const ReflectionProbeComponent &component) noexcept {
-  return add_component_checked(m_reflectionProbes, entity, component,
-                               "add_reflection_probe_component");
+  return static_cast<bool>(add_component_checked(m_reflectionProbes, entity, component,
+                               "add_reflection_probe_component"));
 }
 
 bool World::remove_reflection_probe_component(Entity entity) noexcept {
@@ -916,8 +1055,8 @@ World::get_reflection_probe_component_ptr(Entity entity) const noexcept {
 
 bool World::add_scene_capture_component(
     Entity entity, const SceneCaptureComponent &component) noexcept {
-  return add_component_checked(m_sceneCaptures, entity, component,
-                               "add_scene_capture_component");
+  return static_cast<bool>(add_component_checked(m_sceneCaptures, entity, component,
+                               "add_scene_capture_component"));
 }
 
 bool World::remove_scene_capture_component(Entity entity) noexcept {
@@ -997,10 +1136,15 @@ bool World::add_script_component(Entity entity,
                                 component.scriptPath)) {
     log_identity_overflow("add_script_component", "scriptPath",
                           ScriptComponent::kMaxPathLength);
+    note_refusal(core::FailureKind::InvalidArgument);
     return false;
   }
 
-  return m_scriptComponents.add(entity, safe);
+  if (!m_scriptComponents.add(entity, safe)) {
+    note_refusal(core::FailureKind::CapacityExhausted);
+    return false;
+  }
+  return true;
 }
 
 bool World::remove_script_component(Entity entity) noexcept {
@@ -1036,10 +1180,15 @@ bool World::add_animation_component(
                                 component.controllerPath)) {
     log_identity_overflow("add_animation_component", "controllerPath",
                           AnimationComponent::kMaxPathLength);
+    note_refusal(core::FailureKind::InvalidArgument);
     return false;
   }
 
-  return m_animationComponents.add(entity, safe);
+  if (!m_animationComponents.add(entity, safe)) {
+    note_refusal(core::FailureKind::CapacityExhausted);
+    return false;
+  }
+  return true;
 }
 
 bool World::remove_animation_component(Entity entity) noexcept {
@@ -1065,8 +1214,8 @@ World::get_animation_component_ptr(Entity entity) const noexcept {
 
 bool World::add_spring_arm(Entity entity,
                            const SpringArmComponent &component) noexcept {
-  return add_component_checked(m_springArms, entity, component,
-                               "add_spring_arm");
+  return static_cast<bool>(add_component_checked(m_springArms, entity, component,
+                               "add_spring_arm"));
 }
 
 bool World::remove_spring_arm(Entity entity) noexcept {
@@ -1110,8 +1259,8 @@ World::get_spring_arm_ptr(Entity entity) const noexcept {
 
 bool World::add_camera_component(Entity entity,
                                  const CameraComponent &component) noexcept {
-  return add_component_checked(m_cameraComponents, entity, component,
-                               "add_camera_component");
+  return static_cast<bool>(add_component_checked(m_cameraComponents, entity, component,
+                               "add_camera_component"));
 }
 
 bool World::remove_camera_component(Entity entity) noexcept {

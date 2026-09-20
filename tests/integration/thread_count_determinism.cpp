@@ -12,7 +12,6 @@
 
 #include <array>
 #include <cstdint>
-#include <cstring>
 #include <memory>
 #include <new>
 
@@ -246,39 +245,6 @@ bool parallel_update(engine::runtime::World *world, float deltaSeconds,
   return true;
 }
 
-std::uint64_t hash_world_state(engine::runtime::World *world) {
-  if (world == nullptr) {
-    return 0U;
-  }
-
-  const std::size_t transformCount = world->transform_count();
-  const engine::runtime::Entity *entities = nullptr;
-  const engine::runtime::Transform *transforms = nullptr;
-
-  world->begin_render_prep_phase();
-  const bool readable =
-      world->read_transform_range(0U, transformCount, &entities, &transforms);
-  world->end_frame_phase();
-  if (!readable) {
-    return 0U;
-  }
-
-  std::uint64_t hash = 1469598103934665603ULL;
-  for (std::size_t i = 0U; i < transformCount; ++i) {
-    std::uint32_t xBits = 0U;
-    std::memcpy(&xBits, &transforms[i].position.x, sizeof(xBits));
-
-    hash ^= static_cast<std::uint64_t>(entities[i].index);
-    hash *= 1099511628211ULL;
-    hash ^= static_cast<std::uint64_t>(entities[i].generation);
-    hash *= 1099511628211ULL;
-    hash ^= static_cast<std::uint64_t>(xBits);
-    hash *= 1099511628211ULL;
-  }
-
-  return hash;
-}
-
 /// Runs the configured command, loop, or tool for with worker count.
 bool run_with_worker_count(std::uint32_t workerCount, std::uint64_t *outHash,
                            std::uint32_t *outActualWorkers) {
@@ -315,7 +281,7 @@ bool run_with_worker_count(std::uint32_t workerCount, std::uint64_t *outHash,
     }
   }
 
-  const std::uint64_t hash = hash_world_state(world.get());
+  const std::uint64_t hash = world->state_hash();
   if (hash == 0U) {
     engine::core::shutdown_job_system();
     return false;
@@ -439,59 +405,6 @@ bool populate_ccd_world(engine::runtime::World *world,
   return true;
 }
 
-/// Folds one float's bit pattern into an FNV-1a style hash.
-void fold_float_bits(std::uint64_t *hash, float value) {
-  std::uint32_t bits = 0U;
-  std::memcpy(&bits, &value, sizeof(bits));
-  *hash ^= static_cast<std::uint64_t>(bits);
-  *hash *= 1099511628211ULL;
-}
-
-/// Hashes every transform position and rigid-body velocity bitwise so any
-/// CCD time-of-impact or reflection divergence is visible.
-std::uint64_t hash_ccd_world_state(engine::runtime::World *world) {
-  if (world == nullptr) {
-    return 0U;
-  }
-
-  const std::size_t transformCount = world->transform_count();
-  const engine::runtime::Entity *entities = nullptr;
-  const engine::runtime::Transform *transforms = nullptr;
-
-  world->begin_render_prep_phase();
-  const bool readable =
-      world->read_transform_range(0U, transformCount, &entities, &transforms);
-  world->end_frame_phase();
-  if (!readable) {
-    return 0U;
-  }
-
-  std::uint64_t hash = 1469598103934665603ULL;
-  for (std::size_t i = 0U; i < transformCount; ++i) {
-    hash ^= static_cast<std::uint64_t>(entities[i].index);
-    hash *= 1099511628211ULL;
-    fold_float_bits(&hash, transforms[i].position.x);
-    fold_float_bits(&hash, transforms[i].position.y);
-    fold_float_bits(&hash, transforms[i].position.z);
-  }
-
-  const std::size_t bodyCount = world->rigid_body_count();
-  const engine::runtime::Entity *bodyEntities = nullptr;
-  engine::runtime::RigidBody *bodies = nullptr;
-  if ((bodyCount > 0U) &&
-      world->get_rigid_body_range(0U, bodyCount, &bodyEntities, &bodies)) {
-    for (std::size_t i = 0U; i < bodyCount; ++i) {
-      hash ^= static_cast<std::uint64_t>(bodyEntities[i].index);
-      hash *= 1099511628211ULL;
-      fold_float_bits(&hash, bodies[i].velocity.x);
-      fold_float_bits(&hash, bodies[i].velocity.y);
-      fold_float_bits(&hash, bodies[i].velocity.z);
-    }
-  }
-
-  return hash;
-}
-
 /// Runs the CCD scenario with one worker count: the first step and the
 /// steps right after the mid-run collider add/remove sweep without a usable
 /// snapshot while a guaranteed CCD hit is in flight.
@@ -548,7 +461,7 @@ bool run_ccd_with_worker_count(std::uint32_t workerCount,
     }
   }
 
-  const std::uint64_t hash = hash_ccd_world_state(world.get());
+  const std::uint64_t hash = world->state_hash();
   engine::core::shutdown_job_system();
   if (hash == 0U) {
     return false;

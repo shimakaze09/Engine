@@ -7,9 +7,13 @@
 // EnginePipeline runs (the pipeline_tick_cadence_test.cpp pattern): run A
 // mutates game state from an entity script and loads the bootstrap
 // character's animation controller, teardown must clear both, and run B
-// must start from defaults.
+// must start from defaults. Also pins that teardown forgets the cooked
+// asset generation verdicts, so a repaired asset is re-checked by the
+// next run instead of staying rejected.
 
+#include "../cook_fixture.h"
 #include "engine/audio/audio.h"
+#include "engine/content/asset_staleness.h"
 #include "engine/core/input.h"
 #include "engine/engine.h"
 #include "engine/renderer/command_buffer.h"
@@ -19,11 +23,9 @@
 #include "engine/runtime/world.h"
 #include "engine/scripting/bindable_api.h"
 
-#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
-#include <thread>
 
 namespace {
 
@@ -106,12 +108,13 @@ void remove_script_file() noexcept {
   static_cast<void>(std::remove(kScriptPath));
 }
 
-/// Runs one playing frame guaranteed to simulate at least one fixed step
-/// (see pipeline_tick_cadence_test.cpp on the wall-clock accumulator).
+/// Runs one playing frame that simulates exactly one fixed step.
 bool ticking_frame(engine::EnginePipeline &pipeline) noexcept {
-  std::this_thread::sleep_for(std::chrono::milliseconds(20));
-  return pipeline.execute_frame();
+  return pipeline.set_frame_delta_override(1.0 / 60.0) &&
+         pipeline.execute_frame();
 }
+
+constexpr const char *kProbeMesh = "pipeline_teardown_probe.mesh";
 
 /// Compares the live game-state label against an expected value.
 bool game_state_is(const char *expected) noexcept {
@@ -186,6 +189,25 @@ int main() {
     engine::renderer::set_skin_palettes(&probePalette, 1U);
     CHECK(ticking_frame(pipeline), "run A rendered frame");
 
+    // A cooked asset whose stamp certifies it, then whose bytes change:
+    // the generation gate rejects it and caches that verdict for the run,
+    // so repairing the bytes alone does not clear it.
+    engine::tests::remove_with_stamp(kProbeMesh);
+    CHECK(engine::tests::write_valid_mesh(kProbeMesh) &&
+              engine::tests::write_certifying_stamp(kProbeMesh),
+          "plant a certified probe mesh");
+    CHECK(engine::content::cooked_asset_generation_ok(kProbeMesh),
+          "the intact probe passes the generation gate");
+    engine::content::reset_cooked_asset_stale_warnings();
+    const char torn[] = "not the certified bytes";
+    CHECK(engine::tests::write_bytes(kProbeMesh, torn, sizeof(torn) - 1U),
+          "tear the probe mesh");
+    CHECK(!engine::content::cooked_asset_generation_ok(kProbeMesh),
+          "the torn probe is rejected");
+    CHECK(engine::tests::write_valid_mesh(kProbeMesh), "repair the probe");
+    CHECK(!engine::content::cooked_asset_generation_ok(kProbeMesh),
+          "the rejection stays cached for the run");
+
     // Guard asserts: the run really dirtied every probe before teardown.
     CHECK(game_state_is("in_progress"), "run A moved the game state");
     CHECK(engine::runtime::get_anim_controller(0U) != nullptr,
@@ -214,6 +236,10 @@ int main() {
           "teardown resets the public renderer state");
     CHECK(engine::renderer::skin_palette_count() == 0U,
           "teardown clears stored skin palettes");
+    CHECK(engine::content::cooked_asset_generation_ok(kProbeMesh),
+          "teardown forgets the generation verdicts, so the repaired "
+          "probe passes");
+    engine::tests::remove_with_stamp(kProbeMesh);
   }
 
   // --- Run B: a second run in the same process starts and stays clean. ---

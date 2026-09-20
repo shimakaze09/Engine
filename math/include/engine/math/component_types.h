@@ -33,10 +33,33 @@ struct RigidBody final {
   Vec3 acceleration = Vec3(0.0F, 0.0F, 0.0F);
   Vec3 angularVelocity = Vec3(0.0F, 0.0F, 0.0F);
   float inverseMass = 1.0F;
-  float inverseInertia = 1.0F;
+  /// Body-space diagonal inverse inertia tensor (1 / I about each body
+  /// axis). Zero on an axis locks rotation about it.
+  Vec3 inverseInertia = Vec3(1.0F, 1.0F, 1.0F);
+  /// Provenance of inverseInertia. False (automatic): the World derives the
+  /// tensor from the collider geometry the body owns and rewrites it
+  /// whenever that geometry, its placement, the ownership or the mass
+  /// changes, so the stored value is a cache. True (authored): the value
+  /// is content and the World never touches it. Provenance is explicit
+  /// because no numeric value can tell the two apart.
+  bool inertiaAuthored = false;
   std::uint8_t sleepFrameCount = 0U;
   bool sleeping = false;
 };
+
+/// Inverse inertia a freshly constructed RigidBody carries, and the tensor
+/// an automatic body takes while it owns no collider geometry or is
+/// static: unit inertia about every axis.
+[[nodiscard]] constexpr Vec3 default_inverse_inertia() noexcept {
+  return Vec3(1.0F, 1.0F, 1.0F);
+}
+
+/// True when any axis can rotate (some component of the inverse inertia
+/// is positive); a locked or static body answers false.
+[[nodiscard]] inline bool has_rotational_dof(const Vec3 &inverseInertia) noexcept {
+  return (inverseInertia.x > 0.0F) || (inverseInertia.y > 0.0F) ||
+         (inverseInertia.z > 0.0F);
+}
 
 /// Enumerates collider shape values used by the engine.
 enum class ColliderShape : std::uint8_t {

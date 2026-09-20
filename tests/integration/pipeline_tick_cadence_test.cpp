@@ -4,32 +4,36 @@
 // not a direct dispatch_entity_scripts_update call with a hand-computed dt.
 // Drives engine::bootstrap() + EnginePipeline::execute_frame() the way
 // pipeline_camera_prep_test.cpp does, controlling an EditorBridge to force
-// paused, single-stepped, and wall-clock multi-step-catch-up frames, and
-// reads results back from a shared Lua entity script through error()-raising
-// verifier functions (the lua_lifecycle_test.cpp pattern).
+// paused, single-stepped, and multi-step catch-up frames, and reads results
+// back from a shared Lua entity script through error()-raising verifier
+// functions (the lua_lifecycle_test.cpp pattern). Frame time comes from the
+// pipeline's frame delta override, never the wall clock, so every step
+// count below is exact on every machine.
 
-#include "engine/core/cvar.h"
 #include "engine/engine.h"
 #include "engine/math/component_types.h"
 #include "engine/runtime/editor_bridge.h"
 #include "engine/runtime/engine_pipeline.h"
 #include "engine/runtime/scene_serializer.h"
 #include "engine/runtime/world.h"
+#include "engine/core/simulation_clock.h"
 #include "engine/scripting/scripting.h"
 
-#include <chrono>
 #include <cstdio>
 #include <cstdint>
 #include <filesystem>
-#include <thread>
+#include <limits>
 
 namespace {
 
 constexpr float kFixedDeltaSeconds = 1.0F / 60.0F;
+constexpr double kOneStepSeconds = 1.0 / 60.0;
 // EnginePipeline::Impl's kMaxUpdateStepsPerFrame (runtime/src/engine_pipeline.cpp);
-// not part of the public API, so this test re-derives its value by forcing
-// the clamp with a long sleep rather than asserting a hardcoded step count.
+// not part of the public API, so the catch-up scenarios reach it by feeding
+// a frame delta far past the clamp (kClampingFrameSeconds) rather than a
+// delta that happens to equal it.
 constexpr int kClampedStepCount = 8;
+constexpr double kClampingFrameSeconds = 0.3;
 constexpr const char *kScriptPath = "pipeline_tick_cadence_test.lua";
 
 engine::runtime::World *g_world = nullptr;
@@ -129,6 +133,8 @@ constexpr const char *kScript =
     "local destroy_armed = false\n"
     "local velocity_armed = false\n"
     "local velocity_x = 0.0\n"
+    "local timer_fired = 0\n"
+    "local last_engine_dt = -1.0\n"
     "\n"
     "local function assign_role(self)\n"
     "    if primary == nil then\n"
@@ -151,6 +157,7 @@ constexpr const char *kScript =
     "    assign_role(self)\n"
     "    total_ticks = total_ticks + 1\n"
     "    last_dt = dt\n"
+    "    last_engine_dt = engine.delta_time()\n"
     "    if self == primary then\n"
     "        primary_ticks = primary_ticks + 1\n"
     "    elseif self == secondary then\n"
@@ -195,6 +202,27 @@ constexpr const char *kScript =
     "    destroy_armed = false\n"
     "    velocity_armed = false\n"
     "    velocity_x = 0.0\n"
+    "    timer_fired = 0\n"
+    "    last_engine_dt = -1.0\n"
+    "end\n"
+    "\n"
+    "function arm_timer(seconds)\n"
+    "    engine.set_timeout(function() timer_fired = timer_fired + 1 end,\n"
+    "                       seconds)\n"
+    "end\n"
+    "\n"
+    "function verify_timer_fired(expected)\n"
+    "    if timer_fired ~= expected then\n"
+    "        error('timer_fired ' .. tostring(timer_fired) .. ' expected ' ..\n"
+    "              tostring(expected))\n"
+    "    end\n"
+    "end\n"
+    "\n"
+    "function verify_engine_dt(expected)\n"
+    "    if last_engine_dt ~= expected then\n"
+    "        error('engine.delta_time ' .. tostring(last_engine_dt) ..\n"
+    "              ' expected ' .. tostring(expected))\n"
+    "    end\n"
     "end\n"
     "\n"
     "function arm_spawn() spawn_armed = true end\n"
@@ -281,23 +309,19 @@ engine::runtime::Entity spawn_scripted_entity() noexcept {
   return entity;
 }
 
-// Back-to-back execute_frame() calls with no injected delay can legitimately
-// run faster than one fixed step (16.67 ms) apart, so stage_timing's
-// wall-clock accumulator sometimes has not reached kFixedDeltaSeconds yet
-// and that frame simulates zero steps -- on_tick is only dispatched when
-// isPlaying && updateStepCount > 0, so a same-frame on_tick would then
-// simply not fire, independent of any correctness bug. Every scenario below
-// that expects a specific frame to tick sleeps past one fixed step first so
-// that frame deterministically simulates at least one step; the exact step
-// count is never asserted here (only scenario 3 and 6 need an exact count,
-// and they force the fixed-step clamp with a much longer sleep instead).
-constexpr std::chrono::milliseconds kPastOneFixedStep{20};
+/// Runs one playing frame whose delta is exactly `seconds`, so the frame
+/// simulates a known number of fixed steps regardless of how fast the
+/// frames themselves run; on_tick dispatches whenever that number is
+/// non-zero.
+bool frame_with_delta(engine::EnginePipeline &pipeline,
+                      double seconds) noexcept {
+  return pipeline.set_frame_delta_override(seconds) &&
+         pipeline.execute_frame();
+}
 
-/// Runs one playing frame that is guaranteed to simulate at least one fixed
-/// step (see kPastOneFixedStep above), so on_tick reliably dispatches.
+/// Runs one playing frame that simulates exactly one fixed step.
 bool ticking_frame(engine::EnginePipeline &pipeline) noexcept {
-  std::this_thread::sleep_for(kPastOneFixedStep);
-  return pipeline.execute_frame();
+  return frame_with_delta(pipeline, kOneStepSeconds);
 }
 
 /// Runs a handful of ticking frames to settle any residual accumulator/
@@ -334,7 +358,11 @@ int main() {
   bridge.consume_step_request = &bridge_consume_step_request;
   engine::runtime::set_editor_bridge(&bridge);
 
-  if (!engine::bootstrap()) {
+  // Full production bootstrap in headless mode: the null render device
+  // stands in so the cadence contract runs on every CI lane.
+  engine::EngineConfig config{};
+  config.core.platform.headless = true;
+  if (!engine::bootstrap(config)) {
     std::fprintf(stderr, "FAIL: bootstrap\n");
     remove_script_file();
     return 2;
@@ -355,10 +383,6 @@ int main() {
     return 4;
   }
 
-  // Uncapped: the multi-step catch-up scenario forces the fixed-step clamp
-  // via a real sleep instead of relying on r_max_fps-driven pacing.
-  static_cast<void>(engine::core::cvar_set_int("r_max_fps", 0));
-
   // Warm up: load the shared script module once via a real playing frame so
   // its global helper functions (reset_tracking, verify_*, arm_*) exist
   // before any scenario runs, including the ones that stay paused
@@ -373,6 +397,14 @@ int main() {
   }
 
   std::printf("=== Pipeline Tick Cadence Integration Tests (audit #205) ===\n");
+
+  // The override refuses values that cannot be a frame's length and leaves
+  // the current source in place.
+  CHECK(!pipeline.set_frame_delta_override(-1.0),
+        "a negative frame delta override is refused");
+  CHECK(!pipeline.set_frame_delta_override(
+            std::numeric_limits<double>::quiet_NaN()),
+        "a NaN frame delta override is refused");
 
   // --- Scenario 1: paused, no single-step -> no on_tick at all. ---
   {
@@ -438,15 +470,13 @@ int main() {
     std::printf("%s\n", g_failures == before ? "PASS" : "FAIL");
   }
 
-  // --- Scenario 3: a real wall-clock gap long enough to clamp the fixed-step
-  // count dispatches on_tick exactly once, with dt equal to the summed
-  // clamped steps -- proving stage_timing's step-count decision and
+  // --- Scenario 3: a frame delta long enough to clamp the fixed-step count
+  // dispatches on_tick exactly once, with dt equal to the summed clamped
+  // steps -- proving stage_timing's step-count decision and
   // stage_scripting's dispatch stay wired together end to end, not just
-  // individually correct. The sleep duration only needs to comfortably
-  // exceed the clamp threshold; it does not need to hit an exact step count,
-  // so this assertion is not sensitive to scheduler jitter. ---
+  // individually correct. ---
   {
-    std::printf("  %-52s ", "wall-clock catch-up: one tick, summed dt");
+    std::printf("  %-52s ", "clamped catch-up: one tick, summed dt");
     const int before = g_failures;
     engine::runtime::reset_world(*g_world);
     g_paused = false;
@@ -456,18 +486,165 @@ int main() {
     CHECK(settle_frames(pipeline, 2), "settle before the catch-up frame");
     CHECK(reset_tracking(), "reset tracking");
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(300));
-    CHECK(pipeline.execute_frame(), "catch-up execute_frame");
+    CHECK(frame_with_delta(pipeline, kClampingFrameSeconds),
+          "catch-up execute_frame");
 
     CHECK(engine::scripting::call_script_function_float("verify_total_ticks",
                                                          1.0F),
           "one dispatch regardless of how many steps were folded in");
     const float expectedDt = static_cast<float>(
-        static_cast<double>(kClampedStepCount) *
-        (1.0 / 60.0));
+        static_cast<double>(kClampedStepCount) * kOneStepSeconds);
     CHECK(engine::scripting::call_script_function_float("verify_last_dt",
                                                          expectedDt),
           "dt equals the clamped step count times the fixed delta");
+
+    std::printf("%s\n", g_failures == before ? "PASS" : "FAIL");
+  }
+
+  // --- Scenario 3b: a frame delta of three steps, below the clamp, still
+  // dispatches once and hands the script exactly three steps of time: the
+  // step count follows the delta, not the clamp or the frame rate. ---
+  {
+    std::printf("  %-52s ", "three-step frame: one tick, three-step dt");
+    const int before = g_failures;
+    engine::runtime::reset_world(*g_world);
+    g_paused = false;
+    g_stepArmed = false;
+    const engine::runtime::Entity primary = spawn_scripted_entity();
+    CHECK(primary != engine::runtime::kInvalidEntity, "spawn primary");
+    CHECK(settle_frames(pipeline, 2), "settle before the three-step frame");
+    CHECK(reset_tracking(), "reset tracking");
+
+    CHECK(frame_with_delta(pipeline, 3.0 * kOneStepSeconds),
+          "three-step execute_frame");
+    CHECK(engine::scripting::call_script_function_float("verify_total_ticks",
+                                                         1.0F),
+          "one dispatch for the three-step frame");
+    CHECK(engine::scripting::call_script_function_float(
+              "verify_last_dt", static_cast<float>(3.0 * kOneStepSeconds)),
+          "dt equals exactly three fixed steps");
+
+    // The following one-step frame ticks exactly once more: the three-step
+    // frame left nothing in the accumulator to spill over.
+    CHECK(ticking_frame(pipeline), "one-step frame after the three-step one");
+    CHECK(engine::scripting::call_script_function_float("verify_total_ticks",
+                                                         2.0F),
+          "the next frame dispatches once");
+    CHECK(engine::scripting::call_script_function_float("verify_last_dt",
+                                                         kFixedDeltaSeconds),
+          "the next frame's dt is exactly one fixed step");
+
+    std::printf("%s\n", g_failures == before ? "PASS" : "FAIL");
+  }
+
+  // --- Scenario 3c: an injected delta is exact. 0.0165 s is short of one
+  // fixed step, so the first frame simulates nothing and the second, with
+  // 0.033 s accumulated, exactly one step; snapping the injected value to
+  // the fixed step would have ticked both frames. ---
+  {
+    std::printf("  %-52s ", "injected delta is exact, never snapped");
+    const int before = g_failures;
+    engine::runtime::reset_world(*g_world);
+    g_paused = false;
+    g_stepArmed = false;
+    const engine::runtime::Entity primary = spawn_scripted_entity();
+    CHECK(primary != engine::runtime::kInvalidEntity, "spawn primary");
+    CHECK(settle_frames(pipeline, 2), "settle before the short frames");
+    CHECK(reset_tracking(), "reset tracking");
+
+    CHECK(frame_with_delta(pipeline, 0.0165), "first short frame");
+    CHECK(engine::scripting::call_script_function_float("verify_total_ticks",
+                                                         0.0F),
+          "0.0165 s alone is short of a step");
+    const engine::core::SimulationClock &shortFrame =
+        engine::scripting::simulation_clock();
+    CHECK((shortFrame.stepsThisFrame == 0U) && (shortFrame.deltaSeconds == 0.0),
+          "the zero-step frame publishes zero steps and delta");
+    CHECK(frame_with_delta(pipeline, 0.0165), "second short frame");
+    CHECK(engine::scripting::call_script_function_float("verify_total_ticks",
+                                                         1.0F),
+          "two short frames accumulate to exactly one step");
+    CHECK(engine::scripting::call_script_function_float("verify_last_dt",
+                                                         kFixedDeltaSeconds),
+          "the step's dt is one fixed step");
+    CHECK(engine::scripting::call_script_function_float("verify_engine_dt",
+                                                         kFixedDeltaSeconds),
+          "engine.delta_time in on_tick reads the same published delta");
+
+    std::printf("%s\n", g_failures == before ? "PASS" : "FAIL");
+  }
+
+  // --- Scenario 3d: the published clock names each frame kind. A paused
+  // frame publishes zero steps and delta with alpha 1 under its own frame
+  // index; a catch-up frame publishes its clamped steps, the summed delta,
+  // the advanced tick index and an alpha below one. ---
+  {
+    std::printf("  %-52s ", "clock publication per frame kind");
+    const int before = g_failures;
+    engine::runtime::reset_world(*g_world);
+    g_paused = false;
+    g_stepArmed = false;
+    CHECK(settle_frames(pipeline, 1), "settle");
+    const std::uint32_t settledFrame =
+        engine::scripting::simulation_clock().frameIndex;
+    const std::uint64_t settledTick =
+        engine::scripting::simulation_clock().tickIndex;
+
+    g_paused = true;
+    CHECK(pipeline.execute_frame(), "paused frame");
+    const engine::core::SimulationClock paused =
+        engine::scripting::simulation_clock();
+    CHECK(paused.frameIndex == settledFrame + 1U,
+          "the paused frame publishes its own frame index");
+    CHECK((paused.stepsThisFrame == 0U) && (paused.deltaSeconds == 0.0) &&
+              (paused.renderAlpha == 1.0) && (paused.tickIndex == settledTick),
+          "the paused frame publishes zero steps, zero delta, alpha one");
+
+    g_paused = false;
+    CHECK(frame_with_delta(pipeline, kClampingFrameSeconds), "catch-up frame");
+    const engine::core::SimulationClock catchUp =
+        engine::scripting::simulation_clock();
+    CHECK(catchUp.frameIndex == settledFrame + 2U, "catch-up frame index");
+    CHECK((catchUp.stepsThisFrame == static_cast<std::uint32_t>(kClampedStepCount)) &&
+              (catchUp.deltaSeconds ==
+               static_cast<double>(kClampedStepCount) * kOneStepSeconds) &&
+              (catchUp.tickIndex ==
+               settledTick + static_cast<std::uint64_t>(kClampedStepCount)),
+          "the catch-up frame publishes its clamped steps and summed delta");
+    CHECK((catchUp.renderAlpha >= 0.0) && (catchUp.renderAlpha < 1.0),
+          "the catch-up frame's alpha is the remainder fraction");
+
+    std::printf("%s\n", g_failures == before ? "PASS" : "FAIL");
+  }
+
+  // --- Scenario 3e: timers advance by the published delta. A timeout of
+  // two and a half steps fires on the third one-step frame, not the
+  // second. ---
+  {
+    std::printf("  %-52s ", "timers follow the published delta");
+    const int before = g_failures;
+    engine::runtime::reset_world(*g_world);
+    g_paused = false;
+    g_stepArmed = false;
+    const engine::runtime::Entity primary = spawn_scripted_entity();
+    CHECK(primary != engine::runtime::kInvalidEntity, "spawn primary");
+    CHECK(settle_frames(pipeline, 1), "settle");
+    CHECK(reset_tracking(), "reset tracking");
+    CHECK(engine::scripting::call_script_function_float(
+              "arm_timer", static_cast<float>(2.5 * kOneStepSeconds)),
+          "arm a two-and-a-half-step timer");
+    CHECK(ticking_frame(pipeline) && ticking_frame(pipeline), "two steps");
+    CHECK(engine::scripting::call_script_function_float("verify_timer_fired",
+                                                         0.0F),
+          "two steps are short of the timer");
+    CHECK(ticking_frame(pipeline), "third step");
+    CHECK(engine::scripting::call_script_function_float("verify_timer_fired",
+                                                         1.0F),
+          "the third step fires it exactly once");
+    CHECK(ticking_frame(pipeline), "fourth step");
+    CHECK(engine::scripting::call_script_function_float("verify_timer_fired",
+                                                         1.0F),
+          "a timeout fires once");
 
     std::printf("%s\n", g_failures == before ? "PASS" : "FAIL");
   }
@@ -562,7 +739,7 @@ int main() {
   }
 
   // --- Scenario 6: a script mutation issued from on_tick during a
-  // wall-clock multi-step catch-up frame is visible to every one of that
+  // multi-step catch-up frame is visible to every one of that
   // same frame's fixed physics steps (stage_scripting runs before
   // stage_simulation_graph each frame), not merely a future frame's. ---
   {
@@ -591,8 +768,8 @@ int main() {
                                                          kVelocityX),
           "arm velocity mutation");
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(300));
-    CHECK(pipeline.execute_frame(), "catch-up frame with a velocity mutation");
+    CHECK(frame_with_delta(pipeline, kClampingFrameSeconds),
+          "catch-up frame with a velocity mutation");
 
     CHECK(engine::scripting::call_script_function_float("verify_total_ticks",
                                                          1.0F),

@@ -308,17 +308,22 @@ void shutdown_asset_streaming(AssetStreamingQueue *queue) noexcept {
 // ---- Request management ----
 
 LoadHandle load_asset_async(AssetStreamingQueue *queue, AssetId id,
-                            const char *sourcePath,
-                            LoadPriority priority) noexcept {
+                            const char *sourcePath, LoadPriority priority,
+                            core::Status *outStatus) noexcept {
+  core::Status ignored{};
+  core::Status &status = (outStatus != nullptr) ? *outStatus : ignored;
+  status = core::Status::ok();
   if ((queue == nullptr) || (id == kInvalidAssetId)) {
     core::log_message(core::LogLevel::Error, "streaming",
                       "load_asset_async: null queue or invalid id");
+    status = core::Status::fail(core::FailureKind::InvalidArgument);
     return kInvalidLoadHandle;
   }
   if ((sourcePath != nullptr) &&
       (std::strlen(sourcePath) >= sizeof(LoadRequest::sourcePath))) {
     core::log_message(core::LogLevel::Error, "streaming",
                       "load_asset_async: source path too long; rejected");
+    status = core::Status::fail(core::FailureKind::InvalidArgument, 1U);
     return kInvalidLoadHandle;
   }
 
@@ -347,6 +352,7 @@ LoadHandle load_asset_async(AssetStreamingQueue *queue, AssetId id,
     if (slot == LoadHandle::kInvalid) {
       core::log_message(core::LogLevel::Error, "streaming",
                         "load_asset_async: queue full");
+      status = core::Status::fail(core::FailureKind::CapacityExhausted);
       return kInvalidLoadHandle;
     }
     ++queue->count;

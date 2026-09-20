@@ -356,6 +356,15 @@ void shutdown_editor() noexcept {
   editor_session().playSnapshotSize = 0U;
   editor_session().hasPlaySnapshot = false;
   editor_session().worldRestoreFailed = false;
+  reset_editor_session_residue();
+}
+
+void reset_editor_session_residue() noexcept {
+  asset_index_reset();
+  editor_layout_reset();
+  editor_session().pickers = ReferencePickerState{};
+  editor_session().console = ConsolePanelState{};
+  editor_session().inspector = InspectorPanelState{};
 }
 
 void editor_new_frame() noexcept {

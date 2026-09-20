@@ -58,6 +58,7 @@
 
 #include "generated_manifest.h"
 #include "packer_shared.h"
+#include "engine/content/asset_type_table.h"
 
 namespace {
 
@@ -347,10 +348,10 @@ int main(int argc, char **argv) {
   // A parse failure here is not fatal — the cook path
   // below reports it with its usual diagnostics.
   {
-    const char *ext = std::strrchr(inputPath, '.');
+    const engine::content::AssetClassification input =
+        engine::content::classify_asset_path(inputPath);
     const bool isGltfInput =
-        (ext != nullptr) && ((std::strcmp(ext, ".gltf") == 0) ||
-                             (std::strcmp(ext, ".glb") == 0));
+        input.source && (input.tag == engine::content::AssetTypeTag::Mesh);
     if (isGltfInput && (meshAssetId != 0ULL)) {
       cgltf_options discoverOptions{};
       cgltf_data *discoverData = nullptr;

@@ -1,6 +1,7 @@
 // Implements canonical convex-hull builders for the built-in shape
 // primitives.
 
+#include "engine/math/scalar.h"
 #include "engine/physics/primitive_hulls.h"
 
 #include <cmath>
@@ -28,8 +29,8 @@ bool build_cylinder_hull(ConvexHullData *outHull) noexcept {
   for (int slice = 0; slice < kSlices; ++slice) {
     const float phi =
         (kTwoPi * static_cast<float>(slice)) / static_cast<float>(kSlices);
-    const float x = std::cos(phi) * kRadius;
-    const float z = std::sin(phi) * kRadius;
+    const float x = math::det_cos(phi) * kRadius;
+    const float z = math::det_sin(phi) * kRadius;
     points[slice] = math::Vec3(x, -kHalfHeight, z);
     points[kSlices + slice] = math::Vec3(x, kHalfHeight, z);
   }

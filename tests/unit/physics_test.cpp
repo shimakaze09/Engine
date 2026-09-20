@@ -317,7 +317,9 @@ int check_angular_velocity_integration() {
 
   engine::runtime::RigidBody body{};
   body.inverseMass = 0.0F; // static so no gravity drift
-  body.inverseInertia = 1.0F;
+  body.inverseInertia =
+      engine::math::Vec3(1.0F, 1.0F, 1.0F);
+  body.inertiaAuthored = true;
   body.angularVelocity = engine::math::Vec3(0.0F, 3.14159F, 0.0F);
   if (!world->add_rigid_body(entity, body)) {
     return 33;
@@ -373,10 +375,14 @@ int check_angular_impulse_from_collision() {
 
   engine::runtime::RigidBody bodyA{};
   bodyA.inverseMass = 1.0F;
-  bodyA.inverseInertia = 1.0F;
+  bodyA.inverseInertia =
+      engine::math::Vec3(1.0F, 1.0F, 1.0F);
+  bodyA.inertiaAuthored = true;
   engine::runtime::RigidBody bodyB{};
   bodyB.inverseMass = 1.0F;
-  bodyB.inverseInertia = 1.0F;
+  bodyB.inverseInertia =
+      engine::math::Vec3(1.0F, 1.0F, 1.0F);
+  bodyB.inertiaAuthored = true;
   bodyB.velocity = engine::math::Vec3(-2.0F, 0.0F, 0.0F); // approaching A
 
   if (!world->add_transform(a, tA) || !world->add_transform(b, tB)) {
@@ -440,7 +446,9 @@ int check_zero_inverse_inertia_prevents_rotation() {
 
   engine::runtime::RigidBody body{};
   body.inverseMass = 0.0F;
-  body.inverseInertia = 0.0F; // rotation locked
+  body.inverseInertia =
+      engine::math::Vec3(0.0F, 0.0F, 0.0F); // rotation locked
+  body.inertiaAuthored = true;
   body.angularVelocity = engine::math::Vec3(0.0F, 5.0F, 0.0F);
   if (!world->add_rigid_body(entity, body)) {
     return 53;
@@ -1584,7 +1592,9 @@ bool rigid_body_state_equal(const engine::runtime::RigidBody &lhs,
          (lhs.angularVelocity.y == rhs.angularVelocity.y) &&
          (lhs.angularVelocity.z == rhs.angularVelocity.z) &&
          (lhs.inverseMass == rhs.inverseMass) &&
-         (lhs.inverseInertia == rhs.inverseInertia) &&
+         (lhs.inverseInertia.x == rhs.inverseInertia.x) &&
+         (lhs.inverseInertia.y == rhs.inverseInertia.y) &&
+         (lhs.inverseInertia.z == rhs.inverseInertia.z) &&
          (lhs.sleepFrameCount == rhs.sleepFrameCount) &&
          (lhs.sleeping == rhs.sleeping);
 }
@@ -1640,6 +1650,12 @@ int check_step_rejects_invalid_delta() {
       !world->add_collider(mover, box) || !world->add_collider(floor, box) ||
       !world->add_rigid_body(mover, moverBody) ||
       !world->add_rigid_body(floor, floorBody)) {
+    return 192;
+  }
+  // The stored body is the reference: installation derives the inverse
+  // inertia from the collider, and the refused steps must leave that
+  // stored state untouched.
+  if (!world->get_rigid_body(mover, &moverBody)) {
     return 192;
   }
 
@@ -3620,7 +3636,9 @@ int check_angular_effective_mass_no_overshoot() {
   world->add_collider(boxEntity, boxCol);
   engine::runtime::RigidBody boxRB{};
   boxRB.inverseMass = 1.0F;
-  boxRB.inverseInertia = 1.0F;
+  boxRB.inverseInertia =
+      engine::math::Vec3(1.0F, 1.0F, 1.0F);
+  boxRB.inertiaAuthored = true;
   world->add_rigid_body(boxEntity, boxRB);
 
   const auto sphereEntity = world->create_entity();
@@ -3633,7 +3651,9 @@ int check_angular_effective_mass_no_overshoot() {
   world->add_collider(sphereEntity, sphCol);
   engine::runtime::RigidBody sphRB{};
   sphRB.inverseMass = 1.0F;
-  sphRB.inverseInertia = 1.0F;
+  sphRB.inverseInertia =
+      engine::math::Vec3(1.0F, 1.0F, 1.0F);
+  sphRB.inertiaAuthored = true;
   sphRB.velocity = engine::math::Vec3(-0.5F, 0.0F, 0.0F);
   world->add_rigid_body(sphereEntity, sphRB);
 

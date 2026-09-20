@@ -5,7 +5,7 @@
 #include <cstdint>
 
 #include "engine/core/entity.h"
-#include "engine/runtime/world.h"
+#include "engine/scripting/runtime_services.h"
 
 struct lua_State;
 

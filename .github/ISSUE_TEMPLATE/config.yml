@@ -5,5 +5,5 @@ contact_links:
     url: https://github.com/shimakaze09/Engine/blob/main/.claude/skills/close-finding/SKILL.md
     about: The evidence a finding needs before it can be closed, tiered by severity — read before marking an issue done.
   - name: Defect budget
-    url: https://github.com/shimakaze09/Engine/blob/main/docs/decisions/0007-defect-budget.md
-    about: Why P0/P1 stay at zero, P3 is unbounded and unaudited, and a P3 never justifies a change of its own.
+    url: https://github.com/shimakaze09/Engine/blob/main/docs/decisions/0014-severity-is-impact.md
+    about: Severity by impact, P1/P2 counts as health signals, when a P3 stands alone, and what a consolidation must prove.

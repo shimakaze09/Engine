@@ -1,4 +1,8 @@
-// Implements engine behavior for the Engine runtime world.
+// Implements the engine tier: bootstrap opens each subsystem as one stage
+// on a fixed stack and a failure unwinds the stages already opened in
+// reverse, so every failure path and shutdown share one rollback; run()
+// drives the pipeline (or hands it to the browser loop on the web) and
+// shutdown() unwinds the same stack once.
 
 #include "engine/engine.h"
 
@@ -32,15 +36,97 @@ namespace {
 
 constexpr std::size_t kFrameAllocatorBytes = 1024U * 1024U;
 EngineConfig g_activeConfig{};
+bool g_bootstrapped = false;
 
-/// Shuts down the editor bridge's device resources while the device is
-/// still live.
-void shutdown_editor_bridge(const runtime::EditorBridge *bridge) noexcept {
-  if ((bridge == nullptr) || (bridge->shutdown == nullptr)) {
-    return;
+// The bootstrap stack: each opened stage pushes the function that closes
+// it, and unwinding pops them in reverse. Ordering constraints the closers
+// rely on: the texture registry and the editor bridge release device
+// objects while the render device is still live, so both sit above the
+// renderer; animation controllers hold renderer palette slots and reset
+// above it too.
+using StageCloser = void (*)() noexcept;
+constexpr std::size_t kMaxBootstrapStages = 8U;
+StageCloser g_openedStages[kMaxBootstrapStages]{};
+std::size_t g_openedStageCount = 0U;
+
+// Player mode clears the editor bridge for the run; the pointer it
+// replaced comes back when the run closes so a later editor bootstrap in
+// the same process still finds it.
+const runtime::EditorBridge *g_displacedBridge = nullptr;
+bool g_bridgeDisplaced = false;
+
+BootstrapStage g_injectedFailure = BootstrapStage::None;
+
+/// True once when the named stage is the injected failure.
+bool consume_injected_failure(BootstrapStage stage) noexcept {
+  if (g_injectedFailure != stage) {
+    return false;
   }
-  bridge->shutdown();
+  g_injectedFailure = BootstrapStage::None;
+  core::log_message(core::LogLevel::Warning, "engine",
+                    "bootstrap: injected stage failure");
+  return true;
 }
+
+void open_stage(StageCloser closer) noexcept {
+  g_openedStages[g_openedStageCount] = closer;
+  ++g_openedStageCount;
+}
+
+void unwind_stages() noexcept {
+  while (g_openedStageCount > 0U) {
+    --g_openedStageCount;
+    g_openedStages[g_openedStageCount]();
+    g_openedStages[g_openedStageCount] = nullptr;
+  }
+}
+
+/// Bootstrap failure: every opened stage closes in reverse and the active
+/// configuration returns to its defaults, so a retry starts clean.
+bool fail_bootstrap() noexcept {
+  unwind_stages();
+  g_activeConfig = EngineConfig{};
+  return false;
+}
+
+// ---- Stage closers, in bootstrap order ----------------------------------
+
+void close_core() noexcept { core::shutdown_core(); }
+
+void close_renderer() noexcept { renderer::shutdown_renderer(); }
+
+void restore_editor_bridge() noexcept {
+  if (g_bridgeDisplaced) {
+    runtime::set_editor_bridge(g_displacedBridge);
+    g_displacedBridge = nullptr;
+    g_bridgeDisplaced = false;
+  }
+}
+
+/// Closes the editor bridge's device resources while the device is still
+/// live.
+void close_editor_bridge() noexcept {
+  const runtime::EditorBridge *bridge = runtime::editor_bridge();
+  if ((bridge != nullptr) && (bridge->shutdown != nullptr)) {
+    bridge->shutdown();
+  }
+}
+
+void close_scripting() noexcept {
+  scripting::dap_stop();
+  scripting::shutdown_scripting();
+}
+
+void close_audio() noexcept { audio::shutdown_audio(); }
+
+/// The bootstrap-owned texture registry owns the device object behind
+/// every texture it loaded, so it closes while the device is still live.
+/// Scene-capture textures are registered as external aliases the registry
+/// never destroys; their creator releases them inside shutdown_renderer,
+/// also ahead of the device.
+void close_texture_system() noexcept { renderer::shutdown_texture_system(); }
+
+void close_run_registries() noexcept { runtime::reset_anim_controllers(); }
 
 } // namespace
 
@@ -54,6 +140,12 @@ bool bootstrap() noexcept {
 /// configured project asset root is mounted before any runtime or
 /// editor path resolves through the VFS.
 bool bootstrap(const EngineConfig &config) noexcept {
+  if (g_bootstrapped) {
+    core::log_message(core::LogLevel::Error, "engine",
+                      "bootstrap: the engine is already running");
+    return false;
+  }
+
   // The caller's strings are borrowed for the duration of this call only,
   // while runtime and editor systems keep reading active_config() frames
   // later, so the engine takes its own copies first. Staging into a local
@@ -64,9 +156,11 @@ bool bootstrap(const EngineConfig &config) noexcept {
   }
   g_activeConfig = adopted;
 
-  if (!core::initialize_core(g_activeConfig.core)) {
-    return false;
+  if (consume_injected_failure(BootstrapStage::Core) ||
+      !core::initialize_core(g_activeConfig.core)) {
+    return fail_bootstrap();
   }
+  open_stage(&close_core);
 
   static_cast<void>(core::cvar_register_bool(
       "r_showStats", true,
@@ -122,42 +216,39 @@ bool bootstrap(const EngineConfig &config) noexcept {
 
   static_cast<void>(physics::register_physics_cvars());
 
-  if (!core::mount(g_activeConfig.assetMount, g_activeConfig.assetRoot)) {
+  // The mount lives and dies with core, so it opens no stage of its own.
+  if (consume_injected_failure(BootstrapStage::Mount) ||
+      !core::mount(g_activeConfig.assetMount, g_activeConfig.assetRoot)) {
     core::log_message(core::LogLevel::Error, "engine",
                       "failed to mount configured asset root");
-    core::shutdown_core();
-    return false;
+    return fail_bootstrap();
   }
   renderer::set_shader_root_path(g_activeConfig.shaderRootPath);
-  // Opens the renderer lifetime this bootstrap owns, pairing with the
-  // shutdown_renderer in shutdown(). A process that bootstraps again
-  // after shutting down gets a renderer that initializes on demand once
-  // more, instead of one still latched off by the previous teardown.
+  // Opens the renderer lifetime this bootstrap owns. A process that
+  // bootstraps again after shutting down gets a renderer that initializes
+  // on demand once more, instead of one still latched off by the previous
+  // teardown.
   renderer::initialize_renderer();
+  open_stage(&close_renderer);
 
   // A windowed run initializes the swapchain-owning device here, before
   // the editor bridge — the bgfx ImGui renderer creates device objects
   // during bridge init (initialize_render_device is idempotent, so the
   // pipeline's later call is a no-op). Headless runs keep the pipeline's
-  // lazy null-device initialization.
-  if (!g_activeConfig.core.platform.headless &&
-      !renderer::initialize_render_device()) {
+  // lazy null-device initialization. The device closes with the renderer.
+  if (consume_injected_failure(BootstrapStage::RenderDevice) ||
+      (!g_activeConfig.core.platform.headless &&
+       !renderer::initialize_render_device())) {
     core::log_message(core::LogLevel::Error, "renderer",
                       "render device initialization failed at bootstrap");
-    // The renderer lifetime opened above is released here and on every
-    // failure path below, immediately before core: it was acquired just
-    // after core, so LIFO rollback closes it last. A bootstrap that
-    // returns false must leave the renderer latched off, or the module
-    // stays open for lazy initialization against a destroyed core.
-    renderer::shutdown_renderer();
-    core::shutdown_core();
-    return false;
+    return fail_bootstrap();
   }
 
   // Player mode: the pure gameplay loop for shared creations —
   // clearing the bridge before its init makes the pipeline treat the run
   // as always-playing, and r_present_scene has the renderer draw the
-  // final image to the back buffer in the editor overlay's place.
+  // final image to the back buffer in the editor overlay's place. The
+  // displaced bridge returns when the run closes.
   static_cast<void>(core::cvar_register_bool(
       "r_present_scene", false,
       "Present the post chain's final image on the back buffer (player "
@@ -167,29 +258,31 @@ bool bootstrap(const EngineConfig &config) noexcept {
     g_activeConfig.playerMode = true;
   }
   if (g_activeConfig.playerMode) {
+    g_displacedBridge = runtime::editor_bridge();
+    g_bridgeDisplaced = true;
     runtime::set_editor_bridge(nullptr);
     static_cast<void>(core::cvar_set_bool("r_present_scene", true));
   }
+  open_stage(&restore_editor_bridge);
 
   const runtime::EditorBridge *bridge = runtime::editor_bridge();
   if ((bridge != nullptr) && (bridge->initialize != nullptr)) {
-    if (!bridge->initialize(core::get_sdl_window())) {
+    if (consume_injected_failure(BootstrapStage::EditorBridge) ||
+        !bridge->initialize(core::get_sdl_window())) {
       core::log_message(core::LogLevel::Error, "editor",
                         "failed to initialize editor bridge");
-      renderer::shutdown_renderer();
-      core::shutdown_core();
-      return false;
+      return fail_bootstrap();
     }
+    open_stage(&close_editor_bridge);
   }
 
-  if (!scripting::initialize_scripting()) {
+  if (consume_injected_failure(BootstrapStage::Scripting) ||
+      !scripting::initialize_scripting()) {
     core::log_message(core::LogLevel::Error, "scripting",
                       "failed to initialize scripting");
-    shutdown_editor_bridge(bridge);
-    renderer::shutdown_renderer();
-    core::shutdown_core();
-    return false;
+    return fail_bootstrap();
   }
+  open_stage(&close_scripting);
 
   {
     const int dapPort = core::cvar_get_int("debug_dap_port");
@@ -204,31 +297,29 @@ bool bootstrap(const EngineConfig &config) noexcept {
     }
   }
 
-  if (!audio::initialize_audio()) {
+  audio::AudioConfig audioConfig{};
+  audioConfig.nullDevice = g_activeConfig.audioNullDevice ||
+                           g_activeConfig.core.platform.headless;
+  if (consume_injected_failure(BootstrapStage::Audio) ||
+      !audio::initialize_audio(audioConfig)) {
     core::log_message(core::LogLevel::Error, "audio",
                       "failed to initialize audio");
-    scripting::dap_stop();
-    scripting::shutdown_scripting();
-    shutdown_editor_bridge(bridge);
-    renderer::shutdown_renderer();
-    core::shutdown_core();
-    return false;
+    return fail_bootstrap();
   }
+  open_stage(&close_audio);
 
   // Bootstrap owns the texture registry's lifetime; every production
-  // texture consumer is gated on it and engine::shutdown tears it down.
-  if (!renderer::initialize_texture_system()) {
+  // texture consumer is gated on it and shutdown tears it down.
+  if (consume_injected_failure(BootstrapStage::TextureSystem) ||
+      !renderer::initialize_texture_system()) {
     core::log_message(core::LogLevel::Error, "renderer",
                       "failed to initialize texture system");
-    audio::shutdown_audio();
-    scripting::dap_stop();
-    scripting::shutdown_scripting();
-    shutdown_editor_bridge(bridge);
-    renderer::shutdown_renderer();
-    core::shutdown_core();
-    return false;
+    return fail_bootstrap();
   }
+  open_stage(&close_texture_system);
+  open_stage(&close_run_registries);
 
+  g_bootstrapped = true;
   core::log_message(core::LogLevel::Info, "engine", "bootstrap complete");
   return true;
 }
@@ -236,12 +327,19 @@ bool bootstrap(const EngineConfig &config) noexcept {
 /// Returns the active engine configuration for runtime/editor systems.
 const EngineConfig &active_config() noexcept { return g_activeConfig; }
 
+bool is_bootstrapped() noexcept { return g_bootstrapped; }
+
+void inject_bootstrap_failure(BootstrapStage stage) noexcept {
+  g_injectedFailure = stage;
+}
+
 #if defined(ENGINE_PLATFORM_WEB)
 namespace {
 
 /// Browser frame callback: one engine frame per requestAnimationFrame
-/// tick, tearing the pipeline down when the loop
-/// ends (the pipeline outlives run()'s unwound stack as a static).
+/// tick. When the loop ends the pipeline tears down and the engine tier
+/// closes after it, exactly as a native run returning to main() would;
+/// the pipeline outlives run()'s unwound stack as a static.
 void web_frame(void *arg) noexcept {
   auto *pipeline = static_cast<EnginePipeline *>(arg);
   if (!pipeline->execute_frame()) {
@@ -251,6 +349,7 @@ void web_frame(void *arg) noexcept {
     }
     pipeline->teardown();
     emscripten_cancel_main_loop();
+    shutdown();
   }
 }
 
@@ -259,6 +358,11 @@ void web_frame(void *arg) noexcept {
 
 /// Runs the main loop; reports whether it stopped gracefully or fatally.
 RunResult run(std::uint32_t maxFrames) noexcept {
+  if (!g_bootstrapped) {
+    core::log_message(core::LogLevel::Error, "engine",
+                      "run: the engine has not been bootstrapped");
+    return RunResult::FatalInitialization;
+  }
 #if defined(ENGINE_PLATFORM_WEB)
   // The browser owns the loop: hand execute_frame to
   // requestAnimationFrame and unwind out of run() (simulate_infinite
@@ -292,31 +396,27 @@ RunResult run(std::uint32_t maxFrames) noexcept {
 #endif
 }
 
-/// Maps a run result to the process exit code (0 only for Stopped).
 int run_result_exit_code(RunResult result) noexcept {
-  return (result == RunResult::Stopped) ? 0 : 1;
+  switch (result) {
+  case RunResult::Stopped:
+    return static_cast<int>(ExitCode::Ok);
+  case RunResult::FatalInitialization:
+    return static_cast<int>(ExitCode::FatalInitialization);
+  case RunResult::FatalFrame:
+    break;
+  }
+  return static_cast<int>(ExitCode::FatalFrame);
 }
 
-/// Shuts down the owning system.
+/// Closes every stage bootstrap opened, in reverse; a second call, or a
+/// call without a bootstrap, does nothing.
 void shutdown() noexcept {
+  if (!g_bootstrapped) {
+    return;
+  }
+  g_bootstrapped = false;
+  unwind_stages();
   core::log_message(core::LogLevel::Info, "engine", "shutdown complete");
-
-  const runtime::EditorBridge *bridge = runtime::editor_bridge();
-
-  shutdown_editor_bridge(bridge);
-  runtime::reset_anim_controllers();
-  // The bootstrap-owned texture registry owns the device object behind
-  // every texture it loaded, so it closes while the device is still live;
-  // shutdown_renderer releases the device last. Scene-capture textures are
-  // registered as external aliases the registry never destroys, and their
-  // creator (the command-buffer backend) releases them inside
-  // shutdown_renderer, also ahead of the device.
-  renderer::shutdown_texture_system();
-  renderer::shutdown_renderer();
-  audio::shutdown_audio();
-  scripting::dap_stop();
-  scripting::shutdown_scripting();
-  core::shutdown_core();
 }
 
 } // namespace engine

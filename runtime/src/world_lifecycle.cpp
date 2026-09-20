@@ -51,11 +51,15 @@ World::create_entity_with_persistent_id(PersistentId persistentId) noexcept {
   if (!is_mutation_phase()) {
     core::log_message(core::LogLevel::Error, "world",
                       "create_entity requires Input phase");
+    note_refusal(core::FailureKind::InvariantViolated);
     return kInvalidEntity;
   }
 
   if ((persistentId != kInvalidPersistentId) &&
       (find_persistent_index(persistentId) != 0U)) {
+    core::log_message(core::LogLevel::Error, "world",
+                      "create_entity refused: persistent id already in use");
+    note_refusal(core::FailureKind::InvalidArgument);
     return kInvalidEntity;
   }
 
@@ -65,6 +69,9 @@ World::create_entity_with_persistent_id(PersistentId persistentId) noexcept {
     index = m_freeEntityIndices[m_freeEntityCount];
   } else {
     if (m_nextEntityIndex > static_cast<std::uint32_t>(kMaxEntities)) {
+      core::log_message(core::LogLevel::Error, "world",
+                        "create_entity refused: entity capacity is full");
+      note_refusal(core::FailureKind::CapacityExhausted);
       return kInvalidEntity;
     }
 
@@ -99,6 +106,9 @@ World::create_entity_with_persistent_id(PersistentId persistentId) noexcept {
     } while (m_nextPersistentId != startCandidate);
 
     if (persistentId == kInvalidPersistentId) {
+      core::log_message(core::LogLevel::Error, "world",
+                        "create_entity refused: persistent ids exhausted");
+      note_refusal(core::FailureKind::CapacityExhausted, 1U);
       return kInvalidEntity;
     }
   }
@@ -114,6 +124,9 @@ World::create_entity_with_persistent_id(PersistentId persistentId) noexcept {
       m_freeEntityIndices[m_freeEntityCount] = index;
       ++m_freeEntityCount;
     }
+    core::log_message(core::LogLevel::Error, "world",
+                      "create_entity refused: persistent id table is full");
+    note_refusal(core::FailureKind::CapacityExhausted, 2U);
     return kInvalidEntity;
   }
   ++m_aliveEntityCount;
@@ -366,6 +379,12 @@ void World::remove_all_components(Entity entity) noexcept {
 
   NameComponent removedName{};
   const bool hadName = m_nameComponents.get(entity, &removedName);
+  // A dying collider leaves the body that owned it; resolved before the
+  // hierarchy link goes so the owner is still reachable.
+  const Entity inertiaOwner =
+      (m_colliders.get_ptr(entity) != nullptr)
+          ? find_rigid_body_owner(entity, m_readStateIndex)
+          : kInvalidEntity;
 
   m_cameraManager.on_entity_destroyed(entity);
 
@@ -385,6 +404,9 @@ void World::remove_all_components(Entity entity) noexcept {
   reset_transform_cache(entity.index);
   if (hadName && (removedName.name[0] != '\0')) {
     name_lookup_erase(core::fnv1a_32(removedName.name), entity.index);
+  }
+  if ((inertiaOwner != kInvalidEntity) && (inertiaOwner != entity)) {
+    rederive_inverse_inertia(inertiaOwner);
   }
 }
 

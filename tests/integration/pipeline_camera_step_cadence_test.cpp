@@ -124,14 +124,19 @@ RunResult run_rig(engine::EnginePipeline &pipeline, unsigned totalSteps,
   if (body == kInvalidEntity) {
     return result;
   }
-  // The first frames settle the camera manager onto the rig's camera.
+  // The first frames settle the camera manager onto the rig's camera. They
+  // may run fixed steps of their own — how many depends on how long they
+  // took — and the arm lags through those as through any other, so the
+  // count the arm's length is keyed by starts at the rig's creation.
+  unsigned steps = 0U;
   for (int frame = 0; frame < 4; ++frame) {
     if (!pipeline.execute_frame()) {
       return result;
     }
+    steps += engine::core::get_engine_stats().fixedSteps;
   }
+  totalSteps += steps;
 
-  unsigned steps = 0U;
   bool haveFirstOffset = false;
   double firstOffset = 0.0;
   for (unsigned frame = 0U; (steps < totalSteps) && (frame < 4000U); ++frame) {

@@ -23,6 +23,56 @@ engine::renderer::DrawCommand make_command(std::uint64_t sortKey,
   return command;
 }
 
+/// Two submissions of the same tie-equal draws in different orders must
+/// sort to one order: the render keys cannot separate them, so the sort
+/// falls through to draw identity instead of the input order (which in
+/// production follows the thread each chunk ran on).
+int check_sort_is_total_over_tie_equal_draws() {
+  static engine::renderer::CommandBufferBuilder forward;
+  static engine::renderer::CommandBufferBuilder scrambled;
+  forward.reset();
+  scrambled.reset();
+
+  constexpr std::uint32_t kCount = 96U;
+  // Half the draws share one entity and differ only by placement, the
+  // way foliage instances do; the rest are distinct entities.
+  const auto make = [](std::uint32_t i) noexcept {
+    engine::renderer::DrawCommand command{};
+    command.sortKey.value = 0x5000U;
+    command.mesh.id = 7U;
+    command.entity = (i < (kCount / 2U)) ? 1U : (i + 1U);
+    command.modelMatrix.columns[3].x = static_cast<float>(i);
+    return command;
+  };
+  for (std::uint32_t i = 0U; i < kCount; ++i) {
+    if (!forward.submit(make(i))) {
+      return 401;
+    }
+  }
+  // A fixed permutation: stride 37 is coprime with 96, so every index
+  // appears once.
+  for (std::uint32_t i = 0U; i < kCount; ++i) {
+    if (!scrambled.submit(make((i * 37U) % kCount))) {
+      return 402;
+    }
+  }
+  forward.sort_by_key();
+  scrambled.sort_by_key();
+  const engine::renderer::CommandBufferView a = forward.view();
+  const engine::renderer::CommandBufferView b = scrambled.view();
+  if ((a.count != kCount) || (b.count != kCount)) {
+    return 403;
+  }
+  for (std::uint32_t i = 0U; i < kCount; ++i) {
+    if ((a.data[i].entity != b.data[i].entity) ||
+        (a.data[i].modelMatrix.columns[3].x !=
+         b.data[i].modelMatrix.columns[3].x)) {
+      return 404;
+    }
+  }
+  return 0;
+}
+
 int check_submit_sort_and_reset() {
   static engine::renderer::CommandBufferBuilder builder;
   builder.reset();
@@ -1052,6 +1102,10 @@ int check_point_shadow_slot_liveness() {
 /// Runs this executable or test program.
 int main() {
   int result = check_submit_sort_and_reset();
+  if (result != 0) {
+    return result;
+  }
+  result = check_sort_is_total_over_tie_equal_draws();
   if (result != 0) {
     return result;
   }

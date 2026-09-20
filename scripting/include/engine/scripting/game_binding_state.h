@@ -9,10 +9,10 @@
 #include <cstddef>
 
 #include "engine/core/entity.h"
-#include "engine/runtime/game_state.h"
-#include "engine/runtime/player_controller.h"
+#include "engine/scripting/game_state.h"
+#include "engine/scripting/player_controller.h"
 
-namespace engine::runtime {
+namespace engine::scripting {
 
 /// The state the Lua game bindings read and write; default-construction is
 /// a full reset to the documented defaults.
@@ -50,4 +50,4 @@ private:
   }
 };
 
-} // namespace engine::runtime
+} // namespace engine::scripting

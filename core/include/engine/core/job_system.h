@@ -5,6 +5,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "engine/core/status.h"
+
 namespace engine::core {
 
 using JobFunction = void (*)(void *) noexcept;
@@ -40,8 +42,12 @@ bool is_job_system_initialized() noexcept;
 
 /// Begins the requested operation or profiling range for frame graph.
 bool begin_frame_graph() noexcept;
-/// Ends the requested operation or profiling range for frame graph.
-bool end_frame_graph() noexcept;
+/// Closes the frame graph once every job has run. InvariantViolated with
+/// detail 1 when the job system is not initialized, 2 when no graph is
+/// open, 3 when jobs are still pending (wait first), and 4 when dispatch
+/// failed (a cyclic graph or a ready-queue overflow dropped jobs); the
+/// graph is closed in every case but 3.
+Status end_frame_graph() noexcept;
 
 /// Submits work to the owning buffer or system.
 JobHandle submit(Job job) noexcept;

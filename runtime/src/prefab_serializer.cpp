@@ -18,6 +18,18 @@
 
 namespace engine::runtime {
 
+namespace {
+
+// Revision 3 writes RigidBody inertia provenance (inertiaAuthored); every
+// older revision always wrote a numeric inverseInertia, which is kept as
+// the authored value. Revision 2 writes inverseInertia as a 3-element
+// array; revision 1 wrote one number, read as the same value on every axis.
+constexpr std::uint32_t kLastImplicitInertiaPrefabVersion = 2U;
+constexpr std::uint32_t kLastScalarInertiaPrefabVersion = 1U;
+constexpr const char *kInverseInertiaKey = "inverseInertia";
+
+} // namespace
+
 // ---- Registry-driven component codec ----------------------------
 // Row membership and order for both prefab directions expand from
 // ENGINE_PERSISTENT_COMPONENT_TABLE; each type's prefab wire shape lives
@@ -32,7 +44,7 @@ template <typename T>
 bool decode_prefab_component(const core::JsonParser &parser,
                              const core::JsonValue &value,
                              const ReflectedComponentDescriptors &descs,
-                             T *out) noexcept {
+                             std::uint32_t documentVersion, T *out) noexcept {
   if constexpr (std::is_same_v<T, ScriptComponent>) {
     bool gotPath = false;
     if (value.type == core::JsonValue::Type::String) {
@@ -89,7 +101,22 @@ bool decode_prefab_component(const core::JsonParser &parser,
     return read_light_component(parser, value, out);
   } else if constexpr (std::is_same_v<T, FoliagePatchComponent>) {
     return read_foliage_patch_component(parser, value, out);
+  } else if constexpr (std::is_same_v<T, RigidBody>) {
+    ReflectedReadOptions options{};
+    if (documentVersion <= kLastScalarInertiaPrefabVersion) {
+      options.uniformScalarVec3Key = kInverseInertiaKey;
+    }
+    if (!read_reflected_component(parser, value,
+                                  component_descriptor(descs, out), out,
+                                  options)) {
+      return false;
+    }
+    if (documentVersion <= kLastImplicitInertiaPrefabVersion) {
+      out->inertiaAuthored = true;
+    }
+    return true;
   } else {
+    static_cast<void>(documentVersion);
     return read_reflected_component(parser, value,
                                     component_descriptor(descs, out), out);
   }
@@ -144,7 +171,7 @@ bool encode_prefab_component(core::JsonWriter &w, const char *key,
 namespace {
 
 constexpr const char *kPrefabLogChannel = "prefab";
-constexpr std::uint32_t kPrefabVersion = 1U;
+constexpr std::uint32_t kPrefabVersion = 3U;
 
 // File IO and vec/quat/foliage JSON helpers are shared with the scene
 // serializer via serialization_util.h.
@@ -259,8 +286,9 @@ Entity instantiate_prefab(World &world, const char *path) noexcept {
 
   // The revision decides how everything below it is interpreted, so a
   // document this build cannot read is refused before an instance exists.
+  std::uint32_t documentVersion = kPrefabVersion;
   if (!schema_version_supported(parser, root, kPrefabVersion, "prefab",
-                                kPrefabLogChannel)) {
+                                kPrefabLogChannel, &documentVersion)) {
     return kInvalidEntity;
   }
 
@@ -296,7 +324,8 @@ Entity instantiate_prefab(World &world, const char *path) noexcept {
     core::JsonValue value{};                                                   \
     if (parser.get_object_field(componentsVal, Key, &value)) {                 \
       Type component{};                                                        \
-      if (!decode_prefab_component(parser, value, descs, &component) ||        \
+      if (!decode_prefab_component(parser, value, descs, documentVersion,      \
+                                   &component) ||                              \
           !world.AddFn(entity, component)) {                                   \
         return failComponent("instantiate_prefab: failed to load " #Type);     \
       }                                                                        \

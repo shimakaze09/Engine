@@ -123,6 +123,20 @@ std::uint64_t draw_key_state_bits(const DrawCommand &command) noexcept {
   return command.sortKey.value & ~kDrawKeyDepthMask;
 }
 
+/// Total order for commands the render keys cannot separate: the owning
+/// entity, then the model matrix bit for bit (a foliage patch emits one
+/// command per instance under one entity). Without it the sort's output
+/// for tie-equal draws would follow the input order, which follows the
+/// thread each chunk ran on.
+bool draw_identity_less(const DrawCommand &lhs,
+                        const DrawCommand &rhs) noexcept {
+  if (lhs.entity != rhs.entity) {
+    return lhs.entity < rhs.entity;
+  }
+  return std::memcmp(&lhs.modelMatrix, &rhs.modelMatrix,
+                     sizeof(lhs.modelMatrix)) < 0;
+}
+
 } // namespace
 
 /// Resets this object back to its reusable empty state.
@@ -157,7 +171,8 @@ bool CommandBufferBuilder::append_from(
   return true;
 }
 
-/// Sorts submitted commands by transparency, state, material, and depth.
+/// Sorts submitted commands by transparency, state, material, depth and
+/// finally draw identity, so the order is total and input-independent.
 void CommandBufferBuilder::sort_by_key() noexcept {
   std::sort(m_commands.begin(),
             m_commands.begin() + static_cast<std::ptrdiff_t>(m_commandCount),
@@ -177,7 +192,10 @@ void CommandBufferBuilder::sort_by_key() noexcept {
                 if (lhsDepth != rhsDepth) {
                   return lhsDepth < rhsDepth;
                 }
-                return lhs.sortKey.value < rhs.sortKey.value;
+                if (lhs.sortKey.value != rhs.sortKey.value) {
+                  return lhs.sortKey.value < rhs.sortKey.value;
+                }
+                return draw_identity_less(lhs, rhs);
               }
 
               const std::uint64_t lhsState = draw_key_state_bits(lhs);
@@ -197,8 +215,14 @@ void CommandBufferBuilder::sort_by_key() noexcept {
               if (lhs.foliageWindFrequency != rhs.foliageWindFrequency) {
                 return lhs.foliageWindFrequency < rhs.foliageWindFrequency;
               }
-              return (lhs.sortKey.value & kDrawKeyDepthMask) <
-                     (rhs.sortKey.value & kDrawKeyDepthMask);
+              const std::uint64_t lhsDepth =
+                  lhs.sortKey.value & kDrawKeyDepthMask;
+              const std::uint64_t rhsDepth =
+                  rhs.sortKey.value & kDrawKeyDepthMask;
+              if (lhsDepth != rhsDepth) {
+                return lhsDepth < rhsDepth;
+              }
+              return draw_identity_less(lhs, rhs);
             });
 }
 

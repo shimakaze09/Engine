@@ -7,6 +7,7 @@
 #include "deferred_mutations.h"
 #include "entity_handle.h"
 #include "lua_state.h"
+#include "reload_transaction.h"
 #include "runtime_binding.h"
 
 extern "C" {
@@ -26,8 +27,7 @@ extern "C" {
 #include "engine/core/string_util.h"
 #include "engine/math/quat.h"
 #include "engine/math/vec3.h"
-#include "engine/runtime/scripting_bridge.h"
-#include "engine/runtime/world.h"
+#include "engine/scripting/runtime_services.h"
 
 namespace engine::scripting {
 
@@ -52,13 +52,54 @@ int lua_engine_load_sound(lua_State *state) noexcept {
   return 1;
 }
 
+/// Hands a fire-and-forget audio call to the reload scope when one is
+/// open. True when the caller performs the call itself; false when it was
+/// held or refused (a refused call is logged and does nothing).
+bool audio_call_runs_now(const StagedAudioOp &staged) noexcept {
+  switch (reload_staging(ReloadEffect::Audio)) {
+  case ReloadStaging::None:
+    return true;
+  case ReloadStaging::Staged:
+    reload_hold_audio(staged);
+    return false;
+  case ReloadStaging::Refused:
+    core::log_message(core::LogLevel::Warning, "scripting",
+                      "audio call refused: the hot reload holds no more");
+    return false;
+  }
+  return false;
+}
+
+/// Same for a call that reports success: true when the call ran or was
+/// held, false when the scope refused it or the call itself failed.
+template <typename Call>
+bool audio_call_ok(const StagedAudioOp &staged, Call call) noexcept {
+  switch (reload_staging(ReloadEffect::Audio)) {
+  case ReloadStaging::None:
+    return call();
+  case ReloadStaging::Staged:
+    reload_hold_audio(staged);
+    return true;
+  case ReloadStaging::Refused:
+    core::log_message(core::LogLevel::Warning, "scripting",
+                      "audio call refused: the hot reload holds no more");
+    return false;
+  }
+  return false;
+}
+
 int lua_engine_unload_sound(lua_State *state) noexcept {
   if (!lua_isnumber(state, 1)) {
     return 0;
   }
   if ((runtime_binding().services != nullptr) && (runtime_binding().services->unload_sound != nullptr)) {
     const auto id = static_cast<std::uint32_t>(lua_tointeger(state, 1));
-    runtime_binding().services->unload_sound(id);
+    StagedAudioOp staged{};
+    staged.kind = StagedAudioOp::Kind::UnloadSound;
+    staged.id = id;
+    if (audio_call_runs_now(staged)) {
+      runtime_binding().services->unload_sound(id);
+    }
   }
   return 0;
 }
@@ -84,7 +125,15 @@ int lua_engine_play_sound(lua_State *state) noexcept {
   if (lua_gettop(state) >= 4) {
     loop = lua_toboolean(state, 4) != 0;
   }
-  const bool ok = runtime_binding().services->play_sound(id, volume, pitch, loop);
+  StagedAudioOp staged{};
+  staged.kind = StagedAudioOp::Kind::PlaySound;
+  staged.id = id;
+  staged.a = volume;
+  staged.b = pitch;
+  staged.flag = loop;
+  const bool ok = audio_call_ok(staged, [&]() noexcept {
+    return runtime_binding().services->play_sound(id, volume, pitch, loop);
+  });
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
@@ -95,7 +144,12 @@ int lua_engine_stop_sound(lua_State *state) noexcept {
   }
   if ((runtime_binding().services != nullptr) && (runtime_binding().services->stop_sound != nullptr)) {
     const auto id = static_cast<std::uint32_t>(lua_tointeger(state, 1));
-    runtime_binding().services->stop_sound(id);
+    StagedAudioOp staged{};
+    staged.kind = StagedAudioOp::Kind::StopSound;
+    staged.id = id;
+    if (audio_call_runs_now(staged)) {
+      runtime_binding().services->stop_sound(id);
+    }
   }
   return 0;
 }
@@ -114,8 +168,17 @@ int lua_engine_play_sound_at(lua_State *state) noexcept {
   if ((runtime_binding().services != nullptr) &&
       (runtime_binding().services->play_sound_at != nullptr)) {
     const auto soundId = static_cast<std::uint32_t>(lua_tointeger(state, 1));
-    ok = runtime_binding().services->play_sound_at(
-        soundId, position.x, position.y, position.z, volume);
+    StagedAudioOp staged{};
+    staged.kind = StagedAudioOp::Kind::PlaySoundAt;
+    staged.id = soundId;
+    staged.a = position.x;
+    staged.b = position.y;
+    staged.c = position.z;
+    staged.d = volume;
+    ok = audio_call_ok(staged, [&]() noexcept {
+      return runtime_binding().services->play_sound_at(
+          soundId, position.x, position.y, position.z, volume);
+    });
   }
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
@@ -138,7 +201,13 @@ int lua_engine_set_bus_volume(lua_State *state) noexcept {
   }
   if ((runtime_binding().services != nullptr) &&
       (runtime_binding().services->set_bus_volume != nullptr)) {
-    runtime_binding().services->set_bus_volume(bus, volume);
+    StagedAudioOp staged{};
+    staged.kind = StagedAudioOp::Kind::SetBusVolume;
+    staged.id = bus;
+    staged.a = volume;
+    if (audio_call_runs_now(staged)) {
+      runtime_binding().services->set_bus_volume(bus, volume);
+    }
   }
   return 0;
 }
@@ -164,7 +233,21 @@ int lua_engine_play_music(lua_State *state) noexcept {
       (runtime_binding().services->play_music != nullptr)) {
     const bool loop = (lua_isboolean(state, 3) == 0) ||
                       (lua_toboolean(state, 3) != 0);
-    ok = runtime_binding().services->play_music(path, volume, loop);
+    StagedAudioOp staged{};
+    staged.kind = StagedAudioOp::Kind::PlayMusic;
+    staged.a = volume;
+    staged.flag = loop;
+    // The jail already bounded the path; a longer one is refused under
+    // reload rather than replayed truncated.
+    if (reload_transaction_open() &&
+        (std::strlen(path) > StagedAudioOp::kMaxPathLength)) {
+      ok = false;
+    } else {
+      std::snprintf(staged.path, sizeof(staged.path), "%s", path);
+      ok = audio_call_ok(staged, [&]() noexcept {
+        return runtime_binding().services->play_music(path, volume, loop);
+      });
+    }
   }
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
@@ -175,7 +258,11 @@ int lua_engine_stop_music(lua_State *state) noexcept {
   static_cast<void>(state);
   if ((runtime_binding().services != nullptr) &&
       (runtime_binding().services->stop_music != nullptr)) {
-    runtime_binding().services->stop_music();
+    StagedAudioOp staged{};
+    staged.kind = StagedAudioOp::Kind::StopMusic;
+    if (audio_call_runs_now(staged)) {
+      runtime_binding().services->stop_music();
+    }
   }
   return 0;
 }

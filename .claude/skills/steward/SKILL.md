@@ -68,20 +68,6 @@ sentence in a pull request body. Once "N-1 of N pass, and the one failure
 also fails on main" becomes template text, the suite has stopped being a
 signal and the next real failure will be invisible.
 
-## Selecting work: overlap is not a criterion
-
-**Never defer or substitute work because it touches files another change
-is touching.** Selecting by file-disjointness maximizes parallel
-throughput and systematically excludes every structural fix, because
-structural fixes touch many files by nature. That trade is wrong: it buys
-commit volume at the price of the work that would stop the defects
-recurring.
-
-Pick by severity and by whether the fix sits at the layer that owns the
-defect. When the right work overlaps concurrent work, **pause the
-concurrent work**. Consolidations and foundation changes run alone,
-holding the default branch.
-
 ## Before you push
 
 One validated push beats three speculative ones.

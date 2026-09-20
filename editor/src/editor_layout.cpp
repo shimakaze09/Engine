@@ -76,6 +76,12 @@ bool resolve_layout_directory(char *out, std::size_t capacity) noexcept {
 
 } // namespace
 
+void editor_layout_reset() noexcept {
+  g_loadFailed = false;
+  g_refusalLogged = false;
+  g_oversizedLogged = false;
+}
+
 bool editor_layout_path(char *out, std::size_t capacity) noexcept {
   if ((out == nullptr) || (capacity == 0U)) {
     return false;

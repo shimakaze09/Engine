@@ -5,7 +5,7 @@
 /// Runs this executable or test program.
 int main() {
   if (!engine::bootstrap()) {
-    return 1;
+    return static_cast<int>(engine::ExitCode::BootstrapFailed);
   }
 
   const engine::RunResult result = engine::run(0);

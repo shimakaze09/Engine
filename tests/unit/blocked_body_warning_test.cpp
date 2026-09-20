@@ -5,10 +5,13 @@
 // unobstructed motion, and is disabled by cvar 0.
 
 #include <cstdio>
+#include <cstring>
 #include <memory>
 #include <new>
 
 #include "engine/core/cvar.h"
+#include "engine/core/diagnostic.h"
+#include "engine/core/logging.h"
 #include "engine/math/vec3.h"
 #include "engine/physics/physics.h"
 #include "engine/runtime/physics_bridge.h"
@@ -29,6 +32,16 @@ static void check(bool condition, const char *name) noexcept {
 }
 
 namespace {
+
+/// The entity the last physics warning record named.
+engine::runtime::PersistentId g_lastPhysicsEntityId = 0U;
+
+void note_physics_record(const engine::core::Diagnostic &record,
+                         void *) noexcept {
+  if (std::strcmp(record.channel, "physics") == 0) {
+    g_lastPhysicsEntityId = record.entityPersistentId;
+  }
+}
 
 constexpr float kDt = 1.0F / 60.0F;
 constexpr float kDriveSpeed = 1.5F;
@@ -58,7 +71,9 @@ DrivenBoxWorld make_driven_box_world(bool withWall) noexcept {
   boxCollider.restitution = 0.0F;
   engine::runtime::RigidBody boxBody{};
   boxBody.inverseMass = 0.001F;
-  boxBody.inverseInertia = 0.0F;
+  boxBody.inverseInertia =
+      engine::math::Vec3(0.0F, 0.0F, 0.0F);
+  boxBody.inertiaAuthored = true;
   if ((setup.box == engine::runtime::kInvalidEntity) ||
       !setup.world->add_collider(setup.box, boxCollider) ||
       !setup.world->add_rigid_body(setup.box, boxBody)) {
@@ -150,6 +165,8 @@ static void test_blocked_box_warns_once_per_episode() noexcept {
         "Warning names the blocked body");
   check(stats.lastBlockingEntityIndex == setup.wall.index,
         "Warning names the blocking wall");
+  check(g_lastPhysicsEntityId == setup.world->persistent_id(setup.box),
+        "Warning record names the blocked body by persistent id");
 
   for (int i = 0; i < 100; ++i) {
     stepsOk = stepsOk && step_once(setup, kDriveSpeed);
@@ -195,6 +212,8 @@ static void test_cvar_zero_disables() noexcept {
 
 /// Runs this executable or test program.
 int main() {
+  engine::core::initialize_logging();
+  engine::core::log_register_diagnostic_sink(&note_physics_record, nullptr);
   std::printf("=== Blocked-body warning diagnostic ===\n");
 
   check(engine::physics::register_physics_cvars(),
@@ -205,5 +224,7 @@ int main() {
   test_cvar_zero_disables();
 
   std::printf("\n%d passed, %d failed\n", g_passed, g_failed);
+  engine::core::log_unregister_diagnostic_sink(&note_physics_record, nullptr);
+  engine::core::shutdown_logging();
   return (g_failed > 0) ? 1 : 0;
 }

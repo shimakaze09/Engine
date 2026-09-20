@@ -12,17 +12,19 @@ extern "C" {
 
 #include <cstddef>
 
-#include "engine/runtime/timer_manager.h"
-#include "engine/runtime/world.h"
+#include "reload_transaction.h"
 #include "runtime_binding.h"
 
 namespace engine::scripting {
 namespace {
 
-constexpr std::size_t kMaxTimerRefs = runtime::TimerManager::kMaxTimers;
+/// Timer ids are opaque bridge values; zero never names a timer.
+using TimerId = std::uint32_t;
+constexpr TimerId kInvalidTimerId = 0U;
+constexpr std::size_t kMaxTimerRefs = kMaxTimerSlots;
 /// Owns one Lua callback registry ref for an exact timer generation.
 struct LuaTimerRef final {
-  runtime::TimerId ownerId = runtime::kInvalidTimerId;
+  TimerId ownerId = kInvalidTimerId;
   int registryRef = LUA_NOREF;
 };
 
@@ -81,21 +83,23 @@ int timer_call_trampoline(lua_State *state) noexcept {
 }
 
 /// Invokes a Lua callback for a fired runtime timer.
-void lua_timer_callback(runtime::TimerId id, void *userData) noexcept {
+void lua_timer_callback(TimerId id, void *userData) noexcept {
   (void)userData;
   lua_State *const mainState = timer_main_state(nullptr);
-  if ((mainState == nullptr) || (id == runtime::kInvalidTimerId) ||
-      (runtime_binding().world == nullptr)) {
+  if ((mainState == nullptr) || (id == kInvalidTimerId) || !runtime_bound()) {
     return;
   }
 
-  auto &timerManager = runtime_binding().world->timer_manager();
-  const std::size_t slot = timerManager.slot_for_id(id);
-  if (slot >= kMaxTimerRefs) {
+  const RuntimeServices &services = *runtime_binding().services;
+  runtime::World *const world = runtime_binding().world;
+  const std::size_t slot = services.timer_slot_for_id(world, id);
+  bool wasRepeating = false;
+  bool wasActive = false;
+  if ((slot >= kMaxTimerRefs) ||
+      !services.timer_slot_state(world, slot, &wasRepeating, &wasActive)) {
     return;
   }
 
-  const bool wasRepeating = timerManager.entry_at(slot).repeat;
   const LuaTimerRef firedRef = g_timerLuaRefs[slot];
   if ((firedRef.ownerId != id) || (firedRef.registryRef == LUA_NOREF)) {
     return;
@@ -106,14 +110,16 @@ void lua_timer_callback(runtime::TimerId id, void *userData) noexcept {
   static_cast<void>(protected_engine_dispatch(
       mainState, &timer_call_trampoline, &args, 0, "timer"));
 
-  if (runtime_binding().world == nullptr) {
+  if (!runtime_bound()) {
     return;
   }
 
-  auto &currentTimerManager = runtime_binding().world->timer_manager();
+  bool repeatNow = false;
+  bool activeNow = false;
   const bool stillCurrent =
-      (currentTimerManager.slot_for_id(id) == slot) &&
-      currentTimerManager.entry_at(slot).active;
+      (services.timer_slot_for_id(world, id) == slot) &&
+      services.timer_slot_state(world, slot, &repeatNow, &activeNow) &&
+      activeNow;
   if (!wasRepeating || !stillCurrent) {
     LuaTimerRef &currentRef = g_timerLuaRefs[slot];
     if (currentRef.ownerId == id) {
@@ -123,28 +129,30 @@ void lua_timer_callback(runtime::TimerId id, void *userData) noexcept {
 }
 
 /// Registers a Lua timer callback in the current world's timer manager.
-runtime::TimerId register_lua_timer(lua_State *state, float seconds,
+TimerId register_lua_timer(lua_State *state, float seconds,
                                     bool repeat) noexcept {
-  if (runtime_binding().world == nullptr) {
-    return runtime::kInvalidTimerId;
+  if (!runtime_bound() ||
+      (reload_staging(ReloadEffect::TimerCreate) == ReloadStaging::Refused)) {
+    return kInvalidTimerId;
   }
 
   ensure_timer_refs_init();
-  auto &timerManager = runtime_binding().world->timer_manager();
-  const runtime::TimerId id =
-      repeat ? timerManager.set_interval(seconds, lua_timer_callback, nullptr)
-             : timerManager.set_timeout(seconds, lua_timer_callback, nullptr);
-  if (id == runtime::kInvalidTimerId) {
+  const RuntimeServices &services = *runtime_binding().services;
+  runtime::World *const world = runtime_binding().world;
+  const TimerId id =
+      services.timer_set(world, seconds, repeat, &lua_timer_callback, nullptr);
+  if (id == kInvalidTimerId) {
     return id;
   }
 
-  const std::size_t slot = timerManager.slot_for_id(id);
+  const std::size_t slot = services.timer_slot_for_id(world, id);
   if (slot >= kMaxTimerRefs) {
-    timerManager.cancel(id);
-    return runtime::kInvalidTimerId;
+    services.timer_cancel(world, id);
+    return kInvalidTimerId;
   }
 
   release_timer_ref(g_timerLuaRefs[slot], timer_main_state(state));
+  reload_note_timer_created(id);
 
   // The callback is on the calling thread's stack, so the ref is taken
   // there; the resulting registry ref is VM-global and is released from
@@ -164,8 +172,8 @@ int lua_engine_set_timeout(lua_State *state) noexcept {
   }
 
   const float seconds = static_cast<float>(lua_tonumber(state, 2));
-  const runtime::TimerId id = register_lua_timer(state, seconds, false);
-  if (id == runtime::kInvalidTimerId) {
+  const TimerId id = register_lua_timer(state, seconds, false);
+  if (id == kInvalidTimerId) {
     lua_pushnil(state);
     return 1;
   }
@@ -181,8 +189,8 @@ int lua_engine_set_interval(lua_State *state) noexcept {
   }
 
   const float seconds = static_cast<float>(lua_tonumber(state, 2));
-  const runtime::TimerId id = register_lua_timer(state, seconds, true);
-  if (id == runtime::kInvalidTimerId) {
+  const TimerId id = register_lua_timer(state, seconds, true);
+  if (id == kInvalidTimerId) {
     lua_pushnil(state);
     return 1;
   }
@@ -192,28 +200,46 @@ int lua_engine_set_interval(lua_State *state) noexcept {
 }
 
 int lua_engine_cancel_timer(lua_State *state) noexcept {
-  if (!lua_isnumber(state, 1) || (runtime_binding().world == nullptr)) {
+  if (!lua_isnumber(state, 1) || !runtime_bound()) {
     return 0;
   }
 
-  const auto id = static_cast<runtime::TimerId>(lua_tointeger(state, 1));
-  if (id == runtime::kInvalidTimerId) {
+  const auto id = static_cast<TimerId>(lua_tointeger(state, 1));
+  if (id == kInvalidTimerId) {
     return 0;
   }
-
-  auto &timerManager = runtime_binding().world->timer_manager();
-  const std::size_t slot = timerManager.slot_for_id(id);
-  if (slot >= kMaxTimerRefs) {
-    return 0;
-  }
-
-  timerManager.cancel(id);
-  lua_State *refState = timer_main_state(state);
-  LuaTimerRef &timerRef = g_timerLuaRefs[slot];
-  if (timerRef.ownerId == id) {
-    release_timer_ref(timerRef, refState);
+  switch (reload_staging(ReloadEffect::TimerCancel)) {
+  case ReloadStaging::None:
+    cancel_lua_timer(id);
+    break;
+  case ReloadStaging::Staged:
+    reload_hold_timer_cancel(id);
+    break;
+  case ReloadStaging::Refused:
+    core::log_message(core::LogLevel::Warning, "scripting",
+                      "cancel_timer refused: the hot reload holds no more");
+    break;
   }
   return 0;
+}
+
+void cancel_lua_timer(std::uint32_t timerId) noexcept {
+  if ((timerId == kInvalidTimerId) || !runtime_bound()) {
+    return;
+  }
+  const RuntimeServices &services = *runtime_binding().services;
+  runtime::World *const world = runtime_binding().world;
+  const std::size_t slot = services.timer_slot_for_id(world, timerId);
+  if (slot >= kMaxTimerRefs) {
+    return;
+  }
+
+  services.timer_cancel(world, timerId);
+  lua_State *refState = timer_main_state(nullptr);
+  LuaTimerRef &timerRef = g_timerLuaRefs[slot];
+  if (timerRef.ownerId == timerId) {
+    release_timer_ref(timerRef, refState);
+  }
 }
 
 void clear_lua_timer_bindings(lua_State *fallbackState) noexcept {
@@ -224,8 +250,8 @@ void clear_lua_timer_bindings(lua_State *fallbackState) noexcept {
     release_timer_ref(timerRef, refState);
   }
 
-  if (runtime_binding().world != nullptr) {
-    runtime_binding().world->timer_manager().clear();
+  if (runtime_bound()) {
+    runtime_binding().services->timer_clear(runtime_binding().world);
   }
 }
 
@@ -241,12 +267,13 @@ std::size_t active_lua_timer_ref_count() noexcept {
 }
 
 void tick_lua_timers(lua_State *state, float deltaSeconds) noexcept {
-  if ((state == nullptr) || (runtime_binding().world == nullptr)) {
+  if ((state == nullptr) || !runtime_bound()) {
     return;
   }
 
   ensure_timer_refs_init();
-  runtime_binding().world->timer_manager().tick(deltaSeconds);
+  static_cast<void>(
+      runtime_binding().services->timer_tick(runtime_binding().world, deltaSeconds));
 }
 
 } // namespace engine::scripting

@@ -8,19 +8,21 @@
 // pipeline_teardown_run_state_test.cpp pattern, headless): run A advances the
 // clocks, teardown must zero them, and run B's first-frame on_begin_play —
 // which fires before run B ever publishes a frame time — must read all three
-// clocks as zero through the production Lua dispatch path.
+// clocks as zero through the production Lua dispatch path. Also pins the
+// published SimulationClock exactly: three one-step frames put the tick
+// index at three, the frame index at the frame the callbacks ran in, and
+// the render alpha at zero.
 
 #include "engine/engine.h"
 #include "engine/runtime/editor_bridge.h"
 #include "engine/runtime/engine_pipeline.h"
 #include "engine/runtime/world.h"
 #include "engine/scripting/bindable_api.h"
+#include "engine/scripting/scripting.h"
 
-#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
-#include <thread>
 
 namespace {
 
@@ -115,11 +117,11 @@ void remove_script_file() noexcept {
   static_cast<void>(std::remove(kScriptPath));
 }
 
-/// Runs one playing frame guaranteed to simulate at least one fixed step
-/// (see pipeline_tick_cadence_test.cpp on the wall-clock accumulator).
+/// Runs one playing frame that simulates exactly one fixed step: the frame
+/// delta comes from the pipeline's override, not the wall clock.
 bool ticking_frame(engine::EnginePipeline &pipeline) noexcept {
-  std::this_thread::sleep_for(std::chrono::milliseconds(20));
-  return pipeline.execute_frame();
+  return pipeline.set_frame_delta_override(1.0 / 60.0) &&
+         pipeline.execute_frame();
 }
 
 /// Compares the live game-state label against an expected value.
@@ -181,6 +183,24 @@ int main() {
     CHECK(engine::scripting::bindable_frame_count() > 0,
           "run A published a nonzero frame index");
 
+    // The published clock is exact: every field derives from the fixed
+    // step and the frame count, never from the wall clock.
+    const engine::core::SimulationClock &published =
+        engine::scripting::simulation_clock();
+    constexpr double kStep = engine::core::kFixedDeltaSeconds;
+    CHECK(published.tickIndex == 3U, "three one-step frames simulate three ticks");
+    CHECK(published.frameIndex == 2U,
+          "the published frame index names the frame the callbacks ran in");
+    CHECK(published.stepsThisFrame == 1U, "a one-step frame publishes one step");
+    CHECK(published.fixedDeltaSeconds == kStep, "the fixed step is published");
+    CHECK(published.deltaSeconds == kStep, "the frame delta is one fixed step");
+    CHECK(published.simulationSeconds == ((kStep + kStep) + kStep),
+          "simulation time is the sum of the steps taken");
+    CHECK(published.renderAlpha == 0.0,
+          "an exact one-step frame leaves nothing to interpolate");
+    CHECK(engine::scripting::bindable_delta_time() == static_cast<float>(kStep),
+          "engine.delta_time reads the published delta");
+
     pipeline.teardown();
 
     // The run boundary itself must zero the clocks: an embedder reading them
@@ -191,6 +211,10 @@ int main() {
           "teardown zeroes the published elapsed time");
     CHECK(engine::scripting::bindable_frame_count() == 0,
           "teardown zeroes the published frame index");
+    CHECK((engine::scripting::simulation_clock().tickIndex == 0U) &&
+              (engine::scripting::simulation_clock().stepsThisFrame == 0U) &&
+              (engine::scripting::simulation_clock().renderAlpha == 1.0),
+          "teardown publishes the zero clock");
   }
 
   // --- Run B: the first begin-play dispatch observes the new run's clocks. ---

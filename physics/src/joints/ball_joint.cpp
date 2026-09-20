@@ -3,8 +3,9 @@
 // Model: world anchors p = x + R r with R the body rotation and r the
 // local anchor; constraint C = pB - pA = 0. Along a direction n the
 // Jacobian row is J = [-n^T, -(rA x n)^T, n^T, (rB x n)^T], giving the
-// effective inverse mass J M^-1 J^T = mA^-1 + mB^-1 + iA|rA x n|^2 +
-// iB|rB x n|^2 with scalar inverse inertias i. Each iteration projects the
+// effective inverse mass J M^-1 J^T = mA^-1 + mB^-1 + (rA x n)^T IA (rA x n)
+// + (rB x n)^T IB (rB x n) with world inverse inertia tensors I. Each
+// iteration projects the
 // current error along its own direction as an impulse at the anchors (so
 // offset anchors torque their bodies), then removes the full relative
 // anchor velocity through the 3x3 anchor mass matrix. Rotation about the

@@ -36,15 +36,12 @@ struct ContactManifold final {
   ManifoldContact contacts[kMaxContacts]{};
   std::size_t contactCount = 0U;
   std::uint32_t lastFrameUsed = 0U;
-  // Scalar inverse inertia the ORIGINATING resolve (clipped-manifold or
-  // single-point) actually used for each endpoint, so outer
-  // relaxation pass re-solves the same point-relative quantity the primary
-  // resolve converged instead of guessing a possibly-mismatched value
-  // (clipped manifolds use a box-tensor approximation; single-point paths
-  // use RigidBody::inverseInertia directly). Zero for a static or
-  // non-rotating endpoint.
-  float invInertiaA = 0.0F;
-  float invInertiaB = 0.0F;
+  // Body-space inverse inertia each endpoint carried when the originating
+  // resolve ran, so the outer relaxation pass re-solves the same
+  // point-relative quantity the primary resolve converged. Zero for a
+  // static or non-rotating endpoint.
+  math::Vec3 invInertiaA = math::Vec3(0.0F, 0.0F, 0.0F);
+  math::Vec3 invInertiaB = math::Vec3(0.0F, 0.0F, 0.0F);
 };
 
 static constexpr std::size_t kMaxContactManifolds = 2048U;

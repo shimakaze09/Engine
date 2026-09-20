@@ -165,13 +165,16 @@ void draw_import_settings_inspector(const char *assetPath) noexcept {
   }
 }
 
-/// Every filterable AssetKind, in the fixed order the type-filter row and
-/// the "N kinds" persistence mask both use.
-constexpr AssetKind kFilterKinds[] = {
-    AssetKind::Mesh,     AssetKind::Texture,   AssetKind::Material,
-    AssetKind::Script,   AssetKind::Scene,     AssetKind::Animation,
-    AssetKind::AnimationController, AssetKind::Sound, AssetKind::Other,
+/// Every filterable asset type in table order, which is also the bit
+/// order of the persisted type mask.
+constexpr content::AssetTypeTag kFilterKinds[] = {
+#define ENGINE_ASSET_FILTER_KIND(Tag, label, policy, action, sources, cooked) \
+  content::AssetTypeTag::Tag,
+    ENGINE_ASSET_TYPE_TABLE(ENGINE_ASSET_FILTER_KIND)
+#undef ENGINE_ASSET_FILTER_KIND
 };
+static_assert(std::size(kFilterKinds) == content::kAssetTypeCount,
+              "one filter checkbox per asset type");
 
 /// Result of the last "Find Usages" scan, shown in a modal popup. Populated
 /// only by an explicit context-menu click — never per frame.
@@ -233,7 +236,7 @@ void run_find_usages(const AssetIndexEntry &target) noexcept {
        (i < count) && (g_findUsages.matchCount < FindUsagesState::kMaxMatches);
        ++i) {
     const AssetIndexEntry *entry = asset_index_entry(i);
-    if ((entry == nullptr) || (entry->kind != AssetKind::Scene)) {
+    if ((entry == nullptr) || (entry->kind != content::AssetTypeTag::Scene)) {
       continue;
     }
     if (file_contains_substring(entry->osPath, target.virtualPath)) {
@@ -330,7 +333,7 @@ void draw_asset_row(const AssetIndexEntry &entry) noexcept {
 
   char label[256] = {};
   std::snprintf(label, sizeof(label), "[%s] %s",
-               asset_kind_label(entry.kind), entry.name);
+               content::asset_type_label(entry.kind), entry.name);
   const bool isSelected =
       std::strcmp(editor_session().selectedAssetPath, entry.osPath) == 0;
 
@@ -345,8 +348,8 @@ void draw_asset_row(const AssetIndexEntry &entry) noexcept {
     }
   }
 
-  if ((entry.kind == AssetKind::Mesh) && (entry.virtualPath[0] != '\0') &&
-      ImGui::BeginDragDropSource()) {
+  if ((entry.kind == content::AssetTypeTag::Mesh) && !entry.isSource &&
+      (entry.virtualPath[0] != '\0') && ImGui::BeginDragDropSource()) {
     ImGui::SetDragDropPayload("ASSET_VIRTUAL_PATH", entry.virtualPath,
                               std::strlen(entry.virtualPath) + 1U);
     ImGui::TextUnformatted(entry.name);
@@ -365,10 +368,10 @@ void draw_type_filters(ContentBrowserState &browser) noexcept {
     if (i != 0U) {
       ImGui::SameLine();
     }
-    const AssetKind kind = kFilterKinds[i];
+    const content::AssetTypeTag kind = kFilterKinds[i];
     bool enabled = (browser.filter.typeMask & asset_kind_bit(kind)) != 0U;
     ImGui::PushID(static_cast<int>(i));
-    if (ImGui::Checkbox(asset_kind_label(kind), &enabled)) {
+    if (ImGui::Checkbox(content::asset_type_label(kind), &enabled)) {
       if (enabled) {
         browser.filter.typeMask |= asset_kind_bit(kind);
       } else {

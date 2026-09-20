@@ -22,7 +22,7 @@ bool g_teardownDispatchActive = false;
 
 /// Saves the current world to a scene file from Lua.
 int lua_engine_save_scene(lua_State *state) noexcept {
-  if ((runtime_binding().world == nullptr) || !lua_isstring(state, 1)) {
+  if (!runtime_bound() || !lua_isstring(state, 1)) {
     lua_pushboolean(state, 0);
     return 1;
   }

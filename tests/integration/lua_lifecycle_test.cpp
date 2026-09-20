@@ -12,6 +12,7 @@
 #include "engine/runtime/scripting_bridge.h"
 #include "engine/runtime/world.h"
 #include "engine/scripting/scripting.h"
+#include "../scripting_clock.h"
 
 namespace {
 
@@ -74,83 +75,6 @@ bool write_script_file(const char *contents) noexcept {
   const bool ok = (std::fwrite(contents, 1U, len, file) == len);
   std::fclose(file);
   return ok;
-}
-
-// Minimal RuntimeServices wiring so scripting dispatch works.
-engine::runtime::World *g_testWorld = nullptr;
-
-engine::runtime::WorldPhase get_phase(engine::runtime::World *w) noexcept {
-  return (w != nullptr) ? w->current_phase()
-                        : engine::runtime::WorldPhase::Input;
-}
-
-/// Creates a scene object for the Lua-facing spawn operation.
-std::uint32_t create_scene_object(engine::runtime::World *w) noexcept {
-  if (w == nullptr) {
-    return 0U;
-  }
-  return w->create_scene_object().index;
-}
-
-/// Destroys or releases the requested object, handle, or resource for entity.
-bool destroy_entity(engine::runtime::World *w, std::uint32_t idx) noexcept {
-  if (w == nullptr) {
-    return false;
-  }
-  const auto e = w->find_entity_by_index(idx);
-  return w->destroy_entity(e);
-}
-
-bool add_transform(engine::runtime::World *w, std::uint32_t idx,
-                   const engine::runtime::Transform &t) noexcept {
-  if (w == nullptr) {
-    return false;
-  }
-  const auto e = w->find_entity_by_index(idx);
-  return w->add_transform(e, t);
-}
-
-bool add_script_component(engine::runtime::World *w, std::uint32_t idx,
-                          const engine::runtime::ScriptComponent &sc) noexcept {
-  if (w == nullptr) {
-    return false;
-  }
-  return w->add_script_component(w->find_entity_by_index(idx), sc);
-}
-
-std::uint32_t get_entity_count(engine::runtime::World *w) noexcept {
-  return (w != nullptr) ? static_cast<std::uint32_t>(w->alive_entity_count())
-                        : 0U;
-}
-
-const engine::runtime::Transform *
-get_transform_read_ptr(engine::runtime::World *w, std::uint32_t idx) noexcept {
-  if (w == nullptr) {
-    return nullptr;
-  }
-  return w->get_transform_read_ptr(w->find_entity_by_index(idx));
-}
-
-bool get_transform(engine::runtime::World *w, std::uint32_t idx,
-                   engine::runtime::Transform *outTransform) noexcept {
-  if (w == nullptr) {
-    return false;
-  }
-  return w->get_transform(w->find_entity_by_index(idx), outTransform);
-}
-
-/// Builds the requested runtime data for test services.
-engine::scripting::RuntimeServices build_test_services() noexcept {
-  engine::scripting::RuntimeServices svc{};
-  svc.get_current_phase = &get_phase;
-  svc.create_scene_object_op = &create_scene_object;
-  svc.destroy_entity_op = &destroy_entity;
-  svc.add_transform_op = &add_transform;
-  svc.add_script_component_op = &add_script_component;
-  svc.get_entity_count = &get_entity_count;
-  svc.get_transform_read_ptr = &get_transform_read_ptr;
-  svc.get_transform_op = &get_transform;
-  return svc;
 }
 
 /// Moves the test script timestamp forward from a known cached value.
@@ -1341,11 +1265,8 @@ int main() {
     return 1;
   }
 
-  g_testWorld = world.get();
   engine::core::ServiceLocator serviceLocator{};
   engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
-  auto svc = build_test_services();
-  engine::scripting::bind_runtime_services(&svc, serviceLocator);
   engine::scripting::set_default_mesh_asset_id(1U);
 
   int failures = 0;
@@ -1390,7 +1311,7 @@ int main() {
     } else {
       constexpr float kDt = 1.0F / 60.0F;
       for (int i = 0; i < 3; ++i) {
-        engine::scripting::set_frame_time(kDt,
+        engine::tests::publish_frame_time(kDt,
                                           kDt * static_cast<float>(i + 1));
         engine::scripting::dispatch_entity_scripts_update(kDt);
       }
@@ -1426,7 +1347,7 @@ int main() {
       // covered directly in frame_pacing_test.cpp); stage_scripting would
       // pass step_seconds() == 3 * kFixedDeltaSeconds for that frame.
       constexpr float kThreeStepDt = 3.0F * (1.0F / 60.0F);
-      engine::scripting::set_frame_time(kThreeStepDt, kThreeStepDt);
+      engine::tests::publish_frame_time(kThreeStepDt, kThreeStepDt);
       engine::scripting::dispatch_entity_scripts_update(kThreeStepDt);
 
       const bool countOk = engine::scripting::call_script_function_float(

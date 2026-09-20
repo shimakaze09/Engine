@@ -29,8 +29,19 @@ struct PlayParams final {
   bool loop = false;
 };
 
-/// Initializes the owning system for audio.
+/// Audio start-up choices.
+struct AudioConfig final {
+  /// Mix into no device at all: a headless run keeps every API answering
+  /// as with a device while never opening one.
+  bool nullDevice = false;
+};
+
+/// Initializes the owning system for audio against a real device.
 bool initialize_audio() noexcept;
+/// Initializes the owning system for audio with explicit choices.
+bool initialize_audio(const AudioConfig &config) noexcept;
+/// True while the audio engine mixes into no device.
+bool audio_uses_null_device() noexcept;
 /// Shuts down the owning system for audio.
 void shutdown_audio() noexcept;
 

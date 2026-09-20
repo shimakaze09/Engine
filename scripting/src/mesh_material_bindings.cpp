@@ -8,6 +8,7 @@
 #include "deferred_mutations.h"
 #include "entity_handle.h"
 #include "lua_state.h"
+#include "reload_transaction.h"
 #include "runtime_binding.h"
 
 extern "C" {
@@ -26,9 +27,7 @@ extern "C" {
 #include "engine/core/logging.h"
 #include "engine/core/string_util.h"
 #include "engine/math/quat.h"
-#include "engine/runtime/primitive_collider.h"
-#include "engine/runtime/scripting_bridge.h"
-#include "engine/runtime/world.h"
+#include "engine/scripting/runtime_services.h"
 
 namespace engine::scripting {
 
@@ -84,8 +83,8 @@ int lua_engine_get_default_mesh_asset_id(lua_State *state) noexcept {
 // degrade to the bounding box if hull slots are exhausted so the prop
 // still collides instead of falling through the world.
 int lua_engine_spawn_shape(lua_State *state) noexcept {
-  if ((runtime_binding().world == nullptr) || !can_apply_mutations_now() ||
-      !lua_isstring(state, 1)) {
+  if (!can_create_entities_now() || !lua_isstring(state, 1) ||
+      (reload_staging(ReloadEffect::CreateEntity) == ReloadStaging::Refused)) {
     lua_pushnil(state);
     return 1;
   }
@@ -152,12 +151,14 @@ int lua_engine_spawn_shape(lua_State *state) noexcept {
   // installation: it sizes and tags the collider, and World::add_collider
   // rebuilds the payload from that tag, so a script spawn never builds or
   // carries a physics hull of its own.
-  const bool hasHull = runtime::apply_primitive_hull(hullSource, &collider);
+  const RuntimeServices &services = *runtime_binding().services;
+  runtime::World *const world = runtime_binding().world;
+  const bool hasHull = services.apply_primitive_hull(hullSource, &collider);
 
-  runtime::World &world = *runtime_binding().world;
   runtime::Transform transform{};
   transform.position = pos;
-  const runtime::Entity entity = world.create_scene_object(transform);
+  const runtime::Entity entity =
+      services.create_scene_object_op(world, &transform);
   if (entity == runtime::kInvalidEntity) {
     lua_pushnil(state);
     return 1;
@@ -169,14 +170,14 @@ int lua_engine_spawn_shape(lua_State *state) noexcept {
 
   runtime::RigidBody rigidBody{};
   rigidBody.inverseMass = 1.0F;
-  if (!world.add_rigid_body(entity, rigidBody)) {
+  if (!services.add_rigid_body_op(world, entity, rigidBody)) {
     failedStep = "rigid body";
   }
 
   if (failedStep == nullptr) {
-    if (!world.add_collider(entity, collider)) {
+    if (!services.add_collider_op(world, entity, collider)) {
       failedStep = "collider";
-    } else if (hasHull && !world.has_convex_hull_payload(entity)) {
+    } else if (hasHull && !services.has_convex_hull_payload(world, entity)) {
       // Documented fallback: hull slots exhausted degrades to the bounding
       // box, but only if the replacement collider actually installs.
       core::log_message(
@@ -184,7 +185,7 @@ int lua_engine_spawn_shape(lua_State *state) noexcept {
           "spawn_shape hull slots exhausted — using box collider");
       collider.shape = runtime::ColliderShape::AABB;
       collider.hullSource = runtime::HullSource::None;
-      if (!world.add_collider(entity, collider)) {
+      if (!services.add_collider_op(world, entity, collider)) {
         failedStep = "fallback collider";
       }
     }
@@ -194,7 +195,7 @@ int lua_engine_spawn_shape(lua_State *state) noexcept {
     runtime::MeshComponent meshComp{};
     meshComp.meshAssetId = meshId;
     meshComp.albedo = albedo;
-    if (!world.add_mesh_component(entity, meshComp)) {
+    if (!services.add_mesh_component_op(world, entity, meshComp)) {
       failedStep = "mesh component";
     }
   }
@@ -205,11 +206,12 @@ int lua_engine_spawn_shape(lua_State *state) noexcept {
                   "spawn_shape %s insertion failed — spawn rolled back",
                   failedStep);
     core::log_message(core::LogLevel::Warning, "scripting", message);
-    static_cast<void>(world.destroy_entity(entity));
+    static_cast<void>(services.destroy_entity_op(world, entity));
     lua_pushnil(state);
     return 1;
   }
 
+  reload_note_created_entity(entity);
   push_entity_handle(state, entity);
   return 1;
 }

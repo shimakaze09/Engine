@@ -13,29 +13,23 @@ description: >
 
 # Consolidating a primitive
 
-Most defects in this engine are not independent. They are one missing
-primitive showing symptoms at every site that had to invent its own. Six
-hand-written generational handle tables produce stale-handle defects six
-times; twenty-nine independent capacity constants produce a different
-behavior at capacity twenty-nine times.
+Many defects here are one missing primitive showing symptoms at every
+site that invented its own. Fixing one site leaves the others broken and
+adds a local workaround the eventual consolidation must migrate.
 
-Fixing one site leaves the other sites broken **and** adds a local
-workaround that the eventual consolidation must migrate. Instance fixes on
-a duplicated primitive increase the work remaining. Consolidate instead.
+## Similar is a signal; identical is the test
 
-## When this is the right change
+Similar code is a reason to investigate, not a verdict. Signals: the same
+magic number, bit layout or loop in two files; two files that differ only
+by a type name; a finding whose text applies verbatim elsewhere; one event
+(capacity reached, input malformed, handle stale) with different behavior
+in different modules.
 
-Use this procedure when a defect, a review note, or a finding is one
-instance of a concept implemented more than once. Signals:
-
-- The same magic number, bit layout or loop appears in two files.
-- Two files differ only by a type name (diff them with the names
-  normalized — if they match, they are one primitive).
-- A finding's text would apply verbatim to another file.
-- The same event (capacity reached, input malformed, handle stale) has
-  different behavior in different modules.
-
-Do not use it for a genuinely local bug in one place.
+Two implementations are one primitive only when their owner, lifetime,
+identity, threading, failure and persistence semantics are compatible.
+Shared mechanics never force shared policy: two tables with the same
+shape but different lifetimes stay two tables. A local bug in one place
+is fixed in place.
 
 ## Procedure
 
@@ -58,11 +52,10 @@ Do not use it for a genuinely local bug in one place.
 5. **Delete the originals.** This is the step that makes the change worth
    doing. A consolidation that adds a primitive and leaves the copies in
    place has made the codebase worse.
-6. **Add the gate that prevents copy N+1.** A mechanical check that fails
-   on a new hand-written implementation. Without it the copies come back,
-   and the next agent has no way to know the primitive exists. If no
-   mechanical check is possible, say so explicitly and name what a
-   reviewer must look for.
+6. **Add the gate that prevents copy N+1.** Prefer the compiler, a type,
+   a schema or an existing gate over a bespoke checker; a new script is
+   the last resort. If no mechanical check is possible, say so and name
+   what a reviewer must look for.
 
 ## Evidence that closes it
 
@@ -70,8 +63,9 @@ A consolidation is **not** closed by a red-on-base regression. It is
 usually behavior-preserving, so demanding one pushes the work back toward
 instance fixes. Its evidence is:
 
-- **Net deletion.** Report lines added and removed. A consolidation whose
-  net line count is positive needs an explanation.
+- **Net deletion is evidence, not the objective.** Report lines added and
+  removed; a positive net needs an explanation, and the replaced
+  implementations are deleted, not kept beside the new one.
 - **Zero remaining implementations.** State the count found in step 1 and
   the count remaining. The target is zero; anything else names the
   remaining sites and their tracking issue.
@@ -82,14 +76,3 @@ instance fixes. Its evidence is:
   red-on-base test for that correction.
 - **The gate fails on a reintroduced copy.** Show it: add a copy locally,
   watch the gate reject it, revert.
-
-## Serialization
-
-A consolidation touches many files by nature, so it cannot be scheduled
-alongside parallel work that touches the same files. Run it alone: one
-consolidation at a time, holding the default branch, with no other
-concurrent change in the same modules.
-
-Never defer a consolidation because it overlaps other in-flight work.
-Overlap is a scheduling fact, not a reason to substitute an instance fix.
-Pause the parallel work instead.

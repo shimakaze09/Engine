@@ -28,7 +28,8 @@ void warn_if_cooked_asset_stale(const char *cookedPath) noexcept;
 bool cooked_asset_generation_ok(const char *cookedPath) noexcept;
 
 /// Clears the once-per-asset warning memory and the per-session
-/// generation verdicts (tests only).
+/// generation verdicts; a run's teardown calls it so a later run in the
+/// same process re-checks every asset, and tests call it between cases.
 void reset_cooked_asset_stale_warnings() noexcept;
 
 } // namespace engine::content

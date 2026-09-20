@@ -26,8 +26,14 @@
 #include "engine/runtime/service_registry.h"
 #include "engine/runtime/world.h"
 #include "engine/scripting/scripting.h"
+#include "../scripting_clock.h"
 
 namespace {
+
+/// True when every inverse inertia axis holds exactly `value`.
+bool uniform_inertia(const engine::math::Vec3 &inertia, float value) noexcept {
+  return (inertia.x == value) && (inertia.y == value) && (inertia.z == value);
+}
 
 constexpr const char *kTempScriptPath = "scripting_test.lua";
 
@@ -319,9 +325,11 @@ int main() {
     engine::scripting::shutdown_scripting();
     return 132;
   }
-  lockedBody->inverseInertia = 0.25F;
+  lockedBody->inverseInertia = engine::math::Vec3(0.25F, 0.25F, 0.25F);
+  lockedBody->inertiaAuthored = true;
   if (!engine::scripting::call_script_function("verify_lock_rotation") ||
-      (world->get_rigid_body_ptr(lockEntity)->inverseInertia != 0.0F)) {
+      !uniform_inertia(world->get_rigid_body_ptr(lockEntity)->inverseInertia,
+                       0.0F)) {
     remove_script_file();
     engine::scripting::shutdown_scripting();
     return 133;
@@ -331,14 +339,16 @@ int main() {
     engine::scripting::shutdown_scripting();
     return 134;
   }
-  if (world->get_rigid_body_ptr(lockEntity)->inverseInertia != 0.25F) {
+  if (!uniform_inertia(world->get_rigid_body_ptr(lockEntity)->inverseInertia,
+                       0.25F)) {
     remove_script_file();
     engine::scripting::shutdown_scripting();
     return 135;
   }
   if (!engine::scripting::call_script_function("verify_lock_rotation") ||
       !engine::scripting::call_script_function("verify_unlock_rotation") ||
-      (world->get_rigid_body_ptr(lockEntity)->inverseInertia != 0.25F)) {
+      !uniform_inertia(world->get_rigid_body_ptr(lockEntity)->inverseInertia,
+                       0.25F)) {
     remove_script_file();
     engine::scripting::shutdown_scripting();
     return 136;
@@ -749,7 +759,7 @@ int main() {
       return 43;
     }
     // Reset total time to 0 so the timer delay is relative.
-    engine::scripting::set_frame_time(0.0F, 0.0F);
+    engine::tests::publish_frame_time(0.0F, 0.0F);
     engine::scripting::tick_timers();
     // Should NOT have fired yet (0s < 0.1s).
     bool timerFiredEarly = false;
@@ -766,7 +776,7 @@ int main() {
       return 44;
     }
     // Advance by 0.15s — past the 0.1s threshold.
-    engine::scripting::set_frame_time(0.15F, 0.15F);
+    engine::tests::publish_frame_time(0.15F, 0.15F);
     engine::scripting::tick_timers();
     bool timerFired = false;
     world->for_each_alive([&](engine::runtime::Entity ent) noexcept {
@@ -807,7 +817,7 @@ int main() {
       remove_script_file();
       return 47;
     }
-    engine::scripting::set_frame_time(0.5F, 0.5F);
+    engine::tests::publish_frame_time(0.5F, 0.5F);
     engine::scripting::tick_timers();
     bool cancelledFired = false;
     world->for_each_alive([&](engine::runtime::Entity ent) noexcept {
@@ -853,7 +863,7 @@ int main() {
       remove_script_file();
       return 202;
     }
-    engine::scripting::set_frame_time(0.2F, 0.2F);
+    engine::tests::publish_frame_time(0.2F, 0.2F);
     engine::scripting::tick_timers();
     bool oldTimerFired = false;
     bool newTimerFired = false;
@@ -902,9 +912,9 @@ int main() {
       return 210;
     }
 
-    engine::scripting::set_frame_time(0.2F, 0.2F);
+    engine::tests::publish_frame_time(0.2F, 0.2F);
     engine::scripting::tick_timers();
-    engine::scripting::set_frame_time(0.2F, 0.4F);
+    engine::tests::publish_frame_time(0.2F, 0.4F);
     engine::scripting::tick_timers();
 
     bool replacementTimerFired = false;
@@ -943,7 +953,7 @@ int main() {
     // Reset total time to 0 BEFORE on_start so that wakeAt is computed
     // relative to a known origin. start_coroutine immediately resumes the
     // coroutine, so g_totalSeconds must already be 0 when that happens.
-    engine::scripting::set_frame_time(0.0F, 0.0F);
+    engine::tests::publish_frame_time(0.0F, 0.0F);
     if (!engine::scripting::load_script(kTempScriptPath) ||
         !engine::scripting::call_script_function("on_start")) {
       engine::scripting::shutdown_scripting();
@@ -974,7 +984,7 @@ int main() {
     }
     // Advance 0.25s past the 0s origin; coroutine should resume and create
     // co_step2.
-    engine::scripting::set_frame_time(0.0F, 0.25F);
+    engine::tests::publish_frame_time(0.0F, 0.25F);
     engine::scripting::tick_coroutines();
     bool step2Exists = false;
     world->for_each_alive([&](engine::runtime::Entity ent) noexcept {

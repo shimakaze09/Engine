@@ -49,9 +49,10 @@ blocked_body_warning_stats(const PhysicsWorldView &world) noexcept;
 // kMaxLinearSpeed is the matching linear guard (~mach 1.5, 8.3 m per fixed
 // step — far above gameplay speeds while keeping broad-phase velocity
 // expansion and CCD travel bounded), applied at rigid-body ingress and
-// after velocity integration. kMaxInverseInertia bounds the scalar inverse
-// inertia that scales lever^2 effective-mass terms and angular impulses
-// (a 1 kg body of 2 cm radius is ~6e3, comfortably inside the bound).
+// after velocity integration. kMaxInverseInertia bounds each axis of the
+// inverse inertia tensor that scales lever^2 effective-mass terms and
+// angular impulses (a 1 kg body of 2 cm radius is ~6e3, comfortably inside
+// the bound).
 constexpr float kMaxAngularSpeed = 12.0F;
 constexpr float kMaxLinearSpeed = 500.0F;
 constexpr float kMaxInverseInertia = 1.0e4F;

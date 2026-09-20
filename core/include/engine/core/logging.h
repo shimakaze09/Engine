@@ -19,6 +19,40 @@ enum class LogLevel : std::uint8_t {
 /// Returns a short human-readable name for a log level ("Trace".."Fatal").
 const char *log_level_to_string(LogLevel level) noexcept;
 
+/// The log channels the engine writes under, one spelling each, so a
+/// consumer that filters by channel compares against the name the enum
+/// owns instead of a literal repeated at every call site.
+enum class LogChannel : std::uint8_t {
+  Engine,
+  Runtime,
+  World,
+  Renderer,
+  RenderDevice,
+  RenderPrep,
+  Shader,
+  Shadow,
+  ShadowMap,
+  PassResources,
+  Bgfx,
+  Scripting,
+  Dap,
+  Editor,
+  Assets,
+  AssetStreaming,
+  Streaming,
+  Save,
+  Prefab,
+  Audio,
+  Physics,
+  Animation,
+  EntityPool,
+  Jobs,
+  Slice,
+};
+
+/// The channel's name as sinks receive it; never null.
+const char *log_channel_name(LogChannel channel) noexcept;
+
 /// Initializes the owning system for logging.
 bool initialize_logging() noexcept;
 /// Shuts down the owning system for logging, dropping every still-registered
@@ -26,6 +60,9 @@ bool initialize_logging() noexcept;
 void shutdown_logging() noexcept;
 /// Writes one log line (level + channel + message) to the sinks.
 void log_message(LogLevel level, const char* channel, const char* message) noexcept;
+/// Writes one log line under a named channel.
+void log_message(LogLevel level, LogChannel channel,
+                 const char *message) noexcept;
 /// Logs the per-frame timing/metrics line.
 void log_frame_metrics(
     std::uint32_t frameIndex,

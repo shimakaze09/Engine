@@ -82,13 +82,14 @@ environments and is not a reason to skip the tier or soften the claim.
 - A parse or load failure leaves the destination unchanged. Prove it.
 - Byte-identical output for unchanged input (the deterministic-cook
   contract) where the format promises it.
-- Pair with `-R engine_integration_determinism` and
-  `-R engine_integration_thread_count_determinism`.
+- Pair with
+  `-R 'engine_integration_determinism|engine_integration_thread_count_determinism'`.
 - A format change carries a migration and a test that reads the old form.
 
 ## Tier: physics, math
 
-- `-R engine_unit_physics -R engine_integration_determinism`.
+- `-R 'engine_unit_physics|engine_integration_determinism'` (one regex;
+  CTest keeps only the last `-R`).
 - Tolerances are justified absolute and/or relative bounds plus an
   invariant (energy, momentum, penetration depth). An arbitrary loose
   tolerance is a defect, not a passing test.
@@ -120,7 +121,7 @@ interruption cannot leave a mixed state.
 
 ## Tier: Lua API
 
-- `-R engine_integration_lua -R engine_unit_scripting`.
+- `-R 'engine_integration_lua|engine_unit_scripting'`.
 - Validate stack usage; preserve traceback, sandbox and hot-reload
   behavior.
 - An API change updates the generated bindings and the scripting docs in

@@ -12,6 +12,7 @@
 #include "engine/core/native_thread.h"
 
 #include "engine/content/asset_metadata.h"
+#include "engine/core/status.h"
 
 namespace engine::content {
 
@@ -122,9 +123,12 @@ void shutdown_asset_streaming(AssetStreamingQueue *queue) noexcept;
 /// Queue an async load.  Returns a LoadHandle for polling.  Re-requesting an
 /// asset joins its live request; a Failed slot for the same asset is
 /// reclaimed (generation-bumped, stale handles rejected) instead of leaking.
+/// An invalid handle comes with its reason in *outStatus when asked for:
+/// InvalidArgument (null queue or invalid id; detail 1 when the source
+/// path does not fit a request) or CapacityExhausted (queue full).
 LoadHandle load_asset_async(AssetStreamingQueue *queue, AssetId id,
-                            const char *sourcePath,
-                            LoadPriority priority) noexcept;
+                            const char *sourcePath, LoadPriority priority,
+                            core::Status *outStatus = nullptr) noexcept;
 
 /// Update the priority of a queued (not yet loading) request.
 bool update_load_priority(AssetStreamingQueue *queue, LoadHandle handle,

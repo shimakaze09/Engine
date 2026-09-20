@@ -2,20 +2,21 @@
 
 #include "entity_pool_bindings.h"
 
+#include "engine/core/logging.h"
+
 #include "entity_handle.h"
+#include "reload_transaction.h"
 #include "runtime_binding.h"
 
 #include <cstddef>
 #include <cstdint>
 
-#include "engine/runtime/entity_pool.h"
-#include "engine/runtime/world.h"
 
 namespace engine::scripting {
 namespace {
 
-constexpr std::size_t kMaxEntityPools = 16U;
-runtime::EntityPool g_entityPools[kMaxEntityPools]{};
+// The pools themselves live in the runtime bridge; scripting addresses
+// them by slot and owns the Lua-visible ids.
 std::size_t g_entityPoolCount = 0U;
 
 // Lua-visible pool id layout: slot index in the low bits, the
@@ -35,11 +36,12 @@ static_assert(kMaxEntityPools <= kPoolSlotMask,
 /// Encodes a pool slot plus the current world epoch into a Lua pool id;
 /// zero (nil) on no bound world.
 bool encode_pool_id(std::size_t slot, lua_Integer *outId) noexcept {
-  if ((outId == nullptr) || (runtime_binding().world == nullptr)) {
+  if ((outId == nullptr) || !runtime_bound()) {
     return false;
   }
   const auto epoch =
-      static_cast<std::uint64_t>(runtime_binding().world->content_epoch());
+      static_cast<std::uint64_t>(runtime_binding().services->content_epoch(
+          runtime_binding().world));
   const std::uint64_t encoded =
       (epoch << kPoolEpochShift) | (static_cast<std::uint64_t>(slot) + 1ULL);
   *outId = static_cast<lua_Integer>(encoded);
@@ -50,14 +52,15 @@ bool encode_pool_id(std::size_t slot, lua_Integer *outId) noexcept {
 /// of the currently allocated range, or stamped with a stale world epoch.
 bool decode_pool_id(lua_Integer rawId, std::size_t *outSlot) noexcept {
   if ((outSlot == nullptr) || (rawId <= 0) ||
-      (runtime_binding().world == nullptr)) {
+      !runtime_bound()) {
     return false;
   }
   const auto encoded = static_cast<std::uint64_t>(rawId);
   const std::uint64_t encodedSlot = encoded & kPoolSlotMask;
   const std::uint64_t encodedEpoch = encoded >> kPoolEpochShift;
   const auto currentEpoch =
-      static_cast<std::uint64_t>(runtime_binding().world->content_epoch());
+      static_cast<std::uint64_t>(runtime_binding().services->content_epoch(
+          runtime_binding().world));
   if ((encodedSlot == 0ULL) || (encodedEpoch != currentEpoch)) {
     return false;
   }
@@ -71,14 +74,19 @@ bool decode_pool_id(lua_Integer rawId, std::size_t *outSlot) noexcept {
 
 /// Creates a fixed-size runtime entity pool from Lua.
 int lua_engine_pool_create(lua_State *state) noexcept {
-  if ((runtime_binding().world == nullptr) || !lua_isinteger(state, 1)) {
+  if (!runtime_bound() || !lua_isinteger(state, 1)) {
+    lua_pushnil(state);
+    return 1;
+  }
+  // A pool seeds entities the reload scope cannot take back.
+  if (reload_refuses("pool_create")) {
     lua_pushnil(state);
     return 1;
   }
 
   const lua_Integer count = lua_tointeger(state, 1);
   if ((count <= 0) ||
-      (static_cast<std::size_t>(count) > runtime::EntityPool::kMaxPoolSize)) {
+      (static_cast<std::size_t>(count) > kMaxEntityPoolSize)) {
     lua_pushnil(state);
     return 1;
   }
@@ -88,15 +96,13 @@ int lua_engine_pool_create(lua_State *state) noexcept {
     return 1;
   }
 
-  runtime::EntityPool &pool = g_entityPools[g_entityPoolCount];
-  if (!pool.init(runtime_binding().world, static_cast<std::size_t>(count))) {
-    lua_pushnil(state);
-    return 1;
-  }
-
+  // The id is encoded before the pool is seeded so a slot never holds a
+  // pool Lua cannot address.
   lua_Integer poolId = 0;
-  if (!encode_pool_id(g_entityPoolCount, &poolId)) {
-    pool = runtime::EntityPool{};
+  if (!encode_pool_id(g_entityPoolCount, &poolId) ||
+      !runtime_binding().services->entity_pool_init(
+          runtime_binding().world, g_entityPoolCount,
+          static_cast<std::size_t>(count))) {
     lua_pushnil(state);
     return 1;
   }
@@ -113,16 +119,19 @@ int lua_engine_pool_spawn(lua_State *state) noexcept {
   }
 
   std::size_t slot = 0U;
-  if (!decode_pool_id(lua_tointeger(state, 1), &slot)) {
+  if (!decode_pool_id(lua_tointeger(state, 1), &slot) ||
+      (reload_staging(ReloadEffect::PoolAcquire) == ReloadStaging::Refused)) {
     lua_pushnil(state);
     return 1;
   }
 
-  const runtime::Entity entity = g_entityPools[slot].acquire();
+  const runtime::Entity entity = runtime_binding().services->entity_pool_acquire(
+      runtime_binding().world, slot);
   if (entity == runtime::kInvalidEntity) {
     lua_pushnil(state);
     return 1;
   }
+  reload_note_pool_acquire(slot, entity);
 
   push_entity_handle(state, entity);
   return 1;
@@ -147,7 +156,19 @@ int lua_engine_pool_release(lua_State *state) noexcept {
     return 1;
   }
 
-  const bool ok = g_entityPools[slot].release(entity);
+  bool ok = false;
+  switch (reload_staging(ReloadEffect::PoolRelease)) {
+  case ReloadStaging::None:
+    ok = runtime_binding().services->entity_pool_release(
+        runtime_binding().world, slot, entity);
+    break;
+  case ReloadStaging::Staged:
+    reload_hold_pool_release(slot, entity);
+    ok = true;
+    break;
+  case ReloadStaging::Refused:
+    break;
+  }
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
@@ -164,8 +185,9 @@ void register_entity_pool_bindings(lua_State *state) noexcept {
 }
 
 void reset_entity_pool_bindings() noexcept {
-  for (std::size_t i = 0U; i < kMaxEntityPools; ++i) {
-    g_entityPools[i] = runtime::EntityPool{};
+  if ((runtime_binding().services != nullptr) &&
+      (runtime_binding().services->entity_pool_reset_all != nullptr)) {
+    runtime_binding().services->entity_pool_reset_all();
   }
   g_entityPoolCount = 0U;
 }

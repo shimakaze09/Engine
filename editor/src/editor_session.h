@@ -29,6 +29,7 @@
 #include "engine/runtime/world.h"
 
 #include "editor_asset_index.h"
+#include "editor_console_capture.h"
 #include "editor_scene_document.h"
 
 namespace engine::editor {
@@ -66,6 +67,31 @@ struct ContentBrowserState final {
   AssetChildFolderCache childFolderCache{};
   ContentBrowserNavHistory navHistory{};
   bool persistedStateLoaded = false;
+};
+
+/// Search text of the reference pickers. One popup is open at a time, so
+/// one buffer per picker kind suffices; each is cleared when its popup
+/// appears so no instance inherits another's search.
+struct ReferencePickerState final {
+  char entityQuery[128] = {};
+  char assetQuery[128] = {};
+  char pathQuery[128] = {};
+};
+
+/// Console panel view state: the filter, scrolling and the frozen entry
+/// count while paused (the ring keeps recording underneath; the visible
+/// list stops growing until Resume).
+struct ConsolePanelState final {
+  ConsoleFilter filter{};
+  bool autoScroll = true;
+  bool paused = false;
+  bool collapseView = true;
+  std::size_t pausedEntryCount = 0U;
+};
+
+/// Inspector panel view state: the Add Component search text.
+struct InspectorPanelState final {
+  char addComponentFilter[64] = {};
 };
 
 /// Owns editor UI/session state for the currently attached runtime world.
@@ -123,7 +149,16 @@ struct EditorSession final {
   char lastAppliedWindowTitle[640] = {};
   SceneDocumentState document{};
   ContentBrowserState contentBrowser{};
+  ReferencePickerState pickers{};
+  ConsolePanelState console{};
+  InspectorPanelState inspector{};
 };
+
+/// Returns every piece of session state that outlives a world to its
+/// defaults: the asset index, the layout latches and the panel view
+/// state above. shutdown_editor runs it; it needs no window or ImGui
+/// context, so a headless test can drive it.
+void reset_editor_session_residue() noexcept;
 
 constexpr const char *kTransformTypeName = "engine::runtime::Transform";
 constexpr const char *kRigidBodyTypeName = "engine::runtime::RigidBody";

@@ -7,6 +7,13 @@ engine_add_test_executable(engine_unit_core_lifecycle
     engine_core
 )
 
+engine_add_test_executable(engine_unit_status
+    SOURCES
+    status_test.cpp
+    PRIVATE_DEPS
+    engine_core
+)
+
 engine_add_test_executable(engine_unit_foundation
     SOURCES
     smoke_test.cpp
@@ -98,6 +105,13 @@ engine_add_test_executable(engine_unit_string_util
 engine_add_test_executable(engine_unit_math
     SOURCES
     math_test.cpp
+    PRIVATE_DEPS
+    engine_math
+)
+
+engine_add_test_executable(engine_unit_scalar_determinism
+    SOURCES
+    scalar_determinism_test.cpp
     PRIVATE_DEPS
     engine_math
 )
@@ -252,6 +266,13 @@ engine_add_test_executable(engine_unit_content_metadata
     engine_content
 )
 
+engine_add_test_executable(engine_unit_asset_type_table
+    SOURCES
+    asset_type_table_test.cpp
+    PRIVATE_DEPS
+    engine_content
+)
+
 engine_add_test_executable(engine_unit_content_dependency_dedup
     SOURCES
     content_dependency_dedup_test.cpp
@@ -391,6 +412,14 @@ engine_add_test_executable(engine_unit_scripting
     engine_runtime
 )
 
+engine_add_test_executable(engine_unit_lua_error_diagnostic
+    SOURCES
+    lua_error_diagnostic_test.cpp
+    PRIVATE_DEPS
+    engine_scripting
+    engine_core
+)
+
 engine_add_test_executable(engine_unit_collision_event_identity
     SOURCES
     collision_event_identity_test.cpp
@@ -528,6 +557,29 @@ engine_add_test_executable(engine_unit_runtime_binding
     engine_runtime
 )
 
+# Links scripting without the runtime: the boundary's link evidence.
+engine_add_test_executable(engine_unit_scripting_link
+    SOURCES
+    scripting_link_test.cpp
+    PRIVATE_DEPS
+    engine_scripting
+)
+
+engine_add_test_executable(engine_unit_log_channel
+    SOURCES
+    log_channel_test.cpp
+    PRIVATE_DEPS
+    engine_core
+)
+
+engine_add_test_executable(engine_unit_script_bridge_handle
+    SOURCES
+    script_bridge_handle_test.cpp
+    PRIVATE_DEPS
+    engine_scripting
+    engine_runtime
+)
+
 engine_add_test_executable(engine_unit_game_binding_state
     SOURCES
     game_binding_state_test.cpp
@@ -548,6 +600,14 @@ engine_add_test_executable(engine_unit_scene_version_gate
     scene_version_gate_test.cpp
     PRIVATE_DEPS
     engine_runtime
+)
+
+engine_add_test_executable(engine_unit_scene_validation_report
+    SOURCES
+    scene_validation_report_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_core
 )
 
 engine_add_test_executable(engine_unit_entity_handle_epoch
@@ -572,6 +632,22 @@ engine_add_test_executable(engine_unit_runtime_world
     SOURCES
     runtime_world_test.cpp
     PRIVATE_DEPS
+    engine_runtime
+)
+
+engine_add_test_executable(engine_unit_world_capacity_diagnostics
+    SOURCES
+    world_capacity_diagnostics_test.cpp
+    PRIVATE_DEPS
+    engine_core
+    engine_runtime
+)
+
+engine_add_test_executable(engine_unit_world_state_hash
+    SOURCES
+    world_state_hash_test.cpp
+    PRIVATE_DEPS
+    engine_core
     engine_runtime
 )
 
@@ -789,6 +865,18 @@ engine_add_test_executable(engine_unit_editor_scene_document_play_mode
     ${CMAKE_SOURCE_DIR}/editor/include
     ${CMAKE_SOURCE_DIR}/editor/src
     ${CMAKE_SOURCE_DIR}/runtime/src
+    PRIVATE_DEPS
+    engine_editor
+    COMPILE_DEFINITIONS
+    SDL_MAIN_HANDLED
+)
+
+engine_add_test_executable(engine_unit_editor_residue
+    SOURCES
+    editor_residue_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/editor/include
+    ${CMAKE_SOURCE_DIR}/editor/src
     PRIVATE_DEPS
     engine_editor
     COMPILE_DEFINITIONS
@@ -1138,6 +1226,26 @@ engine_add_test_executable(engine_unit_joint_constraints
     engine_core
     engine_physics
     engine_runtime
+)
+
+engine_add_test_executable(engine_unit_inertia
+    SOURCES
+    inertia_test.cpp
+    PRIVATE_DEPS
+    engine_core
+    engine_physics
+    engine_runtime
+)
+
+engine_add_test_executable(engine_unit_joint_rank_deficient
+    SOURCES
+    joint_rank_deficient_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/physics/src/joints
+    PRIVATE_DEPS
+    engine_core
+    engine_math
+    engine_physics
 )
 
 engine_add_test_executable(engine_unit_manifold

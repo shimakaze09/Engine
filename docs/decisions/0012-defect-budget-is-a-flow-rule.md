@@ -47,6 +47,8 @@ promotion rule that does the "miss nothing" work.
 - **P1 may not grow.** The count at the end of a month must be at or below
   the count at its start. Baseline on this date: **27**.
 - **P2 may not grow.** Same rule. Baseline on this date: **38**.
+  *(Both superseded by [0014](0014-severity-is-impact.md): the counts are
+  health signals, reported and triaged, never an optimization target.)*
 - **P3 is unbounded and not audited**, as 0007 states.
 
 **Promotion — this is the half that catches what a label missed**

@@ -12,6 +12,7 @@
 #include "engine/runtime/scripting_bridge.h"
 #include "engine/runtime/world.h"
 #include "engine/scripting/scripting.h"
+#include "../scripting_clock.h"
 
 namespace {
 
@@ -76,8 +77,8 @@ bool test_wait_seconds() noexcept {
     remove_script();
     return false;
   }
-  engine::scripting::set_frame_time(0.0F, 0.0F);
-  engine::scripting::set_frame_index(0U);
+  engine::tests::publish_frame_time(0.0F, 0.0F);
+  engine::tests::publish_frame_index(0U);
   engine::scripting::call_script_function("on_start");
 
   // Not woken yet (only 0.0s elapsed).
@@ -88,8 +89,8 @@ bool test_wait_seconds() noexcept {
   }
 
   // Tick at t=0.3 — still too early.
-  engine::scripting::set_frame_time(0.3F, 0.3F);
-  engine::scripting::set_frame_index(1U);
+  engine::tests::publish_frame_time(0.3F, 0.3F);
+  engine::tests::publish_frame_index(1U);
   engine::scripting::tick_coroutines();
   if (count_named(world.get(), "wait_done") != 0) {
     engine::scripting::shutdown_scripting();
@@ -98,8 +99,8 @@ bool test_wait_seconds() noexcept {
   }
 
   // Tick at t=0.6 — should wake.
-  engine::scripting::set_frame_time(0.3F, 0.6F);
-  engine::scripting::set_frame_index(2U);
+  engine::tests::publish_frame_time(0.3F, 0.6F);
+  engine::tests::publish_frame_index(2U);
   engine::scripting::tick_coroutines();
   if (count_named(world.get(), "wait_done") != 1) {
     engine::scripting::shutdown_scripting();
@@ -141,14 +142,14 @@ bool test_wait_frames() noexcept {
   }
 
   // Frame 0: start coroutine. wakeAtFrame = 0 + 3 = 3.
-  engine::scripting::set_frame_time(0.016F, 0.0F);
-  engine::scripting::set_frame_index(0U);
+  engine::tests::publish_frame_time(0.016F, 0.0F);
+  engine::tests::publish_frame_index(0U);
   engine::scripting::call_script_function("on_start");
 
   // Frames 1, 2 — not ready yet.
   for (std::uint32_t f = 1U; f <= 2U; ++f) {
-    engine::scripting::set_frame_index(f);
-    engine::scripting::set_frame_time(0.016F, 0.016F * static_cast<float>(f));
+    engine::tests::publish_frame_index(f);
+    engine::tests::publish_frame_time(0.016F, 0.016F * static_cast<float>(f));
     engine::scripting::tick_coroutines();
     if (count_named(world.get(), "frames_done") != 0) {
       engine::scripting::shutdown_scripting();
@@ -158,8 +159,8 @@ bool test_wait_frames() noexcept {
   }
 
   // Frame 3 — should wake.
-  engine::scripting::set_frame_index(3U);
-  engine::scripting::set_frame_time(0.016F, 0.048F);
+  engine::tests::publish_frame_index(3U);
+  engine::tests::publish_frame_time(0.016F, 0.048F);
   engine::scripting::tick_coroutines();
   if (count_named(world.get(), "frames_done") != 1) {
     engine::scripting::shutdown_scripting();
@@ -205,13 +206,13 @@ bool test_wait_until() noexcept {
     return false;
   }
 
-  engine::scripting::set_frame_time(0.0F, 0.0F);
-  engine::scripting::set_frame_index(0U);
+  engine::tests::publish_frame_time(0.0F, 0.0F);
+  engine::tests::publish_frame_index(0U);
   engine::scripting::call_script_function("on_start");
 
   for (int i = 1; i <= 3; ++i) {
-    engine::scripting::set_frame_index(static_cast<std::uint32_t>(i));
-    engine::scripting::set_frame_time(0.016F, 0.016F * static_cast<float>(i));
+    engine::tests::publish_frame_index(static_cast<std::uint32_t>(i));
+    engine::tests::publish_frame_time(0.016F, 0.016F * static_cast<float>(i));
     engine::scripting::tick_coroutines();
   }
   if (count_named(world.get(), "cond_done") != 0) {
@@ -221,8 +222,8 @@ bool test_wait_until() noexcept {
   }
 
   engine::scripting::call_script_function("set_flag");
-  engine::scripting::set_frame_index(4U);
-  engine::scripting::set_frame_time(0.016F, 0.064F);
+  engine::tests::publish_frame_index(4U);
+  engine::tests::publish_frame_time(0.016F, 0.064F);
   engine::scripting::tick_coroutines();
   if (count_named(world.get(), "cond_done") != 1) {
     engine::scripting::shutdown_scripting();
@@ -266,14 +267,14 @@ bool test_chained_waits() noexcept {
     return false;
   }
 
-  engine::scripting::set_frame_time(0.0F, 0.0F);
-  engine::scripting::set_frame_index(0U);
+  engine::tests::publish_frame_time(0.0F, 0.0F);
+  engine::tests::publish_frame_index(0U);
   engine::scripting::call_script_function("on_start");
 
   // Tick at t=0.15 (frame 1) — wait(0.1) should wake, step1 created,
   // then immediately re-yields on wait_frames(2), wakeAtFrame = 1 + 2 = 3.
-  engine::scripting::set_frame_index(1U);
-  engine::scripting::set_frame_time(0.15F, 0.15F);
+  engine::tests::publish_frame_index(1U);
+  engine::tests::publish_frame_time(0.15F, 0.15F);
   engine::scripting::tick_coroutines();
   if (count_named(world.get(), "chain_step1") != 1) {
     engine::scripting::shutdown_scripting();
@@ -287,8 +288,8 @@ bool test_chained_waits() noexcept {
   }
 
   // Frame 2 — not ready.
-  engine::scripting::set_frame_index(2U);
-  engine::scripting::set_frame_time(0.016F, 0.166F);
+  engine::tests::publish_frame_index(2U);
+  engine::tests::publish_frame_time(0.016F, 0.166F);
   engine::scripting::tick_coroutines();
   if (count_named(world.get(), "chain_step2") != 0) {
     engine::scripting::shutdown_scripting();
@@ -297,8 +298,8 @@ bool test_chained_waits() noexcept {
   }
 
   // Frame 3 — should wake.
-  engine::scripting::set_frame_index(3U);
-  engine::scripting::set_frame_time(0.016F, 0.182F);
+  engine::tests::publish_frame_index(3U);
+  engine::tests::publish_frame_time(0.016F, 0.182F);
   engine::scripting::tick_coroutines();
   if (count_named(world.get(), "chain_step2") != 1) {
     engine::scripting::shutdown_scripting();
@@ -345,13 +346,13 @@ bool test_error_handling() noexcept {
     return false;
   }
 
-  engine::scripting::set_frame_time(0.0F, 0.0F);
-  engine::scripting::set_frame_index(0U);
+  engine::tests::publish_frame_time(0.0F, 0.0F);
+  engine::tests::publish_frame_index(0U);
   engine::scripting::call_script_function("on_start");
 
   // Wake both coroutines.
-  engine::scripting::set_frame_index(1U);
-  engine::scripting::set_frame_time(0.2F, 0.2F);
+  engine::tests::publish_frame_index(1U);
+  engine::tests::publish_frame_time(0.2F, 0.2F);
   engine::scripting::tick_coroutines();
 
   // The errored coroutine should be cleaned up, the survivor should succeed.
@@ -410,11 +411,11 @@ bool test_error_at_memory_cap() noexcept {
 
   bool ok = write_script(script) && engine::scripting::load_script(kTempScript);
   if (ok) {
-    engine::scripting::set_frame_time(0.0F, 0.0F);
-    engine::scripting::set_frame_index(0U);
+    engine::tests::publish_frame_time(0.0F, 0.0F);
+    engine::tests::publish_frame_index(0U);
     engine::scripting::call_script_function("on_start");
-    engine::scripting::set_frame_index(1U);
-    engine::scripting::set_frame_time(0.2F, 0.2F);
+    engine::tests::publish_frame_index(1U);
+    engine::tests::publish_frame_time(0.2F, 0.2F);
     engine::scripting::tick_coroutines();
 
     // With no garbage left, neither the resume's incremental step nor the
@@ -422,8 +423,8 @@ bool test_error_at_memory_cap() noexcept {
     // room for the dispatcher's message.
     engine::scripting::call_script_function("settle");
     engine::scripting::set_memory_limit(engine::scripting::get_memory_used());
-    engine::scripting::set_frame_index(2U);
-    engine::scripting::set_frame_time(0.2F, 0.4F);
+    engine::tests::publish_frame_index(2U);
+    engine::tests::publish_frame_time(0.2F, 0.4F);
     // Returning from this call is the assertion; base aborts inside it.
     engine::scripting::tick_coroutines();
   }
@@ -463,14 +464,14 @@ bool test_clear() noexcept {
     return false;
   }
 
-  engine::scripting::set_frame_time(0.0F, 0.0F);
-  engine::scripting::set_frame_index(0U);
+  engine::tests::publish_frame_time(0.0F, 0.0F);
+  engine::tests::publish_frame_index(0U);
   engine::scripting::call_script_function("on_start");
 
   engine::scripting::clear_coroutines();
 
-  engine::scripting::set_frame_time(11.0F, 11.0F);
-  engine::scripting::set_frame_index(1U);
+  engine::tests::publish_frame_time(11.0F, 11.0F);
+  engine::tests::publish_frame_index(1U);
   engine::scripting::tick_coroutines();
 
   if (count_named(world.get(), "should_not_exist") != 0) {
@@ -549,12 +550,12 @@ bool test_invalid_waits_do_not_consume_slots() noexcept {
     return false;
   }
 
-  engine::scripting::set_frame_time(0.0F, 0.0F);
-  engine::scripting::set_frame_index(0U);
+  engine::tests::publish_frame_time(0.0F, 0.0F);
+  engine::tests::publish_frame_index(0U);
   engine::scripting::call_script_function("on_start");
 
-  engine::scripting::set_frame_time(0.2F, 0.2F);
-  engine::scripting::set_frame_index(1U);
+  engine::tests::publish_frame_time(0.2F, 0.2F);
+  engine::tests::publish_frame_index(1U);
   engine::scripting::tick_coroutines();
   bool ok = (count_named(world.get(), "valid_done") == 32) &&
             (count_named(world.get(), "invalid_done") == 0) &&
@@ -563,18 +564,18 @@ bool test_invalid_waits_do_not_consume_slots() noexcept {
   // Every slot is free again: a coroutine that turns bad mid-life is
   // dropped at its bad yield, and the slot it held is reusable.
   engine::scripting::call_script_function("on_tick_raw");
-  engine::scripting::set_frame_time(0.2F, 0.4F);
-  engine::scripting::set_frame_index(2U);
+  engine::tests::publish_frame_time(0.2F, 0.4F);
+  engine::tests::publish_frame_index(2U);
   engine::scripting::tick_coroutines();
-  engine::scripting::set_frame_time(0.2F, 0.6F);
-  engine::scripting::set_frame_index(3U);
+  engine::tests::publish_frame_time(0.2F, 0.6F);
+  engine::tests::publish_frame_index(3U);
   engine::scripting::tick_coroutines();
   ok = ok && (count_named(world.get(), "late_raw_done") == 0);
 
-  engine::scripting::set_frame_time(0.0F, 0.6F);
+  engine::tests::publish_frame_time(0.0F, 0.6F);
   engine::scripting::call_script_function("on_start");
-  engine::scripting::set_frame_time(0.2F, 0.8F);
-  engine::scripting::set_frame_index(4U);
+  engine::tests::publish_frame_time(0.2F, 0.8F);
+  engine::tests::publish_frame_index(4U);
   engine::scripting::tick_coroutines();
   ok = ok && (count_named(world.get(), "valid_done") == 64) &&
        (count_named(world.get(), "invalid_done") == 0) &&
@@ -643,13 +644,13 @@ bool test_timer_armed_in_coroutine_does_not_capture_its_thread() noexcept {
     return false;
   }
 
-  engine::scripting::set_frame_time(0.0F, 0.0F);
-  engine::scripting::set_frame_index(0U);
+  engine::tests::publish_frame_time(0.0F, 0.0F);
+  engine::tests::publish_frame_index(0U);
   engine::scripting::call_script_function("on_start");
 
   // Let the scheduler drop the finished coroutine's entry, then collect.
-  engine::scripting::set_frame_time(0.016F, 0.016F);
-  engine::scripting::set_frame_index(1U);
+  engine::tests::publish_frame_time(0.016F, 0.016F);
+  engine::tests::publish_frame_index(1U);
   engine::scripting::tick_coroutines();
   engine::scripting::call_script_function("on_collect");
 
@@ -662,8 +663,8 @@ bool test_timer_armed_in_coroutine_does_not_capture_its_thread() noexcept {
   ok = ok && (engine::scripting::active_timer_ref_count() == 0U);
 
   // The cancelled timer must not fire afterwards.
-  engine::scripting::set_frame_time(200.0F, 200.0F);
-  engine::scripting::set_frame_index(2U);
+  engine::tests::publish_frame_time(200.0F, 200.0F);
+  engine::tests::publish_frame_index(2U);
   engine::scripting::tick_timers();
   ok = ok && (count_named(world.get(), "armed_fired") == 0);
 

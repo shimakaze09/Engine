@@ -3,9 +3,10 @@
 #include "deferred_mutations.h"
 
 #include "engine/core/logging.h"
-#include "engine/runtime/scripting_bridge.h"
+#include "engine/scripting/runtime_services.h"
 #include "engine/scripting/scripting.h"
 #include "entity_script_bindings.h"
+#include "reload_transaction.h"
 #include "runtime_binding.h"
 
 #include <cstddef>
@@ -32,6 +33,9 @@ enum class DeferredMutationType : std::uint8_t {
   RemovePointLightComponent,
   AddSpotLightComponent,
   RemoveSpotLightComponent,
+  AddSpringArm,
+  AddCameraComponent,
+  RemoveCameraComponent,
 };
 
 struct DeferredMutation final {
@@ -46,6 +50,8 @@ struct DeferredMutation final {
   runtime::ScriptComponent scriptComponent{};
   runtime::PointLightComponent pointLightComponent{};
   runtime::SpotLightComponent spotLightComponent{};
+  math::SpringArmComponent springArm{};
+  math::CameraComponent cameraComponent{};
   runtime::MovementAuthority movementAuthority =
       runtime::MovementAuthority::None;
   bool setMovementAuthority = false;
@@ -65,7 +71,7 @@ std::mutex g_deferredMutationMutex{};
 /// Content epoch of the bound World, or 0 when no World is bound.
 std::uint32_t bound_world_content_epoch() noexcept {
   const ScriptingRuntimeBinding &binding = runtime_binding();
-  return (binding.world != nullptr) ? binding.world->content_epoch() : 0U;
+  return runtime_bound() ? binding.services->content_epoch(binding.world) : 0U;
 }
 
 /// Queues one deferred mutation for the next safe flush point, stamped
@@ -90,7 +96,8 @@ bool queue_deferred_mutation(const DeferredMutation &mutation) noexcept {
 /// Returns whether a deferred mutation still targets the same live entity.
 bool is_deferred_entity_current(runtime::World *world,
                                 runtime::Entity entity) noexcept {
-  return (world != nullptr) && world->is_alive(entity);
+  return (world != nullptr) && runtime_bound() &&
+         runtime_binding().services->is_alive(world, entity);
 }
 
 /// Pending-read outcome: nothing queued, a queued snapshot, or a queued
@@ -132,7 +139,7 @@ PendingRead find_pending_snapshot(runtime::Entity entity,
 bool latest_transform(runtime::Entity entity,
                       runtime::Transform *outTransform) noexcept {
   const ScriptingRuntimeBinding &binding = runtime_binding();
-  if ((binding.world == nullptr) || (outTransform == nullptr)) {
+  if (!runtime_bound() || (outTransform == nullptr)) {
     return false;
   }
   DeferredMutation pending{};
@@ -147,14 +154,14 @@ bool latest_transform(runtime::Entity entity,
   case PendingRead::None:
     break;
   }
-  return binding.world->get_transform(entity, outTransform);
+  return binding.services->get_transform_op(binding.world, entity, outTransform);
 }
 
 /// Reads the entity's rigid body through any pending queued write.
 bool latest_rigid_body(runtime::Entity entity,
                        runtime::RigidBody *outRigidBody) noexcept {
   const ScriptingRuntimeBinding &binding = runtime_binding();
-  if ((binding.world == nullptr) || (outRigidBody == nullptr)) {
+  if (!runtime_bound() || (outRigidBody == nullptr)) {
     return false;
   }
   DeferredMutation pending{};
@@ -169,14 +176,14 @@ bool latest_rigid_body(runtime::Entity entity,
   case PendingRead::None:
     break;
   }
-  return binding.world->get_rigid_body(entity, outRigidBody);
+  return binding.services->get_rigid_body_op(binding.world, entity, outRigidBody);
 }
 
 /// Reads the entity's collider through any pending queued write.
 bool latest_collider(runtime::Entity entity,
                      runtime::Collider *outCollider) noexcept {
   const ScriptingRuntimeBinding &binding = runtime_binding();
-  if ((binding.world == nullptr) || (outCollider == nullptr)) {
+  if (!runtime_bound() || (outCollider == nullptr)) {
     return false;
   }
   DeferredMutation pending{};
@@ -191,14 +198,14 @@ bool latest_collider(runtime::Entity entity,
   case PendingRead::None:
     break;
   }
-  return binding.world->get_collider(entity, outCollider);
+  return binding.services->get_collider_op(binding.world, entity, outCollider);
 }
 
 /// Reads the entity's mesh component through any pending queued write.
 bool latest_mesh_component(runtime::Entity entity,
                            runtime::MeshComponent *outComponent) noexcept {
   const ScriptingRuntimeBinding &binding = runtime_binding();
-  if ((binding.world == nullptr) || (outComponent == nullptr)) {
+  if (!runtime_bound() || (outComponent == nullptr)) {
     return false;
   }
   DeferredMutation pending{};
@@ -214,7 +221,30 @@ bool latest_mesh_component(runtime::Entity entity,
   case PendingRead::None:
     break;
   }
-  return binding.world->get_mesh_component(entity, outComponent);
+  return binding.services->get_mesh_component_op(binding.world, entity, outComponent);
+}
+
+bool latest_name_component(runtime::Entity entity,
+                           runtime::NameComponent *outComponent) noexcept {
+  const ScriptingRuntimeBinding &binding = runtime_binding();
+  if (!runtime_bound() || (outComponent == nullptr)) {
+    return false;
+  }
+  DeferredMutation pending{};
+  switch (find_pending_snapshot(entity,
+                                DeferredMutationType::AddNameComponent,
+                                DeferredMutationType::AddNameComponent, false,
+                                &pending)) {
+  case PendingRead::Value:
+    *outComponent = pending.nameComponent;
+    return true;
+  case PendingRead::Removed:
+    return false;
+  case PendingRead::None:
+    break;
+  }
+  return binding.services->get_name_component_op(binding.world, entity,
+                                                 outComponent);
 }
 
 /// Reads the entity's light component through any pending queued write;
@@ -222,7 +252,7 @@ bool latest_mesh_component(runtime::Entity entity,
 bool latest_light_component(runtime::Entity entity,
                             runtime::LightComponent *outComponent) noexcept {
   const ScriptingRuntimeBinding &binding = runtime_binding();
-  if ((binding.world == nullptr) || (outComponent == nullptr)) {
+  if (!runtime_bound() || (outComponent == nullptr)) {
     return false;
   }
   DeferredMutation pending{};
@@ -238,14 +268,14 @@ bool latest_light_component(runtime::Entity entity,
   case PendingRead::None:
     break;
   }
-  return binding.world->get_light_component(entity, outComponent);
+  return binding.services->get_light_component_op(binding.world, entity, outComponent);
 }
 
 bool latest_point_light_component(
     runtime::Entity entity,
     runtime::PointLightComponent *outComponent) noexcept {
   const ScriptingRuntimeBinding &binding = runtime_binding();
-  if ((binding.world == nullptr) || (outComponent == nullptr)) {
+  if (!runtime_bound() || (outComponent == nullptr)) {
     return false;
   }
   DeferredMutation pending{};
@@ -261,14 +291,14 @@ bool latest_point_light_component(
   case PendingRead::None:
     break;
   }
-  return binding.world->get_point_light_component(entity, outComponent);
+  return binding.services->get_point_light_component_op(binding.world, entity, outComponent);
 }
 
 bool latest_spot_light_component(
     runtime::Entity entity,
     runtime::SpotLightComponent *outComponent) noexcept {
   const ScriptingRuntimeBinding &binding = runtime_binding();
-  if ((binding.world == nullptr) || (outComponent == nullptr)) {
+  if (!runtime_bound() || (outComponent == nullptr)) {
     return false;
   }
   DeferredMutation pending{};
@@ -284,16 +314,74 @@ bool latest_spot_light_component(
   case PendingRead::None:
     break;
   }
-  return binding.world->get_spot_light_component(entity, outComponent);
+  return binding.services->get_spot_light_component_op(binding.world, entity, outComponent);
 }
 
-/// Returns whether script-driven world mutations may run immediately.
-bool can_apply_mutations_now() noexcept {
+bool latest_spring_arm(runtime::Entity entity,
+                       math::SpringArmComponent *outComponent) noexcept {
   const ScriptingRuntimeBinding &binding = runtime_binding();
-  return (binding.world != nullptr) && (binding.services != nullptr) &&
-         !in_end_play_dispatch() &&
-         (binding.services->get_current_phase(binding.world) ==
-          runtime::WorldPhase::Input);
+  if (!runtime_bound() || (outComponent == nullptr)) {
+    return false;
+  }
+  DeferredMutation pending{};
+  switch (find_pending_snapshot(entity, DeferredMutationType::AddSpringArm,
+                                DeferredMutationType::AddSpringArm, false,
+                                &pending)) {
+  case PendingRead::Value:
+    *outComponent = pending.springArm;
+    return true;
+  case PendingRead::Removed:
+    return false;
+  case PendingRead::None:
+    break;
+  }
+  return binding.services->get_spring_arm_op(binding.world, entity,
+                                             outComponent);
+}
+
+bool latest_camera_component(runtime::Entity entity,
+                             math::CameraComponent *outComponent) noexcept {
+  const ScriptingRuntimeBinding &binding = runtime_binding();
+  if (!runtime_bound() || (outComponent == nullptr)) {
+    return false;
+  }
+  DeferredMutation pending{};
+  switch (find_pending_snapshot(entity,
+                                DeferredMutationType::AddCameraComponent,
+                                DeferredMutationType::RemoveCameraComponent,
+                                true, &pending)) {
+  case PendingRead::Value:
+    *outComponent = pending.cameraComponent;
+    return true;
+  case PendingRead::Removed:
+    return false;
+  case PendingRead::None:
+    break;
+  }
+  return binding.services->get_camera_component_op(binding.world, entity,
+                                                   outComponent);
+}
+
+bool can_create_entities_now() noexcept {
+  const ScriptingRuntimeBinding &binding = runtime_binding();
+  return runtime_bound() && !in_end_play_dispatch() &&
+         binding.services->is_input_phase(binding.world);
+}
+
+bool can_apply_mutations_now() noexcept {
+  return can_create_entities_now() && !reload_transaction_open();
+}
+
+std::size_t deferred_mutation_count() noexcept {
+  std::lock_guard<std::mutex> lock(g_deferredMutationMutex);
+  return g_deferredMutationCount;
+}
+
+void truncate_deferred_mutations(std::size_t count) noexcept {
+  std::lock_guard<std::mutex> lock(g_deferredMutationMutex);
+  if (count < g_deferredMutationCount) {
+    g_deferredMutationCount = count;
+  }
 }
 
 /// Applies or queues entity destruction based on the current World phase.
@@ -306,7 +394,7 @@ bool apply_or_queue_destroy_entity(runtime::Entity entity) noexcept {
 
   if (can_apply_mutations_now()) {
     dispatch_entity_subtree_end_play(binding.world, entity);
-    return binding.services->destroy_entity_op(binding.world, entity.index);
+    return binding.services->destroy_entity_op(binding.world, entity);
   }
 
   DeferredMutation mutation{};
@@ -327,14 +415,14 @@ bool apply_or_queue_transform(runtime::Entity entity,
 
   if (can_apply_mutations_now()) {
     const bool transformUpdated =
-        binding.services->add_transform_op(binding.world, entity.index,
+        binding.services->add_transform_op(binding.world, entity,
                                            transform);
     if (!transformUpdated) {
       return false;
     }
     return !setAuthority ||
            binding.services->set_movement_authority_op(binding.world,
-                                                       entity.index, authority);
+                                                       entity, authority);
   }
 
   DeferredMutation mutation{};
@@ -357,13 +445,13 @@ bool apply_or_queue_rigid_body(runtime::Entity entity,
   }
 
   if (can_apply_mutations_now()) {
-    if (!binding.services->add_rigid_body_op(binding.world, entity.index,
+    if (!binding.services->add_rigid_body_op(binding.world, entity,
                                              rigidBody)) {
       return false;
     }
     return !releaseAuthority ||
            binding.services->set_movement_authority_op(
-               binding.world, entity.index, runtime::MovementAuthority::None);
+               binding.world, entity, runtime::MovementAuthority::None);
   }
 
   DeferredMutation mutation{};
@@ -384,7 +472,7 @@ bool apply_or_queue_collider(runtime::Entity entity,
   }
 
   if (can_apply_mutations_now()) {
-    return binding.services->add_collider_op(binding.world, entity.index,
+    return binding.services->add_collider_op(binding.world, entity,
                                              collider);
   }
 
@@ -404,7 +492,7 @@ bool apply_or_queue_mesh_component(
   }
 
   if (can_apply_mutations_now()) {
-    return binding.services->add_mesh_component_op(binding.world, entity.index,
+    return binding.services->add_mesh_component_op(binding.world, entity,
                                                    component);
   }
 
@@ -424,7 +512,7 @@ bool apply_or_queue_name_component(
   }
 
   if (can_apply_mutations_now()) {
-    return binding.services->add_name_component_op(binding.world, entity.index,
+    return binding.services->add_name_component_op(binding.world, entity,
                                                    component);
   }
 
@@ -444,7 +532,7 @@ bool apply_or_queue_light_component(
   }
 
   if (can_apply_mutations_now()) {
-    return binding.services->add_light_component_op(binding.world, entity.index,
+    return binding.services->add_light_component_op(binding.world, entity,
                                                     component);
   }
 
@@ -464,7 +552,7 @@ bool apply_or_queue_remove_light_component(runtime::Entity entity) noexcept {
 
   if (can_apply_mutations_now()) {
     return binding.services->remove_light_component_op(binding.world,
-                                                       entity.index);
+                                                       entity);
   }
 
   DeferredMutation mutation{};
@@ -484,7 +572,7 @@ bool apply_or_queue_script_component(
 
   if (can_apply_mutations_now()) {
     return binding.services->add_script_component_op(binding.world,
-                                                     entity.index, component);
+                                                     entity, component);
   }
 
   DeferredMutation mutation{};
@@ -503,7 +591,7 @@ bool apply_or_queue_remove_script_component(runtime::Entity entity) noexcept {
 
   if (can_apply_mutations_now()) {
     return binding.services->remove_script_component_op(binding.world,
-                                                        entity.index);
+                                                        entity);
   }
 
   DeferredMutation mutation{};
@@ -592,6 +680,60 @@ bool apply_or_queue_remove_spot_light_component(
   return queue_deferred_mutation(mutation);
 }
 
+bool apply_or_queue_spring_arm(runtime::Entity entity,
+                               const math::SpringArmComponent &component) noexcept {
+  const ScriptingRuntimeBinding &binding = runtime_binding();
+  if (!runtime_bound()) {
+    return false;
+  }
+
+  if (can_apply_mutations_now()) {
+    return binding.services->add_spring_arm_op(binding.world, entity,
+                                               component);
+  }
+
+  DeferredMutation mutation{};
+  mutation.type = DeferredMutationType::AddSpringArm;
+  mutation.entity = entity;
+  mutation.springArm = component;
+  return queue_deferred_mutation(mutation);
+}
+
+bool apply_or_queue_camera_component(
+    runtime::Entity entity, const math::CameraComponent &component) noexcept {
+  const ScriptingRuntimeBinding &binding = runtime_binding();
+  if (!runtime_bound()) {
+    return false;
+  }
+
+  if (can_apply_mutations_now()) {
+    return binding.services->add_camera_component_op(binding.world, entity,
+                                                     component);
+  }
+
+  DeferredMutation mutation{};
+  mutation.type = DeferredMutationType::AddCameraComponent;
+  mutation.entity = entity;
+  mutation.cameraComponent = component;
+  return queue_deferred_mutation(mutation);
+}
+
+bool apply_or_queue_remove_camera_component(runtime::Entity entity) noexcept {
+  const ScriptingRuntimeBinding &binding = runtime_binding();
+  if (!runtime_bound()) {
+    return false;
+  }
+
+  if (can_apply_mutations_now()) {
+    return binding.services->remove_camera_component_op(binding.world, entity);
+  }
+
+  DeferredMutation mutation{};
+  mutation.type = DeferredMutationType::RemoveCameraComponent;
+  mutation.entity = entity;
+  return queue_deferred_mutation(mutation);
+}
+
 /// Flushes queued mutations against a snapshot of the current count:
 /// applying a destroy runs on_end_play, which may queue new mutations —
 /// those append past the snapshot and survive into the next flush. Each
@@ -602,22 +744,26 @@ bool apply_or_queue_remove_spot_light_component(
 /// of the new scene) are counted and reported in one summary log instead
 /// of being silently discarded.
 void flush_deferred_mutations() noexcept {
+  static_cast<void>(flush_deferred_mutations_prefix(kMaxDeferredMutations));
+}
+
+std::size_t flush_deferred_mutations_prefix(std::size_t limit) noexcept {
   const ScriptingRuntimeBinding &binding = runtime_binding();
   if ((binding.world == nullptr) || (binding.services == nullptr) ||
       !can_apply_mutations_now()) {
-    return;
+    return 0U;
   }
 
   std::size_t count = 0U;
   {
     std::lock_guard<std::mutex> lock(g_deferredMutationMutex);
-    count = g_deferredMutationCount;
+    count = (limit < g_deferredMutationCount) ? limit : g_deferredMutationCount;
   }
   if (count == 0U) {
-    return;
+    return 0U;
   }
 
-  const std::uint32_t liveEpoch = binding.world->content_epoch();
+  const std::uint32_t liveEpoch = binding.services->content_epoch(binding.world);
   std::size_t failedApplies = 0U;
   std::size_t deadTargets = 0U;
   std::size_t staleEpochTargets = 0U;
@@ -645,60 +791,60 @@ void flush_deferred_mutations() noexcept {
     case DeferredMutationType::DestroyEntity:
       dispatch_entity_subtree_end_play(binding.world, mutation.entity);
       note(binding.services->destroy_entity_op(binding.world,
-                                               mutation.entity.index));
+                                               mutation.entity));
       break;
     case DeferredMutationType::SetTransform: {
       const bool transformUpdated = binding.services->add_transform_op(
-          binding.world, mutation.entity.index, mutation.transform);
+          binding.world, mutation.entity, mutation.transform);
       note(transformUpdated);
       if (transformUpdated && mutation.setMovementAuthority) {
         note(binding.services->set_movement_authority_op(
-            binding.world, mutation.entity.index, mutation.movementAuthority));
+            binding.world, mutation.entity, mutation.movementAuthority));
       }
       break;
     }
     case DeferredMutationType::AddRigidBody: {
       const bool bodyUpdated = binding.services->add_rigid_body_op(
-          binding.world, mutation.entity.index, mutation.rigidBody);
+          binding.world, mutation.entity, mutation.rigidBody);
       note(bodyUpdated);
       if (bodyUpdated && mutation.setMovementAuthority) {
         note(binding.services->set_movement_authority_op(
-            binding.world, mutation.entity.index, mutation.movementAuthority));
+            binding.world, mutation.entity, mutation.movementAuthority));
       }
       break;
     }
     case DeferredMutationType::AddCollider:
       note(binding.services->add_collider_op(binding.world,
-                                             mutation.entity.index,
+                                             mutation.entity,
                                              mutation.collider));
       break;
     case DeferredMutationType::AddMeshComponent:
       note(binding.services->add_mesh_component_op(binding.world,
-                                                   mutation.entity.index,
+                                                   mutation.entity,
                                                    mutation.meshComponent));
       break;
     case DeferredMutationType::AddNameComponent:
       note(binding.services->add_name_component_op(binding.world,
-                                                   mutation.entity.index,
+                                                   mutation.entity,
                                                    mutation.nameComponent));
       break;
     case DeferredMutationType::AddLightComponent:
       note(binding.services->add_light_component_op(binding.world,
-                                                    mutation.entity.index,
+                                                    mutation.entity,
                                                     mutation.lightComponent));
       break;
     case DeferredMutationType::RemoveLightComponent:
       note(binding.services->remove_light_component_op(binding.world,
-                                                       mutation.entity.index));
+                                                       mutation.entity));
       break;
     case DeferredMutationType::AddScriptComponent:
       note(binding.services->add_script_component_op(binding.world,
-                                                     mutation.entity.index,
+                                                     mutation.entity,
                                                      mutation.scriptComponent));
       break;
     case DeferredMutationType::RemoveScriptComponent:
       note(binding.services->remove_script_component_op(
-          binding.world, mutation.entity.index));
+          binding.world, mutation.entity));
       break;
     case DeferredMutationType::AddPointLightComponent:
       note(binding.services->add_point_light_component_op(
@@ -715,6 +861,18 @@ void flush_deferred_mutations() noexcept {
     case DeferredMutationType::RemoveSpotLightComponent:
       note(binding.services->remove_spot_light_component_op(
           binding.world, mutation.entity));
+      break;
+    case DeferredMutationType::AddSpringArm:
+      note(binding.services->add_spring_arm_op(binding.world, mutation.entity,
+                                               mutation.springArm));
+      break;
+    case DeferredMutationType::AddCameraComponent:
+      note(binding.services->add_camera_component_op(
+          binding.world, mutation.entity, mutation.cameraComponent));
+      break;
+    case DeferredMutationType::RemoveCameraComponent:
+      note(binding.services->remove_camera_component_op(binding.world,
+                                                        mutation.entity));
       break;
     }
   }
@@ -738,6 +896,7 @@ void flush_deferred_mutations() noexcept {
                   failedApplies, deadTargets, staleEpochTargets);
     core::log_message(core::LogLevel::Warning, "scripting", buffer);
   }
+  return failedApplies + deadTargets + staleEpochTargets;
 }
 
 /// Clears queued deferred mutations without applying them.

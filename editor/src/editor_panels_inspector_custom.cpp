@@ -389,10 +389,11 @@ void draw_add_component_menu(runtime::Entity entity, bool editable) noexcept {
   if (!ImGui::BeginCombo("##addcomp", "Add Component...")) {
     return;
   }
-  static char filter[64] = {};
+  char *filter = editor_session().inspector.addComponentFilter;
   ImGui::SetNextItemWidth(-1.0F);
-  ImGui::InputTextWithHint("##addcompfilter", "Search...", filter,
-                           sizeof(filter));
+  ImGui::InputTextWithHint(
+      "##addcompfilter", "Search...", filter,
+      sizeof(InspectorPanelState::addComponentFilter));
 
   const char *lastCategory = nullptr;
   for (std::size_t i = 0U; i < candidateCount; ++i) {

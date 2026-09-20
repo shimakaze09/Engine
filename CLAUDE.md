@@ -115,16 +115,25 @@ Calling a rule enforced without one of these three is prohibited.
   dated human observation beside it. "Verified", "landed" and
   "production-ready" name the commit, the evidence, the platform and the
   date, or they are not written.
-- **[OWNER]** Defect budget, as flow rather than a count: **P0 is
-  stop-the-line** — while one is open it is the work. **P1 and P2 may not
-  grow** month over month. **P3 is unbounded and not audited**, and never
-  justifies a change of its own. Do not open a broad audit campaign while
-  P0 or P1 is non-empty. Severity is assigned per row, never per batch;
-  **anything observed happening in real use is at least P2** whatever it
-  was filed as; and a budget never justifies a downgrade — moving a
-  severity down needs the same evidence as any other contract change. Zero
-  open findings is not a reachable state for an engine, and pursuing it
-  starves the foundation work.
+- **[OWNER]** Severity is impact: **P0** data loss or corruption,
+  unrecoverable project damage, a critical crash; **P1** a major
+  correctness or stability failure, or an important workflow that cannot
+  reliably complete; **P2** a user-visible functional defect, or a
+  workflow materially obstructed but recoverable; **P3** low-impact debt,
+  hygiene, cosmetics. Visibility alone sets no severity, and a reachable
+  functional defect is never dismissed for being hard to reach. **P0 is
+  stop-the-line** — while one is open it is the work, and a consolidation
+  is allowed for it only as the owning-layer fix. **P1 and P2 counts are
+  health signals, not quotas**: a rising count is reported and triaged,
+  never optimized for. **P3 is not audited**; it is normally fixed inside
+  a change already touching its files, and stands alone only for bounded
+  structural value (deleting a substantial obsolete API or dead code,
+  unblocking a migration, removing recurring noise, a cleanup cheaper than
+  carrying). Age triggers triage or an icebox, never a close. Do not open a
+  broad audit campaign while P0 or P1 is non-empty. Severity is assigned
+  per row, never per batch; **anything observed happening in real use is
+  at least P2** whatever it was filed as; a budget never justifies a
+  downgrade. Zero open findings is not a reachable state for an engine.
 
 ## Working conventions
 
@@ -149,10 +158,12 @@ Calling a rule enforced without one of these three is prohibited.
   Residual scope from a partial fix gets its own linked issue.
 - Prefer `bool`+log, small status objects, or optional-like returns;
   assertions only for programmer errors.
-- **Documentation is net-negative.** A new skill or document deletes at
-  least as much prose as it adds. Skills cap at eight: to add one, merge or
-  delete another. Only procedures with a completion criterion become
-  skills; principles belong in the hard rules above.
+- **One fact, one owner.** No document mirrors another, no history in an
+  always-loaded contract, every document has a unique purpose, stale prose
+  is deleted. A genuinely new subsystem may add a document. Through the
+  current correction pass a new skill or document still deletes at least
+  as much prose as it adds and skills cap at eight; only procedures with a
+  completion criterion become skills.
 
 ## Build and test
 

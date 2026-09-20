@@ -203,10 +203,19 @@ static void test_release_reuses_terminal_slots() noexcept {
     queue->count = AssetStreamingQueue::kMaxRequests;
   }
 
+  engine::core::Status fullStatus{};
   const LoadHandle full =
       load_asset_async(queue.get(), make_id(AssetStreamingQueue::kMaxRequests),
-                       "overflow.mesh", LoadPriority::Normal);
+                       "overflow.mesh", LoadPriority::Normal, &fullStatus);
   CHECK(!full.valid(), "full terminal queue rejects new request");
+  CHECK(fullStatus.kind == engine::core::FailureKind::CapacityExhausted,
+        "the rejection names the full queue");
+  engine::core::Status nullStatus{};
+  CHECK(!load_asset_async(nullptr, make_id(1U), "x.mesh", LoadPriority::Normal,
+                          &nullStatus)
+             .valid() &&
+            (nullStatus.kind == engine::core::FailureKind::InvalidArgument),
+        "a null queue is named as an invalid argument");
 
   for (std::uint32_t i = 0U; i < AssetStreamingQueue::kMaxRequests; ++i) {
     CHECK(release_load(queue.get(), LoadHandle{i, queue->requests[i].generation}),

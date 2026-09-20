@@ -34,6 +34,7 @@
 #define MINIAUDIO_IMPLEMENTATION
 #define MA_NO_GENERATION
 #include "miniaudio.h"
+#include "engine/core/diagnostic.h"
 
 #if defined(__clang__)
 #pragma clang diagnostic pop
@@ -70,6 +71,7 @@ struct OneShotInstance final {
 
 struct AudioState final {
   bool initialized = false;
+  bool nullDevice = false;
   bool busesReady = false;
   ma_engine engine{};
   ma_sound_group musicGroup{};
@@ -117,9 +119,8 @@ void register_budget_cvars() noexcept {
 /// Logs one audio diagnostic in the `<path>: <reason>` shape the editor
 /// console parses for its navigation actions.
 void log_path_error(const char *virtualPath, const char *reason) noexcept {
-  char message[1280] = {};
-  std::snprintf(message, sizeof(message), "%s: %s", virtualPath, reason);
-  core::log_message(core::LogLevel::Error, "audio", message);
+  core::log_path_diagnostic(core::LogLevel::Error, core::LogChannel::Audio,
+                            virtualPath, reason);
 }
 
 /// The byte budget a cvar currently holds; a value below zero bounds
@@ -345,15 +346,27 @@ void reset_sound_entry(SoundEntry &entry) noexcept {
 
 } // namespace
 
+bool initialize_audio() noexcept { return initialize_audio(AudioConfig{}); }
+
+bool audio_uses_null_device() noexcept {
+  return g_audio.initialized && g_audio.nullDevice;
+}
+
 /// Initializes the owning system for audio.
-bool initialize_audio() noexcept {
+bool initialize_audio(const AudioConfig &audioConfig) noexcept {
   if (g_audio.initialized) {
     return true;
   }
   register_budget_cvars();
 
   ma_engine_config config = ma_engine_config_init();
-  config.noDevice = MA_FALSE;
+  config.noDevice = audioConfig.nullDevice ? MA_TRUE : MA_FALSE;
+  if (audioConfig.nullDevice) {
+    // Without a device the engine has no format to take over, so the mix
+    // format is fixed here.
+    config.channels = 2U;
+    config.sampleRate = 48000U;
+  }
 
   const ma_result result = ma_engine_init(&config, &g_audio.engine);
   if (result != MA_SUCCESS) {
@@ -384,7 +397,10 @@ bool initialize_audio() noexcept {
   g_audio.busVolumes[2] = 1.0F;
 
   g_audio.initialized = true;
-  core::log_message(core::LogLevel::Info, "audio", "audio initialized");
+  g_audio.nullDevice = audioConfig.nullDevice;
+  core::log_message(core::LogLevel::Info, "audio",
+                    audioConfig.nullDevice ? "audio initialized (no device)"
+                                           : "audio initialized");
   return true;
 }
 
@@ -490,10 +506,11 @@ SoundHandle load_sound(const char *virtualPath) noexcept {
   const std::uint64_t fileLimit =
       budget_bytes(kMaxSoundFileBytesCvar, kDefaultMaxSoundFileBytes);
   switch (core::vfs_read_binary_bounded(virtualPath, fileLimit, &fileData,
-                                        &fileSize)) {
-  case core::VfsReadStatus::Ok:
+                                        &fileSize)
+              .kind) {
+  case core::FailureKind::Ok:
     break;
-  case core::VfsReadStatus::TooLarge: {
+  case core::FailureKind::CapacityExhausted: {
     char reason[192] = {};
     std::snprintf(reason, sizeof(reason),
                   "file of %llu bytes exceeds %s (%llu)",
@@ -503,10 +520,10 @@ SoundHandle load_sound(const char *virtualPath) noexcept {
     log_path_error(virtualPath, reason);
     return kInvalidSound;
   }
-  case core::VfsReadStatus::Unresolved:
+  case core::FailureKind::NotFound:
     log_path_error(virtualPath, "sound file not found or unreadable");
     return kInvalidSound;
-  case core::VfsReadStatus::IoError:
+  case core::FailureKind::IoFailed:
   default:
     log_path_error(virtualPath, "failed to read sound file via VFS");
     return kInvalidSound;

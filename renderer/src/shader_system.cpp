@@ -16,6 +16,7 @@
 #include "engine/core/vfs.h"
 #include "engine/renderer/material.h"
 #include "engine/renderer/render_device.h"
+#include "engine/core/diagnostic.h"
 
 namespace engine::renderer {
 
@@ -414,13 +415,10 @@ DeviceProgramHandle try_cooked_program(const char *vertPath,
   return program;
 }
 
-/// Logs one shader diagnostic in the `<path>: <reason>` shape the editor
-/// console parses for its Open/Select navigation actions.
+/// Logs one shader diagnostic with its path carried in the record.
 void log_shader_path_error(const char *path, const char *reason) noexcept {
-  char message[640] = {};
-  std::snprintf(message, sizeof(message), "%s: %s",
-                (path != nullptr) ? path : "(null)", reason);
-  core::log_message(core::LogLevel::Error, "shader", message);
+  core::log_path_diagnostic(core::LogLevel::Error, core::LogChannel::Shader,
+                            path, reason);
 }
 
 bool try_reload_entry(ShaderEntry &entry) noexcept {
@@ -442,7 +440,11 @@ bool try_reload_entry(ShaderEntry &entry) noexcept {
                   "%s %s: cooked shader binaries unavailable — keeping old "
                   "program until the cooked files change again",
                   entry.vertPath, entry.fragPath);
-    core::log_message(core::LogLevel::Error, "shader", message);
+    // The record names the vertex stage; the text names both.
+    core::Diagnostic record = core::make_diagnostic(
+        core::LogLevel::Error, core::LogChannel::Shader, message);
+    core::diagnostic_set_path(&record, entry.vertPath);
+    core::log_diagnostic(record);
     return false;
   }
   const RenderDevice *dev = render_device();

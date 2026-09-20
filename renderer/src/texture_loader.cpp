@@ -19,6 +19,7 @@
 #include "engine/math/vec3.h"
 #include "texture_handle_codec.h"
 #include "engine/renderer/render_device.h"
+#include "engine/core/diagnostic.h"
 
 #ifdef __clang__
 #pragma clang diagnostic push
@@ -188,13 +189,10 @@ namespace {
 constexpr int kMaxDecodedTextureDimension = 16384;
 constexpr std::uint64_t kMaxDecodedTextureBytes = 512ULL << 20U;
 
-/// Logs one texture diagnostic in the `<path>: <reason>` shape the editor
-/// console parses for its Open/Select navigation actions.
+/// Logs one texture diagnostic with its path carried in the record.
 void log_texture_path_error(const char *path, const char *reason) noexcept {
-  char message[640] = {};
-  std::snprintf(message, sizeof(message), "%s: %s",
-                (path != nullptr) ? path : "(null)", reason);
-  core::log_message(core::LogLevel::Error, "renderer", message);
+  core::log_path_diagnostic(core::LogLevel::Error, core::LogChannel::Renderer,
+                            path, reason);
 }
 
 /// Logs one decode-budget rejection with the offending numbers.

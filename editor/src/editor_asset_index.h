@@ -10,36 +10,21 @@
 #include <string>
 #include <vector>
 
+#include "engine/content/asset_type_table.h"
+
 namespace engine::editor {
 
-/// Enumerates the browsable asset categories the content browser filters
-/// and dispatches typed actions on. Distinct from
-/// engine::renderer::AssetTypeTag: that enum tags GPU-resident cooked
-/// records already loaded into the runtime AssetDatabase, while this one
-/// classifies every source file the editor can see on disk, including
-/// kinds (Scene, Animation, AnimationController) the renderer database
-/// never tracks.
-enum class AssetKind : std::uint8_t {
-  Mesh,
-  Texture,
-  Material,
-  Script,
-  Scene,
-  Animation,
-  AnimationController,
-  Sound,
-  Other,
-};
-
-/// Number of AssetKind values (used to size the type-filter bitmask).
-inline constexpr std::size_t kAssetKindCount = 9U;
-/// Bitmask bit for one AssetKind, used by AssetFilterState::typeMask.
-inline constexpr std::uint32_t asset_kind_bit(AssetKind kind) noexcept {
+/// Bitmask bit for one asset type, used by AssetFilterState::typeMask;
+/// the bit order is the asset type table's row order.
+inline constexpr std::uint32_t
+asset_kind_bit(content::AssetTypeTag kind) noexcept {
   return 1U << static_cast<std::uint32_t>(kind);
 }
-/// Type-filter mask value that accepts every AssetKind.
+/// Type-filter mask value that accepts every asset type.
 inline constexpr std::uint32_t kAssetKindMaskAll =
-    (1U << kAssetKindCount) - 1U;
+    (1U << content::kAssetTypeCount) - 1U;
+static_assert(content::kAssetTypeCount < 32U,
+              "the type filter mask holds one bit per asset type");
 
 constexpr std::size_t kMaxAssetIndexPath = 512U;
 constexpr std::size_t kMaxAssetIndexName = 160U;
@@ -54,7 +39,10 @@ struct AssetIndexEntry final {
   char virtualPath[kMaxAssetIndexPath] = {};
   char name[kMaxAssetIndexName] = {};
   char folder[kMaxAssetIndexPath] = {};
-  AssetKind kind = AssetKind::Other;
+  content::AssetTypeTag kind = content::AssetTypeTag::Unknown;
+  /// True for the authored source of a cooked type (a .gltf beside its
+  /// .mesh): browsable, but not the form the runtime loads.
+  bool isSource = false;
   bool hasThumbnail = false;
 };
 
@@ -73,13 +61,17 @@ const AssetIndexEntry *asset_index_entry(std::size_t index) noexcept;
 std::uint64_t asset_index_generation() noexcept;
 /// True once rebuild_asset_index has run at least once this process.
 bool asset_index_built() noexcept;
+/// Drops the index and its root so the next editor session walks afresh;
+/// bumps the generation so every dependent cache recomputes.
+void asset_index_reset() noexcept;
 
-/// Classifies one file by extension, falling back to a cheap top-level-key
-/// content sniff for ambiguous ".json" files (scene/material/animation
-/// controller all use that extension). Exposed for tests.
-AssetKind classify_asset_kind(const char *osPath) noexcept;
-/// Display label for a kind ("Mesh", "Texture", ...).
-const char *asset_kind_label(AssetKind kind) noexcept;
+/// Classifies one file through the asset type table's suffixes, falling
+/// back to a cheap top-level-key content sniff for ".json" documents no
+/// suffix names (scene and material both use that bare extension). Sets
+/// *outIsSource when the suffix is a cooked type's authored source form.
+/// Exposed for tests.
+content::AssetTypeTag classify_asset_kind(const char *osPath,
+                                          bool *outIsSource = nullptr) noexcept;
 
 /// Search/filter/navigation request evaluated against the index.
 struct AssetFilterState final {
@@ -140,9 +132,12 @@ enum class AssetOpenAction : std::uint8_t {
   SelectOnly,
 };
 
-/// Maps an asset kind to its typed Open behavior (pure — the caller
-/// performs the actual side effect through the production entry point:
-/// execute_asset_spawn for SpawnMesh, request_scene_open for OpenScene).
-AssetOpenAction resolve_asset_open_action(AssetKind kind) noexcept;
+/// Maps an asset type's primary action from the type table to its typed
+/// Open behavior (pure — the caller performs the actual side effect
+/// through the production entry point: execute_asset_spawn for SpawnMesh,
+/// request_scene_open for OpenScene). The authored source of a cooked type
+/// only selects: the runtime cannot load it.
+AssetOpenAction resolve_asset_open_action(content::AssetTypeTag kind,
+                                          bool isSource = false) noexcept;
 
 } // namespace engine::editor

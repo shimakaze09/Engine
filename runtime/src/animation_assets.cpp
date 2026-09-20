@@ -17,6 +17,7 @@
 #include "engine/core/logging.h"
 #include "engine/core/vfs.h"
 #include "engine/content/asset_staleness.h"
+#include "engine/core/diagnostic.h"
 
 namespace engine::runtime {
 
@@ -31,12 +32,10 @@ namespace {
 // allocation.
 constexpr std::uint32_t kMaxAnimPayloadFloats = 8U * 1024U * 1024U;
 
-/// Logs one load failure with its virtual path.
+/// Logs one load failure with its virtual path carried in the record.
 bool fail(const char *virtualPath, const char *reason) noexcept {
-  char message[192] = {};
-  std::snprintf(message, sizeof(message), "%s: %s",
-                (virtualPath != nullptr) ? virtualPath : "(null)", reason);
-  core::log_message(core::LogLevel::Error, "animation", message);
+  core::log_path_diagnostic(core::LogLevel::Error, core::LogChannel::Animation,
+                            virtualPath, reason);
   return false;
 }
 

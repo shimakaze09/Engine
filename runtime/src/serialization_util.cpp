@@ -6,6 +6,7 @@
 #include "serialization_util.h"
 
 #include <cstdio>
+#include <cstring>
 #include <new>
 
 #include "engine/core/atomic_file.h"
@@ -57,7 +58,8 @@ bool read_optional_float_strict(const core::JsonParser &parser,
 bool schema_version_supported(const core::JsonParser &parser,
                               const core::JsonValue &root,
                               std::uint32_t currentVersion, const char *noun,
-                              const char *channel) noexcept {
+                              const char *channel,
+                              std::uint32_t *outVersion) noexcept {
   // An absent key is the documented legacy revision rather than a parse
   // failure; a present one is read strictly, so a value of the wrong JSON
   // type is a refusal instead of a silent fall back to that revision.
@@ -81,6 +83,9 @@ bool schema_version_supported(const core::JsonParser &parser,
     return false;
   }
 
+  if (outVersion != nullptr) {
+    *outVersion = version;
+  }
   return true;
 }
 
@@ -422,7 +427,8 @@ bool write_reflected_component(core::JsonWriter &writer,
 bool read_reflected_component(const core::JsonParser &parser,
                               const core::JsonValue &componentObject,
                               const core::TypeDescriptor &descriptor,
-                              void *instance) noexcept {
+                              void *instance,
+                              const ReflectedReadOptions &options) noexcept {
   if ((instance == nullptr) ||
       (componentObject.type != core::JsonValue::Type::Object)) {
     return false;
@@ -471,7 +477,20 @@ bool read_reflected_component(const core::JsonParser &parser,
     }
     case core::TypeField::Kind::Vec3: {
       math::Vec3 *value = descriptor.field_ptr<math::Vec3>(instance, field);
-      if ((value == nullptr) || !read_vec3(parser, fieldValue, value)) {
+      if (value == nullptr) {
+        return false;
+      }
+      if ((options.uniformScalarVec3Key != nullptr) &&
+          (fieldValue.type == core::JsonValue::Type::Number) &&
+          (std::strcmp(field.key, options.uniformScalarVec3Key) == 0)) {
+        float uniform = 0.0F;
+        if (!parser.as_float(fieldValue, &uniform)) {
+          return false;
+        }
+        *value = math::Vec3(uniform, uniform, uniform);
+        break;
+      }
+      if (!read_vec3(parser, fieldValue, value)) {
         return false;
       }
       break;

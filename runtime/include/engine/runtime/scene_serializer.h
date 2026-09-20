@@ -4,6 +4,8 @@
 
 #include <cstddef>
 
+#include "engine/core/validation_report.h"
+
 namespace engine::runtime {
 
 class World;
@@ -35,12 +37,20 @@ bool save_scene(const World &world, const char *path) noexcept;
 /// Saves the requested resource for scene.
 bool save_scene(const World &world, char *buffer, std::size_t capacity,
                 std::size_t *outSize) noexcept;
-/// Loads the requested resource for scene.
+/// Loads the scene at `path` into the world. A malformed document is
+/// refused with the world untouched; a well-formed one whose references
+/// do not resolve still loads, and each such reference is a Warning in
+/// *outReport (when given) and a logged diagnostic: `dangling_parent`
+/// (a Transform parent no entity carries; the child loads as a root),
+/// `missing_script` and `missing_controller` (a path under a mounted
+/// prefix that names no file; unmounted prefixes are not judged).
 bool load_scene(World &world, const char *path,
-                SceneTeardownHook beforeTeardown = nullptr) noexcept;
-/// Loads the requested resource for scene.
+                SceneTeardownHook beforeTeardown = nullptr,
+                core::ValidationReport *outReport = nullptr) noexcept;
+/// Loads the scene held in `buffer`; same contract as the path form.
 bool load_scene(World &world, const char *buffer, std::size_t size,
-                SceneTeardownHook beforeTeardown = nullptr) noexcept;
+                SceneTeardownHook beforeTeardown = nullptr,
+                core::ValidationReport *outReport = nullptr) noexcept;
 /// Resets this object back to its reusable empty state for world.
 void reset_world(World &world,
                  SceneTeardownHook beforeTeardown = nullptr) noexcept;

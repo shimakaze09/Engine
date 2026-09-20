@@ -12,10 +12,12 @@
 #include "engine/core/entity.h"
 #include "engine/core/fixed_hash_table.h"
 #include "engine/core/sparse_set.h"
+#include "engine/core/status.h"
 #include "engine/math/component_types.h"
 #include "engine/math/mat4.h"
 #include "engine/math/quat.h"
 #include "engine/math/vec3.h"
+#include "engine/physics/inertia.h"
 #include "engine/physics/physics_world_view.h"
 #include "engine/runtime/animation.h"
 #include "engine/runtime/world_component_types.h"
@@ -90,6 +92,18 @@ inline constexpr bool kTupleContainsV<C, std::tuple<Ts...>> =
 
 /// Fixed-capacity ECS world: entity lifetimes, component storage, phase
 /// gating, and the physics-facing world view.
+/// The fold's running value after each section of state_hash, so a
+/// divergence between two runs or platforms is localised to the section
+/// that first differs.
+struct StateHashSections final {
+  std::uint64_t entities = 0U;
+  std::uint64_t transforms = 0U;
+  std::uint64_t rigidBodies = 0U;
+  std::uint64_t physics = 0U;
+  std::uint64_t timers = 0U;
+  std::uint64_t animation = 0U;
+};
+
 class World final : public physics::PhysicsWorldView {
 public:
   static constexpr std::size_t kMaxEntities = ENGINE_MAX_ENTITIES;
@@ -182,9 +196,30 @@ public:
   /// Finds the matching object or resource for entity by persistent id.
   Entity find_entity_by_persistent_id(PersistentId persistentId) const noexcept;
   /// Serialization-stable id of a live entity; kInvalidPersistentId when dead.
-  PersistentId persistent_id(Entity entity) const noexcept;
+  PersistentId persistent_id(Entity entity) const noexcept override;
   /// Number of live alive entity components.
   std::size_t alive_entity_count() const noexcept;
+
+  /// Why the last refused entity creation, component add or remove was
+  /// refused, so a caller that got `false` or an invalid entity can tell:
+  /// InvariantViolated outside the Input phase, NotFound for a dead
+  /// entity, InvalidArgument for a persistent id already in use or an
+  /// identity field that does not fit, CapacityExhausted when the entity
+  /// table or the component's storage is full. Successes leave it as it
+  /// was; it starts as Ok.
+  core::Status last_refusal() const noexcept { return m_lastRefusal; }
+
+  /// One 64-bit fold over the state the determinism scenarios compare, in
+  /// dense storage order: every alive entity's index, generation and
+  /// persistent id; each transform's TRS bits and parent; each rigid
+  /// body's velocities and sleep state; world gravity; the collision
+  /// pairs of the last step; the active timers; and each animation
+  /// component's state-machine position and times. It does not fold
+  /// masses, inertia, colliders, joints, materials or script state, so
+  /// equal hashes mean the observed subset evolved identically, not that
+  /// two worlds are the same world. Reads the committed state; never call
+  /// it during Simulation.
+  std::uint64_t state_hash(StateHashSections *outSections = nullptr) const noexcept;
 
   /// Content epoch: advances every time this world's entire contents are
   /// replaced (scene load commit, reset), so externally retained entity
@@ -946,17 +981,41 @@ private:
   /// Resolves a nearest body owner from one transform state buffer.
   Entity find_rigid_body_owner(Entity entity,
                                std::size_t stateIndex) const noexcept;
+  /// Inverse inertia derived from the colliders `body` owns: its own and
+  /// every descendant's whose nearest rigid-body ancestor is `body`, the
+  /// same ownership collision resolves through rigid_body_owner. The
+  /// default tensor when nothing contributes or the body is static.
+  math::Vec3 derived_inverse_inertia(Entity body, float inverseMass) noexcept;
+  /// Adds the colliders of `entity`'s subtree that `body` owns, each placed
+  /// by its transform composed down from the body; stops at descendants
+  /// that carry their own rigid body.
+  void accumulate_owned_collider_inertia(Entity body, Entity entity,
+                                         const math::Vec3 &offset,
+                                         const math::Quat &rotation,
+                                         physics::InertiaAccumulator *out,
+                                         std::size_t depth) noexcept;
+  /// Rewrites an automatic body's tensor from the geometry it owns now;
+  /// an authored body or a non-body is left alone.
+  void rederive_inverse_inertia(Entity body) noexcept;
+  /// Rederives the body that owns `entity`'s subtree, when there is one.
+  void rederive_owner_inertia(Entity entity) noexcept;
   /// Transform state buffer index reads should use in the current phase.
   std::size_t query_state_index() const noexcept;
   // Shared guard/log/dispatch bodies behind the per-component add/remove/get
   // wrappers. Defined in world.cpp; every instantiation lives there.
   /// Phase + liveness guard used by component mutators with extra logic.
   bool check_component_mutation(Entity entity, const char *label) noexcept;
-  /// Phase + liveness guarded SparseSet insert; logs failures under `label`.
+  /// Records why a mutation was refused (see last_refusal).
+  void note_refusal(core::FailureKind kind,
+                    std::uint32_t detail = 0U) noexcept {
+    m_lastRefusal = core::Status::fail(kind, detail);
+  }
+  /// Phase + liveness guarded SparseSet insert; logs failures under `label`
+  /// and records a refusal in last_refusal.
   template <typename Set, typename Component>
-  bool add_component_checked(Set &set, Entity entity,
-                             const Component &component,
-                             const char *label) noexcept;
+  core::Status add_component_checked(Set &set, Entity entity,
+                                     const Component &component,
+                                     const char *label) noexcept;
   /// Phase + liveness guarded SparseSet remove; logs failures under `label`.
   template <typename Set>
   bool remove_component_checked(Set &set, Entity entity,
@@ -1068,6 +1127,7 @@ private:
   }
 
   WorldPhase m_phase = WorldPhase::Input;
+  core::Status m_lastRefusal{};
   std::uint32_t m_nextEntityIndex = 1U;
   PersistentId m_nextPersistentId = 1U;
   std::uint32_t m_contentEpoch = 0U;

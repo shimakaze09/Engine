@@ -184,7 +184,7 @@ int lua_engine_on_touch(lua_State *state) noexcept {
 
   lua_State *mainState = resolve_main_state(state);
   if (mainState == nullptr) {
-    core::log_message(core::LogLevel::Error, "Scripting",
+    core::log_message(core::LogLevel::Error, "scripting",
                       "failed to resolve main state for touch callback");
     lua_pushboolean(state, 0);
     return 1;
@@ -257,7 +257,7 @@ int lua_engine_on_gesture(lua_State *state) noexcept {
 
   lua_State *mainState = resolve_main_state(state);
   if (mainState == nullptr) {
-    core::log_message(core::LogLevel::Error, "Scripting",
+    core::log_message(core::LogLevel::Error, "scripting",
                       "failed to resolve main state for gesture callback");
     lua_pushboolean(state, 0);
     return 1;

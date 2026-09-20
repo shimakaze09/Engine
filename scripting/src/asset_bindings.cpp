@@ -8,6 +8,7 @@
 #include "deferred_mutations.h"
 #include "entity_handle.h"
 #include "lua_state.h"
+#include "reload_transaction.h"
 #include "runtime_binding.h"
 
 extern "C" {
@@ -26,15 +27,14 @@ extern "C" {
 #include "engine/core/logging.h"
 #include "engine/core/string_util.h"
 #include "engine/math/quat.h"
-#include "engine/runtime/scripting_bridge.h"
-#include "engine/runtime/world.h"
+#include "engine/scripting/runtime_services.h"
 
 namespace engine::scripting {
 
 namespace {
 
 int lua_engine_save_prefab(lua_State *state) noexcept {
-  if ((runtime_binding().world == nullptr) || !lua_isinteger(state, 1) ||
+  if (!runtime_bound() || !lua_isinteger(state, 1) ||
       !lua_isstring(state, 2)) {
     lua_pushboolean(state, 0);
     return 1;
@@ -51,31 +51,35 @@ int lua_engine_save_prefab(lua_State *state) noexcept {
   }
   const bool ok =
       (runtime_binding().services != nullptr) && (runtime_binding().services->save_prefab != nullptr)
-          ? runtime_binding().services->save_prefab(runtime_binding().world, entity.index, path)
+          ? runtime_binding().services->save_prefab(runtime_binding().world, entity, path)
           : false;
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
 
 int lua_engine_instantiate(lua_State *state) noexcept {
-  if ((runtime_binding().world == nullptr) || !lua_isstring(state, 1)) {
+  if (!runtime_bound() || !lua_isstring(state, 1)) {
     lua_pushnil(state);
     return 1;
   }
   const char *path = lua_tostring(state, 1);
-  if ((path == nullptr) || !script_path_in_jail(path, "instantiate")) {
+  if ((path == nullptr) || !script_path_in_jail(path, "instantiate") ||
+      (reload_staging(ReloadEffect::CreateEntity) == ReloadStaging::Refused)) {
     lua_pushnil(state);
     return 1;
   }
-  const std::uint32_t entityIndex =
-      ((runtime_binding().services != nullptr) && (runtime_binding().services->instantiate_prefab != nullptr))
-          ? runtime_binding().services->instantiate_prefab(runtime_binding().world, path)
-          : 0U;
-  if (entityIndex == 0U) {
+  const runtime::Entity entity =
+      ((runtime_binding().services != nullptr) &&
+       (runtime_binding().services->instantiate_prefab != nullptr))
+          ? runtime_binding().services->instantiate_prefab(
+                runtime_binding().world, path)
+          : runtime::kInvalidEntity;
+  if (entity == runtime::kInvalidEntity) {
     lua_pushnil(state);
     return 1;
   }
-  push_entity_handle_from_index(state, entityIndex);
+  reload_note_created_entity(entity);
+  push_entity_handle(state, entity);
   return 1;
 }
 

@@ -16,8 +16,10 @@ namespace engine::physics {
 using engine::math::RigidBody;
 using engine::math::Transform;
 
-/// Endpoint state for one joint solve; inverse mass and inertia are the
-/// effective values (zero for static or missing bodies).
+/// Endpoint state for one joint solve; inverse mass and the body-space
+/// inverse inertia are the effective values (zero for static or missing
+/// bodies). The tensors apply in world space through the endpoints'
+/// current rotations, which the projection helpers read from tA/tB.
 struct JointSolveContext final {
   Transform *tA = nullptr;
   Transform *tB = nullptr;
@@ -25,8 +27,8 @@ struct JointSolveContext final {
   RigidBody *bodyB = nullptr;
   float invMassA = 0.0F;
   float invMassB = 0.0F;
-  float invInertiaA = 0.0F;
-  float invInertiaB = 0.0F;
+  math::Vec3 invInertiaA = math::Vec3(0.0F, 0.0F, 0.0F);
+  math::Vec3 invInertiaB = math::Vec3(0.0F, 0.0F, 0.0F);
 };
 
 // Per-type solvers: one Gauss-Seidel iteration of position projection plus

@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "engine/math/quat.h"
 #include "engine/math/vec3.h"
 #include "engine/physics/collider.h"
 #include "engine/physics/physics_context.h"
@@ -38,6 +39,7 @@ struct ResolveScratch final {
   std::array<ColliderWorldGeometry, kMaxColliders> geometries{};
   std::array<Entity, kMaxColliders> bodyOwners{};
   std::array<engine::math::Vec3, kMaxColliders> bodyCenters{};
+  std::array<engine::math::Quat, kMaxColliders> bodyRotations{};
   std::array<bool, kMaxColliders> geometryValid{};
   std::array<float, kMaxColliders> posX{};
   std::array<float, kMaxColliders> posY{};

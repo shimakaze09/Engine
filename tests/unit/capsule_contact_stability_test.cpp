@@ -63,7 +63,9 @@ int verify_driven_box_against_capsule() {
   playerCollider.dynamicFriction = 0.7F;
   engine::runtime::RigidBody playerBody{};
   playerBody.inverseMass = 1.0F;
-  playerBody.inverseInertia = 0.0F;
+  playerBody.inverseInertia =
+      engine::math::Vec3(0.0F, 0.0F, 0.0F);
+  playerBody.inertiaAuthored = true;
   if ((player == engine::runtime::kInvalidEntity) ||
       !world->add_collider(player, playerCollider) ||
       !world->add_rigid_body(player, playerBody)) {
