@@ -419,22 +419,18 @@ AssetId make_asset_id_from_path(const char *path) noexcept {
     return kInvalidAssetId;
   }
 
+  // A path with no canonical form names no asset: empty, nothing but
+  // separators or "." segments, carrying a ".." segment, or too long to
+  // hold whole. All of those are the absence of an identity, which is
+  // what kInvalidAssetId is for.
   char canonical[core::kMaxVirtualPathLength] = {};
-  const char *hashed = canonical;
   if (!core::canonical_virtual_path(path, canonical, sizeof(canonical))) {
-    // An empty path canonicalizes to nothing. Its hash is pinned by an
-    // existing contract test, so it is kept rather than changed here; a
-    // non-empty path that will not canonicalize is too long to be an
-    // identity and is refused.
-    if (path[0] != '\0') {
-      return kInvalidAssetId;
-    }
-    hashed = "";
+    return kInvalidAssetId;
   }
 
   std::uint64_t hash = core::kFnv1a64Offset;
   for (const unsigned char *cursor =
-           reinterpret_cast<const unsigned char *>(hashed);
+           reinterpret_cast<const unsigned char *>(canonical);
        *cursor != 0U; ++cursor) {
     hash = core::fnv1a_64_append(hash, static_cast<std::uint8_t>(*cursor));
   }

@@ -709,8 +709,9 @@ bool test_prefix_remount_cycles_and_nested() noexcept {
 }
 
 /// EXPECTATION: canonical_virtual_path folds separators, collapses runs
-/// of them, drops a trailing one, keeps a scheme's "//" and every "."
-/// or ".." segment, and refuses a path it cannot hold whole.
+/// of them, drops "." segments and a trailing separator, keeps a scheme's
+/// "//" and a single leading '/', preserves case, and refuses a path that
+/// names no asset, carries a ".." segment, or will not fit whole.
 bool test_canonical_virtual_path() noexcept {
   struct Accepted final {
     const char *input;
@@ -724,13 +725,24 @@ bool test_canonical_virtual_path() noexcept {
       {"assets\\\\props//coin.mesh", "assets/props/coin.mesh"},
       {"assets/props/", "assets/props"},
       {"assets/props//", "assets/props"},
+      // "." segments carry no information and are dropped.
+      {"./assets/coin.mesh", "assets/coin.mesh"},
+      {"assets/./coin.mesh", "assets/coin.mesh"},
+      {"assets/props/./coin.mesh", "assets/props/coin.mesh"},
+      {".///assets/.//props/./coin.mesh", "assets/props/coin.mesh"},
+      {".\\assets\\coin.mesh", "assets/coin.mesh"},
       // A scheme's "//" is part of the name: collapsing it would rename
       // every built-in primitive.
       {"builtin://cube", "builtin://cube"},
       {"builtin://sphere/", "builtin://sphere"},
-      // Left for vfs_path_is_jailed to refuse, not resolved here.
-      {"assets/../outside.txt", "assets/../outside.txt"},
-      {"assets/./same.txt", "assets/./same.txt"},
+      {"builtin://./cube", "builtin://cube"},
+      // A single leading separator is kept: an absolute-looking path is
+      // not the same name as the relative one, and the jail refuses it
+      // either way.
+      {"/assets/coin.mesh", "/assets/coin.mesh"},
+      {"//assets//coin.mesh", "/assets/coin.mesh"},
+      // Case is preserved byte for byte on every platform.
+      {"Assets/Props/Coin.MESH", "Assets/Props/Coin.MESH"},
   };
   for (const Accepted &row : accepted) {
     char out[kMaxVirtualPathLength] = {};
@@ -742,11 +754,19 @@ bool test_canonical_virtual_path() noexcept {
     }
   }
 
-  const char *refused[] = {nullptr, "", "/", "//", "///", "\\", "\\\\"};
+  const char *refused[] = {
+      // Nothing that names an asset.
+      nullptr, "", "/", "//", "///", "\\", "\\\\", ".", "./", "././",
+      "/./", "builtin://", "builtin://./",
+      // ".." is refused rather than resolved, at every position.
+      "..", "../x", "assets/../x", "assets/a/../../x", "assets/a/..",
+      "assets\\a\\..\\x", "builtin://../cube",
+  };
   for (const char *input : refused) {
     char out[kMaxVirtualPathLength] = {};
     if (canonical_virtual_path(input, out, sizeof(out)) || (out[0] != '\0')) {
-      std::fprintf(stderr, "FAIL: canonical accepted an empty path\n");
+      std::fprintf(stderr, "FAIL: canonical accepted '%s'\n",
+                   (input != nullptr) ? input : "(null)");
       return false;
     }
   }

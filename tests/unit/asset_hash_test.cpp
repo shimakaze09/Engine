@@ -74,12 +74,26 @@ static int test_invalid_path_returns_invalid_id() {
     return 1;
   }
 
+  // An empty path names no asset. This case previously required a valid
+  // hash for it; that contract is replaced here, because an empty virtual
+  // path can never pass vfs_path_is_jailed, so the id it owned could
+  // never resolve to content — which is exactly the "id that maps to
+  // nothing" the path-key contract exists to remove.
   const engine::content::AssetId idEmpty =
       engine::content::make_asset_id_from_path("");
-  if (idEmpty == engine::content::kInvalidAssetId) {
-    std::fprintf(stderr,
-                 "FAIL: empty string should still produce a valid hash\n");
+  if (idEmpty != engine::content::kInvalidAssetId) {
+    std::fprintf(stderr, "FAIL: an empty path should have no identity\n");
     return 1;
+  }
+
+  // Neither does a path that is nothing but separators or "." segments.
+  const char *noName[] = {"/", "//", ".", "./", "./.", "\\", "././"};
+  for (const char *path : noName) {
+    if (engine::content::make_asset_id_from_path(path) !=
+        engine::content::kInvalidAssetId) {
+      std::fprintf(stderr, "FAIL: '%s' should have no identity\n", path);
+      return 1;
+    }
   }
 
   std::printf("PASS: invalid path handling\n");
@@ -99,6 +113,12 @@ static int test_spelling_does_not_change_identity() {
       "assets\\props\\coin.mesh",
       "assets\\\\props//coin.mesh",
       "assets/props/coin.mesh/",
+      // Dot segments carry no information, so these name the same asset.
+      "./assets/props/coin.mesh",
+      "assets/./props/coin.mesh",
+      "assets/props/./coin.mesh",
+      ".///assets/.//props/./coin.mesh",
+      ".\\assets\\props\\coin.mesh",
   };
   for (const char *spelling : sameAsset) {
     const engine::content::AssetId id =
@@ -131,6 +151,36 @@ static int test_spelling_does_not_change_identity() {
   if (canonical ==
       engine::content::make_asset_id_from_path("assets/props/gem.mesh")) {
     std::fprintf(stderr, "FAIL: two assets share one id\n");
+    return 1;
+  }
+
+  // A ".." segment is refused, not resolved: an identity must not depend
+  // on the directory the reference was written from.
+  const char *withDotDot[] = {
+      "assets/a/../x",      "../assets/x",     "assets/../../x",
+      "assets\\a\\..\\x",   "assets/a/..",     "..",
+  };
+  for (const char *path : withDotDot) {
+    if (engine::content::make_asset_id_from_path(path) !=
+        engine::content::kInvalidAssetId) {
+      std::fprintf(stderr, "FAIL: '%s' should be refused, not resolved\n",
+                   path);
+      return 1;
+    }
+  }
+  // Specifically: it is refused rather than being folded onto the asset
+  // the resolved form would have named.
+  if (engine::content::make_asset_id_from_path("assets/a/../props/coin.mesh") ==
+      canonical) {
+    std::fprintf(stderr, "FAIL: a '..' path resolved onto a real asset\n");
+    return 1;
+  }
+
+  // Case is preserved identically on every platform: folding it here
+  // would make identity platform-dependent.
+  if (engine::content::make_asset_id_from_path("assets/props/Coin.mesh") ==
+      canonical) {
+    std::fprintf(stderr, "FAIL: case was folded into one identity\n");
     return 1;
   }
 

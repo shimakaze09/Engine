@@ -72,6 +72,31 @@ bool is_drive_designator(const char *segment) noexcept {
          (segment[1] == ':');
 }
 
+// Length of a "scheme://" prefix at the start of `path`, or 0 when there
+// is none. URI grammar: a letter, then letters, digits, '+', '-' or '.',
+// then "://". This is what keeps "builtin://cube" intact while
+// "assets//coin.mesh" collapses.
+std::size_t scheme_prefix_length(const char *path) noexcept {
+  if (!is_ascii_alpha(path[0])) {
+    return 0U;
+  }
+  std::size_t index = 1U;
+  while (path[index] != '\0') {
+    const char ch = path[index];
+    const bool schemeChar = is_ascii_alpha(ch) || ((ch >= '0') && (ch <= '9')) ||
+                            (ch == '+') || (ch == '-') || (ch == '.');
+    if (!schemeChar) {
+      break;
+    }
+    ++index;
+  }
+  if ((path[index] == ':') && (path[index + 1U] == '/') &&
+      (path[index + 2U] == '/')) {
+    return index + 3U;
+  }
+  return 0U;
+}
+
 bool is_safe_virtual_remainder(const char *remainder) noexcept {
   if (remainder == nullptr) {
     return false;
@@ -287,37 +312,92 @@ bool canonical_virtual_path(const char *virtualPath, char *out,
     return false;
   }
 
-  std::size_t written = 0U;
-  bool afterSeparator = false;
-  bool afterScheme = false;
+  // Fold separators once up front so the segment walk below sees a
+  // single spelling. A path too long to fold is too long to be an
+  // identity and is refused rather than truncated.
+  char folded[kMaxVirtualPathLength] = {};
+  std::size_t foldedLength = 0U;
   for (const char *cursor = virtualPath; *cursor != '\0'; ++cursor) {
-    const char ch = (*cursor == '\\') ? '/' : *cursor;
-    // The "//" of a scheme ("builtin://cube") is part of the name, not a
-    // run of separators: collapsing it would rename every built-in
-    // primitive. Standard URI grammar, so the rule is the colon before.
-    if ((ch == '/') && afterSeparator && !afterScheme) {
-      continue;
-    }
-    afterScheme = (ch == '/') && (written > 0U) && (out[written - 1U] == ':');
-    if ((written + 1U) >= capacity) {
-      // An identity that does not fit whole would name a different asset,
-      // so the path is refused rather than truncated.
-      out[0] = '\0';
+    if ((foldedLength + 1U) >= sizeof(folded)) {
       return false;
     }
-    out[written] = ch;
-    ++written;
-    afterSeparator = (ch == '/');
+    folded[foldedLength] = (*cursor == '\\') ? '/' : *cursor;
+    ++foldedLength;
   }
 
-  // A trailing separator names the same entry as its absence.
-  if ((written > 0U) && (out[written - 1U] == '/')) {
-    --written;
+  std::size_t written = 0U;
+  const char *cursor = folded;
+
+  // A scheme's "//" is part of the name ("builtin://cube"), so the whole
+  // "scheme://" is copied through and only the remainder is canonicalized.
+  const std::size_t schemeLength = scheme_prefix_length(folded);
+  if (schemeLength > 0U) {
+    if (schemeLength >= capacity) {
+      return false;
+    }
+    std::memcpy(out, folded, schemeLength);
+    written = schemeLength;
+    cursor = folded + schemeLength;
+  } else if (folded[0] == '/') {
+    // An absolute-looking path keeps its single leading separator: it is
+    // not the same name as the relative spelling, and the jail refuses it
+    // either way.
+    if (capacity < 2U) {
+      return false;
+    }
+    out[0] = '/';
+    written = 1U;
+    while (*cursor == '/') {
+      ++cursor;
+    }
   }
-  out[written] = '\0';
-  if (written == 0U) {
+
+  bool bodyEmpty = true;
+  while (*cursor != '\0') {
+    const char *end = cursor;
+    while ((*end != '\0') && (*end != '/')) {
+      ++end;
+    }
+    const std::size_t length = static_cast<std::size_t>(end - cursor);
+
+    if (length == 0U) {
+      // A run of separators: "assets//x" names what "assets/x" names.
+    } else if ((length == 1U) && (cursor[0] == '.')) {
+      // "." names the directory it sits in, so it carries no information.
+    } else if ((length == 2U) && (cursor[0] == '.') && (cursor[1] == '.')) {
+      // ".." is refused, not resolved. An identity must not depend on
+      // where it was written from, and resolving it here would let a
+      // caller spell a path that then passes vfs_path_is_jailed.
+      out[0] = '\0';
+      return false;
+    } else {
+      const bool needSeparator =
+          !bodyEmpty || ((written > 0U) && (out[written - 1U] != '/'));
+      if ((written + (needSeparator ? 1U : 0U) + length) >= capacity) {
+        out[0] = '\0';
+        return false;
+      }
+      if (needSeparator) {
+        out[written] = '/';
+        ++written;
+      }
+      std::memcpy(out + written, cursor, length);
+      written += length;
+      bodyEmpty = false;
+    }
+
+    if (*end == '\0') {
+      break;
+    }
+    cursor = end + 1;
+  }
+
+  // Nothing but separators, dots or a bare scheme names no asset.
+  if (bodyEmpty) {
+    out[0] = '\0';
     return false;
   }
+  out[written] = '\0';
   return true;
 }
 
