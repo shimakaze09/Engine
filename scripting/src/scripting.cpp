@@ -988,26 +988,29 @@ void restore_global_bindings(lua_State *state, int snapshotReference) noexcept {
 /// Executes a reload as one transaction. The rule: a chunk's externally
 /// visible effects commit only when it returns without error and within
 /// its instruction budget; until then they are staged and a failure
-/// discards them. Staged: top-level Lua bindings (snapshot), the deferred
-/// scene request, World component writes (the deferred queue), entities
-/// created and pool entities acquired (recorded, undone on failure),
-/// timers set (recorded) and cancelled (held), and audio calls (held).
-/// Not staged, by design: joints, gravity, game mode, the camera stack,
-/// sound loading, and pool creation (refused under reload).
-bool reload_script_transactionally(const char *path) noexcept {
+/// discards them. The top-level Lua bindings (snapshot) and the deferred
+/// scene request are staged here; every other effect belongs to the
+/// reload scope, whose header lists what it records, holds, queues and
+/// refuses. RolledBack: the chunk failed and nothing of it remains.
+/// Committed: every effect applied once. CommitFailed: the chunk's
+/// bindings are in place but at least one staged effect could not apply
+/// at commit (logged with the count).
+enum class ReloadOutcome : std::uint8_t { Committed, RolledBack, CommitFailed };
+
+ReloadOutcome reload_script_transactionally(const char *path) noexcept {
   lua_State *state = lua_state();
   if ((state == nullptr) || (path == nullptr)) {
-    return false;
+    return ReloadOutcome::RolledBack;
   }
 
   if (!protected_load_chunk(state, path, "hot_reload")) {
-    return false;
+    return ReloadOutcome::RolledBack;
   }
 
   int snapshotReference = LUA_NOREF;
   if (!snapshot_global_bindings(state, &snapshotReference)) {
     lua_pop(state, 1);
-    return false;
+    return ReloadOutcome::RolledBack;
   }
   // Captured after the chunk is loaded and before it runs: loading executes
   // no chunk code, so this is the request as it stood before the reload.
@@ -1017,31 +1020,31 @@ bool reload_script_transactionally(const char *path) noexcept {
                       "hot_reload: a reload is already in progress");
     lua_pop(state, 1);
     luaL_unref(state, LUA_REGISTRYINDEX, snapshotReference);
-    return false;
+    return ReloadOutcome::RolledBack;
   }
   arm_debug_lua_hook(state);
-  if (lua_pcall(state, 0, 0, 0) != LUA_OK) {
+  bool failed = (lua_pcall(state, 0, 0, 0) != LUA_OK);
+  if (failed) {
     log_lua_error("hot_reload");
-    rollback_reload_transaction();
-    restore_global_bindings(state, snapshotReference);
-    restore_pending_scene_op(sceneOpCheckpoint);
-    luaL_unref(state, LUA_REGISTRYINDEX, snapshotReference);
-    return false;
-  }
-
-  if (debug_instruction_budget_exhausted()) {
+  } else if (debug_instruction_budget_exhausted()) {
     core::log_message(core::LogLevel::Error, "scripting",
                       "hot_reload: CPU instruction budget exhausted");
+    failed = true;
+  }
+  if (failed) {
     rollback_reload_transaction();
+  }
+  const ReloadCommit commit =
+      failed ? ReloadCommit::Refused : commit_reload_transaction();
+  if (commit == ReloadCommit::Refused) {
     restore_global_bindings(state, snapshotReference);
     restore_pending_scene_op(sceneOpCheckpoint);
     luaL_unref(state, LUA_REGISTRYINDEX, snapshotReference);
-    return false;
+    return ReloadOutcome::RolledBack;
   }
-
-  commit_reload_transaction();
   luaL_unref(state, LUA_REGISTRYINDEX, snapshotReference);
-  return true;
+  return (commit == ReloadCommit::Applied) ? ReloadOutcome::Committed
+                                           : ReloadOutcome::CommitFailed;
 }
 
 } // anonymous namespace
@@ -1156,9 +1159,18 @@ void check_script_reload() noexcept {
     entry.mtime = mtime;
     core::log_message(core::LogLevel::Info, "scripting",
                       "hot-reloading script");
-    if (!reload_script_transactionally(entry.path)) {
+    switch (reload_script_transactionally(entry.path)) {
+    case ReloadOutcome::Committed:
+      break;
+    case ReloadOutcome::RolledBack:
       core::log_message(core::LogLevel::Warning, "scripting",
                         "hot-reload failed; keeping previous version");
+      break;
+    case ReloadOutcome::CommitFailed:
+      core::log_message(core::LogLevel::Error, "scripting",
+                        "hot-reload committed; some of its effects did not "
+                        "apply");
+      break;
     }
   }
 }

@@ -78,11 +78,8 @@ int lua_engine_pool_create(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
-  // A pool seeds entities the reload scope cannot take back, so a chunk
-  // under reload is refused rather than left half-committed.
-  if (reload_transaction_open()) {
-    core::log_message(core::LogLevel::Warning, "scripting",
-                      "pool_create is refused while a script hot reload runs");
+  // A pool seeds entities the reload scope cannot take back.
+  if (reload_refuses("pool_create")) {
     lua_pushnil(state);
     return 1;
   }
@@ -122,7 +119,8 @@ int lua_engine_pool_spawn(lua_State *state) noexcept {
   }
 
   std::size_t slot = 0U;
-  if (!decode_pool_id(lua_tointeger(state, 1), &slot)) {
+  if (!decode_pool_id(lua_tointeger(state, 1), &slot) ||
+      (reload_staging(ReloadEffect::PoolAcquire) == ReloadStaging::Refused)) {
     lua_pushnil(state);
     return 1;
   }
@@ -158,9 +156,19 @@ int lua_engine_pool_release(lua_State *state) noexcept {
     return 1;
   }
 
-  const bool ok = reload_stage_pool_release(slot, entity) ||
-                  runtime_binding().services->entity_pool_release(
-                      runtime_binding().world, slot, entity);
+  bool ok = false;
+  switch (reload_staging(ReloadEffect::PoolRelease)) {
+  case ReloadStaging::None:
+    ok = runtime_binding().services->entity_pool_release(
+        runtime_binding().world, slot, entity);
+    break;
+  case ReloadStaging::Staged:
+    reload_hold_pool_release(slot, entity);
+    ok = true;
+    break;
+  case ReloadStaging::Refused:
+    break;
+  }
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }

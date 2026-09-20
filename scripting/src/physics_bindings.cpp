@@ -8,6 +8,7 @@
 #include "deferred_mutations.h"
 #include "entity_handle.h"
 #include "lua_state.h"
+#include "reload_transaction.h"
 #include "runtime_binding.h"
 
 extern "C" {
@@ -305,7 +306,9 @@ int lua_engine_set_gravity(lua_State *state) noexcept {
                       "numbers; gravity unchanged");
     return 0;
   }
-  if ((runtime_binding().services != nullptr) && (runtime_binding().services->set_gravity != nullptr)) {
+  if ((runtime_binding().services != nullptr) &&
+      (runtime_binding().services->set_gravity != nullptr) &&
+      !reload_refuses("set_gravity")) {
     runtime_binding().services->set_gravity(runtime_binding().world, x, y, z);
   }
   return 0;
@@ -611,11 +614,13 @@ int lua_engine_sweep_box(lua_State *state) noexcept {
 }
 
 /// Pushes a joint constructor result: nil for the unified 0 failure
-/// sentinel, the id otherwise.
+/// sentinel, the id otherwise. A joint added under a hot reload is
+/// recorded so a failed reload removes it again.
 int push_joint_result(lua_State *state, std::uint32_t id) noexcept {
   if (id == 0U) {
     lua_pushnil(state);
   } else {
+    reload_note_joint_created(id);
     lua_pushinteger(state, static_cast<lua_Integer>(id));
   }
   return 1;
@@ -648,6 +653,10 @@ int lua_engine_add_distance_joint(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
+  if (reload_staging(ReloadEffect::JointCreate) == ReloadStaging::Refused) {
+    lua_pushnil(state);
+    return 1;
+  }
   const std::uint32_t id = runtime_binding().services->add_distance_joint(
       runtime_binding().world, entityA, entityB, dist);
   return push_joint_result(state, id);
@@ -656,7 +665,8 @@ int lua_engine_add_distance_joint(lua_State *state) noexcept {
 // engine.remove_joint(jointId) → true | nil
 int lua_engine_remove_joint(lua_State *state) noexcept {
   if (!lua_isnumber(state, 1) || (runtime_binding().services == nullptr) ||
-      (runtime_binding().services->remove_joint == nullptr)) {
+      (runtime_binding().services->remove_joint == nullptr) ||
+      reload_refuses("remove_joint")) {
     lua_pushnil(state);
     return 1;
   }
@@ -690,6 +700,10 @@ int lua_engine_add_hinge_joint(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
+  if (reload_staging(ReloadEffect::JointCreate) == ReloadStaging::Refused) {
+    lua_pushnil(state);
+    return 1;
+  }
   const std::uint32_t id = runtime_binding().services->add_hinge_joint(
       runtime_binding().world, entityA, entityB, px, py, pz, ax, ay, az);
   return push_joint_result(state, id);
@@ -712,6 +726,10 @@ int lua_engine_add_ball_socket_joint(lua_State *state) noexcept {
   if (!read_optional_finite_number_arg(state, 3, 0.0F, &px) ||
       !read_optional_finite_number_arg(state, 4, 0.0F, &py) ||
       !read_optional_finite_number_arg(state, 5, 0.0F, &pz)) {
+    lua_pushnil(state);
+    return 1;
+  }
+  if (reload_staging(ReloadEffect::JointCreate) == ReloadStaging::Refused) {
     lua_pushnil(state);
     return 1;
   }
@@ -739,6 +757,10 @@ int lua_engine_add_slider_joint(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
+  if (reload_staging(ReloadEffect::JointCreate) == ReloadStaging::Refused) {
+    lua_pushnil(state);
+    return 1;
+  }
   const std::uint32_t id = runtime_binding().services->add_slider_joint(
       runtime_binding().world, entityA, entityB, ax, ay, az);
   return push_joint_result(state, id);
@@ -763,6 +785,10 @@ int lua_engine_add_spring_joint(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
+  if (reload_staging(ReloadEffect::JointCreate) == ReloadStaging::Refused) {
+    lua_pushnil(state);
+    return 1;
+  }
   const std::uint32_t id = runtime_binding().services->add_spring_joint(
       runtime_binding().world, entityA, entityB, rest, stiff, damp);
   return push_joint_result(state, id);
@@ -777,6 +803,10 @@ int lua_engine_add_fixed_joint(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
+  if (reload_staging(ReloadEffect::JointCreate) == ReloadStaging::Refused) {
+    lua_pushnil(state);
+    return 1;
+  }
   const std::uint32_t id =
       runtime_binding().services->add_fixed_joint(runtime_binding().world, entityA, entityB);
   return push_joint_result(state, id);
@@ -785,7 +815,8 @@ int lua_engine_add_fixed_joint(lua_State *state) noexcept {
 // engine.set_joint_limits(jointId, minLimit, maxLimit) → true | nil
 int lua_engine_set_joint_limits(lua_State *state) noexcept {
   if (!lua_isnumber(state, 1) || (runtime_binding().services == nullptr) ||
-      (runtime_binding().services->set_joint_limits == nullptr)) {
+      (runtime_binding().services->set_joint_limits == nullptr) ||
+      reload_refuses("set_joint_limits")) {
     lua_pushnil(state);
     return 1;
   }

@@ -1,9 +1,12 @@
 // Integration tests for the hot-reload transaction across a chunk that
-// mutates timers, audio, entities and components and then fails: every
-// effect must be discarded, and the same effects from a chunk that
-// succeeds must land exactly once. Runs through the production
-// watch/check_script_reload path against the production bridge table
-// with only the audio calls recorded.
+// mutates timers, audio, entities, joints and components and then fails:
+// every effect must be discarded, and the same effects from a chunk that
+// succeeds must land exactly once, in the order the chunk requested them.
+// Also pins the scope's capacities (exact and one past), read-your-writes
+// inside the chunk, the refused effects, an instruction-budget failure and
+// a commit whose effect reports failure. Runs through the production
+// watch/check_script_reload path against the production bridge table with
+// only the audio calls recorded.
 
 #include <chrono>
 #include <cstdio>
@@ -13,7 +16,9 @@
 #include <thread>
 
 #include "../test_harness.h"
+#include "engine/core/logging.h"
 #include "engine/core/service_locator.h"
+#include "engine/physics/physics_context.h"
 #include "engine/runtime/scripting_bridge.h"
 #include "engine/runtime/world.h"
 #include "engine/scripting/runtime_services.h"
@@ -55,9 +60,16 @@ bool rewrite_script(const char *code) noexcept {
 // Audio recorder: the production table with its audio entries replaced, so
 // the test sees exactly which calls reached the audio service and in what
 // order.
-constexpr std::size_t kMaxRecorded = 32U;
-char g_recorded[kMaxRecorded][32] = {};
+constexpr std::size_t kMaxRecorded = 160U;
+char g_recorded[kMaxRecorded][48] = {};
 std::size_t g_recordedCount = 0U;
+/// When set, the recorded play_sound reports failure, so a held call that
+/// the chunk saw succeed fails at commit.
+bool g_playSoundFails = false;
+/// The marker entity, read by the play_sound recorder so the test can see
+/// which queued name write had applied when each held call ran.
+rt::World *g_world = nullptr;
+rt::Entity g_marker = rt::kInvalidEntity;
 
 void record(const char *name) noexcept {
   if (g_recordedCount < kMaxRecorded) {
@@ -68,8 +80,27 @@ void record(const char *name) noexcept {
 }
 
 bool record_play_sound(std::uint32_t, float, float, bool) noexcept {
-  record("play_sound");
-  return true;
+  rt::NameComponent name{};
+  if ((g_world != nullptr) &&
+      g_world->get_name_component(g_marker, &name)) {
+    char entry[48] = {};
+    std::snprintf(entry, sizeof(entry), "play_sound:%s", name.name);
+    record(entry);
+  } else {
+    record("play_sound");
+  }
+  return !g_playSoundFails;
+}
+
+/// Counts the reload driver's "committed with failures" report.
+std::size_t g_commitFailureLogs = 0U;
+void count_commit_failure(engine::core::LogLevel, const char *,
+                          const char *message, void *) noexcept {
+  if ((message != nullptr) &&
+      (std::strstr(message, "hot-reload committed; some of its effects") !=
+       nullptr)) {
+    ++g_commitFailureLogs;
+  }
 }
 bool record_play_sound_at(std::uint32_t, float, float, float, float) noexcept {
   record("play_sound_at");
@@ -104,6 +135,8 @@ constexpr const char *kV1 =
     "Marker = 'v1'\n"
     "E = engine.find_entity_by_name('Marker')\n"
     "if E == nil then error('marker entity missing') end\n"
+    "E2 = engine.find_entity_by_name('Second')\n"
+    "if E2 == nil then error('second entity missing') end\n"
     "T = engine.set_timeout(function() end, 100)\n"
     "if T == nil then error('timer missing') end\n"
     "P = engine.pool_create(2)\n"
@@ -169,6 +202,118 @@ constexpr const char *kFailingPool =
     "end\n"
     "error('intentional reload failure')\n";
 
+/// Reads its own queued writes back before commit, and sees a queued
+/// destroy as absent; name lookup reads the committed World.
+constexpr const char *kReadYourWrites =
+    "Marker = 'ryw'\n"
+    "engine.set_name(E, 'Dependent')\n"
+    "if engine.get_name(E) ~= 'Dependent' then\n"
+    "    error('name read misses the queued write')\n"
+    "end\n"
+    "engine.set_position(E, 5, 6, 7)\n"
+    "local x, y, z = engine.get_position(E)\n"
+    "if x ~= 5 or y ~= 6 or z ~= 7 then\n"
+    "    error('position read misses the queued write')\n"
+    "end\n"
+    "local D = engine.spawn_entity()\n"
+    "if D == nil then error('spawn refused') end\n"
+    "engine.set_position(D, 1, 1, 1)\n"
+    "engine.destroy_entity(D)\n"
+    "if engine.get_position(D) ~= nil then\n"
+    "    error('a queued destroy must read as absent')\n"
+    "end\n"
+    "if engine.find_entity_by_name('Dependent') ~= nil then\n"
+    "    error('name lookup reads the committed World only')\n"
+    "end\n"
+    "if engine.find_entity_by_name('Renamed') == nil then\n"
+    "    error('the committed name is still found')\n"
+    "end\n";
+
+/// Interleaves queued writes with held calls; the recorder reads the
+/// marker's name when each held call runs.
+constexpr const char *kRequestOrder =
+    "Marker = 'order'\n"
+    "engine.set_name(E, 'First')\n"
+    "if not engine.play_sound(1) then error('play_sound refused') end\n"
+    "engine.set_name(E, 'Second')\n"
+    "if not engine.play_sound(2) then error('play_sound refused') end\n"
+    "engine.set_name(E, 'Third')\n";
+
+/// Creates exactly the scope's capacity of entities, then one more, and
+/// fails; the one past capacity is refused before it exists.
+constexpr const char *kCreateCapacityThenFail =
+    "Marker = 'failed'\n"
+    "for i = 1, 256 do\n"
+    "    if engine.spawn_entity() == nil then\n"
+    "        error('spawn ' .. i .. ' refused inside capacity')\n"
+    "    end\n"
+    "end\n"
+    "if engine.spawn_entity() ~= nil then\n"
+    "    error('the 257th spawn must be refused')\n"
+    "end\n"
+    "error('intentional reload failure')\n";
+
+/// The same, committed: exactly the capacity survives.
+constexpr const char *kCreateCapacity =
+    "Marker = 'created'\n"
+    "for i = 1, 256 do\n"
+    "    if engine.spawn_entity() == nil then\n"
+    "        error('spawn ' .. i .. ' refused inside capacity')\n"
+    "    end\n"
+    "end\n"
+    "if engine.spawn_entity() ~= nil then\n"
+    "    error('the 257th spawn must be refused')\n"
+    "end\n";
+
+/// Holds exactly the journal's capacity of audio calls, then one more.
+constexpr const char *kHeldCapacity =
+    "Marker = 'held'\n"
+    "for i = 1, 128 do\n"
+    "    if not engine.play_sound(i) then\n"
+    "        error('held call ' .. i .. ' refused inside capacity')\n"
+    "    end\n"
+    "end\n"
+    "if engine.play_sound(129) then\n"
+    "    error('the 129th held call must be refused')\n"
+    "end\n"
+    "engine.cancel_timer(T)\n";
+
+/// Queues a write, then spins past the instruction budget.
+constexpr const char *kBudgetFailure =
+    "Marker = 'failed'\n"
+    "engine.set_name(E, 'Budget')\n"
+    "while true do end\n";
+
+/// Adds a joint (recorded), attempts every refused effect, and fails.
+constexpr const char *kFailingRefused =
+    "Marker = 'failed'\n"
+    "if engine.add_distance_joint(E, E2, 1) == nil then\n"
+    "    error('add_distance_joint refused')\n"
+    "end\n"
+    "engine.set_gravity(0, -1, 0)\n"
+    "if engine.remove_joint(1) ~= nil then\n"
+    "    error('remove_joint must be refused under reload')\n"
+    "end\n"
+    "if engine.pool_create(1) ~= nil then\n"
+    "    error('pool_create must be refused under reload')\n"
+    "end\n"
+    "if engine.game_mode_start() then\n"
+    "    error('game_mode_start must be refused under reload')\n"
+    "end\n"
+    "if engine.push_camera(E, 0, 0, 0, 0, 0, 1, 1) then\n"
+    "    error('push_camera must be refused under reload')\n"
+    "end\n"
+    "error('intentional reload failure')\n";
+
+/// A held call that reports failure at commit.
+constexpr const char *kCommitFailure =
+    "Marker = 'commit_failure'\n"
+    "engine.set_name(E, 'CommitFailed')\n"
+    "if not engine.play_sound(1) then error('play_sound refused') end\n"
+    "function marker_is_commit_failure()\n"
+    "    if Marker ~= 'commit_failure' then error('marker ' .. Marker) end\n"
+    "end\n";
+
 /// The same effects, committed.
 constexpr const char *kGood =
     "Marker = 'committed'\n"
@@ -186,6 +331,10 @@ constexpr const char *kGood =
 /// Runs this executable or test program.
 int main() {
   engine::tests::TestContext ctx;
+  if (!engine::core::initialize_logging()) {
+    std::fprintf(stderr, "FAIL: initialize_logging\n");
+    return 1;
+  }
   if (!sc::initialize_scripting()) {
     std::fprintf(stderr, "FAIL: initialize_scripting\n");
     return 1;
@@ -211,6 +360,13 @@ int main() {
   rt::NameComponent name{};
   std::snprintf(name.name, sizeof(name.name), "%s", "Marker");
   ctx.check(world->add_name_component(marker, name), "name the marker");
+  g_world = world.get();
+  g_marker = marker;
+  const rt::Entity second = world->create_scene_object();
+  std::snprintf(name.name, sizeof(name.name), "%s", "Second");
+  ctx.check(world->add_name_component(second, name), "name the second");
+  ctx.check(engine::core::log_register_sink(&count_commit_failure, nullptr),
+            "register the commit-failure sink");
 
   ctx.check(write_script(kV1), "write v1");
   ctx.check(sc::load_script(kScriptPath), "load v1");
@@ -282,16 +438,118 @@ int main() {
             "succeeding reload's spawn is kept");
   ctx.check(sc::active_timer_ref_count() == 1U,
             "succeeding reload's timer stays and its cancel applied");
-  const char *const expected[] = {"play_sound", "stop_music"};
+  const char *const expected[] = {"play_sound:Renamed", "stop_music"};
   ctx.check(recorded_is(expected, 2U),
-            "succeeding reload's audio calls happen once, in order");
+            "succeeding reload's audio calls happen once, in order, after "
+            "the writes queued before them");
   ctx.check(!world->is_alive(pooled),
             "succeeding reload's pool release applied");
   sc::flush_deferred_mutations();
   ctx.check(world->alive_entity_count() == aliveBeforeCommit + 1U,
             "a later flush applies nothing twice");
 
+  // --- Read-your-writes inside the chunk ---
+  {
+    const std::size_t aliveBeforeRyw = world->alive_entity_count();
+    ctx.check(rewrite_script(kReadYourWrites), "write read-your-writes reload");
+    sc::check_script_reload();
+    ctx.check(world->get_name_component(marker, &name) &&
+                  (std::strcmp(name.name, "Dependent") == 0),
+              "read-your-writes chunk committed (its reads all passed)");
+    ctx.check(world->get_transform(marker, &transform) &&
+                  (transform.position.z == 7.0F),
+              "the dependent write chain applied");
+    ctx.check(world->alive_entity_count() == aliveBeforeRyw,
+              "an entity spawned and destroyed in the chunk is gone");
+  }
+
+  // --- Held calls apply in request order among the queued writes ---
+  {
+    g_recordedCount = 0U;
+    ctx.check(rewrite_script(kRequestOrder), "write request-order reload");
+    sc::check_script_reload();
+    const char *const ordered[] = {"play_sound:First", "play_sound:Second"};
+    ctx.check(recorded_is(ordered, 2U),
+              "each held call ran after the writes queued before it");
+    ctx.check(world->get_name_component(marker, &name) &&
+                  (std::strcmp(name.name, "Third") == 0),
+              "the writes queued after the last held call applied too");
+  }
+
+  // --- Capacity: created entities, exact and one past ---
+  {
+    const std::size_t aliveBeforeCap = world->alive_entity_count();
+    ctx.check(rewrite_script(kCreateCapacityThenFail),
+              "write failing capacity reload");
+    sc::check_script_reload();
+    ctx.check(world->alive_entity_count() == aliveBeforeCap,
+              "a failed chunk at capacity leaves no entity behind");
+    ctx.check(rewrite_script(kCreateCapacity), "write capacity reload");
+    sc::check_script_reload();
+    ctx.check(world->alive_entity_count() == aliveBeforeCap + 256U,
+              "exactly the capacity of created entities commits");
+  }
+
+  // --- Capacity: held calls, exact and one past ---
+  {
+    g_recordedCount = 0U;
+    ctx.check(rewrite_script(kHeldCapacity), "write held-capacity reload");
+    sc::check_script_reload();
+    ctx.check(g_recordedCount == 128U,
+              "exactly the journal's capacity of held calls commits");
+    ctx.check(sc::active_timer_ref_count() == 1U,
+              "the cancel past the journal's capacity was refused");
+  }
+
+  // --- Instruction budget failure rolls back ---
+  {
+    sc::set_sandbox_enabled(true);
+    sc::set_instruction_limit(5000);
+    ctx.check(rewrite_script(kBudgetFailure), "write budget-failure reload");
+    sc::check_script_reload();
+    sc::set_sandbox_enabled(false);
+    sc::set_instruction_limit(0);
+    ctx.check(world->get_name_component(marker, &name) &&
+                  (std::strcmp(name.name, "Third") == 0),
+              "a chunk that exhausts the instruction budget applies nothing");
+  }
+
+  // --- Refused effects and a recorded joint on a failing chunk ---
+  {
+    const engine::physics::PhysicsContext &physics = world->physics_context();
+    const std::size_t jointsBefore = physics.jointCount;
+    const engine::math::Vec3 gravityBefore = physics.gravity;
+    ctx.check(rewrite_script(kFailingRefused), "write refused-effects reload");
+    sc::check_script_reload();
+    ctx.check(physics.jointCount == jointsBefore,
+              "a failed chunk's joint is removed again");
+    ctx.check((physics.gravity.x == gravityBefore.x) &&
+                  (physics.gravity.y == gravityBefore.y) &&
+                  (physics.gravity.z == gravityBefore.z),
+              "set_gravity under reload leaves gravity unchanged");
+  }
+
+  // --- A held call that fails at commit is reported, not hidden ---
+  {
+    g_playSoundFails = true;
+    g_recordedCount = 0U;
+    g_commitFailureLogs = 0U;
+    ctx.check(rewrite_script(kCommitFailure), "write commit-failure reload");
+    sc::check_script_reload();
+    g_playSoundFails = false;
+    ctx.check(g_recordedCount == 1U, "the held call ran once at commit");
+    ctx.check(g_commitFailureLogs == 1U,
+              "the reload reports that a committed effect failed");
+    ctx.check(world->get_name_component(marker, &name) &&
+                  (std::strcmp(name.name, "CommitFailed") == 0),
+              "the writes that did apply stay applied");
+    ctx.check(sc::call_script_function("marker_is_commit_failure"),
+              "the chunk's bindings stay in place after a commit failure");
+  }
+
+  engine::core::log_unregister_sink(&count_commit_failure, nullptr);
   static_cast<void>(std::remove(kScriptPath));
   sc::shutdown_scripting();
+  engine::core::shutdown_logging();
   return ctx.finish("hotreload_transaction");
 }

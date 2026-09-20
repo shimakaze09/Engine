@@ -224,6 +224,29 @@ bool latest_mesh_component(runtime::Entity entity,
   return binding.services->get_mesh_component_op(binding.world, entity, outComponent);
 }
 
+bool latest_name_component(runtime::Entity entity,
+                           runtime::NameComponent *outComponent) noexcept {
+  const ScriptingRuntimeBinding &binding = runtime_binding();
+  if (!runtime_bound() || (outComponent == nullptr)) {
+    return false;
+  }
+  DeferredMutation pending{};
+  switch (find_pending_snapshot(entity,
+                                DeferredMutationType::AddNameComponent,
+                                DeferredMutationType::AddNameComponent, false,
+                                &pending)) {
+  case PendingRead::Value:
+    *outComponent = pending.nameComponent;
+    return true;
+  case PendingRead::Removed:
+    return false;
+  case PendingRead::None:
+    break;
+  }
+  return binding.services->get_name_component_op(binding.world, entity,
+                                                 outComponent);
+}
+
 /// Reads the entity's light component through any pending queued write;
 /// a queued removal reports the component as absent.
 bool latest_light_component(runtime::Entity entity,
@@ -721,19 +744,23 @@ bool apply_or_queue_remove_camera_component(runtime::Entity entity) noexcept {
 /// of the new scene) are counted and reported in one summary log instead
 /// of being silently discarded.
 void flush_deferred_mutations() noexcept {
+  static_cast<void>(flush_deferred_mutations_prefix(kMaxDeferredMutations));
+}
+
+std::size_t flush_deferred_mutations_prefix(std::size_t limit) noexcept {
   const ScriptingRuntimeBinding &binding = runtime_binding();
   if ((binding.world == nullptr) || (binding.services == nullptr) ||
       !can_apply_mutations_now()) {
-    return;
+    return 0U;
   }
 
   std::size_t count = 0U;
   {
     std::lock_guard<std::mutex> lock(g_deferredMutationMutex);
-    count = g_deferredMutationCount;
+    count = (limit < g_deferredMutationCount) ? limit : g_deferredMutationCount;
   }
   if (count == 0U) {
-    return;
+    return 0U;
   }
 
   const std::uint32_t liveEpoch = binding.services->content_epoch(binding.world);
@@ -869,6 +896,7 @@ void flush_deferred_mutations() noexcept {
                   failedApplies, deadTargets, staleEpochTargets);
     core::log_message(core::LogLevel::Warning, "scripting", buffer);
   }
+  return failedApplies + deadTargets + staleEpochTargets;
 }
 
 /// Clears queued deferred mutations without applying them.

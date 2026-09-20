@@ -45,7 +45,8 @@ int lua_engine_log(lua_State *state) noexcept {
 }
 
 int lua_engine_spawn_entity(lua_State *state) noexcept {
-  if (!can_create_entities_now()) {
+  if (!can_create_entities_now() ||
+      (reload_staging(ReloadEffect::CreateEntity) == ReloadStaging::Refused)) {
     lua_pushnil(state);
     return 1;
   }
@@ -118,9 +119,7 @@ int lua_engine_get_name(lua_State *state) noexcept {
   }
 
   runtime::NameComponent component{};
-  if ((runtime_binding().services == nullptr) ||
-      !runtime_binding().services->get_name_component_op(
-          runtime_binding().world, entity, &component)) {
+  if (!latest_name_component(entity, &component)) {
     lua_pushnil(state);
     return 1;
   }
@@ -160,7 +159,8 @@ int lua_engine_clone_entity(lua_State *state) noexcept {
     return 1;
   }
   runtime::Entity source{};
-  if (!read_entity(state, 1, &source)) {
+  if (!read_entity(state, 1, &source) ||
+      (reload_staging(ReloadEffect::CreateEntity) == ReloadStaging::Refused)) {
     lua_pushnil(state);
     return 1;
   }

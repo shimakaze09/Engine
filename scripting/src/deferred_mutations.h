@@ -17,6 +17,12 @@ bool can_create_entities_now() noexcept;
 std::size_t deferred_mutation_count() noexcept;
 /// Drops every queued mutation past `count`, oldest kept.
 void truncate_deferred_mutations(std::size_t count) noexcept;
+/// Applies the oldest `limit` queued mutations (all of them when fewer
+/// are queued) and returns how many did not apply: a rejected write, a
+/// target already destroyed, or one queued before a scene replacement.
+/// Nothing applies outside the World's mutation phase; the queue then
+/// waits for the next flush point and the count is zero.
+std::size_t flush_deferred_mutations_prefix(std::size_t limit) noexcept;
 
 // Read-through component reads: read-modify-write setters must see the
 // newest queued snapshot, or later deferred writes clobber earlier ones
@@ -37,6 +43,10 @@ bool latest_collider(runtime::Entity entity,
 /// Reads the entity's mesh component through any pending queued write.
 bool latest_mesh_component(runtime::Entity entity,
                            runtime::MeshComponent *outComponent) noexcept;
+
+/// Reads the entity's name through any pending queued write.
+bool latest_name_component(runtime::Entity entity,
+                           runtime::NameComponent *outComponent) noexcept;
 
 /// Reads the entity's light component through any pending queued write.
 bool latest_light_component(runtime::Entity entity,

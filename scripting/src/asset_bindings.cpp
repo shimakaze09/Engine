@@ -63,7 +63,8 @@ int lua_engine_instantiate(lua_State *state) noexcept {
     return 1;
   }
   const char *path = lua_tostring(state, 1);
-  if ((path == nullptr) || !script_path_in_jail(path, "instantiate")) {
+  if ((path == nullptr) || !script_path_in_jail(path, "instantiate") ||
+      (reload_staging(ReloadEffect::CreateEntity) == ReloadStaging::Refused)) {
     lua_pushnil(state);
     return 1;
   }

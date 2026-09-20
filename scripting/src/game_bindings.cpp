@@ -13,6 +13,7 @@ extern "C" {
 #include <limits>
 
 #include "engine/scripting/game_binding_state.h"
+#include "reload_transaction.h"
 #include "runtime_binding.h"
 
 namespace engine::scripting {
@@ -56,7 +57,7 @@ bool set_game_state_name(const char *name) noexcept {
 } // namespace
 
 int lua_engine_game_mode_start(lua_State *state) noexcept {
-  if (!runtime_bound()) {
+  if (!runtime_bound() || reload_refuses("game_mode_start")) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -68,7 +69,7 @@ int lua_engine_game_mode_start(lua_State *state) noexcept {
 }
 
 int lua_engine_game_mode_pause(lua_State *state) noexcept {
-  if (!runtime_bound()) {
+  if (!runtime_bound() || reload_refuses("game_mode_pause")) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -80,7 +81,7 @@ int lua_engine_game_mode_pause(lua_State *state) noexcept {
 }
 
 int lua_engine_game_mode_end(lua_State *state) noexcept {
-  if (!runtime_bound()) {
+  if (!runtime_bound() || reload_refuses("game_mode_end")) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -115,7 +116,7 @@ int lua_engine_game_mode_state(lua_State *state) noexcept {
 }
 
 int lua_engine_game_mode_set_rule(lua_State *state) noexcept {
-  if (!runtime_bound()) {
+  if (!runtime_bound() || reload_refuses("game_mode_set_rule")) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -153,7 +154,8 @@ int lua_engine_game_mode_max_players(lua_State *state) noexcept {
     lua_pushinteger(state, 0);
     return 1;
   }
-  if ((lua_gettop(state) >= 1) && (lua_isnumber(state, 1) != 0)) {
+  if ((lua_gettop(state) >= 1) && (lua_isnumber(state, 1) != 0) &&
+      !reload_refuses("game_mode_max_players")) {
     const auto n = static_cast<std::uint32_t>(lua_tointeger(state, 1));
     runtime_binding().services->set_game_mode_max_players(
         runtime_binding().world, n);
@@ -166,7 +168,8 @@ int lua_engine_game_mode_max_players(lua_State *state) noexcept {
 
 int lua_engine_game_state_set_number(lua_State *state) noexcept {
   const char *key = lua_tostring(state, 1);
-  if ((key == nullptr) || (lua_isnumber(state, 2) == 0)) {
+  if ((key == nullptr) || (lua_isnumber(state, 2) == 0) ||
+      reload_refuses("game_state_set_number")) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -187,7 +190,7 @@ int lua_engine_game_state_get_number(lua_State *state) noexcept {
 int lua_engine_game_state_set_string(lua_State *state) noexcept {
   const char *key = lua_tostring(state, 1);
   const char *value = lua_tostring(state, 2);
-  if (key == nullptr) {
+  if ((key == nullptr) || reload_refuses("game_state_set_string")) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -214,7 +217,9 @@ int lua_engine_game_state_has(lua_State *state) noexcept {
 
 int lua_engine_game_state_clear(lua_State *state) noexcept {
   static_cast<void>(state);
-  binding_state().persistentState.clear();
+  if (!reload_refuses("game_state_clear")) {
+    binding_state().persistentState.clear();
+  }
   return 0;
 }
 
@@ -294,7 +299,8 @@ bool bindable_set_game_state(const char *name) noexcept {
 }
 
 int lua_engine_set_player_controller(lua_State *state) noexcept {
-  if (!lua_isnumber(state, 1) || !lua_isnumber(state, 2)) {
+  if (!lua_isnumber(state, 1) || !lua_isnumber(state, 2) ||
+      reload_refuses("set_player_controller")) {
     lua_pushboolean(state, 0);
     return 1;
   }

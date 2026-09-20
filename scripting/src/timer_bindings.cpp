@@ -131,7 +131,8 @@ void lua_timer_callback(TimerId id, void *userData) noexcept {
 /// Registers a Lua timer callback in the current world's timer manager.
 TimerId register_lua_timer(lua_State *state, float seconds,
                                     bool repeat) noexcept {
-  if (!runtime_bound()) {
+  if (!runtime_bound() ||
+      (reload_staging(ReloadEffect::TimerCreate) == ReloadStaging::Refused)) {
     return kInvalidTimerId;
   }
 
@@ -204,10 +205,21 @@ int lua_engine_cancel_timer(lua_State *state) noexcept {
   }
 
   const auto id = static_cast<TimerId>(lua_tointeger(state, 1));
-  if ((id == kInvalidTimerId) || reload_stage_timer_cancel(id)) {
+  if (id == kInvalidTimerId) {
     return 0;
   }
-  cancel_lua_timer(id);
+  switch (reload_staging(ReloadEffect::TimerCancel)) {
+  case ReloadStaging::None:
+    cancel_lua_timer(id);
+    break;
+  case ReloadStaging::Staged:
+    reload_hold_timer_cancel(id);
+    break;
+  case ReloadStaging::Refused:
+    core::log_message(core::LogLevel::Warning, "scripting",
+                      "cancel_timer refused: the hot reload holds no more");
+    break;
+  }
   return 0;
 }
 

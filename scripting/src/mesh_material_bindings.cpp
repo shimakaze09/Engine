@@ -83,7 +83,8 @@ int lua_engine_get_default_mesh_asset_id(lua_State *state) noexcept {
 // degrade to the bounding box if hull slots are exhausted so the prop
 // still collides instead of falling through the world.
 int lua_engine_spawn_shape(lua_State *state) noexcept {
-  if (!can_create_entities_now() || !lua_isstring(state, 1)) {
+  if (!can_create_entities_now() || !lua_isstring(state, 1) ||
+      (reload_staging(ReloadEffect::CreateEntity) == ReloadStaging::Refused)) {
     lua_pushnil(state);
     return 1;
   }

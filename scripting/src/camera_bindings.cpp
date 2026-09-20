@@ -8,6 +8,7 @@
 #include "deferred_mutations.h"
 #include "entity_handle.h"
 #include "lua_state.h"
+#include "reload_transaction.h"
 #include "runtime_binding.h"
 
 extern "C" {
@@ -35,7 +36,8 @@ namespace {
 int lua_engine_set_camera_position(lua_State *state) noexcept {
   math::Vec3 pos{};
   if (!read_vec3_args(state, 1, &pos) || (runtime_binding().services == nullptr) ||
-      (runtime_binding().services->set_camera_position == nullptr)) {
+      (runtime_binding().services->set_camera_position == nullptr) ||
+      reload_refuses("set_camera_position")) {
     return 0;
   }
   runtime_binding().services->set_camera_position(pos.x, pos.y, pos.z);
@@ -45,7 +47,8 @@ int lua_engine_set_camera_position(lua_State *state) noexcept {
 int lua_engine_set_camera_target(lua_State *state) noexcept {
   math::Vec3 target{};
   if (!read_vec3_args(state, 1, &target) || (runtime_binding().services == nullptr) ||
-      (runtime_binding().services->set_camera_target == nullptr)) {
+      (runtime_binding().services->set_camera_target == nullptr) ||
+      reload_refuses("set_camera_target")) {
     return 0;
   }
   runtime_binding().services->set_camera_target(target.x, target.y, target.z);
@@ -55,7 +58,8 @@ int lua_engine_set_camera_target(lua_State *state) noexcept {
 int lua_engine_set_camera_up(lua_State *state) noexcept {
   math::Vec3 up{};
   if (!read_vec3_args(state, 1, &up) || (runtime_binding().services == nullptr) ||
-      (runtime_binding().services->set_camera_up == nullptr)) {
+      (runtime_binding().services->set_camera_up == nullptr) ||
+      reload_refuses("set_camera_up")) {
     return 0;
   }
   runtime_binding().services->set_camera_up(up.x, up.y, up.z);
@@ -68,7 +72,8 @@ int lua_engine_set_camera_up(lua_State *state) noexcept {
 // [, blendSpeed])
 int lua_engine_push_camera(lua_State *state) noexcept {
   if (!runtime_bound() ||
-      (runtime_binding().services->push_camera_op == nullptr)) {
+      (runtime_binding().services->push_camera_op == nullptr) ||
+      reload_refuses("push_camera")) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -98,7 +103,8 @@ int lua_engine_push_camera(lua_State *state) noexcept {
 // Engine.pop_camera(entityIndex)
 int lua_engine_pop_camera(lua_State *state) noexcept {
   if (!runtime_bound() ||
-      (runtime_binding().services->pop_camera_op == nullptr)) {
+      (runtime_binding().services->pop_camera_op == nullptr) ||
+      reload_refuses("pop_camera")) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -144,7 +150,8 @@ int lua_engine_get_active_camera(lua_State *state) noexcept {
 // Engine.camera_shake(amplitude, frequency, duration [, decay])
 int lua_engine_camera_shake(lua_State *state) noexcept {
   if (!runtime_bound() ||
-      (runtime_binding().services->camera_shake_op == nullptr)) {
+      (runtime_binding().services->camera_shake_op == nullptr) ||
+      reload_refuses("camera_shake")) {
     lua_pushboolean(state, 0);
     return 1;
   }
