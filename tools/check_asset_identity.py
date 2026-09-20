@@ -1,13 +1,29 @@
 #!/usr/bin/env python3
-"""Audit that every identity-bearing tracked asset has a tracked sidecar.
+"""Audit asset identity: a committed sidecar, unique, and portable.
 
-An asset's persistent GUID lives in its "<asset>.meta" sidecar. If that
-file is not committed, a teammate's clone has the asset but not its
-identity, and the next import on their machine mints a different GUID —
-so the same asset ends up with two identities and every reference
-resolves on one machine and not the other. A sidecar that exists locally
-but is untracked or ignored looks fine to whoever created it, which is
-exactly why this is a gate and not a review item.
+Three ways a project loses track of which asset is which, all of them
+silent until somebody else clones the repository.
+
+**A missing sidecar.** An asset's persistent GUID lives in its
+"<asset>.meta". If that file is not committed, a teammate's clone has the
+asset but not its identity, and the next import on their machine mints a
+different GUID — so one asset ends up with two identities and every
+reference resolves on one machine and not the other. A sidecar that
+exists locally but is untracked or ignored looks fine to whoever created
+it, which is exactly why this is a gate and not a review item.
+
+**A duplicate GUID.** Copying an asset in a file manager copies its
+sidecar, so two assets claim one identity and a reference to it resolves
+to whichever the index happened to see last. Every colliding path is
+reported and the audit fails; it never picks a winner and never
+regenerates one of them, because either choice silently rebinds
+references somebody already wrote.
+
+**A case-only path collision.** "Foo.png" and "foo.png" are two assets on
+Linux and one on Windows and macOS, so a project holding both builds for
+one teammate and not another. Reported as the portability conflict it is
+rather than folded away, since folding would make identity depend on
+which machine indexed the project.
 
 Identity-bearing is read from the asset type table's own rows rather than
 restated here, so adding a type to the table extends this audit with it.
@@ -66,6 +82,52 @@ def tracked_files(root: pathlib.Path) -> set[str]:
     return {name for name in result.stdout.split("\0") if name}
 
 
+GUID_RE = re.compile(r'"guid"\s*:\s*"([0-9a-fA-F-]{36})"')
+
+
+def sidecar_guid(path: pathlib.Path) -> str | None:
+    """The GUID a sidecar claims, lowercased; None when unreadable."""
+    try:
+        match = GUID_RE.search(path.read_text(encoding="utf-8"))
+    except OSError:
+        return None
+    return match.group(1).lower() if match else None
+
+
+def duplicate_guid_findings(root: pathlib.Path,
+                            sidecars: list[str]) -> list[str]:
+    """One finding per GUID claimed by more than one sidecar."""
+    owners: dict[str, list[str]] = {}
+    for name in sidecars:
+        guid = sidecar_guid(root / name)
+        if guid is None:
+            continue
+        owners.setdefault(guid, []).append(name)
+    findings: list[str] = []
+    for guid, paths in sorted(owners.items()):
+        if len(paths) < 2:
+            continue
+        findings.append(f"  {guid} is claimed by {len(paths)} sidecars:")
+        findings.extend(f"      {path}" for path in sorted(paths))
+    return findings
+
+
+def case_collision_findings(tracked: set[str]) -> list[str]:
+    """One finding per set of tracked paths differing only by case."""
+    folded: dict[str, list[str]] = {}
+    for name in tracked:
+        folded.setdefault(name.lower(), []).append(name)
+    findings: list[str] = []
+    for lowered, paths in sorted(folded.items()):
+        if len(paths) < 2:
+            continue
+        findings.append(f"  {len(paths)} paths differ only by case "
+                        f"(one file on Windows and macOS, {len(paths)} on "
+                        f"Linux):")
+        findings.extend(f"      {path}" for path in sorted(paths))
+    return findings
+
+
 def main() -> int:
     """Runs the audit and reports findings; exit 1 when any exist."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -77,6 +139,11 @@ def main() -> int:
     tracked = tracked_files(root)
 
     findings: list[str] = []
+    sidecars = [name for name in tracked
+                if name.lower().endswith(SIDECAR_SUFFIX)]
+    findings.extend(duplicate_guid_findings(root, sidecars))
+    findings.extend(case_collision_findings(tracked))
+
     audited = 0
     for name in sorted(tracked):
         lower = name.lower()
@@ -94,14 +161,14 @@ def main() -> int:
         findings.append(f"  {name}: {sidecar} {why}")
 
     if findings:
-        print("asset identity audit failed: an asset without a committed "
-              "sidecar has no identity on a teammate's clone:")
+        print("asset identity audit failed:")
         for finding in findings:
             print(finding)
         return 1
 
     print(f"asset identity audit passed: {audited} identity-bearing asset(s) "
-          f"checked against {len(suffixes)} table suffix(es)")
+          f"with {len(sidecars)} sidecar(s), no duplicate GUID and no "
+          f"case-only collision among {len(tracked)} tracked path(s)")
     return 0
 
 
