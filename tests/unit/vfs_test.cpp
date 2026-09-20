@@ -708,6 +708,73 @@ bool test_prefix_remount_cycles_and_nested() noexcept {
   return true;
 }
 
+/// EXPECTATION: canonical_virtual_path folds separators, collapses runs
+/// of them, drops a trailing one, keeps a scheme's "//" and every "."
+/// or ".." segment, and refuses a path it cannot hold whole.
+bool test_canonical_virtual_path() noexcept {
+  struct Accepted final {
+    const char *input;
+    const char *expected;
+  };
+  const Accepted accepted[] = {
+      {"assets/coin.mesh", "assets/coin.mesh"},
+      {"assets//coin.mesh", "assets/coin.mesh"},
+      {"assets///props////coin.mesh", "assets/props/coin.mesh"},
+      {"assets\\props\\coin.mesh", "assets/props/coin.mesh"},
+      {"assets\\\\props//coin.mesh", "assets/props/coin.mesh"},
+      {"assets/props/", "assets/props"},
+      {"assets/props//", "assets/props"},
+      // A scheme's "//" is part of the name: collapsing it would rename
+      // every built-in primitive.
+      {"builtin://cube", "builtin://cube"},
+      {"builtin://sphere/", "builtin://sphere"},
+      // Left for vfs_path_is_jailed to refuse, not resolved here.
+      {"assets/../outside.txt", "assets/../outside.txt"},
+      {"assets/./same.txt", "assets/./same.txt"},
+  };
+  for (const Accepted &row : accepted) {
+    char out[kMaxVirtualPathLength] = {};
+    if (!canonical_virtual_path(row.input, out, sizeof(out)) ||
+        (std::strcmp(out, row.expected) != 0)) {
+      std::fprintf(stderr, "FAIL: canonical('%s') = '%s', expected '%s'\n",
+                   row.input, out, row.expected);
+      return false;
+    }
+  }
+
+  const char *refused[] = {nullptr, "", "/", "//", "///", "\\", "\\\\"};
+  for (const char *input : refused) {
+    char out[kMaxVirtualPathLength] = {};
+    if (canonical_virtual_path(input, out, sizeof(out)) || (out[0] != '\0')) {
+      std::fprintf(stderr, "FAIL: canonical accepted an empty path\n");
+      return false;
+    }
+  }
+
+  // A path that does not fit whole is refused rather than truncated: a
+  // truncated identity names a different asset.
+  char tiny[8] = {};
+  if (canonical_virtual_path("assets/coin.mesh", tiny, sizeof(tiny)) ||
+      (tiny[0] != '\0')) {
+    std::fprintf(stderr, "FAIL: canonical truncated instead of refusing\n");
+    return false;
+  }
+  // Exactly fitting is accepted; one over is not.
+  char exact[8] = {};
+  if (!canonical_virtual_path("a/b/c/d", exact, sizeof(exact)) ||
+      (std::strcmp(exact, "a/b/c/d") != 0)) {
+    std::fprintf(stderr, "FAIL: canonical refused a path that fits whole\n");
+    return false;
+  }
+  if (canonical_virtual_path(nullptr, nullptr, 0U)) {
+    std::fprintf(stderr, "FAIL: canonical accepted a null destination\n");
+    return false;
+  }
+
+  std::printf("PASS: canonical_virtual_path\n");
+  return true;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -756,6 +823,9 @@ int main() {
   }
   if (!test_mtime_far_future()) {
     return 15;
+  }
+  if (!test_canonical_virtual_path()) {
+    return 16;
   }
   return 0;
 }

@@ -43,7 +43,15 @@ struct MountEntry final {
 std::array<MountEntry, kMaxMounts> g_mounts{};
 bool g_vfsInitialized = false;
 
-// Normalize a path in-place: backslash → forward slash, strip trailing slash.
+// Normalize a path in-place for resolution: backslash → forward slash,
+// strip a trailing slash. Deliberately does NOT collapse a run of
+// separators, unlike canonical_virtual_path, and the difference is load
+// bearing in both directions. A mount's OS root may be a Windows UNC
+// share ("\\server\share"), where the leading "//" is the name. And a
+// virtual path whose remainder after the mount prefix begins with '/' is
+// refused by the jail as absolute-looking; collapsing here would turn
+// that refusal into a resolution, which is a security stance to change
+// deliberately rather than as a side effect of normalizing identity.
 void normalize_path(char *path, std::size_t length) noexcept {
   for (std::size_t i = 0U; i < length; ++i) {
     if (path[i] == '\\') {
@@ -267,6 +275,50 @@ bool unmount(const char *virtualPrefix) noexcept {
     }
   }
   return false;
+}
+
+bool canonical_virtual_path(const char *virtualPath, char *out,
+                            std::size_t capacity) noexcept {
+  if ((out == nullptr) || (capacity == 0U)) {
+    return false;
+  }
+  out[0] = '\0';
+  if (virtualPath == nullptr) {
+    return false;
+  }
+
+  std::size_t written = 0U;
+  bool afterSeparator = false;
+  bool afterScheme = false;
+  for (const char *cursor = virtualPath; *cursor != '\0'; ++cursor) {
+    const char ch = (*cursor == '\\') ? '/' : *cursor;
+    // The "//" of a scheme ("builtin://cube") is part of the name, not a
+    // run of separators: collapsing it would rename every built-in
+    // primitive. Standard URI grammar, so the rule is the colon before.
+    if ((ch == '/') && afterSeparator && !afterScheme) {
+      continue;
+    }
+    afterScheme = (ch == '/') && (written > 0U) && (out[written - 1U] == ':');
+    if ((written + 1U) >= capacity) {
+      // An identity that does not fit whole would name a different asset,
+      // so the path is refused rather than truncated.
+      out[0] = '\0';
+      return false;
+    }
+    out[written] = ch;
+    ++written;
+    afterSeparator = (ch == '/');
+  }
+
+  // A trailing separator names the same entry as its absence.
+  if ((written > 0U) && (out[written - 1U] == '/')) {
+    --written;
+  }
+  out[written] = '\0';
+  if (written == 0U) {
+    return false;
+  }
+  return true;
 }
 
 /// Rejects absolute paths, backslashes, drive designators, and ".."

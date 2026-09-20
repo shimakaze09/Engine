@@ -11,6 +11,7 @@
 
 #include "engine/core/hash.h"
 #include "engine/core/logging.h"
+#include "engine/core/vfs.h"
 
 namespace engine::content {
 
@@ -407,21 +408,35 @@ bool load_with_dependencies(MetadataStore *store, AssetId rootId,
 
 // --- Asset identity constructors ---
 
-/// FNV-1a over the path with separators canonicalized to '/' so the same
-/// asset hashes identically on every platform.
+/// FNV-1a over the path's canonical virtual spelling, so the id the
+/// runtime derives is the id the catalog registered no matter how the
+/// reference was written. Hashing the raw path instead gave one asset as
+/// many ids as it had spellings: "assets//coin.mesh" resolved to the same
+/// file as "assets/coin.mesh" and owned a different id, which a saved
+/// reference then failed to resolve.
 AssetId make_asset_id_from_path(const char *path) noexcept {
   if (path == nullptr) {
     return kInvalidAssetId;
   }
 
+  char canonical[core::kMaxVirtualPathLength] = {};
+  const char *hashed = canonical;
+  if (!core::canonical_virtual_path(path, canonical, sizeof(canonical))) {
+    // An empty path canonicalizes to nothing. Its hash is pinned by an
+    // existing contract test, so it is kept rather than changed here; a
+    // non-empty path that will not canonicalize is too long to be an
+    // identity and is refused.
+    if (path[0] != '\0') {
+      return kInvalidAssetId;
+    }
+    hashed = "";
+  }
+
   std::uint64_t hash = core::kFnv1a64Offset;
   for (const unsigned char *cursor =
-           reinterpret_cast<const unsigned char *>(path);
+           reinterpret_cast<const unsigned char *>(hashed);
        *cursor != 0U; ++cursor) {
-    const unsigned char ch = (*cursor == static_cast<unsigned char>('\\'))
-                                 ? static_cast<unsigned char>('/')
-                                 : *cursor;
-    hash = core::fnv1a_64_append(hash, static_cast<std::uint8_t>(ch));
+    hash = core::fnv1a_64_append(hash, static_cast<std::uint8_t>(*cursor));
   }
 
   if (hash == kInvalidAssetId) {

@@ -21,6 +21,32 @@ bool mount(const char *virtualPrefix, const char *osDirectoryPath) noexcept;
 /// Removes a mount; false when the prefix is unknown.
 bool unmount(const char *virtualPrefix) noexcept;
 
+/// Longest canonical virtual path, terminator included.
+inline constexpr std::size_t kMaxVirtualPathLength = 512U;
+
+/// Writes the canonical spelling of `virtualPath` into `out`: '\' folded
+/// to '/', a run of separators collapsed to one (except the "//" of a
+/// scheme such as "builtin://cube", which is part of the name), and a
+/// trailing '/' dropped.
+///
+/// This is the spelling asset identity is derived from, so that one asset
+/// owns one id however a reference was written. It is deliberately *not*
+/// what resolution accepts: the VFS keeps its stricter grammar, where a
+/// remainder beginning with '/' is refused as absolute-looking. A path
+/// this function accepts may therefore still fail to resolve; it will at
+/// least carry the same id as its well-spelled form.
+///
+/// Refuses — clearing `out` and returning false — a null path, a path
+/// that is empty or only separators, and one whose canonical form does
+/// not fit `capacity` whole: a virtual path is identity-bearing, so a
+/// truncated one names a different asset.
+///
+/// "." and ".." segments are carried through unchanged. Resolving them
+/// here would let a caller turn an attempted jail escape into a path that
+/// passes vfs_path_is_jailed.
+bool canonical_virtual_path(const char *virtualPath, char *out,
+                            std::size_t capacity) noexcept;
+
 /// True when a script-supplied path stays inside the VFS jail: non-empty,
 /// relative, forward slashes only, no drive designator, no ".." segment.
 bool vfs_path_is_jailed(const char *virtualPath) noexcept;
