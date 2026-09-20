@@ -64,6 +64,31 @@ bool case_sensitive_under(const std::filesystem::path &directory) noexcept {
   return distinct;
 }
 
+/// How the filesystem spells the one file ending in `suffix` directly
+/// inside `directory` right now, or empty when there is not exactly one.
+/// A case-only rename is answered differently by each platform — Linux
+/// moves the file, and a case-folding filesystem may keep the old
+/// spelling or refuse the call — so the cases below ask what the name
+/// became instead of predicting it.
+std::string spelling_of(const std::filesystem::path &directory,
+                        const std::string &suffix) noexcept {
+  std::error_code ec{};
+  std::string found{};
+  std::size_t matches = 0U;
+  for (const std::filesystem::directory_entry &entry :
+       std::filesystem::directory_iterator(directory, ec)) {
+    const std::string name = entry.path().filename().string();
+    if ((name.size() <= suffix.size()) ||
+        (name.compare(name.size() - suffix.size(), suffix.size(), suffix) !=
+         0)) {
+      continue;
+    }
+    found = name;
+    ++matches;
+  }
+  return ((matches == 1U) && !ec) ? found : std::string{};
+}
+
 /// The tree: ten runtime forms, six entries the walk must skip.
 bool build_tree() noexcept {
   const std::filesystem::path root(kRoot);
@@ -413,24 +438,32 @@ void test_identity_survives_relocation() noexcept {
              0),
         "a move keeps the GUID and moves where it resolves to");
 
-  // A case-only rename is still the same asset. Where the filesystem
-  // tells case apart the file really becomes "Jump.lua"; where it does
-  // not the rename is a no-op and "jump.lua" is still the name. The GUID
-  // resolving to whichever name survived is the contract either way.
+  // A case-only rename is still the same asset. Whether the rename lands
+  // is the filesystem's business — it is a move on Linux, and a
+  // case-folding filesystem may keep the old spelling or refuse the call
+  // — and none of those is the asset changing, so the contract asserted
+  // here is that the GUID still resolves to whatever the script is
+  // called on disk afterwards.
   const bool caseSensitive = case_sensitive_under(root / "gameplay");
+  std::error_code recaseEc{};
   std::filesystem::rename(root / "gameplay/jump.lua",
-                          root / "gameplay/Jump.lua", ec);
+                          root / "gameplay/Jump.lua", recaseEc);
   std::filesystem::rename(root / "gameplay/jump.lua.meta",
-                          root / "gameplay/Jump.lua.meta", ec);
-  const char *const survivingPath =
-      caseSensitive ? "kit/gameplay/Jump.lua" : "kit/gameplay/jump.lua";
+                          root / "gameplay/Jump.lua.meta", recaseEc);
+  const std::string scriptSpelling = spelling_of(root / "gameplay", ".lua");
+  const std::string recasedPath = "kit/gameplay/" + scriptSpelling;
   static_cast<void>(walk(store.get()));
   const engine::content::AssetMetadata *recased =
       find_asset_metadata_by_ref(store.get(),
                                  engine::content::asset_ref_primary(script));
-  check(!ec && (recased != nullptr) &&
-            (std::strcmp(recased->filePath.data(), survivingPath) == 0),
-        "a case-only rename keeps the GUID");
+  check(recased != nullptr, "a case-only rename keeps the GUID");
+  check(!scriptSpelling.empty() && (recased != nullptr) &&
+            (std::strcmp(recased->filePath.data(), recasedPath.c_str()) == 0),
+        "the recased script resolves to the name it now has on disk");
+  if (caseSensitive) {
+    check(scriptSpelling == "Jump.lua",
+          "a case-only rename is a real rename where case is significant");
+  }
 
   // Editing the bytes changes the content hash and nothing else.
   const engine::content::ContentHash before =
@@ -450,10 +483,9 @@ void test_identity_survives_relocation() noexcept {
   // only reaches the catalog once a recook rewrites the stamps, and the
   // CI identity gate catches that pair at the sidecars themselves.
   static_cast<void>(identify(root, "scripts/dash.lua"));
-  const std::filesystem::path survivingSidecar =
-      root / (caseSensitive ? "gameplay/Jump.lua.meta"
-                            : "gameplay/jump.lua.meta");
-  std::filesystem::copy_file(survivingSidecar, root / "scripts/dash.lua.meta",
+  const std::filesystem::path recasedSidecar =
+      root / "gameplay" / (scriptSpelling + ".meta");
+  std::filesystem::copy_file(recasedSidecar, root / "scripts/dash.lua.meta",
                              std::filesystem::copy_options::overwrite_existing,
                              ec);
   static_cast<void>(walk(store.get()));
