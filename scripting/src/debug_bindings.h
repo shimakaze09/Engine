@@ -38,8 +38,9 @@ void refresh_debug_lua_hook() noexcept;
 void arm_debug_lua_hook(lua_State *state) noexcept;
 /// True once this frame's shared instruction budget is exhausted.
 bool debug_instruction_budget_exhausted() noexcept;
-/// Refills the shared per-frame instruction budget; called at frame
-/// boundaries (set_frame_index) and on limit/sandbox reconfiguration.
+/// Refills the shared per-frame instruction budget; called when the
+/// published clock's frame index changes and on limit/sandbox
+/// reconfiguration.
 void refill_debug_instruction_budget() noexcept;
 /// Applies the current hook configuration to an explicit Lua thread; hooks
 /// are per-thread in Lua 5.4, so coroutines must arm them before resuming.

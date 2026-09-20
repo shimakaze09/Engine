@@ -10,6 +10,7 @@
 #include "engine/runtime/scripting_bridge.h"
 #include "engine/runtime/world.h"
 #include "engine/scripting/scripting.h"
+#include "../scripting_clock.h"
 
 namespace {
 
@@ -49,8 +50,8 @@ bool test_generated_bindings() noexcept {
   engine::core::ServiceLocator serviceLocator{};
   engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
 
-  engine::scripting::set_frame_time(0.016F, 1.0F);
-  engine::scripting::set_frame_index(60U);
+  engine::tests::publish_frame_time(0.016F, 1.0F);
+  engine::tests::publish_frame_index(60U);
 
   const char *script =
       "function run_generated_bindings()\n"

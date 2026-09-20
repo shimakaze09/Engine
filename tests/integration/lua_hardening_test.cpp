@@ -15,6 +15,7 @@
 #include "engine/runtime/scripting_bridge.h"
 #include "engine/runtime/world.h"
 #include "engine/scripting/scripting.h"
+#include "../scripting_clock.h"
 
 namespace {
 
@@ -158,7 +159,7 @@ bool test_budget_resets_at_next_dispatch() noexcept {
     return false;
   }
 
-  engine::scripting::set_frame_index(1U);
+  engine::tests::publish_frame_index(1U);
 
   const char *sane = "hardening_marker = 41\n"
                      "hardening_marker = hardening_marker + 1\n"

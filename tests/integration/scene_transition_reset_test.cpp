@@ -19,6 +19,7 @@
 #include "engine/runtime/service_registry.h"
 #include "engine/runtime/world.h"
 #include "engine/scripting/scripting.h"
+#include "../scripting_clock.h"
 
 namespace {
 
@@ -97,7 +98,7 @@ int main() {
     std::puts("scripting init failed");
     return 1;
   }
-  engine::scripting::set_frame_time(0.016F, 0.016F);
+  engine::tests::publish_frame_time(0.016F, 0.016F);
 
   std::unique_ptr<engine::runtime::World> world(
       new (std::nothrow) engine::runtime::World());

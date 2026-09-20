@@ -6,6 +6,7 @@
 #include <cstdint>
 
 #include "engine/core/entity.h"
+#include "engine/core/simulation_clock.h"
 
 namespace engine::runtime {
 class World;
@@ -45,9 +46,15 @@ void set_builtin_mesh_ids(std::uint64_t planeMesh, std::uint64_t cubeMesh,
                           std::uint64_t capsuleMesh,
                           std::uint64_t pyramidMesh) noexcept;
 
-// Set the frame time exposed to Lua via engine.delta_time() /
-// engine.elapsed_time(). Call once per frame before invoking script callbacks.
-void set_frame_time(float deltaSeconds, float totalSeconds) noexcept;
+/// Publishes the simulation clock Lua reads through engine.delta_time(),
+/// engine.elapsed_time() and engine.frame_count() and that timers and
+/// coroutines advance by. The pipeline publishes it at the start of every
+/// frame and again once the frame's fixed steps are decided; a change of
+/// frame index refills the shared per-frame Lua instruction budget.
+void set_simulation_clock(const core::SimulationClock &clock) noexcept;
+/// The clock last published (the zero clock before any publication and
+/// after a run ends).
+const core::SimulationClock &simulation_clock() noexcept;
 
 // Load and execute a script file. Returns false and logs on error.
 bool load_script(const char *path) noexcept;
@@ -80,9 +87,6 @@ void dispatch_physics_callbacks(const core::Entity *pairData,
 // Dispatch registered Lua handlers and the global on_anim_event fallback
 // for every animation event fired by the last fixed-step animation update.
 void dispatch_animation_event_callbacks() noexcept;
-
-// Set the current frame index; exposed to Lua via engine.frame_count().
-void set_frame_index(std::uint32_t frameIndex) noexcept;
 
 // Tick all active timers; call once per frame before on_update.
 void tick_timers() noexcept;
@@ -217,7 +221,8 @@ void set_sandbox_enabled(bool enabled) noexcept;
 bool is_sandbox_enabled() noexcept;
 
 // CPU instruction budget per frame, shared across all dispatches,
-// coroutines, and hooks; refilled at set_frame_index (0 = unlimited).
+// coroutines, and hooks; refilled when the published clock's frame index
+// changes (0 = unlimited).
 void set_instruction_limit(int limit) noexcept;
 /// Current per-frame shared Lua instruction cap (0 = unlimited).
 int get_instruction_limit() noexcept;

@@ -29,6 +29,7 @@
 #include "engine/core/input.h"
 #include "engine/core/job_system.h"
 #include "engine/core/logging.h"
+#include "engine/core/simulation_clock.h"
 #include "engine/core/platform.h"
 #include "engine/core/profiler.h"
 #include "engine/core/vfs.h"
@@ -182,7 +183,6 @@ bool process_pending_scene_op(World &world) noexcept {
 
 namespace {
 
-constexpr double kFixedDeltaSeconds = 1.0 / 60.0;
 // Shader and watched-script timestamps are polled on this cadence, not
 // every frame: up to 128 shader entries plus every watched script is a
 // stat storm at frame rate, and only an attached editor can act on it.
@@ -567,13 +567,15 @@ struct EnginePipeline::Impl final {
   // Last time the frame-metrics trace line was written (rate-limited).
   Clock::time_point lastMetricsLogTime{};
   double accumulator = 0.0;
-  double simulationTimeSeconds = 0.0;
+  // The clock every consumer of simulated time reads, published to
+  // scripting at frame start (new frame index) and again once the frame's
+  // fixed steps are decided.
+  core::SimulationClock clock{};
   // Frame delta source: negative reads the wall clock, otherwise every
   // playing frame accumulates exactly this many seconds (tests, replay).
   double frameDeltaOverrideSeconds = -1.0;
 
   // --- Loop state ---
-  std::uint32_t frameIndex = 0U;
   std::uint32_t maxFrames = 0U;
   bool running = true;
   // Draw-command overflow is reported once per run, not once per frame.
@@ -615,7 +617,6 @@ struct EnginePipeline::Impl final {
   core::CVarRef failFrameStageCvar{"dbg_fail_frame_stage"};
   std::uint64_t failFrameStageStamp = 0U;
   char failFrameStage[64] = {};
-  double renderAlpha = 1.0;
   Clock::time_point previousFrameStart{};
   double wallFrameMs = 0.0;
   // Windowed FPS readout: instantaneous 1/dt swings +-4 FPS on 1 ms of
@@ -643,16 +644,13 @@ struct EnginePipeline::Impl final {
   renderer::CameraState currentCameraSample{};
   bool cameraSampleValid = false;
   std::uint32_t cameraSampleEpoch = 0U;
-  std::size_t updateStepCount = 0U;
   double frameMs = 0.0;
   double utilizationPct = 0.0;
   core::JobSystemStats jobStats{};
 
   /// Total simulated time this frame: the dt every per-frame gameplay system
   /// receives, so one dispatch still accounts for every catch-up step.
-  double step_seconds() const noexcept {
-    return static_cast<double>(updateStepCount) * kFixedDeltaSeconds;
-  }
+  double step_seconds() const noexcept { return clock.deltaSeconds; }
 
   // --- Stage methods ---
   bool initialize(std::uint32_t maxFrameCount) noexcept;
@@ -813,8 +811,7 @@ bool EnginePipeline::Impl::initialize(std::uint32_t maxFrameCount) noexcept {
 
   previousTick = Clock::now();
   accumulator = 0.0;
-  simulationTimeSeconds = 0.0;
-  frameIndex = 0U;
+  clock = core::SimulationClock{};
   running = true;
   previousPlayState = query_editor_play_state();
   previousAliveCount = world->alive_entity_count();
@@ -842,12 +839,12 @@ bool EnginePipeline::Impl::execute_frame() noexcept {
   // Published before any stage runs so every log_message call this frame
   // (including early stages ahead of stage_scripting) tags itself with the
   // right index for the editor Console's frame-context column.
-  core::log_set_frame_index(frameIndex);
-  // The Lua-visible frame index is published at the same point, for the same
+  core::log_set_frame_index(clock.frameIndex);
+  // The Lua-visible clock is published at the same point, for the same
   // reason: begin-play and start callbacks dispatch in stage_play_transitions,
   // ahead of stage_scripting, and engine.frame_count() there must name the
   // frame those callbacks run in — not the previous frame's publication.
-  scripting::set_frame_index(frameIndex);
+  scripting::set_simulation_clock(clock);
   PROFILE_SCOPE("engine_frame");
   frameStart = Clock::now();
   wallFrameMs =
@@ -1010,7 +1007,8 @@ void EnginePipeline::Impl::stage_play_transitions() noexcept {
 
     accumulator = 0.0;
     previousTick = frameStart;
-    simulationTimeSeconds = 0.0;
+    clock.simulationSeconds = 0.0;
+    clock.tickIndex = 0U;
   }
 
   isPlaying = (playState == LoopPlayState::Playing);
@@ -1050,22 +1048,24 @@ void EnginePipeline::Impl::stage_timing() noexcept {
     // Snapped so vsync-at-fixed-rate frames drain exactly one step
     // instead of alternating 0/2 on measurement noise (frame_pacing).
     accumulator +=
-        runtime::snap_delta_to_fixed_step(frameDelta, kFixedDeltaSeconds);
+        runtime::snap_delta_to_fixed_step(frameDelta, core::kFixedDeltaSeconds);
     previousTick = now;
   } else {
     previousTick = frameStart;
   }
 
   const runtime::FixedStepDecision decision = runtime::fixed_step_decision(
-      isPlaying, singleStepping, accumulator, kFixedDeltaSeconds,
+      isPlaying, singleStepping, accumulator, core::kFixedDeltaSeconds,
       kMaxUpdateStepsPerFrame);
-  updateStepCount = decision.stepCount;
+  clock.stepsThisFrame = static_cast<std::uint32_t>(decision.stepCount);
   accumulator = decision.remainingAccumulator;
-  simulationTimeSeconds +=
-      static_cast<double>(updateStepCount) * kFixedDeltaSeconds;
-  renderAlpha = (isPlaying && !singleStepping)
-                    ? accumulator / kFixedDeltaSeconds
-                    : 1.0;
+  clock.deltaSeconds =
+      static_cast<double>(clock.stepsThisFrame) * core::kFixedDeltaSeconds;
+  clock.simulationSeconds += clock.deltaSeconds;
+  clock.tickIndex += clock.stepsThisFrame;
+  clock.renderAlpha = (isPlaying && !singleStepping)
+                          ? accumulator / core::kFixedDeltaSeconds
+                          : 1.0;
 }
 
 // ---------------------------------------------------------------------------
@@ -1074,7 +1074,7 @@ void EnginePipeline::Impl::stage_timing() noexcept {
 // Cadence contract. Two classes of system exist in this frame:
 //   * per-fixed-step: transform propagation, physics, collision resolve,
 //     animation, spring arms and camera evaluation each run exactly
-//     updateStepCount times with kFixedDeltaSeconds apiece, so their
+//     stepsThisFrame times with the fixed delta apiece, so their
 //     integration is independent of the render rate. The camera belongs
 //     here because its blend and the arm's lag are single lerps per call —
 //     one call with twice the delta is not two calls with one — and because
@@ -1100,9 +1100,8 @@ void EnginePipeline::Impl::stage_scripting() noexcept {
   if (scripting::dap_is_running()) {
     scripting::dap_poll();
   }
-  if (isPlaying && (updateStepCount > 0U)) {
-    scripting::set_frame_time(static_cast<float>(step_seconds()),
-                              static_cast<float>(simulationTimeSeconds));
+  if (isPlaying && (clock.stepsThisFrame > 0U)) {
+    scripting::set_simulation_clock(clock);
     scripting::tick_timers();
     scripting::tick_coroutines();
     scripting::dispatch_entity_scripts_update(
@@ -1188,8 +1187,8 @@ void EnginePipeline::Impl::stage_animation() noexcept {
   // One evaluation per fixed simulation step, matching the frame graph's
   // stepping — never per render frame, or playback speed would track the
   // uncapped render rate.
-  for (std::size_t step = 0U; step < updateStepCount; ++step) {
-    runtime::update_animations(*world, static_cast<float>(kFixedDeltaSeconds));
+  for (std::size_t step = 0U; step < clock.stepsThisFrame; ++step) {
+    runtime::update_animations(*world, static_cast<float>(core::kFixedDeltaSeconds));
     scripting::dispatch_animation_event_callbacks();
   }
 }
@@ -1232,7 +1231,7 @@ bool EnginePipeline::Impl::stage_simulation_graph() noexcept {
   }
   frameContext->frameGraphFailed.store(false, std::memory_order_release);
   frameContext->droppedDrawCommands.store(0U, std::memory_order_release);
-  if (updateStepCount == 0U) {
+  if (clock.stepsThisFrame == 0U) {
     return true;
   }
 
@@ -1252,7 +1251,7 @@ bool EnginePipeline::Impl::stage_simulation_graph() noexcept {
   core::JobHandle previousUpdateCommit{};
   bool graphFailed = false;
 
-  for (std::size_t step = 0U; step < updateStepCount; ++step) {
+  for (std::size_t step = 0U; step < clock.stepsThisFrame; ++step) {
     core::JobHandle commitHandle =
         submit_world_phase_job(frameContext.get(), world.get(), &phaseJobCursor,
                                &commit_update_phase_job);
@@ -1318,7 +1317,7 @@ bool EnginePipeline::Impl::stage_simulation_graph() noexcept {
       updateData.world = world.get();
       updateData.startIndex = start;
       updateData.count = count;
-      updateData.deltaSeconds = static_cast<float>(kFixedDeltaSeconds);
+      updateData.deltaSeconds = static_cast<float>(core::kFixedDeltaSeconds);
 
       core::Job updateJob{};
       updateJob.function = &update_chunk_job;
@@ -1368,7 +1367,7 @@ bool EnginePipeline::Impl::stage_simulation_graph() noexcept {
         physicsData.world = world.get();
         physicsData.startIndex = start;
         physicsData.count = count;
-        physicsData.deltaSeconds = static_cast<float>(kFixedDeltaSeconds);
+        physicsData.deltaSeconds = static_cast<float>(core::kFixedDeltaSeconds);
         physicsData.frameGraphFailed = &frameContext->frameGraphFailed;
 
         core::Job physicsJob{};
@@ -1397,7 +1396,7 @@ bool EnginePipeline::Impl::stage_simulation_graph() noexcept {
 
       frameContext->resolveCollisionsJobData.world = world.get();
       frameContext->resolveCollisionsJobData.deltaSeconds =
-          static_cast<float>(kFixedDeltaSeconds);
+          static_cast<float>(core::kFixedDeltaSeconds);
       frameContext->resolveCollisionsJobData.frameGraphFailed =
           &frameContext->frameGraphFailed;
       core::Job resolveJob{};
@@ -1472,7 +1471,7 @@ bool EnginePipeline::Impl::stage_simulation_graph() noexcept {
 void EnginePipeline::Impl::camera_step_hook(void *context) noexcept {
   auto *self = static_cast<EnginePipeline::Impl *>(context);
   if (self != nullptr) {
-    self->evaluate_cameras_for_step(static_cast<float>(kFixedDeltaSeconds));
+    self->evaluate_cameras_for_step(static_cast<float>(core::kFixedDeltaSeconds));
   }
 }
 
@@ -1535,8 +1534,8 @@ void EnginePipeline::Impl::stage_camera() noexcept {
   // frame while the world kept moving under it. Without a valid pair
   // there is nothing to carry, so that frame still evaluates, with no
   // time passing.
-  if (updateStepCount > 0U) {
-    evaluate_cameras_for_step(static_cast<float>(kFixedDeltaSeconds));
+  if (clock.stepsThisFrame > 0U) {
+    evaluate_cameras_for_step(static_cast<float>(core::kFixedDeltaSeconds));
   } else if (!cameraSampleValid) {
     evaluate_cameras_for_step(0.0F);
   }
@@ -1609,7 +1608,7 @@ bool EnginePipeline::Impl::stage_render_prep_graph() noexcept {
             renderPhaseHandle, &frameContext->frameGraphFailed,
             &frameContext->droppedDrawCommands, frameThreadCount, kChunkSize,
             vpMatrix,
-            isPlaying ? static_cast<float>(renderAlpha) : 1.0F,
+            isPlaying ? static_cast<float>(clock.renderAlpha) : 1.0F,
             &mergeHandle, auxiliaryCommandBuffer.get(),
             &frameAuxiliaryInputs)) {
       graphFailed = true;
@@ -1800,11 +1799,11 @@ void EnginePipeline::Impl::stage_render() noexcept {
   }
 
   const bool interpolateCamera =
-      isPlaying && cameraSampleValid && (renderAlpha < 1.0);
+      isPlaying && cameraSampleValid && (clock.renderAlpha < 1.0);
   if (interpolateCamera) {
     renderer::set_active_camera(interpolate_camera_state(
         previousCameraSample, currentCameraSample,
-        static_cast<float>(renderAlpha)));
+        static_cast<float>(clock.renderAlpha)));
   }
 
   const renderer::CameraState listenerCamera = renderer::get_active_camera();
@@ -1827,7 +1826,7 @@ void EnginePipeline::Impl::stage_render() noexcept {
                                        frameCaptureRequestCount);
 
   renderer::flush_renderer(commandBuffer->view(), meshRegistry.get(),
-                           static_cast<float>(simulationTimeSeconds),
+                           static_cast<float>(clock.simulationSeconds),
                            frameSceneLights, auxiliaryCommandBuffer->view());
   frameCollectionValid = false;
 
@@ -1881,7 +1880,7 @@ void EnginePipeline::Impl::stage_diagnostics() noexcept {
     }
 
     core::log_frame_metrics(
-        frameIndex, frameMs,
+        clock.frameIndex, frameMs,
         core::frame_allocator_bytes_used() + threadFrameBytes,
         core::frame_allocator_allocation_count() + threadFrameAllocs);
   }
@@ -1898,7 +1897,7 @@ void EnginePipeline::Impl::stage_diagnostics() noexcept {
       count_mesh_asset_states(assetDatabase.get());
 
   const bool shouldLogSliceDiagnostics =
-      ((frameIndex % kSliceDiagnosticsPeriodFrames) == 0U) ||
+      ((clock.frameIndex % kSliceDiagnosticsPeriodFrames) == 0U) ||
       (spawnedCount > 0U) || (destroyedCount > 0U) || (assetCounts.failed > 0U);
   if (shouldLogSliceDiagnostics) {
     const std::size_t movingRigidBodyCount = count_moving_rigid_bodies(*world);
@@ -1917,7 +1916,7 @@ void EnginePipeline::Impl::stage_diagnostics() noexcept {
         "meshComponents=%llu readyMeshComponents=%llu drawCommands=%llu "
         "assetsReady=%llu assetsLoading=%llu assetsFailed=%llu "
         "assetRequests=%llu updateSteps=%llu",
-        frameIndex, world_phase_to_string(world->current_phase()),
+        clock.frameIndex, world_phase_to_string(world->current_phase()),
         static_cast<unsigned long long>(aliveCount),
         static_cast<unsigned long long>(spawnedCount),
         static_cast<unsigned long long>(destroyedCount),
@@ -1931,7 +1930,7 @@ void EnginePipeline::Impl::stage_diagnostics() noexcept {
         static_cast<unsigned long long>(assetCounts.loading),
         static_cast<unsigned long long>(assetCounts.failed),
         static_cast<unsigned long long>(pendingAssetRequests),
-        static_cast<unsigned long long>(updateStepCount));
+        static_cast<unsigned long long>(clock.stepsThisFrame));
     core::log_message(core::LogLevel::Info, "slice", diagnostics);
   }
 
@@ -1988,8 +1987,8 @@ void EnginePipeline::Impl::stage_diagnostics() noexcept {
     frameStats.captureOnlyDraws = captureOnly;
     frameStats.hotReloadPolls = frameHotReloadPolls;
   }
-  frameStats.fixedSteps = static_cast<std::uint32_t>(updateStepCount);
-  frameStats.interpolationAlpha = static_cast<float>(renderAlpha);
+  frameStats.fixedSteps = clock.stepsThisFrame;
+  frameStats.interpolationAlpha = static_cast<float>(clock.renderAlpha);
   core::set_engine_stats(frameStats);
 
   if (logTraceThisFrame) {
@@ -2015,8 +2014,8 @@ void EnginePipeline::Impl::stage_frame_cleanup() noexcept {
 
   previousPlayState = playState;
   previousAliveCount = world->alive_entity_count();
-  ++frameIndex;
-  if ((maxFrames != 0U) && (frameIndex >= maxFrames)) {
+  ++clock.frameIndex;
+  if ((maxFrames != 0U) && (clock.frameIndex >= maxFrames)) {
     running = false;
   }
 

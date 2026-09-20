@@ -12,6 +12,7 @@
 #include "engine/runtime/scripting_bridge.h"
 #include "engine/runtime/world.h"
 #include "engine/scripting/scripting.h"
+#include "../scripting_clock.h"
 
 namespace {
 
@@ -1310,7 +1311,7 @@ int main() {
     } else {
       constexpr float kDt = 1.0F / 60.0F;
       for (int i = 0; i < 3; ++i) {
-        engine::scripting::set_frame_time(kDt,
+        engine::tests::publish_frame_time(kDt,
                                           kDt * static_cast<float>(i + 1));
         engine::scripting::dispatch_entity_scripts_update(kDt);
       }
@@ -1346,7 +1347,7 @@ int main() {
       // covered directly in frame_pacing_test.cpp); stage_scripting would
       // pass step_seconds() == 3 * kFixedDeltaSeconds for that frame.
       constexpr float kThreeStepDt = 3.0F * (1.0F / 60.0F);
-      engine::scripting::set_frame_time(kThreeStepDt, kThreeStepDt);
+      engine::tests::publish_frame_time(kThreeStepDt, kThreeStepDt);
       engine::scripting::dispatch_entity_scripts_update(kThreeStepDt);
 
       const bool countOk = engine::scripting::call_script_function_float(

@@ -57,20 +57,17 @@ namespace engine::scripting {
 void register_generated_bindings(lua_State *L) noexcept;
 namespace {
 
-float g_deltaSeconds = 0.0F;
-float g_totalSeconds = 0.0F;
-std::uint32_t g_frameIndex = 0U;
+core::SimulationClock g_clock{};
 
-/// Returns the Lua-visible clocks (delta/elapsed/frame index) to their
-/// initial values. Run-scoped: a run's end must zero them so a later run's
-/// begin-play/start callbacks — which fire before the pipeline's first
-/// per-frame publication — cannot observe the previous run's time. Ordinary
-/// scene transitions keep the VM and the run alive and never come through
-/// here, so clocks stay continuous across engine.load_scene.
+/// Publishes the zero clock. Run-scoped: a run's end must zero it so a
+/// later run's begin-play/start callbacks — which fire before the
+/// pipeline's first per-frame publication — cannot observe the previous
+/// run's time. Ordinary scene transitions keep the VM and the run alive
+/// and never come through here, so the clock stays continuous across
+/// engine.load_scene.
 void reset_clock_bindings() noexcept {
-  g_deltaSeconds = 0.0F;
-  g_totalSeconds = 0.0F;
-  g_frameIndex = 0U;
+  g_clock = core::SimulationClock{};
+  refill_debug_instruction_budget();
 }
 
 /// One hot-reload watch entry: a script path and its last known mtime.
@@ -135,7 +132,8 @@ int global_call_trampoline(lua_State *state) noexcept {
 }
 
 int lua_engine_start_coroutine(lua_State *state) noexcept {
-  return start_lua_coroutine(state, g_totalSeconds, g_frameIndex,
+  return start_lua_coroutine(state, static_cast<float>(g_clock.simulationSeconds),
+                             g_clock.frameIndex,
                              log_lua_error, arm_debug_lua_hook);
 }
 
@@ -369,11 +367,17 @@ void *scripting_lua_alloc(void * /*ud*/, void *ptr, std::size_t osize,
   return newPtr;
 }
 
-float bindable_delta_time() noexcept { return g_deltaSeconds; }
+float bindable_delta_time() noexcept {
+  return static_cast<float>(g_clock.deltaSeconds);
+}
 
-float bindable_elapsed_time() noexcept { return g_totalSeconds; }
+float bindable_elapsed_time() noexcept {
+  return static_cast<float>(g_clock.simulationSeconds);
+}
 
-int bindable_frame_count() noexcept { return static_cast<int>(g_frameIndex); }
+int bindable_frame_count() noexcept {
+  return static_cast<int>(g_clock.frameIndex);
+}
 
 int bindable_get_entity_count() noexcept {
   if (!runtime_bound()) {
@@ -556,12 +560,6 @@ void reset_run_state() noexcept {
     watchedScript = {};
   }
   g_watchedScriptCount = 0U;
-}
-
-/// Sets the requested value for frame time.
-void set_frame_time(float deltaSeconds, float totalSeconds) noexcept {
-  g_deltaSeconds = deltaSeconds;
-  g_totalSeconds = totalSeconds;
 }
 
 /// Loads the requested resource for script.
@@ -1065,14 +1063,21 @@ bool reload_script_transactionally(const char *path) noexcept {
 
 } // anonymous namespace
 
-/// Frame boundary: advances the frame index and refills the shared
-/// per-frame Lua instruction budget.
-void set_frame_index(std::uint32_t frameIndex) noexcept {
-  g_frameIndex = frameIndex;
-  refill_debug_instruction_budget();
+void set_simulation_clock(const core::SimulationClock &clock) noexcept {
+  // A new frame index is the frame boundary the shared per-frame Lua
+  // instruction budget is measured against.
+  const bool frameBoundary = (clock.frameIndex != g_clock.frameIndex);
+  g_clock = clock;
+  if (frameBoundary) {
+    refill_debug_instruction_budget();
+  }
 }
 
-void tick_timers() noexcept { tick_lua_timers(lua_state(), g_deltaSeconds); }
+const core::SimulationClock &simulation_clock() noexcept { return g_clock; }
+
+void tick_timers() noexcept {
+  tick_lua_timers(lua_state(), static_cast<float>(g_clock.deltaSeconds));
+}
 
 // Scene transitions reset the World's TimerManager (reset_world/load_scene)
 // but that layer cannot reach the scripting-side Lua registry refs, which
@@ -1084,8 +1089,8 @@ void tick_timers() noexcept { tick_lua_timers(lua_state(), g_deltaSeconds); }
 void clear_timers() noexcept { clear_lua_timer_bindings(lua_state()); }
 
 void tick_coroutines() noexcept {
-  tick_lua_coroutines(lua_state(), g_totalSeconds, g_frameIndex, log_lua_error,
-                      arm_debug_lua_hook);
+  tick_lua_coroutines(lua_state(), static_cast<float>(g_clock.simulationSeconds),
+                      g_clock.frameIndex, log_lua_error, arm_debug_lua_hook);
 }
 
 void clear_coroutines() noexcept { clear_lua_coroutines(lua_state()); }

@@ -39,6 +39,7 @@
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include "../scripting_clock.h"
 #endif
 
 namespace {
@@ -693,7 +694,7 @@ bool test_dap_breakpoint_pause() noexcept {
   // The transport is serviced by the pipeline's scripting stage in
   // production; this harness polls it directly between frames.
   for (int i = 0; i < 100; ++i) {
-    engine::scripting::set_frame_time(0.016F, 0.016F * static_cast<float>(i));
+    engine::tests::publish_frame_time(0.016F, 0.016F * static_cast<float>(i));
     engine::scripting::dap_poll();
     std::this_thread::sleep_for(std::chrono::milliseconds(5));
   }
@@ -866,8 +867,8 @@ bool set_working_directory_with_assets() noexcept {
   return false;
 }
 
-/// Regression for #540: the transport was serviced only from
-/// set_frame_time, which the pipeline calls while playing, so a client
+/// Regression for #540: the transport was serviced only from the frame
+/// time publication, which the pipeline made only while playing, so a client
 /// could connect before Play but never get its initialize answered. The
 /// production pipeline (headless, editor bridge reporting Stopped) must
 /// answer initialize and setBreakpoints in the same handshake without a
