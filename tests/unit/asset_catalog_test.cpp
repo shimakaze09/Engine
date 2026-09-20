@@ -10,6 +10,8 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <memory>
+#include <new>
 #include <string>
 #include <system_error>
 
@@ -207,10 +209,18 @@ int main() {
     return g_tests.finish("asset catalog tests");
   }
 
-  engine::content::MetadataStore store{};
-  test_invalid_arguments(&store);
-  test_walk(&store);
-  test_overlong_prefix(&store);
+  // On the heap: the store is 4 MB of fixed slots, which overflows the
+  // 1 MB stack a Windows thread gets by default.
+  std::unique_ptr<engine::content::MetadataStore> store(
+      new (std::nothrow) engine::content::MetadataStore());
+  if (store == nullptr) {
+    g_tests.fail("the metadata store could be allocated");
+    remove_tree();
+    return g_tests.finish("asset catalog tests");
+  }
+  test_invalid_arguments(store.get());
+  test_walk(store.get());
+  test_overlong_prefix(store.get());
 
   remove_tree();
   return g_tests.finish("asset catalog tests");
