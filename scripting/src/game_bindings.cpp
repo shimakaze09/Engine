@@ -10,6 +10,7 @@ extern "C" {
 
 #include <cstddef>
 #include <cstdio>
+#include <limits>
 
 #include "engine/scripting/game_binding_state.h"
 #include "runtime_binding.h"
