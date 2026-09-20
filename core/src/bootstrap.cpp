@@ -10,6 +10,7 @@
 #include "engine/core/console.h"
 #include "engine/core/cvar.h"
 #include "engine/core/debug_draw.h"
+#include "engine/core/engine_stats.h"
 #include "engine/core/engine_version.h"
 #include "engine/core/event_bus.h"
 #include "engine/core/input.h"
@@ -260,6 +261,9 @@ void shutdown_core() noexcept {
     g_threadFrameAllocators[i].reset();
   }
 
+  // The published stats snapshot is run-scoped; a later core in this
+  // process must not read the previous run's numbers before its own.
+  reset_engine_stats();
   g_coreInitialized = false;
 }
 

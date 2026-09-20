@@ -11,6 +11,7 @@
 #include "engine/core/console.h"
 #include "engine/core/cvar.h"
 #include "engine/core/logging.h"
+#include "engine/core/engine_stats.h"
 
 #include <cstdio>
 
@@ -54,6 +55,23 @@ void check_cvar_lifecycle() {
 
 /// The console built-ins must be live in a production core session and act
 /// on the production cvar table.
+/// The published engine stats are run-scoped: shutdown_core returns them
+/// to defaults so a later core in the same process cannot read the
+/// previous run's numbers before publishing its own.
+void check_engine_stats_reset() {
+  CHECK(engine::core::initialize_core(headless_config()), "core init");
+  engine::core::EngineStats stats{};
+  stats.drawCalls = 77U;
+  stats.fixedSteps = 3U;
+  engine::core::set_engine_stats(stats);
+  CHECK(engine::core::get_engine_stats().drawCalls == 77U,
+        "stats published");
+  engine::core::shutdown_core();
+  CHECK((engine::core::get_engine_stats().drawCalls == 0U) &&
+            (engine::core::get_engine_stats().fixedSteps == 0U),
+        "shutdown_core resets the published engine stats");
+}
+
 void check_console_builtins() {
   CHECK(engine::core::initialize_core(headless_config()), "core init");
   CHECK(engine::core::console_execute("help"),
@@ -97,6 +115,7 @@ void check_logging_sink_dropped() {
 
 /// Runs this executable or test program.
 int main() {
+  check_engine_stats_reset();
   check_cvar_lifecycle();
   check_console_builtins();
   check_logging_sink_dropped();

@@ -275,6 +275,14 @@ bool rebuild_asset_index() noexcept {
 
 std::size_t asset_index_count() noexcept { return g_index.size(); }
 
+void asset_index_reset() noexcept {
+  g_index.clear();
+  g_index.shrink_to_fit();
+  g_rootOsPath.clear();
+  g_built = false;
+  ++g_generation;
+}
+
 const AssetIndexEntry *asset_index_entry(std::size_t index) noexcept {
   if (index >= g_index.size()) {
     return nullptr;

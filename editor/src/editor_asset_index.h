@@ -61,6 +61,9 @@ const AssetIndexEntry *asset_index_entry(std::size_t index) noexcept;
 std::uint64_t asset_index_generation() noexcept;
 /// True once rebuild_asset_index has run at least once this process.
 bool asset_index_built() noexcept;
+/// Drops the index and its root so the next editor session walks afresh;
+/// bumps the generation so every dependent cache recomputes.
+void asset_index_reset() noexcept;
 
 /// Classifies one file through the asset type table's suffixes, falling
 /// back to a cheap top-level-key content sniff for ".json" documents no

@@ -142,16 +142,14 @@ bool draw_entity_reference_picker(
     std::snprintf(previewText, sizeof(previewText), "<missing>");
   }
 
-  // One popup is open at a time, so one buffer per picker kind suffices,
-  // but it is reset whenever a popup appears so no instance inherits
-  // another's search text.
-  static char query[128] = {};
+  char *query = editor_session().pickers.entityQuery;
+  constexpr std::size_t kQuerySize = sizeof(ReferencePickerState::entityQuery);
   if (ImGui::BeginCombo("##picker", previewText)) {
     if (ImGui::IsWindowAppearing()) {
       query[0] = '\0';
     }
     ImGui::SetNextItemWidth(-1.0F);
-    ImGui::InputTextWithHint("##search", "Search...", query, sizeof(query));
+    ImGui::InputTextWithHint("##search", "Search...", query, kQuerySize);
 
     if (ImGui::Selectable("<none>", *value == runtime::kInvalidPersistentId)) {
       *value = runtime::kInvalidPersistentId;
@@ -208,10 +206,8 @@ bool draw_asset_reference_picker(const char *label,
     }
   }
 
-  // One popup is open at a time, so one buffer per picker kind suffices,
-  // but it is reset whenever a popup appears so no instance inherits
-  // another's search text.
-  static char query[128] = {};
+  char *query = editor_session().pickers.assetQuery;
+  constexpr std::size_t kQuerySize = sizeof(ReferencePickerState::assetQuery);
   const char *previewText =
       resolved ? displayPath : ((*value == 0ULL) ? "<none>" : "<missing>");
   if (ImGui::BeginCombo("##picker", previewText)) {
@@ -219,7 +215,7 @@ bool draw_asset_reference_picker(const char *label,
       query[0] = '\0';
     }
     ImGui::SetNextItemWidth(-1.0F);
-    ImGui::InputTextWithHint("##search", "Search...", query, sizeof(query));
+    ImGui::InputTextWithHint("##search", "Search...", query, kQuerySize);
 
     if (ImGui::Selectable("<none>", *value == 0ULL)) {
       *value = 0ULL;
@@ -360,17 +356,15 @@ bool draw_path_reference_picker(const char *label, char *pathBuffer,
     }
   }
 
-  // One popup is open at a time, so one buffer per picker kind suffices,
-  // but it is reset whenever a popup appears so no instance inherits
-  // another's search text.
-  static char query[128] = {};
+  char *query = editor_session().pickers.pathQuery;
+  constexpr std::size_t kQuerySize = sizeof(ReferencePickerState::pathQuery);
   const char *previewText = hasPath ? pathBuffer : "<none>";
   if (ImGui::BeginCombo("##picker", previewText)) {
     if (ImGui::IsWindowAppearing()) {
       query[0] = '\0';
     }
     ImGui::SetNextItemWidth(-1.0F);
-    ImGui::InputTextWithHint("##search", "Search...", query, sizeof(query));
+    ImGui::InputTextWithHint("##search", "Search...", query, kQuerySize);
 
     if (ImGui::Selectable("<none>", !hasPath)) {
       pathBuffer[0] = '\0';
@@ -378,6 +372,7 @@ bool draw_path_reference_picker(const char *label, char *pathBuffer,
     }
 
     constexpr std::size_t kMaxHits = 64U;
+    // Scratch for this frame's hits only; nothing reads it across frames.
     static char hits[kMaxHits][196];
     const std::size_t hitCount = scan_paths_by_extension(
         editor_asset_root(), 0U, extension, query, hits, kMaxHits, 0U);

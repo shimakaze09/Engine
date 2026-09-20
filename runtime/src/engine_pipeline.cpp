@@ -66,6 +66,7 @@
 #include "engine/runtime/world.h"
 #include "engine/scripting/dap_server.h"
 #include "engine/scripting/scripting.h"
+#include "engine/content/asset_staleness.h"
 
 namespace engine {
 
@@ -924,6 +925,7 @@ void EnginePipeline::Impl::teardown() noexcept {
     core::clear_gameplay_bindings();
     audio::unload_all_sounds();
     renderer::reset_renderer_public_state();
+    content::reset_cooked_asset_stale_warnings();
 
     runtime::set_editor_asset_service(nullptr);
     scripting::bind_game_state(nullptr);

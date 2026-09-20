@@ -499,26 +499,17 @@ bool initialize_scripting() noexcept {
   return true;
 }
 
-/// Shuts down the owning system for scripting.
+/// Shuts down the owning system for scripting: the run-scoped state goes
+/// first, while the VM is still alive to release its references, then the
+/// VM and the aliases that belong to whoever destroyed it.
 void shutdown_scripting() noexcept {
-  lua_State *state = lua_state();
-  clear_touch_gesture_callbacks(state);
-
-  if (state != nullptr) {
-    clear_persist_bindings(state);
-    reset_entity_script_bindings();
-    clear_lua_timer_bindings(state);
-    clear_collision_handlers(state);
-    clear_anim_event_handlers(state);
-    clear_lua_coroutines(state);
+  reset_run_state();
+  if (lua_state() != nullptr) {
     shutdown_lua_state();
   }
 
   g_memoryUsed = 0U;
   clear_runtime_binding();
-  reset_mesh_material_bindings();
-  clear_deferred_mutations();
-  reset_scene_bindings();
   reset_debug_bindings();
   set_debug_lua_state(nullptr);
   // Cleared here rather than in reset_entity_script_bindings: that reset
@@ -526,14 +517,6 @@ void shutdown_scripting() noexcept {
   // survive. The alias belongs to whoever destroyed the VM, so it is
   // cleared beside the sibling debug alias, after shutdown_lua_state.
   clear_entity_script_bindings();
-  reset_cheat_bindings();
-  reset_entity_pool_bindings();
-  reset_game_bindings();
-  reset_clock_bindings();
-  for (WatchedScript &watchedScript : g_watchedScripts) {
-    watchedScript = {};
-  }
-  g_watchedScriptCount = 0U;
 }
 
 /// Resets run-scoped scripting state without touching the VM, the debug/DAP

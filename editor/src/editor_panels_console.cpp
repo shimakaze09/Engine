@@ -183,14 +183,12 @@ void draw_entry_row(const ConsoleEntry &entry, std::size_t rowIndex) noexcept {
 } // namespace
 
 void draw_console_panel() noexcept {
-  static ConsoleFilter filter{};
-  static bool autoScroll = true;
-  static bool paused = false;
-  static bool collapseView = true;
-  // Frozen entry count while paused: the ring keeps recording underneath,
-  // but the visible list stops growing until Resume (UI-only, not a
-  // capture-layer concept, so it lives here rather than in ConsoleFilter).
-  static std::size_t pausedEntryCount = 0U;
+  ConsolePanelState &console = editor_session().console;
+  ConsoleFilter &filter = console.filter;
+  bool &autoScroll = console.autoScroll;
+  bool &paused = console.paused;
+  bool &collapseView = console.collapseView;
+  std::size_t &pausedEntryCount = console.pausedEntryCount;
 
   if (!core::cvar_get_bool("editor.show_console", true)) {
     return;
