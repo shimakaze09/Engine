@@ -9,9 +9,9 @@
 #include <cstdint>
 #include <cstdio>
 
+#include "engine/content/asset_identity.h"
 #include "engine/core/hash.h"
 #include "engine/core/logging.h"
-#include "engine/core/vfs.h"
 
 namespace engine::content {
 
@@ -415,31 +415,12 @@ bool load_with_dependencies(MetadataStore *store, AssetId rootId,
 /// file as "assets/coin.mesh" and owned a different id, which a saved
 /// reference then failed to resolve.
 AssetId make_asset_id_from_path(const char *path) noexcept {
-  if (path == nullptr) {
-    return kInvalidAssetId;
-  }
-
-  // A path with no canonical form names no asset: empty, nothing but
-  // separators or "." segments, carrying a ".." segment, or too long to
-  // hold whole. All of those are the absence of an identity, which is
-  // what kInvalidAssetId is for.
-  char canonical[core::kMaxVirtualPathLength] = {};
-  if (!core::canonical_virtual_path(path, canonical, sizeof(canonical))) {
-    return kInvalidAssetId;
-  }
-
-  std::uint64_t hash = core::kFnv1a64Offset;
-  for (const unsigned char *cursor =
-           reinterpret_cast<const unsigned char *>(canonical);
-       *cursor != 0U; ++cursor) {
-    hash = core::fnv1a_64_append(hash, static_cast<std::uint8_t>(*cursor));
-  }
-
-  if (hash == kInvalidAssetId) {
-    hash = 1ULL;
-  }
-
-  return hash;
+  // One derivation, in PathKey: this is the numeric form of the same key,
+  // kept while references written before GUID identity are still read.
+  // kInvalidPathKey and kInvalidAssetId are both zero, so a path that
+  // names no asset — empty, nothing but separators or "." segments,
+  // carrying a "..", or too long to hold whole — maps straight through.
+  return make_path_key(path).value;
 }
 
 AssetId make_asset_id_from_file(const char *path) noexcept {

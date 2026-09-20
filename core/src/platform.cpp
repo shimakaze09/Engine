@@ -1,5 +1,11 @@
 // Implements platform behavior for the Engine core engine.
 
+// rand_s (platform_random_bytes) is only declared when this is defined
+// before the CRT headers.
+#if defined(_WIN32) && !defined(_CRT_RAND_S)
+#define _CRT_RAND_S
+#endif
+
 #include "engine/core/platform.h"
 
 #if defined(__clang__) && (defined(__x86_64__) || defined(__i386__)) && !defined(__PRFCHWINTRIN_H)
@@ -11,6 +17,7 @@
 #include <cstdint>
 #include <array>
 #include <cstdio>
+#include <cerrno>
 #include <cstdlib>
 #include <cstring>
 
@@ -27,6 +34,7 @@
 #include <mach/mach.h>
 #include <mach/task.h>
 #elif defined(__linux__)
+#include <sys/random.h>
 #include <unistd.h>
 #endif
 
@@ -359,6 +367,63 @@ bool non_empty_env(const char *name, char *out, std::size_t capacity) noexcept {
   }
   std::memcpy(out, value, length + 1U);
   return true;
+#endif
+}
+
+bool platform_random_bytes(void *out, std::size_t size) noexcept {
+  if (out == nullptr) {
+    return false;
+  }
+  if (size == 0U) {
+    return true;
+  }
+  auto *bytes = static_cast<unsigned char *>(out);
+
+#if defined(_WIN32)
+  // rand_s draws from the OS CSPRNG and needs no extra import library,
+  // unlike BCryptGenRandom. It yields four bytes at a time.
+  std::size_t written = 0U;
+  while (written < size) {
+    unsigned int value = 0U;
+    if (rand_s(&value) != 0) {
+      return false;
+    }
+    const std::size_t chunk =
+        ((size - written) < sizeof(value)) ? (size - written) : sizeof(value);
+    std::memcpy(bytes + written, &value, chunk);
+    written += chunk;
+  }
+  return true;
+#elif defined(__APPLE__)
+  arc4random_buf(out, size);
+  return true;
+#elif defined(__linux__)
+  std::size_t written = 0U;
+  while (written < size) {
+    const ssize_t got = getrandom(bytes + written, size - written, 0);
+    if (got < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      break;
+    }
+    written += static_cast<std::size_t>(got);
+  }
+  if (written == size) {
+    return true;
+  }
+  // getrandom is unavailable before Linux 3.17 and can be blocked by a
+  // sandbox; the device is the long-standing fallback.
+  FILE *device = std::fopen("/dev/urandom", "rb");
+  if (device == nullptr) {
+    return false;
+  }
+  const std::size_t read = std::fread(bytes, 1U, size, device);
+  static_cast<void>(std::fclose(device));
+  return read == size;
+#else
+  static_cast<void>(bytes);
+  return false;
 #endif
 }
 

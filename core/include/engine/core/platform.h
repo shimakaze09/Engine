@@ -43,6 +43,13 @@ void render_drawable_size(int *outWidth, int *outHeight) noexcept;
 /// API, avoiding the CRT getenv deprecation).
 bool non_empty_env(const char *name, char *out, std::size_t capacity) noexcept;
 
+/// Fills `out` with `size` bytes from the OS entropy source; false with
+/// `out` untouched when the platform refuses. Cold path only — it may
+/// open a device file — and intended for generating a persistent
+/// identity in an explicit transaction, never per frame and never on a
+/// deterministic read or cook path.
+bool platform_random_bytes(void *out, std::size_t size) noexcept;
+
 // ----- Gamepad devices -------------------------------------------------------
 // The platform owns the OS-level gamepad subsystem and the open device
 // handles: SDL announces a controller and delivers its button and axis
