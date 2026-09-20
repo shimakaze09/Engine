@@ -395,7 +395,7 @@ bool platform_random_bytes(void *out, std::size_t size) noexcept {
   }
   return true;
 #elif defined(__APPLE__)
-  arc4random_buf(out, size);
+  arc4random_buf(bytes, size);
   return true;
 #elif defined(__linux__)
   std::size_t written = 0U;
