@@ -30,6 +30,25 @@ bool register_asset_metadata(MetadataStore *store,
 const AssetMetadata *find_asset_metadata(const MetadataStore *store,
                                          AssetId id) noexcept;
 
+/// Finds the record whose persistent identity is `ref`; nullptr when no
+/// catalogued asset carries it. This is the resolution a saved reference
+/// goes through: the GUID answers "which asset", the record answers
+/// "where it is now", so a rename or a move costs the reference nothing.
+///
+/// Linear over the store, and deliberately so: it runs when a document
+/// loads, never per frame, and a reference that resolves to a path is
+/// then addressed by that path's id.
+const AssetMetadata *find_asset_metadata_by_ref(const MetadataStore *store,
+                                                const AssetRef &ref) noexcept;
+
+/// Reports every pair of catalogued assets that claim one GUID, writing
+/// up to `capacity` offending records into `outRecords` and returning how
+/// many exist. A duplicate is an error to report, never to resolve:
+/// picking a winner would silently rebind references somebody wrote.
+std::size_t find_duplicate_guid_records(const MetadataStore *store,
+                                        const AssetMetadata **outRecords,
+                                        std::size_t capacity) noexcept;
+
 /// Adds a tag to the id's metadata; false when unknown or tags full.
 bool add_asset_tag(MetadataStore *store, AssetId id,
                    const char *tag) noexcept;

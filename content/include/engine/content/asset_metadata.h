@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstring>
 
+#include "engine/content/asset_identity.h"
 #include "engine/content/asset_type_table.h"
 
 namespace engine::content {
@@ -57,6 +58,13 @@ struct AssetMetadata final {
   static constexpr std::size_t kMaxDependencies = 32U;
 
   AssetId assetId = kInvalidAssetId;
+  /// The asset's persistent identity, resolved from the authored
+  /// sidecars: a source's own, or — for a cooked output, which owns no
+  /// identity of its own — the producing source's GUID plus the local id
+  /// that names this output among that source's several. Nil for an
+  /// asset whose source has not been imported yet; `assetId` still
+  /// locates it by path in the meantime.
+  AssetRef ref{};
   AssetTypeTag typeTag = AssetTypeTag::Unknown;
   std::array<char, 260U> filePath{};
   std::uint64_t fileSize = 0ULL;

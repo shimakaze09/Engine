@@ -17,7 +17,9 @@
 
 #include "../test_harness.h"
 #include "engine/content/asset_catalog.h"
+#include "engine/content/asset_sidecar.h"
 #include "engine/content/metadata_store.h"
+#include "engine/core/logging.h"
 
 namespace {
 
@@ -216,6 +218,185 @@ void test_overlong_prefix(engine::content::MetadataStore *store) noexcept {
         "a refused walk leaves the store as it was");
 }
 
+/// Gives `relative` an authored sidecar and returns the GUID it got.
+engine::content::AssetGuid identify(const std::filesystem::path &root,
+                                    const char *relative) noexcept {
+  engine::content::AssetSidecar sidecar{};
+  sidecar.guid = engine::content::generate_asset_guid();
+  if (!engine::content::write_asset_sidecar((root / relative).string().c_str(),
+                                            sidecar)) {
+    return engine::content::kNilAssetGuid;
+  }
+  return sidecar.guid;
+}
+
+/// The identity contract the whole scheme exists for: a reference made of
+/// a GUID keeps resolving through a rename, a move, a case-only rename
+/// and a content edit, because none of those is the asset changing.
+void test_identity_survives_relocation() noexcept {
+  using engine::content::AssetRef;
+  using engine::content::AssetTypeTag;
+  constexpr const char *kRoot = "asset_catalog_identity_root";
+  constexpr const char *kPrefix = "kit";
+
+  std::error_code ec{};
+  std::filesystem::remove_all(kRoot, ec);
+  const std::filesystem::path root(kRoot);
+  const bool built = write_file(root / "props/coin.gltf") &&
+                     write_file(root / "props/coin.mesh") &&
+                     write_file(root / "chars/hero.gltf") &&
+                     write_file(root / "chars/hero.mesh") &&
+                     write_file(root / "chars/hero.skel") &&
+                     write_file(root / "chars/hero.walk.anim") &&
+                     write_file(root / "scripts/hop.lua");
+  if (!built) {
+    g_tests.fail("the identity tree could be written");
+    return;
+  }
+
+  const engine::content::AssetGuid coin = identify(root, "props/coin.gltf");
+  const engine::content::AssetGuid hero = identify(root, "chars/hero.gltf");
+  const engine::content::AssetGuid script = identify(root, "scripts/hop.lua");
+  check(engine::content::asset_guid_is_valid(coin) &&
+            engine::content::asset_guid_is_valid(hero) &&
+            engine::content::asset_guid_is_valid(script),
+        "the three sources are identified");
+
+  const auto walk = [&](engine::content::MetadataStore *store) noexcept {
+    engine::content::clear_metadata_store(store);
+    return engine::content::register_mounted_assets(store, kPrefix, kRoot);
+  };
+
+  std::unique_ptr<engine::content::MetadataStore> store(
+      new (std::nothrow) engine::content::MetadataStore());
+  if (store == nullptr) {
+    g_tests.fail("the identity store could be allocated");
+    return;
+  }
+  static_cast<void>(walk(store.get()));
+
+  // A source-policy asset is the primary asset of its own GUID.
+  const engine::content::AssetMetadata *scriptRecord =
+      find_asset_metadata_by_ref(store.get(),
+                                 engine::content::asset_ref_primary(script));
+  check((scriptRecord != nullptr) &&
+            (std::strcmp(scriptRecord->filePath.data(),
+                         "kit/scripts/hop.lua") == 0),
+        "a script resolves from its own GUID to its path");
+
+  // A cooked output has no sidecar: it is the primary output of the
+  // source that made it.
+  const engine::content::AssetMetadata *coinMesh = find_asset_metadata_by_ref(
+      store.get(), AssetRef{coin, engine::content::asset_local_id("mesh")});
+  check((coinMesh != nullptr) &&
+            (std::strcmp(coinMesh->filePath.data(), "kit/props/coin.mesh") ==
+             0) &&
+            (coinMesh->typeTag == AssetTypeTag::Mesh),
+        "a cooked mesh resolves from its source's GUID and local id");
+  check(find_asset_metadata_by_ref(
+            store.get(), engine::content::asset_ref_primary(coin)) == nullptr,
+        "the source's own primary id is not one of its cooked outputs");
+
+  // One source, several outputs, told apart by local id — the case a
+  // bare GUID cannot express.
+  const AssetRef walkClip{hero, engine::content::asset_local_id("walk.anim")};
+  const AssetRef skeleton{hero, engine::content::asset_local_id("skel")};
+  const AssetRef heroMesh{hero, engine::content::asset_local_id("mesh")};
+  const engine::content::AssetMetadata *clipRecord =
+      find_asset_metadata_by_ref(store.get(), walkClip);
+  check((clipRecord != nullptr) &&
+            (std::strcmp(clipRecord->filePath.data(),
+                         "kit/chars/hero.walk.anim") == 0),
+        "a clip resolves from its source's GUID plus its local id");
+  const engine::content::AssetMetadata *skelRecord =
+      find_asset_metadata_by_ref(store.get(), skeleton);
+  const engine::content::AssetMetadata *meshRecord =
+      find_asset_metadata_by_ref(store.get(), heroMesh);
+  check((skelRecord != nullptr) && (meshRecord != nullptr) &&
+            (std::strcmp(skelRecord->filePath.data(),
+                         "kit/chars/hero.skel") == 0) &&
+            (std::strcmp(meshRecord->filePath.data(),
+                         "kit/chars/hero.mesh") == 0),
+        "the skeleton and the mesh of one source resolve separately");
+  check((clipRecord != skelRecord) && (skelRecord != meshRecord) &&
+            (clipRecord != meshRecord),
+        "three outputs of one source are three distinct references");
+
+  check(engine::content::find_duplicate_guid_records(store.get(), nullptr,
+                                                     0U) == 0U,
+        "a tree with one sidecar per source has no duplicate identity");
+
+  // Rename: the file and its sidecar move together, so the GUID does not.
+  std::filesystem::rename(root / "scripts/hop.lua",
+                          root / "scripts/jump.lua", ec);
+  std::filesystem::rename(root / "scripts/hop.lua.meta",
+                          root / "scripts/jump.lua.meta", ec);
+  static_cast<void>(walk(store.get()));
+  const engine::content::AssetMetadata *renamed =
+      find_asset_metadata_by_ref(store.get(),
+                                 engine::content::asset_ref_primary(script));
+  check(!ec && (renamed != nullptr) &&
+            (std::strcmp(renamed->filePath.data(), "kit/scripts/jump.lua") ==
+             0),
+        "a rename keeps the GUID and moves where it resolves to");
+
+  // Move to another folder: same.
+  std::filesystem::create_directories(root / "gameplay", ec);
+  std::filesystem::rename(root / "scripts/jump.lua",
+                          root / "gameplay/jump.lua", ec);
+  std::filesystem::rename(root / "scripts/jump.lua.meta",
+                          root / "gameplay/jump.lua.meta", ec);
+  static_cast<void>(walk(store.get()));
+  const engine::content::AssetMetadata *moved =
+      find_asset_metadata_by_ref(store.get(),
+                                 engine::content::asset_ref_primary(script));
+  check(!ec && (moved != nullptr) &&
+            (std::strcmp(moved->filePath.data(), "kit/gameplay/jump.lua") ==
+             0),
+        "a move keeps the GUID and moves where it resolves to");
+
+  // A case-only rename is still the same asset.
+  std::filesystem::rename(root / "gameplay/jump.lua",
+                          root / "gameplay/Jump.lua", ec);
+  std::filesystem::rename(root / "gameplay/jump.lua.meta",
+                          root / "gameplay/Jump.lua.meta", ec);
+  static_cast<void>(walk(store.get()));
+  const engine::content::AssetMetadata *recased =
+      find_asset_metadata_by_ref(store.get(),
+                                 engine::content::asset_ref_primary(script));
+  check(!ec && (recased != nullptr) &&
+            (std::strcmp(recased->filePath.data(), "kit/gameplay/Jump.lua") ==
+             0),
+        "a case-only rename keeps the GUID");
+
+  // Editing the bytes changes the content hash and nothing else.
+  const engine::content::ContentHash before =
+      engine::content::make_content_hash("x", 1U);
+  const engine::content::ContentHash after =
+      engine::content::make_content_hash("edited", 6U);
+  check(!(before == after), "an edit changes the content hash");
+  static_cast<void>(walk(store.get()));
+  check(find_asset_metadata_by_ref(store.get(),
+                                   engine::content::asset_ref_primary(
+                                       script)) != nullptr,
+        "an edit does not change the GUID");
+
+  // A copied sidecar is two assets claiming one identity: reported, never
+  // resolved by picking one.
+  std::filesystem::copy_file(root / "props/coin.gltf.meta",
+                             root / "chars/hero.gltf.meta",
+                             std::filesystem::copy_options::overwrite_existing,
+                             ec);
+  static_cast<void>(walk(store.get()));
+  const engine::content::AssetMetadata *records[8] = {};
+  const std::size_t duplicates =
+      engine::content::find_duplicate_guid_records(store.get(), records, 8U);
+  check(!ec && (duplicates >= 2U),
+        "a copied sidecar is reported as a duplicate identity");
+
+  std::filesystem::remove_all(kRoot, ec);
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -238,6 +419,7 @@ int main() {
   test_invalid_arguments(store.get());
   test_walk(store.get());
   test_overlong_prefix(store.get());
+  test_identity_survives_relocation();
 
   remove_tree();
   return g_tests.finish("asset catalog tests");

@@ -11,6 +11,7 @@
 #include <string>
 
 #include "engine/content/asset_metadata.h"
+#include "engine/content/asset_sidecar.h"
 #include "engine/content/asset_type_table.h"
 #include "engine/core/diagnostic.h"
 #include "engine/core/logging.h"
@@ -36,6 +37,78 @@ bool is_runtime_form(const AssetClassification &classification) noexcept {
     return !classification.source;
   }
   return false;
+}
+
+/// The authored identity of a file the walk is about to catalogue.
+///
+/// A source-policy asset carries its own sidecar, so it is the primary
+/// asset of its own GUID. A cooked or derived output has no sidecar —
+/// it is regenerable and belongs to the source that made it — so its
+/// identity is that source's GUID plus the local id naming it among the
+/// source's outputs. One glTF here yields a mesh, a skeleton and three
+/// clips, which is exactly the case a bare GUID cannot express.
+///
+/// Returns a nil ref when no sidecar answers: the asset is still
+/// catalogued and still reachable by path, it just has no persistent
+/// identity until it is imported.
+AssetRef resolve_authored_ref(const std::filesystem::path &osPath,
+                              const AssetClassification &classification)
+    noexcept {
+  AssetSidecar sidecar{};
+
+  if (classification.source) {
+    if (read_asset_sidecar(osPath.string().c_str(), &sidecar) !=
+        SidecarReadResult::Ok) {
+      return AssetRef{};
+    }
+    return asset_ref_primary(sidecar.guid);
+  }
+
+  // A cooked output is named "<source stem>.<rest>", where the rest is
+  // everything the source produced it as: "mesh", "skel", "walk.anim".
+  // The producing source is found by trying every type's source suffixes
+  // against progressively shorter stems, longest first, so "a.b.mesh"
+  // prefers a source named "a.b" over one named "a".
+  const std::string filename = osPath.filename().string();
+  const std::filesystem::path directory = osPath.parent_path();
+  std::size_t dot = filename.rfind('.');
+  while (dot != std::string::npos) {
+    const std::string stem = filename.substr(0U, dot);
+    if (stem.empty()) {
+      break;
+    }
+    // Every type's source suffixes, not just the classified type's: a
+    // ".anim" classifies as Animation, which is Derived and so has no
+    // source suffix of its own, yet the clip really was produced by a
+    // ".gltf" on the Mesh row.
+    for (std::size_t typeIndex = 0U; typeIndex < kAssetTypeCount;
+         ++typeIndex) {
+      const AssetTypeDescriptor &row =
+          asset_type_descriptor(static_cast<AssetTypeTag>(typeIndex));
+      for (std::size_t i = 0U; i < row.sourceSuffixCount; ++i) {
+        const std::filesystem::path candidate =
+            directory / (stem + row.sourceSuffixes[i]);
+        std::error_code ec{};
+        if (!std::filesystem::is_regular_file(candidate, ec) || ec) {
+          continue;
+        }
+        if (read_asset_sidecar(candidate.string().c_str(), &sidecar) !=
+            SidecarReadResult::Ok) {
+          return AssetRef{};
+        }
+        // The rest of the name, cooked suffix included: "mesh" and
+        // "skel" of one source are two assets, so dropping the suffix
+        // here would collapse them onto one reference.
+        return AssetRef{sidecar.guid,
+                        asset_local_id(filename.substr(dot + 1U).c_str())};
+      }
+    }
+    if (dot == 0U) {
+      break;
+    }
+    dot = filename.rfind('.', dot - 1U);
+  }
+  return AssetRef{};
 }
 
 /// Thumbnail caches and dot-files are never assets.
@@ -116,6 +189,7 @@ MountRegistration register_mounted_assets(MetadataStore *store,
     }
     metadata.assetId = make_asset_id_from_path(metadata.filePath.data());
     metadata.typeTag = classification.tag;
+    metadata.ref = resolve_authored_ref(entry.path(), classification);
     if (metadata.assetId == kInvalidAssetId) {
       ++result.refused;
       continue;

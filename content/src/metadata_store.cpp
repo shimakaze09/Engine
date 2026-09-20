@@ -136,6 +136,60 @@ const AssetMetadata *find_asset_metadata(const MetadataStore *store,
   return &store->entries[slot];
 }
 
+const AssetMetadata *find_asset_metadata_by_ref(const MetadataStore *store,
+                                                const AssetRef &ref) noexcept {
+  if ((store == nullptr) || !asset_ref_is_valid(ref)) {
+    return nullptr;
+  }
+  for (std::size_t slot = 0U; slot < store->entries.size(); ++slot) {
+    if (!store->occupied[slot]) {
+      continue;
+    }
+    if (store->entries[slot].ref == ref) {
+      return &store->entries[slot];
+    }
+  }
+  return nullptr;
+}
+
+std::size_t find_duplicate_guid_records(const MetadataStore *store,
+                                        const AssetMetadata **outRecords,
+                                        std::size_t capacity) noexcept {
+  if (store == nullptr) {
+    return 0U;
+  }
+  std::size_t found = 0U;
+  for (std::size_t slot = 0U; slot < store->entries.size(); ++slot) {
+    if (!store->occupied[slot]) {
+      continue;
+    }
+    const AssetMetadata &record = store->entries[slot];
+    if (!asset_ref_is_valid(record.ref)) {
+      continue;
+    }
+    // Only a full ref collision is a duplicate: two outputs of one
+    // source share its GUID by design and are told apart by local id.
+    bool collides = false;
+    for (std::size_t other = 0U; other < store->entries.size(); ++other) {
+      if ((other == slot) || !store->occupied[other]) {
+        continue;
+      }
+      if (store->entries[other].ref == record.ref) {
+        collides = true;
+        break;
+      }
+    }
+    if (!collides) {
+      continue;
+    }
+    if ((outRecords != nullptr) && (found < capacity)) {
+      outRecords[found] = &record;
+    }
+    ++found;
+  }
+  return found;
+}
+
 bool add_asset_tag(MetadataStore *store, AssetId id,
                    const char *tag) noexcept {
   if ((store == nullptr) || (id == kInvalidAssetId) || (tag == nullptr)) {
