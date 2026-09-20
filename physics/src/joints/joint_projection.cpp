@@ -6,7 +6,9 @@
 // tensors. Velocity projections apply the momentum-conserving impulse that
 // removes exactly the requested relative-velocity component, so equality
 // constraints stop re-violating under integration while free DOFs (the
-// null space of each projection) keep their motion.
+// null space of each projection) keep their motion. Every 3x3 solve goes
+// through the same rank-aware pseudo-inverse, so a locked axis in any
+// orientation contributes nothing and takes nothing.
 
 #include "joint_projection.h"
 
@@ -20,75 +22,96 @@ namespace engine::physics {
 
 constexpr float kJointEpsilon = 1.0e-6F;
 
-/// Solves the symmetric positive-definite 3x3 system K x = b by Cholesky
-/// factorization with pivots checked RELATIVE to the matrix scale (largest
-/// diagonal entry), so validity does not depend on absolute mass units:
-/// a matrix built from tiny inverse masses (very heavy bodies) still
-/// solves, while a genuinely rank-deficient matrix is rejected at any
-/// scale. Returns false when K is not positive definite at working
-/// precision.
-static bool solve_spd3(const float k[3][3], const math::Vec3 &b,
-                       math::Vec3 *out) noexcept {
-  constexpr float kRelativePivotEpsilon = 1.0e-7F;
-  const float maxDiag =
-      (k[0][0] > k[1][1]) ? ((k[0][0] > k[2][2]) ? k[0][0] : k[2][2])
-                          : ((k[1][1] > k[2][2]) ? k[1][1] : k[2][2]);
-  if (maxDiag <= 0.0F) {
-    return false;
+/// Diagonalizes the symmetric 3x3 matrix `k` by cyclic Jacobi rotations:
+/// `eigenvalues[i]` pairs with the unit column `eigenvectors[.][i]`. A
+/// fixed sweep count keeps the work bounded and the result deterministic;
+/// float precision is reached in far fewer sweeps for a 3x3.
+static void eigen_symmetric3(const float k[3][3], float eigenvalues[3],
+                             float eigenvectors[3][3]) noexcept {
+  constexpr int kMaxSweeps = 16;
+  float a[3][3] = {{k[0][0], k[0][1], k[0][2]},
+                   {k[1][0], k[1][1], k[1][2]},
+                   {k[2][0], k[2][1], k[2][2]}};
+  float v[3][3] = {{1.0F, 0.0F, 0.0F}, {0.0F, 1.0F, 0.0F}, {0.0F, 0.0F, 1.0F}};
+  for (int sweep = 0; sweep < kMaxSweeps; ++sweep) {
+    const float off = (a[0][1] * a[0][1]) + (a[0][2] * a[0][2]) +
+                      (a[1][2] * a[1][2]);
+    if (off == 0.0F) {
+      break;
+    }
+    for (int p = 0; p < 2; ++p) {
+      for (int q = p + 1; q < 3; ++q) {
+        const float apq = a[p][q];
+        if (apq == 0.0F) {
+          continue;
+        }
+        const float theta = (a[q][q] - a[p][p]) / (2.0F * apq);
+        const float t = ((theta >= 0.0F) ? 1.0F : -1.0F) /
+                        (std::fabs(theta) + std::sqrt((theta * theta) + 1.0F));
+        const float c = 1.0F / std::sqrt((t * t) + 1.0F);
+        const float s = t * c;
+        // Rotate rows and columns p and q of a, keeping it symmetric.
+        for (int r = 0; r < 3; ++r) {
+          const float arp = a[r][p];
+          const float arq = a[r][q];
+          a[r][p] = (c * arp) - (s * arq);
+          a[r][q] = (s * arp) + (c * arq);
+        }
+        for (int col = 0; col < 3; ++col) {
+          const float apc = a[p][col];
+          const float aqc = a[q][col];
+          a[p][col] = (c * apc) - (s * aqc);
+          a[q][col] = (s * apc) + (c * aqc);
+        }
+        for (int r = 0; r < 3; ++r) {
+          const float vrp = v[r][p];
+          const float vrq = v[r][q];
+          v[r][p] = (c * vrp) - (s * vrq);
+          v[r][q] = (s * vrp) + (c * vrq);
+        }
+      }
+    }
   }
-  const float pivotFloor = kRelativePivotEpsilon * maxDiag;
-
-  const float d0 = k[0][0];
-  if (d0 <= pivotFloor) {
-    return false;
+  for (int i = 0; i < 3; ++i) {
+    eigenvalues[i] = a[i][i];
+    for (int r = 0; r < 3; ++r) {
+      eigenvectors[r][i] = v[r][i];
+    }
   }
-  const float l00 = std::sqrt(d0);
-  const float l10 = k[0][1] / l00;
-  const float l20 = k[0][2] / l00;
-
-  const float d1 = k[1][1] - (l10 * l10);
-  if (d1 <= pivotFloor) {
-    return false;
-  }
-  const float l11 = std::sqrt(d1);
-  const float l21 = (k[1][2] - (l20 * l10)) / l11;
-
-  const float d2 = k[2][2] - (l20 * l20) - (l21 * l21);
-  if (d2 <= pivotFloor) {
-    return false;
-  }
-  const float l22 = std::sqrt(d2);
-
-  const float y0 = b.x / l00;
-  const float y1 = (b.y - (l10 * y0)) / l11;
-  const float y2 = (b.z - (l20 * y0) - (l21 * y1)) / l22;
-
-  out->z = y2 / l22;
-  out->y = (y1 - (l21 * out->z)) / l11;
-  out->x = (y0 - (l10 * out->y) - (l20 * out->z)) / l00;
-  return true;
 }
 
-/// Solves K x = b where K is positive semi-definite: the full Cholesky
-/// solve when K is definite, otherwise the diagonal solve that skips the
-/// locked axes, so a pair of bodies both locked about one axis still
-/// receives its correction about the free ones.
+/// Solves K x = b for a symmetric positive semi-definite K through its
+/// pseudo-inverse: x = sum over the eigenpairs whose eigenvalue is above
+/// a floor RELATIVE to the largest (so validity does not depend on
+/// absolute mass units) of (v . b / w) v. The part of b outside K's range
+/// is the motion the bodies cannot perform, and it is left alone rather
+/// than approximated axis by axis. False only when K is zero at working
+/// precision: nothing can move.
 static bool solve_psd3(const float k[3][3], const math::Vec3 &b,
                        math::Vec3 *out) noexcept {
-  if (solve_spd3(k, b, out)) {
-    return true;
+  constexpr float kRelativeEigenvalueEpsilon = 1.0e-6F;
+  float w[3] = {};
+  float v[3][3] = {};
+  eigen_symmetric3(k, w, v);
+  float wMax = 0.0F;
+  for (const float eigenvalue : w) {
+    if (eigenvalue > wMax) {
+      wMax = eigenvalue;
+    }
   }
-  constexpr float kRelativePivotEpsilon = 1.0e-7F;
-  const float maxDiag =
-      (k[0][0] > k[1][1]) ? ((k[0][0] > k[2][2]) ? k[0][0] : k[2][2])
-                          : ((k[1][1] > k[2][2]) ? k[1][1] : k[2][2]);
-  if (maxDiag <= 0.0F) {
+  if (wMax <= 0.0F) {
     return false;
   }
-  const float pivotFloor = kRelativePivotEpsilon * maxDiag;
-  out->x = (k[0][0] > pivotFloor) ? (b.x / k[0][0]) : 0.0F;
-  out->y = (k[1][1] > pivotFloor) ? (b.y / k[1][1]) : 0.0F;
-  out->z = (k[2][2] > pivotFloor) ? (b.z / k[2][2]) : 0.0F;
+  const float floor = kRelativeEigenvalueEpsilon * wMax;
+  *out = math::Vec3(0.0F, 0.0F, 0.0F);
+  for (int i = 0; i < 3; ++i) {
+    if (w[i] <= floor) {
+      continue;
+    }
+    const math::Vec3 axis(v[0][i], v[1][i], v[2][i]);
+    const float coefficient = math::dot(axis, b) / w[i];
+    *out = math::add(*out, math::mul(axis, coefficient));
+  }
   return true;
 }
 
@@ -222,7 +245,7 @@ float project_point_velocity(JointSolveContext &ctx, const math::Vec3 &leverA,
   accumulate_anchor_mass(k, ctx.invMassB, inertiaB, leverB);
 
   math::Vec3 impulse{};
-  if (!solve_spd3(k, remove, &impulse)) {
+  if (!solve_psd3(k, remove, &impulse)) {
     return 0.0F;
   }
 

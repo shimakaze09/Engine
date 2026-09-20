@@ -1230,6 +1230,17 @@ engine_add_test_executable(engine_unit_inertia
     engine_runtime
 )
 
+engine_add_test_executable(engine_unit_joint_rank_deficient
+    SOURCES
+    joint_rank_deficient_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/physics/src/joints
+    PRIVATE_DEPS
+    engine_core
+    engine_math
+    engine_physics
+)
+
 engine_add_test_executable(engine_unit_manifold
     SOURCES
     manifold_test.cpp
