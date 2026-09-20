@@ -214,7 +214,7 @@ The code is the detail.
 | `app/` | Editor entry point; whole-archives the editor so its bridge registers before bootstrap. |
 | `core/` | Bootstrap/config, platform (SDL glue, paths, native handles), logging, cvars, console, event bus, input and input maps, VFS, JSON, job system, allocators, profiler, reflection, entity handle, service locator, shared primitives. |
 | `math/` | Header-only vectors, matrices, quaternions, transforms, bounding volumes, component PODs. |
-| `content/` | Generic asset layer: identity, metadata store, dependency edges and ordered load, transition queue, async streaming, staleness diagnostics, LRU cache. |
+| `content/` | Generic asset layer: identity, metadata store and the mount walk that fills it from the asset type table, dependency edges and ordered load, transition queue, async streaming, staleness diagnostics, LRU cache. |
 | `physics/` | Bodies, colliders, convex hull, heightfields, CCD, contact manifolds and solver, joints, queries, materials, primitive hull builders, diagnostics. |
 | `renderer/` | Asset database, mesh/texture loading, shader system, the `RenderDevice` contract and its bgfx backend, command buffer frontend and backend, pass resources, shadows, light culling, post stack, GPU profiler. |
 | `audio/` | Sound handles, bus groups, one-shot instance pool, 3D listener, streaming music, decode budgets. |

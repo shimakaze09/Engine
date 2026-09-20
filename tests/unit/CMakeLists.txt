@@ -273,6 +273,13 @@ engine_add_test_executable(engine_unit_asset_type_table
     engine_content
 )
 
+engine_add_test_executable(engine_unit_asset_catalog
+    SOURCES
+    asset_catalog_test.cpp
+    PRIVATE_DEPS
+    engine_content
+)
+
 engine_add_test_executable(engine_unit_content_dependency_dedup
     SOURCES
     content_dependency_dedup_test.cpp

@@ -15,6 +15,7 @@
 #include "engine/renderer/material_loader.h"
 #include "engine/renderer/material_writer.h"
 #include "engine/runtime/service_registry.h"
+#include "mesh_reference_resolution.h"
 
 namespace engine::runtime {
 
@@ -50,6 +51,10 @@ std::uint64_t editor_request_mesh_asset(const char *virtualPath) noexcept {
   if (assetId == renderer::kInvalidAssetId) {
     return renderer::kInvalidAssetId;
   }
+  // A mesh the editor names by path is catalogued under that path, so
+  // the id the scene saves reads back as a name and resolves on reopen.
+  static_cast<void>(note_mesh_asset_path(g_editorAssetService->database,
+                                         assetId, virtualPath));
 
   const renderer::AssetState state =
       renderer::mesh_asset_state(g_editorAssetService->database, assetId);
