@@ -72,11 +72,6 @@ MountRegistration register_mounted_assets(MetadataStore *store,
     return result;
   }
 
-  // Named in the one legacy-suffix warning below, so the author has a
-  // concrete file to look at rather than only a count.
-  std::string firstLegacy{};
-  const char *legacyReplacement = nullptr;
-
   const std::filesystem::recursive_directory_iterator end{};
   for (; it != end; it.increment(ec)) {
     if (ec) {
@@ -138,13 +133,6 @@ MountRegistration register_mounted_assets(MetadataStore *store,
       continue;
     }
     ++result.registered;
-    if (classification.legacy) {
-      ++result.legacyNamed;
-      if (firstLegacy.empty()) {
-        firstLegacy = generic;
-        legacyReplacement = asset_legacy_replacement_suffix(generic.c_str());
-      }
-    }
   }
 
   char message[192] = {};
@@ -154,21 +142,6 @@ MountRegistration register_mounted_assets(MetadataStore *store,
                 result.registered, result.alreadyKnown, result.skipped,
                 result.refused, mountPrefix);
   core::log_message(core::LogLevel::Info, "assets", message);
-  // One line for the whole walk rather than one per file: a project
-  // authored before the rename would otherwise flood the log with a
-  // warning per asset, and the author's next step is the same either way.
-  if (result.legacyNamed > 0U) {
-    char legacyMessage[320] = {};
-    std::snprintf(legacyMessage, sizeof(legacyMessage),
-                  "asset catalog: %zu asset(s) under '%s' carry a superseded "
-                  "suffix and were catalogued anyway; rename them to end in "
-                  "'%s' (for example '%s'). The old names stop classifying "
-                  "after this revision.",
-                  result.legacyNamed, mountPrefix,
-                  (legacyReplacement != nullptr) ? legacyReplacement : "?",
-                  firstLegacy.c_str());
-    core::log_message(core::LogLevel::Warning, "assets", legacyMessage);
-  }
   return result;
 }
 

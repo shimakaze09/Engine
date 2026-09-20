@@ -24,20 +24,15 @@ struct MountRegistration final {
   /// Files refused with a diagnostic: the store is full or the virtual
   /// path does not fit a record whole.
   std::size_t refused = 0U;
-  /// Registered files whose suffix is a superseded name. They are
-  /// catalogued as usual; the walk reports the count and names one so the
-  /// author can rename them.
-  std::size_t legacyNamed = 0U;
 };
 
 /// Registers every runtime-form asset file under `osRoot` as
 /// `mountPrefix/<relative path>`, typed by the asset type table: the
 /// cooked form of a cooked or derived type, the authored form of a source
-/// type. A file carrying a superseded suffix is still catalogued and
-/// counted in `legacyNamed`, with one warning naming the rename.
-/// Entries under a `.thumbnails` directory and dot-files are hidden.
-/// Never registers a path that would not fit a record whole. Returns zero
-/// counts when either argument is null or the root cannot be walked.
+/// type. Entries under a `.thumbnails` directory and dot-files are
+/// hidden. Never registers a path that would not fit a record whole.
+/// Returns zero counts when either argument is null or the root cannot be
+/// walked.
 MountRegistration register_mounted_assets(MetadataStore *store,
                                           const char *mountPrefix,
                                           const char *osRoot) noexcept;

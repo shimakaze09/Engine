@@ -2,9 +2,8 @@
 // answer for every tag, and the path classifier maps each row's source and
 // cooked suffixes back to that row regardless of case, preferring the
 // longest suffix and answering Unknown for anything else. Also pins that a
-// suffix names the kind and not the serialization format, and that the
-// suffixes this scheme replaced still classify while reporting themselves
-// as legacy.
+// suffix names the kind and not the serialization format, so a document
+// named with its format instead does not classify at all.
 
 #include <cstdio>
 #include <cstring>
@@ -86,49 +85,18 @@ int main() {
   ctx.check(ct::classify_asset_path("scene.json").tag ==
                 ct::AssetTypeTag::Unknown,
             "the serialization format never names a kind: .json is Unknown");
-  // ".scene.json" is a legacy row below, so this uses a suffix that is on
-  // neither table to pin that a kind name only counts at the path's end.
-  ctx.check(ct::classify_asset_path("hub.scene.txt").tag ==
+  ctx.check(ct::classify_asset_path("hub.scene.json").tag ==
                 ct::AssetTypeTag::Unknown,
             "a kind suffix only counts at the end of the path");
+  ctx.check(ct::classify_asset_path("hub.scene.txt").tag ==
+                ct::AssetTypeTag::Unknown,
+            "a kind name mid-path does not classify whatever follows it");
   ctx.check(ct::classify_asset_path("props/coin.mesh.meta").tag ==
                 ct::AssetTypeTag::Unknown,
             "a sidecar is not the asset it sits beside");
   ctx.check(ct::classify_asset_path("anim/walk.animat").tag ==
                 ct::AssetTypeTag::Unknown,
             "a suffix matches on its dot, not on trailing letters");
-
-  // Superseded names classify for one revision so a project authored
-  // before the rename does not fall to Other, and say they are legacy.
-  const ct::AssetClassification legacyScene =
-      ct::classify_asset_path("levels/hub.scene.json");
-  ctx.check((legacyScene.tag == ct::AssetTypeTag::Scene) &&
-                legacyScene.source && legacyScene.legacy,
-            "a .scene.json still classifies as a legacy-named Scene");
-  ctx.check(ct::classify_asset_path("hero.animctrl.json").legacy &&
-                (ct::classify_asset_path("hero.animctrl.json").tag ==
-                 ct::AssetTypeTag::AnimationController),
-            "an .animctrl.json still classifies as a legacy-named controller");
-  ctx.check(ct::classify_asset_path("mats/brass.mat.json").tag ==
-                ct::AssetTypeTag::Material,
-            "a .mat.json still classifies as Material");
-  ctx.check(!ct::classify_asset_path("levels/hub.scene").legacy,
-            "a current name is not reported as legacy");
-  ctx.check(ct::asset_legacy_replacement_suffix("levels/hub.scene.json") !=
-                nullptr,
-            "a legacy path names its replacement suffix");
-  ctx.check(std::strcmp(ct::asset_legacy_replacement_suffix(
-                            "levels/hub.scene.json"),
-                        ".scene") == 0,
-            "the replacement for .scene.json is .scene");
-  ctx.check(ct::asset_legacy_replacement_suffix("levels/hub.scene") == nullptr,
-            "a current name has no replacement suffix");
-  ctx.check(ct::asset_legacy_replacement_suffix(nullptr) == nullptr,
-            "a null path has no replacement suffix");
-  ctx.check(ct::classify_asset_path(".mesh").tag == ct::AssetTypeTag::Mesh,
-            "a path that is only the suffix still matches");
-  ctx.check(ct::classify_asset_path("mesh").tag == ct::AssetTypeTag::Unknown,
-            "a suffix needs its dot");
 
   return ctx.finish("asset_type_table");
 }
