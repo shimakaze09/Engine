@@ -54,6 +54,10 @@ constexpr FieldMetadata kFieldMetadataTable[] = {
     {"engine::runtime::RigidBody", "inverseMass", "Inverse Mass", "Physics",
      "1 / mass in kg^-1. 0 means infinite mass (static or kinematic).",
      "1/kg", 0.01F, 0.0F, 1000.0F, InspectorWidget::Drag, false, false},
+    {"engine::runtime::RigidBody", "gravityScale", "Gravity Scale", "Physics",
+     "How much of the world's gravity the body feels: 1 the full pull, 0 "
+     "none (a driven platform, a held rock).",
+     nullptr, 0.01F, 0.0F, 0.0F, InspectorWidget::Drag, false, false},
     {"engine::runtime::RigidBody", "inverseInertia", "Inverse Inertia",
      "Physics",
      "1 / rotational inertia about each body axis. 0 locks that axis. "

@@ -273,6 +273,13 @@ engine_add_test_executable(engine_unit_asset_type_table
     engine_content
 )
 
+engine_add_test_executable(engine_unit_asset_catalog
+    SOURCES
+    asset_catalog_test.cpp
+    PRIVATE_DEPS
+    engine_content
+)
+
 engine_add_test_executable(engine_unit_content_dependency_dedup
     SOURCES
     content_dependency_dedup_test.cpp
@@ -417,6 +424,15 @@ engine_add_test_executable(engine_unit_lua_error_diagnostic
     lua_error_diagnostic_test.cpp
     PRIVATE_DEPS
     engine_scripting
+    engine_core
+)
+
+engine_add_test_executable(engine_unit_lua_deterministic_math
+    SOURCES
+    lua_deterministic_math_test.cpp
+    PRIVATE_DEPS
+    engine_scripting
+    engine_math
     engine_core
 )
 
@@ -786,6 +802,19 @@ engine_add_test_executable(engine_unit_command_history_token
     SDL_MAIN_HANDLED
 )
 
+engine_add_test_executable(engine_unit_editor_duplicate_entity
+    SOURCES
+    editor_duplicate_entity_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/editor/include
+    ${CMAKE_SOURCE_DIR}/editor/src
+    ${CMAKE_SOURCE_DIR}/runtime/src
+    PRIVATE_DEPS
+    engine_editor
+    COMPILE_DEFINITIONS
+    SDL_MAIN_HANDLED
+)
+
 engine_add_test_executable(engine_unit_editor_command_transaction
     SOURCES
     editor_command_transaction_test.cpp
@@ -922,6 +951,19 @@ engine_add_test_executable(engine_unit_editor_font_fallback
 engine_add_test_executable(engine_unit_editor_inspector_edit
     SOURCES
     editor_inspector_edit_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/editor/include
+    ${CMAKE_SOURCE_DIR}/editor/src
+    ${CMAKE_SOURCE_DIR}/runtime/src
+    PRIVATE_DEPS
+    engine_editor
+    COMPILE_DEFINITIONS
+    SDL_MAIN_HANDLED
+)
+
+engine_add_test_executable(engine_unit_editor_inspector_text_entry
+    SOURCES
+    editor_inspector_text_entry_test.cpp
     PRIVATE_INCLUDE_DIRS
     ${CMAKE_SOURCE_DIR}/editor/include
     ${CMAKE_SOURCE_DIR}/editor/src
@@ -1231,6 +1273,15 @@ engine_add_test_executable(engine_unit_joint_constraints
 engine_add_test_executable(engine_unit_inertia
     SOURCES
     inertia_test.cpp
+    PRIVATE_DEPS
+    engine_core
+    engine_physics
+    engine_runtime
+)
+
+engine_add_test_executable(engine_unit_gravity_scale
+    SOURCES
+    gravity_scale_test.cpp
     PRIVATE_DEPS
     engine_core
     engine_physics

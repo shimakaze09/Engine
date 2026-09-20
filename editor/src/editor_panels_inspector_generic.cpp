@@ -10,10 +10,12 @@
 
 #include "imgui.h"
 
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 
 #include "editor_inspector_metadata.h"
+#include "editor_inspector_widgets.h"
 #include "engine/core/reflect.h"
 #include "engine/math/vec2.h"
 #include "engine/math/vec3.h"
@@ -72,16 +74,29 @@ void draw_tooltip(const FieldMetadata *meta) noexcept {
   }
 }
 
+/// Width of each of `count` component fields drawn on the label's row:
+/// the row's remaining width shared equally, so a widened Inspector
+/// shows more digits instead of the same three.
+float component_field_width(int count) noexcept {
+  const float spacing = ImGui::GetStyle().ItemInnerSpacing.x;
+  const float available = ImGui::GetContentRegionAvail().x -
+                          (spacing * static_cast<float>(count - 1));
+  const float each = std::floor(available / static_cast<float>(count));
+  return (each < 48.0F) ? 48.0F : each;
+}
+
 void draw_vec2_field(const char *label, math::Vec2 &value,
                      bool *modified) noexcept {
   ImGui::PushID(label);
   ImGui::TextUnformatted(label);
   ImGui::SameLine();
-  ImGui::SetNextItemWidth(80.0F);
-  mark_modified(modified, ImGui::InputFloat("##x", &value.x));
-  ImGui::SameLine();
-  ImGui::SetNextItemWidth(80.0F);
-  mark_modified(modified, ImGui::InputFloat("##y", &value.y));
+  const float spacing = ImGui::GetStyle().ItemInnerSpacing.x;
+  const float width = component_field_width(2);
+  ImGui::SetNextItemWidth(width);
+  mark_modified(modified, inspector_input_float("##x", &value.x));
+  ImGui::SameLine(0.0F, spacing);
+  ImGui::SetNextItemWidth(width);
+  mark_modified(modified, inspector_input_float("##y", &value.y));
   ImGui::PopID();
 }
 
@@ -90,14 +105,16 @@ void draw_vec3_field(const char *label, math::Vec3 &value,
   ImGui::PushID(label);
   ImGui::TextUnformatted(label);
   ImGui::SameLine();
-  ImGui::SetNextItemWidth(80.0F);
-  mark_modified(modified, ImGui::InputFloat("##x", &value.x));
-  ImGui::SameLine();
-  ImGui::SetNextItemWidth(80.0F);
-  mark_modified(modified, ImGui::InputFloat("##y", &value.y));
-  ImGui::SameLine();
-  ImGui::SetNextItemWidth(80.0F);
-  mark_modified(modified, ImGui::InputFloat("##z", &value.z));
+  const float spacing = ImGui::GetStyle().ItemInnerSpacing.x;
+  const float width = component_field_width(3);
+  ImGui::SetNextItemWidth(width);
+  mark_modified(modified, inspector_input_float("##x", &value.x));
+  ImGui::SameLine(0.0F, spacing);
+  ImGui::SetNextItemWidth(width);
+  mark_modified(modified, inspector_input_float("##y", &value.y));
+  ImGui::SameLine(0.0F, spacing);
+  ImGui::SetNextItemWidth(width);
+  mark_modified(modified, inspector_input_float("##z", &value.z));
   ImGui::PopID();
 }
 
@@ -106,17 +123,19 @@ void draw_vec4_field(const char *label, math::Vec4 &value,
   ImGui::PushID(label);
   ImGui::TextUnformatted(label);
   ImGui::SameLine();
-  ImGui::SetNextItemWidth(70.0F);
-  mark_modified(modified, ImGui::InputFloat("##x", &value.x));
-  ImGui::SameLine();
-  ImGui::SetNextItemWidth(70.0F);
-  mark_modified(modified, ImGui::InputFloat("##y", &value.y));
-  ImGui::SameLine();
-  ImGui::SetNextItemWidth(70.0F);
-  mark_modified(modified, ImGui::InputFloat("##z", &value.z));
-  ImGui::SameLine();
-  ImGui::SetNextItemWidth(70.0F);
-  mark_modified(modified, ImGui::InputFloat("##w", &value.w));
+  const float spacing = ImGui::GetStyle().ItemInnerSpacing.x;
+  const float width = component_field_width(4);
+  ImGui::SetNextItemWidth(width);
+  mark_modified(modified, inspector_input_float("##x", &value.x));
+  ImGui::SameLine(0.0F, spacing);
+  ImGui::SetNextItemWidth(width);
+  mark_modified(modified, inspector_input_float("##y", &value.y));
+  ImGui::SameLine(0.0F, spacing);
+  ImGui::SetNextItemWidth(width);
+  mark_modified(modified, inspector_input_float("##z", &value.z));
+  ImGui::SameLine(0.0F, spacing);
+  ImGui::SetNextItemWidth(width);
+  mark_modified(modified, inspector_input_float("##w", &value.w));
   ImGui::PopID();
 }
 
@@ -125,22 +144,24 @@ void draw_quat_raw_field(const char *label, math::Quat &value,
   ImGui::PushID(label);
   ImGui::TextUnformatted(label);
   ImGui::SameLine();
-  ImGui::SetNextItemWidth(70.0F);
-  mark_modified(modified, ImGui::InputFloat("##x", &value.x));
-  ImGui::SameLine();
-  ImGui::SetNextItemWidth(70.0F);
-  mark_modified(modified, ImGui::InputFloat("##y", &value.y));
-  ImGui::SameLine();
-  ImGui::SetNextItemWidth(70.0F);
-  mark_modified(modified, ImGui::InputFloat("##z", &value.z));
-  ImGui::SameLine();
-  ImGui::SetNextItemWidth(70.0F);
-  mark_modified(modified, ImGui::InputFloat("##w", &value.w));
+  const float spacing = ImGui::GetStyle().ItemInnerSpacing.x;
+  const float width = component_field_width(4);
+  ImGui::SetNextItemWidth(width);
+  mark_modified(modified, inspector_input_float("##x", &value.x));
+  ImGui::SameLine(0.0F, spacing);
+  ImGui::SetNextItemWidth(width);
+  mark_modified(modified, inspector_input_float("##y", &value.y));
+  ImGui::SameLine(0.0F, spacing);
+  ImGui::SetNextItemWidth(width);
+  mark_modified(modified, inspector_input_float("##z", &value.z));
+  ImGui::SameLine(0.0F, spacing);
+  ImGui::SetNextItemWidth(width);
+  mark_modified(modified, inspector_input_float("##w", &value.w));
   ImGui::PopID();
 }
 
 /// Draws a Vec3 as three Drag/Slider floats (metadata-opted widgets) rather
-/// than the raw x/y/z InputFloat trio.
+/// than the raw x/y/z text trio.
 void draw_vec3_ranged_field(const char *label, math::Vec3 &value,
                             const FieldMetadata &meta,
                             bool *modified) noexcept {
@@ -152,9 +173,10 @@ void draw_vec3_ranged_field(const char *label, math::Vec3 &value,
   ImGui::SetNextItemWidth(180.0F);
   bool changed = false;
   if (meta.widget == InspectorWidget::Slider && ranged) {
-    changed = ImGui::SliderFloat3("##v", &value.x, meta.min, meta.max);
+    changed = inspector_slider_float3("##v", &value.x, meta.min, meta.max);
   } else {
-    changed = ImGui::DragFloat3("##v", &value.x, speed, meta.min, meta.max);
+    changed = inspector_drag_float3("##v", &value.x, speed, meta.min,
+                                    meta.max);
   }
   mark_modified(modified, changed);
   ImGui::PopID();
@@ -169,10 +191,12 @@ void draw_angle_degrees_field(const char *label, float &radians,
   const bool ranged = meta.max > meta.min;
   bool changed = false;
   if (ranged) {
-    changed = ImGui::SliderFloat(label, &degrees, meta.min, meta.max, "%.1f");
+    changed =
+        inspector_slider_float(label, &degrees, meta.min, meta.max, "%.1f");
   } else {
     const float speed = (meta.speed > 0.0F) ? meta.speed : 1.0F;
-    changed = ImGui::DragFloat(label, &degrees, speed, 0.0F, 0.0F, "%.1f");
+    changed =
+        inspector_drag_float(label, &degrees, speed, 0.0F, 0.0F, "%.1f");
   }
   if (changed) {
     radians = degrees * kDegToRad;
@@ -190,8 +214,8 @@ void draw_euler_degrees_field(const char *label, math::Quat &value,
   ImGui::TextUnformatted(label);
   ImGui::SameLine();
   ImGui::SetNextItemWidth(180.0F);
-  const bool changed = ImGui::DragFloat3("##euler", &degrees.x, 1.0F, 0.0F,
-                                         0.0F, "%.1f");
+  const bool changed = inspector_drag_float3("##euler", &degrees.x, 1.0F,
+                                             0.0F, 0.0F, "%.1f");
   if (changed) {
     value = quat_from_euler_degrees(degrees);
   }
@@ -289,21 +313,22 @@ void draw_field(const core::TypeDescriptor &desc, void *instance,
       const bool ranged = meta->max > meta->min;
       bool changed = false;
       if ((meta->widget == InspectorWidget::Slider) && ranged) {
-        changed = ImGui::SliderFloat(label, value, meta->min, meta->max);
+        changed = inspector_slider_float(label, value, meta->min, meta->max);
       } else {
-        changed = ImGui::DragFloat(label, value, speed, meta->min, meta->max);
+        changed =
+            inspector_drag_float(label, value, speed, meta->min, meta->max);
       }
       mark_modified(modified, changed);
     } else {
-      mark_modified(modified, ImGui::InputFloat(label, value));
+      mark_modified(modified, inspector_input_float(label, value));
     }
     break;
   }
   case core::TypeField::Kind::Int32: {
     std::int32_t *value = desc.field_ptr<std::int32_t>(instance, field);
     if (value != nullptr) {
-      mark_modified(modified, ImGui::InputScalar(label, ImGuiDataType_S32,
-                                                 value));
+      mark_modified(modified,
+                    inspector_input_int(label, value));
     }
     break;
   }
@@ -319,7 +344,7 @@ void draw_field(const core::TypeDescriptor &desc, void *instance,
       draw_enum_combo_field(label, *value, *meta, modified);
     } else {
       mark_modified(modified,
-                    ImGui::InputScalar(label, ImGuiDataType_U32, value));
+                    inspector_input_uint(label, value));
     }
     break;
   }

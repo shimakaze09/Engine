@@ -210,7 +210,9 @@ bool finite_vec(const math::Vec3 &v) noexcept {
 /// playback call.
 bool valid_play_params(const PlayParams &params) noexcept {
   if (!std::isfinite(params.volume) || (params.volume < 0.0F) ||
-      !std::isfinite(params.pitch) || (params.pitch <= 0.0F)) {
+      !std::isfinite(params.pitch) || (params.pitch <= 0.0F) ||
+      !std::isfinite(params.minDistance) || (params.minDistance <= 0.0F) ||
+      !std::isfinite(params.rolloff) || (params.rolloff < 0.0F)) {
     core::log_message(core::LogLevel::Error, "audio",
                       "rejected non-finite/out-of-range play params");
     return false;
@@ -299,6 +301,13 @@ bool start_one_shot(SoundEntry *entry, std::size_t sourceSlot,
   if (positional) {
     ma_sound_set_position(&instance.sound, position.x, position.y,
                           position.z);
+    // Explicit attenuation: the mixer's own defaults hold full volume
+    // only within one metre, which silences everything a third-person
+    // camera hears.
+    ma_sound_set_attenuation_model(&instance.sound,
+                                   ma_attenuation_model_inverse);
+    ma_sound_set_min_distance(&instance.sound, params.minDistance);
+    ma_sound_set_rolloff(&instance.sound, params.rolloff);
   }
   if (ma_sound_start(&instance.sound) != MA_SUCCESS) {
     reset_one_shot(instance);
@@ -689,11 +698,36 @@ void set_listener(const math::Vec3 &position, const math::Vec3 &forward,
   ma_engine_listener_set_world_up(&g_audio.engine, 0U, up.x, up.y, up.z);
 }
 
+float distance_gain(float distance, const PlayParams &params) noexcept {
+  if (!std::isfinite(distance) || (distance <= params.minDistance)) {
+    return 1.0F;
+  }
+  if (!std::isfinite(params.minDistance) || (params.minDistance <= 0.0F) ||
+      !std::isfinite(params.rolloff) || (params.rolloff < 0.0F)) {
+    return 1.0F;
+  }
+  return params.minDistance /
+         (params.minDistance +
+          (params.rolloff * (distance - params.minDistance)));
+}
+
 bool play_sound_at(SoundHandle handle, const math::Vec3 &position,
                    const PlayParams &params, AudioBus bus) noexcept {
   SoundEntry *entry = lookup_sound_entry(handle);
   if (entry == nullptr) {
     return false;
+  }
+  // A sound too far to be heard never takes one of the fixed instance
+  // slots: the pool is better spent on one that can be.
+  if (g_audio.initialized && valid_play_params(params)) {
+    const ma_vec3f listener =
+        ma_engine_listener_get_position(&g_audio.engine, 0U);
+    const math::Vec3 toListener =
+        math::sub(position, math::Vec3(listener.x, listener.y, listener.z));
+    const float distance = math::length(toListener);
+    if ((params.volume * distance_gain(distance, params)) < kInaudibleGain) {
+      return false;
+    }
   }
   const std::size_t sourceSlot =
       static_cast<std::size_t>(entry - &g_audio.sounds[0]);

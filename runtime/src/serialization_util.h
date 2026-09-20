@@ -246,4 +246,16 @@ bool read_animation_component(const core::JsonParser &parser,
                               bool requireNonEmptyPath,
                               AnimationComponent *outComponent) noexcept;
 
+/// True when a body from a document older than the gravity scale was
+/// held against gravity the only way that revision allowed: a dynamic
+/// body whose authored acceleration is the exact opposite of `gravity`
+/// (to a thousandth per axis).
+bool legacy_acceleration_cancels_gravity(const RigidBody &body,
+                                         const math::Vec3 &gravity) noexcept;
+
+/// Rewrites such a body as what it meant: gravity scale 0 and no
+/// authored acceleration. A body the predicate refuses is left as it is.
+void migrate_cancelled_gravity(RigidBody *body,
+                               const math::Vec3 &gravity) noexcept;
+
 } // namespace engine::runtime

@@ -1,0 +1,31 @@
+# Content-addressed files keep their committed bytes on every checkout.
+# The cook stamps record a hash of each authored source and of each cooked
+# output, and the stale check re-hashes the working-tree bytes: a checkout
+# that rewrites line endings (Git for Windows' core.autocrlf default)
+# would change the hash of every glTF and report every prop stale.
+# tools/check_content_attributes.py holds every tracked file with one of
+# these suffixes to `text` unset; add a suffix here and there together.
+
+# Authored sources the stamps hash.
+*.gltf -text
+*.glb binary
+*.bin binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.tga binary
+*.dds binary
+*.ktx2 binary
+*.wav binary
+*.ogg binary
+*.mp3 binary
+*.ttf binary
+
+# Cooked outputs and their sidecars.
+*.mesh binary
+*.hull binary
+*.anim binary
+*.skel binary
+*.cookstamp -text
+*.checksum -text
+*.meta.json -text

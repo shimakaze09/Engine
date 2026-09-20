@@ -20,14 +20,40 @@ struct SoundHandle final {
 
 inline constexpr SoundHandle kInvalidSound{};
 
-/// Playback settings: volume, pitch, and looping. Playback calls validate
-/// them: volume must be finite and >= 0, pitch finite and > 0; invalid
-/// params make the call return false with a logged diagnostic.
+/// Distance within which a positional sound plays at its full volume.
+/// The default is a third-person camera's distance from the character it
+/// follows: the listener sits at the camera, so a sound emitted at the
+/// followed entity's feet is about this far away and must not be
+/// attenuated as a distant sound would be. A sound meant to fall away
+/// from arm's length passes a smaller value.
+inline constexpr float kDefaultMinAudibleDistance = 8.0F;
+/// How fast a positional sound falls off past its minimum distance, in
+/// the inverse model gain = minDistance / (minDistance + rolloff *
+/// (distance - minDistance)). 1 is the physical inverse law.
+inline constexpr float kDefaultRolloff = 1.0F;
+/// Gain below which a positional one-shot is not started at all: at 1/512
+/// of full scale it is inaudible against anything else playing, and the
+/// fixed instance pool is better spent on a sound that can be heard.
+inline constexpr float kInaudibleGain = 1.0F / 512.0F;
+
+/// Playback settings: volume, pitch, looping and, for a positional
+/// sound, its attenuation. Playback calls validate them: volume must be
+/// finite and >= 0, pitch finite and > 0, minDistance finite and > 0,
+/// rolloff finite and >= 0; invalid params make the call return false
+/// with a logged diagnostic.
 struct PlayParams final {
   float volume = 1.0F;
   float pitch = 1.0F;
   bool loop = false;
+  float minDistance = kDefaultMinAudibleDistance;
+  float rolloff = kDefaultRolloff;
 };
+
+/// The inverse-model gain a positional sound plays at `distance` from the
+/// listener under `params`: 1 inside minDistance, falling off past it.
+/// The same model and numbers the mixer is configured with, so a caller
+/// can judge a sound's audibility before starting it.
+float distance_gain(float distance, const PlayParams &params) noexcept;
 
 /// Audio start-up choices.
 struct AudioConfig final {

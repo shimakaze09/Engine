@@ -5,6 +5,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 
 #include "engine/core/logging.h"
 #include "engine/renderer/render_device.h"
@@ -111,15 +112,30 @@ bool initialize_gpu_profiler() noexcept {
   g_gpuProfiler = GpuProfilerState{};
 
   const RenderDevice *dev = render_device();
-  if ((dev == nullptr) || !dev->caps.timestampQueries ||
-      (dev->create_timestamp_query == nullptr) ||
+  if ((dev == nullptr) || !dev->caps.timestampQueries) {
+    // Not a fault: the bgfx backend exposes no timestamp queries in its
+    // model, so on that device the per-pass GPU timings the Stats panel
+    // lists read 0 by design. Said once, at Info, naming the device.
+    char message[160] = {};
+    std::snprintf(message, sizeof(message),
+                  "GPU profiler: the %s render device exposes no timestamp "
+                  "queries; per-pass GPU timings read 0",
+                  (dev != nullptr) ? dev->name : "absent");
+    core::log_message(core::LogLevel::Info, "renderer", message);
+    g_gpuProfiler.initialized = true;
+    g_gpuProfiler.supported = false;
+    return true;
+  }
+  if ((dev->create_timestamp_query == nullptr) ||
       (dev->destroy_timestamp_query == nullptr) ||
       (dev->write_timestamp == nullptr) ||
       (dev->timestamp_ready == nullptr) ||
       (dev->timestamp_value == nullptr)) {
-    core::log_message(
-        core::LogLevel::Warning, "renderer",
-        "GPU profiler unavailable: timestamp query support missing");
+    // A device that claims the capability without the entries is a
+    // backend defect, not a fallback.
+    core::log_message(core::LogLevel::Warning, "renderer",
+                      "GPU profiler unavailable: the device reports "
+                      "timestamp queries but lacks their entry points");
     g_gpuProfiler.initialized = true;
     g_gpuProfiler.supported = false;
     return true;

@@ -17,6 +17,7 @@
 
 #include "editor_commands.h"
 #include "editor_inspector_metadata.h"
+#include "editor_inspector_widgets.h"
 #include "editor_material_edit.h"
 #include "editor_reference_pickers.h"
 #include "editor_session.h"
@@ -68,14 +69,12 @@ bool draw_mesh_component_fields(runtime::Entity entity,
     }
   }
   mark_modified(modified, ImGui::ColorEdit3("Albedo", &mesh.albedo.x));
-  mark_modified(modified, ImGui::SliderFloat("Roughness", &mesh.roughness,
-                                             0.0F, 1.0F, "%.2f"));
-  mark_modified(modified,
-                ImGui::SliderFloat("Metallic", &mesh.metallic, 0.0F, 1.0F,
-                                   "%.2f"));
-  mark_modified(modified,
-                ImGui::SliderFloat("Opacity", &mesh.opacity, 0.0F, 1.0F,
-                                   "%.2f"));
+  mark_modified(modified, inspector_slider_float("Roughness", &mesh.roughness,
+                                                 0.0F, 1.0F, "%.2f"));
+  mark_modified(modified, inspector_slider_float("Metallic", &mesh.metallic,
+                                                 0.0F, 1.0F, "%.2f"));
+  mark_modified(modified, inspector_slider_float("Opacity", &mesh.opacity,
+                                                 0.0F, 1.0F, "%.2f"));
   mark_modified(modified, draw_entity_reference_picker(
                               "Capture Source", &mesh.sceneCaptureSourceId,
                               entity_has_scene_capture));
@@ -156,9 +155,10 @@ bool draw_animation_component_fields(
       "Controller Path", animation.controllerPath,
       sizeof(animation.controllerPath), ".json");
   mark_modified(&modified, ImGui::Checkbox("Playing", &animation.playing));
-  mark_modified(&modified, ImGui::DragFloat("Playback Speed",
-                                            &animation.playbackSpeed, 0.01F,
-                                            0.0F, 8.0F));
+  mark_modified(&modified,
+                inspector_drag_float("Playback Speed",
+                                     &animation.playbackSpeed, 0.01F, 0.0F,
+                                     8.0F));
   return modified;
 }
 
@@ -190,21 +190,22 @@ void draw_foliage_patch_fields(runtime::Entity entity,
     mark_modified(modified, true);
   }
 
-  mark_modified(modified, ImGui::DragFloat("Density", &foliage.density, 0.05F,
-                                           0.0F, 100.0F, "%.2f"));
+  mark_modified(modified, inspector_drag_float("Density", &foliage.density,
+                                               0.05F, 0.0F, 100.0F, "%.2f"));
   mark_modified(modified, ImGui::ColorEdit3("Albedo", &foliage.albedo.x));
-  mark_modified(modified, ImGui::SliderFloat("Roughness", &foliage.roughness,
-                                             0.0F, 1.0F, "%.2f"));
-  mark_modified(modified, ImGui::SliderFloat("Metallic", &foliage.metallic,
-                                             0.0F, 1.0F, "%.2f"));
-  mark_modified(modified, ImGui::SliderFloat("Opacity", &foliage.opacity, 0.0F,
-                                             1.0F, "%.2f"));
+  mark_modified(modified, inspector_slider_float("Roughness",
+                                                 &foliage.roughness, 0.0F,
+                                                 1.0F, "%.2f"));
+  mark_modified(modified, inspector_slider_float("Metallic", &foliage.metallic,
+                                                 0.0F, 1.0F, "%.2f"));
+  mark_modified(modified, inspector_slider_float("Opacity", &foliage.opacity,
+                                                 0.0F, 1.0F, "%.2f"));
   mark_modified(modified,
-                ImGui::DragFloat("Wind Strength", &foliage.windStrength, 0.01F,
-                                 0.0F, 5.0F, "%.2f"));
+                inspector_drag_float("Wind Strength", &foliage.windStrength,
+                                     0.01F, 0.0F, 5.0F, "%.2f"));
   mark_modified(modified,
-                ImGui::DragFloat("Wind Frequency", &foliage.windFrequency,
-                                 0.05F, 0.0F, 20.0F, "%.2f"));
+                inspector_drag_float("Wind Frequency", &foliage.windFrequency,
+                                     0.05F, 0.0F, 20.0F, "%.2f"));
 
   if (ImGui::TreeNode("Instances")) {
     std::uint32_t visibleCount = foliage.instanceCount;
@@ -227,11 +228,14 @@ void draw_foliage_patch_fields(runtime::Entity entity,
         }
       }
       mark_modified(modified,
-                    ImGui::DragFloat3("Offset", &instance.offset.x, 0.05F));
-      mark_modified(modified, ImGui::DragFloat("Scale", &instance.scale, 0.01F,
-                                               0.05F, 10.0F, "%.2f"));
-      mark_modified(modified, ImGui::DragFloat("Phase", &instance.phase, 0.05F,
-                                               -100.0F, 100.0F, "%.2f"));
+                    inspector_drag_float3("Offset", &instance.offset.x, 0.05F,
+                                          0.0F, 0.0F));
+      mark_modified(modified,
+                    inspector_drag_float("Scale", &instance.scale, 0.01F,
+                                         0.05F, 10.0F, "%.2f"));
+      mark_modified(modified,
+                    inspector_drag_float("Phase", &instance.phase, 0.05F,
+                                         -100.0F, 100.0F, "%.2f"));
       int lodIndex = static_cast<int>(instance.lodIndex);
       if (ImGui::SliderInt(
               "LOD Index", &lodIndex, 0,
@@ -390,6 +394,11 @@ void draw_add_component_menu(runtime::Entity entity, bool editable) noexcept {
     return;
   }
   char *filter = editor_session().inspector.addComponentFilter;
+  // A search starts empty each time the menu opens; the text of the
+  // last search would otherwise filter the next one before it is typed.
+  if (ImGui::IsWindowAppearing()) {
+    filter[0] = '\0';
+  }
   ImGui::SetNextItemWidth(-1.0F);
   ImGui::InputTextWithHint(
       "##addcompfilter", "Search...", filter,

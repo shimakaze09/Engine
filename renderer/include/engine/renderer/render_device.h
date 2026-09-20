@@ -371,6 +371,9 @@ struct DeviceDebugStats final {
 /// every entry and express optional features through caps).
 struct RenderDevice final {
   DeviceCaps caps{};
+  /// The backend behind this table, for log lines that name it ("null",
+  /// "bgfx/Vulkan").
+  char name[32] = "unknown";
 
   // Buffers. Creation returns an invalid handle on failure (logged).
   DeviceBufferHandle (*create_buffer)(const BufferDesc &desc) noexcept =

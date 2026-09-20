@@ -11,6 +11,7 @@
 #include "editor_asset_index.h"
 #include "editor_commands.h"
 #include "editor_scene_document.h"
+#include "editor_scene_document_fixture.h"
 #include "editor_session.h"
 #include "engine/core/vfs.h"
 #include "engine/editor/editor.h"
@@ -610,15 +611,37 @@ int main() {
       {"check_overlong_paths_are_skipped", &check_overlong_paths_are_skipped},
   };
 
+  // The open-gate check saves and opens scenes, which adds them to the
+  // recent-scenes list; the guard keeps that out of the developer's real
+  // save directory. Its directory sits beside the scratch tree, which
+  // the checks rebuild from scratch.
+  engine::tests::RecentScenesGuard recentGuard;
+  char recentScratch[1000] = {};
+  char root[900] = {};
+  if (!scratch_root(root, sizeof(root)) ||
+      (std::snprintf(recentScratch, sizeof(recentScratch), "%s_recent_scenes",
+                     root) <= 0) ||
+      !recentGuard.arm(recentScratch)) {
+    std::fprintf(stderr, "editor_asset_index_test: the recent-scenes guard "
+                         "could not be armed\n");
+    return 98;
+  }
+
   for (const auto &check : checks) {
     const int result = check.fn();
     if (result != 0) {
       std::fprintf(stderr, "editor_asset_index_test: %s failed: %d\n",
                    check.name, result);
+      static_cast<void>(recentGuard.disarm());
       return result;
     }
   }
 
+  std::error_code ec{};
+  std::filesystem::remove_all(std::filesystem::path(recentScratch), ec);
+  if (!recentGuard.disarm()) {
+    return 99;
+  }
   std::printf("editor_asset_index_test: all tests passed\n");
   return 0;
 }

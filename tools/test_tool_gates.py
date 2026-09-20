@@ -697,6 +697,72 @@ def test_dependency_pin_gate():
         sys.argv = argv
 
 
+def write_attribute_fixture(root, attributes, tracked):
+    """A throwaway git work tree with the given .gitattributes text and
+    the given tracked files staged (no commit or identity needed)."""
+    root.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "-C", str(root), "init", "-q"], check=True,
+                   capture_output=True)
+    if attributes is not None:
+        (root / ".gitattributes").write_text(attributes, encoding="utf-8")
+    for relative in tracked:
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"x\n")
+    subprocess.run(["git", "-C", str(root), "add", "-A"], check=True,
+                   capture_output=True)
+    return root
+
+
+def test_content_attributes_gate():
+    """The attributes gate (issue #590) must hold every tracked
+    content-hashed file to `text` unset, accept both `-text` and the
+    `binary` macro, ignore untracked and unhashed files, fail when git
+    cannot answer, and pass on this checkout."""
+    script = str(TOOLS / "check_content_attributes.py")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+
+        check(run([script, "--root", str(write_attribute_fixture(
+            tmp / "clean", "*.gltf -text\n*.mesh binary\n*.meta.json -text\n",
+            ["props/coin.gltf", "props/coin.mesh",
+             "props/coin.mesh.meta.json", "scene.json"]))]) == 0,
+              "attributes: -text and binary marks on every hashed file pass")
+
+        check(run([script, "--root", str(write_attribute_fixture(
+            tmp / "missing", "*.mesh binary\n",
+            ["props/coin.gltf", "props/coin.mesh"]))]) != 0,
+              "attributes: a hashed suffix with no attribute fails")
+
+        check(run([script, "--root", str(write_attribute_fixture(
+            tmp / "no_file", None, ["props/coin.gltf"]))]) != 0,
+              "attributes: a tree without .gitattributes fails")
+
+        check(run([script, "--root", str(write_attribute_fixture(
+            tmp / "marked_text", "*.gltf text\n", ["props/coin.gltf"]))]) != 0,
+              "attributes: a hashed file marked text fails")
+
+        check(run([script, "--root", str(write_attribute_fixture(
+            tmp / "sidecar", "*.gltf -text\n*.json -text\n*.meta.json text\n",
+            ["props/coin.gltf", "props/coin.mesh.meta.json"]))]) != 0,
+              "attributes: a later text mark on a sidecar suffix fails")
+
+        untracked = write_attribute_fixture(
+            tmp / "untracked", "*.gltf -text\n", ["props/coin.gltf"])
+        (untracked / "stray.mesh").write_bytes(b"x\n")
+        check(run([script, "--root", str(untracked)]) == 0,
+              "attributes: an untracked hashed file is not audited")
+
+        plain = tmp / "plain"
+        plain.mkdir()
+        check(run([script, "--root", str(plain)]) != 0,
+              "attributes: a directory that is not a work tree fails")
+
+    check(run([script, "--root", str(TOOLS.parent)]) == 0,
+          "attributes: this checkout passes the gate")
+
+
 def write_timing_fixture(root, relative, body):
     """Plants one test source at `relative` under a synthetic tree root."""
     path = root / relative
@@ -921,9 +987,10 @@ def test_error_handling_gate():
 
 
 def test_portable_fopen_gate():
-    """The portable-fopen gate must reject a bare fopen that a Windows lane
-    would compile, accept one in a branch Windows skips, ignore comments,
-    strings and look-alike names, and pass this checkout."""
+    """The portability gate must reject a bare call to any deprecated CRT
+    function that a Windows lane would compile, accept one in a branch
+    Windows skips, ignore comments, strings and look-alike names, and pass
+    this checkout."""
     script = str(TOOLS / "check_portable_fopen.py")
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -981,6 +1048,33 @@ def test_portable_fopen_gate():
             "tools", "tools/asset_packer/a.cpp",
             "// Purpose.\nvoid f() { FILE *g = std::fopen(p, m); }\n")]) == 0,
               "portable fopen: tools/ is outside the audited roots")
+        # The rest of the deprecated family the MSVC CRT rejects, which
+        # cost a Windows lane once (a test's std::sscanf).
+        check(run([script, "--root", case(
+            "sscanf", "tests/unit/a_test.cpp",
+            "// Purpose.\nvoid f() { std::sscanf(t, \"%d\", &v); }\n")]) != 0,
+              "portable fopen: a bare std::sscanf is a finding")
+        check(run([script, "--root", case(
+            "sprintf", "core/src/a.cpp",
+            "// Purpose.\nvoid f() { sprintf(buffer, \"%d\", v); }\n")]) != 0,
+              "portable fopen: sprintf is a finding")
+        check(run([script, "--root", case(
+            "strcpy", "core/src/a.cpp",
+            "// Purpose.\nvoid f() { strcpy(dst, src); }\n")]) != 0,
+              "portable fopen: strcpy is a finding")
+        check(run([script, "--root", case(
+            "getenv", "core/src/a.cpp",
+            "// Purpose.\nvoid f() { const char *v = std::getenv(\"HOME\"); }\n")]) != 0,
+              "portable fopen: getenv is a finding")
+        check(run([script, "--root", case(
+            "sscanf_guarded", "core/src/a.cpp",
+            "// Purpose.\n#ifndef _WIN32\nstd::sscanf(t, \"%d\", &v);\n#endif\n")]) == 0,
+              "portable fopen: a guarded sscanf passes")
+        check(run([script, "--root", case(
+            "safe_family", "core/src/a.cpp",
+            "// Purpose.\nvoid f() { std::snprintf(b, n, \"%d\", v); "
+            "sscanf_s(t, \"%d\", &v); my_strcpy(d, s); }\n")]) == 0,
+              "portable fopen: the safe variants and look-alikes pass")
         check(run([script, "--root", str(tmp / "empty")]) == 0,
               "portable fopen: an empty tree passes")
 
@@ -1049,6 +1143,7 @@ def main():
     test_binding_generator()
     test_module_dependency_gate()
     test_dependency_pin_gate()
+    test_content_attributes_gate()
     test_test_timing_gate()
     test_comment_quality_gate()
     test_error_handling_gate()

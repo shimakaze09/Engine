@@ -63,6 +63,7 @@
 #include "engine_bootstrap_content.h"
 #include "engine_frame_collect.h"
 #include "engine_runtime_streaming.h"
+#include "mesh_reference_resolution.h"
 #include "engine/runtime/world.h"
 #include "engine/scripting/dap_server.h"
 #include "engine/scripting/scripting.h"
@@ -541,6 +542,9 @@ struct EnginePipeline::Impl final {
   runtime::EnginePhysicsService physicsService{};
   runtime::EngineAudioService audioService{};
   runtime::EngineAssetDatabaseService assetDatabaseService{};
+  // Mesh ids the World references that the catalog cannot place, already
+  // reported for the current content.
+  UnresolvedMeshReports unresolvedMeshReports{};
   runtime::EngineRendererService rendererService{};
 
   // --- Run lifetime ---
@@ -1133,6 +1137,12 @@ void EnginePipeline::Impl::stage_assets() noexcept {
   if (assetStreamingQueue != nullptr) {
     content::begin_streaming_frame(assetStreamingQueue.get());
   }
+
+  // Every mesh the World references and nothing has loaded yet is
+  // requested through the catalog here, so a reopened scene draws without
+  // a script naming its meshes. One table probe per reference per frame.
+  static_cast<void>(request_referenced_mesh_assets(
+      *world, &assetDatabaseService, &unresolvedMeshReports));
 
   if ((assetStreamingQueue != nullptr) && (assetStreamingState != nullptr)) {
     static_cast<void>(content::update_asset_streaming(
@@ -1818,6 +1828,11 @@ void EnginePipeline::Impl::stage_render() noexcept {
         static_cast<float>(clock.renderAlpha)));
   }
 
+  // The listener sits at the camera, so panning matches what is on
+  // screen. A third-person camera is then metres from the character it
+  // follows, which is why a positional sound keeps full volume out to
+  // audio::kDefaultMinAudibleDistance instead of falling off from one
+  // metre as the mixer's own default would.
   const renderer::CameraState listenerCamera = renderer::get_active_camera();
   audio::set_listener(
       listenerCamera.position,

@@ -146,12 +146,13 @@ bool append_path_segment(char *base, std::size_t capacity,
 
 /// Builds the requested runtime data for save base.
 bool build_save_base(char *outBuffer, std::size_t bufferCapacity) noexcept {
+  char value[kPlatformPathMax] = {};
 #if defined(_WIN32)
-  if (const char *appData = non_empty_env("APPDATA")) {
-    return copy_normalized_path(appData, outBuffer, bufferCapacity);
+  if (non_empty_env("APPDATA", value, sizeof(value))) {
+    return copy_normalized_path(value, outBuffer, bufferCapacity);
   }
-  if (const char *userProfile = non_empty_env("USERPROFILE")) {
-    if (!copy_normalized_path(userProfile, outBuffer, bufferCapacity)) {
+  if (non_empty_env("USERPROFILE", value, sizeof(value))) {
+    if (!copy_normalized_path(value, outBuffer, bufferCapacity)) {
       return false;
     }
     return append_path_segment(outBuffer, bufferCapacity, "AppData") &&
@@ -159,24 +160,22 @@ bool build_save_base(char *outBuffer, std::size_t bufferCapacity) noexcept {
   }
   return false;
 #elif defined(__APPLE__)
-  const char *home = non_empty_env("HOME");
-  if (home == nullptr) {
+  if (!non_empty_env("HOME", value, sizeof(value))) {
     return false;
   }
-  if (!copy_normalized_path(home, outBuffer, bufferCapacity)) {
+  if (!copy_normalized_path(value, outBuffer, bufferCapacity)) {
     return false;
   }
   return append_path_segment(outBuffer, bufferCapacity, "Library") &&
          append_path_segment(outBuffer, bufferCapacity, "Application Support");
 #else
-  if (const char *xdgDataHome = non_empty_env("XDG_DATA_HOME")) {
-    return copy_normalized_path(xdgDataHome, outBuffer, bufferCapacity);
+  if (non_empty_env("XDG_DATA_HOME", value, sizeof(value))) {
+    return copy_normalized_path(value, outBuffer, bufferCapacity);
   }
-  const char *home = non_empty_env("HOME");
-  if (home == nullptr) {
+  if (!non_empty_env("HOME", value, sizeof(value))) {
     return false;
   }
-  if (!copy_normalized_path(home, outBuffer, bufferCapacity)) {
+  if (!copy_normalized_path(value, outBuffer, bufferCapacity)) {
     return false;
   }
   return append_path_segment(outBuffer, bufferCapacity, ".local") &&
@@ -268,6 +267,21 @@ bool initialize_platform_impl(int width, int height, const char *title,
     shutdown_platform_resources();
     return false;
   }
+  // The configured size is meant in the display's own scale: on a
+  // platform whose window units are pixels (Windows, X11) a 200 %
+  // display would otherwise open a 1280x720 window holding a 640x360
+  // UI. Where window units already follow the display scale (macOS
+  // points) the two readings agree and nothing changes.
+  const float displayScale = SDL_GetWindowDisplayScale(g_window);
+  const float pixelDensity = SDL_GetWindowPixelDensity(g_window);
+  if ((displayScale > 0.0F) && (pixelDensity > 0.0F)) {
+    const float factor = displayScale / pixelDensity;
+    if (factor > 1.01F) {
+      static_cast<void>(SDL_SetWindowSize(
+          g_window, static_cast<int>(static_cast<float>(width) * factor),
+          static_cast<int>(static_cast<float>(height) * factor)));
+    }
+  }
   static_cast<void>(SDL_SetWindowPosition(g_window, SDL_WINDOWPOS_CENTERED,
                                           SDL_WINDOWPOS_CENTERED));
   g_platformRunning = true;
@@ -315,25 +329,36 @@ void platform_close_gamepad(std::uint32_t instanceId) noexcept {
   }
 }
 
-const char *non_empty_env(const char *name) noexcept {
-#if defined(_WIN32)
-  static thread_local char value[kPlatformPathMax] = {};
+bool non_empty_env(const char *name, char *out, std::size_t capacity) noexcept {
+  if ((out == nullptr) || (capacity == 0U)) {
+    return false;
+  }
+  out[0] = '\0';
   if ((name == nullptr) || (name[0] == '\0')) {
-    return nullptr;
+    return false;
   }
+#if defined(_WIN32)
+  // The API reports the length the value needs when the buffer is too
+  // small, and 0 when the variable is unset; an empty value fits and
+  // returns 0 too, which is the same answer here.
   const DWORD length =
-      GetEnvironmentVariableA(name, value, static_cast<DWORD>(sizeof(value)));
-  if ((length == 0U) || (length >= sizeof(value))) {
-    value[0] = '\0';
-    return nullptr;
+      GetEnvironmentVariableA(name, out, static_cast<DWORD>(capacity));
+  if ((length == 0U) || (length >= capacity)) {
+    out[0] = '\0';
+    return false;
   }
-  return value;
+  return true;
 #else
   const char *value = std::getenv(name);
   if ((value == nullptr) || (value[0] == '\0')) {
-    return nullptr;
+    return false;
   }
-  return value;
+  const std::size_t length = std::strlen(value);
+  if (length >= capacity) {
+    return false;
+  }
+  std::memcpy(out, value, length + 1U);
+  return true;
 #endif
 }
 
@@ -536,20 +561,14 @@ bool platform_get_temp_dir(char *outBuffer,
   }
   return copy_normalized_path(tempPath, outBuffer, bufferCapacity);
 #else
-  const char *tempPath = non_empty_env("TMPDIR");
-  if (tempPath == nullptr) {
-    tempPath = non_empty_env("TMP");
+  char tempPath[kPlatformPathMax] = {};
+  const char *candidates[] = {"TMPDIR", "TMP", "TEMP", "TEMPDIR"};
+  for (const char *candidate : candidates) {
+    if (non_empty_env(candidate, tempPath, sizeof(tempPath))) {
+      return copy_normalized_path(tempPath, outBuffer, bufferCapacity);
+    }
   }
-  if (tempPath == nullptr) {
-    tempPath = non_empty_env("TEMP");
-  }
-  if (tempPath == nullptr) {
-    tempPath = non_empty_env("TEMPDIR");
-  }
-  if (tempPath == nullptr) {
-    tempPath = "/tmp";
-  }
-  return copy_normalized_path(tempPath, outBuffer, bufferCapacity);
+  return copy_normalized_path("/tmp", outBuffer, bufferCapacity);
 #endif
 }
 

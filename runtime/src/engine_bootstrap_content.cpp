@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "engine/content/asset_catalog.h"
 #include "engine/core/logging.h"
 #include "engine/engine.h"
 #include "engine/renderer/material_loader.h"
@@ -17,6 +18,7 @@
 #include "engine/renderer/mesh_loader.h"
 #include "engine/renderer/mesh_primitives.h"
 #include "engine/runtime/world.h"
+#include "mesh_reference_resolution.h"
 
 namespace engine {
 
@@ -47,6 +49,9 @@ renderer::AssetId register_builtin_mesh(renderer::GpuMeshRegistry *registry,
   if (!renderer::register_mesh_asset(database, id, builtinPath, handle)) {
     return renderer::kInvalidAssetId;
   }
+  // The catalog lists the primitive beside the project's meshes so a
+  // picker offers it and a saved reference to it reads by name.
+  static_cast<void>(note_mesh_asset_path(database, id, builtinPath));
   const std::uint64_t vertexFloats = mesh.hasUVs ? 8ULL : 6ULL;
   const std::uint64_t sizeEstimate =
       (static_cast<std::uint64_t>(mesh.vertexCount) * vertexFloats *
@@ -148,6 +153,14 @@ bool load_bootstrap_meshes(renderer::AssetManager *assetManager,
       }
     }
   }
+
+  // Catalogue the mount so a saved mesh id maps back to the path its
+  // bytes live at and a picker can list what exists before it loads. A
+  // loader's own record wins: the walk never replaces one that exists,
+  // and the material loader below updates the walk's in place.
+  static_cast<void>(content::register_mounted_assets(
+      &assetDatabase->metadataStore, active_config().assetMount,
+      active_config().assetRoot));
 
   // Discover project material JSONs so MeshComponent.materialAssetId
   // references resolve during render prep.

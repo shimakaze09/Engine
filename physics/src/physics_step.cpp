@@ -80,8 +80,9 @@ bool step_physics_range(PhysicsWorldView &world, std::size_t startIndex,
     }
 
     if ((body != nullptr) && (body->inverseMass > 0.0F)) {
-      const engine::math::Vec3 totalAccel =
-          engine::math::add(body->acceleration, physicsCtx.gravity);
+      const engine::math::Vec3 totalAccel = engine::math::add(
+          body->acceleration,
+          engine::math::mul(physicsCtx.gravity, body->gravityScale));
       body->velocity = engine::math::add(
           body->velocity, engine::math::mul(totalAccel, deltaSeconds));
       const float speedSq = engine::math::length_sq(body->velocity);

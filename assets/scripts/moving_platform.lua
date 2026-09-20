@@ -4,6 +4,8 @@
 -- position and AMPLITUDE units further. The platform is a near-infinite-mass
 -- rigid body driven by velocity (not teleported), so contact friction can
 -- carry a rider and the player controller can read its velocity to ride it.
+-- Author its Rigid Body with Gravity Scale 0: the script drives it and it
+-- must not fall.
 -- Reference pattern: the engine caches ONE module table per script path and
 -- calls it for every entity using the script, so per-entity state must live
 -- in a table keyed by the entity handle (handles encode index, generation,

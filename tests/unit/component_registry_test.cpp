@@ -110,6 +110,7 @@ void make_test_value(RigidBody *out) noexcept {
   out->inverseInertia = engine::math::Vec3(0.25F, 0.5F, 0.125F);
   out->inertiaAuthored = true;
   out->sleeping = true;
+  out->gravityScale = 0.25F;
 }
 
 bool components_equal(const RigidBody &a, const RigidBody &b) noexcept {
@@ -119,7 +120,7 @@ bool components_equal(const RigidBody &a, const RigidBody &b) noexcept {
          (a.inverseMass == b.inverseMass) &&
          vec3_equal(a.inverseInertia, b.inverseInertia) &&
          (a.inertiaAuthored == b.inertiaAuthored) &&
-         (a.sleeping == b.sleeping);
+         (a.sleeping == b.sleeping) && (a.gravityScale == b.gravityScale);
 }
 
 void make_test_value(Collider *out) noexcept {

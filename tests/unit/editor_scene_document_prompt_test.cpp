@@ -14,6 +14,7 @@
 
 #include "editor_commands.h"
 #include "editor_scene_document.h"
+#include "editor_scene_document_fixture.h"
 #include "editor_session.h"
 #include "engine/core/platform.h"
 #include "engine/editor/editor.h"
@@ -706,16 +707,33 @@ int main() {
        &check_request_pool_reclaims_delivered_retired_records},
   };
 
+  // Saves and opens below add to the recent-scenes list; the guard keeps
+  // that out of the developer's real save directory.
+  engine::tests::RecentScenesGuard recentGuard;
+  char recentScratch[1000] = {};
+  if (!ensure_scratch_root() ||
+      !make_scratch_path("recent_scenes_fixture", recentScratch,
+                         sizeof(recentScratch)) ||
+      !recentGuard.arm(recentScratch)) {
+    std::fprintf(stderr, "editor_scene_document_prompt_test: the "
+                         "recent-scenes guard could not be armed\n");
+    return 98;
+  }
+
   for (const auto &check : checks) {
     const int result = check.fn();
     if (result != 0) {
       std::fprintf(stderr,
                    "editor_scene_document_prompt_test: %s failed: %d\n",
                    check.name, result);
+      static_cast<void>(recentGuard.disarm());
       return result;
     }
   }
 
+  if (!recentGuard.disarm()) {
+    return 99;
+  }
   std::printf("editor_scene_document_prompt_test: all tests passed\n");
   return 0;
 }

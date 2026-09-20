@@ -10,6 +10,7 @@
 #include "render_device_null.h"
 
 #include <cstdint>
+#include <cstdio>
 
 namespace engine::renderer {
 
@@ -131,6 +132,7 @@ void fill_null_render_device(RenderDevice *device) noexcept {
   *device = RenderDevice{};
   g_nextHandle = 0U;
 
+  std::snprintf(device->name, sizeof(device->name), "null");
   device->caps.instancing = true;
   device->caps.uniformBlocks = true;
   device->caps.timestampQueries = true;

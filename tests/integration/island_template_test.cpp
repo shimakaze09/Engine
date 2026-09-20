@@ -1,8 +1,8 @@
 // Loads the real Island Hopper template JSON and verifies its authored
 // per-body gravity semantics against the production physics step:
-// normal bodies accelerate at exactly world gravity, gravity-disabled
-// bodies (MovingPlatform, FallingRock) hold position with zero total
-// acceleration (issue #104).
+// normal bodies accelerate at exactly world gravity, and the bodies
+// authored with gravity scale 0 (MovingPlatform, FallingRock) hold
+// position with zero total acceleration.
 
 #include <cmath>
 #include <cstdio>
@@ -118,19 +118,24 @@ int main() {
     return 1;
   }
 
-  // --- Authored acceleration semantics: additional on top of gravity ---
+  // --- Authored gravity: the player feels it, the driven bodies do not ---
   {
-    std::printf("  %-40s ", "authored acceleration values");
+    std::printf("  %-40s ", "authored gravity scale values");
     const bool ok =
         vec3_equals(playerBody.acceleration, 0.0F, 0.0F, 0.0F) &&
-        vec3_equals(platformBody.acceleration, 0.0F, -gravityY, 0.0F) &&
-        vec3_equals(rockBody.acceleration, 0.0F, -gravityY, 0.0F);
+        (playerBody.gravityScale == 1.0F) &&
+        vec3_equals(platformBody.acceleration, 0.0F, 0.0F, 0.0F) &&
+        (platformBody.gravityScale == 0.0F) &&
+        vec3_equals(rockBody.acceleration, 0.0F, 0.0F, 0.0F) &&
+        (rockBody.gravityScale == 0.0F);
     if (ok) {
       std::printf("PASS\n");
     } else {
-      std::printf("FAIL (player %g, platform %g, rock %g vs gravity %g)\n",
-                  playerBody.acceleration.y, platformBody.acceleration.y,
-                  rockBody.acceleration.y, gravityY);
+      std::printf("FAIL (player scale %g, platform scale %g accel %g, rock "
+                  "scale %g accel %g)\n",
+                  playerBody.gravityScale, platformBody.gravityScale,
+                  platformBody.acceleration.y, rockBody.gravityScale,
+                  rockBody.acceleration.y);
       ++failures;
     }
   }
@@ -170,8 +175,8 @@ int main() {
     engine::runtime::RigidBody rockAfter{};
     engine::runtime::Transform platformPose{};
     engine::runtime::Transform rockPose{};
-    // -9.8 + 9.8 is exactly zero in float, so held bodies never gain
-    // velocity and their serialized positions stay bit-identical.
+    // Gravity times a scale of 0 is exactly zero, so held bodies never
+    // gain velocity and their serialized positions stay bit-identical.
     const bool ok =
         world->get_rigid_body(platform, &platformAfter) &&
         world->get_rigid_body(rock, &rockAfter) &&

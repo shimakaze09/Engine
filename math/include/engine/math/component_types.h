@@ -45,6 +45,12 @@ struct RigidBody final {
   bool inertiaAuthored = false;
   std::uint8_t sleepFrameCount = 0U;
   bool sleeping = false;
+  /// How much of the world's gravity this body feels: 1 the full pull, 0
+  /// none (a driven platform, a held rock), a fraction or a negative
+  /// value in between or beyond. Authored; it never depends on the
+  /// world's gravity value, which is what an acceleration that cancels
+  /// gravity would.
+  float gravityScale = 1.0F;
 };
 
 /// Inverse inertia a freshly constructed RigidBody carries, and the tensor

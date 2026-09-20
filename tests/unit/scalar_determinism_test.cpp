@@ -1,9 +1,10 @@
 // Pins the deterministic scalar set (engine/math/scalar.h): each function
 // tracks the C library within a few ulp across the simulation's ranges,
-// holds its identities, and produces exact promised bit patterns on a
-// fixed input table. The bit patterns are the cross-platform contract:
-// every lane must print the same words, which the libm versions they
-// replace do not (glibc, UCRT and libSystem round differently).
+// holds its identities, and produces the promised bit patterns of
+// scalar_pinned_words.h on a fixed input table. The bit patterns are the
+// cross-platform contract: every lane must print the same words, which
+// the libm versions they replace do not (glibc, UCRT and libSystem round
+// differently).
 
 #include <cmath>
 #include <cstdint>
@@ -12,6 +13,7 @@
 
 #include "../test_harness.h"
 #include "engine/math/scalar.h"
+#include "scalar_pinned_words.h"
 
 namespace {
 
@@ -119,45 +121,61 @@ void test_tracks_libm() noexcept {
   check(engine::math::det_acos(1.0F) == 0.0F, "acos(1) is exactly 0");
   check(engine::math::det_acos(-1.0F) == engine::math::kDetPi,
         "acos(-1) is exactly pi");
+
+  bool tanOk = true;
+  for (int i = -1400; i <= 1400; ++i) {
+    // Inside (-pi/2 + 0.17, pi/2 - 0.17): tan stays below 6 and the
+    // quotient's error stays a few ulp of the result.
+    const float x = static_cast<float>(i) * 0.001F;
+    tanOk = tanOk && close(engine::math::det_tan(x), std::tan(x));
+  }
+  check(tanOk, "det_tan tracks tan on [-1.4, 1.4]");
+
+  bool logOk = true;
+  bool logIdentityOk = true;
+  for (int i = 1; i <= 4000; ++i) {
+    const float x = static_cast<float>(i) * 0.05F;
+    logOk = logOk && close(engine::math::det_log(x), std::log(x));
+    // exp(log(x)) returns x within a few ulp of x.
+    const float roundTrip = engine::math::det_exp(engine::math::det_log(x));
+    logIdentityOk = logIdentityOk && (std::fabs(roundTrip - x) <= 2.0e-6F * x);
+  }
+  for (int e = -30; e <= 30; ++e) {
+    const float x = std::ldexp(1.5F, e);
+    logOk = logOk && close(engine::math::det_log(x), std::log(x));
+  }
+  check(logOk, "det_log tracks log on (0, 200] and across the exponent range");
+  check(logIdentityOk, "exp(log(x)) returns x within 2e-6 relative");
+  check(engine::math::det_log(1.0F) == 0.0F, "log(1) is exactly 0");
+  check(engine::math::det_log(0.0F) == -INFINITY, "log(0) is -infinity");
+  check(std::isnan(engine::math::det_log(-1.0F)), "log(-1) is NaN");
+  check(engine::math::det_log(INFINITY) == INFINITY, "log(inf) is infinity");
 }
 
-/// One promised word per function and input: the bits every platform
-/// must reproduce. Recorded on Linux x86-64 (gcc, strict floats).
-struct Pinned final {
-  float input;
-  std::uint32_t sinBits;
-  std::uint32_t cosBits;
-  std::uint32_t expBits;
-  std::uint32_t atanBits;
-};
-
-constexpr Pinned kPinned[] = {
-    {0.0F, 0x00000000U, 0x3F800000U, 0x3F800000U, 0x00000000U},
-    {0.005F, 0x3BA3D6DDU, 0x3F7FFF2EU, 0x3F80A440U, 0x3BA3D6B0U},
-    {-0.0066666668F, 0xBBDA73A4U, 0x3F7FFE8BU, 0x3F7E4C8CU, 0xBBDA733AU},
-    {0.35F, 0x3EAF904DU, 0x3F707ABBU, 0x3FB5A402U, 0x3EAC60A3U},
-    {1.0F, 0x3F576AA4U, 0x3F0A5140U, 0x402DF854U, 0x3F490FDAU},
-    {-2.5F, 0xBF193579U, 0xBF4D17BFU, 0x3DA81C2EU, 0xBF985B6CU},
-    {7.0F, 0x3F283046U, 0x3F40FFBDU, 0x44891443U, 0x3FB6E62CU},
-    {-12.0F, 0x3F095CD8U, 0x3F5806D0U, 0x36CE2A62U, 0xBFBE6B7CU},
-};
-
 void test_pinned_bits() noexcept {
-  for (const Pinned &row : kPinned) {
+  for (const engine::tests::PinnedScalarWords &row :
+       engine::tests::kPinnedScalarWords) {
     char label[96] = {};
     std::snprintf(label, sizeof(label), "pinned bits for input %g",
                   static_cast<double>(row.input));
+    const bool logOk = (row.input <= 0.0F) ||
+                       (bits(engine::math::det_log(row.input)) == row.logBits);
     const bool ok = (bits(engine::math::det_sin(row.input)) == row.sinBits) &&
                     (bits(engine::math::det_cos(row.input)) == row.cosBits) &&
                     (bits(engine::math::det_exp(row.input)) == row.expBits) &&
-                    (bits(engine::math::det_atan(row.input)) == row.atanBits);
+                    (bits(engine::math::det_atan(row.input)) == row.atanBits) &&
+                    (bits(engine::math::det_tan(row.input)) == row.tanBits) &&
+                    logOk;
     if (!ok) {
-      std::printf("  input %g: sin %08X cos %08X exp %08X atan %08X\n",
+      std::printf("  input %g: sin %08X cos %08X exp %08X atan %08X tan %08X "
+                  "log %08X\n",
                   static_cast<double>(row.input),
                   bits(engine::math::det_sin(row.input)),
                   bits(engine::math::det_cos(row.input)),
                   bits(engine::math::det_exp(row.input)),
-                  bits(engine::math::det_atan(row.input)));
+                  bits(engine::math::det_atan(row.input)),
+                  bits(engine::math::det_tan(row.input)),
+                  bits(engine::math::det_log(row.input)));
     }
     check(ok, label);
   }

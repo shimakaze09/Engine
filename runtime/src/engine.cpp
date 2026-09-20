@@ -253,8 +253,9 @@ bool bootstrap(const EngineConfig &config) noexcept {
       "r_present_scene", false,
       "Present the post chain's final image on the back buffer (player "
       "mode; the editor overlay presents otherwise)"));
-  const char *playerEnv = core::non_empty_env("ENGINE_PLAYER");
-  if ((playerEnv != nullptr) && (playerEnv[0] == '1')) {
+  char playerEnv[8] = {};
+  if (core::non_empty_env("ENGINE_PLAYER", playerEnv, sizeof(playerEnv)) &&
+      (playerEnv[0] == '1')) {
     g_activeConfig.playerMode = true;
   }
   if (g_activeConfig.playerMode) {

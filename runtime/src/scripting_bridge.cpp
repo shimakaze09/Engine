@@ -28,6 +28,7 @@
 
 #include "component_registry.h"
 #include "engine_runtime_streaming.h"
+#include "mesh_reference_resolution.h"
 
 #include <cstring>
 
@@ -624,6 +625,10 @@ std::uint32_t scripting_load_asset_async(const char *path,
                       "OS path (is its mount registered?)");
     return kInvalidScriptAssetHandle;
   }
+  // A mesh a script names by path is catalogued under that path, the
+  // same record the editor's picker and a reopened scene read.
+  static_cast<void>(note_mesh_asset_path(
+      g_scriptingAssetDatabaseService->database, assetId, path));
 
   retire_terminal_script_loads(g_scriptingAssetDatabaseService);
 

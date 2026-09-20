@@ -207,6 +207,23 @@ void draw_main_menu_bar() noexcept {
       ImGui::EndDisabled();
     }
 
+    ImGui::Separator();
+    const runtime::Entity selection = selected_entity();
+    const bool canDuplicate =
+        world_is_editable() && (selection != runtime::kInvalidEntity);
+    if (!canDuplicate) {
+      ImGui::BeginDisabled();
+    }
+    if (ImGui::MenuItem("Duplicate", "Ctrl+D")) {
+      const runtime::Entity copy = execute_entity_duplicate(selection);
+      if (copy != runtime::kInvalidEntity) {
+        select_entity(copy, false);
+      }
+    }
+    if (!canDuplicate) {
+      ImGui::EndDisabled();
+    }
+
     ImGui::EndMenu();
   }
 
@@ -224,12 +241,23 @@ void draw_main_menu_bar() noexcept {
 
   // Document status: name plus a dirty marker, right-aligned
   // in the menu bar; scene_document_update_window_title mirrors the same
-  // state into the OS title bar once per frame.
+  // state into the OS title bar once per frame. A failed save stands
+  // beside it until the next save succeeds: File > Save As opens no
+  // prompt, so this is where its refusal is seen.
   char status[160] = {};
   std::snprintf(status, sizeof(status), "%s%s", scene_document_display_name(),
                scene_document_is_dirty() ? " *" : "");
+  const char *saveError = scene_document_last_error();
   const float statusWidth = ImGui::CalcTextSize(status).x;
-  ImGui::SameLine(ImGui::GetWindowWidth() - statusWidth - 16.0F);
+  float errorWidth = 0.0F;
+  if (saveError[0] != '\0') {
+    errorWidth = ImGui::CalcTextSize(saveError).x + 24.0F;
+  }
+  ImGui::SameLine(ImGui::GetWindowWidth() - statusWidth - errorWidth - 16.0F);
+  if (saveError[0] != '\0') {
+    ImGui::TextColored(ImVec4(0.9F, 0.35F, 0.35F, 1.0F), "%s", saveError);
+    ImGui::SameLine();
+  }
   ImGui::TextUnformatted(status);
 
   ImGui::EndMainMenuBar();
@@ -270,9 +298,11 @@ void draw_toolbar() noexcept {
   // so a later editor session in the same process re-arms.
   if (!editor_session().autoplayConsumed && canPlay &&
       (editor_session().playState == PlayState::Stopped)) {
-    const char *autoplay = core::non_empty_env("ENGINE_EDITOR_AUTOPLAY");
+    char autoplay[8] = {};
     editor_session().autoplayConsumed = true;
-    if ((autoplay != nullptr) && (autoplay[0] == '1')) {
+    if (core::non_empty_env("ENGINE_EDITOR_AUTOPLAY", autoplay,
+                            sizeof(autoplay)) &&
+        (autoplay[0] == '1')) {
       start_play_mode();
     }
   }
@@ -422,6 +452,31 @@ static void draw_entity_node(runtime::Entity entity,
   if (ImGui::IsItemClicked(ImGuiMouseButton_Left) &&
       !ImGui::IsItemToggledOpen()) {
     select_entity(entity, ImGui::GetIO().KeyCtrl);
+  }
+
+  if (ImGui::BeginPopupContextItem(label)) {
+    // A right-click selects the row first, so the actions below and the
+    // Edit menu's act on the same entity.
+    if (!is_entity_selected(entity) && (selected_entity() != entity)) {
+      select_entity(entity, false);
+    }
+    const bool editable = world_is_editable();
+    if (!editable) {
+      ImGui::BeginDisabled();
+    }
+    if (ImGui::MenuItem("Duplicate", "Ctrl+D")) {
+      const runtime::Entity copy = execute_entity_duplicate(entity);
+      if (copy != runtime::kInvalidEntity) {
+        select_entity(copy, false);
+      }
+    }
+    if (ImGui::MenuItem("Delete", "Del")) {
+      static_cast<void>(execute_entity_delete(entity));
+    }
+    if (!editable) {
+      ImGui::EndDisabled();
+    }
+    ImGui::EndPopup();
   }
 
   if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {

@@ -38,8 +38,12 @@ constexpr const char *kSceneLogChannel = "scene";
 // the authored value. Revision 3 writes inverseInertia as a 3-element
 // array; older revisions wrote one number, read as the same value on
 // every axis.
-constexpr std::uint32_t kCurrentSceneVersion = 4U;
+constexpr std::uint32_t kCurrentSceneVersion = 5U;
 constexpr std::uint32_t kLastImplicitInertiaSceneVersion = 3U;
+// Before the gravity scale, a body was held against gravity by an
+// authored acceleration equal to its opposite; those documents read as
+// gravity scale 0.
+constexpr std::uint32_t kLastAccelerationCancelsGravitySceneVersion = 4U;
 constexpr std::uint32_t kLastScalarInertiaSceneVersion = 2U;
 constexpr const char *kInverseInertiaKey = "inverseInertia";
 constexpr const char *kEntitiesKey = "entities";
@@ -78,6 +82,24 @@ void report_reference(core::ValidationReport *report, const char *code,
   record.entityPersistentId = entityPersistentId;
   std::snprintf(record.field, sizeof(record.field), "%s", field);
   core::log_diagnostic(record);
+}
+
+/// Rewrites every body an older document held against gravity by an
+/// opposite acceleration as gravity scale 0, against the gravity the
+/// document authored (or the default it relied on).
+void migrate_cancelled_gravity_bodies(World &world) noexcept {
+  math::Vec3 gravity = physics::kDefaultGravity;
+  static_cast<void>(get_gravity(world, &gravity.x, &gravity.y, &gravity.z));
+  world.for_each<RigidBody>(
+      [&world, &gravity](Entity entity, const RigidBody &body) noexcept {
+        if (!legacy_acceleration_cancels_gravity(body, gravity)) {
+          return;
+        }
+        RigidBody *stored = world.get_rigid_body_ptr(entity);
+        if (stored != nullptr) {
+          migrate_cancelled_gravity(stored, gravity);
+        }
+      });
 }
 
 /// True when the path sits under a mounted prefix and names no file; an
@@ -704,13 +726,8 @@ bool load_scene(World &world, const char *buffer, std::size_t size,
     return false;
   }
 
-  if (!deserialize_scene_entities(parser, entities, descs, documentVersion,
-                                  *stagedWorld)) {
-    return false;
-  }
-  validate_scene_references(*stagedWorld, outReport);
-
-  // World gravity: optional root field, default when absent.
+  // World gravity: optional root field, default when absent. Read before
+  // the entities: an older document's bodies are migrated against it.
   core::JsonValue gravityValue{};
   if (parser.get_object_field(*root, kGravityKey, &gravityValue)) {
     math::Vec3 gravity{};
@@ -719,6 +736,15 @@ bool load_scene(World &world, const char *buffer, std::size_t size,
     }
     set_gravity(*stagedWorld, gravity.x, gravity.y, gravity.z);
   }
+
+  if (!deserialize_scene_entities(parser, entities, descs, documentVersion,
+                                  *stagedWorld)) {
+    return false;
+  }
+  if (documentVersion <= kLastAccelerationCancelsGravitySceneVersion) {
+    migrate_cancelled_gravity_bodies(*stagedWorld);
+  }
+  validate_scene_references(*stagedWorld, outReport);
 
   // Legacy "timers" blocks are ignored:
   // the serialized timing carried no callback identity, so a restored

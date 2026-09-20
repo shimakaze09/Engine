@@ -1,7 +1,9 @@
 -- assets/scripts/falling_rock.lua
 --
 -- The Island Hopper hazard: a rock held in the air until the player walks
--- underneath, then dropped with a warning alarm. After the drop it rests
+-- underneath, then dropped with a warning alarm. Author its Rigid Body with
+-- Gravity Scale 0: the script holds it on its perch and drops it by setting
+-- its velocity, so the world's gravity must not pull on it by itself. After the drop it rests
 -- wherever it lands (or falls out of the world); it only re-arms back onto
 -- its perch once the player has moved well away, so the reset never
 -- teleports in view and the trap cannot re-trigger in a loop.
