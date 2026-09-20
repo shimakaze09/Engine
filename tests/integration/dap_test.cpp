@@ -24,6 +24,8 @@
 #include "engine/scripting/dap_server.h"
 #include "engine/scripting/scripting.h"
 
+#include "../scripting_clock.h"
+
 #if defined(_WIN32)
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -39,7 +41,6 @@
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <unistd.h>
-#include "../scripting_clock.h"
 #endif
 
 namespace {
