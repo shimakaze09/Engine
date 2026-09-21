@@ -964,86 +964,23 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
       if (backend.pbrAlbedoMapLocation.valid())
         dev->set_param_i32(backend.pbrAlbedoMapLocation, 0);
 
-      const math::Mat4 &vp = viewProjection;
-      const MaterialTextureUniformLocs transparentMaterialTexLocs{
-          backend.pbrHasMetallicRoughnessTextureLocation,
-          backend.pbrMetallicRoughnessMapLocation,
-          backend.pbrHasEmissiveTextureLocation,
-          backend.pbrEmissiveMapLocation,
-          backend.pbrHasOcclusionTextureLocation,
-          backend.pbrOcclusionMapLocation,
-          backend.pbrHasOpacityTextureLocation,
-          backend.pbrOpacityMapLocation,
-          backend.pbrAlphaModeLocation,
-          backend.pbrAlphaCutoffLocation,
-          backend.pbrUvTilingLocation,
-          backend.pbrUvOffsetLocation};
+      const ForwardDrawProgram transparentProgram =
+          pbr_forward_draw_program(backend);
 
       auto drawForwardTransparent = [&](std::size_t start, std::size_t end) {
-        DeviceTextureHandle boundAlbedoTex{};
-        DeviceTextureHandle boundMaterialTex[4] = {};
+        ForwardDrawBindings bindings{};
         for (std::size_t i = start; i < end; ++i) {
           const DrawCommand &cmd = commandBufferView.data[i];
           const GpuMesh *mesh = lookup_gpu_mesh(registry, cmd.mesh);
           if ((mesh == nullptr) ||
               (mesh->geometry == kInvalidDeviceGeometry) ||
-              (mesh->vertexCount == 0U))
+              (mesh->vertexCount == 0U)) {
             continue;
-          if (backend.pbrAlbedoLocation.valid())
-            dev->set_param_vec3(backend.pbrAlbedoLocation,
-                                  &cmd.material.albedo.x);
-          if (backend.pbrRoughnessLocation.valid())
-            dev->set_param_f32(backend.pbrRoughnessLocation,
-                                   cmd.material.roughness);
-          if (backend.pbrMetallicLocation.valid())
-            dev->set_param_f32(backend.pbrMetallicLocation,
-                                   cmd.material.metallic);
-          if (backend.pbrOpacityLocation.valid())
-            dev->set_param_f32(backend.pbrOpacityLocation,
-                                   cmd.material.opacity);
-          if (backend.pbrEmissiveLocation.valid())
-            dev->set_param_vec3(backend.pbrEmissiveLocation,
-                                  &cmd.material.emissive.x);
-          upload_pbr_foliage_uniforms(backend, dev, cmd);
-          const DeviceTextureHandle albedoTex =
-              texture_device_handle(cmd.material.albedoTexture);
-          const bool hasTex =
-              (cmd.material.albedoTexture != kInvalidTextureHandle) &&
-              (albedoTex != kInvalidDeviceTexture);
-          if (backend.pbrHasAlbedoTextureLocation.valid())
-            dev->set_param_i32(backend.pbrHasAlbedoTextureLocation,
-                                 hasTex ? 1 : 0);
-          if (hasTex && albedoTex != boundAlbedoTex) {
-            dev->bind_texture_slot(0U, albedoTex);
-            boundAlbedoTex = albedoTex;
-          } else if (!hasTex && (boundAlbedoTex != backend.fallbackTexture2D)) {
-            dev->bind_texture_slot(0U, backend.fallbackTexture2D);
-            boundAlbedoTex = backend.fallbackTexture2D;
           }
-          upload_material_texture_slots(transparentMaterialTexLocs, dev,
-                                        cmd.material,
-                                        backend.fallbackTexture2D,
-                                        boundMaterialTex);
-          const math::Mat4 model = compute_model_matrix(cmd);
-          const math::Mat4 mvp = compute_mvp(model, vp);
-          float nm[9] = {};
-          extract_normal_matrix(model, nm);
-          if (backend.pbrModelLocation.valid())
-            dev->set_param_mat4(backend.pbrModelLocation,
-                                  &model.columns[0].x);
-          dev->set_param_mat4(backend.pbrMvpLocation, &mvp.columns[0].x);
-          dev->set_param_mat3(backend.pbrNormalMatrixLocation, nm);
-          if (mesh->indexCount > 0U) {
-            ++frameStats.drawCalls;
-            frameStats.triangleCount += (mesh->indexCount / 3U);
-            dev->draw_indexed(mesh->geometry,
-                              static_cast<std::int32_t>(mesh->indexCount));
-          } else {
-            ++frameStats.drawCalls;
-            frameStats.triangleCount += (mesh->vertexCount / 3U);
-            dev->draw(mesh->geometry, PrimitiveTopology::Triangles, 0,
-                      static_cast<std::int32_t>(mesh->vertexCount));
-          }
+          upload_forward_material(transparentProgram, backend, dev, cmd,
+                                  &bindings);
+          draw_forward_command(transparentProgram, dev, cmd, *mesh,
+                               viewProjection, &frameStats);
         }
       };
 

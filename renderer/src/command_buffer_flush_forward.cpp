@@ -122,98 +122,11 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
       dev->set_param_i32(backend.pbrAlbedoMapLocation, 0);
     }
 
-    const MaterialTextureUniformLocs forwardMaterialTexLocs{
-        backend.pbrHasMetallicRoughnessTextureLocation,
-        backend.pbrMetallicRoughnessMapLocation,
-        backend.pbrHasEmissiveTextureLocation,
-        backend.pbrEmissiveMapLocation,
-        backend.pbrHasOcclusionTextureLocation,
-        backend.pbrOcclusionMapLocation,
-        backend.pbrHasOpacityTextureLocation,
-        backend.pbrOpacityMapLocation,
-        backend.pbrAlphaModeLocation,
-        backend.pbrAlphaCutoffLocation,
-        backend.pbrUvTilingLocation,
-        backend.pbrUvOffsetLocation};
-
-    auto drawForwardCommand = [&](const DrawCommand &command,
-                                  const GpuMesh &mesh) {
-      const math::Mat4 model = compute_model_matrix(command);
-      const math::Mat4 mvp = compute_mvp(model, viewProjection);
-      float normalMatrix[9] = {};
-      extract_normal_matrix(model, normalMatrix);
-
-      if (backend.pbrUseInstancingLocation.valid()) {
-        dev->set_param_i32(backend.pbrUseInstancingLocation, 0);
-      }
-      upload_pbr_foliage_uniforms(backend, dev, command);
-      if (backend.pbrModelLocation.valid()) {
-        dev->set_param_mat4(backend.pbrModelLocation, &model.columns[0].x);
-      }
-      dev->set_param_mat4(backend.pbrMvpLocation, &mvp.columns[0].x);
-      dev->set_param_mat3(backend.pbrNormalMatrixLocation, normalMatrix);
-
-      if (mesh.indexCount > 0U) {
-        ++frameStats.drawCalls;
-        frameStats.triangleCount += (mesh.indexCount / 3U);
-        dev->draw_indexed(mesh.geometry,
-                          static_cast<std::int32_t>(mesh.indexCount));
-      } else {
-        ++frameStats.drawCalls;
-        frameStats.triangleCount += (mesh.vertexCount / 3U);
-        dev->draw(mesh.geometry, PrimitiveTopology::Triangles, 0,
-                  static_cast<std::int32_t>(mesh.vertexCount));
-      }
-    };
-
-    auto uploadForwardMaterial = [&](const Material &material,
-                                     DeviceTextureHandle *boundAlbedoTexture,
-                                     DeviceTextureHandle *boundMaterialTex) {
-      if (backend.pbrAlbedoLocation.valid()) {
-        dev->set_param_vec3(backend.pbrAlbedoLocation, &material.albedo.x);
-      }
-      if (backend.pbrRoughnessLocation.valid()) {
-        dev->set_param_f32(backend.pbrRoughnessLocation,
-                               material.roughness);
-      }
-      if (backend.pbrMetallicLocation.valid()) {
-        dev->set_param_f32(backend.pbrMetallicLocation, material.metallic);
-      }
-      if (backend.pbrOpacityLocation.valid()) {
-        dev->set_param_f32(backend.pbrOpacityLocation, material.opacity);
-      }
-      if (backend.pbrEmissiveLocation.valid()) {
-        dev->set_param_vec3(backend.pbrEmissiveLocation,
-                              &material.emissive.x);
-      }
-
-      const DeviceTextureHandle albedoTex =
-          texture_device_handle(material.albedoTexture);
-      const bool hasAlbedoTex =
-          (material.albedoTexture != kInvalidTextureHandle) &&
-          (albedoTex != kInvalidDeviceTexture);
-      if (backend.pbrHasAlbedoTextureLocation.valid()) {
-        dev->set_param_i32(backend.pbrHasAlbedoTextureLocation,
-                             hasAlbedoTex ? 1 : 0);
-      }
-      if (hasAlbedoTex && (albedoTex != *boundAlbedoTexture)) {
-        dev->bind_texture_slot(0U, albedoTex);
-        *boundAlbedoTexture = albedoTex;
-      } else if (!hasAlbedoTex &&
-                 (*boundAlbedoTexture != backend.fallbackTexture2D)) {
-        // Fallback, not nothing: WebGL rejects draws whose declared
-        // samplers still reference the pass's render target.
-        dev->bind_texture_slot(0U, backend.fallbackTexture2D);
-        *boundAlbedoTexture = backend.fallbackTexture2D;
-      }
-      upload_material_texture_slots(forwardMaterialTexLocs, dev, material,
-                                    backend.fallbackTexture2D,
-                                    boundMaterialTex);
-    };
+    const ForwardDrawProgram forwardProgram =
+        pbr_forward_draw_program(backend);
 
     auto drawRange = [&](std::size_t start, std::size_t end) {
-      DeviceTextureHandle boundAlbedoTexture{};
-      DeviceTextureHandle boundMaterialTex[4] = {};
+      ForwardDrawBindings bindings{};
 
       if ((start == 0U) && (end == opaqueCount)) {
         for (std::size_t batchIndex = 0U; batchIndex < opaqueBatchCount;
@@ -227,9 +140,8 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
             continue;
           }
 
-          uploadForwardMaterial(command.material, &boundAlbedoTexture,
-                                boundMaterialTex);
-          upload_pbr_foliage_uniforms(backend, dev, command);
+          upload_forward_material(forwardProgram, backend, dev, command,
+                                  &bindings);
 
           // Instanced batching runs through the shader's runtime
           // toggle (GL) or the INSTANCED sibling program (bgfx, whose
@@ -265,7 +177,9 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
             const std::size_t commandIndex =
                 static_cast<std::size_t>(batch.first) +
                 static_cast<std::size_t>(local);
-            drawForwardCommand(commandBufferView.data[commandIndex], *mesh);
+            draw_forward_command(forwardProgram, dev,
+                                 commandBufferView.data[commandIndex], *mesh,
+                                 viewProjection, &frameStats);
           }
         }
         return;
@@ -279,9 +193,10 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
           continue;
         }
 
-        uploadForwardMaterial(command.material, &boundAlbedoTexture,
-                                boundMaterialTex);
-        drawForwardCommand(command, *mesh);
+        upload_forward_material(forwardProgram, backend, dev, command,
+                                &bindings);
+        draw_forward_command(forwardProgram, dev, command, *mesh,
+                             viewProjection, &frameStats);
       }
     };
 

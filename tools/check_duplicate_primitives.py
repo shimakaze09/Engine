@@ -85,6 +85,22 @@ RULES: tuple[Rule, ...] = (
         remedy="include engine/renderer/command_buffer.h and use the "
         "kDrawKey* constants or the draw_key_* accessors",
     ),
+    Rule(
+        name="the per-draw forward uniform upload",
+        owner="renderer/src/command_buffer_flush_uniforms.cpp",
+        # Writing one of the per-draw material or transform locations is
+        # what a copied forward draw loop looks like. The forward pass,
+        # the deferred path's transparent pass and each scene capture
+        # each carried one, so a uniform added to one draw could be
+        # forgotten in the other two and the same material shaded
+        # differently depending on which pass drew it. Per-frame
+        # uniforms (time, camera, lighting, fog) legitimately stay in
+        # the passes and are deliberately not matched here.
+        pattern=r"set_param_\w+\(\s*backend\.pbr(?:Albedo|Roughness|Metallic"
+        r"|Opacity|Emissive|HasAlbedoTexture|Model|Mvp|NormalMatrix)Location",
+        remedy="call upload_forward_material and draw_forward_command from "
+        "command_buffer_flush_internal.h instead of uploading the set by hand",
+    ),
 )
 
 

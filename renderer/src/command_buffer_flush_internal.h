@@ -264,4 +264,70 @@ void upload_skinned_gbuffer_uniforms(
 math::Mat4 sky_projection_matrix(const CameraState &camera,
                                  float aspect) noexcept;
 
+// --- One forward draw -----------------------------------------------------
+
+/// Every uniform location one forward-shaded draw needs from the program
+/// it is drawn with. The forward pass, the deferred path's transparent
+/// pass and each scene capture each used to name the same backend members
+/// inline, so a uniform added to one draw could be forgotten in the other
+/// two; naming the set once makes the three passes provably identical.
+///
+/// It is a parameter rather than a lookup because it is the seam a
+/// second shading model plugs into: one of these per program, chosen per
+/// draw run, is what binding a program per shading model needs.
+struct ForwardDrawProgram final {
+  ShaderParam albedo{};
+  ShaderParam roughness{};
+  ShaderParam metallic{};
+  ShaderParam opacity{};
+  ShaderParam emissive{};
+  ShaderParam hasAlbedoTexture{};
+  ShaderParam model{};
+  ShaderParam mvp{};
+  ShaderParam normalMatrix{};
+  /// Set to 0 per draw where the program carries the runtime instancing
+  /// toggle; invalid where the pass never instances.
+  ShaderParam useInstancing{};
+  MaterialTextureUniformLocs materialTextures{};
+};
+
+/// The physically-based program's forward-draw locations. The one place
+/// the pbr* members are read for a per-draw upload.
+ForwardDrawProgram pbr_forward_draw_program(const BackendState &backend) noexcept;
+
+/// The device textures a range of draws last bound, so consecutive draws
+/// sharing a material do not rebind. One instance per range, never
+/// shared across passes.
+struct ForwardDrawBindings final {
+  DeviceTextureHandle albedo{};
+  DeviceTextureHandle materialSlots[4] = {};
+};
+
+/// Uploads everything about a draw that does not depend on its
+/// transform: the material scalars, its foliage wind, its albedo texture
+/// (falling back to the opaque placeholder rather than leaving the
+/// pass's own render target bound, which WebGL rejects) and the four
+/// texture-backed slots. Split from the draw below because the opaque
+/// batching path uploads a batch's material once and then decides
+/// whether to issue it instanced.
+void upload_forward_material(const ForwardDrawProgram &program,
+                             const BackendState &backend,
+                             const RenderDevice *dev,
+                             const DrawCommand &command,
+                             ForwardDrawBindings *bindings) noexcept;
+
+/// Uploads one draw's transform through `program` and issues it,
+/// accumulating draw and triangle counts. The caller has already
+/// uploaded the material.
+///
+/// Together with upload_forward_material this is the whole per-draw
+/// forward path. The three passes that used to carry a copy of it now
+/// differ only in which range they walk, which program they pass, and
+/// their render state.
+void draw_forward_command(const ForwardDrawProgram &program,
+                          const RenderDevice *dev, const DrawCommand &command,
+                          const GpuMesh &mesh,
+                          const math::Mat4 &viewProjection,
+                          RendererFrameStats *frameStats) noexcept;
+
 } // namespace engine::renderer

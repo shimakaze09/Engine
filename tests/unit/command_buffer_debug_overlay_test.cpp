@@ -85,6 +85,17 @@ void upload_material_texture_slots(const MaterialTextureUniformLocs &,
                                    const RenderDevice *, const Material &,
                                    DeviceTextureHandle,
                                    DeviceTextureHandle *) noexcept {}
+// The shared forward-draw helpers, stubbed like the rest: this suite
+// drives the pass for its debug overlay, and a real draw needs a device.
+ForwardDrawProgram pbr_forward_draw_program(const BackendState &) noexcept {
+  return ForwardDrawProgram{};
+}
+void upload_forward_material(const ForwardDrawProgram &, const BackendState &,
+                             const RenderDevice *, const DrawCommand &,
+                             ForwardDrawBindings *) noexcept {}
+void draw_forward_command(const ForwardDrawProgram &, const RenderDevice *,
+                          const DrawCommand &, const GpuMesh &,
+                          const math::Mat4 &, RendererFrameStats *) noexcept {}
 
 } // namespace engine::renderer
 

@@ -723,5 +723,119 @@ bool upload_instance_matrices(BackendState &backend, const RenderDevice *dev,
       mesh.geometry, backend.instanceMatrixBuffer, instanceLayout);
 }
 
+// --- One forward draw -----------------------------------------------------
+
+ForwardDrawProgram pbr_forward_draw_program(const BackendState &backend) noexcept {
+  ForwardDrawProgram program{};
+  program.albedo = backend.pbrAlbedoLocation;
+  program.roughness = backend.pbrRoughnessLocation;
+  program.metallic = backend.pbrMetallicLocation;
+  program.opacity = backend.pbrOpacityLocation;
+  program.emissive = backend.pbrEmissiveLocation;
+  program.hasAlbedoTexture = backend.pbrHasAlbedoTextureLocation;
+  program.model = backend.pbrModelLocation;
+  program.mvp = backend.pbrMvpLocation;
+  program.normalMatrix = backend.pbrNormalMatrixLocation;
+  program.useInstancing = backend.pbrUseInstancingLocation;
+  program.materialTextures = MaterialTextureUniformLocs{
+      backend.pbrHasMetallicRoughnessTextureLocation,
+      backend.pbrMetallicRoughnessMapLocation,
+      backend.pbrHasEmissiveTextureLocation,
+      backend.pbrEmissiveMapLocation,
+      backend.pbrHasOcclusionTextureLocation,
+      backend.pbrOcclusionMapLocation,
+      backend.pbrHasOpacityTextureLocation,
+      backend.pbrOpacityMapLocation,
+      backend.pbrAlphaModeLocation,
+      backend.pbrAlphaCutoffLocation,
+      backend.pbrUvTilingLocation,
+      backend.pbrUvOffsetLocation};
+  return program;
+}
+
+void upload_forward_material(const ForwardDrawProgram &program,
+                             const BackendState &backend,
+                             const RenderDevice *dev,
+                             const DrawCommand &command,
+                             ForwardDrawBindings *bindings) noexcept {
+  if ((dev == nullptr) || (bindings == nullptr)) {
+    return;
+  }
+  const Material &material = command.material;
+  if (program.albedo.valid()) {
+    dev->set_param_vec3(program.albedo, &material.albedo.x);
+  }
+  if (program.roughness.valid()) {
+    dev->set_param_f32(program.roughness, material.roughness);
+  }
+  if (program.metallic.valid()) {
+    dev->set_param_f32(program.metallic, material.metallic);
+  }
+  if (program.opacity.valid()) {
+    dev->set_param_f32(program.opacity, material.opacity);
+  }
+  if (program.emissive.valid()) {
+    dev->set_param_vec3(program.emissive, &material.emissive.x);
+  }
+  upload_pbr_foliage_uniforms(backend, dev, command);
+
+  const DeviceTextureHandle albedoTex =
+      texture_device_handle(material.albedoTexture);
+  const bool hasAlbedoTex = (material.albedoTexture != kInvalidTextureHandle) &&
+                            (albedoTex != kInvalidDeviceTexture);
+  if (program.hasAlbedoTexture.valid()) {
+    dev->set_param_i32(program.hasAlbedoTexture, hasAlbedoTex ? 1 : 0);
+  }
+  if (hasAlbedoTex && (albedoTex != bindings->albedo)) {
+    dev->bind_texture_slot(0U, albedoTex);
+    bindings->albedo = albedoTex;
+  } else if (!hasAlbedoTex &&
+             (bindings->albedo != backend.fallbackTexture2D)) {
+    // Fallback, not nothing: WebGL rejects draws whose declared samplers
+    // still reference the pass's render target.
+    dev->bind_texture_slot(0U, backend.fallbackTexture2D);
+    bindings->albedo = backend.fallbackTexture2D;
+  }
+  upload_material_texture_slots(program.materialTextures, dev, material,
+                                backend.fallbackTexture2D,
+                                bindings->materialSlots);
+}
+
+void draw_forward_command(const ForwardDrawProgram &program,
+                          const RenderDevice *dev, const DrawCommand &command,
+                          const GpuMesh &mesh,
+                          const math::Mat4 &viewProjection,
+                          RendererFrameStats *frameStats) noexcept {
+  if ((dev == nullptr) || (frameStats == nullptr)) {
+    return;
+  }
+  const math::Mat4 model = compute_model_matrix(command);
+  const math::Mat4 mvp = compute_mvp(model, viewProjection);
+  float normalMatrix[9] = {};
+  extract_normal_matrix(model, normalMatrix);
+
+  // Cleared per draw, not per pass: the opaque batching path sets this
+  // to 1 to issue an instanced batch, and a single draw that inherited
+  // that 1 would read its transform from the instance buffer.
+  if (program.useInstancing.valid()) {
+    dev->set_param_i32(program.useInstancing, 0);
+  }
+  if (program.model.valid()) {
+    dev->set_param_mat4(program.model, &model.columns[0].x);
+  }
+  dev->set_param_mat4(program.mvp, &mvp.columns[0].x);
+  dev->set_param_mat3(program.normalMatrix, normalMatrix);
+
+  ++frameStats->drawCalls;
+  if (mesh.indexCount > 0U) {
+    frameStats->triangleCount += (mesh.indexCount / 3U);
+    dev->draw_indexed(mesh.geometry,
+                      static_cast<std::int32_t>(mesh.indexCount));
+  } else {
+    frameStats->triangleCount += (mesh.vertexCount / 3U);
+    dev->draw(mesh.geometry, PrimitiveTopology::Triangles, 0,
+              static_cast<std::int32_t>(mesh.vertexCount));
+  }
+}
 
 } // namespace engine::renderer

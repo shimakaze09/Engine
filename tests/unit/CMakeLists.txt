@@ -1975,3 +1975,21 @@ engine_add_test_executable(engine_unit_scene_path_length
     PRIVATE_DEPS
     engine_runtime
 )
+# Links the real uniform uploads rather than stubbing them: the point is
+# what the shared forward-draw helper writes, so a stub would assert
+# nothing. The pass-level helpers it does not reach come from the same
+# translation unit.
+engine_add_test_executable(engine_unit_forward_draw_uniforms
+    SOURCES
+    forward_draw_uniforms_test.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_flush_uniforms.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_context.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_math.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/render_settings.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/renderer/include
+    ${CMAKE_SOURCE_DIR}/renderer/src
+    PRIVATE_DEPS
+    engine_core
+    engine_math
+)
