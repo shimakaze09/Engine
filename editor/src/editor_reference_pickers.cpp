@@ -181,10 +181,18 @@ bool draw_entity_reference_picker(
 
 bool draw_asset_reference_picker(const char *label,
                                  content::AssetTypeTag typeTag,
-                                 std::uint64_t *value) noexcept {
+                                 std::uint64_t *value,
+                                 core::AssetRef *outRef) noexcept {
   if ((label == nullptr) || (value == nullptr)) {
     return false;
   }
+  // Every branch below that moves the id moves the identity with it.
+  const auto assign = [value, outRef](std::uint64_t assetId) noexcept {
+    *value = assetId;
+    if (outRef != nullptr) {
+      *outRef = runtime::editor_asset_ref(assetId);
+    }
+  };
 
   bool changed = false;
   ImGui::PushID(label);
@@ -201,7 +209,7 @@ bool draw_asset_reference_picker(const char *label,
                        static_cast<unsigned long long>(*value));
     ImGui::SameLine();
     if (ImGui::SmallButton("Clear")) {
-      *value = 0ULL;
+      assign(renderer::kInvalidAssetId);
       changed = true;
     }
   }
@@ -218,7 +226,7 @@ bool draw_asset_reference_picker(const char *label,
     ImGui::InputTextWithHint("##search", "Search...", query, kQuerySize);
 
     if (ImGui::Selectable("<none>", *value == 0ULL)) {
-      *value = 0ULL;
+      assign(renderer::kInvalidAssetId);
       changed = true;
     }
 
@@ -230,7 +238,7 @@ bool draw_asset_reference_picker(const char *label,
       ImGui::PushID(static_cast<int>(i));
       const bool isSelected = (*value == hits[i].assetId);
       if (ImGui::Selectable(hits[i].path, isSelected)) {
-        *value = hits[i].assetId;
+        assign(hits[i].assetId);
         changed = true;
       }
       ImGui::PopID();

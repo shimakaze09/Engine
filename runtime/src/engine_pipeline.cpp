@@ -1138,9 +1138,10 @@ void EnginePipeline::Impl::stage_assets() noexcept {
     content::begin_streaming_frame(assetStreamingQueue.get());
   }
 
-  // Every mesh the World references and nothing has loaded yet is
-  // requested through the catalog here, so a reopened scene draws without
-  // a script naming its meshes. One table probe per reference per frame.
+  // Every mesh the World references and nothing has loaded yet is bound
+  // to its catalogued asset and requested here, so a reopened scene draws
+  // without a script naming its meshes. A reference is looked up once and
+  // costs one integer test per frame afterwards.
   static_cast<void>(request_referenced_mesh_assets(
       *world, &assetDatabaseService, &unresolvedMeshReports));
 

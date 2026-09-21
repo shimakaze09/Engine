@@ -51,10 +51,12 @@ std::uint64_t editor_request_mesh_asset(const char *virtualPath) noexcept {
   if (assetId == renderer::kInvalidAssetId) {
     return renderer::kInvalidAssetId;
   }
-  // A mesh the editor names by path is catalogued under that path, so
-  // the id the scene saves reads back as a name and resolves on reopen.
+  // A mesh the editor names by path is catalogued under that path. The
+  // identity stays whatever the mount walk already recorded for it: this
+  // path is a load, not an import, so it never mints one.
   static_cast<void>(note_mesh_asset_path(g_editorAssetService->database,
-                                         assetId, virtualPath));
+                                         assetId, virtualPath,
+                                         core::AssetRef{}));
 
   const renderer::AssetState state =
       renderer::mesh_asset_state(g_editorAssetService->database, assetId);
@@ -180,6 +182,20 @@ bool editor_asset_display_path(std::uint64_t assetId, char *outPath,
   }
   std::snprintf(outPath, outPathSize, "%s", metadata->filePath.data());
   return true;
+}
+
+core::AssetRef editor_asset_ref(std::uint64_t assetId) noexcept {
+  if ((assetId == renderer::kInvalidAssetId) ||
+      (g_editorAssetService == nullptr) ||
+      (g_editorAssetService->database == nullptr)) {
+    return core::AssetRef{};
+  }
+  const renderer::AssetMetadata *metadata = renderer::find_asset_metadata(
+      g_editorAssetService->database, assetId);
+  // A record without an identity is reported by the mount walk, not
+  // invented here: the reference stays nil so the gesture cannot write a
+  // made-up identity into a document.
+  return (metadata != nullptr) ? metadata->ref : core::AssetRef{};
 }
 
 namespace {

@@ -656,6 +656,7 @@ runtime::Entity execute_asset_spawn(
   make_asset_spawn_name(virtualPath, &command->name);
   command->hasMesh = true;
   command->mesh.meshAssetId = assetId;
+  command->mesh.meshRef = runtime::editor_asset_ref(assetId);
   if (!editor_session().commandHistory.execute(command)) {
     return runtime::kInvalidEntity;
   }
@@ -774,6 +775,11 @@ runtime::Entity execute_primitive_spawn(EditorPrimitive primitive) noexcept {
   command->hasMesh = true;
   command->mesh.meshAssetId =
       content::make_asset_id_from_path(desc.builtinPath);
+  // A primitive's identity is derived from its path rather than looked
+  // up: it ships with the engine, so it is the same asset in every build
+  // and needs no catalog record to be nameable in a saved scene.
+  command->mesh.meshRef = content::asset_ref_primary(
+      content::builtin_asset_guid(desc.builtinPath));
   command->hasCollider = true;
   command->colliderComponent.shape = desc.fallbackShape;
   command->colliderComponent.halfExtents = desc.halfExtents;
@@ -1130,6 +1136,8 @@ ComponentEditSnapshot default_component_snapshot(
         editor_session().world->get_mesh_component(entity, &sourceMesh)) {
       snapshot.foliagePatch.meshAssetIds[0] = sourceMesh.meshAssetId;
       snapshot.foliagePatch.meshAssetIds[1] = sourceMesh.meshAssetId;
+      snapshot.foliagePatch.meshRefs[0] = sourceMesh.meshRef;
+      snapshot.foliagePatch.meshRefs[1] = sourceMesh.meshRef;
     }
     for (std::uint32_t i = 0U; i < snapshot.foliagePatch.instanceCount; ++i) {
       const std::uint32_t x = i % 4U;

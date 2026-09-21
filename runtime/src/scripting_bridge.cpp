@@ -602,6 +602,21 @@ runtime::Entity scripting_instantiate_prefab(runtime::World *world,
   return runtime::instantiate_prefab(*world, path);
 }
 
+/// The catalog's persistent identity for an asset id; nil when the id is
+/// unknown or the asset carries no identity. Never mints one: an asset
+/// without a sidecar is reported by the mount walk, and a made-up
+/// identity in a saved scene would name a different asset next run.
+core::AssetRef scripting_asset_ref_for_id(std::uint64_t assetId) noexcept {
+  if ((assetId == renderer::kInvalidAssetId) ||
+      (g_scriptingAssetDatabaseService == nullptr) ||
+      (g_scriptingAssetDatabaseService->database == nullptr)) {
+    return core::AssetRef{};
+  }
+  const renderer::AssetMetadata *metadata = renderer::find_asset_metadata(
+      g_scriptingAssetDatabaseService->database, assetId);
+  return (metadata != nullptr) ? metadata->ref : core::AssetRef{};
+}
+
 /// Queues a mesh asset load through runtime-owned asset services.
 std::uint32_t scripting_load_asset_async(const char *path,
                                          std::uint8_t priority) noexcept {
@@ -626,9 +641,13 @@ std::uint32_t scripting_load_asset_async(const char *path,
     return kInvalidScriptAssetHandle;
   }
   // A mesh a script names by path is catalogued under that path, the
-  // same record the editor's picker and a reopened scene read.
+  // same record the editor's picker and a reopened scene read. It carries
+  // no authored identity: asking for a file by name is not importing it,
+  // so the record is reachable by id for this session and by nothing
+  // afterwards.
   static_cast<void>(note_mesh_asset_path(
-      g_scriptingAssetDatabaseService->database, assetId, path));
+      g_scriptingAssetDatabaseService->database, assetId, path,
+      core::AssetRef{}));
 
   retire_terminal_script_loads(g_scriptingAssetDatabaseService);
 
@@ -1339,6 +1358,7 @@ scripting::RuntimeServices make_scripting_runtime_services() noexcept {
   s.add_rigid_body_op = &scripting_add_rigid_body_op;
   s.add_collider_op = &scripting_add_collider_op;
   s.add_mesh_component_op = &scripting_add_mesh_component_op;
+  s.asset_ref_for_id = &scripting_asset_ref_for_id;
   s.add_name_component_op = &scripting_add_name_component_op;
   s.add_light_component_op = &scripting_add_light_component_op;
   s.remove_light_component_op = &scripting_remove_light_component_op;

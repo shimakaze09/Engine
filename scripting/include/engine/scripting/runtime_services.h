@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "engine/core/asset_identity.h"
 #include "engine/core/entity.h"
 #include "engine/math/component_types.h"
 #include "engine/math/world_component_types.h"
@@ -402,6 +403,14 @@ struct RuntimeServices final {
   std::uint32_t (*load_asset_async)(const char *path,
                                     std::uint8_t priority) noexcept = nullptr;
   bool (*is_asset_ready)(std::uint32_t handleIndex) noexcept = nullptr;
+
+  // The persistent identity the catalog holds for an asset id, or a nil
+  // reference when the asset carries none. A script that points a
+  // component at an asset stores this beside the id: the id says where
+  // the bytes are this session, the reference is what a saved scene
+  // names, so a component assigned from Lua survives a save and reload.
+  core::AssetRef (*asset_ref_for_id)(std::uint64_t assetId) noexcept =
+      nullptr;
 };
 
 /// Binds the runtime world into an explicit service locator. Binding

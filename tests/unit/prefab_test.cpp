@@ -7,6 +7,7 @@
 
 #include "engine/physics/physics.h"
 #include "engine/physics/primitive_hulls.h"
+#include "engine/content/asset_identity.h"
 #include "engine/runtime/prefab_serializer.h"
 #include "engine/runtime/world.h"
 
@@ -16,6 +17,18 @@ constexpr const char *kPrefabPath = "prefab_test_temp.json";
 constexpr const char *kPrefabSourceName = "Prefab \"Source\" \\ Name";
 constexpr const char *kPrefabScriptPath =
     "assets\\scripts\\prefab \"source\".lua";
+/// The mesh the round-trip prefab names. A prefab carries the persistent
+/// reference; the resolved id beside it is runtime state the format never
+/// writes, so this is what must survive save and instantiate.
+constexpr engine::core::AssetRef kPrefabMeshRef{
+    engine::core::AssetGuid{0x2a2a2a2a2a2a2a2aULL, 0xfeedfacecafebeefULL}, 0U};
+
+/// A distinct, recognisable reference per foliage LOD slot.
+engine::core::AssetRef prefab_lod_ref(std::uint64_t seed) noexcept {
+  return engine::content::asset_ref_primary(
+      engine::core::AssetGuid{0x4c4f440000000000ULL | seed,
+                              0xb000000000000000ULL | seed});
+}
 
 void remove_prefab_file() noexcept {
   static_cast<void>(std::remove(kPrefabPath));
@@ -79,7 +92,7 @@ bool write_prefab_text(const char *text) noexcept {
 int verify_instantiate_rejects_malformed_component() {
   remove_prefab_file();
   constexpr const char *kMalformedPrefab =
-      "{\"version\":1,\"components\":{\"Transform\":{\"position\":\"bad\"}}}";
+      "{\"version\":5,\"components\":{\"Transform\":{\"position\":\"bad\"}}}";
   if (!write_prefab_text(kMalformedPrefab)) {
     remove_prefab_file();
     return 32;
@@ -114,13 +127,13 @@ int verify_malformed_float_field_refuses_prefab() {
   };
 
   constexpr FieldCase kCases[] = {
-      {"{\"version\":1,\"components\":{"
-       "\"MeshComponent\":{\"meshAssetId\":7,\"roughness\":\"0.5\"}}}",
+      {"{\"version\":5,\"components\":{"
+       "\"MeshComponent\":{\"mesh\":\"00000007-0000-4000-8000-000000000007\",\"roughness\":\"0.5\"}}}",
        450},
-      {"{\"version\":1,\"components\":{"
-       "\"MeshComponent\":{\"meshAssetId\":7,\"opacity\":null}}}",
+      {"{\"version\":5,\"components\":{"
+       "\"MeshComponent\":{\"mesh\":\"00000007-0000-4000-8000-000000000007\",\"opacity\":null}}}",
        451},
-      {"{\"version\":1,\"components\":{"
+      {"{\"version\":5,\"components\":{"
        "\"LightComponent\":{\"intensity\":\"bright\"}}}",
        452},
   };
@@ -153,8 +166,8 @@ int verify_malformed_float_field_refuses_prefab() {
   // the refusal is about the value and not the component.
   remove_prefab_file();
   constexpr const char *kValid =
-      "{\"version\":1,\"components\":{"
-      "\"MeshComponent\":{\"meshAssetId\":7,\"roughness\":0.25}}}";
+      "{\"version\":5,\"components\":{"
+      "\"MeshComponent\":{\"mesh\":\"00000007-0000-4000-8000-000000000007\",\"roughness\":0.25}}}";
   if (!write_prefab_text(kValid)) {
     remove_prefab_file();
     return 453;
@@ -185,20 +198,24 @@ int verify_instantiate_validates_schema_version() {
     bool accepted;
   };
 
-  // Revision 4 is what this build writes and revisions 1 to 3 still load.
-  // A document omitting the key reads as revision 1, so hand-authored
-  // prefabs still load.
+  // Revision 5 is the one revision this build reads. Every older
+  // revision is refused rather than migrated, and a document omitting
+  // the key names no revision at all, so it is refused too: the project
+  // is unreleased, the tree migrates once per format change, and a
+  // reader that guessed a revision would silently drop the fields it no
+  // longer knows.
   constexpr VersionCase kCases[] = {
-      {"{\"version\":4,\"components\":{}}", true},
-      {"{\"version\":3,\"components\":{}}", true},
-      {"{\"version\":2,\"components\":{}}", true},
-      {"{\"version\":1,\"components\":{}}", true},
-      {"{\"components\":{}}", true},
-      {"{\"version\":5,\"components\":{}}", false},
+      {"{\"version\":5,\"components\":{}}", true},
+      {"{\"version\":1,\"components\":{}}", false},
+      {"{\"version\":2,\"components\":{}}", false},
+      {"{\"version\":3,\"components\":{}}", false},
+      {"{\"version\":4,\"components\":{}}", false},
+      {"{\"components\":{}}", false},
+      {"{\"version\":6,\"components\":{}}", false},
       {"{\"version\":999,\"components\":{}}", false},
       {"{\"version\":0,\"components\":{}}", false},
       {"{\"version\":-1,\"components\":{}}", false},
-      {"{\"version\":1.5,\"components\":{}}", false},
+      {"{\"version\":5.5,\"components\":{}}", false},
       {"{\"version\":4294967296,\"components\":{}}", false},
       {"{\"version\":\"1\",\"components\":{}}", false},
       {"{\"version\":true,\"components\":{}}", false},
@@ -249,7 +266,7 @@ int verify_instantiate_validates_schema_version() {
 int verify_instantiate_rolls_back_on_component_add_failure() {
   remove_prefab_file();
   constexpr const char *kPointLightPrefab =
-      "{\"version\":1,\"components\":{\"PointLightComponent\":{\"radius\":3}}}";
+      "{\"version\":5,\"components\":{\"PointLightComponent\":{\"radius\":3}}}";
   if (!write_prefab_text(kPointLightPrefab)) {
     remove_prefab_file();
     return 35;
@@ -330,7 +347,7 @@ int verify_collider_prefab_round_trip() {
   }
 
   constexpr const char *kLegacyPrefab =
-      "{\"version\":1,\"components\":{\"Collider\":{\"halfExtents\":[1,2,3]}}}";
+      "{\"version\":5,\"components\":{\"Collider\":{\"halfExtents\":[1,2,3]}}}";
   if (!write_prefab_text(kLegacyPrefab)) {
     return 104;
   }
@@ -346,7 +363,7 @@ int verify_collider_prefab_round_trip() {
   }
 
   constexpr const char *kInvalidPrefab =
-      "{\"version\":1,\"components\":{\"Collider\":{\"shape\":5}}}";
+      "{\"version\":5,\"components\":{\"Collider\":{\"shape\":5}}}";
   if (!write_prefab_text(kInvalidPrefab)) {
     return 106;
   }
@@ -447,7 +464,7 @@ int verify_animation_prefab_round_trip() {
 
   // The bare path stays readable, supplying defaults for the fields it
   // cannot express -- every prefab authored before the object shape.
-  if (!write_prefab_text("{\"version\":1,\"components\":{"
+  if (!write_prefab_text("{\"version\":5,\"components\":{"
                          "\"AnimationComponent\":"
                          "\"assets/character.animctrl\"}}")) {
     return 103;
@@ -467,7 +484,7 @@ int verify_animation_prefab_round_trip() {
 
   // Unchanged rule: the prefab format requires a non-empty controller path,
   // in the object shape as well as the string.
-  if (!write_prefab_text("{\"version\":1,\"components\":{"
+  if (!write_prefab_text("{\"version\":5,\"components\":{"
                          "\"AnimationComponent\":{\"controllerPath\":\"\"}}}")) {
     return 106;
   }
@@ -578,7 +595,7 @@ int verify_overlong_prefab_name_rejected() {
 
   // 32 'n's: one byte past the 31-char capacity.
   const char *overlong =
-      "{\"version\":1,\"components\":{\"Transform\":{},"
+      "{\"version\":5,\"components\":{\"Transform\":{},"
       "\"NameComponent\":{\"name\":"
       "\"nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn\"}}}";
   {
@@ -613,7 +630,7 @@ int verify_overlong_prefab_name_rejected() {
 
   // Boundary: exactly 31 characters instantiates with the name intact.
   const char *boundary =
-      "{\"version\":1,\"components\":{\"Transform\":{},"
+      "{\"version\":5,\"components\":{\"Transform\":{},"
       "\"NameComponent\":{\"name\":"
       "\"nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn\"}}}";
   {
@@ -736,7 +753,7 @@ int verify_child_prefab_instantiates_as_root() {
   // live entity here is normalized to a root rather than re-parented.
   char authored[160] = {};
   std::snprintf(authored, sizeof(authored),
-                "{\"version\":1,\"components\":{\"Transform\":{"
+                "{\"version\":5,\"components\":{\"Transform\":{"
                 "\"position\":[4,5,6],\"parentId\":%u}}}",
                 static_cast<unsigned>(parentId));
   if (!write_prefab_text(authored)) {
@@ -816,7 +833,7 @@ int main() {
   }
 
   engine::runtime::MeshComponent mesh{};
-  mesh.meshAssetId = 42U;
+  mesh.meshRef = kPrefabMeshRef;
   mesh.albedo = engine::math::Vec3(0.8F, 0.2F, 0.4F);
   mesh.roughness = 0.6F;
   mesh.metallic = 0.1F;
@@ -859,8 +876,8 @@ int main() {
   }
 
   engine::runtime::FoliagePatchComponent foliage{};
-  foliage.meshAssetIds[0] = 77U;
-  foliage.meshAssetIds[1] = 88U;
+  foliage.meshRefs[0] = prefab_lod_ref(77U);
+  foliage.meshRefs[1] = prefab_lod_ref(88U);
   foliage.instanceCount = 2U;
   foliage.density = 1.75F;
   foliage.albedo = engine::math::Vec3(0.2F, 0.8F, 0.25F);
@@ -955,7 +972,8 @@ int main() {
     remove_prefab_file();
     return 20;
   }
-  if (instMesh.meshAssetId != 42U || !nearly_equal(instMesh.albedo.x, 0.8F) ||
+  if (!(instMesh.meshRef == kPrefabMeshRef) ||
+      !nearly_equal(instMesh.albedo.x, 0.8F) ||
       !nearly_equal(instMesh.roughness, 0.6F) ||
       !nearly_equal(instMesh.metallic, 0.1F) ||
       !nearly_equal(instMesh.opacity, 0.9F) ||
@@ -1011,8 +1029,8 @@ int main() {
     remove_prefab_file();
     return 30;
   }
-  if ((instFoliage.meshAssetIds[0] != 77U) ||
-      (instFoliage.meshAssetIds[1] != 88U) ||
+  if (!(instFoliage.meshRefs[0] == prefab_lod_ref(77U)) ||
+      !(instFoliage.meshRefs[1] == prefab_lod_ref(88U)) ||
       (instFoliage.instanceCount != 2U) ||
       !nearly_equal(instFoliage.density, 1.75F) ||
       !nearly_equal(instFoliage.albedo.y, 0.8F) ||

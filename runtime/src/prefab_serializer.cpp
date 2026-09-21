@@ -18,21 +18,6 @@
 
 namespace engine::runtime {
 
-namespace {
-
-// Revision 3 writes RigidBody inertia provenance (inertiaAuthored); every
-// older revision always wrote a numeric inverseInertia, which is kept as
-// the authored value. Revision 2 writes inverseInertia as a 3-element
-// array; revision 1 wrote one number, read as the same value on every axis.
-constexpr std::uint32_t kLastImplicitInertiaPrefabVersion = 2U;
-constexpr std::uint32_t kLastScalarInertiaPrefabVersion = 1U;
-// Before the gravity scale (revision 4) a body was held against gravity
-// by an authored acceleration equal to its opposite.
-constexpr std::uint32_t kLastAccelerationCancelsGravityPrefabVersion = 3U;
-constexpr const char *kInverseInertiaKey = "inverseInertia";
-
-} // namespace
-
 // ---- Registry-driven component codec ----------------------------
 // Row membership and order for both prefab directions expand from
 // ENGINE_PERSISTENT_COMPONENT_TABLE; each type's prefab wire shape lives
@@ -104,25 +89,6 @@ bool decode_prefab_component(const core::JsonParser &parser,
     return read_light_component(parser, value, out);
   } else if constexpr (std::is_same_v<T, FoliagePatchComponent>) {
     return read_foliage_patch_component(parser, value, out);
-  } else if constexpr (std::is_same_v<T, RigidBody>) {
-    ReflectedReadOptions options{};
-    if (documentVersion <= kLastScalarInertiaPrefabVersion) {
-      options.uniformScalarVec3Key = kInverseInertiaKey;
-    }
-    if (!read_reflected_component(parser, value,
-                                  component_descriptor(descs, out), out,
-                                  options)) {
-      return false;
-    }
-    if (documentVersion <= kLastImplicitInertiaPrefabVersion) {
-      out->inertiaAuthored = true;
-    }
-    // A prefab carries no gravity of its own; the cancelled value can
-    // only have meant the default the scenes of that revision ran with.
-    if (documentVersion <= kLastAccelerationCancelsGravityPrefabVersion) {
-      migrate_cancelled_gravity(out, physics::kDefaultGravity);
-    }
-    return true;
   } else {
     static_cast<void>(documentVersion);
     return read_reflected_component(parser, value,
@@ -179,7 +145,9 @@ bool encode_prefab_component(core::JsonWriter &w, const char *key,
 namespace {
 
 constexpr const char *kPrefabLogChannel = "prefab";
-constexpr std::uint32_t kPrefabVersion = 4U;
+/// v5 names mesh and material assets by their persistent reference rather
+/// than by a hash of their path, matching scene v6.
+constexpr std::uint32_t kPrefabVersion = 5U;
 
 // File IO and vec/quat/foliage JSON helpers are shared with the scene
 // serializer via serialization_util.h.

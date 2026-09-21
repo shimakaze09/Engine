@@ -73,6 +73,12 @@ std::size_t editor_query_assets(content::AssetTypeTag typeTag,
 /// reference picker uses to render its broken-reference state.
 bool editor_asset_display_path(std::uint64_t assetId, char *outPath,
                                std::size_t outPathSize) noexcept;
+/// The persistent identity the catalog holds for a known asset id, or a
+/// nil reference when the id is unregistered or the asset was never
+/// imported. An editor gesture that points a component at an asset stores
+/// this beside the id, because the id is where the bytes are this session
+/// and the reference is what a saved document names.
+core::AssetRef editor_asset_ref(std::uint64_t assetId) noexcept;
 
 // --- Material editor bridge ---
 //

@@ -10,6 +10,7 @@
 #include <new>
 #include <string>
 
+#include "engine/content/asset_identity.h"
 #include "engine/core/json.h"
 #include "engine/physics/physics.h"
 #include "engine/physics/primitive_hulls.h"
@@ -20,6 +21,16 @@
 namespace {
 
 constexpr const char *kRoundTripName = "Player \"One\" \\ Path";
+/// The mesh the round-trip entity names. A scene carries the persistent
+/// reference; the resolved id beside it is runtime state the format never
+/// writes, so this is what must survive save and load.
+constexpr engine::core::AssetRef kRoundTripMeshRef{
+    engine::core::AssetGuid{0x7777777777777777ULL, 0x1234567890abcdefULL}, 0U};
+/// The material that mesh names, as a sub-asset so the "#localId" text
+/// shape rides the round trip too.
+constexpr engine::core::AssetRef kRoundTripMaterialRef{
+    engine::core::AssetGuid{0xABCDEF0123456789ULL, 0x0F0E0D0C0B0A0908ULL},
+    0x00FF00FF00FF00FFULL};
 constexpr const char *kRoundTripScriptPath =
     "assets\\scripts\\hero \"one\".lua";
 
@@ -165,7 +176,7 @@ int build_source_scene(const char *path) {
   }
 
   engine::runtime::MeshComponent thirdMesh{};
-  thirdMesh.meshAssetId = 7U;
+  thirdMesh.meshRef = kRoundTripMeshRef;
   thirdMesh.albedo = engine::math::Vec3(0.3F, 0.7F, 0.1F);
   thirdMesh.sceneCaptureSourceId = 9U;
   if (!world->add_mesh_component(third, thirdMesh)) {
@@ -271,7 +282,7 @@ int build_source_buffer(
   }
 
   engine::runtime::MeshComponent thirdMesh{};
-  thirdMesh.meshAssetId = 7U;
+  thirdMesh.meshRef = kRoundTripMeshRef;
   thirdMesh.albedo = engine::math::Vec3(0.3F, 0.7F, 0.1F);
   thirdMesh.sceneCaptureSourceId = 9U;
   if (!world->add_mesh_component(third, thirdMesh)) {
@@ -361,7 +372,8 @@ int verify_loaded_scene(const char *path) {
     engine::runtime::MeshComponent mesh{};
     if (world->get_mesh_component(entity, &mesh)) {
       ++meshCount;
-      if ((mesh.meshAssetId == 7U) && nearly_equal(mesh.albedo.y, 0.7F) &&
+      if ((mesh.meshRef == kRoundTripMeshRef) &&
+          nearly_equal(mesh.albedo.y, 0.7F) &&
           (mesh.sceneCaptureSourceId == 9U)) {
         foundMeshValue = true;
       }
@@ -508,7 +520,8 @@ int verify_loaded_scene_from_buffer(
     engine::runtime::MeshComponent mesh{};
     if (world->get_mesh_component(entity, &mesh)) {
       ++meshCount;
-      if ((mesh.meshAssetId == 7U) && nearly_equal(mesh.albedo.y, 0.7F) &&
+      if ((mesh.meshRef == kRoundTripMeshRef) &&
+          nearly_equal(mesh.albedo.y, 0.7F) &&
           (mesh.sceneCaptureSourceId == 9U)) {
         foundMeshValue = true;
       }
@@ -630,7 +643,7 @@ int verify_scene_version_in_buffer(
     return 65;
   }
 
-  if (version != 5U) {
+  if (version != 6U) {
     return 66;
   }
 
@@ -639,7 +652,7 @@ int verify_scene_version_in_buffer(
 
 int verify_duplicate_persistent_id_fails() {
   constexpr const char *kDuplicateScene =
-      "{\"version\":2,\"entities\":["
+      "{\"version\":6,\"entities\":["
       "{\"persistentId\":11,\"components\":{}},"
       "{\"persistentId\":11,\"components\":{}}]}";
 
@@ -827,12 +840,12 @@ int verify_joints_die_with_bodies_and_reset_clears_physics() {
 /// while a forward reference to a later entity loads.
 int verify_cyclic_scene_is_refused() {
   constexpr const char *kCyclicScene =
-      "{\"version\":2,\"entities\":["
+      "{\"version\":6,\"entities\":["
       "{\"persistentId\":1,\"components\":{\"Transform\":{\"parentId\":2}}},"
       "{\"persistentId\":2,\"components\":{\"Transform\":{\"parentId\":3}}},"
       "{\"persistentId\":3,\"components\":{\"Transform\":{\"parentId\":1}}}]}";
   constexpr const char *kForwardScene =
-      "{\"version\":2,\"entities\":["
+      "{\"version\":6,\"entities\":["
       "{\"persistentId\":1,\"components\":{\"Transform\":{\"parentId\":2}}},"
       "{\"persistentId\":2,\"components\":{\"Transform\":{}}}]}";
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
@@ -889,7 +902,7 @@ int verify_load_scene_replaces_existing_scene_state(
 
 int verify_point_spot_light_parse_failures_reject_scene() {
   constexpr const char *kBadPointLightScene =
-      "{\"version\":2,\"entities\":[{\"components\":{"
+      "{\"version\":6,\"entities\":[{\"components\":{"
       "\"PointLightComponent\":{\"color\":\"bad\"}}}]}";
   std::unique_ptr<engine::runtime::World> pointWorld(
       new (std::nothrow) engine::runtime::World());
@@ -905,7 +918,7 @@ int verify_point_spot_light_parse_failures_reject_scene() {
   }
 
   constexpr const char *kBadSpotLightScene =
-      "{\"version\":2,\"entities\":[{\"components\":{"
+      "{\"version\":6,\"entities\":[{\"components\":{"
       "\"SpotLightComponent\":{\"outerConeAngle\":\"wide\"}}}]}";
   std::unique_ptr<engine::runtime::World> spotWorld(
       new (std::nothrow) engine::runtime::World());
@@ -1016,7 +1029,7 @@ int verify_point_spot_light_scene_round_trip() {
 /// S5).
 int verify_foliage_parse_failures_reject_scene() {
   constexpr const char *kBadFoliageDensityScene =
-      "{\"version\":2,\"entities\":[{\"components\":{"
+      "{\"version\":6,\"entities\":[{\"components\":{"
       "\"FoliagePatchComponent\":{\"density\":\"thick\"}}}]}";
   std::unique_ptr<engine::runtime::World> densityWorld(
       new (std::nothrow) engine::runtime::World());
@@ -1032,7 +1045,7 @@ int verify_foliage_parse_failures_reject_scene() {
   }
 
   constexpr const char *kBadFoliageInstanceScene =
-      "{\"version\":2,\"entities\":[{\"components\":{"
+      "{\"version\":6,\"entities\":[{\"components\":{"
       "\"FoliagePatchComponent\":{\"instanceCount\":1,"
       "\"instances\":[{\"scale\":\"big\"}]}}}]}";
   std::unique_ptr<engine::runtime::World> instanceWorld(
@@ -1068,19 +1081,19 @@ int verify_material_and_light_float_fields_reject_malformed() {
   };
 
   const Case malformed[] = {
-      {"{\"version\":2,\"entities\":[{\"components\":{"
+      {"{\"version\":6,\"entities\":[{\"components\":{"
        "\"MeshComponent\":{\"meshAssetId\":7,\"roughness\":\"0.5\"}}}]}",
        431},
-      {"{\"version\":2,\"entities\":[{\"components\":{"
+      {"{\"version\":6,\"entities\":[{\"components\":{"
        "\"MeshComponent\":{\"meshAssetId\":7,\"metallic\":\"shiny\"}}}]}",
        432},
-      {"{\"version\":2,\"entities\":[{\"components\":{"
+      {"{\"version\":6,\"entities\":[{\"components\":{"
        "\"MeshComponent\":{\"meshAssetId\":7,\"opacity\":null}}}]}",
        433},
-      {"{\"version\":2,\"entities\":[{\"components\":{"
+      {"{\"version\":6,\"entities\":[{\"components\":{"
        "\"MeshComponent\":{\"meshAssetId\":7,\"roughness\":true}}}]}",
        434},
-      {"{\"version\":2,\"entities\":[{\"components\":{"
+      {"{\"version\":6,\"entities\":[{\"components\":{"
        "\"LightComponent\":{\"intensity\":\"bright\"}}}]}",
        435},
   };
@@ -1103,7 +1116,7 @@ int verify_material_and_light_float_fields_reject_malformed() {
 
   // Present and valid still round-trips.
   constexpr const char *kValidScene =
-      "{\"version\":2,\"entities\":[{\"components\":{"
+      "{\"version\":6,\"entities\":[{\"components\":{"
       "\"MeshComponent\":{\"meshAssetId\":7,\"roughness\":0.25,"
       "\"metallic\":0.75,\"opacity\":0.5}}}]}";
   std::unique_ptr<engine::runtime::World> validWorld(
@@ -1122,7 +1135,7 @@ int verify_material_and_light_float_fields_reject_malformed() {
   // Absent keeps the component default: strictness applies to a present
   // value only, so existing scenes that omit these fields still load.
   constexpr const char *kAbsentScene =
-      "{\"version\":2,\"entities\":[{\"components\":{"
+      "{\"version\":6,\"entities\":[{\"components\":{"
       "\"MeshComponent\":{\"meshAssetId\":7}}}]}";
   std::unique_ptr<engine::runtime::World> absentWorld(
       new (std::nothrow) engine::runtime::World());
@@ -1149,26 +1162,36 @@ int verify_material_and_light_float_fields_reject_malformed() {
 int verify_over_capacity_authored_data_rejected() {
   // 32 'n's: one byte past NameComponent's 31-char capacity.
   constexpr const char *kOverlongNameScene =
-      "{\"version\":2,\"entities\":[{\"components\":{"
+      "{\"version\":6,\"entities\":[{\"components\":{"
       "\"name\":\"nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn\"}}]}";
+  // One LOD slot past the fixed capacity: refused whole rather than
+  // dropping the authored tail.
   constexpr const char *kFourLodScene =
-      "{\"version\":2,\"entities\":[{\"components\":{"
-      "\"FoliagePatchComponent\":{\"meshAssetIds\":[1,2,3,4]}}}]}";
+      "{\"version\":6,\"entities\":[{\"components\":{"
+      "\"FoliagePatchComponent\":{\"meshes\":["
+      "\"00000001-0000-4000-8000-000000000001\","
+      "\"00000002-0000-4000-8000-000000000002\","
+      "\"00000003-0000-4000-8000-000000000003\","
+      "\"00000004-0000-4000-8000-000000000004\"]}}}]}";
+  // A LOD slot that is neither empty nor a parsable reference.
+  constexpr const char *kMalformedLodRefScene =
+      "{\"version\":6,\"entities\":[{\"components\":{"
+      "\"FoliagePatchComponent\":{\"meshes\":[\"not-a-reference\"]}}}]}";
   constexpr const char *kCountAboveArrayScene =
-      "{\"version\":2,\"entities\":[{\"components\":{"
+      "{\"version\":6,\"entities\":[{\"components\":{"
       "\"FoliagePatchComponent\":{\"instanceCount\":2,"
       "\"instances\":[{\"scale\":1.0}]}}}]}";
   constexpr const char *kCountBelowArrayScene =
-      "{\"version\":2,\"entities\":[{\"components\":{"
+      "{\"version\":6,\"entities\":[{\"components\":{"
       "\"FoliagePatchComponent\":{\"instanceCount\":1,"
       "\"instances\":[{\"scale\":1.0},{\"scale\":2.0}]}}}]}";
   constexpr const char *kBareCountOverCapacityScene =
-      "{\"version\":2,\"entities\":[{\"components\":{"
+      "{\"version\":6,\"entities\":[{\"components\":{"
       "\"FoliagePatchComponent\":{\"instanceCount\":65}}}]}";
 
   // One instance entry past the fixed capacity.
   std::string overCapacityInstances =
-      "{\"version\":2,\"entities\":[{\"components\":{"
+      "{\"version\":6,\"entities\":[{\"components\":{"
       "\"FoliagePatchComponent\":{\"instances\":[";
   for (std::size_t i = 0U;
        i <= engine::runtime::FoliagePatchComponent::kMaxInstances; ++i) {
@@ -1197,6 +1220,7 @@ int verify_over_capacity_authored_data_rejected() {
 
   const char *rejected[] = {kOverlongNameScene,
                             kFourLodScene,
+                            kMalformedLodRefScene,
                             kCountAboveArrayScene,
                             kCountBelowArrayScene,
                             kBareCountOverCapacityScene,
@@ -1238,7 +1262,9 @@ int verify_over_capacity_authored_data_rejected() {
   engine::runtime::FoliagePatchComponent foliage{};
   for (std::size_t i = 0U;
        i < engine::runtime::FoliagePatchComponent::kMaxLods; ++i) {
-    foliage.meshAssetIds[i] = 100ULL + i;
+    foliage.meshRefs[i] = engine::content::asset_ref_primary(
+        engine::core::AssetGuid{0xF0F0F0F000000000ULL + i,
+                                0x0A0A0A0A00000000ULL + i});
   }
   foliage.instanceCount = static_cast<std::uint32_t>(
       engine::runtime::FoliagePatchComponent::kMaxInstances);
@@ -1295,7 +1321,7 @@ int verify_over_capacity_authored_data_rejected() {
 /// precedents above.
 int verify_camera_parse_failure_rejects_scene() {
   constexpr const char *kBadCameraFovScene =
-      "{\"version\":2,\"entities\":[{\"components\":{"
+      "{\"version\":6,\"entities\":[{\"components\":{"
       "\"CameraComponent\":{\"fovRadians\":\"wide\"}}}]}";
   std::unique_ptr<engine::runtime::World> world(
       new (std::nothrow) engine::runtime::World());
@@ -1326,8 +1352,9 @@ int verify_camera_parse_failure_rejects_scene() {
   return 0;
 }
 
-/// MeshComponent.materialAssetId round-trips exactly and stays zero for
-/// scenes authored before material assets existed (key absent).
+/// A mesh component's material reference round-trips exactly, and a mesh
+/// that names no material reads back with a nil one — the key is omitted
+/// when there is nothing to name.
 int verify_mesh_material_reference_round_trip() {
   std::unique_ptr<engine::runtime::World> source(new (std::nothrow)
                                                      engine::runtime::World());
@@ -1341,8 +1368,8 @@ int verify_mesh_material_reference_round_trip() {
   }
 
   engine::runtime::MeshComponent mesh{};
-  mesh.meshAssetId = 42ULL;
-  mesh.materialAssetId = 0xABCDEF0123456789ULL;
+  mesh.meshRef = kRoundTripMeshRef;
+  mesh.materialRef = kRoundTripMaterialRef;
   if (!source->add_mesh_component(entity, mesh)) {
     return 136;
   }
@@ -1370,22 +1397,23 @@ int verify_mesh_material_reference_round_trip() {
   if (!loaded->get_mesh_component(loadedEntity, &loadedMesh)) {
     return 140;
   }
-  if ((loadedMesh.meshAssetId != 42ULL) ||
-      (loadedMesh.materialAssetId != 0xABCDEF0123456789ULL)) {
+  if (!(loadedMesh.meshRef == kRoundTripMeshRef) ||
+      !(loadedMesh.materialRef == kRoundTripMaterialRef)) {
     return 141;
   }
 
-  // Pre-material scene JSON (no materialAssetId key) must load as zero.
-  constexpr const char *kLegacyScene =
-      "{\"version\":2,\"entities\":[{\"components\":{"
-      "\"MeshComponent\":{\"meshAssetId\":7}}}]}";
+  // A mesh naming no material omits the key, and reads back nil.
+  constexpr const char *kNoMaterialScene =
+      "{\"version\":6,\"entities\":[{\"components\":{"
+      "\"MeshComponent\":{\"mesh\":"
+      "\"77777777-7777-7777-1234-567890abcdef\"}}}]}";
   std::unique_ptr<engine::runtime::World> legacy(new (std::nothrow)
                                                      engine::runtime::World());
   if (legacy == nullptr) {
     return 142;
   }
-  if (!engine::runtime::load_scene(*legacy, kLegacyScene,
-                                   std::strlen(kLegacyScene))) {
+  if (!engine::runtime::load_scene(*legacy, kNoMaterialScene,
+                                   std::strlen(kNoMaterialScene))) {
     return 143;
   }
   engine::runtime::Entity legacyEntity = engine::runtime::kInvalidEntity;
@@ -1395,8 +1423,8 @@ int verify_mesh_material_reference_round_trip() {
   if (!legacy->get_mesh_component(legacyEntity, &legacyMesh)) {
     return 144;
   }
-  if ((legacyMesh.meshAssetId != 7ULL) ||
-      (legacyMesh.materialAssetId != 0ULL)) {
+  if (!(legacyMesh.meshRef == kRoundTripMeshRef) ||
+      engine::core::asset_ref_is_valid(legacyMesh.materialRef)) {
     return 145;
   }
 
@@ -1463,8 +1491,10 @@ int verify_collider_scene_round_trip() {
     }
   }
 
+  // A collider that authors only its extents takes the default shape and
+  // pose for the rest.
   constexpr const char *kLegacyScene =
-      "{\"version\":2,\"entities\":[{\"components\":{\"Collider\":{"
+      "{\"version\":6,\"entities\":[{\"components\":{\"Collider\":{"
       "\"halfExtents\":[1,2,3]}}}]}";
   std::unique_ptr<engine::runtime::World> legacy(new (std::nothrow)
                                                      engine::runtime::World());
@@ -1485,7 +1515,7 @@ int verify_collider_scene_round_trip() {
   }
 
   constexpr const char *kInvalidScene =
-      "{\"version\":2,\"entities\":[{\"components\":{\"Collider\":{\"shape\":5}"
+      "{\"version\":6,\"entities\":[{\"components\":{\"Collider\":{\"shape\":5}"
       "}}]}";
   std::unique_ptr<engine::runtime::World> invalid(new (std::nothrow)
                                                       engine::runtime::World());
@@ -1524,7 +1554,7 @@ int check_every_component_type_survives_load() {
   Collider collider{};
   collider.halfExtents = engine::math::Vec3(0.25F, 0.5F, 0.75F);
   MeshComponent mesh{};
-  mesh.meshAssetId = 4242ULL;
+  mesh.meshRef = kRoundTripMeshRef;
   FoliagePatchComponent foliage{};
   foliage.instanceCount = 1U;
   foliage.instances[0].scale = 0.625F;
@@ -1612,7 +1642,7 @@ int check_every_component_type_survives_load() {
       !loaded->get_collider(found, &loadedCollider) ||
       (loadedCollider.halfExtents.z != 0.75F) ||
       !loaded->get_mesh_component(found, &loadedMesh) ||
-      (loadedMesh.meshAssetId != 4242ULL) ||
+      !(loadedMesh.meshRef == kRoundTripMeshRef) ||
       !loaded->get_foliage_patch_component(found, &loadedFoliage) ||
       (loadedFoliage.instanceCount != 1U) ||
       (loadedFoliage.instances[0].scale != 0.625F) ||
@@ -1761,7 +1791,7 @@ int check_animation_authored_fields_round_trip() {
   // it cannot express -- this is the migration path for every scene authored
   // before the object shape existed.
   constexpr const char *kLegacyScene =
-      "{\"version\":2,\"entities\":[{\"components\":{"
+      "{\"version\":6,\"entities\":[{\"components\":{"
       "\"name\":\"Legacy\","
       "\"AnimationComponent\":\"assets/character.animctrl\"}}]}";
   std::unique_ptr<World> legacy(new (std::nothrow) World());
@@ -1785,7 +1815,7 @@ int check_animation_authored_fields_round_trip() {
   // present-but-malformed field fails the load rather than silently keeping
   // the default.
   constexpr const char *kMalformedScene =
-      "{\"version\":2,\"entities\":[{\"components\":{"
+      "{\"version\":6,\"entities\":[{\"components\":{"
       "\"AnimationComponent\":{"
       "\"controllerPath\":\"assets/character.animctrl\","
       "\"playing\":\"yes\"}}}]}";
@@ -1920,7 +1950,7 @@ int check_timers_are_runtime_only() {
 
   // A legacy scene with a timers block still loads, but restores nothing.
   const char *legacyScene =
-      "{\"version\":1,\"entities\":[],"
+      "{\"version\":6,\"entities\":[],"
       "\"timers\":[{\"id\":1,\"remaining\":0.5,\"interval\":0.5,"
       "\"repeat\":true}]}";
   std::unique_ptr<World> loaded(new (std::nothrow) World());

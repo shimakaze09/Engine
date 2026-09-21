@@ -41,6 +41,18 @@ std::uint64_t g_builtinCylinderMesh = 0ULL;
 std::uint64_t g_builtinCapsuleMesh = 0ULL;
 std::uint64_t g_builtinPyramidMesh = 0ULL;
 
+/// The identity the catalog holds for an asset id, so a component a
+/// script points at an asset carries what a saved scene names and not
+/// only the id the bytes sit under this session. Nil when the runtime
+/// publishes no lookup or the asset carries no identity.
+core::AssetRef catalogued_asset_ref(std::uint64_t assetId) noexcept {
+  const RuntimeServices *services = runtime_binding().services;
+  if ((services == nullptr) || (services->asset_ref_for_id == nullptr)) {
+    return core::AssetRef{};
+  }
+  return services->asset_ref_for_id(assetId);
+}
+
 int lua_engine_set_mesh(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity) || !lua_isnumber(state, 2)) {
@@ -58,6 +70,7 @@ int lua_engine_set_mesh(lua_State *state) noexcept {
   static_cast<void>(latest_mesh_component(entity, &component));
 
   component.meshAssetId = meshId;
+  component.meshRef = catalogued_asset_ref(meshId);
   const bool ok = apply_or_queue_mesh_component(entity, component);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
@@ -194,6 +207,7 @@ int lua_engine_spawn_shape(lua_State *state) noexcept {
   if ((failedStep == nullptr) && (meshId != 0ULL)) {
     runtime::MeshComponent meshComp{};
     meshComp.meshAssetId = meshId;
+    meshComp.meshRef = catalogued_asset_ref(meshId);
     meshComp.albedo = albedo;
     if (!services.add_mesh_component_op(world, entity, meshComp)) {
       failedStep = "mesh component";
