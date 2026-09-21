@@ -244,6 +244,16 @@ engine_add_test_executable(engine_integration_scene_mesh_resolution
     integration
 )
 
+engine_add_test_executable(engine_integration_scene_material_resolution
+    SOURCES
+    scene_material_resolution_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_scripting
+    LABELS
+    integration
+)
+
 engine_add_test_executable(engine_integration_player_mode
     SOURCES
     player_mode_test.cpp

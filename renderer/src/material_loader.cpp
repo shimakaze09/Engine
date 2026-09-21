@@ -290,6 +290,16 @@ bool parse_material_text(AssetDatabase *database, const char *virtualPath,
   AssetMetadata metadata{};
   metadata.assetId = id;
   metadata.typeTag = AssetTypeTag::Material;
+  // Registering this record replaces whatever the catalog holds for this
+  // path, and the mount walk got there first and resolved the identity
+  // this material's sidecar authored. Carry that identity forward: a
+  // document names a material by its GUID, so dropping it here would
+  // leave every authored reference pointing at nothing, and a save would
+  // write back the nil ref the entity was left holding.
+  if (const AssetMetadata *catalogued = find_asset_metadata(database, id);
+      catalogued != nullptr) {
+    metadata.ref = catalogued->ref;
+  }
   write_metadata_path(&metadata.filePath, virtualPath);
   if ((parentId != kInvalidAssetId) &&
       !asset_metadata_add_dependency(&metadata, parentId)) {
