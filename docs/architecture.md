@@ -186,10 +186,16 @@ See the `serialization` skill for the procedure.
   key carries it, grouping draws into one contiguous run per model within
   each of the opaque and transparent halves. A pass binds one program per
   run. Adding a model means adding its program and its run, never a
-  global mode or a cvar. The G-buffer carries no shading-model channel,
-  so a model the deferred path cannot express renders forward; until a
-  model has a program, its draws are shaded as physically based and the
-  flush says so once.
+  global mode or a cvar. A model's program is the shared forward source
+  cooked with that model's define, so the material sampling, alpha modes
+  and fog are written once and only the surface response differs. Every
+  define set the engine can request must be cooked: a missing stage
+  variant falls back to that stage's default binary in silence, which
+  would shade a model physically based while the engine believed
+  otherwise. The G-buffer carries no shading-model channel, so a model
+  the deferred path cannot express draws forward over the deferred
+  depth, and instanced batching belongs to the model whose instanced
+  sibling program is cooked.
 - The sort key's bit layout lives once, in `command_buffer.h` beside
   `DrawKey`. Render prep, the sort and the flush use the published
   constants and accessors; a copied shift is rejected by
