@@ -78,8 +78,11 @@ bool ref_already_reported(const UnresolvedMeshReports &reports,
 
 /// Reports a reference the catalog cannot place. Named by its canonical
 /// text rather than by an id, because the whole point of the failure is
-/// that no id was found for it.
-void report_unbound(UnresolvedMeshReports *reports, const core::AssetRef &ref,
+/// that no id was found for it, and by what the reference was for, so a
+/// material that failed to place does not send a reader looking at
+/// meshes.
+void report_unbound(UnresolvedMeshReports *reports, const char *kind,
+                    const core::AssetRef &ref,
                     runtime::PersistentId entityId) noexcept {
   if (ref_already_reported(*reports, ref)) {
     return;
@@ -100,10 +103,10 @@ void report_unbound(UnresolvedMeshReports *reports, const core::AssetRef &ref,
   static_cast<void>(content::format_asset_ref(ref, refText, sizeof(refText)));
   char message[256] = {};
   std::snprintf(message, sizeof(message),
-                "mesh reference %s names no catalogued asset, so the entity "
+                "%s reference %s names no catalogued asset, so the entity "
                 "draws nothing; the asset is missing from the project or was "
                 "never imported",
-                refText);
+                kind, refText);
   core::Diagnostic record =
       core::make_diagnostic(core::LogLevel::Warning, kChannel, message);
   record.entityPersistentId = entityId;
@@ -119,7 +122,8 @@ void report_unbound(UnresolvedMeshReports *reports, const core::AssetRef &ref,
 /// per reference per frame. Only a reference the catalog could not place
 /// is retried, because an import can give it an asset later.
 void bind_reference(const runtime::EngineAssetDatabaseService *service,
-                    UnresolvedMeshReports *reports, const core::AssetRef &ref,
+                    UnresolvedMeshReports *reports, const char *kind,
+                    const core::AssetRef &ref,
                     runtime::PersistentId entityId, MeshResolutionPass *pass,
                     renderer::AssetId *outId) noexcept {
   if (!core::asset_ref_is_valid(ref) ||
@@ -131,7 +135,7 @@ void bind_reference(const runtime::EngineAssetDatabaseService *service,
                                            ref);
   if ((metadata == nullptr) || (metadata->assetId == renderer::kInvalidAssetId)) {
     ++pass->unbound;
-    report_unbound(reports, ref, entityId);
+    report_unbound(reports, kind, ref, entityId);
     return;
   }
   *outId = metadata->assetId;
@@ -244,10 +248,10 @@ MeshResolutionPass request_referenced_mesh_assets(
           return;
         }
         const runtime::PersistentId entityId = world.persistent_id(entity);
-        bind_reference(service, reports, mesh->meshRef, entityId, &pass,
-                       &mesh->meshAssetId);
-        bind_reference(service, reports, mesh->materialRef, entityId, &pass,
-                       &mesh->materialAssetId);
+        bind_reference(service, reports, "mesh", mesh->meshRef, entityId,
+                       &pass, &mesh->meshAssetId);
+        bind_reference(service, reports, "material", mesh->materialRef,
+                       entityId, &pass, &mesh->materialAssetId);
         resolve_reference(service, reports, mesh->meshAssetId, entityId,
                           &pass);
       });
@@ -263,8 +267,8 @@ MeshResolutionPass request_referenced_mesh_assets(
     const runtime::PersistentId entityId = world.persistent_id(patchEntity);
     for (std::size_t lod = 0U; lod < runtime::FoliagePatchComponent::kMaxLods;
          ++lod) {
-      bind_reference(service, reports, patch->meshRefs[lod], entityId, &pass,
-                     &patch->meshAssetIds[lod]);
+      bind_reference(service, reports, "foliage mesh", patch->meshRefs[lod],
+                     entityId, &pass, &patch->meshAssetIds[lod]);
       resolve_reference(service, reports, patch->meshAssetIds[lod], entityId,
                         &pass);
     }
