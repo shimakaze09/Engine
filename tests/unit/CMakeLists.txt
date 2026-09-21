@@ -1589,6 +1589,26 @@ engine_add_test_executable(engine_unit_command_buffer_post_chain
     engine_math
 )
 
+engine_add_test_executable(engine_unit_deferred_pass_viewport
+    SOURCES
+    deferred_pass_viewport_test.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_flush_deferred.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_flush_uniforms.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_context.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_math.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_sky.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_ibl.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/render_settings.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/shadow_map.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/pass_resources.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/renderer/include
+    ${CMAKE_SOURCE_DIR}/renderer/src
+    PRIVATE_DEPS
+    engine_core
+    engine_math
+)
+
 engine_add_test_executable(engine_unit_command_buffer_reload_contract
     SOURCES
     command_buffer_reload_contract_test.cpp
