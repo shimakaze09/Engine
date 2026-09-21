@@ -366,7 +366,18 @@ vec3 toon_response(vec3 N, vec3 V, vec3 L, vec3 radiance, vec3 albedo,
                    dot(N, H)) *
         gloss * ENGINE_TOON_SPECULAR_EDGE;
 
-    return radiance * albedo * level + radiance * specular;
+    // The Lambertian 1/pi normalisation belongs to a diffuse response
+    // whatever shapes it. `level` replaces the NdotL falloff, not the
+    // normalisation, so leaving it out makes a toon surface pi times
+    // brighter than the same albedo under the same light shaded as
+    // physically based. That is not a stylistic choice: at that
+    // brightness the tonemap's shoulder compresses the channel ratios,
+    // and an authored colour reads back as near-white whatever it was.
+    // The specular band is normalised with it so restoring the diffuse
+    // scale does not leave the highlight as the brightest thing in the
+    // frame.
+    return (radiance * albedo * level + radiance * specular) /
+           3.14159265359;
 }
 #endif
 
@@ -471,10 +482,17 @@ void main() {
 
 #if ENGINE_SHADING_UNLIT
     // Unlit answers no light: no loops, no ambient, no image-based term,
-    // and no fog either. An unlit surface is authored colour, and fog is
-    // the scene acting on it, so an effect quad or a UI-facing plane
-    // shows exactly what the material says. Alpha modes still apply,
-    // because those are the material's own too.
+    // and no fog either, since fog is the scene acting on a surface and
+    // this surface does not answer the scene. Alpha modes still apply,
+    // because those are the material's own.
+    //
+    // What leaves here is the authored value as scene radiance, not as a
+    // display colour: the post stack's exposure and tonemap still act on
+    // it, as they act on every pixel, so an authored 1.0 lands wherever
+    // the output transform puts it and not at white. A surface that must
+    // show one exact colour on screen — a UI plane, a mask — needs the
+    // output transform not to apply to it, which is a pass-level
+    // decision and not something a shading model can express.
     gl_FragColor = vec4(albedo + emissive, opacity);
 #else
     vec3 F0 = mix(vec3_splat(0.04), albedo, metallic);
