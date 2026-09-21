@@ -338,33 +338,29 @@ vec3 cook_torrance(vec3 N, vec3 V, vec3 L, vec3 radiance, vec3 albedo,
 // The toon surface response: two bands rather than a falloff, which is
 // what reads as drawn rather than lit. The terminator is soft by a fixed
 // width instead of a screen-space derivative, so the edge is stable
-// under camera motion and identical on every profile.
+// under camera motion and identical on every profile. A terminator
+// sweeps slowly across a surface, so a fixed width in NdotL is a usable
+// width in pixels wherever it lands.
 //
-// Minimal on purpose. A ramp texture, rim light, authored shadow colour
-// and specular shape are the Toon model's sub-paths and are not decided
-// here; this is the response a scene needs before any of them exists.
+// Diffuse only, deliberately. A ramp texture, rim light, authored shadow
+// colour and specular shape are the Toon model's phase-two sub-paths,
+// and none of their visual design is decided; this is the response a
+// scene needs before any of them exists. A provisional specular band
+// stood here and was removed: sized in NdotH rather than in pixels, it
+// collapsed below a pixel on a curved surface and aliased into a dashed
+// line along a barrel's rim. Whatever shape phase two gives a toon
+// highlight may well need derivative-aware width to stay stable, which
+// is a decision for that design and not something to approximate here.
 #define ENGINE_TOON_TERMINATOR 0.25
 #define ENGINE_TOON_SOFTNESS 0.05
 #define ENGINE_TOON_SHADED_LEVEL 0.45
-#define ENGINE_TOON_SPECULAR_EDGE 0.5
 
-vec3 toon_response(vec3 N, vec3 V, vec3 L, vec3 radiance, vec3 albedo,
-                   float roughness) {
+vec3 toon_response(vec3 N, vec3 L, vec3 radiance, vec3 albedo) {
     float NdotL = dot(N, L);
     float band = smoothstep(ENGINE_TOON_TERMINATOR - ENGINE_TOON_SOFTNESS,
                             ENGINE_TOON_TERMINATOR + ENGINE_TOON_SOFTNESS,
                             NdotL);
     float level = mix(ENGINE_TOON_SHADED_LEVEL, 1.0, band);
-
-    // A specular band, on or off, sized by roughness: a smooth surface
-    // gets a small tight highlight, a rough one none at all.
-    vec3 H = normalize(V + L);
-    float gloss = 1.0 - clamp(roughness, 0.0, 1.0);
-    float tightness = mix(0.995, 0.6, gloss * gloss);
-    float specular =
-        smoothstep(tightness, tightness + ENGINE_TOON_SOFTNESS,
-                   dot(N, H)) *
-        gloss * ENGINE_TOON_SPECULAR_EDGE;
 
     // The Lambertian 1/pi normalisation belongs to a diffuse response
     // whatever shapes it. `level` replaces the NdotL falloff, not the
@@ -373,11 +369,7 @@ vec3 toon_response(vec3 N, vec3 V, vec3 L, vec3 radiance, vec3 albedo,
     // physically based. That is not a stylistic choice: at that
     // brightness the tonemap's shoulder compresses the channel ratios,
     // and an authored colour reads back as near-white whatever it was.
-    // The specular band is normalised with it so restoring the diffuse
-    // scale does not leave the highlight as the brightest thing in the
-    // frame.
-    return (radiance * albedo * level + radiance * specular) /
-           3.14159265359;
+    return radiance * albedo * level / 3.14159265359;
 }
 #endif
 
@@ -387,7 +379,7 @@ vec3 toon_response(vec3 N, vec3 V, vec3 L, vec3 radiance, vec3 albedo,
 vec3 surface_response(vec3 N, vec3 V, vec3 L, vec3 radiance, vec3 albedo,
                       float metallic, float roughness, vec3 F0) {
 #if ENGINE_SHADING_TOON
-    return toon_response(N, V, L, radiance, albedo, roughness);
+    return toon_response(N, L, radiance, albedo);
 #else
     return cook_torrance(N, V, L, radiance, albedo, metallic, roughness, F0);
 #endif
