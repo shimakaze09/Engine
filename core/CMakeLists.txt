@@ -12,6 +12,7 @@ configure_file(
 
 engine_add_module_library(engine_core
     SOURCES
+    src/asset_identity.cpp
     src/bootstrap.cpp
     src/console.cpp
     src/cvar.cpp

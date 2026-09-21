@@ -17,35 +17,32 @@
 //
 // None of the three converts to another, implicitly or otherwise. A
 // function that needs two of them takes two parameters.
+//
+// The GUID and reference value types themselves are core's, so that a
+// component defined below this module can carry one; this header is
+// where they acquire generation, text and derivation.
 
 #pragma once
 
 #include <cstddef>
 #include <cstdint>
 
+#include "engine/core/asset_identity.h"
+
 namespace engine::content {
 
 // --- AssetGuid ---------------------------------------------------------
 
-/// 128-bit persistent logical asset identity, held as two 64-bit halves
-/// in big-endian reading order: `high` is the first eight bytes of the
-/// canonical text form, `low` the last eight.
-struct AssetGuid final {
-  std::uint64_t high = 0U;
-  std::uint64_t low = 0U;
-
-  friend constexpr bool operator==(const AssetGuid &,
-                                   const AssetGuid &) = default;
-};
-
-/// The all-zero GUID, which no asset owns. A nil UUID is not a valid v4
-/// value, so it can never collide with a generated one.
-inline constexpr AssetGuid kNilAssetGuid{};
-
-/// True for any GUID an asset may own.
-constexpr bool asset_guid_is_valid(const AssetGuid &guid) noexcept {
-  return !((guid.high == 0U) && (guid.low == 0U));
-}
+// The same types as core's, not copies: a caller that names them through
+// either namespace holds the one definition.
+using core::AssetGuid;
+using core::AssetRef;
+using core::asset_guid_hash;
+using core::asset_guid_is_valid;
+using core::asset_guid_precedes;
+using core::asset_ref_is_valid;
+using core::asset_ref_primary;
+using core::kNilAssetGuid;
 
 /// Characters in the canonical text form, terminator excluded:
 /// "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx".
@@ -76,49 +73,52 @@ bool format_asset_guid(const AssetGuid &guid, char *out,
 /// corrupted by an editing mistake.
 bool parse_asset_guid(const char *text, AssetGuid *out) noexcept;
 
-/// A 64-bit hash of the GUID, for keying a fixed-capacity table. Not an
-/// identity: two different GUIDs may hash alike, so a table must still
-/// compare the full value.
-std::uint64_t asset_guid_hash(const AssetGuid &guid) noexcept;
-
-/// Deterministic total order over GUIDs, for reporting a set of them in a
-/// stable sequence. Never use it to choose between two assets that claim
-/// one GUID: that collision is an error to report, not to resolve.
-bool asset_guid_precedes(const AssetGuid &a, const AssetGuid &b) noexcept;
-
-/// Names one asset among the several a single source file can produce.
-/// One glTF here yields a mesh, a skeleton and several clips, and its
-/// import settings select a mesh and primitive inside it, so a GUID
-/// naming the file cannot on its own name "the walk clip of character".
-/// `guid` identifies the source, `localId` the asset within it — the same
-/// split Unity makes with its {guid, fileID} pairs.
+/// The GUID a built-in asset has. Built-ins — the primitive meshes under
+/// "builtin://" — ship with the engine, carry no sidecar, and must name
+/// the same asset on every machine and in every build, so their GUID is
+/// derived from the canonical spelling of their virtual path rather than
+/// generated: FNV-1a over the path into each half, with the version
+/// nibble set to 8 (RFC 9562's custom version; the derivation is not the
+/// SHA-1 that version 5 would promise) and the RFC variant bits, so it can
+/// never coincide with a generated v4 value. Returns nil for a null,
+/// empty or uncanonicalizable path.
 ///
-/// localId 0 is the source's primary asset, which is the only one most
-/// sources have. Sub-assets take asset_local_id, so the value is derived
-/// from the name rather than assigned from a counter: it stays the same
-/// across recooks, across machines, and across a rebuild from scratch.
-struct AssetRef final {
-  AssetGuid guid{};
-  std::uint64_t localId = 0U;
-
-  friend constexpr bool operator==(const AssetRef &, const AssetRef &) = default;
-};
-
-/// The primary asset of `guid`.
-constexpr AssetRef asset_ref_primary(const AssetGuid &guid) noexcept {
-  return AssetRef{guid, 0U};
-}
-
-/// True when the reference names an asset at all.
-constexpr bool asset_ref_is_valid(const AssetRef &ref) noexcept {
-  return asset_guid_is_valid(ref.guid);
-}
+/// A project asset never gets its GUID this way: that would tie identity
+/// back to location, which is the thing a GUID exists to sever.
+AssetGuid builtin_asset_guid(const char *virtualPath) noexcept;
 
 /// The stable local id of a sub-asset named `subName` — the part of a
 /// cooked output's name after its source's stem, such as "walk.anim" for
 /// "character.walk.anim" produced from "character.gltf". Returns 0 for a
 /// null or empty name, which is the primary asset's id.
 std::uint64_t asset_local_id(const char *subName) noexcept;
+
+/// Parses a local id as the cook stamp and the reference text carry it:
+/// exactly 16 lowercase hex digits at `text`. False for any other length
+/// or any other character, uppercase included — the writers only ever
+/// emit this one shape, so anything else is an edit to refuse.
+bool parse_asset_local_id(const char *text, std::size_t length,
+                          std::uint64_t *out) noexcept;
+
+/// Characters in the longer reference text form, terminator excluded:
+/// the GUID, '#', and the 16-digit local id.
+inline constexpr std::size_t kAssetRefTextLength =
+    kAssetGuidTextLength + 1U + 16U;
+
+/// Writes the reference's text form plus a terminator into `out`: the bare
+/// GUID for a primary asset, "<guid>#<local id>" for a sub-asset. Two
+/// shapes so a document that names a whole file stays readable at a glance
+/// while one that names a clip of many still can. False with `out`
+/// emptied when `capacity` is under what the shape needs plus one.
+bool format_asset_ref(const AssetRef &ref, char *out,
+                      std::size_t capacity) noexcept;
+
+/// Parses either text form back; false with `*out` nil for any other
+/// shape — a wrong length, a separator other than '#', a local id that is
+/// not exactly 16 lowercase hex digits, or the sub-asset shape carrying
+/// local id 0, which names the primary and so contradicts itself. As
+/// strict as parse_asset_guid, for the same reason.
+bool parse_asset_ref(const char *text, AssetRef *out) noexcept;
 
 // --- PathKey -----------------------------------------------------------
 

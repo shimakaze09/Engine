@@ -19,29 +19,6 @@ constexpr const char *kStampSuffix = ".cookstamp";
 /// A stamp is a short line-oriented manifest; anything larger is not one.
 constexpr std::size_t kMaxStampBytes = 256U * 1024U;
 
-/// Parses 16 lowercase hex digits; false for any other shape.
-bool parse_hex_u64(const char *text, std::size_t length,
-                   std::uint64_t *out) noexcept {
-  if (length != 16U) {
-    return false;
-  }
-  std::uint64_t value = 0U;
-  for (std::size_t i = 0U; i < length; ++i) {
-    const char ch = text[i];
-    std::uint64_t digit = 0U;
-    if ((ch >= '0') && (ch <= '9')) {
-      digit = static_cast<std::uint64_t>(ch - '0');
-    } else if ((ch >= 'a') && (ch <= 'f')) {
-      digit = static_cast<std::uint64_t>(ch - 'a') + 10U;
-    } else {
-      return false;
-    }
-    value = (value << 4U) | digit;
-  }
-  *out = value;
-  return true;
-}
-
 /// Records one output's reference; counts an overflow rather than
 /// silently dropping it, so a walk that outgrew the index says so.
 void record(ProvenanceIndex *index, const std::string &relativePath,
@@ -103,7 +80,7 @@ void read_stamp(const std::filesystem::path &stampPath,
       continue;
     }
     std::uint64_t localId = 0U;
-    if (!parse_hex_u64(line.c_str() + 6U, 16U, &localId) ||
+    if (!parse_asset_local_id(line.c_str() + 6U, 16U, &localId) ||
         (line[22U] != ' ')) {
       continue;
     }
