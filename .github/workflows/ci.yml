@@ -299,6 +299,9 @@ jobs:
       - name: Asset identity audit
         run: python3 tools/check_asset_identity.py
 
+      - name: Shader variant audit
+        run: python3 tools/check_shader_variants.py
+
       - name: Install cppcheck
         run: bash .github/scripts/install-linux-deps.sh cppcheck
 

@@ -13,6 +13,7 @@
 # engine_integration_tool_gates.
 
 import importlib.util
+import json
 import re
 import subprocess
 import sys
@@ -884,6 +885,97 @@ def test_asset_identity_gate():
         check(run([script]) == 0, "identity: this checkout passes")
 
 
+def write_variant_fixture(root, models, rows, variants):
+    """A tree with just the three files the shader-variant gate reads: the
+    ShadingModel enum, the engine's variant table, and the cook manifest."""
+    header = root / "renderer" / "include" / "engine" / "renderer"
+    header.mkdir(parents=True, exist_ok=True)
+    enumerators = ", ".join("%s = %dU" % (name, index)
+                            for index, name in enumerate(models))
+    (header / "material.h").write_text(
+        "enum class ShadingModel : std::uint8_t { %s };\n" % enumerators,
+        encoding="utf-8")
+
+    source = root / "renderer" / "src"
+    source.mkdir(parents=True, exist_ok=True)
+    table = ",\n".join(
+        '        {ShadingModel::%s, "%s", "%s"}' % (model, define,
+                                                    model.lower())
+        for model, define in rows)
+    (source / "command_buffer_init_core.cpp").write_text(
+        "    const ModelVariant kModelVariants[] = {\n%s};\n" % table,
+        encoding="utf-8")
+
+    manifest = root / "assets" / "shaders" / "bgfx"
+    manifest.mkdir(parents=True, exist_ok=True)
+    (manifest / "shaders.manifest").write_text(
+        json.dumps({"shaders": [
+            {"source": "pbr.fs.sc", "type": "fragment",
+             "output": "pbr.frag", "variants": variants}]}),
+        encoding="utf-8")
+    return root
+
+
+def test_shader_variant_gate():
+    """The shader-variant gate must fail when the engine can request a
+    define set the manifest does not cook, and when a shading model has no
+    row in the variant table at all -- both of which fall back to a stage's
+    default binary in silence (#635/#615). It must pass on this checkout."""
+    script = str(TOOLS / "check_shader_variants.py")
+    every = [[], ["PBR_FULL"],
+             ["ENGINE_SHADING_TOON"], ["ENGINE_SHADING_TOON", "PBR_FULL"],
+             ["ENGINE_SHADING_UNLIT"], ["ENGINE_SHADING_UNLIT", "PBR_FULL"]]
+    rows = [("Toon", "ENGINE_SHADING_TOON"),
+            ("Unlit", "ENGINE_SHADING_UNLIT")]
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+
+        check(run([script, "--root", str(write_variant_fixture(
+            tmp / "clean", ["Pbr", "Toon", "Unlit"], rows, every))]) == 0,
+              "variants: every requestable set cooked passes")
+
+        # PBR_FULL is chosen at runtime by the sampler budget, so cooking
+        # only one form of a model's set still leaves a silent fallback.
+        check(run([script, "--root", str(write_variant_fixture(
+            tmp / "half", ["Pbr", "Toon", "Unlit"], rows,
+            [v for v in every if v != ["ENGINE_SHADING_TOON", "PBR_FULL"]]
+            ))]) != 0,
+              "variants: a model cooked without its PBR_FULL form fails")
+
+        missing = write_variant_fixture(
+            tmp / "missing", ["Pbr", "Toon", "Unlit"], rows,
+            [v for v in every if "ENGINE_SHADING_UNLIT" not in v])
+        completed = subprocess.run(
+            [sys.executable, script, "--root", str(missing)],
+            capture_output=True, text=True)
+        check(completed.returncode != 0,
+              "variants: an uncooked model define fails")
+        check("ENGINE_SHADING_UNLIT" in completed.stdout,
+              "variants: the finding names the uncooked define")
+
+        # A model in the enum with no variant-table row loads no program of
+        # its own, which is the same silent fallback one layer earlier.
+        untabled = write_variant_fixture(
+            tmp / "untabled", ["Pbr", "Toon", "Unlit", "Sketch"], rows,
+            every)
+        completed = subprocess.run(
+            [sys.executable, script, "--root", str(untabled)],
+            capture_output=True, text=True)
+        check(completed.returncode != 0,
+              "variants: a model with no variant-table row fails")
+        check("Sketch" in completed.stdout,
+              "variants: the finding names the untabled model")
+
+        # The default model is what everything else falls back to, so it
+        # needs no define and no row.
+        check(run([script, "--root", str(write_variant_fixture(
+            tmp / "default_only", ["Pbr"], rows, every))]) == 0,
+              "variants: the default model needs no define of its own")
+
+    check(run([script]) == 0, "variants: this checkout passes")
+
+
 def test_content_attributes_gate():
     """The attributes gate (issue #590) must hold every tracked
     content-hashed file to `text` unset, accept both `-text` and the
@@ -1320,6 +1412,7 @@ def main():
     test_portable_fopen_gate()
     test_duplicate_primitive_gate()
     test_asset_identity_gate()
+    test_shader_variant_gate()
     if failures:
         print(f"\nFAILED ({len(failures)} failure(s))")
         return 1
