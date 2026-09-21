@@ -314,12 +314,11 @@ engine::content::AssetGuid identify(const std::filesystem::path &root,
 void test_identity_survives_relocation() noexcept {
   using engine::content::AssetRef;
   using engine::content::AssetTypeTag;
-  constexpr const char *kRoot = "asset_catalog_identity_root";
-  constexpr const char *kPrefix = "kit";
+  constexpr const char *kIdentityRoot = "asset_catalog_identity_root";
 
   std::error_code ec{};
-  std::filesystem::remove_all(kRoot, ec);
-  const std::filesystem::path root(kRoot);
+  std::filesystem::remove_all(kIdentityRoot, ec);
+  const std::filesystem::path root(kIdentityRoot);
   const bool built = write_file(root / "props/coin.gltf") &&
                      write_file(root / "props/coin.mesh") &&
                      write_file(root / "chars/hero.gltf") &&
@@ -347,7 +346,7 @@ void test_identity_survives_relocation() noexcept {
 
   const auto walk = [&](engine::content::MetadataStore *store) noexcept {
     engine::content::clear_metadata_store(store);
-    return engine::content::register_mounted_assets(store, kPrefix, kRoot);
+    return engine::content::register_mounted_assets(store, kPrefix, kIdentityRoot);
   };
 
   std::unique_ptr<engine::content::MetadataStore> store(
@@ -495,7 +494,7 @@ void test_identity_survives_relocation() noexcept {
   check(!ec && (duplicates >= 2U),
         "a copied sidecar is reported as a duplicate identity");
 
-  std::filesystem::remove_all(kRoot, ec);
+  std::filesystem::remove_all(kIdentityRoot, ec);
 }
 
 /// Indexing fails closed on every way an identity can be missing,
@@ -505,13 +504,12 @@ void test_identity_survives_relocation() noexcept {
 /// CI, and a nil identity accepted here becomes a reference that
 /// resolves to nothing much later with nothing to say why.
 void test_identity_validation_fails_closed() noexcept {
-  constexpr const char *kRoot = "asset_catalog_validation_root";
-  constexpr const char *kPrefix = "kit";
+  constexpr const char *kValidationRoot = "asset_catalog_validation_root";
   std::error_code ec{};
 
   const auto walk = [&](engine::content::MetadataStore *store) noexcept {
     engine::content::clear_metadata_store(store);
-    return engine::content::register_mounted_assets(store, kPrefix, kRoot);
+    return engine::content::register_mounted_assets(store, kPrefix, kValidationRoot);
   };
   std::unique_ptr<engine::content::MetadataStore> store(
       new (std::nothrow) engine::content::MetadataStore());
@@ -521,14 +519,14 @@ void test_identity_validation_fails_closed() noexcept {
   }
 
   const auto reset = [&]() noexcept {
-    std::filesystem::remove_all(kRoot, ec);
-    return write_file(std::filesystem::path(kRoot) / "scripts/hop.lua");
+    std::filesystem::remove_all(kValidationRoot, ec);
+    return write_file(std::filesystem::path(kValidationRoot) / "scripts/hop.lua");
   };
 
   // A clean mount indexes cleanly; without this the failures below could
   // all be some unrelated fault.
   check(reset(), "the validation tree is written");
-  static_cast<void>(identify(std::filesystem::path(kRoot), "scripts/hop.lua"));
+  static_cast<void>(identify(std::filesystem::path(kValidationRoot), "scripts/hop.lua"));
   engine::content::MountRegistration walkResult = walk(store.get());
   check(walkResult.ok && (walkResult.unidentified == 0U) &&
             (walkResult.duplicateRefs == 0U) &&
@@ -549,7 +547,7 @@ void test_identity_validation_fails_closed() noexcept {
   };
   for (const char *document : badDocuments) {
     check(reset(), "the validation tree is rewritten");
-    std::ofstream bad(std::filesystem::path(kRoot) / "scripts/hop.lua.meta",
+    std::ofstream bad(std::filesystem::path(kValidationRoot) / "scripts/hop.lua.meta",
                       std::ios::binary);
     bad << document;
     bad.close();
@@ -560,12 +558,12 @@ void test_identity_validation_fails_closed() noexcept {
 
   // 4: two assets claiming one identity, with neither chosen.
   check(reset(), "the validation tree is rewritten");
-  check(write_file(std::filesystem::path(kRoot) / "scripts/dash.lua"),
+  check(write_file(std::filesystem::path(kValidationRoot) / "scripts/dash.lua"),
         "a second script is written");
-  static_cast<void>(identify(std::filesystem::path(kRoot), "scripts/hop.lua"));
+  static_cast<void>(identify(std::filesystem::path(kValidationRoot), "scripts/hop.lua"));
   std::filesystem::copy_file(
-      std::filesystem::path(kRoot) / "scripts/hop.lua.meta",
-      std::filesystem::path(kRoot) / "scripts/dash.lua.meta",
+      std::filesystem::path(kValidationRoot) / "scripts/hop.lua.meta",
+      std::filesystem::path(kValidationRoot) / "scripts/dash.lua.meta",
       std::filesystem::copy_options::overwrite_existing, ec);
   walkResult = walk(store.get());
   check(!ec && !walkResult.ok && (walkResult.duplicateRefs == 2U),
@@ -581,19 +579,19 @@ void test_identity_validation_fails_closed() noexcept {
   // filesystem is how the case stays honest rather than vacuous
   // elsewhere — an exists() probe would answer yes to either spelling.
   check(reset(), "the validation tree is rewritten");
-  if (case_sensitive_under(std::filesystem::path(kRoot) / "scripts")) {
-    check(write_file(std::filesystem::path(kRoot) / "scripts/Hop.lua"),
+  if (case_sensitive_under(std::filesystem::path(kValidationRoot) / "scripts")) {
+    check(write_file(std::filesystem::path(kValidationRoot) / "scripts/Hop.lua"),
           "a second casing of one script is written");
     static_cast<void>(
-        identify(std::filesystem::path(kRoot), "scripts/hop.lua"));
+        identify(std::filesystem::path(kValidationRoot), "scripts/hop.lua"));
     static_cast<void>(
-        identify(std::filesystem::path(kRoot), "scripts/Hop.lua"));
+        identify(std::filesystem::path(kValidationRoot), "scripts/Hop.lua"));
     walkResult = walk(store.get());
     check(!walkResult.ok && (walkResult.caseCollisions == 2U),
           "two paths differing only by case fail the index, both named");
   }
 
-  std::filesystem::remove_all(kRoot, ec);
+  std::filesystem::remove_all(kValidationRoot, ec);
 }
 
 } // namespace
