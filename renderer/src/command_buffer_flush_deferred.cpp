@@ -108,6 +108,10 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
         dev->copy_depth(gbufferTarget, sceneTarget, drawableWidth,
                         drawableHeight);
         dev->bind_render_target(sceneTarget);
+        // Every bind claims a fresh view, and a view without its own rect
+        // inherits the one its id last carried, so whatever draws next
+        // would land wherever an unrelated pass was drawing.
+        dev->set_viewport(0, 0, drawableWidth, drawableHeight);
         sceneDepthHasOpaque = true;
         return true;
       }
@@ -955,10 +959,13 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
 
     if ((opaqueCount < totalCount) || (forwardOpaqueRuns > 0U)) {
       dev->bind_render_target(pass_resource_target(passRes.sceneColor));
+      dev->set_viewport(0, 0, drawableWidth, drawableHeight);
 
       // Carry opaque deferred depth into the scene target so forward
-      // draws depth-test against G-Buffer geometry.
+      // draws depth-test against G-Buffer geometry. This binds again on
+      // its blit path, so the viewport below is the one these draws use.
       static_cast<void>(ensureSceneDepthHasOpaque());
+      dev->set_viewport(0, 0, drawableWidth, drawableHeight);
       dev->bind_program(backend.pbrProgram);
 
       if (backend.pbrTimeLocation.valid()) {

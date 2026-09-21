@@ -977,6 +977,8 @@ bgfx_create_render_target(const RenderTargetDesc &desc) noexcept {
     record.depthTexture = desc.depth.texture.value;
   }
 
+  record.width = targetWidth;
+  record.height = targetHeight;
   record.handle = bgfx::createFrameBuffer(count, attachments, false);
   if (!bgfx::isValid(record.handle)) {
     core::log_message(core::LogLevel::Error, "render_device",
@@ -1029,6 +1031,28 @@ void bgfx_bind_render_target(RenderTargetHandle target) noexcept {
   // clears would otherwise inherit whatever clear an earlier frame (or
   // startup IBL cook) configured on this id and wipe its own input.
   bgfx::setViewClear(view, BGFX_CLEAR_NONE, 0U, 1.0F, 0U);
+  // The rect persists the same way, and inheriting one is worse than
+  // inheriting a clear: a pass whose view carries another pass's rect
+  // draws somewhere other than where it meant to, or off the target
+  // entirely, and nothing reports it. Which id a pass lands on is not
+  // stable either — it shifts by however many views the passes before it
+  // claimed, and the directional shadow cache alone moves every later id
+  // by four cascades whenever the camera moves. So the bind establishes
+  // the whole target as the default rect, and a pass wanting a sub-rect
+  // still overrides it with set_viewport.
+  std::int32_t viewWidth = ctx.backBufferWidth;
+  std::int32_t viewHeight = ctx.backBufferHeight;
+  if (target.value != 0U) {
+    const BgfxTargetRecord *record = ctx.targets.resolve(target.value);
+    if (record != nullptr) {
+      viewWidth = record->width;
+      viewHeight = record->height;
+    }
+  }
+  if ((viewWidth > 0) && (viewHeight > 0)) {
+    bgfx::setViewRect(view, 0U, 0U, static_cast<std::uint16_t>(viewWidth),
+                      static_cast<std::uint16_t>(viewHeight));
+  }
   ctx.currentView = view;
 }
 
