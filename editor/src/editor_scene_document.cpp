@@ -22,6 +22,7 @@
 #include "engine/core/json.h"
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
+#include "engine/runtime/editor_bridge.h"
 #include "engine/runtime/scene_serializer.h"
 #include "engine/runtime/world.h"
 
@@ -477,8 +478,37 @@ bool perform_scene_save_as(const char *path) noexcept {
                   "destination %s is outside the project asset root", path);
     return report_save_failure(session);
   }
+  // Whether this destination already existed decides what rolling back
+  // means below: a file the author already had must survive a failure
+  // here, and one this save created must not outlive it.
+  std::error_code existsEc{};
+  const bool destinationExisted = std::filesystem::exists(path, existsEc);
+
   if (!runtime::save_scene(*session.world, path)) {
     set_save_failure_message(session, path);
+    return report_save_failure(session);
+  }
+
+  // A scene is referenceable, so it needs the identity a reference names,
+  // and it needs it from the same transaction that wrote it rather than
+  // from a tool the author is expected to run afterwards. The diagnostic
+  // for each failing case is logged by the bridge.
+  const runtime::EditorIdentityResult identity =
+      runtime::editor_establish_asset_identity(path);
+  if ((identity != runtime::EditorIdentityResult::Created) &&
+      (identity != runtime::EditorIdentityResult::AlreadyIdentified)) {
+    if (!destinationExisted) {
+      // Nothing referenced this path a moment ago, so removing it leaves
+      // the project exactly as it was instead of leaving a scene behind
+      // that nothing can name.
+      std::error_code removeEc{};
+      static_cast<void>(std::filesystem::remove(path, removeEc));
+    }
+    std::snprintf(session.document.lastSaveError,
+                  sizeof(session.document.lastSaveError),
+                  "%s was written but could not be given an identity, so it "
+                  "could not be referenced",
+                  path);
     return report_save_failure(session);
   }
 

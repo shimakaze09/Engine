@@ -14,6 +14,7 @@
 #include "engine/core/platform.h"
 #include "engine/editor/editor.h"
 #include "engine/runtime/scene_serializer.h"
+#include "engine/content/asset_sidecar.h"
 #include "engine/runtime/world.h"
 
 #include <cstdio>
@@ -750,6 +751,85 @@ int check_recent_scenes_unreadable_file_never_overwritten() {
 } // namespace
 
 /// Runs this executable or test program.
+/// EXPECTATION: Save As gives the scene it writes a source-side sidecar
+/// in the same transaction, so the scene it just created is referenceable
+/// without the author running a tool first (#639). A scene with no
+/// identity is reported by the catalog on every later start and can be
+/// named by no document.
+int check_save_as_establishes_scene_identity() {
+  if (!ensure_scratch_root()) {
+    return 1;
+  }
+  char scenePath[512] = {};
+  if (!make_scratch_path("identified_scene.scene", scenePath,
+                         sizeof(scenePath))) {
+    return 2;
+  }
+  char sidecarPath[600] = {};
+  const int written = std::snprintf(sidecarPath, sizeof(sidecarPath),
+                                    "%s.meta", scenePath);
+  if ((written <= 0) ||
+      (static_cast<std::size_t>(written) >= sizeof(sidecarPath))) {
+    return 3;
+  }
+  static_cast<void>(std::remove(scenePath));
+  static_cast<void>(std::remove(sidecarPath));
+
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 4;
+  }
+  editor_set_world(world.get());
+
+  if (!perform_scene_save_as(scenePath)) {
+    editor_set_world(nullptr);
+    return 5;
+  }
+
+  std::error_code ec{};
+  if (!std::filesystem::exists(scenePath, ec) || ec) {
+    editor_set_world(nullptr);
+    return 6;
+  }
+  if (!std::filesystem::exists(sidecarPath, ec) || ec) {
+    editor_set_world(nullptr);
+    return 7;
+  }
+
+  // The sidecar must carry a usable identity, not merely exist.
+  engine::content::AssetSidecar sidecar{};
+  if (engine::content::read_asset_sidecar(scenePath, &sidecar) !=
+      engine::content::SidecarReadResult::Ok) {
+    editor_set_world(nullptr);
+    return 8;
+  }
+  if (!engine::content::asset_guid_is_valid(sidecar.guid)) {
+    editor_set_world(nullptr);
+    return 9;
+  }
+
+  // Saving again over the same path keeps the identity it already had:
+  // minting a second one would silently rebind every reference written
+  // against the first.
+  const engine::core::AssetGuid first = sidecar.guid;
+  if (!perform_scene_save_as(scenePath)) {
+    editor_set_world(nullptr);
+    return 10;
+  }
+  engine::content::AssetSidecar again{};
+  if ((engine::content::read_asset_sidecar(scenePath, &again) !=
+       engine::content::SidecarReadResult::Ok) ||
+      !(again.guid == first)) {
+    editor_set_world(nullptr);
+    return 11;
+  }
+
+  editor_set_world(nullptr);
+  static_cast<void>(std::remove(scenePath));
+  static_cast<void>(std::remove(sidecarPath));
+  return 0;
+}
+
 int main() {
   struct NamedCheck {
     const char *name;
@@ -772,6 +852,8 @@ int main() {
        &check_jail_validates_destination_root},
       {"check_save_as_rejects_destination_outside_jail",
        &check_save_as_rejects_destination_outside_jail},
+      {"check_save_as_establishes_scene_identity",
+       &check_save_as_establishes_scene_identity},
       {"check_save_failures_log_an_error",
        &check_save_failures_log_an_error},
       {"check_recent_scenes_persist_and_prune",

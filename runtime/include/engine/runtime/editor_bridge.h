@@ -80,6 +80,32 @@ bool editor_asset_display_path(std::uint64_t assetId, char *outPath,
 /// and the reference is what a saved document names.
 core::AssetRef editor_asset_ref(std::uint64_t assetId) noexcept;
 
+/// Why establishing an asset's identity did not succeed, so a caller can
+/// tell "already had one" from a fault it must report and roll back.
+enum class EditorIdentityResult : std::uint8_t {
+  /// The sidecar was written and the asset catalogued under it.
+  Created,
+  /// A readable sidecar was already there; nothing was changed.
+  AlreadyIdentified,
+  /// A sidecar exists but will not read. Never replaced: minting a new
+  /// identity over one that may still be referenced would break every
+  /// reference to the asset instead of reporting a repairable file.
+  SidecarUnusable,
+  /// Minting or the staged sidecar write failed.
+  WriteFailed,
+};
+
+/// Gives the asset at `osPath` a persistent identity if it has none,
+/// writing its source-side sidecar and catalouging it so a reference to
+/// it resolves in this session rather than after a restart.
+///
+/// An editor gesture that creates a referenceable asset calls this in the
+/// same save transaction that writes the asset: an asset the editor
+/// generated must not need the author to run a tool afterwards before it
+/// can be referenced at all.
+EditorIdentityResult
+editor_establish_asset_identity(const char *osPath) noexcept;
+
 // --- Material editor bridge ---
 //
 // The material editor panel (editor/) never touches renderer::AssetDatabase
