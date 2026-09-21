@@ -25,3 +25,6 @@ history.
 | [0012](0012-defect-budget-is-a-flow-rule.md) | The defect budget is a flow rule, not a ceiling | 2026-09-18 |
 | [0013](0013-malformed-authored-fields-refuse-the-load.md) | A malformed authored field refuses the load | 2026-09-18 |
 | [0014](0014-severity-is-impact.md) | Severity is impact; counts are signals; consolidation needs identity | 2026-09-20 |
+| [0015](0015-commercial-anime-engine-on-six-platforms.md) | A commercial anime-game engine: three editor platforms, six shipping targets | 2026-09-21 |
+| [0016](0016-a-project-is-the-unit-of-authoring.md) | A project is the unit of authoring and shipping | 2026-09-21 |
+| [0017](0017-materials-carry-a-shading-model.md) | A material carries its shading model; passes are chosen per draw | 2026-09-21 |
