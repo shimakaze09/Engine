@@ -78,7 +78,7 @@ struct MaterialEditScope final {
 /// EXPECTATION: opening a material loads its resolved state into the
 /// panel buffer.
 int check_open_loads_state() noexcept {
-  if (!write_file(kOsPath, "{\"version\":2,\"roughness\":0.3}")) {
+  if (!write_file(kOsPath, "{\"version\":3,\"roughness\":0.3}")) {
     return 1;
   }
   MaterialEditScope scope;
@@ -105,7 +105,7 @@ int check_open_loads_state() noexcept {
 /// gesture pushes exactly one undoable command whose undo restores the
 /// prior value.
 int check_live_edit_and_undo() noexcept {
-  if (!write_file(kOsPath, "{\"version\":2,\"roughness\":0.3,"
+  if (!write_file(kOsPath, "{\"version\":3,\"roughness\":0.3,"
                           "\"metallic\":0.1}")) {
     return 10;
   }
@@ -176,7 +176,7 @@ int check_live_edit_and_undo() noexcept {
 /// unsaved edit and reflects whatever is on disk (or leaves the buffer
 /// untouched on a malformed file).
 int check_save_and_reload() noexcept {
-  if (!write_file(kOsPath, "{\"version\":2,\"roughness\":0.2}")) {
+  if (!write_file(kOsPath, "{\"version\":3,\"roughness\":0.2}")) {
     return 20;
   }
   MaterialEditScope scope;
@@ -231,7 +231,7 @@ int check_save_and_reload() noexcept {
 /// the gated request_close_material_editor path is covered by
 /// engine_unit_editor_material_document.
 int check_close_keeps_live_edit() noexcept {
-  if (!write_file(kOsPath, "{\"version\":2,\"roughness\":0.4}")) {
+  if (!write_file(kOsPath, "{\"version\":3,\"roughness\":0.4}")) {
     return 30;
   }
   MaterialEditScope scope;
@@ -270,7 +270,7 @@ int check_close_keeps_live_edit() noexcept {
 /// (panel closed, asset id dropped, gesture abandoned without finalizing),
 /// unlike user-driven close, which finalizes and is covered above.
 int check_world_clear_resets_editor() noexcept {
-  if (!write_file(kOsPath, "{\"version\":2,\"roughness\":0.3}")) {
+  if (!write_file(kOsPath, "{\"version\":3,\"roughness\":0.3}")) {
     return 40;
   }
   MaterialEditScope scope;

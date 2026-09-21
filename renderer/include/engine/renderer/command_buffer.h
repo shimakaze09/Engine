@@ -46,7 +46,7 @@ std::size_t skin_palette_count() noexcept;
 
 // Instancing-ready sort key.
 // Bit layout (MSB→LSB):
-//   transparent:1 | shader:7 | texture:20 | mesh:20 | depth:16
+//   transparent:1 | shadingModel:7 | texture:20 | mesh:20 | depth:16
 // Opaque (transparent=0) sorts front-to-back (smaller depth first).
 // Transparent (transparent=1) sorts back-to-front (larger depth first).
 struct DrawKey final {
@@ -58,8 +58,8 @@ struct DrawKey final {
 // this the three sites each carried their own copy of the shifts and
 // masks, so a field could move in one and not the others.
 inline constexpr std::uint64_t kDrawKeyTransparentBit = 1ULL << 63U;
-inline constexpr unsigned int kDrawKeyShaderShift = 56U;
-inline constexpr std::uint64_t kDrawKeyShaderMask = 0x7FULL;
+inline constexpr unsigned int kDrawKeyShadingModelShift = 56U;
+inline constexpr std::uint64_t kDrawKeyShadingModelMask = 0x7FULL;
 inline constexpr unsigned int kDrawKeyTextureShift = 36U;
 inline constexpr std::uint64_t kDrawKeyTextureMask = 0xFFFFFULL;
 inline constexpr unsigned int kDrawKeyMeshShift = 16U;
@@ -69,6 +69,22 @@ inline constexpr std::uint64_t kDrawKeyDepthMask = 0xFFFFULL;
 /// Whether a key's draw belongs to the transparent half.
 constexpr bool draw_key_is_transparent(const DrawKey &key) noexcept {
   return (key.value & kDrawKeyTransparentBit) != 0U;
+}
+
+/// The shading model a key selects, as its raw enumerator value. A key
+/// can carry a value this build has no run for -- the field is 7 bits
+/// wide and kShadingModelCount is smaller -- so a reader validates it
+/// with shading_model_is_valid rather than casting blind.
+constexpr std::uint8_t draw_key_shading_model(const DrawKey &key) noexcept {
+  return static_cast<std::uint8_t>((key.value >> kDrawKeyShadingModelShift) &
+                                   kDrawKeyShadingModelMask);
+}
+
+/// A key's shading-model field packed for composition.
+constexpr std::uint64_t
+draw_key_shading_model_bits(ShadingModel model) noexcept {
+  return (static_cast<std::uint64_t>(model) & kDrawKeyShadingModelMask)
+         << kDrawKeyShadingModelShift;
 }
 
 /// The state bits a key carries above its depth, which is what decides

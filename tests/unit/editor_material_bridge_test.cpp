@@ -90,7 +90,7 @@ int check_load_edit_save_reload() noexcept {
     return finish(12);
   }
 
-  if (!write_file(kOsPath, "{\"version\":2,\"roughness\":0.4,\"metallic\":0.1}")) {
+  if (!write_file(kOsPath, "{\"version\":3,\"roughness\":0.4,\"metallic\":0.1}")) {
     remove_file(kOsPath);
     return finish(13);
   }

@@ -62,7 +62,7 @@ int verify_successful_resolution(engine::renderer::AssetDatabase *database) {
   constexpr const char *kPath = "material_resolve_ok.json";
   constexpr const char *kVirtualPath = "mat/material_resolve_ok.json";
   constexpr const char *kJson =
-      "{\"version\":2,\"textures\":{"
+      "{\"version\":3,\"textures\":{"
       "\"albedo\":\"assets/textures/ok_albedo.png\","
       "\"metallicRoughness\":\"assets/textures/ok_mr.png\","
       "\"emissive\":\"assets/textures/ok_emissive.png\","
@@ -119,7 +119,7 @@ int verify_failed_load_falls_back(engine::renderer::AssetDatabase *database) {
   constexpr const char *kPath = "material_resolve_missing.json";
   constexpr const char *kVirtualPath = "mat/material_resolve_missing.json";
   constexpr const char *kJson =
-      "{\"version\":2,\"roughness\":0.6,\"textures\":{"
+      "{\"version\":3,\"roughness\":0.6,\"textures\":{"
       "\"albedo\":\"assets/textures/missing_albedo.png\"}}";
   if (!write_material_file(kPath, kJson)) {
     return 20;
@@ -171,7 +171,7 @@ int verify_shared_texture_loads_once(engine::renderer::AssetDatabase *database) 
   constexpr const char *kPathA = "material_resolve_shared_a.json";
   constexpr const char *kPathB = "material_resolve_shared_b.json";
   constexpr const char *kJson =
-      "{\"version\":2,\"textures\":{"
+      "{\"version\":3,\"textures\":{"
       "\"albedo\":\"assets/textures/shared_albedo.png\"}}";
   if (!write_material_file(kPathA, kJson) ||
       !write_material_file(kPathB, kJson)) {

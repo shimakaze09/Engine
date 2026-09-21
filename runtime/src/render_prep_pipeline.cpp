@@ -171,8 +171,13 @@ std::uint16_t auxiliary_pass_mask(const AuxiliaryCulling &aux,
 }
 
 /// Builds the 64-bit draw sort key, MSB→LSB:
-/// transparent:1 | shader:7 (0 = PBR, the only shader) | texture:20 |
-/// mesh:20 | depth:16.
+/// transparent:1 | shadingModel:7 | texture:20 | mesh:20 | depth:16.
+///
+/// The shading model sits directly below the transparency bit so draws
+/// group into one contiguous run per model within each of the opaque and
+/// transparent halves. That is what lets the flush bind one program per
+/// run instead of per draw, and it is why the field outranks texture and
+/// mesh: a program change costs more than a texture or buffer rebind.
 std::uint64_t build_draw_sort_key(const renderer::Material &material,
                                   renderer::MeshHandle runtimeMesh,
                                   const math::Vec3 &center,
@@ -181,7 +186,8 @@ std::uint64_t build_draw_sort_key(const renderer::Material &material,
   const std::uint64_t transparentBit =
       transparent ? renderer::kDrawKeyTransparentBit : 0ULL;
 
-  const std::uint64_t shaderBits = 0ULL;
+  const std::uint64_t shadingModelBits =
+      renderer::draw_key_shading_model_bits(material.shadingModel);
 
   const std::uint64_t textureBits =
       (static_cast<std::uint64_t>(material.albedoTexture.id) &
@@ -204,7 +210,7 @@ std::uint64_t build_draw_sort_key(const renderer::Material &material,
     depthQuantized = static_cast<std::uint16_t>(65535U - depthQuantized);
   }
 
-  return transparentBit | shaderBits | textureBits | meshBits |
+  return transparentBit | shadingModelBits | textureBits | meshBits |
          static_cast<std::uint64_t>(depthQuantized);
 }
 

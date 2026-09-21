@@ -25,8 +25,12 @@ namespace engine::renderer {
 namespace {
 
 constexpr const char *kMaterialLogChannel = "material";
-constexpr std::uint32_t kMinMaterialVersion = 1U;
-constexpr std::uint32_t kMaxMaterialVersion = 2U;
+/// The one material revision this build reads. An older revision is
+/// refused rather than migrated: the project is unreleased, so the tree
+/// migrates once per format change instead of carrying a read path per
+/// past revision. A reader that guessed would drop the fields it no
+/// longer knows and resave the material as a reduction of itself.
+constexpr std::uint32_t kMaterialVersion = 3U;
 
 /// Logs a material load failure with the offending path; always false.
 bool log_material_error(const char *virtualPath, const char *message) noexcept {
@@ -106,6 +110,36 @@ bool read_optional_alpha_mode(const core::JsonParser &parser,
     *outValue = AlphaMode::Mask;
   } else if (std::strcmp(text, "blend") == 0) {
     *outValue = AlphaMode::Blend;
+  } else {
+    return false;
+  }
+  return true;
+}
+
+/// Reads the optional shadingModel field. Absent keeps the caller's
+/// value, which inherits the parent's where a material has one and is
+/// physically-based otherwise. A present-but-unknown name refuses the
+/// load: silently lighting a surface by a model the author did not ask
+/// for is a wrong picture, not a default.
+bool read_optional_shading_model(const core::JsonParser &parser,
+                                 const core::JsonValue &object,
+                                 ShadingModel *outValue) noexcept {
+  core::JsonValue field{};
+  if (!parser.get_object_field(object, "shadingModel", &field)) {
+    return true;
+  }
+
+  char text[16] = {};
+  if (!parser.copy_string(field, text, sizeof(text))) {
+    return false;
+  }
+
+  if (std::strcmp(text, "pbr") == 0) {
+    *outValue = ShadingModel::Pbr;
+  } else if (std::strcmp(text, "toon") == 0) {
+    *outValue = ShadingModel::Toon;
+  } else if (std::strcmp(text, "unlit") == 0) {
+    *outValue = ShadingModel::Unlit;
   } else {
     return false;
   }
@@ -209,21 +243,17 @@ bool parse_material_text(AssetDatabase *database, const char *virtualPath,
     return log_material_error(virtualPath, "root must be an object");
   }
 
-  std::uint32_t version = 1U;
-  bool versionPresent = false;
+  // Exactly one revision loads, and a file naming none names no revision
+  // at all, so it is refused with the rest.
+  std::uint32_t version = 0U;
   core::JsonValue versionValue{};
-  if (parser.get_object_field(*root, "version", &versionValue)) {
-    versionPresent = true;
-    if (!parser.as_uint(versionValue, &version) ||
-        (version < kMinMaterialVersion) || (version > kMaxMaterialVersion)) {
-      return log_material_error(virtualPath, "unsupported material version");
-    }
+  if (parser.get_object_field(*root, "version", &versionValue) &&
+      !parser.as_uint(versionValue, &version)) {
+    return log_material_error(virtualPath, "material version is not a number");
   }
-  // A file that never says "version": 2 gets exactly v1 semantics, even if
-  // (malformed authoring aside) it happened to carry v2-only keys — the
-  // staged-migration contract only promises v1 files load unchanged, not
-  // that v2 fields are recognized without opting in.
-  const bool isV2 = versionPresent && (version == 2U);
+  if (version != kMaterialVersion) {
+    return log_material_error(virtualPath, "unsupported material version");
+  }
 
   Material params{};
   MaterialTextureSlots slots{};
@@ -267,33 +297,32 @@ bool parse_material_text(AssetDatabase *database, const char *virtualPath,
                               "material dependency table is full");
   }
 
-  if (isV2) {
-    if (!read_optional_alpha_mode(parser, *root, &params.alphaMode) ||
-        !read_optional_float(parser, *root, "alphaCutoff",
-                             &params.alphaCutoff) ||
-        !read_optional_vec2(parser, *root, "uvTiling", &params.uvTiling) ||
-        !read_optional_vec2(parser, *root, "uvOffset", &params.uvOffset)) {
-      return log_material_error(virtualPath, "malformed v2 parameter field");
-    }
+  if (!read_optional_shading_model(parser, *root, &params.shadingModel) ||
+      !read_optional_alpha_mode(parser, *root, &params.alphaMode) ||
+      !read_optional_float(parser, *root, "alphaCutoff",
+                           &params.alphaCutoff) ||
+      !read_optional_vec2(parser, *root, "uvTiling", &params.uvTiling) ||
+      !read_optional_vec2(parser, *root, "uvOffset", &params.uvOffset)) {
+    return log_material_error(virtualPath, "malformed parameter field");
+  }
 
-    core::JsonValue texturesValue{};
-    if (parser.get_object_field(*root, "textures", &texturesValue)) {
-      if (texturesValue.type != core::JsonValue::Type::Object) {
-        return log_material_error(virtualPath, "textures must be an object");
-      }
-      if (!read_optional_texture_ref(parser, texturesValue, "albedo", database,
-                                     &metadata, &slots.albedo) ||
-          !read_optional_texture_ref(parser, texturesValue,
-                                     "metallicRoughness", database, &metadata,
-                                     &slots.metallicRoughness) ||
-          !read_optional_texture_ref(parser, texturesValue, "emissive",
-                                     database, &metadata, &slots.emissive) ||
-          !read_optional_texture_ref(parser, texturesValue, "occlusion",
-                                     database, &metadata, &slots.occlusion) ||
-          !read_optional_texture_ref(parser, texturesValue, "opacity",
-                                     database, &metadata, &slots.opacity)) {
-        return log_material_error(virtualPath, "malformed texture reference");
-      }
+  core::JsonValue texturesValue{};
+  if (parser.get_object_field(*root, "textures", &texturesValue)) {
+    if (texturesValue.type != core::JsonValue::Type::Object) {
+      return log_material_error(virtualPath, "textures must be an object");
+    }
+    if (!read_optional_texture_ref(parser, texturesValue, "albedo", database,
+                                   &metadata, &slots.albedo) ||
+        !read_optional_texture_ref(parser, texturesValue,
+                                   "metallicRoughness", database, &metadata,
+                                   &slots.metallicRoughness) ||
+        !read_optional_texture_ref(parser, texturesValue, "emissive",
+                                   database, &metadata, &slots.emissive) ||
+        !read_optional_texture_ref(parser, texturesValue, "occlusion",
+                                   database, &metadata, &slots.occlusion) ||
+        !read_optional_texture_ref(parser, texturesValue, "opacity",
+                                   database, &metadata, &slots.opacity)) {
+      return log_material_error(virtualPath, "malformed texture reference");
     }
   }
 

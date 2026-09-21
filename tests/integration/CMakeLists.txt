@@ -1148,3 +1148,11 @@ engine_add_test_executable(engine_integration_pipeline_interpolation_history
     LABELS
     integration
 )
+engine_add_test_executable(engine_integration_render_prep_shading_model
+    SOURCES
+    render_prep_shading_model_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    LABELS
+    integration
+)

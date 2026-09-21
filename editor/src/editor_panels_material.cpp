@@ -6,6 +6,8 @@
 
 #include "editor_panels_material.h"
 
+#include <iterator>
+
 #if defined(__clang__) && (defined(__x86_64__) || defined(__i386__)) &&        \
     !defined(__PRFCHWINTRIN_H)
 #define __PRFCHWINTRIN_H // NOLINT(bugprone-reserved-identifier)
@@ -23,10 +25,25 @@ namespace engine::editor {
 namespace {
 
 constexpr const char *kAlphaModeNames[] = {"Opaque", "Mask", "Blend"};
+// Index order is the ShadingModel enumerator order, which the combo below
+// depends on; a new model needs a name here or it cannot be picked.
+constexpr const char *kShadingModelNames[] = {"Physically Based", "Toon",
+                                              "Unlit"};
+static_assert(std::size(kShadingModelNames) ==
+                  renderer::kShadingModelCount,
+              "name every shading model the renderer defines");
 
 /// Draws every scalar/vector/enum field; returns true if any changed.
 bool draw_scalar_fields(renderer::Material &params) noexcept {
   bool changed = false;
+  // First, because it decides which of the fields below the shading
+  // actually reads: an unlit surface ignores roughness and metallic.
+  int shadingModel = static_cast<int>(params.shadingModel);
+  if (ImGui::Combo("Shading Model", &shadingModel, kShadingModelNames,
+                   static_cast<int>(renderer::kShadingModelCount))) {
+    params.shadingModel = static_cast<renderer::ShadingModel>(shadingModel);
+    changed = true;
+  }
   changed |= ImGui::ColorEdit3("Albedo", &params.albedo.x);
   changed |= ImGui::ColorEdit3("Emissive", &params.emissive.x);
   changed |= ImGui::SliderFloat("Roughness", &params.roughness, 0.0F, 1.0F,

@@ -26,6 +26,21 @@ bool log_save_error(const char *virtualPath, const char *message) noexcept {
   return false;
 }
 
+/// The shadingModel spelling the loader parses. Written for every
+/// material, including the physically-based default, so a reader never
+/// has to infer which model a file meant.
+const char *shading_model_to_string(ShadingModel model) noexcept {
+  switch (model) {
+  case ShadingModel::Pbr:
+    return "pbr";
+  case ShadingModel::Toon:
+    return "toon";
+  case ShadingModel::Unlit:
+    return "unlit";
+  }
+  return "pbr";
+}
+
 const char *alpha_mode_to_string(AlphaMode mode) noexcept {
   switch (mode) {
   case AlphaMode::Opaque:
@@ -97,7 +112,7 @@ bool save_material_asset(const AssetDatabase *database,
 
   core::JsonWriter writer{};
   writer.begin_object();
-  writer.write_uint("version", 2U);
+  writer.write_uint("version", 3U);
   if ((parentVirtualPath != nullptr) && (parentVirtualPath[0] != '\0')) {
     writer.write_string("parent", parentVirtualPath);
   }
@@ -117,6 +132,8 @@ bool save_material_asset(const AssetDatabase *database,
   writer.write_float("roughness", params.roughness);
   writer.write_float("metallic", params.metallic);
   writer.write_float("opacity", params.opacity);
+  writer.write_string("shadingModel",
+                      shading_model_to_string(params.shadingModel));
   writer.write_string("alphaMode", alpha_mode_to_string(params.alphaMode));
   writer.write_float("alphaCutoff", params.alphaCutoff);
 

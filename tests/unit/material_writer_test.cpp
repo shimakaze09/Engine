@@ -148,7 +148,7 @@ int verify_unresolvable_texture_rejects_save(
     engine::renderer::AssetDatabase *database) {
   constexpr const char *kOsPath = "material_writer_unresolvable.json";
   constexpr const char *kVirtualPath = "mat/material_writer_unresolvable.json";
-  constexpr const char *kOriginalContent = "{\"version\":1,\"roughness\":0.77}";
+  constexpr const char *kOriginalContent = "{\"version\":3,\"roughness\":0.77}";
   if (!write_material_file(kOsPath, kOriginalContent)) {
     return 20;
   }
@@ -187,10 +187,10 @@ int verify_find_parent_path(engine::renderer::AssetDatabase *database) {
   constexpr const char *kChildPath = "material_writer_child.json";
   constexpr const char *kChildVirtualPath = "mat/material_writer_child.json";
 
-  if (!write_material_file(kParentPath, "{\"version\":2,\"roughness\":0.5}") ||
+  if (!write_material_file(kParentPath, "{\"version\":3,\"roughness\":0.5}") ||
       !write_material_file(
           kChildPath,
-          "{\"version\":2,\"parent\":\"mat/material_writer_parent.json\","
+          "{\"version\":3,\"parent\":\"mat/material_writer_parent.json\","
           "\"textures\":{\"albedo\":\"assets/textures/child.png\"}}")) {
     remove_file(kParentPath);
     remove_file(kChildPath);
