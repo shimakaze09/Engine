@@ -203,6 +203,27 @@ void flush_renderer(CommandBufferView commandBufferView,
       }
       opaqueCount = i + 1U;
     }
+    // The key groups draws by shading model so a pass can bind one
+    // program per run, but only the physically-based program exists, and
+    // the G-buffer carries no channel to tell the models apart in the
+    // deferred path. So a material asking for another model is shaded as
+    // physically based, and that is said once per process rather than per
+    // draw or not at all: an author who picks Toon and sees a
+    // physically-lit surface is owed the reason.
+    for (std::size_t i = 0U; i < totalCount; ++i) {
+      if (commandBufferView.data[i].material.shadingModel !=
+          ShadingModel::Pbr) {
+        static bool warnedUnhonouredShadingModel = false;
+        if (!warnedUnhonouredShadingModel) {
+          warnedUnhonouredShadingModel = true;
+          core::log_message(core::LogLevel::Warning, "renderer",
+                            "a material selects a shading model this build "
+                            "has no program for; those draws are shaded as "
+                            "physically based");
+        }
+        break;
+      }
+    }
   }
   if (backend.staticMeshBatches.size() < opaqueCount) {
     // A failed grow leaves the buffer empty instead of terminating the
