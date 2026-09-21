@@ -20,7 +20,9 @@
 #include "../gpu_scene_fixture.h"
 
 #include "engine/renderer/command_buffer.h"
+#include "engine/renderer/light_culling.h"
 
+#include <cstdint>
 #include <cstdio>
 
 namespace {
@@ -94,6 +96,28 @@ struct FloorSides final {
   }
 };
 
+/// The smallest texture limit the production layout still accepts for a
+/// width x height drawable, which wraps the table onto the most rows. A
+/// fixed limit cannot serve every window: the drawable is in pixels, so a
+/// display scale above 100% grows it past what a small limit can hold.
+/// Returns 0 when no limit both lays the table out and wraps it.
+int smallest_wrapping_limit(std::uint32_t width,
+                            std::uint32_t height) noexcept {
+  using engine::renderer::kTileDataWidth;
+  using engine::renderer::kTileSize;
+  const int tilesX = (static_cast<int>(width) + kTileSize - 1) / kTileSize;
+  const int tilesY = (static_cast<int>(height) + kTileSize - 1) / kTileSize;
+  for (int limit = kTileDataWidth; limit < tilesX * kTileDataWidth; ++limit) {
+    engine::renderer::TileTextureLayout layout{};
+    if (engine::renderer::compute_tile_texture_layout(tilesX, tilesY, limit,
+                                                      layout) &&
+        (layout.tilesPerRow < tilesX)) {
+      return limit;
+    }
+  }
+  return 0;
+}
+
 FloorSides measure_sides(const CapturedFrame &frame) noexcept {
   const std::uint32_t top = frame.height / 3U;
   const std::uint32_t mid = frame.width / 2U;
@@ -155,9 +179,13 @@ int run(engine::EnginePipeline &pipeline, World &world) noexcept {
     return 13;
   }
 
-  // 512 texels hold ten 50-texel tiles, so a drawable's tile columns wrap
-  // onto many short rows and both lights' tiles move off their old rows.
-  engine::tests::checked(engine::core::cvar_set_int("r_tile_table_max_dimension", 512), "r_tile_table_max_dimension");
+  const int wrapLimit = smallest_wrapping_limit(w, h);
+  if (wrapLimit == 0) {
+    std::fprintf(stderr, "FAIL: no tile table limit wraps a %ux%u drawable\n",
+                 w, h);
+    return 18;
+  }
+  engine::tests::checked(engine::core::cvar_set_int("r_tile_table_max_dimension", wrapLimit), "r_tile_table_max_dimension");
   CapturedFrame wrapped{};
   if (!settle_frames(pipeline) ||
       !capture_presented_frame(pipeline, "tile_wrap_b.tga", &wrapped)) {
@@ -204,12 +232,12 @@ int run(engine::EnginePipeline &pipeline, World &world) noexcept {
                           wideLit.width, wideLit.height);
   const FloorSides wideSides = measure_sides(wideLit);
 
-  std::printf("deferred_tile_wrap_gpu_test: %ux%u frame-to-frame=%.3f "
-              "wrap=%.3f lights=%.3f | wrapped left R/G %.1f/%.1f right R/G "
-              "%.1f/%.1f\n",
-              w, h, noise, wrapDelta, lightDelta, wrappedSides.redLeft,
-              wrappedSides.greenLeft, wrappedSides.redRight,
-              wrappedSides.greenRight);
+  std::printf("deferred_tile_wrap_gpu_test: %ux%u limit=%d "
+              "frame-to-frame=%.3f wrap=%.3f lights=%.3f | wrapped left R/G "
+              "%.1f/%.1f right R/G %.1f/%.1f\n",
+              w, h, wrapLimit, noise, wrapDelta, lightDelta,
+              wrappedSides.redLeft, wrappedSides.greenLeft,
+              wrappedSides.redRight, wrappedSides.greenRight);
   std::printf("deferred_tile_wrap_gpu_test: 7680x2160 scene lights=%.3f | "
               "left R/G %.1f/%.1f right R/G %.1f/%.1f\n",
               wideLightDelta, wideSides.redLeft, wideSides.greenLeft,
