@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Audit asset identity: a committed sidecar, unique, and portable.
 
-Three ways a project loses track of which asset is which, all of them
+Four ways a project loses track of which asset is which, all of them
 silent until somebody else clones the repository.
 
 **A missing sidecar.** An asset's persistent GUID lives in its
@@ -18,6 +18,15 @@ to whichever the index happened to see last. Every colliding path is
 reported and the audit fails; it never picks a winner and never
 regenerates one of them, because either choice silently rebinds
 references somebody already wrote.
+
+**A cooked output no stamp claims.** A cooked output owns no identity of
+its own; it belongs to the source that produced it, and the cook stamp
+beside it is what says which source that is. Commit the output without
+the stamp and the clone has a mesh whose identity nothing can name, so
+every reference to it fails to resolve while the file sits right there.
+This is how "assets/character.mesh" lost its mesh, skeleton and three
+animation clips: an ignore rule anchored to "assets/" dropped the stamp
+while the identical files under "assets/props/" were committed.
 
 **A case-only path collision.** "Foo.png" and "foo.png" are two assets on
 Linux and one on Windows and macOS, so a project holding both builds for
@@ -45,6 +54,11 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 TABLE_HEADER = "content/include/engine/content/asset_type_table.h"
 ASSET_ROOT = "assets"
 SIDECAR_SUFFIX = ".meta"
+STAMP_SUFFIX = ".cookstamp"
+# "ASSET <16 hex> <path>" and "OUTPUT <16 hex> <path>", the stamp lines
+# naming what a cook produced, with paths relative to the stamp.
+STAMP_CLAIM_RE = re.compile(r"^(?:ASSET|OUTPUT)\s+[0-9a-fA-F]+\s+(.+)$",
+                            re.MULTILINE)
 
 ROW_RE = re.compile(
     r"X\(\s*(\w+)\s*,\s*\"[^\"]*\"\s*,\s*(\w+)\s*,\s*\w+\s*,\s*\(([^)]*)\)\s*,"
@@ -72,6 +86,86 @@ def identity_bearing_suffixes(root: pathlib.Path) -> list[str]:
         raise SystemExit("check_asset_identity: parsed no suffixes from the "
                          "asset type table; the gate would pass vacuously")
     return suffixes
+
+
+def cooked_output_suffixes(root: pathlib.Path) -> list[str]:
+    """Suffixes the cook produces, from the asset type table's own rows.
+
+    These own no identity of their own, which is exactly why each needs a
+    stamp saying whose output it is.
+    """
+    text = (root / TABLE_HEADER).read_text(encoding="utf-8")
+    body = text[text.index("#define ENGINE_ASSET_TYPE_TABLE"):]
+    body = body[:body.index("\n\n")]
+    suffixes: list[str] = []
+    for _tag, _policy, _sources, cooked in ROW_RE.findall(body):
+        for quoted in re.findall(r"\"([^\"]+)\"", cooked):
+            suffixes.append(quoted.lower())
+    if not suffixes:
+        raise SystemExit("check_asset_identity: parsed no cooked suffixes "
+                         "from the asset type table; the cooked-output "
+                         "audit would pass vacuously")
+    return suffixes
+
+
+def stamp_claims(root: pathlib.Path,
+                 stamps: list[str]) -> dict[str, list[str]]:
+    """Which stamps claim which outputs, output path to claiming stamps.
+
+    Mirrors what the catalog does at load: a stamp's claims are relative
+    to the directory the stamp sits in.
+    """
+    claims: dict[str, list[str]] = {}
+    for name in stamps:
+        try:
+            text = (root / name).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        directory = pathlib.PurePosixPath(name).parent
+        for relative in STAMP_CLAIM_RE.findall(text):
+            output = (directory / relative.strip()).as_posix()
+            # A stamp names its primary output on both an ASSET and an
+            # OUTPUT line, so claim once per stamp.
+            claiming = claims.setdefault(output, [])
+            if name not in claiming:
+                claiming.append(name)
+    return claims
+
+
+def on_disk_stamps(root: pathlib.Path) -> list[str]:
+    """Every cook stamp present under the asset root, tracked or not."""
+    return sorted(
+        path.relative_to(root).as_posix()
+        for path in (root / ASSET_ROOT).rglob("*" + STAMP_SUFFIX)
+        if path.is_file())
+
+
+def unclaimed_cooked_findings(root: pathlib.Path, tracked: set[str],
+                              cooked_suffixes: list[str]) -> list[str]:
+    """One finding per tracked cooked output no tracked stamp claims.
+
+    An untracked stamp that does claim the output is named, because that
+    is the whole defect: the identity exists on the machine that cooked it
+    and nowhere else.
+    """
+    tracked_stamps = sorted(name for name in tracked
+                            if name.lower().endswith(STAMP_SUFFIX))
+    claimed_by_tracked = stamp_claims(root, tracked_stamps)
+    claimed_by_any = stamp_claims(root, on_disk_stamps(root))
+    findings: list[str] = []
+    for name in sorted(tracked):
+        lower = name.lower()
+        if not any(lower.endswith(suffix) for suffix in cooked_suffixes):
+            continue
+        if name in claimed_by_tracked:
+            continue
+        untracked = [stamp for stamp in claimed_by_any.get(name, [])
+                     if stamp not in tracked]
+        why = (f"exists but is not tracked: {', '.join(untracked)} "
+               "(check .gitignore)" if untracked
+               else "does not exist; recook the asset that produced it")
+        findings.append(f"  {name}: no tracked cook stamp claims it; {why}")
+    return findings
 
 
 def tracked_files(root: pathlib.Path) -> set[str]:
@@ -143,6 +237,11 @@ def main() -> int:
                 if name.lower().endswith(SIDECAR_SUFFIX)]
     findings.extend(duplicate_guid_findings(root, sidecars))
     findings.extend(case_collision_findings(tracked))
+    cooked_suffixes = cooked_output_suffixes(root)
+    findings.extend(unclaimed_cooked_findings(root, tracked, cooked_suffixes))
+    cooked = sum(1 for name in tracked
+                 if any(name.lower().endswith(suffix)
+                        for suffix in cooked_suffixes))
 
     audited = 0
     for name in sorted(tracked):
@@ -167,7 +266,8 @@ def main() -> int:
         return 1
 
     print(f"asset identity audit passed: {audited} identity-bearing asset(s) "
-          f"with {len(sidecars)} sidecar(s), no duplicate GUID and no "
+          f"with {len(sidecars)} sidecar(s), {cooked} cooked output(s) each "
+          f"claimed by a tracked cook stamp, no duplicate GUID and no "
           f"case-only collision among {len(tracked)} tracked path(s)")
     return 0
 

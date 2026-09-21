@@ -715,10 +715,12 @@ def write_attribute_fixture(root, attributes, tracked):
     return root
 
 
-def write_identity_fixture(root, files):
+def write_identity_fixture(root, files, untracked=None):
     """A throwaway git work tree carrying a copy of the real asset type
     table (the gate reads its suffixes from there) plus the given staged
-    files, each a {relative path: contents} pair."""
+    files, each a {relative path: contents} pair. `untracked` files are
+    written after staging, so they are present on disk and not tracked —
+    the shape a .gitignore rule produces."""
     root.mkdir(parents=True, exist_ok=True)
     subprocess.run(["git", "-C", str(root), "init", "-q"], check=True,
                    capture_output=True)
@@ -734,6 +736,10 @@ def write_identity_fixture(root, files):
         path.write_text(contents, encoding="utf-8")
     subprocess.run(["git", "-C", str(root), "add", "-A"], check=True,
                    capture_output=True)
+    for relative, contents in (untracked or {}).items():
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(contents, encoding="utf-8")
     return root
 
 
@@ -742,11 +748,23 @@ def sidecar_text(guid):
     return '{"schemaVersion": 1, "guid": "%s"}\n' % guid
 
 
+def cook_stamp_text(guid, outputs):
+    """A cook stamp claiming `outputs`, each path relative to the stamp,
+    in the ASSET plus OUTPUT shape the packer writes."""
+    lines = ["SCHEMA 5", "TOOL_VERSION 4", "SOURCE_HASH 0123456789abcdef",
+             "SOURCE_GUID %s" % guid]
+    for index, relative in enumerate(outputs):
+        lines.append("OUTPUT %016x %s" % (index + 1, relative))
+        lines.append("ASSET %016x %s" % (index + 1, relative))
+    return "\n".join(lines) + "\n"
+
+
 def test_asset_identity_gate():
     """The identity gate must fail an identity-bearing asset with no
     committed sidecar, two sidecars claiming one GUID (naming every
-    colliding path and picking no winner), and two tracked paths that
-    differ only by case; and pass on this checkout."""
+    colliding path and picking no winner), two tracked paths that differ
+    only by case, and a tracked cooked output no tracked cook stamp claims
+    (issue #631); and pass on this checkout."""
     script = str(TOOLS / "check_asset_identity.py")
     one = "11111111-1111-4111-8111-111111111111"
     two = "22222222-2222-4222-8222-222222222222"
@@ -761,10 +779,67 @@ def test_asset_identity_gate():
                 "assets/scripts/hop.lua": "x\n",
                 "assets/scripts/hop.lua.meta": sidecar_text(two),
                 # A cooked output owns no identity of its own, so it needs
-                # no sidecar and must not be reported as missing one.
+                # no sidecar and must not be reported as missing one — but
+                # it does need the stamp that says whose output it is.
                 "assets/props/coin.mesh": "x\n",
+                "assets/props/coin.mesh.cookstamp":
+                    cook_stamp_text(one, ["coin.mesh"]),
             }))]) == 0,
               "identity: every source with a committed sidecar passes")
+
+        # Issue #631: the stamp is on the machine that cooked it and in no
+        # clone, so the output's identity is unnameable everywhere else.
+        orphan = write_identity_fixture(
+            tmp / "orphan", {
+                "assets/props/coin.gltf": "x\n",
+                "assets/props/coin.gltf.meta": sidecar_text(one),
+                "assets/props/coin.mesh": "x\n",
+            },
+            untracked={
+                "assets/props/coin.mesh.cookstamp":
+                    cook_stamp_text(one, ["coin.mesh"]),
+            })
+        completed = subprocess.run(
+            [sys.executable, script, "--root", str(orphan)],
+            capture_output=True, text=True)
+        check(completed.returncode != 0,
+              "identity: a cooked output whose stamp is untracked fails")
+        check("coin.mesh.cookstamp" in completed.stdout,
+              "identity: the orphan finding names the untracked stamp")
+
+        check(run([script, "--root", str(write_identity_fixture(
+            tmp / "nostamp", {
+                "assets/props/coin.gltf": "x\n",
+                "assets/props/coin.gltf.meta": sidecar_text(one),
+                "assets/props/coin.mesh": "x\n",
+            }))]) != 0,
+              "identity: a cooked output with no stamp at all fails")
+
+        # A stamp's claims resolve against the stamp's own directory, so a
+        # like-named claim one directory over must not cover this output.
+        check(run([script, "--root", str(write_identity_fixture(
+            tmp / "elsewhere", {
+                "assets/props/coin.gltf": "x\n",
+                "assets/props/coin.gltf.meta": sidecar_text(one),
+                "assets/props/coin.mesh": "x\n",
+                "assets/other/coin.mesh.cookstamp":
+                    cook_stamp_text(one, ["coin.mesh"]),
+            }))]) != 0,
+              "identity: a stamp in another directory claims nothing here")
+
+        # A stamp claims its siblings too, so one stamp covers the whole
+        # kit a single source cooked into.
+        check(run([script, "--root", str(write_identity_fixture(
+            tmp / "siblings", {
+                "assets/hero.gltf": "x\n",
+                "assets/hero.gltf.meta": sidecar_text(one),
+                "assets/hero.mesh": "x\n",
+                "assets/hero.skel": "x\n",
+                "assets/hero.idle.anim": "x\n",
+                "assets/hero.mesh.cookstamp": cook_stamp_text(
+                    one, ["hero.mesh", "hero.skel", "hero.idle.anim"]),
+            }))]) == 0,
+              "identity: one stamp claiming its whole cooked kit passes")
 
         check(run([script, "--root", str(write_identity_fixture(
             tmp / "missing", {
