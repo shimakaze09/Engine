@@ -179,6 +179,16 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
            ++batchIndex) {
         const StaticMeshBatch &batch = backend.staticMeshBatches[batchIndex];
         const DrawCommand &command = commandBufferView.data[batch.first];
+        // The G-Buffer's three targets are fully assigned, so it carries
+        // no channel saying which model lit a pixel and the deferred
+        // lighting pass could only shade one. A batch of another model
+        // is therefore left out here and drawn forward over this pass's
+        // depth, which is what keeps a toon character in the same frame
+        // as a physically-lit environment.
+        if (draw_key_shading_model(command.sortKey) !=
+            static_cast<std::uint8_t>(ShadingModel::Pbr)) {
+          continue;
+        }
         const GpuMesh *mesh = lookup_gpu_mesh(registry, command.mesh);
         if ((mesh == nullptr) || (mesh->geometry == kInvalidDeviceGeometry) ||
             (mesh->vertexCount == 0U)) {
@@ -930,11 +940,24 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
       }
     }
 
-    if (opaqueCount < totalCount) {
+    // Opaque runs the G-Buffer could not express, in key order, plus the
+    // transparent tail. Both draw forward over the deferred depth.
+    ShadingModelRun opaqueRuns[kShadingModelCount] = {};
+    const std::size_t opaqueRunCount = partition_shading_model_runs(
+        commandBufferView, 0U, opaqueCount, opaqueRuns, kShadingModelCount);
+    std::size_t forwardOpaqueRuns = 0U;
+    for (std::size_t i = 0U; i < opaqueRunCount; ++i) {
+      if (opaqueRuns[i].model !=
+          static_cast<std::uint8_t>(ShadingModel::Pbr)) {
+        ++forwardOpaqueRuns;
+      }
+    }
+
+    if ((opaqueCount < totalCount) || (forwardOpaqueRuns > 0U)) {
       dev->bind_render_target(pass_resource_target(passRes.sceneColor));
 
       // Carry opaque deferred depth into the scene target so forward
-      // transparent draws depth-test against G-Buffer geometry.
+      // draws depth-test against G-Buffer geometry.
       static_cast<void>(ensureSceneDepthHasOpaque());
       dev->bind_program(backend.pbrProgram);
 
@@ -984,12 +1007,52 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
         }
       };
 
-      dev->apply_render_state(RenderState{DepthTest::Less, false,
-                                          BlendMode::Alpha, CullMode::None});
-      drawForwardTransparent(opaqueCount, totalCount);
-      dev->apply_render_state(RenderState{DepthTest::Less, true,
-                                          BlendMode::Disabled,
-                                          CullMode::Back});
+      DeviceProgramHandle boundProgram = backend.pbrProgram;
+      const auto bindProgramForRun = [&](DeviceProgramHandle program) {
+        if (program == boundProgram) {
+          return;
+        }
+        dev->bind_program(program);
+        boundProgram = program;
+        // Parameter values are registry-global by name and carry across a
+        // bind, but a sampler uniform left at its default unit aliases
+        // whatever sits there, so each newly bound program gets its units.
+        apply_pbr_ibl_uniforms(backend, dev, iblAvailable);
+        if (backend.pbrAlbedoMapLocation.valid()) {
+          dev->set_param_i32(backend.pbrAlbedoMapLocation, 0);
+        }
+      };
+
+      // Opaque state, depth written: these are opaque draws that simply
+      // could not go through the G-Buffer.
+      for (std::size_t i = 0U; i < opaqueRunCount; ++i) {
+        if (opaqueRuns[i].model ==
+            static_cast<std::uint8_t>(ShadingModel::Pbr)) {
+          continue;
+        }
+        bindProgramForRun(shading_model_program(backend, opaqueRuns[i].model));
+        drawForwardTransparent(opaqueRuns[i].first,
+                               opaqueRuns[i].first + opaqueRuns[i].count);
+      }
+
+      if (opaqueCount < totalCount) {
+        dev->apply_render_state(RenderState{DepthTest::Less, false,
+                                            BlendMode::Alpha,
+                                            CullMode::None});
+        ShadingModelRun tailRuns[kShadingModelCount] = {};
+        const std::size_t tailRunCount = partition_shading_model_runs(
+            commandBufferView, opaqueCount, totalCount, tailRuns,
+            kShadingModelCount);
+        for (std::size_t i = 0U; i < tailRunCount; ++i) {
+          bindProgramForRun(shading_model_program(backend, tailRuns[i].model));
+          drawForwardTransparent(tailRuns[i].first,
+                                 tailRuns[i].first + tailRuns[i].count);
+        }
+        dev->apply_render_state(RenderState{DepthTest::Less, true,
+                                            BlendMode::Disabled,
+                                            CullMode::Back});
+      }
+      bindProgramForRun(backend.pbrProgram);
       dev->bind_texture_slot(0U, kInvalidDeviceTexture);
       unbind_pbr_shadow_textures(dev);
       unbind_pbr_ibl_textures(dev);

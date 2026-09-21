@@ -753,6 +753,66 @@ ForwardDrawProgram pbr_forward_draw_program(const BackendState &backend) noexcep
   return program;
 }
 
+std::size_t partition_shading_model_runs(const CommandBufferView &view,
+                                         std::size_t start, std::size_t end,
+                                         ShadingModelRun *runs,
+                                         std::size_t capacity) noexcept {
+  if ((runs == nullptr) || (capacity == 0U) || (view.data == nullptr) ||
+      (start >= end)) {
+    return 0U;
+  }
+  const std::size_t last =
+      (end < static_cast<std::size_t>(view.count))
+          ? end
+          : static_cast<std::size_t>(view.count);
+  if (start >= last) {
+    return 0U;
+  }
+
+  std::size_t count = 0U;
+  runs[0] = ShadingModelRun{start, 0U,
+                            draw_key_shading_model(view.data[start].sortKey)};
+  count = 1U;
+  for (std::size_t i = start; i < last; ++i) {
+    const std::uint8_t model = draw_key_shading_model(view.data[i].sortKey);
+    if (model != runs[count - 1U].model) {
+      if (count == capacity) {
+        // More runs than the caller can hold. The tail keeps drawing,
+        // joined onto the last run rather than dropped: a draw shaded by
+        // the previous model is wrong, a draw missing entirely is worse.
+        runs[count - 1U].count = last - runs[count - 1U].first;
+        return count;
+      }
+      runs[count] = ShadingModelRun{i, 0U, model};
+      ++count;
+    }
+    ++runs[count - 1U].count;
+  }
+  return count;
+}
+
+DeviceProgramHandle shading_model_program(const BackendState &backend,
+                                          std::uint8_t model) noexcept {
+  const DeviceProgramHandle fallback = backend.pbrProgram;
+  if (!shading_model_is_valid(model)) {
+    return fallback;
+  }
+  const DeviceProgramHandle program =
+      backend.shadingModelPrograms[static_cast<std::size_t>(model)];
+  if (program != kInvalidDeviceProgram) {
+    return program;
+  }
+  static bool warnedMissingProgram = false;
+  if (!warnedMissingProgram) {
+    warnedMissingProgram = true;
+    core::log_message(core::LogLevel::Warning, "renderer",
+                      "a material selects a shading model whose program is "
+                      "unavailable; those draws are shaded as physically "
+                      "based");
+  }
+  return fallback;
+}
+
 void upload_forward_material(const ForwardDrawProgram &program,
                              const BackendState &backend,
                              const RenderDevice *dev,

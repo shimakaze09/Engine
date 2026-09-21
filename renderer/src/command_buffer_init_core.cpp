@@ -348,6 +348,52 @@ bool init_backend_core(BackendState &backend) noexcept {
     return false;
   }
 
+  // One forward program per shading model, from the same source cooked
+  // with that model's define. Soft-fail per model: a model whose program
+  // does not load leaves its slot invalid, and the flush draws it with
+  // the physically-based program and says so once, which is strictly
+  // better than refusing to start over an effect shader.
+  //
+  // The define set is the PBR program's plus the model's, so the cooked
+  // variant the manifest lists is exactly the one requested. That
+  // matters because a missing stage variant falls back to the stage's
+  // default binary in silence: asking for a set the manifest does not
+  // cook would shade that model as physically based while the engine
+  // believed otherwise.
+  backend.shadingModelShaderHandles[static_cast<std::size_t>(
+      ShadingModel::Pbr)] = pbrShaderHandle;
+  backend.shadingModelPrograms[static_cast<std::size_t>(ShadingModel::Pbr)] =
+      backend.pbrProgram;
+  {
+    struct ModelVariant final {
+      ShadingModel model;
+      const char *define;
+      const char *name;
+    };
+    const ModelVariant kModelVariants[] = {
+        {ShadingModel::Toon, "ENGINE_SHADING_TOON", "toon"},
+        {ShadingModel::Unlit, "ENGINE_SHADING_UNLIT", "unlit"}};
+    for (const ModelVariant &variant : kModelVariants) {
+      const ShaderDefine defines[2] = {{variant.define, "1"},
+                                       {"PBR_FULL", "1"}};
+      const std::size_t defineCount = forwardFullSamplers ? 2U : 1U;
+      const ShaderProgramHandle handle = load_configured_shader_variant(
+          "pbr.vert", "pbr.frag", defines, defineCount);
+      const std::size_t slot = static_cast<std::size_t>(variant.model);
+      if (handle == kInvalidShaderProgram) {
+        char message[160] = {};
+        std::snprintf(message, sizeof(message),
+                      "the %s shading program did not load; those "
+                      "materials draw as physically based",
+                      variant.name);
+        core::log_message(core::LogLevel::Warning, "renderer", message);
+        continue;
+      }
+      backend.shadingModelShaderHandles[slot] = handle;
+      backend.shadingModelPrograms[slot] = shader_device_program(handle);
+    }
+  }
+
   // Instanced forward sibling (soft-fail: batches fall back to
   // per-command draws). The cooked vertex shaders carry no runtime
   // instancing toggle, so instanced batches bind this program instead;

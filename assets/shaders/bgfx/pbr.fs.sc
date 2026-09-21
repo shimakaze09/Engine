@@ -334,6 +334,54 @@ vec3 cook_torrance(vec3 N, vec3 V, vec3 L, vec3 radiance, vec3 albedo,
     return (kD * albedo / 3.14159265359 + specular) * radiance * NdotL;
 }
 
+#if ENGINE_SHADING_TOON
+// The toon surface response: two bands rather than a falloff, which is
+// what reads as drawn rather than lit. The terminator is soft by a fixed
+// width instead of a screen-space derivative, so the edge is stable
+// under camera motion and identical on every profile.
+//
+// Minimal on purpose. A ramp texture, rim light, authored shadow colour
+// and specular shape are the Toon model's sub-paths and are not decided
+// here; this is the response a scene needs before any of them exists.
+#define ENGINE_TOON_TERMINATOR 0.25
+#define ENGINE_TOON_SOFTNESS 0.05
+#define ENGINE_TOON_SHADED_LEVEL 0.45
+#define ENGINE_TOON_SPECULAR_EDGE 0.5
+
+vec3 toon_response(vec3 N, vec3 V, vec3 L, vec3 radiance, vec3 albedo,
+                   float roughness) {
+    float NdotL = dot(N, L);
+    float band = smoothstep(ENGINE_TOON_TERMINATOR - ENGINE_TOON_SOFTNESS,
+                            ENGINE_TOON_TERMINATOR + ENGINE_TOON_SOFTNESS,
+                            NdotL);
+    float level = mix(ENGINE_TOON_SHADED_LEVEL, 1.0, band);
+
+    // A specular band, on or off, sized by roughness: a smooth surface
+    // gets a small tight highlight, a rough one none at all.
+    vec3 H = normalize(V + L);
+    float gloss = 1.0 - clamp(roughness, 0.0, 1.0);
+    float tightness = mix(0.995, 0.6, gloss * gloss);
+    float specular =
+        smoothstep(tightness, tightness + ENGINE_TOON_SOFTNESS,
+                   dot(N, H)) *
+        gloss * ENGINE_TOON_SPECULAR_EDGE;
+
+    return radiance * albedo * level + radiance * specular;
+}
+#endif
+
+// One surface response per shading model. The light loops in main are
+// written once and call this, so a model decides how a surface answers a
+// light and nothing else about the pass.
+vec3 surface_response(vec3 N, vec3 V, vec3 L, vec3 radiance, vec3 albedo,
+                      float metallic, float roughness, vec3 F0) {
+#if ENGINE_SHADING_TOON
+    return toon_response(N, V, L, radiance, albedo, roughness);
+#else
+    return cook_torrance(N, V, L, radiance, albedo, metallic, roughness, F0);
+#endif
+}
+
 float compute_distance_fog_factor(float distanceToCamera) {
     int mode = int(uFogMode.x);
     if (mode == 1) {
@@ -420,6 +468,15 @@ void main() {
         discard;
     }
     float opacity = clamp(u_opacity.x, 0.0, 1.0);
+
+#if ENGINE_SHADING_UNLIT
+    // Unlit answers no light: no loops, no ambient, no image-based term,
+    // and no fog either. An unlit surface is authored colour, and fog is
+    // the scene acting on it, so an effect quad or a UI-facing plane
+    // shows exactly what the material says. Alpha modes still apply,
+    // because those are the material's own too.
+    gl_FragColor = vec4(albedo + emissive, opacity);
+#else
     vec3 F0 = mix(vec3_splat(0.04), albedo, metallic);
     vec3 Lo = vec3_splat(0.0);
 
@@ -437,8 +494,8 @@ void main() {
         // the GL pbr.frag contract.
         shadow = (i == 0) ? compute_directional_shadow(v_worldpos) : 1.0;
 #endif
-        Lo += cook_torrance(N, V, L, radiance, albedo, metallic, roughness,
-                            F0) * shadow;
+        Lo += surface_response(N, V, L, radiance, albedo, metallic,
+                               roughness, F0) * shadow;
     }
 
     int pointCount = int(u_pointLightCount.x);
@@ -462,8 +519,8 @@ void main() {
 #if PBR_FULL
         shadow = compute_point_shadow(v_worldpos, i);
 #endif
-        Lo += cook_torrance(N, V, L, radiance, albedo, metallic, roughness,
-                            F0) * shadow;
+        Lo += surface_response(N, V, L, radiance, albedo, metallic,
+                               roughness, F0) * shadow;
     }
 
     int spotCount = int(u_spotLightCount.x);
@@ -494,12 +551,15 @@ void main() {
 #if PBR_FULL
         shadow = compute_spot_shadow(v_worldpos, i);
 #endif
-        Lo += cook_torrance(N, V, L, radiance, albedo, metallic, roughness,
-                            F0) * shadow;
+        Lo += surface_response(N, V, L, radiance, albedo, metallic,
+                               roughness, F0) * shadow;
     }
 
     vec3 ambient = vec3_splat(0.03) * albedo * ao;
-#if PBR_FULL
+#if PBR_FULL && !ENGINE_SHADING_TOON
+    // Image-based ambient is a physically-based term: it would wash the
+    // toon response's banding back into a gradient, which is the one
+    // thing that model exists to avoid.
     if (uIblEnabled.x != 0.0) {
         ambient = ibl_ambient(N, V, albedo, metallic, roughness) * ao;
     }
@@ -511,4 +571,5 @@ void main() {
     float fogFactor =
         clamp(1.0 - ((1.0 - distanceFog) * (1.0 - heightFog)), 0.0, 1.0);
     gl_FragColor = vec4(mix(color, uFogColor.xyz, fogFactor), opacity);
+#endif
 }

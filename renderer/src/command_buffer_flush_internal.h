@@ -303,6 +303,34 @@ struct ForwardDrawBindings final {
   DeviceTextureHandle materialSlots[4] = {};
 };
 
+/// One maximal run of consecutive draws sharing a shading model. Render
+/// prep sorts the model directly below the transparency bit, so each
+/// model occupies exactly one run inside a range and finding them is a
+/// scan rather than a sort.
+struct ShadingModelRun final {
+  std::size_t first = 0U;
+  std::size_t count = 0U;
+  /// The raw key field. A key can name a model this build has no run
+  /// for, so callers validate it with shading_model_is_valid.
+  std::uint8_t model = 0U;
+};
+
+/// Splits [start, end) of `view` into model runs, writing at most
+/// `capacity` of them and returning how many. A range whose draws all
+/// share one model yields one run, which is the common case and the
+/// reason this costs a scan and no allocation.
+std::size_t partition_shading_model_runs(const CommandBufferView &view,
+                                         std::size_t start, std::size_t end,
+                                         ShadingModelRun *runs,
+                                         std::size_t capacity) noexcept;
+
+/// The program to draw `model` with, and the model actually used. Falls
+/// back to the physically-based program when a model has none, saying so
+/// once per process rather than per draw or not at all: an author who
+/// picks Toon and sees a physically-lit surface is owed the reason.
+DeviceProgramHandle shading_model_program(const BackendState &backend,
+                                          std::uint8_t model) noexcept;
+
 /// Uploads everything about a draw that does not depend on its
 /// transform: the material scalars, its foliage wind, its albedo texture
 /// (falling back to the opaque placeholder rather than leaving the

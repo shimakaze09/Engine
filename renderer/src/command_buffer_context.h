@@ -125,6 +125,20 @@ struct BackendState final {
   ShaderProgramHandle pbrInstancedShaderHandle{};
   DeviceProgramHandle pbrInstancedProgram{};
 
+  // One forward program per shading model, indexed by the ShadingModel
+  // enumerator, so the flush binds by model rather than by name. The
+  // physically-based slot aliases pbrProgram; the others are the same
+  // source cooked with their model's define, and a model whose program
+  // failed to load leaves its slot invalid so the flush falls back to
+  // the physically-based one and says so once.
+  //
+  // Their uniform values come from the pbr* locations above: this
+  // backend's parameter tokens are global-registry indices, so a
+  // program declaring the same uniform names shares them, which is why
+  // adding a model needs no second parameter family.
+  ShaderProgramHandle shadingModelShaderHandles[kShadingModelCount]{};
+  DeviceProgramHandle shadingModelPrograms[kShadingModelCount]{};
+
   // PBR uniform locations.
   ShaderParam pbrModelLocation{};
   ShaderParam pbrMvpLocation{};

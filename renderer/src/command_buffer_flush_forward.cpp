@@ -124,14 +124,31 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
 
     const ForwardDrawProgram forwardProgram =
         pbr_forward_draw_program(backend);
+    DeviceProgramHandle boundProgram = backend.pbrProgram;
 
-    auto drawRange = [&](std::size_t start, std::size_t end) {
+    // One shading-model run. `batched` asks for the opaque instancing
+    // fast path, and `model` is the run's model, because only the
+    // physically-based model has an instanced sibling program: using it
+    // for another model would shade that run physically based while the
+    // engine believed otherwise, which is the one failure this partition
+    // exists to prevent.
+    auto drawRange = [&](std::size_t start, std::size_t end, bool batched,
+                         std::uint8_t model) {
       ForwardDrawBindings bindings{};
 
-      if ((start == 0U) && (end == opaqueCount)) {
+      if (batched) {
         for (std::size_t batchIndex = 0U; batchIndex < opaqueBatchCount;
              ++batchIndex) {
           const StaticMeshBatch &batch = backend.staticMeshBatches[batchIndex];
+          // Batches are built over the whole opaque range, so a run takes
+          // the ones inside it. A batch never straddles a run: batching
+          // groups by the key's state bits, which the shading model is
+          // part of.
+          const std::size_t batchFirst = static_cast<std::size_t>(batch.first);
+          if ((batchFirst < start) ||
+              ((batchFirst + static_cast<std::size_t>(batch.count)) > end)) {
+            continue;
+          }
           const DrawCommand &command = commandBufferView.data[batch.first];
           const GpuMesh *mesh = lookup_gpu_mesh(registry, command.mesh);
           if ((mesh == nullptr) ||
@@ -143,12 +160,14 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
           upload_forward_material(forwardProgram, backend, dev, command,
                                   &bindings);
 
-          // Instanced batching runs through the shader's runtime
-          // toggle (GL) or the INSTANCED sibling program (bgfx, whose
-          // ports carry no toggle); with neither, batches take the
-          // per-command path below.
+          // Instanced batching runs through the shader's runtime toggle
+          // or the INSTANCED sibling program (bgfx, whose ports carry no
+          // toggle); with neither, batches take the per-command path
+          // below. The sibling is cooked from the physically-based
+          // fragment only, so a run of another model never binds it.
           const bool instancedViaProgram =
               !backend.pbrUseInstancingLocation.valid() &&
+              (model == static_cast<std::uint8_t>(ShadingModel::Pbr)) &&
               (backend.pbrInstancedProgram != kInvalidDeviceProgram);
           if ((batch.count > 1U) && !mesh->hasSkin &&
               (mesh->indexCount > 0U) &&
@@ -168,15 +187,16 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
                 mesh->geometry, static_cast<std::int32_t>(mesh->indexCount),
                 static_cast<std::int32_t>(batch.count));
             if (instancedViaProgram) {
-              dev->bind_program(backend.pbrProgram);
+              // Back to the run's program, not unconditionally the
+              // physically-based one.
+              dev->bind_program(boundProgram);
             }
             continue;
           }
 
           for (std::uint32_t local = 0U; local < batch.count; ++local) {
             const std::size_t commandIndex =
-                static_cast<std::size_t>(batch.first) +
-                static_cast<std::size_t>(local);
+                batchFirst + static_cast<std::size_t>(local);
             draw_forward_command(forwardProgram, dev,
                                  commandBufferView.data[commandIndex], *mesh,
                                  viewProjection, &frameStats);
@@ -200,7 +220,43 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
       }
     };
 
-    drawRange(0U, opaqueCount);
+    // Re-assigns the sampler units after a program change. The parameter
+    // values themselves are registry-global by name and carry across a
+    // bind, but a sampler uniform left at its default unit aliases
+    // whatever sits there, so each newly bound program gets its units.
+    auto bindProgramForRun = [&](DeviceProgramHandle program) {
+      if (program == boundProgram) {
+        return;
+      }
+      dev->bind_program(program);
+      boundProgram = program;
+      apply_pbr_ibl_uniforms(backend, dev, iblAvailable);
+      if (backend.pbrAlbedoMapLocation.valid()) {
+        dev->set_param_i32(backend.pbrAlbedoMapLocation, 0);
+      }
+    };
+
+    // The key groups draws by shading model, so each model is one
+    // contiguous run and a program binds once per run rather than once
+    // per draw. A range of one model therefore costs exactly what it did
+    // before this existed, which is every range in a scene that mixes
+    // no models.
+    auto drawModelRuns = [&](std::size_t start, std::size_t end,
+                             bool batched) {
+      ShadingModelRun runs[kShadingModelCount] = {};
+      const std::size_t runCount = partition_shading_model_runs(
+          commandBufferView, start, end, runs, kShadingModelCount);
+      for (std::size_t i = 0U; i < runCount; ++i) {
+        bindProgramForRun(shading_model_program(backend, runs[i].model));
+        drawRange(runs[i].first, runs[i].first + runs[i].count, batched,
+                  runs[i].model);
+      }
+      // The sky and the passes after this one expect the
+      // physically-based program bound.
+      bindProgramForRun(backend.pbrProgram);
+    };
+
+    drawModelRuns(0U, opaqueCount, true);
 
     const SkyModel skyModel = selected_sky_model();
     const DeviceTextureHandle skyboxTexture = envSkyboxTexture;
@@ -228,7 +284,7 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
     if (opaqueCount < totalCount) {
       dev->apply_render_state(RenderState{DepthTest::Less, false,
                                           BlendMode::Alpha, CullMode::None});
-      drawRange(opaqueCount, totalCount);
+      drawModelRuns(opaqueCount, totalCount, false);
 
       dev->apply_render_state(RenderState{DepthTest::Less, true,
                                           BlendMode::Disabled,

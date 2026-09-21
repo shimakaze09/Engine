@@ -1,4 +1,5 @@
-// Pins the per-draw forward uniform set against a recording device. The
+// Pins the per-draw forward uniform set against a recording device, and
+// the shading-model run partition the passes bind programs by. The
 // forward pass, the deferred path's transparent pass and every scene
 // capture each used to carry their own copy of this upload, so a uniform
 // added to one draw could be forgotten in the other two and the same
@@ -6,6 +7,10 @@
 // now share one helper, and this suite asserts what that helper writes:
 // every location the program declares, the albedo fallback rather than a
 // dangling render target, and the instancing toggle cleared per draw.
+//
+// The partition is here too because it is the other half of one
+// contract: a pass binds a program once per run, so a run that is wrong
+// shades a draw with the wrong model.
 
 #include "command_buffer_flush_internal.h"
 
@@ -299,6 +304,93 @@ int main() {
     check((g_drawIndexed == 0) && (g_draw == 1) && (stats.drawCalls == 1U) &&
               (stats.triangleCount == 2U),
           "an unindexed mesh draws non-indexed and counts two triangles");
+  }
+
+  // The run partition. Render prep sorts the shading model directly
+  // below the transparency bit, so each model occupies one contiguous
+  // run and a pass binds its program once per run.
+  {
+    DrawCommand commands[6] = {};
+    const auto keyed = [](std::uint8_t model) noexcept {
+      DrawCommand entry{};
+      entry.sortKey.value =
+          draw_key_shading_model_bits(static_cast<ShadingModel>(model));
+      entry.material.shadingModel = static_cast<ShadingModel>(model);
+      return entry;
+    };
+    commands[0] = keyed(0U);
+    commands[1] = keyed(0U);
+    commands[2] = keyed(1U);
+    commands[3] = keyed(1U);
+    commands[4] = keyed(1U);
+    commands[5] = keyed(2U);
+    CommandBufferView view{};
+    view.data = commands;
+    view.count = 6U;
+
+    ShadingModelRun runs[kShadingModelCount] = {};
+    const std::size_t count =
+        partition_shading_model_runs(view, 0U, 6U, runs, kShadingModelCount);
+    check(count == 3U, "three models give three runs");
+    check((runs[0].model == 0U) && (runs[0].first == 0U) &&
+              (runs[0].count == 2U),
+          "the first run covers the first model's draws");
+    check((runs[1].model == 1U) && (runs[1].first == 2U) &&
+              (runs[1].count == 3U),
+          "the second run covers the second model's draws");
+    check((runs[2].model == 2U) && (runs[2].first == 5U) &&
+              (runs[2].count == 1U),
+          "the third run covers the last draw");
+
+    // Every draw lands in exactly one run: a gap would silently drop a
+    // draw, an overlap would draw one twice.
+    std::size_t covered = 0U;
+    for (std::size_t i = 0U; i < count; ++i) {
+      check(runs[i].first == covered, "runs are contiguous from the start");
+      covered += runs[i].count;
+    }
+    check(covered == 6U, "the runs cover every draw exactly once");
+
+    // A sub-range is partitioned on its own terms, which is what the
+    // deferred path does for the transparent tail.
+    const std::size_t tail =
+        partition_shading_model_runs(view, 2U, 6U, runs, kShadingModelCount);
+    check((tail == 2U) && (runs[0].first == 2U) && (runs[0].count == 3U) &&
+              (runs[1].first == 5U) && (runs[1].count == 1U),
+          "a sub-range partitions from its own start");
+
+    // One model is one run, which is every scene that mixes none.
+    DrawCommand uniform[4] = {keyed(0U), keyed(0U), keyed(0U), keyed(0U)};
+    CommandBufferView uniformView{};
+    uniformView.data = uniform;
+    uniformView.count = 4U;
+    const std::size_t single = partition_shading_model_runs(
+        uniformView, 0U, 4U, runs, kShadingModelCount);
+    check((single == 1U) && (runs[0].count == 4U),
+          "one model in a range is one run");
+
+    // Boundaries: an empty range, a null destination, and a capacity of
+    // one all answer without reading past anything.
+    check(partition_shading_model_runs(view, 3U, 3U, runs,
+                                       kShadingModelCount) == 0U,
+          "an empty range has no runs");
+    check(partition_shading_model_runs(view, 0U, 6U, nullptr,
+                                       kShadingModelCount) == 0U,
+          "a null destination yields no runs");
+    const std::size_t capped =
+        partition_shading_model_runs(view, 0U, 6U, runs, 1U);
+    check((capped == 1U) && (runs[0].count == 6U),
+          "a capacity of one joins the tail onto the run it can hold, "
+          "rather than dropping those draws");
+
+    // A range that runs past the view stops at the view.
+    const std::size_t clamped =
+        partition_shading_model_runs(view, 0U, 99U, runs, kShadingModelCount);
+    std::size_t clampedTotal = 0U;
+    for (std::size_t i = 0U; i < clamped; ++i) {
+      clampedTotal += runs[i].count;
+    }
+    check(clampedTotal == 6U, "a range past the view stops at the view");
   }
 
   if (g_failures != 0) {
