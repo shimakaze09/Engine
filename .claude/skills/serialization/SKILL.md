@@ -45,16 +45,24 @@ change and needs the migration path below.
 
 ## Changing a format
 
-- **Bump the schema version** and write the migration. A reader that meets
-  an unknown version refuses the document; it never guesses.
-- **Keep the old form readable.** Where a default-valued field can be
-  omitted so that pre-change files stay byte-identical, do that — it keeps
-  the version unchanged and the diff empty.
-- **Test both directions**: the old form loads, the new form round-trips,
-  and an unknown version is refused.
+- **Bump the schema version and migrate the tree.** The gate is exact: the
+  one current revision loads, and every other value — older, newer,
+  malformed, absent — is refused. The project is unreleased, so there is
+  no dual-read layer to add; a reader that guessed an older revision
+  would drop the fields it no longer knows and resave the document as a
+  reduction of itself.
+- **Prefer no version change at all.** Where a default-valued field can be
+  omitted so that unchanged files stay byte-identical, do that — the
+  revision stands and the diff is empty.
+- **Migrate every authored file in the same change**, with a script you
+  keep out of the engine, reproducing exactly what the read path you are
+  deleting produced. A file left behind stops loading.
+- **Test both directions**: the new form round-trips, and each refused
+  shape — the previous revision, the next one, a missing key, a
+  wrong-typed value — is refused.
 - A behavior change in serialized data (physics semantics, for instance)
-  needs an explicit behavior version and before/after tests, not a silent
-  reinterpretation of existing files.
+  is the same kind of change: bump the revision, migrate the tree, and
+  pair before/after tests, never a silent reinterpretation.
 
 ## Failure and durability
 

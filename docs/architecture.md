@@ -144,9 +144,23 @@ fails to compile rather than silently skipping a type. Reflected fields
 serialize under a stable wire key, never the C++ member name, so a rename
 declares the old key instead of migrating content.
 
-Format changes require migrations and production-path tests. Parse, load or
-restore failure leaves the destination unchanged; a scene load stages into
-a replacement World and commits only on success.
+A document names an asset by its persistent identity, never by a path or
+by a path-derived id: `AssetGuid` is what a source `.meta` records and a
+document stores, a cooked output is a sub-asset of it under a local id,
+and the 64-bit asset id beside it is this session's handle for where the
+bytes are. Every path that points a component at an asset writes the
+identity with the id, so a save cannot carry one without the other, and
+nothing invents an identity an asset does not have.
+
+A schema version gate is exact: the one current revision loads, an older
+or newer one is refused, and a document naming no revision is refused
+with them. The project is unreleased, so a format change migrates the
+tree once instead of adding a read path per past revision — a reader that
+guessed would drop the fields it no longer knows and resave the document
+as a reduction of itself. A format change carries the tree migration and
+production-path tests for the new revision and for the refusal of the
+old. Parse, load or restore failure leaves the destination unchanged; a
+scene load stages into a replacement World and commits only on success.
 
 See the `serialization` skill for the procedure.
 
@@ -167,6 +181,19 @@ See the `serialization` skill for the procedure.
   deferred paths. Prefer CPU-verifiable tests; GPU tests carry the `gpu`
   label. **A green test suite is not evidence a renderer change works** —
   see the `verify` skill.
+- **Shading is a material's property, never the build's.** A frame mixes
+  shading models, so the model is a `Material` field and the draw sort
+  key carries it, grouping draws into one contiguous run per model within
+  each of the opaque and transparent halves. A pass binds one program per
+  run. Adding a model means adding its program and its run, never a
+  global mode or a cvar. The G-buffer carries no shading-model channel,
+  so a model the deferred path cannot express renders forward; until a
+  model has a program, its draws are shaded as physically based and the
+  flush says so once.
+- The sort key's bit layout lives once, in `command_buffer.h` beside
+  `DrawKey`. Render prep, the sort and the flush use the published
+  constants and accessors; a copied shift is rejected by
+  `tools/check_duplicate_primitives.py`.
 
 ## Physics
 
