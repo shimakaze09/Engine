@@ -53,6 +53,35 @@ struct DrawKey final {
   std::uint64_t value = 0U;
 };
 
+// The layout above, once. Render prep composes a key from these, the
+// builder sorts by them, and the flush partitions draws by them; before
+// this the three sites each carried their own copy of the shifts and
+// masks, so a field could move in one and not the others.
+inline constexpr std::uint64_t kDrawKeyTransparentBit = 1ULL << 63U;
+inline constexpr unsigned int kDrawKeyShaderShift = 56U;
+inline constexpr std::uint64_t kDrawKeyShaderMask = 0x7FULL;
+inline constexpr unsigned int kDrawKeyTextureShift = 36U;
+inline constexpr std::uint64_t kDrawKeyTextureMask = 0xFFFFFULL;
+inline constexpr unsigned int kDrawKeyMeshShift = 16U;
+inline constexpr std::uint64_t kDrawKeyMeshMask = 0xFFFFFULL;
+inline constexpr std::uint64_t kDrawKeyDepthMask = 0xFFFFULL;
+
+/// Whether a key's draw belongs to the transparent half.
+constexpr bool draw_key_is_transparent(const DrawKey &key) noexcept {
+  return (key.value & kDrawKeyTransparentBit) != 0U;
+}
+
+/// The state bits a key carries above its depth, which is what decides
+/// whether two draws can share one instanced batch.
+constexpr std::uint64_t draw_key_state_bits(const DrawKey &key) noexcept {
+  return key.value & ~kDrawKeyDepthMask;
+}
+
+/// A key's quantized depth.
+constexpr std::uint64_t draw_key_depth(const DrawKey &key) noexcept {
+  return key.value & kDrawKeyDepthMask;
+}
+
 /// Which passes a draw command feeds. Camera-visible commands
 /// carry kPassCamera in the main list; commands render prep culled for
 /// the camera but that a shadow sweep or a capture camera can see travel

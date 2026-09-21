@@ -111,13 +111,16 @@ int check_transparent_sorts_depth_first() {
   static engine::renderer::CommandBufferBuilder builder;
   builder.reset();
 
-  constexpr std::uint64_t kTransparent = 1ULL << 63U;
+  constexpr std::uint64_t kTransparent =
+      engine::renderer::kDrawKeyTransparentBit;
+  constexpr unsigned int kMeshShift = engine::renderer::kDrawKeyMeshShift;
   // Far surface (small inverted depth) with HIGH texture/mesh key bits.
-  const std::uint64_t farKey = kTransparent | (0xFFFFFULL << 16U) | 5ULL;
+  const std::uint64_t farKey = kTransparent | (0xFFFFFULL << kMeshShift) | 5ULL;
   // Near surface (large inverted depth) with LOW texture/mesh key bits.
-  const std::uint64_t nearKey = kTransparent | (0x00001ULL << 16U) | 500ULL;
+  const std::uint64_t nearKey =
+      kTransparent | (0x00001ULL << kMeshShift) | 500ULL;
   // One opaque command to confirm opaque still draws before transparent.
-  const std::uint64_t opaqueKey = (0x00002ULL << 16U) | 7ULL;
+  const std::uint64_t opaqueKey = (0x00002ULL << kMeshShift) | 7ULL;
 
   if (!builder.submit(make_command(nearKey, 1U)) ||
       !builder.submit(make_command(farKey, 2U)) ||

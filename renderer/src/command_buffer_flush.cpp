@@ -49,7 +49,6 @@ namespace {
 
 constexpr float kNearClip = 0.1F;
 constexpr float kFarClip = 100.0F;
-constexpr std::uint64_t kDrawKeyTransparentBit = 1ULL << 63U;
 
 } // namespace
 
@@ -199,8 +198,7 @@ void flush_renderer(CommandBufferView commandBufferView,
   if ((commandBufferView.data != nullptr) && (commandBufferView.count > 0U)) {
     totalCount = static_cast<std::size_t>(commandBufferView.count);
     for (std::size_t i = 0U; i < totalCount; ++i) {
-      if ((commandBufferView.data[i].sortKey.value & kDrawKeyTransparentBit) !=
-          0U) {
+      if (draw_key_is_transparent(commandBufferView.data[i].sortKey)) {
         break;
       }
       opaqueCount = i + 1U;
@@ -255,8 +253,7 @@ void flush_renderer(CommandBufferView commandBufferView,
   if ((auxiliaryView.data != nullptr) && (auxiliaryView.count > 0U)) {
     ctx.auxiliaryView = auxiliaryView;
     for (std::size_t i = 0U; i < auxiliaryView.count; ++i) {
-      if ((auxiliaryView.data[i].sortKey.value & kDrawKeyTransparentBit) !=
-          0U) {
+      if (draw_key_is_transparent(auxiliaryView.data[i].sortKey)) {
         break;
       }
       ctx.auxiliaryOpaqueCount = i + 1U;

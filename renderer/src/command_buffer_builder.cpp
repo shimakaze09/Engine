@@ -10,9 +10,6 @@
 namespace engine::renderer {
 namespace {
 
-constexpr std::uint64_t kDrawKeyTransparentBit = 1ULL << 63U;
-constexpr std::uint64_t kDrawKeyDepthMask = 0xFFFFULL;
-
 /// Compares vec3 values for exact equality.
 bool vec3_equal(const math::Vec3 &lhs, const math::Vec3 &rhs) noexcept {
   return (lhs.x == rhs.x) && (lhs.y == rhs.y) && (lhs.z == rhs.z);
@@ -118,11 +115,6 @@ bool draw_commands_instance_compatible(const DrawCommand &lhs,
          (lhs.foliageWindFrequency == rhs.foliageWindFrequency);
 }
 
-/// Extracts the non-depth state bits from a packed draw key.
-std::uint64_t draw_key_state_bits(const DrawCommand &command) noexcept {
-  return command.sortKey.value & ~kDrawKeyDepthMask;
-}
-
 /// Total order for commands the render keys cannot separate: the owning
 /// entity, then the model matrix bit for bit (a foliage patch emits one
 /// command per instance under one entity). Without it the sort's output
@@ -177,18 +169,14 @@ void CommandBufferBuilder::sort_by_key() noexcept {
   std::sort(m_commands.begin(),
             m_commands.begin() + static_cast<std::ptrdiff_t>(m_commandCount),
             [](const DrawCommand &lhs, const DrawCommand &rhs) {
-              const bool lhsTransparent =
-                  (lhs.sortKey.value & kDrawKeyTransparentBit) != 0U;
-              const bool rhsTransparent =
-                  (rhs.sortKey.value & kDrawKeyTransparentBit) != 0U;
+              const bool lhsTransparent = draw_key_is_transparent(lhs.sortKey);
+              const bool rhsTransparent = draw_key_is_transparent(rhs.sortKey);
               if (lhsTransparent != rhsTransparent) {
                 return lhsTransparent < rhsTransparent;
               }
               if (lhsTransparent) {
-                const std::uint64_t lhsDepth =
-                    lhs.sortKey.value & kDrawKeyDepthMask;
-                const std::uint64_t rhsDepth =
-                    rhs.sortKey.value & kDrawKeyDepthMask;
+                const std::uint64_t lhsDepth = draw_key_depth(lhs.sortKey);
+                const std::uint64_t rhsDepth = draw_key_depth(rhs.sortKey);
                 if (lhsDepth != rhsDepth) {
                   return lhsDepth < rhsDepth;
                 }
@@ -198,8 +186,8 @@ void CommandBufferBuilder::sort_by_key() noexcept {
                 return draw_identity_less(lhs, rhs);
               }
 
-              const std::uint64_t lhsState = draw_key_state_bits(lhs);
-              const std::uint64_t rhsState = draw_key_state_bits(rhs);
+              const std::uint64_t lhsState = draw_key_state_bits(lhs.sortKey);
+              const std::uint64_t rhsState = draw_key_state_bits(rhs.sortKey);
               if (lhsState != rhsState) {
                 return lhsState < rhsState;
               }
@@ -215,10 +203,8 @@ void CommandBufferBuilder::sort_by_key() noexcept {
               if (lhs.foliageWindFrequency != rhs.foliageWindFrequency) {
                 return lhs.foliageWindFrequency < rhs.foliageWindFrequency;
               }
-              const std::uint64_t lhsDepth =
-                  lhs.sortKey.value & kDrawKeyDepthMask;
-              const std::uint64_t rhsDepth =
-                  rhs.sortKey.value & kDrawKeyDepthMask;
+              const std::uint64_t lhsDepth = draw_key_depth(lhs.sortKey);
+              const std::uint64_t rhsDepth = draw_key_depth(rhs.sortKey);
               if (lhsDepth != rhsDepth) {
                 return lhsDepth < rhsDepth;
               }

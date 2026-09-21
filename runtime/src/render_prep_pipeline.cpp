@@ -178,16 +178,19 @@ std::uint64_t build_draw_sort_key(const renderer::Material &material,
                                   const math::Vec3 &center,
                                   const math::Mat4 &viewProjection) noexcept {
   const bool transparent = (material.opacity < 1.0F);
-  const std::uint64_t transparentBit = transparent ? (1ULL << 63U) : 0ULL;
+  const std::uint64_t transparentBit =
+      transparent ? renderer::kDrawKeyTransparentBit : 0ULL;
 
   const std::uint64_t shaderBits = 0ULL;
 
   const std::uint64_t textureBits =
-      (static_cast<std::uint64_t>(material.albedoTexture.id) & 0xFFFFFULL)
-      << 36U;
+      (static_cast<std::uint64_t>(material.albedoTexture.id) &
+       renderer::kDrawKeyTextureMask)
+      << renderer::kDrawKeyTextureShift;
 
-  const std::uint64_t meshBits =
-      (static_cast<std::uint64_t>(runtimeMesh.id) & 0xFFFFFULL) << 16U;
+  const std::uint64_t meshBits = (static_cast<std::uint64_t>(runtimeMesh.id) &
+                                  renderer::kDrawKeyMeshMask)
+                                 << renderer::kDrawKeyMeshShift;
 
   const math::Vec4 clipPos =
       math::mul(viewProjection, math::Vec4(center.x, center.y, center.z, 1.0F));

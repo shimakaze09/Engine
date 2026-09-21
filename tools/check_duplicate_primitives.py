@@ -73,6 +73,18 @@ RULES: tuple[Rule, ...] = (
         remedy="include engine/core/hash.h and use fnv1a_32/fnv1a_64 or "
         "their _append forms",
     ),
+    Rule(
+        name="the draw sort key's bit layout",
+        owner="renderer/include/engine/renderer/command_buffer.h",
+        # The shifts that place the key's fields. Render prep, the sort and
+        # the flush each carried their own copy of these, so a field could
+        # move in one and not the others and draws would silently sort
+        # wrong. A copy is always a shift by one of the field offsets
+        # applied to a 64-bit literal, which is what this matches.
+        pattern=r"1ULL\s*<<\s*63U|<<\s*(?:56U|36U)(?![0-9])",
+        remedy="include engine/renderer/command_buffer.h and use the "
+        "kDrawKey* constants or the draw_key_* accessors",
+    ),
 )
 
 
