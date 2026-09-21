@@ -412,7 +412,7 @@ bool write_metadata_file(const char *inputPath, const char *outputPath,
 
   char metadataPath[512] = {};
   const int pathResult = std::snprintf(metadataPath, sizeof(metadataPath),
-                                       "%s.meta.json", outputPath);
+                                       "%s.cookmeta", outputPath);
   if ((pathResult <= 0) ||
       (pathResult >= static_cast<int>(sizeof(metadataPath)))) {
     return false;

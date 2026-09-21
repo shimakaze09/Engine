@@ -518,7 +518,7 @@ std::size_t load_material_assets_in_directory(
       continue;
     }
     const std::filesystem::path &path = entry.path();
-    if (path.extension() != ".json") {
+    if (path.extension() != ".mat") {
       continue;
     }
     if (nameCount >= kMaxDiscovered) {

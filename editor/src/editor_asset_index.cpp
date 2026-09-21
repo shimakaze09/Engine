@@ -1,6 +1,6 @@
 // Implements the editor's cached content-browser asset index: cold
-// filesystem walk, extension/content-sniff classification, and
-// change-driven filter caching.
+// filesystem walk, suffix classification, and change-driven filter
+// caching.
 
 #include "editor_asset_index.h"
 
@@ -11,8 +11,6 @@
 #include <filesystem>
 #include <string>
 
-#include "engine/core/file_read.h"
-#include "engine/core/json.h"
 #include "engine/core/logging.h"
 #include "engine/engine.h"
 
@@ -59,43 +57,6 @@ void lower_ascii(char *text) noexcept {
   }
 }
 
-/// Distinguishes scene/material/animation-controller ".json" documents by
-/// their top-level keys (schemas already documented on save_scene,
-/// load_material_asset, and the .animctrl loader respectively).
-content::AssetTypeTag classify_json_by_content(const char *osPath) noexcept {
-  char buffer[16U * 1024U] = {};
-  std::size_t size = 0U;
-  // Every non-Ok outcome — absent, unreadable, or larger than the sniff
-  // buffer — classifies as Other: the index never writes the file back, so
-  // a conservative kind is the whole cost of a fault here.
-  if (core::read_whole_file(osPath, buffer, sizeof(buffer), &size) !=
-      core::FileReadResult::Ok) {
-    return content::AssetTypeTag::Unknown;
-  }
-  core::JsonParser parser{};
-  if (!parser.parse(buffer, size)) {
-    return content::AssetTypeTag::Unknown;
-  }
-  const core::JsonValue *root = parser.root();
-  if ((root == nullptr) || (root->type != core::JsonValue::Type::Object)) {
-    return content::AssetTypeTag::Unknown;
-  }
-  if (parser.get_object_field(*root, "entities") != nullptr) {
-    return content::AssetTypeTag::Scene;
-  }
-  if ((parser.get_object_field(*root, "states") != nullptr) &&
-      (parser.get_object_field(*root, "clips") != nullptr)) {
-    return content::AssetTypeTag::AnimationController;
-  }
-  if ((parser.get_object_field(*root, "albedo") != nullptr) ||
-      (parser.get_object_field(*root, "roughness") != nullptr) ||
-      (parser.get_object_field(*root, "metallic") != nullptr) ||
-      (parser.get_object_field(*root, "parent") != nullptr)) {
-    return content::AssetTypeTag::Material;
-  }
-  return content::AssetTypeTag::Unknown;
-}
-
 /// True for sidecar/internal files the browser hides from authors
 /// (import metadata, cook bookkeeping, and their cache directory).
 bool is_hidden_from_index(const std::filesystem::path &path) noexcept {
@@ -104,10 +65,10 @@ bool is_hidden_from_index(const std::filesystem::path &path) noexcept {
     return true;
   }
   const std::string filename = path.filename().string();
-  return has_suffix(filename.c_str(), ".meta.json") ||
+  return has_suffix(filename.c_str(), ".cookmeta") ||
          has_suffix(filename.c_str(), ".cookstamp") ||
          has_suffix(filename.c_str(), ".checksum") ||
-         (filename == "generated.manifest.json");
+         (filename == "generated.manifest");
 }
 
 /// Copies `text` into a fixed field; false (field cleared) when it does
@@ -243,16 +204,7 @@ content::AssetTypeTag classify_asset_kind(const char *osPath,
   if (outIsSource != nullptr) {
     *outIsSource = bySuffix.source;
   }
-  if (bySuffix.tag != content::AssetTypeTag::Unknown) {
-    return bySuffix.tag;
-  }
-  char lowerPath[kMaxAssetIndexPath] = {};
-  std::snprintf(lowerPath, sizeof(lowerPath), "%s", osPath);
-  lower_ascii(lowerPath);
-  if (has_suffix(lowerPath, ".json")) {
-    return classify_json_by_content(osPath);
-  }
-  return content::AssetTypeTag::Unknown;
+  return bySuffix.tag;
 }
 
 bool rebuild_asset_index() noexcept {
@@ -270,6 +222,7 @@ bool rebuild_asset_index() noexcept {
   }
 
   walk_directory(root, root, 0U);
+
   return true;
 }
 

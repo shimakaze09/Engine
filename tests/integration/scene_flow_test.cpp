@@ -38,7 +38,7 @@ namespace {
 constexpr const char *kSceneAScript = "scene_flow_a.lua";
 constexpr const char *kSceneBScript = "scene_flow_b.lua";
 constexpr const char *kHelperScript = "scene_flow_helper.lua";
-constexpr const char *kSceneBFile = "scene_flow_b.scene.json";
+constexpr const char *kSceneBFile = "scene_flow_b.scene";
 
 /// Writes one text file for a script or scene fixture.
 bool write_text_file(const char *path, const char *contents) noexcept {
@@ -145,7 +145,7 @@ int main() {
       "local M = {}\n"
       "function M.on_begin_play(self)\n"
       "    handoff = 7\n"
-      "    engine.load_scene(\"scene_flow_b.scene.json\")\n"
+      "    engine.load_scene(\"scene_flow_b.scene\")\n"
       "end\n"
       "function M.on_end_play(self)\n"
       "    scene_a_end_play = true\n"

@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstdio>
 
+#include "engine/content/asset_identity.h"
 #include "engine/core/hash.h"
 #include "engine/core/logging.h"
 
@@ -133,6 +134,60 @@ const AssetMetadata *find_asset_metadata(const MetadataStore *store,
   }
 
   return &store->entries[slot];
+}
+
+const AssetMetadata *find_asset_metadata_by_ref(const MetadataStore *store,
+                                                const AssetRef &ref) noexcept {
+  if ((store == nullptr) || !asset_ref_is_valid(ref)) {
+    return nullptr;
+  }
+  for (std::size_t slot = 0U; slot < store->entries.size(); ++slot) {
+    if (!store->occupied[slot]) {
+      continue;
+    }
+    if (store->entries[slot].ref == ref) {
+      return &store->entries[slot];
+    }
+  }
+  return nullptr;
+}
+
+std::size_t find_duplicate_guid_records(const MetadataStore *store,
+                                        const AssetMetadata **outRecords,
+                                        std::size_t capacity) noexcept {
+  if (store == nullptr) {
+    return 0U;
+  }
+  std::size_t found = 0U;
+  for (std::size_t slot = 0U; slot < store->entries.size(); ++slot) {
+    if (!store->occupied[slot]) {
+      continue;
+    }
+    const AssetMetadata &record = store->entries[slot];
+    if (!asset_ref_is_valid(record.ref)) {
+      continue;
+    }
+    // Only a full ref collision is a duplicate: two outputs of one
+    // source share its GUID by design and are told apart by local id.
+    bool collides = false;
+    for (std::size_t other = 0U; other < store->entries.size(); ++other) {
+      if ((other == slot) || !store->occupied[other]) {
+        continue;
+      }
+      if (store->entries[other].ref == record.ref) {
+        collides = true;
+        break;
+      }
+    }
+    if (!collides) {
+      continue;
+    }
+    if ((outRecords != nullptr) && (found < capacity)) {
+      outRecords[found] = &record;
+    }
+    ++found;
+  }
+  return found;
 }
 
 bool add_asset_tag(MetadataStore *store, AssetId id,
@@ -407,28 +462,19 @@ bool load_with_dependencies(MetadataStore *store, AssetId rootId,
 
 // --- Asset identity constructors ---
 
-/// FNV-1a over the path with separators canonicalized to '/' so the same
-/// asset hashes identically on every platform.
+/// FNV-1a over the path's canonical virtual spelling, so the id the
+/// runtime derives is the id the catalog registered no matter how the
+/// reference was written. Hashing the raw path instead gave one asset as
+/// many ids as it had spellings: "assets//coin.mesh" resolved to the same
+/// file as "assets/coin.mesh" and owned a different id, which a saved
+/// reference then failed to resolve.
 AssetId make_asset_id_from_path(const char *path) noexcept {
-  if (path == nullptr) {
-    return kInvalidAssetId;
-  }
-
-  std::uint64_t hash = core::kFnv1a64Offset;
-  for (const unsigned char *cursor =
-           reinterpret_cast<const unsigned char *>(path);
-       *cursor != 0U; ++cursor) {
-    const unsigned char ch = (*cursor == static_cast<unsigned char>('\\'))
-                                 ? static_cast<unsigned char>('/')
-                                 : *cursor;
-    hash = core::fnv1a_64_append(hash, static_cast<std::uint8_t>(ch));
-  }
-
-  if (hash == kInvalidAssetId) {
-    hash = 1ULL;
-  }
-
-  return hash;
+  // One derivation, in PathKey: this is the numeric form of the same key,
+  // kept while references written before GUID identity are still read.
+  // kInvalidPathKey and kInvalidAssetId are both zero, so a path that
+  // names no asset — empty, nothing but separators or "." segments,
+  // carrying a "..", or too long to hold whole — maps straight through.
+  return make_path_key(path).value;
 }
 
 AssetId make_asset_id_from_file(const char *path) noexcept {

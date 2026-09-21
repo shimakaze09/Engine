@@ -96,7 +96,7 @@ int main() {
     t.fail("copy shader sources to scratch");
     return t.finish("shader_cook");
   }
-  const std::string manifest = (sources / "shaders.json").string();
+  const std::string manifest = (sources / "shaders.manifest").string();
 
   // Inject a depth-only probe (empty main, the shadow-depth fragment
   // shape) so the bodyless-prototype regression below is provable

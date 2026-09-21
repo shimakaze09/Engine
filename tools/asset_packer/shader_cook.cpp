@@ -497,7 +497,7 @@ int run_shader_cook(int argc, char **argv) {
   if ((manifestPath == nullptr) || (outDir == nullptr) ||
       (shadercPath == nullptr) || (includeDir == nullptr)) {
     std::fprintf(stderr,
-                 "usage: asset_packer --shader-manifest <shaders.json> "
+                 "usage: asset_packer --shader-manifest <shaders.manifest> "
                  "--shader-out <dir> --shaderc <path> --shader-include "
                  "<bgfx src dir> [--profiles glsl,essl,spirv] [--force] "
                  "[--platform <tag>]\n");
@@ -664,8 +664,11 @@ int run_shader_cook(int argc, char **argv) {
   if (!remove_stale_outputs(stampBase.c_str(), outputs)) {
     return 1;
   }
-  if (!write_cook_stamp(stampBase.c_str(), sourceHash, digests, settingsHash,
-                        platformTag, outputs)) {
+  // No producing source asset: shader variants are cooked from a
+  // manifest, not from an asset that carries an identity, so the stamp
+  // records no provenance for them.
+  if (!write_cook_stamp(stampBase.c_str(), nullptr, sourceHash, digests,
+                        settingsHash, platformTag, outputs)) {
     std::fprintf(stderr, "shader cook: stamp write failed\n");
     return 1;
   }

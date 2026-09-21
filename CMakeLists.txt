@@ -612,7 +612,7 @@ if(ENGINE_BUILD_TOOLS AND ENGINE_BGFX_SHADERC AND TARGET copy_assets)
     add_custom_target(bgfx_shader_cook ALL
         COMMAND $<TARGET_FILE:asset_packer>
             --shader-manifest
-            "${ENGINE_ASSET_SOURCE_DIR}/shaders/bgfx/shaders.json"
+            "${ENGINE_ASSET_SOURCE_DIR}/shaders/bgfx/shaders.manifest"
             --shader-out "${ENGINE_ASSET_OUTPUT_DIR}/shaders/bgfx/cooked"
             --shaderc $<TARGET_FILE:shaderc>
             --shader-include "${bgfx_SOURCE_DIR}/bgfx/src"

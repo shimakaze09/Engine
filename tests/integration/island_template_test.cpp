@@ -17,7 +17,7 @@
 
 namespace {
 
-constexpr const char *kTemplatePath = "assets/templates/island_hopper.json";
+constexpr const char *kTemplatePath = "assets/templates/island_hopper.scene";
 constexpr float kDt = 1.0F / 60.0F;
 
 /// Selects the nearest working-directory ancestor containing the template.

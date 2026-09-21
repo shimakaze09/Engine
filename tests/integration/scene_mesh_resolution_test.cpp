@@ -1,5 +1,5 @@
 // A saved scene names its meshes by id alone. This test reopens the kit
-// scene (assets/coin_run.scene.json) through the pipeline's scene
+// scene (assets/coin_run.scene) through the pipeline's scene
 // operation, headless and out of play so no script runs, and requires
 // every mesh component to reach Ready through the asset catalog, with
 // more draw commands than the built-in and bootstrap meshes alone
@@ -32,7 +32,7 @@
 
 namespace {
 
-constexpr const char *kScene = "assets/coin_run.scene.json";
+constexpr const char *kScene = "assets/coin_run.scene";
 constexpr const char *kMainScript = "scene_mesh_resolution_main.lua";
 constexpr const char *kCoinPath = "assets/props/coin.mesh";
 constexpr const char *kCubePath = "builtin://cube";

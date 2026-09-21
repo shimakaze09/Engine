@@ -48,7 +48,7 @@ struct AssetIndexEntry final {
 
 /// Rebuilds the process-wide asset index by walking editor_asset_root()
 /// once. Cold path: called on explicit rescan and editor startup, never
-/// per frame. Skips sidecar/internal files (.meta.json, .cookstamp,
+/// per frame. Skips sidecar/internal files (.cookmeta, .cookstamp,
 /// .checksum) and the .thumbnails cache directories. False when the asset
 /// root does not exist (the index is cleared either way).
 bool rebuild_asset_index() noexcept;
@@ -65,11 +65,9 @@ bool asset_index_built() noexcept;
 /// bumps the generation so every dependent cache recomputes.
 void asset_index_reset() noexcept;
 
-/// Classifies one file through the asset type table's suffixes, falling
-/// back to a cheap top-level-key content sniff for ".json" documents no
-/// suffix names (scene and material both use that bare extension). Sets
-/// *outIsSource when the suffix is a cooked type's authored source form.
-/// Exposed for tests.
+/// Classifies one file through the asset type table's suffixes alone; the
+/// walk never opens a file to guess its kind. Sets *outIsSource when the
+/// suffix is a cooked type's authored source form. Exposed for tests.
 content::AssetTypeTag classify_asset_kind(const char *osPath,
                                           bool *outIsSource = nullptr) noexcept;
 

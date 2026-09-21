@@ -1,11 +1,13 @@
-SCHEMA 4
+SCHEMA 5
 TOOL_VERSION 4
 SOURCE_HASH 23db258f5d0c2dc8
 IMPORT_HASH 2755be6c6a924f10
 PLATFORM Linux
+SOURCE_GUID fcef240a-9ff8-4b92-a6c5-7903d99c2fb3
 DEP_HASH 3c41acc21dddf46d signpost.bin
 OUTPUT 54ba96ce334eab63 signpost.mesh
-OUTPUT 519c529784842c20 signpost.mesh.meta.json
+ASSET 432408a2e33116bc signpost.mesh
+OUTPUT 519c529784842c20 signpost.mesh.cookmeta
 OUTPUT 244ff663833afad9 signpost.mesh.hull
 OUTPUT c2cc1c17c8898dc9 .thumbnails/signpost.mesh.png
 OUTPUT daa5c1787a2390fa .thumbnails/signpost.mesh.checksum

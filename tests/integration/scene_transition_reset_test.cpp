@@ -25,7 +25,7 @@ namespace {
 
 constexpr const char *kSceneAScript = "scene_reset_a.lua";
 constexpr const char *kSceneBScript = "scene_reset_b.lua";
-constexpr const char *kSceneBFile = "scene_reset_b.scene.json";
+constexpr const char *kSceneBFile = "scene_reset_b.scene";
 
 /// Writes one text file for a script or scene fixture.
 bool write_text_file(const char *path, const char *contents) noexcept {
@@ -136,7 +136,7 @@ int main() {
       "            engine.wait(0)\n"
       "        end\n"
       "    end)\n"
-      "    engine.load_scene(\"scene_reset_b.scene.json\")\n"
+      "    engine.load_scene(\"scene_reset_b.scene\")\n"
       "end\n"
       "return M\n";
   const char *sceneBScript =
@@ -242,7 +242,7 @@ int main() {
         "            engine.wait(0)\n"
         "        end\n"
         "    end)\n"
-        "    engine.load_scene(\"scene_reset_missing.scene.json\")\n"
+        "    engine.load_scene(\"scene_reset_missing.scene\")\n"
         "end\n"
         "function assert_leak_survived_failed_load()\n"
         "    if (leak or 0) ~= 104 then\n"
@@ -278,7 +278,7 @@ int main() {
         "    engine.set_interval(function()\n"
         "        leak = (leak or 0) + 1\n"
         "    end, 1000)\n"
-        "    engine.load_scene(\"scene_reset_b.scene.json\")\n"
+        "    engine.load_scene(\"scene_reset_b.scene\")\n"
         "end\n";
     if (!write_text_file(kSceneAScript, timerScript) ||
         !engine::scripting::load_script(kSceneAScript) ||

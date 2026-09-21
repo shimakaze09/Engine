@@ -275,7 +275,7 @@ void begin_save_scene_as_dialog() noexcept {
     return;
   }
 
-  static const SDL_DialogFileFilter kFilters[] = {{"Scene", "json"}};
+  static const SDL_DialogFileFilter kFilters[] = {{"Scene", "scene"}};
   const char *defaultLocation =
       doc.hasPath ? doc.path : editor_asset_root();
   SDL_ShowSaveFileDialog(&scene_dialog_callback, request, session.sdlWindow,
@@ -592,7 +592,7 @@ void request_open_scene_dialog() noexcept {
     return;
   }
 
-  static const SDL_DialogFileFilter kFilters[] = {{"Scene", "json"}};
+  static const SDL_DialogFileFilter kFilters[] = {{"Scene", "scene"}};
   SDL_ShowOpenFileDialog(&scene_dialog_callback, request, session.sdlWindow,
                         kFilters, 1, editor_asset_root(), false);
 }

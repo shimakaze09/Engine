@@ -1,5 +1,5 @@
 // Implements the packer's generated-source certification: reads
-// the directory's generated.manifest.json and compares the listed size and
+// the directory's generated.manifest and compares the listed size and
 // FNV-1a 64 hash against the bytes about to be cooked.
 
 #include "generated_manifest.h"
@@ -17,7 +17,7 @@
 
 namespace {
 
-constexpr const char *kManifestName = "generated.manifest.json";
+constexpr const char *kManifestName = "generated.manifest";
 constexpr std::uint64_t kManifestSchema = 1U;
 constexpr std::size_t kMaxManifestBytes = 4U * 1024U * 1024U;
 

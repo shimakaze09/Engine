@@ -66,7 +66,7 @@ endif()
 
 # Boundary (#211): removing a stamped sidecar while the cook stamp still
 # certifies it is a torn generation, and the load must now be rejected.
-file(REMOVE "${output}.meta.json")
+file(REMOVE "${output}.cookmeta")
 execute_process(
     COMMAND "${STALE_HOST}" "${output}"
     RESULT_VARIABLE result

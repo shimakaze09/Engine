@@ -1546,7 +1546,7 @@ int check_every_component_type_survives_load() {
   springArm.armLength = 4.5F;
   AnimationComponent animation{};
   std::snprintf(animation.controllerPath, sizeof(animation.controllerPath),
-                "%s", "assets/character.animctrl.json");
+                "%s", "assets/character.animctrl");
   CameraComponent camera{};
   camera.priority = 6.5F;
   camera.fovRadians = 0.8F;
@@ -1636,7 +1636,7 @@ int check_every_component_type_survives_load() {
 
   if (!loaded->get_animation_component(found, &loadedAnimation) ||
       (std::strcmp(loadedAnimation.controllerPath,
-                   "assets/character.animctrl.json") != 0)) {
+                   "assets/character.animctrl") != 0)) {
     return 308;
   }
 
@@ -1659,7 +1659,7 @@ int check_every_component_type_survives_load() {
 int check_animation_authored_fields_round_trip() {
   using namespace engine::runtime;
 
-  constexpr const char *kControllerPath = "assets/character.animctrl.json";
+  constexpr const char *kControllerPath = "assets/character.animctrl";
 
   std::unique_ptr<World> source(new (std::nothrow) World());
   if (source == nullptr) {
@@ -1763,7 +1763,7 @@ int check_animation_authored_fields_round_trip() {
   constexpr const char *kLegacyScene =
       "{\"version\":2,\"entities\":[{\"components\":{"
       "\"name\":\"Legacy\","
-      "\"AnimationComponent\":\"assets/character.animctrl.json\"}}]}";
+      "\"AnimationComponent\":\"assets/character.animctrl\"}}]}";
   std::unique_ptr<World> legacy(new (std::nothrow) World());
   if ((legacy == nullptr) ||
       !load_scene(*legacy, kLegacyScene, std::strlen(kLegacyScene))) {
@@ -1787,7 +1787,7 @@ int check_animation_authored_fields_round_trip() {
   constexpr const char *kMalformedScene =
       "{\"version\":2,\"entities\":[{\"components\":{"
       "\"AnimationComponent\":{"
-      "\"controllerPath\":\"assets/character.animctrl.json\","
+      "\"controllerPath\":\"assets/character.animctrl\","
       "\"playing\":\"yes\"}}}]}";
   std::unique_ptr<World> malformed(new (std::nothrow) World());
   if (malformed == nullptr) {

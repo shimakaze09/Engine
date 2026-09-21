@@ -1,7 +1,7 @@
 # Verifies the runtime skeleton/animation loaders surface cooked-asset
 # staleness (issue #91): a cooked .skel/.anim whose source glTF changed
 # after the last cook must log a once-per-asset warning through the
-# production load path by reusing the owning mesh's .meta.json sidecar,
+# production load path by reusing the owning mesh's .cookmeta sidecar,
 # while a fresh cook and a sidecar-less mesh stay silent.
 
 if(NOT DEFINED ASSET_PACKER OR NOT DEFINED STALE_HOST OR NOT DEFINED SRC_GLTF
@@ -31,7 +31,7 @@ endif()
 if(NOT EXISTS "${WORKDIR}/character.walk.anim")
     message(FATAL_ERROR "cook wrote no character.walk.anim")
 endif()
-if(NOT EXISTS "${output}.meta.json")
+if(NOT EXISTS "${output}.cookmeta")
     message(FATAL_ERROR "cook wrote no mesh metadata sidecar")
 endif()
 
@@ -80,7 +80,7 @@ endif()
 # Boundary (#211): removing the stamped mesh sidecar while the cook stamp
 # still certifies it is a torn generation, and the skeletal loads that
 # route through the owning mesh must now be rejected.
-file(REMOVE "${output}.meta.json")
+file(REMOVE "${output}.cookmeta")
 execute_process(
     COMMAND "${STALE_HOST}" "${WORKDIR}" "character.skel" "character.walk.anim"
     RESULT_VARIABLE result

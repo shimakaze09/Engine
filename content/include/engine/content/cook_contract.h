@@ -27,7 +27,7 @@ namespace engine::content {
 /// declaring a higher schema was written by a newer packer whose lines
 /// this reader cannot interpret, so it certifies nothing here; a lower or
 /// absent schema is a legacy stamp that recooks.
-inline constexpr std::uint32_t kCookStampSchema = 4U;
+inline constexpr std::uint32_t kCookStampSchema = 5U;
 
 /// Importer contract version baked into every cook stamp: bump whenever
 /// the cooked output format or import semantics change, so existing

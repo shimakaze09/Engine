@@ -164,7 +164,11 @@ StyleCopReport.xml
 *_p.c
 *_h.h
 *.ilk
-*.meta
+# NOT *.meta: that is the Visual Studio template's name for an MSVC build
+# artifact, and every one of those lands under the already-ignored build
+# directory. Here ".meta" is the authored asset sidecar that owns an
+# asset's persistent identity, and it has to be committed — ignoring it
+# silently leaves every asset without an identity on a fresh clone.
 *.iobj
 *.pdb
 *.ipdb
@@ -495,3 +499,11 @@ assets/.thumbnails/
 assets/*.cookstamp
 assets/*.meta.json
 assets/*.hull
+
+# Scratch trees the editor suites create under the real asset root: the
+# asset index and scene-document tests must walk a directory below
+# editorAssetRoot, so their fixtures land here and are never content.
+/assets/engine_asset_index_test/
+/assets/engine_scene_document_test/
+/assets/engine_scene_document_prompt_test/
+/assets/engine_scene_document_play_mode_test/

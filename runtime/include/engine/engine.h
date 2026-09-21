@@ -16,7 +16,7 @@ struct EngineConfig final {
   const char *mainScriptPath = "assets/main.lua";
   const char *bootstrapMeshPath = "assets/triangle.mesh";
   const char *shaderRootPath = "assets/shaders";
-  const char *editorScenePath = "assets/scene.json";
+  const char *editorScenePath = "assets/main.scene";
   const char *editorAssetRoot = "assets";
   /// Player mode: run the pure gameplay loop — the editor bridge
   /// is cleared at bootstrap and the renderer presents the scene straight

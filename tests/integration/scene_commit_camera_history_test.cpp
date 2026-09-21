@@ -31,9 +31,9 @@
 
 namespace {
 
-constexpr const char *kNoCameraSceneFile = "scch_no_camera.scene.json";
-constexpr const char *kFarCameraSceneFile = "scch_far_camera.scene.json";
-constexpr const char *kMissingSceneFile = "scch_missing.scene.json";
+constexpr const char *kNoCameraSceneFile = "scch_no_camera.scene";
+constexpr const char *kFarCameraSceneFile = "scch_far_camera.scene";
+constexpr const char *kMissingSceneFile = "scch_missing.scene";
 constexpr const char *kNewSceneScript = "scch_new_scene.lua";
 
 // The two authored camera positions are far apart so any blend between
@@ -91,7 +91,7 @@ bool set_working_directory_with_assets() noexcept {
     }
 
     if (std::filesystem::exists(normalized / "assets/main.lua", ec) &&
-        std::filesystem::exists(normalized / "assets/shaders/bgfx/shaders.json",
+        std::filesystem::exists(normalized / "assets/shaders/bgfx/shaders.manifest",
                                 ec)) {
       std::filesystem::current_path(normalized, ec);
       return !ec;

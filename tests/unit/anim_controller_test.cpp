@@ -31,18 +31,18 @@ namespace tools = engine::tools;
 constexpr const char *kSkelPath = "anim_controller_test.skel";
 constexpr const char *kIdlePath = "anim_controller_test.idle.anim";
 constexpr const char *kWalkPath = "anim_controller_test.walk.anim";
-constexpr const char *kControllerPath = "anim_controller_test.animctrl.json";
+constexpr const char *kControllerPath = "anim_controller_test.animctrl";
 constexpr const char *kReverseControllerPath =
-    "anim_controller_test.reverse.animctrl.json";
+    "anim_controller_test.reverse.animctrl";
 constexpr const char *kMountPrefix = "animctrl";
 constexpr const char *kControllerVirtualPath =
-    "animctrl/anim_controller_test.animctrl.json";
+    "animctrl/anim_controller_test.animctrl";
 constexpr const char *kReverseControllerVirtualPath =
-    "animctrl/anim_controller_test.reverse.animctrl.json";
+    "animctrl/anim_controller_test.reverse.animctrl";
 constexpr const char *kNamesControllerPath =
-    "anim_controller_test.names.animctrl.json";
+    "anim_controller_test.names.animctrl";
 constexpr const char *kNamesControllerVirtualPath =
-    "animctrl/anim_controller_test.names.animctrl.json";
+    "animctrl/anim_controller_test.names.animctrl";
 constexpr float kFixedDt = 1.0F / 60.0F;
 
 /// Removes a temporary test file when it exists.

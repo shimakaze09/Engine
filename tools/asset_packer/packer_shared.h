@@ -12,6 +12,7 @@
 #include <cgltf.h>
 
 #include "dependency_graph.h"
+#include "engine/content/asset_metadata.h"
 #include "engine/content/cook_contract.h"
 
 /// Interleaved vertex/index payload extracted from one glTF primitive.
@@ -62,14 +63,15 @@ inline constexpr const char *kMeshCookLogicRevision = "mesh-cook-logic-1";
 /// platform never certify a cook for another; overridable via --platform.
 inline constexpr const char *kCookPlatformTag = ENGINE_COOK_PLATFORM;
 
-/// Import settings read from an asset's .meta.json sidecar.
-struct ImportSettings final {
-  int meshIndex = 0;
-  int primitiveIndex = 0;
-  float scaleFactor = 1.0F;
-  int upAxis = 1;
-  bool generateNormals = false;
-};
+/// The packer's name for the one shared definition in content. Authored
+/// in the source's ".meta" sidecar, never invented here.
+using ImportSettings = engine::content::MeshImportSettings;
+
+/// Runs the one-off identity migration over a tree: every authored
+/// asset and folder without a ".meta" sidecar gets one, carrying a mesh
+/// source's settings over from the cooked record that used to hold them.
+/// Never rewrites a sidecar that already exists. Non-zero on any failure.
+int run_init_meta(int argc, char **argv);
 
 /// Whether the file exists and is readable.
 bool file_exists(const char *path);
@@ -97,8 +99,12 @@ std::uint64_t cook_settings_key(std::uint64_t importSettingsHash,
                                 const char *logicRevision);
 /// Sorts digests by path for deterministic stamp layout.
 void sort_dependency_digests(std::vector<DependencyDigest> &digests);
-/// Reads import settings from the output's .meta.json when present.
-bool read_import_settings_from_meta(const char *outputPath,
+/// Reads the authored import settings out of the SOURCE's ".meta"
+/// sidecar. They are authored data, never derived: the cook reads them
+/// and never writes them, so deleting every cooked output loses nothing
+/// a human typed. Leaves `*outSettings` at the defaults and returns
+/// false when the source has no sidecar or no settings in it.
+bool read_authored_import_settings(const char *sourcePath,
                                     ImportSettings *outSettings);
 /// Writes the cook stamp recording source/settings hashes, dependency
 /// digests, and the output manifest hashed from the committed files;
@@ -107,7 +113,16 @@ bool read_import_settings_from_meta(const char *outputPath,
 /// Schema 4 records every dependency and output path relative to the
 /// stamp's directory; an output outside it, or a line that would not fit
 /// kMaxCookStampLineBytes, refuses the stamp instead of truncating.
-bool write_cook_stamp(const char *outputPath, std::uint64_t sourceHash,
+/// Writes the cook's commit marker. `sourcePath` is the asset that was
+/// cooked: the stamp records its GUID and, for each output that is a
+/// runtime asset form, the local id naming that output among the
+/// source's several. That is the provenance the catalog reads, so a
+/// cooked file's producer is a fact the cook recorded rather than a
+/// guess from its filename — which is ambiguous the moment a tree holds
+/// both "hero.gltf" and "hero.glb", or both "hero.gltf" and
+/// "hero.walk.gltf".
+bool write_cook_stamp(const char *outputPath, const char *sourcePath,
+                      std::uint64_t sourceHash,
                       const std::vector<DependencyDigest> &dependencies,
                       std::uint64_t importSettingsHash,
                       const char *platformTag,
@@ -152,7 +167,7 @@ bool extract_primitive(const cgltf_primitive *primitive,
                        bool allowMissingNormals = false);
 /// Writes the cooked .mesh file.
 bool write_mesh_file(const char *outputPath, const PrimitiveData &data);
-/// Writes the .meta.json metadata sidecar.
+/// Writes the .cookmeta metadata sidecar.
 bool write_metadata_file(const char *inputPath, const char *outputPath,
                          const PrimitiveData &data,
                          std::uint64_t sourceHash,

@@ -36,23 +36,26 @@ enum class AssetPrimaryAction : std::uint8_t {
 
 // Row: X(Tag, label, policy, action, sourceSuffixes, cookedSuffixes).
 // Suffix lists are parenthesised, lower-case, and matched at the end of a
-// path without regard to case; () when the form has no suffix of its own
-// (a ".json" document is told apart by its content, not its name). Row
+// path without regard to case; () when that form has no suffix of its own.
+// A suffix names the kind and never the serialization format, matching the
+// cooked side (".mesh", ".anim", ".hull"): an authored document that
+// happens to hold JSON is a ".scene", not a ".scene.json", so switching a
+// kind's format later costs nothing outside its reader and writer. Row
 // order is the bit order of the editor's persisted type filter, so rows
 // are only ever appended.
 #define ENGINE_ASSET_TYPE_TABLE(X)                                             \
   X(Mesh, "Mesh", Cooked, Instantiate, (".gltf", ".glb"), (".mesh"))           \
   X(Texture, "Texture", Source, Select,                                        \
     (".png", ".jpg", ".jpeg", ".tga", ".dds", ".ktx2"), ())                    \
-  X(Material, "Material", Source, EditInPlace, (), ())                         \
+  X(Material, "Material", Source, EditInPlace, (".mat"), ())                   \
   X(Script, "Script", Source, Select, (".lua"), ())                            \
-  X(Scene, "Scene", Source, OpenDocument, (), ())                              \
+  X(Scene, "Scene", Source, OpenDocument, (".scene"), ())                      \
   X(Animation, "Animation", Derived, Select, (), (".anim", ".skel"))           \
-  X(AnimationController, "Anim Controller", Source, Select,                    \
-    (".animctrl.json"), ())                                                    \
+  X(AnimationController, "Anim Controller", Source, Select, (".animctrl"),     \
+    ())                                                                        \
   X(Audio, "Sound", Source, Select, (".wav", ".ogg", ".mp3"), ())              \
   X(Unknown, "Other", Source, Select, (), ())                                  \
-  X(Prefab, "Prefab", Source, Select, (), ())                                  \
+  X(Prefab, "Prefab", Source, Select, (".prefab"), ())                         \
   X(Shader, "Shader", Cooked, Select, (".sc"), ())
 
 /// Tags every asset record, index entry and query carries.
@@ -98,7 +101,8 @@ struct AssetClassification final {
 };
 
 /// Classifies a path by the longest table suffix it ends with, ignoring
-/// case; Unknown when no row's suffix matches or the path is null.
+/// case; Unknown when no row's suffix matches or the path is null. The
+/// name is the whole input: nothing here opens a file.
 AssetClassification classify_asset_path(const char *path) noexcept;
 
 } // namespace engine::content

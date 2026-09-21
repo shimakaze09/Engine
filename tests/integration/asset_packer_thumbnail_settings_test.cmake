@@ -1,7 +1,9 @@
-# Verifies a recook triggered by an import-settings change (scaleFactor
-# edit in the .meta.json sidecar) also regenerates the thumbnail (audit
-# M-28): the thumbnail skip-gate used to hash only the source bytes, so a
-# settings-driven recook re-listed a stale PNG in the cook manifest.
+# Verifies a recook triggered by an import-settings change (a scaleFactor
+# edit in the SOURCE's authored ".meta" sidecar) also regenerates the
+# thumbnail (audit M-28): the thumbnail skip-gate used to hash only the
+# source bytes, so a settings-driven recook re-listed a stale PNG in the
+# cook manifest. The settings are read from the source's sidecar, never
+# from the cooked record, which is derived and regenerable.
 
 if(NOT DEFINED ASSET_PACKER OR NOT DEFINED SRC_GLTF OR NOT DEFINED SRC_BIN
    OR NOT DEFINED WORKDIR)
@@ -27,8 +29,10 @@ if(NOT cook_output MATCHES "generated thumbnail")
     message(FATAL_ERROR "initial cook did not generate a thumbnail")
 endif()
 
-file(WRITE "${output}.meta.json"
-    "{\"importSettings\":{\"scaleFactor\":2.0}}")
+file(WRITE "${WORKDIR}/${gltf_name}.meta"
+    "{\"schemaVersion\":1,"
+    "\"guid\":\"2f1c8a30-5b64-4d92-9c07-8e3a61f5d4b2\","
+    "\"importSettings\":{\"scaleFactor\":2.0}}")
 
 execute_process(
     COMMAND "${ASSET_PACKER}" "${WORKDIR}/${gltf_name}" "${output}"

@@ -1,5 +1,5 @@
 // The acceptance demo for the first product slice: the collect-a-thon
-// authored in the editor from the bundled kit (assets/coin_run.scene.json)
+// authored in the editor from the bundled kit (assets/coin_run.scene)
 // is loaded through the pipeline's deferred scene operation and played
 // start to finish, headless, by real key events through the production
 // input stage — eight coins, the moving platform across the gap, the flag.
@@ -32,7 +32,7 @@
 
 namespace {
 
-constexpr const char *kScene = "assets/coin_run.scene.json";
+constexpr const char *kScene = "assets/coin_run.scene";
 constexpr const char *kMainScript = "coin_run_acceptance_main.lua";
 constexpr const char *kSaveRoot = "coin_run_acceptance_profile";
 constexpr double kStepSeconds = 1.0 / 60.0;

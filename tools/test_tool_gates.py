@@ -20,6 +20,7 @@ import tempfile
 from pathlib import Path
 
 TOOLS = Path(__file__).resolve().parent
+REPO = TOOLS.parent
 
 failures = []
 
@@ -99,18 +100,18 @@ def test_metadata_path_check():
 
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
-        windows_abs = tmp / "windows.meta.json"
+        windows_abs = tmp / "windows.cookmeta"
         windows_abs.write_text(
             '{"source":"D:\\\\dev\\\\Engine\\\\assets\\\\a.gltf"}',
             encoding="utf-8")
-        unix_abs = tmp / "unix.meta.json"
+        unix_abs = tmp / "unix.cookmeta"
         unix_abs.write_text('{"source":"/home/dev/Engine/assets/a.gltf"}',
                             encoding="utf-8")
-        relative = tmp / "relative.meta.json"
+        relative = tmp / "relative.cookmeta"
         relative.write_text('{"source":"assets/props/a.gltf",'
                             '"output":"assets/props/a.mesh"}',
                             encoding="utf-8")
-        scheme = tmp / "scheme.meta.json"
+        scheme = tmp / "scheme.cookmeta"
         scheme.write_text('{"source":"asset://props/a.gltf"}',
                           encoding="utf-8")
 
@@ -714,6 +715,100 @@ def write_attribute_fixture(root, attributes, tracked):
     return root
 
 
+def write_identity_fixture(root, files):
+    """A throwaway git work tree carrying a copy of the real asset type
+    table (the gate reads its suffixes from there) plus the given staged
+    files, each a {relative path: contents} pair."""
+    root.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "-C", str(root), "init", "-q"], check=True,
+                   capture_output=True)
+    table = REPO / "content" / "include" / "engine" / "content" / \
+        "asset_type_table.h"
+    destination = root / "content" / "include" / "engine" / "content"
+    destination.mkdir(parents=True, exist_ok=True)
+    (destination / "asset_type_table.h").write_text(
+        table.read_text(encoding="utf-8"), encoding="utf-8")
+    for relative, contents in files.items():
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(contents, encoding="utf-8")
+    subprocess.run(["git", "-C", str(root), "add", "-A"], check=True,
+                   capture_output=True)
+    return root
+
+
+def sidecar_text(guid):
+    """A minimal valid sidecar document claiming `guid`."""
+    return '{"schemaVersion": 1, "guid": "%s"}\n' % guid
+
+
+def test_asset_identity_gate():
+    """The identity gate must fail an identity-bearing asset with no
+    committed sidecar, two sidecars claiming one GUID (naming every
+    colliding path and picking no winner), and two tracked paths that
+    differ only by case; and pass on this checkout."""
+    script = str(TOOLS / "check_asset_identity.py")
+    one = "11111111-1111-4111-8111-111111111111"
+    two = "22222222-2222-4222-8222-222222222222"
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+
+        check(run([script, "--root", str(write_identity_fixture(
+            tmp / "clean", {
+                "assets/props/coin.gltf": "x\n",
+                "assets/props/coin.gltf.meta": sidecar_text(one),
+                "assets/scripts/hop.lua": "x\n",
+                "assets/scripts/hop.lua.meta": sidecar_text(two),
+                # A cooked output owns no identity of its own, so it needs
+                # no sidecar and must not be reported as missing one.
+                "assets/props/coin.mesh": "x\n",
+            }))]) == 0,
+              "identity: every source with a committed sidecar passes")
+
+        check(run([script, "--root", str(write_identity_fixture(
+            tmp / "missing", {
+                "assets/props/coin.gltf": "x\n",
+            }))]) != 0,
+              "identity: a source with no sidecar fails")
+
+        duplicate = write_identity_fixture(tmp / "duplicate", {
+            "assets/props/coin.gltf": "x\n",
+            "assets/props/coin.gltf.meta": sidecar_text(one),
+            "assets/props/gem.gltf": "x\n",
+            "assets/props/gem.gltf.meta": sidecar_text(one),
+        })
+        completed = subprocess.run(
+            [sys.executable, script, "--root", str(duplicate)],
+            capture_output=True, text=True)
+        check(completed.returncode != 0,
+              "identity: two sidecars claiming one GUID fail")
+        check(("coin.gltf.meta" in completed.stdout) and
+              ("gem.gltf.meta" in completed.stdout),
+              "identity: a duplicate names every colliding path")
+
+        collision = write_identity_fixture(tmp / "case", {
+            "assets/props/coin.gltf": "x\n",
+            "assets/props/coin.gltf.meta": sidecar_text(one),
+            "assets/props/Coin.gltf": "x\n",
+            "assets/props/Coin.gltf.meta": sidecar_text(two),
+        })
+        # A case-insensitive filesystem cannot hold the pair, so the case
+        # is only meaningful where it can; skipping beats a false pass.
+        if (collision / "assets" / "props" / "Coin.gltf").exists() and \
+                (collision / "assets" / "props" / "coin.gltf").read_text(
+                    encoding="utf-8") == "x\n":
+            tracked = subprocess.run(
+                ["git", "-C", str(collision), "ls-files"],
+                capture_output=True, text=True, check=True).stdout
+            if ("assets/props/Coin.gltf" in tracked) and \
+                    ("assets/props/coin.gltf" in tracked):
+                check(run([script, "--root", str(collision)]) != 0,
+                      "identity: paths differing only by case fail")
+
+        check(run([script]) == 0, "identity: this checkout passes")
+
+
 def test_content_attributes_gate():
     """The attributes gate (issue #590) must hold every tracked
     content-hashed file to `text` unset, accept both `-text` and the
@@ -725,9 +820,9 @@ def test_content_attributes_gate():
         tmp = Path(tmp)
 
         check(run([script, "--root", str(write_attribute_fixture(
-            tmp / "clean", "*.gltf -text\n*.mesh binary\n*.meta.json -text\n",
+            tmp / "clean", "*.gltf -text\n*.mesh binary\n*.cookmeta -text\n",
             ["props/coin.gltf", "props/coin.mesh",
-             "props/coin.mesh.meta.json", "scene.json"]))]) == 0,
+             "props/coin.mesh.cookmeta", "scene.json"]))]) == 0,
               "attributes: -text and binary marks on every hashed file pass")
 
         check(run([script, "--root", str(write_attribute_fixture(
@@ -744,8 +839,8 @@ def test_content_attributes_gate():
               "attributes: a hashed file marked text fails")
 
         check(run([script, "--root", str(write_attribute_fixture(
-            tmp / "sidecar", "*.gltf -text\n*.json -text\n*.meta.json text\n",
-            ["props/coin.gltf", "props/coin.mesh.meta.json"]))]) != 0,
+            tmp / "sidecar", "*.gltf -text\n*.json -text\n*.cookmeta text\n",
+            ["props/coin.gltf", "props/coin.mesh.cookmeta"]))]) != 0,
               "attributes: a later text mark on a sidecar suffix fails")
 
         untracked = write_attribute_fixture(
@@ -1149,6 +1244,7 @@ def main():
     test_error_handling_gate()
     test_portable_fopen_gate()
     test_duplicate_primitive_gate()
+    test_asset_identity_gate()
     if failures:
         print(f"\nFAILED ({len(failures)} failure(s))")
         return 1

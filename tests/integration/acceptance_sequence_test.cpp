@@ -25,7 +25,7 @@ namespace {
 
 constexpr const char *kMainScript = "acceptance_sequence_main.lua";
 constexpr const char *kEntityScript = "acceptance_sequence_probe.lua";
-constexpr const char *kSceneFile = "acceptance_sequence.scene.json";
+constexpr const char *kSceneFile = "acceptance_sequence.scene";
 constexpr double kStepSeconds = 1.0 / 60.0;
 constexpr int kSliceFrames = 30;
 
@@ -61,7 +61,7 @@ bool set_working_directory_with_assets() noexcept {
       continue;
     }
     if (std::filesystem::exists(normalized / "assets/main.lua", ec) &&
-        std::filesystem::exists(normalized / "assets/shaders/bgfx/shaders.json",
+        std::filesystem::exists(normalized / "assets/shaders/bgfx/shaders.manifest",
                                 ec)) {
       std::filesystem::current_path(normalized, ec);
       return !ec;

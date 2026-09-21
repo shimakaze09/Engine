@@ -3,9 +3,17 @@
 // more after an explicit invalidation), its fields parse exactly, a
 // missing sidecar is a cached answer too, and a thumbnail that cannot be
 // produced is remembered instead of being opened again on every frame.
+//
+// Also pins where the panel writes: the authored ".meta" beside the
+// source, which is the file the cook reads. Writing the cooked record
+// instead would let an author change a setting and watch the next cook
+// ignore it.
 
 #include "editor_import_settings.h"
 #include "editor_session.h"
+
+#include "engine/content/asset_sidecar.h"
+#include "engine/core/logging.h"
 
 #include <cstdio>
 #include <cstring>
@@ -51,13 +59,16 @@ int main() {
   std::error_code ec{};
   std::filesystem::remove_all(dir, ec);
   std::filesystem::create_directories(dir, ec);
-  const std::string mesh = dir + "/thing.mesh";
-  const std::string other = dir + "/other.mesh";
-  CHECK(write_file(mesh, "binary"), "asset written");
-  CHECK(write_file(mesh + ".meta.json",
-                   "{\"schema\":1,\"importSettings\":{\"meshIndex\":2,"
+  // A mesh SOURCE, because that is where authored settings live.
+  const std::string mesh = dir + "/thing.gltf";
+  const std::string other = dir + "/other.gltf";
+  CHECK(write_file(mesh, "not a real glTF"), "asset written");
+  CHECK(write_file(mesh + ".meta",
+                   "{\"schemaVersion\":1,"
+                   "\"guid\":\"3d9f0a11-7c62-4b8e-9a05-1f2e3d4c5b6a\","
+                   "\"importSettings\":{\"meshIndex\":2,"
                    "\"primitiveIndex\":3,\"scaleFactor\":0.5,\"upAxis\":2,"
-                   "\"generateNormals\":true},\"outputs\":{}}"),
+                   "\"generateNormals\":true}}"),
         "sidecar written");
 
   const std::uint64_t reads0 = engine::editor::import_settings_read_count();
@@ -68,12 +79,12 @@ int main() {
         "first selection reads the sidecar once");
   if (doc != nullptr) {
     CHECK(doc->state == ImportSettingsDocument::State::Valid, "sidecar valid");
-    CHECK((doc->meshIndex == 2) && (doc->primitiveIndex == 3) &&
-              (doc->scaleFactor == 0.5F) && (doc->upAxis == 2) &&
-              doc->generateNormals,
+    CHECK(doc->hasSettings, "the source carries settings");
+    CHECK((doc->settings.meshIndex == 2) &&
+              (doc->settings.primitiveIndex == 3) &&
+              (doc->settings.scaleFactor == 0.5F) &&
+              (doc->settings.upAxis == 2) && doc->settings.generateNormals,
           "fields parse exactly");
-    CHECK(std::strstr(doc->document, "\"outputs\"") != nullptr,
-          "the whole document is kept for the splice");
   }
 
   // The same selection drawn again: no read.
@@ -102,6 +113,38 @@ int main() {
         "invalidation forces exactly one re-read");
   CHECK(engine::editor::import_settings_for_asset("") == nullptr,
         "an empty path has no document");
+
+  // The panel's write lands in the authored sidecar, keeps the identity
+  // the asset already had, and is what a reader sees next.
+  engine::content::AssetSidecar before{};
+  CHECK(engine::content::read_asset_sidecar(mesh.c_str(), &before) ==
+            engine::content::SidecarReadResult::Ok,
+        "the source has an identity before the edit");
+  engine::content::MeshImportSettings edited{};
+  edited.meshIndex = 7;
+  edited.primitiveIndex = 1;
+  edited.scaleFactor = 2.5F;
+  edited.upAxis = 0;
+  edited.generateNormals = false;
+  CHECK(engine::editor::save_import_settings(mesh.c_str(), edited),
+        "the panel writes the edited settings");
+  engine::content::AssetSidecar after{};
+  CHECK(engine::content::read_asset_sidecar(mesh.c_str(), &after) ==
+            engine::content::SidecarReadResult::Ok,
+        "the sidecar still reads after the write");
+  CHECK(after.guid == before.guid,
+        "editing settings does not change the asset's identity");
+  CHECK(after.hasMeshImport && (after.meshImport == edited),
+        "the cook reads back exactly what the panel wrote");
+  CHECK(!std::filesystem::exists(mesh + ".cookmeta"),
+        "the panel never writes authored settings to the cooked record");
+
+  // An asset with no sidecar is never given one by an edit: that would
+  // hand it an identity nobody imported.
+  CHECK(!engine::editor::save_import_settings(other.c_str(), edited),
+        "settings cannot be saved onto an asset with no identity");
+  CHECK(!std::filesystem::exists(other + ".meta"),
+        "the refused save left no sidecar behind");
 
   // Thumbnails: a miss is remembered.
   engine::editor::clear_thumbnail_cache();

@@ -239,7 +239,7 @@ void create_bootstrap_scene(runtime::World *world,
     static_cast<void>(world->add_mesh_component(characterEntity, mc));
     runtime::AnimationComponent anim{};
     std::snprintf(anim.controllerPath, sizeof(anim.controllerPath),
-                  "%s/character.animctrl.json", active_config().assetMount);
+                  "%s/character.animctrl", active_config().assetMount);
     static_cast<void>(world->add_animation_component(characterEntity, anim));
   }
 

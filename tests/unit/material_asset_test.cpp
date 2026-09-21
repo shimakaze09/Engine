@@ -44,8 +44,8 @@ void remove_file(const char *path) noexcept {
 
 /// Full material file: every field present must land exactly.
 int verify_full_material_load(engine::renderer::AssetDatabase *database) {
-  constexpr const char *kPath = "material_test_full.json";
-  constexpr const char *virtualPath = "mat/material_test_full.json";
+  constexpr const char *kPath = "material_test_full.mat";
+  constexpr const char *virtualPath = "mat/material_test_full.mat";
   constexpr const char *kJson =
       "{\"version\":1,\"albedo\":[0.25,0.5,0.75],"
       "\"emissive\":[0.125,0.0,1.0],"
@@ -98,8 +98,8 @@ int verify_full_material_load(engine::renderer::AssetDatabase *database) {
 /// Partial file: unspecified fields must keep Material defaults exactly.
 int verify_partial_material_defaults(
     engine::renderer::AssetDatabase *database) {
-  constexpr const char *kPath = "material_test_partial.json";
-  constexpr const char *virtualPath = "mat/material_test_partial.json";
+  constexpr const char *kPath = "material_test_partial.mat";
+  constexpr const char *virtualPath = "mat/material_test_partial.mat";
   if (!write_material_file(kPath, "{\"roughness\":0.75}")) {
     return 20;
   }
@@ -134,19 +134,19 @@ int verify_partial_material_defaults(
 /// Instance chain: the child starts from the parent's resolved values and
 /// overrides only what it specifies; a grandchild sees both layers.
 int verify_parent_chain_resolution(engine::renderer::AssetDatabase *database) {
-  constexpr const char *kBasePath = "material_test_base.json";
-  constexpr const char *kChildPath = "material_test_child.json";
-  constexpr const char *kGrandPath = "material_test_grand.json";
+  constexpr const char *kBasePath = "material_test_base.mat";
+  constexpr const char *kChildPath = "material_test_child.mat";
+  constexpr const char *kGrandPath = "material_test_grand.mat";
 
   if (!write_material_file(
           kBasePath,
           "{\"albedo\":[1.0,0.0,0.0],\"roughness\":0.125,\"metallic\":0.5}") ||
       !write_material_file(
           kChildPath,
-          "{\"parent\":\"mat/material_test_base.json\",\"metallic\":1.0}") ||
+          "{\"parent\":\"mat/material_test_base.mat\",\"metallic\":1.0}") ||
       !write_material_file(
           kGrandPath,
-          "{\"parent\":\"mat/material_test_child.json\",\"opacity\":0.25}")) {
+          "{\"parent\":\"mat/material_test_child.mat\",\"opacity\":0.25}")) {
     remove_file(kBasePath);
     remove_file(kChildPath);
     remove_file(kGrandPath);
@@ -154,7 +154,7 @@ int verify_parent_chain_resolution(engine::renderer::AssetDatabase *database) {
   }
 
   const auto grandResult = engine::renderer::load_material_asset(
-      database, "mat/material_test_grand.json");
+      database, "mat/material_test_grand.mat");
   remove_file(kBasePath);
   remove_file(kChildPath);
   remove_file(kGrandPath);
@@ -180,7 +180,7 @@ int verify_parent_chain_resolution(engine::renderer::AssetDatabase *database) {
 
   // The intermediate materials registered too, with their own values.
   const engine::renderer::AssetId childId =
-      engine::renderer::make_asset_id_from_path("mat/material_test_child.json");
+      engine::renderer::make_asset_id_from_path("mat/material_test_child.mat");
   const engine::renderer::Material *child =
       engine::renderer::find_material_params(database, childId);
   if ((child == nullptr) || !exactly_equal(child->metallic, 1.0F) ||
@@ -190,7 +190,7 @@ int verify_parent_chain_resolution(engine::renderer::AssetDatabase *database) {
 
   // The dependency edge child -> base was recorded.
   const engine::renderer::AssetId baseId =
-      engine::renderer::make_asset_id_from_path("mat/material_test_base.json");
+      engine::renderer::make_asset_id_from_path("mat/material_test_base.mat");
   engine::renderer::AssetId deps[4] = {};
   const std::size_t depCount =
       engine::renderer::get_dependencies(database, childId, deps, 4U);
@@ -203,18 +203,18 @@ int verify_parent_chain_resolution(engine::renderer::AssetDatabase *database) {
 
 /// Failure paths: cycles, missing parents, malformed fields, bad versions.
 int verify_material_load_failures(engine::renderer::AssetDatabase *database) {
-  constexpr const char *kCyclePathA = "material_test_cycle_a.json";
-  constexpr const char *kCyclePathB = "material_test_cycle_b.json";
+  constexpr const char *kCyclePathA = "material_test_cycle_a.mat";
+  constexpr const char *kCyclePathB = "material_test_cycle_b.mat";
   if (!write_material_file(kCyclePathA,
-                           "{\"parent\":\"mat/material_test_cycle_b.json\"}") ||
+                           "{\"parent\":\"mat/material_test_cycle_b.mat\"}") ||
       !write_material_file(kCyclePathB,
-                           "{\"parent\":\"mat/material_test_cycle_a.json\"}")) {
+                           "{\"parent\":\"mat/material_test_cycle_a.mat\"}")) {
     remove_file(kCyclePathA);
     remove_file(kCyclePathB);
     return 40;
   }
   const auto cycleResult = engine::renderer::load_material_asset(
-      database, "mat/material_test_cycle_a.json");
+      database, "mat/material_test_cycle_a.mat");
   remove_file(kCyclePathA);
   remove_file(kCyclePathB);
   if (cycleResult.has_value() ||
@@ -222,36 +222,36 @@ int verify_material_load_failures(engine::renderer::AssetDatabase *database) {
     return 41;
   }
 
-  constexpr const char *kOrphanPath = "material_test_orphan.json";
+  constexpr const char *kOrphanPath = "material_test_orphan.mat";
   if (!write_material_file(kOrphanPath,
-                           "{\"parent\":\"mat/material_test_missing.json\"}")) {
+                           "{\"parent\":\"mat/material_test_missing.mat\"}")) {
     return 42;
   }
   const auto orphanResult = engine::renderer::load_material_asset(
-      database, "mat/material_test_orphan.json");
+      database, "mat/material_test_orphan.mat");
   remove_file(kOrphanPath);
   if (orphanResult.has_value()) {
     return 43;
   }
 
-  constexpr const char *kBadFieldPath = "material_test_bad_field.json";
+  constexpr const char *kBadFieldPath = "material_test_bad_field.mat";
   if (!write_material_file(kBadFieldPath, "{\"roughness\":\"rough\"}")) {
     return 44;
   }
   const auto badFieldResult = engine::renderer::load_material_asset(
-      database, "mat/material_test_bad_field.json");
+      database, "mat/material_test_bad_field.mat");
   remove_file(kBadFieldPath);
   if (badFieldResult.has_value() ||
       (badFieldResult.error() != engine::renderer::MaterialLoadError::Parse)) {
     return 45;
   }
 
-  constexpr const char *kBadVec3Path = "material_test_bad_vec3.json";
+  constexpr const char *kBadVec3Path = "material_test_bad_vec3.mat";
   if (!write_material_file(kBadVec3Path, "{\"albedo\":[1.0,2.0]}")) {
     return 46;
   }
   const auto badVec3Result = engine::renderer::load_material_asset(
-      database, "mat/material_test_bad_vec3.json");
+      database, "mat/material_test_bad_vec3.mat");
   remove_file(kBadVec3Path);
   if (badVec3Result.has_value()) {
     return 47;
@@ -260,19 +260,19 @@ int verify_material_load_failures(engine::renderer::AssetDatabase *database) {
   // Version 2 (texture-backed schema) is a supported version now — see
   // material_asset_v2_test.cpp for its contract. Only versions outside
   // [1, 2] still reject the load.
-  constexpr const char *kBadVersionPath = "material_test_bad_version.json";
+  constexpr const char *kBadVersionPath = "material_test_bad_version.mat";
   if (!write_material_file(kBadVersionPath, "{\"version\":3}")) {
     return 48;
   }
   const auto badVersionResult = engine::renderer::load_material_asset(
-      database, "mat/material_test_bad_version.json");
+      database, "mat/material_test_bad_version.mat");
   remove_file(kBadVersionPath);
   if (badVersionResult.has_value()) {
     return 49;
   }
 
   const auto absentResult = engine::renderer::load_material_asset(
-      database, "mat/material_test_absent.json");
+      database, "mat/material_test_absent.mat");
   if (absentResult.has_value() ||
       (absentResult.error() != engine::renderer::MaterialLoadError::Io)) {
     return 50;
@@ -283,8 +283,8 @@ int verify_material_load_failures(engine::renderer::AssetDatabase *database) {
 
 /// Full fixed tables reject a load before creating a partial companion record.
 int verify_full_table_failures() {
-  constexpr const char *kPath = "material_test_full_table.json";
-  constexpr const char *kVirtualPath = "mat/material_test_full_table.json";
+  constexpr const char *kPath = "material_test_full_table.mat";
+  constexpr const char *kVirtualPath = "mat/material_test_full_table.mat";
   const engine::renderer::AssetId targetId =
       engine::renderer::make_asset_id_from_path(kVirtualPath);
 
@@ -394,7 +394,7 @@ int verify_material_database_edges(engine::renderer::AssetDatabase *database) {
   return 0;
 }
 
-/// Directory discovery loads every JSON under a folder with deterministic
+/// Directory discovery loads every .mat under a folder with deterministic
 /// ids derived from the virtual prefix, skipping non-JSON files.
 int verify_material_directory_discovery(
     engine::renderer::AssetDatabase *database) {
@@ -405,9 +405,9 @@ int verify_material_directory_discovery(
   }
 
   const bool wrote =
-      write_material_file("mat_discovery_test/disc_a.json",
+      write_material_file("mat_discovery_test/disc_a.mat",
                           "{\"version\":1,\"roughness\":0.25}") &&
-      write_material_file("mat_discovery_test/disc_b.json",
+      write_material_file("mat_discovery_test/disc_b.mat",
                           "{\"version\":1,\"metallic\":1.0}") &&
       write_material_file("mat_discovery_test/ignored.txt", "not a material");
 
@@ -421,10 +421,10 @@ int verify_material_directory_discovery(
   } else {
     const engine::renderer::AssetId idA =
         engine::renderer::make_asset_id_from_path(
-            "mat/mat_discovery_test/disc_a.json");
+            "mat/mat_discovery_test/disc_a.mat");
     const engine::renderer::AssetId idB =
         engine::renderer::make_asset_id_from_path(
-            "mat/mat_discovery_test/disc_b.json");
+            "mat/mat_discovery_test/disc_b.mat");
     const engine::renderer::Material *matA =
         engine::renderer::find_material_params(database, idA);
     const engine::renderer::Material *matB =
@@ -436,8 +436,8 @@ int verify_material_directory_discovery(
     }
   }
 
-  remove_file("mat_discovery_test/disc_a.json");
-  remove_file("mat_discovery_test/disc_b.json");
+  remove_file("mat_discovery_test/disc_a.mat");
+  remove_file("mat_discovery_test/disc_b.mat");
   remove_file("mat_discovery_test/ignored.txt");
   std::filesystem::remove("mat_discovery_test", error);
   return result;

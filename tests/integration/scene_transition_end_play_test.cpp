@@ -36,8 +36,8 @@ constexpr const char *kUtilScript = "ep_util.lua";
 // against) kSceneAScript's reuse as a plain top-level helper in tests
 // 2/3/4/6.
 constexpr const char *kReentrancyScript = "ep_reentrancy.lua";
-constexpr const char *kSceneBFile = "ep_scene_b.scene.json";
-constexpr const char *kSceneCFile = "ep_scene_c.scene.json";
+constexpr const char *kSceneBFile = "ep_scene_b.scene";
+constexpr const char *kSceneCFile = "ep_scene_c.scene";
 
 /// Writes one text file for a script or scene fixture.
 bool write_text_file(const char *path, const char *contents) noexcept {
@@ -267,7 +267,7 @@ int main() {
       const char *sceneAScript =
           "local M = {}\n"
           "function M.on_begin_play(self)\n"
-          "    engine.load_scene(\"ep_scene_b.scene.json\")\n"
+          "    engine.load_scene(\"ep_scene_b.scene\")\n"
           "end\n"
           "function M.on_end_play(self)\n"
           "    saved_progress = 42\n"
@@ -323,7 +323,7 @@ int main() {
     } else {
       const char *helper =
           "function ep_request_load()\n"
-          "    engine.load_scene(\"ep_scene_b.scene.json\")\n"
+          "    engine.load_scene(\"ep_scene_b.scene\")\n"
           "end\n";
       if (!write_text_file(kSceneAScript, helper) ||
           !engine::scripting::load_script(kSceneAScript) ||
@@ -368,7 +368,7 @@ int main() {
       }
       const char *helper =
           "function ep_request_load()\n"
-          "    engine.load_scene(\"ep_scene_b.scene.json\")\n"
+          "    engine.load_scene(\"ep_scene_b.scene\")\n"
           "end\n"
           "function ep_assert_many_dispatched()\n"
           "    if (end_play_count or 0) ~= 5 then\n"
@@ -420,7 +420,7 @@ int main() {
         } else {
           const char *helper =
               "function ep_request_load()\n"
-              "    engine.load_scene(\"ep_scene_b.scene.json\")\n"
+              "    engine.load_scene(\"ep_scene_b.scene\")\n"
               "end\n"
               "function ep_assert_single_dispatch()\n"
               "    if (end_play_count or 0) ~= 1 then\n"
@@ -517,7 +517,7 @@ int main() {
         dispatch_begin_play(*fx.world);
         const char *helper =
             "function ep_request_bad_load()\n"
-            "    engine.load_scene(\"ep_scene_missing.scene.json\")\n"
+            "    engine.load_scene(\"ep_scene_missing.scene\")\n"
             "end\n"
             "function ep_assert_no_dispatch()\n"
             "    if (end_play_count or 0) ~= 0 then\n"
@@ -561,11 +561,11 @@ int main() {
       const char *reentrancyScript =
           "local M = {}\n"
           "function M.on_begin_play(self)\n"
-          "    engine.load_scene(\"ep_scene_b.scene.json\")\n"
+          "    engine.load_scene(\"ep_scene_b.scene\")\n"
           "end\n"
           "function M.on_end_play(self)\n"
           "    reentrant_count = (reentrant_count or 0) + 1\n"
-          "    engine.load_scene(\"ep_scene_c.scene.json\")\n"
+          "    engine.load_scene(\"ep_scene_c.scene\")\n"
           "    engine.new_scene()\n"
           "    reentrant_spawn = engine.spawn_entity()\n"
           "    reentrant_destroy_ok = engine.destroy_entity(self)\n"
@@ -635,7 +635,7 @@ int main() {
       const char *retargetScript =
           "local M = {}\n"
           "function M.on_begin_play(self)\n"
-          "    engine.load_scene(\"ep_scene_b.scene.json\")\n"
+          "    engine.load_scene(\"ep_scene_b.scene\")\n"
           "end\n"
           "function M.on_end_play(self)\n"
           "    stale_move_queued = engine.set_position(self, 100, 200, 300)\n"

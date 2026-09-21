@@ -42,26 +42,21 @@ namespace engine::editor {
 
 namespace {
 
-/// Draw import settings inspector for mesh assets.
-/// Reads the .meta.json sidecar, displays current import settings, and
-/// allows editing. On modification only the importSettings field is
-/// spliced into the existing document (every other field survives) and
-/// the file is replaced atomically; the packer detects the changed
-/// import-settings hash on the next cook.
+/// Draws the Import Settings inspector for a mesh source.
+///
+/// Only for a source (.gltf / .glb), because the authored sidecar lives
+/// beside the source and that is the file the cook reads. A cooked
+/// ".mesh" is derived: it has no settings of its own to edit, and the
+/// editor will offer them on it again once cooked outputs record which
+/// source produced them, rather than by guessing from the filename.
 void draw_import_settings_inspector(const char *assetPath) noexcept {
-  if (assetPath == nullptr || assetPath[0] == '\0') {
+  if ((assetPath == nullptr) || (assetPath[0] == '\0')) {
     return;
   }
-
-  const char *dot = std::strrchr(assetPath, '.');
-  if (dot == nullptr) {
-    return;
-  }
-  // Accept .mesh or .gltf / .glb source files.
-  const bool isMesh = (std::strcmp(dot, ".mesh") == 0);
-  const bool isGltf =
-      (std::strcmp(dot, ".gltf") == 0) || (std::strcmp(dot, ".glb") == 0);
-  if (!isMesh && !isGltf) {
+  const content::AssetClassification classification =
+      content::classify_asset_path(assetPath);
+  if ((classification.tag != content::AssetTypeTag::Mesh) ||
+      !classification.source) {
     return;
   }
 
@@ -72,22 +67,17 @@ void draw_import_settings_inspector(const char *assetPath) noexcept {
   }
   switch (doc->state) {
   case ImportSettingsDocument::State::Missing:
-    ImGui::TextDisabled("No .meta.json found");
+    ImGui::TextDisabled("Not imported: no .meta beside this asset");
     return;
   case ImportSettingsDocument::State::Unreadable:
+    ImGui::TextDisabled("The .meta beside this asset could not be read");
     return;
   case ImportSettingsDocument::State::Malformed:
-    ImGui::TextDisabled("Invalid .meta.json");
+    ImGui::TextDisabled("The .meta beside this asset is malformed");
     return;
   case ImportSettingsDocument::State::Valid:
     break;
   }
-
-  int meshIndex = doc->meshIndex;
-  int primitiveIndex = doc->primitiveIndex;
-  float scaleFactor = doc->scaleFactor;
-  int upAxis = doc->upAxis;
-  bool generateNormals = doc->generateNormals;
 
   ImGui::Separator();
   if (!ImGui::CollapsingHeader("Import Settings",
@@ -95,73 +85,38 @@ void draw_import_settings_inspector(const char *assetPath) noexcept {
     return;
   }
 
+  content::MeshImportSettings edited = doc->settings;
+  int meshIndex = static_cast<int>(edited.meshIndex);
+  int primitiveIndex = static_cast<int>(edited.primitiveIndex);
+  int upAxis = static_cast<int>(edited.upAxis);
+
   bool changed = false;
   changed |= ImGui::InputInt("Mesh Index", &meshIndex);
   changed |= ImGui::InputInt("Primitive Index", &primitiveIndex);
-  changed |= ImGui::DragFloat("Scale Factor", &scaleFactor, 0.01F, 0.001F,
-                              1000.0F, "%.6g");
-
+  changed |= ImGui::DragFloat("Scale Factor", &edited.scaleFactor, 0.01F,
+                              0.001F, 1000.0F, "%.6g");
   const char *axisLabels[] = {"X (0)", "Y (1)", "Z (2)"};
-  if (upAxis >= 0 && upAxis <= 2) {
+  if ((upAxis >= 0) && (upAxis <= 2)) {
     changed |= ImGui::Combo("Up Axis", &upAxis, axisLabels, 3);
   }
-  changed |= ImGui::Checkbox("Generate Normals", &generateNormals);
+  changed |= ImGui::Checkbox("Generate Normals", &edited.generateNormals);
 
   if (!changed) {
     return;
   }
 
-  if (meshIndex < 0) {
-    meshIndex = 0;
-  }
-  if (primitiveIndex < 0) {
-    primitiveIndex = 0;
-  }
-  if (scaleFactor < 0.001F) {
-    scaleFactor = 0.001F;
+  edited.meshIndex = static_cast<std::int32_t>((meshIndex < 0) ? 0 : meshIndex);
+  edited.primitiveIndex =
+      static_cast<std::int32_t>((primitiveIndex < 0) ? 0 : primitiveIndex);
+  edited.upAxis = static_cast<std::int32_t>(upAxis);
+  if (edited.scaleFactor < 0.001F) {
+    edited.scaleFactor = 0.001F;
   }
 
-  // Parse-update-preserve: splice only the importSettings value into the
-  // original document so schema, output mappings, and unknown
-  // forward-compatible fields survive, validate the result, and replace
-  // the file atomically. Rewriting the meta as an importSettings-only
-  // stub would drop every other field.
-  char newSettings[512] = {};
-  std::snprintf(newSettings, sizeof(newSettings),
-                "{\n"
-                "    \"meshIndex\": %d,\n"
-                "    \"primitiveIndex\": %d,\n"
-                "    \"scaleFactor\": %.6g,\n"
-                "    \"upAxis\": %d,\n"
-                "    \"generateNormals\": %s\n"
-                "  }",
-                meshIndex, primitiveIndex, static_cast<double>(scaleFactor),
-                upAxis, generateNormals ? "true" : "false");
-
-  // The meta read path caps documents at 64 KiB; this leaves headroom
-  // for the spliced settings block. Editor UI runs single-threaded.
-  static char updatedDocument[80U * 1024U];
-  std::size_t updatedLength = 0U;
-  bool staged = core::json_replace_top_level_field(
-      doc->document, doc->documentLength, "importSettings", newSettings,
-      updatedDocument, sizeof(updatedDocument), &updatedLength);
-  if (staged) {
-    core::JsonParser validator{};
-    staged = validator.parse(updatedDocument, updatedLength) &&
-             (validator.root() != nullptr) &&
-             (validator.root()->type == core::JsonValue::Type::Object);
-  }
-  if (staged) {
-    char metaPath[1024] = {};
-    std::snprintf(metaPath, sizeof(metaPath), "%s.meta.json", assetPath);
-    staged = core::atomic_write_file(metaPath, updatedDocument, updatedLength);
-  }
-  // Whether or not the write landed, the next frame re-reads the sidecar
-  // as it is on disk.
-  invalidate_import_settings_cache();
-  if (!staged) {
+  if (!save_import_settings(assetPath, edited)) {
     core::log_message(core::LogLevel::Error, "editor",
-                      "import settings save failed — .meta.json preserved");
+                      "import settings save failed — the .meta on disk is "
+                      "unchanged");
   }
 }
 

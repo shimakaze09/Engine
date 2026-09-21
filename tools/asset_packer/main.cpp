@@ -97,9 +97,10 @@ void print_usage() {
                "[--dep <dependency_path>]... [--graph <asset_deps.json>] "
                "[--force] [--verify] [--sweep-orphans] "
                "[--platform <tag>]\n"
-               "   or: asset_packer --shader-manifest <shaders.json> "
+               "   or: asset_packer --shader-manifest <shaders.manifest> "
                "--shader-out <dir> --shaderc <path> "
-               "--shader-include <dir> [--profiles <csv>] [--force]\n");
+               "--shader-include <dir> [--profiles <csv>] [--force]\n"
+               "   or: asset_packer --init-meta <assets-dir>\n");
 }
 
 /// Strips the mesh output's extension so cooked skeletal assets land
@@ -214,6 +215,9 @@ int main(int argc, char **argv) {
   for (int i = 1; i < argc; ++i) {
     if (std::strcmp(argv[i], "--shader-manifest") == 0) {
       return run_shader_cook(argc, argv);
+    }
+    if (std::strcmp(argv[i], "--init-meta") == 0) {
+      return run_init_meta(argc, argv);
     }
   }
   if (argc < 3) {
@@ -382,8 +386,10 @@ int main(int argc, char **argv) {
     }
   }
 
+  // From the source's authored sidecar. The cooked record is derived and
+  // regenerable, so it can never be where an author's settings live.
   ImportSettings importSettings{};
-  read_import_settings_from_meta(outputPath, &importSettings);
+  static_cast<void>(read_authored_import_settings(inputPath, &importSettings));
   // The cook key pairs the settings with the mesh cook's logic revision,
   // so a logic change recooks (and re-rasterizes the thumbnail, which
   // derives from the same cooked geometry) without a settings edit.
@@ -493,7 +499,7 @@ int main(int argc, char **argv) {
   if (selectedMesh.primitives_count == 0U) {
     std::fprintf(stderr,
                  "error: selected mesh %zu has no primitives "
-                 "(importSettings.meshIndex in %s.meta.json)\n",
+                 "(importSettings.meshIndex in %s.cookmeta)\n",
                  static_cast<std::size_t>(meshIdx), outputPath);
     cgltf_free(data);
     return 5;
@@ -602,7 +608,7 @@ int main(int argc, char **argv) {
     std::fprintf(stderr, "error: failed to write metadata sidecar\n");
     return 12;
   }
-  cookedOutputs.push_back(std::string(outputPath) + ".meta.json");
+  cookedOutputs.push_back(std::string(outputPath) + ".cookmeta");
 
   // Hull-less geometry reports success; only a write failure blocks the
   // stamp below so a broken sidecar can never be certified complete.
@@ -660,7 +666,8 @@ int main(int argc, char **argv) {
   // output above landed (and stale outputs of the previous manifest were
   // retired), so any interruption leaves no fresh stamp and the next run
   // recooks the full output set.
-  if (!write_cook_stamp(outputPath, sourceHash, dependencyDigests,
+  if (!write_cook_stamp(outputPath, inputPath, sourceHash,
+                        dependencyDigests,
                         importSettingsHash, platformTag, cookedOutputs)) {
     std::fprintf(stderr, "error: failed to write cook stamp\n");
     return 13;
@@ -672,7 +679,7 @@ int main(int argc, char **argv) {
 
   std::printf(
       "packed mesh: vertices=%zu indices=%zu uvs=%s skin=%s -> %s "
-      "(+ .meta.json)\n",
+      "(+ .cookmeta)\n",
       primitiveData.interleavedVertices.size() /
           primitive_stride_floats(primitiveData),
       primitiveData.indices.size(), primitiveData.hasUVs ? "yes" : "no",

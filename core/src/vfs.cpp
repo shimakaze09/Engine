@@ -43,7 +43,15 @@ struct MountEntry final {
 std::array<MountEntry, kMaxMounts> g_mounts{};
 bool g_vfsInitialized = false;
 
-// Normalize a path in-place: backslash → forward slash, strip trailing slash.
+// Normalize a path in-place for resolution: backslash → forward slash,
+// strip a trailing slash. Deliberately does NOT collapse a run of
+// separators, unlike canonical_virtual_path, and the difference is load
+// bearing in both directions. A mount's OS root may be a Windows UNC
+// share ("\\server\share"), where the leading "//" is the name. And a
+// virtual path whose remainder after the mount prefix begins with '/' is
+// refused by the jail as absolute-looking; collapsing here would turn
+// that refusal into a resolution, which is a security stance to change
+// deliberately rather than as a side effect of normalizing identity.
 void normalize_path(char *path, std::size_t length) noexcept {
   for (std::size_t i = 0U; i < length; ++i) {
     if (path[i] == '\\') {
@@ -62,6 +70,31 @@ bool is_ascii_alpha(char ch) noexcept {
 bool is_drive_designator(const char *segment) noexcept {
   return (segment != nullptr) && is_ascii_alpha(segment[0]) &&
          (segment[1] == ':');
+}
+
+// Length of a "scheme://" prefix at the start of `path`, or 0 when there
+// is none. URI grammar: a letter, then letters, digits, '+', '-' or '.',
+// then "://". This is what keeps "builtin://cube" intact while
+// "assets//coin.mesh" collapses.
+std::size_t scheme_prefix_length(const char *path) noexcept {
+  if (!is_ascii_alpha(path[0])) {
+    return 0U;
+  }
+  std::size_t index = 1U;
+  while (path[index] != '\0') {
+    const char ch = path[index];
+    const bool schemeChar = is_ascii_alpha(ch) || ((ch >= '0') && (ch <= '9')) ||
+                            (ch == '+') || (ch == '-') || (ch == '.');
+    if (!schemeChar) {
+      break;
+    }
+    ++index;
+  }
+  if ((path[index] == ':') && (path[index + 1U] == '/') &&
+      (path[index + 2U] == '/')) {
+    return index + 3U;
+  }
+  return 0U;
 }
 
 bool is_safe_virtual_remainder(const char *remainder) noexcept {
@@ -267,6 +300,105 @@ bool unmount(const char *virtualPrefix) noexcept {
     }
   }
   return false;
+}
+
+bool canonical_virtual_path(const char *virtualPath, char *out,
+                            std::size_t capacity) noexcept {
+  if ((out == nullptr) || (capacity == 0U)) {
+    return false;
+  }
+  out[0] = '\0';
+  if (virtualPath == nullptr) {
+    return false;
+  }
+
+  // Fold separators once up front so the segment walk below sees a
+  // single spelling. A path too long to fold is too long to be an
+  // identity and is refused rather than truncated.
+  char folded[kMaxVirtualPathLength] = {};
+  std::size_t foldedLength = 0U;
+  for (const char *cursor = virtualPath; *cursor != '\0'; ++cursor) {
+    if ((foldedLength + 1U) >= sizeof(folded)) {
+      return false;
+    }
+    folded[foldedLength] = (*cursor == '\\') ? '/' : *cursor;
+    ++foldedLength;
+  }
+
+  std::size_t written = 0U;
+  const char *cursor = folded;
+
+  // A scheme's "//" is part of the name ("builtin://cube"), so the whole
+  // "scheme://" is copied through and only the remainder is canonicalized.
+  const std::size_t schemeLength = scheme_prefix_length(folded);
+  if (schemeLength > 0U) {
+    if (schemeLength >= capacity) {
+      return false;
+    }
+    std::memcpy(out, folded, schemeLength);
+    written = schemeLength;
+    cursor = folded + schemeLength;
+  } else if (folded[0] == '/') {
+    // An absolute-looking path keeps its single leading separator: it is
+    // not the same name as the relative spelling, and the jail refuses it
+    // either way.
+    if (capacity < 2U) {
+      return false;
+    }
+    out[0] = '/';
+    written = 1U;
+    while (*cursor == '/') {
+      ++cursor;
+    }
+  }
+
+  bool bodyEmpty = true;
+  while (*cursor != '\0') {
+    const char *end = cursor;
+    while ((*end != '\0') && (*end != '/')) {
+      ++end;
+    }
+    const std::size_t length = static_cast<std::size_t>(end - cursor);
+
+    if (length == 0U) {
+      // A run of separators: "assets//x" names what "assets/x" names.
+    } else if ((length == 1U) && (cursor[0] == '.')) {
+      // "." names the directory it sits in, so it carries no information.
+    } else if ((length == 2U) && (cursor[0] == '.') && (cursor[1] == '.')) {
+      // ".." is refused, not resolved. An identity must not depend on
+      // where it was written from, and resolving it here would let a
+      // caller spell a path that then passes vfs_path_is_jailed.
+      out[0] = '\0';
+      return false;
+    } else {
+      const bool needSeparator =
+          !bodyEmpty || ((written > 0U) && (out[written - 1U] != '/'));
+      if ((written + (needSeparator ? 1U : 0U) + length) >= capacity) {
+        out[0] = '\0';
+        return false;
+      }
+      if (needSeparator) {
+        out[written] = '/';
+        ++written;
+      }
+      std::memcpy(out + written, cursor, length);
+      written += length;
+      bodyEmpty = false;
+    }
+
+    if (*end == '\0') {
+      break;
+    }
+    cursor = end + 1;
+  }
+
+  // Nothing but separators, dots or a bare scheme names no asset.
+  if (bodyEmpty) {
+    out[0] = '\0';
+    return false;
+  }
+  out[written] = '\0';
+  return true;
 }
 
 /// Rejects absolute paths, backslashes, drive designators, and ".."

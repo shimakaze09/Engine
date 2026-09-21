@@ -1,5 +1,5 @@
 // Implements the runtime cooked-asset trust checks: the staleness
-// diagnostic (reads the .meta.json sidecar's source path + content hash,
+// diagnostic (reads the .cookmeta sidecar's source path + content hash,
 // re-hashes the source, and logs a once-per-asset warning on mismatch)
 // and the cook-generation validation (verifies the .cookstamp output
 // manifest against the files on disk so a torn or mixed cook is rejected
@@ -142,7 +142,7 @@ bool read_meta_source_record(const char *cookedPath,
                              std::uint64_t *outSourceHash) noexcept {
   char metaPath[512] = {};
   const int written =
-      std::snprintf(metaPath, sizeof(metaPath), "%s.meta.json", cookedPath);
+      std::snprintf(metaPath, sizeof(metaPath), "%s.cookmeta", cookedPath);
   if ((written <= 0) || (written >= static_cast<int>(sizeof(metaPath)))) {
     return false;
   }

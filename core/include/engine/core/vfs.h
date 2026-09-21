@@ -21,6 +21,42 @@ bool mount(const char *virtualPrefix, const char *osDirectoryPath) noexcept;
 /// Removes a mount; false when the prefix is unknown.
 bool unmount(const char *virtualPrefix) noexcept;
 
+/// Longest canonical virtual path, terminator included.
+inline constexpr std::size_t kMaxVirtualPathLength = 512U;
+
+/// Writes the canonical spelling of `virtualPath` into `out`:
+///
+/// - '\' is folded to '/';
+/// - a run of separators collapses to one;
+/// - a "." segment is dropped, so "assets/x", "./assets/x" and
+///   "assets/./x" are one name;
+/// - a trailing '/' is dropped;
+/// - the "//" of a scheme such as "builtin://cube" is part of the name
+///   and is kept, as is a single leading '/';
+/// - case is preserved byte for byte, identically on every platform. Two
+///   assets differing only by case are a portability conflict for the
+///   project to diagnose, not something this function may fold away.
+///
+/// This is the spelling asset identity is derived from, so one asset owns
+/// one id however a reference was written. It is deliberately *not* what
+/// resolution accepts: the VFS keeps its stricter grammar, where a
+/// remainder beginning with '/' is refused as absolute-looking. A path
+/// this function accepts may therefore still fail to resolve; it will at
+/// least carry the same id as its well-spelled form.
+///
+/// Refuses — clearing `out` and returning false:
+///
+/// - a null path, and one that is empty or holds nothing but separators,
+///   "." segments or a bare scheme: none of those names an asset;
+/// - a path whose canonical form does not fit `capacity` whole, since a
+///   truncated identity names a different asset;
+/// - any path with a ".." segment. It is refused rather than resolved: an
+///   identity must not depend on the directory it was written from, and
+///   resolving it here would let a caller spell a path that then passes
+///   vfs_path_is_jailed.
+bool canonical_virtual_path(const char *virtualPath, char *out,
+                            std::size_t capacity) noexcept;
+
 /// True when a script-supplied path stays inside the VFS jail: non-empty,
 /// relative, forward slashes only, no drive designator, no ".." segment.
 bool vfs_path_is_jailed(const char *virtualPath) noexcept;

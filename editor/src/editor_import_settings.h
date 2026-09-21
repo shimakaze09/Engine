@@ -1,41 +1,54 @@
-// Declares the Assets panel's import-settings sidecar cache: the
-// selected asset's .meta.json is read and parsed once per selection, or
-// after the panel rewrites it, instead of once per drawn frame.
+// Declares the Assets panel's import-settings cache: the selected
+// source's authored ".meta" sidecar is read and parsed once per
+// selection, or after the panel rewrites it, instead of once per drawn
+// frame.
+//
+// The authored sidecar is the only place import settings live. The cook
+// reads them from there and writes them nowhere, so the panel edits the
+// same file the cook will read; editing the cooked record instead would
+// let an author change a setting and watch the next cook ignore it.
 
 #pragma once
 
-#include <cstddef>
 #include <cstdint>
+
+#include "engine/content/asset_metadata.h"
 
 namespace engine::editor {
 
-/// One asset's import sidecar as the panel last read it.
+/// One source's authored import settings as the panel last read them.
 struct ImportSettingsDocument final {
   enum class State : std::uint8_t {
-    Missing,    // no <asset>.meta.json beside the asset
-    Unreadable, // present but empty, oversized or not readable
-    Malformed,  // read but not a JSON object
+    /// No sidecar beside the asset: it has not been imported yet.
+    Missing,
+    /// Present but unreadable, or larger than a sidecar can be. The bytes
+    /// on disk may still be good, so the panel must not write over them.
+    Unreadable,
+    /// Read but not a sidecar this build understands.
+    Malformed,
+    /// Read, with the settings below. `hasSettings` is false for a source
+    /// that carries an identity but no settings of its own, which cooks
+    /// at the defaults; the panel may still write settings onto it.
     Valid
   };
   State state = State::Missing;
-  int meshIndex = 0;
-  int primitiveIndex = 0;
-  float scaleFactor = 1.0F;
-  int upAxis = 1;
-  bool generateNormals = false;
-  /// The sidecar text as read, NUL-terminated: the base the panel splices
-  /// an edited importSettings block into. Documents past this are refused.
-  static constexpr std::size_t kMaxDocumentBytes = 64U * 1024U;
-  char document[kMaxDocumentBytes + 1U] = {};
-  std::size_t documentLength = 0U;
+  bool hasSettings = false;
+  content::MeshImportSettings settings{};
 };
 
-/// Returns the sidecar document for `<assetPath>.meta.json`, reading the
-/// file only when assetPath differs from the previous call's or the cache
-/// was invalidated; nullptr for a null or empty path. The pointer stays
+/// Returns the authored sidecar for `assetPath`, reading the file only
+/// when the path differs from the previous call's or the cache was
+/// invalidated; nullptr for a null or empty path. The pointer stays
 /// valid until the next call.
 const ImportSettingsDocument *
 import_settings_for_asset(const char *assetPath) noexcept;
+
+/// Writes `settings` into the asset's authored sidecar, keeping its
+/// identity. False when the asset has no readable sidecar to edit —
+/// never invents one, since a sidecar the editor minted would give the
+/// asset an identity nobody imported. Invalidates the cache either way.
+bool save_import_settings(const char *assetPath,
+                          const content::MeshImportSettings &settings) noexcept;
 
 /// Drops the cached document so the next call re-reads it (after the panel
 /// rewrote the sidecar, or a recook replaced it).

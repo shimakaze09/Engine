@@ -47,7 +47,7 @@ bool ends_with(const char *text, std::size_t textLen, const char *suffix,
 }
 
 /// Derives the cooked mesh path that owns a .skel/.anim sidecar so the
-/// staleness check below can reuse the mesh's .meta.json (skeletons and
+/// staleness check below can reuse the mesh's .cookmeta (skeletons and
 /// clips are cooked from the same source glTF in the same packer run and
 /// carry no sidecar of their own). Mirrors the packer's orphan-sweep
 /// convention in cook_stamp.cpp: a skeleton keeps the mesh's stem, a

@@ -188,14 +188,14 @@ int main() {
     if (!write_text(sources / "varying.def.sc",
                     "vec4 v_color : COLOR0;\n") ||
         !write_text(sources / "probe.vs.sc", "// stub source\n") ||
-        !write_text(sources / "shaders.json",
+        !write_text(sources / "shaders.manifest",
                     manifest_text("probe.vs.sc", {define}))) {
       t.fail("define-case manifest written");
       fs::current_path(savedCwd, ignored);
       return t.finish("shader_cook_argv");
     }
 
-    const int exitCode = run_cook((sources / "shaders.json").string(),
+    const int exitCode = run_cook((sources / "shaders.manifest").string(),
                                   (scratch / "out_define").string(),
                                   include.string());
     t.check(exitCode != 0, "a define outside the macro grammar fails the cook");
@@ -224,14 +224,14 @@ int main() {
     if (!write_text(sources / "varying.def.sc",
                     "vec4 v_color : COLOR0;\n") ||
         !write_text(sources / sourceName, "// stub source\n") ||
-        !write_text(sources / "shaders.json",
+        !write_text(sources / "shaders.manifest",
                     manifest_text(sourceName, {"PBR_FULL"}))) {
       t.fail("path-case manifest written");
       fs::current_path(savedCwd, ignored);
       return t.finish("shader_cook_argv");
     }
 
-    const int exitCode = run_cook((sources / "shaders.json").string(),
+    const int exitCode = run_cook((sources / "shaders.manifest").string(),
                                   (scratch / "out_path").string(),
                                   include.string());
     t.check(exitCode == 0, "a cook over that source succeeds");
@@ -257,7 +257,7 @@ int main() {
     if (!write_text(sources / "varying.def.sc",
                     "vec4 v_color : COLOR0;\n") ||
         !write_text(sources / "probe.vs.sc", "// stub source\n") ||
-        !write_text(sources / "shaders.json",
+        !write_text(sources / "shaders.manifest",
                     manifest_text("probe.vs.sc",
                                   {"INSTANCED", "PBR_FULL"}))) {
       t.fail("multi-define manifest written");
@@ -265,7 +265,7 @@ int main() {
       return t.finish("shader_cook_argv");
     }
 
-    const int exitCode = run_cook((sources / "shaders.json").string(),
+    const int exitCode = run_cook((sources / "shaders.manifest").string(),
                                   (scratch / "out_multi").string(),
                                   include.string());
     t.check(exitCode == 0, "a cook over a multi-define variant succeeds");

@@ -64,7 +64,7 @@ inline bool enter_asset_directory() noexcept {
       continue;
     }
     if (std::filesystem::exists(normalized / "assets/main.lua", ec) &&
-        std::filesystem::exists(normalized / "assets/shaders/bgfx/shaders.json",
+        std::filesystem::exists(normalized / "assets/shaders/bgfx/shaders.manifest",
                                 ec)) {
       std::filesystem::current_path(normalized, ec);
       return !ec;

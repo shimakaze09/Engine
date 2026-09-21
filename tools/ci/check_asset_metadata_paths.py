@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Audit tracked asset metadata for absolute developer-machine paths.
 
-Cooked sidecars (.meta.json, .cookstamp) and other tracked asset JSON must
+Cooked sidecars (.cookmeta, .cookstamp) and other tracked asset JSON must
 store repo-relative paths only (audit L-03): a Windows drive prefix or a
 Unix absolute home/temp prefix means a developer machine's filesystem
 layout leaked into shared metadata. Exits non-zero listing every offender.
@@ -16,7 +16,21 @@ import sys
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 
-TRACKED_PATTERNS = ("assets/**/*.json", "assets/**/*.cookstamp")
+# Every tracked asset document kind, by the suffix that names its kind
+# (the asset type table's convention: the suffix is the kind, never the
+# serialization format). A new authored document kind is added here, or it
+# leaves this audit silently.
+TRACKED_PATTERNS = (
+    "assets/**/*.meta",
+    "assets/**/*.cookmeta",
+    "assets/**/*.cookstamp",
+    "assets/**/*.scene",
+    "assets/**/*.prefab",
+    "assets/**/*.mat",
+    "assets/**/*.animctrl",
+    "assets/**/*.manifest",
+    "assets/**/*.json",
+)
 
 ABSOLUTE_PATH_RE = re.compile(
     r"((?<![A-Za-z0-9])[A-Za-z]:[\\/])"

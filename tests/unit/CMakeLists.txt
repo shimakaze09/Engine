@@ -280,6 +280,20 @@ engine_add_test_executable(engine_unit_asset_catalog
     engine_content
 )
 
+engine_add_test_executable(engine_unit_asset_identity
+    SOURCES
+    asset_identity_test.cpp
+    PRIVATE_DEPS
+    engine_content
+)
+
+engine_add_test_executable(engine_unit_asset_sidecar
+    SOURCES
+    asset_sidecar_test.cpp
+    PRIVATE_DEPS
+    engine_content
+)
+
 engine_add_test_executable(engine_unit_content_dependency_dedup
     SOURCES
     content_dependency_dedup_test.cpp
