@@ -28,13 +28,13 @@ std::uint16_t changed_fields(const Material &current,
   std::uint16_t changed = 0U;
 #define ENGINE_MATERIAL_MARK_PARAM(name, member, key)                          \
   if (!same(current.member, next.member)) {                                    \
-    changed |= material_field::k##name;                                        \
+    changed = static_cast<std::uint16_t>(changed | material_field::k##name);   \
   }
   ENGINE_MATERIAL_PARAM_FIELDS(ENGINE_MATERIAL_MARK_PARAM)
 #undef ENGINE_MATERIAL_MARK_PARAM
 #define ENGINE_MATERIAL_MARK_TEXTURE(name, slot, handle, key)                  \
   if (currentSlots.slot != nextSlots.slot) {                                   \
-    changed |= material_field::k##name;                                        \
+    changed = static_cast<std::uint16_t>(changed | material_field::k##name);   \
   }
   ENGINE_MATERIAL_TEXTURE_FIELDS(ENGINE_MATERIAL_MARK_TEXTURE)
 #undef ENGINE_MATERIAL_MARK_TEXTURE

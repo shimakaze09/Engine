@@ -252,7 +252,7 @@ std::uint16_t authored_fields(const core::JsonParser &parser,
   core::JsonValue value{};
 #define ENGINE_MATERIAL_AUTHORED_PARAM(name, member, key)                      \
   if (parser.get_object_field(root, key, &value)) {                            \
-    authored |= material_field::k##name;                                       \
+    authored = static_cast<std::uint16_t>(authored | material_field::k##name); \
   }
   ENGINE_MATERIAL_PARAM_FIELDS(ENGINE_MATERIAL_AUTHORED_PARAM)
 #undef ENGINE_MATERIAL_AUTHORED_PARAM
@@ -260,7 +260,7 @@ std::uint16_t authored_fields(const core::JsonParser &parser,
   if (parser.get_object_field(root, "textures", &textures)) {
 #define ENGINE_MATERIAL_AUTHORED_TEXTURE(name, slot, handle, key)              \
   if (parser.get_object_field(textures, key, &value)) {                        \
-    authored |= material_field::k##name;                                       \
+    authored = static_cast<std::uint16_t>(authored | material_field::k##name); \
   }
     ENGINE_MATERIAL_TEXTURE_FIELDS(ENGINE_MATERIAL_AUTHORED_TEXTURE)
 #undef ENGINE_MATERIAL_AUTHORED_TEXTURE
