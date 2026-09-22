@@ -209,4 +209,20 @@ void begin_streaming_frame(AssetStreamingQueue *queue) noexcept;
 /// Query how many requests are currently queued or in-flight.
 std::size_t pending_load_count(const AssetStreamingQueue *queue) noexcept;
 
+/// One request that reached Ready or Failed, as collect_terminal_loads
+/// reports it.
+struct TerminalLoad final {
+  LoadHandle handle{};
+  AssetId assetId = kInvalidAssetId;
+  LoadingState state = LoadingState::Queued;
+};
+
+/// Copies every Ready or Failed request into `out`, up to `capacity`, and
+/// returns how many were written. A snapshot taken under the queue's lock,
+/// so a caller retiring terminal requests needs neither the lock nor the
+/// queue's slots; each handle is released with release_load as usual.
+std::size_t collect_terminal_loads(const AssetStreamingQueue *queue,
+                                   TerminalLoad *out,
+                                   std::size_t capacity) noexcept;
+
 } // namespace engine::content

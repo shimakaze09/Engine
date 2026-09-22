@@ -220,32 +220,10 @@ void sync_streaming_failures(
   retire_terminal_script_loads(service);
 
   content::AssetStreamingQueue *queue = service->streamingQueue;
-  struct TerminalRequest final {
-    content::LoadHandle handle{};
-    renderer::AssetId assetId = renderer::kInvalidAssetId;
-    content::LoadingState state = content::LoadingState::Queued;
-  };
-  std::array<TerminalRequest, content::AssetStreamingQueue::kMaxRequests>
+  std::array<content::TerminalLoad, content::AssetStreamingQueue::kMaxRequests>
       terminals{};
-  std::size_t terminalCount = 0U;
-
-  {
-    std::lock_guard<std::mutex> lock(queue->mutex);
-    for (std::uint32_t i = 0U;
-         i < content::AssetStreamingQueue::kMaxRequests; ++i) {
-      const content::LoadRequest &request = queue->requests[i];
-      if (!request.occupied ||
-          ((request.state != content::LoadingState::Ready) &&
-           (request.state != content::LoadingState::Failed))) {
-        continue;
-      }
-      terminals[terminalCount].handle =
-          content::LoadHandle{i, request.generation};
-      terminals[terminalCount].assetId = request.assetId;
-      terminals[terminalCount].state = request.state;
-      ++terminalCount;
-    }
-  }
+  const std::size_t terminalCount = content::collect_terminal_loads(
+      queue, terminals.data(), terminals.size());
 
   for (std::size_t i = 0U; i < terminalCount; ++i) {
     if ((terminals[i].state == content::LoadingState::Failed) &&

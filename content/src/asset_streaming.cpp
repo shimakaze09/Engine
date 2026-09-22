@@ -669,4 +669,27 @@ std::size_t pending_load_count(const AssetStreamingQueue *queue) noexcept {
   return pending;
 }
 
+std::size_t collect_terminal_loads(const AssetStreamingQueue *queue,
+                                   TerminalLoad *out,
+                                   std::size_t capacity) noexcept {
+  if ((queue == nullptr) || (out == nullptr)) {
+    return 0U;
+  }
+  std::lock_guard<std::mutex> lock(queue->mutex);
+  std::size_t written = 0U;
+  for (std::uint32_t i = 0U;
+       (i < AssetStreamingQueue::kMaxRequests) && (written < capacity); ++i) {
+    const LoadRequest &request = queue->requests[i];
+    if (!request.occupied || ((request.state != LoadingState::Ready) &&
+                              (request.state != LoadingState::Failed))) {
+      continue;
+    }
+    out[written].handle = LoadHandle{i, request.generation};
+    out[written].assetId = request.assetId;
+    out[written].state = request.state;
+    ++written;
+  }
+  return written;
+}
+
 } // namespace engine::content

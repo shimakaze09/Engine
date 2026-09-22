@@ -7,6 +7,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstring>
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -625,10 +626,67 @@ static void test_equal_priority_is_first_come_first_served() noexcept {
   engine::core::shutdown_cvars();
 }
 
+/// collect_terminal_loads reports exactly the Ready and Failed requests,
+/// with handles release_load accepts, so the runtime retires terminal
+/// requests without taking the queue's lock or walking its slots (#546).
+static bool fail_named_bad(AssetId, const char *path, std::uint64_t *outSz,
+                           void *) noexcept {
+  if (outSz != nullptr) {
+    *outSz = 1024ULL;
+  }
+  return (path == nullptr) || (std::strstr(path, "bad") == nullptr);
+}
+
+static void test_collect_terminal_loads() noexcept {
+  engine::core::initialize_cvars();
+  auto queue = std::make_unique<AssetStreamingQueue>();
+  initialize_asset_streaming(queue.get());
+
+  const LoadHandle good = load_asset_async(queue.get(), make_id(40),
+                                           "good.mesh", LoadPriority::Normal);
+  const LoadHandle bad = load_asset_async(queue.get(), make_id(41), "bad.mesh",
+                                          LoadPriority::Normal);
+  pump_until_terminal(queue.get(), good, &fail_named_bad, &ok_upload, nullptr);
+  pump_until_terminal(queue.get(), bad, &fail_named_bad, &ok_upload, nullptr);
+  // Queued after the others finished, and never pumped: not terminal.
+  const LoadHandle waiting = load_asset_async(
+      queue.get(), make_id(42), "waiting.mesh", LoadPriority::Normal);
+
+  TerminalLoad terminals[4] = {};
+  const std::size_t count = collect_terminal_loads(queue.get(), terminals, 4U);
+  bool sawGood = false;
+  bool sawBad = false;
+  bool sawWaiting = false;
+  for (std::size_t i = 0U; i < count; ++i) {
+    sawGood = sawGood || ((terminals[i].assetId == make_id(40)) &&
+                          (terminals[i].state == LoadingState::Ready));
+    sawBad = sawBad || ((terminals[i].assetId == make_id(41)) &&
+                        (terminals[i].state == LoadingState::Failed));
+    sawWaiting = sawWaiting || (terminals[i].assetId == make_id(42));
+  }
+  CHECK((count == 2U) && sawGood && sawBad && !sawWaiting,
+        "the Ready and the Failed request are reported, the queued one not");
+  CHECK(collect_terminal_loads(queue.get(), terminals, 1U) == 1U,
+        "the report stops at the caller's capacity");
+  for (std::size_t i = 0U; i < count; ++i) {
+    CHECK(release_load(queue.get(), terminals[i].handle),
+          "a reported handle releases its request");
+  }
+  CHECK(collect_terminal_loads(queue.get(), terminals, 4U) == 0U,
+        "nothing terminal is left once released");
+  CHECK(get_load_state(queue.get(), waiting) == LoadingState::Queued ||
+            get_load_state(queue.get(), waiting) == LoadingState::Loading,
+        "the queued request is untouched");
+
+  shutdown_asset_streaming(queue.get());
+  engine::core::shutdown_cvars();
+}
+
 int main() {
   std::printf("=== Async Streaming Unit Tests ===\n");
 
   test_basic_queue_poll();
+  test_collect_terminal_loads();
   test_equal_priority_is_first_come_first_served();
   test_dedup();
   test_state_transitions();
