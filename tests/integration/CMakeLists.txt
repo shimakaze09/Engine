@@ -1191,3 +1191,12 @@ engine_add_test_executable(engine_integration_render_prep_shading_model
     LABELS
     integration
 )
+
+engine_add_test_executable(engine_integration_draw_order_thread_count
+    SOURCES
+    draw_order_thread_count_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    LABELS
+    integration
+)

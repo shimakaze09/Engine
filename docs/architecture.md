@@ -113,8 +113,46 @@ commit, transform propagation and camera/spring-arm publication run on the
 main thread before any render-prep job; then render-prep jobs fill
 per-thread command buffers that are merged for the backend flush.
 
-Preserve deterministic stepping and thread-count independence. Test the
-production pipeline, never a copied scheduler model.
+Test the production pipeline, never a copied scheduler model.
+
+### Determinism invariants
+
+Two runs of the same inputs produce the same `World::state_hash()`
+sequence, on any platform and at any worker count. That holds only
+because each of these does:
+
+- **One fixed step, one cadence.** Physics, transforms and animation
+  evaluate per fixed step with the exact fixed delta. Timers come due per
+  fixed step and dispatch once per frame; `wait_frames` counts ticks. A
+  system that integrates once per rendered frame makes its own behaviour
+  frame-rate dependent, and `elapsed` accumulated per frame does not even
+  agree with itself across frame schedules.
+- **Frame time is injectable.** `set_frame_delta_override` is the only
+  seam; nothing else reads a wall clock to decide how much to simulate.
+  Tests assert step counts, never durations
+  (`tools/check_test_timing.py`).
+- **Randomness is explicit state.** `core::Rng` over state the caller
+  holds, seeded by a decision and never from a clock or the operating
+  system. The World owns the gameplay stream; Lua's `math.random` routes
+  to it and Lua's string-hash seed is pinned, so table iteration order
+  over string keys is the same in every process.
+- **Ordering is total wherever a thread can affect it.** Render prep
+  produces per-thread buffers and merges them, so the draw sort's final
+  comparison folds the owning entity and the model matrix bit for bit: a
+  comparison that leaves two draws equivalent lets an unstable sort keep
+  whichever order the threads produced. Anything else assembled from
+  parallel work owes the same total order.
+- **Hashes are FNV-1a over exact bits.** No `std::hash` (unspecified
+  across implementations) and no unordered container in anything a hash
+  or an iteration order is derived from. Persisted identity uses the
+  FNV-1a helpers in `core/hash.h`.
+- **Floating point is pinned by the build.** `-ffp-contract=off`, no
+  fast-math, standard excess precision. The deterministic scalar set
+  replaces the C library's transcendentals wherever simulation state
+  depends on them.
+
+A change that touches any of these carries a determinism test, and the
+`verify` skill names which.
 
 Every scene-derived input to one submission — camera, prepared draws,
 lights, capture requests — comes from a single World content epoch: a
