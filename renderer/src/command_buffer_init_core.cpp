@@ -361,9 +361,9 @@ bool init_backend_core(BackendState &backend) noexcept {
   // cook would shade that model as physically based while the engine
   // believed otherwise.
   backend.shadingProgramShaderHandles[static_cast<std::size_t>(
-      ShadingModel::Pbr)] = pbrShaderHandle;
-  backend.shadingPrograms[static_cast<std::size_t>(ShadingModel::Pbr)] =
-      backend.pbrProgram;
+      shading_program_id(ShadingModel::Pbr))] = pbrShaderHandle;
+  backend.shadingPrograms[static_cast<std::size_t>(
+      shading_program_id(ShadingModel::Pbr))] = backend.pbrProgram;
   {
     struct ModelVariant final {
       ShadingModel model;
@@ -379,7 +379,11 @@ bool init_backend_core(BackendState &backend) noexcept {
       const std::size_t defineCount = forwardFullSamplers ? 2U : 1U;
       const ShaderProgramHandle handle = load_configured_shader_variant(
           "pbr.vert", "pbr.frag", defines, defineCount);
-      const std::size_t slot = static_cast<std::size_t>(variant.model);
+      // A preset's program id is its enumerator, so the id a document
+      // resolves to and the slot the program registers at are the same
+      // value by construction rather than by two matching casts.
+      const std::size_t slot =
+          static_cast<std::size_t>(shading_program_id(variant.model));
       if (handle == kInvalidShaderProgram) {
         char message[160] = {};
         std::snprintf(message, sizeof(message),
