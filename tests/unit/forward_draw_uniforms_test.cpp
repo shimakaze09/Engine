@@ -8,15 +8,18 @@
 // every location the program declares, the albedo fallback rather than a
 // dangling render target, and the instancing toggle cleared per draw.
 //
-// The partition is here too because it is the other half of one
-// contract: a pass binds a program once per run, so a run that is wrong
-// shades a draw with the wrong model.
+// The partition and the program resolution are here too because they are
+// the other half of one contract: a pass binds a program once per run, so
+// a run that is wrong, or a run id that resolves to the wrong program,
+// shades a draw as something the material never asked for.
 
 #include "command_buffer_flush_internal.h"
 
 #include <cstdio>
+#include <cstring>
 #include <vector>
 
+#include "engine/core/logging.h"
 #include "engine/renderer/command_buffer.h"
 #include "engine/renderer/render_device.h"
 
@@ -173,10 +176,39 @@ void reset() noexcept {
   g_draw = 0;
 }
 
+/// Counts the renderer's report of a program a material named but no
+/// registration filled. A draw is per frame, so this is a report that has
+/// to be latched: one per run, not one per draw.
+void count_missing_program_reports(engine::core::LogLevel level,
+                                   const char *channel, const char *message,
+                                   void *userData) noexcept {
+  if ((level != engine::core::LogLevel::Warning) || (channel == nullptr) ||
+      (message == nullptr) || (userData == nullptr)) {
+    return;
+  }
+  if (std::strcmp(channel, "renderer") != 0) {
+    return;
+  }
+  if (std::strstr(message, "shading program") == nullptr) {
+    return;
+  }
+  *static_cast<int *>(userData) += 1;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
 int main() {
+  // Registered from the start because the report below is latched for the
+  // process: a sink installed later would see nothing and the count would
+  // read as "reported once" for the wrong reason.
+  int missingProgramReports = 0;
+  const bool loggingReady = engine::core::initialize_logging();
+  const bool sinkReady =
+      loggingReady && engine::core::log_register_sink(
+                          &count_missing_program_reports,
+                          &missingProgramReports);
+
   const RenderDevice device = make_recording_device();
   const ForwardDrawProgram program = make_program();
 
@@ -490,6 +522,64 @@ int main() {
           "one run past capacity returns exactly capacity");
     check(tightCovered == kMaxShadingPrograms,
           "one run past capacity still draws every draw");
+  }
+
+  // What a run's program id resolves to. Addressable is not registered:
+  // the table is as wide as the key's field so that no id can index past
+  // it, which means most ids read an empty slot in a normal build and the
+  // fallback is the common path rather than the exceptional one. A
+  // material naming a program that did not load has to draw as physically
+  // based; drawing with an empty handle or refusing the frame are both
+  // worse than a wrong-looking surface.
+  {
+    BackendState resolve{};
+    resolve.pbrProgram = DeviceProgramHandle{11};
+    resolve.shadingPrograms[shading_program_id(ShadingModel::Pbr)] =
+        resolve.pbrProgram;
+    resolve.shadingPrograms[shading_program_id(ShadingModel::Toon)] =
+        DeviceProgramHandle{22};
+
+    check(shading_program(resolve, shading_program_id(ShadingModel::Toon)) ==
+              DeviceProgramHandle{22},
+          "a registered program id resolves to its own program");
+    check(shading_program(resolve, shading_program_id(ShadingModel::Unlit)) ==
+              resolve.pbrProgram,
+          "a program that did not load falls back to physically based");
+    check(shading_program(resolve, static_cast<std::uint8_t>(
+                                       kMaxShadingPrograms - 1U)) ==
+              resolve.pbrProgram,
+          "the last addressable id falls back rather than reading past the "
+          "table");
+
+    // The fallback is not a guarantee of validity. A build where the PBR
+    // program itself failed to load has already refused to start, so this
+    // pins that the resolution reports what it has rather than inventing
+    // a handle.
+    BackendState empty{};
+    check(shading_program(empty, shading_program_id(ShadingModel::Toon)) ==
+              kInvalidDeviceProgram,
+          "with nothing registered the resolution reports no program");
+
+    // Three unregistered resolutions above, one report. The resolution runs
+    // once per run per pass per frame, so a report per occurrence would bury
+    // the log within a second of starting and the diagnostic that says a
+    // material is drawing as the wrong thing would stop being readable.
+    if (sinkReady) {
+      check(missingProgramReports == 1,
+            "an unregistered program is reported once for the run, not once "
+            "per resolution");
+    } else {
+      std::fprintf(stderr, "SKIPPED: no log sink, so the report's latching "
+                           "is unchecked\n");
+    }
+  }
+
+  if (sinkReady) {
+    engine::core::log_unregister_sink(&count_missing_program_reports,
+                                      &missingProgramReports);
+  }
+  if (loggingReady) {
+    engine::core::shutdown_logging();
   }
 
   if (g_failures != 0) {

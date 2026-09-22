@@ -125,19 +125,26 @@ struct BackendState final {
   ShaderProgramHandle pbrInstancedShaderHandle{};
   DeviceProgramHandle pbrInstancedProgram{};
 
-  // One forward program per shading model, indexed by the ShadingModel
-  // enumerator, so the flush binds by model rather than by name. The
-  // physically-based slot aliases pbrProgram; the others are the same
-  // source cooked with their model's define, and a model whose program
-  // failed to load leaves its slot invalid so the flush falls back to
-  // the physically-based one and says so once.
+  // One forward program per registered shading program, so the flush
+  // binds by a draw's program id rather than by name. The shipped
+  // presets register at their enumerator's id — the physically-based one
+  // holding a second reference to pbrProgram, the others the same source
+  // cooked with their own define — and an id nothing registered reads an
+  // empty entry, which is how the flush knows to fall back to the
+  // physically-based program and say so once.
   //
   // Their uniform values come from the pbr* locations above: this
   // backend's parameter tokens are global-registry indices, so a
   // program declaring the same uniform names shares them, which is why
-  // adding a model needs no second parameter family.
-  /// Indexed by program id, sized to what the draw key can address, so a
-  /// key naming an unregistered program reads an empty slot rather than
+  // adding a program needs no second parameter family.
+  //
+  // The handles sit beside the device programs because a reload replaces
+  // and destroys the device program behind a handle: refresh_shading_-
+  // programs re-reads every registered entry from the handle that
+  // produced it, and register_shading_program is the only writer of
+  // either array.
+  /// Indexed by program id, sized to what a draw key can name, so a key
+  /// naming an unregistered program reads an empty entry rather than
   /// running off the end of a three-entry table.
   ShaderProgramHandle shadingProgramShaderHandles[kMaxShadingPrograms]{};
   DeviceProgramHandle shadingPrograms[kMaxShadingPrograms]{};

@@ -270,6 +270,52 @@ void release_device_if_opened(bool backendOpenedDevice) noexcept {
   }
 }
 
+ShadingProgramRegistration
+register_shading_program(BackendState &backend, std::uint8_t programId,
+                         ShaderProgramHandle handle) noexcept {
+  // A program past the key's reach cannot be drawn: the sort key has no
+  // room to name it, so an entry for it would either be unreachable or,
+  // if anything masked the id into range, would answer for whoever owns
+  // that range. Refusing here is the last point where the caller still
+  // knows which program it was.
+  if (!shading_program_id_is_addressable(programId)) {
+    return ShadingProgramRegistration::NotAddressable;
+  }
+  // An invalid handle would store as an empty entry, which already means
+  // "nothing registered here". Storing one would claim the id while
+  // reading as unclaimed, so the refresh below would skip it and a later
+  // registration could not be told from a first one.
+  if (handle == kInvalidShaderProgram) {
+    return ShadingProgramRegistration::ProgramUnavailable;
+  }
+  const std::size_t slot = static_cast<std::size_t>(programId);
+  backend.shadingProgramShaderHandles[slot] = handle;
+  backend.shadingPrograms[slot] = shader_device_program(handle);
+  return ShadingProgramRegistration::Registered;
+}
+
+void refresh_shading_programs(BackendState &backend) noexcept {
+  // A reload destroys the device program behind a handle and links a new
+  // one, so every cached device program is re-read from its handle. The
+  // handles stored beside the programs exist for exactly this: without
+  // it a recook leaves the flush binding programs the shader system has
+  // destroyed, and because all three shipped variants cook from one
+  // source, a single edit stales every forward draw in the frame rather
+  // than one model's.
+  for (std::size_t slot = 0U; slot < kMaxShadingPrograms; ++slot) {
+    const ShaderProgramHandle handle =
+        backend.shadingProgramShaderHandles[slot];
+    if (handle == kInvalidShaderProgram) {
+      continue;
+    }
+    // A reload that failed keeps the old program, so this reads the same
+    // value back; a handle whose entry is gone reads invalid, and the
+    // draws naming it fall back with the rest rather than binding a dead
+    // program.
+    backend.shadingPrograms[slot] = shader_device_program(handle);
+  }
+}
+
 bool init_backend_core(BackendState &backend) noexcept {
   const bool backendOpenedDevice = (render_device() == nullptr);
   if (!initialize_render_device()) {
@@ -360,10 +406,16 @@ bool init_backend_core(BackendState &backend) noexcept {
   // default binary in silence: asking for a set the manifest does not
   // cook would shade that model as physically based while the engine
   // believed otherwise.
-  backend.shadingProgramShaderHandles[static_cast<std::size_t>(
-      shading_program_id(ShadingModel::Pbr))] = pbrShaderHandle;
-  backend.shadingPrograms[static_cast<std::size_t>(
-      shading_program_id(ShadingModel::Pbr))] = backend.pbrProgram;
+  if (register_shading_program(backend, shading_program_id(ShadingModel::Pbr),
+                               pbrShaderHandle) !=
+      ShadingProgramRegistration::Registered) {
+    // Unreachable as written: the handle linked above and the id is the
+    // first of the addressable range. Reported rather than ignored
+    // because a build where it stops holding would otherwise draw every
+    // surface through the fallback and say nothing.
+    core::log_message(core::LogLevel::Error, "renderer",
+                      "the physically-based shading program did not register");
+  }
   {
     struct ModelVariant final {
       ShadingModel model;
@@ -380,21 +432,22 @@ bool init_backend_core(BackendState &backend) noexcept {
       const ShaderProgramHandle handle = load_configured_shader_variant(
           "pbr.vert", "pbr.frag", defines, defineCount);
       // A preset's program id is its enumerator, so the id a document
-      // resolves to and the slot the program registers at are the same
+      // resolves to and the id the program registers under are the same
       // value by construction rather than by two matching casts.
-      const std::size_t slot =
-          static_cast<std::size_t>(shading_program_id(variant.model));
-      if (handle == kInvalidShaderProgram) {
-        char message[160] = {};
+      const ShadingProgramRegistration registered = register_shading_program(
+          backend, shading_program_id(variant.model), handle);
+      if (registered != ShadingProgramRegistration::Registered) {
+        char message[192] = {};
         std::snprintf(message, sizeof(message),
-                      "the %s shading program did not load; those "
+                      "the %s shading program is not drawable (%s); those "
                       "materials draw as physically based",
-                      variant.name);
+                      variant.name,
+                      (registered ==
+                       ShadingProgramRegistration::NotAddressable)
+                          ? "its id is past what a draw key can name"
+                          : "it did not load");
         core::log_message(core::LogLevel::Warning, "renderer", message);
-        continue;
       }
-      backend.shadingProgramShaderHandles[slot] = handle;
-      backend.shadingPrograms[slot] = shader_device_program(handle);
     }
   }
 

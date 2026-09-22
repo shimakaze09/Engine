@@ -447,6 +447,144 @@ int check_deferred_survives_optimized_out_uniforms() {
   return 0;
 }
 
+/// EXPECTATION (#647): the per-program table the passes bind through
+/// follows a reload. Every other cached device program is re-read on
+/// refresh; this table was not, so a recook left the flush binding
+/// programs the shader system had already destroyed. All three shipped
+/// variants cook from one source, so one edit to the fragment stage
+/// relinks every one of them and staleness covers every forward draw in
+/// the frame rather than one model's — including the physically-based
+/// program, which the table holds a second reference to.
+int check_shading_programs_follow_a_reload() {
+  using namespace engine::renderer;
+
+  reset_backend_harness();
+  clear_missing_uniforms();
+  if (!initialize_backend()) {
+    return 370;
+  }
+
+  BackendState &backend = backend_state();
+  const RenderDevice *dev = render_device();
+  const std::uint8_t ids[3] = {shading_program_id(ShadingModel::Pbr),
+                               shading_program_id(ShadingModel::Toon),
+                               shading_program_id(ShadingModel::Unlit)};
+
+  // The positive control. A build where the toon and unlit variants did
+  // not register would pass every assertion below while proving nothing,
+  // so an unregistered program is a failure of this test rather than a
+  // case it skips.
+  DeviceProgramHandle before[3] = {};
+  for (std::size_t i = 0U; i < 3U; ++i) {
+    before[i] = backend.shadingPrograms[ids[i]];
+    if (before[i] == kInvalidDeviceProgram) {
+      return 371;
+    }
+    if (backend.shadingProgramShaderHandles[ids[i]] == kInvalidShaderProgram) {
+      return 372;
+    }
+  }
+  // Three separate links, so three distinct device programs: if two ids
+  // shared one program, a stale entry could read as refreshed.
+  if ((before[0] == before[1]) || (before[1] == before[2]) ||
+      (before[0] == before[2])) {
+    return 373;
+  }
+
+  if (!touch_shader_file("pbr.frag")) {
+    return 374;
+  }
+  const std::uint64_t epochBeforeReload = shader_reload_epoch();
+  check_shader_reload();
+  if (shader_reload_epoch() == epochBeforeReload) {
+    return 375; // nothing relinked, so the refresh below proves nothing
+  }
+  refresh_backend_program_state(backend, dev);
+
+  for (std::size_t i = 0U; i < 3U; ++i) {
+    const DeviceProgramHandle now = backend.shadingPrograms[ids[i]];
+    if (now == kInvalidDeviceProgram) {
+      return 376;
+    }
+    // The failure this case exists for: the entry still names the
+    // program the reload destroyed.
+    if (now == before[i]) {
+      return 377;
+    }
+    if (now != shader_device_program(backend.shadingProgramShaderHandles[
+            ids[i]])) {
+      return 378;
+    }
+  }
+  // The physically-based entry and the program the rest of the backend
+  // caches are one fact held twice; a refresh that moved only one of
+  // them would shade the same material differently depending on which
+  // the pass read.
+  if (backend.shadingPrograms[shading_program_id(ShadingModel::Pbr)] !=
+      backend.pbrProgram) {
+    return 379;
+  }
+  return 0;
+}
+
+/// EXPECTATION: an id past what a draw key can name is refused at
+/// registration rather than stored somewhere a draw could reach. The
+/// key's field is seven bits, so nothing a real key carries is
+/// unaddressable; this pins the refusal for the authored programs #642
+/// adds, where the id comes from a document rather than an enumerator.
+int check_registration_refuses_what_cannot_be_drawn() {
+  using namespace engine::renderer;
+
+  reset_backend_harness();
+  clear_missing_uniforms();
+  if (!initialize_backend()) {
+    return 380;
+  }
+  BackendState &backend = backend_state();
+  const ShaderProgramHandle loaded =
+      backend.shadingProgramShaderHandles[shading_program_id(
+          ShadingModel::Toon)];
+  if (loaded == kInvalidShaderProgram) {
+    return 381;
+  }
+
+  if (register_shading_program(
+          backend, static_cast<std::uint8_t>(kMaxShadingPrograms), loaded) !=
+      ShadingProgramRegistration::NotAddressable) {
+    return 382;
+  }
+  if (register_shading_program(backend, 255U, loaded) !=
+      ShadingProgramRegistration::NotAddressable) {
+    return 383;
+  }
+  // The last id a key can carry, which is inside the table by one.
+  if (register_shading_program(
+          backend, static_cast<std::uint8_t>(kMaxShadingPrograms - 1U),
+          loaded) != ShadingProgramRegistration::Registered) {
+    return 384;
+  }
+  // A program that did not load leaves its id unregistered: an entry
+  // holding nothing is how the flush knows to fall back, so claiming the
+  // id with one would be indistinguishable from never registering.
+  if (register_shading_program(backend, 5U, kInvalidShaderProgram) !=
+      ShadingProgramRegistration::ProgramUnavailable) {
+    return 385;
+  }
+  if (backend.shadingProgramShaderHandles[5] != kInvalidShaderProgram) {
+    return 386;
+  }
+  // A second registration replaces, which is how a reauthored program
+  // takes over its own id rather than needing a separate release.
+  if (register_shading_program(backend, 5U, loaded) !=
+      ShadingProgramRegistration::Registered) {
+    return 387;
+  }
+  if (backend.shadingPrograms[5] != shader_device_program(loaded)) {
+    return 388;
+  }
+  return 0;
+}
+
 /// EXPECTATION: the dx11 cooked profile links every program through the
 /// introspected entry with both spirv sidecars present, never the plain
 /// entry. DXBC uniform tables are incomplete — fxc strips the
@@ -552,6 +690,12 @@ int main() {
     result = check_deferred_survives_optimized_out_uniforms();
   }
   if (result == 0) {
+    result = check_shading_programs_follow_a_reload();
+  }
+  if (result == 0) {
+    result = check_registration_refuses_what_cannot_be_drawn();
+  }
+  if (result == 0) {
     result = check_dx11_profile_links_with_spirv_sidecars();
   }
 
@@ -559,5 +703,14 @@ int main() {
   engine::core::shutdown_vfs();
   engine::core::shutdown_cvars();
   engine::core::shutdown_logging();
+  // Every code in this suite is above 255 and a process exit status
+  // carries only the low byte, so the status a runner reports is not the
+  // code written here. Printing both keeps a failure greppable.
+  if (result != 0) {
+    std::fprintf(stderr,
+                 "command_buffer_reload_contract_test: failed with code %d "
+                 "(the exit status shows %d)\n",
+                 result, result & 0xFF);
+  }
   return result;
 }
