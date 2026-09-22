@@ -575,10 +575,61 @@ static void test_cancel_refused_while_upload_callback_runs() noexcept {
 }
 
 /// Runs this executable or test program.
+/// Equal-priority requests are scheduled oldest first (#546). Selection used
+/// to take the lowest slot index, and a freed low slot is the first one a
+/// new request gets, so a request that landed in a high slot lost to every
+/// newer request that reused a freed low one: under a churning scene it
+/// could stay Queued until wait_for_load gave up. Driven without workers,
+/// so a scheduled request stays Loading where the test can see it.
+static void test_equal_priority_is_first_come_first_served() noexcept {
+  engine::core::initialize_cvars();
+  auto queue = std::make_unique<AssetStreamingQueue>();
+  // One load slot a frame: the budget is below one unknown-size load.
+  static_cast<void>(engine::core::cvar_register_int("asset.streaming_budget_mb",
+                                                    256, "streaming budget"));
+  CHECK(engine::core::cvar_set_int("asset.streaming_budget_mb", 1),
+        "the streaming budget allows one load at a time");
+
+  const LoadHandle early = load_asset_async(queue.get(), make_id(900),
+                                            "early.mesh", LoadPriority::Normal);
+  const LoadHandle older = load_asset_async(queue.get(), make_id(901),
+                                            "older.mesh", LoadPriority::Normal);
+  // The first slot frees up again; the next request lands in it.
+  CHECK(cancel_load(queue.get(), early), "the first request is cancelled");
+  const LoadHandle newer = load_asset_async(queue.get(), make_id(902),
+                                            "newer.mesh", LoadPriority::Normal);
+  CHECK(newer.index < older.index,
+        "the newer request reuses the lower, freed slot");
+
+  begin_streaming_frame(queue.get());
+  static_cast<void>(
+      update_asset_streaming(queue.get(), nullptr, nullptr, nullptr));
+  CHECK(get_load_state(queue.get(), older) == LoadingState::Loading,
+        "the older request is scheduled first");
+  CHECK(get_load_state(queue.get(), newer) == LoadingState::Queued,
+        "the newer one waits its turn");
+
+  // A higher priority still goes ahead of age.
+  auto urgent = std::make_unique<AssetStreamingQueue>();
+  const LoadHandle waiting = load_asset_async(
+      urgent.get(), make_id(910), "waiting.mesh", LoadPriority::Normal);
+  const LoadHandle critical = load_asset_async(
+      urgent.get(), make_id(911), "critical.mesh", LoadPriority::Immediate);
+  begin_streaming_frame(urgent.get());
+  static_cast<void>(
+      update_asset_streaming(urgent.get(), nullptr, nullptr, nullptr));
+  CHECK(get_load_state(urgent.get(), critical) == LoadingState::Loading,
+        "a higher priority is scheduled before an older request");
+  CHECK(get_load_state(urgent.get(), waiting) == LoadingState::Queued,
+        "the older, lower-priority request waits");
+  engine::core::shutdown_cvars();
+}
+
 int main() {
   std::printf("=== Async Streaming Unit Tests ===\n");
 
   test_basic_queue_poll();
+  test_equal_priority_is_first_come_first_served();
   test_dedup();
   test_state_transitions();
   test_load_failure();

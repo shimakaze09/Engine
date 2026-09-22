@@ -65,6 +65,9 @@ struct LoadRequest final {
   LoadPriority priority = LoadPriority::Normal;
   LoadingState state = LoadingState::Queued;
   std::uint64_t loadedSizeBytes = 0ULL;
+  /// When the request was queued, in queue order: among equal priorities
+  /// the older request is scheduled first, whatever slot it occupies.
+  std::uint64_t enqueueOrdinal = 0ULL;
   std::uint32_t generation = 1U;
   bool loadInProgress = false;
   /// Pinned while the upload pump is inside this request's callback outside
@@ -97,6 +100,8 @@ struct AssetStreamingQueue final {
 
   // Frame-local tracking:
   std::uint64_t inflight_bytes_this_frame = 0ULL;
+  // The ordinal the next queued request takes (see LoadRequest).
+  std::uint64_t nextEnqueueOrdinal = 0ULL;
   std::uint32_t uploads_this_frame = 0U;
 
   AssetLoadCallback loadCallback = nullptr;

@@ -66,21 +66,29 @@ bool is_current_handle_unlocked(const AssetStreamingQueue *queue,
          (queue->requests[handle.index].generation == handle.generation);
 }
 
-/// Sort-stable selection of the highest-priority Queued request.
+/// The Queued request to schedule next: highest priority, then the oldest
+/// among equals. Slot index says nothing about age -- a new request takes
+/// the lowest free slot -- so choosing by it let newer requests overtake an
+/// older one indefinitely.
 std::uint32_t
 pick_highest_priority_queued(const AssetStreamingQueue *queue) noexcept {
   std::uint32_t best = LoadHandle::kInvalid;
-  auto bestPri = LoadPriority::Low;
-
   for (std::uint32_t i = 0U; i < AssetStreamingQueue::kMaxRequests; ++i) {
     const LoadRequest &req = queue->requests[i];
-    if (req.occupied && (req.state == LoadingState::Queued)) {
-      if ((best == LoadHandle::kInvalid) ||
-          (static_cast<std::uint8_t>(req.priority) >
-           static_cast<std::uint8_t>(bestPri))) {
-        best = i;
-        bestPri = req.priority;
-      }
+    if (!req.occupied || (req.state != LoadingState::Queued)) {
+      continue;
+    }
+    if (best == LoadHandle::kInvalid) {
+      best = i;
+      continue;
+    }
+    const LoadRequest &current = queue->requests[best];
+    const auto priority = static_cast<std::uint8_t>(req.priority);
+    const auto bestPriority = static_cast<std::uint8_t>(current.priority);
+    if ((priority > bestPriority) ||
+        ((priority == bestPriority) &&
+         (req.enqueueOrdinal < current.enqueueOrdinal))) {
+      best = i;
     }
   }
   return best;
@@ -373,6 +381,7 @@ LoadHandle load_asset_async(AssetStreamingQueue *queue, AssetId id,
   write_path(&req.sourcePath, sourcePath);
   req.priority = priority;
   req.state = LoadingState::Queued;
+  req.enqueueOrdinal = queue->nextEnqueueOrdinal++;
   req.occupied = true;
   queue->stateChanged.notify_all();
 
