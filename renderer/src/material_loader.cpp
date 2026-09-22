@@ -1,6 +1,5 @@
-// Implements JSON material asset loading (v1 scalar-only and v2
-// texture-backed schemas) with parent-chain (instance) resolution and
-// texture-handle resolution for the Engine renderer system.
+// Implements JSON material asset loading with parent-chain (instance)
+// resolution and texture-handle resolution for the Engine renderer system.
 
 #include "engine/renderer/material_loader.h"
 
@@ -13,12 +12,13 @@
 #include <string>
 #include <system_error>
 
+#include "engine/core/diagnostic.h"
 #include "engine/core/json.h"
 #include "engine/core/logging.h"
 #include "engine/core/vfs.h"
 #include "engine/math/vec2.h"
 #include "engine/math/vec3.h"
-#include "engine/core/diagnostic.h"
+#include "engine/renderer/material_inheritance.h"
 
 namespace engine::renderer {
 
@@ -221,6 +221,52 @@ bool load_material_recursive(AssetDatabase *database, const char *virtualPath,
                              Material *outParams,
                              MaterialTextureSlots *outSlots) noexcept;
 
+/// material_field bits for the fields the document itself names; the rest
+/// its parent supplies.
+std::uint16_t authored_fields(const core::JsonParser &parser,
+                              const core::JsonValue &root) noexcept {
+  struct Field final {
+    const char *key;
+    std::uint16_t bit;
+  };
+  static constexpr Field kFields[] = {
+      {"albedo", material_field::kAlbedo},
+      {"emissive", material_field::kEmissive},
+      {"roughness", material_field::kRoughness},
+      {"metallic", material_field::kMetallic},
+      {"opacity", material_field::kOpacity},
+      {"shadingModel", material_field::kShadingModel},
+      {"alphaMode", material_field::kAlphaMode},
+      {"alphaCutoff", material_field::kAlphaCutoff},
+      {"uvTiling", material_field::kUvTiling},
+      {"uvOffset", material_field::kUvOffset},
+  };
+  static constexpr Field kTextureFields[] = {
+      {"albedo", material_field::kAlbedoTexture},
+      {"metallicRoughness", material_field::kMetallicRoughnessTexture},
+      {"emissive", material_field::kEmissiveTexture},
+      {"occlusion", material_field::kOcclusionTexture},
+      {"opacity", material_field::kOpacityTexture},
+  };
+
+  std::uint16_t authored = 0U;
+  core::JsonValue value{};
+  for (const Field &field : kFields) {
+    if (parser.get_object_field(root, field.key, &value)) {
+      authored = static_cast<std::uint16_t>(authored | field.bit);
+    }
+  }
+  core::JsonValue textures{};
+  if (parser.get_object_field(root, "textures", &textures)) {
+    for (const Field &field : kTextureFields) {
+      if (parser.get_object_field(textures, field.key, &value)) {
+        authored = static_cast<std::uint16_t>(authored | field.bit);
+      }
+    }
+  }
+  return authored;
+}
+
 /// Parses one material file's JSON text and registers the resolved record;
 /// both fixed tables are preflighted for space first so the two mutations
 /// complete together. The text buffer must stay alive for the whole call:
@@ -268,6 +314,12 @@ bool parse_material_text(AssetDatabase *database, const char *virtualPath,
     if (!load_material_recursive(database, parentPath, depth + 1U, &parentId,
                                  &params, &slots)) {
       return log_material_error(virtualPath, "failed to load parent");
+    }
+    // A parent already loaded skips the depth walk above, so a reload that
+    // names one of its own descendants is caught here instead.
+    if (material_chain_contains(database, parentId, id)) {
+      return log_material_error(virtualPath,
+                                "parent chain would become a cycle");
     }
   }
   // Texture GPU handles are never inherited directly: they are re-derived
@@ -336,6 +388,8 @@ bool parse_material_text(AssetDatabase *database, const char *virtualPath,
     }
   }
 
+  const std::uint16_t overridden = authored_fields(parser, *root);
+
   if (!material_slot_available(*database, id)) {
     return log_material_error(virtualPath, "material table is full");
   }
@@ -351,9 +405,10 @@ bool parse_material_text(AssetDatabase *database, const char *virtualPath,
     return log_material_error(virtualPath,
                               "metadata registration unexpectedly failed");
   }
-  if (!set_material_texture_slots(database, id, slots)) {
+  if (!set_material_texture_slots(database, id, slots) ||
+      !set_material_overrides(database, id, overridden)) {
     return log_material_error(virtualPath,
-                              "texture-slot registration unexpectedly failed");
+                              "material record update unexpectedly failed");
   }
 
   if (outParams != nullptr) {
@@ -552,6 +607,7 @@ reload_material_asset(AssetDatabase *database,
     // comment): the previously Ready record is exactly as it was.
     return std::unexpected(MaterialLoadError::Parse);
   }
+  static_cast<void>(propagate_material_to_dependents(database, id));
   return id;
 }
 

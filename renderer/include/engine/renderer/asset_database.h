@@ -96,6 +96,26 @@ struct MaterialTextureSlots final {
   AssetId opacity = kInvalidAssetId;
 };
 
+/// Bits of MaterialAssetRecord::overriddenFields, one per authored field.
+namespace material_field {
+inline constexpr std::uint16_t kAlbedo = 1U << 0U;
+inline constexpr std::uint16_t kEmissive = 1U << 1U;
+inline constexpr std::uint16_t kRoughness = 1U << 2U;
+inline constexpr std::uint16_t kMetallic = 1U << 3U;
+inline constexpr std::uint16_t kOpacity = 1U << 4U;
+inline constexpr std::uint16_t kShadingModel = 1U << 5U;
+inline constexpr std::uint16_t kAlphaMode = 1U << 6U;
+inline constexpr std::uint16_t kAlphaCutoff = 1U << 7U;
+inline constexpr std::uint16_t kUvTiling = 1U << 8U;
+inline constexpr std::uint16_t kUvOffset = 1U << 9U;
+inline constexpr std::uint16_t kAlbedoTexture = 1U << 10U;
+inline constexpr std::uint16_t kMetallicRoughnessTexture = 1U << 11U;
+inline constexpr std::uint16_t kEmissiveTexture = 1U << 12U;
+inline constexpr std::uint16_t kOcclusionTexture = 1U << 13U;
+inline constexpr std::uint16_t kOpacityTexture = 1U << 14U;
+inline constexpr std::uint16_t kAll = (1U << 15U) - 1U;
+} // namespace material_field
+
 /// One material slot: id, source path, and the fully resolved parameters
 /// (parent-chain overrides are baked at load time so render prep reads a
 /// flat record). textureSlots holds the same chain's resolved texture
@@ -112,6 +132,10 @@ struct MaterialAssetRecord final {
   /// MaterialTextureSlots order. Runtime-only; cleared whenever the slots
   /// are assigned again, so a reload or an edit tries once more.
   std::uint8_t unregisterableTextureSlots = 0U;
+  /// material_field bits for the fields this material authors itself; the
+  /// rest are its parent's, re-resolved whenever the parent changes. A
+  /// material with no parent authors everything.
+  std::uint16_t overriddenFields = material_field::kAll;
 };
 
 /// Fixed-slot asset tables (meshes, textures, materials, metadata).
@@ -238,6 +262,14 @@ bool set_material_texture_slots(AssetDatabase *database, AssetId id,
 /// Authored texture-slot references for the id, or nullptr when absent.
 const MaterialTextureSlots *
 find_material_texture_slots(const AssetDatabase *database, AssetId id) noexcept;
+/// Records which fields the material authors (material_field bits); false
+/// when the id is unknown.
+bool set_material_overrides(AssetDatabase *database, AssetId id,
+                            std::uint16_t overriddenFields) noexcept;
+/// The material's material_field override bits; kAll when the id is
+/// unknown, as a material with nothing to inherit authors everything.
+std::uint16_t material_overrides(const AssetDatabase *database,
+                                 AssetId id) noexcept;
 
 // Texture asset management.
 bool register_texture_asset(AssetDatabase *database, AssetId id,

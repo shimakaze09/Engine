@@ -8,14 +8,15 @@
 #include <cstdio>
 #include <cstring>
 
-#include "engine/core/diagnostic.h"
-#include "engine/core/logging.h"
-#include "engine/core/vfs.h"
-#include "engine/renderer/asset_database.h"
 #include "engine/content/asset_sidecar.h"
 #include "engine/content/asset_streaming.h"
 #include "engine/content/asset_type_table.h"
+#include "engine/core/diagnostic.h"
+#include "engine/core/logging.h"
+#include "engine/core/vfs.h"
 #include "engine/engine.h"
+#include "engine/renderer/asset_database.h"
+#include "engine/renderer/material_inheritance.h"
 #include "engine/renderer/material_loader.h"
 #include "engine/renderer/material_writer.h"
 #include "engine/runtime/service_registry.h"
@@ -258,16 +259,31 @@ bool editor_set_material_params(
     return false;
   }
 
-  const renderer::AssetMetadata *metadata = renderer::find_asset_metadata(
-      g_editorAssetService->database, materialId);
-  const char *sourcePath =
-      (metadata != nullptr) ? metadata->filePath.data() : nullptr;
-  if (!renderer::register_material_asset(g_editorAssetService->database,
-                                         materialId, sourcePath, params)) {
+  return renderer::edit_material_asset(g_editorAssetService->database,
+                                       materialId, params, textureSlots);
+}
+
+std::uint16_t editor_material_overrides(renderer::AssetId materialId) noexcept {
+  if ((g_editorAssetService == nullptr) ||
+      (g_editorAssetService->database == nullptr)) {
+    return renderer::material_field::kAll;
+  }
+  return renderer::material_overrides(g_editorAssetService->database,
+                                      materialId);
+}
+
+bool editor_restore_material(renderer::AssetId materialId,
+                             const renderer::Material &params,
+                             const renderer::MaterialTextureSlots &textureSlots,
+                             std::uint16_t overrides) noexcept {
+  if ((materialId == renderer::kInvalidAssetId) ||
+      (g_editorAssetService == nullptr) ||
+      (g_editorAssetService->database == nullptr)) {
     return false;
   }
-  return renderer::set_material_texture_slots(g_editorAssetService->database,
-                                              materialId, textureSlots);
+  return renderer::restore_material_asset(g_editorAssetService->database,
+                                          materialId, params, textureSlots,
+                                          overrides);
 }
 
 bool editor_save_material(const char *virtualPath,
@@ -291,7 +307,8 @@ bool editor_save_material(const char *virtualPath,
   const renderer::MaterialTextureSlots emptySlots{};
   return renderer::save_material_asset(
       g_editorAssetService->database, virtualPath, *params,
-      (slots != nullptr) ? *slots : emptySlots, parentVirtualPath);
+      (slots != nullptr) ? *slots : emptySlots, parentVirtualPath,
+      renderer::material_overrides(g_editorAssetService->database, materialId));
 }
 
 EditorMaterialState editor_reload_material(const char *virtualPath) noexcept {

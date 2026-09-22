@@ -159,21 +159,36 @@ struct EditorMaterialState final {
 EditorMaterialState editor_load_material(const char *virtualPath) noexcept;
 
 /// Writes `params`/`textureSlots` directly into the live asset database
-/// record -- the same mutation register_material_asset and
-/// set_material_texture_slots perform -- so the very next frame's render
+/// record (renderer::edit_material_asset), so the very next frame's render
 /// prep and resolve_material_textures reflect the edit: the material
-/// editor's live viewport feedback. Never touches disk; call
-/// editor_save_material to persist. False when the id is unknown or no
-/// runtime asset service is published.
+/// editor's live viewport feedback. A field that changes becomes one the
+/// material overrides, and every material inheriting from it follows the
+/// edit. Never touches disk; call editor_save_material to persist. False
+/// when the id is not a loaded material or no runtime asset service is
+/// published.
 bool editor_set_material_params(
     content::AssetId materialId, const renderer::Material &params,
     const renderer::MaterialTextureSlots &textureSlots) noexcept;
+
+/// The material's override bits (renderer::material_field), for an undo
+/// step to restore; material_field::kAll when unknown or no service is
+/// published.
+std::uint16_t editor_material_overrides(content::AssetId materialId) noexcept;
+
+/// Sets the live record to exactly `params`/`textureSlots`/`overrides`
+/// (renderer::restore_material_asset): an undo or redo, which restores
+/// which fields the material authors along with their values. False when
+/// the id is not a loaded material or no service is published.
+bool editor_restore_material(content::AssetId materialId,
+                             const renderer::Material &params,
+                             const renderer::MaterialTextureSlots &textureSlots,
+                             std::uint16_t overrides) noexcept;
 
 /// Persists the live in-memory state for `virtualPath` to disk via
 /// save_material_asset (staged atomic write): a failure (including an
 /// unresolvable texture-slot path) leaves the previous file on disk
 /// completely untouched. `parentVirtualPath` may be null/empty for no
-/// parent.
+/// parent; with one, only the material's overrides are written.
 bool editor_save_material(const char *virtualPath,
                           const char *parentVirtualPath) noexcept;
 

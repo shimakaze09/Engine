@@ -578,6 +578,27 @@ find_material_texture_slots(const AssetDatabase *database,
   return &database->materialAssets[slot].textureSlots;
 }
 
+bool set_material_overrides(AssetDatabase *database, AssetId id,
+                            std::uint16_t overriddenFields) noexcept {
+  const std::size_t slot = find_material_slot(database, id);
+  if ((database == nullptr) || (slot == database->materialAssets.size())) {
+    return false;
+  }
+
+  database->materialAssets[slot].overriddenFields =
+      overriddenFields & material_field::kAll;
+  return true;
+}
+
+std::uint16_t material_overrides(const AssetDatabase *database,
+                                 AssetId id) noexcept {
+  const std::size_t slot = find_material_slot(database, id);
+  if ((database == nullptr) || (slot == database->materialAssets.size())) {
+    return material_field::kAll;
+  }
+  return database->materialAssets[slot].overriddenFields;
+}
+
 bool register_texture_asset(AssetDatabase *database, AssetId id,
                             const char *sourcePath,
                             TextureHandle runtimeTexture) noexcept {

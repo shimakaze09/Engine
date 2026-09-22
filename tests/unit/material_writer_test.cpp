@@ -102,7 +102,8 @@ int verify_save_round_trip(engine::renderer::AssetDatabase *database) {
   constexpr const char *kOsPath = "material_writer_roundtrip.json";
   remove_file(kOsPath);
   const bool saved = engine::renderer::save_material_asset(
-      database, kVirtualPath, params, slots, nullptr);
+      database, kVirtualPath, params, slots, nullptr,
+      engine::renderer::material_field::kAll);
   if (!saved) {
     remove_file(kOsPath);
     return 11;
@@ -159,7 +160,8 @@ int verify_unresolvable_texture_rejects_save(
   slots.albedo = 0xDEADBEEFULL;
 
   const bool saved = engine::renderer::save_material_asset(
-      database, kVirtualPath, params, slots, nullptr);
+      database, kVirtualPath, params, slots, nullptr,
+      engine::renderer::material_field::kAll);
   if (saved) {
     remove_file(kOsPath);
     return 21;
@@ -226,6 +228,46 @@ int verify_find_parent_path(engine::renderer::AssetDatabase *database) {
   return 0;
 }
 
+/// A material with a parent writes only its overrides (#543): the parent
+/// key, the fields named in the mask, and no inherited value or slot -- not
+/// even one whose path could not be written.
+int verify_child_writes_only_overrides(
+    engine::renderer::AssetDatabase *database) {
+  constexpr const char *kOsPath = "material_writer_child.json";
+  constexpr const char *kVirtualPath = "mat/material_writer_child.json";
+  remove_file(kOsPath);
+
+  engine::renderer::Material params{};
+  params.roughness = 0.25F;
+  params.metallic = 0.75F;
+  engine::renderer::MaterialTextureSlots slots{};
+  slots.albedo = 0xDEADBEEFULL; // inherited, and unresolvable
+
+  if (!engine::renderer::save_material_asset(
+          database, kVirtualPath, params, slots, "mat/material_parent.json",
+          engine::renderer::material_field::kRoughness)) {
+    remove_file(kOsPath);
+    return 40;
+  }
+  std::string content;
+  const bool read = read_whole_file(kOsPath, &content);
+  remove_file(kOsPath);
+  if (!read) {
+    return 41;
+  }
+  if ((content.find("\"parent\":\"mat/material_parent.json\"") ==
+       std::string::npos) ||
+      (content.find("\"roughness\"") == std::string::npos) ||
+      (content.find("\"metallic\"") != std::string::npos) ||
+      (content.find("\"albedo\"") != std::string::npos) ||
+      (content.find("\"shadingModel\"") != std::string::npos) ||
+      (content.find("\"textures\"") != std::string::npos)) {
+    std::printf("child document: %s\n", content.c_str());
+    return 42;
+  }
+  return 0;
+}
+
 } // namespace
 
 int main() {
@@ -250,6 +292,9 @@ int main() {
   }
   if (result == 0) {
     result = verify_find_parent_path(database.get());
+  }
+  if (result == 0) {
+    result = verify_child_writes_only_overrides(database.get());
   }
 
   engine::core::shutdown_vfs();

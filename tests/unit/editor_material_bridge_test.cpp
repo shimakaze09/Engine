@@ -1,7 +1,9 @@
 // Verifies the material editor bridge (issue #160): no published service
 // yields found=false everywhere, a load surfaces the resolved state, a
 // live param edit is visible immediately (no disk round trip), Save
-// persists it, and a malformed reload preserves the previous live state.
+// persists it, a malformed reload preserves the previous live state, and
+// a parent's edits reach its children while a saved child stays an
+// instance.
 
 #include "engine/core/vfs.h"
 #include "engine/renderer/asset_database.h"
@@ -161,6 +163,174 @@ int check_load_edit_save_reload() noexcept {
   return finish(0);
 }
 
+/// Reads a whole small file into `out`; false when it cannot.
+bool read_file(const char *path, char *out, std::size_t capacity) noexcept {
+  FILE *file = nullptr;
+#ifdef _WIN32
+  if (fopen_s(&file, path, "rb") != 0) {
+    file = nullptr;
+  }
+#else
+  file = std::fopen(path, "rb");
+#endif
+  if (file == nullptr) {
+    return false;
+  }
+  const std::size_t read = std::fread(out, 1U, capacity - 1U, file);
+  std::fclose(file);
+  out[read] = '\0';
+  return read > 0U;
+}
+
+/// A parent's edits reach its children, and a saved child stays an
+/// instance of its parent (#543). A child's values were baked from its
+/// parent once, at load: neither a live edit nor a reload of the parent
+/// reached it, and saving the child wrote every field, so later parent
+/// edits could not reach it even after a restart.
+int check_parent_changes_reach_child() noexcept {
+  constexpr const char *kParentOs = "editor_material_parent_test.json";
+  constexpr const char *kParentVirtual =
+      "edmat/editor_material_parent_test.json";
+  constexpr const char *kChildOs = "editor_material_child_test.json";
+  constexpr const char *kChildVirtual = "edmat/editor_material_child_test.json";
+
+  if (!engine::core::initialize_vfs()) {
+    return 30;
+  }
+  std::unique_ptr<engine::renderer::AssetDatabase> database(
+      new (std::nothrow) engine::renderer::AssetDatabase());
+  if (database == nullptr) {
+    engine::core::shutdown_vfs();
+    return 31;
+  }
+  engine::runtime::EngineAssetDatabaseService service{};
+  service.database = database.get();
+  engine::runtime::set_editor_asset_service(&service);
+  const auto finish = [&](int result) noexcept {
+    remove_file(kParentOs);
+    remove_file(kChildOs);
+    engine::runtime::set_editor_asset_service(nullptr);
+    engine::core::shutdown_vfs();
+    return result;
+  };
+  if (!engine::core::mount(kMountPrefix, ".")) {
+    return finish(32);
+  }
+
+  if (!write_file(kParentOs, "{\"version\":3,\"albedo\":[1,0,0],"
+                             "\"roughness\":0.2,\"metallic\":0.1}") ||
+      !write_file(kChildOs,
+                  "{\"version\":3,\"parent\":\"edmat/"
+                  "editor_material_parent_test.json\",\"roughness\":0.9}")) {
+    return finish(33);
+  }
+  const auto child = [&]() noexcept {
+    return engine::runtime::editor_load_material(kChildVirtual);
+  };
+  const engine::runtime::EditorMaterialState loaded = child();
+  if (!loaded.found || !loaded.hasParent ||
+      !exactly_equal(loaded.params.roughness, 0.9F) ||
+      !exactly_equal(loaded.params.metallic, 0.1F)) {
+    return finish(34);
+  }
+
+  // A live edit of the parent shows on the child at once.
+  engine::runtime::EditorMaterialState parent =
+      engine::runtime::editor_load_material(kParentVirtual);
+  engine::renderer::Material edited = parent.params;
+  edited.metallic = 0.6F;
+  if (!parent.found || !engine::runtime::editor_set_material_params(
+                           parent.materialId, edited, parent.textureSlots)) {
+    return finish(35);
+  }
+  if (!exactly_equal(child().params.metallic, 0.6F) ||
+      !exactly_equal(child().params.roughness, 0.9F)) {
+    std::printf("live parent edit: child metallic %.2f\n",
+                static_cast<double>(child().params.metallic));
+    return finish(36);
+  }
+
+  // So does a reload of the parent from disk.
+  if (!write_file(kParentOs, "{\"version\":3,\"albedo\":[0,0,1],"
+                             "\"roughness\":0.2,\"metallic\":0.3}") ||
+      !engine::runtime::editor_reload_material(kParentVirtual).found) {
+    return finish(37);
+  }
+  engine::runtime::EditorMaterialState afterReload = child();
+  if (!exactly_equal(afterReload.params.metallic, 0.3F) ||
+      !exactly_equal(afterReload.params.albedo.z, 1.0F) ||
+      !exactly_equal(afterReload.params.albedo.x, 0.0F) ||
+      !exactly_equal(afterReload.params.roughness, 0.9F)) {
+    std::printf("parent reload: child metallic %.2f albedo.z %.2f\n",
+                static_cast<double>(afterReload.params.metallic),
+                static_cast<double>(afterReload.params.albedo.z));
+    return finish(38);
+  }
+
+  // Saving the child writes what it overrides and nothing it inherits.
+  char text[1024] = {};
+  if (!engine::runtime::editor_save_material(kChildVirtual, kParentVirtual) ||
+      !read_file(kChildOs, text, sizeof(text))) {
+    return finish(39);
+  }
+  if ((std::strstr(text, "\"parent\"") == nullptr) ||
+      (std::strstr(text, "\"roughness\"") == nullptr) ||
+      (std::strstr(text, "\"metallic\"") != nullptr) ||
+      (std::strstr(text, "\"albedo\"") != nullptr)) {
+    std::printf("saved child: %s\n", text);
+    return finish(40);
+  }
+
+  // An edit on the child is an override: saved, and kept over the parent.
+  engine::renderer::Material childEdit = child().params;
+  childEdit.metallic = 0.8F;
+  if (!engine::runtime::editor_set_material_params(loaded.materialId, childEdit,
+                                                   loaded.textureSlots) ||
+      !engine::runtime::editor_save_material(kChildVirtual, kParentVirtual) ||
+      !read_file(kChildOs, text, sizeof(text)) ||
+      (std::strstr(text, "\"metallic\"") == nullptr) ||
+      (std::strstr(text, "\"albedo\"") != nullptr)) {
+    std::printf("saved child after edit: %s\n", text);
+    return finish(41);
+  }
+
+  // After a restart's worth of reloads the saved child still follows its
+  // parent for everything it does not override.
+  if (!write_file(kParentOs, "{\"version\":3,\"albedo\":[0,1,0],"
+                             "\"roughness\":0.2,\"metallic\":0.05}") ||
+      !engine::runtime::editor_reload_material(kParentVirtual).found ||
+      !engine::runtime::editor_reload_material(kChildVirtual).found) {
+    return finish(42);
+  }
+  const engine::runtime::EditorMaterialState reread = child();
+  if (!exactly_equal(reread.params.albedo.y, 1.0F) ||
+      !exactly_equal(reread.params.albedo.z, 0.0F) ||
+      !exactly_equal(reread.params.metallic, 0.8F) ||
+      !exactly_equal(reread.params.roughness, 0.9F)) {
+    std::printf("reread child: albedo.y %.2f metallic %.2f\n",
+                static_cast<double>(reread.params.albedo.y),
+                static_cast<double>(reread.params.metallic));
+    return finish(43);
+  }
+
+  // A parent reload that would make the chain a cycle is refused, and the
+  // parent keeps serving what it had.
+  if (!write_file(kParentOs,
+                  "{\"version\":3,\"parent\":\"edmat/"
+                  "editor_material_child_test.json\",\"metallic\":0.7}")) {
+    return finish(44);
+  }
+  if (engine::runtime::editor_reload_material(kParentVirtual).found) {
+    return finish(45);
+  }
+  parent = engine::runtime::editor_load_material(kParentVirtual);
+  if (!parent.found || parent.hasParent ||
+      !exactly_equal(parent.params.metallic, 0.05F)) {
+    return finish(46);
+  }
+  return finish(0);
+}
+
 } // namespace
 
 int main() {
@@ -171,6 +341,12 @@ int main() {
   }
 
   result = check_load_edit_save_reload();
+  if (result != 0) {
+    std::fprintf(stderr, "editor_material_bridge_test failed: %d\n", result);
+    return result;
+  }
+
+  result = check_parent_changes_reach_child();
   if (result != 0) {
     std::fprintf(stderr, "editor_material_bridge_test failed: %d\n", result);
     return result;
