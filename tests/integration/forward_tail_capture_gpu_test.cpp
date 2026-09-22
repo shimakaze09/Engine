@@ -61,8 +61,8 @@ int run(engine::EnginePipeline &pipeline, World &world) noexcept {
   engine::tests::checked(engine::core::cvar_set_bool("r_deferred", true),
                          "r_deferred");
 
-  engine::runtime::Transform floorTransform{};
-  floorTransform.scale = engine::math::Vec3(60.0F, 1.0F, 60.0F);
+  const engine::runtime::Transform floorTransform =
+      engine::tests::framed_floor_transform(60.0F);
   const Entity sun = world.create_scene_object();
   engine::runtime::LightComponent sunLight{};
   sunLight.direction = engine::math::Vec3(-0.3F, -0.8F, -0.5F);

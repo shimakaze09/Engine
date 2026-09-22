@@ -43,6 +43,7 @@
 #include "engine/content/asset_metadata.h"
 #include "engine/renderer/camera.h"
 #include "engine/renderer/command_buffer.h"
+#include "engine/renderer/mesh_primitives.h"
 #include "engine/runtime/editor_bridge.h"
 #include "engine/runtime/primitive_collider.h"
 #include "engine/runtime/scene_serializer.h"
@@ -742,9 +743,15 @@ static PrimitiveSpawnDesc primitive_spawn_desc(
   case EditorPrimitive::Plane:
     desc.name = "Plane";
     desc.builtinPath = "builtin://plane";
-    desc.groundY = -0.5F;
+    // Both heights are derived from where the mesh puts its surface, so
+    // the spawn lands its ground on zero and the collider's top meets
+    // that ground, whatever the primitive does. They were hand-written
+    // offsets that cancelled a surface half a metre above the origin,
+    // which is the sort of correction that goes stale silently.
+    desc.groundY = -renderer::kBuiltinPlaneSurfaceY;
     desc.halfExtents = math::Vec3(5.0F, 0.1F, 5.0F);
-    desc.colliderLocalPosition = math::Vec3(0.0F, 0.4F, 0.0F);
+    desc.colliderLocalPosition =
+        math::Vec3(0.0F, renderer::kBuiltinPlaneSurfaceY - 0.1F, 0.0F);
     break;
   }
   return desc;

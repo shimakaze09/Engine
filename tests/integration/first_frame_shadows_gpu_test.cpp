@@ -41,8 +41,8 @@ engine::runtime::LightComponent sun_shining_along_x(float sign) noexcept {
 /// A floor, a two-metre cube at x = -3, and a sun shining along +x, so the
 /// cube's shadow lies across the middle of the view. Seen from (0, 6, 10).
 bool author_scene(World &world) noexcept {
-  engine::runtime::Transform floorTransform{};
-  floorTransform.scale = engine::math::Vec3(60.0F, 1.0F, 60.0F);
+  const engine::runtime::Transform floorTransform =
+      engine::tests::framed_floor_transform(60.0F);
   engine::runtime::Transform cubeTransform{};
   cubeTransform.position = engine::math::Vec3(-3.0F, 1.0F, 0.0F);
   cubeTransform.scale = engine::math::Vec3(2.0F, 2.0F, 2.0F);

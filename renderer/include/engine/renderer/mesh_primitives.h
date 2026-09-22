@@ -13,18 +13,24 @@ namespace engine::renderer {
 // nz), CCW winding for outward-facing normals. Each returns false when GPU
 // mesh creation fails.
 
-/// Where the plane's surface sits relative to the entity's origin. It is
-/// not zero: the quad is generated level with the top face of the unit
-/// cube so a floor built from both is continuous. An object resting on a
-/// plane therefore sits at this height plus its own half extent, which is
-/// a trap worth naming rather than describing in prose — placing on the
-/// origin leaves the object half a metre low, and correcting by eye
-/// leaves it floating.
-inline constexpr float kBuiltinPlaneSurfaceY = 0.5F;
+/// Where the plane's surface sits relative to the entity's origin: on it.
+/// An object resting on a plane therefore sits at the plane's own height
+/// plus the object's half extent, and placing the plane at the origin
+/// puts its ground at zero.
+///
+/// It was 0.5 until the convention changed, generated level with the top
+/// face of the unit cube so a floor built from both was continuous. That
+/// saved a floor nobody builds and cost every author who placed a ground
+/// plane at the origin and then stood something on it half a metre too
+/// high. Named rather than inlined so the relationship stays checkable
+/// from a test, and so a future change to it moves the geometry and the
+/// checks together.
+inline constexpr float kBuiltinPlaneSurfaceY = 0.0F;
 
 /// Half extent of the unit cube, and the radius of the sphere, cylinder
-/// and capsule: each of those is centered on the entity's origin, unlike
-/// the plane above.
+/// and capsule: each of those is centered on the entity's origin, so an
+/// object of one rests on a surface at that surface plus its half
+/// extent.
 inline constexpr float kBuiltinCubeHalfExtent = 0.5F;
 inline constexpr float kBuiltinSphereRadius = 0.5F;
 
