@@ -846,6 +846,81 @@ bool test_wrong_shape_load_preserves_bindings() noexcept {
   return cleared;
 }
 
+/// The bindings document carries a format version (#312 item 5). The
+/// saver writes it; a document without it is the unversioned form every
+/// earlier build wrote and still loads unchanged; any other version, or a
+/// version that is not a number, is refused with the live bindings kept.
+bool test_document_version() noexcept {
+  if (!init_all()) {
+    return false;
+  }
+
+  InputBinding binding{};
+  binding.type = InputBindingType::Key;
+  binding.code = kKey_Space;
+  add_input_action("jump", &binding, 1U);
+
+  char buffer[4096] = {};
+  std::size_t size = 0U;
+  if (!save_input_bindings_to_buffer(buffer, sizeof(buffer), &size)) {
+    shutdown_all();
+    return false;
+  }
+  const std::string saved(buffer, size);
+  const std::size_t key = saved.find("\"version\"");
+  const std::size_t value = saved.find_first_not_of(" :", key + 9U);
+  const bool written = (key != std::string::npos) &&
+                       (value != std::string::npos) &&
+                       (saved.compare(value, 2U, "1,") == 0);
+  if (!written) {
+    std::printf("    the saved document carries no version 1: %s\n",
+                saved.c_str());
+    shutdown_all();
+    return false;
+  }
+
+  const char *refused[] = {
+      "{\"version\":2,\"actions\":[],\"axes\":[]}",
+      "{\"version\":0,\"actions\":[],\"axes\":[]}",
+      "{\"version\":\"1\",\"actions\":[],\"axes\":[]}",
+      "{\"version\":-1,\"actions\":[],\"axes\":[]}",
+  };
+  for (const char *doc : refused) {
+    if (load_input_bindings_from_buffer(doc, std::strlen(doc))) {
+      std::printf("    accepted: %s\n", doc);
+      shutdown_all();
+      return false;
+    }
+  }
+  begin_input_frame();
+  sim_key_down(kKey_Space);
+  end_input_frame();
+  const bool kept = is_mapped_action_down("jump");
+  begin_input_frame();
+  sim_key_up(kKey_Space);
+  end_input_frame();
+  if (!kept) {
+    std::printf("    a refused version replaced the live bindings\n");
+    shutdown_all();
+    return false;
+  }
+
+  // The unversioned form: same shape, same codes, no key.
+  const char *legacy = "{\"actions\":[{\"name\":\"fire\",\"bindings\":"
+                       "[{\"type\":0,\"code\":40}]}],\"axes\":[]}";
+  if (!load_input_bindings_from_buffer(legacy, std::strlen(legacy))) {
+    std::printf("    an unversioned document was refused\n");
+    shutdown_all();
+    return false;
+  }
+  begin_input_frame();
+  sim_key_down(kKey_Return);
+  end_input_frame();
+  const bool legacyLive = is_mapped_action_down("fire");
+  shutdown_all();
+  return legacyLive;
+}
+
 /// Fault injection (audit N-05): a save whose sibling temporary cannot
 /// be staged (read-only parent directory) fails and leaves the
 /// pre-existing destination bytes untouched. Skips silently when the
@@ -1459,6 +1534,7 @@ int main() {
       &test_decoded_name_length_boundaries);
   run("malformed_field_load_preserves_bindings",
       &test_malformed_field_load_preserves_bindings);
+  run("document_version", &test_document_version);
   run("null_and_edge_cases", &test_null_and_edge_cases);
 
   std::printf("--- %d passed, %d failed ---\n", passed, failed);

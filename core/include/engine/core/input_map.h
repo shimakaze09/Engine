@@ -178,7 +178,9 @@ bool load_input_bindings(const char *path) noexcept;
 bool save_input_bindings_to_buffer(char *buffer, std::size_t capacity,
                                    std::size_t *outSize) noexcept;
 /// Loads bindings from a JSON buffer. The document is staged and validated
-/// before commit: malformed shape, non-object entries, missing/empty/
+/// before commit: an unsupported "version" (absent reads as the current
+/// one, which is the unversioned form earlier builds wrote), malformed
+/// shape, non-object entries, missing/empty/
 /// overlong names, out-of-range binding/source type enums, and arrays
 /// beyond the fixed capacities (actions, bindings per action, axes,
 /// sources per axis) reject the whole load with a diagnostic and leave

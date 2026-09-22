@@ -92,6 +92,12 @@ bool read_optional_uint_field(const JsonParser &parser, const JsonValue &entry,
 constexpr std::uint32_t kMaxInputCode = 4096U;
 constexpr float kMaxInputScale = 1000.0F;
 
+// The bindings document's format version. A document without the key is
+// the unversioned form written before it existed, which is the same shape
+// and the same codes, so it reads as version 1. Any other version is
+// refused: a reader never guesses at a format it does not know.
+constexpr std::uint32_t kInputBindingsVersion = 1U;
+
 /// True for a key, button or axis index the mapper can hold: within the
 /// bound, or the struct's own "unset" sentinel (-1) an absent field keeps.
 bool input_code_in_range(std::uint32_t code) noexcept {
@@ -600,9 +606,13 @@ bool input_bindings_default_path(char *outBuffer,
   return (written > 0) && (static_cast<std::size_t>(written) < bufferCapacity);
 }
 
-bool save_input_bindings(const char *path) noexcept {
-  JsonWriter writer{};
+namespace {
+
+/// Writes the whole bindings document. The one writer both savers share,
+/// so the file and the buffer form cannot drift apart.
+void write_bindings_document(JsonWriter &writer) noexcept {
   writer.begin_object();
+  writer.write_uint("version", kInputBindingsVersion);
 
   writer.begin_array("actions");
   for (std::size_t i = 0; i < kMaxInputActions; ++i) {
@@ -654,6 +664,13 @@ bool save_input_bindings(const char *path) noexcept {
   writer.end_array();
 
   writer.end_object();
+}
+
+} // namespace
+
+bool save_input_bindings(const char *path) noexcept {
+  JsonWriter writer{};
+  write_bindings_document(writer);
 
   if (writer.failed()) {
     log_message(LogLevel::Error, kLogChannel,
@@ -690,58 +707,7 @@ bool save_input_bindings_to_buffer(char *buffer, std::size_t capacity,
   }
 
   JsonWriter writer{};
-  writer.begin_object();
-
-  writer.begin_array("actions");
-  for (std::size_t i = 0; i < kMaxInputActions; ++i) {
-    if (!g_mappedActions[i].occupied) {
-      continue;
-    }
-    writer.begin_object();
-    writer.write_string("name", g_mappedActions[i].name);
-    writer.begin_array("bindings");
-    for (std::uint32_t b = 0; b < g_mappedActions[i].bindingCount; ++b) {
-      const auto &binding = g_mappedActions[i].bindings[b];
-      writer.begin_object();
-      writer.write_uint("type", static_cast<std::uint32_t>(binding.type));
-      writer.write_uint("code", static_cast<std::uint32_t>(binding.code));
-      writer.write_float("axis_threshold", binding.axisThreshold);
-      writer.write_float("axis_scale", binding.axisScale);
-      writer.end_object();
-    }
-    writer.end_array();
-    writer.end_object();
-  }
-  writer.end_array();
-
-  writer.begin_array("axes");
-  for (std::size_t i = 0; i < kMaxInputAxes; ++i) {
-    if (!g_mappedAxes[i].occupied) {
-      continue;
-    }
-    writer.begin_object();
-    writer.write_string("name", g_mappedAxes[i].name);
-    writer.begin_array("sources");
-    for (std::uint32_t s = 0; s < g_mappedAxes[i].sourceCount; ++s) {
-      const auto &src = g_mappedAxes[i].sources[s];
-      writer.begin_object();
-      writer.write_uint("type", static_cast<std::uint32_t>(src.type));
-      writer.write_uint("negative_key",
-                        static_cast<std::uint32_t>(src.negativeKey));
-      writer.write_uint("positive_key",
-                        static_cast<std::uint32_t>(src.positiveKey));
-      writer.write_uint("axis_index",
-                        static_cast<std::uint32_t>(src.axisIndex));
-      writer.write_float("scale", src.scale);
-      writer.write_float("dead_zone", src.deadZone);
-      writer.end_object();
-    }
-    writer.end_array();
-    writer.end_object();
-  }
-  writer.end_array();
-
-  writer.end_object();
+  write_bindings_document(writer);
 
   if (writer.failed()) {
     return false;
@@ -776,6 +742,22 @@ bool load_input_bindings_from_buffer(const char *buffer,
   if ((root == nullptr) || (root->type != JsonValue::Type::Object)) {
     log_message(LogLevel::Error, kLogChannel,
                 "load_input_bindings: root is not an object");
+    return false;
+  }
+
+  std::uint32_t version = kInputBindingsVersion;
+  if (!read_optional_uint_field(parser, *root, "version", &version,
+                                "document")) {
+    return false;
+  }
+  if (version != kInputBindingsVersion) {
+    char msg[128] = {};
+    std::snprintf(msg, sizeof(msg),
+                  "load_input_bindings: unsupported version %u (this build "
+                  "reads %u); rejecting the document",
+                  static_cast<unsigned>(version),
+                  static_cast<unsigned>(kInputBindingsVersion));
+    log_message(LogLevel::Error, kLogChannel, msg);
     return false;
   }
 
