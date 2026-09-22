@@ -1,5 +1,5 @@
 // GPU regression for issues #632 and #640: a pass appearing earlier in a
-// frame must not move where the deferred path's forward tail draws.
+// frame must not change where the deferred path's forward tail draws.
 //
 // The deferred path draws the transparent tail, and any opaque run the
 // G-buffer cannot express, forward over the deferred depth. Each bind
@@ -7,21 +7,29 @@
 // and two of those binds set no rect of their own, so the tail drew with
 // whatever rect its view id last carried. Any pass that claims a
 // different number of views before it therefore moved the tail: a scene
-// capture did it (#632, a translucent slab over a screen fraction with
-// the water missing from its place) and so did the directional shadow
-// cache invalidating on a camera move (#640, the same loss for one frame).
+// capture did it (#632) and so did the directional shadow cache
+// invalidating on a camera move (#640).
 //
-// A unit test holds the device call order (engine_unit_deferred_pass_
-// viewport). Only an image shows the tail landing where it belongs, and
-// only a frame that adds a pass shows it staying there — which is why
-// this exists as well and why it adds a scene capture rather than trusting
-// the counters.
+// The invariant is that adding a scene capture changes nothing in the
+// main view, so the test measures the whole frame against itself rather
+// than sampling a colour in a region. Adding the capture on base moved
+// the panel across the frame — 42.5% of pixels differed when the owner
+// reproduced #632 — and a mean absolute difference over every pixel
+// catches that wherever the tail lands, without depending on the panel
+// being distinguishable from the sky by any one channel.
+//
+// A first version of this test sampled a "blueness" in two regions, had
+// the channel order backwards, and watched a corner where the sky is
+// bluer than the panel so the check could not have fired either way. It
+// failed on the fixed build and proved nothing (#646). The positive
+// control below exists so that a test which measures nothing cannot pass
+// again: the panel must demonstrably enter the frame before its
+// stability means anything.
 
 #include "../gpu_scene_fixture.h"
 
 #include "engine/math/quat.h"
 
-#include <cmath>
 #include <cstdio>
 
 namespace {
@@ -30,30 +38,20 @@ using engine::runtime::Entity;
 using engine::runtime::kInvalidEntity;
 using engine::runtime::World;
 using engine::tests::CapturedFrame;
-using engine::tests::mean_channel;
+using engine::tests::mean_abs_difference;
 
-/// The translucent panel's own colour: strongly blue, so the tail's
-/// contribution is separable from the warm floor and the sky behind it
-/// by a channel difference rather than by brightness alone.
-constexpr float kPanelRed = 0.02F;
-constexpr float kPanelGreen = 0.06F;
-constexpr float kPanelBlue = 0.90F;
-
-double blueness(const CapturedFrame &frame, std::uint32_t x0, std::uint32_t y0,
-                std::uint32_t x1, std::uint32_t y1) noexcept {
-  return mean_channel(frame, 2U, x0, y0, x1, y1) -
-         mean_channel(frame, 0U, x0, y0, x1, y1);
+/// Compares two frames over every pixel.
+double whole_frame_difference(const CapturedFrame &a,
+                              const CapturedFrame &b) noexcept {
+  return mean_abs_difference(a, b, 0U, 0U, a.width, a.height);
 }
 
-/// A translucent panel filling the middle of the view, drawn by the
-/// deferred path's forward tail. The floor is opaque and goes through the
-/// G-buffer, so the frame exercises both halves of the split.
 int run(engine::EnginePipeline &pipeline, World &world) noexcept {
   using engine::tests::capture_presented_frame;
   using engine::tests::settle_frames;
 
-  // Fog would mix the panel toward the sky and blunt the very channel
-  // difference this measures (#641).
+  // Fog is a whole-frame mix that would damp the very differences this
+  // measures, and its default reaches standing height (#641).
   engine::tests::checked(engine::core::cvar_set_string("r_fog_mode", "off"),
                          "r_fog_mode");
   engine::tests::checked(engine::core::cvar_set_bool("r_height_fog", false),
@@ -78,6 +76,24 @@ int run(engine::EnginePipeline &pipeline, World &world) noexcept {
     return 10;
   }
 
+  // Before the panel exists, so the panel's arrival is measurable.
+  CapturedFrame empty{};
+  if (!settle_frames(pipeline, 20) ||
+      !capture_presented_frame(pipeline, "forward_tail_empty.tga", &empty)) {
+    std::printf("SKIPPED: the device returned no back-buffer readback\n");
+    return 0;
+  }
+
+  // Repeating the capture with nothing changed gives the noise this
+  // scene actually has, rather than a threshold guessed in advance.
+  CapturedFrame emptyAgain{};
+  if (!settle_frames(pipeline, 10) ||
+      !capture_presented_frame(pipeline, "forward_tail_empty2.tga",
+                               &emptyAgain)) {
+    return 11;
+  }
+  const double noise = whole_frame_difference(empty, emptyAgain);
+
   engine::runtime::Transform panelTransform{};
   panelTransform.position = engine::math::Vec3(0.0F, 2.0F, 0.0F);
   panelTransform.scale = engine::math::Vec3(4.0F, 4.0F, 0.2F);
@@ -85,39 +101,26 @@ int run(engine::EnginePipeline &pipeline, World &world) noexcept {
   engine::runtime::MeshComponent panelMesh{};
   panelMesh.meshAssetId =
       engine::content::make_asset_id_from_path("builtin://cube");
-  panelMesh.albedo = engine::math::Vec3(kPanelRed, kPanelGreen, kPanelBlue);
+  panelMesh.albedo = engine::math::Vec3(0.02F, 0.06F, 0.90F);
   // Below one, so render prep sorts it into the transparent half and the
   // flush draws it in the forward tail rather than through the G-buffer.
   panelMesh.opacity = 0.6F;
   if ((panel == kInvalidEntity) ||
       !world.add_mesh_component(panel, panelMesh)) {
-    return 11;
+    return 12;
   }
 
   CapturedFrame plain{};
   if (!settle_frames(pipeline, 20) ||
       !capture_presented_frame(pipeline, "forward_tail_plain.tga", &plain)) {
-    std::printf("SKIPPED: the device returned no back-buffer readback\n");
-    return 0;
+    return 13;
   }
-
-  const std::uint32_t w = plain.width;
-  const std::uint32_t h = plain.height;
-  // Where the panel is, and a corner it must never reach. #632's slab
-  // covered the top-left quarter, so that corner is the witness.
-  const std::uint32_t cx0 = (w * 2U) / 5U;
-  const std::uint32_t cx1 = (w * 3U) / 5U;
-  const std::uint32_t cy0 = (h * 2U) / 5U;
-  const std::uint32_t cy1 = (h * 3U) / 5U;
-  const std::uint32_t qx1 = w / 4U;
-  const std::uint32_t qy1 = h / 4U;
-
-  const double centrePlain = blueness(plain, cx0, cy0, cx1, cy1);
-  const double cornerPlain = blueness(plain, 0U, 0U, qx1, qy1);
+  const double panelArrival = whole_frame_difference(empty, plain);
 
   // Adding a scene capture claims views before the tail's, which is what
   // moved the tail's rect on base. The capture needs no consumer: the
-  // pass runs for the request, and the views it claims are the mechanism.
+  // pass runs for the request, and the views it claims are the
+  // mechanism.
   engine::runtime::Transform captureTransform{};
   captureTransform.position = engine::math::Vec3(0.0F, 3.0F, 6.0F);
   captureTransform.rotation = engine::math::from_axis_angle(
@@ -126,50 +129,51 @@ int run(engine::EnginePipeline &pipeline, World &world) noexcept {
   engine::runtime::SceneCaptureComponent captureComponent{};
   if ((capture == kInvalidEntity) ||
       !world.add_scene_capture_component(capture, captureComponent)) {
-    return 12;
+    return 14;
   }
 
   CapturedFrame captured{};
   if (!settle_frames(pipeline, 20) ||
       !capture_presented_frame(pipeline, "forward_tail_capture.tga",
                                &captured)) {
-    return 13;
+    return 15;
   }
+  const double captureShift = whole_frame_difference(plain, captured);
 
-  const double centreCaptured = blueness(captured, cx0, cy0, cx1, cy1);
-  const double cornerCaptured = blueness(captured, 0U, 0U, qx1, qy1);
-
-  std::printf("forward_tail_capture_gpu_test: centre blueness %.1f plain, "
-              "%.1f with a capture; corner %.1f then %.1f\n",
-              centrePlain, centreCaptured, cornerPlain, cornerCaptured);
+  std::printf("forward_tail_capture_gpu_test: noise %.3f, the panel's "
+              "arrival %.3f, adding a capture %.3f (levels per channel)\n",
+              noise, panelArrival, captureShift);
 
   int result = 0;
-  // The panel must be there at all, or the rest measures an empty frame.
-  if (centrePlain < 20.0) {
+  // The positive control. A frame the panel never entered makes every
+  // later comparison meaningless, and a test that measures nothing must
+  // fail rather than pass.
+  if (panelArrival < 2.0) {
     std::fprintf(stderr,
-                 "FAIL: the translucent panel is not in the middle of the "
-                 "plain frame (blueness %.1f)\n",
-                 centrePlain);
+                 "FAIL: adding the translucent panel changed the frame by "
+                 "only %.3f levels, so this scene cannot show where the "
+                 "forward tail draws\n",
+                 panelArrival);
     result = 20;
   }
-  // The tail must not move when a pass appears before it. Twelve levels
-  // is far below losing the panel (which would drop the centre to the
-  // floor's negative blueness, tens of levels away) and far above the
-  // frame-to-frame noise of a static scene.
-  if (std::fabs(centreCaptured - centrePlain) > 12.0) {
+  // The panel must be the largest thing that happened: if its arrival is
+  // not well clear of the noise the thresholds below mean nothing.
+  if (panelArrival < (noise * 4.0 + 1.0)) {
     std::fprintf(stderr,
-                 "FAIL: adding a scene capture changed the forward tail in "
-                 "the middle of the view by %.1f levels\n",
-                 centreCaptured - centrePlain);
+                 "FAIL: the panel's arrival (%.3f) is not clear of this "
+                 "scene's own noise (%.3f)\n",
+                 panelArrival, noise);
     result = 21;
   }
-  // And it must not appear anywhere else: #632's signature was the tail
-  // drawn over a corner it does not cover.
-  if ((cornerCaptured - cornerPlain) > 12.0) {
+  // The invariant. Adding a capture must change the main view by noise
+  // and nothing more; moving the tail changes a large share of the
+  // frame, which on base was 42.5% of pixels.
+  if (captureShift > (noise + (panelArrival * 0.25))) {
     std::fprintf(stderr,
-                 "FAIL: adding a scene capture put the forward tail over a "
-                 "corner it does not cover (blueness rose %.1f)\n",
-                 cornerCaptured - cornerPlain);
+                 "FAIL: adding a scene capture changed the frame by %.3f "
+                 "levels, against noise %.3f and the panel's own arrival "
+                 "%.3f: the forward tail moved\n",
+                 captureShift, noise, panelArrival);
     result = 22;
   }
   return result;
