@@ -23,7 +23,6 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
-#include <limits>
 #include <memory>
 #include <vector>
 
@@ -56,6 +55,7 @@
 
 #include "editor_commands.h"
 #include "editor_console_capture.h"
+#include "editor_fonts.h"
 #include "editor_layout.h"
 #include "editor_material_edit.h"
 #include "editor_panels_assets.h"
@@ -260,28 +260,14 @@ bool initialize_editor(void *sdlWindow) noexcept {
   const float uiScale = core::platform_display_scale() *
                         core::cvar_get_float("editor.ui_scale", 1.0F);
 
-  // Proper UI font (the 13px bitmap default reads as a debug tool). The
-  // file is read here and handed to the atlas as memory: ImGui's own
-  // path-based loader asserts on an unreadable file in assert-enabled
-  // builds, which would turn a missing asset into an abort instead of the
-  // recoverable fallback below. The bytes are ImGui-allocated and the
-  // atlas takes ownership, so they live exactly as long as the font.
-  std::size_t fontBytes = 0U;
-  void *fontData =
-      ImFileLoadToMemory("assets/fonts/Roboto-Medium.ttf", "rb", &fontBytes);
-  const ImFont *editorFont = nullptr;
-  if ((fontData != nullptr) && (fontBytes > 0U) &&
-      (fontBytes <= static_cast<std::size_t>(
-                        std::numeric_limits<int>::max()))) {
-    editorFont = io.Fonts->AddFontFromMemoryTTF(
-        fontData, static_cast<int>(fontBytes), 17.0F * uiScale);
-  } else if (fontData != nullptr) {
-    IM_FREE(fontData);
-  }
-  if (editorFont == nullptr) {
-    core::log_message(core::LogLevel::Warning, "editor",
-                      "editor font missing; using ImGui default");
-  }
+  // Proper UI font (the 13px bitmap default reads as a debug tool), with a
+  // CJK face merged behind it; see editor_fonts.h.
+  static_cast<void>(core::cvar_register_string(
+      "editor.cjk_font", "",
+      "Font file for Chinese and Japanese text in the editor; empty uses "
+      "the system's own"));
+  static_cast<void>(load_editor_fonts(
+      io.Fonts, 17.0F * uiScale, core::cvar_get_string("editor.cjk_font", "")));
 
   apply_editor_style();
   ImGui::GetStyle().ScaleAllSizes(uiScale);

@@ -1143,10 +1143,11 @@ std::uint64_t bgfx_timestamp_value(DeviceQueryHandle) noexcept { return 0U; }
 std::uint64_t bgfx_native_texture_id(DeviceTextureHandle texture) noexcept {
   BgfxTextureRecord *record =
       device_context().textures.resolve(texture.value);
-  // The bgfx handle index is what the editor's ImGui bgfx backend
-  // consumes.
-  return (record != nullptr) ? static_cast<std::uint64_t>(record->handle.idx)
-                             : 0U;
+  // The bgfx handle index plus one, so index 0 is a texture like any other
+  // and 0 still means none; the editor's ImGui bgfx backend decodes it.
+  return (record != nullptr)
+             ? static_cast<std::uint64_t>(record->handle.idx) + 1U
+             : 0U;
 }
 
 DeviceDebugStats bgfx_debug_stats() noexcept {

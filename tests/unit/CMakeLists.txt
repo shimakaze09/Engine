@@ -882,6 +882,19 @@ engine_add_test_executable(engine_unit_editor_command_transaction
     SDL_MAIN_HANDLED
 )
 
+engine_add_test_executable(engine_unit_editor_fonts
+    SOURCES
+    editor_fonts_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/editor/src
+    PRIVATE_DEPS
+    engine_editor
+    COMPILE_DEFINITIONS
+    SDL_MAIN_HANDLED
+)
+set_tests_properties(engine_unit_editor_fonts PROPERTIES
+    SKIP_REGULAR_EXPRESSION "SKIPPED:")
+
 engine_add_test_executable(engine_unit_editor_session
     SOURCES
     editor_session_test.cpp
