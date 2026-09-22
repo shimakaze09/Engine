@@ -82,6 +82,20 @@ const char *editor_asset_root() noexcept {
 }
 
 /// Loads the requested resource for thumbnail texture.
+renderer::TextureDesc thumbnail_texture_desc(int width, int height,
+                                             const void *pixels) noexcept {
+  renderer::TextureDesc desc{};
+  desc.kind = renderer::TextureKind::Tex2D;
+  desc.format = renderer::TextureFormat::RGBA8;
+  desc.width = width;
+  desc.height = height;
+  desc.mipLevels = 1;
+  desc.filter = renderer::TextureFilter::Linear;
+  desc.wrap = renderer::TextureWrap::ClampEdge;
+  desc.pixels = pixels;
+  return desc;
+}
+
 renderer::DeviceTextureHandle
 load_thumbnail_texture(const char *assetPath) noexcept {
   if (assetPath == nullptr) {
@@ -166,16 +180,7 @@ load_thumbnail_texture(const char *assetPath) noexcept {
   renderer::DeviceTextureHandle tex{};
   const renderer::RenderDevice *device = renderer::render_device();
   if ((device != nullptr) && (device->create_texture != nullptr)) {
-    renderer::TextureDesc desc{};
-    desc.kind = renderer::TextureKind::Tex2D;
-    desc.format = renderer::TextureFormat::RGBA8;
-    desc.width = w;
-    desc.height = h;
-    desc.mipLevels = 0;
-    desc.filter = renderer::TextureFilter::LinearMipmap;
-    desc.wrap = renderer::TextureWrap::Repeat;
-    desc.pixels = pixels;
-    tex = device->create_texture(desc);
+    tex = device->create_texture(thumbnail_texture_desc(w, h, pixels));
   }
   stbi_image_free(pixels);
 

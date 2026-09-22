@@ -238,6 +238,13 @@ const char *editor_scene_path() noexcept;
 /// Returns the configured editor asset browser root ("" when unset).
 const char *editor_asset_root() noexcept;
 
+/// The texture a decoded RGBA8 thumbnail is uploaded as: a single level,
+/// sampled linearly and clamped. A thumbnail is drawn smaller than it is
+/// stored (20 and 64 px rows), so a mip chain would be sampled -- and a
+/// chain the backend cannot generate stays empty, which drew the
+/// thumbnails black.
+renderer::TextureDesc thumbnail_texture_desc(int width, int height,
+                                             const void *pixels) noexcept;
 /// Loads (and caches) the thumbnail texture for an asset path through the
 /// renderer's RenderDevice; invalid handle on miss.
 renderer::DeviceTextureHandle

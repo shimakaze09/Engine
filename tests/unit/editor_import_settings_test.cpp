@@ -146,6 +146,24 @@ int main() {
   CHECK(!std::filesystem::exists(other + ".meta"),
         "the refused save left no sidecar behind");
 
+  // Thumbnails are one level, sampled without mipmaps (#549). They used to
+  // ask for a generated chain the bgfx backend leaves empty, then draw it
+  // smaller than stored, which sampled the empty levels: black icons.
+  {
+    const unsigned char texel[4] = {255U, 0U, 0U, 255U};
+    const engine::renderer::TextureDesc thumb =
+        engine::editor::thumbnail_texture_desc(1, 1, texel);
+    CHECK(thumb.mipLevels == 1, "a thumbnail has exactly one level");
+    CHECK(thumb.filter == engine::renderer::TextureFilter::Linear,
+          "a thumbnail is not sampled through a mip chain");
+    CHECK(thumb.wrap == engine::renderer::TextureWrap::ClampEdge,
+          "a thumbnail's edges do not bleed into each other");
+    CHECK((thumb.format == engine::renderer::TextureFormat::RGBA8) &&
+              (thumb.width == 1) && (thumb.height == 1) &&
+              (thumb.pixels == texel),
+          "the decoded pixels are what is uploaded");
+  }
+
   // Thumbnails: a miss is remembered.
   engine::editor::clear_thumbnail_cache();
   const std::string noThumb = dir + "/no_thumbnail.mesh";
