@@ -78,6 +78,42 @@ void test_shutdown_frees_unrealized_staging(TestContext &t) {
   t.check(initialize_render_device(), "re-initialize after the sweep");
 }
 
+/// A vertex buffer created with a size but no data, then partially written
+/// before a geometry realizes it (#550). Its staging block used to be sized
+/// to the first update rather than the buffer: a second, larger update
+/// overflowed it and realization read the buffer's full size out of it.
+/// Under ASAN the base build reports both; here every read and write stays
+/// inside the block and the unwritten tail uploads as zeros.
+void test_partial_updates_before_realization(TestContext &t) {
+  const RenderDevice *dev = render_device();
+  const std::uint64_t dropsBefore = dropped(dev);
+  BufferDesc desc{};
+  desc.usage = BufferUsage::Vertex;
+  desc.sizeBytes = 48; // four float3 positions
+  desc.data = nullptr;
+  const DeviceBufferHandle vertex = dev->create_buffer(desc);
+  t.check(vertex.value != 0U, "a data-less vertex buffer is created");
+
+  const float first[4] = {1.0F, 2.0F, 3.0F, 4.0F};
+  dev->update_buffer_range(vertex, first, sizeof(first)); // 16 of 48 bytes
+  const float second[8] = {};
+  dev->update_buffer_range(vertex, second, sizeof(second)); // 32 of 48
+  t.check(render_device_bgfx_live_staging_blocks() > 0U,
+          "the unrealized buffer stages its data");
+
+  GeometryDesc geometryDesc{};
+  geometryDesc.vertexBuffer = vertex;
+  geometryDesc.layout.strideBytes = 12;
+  geometryDesc.layout.attributeCount = 1U;
+  geometryDesc.layout.attributes[0] = {VertexSemantic::Position, 3, 0};
+  const DeviceGeometryHandle geometry = dev->create_geometry(geometryDesc);
+  t.check(geometry.value != 0U, "a geometry realizes the partly written "
+                                "buffer");
+  t.check(dropped(dev) == dropsBefore, "no operation was dropped");
+  dev->destroy_geometry(geometry);
+  dev->destroy_buffer(vertex);
+}
+
 /// Buffers: create/update/destroy, range overflow, stale handles,
 /// uniform-buffer refusal, idempotent destroy.
 void test_buffers(TestContext &t) {
@@ -991,6 +1027,7 @@ int main() {
   test_lifecycle(t);
   test_shutdown_frees_unrealized_staging(t);
   test_buffers(t);
+  test_partial_updates_before_realization(t);
   test_textures(t);
   test_wide_texture_uploads(t);
   test_render_targets(t);

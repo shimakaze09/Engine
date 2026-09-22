@@ -275,6 +275,7 @@ DeviceBufferHandle bgfx_create_buffer(const BufferDesc &desc) noexcept {
                         "bgfx backend: vertex staging allocation failed");
       return kInvalidDeviceBuffer;
     }
+    record.stagingBytes = sizeBytes;
     std::memcpy(record.staging, desc.data, sizeBytes);
   }
   const std::uint32_t value = device_context().buffers.allocate(record);
@@ -339,6 +340,7 @@ bool bgfx_realize_vertex_buffer(BgfxBufferRecord *record,
                             static_cast<std::uint32_t>(record->sizeBytes)));
     staging_free(record->staging);
     record->staging = nullptr;
+    record->stagingBytes = 0U;
   }
   return true;
 }
@@ -364,15 +366,28 @@ void bgfx_buffer_upload(DeviceBufferHandle buffer, const void *data,
   } else if (bgfx::isValid(record->vertex)) {
     bgfx::update(record->vertex, 0U, bgfx::copy(data, bytes));
   } else if (record->usage == BufferUsage::Vertex) {
-    // Not yet realized: replace the CPU staging copy.
-    if ((record->staging == nullptr) ||
-        (sizeBytes > static_cast<std::ptrdiff_t>(record->sizeBytes))) {
+    // Not yet realized: write into the CPU staging copy. The copy always
+    // holds the buffer's whole size, because realization (and a stream
+    // draw) reads sizeBytes from it; an update smaller than the buffer --
+    // or one into a buffer created without data -- must not leave a block
+    // sized to the update behind. Growth keeps the bytes already written.
+    const std::uint32_t required =
+        (allowGrow && (bytes > static_cast<std::uint32_t>(record->sizeBytes)))
+            ? bytes
+            : static_cast<std::uint32_t>(record->sizeBytes);
+    if ((record->staging == nullptr) || (record->stagingBytes < required)) {
+      void *grown = staging_alloc(required);
+      if (grown == nullptr) {
+        drop_operation("update_buffer: staging allocation failed");
+        return;
+      }
+      std::memset(grown, 0, required);
+      if (record->staging != nullptr) {
+        std::memcpy(grown, record->staging, record->stagingBytes);
+      }
       staging_free(record->staging);
-      record->staging = staging_alloc(bytes);
-    }
-    if (record->staging == nullptr) {
-      drop_operation("update_buffer: staging allocation failed");
-      return;
+      record->staging = grown;
+      record->stagingBytes = required;
     }
     std::memcpy(record->staging, data, bytes);
   }

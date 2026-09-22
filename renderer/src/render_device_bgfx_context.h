@@ -47,6 +47,9 @@ struct BgfxBufferRecord final {
   std::int32_t sizeBytes = 0;
   std::int32_t strideBytes = 0; // realized vertex/instance stride
   void *staging = nullptr;
+  // Capacity of `staging`, never less than sizeBytes while staging is
+  // set: realization and stream draws read sizeBytes from it.
+  std::uint32_t stagingBytes = 0U;
   bgfx::DynamicVertexBufferHandle vertex = BGFX_INVALID_HANDLE;
   bgfx::DynamicIndexBufferHandle index = BGFX_INVALID_HANDLE;
   // Stream-access vertex data never becomes a bgfx dynamic buffer: bgfx
