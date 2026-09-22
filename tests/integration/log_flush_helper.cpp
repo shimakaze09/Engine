@@ -1,7 +1,13 @@
 // Helper for log_flush_on_error_test.cmake: logs one Error line, then one
-// Info line, then leaves via std::_Exit, which runs no atexit handler and
-// flushes nothing. Whatever reaches the parent's pipe is therefore exactly
-// what the logging layer chose to flush itself.
+// Info line, then dies the way a crash does, flushing nothing. Whatever
+// reaches the parent's pipe is therefore exactly what the logging layer
+// chose to flush itself.
+//
+// On Windows that death is TerminateProcess, not std::_Exit: _Exit still
+// ends in ExitProcess, which detaches the DLL C runtime, and its teardown
+// flushes every stdio buffer -- so the Info line arrived and the run
+// proved nothing. A crash notifies no DLL, and neither does
+// TerminateProcess.
 //
 // Order matters. The Error comes first so the Info behind it is still
 // sitting in the buffer at exit: the Error must arrive and the Info must
@@ -12,6 +18,16 @@
 
 #include <cstdio>
 #include <cstdlib>
+
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 /// Runs this executable or test program.
 int main() {
@@ -29,5 +45,8 @@ int main() {
                             "info-line-must-not-survive");
 
   // Dies with a full buffer, the way a crash does.
+#if defined(_WIN32)
+  static_cast<void>(::TerminateProcess(::GetCurrentProcess(), 0U));
+#endif
   std::_Exit(0);
 }
