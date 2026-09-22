@@ -252,6 +252,18 @@ if(TARGET asset_packer)
     add_dependencies(engine_unit_shader_cook_argv asset_packer
         engine_test_fake_shaderc)
 
+    engine_add_test_executable(engine_unit_shader_cook_transaction
+        SOURCES
+        shader_cook_transaction_test.cpp
+        PRIVATE_DEPS
+        engine_core
+    )
+    target_compile_definitions(engine_unit_shader_cook_transaction PRIVATE
+        ENGINE_TEST_ASSET_PACKER="$<TARGET_FILE:asset_packer>"
+        ENGINE_TEST_FAKE_SHADERC="$<TARGET_FILE:engine_test_fake_shaderc>")
+    add_dependencies(engine_unit_shader_cook_transaction asset_packer
+        engine_test_fake_shaderc)
+
     engine_add_test_executable(engine_unit_shader_cook_paths
         SOURCES
         shader_cook_paths_test.cpp

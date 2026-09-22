@@ -1,7 +1,10 @@
 // Stands in for bgfx shaderc so the packer's shader-cook invocation can be
 // observed without a real shader compiler: it records the argument vector it
 // was launched with and writes stub bytes to the output path the cook asked
-// for, so a cook driven against it reaches its commit stage. The recording is
+// for, so a cook driven against it reaches its commit stage. The stub bytes
+// carry the source file's text, so two generations of a cooked output can be
+// told apart, and a source containing FAKE_SHADERC_FAIL makes the run fail
+// the way a compile error does. The recording is
 // what the argv suite asserts on - one line per argument, so an argument that
 // was split or rewritten on its way to the child is visible as a line count
 // or a line body that does not match what the manifest authored.
@@ -9,6 +12,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <iterator>
 #include <string>
 
 namespace {
@@ -52,23 +56,44 @@ void record_arguments(int argc, char **argv) {
   }
 }
 
-/// Writes stub bytes to the path following -o; false when no output path was
-/// given or the write failed.
-bool write_stub_output(int argc, char **argv) {
-  const char *outPath = nullptr;
+/// The argument following `flag`, or null.
+const char *argument_after(int argc, char **argv, const char *flag) {
+  const char *value = nullptr;
   for (int i = 1; (i + 1) < argc; ++i) {
-    if (std::strcmp(argv[i], "-o") == 0) {
-      outPath = argv[i + 1];
+    if (std::strcmp(argv[i], flag) == 0) {
+      value = argv[i + 1];
     }
   }
+  return value;
+}
+
+/// The whole text of the source following -f; empty when there is none.
+std::string read_source(int argc, char **argv) {
+  const char *sourcePath = argument_after(argc, argv, "-f");
+  if (sourcePath == nullptr) {
+    return {};
+  }
+  std::ifstream in(sourcePath, std::ios::binary);
+  return std::string(std::istreambuf_iterator<char>(in),
+                     std::istreambuf_iterator<char>());
+}
+
+/// Writes stub bytes to the path following -o; false when no output path was
+/// given, the source asks for a failure, or the write failed.
+bool write_stub_output(int argc, char **argv) {
+  const char *outPath = argument_after(argc, argv, "-o");
   if (outPath == nullptr) {
+    return false;
+  }
+  const std::string source = read_source(argc, argv);
+  if (source.find("FAKE_SHADERC_FAIL") != std::string::npos) {
     return false;
   }
   std::ofstream out(outPath, std::ios::binary | std::ios::trunc);
   if (!out) {
     return false;
   }
-  out << "FAKE-SHADER-BINARY";
+  out << "FAKE-SHADER-BINARY\n" << source;
   return out.good();
 }
 
