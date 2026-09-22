@@ -318,9 +318,12 @@ int main(int argc, char **argv) {
 
     // Graph-tracked dependencies (auto-discovered on earlier cooks) can
     // force a repack beyond the explicit --dep flags.
-    engine::tools::DependencyGraph::AssetId depIds[64] = {};
-    const std::size_t depCount =
-        engine::tools::get_dependencies(&depGraph, meshAssetId, depIds, 64U);
+    // Every one of them: the graph is rewritten from this list below, so
+    // one left out here would leave the graph as well.
+    std::vector<engine::tools::DependencyGraph::AssetId> depIds(
+        engine::tools::get_dependencies(&depGraph, meshAssetId, nullptr, 0U));
+    const std::size_t depCount = engine::tools::get_dependencies(
+        &depGraph, meshAssetId, depIds.data(), depIds.size());
     for (std::size_t i = 0U; i < depCount; ++i) {
       auto pathIt = depGraph.assetPaths.find(depIds[i]);
       if (pathIt != depGraph.assetPaths.end()) {
