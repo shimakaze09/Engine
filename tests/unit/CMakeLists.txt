@@ -14,6 +14,14 @@ engine_add_test_executable(engine_unit_build_identity
     engine_core
 )
 
+engine_add_test_executable(engine_unit_thread_spawn_rollback
+    SOURCES
+    thread_spawn_rollback_test.cpp
+    PRIVATE_DEPS
+    engine_core
+    engine_content
+)
+
 engine_add_test_executable(engine_unit_status
     SOURCES
     status_test.cpp

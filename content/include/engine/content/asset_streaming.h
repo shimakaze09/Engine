@@ -114,6 +114,12 @@ struct AssetStreamingQueue final {
 
 /// Initialise the streaming queue. Registers CVars.
 bool initialize_asset_streaming(AssetStreamingQueue *queue) noexcept;
+/// The same, spawning through a caller-supplied table so a test can refuse
+/// a worker and drive the rollback: every already-started worker is asked
+/// to stop and joined, workerRunning clears, and the queue reports failure
+/// with no thread left behind.
+bool initialize_asset_streaming(AssetStreamingQueue *queue,
+                                const core::ThreadOps &threadOps) noexcept;
 
 /// Shutdown and drain all pending requests.
 void shutdown_asset_streaming(AssetStreamingQueue *queue) noexcept;

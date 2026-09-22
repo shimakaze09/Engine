@@ -236,6 +236,11 @@ AssetStreamingQueue::~AssetStreamingQueue() noexcept {
 }
 
 bool initialize_asset_streaming(AssetStreamingQueue *queue) noexcept {
+  return initialize_asset_streaming(queue, core::production_thread_ops());
+}
+
+bool initialize_asset_streaming(AssetStreamingQueue *queue,
+                                const core::ThreadOps &threadOps) noexcept {
   if (queue == nullptr) {
     return false;
   }
@@ -259,7 +264,9 @@ bool initialize_asset_streaming(AssetStreamingQueue *queue) noexcept {
   // Spawn through NativeThread so an OS refusal rolls the worker set
   // back instead of terminating the no-exception build.
   for (std::size_t i = 0U; i < queue->workerThreads.size(); ++i) {
-    if (!queue->workerThreads[i].spawn(&streaming_worker_entry, queue)) {
+    if ((threadOps.spawn == nullptr) ||
+        !threadOps.spawn(&queue->workerThreads[i], &streaming_worker_entry,
+                         queue)) {
       core::log_message(core::LogLevel::Error, "asset_streaming",
                         "worker thread creation failed — rolling back");
       {

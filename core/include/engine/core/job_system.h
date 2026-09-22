@@ -5,6 +5,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "engine/core/native_thread.h"
+
 #include "engine/core/status.h"
 
 namespace engine::core {
@@ -35,6 +37,11 @@ struct JobSystemStats final {
 
 /// Initializes the owning system for job system.
 bool initialize_job_system(std::uint32_t workerCount) noexcept;
+/// The same, spawning through a caller-supplied table so a test can refuse
+/// a worker and drive the rollback: every already-started worker joins,
+/// the running flag clears, and the system reports uninitialized.
+bool initialize_job_system(std::uint32_t workerCount,
+                           const ThreadOps &threadOps) noexcept;
 /// Shuts down the owning system for job system.
 void shutdown_job_system() noexcept;
 /// Returns whether is job system initialized.
