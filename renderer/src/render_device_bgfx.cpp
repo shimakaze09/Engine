@@ -16,6 +16,7 @@
 #include "engine/core/cvar.h"
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
+#include "engine/core/thread_affinity.h"
 #include "render_device_bgfx_context.h"
 #include "render_device_null.h"
 #include "screenshot_tga.h"
@@ -1373,6 +1374,7 @@ void shutdown_render_device() noexcept {
 }
 
 const RenderDevice *render_device() noexcept {
+  ENGINE_ASSERT_MAIN_THREAD();
   if (!device_context().initialized) {
     return nullptr;
   }

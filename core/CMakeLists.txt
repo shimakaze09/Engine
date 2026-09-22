@@ -91,6 +91,7 @@ engine_add_module_library(engine_core
     src/profiler.cpp
     src/reflect.cpp
     src/service_locator.cpp
+    src/thread_affinity.cpp
     src/touch_input.cpp
     src/vfs.cpp
     src/validation_report.cpp

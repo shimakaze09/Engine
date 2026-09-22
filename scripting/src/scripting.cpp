@@ -52,6 +52,7 @@ extern "C" {
 #include "engine/core/string_util.h"
 #include "engine/math/quat.h"
 #include "engine/scripting/runtime_services.h"
+#include "engine/core/thread_affinity.h"
 
 
 namespace engine::scripting {
@@ -557,6 +558,7 @@ void reset_run_state() noexcept {
 
 /// Loads the requested resource for script.
 bool load_script(const char *path) noexcept {
+  ENGINE_ASSERT_MAIN_THREAD();
   lua_State *state = lua_state();
   if (state == nullptr) {
     core::log_message(core::LogLevel::Error, "scripting",
@@ -591,6 +593,7 @@ bool load_script(const char *path) noexcept {
 }
 
 bool call_script_function(const char *name) noexcept {
+  ENGINE_ASSERT_MAIN_THREAD();
   lua_State *state = lua_state();
   if (state == nullptr) {
     core::log_message(core::LogLevel::Error, "scripting",
@@ -615,6 +618,7 @@ bool call_script_function(const char *name) noexcept {
 }
 
 bool call_script_function_float(const char *name, float arg) noexcept {
+  ENGINE_ASSERT_MAIN_THREAD();
   lua_State *state = lua_state();
   if (state == nullptr) {
     core::log_message(core::LogLevel::Error, "scripting",
@@ -1071,7 +1075,10 @@ void set_simulation_clock(const core::SimulationClock &clock) noexcept {
 
 const core::SimulationClock &simulation_clock() noexcept { return g_clock; }
 
-void dispatch_timers() noexcept { dispatch_lua_timers(lua_state()); }
+void dispatch_timers() noexcept {
+  ENGINE_ASSERT_MAIN_THREAD();
+  dispatch_lua_timers(lua_state());
+}
 
 void tick_timers() noexcept {
   // Advance and dispatch in one call, for a caller outside the fixed
@@ -1093,6 +1100,7 @@ void tick_timers() noexcept {
 void clear_timers() noexcept { clear_lua_timer_bindings(lua_state()); }
 
 void tick_coroutines() noexcept {
+  ENGINE_ASSERT_MAIN_THREAD();
   // Ticks, not rendered frames: engine.wait_frames(n) waits n fixed
   // simulation steps, so a coroutine resumes at the same point in the
   // simulation whatever the frame rate (docs/decisions/0019).

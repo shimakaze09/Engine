@@ -12,6 +12,7 @@
 #include "engine/core/debug_draw.h"
 #include "engine/core/engine_stats.h"
 #include "engine/core/engine_version.h"
+#include "engine/core/thread_affinity.h"
 #include "engine/core/event_bus.h"
 #include "engine/core/input.h"
 #include "engine/core/job_system.h"
@@ -51,6 +52,9 @@ bool initialize_core(const CoreConfig &config) noexcept {
   if (g_coreInitialized) {
     return true;
   }
+  // Whoever initializes core owns the main thread: the platform queue, the
+  // renderer and the Lua VM all run where this call ran.
+  set_main_thread();
 
   const std::size_t frameAllocatorBytes = config.frameAllocatorBytes;
   if ((frameAllocatorBytes == 0U) ||
@@ -230,6 +234,7 @@ bool initialize_core(const CoreConfig &config) noexcept {
     g_threadFrameAllocatorInterfaces[i] = Allocator{};
   }
   g_threadFrameAllocatorCount = 1U;
+  clear_main_thread();
 
   return false;
 }
@@ -246,6 +251,7 @@ void shutdown_core() noexcept {
   if (!g_coreInitialized) {
     return;
   }
+  clear_main_thread();
 
   shutdown_job_system();
   shutdown_debug_draw();

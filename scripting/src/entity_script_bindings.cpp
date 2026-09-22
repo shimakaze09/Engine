@@ -18,6 +18,7 @@ extern "C" {
 #include <cstring>
 
 #include "engine/core/logging.h"
+#include "engine/core/thread_affinity.h"
 #include "runtime_binding.h"
 
 namespace engine::scripting {
@@ -845,6 +846,7 @@ void dispatch_entity_scripts_end_play(runtime::World *world) noexcept {
 std::uint64_t entity_script_mtime_polls() noexcept { return g_mtimePolls; }
 
 void dispatch_entity_scripts_update(float dt) noexcept {
+  ENGINE_ASSERT_MAIN_THREAD();
   if ((g_state == nullptr) || !runtime_bound()) {
     return;
   }

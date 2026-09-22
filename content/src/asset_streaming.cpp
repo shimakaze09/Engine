@@ -11,6 +11,7 @@
 
 #include "engine/core/cvar.h"
 #include "engine/core/logging.h"
+#include "engine/core/thread_affinity.h"
 
 namespace engine::content {
 
@@ -546,6 +547,7 @@ std::size_t update_asset_streaming(
     AssetLoadCallback loadCallback,
     AssetUploadCallback uploadCallback,
     void *userData) noexcept {
+  ENGINE_ASSERT_MAIN_THREAD();
   if (queue == nullptr) {
     return 0U;
   }

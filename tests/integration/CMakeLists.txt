@@ -316,6 +316,26 @@ set_tests_properties(
     PROPERTIES LABELS integration
 )
 
+engine_add_executable_target(thread_affinity_helper
+    SOURCES
+    thread_affinity_helper.cpp
+    PRIVATE_DEPS
+    engine_renderer
+)
+
+add_test(
+    NAME engine_integration_thread_affinity
+    COMMAND ${CMAKE_COMMAND}
+        "-DHELPER=$<TARGET_FILE:thread_affinity_helper>"
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/thread_affinity_test.cmake
+)
+set_tests_properties(
+    engine_integration_thread_affinity
+    PROPERTIES
+        LABELS integration
+        SKIP_REGULAR_EXPRESSION "SKIPPED:"
+)
+
 engine_add_executable_target(crash_report_helper
     SOURCES
     crash_report_helper.cpp

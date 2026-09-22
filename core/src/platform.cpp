@@ -42,6 +42,7 @@
 
 #include "engine/core/input.h"
 #include "engine/core/logging.h"
+#include "engine/core/thread_affinity.h"
 
 namespace engine::core {
 
@@ -652,6 +653,7 @@ void render_drawable_size(int *outWidth, int *outHeight) noexcept {
 void *get_sdl_window() noexcept { return g_window; }
 
 bool platform_poll_event(PlatformEvent *outEvent) noexcept {
+  ENGINE_ASSERT_MAIN_THREAD();
   if ((outEvent == nullptr) || !SDL_PollEvent(&g_polledEvent)) {
     return false;
   }
