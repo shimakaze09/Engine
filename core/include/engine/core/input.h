@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "engine/core/input_map.h"
 #include "engine/core/platform.h"
 
 namespace engine::core {
@@ -66,29 +67,35 @@ bool is_mouse_button_down(int button) noexcept;
 bool is_mouse_button_pressed(int button) noexcept;
 
 // ----- Action Mappings -----------------------------------------------------
+// The script-facing shorthand for the input mapper (input_map.h): one
+// registry, so a name registered here is the action add_input_action,
+// rebinding and the bindings document see. A binding the user persisted
+// outranks the default a script registers here.
 
-inline constexpr std::size_t kMaxActions = 64U;
-inline constexpr std::size_t kMaxAxes = 64U;
+inline constexpr std::size_t kMaxActions = kMaxInputActions;
+inline constexpr std::size_t kMaxAxes = kMaxInputAxes;
 
-/// Binds a named action to a key (and optional mouse button).
+/// Registers a default binding for a named action: a key, and optionally a
+/// mouse button (-1 for none). Registering the name again replaces the
+/// default. False when the name is empty, too long or the mapper is full.
 bool register_action(const char *name, KeyScancode key,
                      int mouseButton = -1) noexcept;
-/// Returns whether is action down.
+/// Whether the action is active this frame (is_mapped_action_down).
 bool is_action_down(const char *name) noexcept;
-/// Returns whether is action pressed.
+/// Whether the action became active this frame (is_mapped_action_pressed).
 bool is_action_pressed(const char *name) noexcept;
-/// 1 when the action is held, else 0.
+/// 1 when the action is active, else 0.
 float action_value(const char *name) noexcept;
 
-/// Binds a named axis to a negative/positive key pair.
+/// Registers a default negative/positive key pair for a named axis.
 bool register_axis(const char *name, KeyScancode negativeKey,
                    KeyScancode positiveKey) noexcept;
-/// Axis value in [-1, 1] from the bound key pair.
+/// The axis value in [-1, 1] (mapped_axis_value).
 float axis_value(const char *name) noexcept;
 
 // Clears run-scoped gameplay registrations — script-registered actions and
 // axes plus the action/touch callback tables that carry script-owned
-// userData — while keeping device state and the persisted input map.
+// userData — while keeping device state and the persisted bindings.
 // EnginePipeline::teardown calls it so no binding outlives its run.
 void clear_gameplay_bindings() noexcept;
 

@@ -516,6 +516,86 @@ bool test_persisted_bindings_outrank_script_defaults() noexcept {
   return !overwritten && defaulted;
 }
 
+/// One action registry (#312 item 5). register_action/register_axis used
+/// to fill tables of their own, so the same name meant two unrelated
+/// actions: a user's rebinding or a loaded bindings document never reached
+/// a script that registered through them, and they were never saved. They
+/// now register in the mapper, so every path sees the same action.
+bool test_legacy_and_mapped_actions_share_one_registry() noexcept {
+  if (!init_all()) {
+    return false;
+  }
+  bool ok = true;
+  auto expect = [&ok](bool cond, const char *what) {
+    if (!cond) {
+      std::printf("    %s\n", what);
+      ok = false;
+    }
+  };
+
+  expect(register_action("jump", kKey_Space), "register jump");
+  expect(register_axis("move_x", kKey_A, kKey_D), "register move_x");
+  begin_input_frame();
+  sim_key_down(kKey_Space);
+  sim_key_down(kKey_D);
+  end_input_frame();
+  expect(is_mapped_action_down("jump"),
+         "a registered action is the mapper's action");
+  expect(is_mapped_action_pressed("jump") && is_action_pressed("jump"),
+         "and presses through both names for it");
+  expect(mapped_axis_value("move_x") == 1.0F,
+         "a registered axis is the mapper's axis");
+  begin_input_frame();
+  sim_key_up(kKey_Space);
+  sim_key_up(kKey_D);
+  end_input_frame();
+
+  // The user rebinds jump; the script registering its default again, as
+  // it does on the next Play, must not undo that.
+  InputBinding w{};
+  w.type = InputBindingType::Key;
+  w.code = kKey_W;
+  expect(rebind_action("jump", 0U, w), "rebind jump to W");
+  expect(register_action("jump", kKey_Space), "re-register the default");
+  begin_input_frame();
+  sim_key_down(kKey_W);
+  end_input_frame();
+  expect(is_action_down("jump"), "the rebinding reaches register_action");
+  begin_input_frame();
+  sim_key_up(kKey_W);
+  end_input_frame();
+
+  // A mapper action reads through the shorthand, too.
+  InputBinding e{};
+  e.type = InputBindingType::Key;
+  e.code = kKey_E;
+  expect(add_input_action("use", &e, 1U), "add use");
+  begin_input_frame();
+  sim_key_down(kKey_E);
+  end_input_frame();
+  expect(is_action_down("use") && (action_value("use") == 1.0F),
+         "a mapper action reads through is_action_down");
+  begin_input_frame();
+  sim_key_up(kKey_E);
+  end_input_frame();
+
+  // The run ends: what scripts registered goes, what the user persisted
+  // stays.
+  expect(gameplay_action_count() == 1U, "one script action: use");
+  expect(gameplay_axis_count() == 1U, "one script axis: move_x");
+  clear_gameplay_bindings();
+  expect(gameplay_action_count() == 0U, "script actions cleared");
+  expect(gameplay_axis_count() == 0U, "script axes cleared");
+  begin_input_frame();
+  sim_key_down(kKey_W);
+  sim_key_down(kKey_E);
+  end_input_frame();
+  expect(is_action_down("jump"), "the rebound action survives the run");
+  expect(!is_action_down("use"), "the script's action does not");
+  shutdown_all();
+  return ok;
+}
+
 /// EXPECTATION (#538 item 2): a document whose numbers are outside what
 /// the mapper can hold is refused whole, and the current bindings stay.
 bool test_out_of_range_numbers_rejected() noexcept {
@@ -1512,6 +1592,8 @@ int main() {
   run("rebind_action", &test_rebind_action);
   run("persisted_bindings_outrank_script_defaults",
       &test_persisted_bindings_outrank_script_defaults);
+  run("legacy_and_mapped_actions_share_one_registry",
+      &test_legacy_and_mapped_actions_share_one_registry);
   run("out_of_range_numbers_rejected", &test_out_of_range_numbers_rejected);
   run("save_load_roundtrip", &test_save_load_roundtrip);
   run("file_round_trip_and_default_path",

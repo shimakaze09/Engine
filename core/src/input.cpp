@@ -26,7 +26,6 @@ constexpr int kMaxScancodes = kMaxKeyCode + 1;
 constexpr int kMaxMouseButtons = 5;
 constexpr int kMaxGamepadButtons = 16;
 constexpr int kMaxGamepadAxes = 6;
-constexpr std::size_t kMaxActionNameLength = 63U;
 
 bool g_inputInitialized = false;
 
@@ -119,53 +118,6 @@ const GamepadStateInternal *gamepad_slot(int gamepad) noexcept {
   return slot.connected ? &slot : nullptr;
 }
 
-struct ActionBinding final {
-  char name[kMaxActionNameLength + 1U] = {};
-  KeyScancode key = -1;
-  int mouseButton = -1;
-  bool occupied = false;
-};
-
-struct AxisBinding final {
-  char name[kMaxActionNameLength + 1U] = {};
-  KeyScancode negativeKey = -1;
-  KeyScancode positiveKey = -1;
-  bool occupied = false;
-};
-
-std::array<ActionBinding, kMaxActions> g_actions{};
-std::array<AxisBinding, kMaxAxes> g_axes{};
-
-/// Finds the matching object or resource for action.
-const ActionBinding *find_action(const char *name) noexcept {
-  if (name == nullptr) {
-    return nullptr;
-  }
-
-  for (const auto &a : g_actions) {
-    if (a.occupied && (std::strcmp(a.name, name) == 0)) {
-      return &a;
-    }
-  }
-
-  return nullptr;
-}
-
-/// Finds the matching object or resource for axis.
-const AxisBinding *find_axis(const char *name) noexcept {
-  if (name == nullptr) {
-    return nullptr;
-  }
-
-  for (const auto &a : g_axes) {
-    if (a.occupied && (std::strcmp(a.name, name) == 0)) {
-      return &a;
-    }
-  }
-
-  return nullptr;
-}
-
 } // namespace
 
 /// Initializes the owning system for input. Persisted per-user rebindings
@@ -181,8 +133,6 @@ bool initialize_input() noexcept {
   g_keyReleasedEdge = {};
   g_mouse = {};
   g_wheelCarry = 0.0F;
-  g_actions = {};
-  g_axes = {};
   g_gamepads = {};
   g_inputInitialized = true;
 
@@ -212,32 +162,19 @@ bool initialize_input() noexcept {
 /// Clears run-scoped gameplay registrations; device state and the
 /// persisted input map stay untouched.
 void clear_gameplay_bindings() noexcept {
-  g_actions = {};
-  g_axes = {};
+  clear_unpersisted_input_mappings();
   clear_action_callbacks();
   clear_touch_callbacks();
 }
 
-/// Live action registrations (teardown-regression introspection).
+/// Live script-registered actions (teardown-regression introspection).
 std::size_t gameplay_action_count() noexcept {
-  std::size_t count = 0U;
-  for (const auto &a : g_actions) {
-    if (a.occupied) {
-      ++count;
-    }
-  }
-  return count;
+  return unpersisted_input_action_count();
 }
 
-/// Live axis registrations (teardown-regression introspection).
+/// Live script-registered axes (teardown-regression introspection).
 std::size_t gameplay_axis_count() noexcept {
-  std::size_t count = 0U;
-  for (const auto &a : g_axes) {
-    if (a.occupied) {
-      ++count;
-    }
-  }
-  return count;
+  return unpersisted_input_axis_count();
 }
 
 void shutdown_input() noexcept {
@@ -249,8 +186,6 @@ void shutdown_input() noexcept {
   g_keyReleasedEdge = {};
   g_mouse = {};
   g_wheelCarry = 0.0F;
-  g_actions = {};
-  g_axes = {};
   g_gamepads = {};
 }
 
@@ -484,126 +419,51 @@ bool is_mouse_button_pressed(int button) noexcept {
   return g_mouse.pressedEdge[static_cast<std::size_t>(button)];
 }
 
+// The legacy action and axis calls are a thin layer over the input
+// mapper, so there is one registry: an action a script registers here is
+// the one add_input_action, rebinding and the bindings document see, and a
+// persisted binding outranks a script default either way.
+
 bool register_action(const char *name, KeyScancode key,
                      int mouseButton) noexcept {
-  if (name == nullptr) {
-    return false;
+  InputBinding bindings[2] = {};
+  std::uint32_t count = 0U;
+  if (key >= 0) {
+    bindings[count].type = InputBindingType::Key;
+    bindings[count].code = key;
+    ++count;
   }
-
-  const std::size_t nameLen = std::strlen(name);
-  if ((nameLen == 0U) || (nameLen > kMaxActionNameLength)) {
-    return false;
+  if (mouseButton >= 0) {
+    bindings[count].type = InputBindingType::MouseButton;
+    bindings[count].code = mouseButton;
+    ++count;
   }
-
-  for (auto &a : g_actions) {
-    if (a.occupied && (std::strcmp(a.name, name) == 0)) {
-      a.key = key;
-      a.mouseButton = mouseButton;
-      return true;
-    }
-  }
-
-  for (auto &a : g_actions) {
-    if (!a.occupied) {
-      std::memcpy(a.name, name, nameLen + 1U);
-      a.key = key;
-      a.mouseButton = mouseButton;
-      a.occupied = true;
-      return true;
-    }
-  }
-
-  return false;
+  return add_input_action(name, bindings, count);
 }
 
-/// Returns whether is action down.
 bool is_action_down(const char *name) noexcept {
-  const ActionBinding *a = find_action(name);
-  if (a == nullptr) {
-    return false;
-  }
-
-  if ((a->key >= 0) && is_key_down(a->key)) {
-    return true;
-  }
-
-  if ((a->mouseButton >= 0) && is_mouse_button_down(a->mouseButton)) {
-    return true;
-  }
-
-  return false;
+  return is_mapped_action_down(name);
 }
 
-/// Returns whether is action pressed.
 bool is_action_pressed(const char *name) noexcept {
-  const ActionBinding *a = find_action(name);
-  if (a == nullptr) {
-    return false;
-  }
-
-  if ((a->key >= 0) && is_key_pressed(a->key)) {
-    return true;
-  }
-
-  if ((a->mouseButton >= 0) && is_mouse_button_pressed(a->mouseButton)) {
-    return true;
-  }
-
-  return false;
+  return is_mapped_action_pressed(name);
 }
 
 float action_value(const char *name) noexcept {
-  return is_action_down(name) ? 1.0F : 0.0F;
+  return is_mapped_action_down(name) ? 1.0F : 0.0F;
 }
 
 bool register_axis(const char *name, KeyScancode negativeKey,
                    KeyScancode positiveKey) noexcept {
-  if (name == nullptr) {
-    return false;
-  }
-
-  const std::size_t nameLen = std::strlen(name);
-  if ((nameLen == 0U) || (nameLen > kMaxActionNameLength)) {
-    return false;
-  }
-
-  for (auto &a : g_axes) {
-    if (a.occupied && (std::strcmp(a.name, name) == 0)) {
-      a.negativeKey = negativeKey;
-      a.positiveKey = positiveKey;
-      return true;
-    }
-  }
-
-  for (auto &a : g_axes) {
-    if (!a.occupied) {
-      std::memcpy(a.name, name, nameLen + 1U);
-      a.negativeKey = negativeKey;
-      a.positiveKey = positiveKey;
-      a.occupied = true;
-      return true;
-    }
-  }
-
-  return false;
+  InputAxisSource source{};
+  source.type = AxisSourceType::KeyPair;
+  source.negativeKey = negativeKey;
+  source.positiveKey = positiveKey;
+  return add_input_axis(name, &source, 1U);
 }
 
 float axis_value(const char *name) noexcept {
-  const AxisBinding *axis = find_axis(name);
-  if (axis == nullptr) {
-    return 0.0F;
-  }
-
-  const bool negDown =
-      (axis->negativeKey >= 0) && is_key_down(axis->negativeKey);
-  const bool posDown =
-      (axis->positiveKey >= 0) && is_key_down(axis->positiveKey);
-
-  if (negDown == posDown) {
-    return 0.0F;
-  }
-
-  return posDown ? 1.0F : -1.0F;
+  return mapped_axis_value(name);
 }
 
 bool is_gamepad_connected(int gamepad) noexcept {

@@ -412,6 +412,35 @@ bool remove_input_axis(const char *name) noexcept {
   return true;
 }
 
+void clear_unpersisted_input_mappings() noexcept {
+  for (auto &action : g_mappedActions) {
+    if (action.occupied && !action.persisted) {
+      action = InputAction{};
+    }
+  }
+  for (auto &axis : g_mappedAxes) {
+    if (axis.occupied && !axis.persisted) {
+      axis = InputAxisMapping{};
+    }
+  }
+}
+
+std::size_t unpersisted_input_action_count() noexcept {
+  std::size_t count = 0U;
+  for (const auto &action : g_mappedActions) {
+    count += (action.occupied && !action.persisted) ? 1U : 0U;
+  }
+  return count;
+}
+
+std::size_t unpersisted_input_axis_count() noexcept {
+  std::size_t count = 0U;
+  for (const auto &axis : g_mappedAxes) {
+    count += (axis.occupied && !axis.persisted) ? 1U : 0U;
+  }
+  return count;
+}
+
 // ---------------------------------------------------------------------------
 // Callback registration
 // ---------------------------------------------------------------------------

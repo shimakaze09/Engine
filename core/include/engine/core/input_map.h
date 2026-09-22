@@ -109,6 +109,15 @@ void shutdown_input_mapper() noexcept;
 // reset.
 void clear_action_callbacks() noexcept;
 
+/// Removes every action and axis that neither a bindings document nor a
+/// rebinding made persistent -- the ones scripts registered -- so none
+/// outlives the run that registered it. Persisted ones stay.
+void clear_unpersisted_input_mappings() noexcept;
+/// Live actions a script registered (see clear_unpersisted_input_mappings).
+std::size_t unpersisted_input_action_count() noexcept;
+/// Live axes a script registered (see clear_unpersisted_input_mappings).
+std::size_t unpersisted_input_axis_count() noexcept;
+
 // ---------------------------------------------------------------------------
 // Registration
 // ---------------------------------------------------------------------------
