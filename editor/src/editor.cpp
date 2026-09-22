@@ -31,6 +31,7 @@
 #include "engine/core/engine_stats.h"
 #include "engine/core/json.h"
 #include "engine/core/logging.h"
+#include "engine/core/platform.h"
 #include "engine/core/mem_tracker.h"
 #include "engine/core/profiler.h"
 #include "engine/core/reflect.h"
@@ -242,7 +243,6 @@ bool initialize_editor(void *sdlWindow) noexcept {
   if (sdlWindow == nullptr) {
     return false;
   }
-  editor_session().sdlWindow = static_cast<SDL_Window *>(sdlWindow);
 
   IMGUI_CHECKVERSION();
   ImGui::CreateContext();
@@ -256,11 +256,8 @@ bool initialize_editor(void *sdlWindow) noexcept {
 
   static_cast<void>(core::cvar_register_float(
       "editor.ui_scale", 1.0F, "Editor UI scale multiplier"));
-  const float displayScale =
-      SDL_GetWindowDisplayScale(static_cast<SDL_Window *>(sdlWindow));
-  const float uiScale =
-      ((displayScale > 0.0F) ? displayScale : 1.0F) *
-      core::cvar_get_float("editor.ui_scale", 1.0F);
+  const float uiScale = core::platform_display_scale() *
+                        core::cvar_get_float("editor.ui_scale", 1.0F);
 
   // Proper UI font (the 13px bitmap default reads as a debug tool). The
   // file is read here and handed to the atlas as memory: ImGui's own
@@ -308,14 +305,12 @@ bool initialize_editor(void *sdlWindow) noexcept {
       !ImGui_ImplSDL3_InitForOther(static_cast<SDL_Window *>(sdlWindow))) {
     ImGui::DestroyContext();
     console_capture_shutdown();
-    editor_session().sdlWindow = nullptr;
     return false;
   }
   if (!ImGui_ImplBgfx_Init()) {
     ImGui_ImplSDL3_Shutdown();
     ImGui::DestroyContext();
     console_capture_shutdown();
-    editor_session().sdlWindow = nullptr;
     return false;
   }
 
@@ -347,7 +342,6 @@ void shutdown_editor() noexcept {
 
   editor_session().initialized = false;
   editor_session().world = nullptr;
-  editor_session().sdlWindow = nullptr;
   editor_session().autoplayConsumed = false;
   clear_entity_selection();
   editor_session().playState = PlayState::Stopped;

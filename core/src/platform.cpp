@@ -16,6 +16,7 @@
 
 #include <cstdint>
 #include <array>
+#include <atomic>
 #include <cstdio>
 #include <cerrno>
 #include <cstdlib>
@@ -296,6 +297,52 @@ bool initialize_platform_impl(int width, int height, const char *title,
   return true;
 }
 
+
+/// One native dialog in flight. SDL's callback has a different signature
+/// from the engine's, and SDL reads the filter array after the show call
+/// returns, so both the caller's callback and a copy of its filters have
+/// to live somewhere until the dialog closes: here.
+///
+/// The cross-thread contract is inUse. The main thread claims a slot with
+/// an acquire exchange, fills it, then asks SDL to show the dialog, so
+/// everything it wrote happens before SDL can invoke the trampoline. The
+/// trampoline reads the slot, calls through, and releases inUse last, so
+/// the main thread never refills a slot SDL may still read.
+struct DialogSlot final {
+  std::atomic<bool> inUse{false};
+  FileDialogCallback callback = nullptr;
+  void *userData = nullptr;
+  std::array<SDL_DialogFileFilter,
+             static_cast<std::size_t>(kMaxFileDialogFilters)>
+      filters{};
+};
+// Dialogs are modal to the user; more than one at a time only happens when
+// one outlives an editor session, which is what the spare slots are for.
+constexpr std::size_t kMaxOpenDialogs = 4U;
+std::array<DialogSlot, kMaxOpenDialogs> g_dialogSlots{};
+
+/// SDL's callback, translated to the engine's: a null list is a failure,
+/// an empty list a cancel, and both reach the caller as a null path.
+void SDLCALL dialog_trampoline(void *userdata, const char *const *filelist,
+                               int /*filter*/) noexcept {
+  auto *slot = static_cast<DialogSlot *>(userdata);
+  if (slot == nullptr) {
+    return;
+  }
+  if (filelist == nullptr) {
+    log_sdl_error("native file dialog failed");
+  }
+  const char *path =
+      ((filelist != nullptr) && (filelist[0] != nullptr)) ? filelist[0]
+                                                          : nullptr;
+  const FileDialogCallback callback = slot->callback;
+  void *const userData = slot->userData;
+  if (callback != nullptr) {
+    callback(userData, path);
+  }
+  slot->inUse.store(false, std::memory_order_release);
+}
+
 } // namespace
 
 bool platform_gamepads_available() noexcept { return g_gamepadSubsystem; }
@@ -466,6 +513,79 @@ void render_drawable_size(int *outWidth, int *outHeight) noexcept {
 }
 
 void *get_sdl_window() noexcept { return g_window; }
+
+float platform_display_scale() noexcept {
+  if (g_window == nullptr) {
+    return 1.0F;
+  }
+  const float scale = SDL_GetWindowDisplayScale(g_window);
+  // SDL reports 0 on failure; a caller multiplying by it would collapse
+  // the UI to nothing.
+  return (scale > 0.0F) ? scale : 1.0F;
+}
+
+bool platform_set_window_title(const char *title) noexcept {
+  if ((g_window == nullptr) || (title == nullptr)) {
+    return false;
+  }
+  if (!SDL_SetWindowTitle(g_window, title)) {
+    log_sdl_error("failed to set the window title");
+    return false;
+  }
+  return true;
+}
+
+bool platform_show_file_dialog(FileDialogKind kind,
+                               FileDialogCallback callback, void *userData,
+                               const FileDialogFilter *filters,
+                               int filterCount,
+                               const char *defaultLocation) noexcept {
+  if ((callback == nullptr) || (g_window == nullptr)) {
+    log_message(LogLevel::Warning, "platform",
+                "native file dialog refused: no window to parent it");
+    return false;
+  }
+  if ((filterCount < 0) || (filterCount > kMaxFileDialogFilters) ||
+      ((filterCount > 0) && (filters == nullptr))) {
+    log_message(LogLevel::Warning, "platform",
+                "native file dialog refused: bad filter list");
+    return false;
+  }
+
+  DialogSlot *slot = nullptr;
+  for (DialogSlot &candidate : g_dialogSlots) {
+    bool expected = false;
+    if (candidate.inUse.compare_exchange_strong(expected, true,
+                                                std::memory_order_acquire)) {
+      slot = &candidate;
+      break;
+    }
+  }
+  if (slot == nullptr) {
+    log_message(LogLevel::Warning, "platform",
+                "native file dialog refused: every dialog slot is held by "
+                "a dialog that has not closed");
+    return false;
+  }
+
+  slot->callback = callback;
+  slot->userData = userData;
+  for (int i = 0; i < filterCount; ++i) {
+    slot->filters[static_cast<std::size_t>(i)] =
+        SDL_DialogFileFilter{filters[i].name, filters[i].pattern};
+  }
+  const SDL_DialogFileFilter *sdlFilters =
+      (filterCount > 0) ? slot->filters.data() : nullptr;
+
+  if (kind == FileDialogKind::Save) {
+    SDL_ShowSaveFileDialog(&dialog_trampoline, slot, g_window, sdlFilters,
+                           filterCount, defaultLocation);
+  } else {
+    SDL_ShowOpenFileDialog(&dialog_trampoline, slot, g_window, sdlFilters,
+                           filterCount, defaultLocation, false);
+  }
+  return true;
+}
 
 
 bool platform_window_is_wayland() noexcept {

@@ -10,8 +10,6 @@
 #define __PRFCHWINTRIN_H // NOLINT(bugprone-reserved-identifier)
 #endif
 
-#include <SDL3/SDL.h>
-
 #include "imgui.h"
 #include "ImGuizmo.h"
 
@@ -154,9 +152,6 @@ struct EditorSession final {
   // viewport panel so overlays can anchor inside the rendered scene.
   ImVec2 sceneViewportScreenPos{};
   ImVec2 sceneViewportScreenSize{};
-  // Native window handle, retained for title-bar updates and as the
-  // parent window for native file dialogs; never touched by Play/Stop.
-  SDL_Window *sdlWindow = nullptr;
   char lastAppliedWindowTitle[640] = {};
   SceneDocumentState document{};
   ContentBrowserState contentBrowser{};

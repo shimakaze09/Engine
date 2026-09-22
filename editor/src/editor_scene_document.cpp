@@ -9,8 +9,6 @@
 #define __PRFCHWINTRIN_H // NOLINT(bugprone-reserved-identifier)
 #endif
 
-#include <SDL3/SDL.h>
-#include <SDL3/SDL_dialog.h>
 
 #include <cstdio>
 #include <cstring>
@@ -208,23 +206,22 @@ void continue_pending_action() noexcept {
   doc.pendingOpenPath[0] = '\0';
 }
 
-/// SDL_ShowOpenFileDialog/SDL_ShowSaveFileDialog callback: publishes the
-/// result into the request's own record through the atomic handoff (see
-/// the SceneDialogRequest comment) and reads no session state, so a
-/// dialog that outlived its session writes nowhere the current session
-/// looks; all filesystem work happens later on the main thread.
-void scene_dialog_callback(void *userdata, const char *const *filelist,
-                           int filter) noexcept {
-  static_cast<void>(filter);
+/// The native dialog's callback: publishes the result into the request's
+/// own record through the atomic handoff (see the SceneDialogRequest
+/// comment) and reads no session state, so a dialog that outlived its
+/// session writes nowhere the current session looks; all filesystem work
+/// happens later on the main thread. A null path is a cancel or a failed
+/// dialog. Runs on whatever thread the platform delivers on.
+void scene_dialog_callback(void *userdata, const char *path) noexcept {
   auto *request = static_cast<SceneDialogRequest *>(userdata);
   if (request == nullptr) {
     return;
   }
-  if ((filelist == nullptr) || (filelist[0] == nullptr)) {
+  if (path == nullptr) {
     request->resultAccepted = false;
   } else {
     std::snprintf(request->resultPath, sizeof(request->resultPath), "%s",
-                  filelist[0]);
+                  path);
     request->resultAccepted = true;
   }
   request->resultPending.store(true, std::memory_order_release);
@@ -276,11 +273,17 @@ void begin_save_scene_as_dialog() noexcept {
     return;
   }
 
-  static const SDL_DialogFileFilter kFilters[] = {{"Scene", "scene"}};
+  static const core::FileDialogFilter kFilters[] = {{"Scene", "scene"}};
   const char *defaultLocation =
       doc.hasPath ? doc.path : editor_asset_root();
-  SDL_ShowSaveFileDialog(&scene_dialog_callback, request, session.sdlWindow,
-                         kFilters, 1, defaultLocation);
+  if (!core::platform_show_file_dialog(core::FileDialogKind::Save,
+                                       &scene_dialog_callback, request,
+                                       kFilters, 1, defaultLocation)) {
+    // No dialog will ever answer this request, so answer it as a cancel:
+    // the poll then releases the record and cancels any action waiting on
+    // the dialog, exactly as if the user had dismissed it.
+    scene_dialog_callback(request, nullptr);
+  }
 }
 
 } // namespace
@@ -622,9 +625,12 @@ void request_open_scene_dialog() noexcept {
     return;
   }
 
-  static const SDL_DialogFileFilter kFilters[] = {{"Scene", "scene"}};
-  SDL_ShowOpenFileDialog(&scene_dialog_callback, request, session.sdlWindow,
-                        kFilters, 1, editor_asset_root(), false);
+  static const core::FileDialogFilter kFilters[] = {{"Scene", "scene"}};
+  if (!core::platform_show_file_dialog(core::FileDialogKind::Open,
+                                       &scene_dialog_callback, request,
+                                       kFilters, 1, editor_asset_root())) {
+    scene_dialog_callback(request, nullptr);
+  }
 }
 
 void request_save_scene() noexcept {
@@ -816,7 +822,7 @@ const char *recent_scene_at(std::size_t index) noexcept {
 
 void scene_document_update_window_title() noexcept {
   EditorSession &session = editor_session();
-  if (session.sdlWindow == nullptr) {
+  if (!session.initialized) {
     return;
   }
   char title[640] = {};
@@ -826,7 +832,11 @@ void scene_document_update_window_title() noexcept {
   if (std::strcmp(title, session.lastAppliedWindowTitle) == 0) {
     return;
   }
-  SDL_SetWindowTitle(session.sdlWindow, title);
+  // Recorded only when applied, so a refused title is retried next frame
+  // rather than believed.
+  if (!core::platform_set_window_title(title)) {
+    return;
+  }
   std::snprintf(session.lastAppliedWindowTitle,
                sizeof(session.lastAppliedWindowTitle), "%s", title);
 }
@@ -865,9 +875,7 @@ void *scene_dialog_arm_for_tests(SceneDialogKind kind,
 }
 
 void scene_dialog_deliver_for_tests(void *request, const char *path) noexcept {
-  // SDL reports a cancelled dialog as a list whose first entry is null.
-  const char *const files[2] = {path, nullptr};
-  scene_dialog_callback(request, files, -1);
+  scene_dialog_callback(request, path);
 }
 
 void recent_scenes_set_directory_override_for_tests(

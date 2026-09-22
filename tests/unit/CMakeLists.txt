@@ -1934,6 +1934,13 @@ endif()
 
 # ---- P1-M12-A: Platform Paths ----
 
+engine_add_test_executable(engine_unit_platform_window
+    SOURCES
+    platform_window_test.cpp
+    PRIVATE_DEPS
+    engine_core
+)
+
 engine_add_test_executable(engine_unit_platform_paths
     SOURCES
     platform_paths_test.cpp

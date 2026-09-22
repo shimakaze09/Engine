@@ -247,9 +247,6 @@ KNOWN_SDL_USERS: dict[str, str] = {
     "SDL_Event until the typed platform event lands",
     "runtime/src/engine_pipeline.cpp": "issue #312 item 1: polls and "
     "classifies SDL events itself",
-    "editor/src/editor_scene_document.cpp": "issue #312 items 2-3: native "
-    "file dialogs and the window title",
-    "editor/src/editor_session.h": "issue #312 item 2: holds the SDL_Window",
 }
 
 
