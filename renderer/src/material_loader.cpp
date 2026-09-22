@@ -92,10 +92,10 @@ bool read_optional_float(const core::JsonParser &parser,
 /// strict when present (unknown text rejects the load), untouched when
 /// absent.
 bool read_optional_alpha_mode(const core::JsonParser &parser,
-                              const core::JsonValue &object,
+                              const core::JsonValue &object, const char *key,
                               AlphaMode *outValue) noexcept {
   core::JsonValue field{};
-  if (!parser.get_object_field(object, "alphaMode", &field)) {
+  if (!parser.get_object_field(object, key, &field)) {
     return true;
   }
 
@@ -122,10 +122,10 @@ bool read_optional_alpha_mode(const core::JsonParser &parser,
 /// load: silently lighting a surface by a model the author did not ask
 /// for is a wrong picture, not a default.
 bool read_optional_shading_model(const core::JsonParser &parser,
-                                 const core::JsonValue &object,
+                                 const core::JsonValue &object, const char *key,
                                  ShadingModel *outValue) noexcept {
   core::JsonValue field{};
-  if (!parser.get_object_field(object, "shadingModel", &field)) {
+  if (!parser.get_object_field(object, key, &field)) {
     return true;
   }
 
@@ -144,6 +144,29 @@ bool read_optional_shading_model(const core::JsonParser &parser,
     return false;
   }
   return true;
+}
+
+/// One overload per material field type, so the field table can read
+/// every field through one name.
+bool read_field(const core::JsonParser &parser, const core::JsonValue &object,
+                const char *key, math::Vec3 *out) noexcept {
+  return read_optional_vec3(parser, object, key, out);
+}
+bool read_field(const core::JsonParser &parser, const core::JsonValue &object,
+                const char *key, math::Vec2 *out) noexcept {
+  return read_optional_vec2(parser, object, key, out);
+}
+bool read_field(const core::JsonParser &parser, const core::JsonValue &object,
+                const char *key, float *out) noexcept {
+  return read_optional_float(parser, object, key, out);
+}
+bool read_field(const core::JsonParser &parser, const core::JsonValue &object,
+                const char *key, AlphaMode *out) noexcept {
+  return read_optional_alpha_mode(parser, object, key, out);
+}
+bool read_field(const core::JsonParser &parser, const core::JsonValue &object,
+                const char *key, ShadingModel *out) noexcept {
+  return read_optional_shading_model(parser, object, key, out);
 }
 
 /// True when material registration can insert or update this ID.
@@ -225,44 +248,22 @@ bool load_material_recursive(AssetDatabase *database, const char *virtualPath,
 /// its parent supplies.
 std::uint16_t authored_fields(const core::JsonParser &parser,
                               const core::JsonValue &root) noexcept {
-  struct Field final {
-    const char *key;
-    std::uint16_t bit;
-  };
-  static constexpr Field kFields[] = {
-      {"albedo", material_field::kAlbedo},
-      {"emissive", material_field::kEmissive},
-      {"roughness", material_field::kRoughness},
-      {"metallic", material_field::kMetallic},
-      {"opacity", material_field::kOpacity},
-      {"shadingModel", material_field::kShadingModel},
-      {"alphaMode", material_field::kAlphaMode},
-      {"alphaCutoff", material_field::kAlphaCutoff},
-      {"uvTiling", material_field::kUvTiling},
-      {"uvOffset", material_field::kUvOffset},
-  };
-  static constexpr Field kTextureFields[] = {
-      {"albedo", material_field::kAlbedoTexture},
-      {"metallicRoughness", material_field::kMetallicRoughnessTexture},
-      {"emissive", material_field::kEmissiveTexture},
-      {"occlusion", material_field::kOcclusionTexture},
-      {"opacity", material_field::kOpacityTexture},
-  };
-
   std::uint16_t authored = 0U;
   core::JsonValue value{};
-  for (const Field &field : kFields) {
-    if (parser.get_object_field(root, field.key, &value)) {
-      authored = static_cast<std::uint16_t>(authored | field.bit);
-    }
+#define ENGINE_MATERIAL_AUTHORED_PARAM(name, member, key)                      \
+  if (parser.get_object_field(root, key, &value)) {                            \
+    authored |= material_field::k##name;                                       \
   }
+  ENGINE_MATERIAL_PARAM_FIELDS(ENGINE_MATERIAL_AUTHORED_PARAM)
+#undef ENGINE_MATERIAL_AUTHORED_PARAM
   core::JsonValue textures{};
   if (parser.get_object_field(root, "textures", &textures)) {
-    for (const Field &field : kTextureFields) {
-      if (parser.get_object_field(textures, field.key, &value)) {
-        authored = static_cast<std::uint16_t>(authored | field.bit);
-      }
-    }
+#define ENGINE_MATERIAL_AUTHORED_TEXTURE(name, slot, handle, key)              \
+  if (parser.get_object_field(textures, key, &value)) {                        \
+    authored |= material_field::k##name;                                       \
+  }
+    ENGINE_MATERIAL_TEXTURE_FIELDS(ENGINE_MATERIAL_AUTHORED_TEXTURE)
+#undef ENGINE_MATERIAL_AUTHORED_TEXTURE
   }
   return authored;
 }
@@ -325,17 +326,17 @@ bool parse_material_text(AssetDatabase *database, const char *virtualPath,
   // Texture GPU handles are never inherited directly: they are re-derived
   // by resolve_material_textures from `slots` every sync, so a slot that
   // this file overrides (below) cannot keep showing a stale parent texture.
-  params.albedoTexture = kInvalidTextureHandle;
-  params.metallicRoughnessTexture = kInvalidTextureHandle;
-  params.emissiveTexture = kInvalidTextureHandle;
-  params.occlusionTexture = kInvalidTextureHandle;
-  params.opacityTexture = kInvalidTextureHandle;
+#define ENGINE_MATERIAL_CLEAR_HANDLE(name, slot, handle, key)                  \
+  params.handle = kInvalidTextureHandle;
+  ENGINE_MATERIAL_TEXTURE_FIELDS(ENGINE_MATERIAL_CLEAR_HANDLE)
+#undef ENGINE_MATERIAL_CLEAR_HANDLE
 
-  if (!read_optional_vec3(parser, *root, "albedo", &params.albedo) ||
-      !read_optional_vec3(parser, *root, "emissive", &params.emissive) ||
-      !read_optional_float(parser, *root, "roughness", &params.roughness) ||
-      !read_optional_float(parser, *root, "metallic", &params.metallic) ||
-      !read_optional_float(parser, *root, "opacity", &params.opacity)) {
+  bool fieldsOk = true;
+#define ENGINE_MATERIAL_READ_PARAM(name, member, key)                          \
+  fieldsOk = fieldsOk && read_field(parser, *root, key, &params.member);
+  ENGINE_MATERIAL_PARAM_FIELDS(ENGINE_MATERIAL_READ_PARAM)
+#undef ENGINE_MATERIAL_READ_PARAM
+  if (!fieldsOk) {
     return log_material_error(virtualPath, "malformed parameter field");
   }
 
@@ -359,31 +360,19 @@ bool parse_material_text(AssetDatabase *database, const char *virtualPath,
                               "material dependency table is full");
   }
 
-  if (!read_optional_shading_model(parser, *root, &params.shadingModel) ||
-      !read_optional_alpha_mode(parser, *root, &params.alphaMode) ||
-      !read_optional_float(parser, *root, "alphaCutoff",
-                           &params.alphaCutoff) ||
-      !read_optional_vec2(parser, *root, "uvTiling", &params.uvTiling) ||
-      !read_optional_vec2(parser, *root, "uvOffset", &params.uvOffset)) {
-    return log_material_error(virtualPath, "malformed parameter field");
-  }
-
   core::JsonValue texturesValue{};
   if (parser.get_object_field(*root, "textures", &texturesValue)) {
     if (texturesValue.type != core::JsonValue::Type::Object) {
       return log_material_error(virtualPath, "textures must be an object");
     }
-    if (!read_optional_texture_ref(parser, texturesValue, "albedo", database,
-                                   &metadata, &slots.albedo) ||
-        !read_optional_texture_ref(parser, texturesValue,
-                                   "metallicRoughness", database, &metadata,
-                                   &slots.metallicRoughness) ||
-        !read_optional_texture_ref(parser, texturesValue, "emissive",
-                                   database, &metadata, &slots.emissive) ||
-        !read_optional_texture_ref(parser, texturesValue, "occlusion",
-                                   database, &metadata, &slots.occlusion) ||
-        !read_optional_texture_ref(parser, texturesValue, "opacity",
-                                   database, &metadata, &slots.opacity)) {
+    bool texturesOk = true;
+#define ENGINE_MATERIAL_READ_TEXTURE(name, slot, handle, key)                  \
+  texturesOk = texturesOk &&                                                   \
+               read_optional_texture_ref(parser, texturesValue, key, database, \
+                                         &metadata, &slots.slot);
+    ENGINE_MATERIAL_TEXTURE_FIELDS(ENGINE_MATERIAL_READ_TEXTURE)
+#undef ENGINE_MATERIAL_READ_TEXTURE
+    if (!texturesOk) {
       return log_material_error(virtualPath, "malformed texture reference");
     }
   }
@@ -694,11 +683,10 @@ std::size_t resolve_material_textures(AssetDatabase *database,
       TextureHandle *handle;
     };
     const SlotRef refs[] = {
-        {slots.albedo, &record.params.albedoTexture},
-        {slots.metallicRoughness, &record.params.metallicRoughnessTexture},
-        {slots.emissive, &record.params.emissiveTexture},
-        {slots.occlusion, &record.params.occlusionTexture},
-        {slots.opacity, &record.params.opacityTexture},
+#define ENGINE_MATERIAL_SLOT_REF(name, slot, handle, key)                      \
+  {slots.slot, &record.params.handle},
+        ENGINE_MATERIAL_TEXTURE_FIELDS(ENGINE_MATERIAL_SLOT_REF)
+#undef ENGINE_MATERIAL_SLOT_REF
     };
     static_assert(sizeof(refs) / sizeof(refs[0]) <= 8U,
                   "unregisterableTextureSlots holds one bit per slot");

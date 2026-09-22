@@ -17,37 +17,27 @@ bool same(const math::Vec2 &lhs, const math::Vec2 &rhs) noexcept {
   return (lhs.x == rhs.x) && (lhs.y == rhs.y);
 }
 
+/// Scalars and enums compare as themselves.
+template <typename T> bool same(T lhs, T rhs) noexcept { return lhs == rhs; }
+
 /// material_field bits for the fields where `next` differs from `current`.
 std::uint16_t changed_fields(const Material &current,
                              const MaterialTextureSlots &currentSlots,
                              const Material &next,
                              const MaterialTextureSlots &nextSlots) noexcept {
   std::uint16_t changed = 0U;
-  const auto mark = [&changed](bool differs, std::uint16_t bit) noexcept {
-    if (differs) {
-      changed = static_cast<std::uint16_t>(changed | bit);
-    }
-  };
-  mark(!same(current.albedo, next.albedo), material_field::kAlbedo);
-  mark(!same(current.emissive, next.emissive), material_field::kEmissive);
-  mark(current.roughness != next.roughness, material_field::kRoughness);
-  mark(current.metallic != next.metallic, material_field::kMetallic);
-  mark(current.opacity != next.opacity, material_field::kOpacity);
-  mark(current.shadingModel != next.shadingModel,
-       material_field::kShadingModel);
-  mark(current.alphaMode != next.alphaMode, material_field::kAlphaMode);
-  mark(current.alphaCutoff != next.alphaCutoff, material_field::kAlphaCutoff);
-  mark(!same(current.uvTiling, next.uvTiling), material_field::kUvTiling);
-  mark(!same(current.uvOffset, next.uvOffset), material_field::kUvOffset);
-  mark(currentSlots.albedo != nextSlots.albedo, material_field::kAlbedoTexture);
-  mark(currentSlots.metallicRoughness != nextSlots.metallicRoughness,
-       material_field::kMetallicRoughnessTexture);
-  mark(currentSlots.emissive != nextSlots.emissive,
-       material_field::kEmissiveTexture);
-  mark(currentSlots.occlusion != nextSlots.occlusion,
-       material_field::kOcclusionTexture);
-  mark(currentSlots.opacity != nextSlots.opacity,
-       material_field::kOpacityTexture);
+#define ENGINE_MATERIAL_MARK_PARAM(name, member, key)                          \
+  if (!same(current.member, next.member)) {                                    \
+    changed |= material_field::k##name;                                        \
+  }
+  ENGINE_MATERIAL_PARAM_FIELDS(ENGINE_MATERIAL_MARK_PARAM)
+#undef ENGINE_MATERIAL_MARK_PARAM
+#define ENGINE_MATERIAL_MARK_TEXTURE(name, slot, handle, key)                  \
+  if (currentSlots.slot != nextSlots.slot) {                                   \
+    changed |= material_field::k##name;                                        \
+  }
+  ENGINE_MATERIAL_TEXTURE_FIELDS(ENGINE_MATERIAL_MARK_TEXTURE)
+#undef ENGINE_MATERIAL_MARK_TEXTURE
   return changed;
 }
 
@@ -58,64 +48,31 @@ void inherit_from(const Material &parent,
                   const MaterialTextureSlots &parentSlots,
                   std::uint16_t overridden, Material *params,
                   MaterialTextureSlots *slots) noexcept {
-  const auto own = [overridden](std::uint16_t bit) noexcept {
-    return (overridden & bit) != 0U;
-  };
-  if (!own(material_field::kAlbedo)) {
-    params->albedo = parent.albedo;
+#define ENGINE_MATERIAL_INHERIT_PARAM(name, member, key)                       \
+  if ((overridden & material_field::k##name) == 0U) {                          \
+    params->member = parent.member;                                            \
   }
-  if (!own(material_field::kEmissive)) {
-    params->emissive = parent.emissive;
+  ENGINE_MATERIAL_PARAM_FIELDS(ENGINE_MATERIAL_INHERIT_PARAM)
+#undef ENGINE_MATERIAL_INHERIT_PARAM
+#define ENGINE_MATERIAL_INHERIT_TEXTURE(name, slot, handle, key)               \
+  if (((overridden & material_field::k##name) == 0U) &&                        \
+      (slots->slot != parentSlots.slot)) {                                     \
+    slots->slot = parentSlots.slot;                                            \
+    params->handle = kInvalidTextureHandle;                                    \
   }
-  if (!own(material_field::kRoughness)) {
-    params->roughness = parent.roughness;
-  }
-  if (!own(material_field::kMetallic)) {
-    params->metallic = parent.metallic;
-  }
-  if (!own(material_field::kOpacity)) {
-    params->opacity = parent.opacity;
-  }
-  if (!own(material_field::kShadingModel)) {
-    params->shadingModel = parent.shadingModel;
-  }
-  if (!own(material_field::kAlphaMode)) {
-    params->alphaMode = parent.alphaMode;
-  }
-  if (!own(material_field::kAlphaCutoff)) {
-    params->alphaCutoff = parent.alphaCutoff;
-  }
-  if (!own(material_field::kUvTiling)) {
-    params->uvTiling = parent.uvTiling;
-  }
-  if (!own(material_field::kUvOffset)) {
-    params->uvOffset = parent.uvOffset;
-  }
+  ENGINE_MATERIAL_TEXTURE_FIELDS(ENGINE_MATERIAL_INHERIT_TEXTURE)
+#undef ENGINE_MATERIAL_INHERIT_TEXTURE
+}
 
-  struct Slot final {
-    std::uint16_t bit;
-    AssetId parentId;
-    AssetId *id;
-    TextureHandle *handle;
-  };
-  const Slot textureSlots[] = {
-      {material_field::kAlbedoTexture, parentSlots.albedo, &slots->albedo,
-       &params->albedoTexture},
-      {material_field::kMetallicRoughnessTexture, parentSlots.metallicRoughness,
-       &slots->metallicRoughness, &params->metallicRoughnessTexture},
-      {material_field::kEmissiveTexture, parentSlots.emissive, &slots->emissive,
-       &params->emissiveTexture},
-      {material_field::kOcclusionTexture, parentSlots.occlusion,
-       &slots->occlusion, &params->occlusionTexture},
-      {material_field::kOpacityTexture, parentSlots.opacity, &slots->opacity,
-       &params->opacityTexture},
-  };
-  for (const Slot &slot : textureSlots) {
-    if (!own(slot.bit) && (*slot.id != slot.parentId)) {
-      *slot.id = slot.parentId;
-      *slot.handle = kInvalidTextureHandle;
-    }
-  }
+/// Whether any texture slot names a different asset.
+bool slots_differ(const MaterialTextureSlots &lhs,
+                  const MaterialTextureSlots &rhs) noexcept {
+  bool differ = false;
+#define ENGINE_MATERIAL_SLOT_DIFFERS(name, slot, handle, key)                  \
+  differ = differ || (lhs.slot != rhs.slot);
+  ENGINE_MATERIAL_TEXTURE_FIELDS(ENGINE_MATERIAL_SLOT_DIFFERS)
+#undef ENGINE_MATERIAL_SLOT_DIFFERS
+  return differ;
 }
 
 } // namespace
@@ -190,11 +147,7 @@ std::size_t propagate_material_to_dependents(AssetDatabase *database,
       const MaterialTextureSlots before = record.textureSlots;
       inherit_from(*parent, *parentSlots, record.overriddenFields,
                    &record.params, &record.textureSlots);
-      if ((before.albedo != record.textureSlots.albedo) ||
-          (before.metallicRoughness != record.textureSlots.metallicRoughness) ||
-          (before.emissive != record.textureSlots.emissive) ||
-          (before.occlusion != record.textureSlots.occlusion) ||
-          (before.opacity != record.textureSlots.opacity)) {
+      if (slots_differ(before, record.textureSlots)) {
         record.unregisterableTextureSlots = 0U;
       }
       visited[visitedCount++] = record.id;

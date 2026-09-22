@@ -96,24 +96,56 @@ struct MaterialTextureSlots final {
   AssetId opacity = kInvalidAssetId;
 };
 
-/// Bits of MaterialAssetRecord::overriddenFields, one per authored field.
+/// Every field a material document authors, in document order: the
+/// override bit's name, the Material member, and the document key. The
+/// override bits, the loader's reads and authored-field scan, parent
+/// inheritance, the editor's change detection and the writer all expand
+/// from this table and the texture table below, so a field added here
+/// reaches every one of them and a field left out reaches none.
+#define ENGINE_MATERIAL_PARAM_FIELDS(X)                                        \
+  X(Albedo, albedo, "albedo")                                                  \
+  X(Emissive, emissive, "emissive")                                            \
+  X(Roughness, roughness, "roughness")                                         \
+  X(Metallic, metallic, "metallic")                                            \
+  X(Opacity, opacity, "opacity")                                               \
+  X(ShadingModel, shadingModel, "shadingModel")                                \
+  X(AlphaMode, alphaMode, "alphaMode")                                         \
+  X(AlphaCutoff, alphaCutoff, "alphaCutoff")                                   \
+  X(UvTiling, uvTiling, "uvTiling")                                            \
+  X(UvOffset, uvOffset, "uvOffset")
+
+/// Every texture slot, in MaterialTextureSlots order: the override bit's
+/// name, the MaterialTextureSlots member, the Material handle it resolves
+/// into, and the key under the document's "textures" object.
+#define ENGINE_MATERIAL_TEXTURE_FIELDS(X)                                      \
+  X(AlbedoTexture, albedo, albedoTexture, "albedo")                            \
+  X(MetallicRoughnessTexture, metallicRoughness, metallicRoughnessTexture,     \
+    "metallicRoughness")                                                       \
+  X(EmissiveTexture, emissive, emissiveTexture, "emissive")                    \
+  X(OcclusionTexture, occlusion, occlusionTexture, "occlusion")                \
+  X(OpacityTexture, opacity, opacityTexture, "opacity")
+
+/// Bits of MaterialAssetRecord::overriddenFields, one per authored field,
+/// generated from the two tables above.
 namespace material_field {
-inline constexpr std::uint16_t kAlbedo = 1U << 0U;
-inline constexpr std::uint16_t kEmissive = 1U << 1U;
-inline constexpr std::uint16_t kRoughness = 1U << 2U;
-inline constexpr std::uint16_t kMetallic = 1U << 3U;
-inline constexpr std::uint16_t kOpacity = 1U << 4U;
-inline constexpr std::uint16_t kShadingModel = 1U << 5U;
-inline constexpr std::uint16_t kAlphaMode = 1U << 6U;
-inline constexpr std::uint16_t kAlphaCutoff = 1U << 7U;
-inline constexpr std::uint16_t kUvTiling = 1U << 8U;
-inline constexpr std::uint16_t kUvOffset = 1U << 9U;
-inline constexpr std::uint16_t kAlbedoTexture = 1U << 10U;
-inline constexpr std::uint16_t kMetallicRoughnessTexture = 1U << 11U;
-inline constexpr std::uint16_t kEmissiveTexture = 1U << 12U;
-inline constexpr std::uint16_t kOcclusionTexture = 1U << 13U;
-inline constexpr std::uint16_t kOpacityTexture = 1U << 14U;
-inline constexpr std::uint16_t kAll = (1U << 15U) - 1U;
+enum FieldIndex : std::uint8_t {
+#define ENGINE_MATERIAL_FIELD_INDEX(name, ...) k##name##Index,
+  ENGINE_MATERIAL_PARAM_FIELDS(ENGINE_MATERIAL_FIELD_INDEX)
+      ENGINE_MATERIAL_TEXTURE_FIELDS(ENGINE_MATERIAL_FIELD_INDEX)
+#undef ENGINE_MATERIAL_FIELD_INDEX
+          kFieldCount
+};
+static_assert(kFieldCount <= 16U, "overriddenFields holds one bit per field");
+
+#define ENGINE_MATERIAL_FIELD_BIT(name, ...)                                   \
+  inline constexpr std::uint16_t k##name =                                     \
+      static_cast<std::uint16_t>(1U << k##name##Index);
+ENGINE_MATERIAL_PARAM_FIELDS(ENGINE_MATERIAL_FIELD_BIT)
+ENGINE_MATERIAL_TEXTURE_FIELDS(ENGINE_MATERIAL_FIELD_BIT)
+#undef ENGINE_MATERIAL_FIELD_BIT
+
+inline constexpr std::uint16_t kAll =
+    static_cast<std::uint16_t>((1U << kFieldCount) - 1U);
 } // namespace material_field
 
 /// One material slot: id, source path, and the fully resolved parameters
