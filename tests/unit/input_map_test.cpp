@@ -8,6 +8,8 @@
 #include "engine/core/input.h"
 #include "engine/core/input_map.h"
 
+#include "../platform_event_from_sdl.h"
+
 #if defined(__clang__) && (defined(__x86_64__) || defined(__i386__)) &&        \
     !defined(__PRFCHWINTRIN_H)
 #define __PRFCHWINTRIN_H // NOLINT(bugprone-reserved-identifier)
@@ -77,14 +79,14 @@ void sim_key_down(KeyScancode key) noexcept {
   SDL_Event ev{};
   ev.type = SDL_EVENT_KEY_DOWN;
   ev.key.scancode = static_cast<SDL_Scancode>(key);
-  input_process_event(&ev);
+  input_process_event(engine::tests::from_sdl(ev));
 }
 
 void sim_key_up(KeyScancode key) noexcept {
   SDL_Event ev{};
   ev.type = SDL_EVENT_KEY_UP;
   ev.key.scancode = static_cast<SDL_Scancode>(key);
-  input_process_event(&ev);
+  input_process_event(engine::tests::from_sdl(ev));
 }
 
 /// Writes raw bytes to a file for save fault-injection fixtures.

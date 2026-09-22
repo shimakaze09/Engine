@@ -1,6 +1,7 @@
 // Implements touch input behavior for the Engine core engine.
 
 #include "engine/core/touch_input.h"
+#include "engine/core/platform_event.h"
 #include "engine/core/input.h"
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
@@ -9,8 +10,6 @@
     !defined(__PRFCHWINTRIN_H)
 #define __PRFCHWINTRIN_H // NOLINT(bugprone-reserved-identifier)
 #endif
-
-#include <SDL3/SDL.h>
 
 #include <array>
 #include <cmath>
@@ -307,18 +306,17 @@ void clear_touch_callbacks() noexcept {
 // Event processing
 // ---------------------------------------------------------------------------
 
-void touch_process_event(const void *nativeEvent) noexcept {
-  if ((nativeEvent == nullptr) || !g_touchInitialized) {
+void touch_process_event(const PlatformEvent &event) noexcept {
+  if (!g_touchInitialized) {
     return;
   }
-  const auto *event = static_cast<const SDL_Event *>(nativeEvent);
 
-  switch (event->type) {
-  case SDL_EVENT_FINGER_DOWN: {
-    const auto fingerId = static_cast<std::int64_t>(event->tfinger.fingerID);
-    const float x = event->tfinger.x;
-    const float y = event->tfinger.y;
-    const float pressure = event->tfinger.pressure;
+  switch (event.kind) {
+  case PlatformEventKind::FingerDown: {
+    const std::int64_t fingerId = event.fingerId;
+    const float x = event.fingerX;
+    const float y = event.fingerY;
+    const float pressure = event.pressure;
 
     ActiveTouch *slot = find_touch(fingerId);
     if (slot == nullptr) {
@@ -362,31 +360,31 @@ void touch_process_event(const void *nativeEvent) noexcept {
       float surfaceW = 0.0F;
       float surfaceH = 0.0F;
       emulated_mouse_extent(&surfaceW, &surfaceH);
-      SDL_Event fakeEvent{};
-      fakeEvent.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
-      fakeEvent.button.button = SDL_BUTTON_LEFT;
-      fakeEvent.button.x = x * surfaceW;
-      fakeEvent.button.y = y * surfaceH;
-      input_process_event(&fakeEvent);
+      PlatformEvent press{};
+      press.kind = PlatformEventKind::MouseButtonDown;
+      press.mouseButton = 0;
+      press.x = x * surfaceW;
+      press.y = y * surfaceH;
+      input_process_event(press);
     }
     break;
   }
 
-  case SDL_EVENT_FINGER_MOTION: {
-    const auto fingerId = static_cast<std::int64_t>(event->tfinger.fingerID);
+  case PlatformEventKind::FingerMove: {
+    const std::int64_t fingerId = event.fingerId;
     ActiveTouch *touch = find_touch(fingerId);
     if (touch != nullptr) {
-      touch->x = event->tfinger.x;
-      touch->y = event->tfinger.y;
-      touch->pressure = event->tfinger.pressure;
+      touch->x = event.fingerX;
+      touch->y = event.fingerY;
+      touch->pressure = event.pressure;
       touch->phase = TouchPhase::Moved;
     }
 
     TouchEvent te{};
     te.touchId = fingerId;
-    te.x = event->tfinger.x;
-    te.y = event->tfinger.y;
-    te.pressure = event->tfinger.pressure;
+    te.x = event.fingerX;
+    te.y = event.fingerY;
+    te.pressure = event.pressure;
     te.phase = TouchPhase::Moved;
     fire_touch_callbacks(te);
 
@@ -394,13 +392,13 @@ void touch_process_event(const void *nativeEvent) noexcept {
       float surfaceW = 0.0F;
       float surfaceH = 0.0F;
       emulated_mouse_extent(&surfaceW, &surfaceH);
-      SDL_Event fakeEvent{};
-      fakeEvent.type = SDL_EVENT_MOUSE_MOTION;
-      fakeEvent.motion.x = event->tfinger.x * surfaceW;
-      fakeEvent.motion.y = event->tfinger.y * surfaceH;
-      fakeEvent.motion.xrel = event->tfinger.dx * surfaceW;
-      fakeEvent.motion.yrel = event->tfinger.dy * surfaceH;
-      input_process_event(&fakeEvent);
+      PlatformEvent motion{};
+      motion.kind = PlatformEventKind::MouseMove;
+      motion.x = event.fingerX * surfaceW;
+      motion.y = event.fingerY * surfaceH;
+      motion.deltaX = event.fingerDeltaX * surfaceW;
+      motion.deltaY = event.fingerDeltaY * surfaceH;
+      input_process_event(motion);
     }
 
     update_two_finger_gestures();
@@ -411,14 +409,14 @@ void touch_process_event(const void *nativeEvent) noexcept {
   // switch) ends like a lift: the slot is released, listeners see
   // Cancelled, and the emulated button comes up, so no finger can stay
   // held forever. No tap or swipe is recognized from it.
-  case SDL_EVENT_FINGER_CANCELED:
-  case SDL_EVENT_FINGER_UP: {
-    const bool cancelled = (event->type == SDL_EVENT_FINGER_CANCELED);
-    const auto fingerId = static_cast<std::int64_t>(event->tfinger.fingerID);
+  case PlatformEventKind::FingerCanceled:
+  case PlatformEventKind::FingerUp: {
+    const bool cancelled = (event.kind == PlatformEventKind::FingerCanceled);
+    const std::int64_t fingerId = event.fingerId;
     ActiveTouch *touch = find_touch(fingerId);
     if (touch != nullptr) {
-      touch->x = event->tfinger.x;
-      touch->y = event->tfinger.y;
+      touch->x = event.fingerX;
+      touch->y = event.fingerY;
       touch->phase = cancelled ? TouchPhase::Cancelled : TouchPhase::Ended;
 
       if (!cancelled) {
@@ -436,17 +434,17 @@ void touch_process_event(const void *nativeEvent) noexcept {
 
     TouchEvent te{};
     te.touchId = fingerId;
-    te.x = event->tfinger.x;
-    te.y = event->tfinger.y;
+    te.x = event.fingerX;
+    te.y = event.fingerY;
     te.pressure = 0.0F;
     te.phase = cancelled ? TouchPhase::Cancelled : TouchPhase::Ended;
     fire_touch_callbacks(te);
 
     if (g_mouseEmulation && (touch == &g_touches[0])) {
-      SDL_Event fakeEvent{};
-      fakeEvent.type = SDL_EVENT_MOUSE_BUTTON_UP;
-      fakeEvent.button.button = SDL_BUTTON_LEFT;
-      input_process_event(&fakeEvent);
+      PlatformEvent release{};
+      release.kind = PlatformEventKind::MouseButtonUp;
+      release.mouseButton = 0;
+      input_process_event(release);
     }
 
     std::uint32_t activeCount = 0;

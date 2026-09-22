@@ -525,10 +525,7 @@ void input_mapper_begin_frame() noexcept {
 /// Consumes mouse-motion events into the per-frame delta accumulator; all
 /// other event types are seen indirectly via the underlying input state
 /// (is_key_down, etc.) that input_process_event maintains.
-void input_mapper_process_event(const void *nativeEvent) noexcept {
-  if (nativeEvent == nullptr) {
-    return;
-  }
+void input_mapper_process_event(const PlatformEvent & /*event*/) noexcept {
   const MouseState ms = mouse_state();
   g_mouseDeltaX = static_cast<float>(ms.deltaX);
   g_mouseDeltaY = static_cast<float>(ms.deltaY);

@@ -32,6 +32,7 @@
 #include "engine/core/json.h"
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
+#include "engine/core/platform_event.h"
 #include "engine/core/mem_tracker.h"
 #include "engine/core/profiler.h"
 #include "engine/core/reflect.h"
@@ -429,12 +430,15 @@ void editor_render(float frameMs, float utilizationPct) noexcept {
   editor_layout_save_if_dirty();
 }
 
-void editor_process_event(void *sdlEvent) noexcept {
-  if (!editor_session().initialized || (sdlEvent == nullptr)) {
+void editor_process_event(const core::PlatformEvent &event) noexcept {
+  // Only the native event is read here: the ImGui SDL3 backend is written
+  // against SDL and consumes events the engine does not model (pointer
+  // enter and leave, text, IME), which is why every event reaches it.
+  if (!editor_session().initialized || (event.native == nullptr)) {
     return;
   }
 
-  ImGui_ImplSDL3_ProcessEvent(static_cast<SDL_Event *>(sdlEvent));
+  ImGui_ImplSDL3_ProcessEvent(static_cast<const SDL_Event *>(event.native));
 }
 
 void editor_set_world(runtime::World *world) noexcept {

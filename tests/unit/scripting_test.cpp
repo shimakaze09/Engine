@@ -26,6 +26,8 @@
 #include "engine/runtime/service_registry.h"
 #include "engine/runtime/world.h"
 #include "engine/scripting/scripting.h"
+
+#include "../platform_event_from_sdl.h"
 #include "../scripting_clock.h"
 
 namespace {
@@ -1732,7 +1734,7 @@ int main() {
     touchEvent.tfinger.x = 0.25F;
     touchEvent.tfinger.y = 0.75F;
     touchEvent.tfinger.pressure = 1.0F;
-    engine::core::touch_process_event(&touchEvent);
+    engine::core::touch_process_event(engine::tests::from_sdl(touchEvent));
     if (!engine::scripting::call_script_function("verify_coroutine_touch")) {
       engine::core::shutdown_touch_input();
       engine::scripting::shutdown_scripting();

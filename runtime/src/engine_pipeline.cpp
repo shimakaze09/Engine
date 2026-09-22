@@ -19,8 +19,6 @@
 #define __PRFCHWINTRIN_H // NOLINT(bugprone-reserved-identifier)
 #endif
 
-#include <SDL3/SDL.h>
-
 #include "engine/audio/audio.h"
 #include "engine/core/bootstrap.h"
 #include "engine/core/crash_report.h"
@@ -32,6 +30,7 @@
 #include "engine/core/logging.h"
 #include "engine/core/simulation_clock.h"
 #include "engine/core/platform.h"
+#include "engine/core/platform_event.h"
 #include "engine/core/profiler.h"
 #include "engine/core/vfs.h"
 #include "engine/engine.h"
@@ -77,28 +76,23 @@ namespace runtime {
 /// Lets the editor process one native event before deciding whether gameplay
 /// input should see it.
 InputEventRoute process_editor_input_event(const EditorBridge *bridge,
-                                           void *nativeEvent) noexcept {
-  if (nativeEvent == nullptr) {
-    return InputEventRoute::Gameplay;
-  }
-
-  auto *event = static_cast<SDL_Event *>(nativeEvent);
+                                           const core::PlatformEvent &event) noexcept {
   if ((bridge != nullptr) && (bridge->process_event != nullptr)) {
     bridge->process_event(event);
   }
 
-  if (event->type == SDL_EVENT_QUIT) {
+  using Kind = core::PlatformEventKind;
+  if (event.kind == Kind::Quit) {
     return InputEventRoute::QuitRequested;
   }
 
-  const bool keyboardEvent = (event->type == SDL_EVENT_KEY_DOWN) ||
-                             (event->type == SDL_EVENT_KEY_UP) ||
-                             (event->type == SDL_EVENT_TEXT_INPUT) ||
-                             (event->type == SDL_EVENT_TEXT_EDITING);
-  const bool mouseEvent = (event->type == SDL_EVENT_MOUSE_MOTION) ||
-                          (event->type == SDL_EVENT_MOUSE_BUTTON_DOWN) ||
-                          (event->type == SDL_EVENT_MOUSE_BUTTON_UP) ||
-                          (event->type == SDL_EVENT_MOUSE_WHEEL);
+  const bool keyboardEvent =
+      (event.kind == Kind::KeyDown) || (event.kind == Kind::KeyUp) ||
+      (event.kind == Kind::TextInput) || (event.kind == Kind::TextEditing);
+  const bool mouseEvent =
+      (event.kind == Kind::MouseMove) ||
+      (event.kind == Kind::MouseButtonDown) ||
+      (event.kind == Kind::MouseButtonUp) || (event.kind == Kind::MouseWheel);
   const bool captureKeyboard = (bridge != nullptr) &&
                                (bridge->wants_capture_keyboard != nullptr) &&
                                bridge->wants_capture_keyboard();
@@ -505,10 +499,10 @@ bool process_input_events_with_editor() noexcept {
 
   const runtime::EditorBridge *bridge = runtime::editor_bridge();
 
-  SDL_Event event{};
-  while (SDL_PollEvent(&event)) {
+  core::PlatformEvent event{};
+  while (core::platform_poll_event(&event)) {
     const runtime::InputEventRoute route =
-        runtime::process_editor_input_event(bridge, &event);
+        runtime::process_editor_input_event(bridge, event);
     if (route == runtime::InputEventRoute::QuitRequested) {
       // The editor gets a chance to defer the quit behind its own
       // unsaved-change confirm flow; a null hook or a bound-but-clean
@@ -536,7 +530,7 @@ bool process_input_events_with_editor() noexcept {
       continue;
     }
 
-    core::input_process_event(&event);
+    core::input_process_event(event);
   }
 
   core::end_input_frame();

@@ -1,6 +1,7 @@
 // Implements input behavior for the Engine core engine.
 
 #include "engine/core/input.h"
+#include "engine/core/platform_event.h"
 #include "engine/core/input_map.h"
 #include "engine/core/touch_input.h"
 
@@ -8,8 +9,6 @@
     !defined(__PRFCHWINTRIN_H)
 #define __PRFCHWINTRIN_H // NOLINT(bugprone-reserved-identifier)
 #endif
-
-#include <SDL3/SDL.h>
 
 #include <array>
 #include <cstdint>
@@ -48,7 +47,7 @@ MouseStateInternal g_mouse{};
 // Fraction of a wheel notch not yet reported.
 float g_wheelCarry = 0.0F;
 
-/// One controller slot, keyed to the SDL instance id it was announced
+/// One controller slot, keyed to the platform instance id it was announced
 /// under so a second controller's events never land on the first.
 struct GamepadStateInternal final {
   bool connected = false;
@@ -60,30 +59,6 @@ struct GamepadStateInternal final {
 std::array<GamepadStateInternal, static_cast<std::size_t>(kMaxGamepads)>
     g_gamepads{};
 
-// The engine vocabulary must stay SDL's numbering: persisted bindings and
-// scripts written against the raw codes keep their meaning.
-static_assert(kGamepadButton_South == SDL_GAMEPAD_BUTTON_SOUTH);
-static_assert(kGamepadButton_East == SDL_GAMEPAD_BUTTON_EAST);
-static_assert(kGamepadButton_West == SDL_GAMEPAD_BUTTON_WEST);
-static_assert(kGamepadButton_North == SDL_GAMEPAD_BUTTON_NORTH);
-static_assert(kGamepadButton_Back == SDL_GAMEPAD_BUTTON_BACK);
-static_assert(kGamepadButton_Guide == SDL_GAMEPAD_BUTTON_GUIDE);
-static_assert(kGamepadButton_Start == SDL_GAMEPAD_BUTTON_START);
-static_assert(kGamepadButton_LeftStick == SDL_GAMEPAD_BUTTON_LEFT_STICK);
-static_assert(kGamepadButton_RightStick == SDL_GAMEPAD_BUTTON_RIGHT_STICK);
-static_assert(kGamepadButton_LeftShoulder == SDL_GAMEPAD_BUTTON_LEFT_SHOULDER);
-static_assert(kGamepadButton_RightShoulder ==
-              SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER);
-static_assert(kGamepadButton_DpadUp == SDL_GAMEPAD_BUTTON_DPAD_UP);
-static_assert(kGamepadButton_DpadDown == SDL_GAMEPAD_BUTTON_DPAD_DOWN);
-static_assert(kGamepadButton_DpadLeft == SDL_GAMEPAD_BUTTON_DPAD_LEFT);
-static_assert(kGamepadButton_DpadRight == SDL_GAMEPAD_BUTTON_DPAD_RIGHT);
-static_assert(kGamepadAxis_LeftX == SDL_GAMEPAD_AXIS_LEFTX);
-static_assert(kGamepadAxis_LeftY == SDL_GAMEPAD_AXIS_LEFTY);
-static_assert(kGamepadAxis_RightX == SDL_GAMEPAD_AXIS_RIGHTX);
-static_assert(kGamepadAxis_RightY == SDL_GAMEPAD_AXIS_RIGHTY);
-static_assert(kGamepadAxis_LeftTrigger == SDL_GAMEPAD_AXIS_LEFT_TRIGGER);
-static_assert(kGamepadAxis_RightTrigger == SDL_GAMEPAD_AXIS_RIGHT_TRIGGER);
 
 /// Slot holding the device with this instance id, or nullptr.
 GamepadStateInternal *find_gamepad(std::uint32_t instanceId) noexcept {
@@ -327,19 +302,13 @@ void release_all_held_input() noexcept {
 
 } // namespace
 
-void input_process_event(const void *nativeEvent) noexcept {
-  if (nativeEvent == nullptr) {
-    return;
-  }
-
-  const auto *event = static_cast<const SDL_Event *>(nativeEvent);
-
-  switch (event->type) {
-  case SDL_EVENT_KEY_DOWN:
-  case SDL_EVENT_KEY_UP: {
-    const int scancode = static_cast<int>(event->key.scancode);
+void input_process_event(const PlatformEvent &event) noexcept {
+  switch (event.kind) {
+  case PlatformEventKind::KeyDown:
+  case PlatformEventKind::KeyUp: {
+    const int scancode = event.scancode;
     if ((scancode >= 0) && (scancode < kMaxScancodes)) {
-      const bool down = (event->type == SDL_EVENT_KEY_DOWN);
+      const bool down = (event.kind == PlatformEventKind::KeyDown);
       g_keyState[static_cast<std::size_t>(scancode)] = down;
       KeyEvent ke{};
       ke.scancode = scancode;
@@ -348,29 +317,29 @@ void input_process_event(const void *nativeEvent) noexcept {
     }
     break;
   }
-  case SDL_EVENT_MOUSE_MOTION: {
-    g_mouse.x = static_cast<int>(event->motion.x);
-    g_mouse.y = static_cast<int>(event->motion.y);
-    g_mouse.deltaX += static_cast<int>(event->motion.xrel);
-    g_mouse.deltaY += static_cast<int>(event->motion.yrel);
+  case PlatformEventKind::MouseMove: {
+    g_mouse.x = static_cast<int>(event.x);
+    g_mouse.y = static_cast<int>(event.y);
+    g_mouse.deltaX += static_cast<int>(event.deltaX);
+    g_mouse.deltaY += static_cast<int>(event.deltaY);
     MouseMoveEvent me{};
-    me.x = static_cast<int>(event->motion.x);
-    me.y = static_cast<int>(event->motion.y);
-    me.deltaX = static_cast<int>(event->motion.xrel);
-    me.deltaY = static_cast<int>(event->motion.yrel);
+    me.x = static_cast<int>(event.x);
+    me.y = static_cast<int>(event.y);
+    me.deltaX = static_cast<int>(event.deltaX);
+    me.deltaY = static_cast<int>(event.deltaY);
     emit(me);
     break;
   }
-  case SDL_EVENT_MOUSE_BUTTON_DOWN:
-  case SDL_EVENT_MOUSE_BUTTON_UP: {
+  case PlatformEventKind::MouseButtonDown:
+  case PlatformEventKind::MouseButtonUp: {
     // A button event carries the cursor too: a touch-emulated tap is a
     // press and release with no motion between, so the position must
     // land here or the press reads a stale cursor.
-    g_mouse.x = static_cast<int>(event->button.x);
-    g_mouse.y = static_cast<int>(event->button.y);
-    const int button = static_cast<int>(event->button.button) - 1;
+    g_mouse.x = static_cast<int>(event.x);
+    g_mouse.y = static_cast<int>(event.y);
+    const int button = event.mouseButton;
     if ((button >= 0) && (button < kMaxMouseButtons)) {
-      const bool down = (event->type == SDL_EVENT_MOUSE_BUTTON_DOWN);
+      const bool down = (event.kind == PlatformEventKind::MouseButtonDown);
       g_mouse.buttons[static_cast<std::size_t>(button)] = down;
       MouseButtonEvent mbe{};
       mbe.button = button;
@@ -379,44 +348,42 @@ void input_process_event(const void *nativeEvent) noexcept {
     }
     break;
   }
-  case SDL_EVENT_MOUSE_WHEEL: {
+  case PlatformEventKind::MouseWheel: {
     // Precise trackpads scroll in fractions of a notch; the fraction is
     // carried across events so it is counted once it adds up to a notch
     // instead of truncating to nothing.
-    g_wheelCarry += event->wheel.y;
+    g_wheelCarry += event.wheelY;
     const int notches = static_cast<int>(g_wheelCarry);
     g_mouse.scrollDelta += notches;
     g_wheelCarry -= static_cast<float>(notches);
     break;
   }
-  case SDL_EVENT_WINDOW_FOCUS_LOST:
+  case PlatformEventKind::WindowFocusLost:
     release_all_held_input();
     break;
-  case SDL_EVENT_GAMEPAD_ADDED:
-    attach_gamepad(static_cast<std::uint32_t>(event->gdevice.which));
+  case PlatformEventKind::GamepadAdded:
+    attach_gamepad(event.deviceId);
     break;
-  case SDL_EVENT_GAMEPAD_REMOVED:
-    detach_gamepad(static_cast<std::uint32_t>(event->gdevice.which));
+  case PlatformEventKind::GamepadRemoved:
+    detach_gamepad(event.deviceId);
     break;
-  case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
-  case SDL_EVENT_GAMEPAD_BUTTON_UP: {
+  case PlatformEventKind::GamepadButtonDown:
+  case PlatformEventKind::GamepadButtonUp: {
     // A device that was never announced (or was removed) has no slot;
     // its late events are dropped rather than applied to another slot.
-    GamepadStateInternal *slot =
-        find_gamepad(static_cast<std::uint32_t>(event->gbutton.which));
-    const int button = static_cast<int>(event->gbutton.button);
+    GamepadStateInternal *slot = find_gamepad(event.deviceId);
+    const int button = event.gamepadButton;
     if ((slot != nullptr) && (button >= 0) && (button < kMaxGamepadButtons)) {
       slot->buttons[static_cast<std::size_t>(button)] =
-          (event->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN);
+          (event.kind == PlatformEventKind::GamepadButtonDown);
     }
     break;
   }
-  case SDL_EVENT_GAMEPAD_AXIS_MOTION: {
-    GamepadStateInternal *slot =
-        find_gamepad(static_cast<std::uint32_t>(event->gaxis.which));
-    const int axis = static_cast<int>(event->gaxis.axis);
+  case PlatformEventKind::GamepadAxis: {
+    GamepadStateInternal *slot = find_gamepad(event.deviceId);
+    const int axis = event.gamepadAxis;
     if ((slot != nullptr) && (axis >= 0) && (axis < kMaxGamepadAxes)) {
-      slot->axes[static_cast<std::size_t>(axis)] = event->gaxis.value;
+      slot->axes[static_cast<std::size_t>(axis)] = event.axisValue;
     }
     break;
   }
@@ -424,8 +391,8 @@ void input_process_event(const void *nativeEvent) noexcept {
     break;
   }
 
-  input_mapper_process_event(nativeEvent);
-  touch_process_event(nativeEvent);
+  input_mapper_process_event(event);
+  touch_process_event(event);
 }
 
 /// Ends the input frame for the mapper and touch subsystems; keyboard and

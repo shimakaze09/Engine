@@ -43,9 +43,9 @@ Four checks, one root cause each:
      one editor TU that drives the ImGui backend. Every other user is a
      place the rest of the engine learned SDL's vocabulary, and each one
      that exists today is listed in KNOWN_SDL_USERS with the #312 item
-     that removes it. Includes are what spread it: seven editor TUs
-     carried SDL and the backend header with no symbol from either, and
-     nothing noticed until an audit counted them.
+     that removes it -- none remain. Includes are what spread it: seven
+     editor TUs carried SDL and the backend header with no symbol from
+     either, and nothing noticed until an audit counted them.
 
 Today's known violations are listed in KNOWN_VIOLATIONS with the issue
 that tracks each. An entry that no longer matches anything is itself a
@@ -237,17 +237,12 @@ SANCTIONED_SDL_USERS: dict[str, str] = {
     "editor/src/editor.cpp": "the ImGui SDL3 backend's one driver",
 }
 
-# Where SDL is today and should not be, each with the #312 item that
-# removes it. The fix that removes the last include deletes the entry, or
-# the stale-entry check fails.
-KNOWN_SDL_USERS: dict[str, str] = {
-    "core/src/input.cpp": "issue #312 item 1: decodes SDL_Event until the "
-    "typed platform event lands",
-    "core/src/touch_input.cpp": "issue #312 item 1: decodes and forges "
-    "SDL_Event until the typed platform event lands",
-    "runtime/src/engine_pipeline.cpp": "issue #312 item 1: polls and "
-    "classifies SDL events itself",
-}
+# Where SDL is today and should not be, each with the issue that removes
+# it. Empty: the typed platform event took SDL out of input, touch and the
+# frame pipeline, and the window surface took it out of the editor's
+# document code. An entry that stops matching is a finding, so this stays
+# empty unless someone deliberately adds a tracked exception.
+KNOWN_SDL_USERS: dict[str, str] = {}
 
 
 class Finding:

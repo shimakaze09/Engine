@@ -7,6 +7,8 @@
 
 namespace engine::core {
 
+struct PlatformEvent;
+
 // ---------------------------------------------------------------------------
 // Input Binding — a single physical input source that can trigger an action.
 // ---------------------------------------------------------------------------
@@ -152,7 +154,7 @@ bool rebind_action(const char *actionName, std::uint32_t bindingIndex,
 // Per-frame processing — called from the main input loop.
 // ---------------------------------------------------------------------------
 
-void input_mapper_process_event(const void *nativeEvent) noexcept;
+void input_mapper_process_event(const PlatformEvent &event) noexcept;
 /// Starts an input frame (captures pressed-edge state).
 void input_mapper_begin_frame() noexcept;
 /// Ends the input frame (clears per-frame edges).

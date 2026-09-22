@@ -9,6 +9,10 @@
 #include "engine/content/asset_metadata.h"
 #include "engine/renderer/material.h"
 
+namespace engine::core {
+struct PlatformEvent;
+} // namespace engine::core
+
 namespace engine::runtime {
 
 class World;
@@ -33,7 +37,9 @@ struct EditorBridge final {
   void (*shutdown)() noexcept = nullptr;
   void (*new_frame)() noexcept = nullptr;
   void (*render)(float frameMs, float utilizationPct) noexcept = nullptr;
-  void (*process_event)(void *sdlEvent) noexcept = nullptr;
+  // Every polled platform event, before gameplay input sees it. The
+  // editor hands event.native to its ImGui SDL3 backend.
+  void (*process_event)(const core::PlatformEvent &event) noexcept = nullptr;
   void (*set_world)(World *world) noexcept = nullptr;
   bool (*is_playing)() noexcept = nullptr;
   bool (*is_paused)() noexcept = nullptr;
@@ -42,7 +48,7 @@ struct EditorBridge final {
   // True at most once per Step click while paused: the pipeline consumes
   // the request and simulates exactly one fixed step that frame.
   bool (*consume_step_request)() noexcept = nullptr;
-  // Called instead of an immediate quit on SDL_EVENT_QUIT; true lets the
+  // Called instead of an immediate quit on a Quit event; true lets the
   // runtime quit right away (the editor has nothing to protect), false
   // means the editor armed its own unsaved-change confirm flow and will
   // request the quit itself once that resolves. Null behaves as true.

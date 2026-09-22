@@ -7,6 +7,7 @@
 #endif
 
 #include "engine/core/platform.h"
+#include "engine/core/platform_event.h"
 
 #if defined(__clang__) && (defined(__x86_64__) || defined(__i386__)) && !defined(__PRFCHWINTRIN_H)
 #define __PRFCHWINTRIN_H // NOLINT(bugprone-reserved-identifier)
@@ -39,6 +40,7 @@
 #include <unistd.h>
 #endif
 
+#include "engine/core/input.h"
 #include "engine/core/logging.h"
 
 namespace engine::core {
@@ -343,6 +345,141 @@ void SDLCALL dialog_trampoline(void *userdata, const char *const *filelist,
   slot->inUse.store(false, std::memory_order_release);
 }
 
+// The engine's gamepad vocabulary is SDL's numbering and must stay so:
+// persisted bindings and scripts written against the raw codes keep their
+// meaning. Checked here -- the one place both are in view -- so the
+// translation below can pass the values through and a reordering on
+// either side fails to compile.
+static_assert(kGamepadButton_South == SDL_GAMEPAD_BUTTON_SOUTH);
+static_assert(kGamepadButton_East == SDL_GAMEPAD_BUTTON_EAST);
+static_assert(kGamepadButton_West == SDL_GAMEPAD_BUTTON_WEST);
+static_assert(kGamepadButton_North == SDL_GAMEPAD_BUTTON_NORTH);
+static_assert(kGamepadButton_Back == SDL_GAMEPAD_BUTTON_BACK);
+static_assert(kGamepadButton_Guide == SDL_GAMEPAD_BUTTON_GUIDE);
+static_assert(kGamepadButton_Start == SDL_GAMEPAD_BUTTON_START);
+static_assert(kGamepadButton_LeftStick == SDL_GAMEPAD_BUTTON_LEFT_STICK);
+static_assert(kGamepadButton_RightStick == SDL_GAMEPAD_BUTTON_RIGHT_STICK);
+static_assert(kGamepadButton_LeftShoulder == SDL_GAMEPAD_BUTTON_LEFT_SHOULDER);
+static_assert(kGamepadButton_RightShoulder ==
+              SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER);
+static_assert(kGamepadButton_DpadUp == SDL_GAMEPAD_BUTTON_DPAD_UP);
+static_assert(kGamepadButton_DpadDown == SDL_GAMEPAD_BUTTON_DPAD_DOWN);
+static_assert(kGamepadButton_DpadLeft == SDL_GAMEPAD_BUTTON_DPAD_LEFT);
+static_assert(kGamepadButton_DpadRight == SDL_GAMEPAD_BUTTON_DPAD_RIGHT);
+static_assert(kGamepadAxis_LeftX == SDL_GAMEPAD_AXIS_LEFTX);
+static_assert(kGamepadAxis_LeftY == SDL_GAMEPAD_AXIS_LEFTY);
+static_assert(kGamepadAxis_RightX == SDL_GAMEPAD_AXIS_RIGHTX);
+static_assert(kGamepadAxis_RightY == SDL_GAMEPAD_AXIS_RIGHTY);
+static_assert(kGamepadAxis_LeftTrigger == SDL_GAMEPAD_AXIS_LEFT_TRIGGER);
+static_assert(kGamepadAxis_RightTrigger == SDL_GAMEPAD_AXIS_RIGHT_TRIGGER);
+
+/// Translates one SDL event. Every event produces a PlatformEvent -- the
+/// ones without an engine meaning as Other -- so the editor's ImGui
+/// backend, which reads the native event, still sees all of them.
+PlatformEvent translate_event(const SDL_Event &event) noexcept {
+  PlatformEvent out{};
+  out.timestampNs = event.common.timestamp;
+  out.native = &event;
+
+  switch (event.type) {
+  case SDL_EVENT_QUIT:
+    out.kind = PlatformEventKind::Quit;
+    break;
+  case SDL_EVENT_KEY_DOWN:
+  case SDL_EVENT_KEY_UP:
+    out.kind = (event.type == SDL_EVENT_KEY_DOWN) ? PlatformEventKind::KeyDown
+                                                  : PlatformEventKind::KeyUp;
+    out.scancode = static_cast<int>(event.key.scancode);
+    out.repeat = event.key.repeat;
+    break;
+  case SDL_EVENT_TEXT_INPUT:
+    out.kind = PlatformEventKind::TextInput;
+    break;
+  case SDL_EVENT_TEXT_EDITING:
+    out.kind = PlatformEventKind::TextEditing;
+    break;
+  case SDL_EVENT_MOUSE_MOTION:
+    out.kind = PlatformEventKind::MouseMove;
+    out.x = event.motion.x;
+    out.y = event.motion.y;
+    out.deltaX = event.motion.xrel;
+    out.deltaY = event.motion.yrel;
+    break;
+  case SDL_EVENT_MOUSE_BUTTON_DOWN:
+  case SDL_EVENT_MOUSE_BUTTON_UP:
+    out.kind = (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN)
+                   ? PlatformEventKind::MouseButtonDown
+                   : PlatformEventKind::MouseButtonUp;
+    out.x = event.button.x;
+    out.y = event.button.y;
+    // SDL numbers buttons from 1 (SDL_BUTTON_LEFT); the engine from 0.
+    out.mouseButton = static_cast<int>(event.button.button) - 1;
+    break;
+  case SDL_EVENT_MOUSE_WHEEL:
+    out.kind = PlatformEventKind::MouseWheel;
+    out.wheelY = event.wheel.y;
+    break;
+  case SDL_EVENT_FINGER_DOWN:
+  case SDL_EVENT_FINGER_MOTION:
+  case SDL_EVENT_FINGER_UP:
+  case SDL_EVENT_FINGER_CANCELED:
+    out.kind = (event.type == SDL_EVENT_FINGER_DOWN)
+                   ? PlatformEventKind::FingerDown
+               : (event.type == SDL_EVENT_FINGER_MOTION)
+                   ? PlatformEventKind::FingerMove
+               : (event.type == SDL_EVENT_FINGER_UP)
+                   ? PlatformEventKind::FingerUp
+                   : PlatformEventKind::FingerCanceled;
+    out.fingerId = static_cast<std::int64_t>(event.tfinger.fingerID);
+    out.fingerX = event.tfinger.x;
+    out.fingerY = event.tfinger.y;
+    out.fingerDeltaX = event.tfinger.dx;
+    out.fingerDeltaY = event.tfinger.dy;
+    out.pressure = event.tfinger.pressure;
+    break;
+  case SDL_EVENT_GAMEPAD_ADDED:
+  case SDL_EVENT_GAMEPAD_REMOVED:
+    out.kind = (event.type == SDL_EVENT_GAMEPAD_ADDED)
+                   ? PlatformEventKind::GamepadAdded
+                   : PlatformEventKind::GamepadRemoved;
+    out.deviceId = static_cast<std::uint32_t>(event.gdevice.which);
+    break;
+  case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
+  case SDL_EVENT_GAMEPAD_BUTTON_UP:
+    out.kind = (event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN)
+                   ? PlatformEventKind::GamepadButtonDown
+                   : PlatformEventKind::GamepadButtonUp;
+    out.deviceId = static_cast<std::uint32_t>(event.gbutton.which);
+    out.gamepadButton = static_cast<int>(event.gbutton.button);
+    break;
+  case SDL_EVENT_GAMEPAD_AXIS_MOTION:
+    out.kind = PlatformEventKind::GamepadAxis;
+    out.deviceId = static_cast<std::uint32_t>(event.gaxis.which);
+    out.gamepadAxis = static_cast<int>(event.gaxis.axis);
+    out.axisValue = event.gaxis.value;
+    break;
+  case SDL_EVENT_WINDOW_FOCUS_GAINED:
+    out.kind = PlatformEventKind::WindowFocusGained;
+    break;
+  case SDL_EVENT_WINDOW_FOCUS_LOST:
+    out.kind = PlatformEventKind::WindowFocusLost;
+    break;
+  case SDL_EVENT_WINDOW_RESIZED:
+    out.kind = PlatformEventKind::WindowResized;
+    out.width = static_cast<int>(event.window.data1);
+    out.height = static_cast<int>(event.window.data2);
+    break;
+  default:
+    out.kind = PlatformEventKind::Other;
+    break;
+  }
+  return out;
+}
+
+// The event behind the most recent poll. A PlatformEvent's native pointer
+// refers to it, which is why that pointer lasts only until the next poll.
+SDL_Event g_polledEvent{};
+
 } // namespace
 
 bool platform_gamepads_available() noexcept { return g_gamepadSubsystem; }
@@ -513,6 +650,23 @@ void render_drawable_size(int *outWidth, int *outHeight) noexcept {
 }
 
 void *get_sdl_window() noexcept { return g_window; }
+
+bool platform_poll_event(PlatformEvent *outEvent) noexcept {
+  if ((outEvent == nullptr) || !SDL_PollEvent(&g_polledEvent)) {
+    return false;
+  }
+  *outEvent = translate_event(g_polledEvent);
+  return true;
+}
+
+bool platform_translate_native_event(const void *nativeEvent,
+                                     PlatformEvent *outEvent) noexcept {
+  if ((nativeEvent == nullptr) || (outEvent == nullptr)) {
+    return false;
+  }
+  *outEvent = translate_event(*static_cast<const SDL_Event *>(nativeEvent));
+  return true;
+}
 
 float platform_display_scale() noexcept {
   if (g_window == nullptr) {

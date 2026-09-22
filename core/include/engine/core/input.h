@@ -9,6 +9,8 @@
 
 namespace engine::core {
 
+struct PlatformEvent;
+
 // Scancode type. Values match SDL_SCANCODE_* from the SDL3 backend.
 using KeyScancode = int;
 
@@ -20,8 +22,10 @@ void shutdown_input() noexcept;
 
 // Called once per frame around the platform event loop.
 void begin_input_frame() noexcept;
-/// Feeds one native (SDL) event into keyboard/mouse state.
-void input_process_event(const void *nativeEvent) noexcept;
+/// Applies one platform event to key, mouse and gamepad state, then hands
+/// it to the action mapper and touch. Every event the pump polls goes
+/// through here unless the editor captured it.
+void input_process_event(const PlatformEvent &event) noexcept;
 /// Ends the requested operation or profiling range for input frame.
 void end_input_frame() noexcept;
 

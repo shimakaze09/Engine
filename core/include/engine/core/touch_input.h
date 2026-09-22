@@ -7,6 +7,8 @@
 
 namespace engine::core {
 
+struct PlatformEvent;
+
 // ---------------------------------------------------------------------------
 // Touch Phase
 // ---------------------------------------------------------------------------
@@ -87,8 +89,10 @@ void shutdown_touch_input() noexcept;
 // part of the run-scoped input reset.
 void clear_touch_callbacks() noexcept;
 
-/// Converts touch process event into the target representation.
-void touch_process_event(const void *nativeEvent) noexcept;
+/// Tracks fingers and recognizes gestures from one platform event, and --
+/// with mouse emulation on -- drives the mouse from the first finger by
+/// feeding input the same button and motion events a mouse would.
+void touch_process_event(const PlatformEvent &event) noexcept;
 /// Converts touch begin frame into the target representation.
 void touch_begin_frame() noexcept;
 /// Converts touch end frame into the target representation.

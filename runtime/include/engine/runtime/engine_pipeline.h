@@ -7,21 +7,25 @@
 
 namespace engine {
 
+namespace core {
+struct PlatformEvent;
+} // namespace core
+
 namespace runtime {
 class World;
 struct EditorBridge;
 
-/// Result of routing one native platform input event through editor capture.
+/// Result of routing one platform input event through editor capture.
 enum class InputEventRoute : std::uint8_t {
   Gameplay = 0,
   EditorCaptured,
   QuitRequested,
 };
 
-/// Lets the editor process one native event before deciding whether gameplay
-/// input should see it.
+/// Lets the editor process one platform event before deciding whether
+/// gameplay input should see it.
 InputEventRoute process_editor_input_event(const EditorBridge *bridge,
-                                           void *nativeEvent) noexcept;
+                                           const core::PlatformEvent &event) noexcept;
 
 /// Processes a queued script scene operation, if one exists.
 /// Returns false when a pending operation exists but cannot be applied;

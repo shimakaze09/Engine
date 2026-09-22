@@ -6,6 +6,10 @@ namespace engine::runtime {
 class World;
 }
 
+namespace engine::core {
+struct PlatformEvent;
+} // namespace engine::core
+
 namespace engine::editor {
 
 /// Initializes the owning system for editor.
@@ -16,8 +20,8 @@ void shutdown_editor() noexcept;
 void editor_new_frame() noexcept;
 /// Draws all editor panels and renders the ImGui frame.
 void editor_render(float frameMs, float utilizationPct) noexcept;
-/// Feeds one SDL event to ImGui (and gizmo) input.
-void editor_process_event(void *sdlEvent) noexcept;
+/// Feeds one platform event to ImGui (and gizmo) input.
+void editor_process_event(const core::PlatformEvent &event) noexcept;
 /// Attaches or detaches the runtime world the editor edits.
 void editor_set_world(runtime::World *world) noexcept;
 /// True while play mode is active.

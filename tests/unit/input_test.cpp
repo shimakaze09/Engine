@@ -6,6 +6,8 @@
 #include "engine/core/input.h"
 #include "engine/core/touch_input.h"
 
+#include "../platform_event_from_sdl.h"
+
 #if defined(__clang__) && (defined(__x86_64__) || defined(__i386__)) && !defined(__PRFCHWINTRIN_H)
 #define __PRFCHWINTRIN_H // NOLINT(bugprone-reserved-identifier)
 #endif
@@ -85,9 +87,9 @@ bool test_wheel_accumulates_fractions() noexcept {
   ev.type = SDL_EVENT_MOUSE_WHEEL;
   ev.wheel.y = 0.5F;
   begin_input_frame();
-  input_process_event(&ev);
-  input_process_event(&ev);
-  input_process_event(&ev);
+  input_process_event(engine::tests::from_sdl(ev));
+  input_process_event(engine::tests::from_sdl(ev));
+  input_process_event(engine::tests::from_sdl(ev));
   end_input_frame();
   const int notches = mouse_state().scrollDelta;
   shutdown_input();
@@ -210,7 +212,7 @@ bool test_axis_value_from_key_events() noexcept {
   begin_input_frame();
   ev.type = SDL_EVENT_KEY_DOWN;
   ev.key.scancode = static_cast<SDL_Scancode>(kKey_D);
-  input_process_event(&ev);
+  input_process_event(engine::tests::from_sdl(ev));
   end_input_frame();
   if (axis_value("move_x") != 1.0F) {
     shutdown_input();
@@ -220,10 +222,10 @@ bool test_axis_value_from_key_events() noexcept {
   begin_input_frame();
   ev.type = SDL_EVENT_KEY_UP;
   ev.key.scancode = static_cast<SDL_Scancode>(kKey_D);
-  input_process_event(&ev);
+  input_process_event(engine::tests::from_sdl(ev));
   ev.type = SDL_EVENT_KEY_DOWN;
   ev.key.scancode = static_cast<SDL_Scancode>(kKey_A);
-  input_process_event(&ev);
+  input_process_event(engine::tests::from_sdl(ev));
   end_input_frame();
   if (axis_value("move_x") != -1.0F) {
     shutdown_input();
@@ -233,7 +235,7 @@ bool test_axis_value_from_key_events() noexcept {
   begin_input_frame();
   ev.type = SDL_EVENT_KEY_DOWN;
   ev.key.scancode = static_cast<SDL_Scancode>(kKey_D);
-  input_process_event(&ev);
+  input_process_event(engine::tests::from_sdl(ev));
   end_input_frame();
   if (axis_value("move_x") != 0.0F) {
     shutdown_input();
@@ -251,19 +253,19 @@ bool test_gamepad_axis_deadzone() noexcept {
 
   SDL_Event ev{};
   ev.type = SDL_EVENT_GAMEPAD_ADDED;
-  input_process_event(&ev);
+  input_process_event(engine::tests::from_sdl(ev));
 
   ev.type = SDL_EVENT_GAMEPAD_AXIS_MOTION;
   ev.gaxis.axis = SDL_GAMEPAD_AXIS_LEFTX;
   ev.gaxis.value = 4000; // under default deadzone
-  input_process_event(&ev);
+  input_process_event(engine::tests::from_sdl(ev));
   if (gamepad_axis_value(SDL_GAMEPAD_AXIS_LEFTX) != 0.0F) {
     shutdown_input();
     return false;
   }
 
   ev.gaxis.value = 20000;
-  input_process_event(&ev);
+  input_process_event(engine::tests::from_sdl(ev));
   if (gamepad_axis_value(SDL_GAMEPAD_AXIS_LEFTX) <= 0.0F) {
     shutdown_input();
     return false;
@@ -280,11 +282,11 @@ bool test_gamepad_button_state() noexcept {
 
   SDL_Event ev{};
   ev.type = SDL_EVENT_GAMEPAD_ADDED;
-  input_process_event(&ev);
+  input_process_event(engine::tests::from_sdl(ev));
 
   ev.type = SDL_EVENT_GAMEPAD_BUTTON_DOWN;
   ev.gbutton.button = SDL_GAMEPAD_BUTTON_SOUTH;
-  input_process_event(&ev);
+  input_process_event(engine::tests::from_sdl(ev));
   if (!is_gamepad_button_down(SDL_GAMEPAD_BUTTON_SOUTH)) {
     shutdown_input();
     return false;
@@ -292,7 +294,7 @@ bool test_gamepad_button_state() noexcept {
 
   ev.type = SDL_EVENT_GAMEPAD_BUTTON_UP;
   ev.gbutton.button = SDL_GAMEPAD_BUTTON_SOUTH;
-  input_process_event(&ev);
+  input_process_event(engine::tests::from_sdl(ev));
   if (is_gamepad_button_down(SDL_GAMEPAD_BUTTON_SOUTH)) {
     shutdown_input();
     return false;
@@ -316,9 +318,9 @@ bool test_gamepad_slots_keyed_by_instance_id() noexcept {
   SDL_Event ev{};
   ev.type = SDL_EVENT_GAMEPAD_ADDED;
   ev.gdevice.which = 7U;
-  input_process_event(&ev);
+  input_process_event(engine::tests::from_sdl(ev));
   ev.gdevice.which = 9U;
-  input_process_event(&ev);
+  input_process_event(engine::tests::from_sdl(ev));
   ok = ok && (connected_gamepad_count() == 2) && is_gamepad_connected(0) &&
        is_gamepad_connected(1) && !is_gamepad_connected(2);
 
@@ -326,7 +328,7 @@ bool test_gamepad_slots_keyed_by_instance_id() noexcept {
   ev.type = SDL_EVENT_GAMEPAD_BUTTON_DOWN;
   ev.gbutton.which = 9U;
   ev.gbutton.button = SDL_GAMEPAD_BUTTON_SOUTH;
-  input_process_event(&ev);
+  input_process_event(engine::tests::from_sdl(ev));
   ok = ok && is_gamepad_button_down(kGamepadButton_South, 1) &&
        !is_gamepad_button_down(kGamepadButton_South, 0) &&
        !is_gamepad_button_down(kGamepadButton_South);
@@ -336,7 +338,7 @@ bool test_gamepad_slots_keyed_by_instance_id() noexcept {
   ev.gaxis.which = 7U;
   ev.gaxis.axis = SDL_GAMEPAD_AXIS_LEFTX;
   ev.gaxis.value = 20000;
-  input_process_event(&ev);
+  input_process_event(engine::tests::from_sdl(ev));
   ok = ok && (gamepad_axis_value(kGamepadAxis_LeftX) > 0.0F) &&
        (gamepad_axis_value(kGamepadAxis_LeftX, 8000, 1) == 0.0F);
 
@@ -344,7 +346,7 @@ bool test_gamepad_slots_keyed_by_instance_id() noexcept {
   ev.type = SDL_EVENT_GAMEPAD_BUTTON_DOWN;
   ev.gbutton.which = 42U;
   ev.gbutton.button = SDL_GAMEPAD_BUTTON_EAST;
-  input_process_event(&ev);
+  input_process_event(engine::tests::from_sdl(ev));
   ok = ok && !is_gamepad_button_down(kGamepadButton_East, 0) &&
        !is_gamepad_button_down(kGamepadButton_East, 1) &&
        (connected_gamepad_count() == 2);
@@ -352,7 +354,7 @@ bool test_gamepad_slots_keyed_by_instance_id() noexcept {
   // Removing the first controller frees slot 0 and leaves slot 1 as is.
   ev.type = SDL_EVENT_GAMEPAD_REMOVED;
   ev.gdevice.which = 7U;
-  input_process_event(&ev);
+  input_process_event(engine::tests::from_sdl(ev));
   ok = ok && !is_gamepad_connected(0) && is_gamepad_connected(1) &&
        (connected_gamepad_count() == 1) &&
        is_gamepad_button_down(kGamepadButton_South, 1) &&
@@ -363,29 +365,29 @@ bool test_gamepad_slots_keyed_by_instance_id() noexcept {
   // one more.
   ev.type = SDL_EVENT_GAMEPAD_ADDED;
   ev.gdevice.which = 11U;
-  input_process_event(&ev);
+  input_process_event(engine::tests::from_sdl(ev));
   ok = ok && is_gamepad_connected(0) && (connected_gamepad_count() == 2);
   ev.gdevice.which = 9U;
-  input_process_event(&ev);
+  input_process_event(engine::tests::from_sdl(ev));
   ok = ok && (connected_gamepad_count() == 2) && is_gamepad_connected(1) &&
        !is_gamepad_button_down(kGamepadButton_South, 1);
   ev.type = SDL_EVENT_GAMEPAD_BUTTON_DOWN;
   ev.gbutton.which = 9U;
   ev.gbutton.button = SDL_GAMEPAD_BUTTON_SOUTH;
-  input_process_event(&ev);
+  input_process_event(engine::tests::from_sdl(ev));
   ev.type = SDL_EVENT_GAMEPAD_ADDED;
   ev.gdevice.which = 13U;
-  input_process_event(&ev);
+  input_process_event(engine::tests::from_sdl(ev));
   ev.gdevice.which = 15U;
-  input_process_event(&ev);
+  input_process_event(engine::tests::from_sdl(ev));
   ok = ok && (connected_gamepad_count() == kMaxGamepads);
   ev.gdevice.which = 17U;
-  input_process_event(&ev);
+  input_process_event(engine::tests::from_sdl(ev));
   ok = ok && (connected_gamepad_count() == kMaxGamepads);
   ev.type = SDL_EVENT_GAMEPAD_BUTTON_DOWN;
   ev.gbutton.which = 17U;
   ev.gbutton.button = SDL_GAMEPAD_BUTTON_SOUTH;
-  input_process_event(&ev);
+  input_process_event(engine::tests::from_sdl(ev));
   for (int slot = 0; slot < kMaxGamepads; ++slot) {
     ok = ok && ((slot == 1) ==
                 is_gamepad_button_down(kGamepadButton_South, slot));
@@ -460,7 +462,7 @@ bool test_touch_integrated_lifecycle() noexcept {
   ev.tfinger.x = 0.25F;
   ev.tfinger.y = 0.25F;
   ev.tfinger.pressure = 1.0F;
-  input_process_event(&ev);
+  input_process_event(engine::tests::from_sdl(ev));
 
   if (active_touch_count() != 1U) {
     shutdown_input();
@@ -472,7 +474,7 @@ bool test_touch_integrated_lifecycle() noexcept {
     return false;
   }
 
-  input_process_event(&ev);
+  input_process_event(engine::tests::from_sdl(ev));
   return active_touch_count() == 0U;
 }
 

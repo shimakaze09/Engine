@@ -1,14 +1,19 @@
 // The window surface the editor now reaches through the platform instead of
 // holding SDL_Window itself (#312 items 2-3): title, display scale, and the
-// refusal paths of the native file dialog.
+// refusal paths of the native file dialog -- plus the event translation
+// that replaced SDL_Event above the platform layer (#312 item 1).
 //
 // A real dialog cannot open in CI -- there is no portal or desktop to show
 // it -- so the dialog cases here are the refusals, which are the ones a
 // caller has to get right: a refused dialog never calls back, and the
 // editor turns that into a cancel so nothing waits on it forever.
 
+#include "engine/core/input.h"
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
+#include "engine/core/platform_event.h"
+
+#include <SDL3/SDL.h>
 
 #include <cstdio>
 
@@ -49,6 +54,63 @@ int main() {
                                    nullptr, &filter, 1, nullptr),
         "a dialog with no window to parent it is refused");
   CHECK(!g_called, "a refused dialog never calls back");
+
+  // --- Event translation: the conversions that are easy to get wrong.
+  CHECK(!platform_translate_native_event(nullptr, nullptr),
+        "a null native event is refused");
+  {
+    // SDL numbers mouse buttons from 1, the engine from 0.
+    SDL_Event native{};
+    native.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+    native.button.button = SDL_BUTTON_RIGHT;
+    native.button.x = 12.5F;
+    native.button.y = 7.0F;
+    PlatformEvent event{};
+    CHECK(platform_translate_native_event(&native, &event), "translates");
+    CHECK(event.kind == PlatformEventKind::MouseButtonDown, "button kind");
+    CHECK(event.mouseButton == 2, "the right button is engine button 2");
+    CHECK((event.x == 12.5F) && (event.y == 7.0F),
+          "the cursor rides on the button event");
+  }
+  {
+    SDL_Event native{};
+    native.type = SDL_EVENT_KEY_DOWN;
+    native.key.scancode = SDL_SCANCODE_W;
+    native.key.repeat = true;
+    native.common.timestamp = 123456789U;
+    PlatformEvent event{};
+    CHECK(platform_translate_native_event(&native, &event), "translates");
+    CHECK(event.kind == PlatformEventKind::KeyDown, "key kind");
+    CHECK(event.scancode == static_cast<int>(SDL_SCANCODE_W),
+          "scancodes keep their numbering");
+    CHECK(event.repeat, "OS auto-repeat is carried, not mistaken for a press");
+    CHECK(event.timestampNs == 123456789U, "the timestamp is carried");
+  }
+  {
+    // An event the engine does not model still arrives, as Other with its
+    // native event attached: the editor's ImGui backend reads those, and
+    // dropping them would lose hover, clipboard and IME there.
+    SDL_Event native{};
+    native.type = SDL_EVENT_WINDOW_MOUSE_ENTER;
+    PlatformEvent event{};
+    CHECK(platform_translate_native_event(&native, &event), "translates");
+    CHECK(event.kind == PlatformEventKind::Other, "unmodelled is Other");
+    CHECK(event.native == &native, "the native event rides along");
+  }
+  {
+    SDL_Event native{};
+    native.type = SDL_EVENT_GAMEPAD_AXIS_MOTION;
+    native.gaxis.which = 77;
+    native.gaxis.axis = SDL_GAMEPAD_AXIS_RIGHT_TRIGGER;
+    native.gaxis.value = -32768;
+    PlatformEvent event{};
+    CHECK(platform_translate_native_event(&native, &event), "translates");
+    CHECK(event.kind == PlatformEventKind::GamepadAxis, "axis kind");
+    CHECK(event.deviceId == 77U, "the device id is the instance id");
+    CHECK(event.gamepadAxis == kGamepadAxis_RightTrigger,
+          "axes are the engine's numbering");
+    CHECK(event.axisValue == -32768, "the full negative range survives");
+  }
 
   PlatformConfig config{};
   config.headless = true;
