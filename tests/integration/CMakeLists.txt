@@ -329,6 +329,15 @@ set_tests_properties(
     PROPERTIES LABELS integration
 )
 
+engine_add_test_executable(engine_integration_pipeline_stage_profile
+    SOURCES
+    pipeline_stage_profile_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    LABELS
+    integration
+)
+
 engine_add_test_executable(engine_integration_play_transition_queue
     SOURCES
     play_transition_queue_test.cpp

@@ -231,11 +231,15 @@ enum : std::uint32_t {
 static_assert((sizeof(kStageNames) / sizeof(kStageNames[0])) == kStageCount,
               "every pipeline stage needs a name in the crash report");
 
-// Publishes the stage, then runs it. A macro rather than a wrapper so the
+// Names the stage, opens a profiler scope for it, then runs it. Both
+// consumers want the same list, so they read it from the same place: the
+// crash report needs the name of the stage a fault happened in, and the
+// Stats panel needs a bar per stage. A macro rather than a wrapper so the
 // sequence below still reads as the list of stages it is.
 #define RUN_STAGE(stage, call)                                               \
   do {                                                                       \
     core::set_crash_stage(kStage##stage);                                    \
+    PROFILE_SCOPE(kStageNames[kStage##stage]);                               \
     (call);                                                                  \
   } while (false)
 
@@ -945,14 +949,24 @@ bool EnginePipeline::Impl::execute_frame() noexcept {
 
   if (runFrameGraph) {
     core::set_crash_stage(kStageSimulationGraph);
-    if (!stage_simulation_graph()) {
+    bool simulationOk = false;
+    {
+      PROFILE_SCOPE(kStageNames[kStageSimulationGraph]);
+      simulationOk = stage_simulation_graph();
+    }
+    if (!simulationOk) {
       fatalError = true;
       core::profiler_end_frame();
       return false;
     }
     RUN_STAGE(Camera, stage_camera());
     core::set_crash_stage(kStageRenderPrepGraph);
-    if (!stage_render_prep_graph()) {
+    bool renderPrepOk = false;
+    {
+      PROFILE_SCOPE(kStageNames[kStageRenderPrepGraph]);
+      renderPrepOk = stage_render_prep_graph();
+    }
+    if (!renderPrepOk) {
       fatalError = true;
       core::profiler_end_frame();
       return false;

@@ -2,6 +2,10 @@
 
 #include "engine/core/profiler.h"
 
+#include "engine/core/logging.h"
+
+#include <thread>
+
 #include <array>
 #include <chrono>
 
@@ -31,6 +35,13 @@ struct FrameBuffer final {
 };
 
 bool g_profilerInitialized = false;
+// The thread allowed to open scopes: whichever one initialized the
+// profiler. Compared rather than assumed, because "thread index 0" is not
+// the same question -- a thread that never took a job index reads 0 too.
+std::thread::id g_ownerThread{};
+// The refusal is logged once. A job calling PROFILE_SCOPE would otherwise
+// log every frame forever.
+bool g_foreignThreadReported = false;
 FrameBuffer g_writeBuffer{};
 FrameBuffer g_readBuffer{};
 
@@ -48,6 +59,8 @@ bool initialize_profiler() noexcept {
   g_writeBuffer = {};
   g_readBuffer = {};
   g_scopeDepth = 0U;
+  g_ownerThread = std::this_thread::get_id();
+  g_foreignThreadReported = false;
   g_profilerInitialized = true;
   return true;
 }
@@ -72,6 +85,19 @@ void profiler_end_frame() noexcept {
 }
 
 bool profiler_begin_scope(const char *name) noexcept {
+  // Refused rather than raced: the buffer, the stack and the depth are
+  // plain globals, so a second thread writing them corrupts the frame for
+  // both. Said once, because a job that profiles would say it every frame.
+  if (std::this_thread::get_id() != g_ownerThread) {
+    if (!g_foreignThreadReported) {
+      g_foreignThreadReported = true;
+      log_message(LogLevel::Warning, "profiler",
+                  "a profiler scope was opened off the profiler's thread "
+                  "and ignored; scopes are main-thread only");
+    }
+    return false;
+  }
+
   if (g_writeBuffer.count >= kMaxEntries) {
     return false;
   }
@@ -97,6 +123,13 @@ bool profiler_begin_scope(const char *name) noexcept {
 }
 
 void profiler_end_scope() noexcept {
+  // A foreign thread's begin was refused, so its end has nothing of its
+  // own to close -- popping here would close the owner's innermost scope
+  // instead and mis-time it. Silent, because the begin already said it.
+  if (std::this_thread::get_id() != g_ownerThread) {
+    return;
+  }
+
   if (g_scopeDepth == 0U) {
     return;
   }
