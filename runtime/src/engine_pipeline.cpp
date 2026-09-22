@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <new>
@@ -1325,12 +1326,14 @@ void EnginePipeline::Impl::stage_assets() noexcept {
   static_cast<void>(renderer::resolve_material_textures(
       assetDatabase.get(), &load_material_texture_production, nullptr));
 
+  // Runs with no byte budget too: a refused mesh claim is answered by
+  // eviction whatever the cache size, or a full table would stay full.
   const int cacheMb = cacheSizeMbCvar.get_int(512);
-  if (cacheMb > 0) {
-    static_cast<void>(renderer::evict_mesh_assets_over_budget(
-        assetDatabase.get(),
-        static_cast<std::uint64_t>(cacheMb) * 1024ULL * 1024ULL));
-  }
+  const std::uint64_t cacheBytes =
+      (cacheMb > 0) ? (static_cast<std::uint64_t>(cacheMb) * 1024ULL * 1024ULL)
+                    : std::numeric_limits<std::uint64_t>::max();
+  static_cast<void>(
+      renderer::evict_mesh_assets_over_budget(assetDatabase.get(), cacheBytes));
 
   if (!updatedAssets) {
     core::log_message(core::LogLevel::Warning, "assets",
