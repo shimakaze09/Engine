@@ -5,7 +5,14 @@
 
 #pragma once
 
+#include <cstddef>
+
 namespace engine::renderer {
+
+/// CPU staging copies held by vertex buffers not yet realized on the GPU.
+/// Diagnostics for the leak tests: zero once every such buffer has been
+/// realized, destroyed, or swept by shutdown_render_device.
+std::size_t render_device_bgfx_live_staging_blocks() noexcept;
 
 /// Advances the bgfx frame: submits everything recorded since the last
 /// call and resets the per-frame view allocation. Test and bring-up hook;

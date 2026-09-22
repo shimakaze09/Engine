@@ -55,6 +55,29 @@ void test_lifecycle(TestContext &t) {
   t.check(dropped(render_device()) == 0U, "re-init starts with zero drops");
 }
 
+/// A vertex buffer is staged in CPU memory until a geometry first realizes
+/// it on the GPU. One never realized when the device shuts down used to
+/// lose its staging block with the table (#573 row 1): the slot table
+/// clears its payloads without looking inside them.
+void test_shutdown_frees_unrealized_staging(TestContext &t) {
+  const RenderDevice *dev = render_device();
+  const std::size_t before = render_device_bgfx_live_staging_blocks();
+  const float vertices[12] = {};
+  BufferDesc desc{};
+  desc.usage = BufferUsage::Vertex;
+  desc.sizeBytes = sizeof(vertices);
+  desc.data = vertices;
+  const DeviceBufferHandle staged = dev->create_buffer(desc);
+  t.check(staged.value != 0U, "an unrealized vertex buffer is created");
+  t.check(render_device_bgfx_live_staging_blocks() == before + 1U,
+          "it holds one staging block");
+
+  shutdown_render_device();
+  t.check(render_device_bgfx_live_staging_blocks() == 0U,
+          "shutdown frees the staging block of a buffer never realized");
+  t.check(initialize_render_device(), "re-initialize after the sweep");
+}
+
 /// Buffers: create/update/destroy, range overflow, stale handles,
 /// uniform-buffer refusal, idempotent destroy.
 void test_buffers(TestContext &t) {
@@ -966,6 +989,7 @@ void test_translation(TestContext &t) {
 int main() {
   TestContext t{};
   test_lifecycle(t);
+  test_shutdown_frees_unrealized_staging(t);
   test_buffers(t);
   test_textures(t);
   test_wide_texture_uploads(t);

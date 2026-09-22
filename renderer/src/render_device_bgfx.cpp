@@ -158,6 +158,28 @@ void reset_views() noexcept {
   ctx.viewsUsed = 1U;
 }
 
+// --- Vertex staging ---
+
+// CPU copies of vertex buffers not yet realized on the GPU (see
+// BgfxBufferRecord::staging). Counted so a leak is observable: shutdown
+// has to free every one still held by a live record.
+std::size_t g_liveStagingBlocks = 0U;
+
+void *staging_alloc(std::size_t bytes) noexcept {
+  void *block = std::malloc(bytes);
+  if (block != nullptr) {
+    ++g_liveStagingBlocks;
+  }
+  return block;
+}
+
+void staging_free(void *block) noexcept {
+  if (block != nullptr) {
+    std::free(block);
+    --g_liveStagingBlocks;
+  }
+}
+
 // --- Texel staging ---
 
 /// Row stride handed to bgfx for staged texels. stage_texels packs rows
@@ -247,7 +269,7 @@ DeviceBufferHandle bgfx_create_buffer(const BufferDesc &desc) noexcept {
       bgfx::update(record.index, 0U, bgfx::copy(desc.data, sizeBytes));
     }
   } else if ((desc.data != nullptr) && (sizeBytes > 0U)) {
-    record.staging = std::malloc(sizeBytes);
+    record.staging = staging_alloc(sizeBytes);
     if (record.staging == nullptr) {
       core::log_message(core::LogLevel::Error, "render_device",
                         "bgfx backend: vertex staging allocation failed");
@@ -260,7 +282,7 @@ DeviceBufferHandle bgfx_create_buffer(const BufferDesc &desc) noexcept {
     if (bgfx::isValid(record.index)) {
       bgfx::destroy(record.index);
     }
-    std::free(record.staging);
+    staging_free(record.staging);
     drop_operation("create_buffer: table full");
     return kInvalidDeviceBuffer;
   }
@@ -315,7 +337,7 @@ bool bgfx_realize_vertex_buffer(BgfxBufferRecord *record,
     bgfx::update(record->vertex, 0U,
                  bgfx::copy(record->staging,
                             static_cast<std::uint32_t>(record->sizeBytes)));
-    std::free(record->staging);
+    staging_free(record->staging);
     record->staging = nullptr;
   }
   return true;
@@ -345,8 +367,8 @@ void bgfx_buffer_upload(DeviceBufferHandle buffer, const void *data,
     // Not yet realized: replace the CPU staging copy.
     if ((record->staging == nullptr) ||
         (sizeBytes > static_cast<std::ptrdiff_t>(record->sizeBytes))) {
-      std::free(record->staging);
-      record->staging = std::malloc(bytes);
+      staging_free(record->staging);
+      record->staging = staging_alloc(bytes);
     }
     if (record->staging == nullptr) {
       drop_operation("update_buffer: staging allocation failed");
@@ -385,7 +407,7 @@ void bgfx_destroy_buffer(DeviceBufferHandle buffer) noexcept {
   if (bgfx::isValid(record->index)) {
     bgfx::destroy(record->index);
   }
-  std::free(record->staging);
+  staging_free(record->staging);
   record->staging = nullptr;
   device_context().buffers.release(buffer.value);
 }
@@ -1337,7 +1359,13 @@ void shutdown_render_device() noexcept {
   BgfxDeviceContext &ctx = device_context();
   // Invalidate every outstanding handle; owning systems destroy their
   // device resources before this point (shutdown_renderer ordering) and
-  // bgfx::shutdown reclaims anything that slipped through.
+  // bgfx::shutdown reclaims anything that slipped through. A vertex
+  // buffer never realized holds a CPU staging copy bgfx does not know
+  // about, so that one is freed here or it is lost with the record.
+  ctx.buffers.for_each_live([](BgfxBufferRecord &record) noexcept {
+    staging_free(record.staging);
+    record.staging = nullptr;
+  });
   ctx.buffers.clear();
   ctx.textures.clear();
   ctx.programs.clear();
@@ -1398,6 +1426,10 @@ bool render_device_bgfx_request_screenshot(const char *path) noexcept {
   }
   std::memcpy(g_requestedScreenshotPath, path, length + 1U);
   return true;
+}
+
+std::size_t render_device_bgfx_live_staging_blocks() noexcept {
+  return g_liveStagingBlocks;
 }
 
 void render_device_bgfx_frame() noexcept {
