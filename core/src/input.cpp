@@ -22,7 +22,7 @@ namespace engine::core {
 
 namespace {
 
-constexpr int kMaxScancodes = 512;
+constexpr int kMaxScancodes = kMaxKeyCode + 1;
 constexpr int kMaxMouseButtons = 5;
 constexpr int kMaxGamepadButtons = 16;
 constexpr int kMaxGamepadAxes = 6;

@@ -11,8 +11,15 @@ namespace engine::core {
 
 struct PlatformEvent;
 
-// Scancode type. Values match SDL_SCANCODE_* from the SDL3 backend.
+// A physical key, named by its USB HID keyboard usage ID (HID Usage Tables,
+// Keyboard/Keypad page 0x07): the engine's own key vocabulary, defined by
+// that standard rather than by whichever platform library is underneath.
+// It is what input_bindings.json persists and what Lua's engine.KEY_*
+// carries. The platform translates native key codes into it; a native key
+// with no usage ID on the page never reaches input as a key.
 using KeyScancode = int;
+/// The highest usage ID on the keyboard page (Right GUI).
+inline constexpr KeyScancode kMaxKeyCode = 0xE7;
 
 // ----- Lifecycle -----------------------------------------------------------
 

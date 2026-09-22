@@ -346,6 +346,72 @@ void SDLCALL dialog_trampoline(void *userdata, const char *const *filelist,
   slot->inUse.store(false, std::memory_order_release);
 }
 
+// SDL numbers its scancodes by the same HID keyboard usage IDs the engine
+// uses up to kMaxKeyCode, so the translation passes those through. Every
+// named engine key is checked against SDL here, so a divergence fails to
+// compile instead of silently rebinding a key.
+static_assert(kKey_A == SDL_SCANCODE_A);
+static_assert(kKey_B == SDL_SCANCODE_B);
+static_assert(kKey_C == SDL_SCANCODE_C);
+static_assert(kKey_D == SDL_SCANCODE_D);
+static_assert(kKey_E == SDL_SCANCODE_E);
+static_assert(kKey_F == SDL_SCANCODE_F);
+static_assert(kKey_G == SDL_SCANCODE_G);
+static_assert(kKey_H == SDL_SCANCODE_H);
+static_assert(kKey_I == SDL_SCANCODE_I);
+static_assert(kKey_J == SDL_SCANCODE_J);
+static_assert(kKey_K == SDL_SCANCODE_K);
+static_assert(kKey_L == SDL_SCANCODE_L);
+static_assert(kKey_M == SDL_SCANCODE_M);
+static_assert(kKey_N == SDL_SCANCODE_N);
+static_assert(kKey_O == SDL_SCANCODE_O);
+static_assert(kKey_P == SDL_SCANCODE_P);
+static_assert(kKey_Q == SDL_SCANCODE_Q);
+static_assert(kKey_R == SDL_SCANCODE_R);
+static_assert(kKey_S == SDL_SCANCODE_S);
+static_assert(kKey_T == SDL_SCANCODE_T);
+static_assert(kKey_U == SDL_SCANCODE_U);
+static_assert(kKey_V == SDL_SCANCODE_V);
+static_assert(kKey_W == SDL_SCANCODE_W);
+static_assert(kKey_X == SDL_SCANCODE_X);
+static_assert(kKey_Y == SDL_SCANCODE_Y);
+static_assert(kKey_Z == SDL_SCANCODE_Z);
+static_assert(kKey_1 == SDL_SCANCODE_1);
+static_assert(kKey_2 == SDL_SCANCODE_2);
+static_assert(kKey_3 == SDL_SCANCODE_3);
+static_assert(kKey_4 == SDL_SCANCODE_4);
+static_assert(kKey_5 == SDL_SCANCODE_5);
+static_assert(kKey_6 == SDL_SCANCODE_6);
+static_assert(kKey_7 == SDL_SCANCODE_7);
+static_assert(kKey_8 == SDL_SCANCODE_8);
+static_assert(kKey_9 == SDL_SCANCODE_9);
+static_assert(kKey_0 == SDL_SCANCODE_0);
+static_assert(kKey_Return == SDL_SCANCODE_RETURN);
+static_assert(kKey_Escape == SDL_SCANCODE_ESCAPE);
+static_assert(kKey_Backspace == SDL_SCANCODE_BACKSPACE);
+static_assert(kKey_Tab == SDL_SCANCODE_TAB);
+static_assert(kKey_Space == SDL_SCANCODE_SPACE);
+static_assert(kKey_F1 == SDL_SCANCODE_F1);
+static_assert(kKey_F2 == SDL_SCANCODE_F2);
+static_assert(kKey_F3 == SDL_SCANCODE_F3);
+static_assert(kKey_F4 == SDL_SCANCODE_F4);
+static_assert(kKey_F5 == SDL_SCANCODE_F5);
+static_assert(kKey_F6 == SDL_SCANCODE_F6);
+static_assert(kKey_F7 == SDL_SCANCODE_F7);
+static_assert(kKey_F8 == SDL_SCANCODE_F8);
+static_assert(kKey_F9 == SDL_SCANCODE_F9);
+static_assert(kKey_F10 == SDL_SCANCODE_F10);
+static_assert(kKey_F11 == SDL_SCANCODE_F11);
+static_assert(kKey_F12 == SDL_SCANCODE_F12);
+static_assert(kKey_Delete == SDL_SCANCODE_DELETE);
+static_assert(kKey_Right == SDL_SCANCODE_RIGHT);
+static_assert(kKey_Left == SDL_SCANCODE_LEFT);
+static_assert(kKey_Down == SDL_SCANCODE_DOWN);
+static_assert(kKey_Up == SDL_SCANCODE_UP);
+static_assert(kKey_LCtrl == SDL_SCANCODE_LCTRL);
+static_assert(kKey_LShift == SDL_SCANCODE_LSHIFT);
+static_assert(kKey_LAlt == SDL_SCANCODE_LALT);
+
 // The engine's gamepad vocabulary is SDL's numbering and must stay so:
 // persisted bindings and scripts written against the raw codes keep their
 // meaning. Checked here -- the one place both are in view -- so the
@@ -388,6 +454,12 @@ PlatformEvent translate_event(const SDL_Event &event) noexcept {
     break;
   case SDL_EVENT_KEY_DOWN:
   case SDL_EVENT_KEY_UP:
+    // Past kMaxKeyCode SDL numbers keys of its own (media and mode keys);
+    // they have no engine key, so they stay Other and reach only the
+    // editor's ImGui backend through the native event.
+    if (static_cast<int>(event.key.scancode) > kMaxKeyCode) {
+      break;
+    }
     out.kind = (event.type == SDL_EVENT_KEY_DOWN) ? PlatformEventKind::KeyDown
                                                   : PlatformEventKind::KeyUp;
     out.scancode = static_cast<int>(event.key.scancode);

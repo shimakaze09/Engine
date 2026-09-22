@@ -87,6 +87,27 @@ int main() {
     CHECK(event.timestampNs == 123456789U, "the timestamp is carried");
   }
   {
+    // The engine's key vocabulary is the HID keyboard page (#312 item 5).
+    // A key SDL numbers past it -- its own media and mode keys -- has no
+    // engine key, so it must not reach input as one: before, it arrived
+    // as KeyDown with SDL's private number, which a bindings file then
+    // persisted as if it meant something outside SDL.
+    SDL_Event native{};
+    native.type = SDL_EVENT_KEY_DOWN;
+    native.key.scancode = SDL_SCANCODE_MEDIA_PLAY;
+    PlatformEvent event{};
+    CHECK(platform_translate_native_event(&native, &event), "translates");
+    CHECK(event.kind == PlatformEventKind::Other,
+          "a key outside the HID keyboard page is not an engine key");
+    CHECK(event.native == &native, "it still reaches the ImGui backend");
+
+    native.key.scancode = static_cast<SDL_Scancode>(kMaxKeyCode);
+    CHECK(platform_translate_native_event(&native, &event), "translates");
+    CHECK((event.kind == PlatformEventKind::KeyDown) &&
+              (event.scancode == kMaxKeyCode),
+          "the last usage on the page is still a key");
+  }
+  {
     // An event the engine does not model still arrives, as Other with its
     // native event attached: the editor's ImGui backend reads those, and
     // dropping them would lose hover, clipboard and IME there.
