@@ -109,7 +109,12 @@ std::size_t claim_mesh_asset_record_slot(AssetDatabase *database,
     return slot;
   }
 
+  ++database->refusedMeshClaims;
   return database->meshAssets.size();
+}
+
+bool mesh_asset_record_releasable(const MeshAssetRecord &record) noexcept {
+  return !record.requestedResident && !record.pinned && (record.refCount <= 1U);
 }
 
 /// Unregisters the asset record; refused while it is still referenced or
@@ -263,23 +268,36 @@ std::size_t evict_mesh_assets_over_budget(AssetDatabase *database,
   }
 
   std::uint64_t residentBytes = 0ULL;
+  // Records free now or already on their way out: a refused claim retries
+  // next frame and one of these serves it, so only the shortfall past
+  // them is evicted.
+  std::size_t comingFree = 0U;
   for (std::size_t i = 0U; i < database->meshAssets.size(); ++i) {
     const MeshAssetRecord &record = database->meshAssets[i];
-    if (database->occupied[i] && (record.state == AssetState::Ready) &&
-        record.requestedResident) {
+    if (!database->occupied[i] || mesh_asset_record_releasable(record)) {
+      ++comingFree;
+      continue;
+    }
+    if ((record.state == AssetState::Ready) && record.requestedResident) {
       residentBytes += record.sizeBytes;
     }
   }
+  const std::size_t wantedFree = database->refusedMeshClaims;
+  database->refusedMeshClaims = 0U;
 
   std::size_t evicted = 0U;
-  while (residentBytes > budgetBytes) {
+  while ((residentBytes > budgetBytes) || (comingFree < wantedFree)) {
+    // Under byte pressure alone a sizeless record frees nothing worth
+    // taking; under record pressure it frees exactly what is short.
+    const bool recordPressure = comingFree < wantedFree;
     std::size_t coldestSlot = database->meshAssets.size();
     std::uint64_t coldestFrame = 0ULL;
     for (std::size_t i = 0U; i < database->meshAssets.size(); ++i) {
       const MeshAssetRecord &record = database->meshAssets[i];
       if (!database->occupied[i] || (record.state != AssetState::Ready) ||
           !record.requestedResident || record.pinned ||
-          (record.refCount > 1U) || (record.sizeBytes == 0ULL)) {
+          (record.refCount > 1U) ||
+          ((record.sizeBytes == 0ULL) && !recordPressure)) {
         continue;
       }
       const std::uint64_t lastAccess =
@@ -301,6 +319,7 @@ std::size_t evict_mesh_assets_over_budget(AssetDatabase *database,
     MeshAssetRecord &record = database->meshAssets[coldestSlot];
     record.requestedResident = false;
     residentBytes -= record.sizeBytes;
+    ++comingFree;
     ++evicted;
   }
 
@@ -389,6 +408,7 @@ void clear_asset_database(AssetDatabase *database) noexcept {
     database->meshAssets[i] = MeshAssetRecord{};
   }
   database->meshIndex.clear();
+  database->refusedMeshClaims = 0U;
 
   for (std::size_t i = 0U; i < database->textureAssets.size(); ++i) {
     database->textureOccupied[i] = false;

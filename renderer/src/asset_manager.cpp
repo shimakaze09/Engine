@@ -95,9 +95,12 @@ void sync_requested_residency(AssetManager *manager,
     }
 
     if (!record.requestedResident) {
-      if ((record.state == AssetState::Ready)
-          || (record.state == AssetState::Loading)
-          || (record.state == AssetState::Failed)) {
+      // An Unloaded record is queued too when it can be released: a load
+      // the streaming upload skipped ends Unloaded without passing here.
+      if ((record.state == AssetState::Ready) ||
+          (record.state == AssetState::Loading) ||
+          (record.state == AssetState::Failed) ||
+          mesh_asset_record_releasable(record)) {
         if (!content::has_pending_asset_request(
                 manager, AssetRequestType::Unload, record.id)) {
           static_cast<void>(content::push_asset_request(
@@ -388,12 +391,10 @@ bool update_asset_manager(AssetManager *manager,
       record.state = AssetState::Unloaded;
       record.runtimeMesh = kInvalidMeshHandle;
       // A record nobody wants back is released, or every mesh ever touched
-      // would hold a slot for the rest of the process. The one reference
-      // left is the request's own, the same one eviction ignores; a later
-      // request claims a fresh record, and until then the id reads as
-      // Unloaded exactly as the kept record did.
-      if (!record.requestedResident && !record.pinned &&
-          (record.refCount <= 1U)) {
+      // would hold a slot for the rest of the process. A later request
+      // claims a fresh record, and until then the id reads as Unloaded
+      // exactly as the kept record did.
+      if (mesh_asset_record_releasable(record)) {
         record.refCount = 0U;
         static_cast<void>(unregister_mesh_asset(database, request.id));
       }

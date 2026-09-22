@@ -494,6 +494,134 @@ int verify_unloaded_records_are_released() {
   return 0;
 }
 
+/// A table full of small cached meshes still takes a new one (#544).
+/// Eviction used to answer only to the byte budget, so meshes small enough
+/// to stay under it filled every record, none was ever released, and the
+/// next request was refused for good. Fills the table with Ready meshes
+/// far under the budget, lets them age, and runs the production request,
+/// eviction and unload in frame order.
+int verify_refused_claim_evicts_under_byte_budget() {
+  std::unique_ptr<engine::renderer::AssetManager> manager(
+      new (std::nothrow) engine::renderer::AssetManager());
+  std::unique_ptr<engine::renderer::AssetDatabase> database(
+      new (std::nothrow) engine::renderer::AssetDatabase());
+  std::unique_ptr<engine::renderer::GpuMeshRegistry> registry(
+      new (std::nothrow) engine::renderer::GpuMeshRegistry());
+  if ((manager == nullptr) || (database == nullptr) || (registry == nullptr)) {
+    return 80;
+  }
+  engine::renderer::clear_asset_manager(manager.get());
+  engine::renderer::clear_asset_database(database.get());
+
+  constexpr std::size_t kCapacity =
+      engine::renderer::AssetDatabase::kMaxMeshAssets;
+  constexpr std::uint64_t kByteBudget = 512ULL * 1024ULL * 1024ULL;
+  for (std::size_t i = 0U; i < kCapacity; ++i) {
+    const engine::renderer::AssetId id =
+        static_cast<engine::renderer::AssetId>(1000U + i);
+    // The handle names no registry mesh, so the unload below has nothing
+    // to free; the record's life is what is under test.
+    if (!engine::renderer::request_mesh_asset_streaming_load(
+            database.get(), id, "assets/small.mesh") ||
+        !engine::renderer::set_mesh_asset_state(
+            database.get(), id, engine::renderer::AssetState::Ready,
+            engine::renderer::MeshHandle{static_cast<std::uint32_t>(i + 1U)}) ||
+        !engine::renderer::set_mesh_asset_size(database.get(), id, 64ULL)) {
+      return 81;
+    }
+  }
+  for (std::uint64_t f = 0ULL; f <= engine::renderer::kMeshEvictionMinAgeFrames;
+       ++f) {
+    engine::renderer::advance_asset_database_frame(database.get());
+  }
+
+  // A full table nobody is waiting on is a cache doing its job: kept.
+  if (engine::renderer::evict_mesh_assets_over_budget(database.get(),
+                                                      kByteBudget) != 0U) {
+    return 82;
+  }
+
+  // Frame order as the pipeline runs it: request, manager update, evict.
+  const engine::renderer::AssetId newcomer =
+      static_cast<engine::renderer::AssetId>(1000U + kCapacity);
+  std::size_t evictedTotal = 0U;
+  bool served = false;
+  for (int frame = 0; (frame < 4) && !served; ++frame) {
+    served = engine::renderer::request_mesh_asset_streaming_load(
+        database.get(), newcomer, "assets/small.mesh");
+    if (!engine::renderer::update_asset_manager(manager.get(), database.get(),
+                                                registry.get(), 16U)) {
+      return 83;
+    }
+    evictedTotal += engine::renderer::evict_mesh_assets_over_budget(
+        database.get(), kByteBudget);
+  }
+  if (!served) {
+    std::printf("a request against a full table of cold meshes was never "
+                "served\n");
+    return 84;
+  }
+  // The retry that finds the record already on its way must not take a
+  // second one: exactly one cold mesh made room.
+  if (evictedTotal != 1U) {
+    std::printf("%zu records evicted for one request\n", evictedTotal);
+    return 85;
+  }
+  return 0;
+}
+
+/// A record that ends Unloaded outside the manager is released too (#544).
+/// The streaming upload marks a load nobody still wants Unloaded directly;
+/// residency sync only queued an Unload for Ready, Loading or Failed, so
+/// such a record held its slot for good.
+int verify_record_unloaded_elsewhere_is_released() {
+  std::unique_ptr<engine::renderer::AssetManager> manager(
+      new (std::nothrow) engine::renderer::AssetManager());
+  std::unique_ptr<engine::renderer::AssetDatabase> database(
+      new (std::nothrow) engine::renderer::AssetDatabase());
+  std::unique_ptr<engine::renderer::GpuMeshRegistry> registry(
+      new (std::nothrow) engine::renderer::GpuMeshRegistry());
+  if ((manager == nullptr) || (database == nullptr) || (registry == nullptr)) {
+    return 90;
+  }
+  engine::renderer::clear_asset_manager(manager.get());
+  engine::renderer::clear_asset_database(database.get());
+
+  constexpr engine::renderer::AssetId kId = 4242ULL;
+  constexpr engine::renderer::AssetId kPinned = 4343ULL;
+  if (!engine::renderer::request_mesh_asset_streaming_load(
+          database.get(), kId, "assets/skipped.mesh") ||
+      !engine::renderer::release_mesh_asset(database.get(), kId) ||
+      !engine::renderer::set_mesh_asset_state(
+          database.get(), kId, engine::renderer::AssetState::Unloaded,
+          engine::renderer::kInvalidMeshHandle)) {
+    return 91;
+  }
+  // A pinned record in the same state keeps its slot.
+  if (!engine::renderer::register_mesh_asset(
+          database.get(), kPinned, "assets/pinned.mesh",
+          engine::renderer::MeshHandle{9U}) ||
+      !engine::renderer::release_mesh_asset(database.get(), kPinned) ||
+      !engine::renderer::set_mesh_asset_state(
+          database.get(), kPinned, engine::renderer::AssetState::Unloaded,
+          engine::renderer::kInvalidMeshHandle)) {
+    return 92;
+  }
+  if (!engine::renderer::update_asset_manager(manager.get(), database.get(),
+                                              registry.get(), 4U)) {
+    return 93;
+  }
+  if (engine::renderer::find_mesh_asset_record_slot(database.get(), kId) !=
+      engine::renderer::AssetDatabase::kMaxMeshAssets) {
+    return 94;
+  }
+  if (engine::renderer::find_mesh_asset_record_slot(database.get(), kPinned) ==
+      engine::renderer::AssetDatabase::kMaxMeshAssets) {
+    return 95;
+  }
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -519,6 +647,16 @@ int main() {
   }
 
   result = verify_unloaded_records_are_released();
+  if (result != 0) {
+    return result;
+  }
+
+  result = verify_refused_claim_evicts_under_byte_budget();
+  if (result != 0) {
+    return result;
+  }
+
+  result = verify_record_unloaded_elsewhere_is_released();
   if (result != 0) {
     return result;
   }

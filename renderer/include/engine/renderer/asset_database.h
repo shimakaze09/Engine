@@ -119,6 +119,11 @@ struct AssetDatabase final {
   static constexpr std::size_t kMaxMeshAssets = 4096U;
   std::array<MeshAssetRecord, kMaxMeshAssets> meshAssets{};
   std::array<bool, kMaxMeshAssets> occupied{};
+  // Mesh claims refused for want of a record since the last eviction pass,
+  // which frees that many of the coldest evictable records even under the
+  // byte budget, so small cached meshes cannot hold every record while a
+  // request goes unserved. Runtime-only.
+  std::size_t refusedMeshClaims = 0U;
   // Id -> meshAssets slot, looked up per visible mesh from the parallel
   // render-prep jobs. Twice the record capacity, and rebuilt once erases
   // leave a quarter of it tombstoned, so it is never more than three
@@ -156,8 +161,9 @@ bool set_mesh_asset_size(AssetDatabase *database, AssetId id,
 
 /// Marks the coldest unpinned streamed meshes non-resident (LRU order, age
 /// hysteresis, retained records skipped) until the resident total fits the
-/// budget; the asset manager unloads them on its next residency sync.
-/// Returns the number of records marked.
+/// budget and every refused claim has a record on its way (see
+/// refusedMeshClaims); the asset manager unloads and releases them on its
+/// next residency sync. Returns the number of records marked.
 std::size_t evict_mesh_assets_over_budget(AssetDatabase *database,
                                           std::uint64_t budgetBytes) noexcept;
 
@@ -200,6 +206,10 @@ std::size_t find_mesh_asset_record_slot(const AssetDatabase *database,
 /// written for fresh claims). Returns kMaxMeshAssets when full.
 std::size_t claim_mesh_asset_record_slot(AssetDatabase *database,
                                          AssetId id) noexcept;
+/// Whether a record may give up its slot once its mesh is unloaded: not
+/// requested resident, not pinned, and holding no reference beyond the
+/// request's own, the same one eviction ignores.
+bool mesh_asset_record_releasable(const MeshAssetRecord &record) noexcept;
 /// Frees a mesh record slot for reuse. Requires refCount == 0 and no live
 /// runtimeMesh (unload first). Every other record keeps its slot.
 bool unregister_mesh_asset(AssetDatabase *database, AssetId id) noexcept;
