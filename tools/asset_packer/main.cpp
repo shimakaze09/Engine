@@ -502,8 +502,8 @@ int main(int argc, char **argv) {
   if (selectedMesh.primitives_count == 0U) {
     std::fprintf(stderr,
                  "error: selected mesh %zu has no primitives "
-                 "(importSettings.meshIndex in %s.cookmeta)\n",
-                 static_cast<std::size_t>(meshIdx), outputPath);
+                 "(importSettings.meshIndex in %s.meta)\n",
+                 static_cast<std::size_t>(meshIdx), inputPath);
     cgltf_free(data);
     return 5;
   }
@@ -513,6 +513,12 @@ int main(int argc, char **argv) {
            selectedMesh.primitives_count)
           ? static_cast<cgltf_size>(importSettings.primitiveIndex)
           : 0U;
+
+  // What was cooked, which the sidecar records: an index out of range
+  // falls back to the first, and the sidecar must not claim the request.
+  ImportSettings cookedSettings = importSettings;
+  cookedSettings.meshIndex = static_cast<std::int32_t>(meshIdx);
+  cookedSettings.primitiveIndex = static_cast<std::int32_t>(primIdx);
 
   const cgltf_primitive *primitive = &selectedMesh.primitives[primIdx];
   PrimitiveData primitiveData{};
@@ -607,7 +613,7 @@ int main(int argc, char **argv) {
   cookedOutputs.emplace_back(outputPath);
 
   if (!write_metadata_file(inputPath, outputPath, primitiveData, sourceHash,
-                           dependencyDigests, importSettings)) {
+                           dependencyDigests, cookedSettings)) {
     std::fprintf(stderr, "error: failed to write metadata sidecar\n");
     return 12;
   }

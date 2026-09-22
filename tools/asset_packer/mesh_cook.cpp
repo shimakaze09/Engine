@@ -478,17 +478,19 @@ bool write_metadata_file(const char *inputPath, const char *outputPath,
 
   writer.write_key("importSettings");
   writer.begin_object();
-  writer.write_uint64("meshIndex",
-                      static_cast<std::uint64_t>(importSettings.meshIndex));
-  writer.write_uint64("primitiveIndex", static_cast<std::uint64_t>(
-                                            importSettings.primitiveIndex));
+  // Signed, as the settings are: a negative index written unsigned read
+  // back as 18446744073709551615.
+  writer.write_int64("meshIndex", importSettings.meshIndex);
+  writer.write_int64("primitiveIndex", importSettings.primitiveIndex);
   writer.write_float("scaleFactor", importSettings.scaleFactor);
-  writer.write_uint64("upAxis",
-                      static_cast<std::uint64_t>(importSettings.upAxis));
+  writer.write_int64("upAxis", importSettings.upAxis);
   writer.write_bool("generateNormals", importSettings.generateNormals);
-  writer.write_string("interleavedLayout", data.hasUVs
-                                               ? "position_normal_texcoord"
-                                               : "position_normal");
+  // The layout write_mesh_file wrote: a skinned mesh is always v3, with
+  // texcoords, joints and weights whether the source had UVs or not.
+  const char *layout = data.hasSkin  ? "position_normal_texcoord_joints_weights"
+                       : data.hasUVs ? "position_normal_texcoord"
+                                     : "position_normal";
+  writer.write_string("interleavedLayout", layout);
   writer.end_object();
   writer.end_object();
 

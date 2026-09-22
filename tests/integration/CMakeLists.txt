@@ -874,6 +874,20 @@ if(ENGINE_BUILD_TOOLS)
         PROPERTIES LABELS integration
     )
 
+    add_test(
+        NAME engine_integration_asset_packer_cookmeta_labels
+        COMMAND ${CMAKE_COMMAND}
+            "-DASSET_PACKER=$<TARGET_FILE:asset_packer>"
+            "-DSRC_GLTF=${CMAKE_SOURCE_DIR}/assets/character.gltf"
+            "-DSRC_BIN=${CMAKE_SOURCE_DIR}/assets/character.bin"
+            "-DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/cookmeta_labels_work"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/asset_packer_cookmeta_labels_test.cmake
+    )
+    set_tests_properties(
+        engine_integration_asset_packer_cookmeta_labels
+        PROPERTIES LABELS integration
+    )
+
     # A driver that reaches the Assets panel's real save entry point, so
     # the editor-to-cook test edits a setting the way an author does
     # rather than by writing the sidecar bytes itself.
