@@ -7,6 +7,7 @@
 
 #include "engine/audio/audio.h"
 #include "engine/core/logging.h"
+#include "engine/core/rng.h"
 #include "engine/core/vfs.h"
 #include "engine/math/vec3.h"
 #include "engine/physics/physics.h"
@@ -752,6 +753,29 @@ std::uint32_t scripting_content_epoch(runtime::World *world) noexcept {
   return (world != nullptr) ? world->content_epoch() : 0U;
 }
 
+double scripting_random_double(runtime::World *world) noexcept {
+  if (world == nullptr) {
+    return 0.0;
+  }
+  return core::rng_next_double(&world->random());
+}
+
+std::int64_t scripting_random_range(runtime::World *world,
+                                    std::int64_t minimum,
+                                    std::int64_t maximum) noexcept {
+  if (world == nullptr) {
+    return minimum;
+  }
+  return core::rng_range(&world->random(), minimum, maximum);
+}
+
+void scripting_seed_random(runtime::World *world,
+                           std::uint64_t seed) noexcept {
+  if (world != nullptr) {
+    world->seed_random(seed);
+  }
+}
+
 std::size_t scripting_alive_entity_count(runtime::World *world) noexcept {
   return (world != nullptr) ? world->alive_entity_count() : 0U;
 }
@@ -1323,6 +1347,9 @@ scripting::RuntimeServices make_scripting_runtime_services() noexcept {
   s.is_alive = &scripting_is_alive;
   s.content_epoch = &scripting_content_epoch;
   s.alive_entity_count = &scripting_alive_entity_count;
+  s.random_double = &scripting_random_double;
+  s.random_range = &scripting_random_range;
+  s.seed_random = &scripting_seed_random;
   s.find_entity_by_index = &scripting_find_entity_by_index;
   s.find_entity_by_name = &scripting_find_entity_by_name;
   s.find_entity_by_persistent_id = &scripting_find_entity_by_persistent_id;

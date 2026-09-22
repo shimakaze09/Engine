@@ -589,6 +589,16 @@ engine_add_test_executable(engine_integration_lua_hardening
     integration
 )
 
+engine_add_test_executable(engine_integration_script_random
+    SOURCES
+    script_random_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_scripting
+    LABELS
+    integration
+)
+
 # ---- P1-M4-C / P1-M4-D: Async Streaming & LRU ----
 
 engine_add_test_executable(engine_integration_async_load

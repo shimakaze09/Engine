@@ -122,6 +122,16 @@ struct RuntimeServices final {
                    core::Entity entity) noexcept = nullptr;
   std::uint32_t (*content_epoch)(runtime::World *world) noexcept = nullptr;
   std::size_t (*alive_entity_count)(runtime::World *world) noexcept = nullptr;
+  // The gameplay random stream, drawn through the World so a script's
+  // randomness is part of the simulation state a run is reproducible
+  // from. Three operations rather than exposing the stream itself: the
+  // scripting side holds no simulation state of its own, so there is one
+  // place a reset has to reach rather than two to keep in step.
+  double (*random_double)(runtime::World *world) noexcept = nullptr;
+  std::int64_t (*random_range)(runtime::World *world, std::int64_t minimum,
+                               std::int64_t maximum) noexcept = nullptr;
+  void (*seed_random)(runtime::World *world,
+                      std::uint64_t seed) noexcept = nullptr;
   core::Entity (*find_entity_by_index)(runtime::World *world,
                                        std::uint32_t index) noexcept = nullptr;
   core::Entity (*find_entity_by_name)(runtime::World *world,

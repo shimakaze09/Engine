@@ -39,6 +39,12 @@ constexpr const char *kSceneLogChannel = "scene";
 /// is renamed, moved or recooked. The project is unreleased, so the tree
 /// was migrated once and the reader accepts this version alone.
 constexpr std::uint32_t kCurrentSceneVersion = 6U;
+/// The seed every scene load and world reset starts the gameplay random
+/// stream from, so opening a scene twice plays it the same way. Zero is a
+/// seed like any other here — the stream is filled through splitmix64,
+/// which has no zero fixed point. An author who wants a different run
+/// each time calls engine.set_seed.
+constexpr std::uint64_t kSceneRandomSeed = 0U;
 constexpr const char *kEntitiesKey = "entities";
 constexpr const char *kComponentsKey = "components";
 constexpr const char *kPersistentIdKey = "persistentId";
@@ -544,6 +550,7 @@ void reset_world(World &world, SceneTeardownHook beforeTeardown) noexcept {
   world.timer_manager().clear();
   world.camera_manager().clear();
   world.game_mode().reset();
+  world.seed_random(kSceneRandomSeed);
   world.mark_content_replaced(world.content_epoch());
   reset_anim_controllers();
 }
@@ -746,6 +753,10 @@ bool load_scene(World &world, const char *buffer, std::size_t size,
   }
 
   world = *committedWorld;
+  // Explicitly, not by inheriting the staged world's untouched default:
+  // where the random stream stands is simulation state, and a scene that
+  // opens twice has to play the same way both times.
+  world.seed_random(kSceneRandomSeed);
   world.mark_content_replaced(previousEpoch);
   // The replaced world's components are gone, so their cached animation
   // controllers are released; the loaded scene's components re-acquire

@@ -29,3 +29,4 @@ history.
 | [0016](0016-a-project-is-the-unit-of-authoring.md) | A project is the unit of authoring and shipping | 2026-09-21 |
 | [0017](0017-materials-carry-a-shading-model.md) | A material carries its shading model; passes are chosen per draw | 2026-09-21 |
 | [0018](0018-authors-compose-shading.md) | Authors compose shading; the engine ships the pieces and the presets | 2026-09-22 |
+| [0019](0019-the-simulation-owns-time-and-randomness.md) | The simulation owns its time and its randomness | 2026-09-22 |

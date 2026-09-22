@@ -11,6 +11,7 @@
 
 #include "engine/core/entity.h"
 #include "engine/core/fixed_hash_table.h"
+#include "engine/core/rng.h"
 #include "engine/core/sparse_set.h"
 #include "engine/core/status.h"
 #include "engine/math/component_types.h"
@@ -102,6 +103,11 @@ struct StateHashSections final {
   std::uint64_t physics = 0U;
   std::uint64_t timers = 0U;
   std::uint64_t animation = 0U;
+  /// Where the gameplay random stream stands. Part of the hash because a
+  /// run that has drawn a different number of values will diverge on its
+  /// next draw even when everything else still matches, and a divergence
+  /// that only appears later is the expensive kind to chase.
+  std::uint64_t random = 0U;
 };
 
 class World final : public physics::PhysicsWorldView {
@@ -220,6 +226,21 @@ public:
   /// two worlds are the same world. Reads the committed state; never call
   /// it during Simulation.
   std::uint64_t state_hash(StateHashSections *outSections = nullptr) const noexcept;
+
+  /// The gameplay random stream. One per world, so a run is reproducible
+  /// from its seed, and mutable through the non-const accessor because
+  /// drawing a value is what advances it. Its state is part of
+  /// `state_hash`, so two runs that drew a different number of values are
+  /// already different before the difference is visible in a position.
+  ///
+  /// Seeded by `seed_random` at run start and at scene load rather than
+  /// from a clock: nothing in the engine reads operating-system entropy
+  /// (see docs/decisions/0019).
+  core::Rng &random() noexcept;
+  const core::Rng &random() const noexcept;
+  /// Replaces the stream with one derived from `seed`, discarding where
+  /// the old stream stood. Called at run start and on a scene-load commit.
+  void seed_random(std::uint64_t seed) noexcept;
 
   /// Content epoch: advances every time this world's entire contents are
   /// replaced (scene load commit, reset), so externally retained entity
@@ -1148,6 +1169,11 @@ private:
   std::size_t m_aliveEntityCount = 0U;
   std::array<Entity, kMaxEntities> m_pendingDestroyEntities{};
   std::size_t m_pendingDestroyCount = 0U;
+
+  // The gameplay random stream. Seeded explicitly; the default below is a
+  // usable stream rather than zeroed state so a world nobody seeded still
+  // draws numbers instead of returning the same value forever.
+  core::Rng m_random = core::rng_from_seed(0U);
 
   // Compact per-entity node for transform propagation.
   // Packs tree links, per-frame flags, and cached local values into one struct

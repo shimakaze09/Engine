@@ -29,6 +29,7 @@ engine_add_module_library(engine_scripting
     src/camera_bindings.cpp
     src/entity_lifecycle_bindings.cpp
     src/light_bindings.cpp
+    src/random_bindings.cpp
     src/mesh_material_bindings.cpp
     src/physics_bindings.cpp
     src/cheat_bindings.cpp

@@ -95,6 +95,13 @@ engine_add_test_executable(engine_unit_fixed_ring
     engine_core
 )
 
+engine_add_test_executable(engine_unit_rng
+    SOURCES
+    rng_test.cpp
+    PRIVATE_DEPS
+    engine_core
+)
+
 engine_add_test_executable(engine_unit_string_util
     SOURCES
     string_util_test.cpp

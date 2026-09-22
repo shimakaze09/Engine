@@ -8,6 +8,7 @@
 #include <cstring>
 
 #include "engine/core/hash.h"
+#include "engine/core/rng.h"
 
 namespace engine::runtime {
 namespace {
@@ -124,6 +125,15 @@ std::uint64_t World::state_hash(StateHashSections *outSections) const noexcept {
   }
 
   sections.animation = h.hash;
+
+  // Where the gameplay stream stands. Folded last because it is world
+  // state rather than per-entity state, and folded at all because two
+  // runs that have drawn a different number of values agree on every
+  // section above until the next draw, which makes the divergence look
+  // like it began somewhere it did not.
+  h.hash = core::rng_hash_append(h.hash, m_random);
+  sections.random = h.hash;
+
   if (outSections != nullptr) {
     *outSections = sections;
   }

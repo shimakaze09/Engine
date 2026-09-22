@@ -13,6 +13,7 @@
 #include "debug_bindings.h"
 #include "deferred_mutations.h"
 #include "deterministic_math_library.h"
+#include "random_bindings.h"
 #include "engine/scripting/bindable_api.h"
 #include "engine/scripting/dap_server.h"
 #include "entity_handle.h"
@@ -256,6 +257,7 @@ void register_engine_bindings(lua_State *state) noexcept {
   lua_setfield(state, -2, "wait_until");
 
   register_light_bindings(state);
+  register_random_bindings(state);
 
   register_scene_bindings(state);
 
@@ -326,6 +328,10 @@ int open_libraries_trampoline(lua_State *state) noexcept {
   // The transcendentals go through the deterministic scalar set, never
   // the C library, so script-driven state matches across platforms.
   install_deterministic_math(state);
+  // math.random and math.randomseed become the engine stream, so a
+  // script reaching for either by habit still gets a reproducible
+  // draw instead of an operating-system seeded one.
+  install_engine_random_over_math(state);
   luaL_requiref(state, LUA_UTF8LIBNAME, luaopen_utf8, 1);
   lua_pop(state, 1);
   register_engine_bindings(state);
