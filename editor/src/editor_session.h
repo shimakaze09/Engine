@@ -26,6 +26,7 @@
 #include "engine/math/transform.h"
 #include "engine/renderer/camera.h"
 #include "engine/renderer/render_device.h"
+#include "engine/runtime/editor_bridge.h"
 #include "engine/runtime/world.h"
 
 #include "editor_asset_index.h"
@@ -108,6 +109,16 @@ struct EditorSession final {
   std::size_t selectedEntityCount = 0U;
   std::uint32_t selectionEpoch = 0U;
   PlayState playState = PlayState::Stopped;
+  // Every play-state change since the runtime last drained, oldest
+  // first. playState alone is the level and loses a Play/Stop pair that
+  // happened between two drains; these are the edges, so the runtime
+  // dispatches the session hooks of each one. Fixed capacity, because
+  // the drain runs every frame and the author cannot out-click it: a
+  // full queue drops the newest and says so once.
+  static constexpr std::size_t kMaxPlayTransitions = 16U;
+  std::array<runtime::PlayTransition, kMaxPlayTransitions> playTransitions{};
+  std::size_t playTransitionHead = 0U;
+  std::size_t playTransitionCount = 0U;
   // Set by the toolbar Step button while paused; the runtime consumes it
   // through the editor bridge to simulate exactly one fixed step.
   bool stepRequested = false;
@@ -291,5 +302,9 @@ void start_play_mode() noexcept;
 void pause_play_mode() noexcept;
 /// Stops play mode and restores the captured pre-play world.
 void stop_play_mode() noexcept;
+/// Takes the oldest recorded play transition, or returns false when none
+/// is queued. The runtime drains this through the editor bridge; nothing
+/// in the editor reads it.
+bool consume_play_transition(runtime::PlayTransition *outTransition) noexcept;
 
 } // namespace engine::editor

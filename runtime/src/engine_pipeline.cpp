@@ -664,6 +664,12 @@ struct EnginePipeline::Impl final {
 
   void stage_input() noexcept;
   void stage_play_transitions() noexcept;
+  /// Starts a play session: the main script goes under the reload watch
+  /// and the entity modules get their session-start hook.
+  void begin_play_session() noexcept;
+  /// Ends one: the end hooks dispatch, the modules and the scripting VM
+  /// are recycled, and simulated time restarts from zero.
+  void end_play_session() noexcept;
   void stage_timing() noexcept;
   void stage_scripting() noexcept;
   void stage_assets() noexcept;
@@ -964,25 +970,117 @@ void EnginePipeline::Impl::stage_input() noexcept {
 // Stage: play transitions
 // ---------------------------------------------------------------------------
 
-void EnginePipeline::Impl::stage_play_transitions() noexcept {
-  playState = query_editor_play_state();
-  if (quitRequested && (playState != LoopPlayState::Stopped)) {
-    // Quit ends a live session exactly like Stop: on_end_play
-    // runs once, here, and the frame continues as Stopped, so nothing of
-    // the session runs after its end hooks. The scripting VM is not
-    // recycled the way Stop does; teardown owns it from here.
-    scripting::dispatch_entity_scripts_end();
-    playState = LoopPlayState::Stopped;
-    previousPlayState = LoopPlayState::Stopped;
+namespace {
+
+/// At most one transition can be inferred from two samples of the play
+/// state, which is what the pipeline did for everybody before the editor
+/// recorded them: the net change between the previous frame and this one.
+runtime::PlayTransition inferred_transition(LoopPlayState previous,
+                                            LoopPlayState current) noexcept {
+  if (current == LoopPlayState::Stopped) {
+    return runtime::PlayTransition::Stop;
+  }
+  if (current == LoopPlayState::Paused) {
+    return runtime::PlayTransition::Pause;
+  }
+  return (previous == LoopPlayState::Paused) ? runtime::PlayTransition::Resume
+                                             : runtime::PlayTransition::Start;
+}
+
+} // namespace
+
+void EnginePipeline::Impl::begin_play_session() noexcept {
+  const char *mainScriptPath = active_config().mainScriptPath;
+  if (mainScriptPath != nullptr) {
+    scripting::watch_script_file(mainScriptPath);
+  }
+  scripting::dispatch_entity_scripts_start();
+}
+
+void EnginePipeline::Impl::end_play_session() noexcept {
+  scripting::dispatch_entity_scripts_end();
+  scripting::clear_entity_script_modules();
+  scripting::shutdown_scripting();
+  if (!scripting::initialize_scripting()) {
+    core::log_message(core::LogLevel::Error, "scripting",
+                      "failed to reinitialize scripting on stop");
+  } else {
+    runtime::bind_scripting_runtime(world.get(), serviceLocator);
+    scripting::set_default_mesh_asset_id(
+        (meshIds.cube != renderer::kInvalidAssetId) ? meshIds.cube
+                                                    : meshIds.bootstrap);
+    scripting::set_builtin_mesh_ids(meshIds.plane, meshIds.cube,
+                                    meshIds.sphere, meshIds.cylinder,
+                                    meshIds.capsule, meshIds.pyramid);
   }
 
-  if ((playState == LoopPlayState::Playing) &&
-      (previousPlayState == LoopPlayState::Stopped)) {
-    const char *mainScriptPath = active_config().mainScriptPath;
-    if (mainScriptPath != nullptr) {
-      scripting::watch_script_file(mainScriptPath);
+  accumulator = 0.0;
+  previousTick = frameStart;
+  clock.simulationSeconds = 0.0;
+  clock.tickIndex = 0U;
+}
+
+void EnginePipeline::Impl::stage_play_transitions() noexcept {
+  playState = query_editor_play_state();
+
+  // Every transition the editor recorded since the last frame, in the
+  // order the author caused them. A bridge that records none -- every
+  // test double, and any host with no editor -- contributes the single
+  // net change two samples of the play state can express, so a Play and
+  // a Stop in the same frame still collapse there, as they always did.
+  // The bound is the pipeline's own: a bridge cannot hold the frame open
+  // by never running dry.
+  static constexpr std::size_t kMaxTransitionsPerFrame = 32U;
+  std::array<runtime::PlayTransition, kMaxTransitionsPerFrame> transitions{};
+  std::size_t transitionCount = 0U;
+  if ((bridge != nullptr) && (bridge->consume_play_transition != nullptr)) {
+    runtime::PlayTransition drained{};
+    while ((transitionCount < transitions.size()) &&
+           bridge->consume_play_transition(&drained)) {
+      transitions[transitionCount] = drained;
+      ++transitionCount;
     }
-    scripting::dispatch_entity_scripts_start();
+  } else if (playState != previousPlayState) {
+    transitions[0] = inferred_transition(previousPlayState, playState);
+    transitionCount = 1U;
+  }
+
+  // True when a session started or resumed this frame, which is what the
+  // transform history and the camera sample below are stale against.
+  bool enteredPlay = false;
+  // True once a drained Stop has already ended the live session, so the
+  // quit below does not dispatch a second set of end hooks over it.
+  bool sessionEnded = false;
+  for (std::size_t i = 0U; i < transitionCount; ++i) {
+    switch (transitions[i]) {
+    case runtime::PlayTransition::Start:
+      begin_play_session();
+      enteredPlay = true;
+      break;
+    case runtime::PlayTransition::Resume:
+      enteredPlay = true;
+      break;
+    case runtime::PlayTransition::Stop:
+      end_play_session();
+      sessionEnded = true;
+      break;
+    case runtime::PlayTransition::Pause:
+      break;
+    }
+  }
+
+  if (quitRequested && (playState != LoopPlayState::Stopped)) {
+    // A quit ends a live session after whatever the author did this
+    // frame, so a session that also started here gets its start hooks
+    // first. What scripts observe matches Stop: the end hooks run once
+    // and the frame continues as Stopped, so nothing of the session runs
+    // after them. Unlike Stop it does not recycle the scripting VM --
+    // teardown owns it from here, and a script's end hook can still be
+    // read afterwards.
+    if (!sessionEnded) {
+      scripting::dispatch_entity_scripts_end();
+    }
+    playState = LoopPlayState::Stopped;
   }
 
   // Fire BeginPlay for entities that haven't received it yet. Skip the phase
@@ -995,30 +1093,6 @@ void EnginePipeline::Impl::stage_play_transitions() noexcept {
     // Flush after leaving the phase: mutations only apply in Input, so a
     // flush inside BeginPlay is a no-op and the writes miss the first step.
     scripting::flush_deferred_mutations();
-  }
-
-  if ((playState == LoopPlayState::Stopped) &&
-      (previousPlayState != LoopPlayState::Stopped)) {
-    scripting::dispatch_entity_scripts_end();
-    scripting::clear_entity_script_modules();
-    scripting::shutdown_scripting();
-    if (!scripting::initialize_scripting()) {
-      core::log_message(core::LogLevel::Error, "scripting",
-                        "failed to reinitialize scripting on stop");
-    } else {
-      runtime::bind_scripting_runtime(world.get(), serviceLocator);
-      scripting::set_default_mesh_asset_id(
-          (meshIds.cube != renderer::kInvalidAssetId) ? meshIds.cube
-                                                      : meshIds.bootstrap);
-      scripting::set_builtin_mesh_ids(meshIds.plane, meshIds.cube,
-                                      meshIds.sphere, meshIds.cylinder,
-                                      meshIds.capsule, meshIds.pyramid);
-    }
-
-    accumulator = 0.0;
-    previousTick = frameStart;
-    clock.simulationSeconds = 0.0;
-    clock.tickIndex = 0U;
   }
 
   isPlaying = (playState == LoopPlayState::Playing);
@@ -1037,8 +1111,7 @@ void EnginePipeline::Impl::stage_play_transitions() noexcept {
     runFrameGraph = true;
   }
 
-  if (isPlaying && (previousPlayState != LoopPlayState::Playing) &&
-      !singleStepping) {
+  if (isPlaying && enteredPlay && !singleStepping) {
     world->clear_world_transform_history();
     cameraSampleValid = false;
   }

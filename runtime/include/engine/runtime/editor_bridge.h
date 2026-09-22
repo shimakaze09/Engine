@@ -14,6 +14,17 @@ namespace engine::runtime {
 class World;
 struct EngineAssetDatabaseService;
 
+/// One change of the editor's play state, recorded when the author causes
+/// it. Comparing the play state across two frames can only ever express
+/// the net change, so a frame carrying Play, Stop and Play again looks
+/// identical to one carrying nothing: the session that ended between them
+/// never gets its end hooks. Recording each change keeps them all, in the
+/// order they happened.
+///
+/// Resume is a return from Paused, distinct from Start, so the end and
+/// begin hooks of a session are not dispatched around a pause.
+enum class PlayTransition : std::uint8_t { Start, Stop, Pause, Resume };
+
 /// Function-pointer bridge the runtime uses to reach the editor. Initialize,
 /// shutdown, new-frame, and render callbacks run with the render context
 /// current.
@@ -36,6 +47,13 @@ struct EditorBridge final {
   // means the editor armed its own unsaved-change confirm flow and will
   // request the quit itself once that resolves. Null behaves as true.
   bool (*handle_quit_request)() noexcept = nullptr;
+  // Takes the oldest play transition the editor has recorded and returns
+  // true, or returns false when none is queued. The pipeline drains this
+  // once per frame and dispatches each transition in turn. Null means the
+  // bridge records none, and the pipeline falls back to the single net
+  // change is_playing/is_paused can express.
+  bool (*consume_play_transition)(PlayTransition *outTransition) noexcept =
+      nullptr;
 };
 
 /// Sets the requested value for editor bridge.

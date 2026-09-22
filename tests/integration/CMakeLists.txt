@@ -289,6 +289,16 @@ engine_add_test_executable(engine_integration_pipeline_lifetime
     integration
 )
 
+engine_add_test_executable(engine_integration_play_transition_queue
+    SOURCES
+    play_transition_queue_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_scripting
+    LABELS
+    integration
+)
+
 engine_add_test_executable(engine_integration_quit_end_play
     SOURCES
     quit_end_play_test.cpp

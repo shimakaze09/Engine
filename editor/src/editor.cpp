@@ -361,6 +361,11 @@ void shutdown_editor() noexcept {
 
 void reset_editor_session_residue() noexcept {
   asset_index_reset();
+  // A transition recorded but never drained must not reach the next
+  // session's runtime as that session's first edge.
+  editor_session().playTransitions = {};
+  editor_session().playTransitionHead = 0U;
+  editor_session().playTransitionCount = 0U;
   editor_layout_reset();
   editor_session().pickers = ReferencePickerState{};
   editor_session().console = ConsolePanelState{};
@@ -522,6 +527,7 @@ const runtime::EditorBridge kRuntimeEditorBridge = {
     &editor_wants_capture_mouse,
     &editor_consume_step_request,
     &editor_handle_quit_request,
+    &consume_play_transition,
 };
 
 [[maybe_unused]] const bool kEditorBridgeRegistered = []() noexcept {
