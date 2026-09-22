@@ -99,6 +99,11 @@ engine_add_module_library(engine_core
     ${CMAKE_CURRENT_BINARY_DIR}/generated
     PUBLIC_DEPS
     Threads::Threads
+    # PRIVATE: SDL is the platform layer's implementation, and nothing that
+    # links core may reach its headers through core. A target that needs
+    # SDL names it itself -- engine_imgui for the editor's SDL3 backend,
+    # and the tests that build native events.
+    PRIVATE_DEPS
     ${ENGINE_SDL_TARGET}
     PCH
     src/pch.h

@@ -461,6 +461,8 @@ engine_add_test_executable(engine_unit_scripting
     SOURCES
     scripting_test.cpp
     PRIVATE_DEPS
+    # Builds native SDL events to drive input the way the platform does.
+    ${ENGINE_SDL_TARGET}
     engine_scripting
     engine_runtime
 )
@@ -771,6 +773,8 @@ engine_add_test_executable(engine_unit_input
     SOURCES
     input_test.cpp
     PRIVATE_DEPS
+    # Builds native SDL events to drive input the way the platform does.
+    ${ENGINE_SDL_TARGET}
     engine_core
 )
 
@@ -1279,6 +1283,8 @@ engine_add_test_executable(engine_unit_input_map
     SOURCES
     input_map_test.cpp
     PRIVATE_DEPS
+    # Builds native SDL events to drive input the way the platform does.
+    ${ENGINE_SDL_TARGET}
     engine_core
 )
 
@@ -1286,6 +1292,8 @@ engine_add_test_executable(engine_unit_touch_input
     SOURCES
     touch_input_test.cpp
     PRIVATE_DEPS
+    # Builds native SDL events to drive input the way the platform does.
+    ${ENGINE_SDL_TARGET}
     engine_core
 )
 
@@ -1938,6 +1946,8 @@ engine_add_test_executable(engine_unit_platform_window
     SOURCES
     platform_window_test.cpp
     PRIVATE_DEPS
+    # Builds native SDL events to drive input the way the platform does.
+    ${ENGINE_SDL_TARGET}
     engine_core
 )
 
@@ -1956,6 +1966,8 @@ engine_add_test_executable(engine_unit_engine_pipeline
     PRIVATE_INCLUDE_DIRS
     ${CMAKE_SOURCE_DIR}/runtime/src
     PRIVATE_DEPS
+    # Builds native SDL events to drive input the way the platform does.
+    ${ENGINE_SDL_TARGET}
     engine_runtime
 )
 

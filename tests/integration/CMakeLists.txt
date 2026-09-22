@@ -243,6 +243,8 @@ engine_add_test_executable(engine_integration_coin_run_acceptance
     SOURCES
     coin_run_acceptance_test.cpp
     PRIVATE_DEPS
+    # Builds native SDL events to drive input the way the platform does.
+    ${ENGINE_SDL_TARGET}
     engine_runtime
     engine_scripting
     LABELS
@@ -355,6 +357,8 @@ engine_add_test_executable(engine_integration_focus_loss_input
     SOURCES
     focus_loss_input_test.cpp
     PRIVATE_DEPS
+    # Builds native SDL events to drive input the way the platform does.
+    ${ENGINE_SDL_TARGET}
     engine_runtime
     LABELS
     integration
@@ -373,6 +377,8 @@ engine_add_test_executable(engine_integration_play_transition_queue
     SOURCES
     play_transition_queue_test.cpp
     PRIVATE_DEPS
+    # Builds native SDL events to drive input the way the platform does.
+    ${ENGINE_SDL_TARGET}
     engine_runtime
     engine_scripting
     LABELS
@@ -383,6 +389,8 @@ engine_add_test_executable(engine_integration_quit_end_play
     SOURCES
     quit_end_play_test.cpp
     PRIVATE_DEPS
+    # Builds native SDL events to drive input the way the platform does.
+    ${ENGINE_SDL_TARGET}
     engine_runtime
     engine_scripting
     LABELS
@@ -1171,6 +1179,8 @@ engine_add_test_executable(engine_integration_gamepad_hotplug
     SOURCES
     gamepad_hotplug_test.cpp
     PRIVATE_DEPS
+    # Builds native SDL events to drive input the way the platform does.
+    ${ENGINE_SDL_TARGET}
     engine_runtime
     engine_scripting
     LABELS
