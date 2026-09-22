@@ -23,6 +23,7 @@
 
 #include "engine/audio/audio.h"
 #include "engine/core/bootstrap.h"
+#include "engine/core/crash_report.h"
 #include "engine/core/cvar.h"
 #include "engine/core/string_util.h"
 #include "engine/core/engine_stats.h"
@@ -184,6 +185,59 @@ bool process_pending_scene_op(World &world) noexcept {
 // ===========================================================================
 
 namespace {
+
+// The stage names a crash report prints, and the indices the pipeline
+// publishes. One table, in frame order, so the index the handler reads is
+// the position in the sequence below -- adding a stage means adding a name
+// here and a RUN_STAGE line there, and the static_assert keeps the two in
+// step.
+//
+// A literal array of literals with static storage duration, because a
+// signal handler dereferences it: nothing about it may be built at run
+// time or live on a stack.
+constexpr const char *kStageNames[] = {
+    "between-frames", "input",         "play-transitions",
+    "timing",         "scripting",     "assets",
+    "hot-reload",     "audio",         "animation",
+    "simulation",     "camera",        "render-prep",
+    "post-frame",     "measure-frame", "render",
+    "scene-commit",   "diagnostics",   "frame-cleanup",
+    "frame-pacing"};
+
+enum : std::uint32_t {
+  // Not a stage: the pipeline is between frames, or has not started one.
+  kStageBetweenFrames = 0U,
+  kStageInput,
+  kStagePlayTransitions,
+  kStageTiming,
+  kStageScripting,
+  kStageAssets,
+  kStageHotReload,
+  kStageAudio,
+  kStageAnimation,
+  kStageSimulationGraph,
+  kStageCamera,
+  kStageRenderPrepGraph,
+  kStagePostFrame,
+  kStageMeasureFrame,
+  kStageRender,
+  kStageSceneCommit,
+  kStageDiagnostics,
+  kStageFrameCleanup,
+  kStageFramePacing,
+  kStageCount
+};
+
+static_assert((sizeof(kStageNames) / sizeof(kStageNames[0])) == kStageCount,
+              "every pipeline stage needs a name in the crash report");
+
+// Publishes the stage, then runs it. A macro rather than a wrapper so the
+// sequence below still reads as the list of stages it is.
+#define RUN_STAGE(stage, call)                                               \
+  do {                                                                       \
+    core::set_crash_stage(kStage##stage);                                    \
+    (call);                                                                  \
+  } while (false)
 
 // Shader and watched-script timestamps are polled on this cadence, not
 // every frame: up to 128 shader entries plus every watched script is a
@@ -712,6 +766,11 @@ EnginePipeline::Impl::Impl() noexcept : serviceRegistry(serviceLocator) {}
 bool EnginePipeline::Impl::initialize(std::uint32_t maxFrameCount) noexcept {
   maxFrames = maxFrameCount;
 
+  // The crash report can name a stage from here on. The table is static,
+  // so it stays readable for the life of the process; only the index the
+  // frame loop publishes changes.
+  core::set_crash_stage_table(kStageNames, kStageCount);
+
   world.reset(new (std::nothrow) runtime::World());
   commandBuffer.reset(new (std::nothrow) renderer::CommandBufferBuilder());
   auxiliaryCommandBuffer.reset(new (std::nothrow)
@@ -870,38 +929,46 @@ bool EnginePipeline::Impl::execute_frame() noexcept {
           : 0.0;
   previousFrameStart = frameStart;
 
-  stage_input();
-  stage_play_transitions();
-  stage_timing();
-  stage_scripting();
-  stage_assets();
-  stage_hot_reload();
-  stage_audio();
-  stage_animation();
+  // Each stage names itself for the crash report before it runs, so a
+  // fault says which one the process died in. One relaxed store per
+  // stage; the handler turns the index back into the name with no
+  // formatting, which is why the names are a static table rather than a
+  // string the pipeline builds.
+  RUN_STAGE(Input, stage_input());
+  RUN_STAGE(PlayTransitions, stage_play_transitions());
+  RUN_STAGE(Timing, stage_timing());
+  RUN_STAGE(Scripting, stage_scripting());
+  RUN_STAGE(Assets, stage_assets());
+  RUN_STAGE(HotReload, stage_hot_reload());
+  RUN_STAGE(Audio, stage_audio());
+  RUN_STAGE(Animation, stage_animation());
 
   if (runFrameGraph) {
+    core::set_crash_stage(kStageSimulationGraph);
     if (!stage_simulation_graph()) {
       fatalError = true;
       core::profiler_end_frame();
       return false;
     }
-    stage_camera();
+    RUN_STAGE(Camera, stage_camera());
+    core::set_crash_stage(kStageRenderPrepGraph);
     if (!stage_render_prep_graph()) {
       fatalError = true;
       core::profiler_end_frame();
       return false;
     }
-    stage_post_frame();
+    RUN_STAGE(PostFrame, stage_post_frame());
   }
 
-  stage_measure_frame();
-  stage_render();
+  RUN_STAGE(MeasureFrame, stage_measure_frame());
+  RUN_STAGE(Render, stage_render());
   if (runFrameGraph) {
-    stage_scene_commit();
+    RUN_STAGE(SceneCommit, stage_scene_commit());
   }
-  stage_diagnostics();
-  stage_frame_cleanup();
-  stage_frame_pacing();
+  RUN_STAGE(Diagnostics, stage_diagnostics());
+  RUN_STAGE(FrameCleanup, stage_frame_cleanup());
+  RUN_STAGE(FramePacing, stage_frame_pacing());
+  core::set_crash_stage(kStageBetweenFrames);
 
   core::profiler_end_frame();
   return running;
@@ -916,6 +983,10 @@ void EnginePipeline::Impl::teardown() noexcept {
     return;
   }
   tornDown = true;
+
+  // No frame is running from here on, so a fault during teardown must not
+  // be reported against whichever stage happened to run last.
+  core::set_crash_stage(kStageBetweenFrames);
 
   // The steps below reach process-wide state, so they belong to whichever
   // run currently owns the alias slots. A run closing while a newer one owns

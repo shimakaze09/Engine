@@ -15,6 +15,7 @@
 
 #include "engine/audio/audio.h"
 #include "engine/core/bootstrap.h"
+#include "engine/core/crash_report.h"
 #include "engine/core/cvar.h"
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
@@ -45,7 +46,11 @@ bool g_bootstrapped = false;
 // renderer; animation controllers hold renderer palette slots and reset
 // above it too.
 using StageCloser = void (*)() noexcept;
-constexpr std::size_t kMaxBootstrapStages = 8U;
+// Headroom over the stages bootstrap opens today, so adding one does not
+// need this constant touched in the same breath. The guard in open_stage
+// is what actually keeps it honest -- the count cannot be checked at
+// compile time, because the calls are spread across the success path.
+constexpr std::size_t kMaxBootstrapStages = 16U;
 StageCloser g_openedStages[kMaxBootstrapStages]{};
 std::size_t g_openedStageCount = 0U;
 
@@ -68,7 +73,23 @@ bool consume_injected_failure(BootstrapStage stage) noexcept {
   return true;
 }
 
+// Set when open_stage had to refuse. Bootstrap fails on it rather than
+// running with a subsystem nothing will close.
+bool g_stageOverflow = false;
+
 void open_stage(StageCloser closer) noexcept {
+  if (g_openedStageCount >= kMaxBootstrapStages) {
+    // Writing past the array corrupts whatever follows it, which shows up
+    // later as a fault somewhere unrelated -- exactly the debugging cost
+    // this refusal exists to avoid. The stage stays unregistered and
+    // bootstrap fails, because a subsystem whose closer was dropped would
+    // leak on every unwind after it.
+    g_stageOverflow = true;
+    core::log_message(core::LogLevel::Error, "engine",
+                      "bootstrap stage stack is full; raise "
+                      "kMaxBootstrapStages");
+    return;
+  }
   g_openedStages[g_openedStageCount] = closer;
   ++g_openedStageCount;
 }
@@ -86,12 +107,15 @@ void unwind_stages() noexcept {
 bool fail_bootstrap() noexcept {
   unwind_stages();
   g_activeConfig = EngineConfig{};
+  g_stageOverflow = false;
   return false;
 }
 
 // ---- Stage closers, in bootstrap order ----------------------------------
 
 void close_core() noexcept { core::shutdown_core(); }
+
+void close_crash_report() noexcept { core::shutdown_crash_report(); }
 
 void close_renderer() noexcept { renderer::shutdown_renderer(); }
 
@@ -161,6 +185,18 @@ bool bootstrap(const EngineConfig &config) noexcept {
     return fail_bootstrap();
   }
   open_stage(&close_core);
+
+  // Installed straight after core, so a fault in anything opened below
+  // still names the build, frame and stage. A refusal is not fatal: the
+  // engine runs without crash reporting, having said so, rather than
+  // refusing to start over a diagnostic.
+  if (core::install_crash_report()) {
+    open_stage(&close_crash_report);
+  } else {
+    core::log_message(core::LogLevel::Warning, "core",
+                      "crash reporting unavailable; a fault will leave no "
+                      "build, frame or stage");
+  }
 
   static_cast<void>(core::cvar_register_bool(
       "r_showStats", true,
@@ -319,6 +355,12 @@ bool bootstrap(const EngineConfig &config) noexcept {
   }
   open_stage(&close_texture_system);
   open_stage(&close_run_registries);
+
+  // Checked once, here, rather than at nine call sites: a refused stage
+  // means the unwind is already incomplete, so the run must not start.
+  if (g_stageOverflow) {
+    return fail_bootstrap();
+  }
 
   g_bootstrapped = true;
   core::log_message(core::LogLevel::Info, "engine", "bootstrap complete");

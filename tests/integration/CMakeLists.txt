@@ -292,6 +292,25 @@ engine_add_test_executable(engine_integration_pipeline_lifetime
 # Helper plus driver: the contract is about what survives a process that
 # exits without flushing, which cannot be observed from inside that
 # process.
+engine_add_executable_target(crash_report_helper
+    SOURCES
+    crash_report_helper.cpp
+    PRIVATE_DEPS
+    engine_runtime
+)
+
+add_test(
+    NAME engine_integration_crash_report
+    COMMAND ${CMAKE_COMMAND}
+        "-DHELPER=$<TARGET_FILE:crash_report_helper>"
+        "-DASSET_ROOT=${CMAKE_SOURCE_DIR}"
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/crash_report_test.cmake
+)
+set_tests_properties(
+    engine_integration_crash_report
+    PROPERTIES LABELS integration
+)
+
 engine_add_executable_target(log_flush_helper
     SOURCES
     log_flush_helper.cpp

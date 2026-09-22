@@ -69,6 +69,7 @@ engine_add_module_library(engine_core
     src/asset_identity.cpp
     src/bootstrap.cpp
     src/console.cpp
+    src/crash_report.cpp
     src/cvar.cpp
     src/debug_draw.cpp
     src/durable_replace.cpp
