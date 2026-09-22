@@ -250,6 +250,11 @@ struct PhysicsContext final {
   bool broadphaseOverflowActive = false;
   std::uint32_t broadphaseOverflowEpisodes = 0U;
 
+  // Pairs the last resolve handed to a narrow phase: those whose bounds,
+  // grown by each body's travel over the step, overlap. Observable so a
+  // test can hold pair testing to the pairs that can touch.
+  std::uint32_t narrowPhasePairTests = 0U;
+
   // Collision-pair buffer diagnostic: pairs recorded past
   // kMaxCollisionPairs are counted per step and reported once per
   // overflow episode. The kept set is the first kMaxCollisionPairs in

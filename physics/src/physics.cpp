@@ -90,9 +90,12 @@ void begin_generation(std::uint32_t *generation, std::uint32_t *stamps,
 // cannot invoke UB or unbounded loops, and any collider whose expanded
 // bounds would touch more than kMaxCellsPerCollider cells (or that the
 // node pool cannot hold) is diverted to the brute-force overflow list
-// instead of silently losing grid coverage. 256 cells comfortably covers
-// the largest legitimate span: kMaxLinearSpeed expansion is ~8.3 m per
-// side against a >=4 m cell, about 6 cells per axis.
+// instead of silently losing grid coverage. 256 cells covers any body's
+// travel -- kMaxLinearSpeed expansion is ~8.3 m per side against a 4 m
+// cell, about 6 cells per axis -- and a collider over ~64 m across, such
+// as a large ground box, overflows by design: it is tested against every
+// collider, each pair costing one bounds comparison before any narrow
+// phase.
 constexpr float kMaxCellCoordMagnitude = 1.0e9F;
 constexpr std::int32_t kMinCellCoord = -1000000000;
 constexpr std::int32_t kMaxCellCoord = 1000000000;
@@ -178,6 +181,7 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
 
   physicsCtx.collisionPairCount = 0U;
   physicsCtx.collisionPairDropCount = 0U;
+  physicsCtx.narrowPhasePairTests = 0U;
   ++physicsCtx.solverFrameNumber;
   begin_generation(&physicsCtx.pairHashGeneration,
                    physicsCtx.pairHashStamps.data(),
@@ -294,19 +298,11 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
     std::uint32_t *const testedStamps = shapeStorePtr->testedStamps.data();
     const std::size_t testedStampsSize = shapeStorePtr->testedStamps.size();
 
-    float cellSize = kDefaultCellSize;
-    for (std::size_t i = 0U; i < colliderCount; ++i) {
-      if (!geometryValid[i]) {
-        continue;
-      }
-      const engine::math::Vec3 he =
-          engine::math::aabb_half_extents(geometries[i].worldAabb);
-      const float maxHe = std::max({he.x, he.y, he.z});
-      if (maxHe * 2.0F > cellSize) {
-        cellSize = maxHe * 2.0F;
-      }
-    }
-    const float invCellSize = 1.0F / cellSize;
+    // A fixed cell: sized from the largest collider, one big ground box
+    // put every collider in one cell and made pair testing quadratic. A
+    // collider too big for its share of cells goes to the overflow list
+    // below, which is lossless.
+    const float invCellSize = 1.0F / kDefaultCellSize;
 
     auto &buckets = resolveScratch->buckets;
     auto &nodes = resolveScratch->nodes;
@@ -443,6 +439,20 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
         if (!geometryValid[j]) {
           return;
         }
+
+        // Only a pair whose bounds, each grown by its body's travel over
+        // the step, overlap can touch within it; anything else would reach
+        // a narrow phase only because the grid put it in the same cell.
+        const engine::math::AABB &boundsI = geometries[i].worldAabb;
+        const engine::math::AABB &boundsJ = geometries[j].worldAabb;
+        if (((boundsI.max.x + expandX[i]) < (boundsJ.min.x - expandX[j])) ||
+            ((boundsJ.max.x + expandX[j]) < (boundsI.min.x - expandX[i])) ||
+            ((boundsI.max.y + expandY[i]) < (boundsJ.min.y - expandY[j])) ||
+            ((boundsJ.max.y + expandY[j]) < (boundsI.min.y - expandY[i])) ||
+            ((boundsI.max.z + expandZ[i]) < (boundsJ.min.z - expandZ[j])) ||
+            ((boundsJ.max.z + expandZ[j]) < (boundsI.min.z - expandZ[i]))) {
+          return;
+        }
         const Entity authorityEntityB =
             (bodyOwners[j] != kInvalidEntity) ? bodyOwners[j] : entityB;
         if (world.movement_authority(authorityEntityB) ==
@@ -509,6 +519,7 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
             has_non_identity_linear_transform(geometries[i]) ||
             has_non_identity_linear_transform(geometries[j]);
 
+        ++physicsCtx.narrowPhasePairTests;
         const PairContext pair{world,
                                simToken,
                                physicsCtx,
@@ -578,6 +589,19 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
         continue;
       }
 
+      // Candidates are gathered first and tested in index order, so the
+      // order pairs resolve in -- which the result depends on -- follows
+      // the colliders, not the grid's bucket layout.
+      auto &candidates = resolveScratch->candidates;
+      std::size_t candidateCount = 0U;
+      const auto gather = [&](std::uint32_t j) noexcept {
+        if ((j > i) && (testedStamps[j] != physicsCtx.testedGeneration)) {
+          testedStamps[j] = physicsCtx.testedGeneration;
+          candidates[candidateCount] = j;
+          ++candidateCount;
+        }
+      };
+
       const engine::math::AABB &boundsA = geometries[i].worldAabb;
       const std::int32_t minCX = cell_coord(boundsA.min.x - expandX[i]);
       const std::int32_t maxCX = cell_coord(boundsA.max.x + expandX[i]);
@@ -594,14 +618,26 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
             while (nodeIdx != kSpatialHashEmpty) {
               const std::uint32_t j = nodes[nodeIdx].colliderIdx;
               nodeIdx = nodes[nodeIdx].next;
-              test_pair(j);
+              gather(j);
             }
           }
         }
       }
 
       for (std::size_t o = 0U; o < overflowCount; ++o) {
-        test_pair(overflowList[o]);
+        gather(overflowList[o]);
+      }
+
+      std::sort(candidates.begin(),
+                candidates.begin() +
+                    static_cast<std::ptrdiff_t>(candidateCount));
+      // test_pair dedupes on the same stamps gather set; a fresh
+      // generation lets it take each candidate exactly once.
+      begin_generation(&physicsCtx.testedGeneration, testedStamps,
+                       testedStampsSize);
+      testedStamps[i] = physicsCtx.testedGeneration;
+      for (std::size_t c = 0U; c < candidateCount; ++c) {
+        test_pair(candidates[c]);
       }
     }
   }
