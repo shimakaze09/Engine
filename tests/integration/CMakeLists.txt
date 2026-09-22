@@ -292,6 +292,28 @@ engine_add_test_executable(engine_integration_pipeline_lifetime
 # Helper plus driver: the contract is about what survives a process that
 # exits without flushing, which cannot be observed from inside that
 # process.
+# NDEBUG on purpose: the contract under test is that the check survives
+# the configuration that ships, which is the one <cassert> removed it from.
+engine_add_executable_target(assertion_helper
+    SOURCES
+    assertion_helper.cpp
+    PRIVATE_DEPS
+    engine_core
+    COMPILE_DEFINITIONS
+    NDEBUG
+)
+
+add_test(
+    NAME engine_integration_assertion_release
+    COMMAND ${CMAKE_COMMAND}
+        "-DHELPER=$<TARGET_FILE:assertion_helper>"
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/assertion_release_test.cmake
+)
+set_tests_properties(
+    engine_integration_assertion_release
+    PROPERTIES LABELS integration
+)
+
 engine_add_executable_target(crash_report_helper
     SOURCES
     crash_report_helper.cpp

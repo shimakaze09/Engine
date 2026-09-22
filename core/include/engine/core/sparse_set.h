@@ -8,7 +8,7 @@
 #pragma once
 
 #include <array>
-#include <cassert>
+#include "engine/core/assertion.h"
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
@@ -163,27 +163,23 @@ public:
 
   /// Returns the entity stored at a dense slot (slot must be < count()).
   EntityType entity_at(std::size_t denseIndex) const noexcept {
-    assert(denseIndex < m_count && "SparseSet::entity_at: index out of range");
+    ENGINE_ASSERT(denseIndex < m_count);
     return m_entities[denseIndex];
   }
 
   /// Returns the component stored at a dense slot (bounds asserted).
   Component &component_at(std::size_t denseIndex,
                           std::size_t stateIndex = 0U) noexcept {
-    assert(denseIndex < m_count &&
-           "SparseSet::component_at: index out of range");
-    assert(stateIndex < StateCount &&
-           "SparseSet::component_at: state index out of range");
+    ENGINE_ASSERT(denseIndex < m_count);
+    ENGINE_ASSERT(stateIndex < StateCount);
     return m_components[stateIndex][denseIndex];
   }
 
   /// Returns the component stored at a dense slot (bounds asserted).
   const Component &component_at(std::size_t denseIndex,
                                 std::size_t stateIndex = 0U) const noexcept {
-    assert(denseIndex < m_count &&
-           "SparseSet::component_at: index out of range");
-    assert(stateIndex < StateCount &&
-           "SparseSet::component_at: state index out of range");
+    ENGINE_ASSERT(denseIndex < m_count);
+    ENGINE_ASSERT(stateIndex < StateCount);
     return m_components[stateIndex][denseIndex];
   }
 
@@ -403,28 +399,23 @@ public:
 
   /// Returns the entity stored at a dense slot (slot must be < count()).
   EntityType entity_at(std::size_t denseIndex) const noexcept {
-    assert(denseIndex < m_count &&
-           "CompactSparseSet::entity_at: index out of range");
+    ENGINE_ASSERT(denseIndex < m_count);
     return m_entities[denseIndex];
   }
 
   /// Returns the component stored at a dense slot (bounds asserted).
   Component &component_at(std::size_t denseIndex,
                           std::size_t stateIndex = 0U) noexcept {
-    assert(denseIndex < m_count &&
-           "CompactSparseSet::component_at: index out of range");
-    assert(stateIndex < StateCount &&
-           "CompactSparseSet::component_at: state index out of range");
+    ENGINE_ASSERT(denseIndex < m_count);
+    ENGINE_ASSERT(stateIndex < StateCount);
     return m_components[stateIndex][denseIndex];
   }
 
   /// Returns the component stored at a dense slot (bounds asserted).
   const Component &component_at(std::size_t denseIndex,
                                 std::size_t stateIndex = 0U) const noexcept {
-    assert(denseIndex < m_count &&
-           "CompactSparseSet::component_at: index out of range");
-    assert(stateIndex < StateCount &&
-           "CompactSparseSet::component_at: state index out of range");
+    ENGINE_ASSERT(denseIndex < m_count);
+    ENGINE_ASSERT(stateIndex < StateCount);
     return m_components[stateIndex][denseIndex];
   }
 

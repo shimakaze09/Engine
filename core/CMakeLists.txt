@@ -67,6 +67,7 @@ add_custom_target(engine_build_info ALL
 engine_add_module_library(engine_core
     SOURCES
     src/asset_identity.cpp
+    src/assertion.cpp
     src/bootstrap.cpp
     src/console.cpp
     src/crash_report.cpp
