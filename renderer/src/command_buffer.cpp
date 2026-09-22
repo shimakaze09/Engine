@@ -543,6 +543,19 @@ void initialize_renderer() noexcept {
   g_shutDownRefusalLogged = false;
 }
 
+const RenderDevice *acquire_render_device() noexcept {
+  if (g_shutDown) {
+    if (!g_shutDownRefusalLogged) {
+      g_shutDownRefusalLogged = true;
+      core::log_message(core::LogLevel::Warning, "renderer",
+                        "renderer work issued after shutdown_renderer; "
+                        "ignored rather than re-initializing the device");
+    }
+    return nullptr;
+  }
+  return initialize_render_device() ? render_device() : nullptr;
+}
+
 /// Shuts down the owning system for renderer.
 void shutdown_renderer() noexcept {
   // Latched before the early return below, so the contract holds on every

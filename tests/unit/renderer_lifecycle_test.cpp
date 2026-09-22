@@ -42,11 +42,13 @@
 #include "../test_harness.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 
 #include "engine/core/cvar.h"
 #include "engine/core/logging.h"
 #include "engine/renderer/command_buffer.h"
+#include "engine/renderer/mesh_loader.h"
 #include "engine/renderer/render_device.h"
 
 namespace {
@@ -152,6 +154,42 @@ void check_flush_after_shutdown_does_not_resurrect(
             "after shutdown: a second flush still initializes nothing");
   ctx.check(again.records == 0U,
             "after shutdown: the refusal is logged once, not per frame");
+}
+
+/// The same rule for mesh uploads (#545). Both upload entry points used to
+/// call initialize_render_device themselves, so an upload after shutdown --
+/// an asset request completing late, a caller in the wrong order -- created
+/// a device again. They now require one that is already live.
+void check_mesh_upload_after_shutdown_does_not_resurrect(
+    engine::tests::TestContext &ctx) {
+  g_tally = LogTally{};
+  const float triangle[9] = {0.0F, 0.0F, 0.0F, 1.0F, 0.0F,
+                             0.0F, 0.0F, 1.0F, 0.0F};
+  const std::uint32_t indices[3] = {0U, 1U, 2U};
+  rr::GpuMesh built{};
+  ctx.check(
+      !rr::build_gpu_mesh_from_data(triangle, 3U, indices, 3U, false, &built),
+      "after shutdown: building a mesh is refused");
+
+  // Position and normal per vertex: the unskinned, UV-less layout, so the
+  // data passes validation and the refusal can only come from the device.
+  const float positionsAndNormals[18] = {0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F,
+                                         1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F,
+                                         0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 1.0F};
+  rr::CpuMeshData data{};
+  const bool filled = data.vertices.assign(positionsAndNormals, 18U) &&
+                      data.indices.assign(indices, 3U);
+  ctx.check(filled, "the mesh data is filled");
+  data.vertexCount = 3U;
+  data.strideFloats = 6U;
+  rr::GpuMesh uploaded{};
+  ctx.check(!rr::upload_mesh_data_to_gpu(data, &uploaded),
+            "after shutdown: uploading mesh data is refused");
+
+  ctx.check(g_tally.deviceInitializations == 0U,
+            "after shutdown: no mesh upload initialized a render device");
+  ctx.check(rr::render_device() == nullptr,
+            "after shutdown: no device is live");
 }
 
 /// A shut-down renderer must be revivable, or the fix would trade a
@@ -274,6 +312,7 @@ int main() {
   check_cold_flush_initializes_the_device(ctx);
   check_failed_backend_does_not_retry(ctx);
   check_flush_after_shutdown_does_not_resurrect(ctx);
+  check_mesh_upload_after_shutdown_does_not_resurrect(ctx);
   check_a_new_lifetime_re_arms_the_backend(ctx);
   check_shutdown_without_a_device_is_a_no_op(ctx);
   check_shutdown_releases_a_device_the_backend_never_owned(ctx);

@@ -13,6 +13,8 @@
 
 namespace engine::renderer {
 
+struct RenderDevice;
+
 /// Opaque id of an uploaded GPU mesh (0 = invalid).
 struct MeshHandle final {
   std::uint32_t id = 0U;
@@ -329,6 +331,14 @@ void initialize_renderer() noexcept;
 /// initialize_renderer, rather than rebuilding the backend against the
 /// device and shader system this call destroyed.
 void shutdown_renderer() noexcept;
+
+/// The render device for work inside the renderer's lifetime that needs
+/// one: created on demand while the renderer is open (the null device on
+/// a headless run, which never creates one up front), and null once
+/// shutdown_renderer has run, instead of a device brought back behind the
+/// renderer's back. Mesh uploads go through here rather than calling
+/// initialize_render_device themselves.
+const RenderDevice *acquire_render_device() noexcept;
 
 /// Sets the virtual root used for built-in renderer shaders.
 void set_shader_root_path(const char *path) noexcept;

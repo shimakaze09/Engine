@@ -281,6 +281,7 @@ engine_add_test_executable(engine_unit_mesh_loader
     SOURCES
     mesh_loader_test.cpp
     ../fake_render_device.cpp
+    ../fake_renderer_lifetime.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/mesh_loader.cpp
     PRIVATE_INCLUDE_DIRS
     ${CMAKE_SOURCE_DIR}/renderer/include
@@ -295,6 +296,7 @@ engine_add_test_executable(engine_unit_asset_generation_check
     SOURCES
     asset_generation_check_test.cpp
     ../fake_render_device.cpp
+    ../fake_renderer_lifetime.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/mesh_loader.cpp
     PRIVATE_INCLUDE_DIRS
     ${CMAKE_SOURCE_DIR}/renderer/include
