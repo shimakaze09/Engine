@@ -23,8 +23,9 @@ void warn_if_cooked_asset_stale(const char *cookedPath) noexcept;
 /// certifies outputs of a format or import semantics this build was not
 /// cooked against. A missing stamp or a pre-manifest schema is accepted
 /// after a once-per-asset notice — never-certified content (hand-placed
-/// or legacy) stays loadable. Verdicts are cached per path for the
-/// session; safe from the streaming worker.
+/// or legacy) stays loadable. Verdicts are cached per path and stamp
+/// content, so a recook, which rewrites the stamp, is checked afresh;
+/// safe from the streaming worker.
 bool cooked_asset_generation_ok(const char *cookedPath) noexcept;
 
 /// Clears the once-per-asset warning memory and the per-session
