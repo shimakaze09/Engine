@@ -6,52 +6,29 @@
 #include "engine/renderer/texture_loader.h"
 #include "texture_handle_codec.h"
 
+#include "../fake_render_device.h"
+
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 
 namespace engine::renderer {
-namespace {
-
-struct FakeTextureDevice final {
-  std::uint32_t nextId = 1U;
-  int aliveTextures = 0;
-};
-
-FakeTextureDevice g_fake{};
-RenderDevice g_device{};
-// When set, render_device() answers as it does after shutdown_render_device:
-// no device is live.
-bool g_deviceAbsent = false;
-
-DeviceTextureHandle fake_create_texture(const TextureDesc &) noexcept {
-  ++g_fake.aliveTextures;
-  return DeviceTextureHandle{g_fake.nextId++};
-}
-
-void fake_destroy_texture(DeviceTextureHandle texture) noexcept {
-  if (texture.value != 0U) {
-    --g_fake.aliveTextures;
-  }
-}
 
 void reset_fake_device() noexcept {
-  g_fake = FakeTextureDevice{};
-  g_device = RenderDevice{};
-  g_device.create_texture = &fake_create_texture;
-  g_device.destroy_texture = &fake_destroy_texture;
-  g_deviceAbsent = false;
+  tests::reset_fake_device();
+  tests::fake_device().create_texture = &tests::fake::create_texture;
+  tests::fake_device().destroy_texture = &tests::fake::destroy_texture;
 }
 
-} // namespace
-
-const RenderDevice *render_device() noexcept {
-  return g_deviceAbsent ? nullptr : &g_device;
+// When set, render_device() answers as it does after shutdown_render_device:
+// no device is live.
+void set_fake_device_absent(bool absent) noexcept {
+  tests::fake_log().present = !absent;
 }
 
-void set_fake_device_absent(bool absent) noexcept { g_deviceAbsent = absent; }
-
-int fake_alive_textures() noexcept { return g_fake.aliveTextures; }
+int fake_alive_textures() noexcept {
+  return tests::fake_alive(tests::FakeKind::Texture);
+}
 
 } // namespace engine::renderer
 

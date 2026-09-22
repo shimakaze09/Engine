@@ -23,12 +23,9 @@
 #include "engine/renderer/command_buffer.h"
 #include "engine/renderer/render_device.h"
 
-namespace engine::renderer {
+#include "../fake_render_device.h"
 
-// The pass-level helpers this suite does not exercise. The shared
-// forward-draw helper calls the foliage upload, which is per draw, so
-// that one records through the device like any other.
-const RenderDevice *render_device() noexcept { return nullptr; }
+namespace engine::renderer {
 
 /// No texture store in this suite, so every material's albedo slot reads
 /// as unset and the fallback path is what each draw exercises.
@@ -199,6 +196,9 @@ void count_missing_program_reports(engine::core::LogLevel level,
 
 /// Runs this executable or test program.
 int main() {
+  // No device is live: the projection helpers fall back to the GL clip
+  // conventions, and every table under test is passed in explicitly.
+  engine::tests::fake_log().present = false;
   // Registered from the start because the report below is latched for the
   // process: a sink installed later would see nothing and the count would
   // read as "reported once" for the wrong reason.

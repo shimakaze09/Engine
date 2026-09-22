@@ -16,6 +16,8 @@
 #include "engine/renderer/render_device.h"
 #include "engine/renderer/shadow_map.h"
 
+#include "../fake_render_device.h"
+
 #include <cstdint>
 #include <cstdio>
 
@@ -36,7 +38,6 @@ struct FakeDeviceLog final {
 };
 
 FakeDeviceLog g_log{};
-RenderDevice g_device{};
 GpuMesh g_mesh{};
 
 void fake_bind_render_target(RenderTargetHandle target) noexcept {
@@ -62,36 +63,28 @@ void fake_draw(DeviceGeometryHandle, PrimitiveTopology, std::int32_t,
 void fake_draw_indexed(DeviceGeometryHandle, std::int32_t) noexcept {
   fake_draw(DeviceGeometryHandle{}, PrimitiveTopology::Triangles, 0, 0);
 }
-void fake_bind_program(DeviceProgramHandle) noexcept {}
-void fake_set_param_f32(ShaderParam, float) noexcept {}
-void fake_set_param_mat4(ShaderParam, const float *) noexcept {}
-void fake_set_param_vec3(ShaderParam, const float *) noexcept {}
-void fake_set_viewport(std::int32_t, std::int32_t, std::int32_t,
-                       std::int32_t) noexcept {}
-void fake_apply_render_state(const RenderState &) noexcept {}
-
 /// Installs the fake device table and clears its log.
 void reset_fake_device() noexcept {
   g_log = FakeDeviceLog{};
-  g_device = RenderDevice{};
-  g_device.bind_render_target = &fake_bind_render_target;
-  g_device.clear = &fake_clear;
-  g_device.draw = &fake_draw;
-  g_device.draw_indexed = &fake_draw_indexed;
-  g_device.bind_program = &fake_bind_program;
-  g_device.set_param_f32 = &fake_set_param_f32;
-  g_device.set_param_mat4 = &fake_set_param_mat4;
-  g_device.set_param_vec3 = &fake_set_param_vec3;
-  g_device.set_viewport = &fake_set_viewport;
-  g_device.apply_render_state = &fake_apply_render_state;
+  tests::reset_fake_device();
+  RenderDevice &device = tests::fake_device();
+  device.bind_render_target = &fake_bind_render_target;
+  device.clear = &fake_clear;
+  device.draw = &fake_draw;
+  device.draw_indexed = &fake_draw_indexed;
+  device.bind_program = &tests::fake::bind_program;
+  device.set_param_f32 = &tests::fake::set_param_f32;
+  device.set_param_mat4 = &tests::fake::set_param_mat4;
+  device.set_param_vec3 = &tests::fake::set_param_vec3;
+  device.set_viewport = &tests::fake::set_viewport;
+  device.apply_render_state = &tests::fake::apply_render_state;
 }
 
 } // namespace
 
-// Link seams for the shadow flush TU: the device, the profiler, the mesh
-// registry lookup (every handle resolves to one unskinned mesh) and the
-// skinning helpers the unskinned draws never reach.
-const RenderDevice *render_device() noexcept { return &g_device; }
+// Link seams for the shadow flush TU: the profiler, the mesh registry
+// lookup (every handle resolves to one unskinned mesh) and the skinning
+// helpers the unskinned draws never reach.
 void gpu_profiler_begin_pass(GpuPassId) noexcept {}
 void gpu_profiler_end_pass(GpuPassId) noexcept {}
 const GpuMesh *lookup_gpu_mesh(const GpuMeshRegistry *, MeshHandle) noexcept {

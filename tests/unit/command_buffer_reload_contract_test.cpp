@@ -27,6 +27,8 @@
 #include "engine/renderer/render_device.h"
 #include "engine/renderer/shader_system.h"
 
+#include "../fake_render_device.h"
+
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -59,9 +61,7 @@ constexpr const char *kShaderFiles[] = {
     "debug_line.frag",      "luminance.frag",
 };
 
-engine::renderer::RenderDevice g_fakeDevice{};
 std::uint32_t g_nextProgram = 100U;
-std::uint32_t g_nextResource = 1U;
 
 // Uniform names the fake reports as missing (-1), each scoped to
 // programs linked after its marker so a reload's re-linked program loses
@@ -140,62 +140,31 @@ fake_shader_param(engine::renderer::DeviceProgramHandle program,
   return engine::renderer::ShaderParam{3};
 }
 
-engine::renderer::DeviceBufferHandle
-fake_create_buffer(const engine::renderer::BufferDesc &) noexcept {
-  return engine::renderer::DeviceBufferHandle{g_nextResource++};
-}
-
-void fake_destroy_buffer(engine::renderer::DeviceBufferHandle) noexcept {}
-
-engine::renderer::DeviceGeometryHandle
-fake_create_geometry(const engine::renderer::GeometryDesc &) noexcept {
-  return engine::renderer::DeviceGeometryHandle{g_nextResource++};
-}
-
-void fake_destroy_geometry(engine::renderer::DeviceGeometryHandle) noexcept {}
-
-engine::renderer::DeviceTextureHandle
-fake_create_texture(const engine::renderer::TextureDesc &) noexcept {
-  return engine::renderer::DeviceTextureHandle{g_nextResource++};
-}
-
-void fake_destroy_texture(engine::renderer::DeviceTextureHandle) noexcept {}
-
-engine::renderer::RenderTargetHandle
-fake_create_render_target(const engine::renderer::RenderTargetDesc &) noexcept {
-  return engine::renderer::RenderTargetHandle{g_nextResource++};
-}
-
-void fake_destroy_render_target(engine::renderer::RenderTargetHandle) noexcept {
-}
-
-void fake_update_buffer(engine::renderer::DeviceBufferHandle, const void *,
-                        std::ptrdiff_t) noexcept {}
-
 /// Installs the fake function table: the program/parameter seam plus the
 /// resource creators the init paths need (skybox geometry, debug line
 /// buffers, SSAO noise, shadow targets). Uniform-block entries stay null
 /// (and caps.uniformBlocks false) so the skinning family is skipped,
 /// keeping the harness scoped to issue #56.
 void configure_fake_device() noexcept {
-  g_fakeDevice = engine::renderer::RenderDevice{};
+  engine::tests::reset_fake_device();
+  engine::renderer::RenderDevice &device = engine::tests::fake_device();
   // Enough sampler units that the deferred capability gate stays open —
   // this harness exercises the reload contract, not device limits.
-  g_fakeDevice.caps.maxTextureSamplers = 32U;
-  g_fakeDevice.caps.cookedPrograms = true;
-  g_fakeDevice.cooked_program_profile = &fake_cooked_profile;
-  g_fakeDevice.create_program_binary = &fake_create_program_binary;
-  g_fakeDevice.destroy_program = &fake_destroy_program;
-  g_fakeDevice.shader_param = &fake_shader_param;
-  g_fakeDevice.create_buffer = &fake_create_buffer;
-  g_fakeDevice.destroy_buffer = &fake_destroy_buffer;
-  g_fakeDevice.update_buffer = &fake_update_buffer;
-  g_fakeDevice.create_geometry = &fake_create_geometry;
-  g_fakeDevice.destroy_geometry = &fake_destroy_geometry;
-  g_fakeDevice.create_texture = &fake_create_texture;
-  g_fakeDevice.destroy_texture = &fake_destroy_texture;
-  g_fakeDevice.create_render_target = &fake_create_render_target;
-  g_fakeDevice.destroy_render_target = &fake_destroy_render_target;
+  device.caps.maxTextureSamplers = 32U;
+  device.caps.cookedPrograms = true;
+  device.cooked_program_profile = &fake_cooked_profile;
+  device.create_program_binary = &fake_create_program_binary;
+  device.destroy_program = &fake_destroy_program;
+  device.shader_param = &fake_shader_param;
+  device.create_buffer = &engine::tests::fake::create_buffer;
+  device.destroy_buffer = &engine::tests::fake::destroy_buffer;
+  device.update_buffer = &engine::tests::fake::update_buffer;
+  device.create_geometry = &engine::tests::fake::create_geometry;
+  device.destroy_geometry = &engine::tests::fake::destroy_geometry;
+  device.create_texture = &engine::tests::fake::create_texture;
+  device.destroy_texture = &engine::tests::fake::destroy_texture;
+  device.create_render_target = &engine::tests::fake::create_render_target;
+  device.destroy_render_target = &engine::tests::fake::destroy_render_target;
 }
 
 bool write_profile_shader_file(const char *fileName, const char *profile,
@@ -601,8 +570,9 @@ int check_dx11_profile_links_with_spirv_sidecars() {
       return 360;
     }
   }
-  g_fakeDevice.cooked_program_profile = &fake_cooked_profile_dx11;
-  g_fakeDevice.create_program_binary_introspected =
+  engine::tests::fake_device().cooked_program_profile =
+      &fake_cooked_profile_dx11;
+  engine::tests::fake_device().create_program_binary_introspected =
       &fake_create_program_binary_introspected;
   reset_link_counters();
 
@@ -619,20 +589,14 @@ int check_dx11_profile_links_with_spirv_sidecars() {
     result = 365;
   }
 
-  g_fakeDevice.cooked_program_profile = &fake_cooked_profile;
-  g_fakeDevice.create_program_binary_introspected = nullptr;
+  engine::tests::fake_device().cooked_program_profile = &fake_cooked_profile;
+  engine::tests::fake_device().create_program_binary_introspected = nullptr;
   return result;
 }
 
 } // namespace
 
 namespace engine::renderer {
-
-bool initialize_render_device() noexcept { return true; }
-
-void shutdown_render_device() noexcept {}
-
-const RenderDevice *render_device() noexcept { return &g_fakeDevice; }
 
 bool initialize_gpu_profiler() noexcept { return true; }
 

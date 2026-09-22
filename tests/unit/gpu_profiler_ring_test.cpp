@@ -10,6 +10,8 @@
 #include "engine/renderer/gpu_profiler.h"
 #include "engine/renderer/render_device.h"
 
+#include "../fake_render_device.h"
+
 #include <cstdint>
 #include <cstdio>
 
@@ -17,16 +19,17 @@ namespace engine::renderer {
 
 namespace {
 
-std::uint32_t g_nextQueryId = 1U;
 std::uint64_t g_timestampCalls = 0U;
 std::uint64_t g_nextTimestampNs = 0U;
 std::uint64_t g_queryResults[512]{};
 bool g_resultsAvailable = true;
 
 DeviceQueryHandle fake_create_query() noexcept {
-  return DeviceQueryHandle{g_nextQueryId++};
+  return DeviceQueryHandle{tests::fake_create(tests::FakeKind::Query)};
 }
-void fake_destroy_query(DeviceQueryHandle) noexcept {}
+void fake_destroy_query(DeviceQueryHandle query) noexcept {
+  tests::fake_destroy(tests::FakeKind::Query, query.value);
+}
 void fake_write_timestamp(DeviceQueryHandle query) noexcept {
   ++g_timestampCalls;
   if (query.value < 512U) {
@@ -40,19 +43,19 @@ std::uint64_t fake_timestamp_value(DeviceQueryHandle query) noexcept {
   return (query.value < 512U) ? g_queryResults[query.value] : 0U;
 }
 
-RenderDevice g_device{};
-
 } // namespace
 
-/// Link seam: the profiler TU resolves its device through this override.
-const RenderDevice *render_device() noexcept {
-  g_device.caps.timestampQueries = true;
-  g_device.create_timestamp_query = &fake_create_query;
-  g_device.destroy_timestamp_query = &fake_destroy_query;
-  g_device.write_timestamp = &fake_write_timestamp;
-  g_device.timestamp_ready = &fake_timestamp_ready;
-  g_device.timestamp_value = &fake_timestamp_value;
-  return &g_device;
+/// The profiler TU resolves its device through the shared seam; this is the
+/// table it finds there.
+void install_fake_queries() noexcept {
+  tests::reset_fake_device();
+  RenderDevice &device = tests::fake_device();
+  device.caps.timestampQueries = true;
+  device.create_timestamp_query = &fake_create_query;
+  device.destroy_timestamp_query = &fake_destroy_query;
+  device.write_timestamp = &fake_write_timestamp;
+  device.timestamp_ready = &fake_timestamp_ready;
+  device.timestamp_value = &fake_timestamp_value;
 }
 
 } // namespace engine::renderer
@@ -249,6 +252,7 @@ void test_late_results_keep_last_value() noexcept {
 /// Runs this executable or test program.
 int main() {
   std::printf("=== GPU Profiler Ring Unit Tests ===\n");
+  engine::renderer::install_fake_queries();
 
   test_ring_backpressure_and_delayed_resolve();
   test_end_without_begin_is_ignored();

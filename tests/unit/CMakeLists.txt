@@ -268,6 +268,7 @@ endif()
 engine_add_test_executable(engine_unit_mesh_loader
     SOURCES
     mesh_loader_test.cpp
+    ../fake_render_device.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/mesh_loader.cpp
     PRIVATE_INCLUDE_DIRS
     ${CMAKE_SOURCE_DIR}/renderer/include
@@ -281,6 +282,7 @@ engine_add_test_executable(engine_unit_mesh_loader
 engine_add_test_executable(engine_unit_asset_generation_check
     SOURCES
     asset_generation_check_test.cpp
+    ../fake_render_device.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/mesh_loader.cpp
     PRIVATE_INCLUDE_DIRS
     ${CMAKE_SOURCE_DIR}/renderer/include
@@ -809,6 +811,7 @@ engine_add_test_executable(engine_unit_gpu_profiler
 engine_add_test_executable(engine_unit_gpu_profiler_ring
     SOURCES
     gpu_profiler_ring_test.cpp
+    ../fake_render_device.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/gpu_profiler.cpp
     PRIVATE_INCLUDE_DIRS
     ${CMAKE_SOURCE_DIR}/renderer/include
@@ -820,6 +823,7 @@ engine_add_test_executable(engine_unit_gpu_profiler_ring
 engine_add_test_executable(engine_unit_pass_resources
     SOURCES
     pass_resources_test.cpp
+    ../fake_render_device.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/pass_resources.cpp
     PRIVATE_INCLUDE_DIRS
     ${CMAKE_SOURCE_DIR}/renderer/include
@@ -1157,6 +1161,7 @@ engine_add_test_executable(engine_unit_editor_asset_index
 engine_add_test_executable(engine_unit_shader_system
     SOURCES
     shader_system_test.cpp
+    ../fake_render_device.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/shader_system.cpp
     PRIVATE_INCLUDE_DIRS
     ${CMAKE_SOURCE_DIR}/renderer/include
@@ -1191,6 +1196,7 @@ engine_add_test_executable(engine_unit_texture_loader
 engine_add_test_executable(engine_unit_texture_loader_handles
     SOURCES
     texture_loader_handle_test.cpp
+    ../fake_render_device.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/texture_loader.cpp
     PRIVATE_INCLUDE_DIRS
     ${CMAKE_SOURCE_DIR}/renderer/include
@@ -1522,6 +1528,7 @@ engine_add_test_executable(engine_unit_light_collect_cast_shadow
 engine_add_test_executable(engine_unit_forward_light_selection
     SOURCES
     forward_light_selection_test.cpp
+    ../fake_render_device.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_flush_uniforms.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_context.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_math.cpp
@@ -1539,6 +1546,7 @@ engine_add_test_executable(engine_unit_forward_light_selection
 engine_add_test_executable(engine_unit_render_target_wrap
     SOURCES
     render_target_wrap_test.cpp
+    ../fake_render_device.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_capture.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_post_resources.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_context.cpp
@@ -1554,6 +1562,7 @@ engine_add_test_executable(engine_unit_render_target_wrap
 engine_add_test_executable(engine_unit_shadow_caster_flush
     SOURCES
     shadow_caster_flush_test.cpp
+    ../fake_render_device.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_flush_shadows.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_context.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_math.cpp
@@ -1617,6 +1626,7 @@ engine_add_test_executable(engine_unit_screenshot_tga
 engine_add_test_executable(engine_unit_command_buffer_post_chain
     SOURCES
     command_buffer_post_chain_test.cpp
+    ../fake_render_device.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_flush_post.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_post_resources.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_context.cpp
@@ -1632,6 +1642,7 @@ engine_add_test_executable(engine_unit_command_buffer_post_chain
 engine_add_test_executable(engine_unit_deferred_pass_viewport
     SOURCES
     deferred_pass_viewport_test.cpp
+    ../fake_render_device.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_flush_deferred.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_flush_uniforms.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_context.cpp
@@ -1652,6 +1663,7 @@ engine_add_test_executable(engine_unit_deferred_pass_viewport
 engine_add_test_executable(engine_unit_command_buffer_reload_contract
     SOURCES
     command_buffer_reload_contract_test.cpp
+    ../fake_render_device.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_context.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_init_core.cpp
@@ -1679,6 +1691,7 @@ engine_add_test_executable(engine_unit_command_buffer_reload_contract
 engine_add_test_executable(engine_unit_command_buffer_ibl_bake
     SOURCES
     command_buffer_ibl_bake_test.cpp
+    ../fake_render_device.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_ibl.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_context.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/render_settings.cpp
@@ -1693,6 +1706,7 @@ engine_add_test_executable(engine_unit_command_buffer_ibl_bake
 engine_add_test_executable(engine_unit_command_buffer_debug_overlay
     SOURCES
     command_buffer_debug_overlay_test.cpp
+    ../fake_render_device.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_flush_forward.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_math.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_context.cpp
@@ -1707,6 +1721,7 @@ engine_add_test_executable(engine_unit_command_buffer_debug_overlay
 engine_add_test_executable(engine_unit_command_buffer_alloc_safety
     SOURCES
     command_buffer_alloc_safety_test.cpp
+    ../fake_render_device.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_flush_uniforms.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_context.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_math.cpp
@@ -1729,6 +1744,7 @@ engine_add_test_executable(engine_unit_native_thread
 engine_add_test_executable(engine_unit_shader_reload
     SOURCES
     shader_reload_test.cpp
+    ../fake_render_device.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/shader_system.cpp
     PRIVATE_INCLUDE_DIRS
     ${CMAKE_SOURCE_DIR}/renderer/include
@@ -2053,6 +2069,7 @@ engine_add_test_executable(engine_unit_scene_path_length
 engine_add_test_executable(engine_unit_forward_draw_uniforms
     SOURCES
     forward_draw_uniforms_test.cpp
+    ../fake_render_device.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_flush_uniforms.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_context.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_math.cpp

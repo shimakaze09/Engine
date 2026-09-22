@@ -3,6 +3,8 @@
 #include "engine/renderer/pass_resources.h"
 #include "engine/renderer/render_device.h"
 
+#include "../fake_render_device.h"
+
 #include <cstdio>
 #include <cstdint>
 
@@ -10,88 +12,42 @@ namespace engine::renderer {
 
 namespace {
 
-struct FakeDeviceStats final {
-  std::uint32_t nextId = 1U;
-  std::uint32_t createCalls = 0U;
-  std::uint32_t failCreateCall = 0U;
-  int aliveTextures = 0;
-  int aliveRenderTargets = 0;
-  int mipChainTextures = 0;
-  std::uint32_t boundRenderTarget = 0U;
-  bool renderTargetComplete = true;
-};
+// Textures created with a mip chain; pass resources never ask for one.
+int g_mipChainTextures = 0;
 
-FakeDeviceStats g_stats{};
-RenderDevice g_device{};
-
-std::uint32_t make_resource(bool texture) noexcept {
-  ++g_stats.createCalls;
-  if ((g_stats.failCreateCall != 0U) &&
-      (g_stats.createCalls == g_stats.failCreateCall)) {
-    return 0U;
-  }
-
-  if (texture) {
-    ++g_stats.aliveTextures;
-  } else {
-    ++g_stats.aliveRenderTargets;
-  }
-  return g_stats.nextId++;
-}
-
-DeviceTextureHandle fake_create_texture(const TextureDesc &desc) noexcept {
+DeviceTextureHandle count_mip_chains(const TextureDesc &desc) noexcept {
   if (desc.mipLevels != 1) {
-    ++g_stats.mipChainTextures;
+    ++g_mipChainTextures;
   }
-  return DeviceTextureHandle{make_resource(true)};
-}
-
-void fake_destroy_texture(DeviceTextureHandle texture) noexcept {
-  if (texture.value != 0U) {
-    --g_stats.aliveTextures;
-  }
-}
-
-RenderTargetHandle fake_create_render_target(
-    const RenderTargetDesc &) noexcept {
-  // Completeness is validated at creation under the device contract, so a
-  // scripted incomplete target is a creation failure.
-  if (!g_stats.renderTargetComplete) {
-    ++g_stats.createCalls;
-    return RenderTargetHandle{};
-  }
-  return RenderTargetHandle{make_resource(false)};
-}
-
-void fake_destroy_render_target(RenderTargetHandle target) noexcept {
-  if (target.value != 0U) {
-    --g_stats.aliveRenderTargets;
-  }
-}
-
-void fake_bind_render_target(RenderTargetHandle target) noexcept {
-  g_stats.boundRenderTarget = target.value;
+  return tests::fake::create_texture(desc);
 }
 
 void reset_device() noexcept {
   shutdown_pass_resources();
 
-  g_stats = FakeDeviceStats{};
-  g_device = RenderDevice{};
-  g_device.create_texture = &fake_create_texture;
-  g_device.destroy_texture = &fake_destroy_texture;
-  g_device.create_render_target = &fake_create_render_target;
-  g_device.destroy_render_target = &fake_destroy_render_target;
-  g_device.bind_render_target = &fake_bind_render_target;
+  tests::reset_fake_device();
+  g_mipChainTextures = 0;
+  RenderDevice &device = tests::fake_device();
+  device.create_texture = &count_mip_chains;
+  device.destroy_texture = &tests::fake::destroy_texture;
+  device.create_render_target = &tests::fake::create_render_target;
+  device.destroy_render_target = &tests::fake::destroy_render_target;
+  device.bind_render_target = &tests::fake::bind_render_target;
+}
+
+int alive_textures() noexcept {
+  return tests::fake_alive(tests::FakeKind::Texture);
+}
+
+int alive_render_targets() noexcept {
+  return tests::fake_alive(tests::FakeKind::RenderTarget);
 }
 
 bool no_live_resources() noexcept {
-  return (g_stats.aliveTextures == 0) && (g_stats.aliveRenderTargets == 0);
+  return (alive_textures() == 0) && (alive_render_targets() == 0);
 }
 
 } // namespace
-
-const RenderDevice *render_device() noexcept { return &g_device; }
 
 } // namespace engine::renderer
 
@@ -117,11 +73,11 @@ void test_success_shutdown_releases_all() noexcept {
   CHECK(pass_resource_texture(resources.sceneColor) !=
             kInvalidDeviceTexture,
         "scene color texture is assigned");
-  CHECK(g_stats.aliveTextures == 9, "all textures tracked alive");
-  CHECK(g_stats.aliveRenderTargets == 5, "all render targets tracked alive");
+  CHECK(alive_textures() == 9, "all textures tracked alive");
+  CHECK(alive_render_targets() == 5, "all render targets tracked alive");
   // Issue #229: only mip 0 is ever rendered, so no pass texture may ask
   // for a mip chain that would hold stale data forever.
-  CHECK(g_stats.mipChainTextures == 0,
+  CHECK(g_mipChainTextures == 0,
         "no pass texture requests a generated mip chain");
 
   shutdown_pass_resources();
@@ -130,7 +86,7 @@ void test_success_shutdown_releases_all() noexcept {
 
 void test_partial_failure_releases_created_resources() noexcept {
   reset_device();
-  g_stats.failCreateCall = 7U;
+  engine::tests::fake_log().failCreateCall = 7U;
 
   CHECK(!initialize_pass_resources(640, 480), "mid-creation failure rejected");
   CHECK(no_live_resources(), "partial failure releases created resources");
@@ -140,7 +96,10 @@ void test_partial_failure_releases_created_resources() noexcept {
 
 void test_incomplete_framebuffer_releases_created_resources() noexcept {
   reset_device();
-  g_stats.renderTargetComplete = false;
+  // Completeness is validated at creation under the device contract, so a
+  // scripted incomplete target is a creation failure.
+  engine::tests::fake_log().failKinds =
+      engine::tests::fake_kind_bit(engine::tests::FakeKind::RenderTarget);
 
   CHECK(!initialize_pass_resources(640, 480), "incomplete render target fails");
   CHECK(no_live_resources(), "completeness failure releases resources");
@@ -153,17 +112,18 @@ void test_resize_failure_keeps_existing_resources() noexcept {
   const PassResources resources = get_pass_resources();
   const DeviceTextureHandle oldSceneColor =
       pass_resource_texture(resources.sceneColor);
-  const int oldTextureCount = g_stats.aliveTextures;
-  const int oldRenderTargetCount = g_stats.aliveRenderTargets;
+  const int oldTextureCount = alive_textures();
+  const int oldRenderTargetCount = alive_render_targets();
 
-  g_stats.failCreateCall = g_stats.createCalls + 1U;
+  engine::tests::fake_log().failCreateCall =
+      engine::tests::fake_log().createCalls + 1U;
   resize_pass_resources(800, 600);
 
   CHECK(pass_resource_texture(resources.sceneColor) == oldSceneColor,
         "resize failure keeps old scene color");
-  CHECK(g_stats.aliveTextures == oldTextureCount,
+  CHECK(alive_textures() == oldTextureCount,
         "resize failure keeps old textures alive");
-  CHECK(g_stats.aliveRenderTargets == oldRenderTargetCount,
+  CHECK(alive_render_targets() == oldRenderTargetCount,
         "resize failure keeps old render targets alive");
 
   shutdown_pass_resources();
@@ -181,25 +141,26 @@ void test_resize_reports_status_and_swaps() noexcept {
   const PassResources resources = get_pass_resources();
   const DeviceTextureHandle oldSceneColor =
       pass_resource_texture(resources.sceneColor);
-  const int oldTextureCount = g_stats.aliveTextures;
-  const int oldRenderTargetCount = g_stats.aliveRenderTargets;
+  const int oldTextureCount = alive_textures();
+  const int oldRenderTargetCount = alive_render_targets();
 
   CHECK(resize_pass_resources(640, 480), "same-size resize reports success");
   CHECK(pass_resource_texture(resources.sceneColor) == oldSceneColor,
         "same-size resize keeps targets");
 
-  g_stats.failCreateCall = g_stats.createCalls + 3U;
+  engine::tests::fake_log().failCreateCall =
+      engine::tests::fake_log().createCalls + 3U;
   CHECK(!resize_pass_resources(1024, 768), "failed resize reports false");
   CHECK(pass_resource_texture(resources.sceneColor) == oldSceneColor,
         "failed resize keeps old targets");
 
-  g_stats.failCreateCall = 0U;
+  engine::tests::fake_log().failCreateCall = 0U;
   CHECK(resize_pass_resources(1024, 768), "retried resize reports success");
   CHECK(pass_resource_texture(resources.sceneColor) != oldSceneColor,
         "successful resize swaps to new targets");
-  CHECK(g_stats.aliveTextures == oldTextureCount,
+  CHECK(alive_textures() == oldTextureCount,
         "successful resize destroys exactly the old textures");
-  CHECK(g_stats.aliveRenderTargets == oldRenderTargetCount,
+  CHECK(alive_render_targets() == oldRenderTargetCount,
         "successful resize destroys exactly the old render targets");
 
   shutdown_pass_resources();

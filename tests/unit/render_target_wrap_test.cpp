@@ -25,6 +25,8 @@
 #include "engine/renderer/render_device.h"
 #include "engine/renderer/texture_loader.h"
 
+#include "../fake_render_device.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -41,8 +43,6 @@ struct CreatedTexture final {
 constexpr std::size_t kMaxCreated = 128U;
 CreatedTexture g_created[kMaxCreated]{};
 std::size_t g_createdCount = 0U;
-std::uint32_t g_nextHandle = 1U;
-RenderDevice g_device{};
 
 DeviceTextureHandle record_create_texture(const TextureDesc &desc) noexcept {
   if (g_createdCount < kMaxCreated) {
@@ -51,31 +51,23 @@ DeviceTextureHandle record_create_texture(const TextureDesc &desc) noexcept {
     g_created[g_createdCount].desc.pixels = nullptr;
     ++g_createdCount;
   }
-  return DeviceTextureHandle{g_nextHandle++};
+  return tests::fake::create_texture(desc);
 }
-
-void ignore_destroy_texture(DeviceTextureHandle) noexcept {}
-
-RenderTargetHandle record_create_target(const RenderTargetDesc &) noexcept {
-  return RenderTargetHandle{g_nextHandle++};
-}
-
-void ignore_destroy_target(RenderTargetHandle) noexcept {}
 
 void reset_recording() noexcept {
   g_createdCount = 0U;
-  g_device = RenderDevice{};
-  g_device.create_texture = &record_create_texture;
-  g_device.destroy_texture = &ignore_destroy_texture;
-  g_device.create_render_target = &record_create_target;
-  g_device.destroy_render_target = &ignore_destroy_target;
+  tests::reset_fake_device();
+  RenderDevice &device = tests::fake_device();
+  device.create_texture = &record_create_texture;
+  device.destroy_texture = &tests::fake::destroy_texture;
+  device.create_render_target = &tests::fake::create_render_target;
+  device.destroy_render_target = &tests::fake::destroy_render_target;
 }
 
 } // namespace
 
-// Link seams for the resource TUs: the device they create through, and
-// the texture system the capture targets publish their colour to.
-const RenderDevice *render_device() noexcept { return &g_device; }
+// Link seams for the resource TUs: the texture system the capture targets
+// publish their colour to.
 TextureHandle register_external_texture(DeviceTextureHandle) noexcept {
   return TextureHandle{};
 }
@@ -154,7 +146,8 @@ void test_pass_resources_clamp() noexcept {
 void test_scene_capture_target_clamps() noexcept {
   reset_recording();
   BackendState backend{};
-  CHECK(ensure_scene_capture_target(backend, &g_device, 0U, 256, 256),
+  CHECK(ensure_scene_capture_target(backend, &engine::tests::fake_device(), 0U,
+                                    256, 256),
         "the capture target allocates");
   CHECK(g_createdCount == 2U, "a colour and a depth texture");
   CHECK(count_without_wrap(TextureWrap::ClampEdge) == 0U,

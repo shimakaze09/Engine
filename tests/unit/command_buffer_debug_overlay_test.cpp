@@ -19,16 +19,12 @@
 #include "engine/renderer/render_device.h"
 #include "engine/renderer/texture_loader.h"
 
+#include "../fake_render_device.h"
+
 #include <cstdint>
 #include <cstdio>
 
 namespace engine::renderer {
-
-/// Link stub: this harness compiles command_buffer_context.cpp, whose
-/// projection helpers consult the live device's clip conventions; no
-/// device exists here, so the GL-convention defaults apply.
-const RenderDevice *render_device() noexcept { return nullptr; }
-
 
 // Link stubs for the forward-path helpers referenced by the flush TU; the
 // debug-overlay contract under test never reaches them (debug-line
@@ -314,6 +310,9 @@ void test_segment_chunking_draws_everything() noexcept {
 
 /// Runs this executable or test program.
 int main() {
+  // No device is live: the projection helpers fall back to the GL clip
+  // conventions, and every table under test is passed in explicitly.
+  engine::tests::fake_log().present = false;
   std::printf("=== Command Buffer Debug Overlay Unit Tests ===\n");
 
   test_one_age_step_per_flush();

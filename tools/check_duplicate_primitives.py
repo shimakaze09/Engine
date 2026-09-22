@@ -12,11 +12,13 @@ undone by the next call site that needs the same thing. Rules name the
 canonical owner and the evidence of a copy — usually a magic constant,
 since a copied algorithm carries the original's numbers.
 
-Scope is deliberately non-test first-party code. A test may legitimately
-want the arithmetic without the contract (`scheduler_stress` uses these
-multipliers as CPU work, not as a hash), and migrating the test tree is
-tracked separately on #484. Python copies are out of reach of a C++
-primitive and are tracked there too.
+Scope is non-test first-party code for the production primitives. A test
+may legitimately want the arithmetic without the contract
+(`scheduler_stress` uses these multipliers as CPU work, not as a hash),
+and migrating the test tree is tracked separately on #484. Python copies
+are out of reach of a C++ primitive and are tracked there too. The test
+tree has primitives of its own -- test doubles every suite used to copy --
+and TEST_RULES holds those, checked under `tests` only.
 
 Usage:
   python tools/check_duplicate_primitives.py            # report, exit 1 on findings
@@ -104,10 +106,30 @@ RULES: tuple[Rule, ...] = (
 )
 
 
-def audited_files(root: pathlib.Path) -> list[pathlib.Path]:
-    """Returns every first-party C++ source under the audited roots."""
+# Test doubles consolidated into one shared fake. Production code may and
+# must define these (the real device TU does), so they are checked only in
+# the test tree.
+TEST_RULES: tuple[Rule, ...] = (
+    Rule(
+        name="the fake render device seam",
+        owner="tests/fake_render_device.cpp",
+        # Defining the seam is what a copied fake device starts with: the
+        # renderer suites each carried one, with its own handle counter,
+        # alive counts and failure switch beside it.
+        pattern=r"(?<!\w)(?:initialize_|shutdown_)?render_device\(\)"
+        r"\s*noexcept\s*\{",
+        remedy="link tests/fake_render_device.cpp and configure "
+        "engine::tests::fake_device() instead",
+    ),
+)
+
+
+def audited_files(
+    root: pathlib.Path, roots=AUDITED_ROOTS
+) -> list[pathlib.Path]:
+    """Returns every first-party C++ source under the given roots."""
     files: list[pathlib.Path] = []
-    for name in AUDITED_ROOTS:
+    for name in roots:
         directory = root / name
         if not directory.is_dir():
             continue
@@ -119,7 +141,7 @@ def audited_files(root: pathlib.Path) -> list[pathlib.Path]:
     return sorted(files)
 
 
-def check_file(path: pathlib.Path, rel: str) -> list[str]:
+def check_file(path: pathlib.Path, rel: str, rules=RULES) -> list[str]:
     """Returns one finding per copied-primitive hit in the file."""
     findings: list[str] = []
     try:
@@ -127,7 +149,7 @@ def check_file(path: pathlib.Path, rel: str) -> list[str]:
     except OSError:
         return findings
 
-    for rule in RULES:
+    for rule in rules:
         if rel == rule.owner:
             continue
         for number, line in enumerate(lines, 1):
@@ -154,6 +176,11 @@ def main() -> int:
     files = audited_files(root)
     for path in files:
         findings.extend(check_file(path, path.relative_to(root).as_posix()))
+    test_files = audited_files(root, ("tests",))
+    for path in test_files:
+        findings.extend(
+            check_file(path, path.relative_to(root).as_posix(), TEST_RULES)
+        )
 
     if findings:
         print("duplicate-primitive audit failed:")
@@ -162,8 +189,9 @@ def main() -> int:
         return 1
 
     print(
-        f"duplicate-primitive audit passed: {len(files)} file(s), "
-        f"{len(RULES)} consolidated primitive(s) checked"
+        f"duplicate-primitive audit passed: {len(files) + len(test_files)} "
+        f"file(s), {len(RULES) + len(TEST_RULES)} consolidated primitive(s) "
+        "checked"
     )
     return 0
 

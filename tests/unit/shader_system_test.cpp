@@ -7,6 +7,8 @@
 #include "engine/renderer/material.h"
 #include "engine/renderer/render_device.h"
 
+#include "../fake_render_device.h"
+
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -19,34 +21,18 @@ namespace engine::renderer {
 
 namespace {
 
-RenderDevice g_fakeDevice{};
-std::uint32_t g_nextProgram = 100U;
-
 const char *fake_cooked_profile() noexcept { return "spirv"; }
 
-DeviceProgramHandle fake_create_program_binary(const void *, std::ptrdiff_t,
-                                               const void *,
-                                               std::ptrdiff_t) noexcept {
-  return DeviceProgramHandle{g_nextProgram++};
-}
-
-void fake_destroy_program(DeviceProgramHandle) noexcept {}
-
 void configure_fake_render_device() noexcept {
-  g_fakeDevice = RenderDevice{};
-  g_fakeDevice.caps.cookedPrograms = true;
-  g_fakeDevice.cooked_program_profile = &fake_cooked_profile;
-  g_fakeDevice.create_program_binary = &fake_create_program_binary;
-  g_fakeDevice.destroy_program = &fake_destroy_program;
+  tests::reset_fake_device();
+  RenderDevice &device = tests::fake_device();
+  device.caps.cookedPrograms = true;
+  device.cooked_program_profile = &fake_cooked_profile;
+  device.create_program_binary = &tests::fake::create_program_binary;
+  device.destroy_program = &tests::fake::destroy_program;
 }
 
 } // namespace
-
-bool initialize_render_device() noexcept { return true; }
-
-void shutdown_render_device() noexcept {}
-
-const RenderDevice *render_device() noexcept { return &g_fakeDevice; }
 
 } // namespace engine::renderer
 

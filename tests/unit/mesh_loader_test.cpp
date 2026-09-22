@@ -14,6 +14,8 @@
 
 #include "mesh_handle_codec.h"
 
+#include "../fake_render_device.h"
+
 namespace {
 
 constexpr const char *kBadMagicPath = "mesh_loader_bad_magic.mesh";
@@ -26,7 +28,6 @@ constexpr const char *kFileSizeMismatchPath = "mesh_loader_size_mismatch.mesh";
 constexpr const char *kOutOfRangeIndexPath =
     "mesh_loader_out_of_range_index.mesh";
 
-engine::renderer::RenderDevice g_fakeDevice{};
 std::uint32_t g_fakeGeometry = 1U;
 std::uint32_t g_fakeVertexBuffer = 2U;
 std::uint32_t g_fakeIndexBuffer = 3U;
@@ -60,11 +61,12 @@ void fake_destroy_geometry(engine::renderer::DeviceGeometryHandle) noexcept {
 void configure_fake_render_device(std::uint32_t geometry,
                                   std::uint32_t vertexBuffer,
                                   std::uint32_t indexBuffer) noexcept {
-  g_fakeDevice = engine::renderer::RenderDevice{};
-  g_fakeDevice.create_buffer = &fake_create_buffer;
-  g_fakeDevice.destroy_buffer = &fake_destroy_buffer;
-  g_fakeDevice.create_geometry = &fake_create_geometry;
-  g_fakeDevice.destroy_geometry = &fake_destroy_geometry;
+  engine::tests::reset_fake_device();
+  engine::renderer::RenderDevice &device = engine::tests::fake_device();
+  device.create_buffer = &fake_create_buffer;
+  device.destroy_buffer = &fake_destroy_buffer;
+  device.create_geometry = &fake_create_geometry;
+  device.destroy_geometry = &fake_destroy_geometry;
   g_fakeGeometry = geometry;
   g_fakeVertexBuffer = vertexBuffer;
   g_fakeIndexBuffer = indexBuffer;
@@ -821,16 +823,6 @@ int check_registry_full_then_reuse() {
 }
 
 } // namespace
-
-namespace engine::renderer {
-
-bool initialize_render_device() noexcept { return true; }
-
-void shutdown_render_device() noexcept {}
-
-const RenderDevice *render_device() noexcept { return &g_fakeDevice; }
-
-} // namespace engine::renderer
 
 /// Runs this executable or test program.
 int main() {

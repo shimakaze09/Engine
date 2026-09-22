@@ -1408,6 +1408,17 @@ def test_duplicate_primitive_gate():
             "tests_exempt", "tests/integration/a.cpp",
             "// Purpose.\nauto h = 1099511628211ULL;\n")]) == 0,
               "duplicate primitives: the test tree is out of scope")
+        seam = "// Purpose.\nconst RenderDevice *render_device() noexcept {\n"
+        check(run([script, "--root", case(
+            "test_seam", "tests/unit/a_test.cpp", seam)]) != 0,
+              "duplicate primitives: a test defining its own device seam is "
+              "a finding")
+        check(run([script, "--root", case(
+            "test_seam_owner", "tests/fake_render_device.cpp", seam)]) == 0,
+              "duplicate primitives: the shared fake owns the device seam")
+        check(run([script, "--root", case(
+            "prod_seam", "renderer/src/render_device.cpp", seam)]) == 0,
+              "duplicate primitives: the real device defines the seam")
         owner = write_comment_fixture(
             tmp / "owner", "core/include/engine/core/hash.h",
             "// Purpose.\nconstexpr auto p = 1099511628211ULL;\n")

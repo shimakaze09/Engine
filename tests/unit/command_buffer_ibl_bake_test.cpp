@@ -13,6 +13,8 @@
 #include "engine/renderer/render_device.h"
 #include "engine/renderer/shader_system.h"
 
+#include "../fake_render_device.h"
+
 #include <cstdint>
 #include <cstdio>
 
@@ -33,80 +35,33 @@ DeviceTextureHandle texture_device_handle(TextureHandle) noexcept {
 
 namespace {
 
-// Fake device state observed by the tests.
-struct FakeDeviceState final {
-  std::uint32_t boundTarget = 0U;
-  RenderState renderState{};
-  std::uint32_t nextResource = 100U;
-  std::uint32_t destroyedTextures[8] = {};
-  std::size_t destroyedTextureCount = 0U;
-  int aliveRenderTargets = 0;
-  bool failRenderTargetCreate = false;
-  std::size_t drawCalls = 0U;
-};
+// The render state the bake last applied; the shared fake records the rest.
+RenderState g_renderState{};
 
-FakeDeviceState g_fake{};
-
-DeviceTextureHandle fake_create_texture(const TextureDesc &) noexcept {
-  return DeviceTextureHandle{g_fake.nextResource++};
-}
-void fake_destroy_texture(DeviceTextureHandle tex) noexcept {
-  if (g_fake.destroyedTextureCount < 8U) {
-    g_fake.destroyedTextures[g_fake.destroyedTextureCount] = tex.value;
-  }
-  ++g_fake.destroyedTextureCount;
-}
-RenderTargetHandle fake_create_render_target(
-    const RenderTargetDesc &) noexcept {
-  if (g_fake.failRenderTargetCreate) {
-    return RenderTargetHandle{};
-  }
-  ++g_fake.aliveRenderTargets;
-  return RenderTargetHandle{g_fake.nextResource++};
-}
-void fake_destroy_render_target(RenderTargetHandle target) noexcept {
-  if (target.value != 0U) {
-    --g_fake.aliveRenderTargets;
-  }
-}
-void fake_bind_render_target(RenderTargetHandle target) noexcept {
-  g_fake.boundTarget = target.value;
-}
 void fake_apply_render_state(const RenderState &state) noexcept {
-  g_fake.renderState = state;
+  g_renderState = state;
 }
-void fake_bind_texture_slot(std::uint32_t, DeviceTextureHandle) noexcept {}
-void fake_bind_program(DeviceProgramHandle) noexcept {}
-void fake_set_param_i32(ShaderParam, std::int32_t) noexcept {}
-void fake_set_param_f32(ShaderParam, float) noexcept {}
-void fake_set_param_mat4(ShaderParam, const float *) noexcept {}
-void fake_set_viewport(std::int32_t, std::int32_t, std::int32_t,
-                       std::int32_t) noexcept {}
-void fake_draw(DeviceGeometryHandle, PrimitiveTopology, std::int32_t,
-               std::int32_t) noexcept {
-  ++g_fake.drawCalls;
-}
-
-RenderDevice g_device{};
 
 } // namespace
 
-/// Link seam: the IBL TU resolves its device through this override.
-const RenderDevice *render_device() noexcept {
-  g_device.create_texture = &fake_create_texture;
-  g_device.destroy_texture = &fake_destroy_texture;
-  g_device.create_render_target = &fake_create_render_target;
-  g_device.destroy_render_target = &fake_destroy_render_target;
-  g_device.bind_render_target = &fake_bind_render_target;
-  g_device.apply_render_state = &fake_apply_render_state;
-  g_device.bind_texture_slot = &fake_bind_texture_slot;
-  g_device.bind_program = &fake_bind_program;
-  g_device.set_param_i32 = &fake_set_param_i32;
-  g_device.set_param_f32 = &fake_set_param_f32;
-  g_device.set_param_mat4 = &fake_set_param_mat4;
-  g_device.set_viewport = &fake_set_viewport;
-  g_device.draw = &fake_draw;
-  return &g_device;
+/// Installs the device the IBL TU resolves through the shared seam.
+void reset_fake_device() noexcept {
+  g_renderState = RenderState{};
+  tests::reset_fake_device();
+  RenderDevice &device = tests::fake_device();
+  device.create_texture = &tests::fake::create_texture;
+  device.destroy_texture = &tests::fake::destroy_texture;
+  device.create_render_target = &tests::fake::create_render_target;
+  device.destroy_render_target = &tests::fake::destroy_render_target;
+  device.bind_render_target = &tests::fake::bind_render_target;
+  device.apply_render_state = &fake_apply_render_state;
+  device.bind_texture_slot = &tests::fake::bind_texture_slot;
+  device.bind_program = &tests::fake::bind_program;
+  device.set_param_i32 = &tests::fake::set_param_i32;
+  device.set_param_f32 = &tests::fake::set_param_f32;
+  device.set_param_mat4 = &tests::fake::set_param_mat4;
+  device.set_viewport = &tests::fake::set_viewport;
+  device.draw = &tests::fake::draw;
 }
 
 } // namespace engine::renderer
@@ -128,7 +83,7 @@ int g_failures = 0;
 /// Resets the fake device and returns a backend whose prefilter,
 /// irradiance, and BRDF-LUT pipelines report available.
 BackendState make_bake_backend() noexcept {
-  g_fake = FakeDeviceState{};
+  reset_fake_device();
   BackendState backend{};
   backend.environmentPrefilterAvailable = true;
   backend.environmentPrefilterProgram = DeviceProgramHandle{7U};
@@ -143,13 +98,12 @@ BackendState make_bake_backend() noexcept {
 
 /// Asserts the fake device is back in the ambient scene state.
 void check_state_restored(const char *what) noexcept {
-  CHECK(g_fake.boundTarget == 0U, what);
-  CHECK(g_fake.renderState.depthTest == DepthTest::Less,
-        "depth test restored");
-  CHECK(g_fake.renderState.depthWrite, "depth write restored");
-  CHECK(g_fake.renderState.blend == BlendMode::Disabled, "blend restored");
-  CHECK(g_fake.renderState.cull == CullMode::Back, "face culling restored");
-  CHECK(g_fake.aliveRenderTargets == 0,
+  CHECK(engine::tests::fake_log().boundRenderTarget == 0U, what);
+  CHECK(g_renderState.depthTest == DepthTest::Less, "depth test restored");
+  CHECK(g_renderState.depthWrite, "depth write restored");
+  CHECK(g_renderState.blend == BlendMode::Disabled, "blend restored");
+  CHECK(g_renderState.cull == CullMode::Back, "face culling restored");
+  CHECK(engine::tests::fake_alive(engine::tests::FakeKind::RenderTarget) == 0,
         "every transient face target destroyed");
 }
 
@@ -163,7 +117,7 @@ void test_prefilter_restores_state() noexcept {
   CHECK(tex != kInvalidDeviceTexture, "prefilter bake succeeds");
   CHECK(backend.prefilteredEnvironmentTexture == tex,
         "prefilter result cached");
-  CHECK(g_fake.drawCalls > 0U, "prefilter bake drew");
+  CHECK(engine::tests::fake_log().draws > 0, "prefilter bake drew");
   check_state_restored("prefilter leaves the back buffer bound");
 }
 
@@ -172,7 +126,8 @@ void test_prefilter_restores_state() noexcept {
 /// restores device state.
 void test_prefilter_target_failure_fails_clean() noexcept {
   BackendState backend = make_bake_backend();
-  g_fake.failRenderTargetCreate = true;
+  engine::tests::fake_log().failKinds =
+      engine::tests::fake_kind_bit(engine::tests::FakeKind::RenderTarget);
   const DeviceTextureHandle tex = ensure_prefiltered_environment(
       backend, render_device(), DeviceTextureHandle{5U},
       ReflectionProbeBakeSettings{});
@@ -180,8 +135,9 @@ void test_prefilter_target_failure_fails_clean() noexcept {
         "failed face target fails the prefilter bake");
   CHECK(backend.prefilteredEnvironmentTexture == kInvalidDeviceTexture,
         "no prefilter texture cached on failure");
-  CHECK(g_fake.destroyedTextureCount == 1U, "staged cubemap destroyed");
-  CHECK(g_fake.drawCalls == 0U, "no draws without a face target");
+  CHECK(engine::tests::fake_destroys(engine::tests::FakeKind::Texture) == 1,
+        "staged cubemap destroyed");
+  CHECK(engine::tests::fake_log().draws == 0, "no draws without a face target");
   check_state_restored("failed prefilter leaves the back buffer bound");
 }
 
@@ -196,7 +152,8 @@ void test_irradiance_contracts() noexcept {
   check_state_restored("irradiance leaves the back buffer bound");
 
   BackendState failing = make_bake_backend();
-  g_fake.failRenderTargetCreate = true;
+  engine::tests::fake_log().failKinds =
+      engine::tests::fake_kind_bit(engine::tests::FakeKind::RenderTarget);
   const DeviceTextureHandle failed = ensure_irradiance_environment(
       failing, render_device(), DeviceTextureHandle{5U},
       ReflectionProbeBakeSettings{});
@@ -204,7 +161,8 @@ void test_irradiance_contracts() noexcept {
         "failed face target fails the irradiance bake");
   CHECK(failing.irradianceEnvironmentTexture == kInvalidDeviceTexture,
         "no irradiance texture cached on failure");
-  CHECK(g_fake.destroyedTextureCount == 1U, "staged irradiance destroyed");
+  CHECK(engine::tests::fake_destroys(engine::tests::FakeKind::Texture) == 1,
+        "staged irradiance destroyed");
   check_state_restored("failed irradiance leaves the back buffer bound");
 }
 

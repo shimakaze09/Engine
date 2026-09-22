@@ -15,16 +15,13 @@
 #include "engine/renderer/mesh_loader.h"
 #include "engine/renderer/render_device.h"
 
+#include "../fake_render_device.h"
+
 #include <cstdint>
 #include <cstdio>
 #include <limits>
 
 namespace engine::renderer {
-
-/// Link stub: this harness compiles command_buffer_context.cpp, whose
-/// projection helpers consult the live device's clip conventions; no
-/// device exists here, so the GL-convention defaults apply.
-const RenderDevice *render_device() noexcept { return nullptr; }
 
 // Link stub: upload_material_texture_slots (linked in from
 // command_buffer_flush_uniforms.cpp) reports every slot unresolved to the
@@ -182,6 +179,9 @@ void test_unallocatable_size_returns_false_instead_of_terminating() noexcept {
 
 /// Runs this executable or test program.
 int main() {
+  // No device is live: the projection helpers fall back to the GL clip
+  // conventions, and every table under test is passed in explicitly.
+  engine::tests::fake_log().present = false;
   std::printf("=== Command Buffer Allocation Safety Unit Tests ===\n");
 
   test_happy_path_uploads_batch();

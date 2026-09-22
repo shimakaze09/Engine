@@ -11,6 +11,8 @@
 #include "engine/renderer/render_device.h"
 #include "engine/renderer/shadow_map.h"
 
+#include "../fake_render_device.h"
+
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -36,7 +38,6 @@ struct Uploads final {
 };
 
 Uploads g_uploads{};
-RenderDevice g_device{};
 
 void fake_set_param_vec4_array(ShaderParam param, const float *values,
                                std::int32_t count) noexcept {
@@ -63,32 +64,23 @@ void fake_set_param_vec4(ShaderParam param, const float *values) noexcept {
     }
   }
 }
-void fake_set_param_i32(ShaderParam, std::int32_t) noexcept {}
-void fake_set_param_f32(ShaderParam, float) noexcept {}
-void fake_set_param_vec3(ShaderParam, const float *) noexcept {}
-void fake_set_param_mat4(ShaderParam, const float *) noexcept {}
-void fake_set_param_mat4_array(ShaderParam, const float *,
-                               std::int32_t) noexcept {}
-void fake_bind_texture_slot(std::uint32_t, DeviceTextureHandle) noexcept {}
-
 void reset_fake_device() noexcept {
   g_uploads = Uploads{};
-  g_device = RenderDevice{};
-  g_device.set_param_vec4_array = &fake_set_param_vec4_array;
-  g_device.set_param_vec4 = &fake_set_param_vec4;
-  g_device.set_param_i32 = &fake_set_param_i32;
-  g_device.set_param_f32 = &fake_set_param_f32;
-  g_device.set_param_vec3 = &fake_set_param_vec3;
-  g_device.set_param_mat4 = &fake_set_param_mat4;
-  g_device.set_param_mat4_array = &fake_set_param_mat4_array;
-  g_device.bind_texture_slot = &fake_bind_texture_slot;
+  tests::reset_fake_device();
+  RenderDevice &device = tests::fake_device();
+  device.set_param_vec4_array = &fake_set_param_vec4_array;
+  device.set_param_vec4 = &fake_set_param_vec4;
+  device.set_param_i32 = &tests::fake::set_param_i32;
+  device.set_param_f32 = &tests::fake::set_param_f32;
+  device.set_param_vec3 = &tests::fake::set_param_vec3;
+  device.set_param_mat4 = &tests::fake::set_param_mat4;
+  device.set_param_mat4_array = &tests::fake::set_param_mat4_array;
+  device.bind_texture_slot = &tests::fake::bind_texture_slot;
 }
 
 } // namespace
 
-// Link seams: the device the context helpers resolve, and material
-// textures, which these uploads never touch.
-const RenderDevice *render_device() noexcept { return &g_device; }
+// Link seam: material textures, which these uploads never touch.
 DeviceTextureHandle texture_device_handle(TextureHandle) noexcept {
   return kInvalidDeviceTexture;
 }
@@ -152,7 +144,8 @@ void test_nearest_point_lights_uploaded() noexcept {
   reset_backend();
   reset_fake_device();
   const SceneLightData lights = make_lights();
-  upload_pbr_lighting_uniforms(g_backend, &g_device, lights);
+  upload_pbr_lighting_uniforms(g_backend, &engine::tests::fake_device(),
+                               lights);
   CHECK(g_uploads.pointCount == 8, "eight point lights uploaded");
   bool nearestFirst = true;
   for (std::size_t i = 0U; i < 8U; ++i) {
@@ -179,7 +172,8 @@ void test_shadow_slots_remap_to_upload_positions() noexcept {
   g_backend.spotShadowState.slots[0].lightIndex = 9;   // nearest: position 0
   g_backend.spotShadowState.slots[1].lightIndex = 1;   // 9 m: unselected
   const SceneLightData lights = make_lights();
-  bind_pbr_shadow_uniforms(g_backend, &g_device, lights, false, true, true);
+  bind_pbr_shadow_uniforms(g_backend, &engine::tests::fake_device(), lights,
+                           false, true, true);
   CHECK(g_uploads.pointShadowIdx[0] == 1.0F,
         "point slot maps to its upload position");
   CHECK(g_uploads.pointShadowIdx[1] == -1.0F,
@@ -202,7 +196,8 @@ void test_ties_break_by_index() noexcept {
     lights.pointLights[i].position = engine::math::Vec3(3.0F, 0.0F, 0.0F);
     lights.pointLights[i].radius = static_cast<float>(i);
   }
-  upload_pbr_lighting_uniforms(g_backend, &g_device, lights);
+  upload_pbr_lighting_uniforms(g_backend, &engine::tests::fake_device(),
+                               lights);
   bool ascending = true;
   for (std::size_t i = 0U; i < 8U; ++i) {
     if (g_uploads.pointPosRadius[i * 4U + 3U] != static_cast<float>(i)) {

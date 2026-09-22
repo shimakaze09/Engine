@@ -29,6 +29,8 @@
 #include "engine/renderer/mesh_loader.h"
 #include "engine/renderer/render_device.h"
 
+#include "../fake_render_device.h"
+
 namespace {
 
 using engine::tests::hash_file;
@@ -504,21 +506,13 @@ int check_crlf_stamp_certifies_like_lf() {
 
 } // namespace
 
-// mesh_loader.cpp compiles standalone into this suite (same recipe as
-// mesh_loader_test.cpp); its GPU upload entry points are never called on
-// the CPU decode path, so the device hooks are inert stubs.
-namespace engine::renderer {
-
-bool initialize_render_device() noexcept { return false; }
-
-void shutdown_render_device() noexcept {}
-
-const RenderDevice *render_device() noexcept { return nullptr; }
-
-} // namespace engine::renderer
-
 /// Runs this executable or test program.
 int main() {
+  // mesh_loader.cpp compiles standalone into this suite; its GPU upload
+  // entry points are never called on the CPU decode path, so no device is
+  // live.
+  engine::tests::fake_log().present = false;
+  engine::tests::fake_log().initializeSucceeds = false;
   engine::content::reset_cooked_asset_stale_warnings();
 
   int result = check_certified_and_mixed_generation();
