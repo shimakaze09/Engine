@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <cstring>
 
+#if !defined(NDEBUG)
 namespace {
 
 void touch_device(void * /*userData*/) noexcept {
@@ -24,6 +25,7 @@ void touch_device(void * /*userData*/) noexcept {
 }
 
 } // namespace
+#endif
 
 /// Runs this executable or test program.
 int main(int argc, char **argv) {

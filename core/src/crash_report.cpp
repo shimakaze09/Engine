@@ -255,7 +255,9 @@ bool install_crash_report() noexcept {
 #else
   struct sigaction action = {};
   action.sa_handler = &crash_handler;
-  static_cast<void>(::sigemptyset(&action.sa_mask));
+  // Unqualified: macOS defines sigemptyset as a macro, which a leading
+  // :: cannot name.
+  static_cast<void>(sigemptyset(&action.sa_mask));
   // SA_NODEFER is deliberately absent: the signal stays blocked while the
   // handler runs, so a second fault inside it cannot re-enter. The
   // re-raise happens after the previous disposition is restored, and the
