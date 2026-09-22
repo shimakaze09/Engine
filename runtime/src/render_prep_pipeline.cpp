@@ -39,7 +39,7 @@ bool aabb_outside_plane(const FrustumPlane &p, const math::Vec3 &center,
 // in order left, right, bottom, top, near, far.
 // Row j = (columns[0][j], columns[1][j], columns[2][j], columns[3][j])
 // where Vec4 x/y/z/w map to indices 0/1/2/3.
-void extract_frustum_planes(const math::Mat4 &vp,
+void extract_frustum_planes(const math::Mat4 &vp, bool depthZeroOne,
                             FrustumPlane planes[6]) noexcept {
   const math::Vec4 c0 = vp.columns[0];
   const math::Vec4 c1 = vp.columns[1];
@@ -51,7 +51,7 @@ void extract_frustum_planes(const math::Mat4 &vp,
   planes[3] = {c0.w - c0.y, c1.w - c1.y, c2.w - c2.y, c3.w - c3.y};
   // Near plane depends on the device clip-depth convention: GL clips at
   // z = -w (row w+z), the zero-to-one APIs at z = 0 (row z alone).
-  if (renderer::device_depth_zero_one()) {
+  if (depthZeroOne) {
     planes[4] = {c0.z, c1.z, c2.z, c3.z};
   } else {
     planes[4] = {c0.w + c0.z, c1.w + c1.z, c2.w + c2.z, c3.w + c3.z};
@@ -113,6 +113,7 @@ struct AuxiliaryCulling final {
 };
 
 void prepare_auxiliary_culling(const RenderPrepAuxiliaryInputs *inputs,
+                               bool depthZeroOne,
                                AuxiliaryCulling *out) noexcept {
   out->inputs = inputs;
   if (inputs == nullptr) {
@@ -124,7 +125,7 @@ void prepare_auxiliary_culling(const RenderPrepAuxiliaryInputs *inputs,
           ? inputs->captureCount
           : renderer::kMaxSceneCaptures;
   for (std::size_t i = 0U; i < captureCount; ++i) {
-    extract_frustum_planes(inputs->captureViewProjections[i],
+    extract_frustum_planes(inputs->captureViewProjections[i], depthZeroOne,
                            out->capturePlanes[i]);
   }
 }
@@ -288,9 +289,10 @@ void render_prep_chunk_job(void *userData) noexcept {
 
   const math::Mat4 &vp = jobData->viewProjection;
   FrustumPlane frustumPlanes[6];
-  extract_frustum_planes(vp, frustumPlanes);
+  extract_frustum_planes(vp, jobData->depthZeroOne, frustumPlanes);
   AuxiliaryCulling auxiliary{};
-  prepare_auxiliary_culling(jobData->auxiliary, &auxiliary);
+  prepare_auxiliary_culling(jobData->auxiliary, jobData->depthZeroOne,
+                            &auxiliary);
 
   for (std::size_t i = 0U; i < jobData->count; ++i) {
     const MeshComponent *meshComponent =
@@ -574,6 +576,9 @@ bool enqueue_render_prep_pipeline(
   const std::size_t transformCount = world->transform_count();
 
   std::size_t renderPrepJobCursor = 0U;
+  // Read here, on the thread building the graph, and handed to every chunk:
+  // the jobs run on workers and the render device is main-thread only.
+  const bool depthZeroOne = renderer::device_depth_zero_one();
   std::size_t renderPrepHandleCount = 0U;
 
   for (std::size_t start = 0U; start < transformCount; start += chunkSize) {
@@ -598,6 +603,7 @@ bool enqueue_render_prep_pipeline(
     prepData.frameGraphFailed = frameGraphFailed;
     prepData.droppedDrawCommands = droppedDrawCommands;
     prepData.viewProjection = viewProjection;
+    prepData.depthZeroOne = depthZeroOne;
     prepData.interpolationAlpha = interpolationAlpha;
     prepData.auxiliary =
         (mergedAuxiliaryBuffer != nullptr) ? auxiliary : nullptr;
