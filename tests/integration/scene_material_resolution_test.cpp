@@ -18,6 +18,7 @@
 #include "engine/engine.h"
 #include "engine/renderer/asset_database.h"
 #include "engine/renderer/material.h"
+#include "engine/renderer/mesh_primitives.h"
 #include "engine/runtime/editor_bridge.h"
 #include "engine/runtime/engine_pipeline.h"
 #include "engine/runtime/scene_serializer.h"
@@ -178,6 +179,56 @@ void collect_bound_ids(std::uint64_t *outIds) noexcept {
   }
 }
 
+/// Requires each sphere to rest exactly on the ground it is placed over,
+/// reading both heights out of the loaded world rather than restating the
+/// authored numbers, so a future edit to either the ground or the spheres
+/// is still checked.
+void check_spheres_rest_on_the_ground() noexcept {
+  const engine::runtime::Entity ground =
+      g_world->find_entity_by_name("Ground");
+  check(ground != engine::runtime::kInvalidEntity,
+        "the fixture has a ground to rest on");
+  if (ground == engine::runtime::kInvalidEntity) {
+    return;
+  }
+  engine::runtime::Transform groundTransform{};
+  check(g_world->get_transform(ground, &groundTransform),
+        "the ground has a transform");
+  // The plane's surface scales with the entity, like any other vertex.
+  const float surface =
+      groundTransform.position.y +
+      (engine::renderer::kBuiltinPlaneSurfaceY * groundTransform.scale.y);
+
+  for (const Subject &subject : kSubjects) {
+    const engine::runtime::Entity entity =
+        g_world->find_entity_by_name(subject.entity);
+    check(entity != engine::runtime::kInvalidEntity,
+          "the subject is in the scene");
+    if (entity == engine::runtime::kInvalidEntity) {
+      continue;
+    }
+    engine::runtime::Transform transform{};
+    check(g_world->get_transform(entity, &transform),
+          "the subject has a transform");
+    const float bottom =
+        transform.position.y -
+        (engine::renderer::kBuiltinSphereRadius * transform.scale.y);
+    const float gap = bottom - surface;
+    std::printf("scene_material_resolution_test: %s bottom %.3f, ground "
+                "surface %.3f, gap %.3f\n",
+                subject.entity, static_cast<double>(bottom),
+                static_cast<double>(surface), static_cast<double>(gap));
+    // Both sides are authored decimals scaled by authored decimals, so
+    // the comparison is exact to within one rounding of that arithmetic,
+    // not to a tolerance chosen to let a placement error through: a gap
+    // of a millimetre is a placement error, and 1e-4 is far below what
+    // any visible gap would be.
+    check((gap > -1.0e-4F) && (gap < 1.0e-4F),
+          "the sphere rests on the ground rather than floating over it or "
+          "sinking into it");
+  }
+}
+
 void run(engine::EnginePipeline &pipeline) noexcept {
   // The catalog must keep the identity each material's sidecar authored.
   // A material record registered without it cannot be found by reference,
@@ -222,6 +273,17 @@ void run(engine::EnginePipeline &pipeline) noexcept {
   check((bound[0] != bound[1]) && (bound[1] != bound[2]) &&
             (bound[0] != bound[2]),
         "the three surfaces bound three different materials");
+
+  // The other thing this fixture is used for. It is what a human looks at
+  // to judge a shading model, and shadow contact is part of that
+  // judgement: a sphere floating a finger's width above the ground makes
+  // its shadow read as detached, which is indistinguishable from a
+  // shadow-bias defect. It was authored 0.1 above the surface (#648),
+  // which cost a GPU session working out which of the two it was.
+  //
+  // The ground is the builtin plane, whose surface is not at its origin,
+  // so resting height is the plane's own offset plus the sphere's radius.
+  check_spheres_rest_on_the_ground();
 
   // Durability: saving the loaded world and reopening it must keep every
   // binding. A reference that resolves in-session but is not written back

@@ -17,12 +17,16 @@ namespace engine::renderer {
 // ---------------------------------------------------------------------------
 
 bool build_plane_mesh(GpuMesh *outMesh) noexcept {
+  // The surface height is the published constant rather than a literal
+  // repeated four times, so what an author has to account for when
+  // placing on a plane, and what a test asserts against, are one value.
+  constexpr float kY = kBuiltinPlaneSurfaceY;
   // clang-format off
   static constexpr float kVerts[] = {
-    -5.0F, 0.5F, -5.0F,  0.0F, 1.0F, 0.0F,
-    -5.0F, 0.5F,  5.0F,  0.0F, 1.0F, 0.0F,
-     5.0F, 0.5F,  5.0F,  0.0F, 1.0F, 0.0F,
-     5.0F, 0.5F, -5.0F,  0.0F, 1.0F, 0.0F,
+    -5.0F, kY, -5.0F,  0.0F, 1.0F, 0.0F,
+    -5.0F, kY,  5.0F,  0.0F, 1.0F, 0.0F,
+     5.0F, kY,  5.0F,  0.0F, 1.0F, 0.0F,
+     5.0F, kY, -5.0F,  0.0F, 1.0F, 0.0F,
   };
   static constexpr std::uint32_t kIdx[] = { 0, 1, 2,  0, 2, 3 };
   // clang-format on
@@ -82,7 +86,7 @@ bool build_cube_mesh(GpuMesh *outMesh) noexcept {
 bool build_sphere_mesh(GpuMesh *outMesh) noexcept {
   constexpr int kStacks = 12;
   constexpr int kSlices = 24;
-  constexpr float kRadius = 0.5F;
+  constexpr float kRadius = kBuiltinSphereRadius;
   constexpr int kVCount = (kStacks + 1) * (kSlices + 1);
   constexpr int kICount = kStacks * kSlices * 6;
 

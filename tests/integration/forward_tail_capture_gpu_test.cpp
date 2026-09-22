@@ -148,11 +148,20 @@ int run(engine::EnginePipeline &pipeline, World &world) noexcept {
   // The positive control. A frame the panel never entered makes every
   // later comparison meaningless, and a test that measures nothing must
   // fail rather than pass.
+  //
+  // It is not only a fixture check. The panel's arrival is measured on
+  // the build under test, so a build that already draws the tail in the
+  // wrong place reports a smaller arrival than a correct one: on the
+  // revert that established this test it fell from 8.3 to 2.0. A failure
+  // here can therefore mean the defect rather than a broken scene, which
+  // is why the message says so instead of only naming the scene.
   if (panelArrival < 2.0) {
     std::fprintf(stderr,
                  "FAIL: adding the translucent panel changed the frame by "
-                 "only %.3f levels, so this scene cannot show where the "
-                 "forward tail draws\n",
+                 "only %.3f levels. Either this scene cannot show where the "
+                 "forward tail draws, or the tail is already drawing "
+                 "somewhere this frame barely sees — check where the panel "
+                 "landed before treating the fixture as the fault\n",
                  panelArrival);
     result = 20;
   }

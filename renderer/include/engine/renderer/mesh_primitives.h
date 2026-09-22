@@ -13,14 +13,28 @@ namespace engine::renderer {
 // nz), CCW winding for outward-facing normals. Each returns false when GPU
 // mesh creation fails.
 
-/// 10x10 single-quad ground plane. NOTE: generated at y = +0.5 so it aligns
-/// with the top face of the unit cube primitive.
+/// Where the plane's surface sits relative to the entity's origin. It is
+/// not zero: the quad is generated level with the top face of the unit
+/// cube so a floor built from both is continuous. An object resting on a
+/// plane therefore sits at this height plus its own half extent, which is
+/// a trap worth naming rather than describing in prose — placing on the
+/// origin leaves the object half a metre low, and correcting by eye
+/// leaves it floating.
+inline constexpr float kBuiltinPlaneSurfaceY = 0.5F;
+
+/// Half extent of the unit cube, and the radius of the sphere, cylinder
+/// and capsule: each of those is centered on the entity's origin, unlike
+/// the plane above.
+inline constexpr float kBuiltinCubeHalfExtent = 0.5F;
+inline constexpr float kBuiltinSphereRadius = 0.5F;
+
+/// 10x10 single-quad ground plane, its surface at kBuiltinPlaneSurfaceY.
 bool build_plane_mesh(GpuMesh *outMesh) noexcept;
 
-/// Unit cube centered on the origin (half extent 0.5).
+/// Unit cube centered on the origin (half extent kBuiltinCubeHalfExtent).
 bool build_cube_mesh(GpuMesh *outMesh) noexcept;
 
-/// UV sphere of radius 0.5 (12 stacks x 24 slices).
+/// UV sphere of kBuiltinSphereRadius (12 stacks x 24 slices).
 bool build_sphere_mesh(GpuMesh *outMesh) noexcept;
 
 /// Capped cylinder of radius 0.5 and height 1 (24 slices).
