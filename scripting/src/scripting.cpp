@@ -143,8 +143,10 @@ int lua_engine_start_coroutine(lua_State *state) noexcept {
 // --- Entity lifecycle completeness ---
 
 /// Registers the full Lua API on one global engine table: the manual
-/// wrappers first, then the generated bindings; the two sets are disjoint,
-/// so registration order carries no override semantics.
+/// wrappers first, then the generated bindings last. Each generated
+/// binding asserts that no manual wrapper already claimed its name, so a
+/// name has one owner; registering them last is what lets that check see
+/// every manual registration.
 void register_engine_bindings(lua_State *state) noexcept {
   lua_newtable(state);
 
@@ -269,12 +271,12 @@ void register_engine_bindings(lua_State *state) noexcept {
   lua_pushcfunction(state, &lua_engine_require);
   lua_setfield(state, -2, "require");
 
-  register_generated_bindings(state);
-
   lua_pushcfunction(state, &lua_engine_persist);
   lua_setfield(state, -2, "persist");
   lua_pushcfunction(state, &lua_engine_restore);
   lua_setfield(state, -2, "restore");
+
+  register_generated_bindings(state);
 
   lua_setglobal(state, "engine");
 }
@@ -396,30 +398,6 @@ int bindable_get_entity_count() noexcept {
   }
   return static_cast<int>(
       runtime_binding().services->alive_entity_count(runtime_binding().world));
-}
-
-bool bindable_is_gamepad_connected() noexcept {
-  return core::is_gamepad_connected();
-}
-
-bool bindable_is_key_down(int scancode) noexcept {
-  return core::is_key_down(scancode);
-}
-
-bool bindable_is_key_pressed(int scancode) noexcept {
-  return core::is_key_pressed(scancode);
-}
-
-bool bindable_is_gamepad_button_down(int button) noexcept {
-  return core::is_gamepad_button_down(button);
-}
-
-bool bindable_is_action_down(const char *name) noexcept {
-  return (name != nullptr) ? core::is_action_down(name) : false;
-}
-
-bool bindable_is_action_pressed(const char *name) noexcept {
-  return (name != nullptr) ? core::is_action_pressed(name) : false;
 }
 
 float bindable_get_action_value(const char *name) noexcept {
