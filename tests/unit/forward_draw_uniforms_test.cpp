@@ -328,17 +328,17 @@ int main() {
     view.data = commands;
     view.count = 6U;
 
-    ShadingModelRun runs[kShadingModelCount] = {};
+    ShadingProgramRun runs[kShadingModelCount] = {};
     const std::size_t count =
-        partition_shading_model_runs(view, 0U, 6U, runs, kShadingModelCount);
+        partition_program_runs(view, 0U, 6U, runs, kShadingModelCount);
     check(count == 3U, "three models give three runs");
-    check((runs[0].model == 0U) && (runs[0].first == 0U) &&
+    check((runs[0].programId == 0U) && (runs[0].first == 0U) &&
               (runs[0].count == 2U),
           "the first run covers the first model's draws");
-    check((runs[1].model == 1U) && (runs[1].first == 2U) &&
+    check((runs[1].programId == 1U) && (runs[1].first == 2U) &&
               (runs[1].count == 3U),
           "the second run covers the second model's draws");
-    check((runs[2].model == 2U) && (runs[2].first == 5U) &&
+    check((runs[2].programId == 2U) && (runs[2].first == 5U) &&
               (runs[2].count == 1U),
           "the third run covers the last draw");
 
@@ -354,7 +354,7 @@ int main() {
     // A sub-range is partitioned on its own terms, which is what the
     // deferred path does for the transparent tail.
     const std::size_t tail =
-        partition_shading_model_runs(view, 2U, 6U, runs, kShadingModelCount);
+        partition_program_runs(view, 2U, 6U, runs, kShadingModelCount);
     check((tail == 2U) && (runs[0].first == 2U) && (runs[0].count == 3U) &&
               (runs[1].first == 5U) && (runs[1].count == 1U),
           "a sub-range partitions from its own start");
@@ -364,33 +364,132 @@ int main() {
     CommandBufferView uniformView{};
     uniformView.data = uniform;
     uniformView.count = 4U;
-    const std::size_t single = partition_shading_model_runs(
+    const std::size_t single = partition_program_runs(
         uniformView, 0U, 4U, runs, kShadingModelCount);
     check((single == 1U) && (runs[0].count == 4U),
           "one model in a range is one run");
 
     // Boundaries: an empty range, a null destination, and a capacity of
     // one all answer without reading past anything.
-    check(partition_shading_model_runs(view, 3U, 3U, runs,
+    check(partition_program_runs(view, 3U, 3U, runs,
                                        kShadingModelCount) == 0U,
           "an empty range has no runs");
-    check(partition_shading_model_runs(view, 0U, 6U, nullptr,
+    check(partition_program_runs(view, 0U, 6U, nullptr,
                                        kShadingModelCount) == 0U,
           "a null destination yields no runs");
     const std::size_t capped =
-        partition_shading_model_runs(view, 0U, 6U, runs, 1U);
+        partition_program_runs(view, 0U, 6U, runs, 1U);
     check((capped == 1U) && (runs[0].count == 6U),
           "a capacity of one joins the tail onto the run it can hold, "
           "rather than dropping those draws");
 
     // A range that runs past the view stops at the view.
     const std::size_t clamped =
-        partition_shading_model_runs(view, 0U, 99U, runs, kShadingModelCount);
+        partition_program_runs(view, 0U, 99U, runs, kShadingModelCount);
     std::size_t clampedTotal = 0U;
     for (std::size_t i = 0U; i < clamped; ++i) {
       clampedTotal += runs[i].count;
     }
     check(clampedTotal == 6U, "a range past the view stops at the view");
+  }
+
+  // Program ids beyond the three the engine ships. The partition reads the
+  // key's field and nothing else, so it must not have been sized or
+  // reasoned around exactly three: with three, one run per program is
+  // indistinguishable from a coincidence.
+  {
+    const auto programKeyed = [](std::uint8_t programId) noexcept {
+      DrawCommand entry{};
+      entry.sortKey.value =
+          (static_cast<std::uint64_t>(programId) & kDrawKeyShadingModelMask)
+          << kDrawKeyShadingModelShift;
+      return entry;
+    };
+
+    // The key's field is seven bits, so the largest id it can carry is
+    // one below the addressable limit. Nothing a real key holds can be
+    // unaddressable, which is what makes the bound in shading_program a
+    // guard rather than a live path.
+    DrawKey saturated{};
+    saturated.value = kDrawKeyShadingModelMask << kDrawKeyShadingModelShift;
+    check(draw_key_shading_model(saturated) ==
+              static_cast<std::uint8_t>(kMaxShadingPrograms - 1U),
+          "the key's widest program field is the last addressable id");
+    check(shading_program_id_is_addressable(
+              draw_key_shading_model(saturated)),
+          "every id a key can carry is addressable");
+
+    // Five programs, including ids no shipped model occupies.
+    DrawCommand five[5] = {programKeyed(0U), programKeyed(1U),
+                           programKeyed(2U), programKeyed(3U),
+                           programKeyed(4U)};
+    CommandBufferView fiveView{};
+    fiveView.data = five;
+    fiveView.count = 5U;
+    ShadingProgramRun fiveRuns[kMaxShadingPrograms] = {};
+    const std::size_t fiveCount =
+        partition_program_runs(fiveView, 0U, 5U, fiveRuns,
+                               kMaxShadingPrograms);
+    check(fiveCount == 5U, "five programs give five runs");
+    bool fiveNamed = true;
+    for (std::size_t i = 0U; i < fiveCount; ++i) {
+      fiveNamed = fiveNamed && (fiveRuns[i].programId ==
+                                static_cast<std::uint8_t>(i)) &&
+                  (fiveRuns[i].first == i) && (fiveRuns[i].count == 1U);
+    }
+    check(fiveNamed, "each of the five runs names its own program");
+
+    // Ids that are neither contiguous nor small, so no arithmetic that
+    // assumes id equals run index survives.
+    DrawCommand sparse[4] = {programKeyed(3U), programKeyed(40U),
+                             programKeyed(40U), programKeyed(127U)};
+    CommandBufferView sparseView{};
+    sparseView.data = sparse;
+    sparseView.count = 4U;
+    ShadingProgramRun sparseRuns[kMaxShadingPrograms] = {};
+    const std::size_t sparseCount =
+        partition_program_runs(sparseView, 0U, 4U, sparseRuns,
+                               kMaxShadingPrograms);
+    check((sparseCount == 3U) && (sparseRuns[0].programId == 3U) &&
+              (sparseRuns[1].programId == 40U) &&
+              (sparseRuns[1].count == 2U) &&
+              (sparseRuns[2].programId == 127U),
+          "sparse high program ids each get their own run");
+
+    // Exactly at capacity: one draw per addressable program.
+    DrawCommand full[kMaxShadingPrograms] = {};
+    for (std::size_t i = 0U; i < kMaxShadingPrograms; ++i) {
+      full[i] = programKeyed(static_cast<std::uint8_t>(i));
+    }
+    CommandBufferView fullView{};
+    fullView.data = full;
+    fullView.count = static_cast<std::uint32_t>(kMaxShadingPrograms);
+    ShadingProgramRun fullRuns[kMaxShadingPrograms] = {};
+    const std::size_t fullCount = partition_program_runs(
+        fullView, 0U, kMaxShadingPrograms, fullRuns, kMaxShadingPrograms);
+    std::size_t fullCovered = 0U;
+    for (std::size_t i = 0U; i < fullCount; ++i) {
+      fullCovered += fullRuns[i].count;
+    }
+    check(fullCount == kMaxShadingPrograms,
+          "every addressable program gets its own run at capacity");
+    check(fullCovered == kMaxShadingPrograms,
+          "the runs at capacity still cover every draw");
+
+    // One run past what the caller can hold: the tail joins the last run
+    // rather than being dropped, and every draw is still covered.
+    ShadingProgramRun tightRuns[kMaxShadingPrograms - 1U] = {};
+    const std::size_t tightCount =
+        partition_program_runs(fullView, 0U, kMaxShadingPrograms, tightRuns,
+                               kMaxShadingPrograms - 1U);
+    std::size_t tightCovered = 0U;
+    for (std::size_t i = 0U; i < tightCount; ++i) {
+      tightCovered += tightRuns[i].count;
+    }
+    check(tightCount == (kMaxShadingPrograms - 1U),
+          "one run past capacity returns exactly capacity");
+    check(tightCovered == kMaxShadingPrograms,
+          "one run past capacity still draws every draw");
   }
 
   if (g_failures != 0) {

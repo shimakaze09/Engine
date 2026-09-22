@@ -136,8 +136,11 @@ struct BackendState final {
   // backend's parameter tokens are global-registry indices, so a
   // program declaring the same uniform names shares them, which is why
   // adding a model needs no second parameter family.
-  ShaderProgramHandle shadingModelShaderHandles[kShadingModelCount]{};
-  DeviceProgramHandle shadingModelPrograms[kShadingModelCount]{};
+  /// Indexed by program id, sized to what the draw key can address, so a
+  /// key naming an unregistered program reads an empty slot rather than
+  /// running off the end of a three-entry table.
+  ShaderProgramHandle shadingProgramShaderHandles[kMaxShadingPrograms]{};
+  DeviceProgramHandle shadingPrograms[kMaxShadingPrograms]{};
 
   // PBR uniform locations.
   ShaderParam pbrModelLocation{};

@@ -98,17 +98,17 @@ void draw_forward_command(const ForwardDrawProgram &, const RenderDevice *,
                           const math::Mat4 &, RendererFrameStats *) noexcept {}
 /// One run covering the whole range: this suite submits no draws with a
 /// shading model, and the overlay it tests runs after the geometry.
-std::size_t partition_shading_model_runs(const CommandBufferView &,
+std::size_t partition_program_runs(const CommandBufferView &,
                                          std::size_t start, std::size_t end,
-                                         ShadingModelRun *runs,
+                                         ShadingProgramRun *runs,
                                          std::size_t capacity) noexcept {
   if ((runs == nullptr) || (capacity == 0U) || (start >= end)) {
     return 0U;
   }
-  runs[0] = ShadingModelRun{start, end - start, 0U};
+  runs[0] = ShadingProgramRun{start, end - start, 0U};
   return 1U;
 }
-DeviceProgramHandle shading_model_program(const BackendState &backend,
+DeviceProgramHandle shading_program(const BackendState &backend,
                                           std::uint8_t) noexcept {
   return backend.pbrProgram;
 }

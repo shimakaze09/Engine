@@ -243,13 +243,13 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
     // no models.
     auto drawModelRuns = [&](std::size_t start, std::size_t end,
                              bool batched) {
-      ShadingModelRun runs[kShadingModelCount] = {};
-      const std::size_t runCount = partition_shading_model_runs(
-          commandBufferView, start, end, runs, kShadingModelCount);
+      ShadingProgramRun runs[kMaxShadingPrograms] = {};
+      const std::size_t runCount = partition_program_runs(
+          commandBufferView, start, end, runs, kMaxShadingPrograms);
       for (std::size_t i = 0U; i < runCount; ++i) {
-        bindProgramForRun(shading_model_program(backend, runs[i].model));
+        bindProgramForRun(shading_program(backend, runs[i].programId));
         drawRange(runs[i].first, runs[i].first + runs[i].count, batched,
-                  runs[i].model);
+                  runs[i].programId);
       }
       // The sky and the passes after this one expect the
       // physically-based program bound.

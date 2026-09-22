@@ -198,7 +198,7 @@ void reset_backend() noexcept {
   g_backend.pbrProgram = DeviceProgramHandle{4U};
   g_backend.emptyGeometry = DeviceGeometryHandle{5U};
   for (std::size_t i = 0U; i < kShadingModelCount; ++i) {
-    g_backend.shadingModelPrograms[i] = DeviceProgramHandle{
+    g_backend.shadingPrograms[i] = DeviceProgramHandle{
         static_cast<std::uint32_t>(10U + i)};
   }
 }

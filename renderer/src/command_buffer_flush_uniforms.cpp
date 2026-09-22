@@ -753,9 +753,9 @@ ForwardDrawProgram pbr_forward_draw_program(const BackendState &backend) noexcep
   return program;
 }
 
-std::size_t partition_shading_model_runs(const CommandBufferView &view,
+std::size_t partition_program_runs(const CommandBufferView &view,
                                          std::size_t start, std::size_t end,
-                                         ShadingModelRun *runs,
+                                         ShadingProgramRun *runs,
                                          std::size_t capacity) noexcept {
   if ((runs == nullptr) || (capacity == 0U) || (view.data == nullptr) ||
       (start >= end)) {
@@ -770,20 +770,22 @@ std::size_t partition_shading_model_runs(const CommandBufferView &view,
   }
 
   std::size_t count = 0U;
-  runs[0] = ShadingModelRun{start, 0U,
-                            draw_key_shading_model(view.data[start].sortKey)};
+  runs[0] = ShadingProgramRun{
+      start, 0U, draw_key_shading_model(view.data[start].sortKey)};
   count = 1U;
   for (std::size_t i = start; i < last; ++i) {
-    const std::uint8_t model = draw_key_shading_model(view.data[i].sortKey);
-    if (model != runs[count - 1U].model) {
+    const std::uint8_t programId =
+        draw_key_shading_model(view.data[i].sortKey);
+    if (programId != runs[count - 1U].programId) {
       if (count == capacity) {
         // More runs than the caller can hold. The tail keeps drawing,
         // joined onto the last run rather than dropped: a draw shaded by
-        // the previous model is wrong, a draw missing entirely is worse.
+        // the previous program is wrong, a draw missing entirely is
+        // worse.
         runs[count - 1U].count = last - runs[count - 1U].first;
         return count;
       }
-      runs[count] = ShadingModelRun{i, 0U, model};
+      runs[count] = ShadingProgramRun{i, 0U, programId};
       ++count;
     }
     ++runs[count - 1U].count;
@@ -791,14 +793,17 @@ std::size_t partition_shading_model_runs(const CommandBufferView &view,
   return count;
 }
 
-DeviceProgramHandle shading_model_program(const BackendState &backend,
-                                          std::uint8_t model) noexcept {
+DeviceProgramHandle shading_program(const BackendState &backend,
+                                    std::uint8_t programId) noexcept {
   const DeviceProgramHandle fallback = backend.pbrProgram;
-  if (!shading_model_is_valid(model)) {
+  // Addressable, not registered: the table is as wide as the key's field,
+  // so an id the key can carry always reads a slot, and an id no program
+  // was registered for reads an empty one and falls back below.
+  if (!shading_program_id_is_addressable(programId)) {
     return fallback;
   }
   const DeviceProgramHandle program =
-      backend.shadingModelPrograms[static_cast<std::size_t>(model)];
+      backend.shadingPrograms[static_cast<std::size_t>(programId)];
   if (program != kInvalidDeviceProgram) {
     return program;
   }
@@ -806,8 +811,8 @@ DeviceProgramHandle shading_model_program(const BackendState &backend,
   if (!warnedMissingProgram) {
     warnedMissingProgram = true;
     core::log_message(core::LogLevel::Warning, "renderer",
-                      "a material selects a shading model whose program is "
-                      "unavailable; those draws are shaded as physically "
+                      "a material selects a shading program that is not "
+                      "registered; those draws are shaded as physically "
                       "based");
   }
   return fallback;

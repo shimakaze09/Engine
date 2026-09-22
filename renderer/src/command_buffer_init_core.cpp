@@ -360,9 +360,9 @@ bool init_backend_core(BackendState &backend) noexcept {
   // default binary in silence: asking for a set the manifest does not
   // cook would shade that model as physically based while the engine
   // believed otherwise.
-  backend.shadingModelShaderHandles[static_cast<std::size_t>(
+  backend.shadingProgramShaderHandles[static_cast<std::size_t>(
       ShadingModel::Pbr)] = pbrShaderHandle;
-  backend.shadingModelPrograms[static_cast<std::size_t>(ShadingModel::Pbr)] =
+  backend.shadingPrograms[static_cast<std::size_t>(ShadingModel::Pbr)] =
       backend.pbrProgram;
   {
     struct ModelVariant final {
@@ -389,8 +389,8 @@ bool init_backend_core(BackendState &backend) noexcept {
         core::log_message(core::LogLevel::Warning, "renderer", message);
         continue;
       }
-      backend.shadingModelShaderHandles[slot] = handle;
-      backend.shadingModelPrograms[slot] = shader_device_program(handle);
+      backend.shadingProgramShaderHandles[slot] = handle;
+      backend.shadingPrograms[slot] = shader_device_program(handle);
     }
   }
 

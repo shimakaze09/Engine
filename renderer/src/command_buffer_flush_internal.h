@@ -303,33 +303,35 @@ struct ForwardDrawBindings final {
   DeviceTextureHandle materialSlots[4] = {};
 };
 
-/// One maximal run of consecutive draws sharing a shading model. Render
-/// prep sorts the model directly below the transparency bit, so each
-/// model occupies exactly one run inside a range and finding them is a
-/// scan rather than a sort.
-struct ShadingModelRun final {
+/// One maximal run of consecutive draws sharing a shading program.
+/// Render prep sorts the program id directly below the transparency bit,
+/// so each program occupies exactly one run inside a range and finding
+/// them is a scan rather than a sort.
+struct ShadingProgramRun final {
   std::size_t first = 0U;
   std::size_t count = 0U;
-  /// The raw key field. A key can name a model this build has no run
-  /// for, so callers validate it with shading_model_is_valid.
-  std::uint8_t model = 0U;
+  /// The raw key field. A key can name a program nothing registered, so
+  /// callers resolve it through shading_program rather than indexing.
+  std::uint8_t programId = 0U;
 };
 
-/// Splits [start, end) of `view` into model runs, writing at most
+/// Splits [start, end) of `view` into program runs, writing at most
 /// `capacity` of them and returning how many. A range whose draws all
-/// share one model yields one run, which is the common case and the
-/// reason this costs a scan and no allocation.
-std::size_t partition_shading_model_runs(const CommandBufferView &view,
+/// share one program yields one run, which is the common case and the
+/// reason this costs a scan and no allocation. More runs than `capacity`
+/// joins the tail onto the last run: a draw shaded by the wrong program
+/// is wrong, a draw missing entirely is worse.
+std::size_t partition_program_runs(const CommandBufferView &view,
                                          std::size_t start, std::size_t end,
-                                         ShadingModelRun *runs,
+                                         ShadingProgramRun *runs,
                                          std::size_t capacity) noexcept;
 
-/// The program to draw `model` with, and the model actually used. Falls
-/// back to the physically-based program when a model has none, saying so
+/// The program registered for `programId`. Falls back to the
+/// physically-based program when nothing is registered there, saying so
 /// once per process rather than per draw or not at all: an author who
-/// picks Toon and sees a physically-lit surface is owed the reason.
-DeviceProgramHandle shading_model_program(const BackendState &backend,
-                                          std::uint8_t model) noexcept;
+/// picks a program and sees a physically-lit surface is owed the reason.
+DeviceProgramHandle shading_program(const BackendState &backend,
+                                    std::uint8_t programId) noexcept;
 
 /// Uploads everything about a draw that does not depend on its
 /// transform: the material scalars, its foliage wind, its albedo texture
