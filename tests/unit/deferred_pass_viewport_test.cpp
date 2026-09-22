@@ -199,12 +199,17 @@ void reset_draws() noexcept {
   g_draws[2].sortKey = DrawKey{kDrawKeyTransparentBit};
 }
 
+/// The context holds its lights by reference, so they must outlive the
+/// function that builds it.
+SceneLightData g_lights{};
+
 FrameFlushContext make_context() noexcept {
+  g_lights = SceneLightData{};
   return FrameFlushContext{.backend = g_backend,
                            .dev = render_device(),
                            .commandBufferView = {g_draws, 3U},
                            .registry = nullptr,
-                           .lights = {},
+                           .lights = g_lights,
                            .timeSeconds = 0.0F,
                            .passRes = get_pass_resources(),
                            .drawableWidth = 64,
