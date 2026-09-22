@@ -93,6 +93,21 @@ engine_add_test_executable(engine_integration_offscreen_draws_gpu
 set_tests_properties(engine_integration_offscreen_draws_gpu PROPERTIES
     SKIP_REGULAR_EXPRESSION "SKIPPED:")
 
+engine_add_test_executable(engine_integration_forward_tail_capture_gpu
+    SOURCES
+    forward_tail_capture_gpu_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/renderer/src
+    PRIVATE_DEPS
+    engine_runtime
+    engine_renderer
+    engine_content
+    LABELS
+    gpu;integration
+)
+set_tests_properties(engine_integration_forward_tail_capture_gpu PROPERTIES
+    SKIP_REGULAR_EXPRESSION "SKIPPED:")
+
 engine_add_test_executable(engine_integration_first_frame_shadows_gpu
     SOURCES
     first_frame_shadows_gpu_test.cpp
