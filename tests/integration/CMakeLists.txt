@@ -351,6 +351,15 @@ set_tests_properties(
     PROPERTIES LABELS integration
 )
 
+engine_add_test_executable(engine_integration_focus_loss_input
+    SOURCES
+    focus_loss_input_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    LABELS
+    integration
+)
+
 engine_add_test_executable(engine_integration_pipeline_stage_profile
     SOURCES
     pipeline_stage_profile_test.cpp

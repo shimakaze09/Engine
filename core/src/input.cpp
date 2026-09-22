@@ -282,6 +282,51 @@ void begin_input_frame() noexcept {
   touch_begin_frame();
 }
 
+namespace {
+
+/// Releases everything the window can no longer see being released.
+///
+/// Losing focus stops key, mouse and -- in a windowed run, where SDL does
+/// not deliver background controller events -- gamepad events. Anything
+/// held at that moment would otherwise stay down until the same input
+/// happened to be pressed and released again after focus returned: the
+/// Alt-Tab-while-walking character that keeps walking.
+///
+/// Released rather than silently cleared: current state goes to up while
+/// the previous frame's still says down, so is_key_released and the
+/// mapper's release callbacks fire exactly as for a real release, and each
+/// key and button emits its up event so event-bus listeners that track
+/// held state see the same edge. A charge-and-release mechanic resolves
+/// instead of hanging.
+void release_all_held_input() noexcept {
+  for (std::size_t i = 0U; i < g_keyState.size(); ++i) {
+    if (g_keyState[i]) {
+      g_keyState[i] = false;
+      KeyEvent ke{};
+      ke.scancode = static_cast<int>(i);
+      ke.down = false;
+      emit(ke);
+    }
+  }
+  for (std::size_t i = 0U; i < g_mouse.buttons.size(); ++i) {
+    if (g_mouse.buttons[i]) {
+      g_mouse.buttons[i] = false;
+      MouseButtonEvent mbe{};
+      mbe.button = static_cast<int>(i);
+      mbe.down = false;
+      emit(mbe);
+    }
+  }
+  // Sticks centre as well as buttons release: a stick held left when
+  // focus went would otherwise keep steering.
+  for (GamepadStateInternal &pad : g_gamepads) {
+    pad.buttons = {};
+    pad.axes = {};
+  }
+}
+
+} // namespace
+
 void input_process_event(const void *nativeEvent) noexcept {
   if (nativeEvent == nullptr) {
     return;
@@ -344,6 +389,9 @@ void input_process_event(const void *nativeEvent) noexcept {
     g_wheelCarry -= static_cast<float>(notches);
     break;
   }
+  case SDL_EVENT_WINDOW_FOCUS_LOST:
+    release_all_held_input();
+    break;
   case SDL_EVENT_GAMEPAD_ADDED:
     attach_gamepad(static_cast<std::uint32_t>(event->gdevice.which));
     break;
