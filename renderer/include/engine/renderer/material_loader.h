@@ -113,10 +113,13 @@ using MaterialTextureLoadFn = TextureHandle (*)(const char *virtualPath,
 /// AssetState::Failed and logged once (actionable: source path + material
 /// path); the material's corresponding TextureHandle field simply stays
 /// kInvalidTextureHandle, so shaders fall back to the material's scalar
-/// parameters — never a crash, never a stale/unrelated texture bind. Not a
-/// per-frame hot path itself, but cheap to call every frame: cost is O(materials
-/// with an unresolved slot), which drains to zero once textures are
-/// resident. Returns the number of texture slots newly resolved to Ready.
+/// parameters — never a crash, never a stale/unrelated texture bind. A
+/// texture the full texture table has no room to record is not loaded at
+/// all: it is reported once and the slot is not tried again until the
+/// material's slots are next assigned. Not a per-frame hot path itself,
+/// but cheap to call every frame: cost is O(materials with an unresolved
+/// slot), which drains to zero once textures are resident. Returns the
+/// number of texture slots newly resolved to Ready.
 std::size_t resolve_material_textures(AssetDatabase *database,
                                       MaterialTextureLoadFn loadFn,
                                       void *userData) noexcept;

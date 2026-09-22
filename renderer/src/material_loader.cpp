@@ -415,38 +415,61 @@ bool load_material_recursive(AssetDatabase *database, const char *virtualPath,
   return loaded;
 }
 
+/// What resolving one texture slot did.
+enum class SlotOutcome : std::uint8_t {
+  /// Nothing new: an empty slot, a lookup, or a failure now recorded.
+  Unchanged,
+  /// This call promoted the id to Ready.
+  Resolved,
+  /// The texture table has no room to record the id, Ready or Failed, so
+  /// the slot must not be tried again: a load whose result cannot be
+  /// recorded is repeated on every call, uploading and leaking a device
+  /// texture each time.
+  Unregisterable,
+};
+
 /// Resolves one texture slot's AssetId into a material's TextureHandle
-/// field; returns true only when this call newly promoted the id to Ready.
-/// An already-Ready or already-Failed id is a cheap lookup, never a reload.
-bool resolve_one_texture_slot(AssetDatabase *database, AssetId textureId,
-                              MaterialTextureLoadFn loadFn, void *userData,
-                              TextureHandle *outHandle) noexcept {
+/// field. An already-Ready or already-Failed id is a cheap lookup, never a
+/// reload, and nothing is loaded while there is no table slot to record it.
+SlotOutcome resolve_one_texture_slot(AssetDatabase *database, AssetId textureId,
+                                     MaterialTextureLoadFn loadFn,
+                                     void *userData,
+                                     TextureHandle *outHandle) noexcept {
+  *outHandle = kInvalidTextureHandle;
   if (textureId == kInvalidAssetId) {
-    *outHandle = kInvalidTextureHandle;
-    return false;
+    return SlotOutcome::Unchanged;
   }
 
   const AssetState state = texture_asset_state(database, textureId);
   if (state == AssetState::Ready) {
     *outHandle = resolve_texture_asset(database, textureId);
-    return false;
+    return SlotOutcome::Unchanged;
   }
   if (state == AssetState::Failed) {
-    *outHandle = kInvalidTextureHandle;
-    return false;
+    return SlotOutcome::Unchanged;
   }
 
   const AssetMetadata *metadata = find_asset_metadata(database, textureId);
   const char *path = ((metadata != nullptr) && (metadata->filePath[0] != '\0'))
                          ? metadata->filePath.data()
                          : nullptr;
+  if (!texture_asset_slot_available(database, textureId)) {
+    char message[512] = {};
+    std::snprintf(message, sizeof(message),
+                  "texture table is full (%zu textures); material falls back "
+                  "to its scalar parameters: %s",
+                  database->textureAssets.size(),
+                  (path != nullptr) ? path : "(no source path)");
+    core::log_message(core::LogLevel::Error, kMaterialLogChannel, message);
+    return SlotOutcome::Unregisterable;
+  }
   if ((path == nullptr) || (loadFn == nullptr)) {
     static_cast<void>(register_texture_asset_failed(database, textureId, path));
     *outHandle = kInvalidTextureHandle;
     core::log_message(
         core::LogLevel::Error, kMaterialLogChannel,
         "material texture reference has no resolvable source path");
-    return false;
+    return SlotOutcome::Unchanged;
   }
 
   const TextureHandle loaded = loadFn(path, userData);
@@ -458,13 +481,13 @@ bool resolve_one_texture_slot(AssetDatabase *database, AssetId textureId,
                  "its scalar parameters: %s",
                  path);
     core::log_message(core::LogLevel::Error, kMaterialLogChannel, message);
-    *outHandle = kInvalidTextureHandle;
-    return false;
+    return SlotOutcome::Unchanged;
   }
 
+  // Cannot fail: the slot was checked above and nothing ran in between.
   static_cast<void>(register_texture_asset(database, textureId, path, loaded));
   *outHandle = loaded;
-  return true;
+  return SlotOutcome::Resolved;
 }
 
 } // namespace
@@ -610,26 +633,35 @@ std::size_t resolve_material_textures(AssetDatabase *database,
     }
 
     const MaterialTextureSlots slots = record.textureSlots;
-    if (resolve_one_texture_slot(database, slots.albedo, loadFn, userData,
-                                 &record.params.albedoTexture)) {
-      ++resolvedCount;
-    }
-    if (resolve_one_texture_slot(database, slots.metallicRoughness, loadFn,
-                                 userData,
-                                 &record.params.metallicRoughnessTexture)) {
-      ++resolvedCount;
-    }
-    if (resolve_one_texture_slot(database, slots.emissive, loadFn, userData,
-                                 &record.params.emissiveTexture)) {
-      ++resolvedCount;
-    }
-    if (resolve_one_texture_slot(database, slots.occlusion, loadFn, userData,
-                                 &record.params.occlusionTexture)) {
-      ++resolvedCount;
-    }
-    if (resolve_one_texture_slot(database, slots.opacity, loadFn, userData,
-                                 &record.params.opacityTexture)) {
-      ++resolvedCount;
+    struct SlotRef final {
+      AssetId id;
+      TextureHandle *handle;
+    };
+    const SlotRef refs[] = {
+        {slots.albedo, &record.params.albedoTexture},
+        {slots.metallicRoughness, &record.params.metallicRoughnessTexture},
+        {slots.emissive, &record.params.emissiveTexture},
+        {slots.occlusion, &record.params.occlusionTexture},
+        {slots.opacity, &record.params.opacityTexture},
+    };
+    static_assert(sizeof(refs) / sizeof(refs[0]) <= 8U,
+                  "unregisterableTextureSlots holds one bit per slot");
+    for (std::size_t slot = 0U; slot < sizeof(refs) / sizeof(refs[0]); ++slot) {
+      const auto bit = static_cast<std::uint8_t>(1U << slot);
+      if ((record.unregisterableTextureSlots & bit) != 0U) {
+        continue;
+      }
+      switch (resolve_one_texture_slot(database, refs[slot].id, loadFn,
+                                       userData, refs[slot].handle)) {
+      case SlotOutcome::Resolved:
+        ++resolvedCount;
+        break;
+      case SlotOutcome::Unregisterable:
+        record.unregisterableTextureSlots |= bit;
+        break;
+      case SlotOutcome::Unchanged:
+        break;
+      }
     }
   }
   return resolvedCount;

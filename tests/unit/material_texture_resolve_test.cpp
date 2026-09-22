@@ -1,9 +1,12 @@
 // Verifies resolve_material_textures: successful resolution populates GPU
 // handles, a failed load falls back to invalid handles (never a crash) and
-// is not retried, and a texture shared by two materials loads only once.
+// is not retried, a texture shared by two materials loads only once, and a
+// texture that cannot be registered because the table is full is neither
+// loaded nor reported again on every call.
 // The GL-touching loader is stubbed via MaterialTextureLoadFn injection so
 // this stays a CPU-only, headless-safe test (issue #160 fallback policy).
 
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -222,9 +225,92 @@ int verify_no_slots_and_null_database() {
   return 0;
 }
 
+/// Counts the material channel's errors so a per-frame log storm shows.
+int g_materialErrors = 0;
+
+void count_material_errors(engine::core::LogLevel level, const char *channel,
+                           const char * /*message*/,
+                           void * /*userData*/) noexcept {
+  if ((level == engine::core::LogLevel::Error) && (channel != nullptr) &&
+      (std::strcmp(channel, "material") == 0)) {
+    ++g_materialErrors;
+  }
+}
+
+/// A texture that cannot be registered because the texture table is full
+/// (#573 row 2). It used to be loaded, uploaded and then dropped on every
+/// call -- a device texture leaked per frame -- because the failed
+/// registration left the id unattempted. It must not be loaded at all
+/// while there is nowhere to record it, the refusal is reported once, and
+/// the material falls back to its scalar parameters.
+int verify_full_texture_table_is_not_reloaded(
+    engine::renderer::AssetDatabase *database) {
+  // Fill every remaining texture slot with an unrelated resident texture.
+  std::size_t filled = 0U;
+  for (std::size_t i = 0U;
+       i <= engine::renderer::AssetDatabase::kMaxTextureAssets; ++i) {
+    char path[64] = {};
+    std::snprintf(path, sizeof(path), "assets/textures/filler_%zu.png", i);
+    const engine::renderer::AssetId id =
+        engine::renderer::make_asset_id_from_path(path);
+    if (!engine::renderer::register_texture_asset(
+            database, id, path,
+            engine::renderer::TextureHandle{
+                static_cast<std::uint32_t>(1000U + i)})) {
+      break;
+    }
+    ++filled;
+  }
+  if (filled == 0U) {
+    return 50; // the table was already full: the case would prove nothing
+  }
+
+  constexpr const char *kPath = "material_resolve_full.json";
+  constexpr const char *kJson =
+      "{\"version\":3,\"textures\":{"
+      "\"albedo\":\"assets/textures/over_capacity.png\"}}";
+  if (!write_material_file(kPath, kJson)) {
+    return 51;
+  }
+  const auto loadResult = engine::renderer::load_material_asset(
+      database, "mat/material_resolve_full.json");
+  remove_file(kPath);
+  if (!loadResult.has_value()) {
+    return 52;
+  }
+
+  FakeLoaderState state{};
+  g_materialErrors = 0;
+  for (int frame = 0; frame < 3; ++frame) {
+    static_cast<void>(engine::renderer::resolve_material_textures(
+        database, &fake_load_texture, &state));
+  }
+  if (state.callCount != 0U) {
+    std::printf("a texture with no table slot was loaded %u time(s)\n",
+                static_cast<unsigned>(state.callCount));
+    return 53;
+  }
+  if (g_materialErrors != 1) {
+    std::printf("the full texture table was reported %d time(s), not once\n",
+                g_materialErrors);
+    return 54;
+  }
+  const engine::renderer::Material *params =
+      engine::renderer::find_material_params(database, *loadResult);
+  if ((params == nullptr) ||
+      (params->albedoTexture != engine::renderer::kInvalidTextureHandle)) {
+    return 55;
+  }
+  return 0;
+}
+
 } // namespace
 
 int main() {
+  if (!engine::core::initialize_logging() ||
+      !engine::core::log_register_sink(&count_material_errors, nullptr)) {
+    return 4;
+  }
   if (!engine::core::initialize_vfs()) {
     return 1;
   }
@@ -250,7 +336,11 @@ int main() {
   if (result == 0) {
     result = verify_no_slots_and_null_database();
   }
+  if (result == 0) {
+    result = verify_full_texture_table_is_not_reloaded(database.get());
+  }
 
   engine::core::shutdown_vfs();
+  engine::core::shutdown_logging();
   return result;
 }

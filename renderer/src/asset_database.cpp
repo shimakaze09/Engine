@@ -549,6 +549,7 @@ bool set_material_texture_slots(AssetDatabase *database, AssetId id,
   }
 
   database->materialAssets[slot].textureSlots = slots;
+  database->materialAssets[slot].unregisterableTextureSlots = 0U;
   return true;
 }
 
@@ -585,6 +586,13 @@ bool register_texture_asset(AssetDatabase *database, AssetId id,
   record.requestedResident = true;
   write_source_path(&record.sourcePath, sourcePath);
   return true;
+}
+
+bool texture_asset_slot_available(const AssetDatabase *database,
+                                  AssetId id) noexcept {
+  return (database != nullptr) && (id != kInvalidAssetId) &&
+         (find_texture_insert_slot(database, id) !=
+          database->textureAssets.size());
 }
 
 bool register_texture_asset_failed(AssetDatabase *database, AssetId id,

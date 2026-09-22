@@ -106,6 +106,11 @@ struct MaterialAssetRecord final {
   Material params{};
   MaterialTextureSlots textureSlots{};
   AssetState state = AssetState::Unloaded;
+  /// Texture slots resolve_material_textures gave up on because the
+  /// texture table had no room to record them, one bit per slot in
+  /// MaterialTextureSlots order. Runtime-only; cleared whenever the slots
+  /// are assigned again, so a reload or an edit tries once more.
+  std::uint8_t unregisterableTextureSlots = 0U;
 };
 
 /// Fixed-slot asset tables (meshes with tombstones, textures, materials,
@@ -227,6 +232,10 @@ find_material_texture_slots(const AssetDatabase *database, AssetId id) noexcept;
 bool register_texture_asset(AssetDatabase *database, AssetId id,
                             const char *sourcePath,
                             TextureHandle runtimeTexture) noexcept;
+/// True when register_texture_asset or register_texture_asset_failed can
+/// record this id: it is already in the table, or the table has room.
+bool texture_asset_slot_available(const AssetDatabase *database,
+                                  AssetId id) noexcept;
 /// Registers (or updates) a texture id as permanently Failed with no GPU
 /// handle, so resolve_material_textures does not retry it every frame; the
 /// source path is kept for diagnostics.
