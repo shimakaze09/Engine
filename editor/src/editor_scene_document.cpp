@@ -212,17 +212,26 @@ void continue_pending_action() noexcept {
 /// session writes nowhere the current session looks; all filesystem work
 /// happens later on the main thread. A null path is a cancel or a failed
 /// dialog. Runs on whatever thread the platform delivers on.
+///
+/// A path that does not fit the record is refused, not cut: the record's
+/// path is what Save As writes to and Open reads from, and a truncated
+/// path names a different file.
 void scene_dialog_callback(void *userdata, const char *path) noexcept {
   auto *request = static_cast<SceneDialogRequest *>(userdata);
   if (request == nullptr) {
     return;
   }
-  if (path == nullptr) {
-    request->resultAccepted = false;
-  } else {
-    std::snprintf(request->resultPath, sizeof(request->resultPath), "%s",
-                  path);
-    request->resultAccepted = true;
+  request->resultAccepted = false;
+  if (path != nullptr) {
+    const std::size_t length = std::strlen(path);
+    if (length < sizeof(request->resultPath)) {
+      std::memcpy(request->resultPath, path, length + 1U);
+      request->resultAccepted = true;
+    } else {
+      core::log_message(core::LogLevel::Error, kLogChannel,
+                        "the chosen path is longer than the editor can hold; "
+                        "nothing was opened or saved");
+    }
   }
   request->resultPending.store(true, std::memory_order_release);
 }
