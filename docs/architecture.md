@@ -24,7 +24,10 @@ private `src/` headers, rejects foreign include directories hand-wired via
 `*_INCLUDE_DIRS` (a dependency is expressed only as a dep on the target, so
 CMake usage requirements stay the single source of truth), and requires a
 module whose *public headers* include another's to declare that module as a
-PUBLIC dep.
+PUBLIC dep. It also holds SDL behind the platform layer: an include of
+`<SDL3/...>`, or of the ImGui SDL3 backend header that declares SDL types,
+is legal only in `core/src/platform.cpp` and in `editor/src/editor.cpp`,
+which drives that backend.
 
 The gate carries an allowlist of tracked violations. **That file is the
 authoritative list** — do not restate it here. An entry that no longer

@@ -194,8 +194,31 @@ def test_module_dependency_gate():
                      ["engine/physics/collider.h", "engine/scripting/vm.h"])
         write_source(clean, "editor/src/panels.cpp",
                      ["engine/runtime/world.h", "engine/renderer/device.h"])
+        # SDL where it belongs: the platform layer, and the one editor TU
+        # that drives the ImGui SDL3 backend.
+        write_source(clean, "core/src/platform.cpp", ["SDL3/SDL.h"])
+        write_source(clean, "editor/src/editor.cpp",
+                     ["backends/imgui_impl_sdl3.h", "SDL3/SDL.h"])
         check(run([script, "--root", str(clean)]) == 0,
               "module deps: a strictly downward tree passes")
+
+        # SDL anywhere else is the platform layer leaking (issue #312). The
+        # tracked users are excused only for this checkout, so an alternate
+        # root sees the pipeline's pump as the violation it is.
+        sdl_runtime = tmp / "sdl_runtime"
+        write_source(sdl_runtime, "runtime/src/engine_pipeline.cpp",
+                     ["SDL3/SDL.h"])
+        check(run([script, "--root", str(sdl_runtime)]) != 0,
+              "module deps: SDL included outside the platform layer fails")
+
+        # The ImGui SDL3 backend header declares SDL types, so including it
+        # from another editor TU is the same leak by a side door -- the one
+        # seven panels used with no call into it.
+        sdl_backend = tmp / "sdl_backend"
+        write_source(sdl_backend, "editor/src/editor_panels_main.cpp",
+                     ["backends/imgui_impl_sdl3.h"])
+        check(run([script, "--root", str(sdl_backend)]) != 0,
+              "module deps: the ImGui SDL3 backend outside editor.cpp fails")
 
         # Upward: the issue #309 class, a subsystem reaching into runtime.
         upward = tmp / "upward"
