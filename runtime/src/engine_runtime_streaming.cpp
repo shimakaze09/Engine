@@ -185,21 +185,26 @@ void retire_terminal_script_loads(
 
     const content::LoadingState state = content::get_load_state(
         service->streamingQueue, handle.streamingHandle);
-    if (state == content::LoadingState::Failed) {
+    if ((state != content::LoadingState::Ready) &&
+        (state != content::LoadingState::Failed)) {
+      continue;
+    }
+    // Every terminal request is let go here, whatever the mesh ended as: a
+    // Ready request whose upload was skipped leaves the mesh Unloaded, and
+    // keeping that handle past the pass below, which releases the queue
+    // slot, would leave it stale -- and a stale handle reads as Failed.
+    // So a failure is mirrored only onto a mesh still waiting on this
+    // load; one the upload settled keeps the state it was given.
+    if ((state == content::LoadingState::Failed) &&
+        (renderer::mesh_asset_state(service->database, handle.assetId) ==
+         renderer::AssetState::Loading)) {
       static_cast<void>(renderer::set_mesh_asset_state(
           service->database, handle.assetId, renderer::AssetState::Failed,
           renderer::kInvalidMeshHandle));
-      static_cast<void>(content::release_load(service->streamingQueue,
-                                               handle.streamingHandle));
-      handle.streamingHandle = content::kInvalidLoadHandle;
-    } else if ((state == content::LoadingState::Ready) &&
-               (renderer::mesh_asset_state(service->database,
-                                           handle.assetId) ==
-                renderer::AssetState::Ready)) {
-      static_cast<void>(content::release_load(service->streamingQueue,
-                                               handle.streamingHandle));
-      handle.streamingHandle = content::kInvalidLoadHandle;
     }
+    static_cast<void>(
+        content::release_load(service->streamingQueue, handle.streamingHandle));
+    handle.streamingHandle = content::kInvalidLoadHandle;
   }
 }
 

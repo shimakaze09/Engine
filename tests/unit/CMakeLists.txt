@@ -1523,6 +1523,15 @@ engine_add_test_executable(engine_unit_async_streaming
     engine_content
 )
 
+engine_add_test_executable(engine_unit_streaming_script_retire
+    SOURCES
+    streaming_script_retire_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/runtime/src
+    PRIVATE_DEPS
+    engine_runtime
+)
+
 # ---- P1-M4-D: LRU Eviction ----
 
 engine_add_test_executable(engine_unit_lru_cache
