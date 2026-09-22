@@ -56,7 +56,7 @@ struct CoroutineEntry final {
   int threadRef = LUA_NOREF;
   int conditionRef = LUA_NOREF;
   float wakeAt = 0.0F;
-  std::uint32_t wakeAtFrame = 0U;
+  std::uint64_t wakeAtTick = 0U;
   WaitMode mode = WaitMode::Time;
   bool active = false;
 };
@@ -78,10 +78,10 @@ public:
   /// instead of scheduling a coroutine that could never wake.
   bool parse_yield(lua_State *state, lua_State *thread, int nresults,
                    CoroutineEntry &entry, float totalSeconds,
-                   std::uint32_t frameIndex) noexcept {
+                   std::uint64_t tickIndex) noexcept {
     entry.mode = WaitMode::Time;
     entry.wakeAt = totalSeconds;
-    entry.wakeAtFrame = 0U;
+    entry.wakeAtTick = 0U;
     if ((entry.conditionRef != LUA_NOREF) && (state != nullptr)) {
       luaL_unref(state, LUA_REGISTRYINDEX, entry.conditionRef);
       entry.conditionRef = LUA_NOREF;
@@ -93,7 +93,7 @@ public:
         const auto frames =
             static_cast<std::uint32_t>(lua_tointeger(thread, -2));
         entry.mode = WaitMode::Frames;
-        entry.wakeAtFrame = frameIndex + frames;
+        entry.wakeAtTick = tickIndex + frames;
       } else if (tag == static_cast<void *>(&kWaitConditionTag)) {
         lua_pushvalue(thread, -2);
         if (protected_registry_ref(thread, &entry.conditionRef,
@@ -154,13 +154,13 @@ public:
 
   /// Returns true when the coroutine should resume this tick.
   bool should_wake(lua_State *state, const CoroutineEntry &entry,
-                   float totalSeconds, std::uint32_t frameIndex,
+                   float totalSeconds, std::uint64_t tickIndex,
                    CoroutineLogLuaErrorFn logLuaError) noexcept {
     switch (entry.mode) {
     case WaitMode::Time:
       return totalSeconds >= entry.wakeAt;
     case WaitMode::Frames:
-      return frameIndex >= entry.wakeAtFrame;
+      return tickIndex >= entry.wakeAtTick;
     case WaitMode::Condition:
       return check_condition(state, entry.conditionRef, logLuaError);
     }
@@ -260,7 +260,7 @@ int lua_engine_wait_until(lua_State *state) noexcept {
 }
 
 int start_lua_coroutine(lua_State *state, float totalSeconds,
-                        std::uint32_t frameIndex,
+                        std::uint64_t tickIndex,
                         CoroutineLogLuaErrorFn logLuaError,
                         CoroutineRefreshHookFn refreshLuaHook) noexcept {
   if (lua_isfunction(state, 1) == 0) {
@@ -298,7 +298,7 @@ int start_lua_coroutine(lua_State *state, float totalSeconds,
       entry.threadRef = threadRef;
       entry.active = true;
       if (!g_coroutineScheduler.parse_yield(state, thread, nresults, entry,
-                                            totalSeconds, frameIndex)) {
+                                            totalSeconds, tickIndex)) {
         g_coroutineScheduler.reject_yield(state, entry, logLuaError);
         lua_pushnil(state);
         return 1;
@@ -329,7 +329,7 @@ int start_lua_coroutine(lua_State *state, float totalSeconds,
 }
 
 void tick_lua_coroutines(lua_State *state, float totalSeconds,
-                         std::uint32_t frameIndex,
+                         std::uint64_t tickIndex,
                          CoroutineLogLuaErrorFn logLuaError,
                          CoroutineRefreshHookFn refreshLuaHook) noexcept {
   if (state == nullptr) {
@@ -342,7 +342,7 @@ void tick_lua_coroutines(lua_State *state, float totalSeconds,
       continue;
     }
     if (!g_coroutineScheduler.should_wake(state, entry, totalSeconds,
-                                          frameIndex, logLuaError)) {
+                                          tickIndex, logLuaError)) {
       continue;
     }
     if (entry.conditionRef != LUA_NOREF) {
@@ -359,7 +359,7 @@ void tick_lua_coroutines(lua_State *state, float totalSeconds,
       g_coroutineScheduler.release_entry(state, entry);
     } else if (status == LUA_YIELD) {
       if (!g_coroutineScheduler.parse_yield(state, entry.thread, nresults,
-                                            entry, totalSeconds, frameIndex)) {
+                                            entry, totalSeconds, tickIndex)) {
         g_coroutineScheduler.reject_yield(state, entry, logLuaError);
       }
     } else {

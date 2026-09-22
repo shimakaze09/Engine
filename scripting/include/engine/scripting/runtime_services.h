@@ -297,8 +297,16 @@ struct RuntimeServices final {
   bool (*timer_slot_state)(runtime::World *world, std::size_t slot,
                            bool *outRepeat, bool *outActive) noexcept = nullptr;
   void (*timer_clear)(runtime::World *world) noexcept = nullptr;
-  std::size_t (*timer_tick)(runtime::World *world,
-                            float deltaSeconds) noexcept = nullptr;
+  // Coming due and firing are separate now. The pipeline advances the
+  // World's timers once per fixed step and dispatches once per frame, so
+  // when a timer comes due is simulation time rather than frame rate;
+  // this advance entry exists for callers outside the fixed step that
+  // step a world by hand.
+  std::size_t (*timer_advance)(runtime::World *world,
+                               float deltaSeconds) noexcept = nullptr;
+  // Runs the callbacks of the timers an advance marked as due. No delta:
+  // coming due was already decided, and this only dispatches it.
+  std::size_t (*timer_dispatch)(runtime::World *world) noexcept = nullptr;
 
   // Entity pools: kMaxEntityPools slots the runtime owns, each seeded
   // against the World's current contents and expiring with them.

@@ -102,6 +102,16 @@ engine_add_test_executable(engine_unit_rng
     engine_core
 )
 
+engine_add_test_executable(engine_unit_timer_cadence
+    SOURCES
+    timer_cadence_test.cpp
+    ${CMAKE_SOURCE_DIR}/runtime/src/timer_manager.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/runtime/include
+    PRIVATE_DEPS
+    engine_core
+)
+
 engine_add_test_executable(engine_unit_string_util
     SOURCES
     string_util_test.cpp

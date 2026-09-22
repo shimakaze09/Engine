@@ -1083,6 +1083,19 @@ void EnginePipeline::Impl::stage_timing() noexcept {
   // Every frame publishes its decided steps, a paused or zero-step frame
   // included, so a script reading the clock always sees this frame's.
   scripting::set_simulation_clock(clock);
+
+  // Timers come due on simulation time: one advance per decided step with
+  // the fixed delta, so a timer fires at the same tick whatever the frame
+  // rate. Their callbacks run later, once, in stage_scripting — a timer
+  // reads no physics state, so advancing them here rather than inside the
+  // simulation graph changes nothing about when they come due, and it
+  // keeps callbacks out of a step they must not re-enter.
+  if (isPlaying && (world != nullptr)) {
+    for (std::uint32_t step = 0U; step < clock.stepsThisFrame; ++step) {
+      static_cast<void>(world->timer_manager().advance(
+          static_cast<float>(core::kFixedDeltaSeconds)));
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1118,7 +1131,7 @@ void EnginePipeline::Impl::stage_scripting() noexcept {
     scripting::dap_poll();
   }
   if (isPlaying && (clock.stepsThisFrame > 0U)) {
-    scripting::tick_timers();
+    scripting::dispatch_timers();
     scripting::tick_coroutines();
     scripting::dispatch_entity_scripts_update(
         static_cast<float>(step_seconds()));

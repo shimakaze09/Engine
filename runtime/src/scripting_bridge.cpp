@@ -1292,9 +1292,13 @@ void scripting_timer_clear(runtime::World *world) noexcept {
   }
 }
 
-std::size_t scripting_timer_tick(runtime::World *world,
-                                 float deltaSeconds) noexcept {
-  return (world != nullptr) ? world->timer_manager().tick(deltaSeconds) : 0U;
+std::size_t scripting_timer_advance(runtime::World *world,
+                                    float deltaSeconds) noexcept {
+  return (world != nullptr) ? world->timer_manager().advance(deltaSeconds) : 0U;
+}
+
+std::size_t scripting_timer_dispatch(runtime::World *world) noexcept {
+  return (world != nullptr) ? world->timer_manager().dispatch() : 0U;
 }
 
 // Entity pools the Lua pool bindings address by slot. Each pool records
@@ -1415,7 +1419,8 @@ scripting::RuntimeServices make_scripting_runtime_services() noexcept {
   s.timer_slot_for_id = &scripting_timer_slot_for_id;
   s.timer_slot_state = &scripting_timer_slot_state;
   s.timer_clear = &scripting_timer_clear;
-  s.timer_tick = &scripting_timer_tick;
+  s.timer_advance = &scripting_timer_advance;
+  s.timer_dispatch = &scripting_timer_dispatch;
   s.entity_pool_init = &scripting_entity_pool_init;
   s.entity_pool_acquire = &scripting_entity_pool_acquire;
   s.entity_pool_release = &scripting_entity_pool_release;

@@ -100,6 +100,9 @@ std::uint64_t World::state_hash(StateHashSections *outSections) const noexcept {
     h.f32(entry.fireAt);
     h.f32(entry.interval);
     h.u32(entry.repeat ? 1U : 0U);
+    // Waiting for dispatch is simulation state now that coming due and
+    // firing happen at different points in the frame.
+    h.u32(entry.pending ? 1U : 0U);
   }
   sections.timers = h.hash;
 

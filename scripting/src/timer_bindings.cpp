@@ -266,14 +266,23 @@ std::size_t active_lua_timer_ref_count() noexcept {
   return count;
 }
 
-void tick_lua_timers(lua_State *state, float deltaSeconds) noexcept {
+void advance_lua_timers(lua_State *state, float deltaSeconds) noexcept {
+  if ((state == nullptr) || !runtime_bound()) {
+    return;
+  }
+  ensure_timer_refs_init();
+  static_cast<void>(runtime_binding().services->timer_advance(
+      runtime_binding().world, deltaSeconds));
+}
+
+void dispatch_lua_timers(lua_State *state) noexcept {
   if ((state == nullptr) || !runtime_bound()) {
     return;
   }
 
   ensure_timer_refs_init();
   static_cast<void>(
-      runtime_binding().services->timer_tick(runtime_binding().world, deltaSeconds));
+      runtime_binding().services->timer_dispatch(runtime_binding().world));
 }
 
 } // namespace engine::scripting

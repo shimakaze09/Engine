@@ -85,6 +85,7 @@ TimerId TimerManager::set_timeout(float delaySeconds, Callback callback,
       m_timers[i].callback = callback;
       m_timers[i].userData = userData;
       m_timers[i].repeat = false;
+      m_timers[i].pending = false;
       m_timers[i].active = true;
       return make_timer_id(i);
     }
@@ -116,6 +117,7 @@ TimerId TimerManager::set_interval(float intervalSeconds, Callback callback,
       m_timers[i].callback = callback;
       m_timers[i].userData = userData;
       m_timers[i].repeat = true;
+      m_timers[i].pending = false;
       m_timers[i].active = true;
       return make_timer_id(i);
     }
@@ -147,14 +149,30 @@ std::size_t TimerManager::slot_for_id(TimerId id) const noexcept {
   return slot;
 }
 
-std::size_t TimerManager::tick(float dt) noexcept {
+std::size_t TimerManager::advance(float dt) noexcept {
   m_elapsed += dt;
-  std::size_t fired = 0U;
+  std::size_t marked = 0U;
   for (std::size_t i = 0U; i < kMaxTimers; ++i) {
-    if (!m_timers[i].active) {
+    Entry &timer = m_timers[i];
+    // Already waiting for this frame's dispatch: a later step in the same
+    // frame finds it due again and leaves it, so one frame runs one
+    // callback however many steps it caught up.
+    if (!timer.active || timer.pending) {
       continue;
     }
-    if (m_elapsed < m_timers[i].fireAt) {
+    if (m_elapsed < timer.fireAt) {
+      continue;
+    }
+    timer.pending = true;
+    ++marked;
+  }
+  return marked;
+}
+
+std::size_t TimerManager::dispatch() noexcept {
+  std::size_t fired = 0U;
+  for (std::size_t i = 0U; i < kMaxTimers; ++i) {
+    if (!m_timers[i].active || !m_timers[i].pending) {
       continue;
     }
     const TimerId firedId = make_timer_id(i);
@@ -166,14 +184,22 @@ std::size_t TimerManager::tick(float dt) noexcept {
     // re-arming an empty callback on every interval forever.
     if (m_timers[i].callback == nullptr) {
       core::log_message(core::LogLevel::Warning, kLogChannel,
-                        "tick: dropped restored timer with no callback");
+                        "dispatch: dropped restored timer with no callback");
       release_slot(i);
       continue;
     }
 
+    // Cleared before the callback runs, so a callback that re-arms this
+    // timer or sets a new one leaves nothing marked behind it, and the
+    // release below is what ends a one-shot rather than the flag.
+    m_timers[i].pending = false;
     m_timers[i].callback(firedId, m_timers[i].userData);
     ++fired;
 
+    // The callback may have cancelled this timer, or cancelled it and
+    // set another that took the slot. Either way the generation no
+    // longer matches and neither the re-arm nor the release below is
+    // this timer's to make.
     if ((slot_for_id(firedId) != i) || !m_timers[i].active) {
       continue;
     }
@@ -185,6 +211,11 @@ std::size_t TimerManager::tick(float dt) noexcept {
     }
   }
   return fired;
+}
+
+std::size_t TimerManager::tick(float dt) noexcept {
+  static_cast<void>(advance(dt));
+  return dispatch();
 }
 
 void TimerManager::clear() noexcept {

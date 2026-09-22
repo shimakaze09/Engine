@@ -266,7 +266,8 @@ Current scripting/runtime support in the tree includes:
 - Adding rigid bodies and colliders
 - Reacting to key input and collisions
 - Scheduling timers with `engine.set_timeout()` and `engine.set_interval()`
-- Coroutine helpers such as `engine.wait()`, `engine.wait_frames()`, and `engine.wait_until()`
+- Coroutine helpers such as `engine.wait()`, `engine.wait_frames()` (fixed
+  simulation steps, not rendered frames), and `engine.wait_until()`
 - Sandbox, generated binding, and hot-reload coverage in integration tests
 
 The scripting surface is still evolving. Some APIs are generated from annotated accessors, while the hand-written surface lives in domain binding translation units under `scripting/src/` (entity lifecycle, body, mesh/material, physics, lights, camera, audio, input, timers, coroutines, and more).

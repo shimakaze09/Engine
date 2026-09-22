@@ -1071,8 +1071,16 @@ void set_simulation_clock(const core::SimulationClock &clock) noexcept {
 
 const core::SimulationClock &simulation_clock() noexcept { return g_clock; }
 
+void dispatch_timers() noexcept { dispatch_lua_timers(lua_state()); }
+
 void tick_timers() noexcept {
-  tick_lua_timers(lua_state(), static_cast<float>(g_clock.deltaSeconds));
+  // Advance and dispatch in one call, for a caller outside the fixed
+  // step: the pipeline advances per step and dispatches per frame
+  // instead, so this is what a test or tool stepping a world by hand
+  // uses. The delta is the published clock's, which is the time the
+  // world actually advanced.
+  advance_lua_timers(lua_state(), static_cast<float>(g_clock.deltaSeconds));
+  dispatch_lua_timers(lua_state());
 }
 
 // Scene transitions reset the World's TimerManager (reset_world/load_scene)
@@ -1085,8 +1093,11 @@ void tick_timers() noexcept {
 void clear_timers() noexcept { clear_lua_timer_bindings(lua_state()); }
 
 void tick_coroutines() noexcept {
+  // Ticks, not rendered frames: engine.wait_frames(n) waits n fixed
+  // simulation steps, so a coroutine resumes at the same point in the
+  // simulation whatever the frame rate (docs/decisions/0019).
   tick_lua_coroutines(lua_state(), static_cast<float>(g_clock.simulationSeconds),
-                      g_clock.frameIndex, log_lua_error, arm_debug_lua_hook);
+                      g_clock.tickIndex, log_lua_error, arm_debug_lua_hook);
 }
 
 void clear_coroutines() noexcept { clear_lua_coroutines(lua_state()); }
