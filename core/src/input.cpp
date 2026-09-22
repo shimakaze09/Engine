@@ -31,7 +31,12 @@ constexpr std::size_t kMaxActionNameLength = 63U;
 bool g_inputInitialized = false;
 
 std::array<bool, kMaxScancodes> g_keyState{};
-std::array<bool, kMaxScancodes> g_prevKeyState{};
+// Edges recorded from the events themselves and cleared when a frame
+// begins. Comparing a frame's end state with the previous frame's cannot
+// see a press and release that both land inside one frame -- the key is up
+// at both ends -- so a quick tap at a low frame rate was lost.
+std::array<bool, kMaxScancodes> g_keyPressedEdge{};
+std::array<bool, kMaxScancodes> g_keyReleasedEdge{};
 
 struct MouseStateInternal final {
   int x = 0;
@@ -40,7 +45,7 @@ struct MouseStateInternal final {
   int deltaY = 0;
   int scrollDelta = 0;
   std::array<bool, kMaxMouseButtons> buttons{};
-  std::array<bool, kMaxMouseButtons> prevButtons{};
+  std::array<bool, kMaxMouseButtons> pressedEdge{};
 };
 
 MouseStateInternal g_mouse{};
@@ -53,6 +58,7 @@ struct GamepadStateInternal final {
   bool connected = false;
   std::uint32_t instanceId = 0U;
   std::array<bool, kMaxGamepadButtons> buttons{};
+  std::array<bool, kMaxGamepadButtons> pressedEdge{};
   std::array<std::int16_t, kMaxGamepadAxes> axes{};
 };
 
@@ -171,7 +177,8 @@ bool initialize_input() noexcept {
   }
 
   g_keyState = {};
-  g_prevKeyState = {};
+  g_keyPressedEdge = {};
+  g_keyReleasedEdge = {};
   g_mouse = {};
   g_wheelCarry = 0.0F;
   g_actions = {};
@@ -238,7 +245,8 @@ void shutdown_input() noexcept {
   shutdown_input_mapper();
   g_inputInitialized = false;
   g_keyState = {};
-  g_prevKeyState = {};
+  g_keyPressedEdge = {};
+  g_keyReleasedEdge = {};
   g_mouse = {};
   g_wheelCarry = 0.0F;
   g_actions = {};
@@ -248,8 +256,12 @@ void shutdown_input() noexcept {
 
 /// Begins the requested operation or profiling range for input frame.
 void begin_input_frame() noexcept {
-  g_prevKeyState = g_keyState;
-  g_mouse.prevButtons = g_mouse.buttons;
+  g_keyPressedEdge = {};
+  g_keyReleasedEdge = {};
+  g_mouse.pressedEdge = {};
+  for (GamepadStateInternal &pad : g_gamepads) {
+    pad.pressedEdge = {};
+  }
   g_mouse.deltaX = 0;
   g_mouse.deltaY = 0;
   g_mouse.scrollDelta = 0;
@@ -267,9 +279,9 @@ namespace {
 /// happened to be pressed and released again after focus returned: the
 /// Alt-Tab-while-walking character that keeps walking.
 ///
-/// Released rather than silently cleared: current state goes to up while
-/// the previous frame's still says down, so is_key_released and the
-/// mapper's release callbacks fire exactly as for a real release, and each
+/// Released rather than silently cleared: each held key records a release
+/// edge, so is_key_released and the mapper's release callbacks fire
+/// exactly as for a real release, and each
 /// key and button emits its up event so event-bus listeners that track
 /// held state see the same edge. A charge-and-release mechanic resolves
 /// instead of hanging.
@@ -277,6 +289,7 @@ void release_all_held_input() noexcept {
   for (std::size_t i = 0U; i < g_keyState.size(); ++i) {
     if (g_keyState[i]) {
       g_keyState[i] = false;
+      g_keyReleasedEdge[i] = true;
       KeyEvent ke{};
       ke.scancode = static_cast<int>(i);
       ke.down = false;
@@ -308,8 +321,16 @@ void input_process_event(const PlatformEvent &event) noexcept {
   case PlatformEventKind::KeyUp: {
     const int scancode = event.scancode;
     if ((scancode >= 0) && (scancode < kMaxScancodes)) {
+      const auto idx = static_cast<std::size_t>(scancode);
       const bool down = (event.kind == PlatformEventKind::KeyDown);
-      g_keyState[static_cast<std::size_t>(scancode)] = down;
+      // OS auto-repeat arrives as KeyDown on a key already held; it is not
+      // a new press.
+      if (down && !event.repeat && !g_keyState[idx]) {
+        g_keyPressedEdge[idx] = true;
+      } else if (!down && g_keyState[idx]) {
+        g_keyReleasedEdge[idx] = true;
+      }
+      g_keyState[idx] = down;
       KeyEvent ke{};
       ke.scancode = scancode;
       ke.down = down;
@@ -339,8 +360,12 @@ void input_process_event(const PlatformEvent &event) noexcept {
     g_mouse.y = static_cast<int>(event.y);
     const int button = event.mouseButton;
     if ((button >= 0) && (button < kMaxMouseButtons)) {
+      const auto idx = static_cast<std::size_t>(button);
       const bool down = (event.kind == PlatformEventKind::MouseButtonDown);
-      g_mouse.buttons[static_cast<std::size_t>(button)] = down;
+      if (down && !g_mouse.buttons[idx]) {
+        g_mouse.pressedEdge[idx] = true;
+      }
+      g_mouse.buttons[idx] = down;
       MouseButtonEvent mbe{};
       mbe.button = button;
       mbe.down = down;
@@ -374,8 +399,12 @@ void input_process_event(const PlatformEvent &event) noexcept {
     GamepadStateInternal *slot = find_gamepad(event.deviceId);
     const int button = event.gamepadButton;
     if ((slot != nullptr) && (button >= 0) && (button < kMaxGamepadButtons)) {
-      slot->buttons[static_cast<std::size_t>(button)] =
-          (event.kind == PlatformEventKind::GamepadButtonDown);
+      const auto idx = static_cast<std::size_t>(button);
+      const bool down = (event.kind == PlatformEventKind::GamepadButtonDown);
+      if (down && !slot->buttons[idx]) {
+        slot->pressedEdge[idx] = true;
+      }
+      slot->buttons[idx] = down;
     }
     break;
   }
@@ -415,8 +444,7 @@ bool is_key_pressed(KeyScancode scancode) noexcept {
   if ((scancode < 0) || (scancode >= kMaxScancodes)) {
     return false;
   }
-  const auto idx = static_cast<std::size_t>(scancode);
-  return g_keyState[idx] && !g_prevKeyState[idx];
+  return g_keyPressedEdge[static_cast<std::size_t>(scancode)];
 }
 
 /// Returns whether is key released.
@@ -424,8 +452,7 @@ bool is_key_released(KeyScancode scancode) noexcept {
   if ((scancode < 0) || (scancode >= kMaxScancodes)) {
     return false;
   }
-  const auto idx = static_cast<std::size_t>(scancode);
-  return !g_keyState[idx] && g_prevKeyState[idx];
+  return g_keyReleasedEdge[static_cast<std::size_t>(scancode)];
 }
 
 MouseState mouse_state() noexcept {
@@ -454,8 +481,7 @@ bool is_mouse_button_pressed(int button) noexcept {
   if ((button < 0) || (button >= kMaxMouseButtons)) {
     return false;
   }
-  const auto idx = static_cast<std::size_t>(button);
-  return g_mouse.buttons[idx] && !g_mouse.prevButtons[idx];
+  return g_mouse.pressedEdge[static_cast<std::size_t>(button)];
 }
 
 bool register_action(const char *name, KeyScancode key,
@@ -598,6 +624,14 @@ bool is_gamepad_button_down(int button, int gamepad) noexcept {
     return false;
   }
   return slot->buttons[static_cast<std::size_t>(button)];
+}
+
+bool is_gamepad_button_pressed(int button, int gamepad) noexcept {
+  const GamepadStateInternal *slot = gamepad_slot(gamepad);
+  if ((slot == nullptr) || (button < 0) || (button >= kMaxGamepadButtons)) {
+    return false;
+  }
+  return slot->pressedEdge[static_cast<std::size_t>(button)];
 }
 
 float gamepad_axis_value(int axis, int deadzone, int gamepad) noexcept {

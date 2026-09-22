@@ -159,14 +159,21 @@ InputAxisMapping *find_mapped_axis(const char *name) noexcept {
   return nullptr;
 }
 
+/// Whether the binding is active this frame. A button pressed during the
+/// frame counts even if it was released again before the frame ended:
+/// action edges come from comparing this with the previous frame, so
+/// without it a tap shorter than a frame would never fire its action.
 bool evaluate_binding(const InputBinding &binding) noexcept {
   switch (binding.type) {
   case InputBindingType::Key:
-    return (binding.code >= 0) && is_key_down(binding.code);
+    return (binding.code >= 0) &&
+           (is_key_down(binding.code) || is_key_pressed(binding.code));
   case InputBindingType::MouseButton:
-    return (binding.code >= 0) && is_mouse_button_down(binding.code);
+    return (binding.code >= 0) && (is_mouse_button_down(binding.code) ||
+                                   is_mouse_button_pressed(binding.code));
   case InputBindingType::GamepadButton:
-    return is_gamepad_connected() && is_gamepad_button_down(binding.code);
+    return is_gamepad_connected() && (is_gamepad_button_down(binding.code) ||
+                                      is_gamepad_button_pressed(binding.code));
   case InputBindingType::GamepadAxis: {
     if (!is_gamepad_connected()) {
       return false;

@@ -32,9 +32,11 @@ void end_input_frame() noexcept;
 // ----- Keyboard ------------------------------------------------------------
 
 bool is_key_down(KeyScancode scancode) noexcept;
-/// Returns whether is key pressed.
+/// True in the frame the key went down, even if it came up again before
+/// the frame ended. OS auto-repeat is not a press.
 bool is_key_pressed(KeyScancode scancode) noexcept;
-/// Returns whether is key released.
+/// True in the frame the key came up, including a release that followed a
+/// press inside the same frame.
 bool is_key_released(KeyScancode scancode) noexcept;
 
 // ----- Mouse ---------------------------------------------------------------
@@ -52,7 +54,8 @@ struct MouseState final {
 MouseState mouse_state() noexcept;
 /// Returns whether is mouse button down.
 bool is_mouse_button_down(int button) noexcept;
-/// Returns whether is mouse button pressed.
+/// True in the frame the button went down, even if it came up again
+/// before the frame ended.
 bool is_mouse_button_pressed(int button) noexcept;
 
 // ----- Action Mappings -----------------------------------------------------
@@ -102,6 +105,9 @@ bool is_gamepad_connected(int gamepad = 0) noexcept;
 int connected_gamepad_count() noexcept;
 /// Returns whether is gamepad button down.
 bool is_gamepad_button_down(int button, int gamepad = 0) noexcept;
+/// True in the frame the button went down, even if it came up again
+/// before the frame ended.
+bool is_gamepad_button_pressed(int button, int gamepad = 0) noexcept;
 // Returns normalized axis value in [-1, 1] with deadzone applied.
 float gamepad_axis_value(int axis, int deadzone = 8000,
                          int gamepad = 0) noexcept;

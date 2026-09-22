@@ -373,6 +373,17 @@ set_tests_properties(
     PROPERTIES LABELS integration
 )
 
+engine_add_test_executable(engine_integration_input_tap_edge
+    SOURCES
+    input_tap_edge_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    # Builds native SDL events to drive input the way the platform does.
+    ${ENGINE_SDL_TARGET}
+    LABELS
+    integration
+)
+
 engine_add_test_executable(engine_integration_focus_loss_input
     SOURCES
     focus_loss_input_test.cpp
