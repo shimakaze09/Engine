@@ -28,3 +28,4 @@ history.
 | [0015](0015-commercial-anime-engine-on-six-platforms.md) | A commercial anime-game engine: three editor platforms, six shipping targets | 2026-09-21 |
 | [0016](0016-a-project-is-the-unit-of-authoring.md) | A project is the unit of authoring and shipping | 2026-09-21 |
 | [0017](0017-materials-carry-a-shading-model.md) | A material carries its shading model; passes are chosen per draw | 2026-09-21 |
+| [0018](0018-authors-compose-shading.md) | Authors compose shading; the engine ships the pieces and the presets | 2026-09-22 |
