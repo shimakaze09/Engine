@@ -392,7 +392,20 @@ int main(int argc, char **argv) {
   // From the source's authored sidecar. The cooked record is derived and
   // regenerable, so it can never be where an author's settings live.
   ImportSettings importSettings{};
-  static_cast<void>(read_authored_import_settings(inputPath, &importSettings));
+  switch (read_authored_import_settings(inputPath, &importSettings)) {
+  case engine::content::SidecarReadResult::Ok:
+  case engine::content::SidecarReadResult::Absent:
+    break;
+  case engine::content::SidecarReadResult::Unreadable:
+  case engine::content::SidecarReadResult::Malformed:
+    // Cooking at the defaults would throw away what the author typed and
+    // look like it worked.
+    std::fprintf(stderr,
+                 "error: the source's sidecar could not be read, so its "
+                 "import settings are unknown; fix or remove it: %s.meta\n",
+                 inputPath);
+    return 22;
+  }
   // The cook key pairs the settings with the mesh cook's logic revision,
   // so a logic change recooks (and re-rasterizes the thumbnail, which
   // derives from the same cooked geometry) without a settings edit.
