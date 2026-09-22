@@ -117,6 +117,115 @@ int verify_mesh_slot_reclamation() {
   return 0;
 }
 
+/// A full mesh table keeps its lookups short (#544). The index used to be
+/// the record table itself, probed from `id % capacity` and ended only by a
+/// never-used slot, so ids sharing a home slot chained through every
+/// record and a lookup on the render-prep path walked thousands of slots.
+/// Fills the table with exactly those ids, then churns it past the point
+/// where the index rebuilds, and bounds every hit and miss.
+int verify_full_table_probe_length() {
+  using engine::renderer::AssetDatabase;
+  using engine::renderer::AssetId;
+  using engine::renderer::AssetState;
+
+  std::unique_ptr<AssetDatabase> database(new (std::nothrow) AssetDatabase());
+  if (database == nullptr) {
+    return 900;
+  }
+  engine::renderer::clear_asset_database(database.get());
+
+  // Linear probing at most three-quarters full keeps an expected miss
+  // under nine slots; 16 leaves room for this id set's clustering and is
+  // still two orders of magnitude under the chain these ids built before.
+  constexpr std::size_t kMaxProbe = 16U;
+  constexpr std::size_t kCapacity = AssetDatabase::kMaxMeshAssets;
+  const auto idAt = [](std::size_t i) noexcept {
+    return static_cast<AssetId>(11ULL + (i * kCapacity));
+  };
+  const auto longestProbe = [&database](std::size_t first, std::size_t count,
+                                        auto &&idOf) noexcept {
+    std::size_t longest = 0U;
+    for (std::size_t i = first; i < first + count; ++i) {
+      const std::size_t probe = database->meshIndex.probe_length(idOf(i));
+      longest = (probe > longest) ? probe : longest;
+    }
+    return longest;
+  };
+
+  for (std::size_t i = 0U; i < kCapacity; ++i) {
+    if (!engine::renderer::request_mesh_asset_streaming_load(
+            database.get(), idAt(i), "assets/full.mesh")) {
+      return 901;
+    }
+  }
+  // An id outside every range below, so the churn's ids stay contiguous.
+  if (engine::renderer::request_mesh_asset_streaming_load(
+          database.get(), idAt(16U * kCapacity), "assets/full.mesh")) {
+    return 902; // one past capacity must be refused
+  }
+  const std::size_t fullHit = longestProbe(0U, kCapacity, idAt);
+  const std::size_t fullMiss = longestProbe(kCapacity, 2U * kCapacity, idAt);
+  std::printf("full table: longest hit %zu, longest miss %zu\n", fullHit,
+              fullMiss);
+  if ((fullHit > kMaxProbe) || (fullMiss > kMaxProbe)) {
+    return 903;
+  }
+
+  // Churn: each round frees a quarter of the table and fills it with new
+  // ids. Sixteen rounds turn the whole table over four times; with no
+  // rebuild the tombstones they leave stretch a miss past a thousand slots.
+  std::size_t nextId = kCapacity;
+  std::size_t oldest = 0U;
+  for (std::size_t round = 0U; round < 16U; ++round) {
+    for (std::size_t i = 0U; i < kCapacity / 4U; ++i) {
+      const AssetId id = idAt(oldest + i);
+      if (!engine::renderer::release_mesh_asset(database.get(), id) ||
+          !engine::renderer::set_mesh_asset_state(
+              database.get(), id, AssetState::Unloaded,
+              engine::renderer::kInvalidMeshHandle) ||
+          !engine::renderer::unregister_mesh_asset(database.get(), id)) {
+        return 904;
+      }
+    }
+    oldest += kCapacity / 4U;
+    for (std::size_t i = 0U; i < kCapacity / 4U; ++i) {
+      if (!engine::renderer::request_mesh_asset_streaming_load(
+              database.get(), idAt(nextId + i), "assets/full.mesh")) {
+        return 905;
+      }
+    }
+    nextId += kCapacity / 4U;
+  }
+
+  const std::size_t live = nextId - oldest;
+  if (live != kCapacity) {
+    return 910;
+  }
+  for (std::size_t i = oldest; i < nextId; ++i) {
+    if (engine::renderer::mesh_asset_state(database.get(), idAt(i)) !=
+        AssetState::Loading) {
+      return 906; // a live record lost through the churn
+    }
+  }
+  if (engine::renderer::mesh_asset_state(database.get(), idAt(0U)) !=
+      AssetState::Unloaded) {
+    return 907; // a released id must read as absent
+  }
+  const std::size_t churnHit = longestProbe(oldest, live, idAt);
+  const std::size_t churnMiss = longestProbe(0U, oldest, idAt);
+  std::printf("after churn: longest hit %zu, longest miss %zu\n", churnHit,
+              churnMiss);
+  if ((churnHit > kMaxProbe) || (churnMiss > kMaxProbe)) {
+    return 908;
+  }
+
+  // unregister_mesh_asset used to dereference a null database.
+  if (engine::renderer::unregister_mesh_asset(nullptr, idAt(oldest))) {
+    return 909;
+  }
+  return 0;
+}
+
 /// Verifies budget eviction clears the coldest unpinned records only, with
 /// age hysteresis and retain protection.
 int verify_mesh_cache_eviction() {
@@ -312,6 +421,11 @@ int main() {
   if (reclamation != 0) {
     std::fprintf(stderr, "mesh slot reclamation failed: %d\n", reclamation);
     return reclamation;
+  }
+  const int probeLength = verify_full_table_probe_length();
+  if (probeLength != 0) {
+    std::fprintf(stderr, "full-table probe length failed: %d\n", probeLength);
+    return probeLength;
   }
   const int eviction = verify_mesh_cache_eviction();
   if (eviction != 0) {

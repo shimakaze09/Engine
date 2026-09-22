@@ -8,6 +8,7 @@
 #include <cstdint>
 
 #include "engine/content/metadata_store.h"
+#include "engine/core/fixed_hash_table.h"
 #include "engine/renderer/command_buffer.h"
 #include "engine/renderer/material.h"
 #include "engine/renderer/texture_loader.h"
@@ -113,15 +114,17 @@ struct MaterialAssetRecord final {
   std::uint8_t unregisterableTextureSlots = 0U;
 };
 
-/// Fixed-slot asset tables (meshes with tombstones, textures, materials,
-/// metadata).
+/// Fixed-slot asset tables (meshes, textures, materials, metadata).
 struct AssetDatabase final {
   static constexpr std::size_t kMaxMeshAssets = 4096U;
   std::array<MeshAssetRecord, kMaxMeshAssets> meshAssets{};
   std::array<bool, kMaxMeshAssets> occupied{};
-  // Slots freed by unregister_mesh_asset: not occupied (iteration skips them)
-  // but probe chains continue through them; inserts reuse them.
-  std::array<bool, kMaxMeshAssets> meshTombstoned{};
+  // Id -> meshAssets slot, looked up per visible mesh from the parallel
+  // render-prep jobs. Twice the record capacity, and rebuilt once erases
+  // leave a quarter of it tombstoned, so it is never more than three
+  // quarters full and a probe, hit or miss, stays a few slots long.
+  static constexpr std::size_t kMeshIndexCapacity = 2U * kMaxMeshAssets;
+  core::FixedHashTable<AssetId, std::uint32_t, kMeshIndexCapacity> meshIndex{};
 
   static constexpr std::size_t kMaxTextureAssets = 512U;
   std::array<TextureAssetRecord, kMaxTextureAssets> textureAssets{};
@@ -193,14 +196,12 @@ void clear_asset_database(AssetDatabase *database) noexcept;
 /// Returns the record slot for an id, or kMaxMeshAssets when absent.
 std::size_t find_mesh_asset_record_slot(const AssetDatabase *database,
                                         AssetId id) noexcept;
-/// Finds the id's slot or claims an empty/tombstoned one (occupied is set and
-/// the id written for fresh claims). Returns kMaxMeshAssets when full.
+/// Finds the id's slot or claims a free one (occupied is set and the id
+/// written for fresh claims). Returns kMaxMeshAssets when full.
 std::size_t claim_mesh_asset_record_slot(AssetDatabase *database,
                                          AssetId id) noexcept;
 /// Frees a mesh record slot for reuse. Requires refCount == 0 and no live
-/// runtimeMesh (unload first); the slot becomes a tombstone so probe chains
-/// stay intact. Fixes unbounded slot growth over long content-streaming
-/// sessions.
+/// runtimeMesh (unload first). Every other record keeps its slot.
 bool unregister_mesh_asset(AssetDatabase *database, AssetId id) noexcept;
 
 // Material asset management. Materials are CPU parameter blocks; records

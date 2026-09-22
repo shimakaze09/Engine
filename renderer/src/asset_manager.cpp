@@ -387,6 +387,16 @@ bool update_asset_manager(AssetManager *manager,
       unload_record_mesh(&record, registry);
       record.state = AssetState::Unloaded;
       record.runtimeMesh = kInvalidMeshHandle;
+      // A record nobody wants back is released, or every mesh ever touched
+      // would hold a slot for the rest of the process. The one reference
+      // left is the request's own, the same one eviction ignores; a later
+      // request claims a fresh record, and until then the id reads as
+      // Unloaded exactly as the kept record did.
+      if (!record.requestedResident && !record.pinned &&
+          (record.refCount <= 1U)) {
+        record.refCount = 0U;
+        static_cast<void>(unregister_mesh_asset(database, request.id));
+      }
       break;
     }
 

@@ -445,6 +445,55 @@ int verify_auto_unload_from_release_intent() {
   return 0;
 }
 
+/// Mesh records are released once nothing wants them (#544). An unloaded
+/// record used to stay in the table for the rest of the process, so after
+/// kMaxMeshAssets distinct meshes had ever been requested -- spawns across
+/// many props, many scene changes -- no new mesh could be registered at
+/// all. Cycles twice the table's capacity through request and unload.
+int verify_unloaded_records_are_released() {
+  std::unique_ptr<engine::renderer::AssetManager> manager(
+      new (std::nothrow) engine::renderer::AssetManager());
+  std::unique_ptr<engine::renderer::AssetDatabase> database(
+      new (std::nothrow) engine::renderer::AssetDatabase());
+  std::unique_ptr<engine::renderer::GpuMeshRegistry> registry(
+      new (std::nothrow) engine::renderer::GpuMeshRegistry());
+  if ((manager == nullptr) || (database == nullptr) || (registry == nullptr)) {
+    return 70;
+  }
+  engine::renderer::clear_asset_manager(manager.get());
+  engine::renderer::clear_asset_database(database.get());
+
+  constexpr std::size_t kCycles =
+      2U * engine::renderer::AssetDatabase::kMaxMeshAssets;
+  for (std::size_t i = 0U; i < kCycles; ++i) {
+    const engine::renderer::AssetId id =
+        static_cast<engine::renderer::AssetId>(1000U + i);
+    if (!engine::renderer::request_mesh_asset_streaming_load(
+            database.get(), id, "assets/cycle.mesh")) {
+      std::printf("mesh %zu of %zu could not be requested: the table is "
+                  "full of unloaded records\n",
+                  i, kCycles);
+      return 71;
+    }
+    if (!engine::renderer::queue_mesh_unload(manager.get(), database.get(),
+                                             id) ||
+        !engine::renderer::update_asset_manager(manager.get(), database.get(),
+                                                registry.get(), 4U)) {
+      return 72;
+    }
+  }
+
+  std::size_t occupied = 0U;
+  for (bool slot : database->occupied) {
+    occupied += slot ? 1U : 0U;
+  }
+  if (occupied != 0U) {
+    std::printf("%zu unloaded records were kept\n", occupied);
+    return 73;
+  }
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -465,6 +514,11 @@ int main() {
   }
 
   result = verify_auto_unload_from_release_intent();
+  if (result != 0) {
+    return result;
+  }
+
+  result = verify_unloaded_records_are_released();
   if (result != 0) {
     return result;
   }

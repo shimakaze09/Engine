@@ -57,28 +57,30 @@ void write_source_path(std::array<char, 260U> *outPath,
 
 } // namespace
 
-/// Linear-probe lookup; a never-used slot terminates the probe chain while
-/// tombstones keep it alive. Returns capacity when the id is absent.
+namespace {
+
+/// Re-indexes every live record, dropping the tombstones erases left.
+void rebuild_mesh_index(AssetDatabase *database) noexcept {
+  database->meshIndex.clear();
+  for (std::size_t slot = 0U; slot < database->meshAssets.size(); ++slot) {
+    if (database->occupied[slot]) {
+      static_cast<void>(database->meshIndex.insert(
+          database->meshAssets[slot].id, static_cast<std::uint32_t>(slot)));
+    }
+  }
+}
+
+} // namespace
+
 std::size_t find_mesh_asset_record_slot(const AssetDatabase *database,
                                         AssetId id) noexcept {
   if ((database == nullptr) || (id == kInvalidAssetId)) {
     return database != nullptr ? database->meshAssets.size() : 0U;
   }
 
-  const std::size_t capacity = database->meshAssets.size();
-  const std::size_t base = hashed_slot(id, capacity);
-  for (std::size_t probe = 0U; probe < capacity; ++probe) {
-    const std::size_t slot = (base + probe) % capacity;
-    if (database->occupied[slot]) {
-      if (database->meshAssets[slot].id == id) {
-        return slot;
-      }
-    } else if (!database->meshTombstoned[slot]) {
-      return database->meshAssets.size();
-    }
-  }
-
-  return database->meshAssets.size();
+  const std::uint32_t *slot = database->meshIndex.find(id);
+  return (slot != nullptr) ? static_cast<std::size_t>(*slot)
+                           : database->meshAssets.size();
 }
 
 std::size_t claim_mesh_asset_record_slot(AssetDatabase *database,
@@ -87,39 +89,24 @@ std::size_t claim_mesh_asset_record_slot(AssetDatabase *database,
     return database != nullptr ? database->meshAssets.size() : 0U;
   }
 
-  const std::size_t capacity = database->meshAssets.size();
-  const std::size_t base = hashed_slot(id, capacity);
-  std::size_t tombstone = capacity;
-  for (std::size_t probe = 0U; probe < capacity; ++probe) {
-    const std::size_t slot = (base + probe) % capacity;
-    if (database->occupied[slot]) {
-      if (database->meshAssets[slot].id == id) {
-        return slot;
-      }
-      continue;
-    }
-
-    if (database->meshTombstoned[slot]) {
-      if (tombstone == capacity) {
-        tombstone = slot;
-      }
-      continue;
-    }
-
-    const std::size_t target = (tombstone != capacity) ? tombstone : slot;
-    database->occupied[target] = true;
-    database->meshTombstoned[target] = false;
-    database->meshAssets[target] = MeshAssetRecord{};
-    database->meshAssets[target].id = id;
-    return target;
+  const std::size_t existing = find_mesh_asset_record_slot(database, id);
+  if (existing != database->meshAssets.size()) {
+    return existing;
   }
 
-  if (tombstone != capacity) {
-    database->occupied[tombstone] = true;
-    database->meshTombstoned[tombstone] = false;
-    database->meshAssets[tombstone] = MeshAssetRecord{};
-    database->meshAssets[tombstone].id = id;
-    return tombstone;
+  for (std::size_t slot = 0U; slot < database->meshAssets.size(); ++slot) {
+    if (database->occupied[slot]) {
+      continue;
+    }
+    // The index has twice the records' capacity, so while a record slot is
+    // free it has room; the check keeps the two in step regardless.
+    if (!database->meshIndex.insert(id, static_cast<std::uint32_t>(slot))) {
+      return database->meshAssets.size();
+    }
+    database->occupied[slot] = true;
+    database->meshAssets[slot] = MeshAssetRecord{};
+    database->meshAssets[slot].id = id;
+    return slot;
   }
 
   return database->meshAssets.size();
@@ -128,6 +115,9 @@ std::size_t claim_mesh_asset_record_slot(AssetDatabase *database,
 /// Unregisters the asset record; refused while it is still referenced or
 /// still owns a GPU mesh.
 bool unregister_mesh_asset(AssetDatabase *database, AssetId id) noexcept {
+  if (database == nullptr) {
+    return false;
+  }
   const std::size_t slot = find_mesh_asset_record_slot(database, id);
   if (slot == database->meshAssets.size()) {
     return false;
@@ -139,8 +129,12 @@ bool unregister_mesh_asset(AssetDatabase *database, AssetId id) noexcept {
   }
 
   database->occupied[slot] = false;
-  database->meshTombstoned[slot] = true;
   database->meshAssets[slot] = MeshAssetRecord{};
+  static_cast<void>(database->meshIndex.erase(id));
+  if (database->meshIndex.tombstone_count() >
+      (AssetDatabase::kMeshIndexCapacity / 4U)) {
+    rebuild_mesh_index(database);
+  }
   return true;
 }
 
@@ -392,9 +386,9 @@ void clear_asset_database(AssetDatabase *database) noexcept {
 
   for (std::size_t i = 0U; i < database->meshAssets.size(); ++i) {
     database->occupied[i] = false;
-    database->meshTombstoned[i] = false;
     database->meshAssets[i] = MeshAssetRecord{};
   }
+  database->meshIndex.clear();
 
   for (std::size_t i = 0U; i < database->textureAssets.size(); ++i) {
     database->textureOccupied[i] = false;
