@@ -1,8 +1,12 @@
-// Template for the generated engine package/version identity header (issue
-// #86 L-06). CMake substitutes the @…@ tokens from the root project()
-// VERSION and writes engine_version.h into the build tree; this is engine
-// package versioning, distinct from cooked-asset format versions (e.g.
-// kMeshAssetVersion) which are unaffected and keep their own numbering.
+// Template for the generated engine package/version and build identity
+// header. CMake substitutes the @…@ tokens and writes engine_version.h into
+// the build tree; this is engine package versioning, distinct from
+// cooked-asset format versions (e.g. kMeshAssetVersion) which are unaffected
+// and keep their own numbering.
+//
+// The build identity below is regenerated at build time (see
+// core/cmake/generate_build_info.cmake) so the revision it names is the one
+// being built.
 
 #pragma once
 
@@ -11,11 +15,40 @@
 #define ENGINE_VERSION_PATCH @PROJECT_VERSION_PATCH@
 #define ENGINE_VERSION_STRING "@PROJECT_VERSION@"
 
+// Source revision as `git describe --always --dirty --tags` reported it, or
+// "unknown" when no git history was available. A `-dirty` suffix means the
+// working tree carried uncommitted changes, so the revision alone does not
+// reproduce the binary.
+#define ENGINE_BUILD_DESCRIBE "@ENGINE_BUILD_DESCRIBE@"
+// Compiler id and version, which decides language support and, with the
+// float flags, floating-point results.
+#define ENGINE_BUILD_COMPILER "@ENGINE_BUILD_COMPILER@"
+// CMAKE_BUILD_TYPE, or "Unspecified" for a build that set none.
+#define ENGINE_BUILD_TYPE "@ENGINE_BUILD_TYPE@"
+#define ENGINE_BUILD_PLATFORM "@ENGINE_BUILD_PLATFORM@"
+// The floating-point flags determinism rests on. Two builds whose other
+// fields match but whose float flags differ are not expected to agree on a
+// state hash, so a report that omits this cannot be compared.
+#define ENGINE_BUILD_FLOAT "@ENGINE_BUILD_FLOAT@"
+
 namespace engine::core {
 
 /// Returns the build-time "MAJOR.MINOR.PATCH" engine version string.
 inline constexpr const char *engine_version_string() noexcept {
   return ENGINE_VERSION_STRING;
+}
+
+/// One line naming the build a report came from: engine version, source
+/// revision, compiler, configuration, platform and float flags.
+///
+/// A single compile-time constant, not a formatted string, because the
+/// crash path has to write it with nothing but a write(2): no allocation,
+/// no snprintf, no locale, nothing that can fail or deadlock in a signal
+/// handler.
+inline constexpr const char *engine_build_id() noexcept {
+  return ENGINE_VERSION_STRING " " ENGINE_BUILD_DESCRIBE
+         " " ENGINE_BUILD_COMPILER " " ENGINE_BUILD_TYPE
+         " " ENGINE_BUILD_PLATFORM " " ENGINE_BUILD_FLOAT;
 }
 
 } // namespace engine::core

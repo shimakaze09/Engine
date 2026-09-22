@@ -171,10 +171,12 @@ bool initialize_core(const CoreConfig &config) noexcept {
 
   if (initializedSuccessfully) {
     g_coreInitialized = true;
-    char versionMessage[64] = {};
-    std::snprintf(versionMessage, sizeof(versionMessage),
-                  "core initialized (engine %s)", engine_version_string());
-    log_message(LogLevel::Info, "core", versionMessage);
+    // The build identity, logged once as its own line: every log file and
+    // every pasted excerpt then names the binary it came from, including
+    // whether the tree was dirty and which float flags were in force, so
+    // a report never has to be traced back by asking.
+    log_message(LogLevel::Info, "core", engine_build_id());
+    log_message(LogLevel::Info, "core", "core initialized");
     return true;
   }
 

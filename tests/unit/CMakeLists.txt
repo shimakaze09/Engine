@@ -7,6 +7,13 @@ engine_add_test_executable(engine_unit_core_lifecycle
     engine_core
 )
 
+engine_add_test_executable(engine_unit_build_identity
+    SOURCES
+    build_identity_test.cpp
+    PRIVATE_DEPS
+    engine_core
+)
+
 engine_add_test_executable(engine_unit_status
     SOURCES
     status_test.cpp

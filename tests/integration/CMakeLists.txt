@@ -289,6 +289,27 @@ engine_add_test_executable(engine_integration_pipeline_lifetime
     integration
 )
 
+# Helper plus driver: the contract is about what survives a process that
+# exits without flushing, which cannot be observed from inside that
+# process.
+engine_add_executable_target(log_flush_helper
+    SOURCES
+    log_flush_helper.cpp
+    PRIVATE_DEPS
+    engine_core
+)
+
+add_test(
+    NAME engine_integration_log_flush_on_error
+    COMMAND ${CMAKE_COMMAND}
+        "-DHELPER=$<TARGET_FILE:log_flush_helper>"
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/log_flush_on_error_test.cmake
+)
+set_tests_properties(
+    engine_integration_log_flush_on_error
+    PROPERTIES LABELS integration
+)
+
 engine_add_test_executable(engine_integration_play_transition_queue
     SOURCES
     play_transition_queue_test.cpp
