@@ -6,8 +6,8 @@ produced [0015](0015-commercial-anime-engine-on-six-platforms.md).
 ## Context
 
 The engine has no notion of a project. `app/main.cpp` takes no arguments
-and calls `bootstrap()` with defaults; `EngineConfig` is eight hard-coded
-relative paths under `assets`; the editor can only be launched from the
+and calls `bootstrap()` with defaults; `EngineConfig` is seven hard-coded
+strings under `assets`; the editor can only be launched from the
 repository root and cannot be told what to open. The sample game's scenes
 and characters sit in the same `assets/` directory as the engine's own
 shaders, fonts, templates and web shell, so deleting the sample deletes

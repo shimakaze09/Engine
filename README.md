@@ -112,7 +112,9 @@ secondary compilers validated for portability:
 - **Tier 1 — canonical (used for development and primary CI)**
 	- Windows x64: `clang-cl`
 	- Linux x64: `clang++` 19 or newer (clang 18 cannot compile libstdc++'s `<expected>`)
-	- macOS: AppleClang (build and headless-test lane; see [decision 0002](docs/decisions/0002-macos-is-a-test-lane.md))
+	- macOS: AppleClang. macOS is an editor platform by
+	  [decision 0015](docs/decisions/0015-commercial-anime-engine-on-six-platforms.md),
+	  but today it builds with the shader cook off and runs headless tests only
 - **Tier 2 — portability validation (dedicated CI compatibility lanes)**
 	- Windows x64: MSVC
 	- Linux x64: GCC
@@ -161,7 +163,7 @@ plus the MSVC/GCC compatibility lanes.
 
 | Option | Default | Effect |
 | --- | --- | --- |
-| `ENGINE_TARGET_PLATFORM` | host | `Win64`, `Linux`, `macOS` (headless lane), `Web` (Emscripten plus `ENGINE_WEB_COOKED_DIR`); `Android` and `iOS` are rejected at configure |
+| `ENGINE_TARGET_PLATFORM` | host | `Win64`, `Linux`, `macOS` (headless tests only for now), `Web` (Emscripten plus `ENGINE_WEB_COOKED_DIR`); `Android` and `iOS` are rejected at configure |
 | `ENGINE_RENDERER_BACKEND` | `bgfx` | The only accepted value; the variable survives so existing `-D` invocations keep working (see [decision 0001](docs/decisions/0001-bgfx-as-the-rhi.md)) |
 | `ENGINE_BGFX_SHADERC` | `ON` | Builds `shaderc` and cooks the shader manifest. Lanes that never consume cooked binaries turn it off, and the cooked test sections skip. Needs `ENGINE_BUILD_TOOLS=ON`; forced off for Web |
 | `ENGINE_MAX_ENTITIES` | `65536` | ECS fixed capacity |
@@ -187,8 +189,8 @@ headers; the package set CI passes to
 Run the app after build:
 
 - Windows: `build\engine_editor_app.exe`
-- Linux: `./build/engine_editor_app` (macOS does not run the editor yet;
-  decision 0002)
+- Linux: `./build/engine_editor_app` (macOS cannot run it until the shader
+  cook works there)
 
 Build benchmark targets as needed:
 

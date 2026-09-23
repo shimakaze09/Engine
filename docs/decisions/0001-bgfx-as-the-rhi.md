@@ -25,6 +25,9 @@ twice and the second one was never verified.
 
 - bgfx concepts must not appear above the backend translation unit. The
   device contract is the boundary.
+  *(One sanctioned exception since: the editor's ImGui renderer,
+  `editor/src/imgui_impl_bgfx.cpp`, calls bgfx directly, as `CLAUDE.md`
+  records.)*
 - Programs link only from cooked shader binaries; runtime GLSL compilation
   is unavailable. spirv is the canonical introspection profile.
 - bgfx brings pipeline caching, so the GL shader binary cache stayed cut.

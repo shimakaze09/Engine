@@ -4,6 +4,10 @@
 [0017](0017-materials-carry-a-shading-model.md) and superseding its
 point 5.
 
+**Status:** Step 1 in progress: shading-program ids and the
+`kMaxShadingPrograms` limit of 128 exist, while materials and the draw
+key still select by `ShadingModel`.
+
 ## Context
 
 [0017](0017-materials-carry-a-shading-model.md) gave a material a
@@ -123,6 +127,8 @@ and of nothing else's cook key.
 - `ShadingModel` stops being the type the draw key carries; the key
   carries a program id over the same 7 bits, and `kShadingModelCount`
   becomes a published maximum rather than a count of three.
+  *(The published maximum landed as `kMaxShadingPrograms`;
+  `kShadingModelCount` stays the count of built-in presets.)*
 - `tools/check_shader_variants.py` generalises from enum rows against
   manifest rows to registered programs against cooked variants. Its
   vacuity guards matter more once the left-hand side is authored.

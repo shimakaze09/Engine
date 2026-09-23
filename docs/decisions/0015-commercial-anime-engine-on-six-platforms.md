@@ -43,6 +43,9 @@ this record the tracker held sixty open items and not one was a feature.
 5. **Still parked:** networking and multiplayer, a 2D engine, CSG, XR,
    haptics and input replay, user-authored shaders, a plugin system, and
    advanced photorealistic rendering (lightmap baking, SSR, volumetrics).
+   *(Authored shading programs leave the parking lot by
+   [0018](0018-authors-compose-shading.md). `docs/vision.md` also keeps
+   foliage painting parked.)*
 6. **Runtime UI is a shipping requirement**, which amends 0004: it is no
    longer template-driven feature work to be suspended. 0004's core
    stands — the engine is the product and the templates are fixtures.

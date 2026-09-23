@@ -40,5 +40,7 @@ one common file, so every change conflicted with every other change.
 - A consolidation's evidence is net deletion and a recurrence gate, not a
   red-on-base regression — demanding one pushes work back toward instance
   fixes. See the `consolidate-primitive` skill.
+  *(Narrowed by [0014](0014-severity-is-impact.md): a merge needs
+  semantic identity, and net line count is evidence, not the objective.)*
 - Agents must be told this explicitly, because the incentive to pick the
   non-overlapping task is structural and does not announce itself.

@@ -83,16 +83,18 @@ Sequencing: content before replatform. Porting a stabilized renderer is far
 cheaper than porting a moving target, and the hour test cannot be validated
 until the creation loop exists.
 
-Platforms: the editor runs on Windows, Linux and macOS; games ship to
-those three, Android, iOS and the web. The mobile proofs wait on hardware
+Platforms: the editor targets Windows, Linux and macOS; games are to ship
+to those three, Android, iOS and the web. The mobile proofs wait on hardware
 the project owns.
 
 ## Parking lot
 
 Cut from v1, not canceled: advanced photorealistic rendering (lightmap
 baking, SSR, volumetrics), a 2D engine, networking and multiplayer,
-foliage painting, CSG, haptics and input replay, XR, user-authored
-shaders, a plugin system.
+foliage painting, CSG, haptics and input replay, XR, a general-purpose
+shader language beyond authored shading programs (those left the parking
+lot by [0018](decisions/0018-authors-compose-shading.md)), a plugin system.
 
 Parallel lanes stay live throughout: documentation, extended test coverage
-including golden-image renderer tests, and the devops pipeline.
+(golden-image renderer tests are a goal; none exist yet), and the devops
+pipeline.

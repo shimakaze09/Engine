@@ -2,6 +2,10 @@
 
 **Date:** 2026-08-25.
 
+**Status:** Amended by
+[0015](0015-commercial-anime-engine-on-six-platforms.md): runtime UI is a
+shipping requirement, and the queue includes 0015's genre features.
+
 ## Context
 
 Feature work was being driven by what the bundled starter template needed
