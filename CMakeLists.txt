@@ -201,7 +201,7 @@ include(FetchContent)
         FORCE)
     # shaderc's toolchain (glslang/spirv-*) dominates a cold bgfx build;
     # lanes that never consume cooked binaries (sanitizers, analysis,
-    # werror, benchmarks) turn it off — the cooked test sections skip
+    # benchmarks) turn it off — the cooked test sections skip
     # gracefully when no cook target exists.
     option(ENGINE_BGFX_SHADERC
         "Build bgfx shaderc and cook the shader manifest" ON)

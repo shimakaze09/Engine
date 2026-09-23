@@ -94,7 +94,7 @@ jobs:
         run: cmake --build build --config ${{ matrix.config }} --parallel 4
 
       - name: Test
-        run: ctest --test-dir build --build-config ${{ matrix.config }} --output-on-failure --timeout 120 --label-exclude gpu
+        run: ctest --test-dir build --parallel 4 --build-config ${{ matrix.config }} --output-on-failure --timeout 120 --label-exclude gpu
 
       # ---- The bundled scene loads through the production loader with
       # every reference resolving; a dangling one fails here, not for an
@@ -149,7 +149,6 @@ jobs:
   # stay covered (issue #118's stringop-truncation was GCC-Release-only).
   compat-build:
     name: ${{ matrix.name }} compatibility
-    needs: build
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -209,7 +208,7 @@ jobs:
         run: cmake --build build --config Release --parallel 4
 
       - name: Test
-        run: ctest --test-dir build --build-config Release --output-on-failure --timeout 120 --label-exclude gpu
+        run: ctest --test-dir build --parallel 4 --build-config Release --output-on-failure --timeout 120 --label-exclude gpu
 
   # ---- Determinism comparison across every platform and configuration ----
   determinism-check:
@@ -260,7 +259,6 @@ jobs:
 
   static-analysis:
     name: cppcheck
-    needs: build
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
@@ -351,7 +349,6 @@ jobs:
   # ---- clang-tidy (P1-M1-B2b) ----
   clang-tidy:
     name: clang-tidy
-    needs: build
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
@@ -421,36 +418,6 @@ jobs:
           sys.exit(result.returncode)
           "
 
-  werror-check:
-    name: -Werror verification
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Checkout
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-
-      - name: Install Linux dependencies
-        run: |
-          bash .github/scripts/install-linux-deps.sh \
-            libgl1-mesa-dev libglu1-mesa-dev libegl1-mesa-dev \
-            libx11-dev libxext-dev libxrandr-dev libxi-dev \
-            libxcursor-dev libxinerama-dev libxxf86vm-dev \
-            libxtst-dev libxfixes-dev \
-            libxss-dev libwayland-dev libxkbcommon-dev \
-            libasound2-dev libpulse-dev
-
-      - name: Cache _deps
-        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
-        with:
-          path: build/_deps
-          key: deps-ubuntu-24.04-${{ hashFiles('CMakeLists.txt') }}
-          restore-keys: deps-ubuntu-24.04-
-
-      - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DENGINE_BGFX_SHADERC=OFF
-
-      - name: Build (will fail on any warning due to -Werror)
-        run: cmake --build build --config Release --parallel 4
-
   sanitizers:
     name: ASAN+UBSAN
     runs-on: ubuntu-24.04
@@ -491,7 +458,7 @@ jobs:
           ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
           LSAN_OPTIONS: suppressions=${{ github.workspace }}/tests/sanitizer_suppressions/lsan.supp
-        run: ctest --test-dir build --output-on-failure --timeout 180 --label-exclude "gpu|integration|benchmark"
+        run: ctest --test-dir build --parallel 4 --output-on-failure --timeout 180 --label-exclude "gpu|integration|benchmark"
 
   # ---- TSAN (P1-M1-B3b) ----
   tsan:
@@ -534,7 +501,7 @@ jobs:
       - name: Test under TSAN
         env:
           TSAN_OPTIONS: suppressions=${{ github.workspace }}/tests/sanitizer_suppressions/tsan.supp:halt_on_error=1:second_deadlock_stack=1
-        run: ctest --test-dir build --output-on-failure --timeout 180 --label-exclude "gpu|integration|benchmark"
+        run: ctest --test-dir build --parallel 4 --output-on-failure --timeout 180 --label-exclude "gpu|integration|benchmark"
 
   # ---- Code coverage (P1-M1-B4a/B4b/B4c) ----
   coverage:
@@ -575,7 +542,7 @@ jobs:
         run: cmake --build build --parallel 4
 
       - name: Test
-        run: ctest --test-dir build --output-on-failure --timeout 120 --label-exclude gpu
+        run: ctest --test-dir build --parallel 4 --output-on-failure --timeout 120 --label-exclude gpu
 
       - name: Collect coverage (lcov)
         run: |
@@ -611,7 +578,6 @@ jobs:
 
   benchmarks:
     name: Performance benchmarks
-    needs: build
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
@@ -677,7 +643,6 @@ jobs:
       - determinism-check
       - static-analysis
       - clang-tidy
-      - werror-check
       - sanitizers
       - tsan
       - coverage

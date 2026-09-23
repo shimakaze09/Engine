@@ -236,7 +236,9 @@ Some tests are labeled `gpu`; CI excludes those where headless execution is requ
 ## Continuous integration
 
 GitHub Actions configuration lives in `.github/workflows/ci.yml` and currently
-runs eleven jobs:
+runs ten jobs. Every job except the cross-platform determinism comparison
+starts at once; engine targets build with warnings as errors on every lane,
+and CTest runs four tests at a time:
 
 - Windows, Linux, and macOS builds in Debug and Release on the canonical
   toolchains (`clang-cl` via Ninja, `clang++-19`, AppleClang),
@@ -249,7 +251,6 @@ runs eleven jobs:
   timing, error handling, portable fopen, duplicate primitives, asset
   metadata paths, asset identity, shader variants, document references)
 - `clang-tidy` with warnings-as-errors
-- A dedicated `-Werror` build check
 - ASAN/UBSAN and TSAN sanitizer lanes
 - Coverage with a minimum-threshold gate
 - Benchmark runs gated against `tests/benchmark/perf_baseline.json`
