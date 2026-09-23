@@ -15,7 +15,9 @@
 // deferred path, while a genuinely required uniform still does. And it
 // pins the dx11 profile's sidecar contract (#301): DXBC uniform tables
 // lose Load-only samplers to fxc stripping, so dx11 programs must link
-// through the spirv-introspected entry, never the plain one.
+// through the spirv-introspected entry, never the plain one. A device
+// without texture arrays is never asked for one: both array-backed shadow
+// sets stay unavailable while the cubemap point shadows still initialize.
 
 #include "command_buffer_capture.h"
 #include "command_buffer_context.h"
@@ -633,6 +635,51 @@ int check_metal_profile_links_without_sidecars() {
   return result;
 }
 
+std::uint32_t g_arrayTextureRequests = 0U;
+
+/// Counts Tex2DArray descriptors, then creates through the shared fake.
+engine::renderer::DeviceTextureHandle
+counting_create_texture(const engine::renderer::TextureDesc &desc) noexcept {
+  if (desc.kind == engine::renderer::TextureKind::Tex2DArray) {
+    ++g_arrayTextureRequests;
+  }
+  return engine::tests::fake::create_texture(desc);
+}
+
+/// EXPECTATION: a device without texture arrays (bgfx under Emscripten) is
+/// never asked for one. Both array-backed shadow sets stay unavailable and
+/// no array fallback exists, while the cubemap-backed point shadows are
+/// unaffected.
+int check_no_texture_arrays_skips_array_shadow_sets() {
+  using namespace engine::renderer;
+
+  reset_backend_harness();
+  clear_missing_uniforms();
+  RenderDevice &device = engine::tests::fake_device();
+  device.caps.textureArrays = false;
+  device.create_texture = &counting_create_texture;
+  g_arrayTextureRequests = 0U;
+
+  int result = 0;
+  if (!initialize_backend()) {
+    result = 380;
+  } else if (g_arrayTextureRequests != 0U) {
+    result = 381;
+  } else if (backend_state().shadowAvailable ||
+             backend_state().spotShadowAvailable) {
+    result = 382;
+  } else if (backend_state().fallbackTexture2DArray !=
+             kInvalidDeviceTexture) {
+    result = 383;
+  } else if (!backend_state().pointShadowAvailable) {
+    result = 384;
+  }
+
+  device.caps.textureArrays = true;
+  device.create_texture = &engine::tests::fake::create_texture;
+  return result;
+}
+
 } // namespace
 
 namespace engine::renderer {
@@ -708,6 +755,9 @@ int main() {
   }
   if (result == 0) {
     result = check_metal_profile_links_without_sidecars();
+  }
+  if (result == 0) {
+    result = check_no_texture_arrays_skips_array_shadow_sets();
   }
 
   std::filesystem::remove_all(kShaderDir, ec);

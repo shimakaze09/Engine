@@ -543,17 +543,22 @@ bool init_backend_core(BackendState &backend) noexcept {
     // Arrays reject client texels (render-target only), so the array
     // fallback is created empty: its contents are undefined, but the
     // shaders only sample the shadow arrays behind their enabled flags
-    // and the descriptor just has to be valid.
-    TextureDesc fallbackArray{};
-    fallbackArray.kind = TextureKind::Tex2DArray;
-    fallbackArray.format = TextureFormat::Depth24;
-    fallbackArray.width = 1;
-    fallbackArray.height = 1;
-    fallbackArray.layers = 1;
-    fallbackArray.filter = TextureFilter::Nearest;
-    backend.fallbackTexture2DArray = dev->create_texture(fallbackArray);
+    // and the descriptor just has to be valid. A device without arrays
+    // never enables either shadow set, so it gets no fallback and the
+    // array slots bind nothing.
+    if (dev->caps.textureArrays) {
+      TextureDesc fallbackArray{};
+      fallbackArray.kind = TextureKind::Tex2DArray;
+      fallbackArray.format = TextureFormat::Depth24;
+      fallbackArray.width = 1;
+      fallbackArray.height = 1;
+      fallbackArray.layers = 1;
+      fallbackArray.filter = TextureFilter::Nearest;
+      backend.fallbackTexture2DArray = dev->create_texture(fallbackArray);
+    }
     if ((backend.fallbackTexture2D == kInvalidDeviceTexture) ||
-        (backend.fallbackTexture2DArray == kInvalidDeviceTexture) ||
+        (dev->caps.textureArrays &&
+         (backend.fallbackTexture2DArray == kInvalidDeviceTexture)) ||
         (backend.fallbackCubemap == kInvalidDeviceTexture)) {
       core::log_message(core::LogLevel::Warning, "renderer",
                         "fallback sampler textures unavailable — disabled "
