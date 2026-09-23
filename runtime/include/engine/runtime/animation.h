@@ -81,7 +81,8 @@ struct AnimTrackDesc final {
 struct AnimationClip final {
   float durationSeconds = 0.0F;
   std::uint32_t trackCount = 0U;
-  std::array<AnimTrackDesc, kMaxAnimTracks> tracks{};
+  std::array<AnimTrackDesc, kMaxAnimTracks> tracks =
+      std::array<AnimTrackDesc, kMaxAnimTracks>();
   core::NothrowBuffer<float> payload{};
 };
 

@@ -14,17 +14,18 @@ constexpr std::size_t kMaxSpheres = 512U;
 constexpr std::size_t kMaxTexts = 256U;
 
 struct LineStore final {
-  std::array<DebugLine, kMaxLines> entries{};
+  std::array<DebugLine, kMaxLines> entries = std::array<DebugLine, kMaxLines>();
   std::size_t count = 0U;
 };
 
 struct SphereStore final {
-  std::array<DebugSphere, kMaxSpheres> entries{};
+  std::array<DebugSphere, kMaxSpheres> entries =
+      std::array<DebugSphere, kMaxSpheres>();
   std::size_t count = 0U;
 };
 
 struct TextStore final {
-  std::array<DebugText, kMaxTexts> entries{};
+  std::array<DebugText, kMaxTexts> entries = std::array<DebugText, kMaxTexts>();
   std::size_t count = 0U;
 };
 

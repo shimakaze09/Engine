@@ -151,7 +151,8 @@ public:
   CommandBufferView view() const noexcept;
 
 private:
-  std::array<DrawCommand, kMaxDrawCommands> m_commands{};
+  std::array<DrawCommand, kMaxDrawCommands> m_commands =
+      std::array<DrawCommand, kMaxDrawCommands>();
   std::size_t m_commandCount = 0U;
 };
 

@@ -229,7 +229,8 @@ private:
   std::size_t m_length = 0U;
   JsonValue m_root{};
   bool m_hasRoot = false;
-  mutable std::array<JsonValue, kScratchSlots> m_scratch{};
+  mutable std::array<JsonValue, kScratchSlots> m_scratch =
+      std::array<JsonValue, kScratchSlots>();
   mutable std::size_t m_scratchCursor = 0U;
   mutable bool m_scratchExhausted = false;
   // Sequential-access memos for get_array_element: the lazy representation

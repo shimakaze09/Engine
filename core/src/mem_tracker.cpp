@@ -16,7 +16,8 @@ struct TagCounters {
   std::atomic<std::uint64_t> totalFreed{0};
 };
 
-std::array<TagCounters, kMemTagCount> g_tagCounters{};
+std::array<TagCounters, kMemTagCount> g_tagCounters =
+    std::array<TagCounters, kMemTagCount>();
 
 } // namespace
 

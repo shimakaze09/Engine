@@ -147,8 +147,8 @@ private:
     return Capacity;
   }
 
-  std::array<Key, Capacity> m_keys{};
-  std::array<Value, Capacity> m_values{};
+  std::array<Key, Capacity> m_keys = std::array<Key, Capacity>();
+  std::array<Value, Capacity> m_values = std::array<Value, Capacity>();
   std::array<std::uint8_t, Capacity> m_states{};
   std::size_t m_size = 0U;
   std::size_t m_tombstones = 0U;

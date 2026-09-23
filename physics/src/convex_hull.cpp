@@ -139,7 +139,7 @@ bool build_convex_hull(const math::Vec3 *points, std::size_t pointCount,
     i2 = tmp;
   }
 
-  std::array<HullFace, kMaxFaces> faces{};
+  std::array<HullFace, kMaxFaces> faces = std::array<HullFace, kMaxFaces>();
   std::size_t faceCount = 0U;
 
   auto add_face = [&](std::size_t a, std::size_t b,
@@ -201,7 +201,7 @@ bool build_convex_hull(const math::Vec3 *points, std::size_t pointCount,
     struct Edge {
       std::uint16_t a, b;
     };
-    std::array<Edge, kMaxEdges> horizon{};
+    std::array<Edge, kMaxEdges> horizon = std::array<Edge, kMaxEdges>();
     std::size_t horizonCount = 0U;
 
     for (std::size_t fi = 0U; fi < faceCount; ++fi) {
@@ -627,7 +627,8 @@ GjkResult epa(const EpaSeed &seed, const void *shapeA,
   GjkResult result;
   result.intersecting = true;
 
-  std::array<MinkowskiPoint, kEpaMaxVertices> verts{};
+  std::array<MinkowskiPoint, kEpaMaxVertices> verts =
+      std::array<MinkowskiPoint, kEpaMaxVertices>();
   std::size_t vertCount = seed.vertCount;
   for (std::size_t i = 0U; i < seed.vertCount; ++i) {
     verts[i] = seed.verts[i];
@@ -687,7 +688,8 @@ GjkResult epa(const EpaSeed &seed, const void *shapeA,
     struct Edge {
       std::uint16_t a, b;
     };
-    std::array<Edge, kEpaMaxHorizon> horizon{};
+    std::array<Edge, kEpaMaxHorizon> horizon =
+        std::array<Edge, kEpaMaxHorizon>();
     std::size_t horizonCount = 0U;
     bool horizonOverflow = false;
 

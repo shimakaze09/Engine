@@ -55,7 +55,8 @@ namespace engine::editor {
 namespace {
 
 void draw_profiler_flame_graph() noexcept {
-  std::array<core::ProfileEntry, 256U> entries{};
+  std::array<core::ProfileEntry, 256U> entries =
+      std::array<core::ProfileEntry, 256U>();
   const std::size_t count =
       core::profiler_get_entries(entries.data(), entries.size());
   if (count == 0U) {
@@ -162,7 +163,8 @@ void draw_stats_panel(const core::EngineStats &stats) noexcept {
   ImGui::Separator();
   ImGui::TextUnformatted("Memory by Subsystem");
   {
-    std::array<core::MemTagSnapshot, core::kMemTagCount> snaps{};
+    std::array<core::MemTagSnapshot, core::kMemTagCount> snaps =
+        std::array<core::MemTagSnapshot, core::kMemTagCount>();
     const std::size_t count =
         core::mem_tracker_snapshot(snaps.data(), snaps.size());
     float maxBytes = 1.0F;

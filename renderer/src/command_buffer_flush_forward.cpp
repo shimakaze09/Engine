@@ -349,9 +349,9 @@ void flush_debug_overlay(FrameFlushContext &ctx) noexcept {
   const math::Mat4 &projMat = ctx.projMat;
   if (backend.debugLineAvailable) {
     thread_local static std::array<core::DebugLine, kMaxDebugLineDraws>
-        debugLines{};
+        debugLines = std::array<core::DebugLine, kMaxDebugLineDraws>();
     thread_local static std::array<core::DebugSphere, kMaxDebugSphereDraws>
-        debugSpheres{};
+        debugSpheres = std::array<core::DebugSphere, kMaxDebugSphereDraws>();
     const std::size_t debugLineCount =
         core::debug_draw_get_lines(debugLines.data(), kMaxDebugLineDraws);
     const std::size_t debugSphereCount =

@@ -307,10 +307,14 @@ struct ResolveCollisionsJobData final {
 
 struct FrameContext final {
   runtime::RenderPrepPipelineContext renderPrepPipeline{};
-  std::array<UpdateChunkJobData, kMaxChunkJobs> updateJobData{};
-  std::array<core::JobHandle, kMaxChunkJobs> updateJobHandles{};
-  std::array<PhysicsChunkJobData, kMaxChunkJobs> physicsJobData{};
-  std::array<core::JobHandle, kMaxChunkJobs> physicsJobHandles{};
+  std::array<UpdateChunkJobData, kMaxChunkJobs> updateJobData =
+      std::array<UpdateChunkJobData, kMaxChunkJobs>();
+  std::array<core::JobHandle, kMaxChunkJobs> updateJobHandles =
+      std::array<core::JobHandle, kMaxChunkJobs>();
+  std::array<PhysicsChunkJobData, kMaxChunkJobs> physicsJobData =
+      std::array<PhysicsChunkJobData, kMaxChunkJobs>();
+  std::array<core::JobHandle, kMaxChunkJobs> physicsJobHandles =
+      std::array<core::JobHandle, kMaxChunkJobs>();
   std::array<WorldPhaseJobData, kMaxPhaseJobs> phaseJobData{};
   ResolveCollisionsJobData resolveCollisionsJobData{};
   std::atomic<bool> frameGraphFailed = false;

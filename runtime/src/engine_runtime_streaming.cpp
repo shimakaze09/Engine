@@ -221,7 +221,8 @@ void sync_streaming_failures(
 
   content::AssetStreamingQueue *queue = service->streamingQueue;
   std::array<content::TerminalLoad, content::AssetStreamingQueue::kMaxRequests>
-      terminals{};
+      terminals = std::array<content::TerminalLoad,
+                             content::AssetStreamingQueue::kMaxRequests>();
   const std::size_t terminalCount = content::collect_terminal_loads(
       queue, terminals.data(), terminals.size());
 

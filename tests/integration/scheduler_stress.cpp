@@ -50,7 +50,8 @@ std::uint64_t run_stress_round(std::uint64_t *outExecutedJobs,
     return 0U;
   }
 
-  std::array<StressJobData, kJobCount> jobData{};
+  std::array<StressJobData, kJobCount> jobData =
+      std::array<StressJobData, kJobCount>();
   std::array<std::uint64_t, kJobCount> outputs{};
 
   engine::core::Job completion{};

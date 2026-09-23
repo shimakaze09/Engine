@@ -54,7 +54,8 @@ struct EngineAssetDatabaseService final {
   renderer::AssetManager *manager = nullptr;
   content::AssetStreamingQueue *streamingQueue = nullptr;
   std::array<ScriptAssetLoadHandle, kMaxScriptAssetLoadHandles>
-      scriptLoadHandles{};
+      scriptLoadHandles =
+          std::array<ScriptAssetLoadHandle, kMaxScriptAssetLoadHandles>();
 };
 
 /// Renderer service exposed through the locator.

@@ -34,7 +34,8 @@ struct RuntimeAssetStreamingState final {
   renderer::GpuMeshRegistry *meshRegistry = nullptr;
   std::array<StreamingMeshTransferSlot,
              content::AssetStreamingQueue::kMaxRequests>
-      meshTransfers{};
+      meshTransfers = std::array<StreamingMeshTransferSlot,
+                                 content::AssetStreamingQueue::kMaxRequests>();
   std::mutex mutex{};
 };
 

@@ -1167,7 +1167,8 @@ private:
   std::array<std::uint32_t, kMaxEntities> m_freeEntityIndices{};
   std::size_t m_freeEntityCount = 0U;
   std::size_t m_aliveEntityCount = 0U;
-  std::array<Entity, kMaxEntities> m_pendingDestroyEntities{};
+  std::array<Entity, kMaxEntities> m_pendingDestroyEntities =
+      std::array<Entity, kMaxEntities>();
   std::size_t m_pendingDestroyCount = 0U;
 
   // The gameplay random stream. Seeded explicitly; the default below is a
@@ -1225,7 +1226,8 @@ private:
 
   TransformSet m_transforms{};
   WorldTransformSet m_worldTransforms{};
-  std::array<TransformNode, kMaxEntities + 1U> m_transformNodes{};
+  std::array<TransformNode, kMaxEntities + 1U> m_transformNodes =
+      std::array<TransformNode, kMaxEntities + 1U>();
   std::array<std::uint32_t, kMaxEntities> m_transformActiveIndices{};
   std::size_t m_transformActiveCount = 0U;
   std::array<std::uint32_t, kMaxEntities> m_transformRoots{};
@@ -1268,7 +1270,8 @@ private:
   AnimationComponentSet m_animationComponents{};
   CameraComponentSet m_cameraComponents{};
   std::array<WorldTransformHistoryEntry, kMaxEntities + 1U>
-      m_worldTransformHistory{};
+      m_worldTransformHistory =
+          std::array<WorldTransformHistoryEntry, kMaxEntities + 1U>();
   std::uint64_t m_worldTransformHistoryEpoch = 0U;
   physics::PhysicsContext m_physicsContext{};
   GameMode m_gameMode{};

@@ -68,7 +68,7 @@ struct CVarEntry final {
 };
 
 bool g_initialized = false;
-std::array<CVarEntry, kMaxCVars> g_entries{};
+std::array<CVarEntry, kMaxCVars> g_entries = std::array<CVarEntry, kMaxCVars>();
 std::size_t g_count = 0U;
 std::mutex g_mutex{};
 // Advances on every table reset so a handle resolved before the reset
