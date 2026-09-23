@@ -142,6 +142,12 @@ if(ENGINE_TARGET_PLATFORM STREQUAL "Web")
         "-sALLOW_MEMORY_GROWTH=1" "-sINITIAL_MEMORY=268435456"
         "-sMIN_WEBGL_VERSION=2" "-sMAX_WEBGL_VERSION=2"
         "-sSTACK_SIZE=1048576")
+    # The runtime exports every page needs, in one place because emcc
+    # keeps only the last -sEXPORTED_RUNTIME_METHODS it sees. ENV is how a
+    # shell seeds ENGINE_CVAR_* before main runs; HEAPF32 is how
+    # miniaudio's WebAudio callback reaches the mix buffer (without it
+    # every audio callback throws on Module.HEAPF32 being undefined).
+    add_link_options("-sEXPORTED_RUNTIME_METHODS=ENV,HEAPF32")
 endif()
 
 if(NOT CMAKE_CROSSCOMPILING AND NOT ENGINE_TARGET_PLATFORM STREQUAL _ENGINE_HOST_PLATFORM)
