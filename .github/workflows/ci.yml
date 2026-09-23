@@ -105,6 +105,17 @@ jobs:
       - name: Build
         run: cmake --build build --config ${{ matrix.config }} --parallel 4
 
+      # The web lane packages this lane's cook: shaderc cannot build under
+      # Emscripten (ENGINE_WEB_COOKED_DIR).
+      - name: Upload cooked shaders for the web lane
+        if: matrix.os == 'ubuntu-24.04' && matrix.config == 'Release'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: web-cooked-shaders
+          path: build/assets/shaders/bgfx/cooked
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Save _deps
         if: github.event_name == 'push' && steps.deps.outputs.cache-hit != 'true'
         uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
@@ -247,6 +258,63 @@ jobs:
 
       - name: Test
         run: ctest --test-dir build --parallel 4 --build-config Release --output-on-failure --timeout 120 --label-exclude gpu
+
+  # ---- Web (Emscripten): the browser target's build ----
+  # The ENGINE_PLATFORM_WEB paths compile nowhere else. The page packages
+  # the Linux Release lane's cook (shaderc cannot build under Emscripten),
+  # so this lane waits for the build matrix.
+  web:
+    name: web (Emscripten)
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      # emsdk at its 6.0.10 tag; `install 6.0.10` then fetches that
+      # release's toolchain by its release hash.
+      - name: Checkout emsdk
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: emscripten-core/emsdk
+          ref: a2b92777574c2feda07994cd4f1079a3dfc151f8 # 6.0.10
+          path: emsdk
+
+      - name: Install Emscripten
+        run: |
+          emsdk/emsdk install 6.0.10
+          emsdk/emsdk activate 6.0.10
+
+      - name: Download cooked shaders
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: web-cooked-shaders
+          path: web-cooked-shaders
+
+      # Fetched sources only, from the entry the analysis lane saves on
+      # main; FetchContent re-fetches any dependency whose pin changed.
+      # Nothing is saved here: the Emscripten objects rebuild in minutes,
+      # so the lane adds no cache entry of its own. The default generator
+      # matches the one that entry's subbuilds were configured with.
+      - name: Restore _deps
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: build/_deps
+          key: deps-v4-ubuntu-24.04-sources-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: deps-v4-ubuntu-24.04-sources-
+
+      - name: Configure
+        run: >
+          source emsdk/emsdk_env.sh &&
+          emcmake cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DENGINE_TARGET_PLATFORM=Web
+          -DENGINE_BUILD_TESTS=OFF
+          -DENGINE_BUILD_TOOLS=OFF
+          -DENGINE_WEB_COOKED_DIR=${{ github.workspace }}/web-cooked-shaders
+
+      - name: Build
+        run: source emsdk/emsdk_env.sh && cmake --build build --parallel 4
 
   # ---- Determinism comparison across every platform and configuration ----
   determinism-check:
@@ -693,6 +761,7 @@ jobs:
     needs:
       - build
       - compat-build
+      - web
       - determinism-check
       - static-analysis
       - clang-tidy
