@@ -175,6 +175,18 @@ int main() {
           "essl depth-only fragment keeps a main definition");
   t.check(!contains(probeEssl, "void main ();"),
           "essl depth-only fragment is not a bodyless prototype");
+  // The shadow-array taps sample at explicit LOD 0; glsl-optimizer lowers
+  // them to an ES 2.0 extension name bgfx's GLES3 preamble does not map,
+  // which fails the WebGL2 compile at first submit (fatal in bgfx).
+  for (const char *output : {"deferred_lighting.frag.default.essl.bin",
+                             "pbr.frag.PBR_FULL.essl.bin"}) {
+    const std::vector<char> essl = read_file(outA / output);
+    t.check(!essl.empty(), "essl shadow-array consumer cooked");
+    t.check(!contains(essl, "texture2DArrayLodEXT"),
+            "essl carries no texture2DArrayLodEXT call");
+    t.check(contains(essl, "textureLod"),
+            "essl samples the shadow array through textureLod");
+  }
 
   // Unchanged re-run: stamp-driven skip, bytes untouched.
   t.check(run_cook(packer, manifest, outA.string(), shaderc, include) == 0,

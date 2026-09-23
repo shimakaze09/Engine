@@ -272,15 +272,18 @@ void apply_program_samplers(const BgfxProgramRecord &program) noexcept {
     }
     const std::uint32_t bound =
         ctx.boundTextures[static_cast<std::size_t>(param.samplerStage)];
-    if (bound == 0U) {
-      continue;
-    }
-    BgfxTextureRecord *texture = ctx.textures.resolve(bound);
-    if (texture == nullptr) {
-      continue;
-    }
+    BgfxTextureRecord *texture =
+        (bound != 0U) ? ctx.textures.resolve(bound) : nullptr;
+    // An empty slot still pins the sampler to its own stage: on GL a
+    // sampler nobody assigns reads unit 0, and a sampler2DArray there
+    // beside a sampler2D makes WebGL reject the draw ("two textures of
+    // different types use the same sampler location"). The invalid
+    // texture handle binds nothing at that stage.
     bgfx::setTexture(static_cast<std::uint8_t>(param.samplerStage),
-                     param.handle, texture->handle);
+                     param.handle,
+                     (texture != nullptr) ? texture->handle
+                                          : bgfx::TextureHandle{
+                                                bgfx::kInvalidHandle});
   }
 }
 

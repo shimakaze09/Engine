@@ -39,7 +39,7 @@ namespace {
 // hashes and skip. Bump this whenever the cook's observable output for
 // identical inputs changes; a compile-time constant cannot test its own
 // future bumps, so the bump is a review obligation ([REVIEW]).
-constexpr const char *kCookLogicRevision = "cook-logic-1";
+constexpr const char *kCookLogicRevision = "cook-logic-2";
 
 /// One engine profile tag with its shaderc platform/profile arguments.
 struct ShaderProfile final {
@@ -332,6 +332,37 @@ void shrink_frag_data_declaration(std::vector<char> &bytes) {
   bytes[declDigit] = static_cast<char>('0' + (maxUsed + 1));
 }
 
+/// Rewrites every `texture2DArrayLodEXT` call in an essl binary to the
+/// ES 3.00 built-in `textureLod`. glsl-optimizer lowers an explicit-LOD
+/// array sample to that ES 2.0 extension name, and bgfx's GLES3 preamble
+/// maps the 2D, 3D and cube LOD names but not this one, so the program
+/// fails to compile at its first submit -- which bgfx treats as fatal.
+/// The name is padded with spaces to its original length (whitespace
+/// before the call's parenthesis is legal GLSL), so the container's
+/// code-length field stays valid.
+void rename_array_lod_samples(std::vector<char> &bytes) {
+  constexpr std::string_view kExtension = "texture2DArrayLodEXT";
+  constexpr std::string_view kBuiltin = "textureLod";
+  static_assert(kBuiltin.size() < kExtension.size());
+  const auto identifierChar = [](char c) {
+    return ((c >= 'a') && (c <= 'z')) || ((c >= 'A') && (c <= 'Z')) ||
+           ((c >= '0') && (c <= '9')) || (c == '_');
+  };
+  const std::string_view text(bytes.data(), bytes.size());
+  std::size_t pos = 0U;
+  while ((pos = text.find(kExtension, pos)) != std::string_view::npos) {
+    const std::size_t end = pos + kExtension.size();
+    const bool whole = ((pos == 0U) || !identifierChar(text[pos - 1U])) &&
+                       ((end == text.size()) || !identifierChar(text[end]));
+    if (whole) {
+      std::memcpy(bytes.data() + pos, kBuiltin.data(), kBuiltin.size());
+      std::memset(bytes.data() + pos + kBuiltin.size(), ' ',
+                  kExtension.size() - kBuiltin.size());
+    }
+    pos = end;
+  }
+}
+
 /// POSIX hosts drop shaderc's standard error: it reports per-invocation
 /// progress there, and the cook prints its own failure line naming the
 /// source and profile. Windows hosts inherit it.
@@ -431,6 +462,9 @@ bool cook_one(const std::string &shadercPath, const std::string &sourcePath,
                         (std::strcmp(profile.tag, "essl") == 0);
   if (!isVertex && glFlavor) {
     shrink_frag_data_declaration(bytes);
+  }
+  if (std::strcmp(profile.tag, "essl") == 0) {
+    rename_array_lod_samples(bytes);
   }
   if (glFlavor) {
     // glsl-optimizer reduces an empty main body (depth-only fragment

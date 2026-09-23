@@ -1,0 +1,29 @@
+<!doctype html>
+<!-- Shell for the browser lifecycle harness (engine_web_lifecycle): a
+     canvas for the WebGL2 context, player mode seeded the way the share
+     shell seeds it, and the ?case= query passed to the harness through
+     ENV. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Engine web lifecycle</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #101318; }
+    #canvas { display: block; width: 640px; height: 360px; }
+  </style>
+</head>
+<body>
+  <canvas id="canvas" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
+  <script>
+    var Module = {
+      canvas: document.getElementById('canvas'),
+      preRun: [function () {
+        var match = /[?&]case=([a-z0-9_]+)/.exec(location.search);
+        Module.ENV.ENGINE_WEB_TEST_CASE = match ? match[1] : 'frames';
+        Module.ENV.ENGINE_CVAR_app_player_mode = '1';
+      }]
+    };
+  </script>
+  {{{ SCRIPT }}}
+</body>
+</html>

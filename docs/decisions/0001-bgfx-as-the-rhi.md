@@ -33,3 +33,6 @@ twice and the second one was never verified.
 - bgfx brings pipeline caching, so the GL shader binary cache stayed cut.
 - Web export and the Metal path become reachable; both remain unproven
   until a lane demonstrates them.
+  *(Since 2026-09-23 the web lane builds the page and runs it in headless
+  Chromium, `engine_web_page_boots`; it checks for errors, not images.
+  Metal has no lane.)*

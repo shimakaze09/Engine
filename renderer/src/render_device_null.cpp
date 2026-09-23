@@ -138,6 +138,7 @@ void fill_null_render_device(RenderDevice *device) noexcept {
   device->caps.timestampQueries = true;
   device->caps.cookedPrograms = true;
   device->caps.depthBlit = true;
+  device->caps.textureArrays = true;
   // Generous so headless tests exercise the full pass list.
   device->caps.maxTextureSamplers = 32U;
   // The desktop floor, so headless runs lay tables out the way a D3D
