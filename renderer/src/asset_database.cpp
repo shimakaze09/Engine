@@ -19,14 +19,6 @@ void advance_asset_database_frame(AssetDatabase *database) noexcept {
 
 namespace {
 
-std::size_t hashed_slot(AssetId id, std::size_t capacity) noexcept {
-  if ((capacity == 0U) || (id == kInvalidAssetId)) {
-    return 0U;
-  }
-
-  return static_cast<std::size_t>(id) % capacity;
-}
-
 /// Finds the matching object or resource for mesh asset slot.
 std::size_t find_mesh_asset_slot(const AssetDatabase *database,
                                  AssetId id) noexcept {
@@ -414,11 +406,13 @@ void clear_asset_database(AssetDatabase *database) noexcept {
     database->textureOccupied[i] = false;
     database->textureAssets[i] = TextureAssetRecord{};
   }
+  database->textureIndex.clear();
 
   for (std::size_t i = 0U; i < database->materialAssets.size(); ++i) {
     database->materialOccupied[i] = false;
     database->materialAssets[i] = MaterialAssetRecord{};
   }
+  database->materialIndex.clear();
 
   content::clear_metadata_store(&database->metadataStore);
 }
@@ -427,88 +421,89 @@ void clear_asset_database(AssetDatabase *database) noexcept {
 
 namespace {
 
-/// Finds the matching object or resource for texture slot.
-std::size_t find_texture_slot(const AssetDatabase *database,
-                              AssetId id) noexcept {
-  if ((database == nullptr) || (id == kInvalidAssetId)) {
-    return database != nullptr ? database->textureAssets.size() : 0U;
+/// The record slot the index maps `id` to, or `capacity` when absent.
+template <typename Index>
+std::size_t indexed_slot(const Index &index, AssetId id,
+                         std::size_t capacity) noexcept {
+  if (id == kInvalidAssetId) {
+    return capacity;
   }
+  const std::uint32_t *slot = index.find(id);
+  return (slot != nullptr) ? static_cast<std::size_t>(*slot) : capacity;
+}
 
-  const std::size_t capacity = database->textureAssets.size();
-  const std::size_t base = hashed_slot(id, capacity);
-  for (std::size_t probe = 0U; probe < capacity; ++probe) {
-    const std::size_t slot = (base + probe) % capacity;
-    if (!database->textureOccupied[slot]) {
-      return capacity;
-    }
-    if (database->textureAssets[slot].id == id) {
+/// The id's slot, or else the first free record slot; `occupied.size()`
+/// when neither exists. Registration is the only caller, so the scan for a
+/// free slot is off every per-frame path.
+template <typename Index, std::size_t N>
+std::size_t indexed_insert_slot(const Index &index,
+                                const std::array<bool, N> &occupied,
+                                AssetId id) noexcept {
+  if (id == kInvalidAssetId) {
+    return N;
+  }
+  const std::size_t existing = indexed_slot(index, id, N);
+  if (existing != N) {
+    return existing;
+  }
+  for (std::size_t slot = 0U; slot < N; ++slot) {
+    if (!occupied[slot]) {
       return slot;
     }
   }
-
-  return capacity;
+  return N;
 }
 
-/// Finds the matching object or resource for texture insert slot.
+/// Marks a slot claimed for `id` and indexes it. False, with the slot left
+/// free, when the index has no room -- it has twice the records' capacity,
+/// so this does not happen while a record slot is free.
+template <typename Index, std::size_t N>
+bool claim_indexed_slot(Index &index, std::array<bool, N> &occupied,
+                        std::size_t slot, AssetId id) noexcept {
+  if (occupied[slot]) {
+    return true;
+  }
+  if (!index.insert(id, static_cast<std::uint32_t>(slot))) {
+    return false;
+  }
+  occupied[slot] = true;
+  return true;
+}
+
+std::size_t find_texture_slot(const AssetDatabase *database,
+                              AssetId id) noexcept {
+  if (database == nullptr) {
+    return 0U;
+  }
+  return indexed_slot(database->textureIndex, id,
+                      database->textureAssets.size());
+}
+
 std::size_t find_texture_insert_slot(const AssetDatabase *database,
                                      AssetId id) noexcept {
   if (database == nullptr) {
     return 0U;
   }
-
-  const std::size_t capacity = database->textureAssets.size();
-  const std::size_t base = hashed_slot(id, capacity);
-  for (std::size_t probe = 0U; probe < capacity; ++probe) {
-    const std::size_t slot = (base + probe) % capacity;
-    if (!database->textureOccupied[slot] ||
-        (database->textureAssets[slot].id == id)) {
-      return slot;
-    }
-  }
-
-  return capacity;
+  return indexed_insert_slot(database->textureIndex, database->textureOccupied,
+                             id);
 }
 
-/// Returns the occupied material slot for an id, or capacity when absent.
 std::size_t find_material_slot(const AssetDatabase *database,
                                AssetId id) noexcept {
-  if ((database == nullptr) || (id == kInvalidAssetId)) {
-    return database != nullptr ? database->materialAssets.size() : 0U;
+  if (database == nullptr) {
+    return 0U;
   }
-
-  const std::size_t capacity = database->materialAssets.size();
-  const std::size_t base = hashed_slot(id, capacity);
-  for (std::size_t probe = 0U; probe < capacity; ++probe) {
-    const std::size_t slot = (base + probe) % capacity;
-    if (!database->materialOccupied[slot]) {
-      return capacity;
-    }
-    if (database->materialAssets[slot].id == id) {
-      return slot;
-    }
-  }
-
-  return capacity;
+  return indexed_slot(database->materialIndex, id,
+                      database->materialAssets.size());
 }
 
-/// Finds the id's material slot or the first free one for insertion.
 std::size_t find_material_insert_slot(const AssetDatabase *database,
                                       AssetId id) noexcept {
   if (database == nullptr) {
     return 0U;
   }
-
-  const std::size_t capacity = database->materialAssets.size();
-  const std::size_t base = hashed_slot(id, capacity);
-  for (std::size_t probe = 0U; probe < capacity; ++probe) {
-    const std::size_t slot = (base + probe) % capacity;
-    if (!database->materialOccupied[slot] ||
-        (database->materialAssets[slot].id == id)) {
-      return slot;
-    }
-  }
-
-  return capacity;
+  return indexed_insert_slot(database->materialIndex,
+                             database->materialOccupied, id);
 }
 
 } // namespace
@@ -525,7 +520,10 @@ bool register_material_asset(AssetDatabase *database, AssetId id,
     return false;
   }
 
-  database->materialOccupied[slot] = true;
+  if (!claim_indexed_slot(database->materialIndex, database->materialOccupied,
+                          slot, id)) {
+    return false;
+  }
   MaterialAssetRecord &record = database->materialAssets[slot];
   record.id = id;
   record.params = params;
@@ -612,7 +610,10 @@ bool register_texture_asset(AssetDatabase *database, AssetId id,
     return false;
   }
 
-  database->textureOccupied[slot] = true;
+  if (!claim_indexed_slot(database->textureIndex, database->textureOccupied,
+                          slot, id)) {
+    return false;
+  }
   TextureAssetRecord &record = database->textureAssets[slot];
   record.id = id;
   record.runtimeTexture = runtimeTexture;
@@ -630,6 +631,13 @@ bool texture_asset_slot_available(const AssetDatabase *database,
           database->textureAssets.size());
 }
 
+bool material_asset_slot_available(const AssetDatabase *database,
+                                   AssetId id) noexcept {
+  return (database != nullptr) && (id != kInvalidAssetId) &&
+         (find_material_insert_slot(database, id) !=
+          database->materialAssets.size());
+}
+
 bool register_texture_asset_failed(AssetDatabase *database, AssetId id,
                                    const char *sourcePath) noexcept {
   if ((database == nullptr) || (id == kInvalidAssetId)) {
@@ -641,7 +649,10 @@ bool register_texture_asset_failed(AssetDatabase *database, AssetId id,
     return false;
   }
 
-  database->textureOccupied[slot] = true;
+  if (!claim_indexed_slot(database->textureIndex, database->textureOccupied,
+                          slot, id)) {
+    return false;
+  }
   TextureAssetRecord &record = database->textureAssets[slot];
   record.id = id;
   record.runtimeTexture = kInvalidTextureHandle;

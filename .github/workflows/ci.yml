@@ -30,7 +30,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-14, windows-2025-vs2026]
+        os: [ubuntu-24.04, macos-15, windows-2025-vs2026]
         config: [Debug, Release]
         # Canonical toolchain per OS (matches CMakePresets.json).
         include:
@@ -39,7 +39,9 @@ jobs:
           # noble container); 19 reports 202002 and compiles it.
           - os: ubuntu-24.04
             toolchain_args: -DCMAKE_C_COMPILER=clang-19 -DCMAKE_CXX_COMPILER=clang++-19
-          - os: macos-14
+          # macos-15: its Xcode 16 AppleClang compiles shaderc's tint (the
+          # aggregate CTAD Xcode 15 lacks), so the Release lane cooks.
+          - os: macos-15
             toolchain_args: -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
           - os: windows-2025-vs2026
             toolchain_args: -G Ninja -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl
@@ -84,17 +86,15 @@ jobs:
         uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
 
       # shaderc's toolchain is most of a cold build, so one lane per OS
-      # builds it and cooks: Release on Linux and Windows (Windows adds the
-      # dx11 profile, which needs a Windows host). Debug lanes run the
-      # fake-shaderc cook suites instead. macOS skips it entirely: tint's
-      # overloaded-CTAD pattern does not compile under AppleClang, and the
-      # lane is headless-only. The engine's own bgfx backend TUs stay in
-      # every lane's coverage.
+      # builds it and cooks: Release (Windows adds the dx11 profile, which
+      # needs a Windows host; every host cooks metal). Debug lanes run the
+      # fake-shaderc cook suites instead. The engine's own bgfx backend TUs
+      # stay in every lane's coverage.
       - name: Configure
         run: >
           cmake -S . -B build
           ${{ matrix.toolchain_args }}
-          ${{ (matrix.config == 'Debug' || startsWith(matrix.os, 'macos')) && '-DENGINE_BGFX_SHADERC=OFF' || '' }}
+          ${{ matrix.config == 'Debug' && '-DENGINE_BGFX_SHADERC=OFF' || '' }}
           -DCMAKE_BUILD_TYPE=${{ matrix.config }}
           -DENGINE_BUILD_TESTS=ON
           -DENGINE_BUILD_TOOLS=ON

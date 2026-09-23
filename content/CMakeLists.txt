@@ -6,6 +6,7 @@ engine_add_module_library(engine_content
     src/asset_catalog.cpp
     src/asset_identity.cpp
     src/asset_provenance.cpp
+    src/asset_ref_json.cpp
     src/asset_sidecar.cpp
     src/asset_request_queue.cpp
     src/asset_stale_check.cpp

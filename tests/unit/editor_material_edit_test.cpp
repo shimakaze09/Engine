@@ -17,6 +17,8 @@
 #include "engine/runtime/editor_bridge.h"
 #include "engine/runtime/service_registry.h"
 
+#include "../material_ref_fixture.h"
+
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -98,7 +100,7 @@ struct MaterialEditScope final {
 /// EXPECTATION: opening a material loads its resolved state into the
 /// panel buffer.
 int check_open_loads_state() noexcept {
-  if (!write_file(kOsPath, "{\"version\":3,\"roughness\":0.3}")) {
+  if (!write_file(kOsPath, "{\"version\":4,\"roughness\":0.3}")) {
     return 1;
   }
   MaterialEditScope scope;
@@ -125,8 +127,8 @@ int check_open_loads_state() noexcept {
 /// gesture pushes exactly one undoable command whose undo restores the
 /// prior value.
 int check_live_edit_and_undo() noexcept {
-  if (!write_file(kOsPath, "{\"version\":3,\"roughness\":0.3,"
-                          "\"metallic\":0.1}")) {
+  if (!write_file(kOsPath, "{\"version\":4,\"roughness\":0.3,"
+                           "\"metallic\":0.1}")) {
     return 10;
   }
   MaterialEditScope scope;
@@ -196,7 +198,7 @@ int check_live_edit_and_undo() noexcept {
 /// unsaved edit and reflects whatever is on disk (or leaves the buffer
 /// untouched on a malformed file).
 int check_save_and_reload() noexcept {
-  if (!write_file(kOsPath, "{\"version\":3,\"roughness\":0.2}")) {
+  if (!write_file(kOsPath, "{\"version\":4,\"roughness\":0.2}")) {
     return 20;
   }
   MaterialEditScope scope;
@@ -251,7 +253,7 @@ int check_save_and_reload() noexcept {
 /// the gated request_close_material_editor path is covered by
 /// engine_unit_editor_material_document.
 int check_close_keeps_live_edit() noexcept {
-  if (!write_file(kOsPath, "{\"version\":3,\"roughness\":0.4}")) {
+  if (!write_file(kOsPath, "{\"version\":4,\"roughness\":0.4}")) {
     return 30;
   }
   MaterialEditScope scope;
@@ -293,13 +295,6 @@ int check_undo_returns_field_to_parent() noexcept {
   constexpr const char *kChildOs = "editor_material_edit_child.json";
   constexpr const char *kChildVirtual =
       "edmatpanel/editor_material_edit_child.json";
-  if (!write_file(kParentOs, "{\"version\":3,\"roughness\":0.3,"
-                             "\"metallic\":0.1}") ||
-      !write_file(kChildOs,
-                  "{\"version\":3,\"parent\":\"edmatpanel/"
-                  "editor_material_edit_parent.json\",\"roughness\":0.7}")) {
-    return 60;
-  }
   MaterialEditScope scope;
   const auto finish = [&](int result) noexcept {
     remove_file(kParentOs);
@@ -308,6 +303,18 @@ int check_undo_returns_field_to_parent() noexcept {
   };
   if (!scope.valid()) {
     return finish(61);
+  }
+  char childJson[160] = {};
+  std::snprintf(
+      childJson, sizeof(childJson),
+      "{\"version\":4,\"parent\":\"%s\",\"roughness\":0.7}",
+      engine::tests::catalog_material(
+          scope.database.get(), "edmatpanel/editor_material_edit_parent.json")
+          .text);
+  if (!write_file(kParentOs, "{\"version\":4,\"roughness\":0.3,"
+                             "\"metallic\":0.1}") ||
+      !write_file(kChildOs, childJson)) {
+    return finish(60);
   }
 
   open_material_editor(kChildVirtual);
@@ -358,7 +365,7 @@ int check_undo_returns_field_to_parent() noexcept {
 /// (panel closed, asset id dropped, gesture abandoned without finalizing),
 /// unlike user-driven close, which finalizes and is covered above.
 int check_world_clear_resets_editor() noexcept {
-  if (!write_file(kOsPath, "{\"version\":3,\"roughness\":0.3}")) {
+  if (!write_file(kOsPath, "{\"version\":4,\"roughness\":0.3}")) {
     return 40;
   }
   MaterialEditScope scope;

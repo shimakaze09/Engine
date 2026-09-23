@@ -316,16 +316,15 @@ struct ShadingProgramRun final {
   std::uint8_t programId = 0U;
 };
 
-/// Splits [start, end) of `view` into program runs, writing at most
-/// `capacity` of them and returning how many. A range whose draws all
-/// share one program yields one run, which is the common case and the
-/// reason this costs a scan and no allocation. More runs than `capacity`
-/// joins the tail onto the last run: a draw shaded by the wrong program
-/// is wrong, a draw missing entirely is worse.
-std::size_t partition_program_runs(const CommandBufferView &view,
-                                         std::size_t start, std::size_t end,
-                                         ShadingProgramRun *runs,
-                                         std::size_t capacity) noexcept;
+/// Finds the program run that starts at `*cursor` within [*cursor, end)
+/// of `view`, writes it to `run` and moves the cursor past it. False once
+/// the range (clamped to the view) is used up. A caller walks a range
+/// with `for (cursor = start; next_program_run(...);)` and binds each
+/// run as it comes: no storage, so no capacity, and a transparent range
+/// whose programs alternate any number of times draws every run with its
+/// own program.
+bool next_program_run(const CommandBufferView &view, std::size_t *cursor,
+                      std::size_t end, ShadingProgramRun *run) noexcept;
 
 /// The program registered for `programId`. Falls back to the
 /// physically-based program when nothing is registered there, saying so

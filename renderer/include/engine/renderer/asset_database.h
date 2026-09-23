@@ -194,11 +194,20 @@ struct AssetDatabase final {
   std::array<TextureAssetRecord, kMaxTextureAssets> textureAssets =
       std::array<TextureAssetRecord, kMaxTextureAssets>();
   std::array<bool, kMaxTextureAssets> textureOccupied{};
+  // Id -> textureAssets slot, the same shape as meshIndex: twice the
+  // records, so a probe stays short however full the table is.
+  static constexpr std::size_t kTextureIndexCapacity = 2U * kMaxTextureAssets;
+  core::FixedHashTable<AssetId, std::uint32_t, kTextureIndexCapacity>
+      textureIndex{};
 
   static constexpr std::size_t kMaxMaterialAssets = 1024U;
   std::array<MaterialAssetRecord, kMaxMaterialAssets> materialAssets =
       std::array<MaterialAssetRecord, kMaxMaterialAssets>();
   std::array<bool, kMaxMaterialAssets> materialOccupied{};
+  // Id -> materialAssets slot, looked up per draw from render prep.
+  static constexpr std::size_t kMaterialIndexCapacity = 2U * kMaxMaterialAssets;
+  core::FixedHashTable<AssetId, std::uint32_t, kMaterialIndexCapacity>
+      materialIndex{};
 
   // The generic identity/tag/dependency table is content-owned;
   // this database embeds one store and delegates the metadata API to it.
@@ -318,6 +327,10 @@ bool register_texture_asset(AssetDatabase *database, AssetId id,
 /// record this id: it is already in the table, or the table has room.
 bool texture_asset_slot_available(const AssetDatabase *database,
                                   AssetId id) noexcept;
+/// True when register_material_asset can record this id: it is already in
+/// the table, or the table has room.
+bool material_asset_slot_available(const AssetDatabase *database,
+                                   AssetId id) noexcept;
 /// Registers (or updates) a texture id as permanently Failed with no GPU
 /// handle, so resolve_material_textures does not retry it every frame; the
 /// source path is kept for diagnostics.

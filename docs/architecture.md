@@ -144,7 +144,11 @@ because each of these does:
   spring arms and cameras evaluate per fixed step with the exact fixed
   delta (animation evaluates all of a frame's steps before the simulation
   graph). Timers come due per
-  fixed step and dispatch once per frame; `wait_frames` counts ticks. A
+  fixed step and dispatch once per frame; `wait_frames` counts ticks.
+  Lua's `on_fixed_tick` runs once per step, all of a frame's steps before
+  the simulation graph, with that step's own input snapshot answering
+  every input query, so a press is seen in exactly one step at any frame
+  rate; `on_tick` stays per frame. A
   system that integrates once per rendered frame makes its own behaviour
   frame-rate dependent, and `elapsed` accumulated per frame does not even
   agree with itself across frame schedules.
@@ -219,9 +223,9 @@ document stores, a cooked output is a sub-asset of it under a local id,
 and the 64-bit asset id beside it is this session's handle for where the
 bytes are. Every path that points a component at an asset writes the
 identity with the id, so a save cannot carry one without the other, and
-nothing invents an identity an asset does not have. Not yet true of a
-material's parent and texture references (#670) or of script and
-animation-controller paths (#627).
+nothing invents an identity an asset does not have. A material names
+its parent and textures the same way (material schema v4). Not yet true
+of script and animation-controller paths (#627).
 
 An authored document's schema version gate is exact: the one current
 revision loads, an older or newer one is refused, and a document naming

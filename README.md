@@ -57,8 +57,8 @@ and was never read, shadow types no producer could enable. So, instead:
 - **Open scope lives on the GitHub tracker.** It is the only source of
   truth for what is broken, missing, or deferred.
 - **On-screen renderer behavior is not covered by CI.** No CI lane draws a
-  frame. Only the Windows and Linux Release lanes cook shaders; every
-  other lane builds with the cook off. A rendering feature is only as verified as the last time
+  frame. Only the Windows, Linux and macOS Release lanes cook shaders;
+  every other lane builds with the cook off. A rendering feature is only as verified as the last time
   somebody ran the editor and looked at it.
 
 The engine builds, runs an editor, simulates a deterministic world, and
@@ -111,9 +111,10 @@ secondary compilers validated for portability:
 - **Tier 1 — canonical (used for development and primary CI)**
 	- Windows x64: `clang-cl`
 	- Linux x64: `clang++` 19 or newer (clang 18 cannot compile libstdc++'s `<expected>`)
-	- macOS: AppleClang. macOS is an editor platform by
-	  [decision 0015](docs/decisions/0015-commercial-anime-engine-on-six-platforms.md),
-	  but today it builds with the shader cook off and runs headless tests only
+	- macOS: AppleClang 16 (Xcode 16) or newer. macOS is an editor platform by
+	  [decision 0015](docs/decisions/0015-commercial-anime-engine-on-six-platforms.md)
+	  and cooks the `metal` shader profile; CI has no GPU, so the live editor
+	  on a Mac rests on a human observation
 - **Tier 2 — portability validation (dedicated CI compatibility lanes)**
 	- Windows x64: MSVC
 	- Linux x64: GCC
@@ -145,8 +146,8 @@ ctest --test-dir build --output-on-failure
 
 ```bash
 cmake --preset linux-clang-debug
-# macOS (headless tests only; shaderc does not build under AppleClang):
-# cmake --preset macos-clang-debug -DENGINE_BGFX_SHADERC=OFF
+# macOS (Xcode 16 or newer, which shaderc needs):
+# cmake --preset macos-clang-debug
 cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ```
@@ -265,11 +266,18 @@ Current script conventions in `assets/`:
 
 - Scene-level module (`assets/main.lua`)
 	- `M.on_begin_play(self)` is called once when play starts
+	- `M.on_fixed_tick(self, dt)` is called once per fixed step, with the
+	  fixed delta. Input queries made inside it (`engine.is_key_pressed`,
+	  `engine.is_action_pressed`, gamepad and mouse reads) answer for that
+	  step alone, so a tap is seen once whatever the frame rate: gameplay
+	  that reacts to input belongs here
 	- `M.on_tick(self, dt)` is called once per rendered frame that
 	  advanced simulation (not once per fixed step); `dt` is that
 	  frame's total simulated time, summing every catch-up fixed step
 	- `M.on_end_play(self)`, `M.on_save_state(self)`, and
-	  `M.on_reload(self, state)` cover teardown and hot reload
+	  `M.on_reload(self, state)` cover teardown and hot reload. On an
+	  editor Stop, `on_end_play` runs before the authored scene is
+	  restored, so it reads the state the session ended in
 	- Legacy `on_start`/`on_update`/`on_end` names remain as fallbacks
 - Entity behavior module example (`assets/scripts/player.lua`)
 - Reusable utility module example (`assets/lib/utils.lua`)

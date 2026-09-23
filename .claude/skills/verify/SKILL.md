@@ -75,8 +75,8 @@ These override every tier below.
 
 ## Tier: renderer, shaders, post stack
 
-**CI cannot verify this tier.** Only the Linux and Windows Release lanes
-build with the shader cook; every other lane passes
+**CI cannot verify this tier.** Only the Linux, Windows and macOS Release
+lanes build with the shader cook; every other lane passes
 `ENGINE_BGFX_SHADERC=OFF`, and no lane draws a frame (every lane excludes
 the `gpu` label). A pass can be
 unreachable, a uniform never written, a target sampled while it renders,
@@ -86,8 +86,8 @@ Required:
 
 1. Build with the cook on, so shaders compile and the cooked binaries
    exist:
-   `cmake -S . -B build -DENGINE_BGFX_SHADERC=ON` then build. Not yet
-   possible on macOS: shaderc's tint does not build under AppleClang.
+   `cmake -S . -B build -DENGINE_BGFX_SHADERC=ON` then build. On macOS
+   this needs Xcode 16 or newer.
 2. Run the `gpu`-labelled suites: `ctest --test-dir build -L gpu`.
 3. Run the editor windowed and look at what you changed. Toggle it off and
    on. A feature you cannot see change is a feature you have not verified.

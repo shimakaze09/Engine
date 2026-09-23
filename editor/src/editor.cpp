@@ -257,7 +257,14 @@ bool initialize_editor(void *sdlWindow) noexcept {
 
   static_cast<void>(core::cvar_register_float(
       "editor.ui_scale", 1.0F, "Editor UI scale multiplier"));
-  const float uiScale = core::platform_display_scale() *
+  static_cast<void>(core::cvar_register_bool(
+      "editor.autoplay", false,
+      "Enter play mode on the first eligible frame (scripted verification "
+      "runs)"));
+  // Content scale, not display scale: the ImGui SDL3 backend already
+  // renders at the window's pixel density, so on Retina the display
+  // scale's 2x would size the UI twice.
+  const float uiScale = core::platform_content_scale() *
                         core::cvar_get_float("editor.ui_scale", 1.0F);
 
   // Proper UI font (the 13px bitmap default reads as a debug tool), with a
@@ -337,6 +344,7 @@ void shutdown_editor() noexcept {
   editor_session().playSnapshotSize = 0U;
   editor_session().hasPlaySnapshot = false;
   editor_session().worldRestoreFailed = false;
+  editor_session().playStopPending = false;
   reset_editor_session_residue();
 }
 
@@ -444,6 +452,8 @@ void editor_set_world(runtime::World *world) noexcept {
     editor_session().hasPlaySnapshot = false;
     editor_session().playSnapshotWorld = nullptr;
     editor_session().worldRestoreFailed = false;
+    // The old world's restore is moot, and the snapshot it needed is gone.
+    editor_session().playStopPending = false;
     scene_document_reset_for_world_switch();
   }
   editor_session().world = world;
@@ -473,7 +483,9 @@ bool editor_handle_quit_request() noexcept {
   }
   // Window-close during play routes through the Stop flow first, so
   // on_end_play dispatch and the authored-world restore behave exactly
-  // like the Stop button before the unsaved-change check below runs.
+  // like the Stop button. The pipeline drains that Stop this same frame,
+  // before any UI pass, so a Save chosen from the unsaved-change prompt
+  // armed below always writes the restored authored world.
   if (editor_session().playState != PlayState::Stopped) {
     stop_play_mode();
   }
@@ -512,6 +524,7 @@ const runtime::EditorBridge kRuntimeEditorBridge = {
     &editor_consume_step_request,
     &editor_handle_quit_request,
     &consume_play_transition,
+    &finish_play_stop,
 };
 
 [[maybe_unused]] const bool kEditorBridgeRegistered = []() noexcept {

@@ -46,6 +46,13 @@ if(WIN32)
         LABELS "gpu;integration"
         ENVIRONMENT "ENGINE_CVAR_r_bgfx_renderer=d3d11"
         SKIP_REGULAR_EXPRESSION "SKIPPED:")
+    add_test(NAME engine_integration_deferred_tile_wrap_gpu_d3d12
+        COMMAND engine_integration_deferred_tile_wrap_gpu)
+    set_tests_properties(engine_integration_deferred_tile_wrap_gpu_d3d12
+        PROPERTIES
+        LABELS "gpu;integration"
+        ENVIRONMENT "ENGINE_CVAR_r_bgfx_renderer=d3d12"
+        SKIP_REGULAR_EXPRESSION "SKIPPED:")
 endif()
 
 engine_add_test_executable(engine_integration_instanced_batches_gpu
@@ -384,6 +391,18 @@ engine_add_test_executable(engine_integration_input_tap_edge
     integration
 )
 
+engine_add_test_executable(engine_integration_fixed_tick_input
+    SOURCES
+    fixed_tick_input_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_scripting
+    # Builds native SDL events to drive input the way the platform does.
+    ${ENGINE_SDL_TARGET}
+    LABELS
+    integration
+)
+
 engine_add_test_executable(engine_integration_focus_loss_input
     SOURCES
     focus_loss_input_test.cpp
@@ -501,6 +520,19 @@ engine_add_test_executable(engine_integration_scene_flow
     engine_scripting
     engine_renderer
     engine_core
+    LABELS
+    integration
+)
+
+engine_add_test_executable(engine_integration_end_play_session_state
+    SOURCES
+    end_play_sees_session_state_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/editor/src
+    PRIVATE_DEPS
+    engine_editor
+    engine_runtime
+    engine_scripting
     LABELS
     integration
 )

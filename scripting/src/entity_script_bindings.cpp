@@ -845,7 +845,14 @@ void dispatch_entity_scripts_end_play(runtime::World *world) noexcept {
 
 std::uint64_t entity_script_mtime_polls() noexcept { return g_mtimePolls; }
 
-void dispatch_entity_scripts_update(float dt) noexcept {
+namespace {
+
+/// Shared body of the per-frame and per-step dispatches: calls `funcName`
+/// (or `fallbackName`, when given and the module lacks the first) with
+/// the entity and `dt` for every alive, unfaulted scripted entity, in
+/// snapshotted ScriptComponent dispatch order.
+void dispatch_entity_scripts_tick(const char *funcName,
+                                  const char *fallbackName, float dt) noexcept {
   ENGINE_ASSERT_MAIN_THREAD();
   if ((g_state == nullptr) || !runtime_bound()) {
     return;
@@ -872,8 +879,19 @@ void dispatch_entity_scripts_update(float dt) noexcept {
     if (!world_entity_alive(world, entity) || entity_is_faulted(entity)) {
       continue;
     }
-    call_module_function(ref, "on_tick", "on_update", entity, true, dt);
+    call_module_function(ref, funcName, fallbackName, entity, true, dt);
   }
+}
+
+} // namespace
+
+void dispatch_entity_scripts_update(float dt) noexcept {
+  dispatch_entity_scripts_tick("on_tick", "on_update", dt);
+}
+
+void dispatch_entity_scripts_fixed_update(float dt) noexcept {
+  // No legacy name: the hook is new, and a module without it is skipped.
+  dispatch_entity_scripts_tick("on_fixed_tick", nullptr, dt);
 }
 
 namespace {

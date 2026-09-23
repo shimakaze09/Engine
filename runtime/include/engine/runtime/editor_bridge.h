@@ -60,6 +60,10 @@ struct EditorBridge final {
   // change is_playing/is_paused can express.
   bool (*consume_play_transition)(PlayTransition *outTransition) noexcept =
       nullptr;
+  // Called once for each drained Stop, right after the session's end
+  // hooks: the editor restores the pre-play world here, so the hooks saw
+  // the world the session ended in. Null means the bridge owes nothing.
+  void (*complete_play_stop)() noexcept = nullptr;
 };
 
 /// Sets the requested value for editor bridge.

@@ -99,6 +99,9 @@ int check_live_edit_requires_opt_in() noexcept {
   }
 
   stop_play_mode();
+  // No pipeline frame runs here, so finish the Stop as the pipeline
+  // would after the end hooks.
+  finish_play_stop();
   return 0;
 }
 
@@ -140,6 +143,7 @@ int check_live_edit_bypasses_history_and_is_discarded_on_stop() noexcept {
   }
 
   stop_play_mode();
+  finish_play_stop();
   if (editor_session().worldRestoreFailed) {
     return 17;
   }
@@ -195,6 +199,7 @@ int check_revert_restores_baseline() noexcept {
   }
 
   stop_play_mode();
+  finish_play_stop();
   return 0;
 }
 
@@ -232,6 +237,7 @@ int check_apply_to_authored_replays_as_undoable_command() noexcept {
   }
 
   stop_play_mode();
+  finish_play_stop();
   if (editor_session().worldRestoreFailed) {
     return 36;
   }
@@ -290,6 +296,7 @@ int check_cancel_apply_to_authored() noexcept {
   }
 
   stop_play_mode();
+  finish_play_stop();
   RigidBody restored{};
   if (!world->get_rigid_body(entity, &restored) ||
       (restored.inverseMass != 1.0F)) {
@@ -404,6 +411,7 @@ int check_baseline_budget_blocks_edit_before_mutation() noexcept {
   }
 
   stop_play_mode();
+  finish_play_stop();
   return 0;
 }
 
@@ -480,6 +488,7 @@ int check_pending_apply_budget() noexcept {
   }
 
   stop_play_mode();
+  finish_play_stop();
   return 0;
 }
 

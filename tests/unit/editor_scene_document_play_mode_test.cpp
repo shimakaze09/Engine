@@ -135,6 +135,9 @@ int check_titled_document_identity_survives_play_stop() {
   }
 
   stop_play_mode();
+  // No pipeline frame runs here, so finish the Stop as the pipeline
+  // would after the end hooks.
+  finish_play_stop();
   if (editor_session().worldRestoreFailed) {
     editor_set_world(nullptr);
     return 8;
@@ -172,6 +175,7 @@ int check_untitled_unsaved_changes_survive_play_stop() {
 
   start_play_mode();
   stop_play_mode();
+  finish_play_stop();
 
   const bool ok = !editor_session().worldRestoreFailed &&
                   !scene_document_has_path() && scene_document_is_dirty() &&
@@ -241,6 +245,7 @@ int check_document_actions_blocked_while_playing() {
   }
 
   stop_play_mode();
+  finish_play_stop();
   const bool ok = !editor_session().worldRestoreFailed &&
                   (std::strcmp(scene_document_path(), scenePath) == 0) &&
                   (world->find_entity_by_name("Original") != kInvalidEntity);

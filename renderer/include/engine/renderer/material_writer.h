@@ -28,12 +28,12 @@ bool find_material_parent_virtual_path(const AssetDatabase *database,
 /// `parentVirtualPath` may be null/empty for no parent. With no parent every
 /// field is written; with one, only the fields `overriddenFields`
 /// (material_field bits, see material_overrides) names, so the saved
-/// material stays an instance its parent's edits still reach. A written
-/// texture slot whose AssetId is set but whose source path cannot be
-/// resolved through the database's metadata fails the save outright
-/// (logged) rather than silently dropping the reference. False on any
-/// failure; the destination file is guaranteed untouched
-/// (atomic_write_file's contract) whenever this returns false.
+/// material stays an instance its parent's edits still reach. The parent
+/// and each written texture are saved as the persistent identity the
+/// database's catalog records for them; one with no identity there fails
+/// the save outright (logged) rather than silently dropping the
+/// reference. False on any failure; the destination file is guaranteed
+/// untouched (atomic_write_file's contract) whenever this returns false.
 bool save_material_asset(const AssetDatabase *database, const char *virtualPath,
                          const Material &params,
                          const MaterialTextureSlots &textureSlots,

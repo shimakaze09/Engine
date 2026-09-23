@@ -720,7 +720,15 @@ void start_play_mode() noexcept {
     return;
   }
 
-  if (editor_session().playState == PlayState::Stopped) {
+  if ((editor_session().playState == PlayState::Stopped) &&
+      editor_session().playStopPending) {
+    // Stop then Play before the pipeline finished the Stop: the world is
+    // still the play-time one, and the pending restore brings back the
+    // authored state this session must start from. The snapshot already
+    // holds it, and the queued apply-to-authored edits still belong to
+    // the restore, so nothing is captured or reset here; the pipeline
+    // drains Stop (end hooks, restore) before this Start.
+  } else if (editor_session().playState == PlayState::Stopped) {
     // Authored edits still open as gestures are recorded before the
     // snapshot so Stop restores a state the history accounts for; a
     // gizmo drag cannot span Play, so it is dropped.
@@ -764,21 +772,43 @@ void stop_play_mode() noexcept {
     return;
   }
 
+  record_play_transition(runtime::PlayTransition::Stop);
+  editor_session().playState = PlayState::Stopped;
+  editor_session().stepRequested = false;
+  editor_session().playStopPending = true;
+  // A gesture opened against the play-time world must not record against
+  // the world the restore will bring back.
+  inspector_abandon_pending_edit();
+  gizmo_abandon_gesture();
+  core::log_message(core::LogLevel::Info, "editor", "stop");
+}
+
+void finish_play_stop() noexcept {
+  EditorSession &session = editor_session();
+  if (!session.playStopPending) {
+    return;
+  }
+  session.playStopPending = false;
+  if (session.world == nullptr) {
+    return;
+  }
+
   bool restored = true;
 
-  if (!editor_session().hasPlaySnapshot || (editor_session().playSnapshotSize == 0U)) {
+  if (!session.hasPlaySnapshot || (session.playSnapshotSize == 0U)) {
     core::log_message(core::LogLevel::Warning, "editor",
                       "stop requested without pre-play snapshot");
     restored = false;
-  } else if (editor_session().playSnapshotWorld != editor_session().world) {
+  } else if (session.playSnapshotWorld != session.world) {
     core::log_message(core::LogLevel::Warning, "editor",
                       "play snapshot belongs to a different world; discarded");
-    editor_session().hasPlaySnapshot = false;
-    editor_session().playSnapshotSize = 0U;
-    editor_session().playSnapshotWorld = nullptr;
+    session.hasPlaySnapshot = false;
+    session.playSnapshotSize = 0U;
+    session.playSnapshotWorld = nullptr;
     restored = false;
-  } else if (!runtime::load_scene(*editor_session().world, editor_session().playSnapshotBuffer.get(),
-                                  editor_session().playSnapshotSize)) {
+  } else if (!runtime::load_scene(*session.world,
+                                  session.playSnapshotBuffer.get(),
+                                  session.playSnapshotSize)) {
     // Scene loading is transactional, so the live world is intact after a
     // failed restore; keep it and the snapshot for recovery/diagnostics
     // instead of destroying the only remaining copy of the user's work.
@@ -790,15 +820,7 @@ void stop_play_mode() noexcept {
   } else {
     clear_entity_selection();
   }
-
-  record_play_transition(runtime::PlayTransition::Stop);
-  editor_session().playState = PlayState::Stopped;
-  editor_session().stepRequested = false;
-  editor_session().worldRestoreFailed = !restored;
-  // Whatever the restore did to the contents, a gesture opened against
-  // the play-time world must not record against the restored one.
-  inspector_abandon_pending_edit();
-  gizmo_abandon_gesture();
+  session.worldRestoreFailed = !restored;
 
   if (restored) {
     // Authored state is back; any "Apply to authored value" queued during
@@ -815,8 +837,6 @@ void stop_play_mode() noexcept {
       core::log_message(core::LogLevel::Info, "editor", message);
     }
   }
-
-  core::log_message(core::LogLevel::Info, "editor", "stop");
 }
 
 bool consume_play_transition(runtime::PlayTransition *outTransition) noexcept {

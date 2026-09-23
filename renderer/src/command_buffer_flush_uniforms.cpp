@@ -753,44 +753,29 @@ ForwardDrawProgram pbr_forward_draw_program(const BackendState &backend) noexcep
   return program;
 }
 
-std::size_t partition_program_runs(const CommandBufferView &view,
-                                         std::size_t start, std::size_t end,
-                                         ShadingProgramRun *runs,
-                                         std::size_t capacity) noexcept {
-  if ((runs == nullptr) || (capacity == 0U) || (view.data == nullptr) ||
-      (start >= end)) {
-    return 0U;
+bool next_program_run(const CommandBufferView &view, std::size_t *cursor,
+                      std::size_t end, ShadingProgramRun *run) noexcept {
+  if ((cursor == nullptr) || (run == nullptr) || (view.data == nullptr)) {
+    return false;
   }
   const std::size_t last =
       (end < static_cast<std::size_t>(view.count))
           ? end
           : static_cast<std::size_t>(view.count);
-  if (start >= last) {
-    return 0U;
+  const std::size_t first = *cursor;
+  if (first >= last) {
+    return false;
   }
-
-  std::size_t count = 0U;
-  runs[0] = ShadingProgramRun{
-      start, 0U, draw_key_shading_model(view.data[start].sortKey)};
-  count = 1U;
-  for (std::size_t i = start; i < last; ++i) {
-    const std::uint8_t programId =
-        draw_key_shading_model(view.data[i].sortKey);
-    if (programId != runs[count - 1U].programId) {
-      if (count == capacity) {
-        // More runs than the caller can hold. The tail keeps drawing,
-        // joined onto the last run rather than dropped: a draw shaded by
-        // the previous program is wrong, a draw missing entirely is
-        // worse.
-        runs[count - 1U].count = last - runs[count - 1U].first;
-        return count;
-      }
-      runs[count] = ShadingProgramRun{i, 0U, programId};
-      ++count;
-    }
-    ++runs[count - 1U].count;
+  const std::uint8_t programId =
+      draw_key_shading_model(view.data[first].sortKey);
+  std::size_t next = first + 1U;
+  while ((next < last) &&
+         (draw_key_shading_model(view.data[next].sortKey) == programId)) {
+    ++next;
   }
-  return count;
+  *run = ShadingProgramRun{first, next - first, programId};
+  *cursor = next;
+  return true;
 }
 
 DeviceProgramHandle shading_program(const BackendState &backend,

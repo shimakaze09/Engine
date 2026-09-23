@@ -303,16 +303,17 @@ int check_dirty_new_save_as_continuation_via_simulated_dialog() {
     return 6;
   }
 
-  // scene_document_prompt_choose_save() would call the real SDL Save As
-  // dialog here (untitled document); arm the same request without the
-  // native call and deliver its result through the production callback,
-  // exercising scene_document_poll_dialog_result()'s continuation branch
-  // exactly as the real callback handoff would drive it.
+  // An untitled document's Save opens a Save As dialog. Arm it through
+  // the production request with the platform's scripted dialogs, answer
+  // it through the platform's delivery, and let
+  // scene_document_poll_dialog_result() take the continuation branch
+  // exactly as a native answer would drive it.
   SceneDocumentState &doc = editor_session().document;
   doc.pendingAction = PendingSceneAction::New;
   doc.unsavedPromptOpen = true;
-  void *request = scene_dialog_arm_for_tests(SceneDialogKind::SaveAs, true);
-  if (request == nullptr) {
+  engine::core::FileDialogTicket request =
+      scene_dialog_arm_for_tests(SceneDialogKind::SaveAs, true);
+  if (request == engine::core::kNoFileDialog) {
     editor_set_world(nullptr);
     return 9;
   }
@@ -462,9 +463,9 @@ int check_retired_dialog_result_is_discarded() {
     return 3;
   }
   editor_set_world(first.get());
-  void *staleOpenRequest =
+  engine::core::FileDialogTicket staleOpenRequest =
       scene_dialog_arm_for_tests(SceneDialogKind::Open, false);
-  if (staleOpenRequest == nullptr) {
+  if (staleOpenRequest == engine::core::kNoFileDialog) {
     editor_set_world(nullptr);
     return 4;
   }
@@ -493,9 +494,9 @@ int check_retired_dialog_result_is_discarded() {
     editor_set_world(nullptr);
     return 7;
   }
-  void *staleSaveRequest =
+  engine::core::FileDialogTicket staleSaveRequest =
       scene_dialog_arm_for_tests(SceneDialogKind::SaveAs, false);
-  if (staleSaveRequest == nullptr) {
+  if (staleSaveRequest == engine::core::kNoFileDialog) {
     editor_set_world(nullptr);
     return 8;
   }
@@ -541,15 +542,17 @@ int check_fresh_dialog_after_retire_completes() {
     return 3;
   }
   editor_set_world(world.get());
-  void *stale = scene_dialog_arm_for_tests(SceneDialogKind::Open, false);
-  if (stale == nullptr) {
+  engine::core::FileDialogTicket stale =
+      scene_dialog_arm_for_tests(SceneDialogKind::Open, false);
+  if (stale == engine::core::kNoFileDialog) {
     editor_set_world(nullptr);
     return 4;
   }
   scene_document_retire_dialogs();
 
-  void *fresh = scene_dialog_arm_for_tests(SceneDialogKind::Open, false);
-  if ((fresh == nullptr) || (fresh == stale)) {
+  engine::core::FileDialogTicket fresh =
+      scene_dialog_arm_for_tests(SceneDialogKind::Open, false);
+  if ((fresh == engine::core::kNoFileDialog) || (fresh == stale)) {
     editor_set_world(nullptr);
     return 5;
   }
@@ -572,8 +575,9 @@ int check_fresh_dialog_after_retire_completes() {
   // Cancelled results: a retired cancel must not cancel the later
   // session's pending action, while the current session's cancel does.
   request_scene_new();
-  void *staleCancel = scene_dialog_arm_for_tests(SceneDialogKind::SaveAs, true);
-  if (staleCancel == nullptr) {
+  engine::core::FileDialogTicket staleCancel =
+      scene_dialog_arm_for_tests(SceneDialogKind::SaveAs, true);
+  if (staleCancel == engine::core::kNoFileDialog) {
     editor_set_world(nullptr);
     return 8;
   }
@@ -601,9 +605,9 @@ int check_fresh_dialog_after_retire_completes() {
     editor_set_world(nullptr);
     return 12;
   }
-  void *currentCancel =
+  engine::core::FileDialogTicket currentCancel =
       scene_dialog_arm_for_tests(SceneDialogKind::SaveAs, true);
-  if (currentCancel == nullptr) {
+  if (currentCancel == engine::core::kNoFileDialog) {
     editor_set_world(nullptr);
     return 13;
   }
@@ -615,10 +619,10 @@ int check_fresh_dialog_after_retire_completes() {
   return ok ? 0 : 14;
 }
 
-/// EXPECTATION (audit #390): request records are never aliased while a
-/// callback may still write them. With every slot held by a retired
-/// dialog that has not reported, a new dialog is refused; once one of
-/// those dialogs reports, its slot is reclaimed and reused, and repeated
+/// EXPECTATION (audit #390): a dialog slot is never reused while its
+/// dialog may still answer. With every slot held by a retired dialog that
+/// has not reported, a new dialog is refused; once one of those dialogs
+/// reports, its slot is reclaimed under a new ticket, and repeated
 /// retirements keep the pool usable.
 int check_request_pool_reclaims_delivered_retired_records() {
   std::unique_ptr<World> world(new (std::nothrow) World());
@@ -627,14 +631,15 @@ int check_request_pool_reclaims_delivered_retired_records() {
   }
   editor_set_world(world.get());
 
-  void *held[kMaxSceneDialogRequests] = {};
-  for (std::size_t i = 0U; i < kMaxSceneDialogRequests; ++i) {
+  engine::core::FileDialogTicket held[engine::core::kMaxPendingFileDialogs] =
+      {};
+  for (int i = 0; i < engine::core::kMaxPendingFileDialogs; ++i) {
     held[i] = scene_dialog_arm_for_tests(SceneDialogKind::Open, false);
-    if (held[i] == nullptr) {
+    if (held[i] == engine::core::kNoFileDialog) {
       editor_set_world(nullptr);
       return 2;
     }
-    for (std::size_t j = 0U; j < i; ++j) {
+    for (int j = 0; j < i; ++j) {
       if (held[j] == held[i]) {
         editor_set_world(nullptr);
         return 3;
@@ -643,28 +648,38 @@ int check_request_pool_reclaims_delivered_retired_records() {
     scene_document_retire_dialogs();
   }
 
-  if (scene_dialog_arm_for_tests(SceneDialogKind::Open, false) != nullptr) {
+  if (scene_dialog_arm_for_tests(SceneDialogKind::Open, false) !=
+      engine::core::kNoFileDialog) {
     editor_set_world(nullptr);
     return 4; // every slot is still owned by an unreported dialog
   }
 
   scene_dialog_deliver_for_tests(held[1], nullptr);
-  void *reclaimed = scene_dialog_arm_for_tests(SceneDialogKind::Open, false);
-  if (reclaimed != held[1]) {
+  // The answered dialog's slot is free again, under a new ticket: the
+  // spent one never names a live request.
+  const engine::core::FileDialogTicket reclaimed =
+      scene_dialog_arm_for_tests(SceneDialogKind::Open, false);
+  bool reclaimedIsNew = reclaimed != engine::core::kNoFileDialog;
+  for (const engine::core::FileDialogTicket ticket : held) {
+    reclaimedIsNew = reclaimedIsNew && (reclaimed != ticket);
+  }
+  if (!reclaimedIsNew) {
     editor_set_world(nullptr);
     return 5;
   }
   scene_document_retire_dialogs();
   scene_document_retire_dialogs();
-  if (scene_dialog_arm_for_tests(SceneDialogKind::Open, false) != nullptr) {
+  if (scene_dialog_arm_for_tests(SceneDialogKind::Open, false) !=
+      engine::core::kNoFileDialog) {
     editor_set_world(nullptr);
     return 6;
   }
-  for (std::size_t i = 0U; i < kMaxSceneDialogRequests; ++i) {
+  for (int i = 0; i < engine::core::kMaxPendingFileDialogs; ++i) {
     scene_dialog_deliver_for_tests(held[i], nullptr);
   }
-  void *fresh = scene_dialog_arm_for_tests(SceneDialogKind::Open, false);
-  if (fresh == nullptr) {
+  engine::core::FileDialogTicket fresh =
+      scene_dialog_arm_for_tests(SceneDialogKind::Open, false);
+  if (fresh == engine::core::kNoFileDialog) {
     editor_set_world(nullptr);
     return 7;
   }
@@ -676,8 +691,8 @@ int check_request_pool_reclaims_delivered_retired_records() {
   return ok ? 0 : 8;
 }
 
-/// A dialog can return a path longer than the request record holds -- a
-/// Linux path runs to 4096 bytes, the record to 512. The record's path is
+/// A dialog can return a path longer than the document holds -- a Linux
+/// path runs to 4096 bytes, the document's to 512. The document's path is
 /// what Save As writes to, so a cut path names a different file: the
 /// result must be refused, not truncated, and the dialog released as if
 /// cancelled so nothing waits on it.
@@ -688,8 +703,9 @@ int check_overlong_dialog_path_is_refused_not_truncated() {
   }
   editor_set_world(world.get());
 
-  void *armed = scene_dialog_arm_for_tests(SceneDialogKind::SaveAs, false);
-  if (armed == nullptr) {
+  const engine::core::FileDialogTicket armed =
+      scene_dialog_arm_for_tests(SceneDialogKind::SaveAs, false);
+  if (armed == engine::core::kNoFileDialog) {
     editor_set_world(nullptr);
     return 2;
   }
@@ -700,12 +716,6 @@ int check_overlong_dialog_path_is_refused_not_truncated() {
   longPath[0] = '/';
   longPath[kMaxDocumentPathLength] = '\0';
   scene_dialog_deliver_for_tests(armed, longPath);
-
-  const auto *record = static_cast<const SceneDialogRequest *>(armed);
-  if (record->resultAccepted) {
-    editor_set_world(nullptr);
-    return 3; // the truncated prefix would be saved to
-  }
 
   scene_document_poll_dialog_result();
   const SceneDocumentState &doc = editor_session().document;

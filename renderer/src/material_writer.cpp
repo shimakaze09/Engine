@@ -5,11 +5,13 @@
 #include <cstdio>
 #include <cstring>
 
+#include "engine/content/asset_ref_json.h"
 #include "engine/core/atomic_file.h"
 #include "engine/core/json.h"
 #include "engine/core/logging.h"
 #include "engine/core/vfs.h"
 #include "engine/renderer/material_inheritance.h"
+#include "engine/renderer/material_loader.h"
 
 namespace engine::renderer {
 
@@ -84,22 +86,40 @@ void write_field(core::JsonWriter *writer, const char *key,
   writer->write_string(key, alpha_mode_to_string(value));
 }
 
+/// Writes `key` as the persistent identity of the asset behind `id`;
+/// false, logged against the material, when the catalog holds no
+/// identity for it. A save that wrote a path, or nothing, in its place
+/// would lose the reference the next time the file moved or loaded.
+bool write_catalogued_ref(core::JsonWriter *writer,
+                          const AssetDatabase *database, const char *key,
+                          AssetId id, const char *virtualPath) noexcept {
+  const AssetMetadata *metadata = find_asset_metadata(database, id);
+  if ((metadata == nullptr) || !core::asset_ref_is_valid(metadata->ref)) {
+    char message[160] = {};
+    std::snprintf(message, sizeof(message),
+                  "%s names an asset with no persistent identity", key);
+    return log_save_error(virtualPath, message);
+  }
+  content::write_asset_ref(*writer, key, metadata->ref);
+  return true;
+}
+
 /// Writes one texture-slot key if its asset id is set; false when the id is
-/// set but its source path cannot be resolved (a save must not silently
-/// drop or corrupt a texture reference).
+/// set but carries no identity (a save must not silently drop or corrupt a
+/// texture reference).
 bool write_texture_slot(core::JsonWriter *writer, const AssetDatabase *database,
-                        const char *key, AssetId textureId) noexcept {
+                        const char *key, AssetId textureId,
+                        bool clearsInherited,
+                        const char *virtualPath) noexcept {
   if (textureId == kInvalidAssetId) {
+    // A child that empties a slot its parent fills says so, or the next
+    // load would inherit the parent's texture straight back.
+    if (clearsInherited) {
+      writer->write_null(key);
+    }
     return true;
   }
-
-  const AssetMetadata *metadata = find_asset_metadata(database, textureId);
-  if ((metadata == nullptr) || (metadata->filePath[0] == '\0')) {
-    return false;
-  }
-
-  writer->write_string(key, metadata->filePath.data());
-  return true;
+  return write_catalogued_ref(writer, database, key, textureId, virtualPath);
 }
 
 } // namespace
@@ -137,7 +157,7 @@ bool save_material_asset(const AssetDatabase *database, const char *virtualPath,
 
   core::JsonWriter writer{};
   writer.begin_object();
-  writer.write_uint("version", 3U);
+  writer.write_uint("version", kMaterialDocumentVersion);
   const bool hasParent =
       (parentVirtualPath != nullptr) && (parentVirtualPath[0] != '\0');
   // A material without a parent writes every field, so a reader never has
@@ -148,8 +168,11 @@ bool save_material_asset(const AssetDatabase *database, const char *virtualPath,
   const auto writes = [written](std::uint16_t bit) noexcept {
     return (written & bit) != 0U;
   };
-  if (hasParent) {
-    writer.write_string("parent", parentVirtualPath);
+  if (hasParent &&
+      !write_catalogued_ref(&writer, database, "parent",
+                            make_asset_id_from_path(parentVirtualPath),
+                            virtualPath)) {
+    return false;
   }
 
 #define ENGINE_MATERIAL_WRITE_PARAM(name, member, key)                         \
@@ -166,7 +189,8 @@ bool save_material_asset(const AssetDatabase *database, const char *virtualPath,
 #define ENGINE_MATERIAL_OWN_SLOT(name, slot, handle, key)                      \
   if (writes(material_field::k##name)) {                                       \
     ownSlots.slot = textureSlots.slot;                                         \
-    hasAnyTexture = hasAnyTexture || (ownSlots.slot != kInvalidAssetId);       \
+    hasAnyTexture =                                                            \
+        hasAnyTexture || hasParent || (ownSlots.slot != kInvalidAssetId);      \
   }
   ENGINE_MATERIAL_TEXTURE_FIELDS(ENGINE_MATERIAL_OWN_SLOT)
 #undef ENGINE_MATERIAL_OWN_SLOT
@@ -176,15 +200,17 @@ bool save_material_asset(const AssetDatabase *database, const char *virtualPath,
     writer.write_key("textures");
     writer.begin_object();
 #define ENGINE_MATERIAL_WRITE_TEXTURE(name, slot, handle, key)                 \
-  textureSlotsOk = textureSlotsOk &&                                           \
-                   write_texture_slot(&writer, database, key, ownSlots.slot);
+  textureSlotsOk =                                                             \
+      textureSlotsOk &&                                                        \
+      write_texture_slot(&writer, database, key, ownSlots.slot,                \
+                         hasParent && writes(material_field::k##name),         \
+                         virtualPath);
     ENGINE_MATERIAL_TEXTURE_FIELDS(ENGINE_MATERIAL_WRITE_TEXTURE)
 #undef ENGINE_MATERIAL_WRITE_TEXTURE
     writer.end_object();
   }
   if (!textureSlotsOk) {
-    return log_save_error(virtualPath,
-                          "a texture slot's source path is unresolvable");
+    return false;
   }
 
   writer.end_object();

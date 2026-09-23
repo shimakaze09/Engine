@@ -58,27 +58,29 @@ struct VersionCase final {
   bool accepted;
 };
 
-// Revision 3 is the one revision this build reads. Every older revision
-// is refused rather than migrated, and a document omitting the key names
+// Revision 4 is the one revision this build reads. Every older revision
+// is refused rather than migrated -- revision 3 named its parent and
+// textures by path -- and a document omitting the key names
 // no revision at all, so it is refused too. Everything else -- zero,
 // future, negative, fractional, past-uint32, or a non-integer JSON type
 // -- is refused as before. Mirrors the scene loader's table
 // (engine_unit_scene_version_gate) with the material schema's revision.
 constexpr VersionCase kCases[] = {
-    {"{\"version\":3,\"roughness\":0.25}", true},
+    {"{\"version\":4,\"roughness\":0.25}", true},
     {"{\"version\":1,\"roughness\":0.25}", false},
     {"{\"version\":2,\"roughness\":0.25}", false},
+    {"{\"version\":3,\"roughness\":0.25}", false},
     {"{\"roughness\":0.25}", false},
-    {"{\"version\":4,\"roughness\":0.25}", false},
+    {"{\"version\":5,\"roughness\":0.25}", false},
     {"{\"version\":999,\"roughness\":0.25}", false},
     {"{\"version\":0,\"roughness\":0.25}", false},
     {"{\"version\":-1,\"roughness\":0.25}", false},
     {"{\"version\":1.5,\"roughness\":0.25}", false},
     {"{\"version\":4294967296,\"roughness\":0.25}", false},
-    {"{\"version\":\"3\",\"roughness\":0.25}", false},
+    {"{\"version\":\"4\",\"roughness\":0.25}", false},
     {"{\"version\":true,\"roughness\":0.25}", false},
     {"{\"version\":null,\"roughness\":0.25}", false},
-    {"{\"version\":[3],\"roughness\":0.25}", false},
+    {"{\"version\":[4],\"roughness\":0.25}", false},
 };
 
 // Every case runs against its own file so an accepted case's registration
@@ -136,7 +138,7 @@ void run_reload_cases(engine::renderer::AssetDatabase *database) noexcept {
   constexpr const char *kPath = "material_version_reload.json";
   constexpr const char *kVirtualPath = "mat/material_version_reload.json";
 
-  if (!write_material_file(kPath, "{\"version\":3,\"roughness\":0.25}")) {
+  if (!write_material_file(kPath, "{\"version\":4,\"roughness\":0.25}")) {
     check(false, "write reload baseline");
     return;
   }

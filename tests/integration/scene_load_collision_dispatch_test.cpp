@@ -354,6 +354,9 @@ bool test_editor_play_stop_play_keeps_lua_handler() noexcept {
 
   if (ok) {
     engine::editor::stop_play_mode();
+    // No pipeline frame runs here, so finish the Stop as the pipeline
+    // would after the end hooks.
+    engine::editor::finish_play_stop();
     if ((engine::editor::editor_session().playState !=
          engine::editor::PlayState::Stopped) ||
         engine::editor::editor_session().worldRestoreFailed) {
@@ -377,6 +380,7 @@ bool test_editor_play_stop_play_keeps_lua_handler() noexcept {
       ok = false;
     }
     engine::editor::stop_play_mode();
+    engine::editor::finish_play_stop();
   }
 
   engine::editor::editor_session().initialized = false;

@@ -8,15 +8,23 @@
 // reloaded its dependents are re-resolved in memory from the parent's new
 // values and their own overrides (material_inheritance.h); render prep
 // still reads one flat, fully resolved record. Texture *references*
-// inherit the same way, as path-derived AssetIds; the GPU TextureHandle
-// behind each is filled in later by resolve_material_textures, since that
-// needs a live render device and never runs on a per-frame hot path.
+// inherit the same way; the GPU TextureHandle behind each is filled in
+// later by resolve_material_textures, since that needs a live render
+// device and never runs on a per-frame hot path.
 //
-// Exactly one revision loads. A document naming another version, or none,
-// is refused, not migrated:
+// The parent and every texture are named by persistent identity, the
+// AssetRef text a scene uses (content/asset_ref_json.h), never by path:
+// moving or renaming the file keeps its sidecar GUID, so the material
+// still finds it. Each reference resolves through the asset catalog at
+// load. A reference the catalog has no asset for, or one naming an asset
+// of the wrong type, refuses the load rather than dropping the slot, since
+// a material loaded without it would save back without it.
+//
+// Exactly one revision loads, kMaterialDocumentVersion. A document naming
+// another version, or none, is refused, not migrated:
 //   {
-//     "version": 3,                                // required
-//     "parent": "assets/materials/x.mat",          // optional
+//     "version": 4,                                // required
+//     "parent": "<guid>",                          // optional
 //     "shadingModel": "pbr" | "toon" | "unlit",    // default "pbr"
 //     "albedo": [r, g, b],
 //     "emissive": [r, g, b],
@@ -27,16 +35,17 @@
 //     "alphaCutoff": 0.5,                          // Mask only
 //     "uvTiling": [1.0, 1.0],
 //     "uvOffset": [0.0, 0.0],
-//     "textures": {
-//       "albedo": "assets/textures/x_albedo.png",
-//       "metallicRoughness": "assets/textures/x_mr.png", // glTF-style: G
-//                                                          // = roughness,
-//                                                          // B = metallic
-//       "emissive": "assets/textures/x_emissive.png",
-//       "occlusion": "assets/textures/x_ao.png",   // R channel
-//       "opacity": "assets/textures/x_opacity.png" // R channel, cutout mask
+//     "textures": {                                // each "<guid>" or null
+//       "albedo": "<guid>",
+//       "metallicRoughness": "<guid>",  // glTF-style: G = roughness,
+//                                       // B = metallic
+//       "emissive": "<guid>",
+//       "occlusion": "<guid>",          // R channel
+//       "opacity": "<guid>"             // R channel, cutout mask
 //     }
 //   }
+// A texture slot written as null clears a slot the parent fills; a
+// material with no parent has nothing to clear and refuses null.
 // Every field but "version" is optional; the authoritative list of fields
 // is ENGINE_MATERIAL_PARAM_FIELDS / ENGINE_MATERIAL_TEXTURE_FIELDS in
 // asset_database.h. A parent chain deeper than kMaxMaterialParentDepth, or
@@ -49,12 +58,21 @@
 
 #pragma once
 
+#include <cstdint>
 #include <expected>
 
 #include "engine/renderer/asset_database.h"
 #include "engine/renderer/texture_loader.h"
 
 namespace engine::renderer {
+
+/// The one material document revision this build reads and writes. An
+/// older revision is refused rather than migrated: the project is
+/// unreleased, so the tree migrates once per format change instead of
+/// carrying a read path per past revision. A reader that guessed would
+/// drop the fields it no longer knows and resave the material as a
+/// reduction of itself.
+inline constexpr std::uint32_t kMaterialDocumentVersion = 4U;
 
 /// Maximum parent-chain depth; deeper chains (including cycles) fail.
 inline constexpr std::size_t kMaxMaterialParentDepth = 8U;

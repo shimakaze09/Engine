@@ -403,6 +403,110 @@ int verify_overlong_tag_rejected() {
   return 0;
 }
 
+/// Full texture and material tables keep their lookups short (#663), as
+/// the mesh table does. Both used to be probed from `id % capacity` and
+/// ended only by a never-used slot, so ids sharing a home slot chained
+/// through every record, and materials are looked up per draw from the
+/// parallel render-prep jobs. Fills both tables with exactly those ids,
+/// refuses one past capacity, finds every id, and bounds every hit and
+/// miss.
+int verify_texture_material_probe_length() {
+  using engine::renderer::AssetDatabase;
+  using engine::renderer::AssetId;
+  using engine::renderer::AssetState;
+
+  std::unique_ptr<AssetDatabase> database(new (std::nothrow) AssetDatabase());
+  if (database == nullptr) {
+    return 1000;
+  }
+  engine::renderer::clear_asset_database(database.get());
+  // Same bound, and the same reasoning, as the mesh index above.
+  constexpr std::size_t kMaxProbe = 16U;
+
+  constexpr std::size_t kTextures = AssetDatabase::kMaxTextureAssets;
+  const auto textureId = [](std::size_t i) noexcept {
+    return static_cast<AssetId>(7ULL + (i * kTextures));
+  };
+  for (std::size_t i = 0U; i < kTextures; ++i) {
+    if (!engine::renderer::register_texture_asset(
+            database.get(), textureId(i), "assets/t.png",
+            engine::renderer::TextureHandle{
+                static_cast<std::uint32_t>(i + 1U)})) {
+      return 1001;
+    }
+  }
+  if (engine::renderer::texture_asset_slot_available(
+          database.get(), textureId(4U * kTextures)) ||
+      engine::renderer::register_texture_asset(
+          database.get(), textureId(4U * kTextures), "assets/t.png",
+          engine::renderer::TextureHandle{9999U})) {
+    return 1002; // one past capacity must be refused
+  }
+  std::size_t longest = 0U;
+  for (std::size_t i = 0U; i < 2U * kTextures; ++i) {
+    if ((i < kTextures) &&
+        (engine::renderer::texture_asset_state(database.get(), textureId(i)) !=
+         AssetState::Ready)) {
+      return 1003; // every registered id resolves to its own record
+    }
+    const std::size_t probe = database->textureIndex.probe_length(textureId(i));
+    longest = (probe > longest) ? probe : longest;
+  }
+  std::printf("full texture table: longest probe %zu\n", longest);
+  if (longest > kMaxProbe) {
+    return 1004;
+  }
+
+  constexpr std::size_t kMaterials = AssetDatabase::kMaxMaterialAssets;
+  const auto materialId = [](std::size_t i) noexcept {
+    return static_cast<AssetId>(5ULL + (i * kMaterials));
+  };
+  engine::renderer::Material params{};
+  for (std::size_t i = 0U; i < kMaterials; ++i) {
+    params.metallic = static_cast<float>(i) / static_cast<float>(kMaterials);
+    if (!engine::renderer::register_material_asset(
+            database.get(), materialId(i), "assets/m.mat", params)) {
+      return 1005;
+    }
+  }
+  if (engine::renderer::material_asset_slot_available(
+          database.get(), materialId(4U * kMaterials)) ||
+      engine::renderer::register_material_asset(database.get(),
+                                                materialId(4U * kMaterials),
+                                                "assets/m.mat", params)) {
+    return 1006; // one past capacity must be refused
+  }
+  longest = 0U;
+  for (std::size_t i = 0U; i < 2U * kMaterials; ++i) {
+    if (i < kMaterials) {
+      const engine::renderer::Material *found =
+          engine::renderer::find_material_params(database.get(), materialId(i));
+      if ((found == nullptr) ||
+          (found->metallic !=
+           static_cast<float>(i) / static_cast<float>(kMaterials))) {
+        return 1007; // every registered id resolves to its own record
+      }
+    }
+    const std::size_t probe =
+        database->materialIndex.probe_length(materialId(i));
+    longest = (probe > longest) ? probe : longest;
+  }
+  std::printf("full material table: longest probe %zu\n", longest);
+  if (longest > kMaxProbe) {
+    return 1008;
+  }
+
+  // Clearing the database empties the indexes with the records.
+  engine::renderer::clear_asset_database(database.get());
+  if ((database->textureIndex.size() != 0U) ||
+      (database->materialIndex.size() != 0U) ||
+      !engine::renderer::material_asset_slot_available(database.get(),
+                                                       materialId(0U))) {
+    return 1009;
+  }
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -426,6 +530,12 @@ int main() {
   if (probeLength != 0) {
     std::fprintf(stderr, "full-table probe length failed: %d\n", probeLength);
     return probeLength;
+  }
+  const int indexProbe = verify_texture_material_probe_length();
+  if (indexProbe != 0) {
+    std::fprintf(stderr, "texture/material probe length failed: %d\n",
+                 indexProbe);
+    return indexProbe;
   }
   const int eviction = verify_mesh_cache_eviction();
   if (eviction != 0) {

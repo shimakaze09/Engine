@@ -413,11 +413,12 @@ struct RenderDevice final {
       const void *vertexData, std::ptrdiff_t vertexSize,
       const void *fragmentData, std::ptrdiff_t fragmentSize) noexcept =
       nullptr;
-  // Stable engine profile tag ("glsl", "essl", "spirv", "metal") naming
-  // the cooked shader flavor this backend consumes; pairs with
-  // caps.cookedPrograms.
+  // Stable engine profile tag ("glsl", "essl", "spirv", "metal", "dx11",
+  // "dxil") naming the cooked shader flavor this backend consumes; pairs
+  // with caps.cookedPrograms.
   const char *(*cooked_program_profile)() noexcept = nullptr;
-  // GLSL-family cooked binaries carry no embedded uniform table; when
+  // GLSL-family cooked binaries carry no embedded uniform table, and the
+  // D3D ones (dx11, dxil) an incomplete one; when
   // this entry is set the loader passes the program's spirv siblings as
   // introspection sidecars alongside the consumable binaries.
   DeviceProgramHandle (*create_program_binary_introspected)(

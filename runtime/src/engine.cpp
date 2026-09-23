@@ -223,8 +223,8 @@ bool bootstrap(const EngineConfig &config) noexcept {
 
   static_cast<void>(core::cvar_register_string(
       "r_bgfx_renderer", "auto",
-      "bgfx backend only: renderer API (auto, vulkan, opengl, metal, "
-      "noop); read once at device initialization (#138)"));
+      "bgfx backend only: renderer API (auto, vulkan, opengl, gles, metal, "
+      "d3d11, d3d12, noop); read once at device initialization"));
 
   static_cast<void>(core::cvar_register_bool(
       "r_bgfx_trace", false,
@@ -289,9 +289,11 @@ bool bootstrap(const EngineConfig &config) noexcept {
       "r_present_scene", false,
       "Present the post chain's final image on the back buffer (player "
       "mode; the editor overlay presents otherwise)"));
-  char playerEnv[8] = {};
-  if (core::non_empty_env("ENGINE_PLAYER", playerEnv, sizeof(playerEnv)) &&
-      (playerEnv[0] == '1')) {
+  static_cast<void>(core::cvar_register_bool(
+      "app.player_mode", false,
+      "Boot straight into the gameplay loop with no editor (the web share "
+      "page sets it through ENGINE_CVAR_app_player_mode)"));
+  if (core::cvar_get_bool("app.player_mode", false)) {
     g_activeConfig.playerMode = true;
   }
   if (g_activeConfig.playerMode) {

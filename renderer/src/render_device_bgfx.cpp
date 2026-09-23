@@ -19,6 +19,7 @@
 #include "engine/core/thread_affinity.h"
 #include "render_device_bgfx_context.h"
 #include "render_device_null.h"
+#include "renderer_backend_select.h"
 #include "screenshot_tga.h"
 
 #if defined(__GNUC__) || defined(__clang__)
@@ -1281,39 +1282,38 @@ bool initialize_render_device() noexcept {
   init.callback = &callback;
   init.debug = core::cvar_get_bool("r_bgfx_debug", false);
 
-  // Renderer selection: r_bgfx_renderer names the API; without a native
-  // window (headless/dummy driver) only Noop is reachable. "auto" lets
-  // bgfx pick the platform's best backend.
+  // Renderer selection: r_bgfx_renderer names the API, and the platform's
+  // capabilities decide what "auto" means and whether anything but Noop
+  // can present at all.
   void *nativeWindow = core::platform_native_window_handle();
-  const char *requested = core::cvar_get_string("r_bgfx_renderer", "auto");
-  if (nativeWindow == nullptr) {
+  switch (select_renderer_backend(
+      core::platform_caps(),
+      core::cvar_get_string("r_bgfx_renderer", "auto"))) {
+  case RendererBackendChoice::Noop:
     init.type = bgfx::RendererType::Noop;
-  } else if (std::strcmp(requested, "noop") == 0) {
-    init.type = bgfx::RendererType::Noop;
-  } else if (std::strcmp(requested, "vulkan") == 0) {
+    break;
+  case RendererBackendChoice::Vulkan:
     init.type = bgfx::RendererType::Vulkan;
-  } else if (std::strcmp(requested, "opengl") == 0) {
+    break;
+  case RendererBackendChoice::OpenGL:
     init.type = bgfx::RendererType::OpenGL;
-  } else if (std::strcmp(requested, "gles") == 0) {
-    // The web export's API family, runnable natively for diagnosis.
+    break;
+  case RendererBackendChoice::OpenGLES:
     init.type = bgfx::RendererType::OpenGLES;
-  } else if (std::strcmp(requested, "metal") == 0) {
+    break;
+  case RendererBackendChoice::Metal:
     init.type = bgfx::RendererType::Metal;
-  } else if (std::strcmp(requested, "d3d11") == 0) {
+    break;
+  case RendererBackendChoice::Direct3D11:
     init.type = bgfx::RendererType::Direct3D11;
-  } else if (std::strcmp(requested, "d3d12") == 0) {
+    break;
+  case RendererBackendChoice::Direct3D12:
     init.type = bgfx::RendererType::Direct3D12;
-  } else {
-#ifdef _WIN32
-    // "auto" picks Vulkan explicitly on Windows: it is the proven
-    // backend on the canonical spirv cook. The shadow-array unit
-    // map fits DXBC and Windows builds cook the dx11 profile, so the
-    // D3D backends are runnable — but they stay explicit d3d11/d3d12
-    // opt-ins until verified, an owner call to flip.
-    init.type = bgfx::RendererType::Vulkan;
-#else
-    init.type = bgfx::RendererType::Count; // auto
-#endif
+    break;
+  case RendererBackendChoice::LibraryDefault:
+  default:
+    init.type = bgfx::RendererType::Count; // bgfx picks
+    break;
   }
   if (nativeWindow != nullptr) {
     init.platformData.nwh = nativeWindow;

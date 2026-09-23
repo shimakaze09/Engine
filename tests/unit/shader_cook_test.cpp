@@ -33,12 +33,15 @@ int run_cook(const std::string &packer, const std::string &manifest,
       quoted(packer) + " --shader-manifest " + quoted(manifest) +
       " --shader-out " + quoted(outDir) + " --shaderc " + quoted(shaderc) +
       " --shader-include " + quoted(include) +
-#ifdef _WIN32
+#if defined(_WIN32)
       // Windows hosts also cook DXBC (#301): the CI lanes prove the
       // s_5_0 compile of the whole manifest through the production CLI.
-      " --profiles glsl,essl,spirv,dx11";
+      " --profiles glsl,essl,spirv,metal,dx11,dxil";
+#elif defined(__APPLE__)
+      // shaderc ships no DXC for macOS, so no DXIL there.
+      " --profiles glsl,essl,spirv,metal";
 #else
-      " --profiles glsl,essl,spirv";
+      " --profiles glsl,essl,spirv,metal,dxil";
 #endif
 #ifdef _WIN32
   // cmd.exe strips the outer quote pair from the whole command line
@@ -133,6 +136,25 @@ int main() {
   t.check(fs::exists(outA / "tonemap.frag.default.spirv.bin"),
           "second profile present");
   t.check(fs::exists(stamp), "cook stamp committed");
+  // Metal cooks on any host. Its binaries keep a complete uniform table:
+  // the samplers the deferred lighting reads only through texelFetch are
+  // still listed, which is why metal links without spirv sidecars (the
+  // tables fxc and DXC strip, for dx11 and dxil, are the cases that need
+  // them).
+  const std::vector<char> deferredMetal =
+      read_file(outA / "deferred_lighting.frag.default.metal.bin");
+  t.check(!deferredMetal.empty(), "metal profile cooked");
+  t.check(contains(deferredMetal, "uTileLightTexSampler") &&
+              contains(deferredMetal, "uLightDataTexSampler"),
+          "metal keeps the fetch-only samplers in its uniform table");
+#if !defined(__APPLE__)
+  // DXIL, for Direct3D 12: the whole manifest must compile under DXC,
+  // which is stricter than fxc.
+  const std::vector<char> deferredDxil =
+      read_file(outA / "deferred_lighting.frag.default.dxil.bin");
+  t.check(contains(deferredDxil, "uInvProjection"),
+          "dxil profile cooked with its uniform table");
+#endif
   const std::vector<char> firstBytes = read_file(sample);
   t.check(!firstBytes.empty(), "cooked binary non-empty");
 

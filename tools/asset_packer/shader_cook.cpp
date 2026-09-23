@@ -57,6 +57,11 @@ constexpr ShaderProfile kKnownProfiles[] = {
     // d3dcompiler. The shadow-array unit map fits DXBC's
     // 16-sampler cap, so Windows builds cook it by default.
     {"dx11", "windows", "s_5_0"},
+    // DXIL for Direct3D 12, through DXC, which ships with shaderc on
+    // Windows and Linux hosts (not macOS). Like DXBC it drops samplers
+    // read only through texelFetch from its uniform table, so the runtime
+    // links it with spirv sidecars.
+    {"dxil", "windows", "s_6_0"},
 };
 
 /// One manifest entry: a .sc source, its stage, the runtime output stem,
@@ -491,10 +496,12 @@ int run_shader_cook(int argc, char **argv) {
   const char *outDir = nullptr;
   const char *shadercPath = nullptr;
   const char *includeDir = nullptr;
-#ifdef _WIN32
-  std::string profilesCsv = "glsl,essl,spirv,dx11";
+#if defined(_WIN32)
+  std::string profilesCsv = "glsl,essl,spirv,metal,dx11,dxil";
+#elif defined(__APPLE__)
+  std::string profilesCsv = "glsl,essl,spirv,metal";
 #else
-  std::string profilesCsv = "glsl,essl,spirv";
+  std::string profilesCsv = "glsl,essl,spirv,metal,dxil";
 #endif
   const char *platformTag = kCookPlatformTag;
   bool force = false;

@@ -4,8 +4,9 @@
 
 **Status:** The editor-target and shipping clauses are superseded by
 [0015](0015-commercial-anime-engine-on-six-platforms.md); the AppleClang
-conformance clause stands. The lane still builds with the shader cook
-off because shaderc's tint does not compile under AppleClang.
+conformance clause stands, now at AppleClang 16 (Xcode 16, the `macos-15`
+CI image), which also compiles shaderc's tint: the macOS Release lane
+cooks shaders, the `metal` profile included (#672).
 
 ## Context
 

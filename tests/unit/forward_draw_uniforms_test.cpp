@@ -195,6 +195,24 @@ void count_missing_program_reports(engine::core::LogLevel level,
 } // namespace
 
 /// Runs this executable or test program.
+/// Collects every program run of [start, end) through the cursor, writing
+/// at most `capacity` and returning how many there were.
+std::size_t collect_runs(const engine::renderer::CommandBufferView &view,
+                         std::size_t start, std::size_t end,
+                         engine::renderer::ShadingProgramRun *out,
+                         std::size_t capacity) noexcept {
+  std::size_t count = 0U;
+  engine::renderer::ShadingProgramRun run{};
+  for (std::size_t cursor = start;
+       engine::renderer::next_program_run(view, &cursor, end, &run);) {
+    if (count < capacity) {
+      out[count] = run;
+    }
+    ++count;
+  }
+  return count;
+}
+
 int main() {
   // No device is live: the projection helpers fall back to the GL clip
   // conventions, and every table under test is passed in explicitly.
@@ -362,7 +380,7 @@ int main() {
 
     ShadingProgramRun runs[kShadingModelCount] = {};
     const std::size_t count =
-        partition_program_runs(view, 0U, 6U, runs, kShadingModelCount);
+        collect_runs(view, 0U, 6U, runs, kShadingModelCount);
     check(count == 3U, "three models give three runs");
     check((runs[0].programId == 0U) && (runs[0].first == 0U) &&
               (runs[0].count == 2U),
@@ -383,46 +401,70 @@ int main() {
     }
     check(covered == 6U, "the runs cover every draw exactly once");
 
-    // A sub-range is partitioned on its own terms, which is what the
-    // deferred path does for the transparent tail.
+    // A sub-range is walked on its own terms, which is what the deferred
+    // path does for the transparent tail.
     const std::size_t tail =
-        partition_program_runs(view, 2U, 6U, runs, kShadingModelCount);
+        collect_runs(view, 2U, 6U, runs, kShadingModelCount);
     check((tail == 2U) && (runs[0].first == 2U) && (runs[0].count == 3U) &&
               (runs[1].first == 5U) && (runs[1].count == 1U),
-          "a sub-range partitions from its own start");
+          "a sub-range walks from its own start");
 
     // One model is one run, which is every scene that mixes none.
     DrawCommand uniform[4] = {keyed(0U), keyed(0U), keyed(0U), keyed(0U)};
     CommandBufferView uniformView{};
     uniformView.data = uniform;
     uniformView.count = 4U;
-    const std::size_t single = partition_program_runs(
-        uniformView, 0U, 4U, runs, kShadingModelCount);
+    const std::size_t single =
+        collect_runs(uniformView, 0U, 4U, runs, kShadingModelCount);
     check((single == 1U) && (runs[0].count == 4U),
           "one model in a range is one run");
 
-    // Boundaries: an empty range, a null destination, and a capacity of
-    // one all answer without reading past anything.
-    check(partition_program_runs(view, 3U, 3U, runs,
-                                       kShadingModelCount) == 0U,
+    // Boundaries: an empty range and null arguments answer without
+    // reading past anything.
+    check(collect_runs(view, 3U, 3U, runs, kShadingModelCount) == 0U,
           "an empty range has no runs");
-    check(partition_program_runs(view, 0U, 6U, nullptr,
-                                       kShadingModelCount) == 0U,
-          "a null destination yields no runs");
-    const std::size_t capped =
-        partition_program_runs(view, 0U, 6U, runs, 1U);
-    check((capped == 1U) && (runs[0].count == 6U),
-          "a capacity of one joins the tail onto the run it can hold, "
-          "rather than dropping those draws");
+    ShadingProgramRun unused{};
+    std::size_t cursor = 0U;
+    check(!next_program_run(view, nullptr, 6U, &unused) &&
+              !next_program_run(view, &cursor, 6U, nullptr),
+          "a null cursor or destination yields no run");
 
     // A range that runs past the view stops at the view.
     const std::size_t clamped =
-        partition_program_runs(view, 0U, 99U, runs, kShadingModelCount);
+        collect_runs(view, 0U, 99U, runs, kShadingModelCount);
     std::size_t clampedTotal = 0U;
     for (std::size_t i = 0U; i < clamped; ++i) {
       clampedTotal += runs[i].count;
     }
     check(clampedTotal == 6U, "a range past the view stops at the view");
+
+    // A depth-sorted transparent range alternates programs as often as the
+    // scene interleaves them -- far more times than there are programs.
+    // Every run must carry its own draws' program: a fixed run table used
+    // to join everything past its 128th run onto the last one, drawing it
+    // with the wrong program.
+    constexpr std::size_t kAlternating = 300U;
+    static DrawCommand alternating[kAlternating] = {};
+    for (std::size_t i = 0U; i < kAlternating; ++i) {
+      alternating[i] = keyed(static_cast<std::uint8_t>(i % 2U));
+    }
+    CommandBufferView alternatingView{};
+    alternatingView.data = alternating;
+    alternatingView.count = static_cast<std::uint32_t>(kAlternating);
+    std::size_t walked = 0U;
+    bool everyRunOwnProgram = true;
+    ShadingProgramRun run{};
+    for (std::size_t at = 0U;
+         next_program_run(alternatingView, &at, kAlternating, &run);) {
+      everyRunOwnProgram =
+          everyRunOwnProgram && (run.count == 1U) && (run.first == walked) &&
+          (run.programId ==
+           draw_key_shading_model(alternating[run.first].sortKey));
+      ++walked;
+    }
+    check(walked == kAlternating,
+          "300 alternating draws are 300 runs, not a capped table");
+    check(everyRunOwnProgram, "every alternating run keeps its own program");
   }
 
   // Program ids beyond the three the engine ships. The partition reads the
@@ -460,8 +502,7 @@ int main() {
     fiveView.count = 5U;
     ShadingProgramRun fiveRuns[kMaxShadingPrograms] = {};
     const std::size_t fiveCount =
-        partition_program_runs(fiveView, 0U, 5U, fiveRuns,
-                               kMaxShadingPrograms);
+        collect_runs(fiveView, 0U, 5U, fiveRuns, kMaxShadingPrograms);
     check(fiveCount == 5U, "five programs give five runs");
     bool fiveNamed = true;
     for (std::size_t i = 0U; i < fiveCount; ++i) {
@@ -480,8 +521,7 @@ int main() {
     sparseView.count = 4U;
     ShadingProgramRun sparseRuns[kMaxShadingPrograms] = {};
     const std::size_t sparseCount =
-        partition_program_runs(sparseView, 0U, 4U, sparseRuns,
-                               kMaxShadingPrograms);
+        collect_runs(sparseView, 0U, 4U, sparseRuns, kMaxShadingPrograms);
     check((sparseCount == 3U) && (sparseRuns[0].programId == 3U) &&
               (sparseRuns[1].programId == 40U) &&
               (sparseRuns[1].count == 2U) &&
@@ -497,7 +537,7 @@ int main() {
     fullView.data = full;
     fullView.count = static_cast<std::uint32_t>(kMaxShadingPrograms);
     ShadingProgramRun fullRuns[kMaxShadingPrograms] = {};
-    const std::size_t fullCount = partition_program_runs(
+    const std::size_t fullCount = collect_runs(
         fullView, 0U, kMaxShadingPrograms, fullRuns, kMaxShadingPrograms);
     std::size_t fullCovered = 0U;
     for (std::size_t i = 0U; i < fullCount; ++i) {
@@ -508,20 +548,28 @@ int main() {
     check(fullCovered == kMaxShadingPrograms,
           "the runs at capacity still cover every draw");
 
-    // One run past what the caller can hold: the tail joins the last run
-    // rather than being dropped, and every draw is still covered.
-    ShadingProgramRun tightRuns[kMaxShadingPrograms - 1U] = {};
-    const std::size_t tightCount =
-        partition_program_runs(fullView, 0U, kMaxShadingPrograms, tightRuns,
-                               kMaxShadingPrograms - 1U);
-    std::size_t tightCovered = 0U;
-    for (std::size_t i = 0U; i < tightCount; ++i) {
-      tightCovered += tightRuns[i].count;
+    // One run past the program count: the draw after the last program
+    // returns to the first, as a depth-sorted transparent range does. It
+    // is its own run with its own program; there is no run table to fill.
+    DrawCommand pastFull[kMaxShadingPrograms + 1U] = {};
+    for (std::size_t i = 0U; i < kMaxShadingPrograms; ++i) {
+      pastFull[i] = programKeyed(static_cast<std::uint8_t>(i));
     }
-    check(tightCount == (kMaxShadingPrograms - 1U),
-          "one run past capacity returns exactly capacity");
-    check(tightCovered == kMaxShadingPrograms,
-          "one run past capacity still draws every draw");
+    pastFull[kMaxShadingPrograms] = programKeyed(0U);
+    CommandBufferView pastView{};
+    pastView.data = pastFull;
+    pastView.count = static_cast<std::uint32_t>(kMaxShadingPrograms + 1U);
+    ShadingProgramRun lastRun{};
+    std::size_t pastCount = 0U;
+    for (std::size_t cursor = 0U; next_program_run(
+             pastView, &cursor, kMaxShadingPrograms + 1U, &lastRun);) {
+      ++pastCount;
+    }
+    check(pastCount == (kMaxShadingPrograms + 1U),
+          "one run past the program count is still its own run");
+    check((lastRun.programId == 0U) && (lastRun.first == kMaxShadingPrograms) &&
+              (lastRun.count == 1U),
+          "the run past the program count draws with its own program");
   }
 
   // What a run's program id resolves to. Addressable is not registered:

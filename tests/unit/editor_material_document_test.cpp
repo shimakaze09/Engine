@@ -39,8 +39,8 @@ constexpr const char *kOsPathB = "editor_material_document_b.json";
 constexpr const char *kVirtualPathA = "edmatdoc/editor_material_document_a.json";
 constexpr const char *kVirtualPathB = "edmatdoc/editor_material_document_b.json";
 constexpr const char *kScenePath = "editor_material_document_scene.json";
-constexpr const char *kMaterialA = "{\"version\":3,\"roughness\":0.3}";
-constexpr const char *kMaterialB = "{\"version\":3,\"roughness\":0.6}";
+constexpr const char *kMaterialA = "{\"version\":4,\"roughness\":0.3}";
+constexpr const char *kMaterialB = "{\"version\":4,\"roughness\":0.6}";
 
 bool exactly_equal(float lhs, float rhs) noexcept { return lhs == rhs; }
 

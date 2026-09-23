@@ -86,6 +86,8 @@ void add_missing_uniform(const char *name,
 
 const char *fake_cooked_profile() noexcept { return "spirv"; }
 const char *fake_cooked_profile_dx11() noexcept { return "dx11"; }
+const char *fake_cooked_profile_metal() noexcept { return "metal"; }
+const char *fake_cooked_profile_dxil() noexcept { return "dxil"; }
 
 // Link-entry counters for the dx11 sidecar scenario: plain links, links
 // through the introspected entry, and introspected links whose spirv
@@ -554,24 +556,24 @@ int check_registration_refuses_what_cannot_be_drawn() {
   return 0;
 }
 
-/// EXPECTATION: the dx11 cooked profile links every program through the
-/// introspected entry with both spirv sidecars present, never the plain
-/// entry. DXBC uniform tables are incomplete — fxc strips the
-/// SamplerState of any texture read only via Load/texelFetch, which
-/// silently disabled the deferred path on D3D (#301 hardware run) —
-/// so the spirv table must stay the source of the parameter set.
-int check_dx11_profile_links_with_spirv_sidecars() {
+/// EXPECTATION: the dx11 and dxil cooked profiles link every program
+/// through the introspected entry with both spirv sidecars present, never
+/// the plain entry. D3D uniform tables are incomplete — fxc and DXC both
+/// strip the sampler of any texture read only via Load/texelFetch, which
+/// silently disabled the deferred path on D3D (#301 hardware run) — so
+/// the spirv table must stay the source of the parameter set.
+int check_d3d_profile_links_with_spirv_sidecars(
+    const char *profile, const char *(*profileFn)() noexcept) {
   using namespace engine::renderer;
 
   reset_backend_harness();
   clear_missing_uniforms();
   for (const char *fileName : kShaderFiles) {
-    if (!write_profile_shader_file(fileName, "dx11", "// dxbc stub\n")) {
+    if (!write_profile_shader_file(fileName, profile, "// d3d stub\n")) {
       return 360;
     }
   }
-  engine::tests::fake_device().cooked_program_profile =
-      &fake_cooked_profile_dx11;
+  engine::tests::fake_device().cooked_program_profile = profileFn;
   engine::tests::fake_device().create_program_binary_introspected =
       &fake_create_program_binary_introspected;
   reset_link_counters();
@@ -582,11 +584,48 @@ int check_dx11_profile_links_with_spirv_sidecars() {
   } else if (!backend_state().deferredAvailable) {
     result = 362;
   } else if (g_introspectedLinks == 0U) {
-    result = 363; // dx11 fell back to the plain, table-stripped entry
+    result = 363; // D3D fell back to the plain, table-stripped entry
   } else if (g_introspectedMissingMeta != 0U) {
     result = 364; // a link ran without its spirv sidecar bytes
   } else if (g_plainLinks != 0U) {
     result = 365;
+  }
+
+  engine::tests::fake_device().cooked_program_profile = &fake_cooked_profile;
+  engine::tests::fake_device().create_program_binary_introspected = nullptr;
+  return result;
+}
+
+/// EXPECTATION: the metal cooked profile links through the plain entry.
+/// A Metal binary's uniform table lists every sampler, the fetch-only ones
+/// included (engine_unit_shader_cook checks the cooked bytes), so it needs
+/// no spirv sidecar; linking it through the introspected entry would read
+/// sidecars a metal-only install need not ship.
+int check_metal_profile_links_without_sidecars() {
+  using namespace engine::renderer;
+
+  reset_backend_harness();
+  clear_missing_uniforms();
+  for (const char *fileName : kShaderFiles) {
+    if (!write_profile_shader_file(fileName, "metal", "// msl stub\n")) {
+      return 370;
+    }
+  }
+  engine::tests::fake_device().cooked_program_profile =
+      &fake_cooked_profile_metal;
+  engine::tests::fake_device().create_program_binary_introspected =
+      &fake_create_program_binary_introspected;
+  reset_link_counters();
+
+  int result = 0;
+  if (!initialize_backend()) {
+    result = 371;
+  } else if (!backend_state().deferredAvailable) {
+    result = 372;
+  } else if (g_plainLinks == 0U) {
+    result = 373;
+  } else if (g_introspectedLinks != 0U) {
+    result = 374; // metal took the sidecar path
   }
 
   engine::tests::fake_device().cooked_program_profile = &fake_cooked_profile;
@@ -660,7 +699,15 @@ int main() {
     result = check_registration_refuses_what_cannot_be_drawn();
   }
   if (result == 0) {
-    result = check_dx11_profile_links_with_spirv_sidecars();
+    result = check_d3d_profile_links_with_spirv_sidecars(
+        "dx11", &fake_cooked_profile_dx11);
+  }
+  if (result == 0) {
+    result = check_d3d_profile_links_with_spirv_sidecars(
+        "dxil", &fake_cooked_profile_dxil);
+  }
+  if (result == 0) {
+    result = check_metal_profile_links_without_sidecars();
   }
 
   std::filesystem::remove_all(kShaderDir, ec);

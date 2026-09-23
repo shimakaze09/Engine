@@ -187,6 +187,13 @@ void dispatch_entity_scripts_end_play(runtime::World *world) noexcept;
 // time — see the on_tick cadence note above.
 void dispatch_entity_scripts_update(float dt) noexcept;
 
+// Call module.on_fixed_tick(self, dt) for every entity with a
+// ScriptComponent, with dt the fixed step. Call once per fixed step, in
+// step order, while that step's input snapshot is current (see
+// core::advance_input_step), so the input queries a hook makes answer for
+// its own step. A module without the hook is skipped.
+void dispatch_entity_scripts_fixed_update(float dt) noexcept;
+
 // Call module.on_end_play(self) for every entity with a ScriptComponent.
 // Call once when Play transitions to Stopped.
 void dispatch_entity_scripts_end() noexcept;
