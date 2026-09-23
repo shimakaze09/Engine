@@ -13,6 +13,10 @@
 #include "engine/core/vfs.h"
 #include "sound_handle.h"
 
+#if defined(ENGINE_PLATFORM_WEB)
+#include <emscripten.h>
+#endif
+
 // Silence warnings from miniaudio in third-party code.
 #if defined(__clang__)
 #pragma clang diagnostic push
@@ -362,6 +366,44 @@ bool audio_uses_null_device() noexcept {
   return g_audio.initialized && g_audio.nullDevice;
 }
 
+
+#if defined(ENGINE_PLATFORM_WEB)
+namespace {
+
+/// miniaudio's WebAudio start calls AudioContext.resume() and drops the
+/// promise. It stays pending until the page's first user gesture, and a
+/// shutdown in between closes the context under it, which rejects it as an
+/// unhandled "Cannot resume a closed AudioContext". Observing every resume
+/// on this device's context settles that case quietly; a resume that fails
+/// while the context is still open is still reported.
+void observe_webaudio_resume(const ma_device &device) noexcept {
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdollar-in-identifier-extension"
+#endif
+  EM_ASM(
+      {
+        var context = miniaudio.get_device_by_index($0).webaudio;
+        var resume = context.resume.bind(context);
+        context.resume = function() {
+          var pending = resume();
+          pending.catch(function(error) {
+            if (context.state !== 'closed') {
+              console.error('audio: AudioContext resume failed', error);
+            }
+          });
+          return pending;
+        };
+      },
+      device.webaudio.deviceIndex);
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
+}
+
+} // namespace
+#endif
+
 /// Initializes the owning system for audio.
 bool initialize_audio(const AudioConfig &audioConfig) noexcept {
   if (g_audio.initialized) {
@@ -377,6 +419,10 @@ bool initialize_audio(const AudioConfig &audioConfig) noexcept {
     config.channels = 2U;
     config.sampleRate = 48000U;
   }
+#if defined(ENGINE_PLATFORM_WEB)
+  // Started by hand below, once its context's resume is observed.
+  config.noAutoStart = MA_TRUE;
+#endif
 
   const ma_result result = ma_engine_init(&config, &g_audio.engine);
   if (result != MA_SUCCESS) {
@@ -384,6 +430,17 @@ bool initialize_audio(const AudioConfig &audioConfig) noexcept {
         core::LogLevel::Error, "audio", "failed to initialize audio engine");
     return false;
   }
+#if defined(ENGINE_PLATFORM_WEB)
+  if (!audioConfig.nullDevice) {
+    observe_webaudio_resume(*ma_engine_get_device(&g_audio.engine));
+    if (ma_engine_start(&g_audio.engine) != MA_SUCCESS) {
+      core::log_message(core::LogLevel::Error, "audio",
+                        "failed to start audio engine");
+      ma_engine_uninit(&g_audio.engine);
+      return false;
+    }
+  }
+#endif
 
   // Both groups or neither: a partial pair would leak the first group,
   // because shutdown releases them only when busesReady is set.
