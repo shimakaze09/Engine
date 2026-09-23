@@ -195,6 +195,16 @@ capacity must:
 A capacity limit that can be met in normal use is a design defect, not a
 robustness feature: raise it or make the storage grow at a cold boundary.
 
+Fixed storage of a non-scalar type is value-initialized with parentheses,
+`std::array<T, N> m = std::array<T, N>();`, never an empty braced list.
+The two are the same initialization byte for byte, but MSVC lowers the
+braced list element by element in its front end, and for a default
+member initializer of a non-template class it does so in every
+translation unit that includes the header, constructed or not: `world.h`
+alone cost 16 s per includer that way. `tools/check_array_value_init.py`
+rejects the braced form from 256 elements up and for template-sized
+arrays, and `--fix` rewrites it.
+
 ## Serialization
 
 One authoritative persistent-component registry generates or mechanically

@@ -10,6 +10,8 @@ on:
     paths:
       - .github/workflows/msvc-compile-probe.yml
       - tools/ci/msvc_compile_probe.py
+      # Re-measure whenever the array initialization rule or its sites move.
+      - tools/check_array_value_init.py
   workflow_dispatch:
 
 concurrency:

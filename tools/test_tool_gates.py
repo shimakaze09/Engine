@@ -5,8 +5,8 @@
 # metadata path and identity audits, the Lua binding generator, module
 # dependencies, dependency pins, shader variants, content attributes,
 # test timing, comment quality, error handling, portable fopen,
-# duplicate primitives and document references. Run from ctest as
-# engine_integration_tool_gates.
+# duplicate primitives, document references and array value-init. Run
+# from ctest as engine_integration_tool_gates.
 
 import importlib.util
 import json
@@ -1482,6 +1482,63 @@ def test_doc_reference_gate():
           "doc references: this checkout's documents reference only what exists")
 
 
+def test_array_value_init_gate():
+    """The array value-initialization gate must reject an empty braced
+    initializer on a large or template-sized array of non-scalar type,
+    pass scalar, enum-alias and small arrays and the parenthesized form,
+    rewrite findings with --fix, and pass this checkout."""
+    script = str(TOOLS / "check_array_value_init.py")
+
+    def tree(tmp, name, text):
+        root = tmp / name
+        (root / "core" / "include").mkdir(parents=True)
+        (root / "core" / "include" / "store.h").write_text(text, encoding="utf-8")
+        return root
+
+    head = ("#include <array>\n#include <cstdint>\n"
+            "struct Node { float x = 0.0F; };\n"
+            "enum class Kind : std::uint8_t { A };\n"
+            "using Id = std::uint32_t;\n"
+            "inline constexpr std::size_t kMaxNodes = 4096U;\n"
+            "inline constexpr std::size_t kFew = 8U;\n")
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        check(run([script, "--root", str(tree(
+            tmp, "large", head + "struct S { std::array<Node, kMaxNodes> nodes{}; };\n"))]) != 0,
+              "array value-init: a braced large array of a class type is a finding")
+        check(run([script, "--root", str(tree(
+            tmp, "wrapped", head + "struct S { std::array<Node, kMaxNodes + 1U>\n"
+            "      nodes{}; };\n"))]) != 0,
+              "array value-init: a declaration that wraps is still read")
+        check(run([script, "--root", str(tree(
+            tmp, "template", head + "template <typename T, std::size_t N>\n"
+            "struct S { std::array<T, N> items{}; };\n"))]) != 0,
+              "array value-init: a template-sized array of a template type is a finding")
+        check(run([script, "--root", str(tree(
+            tmp, "scalar", head + "struct S { std::array<std::uint32_t, kMaxNodes> a{};\n"
+            "  std::array<Kind, kMaxNodes> b{}; std::array<Id, kMaxNodes> c{};\n"
+            "  std::array<const void *, kMaxNodes> d{};\n"
+            "  std::array<std::array<char, 64>, kMaxNodes> e{}; };\n"))]) == 0,
+              "array value-init: scalar, enum, alias, pointer and char-array elements pass")
+        check(run([script, "--root", str(tree(
+            tmp, "small", head + "struct S { std::array<Node, kFew> nodes{}; };\n"))]) == 0,
+              "array value-init: an array below the threshold passes")
+        check(run([script, "--root", str(tree(
+            tmp, "paren", head + "struct S { std::array<Node, kMaxNodes> nodes =\n"
+            "      std::array<Node, kMaxNodes>(); };\n"))]) == 0,
+              "array value-init: the parenthesized form passes")
+        fixed = tree(tmp, "fix", head + "struct S { std::array<Node, kMaxNodes> nodes{}; };\n")
+        run([script, "--root", str(fixed), "--fix"])
+        text = (fixed / "core" / "include" / "store.h").read_text(encoding="utf-8")
+        check("nodes = std::array<Node, kMaxNodes>();" in text,
+              "array value-init: --fix writes the parenthesized form")
+        check(run([script, "--root", str(fixed)]) == 0,
+              "array value-init: a fixed tree passes")
+
+    check(run([script]) == 0,
+          "array value-init: this checkout has no braced large arrays")
+
+
 def main():
     test_coverage_gate()
     test_perf_gate_evaluate()
@@ -1498,6 +1555,7 @@ def main():
     test_asset_identity_gate()
     test_shader_variant_gate()
     test_doc_reference_gate()
+    test_array_value_init_gate()
     if failures:
         print(f"\nFAILED ({len(failures)} failure(s))")
         return 1

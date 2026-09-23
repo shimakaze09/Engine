@@ -247,7 +247,7 @@ runs eleven jobs:
 - `cppcheck` static analysis plus the audit gates (source comments, comment
   quality, module dependencies, dependency pins, content attributes, test
   timing, error handling, portable fopen, duplicate primitives, asset
-  metadata paths, asset identity, shader variants, document references)
+  metadata paths, asset identity, shader variants, document references, array value-initialization)
 - `clang-tidy` with warnings-as-errors
 - A dedicated `-Werror` build check
 - ASAN/UBSAN and TSAN sanitizer lanes
