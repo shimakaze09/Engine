@@ -318,9 +318,12 @@ int main(int argc, char **argv) {
 
     // Graph-tracked dependencies (auto-discovered on earlier cooks) can
     // force a repack beyond the explicit --dep flags.
-    engine::tools::DependencyGraph::AssetId depIds[64] = {};
-    const std::size_t depCount =
-        engine::tools::get_dependencies(&depGraph, meshAssetId, depIds, 64U);
+    // Every one of them: the graph is rewritten from this list below, so
+    // one left out here would leave the graph as well.
+    std::vector<engine::tools::DependencyGraph::AssetId> depIds(
+        engine::tools::get_dependencies(&depGraph, meshAssetId, nullptr, 0U));
+    const std::size_t depCount = engine::tools::get_dependencies(
+        &depGraph, meshAssetId, depIds.data(), depIds.size());
     for (std::size_t i = 0U; i < depCount; ++i) {
       auto pathIt = depGraph.assetPaths.find(depIds[i]);
       if (pathIt != depGraph.assetPaths.end()) {
@@ -389,7 +392,20 @@ int main(int argc, char **argv) {
   // From the source's authored sidecar. The cooked record is derived and
   // regenerable, so it can never be where an author's settings live.
   ImportSettings importSettings{};
-  static_cast<void>(read_authored_import_settings(inputPath, &importSettings));
+  switch (read_authored_import_settings(inputPath, &importSettings)) {
+  case engine::content::SidecarReadResult::Ok:
+  case engine::content::SidecarReadResult::Absent:
+    break;
+  case engine::content::SidecarReadResult::Unreadable:
+  case engine::content::SidecarReadResult::Malformed:
+    // Cooking at the defaults would throw away what the author typed and
+    // look like it worked.
+    std::fprintf(stderr,
+                 "error: the source's sidecar could not be read, so its "
+                 "import settings are unknown; fix or remove it: %s.meta\n",
+                 inputPath);
+    return 22;
+  }
   // The cook key pairs the settings with the mesh cook's logic revision,
   // so a logic change recooks (and re-rasterizes the thumbnail, which
   // derives from the same cooked geometry) without a settings edit.
@@ -499,8 +515,8 @@ int main(int argc, char **argv) {
   if (selectedMesh.primitives_count == 0U) {
     std::fprintf(stderr,
                  "error: selected mesh %zu has no primitives "
-                 "(importSettings.meshIndex in %s.cookmeta)\n",
-                 static_cast<std::size_t>(meshIdx), outputPath);
+                 "(importSettings.meshIndex in %s.meta)\n",
+                 static_cast<std::size_t>(meshIdx), inputPath);
     cgltf_free(data);
     return 5;
   }
@@ -510,6 +526,12 @@ int main(int argc, char **argv) {
            selectedMesh.primitives_count)
           ? static_cast<cgltf_size>(importSettings.primitiveIndex)
           : 0U;
+
+  // What was cooked, which the sidecar records: an index out of range
+  // falls back to the first, and the sidecar must not claim the request.
+  ImportSettings cookedSettings = importSettings;
+  cookedSettings.meshIndex = static_cast<std::int32_t>(meshIdx);
+  cookedSettings.primitiveIndex = static_cast<std::int32_t>(primIdx);
 
   const cgltf_primitive *primitive = &selectedMesh.primitives[primIdx];
   PrimitiveData primitiveData{};
@@ -604,7 +626,7 @@ int main(int argc, char **argv) {
   cookedOutputs.emplace_back(outputPath);
 
   if (!write_metadata_file(inputPath, outputPath, primitiveData, sourceHash,
-                           dependencyDigests, importSettings)) {
+                           dependencyDigests, cookedSettings)) {
     std::fprintf(stderr, "error: failed to write metadata sidecar\n");
     return 12;
   }

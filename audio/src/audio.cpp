@@ -35,6 +35,7 @@
 #define MA_NO_GENERATION
 #include "miniaudio.h"
 #include "engine/core/diagnostic.h"
+#include "engine/core/thread_affinity.h"
 
 #if defined(__clang__)
 #pragma clang diagnostic pop
@@ -477,6 +478,7 @@ void shutdown_audio() noexcept {
 /// Per-frame audio hook: recycles finished one-shot instances so the
 /// pool never leaks slots (device-driven playback needs no other pump).
 void update_audio() noexcept {
+  ENGINE_ASSERT_MAIN_THREAD();
   if (!g_audio.initialized) {
     return;
   }
@@ -490,6 +492,7 @@ void update_audio() noexcept {
 
 /// Loads the requested resource for sound.
 SoundHandle load_sound(const char *virtualPath) noexcept {
+  ENGINE_ASSERT_MAIN_THREAD();
   if ((virtualPath == nullptr) || !g_audio.initialized) {
     return kInvalidSound;
   }
@@ -600,6 +603,7 @@ void unload_sound(SoundHandle handle) noexcept {
 }
 
 bool play_sound(SoundHandle handle, const PlayParams &params) noexcept {
+  ENGINE_ASSERT_MAIN_THREAD();
   SoundEntry *entry = lookup_sound_entry(handle);
   if ((entry == nullptr) || !valid_play_params(params)) {
     return false;
@@ -713,6 +717,7 @@ float distance_gain(float distance, const PlayParams &params) noexcept {
 
 bool play_sound_at(SoundHandle handle, const math::Vec3 &position,
                    const PlayParams &params, AudioBus bus) noexcept {
+  ENGINE_ASSERT_MAIN_THREAD();
   SoundEntry *entry = lookup_sound_entry(handle);
   if (entry == nullptr) {
     return false;
@@ -736,6 +741,7 @@ bool play_sound_at(SoundHandle handle, const math::Vec3 &position,
 
 bool play_sound_oneshot(SoundHandle handle, const PlayParams &params,
                         AudioBus bus) noexcept {
+  ENGINE_ASSERT_MAIN_THREAD();
   SoundEntry *entry = lookup_sound_entry(handle);
   if (entry == nullptr) {
     return false;
@@ -747,6 +753,7 @@ bool play_sound_oneshot(SoundHandle handle, const PlayParams &params,
 }
 
 bool play_music(const char *virtualPath, float volume, bool loop) noexcept {
+  ENGINE_ASSERT_MAIN_THREAD();
   if ((virtualPath == nullptr) || !g_audio.initialized) {
     return false;
   }

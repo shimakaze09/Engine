@@ -14,7 +14,11 @@ using CoroutineRefreshHookFn = void (*)(lua_State *thread) noexcept;
 
 /// Lua binding: Lua engine.wait(seconds).
 int lua_engine_wait(lua_State *state) noexcept;
-/// Lua binding: Lua engine.wait_frames(frame_count).
+/// Lua binding: Lua engine.wait_frames(count). Counts fixed simulation
+/// steps, not rendered frames, so a coroutine resumes at the same point
+/// in the simulation whatever the frame rate — at 60 Hz with one step per
+/// frame the two are the same number, which is why the name stayed
+/// (docs/decisions/0019).
 int lua_engine_wait_frames(lua_State *state) noexcept;
 /// Lua binding: Lua engine.wait_until(callback).
 int lua_engine_wait_until(lua_State *state) noexcept;
@@ -22,13 +26,13 @@ int lua_engine_wait_until(lua_State *state) noexcept;
 /// Starts a Lua coroutine using the supplied scheduler clock; the refresh
 /// hook arms sandbox/debug hooks on the new thread before its first resume.
 int start_lua_coroutine(lua_State *state, float totalSeconds,
-                        std::uint32_t frameIndex,
+                        std::uint64_t tickIndex,
                         CoroutineLogLuaErrorFn logLuaError,
                         CoroutineRefreshHookFn refreshLuaHook) noexcept;
 
 /// Advances active Lua coroutines against the supplied scheduler clock.
 void tick_lua_coroutines(lua_State *state, float totalSeconds,
-                         std::uint32_t frameIndex,
+                         std::uint64_t tickIndex,
                          CoroutineLogLuaErrorFn logLuaError,
                          CoroutineRefreshHookFn refreshLuaHook) noexcept;
 

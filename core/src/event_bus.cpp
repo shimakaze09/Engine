@@ -3,7 +3,7 @@
 #include "engine/core/event_bus.h"
 
 #include <array>
-#include <cassert>
+#include "engine/core/assertion.h"
 #include <cstring>
 
 #include "engine/core/hash.h"
@@ -96,7 +96,7 @@ thread_local std::uint32_t g_emitDepth = 0U;
 
 struct EmitDepthScope final {
   EmitDepthScope() noexcept {
-    assert(g_emitDepth < kMaxEmitDepth);
+    ENGINE_ASSERT(g_emitDepth < kMaxEmitDepth);
     ++g_emitDepth;
   }
 

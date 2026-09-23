@@ -8,6 +8,8 @@
 #include "engine/core/input.h"
 #include "engine/core/input_map.h"
 
+#include "../platform_event_from_sdl.h"
+
 #if defined(__clang__) && (defined(__x86_64__) || defined(__i386__)) &&        \
     !defined(__PRFCHWINTRIN_H)
 #define __PRFCHWINTRIN_H // NOLINT(bugprone-reserved-identifier)
@@ -77,14 +79,14 @@ void sim_key_down(KeyScancode key) noexcept {
   SDL_Event ev{};
   ev.type = SDL_EVENT_KEY_DOWN;
   ev.key.scancode = static_cast<SDL_Scancode>(key);
-  input_process_event(&ev);
+  input_process_event(engine::tests::from_sdl(ev));
 }
 
 void sim_key_up(KeyScancode key) noexcept {
   SDL_Event ev{};
   ev.type = SDL_EVENT_KEY_UP;
   ev.key.scancode = static_cast<SDL_Scancode>(key);
-  input_process_event(&ev);
+  input_process_event(engine::tests::from_sdl(ev));
 }
 
 /// Writes raw bytes to a file for save fault-injection fixtures.
@@ -514,6 +516,86 @@ bool test_persisted_bindings_outrank_script_defaults() noexcept {
   return !overwritten && defaulted;
 }
 
+/// One action registry (#312 item 5). register_action/register_axis used
+/// to fill tables of their own, so the same name meant two unrelated
+/// actions: a user's rebinding or a loaded bindings document never reached
+/// a script that registered through them, and they were never saved. They
+/// now register in the mapper, so every path sees the same action.
+bool test_legacy_and_mapped_actions_share_one_registry() noexcept {
+  if (!init_all()) {
+    return false;
+  }
+  bool ok = true;
+  auto expect = [&ok](bool cond, const char *what) {
+    if (!cond) {
+      std::printf("    %s\n", what);
+      ok = false;
+    }
+  };
+
+  expect(register_action("jump", kKey_Space), "register jump");
+  expect(register_axis("move_x", kKey_A, kKey_D), "register move_x");
+  begin_input_frame();
+  sim_key_down(kKey_Space);
+  sim_key_down(kKey_D);
+  end_input_frame();
+  expect(is_mapped_action_down("jump"),
+         "a registered action is the mapper's action");
+  expect(is_mapped_action_pressed("jump") && is_action_pressed("jump"),
+         "and presses through both names for it");
+  expect(mapped_axis_value("move_x") == 1.0F,
+         "a registered axis is the mapper's axis");
+  begin_input_frame();
+  sim_key_up(kKey_Space);
+  sim_key_up(kKey_D);
+  end_input_frame();
+
+  // The user rebinds jump; the script registering its default again, as
+  // it does on the next Play, must not undo that.
+  InputBinding w{};
+  w.type = InputBindingType::Key;
+  w.code = kKey_W;
+  expect(rebind_action("jump", 0U, w), "rebind jump to W");
+  expect(register_action("jump", kKey_Space), "re-register the default");
+  begin_input_frame();
+  sim_key_down(kKey_W);
+  end_input_frame();
+  expect(is_action_down("jump"), "the rebinding reaches register_action");
+  begin_input_frame();
+  sim_key_up(kKey_W);
+  end_input_frame();
+
+  // A mapper action reads through the shorthand, too.
+  InputBinding e{};
+  e.type = InputBindingType::Key;
+  e.code = kKey_E;
+  expect(add_input_action("use", &e, 1U), "add use");
+  begin_input_frame();
+  sim_key_down(kKey_E);
+  end_input_frame();
+  expect(is_action_down("use") && (action_value("use") == 1.0F),
+         "a mapper action reads through is_action_down");
+  begin_input_frame();
+  sim_key_up(kKey_E);
+  end_input_frame();
+
+  // The run ends: what scripts registered goes, what the user persisted
+  // stays.
+  expect(gameplay_action_count() == 1U, "one script action: use");
+  expect(gameplay_axis_count() == 1U, "one script axis: move_x");
+  clear_gameplay_bindings();
+  expect(gameplay_action_count() == 0U, "script actions cleared");
+  expect(gameplay_axis_count() == 0U, "script axes cleared");
+  begin_input_frame();
+  sim_key_down(kKey_W);
+  sim_key_down(kKey_E);
+  end_input_frame();
+  expect(is_action_down("jump"), "the rebound action survives the run");
+  expect(!is_action_down("use"), "the script's action does not");
+  shutdown_all();
+  return ok;
+}
+
 /// EXPECTATION (#538 item 2): a document whose numbers are outside what
 /// the mapper can hold is refused whole, and the current bindings stay.
 bool test_out_of_range_numbers_rejected() noexcept {
@@ -842,6 +924,81 @@ bool test_wrong_shape_load_preserves_bindings() noexcept {
   const bool cleared = !is_mapped_action_down("jump");
   shutdown_all();
   return cleared;
+}
+
+/// The bindings document carries a format version (#312 item 5). The
+/// saver writes it; a document without it is the unversioned form every
+/// earlier build wrote and still loads unchanged; any other version, or a
+/// version that is not a number, is refused with the live bindings kept.
+bool test_document_version() noexcept {
+  if (!init_all()) {
+    return false;
+  }
+
+  InputBinding binding{};
+  binding.type = InputBindingType::Key;
+  binding.code = kKey_Space;
+  add_input_action("jump", &binding, 1U);
+
+  char buffer[4096] = {};
+  std::size_t size = 0U;
+  if (!save_input_bindings_to_buffer(buffer, sizeof(buffer), &size)) {
+    shutdown_all();
+    return false;
+  }
+  const std::string saved(buffer, size);
+  const std::size_t key = saved.find("\"version\"");
+  const std::size_t value = saved.find_first_not_of(" :", key + 9U);
+  const bool written = (key != std::string::npos) &&
+                       (value != std::string::npos) &&
+                       (saved.compare(value, 2U, "1,") == 0);
+  if (!written) {
+    std::printf("    the saved document carries no version 1: %s\n",
+                saved.c_str());
+    shutdown_all();
+    return false;
+  }
+
+  const char *refused[] = {
+      "{\"version\":2,\"actions\":[],\"axes\":[]}",
+      "{\"version\":0,\"actions\":[],\"axes\":[]}",
+      "{\"version\":\"1\",\"actions\":[],\"axes\":[]}",
+      "{\"version\":-1,\"actions\":[],\"axes\":[]}",
+  };
+  for (const char *doc : refused) {
+    if (load_input_bindings_from_buffer(doc, std::strlen(doc))) {
+      std::printf("    accepted: %s\n", doc);
+      shutdown_all();
+      return false;
+    }
+  }
+  begin_input_frame();
+  sim_key_down(kKey_Space);
+  end_input_frame();
+  const bool kept = is_mapped_action_down("jump");
+  begin_input_frame();
+  sim_key_up(kKey_Space);
+  end_input_frame();
+  if (!kept) {
+    std::printf("    a refused version replaced the live bindings\n");
+    shutdown_all();
+    return false;
+  }
+
+  // The unversioned form: same shape, same codes, no key.
+  const char *legacy = "{\"actions\":[{\"name\":\"fire\",\"bindings\":"
+                       "[{\"type\":0,\"code\":40}]}],\"axes\":[]}";
+  if (!load_input_bindings_from_buffer(legacy, std::strlen(legacy))) {
+    std::printf("    an unversioned document was refused\n");
+    shutdown_all();
+    return false;
+  }
+  begin_input_frame();
+  sim_key_down(kKey_Return);
+  end_input_frame();
+  const bool legacyLive = is_mapped_action_down("fire");
+  shutdown_all();
+  return legacyLive;
 }
 
 /// Fault injection (audit N-05): a save whose sibling temporary cannot
@@ -1435,6 +1592,8 @@ int main() {
   run("rebind_action", &test_rebind_action);
   run("persisted_bindings_outrank_script_defaults",
       &test_persisted_bindings_outrank_script_defaults);
+  run("legacy_and_mapped_actions_share_one_registry",
+      &test_legacy_and_mapped_actions_share_one_registry);
   run("out_of_range_numbers_rejected", &test_out_of_range_numbers_rejected);
   run("save_load_roundtrip", &test_save_load_roundtrip);
   run("file_round_trip_and_default_path",
@@ -1457,6 +1616,7 @@ int main() {
       &test_decoded_name_length_boundaries);
   run("malformed_field_load_preserves_bindings",
       &test_malformed_field_load_preserves_bindings);
+  run("document_version", &test_document_version);
   run("null_and_edge_cases", &test_null_and_edge_cases);
 
   std::printf("--- %d passed, %d failed ---\n", passed, failed);

@@ -7,6 +7,7 @@
 
 #include "engine/audio/audio.h"
 #include "engine/core/logging.h"
+#include "engine/core/rng.h"
 #include "engine/core/vfs.h"
 #include "engine/math/vec3.h"
 #include "engine/physics/physics.h"
@@ -602,6 +603,21 @@ runtime::Entity scripting_instantiate_prefab(runtime::World *world,
   return runtime::instantiate_prefab(*world, path);
 }
 
+/// The catalog's persistent identity for an asset id; nil when the id is
+/// unknown or the asset carries no identity. Never mints one: an asset
+/// without a sidecar is reported by the mount walk, and a made-up
+/// identity in a saved scene would name a different asset next run.
+core::AssetRef scripting_asset_ref_for_id(std::uint64_t assetId) noexcept {
+  if ((assetId == renderer::kInvalidAssetId) ||
+      (g_scriptingAssetDatabaseService == nullptr) ||
+      (g_scriptingAssetDatabaseService->database == nullptr)) {
+    return core::AssetRef{};
+  }
+  const renderer::AssetMetadata *metadata = renderer::find_asset_metadata(
+      g_scriptingAssetDatabaseService->database, assetId);
+  return (metadata != nullptr) ? metadata->ref : core::AssetRef{};
+}
+
 /// Queues a mesh asset load through runtime-owned asset services.
 std::uint32_t scripting_load_asset_async(const char *path,
                                          std::uint8_t priority) noexcept {
@@ -626,9 +642,13 @@ std::uint32_t scripting_load_asset_async(const char *path,
     return kInvalidScriptAssetHandle;
   }
   // A mesh a script names by path is catalogued under that path, the
-  // same record the editor's picker and a reopened scene read.
+  // same record the editor's picker and a reopened scene read. It carries
+  // no authored identity: asking for a file by name is not importing it,
+  // so the record is reachable by id for this session and by nothing
+  // afterwards.
   static_cast<void>(note_mesh_asset_path(
-      g_scriptingAssetDatabaseService->database, assetId, path));
+      g_scriptingAssetDatabaseService->database, assetId, path,
+      core::AssetRef{}));
 
   retire_terminal_script_loads(g_scriptingAssetDatabaseService);
 
@@ -731,6 +751,29 @@ bool scripting_is_alive(runtime::World *world,
 
 std::uint32_t scripting_content_epoch(runtime::World *world) noexcept {
   return (world != nullptr) ? world->content_epoch() : 0U;
+}
+
+double scripting_random_double(runtime::World *world) noexcept {
+  if (world == nullptr) {
+    return 0.0;
+  }
+  return core::rng_next_double(&world->random());
+}
+
+std::int64_t scripting_random_range(runtime::World *world,
+                                    std::int64_t minimum,
+                                    std::int64_t maximum) noexcept {
+  if (world == nullptr) {
+    return minimum;
+  }
+  return core::rng_range(&world->random(), minimum, maximum);
+}
+
+void scripting_seed_random(runtime::World *world,
+                           std::uint64_t seed) noexcept {
+  if (world != nullptr) {
+    world->seed_random(seed);
+  }
 }
 
 std::size_t scripting_alive_entity_count(runtime::World *world) noexcept {
@@ -1249,9 +1292,13 @@ void scripting_timer_clear(runtime::World *world) noexcept {
   }
 }
 
-std::size_t scripting_timer_tick(runtime::World *world,
-                                 float deltaSeconds) noexcept {
-  return (world != nullptr) ? world->timer_manager().tick(deltaSeconds) : 0U;
+std::size_t scripting_timer_advance(runtime::World *world,
+                                    float deltaSeconds) noexcept {
+  return (world != nullptr) ? world->timer_manager().advance(deltaSeconds) : 0U;
+}
+
+std::size_t scripting_timer_dispatch(runtime::World *world) noexcept {
+  return (world != nullptr) ? world->timer_manager().dispatch() : 0U;
 }
 
 // Entity pools the Lua pool bindings address by slot. Each pool records
@@ -1304,6 +1351,9 @@ scripting::RuntimeServices make_scripting_runtime_services() noexcept {
   s.is_alive = &scripting_is_alive;
   s.content_epoch = &scripting_content_epoch;
   s.alive_entity_count = &scripting_alive_entity_count;
+  s.random_double = &scripting_random_double;
+  s.random_range = &scripting_random_range;
+  s.seed_random = &scripting_seed_random;
   s.find_entity_by_index = &scripting_find_entity_by_index;
   s.find_entity_by_name = &scripting_find_entity_by_name;
   s.find_entity_by_persistent_id = &scripting_find_entity_by_persistent_id;
@@ -1339,6 +1389,7 @@ scripting::RuntimeServices make_scripting_runtime_services() noexcept {
   s.add_rigid_body_op = &scripting_add_rigid_body_op;
   s.add_collider_op = &scripting_add_collider_op;
   s.add_mesh_component_op = &scripting_add_mesh_component_op;
+  s.asset_ref_for_id = &scripting_asset_ref_for_id;
   s.add_name_component_op = &scripting_add_name_component_op;
   s.add_light_component_op = &scripting_add_light_component_op;
   s.remove_light_component_op = &scripting_remove_light_component_op;
@@ -1368,7 +1419,8 @@ scripting::RuntimeServices make_scripting_runtime_services() noexcept {
   s.timer_slot_for_id = &scripting_timer_slot_for_id;
   s.timer_slot_state = &scripting_timer_slot_state;
   s.timer_clear = &scripting_timer_clear;
-  s.timer_tick = &scripting_timer_tick;
+  s.timer_advance = &scripting_timer_advance;
+  s.timer_dispatch = &scripting_timer_dispatch;
   s.entity_pool_init = &scripting_entity_pool_init;
   s.entity_pool_acquire = &scripting_entity_pool_acquire;
   s.entity_pool_release = &scripting_entity_pool_release;

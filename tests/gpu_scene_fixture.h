@@ -14,6 +14,7 @@
 #include "engine/core/cvar.h"
 #include "engine/engine.h"
 #include "engine/math/transform.h"
+#include "engine/renderer/mesh_primitives.h"
 #include "engine/renderer/render_device.h"
 #include "engine/runtime/camera_manager.h"
 #include "engine/runtime/editor_bridge.h"
@@ -103,6 +104,31 @@ add_builtin_mesh(engine::runtime::World &world, const char *builtinPath,
     return engine::runtime::kInvalidEntity;
   }
   return entity;
+}
+
+/// A floor of `extent` metres square whose surface lands where these
+/// suites were framed against, whatever height the plane primitive puts
+/// its own surface at.
+///
+/// The suites that sample named rectangles of the frame — a shadow strip
+/// a twentieth of the frame tall, a left/right tile split — have those
+/// rectangles tuned to one framing, measured on a GPU. When the plane's
+/// surface moved to its origin the floor would have dropped half a metre
+/// under all of them, lengthening the shadows they measure and moving
+/// their features across the rectangles. Re-tuning needs the hardware
+/// they were tuned on, and nothing about those suites is about where the
+/// floor is, so the framing is held and the convention change stays in
+/// the content that is about it.
+inline engine::runtime::Transform
+framed_floor_transform(float extent) noexcept {
+  // The height the rectangles were calibrated against, as a surface
+  // position rather than an entity position.
+  constexpr float kFramedSurfaceY = 0.5F;
+  engine::runtime::Transform transform{};
+  transform.scale = engine::math::Vec3(extent, 1.0F, extent);
+  transform.position = engine::math::Vec3(
+      0.0F, kFramedSurfaceY - engine::renderer::kBuiltinPlaneSurfaceY, 0.0F);
+  return transform;
 }
 
 /// Points the view at target from position. The blend is saturated at

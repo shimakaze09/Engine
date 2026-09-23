@@ -95,6 +95,19 @@ constexpr const char *kScriptContents =
     "    if engine.gamepad_axis_value(2 ^ 32) ~= 0 then\n"
     "        error('int-truncating gamepad axis returned a value')\n"
     "    end\n"
+    // A wrong-typed argument is refused with false, not raised (#473):
+    // the live wrappers used to be generated duplicates that raised, so
+    // the refusal the checks above rely on never ran.
+    "    for _, query in ipairs({ engine.is_key_down, engine.is_key_pressed,\n"
+    "                             engine.is_gamepad_button_down }) do\n"
+    "        if query('x') ~= false then\n"
+    "            error('a non-integer key or button was not refused')\n"
+    "        end\n"
+    "    end\n"
+    "    if engine.is_action_down({}) ~= false or\n"
+    "       engine.is_action_pressed({}) ~= false then\n"
+    "        error('a non-string action name was not refused')\n"
+    "    end\n"
     "end\n"
     "function accept_valid_registrations()\n"
     "    local b = {\n"

@@ -654,52 +654,29 @@ void test_contact_respects_locked_axis() noexcept {
 
 // ---- Serialization migration ----------------------------------------------
 
-constexpr const char *kSceneV2Scalar =
-    "{\"version\":2,\"entities\":[{\"persistentId\":7,\"components\":{"
-    "\"Transform\":{\"position\":[0.0,0.0,0.0]},"
-    "\"RigidBody\":{\"inverseMass\":1.0,\"inverseInertia\":0.25}}}]}";
-constexpr const char *kSceneV2DefaultWithCollider =
-    "{\"version\":2,\"entities\":[{\"persistentId\":7,\"components\":{"
-    "\"Transform\":{\"position\":[0.0,0.0,0.0]},"
-    "\"RigidBody\":{\"inverseMass\":1.0,\"inverseInertia\":1.0},"
-    "\"Collider\":{\"shape\":0,\"halfExtents\":[0.5,0.5,0.5]}}}]}";
-constexpr const char *kSceneV1Scalar =
-    "{\"entities\":[{\"persistentId\":7,\"components\":{"
-    "\"Transform\":{\"position\":[0.0,0.0,0.0]},"
-    "\"RigidBody\":{\"inverseMass\":1.0,\"inverseInertia\":0.0}}}]}";
-constexpr const char *kSceneV3Scalar =
-    "{\"version\":3,\"entities\":[{\"persistentId\":7,\"components\":{"
-    "\"Transform\":{\"position\":[0.0,0.0,0.0]},"
-    "\"RigidBody\":{\"inverseMass\":1.0,\"inverseInertia\":0.25}}}]}";
-constexpr const char *kSceneV3Array =
-    "{\"version\":3,\"entities\":[{\"persistentId\":7,\"components\":{"
-    "\"Transform\":{\"position\":[0.0,0.0,0.0]},"
-    "\"RigidBody\":{\"inverseMass\":1.0,\"inverseInertia\":[0.25,0.5,0.125]}}"
-    "}]}";
-constexpr const char *kSceneV3DefaultArrayWithCollider =
-    "{\"version\":3,\"entities\":[{\"persistentId\":7,\"components\":{"
-    "\"Transform\":{\"position\":[0,0,0]},"
-    "\"Collider\":{\"halfExtents\":[0.5,0.5,0.5]},"
-    "\"RigidBody\":{\"inverseMass\":1.0,\"inverseInertia\":[1,1,1]}}}]}";
-constexpr const char *kSceneV4AutomaticWithCollider =
-    "{\"version\":4,\"entities\":[{\"persistentId\":7,\"components\":{"
+constexpr const char *kSceneAutomaticWithCollider =
+    "{\"version\":6,\"entities\":[{\"persistentId\":7,\"components\":{"
     "\"Transform\":{\"position\":[0,0,0]},"
     "\"Collider\":{\"halfExtents\":[0.5,0.5,0.5]},"
     "\"RigidBody\":{\"inverseMass\":1.0,\"inverseInertia\":[1,1,1],"
     "\"inertiaAuthored\":false}}}]}";
-constexpr const char *kSceneV4AuthoredWithCollider =
-    "{\"version\":4,\"entities\":[{\"persistentId\":7,\"components\":{"
+constexpr const char *kSceneAuthoredWithCollider =
+    "{\"version\":6,\"entities\":[{\"persistentId\":7,\"components\":{"
     "\"Transform\":{\"position\":[0,0,0]},"
     "\"Collider\":{\"halfExtents\":[0.5,0.5,0.5]},"
     "\"RigidBody\":{\"inverseMass\":1.0,\"inverseInertia\":[1,1,1],"
     "\"inertiaAuthored\":true}}}]}";
-constexpr const char *kSceneV4NoProvenanceWithCollider =
-    "{\"version\":4,\"entities\":[{\"persistentId\":7,\"components\":{"
+constexpr const char *kSceneNoProvenanceWithCollider =
+    "{\"version\":6,\"entities\":[{\"persistentId\":7,\"components\":{"
     "\"Transform\":{\"position\":[0,0,0]},"
     "\"Collider\":{\"halfExtents\":[0.5,0.5,0.5]},"
     "\"RigidBody\":{\"inverseMass\":1.0,\"inverseInertia\":[1,1,1]}}}]}";
-constexpr const char *kSceneV3ShortArray =
-    "{\"version\":3,\"entities\":[{\"persistentId\":7,\"components\":{"
+constexpr const char *kSceneScalarInertia =
+    "{\"version\":6,\"entities\":[{\"persistentId\":7,\"components\":{"
+    "\"Transform\":{\"position\":[0.0,0.0,0.0]},"
+    "\"RigidBody\":{\"inverseMass\":1.0,\"inverseInertia\":0.25}}}]}";
+constexpr const char *kSceneShortInertiaArray =
+    "{\"version\":6,\"entities\":[{\"persistentId\":7,\"components\":{"
     "\"Transform\":{\"position\":[0.0,0.0,0.0]},"
     "\"RigidBody\":{\"inverseMass\":1.0,\"inverseInertia\":[0.25,0.5]}}}]}";
 
@@ -716,47 +693,27 @@ bool load_scene_body(const char *json, RigidBody *outBody) noexcept {
          world->get_rigid_body(entity, outBody);
 }
 
-void test_scene_migration() noexcept {
+void test_scene_inertia_provenance() noexcept {
   RigidBody body{};
-  check(load_scene_body(kSceneV2Scalar, &body) &&
-            vec_exact(body.inverseInertia, math::Vec3(0.25F, 0.25F, 0.25F)),
-        "scene v2 scalar inverse inertia loads on every axis");
-  check(load_scene_body(kSceneV1Scalar, &body) &&
-            vec_exact(body.inverseInertia, math::Vec3(0.0F, 0.0F, 0.0F)),
-        "scene v1 scalar zero stays a locked body");
-  // Older revisions always wrote the number the scene simulated with, so
-  // it stays that number, authored: a default-looking 1 is never read as
-  // "derive from the collider".
-  check(load_scene_body(kSceneV2DefaultWithCollider, &body) &&
-            vec_exact(body.inverseInertia, math::Vec3(1.0F, 1.0F, 1.0F)) &&
-            body.inertiaAuthored,
-        "scene v2 default scalar is kept as the authored value");
-  check(load_scene_body(kSceneV3Array, &body) &&
-            vec_exact(body.inverseInertia, math::Vec3(0.25F, 0.5F, 0.125F)) &&
-            body.inertiaAuthored,
-        "scene v3 array loads per axis, authored");
-  check(load_scene_body(kSceneV3DefaultArrayWithCollider, &body) &&
-            vec_exact(body.inverseInertia, math::Vec3(1.0F, 1.0F, 1.0F)) &&
-            body.inertiaAuthored,
-        "scene v3 default array with a collider is kept as authored");
-  // The current revision carries provenance: an automatic body derives from
-  // its collider on load whatever number the document holds, an authored
-  // one keeps its number.
-  check(load_scene_body(kSceneV4AutomaticWithCollider, &body) &&
+  // Provenance decides what a load does with the number the document
+  // holds: an automatic body derives from its collider whatever the file
+  // says, an authored one keeps its number, and a body with no provenance
+  // key is automatic.
+  check(load_scene_body(kSceneAutomaticWithCollider, &body) &&
             vec_near(body.inverseInertia, math::Vec3(6.0F, 6.0F, 6.0F)) &&
             !body.inertiaAuthored,
-        "scene v4 automatic body derives from the collider on load");
-  check(load_scene_body(kSceneV4AuthoredWithCollider, &body) &&
+        "an automatic body derives from the collider on load");
+  check(load_scene_body(kSceneAuthoredWithCollider, &body) &&
             vec_exact(body.inverseInertia, math::Vec3(1.0F, 1.0F, 1.0F)) &&
             body.inertiaAuthored,
-        "scene v4 authored body keeps its number beside a collider");
-  check(load_scene_body(kSceneV4NoProvenanceWithCollider, &body) &&
+        "an authored body keeps its number beside a collider");
+  check(load_scene_body(kSceneNoProvenanceWithCollider, &body) &&
             vec_near(body.inverseInertia, math::Vec3(6.0F, 6.0F, 6.0F)) &&
             !body.inertiaAuthored,
-        "scene v4 without the provenance key is automatic");
+        "a body without the provenance key is automatic");
 
-  // The current revision reads the field strictly; a refused load leaves
-  // the destination untouched.
+  // The tensor is read strictly: one number or a short array is refused,
+  // and a refused load leaves the destination untouched.
   std::unique_ptr<World> world = make_world();
   if (world == nullptr) {
     check(false, "world allocation");
@@ -765,12 +722,12 @@ void test_scene_migration() noexcept {
   const Entity sentinel =
       make_body(*world, math::Vec3(0.0F, 0.0F, 0.0F), 1.0F, nullptr);
   const std::size_t aliveBefore = world->alive_entity_count();
-  check(!engine::runtime::load_scene(*world, kSceneV3Scalar,
-                                     std::strlen(kSceneV3Scalar)),
-        "scene v3 refuses a scalar inverse inertia");
-  check(!engine::runtime::load_scene(*world, kSceneV3ShortArray,
-                                     std::strlen(kSceneV3ShortArray)),
-        "scene v3 refuses a two-element inverse inertia");
+  check(!engine::runtime::load_scene(*world, kSceneScalarInertia,
+                                     std::strlen(kSceneScalarInertia)),
+        "a scalar inverse inertia is refused");
+  check(!engine::runtime::load_scene(*world, kSceneShortInertiaArray,
+                                     std::strlen(kSceneShortInertiaArray)),
+        "a two-element inverse inertia is refused");
   RigidBody kept{};
   check((world->alive_entity_count() == aliveBefore) &&
             world->get_rigid_body(sentinel, &kept),
@@ -828,8 +785,8 @@ void test_scene_round_trip() noexcept {
   check(parser.parse(buffer.get(), size) && (parser.root() != nullptr) &&
             parser.get_object_field(*parser.root(), "version",
                                     &versionValue) &&
-            parser.as_uint(versionValue, &version) && (version == 5U),
-        "saved scene carries revision 5");
+            parser.as_uint(versionValue, &version) && (version == 6U),
+        "saved scene carries revision 6");
   check(std::strstr(buffer.get(), "\"inverseInertia\":[") != nullptr,
         "saved scene writes the tensor as an array");
 
@@ -885,7 +842,7 @@ bool write_prefab_file(const char *text) noexcept {
   return written == size;
 }
 
-void test_prefab_migration() noexcept {
+void test_prefab_inertia_tensor() noexcept {
   std::unique_ptr<World> world = make_world();
   if (world == nullptr) {
     check(false, "world allocation");
@@ -893,35 +850,29 @@ void test_prefab_migration() noexcept {
   }
   RigidBody body{};
 
-  check(write_prefab_file("{\"version\":1,\"components\":{"
+  // Authored provenance is explicit now: without it the body is automatic
+  // and derives from its collider, so a prefab that means to carry a
+  // tensor says so.
+  check(write_prefab_file("{\"version\":5,\"components\":{"
                           "\"RigidBody\":{\"inverseMass\":1.0,"
-                          "\"inverseInertia\":0.25}}}"),
-        "write prefab v1");
+                          "\"inverseInertia\":[0.25,0.5,0.125],"
+                          "\"inertiaAuthored\":true}}}"),
+        "write a prefab carrying an inertia tensor");
   Entity entity = engine::runtime::instantiate_prefab(*world, kPrefabPath);
   check((entity != engine::runtime::kInvalidEntity) &&
             world->get_rigid_body(entity, &body) &&
-            vec_exact(body.inverseInertia, math::Vec3(0.25F, 0.25F, 0.25F)),
-        "prefab v1 scalar inverse inertia loads on every axis");
-
-  check(write_prefab_file("{\"version\":2,\"components\":{"
-                          "\"RigidBody\":{\"inverseMass\":1.0,"
-                          "\"inverseInertia\":[0.25,0.5,0.125]}}}"),
-        "write prefab v2");
-  entity = engine::runtime::instantiate_prefab(*world, kPrefabPath);
-  check((entity != engine::runtime::kInvalidEntity) &&
-            world->get_rigid_body(entity, &body) &&
             vec_exact(body.inverseInertia, math::Vec3(0.25F, 0.5F, 0.125F)),
-        "prefab v2 array loads per axis");
+        "a prefab's inertia array loads per axis");
 
   const std::size_t aliveBefore = world->alive_entity_count();
-  check(write_prefab_file("{\"version\":2,\"components\":{"
+  check(write_prefab_file("{\"version\":5,\"components\":{"
                           "\"RigidBody\":{\"inverseMass\":1.0,"
                           "\"inverseInertia\":0.25}}}"),
-        "write prefab v2 scalar");
+        "write a prefab carrying a scalar inertia");
   entity = engine::runtime::instantiate_prefab(*world, kPrefabPath);
   check((entity == engine::runtime::kInvalidEntity) &&
             (world->alive_entity_count() == aliveBefore),
-        "prefab v2 refuses a scalar inverse inertia and creates nothing");
+        "a scalar inverse inertia is refused and creates nothing");
   static_cast<void>(std::remove(kPrefabPath));
 }
 
@@ -940,9 +891,9 @@ int main() {
   test_world_provenance_is_explicit();
   test_joint_respects_locked_axis();
   test_contact_respects_locked_axis();
-  test_scene_migration();
+  test_scene_inertia_provenance();
   test_scene_round_trip();
-  test_prefab_migration();
+  test_prefab_inertia_tensor();
   if (g_failures != 0) {
     std::printf("inertia tests: %d failure(s)\n", g_failures);
     return 1;

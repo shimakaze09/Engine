@@ -1,9 +1,10 @@
 // Implements the packer's bgfx shader cook: reads the
 // shader manifest (sources, stages, output stems, variant define sets),
-// invokes bgfx shaderc per variant and platform profile, stages each
-// binary through an atomic replace, and commits the whole output set
-// under one cook stamp so interruption can never certify a mixed
-// generation. Inputs are digested (manifest, sources, varying
+// invokes bgfx shaderc per variant and platform profile into memory, and
+// only when every output has compiled writes them all beside their final
+// paths and renames them into place, under one cook stamp: a compile error
+// or an interruption leaves the previous set whole, never a mix of two
+// generations. Inputs are digested (manifest, sources, varying
 // table, shaderc's shared include headers) and the cook's own logic
 // revision joins the settings hash, so should_repack skips
 // byte-identical cooks while any input edit or cook-behavior change
@@ -21,6 +22,7 @@
 #include <filesystem>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "engine/core/atomic_file.h"
@@ -376,12 +378,14 @@ std::vector<std::string> build_shaderc_arguments(
 }
 
 /// Invokes shaderc for one source/variant/profile into a staged sibling
-/// and atomically replaces the final output; false on any failure with
-/// the stage cleaned up.
+/// and returns the finished binary in `outBytes`; false on any failure
+/// with the stage cleaned up. Nothing at `finalPath` is touched: the cook
+/// commits every output together once all of them have compiled.
 bool cook_one(const std::string &shadercPath, const std::string &sourcePath,
               const std::string &varyingPath, const std::string &includeDir,
               bool isVertex, const std::vector<std::string> &defines,
-              const ShaderProfile &profile, const std::string &finalPath) {
+              const ShaderProfile &profile, const std::string &finalPath,
+              std::vector<char> *outBytes) {
   const std::string stagedPath = finalPath + ".cooking";
   const std::vector<std::string> arguments = build_shaderc_arguments(
       sourcePath, stagedPath, varyingPath, includeDir, isVertex, defines,
@@ -437,11 +441,45 @@ bool cook_one(const std::string &shadercPath, const std::string &sourcePath,
       std::memcpy(bytes.data() + at, kDefinition.data(), kDefinition.size());
     }
   }
-  if (!engine::core::atomic_write_file(finalPath.c_str(), bytes.data(),
-                                       bytes.size())) {
-    std::fprintf(stderr, "shader cook: cannot commit %s\n",
-                 finalPath.c_str());
-    return false;
+  *outBytes = std::move(bytes);
+  return true;
+}
+
+/// The sibling each output is written to before any output replaces its
+/// predecessor.
+std::string next_path(const std::string &finalPath) {
+  return finalPath + ".next";
+}
+
+/// Commits a fully compiled output set. Every binary is first written,
+/// durably, beside its final path; only when all of them are on disk is
+/// each renamed over its predecessor. A write failure removes what was
+/// staged and leaves the previous set, and the stamp certifying it,
+/// untouched. The renames that follow are single-file atomic operations
+/// on files already written; a failure among them is reported and the
+/// stamp is not rewritten, so the set is never certified.
+bool commit_outputs(const std::vector<std::string> &outputs,
+                    const std::vector<std::vector<char>> &binaries) {
+  std::error_code ignored;
+  for (std::size_t i = 0U; i < outputs.size(); ++i) {
+    const std::string staged = next_path(outputs[i]);
+    if (!engine::core::atomic_write_file(staged.c_str(), binaries[i].data(),
+                                         binaries[i].size())) {
+      std::fprintf(stderr, "shader cook: cannot stage %s\n",
+                   outputs[i].c_str());
+      for (std::size_t j = 0U; j <= i; ++j) {
+        std::filesystem::remove(next_path(outputs[j]), ignored);
+      }
+      return false;
+    }
+  }
+  for (const std::string &output : outputs) {
+    std::error_code error;
+    std::filesystem::rename(next_path(output), output, error);
+    if (error) {
+      std::fprintf(stderr, "shader cook: cannot commit %s\n", output.c_str());
+      return false;
+    }
   }
   return true;
 }
@@ -629,22 +667,31 @@ int run_shader_cook(int argc, char **argv) {
     return 1;
   }
 
+  // Every output compiles into memory before any is written: a compile
+  // error in the last shader must not leave the first one's new binary
+  // beside the old ones, a mix that links with mismatched varyings.
+  std::vector<std::vector<char>> binaries;
+  binaries.reserve(outputs.size());
   std::size_t outputIndex = 0U;
   for (const ShaderEntry &entry : entries) {
     for (const std::vector<std::string> &variant : entry.variants) {
       for (const ShaderProfile &profile : profiles) {
         const std::string &finalPath = outputs[outputIndex];
         ++outputIndex;
+        std::vector<char> bytes;
         if (!cook_one(shadercPath, (manifestDir / entry.source).string(),
-                      varyingPath, includeDir, entry.isVertex, variant,
-                      profile, finalPath)) {
-          // No stamp: the previous stamp (if any) still certifies the
-          // previous complete generation; a partial new one never
-          // becomes certified.
+                      varyingPath, includeDir, entry.isVertex, variant, profile,
+                      finalPath, &bytes)) {
+          // Nothing was written: the previous set and the stamp that
+          // certifies it are exactly as they were.
           return 1;
         }
+        binaries.push_back(std::move(bytes));
       }
     }
+  }
+  if (!commit_outputs(outputs, binaries)) {
+    return 1;
   }
 
   // The stamp anchors on its output file, so the cook's primary output

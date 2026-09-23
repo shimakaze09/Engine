@@ -12,6 +12,8 @@
 #include "engine/renderer/pass_resources.h"
 #include "engine/renderer/render_device.h"
 
+#include "../fake_render_device.h"
+
 #include <cstdint>
 #include <cstdio>
 
@@ -19,110 +21,57 @@ namespace engine::renderer {
 
 namespace {
 
-/// Bookkeeping the fake device records so tests can assert on resource
-/// lifetime, create-call volume, and draw destinations.
-struct FakeDeviceStats final {
-  std::uint32_t nextId = 1U;
-  int hdrTextureCreates = 0;
-  int renderTargetCreates = 0;
-  int aliveTextures = 0;
-  int aliveRenderTargets = 0;
-  bool failHdrTextureCreate = false;
-  bool failRenderTargetCreate = false;
-  std::uint32_t boundRenderTarget = 0U;
-  int draws = 0;
-  int drawsToBackBuffer = 0;
-};
-
-FakeDeviceStats g_stats{};
-RenderDevice g_device{};
+// The RGBA16F post-chain allocations are the ones the audit N-10 tests
+// script failures for; other formats always succeed.
+int g_hdrTextureCreates = 0;
+bool g_failHdrTextureCreate = false;
 
 DeviceTextureHandle fake_create_texture(const TextureDesc &desc) noexcept {
-  // The RGBA16F post-chain allocations are the ones the audit N-10 tests
-  // script failures for; other formats always succeed.
   if (desc.format == TextureFormat::RGBA16F) {
-    ++g_stats.hdrTextureCreates;
-    if (g_stats.failHdrTextureCreate) {
+    ++g_hdrTextureCreates;
+    if (g_failHdrTextureCreate) {
       return kInvalidDeviceTexture;
     }
   }
-  ++g_stats.aliveTextures;
-  return DeviceTextureHandle{g_stats.nextId++};
-}
-
-void fake_destroy_texture(DeviceTextureHandle texture) noexcept {
-  if (texture.value != 0U) {
-    --g_stats.aliveTextures;
-  }
+  return tests::fake::create_texture(desc);
 }
 
 RenderTargetHandle fake_create_render_target(
     const RenderTargetDesc &desc) noexcept {
-  ++g_stats.renderTargetCreates;
-  if (g_stats.failRenderTargetCreate) {
-    return RenderTargetHandle{};
-  }
+  const RenderTargetHandle target = tests::fake::create_render_target(desc);
   // The contract rejects targets over failed (invalid) textures; mirroring
   // that here keeps "no target is created over a failed texture" honest.
-  if ((desc.colorCount > 0U) &&
+  if ((target.value != 0U) && (desc.colorCount > 0U) &&
       (desc.colors[0].texture == kInvalidDeviceTexture)) {
+    tests::fake::destroy_render_target(target);
     return RenderTargetHandle{};
   }
-  ++g_stats.aliveRenderTargets;
-  return RenderTargetHandle{g_stats.nextId++};
+  return target;
 }
 
-void fake_destroy_render_target(RenderTargetHandle target) noexcept {
-  if (target.value != 0U) {
-    --g_stats.aliveRenderTargets;
-  }
-}
-
-void fake_bind_render_target(RenderTargetHandle target) noexcept {
-  g_stats.boundRenderTarget = target.value;
-}
-
-void fake_draw(DeviceGeometryHandle, PrimitiveTopology, std::int32_t,
-               std::int32_t) noexcept {
-  ++g_stats.draws;
-  if (g_stats.boundRenderTarget == 0U) {
-    ++g_stats.drawsToBackBuffer;
-  }
-}
-
-void fake_bind_program(DeviceProgramHandle) noexcept {}
-void fake_bind_texture_slot(std::uint32_t, DeviceTextureHandle) noexcept {}
-void fake_set_param_i32(ShaderParam, std::int32_t) noexcept {}
-void fake_set_param_f32(ShaderParam, float) noexcept {}
-void fake_set_param_vec2(ShaderParam, const float *) noexcept {}
-void fake_set_viewport(std::int32_t, std::int32_t, std::int32_t,
-                       std::int32_t) noexcept {}
-void fake_apply_render_state(const RenderState &) noexcept {}
-void fake_clear(ClearFlags, float, float, float, float) noexcept {}
-
-/// Installs the fake device table and clears its stats.
+/// Installs the fake device table and clears its record.
 void reset_fake_device() noexcept {
-  g_stats = FakeDeviceStats{};
-  g_device = RenderDevice{};
-  g_device.create_texture = &fake_create_texture;
-  g_device.destroy_texture = &fake_destroy_texture;
-  g_device.create_render_target = &fake_create_render_target;
-  g_device.destroy_render_target = &fake_destroy_render_target;
-  g_device.bind_render_target = &fake_bind_render_target;
-  g_device.draw = &fake_draw;
-  g_device.bind_program = &fake_bind_program;
-  g_device.bind_texture_slot = &fake_bind_texture_slot;
-  g_device.set_param_i32 = &fake_set_param_i32;
-  g_device.set_param_f32 = &fake_set_param_f32;
-  g_device.set_param_vec2 = &fake_set_param_vec2;
-  g_device.set_viewport = &fake_set_viewport;
-  g_device.apply_render_state = &fake_apply_render_state;
-  g_device.clear = &fake_clear;
+  g_hdrTextureCreates = 0;
+  g_failHdrTextureCreate = false;
+  tests::reset_fake_device();
+  RenderDevice &device = tests::fake_device();
+  device.create_texture = &fake_create_texture;
+  device.destroy_texture = &tests::fake::destroy_texture;
+  device.create_render_target = &fake_create_render_target;
+  device.destroy_render_target = &tests::fake::destroy_render_target;
+  device.bind_render_target = &tests::fake::bind_render_target;
+  device.draw = &tests::fake::draw;
+  device.bind_program = &tests::fake::bind_program;
+  device.bind_texture_slot = &tests::fake::bind_texture_slot;
+  device.set_param_i32 = &tests::fake::set_param_i32;
+  device.set_param_f32 = &tests::fake::set_param_f32;
+  device.set_param_vec2 = &tests::fake::set_param_vec2;
+  device.set_viewport = &tests::fake::set_viewport;
+  device.apply_render_state = &tests::fake::apply_render_state;
+  device.clear = &tests::fake::clear;
 }
 
 } // namespace
-
-const RenderDevice *render_device() noexcept { return &g_device; }
 
 void gpu_profiler_begin_pass(GpuPassId) noexcept {}
 void gpu_profiler_end_pass(GpuPassId) noexcept {}
@@ -146,8 +95,9 @@ int g_failures = 0;
 /// Number of bloom+luminance HDR texture / render-target create calls
 /// issued since the given baselines.
 int chain_create_calls_since(int hdrBaseline, int targetBaseline) noexcept {
-  return (g_stats.hdrTextureCreates - hdrBaseline) +
-         (g_stats.renderTargetCreates - targetBaseline);
+  return (g_hdrTextureCreates - hdrBaseline) +
+         (engine::tests::fake_creates(engine::tests::FakeKind::RenderTarget) -
+          targetBaseline);
 }
 
 /// Returns true when every bloom mip texture and render-target slot is
@@ -230,39 +180,46 @@ void test_framebuffer_failure_disables_post_chains() noexcept {
   static const SceneLightData lights{};
   BackendState &backend = backend_state();
 
-  g_stats.failRenderTargetCreate = true;
-  const int aliveTextures = g_stats.aliveTextures;
-  const int aliveRenderTargets = g_stats.aliveRenderTargets;
+  engine::tests::fake_log().failKinds =
+      engine::tests::fake_kind_bit(engine::tests::FakeKind::RenderTarget);
+  const int aliveTextures =
+      engine::tests::fake_alive(engine::tests::FakeKind::Texture);
+  const int aliveRenderTargets =
+      engine::tests::fake_alive(engine::tests::FakeKind::RenderTarget);
   FrameFlushContext ctx = make_context(lights, 640, 480);
   flush_post_chain(ctx);
 
-  CHECK(g_stats.drawsToBackBuffer == 0,
+  CHECK(engine::tests::fake_log().drawsToBackBuffer == 0,
         "no pass draws into the back buffer on chain failure");
   CHECK(bloom_chain_is_zeroed(backend), "failed bloom chain fully released");
   CHECK(luminance_chain_is_zeroed(backend),
         "failed luminance chain fully released");
-  CHECK(g_stats.aliveTextures == aliveTextures,
+  CHECK(engine::tests::fake_alive(engine::tests::FakeKind::Texture) ==
+            aliveTextures,
         "chain failure leaks no textures");
-  CHECK(g_stats.aliveRenderTargets == aliveRenderTargets,
+  CHECK(engine::tests::fake_alive(engine::tests::FakeKind::RenderTarget) ==
+            aliveRenderTargets,
         "chain failure leaks no render targets");
-  CHECK(g_stats.draws > 0, "tonemap still runs into the final target");
+  CHECK(engine::tests::fake_log().draws > 0,
+        "tonemap still runs into the final target");
 
-  const int hdrBaseline = g_stats.hdrTextureCreates;
-  const int targetBaseline = g_stats.renderTargetCreates;
+  const int hdrBaseline = g_hdrTextureCreates;
+  const int targetBaseline =
+      engine::tests::fake_creates(engine::tests::FakeKind::RenderTarget);
   FrameFlushContext repeatCtx = make_context(lights, 640, 480);
   flush_post_chain(repeatCtx);
   CHECK(chain_create_calls_since(hdrBaseline, targetBaseline) == 0,
         "failed size is not retried every frame");
-  CHECK(g_stats.drawsToBackBuffer == 0,
+  CHECK(engine::tests::fake_log().drawsToBackBuffer == 0,
         "repeat frame still never draws into the back buffer");
 
-  g_stats.failRenderTargetCreate = false;
+  engine::tests::fake_log().failKinds = 0U;
   FrameFlushContext resizedCtx = make_context(lights, 800, 600);
   flush_post_chain(resizedCtx);
   CHECK(!bloom_chain_is_zeroed(backend), "resize retries the bloom chain");
   CHECK(!luminance_chain_is_zeroed(backend),
         "resize retries the luminance chain");
-  CHECK(g_stats.drawsToBackBuffer == 0,
+  CHECK(engine::tests::fake_log().drawsToBackBuffer == 0,
         "recovered chain draws only into offscreen targets");
 }
 
@@ -274,20 +231,22 @@ void test_texture_failure_disables_post_chains() noexcept {
   static const SceneLightData lights{};
   BackendState &backend = backend_state();
 
-  g_stats.failHdrTextureCreate = true;
-  const int targetBaseline = g_stats.renderTargetCreates;
+  g_failHdrTextureCreate = true;
+  const int targetBaseline =
+      engine::tests::fake_creates(engine::tests::FakeKind::RenderTarget);
   FrameFlushContext ctx = make_context(lights, 640, 480);
   flush_post_chain(ctx);
 
-  CHECK(g_stats.drawsToBackBuffer == 0,
+  CHECK(engine::tests::fake_log().drawsToBackBuffer == 0,
         "no pass draws into the back buffer on texture failure");
   CHECK(bloom_chain_is_zeroed(backend), "failed bloom chain fully released");
   CHECK(luminance_chain_is_zeroed(backend),
         "failed luminance chain fully released");
-  CHECK(g_stats.renderTargetCreates == targetBaseline,
+  CHECK(engine::tests::fake_creates(engine::tests::FakeKind::RenderTarget) ==
+            targetBaseline,
         "no render target is created over a failed texture");
 
-  const int hdrBaseline = g_stats.hdrTextureCreates;
+  const int hdrBaseline = g_hdrTextureCreates;
   FrameFlushContext repeatCtx = make_context(lights, 640, 480);
   flush_post_chain(repeatCtx);
   CHECK(chain_create_calls_since(hdrBaseline, targetBaseline) == 0,
@@ -306,12 +265,13 @@ void test_success_creates_chains_once_per_size() noexcept {
   flush_post_chain(ctx);
   CHECK(!bloom_chain_is_zeroed(backend), "bloom chain created");
   CHECK(!luminance_chain_is_zeroed(backend), "luminance chain created");
-  CHECK(g_stats.draws > 0, "post chain draws");
-  CHECK(g_stats.drawsToBackBuffer == 0,
+  CHECK(engine::tests::fake_log().draws > 0, "post chain draws");
+  CHECK(engine::tests::fake_log().drawsToBackBuffer == 0,
         "all post draws land in offscreen targets");
 
-  const int hdrBaseline = g_stats.hdrTextureCreates;
-  const int targetBaseline = g_stats.renderTargetCreates;
+  const int hdrBaseline = g_hdrTextureCreates;
+  const int targetBaseline =
+      engine::tests::fake_creates(engine::tests::FakeKind::RenderTarget);
   FrameFlushContext repeatCtx = make_context(lights, 640, 480);
   flush_post_chain(repeatCtx);
   CHECK(chain_create_calls_since(hdrBaseline, targetBaseline) == 0,

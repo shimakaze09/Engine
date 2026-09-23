@@ -4,6 +4,8 @@
 #include "engine/runtime/editor_bridge.h"
 #include "engine/runtime/engine_pipeline.h"
 
+#include "../platform_event_from_sdl.h"
+
 #include <SDL3/SDL.h>
 
 namespace {
@@ -19,19 +21,19 @@ void capture_editor_world(engine::runtime::World *world) noexcept {
 }
 
 /// Records an editor event and begins keyboard capture.
-void process_editor_event_and_capture_keyboard(void * /*sdlEvent*/) noexcept {
+void process_editor_event_and_capture_keyboard(const engine::core::PlatformEvent & /*event*/) noexcept {
   ++g_editorProcessedEvents;
   g_editorCaptureKeyboard = true;
 }
 
 /// Records an editor event and begins mouse capture.
-void process_editor_event_and_capture_mouse(void * /*sdlEvent*/) noexcept {
+void process_editor_event_and_capture_mouse(const engine::core::PlatformEvent & /*event*/) noexcept {
   ++g_editorProcessedEvents;
   g_editorCaptureMouse = true;
 }
 
 /// Records an editor event without requesting capture.
-void process_editor_event_without_capture(void * /*sdlEvent*/) noexcept {
+void process_editor_event_without_capture(const engine::core::PlatformEvent & /*event*/) noexcept {
   ++g_editorProcessedEvents;
 }
 
@@ -98,9 +100,9 @@ int check_editor_capture_after_event_processing_skips_gameplay_input() {
 
   engine::core::begin_input_frame();
   const engine::runtime::InputEventRoute route =
-      engine::runtime::process_editor_input_event(&bridge, &event);
+      engine::runtime::process_editor_input_event(&bridge, engine::tests::from_sdl(event));
   if (route == engine::runtime::InputEventRoute::Gameplay) {
-    engine::core::input_process_event(&event);
+    engine::core::input_process_event(engine::tests::from_sdl(event));
   }
   engine::core::end_input_frame();
 
@@ -140,9 +142,9 @@ int check_editor_mouse_capture_after_event_processing_skips_gameplay_input() {
 
   engine::core::begin_input_frame();
   const engine::runtime::InputEventRoute route =
-      engine::runtime::process_editor_input_event(&bridge, &event);
+      engine::runtime::process_editor_input_event(&bridge, engine::tests::from_sdl(event));
   if (route == engine::runtime::InputEventRoute::Gameplay) {
-    engine::core::input_process_event(&event);
+    engine::core::input_process_event(engine::tests::from_sdl(event));
   }
   engine::core::end_input_frame();
 
@@ -181,9 +183,9 @@ int check_uncaptured_editor_event_reaches_gameplay_input() {
 
   engine::core::begin_input_frame();
   const engine::runtime::InputEventRoute route =
-      engine::runtime::process_editor_input_event(&bridge, &event);
+      engine::runtime::process_editor_input_event(&bridge, engine::tests::from_sdl(event));
   if (route == engine::runtime::InputEventRoute::Gameplay) {
-    engine::core::input_process_event(&event);
+    engine::core::input_process_event(engine::tests::from_sdl(event));
   }
   engine::core::end_input_frame();
 
@@ -214,7 +216,7 @@ int check_editor_processed_quit_event_routes_to_quit() {
   event.type = SDL_EVENT_QUIT;
 
   const engine::runtime::InputEventRoute route =
-      engine::runtime::process_editor_input_event(&bridge, &event);
+      engine::runtime::process_editor_input_event(&bridge, engine::tests::from_sdl(event));
 
   if (g_editorProcessedEvents != 1) {
     return 1;

@@ -185,21 +185,26 @@ void retire_terminal_script_loads(
 
     const content::LoadingState state = content::get_load_state(
         service->streamingQueue, handle.streamingHandle);
-    if (state == content::LoadingState::Failed) {
+    if ((state != content::LoadingState::Ready) &&
+        (state != content::LoadingState::Failed)) {
+      continue;
+    }
+    // Every terminal request is let go here, whatever the mesh ended as: a
+    // Ready request whose upload was skipped leaves the mesh Unloaded, and
+    // keeping that handle past the pass below, which releases the queue
+    // slot, would leave it stale -- and a stale handle reads as Failed.
+    // So a failure is mirrored only onto a mesh still waiting on this
+    // load; one the upload settled keeps the state it was given.
+    if ((state == content::LoadingState::Failed) &&
+        (renderer::mesh_asset_state(service->database, handle.assetId) ==
+         renderer::AssetState::Loading)) {
       static_cast<void>(renderer::set_mesh_asset_state(
           service->database, handle.assetId, renderer::AssetState::Failed,
           renderer::kInvalidMeshHandle));
-      static_cast<void>(content::release_load(service->streamingQueue,
-                                               handle.streamingHandle));
-      handle.streamingHandle = content::kInvalidLoadHandle;
-    } else if ((state == content::LoadingState::Ready) &&
-               (renderer::mesh_asset_state(service->database,
-                                           handle.assetId) ==
-                renderer::AssetState::Ready)) {
-      static_cast<void>(content::release_load(service->streamingQueue,
-                                               handle.streamingHandle));
-      handle.streamingHandle = content::kInvalidLoadHandle;
     }
+    static_cast<void>(
+        content::release_load(service->streamingQueue, handle.streamingHandle));
+    handle.streamingHandle = content::kInvalidLoadHandle;
   }
 }
 
@@ -215,32 +220,10 @@ void sync_streaming_failures(
   retire_terminal_script_loads(service);
 
   content::AssetStreamingQueue *queue = service->streamingQueue;
-  struct TerminalRequest final {
-    content::LoadHandle handle{};
-    renderer::AssetId assetId = renderer::kInvalidAssetId;
-    content::LoadingState state = content::LoadingState::Queued;
-  };
-  std::array<TerminalRequest, content::AssetStreamingQueue::kMaxRequests>
+  std::array<content::TerminalLoad, content::AssetStreamingQueue::kMaxRequests>
       terminals{};
-  std::size_t terminalCount = 0U;
-
-  {
-    std::lock_guard<std::mutex> lock(queue->mutex);
-    for (std::uint32_t i = 0U;
-         i < content::AssetStreamingQueue::kMaxRequests; ++i) {
-      const content::LoadRequest &request = queue->requests[i];
-      if (!request.occupied ||
-          ((request.state != content::LoadingState::Ready) &&
-           (request.state != content::LoadingState::Failed))) {
-        continue;
-      }
-      terminals[terminalCount].handle =
-          content::LoadHandle{i, request.generation};
-      terminals[terminalCount].assetId = request.assetId;
-      terminals[terminalCount].state = request.state;
-      ++terminalCount;
-    }
-  }
+  const std::size_t terminalCount = content::collect_terminal_loads(
+      queue, terminals.data(), terminals.size());
 
   for (std::size_t i = 0U; i < terminalCount; ++i) {
     if ((terminals[i].state == content::LoadingState::Failed) &&

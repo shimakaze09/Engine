@@ -13,6 +13,8 @@
 #include "engine/renderer/render_device.h"
 #include "engine/renderer/shader_system.h"
 
+#include "../fake_render_device.h"
+
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -29,7 +31,6 @@ constexpr const char *kFragBinFile =
 constexpr const char *kVertVfsPath = "shdr/_shader_reload_test.vert";
 constexpr const char *kFragVfsPath = "shdr/_shader_reload_test.frag";
 
-engine::renderer::RenderDevice g_fakeDevice{};
 std::uint32_t g_nextProgram = 100U;
 std::uint32_t g_lastDestroyedProgram = 0U;
 std::uint32_t g_destroyedProgramCount = 0U;
@@ -75,11 +76,12 @@ void fake_destroy_program(
 }
 
 void configure_fake_device() noexcept {
-  g_fakeDevice = engine::renderer::RenderDevice{};
-  g_fakeDevice.caps.cookedPrograms = true;
-  g_fakeDevice.cooked_program_profile = &cooked_profile;
-  g_fakeDevice.create_program_binary = &fake_create_program_binary;
-  g_fakeDevice.destroy_program = &fake_destroy_program;
+  engine::tests::reset_fake_device();
+  engine::renderer::RenderDevice &device = engine::tests::fake_device();
+  device.caps.cookedPrograms = true;
+  device.cooked_program_profile = &cooked_profile;
+  device.create_program_binary = &fake_create_program_binary;
+  device.destroy_program = &fake_destroy_program;
 }
 
 bool write_file(const char *path, const char *text) noexcept {
@@ -338,16 +340,6 @@ int check_failed_reload_attempts_once_per_generation() {
 }
 
 } // namespace
-
-namespace engine::renderer {
-
-bool initialize_render_device() noexcept { return true; }
-
-void shutdown_render_device() noexcept {}
-
-const RenderDevice *render_device() noexcept { return &g_fakeDevice; }
-
-} // namespace engine::renderer
 
 /// Runs this executable or test program.
 int main() {

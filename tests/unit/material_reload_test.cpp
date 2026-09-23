@@ -43,7 +43,7 @@ int verify_reload_success(engine::renderer::AssetDatabase *database) {
   constexpr const char *kPath = "material_reload_ok.json";
   constexpr const char *kVirtualPath = "mat/material_reload_ok.json";
 
-  if (!write_material_file(kPath, "{\"version\":2,\"roughness\":0.2}")) {
+  if (!write_material_file(kPath, "{\"version\":3,\"roughness\":0.2}")) {
     return 10;
   }
   const auto loadResult =
@@ -55,7 +55,7 @@ int verify_reload_success(engine::renderer::AssetDatabase *database) {
   const engine::renderer::AssetId id = *loadResult;
 
   if (!write_material_file(
-          kPath, "{\"version\":2,\"roughness\":0.8,\"metallic\":1.0,"
+          kPath, "{\"version\":3,\"roughness\":0.8,\"metallic\":1.0,"
                 "\"textures\":{\"albedo\":\"assets/textures/new.png\"}}")) {
     remove_file(kPath);
     return 12;
@@ -91,7 +91,7 @@ int verify_reload_malformed_preserves_previous(
   constexpr const char *kPath = "material_reload_bad.json";
   constexpr const char *kVirtualPath = "mat/material_reload_bad.json";
 
-  if (!write_material_file(kPath, "{\"version\":2,\"roughness\":0.33,"
+  if (!write_material_file(kPath, "{\"version\":3,\"roughness\":0.33,"
                                   "\"metallic\":0.11}")) {
     return 20;
   }

@@ -1,8 +1,10 @@
 // Pins the three asset identities' contracts: v4 GUID generation and its
-// canonical text round trip with strict parsing, the canonical-path key's
-// spelling independence and case sensitivity, the case-only portability
-// conflict check, and the content hash. Also pins that the three are
-// distinct types the compiler will not let a caller interchange.
+// canonical text round trip with strict parsing, the built-in GUID's
+// derivation from the canonical path, the reference's two text shapes and
+// their strict parse, the canonical-path key's spelling independence and
+// case sensitivity, the case-only portability conflict check, and the
+// content hash. Also pins that the three are distinct types the compiler
+// will not let a caller interchange.
 
 #include <cstdio>
 #include <cstring>
@@ -236,6 +238,121 @@ void test_content_hash(engine::tests::TestContext &ctx) noexcept {
             "the numbers can coincide, so only the types keep them apart");
 }
 
+void test_builtin_guid(engine::tests::TestContext &ctx) noexcept {
+  const ct::AssetGuid cube = ct::builtin_asset_guid("builtin://cube");
+  ctx.check(ct::asset_guid_is_valid(cube), "a built-in has a GUID");
+  ctx.check(ct::builtin_asset_guid("builtin://cube") == cube,
+            "the derivation is deterministic");
+  ctx.check(ct::builtin_asset_guid("builtin://./cube") == cube,
+            "every spelling of one path derives one GUID");
+  ctx.check(!(ct::builtin_asset_guid("builtin://sphere") == cube),
+            "two built-ins derive two GUIDs");
+  ctx.check(!(ct::builtin_asset_guid("builtin://Cube") == cube),
+            "case is identity for a built-in as for any path");
+
+  // Version 8 and the RFC variant, in the same positions v4 uses, so a
+  // derived GUID can never coincide with a generated one.
+  ctx.check(((cube.high >> 12U) & 0xFULL) == 8U,
+            "the version nibble says custom (8), not v4");
+  ctx.check(((cube.low >> 62U) & 0x3ULL) == 2U,
+            "the variant bits are 10xx");
+  ctx.check(!(cube == ct::generate_asset_guid()),
+            "a derived GUID is never a generated one");
+
+  ctx.check(!ct::asset_guid_is_valid(ct::builtin_asset_guid(nullptr)),
+            "a null path derives nil");
+  ctx.check(!ct::asset_guid_is_valid(ct::builtin_asset_guid("")),
+            "an empty path derives nil");
+  ctx.check(!ct::asset_guid_is_valid(ct::builtin_asset_guid("builtin://../x")),
+            "an uncanonicalizable path derives nil");
+}
+
+void test_local_id_parse(engine::tests::TestContext &ctx) noexcept {
+  std::uint64_t value = 0U;
+  ctx.check(ct::parse_asset_local_id("0123456789abcdef", 16U, &value) &&
+                (value == 0x0123456789ABCDEFULL),
+            "sixteen lowercase hex digits parse");
+  ctx.check(!ct::parse_asset_local_id("0123456789abcde", 15U, &value),
+            "fifteen digits are refused");
+  ctx.check(!ct::parse_asset_local_id("0123456789ABCDEF", 16U, &value),
+            "uppercase digits are refused");
+  ctx.check(!ct::parse_asset_local_id("0123456789abcdeg", 16U, &value),
+            "a non-hex character is refused");
+  ctx.check(!ct::parse_asset_local_id(nullptr, 16U, &value),
+            "null text is refused");
+  ctx.check(!ct::parse_asset_local_id("0123456789abcdef", 16U, nullptr),
+            "a null out is refused");
+}
+
+void test_ref_text_round_trip(engine::tests::TestContext &ctx) noexcept {
+  const ct::AssetGuid guid{0x0123456789ABCDEFULL, 0xFEDCBA9876543210ULL};
+  const char *const guidText = "01234567-89ab-cdef-fedc-ba9876543210";
+  char text[ct::kAssetRefTextLength + 1U] = {};
+
+  // A primary asset is written as the bare GUID.
+  const ct::AssetRef primary = ct::asset_ref_primary(guid);
+  ctx.check(ct::format_asset_ref(primary, text, sizeof(text)) &&
+                (std::strcmp(text, guidText) == 0),
+            "a primary reference formats as the bare GUID");
+  ct::AssetRef parsed{};
+  ctx.check(ct::parse_asset_ref(text, &parsed) && (parsed == primary),
+            "the bare GUID parses back to the primary reference");
+
+  // A sub-asset carries its local id after '#'.
+  const ct::AssetRef sub{guid, 0x00FF00FF00FF00FFULL};
+  ctx.check(ct::format_asset_ref(sub, text, sizeof(text)) &&
+                (std::strcmp(text, "01234567-89ab-cdef-fedc-ba9876543210"
+                                   "#00ff00ff00ff00ff") == 0),
+            "a sub-asset reference formats as GUID#localId");
+  ctx.check(std::strlen(text) == ct::kAssetRefTextLength,
+            "the sub-asset form is exactly kAssetRefTextLength long");
+  ctx.check(ct::parse_asset_ref(text, &parsed) && (parsed == sub),
+            "the sub-asset form parses back whole");
+
+  // Capacity is checked for the shape actually written.
+  char tight[ct::kAssetGuidTextLength + 1U] = {};
+  ctx.check(ct::format_asset_ref(primary, tight, sizeof(tight)),
+            "a primary reference fits a GUID-sized buffer");
+  ctx.check(!ct::format_asset_ref(sub, tight, sizeof(tight)) &&
+                (tight[0] == '\0'),
+            "a sub-asset reference refuses a GUID-sized buffer and empties it");
+  char short36[ct::kAssetGuidTextLength] = {};
+  ctx.check(!ct::format_asset_ref(primary, short36, sizeof(short36)),
+            "a buffer one short of the GUID form is refused");
+}
+
+void test_ref_parse_is_strict(engine::tests::TestContext &ctx) noexcept {
+  const char *const guidText = "01234567-89ab-cdef-fedc-ba9876543210";
+  ct::AssetRef parsed{ct::AssetGuid{1U, 1U}, 7U};
+
+  ctx.check(!ct::parse_asset_ref(nullptr, &parsed) &&
+                !ct::asset_ref_is_valid(parsed),
+            "null text is refused and the out is nil");
+  ctx.check(!ct::parse_asset_ref("", &parsed), "empty text is refused");
+  ctx.check(!ct::parse_asset_ref(guidText, nullptr), "a null out is refused");
+
+  std::string text = std::string(guidText) + "#0123456789abcde";
+  ctx.check(!ct::parse_asset_ref(text.c_str(), &parsed),
+            "a fifteen-digit local id is refused");
+  text = std::string(guidText) + "#0123456789ABCDEF";
+  ctx.check(!ct::parse_asset_ref(text.c_str(), &parsed),
+            "an uppercase local id is refused");
+  text = std::string(guidText) + "#0123456789abcdef0";
+  ctx.check(!ct::parse_asset_ref(text.c_str(), &parsed),
+            "a trailing character is refused");
+  text = std::string(guidText) + "%0123456789abcdef";
+  ctx.check(!ct::parse_asset_ref(text.c_str(), &parsed),
+            "a separator other than '#' is refused");
+  text = std::string(guidText) + "#0000000000000000";
+  ctx.check(!ct::parse_asset_ref(text.c_str(), &parsed),
+            "the sub-asset shape naming the primary is refused");
+  text = std::string("01234567-89ab-cdef-fedc-ba987654321") + "#0123456789abcdef";
+  ctx.check(!ct::parse_asset_ref(text.c_str(), &parsed),
+            "a malformed GUID in the sub-asset shape is refused");
+  ctx.check(!ct::asset_ref_is_valid(parsed),
+            "every refusal leaves the out nil");
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -247,5 +364,9 @@ int main() {
   test_guid_hash_and_order(ctx);
   test_path_key(ctx);
   test_content_hash(ctx);
+  test_builtin_guid(ctx);
+  test_local_id_parse(ctx);
+  test_ref_text_round_trip(ctx);
+  test_ref_parse_is_strict(ctx);
   return ctx.finish("asset identity");
 }

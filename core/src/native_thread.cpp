@@ -125,4 +125,17 @@ void NativeThread::join() noexcept {
   m_handle = nullptr;
 }
 
+
+/// Production spawn: straight through to the wrapper, so the injected and
+/// the real path differ in nothing but the refusal.
+bool production_spawn(NativeThread *thread, NativeThread::EntryFn entry,
+                      void *userData) noexcept {
+  return (thread != nullptr) && thread->spawn(entry, userData);
+}
+
+const ThreadOps &production_thread_ops() noexcept {
+  static const ThreadOps ops{&production_spawn};
+  return ops;
+}
+
 } // namespace engine::core

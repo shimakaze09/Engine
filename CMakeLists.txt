@@ -509,6 +509,20 @@ else()
     target_compile_options(engine_lua PRIVATE -w -Wno-error)
 endif()
 
+# Lua's string-hash seed is pinned so table iteration over string keys is
+# the same in every process. It is a function-like macro, which MSVC
+# cannot define on the command line, so the definition is force-included
+# instead: /FI and -include are the same mechanism on all three lanes.
+set(_ENGINE_LUA_SEED_HEADER
+    "${CMAKE_SOURCE_DIR}/scripting/src/lua_seed_override.h")
+if(MSVC)
+    target_compile_options(engine_lua PRIVATE
+        "/FI${_ENGINE_LUA_SEED_HEADER}")
+else()
+    target_compile_options(engine_lua PRIVATE
+        "-include" "${_ENGINE_LUA_SEED_HEADER}")
+endif()
+
 FetchContent_Declare(
     imgui
     GIT_REPOSITORY https://github.com/ocornut/imgui.git

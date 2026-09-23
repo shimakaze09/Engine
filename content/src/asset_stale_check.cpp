@@ -218,21 +218,35 @@ constexpr std::uint32_t kVerdictPending = 0U;
 constexpr std::uint32_t kVerdictOk = 1U;
 constexpr std::uint32_t kVerdictRejected = 2U;
 
-/// Fixed CAS-claimed verdict cache so each cooked path is hashed and
-/// validated once per session; a full table or an in-flight entry just
+/// Fixed CAS-claimed verdict cache so each cooked path's outputs are hashed
+/// once per stamp: an entry is the verdict in the low two bits over the
+/// stamp's content key, in one atomic so a reader never pairs one stamp's
+/// key with another's verdict. A recook rewrites the stamp, so its next
+/// check validates afresh. A full table or an in-flight entry just
 /// revalidates without caching, which is correct and merely slower.
 std::atomic<std::uint64_t> g_verdictPaths[kMaxVerdictEntries] = {};
-std::atomic<std::uint32_t> g_verdictValues[kMaxVerdictEntries] = {};
+std::atomic<std::uint64_t> g_verdictValues[kMaxVerdictEntries] = {};
+
+/// The 62-bit key a verdict is cached under: the stamp's content hash, or
+/// a fixed key for an asset with no stamp.
+constexpr std::uint64_t kStampKeyMask = ~0ULL >> 2U;
+constexpr std::uint64_t kNoStampKey = kStampKeyMask;
+
+std::uint64_t pack_verdict(std::uint64_t stampKey,
+                           std::uint32_t verdict) noexcept {
+  return ((stampKey & kStampKeyMask) << 2U) | verdict;
+}
+
+/// Writes `<cookedPath>.cookstamp`; false when it does not fit.
+bool build_stamp_path(const char *cookedPath, char (&out)[512]) noexcept {
+  const int written =
+      std::snprintf(out, sizeof(out), "%s.cookstamp", cookedPath);
+  return (written > 0) && (written < static_cast<int>(sizeof(out)));
+}
 
 /// Reads the whole stamp file; false when absent or oversized.
-bool read_stamp_file(const char *cookedPath, std::unique_ptr<char[]> *outText,
+bool read_stamp_file(const char *stampPath, std::unique_ptr<char[]> *outText,
                      std::size_t *outSize) noexcept {
-  char stampPath[512] = {};
-  const int written =
-      std::snprintf(stampPath, sizeof(stampPath), "%s.cookstamp", cookedPath);
-  if ((written <= 0) || (written >= static_cast<int>(sizeof(stampPath)))) {
-    return false;
-  }
 
   FILE *file = nullptr;
 #ifdef _WIN32
@@ -499,11 +513,11 @@ std::uint32_t validate_stamp_outputs(const char *cookedPath, char *text) noexcep
   return kVerdictOk;
 }
 
-/// Computes the verdict for one cooked path (no cache involvement).
-std::uint32_t compute_generation_verdict(const char *cookedPath) noexcept {
-  std::unique_ptr<char[]> stampText{};
-  std::size_t stampSize = 0U;
-  if (!read_stamp_file(cookedPath, &stampText, &stampSize)) {
+/// Computes the verdict for one cooked path from its stamp text, or null
+/// when it has none (no cache involvement).
+std::uint32_t compute_generation_verdict(const char *cookedPath,
+                                         char *stampText) noexcept {
+  if (stampText == nullptr) {
     // Never-certified content (hand-placed, legacy, or test assets) stays
     // loadable; the notice keeps the gap visible without failing loads.
     char message[640] = {};
@@ -512,7 +526,7 @@ std::uint32_t compute_generation_verdict(const char *cookedPath) noexcept {
     core::log_message(core::LogLevel::Info, "assets", message);
     return kVerdictOk;
   }
-  return validate_stamp_outputs(cookedPath, stampText.get());
+  return validate_stamp_outputs(cookedPath, stampText);
 }
 
 } // namespace
@@ -522,34 +536,66 @@ bool cooked_asset_generation_ok(const char *cookedPath) noexcept {
     return false;
   }
 
+  // The stamp is small and read on every check; the outputs it certifies
+  // are what the cache saves hashing again. Its key is its content and
+  // when it was written: a clean recook of a torn asset writes the same
+  // text the rejected cook did, and only the write tells them apart.
+  char stampPath[512] = {};
+  std::unique_ptr<char[]> stampText{};
+  std::size_t stampSize = 0U;
+  const bool hasStamp = build_stamp_path(cookedPath, stampPath) &&
+                        read_stamp_file(stampPath, &stampText, &stampSize);
+  std::uint64_t stampKey = kNoStampKey;
+  if (hasStamp) {
+    std::uint64_t hash = core::kFnv1a64Offset;
+    for (std::size_t i = 0U; i < stampSize; ++i) {
+      hash =
+          core::fnv1a_64_append(hash, static_cast<std::uint8_t>(stampText[i]));
+    }
+    std::error_code timeError;
+    const auto writeTime = std::filesystem::last_write_time(
+        std::filesystem::path(stampPath), timeError);
+    if (!timeError) {
+      hash = core::fnv1a_64_append_u64(
+          hash,
+          static_cast<std::uint64_t>(writeTime.time_since_epoch().count()));
+    }
+    // A stamp that hashes to the no-stamp key only costs a revalidation.
+    stampKey = hash & kStampKeyMask;
+  }
+
   const std::uint64_t pathHash = core::fnv1a_64(cookedPath);
-  std::size_t claimedSlot = kMaxVerdictEntries;
+  std::size_t slot = kMaxVerdictEntries;
   for (std::size_t i = 0U; i < kMaxVerdictEntries; ++i) {
     std::uint64_t current = g_verdictPaths[i].load(std::memory_order_acquire);
     if (current == 0ULL) {
       std::uint64_t expected = 0ULL;
       if (g_verdictPaths[i].compare_exchange_strong(
               expected, pathHash, std::memory_order_acq_rel)) {
-        claimedSlot = i;
+        slot = i;
         break;
       }
       current = expected;
     }
     if (current == pathHash) {
-      const std::uint32_t cached =
+      const std::uint64_t cached =
           g_verdictValues[i].load(std::memory_order_acquire);
-      if (cached != kVerdictPending) {
-        return cached == kVerdictOk;
+      const auto verdict = static_cast<std::uint32_t>(cached & 3U);
+      if ((verdict != kVerdictPending) && ((cached >> 2U) == stampKey)) {
+        return verdict == kVerdictOk;
       }
-      // Another thread is validating this path right now; validate
-      // redundantly rather than blocking the load path.
+      // Pending on another thread, or cached under a stamp since
+      // rewritten: validate now, and record the result for this stamp.
+      slot = i;
       break;
     }
   }
 
-  const std::uint32_t verdict = compute_generation_verdict(cookedPath);
-  if (claimedSlot < kMaxVerdictEntries) {
-    g_verdictValues[claimedSlot].store(verdict, std::memory_order_release);
+  const std::uint32_t verdict = compute_generation_verdict(
+      cookedPath, hasStamp ? stampText.get() : nullptr);
+  if (slot < kMaxVerdictEntries) {
+    g_verdictValues[slot].store(pack_verdict(stampKey, verdict),
+                                std::memory_order_release);
   }
   return verdict == kVerdictOk;
 }
@@ -592,7 +638,7 @@ void reset_cooked_asset_stale_warnings() noexcept {
     g_checkedPaths[i].store(0ULL, std::memory_order_release);
   }
   for (std::size_t i = 0U; i < kMaxVerdictEntries; ++i) {
-    g_verdictValues[i].store(kVerdictPending, std::memory_order_release);
+    g_verdictValues[i].store(0ULL, std::memory_order_release);
     g_verdictPaths[i].store(0ULL, std::memory_order_release);
   }
 }

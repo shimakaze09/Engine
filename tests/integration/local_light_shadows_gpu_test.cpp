@@ -68,8 +68,8 @@ int shadow_pixels(engine::EnginePipeline &pipeline, const char *label,
 
 int run(engine::EnginePipeline &pipeline, World &world) noexcept {
   engine::tests::checked(engine::core::cvar_set_string("r_fog_mode", "off"), "r_fog_mode");
-  engine::runtime::Transform floorTransform{};
-  floorTransform.scale = engine::math::Vec3(40.0F, 1.0F, 40.0F);
+  const engine::runtime::Transform floorTransform =
+      engine::tests::framed_floor_transform(40.0F);
   engine::runtime::Transform cubeTransform{};
   cubeTransform.position = engine::math::Vec3(0.0F, 1.5F, 0.0F);
   cubeTransform.scale = engine::math::Vec3(2.0F, 0.5F, 2.0F);

@@ -10,9 +10,6 @@
 #define __PRFCHWINTRIN_H // NOLINT(bugprone-reserved-identifier)
 #endif
 
-#include <SDL3/SDL.h>
-
-#include "backends/imgui_impl_sdl3.h"
 #include "imgui.h"
 #include "imgui_internal.h"
 
@@ -43,6 +40,7 @@
 #include "engine/content/asset_metadata.h"
 #include "engine/renderer/camera.h"
 #include "engine/renderer/command_buffer.h"
+#include "engine/renderer/mesh_primitives.h"
 #include "engine/runtime/editor_bridge.h"
 #include "engine/runtime/primitive_collider.h"
 #include "engine/runtime/scene_serializer.h"
@@ -656,6 +654,7 @@ runtime::Entity execute_asset_spawn(
   make_asset_spawn_name(virtualPath, &command->name);
   command->hasMesh = true;
   command->mesh.meshAssetId = assetId;
+  command->mesh.meshRef = runtime::editor_asset_ref(assetId);
   if (!editor_session().commandHistory.execute(command)) {
     return runtime::kInvalidEntity;
   }
@@ -741,9 +740,15 @@ static PrimitiveSpawnDesc primitive_spawn_desc(
   case EditorPrimitive::Plane:
     desc.name = "Plane";
     desc.builtinPath = "builtin://plane";
-    desc.groundY = -0.5F;
+    // Both heights are derived from where the mesh puts its surface, so
+    // the spawn lands its ground on zero and the collider's top meets
+    // that ground, whatever the primitive does. They were hand-written
+    // offsets that cancelled a surface half a metre above the origin,
+    // which is the sort of correction that goes stale silently.
+    desc.groundY = -renderer::kBuiltinPlaneSurfaceY;
     desc.halfExtents = math::Vec3(5.0F, 0.1F, 5.0F);
-    desc.colliderLocalPosition = math::Vec3(0.0F, 0.4F, 0.0F);
+    desc.colliderLocalPosition =
+        math::Vec3(0.0F, renderer::kBuiltinPlaneSurfaceY - 0.1F, 0.0F);
     break;
   }
   return desc;
@@ -774,6 +779,11 @@ runtime::Entity execute_primitive_spawn(EditorPrimitive primitive) noexcept {
   command->hasMesh = true;
   command->mesh.meshAssetId =
       content::make_asset_id_from_path(desc.builtinPath);
+  // A primitive's identity is derived from its path rather than looked
+  // up: it ships with the engine, so it is the same asset in every build
+  // and needs no catalog record to be nameable in a saved scene.
+  command->mesh.meshRef = content::asset_ref_primary(
+      content::builtin_asset_guid(desc.builtinPath));
   command->hasCollider = true;
   command->colliderComponent.shape = desc.fallbackShape;
   command->colliderComponent.halfExtents = desc.halfExtents;
@@ -1130,6 +1140,8 @@ ComponentEditSnapshot default_component_snapshot(
         editor_session().world->get_mesh_component(entity, &sourceMesh)) {
       snapshot.foliagePatch.meshAssetIds[0] = sourceMesh.meshAssetId;
       snapshot.foliagePatch.meshAssetIds[1] = sourceMesh.meshAssetId;
+      snapshot.foliagePatch.meshRefs[0] = sourceMesh.meshRef;
+      snapshot.foliagePatch.meshRefs[1] = sourceMesh.meshRef;
     }
     for (std::uint32_t i = 0U; i < snapshot.foliagePatch.instanceCount; ++i) {
       const std::uint32_t x = i % 4U;

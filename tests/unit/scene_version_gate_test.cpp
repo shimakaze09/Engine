@@ -1,10 +1,11 @@
 // Pins the scene loader's schema-version refusal (issue #369): load_scene is
-// what stops a scene written by a newer engine — or a malformed version
-// field — from loading as the subset this build recognizes and later being
-// resaved over the author's file as that reduction. The gate's policy helper
-// is covered from the prefab side; this suite pins the scene wiring itself:
-// every refused document returns false and leaves the destination World's
-// entities byte-for-byte reachable, and the accepted revisions still commit.
+// what stops a scene written against any revision but this build's — newer,
+// superseded, or a malformed version field — from loading as the subset this
+// build recognizes and later being resaved over the author's file as that
+// reduction. The gate's policy helper is covered from the prefab side; this
+// suite pins the scene wiring itself: every refused document returns false
+// and leaves the destination World's entities byte-for-byte reachable, and
+// the one accepted revision still commits.
 
 #include <cstdio>
 #include <cstring>
@@ -42,18 +43,21 @@ struct VersionCase final {
   bool accepted;
 };
 
-// Revision 5 is what this build writes and revisions 1 to 4 still load;
-// an absent key is the documented legacy revision 1. Everything else — zero,
-// future, negative, fractional, out-of-range, or a non-integer JSON type —
-// must be refused.
+// Revision 6 is the one this build reads. Every other value is refused,
+// superseded revisions included: the project is unreleased, so the tree is
+// migrated once per format change and no dual-read layer is kept. Reading a
+// superseded revision through this reader would drop the fields it no
+// longer knows in silence, and the next save would make that permanent. An
+// absent key names no revision and is refused with the rest.
 constexpr VersionCase kCases[] = {
-    {"{\"version\":5,\"entities\":[]}", true},
-    {"{\"version\":4,\"entities\":[]}", true},
-    {"{\"version\":3,\"entities\":[]}", true},
-    {"{\"version\":2,\"entities\":[]}", true},
-    {"{\"version\":1,\"entities\":[]}", true},
-    {"{\"entities\":[]}", true},
-    {"{\"version\":6,\"entities\":[]}", false},
+    {"{\"version\":6,\"entities\":[]}", true},
+    {"{\"version\":5,\"entities\":[]}", false},
+    {"{\"version\":4,\"entities\":[]}", false},
+    {"{\"version\":3,\"entities\":[]}", false},
+    {"{\"version\":2,\"entities\":[]}", false},
+    {"{\"version\":1,\"entities\":[]}", false},
+    {"{\"entities\":[]}", false},
+    {"{\"version\":7,\"entities\":[]}", false},
     {"{\"version\":999,\"entities\":[]}", false},
     {"{\"version\":0,\"entities\":[]}", false},
     {"{\"version\":-1,\"entities\":[]}", false},

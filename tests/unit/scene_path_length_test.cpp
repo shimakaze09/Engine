@@ -24,7 +24,7 @@ constexpr const char *kPrefabPath = "scene_path_length_prefab.json";
 /// Builds a scene JSON buffer with one entity carrying the given field.
 std::string make_scene_json(const char *componentKey,
                             const std::string &pathValue) {
-  std::string json = "{\"version\":2,\"entities\":[{\"components\":{\"";
+  std::string json = "{\"version\":6,\"entities\":[{\"components\":{\"";
   json += componentKey;
   json += "\":\"";
   json += pathValue;
@@ -129,7 +129,7 @@ int check_prefab_path_rejection() {
   const std::string longPath(
       sizeof(engine::runtime::ScriptComponent::scriptPath), 'd');
   std::string prefab =
-      "{\"version\":1,\"components\":{\"ScriptComponent\":\"";
+      "{\"version\":5,\"components\":{\"ScriptComponent\":\"";
   prefab += longPath;
   prefab += "\"}}";
   if (!write_prefab_file(prefab)) {

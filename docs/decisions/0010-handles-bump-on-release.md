@@ -3,6 +3,10 @@
 **Date:** 2026-09-18. Decided by the maintainer agent on the owner's
 delegation; the owner may override.
 
+**Status:** Implemented in `EntityPool` through `World::recycle_entity`
+ahead of the slot-table consolidation, which has not landed; the
+"lands with the consolidation" consequence did not hold.
+
 ## Context
 
 `EntityPool` recycles an entity without bumping its generation, so a handle

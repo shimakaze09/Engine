@@ -53,8 +53,8 @@ engine::runtime::PointLightComponent pool_light(float r, float g) noexcept {
 /// point light left of centre and a green one right of it, so what they
 /// contribute is most of the image.
 bool build_scene(World &world, Entity *outRed, Entity *outGreen) noexcept {
-  engine::runtime::Transform floorTransform{};
-  floorTransform.scale = engine::math::Vec3(40.0F, 1.0F, 40.0F);
+  const engine::runtime::Transform floorTransform =
+      engine::tests::framed_floor_transform(40.0F);
   if (engine::tests::add_builtin_mesh(world, "builtin://plane", floorTransform,
                                       engine::math::Vec3(1.0F, 1.0F, 1.0F)) ==
       kInvalidEntity) {

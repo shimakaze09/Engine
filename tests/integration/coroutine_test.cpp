@@ -114,7 +114,7 @@ bool test_wait_seconds() noexcept {
 }
 
 // -----------------------------------------------------------------------
-// 2. wait_frames(3) — entity created after 3 frames
+// 2. wait_frames(3) — entity created after 3 fixed steps
 // -----------------------------------------------------------------------
 bool test_wait_frames() noexcept {
   engine::scripting::initialize_scripting();
@@ -141,12 +141,12 @@ bool test_wait_frames() noexcept {
     return false;
   }
 
-  // Frame 0: start coroutine. wakeAtFrame = 0 + 3 = 3.
+  // Tick 0: start coroutine. wakeAtTick = 0 + 3 = 3.
   engine::tests::publish_frame_time(0.016F, 0.0F);
   engine::tests::publish_frame_index(0U);
   engine::scripting::call_script_function("on_start");
 
-  // Frames 1, 2 — not ready yet.
+  // Ticks 1, 2 — not ready yet.
   for (std::uint32_t f = 1U; f <= 2U; ++f) {
     engine::tests::publish_frame_index(f);
     engine::tests::publish_frame_time(0.016F, 0.016F * static_cast<float>(f));
@@ -171,6 +171,71 @@ bool test_wait_frames() noexcept {
   engine::scripting::shutdown_scripting();
   remove_script();
   return true;
+}
+
+// -----------------------------------------------------------------------
+// 2b. wait_frames counts fixed steps, not rendered frames (#415 item 4,
+// docs/decisions/0019). A frame that simulated nothing — paused, or
+// waiting on a long asset load — must not advance a coroutine's wait,
+// and a frame that simulated several steps advances it by several. On
+// the old cadence this counted rendered frames, so a paused editor
+// walked every coroutine forward.
+// -----------------------------------------------------------------------
+bool test_wait_frames_counts_steps_not_frames() noexcept {
+  engine::scripting::initialize_scripting();
+  auto world = std::unique_ptr<engine::runtime::World>(
+      new (std::nothrow) engine::runtime::World());
+  if (!world) {
+    return false;
+  }
+  engine::core::ServiceLocator serviceLocator{};
+  engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
+  engine::scripting::set_default_mesh_asset_id(1U);
+
+  const char *script = "function on_start()\n"
+                       "  engine.start_coroutine(function()\n"
+                       "    engine.wait_frames(2)\n"
+                       "    local e = engine.spawn_entity()\n"
+                       "    engine.set_name(e, 'steps_done')\n"
+                       "  end)\n"
+                       "end\n";
+
+  if (!write_script(script) || !engine::scripting::load_script(kTempScript)) {
+    engine::scripting::shutdown_scripting();
+    remove_script();
+    return false;
+  }
+
+  bool ok = true;
+  engine::tests::publish_frame_index(0U);
+  engine::tests::publish_frame_time(0.016F, 0.0F);
+  engine::scripting::call_script_function("on_start");
+
+  // Ten rendered frames that simulated no steps at all. The tick index
+  // stays where it was, so the wait must not move.
+  for (std::uint32_t frame = 1U; frame <= 10U; ++frame) {
+    engine::tests::publish_frame_index(frame);
+    engine::tests::publish_tick_index(0U);
+    engine::scripting::tick_coroutines();
+  }
+  if (count_named(world.get(), "steps_done") != 0) {
+    ok = false; // frames alone woke it: the old cadence
+  }
+
+  // One frame that simulated two steps reaches the wait, which the old
+  // cadence could not express at all.
+  if (ok) {
+    engine::tests::publish_frame_index(11U);
+    engine::tests::publish_tick_index(2U);
+    engine::scripting::tick_coroutines();
+    if (count_named(world.get(), "steps_done") != 1) {
+      ok = false;
+    }
+  }
+
+  engine::scripting::shutdown_scripting();
+  remove_script();
+  return ok;
 }
 
 // -----------------------------------------------------------------------
@@ -272,7 +337,7 @@ bool test_chained_waits() noexcept {
   engine::scripting::call_script_function("on_start");
 
   // Tick at t=0.15 (frame 1) — wait(0.1) should wake, step1 created,
-  // then immediately re-yields on wait_frames(2), wakeAtFrame = 1 + 2 = 3.
+  // then immediately re-yields on wait_frames(2), wakeAtTick = 1 + 2 = 3.
   engine::tests::publish_frame_index(1U);
   engine::tests::publish_frame_time(0.15F, 0.15F);
   engine::scripting::tick_coroutines();
@@ -685,6 +750,8 @@ int main() {
   const TestCase tests[] = {
       {"wait_seconds", test_wait_seconds},
       {"wait_frames", test_wait_frames},
+      {"wait_frames_counts_steps_not_frames",
+       test_wait_frames_counts_steps_not_frames},
       {"wait_until", test_wait_until},
       {"chained_waits", test_chained_waits},
       {"error_handling", test_error_handling},

@@ -27,6 +27,8 @@
 #include "engine/renderer/render_device.h"
 #include "engine/renderer/shader_system.h"
 
+#include "../fake_render_device.h"
+
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -59,9 +61,7 @@ constexpr const char *kShaderFiles[] = {
     "debug_line.frag",      "luminance.frag",
 };
 
-engine::renderer::RenderDevice g_fakeDevice{};
 std::uint32_t g_nextProgram = 100U;
-std::uint32_t g_nextResource = 1U;
 
 // Uniform names the fake reports as missing (-1), each scoped to
 // programs linked after its marker so a reload's re-linked program loses
@@ -140,62 +140,31 @@ fake_shader_param(engine::renderer::DeviceProgramHandle program,
   return engine::renderer::ShaderParam{3};
 }
 
-engine::renderer::DeviceBufferHandle
-fake_create_buffer(const engine::renderer::BufferDesc &) noexcept {
-  return engine::renderer::DeviceBufferHandle{g_nextResource++};
-}
-
-void fake_destroy_buffer(engine::renderer::DeviceBufferHandle) noexcept {}
-
-engine::renderer::DeviceGeometryHandle
-fake_create_geometry(const engine::renderer::GeometryDesc &) noexcept {
-  return engine::renderer::DeviceGeometryHandle{g_nextResource++};
-}
-
-void fake_destroy_geometry(engine::renderer::DeviceGeometryHandle) noexcept {}
-
-engine::renderer::DeviceTextureHandle
-fake_create_texture(const engine::renderer::TextureDesc &) noexcept {
-  return engine::renderer::DeviceTextureHandle{g_nextResource++};
-}
-
-void fake_destroy_texture(engine::renderer::DeviceTextureHandle) noexcept {}
-
-engine::renderer::RenderTargetHandle
-fake_create_render_target(const engine::renderer::RenderTargetDesc &) noexcept {
-  return engine::renderer::RenderTargetHandle{g_nextResource++};
-}
-
-void fake_destroy_render_target(engine::renderer::RenderTargetHandle) noexcept {
-}
-
-void fake_update_buffer(engine::renderer::DeviceBufferHandle, const void *,
-                        std::ptrdiff_t) noexcept {}
-
 /// Installs the fake function table: the program/parameter seam plus the
 /// resource creators the init paths need (skybox geometry, debug line
 /// buffers, SSAO noise, shadow targets). Uniform-block entries stay null
 /// (and caps.uniformBlocks false) so the skinning family is skipped,
 /// keeping the harness scoped to issue #56.
 void configure_fake_device() noexcept {
-  g_fakeDevice = engine::renderer::RenderDevice{};
+  engine::tests::reset_fake_device();
+  engine::renderer::RenderDevice &device = engine::tests::fake_device();
   // Enough sampler units that the deferred capability gate stays open —
   // this harness exercises the reload contract, not device limits.
-  g_fakeDevice.caps.maxTextureSamplers = 32U;
-  g_fakeDevice.caps.cookedPrograms = true;
-  g_fakeDevice.cooked_program_profile = &fake_cooked_profile;
-  g_fakeDevice.create_program_binary = &fake_create_program_binary;
-  g_fakeDevice.destroy_program = &fake_destroy_program;
-  g_fakeDevice.shader_param = &fake_shader_param;
-  g_fakeDevice.create_buffer = &fake_create_buffer;
-  g_fakeDevice.destroy_buffer = &fake_destroy_buffer;
-  g_fakeDevice.update_buffer = &fake_update_buffer;
-  g_fakeDevice.create_geometry = &fake_create_geometry;
-  g_fakeDevice.destroy_geometry = &fake_destroy_geometry;
-  g_fakeDevice.create_texture = &fake_create_texture;
-  g_fakeDevice.destroy_texture = &fake_destroy_texture;
-  g_fakeDevice.create_render_target = &fake_create_render_target;
-  g_fakeDevice.destroy_render_target = &fake_destroy_render_target;
+  device.caps.maxTextureSamplers = 32U;
+  device.caps.cookedPrograms = true;
+  device.cooked_program_profile = &fake_cooked_profile;
+  device.create_program_binary = &fake_create_program_binary;
+  device.destroy_program = &fake_destroy_program;
+  device.shader_param = &fake_shader_param;
+  device.create_buffer = &engine::tests::fake::create_buffer;
+  device.destroy_buffer = &engine::tests::fake::destroy_buffer;
+  device.update_buffer = &engine::tests::fake::update_buffer;
+  device.create_geometry = &engine::tests::fake::create_geometry;
+  device.destroy_geometry = &engine::tests::fake::destroy_geometry;
+  device.create_texture = &engine::tests::fake::create_texture;
+  device.destroy_texture = &engine::tests::fake::destroy_texture;
+  device.create_render_target = &engine::tests::fake::create_render_target;
+  device.destroy_render_target = &engine::tests::fake::destroy_render_target;
 }
 
 bool write_profile_shader_file(const char *fileName, const char *profile,
@@ -447,6 +416,144 @@ int check_deferred_survives_optimized_out_uniforms() {
   return 0;
 }
 
+/// EXPECTATION (#647): the per-program table the passes bind through
+/// follows a reload. Every other cached device program is re-read on
+/// refresh; this table was not, so a recook left the flush binding
+/// programs the shader system had already destroyed. All three shipped
+/// variants cook from one source, so one edit to the fragment stage
+/// relinks every one of them and staleness covers every forward draw in
+/// the frame rather than one model's — including the physically-based
+/// program, which the table holds a second reference to.
+int check_shading_programs_follow_a_reload() {
+  using namespace engine::renderer;
+
+  reset_backend_harness();
+  clear_missing_uniforms();
+  if (!initialize_backend()) {
+    return 370;
+  }
+
+  BackendState &backend = backend_state();
+  const RenderDevice *dev = render_device();
+  const std::uint8_t ids[3] = {shading_program_id(ShadingModel::Pbr),
+                               shading_program_id(ShadingModel::Toon),
+                               shading_program_id(ShadingModel::Unlit)};
+
+  // The positive control. A build where the toon and unlit variants did
+  // not register would pass every assertion below while proving nothing,
+  // so an unregistered program is a failure of this test rather than a
+  // case it skips.
+  DeviceProgramHandle before[3] = {};
+  for (std::size_t i = 0U; i < 3U; ++i) {
+    before[i] = backend.shadingPrograms[ids[i]];
+    if (before[i] == kInvalidDeviceProgram) {
+      return 371;
+    }
+    if (backend.shadingProgramShaderHandles[ids[i]] == kInvalidShaderProgram) {
+      return 372;
+    }
+  }
+  // Three separate links, so three distinct device programs: if two ids
+  // shared one program, a stale entry could read as refreshed.
+  if ((before[0] == before[1]) || (before[1] == before[2]) ||
+      (before[0] == before[2])) {
+    return 373;
+  }
+
+  if (!touch_shader_file("pbr.frag")) {
+    return 374;
+  }
+  const std::uint64_t epochBeforeReload = shader_reload_epoch();
+  check_shader_reload();
+  if (shader_reload_epoch() == epochBeforeReload) {
+    return 375; // nothing relinked, so the refresh below proves nothing
+  }
+  refresh_backend_program_state(backend, dev);
+
+  for (std::size_t i = 0U; i < 3U; ++i) {
+    const DeviceProgramHandle now = backend.shadingPrograms[ids[i]];
+    if (now == kInvalidDeviceProgram) {
+      return 376;
+    }
+    // The failure this case exists for: the entry still names the
+    // program the reload destroyed.
+    if (now == before[i]) {
+      return 377;
+    }
+    if (now != shader_device_program(backend.shadingProgramShaderHandles[
+            ids[i]])) {
+      return 378;
+    }
+  }
+  // The physically-based entry and the program the rest of the backend
+  // caches are one fact held twice; a refresh that moved only one of
+  // them would shade the same material differently depending on which
+  // the pass read.
+  if (backend.shadingPrograms[shading_program_id(ShadingModel::Pbr)] !=
+      backend.pbrProgram) {
+    return 379;
+  }
+  return 0;
+}
+
+/// EXPECTATION: an id past what a draw key can name is refused at
+/// registration rather than stored somewhere a draw could reach. The
+/// key's field is seven bits, so nothing a real key carries is
+/// unaddressable; this pins the refusal for the authored programs #642
+/// adds, where the id comes from a document rather than an enumerator.
+int check_registration_refuses_what_cannot_be_drawn() {
+  using namespace engine::renderer;
+
+  reset_backend_harness();
+  clear_missing_uniforms();
+  if (!initialize_backend()) {
+    return 380;
+  }
+  BackendState &backend = backend_state();
+  const ShaderProgramHandle loaded =
+      backend.shadingProgramShaderHandles[shading_program_id(
+          ShadingModel::Toon)];
+  if (loaded == kInvalidShaderProgram) {
+    return 381;
+  }
+
+  if (register_shading_program(
+          backend, static_cast<std::uint8_t>(kMaxShadingPrograms), loaded) !=
+      ShadingProgramRegistration::NotAddressable) {
+    return 382;
+  }
+  if (register_shading_program(backend, 255U, loaded) !=
+      ShadingProgramRegistration::NotAddressable) {
+    return 383;
+  }
+  // The last id a key can carry, which is inside the table by one.
+  if (register_shading_program(
+          backend, static_cast<std::uint8_t>(kMaxShadingPrograms - 1U),
+          loaded) != ShadingProgramRegistration::Registered) {
+    return 384;
+  }
+  // A program that did not load leaves its id unregistered: an entry
+  // holding nothing is how the flush knows to fall back, so claiming the
+  // id with one would be indistinguishable from never registering.
+  if (register_shading_program(backend, 5U, kInvalidShaderProgram) !=
+      ShadingProgramRegistration::ProgramUnavailable) {
+    return 385;
+  }
+  if (backend.shadingProgramShaderHandles[5] != kInvalidShaderProgram) {
+    return 386;
+  }
+  // A second registration replaces, which is how a reauthored program
+  // takes over its own id rather than needing a separate release.
+  if (register_shading_program(backend, 5U, loaded) !=
+      ShadingProgramRegistration::Registered) {
+    return 387;
+  }
+  if (backend.shadingPrograms[5] != shader_device_program(loaded)) {
+    return 388;
+  }
+  return 0;
+}
+
 /// EXPECTATION: the dx11 cooked profile links every program through the
 /// introspected entry with both spirv sidecars present, never the plain
 /// entry. DXBC uniform tables are incomplete — fxc strips the
@@ -463,8 +570,9 @@ int check_dx11_profile_links_with_spirv_sidecars() {
       return 360;
     }
   }
-  g_fakeDevice.cooked_program_profile = &fake_cooked_profile_dx11;
-  g_fakeDevice.create_program_binary_introspected =
+  engine::tests::fake_device().cooked_program_profile =
+      &fake_cooked_profile_dx11;
+  engine::tests::fake_device().create_program_binary_introspected =
       &fake_create_program_binary_introspected;
   reset_link_counters();
 
@@ -481,20 +589,14 @@ int check_dx11_profile_links_with_spirv_sidecars() {
     result = 365;
   }
 
-  g_fakeDevice.cooked_program_profile = &fake_cooked_profile;
-  g_fakeDevice.create_program_binary_introspected = nullptr;
+  engine::tests::fake_device().cooked_program_profile = &fake_cooked_profile;
+  engine::tests::fake_device().create_program_binary_introspected = nullptr;
   return result;
 }
 
 } // namespace
 
 namespace engine::renderer {
-
-bool initialize_render_device() noexcept { return true; }
-
-void shutdown_render_device() noexcept {}
-
-const RenderDevice *render_device() noexcept { return &g_fakeDevice; }
 
 bool initialize_gpu_profiler() noexcept { return true; }
 
@@ -552,6 +654,12 @@ int main() {
     result = check_deferred_survives_optimized_out_uniforms();
   }
   if (result == 0) {
+    result = check_shading_programs_follow_a_reload();
+  }
+  if (result == 0) {
+    result = check_registration_refuses_what_cannot_be_drawn();
+  }
+  if (result == 0) {
     result = check_dx11_profile_links_with_spirv_sidecars();
   }
 
@@ -559,5 +667,14 @@ int main() {
   engine::core::shutdown_vfs();
   engine::core::shutdown_cvars();
   engine::core::shutdown_logging();
+  // Every code in this suite is above 255 and a process exit status
+  // carries only the low byte, so the status a runner reports is not the
+  // code written here. Printing both keeps a failure greppable.
+  if (result != 0) {
+    std::fprintf(stderr,
+                 "command_buffer_reload_contract_test: failed with code %d "
+                 "(the exit status shows %d)\n",
+                 result, result & 0xFF);
+  }
   return result;
 }

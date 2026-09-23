@@ -48,6 +48,10 @@ struct RenderPrepChunkJobData final {
   /// the frame, it does not fail the graph.
   std::atomic<std::uint32_t> *droppedDrawCommands = nullptr;
   math::Mat4 viewProjection{};
+  /// The device's clip-depth convention, read on the main thread when the
+  /// graph is built: the chunk jobs run on workers, and the render device
+  /// is main-thread only.
+  bool depthZeroOne = false;
   float interpolationAlpha = 1.0F;
   /// Null disables the auxiliary list (camera-culled draws are dropped).
   const RenderPrepAuxiliaryInputs *auxiliary = nullptr;

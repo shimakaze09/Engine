@@ -51,6 +51,8 @@ struct ResolveScratch final {
   std::array<float, kMaxColliders> expandZ{};
   std::array<std::uint32_t, kMaxColliders> overflowList{};
   std::array<bool, kMaxColliders> isOverflow{};
+  // One collider's broadphase candidates, sorted before any is tested.
+  std::array<std::uint32_t, kMaxColliders> candidates{};
 };
 
 /// True when a step delta is usable: finite and strictly positive. NaN

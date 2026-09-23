@@ -13,6 +13,7 @@
 #include "debug_bindings.h"
 #include "deferred_mutations.h"
 #include "deterministic_math_library.h"
+#include "random_bindings.h"
 #include "engine/scripting/bindable_api.h"
 #include "engine/scripting/dap_server.h"
 #include "entity_handle.h"
@@ -51,6 +52,7 @@ extern "C" {
 #include "engine/core/string_util.h"
 #include "engine/math/quat.h"
 #include "engine/scripting/runtime_services.h"
+#include "engine/core/thread_affinity.h"
 
 
 namespace engine::scripting {
@@ -141,8 +143,10 @@ int lua_engine_start_coroutine(lua_State *state) noexcept {
 // --- Entity lifecycle completeness ---
 
 /// Registers the full Lua API on one global engine table: the manual
-/// wrappers first, then the generated bindings; the two sets are disjoint,
-/// so registration order carries no override semantics.
+/// wrappers first, then the generated bindings last. Each generated
+/// binding asserts that no manual wrapper already claimed its name, so a
+/// name has one owner; registering them last is what lets that check see
+/// every manual registration.
 void register_engine_bindings(lua_State *state) noexcept {
   lua_newtable(state);
 
@@ -256,6 +260,7 @@ void register_engine_bindings(lua_State *state) noexcept {
   lua_setfield(state, -2, "wait_until");
 
   register_light_bindings(state);
+  register_random_bindings(state);
 
   register_scene_bindings(state);
 
@@ -266,12 +271,12 @@ void register_engine_bindings(lua_State *state) noexcept {
   lua_pushcfunction(state, &lua_engine_require);
   lua_setfield(state, -2, "require");
 
-  register_generated_bindings(state);
-
   lua_pushcfunction(state, &lua_engine_persist);
   lua_setfield(state, -2, "persist");
   lua_pushcfunction(state, &lua_engine_restore);
   lua_setfield(state, -2, "restore");
+
+  register_generated_bindings(state);
 
   lua_setglobal(state, "engine");
 }
@@ -326,6 +331,10 @@ int open_libraries_trampoline(lua_State *state) noexcept {
   // The transcendentals go through the deterministic scalar set, never
   // the C library, so script-driven state matches across platforms.
   install_deterministic_math(state);
+  // math.random and math.randomseed become the engine stream, so a
+  // script reaching for either by habit still gets a reproducible
+  // draw instead of an operating-system seeded one.
+  install_engine_random_over_math(state);
   luaL_requiref(state, LUA_UTF8LIBNAME, luaopen_utf8, 1);
   lua_pop(state, 1);
   register_engine_bindings(state);
@@ -389,30 +398,6 @@ int bindable_get_entity_count() noexcept {
   }
   return static_cast<int>(
       runtime_binding().services->alive_entity_count(runtime_binding().world));
-}
-
-bool bindable_is_gamepad_connected() noexcept {
-  return core::is_gamepad_connected();
-}
-
-bool bindable_is_key_down(int scancode) noexcept {
-  return core::is_key_down(scancode);
-}
-
-bool bindable_is_key_pressed(int scancode) noexcept {
-  return core::is_key_pressed(scancode);
-}
-
-bool bindable_is_gamepad_button_down(int button) noexcept {
-  return core::is_gamepad_button_down(button);
-}
-
-bool bindable_is_action_down(const char *name) noexcept {
-  return (name != nullptr) ? core::is_action_down(name) : false;
-}
-
-bool bindable_is_action_pressed(const char *name) noexcept {
-  return (name != nullptr) ? core::is_action_pressed(name) : false;
 }
 
 float bindable_get_action_value(const char *name) noexcept {
@@ -551,6 +536,7 @@ void reset_run_state() noexcept {
 
 /// Loads the requested resource for script.
 bool load_script(const char *path) noexcept {
+  ENGINE_ASSERT_MAIN_THREAD();
   lua_State *state = lua_state();
   if (state == nullptr) {
     core::log_message(core::LogLevel::Error, "scripting",
@@ -585,6 +571,7 @@ bool load_script(const char *path) noexcept {
 }
 
 bool call_script_function(const char *name) noexcept {
+  ENGINE_ASSERT_MAIN_THREAD();
   lua_State *state = lua_state();
   if (state == nullptr) {
     core::log_message(core::LogLevel::Error, "scripting",
@@ -609,6 +596,7 @@ bool call_script_function(const char *name) noexcept {
 }
 
 bool call_script_function_float(const char *name, float arg) noexcept {
+  ENGINE_ASSERT_MAIN_THREAD();
   lua_State *state = lua_state();
   if (state == nullptr) {
     core::log_message(core::LogLevel::Error, "scripting",
@@ -1065,8 +1053,19 @@ void set_simulation_clock(const core::SimulationClock &clock) noexcept {
 
 const core::SimulationClock &simulation_clock() noexcept { return g_clock; }
 
+void dispatch_timers() noexcept {
+  ENGINE_ASSERT_MAIN_THREAD();
+  dispatch_lua_timers(lua_state());
+}
+
 void tick_timers() noexcept {
-  tick_lua_timers(lua_state(), static_cast<float>(g_clock.deltaSeconds));
+  // Advance and dispatch in one call, for a caller outside the fixed
+  // step: the pipeline advances per step and dispatches per frame
+  // instead, so this is what a test or tool stepping a world by hand
+  // uses. The delta is the published clock's, which is the time the
+  // world actually advanced.
+  advance_lua_timers(lua_state(), static_cast<float>(g_clock.deltaSeconds));
+  dispatch_lua_timers(lua_state());
 }
 
 // Scene transitions reset the World's TimerManager (reset_world/load_scene)
@@ -1079,8 +1078,12 @@ void tick_timers() noexcept {
 void clear_timers() noexcept { clear_lua_timer_bindings(lua_state()); }
 
 void tick_coroutines() noexcept {
+  ENGINE_ASSERT_MAIN_THREAD();
+  // Ticks, not rendered frames: engine.wait_frames(n) waits n fixed
+  // simulation steps, so a coroutine resumes at the same point in the
+  // simulation whatever the frame rate (docs/decisions/0019).
   tick_lua_coroutines(lua_state(), static_cast<float>(g_clock.simulationSeconds),
-                      g_clock.frameIndex, log_lua_error, arm_debug_lua_hook);
+                      g_clock.tickIndex, log_lua_error, arm_debug_lua_hook);
 }
 
 void clear_coroutines() noexcept { clear_lua_coroutines(lua_state()); }

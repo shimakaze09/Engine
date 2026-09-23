@@ -50,8 +50,9 @@ bool runtime_streaming_upload_mesh(renderer::AssetId assetId,
 /// Releases every transfer slot's CPU payload (teardown path).
 void clear_streamed_mesh_data(RuntimeAssetStreamingState *state) noexcept;
 
-/// Retires terminal script streaming handles: mirrors Failed into the
-/// database, releases the queue slot, and clears the stale handle reference.
+/// Retires terminal script streaming handles: releases every Ready or
+/// Failed request a script handle holds and clears the reference, and
+/// mirrors a failure onto a mesh still Loading.
 void retire_terminal_script_loads(
     runtime::EngineAssetDatabaseService *service) noexcept;
 

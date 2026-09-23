@@ -1,7 +1,7 @@
-// Implements the three asset identities: v4 GUID generation and its
-// canonical text round trip, the canonical-path key, and the content
-// hash. Each identity's derivation lives here so no call site can invent
-// its own and drift.
+// Implements the three asset identities: v4 GUID generation, the derived
+// built-in GUID, the canonical text round trips of a GUID and of a
+// reference, the canonical-path key, and the content hash. Each
+// derivation lives here so no call site can invent its own and drift.
 
 #include "engine/content/asset_identity.h"
 
@@ -156,26 +156,39 @@ bool parse_asset_guid(const char *text, AssetGuid *out) noexcept {
   return true;
 }
 
-std::uint64_t asset_guid_hash(const AssetGuid &guid) noexcept {
-  std::uint64_t hash = core::kFnv1a64Offset;
-  for (std::size_t i = 0U; i < 8U; ++i) {
-    const std::size_t shift = (7U - i) * 8U;
-    hash = core::fnv1a_64_append(
-        hash, static_cast<std::uint8_t>((guid.high >> shift) & 0xFFULL));
+AssetGuid builtin_asset_guid(const char *virtualPath) noexcept {
+  char canonical[core::kMaxVirtualPathLength] = {};
+  if (!core::canonical_virtual_path(virtualPath, canonical,
+                                    sizeof(canonical))) {
+    return kNilAssetGuid;
   }
-  for (std::size_t i = 0U; i < 8U; ++i) {
-    const std::size_t shift = (7U - i) * 8U;
-    hash = core::fnv1a_64_append(
-        hash, static_cast<std::uint8_t>((guid.low >> shift) & 0xFFULL));
-  }
-  return hash;
-}
-
-bool asset_guid_precedes(const AssetGuid &a, const AssetGuid &b) noexcept {
-  if (a.high != b.high) {
-    return a.high < b.high;
-  }
-  return a.low < b.low;
+  // Two independent streams, each salted by which half it feeds, so the
+  // halves are not the same 64 bits twice.
+  const auto derive = [&canonical](const char *salt) noexcept {
+    std::uint64_t hash = core::kFnv1a64Offset;
+    for (const unsigned char *cursor =
+             reinterpret_cast<const unsigned char *>(salt);
+         *cursor != 0U; ++cursor) {
+      hash = core::fnv1a_64_append(hash, static_cast<std::uint8_t>(*cursor));
+    }
+    hash = core::fnv1a_64_append(hash, 0U);
+    for (const unsigned char *cursor =
+             reinterpret_cast<const unsigned char *>(canonical);
+         *cursor != 0U; ++cursor) {
+      hash = core::fnv1a_64_append(hash, static_cast<std::uint8_t>(*cursor));
+    }
+    return hash;
+  };
+  AssetGuid guid{};
+  guid.high = derive("builtin.high");
+  guid.low = derive("builtin.low");
+  // Version 8 in the high nibble of byte 6 (bits 12..15 of `high`), the
+  // RFC variant in the top two bits of byte 8 (the top of `low`): the
+  // same positions generate_asset_guid sets for v4. Bit 15 of `high` is
+  // therefore always set, so the result is never nil.
+  guid.high = (guid.high & ~0xF000ULL) | 0x8000ULL;
+  guid.low = (guid.low & ~0xC000000000000000ULL) | 0x8000000000000000ULL;
+  return guid;
 }
 
 std::uint64_t asset_local_id(const char *subName) noexcept {
@@ -194,6 +207,87 @@ std::uint64_t asset_local_id(const char *subName) noexcept {
     hash = 1ULL;
   }
   return hash;
+}
+
+bool parse_asset_local_id(const char *text, std::size_t length,
+                          std::uint64_t *out) noexcept {
+  if ((out == nullptr) || (text == nullptr) || (length != 16U)) {
+    return false;
+  }
+  std::uint64_t value = 0U;
+  for (std::size_t i = 0U; i < length; ++i) {
+    const char ch = text[i];
+    std::uint64_t digit = 0U;
+    if ((ch >= '0') && (ch <= '9')) {
+      digit = static_cast<std::uint64_t>(ch - '0');
+    } else if ((ch >= 'a') && (ch <= 'f')) {
+      digit = static_cast<std::uint64_t>(ch - 'a') + 10U;
+    } else {
+      return false;
+    }
+    value = (value << 4U) | digit;
+  }
+  *out = value;
+  return true;
+}
+
+bool format_asset_ref(const AssetRef &ref, char *out,
+                      std::size_t capacity) noexcept {
+  if ((out == nullptr) || (capacity == 0U)) {
+    return false;
+  }
+  out[0] = '\0';
+  if (ref.localId == 0U) {
+    return format_asset_guid(ref.guid, out, capacity);
+  }
+  if (capacity < (kAssetRefTextLength + 1U)) {
+    return false;
+  }
+  if (!format_asset_guid(ref.guid, out, capacity)) {
+    return false;
+  }
+  std::size_t offset = kAssetGuidTextLength;
+  out[offset] = '#';
+  ++offset;
+  offset = write_hex(out, offset, ref.localId, 16U);
+  out[offset] = '\0';
+  return true;
+}
+
+bool parse_asset_ref(const char *text, AssetRef *out) noexcept {
+  if (out == nullptr) {
+    return false;
+  }
+  *out = AssetRef{};
+  if (text == nullptr) {
+    return false;
+  }
+  const std::size_t length = std::strlen(text);
+  if (length == kAssetGuidTextLength) {
+    AssetGuid guid{};
+    if (!parse_asset_guid(text, &guid)) {
+      return false;
+    }
+    *out = asset_ref_primary(guid);
+    return true;
+  }
+  if ((length != kAssetRefTextLength) ||
+      (text[kAssetGuidTextLength] != '#')) {
+    return false;
+  }
+  char guidText[kAssetGuidTextLength + 1U] = {};
+  std::memcpy(guidText, text, kAssetGuidTextLength);
+  AssetGuid guid{};
+  std::uint64_t localId = 0U;
+  if (!parse_asset_guid(guidText, &guid) ||
+      !parse_asset_local_id(text + kAssetGuidTextLength + 1U, 16U,
+                            &localId) ||
+      (localId == 0U)) {
+    return false;
+  }
+  out->guid = guid;
+  out->localId = localId;
+  return true;
 }
 
 PathKey make_path_key(const char *virtualPath) noexcept {

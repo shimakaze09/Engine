@@ -27,24 +27,6 @@ bool bindable_is_god_mode() noexcept;
 // LUA_BIND: is_noclip() -> bool
 bool bindable_is_noclip() noexcept;
 
-// LUA_BIND: is_gamepad_connected() -> bool
-bool bindable_is_gamepad_connected() noexcept;
-
-// LUA_BIND: is_key_down(scancode: int) -> bool
-bool bindable_is_key_down(int scancode) noexcept;
-
-// LUA_BIND: is_key_pressed(scancode: int) -> bool
-bool bindable_is_key_pressed(int scancode) noexcept;
-
-// LUA_BIND: is_gamepad_button_down(button: int) -> bool
-bool bindable_is_gamepad_button_down(int button) noexcept;
-
-// LUA_BIND: is_action_down(name: string) -> bool
-bool bindable_is_action_down(const char *name) noexcept;
-
-// LUA_BIND: is_action_pressed(name: string) -> bool
-bool bindable_is_action_pressed(const char *name) noexcept;
-
 // LUA_BIND: get_action_value(name: string) -> float
 float bindable_get_action_value(const char *name) noexcept;
 

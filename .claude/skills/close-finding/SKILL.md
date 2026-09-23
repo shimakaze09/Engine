@@ -13,12 +13,10 @@ description: >
 
 The proof burden scales with severity. Applying a P0's burden to every
 item is why prose cleanups get regression suites while real defects wait,
-so match the tier.
+so match the tier. The tiers are the severity scale in `CLAUDE.md`
+(decision 0014); this skill sets only what each tier's close requires.
 
 ## P0 / P1 — full contract
-
-Data loss, memory unsafety, silent corruption of authored data, a crash
-path, or a defect that makes a shipped feature wrong.
 
 - **A red-on-base regression.** It fails on the base revision and passes
   on the fixed one. Record both results and the exact test name. No
@@ -42,17 +40,12 @@ path, or a defect that makes a shipped feature wrong.
 
 ## P2 — reduced
 
-A correctness or robustness defect with bounded impact, or a structural
-problem that will cause defects.
-
 - A test that would have caught it, red on base where the change is a
   correctness fix.
 - Boundary cases for the specific boundary involved, not the full matrix.
 - No new linked issue required unless scope is genuinely left open.
 
 ## P3 — fix inline, or alone when the value is structural
-
-Hygiene, duplication, dead code, naming, stale comments, an unused API.
 
 - Normally fixed inside a change that already touches those files, with
   the existing tests passing: no regression suite, no scope table.

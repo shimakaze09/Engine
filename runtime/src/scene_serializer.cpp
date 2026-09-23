@@ -33,19 +33,18 @@ namespace engine::runtime {
 namespace {
 
 constexpr const char *kSceneLogChannel = "scene";
-// Revision 4 writes RigidBody inertia provenance (inertiaAuthored); every
-// older revision always wrote a numeric inverseInertia, which is kept as
-// the authored value. Revision 3 writes inverseInertia as a 3-element
-// array; older revisions wrote one number, read as the same value on
-// every axis.
-constexpr std::uint32_t kCurrentSceneVersion = 5U;
-constexpr std::uint32_t kLastImplicitInertiaSceneVersion = 3U;
-// Before the gravity scale, a body was held against gravity by an
-// authored acceleration equal to its opposite; those documents read as
-// gravity scale 0.
-constexpr std::uint32_t kLastAccelerationCancelsGravitySceneVersion = 4U;
-constexpr std::uint32_t kLastScalarInertiaSceneVersion = 2U;
-constexpr const char *kInverseInertiaKey = "inverseInertia";
+
+/// v6 names mesh and material assets by their persistent reference rather
+/// than by a hash of their path, so a scene keeps drawing after an asset
+/// is renamed, moved or recooked. The project is unreleased, so the tree
+/// was migrated once and the reader accepts this version alone.
+constexpr std::uint32_t kCurrentSceneVersion = 6U;
+/// The seed every scene load and world reset starts the gameplay random
+/// stream from, so opening a scene twice plays it the same way. Zero is a
+/// seed like any other here — the stream is filled through splitmix64,
+/// which has no zero fixed point. An author who wants a different run
+/// each time calls engine.set_seed.
+constexpr std::uint64_t kSceneRandomSeed = 0U;
 constexpr const char *kEntitiesKey = "entities";
 constexpr const char *kComponentsKey = "components";
 constexpr const char *kPersistentIdKey = "persistentId";
@@ -82,24 +81,6 @@ void report_reference(core::ValidationReport *report, const char *code,
   record.entityPersistentId = entityPersistentId;
   std::snprintf(record.field, sizeof(record.field), "%s", field);
   core::log_diagnostic(record);
-}
-
-/// Rewrites every body an older document held against gravity by an
-/// opposite acceleration as gravity scale 0, against the gravity the
-/// document authored (or the default it relied on).
-void migrate_cancelled_gravity_bodies(World &world) noexcept {
-  math::Vec3 gravity = physics::kDefaultGravity;
-  static_cast<void>(get_gravity(world, &gravity.x, &gravity.y, &gravity.z));
-  world.for_each<RigidBody>(
-      [&world, &gravity](Entity entity, const RigidBody &body) noexcept {
-        if (!legacy_acceleration_cancels_gravity(body, gravity)) {
-          return;
-        }
-        RigidBody *stored = world.get_rigid_body_ptr(entity);
-        if (stored != nullptr) {
-          migrate_cancelled_gravity(stored, gravity);
-        }
-      });
 }
 
 /// True when the path sits under a mounted prefix and names no file; an
@@ -192,23 +173,6 @@ bool decode_scene_component(const core::JsonParser &parser,
                                      sizeof(out->scriptPath));
   } else if constexpr (std::is_same_v<T, AnimationComponent>) {
     return read_animation_component(parser, value, false, out);
-  } else if constexpr (std::is_same_v<T, RigidBody>) {
-    ReflectedReadOptions options{};
-    if (documentVersion <= kLastScalarInertiaSceneVersion) {
-      options.uniformScalarVec3Key = kInverseInertiaKey;
-    }
-    if (!read_reflected_component(parser, value,
-                                  component_descriptor(descs, out), out,
-                                  options)) {
-      return false;
-    }
-    // An older revision carried no provenance and always wrote the
-    // tensor, so its number is what the scene simulated with: authored,
-    // never reinterpreted from the value.
-    if (documentVersion <= kLastImplicitInertiaSceneVersion) {
-      out->inertiaAuthored = true;
-    }
-    return true;
   } else {
     static_cast<void>(documentVersion);
     return read_reflected_component(parser, value,
@@ -586,6 +550,7 @@ void reset_world(World &world, SceneTeardownHook beforeTeardown) noexcept {
   world.timer_manager().clear();
   world.camera_manager().clear();
   world.game_mode().reset();
+  world.seed_random(kSceneRandomSeed);
   world.mark_content_replaced(world.content_epoch());
   reset_anim_controllers();
 }
@@ -741,9 +706,6 @@ bool load_scene(World &world, const char *buffer, std::size_t size,
                                   *stagedWorld)) {
     return false;
   }
-  if (documentVersion <= kLastAccelerationCancelsGravitySceneVersion) {
-    migrate_cancelled_gravity_bodies(*stagedWorld);
-  }
   validate_scene_references(*stagedWorld, outReport);
 
   // Legacy "timers" blocks are ignored:
@@ -791,6 +753,10 @@ bool load_scene(World &world, const char *buffer, std::size_t size,
   }
 
   world = *committedWorld;
+  // Explicitly, not by inheriting the staged world's untouched default:
+  // where the random stream stands is simulation state, and a scene that
+  // opens twice has to play the same way both times.
+  world.seed_random(kSceneRandomSeed);
   world.mark_content_replaced(previousEpoch);
   // The replaced world's components are gone, so their cached animation
   // controllers are released; the loaded scene's components re-acquire

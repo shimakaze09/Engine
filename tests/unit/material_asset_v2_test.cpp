@@ -1,6 +1,8 @@
-// Verifies the v2 texture-backed material schema: full field round trip,
+// Verifies the texture-backed material schema: full field round trip,
 // texture-slot dependency edges, parent-chain texture override semantics,
-// and the version gate that keeps v1 files from picking up v2-only fields.
+// and that every field the format defines is read at the one revision the
+// build accepts -- there is no revision at which a present field is
+// silently ignored.
 
 #include <cstdio>
 #include <cstring>
@@ -44,7 +46,7 @@ int verify_v2_full_load(engine::renderer::AssetDatabase *database) {
   constexpr const char *kPath = "material_v2_full.json";
   constexpr const char *kVirtualPath = "mat/material_v2_full.json";
   constexpr const char *kJson =
-      "{\"version\":2,\"albedo\":[0.5,0.5,0.5],\"roughness\":0.4,"
+      "{\"version\":3,\"albedo\":[0.5,0.5,0.5],\"roughness\":0.4,"
       "\"alphaMode\":\"mask\",\"alphaCutoff\":0.3,"
       "\"uvTiling\":[2.0,3.0],\"uvOffset\":[0.25,0.75],"
       "\"textures\":{"
@@ -147,7 +149,7 @@ int verify_v2_malformed_fields(engine::renderer::AssetDatabase *database) {
   constexpr const char *kPath = "material_v2_bad.json";
   constexpr const char *kVirtualPath = "mat/material_v2_bad.json";
 
-  if (!write_material_file(kPath, "{\"version\":2,\"alphaMode\":\"glow\"}")) {
+  if (!write_material_file(kPath, "{\"version\":3,\"alphaMode\":\"glow\"}")) {
     return 30;
   }
   auto result = engine::renderer::load_material_asset(database, kVirtualPath);
@@ -156,7 +158,7 @@ int verify_v2_malformed_fields(engine::renderer::AssetDatabase *database) {
     return 31;
   }
 
-  if (!write_material_file(kPath, "{\"version\":2,\"textures\":[1,2]}")) {
+  if (!write_material_file(kPath, "{\"version\":3,\"textures\":[1,2]}")) {
     return 32;
   }
   result = engine::renderer::load_material_asset(database, kVirtualPath);
@@ -166,7 +168,7 @@ int verify_v2_malformed_fields(engine::renderer::AssetDatabase *database) {
   }
 
   if (!write_material_file(kPath,
-                           "{\"version\":2,\"textures\":{\"albedo\":\"\"}}")) {
+                           "{\"version\":3,\"textures\":{\"albedo\":\"\"}}")) {
     return 34;
   }
   result = engine::renderer::load_material_asset(database, kVirtualPath);
@@ -178,15 +180,18 @@ int verify_v2_malformed_fields(engine::renderer::AssetDatabase *database) {
   return 0;
 }
 
-/// A v1-declared file that happens to carry v2-only keys ignores them
-/// entirely (the version gate, not merely "fields default when absent").
-int verify_v1_ignores_v2_fields(engine::renderer::AssetDatabase *database) {
-  constexpr const char *kPath = "material_v1_with_v2_keys.json";
-  constexpr const char *kVirtualPath = "mat/material_v1_with_v2_keys.json";
+/// Every field the format defines is read, and an authored value is never
+/// dropped in favor of the default. This replaces the staged-migration
+/// contract, where a file declaring the older revision ignored the newer
+/// revision's keys: that layer is gone, so a present field either takes
+/// effect or refuses the document, and nothing in between.
+int verify_every_field_is_read(engine::renderer::AssetDatabase *database) {
+  constexpr const char *kPath = "material_all_fields.json";
+  constexpr const char *kVirtualPath = "mat/material_all_fields.json";
   constexpr const char *kJson =
-      "{\"version\":1,\"alphaMode\":\"mask\",\"alphaCutoff\":0.9,"
-      "\"uvTiling\":[9.0,9.0],"
-      "\"textures\":{\"albedo\":\"assets/textures/should_be_ignored.png\"}}";
+      "{\"version\":3,\"shadingModel\":\"toon\","
+      "\"alphaMode\":\"mask\",\"alphaCutoff\":0.9,"
+      "\"uvTiling\":[9.0,9.0]}";
   if (!write_material_file(kPath, kJson)) {
     return 40;
   }
@@ -202,17 +207,35 @@ int verify_v1_ignores_v2_fields(engine::renderer::AssetDatabase *database) {
   const engine::renderer::Material *params =
       engine::renderer::find_material_params(database, id);
   const engine::renderer::Material defaults{};
-  if ((params == nullptr) || (params->alphaMode != defaults.alphaMode) ||
-      !exactly_equal(params->alphaCutoff, defaults.alphaCutoff) ||
-      !exactly_equal(params->uvTiling.x, defaults.uvTiling.x)) {
+  if ((params == nullptr) ||
+      (params->shadingModel != engine::renderer::ShadingModel::Toon) ||
+      (params->alphaMode != engine::renderer::AlphaMode::Mask) ||
+      !exactly_equal(params->alphaCutoff, 0.9F) ||
+      !exactly_equal(params->uvTiling.x, 9.0F) ||
+      !exactly_equal(params->uvTiling.y, 9.0F)) {
     return 42;
   }
-
-  const engine::renderer::MaterialTextureSlots *slots =
-      engine::renderer::find_material_texture_slots(database, id);
-  if ((slots == nullptr) ||
-      (slots->albedo != engine::renderer::kInvalidAssetId)) {
+  // A field the document omits still takes the default, so "every field is
+  // read" is not "every field is required".
+  if (!exactly_equal(params->uvOffset.x, defaults.uvOffset.x)) {
     return 43;
+  }
+
+  // A shading model this build does not know refuses the document rather
+  // than lighting the surface by a model the author did not ask for.
+  constexpr const char *kUnknownPath = "material_unknown_model.json";
+  constexpr const char *kUnknownVirtualPath =
+      "mat/material_unknown_model.json";
+  constexpr const char *kUnknownModel =
+      "{\"version\":3,\"shadingModel\":\"cel\"}";
+  if (!write_material_file(kUnknownPath, kUnknownModel)) {
+    return 44;
+  }
+  const auto unknownResult =
+      engine::renderer::load_material_asset(database, kUnknownVirtualPath);
+  remove_file(kUnknownPath);
+  if (unknownResult.has_value()) {
+    return 45;
   }
 
   return 0;
@@ -228,12 +251,12 @@ int verify_v2_parent_texture_override(
 
   if (!write_material_file(
           kBasePath,
-          "{\"version\":2,\"textures\":{"
+          "{\"version\":3,\"textures\":{"
           "\"albedo\":\"assets/textures/base_albedo.png\","
           "\"emissive\":\"assets/textures/base_emissive.png\"}}") ||
       !write_material_file(
           kChildPath,
-          "{\"version\":2,\"parent\":\"mat/material_v2_tex_base.json\","
+          "{\"version\":3,\"parent\":\"mat/material_v2_tex_base.json\","
           "\"textures\":{\"albedo\":\"assets/textures/child_albedo.png\"}}")) {
     remove_file(kBasePath);
     remove_file(kChildPath);
@@ -301,7 +324,7 @@ int main() {
     result = verify_v2_malformed_fields(database.get());
   }
   if (result == 0) {
-    result = verify_v1_ignores_v2_fields(database.get());
+    result = verify_every_field_is_read(database.get());
   }
   if (result == 0) {
     result = verify_v2_parent_texture_override(database.get());

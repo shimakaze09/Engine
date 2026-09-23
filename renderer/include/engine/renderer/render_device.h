@@ -508,8 +508,9 @@ struct RenderDevice final {
   std::uint64_t (*timestamp_value)(DeviceQueryHandle query) noexcept = nullptr;
 
   // UI-backend escape hatch: the native texture id consumed by the UI
-  // renderer running on the same backend (ImGui image binding). Not part
-  // of the engine rendering contract; nothing else may interpret it.
+  // renderer running on the same backend (ImGui image binding), non-zero
+  // for a live texture and 0 for a stale handle or none. Not part of the
+  // engine rendering contract; nothing else may interpret it.
   std::uint64_t (*native_texture_id)(DeviceTextureHandle texture) noexcept =
       nullptr;
 

@@ -2,6 +2,11 @@
 
 **Date:** 2026-08-09.
 
+**Status:** The editor-target and shipping clauses are superseded by
+[0015](0015-commercial-anime-engine-on-six-platforms.md); the AppleClang
+conformance clause stands. The lane still builds with the shader cook
+off because shaderc's tint does not compile under AppleClang.
+
 ## Context
 
 macOS was originally blocked as a renderer target by Apple's OpenGL

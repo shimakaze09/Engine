@@ -55,10 +55,10 @@ bool draw_mesh_component_fields(runtime::Entity entity,
 
   mark_modified(modified,
                draw_asset_reference_picker("Mesh", content::AssetTypeTag::Mesh,
-                                          &mesh.meshAssetId));
+                                          &mesh.meshAssetId, &mesh.meshRef));
   mark_modified(modified, draw_asset_reference_picker(
                               "Material", content::AssetTypeTag::Material,
-                              &mesh.materialAssetId));
+                              &mesh.materialAssetId, &mesh.materialRef));
   if (mesh.materialAssetId != 0ULL) {
     ImGui::SameLine();
     char materialPath[260] = {};
@@ -176,7 +176,8 @@ void draw_foliage_patch_fields(runtime::Entity entity,
     mark_modified(modified,
                   draw_asset_reference_picker(label,
                                              content::AssetTypeTag::Mesh,
-                                             &foliage.meshAssetIds[lod]));
+                                             &foliage.meshAssetIds[lod],
+                                             &foliage.meshRefs[lod]));
   }
 
   int instanceCount = static_cast<int>(foliage.instanceCount);

@@ -50,8 +50,12 @@ renderer::AssetId register_builtin_mesh(renderer::GpuMeshRegistry *registry,
     return renderer::kInvalidAssetId;
   }
   // The catalog lists the primitive beside the project's meshes so a
-  // picker offers it and a saved reference to it reads by name.
-  static_cast<void>(note_mesh_asset_path(database, id, builtinPath));
+  // picker offers it and a saved reference to it resolves. Its identity is
+  // derived from its path rather than generated: a built-in ships with the
+  // engine, carries no sidecar, and must be the same asset in every build.
+  static_cast<void>(note_mesh_asset_path(
+      database, id, builtinPath,
+      content::asset_ref_primary(content::builtin_asset_guid(builtinPath))));
   const std::uint64_t vertexFloats = mesh.hasUVs ? 8ULL : 6ULL;
   const std::uint64_t sizeEstimate =
       (static_cast<std::uint64_t>(mesh.vertexCount) * vertexFloats *

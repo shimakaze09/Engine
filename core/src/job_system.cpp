@@ -87,7 +87,8 @@ std::uint32_t decode_handle_generation(JobHandle handle) noexcept {
 
 class JobSystem final {
 public:
-  bool initialize(std::uint32_t requestedWorkers) noexcept {
+  bool initialize(std::uint32_t requestedWorkers,
+                  const ThreadOps &threadOps) noexcept {
     if (m_initialized.load(std::memory_order_acquire)) {
       return true;
     }
@@ -107,8 +108,9 @@ public:
     // back instead of terminating the no-exception build.
     for (std::uint32_t i = 0U; i < m_workerCount; ++i) {
       auto *start = new (std::nothrow) WorkerStart{this, i + 1U};
-      const bool spawned = (start != nullptr) &&
-                           m_workers[i].spawn(&worker_thread_entry, start);
+      const bool spawned =
+          (start != nullptr) && (threadOps.spawn != nullptr) &&
+          threadOps.spawn(&m_workers[i], &worker_thread_entry, start);
       if (!spawned) {
         delete start;
         log_message(LogLevel::Error, "job_system",
@@ -790,7 +792,12 @@ JobSystem g_jobSystem;
 
 /// Initializes the owning system for job system.
 bool initialize_job_system(std::uint32_t workerCount) noexcept {
-  return g_jobSystem.initialize(workerCount);
+  return g_jobSystem.initialize(workerCount, production_thread_ops());
+}
+
+bool initialize_job_system(std::uint32_t workerCount,
+                           const ThreadOps &threadOps) noexcept {
+  return g_jobSystem.initialize(workerCount, threadOps);
 }
 
 /// Shuts down the owning system for job system.

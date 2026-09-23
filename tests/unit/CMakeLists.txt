@@ -7,6 +7,21 @@ engine_add_test_executable(engine_unit_core_lifecycle
     engine_core
 )
 
+engine_add_test_executable(engine_unit_build_identity
+    SOURCES
+    build_identity_test.cpp
+    PRIVATE_DEPS
+    engine_core
+)
+
+engine_add_test_executable(engine_unit_thread_spawn_rollback
+    SOURCES
+    thread_spawn_rollback_test.cpp
+    PRIVATE_DEPS
+    engine_core
+    engine_content
+)
+
 engine_add_test_executable(engine_unit_status
     SOURCES
     status_test.cpp
@@ -91,6 +106,23 @@ engine_add_test_executable(engine_unit_fixed_hash_table
 engine_add_test_executable(engine_unit_fixed_ring
     SOURCES
     fixed_ring_test.cpp
+    PRIVATE_DEPS
+    engine_core
+)
+
+engine_add_test_executable(engine_unit_rng
+    SOURCES
+    rng_test.cpp
+    PRIVATE_DEPS
+    engine_core
+)
+
+engine_add_test_executable(engine_unit_timer_cadence
+    SOURCES
+    timer_cadence_test.cpp
+    ${CMAKE_SOURCE_DIR}/runtime/src/timer_manager.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/runtime/include
     PRIVATE_DEPS
     engine_core
 )
@@ -220,6 +252,18 @@ if(TARGET asset_packer)
     add_dependencies(engine_unit_shader_cook_argv asset_packer
         engine_test_fake_shaderc)
 
+    engine_add_test_executable(engine_unit_shader_cook_transaction
+        SOURCES
+        shader_cook_transaction_test.cpp
+        PRIVATE_DEPS
+        engine_core
+    )
+    target_compile_definitions(engine_unit_shader_cook_transaction PRIVATE
+        ENGINE_TEST_ASSET_PACKER="$<TARGET_FILE:asset_packer>"
+        ENGINE_TEST_FAKE_SHADERC="$<TARGET_FILE:engine_test_fake_shaderc>")
+    add_dependencies(engine_unit_shader_cook_transaction asset_packer
+        engine_test_fake_shaderc)
+
     engine_add_test_executable(engine_unit_shader_cook_paths
         SOURCES
         shader_cook_paths_test.cpp
@@ -236,6 +280,8 @@ endif()
 engine_add_test_executable(engine_unit_mesh_loader
     SOURCES
     mesh_loader_test.cpp
+    ../fake_render_device.cpp
+    ../fake_renderer_lifetime.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/mesh_loader.cpp
     PRIVATE_INCLUDE_DIRS
     ${CMAKE_SOURCE_DIR}/renderer/include
@@ -249,6 +295,8 @@ engine_add_test_executable(engine_unit_mesh_loader
 engine_add_test_executable(engine_unit_asset_generation_check
     SOURCES
     asset_generation_check_test.cpp
+    ../fake_render_device.cpp
+    ../fake_renderer_lifetime.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/mesh_loader.cpp
     PRIVATE_INCLUDE_DIRS
     ${CMAKE_SOURCE_DIR}/renderer/include
@@ -325,6 +373,14 @@ engine_add_test_executable(engine_unit_asset_manager
 engine_add_test_executable(engine_unit_physics
     SOURCES
     physics_test.cpp
+    PRIVATE_DEPS
+    engine_physics
+    engine_runtime
+)
+
+engine_add_test_executable(engine_unit_physics_broadphase
+    SOURCES
+    physics_broadphase_test.cpp
     PRIVATE_DEPS
     engine_physics
     engine_runtime
@@ -429,6 +485,8 @@ engine_add_test_executable(engine_unit_scripting
     SOURCES
     scripting_test.cpp
     PRIVATE_DEPS
+    # Builds native SDL events to drive input the way the platform does.
+    ${ENGINE_SDL_TARGET}
     engine_scripting
     engine_runtime
 )
@@ -739,6 +797,8 @@ engine_add_test_executable(engine_unit_input
     SOURCES
     input_test.cpp
     PRIVATE_DEPS
+    # Builds native SDL events to drive input the way the platform does.
+    ${ENGINE_SDL_TARGET}
     engine_core
 )
 
@@ -773,6 +833,7 @@ engine_add_test_executable(engine_unit_gpu_profiler
 engine_add_test_executable(engine_unit_gpu_profiler_ring
     SOURCES
     gpu_profiler_ring_test.cpp
+    ../fake_render_device.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/gpu_profiler.cpp
     PRIVATE_INCLUDE_DIRS
     ${CMAKE_SOURCE_DIR}/renderer/include
@@ -784,6 +845,7 @@ engine_add_test_executable(engine_unit_gpu_profiler_ring
 engine_add_test_executable(engine_unit_pass_resources
     SOURCES
     pass_resources_test.cpp
+    ../fake_render_device.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/pass_resources.cpp
     PRIVATE_INCLUDE_DIRS
     ${CMAKE_SOURCE_DIR}/renderer/include
@@ -841,6 +903,19 @@ engine_add_test_executable(engine_unit_editor_command_transaction
     COMPILE_DEFINITIONS
     SDL_MAIN_HANDLED
 )
+
+engine_add_test_executable(engine_unit_editor_fonts
+    SOURCES
+    editor_fonts_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/editor/src
+    PRIVATE_DEPS
+    engine_editor
+    COMPILE_DEFINITIONS
+    SDL_MAIN_HANDLED
+)
+set_tests_properties(engine_unit_editor_fonts PROPERTIES
+    SKIP_REGULAR_EXPRESSION "SKIPPED:")
 
 engine_add_test_executable(engine_unit_editor_session
     SOURCES
@@ -1121,6 +1196,7 @@ engine_add_test_executable(engine_unit_editor_asset_index
 engine_add_test_executable(engine_unit_shader_system
     SOURCES
     shader_system_test.cpp
+    ../fake_render_device.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/shader_system.cpp
     PRIVATE_INCLUDE_DIRS
     ${CMAKE_SOURCE_DIR}/renderer/include
@@ -1155,6 +1231,7 @@ engine_add_test_executable(engine_unit_texture_loader
 engine_add_test_executable(engine_unit_texture_loader_handles
     SOURCES
     texture_loader_handle_test.cpp
+    ../fake_render_device.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/texture_loader.cpp
     PRIVATE_INCLUDE_DIRS
     ${CMAKE_SOURCE_DIR}/renderer/include
@@ -1247,6 +1324,8 @@ engine_add_test_executable(engine_unit_input_map
     SOURCES
     input_map_test.cpp
     PRIVATE_DEPS
+    # Builds native SDL events to drive input the way the platform does.
+    ${ENGINE_SDL_TARGET}
     engine_core
 )
 
@@ -1254,6 +1333,8 @@ engine_add_test_executable(engine_unit_touch_input
     SOURCES
     touch_input_test.cpp
     PRIVATE_DEPS
+    # Builds native SDL events to drive input the way the platform does.
+    ${ENGINE_SDL_TARGET}
     engine_core
 )
 
@@ -1452,6 +1533,15 @@ engine_add_test_executable(engine_unit_async_streaming
     engine_content
 )
 
+engine_add_test_executable(engine_unit_streaming_script_retire
+    SOURCES
+    streaming_script_retire_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/runtime/src
+    PRIVATE_DEPS
+    engine_runtime
+)
+
 # ---- P1-M4-D: LRU Eviction ----
 
 engine_add_test_executable(engine_unit_lru_cache
@@ -1482,6 +1572,7 @@ engine_add_test_executable(engine_unit_light_collect_cast_shadow
 engine_add_test_executable(engine_unit_forward_light_selection
     SOURCES
     forward_light_selection_test.cpp
+    ../fake_render_device.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_flush_uniforms.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_context.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_math.cpp
@@ -1499,6 +1590,7 @@ engine_add_test_executable(engine_unit_forward_light_selection
 engine_add_test_executable(engine_unit_render_target_wrap
     SOURCES
     render_target_wrap_test.cpp
+    ../fake_render_device.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_capture.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_post_resources.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_context.cpp
@@ -1514,6 +1606,7 @@ engine_add_test_executable(engine_unit_render_target_wrap
 engine_add_test_executable(engine_unit_shadow_caster_flush
     SOURCES
     shadow_caster_flush_test.cpp
+    ../fake_render_device.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_flush_shadows.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_context.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_math.cpp
@@ -1577,6 +1670,7 @@ engine_add_test_executable(engine_unit_screenshot_tga
 engine_add_test_executable(engine_unit_command_buffer_post_chain
     SOURCES
     command_buffer_post_chain_test.cpp
+    ../fake_render_device.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_flush_post.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_post_resources.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_context.cpp
@@ -1589,9 +1683,31 @@ engine_add_test_executable(engine_unit_command_buffer_post_chain
     engine_math
 )
 
+engine_add_test_executable(engine_unit_deferred_pass_viewport
+    SOURCES
+    deferred_pass_viewport_test.cpp
+    ../fake_render_device.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_flush_deferred.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_flush_uniforms.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_context.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_math.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_sky.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_ibl.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/render_settings.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/shadow_map.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/pass_resources.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/renderer/include
+    ${CMAKE_SOURCE_DIR}/renderer/src
+    PRIVATE_DEPS
+    engine_core
+    engine_math
+)
+
 engine_add_test_executable(engine_unit_command_buffer_reload_contract
     SOURCES
     command_buffer_reload_contract_test.cpp
+    ../fake_render_device.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_context.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_init_core.cpp
@@ -1619,6 +1735,7 @@ engine_add_test_executable(engine_unit_command_buffer_reload_contract
 engine_add_test_executable(engine_unit_command_buffer_ibl_bake
     SOURCES
     command_buffer_ibl_bake_test.cpp
+    ../fake_render_device.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_ibl.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_context.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/render_settings.cpp
@@ -1633,6 +1750,7 @@ engine_add_test_executable(engine_unit_command_buffer_ibl_bake
 engine_add_test_executable(engine_unit_command_buffer_debug_overlay
     SOURCES
     command_buffer_debug_overlay_test.cpp
+    ../fake_render_device.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_flush_forward.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_math.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_context.cpp
@@ -1647,6 +1765,7 @@ engine_add_test_executable(engine_unit_command_buffer_debug_overlay
 engine_add_test_executable(engine_unit_command_buffer_alloc_safety
     SOURCES
     command_buffer_alloc_safety_test.cpp
+    ../fake_render_device.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_flush_uniforms.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_context.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_math.cpp
@@ -1669,6 +1788,7 @@ engine_add_test_executable(engine_unit_native_thread
 engine_add_test_executable(engine_unit_shader_reload
     SOURCES
     shader_reload_test.cpp
+    ../fake_render_device.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/shader_system.cpp
     PRIVATE_INCLUDE_DIRS
     ${CMAKE_SOURCE_DIR}/renderer/include
@@ -1882,6 +2002,15 @@ endif()
 
 # ---- P1-M12-A: Platform Paths ----
 
+engine_add_test_executable(engine_unit_platform_window
+    SOURCES
+    platform_window_test.cpp
+    PRIVATE_DEPS
+    # Builds native SDL events to drive input the way the platform does.
+    ${ENGINE_SDL_TARGET}
+    engine_core
+)
+
 engine_add_test_executable(engine_unit_platform_paths
     SOURCES
     platform_paths_test.cpp
@@ -1897,6 +2026,8 @@ engine_add_test_executable(engine_unit_engine_pipeline
     PRIVATE_INCLUDE_DIRS
     ${CMAKE_SOURCE_DIR}/runtime/src
     PRIVATE_DEPS
+    # Builds native SDL events to drive input the way the platform does.
+    ${ENGINE_SDL_TARGET}
     engine_runtime
 )
 
@@ -1974,4 +2105,23 @@ engine_add_test_executable(engine_unit_scene_path_length
     scene_path_length_test.cpp
     PRIVATE_DEPS
     engine_runtime
+)
+# Links the real uniform uploads rather than stubbing them: the point is
+# what the shared forward-draw helper writes, so a stub would assert
+# nothing. The pass-level helpers it does not reach come from the same
+# translation unit.
+engine_add_test_executable(engine_unit_forward_draw_uniforms
+    SOURCES
+    forward_draw_uniforms_test.cpp
+    ../fake_render_device.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_flush_uniforms.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_context.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_math.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/render_settings.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/renderer/include
+    ${CMAKE_SOURCE_DIR}/renderer/src
+    PRIVATE_DEPS
+    engine_core
+    engine_math
 )

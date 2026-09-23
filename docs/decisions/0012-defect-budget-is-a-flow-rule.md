@@ -18,7 +18,7 @@ tracker before setting it produced the actual distribution:
 | P3 | 26 |
 | P4 | ~46 |
 
-Two things follow immediately.
+Three things follow immediately.
 
 First, 0007's "P0 and P1 stay at zero" was not a description of a
 near-term state — it is violated 31 times today. A rule that is false on
@@ -90,5 +90,7 @@ mislabelled batches; no ceiling would have caught any of them.
 - A month that closes over budget is reported, not hidden, and the next
   month's baseline does not ratchet up to absorb it — the baseline stays at
   the lower of the two.
+  *(Superseded by [0014](0014-severity-is-impact.md) with the budgets
+  above: there is no baseline to hold.)*
 - These baselines are re-read from the tracker, not maintained by hand in
   this document.

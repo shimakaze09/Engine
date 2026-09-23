@@ -3,8 +3,9 @@
 // and pushes exactly one undo step (onto the material document's own
 // history) once the gesture ends, undo/redo round trips through the live
 // database record, Save persists to disk, Reload discards unsaved edits and
-// reflects the file, and the ungated close primitive does not discard
-// already-applied live edits.
+// reflects the file, the ungated close primitive does not discard
+// already-applied live edits, and undo on a child hands a field back to
+// its parent.
 
 #include "editor_commands.h"
 #include "editor_material_edit.h"
@@ -53,6 +54,25 @@ void remove_file(const char *path) noexcept {
   static_cast<void>(std::remove(path));
 }
 
+/// Reads a whole small file into `out`; false when it cannot.
+bool read_file(const char *path, char *out, std::size_t capacity) noexcept {
+  FILE *file = nullptr;
+#ifdef _WIN32
+  if (fopen_s(&file, path, "rb") != 0) {
+    file = nullptr;
+  }
+#else
+  file = std::fopen(path, "rb");
+#endif
+  if (file == nullptr) {
+    return false;
+  }
+  const std::size_t read = std::fread(out, 1U, capacity - 1U, file);
+  std::fclose(file);
+  out[read] = '\0';
+  return read > 0U;
+}
+
 /// Binds a fresh asset database as the published editor asset service, and
 /// resets the material editor + command history on destruction so tests
 /// never leak process-wide state into each other.
@@ -78,7 +98,7 @@ struct MaterialEditScope final {
 /// EXPECTATION: opening a material loads its resolved state into the
 /// panel buffer.
 int check_open_loads_state() noexcept {
-  if (!write_file(kOsPath, "{\"version\":2,\"roughness\":0.3}")) {
+  if (!write_file(kOsPath, "{\"version\":3,\"roughness\":0.3}")) {
     return 1;
   }
   MaterialEditScope scope;
@@ -105,7 +125,7 @@ int check_open_loads_state() noexcept {
 /// gesture pushes exactly one undoable command whose undo restores the
 /// prior value.
 int check_live_edit_and_undo() noexcept {
-  if (!write_file(kOsPath, "{\"version\":2,\"roughness\":0.3,"
+  if (!write_file(kOsPath, "{\"version\":3,\"roughness\":0.3,"
                           "\"metallic\":0.1}")) {
     return 10;
   }
@@ -176,7 +196,7 @@ int check_live_edit_and_undo() noexcept {
 /// unsaved edit and reflects whatever is on disk (or leaves the buffer
 /// untouched on a malformed file).
 int check_save_and_reload() noexcept {
-  if (!write_file(kOsPath, "{\"version\":2,\"roughness\":0.2}")) {
+  if (!write_file(kOsPath, "{\"version\":3,\"roughness\":0.2}")) {
     return 20;
   }
   MaterialEditScope scope;
@@ -231,7 +251,7 @@ int check_save_and_reload() noexcept {
 /// the gated request_close_material_editor path is covered by
 /// engine_unit_editor_material_document.
 int check_close_keeps_live_edit() noexcept {
-  if (!write_file(kOsPath, "{\"version\":2,\"roughness\":0.4}")) {
+  if (!write_file(kOsPath, "{\"version\":3,\"roughness\":0.4}")) {
     return 30;
   }
   MaterialEditScope scope;
@@ -263,6 +283,74 @@ int check_close_keeps_live_edit() noexcept {
   return finish(0);
 }
 
+/// EXPECTATION: undoing an edit on a child hands the field back to its
+/// parent (#543). An edit makes a field one the child overrides; an undo
+/// that restored only the value left the field overridden, so saving
+/// pinned a value the author had reverted and the parent's later edits
+/// never reached it.
+int check_undo_returns_field_to_parent() noexcept {
+  constexpr const char *kParentOs = "editor_material_edit_parent.json";
+  constexpr const char *kChildOs = "editor_material_edit_child.json";
+  constexpr const char *kChildVirtual =
+      "edmatpanel/editor_material_edit_child.json";
+  if (!write_file(kParentOs, "{\"version\":3,\"roughness\":0.3,"
+                             "\"metallic\":0.1}") ||
+      !write_file(kChildOs,
+                  "{\"version\":3,\"parent\":\"edmatpanel/"
+                  "editor_material_edit_parent.json\",\"roughness\":0.7}")) {
+    return 60;
+  }
+  MaterialEditScope scope;
+  const auto finish = [&](int result) noexcept {
+    remove_file(kParentOs);
+    remove_file(kChildOs);
+    return result;
+  };
+  if (!scope.valid()) {
+    return finish(61);
+  }
+
+  open_material_editor(kChildVirtual);
+  MaterialEditorState &state = material_editor_state();
+  if (!state.found || !state.hasParent) {
+    return finish(62);
+  }
+  const engine::renderer::Material beforeGesture = state.buffer;
+  const engine::renderer::MaterialTextureSlots beforeSlots = state.textureSlots;
+  state.buffer.metallic = 0.9F;
+  material_editor_apply_frame(beforeGesture, beforeSlots, true, true);
+  material_editor_apply_frame(beforeGesture, beforeSlots, false, false);
+  if (!material_editor_history().undo()) {
+    return finish(63);
+  }
+  if (!save_material_editor()) {
+    return finish(64);
+  }
+
+  char text[512] = {};
+  if (!read_file(kChildOs, text, sizeof(text))) {
+    return finish(65);
+  }
+  if ((std::strstr(text, "\"metallic\"") != nullptr) ||
+      (std::strstr(text, "\"roughness\"") == nullptr)) {
+    std::printf("child saved after undo: %s\n", text);
+    return finish(66);
+  }
+
+  // Redo makes it an override again.
+  if (!material_editor_history().redo() || !save_material_editor()) {
+    return finish(67);
+  }
+  if (!read_file(kChildOs, text, sizeof(text))) {
+    return finish(68);
+  }
+  if (std::strstr(text, "\"metallic\"") == nullptr) {
+    std::printf("child saved after redo: %s\n", text);
+    return finish(69);
+  }
+  return finish(0);
+}
+
 } // namespace
 
 /// EXPECTATION (#168 M5): a world rebind is a full session transition — an
@@ -270,7 +358,7 @@ int check_close_keeps_live_edit() noexcept {
 /// (panel closed, asset id dropped, gesture abandoned without finalizing),
 /// unlike user-driven close, which finalizes and is covered above.
 int check_world_clear_resets_editor() noexcept {
-  if (!write_file(kOsPath, "{\"version\":2,\"roughness\":0.3}")) {
+  if (!write_file(kOsPath, "{\"version\":3,\"roughness\":0.3}")) {
     return 40;
   }
   MaterialEditScope scope;
@@ -345,6 +433,9 @@ int main() {
   }
   if (result == 0) {
     result = check_world_clear_resets_editor();
+  }
+  if (result == 0) {
+    result = check_undo_returns_field_to_parent();
   }
 
   engine::core::shutdown_vfs();

@@ -6,7 +6,9 @@
 
 #pragma once
 
-/// Creates the font atlas texture, ImGui program, and vertex layout.
+/// Creates the ImGui program and vertex layout and declares that this
+/// renderer honours ImGui's texture requests; the font atlas is created on
+/// the first frame that draws.
 bool ImGui_ImplBgfx_Init();
 /// Destroys every bgfx resource the backend created.
 void ImGui_ImplBgfx_Shutdown();

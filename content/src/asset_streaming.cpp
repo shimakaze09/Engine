@@ -11,6 +11,7 @@
 
 #include "engine/core/cvar.h"
 #include "engine/core/logging.h"
+#include "engine/core/thread_affinity.h"
 
 namespace engine::content {
 
@@ -65,21 +66,29 @@ bool is_current_handle_unlocked(const AssetStreamingQueue *queue,
          (queue->requests[handle.index].generation == handle.generation);
 }
 
-/// Sort-stable selection of the highest-priority Queued request.
+/// The Queued request to schedule next: highest priority, then the oldest
+/// among equals. Slot index says nothing about age -- a new request takes
+/// the lowest free slot -- so choosing by it let newer requests overtake an
+/// older one indefinitely.
 std::uint32_t
 pick_highest_priority_queued(const AssetStreamingQueue *queue) noexcept {
   std::uint32_t best = LoadHandle::kInvalid;
-  auto bestPri = LoadPriority::Low;
-
   for (std::uint32_t i = 0U; i < AssetStreamingQueue::kMaxRequests; ++i) {
     const LoadRequest &req = queue->requests[i];
-    if (req.occupied && (req.state == LoadingState::Queued)) {
-      if ((best == LoadHandle::kInvalid) ||
-          (static_cast<std::uint8_t>(req.priority) >
-           static_cast<std::uint8_t>(bestPri))) {
-        best = i;
-        bestPri = req.priority;
-      }
+    if (!req.occupied || (req.state != LoadingState::Queued)) {
+      continue;
+    }
+    if (best == LoadHandle::kInvalid) {
+      best = i;
+      continue;
+    }
+    const LoadRequest &current = queue->requests[best];
+    const auto priority = static_cast<std::uint8_t>(req.priority);
+    const auto bestPriority = static_cast<std::uint8_t>(current.priority);
+    if ((priority > bestPriority) ||
+        ((priority == bestPriority) &&
+         (req.enqueueOrdinal < current.enqueueOrdinal))) {
+      best = i;
     }
   }
   return best;
@@ -236,6 +245,11 @@ AssetStreamingQueue::~AssetStreamingQueue() noexcept {
 }
 
 bool initialize_asset_streaming(AssetStreamingQueue *queue) noexcept {
+  return initialize_asset_streaming(queue, core::production_thread_ops());
+}
+
+bool initialize_asset_streaming(AssetStreamingQueue *queue,
+                                const core::ThreadOps &threadOps) noexcept {
   if (queue == nullptr) {
     return false;
   }
@@ -259,7 +273,9 @@ bool initialize_asset_streaming(AssetStreamingQueue *queue) noexcept {
   // Spawn through NativeThread so an OS refusal rolls the worker set
   // back instead of terminating the no-exception build.
   for (std::size_t i = 0U; i < queue->workerThreads.size(); ++i) {
-    if (!queue->workerThreads[i].spawn(&streaming_worker_entry, queue)) {
+    if ((threadOps.spawn == nullptr) ||
+        !threadOps.spawn(&queue->workerThreads[i], &streaming_worker_entry,
+                         queue)) {
       core::log_message(core::LogLevel::Error, "asset_streaming",
                         "worker thread creation failed — rolling back");
       {
@@ -365,6 +381,7 @@ LoadHandle load_asset_async(AssetStreamingQueue *queue, AssetId id,
   write_path(&req.sourcePath, sourcePath);
   req.priority = priority;
   req.state = LoadingState::Queued;
+  req.enqueueOrdinal = queue->nextEnqueueOrdinal++;
   req.occupied = true;
   queue->stateChanged.notify_all();
 
@@ -539,6 +556,7 @@ std::size_t update_asset_streaming(
     AssetLoadCallback loadCallback,
     AssetUploadCallback uploadCallback,
     void *userData) noexcept {
+  ENGINE_ASSERT_MAIN_THREAD();
   if (queue == nullptr) {
     return 0U;
   }
@@ -649,6 +667,29 @@ std::size_t pending_load_count(const AssetStreamingQueue *queue) noexcept {
     }
   }
   return pending;
+}
+
+std::size_t collect_terminal_loads(const AssetStreamingQueue *queue,
+                                   TerminalLoad *out,
+                                   std::size_t capacity) noexcept {
+  if ((queue == nullptr) || (out == nullptr)) {
+    return 0U;
+  }
+  std::lock_guard<std::mutex> lock(queue->mutex);
+  std::size_t written = 0U;
+  for (std::uint32_t i = 0U;
+       (i < AssetStreamingQueue::kMaxRequests) && (written < capacity); ++i) {
+    const LoadRequest &request = queue->requests[i];
+    if (!request.occupied || ((request.state != LoadingState::Ready) &&
+                              (request.state != LoadingState::Failed))) {
+      continue;
+    }
+    out[written].handle = LoadHandle{i, request.generation};
+    out[written].assetId = request.assetId;
+    out[written].state = request.state;
+    ++written;
+  }
+  return written;
 }
 
 } // namespace engine::content

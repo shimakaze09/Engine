@@ -8,10 +8,15 @@
 #include <cstdio>
 #include <cstring>
 
+#include "engine/content/asset_sidecar.h"
+#include "engine/content/asset_streaming.h"
+#include "engine/content/asset_type_table.h"
+#include "engine/core/diagnostic.h"
 #include "engine/core/logging.h"
 #include "engine/core/vfs.h"
+#include "engine/engine.h"
 #include "engine/renderer/asset_database.h"
-#include "engine/content/asset_streaming.h"
+#include "engine/renderer/material_inheritance.h"
 #include "engine/renderer/material_loader.h"
 #include "engine/renderer/material_writer.h"
 #include "engine/runtime/service_registry.h"
@@ -51,10 +56,12 @@ std::uint64_t editor_request_mesh_asset(const char *virtualPath) noexcept {
   if (assetId == renderer::kInvalidAssetId) {
     return renderer::kInvalidAssetId;
   }
-  // A mesh the editor names by path is catalogued under that path, so
-  // the id the scene saves reads back as a name and resolves on reopen.
+  // A mesh the editor names by path is catalogued under that path. The
+  // identity stays whatever the mount walk already recorded for it: this
+  // path is a load, not an import, so it never mints one.
   static_cast<void>(note_mesh_asset_path(g_editorAssetService->database,
-                                         assetId, virtualPath));
+                                         assetId, virtualPath,
+                                         core::AssetRef{}));
 
   const renderer::AssetState state =
       renderer::mesh_asset_state(g_editorAssetService->database, assetId);
@@ -182,6 +189,20 @@ bool editor_asset_display_path(std::uint64_t assetId, char *outPath,
   return true;
 }
 
+core::AssetRef editor_asset_ref(std::uint64_t assetId) noexcept {
+  if ((assetId == renderer::kInvalidAssetId) ||
+      (g_editorAssetService == nullptr) ||
+      (g_editorAssetService->database == nullptr)) {
+    return core::AssetRef{};
+  }
+  const renderer::AssetMetadata *metadata = renderer::find_asset_metadata(
+      g_editorAssetService->database, assetId);
+  // A record without an identity is reported by the mount walk, not
+  // invented here: the reference stays nil so the gesture cannot write a
+  // made-up identity into a document.
+  return (metadata != nullptr) ? metadata->ref : core::AssetRef{};
+}
+
 namespace {
 
 /// Builds the state struct from an already-registered material id; false
@@ -238,16 +259,31 @@ bool editor_set_material_params(
     return false;
   }
 
-  const renderer::AssetMetadata *metadata = renderer::find_asset_metadata(
-      g_editorAssetService->database, materialId);
-  const char *sourcePath =
-      (metadata != nullptr) ? metadata->filePath.data() : nullptr;
-  if (!renderer::register_material_asset(g_editorAssetService->database,
-                                         materialId, sourcePath, params)) {
+  return renderer::edit_material_asset(g_editorAssetService->database,
+                                       materialId, params, textureSlots);
+}
+
+std::uint16_t editor_material_overrides(renderer::AssetId materialId) noexcept {
+  if ((g_editorAssetService == nullptr) ||
+      (g_editorAssetService->database == nullptr)) {
+    return renderer::material_field::kAll;
+  }
+  return renderer::material_overrides(g_editorAssetService->database,
+                                      materialId);
+}
+
+bool editor_restore_material(renderer::AssetId materialId,
+                             const renderer::Material &params,
+                             const renderer::MaterialTextureSlots &textureSlots,
+                             std::uint16_t overrides) noexcept {
+  if ((materialId == renderer::kInvalidAssetId) ||
+      (g_editorAssetService == nullptr) ||
+      (g_editorAssetService->database == nullptr)) {
     return false;
   }
-  return renderer::set_material_texture_slots(g_editorAssetService->database,
-                                              materialId, textureSlots);
+  return renderer::restore_material_asset(g_editorAssetService->database,
+                                          materialId, params, textureSlots,
+                                          overrides);
 }
 
 bool editor_save_material(const char *virtualPath,
@@ -271,7 +307,8 @@ bool editor_save_material(const char *virtualPath,
   const renderer::MaterialTextureSlots emptySlots{};
   return renderer::save_material_asset(
       g_editorAssetService->database, virtualPath, *params,
-      (slots != nullptr) ? *slots : emptySlots, parentVirtualPath);
+      (slots != nullptr) ? *slots : emptySlots, parentVirtualPath,
+      renderer::material_overrides(g_editorAssetService->database, materialId));
 }
 
 EditorMaterialState editor_reload_material(const char *virtualPath) noexcept {
@@ -290,6 +327,78 @@ EditorMaterialState editor_reload_material(const char *virtualPath) noexcept {
 
   static_cast<void>(fill_material_state(*reloadResult, &state));
   return state;
+}
+
+EditorIdentityResult
+editor_establish_asset_identity(const char *osPath) noexcept {
+  if ((osPath == nullptr) || (osPath[0] == '\0')) {
+    return EditorIdentityResult::WriteFailed;
+  }
+
+  content::AssetSidecar existing{};
+  switch (content::read_asset_sidecar(osPath, &existing)) {
+  case content::SidecarReadResult::Ok:
+    return EditorIdentityResult::AlreadyIdentified;
+  case content::SidecarReadResult::Unreadable:
+  case content::SidecarReadResult::Malformed:
+    core::log_path_diagnostic(
+        core::LogLevel::Error, "editor", osPath,
+        "a sidecar is already there and will not read; repair or delete it "
+        "rather than letting a save mint a second identity for this asset");
+    return EditorIdentityResult::SidecarUnusable;
+  case content::SidecarReadResult::Absent:
+    break;
+  }
+
+  content::AssetSidecar sidecar{};
+  sidecar.guid = content::generate_asset_guid();
+  if (!content::asset_guid_is_valid(sidecar.guid)) {
+    return EditorIdentityResult::WriteFailed;
+  }
+  if (!content::write_asset_sidecar(osPath, sidecar)) {
+    core::log_path_diagnostic(core::LogLevel::Error, "editor", osPath,
+                              "the asset's sidecar could not be written, so "
+                              "it would have no identity to be referenced by");
+    return EditorIdentityResult::WriteFailed;
+  }
+
+  // Catalogue it under the identity just minted. Without this the asset
+  // is referenceable only after a restart re-walks the mount, which for
+  // something the author just created reads as the save having failed.
+  if ((g_editorAssetService != nullptr) &&
+      (g_editorAssetService->database != nullptr)) {
+    const char *root = active_config().assetRoot;
+    const char *mount = active_config().assetMount;
+    const std::size_t rootLength = std::strlen(root);
+    // The path is under the asset root (the caller's jail check proved
+    // it), so the mount-relative spelling is what the catalog keys on.
+    const char *relative = osPath;
+    if ((rootLength > 0U) && (std::strncmp(osPath, root, rootLength) == 0)) {
+      relative = osPath + rootLength;
+      while ((*relative == '/') || (*relative == '\\')) {
+        ++relative;
+      }
+    }
+    char virtualPath[520] = {};
+    const int written = std::snprintf(virtualPath, sizeof(virtualPath),
+                                      "%s/%s", mount, relative);
+    if ((written > 0) &&
+        (static_cast<std::size_t>(written) < sizeof(virtualPath))) {
+      for (char &c : virtualPath) {
+        if (c == '\\') {
+          c = '/';
+        }
+      }
+      renderer::AssetMetadata metadata{};
+      metadata.assetId = renderer::make_asset_id_from_path(virtualPath);
+      metadata.typeTag = content::classify_asset_path(virtualPath).tag;
+      metadata.ref = content::asset_ref_primary(sidecar.guid);
+      renderer::write_metadata_path(&metadata.filePath, virtualPath);
+      static_cast<void>(renderer::register_asset_metadata(
+          g_editorAssetService->database, metadata));
+    }
+  }
+  return EditorIdentityResult::Created;
 }
 
 } // namespace engine::runtime

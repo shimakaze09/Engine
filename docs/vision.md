@@ -6,13 +6,15 @@ GitHub tracker; decisions and their dates live in `docs/decisions/`.
 
 ## The goal
 
-A production-level game engine with two co-equal halves:
+A commercial engine for anime-style games, with two co-equal halves:
 
 **Unreal-level scene rendering with Unity/Godot-level ease of use.**
 
 Both halves are engine qualities. Rendering depth is earned through
-correct, scalable foundations; ease of use through disciplined APIs,
-presets and diagnostics. Neither is pursued by patching around the other.
+correct, scalable foundations and is judged by how well it renders the
+target style, not by photorealism alone; ease of use through disciplined
+APIs, presets and diagnostics. Neither is pursued by patching around the
+other.
 
 Beginner ease comes from strong defaults, presets, templates, validation,
 guidance, undo and recovery — never from weaker correctness, hidden
@@ -65,9 +67,13 @@ smooth at 60 Hz simulation. This demo is the engine's own regression test
 for the creation loop: run it, and the defects a human hits become the
 queue.
 
-**Runs everywhere.** The same content plays from a shared web link in a
-browser, and an iOS runtime boots it. Gated on the RHI migration; web
-export is the headline differentiator.
+**Ships.** A project made in the editor is packaged, without leaving it,
+into a build that runs by itself on Windows, Linux and macOS, from a web
+link, and on an Android and an iOS device.
+
+**Looks like anime.** A character with a toon shading model, an outline,
+a morph-target expression and spring-bone hair is authored in the editor
+and confirmed by a dated human observation on real hardware.
 
 **The hour test.** Five external testers with no game-dev background each
 produce and share a playable variation of a template in under an hour,
@@ -77,18 +83,18 @@ Sequencing: content before replatform. Porting a stabilized renderer is far
 cheaper than porting a moving target, and the hour test cannot be validated
 until the creation loop exists.
 
-Platforms follow the vision: Windows and Linux editor first, web export
-after the RHI migration, an iOS/iPadOS runtime proof. A macOS editor
-remains likely; macOS game shipping and Android remain product decisions
-rather than commitments.
+Platforms: the editor targets Windows, Linux and macOS; games are to ship
+to those three, Android, iOS and the web. The mobile proofs wait on hardware
+the project owns.
 
 ## Parking lot
 
-Cut from v1, not canceled: advanced rendering (lightmap baking, SSR,
-volumetrics, advanced post), particles, a 2D engine, networking, splines,
-data tables, foliage painting, CSG, haptics and input replay, XR, AI and
-navigation, animation retargeting and root motion, a timeline/sequencer,
-user-authored shaders, a plugin system.
+Cut from v1, not canceled: advanced photorealistic rendering (lightmap
+baking, SSR, volumetrics), a 2D engine, networking and multiplayer,
+foliage painting, CSG, haptics and input replay, XR, a general-purpose
+shader language beyond authored shading programs (those left the parking
+lot by [0018](decisions/0018-authors-compose-shading.md)), a plugin system.
 
 Parallel lanes stay live throughout: documentation, extended test coverage
-including golden-image renderer tests, and the devops pipeline.
+(golden-image renderer tests are a goal; none exist yet), and the devops
+pipeline.

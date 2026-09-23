@@ -43,4 +43,25 @@ private:
 #endif
 };
 
+/// The thread operations a worker pool spawns through, so a test can
+/// refuse a spawn at a chosen point and drive the rollback an OS refusal
+/// would take. Those rollbacks are the paths least likely to be right and
+/// the least reachable otherwise: a real refusal needs the thread limit or
+/// memory to run out, which no test can arrange reliably.
+///
+/// Same shape as ReplaceOps, and passed the same way -- as an argument,
+/// not installed globally, so a test cannot leak its injection into
+/// whatever runs next.
+struct ThreadOps {
+  /// Starts entry(userData) on `thread`. False must leave `thread` empty,
+  /// exactly as NativeThread::spawn does, or the caller's rollback will
+  /// join something that never started.
+  bool (*spawn)(NativeThread *thread, NativeThread::EntryFn entry,
+                void *userData) noexcept;
+};
+
+/// The table every production caller uses: spawn forwards to
+/// NativeThread::spawn.
+const ThreadOps &production_thread_ops() noexcept;
+
 } // namespace engine::core

@@ -10,8 +10,6 @@
 #define __PRFCHWINTRIN_H // NOLINT(bugprone-reserved-identifier)
 #endif
 
-#include <SDL3/SDL.h>
-
 #include "imgui.h"
 #include "ImGuizmo.h"
 
@@ -26,6 +24,7 @@
 #include "engine/math/transform.h"
 #include "engine/renderer/camera.h"
 #include "engine/renderer/render_device.h"
+#include "engine/runtime/editor_bridge.h"
 #include "engine/runtime/world.h"
 
 #include "editor_asset_index.h"
@@ -108,6 +107,16 @@ struct EditorSession final {
   std::size_t selectedEntityCount = 0U;
   std::uint32_t selectionEpoch = 0U;
   PlayState playState = PlayState::Stopped;
+  // Every play-state change since the runtime last drained, oldest
+  // first. playState alone is the level and loses a Play/Stop pair that
+  // happened between two drains; these are the edges, so the runtime
+  // dispatches the session hooks of each one. Fixed capacity, because
+  // the drain runs every frame and the author cannot out-click it: a
+  // full queue drops the newest and says so once.
+  static constexpr std::size_t kMaxPlayTransitions = 16U;
+  std::array<runtime::PlayTransition, kMaxPlayTransitions> playTransitions{};
+  std::size_t playTransitionHead = 0U;
+  std::size_t playTransitionCount = 0U;
   // Set by the toolbar Step button while paused; the runtime consumes it
   // through the editor bridge to simulate exactly one fixed step.
   bool stepRequested = false;
@@ -143,9 +152,6 @@ struct EditorSession final {
   // viewport panel so overlays can anchor inside the rendered scene.
   ImVec2 sceneViewportScreenPos{};
   ImVec2 sceneViewportScreenSize{};
-  // Native window handle, retained for title-bar updates and as the
-  // parent window for native file dialogs; never touched by Play/Stop.
-  SDL_Window *sdlWindow = nullptr;
   char lastAppliedWindowTitle[640] = {};
   SceneDocumentState document{};
   ContentBrowserState contentBrowser{};
@@ -232,6 +238,13 @@ const char *editor_scene_path() noexcept;
 /// Returns the configured editor asset browser root ("" when unset).
 const char *editor_asset_root() noexcept;
 
+/// The texture a decoded RGBA8 thumbnail is uploaded as: a single level,
+/// sampled linearly and clamped. A thumbnail is drawn smaller than it is
+/// stored (20 and 64 px rows), so a mip chain would be sampled -- and a
+/// chain the backend cannot generate stays empty, which drew the
+/// thumbnails black.
+renderer::TextureDesc thumbnail_texture_desc(int width, int height,
+                                             const void *pixels) noexcept;
 /// Loads (and caches) the thumbnail texture for an asset path through the
 /// renderer's RenderDevice; invalid handle on miss.
 renderer::DeviceTextureHandle
@@ -291,5 +304,9 @@ void start_play_mode() noexcept;
 void pause_play_mode() noexcept;
 /// Stops play mode and restores the captured pre-play world.
 void stop_play_mode() noexcept;
+/// Takes the oldest recorded play transition, or returns false when none
+/// is queued. The runtime drains this through the editor bridge; nothing
+/// in the editor reads it.
+bool consume_play_transition(runtime::PlayTransition *outTransition) noexcept;
 
 } // namespace engine::editor

@@ -67,8 +67,60 @@ bool platform_gamepads_available() noexcept;
 void platform_open_gamepad(std::uint32_t instanceId) noexcept;
 /// Closes the device behind an instance id; a no-op for an unknown id.
 void platform_close_gamepad(std::uint32_t instanceId) noexcept;
-/// Underlying SDL_Window* (opaque; platform/editor glue only).
+/// Underlying SDL_Window* (opaque). Its one sanctioned consumer is the
+/// editor's ImGui SDL3 backend, which is written against SDL and needs the
+/// window itself; everything else asks the platform for what it wants
+/// from the window through the functions below.
 void *get_sdl_window() noexcept;
+
+// ----- Window ----------------------------------------------------------------
+
+/// The window's content scale, for sizing UI to the display: 1.0 at the
+/// platform's reference density, 2.0 on a typical HiDPI laptop. 1.0 when
+/// there is no window or the platform cannot tell, so a caller can
+/// multiply by it unconditionally.
+float platform_display_scale() noexcept;
+/// Sets the window's title. False when there is no window or the platform
+/// refuses; the title is copied, so the caller's buffer need not outlive
+/// the call.
+bool platform_set_window_title(const char *title) noexcept;
+
+// ----- File dialogs ----------------------------------------------------------
+
+enum class FileDialogKind : std::uint8_t { Open, Save };
+
+/// One entry in a dialog's file-type list: a display name and a
+/// semicolon-separated list of extensions without dots ("scene",
+/// "png;jpg"). Read after the call returns, until the dialog closes, so
+/// both strings must outlive it -- in practice, string literals.
+struct FileDialogFilter final {
+  const char *name = nullptr;
+  const char *pattern = nullptr;
+};
+
+/// Filters one dialog can carry.
+inline constexpr int kMaxFileDialogFilters = 4;
+
+/// Receives a dialog's outcome: the chosen path, or nullptr when the user
+/// cancelled or the dialog failed (a failure is logged by the platform
+/// first). Runs on whatever thread the platform delivers on -- a portal
+/// worker on Linux, possibly the calling thread itself when a dialog
+/// fails at once -- so it must only publish the result for the main
+/// thread to pick up, and must not touch state the main thread owns. The
+/// path is valid only for the duration of the call.
+using FileDialogCallback = void (*)(void *userData, const char *path) noexcept;
+
+/// Shows a native open or save dialog parented to the platform window,
+/// starting at `defaultLocation` (may be null). True means the callback
+/// will run exactly once. False means it will not: no window, too many
+/// filters, or every dialog slot is held by a dialog still open -- the
+/// refusal is logged, and the caller still owns whatever it passed as
+/// `userData`.
+bool platform_show_file_dialog(FileDialogKind kind,
+                               FileDialogCallback callback, void *userData,
+                               const FileDialogFilter *filters,
+                               int filterCount,
+                               const char *defaultLocation) noexcept;
 /// Native window handle for external render backends: X11 window
 /// id / Wayland wl_surface / Win32 HWND / Cocoa NSWindow, null when
 /// headless or before initialization.

@@ -1,0 +1,11 @@
+SCHEMA 5
+TOOL_VERSION 4
+SOURCE_HASH cd48932d18f70c7c
+IMPORT_HASH 2755be6c6a924f10
+PLATFORM Linux
+SOURCE_GUID b556daf3-7c19-40a2-a93f-a22d07afea4a
+OUTPUT 59790f561b916840 triangle.mesh
+ASSET 432408a2e33116bc triangle.mesh
+OUTPUT ee0da4f1d7405797 triangle.mesh.cookmeta
+OUTPUT 50e3c997de316b6c .thumbnails/triangle.mesh.png
+OUTPUT cc8abc9d0793c8cf .thumbnails/triangle.mesh.checksum

@@ -64,18 +64,23 @@ struct MaterialEditorState final {
   bool gestureActive = false;
   renderer::Material gestureBeforeParams{};
   renderer::MaterialTextureSlots gestureBeforeSlots{};
+  std::uint16_t gestureBeforeOverrides = 0U;
 };
 
 /// Undoable material param/texture-slot edit: execute/undo both write
-/// straight into the live asset database record (editor_set_material_
-/// params) -- the same viewport-preview mutation a live drag already
-/// applies, so redo/undo is instant with no disk round trip.
+/// straight into the live asset database record (editor_restore_material)
+/// -- the same viewport-preview mutation a live drag already applies, so
+/// redo/undo is instant with no disk round trip.
 struct MaterialEditCommand final : EditorCommand {
   renderer::AssetId materialId = renderer::kInvalidAssetId;
   renderer::Material before{};
   renderer::MaterialTextureSlots slotsBefore{};
   renderer::Material after{};
   renderer::MaterialTextureSlots slotsAfter{};
+  // Which fields the material authored on each side: an edit makes a field
+  // an override, so undoing it must hand the field back to the parent.
+  std::uint16_t overridesBefore = 0U;
+  std::uint16_t overridesAfter = 0U;
 
   bool execute() noexcept override;
   bool undo() noexcept override;

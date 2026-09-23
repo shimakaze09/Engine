@@ -116,24 +116,13 @@ void flush_scene_captures(FrameFlushContext &ctx) noexcept {
       dev->set_param_i32(backend.pbrAlbedoMapLocation, 0);
     }
 
-    //: scene captures share pbrProgram (and its GL uniform
-    // state) with the main forward pass, so every draw here must set these
-    // uniforms itself even when a capture's own materials never use them —
+    // Scene captures share pbrProgram, and its GL uniform state, with the
+    // main forward pass, so every draw here sets its own material
+    // uniforms even when a capture's own materials never use them —
     // otherwise a capture would silently keep whatever texture the last
     // forward draw left bound.
-    const MaterialTextureUniformLocs captureMaterialTexLocs{
-        backend.pbrHasMetallicRoughnessTextureLocation,
-        backend.pbrMetallicRoughnessMapLocation,
-        backend.pbrHasEmissiveTextureLocation,
-        backend.pbrEmissiveMapLocation,
-        backend.pbrHasOcclusionTextureLocation,
-        backend.pbrOcclusionMapLocation,
-        backend.pbrHasOpacityTextureLocation,
-        backend.pbrOpacityMapLocation,
-        backend.pbrAlphaModeLocation,
-        backend.pbrAlphaCutoffLocation,
-        backend.pbrUvTilingLocation,
-        backend.pbrUvOffsetLocation};
+    const ForwardDrawProgram captureProgram =
+        pbr_forward_draw_program(backend);
 
     // Commands render prep culled for the main camera but flagged for
     // this capture ride in the auxiliary list.
@@ -142,8 +131,7 @@ void flush_scene_captures(FrameFlushContext &ctx) noexcept {
     auto drawCaptureRange = [&](const CommandBufferView &view,
                                 std::size_t start, std::size_t end,
                                 std::uint16_t requiredMask) {
-      DeviceTextureHandle boundAlbedoTexture{};
-      DeviceTextureHandle boundMaterialTex[4] = {};
+      ForwardDrawBindings bindings{};
       for (std::size_t i = start; (view.data != nullptr) && (i < end); ++i) {
         const DrawCommand &command = view.data[i];
         if ((requiredMask != 0U) &&
@@ -156,71 +144,10 @@ void flush_scene_captures(FrameFlushContext &ctx) noexcept {
           continue;
         }
 
-        if (backend.pbrAlbedoLocation.valid()) {
-          dev->set_param_vec3(backend.pbrAlbedoLocation,
-                                &command.material.albedo.x);
-        }
-        if (backend.pbrRoughnessLocation.valid()) {
-          dev->set_param_f32(backend.pbrRoughnessLocation,
-                                 command.material.roughness);
-        }
-        if (backend.pbrMetallicLocation.valid()) {
-          dev->set_param_f32(backend.pbrMetallicLocation,
-                                 command.material.metallic);
-        }
-        if (backend.pbrOpacityLocation.valid()) {
-          dev->set_param_f32(backend.pbrOpacityLocation,
-                                 command.material.opacity);
-        }
-        if (backend.pbrEmissiveLocation.valid()) {
-          dev->set_param_vec3(backend.pbrEmissiveLocation,
-                                &command.material.emissive.x);
-        }
-        upload_pbr_foliage_uniforms(backend, dev, command);
-
-        const DeviceTextureHandle albedoTex =
-            texture_device_handle(command.material.albedoTexture);
-        const bool hasAlbedoTex =
-            (command.material.albedoTexture != kInvalidTextureHandle) &&
-            (albedoTex != kInvalidDeviceTexture);
-        if (backend.pbrHasAlbedoTextureLocation.valid()) {
-          dev->set_param_i32(backend.pbrHasAlbedoTextureLocation,
-                               hasAlbedoTex ? 1 : 0);
-        }
-        if (hasAlbedoTex && (albedoTex != boundAlbedoTexture)) {
-          dev->bind_texture_slot(0U, albedoTex);
-          boundAlbedoTexture = albedoTex;
-        } else if (!hasAlbedoTex &&
-                   (boundAlbedoTexture != backend.fallbackTexture2D)) {
-          dev->bind_texture_slot(0U, backend.fallbackTexture2D);
-          boundAlbedoTexture = backend.fallbackTexture2D;
-        }
-        upload_material_texture_slots(captureMaterialTexLocs, dev,
-                                      command.material,
-                                      backend.fallbackTexture2D,
-                                      boundMaterialTex);
-
-        const math::Mat4 model = compute_model_matrix(command);
-        const math::Mat4 mvp = compute_mvp(model, captureViewProjection);
-        float normalMatrix[9] = {};
-        extract_normal_matrix(model, normalMatrix);
-        if (backend.pbrModelLocation.valid()) {
-          dev->set_param_mat4(backend.pbrModelLocation, &model.columns[0].x);
-        }
-        dev->set_param_mat4(backend.pbrMvpLocation, &mvp.columns[0].x);
-        dev->set_param_mat3(backend.pbrNormalMatrixLocation, normalMatrix);
-
-        if (mesh->indexCount > 0U) {
-          ++frameStats.drawCalls;
-          frameStats.triangleCount += (mesh->indexCount / 3U);
-          dev->draw_indexed(mesh->geometry,
-                            static_cast<std::int32_t>(mesh->indexCount));
-        } else {
-          ++frameStats.drawCalls;
-          frameStats.triangleCount += (mesh->vertexCount / 3U);
-          dev->draw(mesh->geometry, PrimitiveTopology::Triangles, 0,
-                    static_cast<std::int32_t>(mesh->vertexCount));
-        }
+        upload_forward_material(captureProgram, backend, dev, command,
+                                &bindings);
+        draw_forward_command(captureProgram, dev, command, *mesh,
+                             captureViewProjection, &frameStats);
       }
     };
 

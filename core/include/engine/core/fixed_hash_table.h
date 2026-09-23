@@ -72,6 +72,21 @@ public:
     return (slot != Capacity) ? &m_values[slot] : nullptr;
   }
 
+  /// Slots a lookup of `key` visits, hit or miss: the table's cost for that
+  /// key, for owners that promise a bounded lookup.
+  std::size_t probe_length(Key key) const noexcept {
+    std::size_t slot = home_slot(key);
+    for (std::size_t probe = 0U; probe < Capacity; ++probe) {
+      const std::uint8_t state = m_states[slot];
+      if ((state == kEmpty) ||
+          ((state == kOccupied) && (m_keys[slot] == key))) {
+        return probe + 1U;
+      }
+      slot = (slot + 1U) % Capacity;
+    }
+    return Capacity;
+  }
+
   /// Tombstones the entry for a key; false when absent.
   bool erase(Key key) noexcept {
     const std::size_t slot = find_slot(key);

@@ -244,21 +244,20 @@ void sort_dependency_digests(std::vector<DependencyDigest> &digests) {
 }
 
 /// Reads the authored import settings out of the source's sidecar.
-bool read_authored_import_settings(const char *sourcePath,
-                                   ImportSettings *outSettings) {
+engine::content::SidecarReadResult
+read_authored_import_settings(const char *sourcePath,
+                              ImportSettings *outSettings) {
   if ((sourcePath == nullptr) || (outSettings == nullptr)) {
-    return false;
+    return engine::content::SidecarReadResult::Absent;
   }
   engine::content::AssetSidecar sidecar{};
-  if (engine::content::read_asset_sidecar(sourcePath, &sidecar) !=
-      engine::content::SidecarReadResult::Ok) {
-    return false;
+  const engine::content::SidecarReadResult result =
+      engine::content::read_asset_sidecar(sourcePath, &sidecar);
+  if ((result == engine::content::SidecarReadResult::Ok) &&
+      sidecar.hasMeshImport) {
+    *outSettings = sidecar.meshImport;
   }
-  if (!sidecar.hasMeshImport) {
-    return false;
-  }
-  *outSettings = sidecar.meshImport;
-  return true;
+  return result;
 }
 
 bool make_cookstamp_path(const char *outputPath, char *outPath,

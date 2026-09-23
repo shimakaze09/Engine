@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <new>
@@ -19,10 +20,9 @@
 #define __PRFCHWINTRIN_H // NOLINT(bugprone-reserved-identifier)
 #endif
 
-#include <SDL3/SDL.h>
-
 #include "engine/audio/audio.h"
 #include "engine/core/bootstrap.h"
+#include "engine/core/crash_report.h"
 #include "engine/core/cvar.h"
 #include "engine/core/string_util.h"
 #include "engine/core/engine_stats.h"
@@ -31,6 +31,7 @@
 #include "engine/core/logging.h"
 #include "engine/core/simulation_clock.h"
 #include "engine/core/platform.h"
+#include "engine/core/platform_event.h"
 #include "engine/core/profiler.h"
 #include "engine/core/vfs.h"
 #include "engine/engine.h"
@@ -76,28 +77,23 @@ namespace runtime {
 /// Lets the editor process one native event before deciding whether gameplay
 /// input should see it.
 InputEventRoute process_editor_input_event(const EditorBridge *bridge,
-                                           void *nativeEvent) noexcept {
-  if (nativeEvent == nullptr) {
-    return InputEventRoute::Gameplay;
-  }
-
-  auto *event = static_cast<SDL_Event *>(nativeEvent);
+                                           const core::PlatformEvent &event) noexcept {
   if ((bridge != nullptr) && (bridge->process_event != nullptr)) {
     bridge->process_event(event);
   }
 
-  if (event->type == SDL_EVENT_QUIT) {
+  using Kind = core::PlatformEventKind;
+  if (event.kind == Kind::Quit) {
     return InputEventRoute::QuitRequested;
   }
 
-  const bool keyboardEvent = (event->type == SDL_EVENT_KEY_DOWN) ||
-                             (event->type == SDL_EVENT_KEY_UP) ||
-                             (event->type == SDL_EVENT_TEXT_INPUT) ||
-                             (event->type == SDL_EVENT_TEXT_EDITING);
-  const bool mouseEvent = (event->type == SDL_EVENT_MOUSE_MOTION) ||
-                          (event->type == SDL_EVENT_MOUSE_BUTTON_DOWN) ||
-                          (event->type == SDL_EVENT_MOUSE_BUTTON_UP) ||
-                          (event->type == SDL_EVENT_MOUSE_WHEEL);
+  const bool keyboardEvent =
+      (event.kind == Kind::KeyDown) || (event.kind == Kind::KeyUp) ||
+      (event.kind == Kind::TextInput) || (event.kind == Kind::TextEditing);
+  const bool mouseEvent =
+      (event.kind == Kind::MouseMove) ||
+      (event.kind == Kind::MouseButtonDown) ||
+      (event.kind == Kind::MouseButtonUp) || (event.kind == Kind::MouseWheel);
   const bool captureKeyboard = (bridge != nullptr) &&
                                (bridge->wants_capture_keyboard != nullptr) &&
                                bridge->wants_capture_keyboard();
@@ -184,6 +180,63 @@ bool process_pending_scene_op(World &world) noexcept {
 // ===========================================================================
 
 namespace {
+
+// The stage names a crash report prints, and the indices the pipeline
+// publishes. One table, in frame order, so the index the handler reads is
+// the position in the sequence below -- adding a stage means adding a name
+// here and a RUN_STAGE line there, and the static_assert keeps the two in
+// step.
+//
+// A literal array of literals with static storage duration, because a
+// signal handler dereferences it: nothing about it may be built at run
+// time or live on a stack.
+constexpr const char *kStageNames[] = {
+    "between-frames", "input",         "play-transitions",
+    "timing",         "scripting",     "assets",
+    "hot-reload",     "audio",         "animation",
+    "simulation",     "camera",        "render-prep",
+    "post-frame",     "measure-frame", "render",
+    "scene-commit",   "diagnostics",   "frame-cleanup",
+    "frame-pacing"};
+
+enum : std::uint32_t {
+  // Not a stage: the pipeline is between frames, or has not started one.
+  kStageBetweenFrames = 0U,
+  kStageInput,
+  kStagePlayTransitions,
+  kStageTiming,
+  kStageScripting,
+  kStageAssets,
+  kStageHotReload,
+  kStageAudio,
+  kStageAnimation,
+  kStageSimulationGraph,
+  kStageCamera,
+  kStageRenderPrepGraph,
+  kStagePostFrame,
+  kStageMeasureFrame,
+  kStageRender,
+  kStageSceneCommit,
+  kStageDiagnostics,
+  kStageFrameCleanup,
+  kStageFramePacing,
+  kStageCount
+};
+
+static_assert((sizeof(kStageNames) / sizeof(kStageNames[0])) == kStageCount,
+              "every pipeline stage needs a name in the crash report");
+
+// Names the stage, opens a profiler scope for it, then runs it. Both
+// consumers want the same list, so they read it from the same place: the
+// crash report needs the name of the stage a fault happened in, and the
+// Stats panel needs a bar per stage. A macro rather than a wrapper so the
+// sequence below still reads as the list of stages it is.
+#define RUN_STAGE(stage, call)                                               \
+  do {                                                                       \
+    core::set_crash_stage(kStage##stage);                                    \
+    PROFILE_SCOPE(kStageNames[kStage##stage]);                               \
+    (call);                                                                  \
+  } while (false)
 
 // Shader and watched-script timestamps are polled on this cadence, not
 // every frame: up to 128 shader entries plus every watched script is a
@@ -447,10 +500,10 @@ bool process_input_events_with_editor() noexcept {
 
   const runtime::EditorBridge *bridge = runtime::editor_bridge();
 
-  SDL_Event event{};
-  while (SDL_PollEvent(&event)) {
+  core::PlatformEvent event{};
+  while (core::platform_poll_event(&event)) {
     const runtime::InputEventRoute route =
-        runtime::process_editor_input_event(bridge, &event);
+        runtime::process_editor_input_event(bridge, event);
     if (route == runtime::InputEventRoute::QuitRequested) {
       // The editor gets a chance to defer the quit behind its own
       // unsaved-change confirm flow; a null hook or a bound-but-clean
@@ -478,7 +531,7 @@ bool process_input_events_with_editor() noexcept {
       continue;
     }
 
-    core::input_process_event(&event);
+    core::input_process_event(event);
   }
 
   core::end_input_frame();
@@ -664,6 +717,12 @@ struct EnginePipeline::Impl final {
 
   void stage_input() noexcept;
   void stage_play_transitions() noexcept;
+  /// Starts a play session: the main script goes under the reload watch
+  /// and the entity modules get their session-start hook.
+  void begin_play_session() noexcept;
+  /// Ends one: the end hooks dispatch, the modules and the scripting VM
+  /// are recycled, and simulated time restarts from zero.
+  void end_play_session() noexcept;
   void stage_timing() noexcept;
   void stage_scripting() noexcept;
   void stage_assets() noexcept;
@@ -705,6 +764,11 @@ EnginePipeline::Impl::Impl() noexcept : serviceRegistry(serviceLocator) {}
 
 bool EnginePipeline::Impl::initialize(std::uint32_t maxFrameCount) noexcept {
   maxFrames = maxFrameCount;
+
+  // The crash report can name a stage from here on. The table is static,
+  // so it stays readable for the life of the process; only the index the
+  // frame loop publishes changes.
+  core::set_crash_stage_table(kStageNames, kStageCount);
 
   world.reset(new (std::nothrow) runtime::World());
   commandBuffer.reset(new (std::nothrow) renderer::CommandBufferBuilder());
@@ -864,38 +928,56 @@ bool EnginePipeline::Impl::execute_frame() noexcept {
           : 0.0;
   previousFrameStart = frameStart;
 
-  stage_input();
-  stage_play_transitions();
-  stage_timing();
-  stage_scripting();
-  stage_assets();
-  stage_hot_reload();
-  stage_audio();
-  stage_animation();
+  // Each stage names itself for the crash report before it runs, so a
+  // fault says which one the process died in. One relaxed store per
+  // stage; the handler turns the index back into the name with no
+  // formatting, which is why the names are a static table rather than a
+  // string the pipeline builds.
+  RUN_STAGE(Input, stage_input());
+  RUN_STAGE(PlayTransitions, stage_play_transitions());
+  RUN_STAGE(Timing, stage_timing());
+  RUN_STAGE(Scripting, stage_scripting());
+  RUN_STAGE(Assets, stage_assets());
+  RUN_STAGE(HotReload, stage_hot_reload());
+  RUN_STAGE(Audio, stage_audio());
+  RUN_STAGE(Animation, stage_animation());
 
   if (runFrameGraph) {
-    if (!stage_simulation_graph()) {
+    core::set_crash_stage(kStageSimulationGraph);
+    bool simulationOk = false;
+    {
+      PROFILE_SCOPE(kStageNames[kStageSimulationGraph]);
+      simulationOk = stage_simulation_graph();
+    }
+    if (!simulationOk) {
       fatalError = true;
       core::profiler_end_frame();
       return false;
     }
-    stage_camera();
-    if (!stage_render_prep_graph()) {
+    RUN_STAGE(Camera, stage_camera());
+    core::set_crash_stage(kStageRenderPrepGraph);
+    bool renderPrepOk = false;
+    {
+      PROFILE_SCOPE(kStageNames[kStageRenderPrepGraph]);
+      renderPrepOk = stage_render_prep_graph();
+    }
+    if (!renderPrepOk) {
       fatalError = true;
       core::profiler_end_frame();
       return false;
     }
-    stage_post_frame();
+    RUN_STAGE(PostFrame, stage_post_frame());
   }
 
-  stage_measure_frame();
-  stage_render();
+  RUN_STAGE(MeasureFrame, stage_measure_frame());
+  RUN_STAGE(Render, stage_render());
   if (runFrameGraph) {
-    stage_scene_commit();
+    RUN_STAGE(SceneCommit, stage_scene_commit());
   }
-  stage_diagnostics();
-  stage_frame_cleanup();
-  stage_frame_pacing();
+  RUN_STAGE(Diagnostics, stage_diagnostics());
+  RUN_STAGE(FrameCleanup, stage_frame_cleanup());
+  RUN_STAGE(FramePacing, stage_frame_pacing());
+  core::set_crash_stage(kStageBetweenFrames);
 
   core::profiler_end_frame();
   return running;
@@ -910,6 +992,10 @@ void EnginePipeline::Impl::teardown() noexcept {
     return;
   }
   tornDown = true;
+
+  // No frame is running from here on, so a fault during teardown must not
+  // be reported against whichever stage happened to run last.
+  core::set_crash_stage(kStageBetweenFrames);
 
   // The steps below reach process-wide state, so they belong to whichever
   // run currently owns the alias slots. A run closing while a newer one owns
@@ -964,25 +1050,117 @@ void EnginePipeline::Impl::stage_input() noexcept {
 // Stage: play transitions
 // ---------------------------------------------------------------------------
 
-void EnginePipeline::Impl::stage_play_transitions() noexcept {
-  playState = query_editor_play_state();
-  if (quitRequested && (playState != LoopPlayState::Stopped)) {
-    // Quit ends a live session exactly like Stop: on_end_play
-    // runs once, here, and the frame continues as Stopped, so nothing of
-    // the session runs after its end hooks. The scripting VM is not
-    // recycled the way Stop does; teardown owns it from here.
-    scripting::dispatch_entity_scripts_end();
-    playState = LoopPlayState::Stopped;
-    previousPlayState = LoopPlayState::Stopped;
+namespace {
+
+/// At most one transition can be inferred from two samples of the play
+/// state, which is what the pipeline did for everybody before the editor
+/// recorded them: the net change between the previous frame and this one.
+runtime::PlayTransition inferred_transition(LoopPlayState previous,
+                                            LoopPlayState current) noexcept {
+  if (current == LoopPlayState::Stopped) {
+    return runtime::PlayTransition::Stop;
+  }
+  if (current == LoopPlayState::Paused) {
+    return runtime::PlayTransition::Pause;
+  }
+  return (previous == LoopPlayState::Paused) ? runtime::PlayTransition::Resume
+                                             : runtime::PlayTransition::Start;
+}
+
+} // namespace
+
+void EnginePipeline::Impl::begin_play_session() noexcept {
+  const char *mainScriptPath = active_config().mainScriptPath;
+  if (mainScriptPath != nullptr) {
+    scripting::watch_script_file(mainScriptPath);
+  }
+  scripting::dispatch_entity_scripts_start();
+}
+
+void EnginePipeline::Impl::end_play_session() noexcept {
+  scripting::dispatch_entity_scripts_end();
+  scripting::clear_entity_script_modules();
+  scripting::shutdown_scripting();
+  if (!scripting::initialize_scripting()) {
+    core::log_message(core::LogLevel::Error, "scripting",
+                      "failed to reinitialize scripting on stop");
+  } else {
+    runtime::bind_scripting_runtime(world.get(), serviceLocator);
+    scripting::set_default_mesh_asset_id(
+        (meshIds.cube != renderer::kInvalidAssetId) ? meshIds.cube
+                                                    : meshIds.bootstrap);
+    scripting::set_builtin_mesh_ids(meshIds.plane, meshIds.cube,
+                                    meshIds.sphere, meshIds.cylinder,
+                                    meshIds.capsule, meshIds.pyramid);
   }
 
-  if ((playState == LoopPlayState::Playing) &&
-      (previousPlayState == LoopPlayState::Stopped)) {
-    const char *mainScriptPath = active_config().mainScriptPath;
-    if (mainScriptPath != nullptr) {
-      scripting::watch_script_file(mainScriptPath);
+  accumulator = 0.0;
+  previousTick = frameStart;
+  clock.simulationSeconds = 0.0;
+  clock.tickIndex = 0U;
+}
+
+void EnginePipeline::Impl::stage_play_transitions() noexcept {
+  playState = query_editor_play_state();
+
+  // Every transition the editor recorded since the last frame, in the
+  // order the author caused them. A bridge that records none -- every
+  // test double, and any host with no editor -- contributes the single
+  // net change two samples of the play state can express, so a Play and
+  // a Stop in the same frame still collapse there, as they always did.
+  // The bound is the pipeline's own: a bridge cannot hold the frame open
+  // by never running dry.
+  static constexpr std::size_t kMaxTransitionsPerFrame = 32U;
+  std::array<runtime::PlayTransition, kMaxTransitionsPerFrame> transitions{};
+  std::size_t transitionCount = 0U;
+  if ((bridge != nullptr) && (bridge->consume_play_transition != nullptr)) {
+    runtime::PlayTransition drained{};
+    while ((transitionCount < transitions.size()) &&
+           bridge->consume_play_transition(&drained)) {
+      transitions[transitionCount] = drained;
+      ++transitionCount;
     }
-    scripting::dispatch_entity_scripts_start();
+  } else if (playState != previousPlayState) {
+    transitions[0] = inferred_transition(previousPlayState, playState);
+    transitionCount = 1U;
+  }
+
+  // True when a session started or resumed this frame, which is what the
+  // transform history and the camera sample below are stale against.
+  bool enteredPlay = false;
+  // True once a drained Stop has already ended the live session, so the
+  // quit below does not dispatch a second set of end hooks over it.
+  bool sessionEnded = false;
+  for (std::size_t i = 0U; i < transitionCount; ++i) {
+    switch (transitions[i]) {
+    case runtime::PlayTransition::Start:
+      begin_play_session();
+      enteredPlay = true;
+      break;
+    case runtime::PlayTransition::Resume:
+      enteredPlay = true;
+      break;
+    case runtime::PlayTransition::Stop:
+      end_play_session();
+      sessionEnded = true;
+      break;
+    case runtime::PlayTransition::Pause:
+      break;
+    }
+  }
+
+  if (quitRequested && (playState != LoopPlayState::Stopped)) {
+    // A quit ends a live session after whatever the author did this
+    // frame, so a session that also started here gets its start hooks
+    // first. What scripts observe matches Stop: the end hooks run once
+    // and the frame continues as Stopped, so nothing of the session runs
+    // after them. Unlike Stop it does not recycle the scripting VM --
+    // teardown owns it from here, and a script's end hook can still be
+    // read afterwards.
+    if (!sessionEnded) {
+      scripting::dispatch_entity_scripts_end();
+    }
+    playState = LoopPlayState::Stopped;
   }
 
   // Fire BeginPlay for entities that haven't received it yet. Skip the phase
@@ -995,30 +1173,6 @@ void EnginePipeline::Impl::stage_play_transitions() noexcept {
     // Flush after leaving the phase: mutations only apply in Input, so a
     // flush inside BeginPlay is a no-op and the writes miss the first step.
     scripting::flush_deferred_mutations();
-  }
-
-  if ((playState == LoopPlayState::Stopped) &&
-      (previousPlayState != LoopPlayState::Stopped)) {
-    scripting::dispatch_entity_scripts_end();
-    scripting::clear_entity_script_modules();
-    scripting::shutdown_scripting();
-    if (!scripting::initialize_scripting()) {
-      core::log_message(core::LogLevel::Error, "scripting",
-                        "failed to reinitialize scripting on stop");
-    } else {
-      runtime::bind_scripting_runtime(world.get(), serviceLocator);
-      scripting::set_default_mesh_asset_id(
-          (meshIds.cube != renderer::kInvalidAssetId) ? meshIds.cube
-                                                      : meshIds.bootstrap);
-      scripting::set_builtin_mesh_ids(meshIds.plane, meshIds.cube,
-                                      meshIds.sphere, meshIds.cylinder,
-                                      meshIds.capsule, meshIds.pyramid);
-    }
-
-    accumulator = 0.0;
-    previousTick = frameStart;
-    clock.simulationSeconds = 0.0;
-    clock.tickIndex = 0U;
   }
 
   isPlaying = (playState == LoopPlayState::Playing);
@@ -1037,8 +1191,7 @@ void EnginePipeline::Impl::stage_play_transitions() noexcept {
     runFrameGraph = true;
   }
 
-  if (isPlaying && (previousPlayState != LoopPlayState::Playing) &&
-      !singleStepping) {
+  if (isPlaying && enteredPlay && !singleStepping) {
     world->clear_world_transform_history();
     cameraSampleValid = false;
   }
@@ -1083,6 +1236,19 @@ void EnginePipeline::Impl::stage_timing() noexcept {
   // Every frame publishes its decided steps, a paused or zero-step frame
   // included, so a script reading the clock always sees this frame's.
   scripting::set_simulation_clock(clock);
+
+  // Timers come due on simulation time: one advance per decided step with
+  // the fixed delta, so a timer fires at the same tick whatever the frame
+  // rate. Their callbacks run later, once, in stage_scripting — a timer
+  // reads no physics state, so advancing them here rather than inside the
+  // simulation graph changes nothing about when they come due, and it
+  // keeps callbacks out of a step they must not re-enter.
+  if (isPlaying && (world != nullptr)) {
+    for (std::uint32_t step = 0U; step < clock.stepsThisFrame; ++step) {
+      static_cast<void>(world->timer_manager().advance(
+          static_cast<float>(core::kFixedDeltaSeconds)));
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1118,7 +1284,7 @@ void EnginePipeline::Impl::stage_scripting() noexcept {
     scripting::dap_poll();
   }
   if (isPlaying && (clock.stepsThisFrame > 0U)) {
-    scripting::tick_timers();
+    scripting::dispatch_timers();
     scripting::tick_coroutines();
     scripting::dispatch_entity_scripts_update(
         static_cast<float>(step_seconds()));
@@ -1138,9 +1304,10 @@ void EnginePipeline::Impl::stage_assets() noexcept {
     content::begin_streaming_frame(assetStreamingQueue.get());
   }
 
-  // Every mesh the World references and nothing has loaded yet is
-  // requested through the catalog here, so a reopened scene draws without
-  // a script naming its meshes. One table probe per reference per frame.
+  // Every mesh the World references and nothing has loaded yet is bound
+  // to its catalogued asset and requested here, so a reopened scene draws
+  // without a script naming its meshes. A reference is looked up once and
+  // costs one integer test per frame afterwards.
   static_cast<void>(request_referenced_mesh_assets(
       *world, &assetDatabaseService, &unresolvedMeshReports));
 
@@ -1159,12 +1326,14 @@ void EnginePipeline::Impl::stage_assets() noexcept {
   static_cast<void>(renderer::resolve_material_textures(
       assetDatabase.get(), &load_material_texture_production, nullptr));
 
+  // Runs with no byte budget too: a refused mesh claim is answered by
+  // eviction whatever the cache size, or a full table would stay full.
   const int cacheMb = cacheSizeMbCvar.get_int(512);
-  if (cacheMb > 0) {
-    static_cast<void>(renderer::evict_mesh_assets_over_budget(
-        assetDatabase.get(),
-        static_cast<std::uint64_t>(cacheMb) * 1024ULL * 1024ULL));
-  }
+  const std::uint64_t cacheBytes =
+      (cacheMb > 0) ? (static_cast<std::uint64_t>(cacheMb) * 1024ULL * 1024ULL)
+                    : std::numeric_limits<std::uint64_t>::max();
+  static_cast<void>(
+      renderer::evict_mesh_assets_over_budget(assetDatabase.get(), cacheBytes));
 
   if (!updatedAssets) {
     core::log_message(core::LogLevel::Warning, "assets",

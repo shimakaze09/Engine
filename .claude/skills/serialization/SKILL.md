@@ -11,8 +11,9 @@ description: >
 
 # Serialization
 
-One authoritative registry generates or mechanically validates every
-direction: parse, write, copy, reset, migration and codec coverage. A type
+One authoritative registry generates or mechanically validates the
+scene and prefab read and write, copy, clone, count check, editor
+dispatch and codec coverage. A type
 missing a row fails to compile rather than silently skipping. Keep it that
 way — never add a parallel dispatch path.
 
@@ -20,12 +21,14 @@ way — never add a parallel dispatch path.
 
 1. **Add the row** to the X-macro table in
    `runtime/src/component_registry.h`. Row order is the serialized key
-   order of every format, so appending is the compatible position.
+   order of the scene and prefab formats, so appending is the compatible
+   position.
 2. **The compile-time cross-check** against `World::PersistentComponentTypes`
    will tell you what else the row needs. Follow it rather than guessing.
 3. **Reflect the fields** that are plain data, and give each a wire key.
-   `REFLECT_FIELD_KEY` defaults to the member name; declare it explicitly
-   whenever the member name might ever change, because the key — not the
+   `REFLECT_FIELD` uses the member name as the key; use
+   `REFLECT_FIELD_KEY` to pin one explicitly whenever the member name
+   might ever change, because the key — not the
    C++ name — is what scenes carry.
 4. **Add a codec** for anything reflection cannot express (64-bit asset
    ids, VFS paths, enums, nested arrays), sharing the helpers in
@@ -45,16 +48,24 @@ change and needs the migration path below.
 
 ## Changing a format
 
-- **Bump the schema version** and write the migration. A reader that meets
-  an unknown version refuses the document; it never guesses.
-- **Keep the old form readable.** Where a default-valued field can be
-  omitted so that pre-change files stay byte-identical, do that — it keeps
-  the version unchanged and the diff empty.
-- **Test both directions**: the old form loads, the new form round-trips,
-  and an unknown version is refused.
+- **Bump the schema version and migrate the tree.** The gate is exact: the
+  one current revision loads, and every other value — older, newer,
+  malformed, absent — is refused. The project is unreleased, so there is
+  no dual-read layer to add; a reader that guessed an older revision
+  would drop the fields it no longer knows and resave the document as a
+  reduction of itself.
+- **Prefer no version change at all.** Where a default-valued field can be
+  omitted so that unchanged files stay byte-identical, do that — the
+  revision stands and the diff is empty.
+- **Migrate every authored file in the same change**, with a script you
+  keep out of the engine, reproducing exactly what the read path you are
+  deleting produced. A file left behind stops loading.
+- **Test both directions**: the new form round-trips, and each refused
+  shape — the previous revision, the next one, a missing key, a
+  wrong-typed value — is refused.
 - A behavior change in serialized data (physics semantics, for instance)
-  needs an explicit behavior version and before/after tests, not a silent
-  reinterpretation of existing files.
+  is the same kind of change: bump the revision, migrate the tree, and
+  pair before/after tests, never a silent reinterpretation.
 
 ## Failure and durability
 
@@ -78,8 +89,8 @@ Determinism-sensitive by definition, so:
 - Round-trip through the production entry point — never a copied
   serializer model.
 - Byte-identical output for identical input.
-- `-R engine_integration_determinism` and
-  `-R engine_unit_component_registry`.
+- `-R 'determinism|scene_serializer|scene_version_gate|prefab|component_registry|reflect_wire_key|save_data'`
+  (one regex; CTest keeps only the last `-R`).
 - A refusal test per ingress you made strict, red on base.
 - Boundary cases: empty document, one entity, at capacity, one past
   capacity, malformed field, unknown version, truncated file.

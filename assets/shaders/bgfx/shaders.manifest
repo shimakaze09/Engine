@@ -1,11 +1,11 @@
 {
-  "comment": "bgfx shader cook manifest (#138 Phase C): each entry names one .sc source, its stage, the runtime output stem (matching the GL shader path stem shader_system maps from), and its variant define sets. Cooked outputs land as <output>.<variantKey>.<profile>.bin under the cooked directory; variantKey is the sorted defines joined with '-', or 'default' for none.",
+  "comment": "bgfx shader cook manifest: each entry names one .sc source, its stage, the runtime output stem (matching the shader path stem shader_system maps from), and its variant define sets. Cooked outputs land as <output>.<variantKey>.<profile>.bin under the cooked directory; variantKey is the sorted defines joined with '-', or 'default' for none. A stage whose requested variant is absent falls back to that stage's default binary, which is silent, so every define set the engine can request must be listed here: pbr.frag therefore carries each shading model both with and without PBR_FULL, because a missed shading-model variant would shade that surface as physically based while the engine believed otherwise.",
   "shaders": [
     { "source": "default.vs.sc", "type": "vertex", "output": "default.vert", "variants": [[]] },
     { "source": "default.fs.sc", "type": "fragment", "output": "default.frag", "variants": [[]] },
     { "source": "pbr.vs.sc", "type": "vertex", "output": "pbr.vert", "variants": [[]] },
     { "source": "pbr_instanced.vs.sc", "type": "vertex", "output": "pbr.vert", "variants": [["INSTANCED"], ["INSTANCED", "PBR_FULL"]] },
-    { "source": "pbr.fs.sc", "type": "fragment", "output": "pbr.frag", "variants": [[], ["PBR_FULL"], ["INSTANCED"], ["INSTANCED", "PBR_FULL"]] },
+    { "source": "pbr.fs.sc", "type": "fragment", "output": "pbr.frag", "variants": [[], ["PBR_FULL"], ["INSTANCED"], ["INSTANCED", "PBR_FULL"], ["ENGINE_SHADING_TOON"], ["ENGINE_SHADING_TOON", "PBR_FULL"], ["ENGINE_SHADING_UNLIT"], ["ENGINE_SHADING_UNLIT", "PBR_FULL"]] },
     { "source": "gbuffer.vs.sc", "type": "vertex", "output": "gbuffer.vert", "variants": [[]] },
     { "source": "gbuffer_instanced.vs.sc", "type": "vertex", "output": "gbuffer.vert", "variants": [["INSTANCED"]] },
     { "source": "gbuffer_skinned.vs.sc", "type": "vertex", "output": "gbuffer.vert", "variants": [["SKINNED"]] },
