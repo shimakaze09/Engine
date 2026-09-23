@@ -305,8 +305,9 @@ struct ForwardDrawBindings final {
 
 /// One maximal run of consecutive draws sharing a shading program.
 /// Render prep sorts the program id directly below the transparency bit,
-/// so each program occupies exactly one run inside a range and finding
-/// them is a scan rather than a sort.
+/// so in the opaque half each program occupies exactly one run and
+/// finding them is a scan rather than a sort. The transparent half sorts
+/// by depth first, so a program there can recur in many runs.
 struct ShadingProgramRun final {
   std::size_t first = 0U;
   std::size_t count = 0U;

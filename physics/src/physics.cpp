@@ -82,9 +82,6 @@ void begin_generation(std::uint32_t *generation, std::uint32_t *stamps,
 
 // Linked-list node for the broadphase spatial hash grid.
 
-// Max spatial-hash entries: each collider may touch up to 8 cells (the
-// corners of its AABB).
-
 // Cell-quantization guards: coordinates clamp to +/-1e9 cells (inside
 // int32) before the float-to-int cast so large-but-finite positions
 // cannot invoke UB or unbounded loops, and any collider whose expanded

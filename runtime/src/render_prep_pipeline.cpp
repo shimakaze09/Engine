@@ -174,10 +174,11 @@ std::uint16_t auxiliary_pass_mask(const AuxiliaryCulling &aux,
 /// Builds the 64-bit draw sort key, MSB→LSB:
 /// transparent:1 | shadingModel:7 | texture:20 | mesh:20 | depth:16.
 ///
-/// The shading model sits directly below the transparency bit so draws
-/// group into one contiguous run per model within each of the opaque and
-/// transparent halves. That is what lets the flush bind one program per
-/// run instead of per draw, and it is why the field outranks texture and
+/// The shading model sits directly below the transparency bit so opaque
+/// draws group into one contiguous run per model. Transparent draws sort
+/// back to front first, so there a model recurs wherever depth interleaves
+/// it. That is what lets the flush bind one program per run instead of
+/// per draw, and it is why the field outranks texture and
 /// mesh: a program change costs more than a texture or buffer rebind.
 std::uint64_t build_draw_sort_key(const renderer::Material &material,
                                   renderer::MeshHandle runtimeMesh,
