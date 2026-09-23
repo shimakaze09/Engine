@@ -68,6 +68,9 @@ bool initialize_audio() noexcept;
 bool initialize_audio(const AudioConfig &config) noexcept;
 /// True while the audio engine mixes into no device.
 bool audio_uses_null_device() noexcept;
+/// True between a successful initialize_audio and the shutdown_audio that
+/// closes it, whichever device the engine mixes into.
+bool audio_is_initialized() noexcept;
 /// Shuts down the owning system for audio.
 void shutdown_audio() noexcept;
 

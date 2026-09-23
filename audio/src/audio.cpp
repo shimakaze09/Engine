@@ -366,6 +366,7 @@ bool audio_uses_null_device() noexcept {
   return g_audio.initialized && g_audio.nullDevice;
 }
 
+bool audio_is_initialized() noexcept { return g_audio.initialized; }
 
 #if defined(ENGINE_PLATFORM_WEB)
 namespace {

@@ -622,6 +622,37 @@ if(EXISTS "${ENGINE_ASSET_SOURCE_DIR}")
     )
 endif()
 
+# Web pages ship the synced asset tree preloaded into the wasm FS, with
+# cooked bgfx shader binaries from a host cook: shaderc cannot build under
+# Emscripten, so ENGINE_WEB_COOKED_DIR names a native build's cooked output
+# (<native-build>/assets/shaders/bgfx/cooked), copied into the packaged
+# asset tree before every link. The .data archive only regenerates at link,
+# so the copy stamp is a link dependency of every page
+# (engine_package_web_page) and a recook repackages instead of silently
+# shipping stale binaries.
+if(ENGINE_TARGET_PLATFORM STREQUAL "Web")
+    set(ENGINE_WEB_COOKED_DIR "" CACHE PATH
+        "Host-cooked bgfx shader dir packaged into the web build")
+    if(ENGINE_WEB_COOKED_DIR STREQUAL "")
+        message(FATAL_ERROR
+            "ENGINE_TARGET_PLATFORM=Web needs ENGINE_WEB_COOKED_DIR: the "
+            "path to a native build's cooked shaders "
+            "(<native-build>/assets/shaders/bgfx/cooked); shaderc cannot "
+            "build under Emscripten, so the web package consumes a host "
+            "cook.")
+    endif()
+    set(ENGINE_WEB_COOK_STAMP "${CMAKE_BINARY_DIR}/web_cooked_shaders.stamp")
+    add_custom_command(
+        OUTPUT "${ENGINE_WEB_COOK_STAMP}"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${ENGINE_WEB_COOKED_DIR}"
+            "${ENGINE_ASSET_OUTPUT_DIR}/shaders/bgfx/cooked"
+        COMMAND ${CMAKE_COMMAND} -E touch "${ENGINE_WEB_COOK_STAMP}"
+        DEPENDS "${ENGINE_WEB_COOKED_DIR}/bgfx_shaders.cookstamp"
+        COMMENT "Packaging host-cooked bgfx shaders into the web assets")
+    add_custom_target(web_cooked_shaders DEPENDS "${ENGINE_WEB_COOK_STAMP}")
+endif()
+
 add_subdirectory(core)
 add_subdirectory(math)
 add_subdirectory(content)
@@ -666,7 +697,12 @@ if(ENGINE_BUILD_TOOLS AND ENGINE_BGFX_SHADERC AND TARGET copy_assets)
     add_dependencies(bgfx_shader_cook asset_packer shaderc copy_assets)
 endif()
 
-if(ENGINE_BUILD_TESTS)
+if(ENGINE_BUILD_TESTS AND (ENGINE_TARGET_PLATFORM STREQUAL "Web"))
+    # The host suites stay host-side; a web build carries only the browser
+    # tests.
+    enable_testing()
+    add_subdirectory(tests/web)
+elseif(ENGINE_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()

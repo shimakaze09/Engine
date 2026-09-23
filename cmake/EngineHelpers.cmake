@@ -118,6 +118,18 @@ function(engine_add_executable_target target)
     endif()
 endfunction()
 
+# Web only: links <target> as an .html page from <shell> with the synced
+# asset tree, host-cooked shaders included, preloaded at assets/.
+function(engine_package_web_page target shell)
+    set_target_properties(${target} PROPERTIES
+        SUFFIX ".html"
+        LINK_DEPENDS "${ENGINE_WEB_COOK_STAMP}")
+    target_link_options(${target} PRIVATE
+        "SHELL:--preload-file ${ENGINE_ASSET_OUTPUT_DIR}@assets"
+        "SHELL:--shell-file ${shell}")
+    add_dependencies(${target} copy_assets web_cooked_shaders)
+endfunction()
+
 function(engine_add_test_executable target)
     set(options)
     set(oneValueArgs LABELS)

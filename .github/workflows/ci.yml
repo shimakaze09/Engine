@@ -259,10 +259,12 @@ jobs:
       - name: Test
         run: ctest --test-dir build --parallel 4 --build-config Release --output-on-failure --timeout 120 --label-exclude gpu
 
-  # ---- Web (Emscripten): the browser target's build ----
-  # The ENGINE_PLATFORM_WEB paths compile nowhere else. The page packages
-  # the Linux Release lane's cook (shaderc cannot build under Emscripten),
-  # so this lane waits for the build matrix.
+  # ---- Web (Emscripten): the browser target's build and browser tests ----
+  # The ENGINE_PLATFORM_WEB paths compile nowhere else, and the pages run
+  # nowhere else: headless Chromium (Playwright, pinned in tests/web) drives
+  # the shipped page and the lifecycle harness on SwiftShader's WebGL2. The
+  # pages package the Linux Release lane's cook (shaderc cannot build under
+  # Emscripten), so this lane waits for the build matrix.
   web:
     name: web (Emscripten)
     needs: build
@@ -309,12 +311,22 @@ jobs:
           emcmake cmake -S . -B build
           -DCMAKE_BUILD_TYPE=Release
           -DENGINE_TARGET_PLATFORM=Web
-          -DENGINE_BUILD_TESTS=OFF
+          -DENGINE_BUILD_TESTS=ON
           -DENGINE_BUILD_TOOLS=OFF
           -DENGINE_WEB_COOKED_DIR=${{ github.workspace }}/web-cooked-shaders
 
       - name: Build
         run: source emsdk/emsdk_env.sh && cmake --build build --parallel 4
+
+      # The lockfile pins Playwright, and Playwright pins its Chromium.
+      - name: Install Playwright
+        working-directory: tests/web
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium-headless-shell
+
+      - name: Browser tests
+        run: ctest --test-dir build --output-on-failure --timeout 300 --label-regex web
 
   # ---- Determinism comparison across every platform and configuration ----
   determinism-check:

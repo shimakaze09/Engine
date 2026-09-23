@@ -184,9 +184,11 @@ int main() {
           "the configured worker count is the job system's (plus main)");
     check(engine::audio::audio_uses_null_device(),
           "headless mixes audio into no device");
+    check(engine::audio::audio_is_initialized(), "bootstrap opens audio");
     engine::shutdown();
     check(!engine::audio::audio_uses_null_device(),
           "shutdown closes the device-less audio engine");
+    check(!engine::audio::audio_is_initialized(), "shutdown closes audio");
   }
 
   // --- Exit codes name every outcome distinctly ---
