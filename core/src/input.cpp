@@ -354,10 +354,12 @@ void reconcile_with_live(InputFrame &frame) noexcept {
 
 /// The step, out of `stepCount`, whose share of the window holds `ns`.
 std::uint32_t step_for(std::uint64_t ns, std::uint32_t stepCount) noexcept {
-  if ((stepCount <= 1U) || (g_stepWindowEndNs <= g_stepWindowStartNs) ||
-      (ns <= g_stepWindowStartNs)) {
+  if ((stepCount <= 1U) || (ns <= g_stepWindowStartNs)) {
     return 0U;
   }
+  // Past the window's end goes last even when the window has no length:
+  // two clock reads can return the same tick, and an event stamped after
+  // both still happened after everything before it.
   if (ns >= g_stepWindowEndNs) {
     return stepCount - 1U;
   }
