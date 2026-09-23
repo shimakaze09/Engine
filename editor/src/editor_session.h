@@ -133,6 +133,10 @@ struct EditorSession final {
   // into any other world.
   const runtime::World *playSnapshotWorld = nullptr;
   bool worldRestoreFailed = false;
+  // Stop was recorded and the pre-play restore is owed: the pipeline
+  // finishes it (finish_play_stop, through the bridge) right after the
+  // session's end hooks run, so they see the world the session ended in.
+  bool playStopPending = false;
   // One-shot editor.autoplay latch: session-scoped so a
   // second editor session in one process autoplays again.
   bool autoplayConsumed = false;
@@ -302,8 +306,16 @@ bool capture_play_snapshot() noexcept;
 void start_play_mode() noexcept;
 /// Toggles between Playing and Paused.
 void pause_play_mode() noexcept;
-/// Stops play mode and restores the captured pre-play world.
+/// Stops play mode: records the Stop and owes the restore of the captured
+/// pre-play world. The pipeline dispatches the session's end hooks for the
+/// Stop and then calls finish_play_stop, so on_end_play reads the world the
+/// session ended in, not the authored one.
 void stop_play_mode() noexcept;
+/// Restores the pre-play world a Stop owes and replays queued
+/// apply-to-authored edits; a no-op when no Stop is pending. Called by the
+/// pipeline after the end hooks, and directly by a host that runs no
+/// pipeline frame.
+void finish_play_stop() noexcept;
 /// Takes the oldest recorded play transition, or returns false when none
 /// is queued. The runtime drains this through the editor bridge; nothing
 /// in the editor reads it.

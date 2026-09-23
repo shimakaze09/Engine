@@ -524,6 +524,19 @@ engine_add_test_executable(engine_integration_scene_flow
     integration
 )
 
+engine_add_test_executable(engine_integration_end_play_session_state
+    SOURCES
+    end_play_sees_session_state_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/editor/src
+    PRIVATE_DEPS
+    engine_editor
+    engine_runtime
+    engine_scripting
+    LABELS
+    integration
+)
+
 engine_add_test_executable(engine_integration_scene_load_collision_dispatch
     SOURCES
     scene_load_collision_dispatch_test.cpp

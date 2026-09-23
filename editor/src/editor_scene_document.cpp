@@ -82,6 +82,7 @@ void reset_session_for_scene_switch() noexcept {
   session.hasPlaySnapshot = false;
   session.playSnapshotSize = 0U;
   session.playSnapshotWorld = nullptr;
+  session.playStopPending = false;
 }
 
 /// Resolves the recent-scenes persistence directory: the test override

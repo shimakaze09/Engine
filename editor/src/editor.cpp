@@ -344,6 +344,7 @@ void shutdown_editor() noexcept {
   editor_session().playSnapshotSize = 0U;
   editor_session().hasPlaySnapshot = false;
   editor_session().worldRestoreFailed = false;
+  editor_session().playStopPending = false;
   reset_editor_session_residue();
 }
 
@@ -451,6 +452,8 @@ void editor_set_world(runtime::World *world) noexcept {
     editor_session().hasPlaySnapshot = false;
     editor_session().playSnapshotWorld = nullptr;
     editor_session().worldRestoreFailed = false;
+    // The old world's restore is moot, and the snapshot it needed is gone.
+    editor_session().playStopPending = false;
     scene_document_reset_for_world_switch();
   }
   editor_session().world = world;
@@ -480,7 +483,9 @@ bool editor_handle_quit_request() noexcept {
   }
   // Window-close during play routes through the Stop flow first, so
   // on_end_play dispatch and the authored-world restore behave exactly
-  // like the Stop button before the unsaved-change check below runs.
+  // like the Stop button. The pipeline drains that Stop this same frame,
+  // before any UI pass, so a Save chosen from the unsaved-change prompt
+  // armed below always writes the restored authored world.
   if (editor_session().playState != PlayState::Stopped) {
     stop_play_mode();
   }
@@ -519,6 +524,7 @@ const runtime::EditorBridge kRuntimeEditorBridge = {
     &editor_consume_step_request,
     &editor_handle_quit_request,
     &consume_play_transition,
+    &finish_play_stop,
 };
 
 [[maybe_unused]] const bool kEditorBridgeRegistered = []() noexcept {

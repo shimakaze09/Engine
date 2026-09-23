@@ -107,6 +107,9 @@ int check_snapshot_never_restores_into_other_world() {
 
   editor_session().world = worldB.get();
   stop_play_mode();
+  // No pipeline frame runs here, so finish the Stop as the pipeline
+  // would after the end hooks.
+  finish_play_stop();
 
   if (worldB->find_entity_by_name("OnlyInB") == kInvalidEntity) {
     editor_set_world(nullptr);
@@ -158,6 +161,7 @@ int check_malformed_snapshot_preserves_world() {
   std::memcpy(editor_session().playSnapshotBuffer.get(), "garbage!", 8U);
 
   stop_play_mode();
+  finish_play_stop();
 
   if (world->find_entity_by_name("Survivor") == kInvalidEntity) {
     editor_set_world(nullptr);
@@ -679,6 +683,7 @@ int check_gizmo_gesture_binds_its_target() {
   gizmo_track_gesture(a, true, ta);
   start_play_mode();
   stop_play_mode();
+  finish_play_stop();
   if (gizmo_has_gesture() ||
       (editor_session().playState != PlayState::Stopped)) {
     std::fprintf(stderr, "gizmo gesture survived Stop\n");

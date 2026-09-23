@@ -1145,7 +1145,13 @@ void EnginePipeline::Impl::stage_play_transitions() noexcept {
       enteredPlay = true;
       break;
     case runtime::PlayTransition::Stop:
+      // End hooks first, then the editor's restore: on_end_play reads the
+      // world the session ended in. A Start drained after this Stop then
+      // begins on the restored world.
       end_play_session();
+      if ((bridge != nullptr) && (bridge->complete_play_stop != nullptr)) {
+        bridge->complete_play_stop();
+      }
       sessionEnded = true;
       break;
     case runtime::PlayTransition::Pause:

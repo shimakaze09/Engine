@@ -53,7 +53,13 @@ int main() {
   CHECK(editor_handle_quit_request(), "clean document proceeds with quit");
   CHECK(editor_session().playState == PlayState::Stopped,
         "quit request stopped the play session");
-  CHECK(!editor_session().worldRestoreFailed,
+  // The restore waits for the pipeline, which finishes the Stop after the
+  // end hooks; this host runs no frame, so it finishes it itself.
+  CHECK(editor_session().playStopPending,
+        "the quit owes the restore to the Stop's drain");
+  finish_play_stop();
+  CHECK(!editor_session().playStopPending &&
+            !editor_session().worldRestoreFailed,
         "the authored world restored on the way out");
 
   editor_session().initialized = false;

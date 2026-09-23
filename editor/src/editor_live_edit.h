@@ -87,7 +87,7 @@ std::size_t pending_apply_to_authored_capacity() noexcept;
 
 /// Replays every queued apply-to-authored entry as an ordinary undoable
 /// ComponentEditCommand against the just-restored authored world, then
-/// clears all live-edit tracking; called by stop_play_mode() after a
+/// clears all live-edit tracking; called by finish_play_stop() after a
 /// successful restore. Entries whose persistent id no longer resolves
 /// (e.g. an entity that only ever existed during Play) are skipped and
 /// logged rather than treated as fatal. Returns the number of entries

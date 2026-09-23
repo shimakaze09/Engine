@@ -275,7 +275,9 @@ Current script conventions in `assets/`:
 	  advanced simulation (not once per fixed step); `dt` is that
 	  frame's total simulated time, summing every catch-up fixed step
 	- `M.on_end_play(self)`, `M.on_save_state(self)`, and
-	  `M.on_reload(self, state)` cover teardown and hot reload
+	  `M.on_reload(self, state)` cover teardown and hot reload. On an
+	  editor Stop, `on_end_play` runs before the authored scene is
+	  restored, so it reads the state the session ended in
 	- Legacy `on_start`/`on_update`/`on_end` names remain as fallbacks
 - Entity behavior module example (`assets/scripts/player.lua`)
 - Reusable utility module example (`assets/lib/utils.lua`)
