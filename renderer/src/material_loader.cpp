@@ -191,10 +191,21 @@ bool metadata_slot_available(const AssetDatabase &database,
 /// property the parent-material dependency load above already has.
 bool read_optional_texture_ref(const core::JsonParser &parser,
                                const core::JsonValue &object, const char *key,
-                               AssetDatabase *database, AssetMetadata *metadata,
+                               bool hasParent, AssetDatabase *database,
+                               AssetMetadata *metadata,
                                AssetId *outId) noexcept {
   core::JsonValue field{};
   if (!parser.get_object_field(object, key, &field)) {
+    return true;
+  }
+  // null clears a slot the parent would otherwise supply. Only a child
+  // has anything to clear: in a root material an absent slot is already
+  // empty, so null there is not a second spelling of it but a mistake.
+  if (field.type == core::JsonValue::Type::Null) {
+    if (!hasParent) {
+      return false;
+    }
+    *outId = kInvalidAssetId;
     return true;
   }
 
@@ -355,8 +366,9 @@ bool parse_material_text(AssetDatabase *database, const char *virtualPath,
     bool texturesOk = true;
 #define ENGINE_MATERIAL_READ_TEXTURE(name, slot, handle, key)                  \
   texturesOk = texturesOk &&                                                   \
-               read_optional_texture_ref(parser, texturesValue, key, database, \
-                                         &metadata, &slots.slot);
+               read_optional_texture_ref(parser, texturesValue, key,           \
+                                         parentId != kInvalidAssetId,          \
+                                         database, &metadata, &slots.slot);
     ENGINE_MATERIAL_TEXTURE_FIELDS(ENGINE_MATERIAL_READ_TEXTURE)
 #undef ENGINE_MATERIAL_READ_TEXTURE
     if (!texturesOk) {

@@ -64,6 +64,8 @@ public:
   void write_bool(const char *key, bool value) noexcept;
   /// Writes string data.
   void write_string(const char *key, const char *value) noexcept;
+  /// Writes a null value under `key`.
+  void write_null(const char *key) noexcept;
 
   /// Writes float value data.
   void write_float_value(float value) noexcept;

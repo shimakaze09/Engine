@@ -331,6 +331,83 @@ int check_parent_changes_reach_child() noexcept {
   return finish(0);
 }
 
+/// A child that clears a texture slot its parent fills keeps it cleared
+/// across a save and a reload (#665). The writer could only omit the slot,
+/// and an omitted slot inherits, so the parent's texture came back on the
+/// next load with no diagnostic.
+int check_child_clears_inherited_texture() noexcept {
+  constexpr const char *kParentOs = "editor_material_clear_parent.json";
+  constexpr const char *kParentVirtual =
+      "edmat/editor_material_clear_parent.json";
+  constexpr const char *kChildOs = "editor_material_clear_child.json";
+  constexpr const char *kChildVirtual =
+      "edmat/editor_material_clear_child.json";
+
+  if (!engine::core::initialize_vfs()) {
+    return 60;
+  }
+  std::unique_ptr<engine::renderer::AssetDatabase> database(
+      new (std::nothrow) engine::renderer::AssetDatabase());
+  if (database == nullptr) {
+    engine::core::shutdown_vfs();
+    return 61;
+  }
+  engine::runtime::EngineAssetDatabaseService service{};
+  service.database = database.get();
+  engine::runtime::set_editor_asset_service(&service);
+  const auto finish = [&](int result) noexcept {
+    remove_file(kParentOs);
+    remove_file(kChildOs);
+    engine::runtime::set_editor_asset_service(nullptr);
+    engine::core::shutdown_vfs();
+    return result;
+  };
+  if (!engine::core::mount(kMountPrefix, ".")) {
+    return finish(62);
+  }
+  if (!write_file(kParentOs,
+                  "{\"version\":3,\"roughness\":0.5,\"textures\":"
+                  "{\"albedo\":\"edmat/clear_parent_albedo.png\"}}") ||
+      !write_file(kChildOs, "{\"version\":3,\"parent\":\"edmat/"
+                            "editor_material_clear_parent.json\"}")) {
+    return finish(63);
+  }
+
+  const engine::runtime::EditorMaterialState loaded =
+      engine::runtime::editor_load_material(kChildVirtual);
+  if (!loaded.found || !loaded.hasParent ||
+      (loaded.textureSlots.albedo == engine::renderer::kInvalidAssetId)) {
+    return finish(64); // the child starts out inheriting the albedo
+  }
+
+  // Clear the inherited slot, save, and reload from disk.
+  engine::renderer::MaterialTextureSlots cleared = loaded.textureSlots;
+  cleared.albedo = engine::renderer::kInvalidAssetId;
+  if (!engine::runtime::editor_set_material_params(loaded.materialId,
+                                                   loaded.params, cleared) ||
+      !engine::runtime::editor_save_material(kChildVirtual, kParentVirtual)) {
+    return finish(65);
+  }
+  const engine::runtime::EditorMaterialState reloaded =
+      engine::runtime::editor_reload_material(kChildVirtual);
+  if (!reloaded.found) {
+    return finish(66);
+  }
+  if (reloaded.textureSlots.albedo != engine::renderer::kInvalidAssetId) {
+    std::printf("cleared slot came back from the parent\n");
+    return finish(67);
+  }
+
+  // A root material has nothing to clear: null there is refused rather
+  // than read as a second spelling of an absent slot.
+  if (!write_file(kParentOs, "{\"version\":3,\"roughness\":0.5,"
+                             "\"textures\":{\"albedo\":null}}") ||
+      engine::runtime::editor_reload_material(kParentVirtual).found) {
+    return finish(68);
+  }
+  return finish(0);
+}
+
 } // namespace
 
 int main() {
@@ -347,6 +424,12 @@ int main() {
   }
 
   result = check_parent_changes_reach_child();
+  if (result != 0) {
+    std::fprintf(stderr, "editor_material_bridge_test failed: %d\n", result);
+    return result;
+  }
+
+  result = check_child_clears_inherited_texture();
   if (result != 0) {
     std::fprintf(stderr, "editor_material_bridge_test failed: %d\n", result);
     return result;

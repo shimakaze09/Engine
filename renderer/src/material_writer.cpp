@@ -88,8 +88,14 @@ void write_field(core::JsonWriter *writer, const char *key,
 /// set but its source path cannot be resolved (a save must not silently
 /// drop or corrupt a texture reference).
 bool write_texture_slot(core::JsonWriter *writer, const AssetDatabase *database,
-                        const char *key, AssetId textureId) noexcept {
+                        const char *key, AssetId textureId,
+                        bool clearsInherited) noexcept {
   if (textureId == kInvalidAssetId) {
+    // A child that empties a slot its parent fills says so, or the next
+    // load would inherit the parent's texture straight back.
+    if (clearsInherited) {
+      writer->write_null(key);
+    }
     return true;
   }
 
@@ -166,7 +172,8 @@ bool save_material_asset(const AssetDatabase *database, const char *virtualPath,
 #define ENGINE_MATERIAL_OWN_SLOT(name, slot, handle, key)                      \
   if (writes(material_field::k##name)) {                                       \
     ownSlots.slot = textureSlots.slot;                                         \
-    hasAnyTexture = hasAnyTexture || (ownSlots.slot != kInvalidAssetId);       \
+    hasAnyTexture =                                                            \
+        hasAnyTexture || hasParent || (ownSlots.slot != kInvalidAssetId);      \
   }
   ENGINE_MATERIAL_TEXTURE_FIELDS(ENGINE_MATERIAL_OWN_SLOT)
 #undef ENGINE_MATERIAL_OWN_SLOT
@@ -176,8 +183,10 @@ bool save_material_asset(const AssetDatabase *database, const char *virtualPath,
     writer.write_key("textures");
     writer.begin_object();
 #define ENGINE_MATERIAL_WRITE_TEXTURE(name, slot, handle, key)                 \
-  textureSlotsOk = textureSlotsOk &&                                           \
-                   write_texture_slot(&writer, database, key, ownSlots.slot);
+  textureSlotsOk =                                                             \
+      textureSlotsOk &&                                                        \
+      write_texture_slot(&writer, database, key, ownSlots.slot,                \
+                         hasParent && writes(material_field::k##name));
     ENGINE_MATERIAL_TEXTURE_FIELDS(ENGINE_MATERIAL_WRITE_TEXTURE)
 #undef ENGINE_MATERIAL_WRITE_TEXTURE
     writer.end_object();

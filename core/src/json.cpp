@@ -880,6 +880,14 @@ void JsonWriter::write_string(const char *key, const char *value) noexcept {
   write_string_value(value);
 }
 
+void JsonWriter::write_null(const char *key) noexcept {
+  write_key(key);
+  if (!begin_value()) {
+    return;
+  }
+  static_cast<void>(append_cstr("null"));
+}
+
 void JsonWriter::write_float_value(float value) noexcept {
   if (!begin_value()) {
     return;
