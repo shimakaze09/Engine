@@ -1,17 +1,11 @@
 #!/usr/bin/env python3
-# Self-tests for the tooling quality gates (audit M-27): the coverage
-# gate must reject NaN/missing/non-numeric reports and thresholds, the
-# perf gate's evaluate() must reject non-finite or non-positive
-# measurements and baselines, the asset metadata path audit must flag
-# absolute developer paths while passing repo-relative ones (audit L-03),
-# the Lua binding generator must reject
-# duplicate Lua names and invalid or reserved parameter identifiers
-# instead of emitting uncompilable or injected C++, the test timing
-# audit must hold functional tests to classified clock reads only, the
-# documentation policy audit must hold the README's mirror of the
-# conditional noexcept rule to its conditional wording, and the document
-# reference audit must catch a document naming a file, link or test that
-# no longer exists. Run from ctest as
+# Self-tests for the tooling quality gates: each gate is fed input that
+# holds the defect it exists to catch and must reject it, and clean
+# input it must pass. Covered: the coverage and perf gates, the asset
+# metadata path and identity audits, the Lua binding generator, module
+# dependencies, dependency pins, shader variants, content attributes,
+# test timing, comment quality, error handling, portable fopen,
+# duplicate primitives and document references. Run from ctest as
 # engine_integration_tool_gates.
 
 import importlib.util
