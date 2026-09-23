@@ -755,8 +755,9 @@ private:
   }
 
   std::array<NativeThread, kMaxWorkers> m_workers{};
-  std::array<JobNode, kMaxJobs> m_nodes{};
-  std::array<DependencyEdge, kMaxEdges> m_edges{};
+  std::array<JobNode, kMaxJobs> m_nodes = std::array<JobNode, kMaxJobs>();
+  std::array<DependencyEdge, kMaxEdges> m_edges =
+      std::array<DependencyEdge, kMaxEdges>();
   std::array<std::uint32_t, kReadyQueueCapacity> m_readyQueue{};
   // Dispatch-time ready-set snapshot; guarded by m_graphMutex.
   std::array<std::uint32_t, kMaxJobs> m_initialReady{};

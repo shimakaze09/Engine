@@ -75,8 +75,10 @@ struct RenderPrepPipelineContext final {
 
   std::array<renderer::CommandBufferBuilder, kMaxFrameThreads>
       localCommandBuffers{};
-  std::array<RenderPrepChunkJobData, kMaxChunkJobs> renderPrepJobData{};
-  std::array<core::JobHandle, kMaxChunkJobs> renderPrepJobHandles{};
+  std::array<RenderPrepChunkJobData, kMaxChunkJobs> renderPrepJobData =
+      std::array<RenderPrepChunkJobData, kMaxChunkJobs>();
+  std::array<core::JobHandle, kMaxChunkJobs> renderPrepJobHandles =
+      std::array<core::JobHandle, kMaxChunkJobs>();
   MergeCommandsJobData mergeCommandsJobData{};
 };
 

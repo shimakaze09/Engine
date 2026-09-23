@@ -305,6 +305,9 @@ jobs:
       - name: Document reference audit
         run: python3 tools/check_doc_references.py
 
+      - name: Array value-initialization audit
+        run: python3 tools/check_array_value_init.py
+
       - name: Install cppcheck
         run: bash .github/scripts/install-linux-deps.sh cppcheck
 

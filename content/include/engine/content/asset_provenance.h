@@ -44,7 +44,7 @@ struct ProvenanceIndex final {
     AssetRef ref{};
   };
 
-  std::array<Entry, kMaxOutputs> entries{};
+  std::array<Entry, kMaxOutputs> entries = std::array<Entry, kMaxOutputs>();
   std::size_t count = 0U;
   /// Outputs a stamp named that did not fit the index; a walk that
   /// reports any of these is incomplete and says so.

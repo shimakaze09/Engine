@@ -14,7 +14,8 @@ namespace engine::content {
 /// Fixed-slot open-addressed metadata table keyed by AssetId.
 struct MetadataStore final {
   static constexpr std::size_t kMaxMetadata = 4096U;
-  std::array<AssetMetadata, kMaxMetadata> entries{};
+  std::array<AssetMetadata, kMaxMetadata> entries =
+      std::array<AssetMetadata, kMaxMetadata>();
   std::array<bool, kMaxMetadata> occupied{};
 };
 

@@ -107,11 +107,14 @@ struct PhysicsShapeStore final {
   // Joint slot table and broadphase dedupe stamps: moved off
   // PhysicsContext itself, which a Windows main-red incident found sat ~8 KB
   // under the platform's 1 MB default thread stack when stack-constructed.
-  std::array<PhysicsJointSlot, kMaxPhysicsJoints> joints{};
+  std::array<PhysicsJointSlot, kMaxPhysicsJoints> joints =
+      std::array<PhysicsJointSlot, kMaxPhysicsJoints>();
   std::array<std::uint32_t, kMaxColliders> testedStamps{};
 
-  std::array<ConvexHullData, kMaxConvexHulls> convexHullData{};
-  std::array<Entity, kMaxConvexHulls> convexHullEntity{};
+  std::array<ConvexHullData, kMaxConvexHulls> convexHullData =
+      std::array<ConvexHullData, kMaxConvexHulls>();
+  std::array<Entity, kMaxConvexHulls> convexHullEntity =
+      std::array<Entity, kMaxConvexHulls>();
   std::size_t convexHullCount = 0U;
 
   std::array<HeightfieldData, kMaxHeightfields> heightfieldData{};
@@ -121,9 +124,12 @@ struct PhysicsShapeStore final {
   // Per-collider snapshot rebuilt by resolve_collisions each step; the next
   // step's CCD reads it for cheap candidate rejection and ownership lookup
   // instead of re-walking the hierarchy per body×collider combination.
-  std::array<Entity, kMaxColliders> ccdColliderEntities{};
-  std::array<Entity, kMaxColliders> ccdColliderOwners{};
-  std::array<math::AABB, kMaxColliders> ccdColliderAabbs{};
+  std::array<Entity, kMaxColliders> ccdColliderEntities =
+      std::array<Entity, kMaxColliders>();
+  std::array<Entity, kMaxColliders> ccdColliderOwners =
+      std::array<Entity, kMaxColliders>();
+  std::array<math::AABB, kMaxColliders> ccdColliderAabbs =
+      std::array<math::AABB, kMaxColliders>();
   // Entity-index -> snapshot-slot map so CCD matches snapshot entries by
   // identity instead of dense position: sparse-set reorders between the
   // publish and the next step's sweep would otherwise mismatch every
@@ -135,12 +141,14 @@ struct PhysicsShapeStore final {
   // Owner body velocities captured with the snapshot: CCD's candidate
   // rejection must not read live RigidBody::velocity, which parallel chunk
   // jobs are integrating concurrently.
-  std::array<math::Vec3, kMaxColliders> ccdColliderVelocities{};
+  std::array<math::Vec3, kMaxColliders> ccdColliderVelocities =
+      std::array<math::Vec3, kMaxColliders>();
 
   // Persistent contact-manifold cache: world-scoped so
   // separate worlds never share warm-start state; entries are keyed by
   // full Entity so index reuse cannot inherit stale impulses.
-  std::array<ContactManifold, kMaxContactManifolds> contactManifolds{};
+  std::array<ContactManifold, kMaxContactManifolds> contactManifolds =
+      std::array<ContactManifold, kMaxContactManifolds>();
   std::size_t contactManifoldCount = 0U;
   // O(1) pair->slot index (open addressing over entity-index pair keys;
   // hits verify full Entity identity). Maintained on insert, rebuilt after
@@ -202,7 +210,8 @@ struct PhysicsContext final {
   // Entity values, not bare indices: callbacks fire after entity mutation
   // is legal again, so a bare index could be recycled by a handler's
   // destroy/spawn and retarget the event to an unrelated entity.
-  std::array<Entity, kMaxCollisionPairs * 2U> collisionPairData{};
+  std::array<Entity, kMaxCollisionPairs * 2U> collisionPairData =
+      std::array<Entity, kMaxCollisionPairs * 2U>();
   std::size_t collisionPairCount = 0U;
   // Run-tier callback installed by the World's owner (the pipeline) for the
   // life of the run; survives every content copy into this context.
@@ -213,7 +222,9 @@ struct PhysicsContext final {
   // pair persisting across substeps repeats once per substep. Drops are
   // counted per rendered frame (per-step caps plus append overflow).
   std::array<Entity, kMaxCollisionPairs * kMaxCollisionFrameSteps * 2U>
-      frameCollisionPairData{};
+      frameCollisionPairData =
+          std::array<Entity,
+                     kMaxCollisionPairs * kMaxCollisionFrameSteps * 2U>();
   std::size_t frameCollisionPairCount = 0U;
   std::uint32_t frameCollisionPairDropCount = 0U;
 

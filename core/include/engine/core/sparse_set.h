@@ -237,8 +237,10 @@ private:
     return denseIndex;
   }
 
-  std::array<std::array<Component, MaxComponents>, StateCount> m_components{};
-  std::array<EntityType, MaxComponents> m_entities{};
+  std::array<std::array<Component, MaxComponents>, StateCount> m_components =
+      std::array<std::array<Component, MaxComponents>, StateCount>();
+  std::array<EntityType, MaxComponents> m_entities =
+      std::array<EntityType, MaxComponents>();
   std::array<std::int32_t, MaxEntities + 1U> m_sparse{};
   std::size_t m_count = 0U;
 };
@@ -478,8 +480,10 @@ private:
     return *denseIndex;
   }
 
-  std::array<std::array<Component, MaxComponents>, StateCount> m_components{};
-  std::array<EntityType, MaxComponents> m_entities{};
+  std::array<std::array<Component, MaxComponents>, StateCount> m_components =
+      std::array<std::array<Component, MaxComponents>, StateCount>();
+  std::array<EntityType, MaxComponents> m_entities =
+      std::array<EntityType, MaxComponents>();
   FixedHashTable<std::uint32_t, std::int32_t, kIndexCapacity> m_index{};
   std::size_t m_count = 0U;
 };

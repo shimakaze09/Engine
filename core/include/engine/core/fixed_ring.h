@@ -92,7 +92,7 @@ public:
   }
 
 private:
-  std::array<T, Capacity> m_slots{};
+  std::array<T, Capacity> m_slots = std::array<T, Capacity>();
   std::size_t m_head = 0U;
   std::size_t m_count = 0U;
 };

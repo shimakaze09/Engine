@@ -140,7 +140,7 @@ private:
     return (generation << kSlotBits) | static_cast<std::uint32_t>(slot);
   }
 
-  std::array<Entry, Capacity> m_entries{};
+  std::array<Entry, Capacity> m_entries = std::array<Entry, Capacity>();
   std::array<std::uint32_t, Capacity> m_freeList{};
   std::size_t m_freeCount = 0U;
   // Slot 0 encodes the invalid handle, so allocation starts at 1.

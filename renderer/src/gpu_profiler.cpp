@@ -32,7 +32,8 @@ struct QueryRange final {
 /// slot, so a slot re-read while its GPU results are still pending cannot
 /// keep overwriting a newer frame's measurement with an older absence.
 struct QueryFrame final {
-  std::array<QueryRange, kPassCount> ranges{};
+  std::array<QueryRange, kPassCount> ranges =
+      std::array<QueryRange, kPassCount>();
   bool absentPassesPending = false;
 };
 

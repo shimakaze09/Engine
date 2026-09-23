@@ -29,7 +29,7 @@ struct GpuMesh final {
 /// was loaded into the recycled slot afterward.
 struct GpuMeshRegistry final {
   static constexpr std::size_t kMaxSlots = 4096U;
-  std::array<GpuMesh, kMaxSlots> meshes{};
+  std::array<GpuMesh, kMaxSlots> meshes = std::array<GpuMesh, kMaxSlots>();
   std::array<bool, kMaxSlots> occupied{};
   std::array<std::uint32_t, kMaxSlots> generations{};
 };

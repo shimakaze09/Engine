@@ -36,16 +36,21 @@ constexpr std::size_t kMaxNodes = kMaxColliders * 8U;
 // that way), and per-thread heap ownership retained one block in every
 // worker that ever ran the resolve job.
 struct ResolveScratch final {
-  std::array<ColliderWorldGeometry, kMaxColliders> geometries{};
-  std::array<Entity, kMaxColliders> bodyOwners{};
-  std::array<engine::math::Vec3, kMaxColliders> bodyCenters{};
-  std::array<engine::math::Quat, kMaxColliders> bodyRotations{};
+  std::array<ColliderWorldGeometry, kMaxColliders> geometries =
+      std::array<ColliderWorldGeometry, kMaxColliders>();
+  std::array<Entity, kMaxColliders> bodyOwners =
+      std::array<Entity, kMaxColliders>();
+  std::array<engine::math::Vec3, kMaxColliders> bodyCenters =
+      std::array<engine::math::Vec3, kMaxColliders>();
+  std::array<engine::math::Quat, kMaxColliders> bodyRotations =
+      std::array<engine::math::Quat, kMaxColliders>();
   std::array<bool, kMaxColliders> geometryValid{};
   std::array<float, kMaxColliders> posX{};
   std::array<float, kMaxColliders> posY{};
   std::array<float, kMaxColliders> posZ{};
   std::array<std::uint32_t, kSpatialHashBuckets> buckets{};
-  std::array<SpatialNode, kMaxNodes> nodes{};
+  std::array<SpatialNode, kMaxNodes> nodes =
+      std::array<SpatialNode, kMaxNodes>();
   std::array<float, kMaxColliders> expandX{};
   std::array<float, kMaxColliders> expandY{};
   std::array<float, kMaxColliders> expandZ{};

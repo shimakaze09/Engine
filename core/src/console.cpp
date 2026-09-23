@@ -40,7 +40,8 @@ bool g_initialized = false;
 std::array<CommandEntry, kMaxCommands> g_commands{};
 std::size_t g_commandCount = 0U;
 
-std::array<OutputLine, kMaxOutputLines> g_outputBuf{};
+std::array<OutputLine, kMaxOutputLines> g_outputBuf =
+    std::array<OutputLine, kMaxOutputLines>();
 std::size_t g_outputHead = 0U; // oldest entry
 std::size_t g_outputCount = 0U;
 std::mutex g_mutex{};

@@ -164,7 +164,8 @@ int verify_reload_stages_replacement() {
   std::size_t fillerCount = 0U;
   std::array<engine::renderer::MeshHandle,
              engine::renderer::GpuMeshRegistry::kMaxSlots>
-      fillers{};
+      fillers = std::array<engine::renderer::MeshHandle,
+                           engine::renderer::GpuMeshRegistry::kMaxSlots>();
   if (failure == 0) {
     for (;;) {
       const engine::renderer::MeshHandle filler =

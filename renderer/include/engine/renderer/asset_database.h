@@ -175,7 +175,8 @@ struct MaterialAssetRecord final {
 /// Fixed-slot asset tables (meshes, textures, materials, metadata).
 struct AssetDatabase final {
   static constexpr std::size_t kMaxMeshAssets = 4096U;
-  std::array<MeshAssetRecord, kMaxMeshAssets> meshAssets{};
+  std::array<MeshAssetRecord, kMaxMeshAssets> meshAssets =
+      std::array<MeshAssetRecord, kMaxMeshAssets>();
   std::array<bool, kMaxMeshAssets> occupied{};
   // Mesh claims refused for want of a record since the last eviction pass,
   // which frees that many of the coldest evictable records even under the
@@ -190,11 +191,13 @@ struct AssetDatabase final {
   core::FixedHashTable<AssetId, std::uint32_t, kMeshIndexCapacity> meshIndex{};
 
   static constexpr std::size_t kMaxTextureAssets = 512U;
-  std::array<TextureAssetRecord, kMaxTextureAssets> textureAssets{};
+  std::array<TextureAssetRecord, kMaxTextureAssets> textureAssets =
+      std::array<TextureAssetRecord, kMaxTextureAssets>();
   std::array<bool, kMaxTextureAssets> textureOccupied{};
 
   static constexpr std::size_t kMaxMaterialAssets = 1024U;
-  std::array<MaterialAssetRecord, kMaxMaterialAssets> materialAssets{};
+  std::array<MaterialAssetRecord, kMaxMaterialAssets> materialAssets =
+      std::array<MaterialAssetRecord, kMaxMaterialAssets>();
   std::array<bool, kMaxMaterialAssets> materialOccupied{};
 
   // The generic identity/tag/dependency table is content-owned;

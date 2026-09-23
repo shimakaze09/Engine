@@ -136,7 +136,8 @@ bool parallel_update(engine::runtime::World *world, float deltaSeconds,
     return false;
   }
 
-  std::array<UpdateJobData, kMaxJobs> jobs{};
+  std::array<UpdateJobData, kMaxJobs> jobs =
+      std::array<UpdateJobData, kMaxJobs>();
   std::array<std::size_t, kMaxJobs> order{};
   std::size_t jobCount = 0U;
 

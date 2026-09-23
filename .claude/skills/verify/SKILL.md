@@ -35,6 +35,7 @@ python tools/ci/check_asset_metadata_paths.py
 python tools/check_asset_identity.py
 python tools/check_shader_variants.py
 python tools/check_doc_references.py
+python tools/check_array_value_init.py
 python tools/test_tool_gates.py                             # the gates' own tests
 ```
 
