@@ -206,68 +206,21 @@ void continue_pending_action() noexcept {
   doc.pendingOpenPath[0] = '\0';
 }
 
-/// The native dialog's callback: publishes the result into the request's
-/// own record through the atomic handoff (see the SceneDialogRequest
-/// comment) and reads no session state, so a dialog that outlived its
-/// session writes nowhere the current session looks; all filesystem work
-/// happens later on the main thread. A null path is a cancel or a failed
-/// dialog. Runs on whatever thread the platform delivers on.
-///
-/// A path that does not fit the record is refused, not cut: the record's
-/// path is what Save As writes to and Open reads from, and a truncated
-/// path names a different file.
-void scene_dialog_callback(void *userdata, const char *path) noexcept {
-  auto *request = static_cast<SceneDialogRequest *>(userdata);
-  if (request == nullptr) {
-    return;
+/// Asks the platform for a scene dialog and makes it the one the session
+/// waits on. False when the platform refused; it logged why.
+bool begin_scene_dialog(SceneDocumentState &doc, SceneDialogKind kind,
+                        const char *defaultLocation) noexcept {
+  static const core::FileDialogFilter kFilters[] = {{"Scene", "scene"}};
+  const core::FileDialogTicket ticket = core::platform_request_file_dialog(
+      (kind == SceneDialogKind::Open) ? core::FileDialogKind::Open
+                                      : core::FileDialogKind::Save,
+      kFilters, 1, defaultLocation);
+  if (ticket == core::kNoFileDialog) {
+    return false;
   }
-  request->resultAccepted = false;
-  if (path != nullptr) {
-    const std::size_t length = std::strlen(path);
-    if (length < sizeof(request->resultPath)) {
-      std::memcpy(request->resultPath, path, length + 1U);
-      request->resultAccepted = true;
-    } else {
-      core::log_message(core::LogLevel::Error, kLogChannel,
-                        "the chosen path is longer than the editor can hold; "
-                        "nothing was opened or saved");
-    }
-  }
-  request->resultPending.store(true, std::memory_order_release);
-}
-
-/// Stamps a free request record with the current generation and makes it
-/// the one the session waits on. A record is free when nothing is in
-/// flight on it, or when its callback has already delivered for a
-/// retired generation: nobody will consume that result and the callback
-/// has no store left to make. Null when the pool is exhausted by
-/// retired dialogs whose callbacks have not fired yet; the request is
-/// refused rather than aliasing a record a callback may still write.
-SceneDialogRequest *acquire_dialog_request(SceneDocumentState &doc,
-                                           SceneDialogKind kind) noexcept {
-  for (std::size_t i = 0U; i < kMaxSceneDialogRequests; ++i) {
-    SceneDialogRequest &request = doc.dialogRequests[i];
-    const bool inFlight = request.inFlight.load(std::memory_order_acquire);
-    const bool retiredAndDelivered =
-        inFlight && (request.generation != doc.dialogGeneration) &&
-        request.resultPending.load(std::memory_order_acquire);
-    if (inFlight && !retiredAndDelivered) {
-      continue;
-    }
-    request.generation = doc.dialogGeneration;
-    request.resultPath[0] = '\0';
-    request.resultAccepted = false;
-    request.resultPending.store(false, std::memory_order_relaxed);
-    request.inFlight.store(true, std::memory_order_release);
-    doc.activeDialogRequest = i;
-    doc.dialogPendingKind = kind;
-    return &request;
-  }
-  core::log_message(core::LogLevel::Warning, kLogChannel,
-                    "native file dialog refused: every request slot is held "
-                    "by a dialog from an earlier editor session that has not "
-                    "closed yet");
-  return nullptr;
+  doc.activeDialog = ticket;
+  doc.dialogPendingKind = kind;
+  return true;
 }
 
 void begin_save_scene_as_dialog() noexcept {
@@ -276,22 +229,14 @@ void begin_save_scene_as_dialog() noexcept {
   if (doc.dialogPendingKind != SceneDialogKind::None) {
     return; // one native dialog at a time
   }
-  SceneDialogRequest *request =
-      acquire_dialog_request(doc, SceneDialogKind::SaveAs);
-  if (request == nullptr) {
-    return;
-  }
-
-  static const core::FileDialogFilter kFilters[] = {{"Scene", "scene"}};
   const char *defaultLocation =
       doc.hasPath ? doc.path : editor_asset_root();
-  if (!core::platform_show_file_dialog(core::FileDialogKind::Save,
-                                       &scene_dialog_callback, request,
-                                       kFilters, 1, defaultLocation)) {
-    // No dialog will ever answer this request, so answer it as a cancel:
-    // the poll then releases the record and cancels any action waiting on
-    // the dialog, exactly as if the user had dismissed it.
-    scene_dialog_callback(request, nullptr);
+  if (!begin_scene_dialog(doc, SceneDialogKind::SaveAs, defaultLocation) &&
+      doc.dialogContinuesPendingAction) {
+    // No dialog will answer, so treat it as dismissed: the action waiting
+    // on it is cancelled, exactly as if the user had closed the dialog.
+    doc.dialogContinuesPendingAction = false;
+    scene_document_prompt_choose_cancel();
   }
 }
 
@@ -623,23 +568,12 @@ void scene_document_prompt_choose_cancel() noexcept {
 }
 
 void request_open_scene_dialog() noexcept {
-  EditorSession &session = editor_session();
-  SceneDocumentState &doc = session.document;
+  SceneDocumentState &doc = editor_session().document;
   if (doc.dialogPendingKind != SceneDialogKind::None) {
     return;
   }
-  SceneDialogRequest *request =
-      acquire_dialog_request(doc, SceneDialogKind::Open);
-  if (request == nullptr) {
-    return;
-  }
-
-  static const core::FileDialogFilter kFilters[] = {{"Scene", "scene"}};
-  if (!core::platform_show_file_dialog(core::FileDialogKind::Open,
-                                       &scene_dialog_callback, request,
-                                       kFilters, 1, editor_asset_root())) {
-    scene_dialog_callback(request, nullptr);
-  }
+  static_cast<void>(
+      begin_scene_dialog(doc, SceneDialogKind::Open, editor_asset_root()));
 }
 
 void request_save_scene() noexcept {
@@ -664,26 +598,41 @@ void request_save_scene_as() noexcept {
 
 void scene_document_poll_dialog_result() noexcept {
   SceneDocumentState &doc = editor_session().document;
-  if (doc.activeDialogRequest == kNoSceneDialogRequest) {
+  if (doc.activeDialog == core::kNoFileDialog) {
     return;
   }
-  SceneDialogRequest &request = doc.dialogRequests[doc.activeDialogRequest];
-  if (!request.resultPending.load(std::memory_order_acquire)) {
+  // Static: a result carries a path buffer too large for the frame's stack.
+  static core::FileDialogResult result{};
+  if (core::platform_take_file_dialog_result(doc.activeDialog, &result) ==
+      core::FileDialogPoll::Pending) {
     return;
   }
-
+  // Ready, or Unknown if the platform lost the ticket; either way the
+  // session stops waiting, and anything but a chosen path is a cancel.
   const SceneDialogKind kind = doc.dialogPendingKind;
   doc.dialogPendingKind = SceneDialogKind::None;
-  doc.activeDialogRequest = kNoSceneDialogRequest;
-  const bool accepted = request.resultAccepted;
-  char path[kMaxDocumentPathLength] = {};
-  std::snprintf(path, sizeof(path), "%s", request.resultPath);
-  // Consumed: the callback has made its last store, so the record is free
-  // for the next request.
-  request.resultPending.store(false, std::memory_order_relaxed);
-  request.inFlight.store(false, std::memory_order_release);
+  doc.activeDialog = core::kNoFileDialog;
   const bool continues = doc.dialogContinuesPendingAction;
   doc.dialogContinuesPendingAction = false;
+
+  // The document's path is what Save As writes to and Open reads from,
+  // so a path that does not fit is refused, not cut: a cut path names a
+  // different file.
+  bool accepted = (result.ticket != core::kNoFileDialog) &&
+                  (result.outcome == core::FileDialogOutcome::Chosen);
+  char path[kMaxDocumentPathLength] = {};
+  if (accepted) {
+    const std::size_t length = std::strlen(result.path);
+    if (length < sizeof(path)) {
+      std::memcpy(path, result.path, length + 1U);
+    } else {
+      accepted = false;
+      core::log_message(core::LogLevel::Error, kLogChannel,
+                        "the chosen path is longer than the editor can hold; "
+                        "nothing was opened or saved");
+    }
+  }
+  result = core::FileDialogResult{};
 
   if (!accepted) {
     if (continues) {
@@ -856,35 +805,34 @@ void scene_document_reset_for_world_switch() noexcept {
 
 void scene_document_retire_dialogs() noexcept {
   SceneDocumentState &doc = editor_session().document;
-  // The records themselves are left alone: a callback may still be about
-  // to write one, and the generation mismatch is what keeps that write
-  // from ever being consumed. Wraps after 2^32 retirements, which no
-  // process reaches.
-  ++doc.dialogGeneration;
-  if (doc.dialogGeneration == 0U) {
-    doc.dialogGeneration = 1U;
-  }
-  doc.activeDialogRequest = kNoSceneDialogRequest;
+  core::platform_abandon_file_dialog(doc.activeDialog);
+  doc.activeDialog = core::kNoFileDialog;
   doc.dialogPendingKind = SceneDialogKind::None;
   doc.dialogContinuesPendingAction = false;
 }
 
-void *scene_dialog_arm_for_tests(SceneDialogKind kind,
-                                 bool continuesPendingAction) noexcept {
+core::FileDialogTicket
+scene_dialog_arm_for_tests(SceneDialogKind kind,
+                           bool continuesPendingAction) noexcept {
   SceneDocumentState &doc = editor_session().document;
   if ((kind == SceneDialogKind::None) ||
       (doc.dialogPendingKind != SceneDialogKind::None)) {
-    return nullptr;
+    return core::kNoFileDialog;
   }
-  SceneDialogRequest *request = acquire_dialog_request(doc, kind);
-  if (request != nullptr) {
+  core::platform_set_scripted_file_dialogs(true);
+  if (kind == SceneDialogKind::Open) {
+    request_open_scene_dialog();
+  } else {
     doc.dialogContinuesPendingAction = continuesPendingAction;
+    begin_save_scene_as_dialog();
   }
-  return request;
+  core::platform_set_scripted_file_dialogs(false);
+  return doc.activeDialog;
 }
 
-void scene_dialog_deliver_for_tests(void *request, const char *path) noexcept {
-  scene_dialog_callback(request, path);
+void scene_dialog_deliver_for_tests(core::FileDialogTicket ticket,
+                                    const char *path) noexcept {
+  static_cast<void>(core::platform_answer_scripted_file_dialog(ticket, path));
 }
 
 void recent_scenes_set_directory_override_for_tests(

@@ -101,26 +101,82 @@ struct FileDialogFilter final {
 /// Filters one dialog can carry.
 inline constexpr int kMaxFileDialogFilters = 4;
 
-/// Receives a dialog's outcome: the chosen path, or nullptr when the user
-/// cancelled or the dialog failed (a failure is logged by the platform
-/// first). Runs on whatever thread the platform delivers on -- a portal
-/// worker on Linux, possibly the calling thread itself when a dialog
-/// fails at once -- so it must only publish the result for the main
-/// thread to pick up, and must not touch state the main thread owns. The
-/// path is valid only for the duration of the call.
-using FileDialogCallback = void (*)(void *userData, const char *path) noexcept;
+/// Names one dialog request. Zero is never a live ticket.
+using FileDialogTicket = std::uint32_t;
+inline constexpr FileDialogTicket kNoFileDialog = 0U;
+
+/// Dialogs that can be outstanding at once. A dialog stays outstanding
+/// until the OS closes it, even when its requester has abandoned it, so
+/// the table has room for a few such stragglers.
+inline constexpr int kMaxPendingFileDialogs = 4;
+/// Longest path, terminator included, a dialog result carries.
+inline constexpr std::size_t kMaxFileDialogPathLength = 1024U;
+
+enum class FileDialogOutcome : std::uint8_t {
+  Chosen,
+  Cancelled,
+  /// The native dialog failed; the platform logged why.
+  Failed,
+  /// The user chose a path longer than kMaxFileDialogPathLength. It is
+  /// refused rather than cut, because a cut path names a different file.
+  PathTooLong,
+};
+
+/// One dialog's result, owned by the caller once taken.
+struct FileDialogResult final {
+  FileDialogTicket ticket = kNoFileDialog;
+  FileDialogOutcome outcome = FileDialogOutcome::Cancelled;
+  /// The chosen path when outcome is Chosen, otherwise empty.
+  char path[kMaxFileDialogPathLength] = {};
+};
+
+enum class FileDialogPoll : std::uint8_t {
+  /// The dialog is still open.
+  Pending,
+  /// The result was copied out and the ticket is spent.
+  Ready,
+  /// Not a live ticket: never issued, already taken, or abandoned.
+  Unknown,
+};
 
 /// Shows a native open or save dialog parented to the platform window,
-/// starting at `defaultLocation` (may be null). True means the callback
-/// will run exactly once. False means it will not: no window, too many
-/// filters, or every dialog slot is held by a dialog still open -- the
-/// refusal is logged, and the caller still owns whatever it passed as
-/// `userData`.
-bool platform_show_file_dialog(FileDialogKind kind,
-                               FileDialogCallback callback, void *userData,
-                               const FileDialogFilter *filters,
-                               int filterCount,
-                               const char *defaultLocation) noexcept;
+/// starting at `defaultLocation` (may be null), and returns its ticket.
+/// kNoFileDialog means no dialog was shown: no window, a bad filter list,
+/// or every slot is held by a dialog that has not closed. The refusal is
+/// logged. Main thread only.
+///
+/// The OS answers on a thread of its choosing (a portal worker on Linux).
+/// The platform keeps the answer until the requester takes it with
+/// platform_take_file_dialog_result, so the requester only ever sees a
+/// result on the main thread.
+FileDialogTicket
+platform_request_file_dialog(FileDialogKind kind,
+                             const FileDialogFilter *filters, int filterCount,
+                             const char *defaultLocation) noexcept;
+
+/// Copies out and spends the ticket's result once the dialog has closed.
+/// Main thread only.
+FileDialogPoll platform_take_file_dialog_result(FileDialogTicket ticket,
+                                                FileDialogResult *out) noexcept;
+
+/// Gives up a ticket: its result, whenever it arrives, is dropped, and
+/// its slot is freed once the OS has closed the dialog. No platform
+/// promises a synchronous cancel, so the dialog itself stays open.
+/// Harmless on a ticket that is not live. Main thread only.
+void platform_abandon_file_dialog(FileDialogTicket ticket) noexcept;
+
+/// Headless automation and tests: while enabled, requests take a slot and
+/// a ticket but show nothing and need no window. Each is then answered
+/// with platform_answer_scripted_file_dialog. Main thread only.
+void platform_set_scripted_file_dialogs(bool enabled) noexcept;
+
+/// Answers a scripted request as the OS would: a path is the user's
+/// choice, null is a cancel. It goes through the same delivery as a
+/// native answer, so it may be called from any thread. False when the
+/// ticket is not an unanswered scripted request.
+bool platform_answer_scripted_file_dialog(FileDialogTicket ticket,
+                                          const char *path) noexcept;
+
 /// Native window handle for external render backends: X11 window
 /// id / Wayland wl_surface / Win32 HWND / Cocoa NSWindow, null when
 /// headless or before initialization.

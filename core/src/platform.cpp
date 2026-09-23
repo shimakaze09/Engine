@@ -300,32 +300,86 @@ bool initialize_platform_impl(int width, int height, const char *title,
   return true;
 }
 
+/// Where a dialog slot is in its life. The main thread moves a slot out
+/// of Free (claim) and out of Delivered (take); the thread that answers
+/// the dialog moves it out of Pending and Abandoned. Every transition is
+/// on `state`, so it is the slot's only cross-thread contract.
+enum class DialogSlotState : std::uint8_t {
+  Free,
+  /// Shown and not yet answered.
+  Pending,
+  /// Given up while still open; the answer frees the slot.
+  Abandoned,
+  /// Answered; the result waits for the requester to take it.
+  Delivered,
+};
 
-/// One native dialog in flight. SDL's callback has a different signature
-/// from the engine's, and SDL reads the filter array after the show call
-/// returns, so both the caller's callback and a copy of its filters have
-/// to live somewhere until the dialog closes: here.
-///
-/// The cross-thread contract is inUse. The main thread claims a slot with
-/// an acquire exchange, fills it, then asks SDL to show the dialog, so
-/// everything it wrote happens before SDL can invoke the trampoline. The
-/// trampoline reads the slot, calls through, and releases inUse last, so
-/// the main thread never refills a slot SDL may still read.
+/// One dialog, from request to taken result. SDL reads the filter array
+/// after the show call returns, so a copy lives here until the dialog
+/// closes. The answering thread writes outcome and path, then publishes
+/// them with a release on state; the main thread reads them only after
+/// an acquire load sees Delivered. The main thread reuses a slot only
+/// once it is Free again, and an answer's last access to the slot is the
+/// store that frees or delivers it.
 struct DialogSlot final {
-  std::atomic<bool> inUse{false};
-  FileDialogCallback callback = nullptr;
-  void *userData = nullptr;
+  std::atomic<DialogSlotState> state{DialogSlotState::Free};
+  /// Set by the main thread after the claim, before the dialog is shown,
+  /// and kept until the next claim; state says whether it is still live.
+  /// Atomic because a scripted answer may look it up from another thread.
+  std::atomic<FileDialogTicket> ticket{kNoFileDialog};
+  bool scripted = false;
+  FileDialogOutcome outcome = FileDialogOutcome::Cancelled;
+  std::array<char, kMaxFileDialogPathLength> path{};
   std::array<SDL_DialogFileFilter,
              static_cast<std::size_t>(kMaxFileDialogFilters)>
       filters{};
 };
-// Dialogs are modal to the user; more than one at a time only happens when
-// one outlives an editor session, which is what the spare slots are for.
-constexpr std::size_t kMaxOpenDialogs = 4U;
-std::array<DialogSlot, kMaxOpenDialogs> g_dialogSlots{};
+constexpr std::size_t kDialogSlotCount =
+    static_cast<std::size_t>(kMaxPendingFileDialogs);
+std::array<DialogSlot, kDialogSlotCount> g_dialogSlots{};
+// Main thread only. Counts claims; a ticket encodes it with the slot index,
+// so a slot's successive tickets never repeat.
+std::uint32_t g_dialogClaims = 0U;
+bool g_scriptedDialogs = false;
 
-/// SDL's callback, translated to the engine's: a null list is a failure,
-/// an empty list a cancel, and both reach the caller as a null path.
+/// The slot a ticket was issued for, or null for kNoFileDialog.
+DialogSlot *dialog_slot_for(FileDialogTicket ticket) noexcept {
+  if (ticket == kNoFileDialog) {
+    return nullptr;
+  }
+  return &g_dialogSlots[static_cast<std::size_t>(ticket - 1U) %
+                        kDialogSlotCount];
+}
+
+/// Records an answer and hands it to whoever holds the ticket, or frees
+/// the slot when nobody does any more. Runs on the answering thread, once
+/// per shown dialog.
+void deliver_dialog_answer(DialogSlot &slot, FileDialogOutcome outcome,
+                           const char *path) noexcept {
+  slot.path[0] = '\0';
+  if (outcome == FileDialogOutcome::Chosen) {
+    const std::size_t length = std::strlen(path);
+    if (length < slot.path.size()) {
+      std::memcpy(slot.path.data(), path, length + 1U);
+    } else {
+      outcome = FileDialogOutcome::PathTooLong;
+      log_message(LogLevel::Error, "platform",
+                  "the chosen path is longer than a file dialog result can "
+                  "hold; it was refused");
+    }
+  }
+  slot.outcome = outcome;
+  DialogSlotState expected = DialogSlotState::Pending;
+  if (!slot.state.compare_exchange_strong(expected, DialogSlotState::Delivered,
+                                          std::memory_order_acq_rel,
+                                          std::memory_order_acquire)) {
+    // Abandoned while open: nobody will take this answer.
+    slot.state.store(DialogSlotState::Free, std::memory_order_release);
+  }
+}
+
+/// SDL's callback, translated to the engine's outcomes: a null list is a
+/// failure, an empty list a cancel.
 void SDLCALL dialog_trampoline(void *userdata, const char *const *filelist,
                                int /*filter*/) noexcept {
   auto *slot = static_cast<DialogSlot *>(userdata);
@@ -334,16 +388,12 @@ void SDLCALL dialog_trampoline(void *userdata, const char *const *filelist,
   }
   if (filelist == nullptr) {
     log_sdl_error("native file dialog failed");
+    deliver_dialog_answer(*slot, FileDialogOutcome::Failed, nullptr);
+  } else if (filelist[0] == nullptr) {
+    deliver_dialog_answer(*slot, FileDialogOutcome::Cancelled, nullptr);
+  } else {
+    deliver_dialog_answer(*slot, FileDialogOutcome::Chosen, filelist[0]);
   }
-  const char *path =
-      ((filelist != nullptr) && (filelist[0] != nullptr)) ? filelist[0]
-                                                          : nullptr;
-  const FileDialogCallback callback = slot->callback;
-  void *const userData = slot->userData;
-  if (callback != nullptr) {
-    callback(userData, path);
-  }
-  slot->inUse.store(false, std::memory_order_release);
 }
 
 // SDL numbers its scancodes by the same HID keyboard usage IDs the engine
@@ -763,58 +813,144 @@ bool platform_set_window_title(const char *title) noexcept {
   return true;
 }
 
-bool platform_show_file_dialog(FileDialogKind kind,
-                               FileDialogCallback callback, void *userData,
-                               const FileDialogFilter *filters,
-                               int filterCount,
-                               const char *defaultLocation) noexcept {
-  if ((callback == nullptr) || (g_window == nullptr)) {
+FileDialogTicket
+platform_request_file_dialog(FileDialogKind kind,
+                             const FileDialogFilter *filters, int filterCount,
+                             const char *defaultLocation) noexcept {
+  ENGINE_ASSERT_MAIN_THREAD();
+  if (!g_scriptedDialogs && (g_window == nullptr)) {
     log_message(LogLevel::Warning, "platform",
                 "native file dialog refused: no window to parent it");
-    return false;
+    return kNoFileDialog;
   }
   if ((filterCount < 0) || (filterCount > kMaxFileDialogFilters) ||
       ((filterCount > 0) && (filters == nullptr))) {
     log_message(LogLevel::Warning, "platform",
                 "native file dialog refused: bad filter list");
-    return false;
+    return kNoFileDialog;
   }
 
-  DialogSlot *slot = nullptr;
-  for (DialogSlot &candidate : g_dialogSlots) {
-    bool expected = false;
-    if (candidate.inUse.compare_exchange_strong(expected, true,
-                                                std::memory_order_acquire)) {
-      slot = &candidate;
+  std::size_t index = kDialogSlotCount;
+  for (std::size_t i = 0U; i < kDialogSlotCount; ++i) {
+    DialogSlotState expected = DialogSlotState::Free;
+    if (g_dialogSlots[i].state.compare_exchange_strong(
+            expected, DialogSlotState::Pending, std::memory_order_acquire)) {
+      index = i;
       break;
     }
   }
-  if (slot == nullptr) {
+  if (index == kDialogSlotCount) {
     log_message(LogLevel::Warning, "platform",
                 "native file dialog refused: every dialog slot is held by "
                 "a dialog that has not closed");
-    return false;
+    return kNoFileDialog;
   }
 
-  slot->callback = callback;
-  slot->userData = userData;
+  DialogSlot &slot = g_dialogSlots[index];
+  // Unsigned wraparound keeps (ticket - 1) % kDialogSlotCount == index,
+  // since the slot count divides 2^32; only zero is skipped.
+  FileDialogTicket ticket = kNoFileDialog;
+  while (ticket == kNoFileDialog) {
+    ++g_dialogClaims;
+    ticket = g_dialogClaims * static_cast<FileDialogTicket>(kDialogSlotCount) +
+             static_cast<FileDialogTicket>(index) + 1U;
+  }
+  slot.scripted = g_scriptedDialogs;
+  slot.ticket.store(ticket, std::memory_order_release);
+  if (slot.scripted) {
+    return ticket;
+  }
+
   for (int i = 0; i < filterCount; ++i) {
-    slot->filters[static_cast<std::size_t>(i)] =
+    slot.filters[static_cast<std::size_t>(i)] =
         SDL_DialogFileFilter{filters[i].name, filters[i].pattern};
   }
   const SDL_DialogFileFilter *sdlFilters =
-      (filterCount > 0) ? slot->filters.data() : nullptr;
-
+      (filterCount > 0) ? slot.filters.data() : nullptr;
   if (kind == FileDialogKind::Save) {
-    SDL_ShowSaveFileDialog(&dialog_trampoline, slot, g_window, sdlFilters,
+    SDL_ShowSaveFileDialog(&dialog_trampoline, &slot, g_window, sdlFilters,
                            filterCount, defaultLocation);
   } else {
-    SDL_ShowOpenFileDialog(&dialog_trampoline, slot, g_window, sdlFilters,
+    SDL_ShowOpenFileDialog(&dialog_trampoline, &slot, g_window, sdlFilters,
                            filterCount, defaultLocation, false);
   }
-  return true;
+  return ticket;
 }
 
+FileDialogPoll
+platform_take_file_dialog_result(FileDialogTicket ticket,
+                                 FileDialogResult *out) noexcept {
+  ENGINE_ASSERT_MAIN_THREAD();
+  DialogSlot *slot = dialog_slot_for(ticket);
+  if ((slot == nullptr) ||
+      (slot->ticket.load(std::memory_order_relaxed) != ticket)) {
+    return FileDialogPoll::Unknown;
+  }
+  switch (slot->state.load(std::memory_order_acquire)) {
+  case DialogSlotState::Pending:
+    return FileDialogPoll::Pending;
+  case DialogSlotState::Delivered:
+    break;
+  case DialogSlotState::Free:
+  case DialogSlotState::Abandoned:
+  default:
+    return FileDialogPoll::Unknown;
+  }
+  if (out != nullptr) {
+    out->ticket = ticket;
+    out->outcome = slot->outcome;
+    std::memcpy(out->path, slot->path.data(), sizeof(out->path));
+  }
+  slot->state.store(DialogSlotState::Free, std::memory_order_release);
+  return FileDialogPoll::Ready;
+}
+
+void platform_abandon_file_dialog(FileDialogTicket ticket) noexcept {
+  ENGINE_ASSERT_MAIN_THREAD();
+  DialogSlot *slot = dialog_slot_for(ticket);
+  if ((slot == nullptr) ||
+      (slot->ticket.load(std::memory_order_relaxed) != ticket)) {
+    return;
+  }
+  DialogSlotState expected = DialogSlotState::Pending;
+  if (slot->state.compare_exchange_strong(expected, DialogSlotState::Abandoned,
+                                          std::memory_order_acq_rel,
+                                          std::memory_order_acquire)) {
+    return; // the answer, when it comes, frees the slot
+  }
+  if (expected == DialogSlotState::Delivered) {
+    slot->state.store(DialogSlotState::Free, std::memory_order_release);
+  }
+}
+
+void platform_set_scripted_file_dialogs(bool enabled) noexcept {
+  ENGINE_ASSERT_MAIN_THREAD();
+  g_scriptedDialogs = enabled;
+}
+
+bool platform_answer_scripted_file_dialog(FileDialogTicket ticket,
+                                          const char *path) noexcept {
+  DialogSlot *slot = dialog_slot_for(ticket);
+  // The acquire on ticket pairs with the release that published it, so
+  // `scripted` is read as the request wrote it. An abandoned request still
+  // waits for its answer to free the slot, exactly as an open native
+  // dialog does.
+  if ((slot == nullptr) ||
+      (slot->ticket.load(std::memory_order_acquire) != ticket) ||
+      !slot->scripted) {
+    return false;
+  }
+  const DialogSlotState state = slot->state.load(std::memory_order_acquire);
+  if ((state != DialogSlotState::Pending) &&
+      (state != DialogSlotState::Abandoned)) {
+    return false;
+  }
+  deliver_dialog_answer(*slot,
+                        (path != nullptr) ? FileDialogOutcome::Chosen
+                                          : FileDialogOutcome::Cancelled,
+                        path);
+  return true;
+}
 
 bool platform_window_is_wayland() noexcept {
   const char *driver = SDL_GetCurrentVideoDriver();
