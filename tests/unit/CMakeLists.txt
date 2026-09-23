@@ -810,6 +810,13 @@ engine_add_test_executable(engine_unit_input_steps
     engine_core
 )
 
+engine_add_test_executable(engine_unit_input_log
+    SOURCES
+    input_log_test.cpp
+    PRIVATE_DEPS
+    engine_core
+)
+
 engine_add_test_executable(engine_unit_input
     SOURCES
     input_test.cpp

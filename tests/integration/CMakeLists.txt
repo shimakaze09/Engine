@@ -403,6 +403,18 @@ engine_add_test_executable(engine_integration_fixed_tick_input
     integration
 )
 
+engine_add_test_executable(engine_integration_input_replay
+    SOURCES
+    input_replay_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_scripting
+    # Builds native SDL events to drive input the way the platform does.
+    ${ENGINE_SDL_TARGET}
+    LABELS
+    integration
+)
+
 engine_add_test_executable(engine_integration_focus_loss_input
     SOURCES
     focus_loss_input_test.cpp
