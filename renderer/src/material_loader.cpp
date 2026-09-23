@@ -169,19 +169,6 @@ bool read_field(const core::JsonParser &parser, const core::JsonValue &object,
   return read_optional_shading_model(parser, object, key, out);
 }
 
-/// True when material registration can insert or update this ID.
-bool material_slot_available(const AssetDatabase &database,
-                             AssetId id) noexcept {
-  for (std::size_t index = 0U; index < database.materialAssets.size();
-       ++index) {
-    if (!database.materialOccupied[index] ||
-        (database.materialAssets[index].id == id)) {
-      return true;
-    }
-  }
-  return false;
-}
-
 /// True when metadata registration can insert or update this ID.
 bool metadata_slot_available(const AssetDatabase &database,
                              AssetId id) noexcept {
@@ -379,7 +366,7 @@ bool parse_material_text(AssetDatabase *database, const char *virtualPath,
 
   const std::uint16_t overridden = authored_fields(parser, *root);
 
-  if (!material_slot_available(*database, id)) {
+  if (!material_asset_slot_available(database, id)) {
     return log_material_error(virtualPath, "material table is full");
   }
   if (!metadata_slot_available(*database, id)) {
