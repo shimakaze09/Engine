@@ -57,9 +57,8 @@ and was never read, shadow types no producer could enable. So, instead:
 - **Open scope lives on the GitHub tracker.** It is the only source of
   truth for what is broken, missing, or deferred.
 - **On-screen renderer behavior is not covered by CI.** No CI lane draws a
-  frame. Only the canonical Windows and Linux lanes and the MSVC and GCC
-  compatibility lanes cook shaders; macOS and the analysis, sanitizer,
-  coverage and benchmark lanes build with the cook off. A rendering feature is only as verified as the last time
+  frame. Only the Windows and Linux Release lanes cook shaders; every
+  other lane builds with the cook off. A rendering feature is only as verified as the last time
   somebody ran the editor and looked at it.
 
 The engine builds, runs an editor, simulates a deterministic world, and

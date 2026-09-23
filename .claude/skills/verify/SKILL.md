@@ -74,9 +74,8 @@ These override every tier below.
 
 ## Tier: renderer, shaders, post stack
 
-**CI cannot verify this tier.** Only the canonical Linux and Windows
-lanes and the MSVC and GCC compatibility lanes build with the shader cook;
-macOS and every analysis, sanitizer, coverage and benchmark lane pass
+**CI cannot verify this tier.** Only the Linux and Windows Release lanes
+build with the shader cook; every other lane passes
 `ENGINE_BGFX_SHADERC=OFF`, and no lane draws a frame (every lane excludes
 the `gpu` label). A pass can be
 unreachable, a uniform never written, a target sampled while it renders,
