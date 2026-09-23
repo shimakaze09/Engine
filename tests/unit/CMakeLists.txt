@@ -198,6 +198,16 @@ engine_add_test_executable(engine_unit_dynamic_resolution
     engine_core
 )
 
+engine_add_test_executable(engine_unit_renderer_backend_select
+    SOURCES
+    renderer_backend_select_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/renderer/src
+    PRIVATE_DEPS
+    engine_renderer
+    engine_core
+)
+
 engine_add_test_executable(engine_unit_render_device_bgfx
     SOURCES
     render_device_bgfx_test.cpp

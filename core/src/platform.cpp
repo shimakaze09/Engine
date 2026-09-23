@@ -952,6 +952,21 @@ bool platform_answer_scripted_file_dialog(FileDialogTicket ticket,
   return true;
 }
 
+PlatformCaps platform_caps() noexcept {
+  PlatformCaps caps{};
+#if defined(ENGINE_PLATFORM_WEB)
+  caps.id = PlatformId::Web;
+#elif defined(_WIN32)
+  caps.id = PlatformId::Windows;
+#elif defined(__APPLE__)
+  caps.id = PlatformId::MacOS;
+#else
+  caps.id = PlatformId::Linux;
+#endif
+  caps.hasWindow = platform_native_window_handle() != nullptr;
+  return caps;
+}
+
 bool platform_window_is_wayland() noexcept {
   const char *driver = SDL_GetCurrentVideoDriver();
   return (driver != nullptr) && (SDL_strcmp(driver, "wayland") == 0);

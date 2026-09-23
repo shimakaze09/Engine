@@ -24,6 +24,21 @@ struct PlatformConfig final {
   bool headless = false;
 };
 
+/// The platform a build targets.
+enum class PlatformId : std::uint8_t { Windows, Linux, MacOS, Web };
+
+/// What the running platform offers. Callers read this rather than test
+/// build macros or infer a capability from a null handle.
+struct PlatformCaps final {
+  PlatformId id = PlatformId::Linux;
+  /// A native window a GPU backend can present to. False before the
+  /// platform initializes, after it shuts down, and when headless.
+  bool hasWindow = false;
+};
+
+/// The running platform's capabilities; valid at any time.
+PlatformCaps platform_caps() noexcept;
+
 /// Initializes the owning system for platform.
 bool initialize_platform() noexcept;
 /// Initializes the owning system for platform.

@@ -155,6 +155,8 @@ int main() {
         "display scale is 1.0 with no window, so callers can multiply by it");
   CHECK(!platform_set_window_title("no window"),
         "setting a title with no window is refused");
+  CHECK(!platform_caps().hasWindow,
+        "the capabilities report no window before the platform exists");
   CHECK(platform_request_file_dialog(FileDialogKind::Open, &filter, 1,
                                      nullptr) == kNoFileDialog,
         "a dialog with no window to parent it is refused");
@@ -246,6 +248,8 @@ int main() {
     return 1;
   }
 
+  CHECK(!platform_caps().hasWindow,
+        "a headless window is not one a GPU backend can present to");
   const float scale = platform_display_scale();
   CHECK(scale > 0.0F, "a window reports a positive display scale");
   CHECK(platform_set_window_title("platform window test - renamed"),
