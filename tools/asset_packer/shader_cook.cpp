@@ -492,9 +492,9 @@ int run_shader_cook(int argc, char **argv) {
   const char *shadercPath = nullptr;
   const char *includeDir = nullptr;
 #ifdef _WIN32
-  std::string profilesCsv = "glsl,essl,spirv,dx11";
+  std::string profilesCsv = "glsl,essl,spirv,metal,dx11";
 #else
-  std::string profilesCsv = "glsl,essl,spirv";
+  std::string profilesCsv = "glsl,essl,spirv,metal";
 #endif
   const char *platformTag = kCookPlatformTag;
   bool force = false;

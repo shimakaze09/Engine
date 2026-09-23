@@ -621,11 +621,13 @@ endif()
 # profile into the build-tree asset dir with shaderc from the fetched
 # superproject; the cook stamp keeps incremental builds a no-op.
 if(ENGINE_BUILD_TOOLS AND ENGINE_BGFX_SHADERC AND TARGET copy_assets)
-    # Win64 also cooks DXBC (dx11) — the shadow-array unit map fits
-    # its 16-sampler cap and shaderc's DXBC backend needs a Windows host.
-    set(_ENGINE_SHADER_PROFILES "glsl,essl,spirv")
+    # Metal cooks on every host (glslang then SPIRV-Cross, no Apple tools),
+    # so the lanes that cook prove it. Win64 also cooks DXBC (dx11) — the
+    # shadow-array unit map fits its 16-sampler cap and shaderc's DXBC
+    # backend needs a Windows host.
+    set(_ENGINE_SHADER_PROFILES "glsl,essl,spirv,metal")
     if(ENGINE_TARGET_PLATFORM STREQUAL "Win64")
-        set(_ENGINE_SHADER_PROFILES "glsl,essl,spirv,dx11")
+        set(_ENGINE_SHADER_PROFILES "glsl,essl,spirv,metal,dx11")
     endif()
     add_custom_target(bgfx_shader_cook ALL
         COMMAND $<TARGET_FILE:asset_packer>

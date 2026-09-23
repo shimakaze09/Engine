@@ -86,6 +86,7 @@ void add_missing_uniform(const char *name,
 
 const char *fake_cooked_profile() noexcept { return "spirv"; }
 const char *fake_cooked_profile_dx11() noexcept { return "dx11"; }
+const char *fake_cooked_profile_metal() noexcept { return "metal"; }
 
 // Link-entry counters for the dx11 sidecar scenario: plain links, links
 // through the introspected entry, and introspected links whose spirv
@@ -594,6 +595,43 @@ int check_dx11_profile_links_with_spirv_sidecars() {
   return result;
 }
 
+/// EXPECTATION: the metal cooked profile links through the plain entry.
+/// A Metal binary's uniform table lists every sampler, the fetch-only ones
+/// included (engine_unit_shader_cook checks the cooked bytes), so it needs
+/// no spirv sidecar; linking it through the introspected entry would read
+/// sidecars a metal-only install need not ship.
+int check_metal_profile_links_without_sidecars() {
+  using namespace engine::renderer;
+
+  reset_backend_harness();
+  clear_missing_uniforms();
+  for (const char *fileName : kShaderFiles) {
+    if (!write_profile_shader_file(fileName, "metal", "// msl stub\n")) {
+      return 370;
+    }
+  }
+  engine::tests::fake_device().cooked_program_profile =
+      &fake_cooked_profile_metal;
+  engine::tests::fake_device().create_program_binary_introspected =
+      &fake_create_program_binary_introspected;
+  reset_link_counters();
+
+  int result = 0;
+  if (!initialize_backend()) {
+    result = 371;
+  } else if (!backend_state().deferredAvailable) {
+    result = 372;
+  } else if (g_plainLinks == 0U) {
+    result = 373;
+  } else if (g_introspectedLinks != 0U) {
+    result = 374; // metal took the sidecar path
+  }
+
+  engine::tests::fake_device().cooked_program_profile = &fake_cooked_profile;
+  engine::tests::fake_device().create_program_binary_introspected = nullptr;
+  return result;
+}
+
 } // namespace
 
 namespace engine::renderer {
@@ -661,6 +699,9 @@ int main() {
   }
   if (result == 0) {
     result = check_dx11_profile_links_with_spirv_sidecars();
+  }
+  if (result == 0) {
+    result = check_metal_profile_links_without_sidecars();
   }
 
   std::filesystem::remove_all(kShaderDir, ec);

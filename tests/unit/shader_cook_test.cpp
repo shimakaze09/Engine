@@ -36,9 +36,9 @@ int run_cook(const std::string &packer, const std::string &manifest,
 #ifdef _WIN32
       // Windows hosts also cook DXBC (#301): the CI lanes prove the
       // s_5_0 compile of the whole manifest through the production CLI.
-      " --profiles glsl,essl,spirv,dx11";
+      " --profiles glsl,essl,spirv,metal,dx11";
 #else
-      " --profiles glsl,essl,spirv";
+      " --profiles glsl,essl,spirv,metal";
 #endif
 #ifdef _WIN32
   // cmd.exe strips the outer quote pair from the whole command line
@@ -133,6 +133,16 @@ int main() {
   t.check(fs::exists(outA / "tonemap.frag.default.spirv.bin"),
           "second profile present");
   t.check(fs::exists(stamp), "cook stamp committed");
+  // Metal cooks on any host. Its binaries keep a complete uniform table:
+  // the samplers the deferred lighting reads only through texelFetch are
+  // still listed, which is why metal links without spirv sidecars (the
+  // table fxc strips for dx11 is the case that needs them).
+  const std::vector<char> deferredMetal =
+      read_file(outA / "deferred_lighting.frag.default.metal.bin");
+  t.check(!deferredMetal.empty(), "metal profile cooked");
+  t.check(contains(deferredMetal, "uTileLightTexSampler") &&
+              contains(deferredMetal, "uLightDataTexSampler"),
+          "metal keeps the fetch-only samplers in its uniform table");
   const std::vector<char> firstBytes = read_file(sample);
   t.check(!firstBytes.empty(), "cooked binary non-empty");
 
