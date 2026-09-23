@@ -223,8 +223,8 @@ bool bootstrap(const EngineConfig &config) noexcept {
 
   static_cast<void>(core::cvar_register_string(
       "r_bgfx_renderer", "auto",
-      "bgfx backend only: renderer API (auto, vulkan, opengl, metal, "
-      "noop); read once at device initialization (#138)"));
+      "bgfx backend only: renderer API (auto, vulkan, opengl, gles, metal, "
+      "d3d11, d3d12, noop); read once at device initialization"));
 
   static_cast<void>(core::cvar_register_bool(
       "r_bgfx_trace", false,

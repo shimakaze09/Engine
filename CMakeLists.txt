@@ -89,9 +89,10 @@ find_package(Threads REQUIRED)
 #   Win64  - native only (no cross-compile toolchain is wired up in this
 #            repo). Full editor + runtime. Primary lane alongside Linux.
 #   Linux  - native only. Full editor + runtime.
-#   macOS  - native only. Build + headless-test lane ONLY
-#            (docs/decisions/0002): AppleClang conformance, no editor
-#            target and no GPU verification. Configure succeeds but warns.
+#   macOS  - native only. Editor + runtime on Metal (docs/decisions/0015);
+#            AppleClang 16 (Xcode 16) or newer builds shaderc and cooks the
+#            metal profile. CI runs no GPU, so the live editor rests on a
+#            human observation.
 #   Web    - Emscripten runtime build; see below.
 #   Android, iOS - no toolchain or dependency graph exists for these yet.
 #            Configure fails fast below.
@@ -141,13 +142,6 @@ if(NOT CMAKE_CROSSCOMPILING AND NOT ENGINE_TARGET_PLATFORM STREQUAL _ENGINE_HOST
         "mistake, not a supported cross-compile — it would otherwise apply "
         "the wrong ENGINE_PLATFORM_* compile definitions to a native build "
         "instead of failing here.")
-endif()
-
-if(ENGINE_TARGET_PLATFORM STREQUAL "macOS")
-    message(WARNING
-        "ENGINE_TARGET_PLATFORM=macOS is a build + headless-test lane only "
-        "(docs/decisions/0002): no editor target and no GPU verification. "
-        "Use Win64 or Linux to run the live renderer.")
 endif()
 
 message(STATUS "ENGINE_TARGET_PLATFORM: ${ENGINE_TARGET_PLATFORM}")
@@ -209,6 +203,15 @@ include(FetchContent)
     # gracefully when no cook target exists.
     option(ENGINE_BGFX_SHADERC
         "Build bgfx shaderc and cook the shader manifest" ON)
+    if((ENGINE_TARGET_PLATFORM STREQUAL "macOS") AND ENGINE_BGFX_SHADERC AND
+       (CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang") AND
+       (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 16))
+        message(FATAL_ERROR
+            "shaderc needs AppleClang 16 (Xcode 16) or newer: its tint "
+            "uses class template argument deduction for aggregates. "
+            "Install Xcode 16, or configure with -DENGINE_BGFX_SHADERC=OFF "
+            "for a build that cannot cook shaders.")
+    endif()
     # shaderc is a host tool; wasm builds consume host-cooked binaries.
     if(EMSCRIPTEN)
         set(BGFX_BUILD_TOOLS OFF CACHE BOOL "bgfx shaderc/tools" FORCE)

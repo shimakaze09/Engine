@@ -57,8 +57,8 @@ and was never read, shadow types no producer could enable. So, instead:
 - **Open scope lives on the GitHub tracker.** It is the only source of
   truth for what is broken, missing, or deferred.
 - **On-screen renderer behavior is not covered by CI.** No CI lane draws a
-  frame. Only the Windows and Linux Release lanes cook shaders; every
-  other lane builds with the cook off. A rendering feature is only as verified as the last time
+  frame. Only the Windows, Linux and macOS Release lanes cook shaders;
+  every other lane builds with the cook off. A rendering feature is only as verified as the last time
   somebody ran the editor and looked at it.
 
 The engine builds, runs an editor, simulates a deterministic world, and
@@ -111,9 +111,10 @@ secondary compilers validated for portability:
 - **Tier 1 — canonical (used for development and primary CI)**
 	- Windows x64: `clang-cl`
 	- Linux x64: `clang++` 19 or newer (clang 18 cannot compile libstdc++'s `<expected>`)
-	- macOS: AppleClang. macOS is an editor platform by
-	  [decision 0015](docs/decisions/0015-commercial-anime-engine-on-six-platforms.md),
-	  but today it builds with the shader cook off and runs headless tests only
+	- macOS: AppleClang 16 (Xcode 16) or newer. macOS is an editor platform by
+	  [decision 0015](docs/decisions/0015-commercial-anime-engine-on-six-platforms.md)
+	  and cooks the `metal` shader profile; CI has no GPU, so the live editor
+	  on a Mac rests on a human observation
 - **Tier 2 — portability validation (dedicated CI compatibility lanes)**
 	- Windows x64: MSVC
 	- Linux x64: GCC
@@ -145,8 +146,8 @@ ctest --test-dir build --output-on-failure
 
 ```bash
 cmake --preset linux-clang-debug
-# macOS (headless tests only; shaderc does not build under AppleClang):
-# cmake --preset macos-clang-debug -DENGINE_BGFX_SHADERC=OFF
+# macOS (Xcode 16 or newer, which shaderc needs):
+# cmake --preset macos-clang-debug
 cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ```
