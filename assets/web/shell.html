@@ -29,7 +29,7 @@
       // Shared links play the creation; ?edit boots the full editor.
       preRun: [function () {
         if (!/[?&]edit(=|&|$)/.test(location.search)) {
-          Module.ENV.ENGINE_PLAYER = '1';
+          Module.ENV.ENGINE_CVAR_app_player_mode = '1';
         }
       }],
       setStatus: function (text) {

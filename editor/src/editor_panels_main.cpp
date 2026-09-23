@@ -289,17 +289,15 @@ void draw_toolbar() noexcept {
   const bool canPlay = hasWorld && !editor_session().worldRestoreFailed &&
                        (editor_session().playState != PlayState::Playing);
 
-  // One-shot automation hook: ENGINE_EDITOR_AUTOPLAY=1 enters play mode on
-  // the first eligible frame (scripted verification runs use it; interactive
-  // sessions never set the variable). The latch lives on the session
-  // so a later editor session in the same process re-arms.
+  // One-shot automation hook: the editor.autoplay cvar enters play mode on
+  // the first eligible frame (scripted verification runs seed it with
+  // ENGINE_CVAR_editor_autoplay=1; interactive sessions never set it). The
+  // latch lives on the session so a later editor session in the same
+  // process re-arms.
   if (!editor_session().autoplayConsumed && canPlay &&
       (editor_session().playState == PlayState::Stopped)) {
-    char autoplay[8] = {};
     editor_session().autoplayConsumed = true;
-    if (core::non_empty_env("ENGINE_EDITOR_AUTOPLAY", autoplay,
-                            sizeof(autoplay)) &&
-        (autoplay[0] == '1')) {
+    if (core::cvar_get_bool("editor.autoplay", false)) {
       start_play_mode();
     }
   }

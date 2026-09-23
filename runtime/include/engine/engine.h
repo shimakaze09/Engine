@@ -20,8 +20,8 @@ struct EngineConfig final {
   const char *editorAssetRoot = "assets";
   /// Player mode: run the pure gameplay loop — the editor bridge
   /// is cleared at bootstrap and the renderer presents the scene straight
-  /// to the back buffer. ENGINE_PLAYER=1 in the environment also enables
-  /// it (the web share page's default).
+  /// to the back buffer. The app.player_mode cvar also enables it (the
+  /// web share page's default, seeded through ENGINE_CVAR_app_player_mode).
   bool playerMode = false;
   /// Mix audio into no device; a headless platform forces this on, the
   /// way it forces the null render device.

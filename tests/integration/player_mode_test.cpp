@@ -1,6 +1,7 @@
-// Player mode (#138): ENGINE_PLAYER=1 must clear the editor bridge at
-// bootstrap so the pipeline runs the pure gameplay loop (always-playing,
-// scripts begin play with no editor present) and must arm
+// Player mode (#138): the app.player_mode cvar, seeded from the
+// environment the way the web share page sets it, must clear the editor
+// bridge at bootstrap so the pipeline runs the pure gameplay loop
+// (always-playing, scripts begin play with no editor present) and must arm
 // r_present_scene so the renderer presents the final image on the back
 // buffer — the web share page's boot path. Drives real
 // engine::bootstrap() + a full EnginePipeline run with a pre-registered
@@ -188,9 +189,9 @@ bool collision_seen() noexcept {
 
 void set_player_env() noexcept {
 #ifdef _WIN32
-  static_cast<void>(_putenv_s("ENGINE_PLAYER", "1"));
+  static_cast<void>(_putenv_s("ENGINE_CVAR_app_player_mode", "1"));
 #else
-  static_cast<void>(setenv("ENGINE_PLAYER", "1", 1));
+  static_cast<void>(setenv("ENGINE_CVAR_app_player_mode", "1", 1));
 #endif
 }
 

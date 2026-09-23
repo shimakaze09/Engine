@@ -257,6 +257,10 @@ bool initialize_editor(void *sdlWindow) noexcept {
 
   static_cast<void>(core::cvar_register_float(
       "editor.ui_scale", 1.0F, "Editor UI scale multiplier"));
+  static_cast<void>(core::cvar_register_bool(
+      "editor.autoplay", false,
+      "Enter play mode on the first eligible frame (scripted verification "
+      "runs)"));
   const float uiScale = core::platform_display_scale() *
                         core::cvar_get_float("editor.ui_scale", 1.0F);
 
