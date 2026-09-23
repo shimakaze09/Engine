@@ -126,7 +126,19 @@ if(ENGINE_TARGET_PLATFORM STREQUAL "Web")
     # SharedArrayBuffer), growable memory, and a strict WebGL2 context
     # for bgfx.
     add_compile_options(-pthread)
-    add_link_options(-pthread "-sPTHREAD_POOL_SIZE=8"
+    # Every engine thread comes from the page's prewarmed worker pool. A
+    # thread past it starts only once the main thread returns to the
+    # browser, so a join or a wait on one before then hangs the page; the
+    # strict pool refuses that spawn instead. The job system takes what
+    # asset streaming's four workers leave (checked in asset_streaming.cpp).
+    set(ENGINE_WEB_PTHREAD_POOL_SIZE 8)
+    set(ENGINE_WEB_JOB_WORKERS 4)
+    add_compile_definitions(
+        ENGINE_WEB_PTHREAD_POOL_SIZE=${ENGINE_WEB_PTHREAD_POOL_SIZE}
+        ENGINE_WEB_JOB_WORKERS=${ENGINE_WEB_JOB_WORKERS})
+    add_link_options(-pthread
+        "-sPTHREAD_POOL_SIZE=${ENGINE_WEB_PTHREAD_POOL_SIZE}"
+        "-sPTHREAD_POOL_SIZE_STRICT=2"
         "-sALLOW_MEMORY_GROWTH=1" "-sINITIAL_MEMORY=268435456"
         "-sMIN_WEBGL_VERSION=2" "-sMAX_WEBGL_VERSION=2"
         "-sSTACK_SIZE=1048576")
