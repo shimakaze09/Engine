@@ -261,7 +261,10 @@ bool initialize_editor(void *sdlWindow) noexcept {
       "editor.autoplay", false,
       "Enter play mode on the first eligible frame (scripted verification "
       "runs)"));
-  const float uiScale = core::platform_display_scale() *
+  // Content scale, not display scale: the ImGui SDL3 backend already
+  // renders at the window's pixel density, so on Retina the display
+  // scale's 2x would size the UI twice.
+  const float uiScale = core::platform_content_scale() *
                         core::cvar_get_float("editor.ui_scale", 1.0F);
 
   // Proper UI font (the 13px bitmap default reads as a debug tool), with a

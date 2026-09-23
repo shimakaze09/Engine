@@ -99,6 +99,19 @@ void *get_sdl_window() noexcept;
 /// there is no window or the platform cannot tell, so a caller can
 /// multiply by it unconditionally.
 float platform_display_scale() noexcept;
+
+/// The display scale with the window's pixel density divided out: what a
+/// UI laid out in window units should scale by. On a Retina Mac the
+/// display scale is 2 because the backbuffer has two pixels per window
+/// unit, and a renderer drawing at framebuffer size already applies that;
+/// the content scale is 1. On Windows at 150% the window units are
+/// pixels, so both are 1.5. 1.0 when there is no window.
+float platform_content_scale() noexcept;
+
+/// content scale = display scale / pixel density, with 1.0 for either
+/// factor when it is not positive. The arithmetic behind
+/// platform_content_scale, so every platform's case is testable anywhere.
+float content_scale_for(float displayScale, float pixelDensity) noexcept;
 /// Sets the window's title. False when there is no window or the platform
 /// refuses; the title is copied, so the caller's buffer need not outlive
 /// the call.

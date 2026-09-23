@@ -802,6 +802,20 @@ float platform_display_scale() noexcept {
   return (scale > 0.0F) ? scale : 1.0F;
 }
 
+float content_scale_for(float displayScale, float pixelDensity) noexcept {
+  const float display = (displayScale > 0.0F) ? displayScale : 1.0F;
+  const float density = (pixelDensity > 0.0F) ? pixelDensity : 1.0F;
+  return display / density;
+}
+
+float platform_content_scale() noexcept {
+  if (g_window == nullptr) {
+    return 1.0F;
+  }
+  return content_scale_for(SDL_GetWindowDisplayScale(g_window),
+                           SDL_GetWindowPixelDensity(g_window));
+}
+
 bool platform_set_window_title(const char *title) noexcept {
   if ((g_window == nullptr) || (title == nullptr)) {
     return false;

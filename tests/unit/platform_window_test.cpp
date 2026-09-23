@@ -157,6 +157,22 @@ int main() {
         "setting a title with no window is refused");
   CHECK(!platform_caps().hasWindow,
         "the capabilities report no window before the platform exists");
+  CHECK(platform_content_scale() == 1.0F,
+        "content scale is 1.0 with no window");
+
+  // Content scale per platform shape: the pixel density the renderer
+  // already applies is divided out of the display scale.
+  CHECK(content_scale_for(2.0F, 2.0F) == 1.0F,
+        "Retina: two pixels per unit, no extra UI scale");
+  CHECK(content_scale_for(1.5F, 1.0F) == 1.5F,
+        "Windows at 150%: window units are pixels, scale 1.5");
+  CHECK(content_scale_for(4.0F, 2.0F) == 2.0F,
+        "Retina plus a 200% content scale keeps the 2");
+  CHECK(content_scale_for(1.0F, 1.0F) == 1.0F, "reference density");
+  CHECK((content_scale_for(0.0F, 2.0F) == 0.5F) &&
+            (content_scale_for(2.0F, 0.0F) == 2.0F) &&
+            (content_scale_for(-1.0F, -1.0F) == 1.0F),
+        "a factor the platform could not report counts as 1");
   CHECK(platform_request_file_dialog(FileDialogKind::Open, &filter, 1,
                                      nullptr) == kNoFileDialog,
         "a dialog with no window to parent it is refused");
