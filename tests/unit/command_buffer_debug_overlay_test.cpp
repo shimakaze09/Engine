@@ -19,16 +19,12 @@
 #include "engine/renderer/render_device.h"
 #include "engine/renderer/texture_loader.h"
 
+#include "../fake_render_device.h"
+
 #include <cstdint>
 #include <cstdio>
 
 namespace engine::renderer {
-
-/// Link stub: this harness compiles command_buffer_context.cpp, whose
-/// projection helpers consult the live device's clip conventions; no
-/// device exists here, so the GL-convention defaults apply.
-const RenderDevice *render_device() noexcept { return nullptr; }
-
 
 // Link stubs for the forward-path helpers referenced by the flush TU; the
 // debug-overlay contract under test never reaches them (debug-line
@@ -85,6 +81,33 @@ void upload_material_texture_slots(const MaterialTextureUniformLocs &,
                                    const RenderDevice *, const Material &,
                                    DeviceTextureHandle,
                                    DeviceTextureHandle *) noexcept {}
+// The shared forward-draw helpers, stubbed like the rest: this suite
+// drives the pass for its debug overlay, and a real draw needs a device.
+ForwardDrawProgram pbr_forward_draw_program(const BackendState &) noexcept {
+  return ForwardDrawProgram{};
+}
+void upload_forward_material(const ForwardDrawProgram &, const BackendState &,
+                             const RenderDevice *, const DrawCommand &,
+                             ForwardDrawBindings *) noexcept {}
+void draw_forward_command(const ForwardDrawProgram &, const RenderDevice *,
+                          const DrawCommand &, const GpuMesh &,
+                          const math::Mat4 &, RendererFrameStats *) noexcept {}
+/// One run covering the whole range: this suite submits no draws with a
+/// shading model, and the overlay it tests runs after the geometry.
+std::size_t partition_program_runs(const CommandBufferView &,
+                                         std::size_t start, std::size_t end,
+                                         ShadingProgramRun *runs,
+                                         std::size_t capacity) noexcept {
+  if ((runs == nullptr) || (capacity == 0U) || (start >= end)) {
+    return 0U;
+  }
+  runs[0] = ShadingProgramRun{start, end - start, 0U};
+  return 1U;
+}
+DeviceProgramHandle shading_program(const BackendState &backend,
+                                          std::uint8_t) noexcept {
+  return backend.pbrProgram;
+}
 
 } // namespace engine::renderer
 
@@ -287,6 +310,9 @@ void test_segment_chunking_draws_everything() noexcept {
 
 /// Runs this executable or test program.
 int main() {
+  // No device is live: the projection helpers fall back to the GL clip
+  // conventions, and every table under test is passed in explicitly.
+  engine::tests::fake_log().present = false;
   std::printf("=== Command Buffer Debug Overlay Unit Tests ===\n");
 
   test_one_age_step_per_flush();

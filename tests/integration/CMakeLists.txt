@@ -93,6 +93,21 @@ engine_add_test_executable(engine_integration_offscreen_draws_gpu
 set_tests_properties(engine_integration_offscreen_draws_gpu PROPERTIES
     SKIP_REGULAR_EXPRESSION "SKIPPED:")
 
+engine_add_test_executable(engine_integration_forward_tail_capture_gpu
+    SOURCES
+    forward_tail_capture_gpu_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/renderer/src
+    PRIVATE_DEPS
+    engine_runtime
+    engine_renderer
+    engine_content
+    LABELS
+    gpu;integration
+)
+set_tests_properties(engine_integration_forward_tail_capture_gpu PROPERTIES
+    SKIP_REGULAR_EXPRESSION "SKIPPED:")
+
 engine_add_test_executable(engine_integration_first_frame_shadows_gpu
     SOURCES
     first_frame_shadows_gpu_test.cpp
@@ -228,6 +243,8 @@ engine_add_test_executable(engine_integration_coin_run_acceptance
     SOURCES
     coin_run_acceptance_test.cpp
     PRIVATE_DEPS
+    # Builds native SDL events to drive input the way the platform does.
+    ${ENGINE_SDL_TARGET}
     engine_runtime
     engine_scripting
     LABELS
@@ -237,6 +254,16 @@ engine_add_test_executable(engine_integration_coin_run_acceptance
 engine_add_test_executable(engine_integration_scene_mesh_resolution
     SOURCES
     scene_mesh_resolution_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_scripting
+    LABELS
+    integration
+)
+
+engine_add_test_executable(engine_integration_scene_material_resolution
+    SOURCES
+    scene_material_resolution_test.cpp
     PRIVATE_DEPS
     engine_runtime
     engine_scripting
@@ -264,10 +291,137 @@ engine_add_test_executable(engine_integration_pipeline_lifetime
     integration
 )
 
+# Helper plus driver: the contract is about what survives a process that
+# exits without flushing, which cannot be observed from inside that
+# process.
+# NDEBUG on purpose: the contract under test is that the check survives
+# the configuration that ships, which is the one <cassert> removed it from.
+engine_add_executable_target(assertion_helper
+    SOURCES
+    assertion_helper.cpp
+    PRIVATE_DEPS
+    engine_core
+    COMPILE_DEFINITIONS
+    NDEBUG
+)
+
+add_test(
+    NAME engine_integration_assertion_release
+    COMMAND ${CMAKE_COMMAND}
+        "-DHELPER=$<TARGET_FILE:assertion_helper>"
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/assertion_release_test.cmake
+)
+set_tests_properties(
+    engine_integration_assertion_release
+    PROPERTIES LABELS integration
+)
+
+engine_add_executable_target(thread_affinity_helper
+    SOURCES
+    thread_affinity_helper.cpp
+    PRIVATE_DEPS
+    engine_renderer
+)
+
+add_test(
+    NAME engine_integration_thread_affinity
+    COMMAND ${CMAKE_COMMAND}
+        "-DHELPER=$<TARGET_FILE:thread_affinity_helper>"
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/thread_affinity_test.cmake
+)
+set_tests_properties(
+    engine_integration_thread_affinity
+    PROPERTIES
+        LABELS integration
+        SKIP_REGULAR_EXPRESSION "SKIPPED:"
+)
+
+engine_add_executable_target(crash_report_helper
+    SOURCES
+    crash_report_helper.cpp
+    PRIVATE_DEPS
+    engine_runtime
+)
+
+add_test(
+    NAME engine_integration_crash_report
+    COMMAND ${CMAKE_COMMAND}
+        "-DHELPER=$<TARGET_FILE:crash_report_helper>"
+        "-DASSET_ROOT=${CMAKE_SOURCE_DIR}"
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/crash_report_test.cmake
+)
+set_tests_properties(
+    engine_integration_crash_report
+    PROPERTIES LABELS integration
+)
+
+engine_add_executable_target(log_flush_helper
+    SOURCES
+    log_flush_helper.cpp
+    PRIVATE_DEPS
+    engine_core
+)
+
+add_test(
+    NAME engine_integration_log_flush_on_error
+    COMMAND ${CMAKE_COMMAND}
+        "-DHELPER=$<TARGET_FILE:log_flush_helper>"
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/log_flush_on_error_test.cmake
+)
+set_tests_properties(
+    engine_integration_log_flush_on_error
+    PROPERTIES LABELS integration
+)
+
+engine_add_test_executable(engine_integration_input_tap_edge
+    SOURCES
+    input_tap_edge_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    # Builds native SDL events to drive input the way the platform does.
+    ${ENGINE_SDL_TARGET}
+    LABELS
+    integration
+)
+
+engine_add_test_executable(engine_integration_focus_loss_input
+    SOURCES
+    focus_loss_input_test.cpp
+    PRIVATE_DEPS
+    # Builds native SDL events to drive input the way the platform does.
+    ${ENGINE_SDL_TARGET}
+    engine_runtime
+    LABELS
+    integration
+)
+
+engine_add_test_executable(engine_integration_pipeline_stage_profile
+    SOURCES
+    pipeline_stage_profile_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    LABELS
+    integration
+)
+
+engine_add_test_executable(engine_integration_play_transition_queue
+    SOURCES
+    play_transition_queue_test.cpp
+    PRIVATE_DEPS
+    # Builds native SDL events to drive input the way the platform does.
+    ${ENGINE_SDL_TARGET}
+    engine_runtime
+    engine_scripting
+    LABELS
+    integration
+)
+
 engine_add_test_executable(engine_integration_quit_end_play
     SOURCES
     quit_end_play_test.cpp
     PRIVATE_DEPS
+    # Builds native SDL events to drive input the way the platform does.
+    ${ENGINE_SDL_TARGET}
     engine_runtime
     engine_scripting
     LABELS
@@ -564,6 +718,16 @@ engine_add_test_executable(engine_integration_lua_hardening
     integration
 )
 
+engine_add_test_executable(engine_integration_script_random
+    SOURCES
+    script_random_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_scripting
+    LABELS
+    integration
+)
+
 # ---- P1-M4-C / P1-M4-D: Async Streaming & LRU ----
 
 engine_add_test_executable(engine_integration_async_load
@@ -693,6 +857,48 @@ if(ENGINE_BUILD_TOOLS)
     )
     set_tests_properties(
         engine_integration_asset_packer_bin_dependency
+        PROPERTIES LABELS integration
+    )
+
+    add_test(
+        NAME engine_integration_asset_packer_many_graph_deps
+        COMMAND ${CMAKE_COMMAND}
+            "-DASSET_PACKER=$<TARGET_FILE:asset_packer>"
+            "-DSRC_GLTF=${CMAKE_SOURCE_DIR}/assets/props/coin.gltf"
+            "-DSRC_BIN=${CMAKE_SOURCE_DIR}/assets/props/coin.bin"
+            "-DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/many_graph_deps_work"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/asset_packer_many_graph_deps_test.cmake
+    )
+    set_tests_properties(
+        engine_integration_asset_packer_many_graph_deps
+        PROPERTIES LABELS integration
+    )
+
+    add_test(
+        NAME engine_integration_asset_packer_cookmeta_labels
+        COMMAND ${CMAKE_COMMAND}
+            "-DASSET_PACKER=$<TARGET_FILE:asset_packer>"
+            "-DSRC_GLTF=${CMAKE_SOURCE_DIR}/assets/character.gltf"
+            "-DSRC_BIN=${CMAKE_SOURCE_DIR}/assets/character.bin"
+            "-DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/cookmeta_labels_work"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/asset_packer_cookmeta_labels_test.cmake
+    )
+    set_tests_properties(
+        engine_integration_asset_packer_cookmeta_labels
+        PROPERTIES LABELS integration
+    )
+
+    add_test(
+        NAME engine_integration_asset_packer_malformed_sidecar
+        COMMAND ${CMAKE_COMMAND}
+            "-DASSET_PACKER=$<TARGET_FILE:asset_packer>"
+            "-DSRC_GLTF=${CMAKE_SOURCE_DIR}/assets/props/coin.gltf"
+            "-DSRC_BIN=${CMAKE_SOURCE_DIR}/assets/props/coin.bin"
+            "-DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/malformed_sidecar_work"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/asset_packer_malformed_sidecar_test.cmake
+    )
+    set_tests_properties(
+        engine_integration_asset_packer_malformed_sidecar
         PROPERTIES LABELS integration
     )
 
@@ -1046,6 +1252,8 @@ engine_add_test_executable(engine_integration_gamepad_hotplug
     SOURCES
     gamepad_hotplug_test.cpp
     PRIVATE_DEPS
+    # Builds native SDL events to drive input the way the platform does.
+    ${ENGINE_SDL_TARGET}
     engine_runtime
     engine_scripting
     LABELS
@@ -1145,6 +1353,23 @@ engine_add_test_executable(engine_integration_pipeline_interpolation_history
     PRIVATE_DEPS
     engine_runtime
     engine_core
+    LABELS
+    integration
+)
+engine_add_test_executable(engine_integration_render_prep_shading_model
+    SOURCES
+    render_prep_shading_model_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    LABELS
+    integration
+)
+
+engine_add_test_executable(engine_integration_draw_order_thread_count
+    SOURCES
+    draw_order_thread_count_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
     LABELS
     integration
 )

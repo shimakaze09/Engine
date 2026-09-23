@@ -13,6 +13,7 @@
 
 #include "dependency_graph.h"
 #include "engine/content/asset_metadata.h"
+#include "engine/content/asset_sidecar.h"
 #include "engine/content/cook_contract.h"
 
 /// Interleaved vertex/index payload extracted from one glTF primitive.
@@ -102,10 +103,14 @@ void sort_dependency_digests(std::vector<DependencyDigest> &digests);
 /// Reads the authored import settings out of the SOURCE's ".meta"
 /// sidecar. They are authored data, never derived: the cook reads them
 /// and never writes them, so deleting every cooked output loses nothing
-/// a human typed. Leaves `*outSettings` at the defaults and returns
-/// false when the source has no sidecar or no settings in it.
-bool read_authored_import_settings(const char *sourcePath,
-                                    ImportSettings *outSettings);
+/// a human typed. Leaves `*outSettings` at the defaults when the source
+/// has no sidecar or no settings in it. Returns the sidecar's read
+/// result: Unreadable and Malformed mean settings may have been authored
+/// and could not be read, which a cook must refuse rather than cook at
+/// the defaults.
+engine::content::SidecarReadResult
+read_authored_import_settings(const char *sourcePath,
+                              ImportSettings *outSettings);
 /// Writes the cook stamp recording source/settings hashes, dependency
 /// digests, and the output manifest hashed from the committed files;
 /// an unreadable listed output fails the write so the stamp can never

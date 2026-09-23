@@ -9,10 +9,25 @@
 #include "engine/content/asset_metadata.h"
 #include "engine/renderer/material.h"
 
+namespace engine::core {
+struct PlatformEvent;
+} // namespace engine::core
+
 namespace engine::runtime {
 
 class World;
 struct EngineAssetDatabaseService;
+
+/// One change of the editor's play state, recorded when the author causes
+/// it. Comparing the play state across two frames can only ever express
+/// the net change, so a frame carrying Play, Stop and Play again looks
+/// identical to one carrying nothing: the session that ended between them
+/// never gets its end hooks. Recording each change keeps them all, in the
+/// order they happened.
+///
+/// Resume is a return from Paused, distinct from Start, so the end and
+/// begin hooks of a session are not dispatched around a pause.
+enum class PlayTransition : std::uint8_t { Start, Stop, Pause, Resume };
 
 /// Function-pointer bridge the runtime uses to reach the editor. Initialize,
 /// shutdown, new-frame, and render callbacks run with the render context
@@ -22,7 +37,9 @@ struct EditorBridge final {
   void (*shutdown)() noexcept = nullptr;
   void (*new_frame)() noexcept = nullptr;
   void (*render)(float frameMs, float utilizationPct) noexcept = nullptr;
-  void (*process_event)(void *sdlEvent) noexcept = nullptr;
+  // Every polled platform event, before gameplay input sees it. The
+  // editor hands event.native to its ImGui SDL3 backend.
+  void (*process_event)(const core::PlatformEvent &event) noexcept = nullptr;
   void (*set_world)(World *world) noexcept = nullptr;
   bool (*is_playing)() noexcept = nullptr;
   bool (*is_paused)() noexcept = nullptr;
@@ -31,11 +48,18 @@ struct EditorBridge final {
   // True at most once per Step click while paused: the pipeline consumes
   // the request and simulates exactly one fixed step that frame.
   bool (*consume_step_request)() noexcept = nullptr;
-  // Called instead of an immediate quit on SDL_EVENT_QUIT; true lets the
+  // Called instead of an immediate quit on a Quit event; true lets the
   // runtime quit right away (the editor has nothing to protect), false
   // means the editor armed its own unsaved-change confirm flow and will
   // request the quit itself once that resolves. Null behaves as true.
   bool (*handle_quit_request)() noexcept = nullptr;
+  // Takes the oldest play transition the editor has recorded and returns
+  // true, or returns false when none is queued. The pipeline drains this
+  // once per frame and dispatches each transition in turn. Null means the
+  // bridge records none, and the pipeline falls back to the single net
+  // change is_playing/is_paused can express.
+  bool (*consume_play_transition)(PlayTransition *outTransition) noexcept =
+      nullptr;
 };
 
 /// Sets the requested value for editor bridge.
@@ -73,6 +97,38 @@ std::size_t editor_query_assets(content::AssetTypeTag typeTag,
 /// reference picker uses to render its broken-reference state.
 bool editor_asset_display_path(std::uint64_t assetId, char *outPath,
                                std::size_t outPathSize) noexcept;
+/// The persistent identity the catalog holds for a known asset id, or a
+/// nil reference when the id is unregistered or the asset was never
+/// imported. An editor gesture that points a component at an asset stores
+/// this beside the id, because the id is where the bytes are this session
+/// and the reference is what a saved document names.
+core::AssetRef editor_asset_ref(std::uint64_t assetId) noexcept;
+
+/// Why establishing an asset's identity did not succeed, so a caller can
+/// tell "already had one" from a fault it must report and roll back.
+enum class EditorIdentityResult : std::uint8_t {
+  /// The sidecar was written and the asset catalogued under it.
+  Created,
+  /// A readable sidecar was already there; nothing was changed.
+  AlreadyIdentified,
+  /// A sidecar exists but will not read. Never replaced: minting a new
+  /// identity over one that may still be referenced would break every
+  /// reference to the asset instead of reporting a repairable file.
+  SidecarUnusable,
+  /// Minting or the staged sidecar write failed.
+  WriteFailed,
+};
+
+/// Gives the asset at `osPath` a persistent identity if it has none,
+/// writing its source-side sidecar and catalouging it so a reference to
+/// it resolves in this session rather than after a restart.
+///
+/// An editor gesture that creates a referenceable asset calls this in the
+/// same save transaction that writes the asset: an asset the editor
+/// generated must not need the author to run a tool afterwards before it
+/// can be referenced at all.
+EditorIdentityResult
+editor_establish_asset_identity(const char *osPath) noexcept;
 
 // --- Material editor bridge ---
 //
@@ -103,21 +159,36 @@ struct EditorMaterialState final {
 EditorMaterialState editor_load_material(const char *virtualPath) noexcept;
 
 /// Writes `params`/`textureSlots` directly into the live asset database
-/// record -- the same mutation register_material_asset and
-/// set_material_texture_slots perform -- so the very next frame's render
+/// record (renderer::edit_material_asset), so the very next frame's render
 /// prep and resolve_material_textures reflect the edit: the material
-/// editor's live viewport feedback. Never touches disk; call
-/// editor_save_material to persist. False when the id is unknown or no
-/// runtime asset service is published.
+/// editor's live viewport feedback. A field that changes becomes one the
+/// material overrides, and every material inheriting from it follows the
+/// edit. Never touches disk; call editor_save_material to persist. False
+/// when the id is not a loaded material or no runtime asset service is
+/// published.
 bool editor_set_material_params(
     content::AssetId materialId, const renderer::Material &params,
     const renderer::MaterialTextureSlots &textureSlots) noexcept;
+
+/// The material's override bits (renderer::material_field), for an undo
+/// step to restore; material_field::kAll when unknown or no service is
+/// published.
+std::uint16_t editor_material_overrides(content::AssetId materialId) noexcept;
+
+/// Sets the live record to exactly `params`/`textureSlots`/`overrides`
+/// (renderer::restore_material_asset): an undo or redo, which restores
+/// which fields the material authors along with their values. False when
+/// the id is not a loaded material or no service is published.
+bool editor_restore_material(content::AssetId materialId,
+                             const renderer::Material &params,
+                             const renderer::MaterialTextureSlots &textureSlots,
+                             std::uint16_t overrides) noexcept;
 
 /// Persists the live in-memory state for `virtualPath` to disk via
 /// save_material_asset (staged atomic write): a failure (including an
 /// unresolvable texture-slot path) leaves the previous file on disk
 /// completely untouched. `parentVirtualPath` may be null/empty for no
-/// parent.
+/// parent; with one, only the material's overrides are written.
 bool editor_save_material(const char *virtualPath,
                           const char *parentVirtualPath) noexcept;
 

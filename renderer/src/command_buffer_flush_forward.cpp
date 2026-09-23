@@ -122,103 +122,33 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
       dev->set_param_i32(backend.pbrAlbedoMapLocation, 0);
     }
 
-    const MaterialTextureUniformLocs forwardMaterialTexLocs{
-        backend.pbrHasMetallicRoughnessTextureLocation,
-        backend.pbrMetallicRoughnessMapLocation,
-        backend.pbrHasEmissiveTextureLocation,
-        backend.pbrEmissiveMapLocation,
-        backend.pbrHasOcclusionTextureLocation,
-        backend.pbrOcclusionMapLocation,
-        backend.pbrHasOpacityTextureLocation,
-        backend.pbrOpacityMapLocation,
-        backend.pbrAlphaModeLocation,
-        backend.pbrAlphaCutoffLocation,
-        backend.pbrUvTilingLocation,
-        backend.pbrUvOffsetLocation};
+    const ForwardDrawProgram forwardProgram =
+        pbr_forward_draw_program(backend);
+    DeviceProgramHandle boundProgram = backend.pbrProgram;
 
-    auto drawForwardCommand = [&](const DrawCommand &command,
-                                  const GpuMesh &mesh) {
-      const math::Mat4 model = compute_model_matrix(command);
-      const math::Mat4 mvp = compute_mvp(model, viewProjection);
-      float normalMatrix[9] = {};
-      extract_normal_matrix(model, normalMatrix);
+    // One shading-model run. `batched` asks for the opaque instancing
+    // fast path, and `model` is the run's model, because only the
+    // physically-based model has an instanced sibling program: using it
+    // for another model would shade that run physically based while the
+    // engine believed otherwise, which is the one failure this partition
+    // exists to prevent.
+    auto drawRange = [&](std::size_t start, std::size_t end, bool batched,
+                         std::uint8_t model) {
+      ForwardDrawBindings bindings{};
 
-      if (backend.pbrUseInstancingLocation.valid()) {
-        dev->set_param_i32(backend.pbrUseInstancingLocation, 0);
-      }
-      upload_pbr_foliage_uniforms(backend, dev, command);
-      if (backend.pbrModelLocation.valid()) {
-        dev->set_param_mat4(backend.pbrModelLocation, &model.columns[0].x);
-      }
-      dev->set_param_mat4(backend.pbrMvpLocation, &mvp.columns[0].x);
-      dev->set_param_mat3(backend.pbrNormalMatrixLocation, normalMatrix);
-
-      if (mesh.indexCount > 0U) {
-        ++frameStats.drawCalls;
-        frameStats.triangleCount += (mesh.indexCount / 3U);
-        dev->draw_indexed(mesh.geometry,
-                          static_cast<std::int32_t>(mesh.indexCount));
-      } else {
-        ++frameStats.drawCalls;
-        frameStats.triangleCount += (mesh.vertexCount / 3U);
-        dev->draw(mesh.geometry, PrimitiveTopology::Triangles, 0,
-                  static_cast<std::int32_t>(mesh.vertexCount));
-      }
-    };
-
-    auto uploadForwardMaterial = [&](const Material &material,
-                                     DeviceTextureHandle *boundAlbedoTexture,
-                                     DeviceTextureHandle *boundMaterialTex) {
-      if (backend.pbrAlbedoLocation.valid()) {
-        dev->set_param_vec3(backend.pbrAlbedoLocation, &material.albedo.x);
-      }
-      if (backend.pbrRoughnessLocation.valid()) {
-        dev->set_param_f32(backend.pbrRoughnessLocation,
-                               material.roughness);
-      }
-      if (backend.pbrMetallicLocation.valid()) {
-        dev->set_param_f32(backend.pbrMetallicLocation, material.metallic);
-      }
-      if (backend.pbrOpacityLocation.valid()) {
-        dev->set_param_f32(backend.pbrOpacityLocation, material.opacity);
-      }
-      if (backend.pbrEmissiveLocation.valid()) {
-        dev->set_param_vec3(backend.pbrEmissiveLocation,
-                              &material.emissive.x);
-      }
-
-      const DeviceTextureHandle albedoTex =
-          texture_device_handle(material.albedoTexture);
-      const bool hasAlbedoTex =
-          (material.albedoTexture != kInvalidTextureHandle) &&
-          (albedoTex != kInvalidDeviceTexture);
-      if (backend.pbrHasAlbedoTextureLocation.valid()) {
-        dev->set_param_i32(backend.pbrHasAlbedoTextureLocation,
-                             hasAlbedoTex ? 1 : 0);
-      }
-      if (hasAlbedoTex && (albedoTex != *boundAlbedoTexture)) {
-        dev->bind_texture_slot(0U, albedoTex);
-        *boundAlbedoTexture = albedoTex;
-      } else if (!hasAlbedoTex &&
-                 (*boundAlbedoTexture != backend.fallbackTexture2D)) {
-        // Fallback, not nothing: WebGL rejects draws whose declared
-        // samplers still reference the pass's render target.
-        dev->bind_texture_slot(0U, backend.fallbackTexture2D);
-        *boundAlbedoTexture = backend.fallbackTexture2D;
-      }
-      upload_material_texture_slots(forwardMaterialTexLocs, dev, material,
-                                    backend.fallbackTexture2D,
-                                    boundMaterialTex);
-    };
-
-    auto drawRange = [&](std::size_t start, std::size_t end) {
-      DeviceTextureHandle boundAlbedoTexture{};
-      DeviceTextureHandle boundMaterialTex[4] = {};
-
-      if ((start == 0U) && (end == opaqueCount)) {
+      if (batched) {
         for (std::size_t batchIndex = 0U; batchIndex < opaqueBatchCount;
              ++batchIndex) {
           const StaticMeshBatch &batch = backend.staticMeshBatches[batchIndex];
+          // Batches are built over the whole opaque range, so a run takes
+          // the ones inside it. A batch never straddles a run: batching
+          // groups by the key's state bits, which the shading model is
+          // part of.
+          const std::size_t batchFirst = static_cast<std::size_t>(batch.first);
+          if ((batchFirst < start) ||
+              ((batchFirst + static_cast<std::size_t>(batch.count)) > end)) {
+            continue;
+          }
           const DrawCommand &command = commandBufferView.data[batch.first];
           const GpuMesh *mesh = lookup_gpu_mesh(registry, command.mesh);
           if ((mesh == nullptr) ||
@@ -227,16 +157,17 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
             continue;
           }
 
-          uploadForwardMaterial(command.material, &boundAlbedoTexture,
-                                boundMaterialTex);
-          upload_pbr_foliage_uniforms(backend, dev, command);
+          upload_forward_material(forwardProgram, backend, dev, command,
+                                  &bindings);
 
-          // Instanced batching runs through the shader's runtime
-          // toggle (GL) or the INSTANCED sibling program (bgfx, whose
-          // ports carry no toggle); with neither, batches take the
-          // per-command path below.
+          // Instanced batching runs through the shader's runtime toggle
+          // or the INSTANCED sibling program (bgfx, whose ports carry no
+          // toggle); with neither, batches take the per-command path
+          // below. The sibling is cooked from the physically-based
+          // fragment only, so a run of another model never binds it.
           const bool instancedViaProgram =
               !backend.pbrUseInstancingLocation.valid() &&
+              (model == static_cast<std::uint8_t>(ShadingModel::Pbr)) &&
               (backend.pbrInstancedProgram != kInvalidDeviceProgram);
           if ((batch.count > 1U) && !mesh->hasSkin &&
               (mesh->indexCount > 0U) &&
@@ -256,16 +187,19 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
                 mesh->geometry, static_cast<std::int32_t>(mesh->indexCount),
                 static_cast<std::int32_t>(batch.count));
             if (instancedViaProgram) {
-              dev->bind_program(backend.pbrProgram);
+              // Back to the run's program, not unconditionally the
+              // physically-based one.
+              dev->bind_program(boundProgram);
             }
             continue;
           }
 
           for (std::uint32_t local = 0U; local < batch.count; ++local) {
             const std::size_t commandIndex =
-                static_cast<std::size_t>(batch.first) +
-                static_cast<std::size_t>(local);
-            drawForwardCommand(commandBufferView.data[commandIndex], *mesh);
+                batchFirst + static_cast<std::size_t>(local);
+            draw_forward_command(forwardProgram, dev,
+                                 commandBufferView.data[commandIndex], *mesh,
+                                 viewProjection, &frameStats);
           }
         }
         return;
@@ -279,13 +213,50 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
           continue;
         }
 
-        uploadForwardMaterial(command.material, &boundAlbedoTexture,
-                                boundMaterialTex);
-        drawForwardCommand(command, *mesh);
+        upload_forward_material(forwardProgram, backend, dev, command,
+                                &bindings);
+        draw_forward_command(forwardProgram, dev, command, *mesh,
+                             viewProjection, &frameStats);
       }
     };
 
-    drawRange(0U, opaqueCount);
+    // Re-assigns the sampler units after a program change. The parameter
+    // values themselves are registry-global by name and carry across a
+    // bind, but a sampler uniform left at its default unit aliases
+    // whatever sits there, so each newly bound program gets its units.
+    auto bindProgramForRun = [&](DeviceProgramHandle program) {
+      if (program == boundProgram) {
+        return;
+      }
+      dev->bind_program(program);
+      boundProgram = program;
+      apply_pbr_ibl_uniforms(backend, dev, iblAvailable);
+      if (backend.pbrAlbedoMapLocation.valid()) {
+        dev->set_param_i32(backend.pbrAlbedoMapLocation, 0);
+      }
+    };
+
+    // The key groups draws by shading model, so each model is one
+    // contiguous run and a program binds once per run rather than once
+    // per draw. A range of one model therefore costs exactly what it did
+    // before this existed, which is every range in a scene that mixes
+    // no models.
+    auto drawModelRuns = [&](std::size_t start, std::size_t end,
+                             bool batched) {
+      ShadingProgramRun runs[kMaxShadingPrograms] = {};
+      const std::size_t runCount = partition_program_runs(
+          commandBufferView, start, end, runs, kMaxShadingPrograms);
+      for (std::size_t i = 0U; i < runCount; ++i) {
+        bindProgramForRun(shading_program(backend, runs[i].programId));
+        drawRange(runs[i].first, runs[i].first + runs[i].count, batched,
+                  runs[i].programId);
+      }
+      // The sky and the passes after this one expect the
+      // physically-based program bound.
+      bindProgramForRun(backend.pbrProgram);
+    };
+
+    drawModelRuns(0U, opaqueCount, true);
 
     const SkyModel skyModel = selected_sky_model();
     const DeviceTextureHandle skyboxTexture = envSkyboxTexture;
@@ -313,7 +284,7 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
     if (opaqueCount < totalCount) {
       dev->apply_render_state(RenderState{DepthTest::Less, false,
                                           BlendMode::Alpha, CullMode::None});
-      drawRange(opaqueCount, totalCount);
+      drawModelRuns(opaqueCount, totalCount, false);
 
       dev->apply_render_state(RenderState{DepthTest::Less, true,
                                           BlendMode::Disabled,

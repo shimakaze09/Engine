@@ -65,6 +65,9 @@ struct LoadRequest final {
   LoadPriority priority = LoadPriority::Normal;
   LoadingState state = LoadingState::Queued;
   std::uint64_t loadedSizeBytes = 0ULL;
+  /// When the request was queued, in queue order: among equal priorities
+  /// the older request is scheduled first, whatever slot it occupies.
+  std::uint64_t enqueueOrdinal = 0ULL;
   std::uint32_t generation = 1U;
   bool loadInProgress = false;
   /// Pinned while the upload pump is inside this request's callback outside
@@ -97,6 +100,8 @@ struct AssetStreamingQueue final {
 
   // Frame-local tracking:
   std::uint64_t inflight_bytes_this_frame = 0ULL;
+  // The ordinal the next queued request takes (see LoadRequest).
+  std::uint64_t nextEnqueueOrdinal = 0ULL;
   std::uint32_t uploads_this_frame = 0U;
 
   AssetLoadCallback loadCallback = nullptr;
@@ -114,6 +119,12 @@ struct AssetStreamingQueue final {
 
 /// Initialise the streaming queue. Registers CVars.
 bool initialize_asset_streaming(AssetStreamingQueue *queue) noexcept;
+/// The same, spawning through a caller-supplied table so a test can refuse
+/// a worker and drive the rollback: every already-started worker is asked
+/// to stop and joined, workerRunning clears, and the queue reports failure
+/// with no thread left behind.
+bool initialize_asset_streaming(AssetStreamingQueue *queue,
+                                const core::ThreadOps &threadOps) noexcept;
 
 /// Shutdown and drain all pending requests.
 void shutdown_asset_streaming(AssetStreamingQueue *queue) noexcept;
@@ -197,5 +208,21 @@ void begin_streaming_frame(AssetStreamingQueue *queue) noexcept;
 
 /// Query how many requests are currently queued or in-flight.
 std::size_t pending_load_count(const AssetStreamingQueue *queue) noexcept;
+
+/// One request that reached Ready or Failed, as collect_terminal_loads
+/// reports it.
+struct TerminalLoad final {
+  LoadHandle handle{};
+  AssetId assetId = kInvalidAssetId;
+  LoadingState state = LoadingState::Queued;
+};
+
+/// Copies every Ready or Failed request into `out`, up to `capacity`, and
+/// returns how many were written. A snapshot taken under the queue's lock,
+/// so a caller retiring terminal requests needs neither the lock nor the
+/// queue's slots; each handle is released with release_load as usual.
+std::size_t collect_terminal_loads(const AssetStreamingQueue *queue,
+                                   TerminalLoad *out,
+                                   std::size_t capacity) noexcept;
 
 } // namespace engine::content

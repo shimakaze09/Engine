@@ -12,11 +12,13 @@ undone by the next call site that needs the same thing. Rules name the
 canonical owner and the evidence of a copy — usually a magic constant,
 since a copied algorithm carries the original's numbers.
 
-Scope is deliberately non-test first-party code. A test may legitimately
-want the arithmetic without the contract (`scheduler_stress` uses these
-multipliers as CPU work, not as a hash), and migrating the test tree is
-tracked separately on #484. Python copies are out of reach of a C++
-primitive and are tracked there too.
+Scope is non-test first-party code for the production primitives. A test
+may legitimately want the arithmetic without the contract
+(`scheduler_stress` uses these multipliers as CPU work, not as a hash),
+and migrating the test tree is tracked separately on #484. Python copies
+are out of reach of a C++ primitive and are tracked there too. The test
+tree has primitives of its own -- test doubles every suite used to copy --
+and TEST_RULES holds those, checked under `tests` only.
 
 Usage:
   python tools/check_duplicate_primitives.py            # report, exit 1 on findings
@@ -73,13 +75,61 @@ RULES: tuple[Rule, ...] = (
         remedy="include engine/core/hash.h and use fnv1a_32/fnv1a_64 or "
         "their _append forms",
     ),
+    Rule(
+        name="the draw sort key's bit layout",
+        owner="renderer/include/engine/renderer/command_buffer.h",
+        # The shifts that place the key's fields. Render prep, the sort and
+        # the flush each carried their own copy of these, so a field could
+        # move in one and not the others and draws would silently sort
+        # wrong. A copy is always a shift by one of the field offsets
+        # applied to a 64-bit literal, which is what this matches.
+        pattern=r"1ULL\s*<<\s*63U|<<\s*(?:56U|36U)(?![0-9])",
+        remedy="include engine/renderer/command_buffer.h and use the "
+        "kDrawKey* constants or the draw_key_* accessors",
+    ),
+    Rule(
+        name="the per-draw forward uniform upload",
+        owner="renderer/src/command_buffer_flush_uniforms.cpp",
+        # Writing one of the per-draw material or transform locations is
+        # what a copied forward draw loop looks like. The forward pass,
+        # the deferred path's transparent pass and each scene capture
+        # each carried one, so a uniform added to one draw could be
+        # forgotten in the other two and the same material shaded
+        # differently depending on which pass drew it. Per-frame
+        # uniforms (time, camera, lighting, fog) legitimately stay in
+        # the passes and are deliberately not matched here.
+        pattern=r"set_param_\w+\(\s*backend\.pbr(?:Albedo|Roughness|Metallic"
+        r"|Opacity|Emissive|HasAlbedoTexture|Model|Mvp|NormalMatrix)Location",
+        remedy="call upload_forward_material and draw_forward_command from "
+        "command_buffer_flush_internal.h instead of uploading the set by hand",
+    ),
 )
 
 
-def audited_files(root: pathlib.Path) -> list[pathlib.Path]:
-    """Returns every first-party C++ source under the audited roots."""
+# Test doubles consolidated into one shared fake. Production code may and
+# must define these (the real device TU does), so they are checked only in
+# the test tree.
+TEST_RULES: tuple[Rule, ...] = (
+    Rule(
+        name="the fake render device seam",
+        owner="tests/fake_render_device.cpp",
+        # Defining the seam is what a copied fake device starts with: the
+        # renderer suites each carried one, with its own handle counter,
+        # alive counts and failure switch beside it.
+        pattern=r"(?<!\w)(?:initialize_|shutdown_)?render_device\(\)"
+        r"\s*noexcept\s*\{",
+        remedy="link tests/fake_render_device.cpp and configure "
+        "engine::tests::fake_device() instead",
+    ),
+)
+
+
+def audited_files(
+    root: pathlib.Path, roots=AUDITED_ROOTS
+) -> list[pathlib.Path]:
+    """Returns every first-party C++ source under the given roots."""
     files: list[pathlib.Path] = []
-    for name in AUDITED_ROOTS:
+    for name in roots:
         directory = root / name
         if not directory.is_dir():
             continue
@@ -91,7 +141,7 @@ def audited_files(root: pathlib.Path) -> list[pathlib.Path]:
     return sorted(files)
 
 
-def check_file(path: pathlib.Path, rel: str) -> list[str]:
+def check_file(path: pathlib.Path, rel: str, rules=RULES) -> list[str]:
     """Returns one finding per copied-primitive hit in the file."""
     findings: list[str] = []
     try:
@@ -99,7 +149,7 @@ def check_file(path: pathlib.Path, rel: str) -> list[str]:
     except OSError:
         return findings
 
-    for rule in RULES:
+    for rule in rules:
         if rel == rule.owner:
             continue
         for number, line in enumerate(lines, 1):
@@ -126,6 +176,11 @@ def main() -> int:
     files = audited_files(root)
     for path in files:
         findings.extend(check_file(path, path.relative_to(root).as_posix()))
+    test_files = audited_files(root, ("tests",))
+    for path in test_files:
+        findings.extend(
+            check_file(path, path.relative_to(root).as_posix(), TEST_RULES)
+        )
 
     if findings:
         print("duplicate-primitive audit failed:")
@@ -134,8 +189,9 @@ def main() -> int:
         return 1
 
     print(
-        f"duplicate-primitive audit passed: {len(files)} file(s), "
-        f"{len(RULES)} consolidated primitive(s) checked"
+        f"duplicate-primitive audit passed: {len(files) + len(test_files)} "
+        f"file(s), {len(RULES) + len(TEST_RULES)} consolidated primitive(s) "
+        "checked"
     )
     return 0
 

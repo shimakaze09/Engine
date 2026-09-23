@@ -90,6 +90,9 @@ void dispatch_animation_event_callbacks() noexcept;
 
 // Tick all active timers; call once per frame before on_update.
 void tick_timers() noexcept;
+/// Runs the callbacks of the timers the pipeline's per-step advance
+/// marked as due. The pipeline calls this once per frame.
+void dispatch_timers() noexcept;
 
 // Tick all active coroutines; call once per frame before on_update.
 void tick_coroutines() noexcept;

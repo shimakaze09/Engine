@@ -170,6 +170,11 @@ void refresh_backend_program_state(BackendState &backend,
   }
 
   static_cast<void>(resolve_default_program_state(backend, dev));
+  // Every registered shading program, including the physically-based one
+  // the table holds a second reference to: the flush binds through the
+  // table, so refreshing pbrProgram below without refreshing the table
+  // leaves the bind reading a program the reload destroyed.
+  refresh_shading_programs(backend);
   // Instanced siblings cache no parameters (global-registry tokens);
   // refresh only re-reads their device programs.
   backend.pbrInstancedProgram =
@@ -536,6 +541,19 @@ void destroy_backend_resources(BackendState *backend) noexcept {
 void initialize_renderer() noexcept {
   g_shutDown = false;
   g_shutDownRefusalLogged = false;
+}
+
+const RenderDevice *acquire_render_device() noexcept {
+  if (g_shutDown) {
+    if (!g_shutDownRefusalLogged) {
+      g_shutDownRefusalLogged = true;
+      core::log_message(core::LogLevel::Warning, "renderer",
+                        "renderer work issued after shutdown_renderer; "
+                        "ignored rather than re-initializing the device");
+    }
+    return nullptr;
+  }
+  return initialize_render_device() ? render_device() : nullptr;
 }
 
 /// Shuts down the owning system for renderer.

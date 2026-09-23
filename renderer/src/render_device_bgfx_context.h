@@ -47,6 +47,9 @@ struct BgfxBufferRecord final {
   std::int32_t sizeBytes = 0;
   std::int32_t strideBytes = 0; // realized vertex/instance stride
   void *staging = nullptr;
+  // Capacity of `staging`, never less than sizeBytes while staging is
+  // set: realization and stream draws read sizeBytes from it.
+  std::uint32_t stagingBytes = 0U;
   bgfx::DynamicVertexBufferHandle vertex = BGFX_INVALID_HANDLE;
   bgfx::DynamicIndexBufferHandle index = BGFX_INVALID_HANDLE;
   // Stream-access vertex data never becomes a bgfx dynamic buffer: bgfx
@@ -92,6 +95,13 @@ struct BgfxGeometryRecord final {
 struct BgfxTargetRecord final {
   bgfx::FrameBufferHandle handle = BGFX_INVALID_HANDLE;
   std::uint32_t depthTexture = 0U;
+  /// The one extent every attachment renders at, kept so binding the
+  /// target can give its view a rect covering the whole thing. Without
+  /// that a pass which binds and never sets a viewport inherits whatever
+  /// rect its view id last held, which is a different pass's rect as soon
+  /// as anything upstream changes how many views it claims.
+  std::int32_t width = 0;
+  std::int32_t height = 0;
 };
 
 // The global uniform registry can hold every distinct uniform name the

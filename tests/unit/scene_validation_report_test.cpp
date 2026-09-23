@@ -74,7 +74,7 @@ int main() {
     core::ValidationReport report{};
     g_sceneWarnings = 0;
     const std::string json =
-        "{\"version\":3,\"entities\":[{\"persistentId\":7,\"components\":"
+        "{\"version\":6,\"entities\":[{\"persistentId\":7,\"components\":"
         "{\"Transform\":{\"position\":[1,2,3],\"parentId\":999}}}]}";
     ctx.check(load(*world, json, &report), "the scene with a dangling parent loads");
     ctx.check(world->alive_entity_count() == 1U, "the child is present");
@@ -94,7 +94,7 @@ int main() {
   {
     core::ValidationReport report{};
     const std::string json =
-        "{\"version\":3,\"entities\":[{\"persistentId\":8,\"components\":"
+        "{\"version\":6,\"entities\":[{\"persistentId\":8,\"components\":"
         "{\"ScriptComponent\":\"assets/no_such_script_xyz.lua\","
         "\"AnimationComponent\":\"assets/no_such_controller_xyz.json\"}}]}";
     ctx.check(load(*world, json, &report), "the scene with missing files loads");
@@ -115,7 +115,7 @@ int main() {
   {
     core::ValidationReport report{};
     const std::string json =
-        "{\"version\":3,\"entities\":[{\"persistentId\":9,\"components\":"
+        "{\"version\":6,\"entities\":[{\"persistentId\":9,\"components\":"
         "{\"ScriptComponent\":\"elsewhere/script.lua\"}}]}";
     ctx.check(load(*world, json, &report) && report.clean(),
               "a path under an unmounted prefix is left alone");
@@ -124,7 +124,7 @@ int main() {
               "write a present script");
     core::ValidationReport presentReport{};
     const std::string presentJson =
-        "{\"version\":3,\"entities\":[{\"persistentId\":10,\"components\":"
+        "{\"version\":6,\"entities\":[{\"persistentId\":10,\"components\":"
         "{\"ScriptComponent\":\"assets/scene_validation_present.lua\"}}]}";
     ctx.check(load(*world, presentJson, &presentReport) &&
                   presentReport.clean(),
@@ -136,11 +136,11 @@ int main() {
   {
     core::ValidationReport report{};
     report.count = 5U;
-    ctx.check(load(*world, "{\"version\":3,\"entities\":[]}", &report) &&
+    ctx.check(load(*world, "{\"version\":6,\"entities\":[]}", &report) &&
                   report.clean(),
               "a clean scene resets and leaves the report empty");
 
-    std::string json = "{\"version\":3,\"entities\":[";
+    std::string json = "{\"version\":6,\"entities\":[";
     for (unsigned i = 0U; i < core::ValidationReport::kMaxEntries + 6U; ++i) {
       char entity[128] = {};
       std::snprintf(entity, sizeof(entity),

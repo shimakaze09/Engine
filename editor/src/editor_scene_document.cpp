@@ -9,8 +9,6 @@
 #define __PRFCHWINTRIN_H // NOLINT(bugprone-reserved-identifier)
 #endif
 
-#include <SDL3/SDL.h>
-#include <SDL3/SDL_dialog.h>
 
 #include <cstdio>
 #include <cstring>
@@ -22,6 +20,7 @@
 #include "engine/core/json.h"
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
+#include "engine/runtime/editor_bridge.h"
 #include "engine/runtime/scene_serializer.h"
 #include "engine/runtime/world.h"
 
@@ -207,24 +206,32 @@ void continue_pending_action() noexcept {
   doc.pendingOpenPath[0] = '\0';
 }
 
-/// SDL_ShowOpenFileDialog/SDL_ShowSaveFileDialog callback: publishes the
-/// result into the request's own record through the atomic handoff (see
-/// the SceneDialogRequest comment) and reads no session state, so a
-/// dialog that outlived its session writes nowhere the current session
-/// looks; all filesystem work happens later on the main thread.
-void scene_dialog_callback(void *userdata, const char *const *filelist,
-                           int filter) noexcept {
-  static_cast<void>(filter);
+/// The native dialog's callback: publishes the result into the request's
+/// own record through the atomic handoff (see the SceneDialogRequest
+/// comment) and reads no session state, so a dialog that outlived its
+/// session writes nowhere the current session looks; all filesystem work
+/// happens later on the main thread. A null path is a cancel or a failed
+/// dialog. Runs on whatever thread the platform delivers on.
+///
+/// A path that does not fit the record is refused, not cut: the record's
+/// path is what Save As writes to and Open reads from, and a truncated
+/// path names a different file.
+void scene_dialog_callback(void *userdata, const char *path) noexcept {
   auto *request = static_cast<SceneDialogRequest *>(userdata);
   if (request == nullptr) {
     return;
   }
-  if ((filelist == nullptr) || (filelist[0] == nullptr)) {
-    request->resultAccepted = false;
-  } else {
-    std::snprintf(request->resultPath, sizeof(request->resultPath), "%s",
-                  filelist[0]);
-    request->resultAccepted = true;
+  request->resultAccepted = false;
+  if (path != nullptr) {
+    const std::size_t length = std::strlen(path);
+    if (length < sizeof(request->resultPath)) {
+      std::memcpy(request->resultPath, path, length + 1U);
+      request->resultAccepted = true;
+    } else {
+      core::log_message(core::LogLevel::Error, kLogChannel,
+                        "the chosen path is longer than the editor can hold; "
+                        "nothing was opened or saved");
+    }
   }
   request->resultPending.store(true, std::memory_order_release);
 }
@@ -275,11 +282,17 @@ void begin_save_scene_as_dialog() noexcept {
     return;
   }
 
-  static const SDL_DialogFileFilter kFilters[] = {{"Scene", "scene"}};
+  static const core::FileDialogFilter kFilters[] = {{"Scene", "scene"}};
   const char *defaultLocation =
       doc.hasPath ? doc.path : editor_asset_root();
-  SDL_ShowSaveFileDialog(&scene_dialog_callback, request, session.sdlWindow,
-                         kFilters, 1, defaultLocation);
+  if (!core::platform_show_file_dialog(core::FileDialogKind::Save,
+                                       &scene_dialog_callback, request,
+                                       kFilters, 1, defaultLocation)) {
+    // No dialog will ever answer this request, so answer it as a cancel:
+    // the poll then releases the record and cancels any action waiting on
+    // the dialog, exactly as if the user had dismissed it.
+    scene_dialog_callback(request, nullptr);
+  }
 }
 
 } // namespace
@@ -477,8 +490,37 @@ bool perform_scene_save_as(const char *path) noexcept {
                   "destination %s is outside the project asset root", path);
     return report_save_failure(session);
   }
+  // Whether this destination already existed decides what rolling back
+  // means below: a file the author already had must survive a failure
+  // here, and one this save created must not outlive it.
+  std::error_code existsEc{};
+  const bool destinationExisted = std::filesystem::exists(path, existsEc);
+
   if (!runtime::save_scene(*session.world, path)) {
     set_save_failure_message(session, path);
+    return report_save_failure(session);
+  }
+
+  // A scene is referenceable, so it needs the identity a reference names,
+  // and it needs it from the same transaction that wrote it rather than
+  // from a tool the author is expected to run afterwards. The diagnostic
+  // for each failing case is logged by the bridge.
+  const runtime::EditorIdentityResult identity =
+      runtime::editor_establish_asset_identity(path);
+  if ((identity != runtime::EditorIdentityResult::Created) &&
+      (identity != runtime::EditorIdentityResult::AlreadyIdentified)) {
+    if (!destinationExisted) {
+      // Nothing referenced this path a moment ago, so removing it leaves
+      // the project exactly as it was instead of leaving a scene behind
+      // that nothing can name.
+      std::error_code removeEc{};
+      static_cast<void>(std::filesystem::remove(path, removeEc));
+    }
+    std::snprintf(session.document.lastSaveError,
+                  sizeof(session.document.lastSaveError),
+                  "%s was written but could not be given an identity, so it "
+                  "could not be referenced",
+                  path);
     return report_save_failure(session);
   }
 
@@ -592,9 +634,12 @@ void request_open_scene_dialog() noexcept {
     return;
   }
 
-  static const SDL_DialogFileFilter kFilters[] = {{"Scene", "scene"}};
-  SDL_ShowOpenFileDialog(&scene_dialog_callback, request, session.sdlWindow,
-                        kFilters, 1, editor_asset_root(), false);
+  static const core::FileDialogFilter kFilters[] = {{"Scene", "scene"}};
+  if (!core::platform_show_file_dialog(core::FileDialogKind::Open,
+                                       &scene_dialog_callback, request,
+                                       kFilters, 1, editor_asset_root())) {
+    scene_dialog_callback(request, nullptr);
+  }
 }
 
 void request_save_scene() noexcept {
@@ -786,7 +831,7 @@ const char *recent_scene_at(std::size_t index) noexcept {
 
 void scene_document_update_window_title() noexcept {
   EditorSession &session = editor_session();
-  if (session.sdlWindow == nullptr) {
+  if (!session.initialized) {
     return;
   }
   char title[640] = {};
@@ -796,7 +841,11 @@ void scene_document_update_window_title() noexcept {
   if (std::strcmp(title, session.lastAppliedWindowTitle) == 0) {
     return;
   }
-  SDL_SetWindowTitle(session.sdlWindow, title);
+  // Recorded only when applied, so a refused title is retried next frame
+  // rather than believed.
+  if (!core::platform_set_window_title(title)) {
+    return;
+  }
   std::snprintf(session.lastAppliedWindowTitle,
                sizeof(session.lastAppliedWindowTitle), "%s", title);
 }
@@ -835,9 +884,7 @@ void *scene_dialog_arm_for_tests(SceneDialogKind kind,
 }
 
 void scene_dialog_deliver_for_tests(void *request, const char *path) noexcept {
-  // SDL reports a cancelled dialog as a list whose first entry is null.
-  const char *const files[2] = {path, nullptr};
-  scene_dialog_callback(request, files, -1);
+  scene_dialog_callback(request, path);
 }
 
 void recent_scenes_set_directory_override_for_tests(

@@ -2,6 +2,8 @@
 
 #include "engine/renderer/mesh_loader.h"
 
+#include "engine/renderer/command_buffer.h"
+
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -460,11 +462,10 @@ bool upload_mesh_data_to_gpu(const CpuMeshData &meshData,
     return false;
   }
 
-  if (!initialize_render_device()) {
-    return false;
-  }
-
-  const RenderDevice *dev = render_device();
+  // Through the renderer's lifetime, never initialize_render_device: an
+  // upload arriving after shutdown -- a late asset request, a caller out
+  // of order -- would otherwise bring a device back behind it.
+  const RenderDevice *dev = acquire_render_device();
   if (!mesh_upload_device_ready(dev)) {
     return false;
   }
@@ -501,11 +502,10 @@ bool build_gpu_mesh_from_data(const float *vertices, std::uint32_t vertexCount,
     return false;
   }
 
-  if (!initialize_render_device()) {
-    return false;
-  }
-
-  const RenderDevice *dev = render_device();
+  // Through the renderer's lifetime, never initialize_render_device: an
+  // upload arriving after shutdown -- a late asset request, a caller out
+  // of order -- would otherwise bring a device back behind it.
+  const RenderDevice *dev = acquire_render_device();
   if (!mesh_upload_device_ready(dev)) {
     return false;
   }

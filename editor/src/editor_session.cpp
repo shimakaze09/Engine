@@ -9,9 +9,6 @@
 #define __PRFCHWINTRIN_H // NOLINT(bugprone-reserved-identifier)
 #endif
 
-#include <SDL3/SDL.h>
-
-#include "backends/imgui_impl_sdl3.h"
 #include "imgui.h"
 #include "imgui_internal.h"
 
@@ -85,6 +82,20 @@ const char *editor_asset_root() noexcept {
 }
 
 /// Loads the requested resource for thumbnail texture.
+renderer::TextureDesc thumbnail_texture_desc(int width, int height,
+                                             const void *pixels) noexcept {
+  renderer::TextureDesc desc{};
+  desc.kind = renderer::TextureKind::Tex2D;
+  desc.format = renderer::TextureFormat::RGBA8;
+  desc.width = width;
+  desc.height = height;
+  desc.mipLevels = 1;
+  desc.filter = renderer::TextureFilter::Linear;
+  desc.wrap = renderer::TextureWrap::ClampEdge;
+  desc.pixels = pixels;
+  return desc;
+}
+
 renderer::DeviceTextureHandle
 load_thumbnail_texture(const char *assetPath) noexcept {
   if (assetPath == nullptr) {
@@ -169,16 +180,7 @@ load_thumbnail_texture(const char *assetPath) noexcept {
   renderer::DeviceTextureHandle tex{};
   const renderer::RenderDevice *device = renderer::render_device();
   if ((device != nullptr) && (device->create_texture != nullptr)) {
-    renderer::TextureDesc desc{};
-    desc.kind = renderer::TextureKind::Tex2D;
-    desc.format = renderer::TextureFormat::RGBA8;
-    desc.width = w;
-    desc.height = h;
-    desc.mipLevels = 0;
-    desc.filter = renderer::TextureFilter::LinearMipmap;
-    desc.wrap = renderer::TextureWrap::Repeat;
-    desc.pixels = pixels;
-    tex = device->create_texture(desc);
+    tex = device->create_texture(thumbnail_texture_desc(w, h, pixels));
   }
   stbi_image_free(pixels);
 
@@ -640,6 +642,24 @@ bool material_owns_history() noexcept {
   return state.open && state.undoTarget;
 }
 
+/// Records one play-state change for the runtime to drain. A full queue
+/// means the runtime has not run a frame in sixteen author actions, which
+/// it cannot do while the editor is drawing; dropping the newest keeps the
+/// order of what is already queued, and the log says it happened.
+void record_play_transition(runtime::PlayTransition transition) noexcept {
+  EditorSession &session = editor_session();
+  if (session.playTransitionCount >= EditorSession::kMaxPlayTransitions) {
+    core::log_message(core::LogLevel::Warning, "editor",
+                      "play transition queue full; dropped a transition");
+    return;
+  }
+  const std::size_t slot =
+      (session.playTransitionHead + session.playTransitionCount) %
+      EditorSession::kMaxPlayTransitions;
+  session.playTransitions[slot] = transition;
+  ++session.playTransitionCount;
+}
+
 } // namespace
 
 bool editor_history_can_undo() noexcept {
@@ -717,6 +737,11 @@ void start_play_mode() noexcept {
     reset_live_edit_state();
   }
 
+  // Recorded before the state changes so the queue reads in the order the
+  // author acted: a resume carries no session hooks, a fresh Play does.
+  record_play_transition((editor_session().playState == PlayState::Paused)
+                             ? runtime::PlayTransition::Resume
+                             : runtime::PlayTransition::Start);
   editor_session().playState = PlayState::Playing;
   editor_session().stepRequested = false;
   // "Current session" in the Console's filter reads as "since I hit Play."
@@ -729,6 +754,7 @@ void pause_play_mode() noexcept {
     return;
   }
 
+  record_play_transition(runtime::PlayTransition::Pause);
   editor_session().playState = PlayState::Paused;
   core::log_message(core::LogLevel::Info, "editor", "pause");
 }
@@ -765,6 +791,7 @@ void stop_play_mode() noexcept {
     clear_entity_selection();
   }
 
+  record_play_transition(runtime::PlayTransition::Stop);
   editor_session().playState = PlayState::Stopped;
   editor_session().stepRequested = false;
   editor_session().worldRestoreFailed = !restored;
@@ -790,6 +817,18 @@ void stop_play_mode() noexcept {
   }
 
   core::log_message(core::LogLevel::Info, "editor", "stop");
+}
+
+bool consume_play_transition(runtime::PlayTransition *outTransition) noexcept {
+  EditorSession &session = editor_session();
+  if ((outTransition == nullptr) || (session.playTransitionCount == 0U)) {
+    return false;
+  }
+  *outTransition = session.playTransitions[session.playTransitionHead];
+  session.playTransitionHead =
+      (session.playTransitionHead + 1U) % EditorSession::kMaxPlayTransitions;
+  --session.playTransitionCount;
+  return true;
 }
 
 

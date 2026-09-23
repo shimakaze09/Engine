@@ -53,7 +53,8 @@ is fixed in place.
    doing. A consolidation that adds a primitive and leaves the copies in
    place has made the codebase worse.
 6. **Add the gate that prevents copy N+1.** Prefer the compiler, a type,
-   a schema or an existing gate over a bespoke checker; a new script is
+   a schema or a rule in `tools/check_duplicate_primitives.py` over a
+   bespoke checker; a new script is
    the last resort. If no mechanical check is possible, say so and name
    what a reviewer must look for.
 

@@ -108,6 +108,10 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
         dev->copy_depth(gbufferTarget, sceneTarget, drawableWidth,
                         drawableHeight);
         dev->bind_render_target(sceneTarget);
+        // Every bind claims a fresh view, and a view without its own rect
+        // inherits the one its id last carried, so whatever draws next
+        // would land wherever an unrelated pass was drawing.
+        dev->set_viewport(0, 0, drawableWidth, drawableHeight);
         sceneDepthHasOpaque = true;
         return true;
       }
@@ -179,6 +183,16 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
            ++batchIndex) {
         const StaticMeshBatch &batch = backend.staticMeshBatches[batchIndex];
         const DrawCommand &command = commandBufferView.data[batch.first];
+        // The G-Buffer's three targets are fully assigned, so it carries
+        // no channel saying which model lit a pixel and the deferred
+        // lighting pass could only shade one. A batch of another model
+        // is therefore left out here and drawn forward over this pass's
+        // depth, which is what keeps a toon character in the same frame
+        // as a physically-lit environment.
+        if (draw_key_shading_model(command.sortKey) !=
+            static_cast<std::uint8_t>(ShadingModel::Pbr)) {
+          continue;
+        }
         const GpuMesh *mesh = lookup_gpu_mesh(registry, command.mesh);
         if ((mesh == nullptr) || (mesh->geometry == kInvalidDeviceGeometry) ||
             (mesh->vertexCount == 0U)) {
@@ -930,12 +944,28 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
       }
     }
 
-    if (opaqueCount < totalCount) {
+    // Opaque runs the G-Buffer could not express, in key order, plus the
+    // transparent tail. Both draw forward over the deferred depth.
+    ShadingProgramRun opaqueRuns[kMaxShadingPrograms] = {};
+    const std::size_t opaqueRunCount = partition_program_runs(
+        commandBufferView, 0U, opaqueCount, opaqueRuns, kMaxShadingPrograms);
+    std::size_t forwardOpaqueRuns = 0U;
+    for (std::size_t i = 0U; i < opaqueRunCount; ++i) {
+      if (opaqueRuns[i].programId !=
+          static_cast<std::uint8_t>(ShadingModel::Pbr)) {
+        ++forwardOpaqueRuns;
+      }
+    }
+
+    if ((opaqueCount < totalCount) || (forwardOpaqueRuns > 0U)) {
       dev->bind_render_target(pass_resource_target(passRes.sceneColor));
+      dev->set_viewport(0, 0, drawableWidth, drawableHeight);
 
       // Carry opaque deferred depth into the scene target so forward
-      // transparent draws depth-test against G-Buffer geometry.
+      // draws depth-test against G-Buffer geometry. This binds again on
+      // its blit path, so the viewport below is the one these draws use.
       static_cast<void>(ensureSceneDepthHasOpaque());
+      dev->set_viewport(0, 0, drawableWidth, drawableHeight);
       dev->bind_program(backend.pbrProgram);
 
       if (backend.pbrTimeLocation.valid()) {
@@ -964,95 +994,72 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
       if (backend.pbrAlbedoMapLocation.valid())
         dev->set_param_i32(backend.pbrAlbedoMapLocation, 0);
 
-      const math::Mat4 &vp = viewProjection;
-      const MaterialTextureUniformLocs transparentMaterialTexLocs{
-          backend.pbrHasMetallicRoughnessTextureLocation,
-          backend.pbrMetallicRoughnessMapLocation,
-          backend.pbrHasEmissiveTextureLocation,
-          backend.pbrEmissiveMapLocation,
-          backend.pbrHasOcclusionTextureLocation,
-          backend.pbrOcclusionMapLocation,
-          backend.pbrHasOpacityTextureLocation,
-          backend.pbrOpacityMapLocation,
-          backend.pbrAlphaModeLocation,
-          backend.pbrAlphaCutoffLocation,
-          backend.pbrUvTilingLocation,
-          backend.pbrUvOffsetLocation};
+      const ForwardDrawProgram transparentProgram =
+          pbr_forward_draw_program(backend);
 
       auto drawForwardTransparent = [&](std::size_t start, std::size_t end) {
-        DeviceTextureHandle boundAlbedoTex{};
-        DeviceTextureHandle boundMaterialTex[4] = {};
+        ForwardDrawBindings bindings{};
         for (std::size_t i = start; i < end; ++i) {
           const DrawCommand &cmd = commandBufferView.data[i];
           const GpuMesh *mesh = lookup_gpu_mesh(registry, cmd.mesh);
           if ((mesh == nullptr) ||
               (mesh->geometry == kInvalidDeviceGeometry) ||
-              (mesh->vertexCount == 0U))
+              (mesh->vertexCount == 0U)) {
             continue;
-          if (backend.pbrAlbedoLocation.valid())
-            dev->set_param_vec3(backend.pbrAlbedoLocation,
-                                  &cmd.material.albedo.x);
-          if (backend.pbrRoughnessLocation.valid())
-            dev->set_param_f32(backend.pbrRoughnessLocation,
-                                   cmd.material.roughness);
-          if (backend.pbrMetallicLocation.valid())
-            dev->set_param_f32(backend.pbrMetallicLocation,
-                                   cmd.material.metallic);
-          if (backend.pbrOpacityLocation.valid())
-            dev->set_param_f32(backend.pbrOpacityLocation,
-                                   cmd.material.opacity);
-          if (backend.pbrEmissiveLocation.valid())
-            dev->set_param_vec3(backend.pbrEmissiveLocation,
-                                  &cmd.material.emissive.x);
-          upload_pbr_foliage_uniforms(backend, dev, cmd);
-          const DeviceTextureHandle albedoTex =
-              texture_device_handle(cmd.material.albedoTexture);
-          const bool hasTex =
-              (cmd.material.albedoTexture != kInvalidTextureHandle) &&
-              (albedoTex != kInvalidDeviceTexture);
-          if (backend.pbrHasAlbedoTextureLocation.valid())
-            dev->set_param_i32(backend.pbrHasAlbedoTextureLocation,
-                                 hasTex ? 1 : 0);
-          if (hasTex && albedoTex != boundAlbedoTex) {
-            dev->bind_texture_slot(0U, albedoTex);
-            boundAlbedoTex = albedoTex;
-          } else if (!hasTex && (boundAlbedoTex != backend.fallbackTexture2D)) {
-            dev->bind_texture_slot(0U, backend.fallbackTexture2D);
-            boundAlbedoTex = backend.fallbackTexture2D;
           }
-          upload_material_texture_slots(transparentMaterialTexLocs, dev,
-                                        cmd.material,
-                                        backend.fallbackTexture2D,
-                                        boundMaterialTex);
-          const math::Mat4 model = compute_model_matrix(cmd);
-          const math::Mat4 mvp = compute_mvp(model, vp);
-          float nm[9] = {};
-          extract_normal_matrix(model, nm);
-          if (backend.pbrModelLocation.valid())
-            dev->set_param_mat4(backend.pbrModelLocation,
-                                  &model.columns[0].x);
-          dev->set_param_mat4(backend.pbrMvpLocation, &mvp.columns[0].x);
-          dev->set_param_mat3(backend.pbrNormalMatrixLocation, nm);
-          if (mesh->indexCount > 0U) {
-            ++frameStats.drawCalls;
-            frameStats.triangleCount += (mesh->indexCount / 3U);
-            dev->draw_indexed(mesh->geometry,
-                              static_cast<std::int32_t>(mesh->indexCount));
-          } else {
-            ++frameStats.drawCalls;
-            frameStats.triangleCount += (mesh->vertexCount / 3U);
-            dev->draw(mesh->geometry, PrimitiveTopology::Triangles, 0,
-                      static_cast<std::int32_t>(mesh->vertexCount));
-          }
+          upload_forward_material(transparentProgram, backend, dev, cmd,
+                                  &bindings);
+          draw_forward_command(transparentProgram, dev, cmd, *mesh,
+                               viewProjection, &frameStats);
         }
       };
 
-      dev->apply_render_state(RenderState{DepthTest::Less, false,
-                                          BlendMode::Alpha, CullMode::None});
-      drawForwardTransparent(opaqueCount, totalCount);
-      dev->apply_render_state(RenderState{DepthTest::Less, true,
-                                          BlendMode::Disabled,
-                                          CullMode::Back});
+      DeviceProgramHandle boundProgram = backend.pbrProgram;
+      const auto bindProgramForRun = [&](DeviceProgramHandle program) {
+        if (program == boundProgram) {
+          return;
+        }
+        dev->bind_program(program);
+        boundProgram = program;
+        // Parameter values are registry-global by name and carry across a
+        // bind, but a sampler uniform left at its default unit aliases
+        // whatever sits there, so each newly bound program gets its units.
+        apply_pbr_ibl_uniforms(backend, dev, iblAvailable);
+        if (backend.pbrAlbedoMapLocation.valid()) {
+          dev->set_param_i32(backend.pbrAlbedoMapLocation, 0);
+        }
+      };
+
+      // Opaque state, depth written: these are opaque draws that simply
+      // could not go through the G-Buffer.
+      for (std::size_t i = 0U; i < opaqueRunCount; ++i) {
+        if (opaqueRuns[i].programId ==
+            static_cast<std::uint8_t>(ShadingModel::Pbr)) {
+          continue;
+        }
+        bindProgramForRun(shading_program(backend, opaqueRuns[i].programId));
+        drawForwardTransparent(opaqueRuns[i].first,
+                               opaqueRuns[i].first + opaqueRuns[i].count);
+      }
+
+      if (opaqueCount < totalCount) {
+        dev->apply_render_state(RenderState{DepthTest::Less, false,
+                                            BlendMode::Alpha,
+                                            CullMode::None});
+        ShadingProgramRun tailRuns[kMaxShadingPrograms] = {};
+        const std::size_t tailRunCount = partition_program_runs(
+            commandBufferView, opaqueCount, totalCount, tailRuns,
+            kMaxShadingPrograms);
+        for (std::size_t i = 0U; i < tailRunCount; ++i) {
+          bindProgramForRun(shading_program(backend, tailRuns[i].programId));
+          drawForwardTransparent(tailRuns[i].first,
+                                 tailRuns[i].first + tailRuns[i].count);
+        }
+        dev->apply_render_state(RenderState{DepthTest::Less, true,
+                                            BlendMode::Disabled,
+                                            CullMode::Back});
+      }
+      bindProgramForRun(backend.pbrProgram);
       dev->bind_texture_slot(0U, kInvalidDeviceTexture);
       unbind_pbr_shadow_textures(dev);
       unbind_pbr_ibl_textures(dev);

@@ -1,0 +1,21 @@
+SCHEMA 5
+TOOL_VERSION 4
+SOURCE_HASH 3aa15e09bf85a07f
+IMPORT_HASH 2755be6c6a924f10
+PLATFORM Linux
+SOURCE_GUID 379c998f-6eb1-4d93-b620-eeca50ff1083
+DEP_HASH 9483021311390001 character.bin
+OUTPUT ac1865d041f1f308 character.skel
+ASSET 3f422f18de8c26b2 character.skel
+OUTPUT e79ba76c849d90f6 character.idle.anim
+ASSET b8252fad6885797e character.idle.anim
+OUTPUT 923e3de445b6f3ff character.walk.anim
+ASSET e8d6ab7fb39fe763 character.walk.anim
+OUTPUT dcb296c3840e22bc character.jump.anim
+ASSET 96114901ea578dc4 character.jump.anim
+OUTPUT 6c00b267f7797bcd character.mesh
+ASSET 432408a2e33116bc character.mesh
+OUTPUT 76d1261c1d41b083 character.mesh.cookmeta
+OUTPUT ae6998885c9dd1bf character.mesh.hull
+OUTPUT b7f73701cdba7d16 .thumbnails/character.mesh.png
+OUTPUT 0c5a0d52d0e69871 .thumbnails/character.mesh.checksum

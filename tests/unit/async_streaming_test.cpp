@@ -7,6 +7,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstring>
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -575,10 +576,118 @@ static void test_cancel_refused_while_upload_callback_runs() noexcept {
 }
 
 /// Runs this executable or test program.
+/// Equal-priority requests are scheduled oldest first (#546). Selection used
+/// to take the lowest slot index, and a freed low slot is the first one a
+/// new request gets, so a request that landed in a high slot lost to every
+/// newer request that reused a freed low one: under a churning scene it
+/// could stay Queued until wait_for_load gave up. Driven without workers,
+/// so a scheduled request stays Loading where the test can see it.
+static void test_equal_priority_is_first_come_first_served() noexcept {
+  engine::core::initialize_cvars();
+  auto queue = std::make_unique<AssetStreamingQueue>();
+  // One load slot a frame: the budget is below one unknown-size load.
+  static_cast<void>(engine::core::cvar_register_int("asset.streaming_budget_mb",
+                                                    256, "streaming budget"));
+  CHECK(engine::core::cvar_set_int("asset.streaming_budget_mb", 1),
+        "the streaming budget allows one load at a time");
+
+  const LoadHandle early = load_asset_async(queue.get(), make_id(900),
+                                            "early.mesh", LoadPriority::Normal);
+  const LoadHandle older = load_asset_async(queue.get(), make_id(901),
+                                            "older.mesh", LoadPriority::Normal);
+  // The first slot frees up again; the next request lands in it.
+  CHECK(cancel_load(queue.get(), early), "the first request is cancelled");
+  const LoadHandle newer = load_asset_async(queue.get(), make_id(902),
+                                            "newer.mesh", LoadPriority::Normal);
+  CHECK(newer.index < older.index,
+        "the newer request reuses the lower, freed slot");
+
+  begin_streaming_frame(queue.get());
+  static_cast<void>(
+      update_asset_streaming(queue.get(), nullptr, nullptr, nullptr));
+  CHECK(get_load_state(queue.get(), older) == LoadingState::Loading,
+        "the older request is scheduled first");
+  CHECK(get_load_state(queue.get(), newer) == LoadingState::Queued,
+        "the newer one waits its turn");
+
+  // A higher priority still goes ahead of age.
+  auto urgent = std::make_unique<AssetStreamingQueue>();
+  const LoadHandle waiting = load_asset_async(
+      urgent.get(), make_id(910), "waiting.mesh", LoadPriority::Normal);
+  const LoadHandle critical = load_asset_async(
+      urgent.get(), make_id(911), "critical.mesh", LoadPriority::Immediate);
+  begin_streaming_frame(urgent.get());
+  static_cast<void>(
+      update_asset_streaming(urgent.get(), nullptr, nullptr, nullptr));
+  CHECK(get_load_state(urgent.get(), critical) == LoadingState::Loading,
+        "a higher priority is scheduled before an older request");
+  CHECK(get_load_state(urgent.get(), waiting) == LoadingState::Queued,
+        "the older, lower-priority request waits");
+  engine::core::shutdown_cvars();
+}
+
+/// collect_terminal_loads reports exactly the Ready and Failed requests,
+/// with handles release_load accepts, so the runtime retires terminal
+/// requests without taking the queue's lock or walking its slots (#546).
+static bool fail_named_bad(AssetId, const char *path, std::uint64_t *outSz,
+                           void *) noexcept {
+  if (outSz != nullptr) {
+    *outSz = 1024ULL;
+  }
+  return (path == nullptr) || (std::strstr(path, "bad") == nullptr);
+}
+
+static void test_collect_terminal_loads() noexcept {
+  engine::core::initialize_cvars();
+  auto queue = std::make_unique<AssetStreamingQueue>();
+  initialize_asset_streaming(queue.get());
+
+  const LoadHandle good = load_asset_async(queue.get(), make_id(40),
+                                           "good.mesh", LoadPriority::Normal);
+  const LoadHandle bad = load_asset_async(queue.get(), make_id(41), "bad.mesh",
+                                          LoadPriority::Normal);
+  pump_until_terminal(queue.get(), good, &fail_named_bad, &ok_upload, nullptr);
+  pump_until_terminal(queue.get(), bad, &fail_named_bad, &ok_upload, nullptr);
+  // Queued after the others finished, and never pumped: not terminal.
+  const LoadHandle waiting = load_asset_async(
+      queue.get(), make_id(42), "waiting.mesh", LoadPriority::Normal);
+
+  TerminalLoad terminals[4] = {};
+  const std::size_t count = collect_terminal_loads(queue.get(), terminals, 4U);
+  bool sawGood = false;
+  bool sawBad = false;
+  bool sawWaiting = false;
+  for (std::size_t i = 0U; i < count; ++i) {
+    sawGood = sawGood || ((terminals[i].assetId == make_id(40)) &&
+                          (terminals[i].state == LoadingState::Ready));
+    sawBad = sawBad || ((terminals[i].assetId == make_id(41)) &&
+                        (terminals[i].state == LoadingState::Failed));
+    sawWaiting = sawWaiting || (terminals[i].assetId == make_id(42));
+  }
+  CHECK((count == 2U) && sawGood && sawBad && !sawWaiting,
+        "the Ready and the Failed request are reported, the queued one not");
+  CHECK(collect_terminal_loads(queue.get(), terminals, 1U) == 1U,
+        "the report stops at the caller's capacity");
+  for (std::size_t i = 0U; i < count; ++i) {
+    CHECK(release_load(queue.get(), terminals[i].handle),
+          "a reported handle releases its request");
+  }
+  CHECK(collect_terminal_loads(queue.get(), terminals, 4U) == 0U,
+        "nothing terminal is left once released");
+  CHECK(get_load_state(queue.get(), waiting) == LoadingState::Queued ||
+            get_load_state(queue.get(), waiting) == LoadingState::Loading,
+        "the queued request is untouched");
+
+  shutdown_asset_streaming(queue.get());
+  engine::core::shutdown_cvars();
+}
+
 int main() {
   std::printf("=== Async Streaming Unit Tests ===\n");
 
   test_basic_queue_poll();
+  test_collect_terminal_loads();
+  test_equal_priority_is_first_come_first_served();
   test_dedup();
   test_state_transitions();
   test_load_failure();

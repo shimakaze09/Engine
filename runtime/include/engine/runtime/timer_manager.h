@@ -37,8 +37,27 @@ public:
   /// Return the generation-matching slot for a TimerId, or kInvalidTimerSlot.
   std::size_t slot_for_id(TimerId id) const noexcept;
 
-  /// Advance all timers by @p dt seconds with pcall-safe callbacks.
-  /// Returns number of timers that fired this tick.
+  /// Advances every timer by @p dt and marks the ones now due for
+  /// dispatch, without running a callback. Called once per fixed
+  /// simulation step, so when a timer comes due is a simulation time
+  /// rather than a frame rate. Returns how many timers it marked.
+  ///
+  /// A timer already awaiting dispatch is not marked again, so a frame
+  /// that catches up several steps still dispatches each timer once —
+  /// the guarantee the per-frame cadence gave, kept while the due time
+  /// stops depending on how long the frame took.
+  std::size_t advance(float dt) noexcept;
+
+  /// Runs the callbacks of every timer marked by `advance`, in slot
+  /// order. Called once per frame, so a callback runs between steps and
+  /// cannot re-enter one. A timer cancelled after coming due and before
+  /// this call does not fire: its slot's generation has moved and the
+  /// marked entry is skipped. Returns how many callbacks ran.
+  std::size_t dispatch() noexcept;
+
+  /// Advances and dispatches in one call, for callers outside the fixed
+  /// step — tests and tools that step a world by hand. The pipeline
+  /// itself calls `advance` per step and `dispatch` per frame instead.
   std::size_t tick(float dt) noexcept;
 
   /// Reset all timers (e.g. on scene load or play-stop transition).
@@ -63,6 +82,10 @@ public:
     void *userData = nullptr;
     bool repeat = false;
     bool active = false;
+    /// Came due in a step this frame and is waiting for `dispatch`. Also
+    /// the reason a timer is marked at most once per frame: a second
+    /// step that finds it still due leaves it alone.
+    bool pending = false;
   };
 
   /// Direct read access (for scripting bridge inspection).

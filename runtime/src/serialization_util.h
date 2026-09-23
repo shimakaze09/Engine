@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <memory>
 
+#include "engine/core/asset_identity.h"
 #include "engine/core/json.h"
 #include "engine/core/reflect.h"
 #include "engine/math/quat.h"
@@ -41,14 +42,20 @@ bool write_text_file(const char *path, const char *text,
 /// Both runtime serializers write it and gate their reads on it.
 inline constexpr const char *kSchemaVersionKey = "version";
 
-/// Whether a document's schema revision is one this build can interpret.
-/// A document that omits the key reads as revision 1, the earliest revision
-/// of either runtime format, so a hand-authored document without it still
-/// loads; a present key must hold an unsigned integer in
-/// [1, currentVersion]. `noun` names the document in the diagnostics logged
-/// on `channel`. Callers check this before consuming any payload, so a
-/// document written by a newer engine leaves the destination untouched
-/// instead of loading as a partial, resavable reduction of itself.
+/// Whether a document's schema revision is the one this build reads.
+///
+/// Exactly one: the key must be present and hold `currentVersion`. An
+/// older revision is refused rather than migrated, because the project is
+/// unreleased — the tree is migrated once per format change and no
+/// dual-read layer is kept. Reading an older revision through a newer
+/// reader is the failure this guards: the fields it no longer knows would
+/// be dropped in silence, and the document would resave as a reduction of
+/// itself. A newer revision is refused for the same reason in the other
+/// direction.
+///
+/// `noun` names the document in the diagnostics logged on `channel`.
+/// Callers check this before consuming any payload, so a refused document
+/// leaves the destination untouched.
 bool schema_version_supported(const core::JsonParser &parser,
                               const core::JsonValue &root,
                               std::uint32_t currentVersion, const char *noun,
@@ -164,29 +171,40 @@ bool write_reflected_component(core::JsonWriter &writer,
                                const char *componentName,
                                const core::TypeDescriptor &descriptor,
                                const void *instance) noexcept;
-/// Reader options for a document revision older than the current one.
-struct ReflectedReadOptions final {
-  /// Key of a Vec3 field the older revision wrote as one number applied to
-  /// every axis; nullptr reads every Vec3 strictly as a 3-element array.
-  const char *uniformScalarVec3Key = nullptr;
-};
-
 /// Reads reflected fields into `instance`; missing fields keep the caller's
 /// defaults, present-but-malformed fields fail the read.
 bool read_reflected_component(const core::JsonParser &parser,
                               const core::JsonValue &componentObject,
                               const core::TypeDescriptor &descriptor,
-                              void *instance,
-                              const ReflectedReadOptions &options = {}) noexcept;
+                              void *instance) noexcept;
+
+// --- Asset references ------------------------------------------------------
+
+/// Writes `ref` under `key` in its canonical text form. Writes nothing
+/// when the reference is nil, so a component naming no asset stays absent
+/// from the document rather than carrying a nil identity string.
+void write_asset_ref(core::JsonWriter &writer, const char *key,
+                     const core::AssetRef &ref) noexcept;
+
+/// Reads an asset reference from the string at `value`. False for any
+/// non-string, and for any text the reference parser refuses: an
+/// identity that does not parse is an authored field to reject, never one
+/// to silently default, because a defaulted identity names a different
+/// asset than the author wrote.
+bool read_asset_ref(const core::JsonParser &parser,
+                    const core::JsonValue &value,
+                    core::AssetRef *outRef) noexcept;
 
 // --- MeshComponent / LightComponent ----------------------------------------
 
-/// Writes the mesh component under kJsonKeyMeshComponent (material/capture
-/// ids only when set, keeping pre-feature files byte-identical).
+/// Writes the mesh component under kJsonKeyMeshComponent: the authored
+/// mesh and material references (each only when set) and the inline
+/// material fallback. The resolved ids beside the references are runtime
+/// state and are never written.
 void write_mesh_component(core::JsonWriter &writer,
                           const MeshComponent &component) noexcept;
-/// Reads a mesh component, including the legacy "meshId" fallback for
-/// content authored before asset ids.
+/// Reads a mesh component. The mesh and material references are read
+/// strictly; a present-but-unparsable one fails the read.
 bool read_mesh_component(const core::JsonParser &parser,
                          const core::JsonValue &meshObject,
                          MeshComponent *outComponent) noexcept;
@@ -210,8 +228,9 @@ bool read_collider_component(const core::JsonParser &parser,
 
 // --- FoliagePatchComponent -------------------------------------------------
 
-/// Writes the full foliage patch object (LOD mesh ids, material, wind, and
-/// the clamped instance array) under kJsonKeyFoliagePatchComponent.
+/// Writes the full foliage patch object (LOD mesh references, material,
+/// wind, and the clamped instance array) under
+/// kJsonKeyFoliagePatchComponent.
 void write_foliage_patch_component(
     core::JsonWriter &writer, const FoliagePatchComponent &component) noexcept;
 /// Reads a foliage patch object. Strict: any present-but-malformed field
@@ -245,17 +264,5 @@ bool read_animation_component(const core::JsonParser &parser,
                               const core::JsonValue &value,
                               bool requireNonEmptyPath,
                               AnimationComponent *outComponent) noexcept;
-
-/// True when a body from a document older than the gravity scale was
-/// held against gravity the only way that revision allowed: a dynamic
-/// body whose authored acceleration is the exact opposite of `gravity`
-/// (to a thousandth per axis).
-bool legacy_acceleration_cancels_gravity(const RigidBody &body,
-                                         const math::Vec3 &gravity) noexcept;
-
-/// Rewrites such a body as what it meant: gravity scale 0 and no
-/// authored acceleration. A body the predicate refuses is left as it is.
-void migrate_cancelled_gravity(RigidBody *body,
-                               const math::Vec3 &gravity) noexcept;
 
 } // namespace engine::runtime

@@ -1,6 +1,5 @@
-// Implements JSON material asset loading (v1 scalar-only and v2
-// texture-backed schemas) with parent-chain (instance) resolution and
-// texture-handle resolution for the Engine renderer system.
+// Implements JSON material asset loading with parent-chain (instance)
+// resolution and texture-handle resolution for the Engine renderer system.
 
 #include "engine/renderer/material_loader.h"
 
@@ -13,20 +12,25 @@
 #include <string>
 #include <system_error>
 
+#include "engine/core/diagnostic.h"
 #include "engine/core/json.h"
 #include "engine/core/logging.h"
 #include "engine/core/vfs.h"
 #include "engine/math/vec2.h"
 #include "engine/math/vec3.h"
-#include "engine/core/diagnostic.h"
+#include "engine/renderer/material_inheritance.h"
 
 namespace engine::renderer {
 
 namespace {
 
 constexpr const char *kMaterialLogChannel = "material";
-constexpr std::uint32_t kMinMaterialVersion = 1U;
-constexpr std::uint32_t kMaxMaterialVersion = 2U;
+/// The one material revision this build reads. An older revision is
+/// refused rather than migrated: the project is unreleased, so the tree
+/// migrates once per format change instead of carrying a read path per
+/// past revision. A reader that guessed would drop the fields it no
+/// longer knows and resave the material as a reduction of itself.
+constexpr std::uint32_t kMaterialVersion = 3U;
 
 /// Logs a material load failure with the offending path; always false.
 bool log_material_error(const char *virtualPath, const char *message) noexcept {
@@ -88,10 +92,10 @@ bool read_optional_float(const core::JsonParser &parser,
 /// strict when present (unknown text rejects the load), untouched when
 /// absent.
 bool read_optional_alpha_mode(const core::JsonParser &parser,
-                              const core::JsonValue &object,
+                              const core::JsonValue &object, const char *key,
                               AlphaMode *outValue) noexcept {
   core::JsonValue field{};
-  if (!parser.get_object_field(object, "alphaMode", &field)) {
+  if (!parser.get_object_field(object, key, &field)) {
     return true;
   }
 
@@ -110,6 +114,59 @@ bool read_optional_alpha_mode(const core::JsonParser &parser,
     return false;
   }
   return true;
+}
+
+/// Reads the optional shadingModel field. Absent keeps the caller's
+/// value, which inherits the parent's where a material has one and is
+/// physically-based otherwise. A present-but-unknown name refuses the
+/// load: silently lighting a surface by a model the author did not ask
+/// for is a wrong picture, not a default.
+bool read_optional_shading_model(const core::JsonParser &parser,
+                                 const core::JsonValue &object, const char *key,
+                                 ShadingModel *outValue) noexcept {
+  core::JsonValue field{};
+  if (!parser.get_object_field(object, key, &field)) {
+    return true;
+  }
+
+  char text[16] = {};
+  if (!parser.copy_string(field, text, sizeof(text))) {
+    return false;
+  }
+
+  if (std::strcmp(text, "pbr") == 0) {
+    *outValue = ShadingModel::Pbr;
+  } else if (std::strcmp(text, "toon") == 0) {
+    *outValue = ShadingModel::Toon;
+  } else if (std::strcmp(text, "unlit") == 0) {
+    *outValue = ShadingModel::Unlit;
+  } else {
+    return false;
+  }
+  return true;
+}
+
+/// One overload per material field type, so the field table can read
+/// every field through one name.
+bool read_field(const core::JsonParser &parser, const core::JsonValue &object,
+                const char *key, math::Vec3 *out) noexcept {
+  return read_optional_vec3(parser, object, key, out);
+}
+bool read_field(const core::JsonParser &parser, const core::JsonValue &object,
+                const char *key, math::Vec2 *out) noexcept {
+  return read_optional_vec2(parser, object, key, out);
+}
+bool read_field(const core::JsonParser &parser, const core::JsonValue &object,
+                const char *key, float *out) noexcept {
+  return read_optional_float(parser, object, key, out);
+}
+bool read_field(const core::JsonParser &parser, const core::JsonValue &object,
+                const char *key, AlphaMode *out) noexcept {
+  return read_optional_alpha_mode(parser, object, key, out);
+}
+bool read_field(const core::JsonParser &parser, const core::JsonValue &object,
+                const char *key, ShadingModel *out) noexcept {
+  return read_optional_shading_model(parser, object, key, out);
 }
 
 /// True when material registration can insert or update this ID.
@@ -187,6 +244,30 @@ bool load_material_recursive(AssetDatabase *database, const char *virtualPath,
                              Material *outParams,
                              MaterialTextureSlots *outSlots) noexcept;
 
+/// material_field bits for the fields the document itself names; the rest
+/// its parent supplies.
+std::uint16_t authored_fields(const core::JsonParser &parser,
+                              const core::JsonValue &root) noexcept {
+  std::uint16_t authored = 0U;
+  core::JsonValue value{};
+#define ENGINE_MATERIAL_AUTHORED_PARAM(name, member, key)                      \
+  if (parser.get_object_field(root, key, &value)) {                            \
+    authored = static_cast<std::uint16_t>(authored | material_field::k##name); \
+  }
+  ENGINE_MATERIAL_PARAM_FIELDS(ENGINE_MATERIAL_AUTHORED_PARAM)
+#undef ENGINE_MATERIAL_AUTHORED_PARAM
+  core::JsonValue textures{};
+  if (parser.get_object_field(root, "textures", &textures)) {
+#define ENGINE_MATERIAL_AUTHORED_TEXTURE(name, slot, handle, key)              \
+  if (parser.get_object_field(textures, key, &value)) {                        \
+    authored = static_cast<std::uint16_t>(authored | material_field::k##name); \
+  }
+    ENGINE_MATERIAL_TEXTURE_FIELDS(ENGINE_MATERIAL_AUTHORED_TEXTURE)
+#undef ENGINE_MATERIAL_AUTHORED_TEXTURE
+  }
+  return authored;
+}
+
 /// Parses one material file's JSON text and registers the resolved record;
 /// both fixed tables are preflighted for space first so the two mutations
 /// complete together. The text buffer must stay alive for the whole call:
@@ -209,21 +290,17 @@ bool parse_material_text(AssetDatabase *database, const char *virtualPath,
     return log_material_error(virtualPath, "root must be an object");
   }
 
-  std::uint32_t version = 1U;
-  bool versionPresent = false;
+  // Exactly one revision loads, and a file naming none names no revision
+  // at all, so it is refused with the rest.
+  std::uint32_t version = 0U;
   core::JsonValue versionValue{};
-  if (parser.get_object_field(*root, "version", &versionValue)) {
-    versionPresent = true;
-    if (!parser.as_uint(versionValue, &version) ||
-        (version < kMinMaterialVersion) || (version > kMaxMaterialVersion)) {
-      return log_material_error(virtualPath, "unsupported material version");
-    }
+  if (parser.get_object_field(*root, "version", &versionValue) &&
+      !parser.as_uint(versionValue, &version)) {
+    return log_material_error(virtualPath, "material version is not a number");
   }
-  // A file that never says "version": 2 gets exactly v1 semantics, even if
-  // (malformed authoring aside) it happened to carry v2-only keys — the
-  // staged-migration contract only promises v1 files load unchanged, not
-  // that v2 fields are recognized without opting in.
-  const bool isV2 = versionPresent && (version == 2U);
+  if (version != kMaterialVersion) {
+    return log_material_error(virtualPath, "unsupported material version");
+  }
 
   Material params{};
   MaterialTextureSlots slots{};
@@ -239,27 +316,43 @@ bool parse_material_text(AssetDatabase *database, const char *virtualPath,
                                  &params, &slots)) {
       return log_material_error(virtualPath, "failed to load parent");
     }
+    // A parent already loaded skips the depth walk above, so a reload that
+    // names one of its own descendants is caught here instead.
+    if (material_chain_contains(database, parentId, id)) {
+      return log_material_error(virtualPath,
+                                "parent chain would become a cycle");
+    }
   }
   // Texture GPU handles are never inherited directly: they are re-derived
   // by resolve_material_textures from `slots` every sync, so a slot that
   // this file overrides (below) cannot keep showing a stale parent texture.
-  params.albedoTexture = kInvalidTextureHandle;
-  params.metallicRoughnessTexture = kInvalidTextureHandle;
-  params.emissiveTexture = kInvalidTextureHandle;
-  params.occlusionTexture = kInvalidTextureHandle;
-  params.opacityTexture = kInvalidTextureHandle;
+#define ENGINE_MATERIAL_CLEAR_HANDLE(name, slot, handle, key)                  \
+  params.handle = kInvalidTextureHandle;
+  ENGINE_MATERIAL_TEXTURE_FIELDS(ENGINE_MATERIAL_CLEAR_HANDLE)
+#undef ENGINE_MATERIAL_CLEAR_HANDLE
 
-  if (!read_optional_vec3(parser, *root, "albedo", &params.albedo) ||
-      !read_optional_vec3(parser, *root, "emissive", &params.emissive) ||
-      !read_optional_float(parser, *root, "roughness", &params.roughness) ||
-      !read_optional_float(parser, *root, "metallic", &params.metallic) ||
-      !read_optional_float(parser, *root, "opacity", &params.opacity)) {
+  bool fieldsOk = true;
+#define ENGINE_MATERIAL_READ_PARAM(name, member, key)                          \
+  fieldsOk = fieldsOk && read_field(parser, *root, key, &params.member);
+  ENGINE_MATERIAL_PARAM_FIELDS(ENGINE_MATERIAL_READ_PARAM)
+#undef ENGINE_MATERIAL_READ_PARAM
+  if (!fieldsOk) {
     return log_material_error(virtualPath, "malformed parameter field");
   }
 
   AssetMetadata metadata{};
   metadata.assetId = id;
   metadata.typeTag = AssetTypeTag::Material;
+  // Registering this record replaces whatever the catalog holds for this
+  // path, and the mount walk got there first and resolved the identity
+  // this material's sidecar authored. Carry that identity forward: a
+  // document names a material by its GUID, so dropping it here would
+  // leave every authored reference pointing at nothing, and a save would
+  // write back the nil ref the entity was left holding.
+  if (const AssetMetadata *catalogued = find_asset_metadata(database, id);
+      catalogued != nullptr) {
+    metadata.ref = catalogued->ref;
+  }
   write_metadata_path(&metadata.filePath, virtualPath);
   if ((parentId != kInvalidAssetId) &&
       !asset_metadata_add_dependency(&metadata, parentId)) {
@@ -267,35 +360,24 @@ bool parse_material_text(AssetDatabase *database, const char *virtualPath,
                               "material dependency table is full");
   }
 
-  if (isV2) {
-    if (!read_optional_alpha_mode(parser, *root, &params.alphaMode) ||
-        !read_optional_float(parser, *root, "alphaCutoff",
-                             &params.alphaCutoff) ||
-        !read_optional_vec2(parser, *root, "uvTiling", &params.uvTiling) ||
-        !read_optional_vec2(parser, *root, "uvOffset", &params.uvOffset)) {
-      return log_material_error(virtualPath, "malformed v2 parameter field");
+  core::JsonValue texturesValue{};
+  if (parser.get_object_field(*root, "textures", &texturesValue)) {
+    if (texturesValue.type != core::JsonValue::Type::Object) {
+      return log_material_error(virtualPath, "textures must be an object");
     }
-
-    core::JsonValue texturesValue{};
-    if (parser.get_object_field(*root, "textures", &texturesValue)) {
-      if (texturesValue.type != core::JsonValue::Type::Object) {
-        return log_material_error(virtualPath, "textures must be an object");
-      }
-      if (!read_optional_texture_ref(parser, texturesValue, "albedo", database,
-                                     &metadata, &slots.albedo) ||
-          !read_optional_texture_ref(parser, texturesValue,
-                                     "metallicRoughness", database, &metadata,
-                                     &slots.metallicRoughness) ||
-          !read_optional_texture_ref(parser, texturesValue, "emissive",
-                                     database, &metadata, &slots.emissive) ||
-          !read_optional_texture_ref(parser, texturesValue, "occlusion",
-                                     database, &metadata, &slots.occlusion) ||
-          !read_optional_texture_ref(parser, texturesValue, "opacity",
-                                     database, &metadata, &slots.opacity)) {
-        return log_material_error(virtualPath, "malformed texture reference");
-      }
+    bool texturesOk = true;
+#define ENGINE_MATERIAL_READ_TEXTURE(name, slot, handle, key)                  \
+  texturesOk = texturesOk &&                                                   \
+               read_optional_texture_ref(parser, texturesValue, key, database, \
+                                         &metadata, &slots.slot);
+    ENGINE_MATERIAL_TEXTURE_FIELDS(ENGINE_MATERIAL_READ_TEXTURE)
+#undef ENGINE_MATERIAL_READ_TEXTURE
+    if (!texturesOk) {
+      return log_material_error(virtualPath, "malformed texture reference");
     }
   }
+
+  const std::uint16_t overridden = authored_fields(parser, *root);
 
   if (!material_slot_available(*database, id)) {
     return log_material_error(virtualPath, "material table is full");
@@ -312,9 +394,10 @@ bool parse_material_text(AssetDatabase *database, const char *virtualPath,
     return log_material_error(virtualPath,
                               "metadata registration unexpectedly failed");
   }
-  if (!set_material_texture_slots(database, id, slots)) {
+  if (!set_material_texture_slots(database, id, slots) ||
+      !set_material_overrides(database, id, overridden)) {
     return log_material_error(virtualPath,
-                              "texture-slot registration unexpectedly failed");
+                              "material record update unexpectedly failed");
   }
 
   if (outParams != nullptr) {
@@ -376,38 +459,61 @@ bool load_material_recursive(AssetDatabase *database, const char *virtualPath,
   return loaded;
 }
 
+/// What resolving one texture slot did.
+enum class SlotOutcome : std::uint8_t {
+  /// Nothing new: an empty slot, a lookup, or a failure now recorded.
+  Unchanged,
+  /// This call promoted the id to Ready.
+  Resolved,
+  /// The texture table has no room to record the id, Ready or Failed, so
+  /// the slot must not be tried again: a load whose result cannot be
+  /// recorded is repeated on every call, uploading and leaking a device
+  /// texture each time.
+  Unregisterable,
+};
+
 /// Resolves one texture slot's AssetId into a material's TextureHandle
-/// field; returns true only when this call newly promoted the id to Ready.
-/// An already-Ready or already-Failed id is a cheap lookup, never a reload.
-bool resolve_one_texture_slot(AssetDatabase *database, AssetId textureId,
-                              MaterialTextureLoadFn loadFn, void *userData,
-                              TextureHandle *outHandle) noexcept {
+/// field. An already-Ready or already-Failed id is a cheap lookup, never a
+/// reload, and nothing is loaded while there is no table slot to record it.
+SlotOutcome resolve_one_texture_slot(AssetDatabase *database, AssetId textureId,
+                                     MaterialTextureLoadFn loadFn,
+                                     void *userData,
+                                     TextureHandle *outHandle) noexcept {
+  *outHandle = kInvalidTextureHandle;
   if (textureId == kInvalidAssetId) {
-    *outHandle = kInvalidTextureHandle;
-    return false;
+    return SlotOutcome::Unchanged;
   }
 
   const AssetState state = texture_asset_state(database, textureId);
   if (state == AssetState::Ready) {
     *outHandle = resolve_texture_asset(database, textureId);
-    return false;
+    return SlotOutcome::Unchanged;
   }
   if (state == AssetState::Failed) {
-    *outHandle = kInvalidTextureHandle;
-    return false;
+    return SlotOutcome::Unchanged;
   }
 
   const AssetMetadata *metadata = find_asset_metadata(database, textureId);
   const char *path = ((metadata != nullptr) && (metadata->filePath[0] != '\0'))
                          ? metadata->filePath.data()
                          : nullptr;
+  if (!texture_asset_slot_available(database, textureId)) {
+    char message[512] = {};
+    std::snprintf(message, sizeof(message),
+                  "texture table is full (%zu textures); material falls back "
+                  "to its scalar parameters: %s",
+                  database->textureAssets.size(),
+                  (path != nullptr) ? path : "(no source path)");
+    core::log_message(core::LogLevel::Error, kMaterialLogChannel, message);
+    return SlotOutcome::Unregisterable;
+  }
   if ((path == nullptr) || (loadFn == nullptr)) {
     static_cast<void>(register_texture_asset_failed(database, textureId, path));
     *outHandle = kInvalidTextureHandle;
     core::log_message(
         core::LogLevel::Error, kMaterialLogChannel,
         "material texture reference has no resolvable source path");
-    return false;
+    return SlotOutcome::Unchanged;
   }
 
   const TextureHandle loaded = loadFn(path, userData);
@@ -419,13 +525,13 @@ bool resolve_one_texture_slot(AssetDatabase *database, AssetId textureId,
                  "its scalar parameters: %s",
                  path);
     core::log_message(core::LogLevel::Error, kMaterialLogChannel, message);
-    *outHandle = kInvalidTextureHandle;
-    return false;
+    return SlotOutcome::Unchanged;
   }
 
+  // Cannot fail: the slot was checked above and nothing ran in between.
   static_cast<void>(register_texture_asset(database, textureId, path, loaded));
   *outHandle = loaded;
-  return true;
+  return SlotOutcome::Resolved;
 }
 
 } // namespace
@@ -490,6 +596,7 @@ reload_material_asset(AssetDatabase *database,
     // comment): the previously Ready record is exactly as it was.
     return std::unexpected(MaterialLoadError::Parse);
   }
+  static_cast<void>(propagate_material_to_dependents(database, id));
   return id;
 }
 
@@ -571,26 +678,34 @@ std::size_t resolve_material_textures(AssetDatabase *database,
     }
 
     const MaterialTextureSlots slots = record.textureSlots;
-    if (resolve_one_texture_slot(database, slots.albedo, loadFn, userData,
-                                 &record.params.albedoTexture)) {
-      ++resolvedCount;
-    }
-    if (resolve_one_texture_slot(database, slots.metallicRoughness, loadFn,
-                                 userData,
-                                 &record.params.metallicRoughnessTexture)) {
-      ++resolvedCount;
-    }
-    if (resolve_one_texture_slot(database, slots.emissive, loadFn, userData,
-                                 &record.params.emissiveTexture)) {
-      ++resolvedCount;
-    }
-    if (resolve_one_texture_slot(database, slots.occlusion, loadFn, userData,
-                                 &record.params.occlusionTexture)) {
-      ++resolvedCount;
-    }
-    if (resolve_one_texture_slot(database, slots.opacity, loadFn, userData,
-                                 &record.params.opacityTexture)) {
-      ++resolvedCount;
+    struct SlotRef final {
+      AssetId id;
+      TextureHandle *handle;
+    };
+    const SlotRef refs[] = {
+#define ENGINE_MATERIAL_SLOT_REF(name, slot, handle, key)                      \
+  {slots.slot, &record.params.handle},
+        ENGINE_MATERIAL_TEXTURE_FIELDS(ENGINE_MATERIAL_SLOT_REF)
+#undef ENGINE_MATERIAL_SLOT_REF
+    };
+    static_assert(sizeof(refs) / sizeof(refs[0]) <= 8U,
+                  "unregisterableTextureSlots holds one bit per slot");
+    for (std::size_t slot = 0U; slot < sizeof(refs) / sizeof(refs[0]); ++slot) {
+      const auto bit = static_cast<std::uint8_t>(1U << slot);
+      if ((record.unregisterableTextureSlots & bit) != 0U) {
+        continue;
+      }
+      switch (resolve_one_texture_slot(database, refs[slot].id, loadFn,
+                                       userData, refs[slot].handle)) {
+      case SlotOutcome::Resolved:
+        ++resolvedCount;
+        break;
+      case SlotOutcome::Unregisterable:
+        record.unregisterableTextureSlots |= bit;
+        break;
+      case SlotOutcome::Unchanged:
+        break;
+      }
     }
   }
   return resolvedCount;

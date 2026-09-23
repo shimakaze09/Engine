@@ -10,6 +10,7 @@
 #include <cstring>
 #include <new>
 
+#include "engine/content/asset_identity.h"
 #include "engine/core/atomic_file.h"
 #include "engine/core/logging.h"
 #include "engine/runtime/reflect_types.h"
@@ -61,10 +62,11 @@ bool schema_version_supported(const core::JsonParser &parser,
                               std::uint32_t currentVersion, const char *noun,
                               const char *channel,
                               std::uint32_t *outVersion) noexcept {
-  // An absent key is the documented legacy revision rather than a parse
-  // failure; a present one is read strictly, so a value of the wrong JSON
-  // type is a refusal instead of a silent fall back to that revision.
-  std::uint32_t version = 1U;
+  // An absent key cannot be the current revision, so it is refused below
+  // like any other wrong value; a present one is read strictly, so a
+  // value of the wrong JSON type is a refusal rather than a silent
+  // fall back.
+  std::uint32_t version = 0U;
   core::JsonValue versionValue{};
   if (parser.get_object_field(root, kSchemaVersionKey, &versionValue) &&
       !parser.as_uint(versionValue, &version)) {
@@ -76,10 +78,12 @@ bool schema_version_supported(const core::JsonParser &parser,
     return false;
   }
 
-  if ((version == 0U) || (version > currentVersion)) {
-    char message[128] = {};
-    static_cast<void>(std::snprintf(message, sizeof(message),
-                                    "unsupported %s version", noun));
+  if (version != currentVersion) {
+    char message[160] = {};
+    static_cast<void>(std::snprintf(
+        message, sizeof(message),
+        "unsupported %s version %u; this build reads revision %u only", noun,
+        version, currentVersion));
     core::log_message(core::LogLevel::Error, channel, message);
     return false;
   }
@@ -292,6 +296,14 @@ constexpr const char *kCameraTypeName = "engine::runtime::CameraComponent";
 // rather than repeated as literals because the writer and reader below are
 // the only two places they appear, and a silent divergence between them is
 // the drift this codec exists to close.
+/// Wire keys for the authored asset references a component carries. Named
+/// once because each appears in exactly two places — the writer and the
+/// reader — and a silent divergence between them is what this codec
+/// exists to prevent.
+constexpr const char *kMeshRefField = "mesh";
+constexpr const char *kMaterialRefField = "material";
+constexpr const char *kFoliageMeshRefsField = "meshes";
+
 constexpr const char *kAnimationControllerPathField = "controllerPath";
 constexpr const char *kAnimationPlayingField = "playing";
 constexpr const char *kAnimationPlaybackSpeedField = "playbackSpeed";
@@ -428,8 +440,7 @@ bool write_reflected_component(core::JsonWriter &writer,
 bool read_reflected_component(const core::JsonParser &parser,
                               const core::JsonValue &componentObject,
                               const core::TypeDescriptor &descriptor,
-                              void *instance,
-                              const ReflectedReadOptions &options) noexcept {
+                              void *instance) noexcept {
   if ((instance == nullptr) ||
       (componentObject.type != core::JsonValue::Type::Object)) {
     return false;
@@ -481,16 +492,6 @@ bool read_reflected_component(const core::JsonParser &parser,
       if (value == nullptr) {
         return false;
       }
-      if ((options.uniformScalarVec3Key != nullptr) &&
-          (fieldValue.type == core::JsonValue::Type::Number) &&
-          (std::strcmp(field.key, options.uniformScalarVec3Key) == 0)) {
-        float uniform = 0.0F;
-        if (!parser.as_float(fieldValue, &uniform)) {
-          return false;
-        }
-        *value = math::Vec3(uniform, uniform, uniform);
-        break;
-      }
       if (!read_vec3(parser, fieldValue, value)) {
         return false;
       }
@@ -539,15 +540,42 @@ bool read_reflected_component(const core::JsonParser &parser,
 //    reflected path, since one unrepresentable field takes the whole type
 // off it.
 
+void write_asset_ref(core::JsonWriter &writer, const char *key,
+                     const core::AssetRef &ref) noexcept {
+  if ((key == nullptr) || !core::asset_ref_is_valid(ref)) {
+    return;
+  }
+  char text[content::kAssetRefTextLength + 1U] = {};
+  // The buffer is the exact size the longest form needs, so the formatter
+  // has no failing case left here: it refuses only a null or too-small
+  // destination. The check stays as a guard against that buffer shrinking,
+  // and never as a path that drops an authored identity in silence.
+  if (!content::format_asset_ref(ref, text, sizeof(text))) {
+    return;
+  }
+  writer.write_string(key, text);
+}
+
+bool read_asset_ref(const core::JsonParser &parser,
+                    const core::JsonValue &value,
+                    core::AssetRef *outRef) noexcept {
+  if (outRef == nullptr) {
+    return false;
+  }
+  *outRef = core::AssetRef{};
+  char text[content::kAssetRefTextLength + 1U] = {};
+  if (!parser.copy_string_strict(value, text, sizeof(text))) {
+    return false;
+  }
+  return content::parse_asset_ref(text, outRef);
+}
+
 void write_mesh_component(core::JsonWriter &writer,
                           const MeshComponent &component) noexcept {
   writer.write_key(kJsonKeyMeshComponent);
   writer.begin_object();
-  writer.write_uint64("meshAssetId", component.meshAssetId);
-  // Written only when set so pre-material files stay byte-identical.
-  if (component.materialAssetId != 0ULL) {
-    writer.write_uint64("materialAssetId", component.materialAssetId);
-  }
+  write_asset_ref(writer, kMeshRefField, component.meshRef);
+  write_asset_ref(writer, kMaterialRefField, component.materialRef);
   write_vec3(writer, "albedo", component.albedo);
   writer.write_float("roughness", component.roughness);
   writer.write_float("metallic", component.metallic);
@@ -569,24 +597,14 @@ bool read_mesh_component(const core::JsonParser &parser,
 
   MeshComponent component{};
 
-  core::JsonValue meshIdValue{};
-  if (parser.get_object_field(meshObject, "meshAssetId", &meshIdValue)) {
-    if (!parser.as_uint64(meshIdValue, &component.meshAssetId)) {
-      return false;
-    }
-  } else if (parser.get_object_field(meshObject, "meshId", &meshIdValue)) {
-    // Backward-compatible read path for content authored before asset IDs.
-    if (!parser.as_uint64(meshIdValue, &component.meshAssetId)) {
-      return false;
-    }
+  core::JsonValue refValue{};
+  if (parser.get_object_field(meshObject, kMeshRefField, &refValue) &&
+      !read_asset_ref(parser, refValue, &component.meshRef)) {
+    return false;
   }
-
-  core::JsonValue materialIdValue{};
-  if (parser.get_object_field(meshObject, "materialAssetId",
-                              &materialIdValue)) {
-    if (!parser.as_uint64(materialIdValue, &component.materialAssetId)) {
-      return false;
-    }
+  if (parser.get_object_field(meshObject, kMaterialRefField, &refValue) &&
+      !read_asset_ref(parser, refValue, &component.materialRef)) {
+    return false;
   }
 
   core::JsonValue albedoValue{};
@@ -778,9 +796,21 @@ void write_foliage_patch_component(
   writer.write_key(kJsonKeyFoliagePatchComponent);
   writer.begin_object();
 
-  writer.begin_array("meshAssetIds");
+  // Every LOD slot is written, nil included, so a patch's LOD ordering
+  // survives a round trip even when a middle slot names nothing.
+  writer.begin_array(kFoliageMeshRefsField);
   for (std::size_t i = 0U; i < FoliagePatchComponent::kMaxLods; ++i) {
-    writer.write_uint64_value(component.meshAssetIds[i]);
+    // A slot naming nothing writes the empty string rather than being
+    // skipped: the array is positional, so every slot has to occupy its
+    // index. Formatting itself has no failing case on a buffer sized for
+    // the longest form, so an empty slot here always means a nil
+    // reference and never a dropped one.
+    char text[content::kAssetRefTextLength + 1U] = {};
+    if (core::asset_ref_is_valid(component.meshRefs[i])) {
+      static_cast<void>(content::format_asset_ref(component.meshRefs[i], text,
+                                                  sizeof(text)));
+    }
+    writer.write_string_value(text);
   }
   writer.end_array();
 
@@ -824,9 +854,9 @@ bool read_foliage_patch_component(
   FoliagePatchComponent component{};
   core::JsonValue value{};
 
-  if (parser.get_object_field(foliageObject, "meshAssetIds", &value) &&
+  if (parser.get_object_field(foliageObject, kFoliageMeshRefsField, &value) &&
       (value.type == core::JsonValue::Type::Array)) {
-    // More LOD ids than the component can hold cannot round-trip: the
+    // More LOD slots than the component can hold cannot round-trip: the
     // load is refused whole rather than dropping the authored tail.
     const std::size_t count = parser.array_size(value);
     if (count > FoliagePatchComponent::kMaxLods) {
@@ -834,8 +864,15 @@ bool read_foliage_patch_component(
     }
     for (std::size_t i = 0U; i < count; ++i) {
       core::JsonValue element{};
+      char text[content::kAssetRefTextLength + 1U] = {};
       if (!parser.get_array_element(value, i, &element) ||
-          !parser.as_uint64(element, &component.meshAssetIds[i])) {
+          !parser.copy_string_strict(element, text, sizeof(text))) {
+        return false;
+      }
+      // An empty slot is an authored "no LOD here", which the writer
+      // emits for a nil reference; anything else must parse.
+      if ((text[0] != '\0') &&
+          !content::parse_asset_ref(text, &component.meshRefs[i])) {
         return false;
       }
     }
@@ -1007,31 +1044,6 @@ bool read_animation_component(const core::JsonParser &parser,
   // never carries land on their defaults rather than on stale values.
   *outComponent = component;
   return true;
-}
-
-bool legacy_acceleration_cancels_gravity(const RigidBody &body,
-                                         const math::Vec3 &gravity) noexcept {
-  if (body.inverseMass <= 0.0F) {
-    return false;
-  }
-  const auto cancels = [](float acceleration, float pull) noexcept {
-    const float scale = (std::fabs(pull) > 1.0F) ? std::fabs(pull) : 1.0F;
-    return std::fabs(acceleration + pull) <= (1.0e-3F * scale);
-  };
-  const bool anyPull =
-      (gravity.x != 0.0F) || (gravity.y != 0.0F) || (gravity.z != 0.0F);
-  return anyPull && cancels(body.acceleration.x, gravity.x) &&
-         cancels(body.acceleration.y, gravity.y) &&
-         cancels(body.acceleration.z, gravity.z);
-}
-
-void migrate_cancelled_gravity(RigidBody *body,
-                               const math::Vec3 &gravity) noexcept {
-  if ((body == nullptr) || !legacy_acceleration_cancels_gravity(*body, gravity)) {
-    return;
-  }
-  body->gravityScale = 0.0F;
-  body->acceleration = math::Vec3(0.0F, 0.0F, 0.0F);
 }
 
 } // namespace engine::runtime

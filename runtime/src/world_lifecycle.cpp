@@ -621,6 +621,14 @@ bool World::is_alive(Entity entity) const noexcept {
   return is_valid_entity(entity);
 }
 
+core::Rng &World::random() noexcept { return m_random; }
+
+const core::Rng &World::random() const noexcept { return m_random; }
+
+void World::seed_random(std::uint64_t seed) noexcept {
+  m_random = core::rng_from_seed(seed);
+}
+
 std::uint32_t World::content_epoch() const noexcept { return m_contentEpoch; }
 
 void World::mark_content_replaced(std::uint32_t previousEpoch) noexcept {

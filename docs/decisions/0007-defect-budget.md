@@ -42,6 +42,8 @@ were being discovered by code reading instead.
 
 - The tracker stops being a measure of quality and becomes a work queue.
 - Closing a stale P3 is progress, not a concession.
+  *(Superseded by [0014](0014-severity-is-impact.md): age triggers triage
+  or an icebox, never a close.)*
 - Severity tiers now carry different evidence burdens; see the
   `close-finding` skill.
 - Audits keep their value for a *specific* question ("is this subsystem's

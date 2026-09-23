@@ -45,6 +45,5 @@ engine_add_module_library(engine_runtime
     engine_scripting
     engine_renderer
     engine_audio
-    ${ENGINE_SDL_TARGET}
     PCH src/pch.h
 )

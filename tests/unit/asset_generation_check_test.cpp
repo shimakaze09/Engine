@@ -3,14 +3,15 @@
 // the files on disk (hash mismatch, missing essential output, malformed
 // manifest line) rejects the load, presentation-only thumbnail drift and
 // never-certified assets (no stamp, pre-manifest stamp) stay loadable,
-// verdicts cache per session until the test-only reset, a stamp from
-// another tool version or a newer stamp schema rejects even with intact
-// outputs (#424), a schema-4 manifest resolves relative to its stamp from
-// any working directory and never outside it, a non-regular file is
-// refused without being opened (#527), and a stamp whose lines end in
-// CR LF certifies exactly what its LF form does.
+// verdicts cache until the stamp changes (so a recook revalidates) or the
+// test-only reset, a stamp from another tool version or a newer stamp
+// schema rejects even with intact outputs (#424), a schema-4 manifest resolves
+// relative to its stamp from any working directory and never outside it, a
+// non-regular file is refused without being opened (#527), and a stamp whose
+// lines end in CR LF certifies exactly what its LF form does.
 
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -28,6 +29,8 @@
 #include "engine/core/mesh_asset.h"
 #include "engine/renderer/mesh_loader.h"
 #include "engine/renderer/render_device.h"
+
+#include "../fake_render_device.h"
 
 namespace {
 
@@ -124,6 +127,61 @@ int check_certified_and_mixed_generation() {
   remove_with_stamp(kMesh);
   static_cast<void>(std::remove(kMeta));
   return 0;
+}
+
+/// A recook is checked afresh, with no reset (#571). Verdicts were cached
+/// per path for the whole session, rejections included, so an asset
+/// recooked while the editor ran stayed rejected until a restart. The
+/// cache is keyed by the stamp's content and write now, and a recook
+/// always rewrites it.
+int check_recook_revalidates_without_reset() {
+  constexpr const char *kMesh = "gen_check_recook.mesh";
+  remove_with_stamp(kMesh);
+  engine::content::reset_cooked_asset_stale_warnings();
+  if (!write_valid_mesh(kMesh) ||
+      !engine::tests::write_certifying_stamp(kMesh)) {
+    return 520;
+  }
+  if (!engine::content::cooked_asset_generation_ok(kMesh)) {
+    return 521;
+  }
+
+  // An interrupted recook: new bytes under the old stamp are rejected once
+  // checked (the reset only clears the OK verdict cached for the intact
+  // bytes, which that unchanged stamp would otherwise keep serving).
+  engine::content::reset_cooked_asset_stale_warnings();
+  const char torn[] = "not the certified bytes";
+  if (!write_bytes(kMesh, torn, sizeof(torn) - 1U) ||
+      engine::content::cooked_asset_generation_ok(kMesh)) {
+    remove_with_stamp(kMesh);
+    return 522;
+  }
+
+  // The recook completes: a valid mesh and a stamp certifying it -- the
+  // very text the first cook wrote, since the bytes are the same. What
+  // differs is when it was written; the file clock is too coarse to see
+  // two writes a moment apart, so the later write is stated, not waited
+  // for.
+  if (!write_valid_mesh(kMesh) ||
+      !engine::tests::write_certifying_stamp(kMesh)) {
+    remove_with_stamp(kMesh);
+    return 523;
+  }
+  const std::filesystem::path stampPath("gen_check_recook.mesh.cookstamp");
+  std::error_code timeError;
+  const auto written = std::filesystem::last_write_time(stampPath, timeError);
+  if (!timeError) {
+    std::filesystem::last_write_time(
+        stampPath, written + std::chrono::seconds(5), timeError);
+  }
+  if (timeError) {
+    remove_with_stamp(kMesh);
+    return 525;
+  }
+  const bool accepted =
+      engine::content::cooked_asset_generation_ok(kMesh) && load_mesh(kMesh);
+  remove_with_stamp(kMesh);
+  return accepted ? 0 : 524;
 }
 
 /// A stamp listing an essential output that no longer exists rejects.
@@ -504,24 +562,20 @@ int check_crlf_stamp_certifies_like_lf() {
 
 } // namespace
 
-// mesh_loader.cpp compiles standalone into this suite (same recipe as
-// mesh_loader_test.cpp); its GPU upload entry points are never called on
-// the CPU decode path, so the device hooks are inert stubs.
-namespace engine::renderer {
-
-bool initialize_render_device() noexcept { return false; }
-
-void shutdown_render_device() noexcept {}
-
-const RenderDevice *render_device() noexcept { return nullptr; }
-
-} // namespace engine::renderer
-
 /// Runs this executable or test program.
 int main() {
+  // mesh_loader.cpp compiles standalone into this suite; its GPU upload
+  // entry points are never called on the CPU decode path, so no device is
+  // live.
+  engine::tests::fake_log().present = false;
+  engine::tests::fake_log().initializeSucceeds = false;
   engine::content::reset_cooked_asset_stale_warnings();
 
   int result = check_certified_and_mixed_generation();
+  if (result != 0) {
+    return result;
+  }
+  result = check_recook_revalidates_without_reset();
   if (result != 0) {
     return result;
   }

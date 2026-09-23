@@ -66,66 +66,29 @@ const char *scene(char *buffer, std::size_t capacity, int version,
   return buffer;
 }
 
-void test_migration() noexcept {
+void test_gravity_scale_reads() noexcept {
   char json[1024] = {};
   RigidBody body{};
 
-  check(load_scene_body(scene(json, sizeof(json), 4, "[0,9.8,0]", "", ""),
-                        &body) &&
-            (body.gravityScale == 0.0F) && (body.acceleration.x == 0.0F) &&
-            (body.acceleration.y == 0.0F) && (body.acceleration.z == 0.0F),
-        "a v4 body cancelling the default gravity reads as gravity scale 0");
-
-  check(load_scene_body(scene(json, sizeof(json), 4, "[0,9.80000019,0]", "",
-                              ""),
-                        &body) &&
-            (body.gravityScale == 0.0F) && (body.acceleration.y == 0.0F),
-        "the float the editor wrote for 9.8 cancels too");
-
-  check(load_scene_body(scene(json, sizeof(json), 4, "[0,5,0]",
-                              "\"gravity\":[0,-5,0],", ""),
-                        &body) &&
-            (body.gravityScale == 0.0F) && (body.acceleration.y == 0.0F),
-        "a v4 body is migrated against the gravity its scene authored");
-
-  check(load_scene_body(scene(json, sizeof(json), 4, "[0,9.8,0]",
-                              "\"gravity\":[0,-5,0],", ""),
+  // The scale is authored data and nothing else is reinterpreted as it: a
+  // body whose acceleration happens to oppose gravity keeps both.
+  check(load_scene_body(scene(json, sizeof(json), 6, "[0,9.8,0]", "", ""),
                         &body) &&
             (body.gravityScale == 1.0F) && (body.acceleration.y == 9.8F),
-        "a v4 acceleration that is not the scene's gravity is kept");
+        "an acceleration that cancels gravity is never reinterpreted");
 
-  check(load_scene_body(scene(json, sizeof(json), 4, "[0,3,0]", "", ""),
-                        &body) &&
-            (body.gravityScale == 1.0F) && (body.acceleration.y == 3.0F),
-        "a v4 body with another acceleration keeps it and full gravity");
-
-  check(load_scene_body(scene(json, sizeof(json), 4, "[1,9.8,0]", "", ""),
-                        &body) &&
-            (body.gravityScale == 1.0F) && (body.acceleration.x == 1.0F),
-        "a v4 body cancelling gravity on one axis only is kept");
-
-  check(load_scene_body(scene(json, sizeof(json), 3, "[0,9.8,0]", "", ""),
-                        &body) &&
-            (body.gravityScale == 0.0F) && (body.acceleration.y == 0.0F),
-        "a v3 body cancelling gravity migrates as well");
-
-  check(load_scene_body(scene(json, sizeof(json), 5, "[0,9.8,0]", "", ""),
-                        &body) &&
-            (body.gravityScale == 1.0F) && (body.acceleration.y == 9.8F),
-        "a v5 body with a cancelling acceleration is never reinterpreted");
-
-  check(load_scene_body(scene(json, sizeof(json), 5, "[0,0,0]", "",
+  check(load_scene_body(scene(json, sizeof(json), 6, "[0,0,0]", "",
                               ",\"gravityScale\":0.25"),
                         &body) &&
             (body.gravityScale == 0.25F),
-        "a v5 body reads its gravity scale");
+        "a body reads its authored gravity scale");
 
-  check(load_scene_body(scene(json, sizeof(json), 5, "[0,0,0]", "", ""),
+  check(load_scene_body(scene(json, sizeof(json), 6, "[0,0,0]", "", ""),
                         &body) &&
             (body.gravityScale == 1.0F),
-        "a v5 body without the field feels full gravity");
+        "a body without the field feels full gravity");
 
-  check(!load_scene_body(scene(json, sizeof(json), 5, "[0,0,0]", "",
+  check(!load_scene_body(scene(json, sizeof(json), 6, "[0,0,0]", "",
                                ",\"gravityScale\":\"none\""),
                          &body),
         "a malformed gravity scale refuses the document");
@@ -151,8 +114,8 @@ void test_round_trip() noexcept {
         "the scene saves");
   check(std::strstr(buffer, "\"gravityScale\":0.5") != nullptr,
         "the saved scene carries the gravity scale");
-  check(std::strstr(buffer, "\"version\":5") != nullptr,
-        "the saved scene is revision 5");
+  check(std::strstr(buffer, "\"version\":6") != nullptr,
+        "the saved scene is revision 6");
 
   std::unique_ptr<World> reloaded(new (std::nothrow) World());
   RigidBody back{};
@@ -185,15 +148,16 @@ bool write_file(const char *path, const char *text) noexcept {
   return (std::fclose(file) == 0) && ok;
 }
 
-void test_prefab_migration() noexcept {
-  const char *legacy =
-      "{\"version\":3,\"components\":{\"Transform\":{\"position\":"
+void test_prefab_gravity_scale() noexcept {
+  const char *prefab =
+      "{\"version\":5,\"components\":{\"Transform\":{\"position\":"
       "[0,0,0],\"rotation\":[0,0,0,1],\"scale\":[1,1,1],\"parentId\":0},"
-      "\"RigidBody\":{\"velocity\":[0,0,0],\"acceleration\":[0,9.8,0],"
+      "\"RigidBody\":{\"velocity\":[0,0,0],\"acceleration\":[0,0,0],"
       "\"angularVelocity\":[0,0,0],\"inverseMass\":1,\"inverseInertia\":"
-      "[1,1,1],\"inertiaAuthored\":true,\"sleeping\":false}}}";
+      "[1,1,1],\"inertiaAuthored\":true,\"sleeping\":false,"
+      "\"gravityScale\":0.5}}}";
   std::unique_ptr<World> world(new (std::nothrow) World());
-  if ((world == nullptr) || !write_file(kPrefabPath, legacy)) {
+  if ((world == nullptr) || !write_file(kPrefabPath, prefab)) {
     g_tests.fail("prepare the prefab");
     return;
   }
@@ -201,8 +165,8 @@ void test_prefab_migration() noexcept {
   RigidBody body{};
   check((entity != engine::runtime::kInvalidEntity) &&
             world->get_rigid_body(entity, &body) &&
-            (body.gravityScale == 0.0F) && (body.acceleration.y == 0.0F),
-        "a v3 prefab body cancelling the default gravity reads as scale 0");
+            (body.gravityScale == 0.5F),
+        "a prefab body reads its authored gravity scale");
   static_cast<void>(std::remove(kPrefabPath));
 }
 
@@ -248,9 +212,9 @@ void test_physics_step() noexcept {
 /// Runs this executable or test program.
 int main() {
   static_cast<void>(engine::core::initialize_logging());
-  test_migration();
+  test_gravity_scale_reads();
   test_round_trip();
-  test_prefab_migration();
+  test_prefab_gravity_scale();
   test_physics_step();
   engine::core::shutdown_logging();
   return g_tests.finish("gravity scale tests");

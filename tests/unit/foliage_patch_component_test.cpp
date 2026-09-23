@@ -5,6 +5,7 @@
 #include <memory>
 #include <new>
 
+#include "engine/content/asset_identity.h"
 #include "engine/core/json.h"
 #include "engine/runtime/scene_serializer.h"
 #include "engine/runtime/world.h"
@@ -15,11 +16,20 @@ bool nearly_equal(float lhs, float rhs) noexcept {
   return std::fabs(lhs - rhs) <= 0.0001F;
 }
 
+/// A distinct, recognisable reference per LOD slot. The authored field is
+/// the reference; the id beside it is resolution output and is not
+/// serialized, so the round trip below checks references.
+engine::core::AssetRef lod_ref(std::uint64_t seed) noexcept {
+  return engine::content::asset_ref_primary(
+      engine::core::AssetGuid{0x4c4f440000000000ULL | seed,
+                              0xa000000000000000ULL | seed});
+}
+
 engine::runtime::FoliagePatchComponent make_test_foliage() noexcept {
   engine::runtime::FoliagePatchComponent foliage{};
-  foliage.meshAssetIds[0] = 11U;
-  foliage.meshAssetIds[1] = 22U;
-  foliage.meshAssetIds[2] = 33U;
+  foliage.meshRefs[0] = lod_ref(11U);
+  foliage.meshRefs[1] = lod_ref(22U);
+  foliage.meshRefs[2] = lod_ref(33U);
   foliage.instanceCount = 3U;
   foliage.density = 2.25F;
   foliage.albedo = engine::math::Vec3(0.2F, 0.7F, 0.3F);
@@ -76,7 +86,8 @@ int verify_foliage_crud() {
   if (!world->get_foliage_patch_component(entity, &readBack)) {
     return 7;
   }
-  if ((readBack.meshAssetIds[1] != 22U) || (readBack.instanceCount != 3U) ||
+  if (!(readBack.meshRefs[1] == lod_ref(22U)) ||
+      (readBack.instanceCount != 3U) ||
       !nearly_equal(readBack.density, 2.25F) ||
       !nearly_equal(readBack.instances[2].phase, 1.25F) ||
       (readBack.instances[2].lodIndex != 2U)) {
@@ -165,8 +176,9 @@ int verify_foliage_scene_round_trip() {
     return 28;
   }
 
-  if ((foliage.meshAssetIds[0] != 11U) ||
-      (foliage.meshAssetIds[2] != 33U) || (foliage.instanceCount != 3U) ||
+  if (!(foliage.meshRefs[0] == lod_ref(11U)) ||
+      !(foliage.meshRefs[2] == lod_ref(33U)) ||
+      (foliage.instanceCount != 3U) ||
       !nearly_equal(foliage.albedo.y, 0.7F) ||
       !nearly_equal(foliage.roughness, 0.91F) ||
       !nearly_equal(foliage.windFrequency, 1.75F) ||

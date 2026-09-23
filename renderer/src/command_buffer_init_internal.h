@@ -171,4 +171,34 @@ bool resolve_luminance_program_state(BackendState &backend,
 void refresh_backend_program_state(BackendState &backend,
                                    const RenderDevice *dev) noexcept;
 
+/// What a registration did, so a caller that cannot draw the program it
+/// asked for learns which of the two reasons applied rather than reading
+/// a bare false.
+enum class ShadingProgramRegistration : std::uint8_t {
+  /// The id now names this program. A registration for an id that
+  /// already holds one replaces it, which is how a reauthored program
+  /// takes over its own id.
+  Registered,
+  /// The id is past what a draw key can name, so no draw could ever
+  /// select it.
+  NotAddressable,
+  /// The program did not load. Its id stays unregistered and draws
+  /// naming it fall back, rather than the id being claimed by an entry
+  /// that holds nothing.
+  ProgramUnavailable,
+};
+
+/// Points `programId` at `handle`, which is the only way a program
+/// becomes drawable: the flush resolves a run's id through this table and
+/// binds the physically-based program for an id nothing registered.
+ShadingProgramRegistration
+register_shading_program(BackendState &backend, std::uint8_t programId,
+                         ShaderProgramHandle handle) noexcept;
+
+/// Re-reads every registered program's device program from its handle,
+/// which a reload replaces and destroys. Part of the refresh above
+/// rather than a separate step: a table left behind binds programs the
+/// shader system has already destroyed.
+void refresh_shading_programs(BackendState &backend) noexcept;
+
 } // namespace engine::renderer

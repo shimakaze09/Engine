@@ -19,6 +19,7 @@ constexpr std::size_t kBodyCount = 128U;
 constexpr std::uint32_t kFrameCount = 240U;
 constexpr double kFrameSeconds = 1.0 / 60.0;
 constexpr const char *kMainScriptPath = "determinism_main.lua";
+constexpr const char *kRandomScriptPath = "determinism_random.lua";
 
 /// Walks upward from the current path until the bundled assets are found.
 bool set_working_directory_with_assets() noexcept {
@@ -41,8 +42,9 @@ bool set_working_directory_with_assets() noexcept {
   return false;
 }
 
-/// The run's main script does nothing, so the hash covers the engine's own
-/// systems and not the demo script's behavior.
+/// The run's main script does nothing. Script behaviour enters the hash
+/// through the entity module below instead, where it is one entity's
+/// transform rather than anything that could perturb the physics grid.
 bool write_main_script() noexcept {
   std::FILE *file = nullptr;
 #ifdef _WIN32
@@ -62,10 +64,60 @@ bool write_main_script() noexcept {
   return ok;
 }
 
+/// The entity module that puts scripted randomness and Lua table order
+/// into the hash, so the cross-platform compare covers what a script
+/// does and not only the engine's own stepping.
+///
+/// Two sources, each nondeterministic until the engine took ownership of
+/// it: `engine.random`, which reaches Lua's generator seeded from the
+/// wall clock unless the engine stream is installed over it, and
+/// iteration order over string keys, which follows a string-hash seed
+/// Lua draws per process unless it is pinned. Each tick folds a draw and
+/// the table's first key into this entity's position, so either one
+/// diverging moves a transform the hash covers. The fold is
+/// multiplicative and order-sensitive, so a divergence on any tick
+/// survives to the end of the run instead of averaging away.
+bool write_random_script() noexcept {
+  std::FILE *file = nullptr;
+#ifdef _WIN32
+  if (fopen_s(&file, kRandomScriptPath, "wb") != 0) {
+    file = nullptr;
+  }
+#else
+  file = std::fopen(kRandomScriptPath, "wb");
+#endif
+  if (file == nullptr) {
+    return false;
+  }
+  const char *contents =
+      "local M = {}\n"
+      "local fold = 1.0\n"
+      "local names = {'alpha', 'bravo', 'charlie', 'delta',\n"
+      "               'echo', 'foxtrot', 'golf', 'hotel'}\n"
+      "function M.on_begin_play(self)\n"
+      "    engine.set_position(self, 0.0, 40.0, 0.0)\n"
+      "end\n"
+      "function M.on_tick(self, dt)\n"
+      "    local draw = engine.random()\n"
+      "    local keyed = {}\n"
+      "    for i = 1, #names do keyed[names[i]] = i end\n"
+      "    local first = 0\n"
+      "    for _, v in pairs(keyed) do first = v; break end\n"
+      "    fold = (fold * 1.31 + draw + first * 0.01) % 7.0\n"
+      "    engine.set_position(self, fold, 40.0, draw)\n"
+      "end\n"
+      "return M\n";
+  const std::size_t length = std::char_traits<char>::length(contents);
+  const bool ok = (std::fwrite(contents, 1U, length, file) == length);
+  static_cast<void>(std::fclose(file));
+  return ok;
+}
+
 /// A ground slab and a grid of spheres that fall onto it and each other,
 /// so contacts, sleeping and collision pairs all enter the hash.
 bool populate_world(engine::runtime::World &world,
-                    engine::runtime::Entity *outFirstBody) noexcept {
+                    engine::runtime::Entity *outFirstBody,
+                    engine::runtime::Entity *outScripted) noexcept {
   engine::runtime::Transform groundTransform{};
   groundTransform.position = engine::math::Vec3(0.0F, -1.0F, 0.0F);
   const engine::runtime::Entity ground =
@@ -104,6 +156,22 @@ bool populate_world(engine::runtime::World &world,
       *outFirstBody = entity;
     }
   }
+
+  // One scripted entity, well above the falling grid and with no
+  // collider, so its transform enters the hash without touching the
+  // physics the rest of this scene is about.
+  const engine::runtime::Entity scripted = world.create_scene_object();
+  engine::runtime::ScriptComponent script{};
+  const int written = std::snprintf(script.scriptPath,
+                                    sizeof(script.scriptPath), "%s",
+                                    kRandomScriptPath);
+  if ((written < 0) ||
+      (static_cast<std::size_t>(written) >= sizeof(script.scriptPath)) ||
+      (scripted == engine::runtime::kInvalidEntity) ||
+      !world.add_script_component(scripted, script)) {
+    return false;
+  }
+  *outScripted = scripted;
   return true;
 }
 
@@ -111,7 +179,7 @@ bool populate_world(engine::runtime::World &world,
 /// for kFrameCount frames of exactly one fixed step each, and reports the
 /// world's state hash and the first body's final height.
 bool run_pipeline(std::uint32_t workerThreads, std::uint64_t *outHash,
-                  float *outFirstBodyY,
+                  float *outFirstBodyY, float *outScriptedX,
                   engine::runtime::StateHashSections *outSections) noexcept {
   engine::EngineConfig config{};
   config.core.platform.headless = true;
@@ -126,19 +194,23 @@ bool run_pipeline(std::uint32_t workerThreads, std::uint64_t *outHash,
   {
     engine::EnginePipeline pipeline;
     engine::runtime::Entity firstBody = engine::runtime::kInvalidEntity;
+    engine::runtime::Entity scripted = engine::runtime::kInvalidEntity;
     engine::runtime::World *world = nullptr;
     if (pipeline.initialize(0U) && ((world = pipeline.world()) != nullptr)) {
       engine::runtime::reset_world(*world);
-      ok = populate_world(*world, &firstBody) &&
+      ok = populate_world(*world, &firstBody, &scripted) &&
            pipeline.set_frame_delta_override(kFrameSeconds);
     }
     for (std::uint32_t frame = 0U; ok && (frame < kFrameCount); ++frame) {
       ok = pipeline.execute_frame();
     }
     engine::runtime::Transform transform{};
-    if (ok && world->get_transform(firstBody, &transform)) {
+    engine::runtime::Transform scriptedTransform{};
+    if (ok && world->get_transform(firstBody, &transform) &&
+        world->get_transform(scripted, &scriptedTransform)) {
       *outHash = world->state_hash(outSections);
       *outFirstBodyY = transform.position.y;
+      *outScriptedX = scriptedTransform.position.x;
     } else {
       ok = false;
     }
@@ -152,7 +224,8 @@ bool run_pipeline(std::uint32_t workerThreads, std::uint64_t *outHash,
 
 /// Runs this executable or test program.
 int main() {
-  if (!set_working_directory_with_assets() || !write_main_script()) {
+  if (!set_working_directory_with_assets() || !write_main_script() ||
+      !write_random_script()) {
     std::printf("FAIL: determinism test setup\n");
     return 1;
   }
@@ -161,11 +234,15 @@ int main() {
   std::uint64_t hashB = 0U;
   float firstBodyYA = 0.0F;
   float firstBodyYB = 0.0F;
+  float scriptedXA = 0.0F;
+  float scriptedXB = 0.0F;
   engine::runtime::StateHashSections sectionsA{};
   engine::runtime::StateHashSections sectionsB{};
-  const bool ran = run_pipeline(1U, &hashA, &firstBodyYA, &sectionsA) &&
-                   run_pipeline(4U, &hashB, &firstBodyYB, &sectionsB);
+  const bool ran =
+      run_pipeline(1U, &hashA, &firstBodyYA, &scriptedXA, &sectionsA) &&
+      run_pipeline(4U, &hashB, &firstBodyYB, &scriptedXB, &sectionsB);
   static_cast<void>(std::remove(kMainScriptPath));
+  static_cast<void>(std::remove(kRandomScriptPath));
   if (!ran) {
     std::printf("FAIL: determinism pipeline run\n");
     return 1;
@@ -179,6 +256,18 @@ int main() {
     return 2;
   }
 
+  // The scripted entity starts at x = 0 and only on_tick moves it, so a
+  // run where the module never dispatched would leave it there and the
+  // equal hashes below would say nothing about scripted randomness or
+  // Lua table order.
+  if (!(scriptedXA > 0.0F) || (scriptedXA != scriptedXB)) {
+    std::printf("FAIL: the scripted entity did not move deterministically "
+                "(x=%g against %g)\n",
+                static_cast<double>(scriptedXA),
+                static_cast<double>(scriptedXB));
+    return 4;
+  }
+
   if (hashA != hashB) {
     std::printf("FAIL: state hash differs between 1 and 4 workers "
                 "a=%llu b=%llu\n",
@@ -189,14 +278,19 @@ int main() {
 
   // The running fold after each section, so two platforms that disagree
   // can see which section diverged first; the final line is what CI reads.
+  std::printf("[determinism] scripted x=%g body y=%g\n",
+              static_cast<double>(scriptedXA),
+              static_cast<double>(firstBodyYA));
   std::printf("[determinism] fold entities=%llu transforms=%llu "
-              "bodies=%llu physics=%llu timers=%llu animation=%llu\n",
+              "bodies=%llu physics=%llu timers=%llu animation=%llu "
+              "random=%llu\n",
               static_cast<unsigned long long>(sectionsA.entities),
               static_cast<unsigned long long>(sectionsA.transforms),
               static_cast<unsigned long long>(sectionsA.rigidBodies),
               static_cast<unsigned long long>(sectionsA.physics),
               static_cast<unsigned long long>(sectionsA.timers),
-              static_cast<unsigned long long>(sectionsA.animation));
+              static_cast<unsigned long long>(sectionsA.animation),
+              static_cast<unsigned long long>(sectionsA.random));
   std::printf("[determinism] hash=%llu\n",
               static_cast<unsigned long long>(hashA));
   return 0;

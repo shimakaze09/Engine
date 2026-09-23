@@ -16,6 +16,7 @@
 #include "engine/core/cvar.h"
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
+#include "engine/core/thread_affinity.h"
 #include "render_device_bgfx_context.h"
 #include "render_device_null.h"
 #include "screenshot_tga.h"
@@ -157,6 +158,28 @@ void reset_views() noexcept {
   ctx.viewsUsed = 1U;
 }
 
+// --- Vertex staging ---
+
+// CPU copies of vertex buffers not yet realized on the GPU (see
+// BgfxBufferRecord::staging). Counted so a leak is observable: shutdown
+// has to free every one still held by a live record.
+std::size_t g_liveStagingBlocks = 0U;
+
+void *staging_alloc(std::size_t bytes) noexcept {
+  void *block = std::malloc(bytes);
+  if (block != nullptr) {
+    ++g_liveStagingBlocks;
+  }
+  return block;
+}
+
+void staging_free(void *block) noexcept {
+  if (block != nullptr) {
+    std::free(block);
+    --g_liveStagingBlocks;
+  }
+}
+
 // --- Texel staging ---
 
 /// Row stride handed to bgfx for staged texels. stage_texels packs rows
@@ -246,12 +269,13 @@ DeviceBufferHandle bgfx_create_buffer(const BufferDesc &desc) noexcept {
       bgfx::update(record.index, 0U, bgfx::copy(desc.data, sizeBytes));
     }
   } else if ((desc.data != nullptr) && (sizeBytes > 0U)) {
-    record.staging = std::malloc(sizeBytes);
+    record.staging = staging_alloc(sizeBytes);
     if (record.staging == nullptr) {
       core::log_message(core::LogLevel::Error, "render_device",
                         "bgfx backend: vertex staging allocation failed");
       return kInvalidDeviceBuffer;
     }
+    record.stagingBytes = sizeBytes;
     std::memcpy(record.staging, desc.data, sizeBytes);
   }
   const std::uint32_t value = device_context().buffers.allocate(record);
@@ -259,7 +283,7 @@ DeviceBufferHandle bgfx_create_buffer(const BufferDesc &desc) noexcept {
     if (bgfx::isValid(record.index)) {
       bgfx::destroy(record.index);
     }
-    std::free(record.staging);
+    staging_free(record.staging);
     drop_operation("create_buffer: table full");
     return kInvalidDeviceBuffer;
   }
@@ -314,8 +338,9 @@ bool bgfx_realize_vertex_buffer(BgfxBufferRecord *record,
     bgfx::update(record->vertex, 0U,
                  bgfx::copy(record->staging,
                             static_cast<std::uint32_t>(record->sizeBytes)));
-    std::free(record->staging);
+    staging_free(record->staging);
     record->staging = nullptr;
+    record->stagingBytes = 0U;
   }
   return true;
 }
@@ -341,15 +366,28 @@ void bgfx_buffer_upload(DeviceBufferHandle buffer, const void *data,
   } else if (bgfx::isValid(record->vertex)) {
     bgfx::update(record->vertex, 0U, bgfx::copy(data, bytes));
   } else if (record->usage == BufferUsage::Vertex) {
-    // Not yet realized: replace the CPU staging copy.
-    if ((record->staging == nullptr) ||
-        (sizeBytes > static_cast<std::ptrdiff_t>(record->sizeBytes))) {
-      std::free(record->staging);
-      record->staging = std::malloc(bytes);
-    }
-    if (record->staging == nullptr) {
-      drop_operation("update_buffer: staging allocation failed");
-      return;
+    // Not yet realized: write into the CPU staging copy. The copy always
+    // holds the buffer's whole size, because realization (and a stream
+    // draw) reads sizeBytes from it; an update smaller than the buffer --
+    // or one into a buffer created without data -- must not leave a block
+    // sized to the update behind. Growth keeps the bytes already written.
+    const std::uint32_t required =
+        (allowGrow && (bytes > static_cast<std::uint32_t>(record->sizeBytes)))
+            ? bytes
+            : static_cast<std::uint32_t>(record->sizeBytes);
+    if ((record->staging == nullptr) || (record->stagingBytes < required)) {
+      void *grown = staging_alloc(required);
+      if (grown == nullptr) {
+        drop_operation("update_buffer: staging allocation failed");
+        return;
+      }
+      std::memset(grown, 0, required);
+      if (record->staging != nullptr) {
+        std::memcpy(grown, record->staging, record->stagingBytes);
+      }
+      staging_free(record->staging);
+      record->staging = grown;
+      record->stagingBytes = required;
     }
     std::memcpy(record->staging, data, bytes);
   }
@@ -384,7 +422,7 @@ void bgfx_destroy_buffer(DeviceBufferHandle buffer) noexcept {
   if (bgfx::isValid(record->index)) {
     bgfx::destroy(record->index);
   }
-  std::free(record->staging);
+  staging_free(record->staging);
   record->staging = nullptr;
   device_context().buffers.release(buffer.value);
 }
@@ -977,6 +1015,8 @@ bgfx_create_render_target(const RenderTargetDesc &desc) noexcept {
     record.depthTexture = desc.depth.texture.value;
   }
 
+  record.width = targetWidth;
+  record.height = targetHeight;
   record.handle = bgfx::createFrameBuffer(count, attachments, false);
   if (!bgfx::isValid(record.handle)) {
     core::log_message(core::LogLevel::Error, "render_device",
@@ -1029,6 +1069,28 @@ void bgfx_bind_render_target(RenderTargetHandle target) noexcept {
   // clears would otherwise inherit whatever clear an earlier frame (or
   // startup IBL cook) configured on this id and wipe its own input.
   bgfx::setViewClear(view, BGFX_CLEAR_NONE, 0U, 1.0F, 0U);
+  // The rect persists the same way, and inheriting one is worse than
+  // inheriting a clear: a pass whose view carries another pass's rect
+  // draws somewhere other than where it meant to, or off the target
+  // entirely, and nothing reports it. Which id a pass lands on is not
+  // stable either — it shifts by however many views the passes before it
+  // claimed, and the directional shadow cache alone moves every later id
+  // by four cascades whenever the camera moves. So the bind establishes
+  // the whole target as the default rect, and a pass wanting a sub-rect
+  // still overrides it with set_viewport.
+  std::int32_t viewWidth = ctx.backBufferWidth;
+  std::int32_t viewHeight = ctx.backBufferHeight;
+  if (target.value != 0U) {
+    const BgfxTargetRecord *record = ctx.targets.resolve(target.value);
+    if (record != nullptr) {
+      viewWidth = record->width;
+      viewHeight = record->height;
+    }
+  }
+  if ((viewWidth > 0) && (viewHeight > 0)) {
+    bgfx::setViewRect(view, 0U, 0U, static_cast<std::uint16_t>(viewWidth),
+                      static_cast<std::uint16_t>(viewHeight));
+  }
   ctx.currentView = view;
 }
 
@@ -1096,10 +1158,11 @@ std::uint64_t bgfx_timestamp_value(DeviceQueryHandle) noexcept { return 0U; }
 std::uint64_t bgfx_native_texture_id(DeviceTextureHandle texture) noexcept {
   BgfxTextureRecord *record =
       device_context().textures.resolve(texture.value);
-  // The bgfx handle index is what the editor's ImGui bgfx backend
-  // consumes.
-  return (record != nullptr) ? static_cast<std::uint64_t>(record->handle.idx)
-                             : 0U;
+  // The bgfx handle index plus one, so index 0 is a texture like any other
+  // and 0 still means none; the editor's ImGui bgfx backend decodes it.
+  return (record != nullptr)
+             ? static_cast<std::uint64_t>(record->handle.idx) + 1U
+             : 0U;
 }
 
 DeviceDebugStats bgfx_debug_stats() noexcept {
@@ -1312,7 +1375,13 @@ void shutdown_render_device() noexcept {
   BgfxDeviceContext &ctx = device_context();
   // Invalidate every outstanding handle; owning systems destroy their
   // device resources before this point (shutdown_renderer ordering) and
-  // bgfx::shutdown reclaims anything that slipped through.
+  // bgfx::shutdown reclaims anything that slipped through. A vertex
+  // buffer never realized holds a CPU staging copy bgfx does not know
+  // about, so that one is freed here or it is lost with the record.
+  ctx.buffers.for_each_live([](BgfxBufferRecord &record) noexcept {
+    staging_free(record.staging);
+    record.staging = nullptr;
+  });
   ctx.buffers.clear();
   ctx.textures.clear();
   ctx.programs.clear();
@@ -1349,6 +1418,7 @@ void shutdown_render_device() noexcept {
 }
 
 const RenderDevice *render_device() noexcept {
+  ENGINE_ASSERT_MAIN_THREAD();
   if (!device_context().initialized) {
     return nullptr;
   }
@@ -1372,6 +1442,10 @@ bool render_device_bgfx_request_screenshot(const char *path) noexcept {
   }
   std::memcpy(g_requestedScreenshotPath, path, length + 1U);
   return true;
+}
+
+std::size_t render_device_bgfx_live_staging_blocks() noexcept {
+  return g_liveStagingBlocks;
 }
 
 void render_device_bgfx_frame() noexcept {

@@ -37,8 +37,11 @@ bool queue_mesh_reload(AssetManager *manager,
                        AssetId id,
                        const char *sourcePath) noexcept;
 
-// Processes up to maxTransitions queued transitions and auto-synchronizes
-// requested residency intent from the asset database into explicit queues.
+/// Processes up to maxTransitions queued transitions and auto-synchronizes
+/// requested residency intent from the asset database into explicit queues.
+/// An unload releases the record as well when nothing still wants it
+/// (mesh_asset_record_releasable); the id then reads as Unloaded, and the
+/// next request for it claims a fresh record.
 bool update_asset_manager(AssetManager *manager,
                           AssetDatabase *database,
                           GpuMeshRegistry *registry,

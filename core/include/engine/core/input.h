@@ -5,12 +5,22 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "engine/core/input_map.h"
 #include "engine/core/platform.h"
 
 namespace engine::core {
 
-// Scancode type. Values match SDL_SCANCODE_* from the SDL3 backend.
+struct PlatformEvent;
+
+// A physical key, named by its USB HID keyboard usage ID (HID Usage Tables,
+// Keyboard/Keypad page 0x07): the engine's own key vocabulary, defined by
+// that standard rather than by whichever platform library is underneath.
+// It is what input_bindings.json persists and what Lua's engine.KEY_*
+// carries. The platform translates native key codes into it; a native key
+// with no usage ID on the page never reaches input as a key.
 using KeyScancode = int;
+/// The highest usage ID on the keyboard page (Right GUI).
+inline constexpr KeyScancode kMaxKeyCode = 0xE7;
 
 // ----- Lifecycle -----------------------------------------------------------
 
@@ -20,17 +30,21 @@ void shutdown_input() noexcept;
 
 // Called once per frame around the platform event loop.
 void begin_input_frame() noexcept;
-/// Feeds one native (SDL) event into keyboard/mouse state.
-void input_process_event(const void *nativeEvent) noexcept;
+/// Applies one platform event to key, mouse and gamepad state, then hands
+/// it to the action mapper and touch. Every event the pump polls goes
+/// through here unless the editor captured it.
+void input_process_event(const PlatformEvent &event) noexcept;
 /// Ends the requested operation or profiling range for input frame.
 void end_input_frame() noexcept;
 
 // ----- Keyboard ------------------------------------------------------------
 
 bool is_key_down(KeyScancode scancode) noexcept;
-/// Returns whether is key pressed.
+/// True in the frame the key went down, even if it came up again before
+/// the frame ended. OS auto-repeat is not a press.
 bool is_key_pressed(KeyScancode scancode) noexcept;
-/// Returns whether is key released.
+/// True in the frame the key came up, including a release that followed a
+/// press inside the same frame.
 bool is_key_released(KeyScancode scancode) noexcept;
 
 // ----- Mouse ---------------------------------------------------------------
@@ -48,33 +62,40 @@ struct MouseState final {
 MouseState mouse_state() noexcept;
 /// Returns whether is mouse button down.
 bool is_mouse_button_down(int button) noexcept;
-/// Returns whether is mouse button pressed.
+/// True in the frame the button went down, even if it came up again
+/// before the frame ended.
 bool is_mouse_button_pressed(int button) noexcept;
 
 // ----- Action Mappings -----------------------------------------------------
+// The script-facing shorthand for the input mapper (input_map.h): one
+// registry, so a name registered here is the action add_input_action,
+// rebinding and the bindings document see. A binding the user persisted
+// outranks the default a script registers here.
 
-inline constexpr std::size_t kMaxActions = 64U;
-inline constexpr std::size_t kMaxAxes = 64U;
+inline constexpr std::size_t kMaxActions = kMaxInputActions;
+inline constexpr std::size_t kMaxAxes = kMaxInputAxes;
 
-/// Binds a named action to a key (and optional mouse button).
+/// Registers a default binding for a named action: a key, and optionally a
+/// mouse button (-1 for none). Registering the name again replaces the
+/// default. False when the name is empty, too long or the mapper is full.
 bool register_action(const char *name, KeyScancode key,
                      int mouseButton = -1) noexcept;
-/// Returns whether is action down.
+/// Whether the action is active this frame (is_mapped_action_down).
 bool is_action_down(const char *name) noexcept;
-/// Returns whether is action pressed.
+/// Whether the action became active this frame (is_mapped_action_pressed).
 bool is_action_pressed(const char *name) noexcept;
-/// 1 when the action is held, else 0.
+/// 1 when the action is active, else 0.
 float action_value(const char *name) noexcept;
 
-/// Binds a named axis to a negative/positive key pair.
+/// Registers a default negative/positive key pair for a named axis.
 bool register_axis(const char *name, KeyScancode negativeKey,
                    KeyScancode positiveKey) noexcept;
-/// Axis value in [-1, 1] from the bound key pair.
+/// The axis value in [-1, 1] (mapped_axis_value).
 float axis_value(const char *name) noexcept;
 
 // Clears run-scoped gameplay registrations — script-registered actions and
 // axes plus the action/touch callback tables that carry script-owned
-// userData — while keeping device state and the persisted input map.
+// userData — while keeping device state and the persisted bindings.
 // EnginePipeline::teardown calls it so no binding outlives its run.
 void clear_gameplay_bindings() noexcept;
 
@@ -98,6 +119,9 @@ bool is_gamepad_connected(int gamepad = 0) noexcept;
 int connected_gamepad_count() noexcept;
 /// Returns whether is gamepad button down.
 bool is_gamepad_button_down(int button, int gamepad = 0) noexcept;
+/// True in the frame the button went down, even if it came up again
+/// before the frame ended.
+bool is_gamepad_button_pressed(int button, int gamepad = 0) noexcept;
 // Returns normalized axis value in [-1, 1] with deadzone applied.
 float gamepad_axis_value(int axis, int deadzone = 8000,
                          int gamepad = 0) noexcept;

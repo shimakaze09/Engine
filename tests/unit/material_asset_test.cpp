@@ -47,7 +47,7 @@ int verify_full_material_load(engine::renderer::AssetDatabase *database) {
   constexpr const char *kPath = "material_test_full.mat";
   constexpr const char *virtualPath = "mat/material_test_full.mat";
   constexpr const char *kJson =
-      "{\"version\":1,\"albedo\":[0.25,0.5,0.75],"
+      "{\"version\":3,\"albedo\":[0.25,0.5,0.75],"
       "\"emissive\":[0.125,0.0,1.0],"
       "\"roughness\":0.25,\"metallic\":1.0,\"opacity\":0.5}";
   if (!write_material_file(kPath, kJson)) {
@@ -95,12 +95,14 @@ int verify_full_material_load(engine::renderer::AssetDatabase *database) {
   return 0;
 }
 
-/// Partial file: unspecified fields must keep Material defaults exactly.
+/// Partial file: a field the author omitted keeps the Material default
+/// exactly. Absent is not malformed. The revision is named because it is
+/// the one field every material must carry.
 int verify_partial_material_defaults(
     engine::renderer::AssetDatabase *database) {
   constexpr const char *kPath = "material_test_partial.mat";
   constexpr const char *virtualPath = "mat/material_test_partial.mat";
-  if (!write_material_file(kPath, "{\"roughness\":0.75}")) {
+  if (!write_material_file(kPath, "{\"version\":3,\"roughness\":0.75}")) {
     return 20;
   }
 
@@ -140,13 +142,13 @@ int verify_parent_chain_resolution(engine::renderer::AssetDatabase *database) {
 
   if (!write_material_file(
           kBasePath,
-          "{\"albedo\":[1.0,0.0,0.0],\"roughness\":0.125,\"metallic\":0.5}") ||
+          "{\"version\":3,\"albedo\":[1.0,0.0,0.0],\"roughness\":0.125,\"metallic\":0.5}") ||
       !write_material_file(
           kChildPath,
-          "{\"parent\":\"mat/material_test_base.mat\",\"metallic\":1.0}") ||
+          "{\"version\":3,\"parent\":\"mat/material_test_base.mat\",\"metallic\":1.0}") ||
       !write_material_file(
           kGrandPath,
-          "{\"parent\":\"mat/material_test_child.mat\",\"opacity\":0.25}")) {
+          "{\"version\":3,\"parent\":\"mat/material_test_child.mat\",\"opacity\":0.25}")) {
     remove_file(kBasePath);
     remove_file(kChildPath);
     remove_file(kGrandPath);
@@ -206,9 +208,9 @@ int verify_material_load_failures(engine::renderer::AssetDatabase *database) {
   constexpr const char *kCyclePathA = "material_test_cycle_a.mat";
   constexpr const char *kCyclePathB = "material_test_cycle_b.mat";
   if (!write_material_file(kCyclePathA,
-                           "{\"parent\":\"mat/material_test_cycle_b.mat\"}") ||
+                           "{\"version\":3,\"parent\":\"mat/material_test_cycle_b.mat\"}") ||
       !write_material_file(kCyclePathB,
-                           "{\"parent\":\"mat/material_test_cycle_a.mat\"}")) {
+                           "{\"version\":3,\"parent\":\"mat/material_test_cycle_a.mat\"}")) {
     remove_file(kCyclePathA);
     remove_file(kCyclePathB);
     return 40;
@@ -224,7 +226,7 @@ int verify_material_load_failures(engine::renderer::AssetDatabase *database) {
 
   constexpr const char *kOrphanPath = "material_test_orphan.mat";
   if (!write_material_file(kOrphanPath,
-                           "{\"parent\":\"mat/material_test_missing.mat\"}")) {
+                           "{\"version\":3,\"parent\":\"mat/material_test_missing.mat\"}")) {
     return 42;
   }
   const auto orphanResult = engine::renderer::load_material_asset(
@@ -235,7 +237,8 @@ int verify_material_load_failures(engine::renderer::AssetDatabase *database) {
   }
 
   constexpr const char *kBadFieldPath = "material_test_bad_field.mat";
-  if (!write_material_file(kBadFieldPath, "{\"roughness\":\"rough\"}")) {
+  if (!write_material_file(kBadFieldPath,
+                           "{\"version\":3,\"roughness\":\"rough\"}")) {
     return 44;
   }
   const auto badFieldResult = engine::renderer::load_material_asset(
@@ -247,7 +250,7 @@ int verify_material_load_failures(engine::renderer::AssetDatabase *database) {
   }
 
   constexpr const char *kBadVec3Path = "material_test_bad_vec3.mat";
-  if (!write_material_file(kBadVec3Path, "{\"albedo\":[1.0,2.0]}")) {
+  if (!write_material_file(kBadVec3Path, "{\"version\":3,\"albedo\":[1.0,2.0]}")) {
     return 46;
   }
   const auto badVec3Result = engine::renderer::load_material_asset(
@@ -257,18 +260,24 @@ int verify_material_load_failures(engine::renderer::AssetDatabase *database) {
     return 47;
   }
 
-  // Version 2 (texture-backed schema) is a supported version now — see
-  // material_asset_v2_test.cpp for its contract. Only versions outside
-  // [1, 2] still reject the load.
+  // Exactly one revision loads. An older one is refused rather than
+  // migrated, and a newer one is refused for the same reason in the other
+  // direction: the reader cannot know what it would be dropping.
   constexpr const char *kBadVersionPath = "material_test_bad_version.mat";
-  if (!write_material_file(kBadVersionPath, "{\"version\":3}")) {
-    return 48;
-  }
-  const auto badVersionResult = engine::renderer::load_material_asset(
-      database, "mat/material_test_bad_version.mat");
-  remove_file(kBadVersionPath);
-  if (badVersionResult.has_value()) {
-    return 49;
+  const char *const kRefusedVersions[] = {"{\"version\":2}",
+                                          "{\"version\":4}",
+                                          "{\"version\":0}",
+                                          "{\"roughness\":0.5}"};
+  for (const char *document : kRefusedVersions) {
+    if (!write_material_file(kBadVersionPath, document)) {
+      return 48;
+    }
+    const auto badVersionResult = engine::renderer::load_material_asset(
+        database, "mat/material_test_bad_version.mat");
+    remove_file(kBadVersionPath);
+    if (badVersionResult.has_value()) {
+      return 49;
+    }
   }
 
   const auto absentResult = engine::renderer::load_material_asset(
@@ -406,9 +415,9 @@ int verify_material_directory_discovery(
 
   const bool wrote =
       write_material_file("mat_discovery_test/disc_a.mat",
-                          "{\"version\":1,\"roughness\":0.25}") &&
+                          "{\"version\":3,\"roughness\":0.25}") &&
       write_material_file("mat_discovery_test/disc_b.mat",
-                          "{\"version\":1,\"metallic\":1.0}") &&
+                          "{\"version\":3,\"metallic\":1.0}") &&
       write_material_file("mat_discovery_test/ignored.txt", "not a material");
 
   int result = 0;

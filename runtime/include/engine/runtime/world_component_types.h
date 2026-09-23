@@ -88,10 +88,15 @@ struct FoliageInstance final {
 };
 
 /// Instanced foliage patch: per-LOD meshes, material, wind, instances.
+/// `meshRefs` are the authored identities, one per LOD; `meshAssetIds`
+/// beside them hold what the reference pass resolved each to, so they are
+/// runtime state and never serialized (the same split MeshComponent
+/// makes).
 struct FoliagePatchComponent final {
   static constexpr std::size_t kMaxInstances = 64U;
   static constexpr std::size_t kMaxLods = 3U;
 
+  core::AssetRef meshRefs[kMaxLods] = {};
   std::uint64_t meshAssetIds[kMaxLods] = {};
   std::uint32_t instanceCount = 0U;
   float density = 1.0F;

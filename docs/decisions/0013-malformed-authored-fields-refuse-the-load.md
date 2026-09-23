@@ -3,6 +3,10 @@
 **Date:** 2026-09-18. Decided by the maintainer agent on the owner's
 delegation under the tests-are-contracts rule; the owner may override.
 
+**Status:** The editor and the packer now read import settings through
+one shared `.meta` reader in `content`, and the packer refuses a
+sidecar that reader cannot read.
+
 ## Context
 
 Four fields in the shared scene/prefab component readers — `roughness`,

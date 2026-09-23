@@ -36,6 +36,17 @@ Four checks, one root cause each:
      Same root cause as check 3, one level up: the dep graph, not luck,
      has to carry the headers a public surface needs.
 
+  5. SDL containment. SDL is the platform layer's implementation detail
+     (issue #312): an `#include <SDL3/...>` -- or of the ImGui SDL3
+     backend header, which declares SDL types -- is legal only in the
+     files SANCTIONED_SDL_USERS names, the platform layer itself and the
+     one editor TU that drives the ImGui backend. Every other user is a
+     place the rest of the engine learned SDL's vocabulary, and each one
+     that exists today is listed in KNOWN_SDL_USERS with the #312 item
+     that removes it -- none remain. Includes are what spread it: seven
+     editor TUs carried SDL and the backend header with no symbol from
+     either, and nothing noticed until an audit counted them.
+
 Today's known violations are listed in KNOWN_VIOLATIONS with the issue
 that tracks each. An entry that no longer matches anything is itself a
 finding, so entries cannot be left behind once fixed: the fix that
@@ -214,6 +225,24 @@ KNOWN_CMAKE_GRANTS: dict[tuple[str, str, str], str] = {
         "src",
     ): "sanctioned: issue #156 component registry, paired with the include above",
 }
+
+
+# Check 5: an include that brings SDL's types into a file.
+SDL_INCLUDE_RE = re.compile(r"^(SDL3/|backends/imgui_impl_sdl3\.h$)")
+
+# Where SDL belongs. Part of the rule rather than exceptions to it, so they
+# hold on any root, the gate's self-tests included.
+SANCTIONED_SDL_USERS: dict[str, str] = {
+    "core/src/platform.cpp": "the platform layer SDL is the implementation of",
+    "editor/src/editor.cpp": "the ImGui SDL3 backend's one driver",
+}
+
+# Where SDL is today and should not be, each with the issue that removes
+# it. Empty: the typed platform event took SDL out of input, touch and the
+# frame pipeline, and the window surface took it out of the editor's
+# document code. An entry that stops matching is a finding, so this stays
+# empty unless someone deliberately adds a tracked exception.
+KNOWN_SDL_USERS: dict[str, str] = {}
 
 
 class Finding:
@@ -552,6 +581,47 @@ def check_public_dependency_visibility(root: pathlib.Path) -> list[Finding]:
     return findings
 
 
+def check_sdl_containment(
+    root: pathlib.Path, used: set[str], allowlisted: bool
+) -> list[Finding]:
+    """Flags an SDL include anywhere but the platform layer."""
+    findings: list[Finding] = []
+    for path in audited_sources(root):
+        relative = path.relative_to(root).as_posix()
+        for include in included_paths(path):
+            if SDL_INCLUDE_RE.match(include) is None:
+                continue
+            if relative in SANCTIONED_SDL_USERS:
+                continue
+            if allowlisted and relative in KNOWN_SDL_USERS:
+                used.add(relative)
+                continue
+            findings.append(
+                Finding(
+                    relative,
+                    f"includes <{include}>: SDL stays behind the platform "
+                    "layer (issue #312); use the core platform/input API, "
+                    "or add the surface it is missing",
+                )
+            )
+    return findings
+
+
+def check_stale_sdl_allowlist(used: set[str]) -> list[Finding]:
+    """Flags KNOWN_SDL_USERS entries whose file no longer includes SDL."""
+    findings: list[Finding] = []
+    for source, reason in sorted(KNOWN_SDL_USERS.items()):
+        if source not in used:
+            findings.append(
+                Finding(
+                    "tools/check_module_deps.py",
+                    f"stale SDL allowlist entry: {source} no longer includes "
+                    f"SDL ({reason}) — delete the entry",
+                )
+            )
+    return findings
+
+
 def check_stale_allowlist(
     used_includes: set[tuple[str, str]], used_grants: set[tuple[str, str, str]]
 ) -> list[Finding]:
@@ -599,12 +669,15 @@ def main() -> int:
 
     used_includes: set[tuple[str, str]] = set()
     used_grants: set[tuple[str, str, str]] = set()
+    used_sdl: set[str] = set()
 
     findings = check_include_edges(root, used_includes, allowlisted)
     findings += check_cmake_grants(root, used_grants, allowlisted)
     findings += check_public_dependency_visibility(root)
+    findings += check_sdl_containment(root, used_sdl, allowlisted)
     if allowlisted:
         findings += check_stale_allowlist(used_includes, used_grants)
+        findings += check_stale_sdl_allowlist(used_sdl)
 
     if findings:
         print("module dependency audit failed:")
@@ -612,7 +685,7 @@ def main() -> int:
             print(str(finding))
         return 1
 
-    excused = len(used_includes) + len(used_grants)
+    excused = len(used_includes) + len(used_grants) + len(used_sdl)
     print(
         "module dependency audit passed: "
         f"{len(ALLOWED_DEPENDENCIES)} modules checked, "

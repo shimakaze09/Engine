@@ -7,6 +7,8 @@
 
 namespace engine::core {
 
+struct PlatformEvent;
+
 // ---------------------------------------------------------------------------
 // Input Binding — a single physical input source that can trigger an action.
 // ---------------------------------------------------------------------------
@@ -107,6 +109,15 @@ void shutdown_input_mapper() noexcept;
 // reset.
 void clear_action_callbacks() noexcept;
 
+/// Removes every action and axis that neither a bindings document nor a
+/// rebinding made persistent -- the ones scripts registered -- so none
+/// outlives the run that registered it. Persisted ones stay.
+void clear_unpersisted_input_mappings() noexcept;
+/// Live actions a script registered (see clear_unpersisted_input_mappings).
+std::size_t unpersisted_input_action_count() noexcept;
+/// Live axes a script registered (see clear_unpersisted_input_mappings).
+std::size_t unpersisted_input_axis_count() noexcept;
+
 // ---------------------------------------------------------------------------
 // Registration
 // ---------------------------------------------------------------------------
@@ -152,7 +163,7 @@ bool rebind_action(const char *actionName, std::uint32_t bindingIndex,
 // Per-frame processing — called from the main input loop.
 // ---------------------------------------------------------------------------
 
-void input_mapper_process_event(const void *nativeEvent) noexcept;
+void input_mapper_process_event(const PlatformEvent &event) noexcept;
 /// Starts an input frame (captures pressed-edge state).
 void input_mapper_begin_frame() noexcept;
 /// Ends the input frame (clears per-frame edges).
@@ -176,7 +187,9 @@ bool load_input_bindings(const char *path) noexcept;
 bool save_input_bindings_to_buffer(char *buffer, std::size_t capacity,
                                    std::size_t *outSize) noexcept;
 /// Loads bindings from a JSON buffer. The document is staged and validated
-/// before commit: malformed shape, non-object entries, missing/empty/
+/// before commit: an unsupported "version" (absent reads as the current
+/// one, which is the unversioned form earlier builds wrote), malformed
+/// shape, non-object entries, missing/empty/
 /// overlong names, out-of-range binding/source type enums, and arrays
 /// beyond the fixed capacities (actions, bindings per action, axes,
 /// sources per axis) reject the whole load with a diagnostic and leave

@@ -7,6 +7,7 @@
 #endif
 
 #include "engine/core/platform.h"
+#include "engine/core/platform_event.h"
 
 #if defined(__clang__) && (defined(__x86_64__) || defined(__i386__)) && !defined(__PRFCHWINTRIN_H)
 #define __PRFCHWINTRIN_H // NOLINT(bugprone-reserved-identifier)
@@ -16,6 +17,7 @@
 
 #include <cstdint>
 #include <array>
+#include <atomic>
 #include <cstdio>
 #include <cerrno>
 #include <cstdlib>
@@ -38,7 +40,9 @@
 #include <unistd.h>
 #endif
 
+#include "engine/core/input.h"
 #include "engine/core/logging.h"
+#include "engine/core/thread_affinity.h"
 
 namespace engine::core {
 
@@ -296,6 +300,259 @@ bool initialize_platform_impl(int width, int height, const char *title,
   return true;
 }
 
+
+/// One native dialog in flight. SDL's callback has a different signature
+/// from the engine's, and SDL reads the filter array after the show call
+/// returns, so both the caller's callback and a copy of its filters have
+/// to live somewhere until the dialog closes: here.
+///
+/// The cross-thread contract is inUse. The main thread claims a slot with
+/// an acquire exchange, fills it, then asks SDL to show the dialog, so
+/// everything it wrote happens before SDL can invoke the trampoline. The
+/// trampoline reads the slot, calls through, and releases inUse last, so
+/// the main thread never refills a slot SDL may still read.
+struct DialogSlot final {
+  std::atomic<bool> inUse{false};
+  FileDialogCallback callback = nullptr;
+  void *userData = nullptr;
+  std::array<SDL_DialogFileFilter,
+             static_cast<std::size_t>(kMaxFileDialogFilters)>
+      filters{};
+};
+// Dialogs are modal to the user; more than one at a time only happens when
+// one outlives an editor session, which is what the spare slots are for.
+constexpr std::size_t kMaxOpenDialogs = 4U;
+std::array<DialogSlot, kMaxOpenDialogs> g_dialogSlots{};
+
+/// SDL's callback, translated to the engine's: a null list is a failure,
+/// an empty list a cancel, and both reach the caller as a null path.
+void SDLCALL dialog_trampoline(void *userdata, const char *const *filelist,
+                               int /*filter*/) noexcept {
+  auto *slot = static_cast<DialogSlot *>(userdata);
+  if (slot == nullptr) {
+    return;
+  }
+  if (filelist == nullptr) {
+    log_sdl_error("native file dialog failed");
+  }
+  const char *path =
+      ((filelist != nullptr) && (filelist[0] != nullptr)) ? filelist[0]
+                                                          : nullptr;
+  const FileDialogCallback callback = slot->callback;
+  void *const userData = slot->userData;
+  if (callback != nullptr) {
+    callback(userData, path);
+  }
+  slot->inUse.store(false, std::memory_order_release);
+}
+
+// SDL numbers its scancodes by the same HID keyboard usage IDs the engine
+// uses up to kMaxKeyCode, so the translation passes those through. Every
+// named engine key is checked against SDL here, so a divergence fails to
+// compile instead of silently rebinding a key.
+static_assert(kKey_A == SDL_SCANCODE_A);
+static_assert(kKey_B == SDL_SCANCODE_B);
+static_assert(kKey_C == SDL_SCANCODE_C);
+static_assert(kKey_D == SDL_SCANCODE_D);
+static_assert(kKey_E == SDL_SCANCODE_E);
+static_assert(kKey_F == SDL_SCANCODE_F);
+static_assert(kKey_G == SDL_SCANCODE_G);
+static_assert(kKey_H == SDL_SCANCODE_H);
+static_assert(kKey_I == SDL_SCANCODE_I);
+static_assert(kKey_J == SDL_SCANCODE_J);
+static_assert(kKey_K == SDL_SCANCODE_K);
+static_assert(kKey_L == SDL_SCANCODE_L);
+static_assert(kKey_M == SDL_SCANCODE_M);
+static_assert(kKey_N == SDL_SCANCODE_N);
+static_assert(kKey_O == SDL_SCANCODE_O);
+static_assert(kKey_P == SDL_SCANCODE_P);
+static_assert(kKey_Q == SDL_SCANCODE_Q);
+static_assert(kKey_R == SDL_SCANCODE_R);
+static_assert(kKey_S == SDL_SCANCODE_S);
+static_assert(kKey_T == SDL_SCANCODE_T);
+static_assert(kKey_U == SDL_SCANCODE_U);
+static_assert(kKey_V == SDL_SCANCODE_V);
+static_assert(kKey_W == SDL_SCANCODE_W);
+static_assert(kKey_X == SDL_SCANCODE_X);
+static_assert(kKey_Y == SDL_SCANCODE_Y);
+static_assert(kKey_Z == SDL_SCANCODE_Z);
+static_assert(kKey_1 == SDL_SCANCODE_1);
+static_assert(kKey_2 == SDL_SCANCODE_2);
+static_assert(kKey_3 == SDL_SCANCODE_3);
+static_assert(kKey_4 == SDL_SCANCODE_4);
+static_assert(kKey_5 == SDL_SCANCODE_5);
+static_assert(kKey_6 == SDL_SCANCODE_6);
+static_assert(kKey_7 == SDL_SCANCODE_7);
+static_assert(kKey_8 == SDL_SCANCODE_8);
+static_assert(kKey_9 == SDL_SCANCODE_9);
+static_assert(kKey_0 == SDL_SCANCODE_0);
+static_assert(kKey_Return == SDL_SCANCODE_RETURN);
+static_assert(kKey_Escape == SDL_SCANCODE_ESCAPE);
+static_assert(kKey_Backspace == SDL_SCANCODE_BACKSPACE);
+static_assert(kKey_Tab == SDL_SCANCODE_TAB);
+static_assert(kKey_Space == SDL_SCANCODE_SPACE);
+static_assert(kKey_F1 == SDL_SCANCODE_F1);
+static_assert(kKey_F2 == SDL_SCANCODE_F2);
+static_assert(kKey_F3 == SDL_SCANCODE_F3);
+static_assert(kKey_F4 == SDL_SCANCODE_F4);
+static_assert(kKey_F5 == SDL_SCANCODE_F5);
+static_assert(kKey_F6 == SDL_SCANCODE_F6);
+static_assert(kKey_F7 == SDL_SCANCODE_F7);
+static_assert(kKey_F8 == SDL_SCANCODE_F8);
+static_assert(kKey_F9 == SDL_SCANCODE_F9);
+static_assert(kKey_F10 == SDL_SCANCODE_F10);
+static_assert(kKey_F11 == SDL_SCANCODE_F11);
+static_assert(kKey_F12 == SDL_SCANCODE_F12);
+static_assert(kKey_Delete == SDL_SCANCODE_DELETE);
+static_assert(kKey_Right == SDL_SCANCODE_RIGHT);
+static_assert(kKey_Left == SDL_SCANCODE_LEFT);
+static_assert(kKey_Down == SDL_SCANCODE_DOWN);
+static_assert(kKey_Up == SDL_SCANCODE_UP);
+static_assert(kKey_LCtrl == SDL_SCANCODE_LCTRL);
+static_assert(kKey_LShift == SDL_SCANCODE_LSHIFT);
+static_assert(kKey_LAlt == SDL_SCANCODE_LALT);
+
+// The engine's gamepad vocabulary is SDL's numbering and must stay so:
+// persisted bindings and scripts written against the raw codes keep their
+// meaning. Checked here -- the one place both are in view -- so the
+// translation below can pass the values through and a reordering on
+// either side fails to compile.
+static_assert(kGamepadButton_South == SDL_GAMEPAD_BUTTON_SOUTH);
+static_assert(kGamepadButton_East == SDL_GAMEPAD_BUTTON_EAST);
+static_assert(kGamepadButton_West == SDL_GAMEPAD_BUTTON_WEST);
+static_assert(kGamepadButton_North == SDL_GAMEPAD_BUTTON_NORTH);
+static_assert(kGamepadButton_Back == SDL_GAMEPAD_BUTTON_BACK);
+static_assert(kGamepadButton_Guide == SDL_GAMEPAD_BUTTON_GUIDE);
+static_assert(kGamepadButton_Start == SDL_GAMEPAD_BUTTON_START);
+static_assert(kGamepadButton_LeftStick == SDL_GAMEPAD_BUTTON_LEFT_STICK);
+static_assert(kGamepadButton_RightStick == SDL_GAMEPAD_BUTTON_RIGHT_STICK);
+static_assert(kGamepadButton_LeftShoulder == SDL_GAMEPAD_BUTTON_LEFT_SHOULDER);
+static_assert(kGamepadButton_RightShoulder ==
+              SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER);
+static_assert(kGamepadButton_DpadUp == SDL_GAMEPAD_BUTTON_DPAD_UP);
+static_assert(kGamepadButton_DpadDown == SDL_GAMEPAD_BUTTON_DPAD_DOWN);
+static_assert(kGamepadButton_DpadLeft == SDL_GAMEPAD_BUTTON_DPAD_LEFT);
+static_assert(kGamepadButton_DpadRight == SDL_GAMEPAD_BUTTON_DPAD_RIGHT);
+static_assert(kGamepadAxis_LeftX == SDL_GAMEPAD_AXIS_LEFTX);
+static_assert(kGamepadAxis_LeftY == SDL_GAMEPAD_AXIS_LEFTY);
+static_assert(kGamepadAxis_RightX == SDL_GAMEPAD_AXIS_RIGHTX);
+static_assert(kGamepadAxis_RightY == SDL_GAMEPAD_AXIS_RIGHTY);
+static_assert(kGamepadAxis_LeftTrigger == SDL_GAMEPAD_AXIS_LEFT_TRIGGER);
+static_assert(kGamepadAxis_RightTrigger == SDL_GAMEPAD_AXIS_RIGHT_TRIGGER);
+
+/// Translates one SDL event. Every event produces a PlatformEvent -- the
+/// ones without an engine meaning as Other -- so the editor's ImGui
+/// backend, which reads the native event, still sees all of them.
+PlatformEvent translate_event(const SDL_Event &event) noexcept {
+  PlatformEvent out{};
+  out.timestampNs = event.common.timestamp;
+  out.native = &event;
+
+  switch (event.type) {
+  case SDL_EVENT_QUIT:
+    out.kind = PlatformEventKind::Quit;
+    break;
+  case SDL_EVENT_KEY_DOWN:
+  case SDL_EVENT_KEY_UP:
+    // Past kMaxKeyCode SDL numbers keys of its own (media and mode keys);
+    // they have no engine key, so they stay Other and reach only the
+    // editor's ImGui backend through the native event.
+    if (static_cast<int>(event.key.scancode) > kMaxKeyCode) {
+      break;
+    }
+    out.kind = (event.type == SDL_EVENT_KEY_DOWN) ? PlatformEventKind::KeyDown
+                                                  : PlatformEventKind::KeyUp;
+    out.scancode = static_cast<int>(event.key.scancode);
+    out.repeat = event.key.repeat;
+    break;
+  case SDL_EVENT_TEXT_INPUT:
+    out.kind = PlatformEventKind::TextInput;
+    break;
+  case SDL_EVENT_TEXT_EDITING:
+    out.kind = PlatformEventKind::TextEditing;
+    break;
+  case SDL_EVENT_MOUSE_MOTION:
+    out.kind = PlatformEventKind::MouseMove;
+    out.x = event.motion.x;
+    out.y = event.motion.y;
+    out.deltaX = event.motion.xrel;
+    out.deltaY = event.motion.yrel;
+    break;
+  case SDL_EVENT_MOUSE_BUTTON_DOWN:
+  case SDL_EVENT_MOUSE_BUTTON_UP:
+    out.kind = (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN)
+                   ? PlatformEventKind::MouseButtonDown
+                   : PlatformEventKind::MouseButtonUp;
+    out.x = event.button.x;
+    out.y = event.button.y;
+    // SDL numbers buttons from 1 (SDL_BUTTON_LEFT); the engine from 0.
+    out.mouseButton = static_cast<int>(event.button.button) - 1;
+    break;
+  case SDL_EVENT_MOUSE_WHEEL:
+    out.kind = PlatformEventKind::MouseWheel;
+    out.wheelY = event.wheel.y;
+    break;
+  case SDL_EVENT_FINGER_DOWN:
+  case SDL_EVENT_FINGER_MOTION:
+  case SDL_EVENT_FINGER_UP:
+  case SDL_EVENT_FINGER_CANCELED:
+    out.kind = (event.type == SDL_EVENT_FINGER_DOWN)
+                   ? PlatformEventKind::FingerDown
+               : (event.type == SDL_EVENT_FINGER_MOTION)
+                   ? PlatformEventKind::FingerMove
+               : (event.type == SDL_EVENT_FINGER_UP)
+                   ? PlatformEventKind::FingerUp
+                   : PlatformEventKind::FingerCanceled;
+    out.fingerId = static_cast<std::int64_t>(event.tfinger.fingerID);
+    out.fingerX = event.tfinger.x;
+    out.fingerY = event.tfinger.y;
+    out.fingerDeltaX = event.tfinger.dx;
+    out.fingerDeltaY = event.tfinger.dy;
+    out.pressure = event.tfinger.pressure;
+    break;
+  case SDL_EVENT_GAMEPAD_ADDED:
+  case SDL_EVENT_GAMEPAD_REMOVED:
+    out.kind = (event.type == SDL_EVENT_GAMEPAD_ADDED)
+                   ? PlatformEventKind::GamepadAdded
+                   : PlatformEventKind::GamepadRemoved;
+    out.deviceId = static_cast<std::uint32_t>(event.gdevice.which);
+    break;
+  case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
+  case SDL_EVENT_GAMEPAD_BUTTON_UP:
+    out.kind = (event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN)
+                   ? PlatformEventKind::GamepadButtonDown
+                   : PlatformEventKind::GamepadButtonUp;
+    out.deviceId = static_cast<std::uint32_t>(event.gbutton.which);
+    out.gamepadButton = static_cast<int>(event.gbutton.button);
+    break;
+  case SDL_EVENT_GAMEPAD_AXIS_MOTION:
+    out.kind = PlatformEventKind::GamepadAxis;
+    out.deviceId = static_cast<std::uint32_t>(event.gaxis.which);
+    out.gamepadAxis = static_cast<int>(event.gaxis.axis);
+    out.axisValue = event.gaxis.value;
+    break;
+  case SDL_EVENT_WINDOW_FOCUS_GAINED:
+    out.kind = PlatformEventKind::WindowFocusGained;
+    break;
+  case SDL_EVENT_WINDOW_FOCUS_LOST:
+    out.kind = PlatformEventKind::WindowFocusLost;
+    break;
+  case SDL_EVENT_WINDOW_RESIZED:
+    out.kind = PlatformEventKind::WindowResized;
+    out.width = static_cast<int>(event.window.data1);
+    out.height = static_cast<int>(event.window.data2);
+    break;
+  default:
+    out.kind = PlatformEventKind::Other;
+    break;
+  }
+  return out;
+}
+
+// The event behind the most recent poll. A PlatformEvent's native pointer
+// refers to it, which is why that pointer lasts only until the next poll.
+SDL_Event g_polledEvent{};
+
 } // namespace
 
 bool platform_gamepads_available() noexcept { return g_gamepadSubsystem; }
@@ -466,6 +723,97 @@ void render_drawable_size(int *outWidth, int *outHeight) noexcept {
 }
 
 void *get_sdl_window() noexcept { return g_window; }
+
+bool platform_poll_event(PlatformEvent *outEvent) noexcept {
+  ENGINE_ASSERT_MAIN_THREAD();
+  if ((outEvent == nullptr) || !SDL_PollEvent(&g_polledEvent)) {
+    return false;
+  }
+  *outEvent = translate_event(g_polledEvent);
+  return true;
+}
+
+bool platform_translate_native_event(const void *nativeEvent,
+                                     PlatformEvent *outEvent) noexcept {
+  if ((nativeEvent == nullptr) || (outEvent == nullptr)) {
+    return false;
+  }
+  *outEvent = translate_event(*static_cast<const SDL_Event *>(nativeEvent));
+  return true;
+}
+
+float platform_display_scale() noexcept {
+  if (g_window == nullptr) {
+    return 1.0F;
+  }
+  const float scale = SDL_GetWindowDisplayScale(g_window);
+  // SDL reports 0 on failure; a caller multiplying by it would collapse
+  // the UI to nothing.
+  return (scale > 0.0F) ? scale : 1.0F;
+}
+
+bool platform_set_window_title(const char *title) noexcept {
+  if ((g_window == nullptr) || (title == nullptr)) {
+    return false;
+  }
+  if (!SDL_SetWindowTitle(g_window, title)) {
+    log_sdl_error("failed to set the window title");
+    return false;
+  }
+  return true;
+}
+
+bool platform_show_file_dialog(FileDialogKind kind,
+                               FileDialogCallback callback, void *userData,
+                               const FileDialogFilter *filters,
+                               int filterCount,
+                               const char *defaultLocation) noexcept {
+  if ((callback == nullptr) || (g_window == nullptr)) {
+    log_message(LogLevel::Warning, "platform",
+                "native file dialog refused: no window to parent it");
+    return false;
+  }
+  if ((filterCount < 0) || (filterCount > kMaxFileDialogFilters) ||
+      ((filterCount > 0) && (filters == nullptr))) {
+    log_message(LogLevel::Warning, "platform",
+                "native file dialog refused: bad filter list");
+    return false;
+  }
+
+  DialogSlot *slot = nullptr;
+  for (DialogSlot &candidate : g_dialogSlots) {
+    bool expected = false;
+    if (candidate.inUse.compare_exchange_strong(expected, true,
+                                                std::memory_order_acquire)) {
+      slot = &candidate;
+      break;
+    }
+  }
+  if (slot == nullptr) {
+    log_message(LogLevel::Warning, "platform",
+                "native file dialog refused: every dialog slot is held by "
+                "a dialog that has not closed");
+    return false;
+  }
+
+  slot->callback = callback;
+  slot->userData = userData;
+  for (int i = 0; i < filterCount; ++i) {
+    slot->filters[static_cast<std::size_t>(i)] =
+        SDL_DialogFileFilter{filters[i].name, filters[i].pattern};
+  }
+  const SDL_DialogFileFilter *sdlFilters =
+      (filterCount > 0) ? slot->filters.data() : nullptr;
+
+  if (kind == FileDialogKind::Save) {
+    SDL_ShowSaveFileDialog(&dialog_trampoline, slot, g_window, sdlFilters,
+                           filterCount, defaultLocation);
+  } else {
+    SDL_ShowOpenFileDialog(&dialog_trampoline, slot, g_window, sdlFilters,
+                           filterCount, defaultLocation, false);
+  }
+  return true;
+}
 
 
 bool platform_window_is_wayland() noexcept {

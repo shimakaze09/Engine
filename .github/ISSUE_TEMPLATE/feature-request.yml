@@ -11,7 +11,8 @@ body:
       description: Which acceptance slice this serves (see docs/vision.md); parking-lot items are cut from v1, not canceled. A slice is done when its demo passes, not when its feature list is exhausted.
       options:
         - The slice plays
-        - Runs everywhere
+        - Ships
+        - Looks like anime
         - The hour test
         - Parking lot (post-1.0)
     validations:

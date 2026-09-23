@@ -15,6 +15,7 @@
 #include <new>
 
 #include "component_registry.h"
+#include "engine/core/asset_identity.h"
 #include "engine/runtime/prefab_serializer.h"
 #include "engine/runtime/scene_serializer.h"
 #include "engine/runtime/world.h"
@@ -27,6 +28,15 @@ constexpr const char *kPrefabPath = "component_registry_prefab_temp.json";
 constexpr PersistentId kParentPersistentId = 7001U;
 constexpr PersistentId kSubjectPersistentId = 7002U;
 constexpr std::size_t kSceneBufferSize = 64U * 1024U;
+
+/// Authored mesh and material identities for the MeshComponent row. The
+/// resolved ids beside them are runtime state the serializers never write,
+/// so only the references take part in the round trip.
+constexpr engine::core::AssetRef kRegistryMeshRef{
+    engine::core::AssetGuid{0x0123456789abcdefULL, 0xfedcba9876543210ULL}, 0U};
+constexpr engine::core::AssetRef kRegistryMaterialRef{
+    engine::core::AssetGuid{0x1122334455667788ULL, 0x99aabbccddeeff00ULL},
+    0x4dULL};
 
 void remove_prefab_file() noexcept {
   static_cast<void>(std::remove(kPrefabPath));
@@ -150,8 +160,8 @@ bool components_equal(const Collider &a, const Collider &b) noexcept {
 }
 
 void make_test_value(MeshComponent *out) noexcept {
-  out->meshAssetId = 0x123456789ABCDEFULL;
-  out->materialAssetId = 77ULL;
+  out->meshRef = kRegistryMeshRef;
+  out->materialRef = kRegistryMaterialRef;
   out->albedo = engine::math::Vec3(0.25F, 0.5F, 0.75F);
   out->roughness = 0.375F;
   out->metallic = 0.625F;
@@ -161,8 +171,7 @@ void make_test_value(MeshComponent *out) noexcept {
 
 bool components_equal(const MeshComponent &a,
                       const MeshComponent &b) noexcept {
-  return (a.meshAssetId == b.meshAssetId) &&
-         (a.materialAssetId == b.materialAssetId) &&
+  return (a.meshRef == b.meshRef) && (a.materialRef == b.materialRef) &&
          vec3_equal(a.albedo, b.albedo) && (a.roughness == b.roughness) &&
          (a.metallic == b.metallic) && (a.opacity == b.opacity) &&
          (a.sceneCaptureSourceId == b.sceneCaptureSourceId);
@@ -291,8 +300,10 @@ bool components_equal(const SceneCaptureComponent &a,
 }
 
 void make_test_value(FoliagePatchComponent *out) noexcept {
-  out->meshAssetIds[0] = 101ULL;
-  out->meshAssetIds[1] = 202ULL;
+  out->meshRefs[0] = engine::core::asset_ref_primary(
+      engine::core::AssetGuid{0x0a0a0a0a0a0a0a0aULL, 0x0b0b0b0b0b0b0b0bULL});
+  out->meshRefs[1] = engine::core::asset_ref_primary(
+      engine::core::AssetGuid{0x0c0c0c0c0c0c0c0cULL, 0x0d0d0d0d0d0d0d0dULL});
   out->instanceCount = 2U;
   out->density = 1.75F;
   out->albedo = engine::math::Vec3(0.125F, 0.75F, 0.375F);
@@ -321,7 +332,7 @@ bool components_equal(const FoliagePatchComponent &a,
     return false;
   }
   for (std::size_t i = 0U; i < FoliagePatchComponent::kMaxLods; ++i) {
-    if (a.meshAssetIds[i] != b.meshAssetIds[i]) {
+    if (!(a.meshRefs[i] == b.meshRefs[i])) {
       return false;
     }
   }
@@ -458,16 +469,16 @@ int verify_registry_round_trip(
   return 0;
 }
 
-/// EXPECTATION: a prefab Transform without parentId (every prefab written
-/// before the field existed) still loads, defaulting to no parent — the
-/// compatible-widening contract for the parentId addition.
+/// EXPECTATION: parentId is an optional Transform field, so a prefab that
+/// authors no parent still loads and reads as unparented. Absent is not
+/// malformed: only a present-but-unusable parentId refuses the document.
 int verify_prefab_transform_without_parent_id() {
-  constexpr const char *kLegacyPrefab =
-      "{\"version\":1,\"components\":{\"Transform\":{"
+  constexpr const char *kUnparentedPrefab =
+      "{\"version\":5,\"components\":{\"Transform\":{"
       "\"position\":[1.5,2.5,3.5],\"rotation\":[0,0,0,1],"
       "\"scale\":[1,1,1]}}}";
   remove_prefab_file();
-  if (!write_prefab_text(kLegacyPrefab)) {
+  if (!write_prefab_text(kUnparentedPrefab)) {
     return 61;
   }
 
@@ -492,13 +503,17 @@ int verify_prefab_transform_without_parent_id() {
   return 0;
 }
 
-/// EXPECTATION: the prefab reader honors the legacy "meshId" key exactly
-/// like the scene reader does (codec parity for pre-asset-id content).
-int verify_prefab_legacy_mesh_id() {
-  constexpr const char *kLegacyPrefab =
-      "{\"version\":1,\"components\":{\"MeshComponent\":{\"meshId\":4242}}}";
+/// EXPECTATION: the prefab reader reads a hand-authored mesh reference
+/// exactly like the scene reader does, including the sub-asset form, and
+/// leaves the runtime-resolved ids alone (codec parity).
+int verify_prefab_mesh_reference_parity() {
+  constexpr const char *kPrefab =
+      "{\"version\":5,\"components\":{\"MeshComponent\":{"
+      "\"mesh\":\"01234567-89ab-cdef-fedc-ba9876543210\","
+      "\"material\":\"11223344-5566-7788-99aa-bbccddeeff00"
+      "#000000000000004d\"}}}";
   remove_prefab_file();
-  if (!write_prefab_text(kLegacyPrefab)) {
+  if (!write_prefab_text(kPrefab)) {
     return 71;
   }
 
@@ -516,7 +531,9 @@ int verify_prefab_legacy_mesh_id() {
   if (!world->get_mesh_component(entity, &mesh)) {
     return 74;
   }
-  if (mesh.meshAssetId != 4242ULL) {
+  if (!(mesh.meshRef == kRegistryMeshRef) ||
+      !(mesh.materialRef == kRegistryMaterialRef) ||
+      (mesh.meshAssetId != 0ULL) || (mesh.materialAssetId != 0ULL)) {
     return 75;
   }
   return 0;
@@ -552,7 +569,7 @@ int main() {
     return result;
   }
 
-  result = verify_prefab_legacy_mesh_id();
+  result = verify_prefab_mesh_reference_parity();
   if (result != 0) {
     return result;
   }

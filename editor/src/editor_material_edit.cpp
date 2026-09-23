@@ -87,6 +87,8 @@ void finalize_pending_gesture() noexcept {
   cmd->slotsBefore = g_state.gestureBeforeSlots;
   cmd->after = g_state.buffer;
   cmd->slotsAfter = g_state.textureSlots;
+  cmd->overridesBefore = g_state.gestureBeforeOverrides;
+  cmd->overridesAfter = runtime::editor_material_overrides(g_state.materialId);
   g_history.execute(cmd);
 }
 
@@ -162,11 +164,13 @@ void continue_pending_action() noexcept {
 } // namespace
 
 bool MaterialEditCommand::execute() noexcept {
-  return runtime::editor_set_material_params(materialId, after, slotsAfter);
+  return runtime::editor_restore_material(materialId, after, slotsAfter,
+                                          overridesAfter);
 }
 
 bool MaterialEditCommand::undo() noexcept {
-  return runtime::editor_set_material_params(materialId, before, slotsBefore);
+  return runtime::editor_restore_material(materialId, before, slotsBefore,
+                                          overridesBefore);
 }
 
 MaterialEditorState &material_editor_state() noexcept { return g_state; }
@@ -284,6 +288,8 @@ void material_editor_apply_frame(
       g_state.gestureActive = true;
       g_state.gestureBeforeParams = beforeFrameParams;
       g_state.gestureBeforeSlots = beforeFrameSlots;
+      g_state.gestureBeforeOverrides =
+          runtime::editor_material_overrides(g_state.materialId);
     }
     static_cast<void>(runtime::editor_set_material_params(
         g_state.materialId, g_state.buffer, g_state.textureSlots));

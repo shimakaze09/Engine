@@ -1,18 +1,15 @@
 #!/usr/bin/env python3
-# Self-tests for the tooling quality gates (audit M-27): the coverage
-# gate must reject NaN/missing/non-numeric reports and thresholds, the
-# perf gate's evaluate() must reject non-finite or non-positive
-# measurements and baselines, the asset metadata path audit must flag
-# absolute developer paths while passing repo-relative ones (audit L-03),
-# the Lua binding generator must reject
-# duplicate Lua names and invalid or reserved parameter identifiers
-# instead of emitting uncompilable or injected C++, the test timing
-# audit must hold functional tests to classified clock reads only, and
-# the documentation policy audit must hold the README's mirror of the
-# conditional noexcept rule to its conditional wording. Run from ctest as
+# Self-tests for the tooling quality gates: each gate is fed input that
+# holds the defect it exists to catch and must reject it, and clean
+# input it must pass. Covered: the coverage and perf gates, the asset
+# metadata path and identity audits, the Lua binding generator, module
+# dependencies, dependency pins, shader variants, content attributes,
+# test timing, comment quality, error handling, portable fopen,
+# duplicate primitives and document references. Run from ctest as
 # engine_integration_tool_gates.
 
 import importlib.util
+import json
 import re
 import subprocess
 import sys
@@ -193,8 +190,31 @@ def test_module_dependency_gate():
                      ["engine/physics/collider.h", "engine/scripting/vm.h"])
         write_source(clean, "editor/src/panels.cpp",
                      ["engine/runtime/world.h", "engine/renderer/device.h"])
+        # SDL where it belongs: the platform layer, and the one editor TU
+        # that drives the ImGui SDL3 backend.
+        write_source(clean, "core/src/platform.cpp", ["SDL3/SDL.h"])
+        write_source(clean, "editor/src/editor.cpp",
+                     ["backends/imgui_impl_sdl3.h", "SDL3/SDL.h"])
         check(run([script, "--root", str(clean)]) == 0,
               "module deps: a strictly downward tree passes")
+
+        # SDL anywhere else is the platform layer leaking (issue #312). The
+        # tracked users are excused only for this checkout, so an alternate
+        # root sees the pipeline's pump as the violation it is.
+        sdl_runtime = tmp / "sdl_runtime"
+        write_source(sdl_runtime, "runtime/src/engine_pipeline.cpp",
+                     ["SDL3/SDL.h"])
+        check(run([script, "--root", str(sdl_runtime)]) != 0,
+              "module deps: SDL included outside the platform layer fails")
+
+        # The ImGui SDL3 backend header declares SDL types, so including it
+        # from another editor TU is the same leak by a side door -- the one
+        # seven panels used with no call into it.
+        sdl_backend = tmp / "sdl_backend"
+        write_source(sdl_backend, "editor/src/editor_panels_main.cpp",
+                     ["backends/imgui_impl_sdl3.h"])
+        check(run([script, "--root", str(sdl_backend)]) != 0,
+              "module deps: the ImGui SDL3 backend outside editor.cpp fails")
 
         # Upward: the issue #309 class, a subsystem reaching into runtime.
         upward = tmp / "upward"
@@ -715,10 +735,12 @@ def write_attribute_fixture(root, attributes, tracked):
     return root
 
 
-def write_identity_fixture(root, files):
+def write_identity_fixture(root, files, untracked=None):
     """A throwaway git work tree carrying a copy of the real asset type
     table (the gate reads its suffixes from there) plus the given staged
-    files, each a {relative path: contents} pair."""
+    files, each a {relative path: contents} pair. `untracked` files are
+    written after staging, so they are present on disk and not tracked —
+    the shape a .gitignore rule produces."""
     root.mkdir(parents=True, exist_ok=True)
     subprocess.run(["git", "-C", str(root), "init", "-q"], check=True,
                    capture_output=True)
@@ -734,6 +756,10 @@ def write_identity_fixture(root, files):
         path.write_text(contents, encoding="utf-8")
     subprocess.run(["git", "-C", str(root), "add", "-A"], check=True,
                    capture_output=True)
+    for relative, contents in (untracked or {}).items():
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(contents, encoding="utf-8")
     return root
 
 
@@ -742,11 +768,23 @@ def sidecar_text(guid):
     return '{"schemaVersion": 1, "guid": "%s"}\n' % guid
 
 
+def cook_stamp_text(guid, outputs):
+    """A cook stamp claiming `outputs`, each path relative to the stamp,
+    in the ASSET plus OUTPUT shape the packer writes."""
+    lines = ["SCHEMA 5", "TOOL_VERSION 4", "SOURCE_HASH 0123456789abcdef",
+             "SOURCE_GUID %s" % guid]
+    for index, relative in enumerate(outputs):
+        lines.append("OUTPUT %016x %s" % (index + 1, relative))
+        lines.append("ASSET %016x %s" % (index + 1, relative))
+    return "\n".join(lines) + "\n"
+
+
 def test_asset_identity_gate():
     """The identity gate must fail an identity-bearing asset with no
     committed sidecar, two sidecars claiming one GUID (naming every
-    colliding path and picking no winner), and two tracked paths that
-    differ only by case; and pass on this checkout."""
+    colliding path and picking no winner), two tracked paths that differ
+    only by case, and a tracked cooked output no tracked cook stamp claims
+    (issue #631); and pass on this checkout."""
     script = str(TOOLS / "check_asset_identity.py")
     one = "11111111-1111-4111-8111-111111111111"
     two = "22222222-2222-4222-8222-222222222222"
@@ -761,10 +799,67 @@ def test_asset_identity_gate():
                 "assets/scripts/hop.lua": "x\n",
                 "assets/scripts/hop.lua.meta": sidecar_text(two),
                 # A cooked output owns no identity of its own, so it needs
-                # no sidecar and must not be reported as missing one.
+                # no sidecar and must not be reported as missing one — but
+                # it does need the stamp that says whose output it is.
                 "assets/props/coin.mesh": "x\n",
+                "assets/props/coin.mesh.cookstamp":
+                    cook_stamp_text(one, ["coin.mesh"]),
             }))]) == 0,
               "identity: every source with a committed sidecar passes")
+
+        # Issue #631: the stamp is on the machine that cooked it and in no
+        # clone, so the output's identity is unnameable everywhere else.
+        orphan = write_identity_fixture(
+            tmp / "orphan", {
+                "assets/props/coin.gltf": "x\n",
+                "assets/props/coin.gltf.meta": sidecar_text(one),
+                "assets/props/coin.mesh": "x\n",
+            },
+            untracked={
+                "assets/props/coin.mesh.cookstamp":
+                    cook_stamp_text(one, ["coin.mesh"]),
+            })
+        completed = subprocess.run(
+            [sys.executable, script, "--root", str(orphan)],
+            capture_output=True, text=True)
+        check(completed.returncode != 0,
+              "identity: a cooked output whose stamp is untracked fails")
+        check("coin.mesh.cookstamp" in completed.stdout,
+              "identity: the orphan finding names the untracked stamp")
+
+        check(run([script, "--root", str(write_identity_fixture(
+            tmp / "nostamp", {
+                "assets/props/coin.gltf": "x\n",
+                "assets/props/coin.gltf.meta": sidecar_text(one),
+                "assets/props/coin.mesh": "x\n",
+            }))]) != 0,
+              "identity: a cooked output with no stamp at all fails")
+
+        # A stamp's claims resolve against the stamp's own directory, so a
+        # like-named claim one directory over must not cover this output.
+        check(run([script, "--root", str(write_identity_fixture(
+            tmp / "elsewhere", {
+                "assets/props/coin.gltf": "x\n",
+                "assets/props/coin.gltf.meta": sidecar_text(one),
+                "assets/props/coin.mesh": "x\n",
+                "assets/other/coin.mesh.cookstamp":
+                    cook_stamp_text(one, ["coin.mesh"]),
+            }))]) != 0,
+              "identity: a stamp in another directory claims nothing here")
+
+        # A stamp claims its siblings too, so one stamp covers the whole
+        # kit a single source cooked into.
+        check(run([script, "--root", str(write_identity_fixture(
+            tmp / "siblings", {
+                "assets/hero.gltf": "x\n",
+                "assets/hero.gltf.meta": sidecar_text(one),
+                "assets/hero.mesh": "x\n",
+                "assets/hero.skel": "x\n",
+                "assets/hero.idle.anim": "x\n",
+                "assets/hero.mesh.cookstamp": cook_stamp_text(
+                    one, ["hero.mesh", "hero.skel", "hero.idle.anim"]),
+            }))]) == 0,
+              "identity: one stamp claiming its whole cooked kit passes")
 
         check(run([script, "--root", str(write_identity_fixture(
             tmp / "missing", {
@@ -807,6 +902,97 @@ def test_asset_identity_gate():
                       "identity: paths differing only by case fail")
 
         check(run([script]) == 0, "identity: this checkout passes")
+
+
+def write_variant_fixture(root, models, rows, variants):
+    """A tree with just the three files the shader-variant gate reads: the
+    ShadingModel enum, the engine's variant table, and the cook manifest."""
+    header = root / "renderer" / "include" / "engine" / "renderer"
+    header.mkdir(parents=True, exist_ok=True)
+    enumerators = ", ".join("%s = %dU" % (name, index)
+                            for index, name in enumerate(models))
+    (header / "material.h").write_text(
+        "enum class ShadingModel : std::uint8_t { %s };\n" % enumerators,
+        encoding="utf-8")
+
+    source = root / "renderer" / "src"
+    source.mkdir(parents=True, exist_ok=True)
+    table = ",\n".join(
+        '        {ShadingModel::%s, "%s", "%s"}' % (model, define,
+                                                    model.lower())
+        for model, define in rows)
+    (source / "command_buffer_init_core.cpp").write_text(
+        "    const ModelVariant kModelVariants[] = {\n%s};\n" % table,
+        encoding="utf-8")
+
+    manifest = root / "assets" / "shaders" / "bgfx"
+    manifest.mkdir(parents=True, exist_ok=True)
+    (manifest / "shaders.manifest").write_text(
+        json.dumps({"shaders": [
+            {"source": "pbr.fs.sc", "type": "fragment",
+             "output": "pbr.frag", "variants": variants}]}),
+        encoding="utf-8")
+    return root
+
+
+def test_shader_variant_gate():
+    """The shader-variant gate must fail when the engine can request a
+    define set the manifest does not cook, and when a shading model has no
+    row in the variant table at all -- both of which fall back to a stage's
+    default binary in silence (#635/#615). It must pass on this checkout."""
+    script = str(TOOLS / "check_shader_variants.py")
+    every = [[], ["PBR_FULL"],
+             ["ENGINE_SHADING_TOON"], ["ENGINE_SHADING_TOON", "PBR_FULL"],
+             ["ENGINE_SHADING_UNLIT"], ["ENGINE_SHADING_UNLIT", "PBR_FULL"]]
+    rows = [("Toon", "ENGINE_SHADING_TOON"),
+            ("Unlit", "ENGINE_SHADING_UNLIT")]
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+
+        check(run([script, "--root", str(write_variant_fixture(
+            tmp / "clean", ["Pbr", "Toon", "Unlit"], rows, every))]) == 0,
+              "variants: every requestable set cooked passes")
+
+        # PBR_FULL is chosen at runtime by the sampler budget, so cooking
+        # only one form of a model's set still leaves a silent fallback.
+        check(run([script, "--root", str(write_variant_fixture(
+            tmp / "half", ["Pbr", "Toon", "Unlit"], rows,
+            [v for v in every if v != ["ENGINE_SHADING_TOON", "PBR_FULL"]]
+            ))]) != 0,
+              "variants: a model cooked without its PBR_FULL form fails")
+
+        missing = write_variant_fixture(
+            tmp / "missing", ["Pbr", "Toon", "Unlit"], rows,
+            [v for v in every if "ENGINE_SHADING_UNLIT" not in v])
+        completed = subprocess.run(
+            [sys.executable, script, "--root", str(missing)],
+            capture_output=True, text=True)
+        check(completed.returncode != 0,
+              "variants: an uncooked model define fails")
+        check("ENGINE_SHADING_UNLIT" in completed.stdout,
+              "variants: the finding names the uncooked define")
+
+        # A model in the enum with no variant-table row loads no program of
+        # its own, which is the same silent fallback one layer earlier.
+        untabled = write_variant_fixture(
+            tmp / "untabled", ["Pbr", "Toon", "Unlit", "Sketch"], rows,
+            every)
+        completed = subprocess.run(
+            [sys.executable, script, "--root", str(untabled)],
+            capture_output=True, text=True)
+        check(completed.returncode != 0,
+              "variants: a model with no variant-table row fails")
+        check("Sketch" in completed.stdout,
+              "variants: the finding names the untabled model")
+
+        # The default model is what everything else falls back to, so it
+        # needs no define and no row.
+        check(run([script, "--root", str(write_variant_fixture(
+            tmp / "default_only", ["Pbr"], rows, every))]) == 0,
+              "variants: the default model needs no define of its own")
+
+    check(run([script]) == 0, "variants: this checkout passes")
 
 
 def test_content_attributes_gate():
@@ -1218,6 +1404,17 @@ def test_duplicate_primitive_gate():
             "tests_exempt", "tests/integration/a.cpp",
             "// Purpose.\nauto h = 1099511628211ULL;\n")]) == 0,
               "duplicate primitives: the test tree is out of scope")
+        seam = "// Purpose.\nconst RenderDevice *render_device() noexcept {\n"
+        check(run([script, "--root", case(
+            "test_seam", "tests/unit/a_test.cpp", seam)]) != 0,
+              "duplicate primitives: a test defining its own device seam is "
+              "a finding")
+        check(run([script, "--root", case(
+            "test_seam_owner", "tests/fake_render_device.cpp", seam)]) == 0,
+              "duplicate primitives: the shared fake owns the device seam")
+        check(run([script, "--root", case(
+            "prod_seam", "renderer/src/render_device.cpp", seam)]) == 0,
+              "duplicate primitives: the real device defines the seam")
         owner = write_comment_fixture(
             tmp / "owner", "core/include/engine/core/hash.h",
             "// Purpose.\nconstexpr auto p = 1099511628211ULL;\n")
@@ -1229,6 +1426,60 @@ def test_duplicate_primitive_gate():
 
     check(run([script]) == 0,
           "duplicate primitives: this checkout passes the gate")
+
+
+def test_doc_reference_gate():
+    """The document reference gate must reject a backticked path, a
+    relative link and a test name that no longer exist, accept ones that
+    do (and a ctest -R prefix), skip fenced code, templates and prose
+    that only looks like a path, and pass this checkout."""
+    script = str(TOOLS / "check_doc_references.py")
+
+    def tree(tmp, name, doc_text, files=(), cmake=""):
+        root = tmp / name
+        (root / "docs").mkdir(parents=True)
+        (root / "docs" / "guide.md").write_text(doc_text, encoding="utf-8")
+        for rel in files:
+            path = root / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("x\n", encoding="utf-8")
+        (root / "tests").mkdir(exist_ok=True)
+        (root / "tests" / "CMakeLists.txt").write_text(cmake,
+                                                        encoding="utf-8")
+        return str(root)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        check(run([script, "--root", tree(
+            tmp, "gone", "See `core/src/gone.cpp`.\n")]) != 0,
+              "doc references: a backticked path that is gone is a finding")
+        check(run([script, "--root", tree(
+            tmp, "here", "See `core/src/here.cpp:12-20`.\n",
+            files=["core/src/here.cpp"])]) == 0,
+              "doc references: an existing path with a line range passes")
+        check(run([script, "--root", tree(
+            tmp, "link", "Read [the plan](missing.md).\n")]) != 0,
+              "doc references: a dead relative link is a finding")
+        check(run([script, "--root", tree(
+            tmp, "linkok", "Read [the plan](plan.md#top) or "
+            "[the site](https://example.com/x).\n",
+            files=["docs/plan.md"])]) == 0,
+              "doc references: live links and URLs pass")
+        check(run([script, "--root", tree(
+            tmp, "test", "Run `engine_unit_renamed`.\n",
+            cmake="engine_add_test_executable(engine_unit_current)\n")]) != 0,
+              "doc references: an unregistered test name is a finding")
+        check(run([script, "--root", tree(
+            tmp, "prefix", "Run `-R engine_unit_cur` and engine_unit_current.\n",
+            cmake="engine_add_test_executable(engine_unit_current)\n")]) == 0,
+              "doc references: a registered name and a -R prefix pass")
+        check(run([script, "--root", tree(
+            tmp, "skip", "```\ncat core/src/gone.cpp\n```\n"
+            "Template `tools/<name>/x.py`, glob `core/*.h`, prose `and/or`.\n")]) == 0,
+              "doc references: fenced code, templates and prose are skipped")
+
+    check(run([script]) == 0,
+          "doc references: this checkout's documents reference only what exists")
 
 
 def main():
@@ -1245,6 +1496,8 @@ def main():
     test_portable_fopen_gate()
     test_duplicate_primitive_gate()
     test_asset_identity_gate()
+    test_shader_variant_gate()
+    test_doc_reference_gate()
     if failures:
         print(f"\nFAILED ({len(failures)} failure(s))")
         return 1

@@ -34,6 +34,7 @@ engine_add_module_library(engine_renderer
     src/gpu_profiler.cpp
     src/light_culling.cpp
     src/mesh_loader.cpp
+    src/material_inheritance.cpp
     src/material_loader.cpp
     src/material_writer.cpp
     src/mesh_primitives.cpp

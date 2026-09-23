@@ -1,6 +1,9 @@
-// Verifies the editor-facing mesh asset request entry point: no published
-// service yields no id, and a published service turns a virtual path into
-// the path-derived asset id with the database marked Loading.
+// Verifies the editor-facing asset entry points: no published service
+// yields no id, a published service turns a virtual path into the
+// path-derived asset id with the database marked Loading, and an asset's
+// persistent identity is reported as the catalog holds it -- never
+// invented for an asset that carries none, because an editor gesture
+// writes that identity into a saved document.
 
 #include "engine/core/vfs.h"
 #include "engine/renderer/asset_database.h"
@@ -80,6 +83,73 @@ int check_request_marks_asset_loading() noexcept {
   return finish(0);
 }
 
+/// A gesture that points a component at an asset needs the identity a
+/// saved document will name. The bridge reports what the catalog holds
+/// and nothing more: no service, an unknown id, and a record registered
+/// without an identity all read as a nil reference, while a registered
+/// identity comes back whole.
+int check_asset_ref_reports_only_catalogued_identity() noexcept {
+  engine::runtime::set_editor_asset_service(nullptr);
+  if (engine::core::asset_ref_is_valid(engine::runtime::editor_asset_ref(7ULL))) {
+    return 20;
+  }
+
+  std::unique_ptr<engine::renderer::AssetDatabase> database(
+      new (std::nothrow) engine::renderer::AssetDatabase());
+  if (database == nullptr) {
+    return 21;
+  }
+  engine::runtime::EngineAssetDatabaseService service{};
+  service.database = database.get();
+  engine::runtime::set_editor_asset_service(&service);
+  const auto finish = [](int result) noexcept {
+    engine::runtime::set_editor_asset_service(nullptr);
+    return result;
+  };
+
+  // A nil id and an id no record answers for are both nil, not a guess.
+  if (engine::core::asset_ref_is_valid(engine::runtime::editor_asset_ref(0ULL)) ||
+      engine::core::asset_ref_is_valid(
+          engine::runtime::editor_asset_ref(0xABCDEFULL))) {
+    return finish(22);
+  }
+
+  // A record the mount walk could give no identity stays identity-less
+  // here: a made-up reference would name a different asset next run.
+  engine::renderer::AssetMetadata unidentified{};
+  unidentified.assetId = 101ULL;
+  unidentified.typeTag = engine::renderer::AssetTypeTag::Mesh;
+  engine::renderer::write_metadata_path(&unidentified.filePath,
+                                       "edtest/unimported.mesh");
+  if (!engine::renderer::register_asset_metadata(database.get(),
+                                                 unidentified)) {
+    return finish(23);
+  }
+  if (engine::core::asset_ref_is_valid(
+          engine::runtime::editor_asset_ref(101ULL))) {
+    return finish(24);
+  }
+
+  // A catalogued identity comes back exactly, sub-asset local id included.
+  constexpr engine::core::AssetRef kRef{
+      engine::core::AssetGuid{0x0123456789abcdefULL, 0xfedcba9876543210ULL},
+      0x432408a2e33116bcULL};
+  engine::renderer::AssetMetadata identified{};
+  identified.assetId = 202ULL;
+  identified.typeTag = engine::renderer::AssetTypeTag::Mesh;
+  identified.ref = kRef;
+  engine::renderer::write_metadata_path(&identified.filePath,
+                                        "edtest/imported.mesh");
+  if (!engine::renderer::register_asset_metadata(database.get(), identified)) {
+    return finish(25);
+  }
+  if (!(engine::runtime::editor_asset_ref(202ULL) == kRef)) {
+    return finish(26);
+  }
+
+  return finish(0);
+}
+
 } // namespace
 
 int main() {
@@ -90,6 +160,12 @@ int main() {
   }
 
   result = check_request_marks_asset_loading();
+  if (result != 0) {
+    std::fprintf(stderr, "editor_asset_request_test failed: %d\n", result);
+    return result;
+  }
+
+  result = check_asset_ref_reports_only_catalogued_identity();
   if (result != 0) {
     std::fprintf(stderr, "editor_asset_request_test failed: %d\n", result);
     return result;

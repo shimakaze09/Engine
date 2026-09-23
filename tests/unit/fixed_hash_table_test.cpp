@@ -1,5 +1,6 @@
 // Verifies FixedHashTable insert/find/erase/tombstone-reuse behavior,
-// including probe-chain integrity across deletions and full-table fallback.
+// including probe-chain integrity across deletions, full-table fallback and
+// the probe length a lookup reports.
 
 #include "engine/core/fixed_hash_table.h"
 
@@ -141,15 +142,45 @@ int test_clear() {
   return 0;
 }
 
+/// probe_length counts the slots a lookup visits: one for a hit in its home
+/// slot or a miss on an empty one, one more per tombstone passed, and the
+/// whole table for a miss when nothing is empty.
+int test_probe_length() {
+  FixedHashTable<std::uint32_t, int, 8U> table;
+  if (table.probe_length(5U) != 1U) {
+    return 40;
+  }
+  if (!table.insert(5U, 5) || (table.probe_length(5U) != 1U)) {
+    return 41;
+  }
+  if (!table.erase(5U) || (table.probe_length(5U) != 2U)) {
+    return 42;
+  }
+  table.clear();
+  for (std::uint32_t key = 1U; key <= 8U; ++key) {
+    if (!table.insert(key, 0)) {
+      return 43;
+    }
+  }
+  for (std::uint32_t key = 1U; key <= 8U; ++key) {
+    const std::size_t probe = table.probe_length(key);
+    if ((probe == 0U) || (probe > 8U)) {
+      return 44;
+    }
+  }
+  if (table.probe_length(99U) != 8U) {
+    return 45;
+  }
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
 int main() {
   const int results[] = {
-      test_round_trip(),
-      test_probe_chain_integrity(),
-      test_tombstone_reuse(),
-      test_clear(),
+      test_round_trip(), test_probe_chain_integrity(), test_tombstone_reuse(),
+      test_clear(),      test_probe_length(),
   };
 
   for (const int result : results) {

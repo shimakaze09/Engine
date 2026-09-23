@@ -7,6 +7,8 @@
 #include "engine/core/platform.h"
 #include "engine/core/touch_input.h"
 
+#include "../platform_event_from_sdl.h"
+
 #if defined(__clang__) && (defined(__x86_64__) || defined(__i386__)) &&        \
     !defined(__PRFCHWINTRIN_H)
 #define __PRFCHWINTRIN_H // NOLINT(bugprone-reserved-identifier)
@@ -104,7 +106,7 @@ void sim_finger_down(SDL_FingerID fingerId, float x, float y) noexcept {
   ev.tfinger.x = x;
   ev.tfinger.y = y;
   ev.tfinger.pressure = 1.0F;
-  input_process_event(&ev);
+  input_process_event(engine::tests::from_sdl(ev));
 }
 
 void sim_finger_move(SDL_FingerID fingerId, float x, float y, float dx,
@@ -117,7 +119,7 @@ void sim_finger_move(SDL_FingerID fingerId, float x, float y, float dx,
   ev.tfinger.dx = dx;
   ev.tfinger.dy = dy;
   ev.tfinger.pressure = 1.0F;
-  input_process_event(&ev);
+  input_process_event(engine::tests::from_sdl(ev));
 }
 
 void sim_finger_cancel(SDL_FingerID fingerId, float x, float y) noexcept {
@@ -127,7 +129,7 @@ void sim_finger_cancel(SDL_FingerID fingerId, float x, float y) noexcept {
   ev.tfinger.x = x;
   ev.tfinger.y = y;
   ev.tfinger.pressure = 0.0F;
-  input_process_event(&ev);
+  input_process_event(engine::tests::from_sdl(ev));
 }
 
 void sim_finger_up(SDL_FingerID fingerId, float x, float y) noexcept {
@@ -137,7 +139,7 @@ void sim_finger_up(SDL_FingerID fingerId, float x, float y) noexcept {
   ev.tfinger.x = x;
   ev.tfinger.y = y;
   ev.tfinger.pressure = 0.0F;
-  input_process_event(&ev);
+  input_process_event(engine::tests::from_sdl(ev));
 }
 
 // ---------------------------------------------------------------------------
@@ -536,7 +538,14 @@ bool test_null_edge_cases() noexcept {
     return false;
   }
 
-  touch_process_event(nullptr);
+  // A null event used to be the edge case here; with a typed event a null
+  // one cannot be expressed, so the case that remains is an event with no
+  // touch meaning, which must change nothing.
+  touch_process_event(engine::core::PlatformEvent{});
+  if (get_active_touch(0U, nullptr)) {
+    shutdown_all();
+    return false;
+  }
 
   shutdown_all();
   return true;

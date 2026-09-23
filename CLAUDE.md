@@ -59,18 +59,29 @@ Calling a rule enforced without one of these three is prohibited.
   input, jobs. Fixed-size preallocated storage; no unordered containers,
   locks or virtual dispatch there without a profile and a budget.
 - **[CI]** Dependency flow is strictly downward, with no cycles or sideways
-  edges (`tools/check_module_deps.py`; the graph and its tracked
-  exceptions are in `docs/architecture.md`).
-- **[REVIEW]** Public headers are self-contained and never leak SDL, bgfx,
-  Lua, ImGui or ImGuizmo types. bgfx stays inside renderer implementation
-  (plus the editor's sanctioned ImGui backend), Lua inside scripting
-  implementation, editor-only behavior in `editor/` behind explicit
-  bridges.
+  edges (`tools/check_module_deps.py`; the graph is in
+  `docs/architecture.md`, the tracked exceptions in the gate's
+  `KNOWN_VIOLATIONS`).
+- **[CI][REVIEW]** Public headers are self-contained and never leak SDL,
+  bgfx, Lua, ImGui or ImGuizmo types. SDL includes stay in the platform
+  layer (`tools/check_module_deps.py`); the rest is review. bgfx stays
+  inside renderer implementation (plus the editor's sanctioned ImGui
+  backend), Lua inside scripting implementation, editor-only behavior in
+  `editor/` behind explicit bridges.
 - **[CI][REVIEW]** Comments follow the `comment` skill. Every source and
-  header carries a real file-level purpose comment
-  (`tools/check_source_comments.py`); filler, commented-out code and
-  untracked TODOs are rejected (`tools/check_comment_quality.py`).
-- **[CI][REVIEW]** Changes to math, ECS, physics, renderer or scripting
+  header opens with a file-level comment (`tools/check_source_comments.py`
+  checks it is there; that it states the file's purpose is review);
+  filler, commented-out code and untracked TODOs are rejected
+  (`tools/check_comment_quality.py`).
+- **[CI][REVIEW]** Documents move with the code. Every push updates, in the
+  same push, each document its change makes false: README, `docs/`, this
+  file, the skills, and the header comments describing the changed
+  behavior. A decision the code has moved past gets a status line saying
+  so. `tools/check_doc_references.py` rejects a document naming a path,
+  link or test that no longer exists; whether the prose still describes
+  the behavior is review, and a stale document is a defect filed and
+  fixed like any other.
+- **[REVIEW]** Changes to math, ECS, physics, renderer or scripting
   behavior require tests. Determinism-sensitive areas — world,
   serialization, physics, render prep, Lua API — pair with determinism
   tests.

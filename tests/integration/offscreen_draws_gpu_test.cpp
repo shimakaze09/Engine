@@ -43,8 +43,8 @@ int run(engine::EnginePipeline &pipeline, World &world) noexcept {
   using engine::tests::settle_frames;
 
   engine::tests::checked(engine::core::cvar_set_string("r_fog_mode", "off"), "r_fog_mode");
-  engine::runtime::Transform floorTransform{};
-  floorTransform.scale = engine::math::Vec3(60.0F, 1.0F, 60.0F);
+  const engine::runtime::Transform floorTransform =
+      engine::tests::framed_floor_transform(60.0F);
   const Entity sun = world.create_scene_object();
   engine::runtime::LightComponent sunLight{};
   // From behind the camera, forward and down: a caster behind the view

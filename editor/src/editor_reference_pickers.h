@@ -58,9 +58,17 @@ bool draw_entity_reference_picker(
 /// type. Shows the referenced asset's registered path, or a broken-
 /// reference warning with a Clear button when the id is unregistered.
 /// Returns true when the caller should treat *value as changed.
+///
+/// `outRef` is where the picked asset's persistent identity goes, for a
+/// field a document saves: the id says where the bytes are this session,
+/// the reference is what the document names, and the two are written
+/// together so a save can never carry one without the other. It stays
+/// null for a field that is addressed by id alone and never serialized,
+/// such as a material's texture slots.
 bool draw_asset_reference_picker(const char *label,
                                  content::AssetTypeTag typeTag,
-                                 std::uint64_t *value) noexcept;
+                                 std::uint64_t *value,
+                                 core::AssetRef *outRef = nullptr) noexcept;
 
 /// Draws a searchable combo box for a VFS path reference (script and
 /// animation-controller fields, which are addressed by path rather than by

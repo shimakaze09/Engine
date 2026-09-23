@@ -334,6 +334,87 @@ vec3 cook_torrance(vec3 N, vec3 V, vec3 L, vec3 radiance, vec3 albedo,
     return (kD * albedo / 3.14159265359 + specular) * radiance * NdotL;
 }
 
+#if ENGINE_SHADING_TOON
+// The toon surface response: two bands rather than a falloff, which is
+// what reads as drawn rather than lit. The terminator is soft by a fixed
+// width instead of a screen-space derivative, so the edge is stable
+// under camera motion and identical on every profile. A terminator
+// sweeps slowly across a surface, so a fixed width in NdotL is a usable
+// width in pixels wherever it lands.
+//
+// Diffuse only, deliberately. A ramp texture, rim light, authored shadow
+// colour and specular shape are the Toon model's phase-two sub-paths,
+// and none of their visual design is decided; this is the response a
+// scene needs before any of them exists. A provisional specular band
+// stood here and was removed: sized in NdotH rather than in pixels, it
+// collapsed below a pixel on a curved surface and aliased into a dashed
+// line along a barrel's rim. Whatever shape phase two gives a toon
+// highlight may well need derivative-aware width to stay stable, which
+// is a decision for that design and not something to approximate here.
+#define ENGINE_TOON_TERMINATOR 0.25
+#define ENGINE_TOON_SOFTNESS 0.05
+#define ENGINE_TOON_SHADED_LEVEL 0.45
+
+// The lit band's step above the shadow tone, for one light. The shadow
+// tone itself is not here: see toon_shadow_tone below.
+//
+// Only the step is per-light, and that is what makes the model behave.
+// The shadow tone is a property of the surface, so a scene's second and
+// third light must not each add one — when they did, three lights behind
+// a surface made its shadow side brighter than one light made its lit
+// side. The directional shadow term multiplies whatever this returns, so
+// keeping the tone out of it is also what stops the shadow map's own
+// boundary drawing itself across the shadow side as a third band; what
+// the shadow term does instead is drop a lit area back to the tone,
+// which is what a cast shadow should do to a cel-shaded surface.
+vec3 toon_response(vec3 N, vec3 L, vec3 radiance, vec3 albedo) {
+    float NdotL = dot(N, L);
+    float band = smoothstep(ENGINE_TOON_TERMINATOR - ENGINE_TOON_SOFTNESS,
+                            ENGINE_TOON_TERMINATOR + ENGINE_TOON_SOFTNESS,
+                            NdotL);
+    // The Lambertian 1/pi normalisation belongs to a diffuse response
+    // whatever shapes it. The band replaces the NdotL falloff, not the
+    // normalisation, so leaving it out makes a toon surface pi times
+    // brighter than the same albedo under the same light shaded as
+    // physically based. That is not a stylistic choice: at that
+    // brightness the tonemap's shoulder compresses the channel ratios,
+    // and an authored colour reads back as near-white whatever it was.
+    float lift = (1.0 - ENGINE_TOON_SHADED_LEVEL) * band;
+    return radiance * albedo * lift / 3.14159265359;
+}
+
+// The flat tone the whole shadow side carries: the material's own colour
+// at the shaded level, added once for the surface rather than once per
+// light, and never multiplied by a shadow map.
+//
+// This is what makes the model read as drawn. A shadow side that falls
+// to ambient is a lit sphere with a dark half; a shadow side that is one
+// flat darker version of the base colour is cel shading. It is scaled by
+// the primary directional light's radiance rather than authored, so it
+// tracks the scene's exposure and stays inside phase one — an authored
+// shadow colour is the phase-two field that replaces this.
+vec3 toon_shadow_tone(vec3 albedo) {
+    if (int(u_dirLightCount.x) <= 0) {
+        return vec3_splat(0.0);
+    }
+    vec3 radiance =
+        u_dirLightColorIntensity[0].rgb * u_dirLightColorIntensity[0].w;
+    return radiance * albedo * ENGINE_TOON_SHADED_LEVEL / 3.14159265359;
+}
+#endif
+
+// One surface response per shading model. The light loops in main are
+// written once and call this, so a model decides how a surface answers a
+// light and nothing else about the pass.
+vec3 surface_response(vec3 N, vec3 V, vec3 L, vec3 radiance, vec3 albedo,
+                      float metallic, float roughness, vec3 F0) {
+#if ENGINE_SHADING_TOON
+    return toon_response(N, L, radiance, albedo);
+#else
+    return cook_torrance(N, V, L, radiance, albedo, metallic, roughness, F0);
+#endif
+}
+
 float compute_distance_fog_factor(float distanceToCamera) {
     int mode = int(uFogMode.x);
     if (mode == 1) {
@@ -420,6 +501,22 @@ void main() {
         discard;
     }
     float opacity = clamp(u_opacity.x, 0.0, 1.0);
+
+#if ENGINE_SHADING_UNLIT
+    // Unlit answers no light: no loops, no ambient, no image-based term,
+    // and no fog either, since fog is the scene acting on a surface and
+    // this surface does not answer the scene. Alpha modes still apply,
+    // because those are the material's own.
+    //
+    // What leaves here is the authored value as scene radiance, not as a
+    // display colour: the post stack's exposure and tonemap still act on
+    // it, as they act on every pixel, so an authored 1.0 lands wherever
+    // the output transform puts it and not at white. A surface that must
+    // show one exact colour on screen — a UI plane, a mask — needs the
+    // output transform not to apply to it, which is a pass-level
+    // decision and not something a shading model can express.
+    gl_FragColor = vec4(albedo + emissive, opacity);
+#else
     vec3 F0 = mix(vec3_splat(0.04), albedo, metallic);
     vec3 Lo = vec3_splat(0.0);
 
@@ -437,8 +534,8 @@ void main() {
         // the GL pbr.frag contract.
         shadow = (i == 0) ? compute_directional_shadow(v_worldpos) : 1.0;
 #endif
-        Lo += cook_torrance(N, V, L, radiance, albedo, metallic, roughness,
-                            F0) * shadow;
+        Lo += surface_response(N, V, L, radiance, albedo, metallic,
+                               roughness, F0) * shadow;
     }
 
     int pointCount = int(u_pointLightCount.x);
@@ -462,8 +559,8 @@ void main() {
 #if PBR_FULL
         shadow = compute_point_shadow(v_worldpos, i);
 #endif
-        Lo += cook_torrance(N, V, L, radiance, albedo, metallic, roughness,
-                            F0) * shadow;
+        Lo += surface_response(N, V, L, radiance, albedo, metallic,
+                               roughness, F0) * shadow;
     }
 
     int spotCount = int(u_spotLightCount.x);
@@ -494,12 +591,24 @@ void main() {
 #if PBR_FULL
         shadow = compute_spot_shadow(v_worldpos, i);
 #endif
-        Lo += cook_torrance(N, V, L, radiance, albedo, metallic, roughness,
-                            F0) * shadow;
+        Lo += surface_response(N, V, L, radiance, albedo, metallic,
+                               roughness, F0) * shadow;
     }
 
     vec3 ambient = vec3_splat(0.03) * albedo * ao;
-#if PBR_FULL
+#if ENGINE_SHADING_TOON
+    // Added here, outside the light loops, so it is the surface's one
+    // shadow tone and not a per-light floor, and outside the shadow
+    // multiply, so the shadow map cannot draw its boundary across it.
+    // A fully lit fragment reaches the tone plus every light's lift,
+    // which for the primary light alone is the shaded level plus its
+    // complement: exactly the lit band.
+    ambient += toon_shadow_tone(albedo) * ao;
+#endif
+#if PBR_FULL && !ENGINE_SHADING_TOON
+    // Image-based ambient is a physically-based term: it would wash the
+    // toon response's banding back into a gradient, which is the one
+    // thing that model exists to avoid.
     if (uIblEnabled.x != 0.0) {
         ambient = ibl_ambient(N, V, albedo, metallic, roughness) * ao;
     }
@@ -511,4 +620,5 @@ void main() {
     float fogFactor =
         clamp(1.0 - ((1.0 - distanceFog) * (1.0 - heightFog)), 0.0, 1.0);
     gl_FragColor = vec4(mix(color, uFogColor.xyz, fogFactor), opacity);
+#endif
 }

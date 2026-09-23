@@ -1,13 +1,12 @@
-// Pins the material loader's schema-version refusal (issue #369): the
-// version gate in parse_material_text is what stops a material written by a
-// newer engine — or one whose version field is malformed — from loading as
-// the subset this build recognizes and later being resaved over the author's
-// file as that reduction. The upper bound already has one pinned case in
-// engine_unit_material_asset; this suite pins the rest of the gate through
-// both production entry points: every refused version shape fails
-// load_material_asset with Parse, a refused reload_material_asset leaves the
-// previously registered record serving its exact prior values, and the
-// accepted revisions (1, 2, absent-as-v1) still commit.
+// Pins the material loader's schema-version refusal: the version gate in
+// parse_material_text is what stops a material written by a newer engine,
+// or by an older one, or with a malformed version field, from loading as
+// the subset this build recognizes and later being resaved over the
+// author's file as that reduction. The gate is exact, so the suite pins
+// one accepted revision and every refused shape around it, through both
+// production entry points: a refused document fails load_material_asset
+// with Parse, and a refused reload_material_asset leaves the previously
+// registered record serving its exact prior values.
 
 #include <cstdio>
 #include <cstring>
@@ -59,25 +58,27 @@ struct VersionCase final {
   bool accepted;
 };
 
-// Revisions 1 and 2 are the supported range; an absent key is documented v1
-// semantics. Everything else — zero, future, negative, fractional,
-// past-uint32, or a non-integer JSON type — must be refused. Mirrors the
-// scene loader's table (engine_unit_scene_version_gate) with the material
-// schema's own accepted set.
+// Revision 3 is the one revision this build reads. Every older revision
+// is refused rather than migrated, and a document omitting the key names
+// no revision at all, so it is refused too. Everything else -- zero,
+// future, negative, fractional, past-uint32, or a non-integer JSON type
+// -- is refused as before. Mirrors the scene loader's table
+// (engine_unit_scene_version_gate) with the material schema's revision.
 constexpr VersionCase kCases[] = {
-    {"{\"version\":1,\"roughness\":0.25}", true},
-    {"{\"version\":2,\"roughness\":0.25}", true},
-    {"{\"roughness\":0.25}", true},
-    {"{\"version\":3,\"roughness\":0.25}", false},
+    {"{\"version\":3,\"roughness\":0.25}", true},
+    {"{\"version\":1,\"roughness\":0.25}", false},
+    {"{\"version\":2,\"roughness\":0.25}", false},
+    {"{\"roughness\":0.25}", false},
+    {"{\"version\":4,\"roughness\":0.25}", false},
     {"{\"version\":999,\"roughness\":0.25}", false},
     {"{\"version\":0,\"roughness\":0.25}", false},
     {"{\"version\":-1,\"roughness\":0.25}", false},
     {"{\"version\":1.5,\"roughness\":0.25}", false},
     {"{\"version\":4294967296,\"roughness\":0.25}", false},
-    {"{\"version\":\"2\",\"roughness\":0.25}", false},
+    {"{\"version\":\"3\",\"roughness\":0.25}", false},
     {"{\"version\":true,\"roughness\":0.25}", false},
     {"{\"version\":null,\"roughness\":0.25}", false},
-    {"{\"version\":[2],\"roughness\":0.25}", false},
+    {"{\"version\":[3],\"roughness\":0.25}", false},
 };
 
 // Every case runs against its own file so an accepted case's registration
@@ -135,7 +136,7 @@ void run_reload_cases(engine::renderer::AssetDatabase *database) noexcept {
   constexpr const char *kPath = "material_version_reload.json";
   constexpr const char *kVirtualPath = "mat/material_version_reload.json";
 
-  if (!write_material_file(kPath, "{\"version\":1,\"roughness\":0.25}")) {
+  if (!write_material_file(kPath, "{\"version\":3,\"roughness\":0.25}")) {
     check(false, "write reload baseline");
     return;
   }

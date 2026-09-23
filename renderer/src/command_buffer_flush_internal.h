@@ -264,4 +264,101 @@ void upload_skinned_gbuffer_uniforms(
 math::Mat4 sky_projection_matrix(const CameraState &camera,
                                  float aspect) noexcept;
 
+// --- One forward draw -----------------------------------------------------
+
+/// Every uniform location one forward-shaded draw needs from the program
+/// it is drawn with. The forward pass, the deferred path's transparent
+/// pass and each scene capture each used to name the same backend members
+/// inline, so a uniform added to one draw could be forgotten in the other
+/// two; naming the set once makes the three passes provably identical.
+///
+/// It is a parameter rather than a lookup because it is the seam a
+/// second shading model plugs into: one of these per program, chosen per
+/// draw run, is what binding a program per shading model needs.
+struct ForwardDrawProgram final {
+  ShaderParam albedo{};
+  ShaderParam roughness{};
+  ShaderParam metallic{};
+  ShaderParam opacity{};
+  ShaderParam emissive{};
+  ShaderParam hasAlbedoTexture{};
+  ShaderParam model{};
+  ShaderParam mvp{};
+  ShaderParam normalMatrix{};
+  /// Set to 0 per draw where the program carries the runtime instancing
+  /// toggle; invalid where the pass never instances.
+  ShaderParam useInstancing{};
+  MaterialTextureUniformLocs materialTextures{};
+};
+
+/// The physically-based program's forward-draw locations. The one place
+/// the pbr* members are read for a per-draw upload.
+ForwardDrawProgram pbr_forward_draw_program(const BackendState &backend) noexcept;
+
+/// The device textures a range of draws last bound, so consecutive draws
+/// sharing a material do not rebind. One instance per range, never
+/// shared across passes.
+struct ForwardDrawBindings final {
+  DeviceTextureHandle albedo{};
+  DeviceTextureHandle materialSlots[4] = {};
+};
+
+/// One maximal run of consecutive draws sharing a shading program.
+/// Render prep sorts the program id directly below the transparency bit,
+/// so in the opaque half each program occupies exactly one run and
+/// finding them is a scan rather than a sort. The transparent half sorts
+/// by depth first, so a program there can recur in many runs.
+struct ShadingProgramRun final {
+  std::size_t first = 0U;
+  std::size_t count = 0U;
+  /// The raw key field. A key can name a program nothing registered, so
+  /// callers resolve it through shading_program rather than indexing.
+  std::uint8_t programId = 0U;
+};
+
+/// Splits [start, end) of `view` into program runs, writing at most
+/// `capacity` of them and returning how many. A range whose draws all
+/// share one program yields one run, which is the common case and the
+/// reason this costs a scan and no allocation. More runs than `capacity`
+/// joins the tail onto the last run: a draw shaded by the wrong program
+/// is wrong, a draw missing entirely is worse.
+std::size_t partition_program_runs(const CommandBufferView &view,
+                                         std::size_t start, std::size_t end,
+                                         ShadingProgramRun *runs,
+                                         std::size_t capacity) noexcept;
+
+/// The program registered for `programId`. Falls back to the
+/// physically-based program when nothing is registered there, saying so
+/// once per process rather than per draw or not at all: an author who
+/// picks a program and sees a physically-lit surface is owed the reason.
+DeviceProgramHandle shading_program(const BackendState &backend,
+                                    std::uint8_t programId) noexcept;
+
+/// Uploads everything about a draw that does not depend on its
+/// transform: the material scalars, its foliage wind, its albedo texture
+/// (falling back to the opaque placeholder rather than leaving the
+/// pass's own render target bound, which WebGL rejects) and the four
+/// texture-backed slots. Split from the draw below because the opaque
+/// batching path uploads a batch's material once and then decides
+/// whether to issue it instanced.
+void upload_forward_material(const ForwardDrawProgram &program,
+                             const BackendState &backend,
+                             const RenderDevice *dev,
+                             const DrawCommand &command,
+                             ForwardDrawBindings *bindings) noexcept;
+
+/// Uploads one draw's transform through `program` and issues it,
+/// accumulating draw and triangle counts. The caller has already
+/// uploaded the material.
+///
+/// Together with upload_forward_material this is the whole per-draw
+/// forward path. The three passes that used to carry a copy of it now
+/// differ only in which range they walk, which program they pass, and
+/// their render state.
+void draw_forward_command(const ForwardDrawProgram &program,
+                          const RenderDevice *dev, const DrawCommand &command,
+                          const GpuMesh &mesh,
+                          const math::Mat4 &viewProjection,
+                          RendererFrameStats *frameStats) noexcept;
+
 } // namespace engine::renderer

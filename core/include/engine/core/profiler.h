@@ -1,4 +1,16 @@
 // Declares profiler types and APIs for the Engine core engine.
+//
+// Single-threaded by contract: the frame buffer, the scope stack and the
+// depth counter are plain globals, so a scope opened off the thread that
+// initialized the profiler would corrupt all three. The engine only
+// profiles pipeline stages, which all run on that thread, so enforcing
+// the contract costs one thread-id comparison per scope and buys back the
+// synchronisation a shared buffer would otherwise need on a hot path.
+//
+// profiler_begin_scope refuses a scope from any other thread and says so
+// once, rather than racing quietly. Profiling inside a job means giving
+// each thread its own buffer and merging at frame end, which is a change
+// to make when something actually needs it.
 
 #pragma once
 
@@ -17,7 +29,9 @@ void profiler_begin_frame() noexcept;
 /// Stamps the frame end used by profiler_frame_time_ms().
 void profiler_end_frame() noexcept;
 
-/// Begins a profiler scope. Returns false if the scope was not recorded.
+/// Begins a profiler scope. Returns false if the scope was not recorded --
+/// the frame is full, the nesting is too deep, or the caller is not the
+/// thread that initialized the profiler (see the note above).
 bool profiler_begin_scope(const char *name) noexcept;
 /// Closes the innermost open scope.
 void profiler_end_scope() noexcept;

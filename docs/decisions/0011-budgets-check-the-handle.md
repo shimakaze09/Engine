@@ -3,6 +3,9 @@
 **Date:** 2026-09-18. Decided by the maintainer agent on the owner's
 delegation; the owner may override.
 
+**Status:** `load_sound` conforms. `play_music` does not yet: it checks
+the size by path and then opens the file again by path.
+
 ## Context
 
 `play_music` checks a file's size from its metadata and then opens the

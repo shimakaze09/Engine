@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "engine/core/asset_identity.h"
 #include "engine/core/entity.h"
 #include "engine/math/component_types.h"
 #include "engine/math/world_component_types.h"
@@ -121,6 +122,16 @@ struct RuntimeServices final {
                    core::Entity entity) noexcept = nullptr;
   std::uint32_t (*content_epoch)(runtime::World *world) noexcept = nullptr;
   std::size_t (*alive_entity_count)(runtime::World *world) noexcept = nullptr;
+  // The gameplay random stream, drawn through the World so a script's
+  // randomness is part of the simulation state a run is reproducible
+  // from. Three operations rather than exposing the stream itself: the
+  // scripting side holds no simulation state of its own, so there is one
+  // place a reset has to reach rather than two to keep in step.
+  double (*random_double)(runtime::World *world) noexcept = nullptr;
+  std::int64_t (*random_range)(runtime::World *world, std::int64_t minimum,
+                               std::int64_t maximum) noexcept = nullptr;
+  void (*seed_random)(runtime::World *world,
+                      std::uint64_t seed) noexcept = nullptr;
   core::Entity (*find_entity_by_index)(runtime::World *world,
                                        std::uint32_t index) noexcept = nullptr;
   core::Entity (*find_entity_by_name)(runtime::World *world,
@@ -286,8 +297,16 @@ struct RuntimeServices final {
   bool (*timer_slot_state)(runtime::World *world, std::size_t slot,
                            bool *outRepeat, bool *outActive) noexcept = nullptr;
   void (*timer_clear)(runtime::World *world) noexcept = nullptr;
-  std::size_t (*timer_tick)(runtime::World *world,
-                            float deltaSeconds) noexcept = nullptr;
+  // Coming due and firing are separate now. The pipeline advances the
+  // World's timers once per fixed step and dispatches once per frame, so
+  // when a timer comes due is simulation time rather than frame rate;
+  // this advance entry exists for callers outside the fixed step that
+  // step a world by hand.
+  std::size_t (*timer_advance)(runtime::World *world,
+                               float deltaSeconds) noexcept = nullptr;
+  // Runs the callbacks of the timers an advance marked as due. No delta:
+  // coming due was already decided, and this only dispatches it.
+  std::size_t (*timer_dispatch)(runtime::World *world) noexcept = nullptr;
 
   // Entity pools: kMaxEntityPools slots the runtime owns, each seeded
   // against the World's current contents and expiring with them.
@@ -402,6 +421,14 @@ struct RuntimeServices final {
   std::uint32_t (*load_asset_async)(const char *path,
                                     std::uint8_t priority) noexcept = nullptr;
   bool (*is_asset_ready)(std::uint32_t handleIndex) noexcept = nullptr;
+
+  // The persistent identity the catalog holds for an asset id, or a nil
+  // reference when the asset carries none. A script that points a
+  // component at an asset stores this beside the id: the id says where
+  // the bytes are this session, the reference is what a saved scene
+  // names, so a component assigned from Lua survives a save and reload.
+  core::AssetRef (*asset_ref_for_id)(std::uint64_t assetId) noexcept =
+      nullptr;
 };
 
 /// Binds the runtime world into an explicit service locator. Binding

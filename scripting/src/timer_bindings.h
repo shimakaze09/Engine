@@ -24,7 +24,9 @@ void cancel_lua_timer(std::uint32_t timerId) noexcept;
 void clear_lua_timer_bindings(lua_State *fallbackState) noexcept;
 
 /// Rewires restored Lua timers and advances the current world timer manager.
-void tick_lua_timers(lua_State *state, float deltaSeconds) noexcept;
+void advance_lua_timers(lua_State *state, float deltaSeconds) noexcept;
+/// Runs the callbacks an advance marked as due.
+void dispatch_lua_timers(lua_State *state) noexcept;
 
 /// Count of live Lua registry refs held by timer callbacks (test/production
 /// introspectiona: a scene transition must drain this to zero).

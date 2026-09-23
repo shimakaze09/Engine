@@ -4,8 +4,14 @@
 // scissors, alpha blending, and the embedded precompiled ocornut-imgui
 // shaders. Draws submit into a fixed late view (255) so the UI renders
 // after every engine pass regardless of the frame's view allocation.
-// ImTextureID carries RenderDevice::native_texture_id values, which the
-// bgfx backend defines as the bgfx texture handle index.
+//
+// ImGui owns its textures (ImGuiBackendFlags_RendererHasTextures): it asks
+// for its font atlas to be created, updated a rectangle at a time as new
+// glyphs are rasterized, and destroyed, so any glyph a font holds renders
+// the first time it is drawn -- a CJK name included -- with no glyph
+// ranges baked up front. ImTextureID is RenderDevice::native_texture_id's
+// value for engine textures and the same encoding for ImGui's own: the bgfx
+// handle index plus one, so 0 stays "no texture".
 
 #include "imgui_impl_bgfx.h"
 
@@ -41,8 +47,81 @@ const bgfx::EmbeddedShader kEmbeddedShaders[] = {
 
 bgfx::ProgramHandle g_program = BGFX_INVALID_HANDLE;
 bgfx::UniformHandle g_sampler = BGFX_INVALID_HANDLE;
-bgfx::TextureHandle g_fontTexture = BGFX_INVALID_HANDLE;
 bgfx::VertexLayout g_vertexLayout{};
+
+ImTextureID encode_texture(bgfx::TextureHandle handle) noexcept {
+  return static_cast<ImTextureID>(static_cast<std::uint64_t>(handle.idx) + 1U);
+}
+
+/// The bgfx handle an ImTextureID names; invalid for 0.
+bgfx::TextureHandle decode_texture(ImTextureID id) noexcept {
+  bgfx::TextureHandle handle = BGFX_INVALID_HANDLE;
+  const auto value = static_cast<std::uint64_t>(id);
+  if ((value != 0U) && (value <= 0xFFFFU)) {
+    handle.idx = static_cast<std::uint16_t>(value - 1U);
+  }
+  return handle;
+}
+
+/// Uploads one rectangle of an ImGui texture's pixels.
+void upload_rect(bgfx::TextureHandle handle, ImTextureData *tex, int x, int y,
+                 int w, int h) noexcept {
+  if ((w <= 0) || (h <= 0)) {
+    return;
+  }
+  const int pitch = tex->GetPitch();
+  // Rows are pitch apart in ImGui's buffer; the copy spans the first row's
+  // start to the last row's end and bgfx reads it with the same pitch.
+  const auto bytes =
+      static_cast<std::uint32_t>((pitch * (h - 1)) + (w * tex->BytesPerPixel));
+  bgfx::updateTexture2D(
+      handle, 0, 0, static_cast<std::uint16_t>(x),
+      static_cast<std::uint16_t>(y), static_cast<std::uint16_t>(w),
+      static_cast<std::uint16_t>(h), bgfx::copy(tex->GetPixelsAt(x, y), bytes),
+      static_cast<std::uint16_t>(pitch));
+}
+
+/// Honours one texture request ImGui queued: create, update or destroy.
+void update_texture(ImTextureData *tex) noexcept {
+  if (tex->Status == ImTextureStatus_WantCreate) {
+    // Only the RGBA32 format is requested (see ImGui_ImplBgfx_Init).
+    const bgfx::TextureHandle handle = bgfx::createTexture2D(
+        static_cast<std::uint16_t>(tex->Width),
+        static_cast<std::uint16_t>(tex->Height), false, 1,
+        bgfx::TextureFormat::RGBA8, 0,
+        bgfx::copy(tex->GetPixels(),
+                   static_cast<std::uint32_t>(tex->GetSizeInBytes())));
+    if (!bgfx::isValid(handle)) {
+      // Left as WantCreate, so the request is retried next frame; the text
+      // it holds is invisible until then, which is the most a failed
+      // allocation can leave.
+      return;
+    }
+    tex->SetTexID(encode_texture(handle));
+    tex->SetStatus(ImTextureStatus_OK);
+    return;
+  }
+  if (tex->Status == ImTextureStatus_WantUpdates) {
+    const bgfx::TextureHandle handle = decode_texture(tex->GetTexID());
+    if (bgfx::isValid(handle)) {
+      for (const ImTextureRect &rect : tex->Updates) {
+        upload_rect(handle, tex, rect.x, rect.y, rect.w, rect.h);
+      }
+    }
+    tex->SetStatus(ImTextureStatus_OK);
+    return;
+  }
+  // A destroy is honoured only once the texture has gone unused for a
+  // frame, since bgfx may still be drawing the previous one with it.
+  if ((tex->Status == ImTextureStatus_WantDestroy) && (tex->UnusedFrames > 0)) {
+    const bgfx::TextureHandle handle = decode_texture(tex->GetTexID());
+    if (bgfx::isValid(handle)) {
+      bgfx::destroy(handle);
+    }
+    tex->SetTexID(ImTextureID_Invalid);
+    tex->SetStatus(ImTextureStatus_Destroyed);
+  }
+}
 
 } // namespace
 
@@ -64,23 +143,13 @@ bool ImGui_ImplBgfx_Init() {
       .end();
 
   ImGuiIO &io = ImGui::GetIO();
-  unsigned char *pixels = nullptr;
-  int width = 0;
-  int height = 0;
-  io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
-  g_fontTexture = bgfx::createTexture2D(
-      static_cast<std::uint16_t>(width), static_cast<std::uint16_t>(height),
-      false, 1, bgfx::TextureFormat::BGRA8, 0,
-      bgfx::copy(pixels, static_cast<std::uint32_t>(width) *
-                             static_cast<std::uint32_t>(height) * 4U));
-  if (!bgfx::isValid(g_fontTexture)) {
-    ImGui_ImplBgfx_Shutdown();
-    return false;
-  }
-  io.Fonts->SetTexID(
-      static_cast<ImTextureID>(static_cast<std::uintptr_t>(g_fontTexture.idx)));
   io.BackendRendererName = "imgui_impl_bgfx";
   io.BackendFlags |= ImGuiBackendFlags_RendererHasVtxOffset;
+  io.BackendFlags |= ImGuiBackendFlags_RendererHasTextures;
+  io.Fonts->TexDesiredFormat = ImTextureFormat_RGBA32;
+  const auto maxSize = static_cast<int>(bgfx::getCaps()->limits.maxTextureSize);
+  ImGui::GetPlatformIO().Renderer_TextureMaxWidth = maxSize;
+  ImGui::GetPlatformIO().Renderer_TextureMaxHeight = maxSize;
   return true;
 }
 
@@ -88,15 +157,24 @@ void ImGui_ImplBgfx_Shutdown() {
   // Once the render device is gone, bgfx::shutdown has reclaimed every
   // handle this backend holds; destroying them again would call into a
   // bgfx that no longer exists.
-  if (engine::renderer::render_device() == nullptr) {
-    g_fontTexture = BGFX_INVALID_HANDLE;
+  const bool deviceLive = engine::renderer::render_device() != nullptr;
+  // Textures this context alone uses; a shared one belongs to whichever
+  // context outlives this one.
+  for (ImTextureData *tex : ImGui::GetPlatformIO().Textures) {
+    if (tex->RefCount != 1) {
+      continue;
+    }
+    const bgfx::TextureHandle handle = decode_texture(tex->GetTexID());
+    if (deviceLive && bgfx::isValid(handle)) {
+      bgfx::destroy(handle);
+    }
+    tex->SetTexID(ImTextureID_Invalid);
+    tex->SetStatus(ImTextureStatus_Destroyed);
+  }
+  if (!deviceLive) {
     g_sampler = BGFX_INVALID_HANDLE;
     g_program = BGFX_INVALID_HANDLE;
     return;
-  }
-  if (bgfx::isValid(g_fontTexture)) {
-    bgfx::destroy(g_fontTexture);
-    g_fontTexture = BGFX_INVALID_HANDLE;
   }
   if (bgfx::isValid(g_sampler)) {
     bgfx::destroy(g_sampler);
@@ -117,6 +195,13 @@ void ImGui_ImplBgfx_RenderDrawData(ImDrawData *drawData) {
   if ((drawData == nullptr) || !bgfx::isValid(g_program) ||
       (engine::renderer::render_device() == nullptr)) {
     return;
+  }
+  if (drawData->Textures != nullptr) {
+    for (ImTextureData *tex : *drawData->Textures) {
+      if (tex->Status != ImTextureStatus_OK) {
+        update_texture(tex);
+      }
+    }
   }
   const float width = drawData->DisplaySize.x;
   const float height = drawData->DisplaySize.y;
@@ -195,10 +280,9 @@ void ImGui_ImplBgfx_RenderDrawData(ImDrawData *drawData) {
           static_cast<std::uint16_t>(clipW),
           static_cast<std::uint16_t>(clipH));
 
-      bgfx::TextureHandle texture = g_fontTexture;
-      if (cmd.GetTexID() != 0) {
-        texture.idx = static_cast<std::uint16_t>(
-            static_cast<std::uintptr_t>(cmd.GetTexID()));
+      const bgfx::TextureHandle texture = decode_texture(cmd.GetTexID());
+      if (!bgfx::isValid(texture)) {
+        continue; // a texture whose creation has not succeeded yet
       }
       bgfx::setTexture(0, g_sampler, texture);
       bgfx::setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A |

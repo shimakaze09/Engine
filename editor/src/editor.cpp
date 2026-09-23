@@ -23,7 +23,6 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
-#include <limits>
 #include <memory>
 #include <vector>
 
@@ -31,6 +30,8 @@
 #include "engine/core/engine_stats.h"
 #include "engine/core/json.h"
 #include "engine/core/logging.h"
+#include "engine/core/platform.h"
+#include "engine/core/platform_event.h"
 #include "engine/core/mem_tracker.h"
 #include "engine/core/profiler.h"
 #include "engine/core/reflect.h"
@@ -54,6 +55,7 @@
 
 #include "editor_commands.h"
 #include "editor_console_capture.h"
+#include "editor_fonts.h"
 #include "editor_layout.h"
 #include "editor_material_edit.h"
 #include "editor_panels_assets.h"
@@ -242,7 +244,6 @@ bool initialize_editor(void *sdlWindow) noexcept {
   if (sdlWindow == nullptr) {
     return false;
   }
-  editor_session().sdlWindow = static_cast<SDL_Window *>(sdlWindow);
 
   IMGUI_CHECKVERSION();
   ImGui::CreateContext();
@@ -256,34 +257,17 @@ bool initialize_editor(void *sdlWindow) noexcept {
 
   static_cast<void>(core::cvar_register_float(
       "editor.ui_scale", 1.0F, "Editor UI scale multiplier"));
-  const float displayScale =
-      SDL_GetWindowDisplayScale(static_cast<SDL_Window *>(sdlWindow));
-  const float uiScale =
-      ((displayScale > 0.0F) ? displayScale : 1.0F) *
-      core::cvar_get_float("editor.ui_scale", 1.0F);
+  const float uiScale = core::platform_display_scale() *
+                        core::cvar_get_float("editor.ui_scale", 1.0F);
 
-  // Proper UI font (the 13px bitmap default reads as a debug tool). The
-  // file is read here and handed to the atlas as memory: ImGui's own
-  // path-based loader asserts on an unreadable file in assert-enabled
-  // builds, which would turn a missing asset into an abort instead of the
-  // recoverable fallback below. The bytes are ImGui-allocated and the
-  // atlas takes ownership, so they live exactly as long as the font.
-  std::size_t fontBytes = 0U;
-  void *fontData =
-      ImFileLoadToMemory("assets/fonts/Roboto-Medium.ttf", "rb", &fontBytes);
-  const ImFont *editorFont = nullptr;
-  if ((fontData != nullptr) && (fontBytes > 0U) &&
-      (fontBytes <= static_cast<std::size_t>(
-                        std::numeric_limits<int>::max()))) {
-    editorFont = io.Fonts->AddFontFromMemoryTTF(
-        fontData, static_cast<int>(fontBytes), 17.0F * uiScale);
-  } else if (fontData != nullptr) {
-    IM_FREE(fontData);
-  }
-  if (editorFont == nullptr) {
-    core::log_message(core::LogLevel::Warning, "editor",
-                      "editor font missing; using ImGui default");
-  }
+  // Proper UI font (the 13px bitmap default reads as a debug tool), with a
+  // CJK face merged behind it; see editor_fonts.h.
+  static_cast<void>(core::cvar_register_string(
+      "editor.cjk_font", "",
+      "Font file for Chinese and Japanese text in the editor; empty uses "
+      "the system's own"));
+  static_cast<void>(load_editor_fonts(
+      io.Fonts, 17.0F * uiScale, core::cvar_get_string("editor.cjk_font", "")));
 
   apply_editor_style();
   ImGui::GetStyle().ScaleAllSizes(uiScale);
@@ -308,14 +292,12 @@ bool initialize_editor(void *sdlWindow) noexcept {
       !ImGui_ImplSDL3_InitForOther(static_cast<SDL_Window *>(sdlWindow))) {
     ImGui::DestroyContext();
     console_capture_shutdown();
-    editor_session().sdlWindow = nullptr;
     return false;
   }
   if (!ImGui_ImplBgfx_Init()) {
     ImGui_ImplSDL3_Shutdown();
     ImGui::DestroyContext();
     console_capture_shutdown();
-    editor_session().sdlWindow = nullptr;
     return false;
   }
 
@@ -347,7 +329,6 @@ void shutdown_editor() noexcept {
 
   editor_session().initialized = false;
   editor_session().world = nullptr;
-  editor_session().sdlWindow = nullptr;
   editor_session().autoplayConsumed = false;
   clear_entity_selection();
   editor_session().playState = PlayState::Stopped;
@@ -361,6 +342,11 @@ void shutdown_editor() noexcept {
 
 void reset_editor_session_residue() noexcept {
   asset_index_reset();
+  // A transition recorded but never drained must not reach the next
+  // session's runtime as that session's first edge.
+  editor_session().playTransitions = {};
+  editor_session().playTransitionHead = 0U;
+  editor_session().playTransitionCount = 0U;
   editor_layout_reset();
   editor_session().pickers = ReferencePickerState{};
   editor_session().console = ConsolePanelState{};
@@ -430,12 +416,15 @@ void editor_render(float frameMs, float utilizationPct) noexcept {
   editor_layout_save_if_dirty();
 }
 
-void editor_process_event(void *sdlEvent) noexcept {
-  if (!editor_session().initialized || (sdlEvent == nullptr)) {
+void editor_process_event(const core::PlatformEvent &event) noexcept {
+  // Only the native event is read here: the ImGui SDL3 backend is written
+  // against SDL and consumes events the engine does not model (pointer
+  // enter and leave, text, IME), which is why every event reaches it.
+  if (!editor_session().initialized || (event.native == nullptr)) {
     return;
   }
 
-  ImGui_ImplSDL3_ProcessEvent(static_cast<SDL_Event *>(sdlEvent));
+  ImGui_ImplSDL3_ProcessEvent(static_cast<const SDL_Event *>(event.native));
 }
 
 void editor_set_world(runtime::World *world) noexcept {
@@ -522,6 +511,7 @@ const runtime::EditorBridge kRuntimeEditorBridge = {
     &editor_wants_capture_mouse,
     &editor_consume_step_request,
     &editor_handle_quit_request,
+    &consume_play_transition,
 };
 
 [[maybe_unused]] const bool kEditorBridgeRegistered = []() noexcept {

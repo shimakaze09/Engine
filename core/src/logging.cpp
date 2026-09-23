@@ -186,8 +186,15 @@ void emit(LogLevel level, const char *channel, const char *text,
   // contract governs process exit, not diagnostic capture).
   dispatch_to_sinks(level, channel, text, record);
 
-  if (level == LogLevel::Fatal) {
+  // Error and Fatal flush. When stdout is a pipe or a file it is fully
+  // buffered, so whatever is still in the buffer dies with the process --
+  // and the lines immediately before a crash are the ones worth having.
+  // Trace, Info and Warning stay buffered: they are the bulk of the
+  // output, and flushing each one costs a syscall per line.
+  if ((level == LogLevel::Error) || (level == LogLevel::Fatal)) {
     std::fflush(stdout);
+  }
+  if (level == LogLevel::Fatal) {
     std::abort();
   }
 }

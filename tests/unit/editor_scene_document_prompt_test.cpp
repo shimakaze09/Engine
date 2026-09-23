@@ -676,6 +676,48 @@ int check_request_pool_reclaims_delivered_retired_records() {
   return ok ? 0 : 8;
 }
 
+/// A dialog can return a path longer than the request record holds -- a
+/// Linux path runs to 4096 bytes, the record to 512. The record's path is
+/// what Save As writes to, so a cut path names a different file: the
+/// result must be refused, not truncated, and the dialog released as if
+/// cancelled so nothing waits on it.
+int check_overlong_dialog_path_is_refused_not_truncated() {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 1;
+  }
+  editor_set_world(world.get());
+
+  void *armed = scene_dialog_arm_for_tests(SceneDialogKind::SaveAs, false);
+  if (armed == nullptr) {
+    editor_set_world(nullptr);
+    return 2;
+  }
+
+  // One byte past what the record can hold with its terminator.
+  static char longPath[kMaxDocumentPathLength + 1U] = {};
+  std::memset(longPath, 'a', kMaxDocumentPathLength);
+  longPath[0] = '/';
+  longPath[kMaxDocumentPathLength] = '\0';
+  scene_dialog_deliver_for_tests(armed, longPath);
+
+  const auto *record = static_cast<const SceneDialogRequest *>(armed);
+  if (record->resultAccepted) {
+    editor_set_world(nullptr);
+    return 3; // the truncated prefix would be saved to
+  }
+
+  scene_document_poll_dialog_result();
+  const SceneDocumentState &doc = editor_session().document;
+  const bool released = doc.dialogPendingKind == SceneDialogKind::None;
+  const bool untouched = !doc.hasPath;
+  editor_set_world(nullptr);
+  if (!released) {
+    return 4;
+  }
+  return untouched ? 0 : 5;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -705,6 +747,8 @@ int main() {
        &check_fresh_dialog_after_retire_completes},
       {"check_request_pool_reclaims_delivered_retired_records",
        &check_request_pool_reclaims_delivered_retired_records},
+      {"check_overlong_dialog_path_is_refused_not_truncated",
+       &check_overlong_dialog_path_is_refused_not_truncated},
   };
 
   // Saves and opens below add to the recent-scenes list; the guard keeps

@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "engine/core/asset_identity.h"
 #include "engine/math/vec3.h"
 
 namespace engine::math {
@@ -62,12 +63,21 @@ struct ScriptComponent final {
 };
 
 // Renderer-facing component; keep minimal to avoid bloating draw commands.
-// When materialAssetId is set (non-zero) render prep uses the resolved
-// material asset's parameters; the inline fields below are the fallback.
+// When the material reference resolves, render prep uses that material
+// asset's parameters; the inline fields below are the fallback.
 // sceneCaptureSourceId names the persistent id of an entity carrying an
 // enabled SceneCaptureComponent; when resolvable, that capture's output
 // becomes this mesh's albedo texture (overriding any material texture).
+//
+// `meshRef` and `materialRef` are the authored identities: they are what a
+// scene or prefab carries, and they survive the asset being renamed,
+// moved or recooked. The two ids beside them are the resolution's
+// result — the catalog's current answer for where those assets live — so
+// they are runtime state, never serialized, and empty until the reference
+// pass has run.
 struct MeshComponent final {
+  core::AssetRef meshRef{};
+  core::AssetRef materialRef{};
   std::uint64_t meshAssetId = 0ULL;
   std::uint64_t materialAssetId = 0ULL;
   math::Vec3 albedo = math::Vec3(1.0F, 1.0F, 1.0F);
