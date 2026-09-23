@@ -115,10 +115,16 @@ class Console {
     });
   }
 
-  /// Engine log lines at Error level that `allowed` does not name.
+  /// Engine log lines at Error level that `allowed` does not name, and
+  /// every WebGL error: a rejected call is a draw or an upload that never
+  /// happened. bgfx's format-capability probe at init asks
+  /// getInternalformatParameter about targets WebGL2 lacks; those
+  /// INVALID_ENUM lines are the probe's answers, not failures.
   unexpectedErrors(allowed) {
-    return this.lines.filter((line) => /\]\[Error\]\[/.test(line) &&
-                                       !allowed.some((a) => a.test(line)));
+    return this.lines.filter((line) =>
+        (/\]\[Error\]\[/.test(line) && !allowed.some((a) => a.test(line))) ||
+        (/GL_INVALID_|WebGL: INVALID_|CONTEXT_LOST/.test(line) &&
+         !/getInternalformatParameter/.test(line)));
   }
 }
 
