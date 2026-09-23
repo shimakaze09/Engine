@@ -18,6 +18,9 @@ Stages:
   W  headers alone (world.h, physics_context.h, sparse_set.h), a slow real
      test that never constructs a World, and default member initializers
      that are declared but never used
+  H  every first-party header compiled alone, ranked by front-end time
+  F  candidate fixes on the isolated pattern: where the initializer lives,
+     which constructor kind, and whether the unconstructed includer pays
   M  the real SparseSet reduced step by step (one construct removed each)
   I  an isolated copy of SparseSet with each member initializer switchable
   G  a grid of container x element type x initializer at one capacity
@@ -30,7 +33,7 @@ Results go to stdout, to $GITHUB_STEP_SUMMARY when set, and to
 <out>/results.json; listings of stage C go to <out>/listings/.
 
 Usage:
-  python tools/ci/msvc_compile_probe.py --out probe-out [--stages RWMIGSCA]
+  python tools/ci/msvc_compile_probe.py --out probe-out [--stages RWHFMIGSCA]
 """
 
 from __future__ import annotations
@@ -56,10 +59,10 @@ BASE_FLAGS = [
 ]
 OPT_FLAGS = {"O2": ["/O2", "/Ob2"], "Od": ["/Od", "/Ob0"]}
 TIMING_FLAGS = ["/Bt+", "/d2cgsummary"]
-INCLUDES = [f"/I{REPO / d}" for d in (
-    "core/include", "math/include", "physics/include", "runtime/include",
-    "content/include", "renderer/include", "scripting/include",
-    "audio/include")]
+MODULES = ("core", "math", "physics", "runtime", "content", "renderer",
+           "scripting", "audio")
+INCLUDES = [f"/I{REPO / m / 'include'}" for m in MODULES]
+SRC_INCLUDES = [f"/I{REPO / m / 'src'}" for m in MODULES]
 REPORT_RE = re.compile(r"^\s+(.+?):\s+([\d.]+)s\b")
 TIMEOUT_S = 300
 
@@ -254,6 +257,83 @@ struct T { V position = V(); };
         slow_test = REPO / "tests/unit/world_name_lookup_test.cpp"
         for opt in ("O2", "Od"):
             self.compile("W", "world_name_lookup_test", "", opt, path=slow_test)
+
+    # ------------------------------------------------------------- stage H
+    def stage_h(self) -> None:
+        self.say("\n## H: every first-party header alone (/O2), slowest first")
+        rows = []
+        for module in MODULES:
+            for header in sorted((REPO / module).glob("**/*.h")):
+                rel = header.relative_to(REPO).as_posix()
+                name = "h_" + re.sub(r"[^A-Za-z0-9]+", "_", rel)
+                src = f'#include "{header.as_posix()}"\n'
+                path = self.work / f"{name}.cpp"
+                path.write_text(src, encoding="utf-8")
+                cmd = (["cl.exe"] + BASE_FLAGS + OPT_FLAGS["O2"] + ["/Bt+"] +
+                       INCLUDES + SRC_INCLUDES + [str(path), f"/Fo{self.work / name}.obj"])
+                try:
+                    proc = subprocess.run(cmd, capture_output=True, text=True,
+                                          timeout=TIMEOUT_S, cwd=self.work)
+                    out = proc.stdout + proc.stderr
+                    fe = next((float(t) for w, t in BT_RE.findall(out)
+                               if w.lower() == "c1xx"), None)
+                    rc = proc.returncode
+                except subprocess.TimeoutExpired:
+                    fe, rc = None, "timeout"
+                rows.append((fe if fe is not None else -1.0, rc, rel))
+                self.results.append({"stage": "H", "name": rel, "rc": rc, "fe": fe})
+        rows.sort(reverse=True)
+        for fe, rc, rel in rows[:40]:
+            self.say(f"  H {fe:7.2f}s rc={rc!s:<3} {rel}")
+        failed = [rel for fe, rc, rel in rows if rc != 0]
+        self.say(f"  H {len(rows)} headers, {len(failed)} did not compile alone")
+
+    # ------------------------------------------------------------- stage F
+    # T is the benchmark's element shape; N the World's entity capacity.
+    FIX_HEAD = """\
+#include <array>
+#include <cstddef>
+constexpr std::size_t N = 65536;
+struct V { float x; float y; float z;
+  constexpr V() noexcept : x(0.0F), y(0.0F), z(0.0F) {} };
+struct T { V position = V(); unsigned links = 0U; };
+template <typename E, std::size_t K> struct ImplicitCtorSet {
+  std::array<E, K> a{};
+};
+template <typename E, std::size_t K> struct UserCtorSet {
+  UserCtorSet() noexcept {}
+  std::array<E, K> a{};
+};
+template <typename E, std::size_t K> struct ValueArray : std::array<E, K> {
+  ValueArray() noexcept : std::array<E, K>{} {}
+};
+"""
+    FIXES = {
+        # Today's form: braced default member initializer in a plain class,
+        # included, never constructed.
+        "f0_nsdmi_braced": "struct S { std::array<T, N> a{}; S() noexcept; };\n",
+        # Initializer moved to the out-of-line constructor's mem-init list:
+        # the includer sees no initializer at all.
+        "f1_meminit_includer": "struct S { std::array<T, N> a; S() noexcept; };\n",
+        # The one translation unit that defines that constructor.
+        "f2_meminit_definer": ("struct S { std::array<T, N> a; S() noexcept; };\n"
+                               "S::S() noexcept : a{} {}\n"),
+        # Class template with an implicit constructor, value-initialized by a
+        # plain class's braced member (CompactSparseSet in World).
+        "f3_template_implicit_ctor": ("struct S { ImplicitCtorSet<T, N> s{}; S() noexcept; };\n"),
+        # The same template with a user-provided constructor (SparseSet).
+        "f4_template_user_ctor": ("struct S { UserCtorSet<T, N> s{}; S() noexcept; };\n"),
+        # A value-initializing array wrapper with a user-provided constructor.
+        "f5_wrapper_braced": "struct S { ValueArray<T, N> a{}; S() noexcept; };\n",
+        "f6_wrapper_definer": ("struct S { ValueArray<T, N> a{}; S() noexcept; };\n"
+                               "S::S() noexcept {}\n"),
+    }
+
+    def stage_f(self) -> None:
+        self.say("\n## F: candidate fixes (N=65536, element with initializers)")
+        for name, body in self.FIXES.items():
+            for opt in ("O2", "Od"):
+                self.compile("F", name, self.FIX_HEAD + body, opt)
 
     # ------------------------------------------------------------- stage M
     MINI_HEAD = """\
@@ -562,7 +642,7 @@ struct S { alignas(Transform) unsigned char bytes[sizeof(Transform) * N];
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--out", default="probe-out")
-    parser.add_argument("--stages", default="RWMIGSCA")
+    parser.add_argument("--stages", default="RWHFMIGSCA")
     args = parser.parse_args()
     probe = Probe(pathlib.Path(args.out).resolve())
     probe.version()
@@ -571,6 +651,10 @@ def main() -> int:
         probe.stage_r()
     if "W" in stages:
         probe.stage_w()
+    if "F" in stages:
+        probe.stage_f()
+    if "H" in stages:
+        probe.stage_h()
     if "M" in stages:
         probe.stage_m()
     if "I" in stages:

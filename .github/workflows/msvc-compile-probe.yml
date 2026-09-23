@@ -30,11 +30,6 @@ jobs:
             toolset: vs2026
             vsversion: ""
             vcvars: ""
-          # Visual Studio 2022 where the image still carries it.
-          - os: windows-2025
-            toolset: vs2022
-            vsversion: "2022"
-            vcvars: ""
           # The v143 (MSVC 14.44) side-by-side toolset on the CI image,
           # to separate a toolset regression from the code pattern.
           - os: windows-2025-vs2026
