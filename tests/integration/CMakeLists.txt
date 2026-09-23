@@ -46,6 +46,13 @@ if(WIN32)
         LABELS "gpu;integration"
         ENVIRONMENT "ENGINE_CVAR_r_bgfx_renderer=d3d11"
         SKIP_REGULAR_EXPRESSION "SKIPPED:")
+    add_test(NAME engine_integration_deferred_tile_wrap_gpu_d3d12
+        COMMAND engine_integration_deferred_tile_wrap_gpu)
+    set_tests_properties(engine_integration_deferred_tile_wrap_gpu_d3d12
+        PROPERTIES
+        LABELS "gpu;integration"
+        ENVIRONMENT "ENGINE_CVAR_r_bgfx_renderer=d3d12"
+        SKIP_REGULAR_EXPRESSION "SKIPPED:")
 endif()
 
 engine_add_test_executable(engine_integration_instanced_batches_gpu
