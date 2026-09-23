@@ -46,7 +46,8 @@ void end_input_frame() noexcept;
 // inside one step is pressed in that step alone, and one held across steps
 // is pressed in the first. The last step always ends in the live state, so a
 // release the pump saw without an event (focus loss) or one past the record
-// capacity is never lost.
+// capacity is never lost. During a replay the steps read the input log
+// instead (below).
 //
 // While a step is current, every query in this header, and the action
 // mapper's, answers from its snapshot; touch stays per frame. Main thread
@@ -54,7 +55,11 @@ void end_input_frame() noexcept;
 
 /// Readies `stepCount` step snapshots from the events recorded since the
 /// last steps ran. With zero steps the events carry over to the next call.
-void begin_input_steps(std::uint32_t stepCount) noexcept;
+/// `firstTick` is the first step's SimulationClock::tickIndex before it
+/// runs (the steps simulated ahead of it); the input log keys each step by
+/// it.
+void begin_input_steps(std::uint32_t stepCount,
+                       std::uint64_t firstTick) noexcept;
 /// Makes the next step's snapshot current. False when every step readied
 /// by begin_input_steps has been taken.
 bool advance_input_step() noexcept;
@@ -64,6 +69,61 @@ void end_input_steps() noexcept;
 /// state. For frames that simulate nothing -- stopped or paused play -- so
 /// input from then is never replayed into the next step that runs.
 void reset_input_steps() noexcept;
+
+// ----- Recording and replay ------------------------------------------------
+// Which step an event lands in follows its wall-clock timestamp, so the same
+// key sequence can split differently across steps on two runs. The input log
+// records what each step read instead -- its snapshot and the previous one
+// the action mapper compares it with -- keyed by the step's tick, so a run
+// replays step for step at any frame schedule. Replayed at one and at three
+// steps a frame, a run recorded at three reaches the recorded
+// World::state_hash at every tick both observe
+// (engine_integration_input_replay).
+//
+// Only the step snapshots are recorded: what on_fixed_tick and the mapper
+// read inside a step. Per-frame queries (on_tick, touch, the event bus)
+// answer from the live devices during a replay, as they always do.
+//
+// The log is a versioned binary document (docs/architecture.md,
+// "Serialization"). A recording streams through a fixed ring into a staged
+// sibling temporary and replaces the destination only when it ends, so a
+// recording that fails or is abandoned never touches an earlier log there.
+// The pipeline ends both with the play session, whose ticks restart.
+
+/// The one log revision this build reads and writes.
+inline constexpr std::uint32_t kInputLogVersion = 1U;
+/// Steps a recording holds in memory before it drains them to its staged
+/// file, so a recorded step costs a copy and one step in this many a write.
+/// Reaching it drains the ring; it limits nothing about the recording's
+/// length.
+inline constexpr std::size_t kInputLogRingCapacity = 256U;
+
+/// Starts recording every fixed step to `path`. False, with nothing
+/// changed, while a recording is open or when the staged file cannot be
+/// created.
+bool begin_input_recording(const char *path) noexcept;
+/// Seals the recording and atomically replaces its destination. False when
+/// no recording is open or a write failed, which leaves the destination as
+/// it was.
+bool end_input_recording() noexcept;
+/// True while a recording is open and has not failed.
+bool input_recording_active() noexcept;
+
+/// Loads the log at `path` and makes the steps read it from then on in
+/// place of the recorded events, starting with the step whose tick is the
+/// log's first. The whole log is validated before anything changes, then
+/// held in memory and decoded a step at a time. A missing, truncated,
+/// malformed or other-version log, or one too large to hold, is refused
+/// with a logged reason and changes nothing, a replay already running
+/// included. A step whose tick is not the log's next ends the replay with
+/// an error. The live steps are still built from the events throughout, so
+/// the steps after a replay read the live devices as if it had never run,
+/// with no event lost.
+bool begin_input_replay(const char *path) noexcept;
+/// Stops a replay; the next step reads the live devices.
+void end_input_replay() noexcept;
+/// True while a replay has steps left to give.
+bool input_replay_active() noexcept;
 
 // ----- Keyboard ------------------------------------------------------------
 

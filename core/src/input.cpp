@@ -4,6 +4,7 @@
 #include "engine/core/input_map.h"
 #include "engine/core/platform_event.h"
 #include "engine/core/touch_input.h"
+#include "input_frame.h"
 #include "input_steps_internal.h"
 
 #if defined(__clang__) && (defined(__x86_64__) || defined(__i386__)) &&        \
@@ -22,11 +23,6 @@
 namespace engine::core {
 
 namespace {
-
-constexpr int kMaxScancodes = kMaxKeyCode + 1;
-constexpr int kMaxMouseButtons = 5;
-constexpr int kMaxGamepadButtons = 16;
-constexpr int kMaxGamepadAxes = 6;
 
 bool g_inputInitialized = false;
 
@@ -121,32 +117,6 @@ const GamepadStateInternal *gamepad_slot(int gamepad) noexcept {
 
 // ----- Fixed-step snapshots ------------------------------------------------
 
-constexpr std::size_t kKeyWords =
-    (static_cast<std::size_t>(kMaxScancodes) + 63U) / 64U;
-
-/// One fixed step's view of the devices: what was down when the step ended
-/// and what went down or up during it. Plain data, rebuilt per step.
-struct InputFrame final {
-  std::array<std::uint64_t, kKeyWords> keyDown{};
-  std::array<std::uint64_t, kKeyWords> keyPressed{};
-  std::array<std::uint64_t, kKeyWords> keyReleased{};
-  int mouseX = 0;
-  int mouseY = 0;
-  int mouseDeltaX = 0;
-  int mouseDeltaY = 0;
-  int scrollDelta = 0;
-  std::uint8_t mouseDown = 0U;
-  std::uint8_t mousePressed = 0U;
-  std::uint8_t gamepadConnected = 0U;
-  std::array<std::uint16_t, static_cast<std::size_t>(kMaxGamepads)>
-      gamepadDown{};
-  std::array<std::uint16_t, static_cast<std::size_t>(kMaxGamepads)>
-      gamepadPressed{};
-  std::array<std::array<std::int16_t, kMaxGamepadAxes>,
-             static_cast<std::size_t>(kMaxGamepads)>
-      gamepadAxes{};
-};
-
 bool bit(const std::array<std::uint64_t, kKeyWords> &bits,
          std::size_t index) noexcept {
   return ((bits[index / 64U] >> (index % 64U)) & 1U) != 0U;
@@ -196,12 +166,13 @@ bool g_stepEventsOverflowed = false;
 std::uint64_t g_stepWindowStartNs = 0U;
 std::uint64_t g_stepWindowEndNs = 0U;
 
-InputFrame g_stepHeld{};     // the last step's snapshot
+InputFrame g_stepHeld{};     // the last step's live snapshot
 InputFrame g_stepCurrent{};  // the snapshot queries answer from
 InputFrame g_stepPrevious{}; // the step before the current one
 const InputFrame *g_activeFrame = nullptr;
 std::uint32_t g_stepCount = 0U;
 std::uint32_t g_stepNext = 0U;
+std::uint64_t g_stepFirstTick = 0U;
 std::size_t g_stepCursor = 0U;
 
 void record_step_event(const StepEvent &event) noexcept {
@@ -377,6 +348,42 @@ void consume_step_events() noexcept {
   g_stepWindowStartNs = g_stepWindowEndNs;
 }
 
+/// Drops the recorded events and restarts the held snapshot from the live
+/// state, with no edges: what the steps after a pause start from, since
+/// the events before it were never meant for them.
+void restart_steps_from_live() noexcept {
+  g_stepEventCount = 0U;
+  g_stepEventsOverflowed = false;
+  g_stepCursor = 0U;
+  g_stepWindowStartNs = g_stepWindowEndNs;
+  g_stepHeld = live_frame();
+}
+
+/// Step `step`'s snapshot from the recorded events: the last step's held
+/// state with the events in this step's share of the window applied. The
+/// last step takes every event left and ends in the live state.
+InputFrame live_step_frame(std::uint32_t step, bool last) noexcept {
+  InputFrame frame = g_stepHeld;
+  frame.keyPressed = {};
+  frame.keyReleased = {};
+  frame.mouseDeltaX = 0;
+  frame.mouseDeltaY = 0;
+  frame.scrollDelta = 0;
+  frame.mousePressed = 0U;
+  frame.gamepadPressed = {};
+  while ((g_stepCursor < g_stepEventCount) &&
+         (last || (step_for(g_stepEvents[g_stepCursor].timestampNs,
+                            g_stepCount) <= step))) {
+    apply_step_event(frame, g_stepEvents[g_stepCursor]);
+    ++g_stepCursor;
+  }
+  if (last) {
+    reconcile_with_live(frame);
+    consume_step_events();
+  }
+  return frame;
+}
+
 void reset_step_state() noexcept {
   g_stepEventCount = 0U;
   g_stepEventsOverflowed = false;
@@ -388,6 +395,7 @@ void reset_step_state() noexcept {
   g_activeFrame = nullptr;
   g_stepCount = 0U;
   g_stepNext = 0U;
+  g_stepFirstTick = 0U;
   g_stepCursor = 0U;
 }
 
@@ -452,6 +460,7 @@ std::size_t gameplay_axis_count() noexcept {
 }
 
 void shutdown_input() noexcept {
+  input_log_shutdown();
   shutdown_touch_input();
   shutdown_input_mapper();
   g_inputInitialized = false;
@@ -709,9 +718,11 @@ void end_input_frame() noexcept {
   }
 }
 
-void begin_input_steps(std::uint32_t stepCount) noexcept {
+void begin_input_steps(std::uint32_t stepCount,
+                       std::uint64_t firstTick) noexcept {
   g_stepCount = stepCount;
   g_stepNext = 0U;
+  g_stepFirstTick = firstTick;
   g_stepCursor = 0U;
 }
 
@@ -721,28 +732,24 @@ bool advance_input_step() noexcept {
   }
   const std::uint32_t step = g_stepNext++;
   const bool last = (g_stepNext == g_stepCount);
-  g_stepPrevious = g_stepHeld;
-  InputFrame frame = g_stepHeld;
-  frame.keyPressed = {};
-  frame.keyReleased = {};
-  frame.mouseDeltaX = 0;
-  frame.mouseDeltaY = 0;
-  frame.scrollDelta = 0;
-  frame.mousePressed = 0U;
-  frame.gamepadPressed = {};
-  while ((g_stepCursor < g_stepEventCount) &&
-         (last || (step_for(g_stepEvents[g_stepCursor].timestampNs,
-                            g_stepCount) <= step))) {
-    apply_step_event(frame, g_stepEvents[g_stepCursor]);
-    ++g_stepCursor;
+  const std::uint64_t tick = g_stepFirstTick + step;
+  // The live steps are built from the events whether or not a replay is
+  // running, so when it ends the next live step carries on from them with
+  // no event lost; a replayed step only changes what the queries read.
+  InputStepRecord record{};
+  record.tick = tick;
+  record.previous = g_stepHeld;
+  record.current = live_step_frame(step, last);
+  g_stepHeld = record.current;
+  if (const InputStepRecord *replayed = input_log_take_replay_step(tick);
+      replayed != nullptr) {
+    record.previous = replayed->previous;
+    record.current = replayed->current;
   }
-  if (last) {
-    reconcile_with_live(frame);
-    consume_step_events();
-  }
-  g_stepHeld = frame;
-  g_stepCurrent = frame;
+  g_stepPrevious = record.previous;
+  g_stepCurrent = record.current;
   g_activeFrame = &g_stepCurrent;
+  input_log_record_step(record);
   return true;
 }
 
@@ -753,10 +760,7 @@ void end_input_steps() noexcept {
 }
 
 void reset_input_steps() noexcept {
-  g_stepEventCount = 0U;
-  g_stepEventsOverflowed = false;
-  g_stepWindowStartNs = g_stepWindowEndNs;
-  g_stepHeld = live_frame();
+  restart_steps_from_live();
   g_stepPrevious = g_stepHeld;
   g_activeFrame = nullptr;
   g_stepCount = 0U;

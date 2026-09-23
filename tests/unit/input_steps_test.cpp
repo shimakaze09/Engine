@@ -57,7 +57,7 @@ struct StepView final {
 
 /// Runs `stepCount` steps and records what each one read for the key.
 template <std::size_t N> void run_steps(StepView (&views)[N]) {
-  begin_input_steps(static_cast<std::uint32_t>(N));
+  begin_input_steps(static_cast<std::uint32_t>(N), 0U);
   for (StepView &view : views) {
     CHECK(advance_input_step(), "a readied step advances");
     view.down = is_key_down(kKey);
@@ -103,7 +103,7 @@ int main() {
   // A frame with no steps: its events wait for the next steps.
   {
     pump({key(true, kFirstStep)});
-    begin_input_steps(0U);
+    begin_input_steps(0U, 0U);
     CHECK(!advance_input_step(), "zero steps ready nothing");
     end_input_steps();
     pump({key(false, kLastStep)});

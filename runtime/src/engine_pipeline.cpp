@@ -991,6 +991,17 @@ bool EnginePipeline::Impl::execute_frame() noexcept {
 // Impl::teardown
 // ---------------------------------------------------------------------------
 
+namespace {
+
+/// Closes the session's input log: a recording commits what it holds and a
+/// replay stops, since the next session's ticks start again at zero.
+void end_input_log() noexcept {
+  static_cast<void>(core::end_input_recording());
+  core::end_input_replay();
+}
+
+} // namespace
+
 void EnginePipeline::Impl::teardown() noexcept {
   if (tornDown) {
     return;
@@ -1021,6 +1032,7 @@ void EnginePipeline::Impl::teardown() noexcept {
     scripting::reset_run_state();
     runtime::reset_anim_controllers();
     core::clear_gameplay_bindings();
+    end_input_log();
     audio::unload_all_sounds();
     renderer::reset_renderer_public_state();
     content::reset_cooked_asset_stale_warnings();
@@ -1102,6 +1114,8 @@ void EnginePipeline::Impl::end_play_session() noexcept {
   previousTick = frameStart;
   clock.simulationSeconds = 0.0;
   clock.tickIndex = 0U;
+  // A log is keyed by the ticks of one session, which restart here.
+  end_input_log();
 }
 
 void EnginePipeline::Impl::stage_play_transitions() noexcept {
@@ -1300,7 +1314,9 @@ void EnginePipeline::Impl::stage_scripting() noexcept {
     scripting::dap_poll();
   }
   if (isPlaying) {
-    core::begin_input_steps(clock.stepsThisFrame);
+    // stage_timing already advanced the tick past this frame's steps.
+    core::begin_input_steps(clock.stepsThisFrame,
+                            clock.tickIndex - clock.stepsThisFrame);
     while (core::advance_input_step()) {
       scripting::dispatch_entity_scripts_fixed_update(
           static_cast<float>(core::kFixedDeltaSeconds));

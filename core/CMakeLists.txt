@@ -79,6 +79,7 @@ engine_add_module_library(engine_core
     src/mem_tracker.cpp
     src/event_bus.cpp
     src/input.cpp
+    src/input_log.cpp
     src/input_map.cpp
     src/atomic_file.cpp
     src/json.cpp

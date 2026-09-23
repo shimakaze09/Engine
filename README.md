@@ -270,7 +270,11 @@ Current script conventions in `assets/`:
 	  fixed delta. Input queries made inside it (`engine.is_key_pressed`,
 	  `engine.is_action_pressed`, gamepad and mouse reads) answer for that
 	  step alone, so a tap is seen once whatever the frame rate: gameplay
-	  that reacts to input belongs here
+	  that reacts to input belongs here. What each step read can be
+	  recorded to an input log and replayed, reproducing the run at any
+	  frame rate (`core::begin_input_recording` and
+	  `core::begin_input_replay` in `core/include/engine/core/input.h`);
+	  input read in `on_tick` is not recorded
 	- `M.on_tick(self, dt)` is called once per rendered frame that
 	  advanced simulation (not once per fixed step); `dt` is that
 	  frame's total simulated time, summing every catch-up fixed step
