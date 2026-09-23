@@ -28,7 +28,24 @@ python tools/check_module_deps.py
 python tools/check_dependency_pins.py
 python tools/check_content_attributes.py
 python tools/check_test_timing.py
+python tools/check_error_handling.py
+python tools/check_portable_fopen.py
+python tools/check_duplicate_primitives.py
+python tools/ci/check_asset_metadata_paths.py
+python tools/check_asset_identity.py
+python tools/check_shader_variants.py
+python tools/check_doc_references.py
+python tools/test_tool_gates.py                             # the gates' own tests
 ```
+
+The list mirrors the static-checks job in `.github/workflows/ci.yml`; a
+gate added there is added here in the same change.
+
+**Documents move with the code.** Before every push, update each document
+the change makes false -- `README.md`, `docs/`, `CLAUDE.md`, these skills,
+and the header comments describing the changed behavior -- in the same
+push. `check_doc_references.py` catches a named path, link or test that no
+longer exists; reread the prose around what you changed for the rest.
 
 From an agent harness or any process without its own console, wrap the
 command so child processes do not flash windows:

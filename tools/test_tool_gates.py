@@ -7,9 +7,11 @@
 # the Lua binding generator must reject
 # duplicate Lua names and invalid or reserved parameter identifiers
 # instead of emitting uncompilable or injected C++, the test timing
-# audit must hold functional tests to classified clock reads only, and
-# the documentation policy audit must hold the README's mirror of the
-# conditional noexcept rule to its conditional wording. Run from ctest as
+# audit must hold functional tests to classified clock reads only, the
+# documentation policy audit must hold the README's mirror of the
+# conditional noexcept rule to its conditional wording, and the document
+# reference audit must catch a document naming a file, link or test that
+# no longer exists. Run from ctest as
 # engine_integration_tool_gates.
 
 import importlib.util
@@ -1432,6 +1434,60 @@ def test_duplicate_primitive_gate():
           "duplicate primitives: this checkout passes the gate")
 
 
+def test_doc_reference_gate():
+    """The document reference gate must reject a backticked path, a
+    relative link and a test name that no longer exist, accept ones that
+    do (and a ctest -R prefix), skip fenced code, templates and prose
+    that only looks like a path, and pass this checkout."""
+    script = str(TOOLS / "check_doc_references.py")
+
+    def tree(tmp, name, doc_text, files=(), cmake=""):
+        root = tmp / name
+        (root / "docs").mkdir(parents=True)
+        (root / "docs" / "guide.md").write_text(doc_text, encoding="utf-8")
+        for rel in files:
+            path = root / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("x\n", encoding="utf-8")
+        (root / "tests").mkdir(exist_ok=True)
+        (root / "tests" / "CMakeLists.txt").write_text(cmake,
+                                                        encoding="utf-8")
+        return str(root)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        check(run([script, "--root", tree(
+            tmp, "gone", "See `core/src/gone.cpp`.\n")]) != 0,
+              "doc references: a backticked path that is gone is a finding")
+        check(run([script, "--root", tree(
+            tmp, "here", "See `core/src/here.cpp:12-20`.\n",
+            files=["core/src/here.cpp"])]) == 0,
+              "doc references: an existing path with a line range passes")
+        check(run([script, "--root", tree(
+            tmp, "link", "Read [the plan](missing.md).\n")]) != 0,
+              "doc references: a dead relative link is a finding")
+        check(run([script, "--root", tree(
+            tmp, "linkok", "Read [the plan](plan.md#top) or "
+            "[the site](https://example.com/x).\n",
+            files=["docs/plan.md"])]) == 0,
+              "doc references: live links and URLs pass")
+        check(run([script, "--root", tree(
+            tmp, "test", "Run `engine_unit_renamed`.\n",
+            cmake="engine_add_test_executable(engine_unit_current)\n")]) != 0,
+              "doc references: an unregistered test name is a finding")
+        check(run([script, "--root", tree(
+            tmp, "prefix", "Run `-R engine_unit_cur` and engine_unit_current.\n",
+            cmake="engine_add_test_executable(engine_unit_current)\n")]) == 0,
+              "doc references: a registered name and a -R prefix pass")
+        check(run([script, "--root", tree(
+            tmp, "skip", "```\ncat core/src/gone.cpp\n```\n"
+            "Template `tools/<name>/x.py`, glob `core/*.h`, prose `and/or`.\n")]) == 0,
+              "doc references: fenced code, templates and prose are skipped")
+
+    check(run([script]) == 0,
+          "doc references: this checkout's documents reference only what exists")
+
+
 def main():
     test_coverage_gate()
     test_perf_gate_evaluate()
@@ -1447,6 +1503,7 @@ def main():
     test_duplicate_primitive_gate()
     test_asset_identity_gate()
     test_shader_variant_gate()
+    test_doc_reference_gate()
     if failures:
         print(f"\nFAILED ({len(failures)} failure(s))")
         return 1

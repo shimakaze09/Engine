@@ -302,6 +302,9 @@ jobs:
       - name: Shader variant audit
         run: python3 tools/check_shader_variants.py
 
+      - name: Document reference audit
+        run: python3 tools/check_doc_references.py
+
       - name: Install cppcheck
         run: bash .github/scripts/install-linux-deps.sh cppcheck
 

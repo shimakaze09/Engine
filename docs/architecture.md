@@ -148,7 +148,7 @@ because each of these does:
 - **Hashes are FNV-1a over exact bits.** No `std::hash` (unspecified
   across implementations) and no unordered container in anything a hash
   or an iteration order is derived from. Persisted identity uses the
-  FNV-1a helpers in `core/hash.h`.
+  FNV-1a helpers in `core/include/engine/core/hash.h`.
 - **Floating point is pinned by the build.** `-ffp-contract=off`, no
   fast-math, standard excess precision. The deterministic scalar set
   replaces the C library's transcendentals wherever simulation state
