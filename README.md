@@ -27,8 +27,8 @@ Each fact has one home. Nothing mirrors anything else.
 - Lua 5.4 gameplay scripting bridge (`engine` Lua API)
 - Generated Lua binding pipeline for annotated scripting accessors
 - Asset examples under `assets/`
-- Test suites (unit, integration, smoke, benchmark) wired into CTest
-- Tooling for mesh conversion (`asset_packer`)
+- Test suites (unit, integration, smoke, benchmark, CMake configure-rejection) wired into CTest
+- Asset tooling: `asset_packer` (mesh, skeleton and animation cook, shader cook, metadata init) and the `engine_validate` scene checker
 - GitHub Actions CI under `.github/workflows/ci.yml`
 
 ## Core goals
@@ -57,8 +57,9 @@ and was never read, shadow types no producer could enable. So, instead:
 - **Open scope lives on the GitHub tracker.** It is the only source of
   truth for what is broken, missing, or deferred.
 - **On-screen renderer behavior is not covered by CI.** No CI lane draws a
-  frame, and every lane but the canonical matrix builds with the shader
-  cook off. A rendering feature is only as verified as the last time
+  frame. Only the canonical Windows and Linux lanes and the MSVC and GCC
+  compatibility lanes cook shaders; macOS and the analysis, sanitizer,
+  coverage and benchmark lanes build with the cook off. A rendering feature is only as verified as the last time
   somebody ran the editor and looked at it.
 
 The engine builds, runs an editor, simulates a deterministic world, and
@@ -69,18 +70,21 @@ plays the bundled template. It is not production-complete.
 - Language: C++23
 - Build: CMake 3.28+
 - Window/input: SDL3
-- Rendering: bgfx (Vulkan/WebGL2 proven; shaderc-cooked `.sc` shaders)
+- Rendering: bgfx (Vulkan is the proven backend; D3D11, D3D12, Metal and
+  WebGL2 are selectable but unproven; shaderc-cooked `.sc` shaders)
 - UI/editor: ImGui + ImGuizmo
 - Scripting: Lua 5.4 (C API)
 - Audio: miniaudio
 
-Most third-party dependencies are fetched automatically via CMake `FetchContent` when not found locally.
+Every third-party dependency is fetched through CMake `FetchContent` at a
+pinned commit; only SDL3 is looked up locally first.
 
 ## Repository layout
 
 - `app/`: executable entry point (`engine_editor_app`)
 - `core/`: platform, input, job system, logging, reflection base, VFS
 - `math/`: math primitives and transforms
+- `content/`: asset catalog, identity and `.meta` sidecars, cook-stamp staleness checks, streaming
 - `physics/`: simulation and collision stepping
 - `renderer/`: mesh, texture, shader, command buffer, bgfx backend
 - `audio/`: runtime audio services
@@ -88,8 +92,8 @@ Most third-party dependencies are fetched automatically via CMake `FetchContent`
 - `runtime/`: engine bootstrap/run loop, world/ECS, scene and prefab serialization
 - `editor/`: editor integration, camera, command history
 - `assets/`: scripts, shaders, and sample content
-- `tests/`: unit, integration, smoke, and benchmark tests
-- `tools/`: asset packer (glTF/GLB → `.mesh`), Lua binding generator, audit gates and their self-tests, CI helpers
+- `tests/`: unit, integration, smoke, benchmark, and CMake configure-rejection tests
+- `tools/`: asset packer (glTF/GLB → `.mesh`, shader-manifest cook, `--init-meta`), `engine_validate` scene checker, Lua binding generator, content generators, audit gates and their self-tests, CI helpers
 - `docs/`: architecture invariants, product vision, decision records
 - `.claude/skills/`: the procedures agents and contributors follow
 - `.github/workflows/`: CI definitions
@@ -107,8 +111,8 @@ secondary compilers validated for portability:
 
 - **Tier 1 — canonical (used for development and primary CI)**
 	- Windows x64: `clang-cl`
-	- Linux x64: `clang++`
-	- macOS: AppleClang
+	- Linux x64: `clang++` 19 or newer (clang 18 cannot compile libstdc++'s `<expected>`)
+	- macOS: AppleClang (build and headless-test lane; see [decision 0002](docs/decisions/0002-macos-is-a-test-lane.md))
 - **Tier 2 — portability validation (dedicated CI compatibility lanes)**
 	- Windows x64: MSVC
 	- Linux x64: GCC
@@ -129,6 +133,9 @@ From repository root, configure with the canonical preset for your platform
 (`windows-clang-cl-debug`, `linux-clang-debug`, or `macos-clang-debug`),
 then build and test:
 
+On Windows, run from a Visual Studio Developer PowerShell: the preset is
+Ninja + clang-cl, which needs the MSVC environment.
+
 ```powershell
 cmake --preset windows-clang-cl-debug
 cmake --build build --parallel
@@ -136,29 +143,32 @@ ctest --test-dir build --output-on-failure
 ```
 
 ```bash
-cmake --preset linux-clang-debug     # or: macos-clang-debug
+cmake --preset linux-clang-debug
+# macOS (headless tests only; shaderc does not build under AppleClang):
+# cmake --preset macos-clang-debug -DENGINE_BGFX_SHADERC=OFF
 cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ```
 
-`cmake --list-presets` shows every configure/build/test preset, including
-the GCC compatibility flows and the sanitizer lanes. A generic
-`cmake -S . -B build` with the environment-default compiler may work but is
-not a supported configuration; CI validates the canonical presets plus the
-MSVC/GCC compatibility lanes.
+`cmake --list-presets=all` shows every configure/build/test preset
+available on the host, including the GCC flows and the ASAN+UBSAN presets.
+A generic `cmake -S . -B build` with the environment-default compiler may
+work but is not a supported configuration. CI configures the canonical
+toolchains with flags equivalent to the presets (it does not invoke them),
+plus the MSVC/GCC compatibility lanes.
 
 ### Build options
 
 | Option | Default | Effect |
 | --- | --- | --- |
-| `ENGINE_TARGET_PLATFORM` | host | `Win64`, `Linux`, `macOS`, `Android`, `iOS`, `Web` |
+| `ENGINE_TARGET_PLATFORM` | host | `Win64`, `Linux`, `macOS` (headless lane), `Web` (Emscripten plus `ENGINE_WEB_COOKED_DIR`); `Android` and `iOS` are rejected at configure |
 | `ENGINE_RENDERER_BACKEND` | `bgfx` | The only accepted value; the variable survives so existing `-D` invocations keep working (see [decision 0001](docs/decisions/0001-bgfx-as-the-rhi.md)) |
-| `ENGINE_BGFX_SHADERC` | `ON` | Builds `shaderc` and cooks the shader manifest. Lanes that never consume cooked binaries turn it off, and the cooked test sections skip |
+| `ENGINE_BGFX_SHADERC` | `ON` | Builds `shaderc` and cooks the shader manifest. Lanes that never consume cooked binaries turn it off, and the cooked test sections skip. Needs `ENGINE_BUILD_TOOLS=ON`; forced off for Web |
 | `ENGINE_MAX_ENTITIES` | `65536` | ECS fixed capacity |
 | `ENGINE_DETERMINISTIC_FLOATS` | `ON` | `/fp:strict` / `-ffp-contract=off` |
-| `ENGINE_SANITIZERS` | `OFF` | ASAN/UBSAN or TSAN, per the sanitizer presets |
+| `ENGINE_SANITIZERS` | `OFF` | ASAN + UBSAN (GCC/Clang; ignored on MSVC). TSAN has no option: CI passes `-fsanitize=thread` through `CMAKE_CXX_FLAGS` |
 | `ENGINE_BUILD_TESTS` | `ON` | CTest suites |
-| `ENGINE_BUILD_TOOLS` | `ON` | `asset_packer` and the generators |
+| `ENGINE_BUILD_TOOLS` | `ON` | `asset_packer`, `engine_validate` and the shader cook |
 
 Sanitizer flags are declared before the first `FetchContent_MakeAvailable`,
 so they instrument bgfx and SDL3 as well as the engine's own targets;
@@ -170,12 +180,15 @@ SDL3. The per-target warning and conformance flags are applied by
 third-party `FetchContent` targets never inherit those.
 
 On Linux, bgfx's CMake requires the OpenGL and X11/Wayland development
-headers; `.github/scripts/install-linux-deps.sh` installs the set CI uses.
+headers; the package set CI passes to
+`.github/scripts/install-linux-deps.sh` is listed in
+`.github/workflows/ci.yml`.
 
 Run the app after build:
 
 - Windows: `build\engine_editor_app.exe`
-- Linux/macOS: `./build/engine_editor_app`
+- Linux: `./build/engine_editor_app` (macOS does not run the editor yet;
+  decision 0002)
 
 Build benchmark targets as needed:
 
@@ -224,23 +237,21 @@ GitHub Actions configuration lives in `.github/workflows/ci.yml` and currently
 runs eleven jobs:
 
 - Windows, Linux, and macOS builds in Debug and Release on the canonical
-  toolchains (`clang-cl` via the VS ClangCL toolset, `clang++`, AppleClang),
+  toolchains (`clang-cl` via Ninja, `clang++-19`, AppleClang),
   with headless-safe CTest filtering
 - MSVC (Windows) and GCC (Linux) Release compatibility lanes (build + test)
 - Determinism hash comparison across every platform and build
   configuration, through the production pipeline
 - `cppcheck` static analysis plus the audit gates (source comments, comment
-  quality, module dependencies, dependency pins, test timing, error
-  handling, asset metadata paths)
+  quality, module dependencies, dependency pins, content attributes, test
+  timing, error handling, portable fopen, duplicate primitives, asset
+  metadata paths, asset identity, shader variants, document references)
 - `clang-tidy` with warnings-as-errors
 - A dedicated `-Werror` build check
 - ASAN/UBSAN and TSAN sanitizer lanes
 - Coverage with a minimum-threshold gate
 - Benchmark runs gated against `tests/benchmark/perf_baseline.json`
 - A final quality gate that requires all of the above
-
-Remaining follow-up work includes coverage trend reporting and broader
-GPU-path automation.
 
 ## Lua gameplay scripting
 
@@ -287,7 +298,8 @@ Tool behavior:
 
 - Deterministic cook: identical inputs produce byte-identical outputs
 - Imports glTF meshes plus skeletons and animation clips
-- Writes engine mesh binary (`.mesh`) and metadata sidecar (`.cookmeta`)
+- Writes `.mesh`, `.cookmeta`, `.cookstamp` and a collision `.hull`, plus
+  `.skel` and `<clip>.anim` for rigged input
 - Generates asset thumbnails and maintains the asset dependency graph
 
 ## Engine contributor rules
@@ -313,7 +325,7 @@ for any change to math, ECS, physics, renderer, or scripting behavior.
 - App starts but assets are missing:
 	- Build from repository root and run from the build output where `assets/` was copied.
 - Shader or render issues:
-	- Verify the shaderc cook ran (`ENGINE_BGFX_SHADERC=ON`) and the cooked binaries exist under the build tree's `shaders/bgfx/cooked/`.
+	- Verify the shaderc cook ran (`ENGINE_BGFX_SHADERC=ON`) and the cooked binaries exist under `build/assets/shaders/bgfx/cooked/`.
 
 ## License
 
