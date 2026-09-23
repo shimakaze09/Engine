@@ -11,8 +11,9 @@ description: >
 
 # Serialization
 
-One authoritative registry generates or mechanically validates every
-direction: parse, write, copy, reset, migration and codec coverage. A type
+One authoritative registry generates or mechanically validates the
+scene and prefab read and write, copy, clone, count check, editor
+dispatch and codec coverage. A type
 missing a row fails to compile rather than silently skipping. Keep it that
 way — never add a parallel dispatch path.
 
@@ -20,12 +21,14 @@ way — never add a parallel dispatch path.
 
 1. **Add the row** to the X-macro table in
    `runtime/src/component_registry.h`. Row order is the serialized key
-   order of every format, so appending is the compatible position.
+   order of the scene and prefab formats, so appending is the compatible
+   position.
 2. **The compile-time cross-check** against `World::PersistentComponentTypes`
    will tell you what else the row needs. Follow it rather than guessing.
 3. **Reflect the fields** that are plain data, and give each a wire key.
-   `REFLECT_FIELD_KEY` defaults to the member name; declare it explicitly
-   whenever the member name might ever change, because the key — not the
+   `REFLECT_FIELD` uses the member name as the key; use
+   `REFLECT_FIELD_KEY` to pin one explicitly whenever the member name
+   might ever change, because the key — not the
    C++ name — is what scenes carry.
 4. **Add a codec** for anything reflection cannot express (64-bit asset
    ids, VFS paths, enums, nested arrays), sharing the helpers in
@@ -86,8 +89,8 @@ Determinism-sensitive by definition, so:
 - Round-trip through the production entry point — never a copied
   serializer model.
 - Byte-identical output for identical input.
-- `-R engine_integration_determinism` and
-  `-R engine_unit_component_registry`.
+- `-R 'determinism|scene_serializer|scene_version_gate|prefab|component_registry|reflect_wire_key|save_data'`
+  (one regex; CTest keeps only the last `-R`).
 - A refusal test per ingress you made strict, red on base.
 - Boundary cases: empty document, one entity, at capacity, one past
   capacity, malformed field, unknown version, truncated file.

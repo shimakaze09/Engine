@@ -74,8 +74,11 @@ These override every tier below.
 
 ## Tier: renderer, shaders, post stack
 
-**CI cannot verify this tier.** Every lane except the canonical matrix
-passes `ENGINE_BGFX_SHADERC=OFF`, and no lane draws a frame. A pass can be
+**CI cannot verify this tier.** Only the canonical Linux and Windows
+lanes and the MSVC and GCC compatibility lanes build with the shader cook;
+macOS and every analysis, sanitizer, coverage and benchmark lane pass
+`ENGINE_BGFX_SHADERC=OFF`, and no lane draws a frame (every lane excludes
+the `gpu` label). A pass can be
 unreachable, a uniform never written, a target sampled while it renders,
 and every test still passes. Treat a green suite here as no evidence.
 
@@ -83,7 +86,8 @@ Required:
 
 1. Build with the cook on, so shaders compile and the cooked binaries
    exist:
-   `cmake -S . -B build -DENGINE_BGFX_SHADERC=ON` then build.
+   `cmake -S . -B build -DENGINE_BGFX_SHADERC=ON` then build. Not yet
+   possible on macOS: shaderc's tint does not build under AppleClang.
 2. Run the `gpu`-labelled suites: `ctest --test-dir build -L gpu`.
 3. Run the editor windowed and look at what you changed. Toggle it off and
    on. A feature you cannot see change is a feature you have not verified.
@@ -101,13 +105,13 @@ environments and is not a reason to skip the tier or soften the claim.
 - Byte-identical output for unchanged input (the deterministic-cook
   contract) where the format promises it.
 - Pair with
-  `-R 'engine_integration_determinism|engine_integration_thread_count_determinism'`.
+  `-R 'determinism|scene_serializer|scene_version_gate|prefab|component_registry|reflect_wire_key|save_data'`.
 - A format change carries a migration and a test that reads the old form.
 
 ## Tier: physics, math
 
-- `-R 'engine_unit_physics|engine_integration_determinism'` (one regex;
-  CTest keeps only the last `-R`).
+- `-R 'physics|math|ccd|joint|collision|collider|determinism'` (one
+  regex; CTest keeps only the last `-R`).
 - Tolerances are justified absolute and/or relative bounds plus an
   invariant (energy, momentum, penetration depth). An arbitrary loose
   tolerance is a defect, not a passing test.
@@ -139,8 +143,10 @@ interruption cannot leave a mixed state.
 
 ## Tier: Lua API
 
-- `-R 'engine_integration_lua|engine_unit_scripting'`.
+- `-R 'lua|script|sandbox|hotreload|bindgen|coroutine'`.
 - Validate stack usage; preserve traceback, sandbox and hot-reload
   behavior.
-- An API change updates the generated bindings and the scripting docs in
-  the same change.
+- An API change updates its `// LUA_BIND:` annotations in
+  `scripting/include/engine/scripting/bindable_api.h` (the bindings
+  regenerate at build) and the README's Lua scripting section in the same
+  change.

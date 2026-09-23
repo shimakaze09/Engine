@@ -16,15 +16,18 @@ updates the comments that describe it.
 
 Two mechanical gates back this up:
 `tools/check_source_comments.py` (file-level comment presence) and
-`tools/check_comment_quality.py` (filler patterns, commented-out code,
-untracked TODOs, issue numbers outside a tracked marker). Both must report
+`tools/check_comment_quality.py` (tautologies, template stems, doc
+comments misplaced above an access specifier or an init-list line,
+commented-out code, untracked TODOs, issue numbers outside a tracked
+marker). Both must report
 zero findings. Everything else here is
 judgement, checked in review.
 
 ## Required
 
 **Every source, header, shader, build and test file** opens with a short
-comment stating its role — what this translation unit is responsible for,
+comment stating its role (the presence gate does not yet cover `.sc`
+shaders, and most of them lack one) — what this translation unit is responsible for,
 in its own terms. Not a restatement of the filename.
 
 ```cpp
@@ -92,7 +95,7 @@ better name or a smaller function instead.
 
 ## Markers
 
-Exactly six, and issue numbers appear in code only inside the first two
+Six, and issue numbers appear in code only inside the first two
 (plus regression provenance in tests). A comment names what the code does
 and why it must hold; a reader with only the source cannot follow an
 issue number, and the tracker already holds it. The gate rejects it:
@@ -105,6 +108,10 @@ issue number, and the tracker already holds it. The gate rejects it:
 | `HACK:` | Knowingly inelegant and load-bearing. Say what breaks if it is removed. |
 | `NOTE:` | Non-obvious context a reader needs. |
 | `WARNING:` | A trap: a call order, a lifetime, a reentrancy hazard. |
+
+Tests carry one more, required by `tools/check_test_timing.py`:
+`// wall-clock: harness-timeout` or `// wall-clock: diagnostic` on, or
+within two lines above, every clock read in a functional test.
 
 A bare `TODO` or `FIXME` is a gate finding. Either file an issue and cite
 it, or do the work.
