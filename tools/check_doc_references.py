@@ -33,6 +33,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 import pathlib
 import re
 import sys
@@ -63,20 +64,32 @@ ROOT_PREFIXES = (
 )
 
 
+def is_pruned(rel_parts: tuple[str, ...]) -> bool:
+    """Build trees, fetched dependencies and git metadata hold no project
+    CMake. They are pruned before descending, not filtered after: a build
+    tree is being written while tests run, and walking it races them."""
+    return bool(rel_parts) and (rel_parts[0].startswith("build")
+                                or rel_parts[0] == ".git"
+                                or "_deps" in rel_parts)
+
+
 def registered_tests(root: pathlib.Path) -> set[str]:
     """Every engine_* test name any CMake file under the tree mentions."""
     names: set[str] = set()
-    for cmake in list(root.rglob("CMakeLists.txt")) + list(
-            root.rglob("*.cmake")):
-        parts = cmake.relative_to(root).parts
-        if parts and (parts[0].startswith("build") or parts[0] == ".git"
-                      or "_deps" in parts):
-            continue
-        try:
-            text = cmake.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            continue
-        names.update(TEST_NAME.findall(text))
+    for dirpath, dirnames, filenames in os.walk(root):
+        here = pathlib.Path(dirpath)
+        dirnames[:] = [
+            d for d in dirnames
+            if not is_pruned((here / d).relative_to(root).parts)]
+        for name in filenames:
+            if name != "CMakeLists.txt" and not name.endswith(".cmake"):
+                continue
+            try:
+                text = (here / name).read_text(encoding="utf-8",
+                                               errors="replace")
+            except OSError:
+                continue
+            names.update(TEST_NAME.findall(text))
     return names
 
 
