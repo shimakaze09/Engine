@@ -39,6 +39,10 @@ struct PlatformCaps final {
 /// The running platform's capabilities; valid at any time.
 PlatformCaps platform_caps() noexcept;
 
+/// Nanoseconds on the monotonic clock PlatformEvent::timestampNs is read
+/// from, so a caller can place an event in time relative to now.
+std::uint64_t platform_ticks_ns() noexcept;
+
 /// Initializes the owning system for platform.
 bool initialize_platform() noexcept;
 /// Initializes the owning system for platform.

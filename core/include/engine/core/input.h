@@ -37,6 +37,34 @@ void input_process_event(const PlatformEvent &event) noexcept;
 /// Ends the requested operation or profiling range for input frame.
 void end_input_frame() noexcept;
 
+// ----- Fixed steps ---------------------------------------------------------
+// A frame that simulates several fixed steps gives each its own view of the
+// input. The pump records every key, mouse and gamepad event with its
+// timestamp; the steps split the time since the last steps ran evenly and
+// each takes the events that fall in its share. A step's snapshot holds what
+// was down when the step ended and what went down or up during it, so a tap
+// inside one step is pressed in that step alone, and one held across steps
+// is pressed in the first. The last step always ends in the live state, so a
+// release the pump saw without an event (focus loss) or one past the record
+// capacity is never lost.
+//
+// While a step is current, every query in this header, and the action
+// mapper's, answers from its snapshot; touch stays per frame. Main thread
+// only, like the pump.
+
+/// Readies `stepCount` step snapshots from the events recorded since the
+/// last steps ran. With zero steps the events carry over to the next call.
+void begin_input_steps(std::uint32_t stepCount) noexcept;
+/// Makes the next step's snapshot current. False when every step readied
+/// by begin_input_steps has been taken.
+bool advance_input_step() noexcept;
+/// Queries answer from the live, per-frame state again.
+void end_input_steps() noexcept;
+/// Drops the recorded events and restarts the step snapshots from the live
+/// state. For frames that simulate nothing -- stopped or paused play -- so
+/// input from then is never replayed into the next step that runs.
+void reset_input_steps() noexcept;
+
 // ----- Keyboard ------------------------------------------------------------
 
 bool is_key_down(KeyScancode scancode) noexcept;

@@ -952,6 +952,10 @@ bool platform_answer_scripted_file_dialog(FileDialogTicket ticket,
   return true;
 }
 
+std::uint64_t platform_ticks_ns() noexcept {
+  return static_cast<std::uint64_t>(SDL_GetTicksNS());
+}
+
 PlatformCaps platform_caps() noexcept {
   PlatformCaps caps{};
 #if defined(ENGINE_PLATFORM_WEB)

@@ -144,7 +144,11 @@ because each of these does:
   spring arms and cameras evaluate per fixed step with the exact fixed
   delta (animation evaluates all of a frame's steps before the simulation
   graph). Timers come due per
-  fixed step and dispatch once per frame; `wait_frames` counts ticks. A
+  fixed step and dispatch once per frame; `wait_frames` counts ticks.
+  Lua's `on_fixed_tick` runs once per step, all of a frame's steps before
+  the simulation graph, with that step's own input snapshot answering
+  every input query, so a press is seen in exactly one step at any frame
+  rate; `on_tick` stays per frame. A
   system that integrates once per rendered frame makes its own behaviour
   frame-rate dependent, and `elapsed` accumulated per frame does not even
   agree with itself across frame schedules.

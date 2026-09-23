@@ -803,6 +803,13 @@ engine_add_test_executable(engine_unit_event_bus
     engine_core
 )
 
+engine_add_test_executable(engine_unit_input_steps
+    SOURCES
+    input_steps_test.cpp
+    PRIVATE_DEPS
+    engine_core
+)
+
 engine_add_test_executable(engine_unit_input
     SOURCES
     input_test.cpp

@@ -265,6 +265,11 @@ Current script conventions in `assets/`:
 
 - Scene-level module (`assets/main.lua`)
 	- `M.on_begin_play(self)` is called once when play starts
+	- `M.on_fixed_tick(self, dt)` is called once per fixed step, with the
+	  fixed delta. Input queries made inside it (`engine.is_key_pressed`,
+	  `engine.is_action_pressed`, gamepad and mouse reads) answer for that
+	  step alone, so a tap is seen once whatever the frame rate: gameplay
+	  that reacts to input belongs here
 	- `M.on_tick(self, dt)` is called once per rendered frame that
 	  advanced simulation (not once per fixed step); `dt` is that
 	  frame's total simulated time, summing every catch-up fixed step

@@ -6,6 +6,7 @@
 #include "engine/core/json.h"
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
+#include "input_steps_internal.h"
 
 #include <array>
 #include <cmath>
@@ -135,10 +136,6 @@ bool read_optional_array_field(const JsonParser &parser,
   return true;
 }
 
-// Current-frame mouse delta (accumulated).
-float g_mouseDeltaX = 0.0F;
-float g_mouseDeltaY = 0.0F;
-
 /// Finds the matching object or resource for mapped action.
 InputAction *find_mapped_action(const char *name) noexcept {
   if (name == nullptr) {
@@ -212,9 +209,9 @@ float evaluate_axis_source(const InputAxisSource &src) noexcept {
     return raw * src.scale;
   }
   case AxisSourceType::MouseDeltaX:
-    return g_mouseDeltaX * src.scale;
+    return static_cast<float>(mouse_state().deltaX) * src.scale;
   case AxisSourceType::MouseDeltaY:
-    return g_mouseDeltaY * src.scale;
+    return static_cast<float>(mouse_state().deltaY) * src.scale;
   }
   return 0.0F;
 }
@@ -279,8 +276,6 @@ bool initialize_input_mapper() noexcept {
   g_mappedAxes = {};
   g_actionDown = {};
   g_prevActionDown = {};
-  g_mouseDeltaX = 0.0F;
-  g_mouseDeltaY = 0.0F;
   g_mapperInitialized = true;
   return true;
 }
@@ -292,8 +287,6 @@ void shutdown_input_mapper() noexcept {
   g_mappedAxes = {};
   g_actionDown = {};
   g_prevActionDown = {};
-  g_mouseDeltaX = 0.0F;
-  g_mouseDeltaY = 0.0F;
 }
 
 // ---------------------------------------------------------------------------
@@ -502,6 +495,15 @@ bool is_mapped_action_pressed(const char *name) noexcept {
   if (name == nullptr) {
     return false;
   }
+  // Inside a fixed step an action is pressed when it is active in this
+  // step and was not in the step before, both read from the snapshots.
+  if (input_step_current()) {
+    const bool now = is_mapped_action_down(name);
+    input_step_use_previous(true);
+    const bool before = is_mapped_action_down(name);
+    input_step_use_previous(false);
+    return now && !before;
+  }
 
   for (std::size_t i = 0; i < kMaxInputActions; ++i) {
     if (g_mappedActions[i].occupied &&
@@ -558,20 +560,12 @@ bool rebind_action(const char *actionName, std::uint32_t bindingIndex,
 // Per-frame processing
 // ---------------------------------------------------------------------------
 
-void input_mapper_begin_frame() noexcept {
-  g_prevActionDown = g_actionDown;
-  g_mouseDeltaX = 0.0F;
-  g_mouseDeltaY = 0.0F;
-}
+void input_mapper_begin_frame() noexcept { g_prevActionDown = g_actionDown; }
 
-/// Consumes mouse-motion events into the per-frame delta accumulator; all
-/// other event types are seen indirectly via the underlying input state
-/// (is_key_down, etc.) that input_process_event maintains.
-void input_mapper_process_event(const PlatformEvent & /*event*/) noexcept {
-  const MouseState ms = mouse_state();
-  g_mouseDeltaX = static_cast<float>(ms.deltaX);
-  g_mouseDeltaY = static_cast<float>(ms.deltaY);
-}
+/// Every event reaches the mapper through the device state that
+/// input_process_event maintains (is_key_down, mouse_state, ...), which is
+/// also what a fixed step's snapshot replaces; nothing is kept here.
+void input_mapper_process_event(const PlatformEvent & /*event*/) noexcept {}
 
 void input_mapper_end_frame() noexcept {
   for (std::size_t i = 0; i < kMaxInputActions; ++i) {

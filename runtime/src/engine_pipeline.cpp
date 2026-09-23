@@ -1268,6 +1268,12 @@ void EnginePipeline::Impl::stage_timing() noexcept {
 //     render prep interpolates the view by the same one-step fraction as
 //     every entity, which only lines up when the two camera samples are one
 //     step apart like the two entity poses.
+//   * per-fixed-step scripts: entity script on_fixed_tick runs once per
+//     decided step, in step order, with the fixed delta and that step's own
+//     input snapshot current (core::advance_input_step), so a press is seen
+//     in exactly one step whatever the frame rate. The hooks for all of a
+//     frame's steps run here, ahead of the simulation graph, like the timer
+//     advance; their deferred mutations flush with on_tick's below.
 //   * per-frame: entity script on_tick, Lua timers and coroutines run once
 //     per rendered frame. They are dispatched once — re-entrant script
 //     dispatch per catch-up step would multiply gameplay callbacks and their
@@ -1286,6 +1292,18 @@ void EnginePipeline::Impl::stage_scripting() noexcept {
   // disconnect while paused.
   if (scripting::dap_is_running()) {
     scripting::dap_poll();
+  }
+  if (isPlaying) {
+    core::begin_input_steps(clock.stepsThisFrame);
+    while (core::advance_input_step()) {
+      scripting::dispatch_entity_scripts_fixed_update(
+          static_cast<float>(core::kFixedDeltaSeconds));
+    }
+    core::end_input_steps();
+  } else {
+    // Nothing simulates, so nothing may carry into the next step that
+    // does: input from a stopped or paused session is not replayed.
+    core::reset_input_steps();
   }
   if (isPlaying && (clock.stepsThisFrame > 0U)) {
     scripting::dispatch_timers();

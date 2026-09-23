@@ -1,9 +1,10 @@
 // Implements input behavior for the Engine core engine.
 
 #include "engine/core/input.h"
-#include "engine/core/platform_event.h"
 #include "engine/core/input_map.h"
+#include "engine/core/platform_event.h"
 #include "engine/core/touch_input.h"
+#include "input_steps_internal.h"
 
 #if defined(__clang__) && (defined(__x86_64__) || defined(__i386__)) &&        \
     !defined(__PRFCHWINTRIN_H)
@@ -118,6 +119,276 @@ const GamepadStateInternal *gamepad_slot(int gamepad) noexcept {
   return slot.connected ? &slot : nullptr;
 }
 
+// ----- Fixed-step snapshots ------------------------------------------------
+
+constexpr std::size_t kKeyWords =
+    (static_cast<std::size_t>(kMaxScancodes) + 63U) / 64U;
+
+/// One fixed step's view of the devices: what was down when the step ended
+/// and what went down or up during it. Plain data, rebuilt per step.
+struct InputFrame final {
+  std::array<std::uint64_t, kKeyWords> keyDown{};
+  std::array<std::uint64_t, kKeyWords> keyPressed{};
+  std::array<std::uint64_t, kKeyWords> keyReleased{};
+  int mouseX = 0;
+  int mouseY = 0;
+  int mouseDeltaX = 0;
+  int mouseDeltaY = 0;
+  int scrollDelta = 0;
+  std::uint8_t mouseDown = 0U;
+  std::uint8_t mousePressed = 0U;
+  std::uint8_t gamepadConnected = 0U;
+  std::array<std::uint16_t, static_cast<std::size_t>(kMaxGamepads)>
+      gamepadDown{};
+  std::array<std::uint16_t, static_cast<std::size_t>(kMaxGamepads)>
+      gamepadPressed{};
+  std::array<std::array<std::int16_t, kMaxGamepadAxes>,
+             static_cast<std::size_t>(kMaxGamepads)>
+      gamepadAxes{};
+};
+
+bool bit(const std::array<std::uint64_t, kKeyWords> &bits,
+         std::size_t index) noexcept {
+  return ((bits[index / 64U] >> (index % 64U)) & 1U) != 0U;
+}
+
+void set_bit(std::array<std::uint64_t, kKeyWords> &bits, std::size_t index,
+             bool value) noexcept {
+  const std::uint64_t mask = std::uint64_t{1} << (index % 64U);
+  bits[index / 64U] =
+      value ? (bits[index / 64U] | mask) : (bits[index / 64U] & ~mask);
+}
+
+enum class StepEventType : std::uint8_t {
+  Key,
+  MouseMove,
+  MouseButton,
+  MouseWheel,
+  GamepadConnected,
+  GamepadButton,
+  GamepadAxis,
+};
+
+/// An event as the steps replay it, recorded after the live state applied
+/// it, so gamepad events already carry their slot and a wheel event its
+/// whole notches.
+struct StepEvent final {
+  std::uint64_t timestampNs = 0U;
+  StepEventType type = StepEventType::Key;
+  bool down = false;
+  std::uint8_t slot = 0U;
+  std::int16_t code = 0;
+  std::int32_t x = 0;
+  std::int32_t y = 0;
+  std::int32_t deltaX = 0;
+  std::int32_t deltaY = 0;
+};
+
+// Events past this many before steps consume them are not recorded; the
+// last step's reconciliation with the live state keeps what is held right.
+constexpr std::size_t kMaxStepEvents = 512U;
+std::array<StepEvent, kMaxStepEvents> g_stepEvents =
+    std::array<StepEvent, kMaxStepEvents>();
+std::size_t g_stepEventCount = 0U;
+bool g_stepEventsOverflowed = false;
+// The recorded events span [g_stepWindowStartNs, g_stepWindowEndNs]: from
+// the pump that followed the last steps to the latest pump.
+std::uint64_t g_stepWindowStartNs = 0U;
+std::uint64_t g_stepWindowEndNs = 0U;
+
+InputFrame g_stepHeld{};     // the last step's snapshot
+InputFrame g_stepCurrent{};  // the snapshot queries answer from
+InputFrame g_stepPrevious{}; // the step before the current one
+const InputFrame *g_activeFrame = nullptr;
+std::uint32_t g_stepCount = 0U;
+std::uint32_t g_stepNext = 0U;
+std::size_t g_stepCursor = 0U;
+
+void record_step_event(const StepEvent &event) noexcept {
+  // Consecutive motion folds into one record: it is the common case and
+  // the only one that could fill the table on its own.
+  if ((event.type == StepEventType::MouseMove) && (g_stepEventCount > 0U) &&
+      (g_stepEvents[g_stepEventCount - 1U].type == StepEventType::MouseMove)) {
+    StepEvent &last = g_stepEvents[g_stepEventCount - 1U];
+    last.timestampNs = event.timestampNs;
+    last.x = event.x;
+    last.y = event.y;
+    last.deltaX += event.deltaX;
+    last.deltaY += event.deltaY;
+    return;
+  }
+  if (g_stepEventCount >= kMaxStepEvents) {
+    if (!g_stepEventsOverflowed) {
+      g_stepEventsOverflowed = true;
+      log_message(LogLevel::Warning, "input",
+                  "more input events arrived between fixed steps than can "
+                  "be split across them; the rest land on the last step");
+    }
+    return;
+  }
+  g_stepEvents[g_stepEventCount++] = event;
+}
+
+/// The live device state as a snapshot with no edges.
+InputFrame live_frame() noexcept {
+  InputFrame frame{};
+  for (std::size_t i = 0U; i < g_keyState.size(); ++i) {
+    set_bit(frame.keyDown, i, g_keyState[i]);
+  }
+  frame.mouseX = g_mouse.x;
+  frame.mouseY = g_mouse.y;
+  for (std::size_t i = 0U; i < g_mouse.buttons.size(); ++i) {
+    if (g_mouse.buttons[i]) {
+      frame.mouseDown = static_cast<std::uint8_t>(frame.mouseDown | (1U << i));
+    }
+  }
+  for (std::size_t p = 0U; p < g_gamepads.size(); ++p) {
+    const GamepadStateInternal &pad = g_gamepads[p];
+    if (!pad.connected) {
+      continue;
+    }
+    frame.gamepadConnected =
+        static_cast<std::uint8_t>(frame.gamepadConnected | (1U << p));
+    for (std::size_t b = 0U; b < pad.buttons.size(); ++b) {
+      if (pad.buttons[b]) {
+        frame.gamepadDown[p] =
+            static_cast<std::uint16_t>(frame.gamepadDown[p] | (1U << b));
+      }
+    }
+    frame.gamepadAxes[p] = pad.axes;
+  }
+  return frame;
+}
+
+/// Applies one recorded event to a step's snapshot, recording its edges.
+void apply_step_event(InputFrame &frame, const StepEvent &event) noexcept {
+  switch (event.type) {
+  case StepEventType::Key: {
+    const auto idx = static_cast<std::size_t>(event.code);
+    if (event.down && !bit(frame.keyDown, idx)) {
+      set_bit(frame.keyPressed, idx, true);
+    } else if (!event.down && bit(frame.keyDown, idx)) {
+      set_bit(frame.keyReleased, idx, true);
+    }
+    set_bit(frame.keyDown, idx, event.down);
+    break;
+  }
+  case StepEventType::MouseMove:
+    frame.mouseX = event.x;
+    frame.mouseY = event.y;
+    frame.mouseDeltaX += event.deltaX;
+    frame.mouseDeltaY += event.deltaY;
+    break;
+  case StepEventType::MouseButton: {
+    const auto mask = static_cast<std::uint8_t>(1U << event.code);
+    frame.mouseX = event.x;
+    frame.mouseY = event.y;
+    if (event.down && ((frame.mouseDown & mask) == 0U)) {
+      frame.mousePressed = static_cast<std::uint8_t>(frame.mousePressed | mask);
+    }
+    frame.mouseDown = event.down
+                          ? static_cast<std::uint8_t>(frame.mouseDown | mask)
+                          : static_cast<std::uint8_t>(frame.mouseDown & ~mask);
+    break;
+  }
+  case StepEventType::MouseWheel:
+    frame.scrollDelta += event.deltaY;
+    break;
+  case StepEventType::GamepadConnected: {
+    const auto mask = static_cast<std::uint8_t>(1U << event.slot);
+    frame.gamepadConnected =
+        event.down ? static_cast<std::uint8_t>(frame.gamepadConnected | mask)
+                   : static_cast<std::uint8_t>(frame.gamepadConnected & ~mask);
+    // A slot starts and ends empty, as the live slot does.
+    frame.gamepadDown[event.slot] = 0U;
+    frame.gamepadAxes[event.slot] = {};
+    break;
+  }
+  case StepEventType::GamepadButton: {
+    const auto mask = static_cast<std::uint16_t>(1U << event.code);
+    std::uint16_t &down = frame.gamepadDown[event.slot];
+    if (event.down && ((down & mask) == 0U)) {
+      frame.gamepadPressed[event.slot] =
+          static_cast<std::uint16_t>(frame.gamepadPressed[event.slot] | mask);
+    }
+    down = event.down ? static_cast<std::uint16_t>(down | mask)
+                      : static_cast<std::uint16_t>(down & ~mask);
+    break;
+  }
+  case StepEventType::GamepadAxis:
+    frame.gamepadAxes[event.slot][static_cast<std::size_t>(event.code)] =
+        static_cast<std::int16_t>(event.x);
+    break;
+  }
+}
+
+/// Makes the last step end in the live state. Whatever differs is a
+/// change the recorded events did not carry -- focus loss, or events past
+/// the record capacity -- and is applied here, with its edge.
+void reconcile_with_live(InputFrame &frame) noexcept {
+  const InputFrame live = live_frame();
+  for (std::size_t i = 0U; i < static_cast<std::size_t>(kMaxScancodes); ++i) {
+    const bool was = bit(frame.keyDown, i);
+    const bool now = bit(live.keyDown, i);
+    if (now && !was) {
+      set_bit(frame.keyPressed, i, true);
+    } else if (!now && was) {
+      set_bit(frame.keyReleased, i, true);
+    }
+  }
+  frame.keyDown = live.keyDown;
+  frame.mousePressed = static_cast<std::uint8_t>(
+      frame.mousePressed | (live.mouseDown & ~frame.mouseDown));
+  frame.mouseDown = live.mouseDown;
+  frame.mouseX = live.mouseX;
+  frame.mouseY = live.mouseY;
+  for (std::size_t p = 0U; p < frame.gamepadDown.size(); ++p) {
+    frame.gamepadPressed[p] = static_cast<std::uint16_t>(
+        frame.gamepadPressed[p] |
+        (live.gamepadDown[p] & ~frame.gamepadDown[p]));
+  }
+  frame.gamepadDown = live.gamepadDown;
+  frame.gamepadAxes = live.gamepadAxes;
+  frame.gamepadConnected = live.gamepadConnected;
+}
+
+/// The step, out of `stepCount`, whose share of the window holds `ns`.
+std::uint32_t step_for(std::uint64_t ns, std::uint32_t stepCount) noexcept {
+  if ((stepCount <= 1U) || (g_stepWindowEndNs <= g_stepWindowStartNs) ||
+      (ns <= g_stepWindowStartNs)) {
+    return 0U;
+  }
+  if (ns >= g_stepWindowEndNs) {
+    return stepCount - 1U;
+  }
+  const std::uint64_t span = g_stepWindowEndNs - g_stepWindowStartNs;
+  const std::uint64_t offset = ns - g_stepWindowStartNs;
+  // offset < span, so the product fits unless a window spans centuries.
+  const auto step = static_cast<std::uint32_t>((offset * stepCount) / span);
+  return (step < stepCount) ? step : (stepCount - 1U);
+}
+
+/// Clears the recorded events and restarts the window at the latest pump.
+void consume_step_events() noexcept {
+  g_stepEventCount = 0U;
+  g_stepEventsOverflowed = false;
+  g_stepWindowStartNs = g_stepWindowEndNs;
+}
+
+void reset_step_state() noexcept {
+  g_stepEventCount = 0U;
+  g_stepEventsOverflowed = false;
+  g_stepWindowStartNs = 0U;
+  g_stepWindowEndNs = 0U;
+  g_stepHeld = InputFrame{};
+  g_stepCurrent = InputFrame{};
+  g_stepPrevious = InputFrame{};
+  g_activeFrame = nullptr;
+  g_stepCount = 0U;
+  g_stepNext = 0U;
+  g_stepCursor = 0U;
+}
+
 } // namespace
 
 /// Initializes the owning system for input. Persisted per-user rebindings
@@ -134,6 +405,7 @@ bool initialize_input() noexcept {
   g_mouse = {};
   g_wheelCarry = 0.0F;
   g_gamepads = {};
+  reset_step_state();
   g_inputInitialized = true;
 
   static_cast<void>(initialize_input_mapper());
@@ -187,6 +459,7 @@ void shutdown_input() noexcept {
   g_mouse = {};
   g_wheelCarry = 0.0F;
   g_gamepads = {};
+  reset_step_state();
 }
 
 /// Begins the requested operation or profiling range for input frame.
@@ -266,6 +539,14 @@ void input_process_event(const PlatformEvent &event) noexcept {
         g_keyReleasedEdge[idx] = true;
       }
       g_keyState[idx] = down;
+      if (!(down && event.repeat)) {
+        StepEvent step{};
+        step.timestampNs = event.timestampNs;
+        step.type = StepEventType::Key;
+        step.down = down;
+        step.code = static_cast<std::int16_t>(scancode);
+        record_step_event(step);
+      }
       KeyEvent ke{};
       ke.scancode = scancode;
       ke.down = down;
@@ -278,6 +559,16 @@ void input_process_event(const PlatformEvent &event) noexcept {
     g_mouse.y = static_cast<int>(event.y);
     g_mouse.deltaX += static_cast<int>(event.deltaX);
     g_mouse.deltaY += static_cast<int>(event.deltaY);
+    {
+      StepEvent step{};
+      step.timestampNs = event.timestampNs;
+      step.type = StepEventType::MouseMove;
+      step.x = g_mouse.x;
+      step.y = g_mouse.y;
+      step.deltaX = static_cast<std::int32_t>(event.deltaX);
+      step.deltaY = static_cast<std::int32_t>(event.deltaY);
+      record_step_event(step);
+    }
     MouseMoveEvent me{};
     me.x = static_cast<int>(event.x);
     me.y = static_cast<int>(event.y);
@@ -301,6 +592,14 @@ void input_process_event(const PlatformEvent &event) noexcept {
         g_mouse.pressedEdge[idx] = true;
       }
       g_mouse.buttons[idx] = down;
+      StepEvent step{};
+      step.timestampNs = event.timestampNs;
+      step.type = StepEventType::MouseButton;
+      step.down = down;
+      step.code = static_cast<std::int16_t>(button);
+      step.x = g_mouse.x;
+      step.y = g_mouse.y;
+      record_step_event(step);
       MouseButtonEvent mbe{};
       mbe.button = button;
       mbe.down = down;
@@ -316,17 +615,39 @@ void input_process_event(const PlatformEvent &event) noexcept {
     const int notches = static_cast<int>(g_wheelCarry);
     g_mouse.scrollDelta += notches;
     g_wheelCarry -= static_cast<float>(notches);
+    if (notches != 0) {
+      StepEvent step{};
+      step.timestampNs = event.timestampNs;
+      step.type = StepEventType::MouseWheel;
+      step.deltaY = notches;
+      record_step_event(step);
+    }
     break;
   }
   case PlatformEventKind::WindowFocusLost:
     release_all_held_input();
     break;
   case PlatformEventKind::GamepadAdded:
-    attach_gamepad(event.deviceId);
+  case PlatformEventKind::GamepadRemoved: {
+    const bool added = (event.kind == PlatformEventKind::GamepadAdded);
+    const GamepadStateInternal *before = find_gamepad(event.deviceId);
+    if (added) {
+      attach_gamepad(event.deviceId);
+    } else {
+      detach_gamepad(event.deviceId);
+    }
+    const GamepadStateInternal *slot =
+        added ? find_gamepad(event.deviceId) : before;
+    if (slot != nullptr) {
+      StepEvent step{};
+      step.timestampNs = event.timestampNs;
+      step.type = StepEventType::GamepadConnected;
+      step.down = added;
+      step.slot = static_cast<std::uint8_t>(slot - g_gamepads.data());
+      record_step_event(step);
+    }
     break;
-  case PlatformEventKind::GamepadRemoved:
-    detach_gamepad(event.deviceId);
-    break;
+  }
   case PlatformEventKind::GamepadButtonDown:
   case PlatformEventKind::GamepadButtonUp: {
     // A device that was never announced (or was removed) has no slot;
@@ -340,6 +661,13 @@ void input_process_event(const PlatformEvent &event) noexcept {
         slot->pressedEdge[idx] = true;
       }
       slot->buttons[idx] = down;
+      StepEvent step{};
+      step.timestampNs = event.timestampNs;
+      step.type = StepEventType::GamepadButton;
+      step.down = down;
+      step.slot = static_cast<std::uint8_t>(slot - g_gamepads.data());
+      step.code = static_cast<std::int16_t>(button);
+      record_step_event(step);
     }
     break;
   }
@@ -348,6 +676,13 @@ void input_process_event(const PlatformEvent &event) noexcept {
     const int axis = event.gamepadAxis;
     if ((slot != nullptr) && (axis >= 0) && (axis < kMaxGamepadAxes)) {
       slot->axes[static_cast<std::size_t>(axis)] = event.axisValue;
+      StepEvent step{};
+      step.timestampNs = event.timestampNs;
+      step.type = StepEventType::GamepadAxis;
+      step.slot = static_cast<std::uint8_t>(slot - g_gamepads.data());
+      step.code = static_cast<std::int16_t>(axis);
+      step.x = event.axisValue;
+      record_step_event(step);
     }
     break;
   }
@@ -364,12 +699,83 @@ void input_process_event(const PlatformEvent &event) noexcept {
 void end_input_frame() noexcept {
   input_mapper_end_frame();
   touch_end_frame();
+  // Every event this pump delivered happened before now, so now closes the
+  // window the next steps split.
+  g_stepWindowEndNs = platform_ticks_ns();
+  if (g_stepWindowStartNs == 0U) {
+    g_stepWindowStartNs = g_stepWindowEndNs;
+  }
+}
+
+void begin_input_steps(std::uint32_t stepCount) noexcept {
+  g_stepCount = stepCount;
+  g_stepNext = 0U;
+  g_stepCursor = 0U;
+}
+
+bool advance_input_step() noexcept {
+  if (g_stepNext >= g_stepCount) {
+    return false;
+  }
+  const std::uint32_t step = g_stepNext++;
+  const bool last = (g_stepNext == g_stepCount);
+  g_stepPrevious = g_stepHeld;
+  InputFrame frame = g_stepHeld;
+  frame.keyPressed = {};
+  frame.keyReleased = {};
+  frame.mouseDeltaX = 0;
+  frame.mouseDeltaY = 0;
+  frame.scrollDelta = 0;
+  frame.mousePressed = 0U;
+  frame.gamepadPressed = {};
+  while ((g_stepCursor < g_stepEventCount) &&
+         (last || (step_for(g_stepEvents[g_stepCursor].timestampNs,
+                            g_stepCount) <= step))) {
+    apply_step_event(frame, g_stepEvents[g_stepCursor]);
+    ++g_stepCursor;
+  }
+  if (last) {
+    reconcile_with_live(frame);
+    consume_step_events();
+  }
+  g_stepHeld = frame;
+  g_stepCurrent = frame;
+  g_activeFrame = &g_stepCurrent;
+  return true;
+}
+
+void end_input_steps() noexcept {
+  g_activeFrame = nullptr;
+  g_stepCount = 0U;
+  g_stepNext = 0U;
+}
+
+void reset_input_steps() noexcept {
+  g_stepEventCount = 0U;
+  g_stepEventsOverflowed = false;
+  g_stepWindowStartNs = g_stepWindowEndNs;
+  g_stepHeld = live_frame();
+  g_stepPrevious = g_stepHeld;
+  g_activeFrame = nullptr;
+  g_stepCount = 0U;
+  g_stepNext = 0U;
+}
+
+bool input_step_current() noexcept { return g_activeFrame != nullptr; }
+
+void input_step_use_previous(bool previous) noexcept {
+  if (g_activeFrame != nullptr) {
+    g_activeFrame = previous ? &g_stepPrevious : &g_stepCurrent;
+  }
 }
 
 /// Returns whether is key down.
 bool is_key_down(KeyScancode scancode) noexcept {
   if ((scancode < 0) || (scancode >= kMaxScancodes)) {
     return false;
+  }
+  if (g_activeFrame != nullptr) {
+    return bit(g_activeFrame->keyDown, static_cast<std::size_t>(scancode));
   }
   return g_keyState[static_cast<std::size_t>(scancode)];
 }
@@ -379,6 +785,9 @@ bool is_key_pressed(KeyScancode scancode) noexcept {
   if ((scancode < 0) || (scancode >= kMaxScancodes)) {
     return false;
   }
+  if (g_activeFrame != nullptr) {
+    return bit(g_activeFrame->keyPressed, static_cast<std::size_t>(scancode));
+  }
   return g_keyPressedEdge[static_cast<std::size_t>(scancode)];
 }
 
@@ -387,11 +796,25 @@ bool is_key_released(KeyScancode scancode) noexcept {
   if ((scancode < 0) || (scancode >= kMaxScancodes)) {
     return false;
   }
+  if (g_activeFrame != nullptr) {
+    return bit(g_activeFrame->keyReleased, static_cast<std::size_t>(scancode));
+  }
   return g_keyReleasedEdge[static_cast<std::size_t>(scancode)];
 }
 
 MouseState mouse_state() noexcept {
   MouseState state{};
+  if (g_activeFrame != nullptr) {
+    state.x = g_activeFrame->mouseX;
+    state.y = g_activeFrame->mouseY;
+    state.deltaX = g_activeFrame->mouseDeltaX;
+    state.deltaY = g_activeFrame->mouseDeltaY;
+    state.scrollDelta = g_activeFrame->scrollDelta;
+    for (int i = 0; i < kMaxMouseButtons; ++i) {
+      state.buttons[i] = ((g_activeFrame->mouseDown >> i) & 1U) != 0U;
+    }
+    return state;
+  }
   state.x = g_mouse.x;
   state.y = g_mouse.y;
   state.deltaX = g_mouse.deltaX;
@@ -408,6 +831,9 @@ bool is_mouse_button_down(int button) noexcept {
   if ((button < 0) || (button >= kMaxMouseButtons)) {
     return false;
   }
+  if (g_activeFrame != nullptr) {
+    return ((g_activeFrame->mouseDown >> button) & 1U) != 0U;
+  }
   return g_mouse.buttons[static_cast<std::size_t>(button)];
 }
 
@@ -415,6 +841,9 @@ bool is_mouse_button_down(int button) noexcept {
 bool is_mouse_button_pressed(int button) noexcept {
   if ((button < 0) || (button >= kMaxMouseButtons)) {
     return false;
+  }
+  if (g_activeFrame != nullptr) {
+    return ((g_activeFrame->mousePressed >> button) & 1U) != 0U;
   }
   return g_mouse.pressedEdge[static_cast<std::size_t>(button)];
 }
@@ -467,11 +896,21 @@ float axis_value(const char *name) noexcept {
 }
 
 bool is_gamepad_connected(int gamepad) noexcept {
+  if ((g_activeFrame != nullptr) && (gamepad >= 0) &&
+      (gamepad < kMaxGamepads)) {
+    return ((g_activeFrame->gamepadConnected >> gamepad) & 1U) != 0U;
+  }
   return gamepad_slot(gamepad) != nullptr;
 }
 
 int connected_gamepad_count() noexcept {
   int count = 0;
+  if (g_activeFrame != nullptr) {
+    for (int p = 0; p < kMaxGamepads; ++p) {
+      count += ((g_activeFrame->gamepadConnected >> p) & 1U);
+    }
+    return count;
+  }
   for (const GamepadStateInternal &slot : g_gamepads) {
     count += slot.connected ? 1 : 0;
   }
@@ -479,6 +918,13 @@ int connected_gamepad_count() noexcept {
 }
 
 bool is_gamepad_button_down(int button, int gamepad) noexcept {
+  if (g_activeFrame != nullptr) {
+    return is_gamepad_connected(gamepad) && (button >= 0) &&
+           (button < kMaxGamepadButtons) &&
+           (((g_activeFrame->gamepadDown[static_cast<std::size_t>(gamepad)] >>
+              button) &
+             1U) != 0U);
+  }
   const GamepadStateInternal *slot = gamepad_slot(gamepad);
   if ((slot == nullptr) || (button < 0) || (button >= kMaxGamepadButtons)) {
     return false;
@@ -487,6 +933,14 @@ bool is_gamepad_button_down(int button, int gamepad) noexcept {
 }
 
 bool is_gamepad_button_pressed(int button, int gamepad) noexcept {
+  if (g_activeFrame != nullptr) {
+    return is_gamepad_connected(gamepad) && (button >= 0) &&
+           (button < kMaxGamepadButtons) &&
+           (((g_activeFrame
+                  ->gamepadPressed[static_cast<std::size_t>(gamepad)] >>
+              button) &
+             1U) != 0U);
+  }
   const GamepadStateInternal *slot = gamepad_slot(gamepad);
   if ((slot == nullptr) || (button < 0) || (button >= kMaxGamepadButtons)) {
     return false;
@@ -495,12 +949,15 @@ bool is_gamepad_button_pressed(int button, int gamepad) noexcept {
 }
 
 float gamepad_axis_value(int axis, int deadzone, int gamepad) noexcept {
-  const GamepadStateInternal *slot = gamepad_slot(gamepad);
-  if ((slot == nullptr) || (axis < 0) || (axis >= kMaxGamepadAxes)) {
+  if (!is_gamepad_connected(gamepad) || (axis < 0) ||
+      (axis >= kMaxGamepadAxes)) {
     return 0.0F;
   }
-
-  const int raw = static_cast<int>(slot->axes[static_cast<std::size_t>(axis)]);
+  const std::array<std::int16_t, kMaxGamepadAxes> &axes =
+      (g_activeFrame != nullptr)
+          ? g_activeFrame->gamepadAxes[static_cast<std::size_t>(gamepad)]
+          : gamepad_slot(gamepad)->axes;
+  const int raw = static_cast<int>(axes[static_cast<std::size_t>(axis)]);
   const int absRaw = (raw < 0) ? -raw : raw;
   const int dz = (deadzone < 0) ? 0 : deadzone;
   if (absRaw <= dz) {
