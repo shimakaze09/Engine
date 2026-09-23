@@ -73,6 +73,10 @@ project(Engine VERSION 0.1.0 LANGUAGES C CXX)
 include(${CMAKE_SOURCE_DIR}/cmake/EngineHelpers.cmake)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+# No target uses C++20 modules. CMake 3.28+ would otherwise add a
+# dependency-scan and a dyndep step per C++23 translation unit under Ninja,
+# a quarter of all build steps on the Windows lanes.
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 
 find_package(Threads REQUIRED)
 # ---- Platform target ----
@@ -201,7 +205,7 @@ include(FetchContent)
         FORCE)
     # shaderc's toolchain (glslang/spirv-*) dominates a cold bgfx build;
     # lanes that never consume cooked binaries (sanitizers, analysis,
-    # werror, benchmarks) turn it off — the cooked test sections skip
+    # benchmarks) turn it off — the cooked test sections skip
     # gracefully when no cook target exists.
     option(ENGINE_BGFX_SHADERC
         "Build bgfx shaderc and cook the shader manifest" ON)

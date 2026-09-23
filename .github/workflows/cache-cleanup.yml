@@ -1,9 +1,9 @@
-# Weekly Actions-cache pruning: the _deps caches accumulate one ~600 MB
-# entry per CMakeLists.txt hash generation and per branch scope, which
-# breached the repository's 10 GB cache quota (2026-08-19: 17 entries,
-# 10.4 GB) and caused LRU thrash of the live caches. Anything not
-# accessed within the window is a dead generation; active keys are
-# re-saved by the next CI run at worst.
+# Weekly Actions-cache pruning: the _deps caches accumulate one set of
+# entries per CMakeLists.txt hash generation. Before CI saved from main
+# only, per-branch copies breached the repository's 10 GB cache quota
+# (2026-08-19: 17 entries, 10.4 GB) and caused LRU thrash of the live
+# caches. Anything not accessed within the window is a dead generation;
+# active keys are re-saved by the next push to main at worst.
 name: Cache cleanup
 
 on:

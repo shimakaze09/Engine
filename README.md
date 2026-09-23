@@ -57,9 +57,8 @@ and was never read, shadow types no producer could enable. So, instead:
 - **Open scope lives on the GitHub tracker.** It is the only source of
   truth for what is broken, missing, or deferred.
 - **On-screen renderer behavior is not covered by CI.** No CI lane draws a
-  frame. Only the canonical Windows and Linux lanes and the MSVC and GCC
-  compatibility lanes cook shaders; macOS and the analysis, sanitizer,
-  coverage and benchmark lanes build with the cook off. A rendering feature is only as verified as the last time
+  frame. Only the Windows and Linux Release lanes cook shaders; every
+  other lane builds with the cook off. A rendering feature is only as verified as the last time
   somebody ran the editor and looked at it.
 
 The engine builds, runs an editor, simulates a deterministic world, and
@@ -236,7 +235,11 @@ Some tests are labeled `gpu`; CI excludes those where headless execution is requ
 ## Continuous integration
 
 GitHub Actions configuration lives in `.github/workflows/ci.yml` and currently
-runs eleven jobs:
+runs ten jobs. Every job except the cross-platform determinism comparison
+starts at once; engine targets build with warnings as errors on every lane,
+and CTest runs four tests at a time. Each lane restores its built
+dependencies from a cache that only pushes to `main` save, one entry per OS
+and configuration:
 
 - Windows, Linux, and macOS builds in Debug and Release on the canonical
   toolchains (`clang-cl` via Ninja, `clang++-19`, AppleClang),
@@ -249,7 +252,6 @@ runs eleven jobs:
   timing, error handling, portable fopen, duplicate primitives, asset
   metadata paths, asset identity, shader variants, document references, array value-initialization)
 - `clang-tidy` with warnings-as-errors
-- A dedicated `-Werror` build check
 - ASAN/UBSAN and TSAN sanitizer lanes
 - Coverage with a minimum-threshold gate
 - Benchmark runs gated against `tests/benchmark/perf_baseline.json`
