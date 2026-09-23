@@ -77,8 +77,9 @@ These override every tier below.
 
 **CI cannot verify this tier.** Only the Linux, Windows and macOS Release
 lanes build with the shader cook; every other lane passes
-`ENGINE_BGFX_SHADERC=OFF`, and no lane draws a frame (every lane excludes
-the `gpu` label). A pass can be
+`ENGINE_BGFX_SHADERC=OFF`, and every native lane excludes the `gpu` label.
+The web lane draws frames on SwiftShader's WebGL2 but only fails on an
+error; it compares no image. A pass can be
 unreachable, a uniform never written, a target sampled while it renders,
 and every test still passes. Treat a green suite here as no evidence.
 
@@ -97,6 +98,26 @@ If you cannot open a window — headless container, no GPU — you have not
 verified a renderer change. State that, name the observation someone must
 make, and do not claim the tier. This is the normal outcome in CI-like
 environments and is not a reason to skip the tier or soften the claim.
+
+## Tier: web platform
+
+Anything behind `ENGINE_PLATFORM_WEB`, the Web link options, a web shell,
+the lifecycle the browser loop drives, or a thread count (every web thread
+comes from a fixed pool). The `web (Emscripten)` CI lane builds the pages
+and runs `ctest -L web`; locally it needs emsdk 6.0.10 activated, a native
+build's cook, and the Playwright pinned in `tests/web/`:
+
+```bash
+emcmake cmake -S . -B build-web -DCMAKE_BUILD_TYPE=Release -DENGINE_TARGET_PLATFORM=Web -DENGINE_BUILD_TESTS=ON -DENGINE_BUILD_TOOLS=OFF -DENGINE_WEB_COOKED_DIR=<native-build>/assets/shaders/bgfx/cooked
+cmake --build build-web --parallel
+npm ci --prefix tests/web
+npx --prefix tests/web playwright install chromium-headless-shell
+ctest --test-dir build-web -L web --output-on-failure
+```
+
+The browser runs SwiftShader, so a green run shows the page runs without a
+page, engine or WebGL error. It is not the renderer tier: a visible change
+still needs the page looked at in a browser on a real GPU.
 
 ## Tier: serialization, scene, prefab, save, metadata
 

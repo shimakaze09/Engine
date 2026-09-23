@@ -128,9 +128,13 @@ per-thread command buffers that are merged for the backend flush.
 Work outside the job graph: asset streaming runs on its own four worker
 threads behind a mutex, and uploads happen on the main thread; the render
 device is main-thread only; hot reload polls only while an editor bridge
-is published. Scripts, timers and the deferred-mutation flush run before
-the simulation graph; collision callbacks, EndPlay and the final flush run
-after render prep and before submission.
+is published. On the web every thread comes from the page's prewarmed
+pthread pool, whose size and the job system's share of it are one budget
+in the root `CMakeLists.txt`: a thread past the pool would start only after
+the main thread yields, so a join on it would hang the page. Scripts,
+timers and the deferred-mutation flush run before the simulation graph;
+collision callbacks, EndPlay and the final flush run after render prep and
+before submission.
 
 Test the production pipeline, never a copied scheduler model.
 

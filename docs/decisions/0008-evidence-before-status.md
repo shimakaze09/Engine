@@ -40,5 +40,7 @@ claim it implied was about behavior.
 - A renderer feature cannot satisfy this rule from CI alone, because no CI
   lane draws a frame. That is a gap in verification, not a reason to relax
   the rule; see the `verify` skill.
+  *(Since 2026-09-23 the web lane draws frames on SwiftShader's WebGL2, but
+  only fails on errors and checks no image, so the gap stands.)*
 - Historical status prose was deleted rather than migrated. Git history
   holds it.
