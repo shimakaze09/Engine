@@ -17,6 +17,8 @@
 #include "engine/renderer/material_loader.h"
 #include "engine/renderer/material_writer.h"
 
+#include "../material_ref_fixture.h"
+
 namespace {
 
 bool exactly_equal(float lhs, float rhs) noexcept { return lhs == rhs; }
@@ -71,19 +73,15 @@ int verify_save_round_trip(engine::renderer::AssetDatabase *database) {
   constexpr const char *kTexturePath = "material_writer_tex_albedo.png";
   constexpr const char *kTextureVirtualPath =
       "mat/material_writer_tex_albedo.png";
-  // A texture slot's source path must already be registered as metadata
-  // (normally the loader does this); simulate that here for a from-scratch
-  // in-memory material a material editor session would be building.
-  const engine::renderer::AssetId textureId =
-      engine::renderer::make_asset_id_from_path(kTextureVirtualPath);
-  engine::renderer::AssetMetadata textureMetadata{};
-  textureMetadata.assetId = textureId;
-  textureMetadata.typeTag = engine::renderer::AssetTypeTag::Texture;
-  engine::renderer::write_metadata_path(&textureMetadata.filePath,
-                                        kTextureVirtualPath);
-  if (!engine::renderer::register_asset_metadata(database, textureMetadata)) {
+  // The texture is catalogued, as the mount walk would list it, for a
+  // from-scratch in-memory material an editor session would be building.
+  const engine::tests::MaterialRefText textureRef =
+      engine::tests::catalog_texture(database, kTextureVirtualPath);
+  if (textureRef.text[0] == '\0') {
     return 10;
   }
+  const engine::renderer::AssetId textureId =
+      engine::renderer::make_asset_id_from_path(kTextureVirtualPath);
 
   engine::renderer::Material params{};
   params.albedo = engine::math::Vec3(0.2F, 0.4F, 0.6F);
@@ -107,6 +105,16 @@ int verify_save_round_trip(engine::renderer::AssetDatabase *database) {
   if (!saved) {
     remove_file(kOsPath);
     return 11;
+  }
+
+  // The document names the texture by identity, never by where it lives.
+  std::string content;
+  if (!read_whole_file(kOsPath, &content) ||
+      (content.find(textureRef.text) == std::string::npos) ||
+      (content.find(kTextureVirtualPath) != std::string::npos)) {
+    std::printf("saved document: %s\n", content.c_str());
+    remove_file(kOsPath);
+    return 15;
   }
 
   const auto loadResult =
@@ -143,28 +151,45 @@ int verify_save_round_trip(engine::renderer::AssetDatabase *database) {
   return 0;
 }
 
-/// A texture slot id with no resolvable metadata path rejects the save and
-/// leaves a pre-existing destination file completely untouched.
+/// A texture slot whose asset has no persistent identity in the catalog
+/// rejects the save and leaves a pre-existing destination file completely
+/// untouched.
 int verify_unresolvable_texture_rejects_save(
     engine::renderer::AssetDatabase *database) {
   constexpr const char *kOsPath = "material_writer_unresolvable.json";
   constexpr const char *kVirtualPath = "mat/material_writer_unresolvable.json";
-  constexpr const char *kOriginalContent = "{\"version\":3,\"roughness\":0.77}";
+  constexpr const char *kOriginalContent = "{\"version\":4,\"roughness\":0.77}";
   if (!write_material_file(kOsPath, kOriginalContent)) {
     return 20;
   }
 
-  engine::renderer::Material params{};
-  engine::renderer::MaterialTextureSlots slots{};
-  // An id with no registered metadata at all.
-  slots.albedo = 0xDEADBEEFULL;
-
-  const bool saved = engine::renderer::save_material_asset(
-      database, kVirtualPath, params, slots, nullptr,
-      engine::renderer::material_field::kAll);
-  if (saved) {
+  // A texture known only by path: the record a load by file name leaves,
+  // with no identity a document could name.
+  engine::renderer::AssetMetadata pathOnly{};
+  pathOnly.assetId = engine::renderer::make_asset_id_from_path(
+      "mat/material_writer_path_only.png");
+  pathOnly.typeTag = engine::renderer::AssetTypeTag::Texture;
+  engine::renderer::write_metadata_path(&pathOnly.filePath,
+                                        "mat/material_writer_path_only.png");
+  if (!engine::renderer::register_asset_metadata(database, pathOnly)) {
     remove_file(kOsPath);
-    return 21;
+    return 24;
+  }
+
+  // An id with no registered metadata at all, then one with no identity.
+  const engine::renderer::AssetId kUnsavable[] = {0xDEADBEEFULL,
+                                                  pathOnly.assetId};
+  for (const engine::renderer::AssetId id : kUnsavable) {
+    engine::renderer::Material params{};
+    engine::renderer::MaterialTextureSlots slots{};
+    slots.albedo = id;
+    const bool saved = engine::renderer::save_material_asset(
+        database, kVirtualPath, params, slots, nullptr,
+        engine::renderer::material_field::kAll);
+    if (saved) {
+      remove_file(kOsPath);
+      return 21;
+    }
   }
 
   std::string afterContent;
@@ -189,11 +214,15 @@ int verify_find_parent_path(engine::renderer::AssetDatabase *database) {
   constexpr const char *kChildPath = "material_writer_child.json";
   constexpr const char *kChildVirtualPath = "mat/material_writer_child.json";
 
-  if (!write_material_file(kParentPath, "{\"version\":3,\"roughness\":0.5}") ||
-      !write_material_file(
-          kChildPath,
-          "{\"version\":3,\"parent\":\"mat/material_writer_parent.json\","
-          "\"textures\":{\"albedo\":\"assets/textures/child.png\"}}")) {
+  char childJson[256] = {};
+  std::snprintf(
+      childJson, sizeof(childJson),
+      "{\"version\":4,\"parent\":\"%s\",\"textures\":{\"albedo\":\"%s\"}}",
+      engine::tests::catalog_material(database, kParentVirtualPath).text,
+      engine::tests::catalog_texture(database, "assets/textures/child.png")
+          .text);
+  if (!write_material_file(kParentPath, "{\"version\":4,\"roughness\":0.5}") ||
+      !write_material_file(kChildPath, childJson)) {
     remove_file(kParentPath);
     remove_file(kChildPath);
     return 30;
@@ -243,6 +272,16 @@ int verify_child_writes_only_overrides(
   engine::renderer::MaterialTextureSlots slots{};
   slots.albedo = 0xDEADBEEFULL; // inherited, and unresolvable
 
+  // A parent the catalog holds no identity for cannot be named, so the
+  // save is refused rather than writing a path or dropping the parent.
+  if (engine::renderer::save_material_asset(
+          database, kVirtualPath, params, slots, "mat/material_parent.json",
+          engine::renderer::material_field::kRoughness)) {
+    remove_file(kOsPath);
+    return 43;
+  }
+  const engine::tests::MaterialRefText parentRef =
+      engine::tests::catalog_material(database, "mat/material_parent.json");
   if (!engine::renderer::save_material_asset(
           database, kVirtualPath, params, slots, "mat/material_parent.json",
           engine::renderer::material_field::kRoughness)) {
@@ -255,8 +294,9 @@ int verify_child_writes_only_overrides(
   if (!read) {
     return 41;
   }
-  if ((content.find("\"parent\":\"mat/material_parent.json\"") ==
-       std::string::npos) ||
+  const std::string parentKey =
+      std::string("\"parent\":\"") + parentRef.text + "\"";
+  if ((content.find(parentKey) == std::string::npos) ||
       (content.find("\"roughness\"") == std::string::npos) ||
       (content.find("\"metallic\"") != std::string::npos) ||
       (content.find("\"albedo\"") != std::string::npos) ||

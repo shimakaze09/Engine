@@ -1,5 +1,6 @@
 // Verifies the texture-backed material schema: full field round trip,
 // texture-slot dependency edges, parent-chain texture override semantics,
+// references that follow a moved parent and texture,
 // and that every field the format defines is read at the one revision the
 // build accepts -- there is no revision at which a present field is
 // silently ignored.
@@ -8,11 +9,14 @@
 #include <cstring>
 #include <memory>
 #include <new>
+#include <string>
 
 #include "engine/core/logging.h"
 #include "engine/core/vfs.h"
 #include "engine/renderer/asset_database.h"
 #include "engine/renderer/material_loader.h"
+
+#include "../material_ref_fixture.h"
 
 namespace {
 
@@ -40,21 +44,27 @@ void remove_file(const char *path) noexcept {
   static_cast<void>(std::remove(path));
 }
 
-/// A full v2 file: every new field present must land exactly, and every
-/// texture slot must register Texture metadata plus a dependency edge.
+/// A full file: every field present must land exactly, and every texture
+/// slot must resolve to its catalogued texture plus a dependency edge.
 int verify_v2_full_load(engine::renderer::AssetDatabase *database) {
   constexpr const char *kPath = "material_v2_full.json";
   constexpr const char *kVirtualPath = "mat/material_v2_full.json";
-  constexpr const char *kJson =
-      "{\"version\":3,\"albedo\":[0.5,0.5,0.5],\"roughness\":0.4,"
+  char kJson[640] = {};
+  std::snprintf(
+      kJson, sizeof(kJson),
+      "{\"version\":4,\"albedo\":[0.5,0.5,0.5],\"roughness\":0.4,"
       "\"alphaMode\":\"mask\",\"alphaCutoff\":0.3,"
       "\"uvTiling\":[2.0,3.0],\"uvOffset\":[0.25,0.75],"
-      "\"textures\":{"
-      "\"albedo\":\"assets/textures/albedo.png\","
-      "\"metallicRoughness\":\"assets/textures/mr.png\","
-      "\"emissive\":\"assets/textures/emissive.png\","
-      "\"occlusion\":\"assets/textures/ao.png\","
-      "\"opacity\":\"assets/textures/opacity.png\"}}";
+      "\"textures\":{\"albedo\":\"%s\",\"metallicRoughness\":\"%s\","
+      "\"emissive\":\"%s\",\"occlusion\":\"%s\",\"opacity\":\"%s\"}}",
+      engine::tests::catalog_texture(database, "assets/textures/albedo.png")
+          .text,
+      engine::tests::catalog_texture(database, "assets/textures/mr.png").text,
+      engine::tests::catalog_texture(database, "assets/textures/emissive.png")
+          .text,
+      engine::tests::catalog_texture(database, "assets/textures/ao.png").text,
+      engine::tests::catalog_texture(database, "assets/textures/opacity.png")
+          .text);
   if (!write_material_file(kPath, kJson)) {
     return 10;
   }
@@ -115,7 +125,7 @@ int verify_v2_full_load(engine::renderer::AssetDatabase *database) {
     return 16;
   }
 
-  // Every texture slot registered Texture-tagged metadata...
+  // Every texture slot resolved to the catalogued Texture record...
   const engine::renderer::AssetMetadata *albedoMeta =
       engine::renderer::find_asset_metadata(database, expectedAlbedo);
   if ((albedoMeta == nullptr) ||
@@ -142,14 +152,15 @@ int verify_v2_full_load(engine::renderer::AssetDatabase *database) {
   return 0;
 }
 
-/// Malformed v2-only fields (bad alphaMode string, non-object "textures",
-/// empty texture path) reject the load; the version gate itself (out of
-/// range) is covered by material_asset_test.cpp's failure suite.
+/// Malformed fields (bad alphaMode string, non-object "textures", a
+/// texture slot that names no catalogued texture) reject the load; the version
+/// gate itself (out of range) is covered by material_asset_test.cpp's failure
+/// suite.
 int verify_v2_malformed_fields(engine::renderer::AssetDatabase *database) {
   constexpr const char *kPath = "material_v2_bad.json";
   constexpr const char *kVirtualPath = "mat/material_v2_bad.json";
 
-  if (!write_material_file(kPath, "{\"version\":3,\"alphaMode\":\"glow\"}")) {
+  if (!write_material_file(kPath, "{\"version\":4,\"alphaMode\":\"glow\"}")) {
     return 30;
   }
   auto result = engine::renderer::load_material_asset(database, kVirtualPath);
@@ -158,7 +169,7 @@ int verify_v2_malformed_fields(engine::renderer::AssetDatabase *database) {
     return 31;
   }
 
-  if (!write_material_file(kPath, "{\"version\":3,\"textures\":[1,2]}")) {
+  if (!write_material_file(kPath, "{\"version\":4,\"textures\":[1,2]}")) {
     return 32;
   }
   result = engine::renderer::load_material_asset(database, kVirtualPath);
@@ -167,14 +178,32 @@ int verify_v2_malformed_fields(engine::renderer::AssetDatabase *database) {
     return 33;
   }
 
-  if (!write_material_file(kPath,
-                           "{\"version\":3,\"textures\":{\"albedo\":\"\"}}")) {
-    return 34;
-  }
-  result = engine::renderer::load_material_asset(database, kVirtualPath);
-  remove_file(kPath);
-  if (result.has_value()) {
-    return 35;
+  // Not a reference at all: empty text, and the path spelling of the
+  // previous revision, which names nothing now. Then a reference the
+  // catalog has no asset for, and one naming an asset that is not a
+  // texture. Each refuses the load rather than dropping the slot, so a
+  // later save cannot write the material back without it.
+  const engine::tests::MaterialRefText materialRef =
+      engine::tests::catalog_material(database, "mat/material_v2_other.json");
+  char uncatalogued[engine::content::kAssetRefTextLength + 1U] = {};
+  static_cast<void>(engine::content::format_asset_ref(
+      engine::core::asset_ref_primary(
+          engine::content::builtin_asset_guid("assets/textures/gone.png")),
+      uncatalogued, sizeof(uncatalogued)));
+  const char *const kRefusedSlots[] = {"", "assets/textures/albedo.png",
+                                       uncatalogued, materialRef.text};
+  for (const char *slot : kRefusedSlots) {
+    char json[160] = {};
+    std::snprintf(json, sizeof(json),
+                  "{\"version\":4,\"textures\":{\"albedo\":\"%s\"}}", slot);
+    if (!write_material_file(kPath, json)) {
+      return 34;
+    }
+    result = engine::renderer::load_material_asset(database, kVirtualPath);
+    remove_file(kPath);
+    if (result.has_value()) {
+      return 35;
+    }
   }
 
   return 0;
@@ -188,10 +217,9 @@ int verify_v2_malformed_fields(engine::renderer::AssetDatabase *database) {
 int verify_every_field_is_read(engine::renderer::AssetDatabase *database) {
   constexpr const char *kPath = "material_all_fields.json";
   constexpr const char *kVirtualPath = "mat/material_all_fields.json";
-  constexpr const char *kJson =
-      "{\"version\":3,\"shadingModel\":\"toon\","
-      "\"alphaMode\":\"mask\",\"alphaCutoff\":0.9,"
-      "\"uvTiling\":[9.0,9.0]}";
+  constexpr const char *kJson = "{\"version\":4,\"shadingModel\":\"toon\","
+                                "\"alphaMode\":\"mask\",\"alphaCutoff\":0.9,"
+                                "\"uvTiling\":[9.0,9.0]}";
   if (!write_material_file(kPath, kJson)) {
     return 40;
   }
@@ -227,7 +255,7 @@ int verify_every_field_is_read(engine::renderer::AssetDatabase *database) {
   constexpr const char *kUnknownVirtualPath =
       "mat/material_unknown_model.json";
   constexpr const char *kUnknownModel =
-      "{\"version\":3,\"shadingModel\":\"cel\"}";
+      "{\"version\":4,\"shadingModel\":\"cel\"}";
   if (!write_material_file(kUnknownPath, kUnknownModel)) {
     return 44;
   }
@@ -249,15 +277,27 @@ int verify_v2_parent_texture_override(
   constexpr const char *kBasePath = "material_v2_tex_base.json";
   constexpr const char *kChildPath = "material_v2_tex_child.json";
 
-  if (!write_material_file(
-          kBasePath,
-          "{\"version\":3,\"textures\":{"
-          "\"albedo\":\"assets/textures/base_albedo.png\","
-          "\"emissive\":\"assets/textures/base_emissive.png\"}}") ||
-      !write_material_file(
-          kChildPath,
-          "{\"version\":3,\"parent\":\"mat/material_v2_tex_base.json\","
-          "\"textures\":{\"albedo\":\"assets/textures/child_albedo.png\"}}")) {
+  char baseJson[256] = {};
+  char childJson[256] = {};
+  std::snprintf(
+      baseJson, sizeof(baseJson),
+      "{\"version\":4,\"textures\":{\"albedo\":\"%s\",\"emissive\":\"%s\"}}",
+      engine::tests::catalog_texture(database,
+                                     "assets/textures/base_albedo.png")
+          .text,
+      engine::tests::catalog_texture(database,
+                                     "assets/textures/base_emissive.png")
+          .text);
+  std::snprintf(
+      childJson, sizeof(childJson),
+      "{\"version\":4,\"parent\":\"%s\",\"textures\":{\"albedo\":\"%s\"}}",
+      engine::tests::catalog_material(database, "mat/material_v2_tex_base.json")
+          .text,
+      engine::tests::catalog_texture(database,
+                                     "assets/textures/child_albedo.png")
+          .text);
+  if (!write_material_file(kBasePath, baseJson) ||
+      !write_material_file(kChildPath, childJson)) {
     remove_file(kBasePath);
     remove_file(kChildPath);
     return 50;
@@ -301,6 +341,80 @@ int verify_v2_parent_texture_override(
   return 0;
 }
 
+/// A document names its parent and textures by identity, so the same
+/// bytes still resolve after both are moved: the catalog of a later
+/// session lists them at new paths under the GUIDs their sidecars kept,
+/// and the child follows them there. A path-naming document would point
+/// at nothing after the move.
+int verify_moved_assets_still_resolve() {
+  constexpr const char *kChildPath = "material_moved_child.json";
+  constexpr const char *kChildVirtualPath = "mat/material_moved_child.json";
+  constexpr const char *kParentPaths[] = {"material_moved_parent_old.json",
+                                          "material_moved_parent_new.json"};
+  constexpr const char *kParentVirtualPaths[] = {
+      "mat/material_moved_parent_old.json",
+      "mat/material_moved_parent_new.json"};
+  constexpr const char *kTextureVirtualPaths[] = {
+      "assets/textures/before/albedo.png", "assets/textures/after/albedo.png"};
+
+  std::string childJson;
+  for (std::size_t session = 0U; session < 2U; ++session) {
+    std::unique_ptr<engine::renderer::AssetDatabase> database(
+        new (std::nothrow) engine::renderer::AssetDatabase());
+    if (database == nullptr) {
+      return 60;
+    }
+    const engine::tests::MaterialRefText parentRef =
+        engine::tests::catalog_material_asset(
+            database.get(), kParentVirtualPaths[session],
+            engine::renderer::AssetTypeTag::Material, "moved-parent");
+    const engine::tests::MaterialRefText textureRef =
+        engine::tests::catalog_material_asset(
+            database.get(), kTextureVirtualPaths[session],
+            engine::renderer::AssetTypeTag::Texture, "moved-albedo");
+    if (session == 0U) {
+      char json[256] = {};
+      std::snprintf(json, sizeof(json),
+                    "{\"version\":4,\"parent\":\"%s\","
+                    "\"textures\":{\"albedo\":\"%s\"}}",
+                    parentRef.text, textureRef.text);
+      childJson = json;
+      if (!write_material_file(kChildPath, childJson.c_str())) {
+        return 61;
+      }
+    }
+    // Only the current session's parent file exists: the move took the
+    // old one away.
+    if (!write_material_file(kParentPaths[session],
+                             "{\"version\":4,\"roughness\":0.625}")) {
+      remove_file(kChildPath);
+      return 62;
+    }
+
+    const auto childResult = engine::renderer::load_material_asset(
+        database.get(), kChildVirtualPath);
+    remove_file(kParentPaths[session]);
+    if (!childResult.has_value()) {
+      remove_file(kChildPath);
+      return 63 + static_cast<int>(session);
+    }
+    const engine::renderer::Material *params =
+        engine::renderer::find_material_params(database.get(), *childResult);
+    const engine::renderer::MaterialTextureSlots *slots =
+        engine::renderer::find_material_texture_slots(database.get(),
+                                                      *childResult);
+    if ((params == nullptr) || !exactly_equal(params->roughness, 0.625F) ||
+        (slots == nullptr) ||
+        (slots->albedo != engine::renderer::make_asset_id_from_path(
+                              kTextureVirtualPaths[session]))) {
+      remove_file(kChildPath);
+      return 65 + static_cast<int>(session);
+    }
+  }
+  remove_file(kChildPath);
+  return 0;
+}
+
 } // namespace
 
 int main() {
@@ -328,6 +442,9 @@ int main() {
   }
   if (result == 0) {
     result = verify_v2_parent_texture_override(database.get());
+  }
+  if (result == 0) {
+    result = verify_moved_assets_still_resolve();
   }
 
   engine::core::shutdown_vfs();

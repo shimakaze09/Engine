@@ -6,8 +6,8 @@
 **Status:** Implemented as material schema v3, differently in two
 respects. The G-buffer carries no shading-model channel: non-PBR opaque
 draws render forward over the deferred depth instead. It landed apart
-from the AssetRef cutover, and a material's texture and parent
-references are still paths. Point 5 is superseded by
+from the AssetRef cutover; material schema v4 later moved the texture
+and parent references from paths to AssetRefs. Point 5 is superseded by
 [0018](0018-authors-compose-shading.md).
 
 ## Context

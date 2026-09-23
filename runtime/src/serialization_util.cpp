@@ -11,6 +11,7 @@
 #include <new>
 
 #include "engine/content/asset_identity.h"
+#include "engine/content/asset_ref_json.h"
 #include "engine/core/atomic_file.h"
 #include "engine/core/logging.h"
 #include "engine/runtime/reflect_types.h"
@@ -540,42 +541,12 @@ bool read_reflected_component(const core::JsonParser &parser,
 //    reflected path, since one unrepresentable field takes the whole type
 // off it.
 
-void write_asset_ref(core::JsonWriter &writer, const char *key,
-                     const core::AssetRef &ref) noexcept {
-  if ((key == nullptr) || !core::asset_ref_is_valid(ref)) {
-    return;
-  }
-  char text[content::kAssetRefTextLength + 1U] = {};
-  // The buffer is the exact size the longest form needs, so the formatter
-  // has no failing case left here: it refuses only a null or too-small
-  // destination. The check stays as a guard against that buffer shrinking,
-  // and never as a path that drops an authored identity in silence.
-  if (!content::format_asset_ref(ref, text, sizeof(text))) {
-    return;
-  }
-  writer.write_string(key, text);
-}
-
-bool read_asset_ref(const core::JsonParser &parser,
-                    const core::JsonValue &value,
-                    core::AssetRef *outRef) noexcept {
-  if (outRef == nullptr) {
-    return false;
-  }
-  *outRef = core::AssetRef{};
-  char text[content::kAssetRefTextLength + 1U] = {};
-  if (!parser.copy_string_strict(value, text, sizeof(text))) {
-    return false;
-  }
-  return content::parse_asset_ref(text, outRef);
-}
-
 void write_mesh_component(core::JsonWriter &writer,
                           const MeshComponent &component) noexcept {
   writer.write_key(kJsonKeyMeshComponent);
   writer.begin_object();
-  write_asset_ref(writer, kMeshRefField, component.meshRef);
-  write_asset_ref(writer, kMaterialRefField, component.materialRef);
+  content::write_asset_ref(writer, kMeshRefField, component.meshRef);
+  content::write_asset_ref(writer, kMaterialRefField, component.materialRef);
   write_vec3(writer, "albedo", component.albedo);
   writer.write_float("roughness", component.roughness);
   writer.write_float("metallic", component.metallic);
@@ -599,11 +570,11 @@ bool read_mesh_component(const core::JsonParser &parser,
 
   core::JsonValue refValue{};
   if (parser.get_object_field(meshObject, kMeshRefField, &refValue) &&
-      !read_asset_ref(parser, refValue, &component.meshRef)) {
+      !content::read_asset_ref(parser, refValue, &component.meshRef)) {
     return false;
   }
   if (parser.get_object_field(meshObject, kMaterialRefField, &refValue) &&
-      !read_asset_ref(parser, refValue, &component.materialRef)) {
+      !content::read_asset_ref(parser, refValue, &component.materialRef)) {
     return false;
   }
 

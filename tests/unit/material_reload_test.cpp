@@ -12,6 +12,8 @@
 #include "engine/renderer/asset_database.h"
 #include "engine/renderer/material_loader.h"
 
+#include "../material_ref_fixture.h"
+
 namespace {
 
 bool exactly_equal(float lhs, float rhs) noexcept { return lhs == rhs; }
@@ -43,7 +45,7 @@ int verify_reload_success(engine::renderer::AssetDatabase *database) {
   constexpr const char *kPath = "material_reload_ok.json";
   constexpr const char *kVirtualPath = "mat/material_reload_ok.json";
 
-  if (!write_material_file(kPath, "{\"version\":3,\"roughness\":0.2}")) {
+  if (!write_material_file(kPath, "{\"version\":4,\"roughness\":0.2}")) {
     return 10;
   }
   const auto loadResult =
@@ -54,9 +56,13 @@ int verify_reload_success(engine::renderer::AssetDatabase *database) {
   }
   const engine::renderer::AssetId id = *loadResult;
 
-  if (!write_material_file(
-          kPath, "{\"version\":3,\"roughness\":0.8,\"metallic\":1.0,"
-                "\"textures\":{\"albedo\":\"assets/textures/new.png\"}}")) {
+  char reloadJson[192] = {};
+  std::snprintf(
+      reloadJson, sizeof(reloadJson),
+      "{\"version\":4,\"roughness\":0.8,\"metallic\":1.0,"
+      "\"textures\":{\"albedo\":\"%s\"}}",
+      engine::tests::catalog_texture(database, "assets/textures/new.png").text);
+  if (!write_material_file(kPath, reloadJson)) {
     remove_file(kPath);
     return 12;
   }
@@ -91,7 +97,7 @@ int verify_reload_malformed_preserves_previous(
   constexpr const char *kPath = "material_reload_bad.json";
   constexpr const char *kVirtualPath = "mat/material_reload_bad.json";
 
-  if (!write_material_file(kPath, "{\"version\":3,\"roughness\":0.33,"
+  if (!write_material_file(kPath, "{\"version\":4,\"roughness\":0.33,"
                                   "\"metallic\":0.11}")) {
     return 20;
   }

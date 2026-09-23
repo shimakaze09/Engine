@@ -12,6 +12,8 @@
 #include <string>
 #include <system_error>
 
+#include "engine/content/asset_identity.h"
+#include "engine/content/asset_ref_json.h"
 #include "engine/core/diagnostic.h"
 #include "engine/core/json.h"
 #include "engine/core/logging.h"
@@ -25,12 +27,6 @@ namespace engine::renderer {
 namespace {
 
 constexpr const char *kMaterialLogChannel = "material";
-/// The one material revision this build reads. An older revision is
-/// refused rather than migrated: the project is unreleased, so the tree
-/// migrates once per format change instead of carrying a read path per
-/// past revision. A reader that guessed would drop the fields it no
-/// longer knows and resave the material as a reduction of itself.
-constexpr std::uint32_t kMaterialVersion = 3U;
 
 /// Logs a material load failure with the offending path; always false.
 bool log_material_error(const char *virtualPath, const char *message) noexcept {
@@ -181,18 +177,54 @@ bool metadata_slot_available(const AssetDatabase &database,
   return false;
 }
 
-/// Reads an optional texture-slot path field from a v2 "textures" object:
-/// strict when present, keeps the parent-inherited slot id when absent
-/// (matching every other override field in this schema). A present path
-/// registers (or reuses) Texture-tagged metadata for it and records a
-/// dependency edge on the owning material's in-progress metadata record.
-/// Texture metadata registered here during an overall load that later fails
-/// (e.g. the material's own table is full) is not rolled back — the same
-/// property the parent-material dependency load above already has.
+/// Reads the reference at `value` and finds the catalogued asset it names.
+/// Null, logged against the material, when the text is not a reference,
+/// when the catalog has no asset by that identity, or when the asset it
+/// names is not of `type`: a material that loaded with the reference
+/// quietly gone would save back without it.
+const AssetMetadata *read_catalogued_ref(const core::JsonParser &parser,
+                                         const core::JsonValue &value,
+                                         const AssetDatabase &database,
+                                         AssetTypeTag type,
+                                         const char *virtualPath,
+                                         const char *what) noexcept {
+  core::AssetRef ref{};
+  char message[160] = {};
+  if (!content::read_asset_ref(parser, value, &ref)) {
+    std::snprintf(message, sizeof(message), "%s is not an asset reference",
+                  what);
+    static_cast<void>(log_material_error(virtualPath, message));
+    return nullptr;
+  }
+  const AssetMetadata *record =
+      find_asset_metadata_by_ref(&database.metadataStore, ref);
+  if (record == nullptr) {
+    char refText[content::kAssetRefTextLength + 1U] = {};
+    static_cast<void>(content::format_asset_ref(ref, refText, sizeof(refText)));
+    std::snprintf(message, sizeof(message), "%s names no catalogued asset: %s",
+                  what, refText);
+    static_cast<void>(log_material_error(virtualPath, message));
+    return nullptr;
+  }
+  if (record->typeTag != type) {
+    std::snprintf(message, sizeof(message), "%s names an asset of another type",
+                  what);
+    static_cast<void>(log_material_error(virtualPath, message));
+    return nullptr;
+  }
+  return record;
+}
+
+/// Reads an optional texture slot from the "textures" object: strict when
+/// present, keeps the parent-inherited slot id when absent (matching every
+/// other override field in this schema). A present slot is the texture's
+/// reference, resolved through the catalog to the id this session knows
+/// the texture by, and recorded as a dependency edge on the owning
+/// material's in-progress metadata record.
 bool read_optional_texture_ref(const core::JsonParser &parser,
                                const core::JsonValue &object, const char *key,
-                               bool hasParent, AssetDatabase *database,
-                               AssetMetadata *metadata,
+                               bool hasParent, const AssetDatabase &database,
+                               const char *virtualPath, AssetMetadata *metadata,
                                AssetId *outId) noexcept {
   core::JsonValue field{};
   if (!parser.get_object_field(object, key, &field)) {
@@ -203,37 +235,24 @@ bool read_optional_texture_ref(const core::JsonParser &parser,
   // empty, so null there is not a second spelling of it but a mistake.
   if (field.type == core::JsonValue::Type::Null) {
     if (!hasParent) {
-      return false;
+      return log_material_error(virtualPath,
+                                "null texture slot in a material with no "
+                                "parent");
     }
     *outId = kInvalidAssetId;
     return true;
   }
 
-  char texturePath[260] = {};
-  if (!parser.copy_string(field, texturePath, sizeof(texturePath)) ||
-      (texturePath[0] == '\0')) {
+  const AssetMetadata *texture = read_catalogued_ref(
+      parser, field, database, AssetTypeTag::Texture, virtualPath, key);
+  if (texture == nullptr) {
     return false;
   }
-
-  const AssetId textureId = make_asset_id_from_path(texturePath);
-  if (find_asset_metadata(database, textureId) == nullptr) {
-    if (!metadata_slot_available(*database, textureId)) {
-      return false;
-    }
-    AssetMetadata textureMetadata{};
-    textureMetadata.assetId = textureId;
-    textureMetadata.typeTag = AssetTypeTag::Texture;
-    write_metadata_path(&textureMetadata.filePath, texturePath);
-    if (!register_asset_metadata(database, textureMetadata)) {
-      return false;
-    }
+  if (!asset_metadata_add_dependency(metadata, texture->assetId)) {
+    return log_material_error(virtualPath, "material dependency table is full");
   }
 
-  if (!asset_metadata_add_dependency(metadata, textureId)) {
-    return false;
-  }
-
-  *outId = textureId;
+  *outId = texture->assetId;
   return true;
 }
 
@@ -296,7 +315,7 @@ bool parse_material_text(AssetDatabase *database, const char *virtualPath,
       !parser.as_uint(versionValue, &version)) {
     return log_material_error(virtualPath, "material version is not a number");
   }
-  if (version != kMaterialVersion) {
+  if (version != kMaterialDocumentVersion) {
     return log_material_error(virtualPath, "unsupported material version");
   }
 
@@ -305,11 +324,16 @@ bool parse_material_text(AssetDatabase *database, const char *virtualPath,
   AssetId parentId = kInvalidAssetId;
   core::JsonValue parentValue{};
   if (parser.get_object_field(*root, "parent", &parentValue)) {
-    char parentPath[260] = {};
-    if (!parser.copy_string(parentValue, parentPath, sizeof(parentPath)) ||
-        (parentPath[0] == '\0')) {
-      return log_material_error(virtualPath, "invalid parent path");
+    const AssetMetadata *parent =
+        read_catalogued_ref(parser, parentValue, *database,
+                            AssetTypeTag::Material, virtualPath, "parent");
+    if (parent == nullptr) {
+      return false;
     }
+    // Loading the parent rewrites its catalog record in place, so the
+    // path is copied out rather than read through a record being replaced.
+    char parentPath[sizeof(parent->filePath)] = {};
+    std::memcpy(parentPath, parent->filePath.data(), sizeof(parentPath));
     if (!load_material_recursive(database, parentPath, depth + 1U, &parentId,
                                  &params, &slots)) {
       return log_material_error(virtualPath, "failed to load parent");
@@ -366,13 +390,13 @@ bool parse_material_text(AssetDatabase *database, const char *virtualPath,
     bool texturesOk = true;
 #define ENGINE_MATERIAL_READ_TEXTURE(name, slot, handle, key)                  \
   texturesOk = texturesOk &&                                                   \
-               read_optional_texture_ref(parser, texturesValue, key,           \
-                                         parentId != kInvalidAssetId,          \
-                                         database, &metadata, &slots.slot);
+               read_optional_texture_ref(                                      \
+                   parser, texturesValue, key, parentId != kInvalidAssetId,    \
+                   *database, virtualPath, &metadata, &slots.slot);
     ENGINE_MATERIAL_TEXTURE_FIELDS(ENGINE_MATERIAL_READ_TEXTURE)
 #undef ENGINE_MATERIAL_READ_TEXTURE
     if (!texturesOk) {
-      return log_material_error(virtualPath, "malformed texture reference");
+      return false;
     }
   }
 

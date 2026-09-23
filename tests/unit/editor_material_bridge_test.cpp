@@ -10,6 +10,8 @@
 #include "engine/runtime/editor_bridge.h"
 #include "engine/runtime/service_registry.h"
 
+#include "../material_ref_fixture.h"
+
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -92,7 +94,8 @@ int check_load_edit_save_reload() noexcept {
     return finish(12);
   }
 
-  if (!write_file(kOsPath, "{\"version\":3,\"roughness\":0.4,\"metallic\":0.1}")) {
+  if (!write_file(kOsPath,
+                  "{\"version\":4,\"roughness\":0.4,\"metallic\":0.1}")) {
     remove_file(kOsPath);
     return finish(13);
   }
@@ -217,11 +220,17 @@ int check_parent_changes_reach_child() noexcept {
     return finish(32);
   }
 
-  if (!write_file(kParentOs, "{\"version\":3,\"albedo\":[1,0,0],"
+  const engine::tests::MaterialRefText parentRef =
+      engine::tests::catalog_material(database.get(), kParentVirtual);
+  const engine::tests::MaterialRefText childRef =
+      engine::tests::catalog_material(database.get(), kChildVirtual);
+  char childJson[160] = {};
+  std::snprintf(childJson, sizeof(childJson),
+                "{\"version\":4,\"parent\":\"%s\",\"roughness\":0.9}",
+                parentRef.text);
+  if (!write_file(kParentOs, "{\"version\":4,\"albedo\":[1,0,0],"
                              "\"roughness\":0.2,\"metallic\":0.1}") ||
-      !write_file(kChildOs,
-                  "{\"version\":3,\"parent\":\"edmat/"
-                  "editor_material_parent_test.json\",\"roughness\":0.9}")) {
+      !write_file(kChildOs, childJson)) {
     return finish(33);
   }
   const auto child = [&]() noexcept {
@@ -251,7 +260,7 @@ int check_parent_changes_reach_child() noexcept {
   }
 
   // So does a reload of the parent from disk.
-  if (!write_file(kParentOs, "{\"version\":3,\"albedo\":[0,0,1],"
+  if (!write_file(kParentOs, "{\"version\":4,\"albedo\":[0,0,1],"
                              "\"roughness\":0.2,\"metallic\":0.3}") ||
       !engine::runtime::editor_reload_material(kParentVirtual).found) {
     return finish(37);
@@ -273,7 +282,7 @@ int check_parent_changes_reach_child() noexcept {
       !read_file(kChildOs, text, sizeof(text))) {
     return finish(39);
   }
-  if ((std::strstr(text, "\"parent\"") == nullptr) ||
+  if ((std::strstr(text, parentRef.text) == nullptr) ||
       (std::strstr(text, "\"roughness\"") == nullptr) ||
       (std::strstr(text, "\"metallic\"") != nullptr) ||
       (std::strstr(text, "\"albedo\"") != nullptr)) {
@@ -296,7 +305,7 @@ int check_parent_changes_reach_child() noexcept {
 
   // After a restart's worth of reloads the saved child still follows its
   // parent for everything it does not override.
-  if (!write_file(kParentOs, "{\"version\":3,\"albedo\":[0,1,0],"
+  if (!write_file(kParentOs, "{\"version\":4,\"albedo\":[0,1,0],"
                              "\"roughness\":0.2,\"metallic\":0.05}") ||
       !engine::runtime::editor_reload_material(kParentVirtual).found ||
       !engine::runtime::editor_reload_material(kChildVirtual).found) {
@@ -315,9 +324,11 @@ int check_parent_changes_reach_child() noexcept {
 
   // A parent reload that would make the chain a cycle is refused, and the
   // parent keeps serving what it had.
-  if (!write_file(kParentOs,
-                  "{\"version\":3,\"parent\":\"edmat/"
-                  "editor_material_child_test.json\",\"metallic\":0.7}")) {
+  char cycleJson[160] = {};
+  std::snprintf(cycleJson, sizeof(cycleJson),
+                "{\"version\":4,\"parent\":\"%s\",\"metallic\":0.7}",
+                childRef.text);
+  if (!write_file(kParentOs, cycleJson)) {
     return finish(44);
   }
   if (engine::runtime::editor_reload_material(kParentVirtual).found) {
@@ -365,11 +376,18 @@ int check_child_clears_inherited_texture() noexcept {
   if (!engine::core::mount(kMountPrefix, ".")) {
     return finish(62);
   }
-  if (!write_file(kParentOs,
-                  "{\"version\":3,\"roughness\":0.5,\"textures\":"
-                  "{\"albedo\":\"edmat/clear_parent_albedo.png\"}}") ||
-      !write_file(kChildOs, "{\"version\":3,\"parent\":\"edmat/"
-                            "editor_material_clear_parent.json\"}")) {
+  char parentJson[160] = {};
+  char childJson[128] = {};
+  std::snprintf(parentJson, sizeof(parentJson),
+                "{\"version\":4,\"roughness\":0.5,\"textures\":"
+                "{\"albedo\":\"%s\"}}",
+                engine::tests::catalog_texture(database.get(),
+                                               "edmat/clear_parent_albedo.png")
+                    .text);
+  std::snprintf(
+      childJson, sizeof(childJson), "{\"version\":4,\"parent\":\"%s\"}",
+      engine::tests::catalog_material(database.get(), kParentVirtual).text);
+  if (!write_file(kParentOs, parentJson) || !write_file(kChildOs, childJson)) {
     return finish(63);
   }
 
@@ -400,7 +418,7 @@ int check_child_clears_inherited_texture() noexcept {
 
   // A root material has nothing to clear: null there is refused rather
   // than read as a second spelling of an absent slot.
-  if (!write_file(kParentOs, "{\"version\":3,\"roughness\":0.5,"
+  if (!write_file(kParentOs, "{\"version\":4,\"roughness\":0.5,"
                              "\"textures\":{\"albedo\":null}}") ||
       engine::runtime::editor_reload_material(kParentVirtual).found) {
     return finish(68);

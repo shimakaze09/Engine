@@ -17,6 +17,8 @@
 #include "engine/renderer/asset_database.h"
 #include "engine/renderer/material_loader.h"
 
+#include "../material_ref_fixture.h"
+
 namespace {
 
 bool write_material_file(const char *path, const char *text) noexcept {
@@ -64,13 +66,23 @@ engine::renderer::TextureHandle fake_load_texture(const char *path,
 int verify_successful_resolution(engine::renderer::AssetDatabase *database) {
   constexpr const char *kPath = "material_resolve_ok.json";
   constexpr const char *kVirtualPath = "mat/material_resolve_ok.json";
-  constexpr const char *kJson =
-      "{\"version\":3,\"textures\":{"
-      "\"albedo\":\"assets/textures/ok_albedo.png\","
-      "\"metallicRoughness\":\"assets/textures/ok_mr.png\","
-      "\"emissive\":\"assets/textures/ok_emissive.png\","
-      "\"occlusion\":\"assets/textures/ok_ao.png\","
-      "\"opacity\":\"assets/textures/ok_opacity.png\"}}";
+  char kJson[512] = {};
+  std::snprintf(
+      kJson, sizeof(kJson),
+      "{\"version\":4,\"textures\":{\"albedo\":\"%s\","
+      "\"metallicRoughness\":\"%s\",\"emissive\":\"%s\","
+      "\"occlusion\":\"%s\",\"opacity\":\"%s\"}}",
+      engine::tests::catalog_texture(database, "assets/textures/ok_albedo.png")
+          .text,
+      engine::tests::catalog_texture(database, "assets/textures/ok_mr.png")
+          .text,
+      engine::tests::catalog_texture(database,
+                                     "assets/textures/ok_emissive.png")
+          .text,
+      engine::tests::catalog_texture(database, "assets/textures/ok_ao.png")
+          .text,
+      engine::tests::catalog_texture(database, "assets/textures/ok_opacity.png")
+          .text);
   if (!write_material_file(kPath, kJson)) {
     return 10;
   }
@@ -121,9 +133,13 @@ int verify_successful_resolution(engine::renderer::AssetDatabase *database) {
 int verify_failed_load_falls_back(engine::renderer::AssetDatabase *database) {
   constexpr const char *kPath = "material_resolve_missing.json";
   constexpr const char *kVirtualPath = "mat/material_resolve_missing.json";
-  constexpr const char *kJson =
-      "{\"version\":3,\"roughness\":0.6,\"textures\":{"
-      "\"albedo\":\"assets/textures/missing_albedo.png\"}}";
+  char kJson[192] = {};
+  std::snprintf(
+      kJson, sizeof(kJson),
+      "{\"version\":4,\"roughness\":0.6,\"textures\":{\"albedo\":\"%s\"}}",
+      engine::tests::catalog_texture(database,
+                                     "assets/textures/missing_albedo.png")
+          .text);
   if (!write_material_file(kPath, kJson)) {
     return 20;
   }
@@ -173,9 +189,12 @@ int verify_failed_load_falls_back(engine::renderer::AssetDatabase *database) {
 int verify_shared_texture_loads_once(engine::renderer::AssetDatabase *database) {
   constexpr const char *kPathA = "material_resolve_shared_a.json";
   constexpr const char *kPathB = "material_resolve_shared_b.json";
-  constexpr const char *kJson =
-      "{\"version\":3,\"textures\":{"
-      "\"albedo\":\"assets/textures/shared_albedo.png\"}}";
+  char kJson[192] = {};
+  std::snprintf(kJson, sizeof(kJson),
+                "{\"version\":4,\"textures\":{\"albedo\":\"%s\"}}",
+                engine::tests::catalog_texture(
+                    database, "assets/textures/shared_albedo.png")
+                    .text);
   if (!write_material_file(kPathA, kJson) ||
       !write_material_file(kPathB, kJson)) {
     remove_file(kPathA);
@@ -266,9 +285,12 @@ int verify_full_texture_table_is_not_reloaded(
   }
 
   constexpr const char *kPath = "material_resolve_full.json";
-  constexpr const char *kJson =
-      "{\"version\":3,\"textures\":{"
-      "\"albedo\":\"assets/textures/over_capacity.png\"}}";
+  char kJson[192] = {};
+  std::snprintf(kJson, sizeof(kJson),
+                "{\"version\":4,\"textures\":{\"albedo\":\"%s\"}}",
+                engine::tests::catalog_texture(
+                    database, "assets/textures/over_capacity.png")
+                    .text);
   if (!write_material_file(kPath, kJson)) {
     return 51;
   }

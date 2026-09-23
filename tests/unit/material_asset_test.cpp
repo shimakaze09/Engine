@@ -13,6 +13,8 @@
 #include "engine/renderer/asset_database.h"
 #include "engine/renderer/material_loader.h"
 
+#include "../material_ref_fixture.h"
+
 namespace {
 
 /// Exact float comparison: every tested value is exactly representable and
@@ -47,7 +49,7 @@ int verify_full_material_load(engine::renderer::AssetDatabase *database) {
   constexpr const char *kPath = "material_test_full.mat";
   constexpr const char *virtualPath = "mat/material_test_full.mat";
   constexpr const char *kJson =
-      "{\"version\":3,\"albedo\":[0.25,0.5,0.75],"
+      "{\"version\":4,\"albedo\":[0.25,0.5,0.75],"
       "\"emissive\":[0.125,0.0,1.0],"
       "\"roughness\":0.25,\"metallic\":1.0,\"opacity\":0.5}";
   if (!write_material_file(kPath, kJson)) {
@@ -102,7 +104,7 @@ int verify_partial_material_defaults(
     engine::renderer::AssetDatabase *database) {
   constexpr const char *kPath = "material_test_partial.mat";
   constexpr const char *virtualPath = "mat/material_test_partial.mat";
-  if (!write_material_file(kPath, "{\"version\":3,\"roughness\":0.75}")) {
+  if (!write_material_file(kPath, "{\"version\":4,\"roughness\":0.75}")) {
     return 20;
   }
 
@@ -140,15 +142,23 @@ int verify_parent_chain_resolution(engine::renderer::AssetDatabase *database) {
   constexpr const char *kChildPath = "material_test_child.mat";
   constexpr const char *kGrandPath = "material_test_grand.mat";
 
-  if (!write_material_file(
-          kBasePath,
-          "{\"version\":3,\"albedo\":[1.0,0.0,0.0],\"roughness\":0.125,\"metallic\":0.5}") ||
-      !write_material_file(
-          kChildPath,
-          "{\"version\":3,\"parent\":\"mat/material_test_base.mat\",\"metallic\":1.0}") ||
-      !write_material_file(
-          kGrandPath,
-          "{\"version\":3,\"parent\":\"mat/material_test_child.mat\",\"opacity\":0.25}")) {
+  const engine::tests::MaterialRefText baseRef =
+      engine::tests::catalog_material(database, "mat/material_test_base.mat");
+  const engine::tests::MaterialRefText childRef =
+      engine::tests::catalog_material(database, "mat/material_test_child.mat");
+  char childJson[160] = {};
+  char grandJson[160] = {};
+  std::snprintf(childJson, sizeof(childJson),
+                "{\"version\":4,\"parent\":\"%s\",\"metallic\":1.0}",
+                baseRef.text);
+  std::snprintf(grandJson, sizeof(grandJson),
+                "{\"version\":4,\"parent\":\"%s\",\"opacity\":0.25}",
+                childRef.text);
+  if (!write_material_file(kBasePath,
+                           "{\"version\":4,\"albedo\":[1.0,0.0,0.0],"
+                           "\"roughness\":0.125,\"metallic\":0.5}") ||
+      !write_material_file(kChildPath, childJson) ||
+      !write_material_file(kGrandPath, grandJson)) {
     remove_file(kBasePath);
     remove_file(kChildPath);
     remove_file(kGrandPath);
@@ -207,10 +217,20 @@ int verify_parent_chain_resolution(engine::renderer::AssetDatabase *database) {
 int verify_material_load_failures(engine::renderer::AssetDatabase *database) {
   constexpr const char *kCyclePathA = "material_test_cycle_a.mat";
   constexpr const char *kCyclePathB = "material_test_cycle_b.mat";
-  if (!write_material_file(kCyclePathA,
-                           "{\"version\":3,\"parent\":\"mat/material_test_cycle_b.mat\"}") ||
-      !write_material_file(kCyclePathB,
-                           "{\"version\":3,\"parent\":\"mat/material_test_cycle_a.mat\"}")) {
+  const engine::tests::MaterialRefText cycleRefA =
+      engine::tests::catalog_material(database,
+                                      "mat/material_test_cycle_a.mat");
+  const engine::tests::MaterialRefText cycleRefB =
+      engine::tests::catalog_material(database,
+                                      "mat/material_test_cycle_b.mat");
+  char cycleJsonA[128] = {};
+  char cycleJsonB[128] = {};
+  std::snprintf(cycleJsonA, sizeof(cycleJsonA),
+                "{\"version\":4,\"parent\":\"%s\"}", cycleRefB.text);
+  std::snprintf(cycleJsonB, sizeof(cycleJsonB),
+                "{\"version\":4,\"parent\":\"%s\"}", cycleRefA.text);
+  if (!write_material_file(kCyclePathA, cycleJsonA) ||
+      !write_material_file(kCyclePathB, cycleJsonB)) {
     remove_file(kCyclePathA);
     remove_file(kCyclePathB);
     return 40;
@@ -224,21 +244,41 @@ int verify_material_load_failures(engine::renderer::AssetDatabase *database) {
     return 41;
   }
 
+  // A parent the catalog lists but whose file is gone, a parent the
+  // catalog has no asset for, a parent that is not a material, and a
+  // parent written as a path, which names nothing now.
   constexpr const char *kOrphanPath = "material_test_orphan.mat";
-  if (!write_material_file(kOrphanPath,
-                           "{\"version\":3,\"parent\":\"mat/material_test_missing.mat\"}")) {
-    return 42;
-  }
-  const auto orphanResult = engine::renderer::load_material_asset(
-      database, "mat/material_test_orphan.mat");
-  remove_file(kOrphanPath);
-  if (orphanResult.has_value()) {
-    return 43;
+  const engine::tests::MaterialRefText missingRef =
+      engine::tests::catalog_material(database,
+                                      "mat/material_test_missing.mat");
+  const engine::tests::MaterialRefText textureRef =
+      engine::tests::catalog_texture(database, "mat/material_test_tex.png");
+  char uncatalogued[engine::content::kAssetRefTextLength + 1U] = {};
+  static_cast<void>(engine::content::format_asset_ref(
+      engine::core::asset_ref_primary(
+          engine::content::builtin_asset_guid("mat/never_catalogued.mat")),
+      uncatalogued, sizeof(uncatalogued)));
+  const char *const kOrphanParents[] = {missingRef.text, uncatalogued,
+                                        textureRef.text,
+                                        "mat/material_test_missing.mat"};
+  for (const char *parent : kOrphanParents) {
+    char orphanJson[160] = {};
+    std::snprintf(orphanJson, sizeof(orphanJson),
+                  "{\"version\":4,\"parent\":\"%s\"}", parent);
+    if (!write_material_file(kOrphanPath, orphanJson)) {
+      return 42;
+    }
+    const auto orphanResult = engine::renderer::load_material_asset(
+        database, "mat/material_test_orphan.mat");
+    remove_file(kOrphanPath);
+    if (orphanResult.has_value()) {
+      return 43;
+    }
   }
 
   constexpr const char *kBadFieldPath = "material_test_bad_field.mat";
   if (!write_material_file(kBadFieldPath,
-                           "{\"version\":3,\"roughness\":\"rough\"}")) {
+                           "{\"version\":4,\"roughness\":\"rough\"}")) {
     return 44;
   }
   const auto badFieldResult = engine::renderer::load_material_asset(
@@ -250,7 +290,8 @@ int verify_material_load_failures(engine::renderer::AssetDatabase *database) {
   }
 
   constexpr const char *kBadVec3Path = "material_test_bad_vec3.mat";
-  if (!write_material_file(kBadVec3Path, "{\"version\":3,\"albedo\":[1.0,2.0]}")) {
+  if (!write_material_file(kBadVec3Path,
+                           "{\"version\":4,\"albedo\":[1.0,2.0]}")) {
     return 46;
   }
   const auto badVec3Result = engine::renderer::load_material_asset(
@@ -264,9 +305,8 @@ int verify_material_load_failures(engine::renderer::AssetDatabase *database) {
   // migrated, and a newer one is refused for the same reason in the other
   // direction: the reader cannot know what it would be dropping.
   constexpr const char *kBadVersionPath = "material_test_bad_version.mat";
-  const char *const kRefusedVersions[] = {"{\"version\":2}",
-                                          "{\"version\":4}",
-                                          "{\"version\":0}",
+  const char *const kRefusedVersions[] = {"{\"version\":2}", "{\"version\":3}",
+                                          "{\"version\":5}", "{\"version\":0}",
                                           "{\"roughness\":0.5}"};
   for (const char *document : kRefusedVersions) {
     if (!write_material_file(kBadVersionPath, document)) {
@@ -415,9 +455,9 @@ int verify_material_directory_discovery(
 
   const bool wrote =
       write_material_file("mat_discovery_test/disc_a.mat",
-                          "{\"version\":3,\"roughness\":0.25}") &&
+                          "{\"version\":4,\"roughness\":0.25}") &&
       write_material_file("mat_discovery_test/disc_b.mat",
-                          "{\"version\":3,\"metallic\":1.0}") &&
+                          "{\"version\":4,\"metallic\":1.0}") &&
       write_material_file("mat_discovery_test/ignored.txt", "not a material");
 
   int result = 0;

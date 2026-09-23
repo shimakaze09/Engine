@@ -178,23 +178,6 @@ bool read_reflected_component(const core::JsonParser &parser,
                               const core::TypeDescriptor &descriptor,
                               void *instance) noexcept;
 
-// --- Asset references ------------------------------------------------------
-
-/// Writes `ref` under `key` in its canonical text form. Writes nothing
-/// when the reference is nil, so a component naming no asset stays absent
-/// from the document rather than carrying a nil identity string.
-void write_asset_ref(core::JsonWriter &writer, const char *key,
-                     const core::AssetRef &ref) noexcept;
-
-/// Reads an asset reference from the string at `value`. False for any
-/// non-string, and for any text the reference parser refuses: an
-/// identity that does not parse is an authored field to reject, never one
-/// to silently default, because a defaulted identity names a different
-/// asset than the author wrote.
-bool read_asset_ref(const core::JsonParser &parser,
-                    const core::JsonValue &value,
-                    core::AssetRef *outRef) noexcept;
-
 // --- MeshComponent / LightComponent ----------------------------------------
 
 /// Writes the mesh component under kJsonKeyMeshComponent: the authored
