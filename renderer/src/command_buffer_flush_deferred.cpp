@@ -946,14 +946,14 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
 
     // Opaque runs the G-Buffer could not express, in key order, plus the
     // transparent tail. Both draw forward over the deferred depth.
-    ShadingProgramRun opaqueRuns[kMaxShadingPrograms] = {};
-    const std::size_t opaqueRunCount = partition_program_runs(
-        commandBufferView, 0U, opaqueCount, opaqueRuns, kMaxShadingPrograms);
     std::size_t forwardOpaqueRuns = 0U;
-    for (std::size_t i = 0U; i < opaqueRunCount; ++i) {
-      if (opaqueRuns[i].programId !=
-          static_cast<std::uint8_t>(ShadingModel::Pbr)) {
-        ++forwardOpaqueRuns;
+    {
+      ShadingProgramRun run{};
+      for (std::size_t cursor = 0U;
+           next_program_run(commandBufferView, &cursor, opaqueCount, &run);) {
+        if (run.programId != static_cast<std::uint8_t>(ShadingModel::Pbr)) {
+          ++forwardOpaqueRuns;
+        }
       }
     }
 
@@ -1032,28 +1032,25 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
 
       // Opaque state, depth written: these are opaque draws that simply
       // could not go through the G-Buffer.
-      for (std::size_t i = 0U; i < opaqueRunCount; ++i) {
-        if (opaqueRuns[i].programId ==
-            static_cast<std::uint8_t>(ShadingModel::Pbr)) {
+      ShadingProgramRun run{};
+      for (std::size_t cursor = 0U;
+           next_program_run(commandBufferView, &cursor, opaqueCount, &run);) {
+        if (run.programId == static_cast<std::uint8_t>(ShadingModel::Pbr)) {
           continue;
         }
-        bindProgramForRun(shading_program(backend, opaqueRuns[i].programId));
-        drawForwardTransparent(opaqueRuns[i].first,
-                               opaqueRuns[i].first + opaqueRuns[i].count);
+        bindProgramForRun(shading_program(backend, run.programId));
+        drawForwardTransparent(run.first, run.first + run.count);
       }
 
       if (opaqueCount < totalCount) {
         dev->apply_render_state(RenderState{DepthTest::Less, false,
                                             BlendMode::Alpha,
                                             CullMode::None});
-        ShadingProgramRun tailRuns[kMaxShadingPrograms] = {};
-        const std::size_t tailRunCount = partition_program_runs(
-            commandBufferView, opaqueCount, totalCount, tailRuns,
-            kMaxShadingPrograms);
-        for (std::size_t i = 0U; i < tailRunCount; ++i) {
-          bindProgramForRun(shading_program(backend, tailRuns[i].programId));
-          drawForwardTransparent(tailRuns[i].first,
-                                 tailRuns[i].first + tailRuns[i].count);
+        // Depth-sorted, so programs alternate: each run binds as found.
+        for (std::size_t cursor = opaqueCount;
+             next_program_run(commandBufferView, &cursor, totalCount, &run);) {
+          bindProgramForRun(shading_program(backend, run.programId));
+          drawForwardTransparent(run.first, run.first + run.count);
         }
         dev->apply_render_state(RenderState{DepthTest::Less, true,
                                             BlendMode::Disabled,

@@ -241,15 +241,12 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
     // per draw. A range of one model therefore costs exactly what it did
     // before this existed, which is every range in a scene that mixes
     // no models.
-    auto drawModelRuns = [&](std::size_t start, std::size_t end,
-                             bool batched) {
-      ShadingProgramRun runs[kMaxShadingPrograms] = {};
-      const std::size_t runCount = partition_program_runs(
-          commandBufferView, start, end, runs, kMaxShadingPrograms);
-      for (std::size_t i = 0U; i < runCount; ++i) {
-        bindProgramForRun(shading_program(backend, runs[i].programId));
-        drawRange(runs[i].first, runs[i].first + runs[i].count, batched,
-                  runs[i].programId);
+    auto drawModelRuns = [&](std::size_t start, std::size_t end, bool batched) {
+      ShadingProgramRun run{};
+      for (std::size_t cursor = start;
+           next_program_run(commandBufferView, &cursor, end, &run);) {
+        bindProgramForRun(shading_program(backend, run.programId));
+        drawRange(run.first, run.first + run.count, batched, run.programId);
       }
       // The sky and the passes after this one expect the
       // physically-based program bound.
