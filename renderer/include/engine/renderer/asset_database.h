@@ -148,11 +148,13 @@ inline constexpr std::uint16_t kAll =
     static_cast<std::uint16_t>((1U << kFieldCount) - 1U);
 } // namespace material_field
 
-/// One material slot: id, source path, and the fully resolved parameters
-/// (parent-chain overrides are baked at load time so render prep reads a
-/// flat record). textureSlots holds the same chain's resolved texture
-/// references; Material's TextureHandle fields are populated from them by
-/// resolve_material_textures once GPU upload succeeds.
+/// One material slot: id, source path, and the fully resolved parameters,
+/// so render prep reads a flat record. The parent chain is resolved into
+/// it at load and again whenever a parent changes (overriddenFields says
+/// which fields are the material's own). textureSlots holds the same
+/// chain's resolved texture references; Material's TextureHandle fields
+/// are populated from them by resolve_material_textures once GPU upload
+/// succeeds.
 struct MaterialAssetRecord final {
   AssetId id = kInvalidAssetId;
   std::array<char, 260U> sourcePath{};
@@ -271,8 +273,10 @@ bool mesh_asset_record_releasable(const MeshAssetRecord &record) noexcept;
 bool unregister_mesh_asset(AssetDatabase *database, AssetId id) noexcept;
 
 // Material asset management. Materials are CPU parameter blocks; records
-// hold parent-resolved values, so lookups are flat and mutation-free
-// (safe from parallel render-prep jobs).
+// hold parent-resolved values, so lookups are flat and mutation-free (safe
+// from parallel render-prep jobs). Records change only on the main thread,
+// outside render prep: a load, a reload, or an editor edit and the
+// re-resolution of dependents it triggers.
 /// Inserts or updates a material record; false when the table is full.
 bool register_material_asset(AssetDatabase *database, AssetId id,
                              const char *sourcePath,
