@@ -14,6 +14,8 @@
 #include "engine/core/thread_affinity.h"
 #include "engine/renderer/render_device.h"
 
+#include "../quiet_abort.h"
+
 #include <cstdio>
 #include <cstring>
 
@@ -35,6 +37,7 @@ int main(int argc, char **argv) {
   std::printf("SKIPPED: thread-affinity checks are debug-only\n");
   return 0;
 #else
+  engine::tests::quiet_abort_dialogs();
   const char *mode = (argc > 1) ? argv[1] : "worker";
   static_cast<void>(engine::core::initialize_logging());
   engine::core::set_main_thread();

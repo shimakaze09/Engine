@@ -19,6 +19,8 @@
 
 #include "engine/core/sparse_set.h"
 
+#include "../quiet_abort.h"
+
 #include <cstdio>
 #include <cstdint>
 #include <cstring>
@@ -37,6 +39,7 @@ using Set = engine::core::SparseSet<Handle, int, 16U, 8U>;
 
 /// Runs this executable or test program.
 int main(int argc, char **argv) {
+  engine::tests::quiet_abort_dialogs();
   const char *mode = (argc > 1) ? argv[1] : "out-of-range";
 
 #ifndef NDEBUG
