@@ -283,7 +283,7 @@ struct T { V position = V(); };
                 rows.append((fe if fe is not None else -1.0, rc, rel))
                 self.results.append({"stage": "H", "name": rel, "rc": rc, "fe": fe})
         rows.sort(reverse=True)
-        for fe, rc, rel in rows[:40]:
+        for fe, rc, rel in [r for r in rows if r[0] >= 0.5]:
             self.say(f"  H {fe:7.2f}s rc={rc!s:<3} {rel}")
         failed = [rel for fe, rc, rel in rows if rc != 0]
         self.say(f"  H {len(rows)} headers, {len(failed)} did not compile alone")
@@ -307,6 +307,9 @@ template <typename E, std::size_t K> struct UserCtorSet {
 template <typename E, std::size_t K> struct ValueArray : std::array<E, K> {
   ValueArray() noexcept : std::array<E, K>{} {}
 };
+template <typename E, std::size_t K> struct ParenArray : std::array<E, K> {
+  ParenArray() noexcept : std::array<E, K>() {}
+};
 """
     FIXES = {
         # Today's form: braced default member initializer in a plain class,
@@ -327,6 +330,17 @@ template <typename E, std::size_t K> struct ValueArray : std::array<E, K> {
         "f5_wrapper_braced": "struct S { ValueArray<T, N> a{}; S() noexcept; };\n",
         "f6_wrapper_definer": ("struct S { ValueArray<T, N> a{}; S() noexcept; };\n"
                                "S::S() noexcept {}\n"),
+        # Value-initialization spelled with parentheses instead of an empty
+        # braced list: the same language semantics (zero, then defaults).
+        "f7_paren_wrapper_includer": "struct S { ParenArray<T, N> a{}; S() noexcept; };\n",
+        "f8_paren_wrapper_definer": ("struct S { ParenArray<T, N> a{}; S() noexcept; };\n"
+                                     "S::S() noexcept {}\n"),
+        "f9_nsdmi_paren_includer": ("struct S { std::array<T, N> a = std::array<T, N>();"
+                                    " S() noexcept; };\n"),
+        "f10_nsdmi_paren_definer": ("struct S { std::array<T, N> a = std::array<T, N>();"
+                                    " S() noexcept; };\nS::S() noexcept {}\n"),
+        "f11_meminit_paren_definer": ("struct S { std::array<T, N> a; S() noexcept; };\n"
+                                      "S::S() noexcept : a() {}\n"),
     }
 
     def stage_f(self) -> None:
@@ -563,6 +577,7 @@ void f() { std::array<T, N> a INIT; sink(a.data()); }""",
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <new>
@@ -570,7 +585,12 @@ void f() { std::array<T, N> a INIT; sink(a.data()); }""",
 struct Vec3 { float x; float y; float z;
   constexpr Vec3() noexcept : x(0.0F), y(0.0F), z(0.0F) {}
   constexpr Vec3(float a, float b, float c) noexcept : x(a), y(b), z(c) {} };
+struct Padded { char tag = 1; int value = 2; char tail; };
+#ifdef PADDED
+using Transform = Padded;
+#else
 struct Transform { Vec3 position = Vec3(0.0F, 0.0F, 0.0F); };
+#endif
 constexpr std::size_t N = 50000;
 """
     ALT_MAIN = """
@@ -578,16 +598,35 @@ int main() {
   double best = 1e30;
   bool ok = true;
   for (int round = 0; round < 20; ++round) {
+    // Construct into storage pre-filled with a non-zero pattern, so a byte
+    // value-initialization must zero (a member without an initializer, or
+    // padding) cannot pass by landing on fresh zero pages.
+    void *raw = std::malloc(sizeof(S));
+    if (raw == nullptr) return 2;
+    std::memset(raw, 0xAB, sizeof(S));
     const auto t0 = std::chrono::steady_clock::now();
-    std::unique_ptr<S> s(new (std::nothrow) S());
+    S *s = ::new (raw) S();
     const auto t1 = std::chrono::steady_clock::now();
-    if (!s) return 2;
     const double us = std::chrono::duration<double, std::micro>(t1 - t0).count();
     if (us < best) best = us;
-    const Transform expected{};
+    alignas(Transform) unsigned char expectedBytes[sizeof(Transform)];
+    std::memset(expectedBytes, 0, sizeof(expectedBytes));
+    // Zero-initialize, then value-initialize in place: the reference is
+    // value-initialization with its padding zeroed, as the standard gives it.
+    const Transform &expected = *::new (static_cast<void *>(expectedBytes)) Transform();
     for (std::size_t i = 0; i < N; ++i) {
-      if (std::memcmp(&s->at(i), &expected, sizeof(Transform)) != 0) ok = false;
+      // Byte reads through volatile: an indeterminate byte must not be
+      // folded into a match by the optimizer.
+      const volatile unsigned char *got =
+          reinterpret_cast<const volatile unsigned char *>(&s->at(i));
+      const volatile unsigned char *want =
+          reinterpret_cast<const volatile unsigned char *>(&expected);
+      for (std::size_t b = 0; b < sizeof(Transform); ++b) {
+        if (got[b] != want[b]) ok = false;
+      }
     }
+    s->~S();
+    std::free(raw);
   }
   std::printf("construct_us=%.1f value_initialized=%s\\n", best, ok ? "yes" : "NO");
   return ok ? 0 : 1;
@@ -610,6 +649,16 @@ struct S { alignas(Transform) unsigned char bytes[sizeof(Transform) * N];
   Transform &at(std::size_t i) { return *std::launder(reinterpret_cast<Transform *>(bytes) + i); } };""",
         "a6_heap_array": """struct S { std::unique_ptr<Transform[]> a{new (std::nothrow) Transform[N]()};
   S() noexcept {} Transform &at(std::size_t i) { return a[i]; } };""",
+        "a7_paren_nsdmi": """struct S { std::array<Transform, N> a = std::array<Transform, N>();
+  S() noexcept {} Transform &at(std::size_t i) { return a[i]; } };""",
+        "a8_paren_wrapper": """template <typename E, std::size_t K> struct ParenArray : std::array<E, K> {
+  ParenArray() noexcept : std::array<E, K>() {} };
+struct S { ParenArray<Transform, N> a{};
+  S() noexcept {} Transform &at(std::size_t i) { return a[i]; } };""",
+        "a9_brace_wrapper": """template <typename E, std::size_t K> struct ValueArray : std::array<E, K> {
+  ValueArray() noexcept : std::array<E, K>{} {} };
+struct S { ValueArray<Transform, N> a{};
+  S() noexcept {} Transform &at(std::size_t i) { return a[i]; } };""",
     }
 
     def stage_a(self) -> None:
@@ -620,23 +669,26 @@ struct S { alignas(Transform) unsigned char bytes[sizeof(Transform) * N];
             path.write_text(src, encoding="utf-8")
             for opt in ("O2", "Od"):
                 self.compile("A", name, src, opt, path=path)
-            exe = self.work / f"{name}.exe"
-            link = subprocess.run(
-                ["cl.exe", "/nologo", "/std:c++latest", "/MD", "/O2", "/Ob2",
-                 "/DNDEBUG", "/fp:strict", "/GR-", "/EHs-c-",
-                 "/D_HAS_EXCEPTIONS=0", str(path), f"/Fe{exe}",
-                 f"/Fo{self.work / (name + '.link.obj')}"],
-                capture_output=True, text=True, timeout=TIMEOUT_S,
-                cwd=self.work)
-            if link.returncode != 0 or not exe.exists():
-                self.say(f"    run {name}: build failed")
-                continue
-            run = subprocess.run([str(exe)], capture_output=True, text=True,
-                                 timeout=120)
-            self.say(f"    run {name}: {run.stdout.strip()} rc={run.returncode}")
-            self.results.append({"stage": "A-run", "name": name,
-                                 "output": run.stdout.strip(),
-                                 "rc": run.returncode})
+            for variant, defines in (("initializers", []), ("padded", ["/DPADDED"])):
+                exe = self.work / f"{name}.{variant}.exe"
+                link = subprocess.run(
+                    ["cl.exe", "/nologo", "/std:c++latest", "/MD", "/O2", "/Ob2",
+                     "/DNDEBUG", "/fp:strict", "/GR-", "/EHs-c-",
+                     "/D_HAS_EXCEPTIONS=0", *defines, str(path), f"/Fe{exe}",
+                     f"/Fo{self.work / (name + '.' + variant + '.link.obj')}"],
+                    capture_output=True, text=True, timeout=TIMEOUT_S,
+                    cwd=self.work)
+                if link.returncode != 0 or not exe.exists():
+                    self.say(f"    run {name} [{variant}]: build failed "
+                             + (link.stdout + link.stderr)[-300:])
+                    continue
+                run = subprocess.run([str(exe)], capture_output=True, text=True,
+                                     timeout=120)
+                self.say(f"    run {name} [{variant}]: {run.stdout.strip()} rc={run.returncode}")
+                self.results.append({"stage": "A-run", "name": name,
+                                     "variant": variant,
+                                     "output": run.stdout.strip(),
+                                     "rc": run.returncode})
 
 
 def main() -> int:
