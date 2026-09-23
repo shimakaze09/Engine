@@ -15,6 +15,9 @@ times are not skewed by parallel jobs. Each compile records:
 
 Stages:
   R  the real reproducer (tests/benchmark/ecs_perf_test.cpp)
+  W  headers alone (world.h, physics_context.h, sparse_set.h), a slow real
+     test that never constructs a World, and default member initializers
+     that are declared but never used
   M  the real SparseSet reduced step by step (one construct removed each)
   I  an isolated copy of SparseSet with each member initializer switchable
   G  a grid of container x element type x initializer at one capacity
@@ -27,7 +30,7 @@ Results go to stdout, to $GITHUB_STEP_SUMMARY when set, and to
 <out>/results.json; listings of stage C go to <out>/listings/.
 
 Usage:
-  python tools/ci/msvc_compile_probe.py --out probe-out [--stages RMIGSCA]
+  python tools/ci/msvc_compile_probe.py --out probe-out [--stages RWMIGSCA]
 """
 
 from __future__ import annotations
@@ -53,7 +56,11 @@ BASE_FLAGS = [
 ]
 OPT_FLAGS = {"O2": ["/O2", "/Ob2"], "Od": ["/Od", "/Ob0"]}
 TIMING_FLAGS = ["/Bt+", "/d2cgsummary"]
-INCLUDES = [f"/I{REPO / d}" for d in ("core/include", "math/include")]
+INCLUDES = [f"/I{REPO / d}" for d in (
+    "core/include", "math/include", "physics/include", "runtime/include",
+    "content/include", "renderer/include", "scripting/include",
+    "audio/include")]
+REPORT_RE = re.compile(r"^\s+(.+?):\s+([\d.]+)s\b")
 TIMEOUT_S = 300
 
 BT_RE = re.compile(r"time\(.*?(c1xx|c2)\.dll\)=([\d.]+)s", re.IGNORECASE)
@@ -180,6 +187,73 @@ class Probe:
         # Front-end detail: time per include, class and function.
         self.compile("R", "ecs_perf_test", "", "O2", path=src,
                      extra=["/d1reportTime"], tag=".reportTime")
+        self.report_top("ecs_perf_test", "O2", ".reportTime")
+
+    def report_top(self, name: str, opt: str, tag: str, count: int = 25) -> None:
+        """Prints the slowest entries of a saved /d1reportTime log, each
+        with the report section it belongs to."""
+        log = self.out / "logs" / f"{name}.{opt}{tag}.txt"
+        if not log.exists():
+            return
+        section = ""
+        entries = []
+        for line in log.read_text(encoding="utf-8", errors="replace").splitlines():
+            if line and not line[0].isspace() and line.rstrip().endswith(":"):
+                section = line.strip().rstrip(":")
+                continue
+            m = REPORT_RE.match(line)
+            if m:
+                entries.append((float(m.group(2)), section, m.group(1).strip()))
+        entries.sort(reverse=True)
+        self.say(f"    /d1reportTime top {count} for {name}:")
+        for seconds, sec, what in entries[:count]:
+            self.say(f"      {seconds:8.3f}s  [{sec}] {what[:150]}")
+
+    # ------------------------------------------------------------- stage W
+    DECL_HEAD = """\
+#include <array>
+#include <cstddef>
+constexpr std::size_t N = 65536;
+struct V { float x; float y; float z;
+  constexpr V() noexcept : x(0.0F), y(0.0F), z(0.0F) {} };
+struct T { V position = V(); };
+"""
+
+    def stage_w(self) -> None:
+        self.say("\n## W: headers and never-used default member initializers")
+        headers = {
+            "w1_world_h": '#include "engine/runtime/world.h"\n',
+            "w2_physics_context_h": '#include "engine/physics/physics_context.h"\n',
+            "w3_sparse_set_h": '#include "engine/core/sparse_set.h"\n',
+        }
+        for name, src in headers.items():
+            for opt in ("O2", "Od"):
+                self.compile("W", name, src, opt)
+        self.compile("W", "w1_world_h", headers["w1_world_h"], "O2",
+                     extra=["/d1reportTime"], tag=".reportTime")
+        self.report_top("w1_world_h", "O2", ".reportTime")
+        decls = {
+            # Non-template class: the initializer is analysed where the
+            # class is defined, whether or not anything constructs it.
+            "w4_decl_only_braced": "struct S { std::array<T, N> a{}; S() noexcept; };\n",
+            "w5_decl_only_none": "struct S { std::array<T, N> a; S() noexcept; };\n",
+            "w6_decl_only_int_braced": "struct S { std::array<int, N> a{}; S() noexcept; };\n",
+            # Class template instantiated as a member of a non-template
+            # class that is itself never constructed.
+            "w7_template_member_braced": ("template <int K> struct S { std::array<T, N> a{};"
+                                          " S() noexcept; };\n"
+                                          "struct U { S<0> s; U() noexcept; };\n"),
+            # Ten braced members in one non-template class (World's shape).
+            "w8_decl_only_ten_braced": ("struct S {\n" + "".join(
+                f"  std::array<T, N> a{i}{{}};\n" for i in range(10)) +
+                "  S() noexcept; };\n"),
+        }
+        for name, body in decls.items():
+            for opt in ("O2", "Od"):
+                self.compile("W", name, self.DECL_HEAD + body, opt)
+        slow_test = REPO / "tests/unit/world_name_lookup_test.cpp"
+        for opt in ("O2", "Od"):
+            self.compile("W", "world_name_lookup_test", "", opt, path=slow_test)
 
     # ------------------------------------------------------------- stage M
     MINI_HEAD = """\
@@ -488,13 +562,15 @@ struct S { alignas(Transform) unsigned char bytes[sizeof(Transform) * N];
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--out", default="probe-out")
-    parser.add_argument("--stages", default="RMIGSCA")
+    parser.add_argument("--stages", default="RWMIGSCA")
     args = parser.parse_args()
     probe = Probe(pathlib.Path(args.out).resolve())
     probe.version()
     stages = args.stages.upper()
     if "R" in stages:
         probe.stage_r()
+    if "W" in stages:
+        probe.stage_w()
     if "M" in stages:
         probe.stage_m()
     if "I" in stages:

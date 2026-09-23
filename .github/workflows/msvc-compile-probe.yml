@@ -25,19 +25,37 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # The image the CI lanes use: Visual Studio 2026, MSVC 14.5x.
+          # The image the CI lanes use, its default toolset (MSVC 14.5x).
           - os: windows-2025-vs2026
             toolset: vs2026
-          # Visual Studio 2022, MSVC 14.4x, to separate a toolset
-          # regression from a long-standing code pattern.
+            vsversion: ""
+            vcvars: ""
+          # Visual Studio 2022 where the image still carries it.
           - os: windows-2025
             toolset: vs2022
+            vsversion: "2022"
+            vcvars: ""
+          # The v143 (MSVC 14.44) side-by-side toolset on the CI image,
+          # to separate a toolset regression from the code pattern.
+          - os: windows-2025-vs2026
+            toolset: v14.44
+            vsversion: ""
+            vcvars: "14.44"
     steps:
       - name: Checkout
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
+      - name: List installed MSVC toolsets
+        shell: pwsh
+        run: >
+          Get-ChildItem "C:/Program Files*/Microsoft Visual Studio/*/*/VC/Tools/MSVC"
+          -Directory -ErrorAction SilentlyContinue | ForEach-Object FullName
+
       - name: Set up MSVC environment
         uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
+        with:
+          vsversion: ${{ matrix.vsversion }}
+          toolset: ${{ matrix.vcvars }}
 
       - name: Run the probe
         shell: pwsh
