@@ -85,18 +85,21 @@ void upload_rect(bgfx::TextureHandle handle, ImTextureData *tex, int x, int y,
 void update_texture(ImTextureData *tex) noexcept {
   if (tex->Status == ImTextureStatus_WantCreate) {
     // Only the RGBA32 format is requested (see ImGui_ImplBgfx_Init).
+    // Created without memory and then filled like any later update: bgfx
+    // makes a texture created with memory immutable and drops every
+    // updateTexture2D on it, which is how each glyph ImGui rasterizes
+    // after this frame reaches the GPU.
     const bgfx::TextureHandle handle = bgfx::createTexture2D(
         static_cast<std::uint16_t>(tex->Width),
         static_cast<std::uint16_t>(tex->Height), false, 1,
-        bgfx::TextureFormat::RGBA8, 0,
-        bgfx::copy(tex->GetPixels(),
-                   static_cast<std::uint32_t>(tex->GetSizeInBytes())));
+        bgfx::TextureFormat::RGBA8, 0, nullptr);
     if (!bgfx::isValid(handle)) {
       // Left as WantCreate, so the request is retried next frame; the text
       // it holds is invisible until then, which is the most a failed
       // allocation can leave.
       return;
     }
+    upload_rect(handle, tex, 0, 0, tex->Width, tex->Height);
     tex->SetTexID(encode_texture(handle));
     tex->SetStatus(ImTextureStatus_OK);
     return;

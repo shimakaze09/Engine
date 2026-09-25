@@ -175,6 +175,26 @@ engine_add_test_executable(engine_integration_brdf_lut_edge_gpu
 set_tests_properties(engine_integration_brdf_lut_edge_gpu PROPERTIES
     SKIP_REGULAR_EXPRESSION "SKIPPED:")
 
+# Drives the editor's ImGui bgfx renderer directly (editor/src is private),
+# so it links engine_editor normally: only the renderer's objects are
+# pulled in, and no editor bridge registers itself over the fixture's.
+engine_add_test_executable(engine_integration_imgui_late_glyph_gpu
+    SOURCES
+    imgui_late_glyph_gpu_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/renderer/src
+    ${CMAKE_SOURCE_DIR}/editor/src
+    PRIVATE_DEPS
+    engine_runtime
+    engine_renderer
+    engine_content
+    engine_editor
+    LABELS
+    gpu;integration
+)
+set_tests_properties(engine_integration_imgui_late_glyph_gpu PROPERTIES
+    SKIP_REGULAR_EXPRESSION "SKIPPED:")
+
 engine_add_test_executable(engine_integration_pipeline_tick_cadence
     SOURCES
     pipeline_tick_cadence_test.cpp
@@ -394,6 +414,18 @@ engine_add_test_executable(engine_integration_input_tap_edge
 engine_add_test_executable(engine_integration_fixed_tick_input
     SOURCES
     fixed_tick_input_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_scripting
+    # Builds native SDL events to drive input the way the platform does.
+    ${ENGINE_SDL_TARGET}
+    LABELS
+    integration
+)
+
+engine_add_test_executable(engine_integration_input_replay
+    SOURCES
+    input_replay_test.cpp
     PRIVATE_DEPS
     engine_runtime
     engine_scripting

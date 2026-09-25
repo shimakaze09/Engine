@@ -1,0 +1,9 @@
+{
+  "name": "engine-web-tests",
+  "private": true,
+  "description": "Headless-browser tests for the Engine web build",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "playwright": "1.63.0"
+  }
+}

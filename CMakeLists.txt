@@ -126,10 +126,28 @@ if(ENGINE_TARGET_PLATFORM STREQUAL "Web")
     # SharedArrayBuffer), growable memory, and a strict WebGL2 context
     # for bgfx.
     add_compile_options(-pthread)
-    add_link_options(-pthread "-sPTHREAD_POOL_SIZE=8"
+    # Every engine thread comes from the page's prewarmed worker pool. A
+    # thread past it starts only once the main thread returns to the
+    # browser, so a join or a wait on one before then hangs the page; the
+    # strict pool refuses that spawn instead. The job system takes what
+    # asset streaming's four workers leave (checked in asset_streaming.cpp).
+    set(ENGINE_WEB_PTHREAD_POOL_SIZE 8)
+    set(ENGINE_WEB_JOB_WORKERS 4)
+    add_compile_definitions(
+        ENGINE_WEB_PTHREAD_POOL_SIZE=${ENGINE_WEB_PTHREAD_POOL_SIZE}
+        ENGINE_WEB_JOB_WORKERS=${ENGINE_WEB_JOB_WORKERS})
+    add_link_options(-pthread
+        "-sPTHREAD_POOL_SIZE=${ENGINE_WEB_PTHREAD_POOL_SIZE}"
+        "-sPTHREAD_POOL_SIZE_STRICT=2"
         "-sALLOW_MEMORY_GROWTH=1" "-sINITIAL_MEMORY=268435456"
         "-sMIN_WEBGL_VERSION=2" "-sMAX_WEBGL_VERSION=2"
         "-sSTACK_SIZE=1048576")
+    # The runtime exports every page needs, in one place because emcc
+    # keeps only the last -sEXPORTED_RUNTIME_METHODS it sees. ENV is how a
+    # shell seeds ENGINE_CVAR_* before main runs; HEAPF32 is how
+    # miniaudio's WebAudio callback reaches the mix buffer (without it
+    # every audio callback throws on Module.HEAPF32 being undefined).
+    add_link_options("-sEXPORTED_RUNTIME_METHODS=ENV,HEAPF32")
 endif()
 
 if(NOT CMAKE_CROSSCOMPILING AND NOT ENGINE_TARGET_PLATFORM STREQUAL _ENGINE_HOST_PLATFORM)
@@ -604,6 +622,37 @@ if(EXISTS "${ENGINE_ASSET_SOURCE_DIR}")
     )
 endif()
 
+# Web pages ship the synced asset tree preloaded into the wasm FS, with
+# cooked bgfx shader binaries from a host cook: shaderc cannot build under
+# Emscripten, so ENGINE_WEB_COOKED_DIR names a native build's cooked output
+# (<native-build>/assets/shaders/bgfx/cooked), copied into the packaged
+# asset tree before every link. The .data archive only regenerates at link,
+# so the copy stamp is a link dependency of every page
+# (engine_package_web_page) and a recook repackages instead of silently
+# shipping stale binaries.
+if(ENGINE_TARGET_PLATFORM STREQUAL "Web")
+    set(ENGINE_WEB_COOKED_DIR "" CACHE PATH
+        "Host-cooked bgfx shader dir packaged into the web build")
+    if(ENGINE_WEB_COOKED_DIR STREQUAL "")
+        message(FATAL_ERROR
+            "ENGINE_TARGET_PLATFORM=Web needs ENGINE_WEB_COOKED_DIR: the "
+            "path to a native build's cooked shaders "
+            "(<native-build>/assets/shaders/bgfx/cooked); shaderc cannot "
+            "build under Emscripten, so the web package consumes a host "
+            "cook.")
+    endif()
+    set(ENGINE_WEB_COOK_STAMP "${CMAKE_BINARY_DIR}/web_cooked_shaders.stamp")
+    add_custom_command(
+        OUTPUT "${ENGINE_WEB_COOK_STAMP}"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${ENGINE_WEB_COOKED_DIR}"
+            "${ENGINE_ASSET_OUTPUT_DIR}/shaders/bgfx/cooked"
+        COMMAND ${CMAKE_COMMAND} -E touch "${ENGINE_WEB_COOK_STAMP}"
+        DEPENDS "${ENGINE_WEB_COOKED_DIR}/bgfx_shaders.cookstamp"
+        COMMENT "Packaging host-cooked bgfx shaders into the web assets")
+    add_custom_target(web_cooked_shaders DEPENDS "${ENGINE_WEB_COOK_STAMP}")
+endif()
+
 add_subdirectory(core)
 add_subdirectory(math)
 add_subdirectory(content)
@@ -648,7 +697,12 @@ if(ENGINE_BUILD_TOOLS AND ENGINE_BGFX_SHADERC AND TARGET copy_assets)
     add_dependencies(bgfx_shader_cook asset_packer shaderc copy_assets)
 endif()
 
-if(ENGINE_BUILD_TESTS)
+if(ENGINE_BUILD_TESTS AND (ENGINE_TARGET_PLATFORM STREQUAL "Web"))
+    # The host suites stay host-side; a web build carries only the browser
+    # tests.
+    enable_testing()
+    add_subdirectory(tests/web)
+elseif(ENGINE_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()

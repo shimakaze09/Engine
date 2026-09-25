@@ -22,6 +22,16 @@ namespace engine::core {
 namespace {
 
 constexpr std::uint32_t kMaxWorkers = 15U;
+#if defined(ENGINE_PLATFORM_WEB)
+// The page's share of its prewarmed pthread pool (see the root
+// CMakeLists): a worker past the pool would start only after the main
+// thread yields, so shutdown's join on it would hang the page.
+constexpr std::uint32_t kSpawnableWorkers = ENGINE_WEB_JOB_WORKERS;
+#else
+constexpr std::uint32_t kSpawnableWorkers = kMaxWorkers;
+#endif
+static_assert(kSpawnableWorkers <= kMaxWorkers,
+              "the worker storage must hold every spawnable worker");
 constexpr std::size_t kMaxEdges = 65536U;
 constexpr std::uint32_t kInvalidIndex = 0xFFFFFFFFU;
 constexpr std::uint32_t kIndexBits = 13U;
@@ -93,8 +103,8 @@ public:
       return true;
     }
 
-    m_workerCount =
-        (requestedWorkers > kMaxWorkers) ? kMaxWorkers : requestedWorkers;
+    m_workerCount = (requestedWorkers > kSpawnableWorkers) ? kSpawnableWorkers
+                                                           : requestedWorkers;
     m_running.store(true, std::memory_order_release);
     m_pendingJobs.store(0U, std::memory_order_release);
 

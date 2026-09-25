@@ -345,6 +345,11 @@ struct DeviceCaps final {
   // false means the backend cannot blit depth (bgfx's Vulkan/WebGL
   // paths) and the caller must seed depth with a draw instead.
   bool depthBlit = false;
+  // Layered 2-D textures (TextureKind::Tex2DArray). false means
+  // create_texture refuses every array descriptor, so the features built
+  // on them -- the cascade and spot shadow maps -- stay unavailable. bgfx
+  // reports none under Emscripten, even on a WebGL2 context.
+  bool textureArrays = true;
   // Clip-space depth convention: false = OpenGL [-1, 1], true =
   // Vulkan/Metal/D3D [0, 1]. Every projection matrix the engine builds
   // must honor this or world geometry depth-clips away.

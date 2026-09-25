@@ -544,7 +544,13 @@ void init_backend_lighting(BackendState &backend,
   core::cvar_register_bool(
       "r_shadow_debug", false,
       "Log when shadow casters are dropped due to slot limits");
-  {
+  if ((dev != nullptr) && !dev->caps.textureArrays) {
+    // Both the cascade and the spot sets are Tex2DArrays; the spot set is
+    // gated on the cascade set below, so one refusal covers them.
+    core::log_message(core::LogLevel::Warning, "renderer",
+                      "the render device has no texture arrays — cascade "
+                      "and spot shadows disabled");
+  } else {
     const ShaderProgramHandle shadowShader = load_configured_shader_program(
         "shadow_depth.vert", "shadow_depth.frag");
     if (shadowShader != kInvalidShaderProgram) {

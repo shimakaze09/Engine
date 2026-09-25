@@ -461,6 +461,12 @@ DeviceTextureHandle bgfx_create_texture(const TextureDesc &desc) noexcept {
       drop_operation("create_texture: invalid array descriptor");
       return kInvalidDeviceTexture;
     }
+    // bgfx validates this itself, but a debug bgfx asserts rather than
+    // returning an invalid handle, so the refusal happens here.
+    if ((bgfx::getCaps()->supported & BGFX_CAPS_TEXTURE_2D_ARRAY) == 0U) {
+      drop_operation("create_texture: the device has no texture arrays");
+      return kInvalidDeviceTexture;
+    }
   }
   if (desc.cpuUpdatable && ((desc.kind != TextureKind::Tex2D) || hasPixels)) {
     // cpuUpdatable means "created empty, filled through update_texture":
@@ -1181,6 +1187,8 @@ void fill_bgfx_render_device(RenderDevice *device) noexcept {
   device->caps.uniformBlocks = false;
   device->caps.timestampQueries = false;
   device->caps.cookedPrograms = true;
+  device->caps.textureArrays =
+      (bgfx::getCaps()->supported & BGFX_CAPS_TEXTURE_2D_ARRAY) != 0U;
   // Valid here: this fill runs after bgfx::init. WebGL2 reports its
   // 16-unit floor through this, gating the deferred pass off on web.
   device->caps.maxTextureSamplers = static_cast<std::uint16_t>(

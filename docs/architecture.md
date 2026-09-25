@@ -128,9 +128,13 @@ per-thread command buffers that are merged for the backend flush.
 Work outside the job graph: asset streaming runs on its own four worker
 threads behind a mutex, and uploads happen on the main thread; the render
 device is main-thread only; hot reload polls only while an editor bridge
-is published. Scripts, timers and the deferred-mutation flush run before
-the simulation graph; collision callbacks, EndPlay and the final flush run
-after render prep and before submission.
+is published. On the web every thread comes from the page's prewarmed
+pthread pool, whose size and the job system's share of it are one budget
+in the root `CMakeLists.txt`: a thread past the pool would start only after
+the main thread yields, so a join on it would hang the page. Scripts,
+timers and the deferred-mutation flush run before the simulation graph;
+collision callbacks, EndPlay and the final flush run after render prep and
+before submission.
 
 Test the production pipeline, never a copied scheduler model.
 
@@ -156,6 +160,16 @@ because each of these does:
   seam; nothing else reads a wall clock to decide how much to simulate.
   Tests assert step counts, never durations
   (`tools/check_test_timing.py`).
+- **Input is replayable per step.** Which step an event lands in follows
+  its wall-clock timestamp, so the input a run's steps read is recorded,
+  not rederived: the input log (`core/src/input_log.cpp`) keeps each
+  step's snapshot, and the one the action mapper compares it with, keyed
+  by the step's tick. A replay feeds those to the steps in place of the
+  recorded events, so with the delta override a run reproduces at any
+  frame schedule (`engine_integration_input_replay`). Only step
+  snapshots are recorded; `on_tick`, touch and the event bus read live
+  devices during a replay. The pipeline ends a log with the play session,
+  whose ticks restart at zero.
 - **Randomness is explicit state.** `core::Rng` over state the caller
   holds, seeded by a decision and never from a clock or the operating
   system. The World owns the gameplay stream; Lua's `math.random` routes
@@ -238,6 +252,13 @@ as a reduction of itself. A format change carries the tree migration and
 production-path tests for the new revision and for the refusal of the
 old. Parse, load or restore failure leaves the destination unchanged; a
 scene load stages into a replacement World and commits only on success.
+
+The input log is the one binary document: a magic, an exact `u32`
+version, the steps, and a footer carrying the step count and an FNV-1a
+checksum, so a truncated or damaged log is refused as surely as an
+unknown revision. A recording streams into a staged sibling temporary
+through a fixed ring and commits on end; a replay validates the whole log
+before it replaces anything.
 
 See the `serialization` skill for the procedure.
 

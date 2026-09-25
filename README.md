@@ -56,10 +56,13 @@ and was never read, shadow types no producer could enable. So, instead:
   document, is what "works" means here.
 - **Open scope lives on the GitHub tracker.** It is the only source of
   truth for what is broken, missing, or deferred.
-- **On-screen renderer behavior is not covered by CI.** No CI lane draws a
-  frame. Only the Windows, Linux and macOS Release lanes cook shaders;
-  every other lane builds with the cook off. A rendering feature is only as verified as the last time
-  somebody ran the editor and looked at it.
+- **On-screen renderer behavior is not covered by CI.** No CI lane checks
+  what a frame shows. The web lane draws frames in headless Chromium on
+  SwiftShader's WebGL2 and fails on a page, engine or WebGL error, but
+  compares no image. Only the Windows, Linux and macOS Release lanes cook
+  shaders; every other lane builds with the cook off. A rendering feature
+  is only as verified as the last time somebody ran the editor and looked
+  at it.
 
 The engine builds, runs an editor, simulates a deterministic world, and
 plays the bundled template. It is not production-complete.
@@ -69,8 +72,11 @@ plays the bundled template. It is not production-complete.
 - Language: C++23
 - Build: CMake 3.28+
 - Window/input: SDL3
-- Rendering: bgfx (Vulkan is the proven backend; D3D11, D3D12, Metal and
-  WebGL2 are selectable but unproven; shaderc-cooked `.sc` shaders)
+- Rendering: bgfx (Vulkan is the proven backend; D3D11, D3D12 and Metal
+  are selectable but unproven; WebGL2 runs the shipped page error-free in
+  CI (`engine_web_page_boots`) without shadows, since bgfx exposes no
+  texture arrays there, and with no image check; shaderc-cooked `.sc`
+  shaders)
 - UI/editor: ImGui + ImGuizmo
 - Scripting: Lua 5.4 (C API)
 - Audio: miniaudio
@@ -236,16 +242,23 @@ Some tests are labeled `gpu`; CI excludes those where headless execution is requ
 ## Continuous integration
 
 GitHub Actions configuration lives in `.github/workflows/ci.yml` and currently
-runs ten jobs. Every job except the cross-platform determinism comparison
-starts at once; engine targets build with warnings as errors on every lane,
-and CTest runs four tests at a time. Each lane restores its built
-dependencies from a cache that only pushes to `main` save, one entry per OS
-and configuration:
+runs eleven jobs. Every job except the cross-platform determinism comparison
+and the web lane starts at once; engine targets build with warnings as
+errors on every lane, and CTest runs four tests at a time. Each native lane
+restores its built dependencies from a cache that only pushes to `main`
+save, one entry per OS and configuration:
 
 - Windows, Linux, and macOS builds in Debug and Release on the canonical
   toolchains (`clang-cl` via Ninja, `clang++-19`, AppleClang),
   with headless-safe CTest filtering
 - MSVC (Windows) and GCC (Linux) Release compatibility lanes (build + test)
+- A web lane: Emscripten builds the shipped page and the lifecycle harness
+  in `tests/web/` against the Linux Release lane's shader cook, then
+  headless Chromium runs the `web`-labelled tests (the page boots and runs
+  frames; maxFrames, quit and a fatal frame each close every engine tier
+  and a second bootstrap in the same page runs clean). It waits for the
+  build matrix for that cook, and restores the Linux sources cache without
+  saving one of its own
 - Determinism hash comparison across every platform and build
   configuration, through the production pipeline
 - `cppcheck` static analysis plus the audit gates (source comments, comment
@@ -270,7 +283,11 @@ Current script conventions in `assets/`:
 	  fixed delta. Input queries made inside it (`engine.is_key_pressed`,
 	  `engine.is_action_pressed`, gamepad and mouse reads) answer for that
 	  step alone, so a tap is seen once whatever the frame rate: gameplay
-	  that reacts to input belongs here
+	  that reacts to input belongs here. What each step read can be
+	  recorded to an input log and replayed, reproducing the run at any
+	  frame rate (`core::begin_input_recording` and
+	  `core::begin_input_replay` in `core/include/engine/core/input.h`);
+	  input read in `on_tick` is not recorded
 	- `M.on_tick(self, dt)` is called once per rendered frame that
 	  advanced simulation (not once per fixed step); `dt` is that
 	  frame's total simulated time, summing every catch-up fixed step
