@@ -16,11 +16,17 @@ the correction program. Supersedes the flow counts in
    recoverable. P3: low-impact debt, hygiene, cosmetics. Visibility alone
    sets no severity; a reachable functional defect is not dismissed for
    being hard to reach.
-2. **P1 and P2 counts are health signals, not quotas.** A month-over-month
+2. *(Superseded by [0020](0020-issues-are-classified-before-they-are-worked.md):
+   the class label, not a count, decides the work, and the reported
+   signal is the regression count.)* **P1 and P2 counts are health
+   signals, not quotas.** A month-over-month
    count is reported and triaged, never the optimization target. P0 stays
    stop-the-line; a consolidation is allowed for a P0 only as its
    owning-layer fix.
-3. **P3 stands alone only for bounded structural value**: deleting a
+3. *(Superseded by [0020](0020-issues-are-classified-before-they-are-worked.md):
+   a P3 is `class:deferred` and rides inside a change already touching
+   its files; age still never closes it.)* **P3 stands alone only for
+   bounded structural value**: deleting a
    substantial obsolete API or dead code, unblocking a migration, removing
    recurring noise, or a cleanup cheaper than carrying. The
    one-month `wont-fix` rule is deleted; age triggers triage or an icebox,

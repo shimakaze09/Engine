@@ -60,6 +60,14 @@ an event duplicating one you already handled.
    A review bot's finding is a bug report: verify it and fix it. Repeated
    findings across your pushes mean fix the root cause, not stop.
 
+## Choosing the next piece of work
+
+Take the next open `class:blocker` in the order CLAUDE.md's class rule
+gives: severity first, then the foundation layer. An issue labelled
+`needs-triage` is classified before anything is chosen. Never select a
+`class:deferred` issue on its own, and start no `class:feature` while a
+blocker is open.
+
 ## A failing test is never normalized
 
 If a test fails for an environment reason, fix it or make it skip with a

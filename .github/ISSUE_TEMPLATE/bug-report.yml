@@ -1,9 +1,52 @@
-# Issue form for bug reports: reproduction, expected vs actual, platform, and regression status.
+# Issue form for bug reports: class, severity, area, reproduction, expected vs actual, platform, and regression status.
 name: Bug report
 description: Observed misbehavior in the engine, editor, tools, or a sample
 title: "[Bug] <what goes wrong>"
 labels: ["bug"]
 body:
+  - type: dropdown
+    id: class
+    attributes:
+      label: Class
+      description: Decides the work order (CLAUDE.md). Blockers are fixed first; a deferred item rides inside a change already touching its files.
+      options:
+        - blocker — data loss, a crash, a leak, a regression, or a defect normal use hits
+        - deferred — real, but off the normal path (extreme capacity, contrived input, hygiene, cosmetics, debt with no symptom)
+    validations:
+      required: true
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      description: Severity is impact, never visibility; anything observed in real use is at least P2.
+      options:
+        - P0 — data loss or corruption, unrecoverable project damage, critical crash
+        - P1 — major correctness or stability failure, or an important workflow that cannot reliably complete
+        - P2 — user-visible functional defect, or a workflow materially obstructed but recoverable
+        - P3 — low-impact debt, hygiene or cosmetics
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Every subsystem the defect or feature touches; each becomes an `area:*` label.
+      multiple: true
+      options:
+        - core
+        - math
+        - physics
+        - render
+        - audio
+        - scripting
+        - runtime
+        - content
+        - editor
+        - platform
+        - tools-ci
+        - docs
+    validations:
+      required: true
   - type: textarea
     id: repro
     attributes:
