@@ -115,7 +115,9 @@ The engine centers on one canonical LLVM toolchain per platform, with two
 secondary compilers validated for portability:
 
 - **Tier 1 — canonical (used for development and primary CI)**
-	- Windows x64: `clang-cl`
+	- Windows x64: `clang-cl`. Executables embed a UTF-8 active-code-page
+	  manifest (`cmake/windows_utf8.manifest`), so running them needs
+	  Windows 10 version 1903 or newer
 	- Linux x64: `clang++` 19 or newer (clang 18 cannot compile libstdc++'s `<expected>`)
 	- macOS: AppleClang 16 (Xcode 16) or newer. macOS is an editor platform by
 	  [decision 0015](docs/decisions/0015-commercial-anime-engine-on-six-platforms.md)
