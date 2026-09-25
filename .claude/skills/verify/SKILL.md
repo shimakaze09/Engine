@@ -75,13 +75,15 @@ These override every tier below.
 
 ## Tier: renderer, shaders, post stack
 
-**CI cannot verify this tier.** Only the Linux, Windows and macOS Release
-lanes build with the shader cook; every other lane passes
-`ENGINE_BGFX_SHADERC=OFF`, and every native lane excludes the `gpu` label.
-The web lane draws frames on SwiftShader's WebGL2 but only fails on an
-error; it compares no image. A pass can be
-unreachable, a uniform never written, a target sampled while it renders,
-and every test still passes. Treat a green suite here as no evidence.
+**CI verifies this tier only partly.** Only the Linux, Windows and macOS
+Release lanes build with the shader cook; every other lane passes
+`ENGINE_BGFX_SHADERC=OFF`. The Linux Release lane runs the `gpu`-labelled
+suites on Mesa's software Vulkan (lavapipe) under Xvfb, so a crash in the
+device path, an unbound pass or a readback those suites assert fails
+there. Nothing runs them on a hardware GPU, on D3D11/D3D12, Metal or
+OpenGL, or looks at a frame. The web lane draws frames on SwiftShader's
+WebGL2 but only fails on an error; it compares no image. Treat a green CI
+run as evidence for what those suites assert, and nothing more.
 
 Required:
 
@@ -89,7 +91,11 @@ Required:
    exist:
    `cmake -S . -B build -DENGINE_BGFX_SHADERC=ON` then build. On macOS
    this needs Xcode 16 or newer.
-2. Run the `gpu`-labelled suites: `ctest --test-dir build -L gpu`.
+2. Run the `gpu`-labelled suites: `ctest --test-dir build -L gpu`. With
+   no GPU, CI's form runs them on lavapipe:
+   `xvfb-run -a env VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json ctest --test-dir build -L gpu`
+   (packages `xvfb`, `mesa-vulkan-drivers`). That is a software result,
+   not the hardware observation of step 4.
 3. Run the editor windowed and look at what you changed. Toggle it off and
    on. A feature you cannot see change is a feature you have not verified.
 4. Record the observation: date, commit, GPU, driver, backend, what you saw.

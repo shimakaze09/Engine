@@ -1,0 +1,78 @@
+# Keeps every open issue classified (CLAUDE.md's class rule). A new issue
+# filed through a form gets the labels its dropdown answers name: class,
+# severity, area and found-by. On every label change the issue carries
+# `needs-triage` exactly while it lacks a single `class:*` label, so an
+# unclassified or doubly classified issue is visible in one filter.
+name: Issue triage
+
+on:
+  issues:
+    types: [opened, reopened, labeled, unlabeled]
+
+permissions:
+  issues: write
+
+jobs:
+  triage:
+    runs-on: ubuntu-24.04
+    if: github.event.issue.state == 'open'
+    steps:
+      - name: Apply form answers and the needs-triage marker
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const issue = context.payload.issue;
+            const params = { owner: context.repo.owner, repo: context.repo.repo,
+                             issue_number: issue.number };
+            let labels = issue.labels.map((l) => l.name);
+
+            // An issue form renders each answer as "### <label>\n\n<answer>".
+            const answer = (heading) => {
+              const match = new RegExp(`### ${heading}\\s*\\n+([^\\n#]+)`)
+                .exec(issue.body || '');
+              const text = match ? match[1].trim() : '';
+              return text === '_No response_' ? '' : text;
+            };
+
+            if (context.payload.action === 'opened') {
+              let add = [];
+              const cls = answer('Class').split(' ')[0];
+              if (['blocker', 'deferred', 'feature'].includes(cls)) {
+                add.push(`class:${cls}`);
+              }
+              const severity = answer('Severity').slice(0, 2);
+              if (/^P[0-3]$/.test(severity)) {
+                add.push(severity);
+              }
+              for (const area of answer('Area').split(',')) {
+                if (area.trim() !== '') {
+                  add.push(`area:${area.trim()}`);
+                }
+              }
+              let found = answer('Found by').split(' ')[0];
+              if (found === '' && labels.includes('bug')) {
+                found = 'use'; // a bug report describes observed behaviour
+              }
+              // A regression is a blocker whatever else the form says.
+              if (answer('Is this a regression\\?').startsWith('Yes')) {
+                found = 'regression';
+                add = add.filter((l) => !l.startsWith('class:'));
+                add.push('class:blocker');
+              }
+              if (['use', 'audit', 'regression'].includes(found)) {
+                add.push(`found:${found}`);
+              }
+              const fresh = add.filter((l) => !labels.includes(l));
+              if (fresh.length > 0) {
+                await github.rest.issues.addLabels({ ...params, labels: fresh });
+                labels = labels.concat(fresh);
+              }
+            }
+
+            const classified = labels.filter((l) => l.startsWith('class:')).length === 1;
+            const marked = labels.includes('needs-triage');
+            if (!classified && !marked) {
+              await github.rest.issues.addLabels({ ...params, labels: ['needs-triage'] });
+            } else if (classified && marked) {
+              await github.rest.issues.removeLabel({ ...params, name: 'needs-triage' });
+            }

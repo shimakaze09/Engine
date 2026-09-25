@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <limits>
@@ -605,13 +606,19 @@ struct EnginePipeline::Impl final {
   runtime::EngineRendererService rendererService{};
 
   // --- Run lifetime ---
+  // Each run that publishes takes the next id from a process-wide counter
+  // that never repeats; 0 is "never published". The id, not the Impl's
+  // address, is the run's identity: an allocator may place a later run at
+  // a closed run's address, and an id cannot be reused that way. It stays
+  // private to the pipeline until a consumer outside it needs to tell runs
+  // apart, at which point this is the value to publish.
+  static std::uint64_t s_lastRunId;
   // The run whose values currently occupy the process-wide alias slots (the
   // editor bridge's world, the editor asset service, the scripting
   // bindings). Those slots hold one value each, so the run that published
-  // last owns them and is the only one entitled to clear them. Never
-  // dereferenced, and never stale: every Impl is torn down before it is
-  // destroyed, and a run clears this on the way out.
-  static Impl *s_publishingRun;
+  // last owns them and is the only one entitled to clear them.
+  static std::uint64_t s_publishingRunId;
+  std::uint64_t runId = 0U;
 
   // Closing a run releases what that run still owns: its own service
   // registrations, streaming workers and asset-manager content always, and
@@ -758,7 +765,8 @@ struct EnginePipeline::Impl final {
   void stage_frame_pacing() noexcept;
 };
 
-EnginePipeline::Impl *EnginePipeline::Impl::s_publishingRun = nullptr;
+std::uint64_t EnginePipeline::Impl::s_lastRunId = 0U;
+std::uint64_t EnginePipeline::Impl::s_publishingRunId = 0U;
 
 EnginePipeline::Impl::Impl() noexcept : serviceRegistry(serviceLocator) {}
 
@@ -828,7 +836,8 @@ bool EnginePipeline::Impl::initialize(std::uint32_t maxFrameCount) noexcept {
     return false;
   }
 
-  s_publishingRun = this;
+  runId = ++s_lastRunId;
+  s_publishingRunId = runId;
 
   bridge = runtime::editor_bridge();
   runtime::set_editor_asset_service(&assetDatabaseService);
@@ -1017,8 +1026,8 @@ void EnginePipeline::Impl::teardown() noexcept {
   // them would otherwise clear the newer run's world alias, input bindings
   // and game state out from under it; a run that never published (an
   // initialize that failed before the publish block) owns nothing here.
-  if (s_publishingRun == this) {
-    s_publishingRun = nullptr;
+  if ((runId != 0U) && (s_publishingRunId == runId)) {
+    s_publishingRunId = 0U;
 
     if ((bridge != nullptr) && (bridge->set_world != nullptr)) {
       bridge->set_world(nullptr);

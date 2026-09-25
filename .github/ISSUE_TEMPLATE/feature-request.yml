@@ -2,7 +2,7 @@
 name: Feature request
 description: A feature requirement or enhancement — scoped against the product vision and roadmap slice
 title: "[Feature] <what and for whom>"
-labels: ["feature"]
+labels: ["feature", "class:feature"]
 body:
   - type: dropdown
     id: slice
@@ -21,18 +21,21 @@ body:
     id: area
     attributes:
       label: Area
+      description: Every subsystem the defect or feature touches; each becomes an `area:*` label.
+      multiple: true
       options:
         - core
         - math
         - physics
-        - renderer
+        - render
         - audio
         - scripting
         - runtime
+        - content
         - editor
-        - tools / asset pipeline
-        - build / CI
-        - tests
+        - platform
+        - tools-ci
+        - docs
     validations:
       required: true
   - type: textarea

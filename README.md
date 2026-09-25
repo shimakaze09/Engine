@@ -237,7 +237,9 @@ The suite includes targets such as:
 - `engine_bench_ecs_perf`
 - `engine_bench_physics_perf`
 
-Some tests are labeled `gpu`; CI excludes those where headless execution is required.
+Some tests are labeled `gpu`: they open a device and draw. CI runs them on
+the Linux Release lane only, on Mesa's software Vulkan (lavapipe) under Xvfb;
+every other lane excludes the label.
 
 ## Continuous integration
 
@@ -250,7 +252,8 @@ save, one entry per OS and configuration:
 
 - Windows, Linux, and macOS builds in Debug and Release on the canonical
   toolchains (`clang-cl` via Ninja, `clang++-19`, AppleClang),
-  with headless-safe CTest filtering
+  with headless-safe CTest filtering; the Linux Release lane also runs the
+  `gpu`-labelled suites on lavapipe (software Vulkan) under Xvfb
 - MSVC (Windows) and GCC (Linux) Release compatibility lanes (build + test)
 - A web lane: Emscripten builds the shipped page and the lifecycle harness
   in `tests/web/` against the Linux Release lane's shader cook, then

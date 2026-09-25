@@ -32,3 +32,4 @@ history.
 | [0017](0017-materials-carry-a-shading-model.md) | A material carries its shading model; passes are chosen per draw | 2026-09-21 |
 | [0018](0018-authors-compose-shading.md) | Authors compose shading; the engine ships the pieces and the presets | 2026-09-22 |
 | [0019](0019-the-simulation-owns-time-and-randomness.md) | The simulation owns its time and its randomness | 2026-09-22 |
+| [0020](0020-issues-are-classified-before-they-are-worked.md) | Every issue is classified blocker, deferred or feature, and worked in that order | 2026-09-25 |

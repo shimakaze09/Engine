@@ -20,7 +20,7 @@ the work, not a request.
 | Doing this | Load |
 | --- | --- |
 | Claiming a change works; writing a PR's evidence | `verify` |
-| Touching the renderer, shaders or post stack | `verify` (CI cannot verify this tier) |
+| Touching the renderer, shaders or post stack | `verify` (CI covers this tier only in software) |
 | Writing or editing comments; adding a file | `comment` |
 | Working a tracked issue; deciding if a fix is done | `close-finding` |
 | Seeing one concept implemented twice | `consolidate-primitive` |
@@ -134,17 +134,29 @@ Calling a rule enforced without one of these three is prohibited.
   hygiene, cosmetics. Visibility alone sets no severity, and a reachable
   functional defect is never dismissed for being hard to reach. **P0 is
   stop-the-line** — while one is open it is the work, and a consolidation
-  is allowed for it only as the owning-layer fix. **P1 and P2 counts are
-  health signals, not quotas**: a rising count is reported and triaged,
-  never optimized for. **P3 is not audited**; it is normally fixed inside
-  a change already touching its files, and stands alone only for bounded
-  structural value (deleting a substantial obsolete API or dead code,
-  unblocking a migration, removing recurring noise, a cleanup cheaper than
-  carrying). Age triggers triage or an icebox, never a close. Do not open a
-  broad audit campaign while P0 or P1 is non-empty. Severity is assigned
+  is allowed for it only as the owning-layer fix. Severity is assigned
   per row, never per batch; **anything observed happening in real use is
   at least P2** whatever it was filed as; a budget never justifies a
   downgrade. Zero open findings is not a reachable state for an engine.
+- **[OWNER]** Every open issue carries exactly one class label, which
+  decides the work order; `needs-triage` marks one without it
+  (`.github/workflows/issue-triage.yml`). **`class:blocker`**: data loss
+  or corruption, a crash, a leak or unbounded growth in normal operation,
+  a regression, or any defect a normal user of a claimed workflow hits
+  (authoring, play, save/load, cook, build, a supported platform),
+  whoever found it. **`class:deferred`**: real but off the normal path —
+  extreme capacities, contrived input, hygiene, cosmetics, debt with no
+  current symptom; promoted the moment it is observed in normal use.
+  **`class:feature`**: a capability not yet claimed, UI/UX included; a
+  missing piece of a claimed one is a defect. Work blockers first, by
+  severity, then foundation layer first (core, platform, content,
+  renderer/physics/audio, scripting, editor); deferred rides only inside
+  a change already touching its files; features start when no blocker is
+  open. Audits continue, and a finding is classified when filed — a new
+  blocker takes its place by severity, never ahead because it is new.
+  Age triggers triage, never a close. Labels also carry `P0`–`P3`,
+  `area:*` and one `found:*` (`use`, `audit`, `regression`); the count of
+  `found:regression` is the health signal to report.
 
 ## Working conventions
 

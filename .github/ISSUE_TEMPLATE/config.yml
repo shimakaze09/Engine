@@ -4,6 +4,6 @@ contact_links:
   - name: Finding-closure procedure
     url: https://github.com/shimakaze09/Engine/blob/main/.claude/skills/close-finding/SKILL.md
     about: The evidence a finding needs before it can be closed, tiered by severity — read before marking an issue done.
-  - name: Defect budget
-    url: https://github.com/shimakaze09/Engine/blob/main/docs/decisions/0014-severity-is-impact.md
-    about: Severity by impact, P1/P2 counts as health signals, when a P3 stands alone, and what a consolidation must prove.
+  - name: Issue classes and work order
+    url: https://github.com/shimakaze09/Engine/blob/main/docs/decisions/0020-issues-are-classified-before-they-are-worked.md
+    about: Blocker, deferred or feature — what each class means and the order they are worked in.

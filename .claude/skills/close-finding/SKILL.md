@@ -45,14 +45,12 @@ so match the tier. The tiers are the severity scale in `CLAUDE.md`
 - Boundary cases for the specific boundary involved, not the full matrix.
 - No new linked issue required unless scope is genuinely left open.
 
-## P3 — fix inline, or alone when the value is structural
+## P3 — fix inline
 
-- Normally fixed inside a change that already touches those files, with
-  the existing tests passing: no regression suite, no scope table.
-- A change of its own is allowed when the value is bounded and structural:
-  deleting a substantial obsolete API or dead code, unblocking a
-  migration, removing recurring noise, or a cleanup cheaper than carrying.
-- Age triggers triage or an icebox label, never a close.
+- A P3 is `class:deferred` unless it is observed in normal use. It is
+  fixed inside a change that already touches those files, with the
+  existing tests passing: no regression suite, no scope table.
+- Age triggers triage, never a close.
 
 ## Consolidations are a different shape
 
