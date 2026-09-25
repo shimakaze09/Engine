@@ -40,6 +40,10 @@
 #include <unistd.h>
 #endif
 
+#if defined(ENGINE_PLATFORM_WEB)
+#include <emscripten.h>
+#endif
+
 #include "engine/core/input.h"
 #include "engine/core/logging.h"
 #include "engine/core/thread_affinity.h"
@@ -156,8 +160,17 @@ bool append_path_segment(char *base, std::size_t capacity,
   return true;
 }
 
+#if defined(ENGINE_PLATFORM_WEB)
+/// The page's IndexedDB-backed mount (core/web/persistent_storage.js); a
+/// save anywhere else lives in memory and is gone on the next load.
+constexpr const char *kWebPersistentRoot = "/persistent";
+#endif
+
 /// Builds the requested runtime data for save base.
 bool build_save_base(char *outBuffer, std::size_t bufferCapacity) noexcept {
+#if defined(ENGINE_PLATFORM_WEB)
+  return copy_normalized_path(kWebPersistentRoot, outBuffer, bufferCapacity);
+#else
   char value[kPlatformPathMax] = {};
 #if defined(_WIN32)
   if (non_empty_env("APPDATA", value, sizeof(value))) {
@@ -192,6 +205,7 @@ bool build_save_base(char *outBuffer, std::size_t bufferCapacity) noexcept {
   }
   return append_path_segment(outBuffer, bufferCapacity, ".local") &&
          append_path_segment(outBuffer, bufferCapacity, "share");
+#endif
 #endif
 }
 
@@ -1111,6 +1125,28 @@ bool platform_get_save_dir(const char *organizationName,
   }
 
   return copy_normalized_path(path, outBuffer, bufferCapacity);
+}
+
+bool platform_persist_after_write(const char *path) noexcept {
+#if defined(ENGINE_PLATFORM_WEB)
+  const std::size_t rootLength = std::strlen(kWebPersistentRoot);
+  if ((path == nullptr) ||
+      (std::strncmp(path, kWebPersistentRoot, rootLength) != 0) ||
+      (path[rootLength] != '/')) {
+    return false;
+  }
+  // FS lives on the page's main thread; a write committed on a worker
+  // queues the flush there instead of touching FS from the worker.
+  MAIN_THREAD_ASYNC_EM_ASM({
+    if (Module['enginePersist']) {
+      Module['enginePersist']();
+    }
+  });
+  return true;
+#else
+  static_cast<void>(path);
+  return false;
+#endif
 }
 
 bool platform_get_app_dir(char *outBuffer,

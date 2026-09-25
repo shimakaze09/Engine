@@ -10,6 +10,7 @@
 
 #include "durable_replace.h"
 #include "engine/core/logging.h"
+#include "engine/core/platform.h"
 
 #include <atomic>
 #include <cstdio>
@@ -181,6 +182,11 @@ bool AtomicFileWriter::commit() noexcept {
   m_file = nullptr;
   const detail::ReplaceOutcome outcome = detail::durable_replace(
       file, m_tempPath, m_destinationPath, detail::production_replace_ops());
+  // On the web the file system has no directory sync; a save outlives the
+  // page through the flush the platform schedules for its mount instead.
+  const bool persistedByPlatform =
+      (outcome != detail::ReplaceOutcome::Failed) &&
+      platform_persist_after_write(m_destinationPath);
 
   // The replacement already happened, so the save is not reportable as a
   // failure — only its power-loss resistance is degraded, and that must
@@ -189,7 +195,8 @@ bool AtomicFileWriter::commit() noexcept {
   // undurable as one whose sync failed, and saying nothing would make
   // that the one degradation the log never shows.
   if ((outcome == detail::ReplaceOutcome::ReplacedNotDurable) ||
-      (outcome == detail::ReplaceOutcome::ReplacedDurabilityUnavailable)) {
+      ((outcome == detail::ReplaceOutcome::ReplacedDurabilityUnavailable) &&
+       !persistedByPlatform)) {
     const char *reason =
         (outcome == detail::ReplaceOutcome::ReplacedNotDurable)
             ? "could not sync its directory entry"

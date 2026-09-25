@@ -261,9 +261,10 @@ save, one entry per OS and configuration:
   in `tests/web/` against the Linux Release lane's shader cook, then
   headless Chromium runs the `web`-labelled tests (the page boots and runs
   frames; maxFrames, quit and a fatal frame each close every engine tier
-  and a second bootstrap in the same page runs clean). It waits for the
-  build matrix for that cook, and restores the Linux sources cache without
-  saving one of its own
+  and a second bootstrap in the same page runs clean; a save survives a
+  page reload, since web saves live on an IndexedDB-backed mount). It
+  waits for the build matrix for that cook, and restores the Linux
+  sources cache without saving one of its own
 - Determinism hash comparison across every platform and build
   configuration, through the production pipeline
 - `cppcheck` static analysis plus the audit gates (source comments, comment

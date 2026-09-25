@@ -148,6 +148,11 @@ if(ENGINE_TARGET_PLATFORM STREQUAL "Web")
     # miniaudio's WebAudio callback reaches the mix buffer (without it
     # every audio callback throws on Module.HEAPF32 being undefined).
     add_link_options("-sEXPORTED_RUNTIME_METHODS=ENV,HEAPF32")
+    # Saves live on an IndexedDB-backed mount the page reads in before
+    # main() runs (core/web/persistent_storage.js), so they outlive the
+    # page; the platform layer points its save base there.
+    add_link_options(-lidbfs.js
+        "SHELL:--pre-js ${CMAKE_SOURCE_DIR}/core/web/persistent_storage.js")
 endif()
 
 if(NOT CMAKE_CROSSCOMPILING AND NOT ENGINE_TARGET_PLATFORM STREQUAL _ENGINE_HOST_PLATFORM)
