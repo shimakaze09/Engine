@@ -129,6 +129,21 @@ jobs:
       - name: Test
         run: ctest --test-dir build --parallel 4 --build-config ${{ matrix.config }} --output-on-failure --timeout 120 --label-exclude gpu
 
+      # ---- The gpu-labelled suites on Mesa's software Vulkan (lavapipe)
+      # under a virtual X display: they draw real frames and read them
+      # back, so a pass that is never bound, a uniform never written or a
+      # crash in the device path fails here. A software rasterizer is not
+      # a hardware observation; the verify skill's renderer tier still
+      # asks for one. Release only, because this is the Linux lane with
+      # cooked shaders.
+      - name: Test gpu suites on software Vulkan
+        if: matrix.os == 'ubuntu-24.04' && matrix.config == 'Release'
+        run: |
+          bash .github/scripts/install-linux-deps.sh xvfb mesa-vulkan-drivers
+          xvfb-run -a -s "-screen 0 1280x720x24" \
+            env VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json \
+            ctest --test-dir build --parallel 2 --output-on-failure --timeout 400 --label-regex gpu
+
       # ---- The bundled scene loads through the production loader with
       # every reference resolving; a dangling one fails here, not for an
       # author.

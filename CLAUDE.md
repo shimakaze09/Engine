@@ -20,7 +20,7 @@ the work, not a request.
 | Doing this | Load |
 | --- | --- |
 | Claiming a change works; writing a PR's evidence | `verify` |
-| Touching the renderer, shaders or post stack | `verify` (CI cannot verify this tier) |
+| Touching the renderer, shaders or post stack | `verify` (CI covers this tier only in software) |
 | Writing or editing comments; adding a file | `comment` |
 | Working a tracked issue; deciding if a fix is done | `close-finding` |
 | Seeing one concept implemented twice | `consolidate-primitive` |
