@@ -277,6 +277,13 @@ engine_add_test_executable(engine_integration_coin_run_acceptance
     LABELS
     integration
 )
+# The same route played again in a real window with a render device: it
+# must end on the headless play's state hash, so drawing cannot change what
+# the simulation computes. CI runs it on lavapipe.
+add_test(NAME engine_integration_coin_run_acceptance_gpu
+    COMMAND engine_integration_coin_run_acceptance --windowed)
+set_tests_properties(engine_integration_coin_run_acceptance_gpu
+    PROPERTIES LABELS "gpu;integration")
 
 engine_add_test_executable(engine_integration_scene_mesh_resolution
     SOURCES
