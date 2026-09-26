@@ -691,7 +691,8 @@ std::size_t load_material_assets_in_directory(
 
   // Discovered names are sorted before registration so record slot
   // layout is deterministic across platforms and directory orders.
-  constexpr std::size_t kMaxDiscovered = 256U;
+  // The material table is the bound: a name past it could not register.
+  constexpr std::size_t kMaxDiscovered = AssetDatabase::kMaxMaterialAssets;
   constexpr std::size_t kMaxNameLength = 128U;
   static std::array<std::array<char, kMaxNameLength>, kMaxDiscovered> names{};
   std::size_t nameCount = 0U;

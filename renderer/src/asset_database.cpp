@@ -8,8 +8,16 @@
 
 #include "engine/core/hash.h"
 #include "engine/core/logging.h"
+#include "texture_handle_codec.h"
 
 namespace engine::renderer {
+
+// The texture loader has a slot for every value of the handle's slot field
+// (slot 0 aside). It must hold every material texture this table can, and
+// nearly as many again for the textures that are not materials'.
+static_assert((std::size_t{1} << texture_handle_detail::kSlotBits) >=
+                  2U * AssetDatabase::kMaxTextureAssets,
+              "the texture loader cannot hold the material texture table");
 
 void advance_asset_database_frame(AssetDatabase *database) noexcept {
   if (database != nullptr) {

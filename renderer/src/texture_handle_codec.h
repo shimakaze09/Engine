@@ -10,7 +10,7 @@
 
 namespace engine::renderer::texture_handle_detail {
 
-constexpr unsigned kSlotBits = 10U;
+constexpr unsigned kSlotBits = 13U;
 constexpr std::uint32_t kSlotMask = (1U << kSlotBits) - 1U;
 constexpr std::uint32_t kGenerationMask =
     std::numeric_limits<std::uint32_t>::max() >> kSlotBits;

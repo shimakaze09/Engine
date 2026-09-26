@@ -57,7 +57,11 @@ namespace engine::renderer {
 
 namespace {
 
-constexpr std::size_t kMaxTextureSlots = 512U;
+// Every slot the handle's slot field can name; slot 0 is the invalid
+// handle. asset_database.cpp checks this holds the whole material texture
+// table with room over for the sky, captures and character textures.
+constexpr std::size_t kMaxTextureSlots = std::size_t{1}
+                                         << texture_handle_detail::kSlotBits;
 constexpr std::size_t kMaxPathLen = 260U;
 constexpr std::int32_t kHdrCubemapChannels = 3;
 constexpr std::int32_t kMaxCubemapFaceSize = 4096;

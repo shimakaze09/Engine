@@ -182,7 +182,7 @@ struct AssetDatabase final {
   core::FixedHashTable<content::AssetId, std::uint32_t, kMeshIndexCapacity>
       meshIndex{};
 
-  static constexpr std::size_t kMaxTextureAssets = 512U;
+  static constexpr std::size_t kMaxTextureAssets = 4096U;
   std::array<TextureAssetRecord, kMaxTextureAssets> textureAssets =
       std::array<TextureAssetRecord, kMaxTextureAssets>();
   std::array<bool, kMaxTextureAssets> textureOccupied{};
@@ -192,15 +192,16 @@ struct AssetDatabase final {
   core::FixedHashTable<content::AssetId, std::uint32_t, kTextureIndexCapacity>
       textureIndex{};
   // Where the next texture hot-reload poll resumes: the poll checks a
-  // bounded run of slots per call, so a full table costs a sweep over
-  // several polls rather than every file in one frame. Runtime-only.
+  // bounded number of loaded textures per call, so many textures cost a
+  // sweep over several polls rather than every file in one frame.
+  // Runtime-only.
   std::uint32_t textureReloadCursor = 0U;
   // Set whenever a material's texture slots change, so the next
   // release_unreferenced_textures looks for textures no material names any
   // more; nothing else can leave one unreferenced. Runtime-only.
   bool textureReferencesChanged = false;
 
-  static constexpr std::size_t kMaxMaterialAssets = 1024U;
+  static constexpr std::size_t kMaxMaterialAssets = 4096U;
   std::array<MaterialAssetRecord, kMaxMaterialAssets> materialAssets =
       std::array<MaterialAssetRecord, kMaxMaterialAssets>();
   std::array<bool, kMaxMaterialAssets> materialOccupied{};

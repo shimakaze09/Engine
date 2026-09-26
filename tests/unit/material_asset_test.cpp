@@ -503,6 +503,52 @@ int verify_material_directory_discovery(
   return result;
 }
 
+/// A project's materials folder larger than the old discovery cap (256
+/// names) and the old material table (1024 records) loads whole (#663):
+/// every file is discovered and every one resolves.
+int verify_large_material_directory(engine::renderer::AssetDatabase *database) {
+  constexpr std::size_t kMaterials = 1100U;
+  std::error_code error{};
+  std::filesystem::remove_all("mat_large_discovery_test", error);
+  std::filesystem::create_directory("mat_large_discovery_test", error);
+  if (error) {
+    return 100;
+  }
+  bool wrote = true;
+  for (std::size_t i = 0U; wrote && (i < kMaterials); ++i) {
+    char path[96] = {};
+    std::snprintf(path, sizeof(path), "mat_large_discovery_test/m%zu.mat", i);
+    wrote = write_material_file(path, "{\"version\":4,\"roughness\":0.5}");
+  }
+
+  int result = 0;
+  const std::size_t loaded =
+      wrote ? engine::renderer::load_material_assets_in_directory(
+                  database, g_catalog, "mat_large_discovery_test",
+                  "mat/mat_large_discovery_test")
+            : 0U;
+  std::size_t resolved = 0U;
+  for (std::size_t i = 0U; i < kMaterials; ++i) {
+    char path[96] = {};
+    std::snprintf(path, sizeof(path), "mat/mat_large_discovery_test/m%zu.mat",
+                  i);
+    resolved += (engine::renderer::find_material_params(
+                     database,
+                     engine::content::make_asset_id_from_path(path)) != nullptr)
+                    ? 1U
+                    : 0U;
+  }
+  if (!wrote) {
+    result = 101;
+  } else if ((loaded != kMaterials) || (resolved != kMaterials)) {
+    std::printf("%zu of %zu materials loaded, %zu resolve\n", loaded,
+                kMaterials, resolved);
+    result = 102;
+  }
+  std::filesystem::remove_all("mat_large_discovery_test", error);
+  return result;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -549,6 +595,9 @@ int main() {
   }
   if (result == 0) {
     result = verify_material_directory_discovery(database.get());
+  }
+  if (result == 0) {
+    result = verify_large_material_directory(database.get());
   }
 
   engine::core::shutdown_vfs();
