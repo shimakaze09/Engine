@@ -1,7 +1,7 @@
 // Declares the single-slot game save: a JSON document written to the
 // project's data directory (engine/core/project_data.h), one per project
-// per user (best times, progress flags — the small key/value data the
-// v0.1 templates persist between runs).
+// per user, holding what a game keeps between runs (inventory, quest
+// flags, world state, settings) up to a documented hard ceiling.
 
 #pragma once
 
@@ -9,11 +9,16 @@
 
 namespace engine::runtime {
 
-inline constexpr std::size_t kMaxSaveDataBytes = 16U * 1024U;
+/// The hard ceiling on one save document. Saves are a cold path, so the
+/// bound is set by what a game stores rather than by a preallocated
+/// buffer; a document past it is refused whole, never truncated.
+inline constexpr std::size_t kMaxSaveDataBytes = 4U * 1024U * 1024U;
 
 /// Writes the JSON document to the given directory as save.json
-/// (directory created when missing); false on IO failure or oversized
-/// input. Tests use this to avoid the real per-user directory.
+/// (directory created when missing) through a staged atomic replace;
+/// false on IO failure or a document over kMaxSaveDataBytes, logged, with
+/// the previous save.json unchanged. Tests use this to avoid the real
+/// per-user directory.
 bool save_game_data_to(const char *directory, const char *json,
                        std::size_t length) noexcept;
 

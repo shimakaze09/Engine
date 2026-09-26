@@ -1,14 +1,17 @@
 // Verifies the single-slot game save over explicit directories: byte-exact
 // roundtrip, recursive directory creation, missing-file and oversized
-// rejections, the capacity-overflow guard on load, the read-capacity
-// boundaries, and that a failed read is reported as a load failure rather
-// than as a successful load of truncated data.
+// rejections, a 1 MiB document and one exactly at the ceiling round-tripping
+// while one byte past it is refused with the previous save intact, the
+// capacity-overflow guard on load, the read-capacity boundaries, and that a
+// failed read is reported as a load failure rather than as a successful load
+// of truncated data.
 
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <string>
 #include <system_error>
+#include <vector>
 
 #include "engine/core/platform.h"
 #include "engine/runtime/save_data.h"
@@ -152,6 +155,77 @@ int check_failure_paths() {
   if (engine::runtime::load_game_data_from(directory, tiny, sizeof(tiny),
                                            &loadedLength)) {
     std::puts("overflowing load succeeded");
+    cleanup(directory);
+    return 1;
+  }
+
+  cleanup(directory);
+  return 0;
+}
+
+/// A document of `length` bytes whose content varies with position, so a
+/// dropped, repeated or reordered block would not compare equal.
+std::string patterned_document(std::size_t length) {
+  std::string document(length, ' ');
+  for (std::size_t i = 0U; i < length; ++i) {
+    document[i] = static_cast<char>('!' + ((i * 7U + (i >> 10U)) % 90U));
+  }
+  return document;
+}
+
+/// Saves `document` and loads it back through a buffer that holds the
+/// whole ceiling; true when the bytes and length come back exactly.
+bool roundtrips(const char *directory, const std::string &document,
+                std::vector<char> *buffer) {
+  std::size_t loadedLength = 0U;
+  return engine::runtime::save_game_data_to(directory, document.data(),
+                                            document.size()) &&
+         engine::runtime::load_game_data_from(directory, buffer->data(),
+                                              buffer->size(), &loadedLength) &&
+         (loadedLength == document.size()) &&
+         (std::memcmp(buffer->data(), document.data(), document.size()) == 0);
+}
+
+/// EXPECTATION: a 1 MiB save round-trips byte for byte, as does one of
+/// exactly kMaxSaveDataBytes; one byte more is refused and the save on
+/// disk is still the previous document, byte for byte.
+int check_large_saves_and_ceiling() {
+  char directory[576] = {};
+  if (!make_scratch_dir(directory, sizeof(directory))) {
+    std::puts("temp dir unavailable");
+    return 1;
+  }
+  cleanup(directory);
+
+  std::vector<char> buffer(engine::runtime::kMaxSaveDataBytes + 1U, '\0');
+  const std::string megabyte = patterned_document(1024U * 1024U);
+  if (!roundtrips(directory, megabyte, &buffer)) {
+    std::puts("1 MiB save did not round-trip");
+    cleanup(directory);
+    return 1;
+  }
+  const std::string atCeiling =
+      patterned_document(engine::runtime::kMaxSaveDataBytes);
+  if (!roundtrips(directory, atCeiling, &buffer)) {
+    std::puts("save at the ceiling did not round-trip");
+    cleanup(directory);
+    return 1;
+  }
+
+  const std::string pastCeiling =
+      patterned_document(engine::runtime::kMaxSaveDataBytes + 1U);
+  if (engine::runtime::save_game_data_to(directory, pastCeiling.data(),
+                                         pastCeiling.size())) {
+    std::puts("save past the ceiling accepted");
+    cleanup(directory);
+    return 1;
+  }
+  std::size_t loadedLength = 0U;
+  if (!engine::runtime::load_game_data_from(directory, buffer.data(),
+                                            buffer.size(), &loadedLength) ||
+      (loadedLength != atCeiling.size()) ||
+      (std::memcmp(buffer.data(), atCeiling.data(), atCeiling.size()) != 0)) {
+    std::puts("refused save changed the previous save");
     cleanup(directory);
     return 1;
   }
@@ -317,6 +391,10 @@ int main() {
     return result;
   }
   result = check_failure_paths();
+  if (result != 0) {
+    return result;
+  }
+  result = check_large_saves_and_ceiling();
   if (result != 0) {
     return result;
   }

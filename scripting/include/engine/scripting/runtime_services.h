@@ -59,6 +59,9 @@ constexpr std::size_t kMaxTimerSlots = 256U;
 /// Entity pools a run may hold and the entities one pool may seed.
 constexpr std::size_t kMaxEntityPools = 16U;
 constexpr std::size_t kMaxEntityPoolSize = 1024U;
+/// Largest document save_game_data accepts and load_game_data returns, the
+/// save slot's hard ceiling; the runtime asserts it matches.
+constexpr std::size_t kMaxGameSaveBytes = 4U * 1024U * 1024U;
 
 /// Game mode state machine position, mirrored from the runtime's GameMode.
 enum class GameModeState : std::uint8_t {

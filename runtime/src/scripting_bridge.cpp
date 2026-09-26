@@ -170,6 +170,8 @@ static_assert(scripting::kMaxWorldEntities == runtime::World::kMaxEntities,
               "scripting's entity capacity must match the World's");
 static_assert(scripting::kMaxTimerSlots == runtime::TimerManager::kMaxTimers,
               "scripting's timer slot count must match the timer manager's");
+static_assert(scripting::kMaxGameSaveBytes == runtime::kMaxSaveDataBytes,
+              "scripting save ceiling must match the runtime save slot");
 static_assert(scripting::kMaxEntityPoolSize ==
                   runtime::EntityPool::kMaxPoolSize,
               "scripting's pool size must match the entity pool's");

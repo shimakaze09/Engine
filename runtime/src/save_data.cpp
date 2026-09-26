@@ -1,6 +1,6 @@
 // Implements the single-slot game save over the project's data directory:
-// bounded JSON in, save.json on disk, with explicit-directory variants
-// for tests.
+// JSON up to the save ceiling in, save.json on disk, with explicit-directory
+// variants for tests.
 
 #include "engine/runtime/save_data.h"
 
@@ -61,8 +61,16 @@ void note_unattributed_legacy_save() noexcept {
 
 bool save_game_data_to(const char *directory, const char *json,
                        std::size_t length) noexcept {
-  if ((directory == nullptr) || (json == nullptr) ||
-      (length > kMaxSaveDataBytes)) {
+  if ((directory == nullptr) || (json == nullptr)) {
+    return false;
+  }
+  if (length > kMaxSaveDataBytes) {
+    char message[160] = {};
+    std::snprintf(message, sizeof(message),
+                  "save of %zu bytes exceeds the %zu-byte ceiling; the "
+                  "previous save is unchanged",
+                  length, kMaxSaveDataBytes);
+    core::log_message(core::LogLevel::Error, "save", message);
     return false;
   }
 
