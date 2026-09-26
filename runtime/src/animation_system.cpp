@@ -125,7 +125,8 @@ bool read_string_field(const core::JsonParser &parser,
 }
 
 /// Parses the "clips" array: name + cooked .anim path per element.
-bool parse_controller_clips(const char *path, const core::JsonParser &parser,
+bool parse_controller_clips(const char *controllerPath,
+                            const core::JsonParser &parser,
                             const core::JsonValue &root,
                             AnimControllerData &controller) noexcept {
   core::JsonValue clipsValue{};
@@ -134,9 +135,9 @@ bool parse_controller_clips(const char *path, const core::JsonParser &parser,
   }
   const std::size_t clipCount = parser.array_size(clipsValue);
   if ((clipCount == 0U) ||
-      !allocate_table(path, "clips", clipCount, kMaxAnimClips,
+      !allocate_table(controllerPath, "clips", clipCount, kMaxAnimClips,
                       controller.clips) ||
-      !allocate_table(path, "clips", clipCount, kMaxAnimClips,
+      !allocate_table(controllerPath, "clips", clipCount, kMaxAnimClips,
                       controller.clipNameHashes)) {
     return false;
   }
@@ -159,7 +160,8 @@ bool parse_controller_clips(const char *path, const core::JsonParser &parser,
 }
 
 /// Parses the "states" array: name, clip reference, loop, speed.
-bool parse_controller_states(const char *path, const core::JsonParser &parser,
+bool parse_controller_states(const char *controllerPath,
+                             const core::JsonParser &parser,
                              const core::JsonValue &root,
                              AnimControllerData &controller) noexcept {
   core::JsonValue statesValue{};
@@ -168,7 +170,7 @@ bool parse_controller_states(const char *path, const core::JsonParser &parser,
   }
   const std::size_t stateCount = parser.array_size(statesValue);
   if ((stateCount == 0U) ||
-      !allocate_table(path, "states", stateCount, kMaxAnimStates,
+      !allocate_table(controllerPath, "states", stateCount, kMaxAnimStates,
                       controller.states)) {
     return false;
   }
@@ -207,7 +209,7 @@ bool parse_controller_states(const char *path, const core::JsonParser &parser,
 
 /// Parses the optional "transitions" array: from/to states, parameter,
 /// comparison ("<", ">", "=="), threshold, and blend seconds.
-bool parse_controller_transitions(const char *path,
+bool parse_controller_transitions(const char *controllerPath,
                                   const core::JsonParser &parser,
                                   const core::JsonValue &root,
                                   AnimControllerData &controller) noexcept {
@@ -216,8 +218,8 @@ bool parse_controller_transitions(const char *path,
     return true;
   }
   const std::size_t transitionCount = parser.array_size(transitionsValue);
-  if (!allocate_table(path, "transitions", transitionCount, kMaxAnimTransitions,
-                      controller.transitions)) {
+  if (!allocate_table(controllerPath, "transitions", transitionCount,
+                      kMaxAnimTransitions, controller.transitions)) {
     return false;
   }
   for (std::size_t i = 0U; i < transitionCount; ++i) {
@@ -272,7 +274,8 @@ bool parse_controller_transitions(const char *path,
 }
 
 /// Parses the optional "events" array: clip reference, time, event name.
-bool parse_controller_events(const char *path, const core::JsonParser &parser,
+bool parse_controller_events(const char *controllerPath,
+                             const core::JsonParser &parser,
                              const core::JsonValue &root,
                              AnimControllerData &controller) noexcept {
   core::JsonValue eventsValue{};
@@ -280,7 +283,7 @@ bool parse_controller_events(const char *path, const core::JsonParser &parser,
     return true;
   }
   const std::size_t eventCount = parser.array_size(eventsValue);
-  if (!allocate_table(path, "events", eventCount, kMaxAnimEvents,
+  if (!allocate_table(controllerPath, "events", eventCount, kMaxAnimEvents,
                       controller.events)) {
     return false;
   }
