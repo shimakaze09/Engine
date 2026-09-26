@@ -4,6 +4,7 @@
 
 #include "engine/renderer/command_buffer.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -448,6 +449,38 @@ bool mesh_data_valid(const CpuMeshData &meshData) noexcept {
 }
 
 // Precondition: caller must own the render context before this call.
+namespace {
+
+/// Fills the mesh's object-space bounds from its vertex positions (the
+/// first three floats of every vertex).
+void compute_mesh_bounds(const float *vertices, std::uint32_t vertexCount,
+                         std::size_t strideFloats, bool skinned,
+                         GpuMesh *mesh) noexcept {
+  if ((vertices == nullptr) || (vertexCount == 0U) || (mesh == nullptr)) {
+    return;
+  }
+  math::Vec3 low(vertices[0], vertices[1], vertices[2]);
+  math::Vec3 high = low;
+  for (std::uint32_t v = 1U; v < vertexCount; ++v) {
+    const float *position =
+        vertices + (static_cast<std::size_t>(v) * strideFloats);
+    low = math::Vec3(std::min(low.x, position[0]), std::min(low.y, position[1]),
+                     std::min(low.z, position[2]));
+    high =
+        math::Vec3(std::max(high.x, position[0]), std::max(high.y, position[1]),
+                   std::max(high.z, position[2]));
+  }
+  const float widen = skinned ? (1.0F + kSkinnedBoundsMargin) : 1.0F;
+  mesh->boundsCenter =
+      math::Vec3((low.x + high.x) * 0.5F, (low.y + high.y) * 0.5F,
+                 (low.z + high.z) * 0.5F);
+  mesh->boundsHalfExtents = math::Vec3((high.x - low.x) * 0.5F * widen,
+                                       (high.y - low.y) * 0.5F * widen,
+                                       (high.z - low.z) * 0.5F * widen);
+}
+
+} // namespace
+
 bool upload_mesh_data_to_gpu(const CpuMeshData &meshData,
                              GpuMesh *outMesh) noexcept {
   if (outMesh == nullptr) {
@@ -483,6 +516,8 @@ bool upload_mesh_data_to_gpu(const CpuMeshData &meshData,
 
   mesh.vertexCount = meshData.vertexCount;
   mesh.indexCount = static_cast<std::uint32_t>(meshData.indices.size());
+  compute_mesh_bounds(meshData.vertices.data(), meshData.vertexCount,
+                      meshData.strideFloats, meshData.hasSkin, &mesh);
   *outMesh = mesh;
   return true;
 }
@@ -526,6 +561,7 @@ bool build_gpu_mesh_from_data(const float *vertices, std::uint32_t vertexCount,
 
   mesh.vertexCount = vertexCount;
   mesh.indexCount = indexCount;
+  compute_mesh_bounds(vertices, vertexCount, strideFloats, false, &mesh);
   *outMesh = mesh;
   return true;
 }

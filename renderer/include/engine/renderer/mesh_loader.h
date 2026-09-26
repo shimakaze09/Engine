@@ -7,6 +7,7 @@
 #include <cstdint>
 
 #include "engine/core/nothrow_buffer.h"
+#include "engine/math/vec3.h"
 #include "engine/renderer/command_buffer.h"
 #include "engine/renderer/render_device.h"
 
@@ -21,7 +22,18 @@ struct GpuMesh final {
   std::uint32_t indexCount = 0U;
   bool hasUVs = false;
   bool hasSkin = false;
+  /// Object-space box around the vertex positions, computed at upload.
+  /// Render prep culls a draw with it transformed by the draw's matrix. A
+  /// skinned mesh's box is its bind pose widened by kSkinnedBoundsMargin,
+  /// since the pose moves vertices outside it.
+  math::Vec3 boundsCenter = math::Vec3(0.0F, 0.0F, 0.0F);
+  math::Vec3 boundsHalfExtents = math::Vec3(0.0F, 0.0F, 0.0F);
 };
+
+/// Fraction of its bind-pose extent a skinned mesh's bounds are widened
+/// by on every side: a pose reaches past the bind pose (an arm raised
+/// above the head, a crouch), and the culling box must still hold it.
+inline constexpr float kSkinnedBoundsMargin = 0.5F;
 
 /// Fixed table mapping MeshHandle to uploaded GpuMesh slots. Each slot
 /// carries a generation counter (bumped on release) so a MeshHandle that

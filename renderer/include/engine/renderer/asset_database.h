@@ -260,6 +260,11 @@ bool mesh_asset_requested_resident(const AssetDatabase *database,
 /// GPU handle for the id (touches last-access); invalid unless Ready.
 MeshHandle resolve_mesh_asset(AssetDatabase *database,
                               content::AssetId id) noexcept;
+/// GPU handle for the id without touching last-access; invalid unless
+/// Ready. For a caller that must look at the mesh before deciding whether
+/// it is used this frame (culling by its bounds), then resolves it.
+MeshHandle peek_mesh_asset(const AssetDatabase *database,
+                           content::AssetId id) noexcept;
 /// Increments the refcount; false when the id is unknown.
 bool retain_mesh_asset(AssetDatabase *database, content::AssetId id) noexcept;
 /// Decrements the refcount; false when unknown or already zero.

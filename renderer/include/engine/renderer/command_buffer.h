@@ -28,8 +28,10 @@ inline constexpr MeshHandle kInvalidMeshHandle{};
 // GPU skinning: per-entity bone palettes uploaded once per frame and
 // referenced by DrawCommand::skinPalette. One palette fits the 128-joint
 // skeleton budget inside the 16 KiB uniform-block size every supported
-// backend guarantees.
-inline constexpr std::size_t kMaxSkinPalettes = 16U;
+// backend guarantees. A frame holds one palette per animation component a
+// World can hold (checked where palettes are handed out), so no animated
+// character goes unposed for want of a slot.
+inline constexpr std::size_t kMaxSkinPalettes = 256U;
 inline constexpr std::size_t kMaxSkinPaletteJoints = 128U;
 inline constexpr std::uint32_t kInvalidSkinPalette = 0xFFFFFFFFU;
 

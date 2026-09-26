@@ -27,6 +27,9 @@ namespace {
 static_assert(kMaxAnimControllers >= World::kMaxAnimationComponents,
               "every animation component must be able to hold a controller "
               "of its own");
+static_assert(renderer::kMaxSkinPalettes >= World::kMaxAnimationComponents,
+              "every animation component must be able to get a palette "
+              "each frame");
 
 // Controller slots allocate on first acquire, sized to the controller's
 // own tables, so the registry costs nothing until a scene animates.
@@ -42,9 +45,19 @@ struct PendingAnimParam final {
   float value = 0.0F;
 };
 
-constexpr std::size_t kMaxPendingAnimParams = 64U;
+/// Parameter writes queued from scripts within one frame: eight per
+/// animation component a World can hold, so a scene of characters each
+/// setting several parameters every frame never drops one.
+constexpr std::size_t kMaxPendingAnimParams =
+    World::kMaxAnimationComponents * 8U;
 PendingAnimParam g_pendingParams[kMaxPendingAnimParams]{};
 std::size_t g_pendingParamCount = 0U;
+/// One warning per episode when a component's parameter budget refuses a
+/// new parameter, when the frame runs out of skin palettes, and when the
+/// frame's queue of script parameter writes is full.
+bool g_paramBudgetWarned = false;
+bool g_paletteBudgetWarned = false;
+bool g_pendingQueueWarned = false;
 
 /// Logs one controller load failure with its path carried in the record.
 void log_controller_error(const char *path, const char *reason) noexcept {
@@ -376,6 +389,12 @@ bool set_param_by_hash(AnimationComponent &component, std::uint32_t nameHash,
     }
   }
   if (component.paramCount >= AnimationComponent::kMaxParams) {
+    if (!g_paramBudgetWarned) {
+      g_paramBudgetWarned = true;
+      core::log_message(core::LogLevel::Warning, "animation",
+                        "an animation component already drives its maximum "
+                        "of parameters; a new parameter was refused");
+    }
     return false;
   }
   component.params[component.paramCount] = AnimParam{nameHash, value};
@@ -597,6 +616,9 @@ void reset_anim_controllers() noexcept {
   g_failedControllerCount = 0U;
   g_firedEventCount = 0U;
   g_pendingParamCount = 0U;
+  g_paramBudgetWarned = false;
+  g_paletteBudgetWarned = false;
+  g_pendingQueueWarned = false;
 }
 
 void update_animations(World &world, float dt) noexcept {
@@ -698,6 +720,12 @@ void update_animations(World &world, float dt) noexcept {
     }
 
     if (paletteCount >= renderer::kMaxSkinPalettes) {
+      if (!g_paletteBudgetWarned) {
+        g_paletteBudgetWarned = true;
+        core::log_message(core::LogLevel::Warning, "animation",
+                          "more animated characters than skin palettes this "
+                          "frame; the rest are drawn unposed");
+      }
       return;
     }
 
@@ -751,9 +779,8 @@ bool queue_anim_param(core::Entity entity, const char *name,
     return false;
   }
   if (g_pendingParamCount >= kMaxPendingAnimParams) {
-    static bool warned = false;
-    if (!warned) {
-      warned = true;
+    if (!g_pendingQueueWarned) {
+      g_pendingQueueWarned = true;
       core::log_message(core::LogLevel::Warning, "animation",
                         "pending param queue full; parameter writes dropped");
     }

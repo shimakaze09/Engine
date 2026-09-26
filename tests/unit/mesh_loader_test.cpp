@@ -639,6 +639,65 @@ int check_upload_validates_skin_payload() {
   return 0;
 }
 
+/// EXPECTATION (#349): an upload records the object-space box around its
+/// vertex positions, on both upload paths; a skinned mesh's box is its
+/// bind pose widened by kSkinnedBoundsMargin. Render prep culls with it.
+int check_upload_records_bounds() {
+  configure_fake_render_device(1U, 2U, 3U);
+
+  // Positions (1,2,3), (5,-2,3), (3,0,7): the box runs (1,-2,3)-(5,2,7).
+  const float vertices[18] = {1.0F, 2.0F,  3.0F, 0.0F, 1.0F, 0.0F,
+                              5.0F, -2.0F, 3.0F, 0.0F, 1.0F, 0.0F,
+                              3.0F, 0.0F,  7.0F, 0.0F, 1.0F, 0.0F};
+  const std::uint32_t indices[3] = {0U, 1U, 2U};
+  engine::renderer::GpuMesh mesh{};
+  if (!engine::renderer::build_gpu_mesh_from_data(vertices, 3U, indices, 3U,
+                                                  false, &mesh)) {
+    return 190;
+  }
+  if ((mesh.boundsCenter.x != 3.0F) || (mesh.boundsCenter.y != 0.0F) ||
+      (mesh.boundsCenter.z != 5.0F) || (mesh.boundsHalfExtents.x != 2.0F) ||
+      (mesh.boundsHalfExtents.y != 2.0F) ||
+      (mesh.boundsHalfExtents.z != 2.0F)) {
+    return 191;
+  }
+
+  // Two skinned vertices, (1,2,3) and (3,6,3): a 2x4x0 bind pose centred
+  // on (2,4,3), widened to half extents 1.5, 3 and 0.
+  engine::renderer::CpuMeshData skinned{};
+  if (!make_skinned_mesh_data(&skinned)) {
+    return 192;
+  }
+  float twoVertices[32] = {};
+  for (std::size_t i = 0U; i < 16U; ++i) {
+    twoVertices[i] = skinned.vertices[i];
+    twoVertices[16U + i] = skinned.vertices[i];
+  }
+  twoVertices[16] = 3.0F;
+  twoVertices[17] = 6.0F;
+  if (!skinned.vertices.allocate(32U)) {
+    return 193;
+  }
+  for (std::size_t i = 0U; i < 32U; ++i) {
+    skinned.vertices[i] = twoVertices[i];
+  }
+  skinned.vertexCount = 2U;
+  engine::renderer::GpuMesh skinnedMesh{};
+  if (!engine::renderer::upload_mesh_data_to_gpu(skinned, &skinnedMesh)) {
+    return 194;
+  }
+  const float widen = 1.0F + engine::renderer::kSkinnedBoundsMargin;
+  if ((skinnedMesh.boundsCenter.x != 2.0F) ||
+      (skinnedMesh.boundsCenter.y != 4.0F) ||
+      (skinnedMesh.boundsCenter.z != 3.0F) ||
+      (skinnedMesh.boundsHalfExtents.x != 1.0F * widen) ||
+      (skinnedMesh.boundsHalfExtents.y != 2.0F * widen) ||
+      (skinnedMesh.boundsHalfExtents.z != 0.0F)) {
+    return 195;
+  }
+  return 0;
+}
+
 /// EXPECTATION (audit H-11): a cooked v3 mesh file carrying a joint index
 /// outside the bone palette fails to decode.
 int check_v3_decode_rejects_out_of_palette_joint() {
@@ -872,6 +931,11 @@ int main() {
   }
 
   result = check_v2_file_size_validation();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_upload_records_bounds();
   if (result != 0) {
     return result;
   }
