@@ -1,4 +1,5 @@
-// Verifies mem tracker test behavior for the Engine test suite.
+// Verifies the memory tracker: per-tag counts, snapshots, the reported
+// flag that separates an unmeasured tag from an empty one, and MemReport.
 
 #include <cstdio>
 
@@ -122,6 +123,50 @@ static bool test_null_snapshot() noexcept {
   return true;
 }
 
+/// A tag nothing has reported to reads as unmeasured, not as zero; one
+/// that has reported stays measured after everything is freed (#659).
+static bool test_reported_flag() noexcept {
+  mem_tracker_init();
+  MemTagSnapshot snaps[kMemTagCount]{};
+  mem_tracker_snapshot(snaps, kMemTagCount);
+  for (const MemTagSnapshot &snap : snaps) {
+    if (snap.reported) {
+      return false;
+    }
+  }
+  mem_tracker_alloc(MemTag::Audio, 64U);
+  mem_tracker_free(MemTag::Audio, 64U);
+  mem_tracker_snapshot(snaps, kMemTagCount);
+  return snaps[static_cast<std::size_t>(MemTag::Audio)].reported &&
+         (snaps[static_cast<std::size_t>(MemTag::Audio)].currentBytes == 0) &&
+         !snaps[static_cast<std::size_t>(MemTag::Physics)].reported;
+}
+
+/// A report holds its bytes for its lifetime, a second report replaces the
+/// first, and release happens exactly once.
+static bool test_mem_report() noexcept {
+  mem_tracker_init();
+  {
+    MemReport report{};
+    report.report(MemTag::ECS, 1000U);
+    if (mem_tracker_current_bytes(MemTag::ECS) != 1000) {
+      return false;
+    }
+    report.report(MemTag::Assets, 300U);
+    if ((mem_tracker_current_bytes(MemTag::ECS) != 0) ||
+        (mem_tracker_current_bytes(MemTag::Assets) != 300)) {
+      return false;
+    }
+    report.release();
+    report.release();
+    if (mem_tracker_current_bytes(MemTag::Assets) != 0) {
+      return false;
+    }
+    report.report(MemTag::Assets, 50U);
+  }
+  return mem_tracker_current_bytes(MemTag::Assets) == 0;
+}
+
 /// Runs this executable or test program.
 int main() {
   int failures = 0;
@@ -138,6 +183,8 @@ int main() {
   run("test_snapshot", test_snapshot);
   run("test_tag_names", test_tag_names);
   run("test_invalid_tag", test_invalid_tag);
+  run("test_reported_flag", test_reported_flag);
+  run("test_mem_report", test_mem_report);
   run("test_null_snapshot", test_null_snapshot);
 
   if (failures > 0) {

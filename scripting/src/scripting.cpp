@@ -49,6 +49,7 @@ extern "C" {
 
 #include "engine/core/input.h"
 #include "engine/core/logging.h"
+#include "engine/core/mem_tracker.h"
 #include "engine/core/string_util.h"
 #include "engine/core/thread_affinity.h"
 #include "engine/core/vfs.h"
@@ -351,6 +352,7 @@ void *scripting_lua_alloc(void * /*ud*/, void *ptr, std::size_t osize,
   if (nsize == 0U) {
     if (osize > 0U) {
       g_memoryUsed = (g_memoryUsed >= osize) ? (g_memoryUsed - osize) : 0U;
+      core::mem_tracker_free(core::MemTag::Scripting, osize);
     }
     std::free(ptr);
     return nullptr;
@@ -368,6 +370,7 @@ void *scripting_lua_alloc(void * /*ud*/, void *ptr, std::size_t osize,
       g_memoryUsed = (growth > headroom)
                          ? std::numeric_limits<std::size_t>::max()
                          : (g_memoryUsed + growth);
+      core::mem_tracker_alloc(core::MemTag::Scripting, growth);
     }
     return newPtr;
   }
@@ -375,6 +378,7 @@ void *scripting_lua_alloc(void * /*ud*/, void *ptr, std::size_t osize,
   if (newPtr != nullptr) {
     const std::size_t freed = osize - nsize;
     g_memoryUsed = (g_memoryUsed >= freed) ? (g_memoryUsed - freed) : 0U;
+    core::mem_tracker_free(core::MemTag::Scripting, freed);
   }
   return newPtr;
 }
