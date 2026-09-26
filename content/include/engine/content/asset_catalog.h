@@ -119,6 +119,35 @@ std::size_t get_dependencies(const AssetCatalog *catalog, AssetId id,
 bool add_asset_dependency(AssetCatalog *catalog, AssetId id,
                           AssetId depId) noexcept;
 
+/// Copies up to maxIds ids of the catalogued assets that record a direct
+/// dependency on `id` into outIds and returns how many there are, which
+/// may exceed maxIds. The catalog stores edges forward only, so this scans
+/// every record's dependency list: at most kMaxMetadata x
+/// AssetMetadata::kMaxDependencies comparisons, for a change or an edit,
+/// never per frame. Scanning keeps the answer exact with no second index
+/// to fall out of step and no cap on how many assets share a dependency.
+std::size_t find_asset_dependents(const AssetCatalog *catalog, AssetId id,
+                                  AssetId *outIds, std::size_t maxIds) noexcept;
+
+/// Called once per dependent an asset change reaches. `dependent` is the
+/// asset to bring up to date; `cause` is the asset it records a dependency
+/// on that changed, the changed asset itself or a dependent visited before.
+using AssetChangeVisitor = void (*)(AssetId dependent, AssetId cause,
+                                    void *userData);
+
+/// Tells everything that depends on `changed`, directly or through other
+/// assets, that it changed: calls `visit` once per catalogued dependent,
+/// breadth first, so a dependent is visited after the asset it was reached
+/// through. A dependent reached along several paths is visited once, and a
+/// cycle ends. `changed` itself need not be catalogued -- a file a cooked
+/// asset was built from is a dependency without a record of its own. The
+/// visitor must not register, replace or clear catalog records. Returns
+/// how many dependents were visited; the catalog is read, never written,
+/// so its generation does not move.
+std::size_t notify_asset_changed(const AssetCatalog *catalog, AssetId changed,
+                                 AssetChangeVisitor visit,
+                                 void *userData) noexcept;
+
 /// Loads an asset and all its dependencies depth-first, dependency-first,
 /// invoking loadCallback exactly once per distinct asset in dependency
 /// order (callers reach their own state through userData), so a shared

@@ -6,7 +6,7 @@
 // and the shared path-hash identity constructor. Also covers what the
 // catalog adds as the engine's one asset record (#680): the change
 // generation, the keep-first write rule, the capacity probe and the
-// lookup by path.
+// lookup by path, and change notification through the recorded edges.
 
 #include "engine/content/asset_catalog.h"
 #include "engine/content/asset_metadata.h"
@@ -239,6 +239,108 @@ int main() {
         "and register agrees");
   CHECK(!can_register_asset_metadata(store.get(), kInvalidAssetId),
         "the invalid id never registers");
+
+  // --- Dependents and change notification (#681). ---
+  // tex <- matA <- matB <- matC, tex <- matD, and matB also depends on tex
+  // directly: a diamond, so matB is reachable along two paths.
+  clear_asset_catalog(store.get());
+  const AssetId tex = make_asset_id_from_path("assets/t.png");
+  const AssetId matA = make_asset_id_from_path("assets/a.mat");
+  const AssetId matB = make_asset_id_from_path("assets/b.mat");
+  const AssetId matC = make_asset_id_from_path("assets/c.mat");
+  const AssetId matD = make_asset_id_from_path("assets/d.mat");
+  const AssetId unrelated = make_asset_id_from_path("assets/u.mat");
+  AssetMetadata a = make_meta(matA, AssetTypeTag::Material, "assets/a.mat");
+  CHECK(asset_metadata_add_dependency(&a, tex), "a -> tex");
+  AssetMetadata b = make_meta(matB, AssetTypeTag::Material, "assets/b.mat");
+  CHECK(asset_metadata_add_dependency(&b, matA) &&
+            asset_metadata_add_dependency(&b, tex),
+        "b -> a, tex");
+  AssetMetadata c = make_meta(matC, AssetTypeTag::Material, "assets/c.mat");
+  CHECK(asset_metadata_add_dependency(&c, matB), "c -> b");
+  AssetMetadata d = make_meta(matD, AssetTypeTag::Material, "assets/d.mat");
+  CHECK(asset_metadata_add_dependency(&d, tex), "d -> tex");
+  const AssetMetadata u =
+      make_meta(unrelated, AssetTypeTag::Material, "assets/u.mat");
+  const AssetMetadata *const graph[] = {&a, &b, &c, &d, &u};
+  for (const AssetMetadata *record : graph) {
+    CHECK(register_asset_metadata(store.get(), *record), "register graph");
+  }
+
+  AssetId direct[8] = {};
+  CHECK(find_asset_dependents(store.get(), tex, direct, 8U) == 3U,
+        "the texture has three direct dependents");
+  CHECK(find_asset_dependents(store.get(), tex, direct, 1U) == 3U,
+        "the count is the total even when the output is smaller");
+  CHECK(find_asset_dependents(store.get(), matC, direct, 8U) == 0U,
+        "a leaf has no dependents");
+
+  struct Visits final {
+    AssetId ids[16] = {};
+    AssetId causes[16] = {};
+    std::size_t count = 0U;
+  };
+  const auto record_visit = [](AssetId dependent, AssetId cause,
+                               void *userData) noexcept {
+    auto *visits = static_cast<Visits *>(userData);
+    if (visits->count < 16U) {
+      visits->ids[visits->count] = dependent;
+      visits->causes[visits->count] = cause;
+    }
+    ++visits->count;
+  };
+  const auto index_of = [](const Visits &visits, AssetId id) noexcept {
+    for (std::size_t i = 0U; i < visits.count; ++i) {
+      if (visits.ids[i] == id) {
+        return static_cast<int>(i);
+      }
+    }
+    return -1;
+  };
+
+  Visits visits{};
+  const std::uint64_t before = store->generation;
+  CHECK(notify_asset_changed(store.get(), tex, record_visit, &visits) == 4U,
+        "a texture change reaches a, b, c and d");
+  CHECK(visits.count == 4U, "each dependent is visited exactly once");
+  CHECK((index_of(visits, matA) >= 0) && (index_of(visits, matB) >= 0) &&
+            (index_of(visits, matC) >= 0) && (index_of(visits, matD) >= 0) &&
+            (index_of(visits, unrelated) < 0),
+        "every dependent and nothing else is visited");
+  CHECK(index_of(visits, matC) > index_of(visits, matB),
+        "a dependent is visited after the asset it was reached through");
+  CHECK(visits.causes[index_of(visits, matC)] == matB,
+        "the cause names the asset the dependent records");
+  CHECK(visits.causes[index_of(visits, matA)] == tex,
+        "a direct dependent's cause is the changed asset");
+  CHECK(store->generation == before, "a notify writes nothing");
+
+  Visits fromParent{};
+  CHECK(notify_asset_changed(store.get(), matA, record_visit, &fromParent) ==
+            2U,
+        "a parent change reaches its child and grandchild only");
+
+  // A cycle ends: c -> b -> a -> c.
+  AssetMetadata cyclicA = a;
+  CHECK(asset_metadata_add_dependency(&cyclicA, matC), "a -> c");
+  CHECK(register_asset_metadata(store.get(), cyclicA), "close the cycle");
+  Visits cyclic{};
+  CHECK(notify_asset_changed(store.get(), matA, record_visit, &cyclic) == 2U,
+        "a cycle back to the changed asset does not visit it again");
+
+  // The changed asset need not be catalogued: a cooked mesh records the
+  // file it was built from, which has no record of its own.
+  const AssetId bin = make_asset_id_from_path("assets/m.bin");
+  AssetMetadata mesh = make_meta(make_asset_id_from_path("assets/m.mesh"),
+                                 AssetTypeTag::Mesh, "assets/m.mesh");
+  CHECK(asset_metadata_add_dependency(&mesh, bin), "mesh -> bin");
+  CHECK(register_asset_metadata(store.get(), mesh), "register the mesh");
+  Visits fromFile{};
+  CHECK(notify_asset_changed(store.get(), bin, record_visit, &fromFile) == 1U,
+        "an uncatalogued dependency reaches the asset that records it");
+  CHECK(notify_asset_changed(store.get(), kInvalidAssetId, record_visit,
+                             &fromFile) == 0U,
+        "the invalid id reaches nothing");
 
   if (g_failures != 0) {
     std::fprintf(stderr, "%d failure(s)\n", g_failures);
