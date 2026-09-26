@@ -1415,6 +1415,28 @@ def test_duplicate_primitive_gate():
         check(run([script, "--root", case(
             "prod_seam", "renderer/src/render_device.cpp", seam)]) == 0,
               "duplicate primitives: the real device defines the seam")
+        catalog = ("// Purpose.\nstruct Holder {\n"
+                   "  content::AssetCatalog catalog{};\n};\n")
+        check(run([script, "--root", case(
+            "catalog_member", "renderer/include/engine/renderer/a.h",
+            catalog)]) != 0,
+              "duplicate primitives: a second asset catalog held by value is "
+              "a finding")
+        check(run([script, "--root", case(
+            "catalog_new", "editor/src/a.cpp",
+            "// Purpose.\nauto *c = new content::AssetCatalog();\n")]) != 0,
+              "duplicate primitives: allocating a second catalog is a finding")
+        check(run([script, "--root", case(
+            "catalog_pointer", "runtime/src/a.cpp",
+            "// Purpose.\nvoid f(content::AssetCatalog *catalog,\n"
+            "       const content::AssetCatalog &other);\n"
+            "struct AssetCatalog final {\n};\n")]) == 0,
+              "duplicate primitives: pointers, references and the type's "
+              "declaration are not a second catalog")
+        check(run([script, "--root", case(
+            "catalog_owner", "runtime/src/engine_pipeline.cpp",
+            "// Purpose.\nauto *c = new content::AssetCatalog();\n")]) == 0,
+              "duplicate primitives: the pipeline owns the one catalog")
         owner = write_comment_fixture(
             tmp / "owner", "core/include/engine/core/hash.h",
             "// Purpose.\nconstexpr auto p = 1099511628211ULL;\n")

@@ -103,6 +103,20 @@ RULES: tuple[Rule, ...] = (
         remedy="call upload_forward_material and draw_forward_command from "
         "command_buffer_flush_internal.h instead of uploading the set by hand",
     ),
+    Rule(
+        name="the engine's one asset catalog",
+        owner="runtime/src/engine_pipeline.cpp",
+        # Constructing a catalog is what a second one looks like: a
+        # by-value member or variable, or AssetCatalog() behind a new. The
+        # renderer once embedded its own, and every system that named an
+        # asset reached it through the renderer. Pointers and references
+        # to the one the pipeline owns are how everything else reaches it,
+        # and are not matched; nor is the type's own declaration.
+        pattern=r"\bAssetCatalog\s*\(\s*\)|\bAssetCatalog\s+(?!final\b)"
+        r"[A-Za-z_]\w*\s*(?:\{|;|=)",
+        remedy="take a content::AssetCatalog pointer from "
+        "EngineAssetDatabaseService or as a parameter instead of holding one",
+    ),
 )
 
 
