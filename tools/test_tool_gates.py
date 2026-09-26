@@ -41,6 +41,17 @@ def run_captured(script_args):
     return proc.returncode, proc.stdout + proc.stderr
 
 
+def check_checkout(script_args, message):
+    """Runs a gate over this checkout and requires it to pass, printing the
+    gate's own findings when it does not. The checkout is whatever the
+    working tree holds while the suite runs, so a file edited mid-run can
+    fail here; the findings say which file and why."""
+    code, output = run_captured(script_args)
+    check(code == 0, message)
+    if code != 0:
+        print(output.rstrip())
+
+
 def test_coverage_gate():
     cov = str(TOOLS / "ci" / "check_coverage_threshold.py")
     with tempfile.TemporaryDirectory() as tmp:
@@ -901,7 +912,7 @@ def test_asset_identity_gate():
                 check(run([script, "--root", str(collision)]) != 0,
                       "identity: paths differing only by case fail")
 
-        check(run([script]) == 0, "identity: this checkout passes")
+        check_checkout([script], "identity: this checkout passes")
 
 
 def write_variant_fixture(root, models, rows, variants):
@@ -992,7 +1003,7 @@ def test_shader_variant_gate():
             tmp / "default_only", ["Pbr"], rows, every))]) == 0,
               "variants: the default model needs no define of its own")
 
-    check(run([script]) == 0, "variants: this checkout passes")
+    check_checkout([script], "variants: this checkout passes")
 
 
 def test_content_attributes_gate():
@@ -1108,7 +1119,7 @@ def test_test_timing_gate():
         check(run([script, "--root", str(tmp / "empty")]) == 0,
               "timing: a tree with no functional tests passes")
 
-    check(run([script]) == 0,
+    check_checkout([script],
           "timing: this checkout passes the gate")
 
 
@@ -1216,7 +1227,7 @@ def test_comment_quality_gate():
         check(run([script, "--root", str(tmp / "empty")]) == 0,
               "comments: an empty tree passes")
 
-    check(run([script]) == 0,
+    check_checkout([script],
           "comments: this checkout passes the gate with no allowlist")
 
 
@@ -1263,7 +1274,7 @@ def test_error_handling_gate():
         check(run([script, "--root", str(tmp / "empty")]) == 0,
               "error handling: an empty tree passes")
 
-    check(run([script]) == 0,
+    check_checkout([script],
           "error handling: this checkout passes the gate")
 
 
@@ -1359,7 +1370,7 @@ def test_portable_fopen_gate():
         check(run([script, "--root", str(tmp / "empty")]) == 0,
               "portable fopen: an empty tree passes")
 
-    check(run([script]) == 0,
+    check_checkout([script],
           "portable fopen: this checkout passes the gate")
 
 
@@ -1446,7 +1457,7 @@ def test_duplicate_primitive_gate():
         check(run([script, "--root", str(tmp / "empty")]) == 0,
               "duplicate primitives: an empty tree passes")
 
-    check(run([script]) == 0,
+    check_checkout([script],
           "duplicate primitives: this checkout passes the gate")
 
 
@@ -1500,7 +1511,7 @@ def test_doc_reference_gate():
             "Template `tools/<name>/x.py`, glob `core/*.h`, prose `and/or`.\n")]) == 0,
               "doc references: fenced code, templates and prose are skipped")
 
-    check(run([script]) == 0,
+    check_checkout([script],
           "doc references: this checkout's documents reference only what exists")
 
 
@@ -1557,7 +1568,7 @@ def test_array_value_init_gate():
         check(run([script, "--root", str(fixed)]) == 0,
               "array value-init: a fixed tree passes")
 
-    check(run([script]) == 0,
+    check_checkout([script],
           "array value-init: this checkout has no braced large arrays")
 
 
