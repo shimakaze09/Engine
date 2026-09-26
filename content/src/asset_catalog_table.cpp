@@ -5,6 +5,7 @@
 
 #include "engine/content/asset_catalog.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -499,6 +500,84 @@ bool load_with_deps_recursive(DependencyTraversal &traversal, AssetId id,
 }
 
 } // namespace
+
+namespace {
+
+/// Whether catalog slot `slot`'s record lists `id` among its dependencies.
+bool slot_depends_on(const AssetCatalog &catalog, std::size_t slot,
+                     AssetId id) noexcept {
+  const AssetMetadata &record = catalog.entries[slot];
+  for (std::size_t i = 0U; i < record.dependencyCount; ++i) {
+    if (record.dependencies[i] == id) {
+      return true;
+    }
+  }
+  return false;
+}
+
+} // namespace
+
+std::size_t find_asset_dependents(const AssetCatalog *catalog, AssetId id,
+                                  AssetId *outIds,
+                                  std::size_t maxIds) noexcept {
+  if ((catalog == nullptr) || (id == kInvalidAssetId)) {
+    return 0U;
+  }
+  std::size_t count = 0U;
+  for (std::size_t slot = 0U; slot < catalog->entries.size(); ++slot) {
+    if (!catalog->occupied[slot] || !slot_depends_on(*catalog, slot, id)) {
+      continue;
+    }
+    if ((outIds != nullptr) && (count < maxIds)) {
+      outIds[count] = catalog->entries[slot].assetId;
+    }
+    ++count;
+  }
+  return count;
+}
+
+std::size_t notify_asset_changed(const AssetCatalog *catalog, AssetId changed,
+                                 AssetChangeVisitor visit,
+                                 void *userData) noexcept {
+  if ((catalog == nullptr) || (changed == kInvalidAssetId) ||
+      (visit == nullptr)) {
+    return 0U;
+  }
+
+  // Every dependent owns a catalog slot, so a slot bitset remembers what
+  // was visited, and a queue of slots can never hold more than the table.
+  // The changed asset starts the queue by id: it may own no slot at all.
+  static_assert(AssetCatalog::kMaxMetadata <= 65536U,
+                "a notify queue entry holds a catalog slot in 16 bits");
+  VisitedAssets visited{};
+  std::array<std::uint16_t, AssetCatalog::kMaxMetadata> queue{};
+  std::size_t head = 0U;
+  std::size_t tail = 0U;
+  const std::size_t changedSlot = find_metadata_slot(catalog, changed);
+  if (changedSlot < AssetCatalog::kMaxMetadata) {
+    static_cast<void>(mark_asset_visited(visited, changedSlot, changed));
+  }
+
+  AssetId cause = changed;
+  for (;;) {
+    for (std::size_t slot = 0U; slot < catalog->entries.size(); ++slot) {
+      if (!catalog->occupied[slot] ||
+          asset_visited(visited, slot, catalog->entries[slot].assetId) ||
+          !slot_depends_on(*catalog, slot, cause)) {
+        continue;
+      }
+      static_cast<void>(
+          mark_asset_visited(visited, slot, catalog->entries[slot].assetId));
+      queue[tail++] = static_cast<std::uint16_t>(slot);
+      visit(catalog->entries[slot].assetId, cause, userData);
+    }
+    if (head == tail) {
+      break;
+    }
+    cause = catalog->entries[queue[head++]].assetId;
+  }
+  return tail;
+}
 
 /// Loads the requested resource for with dependencies.
 bool load_with_dependencies(AssetCatalog *catalog, AssetId rootId,

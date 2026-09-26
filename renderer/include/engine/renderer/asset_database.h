@@ -65,6 +65,10 @@ struct TextureAssetRecord final {
   std::uint64_t sizeBytes = 0ULL;
   content::AssetState state = content::AssetState::Unloaded;
   bool requestedResident = false;
+  /// The source file's modification time (core::vfs_file_mtime) when the
+  /// record's current state was last loaded or refused; the hot-reload
+  /// poll reloads the texture when the file's time moves off it.
+  std::int64_t sourceWriteTime = 0;
 };
 
 /// Authored texture-slot references for one material (path-derived asset
@@ -184,6 +188,10 @@ struct AssetDatabase final {
   static constexpr std::size_t kTextureIndexCapacity = 2U * kMaxTextureAssets;
   core::FixedHashTable<content::AssetId, std::uint32_t, kTextureIndexCapacity>
       textureIndex{};
+  // Where the next texture hot-reload poll resumes: the poll checks a
+  // bounded run of slots per call, so a full table costs a sweep over
+  // several polls rather than every file in one frame. Runtime-only.
+  std::uint32_t textureReloadCursor = 0U;
 
   static constexpr std::size_t kMaxMaterialAssets = 1024U;
   std::array<MaterialAssetRecord, kMaxMaterialAssets> materialAssets =
@@ -316,14 +324,19 @@ bool texture_asset_slot_available(const AssetDatabase *database,
 /// the table, or the table has room.
 bool material_asset_slot_available(const AssetDatabase *database,
                                    content::AssetId id) noexcept;
-/// Registers (or updates) a texture id as permanently Failed with no GPU
-/// handle, so resolve_material_textures does not retry it every frame; the
-/// source path is kept for diagnostics.
+/// Registers (or updates) a texture id as Failed with no GPU handle, so
+/// resolve_material_textures does not retry it every frame; the source
+/// path is kept for diagnostics. It stays Failed until its file changes and
+/// the editor's hot-reload poll loads it again (texture_hot_reload.h).
 bool register_texture_asset_failed(AssetDatabase *database, content::AssetId id,
                                    const char *sourcePath) noexcept;
 /// Lifecycle state for the texture id (Unloaded when unknown).
 content::AssetState texture_asset_state(const AssetDatabase *database,
                                         content::AssetId id) noexcept;
+/// Records the source file time the texture's current state came from;
+/// ignored for an id the table does not hold.
+void set_texture_source_write_time(AssetDatabase *database, content::AssetId id,
+                                   std::int64_t writeTime) noexcept;
 /// Sets the requested value for texture asset state.
 bool set_texture_asset_state(AssetDatabase *database, content::AssetId id,
                              content::AssetState state,

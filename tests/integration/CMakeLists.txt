@@ -866,16 +866,15 @@ if(ENGINE_BUILD_TOOLS)
     )
 
     add_test(
-        NAME engine_integration_asset_packer_rejects_corrupt_graph
+        NAME engine_integration_asset_packer_rejects_graph_option
         COMMAND ${CMAKE_COMMAND}
             "-DASSET_PACKER=$<TARGET_FILE:asset_packer>"
-            "-DINPUT=${CMAKE_SOURCE_DIR}/tests/data/corrupt_texture.png"
-            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/corrupt_graph.asset"
-            "-DGRAPH=${CMAKE_SOURCE_DIR}/tests/data/corrupt_dependency_graph.json"
-            -P ${CMAKE_CURRENT_SOURCE_DIR}/asset_packer_corrupt_graph_test.cmake
+            "-DSRC_GLTF=${CMAKE_SOURCE_DIR}/assets/props/coin.gltf"
+            "-DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/graph_option_work"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/asset_packer_graph_option_test.cmake
     )
     set_tests_properties(
-        engine_integration_asset_packer_rejects_corrupt_graph
+        engine_integration_asset_packer_rejects_graph_option
         PROPERTIES LABELS integration
     )
 
@@ -937,16 +936,16 @@ if(ENGINE_BUILD_TOOLS)
     )
 
     add_test(
-        NAME engine_integration_asset_packer_many_graph_deps
+        NAME engine_integration_asset_packer_many_deps
         COMMAND ${CMAKE_COMMAND}
             "-DASSET_PACKER=$<TARGET_FILE:asset_packer>"
             "-DSRC_GLTF=${CMAKE_SOURCE_DIR}/assets/props/coin.gltf"
             "-DSRC_BIN=${CMAKE_SOURCE_DIR}/assets/props/coin.bin"
-            "-DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/many_graph_deps_work"
-            -P ${CMAKE_CURRENT_SOURCE_DIR}/asset_packer_many_graph_deps_test.cmake
+            "-DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/many_deps_work"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/asset_packer_many_deps_test.cmake
     )
     set_tests_properties(
-        engine_integration_asset_packer_many_graph_deps
+        engine_integration_asset_packer_many_deps
         PROPERTIES LABELS integration
     )
 
@@ -1404,6 +1403,17 @@ engine_add_test_executable(engine_integration_pipeline_hot_reload_cadence
     pipeline_hot_reload_cadence_test.cpp
     PRIVATE_DEPS
     engine_runtime
+    engine_core
+    LABELS
+    integration
+)
+
+engine_add_test_executable(engine_integration_pipeline_texture_hot_reload
+    SOURCES
+    pipeline_texture_hot_reload_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_renderer
     engine_core
     LABELS
     integration

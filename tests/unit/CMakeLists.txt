@@ -2097,6 +2097,20 @@ engine_add_test_executable(engine_unit_material_reload
     engine_renderer
 )
 
+engine_add_test_executable(engine_unit_material_live_edges
+    SOURCES
+    material_live_edges_test.cpp
+    PRIVATE_DEPS
+    engine_renderer
+)
+
+engine_add_test_executable(engine_unit_texture_hot_reload
+    SOURCES
+    texture_hot_reload_test.cpp
+    PRIVATE_DEPS
+    engine_renderer
+)
+
 engine_add_test_executable(engine_unit_material_version_gate
     SOURCES
     material_version_gate_test.cpp

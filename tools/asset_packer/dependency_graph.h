@@ -1,4 +1,7 @@
-// Declares dependency graph types and APIs for the Engine tooling.
+// Declares the cook's in-memory asset dependency graph: the collector
+// glTF dependency discovery fills, refusing an edge that would close a
+// cycle. It lives only for one cook; what the cook read persists as the
+// cook stamp's DEP_HASH lines.
 
 #pragma once
 
@@ -30,7 +33,7 @@ struct DependencyGraph final {
   /// Reverse edges: asset -> set of assets that depend on it.
   std::unordered_map<AssetId, std::unordered_set<AssetId>> dependents{};
 
-  /// Optional path mapping for human-readable serialization.
+  /// The path each id was registered under, for the cook to read and hash.
   std::unordered_map<AssetId, std::string> assetPaths{};
 };
 
@@ -104,14 +107,6 @@ bool has_cycle(const DependencyGraph *graph) noexcept;
 std::size_t topological_sort(const DependencyGraph *graph,
                              DependencyGraph::AssetId *outIds,
                              std::size_t maxIds) noexcept;
-
-/// Serialize graph to JSON file at `path`.
-bool write_dependency_graph_json(const DependencyGraph *graph,
-                                 const char *path) noexcept;
-
-/// Deserialize graph from JSON file at `path`.
-bool read_dependency_graph_json(DependencyGraph *graph,
-                                const char *path) noexcept;
 
 /// Given a set of changed asset IDs, return all assets that need recooked
 /// (transitive dependents). The changed assets themselves are NOT included.

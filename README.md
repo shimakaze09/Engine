@@ -335,7 +335,8 @@ Tool behavior:
 - Imports glTF meshes plus skeletons and animation clips
 - Writes `.mesh`, `.cookmeta`, `.cookstamp` and a collision `.hull`, plus
   `.skel` and `<clip>.anim` for rigged input
-- Generates asset thumbnails and maintains the asset dependency graph
+- Generates asset thumbnails, and records in the cook stamp every file the
+  cook read beside the source, so an edit to one forces a recook
 
 ## Engine contributor rules
 

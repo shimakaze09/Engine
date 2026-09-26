@@ -29,10 +29,13 @@ bool material_chain_contains(const content::AssetCatalog *catalog,
                              content::AssetId from,
                              content::AssetId target) noexcept;
 
-/// Re-resolves every loaded material that inherits from `changedId`,
-/// directly or through other materials, from its parent's current values
-/// and its own overrides. Each material is visited once. Returns how many
-/// were re-resolved.
+/// Brings every loaded material that depends on `changedId` up to date,
+/// through the catalog's edges (content::notify_asset_changed): one that
+/// inherits from a changed material takes every field it does not override
+/// from its parent's current values, directly or through other materials;
+/// one that names a changed texture drops that slot's handle for
+/// resolve_material_textures to fetch again. Each dependent is visited
+/// once. Returns how many catalogued dependents the change reached.
 std::size_t
 propagate_material_to_dependents(AssetDatabase *database,
                                  const content::AssetCatalog *catalog,
@@ -43,7 +46,7 @@ propagate_material_to_dependents(AssetDatabase *database,
 /// new values, and the change reaches the material's dependents. False when
 /// the id is not a loaded material.
 bool edit_material_asset(AssetDatabase *database,
-                         const content::AssetCatalog *catalog,
+                         content::AssetCatalog *catalog,
                          content::AssetId materialId, const Material &params,
                          const MaterialTextureSlots &textureSlots) noexcept;
 
@@ -52,7 +55,7 @@ bool edit_material_asset(AssetDatabase *database,
 /// authors -- and re-resolves its dependents. False when the id is not a
 /// loaded material.
 bool restore_material_asset(AssetDatabase *database,
-                            const content::AssetCatalog *catalog,
+                            content::AssetCatalog *catalog,
                             content::AssetId materialId, const Material &params,
                             const MaterialTextureSlots &textureSlots,
                             std::uint16_t overriddenFields) noexcept;

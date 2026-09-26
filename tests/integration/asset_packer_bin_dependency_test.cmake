@@ -1,6 +1,6 @@
-# Verifies external glTF .bin edits force a recook without --graph
-# (PR #51 review): dependency correctness is a cooker invariant, not a
-# side effect of the optional dependency-graph flag.
+# Verifies external glTF .bin edits force a recook (PR #51 review):
+# dependency correctness is a cooker invariant, found from the glTF itself
+# with no flag asking for it.
 
 if(NOT DEFINED ASSET_PACKER OR NOT DEFINED SRC_GLTF OR NOT DEFINED SRC_BIN
    OR NOT DEFINED WORKDIR)
@@ -59,7 +59,7 @@ if(NOT result EQUAL 0)
 endif()
 if(third_output MATCHES "asset up-to-date; skipped recook")
     message(FATAL_ERROR
-        "edited .bin did not force a recook without --graph: ${third_output}")
+        "edited .bin did not force a recook: ${third_output}")
 endif()
 
 file(REMOVE_RECURSE "${WORKDIR}")

@@ -536,9 +536,13 @@ SlotOutcome resolve_one_texture_slot(AssetDatabase *database,
     return SlotOutcome::Unchanged;
   }
 
+  // Read before the load, so a save that lands during it moves the time
+  // off the recorded one and the hot-reload poll picks the file up again.
+  const std::int64_t writeTime = core::vfs_file_mtime(path);
   const TextureHandle loaded = loadFn(path, userData);
   if (loaded == kInvalidTextureHandle) {
     static_cast<void>(register_texture_asset_failed(database, textureId, path));
+    set_texture_source_write_time(database, textureId, writeTime);
     char message[512] = {};
     std::snprintf(message, sizeof(message),
                  "material texture failed to load; material falls back to "
@@ -550,6 +554,7 @@ SlotOutcome resolve_one_texture_slot(AssetDatabase *database,
 
   // Cannot fail: the slot was checked above and nothing ran in between.
   static_cast<void>(register_texture_asset(database, textureId, path, loaded));
+  set_texture_source_write_time(database, textureId, writeTime);
   *outHandle = loaded;
   return SlotOutcome::Resolved;
 }
