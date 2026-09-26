@@ -1375,6 +1375,23 @@ int check_execute_primitive_spawn_names_and_meshes() noexcept {
     return finish(163);
   }
 
+  // #651: a plane placed on the ground records y = +0. Negative zero
+  // compares equal but is a different bit pattern, so a plane placed from
+  // the menu and one typed to the same position hashed differently.
+  const Entity plane = engine::editor::execute_primitive_spawn(
+      engine::editor::EditorPrimitive::Plane);
+  Transform planeTransform{};
+  if ((plane == engine::runtime::kInvalidEntity) ||
+      !world->get_transform(plane, &planeTransform)) {
+    return finish(164);
+  }
+  if (std::signbit(planeTransform.position.x) ||
+      std::signbit(planeTransform.position.y) ||
+      std::signbit(planeTransform.position.z)) {
+    std::fprintf(stderr, "the plane spawned at a negative zero\n");
+    return finish(165);
+  }
+
   return finish(0);
 }
 
