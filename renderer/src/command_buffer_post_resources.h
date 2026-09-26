@@ -17,11 +17,12 @@ namespace engine::renderer {
 bool ensure_bloom_resources(BackendState &b, int width, int height) noexcept;
 /// Releases the bloom mip chain textures and framebuffers.
 void destroy_bloom_resources(BackendState &b) noexcept;
-/// (Re)allocates the luminance averaging mip chain when the size changes;
-/// same transactional creation and failure contract as the bloom chain.
+/// (Re)allocates the luminance averaging mip chain and the two 1x1
+/// exposure targets when the size changes; same transactional creation and
+/// failure contract as the bloom chain. New targets hold no exposure yet.
 bool ensure_luminance_resources(BackendState &b, int width,
                                 int height) noexcept;
-/// Releases the luminance mip chain textures and framebuffers.
+/// Releases the luminance mip chain and exposure textures and framebuffers.
 void destroy_luminance_resources(BackendState &b) noexcept;
 /// Fills kernel with `count` SSAO hemisphere sample vectors.
 void generate_ssao_kernel(float *kernel, int count) noexcept;

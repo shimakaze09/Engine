@@ -144,6 +144,18 @@ void destroy_luminance_resources(BackendState &b) noexcept {
       b.lumMipTextures[i] = kInvalidDeviceTexture;
     }
   }
+  for (int i = 0; i < 2; ++i) {
+    if (b.exposureTargets[i].value != 0U) {
+      dev->destroy_render_target(b.exposureTargets[i]);
+      b.exposureTargets[i] = RenderTargetHandle{};
+    }
+    if (b.exposureTextures[i] != kInvalidDeviceTexture) {
+      dev->destroy_texture(b.exposureTextures[i]);
+      b.exposureTextures[i] = kInvalidDeviceTexture;
+    }
+  }
+  b.exposureCurrent = 0;
+  b.exposureValid = false;
   b.lumAllocatedWidth = 0;
   b.lumAllocatedHeight = 0;
 }
@@ -178,6 +190,11 @@ bool ensure_luminance_resources(BackendState &b, int width,
     }
     w /= 2;
     h /= 2;
+  }
+  for (int i = 0; complete && (i < 2); ++i) {
+    b.exposureTextures[i] = create_post_chain_texture(dev, 1, 1);
+    b.exposureTargets[i] = create_post_chain_target(dev, b.exposureTextures[i]);
+    complete = b.exposureTargets[i].value != 0U;
   }
   if (!complete) {
     destroy_luminance_resources(b);

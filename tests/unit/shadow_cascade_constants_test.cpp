@@ -1,9 +1,12 @@
-// Verifies auto exposure test behavior for the Engine test suite.
+// Verifies the shadow-map constants and the cascade split distances: the
+// cascade count and resolution, and splits that span near to far and
+// increase strictly for every lambda.
 
 #include <cmath>
 
 #ifdef _MSC_VER
-#pragma warning(disable : 4127) // constant conditional (constexpr checks in tests)
+#pragma warning(                                                               \
+    disable : 4127) // constant conditional (constexpr checks in tests)
 #endif
 
 #include "engine/renderer/shadow_map.h"
@@ -11,8 +14,7 @@
 namespace {
 
 // ---------------------------------------------------------------------------
-// Test 1: Auto-exposure CVar defaults are reasonable.
-// This tests the shadow_map.h constants (used by auto-exposure system).
+// Test 1: The shadow_map.h cascade count and resolution.
 // ---------------------------------------------------------------------------
 int verify_shadow_map_constants() {
   // Shadow cascade count should be 4.

@@ -312,6 +312,7 @@ void refresh_backend_program_state(BackendState &backend,
   recompute_availability(
       &backend.autoExposureAvailable,
       (backend.luminanceShaderHandle != kInvalidShaderProgram) &&
+          (backend.exposureAdaptShaderHandle != kInvalidShaderProgram) &&
           resolve_luminance_program_state(backend, dev),
       true, "auto exposure");
 }
@@ -431,6 +432,11 @@ void destroy_backend_resources(BackendState *backend) noexcept {
     backend->luminanceShaderHandle = ShaderProgramHandle{};
   }
   backend->luminanceProgram = kInvalidDeviceProgram;
+  if (backend->exposureAdaptShaderHandle != kInvalidShaderProgram) {
+    destroy_shader_program(backend->exposureAdaptShaderHandle);
+    backend->exposureAdaptShaderHandle = ShaderProgramHandle{};
+  }
+  backend->exposureAdaptProgram = kInvalidDeviceProgram;
   backend->autoExposureAvailable = false;
 
   destroy_brdf_lut_resources(*backend);

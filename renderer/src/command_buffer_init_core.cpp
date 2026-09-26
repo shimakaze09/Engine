@@ -233,8 +233,9 @@ bool resolve_pbr_program_state(BackendState &backend,
 
 // REQUIRED: the scene-color sampler and exposure (a dropped u_exposure
 // upload reads as 0 and blacks the frame). OPTIONAL: the operator
-// (0 = Reinhard is valid) and the bloom-composite trio, which
-// u_bloomEnabled=0 keeps inert.
+// (0 = Reinhard is valid), the bloom-composite trio, which
+// u_bloomEnabled=0 keeps inert, and the adapted-exposure pair, which
+// u_autoExposure=0 keeps inert and without which auto exposure is off.
 bool resolve_tonemap_program_state(BackendState &backend,
                                    const RenderDevice *dev) noexcept {
   backend.tonemapProgram = shader_device_program(backend.tonemapShaderHandle);
@@ -255,6 +256,10 @@ bool resolve_tonemap_program_state(BackendState &backend,
       dev->shader_param(tonemapProgram, "u_bloomIntensity");
   backend.tonemapBloomEnabledLoc =
       dev->shader_param(tonemapProgram, "u_bloomEnabled");
+  backend.tonemapExposureTextureLoc =
+      dev->shader_param(tonemapProgram, "u_exposureTexture");
+  backend.tonemapAutoExposureLoc =
+      dev->shader_param(tonemapProgram, "u_autoExposure");
   return ok;
 }
 

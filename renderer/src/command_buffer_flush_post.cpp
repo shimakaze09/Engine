@@ -1,7 +1,7 @@
-// Implements the post chain: bloom mip pyramid, auto-exposure temporal
-// adaptation, tonemap to the LDR final target, optional FXAA ping-pong
-// back into sceneColor, and back-buffer preparation for the editor
-// overlay.
+// Implements the post chain: bloom mip pyramid, auto-exposure (average log
+// luminance, then temporal adaptation on the GPU), tonemap to the LDR final
+// target, optional FXAA ping-pong back into sceneColor, and back-buffer
+// preparation for the editor overlay.
 #include "engine/renderer/command_buffer.h"
 
 #include "command_buffer_capture.h"
@@ -118,10 +118,18 @@ void flush_post_chain(FrameFlushContext &ctx) noexcept {
     gpu_profiler_end_pass(GpuPassId::Bloom);
   }
 
+  // The adapted exposure is consumed by tonemap alone, so without the
+  // pair of tonemap parameters that read it the chain stays unrendered.
   const bool autoExposureEnabled =
       backend.autoExposureAvailable &&
-      backend.cvars.autoExposure.get_bool(true) &&
+      backend.cvars.autoExposure.get_bool(false) &&
+      backend.tonemapExposureTextureLoc.valid() &&
+      backend.tonemapAutoExposureLoc.valid() &&
       ensure_luminance_resources(backend, drawableWidth, drawableHeight);
+  if (!autoExposureEnabled) {
+    // Resuming later adapts from that frame's scene, not a stale value.
+    backend.exposureValid = false;
+  }
   if (autoExposureEnabled) {
     gpu_profiler_begin_pass(GpuPassId::AutoExposure);
 
@@ -136,8 +144,8 @@ void flush_post_chain(FrameFlushContext &ctx) noexcept {
     }
     dev->draw(backend.emptyGeometry, PrimitiveTopology::Triangles, 0, 3);
 
-    // Step 2: Progressive downsample to 1×1 using bloom downsample shader
-    // (re-use as a generic bilinear downsample).
+    // Progressive downsample, re-using the bloom downsample as a generic
+    // weighted average; averaging log luminance yields its geometric mean.
     if (backend.bloomDownsampleProgram != kInvalidDeviceProgram) {
       dev->bind_program(backend.bloomDownsampleProgram);
       for (int i = 1; i < BackendState::kLuminanceMipLevels; ++i) {
@@ -158,36 +166,42 @@ void flush_post_chain(FrameFlushContext &ctx) noexcept {
       }
     }
 
-    // Step 3: Read back average luminance from smallest mip (CPU-side).
-    // In practice we'd use pixel readback, but for now we use temporal
-    // adaptation from the previous frame's exposure. The luminance
-    // mip chain approximates average scene luminance via successive
-    // downsampling.
-    // Adapt exposure: targetExposure = 1 / (2 * avgLuminance + epsilon).
-    // We do temporal smoothing toward the target.
-    const float adaptSpeed = backend.cvars.autoExposureSpeed.get_float(1.5F);
+    // Adaptation: the last mip's average becomes a target exposure, and
+    // last frame's exposure moves toward it by the fraction an exponential
+    // approach at r_auto_exposure_speed covers in the elapsed frame time.
+    // A long stall is capped so one hitch does not jump straight there.
+    constexpr float kMaxAdaptStepSeconds = 0.25F;
+    const float speed =
+        std::max(backend.cvars.autoExposureSpeed.get_float(1.5F), 0.0F);
     const float minExposure = backend.cvars.autoExposureMin.get_float(0.1F);
-    const float maxExposure = backend.cvars.autoExposureMax.get_float(10.0F);
-
-    // Simple temporal adaptation (no readback — use previous frame's
-    // estimate). The mip chain drives the shader-side average; we use
-    // a smooth exponential approach.
-    const float dt = 1.0F / 60.0F;
-    const float targetExposure =
-        std::clamp(backend.currentExposure, minExposure, maxExposure);
-    backend.currentExposure +=
-        (targetExposure - backend.currentExposure) * adaptSpeed * dt;
-    backend.currentExposure =
-        std::clamp(backend.currentExposure, minExposure, maxExposure);
+    const float maxExposure =
+        std::max(backend.cvars.autoExposureMax.get_float(10.0F), minExposure);
+    const float elapsed =
+        std::clamp(ctx.timeSeconds - backend.lastExposureTimeSeconds, 0.0F,
+                   kMaxAdaptStepSeconds);
+    backend.lastExposureTimeSeconds = ctx.timeSeconds;
+    const float adapt[4] = {1.0F - std::exp(-speed * elapsed), minExposure,
+                            maxExposure, backend.exposureValid ? 1.0F : 0.0F};
+    const int next = 1 - backend.exposureCurrent;
+    dev->bind_render_target(backend.exposureTargets[next]);
+    dev->set_viewport(0, 0, 1, 1);
+    dev->bind_program(backend.exposureAdaptProgram);
+    dev->bind_texture_slot(
+        0U, backend.lumMipTextures[BackendState::kLuminanceMipLevels - 1]);
+    dev->set_param_i32(backend.adaptLuminanceLoc, 0);
+    dev->bind_texture_slot(1U,
+                           backend.exposureTextures[backend.exposureCurrent]);
+    dev->set_param_i32(backend.adaptPreviousLoc, 1);
+    dev->set_param_vec4(backend.adaptParamsLoc, adapt);
+    dev->draw(backend.emptyGeometry, PrimitiveTopology::Triangles, 0, 3);
+    backend.exposureCurrent = next;
+    backend.exposureValid = true;
 
     dev->bind_texture_slot(0U, kInvalidDeviceTexture);
+    dev->bind_texture_slot(1U, kInvalidDeviceTexture);
     dev->bind_program(kInvalidDeviceProgram);
     gpu_profiler_end_pass(GpuPassId::AutoExposure);
   }
-
-  const float finalExposure = autoExposureEnabled
-                                  ? backend.currentExposure
-                                  : backend.cvars.exposure.get_float(1.0F);
 
   gpu_profiler_begin_pass(GpuPassId::Tonemap);
   dev->bind_render_target(pass_resource_target(passRes.finalColor));
@@ -202,7 +216,19 @@ void flush_post_chain(FrameFlushContext &ctx) noexcept {
     dev->set_param_i32(backend.tonemapSceneColorLocation, 0);
   }
   if (backend.tonemapExposureLocation.valid()) {
-    dev->set_param_f32(backend.tonemapExposureLocation, finalExposure);
+    dev->set_param_f32(backend.tonemapExposureLocation,
+                       backend.cvars.exposure.get_float(1.0F));
+  }
+  if (backend.tonemapAutoExposureLoc.valid()) {
+    dev->set_param_i32(backend.tonemapAutoExposureLoc,
+                       autoExposureEnabled ? 1 : 0);
+  }
+  if (backend.tonemapExposureTextureLoc.valid()) {
+    dev->bind_texture_slot(
+        2U, autoExposureEnabled
+                ? backend.exposureTextures[backend.exposureCurrent]
+                : backend.fallbackTexture2D);
+    dev->set_param_i32(backend.tonemapExposureTextureLoc, 2);
   }
   if (backend.tonemapOperatorLocation.valid()) {
     dev->set_param_i32(backend.tonemapOperatorLocation,
@@ -232,6 +258,9 @@ void flush_post_chain(FrameFlushContext &ctx) noexcept {
   dev->bind_texture_slot(0U, kInvalidDeviceTexture);
   if (bloomEnabled) {
     dev->bind_texture_slot(1U, kInvalidDeviceTexture);
+  }
+  if (backend.tonemapExposureTextureLoc.valid()) {
+    dev->bind_texture_slot(2U, kInvalidDeviceTexture);
   }
   dev->bind_program(kInvalidDeviceProgram);
   gpu_profiler_end_pass(GpuPassId::Tonemap);
