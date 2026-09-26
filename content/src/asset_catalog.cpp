@@ -91,6 +91,40 @@ AssetRef resolve_authored_ref(const std::filesystem::path &osPath,
   return fromCook;
 }
 
+/// Gives a cooked output the dependency edges its cook stamp recorded:
+/// the files the cook read beside the source, so a change to one reaches
+/// the output through content::notify_asset_changed. An output whose
+/// stamp names more than a record holds keeps the first ones and says
+/// which asset lost the rest.
+void add_cook_dependencies(const ProvenanceIndex &provenance,
+                           const std::string &relativePath,
+                           AssetMetadata *metadata) noexcept {
+  const ProvenanceIndex::Entry *entry =
+      find_provenance_entry(provenance, relativePath.c_str());
+  if (entry == nullptr) {
+    return;
+  }
+  std::size_t dropped = 0U;
+  for (std::uint32_t i = 0U; i < entry->dependencyCount; ++i) {
+    const AssetId dependency =
+        provenance.dependencies[entry->firstDependency + i];
+    if (!asset_metadata_has_dependency(metadata, dependency) &&
+        !asset_metadata_add_dependency(metadata, dependency)) {
+      ++dropped;
+    }
+  }
+  if (dropped > 0U) {
+    char problem[160] = {};
+    std::snprintf(problem, sizeof(problem),
+                  "asset catalog: %zu of this asset's cook dependencies "
+                  "exceed the %zu a record holds; changes to them will not "
+                  "reach it",
+                  dropped, AssetMetadata::kMaxDependencies);
+    core::log_path_diagnostic(core::LogLevel::Warning, "assets",
+                              metadata->filePath.data(), problem);
+  }
+}
+
 /// One registered file, kept for the identity validation the walk runs
 /// once it has seen the whole mount.
 struct RegisteredEntry final {
@@ -102,8 +136,8 @@ struct RegisteredEntry final {
 /// returns how many entries were involved. Never picks a winner: a
 /// duplicate identity is an error to repair, and choosing between them
 /// would silently rebind references somebody already wrote.
-std::size_t report_duplicate_refs(
-    const std::vector<RegisteredEntry> &entries) noexcept {
+std::size_t
+report_duplicate_refs(const std::vector<RegisteredEntry> &entries) noexcept {
   std::size_t offenders = 0U;
   for (std::size_t i = 0U; i < entries.size(); ++i) {
     if (!asset_ref_is_valid(entries[i].ref)) {
@@ -150,8 +184,8 @@ std::size_t report_duplicate_refs(
 
 /// Names every path that differs from another only by letter case, and
 /// returns how many were involved.
-std::size_t report_case_collisions(
-    const std::vector<RegisteredEntry> &entries) noexcept {
+std::size_t
+report_case_collisions(const std::vector<RegisteredEntry> &entries) noexcept {
   const auto folded = [](const std::string &text) noexcept {
     std::string lowered = text;
     for (char &ch : lowered) {
@@ -235,7 +269,8 @@ MountRegistration register_mounted_assets(AssetCatalog *catalog,
   // allocates, and the index is freed with the walk rather than held for
   // the process's life.
   const auto provenance = std::make_unique<ProvenanceIndex>();
-  static_cast<void>(build_provenance_index(osRoot, provenance.get()));
+  static_cast<void>(
+      build_provenance_index(osRoot, mountPrefix, provenance.get()));
 
   // Collected so identity can be validated across the whole mount once
   // the walk has seen every asset, rather than per file.
@@ -291,6 +326,9 @@ MountRegistration register_mounted_assets(AssetCatalog *catalog,
     if (metadata.assetId == kInvalidAssetId) {
       ++result.refused;
       continue;
+    }
+    if (!classification.source) {
+      add_cook_dependencies(*provenance, generic, &metadata);
     }
     const CatalogInsert insert =
         register_asset_metadata_if_absent(catalog, metadata);

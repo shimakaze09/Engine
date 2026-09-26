@@ -1,16 +1,19 @@
-// Public cross-module entry point for the runtime cooked-asset staleness
-// diagnostic: the CAS table and .cookmeta sidecar reader stay
+// Public cross-module entry point for the runtime cooked-asset trust
+// checks: the CAS tables and the .cookmeta and .cookstamp readers stay
 // implemented in the module-private asset_stale_check.cpp; this header is
-// the one public declaration so every cooked-asset consumer (renderer
-// mesh/texture loaders, runtime .skel/.anim loaders) routes through the
+// the one public declaration so every cooked-asset consumer (the
+// renderer's mesh loader, runtime .skel/.anim loaders) routes through the
 // same once-per-asset check.
 
 #pragma once
 
 namespace engine::content {
 
-/// Logs a once-per-asset warning when the cooked file's recorded source
-/// changed after the last cook; silent when no sidecar/source is present.
+/// Logs a once-per-asset warning when the cooked file's recorded source,
+/// or any file its cook stamp records as a dependency (a glTF's external
+/// buffers and images), changed after the last cook, naming the changed
+/// dependency. Silent for a file that cannot be read -- a shipped build
+/// carries no sources -- and for an asset with no sidecar or stamp.
 void warn_if_cooked_asset_stale(const char *cookedPath) noexcept;
 
 /// Validates the cooked asset's generation against its .cookstamp output

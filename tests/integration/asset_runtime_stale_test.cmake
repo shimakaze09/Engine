@@ -1,7 +1,8 @@
 # Verifies the runtime mesh loader surfaces cooked-asset staleness
 # (issue #81) and rejects torn generations (audit #211): a cooked mesh
 # whose source changed after the last cook logs a once-per-asset warning
-# through the production load path, a stamped-but-missing sidecar rejects
+# through the production load path, so does one whose external buffer
+# changed (#681), naming it, a stamped-but-missing sidecar rejects
 # the load, and a fresh cook or never-certified mesh stays silent.
 
 if(NOT DEFINED ASSET_PACKER OR NOT DEFINED STALE_HOST OR NOT DEFINED SRC_GLTF
@@ -62,6 +63,51 @@ list(LENGTH stale_matches stale_count)
 if(NOT stale_count EQUAL 1)
     message(FATAL_ERROR
         "expected exactly one staleness warning, got ${stale_count}")
+endif()
+
+# A dependency the cook read beside the source (#681): recook so the
+# source is current, then edit the external buffer. The runtime must say
+# the asset is stale and name the buffer, not stay silent because the
+# glTF itself is unchanged.
+execute_process(
+    COMMAND "${ASSET_PACKER}" "${source}" "${output}"
+    RESULT_VARIABLE result
+    ERROR_VARIABLE recook_error
+)
+if(NOT result EQUAL 0)
+    message(FATAL_ERROR "recook failed: ${recook_error}")
+endif()
+execute_process(
+    COMMAND "${STALE_HOST}" "${output}"
+    RESULT_VARIABLE result
+    OUTPUT_VARIABLE recooked_output
+    ERROR_VARIABLE recooked_error
+)
+if(NOT result EQUAL 0 OR recooked_output MATCHES "stale cooked asset")
+    message(FATAL_ERROR
+        "recooked mesh did not load cleanly: ${recooked_output}${recooked_error}")
+endif()
+get_filename_component(bin_name "${SRC_BIN}" NAME)
+file(APPEND "${WORKDIR}/${bin_name}" "edited")
+execute_process(
+    COMMAND "${STALE_HOST}" "${output}"
+    RESULT_VARIABLE result
+    OUTPUT_VARIABLE dependency_output
+    ERROR_VARIABLE dependency_error
+)
+if(NOT result EQUAL 0)
+    message(FATAL_ERROR "stale-dependency load failed: ${dependency_error}")
+endif()
+if(NOT dependency_output MATCHES "stale cooked asset \\(dependency [^\n]*${bin_name}")
+    message(FATAL_ERROR
+        "runtime loaded a mesh whose buffer changed silently: ${dependency_output}")
+endif()
+string(REGEX MATCHALL "stale cooked asset" dependency_matches
+       "${dependency_output}")
+list(LENGTH dependency_matches dependency_count)
+if(NOT dependency_count EQUAL 1)
+    message(FATAL_ERROR
+        "expected exactly one dependency warning, got ${dependency_count}")
 endif()
 
 # Boundary (#211): removing a stamped sidecar while the cook stamp still

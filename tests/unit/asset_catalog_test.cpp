@@ -4,7 +4,8 @@
 // table; hidden entries and non-asset files are skipped; a record already
 // in the store is kept whole; a second walk registers nothing; a prefix
 // that pushes a path past the record refuses the file and leaves the
-// store untouched; null arguments and a missing root do nothing.
+// store untouched; null arguments and a missing root do nothing; a cooked
+// output's cook-stamp dependencies become its catalog edges.
 
 #include <cstddef>
 #include <cstring>
@@ -94,22 +95,22 @@ bool build_tree() noexcept {
   std::error_code ec{};
   std::filesystem::remove_all(root, ec);
   const char *files[] = {
-      "props/coin.mesh",      // Mesh, cooked form
-      "props/coin.gltf",      // Mesh source: skipped
-      "props/coin.mesh.hull", // no table suffix: skipped
+      "props/coin.mesh",          // Mesh, cooked form
+      "props/coin.gltf",          // Mesh source: skipped
+      "props/coin.mesh.hull",     // no table suffix: skipped
       "props/coin.mesh.cookmeta", // no table suffix: skipped
-      "textures/Grass.PNG",   // Texture, case kept in the path
-      "scripts/hop.lua",      // Script
-      "anim/walk.anim",       // Animation (derived)
-      "anim/walk.skel",       // Animation (derived)
-      "ctrl/hero.animctrl",   // AnimationController
-      "levels/hub.scene",     // Scene
-      "props/crate.prefab",   // Prefab
-      "mats/brass.mat",       // Material
-      ".thumbnails/coin.png", // hidden directory: skipped
-      "notes.txt",            // no table suffix: skipped
-      ".hidden.mesh",         // dot-file: skipped
-      "sub/deep/log.mesh",    // Mesh, nested
+      "textures/Grass.PNG",       // Texture, case kept in the path
+      "scripts/hop.lua",          // Script
+      "anim/walk.anim",           // Animation (derived)
+      "anim/walk.skel",           // Animation (derived)
+      "ctrl/hero.animctrl",       // AnimationController
+      "levels/hub.scene",         // Scene
+      "props/crate.prefab",       // Prefab
+      "mats/brass.mat",           // Material
+      ".thumbnails/coin.png",     // hidden directory: skipped
+      "notes.txt",                // no table suffix: skipped
+      ".hidden.mesh",             // dot-file: skipped
+      "sub/deep/log.mesh",        // Mesh, nested
   };
   for (const char *file : files) {
     if (!write_file(root / file)) {
@@ -195,8 +196,7 @@ void test_walk(engine::content::AssetCatalog *store) noexcept {
         "coin.mesh is a Mesh under the mount prefix");
   check(engine::content::asset_has_tag(store, authored.assetId, "authored"),
         "the pre-registered record keeps its tag");
-  check(has_path_and_type(*store, "kit/sub/deep/log.mesh",
-                          AssetTypeTag::Mesh),
+  check(has_path_and_type(*store, "kit/sub/deep/log.mesh", AssetTypeTag::Mesh),
         "a nested mesh keeps its full relative path");
   check(has_path_and_type(*store, "kit/textures/Grass.PNG",
                           AssetTypeTag::Texture),
@@ -215,11 +215,10 @@ void test_walk(engine::content::AssetCatalog *store) noexcept {
   // rows carried no suffix: a reference picker for them showed nothing.
   check(has_path_and_type(*store, "kit/levels/hub.scene", AssetTypeTag::Scene),
         "a scene is catalogued as Scene");
-  check(has_path_and_type(*store, "kit/props/crate.prefab",
-                          AssetTypeTag::Prefab),
-        "a prefab is catalogued as Prefab");
-  check(has_path_and_type(*store, "kit/mats/brass.mat",
-                          AssetTypeTag::Material),
+  check(
+      has_path_and_type(*store, "kit/props/crate.prefab", AssetTypeTag::Prefab),
+      "a prefab is catalogued as Prefab");
+  check(has_path_and_type(*store, "kit/mats/brass.mat", AssetTypeTag::Material),
         "a material is catalogued as Material");
   check((count_of_type(*store, AssetTypeTag::Scene) == 1U) &&
             (count_of_type(*store, AssetTypeTag::Prefab) == 1U) &&
@@ -227,8 +226,7 @@ void test_walk(engine::content::AssetCatalog *store) noexcept {
         "each of the three is queryable by its type");
   check((find_by_path(*store, "kit/props/coin.gltf") == nullptr) &&
             (find_by_path(*store, "kit/props/coin.mesh.hull") == nullptr) &&
-            (find_by_path(*store, "kit/props/coin.mesh.cookmeta") ==
-             nullptr) &&
+            (find_by_path(*store, "kit/props/coin.mesh.cookmeta") == nullptr) &&
             (find_by_path(*store, "kit/notes.txt") == nullptr),
         "a cooked type's source, sidecars and unclassified files are absent");
   check((find_by_path(*store, "kit/.thumbnails/coin.png") == nullptr) &&
@@ -345,7 +343,8 @@ void test_identity_survives_relocation() noexcept {
 
   const auto walk = [&](engine::content::AssetCatalog *store) noexcept {
     engine::content::clear_asset_catalog(store);
-    return engine::content::register_mounted_assets(store, kPrefix, kIdentityRoot);
+    return engine::content::register_mounted_assets(store, kPrefix,
+                                                    kIdentityRoot);
   };
 
   std::unique_ptr<engine::content::AssetCatalog> store(
@@ -360,9 +359,8 @@ void test_identity_survives_relocation() noexcept {
   const engine::content::AssetMetadata *scriptRecord =
       find_asset_metadata_by_ref(store.get(),
                                  engine::content::asset_ref_primary(script));
-  check((scriptRecord != nullptr) &&
-            (std::strcmp(scriptRecord->filePath.data(),
-                         "kit/scripts/hop.lua") == 0),
+  check((scriptRecord != nullptr) && (std::strcmp(scriptRecord->filePath.data(),
+                                                  "kit/scripts/hop.lua") == 0),
         "a script resolves from its own GUID to its path");
 
   // A cooked output has no sidecar: it is the primary output of the
@@ -394,10 +392,10 @@ void test_identity_survives_relocation() noexcept {
   const engine::content::AssetMetadata *meshRecord =
       find_asset_metadata_by_ref(store.get(), heroMesh);
   check((skelRecord != nullptr) && (meshRecord != nullptr) &&
-            (std::strcmp(skelRecord->filePath.data(),
-                         "kit/chars/hero.skel") == 0) &&
-            (std::strcmp(meshRecord->filePath.data(),
-                         "kit/chars/hero.mesh") == 0),
+            (std::strcmp(skelRecord->filePath.data(), "kit/chars/hero.skel") ==
+             0) &&
+            (std::strcmp(meshRecord->filePath.data(), "kit/chars/hero.mesh") ==
+             0),
         "the skeleton and the mesh of one source resolve separately");
   check((clipRecord != skelRecord) && (skelRecord != meshRecord) &&
             (clipRecord != meshRecord),
@@ -408,32 +406,29 @@ void test_identity_survives_relocation() noexcept {
         "a tree with one sidecar per source has no duplicate identity");
 
   // Rename: the file and its sidecar move together, so the GUID does not.
-  std::filesystem::rename(root / "scripts/hop.lua",
-                          root / "scripts/jump.lua", ec);
+  std::filesystem::rename(root / "scripts/hop.lua", root / "scripts/jump.lua",
+                          ec);
   std::filesystem::rename(root / "scripts/hop.lua.meta",
                           root / "scripts/jump.lua.meta", ec);
   static_cast<void>(walk(store.get()));
-  const engine::content::AssetMetadata *renamed =
-      find_asset_metadata_by_ref(store.get(),
-                                 engine::content::asset_ref_primary(script));
-  check(!ec && (renamed != nullptr) &&
-            (std::strcmp(renamed->filePath.data(), "kit/scripts/jump.lua") ==
-             0),
-        "a rename keeps the GUID and moves where it resolves to");
+  const engine::content::AssetMetadata *renamed = find_asset_metadata_by_ref(
+      store.get(), engine::content::asset_ref_primary(script));
+  check(
+      !ec && (renamed != nullptr) &&
+          (std::strcmp(renamed->filePath.data(), "kit/scripts/jump.lua") == 0),
+      "a rename keeps the GUID and moves where it resolves to");
 
   // Move to another folder: same.
   std::filesystem::create_directories(root / "gameplay", ec);
-  std::filesystem::rename(root / "scripts/jump.lua",
-                          root / "gameplay/jump.lua", ec);
+  std::filesystem::rename(root / "scripts/jump.lua", root / "gameplay/jump.lua",
+                          ec);
   std::filesystem::rename(root / "scripts/jump.lua.meta",
                           root / "gameplay/jump.lua.meta", ec);
   static_cast<void>(walk(store.get()));
-  const engine::content::AssetMetadata *moved =
-      find_asset_metadata_by_ref(store.get(),
-                                 engine::content::asset_ref_primary(script));
+  const engine::content::AssetMetadata *moved = find_asset_metadata_by_ref(
+      store.get(), engine::content::asset_ref_primary(script));
   check(!ec && (moved != nullptr) &&
-            (std::strcmp(moved->filePath.data(), "kit/gameplay/jump.lua") ==
-             0),
+            (std::strcmp(moved->filePath.data(), "kit/gameplay/jump.lua") == 0),
         "a move keeps the GUID and moves where it resolves to");
 
   // A case-only rename is still the same asset. Whether the rename lands
@@ -451,9 +446,8 @@ void test_identity_survives_relocation() noexcept {
   const std::string scriptSpelling = spelling_of(root / "gameplay", ".lua");
   const std::string recasedPath = "kit/gameplay/" + scriptSpelling;
   static_cast<void>(walk(store.get()));
-  const engine::content::AssetMetadata *recased =
-      find_asset_metadata_by_ref(store.get(),
-                                 engine::content::asset_ref_primary(script));
+  const engine::content::AssetMetadata *recased = find_asset_metadata_by_ref(
+      store.get(), engine::content::asset_ref_primary(script));
   check(recased != nullptr, "a case-only rename keeps the GUID");
   check(!scriptSpelling.empty() && (recased != nullptr) &&
             (std::strcmp(recased->filePath.data(), recasedPath.c_str()) == 0),
@@ -470,9 +464,8 @@ void test_identity_survives_relocation() noexcept {
       engine::content::make_content_hash("edited", 6U);
   check(!(before == after), "an edit changes the content hash");
   static_cast<void>(walk(store.get()));
-  check(find_asset_metadata_by_ref(store.get(),
-                                   engine::content::asset_ref_primary(
-                                       script)) != nullptr,
+  check(find_asset_metadata_by_ref(
+            store.get(), engine::content::asset_ref_primary(script)) != nullptr,
         "an edit does not change the GUID");
 
   // A copied sidecar is two assets claiming one identity: reported,
@@ -508,7 +501,8 @@ void test_identity_validation_fails_closed() noexcept {
 
   const auto walk = [&](engine::content::AssetCatalog *store) noexcept {
     engine::content::clear_asset_catalog(store);
-    return engine::content::register_mounted_assets(store, kPrefix, kValidationRoot);
+    return engine::content::register_mounted_assets(store, kPrefix,
+                                                    kValidationRoot);
   };
   std::unique_ptr<engine::content::AssetCatalog> store(
       new (std::nothrow) engine::content::AssetCatalog());
@@ -519,13 +513,15 @@ void test_identity_validation_fails_closed() noexcept {
 
   const auto reset = [&]() noexcept {
     std::filesystem::remove_all(kValidationRoot, ec);
-    return write_file(std::filesystem::path(kValidationRoot) / "scripts/hop.lua");
+    return write_file(std::filesystem::path(kValidationRoot) /
+                      "scripts/hop.lua");
   };
 
   // A clean mount indexes cleanly; without this the failures below could
   // all be some unrelated fault.
   check(reset(), "the validation tree is written");
-  static_cast<void>(identify(std::filesystem::path(kValidationRoot), "scripts/hop.lua"));
+  static_cast<void>(
+      identify(std::filesystem::path(kValidationRoot), "scripts/hop.lua"));
   engine::content::MountRegistration walkResult = walk(store.get());
   check(walkResult.ok && (walkResult.unidentified == 0U) &&
             (walkResult.duplicateRefs == 0U) &&
@@ -546,7 +542,8 @@ void test_identity_validation_fails_closed() noexcept {
   };
   for (const char *document : badDocuments) {
     check(reset(), "the validation tree is rewritten");
-    std::ofstream bad(std::filesystem::path(kValidationRoot) / "scripts/hop.lua.meta",
+    std::ofstream bad(std::filesystem::path(kValidationRoot) /
+                          "scripts/hop.lua.meta",
                       std::ios::binary);
     bad << document;
     bad.close();
@@ -559,7 +556,8 @@ void test_identity_validation_fails_closed() noexcept {
   check(reset(), "the validation tree is rewritten");
   check(write_file(std::filesystem::path(kValidationRoot) / "scripts/dash.lua"),
         "a second script is written");
-  static_cast<void>(identify(std::filesystem::path(kValidationRoot), "scripts/hop.lua"));
+  static_cast<void>(
+      identify(std::filesystem::path(kValidationRoot), "scripts/hop.lua"));
   std::filesystem::copy_file(
       std::filesystem::path(kValidationRoot) / "scripts/hop.lua.meta",
       std::filesystem::path(kValidationRoot) / "scripts/dash.lua.meta",
@@ -578,9 +576,11 @@ void test_identity_validation_fails_closed() noexcept {
   // filesystem is how the case stays honest rather than vacuous
   // elsewhere — an exists() probe would answer yes to either spelling.
   check(reset(), "the validation tree is rewritten");
-  if (case_sensitive_under(std::filesystem::path(kValidationRoot) / "scripts")) {
-    check(write_file(std::filesystem::path(kValidationRoot) / "scripts/Hop.lua"),
-          "a second casing of one script is written");
+  if (case_sensitive_under(std::filesystem::path(kValidationRoot) /
+                           "scripts")) {
+    check(
+        write_file(std::filesystem::path(kValidationRoot) / "scripts/Hop.lua"),
+        "a second casing of one script is written");
     static_cast<void>(
         identify(std::filesystem::path(kValidationRoot), "scripts/hop.lua"));
     static_cast<void>(
@@ -591,6 +591,78 @@ void test_identity_validation_fails_closed() noexcept {
   }
 
   std::filesystem::remove_all(kValidationRoot, ec);
+}
+
+/// Counts the dependents a change reaches, for notify_asset_changed.
+void count_visit(engine::content::AssetId, engine::content::AssetId,
+                 void *userData) noexcept {
+  ++*static_cast<std::size_t *>(userData);
+}
+
+/// The files a cook read beside its source become the cooked outputs'
+/// dependency edges (#681), named as the walk names a file under the
+/// mount, wherever the stamp lists them; a file outside the mount has no
+/// such name and is left out. A change to one then reaches every output.
+void test_cook_dependencies_become_edges() noexcept {
+  using engine::content::AssetId;
+  using engine::content::make_asset_id_from_path;
+  constexpr const char *kDepRoot = "asset_catalog_dependency_root";
+
+  std::error_code ec{};
+  std::filesystem::remove_all(kDepRoot, ec);
+  const std::filesystem::path root(kDepRoot);
+  if (!write_file(root / "props/coin.gltf") ||
+      !write_file(root / "props/coin.mesh") ||
+      !write_file(root / "props/coin.skel") ||
+      !write_file(root / "props/coin.bin") ||
+      !write_file(root / "textures/coin.png")) {
+    g_tests.fail("the dependency tree could be written");
+    return;
+  }
+  const engine::content::AssetGuid coin = identify(root, "props/coin.gltf");
+  static_cast<void>(identify(root, "textures/coin.png"));
+  const bool stamped = write_stamp(root, "props/coin.mesh.cookstamp", coin,
+                                   {"coin.mesh", "coin.skel"});
+  {
+    std::ofstream out(root / "props/coin.mesh.cookstamp",
+                      std::ios::binary | std::ios::app);
+    out << "DEP_HASH 0000000000000001 coin.bin\n"
+           "DEP_HASH 0000000000000002 ../textures/coin.png\r\n"
+           "DEP_HASH 0000000000000003 ../../outside.bin\n"
+           "DEP_HASH malformed\n";
+  }
+  check(stamped, "the cook stamp lists outputs, then what the cook read");
+
+  std::unique_ptr<engine::content::AssetCatalog> store(
+      new (std::nothrow) engine::content::AssetCatalog());
+  if (store == nullptr) {
+    g_tests.fail("the dependency store could be allocated");
+    return;
+  }
+  static_cast<void>(
+      engine::content::register_mounted_assets(store.get(), kPrefix, kDepRoot));
+
+  const AssetId bin = make_asset_id_from_path("kit/props/coin.bin");
+  const AssetId png = make_asset_id_from_path("kit/textures/coin.png");
+  for (const char *output : {"kit/props/coin.mesh", "kit/props/coin.skel"}) {
+    AssetId deps[engine::content::AssetMetadata::kMaxDependencies] = {};
+    const std::size_t count = engine::content::get_dependencies(
+        store.get(), make_asset_id_from_path(output), deps,
+        engine::content::AssetMetadata::kMaxDependencies);
+    check((count == 2U) && (deps[0] == bin) && (deps[1] == png), output);
+  }
+  AssetId sourceDeps[engine::content::AssetMetadata::kMaxDependencies] = {};
+  check(engine::content::get_dependencies(
+            store.get(), make_asset_id_from_path("kit/textures/coin.png"),
+            sourceDeps, engine::content::AssetMetadata::kMaxDependencies) == 0U,
+        "a source asset takes no cook edges");
+
+  std::size_t reached = 0U;
+  check(engine::content::notify_asset_changed(store.get(), bin, &count_visit,
+                                              &reached) == 2U &&
+            (reached == 2U),
+        "a change to the buffer reaches both outputs of the cook");
+  std::filesystem::remove_all(kDepRoot, ec);
 }
 
 } // namespace
@@ -617,6 +689,7 @@ int main() {
   test_overlong_prefix(store.get());
   test_identity_survives_relocation();
   test_identity_validation_fails_closed();
+  test_cook_dependencies_become_edges();
 
   remove_tree();
   return g_tests.finish("asset catalog tests");

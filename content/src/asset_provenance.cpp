@@ -1,5 +1,5 @@
-// Implements the cooked-output provenance index by reading the SOURCE_GUID
-// and ASSET lines the cook writes into every stamp.
+// Implements the cooked-output provenance index by reading the SOURCE_GUID,
+// ASSET and DEP_HASH lines the cook writes into every stamp.
 
 #include "engine/content/asset_provenance.h"
 
@@ -19,10 +19,16 @@ constexpr const char *kStampSuffix = ".cookstamp";
 /// A stamp is a short line-oriented manifest; anything larger is not one.
 constexpr std::size_t kMaxStampBytes = 256U * 1024U;
 
+/// A stamp's dependency run in the index.
+struct DependencyRun final {
+  std::uint32_t first = 0U;
+  std::uint32_t count = 0U;
+};
+
 /// Records one output's reference; counts an overflow rather than
 /// silently dropping it, so a walk that outgrew the index says so.
 void record(ProvenanceIndex *index, const std::string &relativePath,
-            const AssetRef &ref) noexcept {
+            const AssetRef &ref, const DependencyRun &run) noexcept {
   if (index->count >= ProvenanceIndex::kMaxOutputs) {
     ++index->overflowed;
     return;
@@ -35,35 +41,105 @@ void record(ProvenanceIndex *index, const std::string &relativePath,
   std::memcpy(entry.relativePath, relativePath.c_str(),
               relativePath.size() + 1U);
   entry.ref = ref;
+  entry.firstDependency = run.first;
+  entry.dependencyCount = run.count;
   ++index->count;
+}
+
+/// The next line of the stamp text, advancing `cursor`.
+std::string next_line(const char *&cursor, const char *end) {
+  const char *lineEnd = static_cast<const char *>(
+      std::memchr(cursor, '\n', static_cast<std::size_t>(end - cursor)));
+  const char *const stop = (lineEnd != nullptr) ? lineEnd : end;
+  std::string line(cursor, static_cast<std::size_t>(stop - cursor));
+  cursor = (lineEnd != nullptr) ? (lineEnd + 1) : end;
+  if (!line.empty() && (line.back() == '\r')) {
+    line.pop_back();
+  }
+  return line;
+}
+
+/// `path`, relative to the stamp, as a path under `root`; empty when it
+/// resolves outside it.
+std::string rebase_onto_root(const std::filesystem::path &stampDirectory,
+                             const std::string &path,
+                             const std::filesystem::path &root) {
+  std::error_code ec{};
+  const std::filesystem::path joined =
+      (stampDirectory / path).lexically_normal();
+  const std::filesystem::path relative =
+      std::filesystem::relative(joined, root, ec);
+  const std::string generic = relative.generic_string();
+  if (ec || generic.empty() || (generic.compare(0U, 2U, "..") == 0)) {
+    return std::string();
+  }
+  return generic;
+}
+
+/// Appends the ids of the files the stamp's DEP_HASH lines name, as the
+/// catalog names them under `mountPrefix`.
+DependencyRun read_dependencies(const char *text, std::size_t size,
+                                const std::filesystem::path &stampDirectory,
+                                const std::filesystem::path &root,
+                                const char *mountPrefix,
+                                ProvenanceIndex *index) {
+  DependencyRun run{static_cast<std::uint32_t>(index->dependencyCount), 0U};
+  if ((mountPrefix == nullptr) || (mountPrefix[0] == '\0')) {
+    return run;
+  }
+  const char *cursor = text;
+  const char *const end = text + size;
+  while (cursor < end) {
+    // "DEP_HASH <16 hex content hash> <path relative to the stamp>".
+    const std::string line = next_line(cursor, end);
+    if ((line.compare(0U, 9U, "DEP_HASH ") != 0) || (line.size() < 27U) ||
+        (line[25U] != ' ')) {
+      continue;
+    }
+    const std::string relative =
+        rebase_onto_root(stampDirectory, line.substr(26U), root);
+    if (relative.empty()) {
+      continue;
+    }
+    if (index->dependencyCount >= ProvenanceIndex::kMaxDependencies) {
+      ++index->dependenciesDropped;
+      continue;
+    }
+    const std::string virtualPath = std::string(mountPrefix) + "/" + relative;
+    const AssetId id = make_asset_id_from_path(virtualPath.c_str());
+    if (id == kInvalidAssetId) {
+      continue;
+    }
+    index->dependencies[index->dependencyCount++] = id;
+    ++run.count;
+  }
+  return run;
 }
 
 /// Reads one stamp's provenance lines into the index.
 void read_stamp(const std::filesystem::path &stampPath,
-                const std::filesystem::path &root,
+                const std::filesystem::path &root, const char *mountPrefix,
                 ProvenanceIndex *index) noexcept {
   static char buffer[kMaxStampBytes] = {};
   std::size_t size = 0U;
-  if (core::read_whole_file(stampPath.string().c_str(), buffer,
-                            sizeof(buffer), &size) !=
-      core::FileReadResult::Ok) {
+  if (core::read_whole_file(stampPath.string().c_str(), buffer, sizeof(buffer),
+                            &size) != core::FileReadResult::Ok) {
     return;
   }
 
-  // Outputs are recorded relative to the stamp's own directory, so they
+  // Paths are recorded relative to the stamp's own directory, so they
   // are rebased onto the index's root here.
-  std::error_code ec{};
   const std::filesystem::path stampDirectory = stampPath.parent_path();
+  // Every output of the cook shares the files it read; read them first,
+  // since the stamp lists them before or after its outputs as it likes.
+  const DependencyRun run =
+      read_dependencies(buffer, size, stampDirectory, root, mountPrefix, index);
 
   AssetGuid sourceGuid{};
   const char *cursor = buffer;
   const char *const end = buffer + size;
   while (cursor < end) {
-    const char *lineEnd = static_cast<const char *>(
-        std::memchr(cursor, '\n', static_cast<std::size_t>(end - cursor)));
-    const char *const stop = (lineEnd != nullptr) ? lineEnd : end;
-    const std::string line(cursor, static_cast<std::size_t>(stop - cursor));
-    cursor = (lineEnd != nullptr) ? (lineEnd + 1) : end;
+    const std::string line = next_line(cursor, end);
 
     if (line.compare(0U, 12U, "SOURCE_GUID ") == 0) {
       const std::string text = line.substr(12U);
@@ -88,21 +164,18 @@ void read_stamp(const std::filesystem::path &stampPath,
       // An ASSET line before a readable SOURCE_GUID names no producer.
       continue;
     }
-    const std::filesystem::path output =
-        (stampDirectory / line.substr(23U)).lexically_normal();
-    const std::filesystem::path relative =
-        std::filesystem::relative(output, root, ec);
-    if (ec || relative.empty()) {
-      ec.clear();
+    const std::string relative =
+        rebase_onto_root(stampDirectory, line.substr(23U), root);
+    if (relative.empty()) {
       continue;
     }
-    record(index, relative.generic_string(), AssetRef{sourceGuid, localId});
+    record(index, relative, AssetRef{sourceGuid, localId}, run);
   }
 }
 
 } // namespace
 
-bool build_provenance_index(const char *osRoot,
+bool build_provenance_index(const char *osRoot, const char *mountPrefix,
                             ProvenanceIndex *out) noexcept {
   if ((osRoot == nullptr) || (osRoot[0] == '\0') || (out == nullptr)) {
     return false;
@@ -110,6 +183,8 @@ bool build_provenance_index(const char *osRoot,
   // Only the counters are reset: entries past `count` are unreachable,
   // and clearing all of them would mean a megabyte of writes per mount.
   out->count = 0U;
+  out->dependencyCount = 0U;
+  out->dependenciesDropped = 0U;
   out->overflowed = 0U;
 
   std::error_code ec{};
@@ -131,11 +206,11 @@ bool build_provenance_index(const char *osRoot,
     const std::string name = it->path().filename().string();
     const std::size_t suffixLength = std::strlen(kStampSuffix);
     if ((name.size() <= suffixLength) ||
-        (name.compare(name.size() - suffixLength, suffixLength,
-                      kStampSuffix) != 0)) {
+        (name.compare(name.size() - suffixLength, suffixLength, kStampSuffix) !=
+         0)) {
       continue;
     }
-    read_stamp(it->path(), root, out);
+    read_stamp(it->path(), root, mountPrefix, out);
   }
 
   if (out->overflowed > 0U) {
@@ -146,20 +221,37 @@ bool build_provenance_index(const char *osRoot,
                   out->overflowed);
     core::log_message(core::LogLevel::Error, "assets", message);
   }
+  if (out->dependenciesDropped > 0U) {
+    char message[192] = {};
+    std::snprintf(message, sizeof(message),
+                  "asset provenance: %zu cook dependency edge(s) did not fit "
+                  "the index; a change to those files will not reach the "
+                  "assets cooked from them",
+                  out->dependenciesDropped);
+    core::log_message(core::LogLevel::Error, "assets", message);
+  }
   return true;
+}
+
+const ProvenanceIndex::Entry *
+find_provenance_entry(const ProvenanceIndex &index,
+                      const char *relativePath) noexcept {
+  if (relativePath == nullptr) {
+    return nullptr;
+  }
+  for (std::size_t i = 0U; i < index.count; ++i) {
+    if (std::strcmp(index.entries[i].relativePath, relativePath) == 0) {
+      return &index.entries[i];
+    }
+  }
+  return nullptr;
 }
 
 AssetRef provenance_for_output(const ProvenanceIndex &index,
                                const char *relativePath) noexcept {
-  if (relativePath == nullptr) {
-    return AssetRef{};
-  }
-  for (std::size_t i = 0U; i < index.count; ++i) {
-    if (std::strcmp(index.entries[i].relativePath, relativePath) == 0) {
-      return index.entries[i].ref;
-    }
-  }
-  return AssetRef{};
+  const ProvenanceIndex::Entry *entry =
+      find_provenance_entry(index, relativePath);
+  return (entry != nullptr) ? entry->ref : AssetRef{};
 }
 
 } // namespace engine::content

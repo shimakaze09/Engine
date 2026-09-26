@@ -1,6 +1,7 @@
 // Implements the runtime cooked-asset trust checks: the staleness
-// diagnostic (reads the .cookmeta sidecar's source path + content hash,
-// re-hashes the source, and logs a once-per-asset warning on mismatch)
+// diagnostic (re-hashes the source the .cookmeta sidecar records and each
+// dependency the .cookstamp's DEP_HASH lines record, and logs a
+// once-per-asset warning naming what changed)
 // and the cook-generation validation (verifies the .cookstamp output
 // manifest against the files on disk so a torn or mixed cook is rejected
 // before a load accepts it). Both run on the CPU load
@@ -137,8 +138,7 @@ bool parse_hex_u64(const char *text, std::uint64_t *outValue) noexcept {
 }
 
 /// Reads the sidecar's recorded source path and source content hash.
-bool read_meta_source_record(const char *cookedPath,
-                             char (&outSourcePath)[512],
+bool read_meta_source_record(const char *cookedPath, char (&outSourcePath)[512],
                              std::uint64_t *outSourceHash) noexcept {
   char metaPath[512] = {};
   const int written =
@@ -193,8 +193,7 @@ bool read_meta_source_record(const char *cookedPath,
 
   const core::JsonValue *sourceValue = parser.get_object_field(*root, "source");
   if ((sourceValue == nullptr) ||
-      !parser.copy_string(*sourceValue, outSourcePath,
-                          sizeof(outSourcePath))) {
+      !parser.copy_string(*sourceValue, outSourcePath, sizeof(outSourcePath))) {
     return false;
   }
 
@@ -324,7 +323,8 @@ bool parse_prefixed_uint(const char *line, const char *prefix,
 /// until the tree is recooked. Returns the verdict; logs the first
 /// contradiction with both the asset and the offending line so the
 /// diagnostic is actionable.
-std::uint32_t validate_stamp_outputs(const char *cookedPath, char *text) noexcept {
+std::uint32_t validate_stamp_outputs(const char *cookedPath,
+                                     char *text) noexcept {
   bool sawOutputLine = false;
   bool sawToolVersion = false;
   std::uint32_t schema = 0U;
@@ -600,6 +600,90 @@ bool cooked_asset_generation_ok(const char *cookedPath) noexcept {
   return verdict == kVerdictOk;
 }
 
+namespace {
+
+/// Whether a stamp's DEP_HASH path names the file whole: the cook writes
+/// one on another volume as an absolute path.
+bool is_absolute_stamp_path(const char *path) noexcept {
+  const bool drive = (((path[0] >= 'A') && (path[0] <= 'Z')) ||
+                      ((path[0] >= 'a') && (path[0] <= 'z'))) &&
+                     (path[1] == ':');
+  return (path[0] == '/') || (path[0] == '\\') || drive;
+}
+
+/// Writes into `outDependency` the first file the stamp's DEP_HASH lines
+/// record whose bytes no longer match, and returns true; false when every
+/// readable dependency matches or there is no stamp. The cook records
+/// every file it read beside the source, so these lines are the asset's
+/// whole dependency set. A dependency that cannot be read is not
+/// reported, the same rule as a source that cannot be: a shipped build
+/// carries cooked assets without what they were cooked from.
+bool find_changed_dependency(const char *cookedPath,
+                             char (&outDependency)[512]) noexcept {
+  char stampPath[512] = {};
+  std::unique_ptr<char[]> text{};
+  std::size_t size = 0U;
+  if (!build_stamp_path(cookedPath, stampPath) ||
+      !read_stamp_file(stampPath, &text, &size)) {
+    return false;
+  }
+  const char *slash = std::strrchr(cookedPath, '/');
+  const char *backslash = std::strrchr(cookedPath, '\\');
+  if ((backslash != nullptr) && ((slash == nullptr) || (backslash > slash))) {
+    slash = backslash;
+  }
+  const int stampDirLength =
+      (slash != nullptr) ? static_cast<int>(slash - cookedPath) : 0;
+
+  char *cursor = text.get();
+  while ((cursor != nullptr) && (*cursor != '\0')) {
+    char *lineEnd = std::strchr(cursor, '\n');
+    if (lineEnd != nullptr) {
+      *lineEnd = '\0';
+    }
+    char *line = cursor;
+    cursor = (lineEnd != nullptr) ? (lineEnd + 1) : nullptr;
+    const std::size_t lineLength = std::strlen(line);
+    if ((lineLength > 0U) && (line[lineLength - 1U] == '\r')) {
+      line[lineLength - 1U] = '\0';
+    }
+    // `DEP_HASH <16-hex-hash> <path>`; a malformed line certifies nothing
+    // and is left to the packer, which refuses the stamp.
+    if ((std::strncmp(line, "DEP_HASH ", 9U) != 0) ||
+        (std::strlen(line) < 27U) || (line[25] != ' ')) {
+      continue;
+    }
+    char hashText[17] = {};
+    std::memcpy(hashText, line + 9, 16U);
+    std::uint64_t recordedHash = 0ULL;
+    if (!parse_hex_u64(hashText, &recordedHash)) {
+      continue;
+    }
+    const char *recordedPath = line + 26;
+    char dependencyPath[512] = {};
+    const int written =
+        (is_absolute_stamp_path(recordedPath) || (stampDirLength == 0))
+            ? std::snprintf(dependencyPath, sizeof(dependencyPath), "%s",
+                            recordedPath)
+            : std::snprintf(dependencyPath, sizeof(dependencyPath), "%.*s/%s",
+                            stampDirLength, cookedPath, recordedPath);
+    if ((written <= 0) ||
+        (written >= static_cast<int>(sizeof(dependencyPath)))) {
+      continue;
+    }
+    std::uint64_t currentHash = 0ULL;
+    if (hash_file_bytes(dependencyPath, &currentHash) &&
+        (currentHash != recordedHash)) {
+      std::memcpy(outDependency, dependencyPath,
+                  static_cast<std::size_t>(written) + 1U);
+      return true;
+    }
+  }
+  return false;
+}
+
+} // namespace
+
 void warn_if_cooked_asset_stale(const char *cookedPath) noexcept {
   if (cookedPath == nullptr) {
     return;
@@ -612,25 +696,28 @@ void warn_if_cooked_asset_stale(const char *cookedPath) noexcept {
 
   char sourcePath[512] = {};
   std::uint64_t recordedSourceHash = 0ULL;
-  if (!read_meta_source_record(cookedPath, sourcePath, &recordedSourceHash)) {
-    return;
-  }
-
   std::uint64_t currentSourceHash = 0ULL;
-  if (!hash_file_bytes(sourcePath, &currentSourceHash)) {
+  if (read_meta_source_record(cookedPath, sourcePath, &recordedSourceHash) &&
+      hash_file_bytes(sourcePath, &currentSourceHash) &&
+      (currentSourceHash != recordedSourceHash)) {
+    char message[640] = {};
+    std::snprintf(message, sizeof(message),
+                  "stale cooked asset (source changed since last cook, "
+                  "re-run the asset packer): %s",
+                  cookedPath);
+    core::log_message(core::LogLevel::Warning, "assets", message);
     return;
   }
 
-  if (currentSourceHash == recordedSourceHash) {
-    return;
+  char dependency[512] = {};
+  if (find_changed_dependency(cookedPath, dependency)) {
+    char message[1152] = {};
+    std::snprintf(message, sizeof(message),
+                  "stale cooked asset (dependency %s changed since last "
+                  "cook, re-run the asset packer): %s",
+                  dependency, cookedPath);
+    core::log_message(core::LogLevel::Warning, "assets", message);
   }
-
-  char message[640] = {};
-  std::snprintf(message, sizeof(message),
-                "stale cooked asset (source changed since last cook, re-run "
-                "the asset packer): %s",
-                cookedPath);
-  core::log_message(core::LogLevel::Warning, "assets", message);
 }
 
 void reset_cooked_asset_stale_warnings() noexcept {
