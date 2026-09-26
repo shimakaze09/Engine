@@ -136,8 +136,11 @@ Calling a rule enforced without one of these three is prohibited.
   stop-the-line** — while one is open it is the work, and a consolidation
   is allowed for it only as the owning-layer fix. Severity is assigned
   per row, never per batch; **anything observed happening in real use is
-  at least P2** whatever it was filed as; a budget never justifies a
-  downgrade. Zero open findings is not a reachable state for an engine.
+  at least P2** whatever it was filed as. **Severity is never
+  lowered**: a row keeps the severity its impact earned when it is
+  re-scoped, split, deferred or reclassified, and no budget or plan
+  justifies a downgrade. Zero open findings is not a reachable state for
+  an engine.
 - **[OWNER]** Every open issue carries exactly one class label, which
   decides the work order; `needs-triage` marks one without it
   (`.github/workflows/issue-triage.yml`). **`class:blocker`**: data loss
