@@ -18,7 +18,6 @@
 #include "../test_harness.h"
 #include "engine/content/asset_catalog.h"
 #include "engine/content/asset_sidecar.h"
-#include "engine/content/metadata_store.h"
 #include "engine/core/logging.h"
 
 namespace {
@@ -126,13 +125,13 @@ void remove_tree() noexcept {
 }
 
 const engine::content::AssetMetadata *
-find_by_path(const engine::content::MetadataStore &store,
+find_by_path(const engine::content::AssetCatalog &store,
              const char *virtualPath) noexcept {
   return engine::content::find_asset_metadata(
       &store, engine::content::make_asset_id_from_path(virtualPath));
 }
 
-bool has_path_and_type(const engine::content::MetadataStore &store,
+bool has_path_and_type(const engine::content::AssetCatalog &store,
                        const char *virtualPath,
                        engine::content::AssetTypeTag tag) noexcept {
   const engine::content::AssetMetadata *metadata =
@@ -141,13 +140,13 @@ bool has_path_and_type(const engine::content::MetadataStore &store,
          (std::strcmp(metadata->filePath.data(), virtualPath) == 0);
 }
 
-std::size_t count_of_type(const engine::content::MetadataStore &store,
+std::size_t count_of_type(const engine::content::AssetCatalog &store,
                           engine::content::AssetTypeTag tag) noexcept {
   engine::content::AssetId ids[64] = {};
   return engine::content::query_assets_by_type(&store, tag, ids, 64U);
 }
 
-void test_invalid_arguments(engine::content::MetadataStore *store) noexcept {
+void test_invalid_arguments(engine::content::AssetCatalog *store) noexcept {
   using engine::content::MountRegistration;
   using engine::content::register_mounted_assets;
   const MountRegistration nullStore =
@@ -171,7 +170,7 @@ void test_invalid_arguments(engine::content::MetadataStore *store) noexcept {
         "an invalid walk leaves the store empty");
 }
 
-void test_walk(engine::content::MetadataStore *store) noexcept {
+void test_walk(engine::content::AssetCatalog *store) noexcept {
   using engine::content::AssetTypeTag;
 
   // A loader registered this mesh first, with a tag the walk must keep.
@@ -247,7 +246,7 @@ void test_walk(engine::content::MetadataStore *store) noexcept {
         "a second walk registers nothing and knows every runtime form");
 }
 
-void test_overlong_prefix(engine::content::MetadataStore *store) noexcept {
+void test_overlong_prefix(engine::content::AssetCatalog *store) noexcept {
   // A prefix that leaves no room for any relative path: every runtime
   // form is refused and the store keeps what it had.
   std::string prefix(engine::content::AssetMetadata{}.filePath.size() - 4U,
@@ -344,13 +343,13 @@ void test_identity_survives_relocation() noexcept {
             engine::content::asset_guid_is_valid(script),
         "the three sources are identified");
 
-  const auto walk = [&](engine::content::MetadataStore *store) noexcept {
-    engine::content::clear_metadata_store(store);
+  const auto walk = [&](engine::content::AssetCatalog *store) noexcept {
+    engine::content::clear_asset_catalog(store);
     return engine::content::register_mounted_assets(store, kPrefix, kIdentityRoot);
   };
 
-  std::unique_ptr<engine::content::MetadataStore> store(
-      new (std::nothrow) engine::content::MetadataStore());
+  std::unique_ptr<engine::content::AssetCatalog> store(
+      new (std::nothrow) engine::content::AssetCatalog());
   if (store == nullptr) {
     g_tests.fail("the identity store could be allocated");
     return;
@@ -507,12 +506,12 @@ void test_identity_validation_fails_closed() noexcept {
   constexpr const char *kValidationRoot = "asset_catalog_validation_root";
   std::error_code ec{};
 
-  const auto walk = [&](engine::content::MetadataStore *store) noexcept {
-    engine::content::clear_metadata_store(store);
+  const auto walk = [&](engine::content::AssetCatalog *store) noexcept {
+    engine::content::clear_asset_catalog(store);
     return engine::content::register_mounted_assets(store, kPrefix, kValidationRoot);
   };
-  std::unique_ptr<engine::content::MetadataStore> store(
-      new (std::nothrow) engine::content::MetadataStore());
+  std::unique_ptr<engine::content::AssetCatalog> store(
+      new (std::nothrow) engine::content::AssetCatalog());
   if (store == nullptr) {
     g_tests.fail("the validation store could be allocated");
     return;
@@ -606,8 +605,8 @@ int main() {
 
   // On the heap: the store is 4 MB of fixed slots, which overflows the
   // 1 MB stack a Windows thread gets by default.
-  std::unique_ptr<engine::content::MetadataStore> store(
-      new (std::nothrow) engine::content::MetadataStore());
+  std::unique_ptr<engine::content::AssetCatalog> store(
+      new (std::nothrow) engine::content::AssetCatalog());
   if (store == nullptr) {
     g_tests.fail("the metadata store could be allocated");
     remove_tree();

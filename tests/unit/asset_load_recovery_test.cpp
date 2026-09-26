@@ -10,13 +10,14 @@
 #include <mutex>
 #include <new>
 
+#include "engine/content/asset_catalog.h"
+#include "engine/content/asset_streaming.h"
 #include "engine/core/cvar.h"
 #include "engine/core/logging.h"
 #include "engine/core/service_locator.h"
 #include "engine/core/vfs.h"
 #include "engine/renderer/asset_database.h"
 #include "engine/renderer/asset_manager.h"
-#include "engine/content/asset_streaming.h"
 #include "engine/runtime/editor_bridge.h"
 #include "engine/runtime/scripting_bridge.h"
 #include "engine/runtime/service_registry.h"
@@ -28,13 +29,13 @@ namespace {
 constexpr const char *kTempScriptPath = "asset_recovery_temp.lua";
 
 /// Load callback that fails every request, simulating IO failure.
-bool fail_load(engine::renderer::AssetId, const char *, std::uint64_t *,
+bool fail_load(engine::content::AssetId, const char *, std::uint64_t *,
                void *) noexcept {
   return false;
 }
 
 /// Load callback that succeeds with a tiny payload.
-bool ok_load(engine::renderer::AssetId, const char *,
+bool ok_load(engine::content::AssetId, const char *,
              std::uint64_t *outSizeBytes, void *) noexcept {
   if (outSizeBytes != nullptr) {
     *outSizeBytes = 16ULL;
@@ -43,7 +44,7 @@ bool ok_load(engine::renderer::AssetId, const char *,
 }
 
 /// Upload callback that succeeds without touching the GPU.
-bool ok_upload(engine::renderer::AssetId, void *) noexcept { return true; }
+bool ok_upload(engine::content::AssetId, void *) noexcept { return true; }
 
 /// Counts occupied streaming-queue slots under the queue lock.
 std::size_t occupied_request_count(
@@ -59,9 +60,9 @@ std::size_t occupied_request_count(
 }
 
 /// Finds the live queue handle for an asset id under the queue lock.
-engine::content::LoadHandle find_request_handle(
-    engine::content::AssetStreamingQueue *queue,
-    engine::renderer::AssetId assetId) noexcept {
+engine::content::LoadHandle
+find_request_handle(engine::content::AssetStreamingQueue *queue,
+                    engine::content::AssetId assetId) noexcept {
   std::lock_guard<std::mutex> lock(queue->mutex);
   for (std::uint32_t i = 0U;
        i < engine::content::AssetStreamingQueue::kMaxRequests; ++i) {
@@ -75,7 +76,7 @@ engine::content::LoadHandle find_request_handle(
 
 /// True when an occupied, non-Failed queue request exists for the asset.
 bool has_live_request(engine::content::AssetStreamingQueue *queue,
-                      engine::renderer::AssetId assetId) noexcept {
+                      engine::content::AssetId assetId) noexcept {
   std::lock_guard<std::mutex> lock(queue->mutex);
   for (const auto &request : queue->requests) {
     if (request.occupied && (request.assetId == assetId) &&
@@ -87,11 +88,11 @@ bool has_live_request(engine::content::AssetStreamingQueue *queue,
 }
 
 /// Drives one scheduling pass and blocks until the request is terminal.
-engine::content::LoadingState pump_to_terminal(
-    engine::content::AssetStreamingQueue *queue,
-    engine::renderer::AssetId assetId,
-    engine::content::AssetLoadCallback loadCallback,
-    engine::content::AssetUploadCallback uploadCallback) noexcept {
+engine::content::LoadingState
+pump_to_terminal(engine::content::AssetStreamingQueue *queue,
+                 engine::content::AssetId assetId,
+                 engine::content::AssetLoadCallback loadCallback,
+                 engine::content::AssetUploadCallback uploadCallback) noexcept {
   const engine::content::LoadHandle handle =
       find_request_handle(queue, assetId);
   if (!handle.valid()) {
@@ -139,6 +140,9 @@ int check_editor_failed_load_recovers(
     engine::content::AssetStreamingQueue *queue) noexcept {
   engine::renderer::clear_asset_database(database);
   engine::runtime::EngineAssetDatabaseService service{};
+  std::unique_ptr<engine::content::AssetCatalog> serviceCatalog(
+      new (std::nothrow) engine::content::AssetCatalog());
+  service.catalog = serviceCatalog.get();
   service.database = database;
   service.streamingQueue = queue;
   engine::runtime::set_editor_asset_service(&service);
@@ -151,7 +155,7 @@ int check_editor_failed_load_recovers(
     return 20;
   }
   if (engine::renderer::mesh_asset_state(database, assetId) !=
-      engine::renderer::AssetState::Loading) {
+      engine::content::AssetState::Loading) {
     engine::runtime::set_editor_asset_service(nullptr);
     return 21;
   }
@@ -177,7 +181,7 @@ int check_editor_failed_load_recovers(
     return 25;
   }
   if (engine::renderer::mesh_asset_state(database, assetId) !=
-      engine::renderer::AssetState::Loading) {
+      engine::content::AssetState::Loading) {
     engine::runtime::set_editor_asset_service(nullptr);
     return 26;
   }
@@ -210,6 +214,9 @@ int check_script_failed_load_retries(
 
   engine::core::ServiceLocator locator{};
   engine::runtime::EngineAssetDatabaseService service{};
+  std::unique_ptr<engine::content::AssetCatalog> serviceCatalog(
+      new (std::nothrow) engine::content::AssetCatalog());
+  service.catalog = serviceCatalog.get();
   service.database = database;
   service.manager = manager;
   service.streamingQueue = queue;
@@ -250,8 +257,8 @@ int check_script_failed_load_retries(
     return finish(43);
   }
 
-  const engine::renderer::AssetId scriptAssetId =
-      engine::renderer::make_asset_id_from_path("rtest/rtest_script.mesh");
+  const engine::content::AssetId scriptAssetId =
+      engine::content::make_asset_id_from_path("rtest/rtest_script.mesh");
 
   for (int attempt = 0; attempt < 3; ++attempt) {
     if (!engine::scripting::call_script_function("request_failing_asset")) {
@@ -269,14 +276,14 @@ int check_script_failed_load_retries(
   if (!engine::scripting::call_script_function("request_ready_asset")) {
     return finish(47);
   }
-  const engine::renderer::AssetId readyAssetId =
-      engine::renderer::make_asset_id_from_path("rtest/rtest_ready.mesh");
+  const engine::content::AssetId readyAssetId =
+      engine::content::make_asset_id_from_path("rtest/rtest_ready.mesh");
   if (pump_to_terminal(queue, readyAssetId, &ok_load, &ok_upload) !=
       engine::content::LoadingState::Ready) {
     return finish(48);
   }
   if (!engine::renderer::set_mesh_asset_state(
-          database, readyAssetId, engine::renderer::AssetState::Ready,
+          database, readyAssetId, engine::content::AssetState::Ready,
           engine::renderer::MeshHandle{1U})) {
     return finish(49);
   }

@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include "engine/content/asset_catalog.h"
 #include "engine/content/asset_identity.h"
 #include "engine/renderer/asset_database.h"
 
@@ -21,17 +22,17 @@ struct MaterialRefText final {
 /// move an asset to a new path and keep its identity, as a rename in the
 /// content browser does.
 inline MaterialRefText
-catalog_material_asset(renderer::AssetDatabase *database,
-                       const char *virtualPath, renderer::AssetTypeTag type,
+catalog_material_asset(content::AssetCatalog *catalog, const char *virtualPath,
+                       content::AssetTypeTag type,
                        const char *guidSeed = nullptr) noexcept {
   MaterialRefText out{};
-  renderer::AssetMetadata metadata{};
-  metadata.assetId = renderer::make_asset_id_from_path(virtualPath);
+  content::AssetMetadata metadata{};
+  metadata.assetId = content::make_asset_id_from_path(virtualPath);
   metadata.ref = core::asset_ref_primary(content::builtin_asset_guid(
       (guidSeed != nullptr) ? guidSeed : virtualPath));
   metadata.typeTag = type;
-  renderer::write_metadata_path(&metadata.filePath, virtualPath);
-  if (!renderer::register_asset_metadata(database, metadata) ||
+  content::write_metadata_path(&metadata.filePath, virtualPath);
+  if (!content::register_asset_metadata(catalog, metadata) ||
       !content::format_asset_ref(metadata.ref, out.text, sizeof(out.text))) {
     out.text[0] = '\0';
   }
@@ -39,17 +40,17 @@ catalog_material_asset(renderer::AssetDatabase *database,
 }
 
 /// Catalogues a texture fixture; see catalog_material_asset.
-inline MaterialRefText catalog_texture(renderer::AssetDatabase *database,
+inline MaterialRefText catalog_texture(content::AssetCatalog *catalog,
                                        const char *virtualPath) noexcept {
-  return catalog_material_asset(database, virtualPath,
-                                renderer::AssetTypeTag::Texture);
+  return catalog_material_asset(catalog, virtualPath,
+                                content::AssetTypeTag::Texture);
 }
 
 /// Catalogues a material fixture; see catalog_material_asset.
-inline MaterialRefText catalog_material(renderer::AssetDatabase *database,
+inline MaterialRefText catalog_material(content::AssetCatalog *catalog,
                                         const char *virtualPath) noexcept {
-  return catalog_material_asset(database, virtualPath,
-                                renderer::AssetTypeTag::Material);
+  return catalog_material_asset(catalog, virtualPath,
+                                content::AssetTypeTag::Material);
 }
 
 } // namespace engine::tests

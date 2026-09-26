@@ -180,7 +180,7 @@ int check_streaming_path_rejection() {
     return 43;
   }
   if (engine::renderer::mesh_asset_state(database.get(), 9ULL) !=
-      engine::renderer::AssetState::Unloaded) {
+      engine::content::AssetState::Unloaded) {
     return 44;
   }
   if (!engine::renderer::request_mesh_asset_streaming_load(

@@ -97,7 +97,7 @@ int verify_reload_stages_replacement() {
   constexpr const char *kGoodPath = "am_reload_good.mesh";
   constexpr const char *kMissingPath = "am_reload_missing.mesh";
   constexpr const char *kGarbagePath = "am_reload_garbage.mesh";
-  constexpr engine::renderer::AssetId kAssetId = 105ULL;
+  constexpr engine::content::AssetId kAssetId = 105ULL;
   int failure = 0;
 
   if (!write_v1_mesh_file(kGoodPath, 0.0F) ||
@@ -118,7 +118,7 @@ int verify_reload_stages_replacement() {
       engine::renderer::resolve_mesh_asset(database.get(), kAssetId);
   if ((failure == 0) &&
       ((engine::renderer::mesh_asset_state(database.get(), kAssetId) !=
-        engine::renderer::AssetState::Ready) ||
+        engine::content::AssetState::Ready) ||
        (originalHandle == engine::renderer::kInvalidMeshHandle))) {
     failure = 84;
   }
@@ -132,13 +132,11 @@ int verify_reload_stages_replacement() {
                                                registry.get(), 4U)) {
       failure = 85;
     } else if ((engine::renderer::mesh_asset_state(database.get(), kAssetId) !=
-                engine::renderer::AssetState::Ready) ||
-               (engine::renderer::resolve_mesh_asset(database.get(),
-                                                     kAssetId) !=
-                originalHandle) ||
+                engine::content::AssetState::Ready) ||
+               (engine::renderer::resolve_mesh_asset(
+                    database.get(), kAssetId) != originalHandle) ||
                (engine::renderer::lookup_gpu_mesh(registry.get(),
-                                                  originalHandle) ==
-                nullptr)) {
+                                                  originalHandle) == nullptr)) {
       failure = 86;
     }
   }
@@ -151,10 +149,9 @@ int verify_reload_stages_replacement() {
                                                registry.get(), 4U)) {
       failure = 87;
     } else if ((engine::renderer::mesh_asset_state(database.get(), kAssetId) !=
-                engine::renderer::AssetState::Ready) ||
-               (engine::renderer::resolve_mesh_asset(database.get(),
-                                                     kAssetId) !=
-                originalHandle)) {
+                engine::content::AssetState::Ready) ||
+               (engine::renderer::resolve_mesh_asset(
+                    database.get(), kAssetId) != originalHandle)) {
       failure = 88;
     }
   }
@@ -183,10 +180,9 @@ int verify_reload_stages_replacement() {
                                                registry.get(), 4U)) {
       failure = 89;
     } else if ((engine::renderer::mesh_asset_state(database.get(), kAssetId) !=
-                engine::renderer::AssetState::Ready) ||
-               (engine::renderer::resolve_mesh_asset(database.get(),
-                                                     kAssetId) !=
-                originalHandle)) {
+                engine::content::AssetState::Ready) ||
+               (engine::renderer::resolve_mesh_asset(
+                    database.get(), kAssetId) != originalHandle)) {
       failure = 90;
     }
     if (fillerCount > 0U) {
@@ -211,7 +207,7 @@ int verify_reload_stages_replacement() {
       swappedHandle =
           engine::renderer::resolve_mesh_asset(database.get(), kAssetId);
       if ((engine::renderer::mesh_asset_state(database.get(), kAssetId) !=
-           engine::renderer::AssetState::Ready) ||
+           engine::content::AssetState::Ready) ||
           (swappedHandle == engine::renderer::kInvalidMeshHandle) ||
           (swappedHandle == originalHandle) ||
           (engine::renderer::lookup_gpu_mesh(registry.get(), originalHandle) !=
@@ -246,9 +242,9 @@ int verify_reload_stages_replacement() {
                                                 registry.get(), 4U)) {
       failure = 95;
     } else if ((engine::renderer::mesh_asset_state(database.get(), kAssetId) !=
-                engine::renderer::AssetState::Unloaded) ||
-               (engine::renderer::lookup_gpu_mesh(registry.get(),
-                                                  lastHandle) != nullptr)) {
+                engine::content::AssetState::Unloaded) ||
+               (engine::renderer::lookup_gpu_mesh(registry.get(), lastHandle) !=
+                nullptr)) {
       failure = 96;
     }
   }
@@ -276,7 +272,7 @@ int verify_failed_load_sets_failed_state() {
   engine::renderer::clear_asset_manager(manager.get());
   engine::renderer::clear_asset_database(database.get());
 
-  constexpr engine::renderer::AssetId kAssetId = 101ULL;
+  constexpr engine::content::AssetId kAssetId = 101ULL;
   if (!engine::renderer::queue_mesh_load(manager.get(), database.get(),
                                          kAssetId, "assets/missing.mesh")) {
     return 2;
@@ -292,7 +288,7 @@ int verify_failed_load_sets_failed_state() {
   }
 
   if (engine::renderer::mesh_asset_state(database.get(), kAssetId) !=
-      engine::renderer::AssetState::Failed) {
+      engine::content::AssetState::Failed) {
     return 5;
   }
 
@@ -318,7 +314,7 @@ int verify_release_during_pending_load_unloads() {
   engine::renderer::clear_asset_manager(manager.get());
   engine::renderer::clear_asset_database(database.get());
 
-  constexpr engine::renderer::AssetId kAssetId = 102ULL;
+  constexpr engine::content::AssetId kAssetId = 102ULL;
   if (!engine::renderer::queue_mesh_load(manager.get(), database.get(),
                                          kAssetId, "assets/missing.mesh")) {
     return 21;
@@ -333,7 +329,7 @@ int verify_release_during_pending_load_unloads() {
       manager.get(), database.get(), registry.get(), 8U));
 
   if (engine::renderer::mesh_asset_state(database.get(), kAssetId) !=
-      engine::renderer::AssetState::Unloaded) {
+      engine::content::AssetState::Unloaded) {
     return 23;
   }
 
@@ -354,7 +350,7 @@ int verify_unload_clears_registry_slot() {
   engine::renderer::clear_asset_manager(manager.get());
   engine::renderer::clear_asset_database(database.get());
 
-  constexpr engine::renderer::AssetId kAssetId = 103ULL;
+  constexpr engine::content::AssetId kAssetId = 103ULL;
   const engine::renderer::MeshHandle kMeshHandle =
       engine::renderer::register_gpu_mesh(registry.get(),
                                           engine::renderer::GpuMesh{});
@@ -378,7 +374,7 @@ int verify_unload_clears_registry_slot() {
   }
 
   if (engine::renderer::mesh_asset_state(database.get(), kAssetId) !=
-      engine::renderer::AssetState::Unloaded) {
+      engine::content::AssetState::Unloaded) {
     return 44;
   }
 
@@ -411,7 +407,7 @@ int verify_auto_unload_from_release_intent() {
   engine::renderer::clear_asset_manager(manager.get());
   engine::renderer::clear_asset_database(database.get());
 
-  constexpr engine::renderer::AssetId kAssetId = 104ULL;
+  constexpr engine::content::AssetId kAssetId = 104ULL;
   const engine::renderer::MeshHandle kMeshHandle =
       engine::renderer::register_gpu_mesh(registry.get(),
                                           engine::renderer::GpuMesh{});
@@ -434,7 +430,7 @@ int verify_auto_unload_from_release_intent() {
   }
 
   if (engine::renderer::mesh_asset_state(database.get(), kAssetId) !=
-      engine::renderer::AssetState::Unloaded) {
+      engine::content::AssetState::Unloaded) {
     return 64;
   }
 
@@ -467,8 +463,8 @@ int verify_unloaded_records_are_released() {
   constexpr std::size_t kCycles =
       2U * engine::renderer::AssetDatabase::kMaxMeshAssets;
   for (std::size_t i = 0U; i < kCycles; ++i) {
-    const engine::renderer::AssetId id =
-        static_cast<engine::renderer::AssetId>(1000U + i);
+    const engine::content::AssetId id =
+        static_cast<engine::content::AssetId>(1000U + i);
     if (!engine::renderer::request_mesh_asset_streaming_load(
             database.get(), id, "assets/cycle.mesh")) {
       std::printf("mesh %zu of %zu could not be requested: the table is "
@@ -518,14 +514,14 @@ int verify_refused_claim_evicts_under_byte_budget() {
       engine::renderer::AssetDatabase::kMaxMeshAssets;
   constexpr std::uint64_t kByteBudget = 512ULL * 1024ULL * 1024ULL;
   for (std::size_t i = 0U; i < kCapacity; ++i) {
-    const engine::renderer::AssetId id =
-        static_cast<engine::renderer::AssetId>(1000U + i);
+    const engine::content::AssetId id =
+        static_cast<engine::content::AssetId>(1000U + i);
     // The handle names no registry mesh, so the unload below has nothing
     // to free; the record's life is what is under test.
     if (!engine::renderer::request_mesh_asset_streaming_load(
             database.get(), id, "assets/small.mesh") ||
         !engine::renderer::set_mesh_asset_state(
-            database.get(), id, engine::renderer::AssetState::Ready,
+            database.get(), id, engine::content::AssetState::Ready,
             engine::renderer::MeshHandle{static_cast<std::uint32_t>(i + 1U)}) ||
         !engine::renderer::set_mesh_asset_size(database.get(), id, 64ULL)) {
       return 81;
@@ -543,8 +539,8 @@ int verify_refused_claim_evicts_under_byte_budget() {
   }
 
   // Frame order as the pipeline runs it: request, manager update, evict.
-  const engine::renderer::AssetId newcomer =
-      static_cast<engine::renderer::AssetId>(1000U + kCapacity);
+  const engine::content::AssetId newcomer =
+      static_cast<engine::content::AssetId>(1000U + kCapacity);
   std::size_t evictedTotal = 0U;
   bool served = false;
   for (int frame = 0; (frame < 4) && !served; ++frame) {
@@ -588,13 +584,13 @@ int verify_record_unloaded_elsewhere_is_released() {
   engine::renderer::clear_asset_manager(manager.get());
   engine::renderer::clear_asset_database(database.get());
 
-  constexpr engine::renderer::AssetId kId = 4242ULL;
-  constexpr engine::renderer::AssetId kPinned = 4343ULL;
+  constexpr engine::content::AssetId kId = 4242ULL;
+  constexpr engine::content::AssetId kPinned = 4343ULL;
   if (!engine::renderer::request_mesh_asset_streaming_load(
           database.get(), kId, "assets/skipped.mesh") ||
       !engine::renderer::release_mesh_asset(database.get(), kId) ||
       !engine::renderer::set_mesh_asset_state(
-          database.get(), kId, engine::renderer::AssetState::Unloaded,
+          database.get(), kId, engine::content::AssetState::Unloaded,
           engine::renderer::kInvalidMeshHandle)) {
     return 91;
   }
@@ -604,7 +600,7 @@ int verify_record_unloaded_elsewhere_is_released() {
           engine::renderer::MeshHandle{9U}) ||
       !engine::renderer::release_mesh_asset(database.get(), kPinned) ||
       !engine::renderer::set_mesh_asset_state(
-          database.get(), kPinned, engine::renderer::AssetState::Unloaded,
+          database.get(), kPinned, engine::content::AssetState::Unloaded,
           engine::renderer::kInvalidMeshHandle)) {
     return 92;
   }

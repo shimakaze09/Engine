@@ -1,13 +1,17 @@
 // Proves the #171 closure criterion that generic asset metadata works with
 // no renderer dependency: this target links engine_content only. Covers the
-// moved MetadataStore contract — registration/lookup round trip, tags, a
+// moved AssetCatalog contract — registration/lookup round trip, tags, a
 // cross-type dependency edge (Script -> Mesh, the renderer/non-render
 // crossing #171 requires), dependency-ordered load with cycle rejection,
-// and the shared path-hash identity constructor.
+// and the shared path-hash identity constructor. Also covers what the
+// catalog adds as the engine's one asset record (#680): the change
+// generation, the keep-first write rule, the capacity probe and the
+// lookup by path.
 
+#include "engine/content/asset_catalog.h"
 #include "engine/content/asset_metadata.h"
-#include "engine/content/metadata_store.h"
 
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -54,7 +58,7 @@ int main() {
   using namespace engine::content;
 
   // ~16 MB table: heap-allocate like production owners do.
-  std::unique_ptr<MetadataStore> store(new (std::nothrow) MetadataStore());
+  std::unique_ptr<AssetCatalog> store(new (std::nothrow) AssetCatalog());
   CHECK(store != nullptr, "store allocation");
 
   // Identity: deterministic, separator-canonicalized, never invalid.
@@ -116,7 +120,7 @@ int main() {
         "cycle is rejected");
 
   // Reset boundary.
-  clear_metadata_store(store.get());
+  clear_asset_catalog(store.get());
   CHECK(find_asset_metadata(store.get(), scriptId) == nullptr,
         "clear empties the table");
 
@@ -136,6 +140,105 @@ int main() {
         "a path without a terminator is refused");
   CHECK(find_asset_metadata(store.get(), meshId) == nullptr,
         "a refused registration leaves the store unchanged");
+
+  // --- The catalog's change generation moves once per landed write. ---
+  clear_asset_catalog(store.get());
+  std::uint64_t generation = store->generation;
+  CHECK(
+      register_asset_metadata(store.get(), make_meta(meshId, AssetTypeTag::Mesh,
+                                                     "assets/props/rock.mesh")),
+      "register after clear");
+  CHECK(store->generation == generation + 1U,
+        "a register moves the generation once");
+  generation = store->generation;
+  CHECK(!register_asset_metadata(store.get(), unterminatedPath),
+        "a malformed record is still refused");
+  CHECK(store->generation == generation,
+        "a refused register leaves the generation");
+  CHECK(add_asset_tag(store.get(), meshId, "prop"), "tag the mesh");
+  CHECK(store->generation == generation + 1U, "a new tag moves it once");
+  generation = store->generation;
+  CHECK(add_asset_tag(store.get(), meshId, "prop"), "the same tag again");
+  CHECK(store->generation == generation,
+        "a tag the record already carries is no write");
+  CHECK(add_asset_dependency(store.get(), meshId, scriptId), "a new edge");
+  CHECK(store->generation == generation + 1U, "a new edge moves it once");
+  generation = store->generation;
+  CHECK(add_asset_dependency(store.get(), meshId, scriptId), "the same edge");
+  CHECK(store->generation == generation,
+        "an edge the record already carries is no write");
+  CHECK(!add_asset_tag(store.get(), scriptId, "absent"),
+        "tagging an uncatalogued id is refused");
+  CHECK(store->generation == generation, "a refused tag leaves the generation");
+
+  // --- Keep-first versus replace. ---
+  AssetMetadata richer =
+      make_meta(meshId, AssetTypeTag::Mesh, "assets/props/rock.mesh");
+  richer.fileSize = 42U;
+  CHECK(register_asset_metadata_if_absent(store.get(), richer) ==
+            CatalogInsert::AlreadyKnown,
+        "if-absent reports a known id");
+  CHECK(find_asset_metadata(store.get(), meshId)->fileSize == 0U,
+        "if-absent keeps the first record");
+  CHECK(store->generation == generation, "a kept record is no write");
+  CHECK(register_asset_metadata(store.get(), richer), "replace the record");
+  CHECK(find_asset_metadata(store.get(), meshId)->fileSize == 42U,
+        "register replaces the whole record");
+  CHECK(register_asset_metadata_if_absent(
+            store.get(), make_meta(scriptId, AssetTypeTag::Script,
+                                   "assets/scripts/ai.lua")) ==
+            CatalogInsert::Registered,
+        "if-absent adds an unknown id");
+
+  // --- Lookup by path, by canonical spelling. ---
+  CHECK(find_asset_metadata_by_path(store.get(), "assets/props/rock.mesh") ==
+            find_asset_metadata(store.get(), meshId),
+        "the path finds its record");
+  CHECK(find_asset_metadata_by_path(store.get(), "assets//props/./rock.mesh") ==
+            find_asset_metadata(store.get(), meshId),
+        "another spelling of the path finds it too");
+  CHECK(find_asset_metadata_by_path(store.get(), "assets/props/Rock.mesh") ==
+            nullptr,
+        "case is part of the path");
+  CHECK(find_asset_metadata_by_path(store.get(), "assets/props/none.mesh") ==
+            nullptr,
+        "an uncatalogued path finds nothing");
+  CHECK(find_asset_metadata_by_path(store.get(), "../rock.mesh") == nullptr,
+        "a path that names no asset finds nothing");
+  // A record whose stored path is not the path its id hashes (a colliding
+  // id) must not answer for the path asked.
+  AssetMetadata impostor = make_meta(make_asset_id_from_path("assets/a.png"),
+                                     AssetTypeTag::Texture, "assets/b.png");
+  CHECK(register_asset_metadata(store.get(), impostor), "plant a mismatch");
+  CHECK(find_asset_metadata_by_path(store.get(), "assets/a.png") == nullptr,
+        "a record at another path never answers for this one");
+
+  // --- The capacity probe agrees with register at the boundary. ---
+  clear_asset_catalog(store.get());
+  for (std::size_t i = 0U; i < AssetCatalog::kMaxMetadata; ++i) {
+    const AssetId id = static_cast<AssetId>(i + 1U);
+    char path[32] = {};
+    std::snprintf(path, sizeof(path), "assets/fill/%zu.png", i);
+    if (!register_asset_metadata(store.get(),
+                                 make_meta(id, AssetTypeTag::Texture, path))) {
+      CHECK(false, "fill the catalog to capacity");
+      break;
+    }
+  }
+  const AssetId extra = static_cast<AssetId>(AssetCatalog::kMaxMetadata + 1U);
+  CHECK(!can_register_asset_metadata(store.get(), extra),
+        "a full catalog has no slot for a new id");
+  CHECK(
+      !register_asset_metadata(
+          store.get(), make_meta(extra, AssetTypeTag::Texture, "assets/x.png")),
+      "and register agrees");
+  CHECK(can_register_asset_metadata(store.get(), 1U),
+        "a known id can still be replaced when full");
+  CHECK(register_asset_metadata(
+            store.get(), make_meta(1U, AssetTypeTag::Texture, "assets/y.png")),
+        "and register agrees");
+  CHECK(!can_register_asset_metadata(store.get(), kInvalidAssetId),
+        "the invalid id never registers");
 
   if (g_failures != 0) {
     std::fprintf(stderr, "%d failure(s)\n", g_failures);

@@ -236,22 +236,22 @@ bool submit_render_command(renderer::CommandBufferBuilder &localBuffer,
   return false;
 }
 
-renderer::AssetId
+content::AssetId
 fallback_foliage_mesh_asset(const FoliagePatchComponent &foliage,
                             std::uint32_t lodIndex) noexcept {
   if (lodIndex < static_cast<std::uint32_t>(FoliagePatchComponent::kMaxLods)) {
-    const renderer::AssetId selected = foliage.meshAssetIds[lodIndex];
-    if (selected != renderer::kInvalidAssetId) {
+    const content::AssetId selected = foliage.meshAssetIds[lodIndex];
+    if (selected != content::kInvalidAssetId) {
       return selected;
     }
   }
 
   for (std::size_t i = 0U; i < FoliagePatchComponent::kMaxLods; ++i) {
-    if (foliage.meshAssetIds[i] != renderer::kInvalidAssetId) {
+    if (foliage.meshAssetIds[i] != content::kInvalidAssetId) {
       return foliage.meshAssetIds[i];
     }
   }
-  return renderer::kInvalidAssetId;
+  return content::kInvalidAssetId;
 }
 
 void mark_graph_failed(std::atomic<bool> *frameGraphFailed) noexcept {
@@ -431,9 +431,9 @@ void render_prep_chunk_job(void *userData) noexcept {
         lodIndex = 0U;
       }
 
-      const renderer::AssetId meshAsset =
+      const content::AssetId meshAsset =
           fallback_foliage_mesh_asset(*foliage, lodIndex);
-      if (meshAsset == renderer::kInvalidAssetId) {
+      if (meshAsset == content::kInvalidAssetId) {
         continue;
       }
 

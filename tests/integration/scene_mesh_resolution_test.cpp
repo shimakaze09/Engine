@@ -168,8 +168,10 @@ int pump_until_ready(engine::EnginePipeline &pipeline) noexcept {
 }
 
 void run(engine::EnginePipeline &pipeline) noexcept {
-  const std::uint64_t coinId = engine::renderer::make_asset_id_from_path(kCoinPath);
-  const std::uint64_t cubeId = engine::renderer::make_asset_id_from_path(kCubePath);
+  const std::uint64_t coinId =
+      engine::content::make_asset_id_from_path(kCoinPath);
+  const std::uint64_t cubeId =
+      engine::content::make_asset_id_from_path(kCubePath);
 
   // The catalog answers before any scene asks: rows 1 and 2 of the issue.
   check(query_lists(kCoinPath), "the Mesh query lists the kit's coin mesh");

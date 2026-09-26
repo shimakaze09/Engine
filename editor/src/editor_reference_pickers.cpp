@@ -209,7 +209,7 @@ bool draw_asset_reference_picker(const char *label,
                        static_cast<unsigned long long>(*value));
     ImGui::SameLine();
     if (ImGui::SmallButton("Clear")) {
-      assign(renderer::kInvalidAssetId);
+      assign(content::kInvalidAssetId);
       changed = true;
     }
   }
@@ -226,7 +226,7 @@ bool draw_asset_reference_picker(const char *label,
     ImGui::InputTextWithHint("##search", "Search...", query, kQuerySize);
 
     if (ImGui::Selectable("<none>", *value == 0ULL)) {
-      assign(renderer::kInvalidAssetId);
+      assign(content::kInvalidAssetId);
       changed = true;
     }
 

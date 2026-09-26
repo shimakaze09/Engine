@@ -34,27 +34,28 @@ bool resolve_mesh_asset_path(char *outPath, std::size_t outCapacity) noexcept {
   return core::vfs_resolve_os_path(virtualPath, outPath, outCapacity);
 }
 
-renderer::AssetId register_builtin_mesh(renderer::GpuMeshRegistry *registry,
-                                        renderer::AssetDatabase *database,
-                                        const renderer::GpuMesh &mesh,
-                                        const char *builtinPath) noexcept {
+content::AssetId register_builtin_mesh(renderer::GpuMeshRegistry *registry,
+                                       renderer::AssetDatabase *database,
+                                       content::AssetCatalog *catalog,
+                                       const renderer::GpuMesh &mesh,
+                                       const char *builtinPath) noexcept {
   const renderer::MeshHandle handle = renderer::register_gpu_mesh(registry, mesh);
   if (handle == renderer::kInvalidMeshHandle) {
-    return renderer::kInvalidAssetId;
+    return content::kInvalidAssetId;
   }
-  const renderer::AssetId id = renderer::make_asset_id_from_path(builtinPath);
-  if (id == renderer::kInvalidAssetId) {
-    return renderer::kInvalidAssetId;
+  const content::AssetId id = content::make_asset_id_from_path(builtinPath);
+  if (id == content::kInvalidAssetId) {
+    return content::kInvalidAssetId;
   }
   if (!renderer::register_mesh_asset(database, id, builtinPath, handle)) {
-    return renderer::kInvalidAssetId;
+    return content::kInvalidAssetId;
   }
   // The catalog lists the primitive beside the project's meshes so a
   // picker offers it and a saved reference to it resolves. Its identity is
   // derived from its path rather than generated: a built-in ships with the
   // engine, carries no sidecar, and must be the same asset in every build.
   static_cast<void>(note_mesh_asset_path(
-      database, id, builtinPath,
+      catalog, id, builtinPath,
       content::asset_ref_primary(content::builtin_asset_guid(builtinPath))));
   const std::uint64_t vertexFloats = mesh.hasUVs ? 8ULL : 6ULL;
   const std::uint64_t sizeEstimate =
@@ -73,6 +74,7 @@ renderer::AssetId register_builtin_mesh(renderer::GpuMeshRegistry *registry,
 /// Loads the requested resource for bootstrap meshes.
 bool load_bootstrap_meshes(renderer::AssetManager *assetManager,
                            renderer::AssetDatabase *assetDatabase,
+                           content::AssetCatalog *catalog,
                            renderer::GpuMeshRegistry *meshRegistry,
                            BootstrapMeshIds *out) noexcept {
   char meshPath[512]{};
@@ -82,15 +84,15 @@ bool load_bootstrap_meshes(renderer::AssetManager *assetManager,
     return false;
   }
 
-  out->bootstrap = renderer::make_asset_id_from_file(meshPath);
-  bool ok = (out->bootstrap != renderer::kInvalidAssetId) &&
+  out->bootstrap = content::make_asset_id_from_file(meshPath);
+  bool ok = (out->bootstrap != content::kInvalidAssetId) &&
             renderer::queue_mesh_load(assetManager, assetDatabase,
                                       out->bootstrap, meshPath);
   if (ok) {
     ok = renderer::update_asset_manager(assetManager, assetDatabase,
                                         meshRegistry, 8U);
     ok = ok && (renderer::mesh_asset_state(assetDatabase, out->bootstrap) ==
-                renderer::AssetState::Ready);
+                content::AssetState::Ready);
   }
   if (!ok) {
     core::log_message(core::LogLevel::Error, "engine",
@@ -100,37 +102,37 @@ bool load_bootstrap_meshes(renderer::AssetManager *assetManager,
 
   renderer::GpuMesh m{};
   if (renderer::build_plane_mesh(&m)) {
-    out->plane = register_builtin_mesh(meshRegistry, assetDatabase, m,
+    out->plane = register_builtin_mesh(meshRegistry, assetDatabase, catalog, m,
                                        "builtin://plane");
   }
   m = renderer::GpuMesh{};
   if (renderer::build_cube_mesh(&m)) {
-    out->cube = register_builtin_mesh(meshRegistry, assetDatabase, m,
+    out->cube = register_builtin_mesh(meshRegistry, assetDatabase, catalog, m,
                                       "builtin://cube");
   }
   m = renderer::GpuMesh{};
   if (renderer::build_sphere_mesh(&m)) {
-    out->sphere = register_builtin_mesh(meshRegistry, assetDatabase, m,
+    out->sphere = register_builtin_mesh(meshRegistry, assetDatabase, catalog, m,
                                         "builtin://sphere");
   }
   m = renderer::GpuMesh{};
   if (renderer::build_cylinder_mesh(&m)) {
-    out->cylinder = register_builtin_mesh(meshRegistry, assetDatabase, m,
-                                          "builtin://cylinder");
+    out->cylinder = register_builtin_mesh(meshRegistry, assetDatabase, catalog,
+                                          m, "builtin://cylinder");
   }
   m = renderer::GpuMesh{};
   if (renderer::build_capsule_mesh(&m)) {
-    out->capsule = register_builtin_mesh(meshRegistry, assetDatabase, m,
-                                         "builtin://capsule");
+    out->capsule = register_builtin_mesh(meshRegistry, assetDatabase, catalog,
+                                         m, "builtin://capsule");
   }
   m = renderer::GpuMesh{};
   if (renderer::build_pyramid_mesh(&m)) {
-    out->pyramid = register_builtin_mesh(meshRegistry, assetDatabase, m,
-                                         "builtin://pyramid");
+    out->pyramid = register_builtin_mesh(meshRegistry, assetDatabase, catalog,
+                                         m, "builtin://pyramid");
   }
   m = renderer::GpuMesh{};
   if (renderer::build_grass_tuft_mesh(&m)) {
-    out->grass = register_builtin_mesh(meshRegistry, assetDatabase, m,
+    out->grass = register_builtin_mesh(meshRegistry, assetDatabase, catalog, m,
                                        "builtin://grass");
   }
 
@@ -142,14 +144,14 @@ bool load_bootstrap_meshes(renderer::AssetManager *assetManager,
     char characterPath[512] = {};
     if (core::vfs_resolve_os_path(characterVirtualPath, characterPath,
                                   sizeof(characterPath))) {
-      const renderer::AssetId characterId =
-          renderer::make_asset_id_from_path(characterVirtualPath);
-      if (renderer::queue_mesh_load(assetManager, assetDatabase,
-                                    characterId, characterPath) &&
+      const content::AssetId characterId =
+          content::make_asset_id_from_path(characterVirtualPath);
+      if (renderer::queue_mesh_load(assetManager, assetDatabase, characterId,
+                                    characterPath) &&
           renderer::update_asset_manager(assetManager, assetDatabase,
                                          meshRegistry, 8U) &&
           (renderer::mesh_asset_state(assetDatabase, characterId) ==
-           renderer::AssetState::Ready)) {
+           content::AssetState::Ready)) {
         out->character = characterId;
       } else {
         core::log_message(core::LogLevel::Warning, "engine",
@@ -161,10 +163,11 @@ bool load_bootstrap_meshes(renderer::AssetManager *assetManager,
   // Catalogue the mount so a saved mesh id maps back to the path its
   // bytes live at and a picker can list what exists before it loads. A
   // loader's own record wins: the walk never replaces one that exists,
-  // and the material loader below updates the walk's in place.
+  // and the material loader below updates the walk's in place. The walk
+  // logs its own outcome, an Error naming every offending path when the
+  // mount does not index cleanly, so nothing here repeats it.
   static_cast<void>(content::register_mounted_assets(
-      &assetDatabase->metadataStore, active_config().assetMount,
-      active_config().assetRoot));
+      catalog, active_config().assetMount, active_config().assetRoot));
 
   // Discover project material JSONs so MeshComponent.materialAssetId
   // references resolve during render prep.
@@ -175,7 +178,7 @@ bool load_bootstrap_meshes(renderer::AssetManager *assetManager,
   std::snprintf(materialsPrefix, sizeof(materialsPrefix), "%s/materials",
                 active_config().assetMount);
   const std::size_t materialCount = renderer::load_material_assets_in_directory(
-      assetDatabase, materialsDir, materialsPrefix);
+      assetDatabase, catalog, materialsDir, materialsPrefix);
   if (materialCount > 0U) {
     char logBuffer[128] = {};
     std::snprintf(logBuffer, sizeof(logBuffer), "loaded %zu material assets",
@@ -192,9 +195,9 @@ bool load_bootstrap_meshes(renderer::AssetManager *assetManager,
 
 void create_bootstrap_scene(runtime::World *world,
                             const BootstrapMeshIds &meshIds) noexcept {
-  const renderer::AssetId defaultMesh =
-      (meshIds.cube != renderer::kInvalidAssetId) ? meshIds.cube
-                                                  : meshIds.bootstrap;
+  const content::AssetId defaultMesh =
+      (meshIds.cube != content::kInvalidAssetId) ? meshIds.cube
+                                                 : meshIds.bootstrap;
 
   const runtime::Entity entity = world->create_scene_object();
   const runtime::Entity stackedEntity = world->create_scene_object();
@@ -203,7 +206,7 @@ void create_bootstrap_scene(runtime::World *world,
   const runtime::Entity lightEntity = world->create_scene_object();
   const runtime::Entity sceneControllerEntity = world->create_scene_object();
   const runtime::Entity characterEntity =
-      (meshIds.character != renderer::kInvalidAssetId)
+      (meshIds.character != content::kInvalidAssetId)
           ? world->create_scene_object()
           : runtime::kInvalidEntity;
   if ((entity == runtime::kInvalidEntity) ||
@@ -308,7 +311,7 @@ void create_bootstrap_scene(runtime::World *world,
     gc.restitution = 0.1F;
     static_cast<void>(world->add_collider(groundEntity, gc));
     runtime::MeshComponent mc{};
-    mc.meshAssetId = (meshIds.plane != renderer::kInvalidAssetId)
+    mc.meshAssetId = (meshIds.plane != content::kInvalidAssetId)
                          ? meshIds.plane
                          : meshIds.bootstrap;
     mc.albedo = math::Vec3(0.45F, 0.42F, 0.38F);
@@ -322,7 +325,7 @@ void create_bootstrap_scene(runtime::World *world,
     static_cast<void>(world->add_transform(foliageEntity, t));
 
     runtime::FoliagePatchComponent foliage{};
-    foliage.meshAssetIds[0] = (meshIds.grass != renderer::kInvalidAssetId)
+    foliage.meshAssetIds[0] = (meshIds.grass != content::kInvalidAssetId)
                                   ? meshIds.grass
                                   : defaultMesh;
     foliage.meshAssetIds[1] = foliage.meshAssetIds[0];

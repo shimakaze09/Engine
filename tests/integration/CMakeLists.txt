@@ -280,10 +280,15 @@ engine_add_test_executable(engine_integration_coin_run_acceptance
 # The same route played again in a real window with a render device: it
 # must end on the headless play's state hash, so drawing cannot change what
 # the simulation computes. CI runs it on lavapipe.
+#
+# It runs alone. Its route is key events delivered to a real window, and
+# gpu suites share one display: another suite's window opening mid-route
+# takes keyboard focus, the engine rightly releases the held key, and the
+# player stops short of a coin.
 add_test(NAME engine_integration_coin_run_acceptance_gpu
     COMMAND engine_integration_coin_run_acceptance --windowed)
 set_tests_properties(engine_integration_coin_run_acceptance_gpu
-    PROPERTIES LABELS "gpu;integration")
+    PROPERTIES LABELS "gpu;integration" RUN_SERIAL TRUE)
 
 engine_add_test_executable(engine_integration_scene_mesh_resolution
     SOURCES

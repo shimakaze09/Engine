@@ -16,18 +16,19 @@
 #include <new>
 #include <string>
 
+#include "../test_harness.h"
+#include "engine/content/asset_catalog.h"
+#include "engine/content/asset_streaming.h"
 #include "engine/core/cvar.h"
 #include "engine/core/logging.h"
 #include "engine/core/service_locator.h"
 #include "engine/core/vfs.h"
 #include "engine/renderer/asset_database.h"
 #include "engine/renderer/asset_manager.h"
-#include "engine/content/asset_streaming.h"
 #include "engine/runtime/scripting_bridge.h"
 #include "engine/runtime/service_registry.h"
 #include "engine/runtime/world.h"
 #include "engine/scripting/scripting.h"
-#include "../test_harness.h"
 
 namespace {
 
@@ -41,7 +42,7 @@ struct RecordedLoad final {
 };
 
 /// Load callback that records the path it receives and succeeds.
-bool recording_load(engine::renderer::AssetId, const char *path,
+bool recording_load(engine::content::AssetId, const char *path,
                     std::uint64_t *outSizeBytes, void *userData) noexcept {
   auto *recorded = static_cast<RecordedLoad *>(userData);
   if (recorded != nullptr) {
@@ -57,7 +58,7 @@ bool recording_load(engine::renderer::AssetId, const char *path,
 }
 
 /// Upload callback that succeeds without touching the GPU.
-bool ok_upload(engine::renderer::AssetId, void *) noexcept { return true; }
+bool ok_upload(engine::content::AssetId, void *) noexcept { return true; }
 
 /// Counts scripting-channel errors, so a refused path is seen to log one.
 struct ErrorTally final {
@@ -94,7 +95,7 @@ bool write_script_file(const char *contents) noexcept {
 /// Finds the live queue handle for an asset id under the queue lock.
 engine::content::LoadHandle
 find_request_handle(engine::content::AssetStreamingQueue *queue,
-                    engine::renderer::AssetId assetId) noexcept {
+                    engine::content::AssetId assetId) noexcept {
   std::lock_guard<std::mutex> lock(queue->mutex);
   for (std::uint32_t i = 0U;
        i < engine::content::AssetStreamingQueue::kMaxRequests; ++i) {
@@ -109,7 +110,7 @@ find_request_handle(engine::content::AssetStreamingQueue *queue,
 /// Drives the queue until the asset's request is terminal.
 engine::content::LoadingState
 pump_to_terminal(engine::content::AssetStreamingQueue *queue,
-                 engine::renderer::AssetId assetId,
+                 engine::content::AssetId assetId,
                  RecordedLoad *recorded) noexcept {
   const engine::content::LoadHandle handle =
       find_request_handle(queue, assetId);
@@ -167,6 +168,9 @@ void run_checks(engine::tests::TestContext &ctx,
 
   engine::core::ServiceLocator locator{};
   engine::runtime::EngineAssetDatabaseService service{};
+  std::unique_ptr<engine::content::AssetCatalog> serviceCatalog(
+      new (std::nothrow) engine::content::AssetCatalog());
+  service.catalog = serviceCatalog.get();
   service.database = database.get();
   service.manager = manager.get();
   service.streamingQueue = queue.get();
@@ -200,8 +204,8 @@ void run_checks(engine::tests::TestContext &ctx,
   RecordedLoad recorded{};
   ctx.check(engine::scripting::call_script_function("request_mounted"),
             "mounted request accepted");
-  const engine::renderer::AssetId probeId =
-      engine::renderer::make_asset_id_from_path("assets/probe.mesh");
+  const engine::content::AssetId probeId =
+      engine::content::make_asset_id_from_path("assets/probe.mesh");
   ctx.check(engine::renderer::mesh_asset_requested_resident(database.get(),
                                                             probeId),
             "record keyed by the virtual path");
@@ -229,8 +233,8 @@ void run_checks(engine::tests::TestContext &ctx,
             "unmounted request refused");
   engine::core::log_unregister_sink(&tally_errors, &tally);
   ctx.check(tally.scriptingErrors == 1, "refusal logged one scripting error");
-  const engine::renderer::AssetId strayId =
-      engine::renderer::make_asset_id_from_path("elsewhere/probe.mesh");
+  const engine::content::AssetId strayId =
+      engine::content::make_asset_id_from_path("elsewhere/probe.mesh");
   ctx.check(!engine::renderer::mesh_asset_requested_resident(database.get(),
                                                              strayId),
             "no record for the refused path");
@@ -242,8 +246,8 @@ void run_checks(engine::tests::TestContext &ctx,
   service.streamingQueue = nullptr;
   ctx.check(engine::scripting::call_script_function("request_manager_path"),
             "manager-path request accepted");
-  const engine::renderer::AssetId queuedId =
-      engine::renderer::make_asset_id_from_path("assets/queued.mesh");
+  const engine::content::AssetId queuedId =
+      engine::content::make_asset_id_from_path("assets/queued.mesh");
   ctx.check(engine::renderer::mesh_asset_requested_resident(database.get(),
                                                             queuedId),
             "manager record keyed by the virtual path");

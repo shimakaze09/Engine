@@ -76,8 +76,8 @@ bool decode_script_asset_handle(std::uint32_t handle, std::uint32_t *outSlot,
 /// Finds an existing Lua handle slot for an asset id.
 std::uint32_t find_script_asset_handle_slot(
     const runtime::EngineAssetDatabaseService *service,
-    renderer::AssetId assetId) noexcept {
-  if ((service == nullptr) || (assetId == renderer::kInvalidAssetId)) {
+    content::AssetId assetId) noexcept {
+  if ((service == nullptr) || (assetId == content::kInvalidAssetId)) {
     return runtime::EngineAssetDatabaseService::kMaxScriptAssetLoadHandles;
   }
 
@@ -96,8 +96,8 @@ std::uint32_t find_script_asset_handle_slot(
 /// Allocates or reuses a Lua handle slot for a runtime asset request.
 std::uint32_t
 allocate_script_asset_handle_slot(runtime::EngineAssetDatabaseService *service,
-                                  renderer::AssetId assetId) noexcept {
-  if ((service == nullptr) || (assetId == renderer::kInvalidAssetId)) {
+                                  content::AssetId assetId) noexcept {
+  if ((service == nullptr) || (assetId == content::kInvalidAssetId)) {
     return runtime::EngineAssetDatabaseService::kMaxScriptAssetLoadHandles;
   }
 
@@ -608,13 +608,13 @@ runtime::Entity scripting_instantiate_prefab(runtime::World *world,
 /// without a sidecar is reported by the mount walk, and a made-up
 /// identity in a saved scene would name a different asset next run.
 core::AssetRef scripting_asset_ref_for_id(std::uint64_t assetId) noexcept {
-  if ((assetId == renderer::kInvalidAssetId) ||
+  if ((assetId == content::kInvalidAssetId) ||
       (g_scriptingAssetDatabaseService == nullptr) ||
-      (g_scriptingAssetDatabaseService->database == nullptr)) {
+      (g_scriptingAssetDatabaseService->catalog == nullptr)) {
     return core::AssetRef{};
   }
-  const renderer::AssetMetadata *metadata = renderer::find_asset_metadata(
-      g_scriptingAssetDatabaseService->database, assetId);
+  const content::AssetMetadata *metadata = content::find_asset_metadata(
+      g_scriptingAssetDatabaseService->catalog, assetId);
   return (metadata != nullptr) ? metadata->ref : core::AssetRef{};
 }
 
@@ -623,15 +623,16 @@ std::uint32_t scripting_load_asset_async(const char *path,
                                          std::uint8_t priority) noexcept {
   if ((path == nullptr) || (path[0] == '\0') ||
       (g_scriptingAssetDatabaseService == nullptr) ||
-      (g_scriptingAssetDatabaseService->database == nullptr)) {
+      (g_scriptingAssetDatabaseService->database == nullptr) ||
+      (g_scriptingAssetDatabaseService->catalog == nullptr)) {
     return kInvalidScriptAssetHandle;
   }
 
   // The virtual path is the asset's identity; the bytes come from wherever
   // the mount puts it. The streaming worker and the request queue open the
   // path they are handed, so it must already be the OS path.
-  const renderer::AssetId assetId = renderer::make_asset_id_from_path(path);
-  if (assetId == renderer::kInvalidAssetId) {
+  const content::AssetId assetId = content::make_asset_id_from_path(path);
+  if (assetId == content::kInvalidAssetId) {
     return kInvalidScriptAssetHandle;
   }
   char osPath[512] = {};
@@ -646,15 +647,15 @@ std::uint32_t scripting_load_asset_async(const char *path,
   // no authored identity: asking for a file by name is not importing it,
   // so the record is reachable by id for this session and by nothing
   // afterwards.
-  static_cast<void>(note_mesh_asset_path(
-      g_scriptingAssetDatabaseService->database, assetId, path,
-      core::AssetRef{}));
+  static_cast<void>(
+      note_mesh_asset_path(g_scriptingAssetDatabaseService->catalog, assetId,
+                           path, core::AssetRef{}));
 
   retire_terminal_script_loads(g_scriptingAssetDatabaseService);
 
   const bool alreadyReady =
       renderer::mesh_asset_state(g_scriptingAssetDatabaseService->database,
-                                 assetId) == renderer::AssetState::Ready;
+                                 assetId) == content::AssetState::Ready;
 
   const std::uint32_t slot = allocate_script_asset_handle_slot(
       g_scriptingAssetDatabaseService, assetId);
@@ -671,7 +672,7 @@ std::uint32_t scripting_load_asset_async(const char *path,
     if (!renderer::request_mesh_asset_streaming_load(
             g_scriptingAssetDatabaseService->database, assetId, osPath)) {
       scriptHandle.occupied = false;
-      scriptHandle.assetId = renderer::kInvalidAssetId;
+      scriptHandle.assetId = content::kInvalidAssetId;
       return kInvalidScriptAssetHandle;
     }
 
@@ -682,9 +683,9 @@ std::uint32_t scripting_load_asset_async(const char *path,
       if (!streamingHandle.valid()) {
         static_cast<void>(renderer::set_mesh_asset_state(
             g_scriptingAssetDatabaseService->database, assetId,
-            renderer::AssetState::Failed, renderer::kInvalidMeshHandle));
+            content::AssetState::Failed, renderer::kInvalidMeshHandle));
         scriptHandle.occupied = false;
-        scriptHandle.assetId = renderer::kInvalidAssetId;
+        scriptHandle.assetId = content::kInvalidAssetId;
         return kInvalidScriptAssetHandle;
       }
       scriptHandle.streamingHandle = streamingHandle;
@@ -699,7 +700,7 @@ std::uint32_t scripting_load_asset_async(const char *path,
                                  assetId, osPath)) {
     auto &handle = g_scriptingAssetDatabaseService->scriptLoadHandles[slot];
     handle.occupied = false;
-    handle.assetId = renderer::kInvalidAssetId;
+    handle.assetId = content::kInvalidAssetId;
     return kInvalidScriptAssetHandle;
   }
 
@@ -721,13 +722,13 @@ bool scripting_is_asset_ready(std::uint32_t handleIndex) noexcept {
 
   const auto &handle = g_scriptingAssetDatabaseService->scriptLoadHandles[slot];
   if (!handle.occupied || (handle.generation != generation) ||
-      (handle.assetId == renderer::kInvalidAssetId)) {
+      (handle.assetId == content::kInvalidAssetId)) {
     return false;
   }
 
   const bool databaseReady =
       renderer::mesh_asset_state(g_scriptingAssetDatabaseService->database,
-                                 handle.assetId) == renderer::AssetState::Ready;
+                                 handle.assetId) == content::AssetState::Ready;
   if ((g_scriptingAssetDatabaseService->streamingQueue != nullptr) &&
       handle.streamingHandle.valid()) {
     return databaseReady && content::is_load_ready(

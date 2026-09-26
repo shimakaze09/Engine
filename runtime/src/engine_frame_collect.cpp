@@ -50,7 +50,7 @@ count_ready_mesh_components(const runtime::World &world,
       [&count, assets](runtime::Entity,
                        const runtime::MeshComponent &mesh) noexcept {
         if (renderer::mesh_asset_state(assets, mesh.meshAssetId) ==
-            renderer::AssetState::Ready) {
+            content::AssetState::Ready) {
           ++count;
         }
       });
@@ -71,16 +71,16 @@ count_mesh_asset_states(const renderer::AssetDatabase *assets) noexcept {
     }
 
     switch (assets->meshAssets[i].state) {
-    case renderer::AssetState::Ready:
+    case content::AssetState::Ready:
       ++counts.ready;
       break;
-    case renderer::AssetState::Loading:
+    case content::AssetState::Loading:
       ++counts.loading;
       break;
-    case renderer::AssetState::Failed:
+    case content::AssetState::Failed:
       ++counts.failed;
       break;
-    case renderer::AssetState::Unloaded:
+    case content::AssetState::Unloaded:
       break;
     }
   }

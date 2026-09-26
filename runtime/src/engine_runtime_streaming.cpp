@@ -15,10 +15,10 @@ namespace engine {
 
 /// Stores a CPU-side mesh payload for main-thread upload.
 bool store_streamed_mesh_data(RuntimeAssetStreamingState *state,
-                              renderer::AssetId assetId,
+                              content::AssetId assetId,
                               renderer::CpuMeshData &&meshData,
                               std::uint64_t sizeBytes) noexcept {
-  if ((state == nullptr) || (assetId == renderer::kInvalidAssetId)) {
+  if ((state == nullptr) || (assetId == content::kInvalidAssetId)) {
     return false;
   }
 
@@ -50,10 +50,10 @@ bool store_streamed_mesh_data(RuntimeAssetStreamingState *state,
 
 /// Takes a CPU-side mesh payload loaded by the streaming worker.
 bool take_streamed_mesh_data(RuntimeAssetStreamingState *state,
-                             renderer::AssetId assetId,
+                             content::AssetId assetId,
                              renderer::CpuMeshData *outMeshData,
                              std::uint64_t *outSizeBytes) noexcept {
-  if ((state == nullptr) || (assetId == renderer::kInvalidAssetId) ||
+  if ((state == nullptr) || (assetId == content::kInvalidAssetId) ||
       (outMeshData == nullptr)) {
     return false;
   }
@@ -87,7 +87,7 @@ void clear_streamed_mesh_data(RuntimeAssetStreamingState *state) noexcept {
 }
 
 /// Worker-thread CPU load callback for runtime asset streaming.
-bool runtime_streaming_load_mesh(renderer::AssetId assetId, const char *path,
+bool runtime_streaming_load_mesh(content::AssetId assetId, const char *path,
                                  std::uint64_t *outSizeBytes,
                                  void *userData) noexcept {
   auto *state = static_cast<RuntimeAssetStreamingState *>(userData);
@@ -109,7 +109,7 @@ bool runtime_streaming_load_mesh(renderer::AssetId assetId, const char *path,
 }
 
 /// Main-thread GPU upload callback for runtime asset streaming.
-bool runtime_streaming_upload_mesh(renderer::AssetId assetId,
+bool runtime_streaming_upload_mesh(content::AssetId assetId,
                                    void *userData) noexcept {
   auto *state = static_cast<RuntimeAssetStreamingState *>(userData);
   if ((state == nullptr) || (state->database == nullptr) ||
@@ -121,16 +121,16 @@ bool runtime_streaming_upload_mesh(renderer::AssetId assetId,
   std::uint64_t sizeBytes = 0ULL;
   if (!take_streamed_mesh_data(state, assetId, &meshData, &sizeBytes)) {
     static_cast<void>(renderer::set_mesh_asset_state(
-        state->database, assetId, renderer::AssetState::Failed,
+        state->database, assetId, content::AssetState::Failed,
         renderer::kInvalidMeshHandle));
     return false;
   }
 
   if (!renderer::mesh_asset_requested_resident(state->database, assetId) ||
       (renderer::mesh_asset_state(state->database, assetId) !=
-       renderer::AssetState::Loading)) {
+       content::AssetState::Loading)) {
     static_cast<void>(renderer::set_mesh_asset_state(
-        state->database, assetId, renderer::AssetState::Unloaded,
+        state->database, assetId, content::AssetState::Unloaded,
         renderer::kInvalidMeshHandle));
     return true;
   }
@@ -138,7 +138,7 @@ bool runtime_streaming_upload_mesh(renderer::AssetId assetId,
   renderer::GpuMesh mesh{};
   if (!renderer::upload_mesh_data_to_gpu(meshData, &mesh)) {
     static_cast<void>(renderer::set_mesh_asset_state(
-        state->database, assetId, renderer::AssetState::Failed,
+        state->database, assetId, content::AssetState::Failed,
         renderer::kInvalidMeshHandle));
     return false;
   }
@@ -148,7 +148,7 @@ bool runtime_streaming_upload_mesh(renderer::AssetId assetId,
   if (meshHandle == renderer::kInvalidMeshHandle) {
     renderer::unload_mesh(&mesh);
     static_cast<void>(renderer::set_mesh_asset_state(
-        state->database, assetId, renderer::AssetState::Failed,
+        state->database, assetId, content::AssetState::Failed,
         renderer::kInvalidMeshHandle));
     core::log_message(core::LogLevel::Error, "assets",
                       "mesh registry is full; streamed asset upload failed");
@@ -156,8 +156,7 @@ bool runtime_streaming_upload_mesh(renderer::AssetId assetId,
   }
 
   if (!renderer::set_mesh_asset_state(state->database, assetId,
-                                      renderer::AssetState::Ready,
-                                      meshHandle)) {
+                                      content::AssetState::Ready, meshHandle)) {
     // Roll back through the public unload path (not raw slot indexing) so
     // the registry's generation bump still fires.
     renderer::unload_gpu_mesh(state->meshRegistry, meshHandle);
@@ -179,7 +178,7 @@ void retire_terminal_script_loads(
 
   for (auto &handle : service->scriptLoadHandles) {
     if (!handle.occupied || !handle.streamingHandle.valid() ||
-        (handle.assetId == renderer::kInvalidAssetId)) {
+        (handle.assetId == content::kInvalidAssetId)) {
       continue;
     }
 
@@ -197,9 +196,9 @@ void retire_terminal_script_loads(
     // load; one the upload settled keeps the state it was given.
     if ((state == content::LoadingState::Failed) &&
         (renderer::mesh_asset_state(service->database, handle.assetId) ==
-         renderer::AssetState::Loading)) {
+         content::AssetState::Loading)) {
       static_cast<void>(renderer::set_mesh_asset_state(
-          service->database, handle.assetId, renderer::AssetState::Failed,
+          service->database, handle.assetId, content::AssetState::Failed,
           renderer::kInvalidMeshHandle));
     }
     static_cast<void>(
@@ -229,9 +228,9 @@ void sync_streaming_failures(
   for (std::size_t i = 0U; i < terminalCount; ++i) {
     if ((terminals[i].state == content::LoadingState::Failed) &&
         (renderer::mesh_asset_state(service->database, terminals[i].assetId) ==
-         renderer::AssetState::Loading)) {
+         content::AssetState::Loading)) {
       static_cast<void>(renderer::set_mesh_asset_state(
-          service->database, terminals[i].assetId, renderer::AssetState::Failed,
+          service->database, terminals[i].assetId, content::AssetState::Failed,
           renderer::kInvalidMeshHandle));
     }
     static_cast<void>(

@@ -31,8 +31,8 @@ class World;
 /// for a load that carries no authored identity, such as a script asking
 /// for a file by name — that mesh is reachable by id for this session and
 /// by nothing afterwards, which is what asking by name means.
-bool note_mesh_asset_path(renderer::AssetDatabase *database,
-                          renderer::AssetId id, const char *virtualPath,
+bool note_mesh_asset_path(content::AssetCatalog *catalog, content::AssetId id,
+                          const char *virtualPath,
                           const core::AssetRef &ref) noexcept;
 
 /// What the pass has already reported for the World content it last saw;
@@ -41,7 +41,7 @@ bool note_mesh_asset_path(renderer::AssetDatabase *database,
 struct UnresolvedMeshReports final {
   static constexpr std::size_t kMaxReported = 64U;
   /// Ids the catalog has no mesh path for.
-  std::array<renderer::AssetId, kMaxReported> ids{};
+  std::array<content::AssetId, kMaxReported> ids{};
   std::size_t count = 0U;
   /// References the catalog has no asset for at all, which is the earlier
   /// failure: an id at least said where to look.

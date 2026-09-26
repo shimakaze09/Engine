@@ -5,6 +5,7 @@
 // invented for an asset that carries none, because an editor gesture
 // writes that identity into a saved document.
 
+#include "engine/content/asset_catalog.h"
 #include "engine/core/vfs.h"
 #include "engine/renderer/asset_database.h"
 #include "engine/runtime/editor_bridge.h"
@@ -45,6 +46,9 @@ int check_request_marks_asset_loading() noexcept {
   }
 
   engine::runtime::EngineAssetDatabaseService service{};
+  std::unique_ptr<engine::content::AssetCatalog> serviceCatalog(
+      new (std::nothrow) engine::content::AssetCatalog());
+  service.catalog = serviceCatalog.get();
   service.database = database.get();
   engine::runtime::set_editor_asset_service(&service);
   const auto finish = [](int result) noexcept {
@@ -60,12 +64,12 @@ int check_request_marks_asset_loading() noexcept {
   const std::uint64_t assetId =
       engine::runtime::editor_request_mesh_asset(kVirtualPath);
   const std::uint64_t expectedId =
-      engine::renderer::make_asset_id_from_path(kVirtualPath);
+      engine::content::make_asset_id_from_path(kVirtualPath);
   if ((assetId == 0ULL) || (assetId != expectedId)) {
     return finish(13);
   }
   if (engine::renderer::mesh_asset_state(database.get(), assetId) !=
-      engine::renderer::AssetState::Loading) {
+      engine::content::AssetState::Loading) {
     return finish(14);
   }
 
@@ -100,6 +104,9 @@ int check_asset_ref_reports_only_catalogued_identity() noexcept {
     return 21;
   }
   engine::runtime::EngineAssetDatabaseService service{};
+  std::unique_ptr<engine::content::AssetCatalog> serviceCatalog(
+      new (std::nothrow) engine::content::AssetCatalog());
+  service.catalog = serviceCatalog.get();
   service.database = database.get();
   engine::runtime::set_editor_asset_service(&service);
   const auto finish = [](int result) noexcept {
@@ -116,13 +123,13 @@ int check_asset_ref_reports_only_catalogued_identity() noexcept {
 
   // A record the mount walk could give no identity stays identity-less
   // here: a made-up reference would name a different asset next run.
-  engine::renderer::AssetMetadata unidentified{};
+  engine::content::AssetMetadata unidentified{};
   unidentified.assetId = 101ULL;
-  unidentified.typeTag = engine::renderer::AssetTypeTag::Mesh;
-  engine::renderer::write_metadata_path(&unidentified.filePath,
+  unidentified.typeTag = engine::content::AssetTypeTag::Mesh;
+  engine::content::write_metadata_path(&unidentified.filePath,
                                        "edtest/unimported.mesh");
-  if (!engine::renderer::register_asset_metadata(database.get(),
-                                                 unidentified)) {
+  if (!engine::content::register_asset_metadata(service.catalog,
+                                                unidentified)) {
     return finish(23);
   }
   if (engine::core::asset_ref_is_valid(
@@ -134,13 +141,13 @@ int check_asset_ref_reports_only_catalogued_identity() noexcept {
   constexpr engine::core::AssetRef kRef{
       engine::core::AssetGuid{0x0123456789abcdefULL, 0xfedcba9876543210ULL},
       0x432408a2e33116bcULL};
-  engine::renderer::AssetMetadata identified{};
+  engine::content::AssetMetadata identified{};
   identified.assetId = 202ULL;
-  identified.typeTag = engine::renderer::AssetTypeTag::Mesh;
+  identified.typeTag = engine::content::AssetTypeTag::Mesh;
   identified.ref = kRef;
-  engine::renderer::write_metadata_path(&identified.filePath,
-                                        "edtest/imported.mesh");
-  if (!engine::renderer::register_asset_metadata(database.get(), identified)) {
+  engine::content::write_metadata_path(&identified.filePath,
+                                       "edtest/imported.mesh");
+  if (!engine::content::register_asset_metadata(service.catalog, identified)) {
     return finish(25);
   }
   if (!(engine::runtime::editor_asset_ref(202ULL) == kRef)) {

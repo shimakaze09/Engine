@@ -12,14 +12,15 @@
 
 #include <SDL3/SDL.h>
 
+#include "engine/content/asset_catalog.h"
+#include "engine/content/asset_streaming.h"
 #include "engine/core/cvar.h"
 #include "engine/core/logging.h"
+#include "engine/core/service_locator.h"
 #include "engine/core/touch_input.h"
 #include "engine/core/vfs.h"
-#include "engine/core/service_locator.h"
 #include "engine/renderer/asset_database.h"
 #include "engine/renderer/asset_manager.h"
-#include "engine/content/asset_streaming.h"
 #include "engine/runtime/engine_pipeline.h"
 #include "engine/runtime/scene_serializer.h"
 #include "engine/runtime/scripting_bridge.h"
@@ -125,6 +126,9 @@ int main() {
   engine::renderer::clear_asset_database(scriptAssetDatabase.get());
   engine::renderer::clear_asset_manager(scriptAssetManager.get());
   engine::runtime::EngineAssetDatabaseService scriptAssetService{};
+  std::unique_ptr<engine::content::AssetCatalog> scriptAssetServiceCatalog(
+      new (std::nothrow) engine::content::AssetCatalog());
+  scriptAssetService.catalog = scriptAssetServiceCatalog.get();
   scriptAssetService.database = scriptAssetDatabase.get();
   scriptAssetService.manager = scriptAssetManager.get();
   if (!serviceLocator.register_service<engine::runtime::EngineAssetDatabaseService>(
@@ -374,8 +378,8 @@ int main() {
     return 116;
   }
 
-  const engine::renderer::AssetId asyncAssetId =
-      engine::renderer::make_asset_id_from_path("assets/missing_async.mesh");
+  const engine::content::AssetId asyncAssetId =
+      engine::content::make_asset_id_from_path("assets/missing_async.mesh");
   if (!engine::renderer::mesh_asset_requested_resident(
           scriptAssetDatabase.get(), asyncAssetId)) {
     remove_script_file();
@@ -429,8 +433,8 @@ int main() {
     return 121;
   }
 
-  const engine::renderer::AssetId streamingAssetId =
-      engine::renderer::make_asset_id_from_path("assets/streamed_async.mesh");
+  const engine::content::AssetId streamingAssetId =
+      engine::content::make_asset_id_from_path("assets/streamed_async.mesh");
   if (!engine::renderer::mesh_asset_requested_resident(
           scriptAssetDatabase.get(), streamingAssetId)) {
     scriptAssetService.streamingQueue = nullptr;
@@ -442,7 +446,7 @@ int main() {
   }
   if (engine::renderer::mesh_asset_state(scriptAssetDatabase.get(),
                                          streamingAssetId) !=
-      engine::renderer::AssetState::Loading) {
+      engine::content::AssetState::Loading) {
     scriptAssetService.streamingQueue = nullptr;
     engine::content::shutdown_asset_streaming(scriptStreamingQueue.get());
     engine::core::shutdown_cvars();

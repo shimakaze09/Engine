@@ -13,6 +13,7 @@
 #include <memory>
 #include <new>
 
+#include "engine/content/asset_catalog.h"
 #include "engine/core/logging.h"
 #include "engine/core/service_locator.h"
 #include "engine/renderer/asset_database.h"
@@ -131,6 +132,8 @@ struct Fixture final {
   std::unique_ptr<engine::runtime::World> world;
   engine::core::ServiceLocator locator{};
   engine::runtime::EngineAssetDatabaseService assetService{};
+  std::unique_ptr<engine::content::AssetCatalog> assetServiceCatalog{
+      new (std::nothrow) engine::content::AssetCatalog()};
 
   bool init() noexcept {
     world.reset(new (std::nothrow) engine::runtime::World());
@@ -143,6 +146,7 @@ struct Fixture final {
     engine::renderer::clear_asset_database(assetDatabase.get());
     engine::renderer::clear_asset_manager(assetManager.get());
     assetService.database = assetDatabase.get();
+    assetService.catalog = assetServiceCatalog.get();
     assetService.manager = assetManager.get();
     if (!locator.register_service<engine::runtime::EngineAssetDatabaseService>(
             &assetService)) {

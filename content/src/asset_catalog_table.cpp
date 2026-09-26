@@ -1,17 +1,20 @@
-// Implements the generic asset metadata store and asset-id constructors
-// for the Engine content system: the table and its tag/dependency/query
-// logic, renderer-free.
+// Implements the asset catalog's table and the asset-id constructors: the
+// fixed-slot record store, its lookups by id, identity and path, the
+// write rules and the change generation, and the tag, dependency and query
+// logic. The mount walk that fills it lives in asset_catalog.cpp.
 
-#include "engine/content/metadata_store.h"
+#include "engine/content/asset_catalog.h"
 
 #include <cstddef>
-#include <cstring>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 
 #include "engine/content/asset_identity.h"
 #include "engine/core/hash.h"
 #include "engine/core/logging.h"
+#include "engine/core/thread_affinity.h"
+#include "engine/core/vfs.h"
 
 namespace engine::content {
 
@@ -29,15 +32,17 @@ std::size_t hashed_slot(AssetId id, std::size_t capacity) noexcept {
 } // namespace
 
 /// Resets every slot back to the empty state.
-void clear_metadata_store(MetadataStore *store) noexcept {
-  if (store == nullptr) {
+void clear_asset_catalog(AssetCatalog *catalog) noexcept {
+  if (catalog == nullptr) {
     return;
   }
+  ENGINE_ASSERT_MAIN_THREAD();
 
-  for (std::size_t i = 0U; i < store->entries.size(); ++i) {
-    store->occupied[i] = false;
-    store->entries[i] = AssetMetadata{};
+  for (std::size_t i = 0U; i < catalog->entries.size(); ++i) {
+    catalog->occupied[i] = false;
+    catalog->entries[i] = AssetMetadata{};
   }
+  ++catalog->generation;
 }
 
 // --- Metadata management ---
@@ -45,20 +50,20 @@ void clear_metadata_store(MetadataStore *store) noexcept {
 namespace {
 
 /// Finds the matching object or resource for metadata slot.
-std::size_t find_metadata_slot(const MetadataStore *store,
+std::size_t find_metadata_slot(const AssetCatalog *catalog,
                                AssetId id) noexcept {
-  if ((store == nullptr) || (id == kInvalidAssetId)) {
-    return store != nullptr ? store->entries.size() : 0U;
+  if ((catalog == nullptr) || (id == kInvalidAssetId)) {
+    return catalog != nullptr ? catalog->entries.size() : 0U;
   }
 
-  const std::size_t capacity = store->entries.size();
+  const std::size_t capacity = catalog->entries.size();
   const std::size_t base = hashed_slot(id, capacity);
   for (std::size_t probe = 0U; probe < capacity; ++probe) {
     const std::size_t slot = (base + probe) % capacity;
-    if (!store->occupied[slot]) {
+    if (!catalog->occupied[slot]) {
       return capacity;
     }
-    if (store->entries[slot].assetId == id) {
+    if (catalog->entries[slot].assetId == id) {
       return slot;
     }
   }
@@ -67,18 +72,17 @@ std::size_t find_metadata_slot(const MetadataStore *store,
 }
 
 /// Finds the matching object or resource for metadata insert slot.
-std::size_t find_metadata_insert_slot(const MetadataStore *store,
+std::size_t find_metadata_insert_slot(const AssetCatalog *catalog,
                                       AssetId id) noexcept {
-  if (store == nullptr) {
+  if (catalog == nullptr) {
     return 0U;
   }
 
-  const std::size_t capacity = store->entries.size();
+  const std::size_t capacity = catalog->entries.size();
   const std::size_t base = hashed_slot(id, capacity);
   for (std::size_t probe = 0U; probe < capacity; ++probe) {
     const std::size_t slot = (base + probe) % capacity;
-    if (!store->occupied[slot] ||
-        (store->entries[slot].assetId == id)) {
+    if (!catalog->occupied[slot] || (catalog->entries[slot].assetId == id)) {
       return slot;
     }
   }
@@ -88,9 +92,10 @@ std::size_t find_metadata_insert_slot(const MetadataStore *store,
 
 } // namespace
 
-bool register_asset_metadata(MetadataStore *store,
+bool register_asset_metadata(AssetCatalog *catalog,
                              const AssetMetadata &metadata) noexcept {
-  if ((store == nullptr) || (metadata.assetId == kInvalidAssetId) ||
+  ENGINE_ASSERT_MAIN_THREAD();
+  if ((catalog == nullptr) || (metadata.assetId == kInvalidAssetId) ||
       (metadata.tagCount > AssetMetadata::kMaxTags) ||
       (metadata.dependencyCount > AssetMetadata::kMaxDependencies)) {
     return false;
@@ -110,71 +115,107 @@ bool register_asset_metadata(MetadataStore *store,
     }
   }
 
-  const std::size_t slot =
-      find_metadata_insert_slot(store, metadata.assetId);
-  if (slot == store->entries.size()) {
+  const std::size_t slot = find_metadata_insert_slot(catalog, metadata.assetId);
+  if (slot == catalog->entries.size()) {
     return false;
   }
 
-  store->occupied[slot] = true;
-  store->entries[slot] = metadata;
+  catalog->occupied[slot] = true;
+  catalog->entries[slot] = metadata;
+  ++catalog->generation;
   return true;
 }
 
-/// Finds the matching object or resource for asset metadata.
-const AssetMetadata *find_asset_metadata(const MetadataStore *store,
-                                         AssetId id) noexcept {
-  if ((store == nullptr) || (id == kInvalidAssetId)) {
-    return nullptr;
+CatalogInsert
+register_asset_metadata_if_absent(AssetCatalog *catalog,
+                                  const AssetMetadata &metadata) noexcept {
+  if (find_asset_metadata(catalog, metadata.assetId) != nullptr) {
+    return CatalogInsert::AlreadyKnown;
   }
-
-  const std::size_t slot = find_metadata_slot(store, id);
-  if (slot == store->entries.size()) {
-    return nullptr;
-  }
-
-  return &store->entries[slot];
+  return register_asset_metadata(catalog, metadata) ? CatalogInsert::Registered
+                                                    : CatalogInsert::Refused;
 }
 
-const AssetMetadata *find_asset_metadata_by_ref(const MetadataStore *store,
-                                                const AssetRef &ref) noexcept {
-  if ((store == nullptr) || !asset_ref_is_valid(ref)) {
+bool can_register_asset_metadata(const AssetCatalog *catalog,
+                                 AssetId id) noexcept {
+  return (catalog != nullptr) && (id != kInvalidAssetId) &&
+         (find_metadata_insert_slot(catalog, id) != catalog->entries.size());
+}
+
+/// Finds the matching object or resource for asset metadata.
+const AssetMetadata *find_asset_metadata(const AssetCatalog *catalog,
+                                         AssetId id) noexcept {
+  if ((catalog == nullptr) || (id == kInvalidAssetId)) {
     return nullptr;
   }
-  for (std::size_t slot = 0U; slot < store->entries.size(); ++slot) {
-    if (!store->occupied[slot]) {
+
+  const std::size_t slot = find_metadata_slot(catalog, id);
+  if (slot == catalog->entries.size()) {
+    return nullptr;
+  }
+
+  return &catalog->entries[slot];
+}
+
+const AssetMetadata *
+find_asset_metadata_by_path(const AssetCatalog *catalog,
+                            const char *virtualPath) noexcept {
+  char wanted[sizeof(AssetMetadata::filePath)] = {};
+  if ((catalog == nullptr) ||
+      !core::canonical_virtual_path(virtualPath, wanted, sizeof(wanted))) {
+    return nullptr;
+  }
+  const AssetMetadata *record =
+      find_asset_metadata(catalog, make_asset_id_from_path(wanted));
+  char stored[sizeof(AssetMetadata::filePath)] = {};
+  if ((record == nullptr) ||
+      !core::canonical_virtual_path(record->filePath.data(), stored,
+                                    sizeof(stored)) ||
+      (std::strcmp(stored, wanted) != 0)) {
+    return nullptr;
+  }
+  return record;
+}
+
+const AssetMetadata *find_asset_metadata_by_ref(const AssetCatalog *catalog,
+                                                const AssetRef &ref) noexcept {
+  if ((catalog == nullptr) || !asset_ref_is_valid(ref)) {
+    return nullptr;
+  }
+  for (std::size_t slot = 0U; slot < catalog->entries.size(); ++slot) {
+    if (!catalog->occupied[slot]) {
       continue;
     }
-    if (store->entries[slot].ref == ref) {
-      return &store->entries[slot];
+    if (catalog->entries[slot].ref == ref) {
+      return &catalog->entries[slot];
     }
   }
   return nullptr;
 }
 
-std::size_t find_duplicate_guid_records(const MetadataStore *store,
+std::size_t find_duplicate_guid_records(const AssetCatalog *catalog,
                                         const AssetMetadata **outRecords,
                                         std::size_t capacity) noexcept {
-  if (store == nullptr) {
+  if (catalog == nullptr) {
     return 0U;
   }
   std::size_t found = 0U;
-  for (std::size_t slot = 0U; slot < store->entries.size(); ++slot) {
-    if (!store->occupied[slot]) {
+  for (std::size_t slot = 0U; slot < catalog->entries.size(); ++slot) {
+    if (!catalog->occupied[slot]) {
       continue;
     }
-    const AssetMetadata &record = store->entries[slot];
+    const AssetMetadata &record = catalog->entries[slot];
     if (!asset_ref_is_valid(record.ref)) {
       continue;
     }
     // Only a full ref collision is a duplicate: two outputs of one
     // source share its GUID by design and are told apart by local id.
     bool collides = false;
-    for (std::size_t other = 0U; other < store->entries.size(); ++other) {
-      if ((other == slot) || !store->occupied[other]) {
+    for (std::size_t other = 0U; other < catalog->entries.size(); ++other) {
+      if ((other == slot) || !catalog->occupied[other]) {
         continue;
       }
-      if (store->entries[other].ref == record.ref) {
+      if (catalog->entries[other].ref == record.ref) {
         collides = true;
         break;
       }
@@ -190,48 +231,57 @@ std::size_t find_duplicate_guid_records(const MetadataStore *store,
   return found;
 }
 
-bool add_asset_tag(MetadataStore *store, AssetId id,
+bool add_asset_tag(AssetCatalog *catalog, AssetId id,
                    const char *tag) noexcept {
-  if ((store == nullptr) || (id == kInvalidAssetId) || (tag == nullptr)) {
+  if ((catalog == nullptr) || (id == kInvalidAssetId) || (tag == nullptr)) {
     return false;
   }
 
-  const std::size_t slot = find_metadata_slot(store, id);
-  if (slot == store->entries.size()) {
+  const std::size_t slot = find_metadata_slot(catalog, id);
+  if (slot == catalog->entries.size()) {
     return false;
   }
 
-  return asset_metadata_add_tag(&store->entries[slot], tag);
+  ENGINE_ASSERT_MAIN_THREAD();
+  AssetMetadata &record = catalog->entries[slot];
+  const std::size_t before = record.tagCount;
+  if (!asset_metadata_add_tag(&record, tag)) {
+    return false;
+  }
+  if (record.tagCount != before) {
+    ++catalog->generation;
+  }
+  return true;
 }
 
-bool asset_has_tag(const MetadataStore *store, AssetId id,
+bool asset_has_tag(const AssetCatalog *catalog, AssetId id,
                    const char *tag) noexcept {
-  if ((store == nullptr) || (id == kInvalidAssetId) || (tag == nullptr)) {
+  if ((catalog == nullptr) || (id == kInvalidAssetId) || (tag == nullptr)) {
     return false;
   }
 
-  const std::size_t slot = find_metadata_slot(store, id);
-  if (slot == store->entries.size()) {
+  const std::size_t slot = find_metadata_slot(catalog, id);
+  if (slot == catalog->entries.size()) {
     return false;
   }
 
-  return asset_metadata_has_tag(&store->entries[slot], tag);
+  return asset_metadata_has_tag(&catalog->entries[slot], tag);
 }
 
-std::size_t query_assets_by_tag(const MetadataStore *store, const char *tag,
+std::size_t query_assets_by_tag(const AssetCatalog *catalog, const char *tag,
                                 AssetId *outIds, std::size_t maxIds) noexcept {
-  if ((store == nullptr) || (tag == nullptr) || (outIds == nullptr) ||
+  if ((catalog == nullptr) || (tag == nullptr) || (outIds == nullptr) ||
       (maxIds == 0U)) {
     return 0U;
   }
 
   std::size_t count = 0U;
-  for (std::size_t i = 0U; i < store->entries.size(); ++i) {
-    if (!store->occupied[i]) {
+  for (std::size_t i = 0U; i < catalog->entries.size(); ++i) {
+    if (!catalog->occupied[i]) {
       continue;
     }
-    if (asset_metadata_has_tag(&store->entries[i], tag)) {
-      outIds[count] = store->entries[i].assetId;
+    if (asset_metadata_has_tag(&catalog->entries[i], tag)) {
+      outIds[count] = catalog->entries[i].assetId;
       ++count;
       if (count >= maxIds) {
         break;
@@ -241,20 +291,20 @@ std::size_t query_assets_by_tag(const MetadataStore *store, const char *tag,
   return count;
 }
 
-std::size_t query_assets_by_type(const MetadataStore *store,
+std::size_t query_assets_by_type(const AssetCatalog *catalog,
                                  AssetTypeTag typeTag, AssetId *outIds,
                                  std::size_t maxIds) noexcept {
-  if ((store == nullptr) || (outIds == nullptr) || (maxIds == 0U)) {
+  if ((catalog == nullptr) || (outIds == nullptr) || (maxIds == 0U)) {
     return 0U;
   }
 
   std::size_t count = 0U;
-  for (std::size_t i = 0U; i < store->entries.size(); ++i) {
-    if (!store->occupied[i]) {
+  for (std::size_t i = 0U; i < catalog->entries.size(); ++i) {
+    if (!catalog->occupied[i]) {
       continue;
     }
-    if (store->entries[i].typeTag == typeTag) {
-      outIds[count] = store->entries[i].assetId;
+    if (catalog->entries[i].typeTag == typeTag) {
+      outIds[count] = catalog->entries[i].assetId;
       ++count;
       if (count >= maxIds) {
         break;
@@ -266,14 +316,14 @@ std::size_t query_assets_by_type(const MetadataStore *store,
 
 // --- Dependency management ---
 
-std::size_t get_dependencies(const MetadataStore *store, AssetId id,
+std::size_t get_dependencies(const AssetCatalog *catalog, AssetId id,
                              AssetId *outIds, std::size_t maxIds) noexcept {
-  if ((store == nullptr) || (id == kInvalidAssetId) || (outIds == nullptr) ||
+  if ((catalog == nullptr) || (id == kInvalidAssetId) || (outIds == nullptr) ||
       (maxIds == 0U)) {
     return 0U;
   }
 
-  const AssetMetadata *meta = find_asset_metadata(store, id);
+  const AssetMetadata *meta = find_asset_metadata(catalog, id);
   if (meta == nullptr) {
     return 0U;
   }
@@ -286,19 +336,28 @@ std::size_t get_dependencies(const MetadataStore *store, AssetId id,
   return count;
 }
 
-bool add_asset_dependency(MetadataStore *store, AssetId id,
+bool add_asset_dependency(AssetCatalog *catalog, AssetId id,
                           AssetId depId) noexcept {
-  if ((store == nullptr) || (id == kInvalidAssetId) ||
+  if ((catalog == nullptr) || (id == kInvalidAssetId) ||
       (depId == kInvalidAssetId)) {
     return false;
   }
 
-  const std::size_t slot = find_metadata_slot(store, id);
-  if (slot == store->entries.size()) {
+  const std::size_t slot = find_metadata_slot(catalog, id);
+  if (slot == catalog->entries.size()) {
     return false;
   }
 
-  return asset_metadata_add_dependency(&store->entries[slot], depId);
+  ENGINE_ASSERT_MAIN_THREAD();
+  AssetMetadata &record = catalog->entries[slot];
+  const std::size_t before = record.dependencyCount;
+  if (!asset_metadata_add_dependency(&record, depId)) {
+    return false;
+  }
+  if (record.dependencyCount != before) {
+    ++catalog->generation;
+  }
+  return true;
 }
 
 namespace {
@@ -309,13 +368,13 @@ constexpr std::size_t kMaxDependencyDepth = 64U;
 
 /// Assets whose load callback has already run during one traversal.
 /// A registered asset is marked by its table slot, so deduplication holds
-/// for every record the store can hold; an id the store has no record for
+/// for every record the catalog can hold; an id the catalog has no record for
 /// owns no slot, so those are held in a side list instead.
 struct VisitedAssets final {
   static constexpr std::size_t kMaxUnregistered = 256U;
   static constexpr std::size_t kMarkBits = 64U;
   static constexpr std::size_t kMarkWords =
-      (MetadataStore::kMaxMetadata + kMarkBits - 1U) / kMarkBits;
+      (AssetCatalog::kMaxMetadata + kMarkBits - 1U) / kMarkBits;
 
   std::uint64_t slotMarks[kMarkWords] = {};
   AssetId unregistered[kMaxUnregistered] = {};
@@ -323,13 +382,13 @@ struct VisitedAssets final {
 };
 
 /// Whether the asset already ran its callback. `slot` is the id's slot in
-/// the store, or MetadataStore::kMaxMetadata when the store holds no
+/// the catalog, or AssetCatalog::kMaxMetadata when the catalog holds no
 /// record for it. The side list is scanned either way, because a callback
 /// that registers metadata can give an id a slot it did not have when it
 /// was first visited.
 bool asset_visited(const VisitedAssets &visited, std::size_t slot,
                    AssetId id) noexcept {
-  if (slot < MetadataStore::kMaxMetadata) {
+  if (slot < AssetCatalog::kMaxMetadata) {
     const std::uint64_t bit = 1ULL << (slot % VisitedAssets::kMarkBits);
     if ((visited.slotMarks[slot / VisitedAssets::kMarkBits] & bit) != 0ULL) {
       return true;
@@ -351,7 +410,7 @@ bool asset_visited(const VisitedAssets &visited, std::size_t slot,
 /// several dependents once per dependent.
 bool mark_asset_visited(VisitedAssets &visited, std::size_t slot,
                         AssetId id) noexcept {
-  if (slot < MetadataStore::kMaxMetadata) {
+  if (slot < AssetCatalog::kMaxMetadata) {
     const std::uint64_t bit = 1ULL << (slot % VisitedAssets::kMarkBits);
     visited.slotMarks[slot / VisitedAssets::kMarkBits] |= bit;
     return true;
@@ -366,11 +425,11 @@ bool mark_asset_visited(VisitedAssets &visited, std::size_t slot,
   return true;
 }
 
-/// State one traversal carries across the recursion: the store it walks,
+/// State one traversal carries across the recursion: the catalog it walks,
 /// the callback and its user data, the ancestor chain cycles are detected
 /// against, and the assets already loaded.
 struct DependencyTraversal final {
-  MetadataStore *store = nullptr;
+  AssetCatalog *catalog = nullptr;
   bool (*loadCallback)(AssetId id, void *userData) = nullptr;
   void *userData = nullptr;
   AssetId visitStack[kMaxDependencyDepth] = {};
@@ -399,15 +458,15 @@ bool load_with_deps_recursive(DependencyTraversal &traversal, AssetId id,
     return false;
   }
 
-  const std::size_t slot = find_metadata_slot(traversal.store, id);
+  const std::size_t slot = find_metadata_slot(traversal.catalog, id);
   if (asset_visited(traversal.visited, slot, id)) {
     return true;
   }
 
   traversal.visitStack[visitDepth] = id;
 
-  if (slot < MetadataStore::kMaxMetadata) {
-    const AssetMetadata &meta = traversal.store->entries[slot];
+  if (slot < AssetCatalog::kMaxMetadata) {
+    const AssetMetadata &meta = traversal.catalog->entries[slot];
     for (std::size_t i = 0U; i < meta.dependencyCount; ++i) {
       const AssetId depId = meta.dependencies[i];
       if (depId == kInvalidAssetId) {
@@ -442,10 +501,10 @@ bool load_with_deps_recursive(DependencyTraversal &traversal, AssetId id,
 } // namespace
 
 /// Loads the requested resource for with dependencies.
-bool load_with_dependencies(MetadataStore *store, AssetId rootId,
+bool load_with_dependencies(AssetCatalog *catalog, AssetId rootId,
                             bool (*loadCallback)(AssetId id, void *userData),
                             void *userData) noexcept {
-  if ((store == nullptr) || (rootId == kInvalidAssetId)) {
+  if ((catalog == nullptr) || (rootId == kInvalidAssetId)) {
     return false;
   }
 
@@ -453,7 +512,7 @@ bool load_with_dependencies(MetadataStore *store, AssetId rootId,
   // recursion by reference, so the visited marks cost one ~3 KB frame per
   // call rather than one per dependency level, and nothing is allocated.
   DependencyTraversal traversal{};
-  traversal.store = store;
+  traversal.catalog = catalog;
   traversal.loadCallback = loadCallback;
   traversal.userData = userData;
 

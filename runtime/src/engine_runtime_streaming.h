@@ -22,7 +22,7 @@ struct GpuMeshRegistry;
 /// CPU mesh payloads loaded by the streaming worker and consumed on the
 /// render thread.
 struct StreamingMeshTransferSlot final {
-  renderer::AssetId assetId = renderer::kInvalidAssetId;
+  content::AssetId assetId = content::kInvalidAssetId;
   renderer::CpuMeshData meshData{};
   std::uint64_t sizeBytes = 0ULL;
   bool occupied = false;
@@ -40,12 +40,12 @@ struct RuntimeAssetStreamingState final {
 };
 
 /// Streaming-queue load callback: worker-thread CPU IO into a transfer slot.
-bool runtime_streaming_load_mesh(renderer::AssetId assetId, const char *path,
+bool runtime_streaming_load_mesh(content::AssetId assetId, const char *path,
                                  std::uint64_t *outSizeBytes,
                                  void *userData) noexcept;
 
 /// Streaming-queue upload callback: main-thread GPU upload from the slot.
-bool runtime_streaming_upload_mesh(renderer::AssetId assetId,
+bool runtime_streaming_upload_mesh(content::AssetId assetId,
                                    void *userData) noexcept;
 
 /// Releases every transfer slot's CPU payload (teardown path).

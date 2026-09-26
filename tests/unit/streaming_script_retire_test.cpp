@@ -37,7 +37,7 @@ bool load_ok(content::AssetId, const char *, std::uint64_t *outSize,
 bool upload_skipped(content::AssetId id, void *userData) noexcept {
   auto *database = static_cast<renderer::AssetDatabase *>(userData);
   static_cast<void>(renderer::set_mesh_asset_state(
-      database, id, renderer::AssetState::Unloaded,
+      database, id, content::AssetState::Unloaded,
       renderer::kInvalidMeshHandle));
   return true;
 }
@@ -53,7 +53,7 @@ int main() {
   t.check(content::initialize_asset_streaming(queue.get()),
           "streaming workers start");
 
-  const renderer::AssetId id = renderer::make_asset_id_from_path("skip.mesh");
+  const content::AssetId id = content::make_asset_id_from_path("skip.mesh");
   t.check(renderer::request_mesh_asset_streaming_load(database.get(), id,
                                                       "skip.mesh"),
           "the mesh is requested");
@@ -82,14 +82,14 @@ int main() {
               content::LoadingState::Ready,
           "the request completes with its upload skipped");
   t.check(renderer::mesh_asset_state(database.get(), id) ==
-              renderer::AssetState::Unloaded,
+              content::AssetState::Unloaded,
           "the mesh is Unloaded, as it should be");
 
   // Two frames of the runtime's terminal pass.
   sync_streaming_failures(service.get());
   sync_streaming_failures(service.get());
   t.check(renderer::mesh_asset_state(database.get(), id) ==
-              renderer::AssetState::Unloaded,
+              content::AssetState::Unloaded,
           "a skipped upload is not turned into a failure a frame later");
   t.check(!service->scriptLoadHandles[0].streamingHandle.valid(),
           "the script's handle lets go of the finished request");
