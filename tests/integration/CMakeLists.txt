@@ -1434,6 +1434,17 @@ engine_add_test_executable(engine_integration_pipeline_texture_hot_reload
     integration
 )
 
+engine_add_test_executable(engine_integration_pipeline_texture_release
+    SOURCES
+    pipeline_texture_release_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_renderer
+    engine_core
+    LABELS
+    integration
+)
+
 engine_add_test_executable(engine_integration_pipeline_memory_report
     SOURCES
     pipeline_memory_report_test.cpp

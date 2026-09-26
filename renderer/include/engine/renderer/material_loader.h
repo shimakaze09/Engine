@@ -123,6 +123,11 @@ std::size_t load_material_assets_in_directory(
 using MaterialTextureLoadFn = TextureHandle (*)(const char *virtualPath,
                                                  void *userData) noexcept;
 
+/// Releases a texture handle the database no longer serves; paired with
+/// the MaterialTextureLoadFn that made it.
+using MaterialTextureReleaseFn = void (*)(TextureHandle handle,
+                                          void *userData) noexcept;
+
 /// Resolves every material's authored texture-slot references (see
 /// MaterialTextureSlots) into GPU handles on the material's flat Material
 /// record, so render prep only ever reads already-resolved handles. Calls
@@ -136,7 +141,8 @@ using MaterialTextureLoadFn = TextureHandle (*)(const char *virtualPath,
 /// parameters — never a crash, never a stale/unrelated texture bind. A
 /// texture the full texture table has no room to record is not loaded at
 /// all: it is reported once and the slot is not tried again until the
-/// material's slots are next assigned. A Failed texture is loaded again
+/// material's slots are next assigned or release_unreferenced_textures
+/// frees a record. A Failed texture is loaded again
 /// only by the editor's hot-reload poll, once its file changes
 /// (texture_hot_reload.h). Called every frame: each call visits every
 /// loaded material's slots, one table lookup per set slot, and loads
@@ -146,5 +152,22 @@ std::size_t resolve_material_textures(AssetDatabase *database,
                                       const content::AssetCatalog *catalog,
                                       MaterialTextureLoadFn loadFn,
                                       void *userData) noexcept;
+
+/// Frees every texture record no material's texture slots name, releasing
+/// its handle through `releaseFn`, so a texture a material stopped using
+/// (an edit, a reload, a parent's change) gives back its table slot and
+/// its GPU memory. Any material record counts, whatever its state, and an
+/// inherited slot counts like an authored one. Does nothing unless some
+/// material's slots changed since the last call
+/// (AssetDatabase::textureReferencesChanged), so an idle frame costs one
+/// test; otherwise one lookup per set slot of every material and one pass
+/// over the texture table. Call it on the main thread outside render prep,
+/// before resolve_material_textures, which rewrites every material's
+/// handles from its slots: no material can then draw with a released
+/// handle. Materials that gave up a slot for want of table room try again
+/// once a record is freed. Returns the number of records freed.
+std::size_t release_unreferenced_textures(AssetDatabase *database,
+                                          MaterialTextureReleaseFn releaseFn,
+                                          void *userData) noexcept;
 
 } // namespace engine::renderer

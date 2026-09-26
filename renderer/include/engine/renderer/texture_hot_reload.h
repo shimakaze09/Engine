@@ -15,11 +15,6 @@
 
 namespace engine::renderer {
 
-/// Releases a texture handle the database no longer serves; paired with
-/// the MaterialTextureLoadFn that made it.
-using MaterialTextureReleaseFn = void (*)(TextureHandle handle,
-                                          void *userData) noexcept;
-
 /// What reload_texture_asset did.
 enum class TextureReload : std::uint8_t {
   /// The texture is Ready with the file's current contents, and every

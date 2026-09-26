@@ -1408,6 +1408,11 @@ void EnginePipeline::Impl::stage_assets() noexcept {
   updatedAssets = renderer::update_asset_manager(
       assetManager.get(), assetDatabase.get(), assetCatalog.get(),
       meshRegistry.get(), 16U);
+  // A texture no material names any more gives its record and its device
+  // texture back first, so the resolve below finds the room and rewrites
+  // every handle before render prep reads one.
+  static_cast<void>(renderer::release_unreferenced_textures(
+      assetDatabase.get(), &release_material_texture_production, nullptr));
   // One lookup per set texture slot of every loaded material; loads only a
   // texture no material has tried yet (see resolve_material_textures's
   // header comment).

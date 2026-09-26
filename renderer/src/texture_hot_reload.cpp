@@ -79,7 +79,6 @@ TextureReload reload_texture_asset(AssetDatabase *database,
   record->runtimeTexture = loaded;
   record->state = content::AssetState::Ready;
   record->requestedResident = true;
-  record->refCount = (record->refCount == 0U) ? 1U : record->refCount;
   static_cast<void>(content::note_asset_reloaded(catalog, id));
   static_cast<void>(propagate_material_to_dependents(database, catalog, id));
   if ((previous != kInvalidTextureHandle) && (previous != loaded) &&

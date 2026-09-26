@@ -55,12 +55,13 @@ struct MeshAssetRecord final {
   bool pinned = false;
 };
 
-/// One texture slot: id, GPU handle, source path, refcount, state.
+/// One texture slot: id, GPU handle, source path, state. Materials own
+/// textures: a record lives while some material's texture slots name it,
+/// and release_unreferenced_textures frees it once none does.
 struct TextureAssetRecord final {
   content::AssetId id = content::kInvalidAssetId;
   TextureHandle runtimeTexture = kInvalidTextureHandle;
   std::array<char, 260U> sourcePath{};
-  std::uint32_t refCount = 0U;
   std::uint64_t lastAccessFrame = 0ULL;
   std::uint64_t sizeBytes = 0ULL;
   content::AssetState state = content::AssetState::Unloaded;
@@ -82,6 +83,8 @@ struct MaterialTextureSlots final {
   content::AssetId emissive = content::kInvalidAssetId;
   content::AssetId occlusion = content::kInvalidAssetId;
   content::AssetId opacity = content::kInvalidAssetId;
+
+  bool operator==(const MaterialTextureSlots &) const noexcept = default;
 };
 
 /// Every field a material document authors, in document order: the
@@ -192,6 +195,10 @@ struct AssetDatabase final {
   // bounded run of slots per call, so a full table costs a sweep over
   // several polls rather than every file in one frame. Runtime-only.
   std::uint32_t textureReloadCursor = 0U;
+  // Set whenever a material's texture slots change, so the next
+  // release_unreferenced_textures looks for textures no material names any
+  // more; nothing else can leave one unreferenced. Runtime-only.
+  bool textureReferencesChanged = false;
 
   static constexpr std::size_t kMaxMaterialAssets = 1024U;
   std::array<MaterialAssetRecord, kMaxMaterialAssets> materialAssets =
@@ -344,11 +351,10 @@ bool set_texture_asset_state(AssetDatabase *database, content::AssetId id,
 /// GPU texture handle for the id; invalid unless Ready.
 TextureHandle resolve_texture_asset(AssetDatabase *database,
                                     content::AssetId id) noexcept;
-/// Increments the texture refcount; false when unknown.
-bool retain_texture_asset(AssetDatabase *database,
-                          content::AssetId id) noexcept;
-/// Decrements the texture refcount; false when unknown or zero.
-bool release_texture_asset(AssetDatabase *database,
-                           content::AssetId id) noexcept;
+/// Frees a texture record slot for reuse. Requires no live runtimeTexture
+/// (release the handle and set the state first); false when the id is
+/// unknown or still holds one. Every other record keeps its slot.
+bool unregister_texture_asset(AssetDatabase *database,
+                              content::AssetId id) noexcept;
 
 } // namespace engine::renderer

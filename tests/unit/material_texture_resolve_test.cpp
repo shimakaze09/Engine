@@ -2,7 +2,8 @@
 // handles, a failed load falls back to invalid handles (never a crash) and
 // is not retried, a texture shared by two materials loads only once, and a
 // texture that cannot be registered because the table is full is neither
-// loaded nor reported again on every call.
+// loaded nor reported again on every call, and a texture no material
+// names is freed so the refused one loads.
 // The GL-touching loader is stubbed via MaterialTextureLoadFn injection so
 // this stays a CPU-only, headless-safe test (issue #160 fallback policy).
 
@@ -332,6 +333,85 @@ int verify_full_texture_table_is_not_reloaded(
   return 0;
 }
 
+/// Counts the handles release_unreferenced_textures gives back.
+void count_release(engine::renderer::TextureHandle handle,
+                   void *userData) noexcept {
+  if (handle != engine::renderer::kInvalidTextureHandle) {
+    ++*static_cast<std::size_t *>(userData);
+  }
+}
+
+/// Materials own their textures (#663): the fillers the previous case
+/// registered are named by no material, so a sweep frees every one and
+/// gives back its handle, and the material that found the table full
+/// loads its texture on the next resolve. An unnamed Failed record is
+/// freed with no handle to give back. With no material changed since, a
+/// sweep does nothing.
+int verify_unreferenced_textures_are_released(
+    engine::renderer::AssetDatabase *database) {
+  const engine::content::AssetId overCapacity =
+      engine::content::make_asset_id_from_path(
+          "assets/textures/over_capacity.png");
+  std::size_t fillers = 0U;
+  std::size_t named = 0U;
+  for (std::size_t slot = 0U; slot < database->textureAssets.size(); ++slot) {
+    if (database->textureOccupied[slot]) {
+      const bool filler =
+          std::strstr(database->textureAssets[slot].sourcePath.data(),
+                      "filler_") != nullptr;
+      fillers += filler ? 1U : 0U;
+      named += filler ? 0U : 1U;
+    }
+  }
+  std::size_t released = 0U;
+  const std::size_t freed = engine::renderer::release_unreferenced_textures(
+      database, &count_release, &released);
+  if ((fillers == 0U) || (freed != fillers) || (released != fillers)) {
+    std::printf("the sweep freed %zu and released %zu of %zu fillers\n", freed,
+                released, fillers);
+    return 60;
+  }
+  std::size_t kept = 0U;
+  for (std::size_t slot = 0U; slot < database->textureAssets.size(); ++slot) {
+    kept += database->textureOccupied[slot] ? 1U : 0U;
+  }
+  if (kept != named) {
+    return 61; // a texture some material names was freed
+  }
+
+  FakeLoaderState state{};
+  static_cast<void>(engine::renderer::resolve_material_textures(
+      database, g_catalog, &fake_load_texture, &state));
+  if ((state.callCount != 1U) ||
+      (engine::renderer::texture_asset_state(database, overCapacity) !=
+       engine::content::AssetState::Ready)) {
+    return 62; // the refused slot did not try again once there was room
+  }
+
+  const engine::content::AssetId orphan =
+      engine::content::make_asset_id_from_path("assets/textures/orphan.png");
+  if (!engine::renderer::register_texture_asset_failed(
+          database, orphan, "assets/textures/orphan.png")) {
+    return 63;
+  }
+  released = 0U;
+  if (engine::renderer::release_unreferenced_textures(database, &count_release,
+                                                      &released) != 0U) {
+    return 64; // no material changed, so the sweep has nothing to look at
+  }
+  database->textureReferencesChanged = true;
+  if ((engine::renderer::release_unreferenced_textures(database, &count_release,
+                                                       &released) != 1U) ||
+      (released != 0U) ||
+      (engine::renderer::texture_asset_state(database, orphan) !=
+       engine::content::AssetState::Unloaded) ||
+      (engine::renderer::texture_asset_state(database, overCapacity) !=
+       engine::content::AssetState::Ready)) {
+    return 65;
+  }
+  return 0;
+}
+
 } // namespace
 
 int main() {
@@ -373,6 +453,9 @@ int main() {
   }
   if (result == 0) {
     result = verify_full_texture_table_is_not_reloaded(database.get());
+  }
+  if (result == 0) {
+    result = verify_unreferenced_textures_are_released(database.get());
   }
 
   engine::core::shutdown_vfs();
