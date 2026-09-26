@@ -96,6 +96,7 @@ void flush_renderer(CommandBufferView commandBufferView,
   RendererFrameStats frameStats{};
   backend.lastGbufferBonePalette = 0xFFFFFFFFU;
   backend.lastShadowBonePalette = 0xFFFFFFFFU;
+  backend.lastShadowMaskedBonePalette = 0xFFFFFFFFU;
   gpu_profiler_begin_frame();
 
   apply_quality_preset_if_changed();

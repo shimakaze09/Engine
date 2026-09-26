@@ -19,6 +19,7 @@
 #include <cstring>
 #include <vector>
 
+#include "command_buffer_flush_internal.h"
 #include "engine/core/cvar.h"
 #include "engine/core/debug_draw.h"
 #include "engine/core/logging.h"
@@ -36,7 +37,7 @@
 #include "engine/renderer/shader_system.h"
 #include "engine/renderer/shadow_map.h"
 #include "engine/renderer/texture_loader.h"
-#include "command_buffer_flush_internal.h"
+#include "shadow_caster_draw.h"
 
 namespace engine::renderer {
 
@@ -120,6 +121,9 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
 
         dev->bind_program(backend.shadowDepthProgram);
 
+        ShadowCasterPass pass{};
+        pass.viewProjection = lightVP;
+        pass.baseProgram = backend.shadowDepthProgram;
         for_each_shadow_caster(ctx, [&](const DrawCommand &command) noexcept {
           const GpuMesh *mesh = lookup_gpu_mesh(registry, command.mesh);
           if ((mesh == nullptr) ||
@@ -127,54 +131,9 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
               (mesh->vertexCount == 0U)) {
             return;
           }
-
-          const math::Mat4 lightMvp = math::mul(lightVP, command.modelMatrix);
-          // Param tokens resolve against the bound program on both
-          // backends, so the skinned program must be bound before its
-          // palette uploads (a stale bind sent the palette into the
-          // static program's uniforms).
-          bool skinnedDraw =
-              mesh->hasSkin && (command.skinPalette != kInvalidSkinPalette) &&
-              (backend.shadowDepthSkinnedProgram != kInvalidDeviceProgram);
-          if (skinnedDraw) {
-            dev->bind_program(backend.shadowDepthSkinnedProgram);
-            skinnedDraw =
-                upload_bone_palette(backend, dev, command.skinPalette,
-                                    backend.shadowSkinnedBonesParam,
-                                    &backend.lastShadowBonePalette);
-            if (!skinnedDraw) {
-              dev->bind_program(backend.shadowDepthProgram);
-            }
-          }
-          if (skinnedDraw) {
-            if (backend.shadowSkinnedLightMvpLoc.valid()) {
-              dev->set_param_mat4(backend.shadowSkinnedLightMvpLoc,
-                                    &lightMvp.columns[0].x);
-            }
-          } else {
-            if (backend.shadowLightMvpLoc.valid()) {
-              dev->set_param_mat4(backend.shadowLightMvpLoc,
-                                    &lightMvp.columns[0].x);
-            }
-            if (backend.shadowModelLoc.valid()) {
-              dev->set_param_mat4(backend.shadowModelLoc,
-                                    &command.modelMatrix.columns[0].x);
-            }
-          }
-
-          if (mesh->indexCount > 0U) {
-            dev->draw_indexed(mesh->geometry,
-                              static_cast<std::int32_t>(mesh->indexCount));
-            frameStats.triangleCount += mesh->indexCount / 3U;
-          } else {
-            dev->draw(mesh->geometry, PrimitiveTopology::Triangles, 0,
-                      static_cast<std::int32_t>(mesh->vertexCount));
-            frameStats.triangleCount += mesh->vertexCount / 3U;
-          }
+          frameStats.triangleCount +=
+              draw_shadow_caster(backend, dev, *mesh, command, pass);
           ++frameStats.drawCalls;
-          if (skinnedDraw) {
-            dev->bind_program(backend.shadowDepthProgram);
-          }
         });
 
         dev->bind_program(kInvalidDeviceProgram);
@@ -246,53 +205,15 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
                                           CullMode::Back});
       dev->clear(ClearFlags::ColorDepth, 1.0F, 1.0F, 1.0F, 1.0F);
 
+      ShadowCasterPass pass{};
+      pass.viewProjection = slot.lightViewProjection;
+      pass.baseProgram = backend.shadowDepthProgram;
       for_each_shadow_caster(ctx, [&](const DrawCommand &cmd) noexcept {
         const GpuMesh *mesh = lookup_gpu_mesh(registry, cmd.mesh);
         if ((mesh == nullptr) || (mesh->geometry == kInvalidDeviceGeometry)) {
           return;
         }
-
-        const math::Mat4 mvp =
-            math::mul(slot.lightViewProjection, cmd.modelMatrix);
-        // Same bind-before-upload ordering as the cascade loop above.
-        bool skinnedDraw =
-            mesh->hasSkin && (cmd.skinPalette != kInvalidSkinPalette) &&
-            (backend.shadowDepthSkinnedProgram != kInvalidDeviceProgram);
-        if (skinnedDraw) {
-          dev->bind_program(backend.shadowDepthSkinnedProgram);
-          skinnedDraw =
-              upload_bone_palette(backend, dev, cmd.skinPalette,
-                                  backend.shadowSkinnedBonesParam,
-                                  &backend.lastShadowBonePalette);
-          if (!skinnedDraw) {
-            dev->bind_program(backend.shadowDepthProgram);
-          }
-        }
-        if (skinnedDraw) {
-          if (backend.shadowSkinnedLightMvpLoc.valid()) {
-            dev->set_param_mat4(backend.shadowSkinnedLightMvpLoc,
-                                  &mvp.columns[0].x);
-          }
-        } else {
-          if (backend.shadowLightMvpLoc.valid()) {
-            dev->set_param_mat4(backend.shadowLightMvpLoc, &mvp.columns[0].x);
-          }
-          if (backend.shadowModelLoc.valid()) {
-            dev->set_param_mat4(backend.shadowModelLoc,
-                                  &cmd.modelMatrix.columns[0].x);
-          }
-        }
-
-        if (mesh->indexCount > 0U) {
-          dev->draw_indexed(mesh->geometry,
-                            static_cast<std::int32_t>(mesh->indexCount));
-        } else {
-          dev->draw(mesh->geometry, PrimitiveTopology::Triangles, 0,
-                    static_cast<std::int32_t>(mesh->vertexCount));
-        }
-        if (skinnedDraw) {
-          dev->bind_program(backend.shadowDepthProgram);
-        }
+        static_cast<void>(draw_shadow_caster(backend, dev, *mesh, cmd, pass));
       });
     }
 
@@ -370,32 +291,19 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
                                             CullMode::Back});
         dev->clear(ClearFlags::ColorDepth, 1.0F, 1.0F, 1.0F, 1.0F);
 
+        ShadowCasterPass pass{};
+        pass.viewProjection = slot.faceViewProjections[face];
+        pass.point = true;
+        pass.lightPosition = lightPos;
+        pass.farPlane = slot.farPlane;
+        pass.baseProgram = backend.shadowDepthPointProgram;
         for_each_shadow_caster(ctx, [&](const DrawCommand &cmd) noexcept {
           const GpuMesh *mesh = lookup_gpu_mesh(registry, cmd.mesh);
           if ((mesh == nullptr) ||
               (mesh->geometry == kInvalidDeviceGeometry)) {
             return;
           }
-
-          // The point shader multiplies u_lightMVP by the world-space
-          // position (u_model * aPosition), so upload the face VP alone —
-          // including the model here would apply it twice.
-          if (backend.shadowPointLightMvpLoc.valid()) {
-            dev->set_param_mat4(backend.shadowPointLightMvpLoc,
-                                  &slot.faceViewProjections[face].columns[0].x);
-          }
-          if (backend.shadowPointModelLoc.valid()) {
-            dev->set_param_mat4(backend.shadowPointModelLoc,
-                                  &cmd.modelMatrix.columns[0].x);
-          }
-
-          if (mesh->indexCount > 0U) {
-            dev->draw_indexed(mesh->geometry,
-                              static_cast<std::int32_t>(mesh->indexCount));
-          } else {
-            dev->draw(mesh->geometry, PrimitiveTopology::Triangles, 0,
-                      static_cast<std::int32_t>(mesh->vertexCount));
-          }
+          static_cast<void>(draw_shadow_caster(backend, dev, *mesh, cmd, pass));
         });
       }
     }

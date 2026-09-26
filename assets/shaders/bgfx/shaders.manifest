@@ -34,8 +34,13 @@
     { "source": "prefilter_environment.fs.sc", "type": "fragment", "output": "prefilter_environment.frag", "variants": [[]] },
     { "source": "shadow_depth.vs.sc", "type": "vertex", "output": "shadow_depth.vert", "variants": [[]] },
     { "source": "shadow_depth_skinned.vs.sc", "type": "vertex", "output": "shadow_depth.vert", "variants": [["SKINNED"]] },
+    { "source": "shadow_depth_masked.vs.sc", "type": "vertex", "output": "shadow_depth.vert", "variants": [["MASKED"]] },
+    { "source": "shadow_depth_skinned_masked.vs.sc", "type": "vertex", "output": "shadow_depth.vert", "variants": [["MASKED", "SKINNED"]] },
     { "source": "shadow_depth.fs.sc", "type": "fragment", "output": "shadow_depth.frag", "variants": [[]] },
+    { "source": "shadow_depth_masked.fs.sc", "type": "fragment", "output": "shadow_depth.frag", "variants": [["MASKED"], ["MASKED", "SKINNED"]] },
     { "source": "shadow_depth_point.vs.sc", "type": "vertex", "output": "shadow_depth_point.vert", "variants": [[]] },
-    { "source": "shadow_depth_point.fs.sc", "type": "fragment", "output": "shadow_depth_point.frag", "variants": [[]] }
+    { "source": "shadow_depth_point_masked.vs.sc", "type": "vertex", "output": "shadow_depth_point.vert", "variants": [["MASKED"]] },
+    { "source": "shadow_depth_point.fs.sc", "type": "fragment", "output": "shadow_depth_point.frag", "variants": [[]] },
+    { "source": "shadow_depth_point_masked.fs.sc", "type": "fragment", "output": "shadow_depth_point.frag", "variants": [["MASKED"]] }
   ]
 }

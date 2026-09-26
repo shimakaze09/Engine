@@ -21,6 +21,8 @@ engine_add_module_library(engine_renderer
     src/command_buffer_flush_forward.cpp
     src/command_buffer_flush_post.cpp
     src/command_buffer_flush_shadows.cpp
+    src/shadow_caster_draw.cpp
+    src/shadow_masked_programs.cpp
     src/command_buffer_flush_uniforms.cpp
     src/command_buffer_ibl.cpp
     src/command_buffer_math.cpp

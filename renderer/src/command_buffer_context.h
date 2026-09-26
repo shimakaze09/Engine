@@ -101,6 +101,24 @@ struct FlushCVars final {
 // r_sky_model so the per-frame selection reads no string.
 enum class SkyModel : std::uint8_t;
 
+/// One alpha-mask shadow program (the MASKED variant of a shadow depth
+/// program): the transform uniforms its opaque counterpart takes, plus the
+/// opacity mask, cutoff and UV transform it discards against. A field the
+/// variant does not declare stays an invalid param.
+struct MaskedShadowProgram final {
+  ShaderProgramHandle shaderHandle{};
+  DeviceProgramHandle program{};
+  ShaderParam lightMvpLoc{};
+  ShaderParam modelLoc{};    // point variant
+  ShaderParam lightPosLoc{}; // point variant
+  ShaderParam farPlaneLoc{}; // point variant
+  ShaderParam bonesParam{};  // skinned variant, mat4[kMaxSkinPaletteJoints]
+  ShaderParam opacityMaskLoc{};
+  ShaderParam alphaCutoffLoc{};
+  ShaderParam uvTilingLoc{};
+  ShaderParam uvOffsetLoc{};
+};
+
 /// Owns private GPU backend state for command buffer rendering.
 struct BackendState final {
   bool initialized = false;
@@ -638,6 +656,15 @@ struct BackendState final {
   ShaderProgramHandle shadowDepthSkinnedShaderHandle{};
   DeviceProgramHandle shadowDepthSkinnedProgram{};
   ShaderParam shadowSkinnedLightMvpLoc{};
+
+  // Alpha-mask shadow casters: a mask-mode material with an opacity mask
+  // casts through these, discarding where the mask falls below its
+  // cutoff; every other caster keeps the empty-fragment programs above.
+  MaskedShadowProgram shadowMasked{};
+  MaskedShadowProgram shadowSkinnedMasked{};
+  MaskedShadowProgram shadowPointMasked{};
+  // The skinned masked program keeps its own palette uniform state.
+  std::uint32_t lastShadowMaskedBonePalette = 0xFFFFFFFFU;
 };
 
 /// Owns renderer state for the default renderer context.

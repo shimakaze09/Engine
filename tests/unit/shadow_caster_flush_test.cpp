@@ -5,6 +5,9 @@
 // the flush reports the passes as active for the lighting binds. Until
 // #522 no producer set the flag, so these passes never ran in any scene.
 // Auxiliary (camera-culled) casters are drawn into the same passes (#524).
+// A mask-mode caster with an opacity mask is drawn through the MASKED
+// program with its mask, cutoff and UV transform bound, in the spot and the
+// point passes alike, and every other caster through the pass's own.
 
 #include "command_buffer_context.h"
 #include "command_buffer_flush_internal.h"
@@ -35,7 +38,19 @@ struct FakeDeviceLog final {
   std::size_t clearsOnTargets = 0U;
   std::size_t drawsOnTargets = 0U;
   std::size_t drawsOnBackBuffer = 0U;
+  /// Per depth draw, in order: the program and the texture on unit 0 bound
+  /// when it was issued, and the last cutoff uploaded before it.
+  static constexpr std::size_t kMaxDraws = 64U;
+  std::uint32_t drawPrograms[kMaxDraws] = {};
+  std::uint32_t drawMasks[kMaxDraws] = {};
+  float drawCutoffs[kMaxDraws] = {};
+  std::uint32_t currentProgram = 0U;
+  std::uint32_t unit0Texture = 0U;
+  float cutoff = -1.0F;
 };
+
+/// The fake param slot the MASKED programs' cutoff resolves to.
+constexpr engine::renderer::ShaderParam kCutoffParam{40};
 
 FakeDeviceLog g_log{};
 GpuMesh g_mesh{};
@@ -55,6 +70,11 @@ void fake_clear(ClearFlags, float, float, float, float) noexcept {
 void fake_draw(DeviceGeometryHandle, PrimitiveTopology, std::int32_t,
                std::int32_t) noexcept {
   if (g_log.currentTarget != 0U) {
+    if (g_log.drawsOnTargets < FakeDeviceLog::kMaxDraws) {
+      g_log.drawPrograms[g_log.drawsOnTargets] = g_log.currentProgram;
+      g_log.drawMasks[g_log.drawsOnTargets] = g_log.unit0Texture;
+      g_log.drawCutoffs[g_log.drawsOnTargets] = g_log.cutoff;
+    }
     ++g_log.drawsOnTargets;
   } else {
     ++g_log.drawsOnBackBuffer;
@@ -62,6 +82,20 @@ void fake_draw(DeviceGeometryHandle, PrimitiveTopology, std::int32_t,
 }
 void fake_draw_indexed(DeviceGeometryHandle, std::int32_t) noexcept {
   fake_draw(DeviceGeometryHandle{}, PrimitiveTopology::Triangles, 0, 0);
+}
+void fake_bind_program(DeviceProgramHandle program) noexcept {
+  g_log.currentProgram = program.value;
+}
+void fake_bind_texture_slot(std::uint32_t slot,
+                            DeviceTextureHandle texture) noexcept {
+  if (slot == 0U) {
+    g_log.unit0Texture = texture.value;
+  }
+}
+void fake_set_param_f32(ShaderParam param, float value) noexcept {
+  if (param == kCutoffParam) {
+    g_log.cutoff = value;
+  }
 }
 /// Installs the fake device table and clears its log.
 void reset_fake_device() noexcept {
@@ -72,8 +106,11 @@ void reset_fake_device() noexcept {
   device.clear = &fake_clear;
   device.draw = &fake_draw;
   device.draw_indexed = &fake_draw_indexed;
-  device.bind_program = &tests::fake::bind_program;
-  device.set_param_f32 = &tests::fake::set_param_f32;
+  device.bind_program = &fake_bind_program;
+  device.bind_texture_slot = &fake_bind_texture_slot;
+  device.set_param_f32 = &fake_set_param_f32;
+  device.set_param_i32 = &tests::fake::set_param_i32;
+  device.set_param_vec2 = &tests::fake::set_param_vec2;
   device.set_param_mat4 = &tests::fake::set_param_mat4;
   device.set_param_vec3 = &tests::fake::set_param_vec3;
   device.set_viewport = &tests::fake::set_viewport;
@@ -90,11 +127,17 @@ void gpu_profiler_end_pass(GpuPassId) noexcept {}
 const GpuMesh *lookup_gpu_mesh(const GpuMeshRegistry *, MeshHandle) noexcept {
   return &g_mesh;
 }
+bool g_paletteUploads = false;
 bool upload_bone_palette(BackendState &, const RenderDevice *, std::uint32_t,
                          ShaderParam, std::uint32_t *) noexcept {
-  return false;
+  return g_paletteUploads;
 }
 std::size_t skin_palette_count() noexcept { return 0U; }
+/// Every live texture handle maps to a device texture 1000 above its id.
+DeviceTextureHandle texture_device_handle(TextureHandle handle) noexcept {
+  return (handle.id == 0U) ? kInvalidDeviceTexture
+                           : DeviceTextureHandle{1000U + handle.id};
+}
 
 } // namespace engine::renderer
 
@@ -365,6 +408,145 @@ void test_cvar_gate_still_disables() noexcept {
 } // namespace
 
 /// Runs this executable or test program.
+/// A MASKED program with every uniform resolved to a fake param.
+MaskedShadowProgram fake_masked_program(std::uint32_t program) noexcept {
+  MaskedShadowProgram masked{};
+  masked.program = DeviceProgramHandle{program};
+  masked.lightMvpLoc = ShaderParam{41};
+  masked.modelLoc = ShaderParam{42};
+  masked.lightPosLoc = ShaderParam{43};
+  masked.farPlaneLoc = ShaderParam{44};
+  masked.opacityMaskLoc = ShaderParam{45};
+  masked.alphaCutoffLoc = kCutoffParam;
+  masked.uvTilingLoc = ShaderParam{46};
+  masked.uvOffsetLoc = ShaderParam{47};
+  return masked;
+}
+
+/// EXPECTATION (#693): with the MASKED programs available, a mask-mode
+/// caster with an opacity mask draws through them, with its mask on unit 0
+/// and its cutoff uploaded, into the spot map and every point face; the
+/// opaque caster keeps the pass's own program. On base every caster drew
+/// through the empty-fragment program and cast a full silhouette.
+void test_masked_casters_draw_through_the_masked_programs() noexcept {
+  reset_backend();
+  reset_fake_device();
+  g_backend.shadowMasked = fake_masked_program(11U);
+  g_backend.shadowPointMasked = fake_masked_program(12U);
+  g_draws[1].material.alphaMode = AlphaMode::Mask;
+  g_draws[1].material.alphaCutoff = 0.25F;
+  g_draws[1].material.opacityTexture = TextureHandle{5U};
+  SceneLightData lights{};
+  lights.spotLightCount = 1U;
+  lights.spotLights[0].castShadow = true;
+  lights.pointLightCount = 1U;
+  lights.pointLights[0].castShadow = true;
+  lights.pointLights[0].radius = 8.0F;
+  FrameFlushContext ctx = make_context(lights);
+  flush_shadow_passes(ctx);
+  CHECK(g_log.drawsOnTargets == 14U, "two draws into the spot map and each "
+                                     "of the six faces");
+  const std::size_t draws = (g_log.drawsOnTargets < FakeDeviceLog::kMaxDraws)
+                                ? g_log.drawsOnTargets
+                                : 0U;
+  for (std::size_t i = 0U; i < draws; ++i) {
+    const bool spot = i < 2U;
+    const bool maskedDraw = (i % 2U) == 1U;
+    const std::uint32_t base = spot ? 1U : 2U;
+    const std::uint32_t masked = spot ? 11U : 12U;
+    CHECK(g_log.drawPrograms[i] == (maskedDraw ? masked : base),
+          "each caster draws through the program its material needs");
+    if (maskedDraw) {
+      CHECK(g_log.drawMasks[i] == 1005U, "the caster's mask is on unit 0");
+      CHECK(g_log.drawCutoffs[i] == 0.25F, "the caster's cutoff is uploaded");
+    }
+  }
+  g_draws[1].material = Material{};
+}
+
+/// EXPECTATION (#693): a caster casts a full silhouette through the pass's
+/// own program when the lit passes would not cut it either (mask mode with
+/// no mask texture, blend mode) and when no MASKED program is available.
+void test_unmasked_casters_keep_the_pass_program() noexcept {
+  const struct {
+    AlphaMode mode;
+    std::uint32_t mask;
+    bool maskedAvailable;
+    const char *what;
+  } cases[] = {
+      {AlphaMode::Mask, 0U, true, "mask mode with no mask texture"},
+      {AlphaMode::Blend, 5U, true, "blend mode"},
+      {AlphaMode::Mask, 5U, false, "a masked caster with no MASKED program"},
+  };
+  for (const auto &row : cases) {
+    reset_backend();
+    reset_fake_device();
+    if (row.maskedAvailable) {
+      g_backend.shadowMasked = fake_masked_program(11U);
+    }
+    g_draws[1].material.alphaMode = row.mode;
+    g_draws[1].material.opacityTexture = TextureHandle{row.mask};
+    SceneLightData lights{};
+    lights.spotLightCount = 1U;
+    lights.spotLights[0].castShadow = true;
+    FrameFlushContext ctx = make_context(lights);
+    flush_shadow_passes(ctx);
+    CHECK((g_log.drawsOnTargets == 2U) && (g_log.drawPrograms[0] == 1U) &&
+              (g_log.drawPrograms[1] == 1U),
+          row.what);
+  }
+  g_draws[1].material = Material{};
+}
+
+/// EXPECTATION (#693): a posed skinned caster with a mask draws through the
+/// skinned MASKED program; without it, through the skinned program (the
+/// pose ahead of the mask); and when its palette cannot upload, through the
+/// static MASKED program, never through a program left bound by the failed
+/// upload.
+void test_skinned_masked_casters_pick_the_fitting_program() noexcept {
+  const struct {
+    bool skinnedMaskedAvailable;
+    bool paletteUploads;
+    std::uint32_t expected;
+    const char *what;
+  } cases[] = {
+      {true, true, 13U,
+       "a posed masked caster uses the skinned MASKED program"},
+      {false, true, 3U, "without it, the skinned program keeps the pose"},
+      {true, false, 11U,
+       "a palette that cannot upload falls to the static "
+       "MASKED program"},
+  };
+  for (const auto &row : cases) {
+    reset_backend();
+    reset_fake_device();
+    g_backend.shadowDepthSkinnedProgram = DeviceProgramHandle{3U};
+    g_backend.shadowMasked = fake_masked_program(11U);
+    if (row.skinnedMaskedAvailable) {
+      g_backend.shadowSkinnedMasked = fake_masked_program(13U);
+    }
+    g_paletteUploads = row.paletteUploads;
+    g_mesh.hasSkin = true;
+    g_draws[1].skinPalette = 0U;
+    g_draws[1].material.alphaMode = AlphaMode::Mask;
+    g_draws[1].material.opacityTexture = TextureHandle{5U};
+    SceneLightData lights{};
+    lights.spotLightCount = 1U;
+    lights.spotLights[0].castShadow = true;
+    FrameFlushContext ctx = make_context(lights);
+    flush_shadow_passes(ctx);
+    CHECK((g_log.drawsOnTargets == 2U) &&
+              (g_log.drawPrograms[1] == row.expected),
+          row.what);
+    CHECK(g_log.currentProgram == 0U,
+          "the pass unbinds its program when it ends");
+  }
+  g_paletteUploads = false;
+  g_mesh.hasSkin = false;
+  g_draws[1].skinPalette = kInvalidSkinPalette;
+  g_draws[1].material = Material{};
+}
+
 int main() {
   engine::core::cvar_register_bool("r_spot_shadows", true, "test");
   engine::core::cvar_register_bool("r_point_shadows", true, "test");
@@ -381,6 +563,9 @@ int main() {
   test_slots_go_to_the_nearest_casters();
   test_equidistant_casters_take_slots_in_index_order();
   test_cvar_gate_still_disables();
+  test_masked_casters_draw_through_the_masked_programs();
+  test_unmasked_casters_keep_the_pass_program();
+  test_skinned_masked_casters_pick_the_fitting_program();
 
   if (g_failures != 0) {
     std::fprintf(stderr, "shadow_caster_flush_test: %d failure(s)\n",
