@@ -51,7 +51,8 @@ namespace engine::runtime {
   X(SceneCaptureComponent, m_sceneCaptures)                                    \
   X(FoliagePatchComponent, m_foliagePatches)                                   \
   X(AnimationComponent, m_animationComponents)                                 \
-  X(CameraComponent, m_cameraComponents)
+  X(CameraComponent, m_cameraComponents)                                       \
+  X(SkyLightComponent, m_skyLights)
 
 
 #ifndef ENGINE_MAX_ENTITIES
@@ -129,6 +130,7 @@ public:
   static constexpr std::size_t kMaxFoliagePatchComponents = 128U;
   static constexpr std::size_t kMaxAnimationComponents = 64U;
   static constexpr std::size_t kMaxCameraComponents = 32U;
+  static constexpr std::size_t kMaxSkyLightComponents = 8U;
   static constexpr std::size_t kNameLookupCapacity = kMaxNameComponents * 2U;
   static constexpr std::size_t kStateBufferCount = 2U;
   static constexpr std::size_t kPersistentIndexCapacity = kMaxEntities * 2U;
@@ -144,7 +146,8 @@ public:
                  LightComponent, ScriptComponent, SpringArmComponent,
                  PointLightComponent, SpotLightComponent,
                  ReflectionProbeComponent, SceneCaptureComponent,
-                 FoliagePatchComponent, AnimationComponent, CameraComponent>;
+                 FoliagePatchComponent, AnimationComponent, CameraComponent,
+                 SkyLightComponent>;
   /// Number of persistent component types, derived from the list above.
   static constexpr std::size_t kPersistentComponentTypeCount =
       std::tuple_size_v<PersistentComponentTypes>;
@@ -633,6 +636,38 @@ public:
   /// the component is absent (no logging).
   const CameraComponent *get_camera_component_ptr(Entity entity) const noexcept;
 
+  /// Adds or replaces the entity's sky light. Requires the Input
+  /// phase and a live entity; logs and returns false otherwise or when full.
+  bool add_sky_light_component(
+      Entity entity, const SkyLightComponent &component) noexcept;
+  /// Removes the entity's sky light component. Requires the Input phase
+  /// and a live entity; logs and returns false otherwise or when the component
+  /// is absent.
+  bool remove_sky_light_component(Entity entity) noexcept;
+  /// Copies the entity's sky light into the out parameter; logs and
+  /// returns false for stale/dead entities or when absent.
+  bool get_sky_light_component(
+      Entity entity, SkyLightComponent *outComponent) const noexcept;
+  /// Returns whether has sky light component.
+  bool has_sky_light_component(Entity entity) const noexcept;
+  /// Number of live sky light components.
+  std::size_t sky_light_count() const noexcept;
+  /// Dense-storage sky light at `index` (0..count-1); nullptr out of
+  /// range.
+  const SkyLightComponent *
+  sky_light_at(std::size_t index) const noexcept;
+  /// Entity owning the dense sky light slot at `index`; kInvalidEntity
+  /// when out of range.
+  Entity sky_light_entity_at(std::size_t index) const noexcept;
+  /// Pointer to the entity's sky light component, or nullptr when the
+  /// handle is stale or the component is absent (no logging).
+  SkyLightComponent *
+  get_sky_light_component_ptr(Entity entity) noexcept;
+  /// Pointer to the entity's sky light component, or nullptr when the
+  /// handle is stale or the component is absent (no logging).
+  const SkyLightComponent *
+  get_sky_light_component_ptr(Entity entity) const noexcept;
+
   /// Enters Simulation for the frame's first fixed step: refreshes the
   /// physics per-step cvar cache, snapshots TRS history, opens the write
   /// buffer.
@@ -902,6 +937,9 @@ private:
   using CameraComponentSet =
       core::CompactSparseSet<Entity, CameraComponent, kMaxEntities,
                              kMaxCameraComponents>;
+  using SkyLightSet =
+      core::CompactSparseSet<Entity, SkyLightComponent, kMaxEntities,
+                             kMaxSkyLightComponents>;
 
   /// True for every persistent component type plus the derived
   /// WorldTransform; membership comes from PersistentComponentTypes so the
@@ -1269,6 +1307,7 @@ private:
   FoliagePatchSet m_foliagePatches{};
   AnimationComponentSet m_animationComponents{};
   CameraComponentSet m_cameraComponents{};
+  SkyLightSet m_skyLights{};
   std::array<WorldTransformHistoryEntry, kMaxEntities + 1U>
       m_worldTransformHistory =
           std::array<WorldTransformHistoryEntry, kMaxEntities + 1U>();

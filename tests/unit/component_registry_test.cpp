@@ -37,6 +37,9 @@ constexpr engine::core::AssetRef kRegistryMeshRef{
 constexpr engine::core::AssetRef kRegistryMaterialRef{
     engine::core::AssetGuid{0x1122334455667788ULL, 0x99aabbccddeeff00ULL},
     0x4dULL};
+/// Authored environment identity for the SkyLightComponent row.
+constexpr engine::core::AssetRef kRegistryEnvironmentRef{
+    engine::core::AssetGuid{0x0a1b2c3d4e5f6071ULL, 0x8192a3b4c5d6e7f8ULL}, 0U};
 
 void remove_prefab_file() noexcept {
   static_cast<void>(std::remove(kPrefabPath));
@@ -385,6 +388,15 @@ bool components_equal(const CameraComponent &a,
          (a.active == b.active);
 }
 
+void make_test_value(SkyLightComponent *out) noexcept {
+  out->environmentRef = kRegistryEnvironmentRef;
+}
+
+bool components_equal(const SkyLightComponent &a,
+                      const SkyLightComponent &b) noexcept {
+  return a.environmentRef == b.environmentRef;
+}
+
 /// Round-trips one registry row's component through both production
 /// serializers and compares the reloaded value field-by-field. Returns 0 on
 /// success or a stage code identifying the first failing step.
@@ -544,7 +556,7 @@ int verify_prefab_mesh_reference_parity() {
 // Count tripwire: bumping this is an intentional act that accompanies a new
 // registry row, a World::PersistentComponentTypes entry, and the test-value/
 // comparator overloads above.
-static_assert(engine::runtime::kPersistentComponentTypeCount == 15U,
+static_assert(engine::runtime::kPersistentComponentTypeCount == 16U,
               "new persistent component type: extend the registry table, the "
               "World type list, and this suite's overloads together");
 

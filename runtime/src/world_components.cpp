@@ -1326,4 +1326,61 @@ bool World::get_collider_range(std::size_t startIndex, std::size_t count,
   return true;
 }
 
+bool World::add_sky_light_component(
+    Entity entity, const SkyLightComponent &component) noexcept {
+  return static_cast<bool>(add_component_checked(m_skyLights, entity, component,
+                               "add_sky_light_component"));
+}
+
+bool World::remove_sky_light_component(Entity entity) noexcept {
+  return remove_component_checked(m_skyLights, entity,
+                                  "remove_sky_light_component");
+}
+
+bool World::get_sky_light_component(
+    Entity entity, SkyLightComponent *outComponent) const noexcept {
+  if ((outComponent == nullptr) || !is_valid_entity(entity)) {
+    return false;
+  }
+  const SkyLightComponent *ptr = m_skyLights.get_ptr(entity);
+  if (ptr == nullptr) {
+    return false;
+  }
+  *outComponent = *ptr;
+  return true;
+}
+
+bool World::has_sky_light_component(Entity entity) const noexcept {
+  return is_valid_entity(entity) && m_skyLights.contains(entity);
+}
+
+std::size_t World::sky_light_count() const noexcept {
+  return m_skyLights.count();
+}
+
+const SkyLightComponent *
+World::sky_light_at(std::size_t index) const noexcept {
+  if (index >= m_skyLights.count()) {
+    return nullptr;
+  }
+  return &m_skyLights.component_at(index);
+}
+
+Entity World::sky_light_entity_at(std::size_t index) const noexcept {
+  if (index >= m_skyLights.count()) {
+    return Entity{};
+  }
+  return m_skyLights.entity_at(index);
+}
+
+SkyLightComponent *
+World::get_sky_light_component_ptr(Entity entity) noexcept {
+  return get_component_ptr_checked(m_skyLights, entity);
+}
+
+const SkyLightComponent *
+World::get_sky_light_component_ptr(Entity entity) const noexcept {
+  return get_component_ptr_checked(m_skyLights, entity);
+}
+
 } // namespace engine::runtime

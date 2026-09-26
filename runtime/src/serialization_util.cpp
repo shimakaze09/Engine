@@ -303,6 +303,7 @@ constexpr const char *kCameraTypeName = "engine::runtime::CameraComponent";
 /// exists to prevent.
 constexpr const char *kMeshRefField = "mesh";
 constexpr const char *kMaterialRefField = "material";
+constexpr const char *kEnvironmentRefField = "environment";
 constexpr const char *kFoliageMeshRefsField = "meshes";
 
 constexpr const char *kAnimationControllerPathField = "controllerPath";
@@ -540,6 +541,32 @@ bool read_reflected_component(const core::JsonParser &parser,
 //    bool/float therefore ride its hand-written codec rather than the
 //    reflected path, since one unrepresentable field takes the whole type
 // off it.
+
+void write_sky_light_component(core::JsonWriter &writer,
+                               const SkyLightComponent &component) noexcept {
+  writer.write_key(kJsonKeySkyLightComponent);
+  writer.begin_object();
+  content::write_asset_ref(writer, kEnvironmentRefField,
+                           component.environmentRef);
+  writer.end_object();
+}
+
+bool read_sky_light_component(const core::JsonParser &parser,
+                              const core::JsonValue &value,
+                              SkyLightComponent *outComponent) noexcept {
+  if ((outComponent == nullptr) ||
+      (value.type != core::JsonValue::Type::Object)) {
+    return false;
+  }
+  SkyLightComponent component{};
+  core::JsonValue refValue{};
+  if (parser.get_object_field(value, kEnvironmentRefField, &refValue) &&
+      !content::read_asset_ref(parser, refValue, &component.environmentRef)) {
+    return false;
+  }
+  *outComponent = component;
+  return true;
+}
 
 void write_mesh_component(core::JsonWriter &writer,
                           const MeshComponent &component) noexcept {

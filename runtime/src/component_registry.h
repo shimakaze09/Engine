@@ -69,7 +69,9 @@
   X(AnimationComponent, kJsonKeyAnimationComponent, get_animation_component,   \
     add_animation_component, remove_animation_component)                     \
   X(CameraComponent, kJsonKeyCameraComponent, get_camera_component,           \
-    add_camera_component, remove_camera_component)
+    add_camera_component, remove_camera_component)                             \
+  X(SkyLightComponent, kJsonKeySkyLightComponent, get_sky_light_component,     \
+    add_sky_light_component, remove_sky_light_component)
 
 namespace engine::runtime {
 

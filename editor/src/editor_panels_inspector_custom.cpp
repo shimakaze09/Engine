@@ -44,6 +44,20 @@ bool entity_has_scene_capture(const runtime::World &world,
 
 } // namespace
 
+bool draw_sky_light_component_fields(runtime::SkyLightComponent &skyLight,
+                                     bool editable) noexcept {
+  if (!editable) {
+    ImGui::BeginDisabled();
+  }
+  const bool modified = draw_asset_reference_picker(
+      "Environment", content::AssetTypeTag::Environment,
+      &skyLight.environmentAssetId, &skyLight.environmentRef);
+  if (!editable) {
+    ImGui::EndDisabled();
+  }
+  return modified;
+}
+
 bool draw_mesh_component_fields(runtime::Entity entity,
                                 runtime::MeshComponent &mesh,
                                 bool editable) noexcept {

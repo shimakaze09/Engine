@@ -44,9 +44,10 @@ struct SessionWorldScope final {
 };
 
 /// The registry row count generated from the runtime table matches the
-/// production World's persistent-component count (15 as of issue #161).
+/// production World's persistent-component count (16 since the sky light,
+/// #580).
 int check_component_edit_type_count() noexcept {
-  if (engine::editor::kComponentEditTypeCount != 15U) {
+  if (engine::editor::kComponentEditTypeCount != 16U) {
     return 1;
   }
   return 0;

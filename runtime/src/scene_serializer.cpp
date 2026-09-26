@@ -159,6 +159,8 @@ bool decode_scene_component(const core::JsonParser &parser,
     return read_collider_component(parser, value, out);
   } else if constexpr (std::is_same_v<T, MeshComponent>) {
     return read_mesh_component(parser, value, out);
+  } else if constexpr (std::is_same_v<T, SkyLightComponent>) {
+    return read_sky_light_component(parser, value, out);
   } else if constexpr (std::is_same_v<T, LightComponent>) {
     return read_light_component(parser, value, out);
   } else if constexpr (std::is_same_v<T, FoliagePatchComponent>) {
@@ -191,6 +193,9 @@ bool encode_scene_component(core::JsonWriter &writer, const char *key,
     return write_collider_component(writer, component);
   } else if constexpr (std::is_same_v<T, MeshComponent>) {
     write_mesh_component(writer, component);
+    return true;
+  } else if constexpr (std::is_same_v<T, SkyLightComponent>) {
+    write_sky_light_component(writer, component);
     return true;
   } else if constexpr (std::is_same_v<T, LightComponent>) {
     write_light_component(writer, component);

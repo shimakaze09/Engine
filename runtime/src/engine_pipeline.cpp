@@ -68,6 +68,7 @@
 #include "engine_frame_collect.h"
 #include "engine_runtime_streaming.h"
 #include "mesh_reference_resolution.h"
+#include "scene_environment.h"
 #include "engine/runtime/world.h"
 #include "engine/scripting/dap_server.h"
 #include "engine/scripting/scripting.h"
@@ -276,6 +277,18 @@ renderer::TextureHandle load_material_texture_production(
 void release_material_texture_production(renderer::TextureHandle handle,
                                          void * /*userData*/) noexcept {
   renderer::unload_texture(handle);
+}
+
+/// Face size of the cubemap a scene's environment map loads to; the
+/// prefilter and irradiance bakes read from it.
+constexpr std::int32_t kSceneEnvironmentFaceSize = 256;
+
+/// Production EnvironmentLoadFn: the equirectangular .hdr becomes a cubemap.
+renderer::TextureHandle
+load_scene_environment_production(const char *virtualPath,
+                                  void * /*userData*/) noexcept {
+  return renderer::load_hdr_equirect_cubemap(virtualPath,
+                                             kSceneEnvironmentFaceSize);
 }
 
 // ---------------------------------------------------------------------------
@@ -619,6 +632,8 @@ struct EnginePipeline::Impl final {
   // Mesh ids the World references that the catalog cannot place, already
   // reported for the current content.
   UnresolvedMeshReports unresolvedMeshReports{};
+  // The scene sky light's environment cubemap, bound in stage_assets.
+  runtime::SceneEnvironment sceneEnvironment{};
   runtime::EngineRendererService rendererService{};
 
   // --- Run lifetime ---
@@ -1087,6 +1102,9 @@ void EnginePipeline::Impl::teardown() noexcept {
 
   // The rest is this Impl's own storage, released whichever run holds the
   // alias slots.
+  runtime::release_scene_environment(&sceneEnvironment,
+                                     &release_material_texture_production,
+                                     nullptr);
   serviceRegistry.unregister_services();
 
   content::shutdown_asset_streaming(assetStreamingQueue.get());
@@ -1397,6 +1415,12 @@ void EnginePipeline::Impl::stage_assets() noexcept {
   // costs one integer test per frame afterwards.
   static_cast<void>(request_referenced_mesh_assets(
       *world, &assetDatabaseService, &unresolvedMeshReports));
+  // The scene's sky light names the environment the renderer lights it
+  // from; it loads when the named map changes and costs one comparison on
+  // every other frame.
+  runtime::update_scene_environment(world.get(), assetCatalog.get(), &sceneEnvironment,
+                           &load_scene_environment_production,
+                           &release_material_texture_production, nullptr);
 
   if ((assetStreamingQueue != nullptr) && (assetStreamingState != nullptr)) {
     static_cast<void>(content::update_asset_streaming(

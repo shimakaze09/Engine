@@ -128,6 +128,13 @@ static_cast<void>(desc);
 // Fixed instance and LOD arrays are edited/serialized manually.
 REFLECT_END()
 
+REFLECT_TYPE(engine::runtime::SkyLightComponent)
+static_cast<void>(desc);
+// Intentionally registers a zero-field descriptor: the environment is an
+// AssetRef with a 64-bit runtime id beside it, which TypeField::Kind cannot
+// hold, so the codec is hand-written and the editor uses its asset picker.
+REFLECT_END()
+
 REFLECT_TYPE(engine::runtime::MeshComponent)
 static_cast<void>(desc);
 // Intentionally registers a zero-field descriptor: the asset-id

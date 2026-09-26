@@ -215,6 +215,9 @@ constexpr ComponentMetadata kComponentMetadataTable[] = {
      "Cone-shaped light with inner/outer falloff angles."},
     {"engine::runtime::ReflectionProbeComponent", "Reflection Probe",
      "Rendering", "Bakes an environment cubemap for local reflections."},
+    {"engine::runtime::SkyLightComponent", "Sky Light", "Rendering",
+     "Lights the whole scene from an environment map (.hdr): image-based "
+     "specular and diffuse light under any sky."},
     {"engine::runtime::SceneCaptureComponent", "Scene Capture", "Rendering",
      "Renders the scene from this object's transform into a texture."},
     {"engine::runtime::FoliagePatchComponent", "Foliage Patch", "Rendering",
