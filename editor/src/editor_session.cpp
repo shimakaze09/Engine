@@ -96,30 +96,107 @@ renderer::TextureDesc thumbnail_texture_desc(int width, int height,
   return desc;
 }
 
+namespace {
+
+constexpr const char *kThumbnailBudgetCvar = "editor.thumbnail_cache_kb";
+constexpr int kDefaultThumbnailBudgetKb = 64 * 1024;
+bool g_thumbnailCacheFullWarned = false;
+
+/// The cache's texture-byte budget.
+std::size_t thumbnail_budget_bytes() noexcept {
+  const int kilobytes =
+      core::cvar_get_int(kThumbnailBudgetCvar, kDefaultThumbnailBudgetKb);
+  return static_cast<std::size_t>((kilobytes > 0) ? kilobytes : 1) * 1024U;
+}
+
+/// Bytes a thumbnail texture of this size holds (RGBA8, one level).
+std::size_t thumbnail_bytes(int width, int height) noexcept {
+  return static_cast<std::size_t>(width) * static_cast<std::size_t>(height) *
+         4U;
+}
+
+/// Evicts least-recently drawn thumbnails, never one drawn this frame,
+/// until a new entry of `bytes` fits in a free slot and the budget.
+bool make_thumbnail_room(std::size_t bytes) noexcept {
+  EditorSession &session = editor_session();
+  const std::size_t budget = thumbnail_budget_bytes();
+  while ((session.thumbnailCount >= kMaxThumbnails) ||
+         ((session.thumbnailBytes + bytes > budget) &&
+          (session.thumbnailBytes > 0U))) {
+    std::size_t oldest = session.thumbnailCount;
+    for (std::size_t i = 0U; i < session.thumbnailCount; ++i) {
+      const ThumbnailEntry &entry = session.thumbnailCache[i];
+      if ((entry.lastUsedFrame < session.thumbnailFrame) &&
+          ((oldest == session.thumbnailCount) ||
+           (entry.lastUsedFrame <
+            session.thumbnailCache[oldest].lastUsedFrame))) {
+        oldest = i;
+      }
+    }
+    if (oldest == session.thumbnailCount) {
+      if (!g_thumbnailCacheFullWarned) {
+        g_thumbnailCacheFullWarned = true;
+        core::log_message(core::LogLevel::Warning, "editor",
+                          "every cached thumbnail is on screen and the cache "
+                          "is full; raise editor.thumbnail_cache_kb to show "
+                          "more at once");
+      }
+      return false;
+    }
+    ThumbnailEntry &victim = session.thumbnailCache[oldest];
+    const renderer::RenderDevice *device = renderer::render_device();
+    if ((victim.texture != renderer::kInvalidDeviceTexture) &&
+        (device != nullptr) && (device->destroy_texture != nullptr)) {
+      device->destroy_texture(victim.texture);
+    }
+    session.thumbnailBytes -= thumbnail_bytes(victim.width, victim.height);
+    victim = session.thumbnailCache[session.thumbnailCount - 1U];
+    session.thumbnailCache[session.thumbnailCount - 1U] = ThumbnailEntry{};
+    --session.thumbnailCount;
+  }
+  return true;
+}
+
+} // namespace
+
+void register_thumbnail_cache_cvars() noexcept {
+  static_cast<void>(core::cvar_register_int(
+      kThumbnailBudgetCvar, kDefaultThumbnailBudgetKb,
+      "Texture memory the content browser's thumbnails may hold (KB); the "
+      "least recently drawn are released first"));
+}
+
+void advance_thumbnail_frame() noexcept { ++editor_session().thumbnailFrame; }
+
 renderer::DeviceTextureHandle
 load_thumbnail_texture(const char *assetPath) noexcept {
   if (assetPath == nullptr) {
     return renderer::kInvalidDeviceTexture;
   }
 
-  for (std::size_t i = 0U; i < editor_session().thumbnailCount; ++i) {
-    if (std::strcmp(editor_session().thumbnailCache[i].path, assetPath) == 0) {
-      return editor_session().thumbnailCache[i].texture;
+  EditorSession &session = editor_session();
+  for (std::size_t i = 0U; i < session.thumbnailCount; ++i) {
+    ThumbnailEntry &cached = session.thumbnailCache[i];
+    if (std::strcmp(cached.path, assetPath) == 0) {
+      cached.lastUsedFrame = session.thumbnailFrame;
+      return cached.texture;
     }
-  }
-  if (editor_session().thumbnailCount >= kMaxThumbnails) {
-    return renderer::kInvalidDeviceTexture;
   }
   // A thumbnail that cannot be produced is remembered as such, so a
   // missing or corrupt file is not opened and decoded again every frame
   // the row is visible; clear_thumbnail_cache forgets it.
   const auto remember_missing = [assetPath]() noexcept {
-    auto &entry = editor_session().thumbnailCache[editor_session().thumbnailCount];
+    if (!make_thumbnail_room(0U)) {
+      return renderer::kInvalidDeviceTexture;
+    }
+    EditorSession &owner = editor_session();
+    auto &entry = owner.thumbnailCache[owner.thumbnailCount];
     std::snprintf(entry.path, sizeof(entry.path), "%s", assetPath);
     entry.texture = renderer::kInvalidDeviceTexture;
     entry.width = 0;
     entry.height = 0;
-    ++editor_session().thumbnailCount;
+    entry.lastUsedFrame = owner.thumbnailFrame;
+    ++owner.thumbnailCount;
     return renderer::kInvalidDeviceTexture;
   };
 
@@ -177,6 +254,10 @@ load_thumbnail_texture(const char *assetPath) noexcept {
   // calling glGenTextures/glTexImage2D directly: the graphics API stays
   // inside the renderer backend, and the editor only ever sees the opaque
   // device texture handle create_texture returns.
+  if (!make_thumbnail_room(thumbnail_bytes(w, h))) {
+    stbi_image_free(pixels);
+    return renderer::kInvalidDeviceTexture;
+  }
   renderer::DeviceTextureHandle tex{};
   const renderer::RenderDevice *device = renderer::render_device();
   if ((device != nullptr) && (device->create_texture != nullptr)) {
@@ -185,12 +266,14 @@ load_thumbnail_texture(const char *assetPath) noexcept {
   stbi_image_free(pixels);
 
   if (tex != renderer::kInvalidDeviceTexture) {
-    auto &entry = editor_session().thumbnailCache[editor_session().thumbnailCount];
+    auto &entry = session.thumbnailCache[session.thumbnailCount];
     std::snprintf(entry.path, sizeof(entry.path), "%s", assetPath);
     entry.texture = tex;
     entry.width = w;
     entry.height = h;
-    ++editor_session().thumbnailCount;
+    entry.lastUsedFrame = session.thumbnailFrame;
+    session.thumbnailBytes += thumbnail_bytes(w, h);
+    ++session.thumbnailCount;
     return tex;
   }
   return remember_missing();
@@ -210,6 +293,8 @@ void clear_thumbnail_cache() noexcept {
     editor_session().thumbnailCache[i] = ThumbnailEntry{};
   }
   editor_session().thumbnailCount = 0U;
+  editor_session().thumbnailBytes = 0U;
+  g_thumbnailCacheFullWarned = false;
 }
 
 /// ImGui image id for a device texture (see editor_session.h contract).
@@ -538,6 +623,40 @@ static bool selection_epoch_valid() noexcept {
          (session.selectionEpoch == session.world->content_epoch());
 }
 
+/// Rewrites the index map for members from `first` on, after an insert,
+/// removal or compaction moved them.
+static void reindex_selection_from(std::size_t first) noexcept {
+  EditorSession &session = editor_session();
+  for (std::size_t i = first; i < session.selectedEntityCount; ++i) {
+    session.selectedSlotByIndex[session.selectedEntities[i].index] =
+        static_cast<std::uint32_t>(i + 1U);
+  }
+}
+
+/// Empties the selection, clearing only the index map entries it set.
+static void reset_selection_members() noexcept {
+  EditorSession &session = editor_session();
+  for (std::size_t i = 0U; i < session.selectedEntityCount; ++i) {
+    session.selectedSlotByIndex[session.selectedEntities[i].index] = 0U;
+  }
+  session.selectedEntityCount = 0U;
+}
+
+/// The member position holding exactly this handle, or the count when the
+/// entity is not a member.
+static std::size_t selection_position(runtime::Entity entity) noexcept {
+  const EditorSession &session = editor_session();
+  if (entity.index >= EditorSession::kMaxSelectedEntities) {
+    return session.selectedEntityCount;
+  }
+  const std::uint32_t slot = session.selectedSlotByIndex[entity.index];
+  if ((slot == 0U) || (slot > session.selectedEntityCount) ||
+      (session.selectedEntities[slot - 1U] != entity)) {
+    return session.selectedEntityCount;
+  }
+  return slot - 1U;
+}
+
 bool is_entity_selected(runtime::Entity entity) noexcept {
   if (!selection_epoch_valid()) {
     return false;
@@ -546,12 +665,7 @@ bool is_entity_selected(runtime::Entity entity) noexcept {
   if (!session.world->is_alive(entity)) {
     return false;
   }
-  for (std::size_t i = 0U; i < session.selectedEntityCount; ++i) {
-    if (session.selectedEntities[i] == entity) {
-      return true;
-    }
-  }
-  return false;
+  return selection_position(entity) < session.selectedEntityCount;
 }
 
 void select_entity(runtime::Entity entity, bool additive) noexcept {
@@ -563,19 +677,24 @@ void select_entity(runtime::Entity entity, bool additive) noexcept {
     session.selectionEpoch = session.world->content_epoch();
   }
   if (!additive) {
-    session.selectedEntityCount = 0U;
+    reset_selection_members();
   }
   if (additive && is_entity_selected(entity)) {
-    std::size_t write = 0U;
-    for (std::size_t i = 0U; i < session.selectedEntityCount; ++i) {
-      if (session.selectedEntities[i] != entity) {
-        session.selectedEntities[write++] = session.selectedEntities[i];
-      }
+    // Order-preserving removal: the primary is the last pick, so the
+    // members after the removed one keep their order and shift down.
+    const std::size_t removed = selection_position(entity);
+    session.selectedSlotByIndex[entity.index] = 0U;
+    for (std::size_t i = removed + 1U; i < session.selectedEntityCount; ++i) {
+      session.selectedEntities[i - 1U] = session.selectedEntities[i];
     }
-    session.selectedEntityCount = write;
-    session.selectedEntity =
-        (write > 0U) ? session.selectedEntities[write - 1U]
-                     : runtime::kInvalidEntity;
+    --session.selectedEntityCount;
+    reindex_selection_from(removed);
+    const std::size_t count = session.selectedEntityCount;
+    session.selectedEntity = (count > 0U) ? session.selectedEntities[count - 1U]
+                                          : runtime::kInvalidEntity;
+    return;
+  }
+  if (entity.index >= EditorSession::kMaxSelectedEntities) {
     return;
   }
   // The primary selection must always be a member of the retained set —
@@ -589,11 +708,13 @@ void select_entity(runtime::Entity entity, bool additive) noexcept {
     return;
   }
   session.selectedEntities[session.selectedEntityCount++] = entity;
+  session.selectedSlotByIndex[entity.index] =
+      static_cast<std::uint32_t>(session.selectedEntityCount);
   session.selectedEntity = entity;
 }
 
 void clear_entity_selection() noexcept {
-  editor_session().selectedEntityCount = 0U;
+  reset_selection_members();
   editor_session().selectedEntity = runtime::kInvalidEntity;
 }
 
@@ -621,11 +742,15 @@ void prune_entity_selection() noexcept {
   }
   std::size_t write = 0U;
   for (std::size_t i = 0U; i < session.selectedEntityCount; ++i) {
-    if (session.world->is_alive(session.selectedEntities[i])) {
-      session.selectedEntities[write++] = session.selectedEntities[i];
+    const runtime::Entity member = session.selectedEntities[i];
+    if (session.world->is_alive(member)) {
+      session.selectedEntities[write++] = member;
+    } else {
+      session.selectedSlotByIndex[member.index] = 0U;
     }
   }
   session.selectedEntityCount = write;
+  reindex_selection_from(0U);
   if ((session.selectedEntity != runtime::kInvalidEntity) &&
       !session.world->is_alive(session.selectedEntity)) {
     session.selectedEntity = (write > 0U) ? session.selectedEntities[write - 1U]

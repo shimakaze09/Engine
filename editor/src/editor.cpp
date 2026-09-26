@@ -104,6 +104,7 @@ void setup_default_dock_layout(ImGuiID dockspaceId) noexcept {
 }
 
 void draw_editor_panels(float frameMs, float utilizationPct) noexcept {
+  advance_thumbnail_frame();
   static_cast<void>(frameMs);
   static_cast<void>(utilizationPct);
 
@@ -286,6 +287,7 @@ bool initialize_editor(void *sdlWindow) noexcept {
       "editor.show_console", true,
       "Toggle the editor Console panel (Window menu)"));
   register_rendering_panel_cvars();
+  register_thumbnail_cache_cvars();
   console_capture_initialize();
 
   static_cast<void>(core::cvar_register_bool(

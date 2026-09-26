@@ -19,6 +19,7 @@
 #include "editor_panels_inspector_generic.h"
 #include "editor_session.h"
 #include "engine/core/logging.h"
+#include "engine/core/nothrow_buffer.h"
 #include "engine/core/reflect.h"
 #include "engine/runtime/world.h"
 
@@ -136,7 +137,8 @@ struct MultiEditEntry final {
 /// of leaving a partially-applied selection.
 struct MultiComponentEditCommand final : EditorCommand {
   ComponentEditType type = ComponentEditType::Transform;
-  std::array<MultiEditEntry, EditorSession::kMaxSelectedEntities> entries{};
+  /// Sized to the selection the command was built from.
+  core::NothrowBuffer<MultiEditEntry> entries{};
   std::size_t entryCount = 0U;
 
   bool execute() noexcept override { return apply_all(true); }
@@ -186,7 +188,8 @@ struct MultiEditGesture final {
   ComponentEditType type = ComponentEditType::Transform;
   std::size_t fieldOffset = 0U;
   std::size_t fieldSize = 0U;
-  std::array<MultiEditEntry, EditorSession::kMaxSelectedEntities> entries{};
+  /// Sized to the selection the gesture opened on.
+  core::NothrowBuffer<MultiEditEntry> entries{};
   std::size_t entryCount = 0U;
 };
 
@@ -233,7 +236,14 @@ bool multi_edit_stage_field(ComponentEditType type, std::size_t fieldOffset,
   }
   if (!gesture.active) {
     // Open on the whole selection or not at all: an entity that cannot
-    // be captured has no undo endpoint.
+    // be captured has no undo endpoint, and neither does one the buffer
+    // could not be sized for.
+    if (!gesture.entries.allocate(session.selectedEntityCount)) {
+      core::log_message(core::LogLevel::Error, "editor",
+                        "multi-edit could not start: out of memory for the "
+                        "selection's undo record");
+      return false;
+    }
     std::size_t captured = 0U;
     for (; captured < session.selectedEntityCount; ++captured) {
       MultiEditEntry &entry = gesture.entries[captured];
@@ -315,6 +325,14 @@ void multi_edit_commit_gesture() noexcept {
     return;
   }
   cmd->type = gesture.type;
+  if (!cmd->entries.allocate(gesture.entryCount)) {
+    delete cmd;
+    core::log_message(core::LogLevel::Error, "editor",
+                      "multi-edit gesture could not be recorded: out of "
+                      "memory; the edit stays applied but is not undoable");
+    session.document.unrecordedEdit = true;
+    return;
+  }
   bool changed = false;
   for (std::size_t i = 0U; i < gesture.entryCount; ++i) {
     MultiEditEntry entry = gesture.entries[i];
@@ -364,6 +382,13 @@ bool apply_multi_field_edit(ComponentEditType type, std::size_t fieldOffset,
     return false;
   }
   cmd->type = type;
+  if (!cmd->entries.allocate(session.selectedEntityCount)) {
+    delete cmd;
+    core::log_message(core::LogLevel::Error, "editor",
+                      "multi-edit refused: out of memory for the selection's "
+                      "undo record");
+    return false;
+  }
 
   for (std::size_t i = 0U; i < session.selectedEntityCount; ++i) {
     const runtime::Entity entity = session.selectedEntities[i];
@@ -409,6 +434,13 @@ bool apply_multi_component_remove(ComponentEditType type) noexcept {
     return false;
   }
   cmd->type = type;
+  if (!cmd->entries.allocate(session.selectedEntityCount)) {
+    delete cmd;
+    core::log_message(core::LogLevel::Error, "editor",
+                      "multi-edit refused: out of memory for the selection's "
+                      "undo record");
+    return false;
+  }
 
   for (std::size_t i = 0U; i < session.selectedEntityCount; ++i) {
     const runtime::Entity entity = session.selectedEntities[i];
