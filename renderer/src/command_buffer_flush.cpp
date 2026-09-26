@@ -149,17 +149,19 @@ void flush_renderer(CommandBufferView commandBufferView,
       height_fog_settings_from_cvars(backend.cvars);
   static_cast<void>(ensure_brdf_lut(backend, dev, environmentBakeSettings));
 
+  // An environment lights the scene whatever sky is drawn: r_sky_model
+  // picks what the sky pass shows, and a set environment is image-based
+  // light for every model.
+  const TextureHandle envTexture = renderer_context().activeSkyboxTexture;
   const DeviceTextureHandle envSkyboxTexture =
-      (selected_sky_model() == SkyModel::Cubemap)
-          ? active_skybox_device_texture(backend)
-          : kInvalidDeviceTexture;
+      active_skybox_device_texture(backend);
   DeviceTextureHandle iblPrefilteredTex{};
   DeviceTextureHandle iblIrradianceTex{};
   if (envSkyboxTexture != kInvalidDeviceTexture) {
     iblPrefilteredTex = ensure_prefiltered_environment(
-        backend, dev, envSkyboxTexture, environmentBakeSettings);
+        backend, dev, envTexture, envSkyboxTexture, environmentBakeSettings);
     iblIrradianceTex = ensure_irradiance_environment(
-        backend, dev, envSkyboxTexture, environmentBakeSettings);
+        backend, dev, envTexture, envSkyboxTexture, environmentBakeSettings);
   }
   const bool iblAvailable =
       (iblPrefilteredTex != kInvalidDeviceTexture) &&

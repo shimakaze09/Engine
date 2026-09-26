@@ -8,6 +8,7 @@ engine_add_module_library(engine_renderer
     src/render_device_bgfx.cpp
     src/render_device_bgfx_programs.cpp
     src/render_device_bgfx_translate.cpp
+    src/texel_downsample.cpp
     src/asset_database.cpp
     src/asset_manager.cpp
     src/command_buffer_builder.cpp

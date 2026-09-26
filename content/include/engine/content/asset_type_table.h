@@ -51,12 +51,12 @@ enum class AssetPrimaryAction : std::uint8_t {
   X(Script, "Script", Source, Select, (".lua"), ())                            \
   X(Scene, "Scene", Source, OpenDocument, (".scene"), ())                      \
   X(Animation, "Animation", Derived, Select, (), (".anim", ".skel"))           \
-  X(AnimationController, "Anim Controller", Source, Select, (".animctrl"),     \
-    ())                                                                        \
+  X(AnimationController, "Anim Controller", Source, Select, (".animctrl"), ()) \
   X(Audio, "Sound", Source, Select, (".wav", ".ogg", ".mp3"), ())              \
   X(Unknown, "Other", Source, Select, (), ())                                  \
   X(Prefab, "Prefab", Source, Select, (".prefab"), ())                         \
-  X(Shader, "Shader", Cooked, Select, (".sc"), ())
+  X(Shader, "Shader", Cooked, Select, (".sc"), ())                             \
+  X(Environment, "Environment", Source, Select, (".hdr"), ())
 
 /// Tags every asset record, index entry and query carries.
 enum class AssetTypeTag : std::uint8_t {

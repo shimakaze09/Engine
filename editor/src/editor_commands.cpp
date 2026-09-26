@@ -1170,6 +1170,7 @@ ComponentEditSnapshot default_component_snapshot(
   case ComponentEditType::SceneCapture:
   case ComponentEditType::Animation:
   case ComponentEditType::Camera:
+  case ComponentEditType::SkyLight:
     break;
   }
   return snapshot;

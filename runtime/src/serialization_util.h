@@ -178,7 +178,18 @@ bool read_reflected_component(const core::JsonParser &parser,
                               const core::TypeDescriptor &descriptor,
                               void *instance) noexcept;
 
-// --- MeshComponent / LightComponent ----------------------------------------
+// --- SkyLightComponent / MeshComponent / LightComponent --------------------
+
+/// Writes the sky light under kJsonKeySkyLightComponent as
+/// {"environment": "<ref>"}, the reference only when set; the resolved id
+/// is runtime state and is never written.
+void write_sky_light_component(core::JsonWriter &writer,
+                               const SkyLightComponent &component) noexcept;
+/// Reads a sky light; an absent environment leaves it nil, and a present
+/// one that is not a valid reference fails the read.
+bool read_sky_light_component(const core::JsonParser &parser,
+                              const core::JsonValue &value,
+                              SkyLightComponent *outComponent) noexcept;
 
 /// Writes the mesh component under kJsonKeyMeshComponent: the authored
 /// mesh and material references (each only when set) and the inline

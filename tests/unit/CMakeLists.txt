@@ -1264,6 +1264,21 @@ engine_add_test_executable(engine_unit_texture_loader
     engine_renderer
 )
 
+engine_add_test_executable(engine_unit_texel_downsample
+    SOURCES
+    texel_downsample_test.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/texel_downsample.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/renderer/include
+    ${CMAKE_SOURCE_DIR}/renderer/src
+    ${CMAKE_SOURCE_DIR}/core/include
+    PRIVATE_DEPS
+    engine_core
+    engine_math
+    LABELS
+    unit
+)
+
 engine_add_test_executable(engine_unit_texture_loader_handles
     SOURCES
     texture_loader_handle_test.cpp

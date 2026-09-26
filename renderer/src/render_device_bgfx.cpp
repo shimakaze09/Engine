@@ -21,6 +21,7 @@
 #include "render_device_null.h"
 #include "renderer_backend_select.h"
 #include "screenshot_tga.h"
+#include "texel_downsample.h"
 
 #if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic push
@@ -45,6 +46,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
+#include <new>
 
 namespace engine::renderer {
 
@@ -222,6 +225,49 @@ const bgfx::Memory *stage_texels(const BgfxTexelUpload &shape,
     }
   }
   return mem;
+}
+
+/// Uploads level 0 from `pixels` and every level of the chain below it,
+/// each box-filtered on the CPU from the level above: bgfx cannot generate
+/// a chain on the device, and a level left unwritten would be sampled as
+/// whatever the allocation held. `upload(level, width, height, texels)`
+/// stages and submits one level. Logs and stops at the first level whose
+/// staging buffer cannot be allocated, so the levels written stay valid.
+template <typename UploadLevel>
+void upload_texel_chain(const BgfxTexelUpload &shape, TexelData data,
+                        std::int32_t width, std::int32_t height,
+                        std::int32_t levels, const void *pixels,
+                        UploadLevel upload) noexcept {
+  upload(0, width, height, pixels);
+  const std::int32_t components = (data == TexelData::F32)
+                                      ? (shape.srcBytesPerPixel / 4)
+                                      : shape.srcBytesPerPixel;
+  const std::size_t texelBytes = client_texel_bytes(data, components);
+  std::unique_ptr<std::uint8_t[]> above{};
+  const void *source = pixels;
+  std::int32_t sourceWidth = width;
+  std::int32_t sourceHeight = height;
+  for (std::int32_t level = 1; level < levels; ++level) {
+    const std::int32_t levelWidth = mip_extent(sourceWidth, 1);
+    const std::int32_t levelHeight = mip_extent(sourceHeight, 1);
+    std::unique_ptr<std::uint8_t[]> texels(
+        new (std::nothrow)
+            std::uint8_t[static_cast<std::size_t>(levelWidth) *
+                         static_cast<std::size_t>(levelHeight) * texelBytes]);
+    if ((texels == nullptr) ||
+        !downsample_texels(data, components, source, sourceWidth, sourceHeight,
+                           texels.get())) {
+      core::log_message(core::LogLevel::Error, "render_device",
+                        "bgfx backend: out of memory generating a mip "
+                        "chain; the levels below this one stay empty");
+      return;
+    }
+    upload(level, levelWidth, levelHeight, texels.get());
+    above = std::move(texels);
+    source = above.get();
+    sourceWidth = levelWidth;
+    sourceHeight = levelHeight;
+  }
 }
 
 // --- Buffers ---
@@ -515,8 +561,9 @@ DeviceTextureHandle bgfx_create_texture(const TextureDesc &desc) noexcept {
       flags |= BGFX_TEXTURE_BLIT_DST;
     }
   }
-  // mipLevels 0 asks for a runtime-generated chain, which bgfx cannot
-  // do; the chain is allocated and generation moves to the cook.
+  // mipLevels 0 asks for a generated chain. bgfx cannot generate one on
+  // the device, so the levels below 0 are filled from the client texels
+  // on upload (upload_texel_chain).
   const bool hasMips = (desc.mipLevels != 1);
   {
     // bgfx allocates the whole chain down to 1x1 whenever mips are
@@ -533,17 +580,6 @@ DeviceTextureHandle bgfx_create_texture(const TextureDesc &desc) noexcept {
                                          : std::min(desc.mipLevels, fullChain))
                 : 1;
   }
-  if (desc.mipLevels == 0) {
-    static bool logged = false;
-    if (!logged) {
-      logged = true;
-      core::log_message(core::LogLevel::Info, "render_device",
-                        "bgfx backend: runtime mip generation "
-                        "unavailable; levels beyond 0 stay empty until "
-                        "the cook supplies them");
-    }
-  }
-
   if (desc.kind == TextureKind::Cube) {
     record.handle = bgfx::createTextureCube(
         static_cast<std::uint16_t>(desc.width), hasMips, 1U, shape.format,
@@ -566,28 +602,42 @@ DeviceTextureHandle bgfx_create_texture(const TextureDesc &desc) noexcept {
   }
 
   if ((desc.kind == TextureKind::Tex2D) && (desc.pixels != nullptr)) {
-    const bgfx::Memory *mem =
-        stage_texels(shape, desc.width, desc.height, desc.pixels);
-    if (mem != nullptr) {
-      bgfx::updateTexture2D(record.handle, 0U, 0U, 0U, 0U,
-                            static_cast<std::uint16_t>(desc.width),
-                            static_cast<std::uint16_t>(desc.height), mem,
-                            kTightlyPackedPitch);
-    }
+    const bgfx::TextureHandle handle = record.handle;
+    upload_texel_chain(
+        shape, desc.pixelData, desc.width, desc.height, record.mipLevels,
+        desc.pixels,
+        [&shape, handle](std::int32_t level, std::int32_t width,
+                         std::int32_t height, const void *texels) noexcept {
+          const bgfx::Memory *mem = stage_texels(shape, width, height, texels);
+          if (mem != nullptr) {
+            bgfx::updateTexture2D(handle, 0U, static_cast<std::uint8_t>(level),
+                                  0U, 0U, static_cast<std::uint16_t>(width),
+                                  static_cast<std::uint16_t>(height), mem,
+                                  kTightlyPackedPitch);
+          }
+        });
   } else if ((desc.kind == TextureKind::Cube) &&
              (desc.facePixels != nullptr)) {
+    const bgfx::TextureHandle handle = record.handle;
     for (std::uint8_t face = 0U; face < 6U; ++face) {
       if (desc.facePixels[face] == nullptr) {
         continue;
       }
-      const bgfx::Memory *mem =
-          stage_texels(shape, desc.width, desc.width, desc.facePixels[face]);
-      if (mem != nullptr) {
-        bgfx::updateTextureCube(record.handle, 0U, face, 0U, 0U, 0U,
-                                static_cast<std::uint16_t>(desc.width),
-                                static_cast<std::uint16_t>(desc.width), mem,
-                                kTightlyPackedPitch);
-      }
+      upload_texel_chain(
+          shape, desc.pixelData, desc.width, desc.width, record.mipLevels,
+          desc.facePixels[face],
+          [&shape, handle, face](std::int32_t level, std::int32_t width,
+                                 std::int32_t height,
+                                 const void *texels) noexcept {
+            const bgfx::Memory *mem =
+                stage_texels(shape, width, height, texels);
+            if (mem != nullptr) {
+              bgfx::updateTextureCube(
+                  handle, 0U, face, static_cast<std::uint8_t>(level), 0U, 0U,
+                  static_cast<std::uint16_t>(width),
+                  static_cast<std::uint16_t>(height), mem, kTightlyPackedPitch);
+            }
+          });
     }
   }
 

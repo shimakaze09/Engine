@@ -255,6 +255,13 @@ void draw_component_sections(runtime::Entity entity, bool authoredEditable,
               modified;
       });
 
+  draw_component_section(
+      entity, ComponentEditType::SkyLight, "Sky Light",
+      &ComponentEditSnapshot::skyLight, authoredEditable, false, true,
+      [authoredEditable](runtime::SkyLightComponent &c) {
+        return draw_sky_light_component_fields(c, authoredEditable);
+      });
+
   draw_component_section(entity, ComponentEditType::Mesh, "Mesh",
                          &ComponentEditSnapshot::mesh, authoredEditable, false,
                          true,
@@ -387,8 +394,8 @@ void draw_component_sections(runtime::Entity entity, bool authoredEditable,
         return modified;
       });
 }
-// 13 sections above cover every registry row except Name and Transform.
-static_assert(kComponentEditTypeCount == 15U,
+// 14 sections above cover every registry row except Name and Transform.
+static_assert(kComponentEditTypeCount == 16U,
              "a new persistent-component registry row needs both a section "
              "in draw_component_sections and an entry in "
              "editor_inspector_metadata's ComponentMetadata table");

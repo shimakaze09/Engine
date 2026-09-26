@@ -7,13 +7,15 @@
 // run exactly one — and an arm's lag depended on how the steps were split
 // into frames. Drives the production EnginePipeline headless.
 //
-// Both invariants hold whatever step counts the frames happen to get, so
-// nothing here depends on timing: the sleeps only make sure frames with no
-// step and frames with several both occur.
+// Both invariants hold whatever step counts the frames get. Each frame's
+// delta is injected rather than measured, so the runs exercise exactly the
+// step patterns they are written for, frames with no step and frames with
+// several, on any machine: nothing here depends on timing.
 
 #include "engine/core/cvar.h"
 #include "engine/core/engine_stats.h"
 #include "engine/core/job_system.h"
+#include "engine/core/simulation_clock.h"
 #include "engine/engine.h"
 #include "engine/math/transform.h"
 #include "engine/renderer/camera.h"
@@ -23,13 +25,11 @@
 #include "engine/runtime/scene_serializer.h"
 #include "engine/runtime/world.h"
 
-#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
 #include <map>
 #include <system_error>
-#include <thread>
 
 namespace {
 
@@ -114,23 +114,24 @@ struct RunResult final {
   std::map<unsigned, float> armLengthAtStep;
 };
 
-/// Runs frames until `totalSteps` fixed steps have passed, sleeping per
-/// frame as `sleepFor(frameIndex)` says.
-template <typename SleepFor>
+/// Runs frames until `totalSteps` fixed steps have passed, each frame
+/// accumulating `deltaFor(frameIndex)` fixed steps' worth of time.
+template <typename DeltaFor>
 RunResult run_rig(engine::EnginePipeline &pipeline, unsigned totalSteps,
-                  SleepFor &&sleepFor) noexcept {
+                  DeltaFor &&deltaFor) noexcept {
   RunResult result{};
   const Entity body = build_rig(*g_world);
   if (body == kInvalidEntity) {
     return result;
   }
-  // The first frames settle the camera manager onto the rig's camera. They
-  // may run fixed steps of their own — how many depends on how long they
-  // took — and the arm lags through those as through any other, so the
-  // count the arm's length is keyed by starts at the rig's creation.
+  // The first frames settle the camera manager onto the rig's camera, one
+  // step each. The arm lags through those steps as through any other, so
+  // the count the arm's length is keyed by starts at the rig's creation.
   unsigned steps = 0U;
   for (int frame = 0; frame < 4; ++frame) {
-    if (!pipeline.execute_frame()) {
+    if (!pipeline.set_frame_delta_override(engine::core::kFixedDeltaSeconds) ||
+        !pipeline.execute_frame()) {
+      pipeline.clear_frame_delta_override();
       return result;
     }
     steps += engine::core::get_engine_stats().fixedSteps;
@@ -140,9 +141,11 @@ RunResult run_rig(engine::EnginePipeline &pipeline, unsigned totalSteps,
   bool haveFirstOffset = false;
   double firstOffset = 0.0;
   for (unsigned frame = 0U; (steps < totalSteps) && (frame < 4000U); ++frame) {
-    std::this_thread::sleep_for(sleepFor(frame));
     g_presentedCameraSeen = false;
-    if (!pipeline.execute_frame()) {
+    if (!pipeline.set_frame_delta_override(engine::core::kFixedDeltaSeconds *
+                                           deltaFor(frame)) ||
+        !pipeline.execute_frame()) {
+      pipeline.clear_frame_delta_override();
       return result;
     }
     const engine::core::EngineStats stats = engine::core::get_engine_stats();
@@ -161,9 +164,8 @@ RunResult run_rig(engine::EnginePipeline &pipeline, unsigned totalSteps,
     if ((current == nullptr) || !g_presentedCameraSeen) {
       return result;
     }
-    // Until the first fixed step has run there is no pose behind the
-    // current one, so there is nothing presented to compare yet. How many
-    // frames that takes depends on how long they happen to be.
+    // Until a fixed step has run there is no pose behind the current one,
+    // so there is nothing presented to compare yet.
     if (!g_world->get_previous_world_trs(body, &previousPosition,
                                          &previousRotation, &previousScale)) {
       continue;
@@ -187,6 +189,7 @@ RunResult run_rig(engine::EnginePipeline &pipeline, unsigned totalSteps,
     }
     result.armLengthAtStep[steps] = arm.currentLength;
   }
+  pipeline.clear_frame_delta_override();
   result.ok = (steps >= totalSteps);
   return result;
 }
@@ -264,39 +267,37 @@ int check_with_workers(std::uint32_t workers) noexcept {
     static_cast<void>(engine::core::cvar_set_int("r_vsync", 0));
     static_cast<void>(engine::core::cvar_set_int("r_max_fps", 0));
 
-    // Short frames: most run no step at all, the rest one. Long frames:
-    // 40 ms is more than two steps, so every one runs two or three. Mixed:
-    // both kinds in one run, which is where the defect showed most.
+    // Short frames: half a step each, so they alternate between no step
+    // and one. Long frames: two and a half steps each, so every one runs
+    // two or three. Mixed: both kinds in one run, which is where the
+    // defect showed most. Deltas are in fixed steps.
     constexpr unsigned kSteps = 60U;
-    const RunResult fine = run_rig(pipeline, kSteps, [](unsigned) {
-      return std::chrono::milliseconds(2);
-    });
-    const RunResult coarse = run_rig(pipeline, kSteps, [](unsigned) {
-      return std::chrono::milliseconds(40);
-    });
+    const RunResult fine =
+        run_rig(pipeline, kSteps, [](unsigned) { return 0.5; });
+    const RunResult coarse =
+        run_rig(pipeline, kSteps, [](unsigned) { return 2.5; });
     const RunResult mixed = run_rig(pipeline, kSteps, [](unsigned frame) {
-      return std::chrono::milliseconds(((frame % 3U) == 0U) ? 40 : 2);
+      return ((frame % 3U) == 0U) ? 2.5 : 0.5;
     });
 
     if (!fine.ok || !coarse.ok || !mixed.ok) {
       std::fprintf(stderr, "FAIL: a run did not complete\n");
       result = 4;
-    } else if ((coarse.multiStepFrames == 0U) || (mixed.multiStepFrames == 0U)) {
-      // A 40 ms sleep is more than two steps, so this cannot happen unless
-      // the pipeline stopped stepping; the invariants below would then
-      // pass without testing anything.
+    } else if ((coarse.multiStepFrames == 0U) ||
+               (mixed.multiStepFrames == 0U) || (fine.zeroStepFrames == 0U) ||
+               (mixed.zeroStepFrames == 0U) || (fine.multiStepFrames != 0U)) {
+      // The injected deltas decide these counts, so a miss means the
+      // pipeline stopped honouring them, and the invariants below would
+      // pass without testing what they are for.
       std::fprintf(stderr,
-                   "FAIL: 40 ms frames ran no multi-step frame (%u, %u); "
-                   "nothing was exercised\n",
-                   coarse.multiStepFrames, mixed.multiStepFrames);
+                   "FAIL: the runs did not get their step patterns "
+                   "(multi-step frames long %u mixed %u short %u, zero-step "
+                   "frames short %u mixed %u)\n",
+                   coarse.multiStepFrames, mixed.multiStepFrames,
+                   fine.multiStepFrames, fine.zeroStepFrames,
+                   mixed.zeroStepFrames);
       result = 5;
     } else {
-      // Frames with no step need a machine that renders an empty world in
-      // under a step's time. One that cannot — a sanitizer lane under load —
-      // still checks the multi-step half below, and says the other half
-      // did not run rather than passing it silently.
-      const bool zeroStepExercised =
-          (fine.zeroStepFrames > 0U) && (mixed.zeroStepFrames > 0U);
       std::printf("pipeline_camera_step_cadence_test: %u workers, offset "
                   "drift fine %.6f coarse %.6f mixed %.6f m\n",
                   workers, fine.maxOffsetDrift, coarse.maxOffsetDrift,
@@ -342,27 +343,25 @@ int check_with_workers(std::uint32_t workers) noexcept {
           break;
         }
       }
-      // Every total the long run recorded is one the short run also
-      // recorded when short frames run at most one step. A machine too
-      // slow for that leaves gaps and fewer totals to compare; that is the
-      // machine, not the cadence, so it is reported as not exercised
-      // rather than as a failure. With single-step short frames a
-      // shortfall means the runs disagree about the steps themselves.
-      if ((result == 0) && (compared < 10U) &&
-          (fine.multiStepFrames == 0U)) {
-        std::fprintf(stderr, "FAIL: only %u step totals were common to both "
-                             "runs\n", compared);
-        result = 21;
+      // Short frames run at most one step, so the short run recorded every
+      // total up to its last, and every total the long run recorded in that
+      // range is compared: some twenty-four of them over sixty steps. (The
+      // long run's final frame can overshoot the short run's end by a step
+      // or two.) A shortfall means the runs disagree about the steps
+      // themselves.
+      const unsigned shortEnd = fine.armLengthAtStep.empty()
+                                    ? 0U
+                                    : fine.armLengthAtStep.rbegin()->first;
+      unsigned inRange = 0U;
+      for (const auto &entry : coarse.armLengthAtStep) {
+        inRange += (entry.first <= shortEnd) ? 1U : 0U;
       }
-      const bool armLengthExercised =
-          (compared >= 10U) || (fine.multiStepFrames == 0U);
-      if ((result == 0) && (!zeroStepExercised || !armLengthExercised)) {
-        std::printf("SKIPPED: this machine could not pace short frames "
-                    "finely enough (zero-step frames %u/%u, short frames "
-                    "with several steps %u, common step totals %u); the "
-                    "checks it could run passed\n",
-                    fine.zeroStepFrames, mixed.zeroStepFrames,
-                    fine.multiStepFrames, compared);
+      if ((result == 0) && ((compared != inRange) || (compared < 10U))) {
+        std::fprintf(stderr,
+                     "FAIL: %u of the long run's %u step totals in the short "
+                     "run's range were common to both runs\n",
+                     compared, inRange);
+        result = 21;
       }
     }
     pipeline.teardown();

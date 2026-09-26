@@ -1,6 +1,11 @@
 $input v_dir
 
-// Cosine-hemisphere irradiance convolution.
+// Cosine-hemisphere irradiance convolution. What it stores is the
+// cosine-weighted mean radiance around the normal, E / pi: the shaders
+// light a Lambertian surface as irradianceMap * albedo, and a Lambertian
+// surface leaves with albedo / pi times the irradiance E. With samples
+// drawn in proportion to the cosine, that mean is the plain average of
+// the samples.
 
 #include <bgfx_shader.sh>
 
@@ -41,6 +46,6 @@ void main() {
             cosine_sample_hemisphere(hammersley(i, 128u), normal);
         irradiance += textureCube(u_environmentMap, sampleDir).rgb;
     }
-    irradiance = (3.14159265359 / 128.0) * irradiance;
+    irradiance = irradiance / 128.0;
     gl_FragColor = vec4(irradiance, 1.0);
 }

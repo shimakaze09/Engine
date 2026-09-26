@@ -65,6 +65,17 @@ struct ReflectionProbeComponent final {
   bool needsBake = true;
 };
 
+/// The scene's sky light: an environment map (an Environment asset, a
+/// Radiance .hdr) that lights every surface as image-based light, specular
+/// and diffuse, whatever sky r_sky_model draws. The first sky light in the
+/// World lights the scene; its transform is not used. `environmentRef` is
+/// the authored identity a scene carries; `environmentAssetId` is the
+/// catalog's current answer for it, runtime state that is never serialized.
+struct SkyLightComponent final {
+  core::AssetRef environmentRef{};
+  std::uint64_t environmentAssetId = 0ULL;
+};
+
 /// Renders the scene from this entity each frame into an offscreen texture
 /// (render-to-texture). View position/orientation come from the entity's
 /// world transform (looks along the rotated -Z axis); the renderer clamps

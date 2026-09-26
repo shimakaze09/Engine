@@ -14,9 +14,10 @@
 // is the environment times the table's value. The centre of its disc must
 // be as dim as the ring just around it.
 //
-// No production code sets a cubemap sky, so image-based lighting is
-// switched on here by hand: a small white Radiance file written into the
-// build tree's asset copy, loaded through the production loader.
+// Image-based lighting is switched on here by hand rather than through a
+// sky light, so the test depends on the renderer alone: a small white
+// Radiance file written into the build tree's asset copy, loaded through
+// the production loader.
 
 #include "../gpu_scene_fixture.h"
 

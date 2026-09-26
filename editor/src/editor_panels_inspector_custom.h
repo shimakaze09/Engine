@@ -20,6 +20,11 @@ bool draw_mesh_component_fields(runtime::Entity entity,
                                 runtime::MeshComponent &mesh,
                                 bool editable) noexcept;
 
+/// Draws SkyLightComponent's environment picker, listing Environment
+/// (.hdr) assets; returns true if the environment changed.
+bool draw_sky_light_component_fields(runtime::SkyLightComponent &skyLight,
+                                     bool editable) noexcept;
+
 /// Draws LightComponent's Type combo ahead of its generic reflected fields
 /// (color/direction/intensity); returns true if the type changed.
 bool draw_light_type_combo(runtime::LightComponent &light) noexcept;
