@@ -97,7 +97,10 @@ assumption stands.
 - Dynamic rigid bodies must be hierarchy roots; descendant colliders form
   one compound body owned by their nearest rigid-body ancestor. Collision
   and queries consume the composed world pose.
-- Render prep culls the draw list against the main camera, and keeps a
+- Render prep culls each draw by its mesh's object-space bounds (computed
+  at upload; a skinned mesh's widened past its bind pose) under the draw's
+  transform, and a foliage instance's widened by its wind sway; never by a
+  collider. It culls the draw list against the main camera, and keeps a
   culled draw in a separate auxiliary list, tagged per pass, when sweeping
   it along the directional light reaches the view, a shadow-casting local
   light's range overlaps it, or a capture camera sees it; the shadow and

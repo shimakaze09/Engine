@@ -367,6 +367,20 @@ MeshHandle resolve_mesh_asset(AssetDatabase *database,
   return record.runtimeMesh;
 }
 
+MeshHandle peek_mesh_asset(const AssetDatabase *database,
+                           content::AssetId id) noexcept {
+  if ((database == nullptr) || (id == content::kInvalidAssetId)) {
+    return kInvalidMeshHandle;
+  }
+  const std::size_t slot = find_mesh_asset_slot(database, id);
+  if (slot == database->meshAssets.size()) {
+    return kInvalidMeshHandle;
+  }
+  const MeshAssetRecord &record = database->meshAssets[slot];
+  return (record.state == content::AssetState::Ready) ? record.runtimeMesh
+                                                      : kInvalidMeshHandle;
+}
+
 bool retain_mesh_asset(AssetDatabase *database, content::AssetId id) noexcept {
   if ((database == nullptr) || (id == content::kInvalidAssetId)) {
     return false;

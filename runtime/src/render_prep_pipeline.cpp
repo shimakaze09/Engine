@@ -12,9 +12,7 @@
 #include "engine/math/mat4.h"
 #include "engine/math/transform.h"
 #include "engine/math/vec4.h"
-#include "engine/physics/collider.h"
 #include "engine/renderer/command_buffer.h"
-#include "engine/physics/physics.h"
 
 namespace engine::runtime {
 
@@ -218,6 +216,16 @@ std::uint64_t build_draw_sort_key(const renderer::Material &material,
 
 void mark_graph_failed(std::atomic<bool> *frameGraphFailed) noexcept;
 
+/// World-axis box of a mesh's object-space bounds under `model`.
+void world_mesh_bounds(const renderer::GpuMesh &mesh, const math::Mat4 &model,
+                       math::Vec3 *outCenter, math::Vec3 *outHalf) noexcept {
+  const math::Vec4 center4 =
+      math::mul(model, math::Vec4(mesh.boundsCenter.x, mesh.boundsCenter.y,
+                                  mesh.boundsCenter.z, 1.0F));
+  *outCenter = math::Vec3(center4.x, center4.y, center4.z);
+  *outHalf = math::transform_aabb_half_extents(model, mesh.boundsHalfExtents);
+}
+
 /// Submits a draw to the thread's buffer. A full buffer drops the draw and
 /// counts it; it is a per-frame degradation the pipeline reports once and
 /// surfaces in EngineStats, never a graph failure — treating it as one
@@ -299,26 +307,25 @@ void render_prep_chunk_job(void *userData) noexcept {
     const MeshComponent *meshComponent =
         jobData->world->get_mesh_component_ptr(entities[i]);
     if (meshComponent != nullptr) {
-      const Collider *collider = jobData->world->get_collider_ptr(entities[i]);
+      // Culled by the mesh's own bounds under the entity's transform:
+      // what is drawn, not a unit cube or a collider that may be smaller
+      // or offset. The handle is peeked first so a culled mesh does not
+      // count as used this frame; a visible one is resolved below.
+      const renderer::MeshHandle peekedMesh = renderer::peek_mesh_asset(
+          jobData->assetDatabase, meshComponent->meshAssetId);
+      const renderer::GpuMesh *peeked =
+          (peekedMesh != renderer::kInvalidMeshHandle)
+              ? renderer::lookup_gpu_mesh(jobData->meshRegistry, peekedMesh)
+              : nullptr;
       math::Vec3 center = transforms[i].position;
-      math::Vec3 half = math::transform_aabb_half_extents(
-          transforms[i].matrix, math::Vec3(0.5F, 0.5F, 0.5F));
-      if (collider != nullptr) {
-        const physics::ConvexHullData *hull =
-            (collider->shape == ColliderShape::ConvexHull)
-                ? physics::get_convex_hull_data(
-                      jobData->world->physics_context(), entities[i])
-                : nullptr;
-        physics::ColliderWorldGeometry geometry{};
-        if (physics::make_collider_world_geometry(
-                *collider, transforms[i].matrix, hull, &geometry)) {
-          center = math::aabb_center(geometry.worldAabb);
-          half = math::aabb_half_extents(geometry.worldAabb);
-        }
+      math::Vec3 half(0.0F, 0.0F, 0.0F);
+      if (peeked != nullptr) {
+        world_mesh_bounds(*peeked, transforms[i].matrix, &center, &half);
       }
 
       const std::uint16_t passMask =
-          aabb_culled_by_frustum(frustumPlanes, center, half)
+          (peeked == nullptr) ? std::uint16_t{0U}
+          : aabb_culled_by_frustum(frustumPlanes, center, half)
               ? auxiliary_pass_mask(auxiliary, frustumPlanes, center, half)
               : renderer::kPassCamera;
       if (passMask != 0U) {
@@ -454,11 +461,14 @@ void render_prep_chunk_job(void *userData) noexcept {
           math::compose_trs(instance.offset, math::Quat(),
                             math::Vec3(safeScale, safeScale, safeScale));
       const math::Mat4 model = math::mul(transforms[i].matrix, instanceLocal);
-      const math::Vec4 center4 =
-          math::mul(model, math::Vec4(0.0F, 0.0F, 0.0F, 1.0F));
-      const math::Vec3 center(center4.x, center4.y, center4.z);
-      const math::Vec3 half(0.5F * safeScale, 0.5F * safeScale,
-                            0.5F * safeScale);
+      // The instance's mesh bounds under the patch transform, widened by
+      // the most the wind moves a vertex in world space (the gbuffer
+      // vertex stage sways x by up to the strength and z by 0.35 of it).
+      math::Vec3 center{};
+      math::Vec3 half{};
+      world_mesh_bounds(*mesh, model, &center, &half);
+      const float sway = std::fabs(foliage->windStrength);
+      half = math::Vec3(half.x + sway, half.y, half.z + (0.35F * sway));
       const std::uint16_t passMask =
           aabb_culled_by_frustum(frustumPlanes, center, half)
               ? auxiliary_pass_mask(auxiliary, frustumPlanes, center, half)

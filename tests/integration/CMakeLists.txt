@@ -1613,6 +1613,15 @@ engine_add_test_executable(engine_integration_render_prep_shading_model
     integration
 )
 
+engine_add_test_executable(engine_integration_render_prep_mesh_bounds
+    SOURCES
+    render_prep_mesh_bounds_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    LABELS
+    integration
+)
+
 engine_add_test_executable(engine_integration_draw_order_thread_count
     SOURCES
     draw_order_thread_count_test.cpp
