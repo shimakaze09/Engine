@@ -140,7 +140,9 @@ bool play_sound_oneshot(SoundHandle handle, const PlayParams &params,
 /// new call replaces the current track. The virtual path resolves through
 /// the VFS to a loose OS file (archive-backed streaming is still pending);
 /// volume must be finite and >= 0 or the call fails, and a file larger than
-/// `audio.max_music_file_bytes` is refused before the stream opens.
+/// `audio.max_music_file_bytes` is refused before the stream opens. That
+/// cap is advisory: a file that grows while it streams is not cut off
+/// (decision 0021).
 bool play_music(const char *virtualPath, float volume, bool loop) noexcept;
 /// Stops and releases the streamed music track.
 void stop_music() noexcept;
