@@ -111,9 +111,10 @@ RULES: tuple[Rule, ...] = (
         # renderer once embedded its own, and every system that named an
         # asset reached it through the renderer. Pointers and references
         # to the one the pipeline owns are how everything else reaches it,
-        # and are not matched; nor is the type's own declaration.
-        pattern=r"\bAssetCatalog\s*\(\s*\)|\bAssetCatalog\s+(?!final\b)"
-        r"[A-Za-z_]\w*\s*(?:\{|;|=)",
+        # and are not matched; nor is the type's own declaration, its
+        # defaulted constructor or its destructor.
+        pattern=r"(?<!~)\bAssetCatalog\s*\(\s*\)(?!\s*noexcept\s*=)"
+        r"|\bAssetCatalog\s+(?!final\b)[A-Za-z_]\w*\s*(?:\{|;|=)",
         remedy="take a content::AssetCatalog pointer from "
         "EngineAssetDatabaseService or as a parameter instead of holding one",
     ),

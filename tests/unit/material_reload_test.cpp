@@ -175,10 +175,17 @@ LiveStateBytes live_state(const engine::renderer::AssetDatabase &database) {
                sizeof(database.materialAssets));
   append_bytes(&state.bytes, &database.materialOccupied,
                sizeof(database.materialOccupied));
-  append_bytes(&state.bytes, &g_catalog->entries, sizeof(g_catalog->entries));
-  append_bytes(&state.bytes, &g_catalog->occupied, sizeof(g_catalog->occupied));
-  append_bytes(&state.bytes, &g_catalog->reloadGenerations,
-               sizeof(g_catalog->reloadGenerations));
+  const std::size_t records =
+      engine::content::asset_catalog_record_count(g_catalog);
+  append_bytes(&state.bytes, &records, sizeof(records));
+  for (std::size_t i = 0U; i < records; ++i) {
+    const engine::content::AssetMetadata *record =
+        engine::content::asset_catalog_record(g_catalog, i);
+    append_bytes(&state.bytes, record, sizeof(*record));
+    const std::uint32_t reloads =
+        engine::content::asset_reload_generation(g_catalog, record->assetId);
+    append_bytes(&state.bytes, &reloads, sizeof(reloads));
+  }
   append_bytes(&state.bytes, &g_catalog->generation,
                sizeof(g_catalog->generation));
   return state;

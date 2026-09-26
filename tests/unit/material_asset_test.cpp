@@ -350,9 +350,12 @@ int verify_full_table_failures() {
     }
     engine::content::clear_asset_catalog(g_catalog);
 
+    // A configured limit stands in for a full catalog.
+    constexpr std::size_t kLimit = 64U;
+    g_catalog->recordLimit = kLimit;
     std::size_t inserted = 0U;
     engine::content::AssetId candidate = 1U;
-    while (inserted < engine::content::AssetCatalog::kMaxMetadata) {
+    while (inserted < kLimit) {
       if (candidate != targetId) {
         engine::content::AssetMetadata metadata{};
         metadata.assetId = candidate;
@@ -376,6 +379,7 @@ int verify_full_table_failures() {
          nullptr)) {
       return 73;
     }
+    g_catalog->recordLimit = engine::content::AssetCatalog::kMaxRecords;
   }
 
   {

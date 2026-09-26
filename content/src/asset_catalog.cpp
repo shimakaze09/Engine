@@ -6,7 +6,9 @@
 
 #include "engine/content/asset_catalog.h"
 
+#include <algorithm>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -132,52 +134,59 @@ struct RegisteredEntry final {
   AssetRef ref{};
 };
 
+/// The indices of `entries` in the order `less` sorts them, ties kept in
+/// walk order, so every set of equal entries is one run.
+template <typename Less>
+std::vector<std::size_t> sorted_indices(std::size_t count, Less less) {
+  std::vector<std::size_t> order(count);
+  for (std::size_t i = 0U; i < count; ++i) {
+    order[i] = i;
+  }
+  std::stable_sort(order.begin(), order.end(), less);
+  return order;
+}
+
 /// Names every path in every set of entries that share an AssetRef, and
 /// returns how many entries were involved. Never picks a winner: a
 /// duplicate identity is an error to repair, and choosing between them
-/// would silently rebind references somebody already wrote.
-std::size_t
-report_duplicate_refs(const std::vector<RegisteredEntry> &entries) noexcept {
+/// would silently rebind references somebody already wrote. Sorting keeps
+/// it linear-logarithmic in the size of the mount.
+std::size_t report_duplicate_refs(const std::vector<RegisteredEntry> &entries) {
+  const auto refLess = [&entries](std::size_t lhs, std::size_t rhs) {
+    const AssetRef &a = entries[lhs].ref;
+    const AssetRef &b = entries[rhs].ref;
+    const int guid = std::memcmp(&a.guid, &b.guid, sizeof(a.guid));
+    return (guid != 0) ? (guid < 0) : (a.localId < b.localId);
+  };
+  const std::vector<std::size_t> order =
+      sorted_indices(entries.size(), refLess);
   std::size_t offenders = 0U;
-  for (std::size_t i = 0U; i < entries.size(); ++i) {
-    if (!asset_ref_is_valid(entries[i].ref)) {
-      continue;
+  for (std::size_t start = 0U; start < order.size();) {
+    std::size_t end = start + 1U;
+    while ((end < order.size()) &&
+           (entries[order[end]].ref == entries[order[start]].ref)) {
+      ++end;
     }
-    bool first = true;
-    std::size_t inThisSet = 0U;
-    for (std::size_t j = 0U; j < entries.size(); ++j) {
-      if ((j == i) || !(entries[j].ref == entries[i].ref)) {
-        continue;
-      }
-      if (j < i) {
-        // Already reported as part of an earlier entry's set.
-        first = false;
-        break;
-      }
-      ++inThisSet;
-    }
-    if (!first || (inThisSet == 0U)) {
-      continue;
-    }
-    char guidText[kAssetGuidTextLength + 1U] = {};
-    static_cast<void>(
-        format_asset_guid(entries[i].ref.guid, guidText, sizeof(guidText)));
-    char message[256] = {};
-    std::snprintf(message, sizeof(message),
-                  "asset catalog: %s (local id %016llx) is claimed by more "
-                  "than one asset; repair the duplicate rather than letting "
-                  "references resolve to whichever indexed last",
-                  guidText,
-                  static_cast<unsigned long long>(entries[i].ref.localId));
-    core::log_message(core::LogLevel::Error, "assets", message);
-    for (const RegisteredEntry &entry : entries) {
-      if (entry.ref == entries[i].ref) {
+    const AssetRef &ref = entries[order[start]].ref;
+    if (((end - start) > 1U) && asset_ref_is_valid(ref)) {
+      char guidText[kAssetGuidTextLength + 1U] = {};
+      static_cast<void>(
+          format_asset_guid(ref.guid, guidText, sizeof(guidText)));
+      char message[256] = {};
+      std::snprintf(message, sizeof(message),
+                    "asset catalog: %s (local id %016llx) is claimed by more "
+                    "than one asset; repair the duplicate rather than "
+                    "letting references resolve to whichever indexed last",
+                    guidText, static_cast<unsigned long long>(ref.localId));
+      core::log_message(core::LogLevel::Error, "assets", message);
+      for (std::size_t i = start; i < end; ++i) {
         core::log_path_diagnostic(core::LogLevel::Error, "assets",
-                                  entry.virtualPath.c_str(),
+                                  entries[order[i]].virtualPath.c_str(),
                                   "asset catalog: claims that identity");
         ++offenders;
       }
     }
+    start = end;
   }
   return offenders;
 }
@@ -185,45 +194,39 @@ report_duplicate_refs(const std::vector<RegisteredEntry> &entries) noexcept {
 /// Names every path that differs from another only by letter case, and
 /// returns how many were involved.
 std::size_t
-report_case_collisions(const std::vector<RegisteredEntry> &entries) noexcept {
-  const auto folded = [](const std::string &text) noexcept {
-    std::string lowered = text;
-    for (char &ch : lowered) {
+report_case_collisions(const std::vector<RegisteredEntry> &entries) {
+  std::vector<std::string> folded(entries.size());
+  for (std::size_t i = 0U; i < entries.size(); ++i) {
+    folded[i] = entries[i].virtualPath;
+    for (char &ch : folded[i]) {
       if ((ch >= 'A') && (ch <= 'Z')) {
         ch = static_cast<char>(ch - 'A' + 'a');
       }
     }
-    return lowered;
-  };
+  }
+  const std::vector<std::size_t> order = sorted_indices(
+      entries.size(), [&folded](std::size_t lhs, std::size_t rhs) {
+        return folded[lhs] < folded[rhs];
+      });
   std::size_t offenders = 0U;
-  for (std::size_t i = 0U; i < entries.size(); ++i) {
-    const std::string lowered = folded(entries[i].virtualPath);
-    bool first = true;
-    std::size_t matches = 0U;
-    for (std::size_t j = 0U; j < entries.size(); ++j) {
-      if ((j == i) || (folded(entries[j].virtualPath) != lowered)) {
-        continue;
-      }
-      if (j < i) {
-        first = false;
-        break;
-      }
-      ++matches;
+  for (std::size_t start = 0U; start < order.size();) {
+    std::size_t end = start + 1U;
+    while ((end < order.size()) &&
+           (folded[order[end]] == folded[order[start]])) {
+      ++end;
     }
-    if (!first || (matches == 0U)) {
-      continue;
-    }
-    for (const RegisteredEntry &entry : entries) {
-      if (folded(entry.virtualPath) != lowered) {
-        continue;
+    if ((end - start) > 1U) {
+      for (std::size_t i = start; i < end; ++i) {
+        core::log_path_diagnostic(
+            core::LogLevel::Error, "assets",
+            entries[order[i]].virtualPath.c_str(),
+            "asset catalog: differs from another asset only by letter case, "
+            "so this project is one file on Windows and macOS and two on "
+            "Linux; rename one of them");
+        ++offenders;
       }
-      core::log_path_diagnostic(
-          core::LogLevel::Error, "assets", entry.virtualPath.c_str(),
-          "asset catalog: differs from another asset only by letter case, "
-          "so this project is one file on Windows and macOS and two on "
-          "Linux; rename one of them");
-      ++offenders;
     }
+    start = end;
   }
   return offenders;
 }
@@ -264,10 +267,8 @@ MountRegistration register_mounted_assets(AssetCatalog *catalog,
 
   // Read once for the whole walk: the stamps say which source produced
   // each cooked output, and re-reading them per file would be O(n^2).
-  // Heap, because the index is larger than a Windows thread's whole
-  // default stack; this walk is cold filesystem work that already
-  // allocates, and the index is freed with the walk rather than held for
-  // the process's life.
+  // The index is freed with the walk rather than held for the process's
+  // life.
   const auto provenance = std::make_unique<ProvenanceIndex>();
   static_cast<void>(
       build_provenance_index(osRoot, mountPrefix, provenance.get()));
@@ -337,10 +338,14 @@ MountRegistration register_mounted_assets(AssetCatalog *catalog,
       continue;
     }
     if (insert == CatalogInsert::Refused) {
+      char problem[192] = {};
+      std::snprintf(problem, sizeof(problem),
+                    "asset catalog: the catalog holds its limit of %zu "
+                    "records, or has no memory for more; this asset is not "
+                    "catalogued",
+                    catalog->recordLimit);
       core::log_path_diagnostic(core::LogLevel::Warning, "assets",
-                                metadata.filePath.data(),
-                                "asset catalog: the metadata table is full; "
-                                "this asset is not catalogued");
+                                metadata.filePath.data(), problem);
       ++result.refused;
       continue;
     }
@@ -359,8 +364,8 @@ MountRegistration register_mounted_assets(AssetCatalog *catalog,
 
   result.duplicateRefs = report_duplicate_refs(registered);
   result.caseCollisions = report_case_collisions(registered);
-  result.ok = (result.unidentified == 0U) && (result.duplicateRefs == 0U) &&
-              (result.caseCollisions == 0U);
+  result.ok = (result.refused == 0U) && (result.unidentified == 0U) &&
+              (result.duplicateRefs == 0U) && (result.caseCollisions == 0U);
 
   char message[192] = {};
   std::snprintf(message, sizeof(message),
@@ -370,13 +375,14 @@ MountRegistration register_mounted_assets(AssetCatalog *catalog,
                 result.refused, mountPrefix);
   core::log_message(core::LogLevel::Info, "assets", message);
   if (!result.ok) {
-    char failure[256] = {};
+    char failure[320] = {};
     std::snprintf(failure, sizeof(failure),
-                  "asset catalog: '%s' did not index cleanly: %zu without an "
-                  "identity, %zu claiming a duplicate, %zu colliding only by "
-                  "case. Every offending path is named above.",
-                  mountPrefix, result.unidentified, result.duplicateRefs,
-                  result.caseCollisions);
+                  "asset catalog: '%s' did not index cleanly: %zu refused, "
+                  "%zu without an identity, %zu claiming a duplicate, %zu "
+                  "colliding only by case. Every offending path is named "
+                  "above.",
+                  mountPrefix, result.refused, result.unidentified,
+                  result.duplicateRefs, result.caseCollisions);
     core::log_message(core::LogLevel::Error, "assets", failure);
   }
   return result;
