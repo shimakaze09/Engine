@@ -127,14 +127,14 @@ per-thread command buffers that are merged for the backend flush.
 
 Work outside the job graph: asset streaming runs on its own four worker
 threads behind a mutex, and uploads happen on the main thread; the render
-device is main-thread only; hot reload polls only while an editor bridge
-is published. On the web every thread comes from the page's prewarmed
-pthread pool, whose size and the job system's share of it are one budget
-in the root `CMakeLists.txt`: a thread past the pool would start only after
-the main thread yields, so a join on it would hang the page. Scripts,
-timers and the deferred-mutation flush run before the simulation graph;
-collision callbacks, EndPlay and the final flush run after render prep and
-before submission.
+device is main-thread only; hot reload of shaders, scripts and textures
+polls only while an editor bridge is published. On the web every thread
+comes from the page's prewarmed pthread pool, whose size and the job
+system's share of it are one budget in the root `CMakeLists.txt`: a thread
+past the pool would start only after the main thread yields, so a join on
+it would hang the page. Scripts, timers and the deferred-mutation flush run
+before the simulation graph; collision callbacks, EndPlay and the final
+flush run after render prep and before submission.
 
 Test the production pipeline, never a copied scheduler model.
 
@@ -360,9 +360,9 @@ The code is the detail.
 | `app/` | Editor entry point; whole-archives the editor so its bridge registers before bootstrap. |
 | `core/` | Bootstrap/config, platform (SDL glue, paths, native handles, platform events, touch), logging and crash reports, cvars, console, event bus, input and input maps, VFS, JSON, atomic and durable file writes, job system, allocators, profiler, reflection, entity handle, service locator, `AssetGuid`/`AssetRef` value types, mesh and animation asset formats, `Rng`, simulation clock, debug draw, shared primitives such as `FixedHashTable`. |
 | `math/` | Header-only vectors, matrices, quaternions, transforms, bounding volumes, the deterministic scalar set (`scalar.h`), component PODs. |
-| `content/` | Generic asset layer: identity and `.meta` sidecars, the asset catalog (the one record of every asset's path, identity, type and dependencies, with a change generation) and the mount walk that fills it from the asset type table, cook contract and cook-stamp validation (torn, mixed, newer-schema and foreign-tool cooks are refused), provenance, dependency edges and ordered load, transition queue, async streaming on worker threads. |
+| `content/` | Generic asset layer: identity and `.meta` sidecars, the asset catalog (the one record of every asset's path, identity, type and dependencies, with a change generation) and the mount walk that fills it from the asset type table, cook contract and cook-stamp validation (torn, mixed, newer-schema and foreign-tool cooks are refused), provenance, dependency edges with change notification (a change reaches every dependent, transitively, found by scanning the forward edges) and ordered load, transition queue, async streaming on worker threads. |
 | `physics/` | Bodies, colliders, convex hull, heightfields, CCD, contact manifolds and solver, joints, queries, materials, primitive hull builders, diagnostics. |
-| `renderer/` | Asset database of GPU-side resource records and asset manager (residency, LRU eviction over the `asset.cache_size_mb` budget; what an asset is and where it lives is the content catalog's, which the renderer reads and never owns), mesh/texture loading, materials (loader, writer, parent inheritance with per-field override masks), shader system, the `RenderDevice` contract with its bgfx and null backends, command buffer frontend and backend, pass resources, shadows, light culling, sky and IBL, scene captures, skinning, dynamic resolution, post stack, GPU profiler. |
+| `renderer/` | Asset database of GPU-side resource records and asset manager (residency, LRU eviction over the `asset.cache_size_mb` budget; what an asset is and where it lives is the content catalog's, which the renderer reads and never owns), mesh/texture loading, texture hot reload (which also recovers a texture that failed to load), materials (loader, writer, parent inheritance with per-field override masks, re-resolved through the catalog's edges when a parent or texture changes), shader system, the `RenderDevice` contract with its bgfx and null backends, command buffer frontend and backend, pass resources, shadows, light culling, sky and IBL, scene captures, skinning, dynamic resolution, post stack, GPU profiler. |
 | `audio/` | Sound handles, bus groups, one-shot instance pool, 3D listener, streaming music, decode budgets. |
 | `scripting/` | Lua runtime and sandbox, DAP debugger, hot reload with state persist, generated bindings, per-domain binding translation units, game state and player controller. |
 | `runtime/` | Public bootstrap/run/shutdown, the frame pipeline (which owns the engine's one content asset catalog and hands it to every consumer), `World` ECS, scene and prefab serializers, the subsystem bridges, render prep, skeletal animation, render interpolation, save data, timers, cameras, game mode, entity pool, mesh streaming callbacks and mesh reference resolution, frame pacing. |

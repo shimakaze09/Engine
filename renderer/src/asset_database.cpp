@@ -681,6 +681,17 @@ content::AssetState texture_asset_state(const AssetDatabase *database,
   return database->textureAssets[slot].state;
 }
 
+void set_texture_source_write_time(AssetDatabase *database, content::AssetId id,
+                                   std::int64_t writeTime) noexcept {
+  if ((database == nullptr) || (id == content::kInvalidAssetId)) {
+    return;
+  }
+  const std::size_t slot = find_texture_slot(database, id);
+  if (slot != database->textureAssets.size()) {
+    database->textureAssets[slot].sourceWriteTime = writeTime;
+  }
+}
+
 /// Sets the requested value for texture asset state.
 bool set_texture_asset_state(AssetDatabase *database, content::AssetId id,
                              content::AssetState state,

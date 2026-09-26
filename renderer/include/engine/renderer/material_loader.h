@@ -133,9 +133,11 @@ using MaterialTextureLoadFn = TextureHandle (*)(const char *virtualPath,
 /// parameters — never a crash, never a stale/unrelated texture bind. A
 /// texture the full texture table has no room to record is not loaded at
 /// all: it is reported once and the slot is not tried again until the
-/// material's slots are next assigned. Not a per-frame hot path itself,
-/// but cheap to call every frame: cost is O(materials with an unresolved
-/// slot), which drains to zero once textures are resident. Returns the
+/// material's slots are next assigned. A Failed texture is loaded again
+/// only by the editor's hot-reload poll, once its file changes
+/// (texture_hot_reload.h). Called every frame: each call visits every
+/// loaded material's slots, one table lookup per set slot, and loads
+/// nothing once every referenced texture is Ready or Failed. Returns the
 /// number of texture slots newly resolved to Ready.
 std::size_t resolve_material_textures(AssetDatabase *database,
                                       const content::AssetCatalog *catalog,

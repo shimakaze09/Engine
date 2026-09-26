@@ -50,6 +50,7 @@
 #include "engine/renderer/mesh_primitives.h"
 #include "engine/physics/physics_context.h"
 #include "engine/renderer/shader_system.h"
+#include "engine/renderer/texture_hot_reload.h"
 #include "engine/renderer/texture_loader.h"
 #include "engine/runtime/editor_bridge.h"
 #include "engine/scripting/game_binding_state.h"
@@ -269,6 +270,11 @@ constexpr std::uint32_t kSliceDiagnosticsPeriodFrames = 60U;
 renderer::TextureHandle load_material_texture_production(
     const char *virtualPath, void * /*userData*/) noexcept {
   return renderer::load_texture(virtualPath);
+}
+
+void release_material_texture_production(renderer::TextureHandle handle,
+                                         void * /*userData*/) noexcept {
+  renderer::unload_texture(handle);
 }
 
 // ---------------------------------------------------------------------------
@@ -1380,9 +1386,9 @@ void EnginePipeline::Impl::stage_assets() noexcept {
 
   updatedAssets = renderer::update_asset_manager(
       assetManager.get(), assetDatabase.get(), meshRegistry.get(), 16U);
-  // Not a hot path: cost is O(materials with an unresolved texture slot),
-  // which drains to zero once content is resident (see resolve_material_
-  // textures's header comment).
+  // One lookup per set texture slot of every loaded material; loads only a
+  // texture no material has tried yet (see resolve_material_textures's
+  // header comment).
   static_cast<void>(renderer::resolve_material_textures(
       assetDatabase.get(), assetCatalog.get(),
       &load_material_texture_production, nullptr));
@@ -1419,6 +1425,17 @@ void EnginePipeline::Impl::stage_hot_reload() noexcept {
   frameHotReloadPolls = 1U;
   renderer::check_shader_reload();
   scripting::check_script_reload();
+  // A reload drops the handles of the materials that use the texture; the
+  // assets stage has already resolved this frame, so resolve again now or
+  // render prep draws this frame without the texture.
+  if (renderer::poll_texture_changes(
+          assetDatabase.get(), assetCatalog.get(),
+          &load_material_texture_production,
+          &release_material_texture_production, nullptr) != 0U) {
+    static_cast<void>(renderer::resolve_material_textures(
+        assetDatabase.get(), assetCatalog.get(),
+        &load_material_texture_production, nullptr));
+  }
 }
 
 // ---------------------------------------------------------------------------

@@ -46,6 +46,7 @@ engine_add_module_library(engine_renderer
     src/screenshot_tga.cpp
     src/shader_system.cpp
     src/shadow_map.cpp
+    src/texture_hot_reload.cpp
     src/texture_loader.cpp
     PUBLIC_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/include

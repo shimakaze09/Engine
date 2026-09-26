@@ -39,9 +39,11 @@ std::uint16_t changed_fields(const Material &current,
   return changed;
 }
 
-/// Takes every field `overridden` does not cover from the parent. A texture
-/// handle survives only while its slot keeps the same asset; any other is
-/// cleared for resolve_material_textures to fill on its next pass.
+/// Takes every field `overridden` does not cover from the parent. An
+/// inherited texture slot takes the parent's asset and the parent's handle
+/// for it: the same texture, resolved or waiting for
+/// resolve_material_textures, so a reloaded texture the parent dropped is
+/// dropped here too rather than kept stale.
 void inherit_from(const Material &parent,
                   const MaterialTextureSlots &parentSlots,
                   std::uint16_t overridden, Material *params,
@@ -53,10 +55,9 @@ void inherit_from(const Material &parent,
   ENGINE_MATERIAL_PARAM_FIELDS(ENGINE_MATERIAL_INHERIT_PARAM)
 #undef ENGINE_MATERIAL_INHERIT_PARAM
 #define ENGINE_MATERIAL_INHERIT_TEXTURE(name, slot, handle, key)               \
-  if (((overridden & material_field::k##name) == 0U) &&                        \
-      (slots->slot != parentSlots.slot)) {                                     \
+  if ((overridden & material_field::k##name) == 0U) {                          \
     slots->slot = parentSlots.slot;                                            \
-    params->handle = kInvalidTextureHandle;                                    \
+    params->handle = parent.handle;                                            \
   }
   ENGINE_MATERIAL_TEXTURE_FIELDS(ENGINE_MATERIAL_INHERIT_TEXTURE)
 #undef ENGINE_MATERIAL_INHERIT_TEXTURE
