@@ -44,6 +44,7 @@ engine_add_module_library(engine_renderer
     src/pass_resources.cpp
     src/post_process_stack.cpp
     src/render_settings.cpp
+    src/render_settings_table.cpp
     src/render_device_null.cpp
     src/renderer_backend_select.cpp
     src/screenshot_tga.cpp

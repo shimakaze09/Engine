@@ -229,6 +229,11 @@ void draw_main_menu_bar() noexcept {
     if (ImGui::MenuItem("Console", nullptr, showConsole)) {
       core::cvar_set_bool("editor.show_console", !showConsole);
     }
+    const bool showRendering =
+        core::cvar_get_bool("editor.show_rendering", false);
+    if (ImGui::MenuItem("Rendering", nullptr, showRendering)) {
+      core::cvar_set_bool("editor.show_rendering", !showRendering);
+    }
     ImGui::EndMenu();
   }
 

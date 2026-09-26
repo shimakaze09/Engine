@@ -400,7 +400,9 @@ void init_backend_lighting(BackendState &backend,
                             "Exponential distance fog density");
   core::cvar_register_string("r_fog_color", "0.55 0.65 0.75",
                              "Distance fog RGB color");
-  core::cvar_register_bool("r_height_fog", true, "Enable height fog");
+  // Off by default: at ground level it greys every material; the
+  // editor's Rendering panel is where an author turns it on.
+  core::cvar_register_bool("r_height_fog", false, "Enable height fog");
   core::cvar_register_float("r_height_fog_base", 0.0F,
                             "Height fog base world Y");
   core::cvar_register_float("r_height_fog_density", 0.015F,

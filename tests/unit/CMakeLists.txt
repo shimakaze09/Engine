@@ -1796,6 +1796,7 @@ engine_add_test_executable(engine_unit_command_buffer_reload_contract
     ${CMAKE_SOURCE_DIR}/renderer/src/shadow_map.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/post_process_stack.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/render_settings.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/render_settings_table.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/texture_loader.cpp
     PRIVATE_INCLUDE_DIRS
     ${CMAKE_SOURCE_DIR}/renderer/include

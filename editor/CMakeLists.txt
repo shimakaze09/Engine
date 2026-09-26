@@ -20,6 +20,7 @@ engine_add_module_library(engine_editor
     src/editor_reference_pickers.cpp
     src/editor_panels_assets.cpp
     src/editor_panels_console.cpp
+    src/editor_panels_rendering.cpp
     src/editor_panels_diagnostics.cpp
     src/editor_panels_inspector.cpp
     src/editor_panels_inspector_generic.cpp
