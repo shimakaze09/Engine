@@ -62,14 +62,19 @@ void main() {
     vec3 fragPos = reconstruct_view_pos(v_texcoord0, depth);
     vec3 worldNormal =
         texture2D(u_gBufferNormal, v_texcoord0).rgb * 2.0 - 1.0;
-    mat3 view3 = mat3(u_viewMat[0].xyz, u_viewMat[1].xyz, u_viewMat[2].xyz);
-    vec3 normal = normalize(mul(view3, worldNormal));
+    // w = 0 applies the view rotation alone, the same on every profile.
+    vec3 normal = normalize(mul(u_viewMat, vec4(worldNormal, 0.0)).xyz);
 
     vec3 randomVec =
         texture2D(u_noiseTexture, v_texcoord0 * u_noiseScale.xy).rgb;
     vec3 tangent = normalize(randomVec - normal * dot(randomVec, normal));
     vec3 bitangent = cross(normal, tangent);
-    mat3 TBN = mat3(tangent, bitangent, normal);
+    // The kernel's +z is the normal, so the basis vectors are the columns.
+    // mtxFromCols, not mat3(a, b, c): on the HLSL-family profiles
+    // (spirv, dx, metal) a vector-built matrix takes them as rows, which
+    // turned the hemisphere away from the normal and let flat surfaces
+    // occlude themselves.
+    mat3 TBN = mtxFromCols(tangent, bitangent, normal);
 
     float occlusion = 0.0;
     for (int i = 0; i < 32; ++i) {
