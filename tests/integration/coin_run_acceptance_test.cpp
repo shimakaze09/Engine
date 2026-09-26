@@ -11,9 +11,15 @@
 // on the same World::state_hash. Run with --windowed
 // (engine_integration_coin_run_acceptance_gpu) it then plays the route again
 // in a real window with a render device drawing every frame, and that play
-// must end on the headless play's hash. What the frame looks like and what
-// a speaker would play stay an observation on real hardware.
+// must end on the headless play's hash. The window presents the scene on
+// its back buffer, as player mode does, and each windowed play reads back
+// the frame it ends on: it must be a rendered picture, not a cleared or
+// black back buffer, so a slice that stops drawing fails here rather than
+// passing on its simulation alone (#701). The last one is left at
+// kFramePath for CI to keep. Whether the picture looks right, and what a
+// speaker would play, stay an observation on real hardware.
 
+#include "engine/core/cvar.h"
 #include "engine/core/logging.h"
 #include "engine/engine.h"
 #include "engine/runtime/editor_bridge.h"
@@ -22,8 +28,11 @@
 #include "engine/runtime/world.h"
 #include "engine/scripting/scripting.h"
 
+#include "../gpu_frame_capture.h"
+
 #include <SDL3/SDL.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -31,6 +40,7 @@
 #include <filesystem>
 #include <string>
 #include <system_error>
+#include <vector>
 
 namespace {
 
@@ -39,9 +49,20 @@ constexpr const char *kMainScript = "coin_run_acceptance_main.lua";
 constexpr const char *kSaveRoot = "coin_run_acceptance_profile";
 constexpr double kStepSeconds = 1.0 / 60.0;
 constexpr int kCoinCount = 8;
+/// Where a windowed play leaves the frame it ended on.
+constexpr const char *kFramePath = "coin_run_final_frame.tga";
+/// Fewest distinct colours a rendered frame of the scene may hold. A
+/// cleared or black back buffer holds one; the route's last frame, with
+/// its sky gradient, lit and shadowed white geometry, holds 1605 on
+/// lavapipe (2026-09-26), so this sits far below any frame that draws the
+/// scene and far above any that does not.
+constexpr std::size_t kMinRenderedColours = 256U;
 
 engine::runtime::World *g_world = nullptr;
 void capture_world(engine::runtime::World *world) noexcept { g_world = world; }
+
+/// Set for the windowed session: each play reads back its last frame.
+bool g_readBackFrames = false;
 
 bool g_playing = false;
 bool bridge_is_playing() noexcept { return g_playing; }
@@ -125,8 +146,8 @@ bool write_empty_main_script() noexcept {
   }
   const char text[] =
       "-- Empty on purpose: the scene's own scripts are the game.\n";
-  const bool ok = std::fwrite(text, 1U, sizeof(text) - 1U, file) ==
-                  (sizeof(text) - 1U);
+  const bool ok =
+      std::fwrite(text, 1U, sizeof(text) - 1U, file) == (sizeof(text) - 1U);
   return (std::fclose(file) == 0) && ok;
 }
 
@@ -197,12 +218,33 @@ bool player_position(engine::math::Vec3 *out) noexcept {
   return true;
 }
 
+/// What the frame a windowed play ended on held.
+struct FrameContent final {
+  bool captured = false;
+  std::size_t distinctColours = 0U;
+};
+
+/// Counts the distinct BGR colours in a captured frame.
+std::size_t distinct_colours(const engine::tests::CapturedFrame &frame) {
+  std::vector<std::uint32_t> colours{};
+  colours.reserve(frame.bgra.size() / 4U);
+  for (std::size_t i = 0U; (i + 3U) < frame.bgra.size(); i += 4U) {
+    colours.push_back(static_cast<std::uint32_t>(frame.bgra[i]) |
+                      (static_cast<std::uint32_t>(frame.bgra[i + 1U]) << 8U) |
+                      (static_cast<std::uint32_t>(frame.bgra[i + 2U]) << 16U));
+  }
+  std::sort(colours.begin(), colours.end());
+  return static_cast<std::size_t>(std::unique(colours.begin(), colours.end()) -
+                                  colours.begin());
+}
+
 struct PlayResult final {
   bool ran = false;
   int coinsLeft = kCoinCount;
   int wins = 0;
   std::uint64_t hash = 0U;
   engine::math::Vec3 finalPosition{};
+  FrameContent frame{};
 };
 
 /// Loads the scene and plays the route. The platform sweeps on a four
@@ -239,19 +281,19 @@ PlayResult play_once(engine::EnginePipeline &pipeline) noexcept {
 
   // Settle onto the ground, then the six coins of the start island.
   bool ok = wait(30);
-  ok = ok && run(SDL_SCANCODE_W, 27);  // Coin1 (0, 3)
-  ok = ok && run(SDL_SCANCODE_A, 40) && run(SDL_SCANCODE_W, 27);  // Coin2
-  ok = ok && run(SDL_SCANCODE_A, 27) && run(SDL_SCANCODE_W, 40);  // Coin3
-  ok = ok && run(SDL_SCANCODE_D, 40) && run(SDL_SCANCODE_W, 27);  // Coin4
-  ok = ok && run(SDL_SCANCODE_D, 67) && run(SDL_SCANCODE_S, 13);  // Coin5
-  ok = ok && run(SDL_SCANCODE_S, 40) && run(SDL_SCANCODE_D, 33);  // Coin6
-  ok = ok && run(SDL_SCANCODE_D, 28);  // to the edge, past the falling rock
+  ok = ok && run(SDL_SCANCODE_W, 27);                            // Coin1 (0, 3)
+  ok = ok && run(SDL_SCANCODE_A, 40) && run(SDL_SCANCODE_W, 27); // Coin2
+  ok = ok && run(SDL_SCANCODE_A, 27) && run(SDL_SCANCODE_W, 40); // Coin3
+  ok = ok && run(SDL_SCANCODE_D, 40) && run(SDL_SCANCODE_W, 27); // Coin4
+  ok = ok && run(SDL_SCANCODE_D, 67) && run(SDL_SCANCODE_S, 13); // Coin5
+  ok = ok && run(SDL_SCANCODE_S, 40) && run(SDL_SCANCODE_D, 33); // Coin6
+  ok = ok && run(SDL_SCANCODE_D, 28); // to the edge, past the falling rock
   // Board as the platform reaches the near end, ride to the far end.
   ok = ok && wait_for_phase(225) && run(SDL_SCANCODE_D, 19);
   ok = ok && wait_for_phase(120) && run(SDL_SCANCODE_D, 23);
   // The goal island: two coins, then the flag.
-  ok = ok && run(SDL_SCANCODE_D, 11) && run(SDL_SCANCODE_S, 20);  // Coin7
-  ok = ok && run(SDL_SCANCODE_D, 13) && run(SDL_SCANCODE_W, 40);  // Coin8
+  ok = ok && run(SDL_SCANCODE_D, 11) && run(SDL_SCANCODE_S, 20); // Coin7
+  ok = ok && run(SDL_SCANCODE_D, 13) && run(SDL_SCANCODE_W, 40); // Coin8
   ok = ok && run(SDL_SCANCODE_S, 13) && wait(30);
   if (!ok) {
     return result;
@@ -263,6 +305,17 @@ PlayResult play_once(engine::EnginePipeline &pipeline) noexcept {
   result.hash = g_world->state_hash();
   static_cast<void>(player_position(&result.finalPosition));
 
+  // Read back after the hash is taken: the frames the readback runs are
+  // play the headless route never had.
+  if (g_readBackFrames) {
+    engine::tests::CapturedFrame captured{};
+    result.frame.captured =
+        engine::tests::capture_presented_frame(pipeline, kFramePath, &captured);
+    if (result.frame.captured) {
+      result.frame.distinctColours = distinct_colours(captured);
+    }
+  }
+
   // Stop: end play before the next load replaces the world.
   g_playing = false;
   result.ran = frame(pipeline);
@@ -271,6 +324,8 @@ PlayResult play_once(engine::EnginePipeline &pipeline) noexcept {
 
 struct SessionResult final {
   bool bootstrapped = false;
+  bool presentsScene = false;
+  bool readsBackFrames = false;
   bool pipelineReady = false;
   bool sinkRegistered = false;
   PlayResult first{};
@@ -296,6 +351,13 @@ SessionResult run_session(bool headless) noexcept {
     engine::runtime::set_editor_bridge(nullptr);
     return session;
   }
+  // Outside player mode the back buffer is left for the editor overlay,
+  // which this run has none of; present the scene there as a player sees
+  // it, so the frame read back is the game's.
+  g_readBackFrames = !headless;
+  session.readsBackFrames = g_readBackFrames;
+  session.presentsScene =
+      headless || engine::core::cvar_set_bool("r_present_scene", true);
   session.sinkRegistered = engine::core::log_register_sink(&watch_log, nullptr);
   g_winsAnnounced = 0;
   g_scriptErrors = 0;
@@ -327,6 +389,12 @@ void print_session(const char *label, const SessionResult &session) noexcept {
               static_cast<double>(first.finalPosition.z),
               static_cast<unsigned long long>(first.hash), second.coinsLeft,
               second.wins, static_cast<unsigned long long>(second.hash));
+  if (session.readsBackFrames) {
+    std::printf("coin_run_acceptance_test (%s): last frames hold %zu and %zu "
+                "distinct colours; the second is at %s\n",
+                label, first.frame.distinctColours,
+                second.frame.distinctColours, kFramePath);
+  }
 }
 
 /// Checks one session's plays; returns the number of failed checks.
@@ -354,6 +422,19 @@ int check_session(const SessionResult &session) noexcept {
   check(session.first.hash == session.second.hash,
         "two plays of the scene end on the same state hash");
   check(g_scriptErrors == 0, "no script raised an error");
+  check(session.presentsScene, "the window presents the scene");
+  if (session.readsBackFrames) {
+    for (const PlayResult *play : {&session.first, &session.second}) {
+      check(play->frame.captured, "the play's last frame was read back");
+      if (play->frame.distinctColours < kMinRenderedColours) {
+        std::fprintf(stderr, "  the frame holds %zu distinct colours\n",
+                     play->frame.distinctColours);
+      }
+      check(play->frame.distinctColours >= kMinRenderedColours,
+            "the play's last frame is a rendered picture, not a cleared "
+            "back buffer");
+    }
+  }
   return failures;
 }
 

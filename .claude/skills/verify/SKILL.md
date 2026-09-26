@@ -80,8 +80,10 @@ Release lanes build with the shader cook; every other lane passes
 `ENGINE_BGFX_SHADERC=OFF`. The Linux Release lane runs the `gpu`-labelled
 suites on Mesa's software Vulkan (lavapipe) under Xvfb, so a crash in the
 device path, an unbound pass or a readback those suites assert fails
-there. Nothing runs them on a hardware GPU, on D3D11/D3D12, Metal or
-OpenGL, or looks at a frame. The web lane draws frames on SwiftShader's
+there, as does a windowed coin_run play whose presented frame is not a
+rendered picture (the frame is kept as the `coin-run-final-frame`
+artifact). Nothing runs them on a hardware GPU, on D3D11/D3D12, Metal or
+OpenGL, or judges what a frame looks like. The web lane draws frames on SwiftShader's
 WebGL2 but only fails on an error; it compares no image. Treat a green CI
 run as evidence for what those suites assert, and nothing more.
 

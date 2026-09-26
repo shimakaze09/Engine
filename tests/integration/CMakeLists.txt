@@ -269,6 +269,9 @@ engine_add_test_executable(engine_integration_acceptance_sequence
 engine_add_test_executable(engine_integration_coin_run_acceptance
     SOURCES
     coin_run_acceptance_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    # The frame readback the windowed play asserts on (gpu_frame_capture.h).
+    ${CMAKE_SOURCE_DIR}/renderer/src
     PRIVATE_DEPS
     # Builds native SDL events to drive input the way the platform does.
     ${ENGINE_SDL_TARGET}
