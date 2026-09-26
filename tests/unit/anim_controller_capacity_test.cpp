@@ -4,8 +4,10 @@
 // counts and play every state through parameter-driven transitions; one
 // past any ceiling is refused whole with an Error naming the file and the
 // limit; every animation component a World holds can bind a controller of
-// its own; and the registry holds kMaxAnimControllers distinct controllers,
-// refusing the next one with a diagnostic.
+// its own and is posed through its own palette in one frame, and one more
+// component is refused; a component drives kMaxParams parameters and
+// refuses one more; and the registry holds kMaxAnimControllers distinct
+// controllers, refusing the next one with a diagnostic.
 
 #include "engine/runtime/animation_system.h"
 
@@ -321,21 +323,88 @@ int check_every_component_binds_its_own_controller() {
     }
     entities.push_back(entity);
   }
+  // One past the component capacity is refused.
+  {
+    const auto extra = world->create_entity();
+    AnimationComponent component{};
+    std::snprintf(component.controllerPath, sizeof(component.controllerPath),
+                  "%s", "animcap/one_past.animctrl");
+    if (world->add_animation_component(extra, component)) {
+      std::puts("an animation component past the capacity was accepted");
+      return 1;
+    }
+  }
   engine::runtime::update_animations(*world, kFixedDt);
   std::size_t bound = 0U;
+  std::vector<bool> paletteTaken(kComponents, false);
+  std::size_t posed = 0U;
   for (const engine::core::Entity entity : entities) {
     const AnimationComponent *live = world->get_animation_component_ptr(entity);
     if ((live != nullptr) && (live->controllerSlot != kInvalidAnimSlot)) {
       ++bound;
     }
+    if ((live != nullptr) && (live->paletteSlot < kComponents) &&
+        !paletteTaken[live->paletteSlot]) {
+      paletteTaken[live->paletteSlot] = true;
+      ++posed;
+    }
   }
+  const std::size_t palettes = engine::renderer::skin_palette_count();
   engine::renderer::set_skin_palettes(nullptr, 0U);
   if (bound != kComponents) {
     std::printf("%zu of %zu characters bound their controller\n", bound,
                 kComponents);
     return 1;
   }
+  // Every character is posed this frame, each through its own palette.
+  if ((posed != kComponents) || (palettes != kComponents)) {
+    std::printf("%zu of %zu characters got a palette (%zu stored)\n", posed,
+                kComponents, palettes);
+    return 1;
+  }
   return 0;
+}
+
+/// EXPECTATION: a component drives kMaxParams distinct parameters, more
+/// than the eight a character controller outgrew; one more is refused
+/// while every existing one still updates.
+int check_parameter_budget() {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if (world == nullptr) {
+    return 1;
+  }
+  world->end_frame_phase();
+  const auto entity = world->create_entity();
+  AnimationComponent component{};
+  std::snprintf(component.controllerPath, sizeof(component.controllerPath),
+                "%s", "animcap/params.animctrl");
+  if (!world->add_animation_component(entity, component)) {
+    return 1;
+  }
+  static_assert(AnimationComponent::kMaxParams > 8U);
+  char name[32] = {};
+  for (std::size_t i = 0U; i < AnimationComponent::kMaxParams; ++i) {
+    std::snprintf(name, sizeof(name), "param_%zu", i);
+    if (!engine::runtime::set_anim_param(*world, entity, name,
+                                         static_cast<float>(i))) {
+      std::printf("parameter %zu was refused\n", i);
+      return 1;
+    }
+  }
+  if (engine::runtime::set_anim_param(*world, entity, "one_past", 1.0F)) {
+    std::puts("a parameter past the budget was accepted");
+    return 1;
+  }
+  if (!engine::runtime::set_anim_param(*world, entity, "param_0", 5.0F)) {
+    std::puts("an existing parameter could not be updated at the budget");
+    return 1;
+  }
+  const AnimationComponent *live = world->get_animation_component_ptr(entity);
+  return ((live != nullptr) &&
+          (live->paramCount == AnimationComponent::kMaxParams))
+             ? 0
+             : 1;
 }
 
 /// EXPECTATION: kMaxAnimControllers distinct controllers load into distinct
@@ -416,6 +485,9 @@ int main() {
   }
   if (result == 0) {
     result = check_every_component_binds_its_own_controller();
+  }
+  if (result == 0) {
+    result = check_parameter_budget();
   }
   if (result == 0) {
     result = check_one_past_each_ceiling_is_refused();

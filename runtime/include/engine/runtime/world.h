@@ -127,7 +127,7 @@ public:
   static constexpr std::size_t kMaxReflectionProbeComponents = 64U;
   static constexpr std::size_t kMaxSceneCaptureComponents = 8U;
   static constexpr std::size_t kMaxFoliagePatchComponents = 128U;
-  static constexpr std::size_t kMaxAnimationComponents = 64U;
+  static constexpr std::size_t kMaxAnimationComponents = 256U;
   static constexpr std::size_t kMaxCameraComponents = 32U;
   static constexpr std::size_t kMaxSkyLightComponents = 8U;
   static constexpr std::size_t kNameLookupCapacity = kMaxNameComponents * 2U;

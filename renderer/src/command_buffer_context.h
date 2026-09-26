@@ -698,7 +698,8 @@ struct RendererContext final {
   char shaderRootPath[260] = "assets/shaders";
   std::array<SceneCaptureRequest, kMaxSceneCaptures> sceneCaptureRequests{};
   std::size_t sceneCaptureRequestCount = 0U;
-  std::array<SkinPalette, kMaxSkinPalettes> skinPalettes{};
+  std::array<SkinPalette, kMaxSkinPalettes> skinPalettes =
+      std::array<SkinPalette, kMaxSkinPalettes>();
   std::size_t skinPaletteCount = 0U;
   BackendState backend{};
 };

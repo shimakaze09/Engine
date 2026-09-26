@@ -133,7 +133,10 @@ struct AnimParam final {
 /// the renderer palette slot assigned for the current frame.
 struct AnimationComponent final {
   static constexpr std::size_t kMaxPathLength = 127U; // +1 for null
-  static constexpr std::size_t kMaxParams = 8U;
+  /// State-machine parameters one component drives: room for a
+  /// character controller's speed, direction, grounded, jump, attack
+  /// index, hit, death, emotes and the rest.
+  static constexpr std::size_t kMaxParams = 32U;
   char controllerPath[kMaxPathLength + 1U] = {};
   float playbackSpeed = 1.0F;
   bool playing = true;
