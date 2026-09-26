@@ -2,18 +2,22 @@ $input v_texcoord0
 
 // Tonemap + bloom-composite fragment stage. Scalar and integer
 // uniforms are vec4 (bgfx's uniform model) read through .x, and
-// the baked sampler stages (scene 0, bloom 1) must match the stages the
-// flush assigns through set_param_i32.
+// the baked sampler stages (scene 0, bloom 1, adapted exposure 2) must
+// match the stages the flush assigns through set_param_i32. u_exposure is
+// the manual exposure, or the compensation applied on top of the adapted
+// one when u_autoExposure.x is set.
 
 #include <bgfx_shader.sh>
 
 SAMPLER2D(u_sceneColor, 0);
 SAMPLER2D(u_bloomTexture, 1);
+SAMPLER2D(u_exposureTexture, 2);
 
 uniform vec4 u_exposure;
 uniform vec4 u_tonemapOperator; // .x: 0=Reinhard, 1=ACES, 2=Uncharted2
 uniform vec4 u_bloomIntensity;
 uniform vec4 u_bloomEnabled;
+uniform vec4 u_autoExposure;
 
 vec3 tonemap_reinhard(vec3 hdr) {
     return hdr / (hdr + vec3_splat(1.0));
@@ -54,7 +58,11 @@ void main() {
         hdr += texture2D(u_bloomTexture, v_texcoord0).rgb *
                u_bloomIntensity.x;
     }
-    hdr *= u_exposure.x;
+    float exposure = u_exposure.x;
+    if (u_autoExposure.x != 0.0) {
+        exposure *= texture2D(u_exposureTexture, vec2(0.5, 0.5)).r;
+    }
+    hdr *= exposure;
 
     vec3 mapped;
     if (u_tonemapOperator.x >= 1.5) {

@@ -1916,9 +1916,9 @@ engine_add_test_executable(engine_unit_post_process_stack
     engine_renderer
 )
 
-engine_add_test_executable(engine_unit_auto_exposure
+engine_add_test_executable(engine_unit_shadow_cascade_constants
     SOURCES
-    auto_exposure_test.cpp
+    shadow_cascade_constants_test.cpp
     PRIVATE_DEPS
     engine_renderer
     engine_math

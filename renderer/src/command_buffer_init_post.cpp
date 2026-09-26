@@ -180,18 +180,26 @@ bool resolve_debug_line_program_state(BackendState &backend,
   return ok;
 }
 
-// REQUIRED: u_sceneColor — the only uniform; the average-luminance
-// reduction has no other input.
+// REQUIRED: u_sceneColor for the log-luminance reduction, and every
+// uniform of the adaptation pass that consumes it — without either program
+// the chain would be rendered for nothing, so auto exposure stays off.
 bool resolve_luminance_program_state(BackendState &backend,
                                      const RenderDevice *dev) noexcept {
   backend.luminanceProgram = shader_device_program(backend.luminanceShaderHandle);
+  backend.exposureAdaptProgram =
+      shader_device_program(backend.exposureAdaptShaderHandle);
   const DeviceProgramHandle prog = backend.luminanceProgram;
-  if (prog == kInvalidDeviceProgram) {
+  const DeviceProgramHandle adapt = backend.exposureAdaptProgram;
+  if ((prog == kInvalidDeviceProgram) || (adapt == kInvalidDeviceProgram)) {
     return false;
   }
   bool ok = true;
   backend.lumSceneColorLoc =
       required_param(&ok, dev, prog, "u_sceneColor");
+  backend.adaptLuminanceLoc = required_param(&ok, dev, adapt, "u_luminance");
+  backend.adaptPreviousLoc =
+      required_param(&ok, dev, adapt, "u_previousExposure");
+  backend.adaptParamsLoc = required_param(&ok, dev, adapt, "u_adapt");
   return ok;
 }
 
@@ -362,10 +370,14 @@ void init_backend_post(BackendState &backend,
     }
   }
 
-  // Auto-exposure luminance shader (soft-fail: uses manual exposure).
-  core::cvar_register_bool("r_auto_exposure", true,
-                           "Enable automatic exposure adaptation");
-  core::cvar_register_float("r_exposure", 1.0F, "Manual exposure value");
+  // Auto-exposure luminance and adaptation shaders (soft-fail: uses
+  // manual exposure). Off by default, so a scene looks the same until its
+  // author opts in; r_exposure then compensates the adapted exposure.
+  core::cvar_register_bool("r_auto_exposure", false,
+                           "Adapt exposure to the scene's average luminance");
+  core::cvar_register_float("r_exposure", 1.0F,
+                            "Exposure; with r_auto_exposure, the compensation "
+                            "applied on top of the adapted exposure");
   core::cvar_register_float("r_auto_exposure_speed", 1.5F,
                             "Auto-exposure adaptation speed");
   core::cvar_register_float("r_auto_exposure_min", 0.1F,
@@ -375,18 +387,26 @@ void init_backend_post(BackendState &backend,
   {
     const ShaderProgramHandle lumShader = load_configured_shader_program(
         "fullscreen.vert", "luminance.frag");
-    if (lumShader != kInvalidShaderProgram) {
-      backend.luminanceShaderHandle = lumShader;
-      if (resolve_luminance_program_state(backend, dev)) {
-        backend.autoExposureAvailable = true;
-      } else {
-        backend.luminanceShaderHandle = ShaderProgramHandle{};
+    const ShaderProgramHandle adaptShader = load_configured_shader_program(
+        "fullscreen.vert", "exposure_adapt.frag");
+    backend.luminanceShaderHandle = lumShader;
+    backend.exposureAdaptShaderHandle = adaptShader;
+    if ((lumShader != kInvalidShaderProgram) &&
+        (adaptShader != kInvalidShaderProgram) &&
+        resolve_luminance_program_state(backend, dev)) {
+      backend.autoExposureAvailable = true;
+    } else {
+      if (lumShader != kInvalidShaderProgram) {
         destroy_shader_program(lumShader);
       }
-    } else {
+      if (adaptShader != kInvalidShaderProgram) {
+        destroy_shader_program(adaptShader);
+      }
+      backend.luminanceShaderHandle = ShaderProgramHandle{};
+      backend.exposureAdaptShaderHandle = ShaderProgramHandle{};
       core::log_message(core::LogLevel::Warning, "renderer",
-                        "luminance shader not available — "
-                        "auto-exposure disabled");
+                        "luminance or exposure adaptation shader not "
+                        "available — auto-exposure disabled");
     }
   }
 

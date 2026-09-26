@@ -251,6 +251,8 @@ struct BackendState final {
   DeviceProgramHandle tonemapProgram{};
   ShaderParam tonemapSceneColorLocation{};
   ShaderParam tonemapExposureLocation{};
+  ShaderParam tonemapExposureTextureLoc{};
+  ShaderParam tonemapAutoExposureLoc{};
   ShaderParam tonemapOperatorLocation{};
 
   // FXAA shader.
@@ -587,8 +589,26 @@ struct BackendState final {
   int lumAllocatedWidth = 0;
   int lumAllocatedHeight = 0;
 
-  // Temporal adaptation.
-  float currentExposure = 1.0F;
+  // Temporal adaptation: a 1x1 pass turns the chain's average log
+  // luminance into this frame's exposure, written into one of two 1x1
+  // targets while the other holds last frame's; tonemap samples the
+  // latest. Created and released with the luminance chain.
+  ShaderProgramHandle exposureAdaptShaderHandle{};
+  DeviceProgramHandle exposureAdaptProgram{};
+  ShaderParam adaptLuminanceLoc{};
+  ShaderParam adaptPreviousLoc{};
+  ShaderParam adaptParamsLoc{};
+  DeviceTextureHandle exposureTextures[2] = {};
+  RenderTargetHandle exposureTargets[2] = {};
+  /// The target holding the latest exposure.
+  int exposureCurrent = 0;
+  /// Whether exposureTargets[exposureCurrent] holds an adapted value.
+  /// False once the targets are (re)created or auto exposure pauses, so
+  /// the next adaptation starts at its target instead of blending from
+  /// an undefined texel.
+  bool exposureValid = false;
+  /// Frame time of the last adaptation, for its blend step.
+  float lastExposureTimeSeconds = 0.0F;
 
   // Scene capture render targets (slot i backs capture request i).
   std::array<SceneCaptureTarget, kMaxSceneCaptures> sceneCaptureTargets{};
