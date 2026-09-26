@@ -5,10 +5,10 @@ $input v_texcoord0
 // spot lights fetched from the R32F light-data and tile textures
 // (texelFetch; layouts match light_culling.h). Sampler stages are baked
 // to the flush's unit assignment (G-buffer 0-3, tile 4, SSAO 5, light
-// data 6, cascade array 7, spot array 8, point cubes 9-12 — max
-// register 12, inside DXBC's 16-sampler cap) with full
-// CSM/spot/point shadow sampling. IBL sampling still awaits the environment textures'
-// arrival under this backend: ambient takes the constant-term branch.
+// data 6, cascade array 7, spot array 8, point cubes 9-12, IBL
+// irradiance 13, prefiltered 14, BRDF table 15 — max register 15, inside
+// DXBC's 16-sampler cap) with full CSM/spot/point shadow sampling and,
+// when an environment is set, split-sum image-based ambient.
 // Scalar and integer GL uniforms become vec4 read through .x.
 
 #include <bgfx_shader.sh>
@@ -60,8 +60,13 @@ SAMPLERCUBE(uPointShadowMap0, 9);
 SAMPLERCUBE(uPointShadowMap1, 10);
 SAMPLERCUBE(uPointShadowMap2, 11);
 SAMPLERCUBE(uPointShadowMap3, 12);
+SAMPLERCUBE(uIrradianceMap, 13);
+SAMPLERCUBE(uPrefilteredMap, 14);
+SAMPLER2D(uBrdfLut, 15);
 
 uniform vec4 uSsaoEnabled;        // .x
+uniform vec4 uIblEnabled;         // .x
+uniform vec4 uPrefilteredMips;    // .x
 uniform mat4 uInvProjection;
 uniform mat4 uInvView;
 uniform vec4 uDirLightDirection;  // .xyz
@@ -145,6 +150,29 @@ float geometry_smith(vec3 N, vec3 V, vec3 L, float roughness) {
 vec3 fresnel_schlick(float cosTheta, vec3 F0) {
     return F0 + (vec3_splat(1.0) - F0) *
                     pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
+}
+
+vec3 fresnel_schlick_roughness(float cosTheta, vec3 F0, float roughness) {
+    return F0 + (max(vec3_splat(1.0 - roughness), F0) - F0) *
+                pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
+}
+
+// Split-sum image-based ambient, the forward pbr program's term: the
+// irradiance map lights the diffuse lobe and the prefiltered map, weighted
+// by the BRDF table, the specular one.
+vec3 ibl_ambient(vec3 N, vec3 V, vec3 albedo, float metallic,
+                 float roughness) {
+    vec3 F0 = mix(vec3_splat(0.04), albedo, metallic);
+    float NdotV = max(dot(N, V), 0.0);
+    vec3 F = fresnel_schlick_roughness(NdotV, F0, roughness);
+    vec3 kD = (vec3_splat(1.0) - F) * (1.0 - metallic);
+    vec3 diffuse = textureCubeLod(uIrradianceMap, N, 0.0).rgb * albedo;
+    vec3 R = reflect(-V, N);
+    vec3 prefiltered =
+        textureCubeLod(uPrefilteredMap, R,
+                       roughness * max(uPrefilteredMips.x - 1.0, 0.0)).rgb;
+    vec2 brdf = texture2DLod(uBrdfLut, vec2(NdotV, roughness), 0.0).rg;
+    return kD * diffuse + prefiltered * (F * brdf.x + brdf.y);
 }
 
 vec3 cook_torrance(vec3 N, vec3 V, vec3 L, vec3 albedo, float metallic,
@@ -492,7 +520,10 @@ void main() {
     float ssaoFactor =
         (uSsaoEnabled.x != 0.0) ? texture2D(uSsaoTexture, v_texcoord0).r
                                 : 1.0;
-    vec3 ambient = vec3_splat(0.03) * albedo * ao * ssaoFactor;
+    vec3 ambient = (uIblEnabled.x != 0.0)
+                       ? ibl_ambient(N, V, albedo, metallic, roughness)
+                       : (vec3_splat(0.03) * albedo);
+    ambient *= ao * ssaoFactor;
     vec3 color = ambient + Lo + emissive;
     float distanceFog =
         compute_distance_fog_factor(length(uCameraPos.xyz - worldPos));
