@@ -8,8 +8,16 @@
 
 #include "engine/core/hash.h"
 #include "engine/core/logging.h"
+#include "texture_handle_codec.h"
 
 namespace engine::renderer {
+
+// The texture loader has a slot for every value of the handle's slot field
+// (slot 0 aside). It must hold every material texture this table can, and
+// nearly as many again for the textures that are not materials'.
+static_assert((std::size_t{1} << texture_handle_detail::kSlotBits) >=
+                  2U * AssetDatabase::kMaxTextureAssets,
+              "the texture loader cannot hold the material texture table");
 
 void advance_asset_database_frame(AssetDatabase *database) noexcept {
   if (database != nullptr) {
@@ -414,6 +422,7 @@ void clear_asset_database(AssetDatabase *database) noexcept {
     database->textureAssets[i] = TextureAssetRecord{};
   }
   database->textureIndex.clear();
+  database->textureReferencesChanged = false;
 
   for (std::size_t i = 0U; i < database->materialAssets.size(); ++i) {
     database->materialOccupied[i] = false;
@@ -565,8 +574,12 @@ bool set_material_texture_slots(AssetDatabase *database, content::AssetId id,
     return false;
   }
 
-  database->materialAssets[slot].textureSlots = slots;
-  database->materialAssets[slot].unregisterableTextureSlots = 0U;
+  MaterialAssetRecord &record = database->materialAssets[slot];
+  if (record.textureSlots != slots) {
+    database->textureReferencesChanged = true;
+  }
+  record.textureSlots = slots;
+  record.unregisterableTextureSlots = 0U;
   return true;
 }
 
@@ -622,7 +635,6 @@ bool register_texture_asset(AssetDatabase *database, content::AssetId id,
   TextureAssetRecord &record = database->textureAssets[slot];
   record.id = id;
   record.runtimeTexture = runtimeTexture;
-  record.refCount = (record.refCount == 0U) ? 1U : record.refCount;
   record.state = content::AssetState::Ready;
   record.requestedResident = true;
   write_source_path(&record.sourcePath, sourcePath);
@@ -741,43 +753,30 @@ TextureHandle resolve_texture_asset(AssetDatabase *database,
   return record.runtimeTexture;
 }
 
-bool retain_texture_asset(AssetDatabase *database,
-                          content::AssetId id) noexcept {
-  if ((database == nullptr) || (id == content::kInvalidAssetId)) {
+bool unregister_texture_asset(AssetDatabase *database,
+                              content::AssetId id) noexcept {
+  if (database == nullptr) {
     return false;
   }
-
   const std::size_t slot = find_texture_slot(database, id);
-  if (slot == database->textureAssets.size()) {
+  if ((slot == database->textureAssets.size()) ||
+      (database->textureAssets[slot].runtimeTexture != kInvalidTextureHandle)) {
     return false;
   }
 
-  TextureAssetRecord &record = database->textureAssets[slot];
-  ++record.refCount;
-  record.requestedResident = true;
-  return true;
-}
-
-bool release_texture_asset(AssetDatabase *database,
-                           content::AssetId id) noexcept {
-  if ((database == nullptr) || (id == content::kInvalidAssetId)) {
-    return false;
+  database->textureOccupied[slot] = false;
+  database->textureAssets[slot] = TextureAssetRecord{};
+  static_cast<void>(database->textureIndex.erase(id));
+  if (database->textureIndex.tombstone_count() >
+      (AssetDatabase::kTextureIndexCapacity / 4U)) {
+    database->textureIndex.clear();
+    for (std::size_t i = 0U; i < database->textureAssets.size(); ++i) {
+      if (database->textureOccupied[i]) {
+        static_cast<void>(database->textureIndex.insert(
+            database->textureAssets[i].id, static_cast<std::uint32_t>(i)));
+      }
+    }
   }
-
-  const std::size_t slot = find_texture_slot(database, id);
-  if (slot == database->textureAssets.size()) {
-    return false;
-  }
-
-  TextureAssetRecord &record = database->textureAssets[slot];
-  if (record.refCount > 0U) {
-    --record.refCount;
-  }
-
-  if (record.refCount == 0U) {
-    record.requestedResident = false;
-  }
-
   return true;
 }
 

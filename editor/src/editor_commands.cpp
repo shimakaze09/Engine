@@ -744,8 +744,11 @@ static PrimitiveSpawnDesc primitive_spawn_desc(
     // the spawn lands its ground on zero and the collider's top meets
     // that ground, whatever the primitive does. They were hand-written
     // offsets that cancelled a surface half a metre above the origin,
-    // which is the sort of correction that goes stale silently.
-    desc.groundY = -renderer::kBuiltinPlaneSurfaceY;
+    // which is the sort of correction that goes stale silently. Subtracted
+    // from zero rather than negated: negating a zero surface height gives
+    // negative zero, which compares equal but hashes and saves as a
+    // different value than the zero an author would type.
+    desc.groundY = 0.0F - renderer::kBuiltinPlaneSurfaceY;
     desc.halfExtents = math::Vec3(5.0F, 0.1F, 5.0F);
     desc.colliderLocalPosition =
         math::Vec3(0.0F, renderer::kBuiltinPlaneSurfaceY - 0.1F, 0.0F);

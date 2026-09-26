@@ -1,4 +1,5 @@
-// Verifies texture handle generation prevents stale slot reuse.
+// Verifies texture handle generation prevents stale slot reuse, and that
+// the loader serves every slot its handle can name.
 
 #include "engine/core/logging.h"
 #include "engine/core/vfs.h"
@@ -333,6 +334,38 @@ int check_texture_generation_wrap() noexcept {
 } // namespace
 
 /// Runs this executable or test program.
+/// The loader serves every slot its handle's slot field can name (#663):
+/// asset_database.cpp checks that is enough for the whole material texture
+/// table and as many more, so here every slot registers to a distinct live
+/// handle and one past the last is refused.
+int check_loader_fills_every_slot() {
+  namespace codec = engine::renderer::texture_handle_detail;
+  engine::renderer::reset_fake_device();
+  if (!engine::renderer::initialize_texture_system()) {
+    return 60;
+  }
+  std::size_t registered = 0U;
+  bool resolves = true;
+  for (std::uint32_t i = 0U; i <= codec::kSlotMask; ++i) {
+    const engine::renderer::DeviceTextureHandle device{100U + i};
+    const engine::renderer::TextureHandle handle =
+        engine::renderer::register_external_texture(device);
+    if (handle == engine::renderer::kInvalidTextureHandle) {
+      break;
+    }
+    resolves =
+        resolves && (engine::renderer::texture_device_handle(handle) == device);
+    ++registered;
+  }
+  engine::renderer::shutdown_texture_system();
+  if ((registered != codec::kSlotMask) || !resolves) {
+    std::printf("the loader held %zu of %u textures\n", registered,
+                static_cast<unsigned>(codec::kSlotMask));
+    return 61;
+  }
+  return 0;
+}
+
 int main() {
   const int wrapResult = check_texture_generation_wrap();
   if (wrapResult != 0) {
@@ -347,6 +380,11 @@ int main() {
   const int unreleasedResult = check_shutdown_reports_textures_it_cannot_release();
   if (unreleasedResult != 0) {
     return unreleasedResult;
+  }
+
+  const int fillResult = check_loader_fills_every_slot();
+  if (fillResult != 0) {
+    return fillResult;
   }
 
   return check_texture_handle_generation();

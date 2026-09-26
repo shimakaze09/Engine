@@ -63,17 +63,6 @@ void inherit_from(const Material &parent,
 #undef ENGINE_MATERIAL_INHERIT_TEXTURE
 }
 
-/// Whether any texture slot names a different asset.
-bool slots_differ(const MaterialTextureSlots &lhs,
-                  const MaterialTextureSlots &rhs) noexcept {
-  bool differ = false;
-#define ENGINE_MATERIAL_SLOT_DIFFERS(name, slot, handle, key)                  \
-  differ = differ || (lhs.slot != rhs.slot);
-  ENGINE_MATERIAL_TEXTURE_FIELDS(ENGINE_MATERIAL_SLOT_DIFFERS)
-#undef ENGINE_MATERIAL_SLOT_DIFFERS
-  return differ;
-}
-
 } // namespace
 
 content::AssetId find_material_parent_id(const content::AssetCatalog *catalog,
@@ -146,8 +135,9 @@ void update_dependent_material(content::AssetId dependent,
     const MaterialTextureSlots before = record.textureSlots;
     inherit_from(*parent, *parentSlots, record.overriddenFields, &record.params,
                  &record.textureSlots);
-    if (slots_differ(before, record.textureSlots)) {
+    if (before != record.textureSlots) {
       record.unregisterableTextureSlots = 0U;
+      database->textureReferencesChanged = true;
     }
     return;
   }

@@ -22,56 +22,39 @@
 #include <cstddef>
 #include <cstdint>
 
-#include <array>
+#include <string>
+#include <vector>
 
 #include "engine/content/asset_identity.h"
 #include "engine/content/asset_metadata.h"
 
 namespace engine::content {
 
-/// Fixed-capacity map from a cooked output's path, relative to the root
-/// it was indexed under, to the AssetRef the cook recorded for it.
-///
-/// Over a megabyte, so it never goes on a stack: Windows gives a thread
-/// 1 MiB by default where Linux gives 8 MiB, and one of these is larger
-/// than the whole Windows allowance. Copying and moving are deleted so
-/// that stays a compile error rather than a crash only one platform
-/// shows — including the `*index = ProvenanceIndex{}` spelling of a
-/// reset, whose temporary is what a build_provenance_index caller would
-/// otherwise pay for. Declare one at namespace scope, in a heap
-/// allocation, or as a member of something already there.
+/// Map from a cooked output's path, relative to the root it was indexed
+/// under, to the AssetRef the cook recorded for it and the files the cook
+/// read. It grows with the stamps it reads, so a project of any size is
+/// indexed whole; it lives for one mount walk, which is cold work that
+/// already allocates.
 struct ProvenanceIndex final {
-  static constexpr std::size_t kMaxOutputs = 4096U;
+  /// Longest output path the index records; a longer one is counted in
+  /// `overflowed`, since the catalog could not record it whole either.
   static constexpr std::size_t kMaxPathLength = 260U;
-  /// Dependency ids across every stamp; a stamp's outputs share its run.
-  static constexpr std::size_t kMaxDependencies = 8192U;
 
   struct Entry final {
-    char relativePath[kMaxPathLength] = {};
+    std::string relativePath{};
     AssetRef ref{};
     /// The run of `dependencies` the output's stamp recorded.
     std::uint32_t firstDependency = 0U;
     std::uint32_t dependencyCount = 0U;
   };
 
-  std::array<Entry, kMaxOutputs> entries = std::array<Entry, kMaxOutputs>();
-  std::size_t count = 0U;
-  std::array<AssetId, kMaxDependencies> dependencies =
-      std::array<AssetId, kMaxDependencies>();
-  std::size_t dependencyCount = 0U;
-  /// Outputs a stamp named that did not fit the index; a walk that
-  /// reports any of these is incomplete and says so.
+  /// Sorted by relativePath once the index is built.
+  std::vector<Entry> entries{};
+  /// Dependency ids across every stamp; a stamp's outputs share its run.
+  std::vector<AssetId> dependencies{};
+  /// Outputs whose path is too long to record; a walk that reports any of
+  /// these is incomplete and says so.
   std::size_t overflowed = 0U;
-  /// Dependencies a stamp named that did not fit `dependencies`; reported
-  /// the same way.
-  std::size_t dependenciesDropped = 0U;
-
-  ProvenanceIndex() = default;
-  ProvenanceIndex(const ProvenanceIndex &) = delete;
-  ProvenanceIndex(ProvenanceIndex &&) = delete;
-  ProvenanceIndex &operator=(const ProvenanceIndex &) = delete;
-  ProvenanceIndex &operator=(ProvenanceIndex &&) = delete;
-  ~ProvenanceIndex() = default;
 };
 
 /// Reads every "*.cookstamp" under `osRoot` and records what each one

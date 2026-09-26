@@ -165,7 +165,9 @@ bool run_full_sweep(engine::EnginePipeline &pipeline) {
   std::uint32_t polls = 0U;
   return run_until(pipeline, [&polls]() {
     polls += engine::core::get_engine_stats().hotReloadPolls;
-    return polls > 8U; // kMaxTextureAssets / kTextureReloadPollSlots
+    // One poll checks every texture this project loads (fewer than
+    // kTextureReloadPollSlots); the rest are margin.
+    return polls > 8U;
   });
 }
 

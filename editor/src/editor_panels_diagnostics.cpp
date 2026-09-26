@@ -176,13 +176,19 @@ void draw_stats_panel(const core::EngineStats &stats) noexcept {
       }
     }
     for (std::size_t i = 0U; i < count; ++i) {
+      ImGui::Text("%s", core::mem_tag_name(snaps[i].tag));
+      ImGui::SameLine(100.0F);
+      if (!snaps[i].reported) {
+        // Nothing reports under this tag: say so rather than draw a
+        // zero that reads as a measurement.
+        ImGui::TextDisabled("not measured");
+        continue;
+      }
       const float bytes = static_cast<float>(
           snaps[i].currentBytes > 0 ? snaps[i].currentBytes : 0);
       const float mb = bytes / (1024.0F * 1024.0F);
       char label[64]{};
       std::snprintf(label, sizeof(label), "%.2f MB", static_cast<double>(mb));
-      ImGui::Text("%s", core::mem_tag_name(snaps[i].tag));
-      ImGui::SameLine(100.0F);
       ImGui::ProgressBar(bytes / maxBytes, ImVec2(-1.0F, 0.0F), label);
     }
   }

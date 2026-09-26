@@ -79,7 +79,6 @@ TextureReload reload_texture_asset(AssetDatabase *database,
   record->runtimeTexture = loaded;
   record->state = content::AssetState::Ready;
   record->requestedResident = true;
-  record->refCount = (record->refCount == 0U) ? 1U : record->refCount;
   static_cast<void>(content::note_asset_reloaded(catalog, id));
   static_cast<void>(propagate_material_to_dependents(database, catalog, id));
   if ((previous != kInvalidTextureHandle) && (previous != loaded) &&
@@ -100,11 +99,13 @@ std::size_t poll_texture_changes(AssetDatabase *database,
   constexpr std::size_t kSlots = AssetDatabase::kMaxTextureAssets;
   std::size_t reloaded = 0U;
   std::size_t slot = database->textureReloadCursor % kSlots;
-  for (std::size_t checked = 0U; checked < kTextureReloadPollSlots;
-       ++checked, slot = (slot + 1U) % kSlots) {
+  for (std::size_t visited = 0U, checked = 0U;
+       (visited < kSlots) && (checked < kTextureReloadPollSlots);
+       ++visited, slot = (slot + 1U) % kSlots) {
     if (!database->textureOccupied[slot]) {
       continue;
     }
+    ++checked;
     const TextureAssetRecord &record = database->textureAssets[slot];
     if ((record.state != content::AssetState::Ready) &&
         (record.state != content::AssetState::Failed)) {

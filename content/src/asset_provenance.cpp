@@ -3,6 +3,7 @@
 
 #include "engine/content/asset_provenance.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -29,21 +30,16 @@ struct DependencyRun final {
 /// silently dropping it, so a walk that outgrew the index says so.
 void record(ProvenanceIndex *index, const std::string &relativePath,
             const AssetRef &ref, const DependencyRun &run) noexcept {
-  if (index->count >= ProvenanceIndex::kMaxOutputs) {
-    ++index->overflowed;
-    return;
-  }
   if (relativePath.size() >= ProvenanceIndex::kMaxPathLength) {
     ++index->overflowed;
     return;
   }
-  ProvenanceIndex::Entry &entry = index->entries[index->count];
-  std::memcpy(entry.relativePath, relativePath.c_str(),
-              relativePath.size() + 1U);
+  ProvenanceIndex::Entry entry{};
+  entry.relativePath = relativePath;
   entry.ref = ref;
   entry.firstDependency = run.first;
   entry.dependencyCount = run.count;
-  ++index->count;
+  index->entries.push_back(std::move(entry));
 }
 
 /// The next line of the stamp text, advancing `cursor`.
@@ -83,7 +79,7 @@ DependencyRun read_dependencies(const char *text, std::size_t size,
                                 const std::filesystem::path &root,
                                 const char *mountPrefix,
                                 ProvenanceIndex *index) {
-  DependencyRun run{static_cast<std::uint32_t>(index->dependencyCount), 0U};
+  DependencyRun run{static_cast<std::uint32_t>(index->dependencies.size()), 0U};
   if ((mountPrefix == nullptr) || (mountPrefix[0] == '\0')) {
     return run;
   }
@@ -101,16 +97,12 @@ DependencyRun read_dependencies(const char *text, std::size_t size,
     if (relative.empty()) {
       continue;
     }
-    if (index->dependencyCount >= ProvenanceIndex::kMaxDependencies) {
-      ++index->dependenciesDropped;
-      continue;
-    }
     const std::string virtualPath = std::string(mountPrefix) + "/" + relative;
     const AssetId id = make_asset_id_from_path(virtualPath.c_str());
     if (id == kInvalidAssetId) {
       continue;
     }
-    index->dependencies[index->dependencyCount++] = id;
+    index->dependencies.push_back(id);
     ++run.count;
   }
   return run;
@@ -180,11 +172,8 @@ bool build_provenance_index(const char *osRoot, const char *mountPrefix,
   if ((osRoot == nullptr) || (osRoot[0] == '\0') || (out == nullptr)) {
     return false;
   }
-  // Only the counters are reset: entries past `count` are unreachable,
-  // and clearing all of them would mean a megabyte of writes per mount.
-  out->count = 0U;
-  out->dependencyCount = 0U;
-  out->dependenciesDropped = 0U;
+  out->entries.clear();
+  out->dependencies.clear();
   out->overflowed = 0U;
 
   std::error_code ec{};
@@ -213,21 +202,20 @@ bool build_provenance_index(const char *osRoot, const char *mountPrefix,
     read_stamp(it->path(), root, mountPrefix, out);
   }
 
+  // Sorted once, so the walk looks each file up by bisection rather than
+  // by scanning every output the stamps named.
+  std::sort(
+      out->entries.begin(), out->entries.end(),
+      [](const ProvenanceIndex::Entry &lhs, const ProvenanceIndex::Entry &rhs) {
+        return lhs.relativePath < rhs.relativePath;
+      });
+
   if (out->overflowed > 0U) {
     char message[192] = {};
     std::snprintf(message, sizeof(message),
-                  "asset provenance: %zu cooked output(s) did not fit the "
-                  "index; those assets will report as unidentified",
+                  "asset provenance: %zu cooked output path(s) are too long "
+                  "to record; those assets will report as unidentified",
                   out->overflowed);
-    core::log_message(core::LogLevel::Error, "assets", message);
-  }
-  if (out->dependenciesDropped > 0U) {
-    char message[192] = {};
-    std::snprintf(message, sizeof(message),
-                  "asset provenance: %zu cook dependency edge(s) did not fit "
-                  "the index; a change to those files will not reach the "
-                  "assets cooked from them",
-                  out->dependenciesDropped);
     core::log_message(core::LogLevel::Error, "assets", message);
   }
   return true;
@@ -239,12 +227,16 @@ find_provenance_entry(const ProvenanceIndex &index,
   if (relativePath == nullptr) {
     return nullptr;
   }
-  for (std::size_t i = 0U; i < index.count; ++i) {
-    if (std::strcmp(index.entries[i].relativePath, relativePath) == 0) {
-      return &index.entries[i];
-    }
+  const auto found = std::lower_bound(
+      index.entries.begin(), index.entries.end(), relativePath,
+      [](const ProvenanceIndex::Entry &entry, const char *wanted) {
+        return std::strcmp(entry.relativePath.c_str(), wanted) < 0;
+      });
+  if ((found == index.entries.end()) ||
+      (std::strcmp(found->relativePath.c_str(), relativePath) != 0)) {
+    return nullptr;
   }
-  return nullptr;
+  return &*found;
 }
 
 AssetRef provenance_for_output(const ProvenanceIndex &index,

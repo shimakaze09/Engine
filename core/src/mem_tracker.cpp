@@ -1,4 +1,4 @@
-// Implements mem tracker behavior for the Engine core engine.
+// Implements the per-subsystem memory tracker declared in mem_tracker.h.
 
 #include "engine/core/mem_tracker.h"
 
@@ -66,6 +66,7 @@ std::size_t mem_tracker_snapshot(MemTagSnapshot *out,
         g_tagCounters[i].totalAllocated.load(std::memory_order_relaxed);
     out[i].totalFreed =
         g_tagCounters[i].totalFreed.load(std::memory_order_relaxed);
+    out[i].reported = out[i].totalAllocated != 0U;
   }
   return count;
 }

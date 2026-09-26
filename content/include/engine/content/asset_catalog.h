@@ -18,31 +18,59 @@
 
 namespace engine::content {
 
-/// The engine's one record of what assets exist: a fixed-slot table keyed
-/// by AssetId, open-addressed, so a record's address never moves while it
-/// is held. `generation` moves once per write that lands — a register or
-/// replace, a tag or dependency the record did not already carry, a clear
-/// — and never on a refused one, so a consumer that noted it can tell the
-/// catalog changed since.
+/// The engine's one record of what assets exist, keyed by AssetId. Records
+/// live in pages the catalog allocates as it fills, so a record's address
+/// never moves while it is held (until a clear), and an id index that
+/// doubles as it fills keeps a lookup a short probe however many assets a
+/// project has. It grows at the cold boundaries where assets are
+/// catalogued, a mount walk or a load, and refuses a record, which the
+/// caller reports, only one past `recordLimit` or when memory runs out.
+/// `generation` moves once per write that lands — a register or replace,
+/// a tag or dependency the record did not already carry, a recorded
+/// reload, a clear — and never on a refused one, so a consumer that noted
+/// it can tell the catalog changed since.
 struct AssetCatalog final {
-  static constexpr std::size_t kMaxMetadata = 4096U;
-  std::array<AssetMetadata, kMaxMetadata> entries =
-      std::array<AssetMetadata, kMaxMetadata>();
-  std::array<bool, kMaxMetadata> occupied{};
-  /// Per slot: how many reloads of the asset there have committed
-  /// (note_asset_reloaded). Kept across a replace of the record, so a
-  /// loader that rewrites the record keeps the count; zero for a slot a
-  /// new asset takes, and after a clear.
-  std::array<std::uint32_t, kMaxMetadata> reloadGenerations{};
+  /// The most records any catalog can hold; `recordLimit` may lower it.
+  static constexpr std::size_t kMaxRecords = std::size_t{1} << 20U;
+  /// Records per storage page.
+  static constexpr std::size_t kPageRecords = 1024U;
+
+  /// Records this catalog takes before refusing the next one: the full
+  /// kMaxRecords unless configured lower (a test of the boundary, a
+  /// platform's budget).
+  std::size_t recordLimit = kMaxRecords;
   std::uint64_t generation = 0U;
+
+  // Storage, owned by asset_catalog_table.cpp; read the catalog through
+  // the functions below.
+  struct Page;
+  std::array<Page *, kMaxRecords / kPageRecords> pages{};
+  std::size_t recordCount = 0U;
+  std::uint32_t *index = nullptr;
+  std::size_t indexCapacity = 0U;
+
+  AssetCatalog() noexcept = default;
+  AssetCatalog(const AssetCatalog &) = delete;
+  AssetCatalog &operator=(const AssetCatalog &) = delete;
+  ~AssetCatalog() noexcept;
 };
 
-/// Resets every slot back to the empty state.
+/// How many records the catalog holds.
+std::size_t asset_catalog_record_count(const AssetCatalog *catalog) noexcept;
+
+/// The catalog's `record`th record, in the order they were first
+/// registered; nullptr past the count.
+const AssetMetadata *asset_catalog_record(const AssetCatalog *catalog,
+                                          std::size_t record) noexcept;
+
+/// Resets the catalog to hold nothing; every record pointer it handed out
+/// is invalid afterwards.
 void clear_asset_catalog(AssetCatalog *catalog) noexcept;
 
 /// Inserts the record keyed by its assetId, or replaces the whole record
 /// already there; false when the id is invalid, a string is unterminated,
-/// a count exceeds its array, or the table is full.
+/// a count exceeds its array, the catalog is at its record limit, or the
+/// memory for one more record cannot be allocated.
 bool register_asset_metadata(AssetCatalog *catalog,
                              const AssetMetadata &metadata) noexcept;
 
@@ -63,9 +91,10 @@ CatalogInsert
 register_asset_metadata_if_absent(AssetCatalog *catalog,
                                   const AssetMetadata &metadata) noexcept;
 
-/// True when register_asset_metadata would find a slot for `id`: it has a
-/// record already, or the table has room. Lets a caller that must write
-/// several things together check the catalog's part before writing any.
+/// True when register_asset_metadata would take a record for `id`: it has
+/// one already, or the catalog is below its record limit. Lets a caller that
+/// must write several things together check the catalog's part before writing
+/// any.
 bool can_register_asset_metadata(const AssetCatalog *catalog,
                                  AssetId id) noexcept;
 
@@ -127,7 +156,7 @@ bool add_asset_dependency(AssetCatalog *catalog, AssetId id,
 /// Copies up to maxIds ids of the catalogued assets that record a direct
 /// dependency on `id` into outIds and returns how many there are, which
 /// may exceed maxIds. The catalog stores edges forward only, so this scans
-/// every record's dependency list: at most kMaxMetadata x
+/// every record's dependency list: at most the record count x
 /// AssetMetadata::kMaxDependencies comparisons, for a change or an edit,
 /// never per frame. Scanning keeps the answer exact with no second index
 /// to fall out of step and no cap on how many assets share a dependency.
@@ -216,8 +245,8 @@ struct MountRegistration final {
   /// file on Windows and macOS, two on Linux, so the project builds for
   /// one teammate and not another.
   std::size_t caseCollisions = 0U;
-  /// False when the mount did not index cleanly — any of the three
-  /// counts above is non-zero, or the root could not be walked. The
+  /// False when the mount did not index cleanly — any file refused, any
+  /// of the three counts above non-zero, or the root not walkable. The
   /// records that were readable are still in the catalog, so a caller can
   /// show the project while refusing to cook or package it.
   bool ok = false;

@@ -30,6 +30,7 @@
 #include "engine/core/input.h"
 #include "engine/core/job_system.h"
 #include "engine/core/logging.h"
+#include "engine/core/mem_tracker.h"
 #include "engine/core/simulation_clock.h"
 #include "engine/core/platform.h"
 #include "engine/core/platform_event.h"
@@ -605,6 +606,12 @@ struct EnginePipeline::Impl final {
   std::unique_ptr<content::AssetStreamingQueue> assetStreamingQueue;
   std::unique_ptr<RuntimeAssetStreamingState> assetStreamingState;
   std::unique_ptr<FrameContext> frameContext;
+  // What the pools above hold, reported to the memory tracker for the
+  // editor's Stats panel for as long as they live.
+  core::MemReport ecsMemory{};
+  core::MemReport physicsMemory{};
+  core::MemReport assetsMemory{};
+  core::MemReport rendererMemory{};
   BootstrapMeshIds meshIds{};
   runtime::EnginePhysicsService physicsService{};
   runtime::EngineAudioService audioService{};
@@ -809,6 +816,20 @@ bool EnginePipeline::Impl::initialize(std::uint32_t maxFrameCount) noexcept {
                       "failed to allocate runtime frame state");
     return false;
   }
+  // The physics context lives inside the World; it is reported apart so
+  // the two subsystems read separately.
+  constexpr std::size_t kPhysicsBytes = sizeof(physics::PhysicsContext);
+  ecsMemory.report(core::MemTag::ECS, sizeof(runtime::World) - kPhysicsBytes);
+  physicsMemory.report(core::MemTag::Physics, kPhysicsBytes);
+  assetsMemory.report(core::MemTag::Assets,
+                      sizeof(renderer::AssetDatabase) +
+                          sizeof(content::AssetCatalog) +
+                          sizeof(renderer::AssetManager) +
+                          sizeof(content::AssetStreamingQueue) +
+                          sizeof(RuntimeAssetStreamingState));
+  rendererMemory.report(core::MemTag::Renderer,
+                        (2U * sizeof(renderer::CommandBufferBuilder)) +
+                            sizeof(renderer::GpuMeshRegistry));
   renderer::clear_asset_database(assetDatabase.get());
   content::clear_asset_catalog(assetCatalog.get());
   renderer::clear_asset_manager(assetManager.get());
@@ -1387,6 +1408,11 @@ void EnginePipeline::Impl::stage_assets() noexcept {
   updatedAssets = renderer::update_asset_manager(
       assetManager.get(), assetDatabase.get(), assetCatalog.get(),
       meshRegistry.get(), 16U);
+  // A texture no material names any more gives its record and its device
+  // texture back first, so the resolve below finds the room and rewrites
+  // every handle before render prep reads one.
+  static_cast<void>(renderer::release_unreferenced_textures(
+      assetDatabase.get(), &release_material_texture_production, nullptr));
   // One lookup per set texture slot of every loaded material; loads only a
   // texture no material has tried yet (see resolve_material_textures's
   // header comment).

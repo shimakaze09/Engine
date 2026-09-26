@@ -691,7 +691,8 @@ std::size_t load_material_assets_in_directory(
 
   // Discovered names are sorted before registration so record slot
   // layout is deterministic across platforms and directory orders.
-  constexpr std::size_t kMaxDiscovered = 256U;
+  // The material table is the bound: a name past it could not register.
+  constexpr std::size_t kMaxDiscovered = AssetDatabase::kMaxMaterialAssets;
   constexpr std::size_t kMaxNameLength = 128U;
   static std::array<std::array<char, kMaxNameLength>, kMaxDiscovered> names{};
   std::size_t nameCount = 0U;
@@ -791,6 +792,61 @@ std::size_t resolve_material_textures(AssetDatabase *database,
     }
   }
   return resolvedCount;
+}
+
+std::size_t release_unreferenced_textures(AssetDatabase *database,
+                                          MaterialTextureReleaseFn releaseFn,
+                                          void *userData) noexcept {
+  if ((database == nullptr) || !database->textureReferencesChanged) {
+    return 0U;
+  }
+  database->textureReferencesChanged = false;
+
+  std::array<bool, AssetDatabase::kMaxTextureAssets> named{};
+  for (std::size_t i = 0U; i < database->materialAssets.size(); ++i) {
+    if (!database->materialOccupied[i]) {
+      continue;
+    }
+    const MaterialTextureSlots &slots =
+        database->materialAssets[i].textureSlots;
+    const content::AssetId ids[] = {
+#define ENGINE_MATERIAL_SLOT_ID(name, slot, handle, key) slots.slot,
+        ENGINE_MATERIAL_TEXTURE_FIELDS(ENGINE_MATERIAL_SLOT_ID)
+#undef ENGINE_MATERIAL_SLOT_ID
+    };
+    for (const content::AssetId id : ids) {
+      const std::uint32_t *slot = (id != content::kInvalidAssetId)
+                                      ? database->textureIndex.find(id)
+                                      : nullptr;
+      if (slot != nullptr) {
+        named[*slot] = true;
+      }
+    }
+  }
+
+  std::size_t freed = 0U;
+  for (std::size_t slot = 0U; slot < database->textureAssets.size(); ++slot) {
+    if (!database->textureOccupied[slot] || named[slot]) {
+      continue;
+    }
+    const content::AssetId id = database->textureAssets[slot].id;
+    const TextureHandle handle = database->textureAssets[slot].runtimeTexture;
+    if ((handle != kInvalidTextureHandle) && (releaseFn != nullptr)) {
+      releaseFn(handle, userData);
+    }
+    // Cannot fail: the record is occupied and holds no handle once unloaded.
+    static_cast<void>(set_texture_asset_state(
+        database, id, content::AssetState::Unloaded, kInvalidTextureHandle));
+    static_cast<void>(unregister_texture_asset(database, id));
+    ++freed;
+  }
+
+  if (freed != 0U) {
+    for (std::size_t i = 0U; i < database->materialAssets.size(); ++i) {
+      database->materialAssets[i].unregisterableTextureSlots = 0U;
+    }
+  }
+  return freed;
 }
 
 } // namespace engine::renderer

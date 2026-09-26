@@ -55,12 +55,13 @@ struct MeshAssetRecord final {
   bool pinned = false;
 };
 
-/// One texture slot: id, GPU handle, source path, refcount, state.
+/// One texture slot: id, GPU handle, source path, state. Materials own
+/// textures: a record lives while some material's texture slots name it,
+/// and release_unreferenced_textures frees it once none does.
 struct TextureAssetRecord final {
   content::AssetId id = content::kInvalidAssetId;
   TextureHandle runtimeTexture = kInvalidTextureHandle;
   std::array<char, 260U> sourcePath{};
-  std::uint32_t refCount = 0U;
   std::uint64_t lastAccessFrame = 0ULL;
   std::uint64_t sizeBytes = 0ULL;
   content::AssetState state = content::AssetState::Unloaded;
@@ -82,6 +83,8 @@ struct MaterialTextureSlots final {
   content::AssetId emissive = content::kInvalidAssetId;
   content::AssetId occlusion = content::kInvalidAssetId;
   content::AssetId opacity = content::kInvalidAssetId;
+
+  bool operator==(const MaterialTextureSlots &) const noexcept = default;
 };
 
 /// Every field a material document authors, in document order: the
@@ -179,7 +182,7 @@ struct AssetDatabase final {
   core::FixedHashTable<content::AssetId, std::uint32_t, kMeshIndexCapacity>
       meshIndex{};
 
-  static constexpr std::size_t kMaxTextureAssets = 512U;
+  static constexpr std::size_t kMaxTextureAssets = 4096U;
   std::array<TextureAssetRecord, kMaxTextureAssets> textureAssets =
       std::array<TextureAssetRecord, kMaxTextureAssets>();
   std::array<bool, kMaxTextureAssets> textureOccupied{};
@@ -189,11 +192,16 @@ struct AssetDatabase final {
   core::FixedHashTable<content::AssetId, std::uint32_t, kTextureIndexCapacity>
       textureIndex{};
   // Where the next texture hot-reload poll resumes: the poll checks a
-  // bounded run of slots per call, so a full table costs a sweep over
-  // several polls rather than every file in one frame. Runtime-only.
+  // bounded number of loaded textures per call, so many textures cost a
+  // sweep over several polls rather than every file in one frame.
+  // Runtime-only.
   std::uint32_t textureReloadCursor = 0U;
+  // Set whenever a material's texture slots change, so the next
+  // release_unreferenced_textures looks for textures no material names any
+  // more; nothing else can leave one unreferenced. Runtime-only.
+  bool textureReferencesChanged = false;
 
-  static constexpr std::size_t kMaxMaterialAssets = 1024U;
+  static constexpr std::size_t kMaxMaterialAssets = 4096U;
   std::array<MaterialAssetRecord, kMaxMaterialAssets> materialAssets =
       std::array<MaterialAssetRecord, kMaxMaterialAssets>();
   std::array<bool, kMaxMaterialAssets> materialOccupied{};
@@ -344,11 +352,10 @@ bool set_texture_asset_state(AssetDatabase *database, content::AssetId id,
 /// GPU texture handle for the id; invalid unless Ready.
 TextureHandle resolve_texture_asset(AssetDatabase *database,
                                     content::AssetId id) noexcept;
-/// Increments the texture refcount; false when unknown.
-bool retain_texture_asset(AssetDatabase *database,
-                          content::AssetId id) noexcept;
-/// Decrements the texture refcount; false when unknown or zero.
-bool release_texture_asset(AssetDatabase *database,
-                           content::AssetId id) noexcept;
+/// Frees a texture record slot for reuse. Requires no live runtimeTexture
+/// (release the handle and set the state first); false when the id is
+/// unknown or still holds one. Every other record keeps its slot.
+bool unregister_texture_asset(AssetDatabase *database,
+                              content::AssetId id) noexcept;
 
 } // namespace engine::renderer

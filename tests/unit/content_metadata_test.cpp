@@ -10,6 +10,7 @@
 
 #include "engine/content/asset_catalog.h"
 #include "engine/content/asset_metadata.h"
+#include "engine/core/mem_tracker.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -214,30 +215,102 @@ int main() {
   CHECK(find_asset_metadata_by_path(store.get(), "assets/a.png") == nullptr,
         "a record at another path never answers for this one");
 
-  // --- The capacity probe agrees with register at the boundary. ---
+  // --- A project past the old 4096-slot table catalogues whole (#696). ---
   clear_asset_catalog(store.get());
-  for (std::size_t i = 0U; i < AssetCatalog::kMaxMetadata; ++i) {
+  constexpr std::size_t kLargeProject = 5000U;
+  bool filled = true;
+  for (std::size_t i = 0U; (i < kLargeProject) && filled; ++i) {
+    char path[48] = {};
+    std::snprintf(path, sizeof(path), "assets/large/%zu.png", i);
+    filled = register_asset_metadata(
+        store.get(),
+        make_meta(make_asset_id_from_path(path), AssetTypeTag::Texture, path));
+  }
+  CHECK(filled, "5000 assets register");
+  CHECK(asset_catalog_record_count(store.get()) == kLargeProject,
+        "and the catalog counts every one");
+  std::size_t resolved = 0U;
+  for (std::size_t i = 0U; i < kLargeProject; ++i) {
+    char path[48] = {};
+    std::snprintf(path, sizeof(path), "assets/large/%zu.png", i);
+    const AssetMetadata *record =
+        find_asset_metadata_by_path(store.get(), path);
+    resolved += ((record != nullptr) &&
+                 (std::strcmp(record->filePath.data(), path) == 0))
+                    ? 1U
+                    : 0U;
+  }
+  CHECK(resolved == kLargeProject, "every one resolves by path");
+  const AssetMetadata *first =
+      find_asset_metadata_by_path(store.get(), "assets/large/0.png");
+  for (std::size_t i = kLargeProject; i < kLargeProject + 3000U; ++i) {
+    char path[48] = {};
+    std::snprintf(path, sizeof(path), "assets/large/%zu.png", i);
+    static_cast<void>(register_asset_metadata(
+        store.get(),
+        make_meta(make_asset_id_from_path(path), AssetTypeTag::Texture, path)));
+  }
+  CHECK(find_asset_metadata_by_path(store.get(), "assets/large/0.png") == first,
+        "a record's address holds while the catalog grows");
+
+  // --- The catalog reports what it grows to, and gives it all back. ---
+  {
+    using engine::core::MemTag;
+    const std::int64_t before =
+        engine::core::mem_tracker_current_bytes(MemTag::Assets);
+    std::unique_ptr<AssetCatalog> grown(new (std::nothrow) AssetCatalog());
+    bool registered = grown != nullptr;
+    for (std::size_t i = 0U; registered && (i < kLargeProject); ++i) {
+      char path[48] = {};
+      std::snprintf(path, sizeof(path), "assets/large/%zu.png", i);
+      registered = register_asset_metadata(
+          grown.get(), make_meta(make_asset_id_from_path(path),
+                                 AssetTypeTag::Texture, path));
+    }
+    CHECK(registered, "a second catalog fills");
+    // Every record lives in a reported page, and the index holds twice as
+    // many slots as records, so this is the least it can have reported.
+    const std::int64_t floor = static_cast<std::int64_t>(
+        kLargeProject * (sizeof(AssetMetadata) + (2U * sizeof(std::uint32_t))));
+    CHECK(engine::core::mem_tracker_current_bytes(MemTag::Assets) - before >=
+              floor,
+          "a growing catalog reports its records and its index");
+    grown.reset();
+    CHECK(engine::core::mem_tracker_current_bytes(MemTag::Assets) == before,
+          "a destroyed catalog gives back exactly what it reported");
+  }
+
+  // --- One past a configured limit is refused, and the probe agrees. ---
+  clear_asset_catalog(store.get());
+  constexpr std::size_t kLimit = 16U;
+  store->recordLimit = kLimit;
+  for (std::size_t i = 0U; i < kLimit; ++i) {
     const AssetId id = static_cast<AssetId>(i + 1U);
     char path[32] = {};
     std::snprintf(path, sizeof(path), "assets/fill/%zu.png", i);
     if (!register_asset_metadata(store.get(),
                                  make_meta(id, AssetTypeTag::Texture, path))) {
-      CHECK(false, "fill the catalog to capacity");
+      CHECK(false, "fill the catalog to its limit");
       break;
     }
   }
-  const AssetId extra = static_cast<AssetId>(AssetCatalog::kMaxMetadata + 1U);
+  const AssetId extra = static_cast<AssetId>(kLimit + 1U);
+  const std::uint64_t beforeRefusal = store->generation;
   CHECK(!can_register_asset_metadata(store.get(), extra),
-        "a full catalog has no slot for a new id");
+        "a catalog at its limit has no room for a new id");
   CHECK(
       !register_asset_metadata(
           store.get(), make_meta(extra, AssetTypeTag::Texture, "assets/x.png")),
       "and register agrees");
+  CHECK((store->generation == beforeRefusal) &&
+            (asset_catalog_record_count(store.get()) == kLimit),
+        "a refused record changes nothing");
   CHECK(can_register_asset_metadata(store.get(), 1U),
-        "a known id can still be replaced when full");
+        "a known id can still be replaced at the limit");
   CHECK(register_asset_metadata(
             store.get(), make_meta(1U, AssetTypeTag::Texture, "assets/y.png")),
         "and register agrees");
+  store->recordLimit = AssetCatalog::kMaxRecords;
   CHECK(!can_register_asset_metadata(store.get(), kInvalidAssetId),
         "the invalid id never registers");
 

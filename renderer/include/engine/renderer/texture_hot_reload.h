@@ -15,11 +15,6 @@
 
 namespace engine::renderer {
 
-/// Releases a texture handle the database no longer serves; paired with
-/// the MaterialTextureLoadFn that made it.
-using MaterialTextureReleaseFn = void (*)(TextureHandle handle,
-                                          void *userData) noexcept;
-
 /// What reload_texture_asset did.
 enum class TextureReload : std::uint8_t {
   /// The texture is Ready with the file's current contents, and every
@@ -53,11 +48,11 @@ inline constexpr std::size_t kTextureReloadPollSlots = 64U;
 
 /// Checks the next kTextureReloadPollSlots texture records, resuming where
 /// the last call stopped, and reloads each Ready or Failed one whose source
-/// file time differs from the recorded one. One stat per occupied record
-/// checked; a full table is swept every
-/// AssetDatabase::kMaxTextureAssets / kTextureReloadPollSlots calls. Editor
-/// only: a player's content does not change under it. Returns how many
-/// textures reloaded.
+/// file time differs from the recorded one. One stat per record checked,
+/// and only records the table holds count, so every loaded texture is
+/// checked within ceil(loaded / kTextureReloadPollSlots) calls however
+/// large the table. Editor only: a player's content does not change under
+/// it. Returns how many textures reloaded.
 std::size_t poll_texture_changes(AssetDatabase *database,
                                  content::AssetCatalog *catalog,
                                  MaterialTextureLoadFn loadFn,

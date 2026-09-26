@@ -665,6 +665,103 @@ void test_cook_dependencies_become_edges() noexcept {
   std::filesystem::remove_all(kDepRoot, ec);
 }
 
+/// A project past the old 4096-record table mounts whole (#696): more
+/// authored files than that, and more cooked outputs than one provenance
+/// index used to hold, each registered and each resolving, the cooked ones
+/// with the identity their stamp recorded.
+void test_large_project_mounts_whole() noexcept {
+  using engine::content::AssetRef;
+  constexpr const char *kLargeRoot = "asset_catalog_large_root";
+  constexpr std::size_t kScripts = 4100U;
+  constexpr std::size_t kClips = 4100U;
+
+  std::error_code ec{};
+  std::filesystem::remove_all(kLargeRoot, ec);
+  const std::filesystem::path root(kLargeRoot);
+  bool built = write_file(root / "hero.gltf");
+  for (std::size_t i = 0U; built && (i < kScripts); ++i) {
+    built = write_file(root / "scripts" / ("s" + std::to_string(i) + ".lua"));
+  }
+  for (std::size_t i = 0U; built && (i < kClips); ++i) {
+    built = write_file(root / ("hero.c" + std::to_string(i) + ".anim"));
+  }
+  const engine::content::AssetGuid hero = identify(root, "hero.gltf");
+  char guidText[engine::content::kAssetGuidTextLength + 1U] = {};
+  built = built &&
+          engine::content::format_asset_guid(hero, guidText, sizeof(guidText));
+  if (built) {
+    std::ofstream stamp(root / "hero.anim.cookstamp", std::ios::binary);
+    stamp << "SCHEMA 5\nSOURCE_GUID " << guidText << "\n";
+    for (std::size_t i = 0U; i < kClips; ++i) {
+      const std::string local = "c" + std::to_string(i) + ".anim";
+      char localText[17] = {};
+      std::snprintf(localText, sizeof(localText), "%016llx",
+                    static_cast<unsigned long long>(
+                        engine::content::asset_local_id(local.c_str())));
+      stamp << "ASSET " << localText << " hero." << local << "\n";
+    }
+    built = stamp.good();
+  }
+  if (!built) {
+    g_tests.fail("the large project could be written");
+    std::filesystem::remove_all(kLargeRoot, ec);
+    return;
+  }
+
+  std::unique_ptr<engine::content::AssetCatalog> store(
+      new (std::nothrow) engine::content::AssetCatalog());
+  if (store == nullptr) {
+    g_tests.fail("the large store could be allocated");
+    return;
+  }
+  const engine::content::MountRegistration result =
+      engine::content::register_mounted_assets(store.get(), kPrefix,
+                                               kLargeRoot);
+  check(result.refused == 0U, "no asset of a large project is refused");
+  check(result.registered >= kScripts + kClips,
+        "every asset of a large project registers");
+
+  std::size_t scriptsFound = 0U;
+  for (std::size_t i = 0U; i < kScripts; ++i) {
+    const std::string path =
+        std::string(kPrefix) + "/scripts/s" + std::to_string(i) + ".lua";
+    scriptsFound += (engine::content::find_asset_metadata_by_path(
+                         store.get(), path.c_str()) != nullptr)
+                        ? 1U
+                        : 0U;
+  }
+  check(scriptsFound == kScripts, "every script resolves by path");
+
+  std::size_t clipsIdentified = 0U;
+  for (std::size_t i = 0U; i < kClips; ++i) {
+    const std::string local = "c" + std::to_string(i) + ".anim";
+    const std::string path = std::string(kPrefix) + "/hero." + local;
+    const engine::content::AssetMetadata *clip =
+        engine::content::find_asset_metadata_by_path(store.get(), path.c_str());
+    const AssetRef expected{hero,
+                            engine::content::asset_local_id(local.c_str())};
+    clipsIdentified += ((clip != nullptr) && (clip->ref == expected)) ? 1U : 0U;
+  }
+  check(clipsIdentified == kClips,
+        "every cooked clip resolves with the identity its stamp recorded");
+
+  // One past a configured limit, the walk refuses and counts every asset
+  // it could not take, and says it did not index cleanly.
+  std::unique_ptr<engine::content::AssetCatalog> limited(
+      new (std::nothrow) engine::content::AssetCatalog());
+  if (limited != nullptr) {
+    constexpr std::size_t kLimit = 100U;
+    limited->recordLimit = kLimit;
+    const engine::content::MountRegistration capped =
+        engine::content::register_mounted_assets(limited.get(), kPrefix,
+                                                 kLargeRoot);
+    check((capped.registered == kLimit) &&
+              (capped.refused == result.registered - kLimit) && !capped.ok,
+          "a walk past the configured limit refuses and reports the rest");
+  }
+  std::filesystem::remove_all(kLargeRoot, ec);
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -690,6 +787,7 @@ int main() {
   test_identity_survives_relocation();
   test_identity_validation_fails_closed();
   test_cook_dependencies_become_edges();
+  test_large_project_mounts_whole();
 
   remove_tree();
   return g_tests.finish("asset catalog tests");
