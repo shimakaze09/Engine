@@ -1636,6 +1636,27 @@ engine_add_test_executable(engine_unit_forward_light_selection
     engine_math
 )
 
+# The capture pass with the forward-draw helper it shares, against the
+# fake device; the texture system and mesh registry are link seams.
+engine_add_test_executable(engine_unit_scene_capture_flush
+    SOURCES
+    scene_capture_flush_test.cpp
+    ../fake_render_device.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_flush_captures.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_flush_uniforms.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_capture.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_context.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_math.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/render_settings.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/pass_resources.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/renderer/include
+    ${CMAKE_SOURCE_DIR}/renderer/src
+    PRIVATE_DEPS
+    engine_core
+    engine_math
+)
+
 # Compiles the resource TUs directly so the test's render_device() is the
 # device they create through.
 engine_add_test_executable(engine_unit_render_target_wrap

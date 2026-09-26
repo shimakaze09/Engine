@@ -131,7 +131,10 @@ void flush_scene_captures(FrameFlushContext &ctx) noexcept {
     auto drawCaptureRange = [&](const CommandBufferView &view,
                                 std::size_t start, std::size_t end,
                                 std::uint16_t requiredMask) {
+      // A mesh showing this capture is drawn without it rather than
+      // sampling the target being rendered.
       ForwardDrawBindings bindings{};
+      bindings.passTarget = target.colorTexture;
       for (std::size_t i = start; (view.data != nullptr) && (i < end); ++i) {
         const DrawCommand &command = view.data[i];
         if ((requiredMask != 0U) &&
