@@ -131,8 +131,7 @@ void bind_reference(const runtime::EngineAssetDatabaseService *service,
     return;
   }
   const renderer::AssetMetadata *metadata =
-      renderer::find_asset_metadata_by_ref(&service->database->metadataStore,
-                                           ref);
+      content::find_asset_metadata_by_ref(service->catalog, ref);
   if ((metadata == nullptr) || (metadata->assetId == renderer::kInvalidAssetId)) {
     ++pass->unbound;
     report_unbound(reports, kind, ref, entityId);
@@ -157,7 +156,7 @@ void resolve_reference(runtime::EngineAssetDatabaseService *service,
   }
 
   const renderer::AssetMetadata *metadata =
-      renderer::find_asset_metadata(database, id);
+      content::find_asset_metadata(service->catalog, id);
   if ((metadata == nullptr) ||
       (metadata->typeTag != renderer::AssetTypeTag::Mesh) ||
       (metadata->filePath[0] == '\0')) {
@@ -202,15 +201,12 @@ void resolve_reference(runtime::EngineAssetDatabaseService *service,
 
 } // namespace
 
-bool note_mesh_asset_path(renderer::AssetDatabase *database,
-                          renderer::AssetId id, const char *virtualPath,
+bool note_mesh_asset_path(content::AssetCatalog *catalog, renderer::AssetId id,
+                          const char *virtualPath,
                           const core::AssetRef &ref) noexcept {
-  if ((database == nullptr) || (id == renderer::kInvalidAssetId) ||
+  if ((catalog == nullptr) || (id == renderer::kInvalidAssetId) ||
       (virtualPath == nullptr) || (virtualPath[0] == '\0')) {
     return false;
-  }
-  if (renderer::find_asset_metadata(database, id) != nullptr) {
-    return true;
   }
   renderer::AssetMetadata metadata{};
   if (std::strlen(virtualPath) >= metadata.filePath.size()) {
@@ -221,7 +217,8 @@ bool note_mesh_asset_path(renderer::AssetDatabase *database,
   metadata.typeTag = renderer::AssetTypeTag::Mesh;
   metadata.ref = ref;
   renderer::write_metadata_path(&metadata.filePath, virtualPath);
-  return renderer::register_asset_metadata(database, metadata);
+  return content::register_asset_metadata_if_absent(catalog, metadata) !=
+         content::CatalogInsert::Refused;
 }
 
 MeshResolutionPass request_referenced_mesh_assets(
@@ -229,7 +226,7 @@ MeshResolutionPass request_referenced_mesh_assets(
     UnresolvedMeshReports *reports) noexcept {
   MeshResolutionPass pass{};
   if ((service == nullptr) || (service->database == nullptr) ||
-      (reports == nullptr)) {
+      (service->catalog == nullptr) || (reports == nullptr)) {
     return pass;
   }
   const std::uint32_t epoch = world.content_epoch();

@@ -10,13 +10,14 @@
 #include <mutex>
 #include <new>
 
+#include "engine/content/asset_catalog.h"
+#include "engine/content/asset_streaming.h"
 #include "engine/core/cvar.h"
 #include "engine/core/logging.h"
 #include "engine/core/service_locator.h"
 #include "engine/core/vfs.h"
 #include "engine/renderer/asset_database.h"
 #include "engine/renderer/asset_manager.h"
-#include "engine/content/asset_streaming.h"
 #include "engine/runtime/editor_bridge.h"
 #include "engine/runtime/scripting_bridge.h"
 #include "engine/runtime/service_registry.h"
@@ -139,6 +140,9 @@ int check_editor_failed_load_recovers(
     engine::content::AssetStreamingQueue *queue) noexcept {
   engine::renderer::clear_asset_database(database);
   engine::runtime::EngineAssetDatabaseService service{};
+  std::unique_ptr<engine::content::AssetCatalog> serviceCatalog(
+      new (std::nothrow) engine::content::AssetCatalog());
+  service.catalog = serviceCatalog.get();
   service.database = database;
   service.streamingQueue = queue;
   engine::runtime::set_editor_asset_service(&service);
@@ -210,6 +214,9 @@ int check_script_failed_load_retries(
 
   engine::core::ServiceLocator locator{};
   engine::runtime::EngineAssetDatabaseService service{};
+  std::unique_ptr<engine::content::AssetCatalog> serviceCatalog(
+      new (std::nothrow) engine::content::AssetCatalog());
+  service.catalog = serviceCatalog.get();
   service.database = database;
   service.manager = manager;
   service.streamingQueue = queue;

@@ -16,18 +16,19 @@
 #include <new>
 #include <string>
 
+#include "../test_harness.h"
+#include "engine/content/asset_catalog.h"
+#include "engine/content/asset_streaming.h"
 #include "engine/core/cvar.h"
 #include "engine/core/logging.h"
 #include "engine/core/service_locator.h"
 #include "engine/core/vfs.h"
 #include "engine/renderer/asset_database.h"
 #include "engine/renderer/asset_manager.h"
-#include "engine/content/asset_streaming.h"
 #include "engine/runtime/scripting_bridge.h"
 #include "engine/runtime/service_registry.h"
 #include "engine/runtime/world.h"
 #include "engine/scripting/scripting.h"
-#include "../test_harness.h"
 
 namespace {
 
@@ -167,6 +168,9 @@ void run_checks(engine::tests::TestContext &ctx,
 
   engine::core::ServiceLocator locator{};
   engine::runtime::EngineAssetDatabaseService service{};
+  std::unique_ptr<engine::content::AssetCatalog> serviceCatalog(
+      new (std::nothrow) engine::content::AssetCatalog());
+  service.catalog = serviceCatalog.get();
   service.database = database.get();
   service.manager = manager.get();
   service.streamingQueue = queue.get();

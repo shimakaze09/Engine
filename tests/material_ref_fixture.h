@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include "engine/content/asset_catalog.h"
 #include "engine/content/asset_identity.h"
 #include "engine/renderer/asset_database.h"
 
@@ -21,8 +22,8 @@ struct MaterialRefText final {
 /// move an asset to a new path and keep its identity, as a rename in the
 /// content browser does.
 inline MaterialRefText
-catalog_material_asset(renderer::AssetDatabase *database,
-                       const char *virtualPath, renderer::AssetTypeTag type,
+catalog_material_asset(content::AssetCatalog *catalog, const char *virtualPath,
+                       renderer::AssetTypeTag type,
                        const char *guidSeed = nullptr) noexcept {
   MaterialRefText out{};
   renderer::AssetMetadata metadata{};
@@ -31,7 +32,7 @@ catalog_material_asset(renderer::AssetDatabase *database,
       (guidSeed != nullptr) ? guidSeed : virtualPath));
   metadata.typeTag = type;
   renderer::write_metadata_path(&metadata.filePath, virtualPath);
-  if (!renderer::register_asset_metadata(database, metadata) ||
+  if (!content::register_asset_metadata(catalog, metadata) ||
       !content::format_asset_ref(metadata.ref, out.text, sizeof(out.text))) {
     out.text[0] = '\0';
   }
@@ -39,16 +40,16 @@ catalog_material_asset(renderer::AssetDatabase *database,
 }
 
 /// Catalogues a texture fixture; see catalog_material_asset.
-inline MaterialRefText catalog_texture(renderer::AssetDatabase *database,
+inline MaterialRefText catalog_texture(content::AssetCatalog *catalog,
                                        const char *virtualPath) noexcept {
-  return catalog_material_asset(database, virtualPath,
+  return catalog_material_asset(catalog, virtualPath,
                                 renderer::AssetTypeTag::Texture);
 }
 
 /// Catalogues a material fixture; see catalog_material_asset.
-inline MaterialRefText catalog_material(renderer::AssetDatabase *database,
+inline MaterialRefText catalog_material(content::AssetCatalog *catalog,
                                         const char *virtualPath) noexcept {
-  return catalog_material_asset(database, virtualPath,
+  return catalog_material_asset(catalog, virtualPath,
                                 renderer::AssetTypeTag::Material);
 }
 

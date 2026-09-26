@@ -36,6 +36,7 @@ bool resolve_mesh_asset_path(char *outPath, std::size_t outCapacity) noexcept {
 
 renderer::AssetId register_builtin_mesh(renderer::GpuMeshRegistry *registry,
                                         renderer::AssetDatabase *database,
+                                        content::AssetCatalog *catalog,
                                         const renderer::GpuMesh &mesh,
                                         const char *builtinPath) noexcept {
   const renderer::MeshHandle handle = renderer::register_gpu_mesh(registry, mesh);
@@ -54,7 +55,7 @@ renderer::AssetId register_builtin_mesh(renderer::GpuMeshRegistry *registry,
   // derived from its path rather than generated: a built-in ships with the
   // engine, carries no sidecar, and must be the same asset in every build.
   static_cast<void>(note_mesh_asset_path(
-      database, id, builtinPath,
+      catalog, id, builtinPath,
       content::asset_ref_primary(content::builtin_asset_guid(builtinPath))));
   const std::uint64_t vertexFloats = mesh.hasUVs ? 8ULL : 6ULL;
   const std::uint64_t sizeEstimate =
@@ -73,6 +74,7 @@ renderer::AssetId register_builtin_mesh(renderer::GpuMeshRegistry *registry,
 /// Loads the requested resource for bootstrap meshes.
 bool load_bootstrap_meshes(renderer::AssetManager *assetManager,
                            renderer::AssetDatabase *assetDatabase,
+                           content::AssetCatalog *catalog,
                            renderer::GpuMeshRegistry *meshRegistry,
                            BootstrapMeshIds *out) noexcept {
   char meshPath[512]{};
@@ -100,37 +102,37 @@ bool load_bootstrap_meshes(renderer::AssetManager *assetManager,
 
   renderer::GpuMesh m{};
   if (renderer::build_plane_mesh(&m)) {
-    out->plane = register_builtin_mesh(meshRegistry, assetDatabase, m,
+    out->plane = register_builtin_mesh(meshRegistry, assetDatabase, catalog, m,
                                        "builtin://plane");
   }
   m = renderer::GpuMesh{};
   if (renderer::build_cube_mesh(&m)) {
-    out->cube = register_builtin_mesh(meshRegistry, assetDatabase, m,
+    out->cube = register_builtin_mesh(meshRegistry, assetDatabase, catalog, m,
                                       "builtin://cube");
   }
   m = renderer::GpuMesh{};
   if (renderer::build_sphere_mesh(&m)) {
-    out->sphere = register_builtin_mesh(meshRegistry, assetDatabase, m,
+    out->sphere = register_builtin_mesh(meshRegistry, assetDatabase, catalog, m,
                                         "builtin://sphere");
   }
   m = renderer::GpuMesh{};
   if (renderer::build_cylinder_mesh(&m)) {
-    out->cylinder = register_builtin_mesh(meshRegistry, assetDatabase, m,
-                                          "builtin://cylinder");
+    out->cylinder = register_builtin_mesh(meshRegistry, assetDatabase, catalog,
+                                          m, "builtin://cylinder");
   }
   m = renderer::GpuMesh{};
   if (renderer::build_capsule_mesh(&m)) {
-    out->capsule = register_builtin_mesh(meshRegistry, assetDatabase, m,
-                                         "builtin://capsule");
+    out->capsule = register_builtin_mesh(meshRegistry, assetDatabase, catalog,
+                                         m, "builtin://capsule");
   }
   m = renderer::GpuMesh{};
   if (renderer::build_pyramid_mesh(&m)) {
-    out->pyramid = register_builtin_mesh(meshRegistry, assetDatabase, m,
-                                         "builtin://pyramid");
+    out->pyramid = register_builtin_mesh(meshRegistry, assetDatabase, catalog,
+                                         m, "builtin://pyramid");
   }
   m = renderer::GpuMesh{};
   if (renderer::build_grass_tuft_mesh(&m)) {
-    out->grass = register_builtin_mesh(meshRegistry, assetDatabase, m,
+    out->grass = register_builtin_mesh(meshRegistry, assetDatabase, catalog, m,
                                        "builtin://grass");
   }
 
@@ -163,8 +165,7 @@ bool load_bootstrap_meshes(renderer::AssetManager *assetManager,
   // loader's own record wins: the walk never replaces one that exists,
   // and the material loader below updates the walk's in place.
   static_cast<void>(content::register_mounted_assets(
-      &assetDatabase->metadataStore, active_config().assetMount,
-      active_config().assetRoot));
+      catalog, active_config().assetMount, active_config().assetRoot));
 
   // Discover project material JSONs so MeshComponent.materialAssetId
   // references resolve during render prep.
@@ -175,7 +176,7 @@ bool load_bootstrap_meshes(renderer::AssetManager *assetManager,
   std::snprintf(materialsPrefix, sizeof(materialsPrefix), "%s/materials",
                 active_config().assetMount);
   const std::size_t materialCount = renderer::load_material_assets_in_directory(
-      assetDatabase, materialsDir, materialsPrefix);
+      assetDatabase, catalog, materialsDir, materialsPrefix);
   if (materialCount > 0U) {
     char logBuffer[128] = {};
     std::snprintf(logBuffer, sizeof(logBuffer), "loaded %zu material assets",

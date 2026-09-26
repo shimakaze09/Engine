@@ -3,6 +3,8 @@
 #include <memory>
 #include <new>
 
+#include "../test_harness.h"
+#include "engine/content/asset_catalog.h"
 #include "engine/core/service_locator.h"
 #include "engine/physics/physics_context.h"
 #include "engine/physics/physics_world_view.h"
@@ -13,7 +15,6 @@
 #include "engine/renderer/render_device.h"
 #include "engine/runtime/service_registry.h"
 #include "engine/runtime/world.h"
-#include "../test_harness.h"
 
 namespace {
 
@@ -77,6 +78,9 @@ int main() {
 
   engine::runtime::EngineAudioService audioService{};
   engine::runtime::EngineAssetDatabaseService assetService{};
+  std::unique_ptr<engine::content::AssetCatalog> assetServiceCatalog(
+      new (std::nothrow) engine::content::AssetCatalog());
+  assetService.catalog = assetServiceCatalog.get();
   assetService.database = assetDatabase.get();
   assetService.manager = assetManager.get();
   engine::runtime::EngineRendererService rendererService{};

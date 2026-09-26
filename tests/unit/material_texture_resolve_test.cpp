@@ -12,6 +12,7 @@
 #include <memory>
 #include <new>
 
+#include "engine/content/asset_catalog.h"
 #include "engine/core/logging.h"
 #include "engine/core/vfs.h"
 #include "engine/renderer/asset_database.h"
@@ -20,6 +21,10 @@
 #include "../material_ref_fixture.h"
 
 namespace {
+
+/// The engine asset catalog the material API resolves through; one per
+/// run, cleared wherever the database is.
+engine::content::AssetCatalog *g_catalog = nullptr;
 
 bool write_material_file(const char *path, const char *text) noexcept {
   FILE *file = nullptr;
@@ -72,22 +77,23 @@ int verify_successful_resolution(engine::renderer::AssetDatabase *database) {
       "{\"version\":4,\"textures\":{\"albedo\":\"%s\","
       "\"metallicRoughness\":\"%s\",\"emissive\":\"%s\","
       "\"occlusion\":\"%s\",\"opacity\":\"%s\"}}",
-      engine::tests::catalog_texture(database, "assets/textures/ok_albedo.png")
+      engine::tests::catalog_texture(g_catalog, "assets/textures/ok_albedo.png")
           .text,
-      engine::tests::catalog_texture(database, "assets/textures/ok_mr.png")
+      engine::tests::catalog_texture(g_catalog, "assets/textures/ok_mr.png")
           .text,
-      engine::tests::catalog_texture(database,
+      engine::tests::catalog_texture(g_catalog,
                                      "assets/textures/ok_emissive.png")
           .text,
-      engine::tests::catalog_texture(database, "assets/textures/ok_ao.png")
+      engine::tests::catalog_texture(g_catalog, "assets/textures/ok_ao.png")
           .text,
-      engine::tests::catalog_texture(database, "assets/textures/ok_opacity.png")
+      engine::tests::catalog_texture(g_catalog,
+                                     "assets/textures/ok_opacity.png")
           .text);
   if (!write_material_file(kPath, kJson)) {
     return 10;
   }
   const auto loadResult =
-      engine::renderer::load_material_asset(database, kVirtualPath);
+      engine::renderer::load_material_asset(database, g_catalog, kVirtualPath);
   remove_file(kPath);
   if (!loadResult.has_value()) {
     return 11;
@@ -96,7 +102,7 @@ int verify_successful_resolution(engine::renderer::AssetDatabase *database) {
 
   FakeLoaderState state{};
   const std::size_t resolvedFirst = engine::renderer::resolve_material_textures(
-      database, &fake_load_texture, &state);
+      database, g_catalog, &fake_load_texture, &state);
   if (resolvedFirst != 5U) {
     return 12;
   }
@@ -119,8 +125,8 @@ int verify_successful_resolution(engine::renderer::AssetDatabase *database) {
   // Every already-Ready slot is a cheap lookup on the next sync — the
   // loader must not be called again.
   const std::size_t resolvedSecond =
-      engine::renderer::resolve_material_textures(database, &fake_load_texture,
-                                                   &state);
+      engine::renderer::resolve_material_textures(database, g_catalog,
+                                                  &fake_load_texture, &state);
   if ((resolvedSecond != 0U) || (state.callCount != 5U)) {
     return 15;
   }
@@ -137,14 +143,14 @@ int verify_failed_load_falls_back(engine::renderer::AssetDatabase *database) {
   std::snprintf(
       kJson, sizeof(kJson),
       "{\"version\":4,\"roughness\":0.6,\"textures\":{\"albedo\":\"%s\"}}",
-      engine::tests::catalog_texture(database,
+      engine::tests::catalog_texture(g_catalog,
                                      "assets/textures/missing_albedo.png")
           .text);
   if (!write_material_file(kPath, kJson)) {
     return 20;
   }
   const auto loadResult =
-      engine::renderer::load_material_asset(database, kVirtualPath);
+      engine::renderer::load_material_asset(database, g_catalog, kVirtualPath);
   remove_file(kPath);
   if (!loadResult.has_value()) {
     return 21;
@@ -153,7 +159,7 @@ int verify_failed_load_falls_back(engine::renderer::AssetDatabase *database) {
 
   FakeLoaderState state{};
   static_cast<void>(engine::renderer::resolve_material_textures(
-      database, &fake_load_texture, &state));
+      database, g_catalog, &fake_load_texture, &state));
 
   const engine::renderer::Material *params =
       engine::renderer::find_material_params(database, id);
@@ -177,7 +183,7 @@ int verify_failed_load_falls_back(engine::renderer::AssetDatabase *database) {
 
   const std::uint32_t callsAfterFirstSync = state.callCount;
   static_cast<void>(engine::renderer::resolve_material_textures(
-      database, &fake_load_texture, &state));
+      database, g_catalog, &fake_load_texture, &state));
   if (state.callCount != callsAfterFirstSync) {
     return 24;
   }
@@ -193,7 +199,7 @@ int verify_shared_texture_loads_once(engine::renderer::AssetDatabase *database) 
   std::snprintf(kJson, sizeof(kJson),
                 "{\"version\":4,\"textures\":{\"albedo\":\"%s\"}}",
                 engine::tests::catalog_texture(
-                    database, "assets/textures/shared_albedo.png")
+                    g_catalog, "assets/textures/shared_albedo.png")
                     .text);
   if (!write_material_file(kPathA, kJson) ||
       !write_material_file(kPathB, kJson)) {
@@ -202,9 +208,9 @@ int verify_shared_texture_loads_once(engine::renderer::AssetDatabase *database) 
     return 30;
   }
   const auto resultA = engine::renderer::load_material_asset(
-      database, "mat/material_resolve_shared_a.json");
+      database, g_catalog, "mat/material_resolve_shared_a.json");
   const auto resultB = engine::renderer::load_material_asset(
-      database, "mat/material_resolve_shared_b.json");
+      database, g_catalog, "mat/material_resolve_shared_b.json");
   remove_file(kPathA);
   remove_file(kPathB);
   if (!resultA.has_value() || !resultB.has_value()) {
@@ -213,7 +219,7 @@ int verify_shared_texture_loads_once(engine::renderer::AssetDatabase *database) 
 
   FakeLoaderState state{};
   const std::size_t resolvedCount = engine::renderer::resolve_material_textures(
-      database, &fake_load_texture, &state);
+      database, g_catalog, &fake_load_texture, &state);
   // resolve_material_textures counts newly-loaded slots: whichever of A/B
   // is scanned first drives the one real load (resolvedCount == 1); the
   // other reuses the now-Ready record via a lookup, not a second load —
@@ -237,8 +243,8 @@ int verify_shared_texture_loads_once(engine::renderer::AssetDatabase *database) 
 /// A material with no texture slots at all is a no-op (never calls the
 /// loader) and the call still succeeds against a null database.
 int verify_no_slots_and_null_database() {
-  if (engine::renderer::resolve_material_textures(nullptr, &fake_load_texture,
-                                                   nullptr) != 0U) {
+  if (engine::renderer::resolve_material_textures(
+          nullptr, g_catalog, &fake_load_texture, nullptr) != 0U) {
     return 40;
   }
   return 0;
@@ -289,13 +295,13 @@ int verify_full_texture_table_is_not_reloaded(
   std::snprintf(kJson, sizeof(kJson),
                 "{\"version\":4,\"textures\":{\"albedo\":\"%s\"}}",
                 engine::tests::catalog_texture(
-                    database, "assets/textures/over_capacity.png")
+                    g_catalog, "assets/textures/over_capacity.png")
                     .text);
   if (!write_material_file(kPath, kJson)) {
     return 51;
   }
   const auto loadResult = engine::renderer::load_material_asset(
-      database, "mat/material_resolve_full.json");
+      database, g_catalog, "mat/material_resolve_full.json");
   remove_file(kPath);
   if (!loadResult.has_value()) {
     return 52;
@@ -305,7 +311,7 @@ int verify_full_texture_table_is_not_reloaded(
   g_materialErrors = 0;
   for (int frame = 0; frame < 3; ++frame) {
     static_cast<void>(engine::renderer::resolve_material_textures(
-        database, &fake_load_texture, &state));
+        database, g_catalog, &fake_load_texture, &state));
   }
   if (state.callCount != 0U) {
     std::printf("a texture with no table slot was loaded %u time(s)\n",
@@ -329,6 +335,12 @@ int verify_full_texture_table_is_not_reloaded(
 } // namespace
 
 int main() {
+  std::unique_ptr<engine::content::AssetCatalog> catalogOwner(
+      new (std::nothrow) engine::content::AssetCatalog());
+  if (catalogOwner == nullptr) {
+    return 1;
+  }
+  g_catalog = catalogOwner.get();
   if (!engine::core::initialize_logging() ||
       !engine::core::log_register_sink(&count_material_errors, nullptr)) {
     return 4;
@@ -347,6 +359,7 @@ int main() {
     engine::core::shutdown_vfs();
     return 3;
   }
+  engine::content::clear_asset_catalog(g_catalog);
 
   int result = verify_successful_resolution(database.get());
   if (result == 0) {

@@ -77,14 +77,14 @@ bool slots_differ(const MaterialTextureSlots &lhs,
 
 } // namespace
 
-AssetId find_material_parent_id(const AssetDatabase *database,
+AssetId find_material_parent_id(const content::AssetCatalog *catalog,
                                 AssetId materialId) noexcept {
   constexpr std::size_t kMaxDeps = AssetMetadata::kMaxDependencies;
   AssetId deps[kMaxDeps] = {};
   const std::size_t depCount =
-      get_dependencies(database, materialId, deps, kMaxDeps);
+      get_dependencies(catalog, materialId, deps, kMaxDeps);
   for (std::size_t i = 0U; i < depCount; ++i) {
-    const AssetMetadata *metadata = find_asset_metadata(database, deps[i]);
+    const AssetMetadata *metadata = find_asset_metadata(catalog, deps[i]);
     if ((metadata != nullptr) &&
         (metadata->typeTag == AssetTypeTag::Material)) {
       return deps[i];
@@ -93,7 +93,7 @@ AssetId find_material_parent_id(const AssetDatabase *database,
   return kInvalidAssetId;
 }
 
-bool material_chain_contains(const AssetDatabase *database, AssetId from,
+bool material_chain_contains(const content::AssetCatalog *catalog, AssetId from,
                              AssetId target) noexcept {
   // A loaded chain is never deeper than the loader's limit; the bound only
   // stops a walk through a cycle that got in some other way.
@@ -104,14 +104,17 @@ bool material_chain_contains(const AssetDatabase *database, AssetId from,
     if (current == target) {
       return true;
     }
-    current = find_material_parent_id(database, current);
+    current = find_material_parent_id(catalog, current);
   }
   return false;
 }
 
-std::size_t propagate_material_to_dependents(AssetDatabase *database,
-                                             AssetId changedId) noexcept {
-  if ((database == nullptr) || (changedId == kInvalidAssetId)) {
+std::size_t
+propagate_material_to_dependents(AssetDatabase *database,
+                                 const content::AssetCatalog *catalog,
+                                 AssetId changedId) noexcept {
+  if ((database == nullptr) || (catalog == nullptr) ||
+      (changedId == kInvalidAssetId)) {
     return 0U;
   }
 
@@ -141,7 +144,7 @@ std::size_t propagate_material_to_dependents(AssetDatabase *database,
       MaterialAssetRecord &record = database->materialAssets[i];
       if (!database->materialOccupied[i] ||
           (record.state != AssetState::Ready) || seen(record.id) ||
-          (find_material_parent_id(database, record.id) != parentId)) {
+          (find_material_parent_id(catalog, record.id) != parentId)) {
         continue;
       }
       const MaterialTextureSlots before = record.textureSlots;
@@ -156,8 +159,9 @@ std::size_t propagate_material_to_dependents(AssetDatabase *database,
   return visitedCount - 1U;
 }
 
-bool edit_material_asset(AssetDatabase *database, AssetId materialId,
-                         const Material &params,
+bool edit_material_asset(AssetDatabase *database,
+                         const content::AssetCatalog *catalog,
+                         AssetId materialId, const Material &params,
                          const MaterialTextureSlots &textureSlots) noexcept {
   const Material *current = find_material_params(database, materialId);
   const MaterialTextureSlots *currentSlots =
@@ -169,18 +173,19 @@ bool edit_material_asset(AssetDatabase *database, AssetId materialId,
   const std::uint16_t overridden = static_cast<std::uint16_t>(
       material_overrides(database, materialId) |
       changed_fields(*current, *currentSlots, params, textureSlots));
-  return restore_material_asset(database, materialId, params, textureSlots,
-                                overridden);
+  return restore_material_asset(database, catalog, materialId, params,
+                                textureSlots, overridden);
 }
 
-bool restore_material_asset(AssetDatabase *database, AssetId materialId,
-                            const Material &params,
+bool restore_material_asset(AssetDatabase *database,
+                            const content::AssetCatalog *catalog,
+                            AssetId materialId, const Material &params,
                             const MaterialTextureSlots &textureSlots,
                             std::uint16_t overriddenFields) noexcept {
   if (find_material_params(database, materialId) == nullptr) {
     return false;
   }
-  const AssetMetadata *metadata = find_asset_metadata(database, materialId);
+  const AssetMetadata *metadata = find_asset_metadata(catalog, materialId);
   const char *sourcePath =
       (metadata != nullptr) ? metadata->filePath.data() : nullptr;
   // None of these can fail for a material found above.
@@ -189,7 +194,8 @@ bool restore_material_asset(AssetDatabase *database, AssetId materialId,
       !set_material_overrides(database, materialId, overriddenFields)) {
     return false;
   }
-  static_cast<void>(propagate_material_to_dependents(database, materialId));
+  static_cast<void>(
+      propagate_material_to_dependents(database, catalog, materialId));
   return true;
 }
 

@@ -22,6 +22,7 @@
 #include <memory>
 #include <new>
 
+#include "engine/content/asset_catalog.h"
 #include "engine/core/logging.h"
 #include "engine/core/service_locator.h"
 #include "engine/renderer/asset_database.h"
@@ -121,6 +122,9 @@ int main() {
   engine::renderer::clear_asset_manager(assetManager.get());
   engine::core::ServiceLocator locator{};
   engine::runtime::EngineAssetDatabaseService assetService{};
+  std::unique_ptr<engine::content::AssetCatalog> assetServiceCatalog(
+      new (std::nothrow) engine::content::AssetCatalog());
+  assetService.catalog = assetServiceCatalog.get();
   assetService.database = assetDatabase.get();
   assetService.manager = assetManager.get();
   if (!locator.register_service<engine::runtime::EngineAssetDatabaseService>(

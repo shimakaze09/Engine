@@ -11,6 +11,7 @@
 #include <new>
 #include <string>
 
+#include "engine/content/asset_catalog.h"
 #include "engine/core/logging.h"
 #include "engine/core/vfs.h"
 #include "engine/renderer/asset_database.h"
@@ -20,6 +21,10 @@
 #include "../material_ref_fixture.h"
 
 namespace {
+
+/// The engine asset catalog the material API resolves through; one per
+/// run, cleared wherever the database is.
+engine::content::AssetCatalog *g_catalog = nullptr;
 
 bool exactly_equal(float lhs, float rhs) noexcept { return lhs == rhs; }
 
@@ -76,7 +81,7 @@ int verify_save_round_trip(engine::renderer::AssetDatabase *database) {
   // The texture is catalogued, as the mount walk would list it, for a
   // from-scratch in-memory material an editor session would be building.
   const engine::tests::MaterialRefText textureRef =
-      engine::tests::catalog_texture(database, kTextureVirtualPath);
+      engine::tests::catalog_texture(g_catalog, kTextureVirtualPath);
   if (textureRef.text[0] == '\0') {
     return 10;
   }
@@ -100,7 +105,7 @@ int verify_save_round_trip(engine::renderer::AssetDatabase *database) {
   constexpr const char *kOsPath = "material_writer_roundtrip.json";
   remove_file(kOsPath);
   const bool saved = engine::renderer::save_material_asset(
-      database, kVirtualPath, params, slots, nullptr,
+      g_catalog, kVirtualPath, params, slots, nullptr,
       engine::renderer::material_field::kAll);
   if (!saved) {
     remove_file(kOsPath);
@@ -118,7 +123,7 @@ int verify_save_round_trip(engine::renderer::AssetDatabase *database) {
   }
 
   const auto loadResult =
-      engine::renderer::load_material_asset(database, kVirtualPath);
+      engine::renderer::load_material_asset(database, g_catalog, kVirtualPath);
   remove_file(kOsPath);
   remove_file(kTexturePath);
   if (!loadResult.has_value()) {
@@ -154,8 +159,7 @@ int verify_save_round_trip(engine::renderer::AssetDatabase *database) {
 /// A texture slot whose asset has no persistent identity in the catalog
 /// rejects the save and leaves a pre-existing destination file completely
 /// untouched.
-int verify_unresolvable_texture_rejects_save(
-    engine::renderer::AssetDatabase *database) {
+int verify_unresolvable_texture_rejects_save() {
   constexpr const char *kOsPath = "material_writer_unresolvable.json";
   constexpr const char *kVirtualPath = "mat/material_writer_unresolvable.json";
   constexpr const char *kOriginalContent = "{\"version\":4,\"roughness\":0.77}";
@@ -171,7 +175,7 @@ int verify_unresolvable_texture_rejects_save(
   pathOnly.typeTag = engine::renderer::AssetTypeTag::Texture;
   engine::renderer::write_metadata_path(&pathOnly.filePath,
                                         "mat/material_writer_path_only.png");
-  if (!engine::renderer::register_asset_metadata(database, pathOnly)) {
+  if (!engine::content::register_asset_metadata(g_catalog, pathOnly)) {
     remove_file(kOsPath);
     return 24;
   }
@@ -184,7 +188,7 @@ int verify_unresolvable_texture_rejects_save(
     engine::renderer::MaterialTextureSlots slots{};
     slots.albedo = id;
     const bool saved = engine::renderer::save_material_asset(
-        database, kVirtualPath, params, slots, nullptr,
+        g_catalog, kVirtualPath, params, slots, nullptr,
         engine::renderer::material_field::kAll);
     if (saved) {
       remove_file(kOsPath);
@@ -218,8 +222,8 @@ int verify_find_parent_path(engine::renderer::AssetDatabase *database) {
   std::snprintf(
       childJson, sizeof(childJson),
       "{\"version\":4,\"parent\":\"%s\",\"textures\":{\"albedo\":\"%s\"}}",
-      engine::tests::catalog_material(database, kParentVirtualPath).text,
-      engine::tests::catalog_texture(database, "assets/textures/child.png")
+      engine::tests::catalog_material(g_catalog, kParentVirtualPath).text,
+      engine::tests::catalog_texture(g_catalog, "assets/textures/child.png")
           .text);
   if (!write_material_file(kParentPath, "{\"version\":4,\"roughness\":0.5}") ||
       !write_material_file(kChildPath, childJson)) {
@@ -228,8 +232,8 @@ int verify_find_parent_path(engine::renderer::AssetDatabase *database) {
     return 30;
   }
 
-  const auto childResult =
-      engine::renderer::load_material_asset(database, kChildVirtualPath);
+  const auto childResult = engine::renderer::load_material_asset(
+      database, g_catalog, kChildVirtualPath);
   remove_file(kParentPath);
   remove_file(kChildPath);
   if (!childResult.has_value()) {
@@ -238,7 +242,7 @@ int verify_find_parent_path(engine::renderer::AssetDatabase *database) {
 
   char parentPath[260] = {};
   if (!engine::renderer::find_material_parent_virtual_path(
-          database, *childResult, parentPath, sizeof(parentPath))) {
+          g_catalog, *childResult, parentPath, sizeof(parentPath))) {
     return 32;
   }
   if (std::strcmp(parentPath, kParentVirtualPath) != 0) {
@@ -250,7 +254,7 @@ int verify_find_parent_path(engine::renderer::AssetDatabase *database) {
       engine::renderer::make_asset_id_from_path(kParentVirtualPath);
   char noParentPath[260] = {};
   if (engine::renderer::find_material_parent_virtual_path(
-          database, parentId, noParentPath, sizeof(noParentPath))) {
+          g_catalog, parentId, noParentPath, sizeof(noParentPath))) {
     return 34;
   }
 
@@ -260,8 +264,7 @@ int verify_find_parent_path(engine::renderer::AssetDatabase *database) {
 /// A material with a parent writes only its overrides (#543): the parent
 /// key, the fields named in the mask, and no inherited value or slot -- not
 /// even one whose path could not be written.
-int verify_child_writes_only_overrides(
-    engine::renderer::AssetDatabase *database) {
+int verify_child_writes_only_overrides() {
   constexpr const char *kOsPath = "material_writer_child.json";
   constexpr const char *kVirtualPath = "mat/material_writer_child.json";
   remove_file(kOsPath);
@@ -275,15 +278,15 @@ int verify_child_writes_only_overrides(
   // A parent the catalog holds no identity for cannot be named, so the
   // save is refused rather than writing a path or dropping the parent.
   if (engine::renderer::save_material_asset(
-          database, kVirtualPath, params, slots, "mat/material_parent.json",
+          g_catalog, kVirtualPath, params, slots, "mat/material_parent.json",
           engine::renderer::material_field::kRoughness)) {
     remove_file(kOsPath);
     return 43;
   }
   const engine::tests::MaterialRefText parentRef =
-      engine::tests::catalog_material(database, "mat/material_parent.json");
+      engine::tests::catalog_material(g_catalog, "mat/material_parent.json");
   if (!engine::renderer::save_material_asset(
-          database, kVirtualPath, params, slots, "mat/material_parent.json",
+          g_catalog, kVirtualPath, params, slots, "mat/material_parent.json",
           engine::renderer::material_field::kRoughness)) {
     remove_file(kOsPath);
     return 40;
@@ -311,6 +314,12 @@ int verify_child_writes_only_overrides(
 } // namespace
 
 int main() {
+  std::unique_ptr<engine::content::AssetCatalog> catalogOwner(
+      new (std::nothrow) engine::content::AssetCatalog());
+  if (catalogOwner == nullptr) {
+    return 1;
+  }
+  g_catalog = catalogOwner.get();
   if (!engine::core::initialize_vfs()) {
     return 1;
   }
@@ -325,16 +334,17 @@ int main() {
     engine::core::shutdown_vfs();
     return 3;
   }
+  engine::content::clear_asset_catalog(g_catalog);
 
   int result = verify_save_round_trip(database.get());
   if (result == 0) {
-    result = verify_unresolvable_texture_rejects_save(database.get());
+    result = verify_unresolvable_texture_rejects_save();
   }
   if (result == 0) {
     result = verify_find_parent_path(database.get());
   }
   if (result == 0) {
-    result = verify_child_writes_only_overrides(database.get());
+    result = verify_child_writes_only_overrides();
   }
 
   engine::core::shutdown_vfs();

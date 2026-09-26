@@ -14,6 +14,7 @@
 #include "editor_scene_document.h"
 #include "editor_scene_document_fixture.h"
 #include "editor_session.h"
+#include "engine/content/asset_catalog.h"
 #include "engine/core/vfs.h"
 #include "engine/editor/editor.h"
 #include "engine/renderer/asset_database.h"
@@ -476,6 +477,9 @@ int check_mesh_open_spawns_through_production_path() {
     return 3;
   }
   EngineAssetDatabaseService service{};
+  std::unique_ptr<engine::content::AssetCatalog> serviceCatalog(
+      new (std::nothrow) engine::content::AssetCatalog());
+  service.catalog = serviceCatalog.get();
   service.database = database.get();
   set_editor_asset_service(&service);
   editor_set_world(world.get());

@@ -91,9 +91,9 @@ void write_field(core::JsonWriter *writer, const char *key,
 /// identity for it. A save that wrote a path, or nothing, in its place
 /// would lose the reference the next time the file moved or loaded.
 bool write_catalogued_ref(core::JsonWriter *writer,
-                          const AssetDatabase *database, const char *key,
+                          const content::AssetCatalog *catalog, const char *key,
                           AssetId id, const char *virtualPath) noexcept {
-  const AssetMetadata *metadata = find_asset_metadata(database, id);
+  const AssetMetadata *metadata = find_asset_metadata(catalog, id);
   if ((metadata == nullptr) || !core::asset_ref_is_valid(metadata->ref)) {
     char message[160] = {};
     std::snprintf(message, sizeof(message),
@@ -107,9 +107,9 @@ bool write_catalogued_ref(core::JsonWriter *writer,
 /// Writes one texture-slot key if its asset id is set; false when the id is
 /// set but carries no identity (a save must not silently drop or corrupt a
 /// texture reference).
-bool write_texture_slot(core::JsonWriter *writer, const AssetDatabase *database,
-                        const char *key, AssetId textureId,
-                        bool clearsInherited,
+bool write_texture_slot(core::JsonWriter *writer,
+                        const content::AssetCatalog *catalog, const char *key,
+                        AssetId textureId, bool clearsInherited,
                         const char *virtualPath) noexcept {
   if (textureId == kInvalidAssetId) {
     // A child that empties a slot its parent fills says so, or the next
@@ -119,21 +119,20 @@ bool write_texture_slot(core::JsonWriter *writer, const AssetDatabase *database,
     }
     return true;
   }
-  return write_catalogued_ref(writer, database, key, textureId, virtualPath);
+  return write_catalogued_ref(writer, catalog, key, textureId, virtualPath);
 }
 
 } // namespace
 
-bool find_material_parent_virtual_path(const AssetDatabase *database,
+bool find_material_parent_virtual_path(const content::AssetCatalog *catalog,
                                        AssetId materialId, char *outPath,
                                        std::size_t outPathCapacity) noexcept {
-  if ((database == nullptr) || (outPath == nullptr) ||
-      (outPathCapacity == 0U)) {
+  if ((catalog == nullptr) || (outPath == nullptr) || (outPathCapacity == 0U)) {
     return false;
   }
 
   const AssetMetadata *parent = find_asset_metadata(
-      database, find_material_parent_id(database, materialId));
+      catalog, find_material_parent_id(catalog, materialId));
   if (parent == nullptr) {
     return false;
   }
@@ -145,12 +144,12 @@ bool find_material_parent_virtual_path(const AssetDatabase *database,
   return true;
 }
 
-bool save_material_asset(const AssetDatabase *database, const char *virtualPath,
-                         const Material &params,
+bool save_material_asset(const content::AssetCatalog *catalog,
+                         const char *virtualPath, const Material &params,
                          const MaterialTextureSlots &textureSlots,
                          const char *parentVirtualPath,
                          std::uint16_t overriddenFields) noexcept {
-  if ((database == nullptr) || (virtualPath == nullptr) ||
+  if ((catalog == nullptr) || (virtualPath == nullptr) ||
       (virtualPath[0] == '\0')) {
     return log_save_error(virtualPath, "invalid arguments");
   }
@@ -169,7 +168,7 @@ bool save_material_asset(const AssetDatabase *database, const char *virtualPath,
     return (written & bit) != 0U;
   };
   if (hasParent &&
-      !write_catalogued_ref(&writer, database, "parent",
+      !write_catalogued_ref(&writer, catalog, "parent",
                             make_asset_id_from_path(parentVirtualPath),
                             virtualPath)) {
     return false;
@@ -202,7 +201,7 @@ bool save_material_asset(const AssetDatabase *database, const char *virtualPath,
 #define ENGINE_MATERIAL_WRITE_TEXTURE(name, slot, handle, key)                 \
   textureSlotsOk =                                                             \
       textureSlotsOk &&                                                        \
-      write_texture_slot(&writer, database, key, ownSlots.slot,                \
+      write_texture_slot(&writer, catalog, key, ownSlots.slot,                 \
                          hasParent && writes(material_field::k##name),         \
                          virtualPath);
     ENGINE_MATERIAL_TEXTURE_FIELDS(ENGINE_MATERIAL_WRITE_TEXTURE)

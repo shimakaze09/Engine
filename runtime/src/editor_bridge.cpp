@@ -47,7 +47,8 @@ void set_editor_asset_service(EngineAssetDatabaseService *service) noexcept {
 std::uint64_t editor_request_mesh_asset(const char *virtualPath) noexcept {
   if ((virtualPath == nullptr) || (virtualPath[0] == '\0') ||
       (g_editorAssetService == nullptr) ||
-      (g_editorAssetService->database == nullptr)) {
+      (g_editorAssetService->database == nullptr) ||
+      (g_editorAssetService->catalog == nullptr)) {
     return renderer::kInvalidAssetId;
   }
 
@@ -59,9 +60,8 @@ std::uint64_t editor_request_mesh_asset(const char *virtualPath) noexcept {
   // A mesh the editor names by path is catalogued under that path. The
   // identity stays whatever the mount walk already recorded for it: this
   // path is a load, not an import, so it never mints one.
-  static_cast<void>(note_mesh_asset_path(g_editorAssetService->database,
-                                         assetId, virtualPath,
-                                         core::AssetRef{}));
+  static_cast<void>(note_mesh_asset_path(g_editorAssetService->catalog, assetId,
+                                         virtualPath, core::AssetRef{}));
 
   const renderer::AssetState state =
       renderer::mesh_asset_state(g_editorAssetService->database, assetId);
@@ -142,21 +142,21 @@ std::size_t editor_query_assets(content::AssetTypeTag typeTag,
                                 std::size_t maxResults) noexcept {
   if ((outResults == nullptr) || (maxResults == 0U) ||
       (g_editorAssetService == nullptr) ||
-      (g_editorAssetService->database == nullptr)) {
+      (g_editorAssetService->catalog == nullptr)) {
     return 0U;
   }
 
   constexpr std::size_t kScanCapacity = 512U;
   renderer::AssetId candidateIds[kScanCapacity];
-  const std::size_t candidateCount = renderer::query_assets_by_type(
-      g_editorAssetService->database, typeTag, candidateIds, kScanCapacity);
+  const std::size_t candidateCount = content::query_assets_by_type(
+      g_editorAssetService->catalog, typeTag, candidateIds, kScanCapacity);
 
   const char *effectiveQuery = (query != nullptr) ? query : "";
   std::size_t written = 0U;
   for (std::size_t i = 0U; (i < candidateCount) && (written < maxResults);
       ++i) {
-    const renderer::AssetMetadata *metadata = renderer::find_asset_metadata(
-        g_editorAssetService->database, candidateIds[i]);
+    const renderer::AssetMetadata *metadata = content::find_asset_metadata(
+        g_editorAssetService->catalog, candidateIds[i]);
     if (metadata == nullptr) {
       continue;
     }
@@ -177,11 +177,11 @@ bool editor_asset_display_path(std::uint64_t assetId, char *outPath,
   if ((outPath == nullptr) || (outPathSize == 0U) ||
       (assetId == renderer::kInvalidAssetId) ||
       (g_editorAssetService == nullptr) ||
-      (g_editorAssetService->database == nullptr)) {
+      (g_editorAssetService->catalog == nullptr)) {
     return false;
   }
-  const renderer::AssetMetadata *metadata = renderer::find_asset_metadata(
-      g_editorAssetService->database, assetId);
+  const renderer::AssetMetadata *metadata =
+      content::find_asset_metadata(g_editorAssetService->catalog, assetId);
   if (metadata == nullptr) {
     return false;
   }
@@ -192,11 +192,11 @@ bool editor_asset_display_path(std::uint64_t assetId, char *outPath,
 core::AssetRef editor_asset_ref(std::uint64_t assetId) noexcept {
   if ((assetId == renderer::kInvalidAssetId) ||
       (g_editorAssetService == nullptr) ||
-      (g_editorAssetService->database == nullptr)) {
+      (g_editorAssetService->catalog == nullptr)) {
     return core::AssetRef{};
   }
-  const renderer::AssetMetadata *metadata = renderer::find_asset_metadata(
-      g_editorAssetService->database, assetId);
+  const renderer::AssetMetadata *metadata =
+      content::find_asset_metadata(g_editorAssetService->catalog, assetId);
   // A record without an identity is reported by the mount walk, not
   // invented here: the reference stays nil so the gesture cannot write a
   // made-up identity into a document.
@@ -225,8 +225,8 @@ bool fill_material_state(renderer::AssetId materialId,
     outState->textureSlots = *slots;
   }
   outState->hasParent = renderer::find_material_parent_virtual_path(
-      g_editorAssetService->database, materialId,
-      outState->parentVirtualPath, sizeof(outState->parentVirtualPath));
+      g_editorAssetService->catalog, materialId, outState->parentVirtualPath,
+      sizeof(outState->parentVirtualPath));
   return true;
 }
 
@@ -236,12 +236,14 @@ EditorMaterialState editor_load_material(const char *virtualPath) noexcept {
   EditorMaterialState state{};
   if ((virtualPath == nullptr) || (virtualPath[0] == '\0') ||
       (g_editorAssetService == nullptr) ||
-      (g_editorAssetService->database == nullptr)) {
+      (g_editorAssetService->database == nullptr) ||
+      (g_editorAssetService->catalog == nullptr)) {
     return state;
   }
 
   const auto loadResult =
-      renderer::load_material_asset(g_editorAssetService->database, virtualPath);
+      renderer::load_material_asset(g_editorAssetService->database,
+                                    g_editorAssetService->catalog, virtualPath);
   if (!loadResult.has_value()) {
     return state;
   }
@@ -255,11 +257,13 @@ bool editor_set_material_params(
     const renderer::MaterialTextureSlots &textureSlots) noexcept {
   if ((materialId == renderer::kInvalidAssetId) ||
       (g_editorAssetService == nullptr) ||
-      (g_editorAssetService->database == nullptr)) {
+      (g_editorAssetService->database == nullptr) ||
+      (g_editorAssetService->catalog == nullptr)) {
     return false;
   }
 
   return renderer::edit_material_asset(g_editorAssetService->database,
+                                       g_editorAssetService->catalog,
                                        materialId, params, textureSlots);
 }
 
@@ -278,19 +282,21 @@ bool editor_restore_material(renderer::AssetId materialId,
                              std::uint16_t overrides) noexcept {
   if ((materialId == renderer::kInvalidAssetId) ||
       (g_editorAssetService == nullptr) ||
-      (g_editorAssetService->database == nullptr)) {
+      (g_editorAssetService->database == nullptr) ||
+      (g_editorAssetService->catalog == nullptr)) {
     return false;
   }
-  return renderer::restore_material_asset(g_editorAssetService->database,
-                                          materialId, params, textureSlots,
-                                          overrides);
+  return renderer::restore_material_asset(
+      g_editorAssetService->database, g_editorAssetService->catalog, materialId,
+      params, textureSlots, overrides);
 }
 
 bool editor_save_material(const char *virtualPath,
                           const char *parentVirtualPath) noexcept {
   if ((virtualPath == nullptr) || (virtualPath[0] == '\0') ||
       (g_editorAssetService == nullptr) ||
-      (g_editorAssetService->database == nullptr)) {
+      (g_editorAssetService->database == nullptr) ||
+      (g_editorAssetService->catalog == nullptr)) {
     return false;
   }
 
@@ -306,7 +312,7 @@ bool editor_save_material(const char *virtualPath,
                                             materialId);
   const renderer::MaterialTextureSlots emptySlots{};
   return renderer::save_material_asset(
-      g_editorAssetService->database, virtualPath, *params,
+      g_editorAssetService->catalog, virtualPath, *params,
       (slots != nullptr) ? *slots : emptySlots, parentVirtualPath,
       renderer::material_overrides(g_editorAssetService->database, materialId));
 }
@@ -315,12 +321,14 @@ EditorMaterialState editor_reload_material(const char *virtualPath) noexcept {
   EditorMaterialState state{};
   if ((virtualPath == nullptr) || (virtualPath[0] == '\0') ||
       (g_editorAssetService == nullptr) ||
-      (g_editorAssetService->database == nullptr)) {
+      (g_editorAssetService->database == nullptr) ||
+      (g_editorAssetService->catalog == nullptr)) {
     return state;
   }
 
   const auto reloadResult = renderer::reload_material_asset(
-      g_editorAssetService->database, virtualPath);
+      g_editorAssetService->database, g_editorAssetService->catalog,
+      virtualPath);
   if (!reloadResult.has_value()) {
     return state;
   }
@@ -366,7 +374,7 @@ editor_establish_asset_identity(const char *osPath) noexcept {
   // is referenceable only after a restart re-walks the mount, which for
   // something the author just created reads as the save having failed.
   if ((g_editorAssetService != nullptr) &&
-      (g_editorAssetService->database != nullptr)) {
+      (g_editorAssetService->catalog != nullptr)) {
     const char *root = active_config().assetRoot;
     const char *mount = active_config().assetMount;
     const std::size_t rootLength = std::strlen(root);
@@ -394,8 +402,8 @@ editor_establish_asset_identity(const char *osPath) noexcept {
       metadata.typeTag = content::classify_asset_path(virtualPath).tag;
       metadata.ref = content::asset_ref_primary(sidecar.guid);
       renderer::write_metadata_path(&metadata.filePath, virtualPath);
-      static_cast<void>(renderer::register_asset_metadata(
-          g_editorAssetService->database, metadata));
+      static_cast<void>(content::register_asset_metadata(
+          g_editorAssetService->catalog, metadata));
     }
   }
   return EditorIdentityResult::Created;

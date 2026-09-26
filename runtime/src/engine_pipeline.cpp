@@ -592,6 +592,9 @@ struct EnginePipeline::Impl final {
   runtime::RenderPrepAuxiliaryInputs frameAuxiliaryInputs{};
   std::unique_ptr<renderer::GpuMeshRegistry> meshRegistry;
   std::unique_ptr<renderer::AssetDatabase> assetDatabase;
+  /// The engine's one asset catalog. It outlives every consumer, which
+  /// reaches it through assetDatabaseService.
+  std::unique_ptr<content::AssetCatalog> assetCatalog;
   std::unique_ptr<renderer::AssetManager> assetManager;
   std::unique_ptr<content::AssetStreamingQueue> assetStreamingQueue;
   std::unique_ptr<RuntimeAssetStreamingState> assetStreamingState;
@@ -788,18 +791,20 @@ bool EnginePipeline::Impl::initialize(std::uint32_t maxFrameCount) noexcept {
                                    renderer::CommandBufferBuilder());
   meshRegistry.reset(new (std::nothrow) renderer::GpuMeshRegistry());
   assetDatabase.reset(new (std::nothrow) renderer::AssetDatabase());
+  assetCatalog.reset(new (std::nothrow) content::AssetCatalog());
   assetManager.reset(new (std::nothrow) renderer::AssetManager());
   assetStreamingQueue.reset(new (std::nothrow) content::AssetStreamingQueue());
   assetStreamingState.reset(new (std::nothrow) RuntimeAssetStreamingState());
 
   if (!world || !commandBuffer || !auxiliaryCommandBuffer || !meshRegistry ||
-      !assetDatabase ||
-      !assetManager || !assetStreamingQueue || !assetStreamingState) {
+      !assetDatabase || !assetCatalog || !assetManager ||
+      !assetStreamingQueue || !assetStreamingState) {
     core::log_message(core::LogLevel::Error, "engine",
                       "failed to allocate runtime frame state");
     return false;
   }
   renderer::clear_asset_database(assetDatabase.get());
+  content::clear_asset_catalog(assetCatalog.get());
   renderer::clear_asset_manager(assetManager.get());
   if (!content::initialize_asset_streaming(assetStreamingQueue.get())) {
     core::log_message(core::LogLevel::Error, "engine",
@@ -822,6 +827,7 @@ bool EnginePipeline::Impl::initialize(std::uint32_t maxFrameCount) noexcept {
   audioService.stop_all = &audio::stop_all;
   audioService.set_master_volume = &audio::set_master_volume;
   assetDatabaseService.database = assetDatabase.get();
+  assetDatabaseService.catalog = assetCatalog.get();
   assetDatabaseService.manager = assetManager.get();
   assetDatabaseService.streamingQueue = assetStreamingQueue.get();
   rendererService.commandBuffer = commandBuffer.get();
@@ -854,7 +860,8 @@ bool EnginePipeline::Impl::initialize(std::uint32_t maxFrameCount) noexcept {
                                   &scripting::dispatch_physics_callbacks);
 
   if (!load_bootstrap_meshes(assetManager.get(), assetDatabase.get(),
-                             meshRegistry.get(), &meshIds)) {
+                             assetCatalog.get(), meshRegistry.get(),
+                             &meshIds)) {
     teardown();
     return false;
   }
@@ -1377,7 +1384,8 @@ void EnginePipeline::Impl::stage_assets() noexcept {
   // which drains to zero once content is resident (see resolve_material_
   // textures's header comment).
   static_cast<void>(renderer::resolve_material_textures(
-      assetDatabase.get(), &load_material_texture_production, nullptr));
+      assetDatabase.get(), assetCatalog.get(),
+      &load_material_texture_production, nullptr));
 
   // Runs with no byte budget too: a refused mesh claim is answered by
   // eviction whatever the cache size, or a full table would stay full.

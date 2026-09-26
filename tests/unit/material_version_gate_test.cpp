@@ -14,11 +14,16 @@
 #include <new>
 
 #include "../test_harness.h"
+#include "engine/content/asset_catalog.h"
 #include "engine/core/vfs.h"
 #include "engine/renderer/asset_database.h"
 #include "engine/renderer/material_loader.h"
 
 namespace {
+
+/// The engine asset catalog the material API resolves through; one per
+/// run, cleared wherever the database is.
+engine::content::AssetCatalog *g_catalog = nullptr;
 
 engine::tests::TestContext g_tests;
 
@@ -97,7 +102,7 @@ void run_load_case(engine::renderer::AssetDatabase *database,
     return;
   }
   const auto result =
-      engine::renderer::load_material_asset(database, virtualPath);
+      engine::renderer::load_material_asset(database, g_catalog, virtualPath);
   remove_file(path);
 
   char label[128] = {};
@@ -143,7 +148,7 @@ void run_reload_cases(engine::renderer::AssetDatabase *database) noexcept {
     return;
   }
   const auto baseline =
-      engine::renderer::load_material_asset(database, kVirtualPath);
+      engine::renderer::load_material_asset(database, g_catalog, kVirtualPath);
   if (!baseline.has_value()) {
     remove_file(kPath);
     check(false, "load reload baseline");
@@ -159,8 +164,8 @@ void run_reload_cases(engine::renderer::AssetDatabase *database) noexcept {
       check(false, "rewrite reload file");
       break;
     }
-    const auto reloaded =
-        engine::renderer::reload_material_asset(database, kVirtualPath);
+    const auto reloaded = engine::renderer::reload_material_asset(
+        database, g_catalog, kVirtualPath);
 
     char label[128] = {};
     std::snprintf(label, sizeof(label), "reload refused: %s", testCase.json);
@@ -181,6 +186,12 @@ void run_reload_cases(engine::renderer::AssetDatabase *database) noexcept {
 
 /// Runs this executable or test program.
 int main() {
+  std::unique_ptr<engine::content::AssetCatalog> catalogOwner(
+      new (std::nothrow) engine::content::AssetCatalog());
+  if (catalogOwner == nullptr) {
+    return 1;
+  }
+  g_catalog = catalogOwner.get();
   if (!engine::core::initialize_vfs()) {
     return 1;
   }
@@ -197,6 +208,7 @@ int main() {
     engine::core::shutdown_vfs();
     return 3;
   }
+  engine::content::clear_asset_catalog(g_catalog);
 
   std::size_t index = 0U;
   for (const VersionCase &testCase : kCases) {

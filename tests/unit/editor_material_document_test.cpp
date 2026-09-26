@@ -13,6 +13,7 @@
 #include "editor_material_edit.h"
 #include "editor_scene_document.h"
 #include "editor_session.h"
+#include "engine/content/asset_catalog.h"
 #include "engine/core/vfs.h"
 #include "engine/editor/editor.h"
 #include "engine/renderer/asset_database.h"
@@ -115,6 +116,8 @@ bool push_transform_edit(World &world, Entity entity) noexcept {
 struct DocumentScope final {
   std::unique_ptr<engine::renderer::AssetDatabase> database;
   EngineAssetDatabaseService service{};
+  std::unique_ptr<engine::content::AssetCatalog> serviceCatalog{
+      new (std::nothrow) engine::content::AssetCatalog()};
   std::unique_ptr<World> world;
 
   DocumentScope() noexcept
@@ -123,6 +126,7 @@ struct DocumentScope final {
     static_cast<void>(write_file(kOsPathA, kMaterialA));
     static_cast<void>(write_file(kOsPathB, kMaterialB));
     service.database = database.get();
+    service.catalog = serviceCatalog.get();
     set_editor_asset_service(&service);
     editor_set_world(world.get());
   }

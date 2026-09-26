@@ -11,6 +11,7 @@
 #include <new>
 #include <string>
 
+#include "engine/content/asset_catalog.h"
 #include "engine/core/logging.h"
 #include "engine/core/vfs.h"
 #include "engine/renderer/asset_database.h"
@@ -19,6 +20,10 @@
 #include "../material_ref_fixture.h"
 
 namespace {
+
+/// The engine asset catalog the material API resolves through; one per
+/// run, cleared wherever the database is.
+engine::content::AssetCatalog *g_catalog = nullptr;
 
 bool exactly_equal(float lhs, float rhs) noexcept { return lhs == rhs; }
 
@@ -57,20 +62,20 @@ int verify_v2_full_load(engine::renderer::AssetDatabase *database) {
       "\"uvTiling\":[2.0,3.0],\"uvOffset\":[0.25,0.75],"
       "\"textures\":{\"albedo\":\"%s\",\"metallicRoughness\":\"%s\","
       "\"emissive\":\"%s\",\"occlusion\":\"%s\",\"opacity\":\"%s\"}}",
-      engine::tests::catalog_texture(database, "assets/textures/albedo.png")
+      engine::tests::catalog_texture(g_catalog, "assets/textures/albedo.png")
           .text,
-      engine::tests::catalog_texture(database, "assets/textures/mr.png").text,
-      engine::tests::catalog_texture(database, "assets/textures/emissive.png")
+      engine::tests::catalog_texture(g_catalog, "assets/textures/mr.png").text,
+      engine::tests::catalog_texture(g_catalog, "assets/textures/emissive.png")
           .text,
-      engine::tests::catalog_texture(database, "assets/textures/ao.png").text,
-      engine::tests::catalog_texture(database, "assets/textures/opacity.png")
+      engine::tests::catalog_texture(g_catalog, "assets/textures/ao.png").text,
+      engine::tests::catalog_texture(g_catalog, "assets/textures/opacity.png")
           .text);
   if (!write_material_file(kPath, kJson)) {
     return 10;
   }
 
   const auto loadResult =
-      engine::renderer::load_material_asset(database, kVirtualPath);
+      engine::renderer::load_material_asset(database, g_catalog, kVirtualPath);
   remove_file(kPath);
   if (!loadResult.has_value()) {
     return 11;
@@ -127,7 +132,7 @@ int verify_v2_full_load(engine::renderer::AssetDatabase *database) {
 
   // Every texture slot resolved to the catalogued Texture record...
   const engine::renderer::AssetMetadata *albedoMeta =
-      engine::renderer::find_asset_metadata(database, expectedAlbedo);
+      engine::content::find_asset_metadata(g_catalog, expectedAlbedo);
   if ((albedoMeta == nullptr) ||
       (albedoMeta->typeTag != engine::renderer::AssetTypeTag::Texture)) {
     return 17;
@@ -135,7 +140,7 @@ int verify_v2_full_load(engine::renderer::AssetDatabase *database) {
   // ...and a dependency edge from the material to each texture.
   engine::renderer::AssetId deps[8] = {};
   const std::size_t depCount =
-      engine::renderer::get_dependencies(database, id, deps, 8U);
+      engine::content::get_dependencies(g_catalog, id, deps, 8U);
   if (depCount != 5U) {
     return 18;
   }
@@ -163,7 +168,8 @@ int verify_v2_malformed_fields(engine::renderer::AssetDatabase *database) {
   if (!write_material_file(kPath, "{\"version\":4,\"alphaMode\":\"glow\"}")) {
     return 30;
   }
-  auto result = engine::renderer::load_material_asset(database, kVirtualPath);
+  auto result =
+      engine::renderer::load_material_asset(database, g_catalog, kVirtualPath);
   remove_file(kPath);
   if (result.has_value()) {
     return 31;
@@ -172,7 +178,8 @@ int verify_v2_malformed_fields(engine::renderer::AssetDatabase *database) {
   if (!write_material_file(kPath, "{\"version\":4,\"textures\":[1,2]}")) {
     return 32;
   }
-  result = engine::renderer::load_material_asset(database, kVirtualPath);
+  result =
+      engine::renderer::load_material_asset(database, g_catalog, kVirtualPath);
   remove_file(kPath);
   if (result.has_value()) {
     return 33;
@@ -184,7 +191,7 @@ int verify_v2_malformed_fields(engine::renderer::AssetDatabase *database) {
   // texture. Each refuses the load rather than dropping the slot, so a
   // later save cannot write the material back without it.
   const engine::tests::MaterialRefText materialRef =
-      engine::tests::catalog_material(database, "mat/material_v2_other.json");
+      engine::tests::catalog_material(g_catalog, "mat/material_v2_other.json");
   char uncatalogued[engine::content::kAssetRefTextLength + 1U] = {};
   static_cast<void>(engine::content::format_asset_ref(
       engine::core::asset_ref_primary(
@@ -199,7 +206,8 @@ int verify_v2_malformed_fields(engine::renderer::AssetDatabase *database) {
     if (!write_material_file(kPath, json)) {
       return 34;
     }
-    result = engine::renderer::load_material_asset(database, kVirtualPath);
+    result = engine::renderer::load_material_asset(database, g_catalog,
+                                                   kVirtualPath);
     remove_file(kPath);
     if (result.has_value()) {
       return 35;
@@ -225,7 +233,7 @@ int verify_every_field_is_read(engine::renderer::AssetDatabase *database) {
   }
 
   const auto loadResult =
-      engine::renderer::load_material_asset(database, kVirtualPath);
+      engine::renderer::load_material_asset(database, g_catalog, kVirtualPath);
   remove_file(kPath);
   if (!loadResult.has_value()) {
     return 41;
@@ -259,8 +267,8 @@ int verify_every_field_is_read(engine::renderer::AssetDatabase *database) {
   if (!write_material_file(kUnknownPath, kUnknownModel)) {
     return 44;
   }
-  const auto unknownResult =
-      engine::renderer::load_material_asset(database, kUnknownVirtualPath);
+  const auto unknownResult = engine::renderer::load_material_asset(
+      database, g_catalog, kUnknownVirtualPath);
   remove_file(kUnknownPath);
   if (unknownResult.has_value()) {
     return 45;
@@ -282,18 +290,19 @@ int verify_v2_parent_texture_override(
   std::snprintf(
       baseJson, sizeof(baseJson),
       "{\"version\":4,\"textures\":{\"albedo\":\"%s\",\"emissive\":\"%s\"}}",
-      engine::tests::catalog_texture(database,
+      engine::tests::catalog_texture(g_catalog,
                                      "assets/textures/base_albedo.png")
           .text,
-      engine::tests::catalog_texture(database,
+      engine::tests::catalog_texture(g_catalog,
                                      "assets/textures/base_emissive.png")
           .text);
   std::snprintf(
       childJson, sizeof(childJson),
       "{\"version\":4,\"parent\":\"%s\",\"textures\":{\"albedo\":\"%s\"}}",
-      engine::tests::catalog_material(database, "mat/material_v2_tex_base.json")
+      engine::tests::catalog_material(g_catalog,
+                                      "mat/material_v2_tex_base.json")
           .text,
-      engine::tests::catalog_texture(database,
+      engine::tests::catalog_texture(g_catalog,
                                      "assets/textures/child_albedo.png")
           .text);
   if (!write_material_file(kBasePath, baseJson) ||
@@ -304,7 +313,7 @@ int verify_v2_parent_texture_override(
   }
 
   const auto childResult = engine::renderer::load_material_asset(
-      database, "mat/material_v2_tex_child.json");
+      database, g_catalog, "mat/material_v2_tex_child.json");
   remove_file(kBasePath);
   remove_file(kChildPath);
   if (!childResult.has_value()) {
@@ -364,13 +373,14 @@ int verify_moved_assets_still_resolve() {
     if (database == nullptr) {
       return 60;
     }
+    engine::content::clear_asset_catalog(g_catalog);
     const engine::tests::MaterialRefText parentRef =
         engine::tests::catalog_material_asset(
-            database.get(), kParentVirtualPaths[session],
+            g_catalog, kParentVirtualPaths[session],
             engine::renderer::AssetTypeTag::Material, "moved-parent");
     const engine::tests::MaterialRefText textureRef =
         engine::tests::catalog_material_asset(
-            database.get(), kTextureVirtualPaths[session],
+            g_catalog, kTextureVirtualPaths[session],
             engine::renderer::AssetTypeTag::Texture, "moved-albedo");
     if (session == 0U) {
       char json[256] = {};
@@ -392,7 +402,7 @@ int verify_moved_assets_still_resolve() {
     }
 
     const auto childResult = engine::renderer::load_material_asset(
-        database.get(), kChildVirtualPath);
+        database.get(), g_catalog, kChildVirtualPath);
     remove_file(kParentPaths[session]);
     if (!childResult.has_value()) {
       remove_file(kChildPath);
@@ -418,6 +428,12 @@ int verify_moved_assets_still_resolve() {
 } // namespace
 
 int main() {
+  std::unique_ptr<engine::content::AssetCatalog> catalogOwner(
+      new (std::nothrow) engine::content::AssetCatalog());
+  if (catalogOwner == nullptr) {
+    return 1;
+  }
+  g_catalog = catalogOwner.get();
   if (!engine::core::initialize_vfs()) {
     return 1;
   }
@@ -432,6 +448,7 @@ int main() {
     engine::core::shutdown_vfs();
     return 3;
   }
+  engine::content::clear_asset_catalog(g_catalog);
 
   int result = verify_v2_full_load(database.get());
   if (result == 0) {

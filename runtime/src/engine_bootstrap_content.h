@@ -36,6 +36,7 @@ struct BootstrapMeshIds final {
 /// Loads the sample mesh asset and registers every built-in primitive.
 bool load_bootstrap_meshes(renderer::AssetManager *assetManager,
                            renderer::AssetDatabase *assetDatabase,
+                           content::AssetCatalog *catalog,
                            renderer::GpuMeshRegistry *meshRegistry,
                            BootstrapMeshIds *out) noexcept;
 

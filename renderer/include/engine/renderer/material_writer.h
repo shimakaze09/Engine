@@ -19,7 +19,7 @@ namespace engine::renderer {
 /// loader) whose own metadata is Material-tagged rather than Texture-tagged.
 /// Returns false when the material has no parent or its id/metadata cannot
 /// be resolved; outPath is left untouched in that case.
-bool find_material_parent_virtual_path(const AssetDatabase *database,
+bool find_material_parent_virtual_path(const content::AssetCatalog *catalog,
                                        AssetId materialId, char *outPath,
                                        std::size_t outPathCapacity) noexcept;
 
@@ -30,12 +30,12 @@ bool find_material_parent_virtual_path(const AssetDatabase *database,
 /// (material_field bits, see material_overrides) names, so the saved
 /// material stays an instance its parent's edits still reach. The parent
 /// and each written texture are saved as the persistent identity the
-/// database's catalog records for them; one with no identity there fails
+/// catalog records for them; one with no identity there fails
 /// the save outright (logged) rather than silently dropping the
 /// reference. False on any failure; the destination file is guaranteed
 /// untouched (atomic_write_file's contract) whenever this returns false.
-bool save_material_asset(const AssetDatabase *database, const char *virtualPath,
-                         const Material &params,
+bool save_material_asset(const content::AssetCatalog *catalog,
+                         const char *virtualPath, const Material &params,
                          const MaterialTextureSlots &textureSlots,
                          const char *parentVirtualPath,
                          std::uint16_t overriddenFields) noexcept;

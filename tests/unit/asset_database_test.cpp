@@ -5,9 +5,14 @@
 #include <memory>
 #include <new>
 
+#include "engine/content/asset_catalog.h"
 #include "engine/renderer/asset_database.h"
 
 namespace {
+
+/// The engine asset catalog the material API resolves through; one per
+/// run, cleared wherever the database is.
+engine::content::AssetCatalog *g_catalog = nullptr;
 
 bool open_file_for_write(const char *path, FILE **outFile) noexcept {
   if ((path == nullptr) || (outFile == nullptr)) {
@@ -52,7 +57,9 @@ int verify_mesh_slot_reclamation() {
   if (database == nullptr) {
     return 200;
   }
+  engine::content::clear_asset_catalog(g_catalog);
   engine::renderer::clear_asset_database(database.get());
+  engine::content::clear_asset_catalog(g_catalog);
 
   // Ids spaced exactly kMaxMeshAssets apart share a home slot, forcing one
   // probe chain through every record.
@@ -132,7 +139,9 @@ int verify_full_table_probe_length() {
   if (database == nullptr) {
     return 900;
   }
+  engine::content::clear_asset_catalog(g_catalog);
   engine::renderer::clear_asset_database(database.get());
+  engine::content::clear_asset_catalog(g_catalog);
 
   // Linear probing at most three-quarters full keeps an expected miss
   // under nine slots; 16 leaves room for this id set's clustering and is
@@ -238,7 +247,9 @@ int verify_mesh_cache_eviction() {
   if (database == nullptr) {
     return 300;
   }
+  engine::content::clear_asset_catalog(g_catalog);
   engine::renderer::clear_asset_database(database.get());
+  engine::content::clear_asset_catalog(g_catalog);
 
   constexpr AssetId kA = 501ULL;
   constexpr AssetId kB = 502ULL;
@@ -336,7 +347,9 @@ int verify_pinned_registration_budget() {
   if (database == nullptr) {
     return 700;
   }
+  engine::content::clear_asset_catalog(g_catalog);
   engine::renderer::clear_asset_database(database.get());
+  engine::content::clear_asset_catalog(g_catalog);
 
   constexpr AssetId kBuiltin = 601ULL;
   constexpr AssetId kStreamed = 602ULL;
@@ -419,7 +432,9 @@ int verify_texture_material_probe_length() {
   if (database == nullptr) {
     return 1000;
   }
+  engine::content::clear_asset_catalog(g_catalog);
   engine::renderer::clear_asset_database(database.get());
+  engine::content::clear_asset_catalog(g_catalog);
   // Same bound, and the same reasoning, as the mesh index above.
   constexpr std::size_t kMaxProbe = 16U;
 
@@ -498,6 +513,7 @@ int verify_texture_material_probe_length() {
 
   // Clearing the database empties the indexes with the records.
   engine::renderer::clear_asset_database(database.get());
+  engine::content::clear_asset_catalog(g_catalog);
   if ((database->textureIndex.size() != 0U) ||
       (database->materialIndex.size() != 0U) ||
       !engine::renderer::material_asset_slot_available(database.get(),
@@ -511,6 +527,12 @@ int verify_texture_material_probe_length() {
 
 /// Runs this executable or test program.
 int main() {
+  std::unique_ptr<engine::content::AssetCatalog> catalogOwner(
+      new (std::nothrow) engine::content::AssetCatalog());
+  if (catalogOwner == nullptr) {
+    return 1;
+  }
+  g_catalog = catalogOwner.get();
   const int pinned = verify_pinned_registration_budget();
   if (pinned != 0) {
     std::fprintf(stderr, "pinned registration budget failed: %d\n", pinned);
@@ -547,8 +569,11 @@ int main() {
   if (database == nullptr) {
     return 100;
   }
+  engine::content::clear_asset_catalog(g_catalog);
 
   engine::renderer::clear_asset_database(database.get());
+
+  engine::content::clear_asset_catalog(g_catalog);
 
   constexpr engine::renderer::AssetId kAssetId = 77ULL;
   constexpr engine::renderer::MeshHandle kMeshHandle{5U};
@@ -707,19 +732,18 @@ int main() {
   validMetadata.tagCount = engine::renderer::AssetMetadata::kMaxTags;
   validMetadata.dependencyCount =
       engine::renderer::AssetMetadata::kMaxDependencies;
-  if (!engine::renderer::register_asset_metadata(database.get(),
-                                                 validMetadata)) {
+  if (!engine::content::register_asset_metadata(g_catalog, validMetadata)) {
     return 23;
   }
 
   engine::renderer::AssetMetadata invalidTags{};
   invalidTags.assetId = 89ULL;
   invalidTags.tagCount = engine::renderer::AssetMetadata::kMaxTags + 1U;
-  if (engine::renderer::register_asset_metadata(database.get(), invalidTags)) {
+  if (engine::content::register_asset_metadata(g_catalog, invalidTags)) {
     return 24;
   }
-  if (engine::renderer::find_asset_metadata(database.get(),
-                                            invalidTags.assetId) != nullptr) {
+  if (engine::content::find_asset_metadata(g_catalog, invalidTags.assetId) !=
+      nullptr) {
     return 25;
   }
 
@@ -727,11 +751,11 @@ int main() {
   invalidDeps.assetId = 90ULL;
   invalidDeps.dependencyCount =
       engine::renderer::AssetMetadata::kMaxDependencies + 1U;
-  if (engine::renderer::register_asset_metadata(database.get(), invalidDeps)) {
+  if (engine::content::register_asset_metadata(g_catalog, invalidDeps)) {
     return 26;
   }
-  if (engine::renderer::find_asset_metadata(database.get(),
-                                            invalidDeps.assetId) != nullptr) {
+  if (engine::content::find_asset_metadata(g_catalog, invalidDeps.assetId) !=
+      nullptr) {
     return 27;
   }
 

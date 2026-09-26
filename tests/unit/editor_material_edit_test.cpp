@@ -10,12 +10,13 @@
 #include "editor_commands.h"
 #include "editor_material_edit.h"
 #include "editor_session.h"
+#include "engine/content/asset_catalog.h"
 #include "engine/core/vfs.h"
 #include "engine/editor/editor.h"
-#include "engine/runtime/world.h"
 #include "engine/renderer/asset_database.h"
 #include "engine/runtime/editor_bridge.h"
 #include "engine/runtime/service_registry.h"
+#include "engine/runtime/world.h"
 
 #include "../material_ref_fixture.h"
 
@@ -81,10 +82,13 @@ bool read_file(const char *path, char *out, std::size_t capacity) noexcept {
 struct MaterialEditScope final {
   std::unique_ptr<engine::renderer::AssetDatabase> database;
   engine::runtime::EngineAssetDatabaseService service{};
+  std::unique_ptr<engine::content::AssetCatalog> serviceCatalog{
+      new (std::nothrow) engine::content::AssetCatalog()};
 
   MaterialEditScope() noexcept
       : database(new (std::nothrow) engine::renderer::AssetDatabase()) {
     service.database = database.get();
+    service.catalog = serviceCatalog.get();
     engine::runtime::set_editor_asset_service(&service);
   }
 
@@ -309,7 +313,7 @@ int check_undo_returns_field_to_parent() noexcept {
       childJson, sizeof(childJson),
       "{\"version\":4,\"parent\":\"%s\",\"roughness\":0.7}",
       engine::tests::catalog_material(
-          scope.database.get(), "edmatpanel/editor_material_edit_parent.json")
+          scope.service.catalog, "edmatpanel/editor_material_edit_parent.json")
           .text);
   if (!write_file(kParentOs, "{\"version\":4,\"roughness\":0.3,"
                              "\"metallic\":0.1}") ||

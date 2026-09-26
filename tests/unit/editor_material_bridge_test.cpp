@@ -5,6 +5,7 @@
 // a parent's edits reach its children while a saved child stays an
 // instance.
 
+#include "engine/content/asset_catalog.h"
 #include "engine/core/vfs.h"
 #include "engine/renderer/asset_database.h"
 #include "engine/runtime/editor_bridge.h"
@@ -82,6 +83,9 @@ int check_load_edit_save_reload() noexcept {
   }
 
   engine::runtime::EngineAssetDatabaseService service{};
+  std::unique_ptr<engine::content::AssetCatalog> serviceCatalog(
+      new (std::nothrow) engine::content::AssetCatalog());
+  service.catalog = serviceCatalog.get();
   service.database = database.get();
   engine::runtime::set_editor_asset_service(&service);
   const auto finish = [](int result) noexcept {
@@ -207,6 +211,9 @@ int check_parent_changes_reach_child() noexcept {
     return 31;
   }
   engine::runtime::EngineAssetDatabaseService service{};
+  std::unique_ptr<engine::content::AssetCatalog> serviceCatalog(
+      new (std::nothrow) engine::content::AssetCatalog());
+  service.catalog = serviceCatalog.get();
   service.database = database.get();
   engine::runtime::set_editor_asset_service(&service);
   const auto finish = [&](int result) noexcept {
@@ -221,9 +228,9 @@ int check_parent_changes_reach_child() noexcept {
   }
 
   const engine::tests::MaterialRefText parentRef =
-      engine::tests::catalog_material(database.get(), kParentVirtual);
+      engine::tests::catalog_material(service.catalog, kParentVirtual);
   const engine::tests::MaterialRefText childRef =
-      engine::tests::catalog_material(database.get(), kChildVirtual);
+      engine::tests::catalog_material(service.catalog, kChildVirtual);
   char childJson[160] = {};
   std::snprintf(childJson, sizeof(childJson),
                 "{\"version\":4,\"parent\":\"%s\",\"roughness\":0.9}",
@@ -364,6 +371,9 @@ int check_child_clears_inherited_texture() noexcept {
     return 61;
   }
   engine::runtime::EngineAssetDatabaseService service{};
+  std::unique_ptr<engine::content::AssetCatalog> serviceCatalog(
+      new (std::nothrow) engine::content::AssetCatalog());
+  service.catalog = serviceCatalog.get();
   service.database = database.get();
   engine::runtime::set_editor_asset_service(&service);
   const auto finish = [&](int result) noexcept {
@@ -381,12 +391,12 @@ int check_child_clears_inherited_texture() noexcept {
   std::snprintf(parentJson, sizeof(parentJson),
                 "{\"version\":4,\"roughness\":0.5,\"textures\":"
                 "{\"albedo\":\"%s\"}}",
-                engine::tests::catalog_texture(database.get(),
+                engine::tests::catalog_texture(service.catalog,
                                                "edmat/clear_parent_albedo.png")
                     .text);
   std::snprintf(
       childJson, sizeof(childJson), "{\"version\":4,\"parent\":\"%s\"}",
-      engine::tests::catalog_material(database.get(), kParentVirtual).text);
+      engine::tests::catalog_material(service.catalog, kParentVirtual).text);
   if (!write_file(kParentOs, parentJson) || !write_file(kChildOs, childJson)) {
     return finish(63);
   }

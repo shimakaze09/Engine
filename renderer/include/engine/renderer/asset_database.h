@@ -1,4 +1,9 @@
-// Declares asset database types and APIs for the Engine renderer system.
+// Declares the renderer's asset database: the GPU-side records for meshes,
+// textures and materials -- handles, refcounts, residency, load state and
+// resolved material parameters. What an asset is, where it lives and what
+// it depends on is the content asset catalog's (content/asset_catalog.h),
+// which the engine pipeline owns; renderer code that needs it takes the
+// catalog as a parameter.
 
 #pragma once
 
@@ -209,12 +214,6 @@ struct AssetDatabase final {
   core::FixedHashTable<AssetId, std::uint32_t, kMaterialIndexCapacity>
       materialIndex{};
 
-  // The generic identity/tag/dependency table is content-owned;
-  // this database embeds one store and delegates the metadata API to it.
-  static constexpr std::size_t kMaxMetadata =
-      content::AssetCatalog::kMaxMetadata;
-  content::AssetCatalog metadataStore{};
-
   std::uint64_t currentFrame = 0ULL;
 };
 
@@ -350,43 +349,5 @@ TextureHandle resolve_texture_asset(AssetDatabase *database,
 bool retain_texture_asset(AssetDatabase *database, AssetId id) noexcept;
 /// Decrements the texture refcount; false when unknown or zero.
 bool release_texture_asset(AssetDatabase *database, AssetId id) noexcept;
-
-// Metadata management.
-bool register_asset_metadata(AssetDatabase *database,
-                             const AssetMetadata &metadata) noexcept;
-/// Finds the matching object or resource for asset metadata.
-const AssetMetadata *find_asset_metadata(const AssetDatabase *database,
-                                         AssetId id) noexcept;
-/// Adds a tag to the id's metadata; false when unknown or tags full.
-bool add_asset_tag(AssetDatabase *database, AssetId id,
-                   const char *tag) noexcept;
-/// True when the id's metadata carries the tag.
-bool asset_has_tag(const AssetDatabase *database, AssetId id,
-                   const char *tag) noexcept;
-/// Collects up to maxIds ids carrying the tag; returns the count.
-std::size_t query_assets_by_tag(const AssetDatabase *database, const char *tag,
-                                AssetId *outIds, std::size_t maxIds) noexcept;
-/// Collects up to maxIds ids of the given type; returns the count.
-std::size_t query_assets_by_type(const AssetDatabase *database,
-                                 AssetTypeTag typeTag, AssetId *outIds,
-                                 std::size_t maxIds) noexcept;
-
-// Dependency queries.
-std::size_t get_dependencies(const AssetDatabase *database, AssetId id,
-                             AssetId *outIds, std::size_t maxIds) noexcept;
-
-/// Records a directed dependency edge id -> depId; false when full.
-bool add_asset_dependency(AssetDatabase *database, AssetId id,
-                          AssetId depId) noexcept;
-
-/// Load an asset and all its dependencies (depth-first, dependency-first).
-/// Returns false if a cycle is detected or if any dependency fails to resolve.
-/// The `loadCallback` is invoked for each asset that needs loading, in
-/// dependency order. It receives the AssetId and should return true if the
-/// load succeeds.
-bool load_with_dependencies(AssetDatabase *database, AssetId rootId,
-                            bool (*loadCallback)(AssetDatabase *db, AssetId id,
-                                                 void *userData),
-                            void *userData) noexcept;
 
 } // namespace engine::renderer

@@ -7,6 +7,7 @@
 #include <memory>
 #include <new>
 
+#include "engine/content/asset_catalog.h"
 #include "engine/core/logging.h"
 #include "engine/core/vfs.h"
 #include "engine/renderer/asset_database.h"
@@ -15,6 +16,10 @@
 #include "../material_ref_fixture.h"
 
 namespace {
+
+/// The engine asset catalog the material API resolves through; one per
+/// run, cleared wherever the database is.
+engine::content::AssetCatalog *g_catalog = nullptr;
 
 bool exactly_equal(float lhs, float rhs) noexcept { return lhs == rhs; }
 
@@ -49,7 +54,7 @@ int verify_reload_success(engine::renderer::AssetDatabase *database) {
     return 10;
   }
   const auto loadResult =
-      engine::renderer::load_material_asset(database, kVirtualPath);
+      engine::renderer::load_material_asset(database, g_catalog, kVirtualPath);
   if (!loadResult.has_value()) {
     remove_file(kPath);
     return 11;
@@ -61,13 +66,14 @@ int verify_reload_success(engine::renderer::AssetDatabase *database) {
       reloadJson, sizeof(reloadJson),
       "{\"version\":4,\"roughness\":0.8,\"metallic\":1.0,"
       "\"textures\":{\"albedo\":\"%s\"}}",
-      engine::tests::catalog_texture(database, "assets/textures/new.png").text);
+      engine::tests::catalog_texture(g_catalog, "assets/textures/new.png")
+          .text);
   if (!write_material_file(kPath, reloadJson)) {
     remove_file(kPath);
     return 12;
   }
-  const auto reloadResult =
-      engine::renderer::reload_material_asset(database, kVirtualPath);
+  const auto reloadResult = engine::renderer::reload_material_asset(
+      database, g_catalog, kVirtualPath);
   remove_file(kPath);
   if (!reloadResult.has_value() || (*reloadResult != id)) {
     return 13;
@@ -102,7 +108,7 @@ int verify_reload_malformed_preserves_previous(
     return 20;
   }
   const auto loadResult =
-      engine::renderer::load_material_asset(database, kVirtualPath);
+      engine::renderer::load_material_asset(database, g_catalog, kVirtualPath);
   if (!loadResult.has_value()) {
     remove_file(kPath);
     return 21;
@@ -114,8 +120,8 @@ int verify_reload_malformed_preserves_previous(
     remove_file(kPath);
     return 22;
   }
-  const auto reloadResult =
-      engine::renderer::reload_material_asset(database, kVirtualPath);
+  const auto reloadResult = engine::renderer::reload_material_asset(
+      database, g_catalog, kVirtualPath);
   remove_file(kPath);
   if (reloadResult.has_value() ||
       (reloadResult.error() != engine::renderer::MaterialLoadError::Parse)) {
@@ -142,7 +148,7 @@ int verify_reload_malformed_preserves_previous(
 int verify_reload_of_unknown_material(
     engine::renderer::AssetDatabase *database) {
   const auto reloadResult = engine::renderer::reload_material_asset(
-      database, "mat/material_never_loaded.json");
+      database, g_catalog, "mat/material_never_loaded.json");
   if (reloadResult.has_value()) {
     return 30;
   }
@@ -152,6 +158,12 @@ int verify_reload_of_unknown_material(
 } // namespace
 
 int main() {
+  std::unique_ptr<engine::content::AssetCatalog> catalogOwner(
+      new (std::nothrow) engine::content::AssetCatalog());
+  if (catalogOwner == nullptr) {
+    return 1;
+  }
+  g_catalog = catalogOwner.get();
   if (!engine::core::initialize_vfs()) {
     return 1;
   }
@@ -166,6 +178,7 @@ int main() {
     engine::core::shutdown_vfs();
     return 3;
   }
+  engine::content::clear_asset_catalog(g_catalog);
 
   int result = verify_reload_success(database.get());
   if (result == 0) {

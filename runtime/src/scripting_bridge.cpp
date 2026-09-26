@@ -610,11 +610,11 @@ runtime::Entity scripting_instantiate_prefab(runtime::World *world,
 core::AssetRef scripting_asset_ref_for_id(std::uint64_t assetId) noexcept {
   if ((assetId == renderer::kInvalidAssetId) ||
       (g_scriptingAssetDatabaseService == nullptr) ||
-      (g_scriptingAssetDatabaseService->database == nullptr)) {
+      (g_scriptingAssetDatabaseService->catalog == nullptr)) {
     return core::AssetRef{};
   }
-  const renderer::AssetMetadata *metadata = renderer::find_asset_metadata(
-      g_scriptingAssetDatabaseService->database, assetId);
+  const renderer::AssetMetadata *metadata = content::find_asset_metadata(
+      g_scriptingAssetDatabaseService->catalog, assetId);
   return (metadata != nullptr) ? metadata->ref : core::AssetRef{};
 }
 
@@ -623,7 +623,8 @@ std::uint32_t scripting_load_asset_async(const char *path,
                                          std::uint8_t priority) noexcept {
   if ((path == nullptr) || (path[0] == '\0') ||
       (g_scriptingAssetDatabaseService == nullptr) ||
-      (g_scriptingAssetDatabaseService->database == nullptr)) {
+      (g_scriptingAssetDatabaseService->database == nullptr) ||
+      (g_scriptingAssetDatabaseService->catalog == nullptr)) {
     return kInvalidScriptAssetHandle;
   }
 
@@ -646,9 +647,9 @@ std::uint32_t scripting_load_asset_async(const char *path,
   // no authored identity: asking for a file by name is not importing it,
   // so the record is reachable by id for this session and by nothing
   // afterwards.
-  static_cast<void>(note_mesh_asset_path(
-      g_scriptingAssetDatabaseService->database, assetId, path,
-      core::AssetRef{}));
+  static_cast<void>(
+      note_mesh_asset_path(g_scriptingAssetDatabaseService->catalog, assetId,
+                           path, core::AssetRef{}));
 
   retire_terminal_script_loads(g_scriptingAssetDatabaseService);
 

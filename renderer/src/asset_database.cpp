@@ -413,8 +413,6 @@ void clear_asset_database(AssetDatabase *database) noexcept {
     database->materialAssets[i] = MaterialAssetRecord{};
   }
   database->materialIndex.clear();
-
-  content::clear_asset_catalog(&database->metadataStore);
 }
 
 // --- Texture asset functions ---
@@ -761,106 +759,6 @@ bool release_texture_asset(AssetDatabase *database, AssetId id) noexcept {
   }
 
   return true;
-}
-
-// --- Metadata management: thin delegators into the
-// content-owned AssetCatalog embedded in this database. ---
-
-bool register_asset_metadata(AssetDatabase *database,
-                             const AssetMetadata &metadata) noexcept {
-  return (database != nullptr) &&
-         content::register_asset_metadata(&database->metadataStore, metadata);
-}
-
-/// Finds the matching object or resource for asset metadata.
-const AssetMetadata *find_asset_metadata(const AssetDatabase *database,
-                                         AssetId id) noexcept {
-  return (database != nullptr)
-             ? content::find_asset_metadata(&database->metadataStore, id)
-             : nullptr;
-}
-
-/// Adds a tag to the id's metadata; false when unknown or tags full.
-bool add_asset_tag(AssetDatabase *database, AssetId id,
-                   const char *tag) noexcept {
-  return (database != nullptr) &&
-         content::add_asset_tag(&database->metadataStore, id, tag);
-}
-
-/// True when the id's metadata carries the tag.
-bool asset_has_tag(const AssetDatabase *database, AssetId id,
-                   const char *tag) noexcept {
-  return (database != nullptr) &&
-         content::asset_has_tag(&database->metadataStore, id, tag);
-}
-
-/// Collects up to maxIds ids carrying the tag; returns the count.
-std::size_t query_assets_by_tag(const AssetDatabase *database, const char *tag,
-                                AssetId *outIds, std::size_t maxIds) noexcept {
-  return (database != nullptr)
-             ? content::query_assets_by_tag(&database->metadataStore, tag,
-                                            outIds, maxIds)
-             : 0U;
-}
-
-/// Collects up to maxIds ids of the given type; returns the count.
-std::size_t query_assets_by_type(const AssetDatabase *database,
-                                 AssetTypeTag typeTag, AssetId *outIds,
-                                 std::size_t maxIds) noexcept {
-  return (database != nullptr)
-             ? content::query_assets_by_type(&database->metadataStore, typeTag,
-                                             outIds, maxIds)
-             : 0U;
-}
-
-/// Copies up to maxIds direct dependencies of the id; returns the count.
-std::size_t get_dependencies(const AssetDatabase *database, AssetId id,
-                             AssetId *outIds, std::size_t maxIds) noexcept {
-  return (database != nullptr)
-             ? content::get_dependencies(&database->metadataStore, id, outIds,
-                                         maxIds)
-             : 0U;
-}
-
-/// Records a directed dependency edge id -> depId; false when full.
-bool add_asset_dependency(AssetDatabase *database, AssetId id,
-                          AssetId depId) noexcept {
-  return (database != nullptr) &&
-         content::add_asset_dependency(&database->metadataStore, id, depId);
-}
-
-namespace {
-
-/// Bridges the renderer callback shape (which receives the database) onto
-/// the content-generic dependency walk.
-struct DepLoadTrampoline final {
-  AssetDatabase *database = nullptr;
-  bool (*callback)(AssetDatabase *db, AssetId id, void *userData) = nullptr;
-  void *userData = nullptr;
-};
-
-bool dep_load_trampoline(AssetId id, void *userData) noexcept {
-  auto *bridge = static_cast<DepLoadTrampoline *>(userData);
-  if (bridge->callback == nullptr) {
-    return true;
-  }
-  return bridge->callback(bridge->database, id, bridge->userData);
-}
-
-} // namespace
-
-/// Loads the requested resource for with dependencies.
-bool load_with_dependencies(AssetDatabase *database, AssetId rootId,
-                            bool (*loadCallback)(AssetDatabase *db, AssetId id,
-                                                 void *userData),
-                            void *userData) noexcept {
-  if (database == nullptr) {
-    return false;
-  }
-
-  DepLoadTrampoline bridge{database, loadCallback, userData};
-  return content::load_with_dependencies(&database->metadataStore, rootId,
-                                         &dep_load_trampoline, &bridge);
 }
 
 } // namespace engine::renderer

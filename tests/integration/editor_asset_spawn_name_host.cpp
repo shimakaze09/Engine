@@ -11,6 +11,7 @@
 
 #include "editor_commands.h"
 #include "editor_session.h"
+#include "engine/content/asset_catalog.h"
 #include "engine/core/logging.h"
 #include "engine/core/vfs.h"
 #include "engine/renderer/asset_database.h"
@@ -69,6 +70,9 @@ int main() {
   }
 
   engine::runtime::EngineAssetDatabaseService service{};
+  std::unique_ptr<engine::content::AssetCatalog> serviceCatalog(
+      new (std::nothrow) engine::content::AssetCatalog());
+  service.catalog = serviceCatalog.get();
   service.database = database.get();
   engine::runtime::set_editor_asset_service(&service);
 

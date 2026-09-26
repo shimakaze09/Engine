@@ -91,7 +91,8 @@ enum class MaterialLoadError : std::uint8_t {
 /// returns its path-derived AssetId. Never call .value(): with exceptions
 /// disabled it aborts — check has_value() and use operator* / error().
 std::expected<AssetId, MaterialLoadError>
-load_material_asset(AssetDatabase *database, const char *virtualPath) noexcept;
+load_material_asset(AssetDatabase *database, content::AssetCatalog *catalog,
+                    const char *virtualPath) noexcept;
 
 /// Re-reads and re-parses an already-loaded material file in place (editor
 /// save/hot-reload). On success the material's params/textureSlots/metadata
@@ -102,15 +103,15 @@ load_material_asset(AssetDatabase *database, const char *virtualPath) noexcept;
 /// record is left completely untouched and the previous valid state keeps
 /// serving renders — never a partial or corrupt in-place update.
 std::expected<AssetId, MaterialLoadError>
-reload_material_asset(AssetDatabase *database,
+reload_material_asset(AssetDatabase *database, content::AssetCatalog *catalog,
                       const char *virtualPath) noexcept;
 
 /// Loads every *.mat under an OS directory as material assets addressed as
 /// "<virtualPrefix>/<filename>" (sorted, so registration order is
 /// deterministic). Returns the number successfully loaded; boot-time only.
 std::size_t load_material_assets_in_directory(
-    AssetDatabase *database, const char *osDirectory,
-    const char *virtualPrefix) noexcept;
+    AssetDatabase *database, content::AssetCatalog *catalog,
+    const char *osDirectory, const char *virtualPrefix) noexcept;
 
 /// Loads one texture from a VFS virtual path and returns its handle
 /// (kInvalidTextureHandle on failure); the production texture-loader
@@ -137,6 +138,7 @@ using MaterialTextureLoadFn = TextureHandle (*)(const char *virtualPath,
 /// slot), which drains to zero once textures are resident. Returns the
 /// number of texture slots newly resolved to Ready.
 std::size_t resolve_material_textures(AssetDatabase *database,
+                                      const content::AssetCatalog *catalog,
                                       MaterialTextureLoadFn loadFn,
                                       void *userData) noexcept;
 

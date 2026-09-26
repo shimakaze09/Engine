@@ -6,18 +6,21 @@
 #include <new>
 #include <vector>
 
+#include "engine/content/asset_catalog.h"
 #include "engine/renderer/asset_database.h"
 
 namespace {
+
+/// The engine asset catalog the dependency graph lives in; one per run,
+/// cleared wherever the database is.
+engine::content::AssetCatalog *g_catalog = nullptr;
 
 /// Track the order in which assets are loaded.
 struct LoadTracker {
   std::vector<engine::renderer::AssetId> loadOrder{};
 };
 
-bool tracking_load_callback(engine::renderer::AssetDatabase *db,
-                            engine::renderer::AssetId id, void *userData) {
-  (void)db;
+bool tracking_load_callback(engine::renderer::AssetId id, void *userData) {
   if (userData == nullptr) {
     return false;
   }
@@ -26,8 +29,7 @@ bool tracking_load_callback(engine::renderer::AssetDatabase *db,
   return true;
 }
 
-bool failing_load_callback(engine::renderer::AssetDatabase * /*db*/,
-                           engine::renderer::AssetId id, void *userData) {
+bool failing_load_callback(engine::renderer::AssetId id, void *userData) {
   // Fail on a specific asset.
   const auto failId = *static_cast<engine::renderer::AssetId *>(userData);
   return id != failId;
@@ -37,13 +39,21 @@ bool failing_load_callback(engine::renderer::AssetDatabase * /*db*/,
 
 /// Runs this executable or test program.
 int main() {
+  std::unique_ptr<engine::content::AssetCatalog> catalogOwner(
+      new (std::nothrow) engine::content::AssetCatalog());
+  if (catalogOwner == nullptr) {
+    return 1;
+  }
+  g_catalog = catalogOwner.get();
   using namespace engine::renderer;
 
   std::unique_ptr<AssetDatabase> database(new (std::nothrow) AssetDatabase());
   if (database == nullptr) {
     return 100;
   }
+  engine::content::clear_asset_catalog(g_catalog);
   clear_asset_database(database.get());
+  engine::content::clear_asset_catalog(g_catalog);
 
   // --- Test 1: Prefab -> Mesh -> Texture chain ---
   // Setup: prefab(100) depends on mesh(200), mesh(200) depends on texture(300).
@@ -52,10 +62,10 @@ int main() {
     prefabMeta.assetId = 100ULL;
     prefabMeta.typeTag = AssetTypeTag::Prefab;
     write_metadata_path(&prefabMeta.filePath, "assets/hero.prefab");
-    if (!register_asset_metadata(database.get(), prefabMeta)) {
+    if (!engine::content::register_asset_metadata(g_catalog, prefabMeta)) {
       return 1;
     }
-    if (!add_asset_dependency(database.get(), 100ULL, 200ULL)) {
+    if (!engine::content::add_asset_dependency(g_catalog, 100ULL, 200ULL)) {
       return 2;
     }
 
@@ -63,10 +73,10 @@ int main() {
     meshMeta.assetId = 200ULL;
     meshMeta.typeTag = AssetTypeTag::Mesh;
     write_metadata_path(&meshMeta.filePath, "assets/hero.mesh");
-    if (!register_asset_metadata(database.get(), meshMeta)) {
+    if (!engine::content::register_asset_metadata(g_catalog, meshMeta)) {
       return 3;
     }
-    if (!add_asset_dependency(database.get(), 200ULL, 300ULL)) {
+    if (!engine::content::add_asset_dependency(g_catalog, 200ULL, 300ULL)) {
       return 4;
     }
 
@@ -74,13 +84,13 @@ int main() {
     texMeta.assetId = 300ULL;
     texMeta.typeTag = AssetTypeTag::Texture;
     write_metadata_path(&texMeta.filePath, "assets/hero_diffuse.png");
-    if (!register_asset_metadata(database.get(), texMeta)) {
+    if (!engine::content::register_asset_metadata(g_catalog, texMeta)) {
       return 5;
     }
 
     LoadTracker tracker{};
-    if (!load_with_dependencies(database.get(), 100ULL, tracking_load_callback,
-                                &tracker)) {
+    if (!engine::content::load_with_dependencies(
+            g_catalog, 100ULL, tracking_load_callback, &tracker)) {
       return 6;
     }
 
@@ -113,38 +123,39 @@ int main() {
   // D should only be loaded once.
   {
     clear_asset_database(database.get());
+    engine::content::clear_asset_catalog(g_catalog);
 
     AssetMetadata metaA{};
     metaA.assetId = 1ULL;
     metaA.typeTag = AssetTypeTag::Prefab;
     write_metadata_path(&metaA.filePath, "A");
-    register_asset_metadata(database.get(), metaA);
-    add_asset_dependency(database.get(), 1ULL, 2ULL);
-    add_asset_dependency(database.get(), 1ULL, 3ULL);
+    engine::content::register_asset_metadata(g_catalog, metaA);
+    engine::content::add_asset_dependency(g_catalog, 1ULL, 2ULL);
+    engine::content::add_asset_dependency(g_catalog, 1ULL, 3ULL);
 
     AssetMetadata metaB{};
     metaB.assetId = 2ULL;
     metaB.typeTag = AssetTypeTag::Mesh;
     write_metadata_path(&metaB.filePath, "B");
-    register_asset_metadata(database.get(), metaB);
-    add_asset_dependency(database.get(), 2ULL, 4ULL);
+    engine::content::register_asset_metadata(g_catalog, metaB);
+    engine::content::add_asset_dependency(g_catalog, 2ULL, 4ULL);
 
     AssetMetadata metaC{};
     metaC.assetId = 3ULL;
     metaC.typeTag = AssetTypeTag::Mesh;
     write_metadata_path(&metaC.filePath, "C");
-    register_asset_metadata(database.get(), metaC);
-    add_asset_dependency(database.get(), 3ULL, 4ULL);
+    engine::content::register_asset_metadata(g_catalog, metaC);
+    engine::content::add_asset_dependency(g_catalog, 3ULL, 4ULL);
 
     AssetMetadata metaD{};
     metaD.assetId = 4ULL;
     metaD.typeTag = AssetTypeTag::Texture;
     write_metadata_path(&metaD.filePath, "D");
-    register_asset_metadata(database.get(), metaD);
+    engine::content::register_asset_metadata(g_catalog, metaD);
 
     LoadTracker tracker{};
-    if (!load_with_dependencies(database.get(), 1ULL, tracking_load_callback,
-                                &tracker)) {
+    if (!engine::content::load_with_dependencies(
+            g_catalog, 1ULL, tracking_load_callback, &tracker)) {
       return 20;
     }
 
@@ -184,26 +195,27 @@ int main() {
   // --- Test 3: Circular dependency detection ---
   {
     clear_asset_database(database.get());
+    engine::content::clear_asset_catalog(g_catalog);
 
     AssetMetadata metaX{};
     metaX.assetId = 10ULL;
     metaX.typeTag = AssetTypeTag::Mesh;
     write_metadata_path(&metaX.filePath, "X");
-    register_asset_metadata(database.get(), metaX);
+    engine::content::register_asset_metadata(g_catalog, metaX);
 
     AssetMetadata metaY{};
     metaY.assetId = 20ULL;
     metaY.typeTag = AssetTypeTag::Texture;
     write_metadata_path(&metaY.filePath, "Y");
-    register_asset_metadata(database.get(), metaY);
+    engine::content::register_asset_metadata(g_catalog, metaY);
 
-    add_asset_dependency(database.get(), 10ULL, 20ULL);
-    add_asset_dependency(database.get(), 20ULL, 10ULL);
+    engine::content::add_asset_dependency(g_catalog, 10ULL, 20ULL);
+    engine::content::add_asset_dependency(g_catalog, 20ULL, 10ULL);
 
     LoadTracker tracker{};
     // Should fail due to cycle.
-    if (load_with_dependencies(database.get(), 10ULL, tracking_load_callback,
-                               &tracker)) {
+    if (engine::content::load_with_dependencies(
+            g_catalog, 10ULL, tracking_load_callback, &tracker)) {
       return 30; // Expected failure.
     }
   }
@@ -211,36 +223,37 @@ int main() {
   // --- Test 4: Load failure propagation ---
   {
     clear_asset_database(database.get());
+    engine::content::clear_asset_catalog(g_catalog);
 
     AssetMetadata metaRoot{};
     metaRoot.assetId = 50ULL;
     metaRoot.typeTag = AssetTypeTag::Prefab;
     write_metadata_path(&metaRoot.filePath, "root");
-    register_asset_metadata(database.get(), metaRoot);
-    add_asset_dependency(database.get(), 50ULL, 60ULL);
+    engine::content::register_asset_metadata(g_catalog, metaRoot);
+    engine::content::add_asset_dependency(g_catalog, 50ULL, 60ULL);
 
     AssetMetadata metaDep{};
     metaDep.assetId = 60ULL;
     metaDep.typeTag = AssetTypeTag::Mesh;
     write_metadata_path(&metaDep.filePath, "dep");
-    register_asset_metadata(database.get(), metaDep);
+    engine::content::register_asset_metadata(g_catalog, metaDep);
 
     // Load callback that fails on asset 60.
     AssetId failId = 60ULL;
-    if (load_with_dependencies(database.get(), 50ULL, failing_load_callback,
-                               &failId)) {
+    if (engine::content::load_with_dependencies(
+            g_catalog, 50ULL, failing_load_callback, &failId)) {
       return 40; // Expected failure.
     }
   }
 
   // --- Test 5: Null/invalid inputs ---
   {
-    if (load_with_dependencies(nullptr, 1ULL, tracking_load_callback,
-                               nullptr)) {
+    if (engine::content::load_with_dependencies(
+            nullptr, 1ULL, tracking_load_callback, nullptr)) {
       return 50;
     }
-    if (load_with_dependencies(database.get(), 0ULL, tracking_load_callback,
-                               nullptr)) {
+    if (engine::content::load_with_dependencies(
+            g_catalog, 0ULL, tracking_load_callback, nullptr)) {
       return 51;
     }
   }
@@ -248,17 +261,19 @@ int main() {
   // --- Test 6: get_dependencies query ---
   {
     clear_asset_database(database.get());
+    engine::content::clear_asset_catalog(g_catalog);
 
     AssetMetadata meta{};
     meta.assetId = 77ULL;
     meta.typeTag = AssetTypeTag::Prefab;
     write_metadata_path(&meta.filePath, "test");
-    register_asset_metadata(database.get(), meta);
-    add_asset_dependency(database.get(), 77ULL, 88ULL);
-    add_asset_dependency(database.get(), 77ULL, 99ULL);
+    engine::content::register_asset_metadata(g_catalog, meta);
+    engine::content::add_asset_dependency(g_catalog, 77ULL, 88ULL);
+    engine::content::add_asset_dependency(g_catalog, 77ULL, 99ULL);
 
     AssetId deps[8] = {};
-    const std::size_t count = get_dependencies(database.get(), 77ULL, deps, 8);
+    const std::size_t count =
+        engine::content::get_dependencies(g_catalog, 77ULL, deps, 8);
     if (count != 2U) {
       return 60;
     }
@@ -281,11 +296,12 @@ int main() {
   // --- Test 7: Asset with no metadata still works ---
   {
     clear_asset_database(database.get());
+    engine::content::clear_asset_catalog(g_catalog);
 
     // Loading an asset with no metadata should still succeed (no deps).
     LoadTracker tracker{};
-    if (!load_with_dependencies(database.get(), 999ULL, tracking_load_callback,
-                                &tracker)) {
+    if (!engine::content::load_with_dependencies(
+            g_catalog, 999ULL, tracking_load_callback, &tracker)) {
       return 70;
     }
     // Should have loaded just the root.
