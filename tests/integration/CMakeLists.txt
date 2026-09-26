@@ -214,6 +214,21 @@ engine_add_test_executable(engine_integration_alpha_mask_shadow_gpu
 set_tests_properties(engine_integration_alpha_mask_shadow_gpu PROPERTIES
     SKIP_REGULAR_EXPRESSION "SKIPPED:")
 
+engine_add_test_executable(engine_integration_ssao_contact_gpu
+    SOURCES
+    ssao_contact_gpu_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/renderer/src
+    PRIVATE_DEPS
+    engine_runtime
+    engine_renderer
+    engine_content
+    LABELS
+    gpu;integration
+)
+set_tests_properties(engine_integration_ssao_contact_gpu PROPERTIES
+    SKIP_REGULAR_EXPRESSION "SKIPPED:")
+
 engine_add_test_executable(engine_integration_scene_environment_gpu
     SOURCES
     scene_environment_gpu_test.cpp

@@ -91,7 +91,7 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
     const std::uint64_t cacheKey = directional_shadow_cache_key(
         commandBufferView, opaqueCount, lights.directionalLights[0],
         cascadeSplits, lightMatrices, ctx.auxiliaryView,
-        ctx.auxiliaryOpaqueCount);
+        ctx.auxiliaryOpaqueCount, registry);
     // Skinned poses change every frame, so cached maps would freeze a
     // character's shadow mid-animation.
     const bool cacheEnabled = backend.cvars.shadowCache.get_bool(true) &&

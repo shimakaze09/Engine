@@ -8,6 +8,8 @@
 // A mask-mode caster with an opacity mask is drawn through the MASKED
 // program with its mask, cutoff and UV transform bound, in the spot and the
 // point passes alike, and every other caster through the pass's own.
+// The directional cascades are cached, and reused only while the casters'
+// resolved geometry and masks are unchanged.
 
 #include "command_buffer_context.h"
 #include "command_buffer_flush_internal.h"
@@ -124,8 +126,9 @@ void reset_fake_device() noexcept {
 // helpers the unskinned draws never reach.
 void gpu_profiler_begin_pass(GpuPassId) noexcept {}
 void gpu_profiler_end_pass(GpuPassId) noexcept {}
+bool g_meshResolves = true;
 const GpuMesh *lookup_gpu_mesh(const GpuMeshRegistry *, MeshHandle) noexcept {
-  return &g_mesh;
+  return g_meshResolves ? &g_mesh : nullptr;
 }
 bool g_paletteUploads = false;
 bool upload_bone_palette(BackendState &, const RenderDevice *, std::uint32_t,
@@ -133,10 +136,13 @@ bool upload_bone_palette(BackendState &, const RenderDevice *, std::uint32_t,
   return g_paletteUploads;
 }
 std::size_t skin_palette_count() noexcept { return 0U; }
-/// Every live texture handle maps to a device texture 1000 above its id.
+/// Every live texture handle maps to a device texture 1000 above its id,
+/// or to none while the textures are still loading.
+bool g_texturesResolve = true;
 DeviceTextureHandle texture_device_handle(TextureHandle handle) noexcept {
-  return (handle.id == 0U) ? kInvalidDeviceTexture
-                           : DeviceTextureHandle{1000U + handle.id};
+  return ((handle.id == 0U) || !g_texturesResolve)
+             ? kInvalidDeviceTexture
+             : DeviceTextureHandle{1000U + handle.id};
 }
 
 } // namespace engine::renderer
@@ -547,6 +553,64 @@ void test_skinned_masked_casters_pick_the_fitting_program() noexcept {
   g_draws[1].material = Material{};
 }
 
+/// EXPECTATION (#542): the cached directional cascades are reused only
+/// while a redraw would draw the same maps. An unchanged frame reuses
+/// them; a caster whose mesh starts resolving to geometry, whose mask
+/// texture finishes loading, or whose cutoff changes redraws them. On base
+/// the key hashed none of the three, so each reused maps drawn without
+/// the change.
+void test_directional_cache_follows_what_casters_draw() noexcept {
+  reset_backend();
+  g_backend.shadowAvailable = true;
+  g_backend.shadowMasked = fake_masked_program(11U);
+  for (std::size_t c = 0U; c < kShadowCascadeCount; ++c) {
+    g_backend.shadowState.depthTargets[c] =
+        RenderTargetHandle{300U + static_cast<std::uint32_t>(c)};
+  }
+  g_draws[1].material.alphaMode = AlphaMode::Mask;
+  g_draws[1].material.alphaCutoff = 0.25F;
+  g_draws[1].material.opacityTexture = TextureHandle{5U};
+  SceneLightData lights{};
+  lights.directionalLightCount = 1U;
+  lights.directionalLights[0].direction = engine::math::Vec3(0.3F, -1.0F, 0.2F);
+  lights.directionalLights[0].intensity = 1.0F;
+  // Every cascade is cleared when the maps are redrawn and none is bound
+  // when they are reused.
+  const auto redrawn = [&]() noexcept {
+    reset_fake_device();
+    FrameFlushContext ctx = make_context(lights);
+    flush_shadow_passes(ctx);
+    return g_log.clearsOnTargets == kShadowCascadeCount;
+  };
+  const auto reused = [&]() noexcept {
+    reset_fake_device();
+    FrameFlushContext ctx = make_context(lights);
+    flush_shadow_passes(ctx);
+    return g_log.bindCount == 0U;
+  };
+
+  g_meshResolves = false;
+  g_texturesResolve = false;
+  CHECK(redrawn(), "the first frame draws the cascades");
+  CHECK(reused(), "an unchanged frame reuses them");
+
+  g_meshResolves = true;
+  CHECK(redrawn(), "a mesh that now resolves to geometry redraws them");
+  CHECK(g_log.drawsOnTargets == 2U * kShadowCascadeCount,
+        "the redraw draws both casters into every cascade");
+  CHECK(reused(), "and the frame after reuses them again");
+
+  g_texturesResolve = true;
+  CHECK(redrawn(), "a mask texture that finished loading redraws them");
+  CHECK(reused(), "and the frame after reuses them again");
+
+  g_draws[1].material.alphaCutoff = 0.5F;
+  CHECK(redrawn(), "a changed cutoff redraws them");
+  CHECK(reused(), "and the frame after reuses them again");
+
+  g_draws[1].material = Material{};
+}
+
 int main() {
   engine::core::cvar_register_bool("r_spot_shadows", true, "test");
   engine::core::cvar_register_bool("r_point_shadows", true, "test");
@@ -566,6 +630,7 @@ int main() {
   test_masked_casters_draw_through_the_masked_programs();
   test_unmasked_casters_keep_the_pass_program();
   test_skinned_masked_casters_pick_the_fitting_program();
+  test_directional_cache_follows_what_casters_draw();
 
   if (g_failures != 0) {
     std::fprintf(stderr, "shadow_caster_flush_test: %d failure(s)\n",

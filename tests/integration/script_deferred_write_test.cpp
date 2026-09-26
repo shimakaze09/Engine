@@ -51,10 +51,15 @@ bool write_file_at(const char *path, const char *contents) noexcept {
   return ok;
 }
 
-/// Runs one begin-play dispatch in the pipeline's fixed order, flushing
-/// after it exactly as stage_play_transitions does.
+/// Runs one begin-play dispatch while the World is mid-simulation, where
+/// no mutation applies at once, so every setter in the callback takes the
+/// queued path this suite is about; then flushes, as the pipeline does
+/// after the phase that queued them.
 void run_begin_play_phase(rt::World *world) noexcept {
+  world->begin_update_phase();
   sc::dispatch_entity_scripts_begin_play(world);
+  world->commit_update_phase();
+  world->end_frame_phase();
   sc::flush_deferred_mutations();
 }
 

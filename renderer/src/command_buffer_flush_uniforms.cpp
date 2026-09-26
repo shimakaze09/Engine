@@ -832,7 +832,8 @@ void upload_forward_material(const ForwardDrawProgram &program,
   const DeviceTextureHandle albedoTex =
       texture_device_handle(material.albedoTexture);
   const bool hasAlbedoTex = (material.albedoTexture != kInvalidTextureHandle) &&
-                            (albedoTex != kInvalidDeviceTexture);
+                            (albedoTex != kInvalidDeviceTexture) &&
+                            (albedoTex != bindings->passTarget);
   if (program.hasAlbedoTexture.valid()) {
     dev->set_param_i32(program.hasAlbedoTexture, hasAlbedoTex ? 1 : 0);
   }

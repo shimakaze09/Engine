@@ -206,15 +206,18 @@ constexpr ComponentMetadata kComponentMetadataTable[] = {
      "Defines the object's collision shape and physical material."},
     {"engine::runtime::MeshComponent", "Mesh", "Rendering",
      "Renders a mesh asset with a material."},
-    {"engine::runtime::LightComponent", "Directional/Point Light",
-     "Rendering", "Legacy combined light; prefer Point Light or Spot "
+    {"engine::runtime::LightComponent", "Directional/Point Light", "Rendering",
+     "Legacy combined light; prefer Point Light or Spot "
      "Light for new objects."},
     {"engine::runtime::PointLightComponent", "Point Light", "Rendering",
      "Omnidirectional light with a falloff range."},
     {"engine::runtime::SpotLightComponent", "Spot Light", "Rendering",
      "Cone-shaped light with inner/outer falloff angles."},
     {"engine::runtime::ReflectionProbeComponent", "Reflection Probe",
-     "Rendering", "Bakes an environment cubemap for local reflections."},
+     "Rendering",
+     "Not rendered yet: no pass reads reflection probes, so a probe changes "
+     "nothing. Scene-wide reflections come from a Sky Light.",
+     false},
     {"engine::runtime::SkyLightComponent", "Sky Light", "Rendering",
      "Lights the whole scene from an environment map (.hdr): image-based "
      "specular and diffuse light under any sky."},

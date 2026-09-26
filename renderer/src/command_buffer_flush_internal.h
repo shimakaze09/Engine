@@ -301,6 +301,12 @@ ForwardDrawProgram pbr_forward_draw_program(const BackendState &backend) noexcep
 struct ForwardDrawBindings final {
   DeviceTextureHandle albedo{};
   DeviceTextureHandle materialSlots[4] = {};
+  /// The colour texture the pass renders into, when a material can name
+  /// it: a scene capture drawing a mesh that displays that same capture.
+  /// An albedo resolving to it binds the fallback instead, since sampling
+  /// a texture while rendering into it is undefined on GL and Vulkan and a
+  /// dropped draw on WebGL.
+  DeviceTextureHandle passTarget{};
 };
 
 /// One maximal run of consecutive draws sharing a shading program.
@@ -336,7 +342,8 @@ DeviceProgramHandle shading_program(const BackendState &backend,
 /// Uploads everything about a draw that does not depend on its
 /// transform: the material scalars, its foliage wind, its albedo texture
 /// (falling back to the opaque placeholder rather than leaving the
-/// pass's own render target bound, which WebGL rejects) and the four
+/// pass's own render target bound, which WebGL rejects, and in place of
+/// the bindings' passTarget) and the four
 /// texture-backed slots. Split from the draw below because the opaque
 /// batching path uploads a batch's material once and then decides
 /// whether to issue it instanced.

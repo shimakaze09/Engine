@@ -365,7 +365,39 @@ struct AddMenuEntry final {
   const char *tooltip = nullptr;
 };
 
+/// The Inspector metadata row of a registry component type; nullptr when
+/// the type has none.
+const ComponentMetadata *
+component_metadata_for(ComponentEditType type) noexcept {
+#define ENGINE_ICR_ADDMENU_META(Type, Key, GetFn, AddFn, RemoveFn)             \
+  if (type == ComponentEditType::ENGINE_ICR_ALIAS(Type)) {                     \
+    return find_component_metadata("engine::runtime::" #Type);                 \
+  }
+  ENGINE_PERSISTENT_COMPONENT_TABLE(ENGINE_ICR_ADDMENU_META)
+#undef ENGINE_ICR_ADDMENU_META
+  return nullptr;
+}
+
 } // namespace
+
+std::size_t add_component_menu_candidates(runtime::Entity entity,
+                                          ComponentEditType *out,
+                                          std::size_t capacity) noexcept {
+  std::size_t count = 0U;
+#define ENGINE_ICR_ADDMENU_GATHER(Type, Key, GetFn, AddFn, RemoveFn)           \
+  {                                                                            \
+    const ComponentEditType editType =                                         \
+        ComponentEditType::ENGINE_ICR_ALIAS(Type);                             \
+    const ComponentMetadata *meta = component_metadata_for(editType);          \
+    if ((count < capacity) && !has_component_of_type(editType, entity) &&      \
+        ((meta == nullptr) || meta->offeredInAddMenu)) {                       \
+      out[count++] = editType;                                                 \
+    }                                                                          \
+  }
+  ENGINE_PERSISTENT_COMPONENT_TABLE(ENGINE_ICR_ADDMENU_GATHER)
+#undef ENGINE_ICR_ADDMENU_GATHER
+  return count;
+}
 
 void draw_add_component_menu(runtime::Entity entity, bool editable) noexcept {
   if (!editable || (editor_session().world == nullptr)) {
@@ -373,22 +405,17 @@ void draw_add_component_menu(runtime::Entity entity, bool editable) noexcept {
   }
 
   AddMenuEntry candidates[kComponentEditTypeCount];
-  std::size_t candidateCount = 0U;
-#define ENGINE_ICR_ADDMENU_GATHER(Type, Key, GetFn, AddFn, RemoveFn)          \
-  {                                                                            \
-    const ComponentEditType editType = ComponentEditType::ENGINE_ICR_ALIAS(Type); \
-    if (!has_component_of_type(editType, entity)) {                           \
-      const ComponentMetadata *meta =                                        \
-          find_component_metadata("engine::runtime::" #Type);                \
-      AddMenuEntry &entry = candidates[candidateCount++];                    \
-      entry.type = editType;                                                 \
-      entry.displayName = (meta != nullptr) ? meta->displayName : #Type;     \
-      entry.category = (meta != nullptr) ? meta->category : "General";       \
-      entry.tooltip = (meta != nullptr) ? meta->tooltip : nullptr;           \
-    }                                                                         \
+  ComponentEditType offered[kComponentEditTypeCount] = {};
+  const std::size_t candidateCount =
+      add_component_menu_candidates(entity, offered, kComponentEditTypeCount);
+  for (std::size_t i = 0U; i < candidateCount; ++i) {
+    const ComponentMetadata *meta = component_metadata_for(offered[i]);
+    AddMenuEntry &entry = candidates[i];
+    entry.type = offered[i];
+    entry.displayName = (meta != nullptr) ? meta->displayName : "Component";
+    entry.category = (meta != nullptr) ? meta->category : "General";
+    entry.tooltip = (meta != nullptr) ? meta->tooltip : nullptr;
   }
-  ENGINE_PERSISTENT_COMPONENT_TABLE(ENGINE_ICR_ADDMENU_GATHER)
-#undef ENGINE_ICR_ADDMENU_GATHER
 
   // Stable sort by category so same-category entries render contiguously
   // under one header, without reordering the authoritative registry table

@@ -1,11 +1,14 @@
 // Implements the shadow-caster draw shared by the directional, spot and
-// point shadow passes.
+// point shadow passes, and the directional cache key over what it draws.
 
 #include "shadow_caster_draw.h"
 
 #include "command_buffer_context.h"
 #include "command_buffer_flush_internal.h"
 
+#include <cstring>
+
+#include "engine/core/hash.h"
 #include "engine/renderer/command_buffer.h"
 #include "engine/renderer/material.h"
 #include "engine/renderer/mesh_loader.h"
@@ -27,6 +30,60 @@ DeviceTextureHandle caster_mask_texture(const Material &material) noexcept {
     return kInvalidDeviceTexture;
   }
   return texture_device_handle(material.opacityTexture);
+}
+
+/// Appends one integer value to an FNV-1a hash.
+std::uint64_t hash_u64(std::uint64_t hash, std::uint64_t value) noexcept {
+  return core::fnv1a_64_append_u64(hash, value);
+}
+
+/// Appends one finite float value to an FNV-1a hash.
+std::uint64_t hash_float(std::uint64_t hash, float value) noexcept {
+  std::uint32_t bits = 0U;
+  if (value != 0.0F) {
+    std::memcpy(&bits, &value, sizeof(bits));
+  }
+  return hash_u64(hash, bits);
+}
+
+/// Appends one vector value to an FNV-1a hash.
+std::uint64_t hash_vec3(std::uint64_t hash, const math::Vec3 &value) noexcept {
+  hash = hash_float(hash, value.x);
+  hash = hash_float(hash, value.y);
+  return hash_float(hash, value.z);
+}
+
+/// Appends one matrix value to an FNV-1a hash.
+std::uint64_t hash_mat4(std::uint64_t hash, const math::Mat4 &value) noexcept {
+  for (const math::Vec4 &column : value.columns) {
+    hash = hash_float(hash, column.x);
+    hash = hash_float(hash, column.y);
+    hash = hash_float(hash, column.z);
+    hash = hash_float(hash, column.w);
+  }
+  return hash;
+}
+
+/// Appends what draw_shadow_caster resolves for one caster this frame: the
+/// geometry its mesh handle finds (zero when it finds none, which draws
+/// nothing) and the mask it discards against.
+std::uint64_t hash_caster_resolution(std::uint64_t hash,
+                                     const GpuMeshRegistry *registry,
+                                     const DrawCommand &command) noexcept {
+  const GpuMesh *mesh = lookup_gpu_mesh(registry, command.mesh);
+  hash = hash_u64(hash, (mesh != nullptr) ? mesh->geometry.value : 0U);
+  hash = hash_u64(hash, (mesh != nullptr) ? mesh->vertexCount : 0U);
+  hash = hash_u64(hash, (mesh != nullptr) ? mesh->indexCount : 0U);
+  const DeviceTextureHandle mask = caster_mask_texture(command.material);
+  hash = hash_u64(hash, mask.value);
+  if (mask != kInvalidDeviceTexture) {
+    hash = hash_float(hash, command.material.alphaCutoff);
+    hash = hash_float(hash, command.material.uvTiling.x);
+    hash = hash_float(hash, command.material.uvTiling.y);
+    hash = hash_float(hash, command.material.uvOffset.x);
+    hash = hash_float(hash, command.material.uvOffset.y);
+  }
+  return hash;
 }
 
 /// Uploads the mask, cutoff and UV transform a bound MASKED program tests.
@@ -156,6 +213,55 @@ std::uint32_t draw_shadow_caster(BackendState &backend, const RenderDevice *dev,
                         &command.modelMatrix.columns[0].x);
   }
   return issue_draw(dev, mesh);
+}
+
+std::uint64_t directional_shadow_cache_key(
+    CommandBufferView commandBufferView, std::size_t opaqueCount,
+    const DirectionalLightData &light, const CascadeSplits &splits,
+    const std::array<math::Mat4, kShadowCascadeCount> &matrices,
+    CommandBufferView auxiliaryView, std::size_t auxiliaryOpaqueCount,
+    const GpuMeshRegistry *registry) noexcept {
+  std::uint64_t hash = core::kFnv1a64Offset;
+  hash = hash_u64(hash, static_cast<std::uint64_t>(opaqueCount));
+  hash = hash_u64(hash, static_cast<std::uint64_t>(auxiliaryOpaqueCount));
+  hash = hash_vec3(hash, light.direction);
+  hash = hash_vec3(hash, light.color);
+  hash = hash_float(hash, light.intensity);
+
+  for (std::size_t i = 0U; i <= kShadowCascadeCount; ++i) {
+    hash = hash_float(hash, splits.distances[i]);
+  }
+  for (const math::Mat4 &matrix : matrices) {
+    hash = hash_mat4(hash, matrix);
+  }
+
+  for (std::size_t i = 0U; i < opaqueCount; ++i) {
+    const DrawCommand &command = commandBufferView.data[i];
+    hash = hash_u64(hash, command.sortKey.value);
+    hash = hash_u64(hash, command.entity);
+    hash = hash_u64(hash, command.mesh.id);
+    hash = hash_float(hash, command.foliageWindStrength);
+    hash = hash_float(hash, command.foliageWindFrequency);
+    hash = hash_float(hash, command.foliageWindPhase);
+    hash = hash_u64(hash, command.foliageLodIndex);
+    hash = hash_mat4(hash, command.modelMatrix);
+    hash = hash_caster_resolution(hash, registry, command);
+  }
+  // Off-screen casters shape the maps just as visible ones do.
+  for (std::size_t i = 0U;
+       (auxiliaryView.data != nullptr) && (i < auxiliaryOpaqueCount); ++i) {
+    const DrawCommand &command = auxiliaryView.data[i];
+    if ((command.passMask & kPassShadowCaster) == 0U) {
+      continue;
+    }
+    hash = hash_u64(hash, command.entity);
+    hash = hash_u64(hash, command.mesh.id);
+    hash = hash_u64(hash, command.foliageLodIndex);
+    hash = hash_mat4(hash, command.modelMatrix);
+    hash = hash_caster_resolution(hash, registry, command);
+  }
+
+  return hash;
 }
 
 } // namespace engine::renderer

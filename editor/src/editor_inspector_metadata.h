@@ -74,6 +74,11 @@ struct ComponentMetadata final {
   const char *displayName = nullptr;
   const char *category = "General";
   const char *tooltip = nullptr;
+  /// False keeps a component no pass consumes yet out of the Add Component
+  /// menu: an entity that already carries one still shows it in the
+  /// Inspector and can remove it, but an author is not offered a component
+  /// that changes nothing.
+  bool offeredInAddMenu = true;
 };
 
 /// Looks up component metadata by core::TypeDescriptor name
