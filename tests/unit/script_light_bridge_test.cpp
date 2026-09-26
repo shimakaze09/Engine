@@ -3,7 +3,9 @@
 // ops carry the full entity handle, so a handle whose generation the
 // World has recycled is refused rather than re-targeted to the index's
 // new occupant; the immediate (Input-phase) Lua path and the deferred
-// (BeginPlay-queued, flushed) Lua path both apply through the same ops.
+// (queued outside Input, flushed) Lua path both apply through the same
+// ops, and a queued add is visible to the getters and setters before the
+// flush.
 
 #include <cstdio>
 #include <cstring>
@@ -43,11 +45,15 @@ bool write_file_at(const char *path, const char *contents) noexcept {
   return ok;
 }
 
-/// Runs one begin-play dispatch in the pipeline's fixed order, flushing
-/// after it exactly as stage_play_transitions does.
-void run_begin_play_phase(rt::World *world) noexcept {
+/// Runs one begin-play dispatch while the World is mid-simulation, where
+/// no mutation applies at once, so every light call in the callback takes
+/// the queued path. The flush is left to the caller, which checks the
+/// World before and after it.
+void run_begin_play_while_simulating(rt::World *world) noexcept {
+  world->begin_update_phase();
   sc::dispatch_entity_scripts_begin_play(world);
-  sc::flush_deferred_mutations();
+  world->commit_update_phase();
+  world->end_frame_phase();
 }
 
 // Main script: the immediate path adds and removes lights while the World
@@ -99,8 +105,8 @@ constexpr const char *kScript =
     "    end\n"
     "end\n";
 
-// Entity module: on_begin_play runs outside the Input phase, so both calls
-// queue and apply only at the flush that follows the phase.
+// Entity module: its on_begin_play runs while the World is mid-simulation,
+// so both calls queue and apply only at the flush that follows.
 constexpr const char *kModule =
     "local M = {}\n"
     "function M.on_begin_play(self)\n"
@@ -244,10 +250,14 @@ int main() {
   ctx.check(world->add_spot_light_component(scripted, preSpot),
             "scripted entity starts with a spot light to remove");
 
-  run_begin_play_phase(world.get());
+  run_begin_play_while_simulating(world.get());
 
   ctx.check(sc::call_script_function("verify_begin_play_completed"),
             "on_begin_play ran to completion");
+  ctx.check(!world->has_point_light_component(scripted) &&
+                world->has_spot_light_component(scripted),
+            "the callback's light calls were queued, not applied");
+  sc::flush_deferred_mutations();
   rt::PointLightComponent queuedPoint{};
   ctx.check(world->get_point_light_component(scripted, &queuedPoint),
             "queued add_point_light applied at flush");
