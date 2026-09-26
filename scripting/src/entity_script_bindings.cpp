@@ -50,6 +50,10 @@ constexpr std::size_t kMaxModuleLoadDepth = 32U;
 constexpr std::size_t kInvalidModuleSlot = kMaxEntityScriptModules;
 constexpr std::size_t kMaxScriptDispatchEntries = ENGINE_MAX_ENTITIES;
 constexpr std::size_t kMaxCaptureDepth = 2U;
+/// Begin-play passes one dispatch runs: each pass delivers to the entities
+/// the previous one spawned, so a spawn chain deeper than this finishes on
+/// the next frame's dispatch.
+constexpr std::size_t kMaxBeginPlayPasses = 8U;
 constexpr std::size_t kScriptPathSize =
     runtime::ScriptComponent::kMaxPathLength + 1U;
 
@@ -79,6 +83,12 @@ std::size_t g_moduleLoadDepth = 0U;
 int g_endPlayDispatchDepth = 0;
 core::Entity g_scriptDispatchOrder[kMaxScriptDispatchEntries]{};
 core::Entity g_reloadDispatchOrder[kMaxScriptDispatchEntries]{};
+core::Entity g_beginPlayOrder[kMaxScriptDispatchEntries]{};
+// Begin-play dispatch that last attempted each entity index, so one dispatch
+// attempts an entity once however many passes it runs: an entity whose
+// module failed to load stays pending for the next frame's retry.
+std::uint32_t g_beginPlayAttempt[kMaxFaultedEntities]{};
+std::uint32_t g_beginPlayDispatch = 0U;
 core::Entity g_captureOrder[kMaxCaptureDepth][kMaxScriptDispatchEntries]{};
 std::size_t g_captureDepth = 0U;
 
@@ -753,16 +763,46 @@ void end_play_visit(core::Entity entity, void *context) noexcept {
   dispatch_entity_end_play(static_cast<runtime::World *>(context), entity);
 }
 
-/// Bridge visitor: begins play for one entity that still needs it.
-void begin_play_visit(core::Entity entity, void *context) noexcept {
-  auto *world = static_cast<runtime::World *>(context);
-  const RuntimeServices &services = *runtime_binding().services;
+/// Bridge visitor state for one begin-play snapshot pass.
+struct BeginPlaySnapshot final {
+  runtime::World *world = nullptr;
+  std::size_t count = 0U;
+};
+
+/// Bridge visitor: settles an entity with nothing to call (no script, or a
+/// faulted one) on the spot, and records a scripted entity this dispatch
+/// has not attempted yet. Nothing here calls Lua, so the walk sees no
+/// creation or destruction.
+void begin_play_snapshot_visit(core::Entity entity, void *context) noexcept {
+  auto *snapshot = static_cast<BeginPlaySnapshot *>(context);
   char path[kScriptPathSize] = {};
-  if (!copy_entity_script_path(world, entity, path) ||
+  if (!copy_entity_script_path(snapshot->world, entity, path) ||
       entity_is_faulted(entity)) {
-    services.mark_begin_play_done(world, entity);
+    runtime_binding().services->mark_begin_play_done(snapshot->world, entity);
     return;
   }
+  if ((entity.index >= kMaxFaultedEntities) ||
+      (g_beginPlayAttempt[entity.index] == g_beginPlayDispatch) ||
+      (snapshot->count >= kMaxScriptDispatchEntries)) {
+    return;
+  }
+  g_beginPlayAttempt[entity.index] = g_beginPlayDispatch;
+  g_beginPlayOrder[snapshot->count] = entity;
+  ++snapshot->count;
+}
+
+/// Begins play for one snapshotted entity that still needs it. A module
+/// that fails to load leaves the entity pending.
+void begin_play_entity(runtime::World *world, core::Entity entity) noexcept {
+  const RuntimeServices &services = *runtime_binding().services;
+  char path[kScriptPathSize] = {};
+  if (!world_entity_alive(world, entity) ||
+      services.has_begun_play(world, entity) ||
+      !copy_entity_script_path(world, entity, path) ||
+      entity_is_faulted(entity)) {
+    return;
+  }
+  arm_debug_lua_hook(g_state);
   const int ref = get_or_load_entity_script_module(path);
   if (ref == LUA_NOREF) {
     return;
@@ -829,10 +869,30 @@ void dispatch_entity_scripts_begin_play(runtime::World *world) noexcept {
   if ((g_state == nullptr) || (world == nullptr) || !runtime_bound()) {
     return;
   }
+  ENGINE_ASSERT_MAIN_THREAD();
   ++g_modulePollSerial;
+  ++g_beginPlayDispatch;
+  if (g_beginPlayDispatch == 0U) {
+    // Zero is every index's initial stamp; skipping it keeps a wrapped
+    // counter from reading all of them as already attempted.
+    g_beginPlayDispatch = 1U;
+  }
 
-  runtime_binding().services->for_each_needs_begin_play(
-      world, &begin_play_visit, world);
+  // Each pass snapshots the pending entities first and calls Lua after, so
+  // a callback may create or destroy entities: what it spawns is pending
+  // for the next pass, and what it destroys is skipped.
+  for (std::size_t pass = 0U; pass < kMaxBeginPlayPasses; ++pass) {
+    BeginPlaySnapshot snapshot{};
+    snapshot.world = world;
+    runtime_binding().services->for_each_needs_begin_play(
+        world, &begin_play_snapshot_visit, &snapshot);
+    if (snapshot.count == 0U) {
+      return;
+    }
+    for (std::size_t i = 0U; i < snapshot.count; ++i) {
+      begin_play_entity(world, g_beginPlayOrder[i]);
+    }
+  }
 }
 
 bool in_end_play_dispatch() noexcept { return g_endPlayDispatchDepth > 0; }

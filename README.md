@@ -284,7 +284,9 @@ The runtime exposes an `engine` table to Lua scripts.
 Current script conventions in `assets/`:
 
 - Scene-level module (`assets/main.lua`)
-	- `M.on_begin_play(self)` is called once when play starts
+	- `M.on_begin_play(self)` is called once when play starts, or when
+	  the entity is created during play. It may spawn entities and attach
+	  scripts; an entity spawned there begins play later in the same frame
 	- `M.on_fixed_tick(self, dt)` is called once per fixed step, with the
 	  fixed delta. Input queries made inside it (`engine.is_key_pressed`,
 	  `engine.is_action_pressed`, gamepad and mouse reads) answer for that

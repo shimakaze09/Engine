@@ -5,17 +5,23 @@
 // buffer came back as a different value with no error. Driven through the
 // production bindings with the save slot replaced by memory, so the
 // observation point is the JSON the bindings write and read.
+//
+// Size is bounded by the save slot's document ceiling alone: thousands of
+// keys and a 1 MiB string round-trip, and a table whose document passes the
+// ceiling is refused with the previous save intact.
 
 #include "../test_harness.h"
 #include "engine/core/service_locator.h"
 #include "engine/runtime/scripting_bridge.h"
 #include "engine/runtime/world.h"
+#include "engine/scripting/runtime_services.h"
 #include "engine/scripting/scripting.h"
 
 #include <cstdio>
 #include <cstring>
 #include <memory>
 #include <new>
+#include <string>
 
 namespace sc = engine::scripting;
 namespace rt = engine::runtime;
@@ -24,17 +30,16 @@ namespace {
 
 constexpr const char *kScriptPath = "save_data_bindings_test.lua";
 
-/// The in-memory save slot standing in for the on-disk one.
-char g_slot[16U * 1024U] = {};
-std::size_t g_slotLength = 0U;
+/// The in-memory save slot standing in for the on-disk one, holding up to
+/// the ceiling the runtime's slot enforces.
+std::string g_slot{};
 bool g_slotWritten = false;
 
 bool memory_save(const char *json, std::size_t length) noexcept {
-  if ((json == nullptr) || (length > sizeof(g_slot))) {
+  if ((json == nullptr) || (length > sc::kMaxGameSaveBytes)) {
     return false;
   }
-  std::memcpy(g_slot, json, length);
-  g_slotLength = length;
+  g_slot.assign(json, length);
   g_slotWritten = true;
   return true;
 }
@@ -42,22 +47,23 @@ bool memory_save(const char *json, std::size_t length) noexcept {
 bool memory_load(char *out, std::size_t capacity,
                  std::size_t *outLength) noexcept {
   if (!g_slotWritten || (out == nullptr) || (outLength == nullptr) ||
-      (g_slotLength > capacity)) {
+      (g_slot.size() >= capacity)) {
     return false;
   }
-  std::memcpy(out, g_slot, g_slotLength);
-  *outLength = g_slotLength;
+  std::memcpy(out, g_slot.data(), g_slot.size());
+  out[g_slot.size()] = '\0';
+  *outLength = g_slot.size();
   return true;
 }
 
 /// Plants a document the production writer would never produce.
-void plant_slot(const char *json) noexcept {
-  g_slotLength = std::strlen(json);
-  std::memcpy(g_slot, json, g_slotLength);
+void plant_slot(const char *json) {
+  g_slot.assign(json);
   g_slotWritten = true;
 }
 
-bool write_script_file(const char *code) noexcept {
+bool write_script_file(const std::string &script) noexcept {
+  const char *code = script.c_str();
   std::FILE *file = nullptr;
 #ifdef _WIN32
   if (fopen_s(&file, kScriptPath, "wb") != 0) {
@@ -76,6 +82,7 @@ bool write_script_file(const char *code) noexcept {
 
 // Each case raises on a failed expectation, so call_script_function
 // reports it as false. `same` pins value and Lua number subtype alike.
+// CEILING, the save ceiling in bytes, is defined ahead of this text.
 constexpr const char *kScript =
     "local function expect(cond, what) if not cond then error(what) end end\n"
     "local function same(t)\n"
@@ -110,14 +117,29 @@ constexpr const char *kScript =
     "  for i = 1, 64 do t['k' .. i] = i end\n"
     "  same(t)\n"
     "end\n"
-    "function refuse_keys_past_cap()\n"
+    "function case_many_keys()\n"
     "  local t = {}\n"
-    "  for i = 1, 65 do t['k' .. i] = i end\n"
-    "  expect(engine.save_data(t) == false, 'accepted 65 keys')\n"
+    "  for i = 1, 5000 do t['key' .. i] = string.rep('v', 200) .. i end\n"
+    "  same(t)\n"
     "end\n"
-    "function refuse_string_past_cap()\n"
-    "  expect(engine.save_data({s = string.rep('s', 256)}) == false,\n"
-    "         'accepted a 256-byte string')\n"
+    "function case_long_string()\n"
+    "  local period = {}\n"
+    "  for i = 1, 90 do period[i] = string.char(32 + i) end\n"
+    "  local blob = string.rep(table.concat(period), 11650)\n"
+    "  blob = blob .. string.rep('~', 1024 * 1024 - #blob)\n"
+    "  same({blob = blob, after = 'tail'})\n"
+    "end\n"
+    "function refuse_past_ceiling()\n"
+    "  expect(engine.save_data({s = string.rep('s', CEILING)}) == false,\n"
+    "         'accepted a document past the ceiling')\n"
+    "  local t = {}\n"
+    "  for i = 1, CEILING // 1024 do t['k' .. i] = string.rep('v', 1024) end\n"
+    "  expect(engine.save_data(t) == false,\n"
+    "         'accepted a many-key document past the ceiling')\n"
+    "end\n"
+    "function refuse_embedded_nul()\n"
+    "  expect(engine.save_data({s = 'a\\0b'}) == false,\n"
+    "         'accepted a string holding a NUL byte')\n"
     "end\n"
     "function refuse_key_past_cap()\n"
     "  local t = {}\n"
@@ -133,10 +155,11 @@ constexpr const char *kScript =
     "end\n"
     "function previous_survives_failed_save()\n"
     "  expect(engine.save_data({keep = 42}) == true, 'first save refused')\n"
-    "  expect(engine.save_data({s = string.rep('s', 256)}) == false,\n"
+    "  expect(engine.save_data({s = string.rep('s', CEILING)}) == false,\n"
     "         'oversize save accepted')\n"
     "  local back = engine.load_data()\n"
-    "  expect(type(back) == 'table' and back.keep == 42, 'previous save lost')\n"
+    "  expect(type(back) == 'table' and back.keep == 42, 'previous save "
+    "lost')\n"
     "end\n"
     "function load_refused() expect(engine.load_data() == nil,\n"
     "                               'a corrupt save loaded') end\n";
@@ -163,7 +186,9 @@ int main() {
   sc::bind_runtime_services(&services, serviceLocator);
 
   engine::tests::TestContext ctx;
-  ctx.check(write_script_file(kScript), "write test script");
+  const std::string script =
+      "CEILING = " + std::to_string(sc::kMaxGameSaveBytes) + "\n" + kScript;
+  ctx.check(write_script_file(script), "write test script");
   ctx.check(sc::load_script(kScriptPath), "load test script");
 
   ctx.check(sc::call_script_function("case_empty"), "empty table");
@@ -184,10 +209,15 @@ int main() {
             "a 127-byte key round-trips");
   ctx.check(sc::call_script_function("case_keys_at_cap"),
             "64 keys round-trip");
-  ctx.check(sc::call_script_function("refuse_keys_past_cap"),
-            "65 keys are refused");
-  ctx.check(sc::call_script_function("refuse_string_past_cap"),
-            "a 256-byte string is refused");
+  ctx.check(sc::call_script_function("case_many_keys"), "5000 keys round-trip");
+  ctx.check(g_slot.size() > 1024U * 1024U,
+            "the 5000-key document is over 1 MiB");
+  ctx.check(sc::call_script_function("case_long_string"),
+            "a 1 MiB string round-trips");
+  ctx.check(sc::call_script_function("refuse_past_ceiling"),
+            "a document past the save ceiling is refused");
+  ctx.check(sc::call_script_function("refuse_embedded_nul"),
+            "a string holding a NUL byte is refused");
   ctx.check(sc::call_script_function("refuse_key_past_cap"),
             "a 128-byte key is refused");
   ctx.check(sc::call_script_function("refuse_nonfinite"),

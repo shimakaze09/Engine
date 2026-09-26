@@ -1,6 +1,7 @@
 // Owns Lua persistence bindings for the Engine scripting system: the
 // in-memory hot-reload persist table plus the on-disk single-slot save
-// (engine.save_data / engine.load_data, flat table <-> JSON).
+// (engine.save_data / engine.load_data, flat table <-> JSON, bounded by the
+// save slot's document ceiling rather than by per-key or per-value caps).
 
 #include "persist_bindings.h"
 
@@ -26,14 +27,12 @@ namespace {
 
 int g_persistRef = LUA_NOREF;
 
-constexpr std::size_t kMaxSaveKeys = 64U;
-constexpr std::size_t kMaxSaveJsonBytes = 16U * 1024U;
-// Save and load share one width per field: the loader copies into buffers
-// of exactly these sizes and refuses anything that does not fit, so the
-// writer refuses the same values up front instead of producing a file the
-// loader will reject. Both counts include the terminator.
+// A key names a value, so it is identity-bearing and has a fixed width:
+// the loader copies it into a buffer of exactly this size and refuses one
+// that does not fit, so the writer refuses the same keys up front instead
+// of producing a file the loader will reject. Includes the terminator.
+// Key count and string values are bounded only by the document ceiling.
 constexpr std::size_t kMaxSaveKeyBytes = 128U;
-constexpr std::size_t kMaxSaveTextBytes = 256U;
 
 /// Logs why engine.save_data refused the table; the script sees false.
 void log_save_refusal(const char *key, const char *reason) noexcept {
@@ -57,6 +56,16 @@ int refuse_load(lua_State *state, std::size_t entryIndex,
   lua_pop(state, 1);
   lua_pushnil(state);
   return 1;
+}
+
+/// Logs a save refused for exceeding the document ceiling.
+void log_oversized_save() noexcept {
+  char message[160] = {};
+  std::snprintf(message, sizeof(message),
+                "engine.save_data refused: the document is larger than the "
+                "%zu-byte save ceiling; nothing was written",
+                kMaxGameSaveBytes);
+  core::log_message(core::LogLevel::Error, "scripting", message);
 }
 
 } // namespace
@@ -111,7 +120,6 @@ int lua_engine_save_data(lua_State *state) noexcept {
   core::JsonWriter writer{};
   writer.begin_object();
   writer.begin_array("entries");
-  std::size_t keyCount = 0U;
   bool valid = true;
   lua_pushnil(state);
   while (lua_next(state, 1) != 0) {
@@ -123,12 +131,6 @@ int lua_engine_save_data(lua_State *state) noexcept {
     }
     std::size_t keyLength = 0U;
     const char *key = lua_tolstring(state, -2, &keyLength);
-    if (keyCount >= kMaxSaveKeys) {
-      log_save_refusal(key, "more than 64 keys");
-      valid = false;
-      lua_pop(state, 2);
-      break;
-    }
     if ((keyLength >= kMaxSaveKeyBytes) || (std::strlen(key) != keyLength)) {
       log_save_refusal(nullptr, "a key is longer than 127 bytes or holds an "
                                 "embedded NUL");
@@ -159,10 +161,8 @@ int lua_engine_save_data(lua_State *state) noexcept {
     } else if (valueType == LUA_TSTRING) {
       std::size_t textLength = 0U;
       const char *text = lua_tolstring(state, -1, &textLength);
-      if ((textLength >= kMaxSaveTextBytes) ||
-          (std::strlen(text) != textLength)) {
-        reason = "the string is longer than 255 bytes or holds an embedded "
-                 "NUL";
+      if (std::strlen(text) != textLength) {
+        reason = "the string holds an embedded NUL";
       } else {
         writer.begin_object();
         writer.write_string("k", key);
@@ -183,15 +183,26 @@ int lua_engine_save_data(lua_State *state) noexcept {
       lua_pop(state, 2);
       break;
     }
-    ++keyCount;
+    // Checked per entry so a table far past the ceiling stops here
+    // rather than growing the writer to hold all of it.
+    if (writer.failed() || (writer.result_size() > kMaxGameSaveBytes)) {
+      log_oversized_save();
+      valid = false;
+      lua_pop(state, 2);
+      break;
+    }
     lua_pop(state, 1);
   }
   writer.end_array();
   writer.end_object();
 
   bool ok = false;
-  if (valid && !writer.failed() &&
-      (writer.result_size() <= kMaxSaveJsonBytes)) {
+  if (valid &&
+      (writer.failed() || (writer.result_size() > kMaxGameSaveBytes))) {
+    log_oversized_save();
+    valid = false;
+  }
+  if (valid) {
     ok = runtime_binding().services->save_game_data(writer.result(),
                                                     writer.result_size());
   }
@@ -206,13 +217,21 @@ int lua_engine_load_data(lua_State *state) noexcept {
     return 1;
   }
 
-  static char buffer[kMaxSaveJsonBytes + 1U];
+  // A cold path: one ceiling-sized buffer from the Lua heap per load, kept
+  // alive by its stack slot while the parser points into it and collected
+  // after the call. Only the top value is returned, so the slot needs no
+  // cleanup on any exit.
+  auto *buffer =
+      static_cast<char *>(lua_newuserdatauv(state, kMaxGameSaveBytes + 1U, 0));
   std::size_t length = 0U;
-  if (!runtime_binding().services->load_game_data(buffer, sizeof(buffer),
-                                                  &length)) {
+  if (!runtime_binding().services->load_game_data(
+          buffer, kMaxGameSaveBytes + 1U, &length)) {
     lua_pushnil(state);
     return 1;
   }
+  // Every decoded string fits in the document it came from, so one
+  // scratch buffer of the document's size holds any value.
+  auto *text = static_cast<char *>(lua_newuserdatauv(state, length + 1U, 0));
 
   core::JsonParser parser{};
   const core::JsonValue *root = nullptr;
@@ -250,7 +269,6 @@ int lua_engine_load_data(lua_State *state) noexcept {
     std::int64_t integer = 0;
     double number = 0.0;
     bool flag = false;
-    char text[kMaxSaveTextBytes] = {};
     if (value.type == core::JsonValue::Type::Number) {
       // Integer literals read back as Lua integers, everything else as
       // the double the writer produced at round-trip precision.
@@ -267,10 +285,14 @@ int lua_engine_load_data(lua_State *state) noexcept {
       }
       lua_pushboolean(state, flag ? 1 : 0);
     } else if (value.type == core::JsonValue::Type::String) {
-      if (!parser.copy_string_strict(value, text, sizeof(text))) {
-        return refuse_load(state, i, "has a string longer than 255 bytes");
+      std::size_t textLength = 0U;
+      if (!parser.copy_string(value, text, length + 1U, &textLength) ||
+          (textLength > length) || (std::strlen(text) != textLength)) {
+        return refuse_load(state, i,
+                           "has a string that does not decode or "
+                           "holds a NUL byte");
       }
-      lua_pushstring(state, text);
+      lua_pushlstring(state, text, textLength);
     } else {
       return refuse_load(state, i, "has a value that is not a number, "
                                    "string or boolean");

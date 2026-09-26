@@ -24,8 +24,12 @@ namespace engine::runtime {
 
 namespace {
 
-// Controller slots allocate on first acquire (~114 KB each) so the
-// registry costs nothing until a scene actually animates.
+static_assert(kMaxAnimControllers >= World::kMaxAnimationComponents,
+              "every animation component must be able to hold a controller "
+              "of its own");
+
+// Controller slots allocate on first acquire, sized to the controller's
+// own tables, so the registry costs nothing until a scene animates.
 std::unique_ptr<AnimControllerData> g_controllers[kMaxAnimControllers]{};
 
 FiredAnimEvent g_firedEvents[kMaxFiredAnimEvents]{};
@@ -46,6 +50,29 @@ std::size_t g_pendingParamCount = 0U;
 void log_controller_error(const char *path, const char *reason) noexcept {
   core::log_path_diagnostic(core::LogLevel::Error, core::LogChannel::Animation,
                             path, reason);
+}
+
+/// Allocates one controller table of `count` entries. A count past
+/// `ceiling` refuses the controller, naming the file, the table and the
+/// ceiling, so an oversized asset is reported rather than cut short.
+template <typename T>
+bool allocate_table(const char *path, const char *table, std::size_t count,
+                    std::size_t ceiling, core::NothrowBuffer<T> &out) noexcept {
+  char reason[160] = {};
+  if (count > ceiling) {
+    std::snprintf(reason, sizeof(reason),
+                  "controller declares %zu %s; the limit is %zu", count, table,
+                  ceiling);
+    log_controller_error(path, reason);
+    return false;
+  }
+  if (!out.allocate(count)) {
+    std::snprintf(reason, sizeof(reason),
+                  "controller %s table allocation failed", table);
+    log_controller_error(path, reason);
+    return false;
+  }
+  return true;
 }
 
 /// Index of the named clip in the controller; kInvalidAnimSlot when absent.
@@ -98,7 +125,8 @@ bool read_string_field(const core::JsonParser &parser,
 }
 
 /// Parses the "clips" array: name + cooked .anim path per element.
-bool parse_controller_clips(const core::JsonParser &parser,
+bool parse_controller_clips(const char *controllerPath,
+                            const core::JsonParser &parser,
                             const core::JsonValue &root,
                             AnimControllerData &controller) noexcept {
   core::JsonValue clipsValue{};
@@ -106,7 +134,11 @@ bool parse_controller_clips(const core::JsonParser &parser,
     return false;
   }
   const std::size_t clipCount = parser.array_size(clipsValue);
-  if ((clipCount == 0U) || (clipCount > kMaxAnimClips)) {
+  if ((clipCount == 0U) ||
+      !allocate_table(controllerPath, "clips", clipCount, kMaxAnimClips,
+                      controller.clips) ||
+      !allocate_table(controllerPath, "clips", clipCount, kMaxAnimClips,
+                      controller.clipNameHashes)) {
     return false;
   }
   for (std::size_t i = 0U; i < clipCount; ++i) {
@@ -128,7 +160,8 @@ bool parse_controller_clips(const core::JsonParser &parser,
 }
 
 /// Parses the "states" array: name, clip reference, loop, speed.
-bool parse_controller_states(const core::JsonParser &parser,
+bool parse_controller_states(const char *controllerPath,
+                             const core::JsonParser &parser,
                              const core::JsonValue &root,
                              AnimControllerData &controller) noexcept {
   core::JsonValue statesValue{};
@@ -136,7 +169,9 @@ bool parse_controller_states(const core::JsonParser &parser,
     return false;
   }
   const std::size_t stateCount = parser.array_size(statesValue);
-  if ((stateCount == 0U) || (stateCount > kMaxAnimStates)) {
+  if ((stateCount == 0U) ||
+      !allocate_table(controllerPath, "states", stateCount, kMaxAnimStates,
+                      controller.states)) {
     return false;
   }
   for (std::size_t i = 0U; i < stateCount; ++i) {
@@ -174,7 +209,8 @@ bool parse_controller_states(const core::JsonParser &parser,
 
 /// Parses the optional "transitions" array: from/to states, parameter,
 /// comparison ("<", ">", "=="), threshold, and blend seconds.
-bool parse_controller_transitions(const core::JsonParser &parser,
+bool parse_controller_transitions(const char *controllerPath,
+                                  const core::JsonParser &parser,
                                   const core::JsonValue &root,
                                   AnimControllerData &controller) noexcept {
   core::JsonValue transitionsValue{};
@@ -182,7 +218,8 @@ bool parse_controller_transitions(const core::JsonParser &parser,
     return true;
   }
   const std::size_t transitionCount = parser.array_size(transitionsValue);
-  if (transitionCount > kMaxAnimTransitions) {
+  if (!allocate_table(controllerPath, "transitions", transitionCount,
+                      kMaxAnimTransitions, controller.transitions)) {
     return false;
   }
   for (std::size_t i = 0U; i < transitionCount; ++i) {
@@ -237,7 +274,8 @@ bool parse_controller_transitions(const core::JsonParser &parser,
 }
 
 /// Parses the optional "events" array: clip reference, time, event name.
-bool parse_controller_events(const core::JsonParser &parser,
+bool parse_controller_events(const char *controllerPath,
+                             const core::JsonParser &parser,
                              const core::JsonValue &root,
                              AnimControllerData &controller) noexcept {
   core::JsonValue eventsValue{};
@@ -245,7 +283,8 @@ bool parse_controller_events(const core::JsonParser &parser,
     return true;
   }
   const std::size_t eventCount = parser.array_size(eventsValue);
-  if (eventCount > kMaxAnimEvents) {
+  if (!allocate_table(controllerPath, "events", eventCount, kMaxAnimEvents,
+                      controller.events)) {
     return false;
   }
   for (std::size_t i = 0U; i < eventCount; ++i) {
@@ -292,10 +331,10 @@ bool parse_controller(const char *virtualPath,
         read_string_field(parser, *root, "skeleton", skeletonPath,
                           sizeof(skeletonPath)) &&
         load_skeleton_asset(skeletonPath, &controller.skeleton) &&
-        parse_controller_clips(parser, *root, controller) &&
-        parse_controller_states(parser, *root, controller) &&
-        parse_controller_transitions(parser, *root, controller) &&
-        parse_controller_events(parser, *root, controller)) {
+        parse_controller_clips(virtualPath, parser, *root, controller) &&
+        parse_controller_states(virtualPath, parser, *root, controller) &&
+        parse_controller_transitions(virtualPath, parser, *root, controller) &&
+        parse_controller_events(virtualPath, parser, *root, controller)) {
       // "initial" is optional (state 0 when absent) but, once present,
       // must be a state name the buffer can hold, like every other name.
       char initial[64] = {};

@@ -203,24 +203,6 @@ void World::end_frame_phase() noexcept {
 
 WorldPhase World::current_phase() const noexcept { return m_phase; }
 
-void World::begin_begin_play_phase() noexcept {
-  if (m_phase != WorldPhase::Input) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "begin_begin_play_phase requires Input phase");
-    return;
-  }
-  m_phase = WorldPhase::BeginPlay;
-}
-
-void World::end_begin_play_phase() noexcept {
-  if (m_phase != WorldPhase::BeginPlay) {
-    core::log_message(core::LogLevel::Error, "world",
-                      "end_begin_play_phase requires BeginPlay phase");
-    return;
-  }
-  m_phase = WorldPhase::Input;
-}
-
 void World::mark_begin_play_done(Entity entity) noexcept {
   if (!is_valid_entity(entity)) {
     return;

@@ -213,19 +213,21 @@ int main() {
   ctx.check(vec3_equals(rigidBody->acceleration, 500.0F, 0.0F, 0.0F),
             "additional acceleration clamps to the stable envelope");
 
-  // Deferred path: a BeginPlay write queues, applies on flush with the
-  // gravity captured at call time, and wakes the body then.
+  // Deferred path: a write outside the Input phase (here mid-Simulation)
+  // queues, applies on flush with the gravity captured at call time, and
+  // wakes the body then.
   ctx.check(sc::call_script_function("request_zero_total"),
             "reset to zero-total before deferred check");
   rigidBody->sleeping = true;
   rigidBody->sleepFrameCount = 60U;
-  world->begin_begin_play_phase();
+  world->begin_update_phase();
   ctx.check(sc::call_script_function("drop_custom"),
-            "deferred drop call in BeginPlay");
+            "deferred drop call in Simulation");
   ctx.check(vec3_equals(rigidBody->acceleration, 0.0F, 20.0F, 0.0F) &&
                 rigidBody->sleeping,
-            "BeginPlay write stays queued until flush");
-  world->end_begin_play_phase();
+            "Simulation-phase write stays queued until flush");
+  world->commit_update_phase();
+  world->end_frame_phase();
   sc::flush_deferred_mutations();
   ctx.check(vec3_equals(rigidBody->acceleration, 0.0F, 0.0F, 0.0F),
             "flushed drop applies the gravity-composed term");

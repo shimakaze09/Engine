@@ -375,9 +375,7 @@ bool test_tick_destroy_no_skipped_ticks() noexcept {
             (firstWave[3] != engine::runtime::kInvalidEntity);
 
   if (ok) {
-    world->begin_begin_play_phase();
     engine::scripting::dispatch_entity_scripts_begin_play(world);
-    world->end_begin_play_phase();
 
     engine::scripting::dispatch_entity_scripts_update(1.0F / 60.0F);
     ok = engine::scripting::call_script_function("verify_first_frame");
@@ -405,9 +403,7 @@ bool test_tick_destroy_no_skipped_ticks() noexcept {
   }
 
   if (ok) {
-    world->begin_begin_play_phase();
     engine::scripting::dispatch_entity_scripts_begin_play(world);
-    world->end_begin_play_phase();
 
     engine::scripting::dispatch_entity_scripts_update(1.0F / 60.0F);
     ok = engine::scripting::call_script_function("verify_reversed_frame");
@@ -588,9 +584,7 @@ bool test_reload_hook_destroy_delivers_exactly_once() noexcept {
   }
 
   if (ok) {
-    world->begin_begin_play_phase();
     engine::scripting::dispatch_entity_scripts_begin_play(world);
-    world->end_begin_play_phase();
     engine::scripting::dispatch_entity_scripts_update(1.0F / 60.0F);
   }
 
@@ -676,9 +670,7 @@ bool test_save_state_capture_survives_destroy() noexcept {
   }
 
   if (ok) {
-    world->begin_begin_play_phase();
     engine::scripting::dispatch_entity_scripts_begin_play(world);
-    world->end_begin_play_phase();
     engine::scripting::dispatch_entity_scripts_update(1.0F / 60.0F);
   }
 

@@ -51,12 +51,10 @@ bool write_file_at(const char *path, const char *contents) noexcept {
   return ok;
 }
 
-/// Runs one BeginPlay phase in the pipeline's fixed order, flushing after
-/// the phase ends exactly as stage_play_transitions does.
+/// Runs one begin-play dispatch in the pipeline's fixed order, flushing
+/// after it exactly as stage_play_transitions does.
 void run_begin_play_phase(rt::World *world) noexcept {
-  world->begin_begin_play_phase();
   sc::dispatch_entity_scripts_begin_play(world);
-  world->end_begin_play_phase();
   sc::flush_deferred_mutations();
 }
 

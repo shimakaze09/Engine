@@ -72,7 +72,6 @@ using engine::core::PersistentId;
 /// Frame phases the world moves through; mutation is gated on Input.
 enum class WorldPhase : std::uint8_t {
   Input,
-  BeginPlay,
   Simulation,
   TransformPropagation,
   RenderSubmission,
@@ -706,11 +705,8 @@ public:
   }
 
   // Lifecycle phase helpers ------------------------------------------------
-  // BeginPlay: transition Input → BeginPlay. Iterate new entities via
-  // for_each_needs_begin_play, then call end_begin_play_phase.
-  void begin_begin_play_phase() noexcept;
-  /// Ends the requested operation or profiling range for begin play phase.
-  void end_begin_play_phase() noexcept;
+  // BeginPlay needs no phase of its own: dispatch runs in Input, iterating
+  // new entities via for_each_needs_begin_play and marking each done.
 
   // EndPlay: transition Render → EndPlay. Iterate pending-destroy entities
   // via for_each_pending_destroy, then call end_end_play_phase which flushes.
@@ -728,7 +724,7 @@ public:
   }
 
   // Number of alive entities that have not yet received begin_play; lets the
-  // frame loop skip the BeginPlay phase entirely on quiet frames.
+  // frame loop skip begin-play dispatch entirely on quiet frames.
   std::size_t begin_play_pending_count() const noexcept {
     return m_beginPlayPendingCount;
   }

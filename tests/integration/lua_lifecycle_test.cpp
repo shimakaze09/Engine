@@ -188,9 +188,7 @@ bool verify_entity_module_hot_reload(engine::runtime::World *world) noexcept {
     return false;
   }
 
-  world->begin_begin_play_phase();
   engine::scripting::dispatch_entity_scripts_begin_play(world);
-  world->end_begin_play_phase();
   engine::scripting::dispatch_entity_scripts_update(1.0F / 60.0F);
 
   std::error_code error{};
@@ -245,9 +243,7 @@ bool verify_entity_module_hot_reload(engine::runtime::World *world) noexcept {
     return false;
   }
 
-  world->begin_begin_play_phase();
   engine::scripting::dispatch_entity_scripts_begin_play(world);
-  world->end_begin_play_phase();
 
   const char *versionTwo =
       "local M = {}\n"
@@ -517,9 +513,7 @@ bool reset_world_for_island_tests(engine::runtime::World *world) noexcept {
 
 /// Fires begin-play dispatch for entities created by an island test driver.
 void dispatch_begin_play_phase(engine::runtime::World *world) noexcept {
-  world->begin_begin_play_phase();
   engine::scripting::dispatch_entity_scripts_begin_play(world);
-  world->end_begin_play_phase();
 }
 
 /// Verifies two moving platforms driven by the shipped script through the
@@ -1284,9 +1278,7 @@ int main() {
     static_cast<void>(world->add_script_component(entity, sc));
 
     // Dispatch begin_play.
-    world->begin_begin_play_phase();
     engine::scripting::dispatch_entity_scripts_begin_play(world.get());
-    world->end_begin_play_phase();
 
     std::size_t remainingCount = 0U;
     world->for_each_needs_begin_play(
@@ -1401,9 +1393,7 @@ int main() {
     bool ok = engine::scripting::call_script_function("spawn_scripted_pair");
 
     if (ok) {
-      world->begin_begin_play_phase();
       engine::scripting::dispatch_entity_scripts_begin_play(world.get());
-      world->end_begin_play_phase();
       ok = engine::scripting::call_script_function("destroy_scripted_root");
     }
 

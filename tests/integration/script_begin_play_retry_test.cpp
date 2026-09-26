@@ -54,11 +54,9 @@ bool advance_mtime(const char *path) noexcept {
   return !error;
 }
 
-/// Runs one BeginPlay phase exactly as the pipeline does.
+/// Runs one begin-play dispatch exactly as the pipeline does.
 void run_begin_play_phase(rt::World *world) noexcept {
-  world->begin_begin_play_phase();
   sc::dispatch_entity_scripts_begin_play(world);
-  world->end_begin_play_phase();
 }
 
 /// Clears the Lua counters shared by the per-test module files.
