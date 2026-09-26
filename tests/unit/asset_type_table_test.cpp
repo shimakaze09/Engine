@@ -68,6 +68,13 @@ int main() {
             "an empty path is Unknown");
   ctx.check(ct::classify_asset_path("noext").tag == ct::AssetTypeTag::Unknown,
             "a path without a suffix is Unknown");
+  // An environment map is its own kind, not a material texture: it loads
+  // as a cubemap for the scene's image-based light (#580).
+  {
+    const ct::AssetClassification sky = ct::classify_asset_path("sky/dusk.HDR");
+    ctx.check((sky.tag == ct::AssetTypeTag::Environment) && sky.source,
+              "a Radiance .hdr is an Environment source");
+  }
   // The three kinds that used to need their bytes read to be told apart:
   // a suffix names the kind, so the name alone decides.
   ctx.check(ct::classify_asset_path("levels/hub.scene").tag ==

@@ -16,6 +16,7 @@
 *.tga binary
 *.dds binary
 *.ktx2 binary
+*.hdr binary
 *.wav binary
 *.ogg binary
 *.mp3 binary

@@ -40,6 +40,7 @@ HASHED_SUFFIXES = (
     ".tga",
     ".dds",
     ".ktx2",
+    ".hdr",
     ".wav",
     ".ogg",
     ".mp3",
