@@ -91,11 +91,9 @@ rt::Entity make_scripted_entity(rt::World *world) noexcept {
   return entity;
 }
 
-/// Runs one BeginPlay phase exactly as the pipeline does.
+/// Runs one begin-play dispatch exactly as the pipeline does.
 void run_begin_play_phase(rt::World *world) noexcept {
-  world->begin_begin_play_phase();
   sc::dispatch_entity_scripts_begin_play(world);
-  world->end_begin_play_phase();
 }
 
 /// Asserts the Lua-side delivery count, which only a live VM can answer;

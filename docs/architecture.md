@@ -81,9 +81,10 @@ assumption stands.
   stale handle within the supported lifetime; capacity and wrap behavior
   require explicit tests.
 - Creating entities and adding or removing components is legal only in
-  `WorldPhase::Input`. Immediate destruction is legal in `Input`,
-  `BeginPlay` and `EndPlay`; a destroy during `Simulation` is queued for
-  the EndPlay flush. Writable transforms
+  `WorldPhase::Input`, where `on_begin_play` also runs, so a begin-play
+  callback may spawn. Immediate destruction is legal in `Input` and
+  `EndPlay`; a destroy during `Simulation` is queued for the EndPlay
+  flush. Writable transforms
   during Simulation require the `SimulationAccessToken`; every other
   component's mutable pointer is its owning system's write path in the
   phase that system runs and maintains no derived table, so a component

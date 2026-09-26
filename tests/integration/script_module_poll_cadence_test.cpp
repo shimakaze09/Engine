@@ -97,9 +97,7 @@ int main() {
   ctx.check(spawn_scripted(*world, kMissingScript, kEntities),
             "spawn entities naming a missing module");
 
-  world->begin_begin_play_phase();
   sc::dispatch_entity_scripts_begin_play(world.get());
-  world->end_begin_play_phase();
   sc::dispatch_entity_scripts_update(1.0F / 60.0F);
 
   // Steady state: at most one poll per cached module (two here) per frame,

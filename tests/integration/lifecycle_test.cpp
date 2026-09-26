@@ -45,22 +45,15 @@ bool test_lifecycle_begin_play() {
     return false;
   }
 
-  // Transition through BeginPlay phase.
-  world->begin_begin_play_phase();
-  if (world->current_phase() != WorldPhase::BeginPlay) {
-    std::fprintf(stderr, "FAIL: expected BeginPlay phase\n");
+  // Begin-play dispatch runs in the Input phase, where callbacks may spawn.
+  if (world->current_phase() != WorldPhase::Input) {
+    std::fprintf(stderr, "FAIL: expected Input phase for begin play\n");
     return false;
   }
 
   world->for_each_needs_begin_play([&world](Entity entity) noexcept {
     world->mark_begin_play_done(entity);
   });
-
-  world->end_begin_play_phase();
-  if (world->current_phase() != WorldPhase::Input) {
-    std::fprintf(stderr, "FAIL: expected Input phase after end_begin_play\n");
-    return false;
-  }
 
   std::size_t secondCount = 0U;
   world->for_each_needs_begin_play(
@@ -85,9 +78,7 @@ bool test_lifecycle_tick() {
   const Transform t{};
   static_cast<void>(world->add_transform(e1, t));
 
-  world->begin_begin_play_phase();
   world->mark_begin_play_done(e1);
-  world->end_begin_play_phase();
 
   // Simulate 3 update steps.
   constexpr float kDt = 1.0F / 60.0F;
@@ -119,9 +110,7 @@ bool test_lifecycle_end_play() {
   const Transform t{};
   static_cast<void>(world->add_transform(e1, t));
 
-  world->begin_begin_play_phase();
   world->mark_begin_play_done(e1);
-  world->end_begin_play_phase();
 
   // Enter Simulation so destroy is deferred.
   world->begin_update_phase();
@@ -181,14 +170,12 @@ bool test_full_lifecycle_sequence() {
   static_cast<void>(world->add_transform(e1, t));
 
   // BeginPlay fires once.
-  world->begin_begin_play_phase();
   std::size_t beginPlayFired = 0U;
   world->for_each_needs_begin_play(
       [&world, &beginPlayFired](Entity entity) noexcept {
         world->mark_begin_play_done(entity);
         ++beginPlayFired;
       });
-  world->end_begin_play_phase();
 
   if (beginPlayFired != 1U) {
     std::fprintf(stderr, "FAIL: BeginPlay should fire exactly once, got %zu\n",
@@ -200,11 +187,9 @@ bool test_full_lifecycle_sequence() {
   constexpr float kDt = 1.0F / 60.0F;
   std::size_t tickCount = 0U;
   for (int step = 0; step < 3; ++step) {
-    world->begin_begin_play_phase();
     std::size_t extraBeginPlay = 0U;
     world->for_each_needs_begin_play(
         [&extraBeginPlay](Entity) noexcept { ++extraBeginPlay; });
-    world->end_begin_play_phase();
 
     if (extraBeginPlay != 0U) {
       std::fprintf(stderr, "FAIL: BeginPlay should not fire again on tick %d\n",
@@ -268,9 +253,7 @@ bool test_deferred_destroy_survives_end_frame() {
   const Transform t{};
   static_cast<void>(world->add_transform(e1, t));
 
-  world->begin_begin_play_phase();
   world->mark_begin_play_done(e1);
-  world->end_begin_play_phase();
 
   world->begin_update_phase();
   if (!world->destroy_entity(e1)) {

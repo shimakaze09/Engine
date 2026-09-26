@@ -353,6 +353,16 @@ engine_add_test_executable(engine_integration_player_mode
     integration
 )
 
+engine_add_test_executable(engine_integration_main_script_setup
+    SOURCES
+    main_script_setup_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_scripting
+    LABELS
+    integration
+)
+
 engine_add_test_executable(engine_integration_pipeline_lifetime
     SOURCES
     pipeline_lifetime_test.cpp
@@ -666,6 +676,16 @@ engine_add_test_executable(engine_integration_lua_lifecycle
 engine_add_test_executable(engine_integration_script_begin_play_retry
     SOURCES
     script_begin_play_retry_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_scripting
+    LABELS
+    integration
+)
+
+engine_add_test_executable(engine_integration_script_begin_play_spawn
+    SOURCES
+    script_begin_play_spawn_test.cpp
     PRIVATE_DEPS
     engine_runtime
     engine_scripting

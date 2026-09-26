@@ -1248,15 +1248,14 @@ void EnginePipeline::Impl::stage_play_transitions() noexcept {
     playState = LoopPlayState::Stopped;
   }
 
-  // Fire BeginPlay for entities that haven't received it yet. Skip the phase
-  // entirely on frames with no pending entities (the common case).
+  // Fire BeginPlay for entities that haven't received it yet, in the Input
+  // phase so on_begin_play can spawn and mutate like the Start dispatch
+  // above. Skipped on frames with no pending entities (the common case).
   if ((playState == LoopPlayState::Playing) &&
       (world->begin_play_pending_count() > 0U)) {
-    world->begin_begin_play_phase();
     scripting::dispatch_entity_scripts_begin_play(world.get());
-    world->end_begin_play_phase();
-    // Flush after leaving the phase: mutations only apply in Input, so a
-    // flush inside BeginPlay is a no-op and the writes miss the first step.
+    // Anything a callback queued rather than applied lands before the
+    // first step.
     scripting::flush_deferred_mutations();
   }
 

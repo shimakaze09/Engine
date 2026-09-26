@@ -510,8 +510,7 @@ bool World::recycle_entity(Entity entity, Entity *outRecycled) noexcept {
   if ((outRecycled == nullptr) || !is_valid_entity(entity)) {
     return false;
   }
-  if ((m_phase != WorldPhase::Input) && (m_phase != WorldPhase::BeginPlay) &&
-      (m_phase != WorldPhase::EndPlay)) {
+  if ((m_phase != WorldPhase::Input) && (m_phase != WorldPhase::EndPlay)) {
     core::log_message(core::LogLevel::Warning, "world",
                       "recycle_entity refused outside a mutation phase");
     return false;
@@ -560,8 +559,7 @@ bool World::activate_recycled_entity(Entity entity) noexcept {
   if (!is_valid_entity(entity)) {
     return false;
   }
-  if ((m_phase != WorldPhase::Input) && (m_phase != WorldPhase::BeginPlay) &&
-      (m_phase != WorldPhase::EndPlay)) {
+  if ((m_phase != WorldPhase::Input) && (m_phase != WorldPhase::EndPlay)) {
     core::log_message(core::LogLevel::Warning, "world",
                       "activate_recycled_entity refused outside a mutation "
                       "phase");
@@ -608,9 +606,8 @@ bool World::destroy_entity(Entity entity) noexcept {
     return queue_deferred_destroy(entity);
   }
 
-  // Immediate destruction is allowed during Input, BeginPlay, and EndPlay.
-  if (m_phase != WorldPhase::Input && m_phase != WorldPhase::BeginPlay &&
-      m_phase != WorldPhase::EndPlay) {
+  // Immediate destruction is allowed during Input and EndPlay.
+  if ((m_phase != WorldPhase::Input) && (m_phase != WorldPhase::EndPlay)) {
     return false;
   }
 

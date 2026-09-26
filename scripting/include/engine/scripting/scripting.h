@@ -181,7 +181,11 @@ void check_script_reload() noexcept;
 // call module.on_begin_play(self) for each entity. Call once on Play start.
 void dispatch_entity_scripts_start() noexcept;
 
-// Dispatch on_begin_play for entities that need it (newly created).
+// Dispatch on_begin_play for entities that need it (newly created), in the
+// World's Input phase, so a callback may spawn and mutate like any other
+// script code. The pending set is snapshotted before any callback runs;
+// entities a callback spawns begin play in a later pass of the same call,
+// up to a bounded pass count, after which the rest wait for the next call.
 // Marks begin_play done on delivery; a failed module load leaves the
 // entity pending and retries under the mtime-gated attempt budget.
 void dispatch_entity_scripts_begin_play(runtime::World *world) noexcept;

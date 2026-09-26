@@ -605,10 +605,8 @@ bool test_pool_cross_pool_release_refused() {
 /// Runs one production-style BeginPlay dispatch pass: every entity still
 /// needing begin_play is marked done, as the scripting dispatcher does.
 void run_begin_play_pass(World *world) {
-  world->begin_begin_play_phase();
   world->for_each_needs_begin_play(
       [&](Entity entity) noexcept { world->mark_begin_play_done(entity); });
-  world->end_begin_play_phase();
 }
 
 /// EXPECTATION (review item 5): dormant pool entities keep BeginPlay

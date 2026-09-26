@@ -74,9 +74,7 @@ void cleanup_files() noexcept {
 /// Fires begin-play dispatch and applies the deferred mutations exactly
 /// like the pipeline's play stages do.
 void dispatch_begin_play(engine::runtime::World &world) noexcept {
-  world.begin_begin_play_phase();
   engine::scripting::dispatch_entity_scripts_begin_play(&world);
-  world.end_begin_play_phase();
   engine::scripting::flush_deferred_mutations();
 }
 
