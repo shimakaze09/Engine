@@ -6,6 +6,7 @@
 #include <memory>
 #include <new>
 
+#include "engine/content/asset_catalog.h"
 #include "engine/core/mesh_asset.h"
 #include "engine/renderer/asset_manager.h"
 #include "engine/renderer/command_buffer.h"
@@ -36,16 +37,15 @@ bool write_v1_mesh_file(const char *path, float yOffset) noexcept {
   header.indexCount = 3U;
   // v1 stride: position3 + normal3 per vertex.
   const std::array<float, 18U> vertices = {
-      0.0F, yOffset,        0.0F, 0.0F, 1.0F, 0.0F,
-      1.0F, yOffset,        0.0F, 0.0F, 1.0F, 0.0F,
-      0.0F, yOffset + 1.0F, 0.0F, 0.0F, 1.0F, 0.0F};
+      0.0F, yOffset, 0.0F, 0.0F, 1.0F,           0.0F, 1.0F, yOffset, 0.0F,
+      0.0F, 1.0F,    0.0F, 0.0F, yOffset + 1.0F, 0.0F, 0.0F, 1.0F,    0.0F};
   const std::array<std::uint32_t, 3U> indices = {0U, 1U, 2U};
 
   bool ok = std::fwrite(&header, sizeof(header), 1U, file) == 1U;
   ok = ok && (std::fwrite(vertices.data(), sizeof(float), vertices.size(),
                           file) == vertices.size());
-  ok = ok && (std::fwrite(indices.data(), sizeof(std::uint32_t),
-                          indices.size(), file) == indices.size());
+  ok = ok && (std::fwrite(indices.data(), sizeof(std::uint32_t), indices.size(),
+                          file) == indices.size());
   return (std::fclose(file) == 0) && ok;
 }
 
@@ -82,7 +82,10 @@ int verify_reload_stages_replacement() {
       new (std::nothrow) engine::renderer::AssetDatabase());
   std::unique_ptr<engine::renderer::GpuMeshRegistry> registry(
       new (std::nothrow) engine::renderer::GpuMeshRegistry());
-  if ((manager == nullptr) || (database == nullptr) || (registry == nullptr)) {
+  std::unique_ptr<engine::content::AssetCatalog> catalog(
+      new (std::nothrow) engine::content::AssetCatalog());
+  if ((manager == nullptr) || (database == nullptr) || (registry == nullptr) ||
+      (catalog == nullptr)) {
     return 80;
   }
 
@@ -99,6 +102,17 @@ int verify_reload_stages_replacement() {
   constexpr const char *kGarbagePath = "am_reload_garbage.mesh";
   constexpr engine::content::AssetId kAssetId = 105ULL;
   int failure = 0;
+  // #682: the catalog counts each committed reload exactly once.
+  engine::content::AssetMetadata meshRecord{};
+  meshRecord.assetId = kAssetId;
+  meshRecord.typeTag = engine::content::AssetTypeTag::Mesh;
+  engine::content::write_metadata_path(&meshRecord.filePath, kGoodPath);
+  if (!engine::content::register_asset_metadata(catalog.get(), meshRecord)) {
+    failure = 79;
+  }
+  const auto generation = [&]() {
+    return engine::content::asset_reload_generation(catalog.get(), kAssetId);
+  };
 
   if (!write_v1_mesh_file(kGoodPath, 0.0F) ||
       !write_garbage_file(kGarbagePath)) {
@@ -109,8 +123,8 @@ int verify_reload_stages_replacement() {
   if (failure == 0) {
     if (!engine::renderer::queue_mesh_load(manager.get(), database.get(),
                                            kAssetId, kGoodPath) ||
-        !engine::renderer::update_asset_manager(manager.get(), database.get(),
-                                                registry.get(), 4U)) {
+        !engine::renderer::update_asset_manager(
+            manager.get(), database.get(), catalog.get(), registry.get(), 4U)) {
       failure = 83;
     }
   }
@@ -128,8 +142,8 @@ int verify_reload_stages_replacement() {
   if (failure == 0) {
     if (!engine::renderer::queue_mesh_reload(manager.get(), database.get(),
                                              kAssetId, kMissingPath) ||
-        engine::renderer::update_asset_manager(manager.get(), database.get(),
-                                               registry.get(), 4U)) {
+        engine::renderer::update_asset_manager(
+            manager.get(), database.get(), catalog.get(), registry.get(), 4U)) {
       failure = 85;
     } else if ((engine::renderer::mesh_asset_state(database.get(), kAssetId) !=
                 engine::content::AssetState::Ready) ||
@@ -145,8 +159,8 @@ int verify_reload_stages_replacement() {
   if (failure == 0) {
     if (!engine::renderer::queue_mesh_reload(manager.get(), database.get(),
                                              kAssetId, kGarbagePath) ||
-        engine::renderer::update_asset_manager(manager.get(), database.get(),
-                                               registry.get(), 4U)) {
+        engine::renderer::update_asset_manager(
+            manager.get(), database.get(), catalog.get(), registry.get(), 4U)) {
       failure = 87;
     } else if ((engine::renderer::mesh_asset_state(database.get(), kAssetId) !=
                 engine::content::AssetState::Ready) ||
@@ -176,14 +190,16 @@ int verify_reload_stages_replacement() {
     }
     if (!engine::renderer::queue_mesh_reload(manager.get(), database.get(),
                                              kAssetId, kGoodPath) ||
-        engine::renderer::update_asset_manager(manager.get(), database.get(),
-                                               registry.get(), 4U)) {
+        engine::renderer::update_asset_manager(
+            manager.get(), database.get(), catalog.get(), registry.get(), 4U)) {
       failure = 89;
     } else if ((engine::renderer::mesh_asset_state(database.get(), kAssetId) !=
                 engine::content::AssetState::Ready) ||
                (engine::renderer::resolve_mesh_asset(
                     database.get(), kAssetId) != originalHandle)) {
       failure = 90;
+    } else if (generation() != 0U) {
+      failure = 95;
     }
     if (fillerCount > 0U) {
       engine::renderer::unload_gpu_mesh(registry.get(),
@@ -200,8 +216,8 @@ int verify_reload_stages_replacement() {
     if (!write_v1_mesh_file(kGoodPath, 5.0F) ||
         !engine::renderer::queue_mesh_reload(manager.get(), database.get(),
                                              kAssetId, kGoodPath) ||
-        !engine::renderer::update_asset_manager(manager.get(), database.get(),
-                                                registry.get(), 4U)) {
+        !engine::renderer::update_asset_manager(
+            manager.get(), database.get(), catalog.get(), registry.get(), 4U)) {
       failure = 91;
     } else {
       swappedHandle =
@@ -215,6 +231,8 @@ int verify_reload_stages_replacement() {
           (engine::renderer::lookup_gpu_mesh(registry.get(), swappedHandle) ==
            nullptr)) {
         failure = 92;
+      } else if (generation() != 1U) {
+        failure = 96;
       }
     }
   }
@@ -223,12 +241,14 @@ int verify_reload_stages_replacement() {
   if (failure == 0) {
     if (!engine::renderer::queue_mesh_reload(manager.get(), database.get(),
                                              kAssetId, kGoodPath) ||
-        !engine::renderer::update_asset_manager(manager.get(), database.get(),
-                                                registry.get(), 4U)) {
+        !engine::renderer::update_asset_manager(
+            manager.get(), database.get(), catalog.get(), registry.get(), 4U)) {
       failure = 93;
     } else if (engine::renderer::lookup_gpu_mesh(registry.get(),
                                                  swappedHandle) != nullptr) {
       failure = 94;
+    } else if (generation() != 2U) {
+      failure = 97;
     }
   }
 
@@ -238,8 +258,8 @@ int verify_reload_stages_replacement() {
     const engine::renderer::MeshHandle lastHandle =
         engine::renderer::resolve_mesh_asset(database.get(), kAssetId);
     if (!engine::renderer::release_mesh_asset(database.get(), kAssetId) ||
-        !engine::renderer::update_asset_manager(manager.get(), database.get(),
-                                                registry.get(), 4U)) {
+        !engine::renderer::update_asset_manager(
+            manager.get(), database.get(), catalog.get(), registry.get(), 4U)) {
       failure = 95;
     } else if ((engine::renderer::mesh_asset_state(database.get(), kAssetId) !=
                 engine::content::AssetState::Unloaded) ||

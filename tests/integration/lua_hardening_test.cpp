@@ -11,11 +11,12 @@
 #include <new>
 #include <thread>
 
+#include "../scripting_clock.h"
+#include "engine/core/logging.h"
 #include "engine/core/service_locator.h"
 #include "engine/runtime/scripting_bridge.h"
 #include "engine/runtime/world.h"
 #include "engine/scripting/scripting.h"
-#include "../scripting_clock.h"
 
 namespace {
 
@@ -358,8 +359,7 @@ bool test_tick_destroy_no_skipped_ticks() noexcept {
       !write_file_at("hardening_killer.lua", killer) ||
       !write_file_at("hardening_counter_a.lua", counterA) ||
       !write_file_at("hardening_counter_b.lua", counterB) ||
-      !write_script(prelude) ||
-      !engine::scripting::load_script(kTempScript)) {
+      !write_script(prelude) || !engine::scripting::load_script(kTempScript)) {
     return false;
   }
 
@@ -596,18 +596,17 @@ bool test_reload_hook_destroy_delivers_exactly_once() noexcept {
 
   if (ok) {
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    const char *v2 =
-        "local M = {}\n"
-        "function M.on_reload(self, state)\n"
-        "  reload_total = reload_total + 1\n"
-        "  reload_counts[self] = (reload_counts[self] or 0) + 1\n"
-        "  if self == spawn_order[2] and not reload_killed then\n"
-        "    reload_killed = true\n"
-        "    engine.destroy_entity(spawn_order[1])\n"
-        "  end\n"
-        "end\n"
-        "function M.on_tick(self, dt) end\n"
-        "return M\n";
+    const char *v2 = "local M = {}\n"
+                     "function M.on_reload(self, state)\n"
+                     "  reload_total = reload_total + 1\n"
+                     "  reload_counts[self] = (reload_counts[self] or 0) + 1\n"
+                     "  if self == spawn_order[2] and not reload_killed then\n"
+                     "    reload_killed = true\n"
+                     "    engine.destroy_entity(spawn_order[1])\n"
+                     "  end\n"
+                     "end\n"
+                     "function M.on_tick(self, dt) end\n"
+                     "return M\n";
     ok = write_file_at("hardening_reload_walk.lua", v2);
   }
 
@@ -720,6 +719,20 @@ bool test_save_state_capture_survives_destroy() noexcept {
 // traceback) latches the broken file's mtime and retries only when the
 // file changes again. A subsequent good save reloads successfully.
 // -----------------------------------------------------------------------
+/// Counts the log lines naming the storm test's deliberate reload failure.
+int g_stormFailureLogs = 0;
+void count_storm_failures(engine::core::LogLevel, const char *,
+                          const char *message, void *) noexcept {
+  if ((message != nullptr) &&
+      (std::strstr(message, "intentional reload failure") != nullptr)) {
+    ++g_stormFailureLogs;
+  }
+}
+
+/// A save that does not load is tried once, not every frame, and a
+/// reload that fails runs none of the live instances' on_save_state hooks
+/// (#682): they are user code with effects of their own, so they run only
+/// once the new module has loaded and the swap is certain.
 bool test_failed_reload_does_not_retry_every_frame() noexcept {
   ScriptingSession session{};
   if (!session.ok) {
@@ -743,9 +756,9 @@ bool test_failed_reload_does_not_retry_every_frame() noexcept {
     return false;
   }
 
-  bool ok = add_scripted_entity(session.world.get(),
-                                "hardening_reload_storm.lua") !=
-            engine::runtime::kInvalidEntity;
+  bool ok =
+      add_scripted_entity(session.world.get(), "hardening_reload_storm.lua") !=
+      engine::runtime::kInvalidEntity;
   if (ok) {
     engine::scripting::dispatch_entity_scripts_update(1.0F / 60.0F);
   }
@@ -757,14 +770,30 @@ bool test_failed_reload_does_not_retry_every_frame() noexcept {
   }
 
   if (ok) {
+    // The failure's only outward sign is its log line, so this case
+    // turns logging on for the three dispatches it counts.
+    g_stormFailureLogs = 0;
+    const bool logging = engine::core::initialize_logging();
+    const bool sink = logging && engine::core::log_register_sink(
+                                     &count_storm_failures, nullptr);
     for (int i = 0; i < 3; ++i) {
       engine::scripting::dispatch_entity_scripts_update(1.0F / 60.0F);
     }
-    const char *verifyOnce =
+    if (sink) {
+      engine::core::log_unregister_sink(&count_storm_failures, nullptr);
+    }
+    if (logging) {
+      engine::core::shutdown_logging();
+    }
+    if (!sink || (g_stormFailureLogs != 1)) {
+      std::printf("(the broken save was tried %d times) ", g_stormFailureLogs);
+      ok = false;
+    }
+    const char *verifyNoSave =
         "function verify_single_attempt()\n"
-        "  if storm_saves ~= 1 then error('saves ' .. storm_saves) end\n"
+        "  if storm_saves ~= 0 then error('saves ' .. storm_saves) end\n"
         "end\n";
-    ok = write_script(verifyOnce) &&
+    ok = ok && write_script(verifyNoSave) &&
          engine::scripting::load_script(kTempScript) &&
          engine::scripting::call_script_function("verify_single_attempt");
   }
@@ -783,7 +812,7 @@ bool test_failed_reload_does_not_retry_every_frame() noexcept {
     engine::scripting::dispatch_entity_scripts_update(1.0F / 60.0F);
     const char *verifyRecovered =
         "function verify_storm_recovered()\n"
-        "  if storm_saves ~= 2 then error('saves2 ' .. storm_saves) end\n"
+        "  if storm_saves ~= 1 then error('saves2 ' .. storm_saves) end\n"
         "  if storm_marker ~= 2 then error('marker ' .. storm_marker) end\n"
         "end\n";
     ok = ok && write_script(verifyRecovered) &&
@@ -792,6 +821,90 @@ bool test_failed_reload_does_not_retry_every_frame() noexcept {
   }
 
   std::remove("hardening_reload_storm.lua");
+  remove_script();
+  return ok;
+}
+
+/// A module save whose chunk fails part-way leaves nothing of what it
+/// did (#682): the global it set and the entity it spawned are gone, and
+/// the live module keeps serving. The same chunk ending cleanly lands
+/// both, once.
+bool test_failed_module_reload_leaves_no_trace() noexcept {
+  ScriptingSession session{};
+  if (!session.ok) {
+    return false;
+  }
+  const char *v1 = "local M = {}\n"
+                   "function M.on_tick(self, dt) tick_version = 1 end\n"
+                   "return M\n";
+  if (!write_script("tick_version = 0\n") ||
+      !engine::scripting::load_script(kTempScript) ||
+      !write_file_at("hardening_module_trace.lua", v1)) {
+    remove_script();
+    return false;
+  }
+  bool ok =
+      add_scripted_entity(session.world.get(), "hardening_module_trace.lua") !=
+      engine::runtime::kInvalidEntity;
+  if (ok) {
+    engine::scripting::dispatch_entity_scripts_update(1.0F / 60.0F);
+  }
+  const std::size_t aliveBefore = session.world->alive_entity_count();
+
+  if (ok) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    const char *broken = "leaked_global = 42\n"
+                         "engine.spawn_entity()\n"
+                         "error('module reload failure')\n";
+    ok = write_file_at("hardening_module_trace.lua", broken);
+    engine::scripting::dispatch_entity_scripts_update(1.0F / 60.0F);
+    engine::scripting::flush_deferred_mutations();
+  }
+  if (ok && (session.world->alive_entity_count() != aliveBefore)) {
+    std::printf("(the failed reload left %zu entities) ",
+                session.world->alive_entity_count() - aliveBefore);
+    ok = false;
+  }
+  if (ok) {
+    const char *verifyNoTrace =
+        "function verify_no_trace()\n"
+        "  if leaked_global ~= nil then error('global leaked') end\n"
+        "  if tick_version ~= 1 then error('old module lost') end\n"
+        "end\n";
+    ok = write_script(verifyNoTrace) &&
+         engine::scripting::load_script(kTempScript) &&
+         engine::scripting::call_script_function("verify_no_trace");
+  }
+
+  if (ok) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    const char *v2 = "landed_global = 7\n"
+                     "engine.spawn_entity()\n"
+                     "local M = {}\n"
+                     "function M.on_tick(self, dt) tick_version = 2 end\n"
+                     "return M\n";
+    ok = write_file_at("hardening_module_trace.lua", v2);
+    engine::scripting::dispatch_entity_scripts_update(1.0F / 60.0F);
+    engine::scripting::dispatch_entity_scripts_update(1.0F / 60.0F);
+    engine::scripting::flush_deferred_mutations();
+  }
+  if (ok && (session.world->alive_entity_count() != aliveBefore + 1U)) {
+    std::printf("(the committed reload left %zu entities, expected 1) ",
+                session.world->alive_entity_count() - aliveBefore);
+    ok = false;
+  }
+  if (ok) {
+    const char *verifyLanded =
+        "function verify_landed()\n"
+        "  if landed_global ~= 7 then error('global missing') end\n"
+        "  if tick_version ~= 2 then error('new module not serving') end\n"
+        "end\n";
+    ok = write_script(verifyLanded) &&
+         engine::scripting::load_script(kTempScript) &&
+         engine::scripting::call_script_function("verify_landed");
+  }
+
+  std::remove("hardening_module_trace.lua");
   remove_script();
   return ok;
 }
@@ -826,6 +939,8 @@ int main() {
        test_reload_hook_destroy_delivers_exactly_once},
       {"save_state_capture_survives_destroy",
        test_save_state_capture_survives_destroy},
+      {"failed_module_reload_leaves_no_trace",
+       test_failed_module_reload_leaves_no_trace},
       {"failed_reload_does_not_retry_every_frame",
        test_failed_reload_does_not_retry_every_frame},
   };

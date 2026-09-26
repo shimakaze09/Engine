@@ -1385,7 +1385,8 @@ void EnginePipeline::Impl::stage_assets() noexcept {
   sync_streaming_failures(&assetDatabaseService);
 
   updatedAssets = renderer::update_asset_manager(
-      assetManager.get(), assetDatabase.get(), meshRegistry.get(), 16U);
+      assetManager.get(), assetDatabase.get(), assetCatalog.get(),
+      meshRegistry.get(), 16U);
   // One lookup per set texture slot of every loaded material; loads only a
   // texture no material has tried yet (see resolve_material_textures's
   // header comment).

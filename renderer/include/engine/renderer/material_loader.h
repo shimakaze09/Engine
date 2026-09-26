@@ -95,13 +95,16 @@ load_material_asset(AssetDatabase *database, content::AssetCatalog *catalog,
                     const char *virtualPath) noexcept;
 
 /// Re-reads and re-parses an already-loaded material file in place (editor
-/// save/hot-reload). On success the material's params/textureSlots/metadata
-/// are fully replaced (texture GPU handles are cleared back to unresolved so
-/// resolve_material_textures re-fetches them next sync), and every material
-/// inheriting from it is re-resolved. On any failure (missing file,
-/// malformed JSON, bad parent, a parent cycle, full tables) the existing
-/// record is left completely untouched and the previous valid state keeps
-/// serving renders — never a partial or corrupt in-place update.
+/// save/hot-reload), under the catalog's reload contract. The whole document
+/// is validated first, a parent it newly names included (validated from its
+/// file, not loaded); only then is anything loaded or registered. On success
+/// the material's params/textureSlots/metadata are fully replaced (texture
+/// GPU handles are cleared back to unresolved so resolve_material_textures
+/// re-fetches them next sync), the catalog records the reload
+/// (content::note_asset_reloaded), and every material inheriting from it is
+/// re-resolved. On any failure (missing file, malformed JSON, bad parent, a
+/// parent cycle, full tables) the database and the catalog are left exactly
+/// as they were and the previous valid state keeps serving renders.
 std::expected<content::AssetId, MaterialLoadError>
 reload_material_asset(AssetDatabase *database, content::AssetCatalog *catalog,
                       const char *virtualPath) noexcept;

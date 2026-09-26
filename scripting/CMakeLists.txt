@@ -45,6 +45,7 @@ engine_add_module_library(engine_scripting
     src/lua_state.cpp
     src/persist_bindings.cpp
     src/reload_transaction.cpp
+    src/script_reload.cpp
     src/runtime_binding.cpp
     src/scene_bindings.cpp
     src/timer_bindings.cpp

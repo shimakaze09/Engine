@@ -618,6 +618,17 @@ core::AssetRef scripting_asset_ref_for_id(std::uint64_t assetId) noexcept {
   return (metadata != nullptr) ? metadata->ref : core::AssetRef{};
 }
 
+/// Records a committed script reload on the catalog, by the path's id.
+void scripting_note_script_reloaded(const char *path) noexcept {
+  if ((path == nullptr) || (g_scriptingAssetDatabaseService == nullptr) ||
+      (g_scriptingAssetDatabaseService->catalog == nullptr)) {
+    return;
+  }
+  static_cast<void>(
+      content::note_asset_reloaded(g_scriptingAssetDatabaseService->catalog,
+                                   content::make_asset_id_from_path(path)));
+}
+
 /// Queues a mesh asset load through runtime-owned asset services.
 std::uint32_t scripting_load_asset_async(const char *path,
                                          std::uint8_t priority) noexcept {
@@ -1391,6 +1402,7 @@ scripting::RuntimeServices make_scripting_runtime_services() noexcept {
   s.add_collider_op = &scripting_add_collider_op;
   s.add_mesh_component_op = &scripting_add_mesh_component_op;
   s.asset_ref_for_id = &scripting_asset_ref_for_id;
+  s.note_script_reloaded = &scripting_note_script_reloaded;
   s.add_name_component_op = &scripting_add_name_component_op;
   s.add_light_component_op = &scripting_add_light_component_op;
   s.remove_light_component_op = &scripting_remove_light_component_op;

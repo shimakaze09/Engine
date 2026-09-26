@@ -429,6 +429,11 @@ struct RuntimeServices final {
   // names, so a component assigned from Lua survives a save and reload.
   core::AssetRef (*asset_ref_for_id)(std::uint64_t assetId) noexcept =
       nullptr;
+
+  // Records on the asset catalog that the script at `path` reloaded and
+  // committed (content::note_asset_reloaded); nothing when the catalog
+  // does not hold it. Called only after a reload commits.
+  void (*note_script_reloaded)(const char *path) noexcept = nullptr;
 };
 
 /// Binds the runtime world into an explicit service locator. Binding

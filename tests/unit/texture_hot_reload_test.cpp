@@ -178,6 +178,9 @@ int check_ready_reload(engine::renderer::AssetDatabase *database) noexcept {
     return 11;
   }
 
+  // #682: the catalog counts each committed reload once and no other.
+  const std::uint32_t generation0 =
+      engine::content::asset_reload_generation(g_catalog, texture);
   if (!save_file(kTextureOs, "good v2") ||
       (engine::renderer::reload_texture_asset(
            database, g_catalog, texture, &recording_load, &recording_release,
@@ -186,6 +189,10 @@ int check_ready_reload(engine::renderer::AssetDatabase *database) noexcept {
   }
   if ((g_log.releases != 1U) || (g_log.lastReleased != first)) {
     return 13;
+  }
+  if (engine::content::asset_reload_generation(g_catalog, texture) !=
+      generation0 + 1U) {
+    return 18;
   }
   // Nothing still names the released handle.
   if ((albedo_of(database, parent) == first) ||
@@ -217,6 +224,10 @@ int check_ready_reload(engine::renderer::AssetDatabase *database) noexcept {
       (albedo_of(database, child) != second)) {
     std::printf("a failed reload disturbed the serving texture\n");
     return 17;
+  }
+  if (engine::content::asset_reload_generation(g_catalog, texture) !=
+      generation0 + 1U) {
+    return 19;
   }
   return 0;
 }

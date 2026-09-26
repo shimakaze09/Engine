@@ -6,6 +6,7 @@
 
 #include <cstddef>
 
+#include "engine/content/asset_catalog.h"
 #include "engine/content/asset_request_queue.h"
 #include "engine/renderer/asset_database.h"
 #include "engine/renderer/mesh_loader.h"
@@ -39,6 +40,15 @@ bool queue_mesh_reload(AssetManager *manager, AssetDatabase *database,
 /// next request for it claims a fresh record.
 bool update_asset_manager(AssetManager *manager,
                           AssetDatabase *database,
+                          GpuMeshRegistry *registry,
+                          std::size_t maxTransitions) noexcept;
+
+/// Same, recording each committed reload on the catalog
+/// (content::note_asset_reloaded): a reload swaps the new mesh in only
+/// once it has loaded and registered, and a failure keeps the previous one
+/// serving with nothing recorded. A null catalog records nothing.
+bool update_asset_manager(AssetManager *manager, AssetDatabase *database,
+                          content::AssetCatalog *catalog,
                           GpuMeshRegistry *registry,
                           std::size_t maxTransitions) noexcept;
 

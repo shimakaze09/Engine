@@ -42,6 +42,7 @@ void clear_asset_catalog(AssetCatalog *catalog) noexcept {
   for (std::size_t i = 0U; i < catalog->entries.size(); ++i) {
     catalog->occupied[i] = false;
     catalog->entries[i] = AssetMetadata{};
+    catalog->reloadGenerations[i] = 0U;
   }
   ++catalog->generation;
 }
@@ -121,8 +122,31 @@ bool register_asset_metadata(AssetCatalog *catalog,
     return false;
   }
 
+  if (!catalog->occupied[slot]) {
+    catalog->reloadGenerations[slot] = 0U;
+  }
   catalog->occupied[slot] = true;
   catalog->entries[slot] = metadata;
+  ++catalog->generation;
+  return true;
+}
+
+std::uint32_t asset_reload_generation(const AssetCatalog *catalog,
+                                      AssetId id) noexcept {
+  const std::size_t slot = find_metadata_slot(catalog, id);
+  if ((catalog == nullptr) || (slot == catalog->entries.size())) {
+    return 0U;
+  }
+  return catalog->reloadGenerations[slot];
+}
+
+bool note_asset_reloaded(AssetCatalog *catalog, AssetId id) noexcept {
+  ENGINE_ASSERT_MAIN_THREAD();
+  const std::size_t slot = find_metadata_slot(catalog, id);
+  if ((catalog == nullptr) || (slot == catalog->entries.size())) {
+    return false;
+  }
+  ++catalog->reloadGenerations[slot];
   ++catalog->generation;
   return true;
 }

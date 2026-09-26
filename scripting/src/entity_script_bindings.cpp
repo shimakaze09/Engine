@@ -6,6 +6,7 @@
 #include "debug_bindings.h"
 #include "physics_bindings.h"
 #include "scene_bindings.h"
+#include "script_reload.h"
 
 extern "C" {
 #include "lauxlib.h"
@@ -169,7 +170,8 @@ bool copy_entity_script_path(runtime::World *world, runtime::Entity entity,
 }
 
 /// True when `entity` is live in `world`; the bridge answers.
-bool world_entity_alive(runtime::World *world, runtime::Entity entity) noexcept {
+bool world_entity_alive(runtime::World *world,
+                        runtime::Entity entity) noexcept {
   return runtime_bound() && runtime_binding().services->is_alive(world, entity);
 }
 
@@ -261,6 +263,17 @@ int module_save_state_trampoline(lua_State *state) noexcept {
   push_entity_handle(state, args->entity);
   lua_call(state, 1, 1);
   return 1;
+}
+
+/// The reload check an entity module must pass: its chunk returns the
+/// module table.
+bool returns_module_table(lua_State *state, void *) noexcept {
+  if (lua_istable(state, -1) != 0) {
+    return true;
+  }
+  core::log_message(core::LogLevel::Error, "scripting",
+                    "entity script must return a module table");
+  return false;
 }
 
 /// Captures state from every live entity using one cached module. The
@@ -465,34 +478,35 @@ int get_or_load_entity_script_module(const char *path) noexcept {
                       sizeof(g_moduleLoadStack[g_moduleLoadDepth]), "%s", path);
         ++g_moduleLoadDepth;
 
+        // The new chunk runs as one reload transaction, like the main
+        // script's: its top-level bindings and effects commit only once it
+        // has run cleanly and returned a module table, so a broken save
+        // leaves nothing behind. The live instances' on_save_state hooks
+        // run only after that, when the swap is certain.
         if (!protected_load_chunk(g_state, path, "reload entity script")) {
           mod.lastFailedMtime = currentMtime;
           --g_moduleLoadDepth;
           return mod.registryRef;
         }
-
-        capture_entity_saved_state(i, mod);
         refresh_lua_hook();
-
-        if (lua_pcall(g_state, 0, 1, 0) != LUA_OK) {
-          log_script_error("reload entity script");
-          mod.lastFailedMtime = currentMtime;
-          clear_entity_saved_state_for_module(i);
-          --g_moduleLoadDepth;
-          return mod.registryRef;
-        }
-
-        if (lua_istable(g_state, -1) == 0) {
-          core::log_message(core::LogLevel::Error, "scripting",
-                            "entity script must return a module table");
-          lua_pop(g_state, 1);
-          mod.lastFailedMtime = currentMtime;
-          clear_entity_saved_state_for_module(i);
-          --g_moduleLoadDepth;
-          return mod.registryRef;
-        }
-
+        const ReloadOutcome outcome = run_chunk_as_reload(
+            g_state, "reload entity script", 1, &returns_module_table, nullptr);
         --g_moduleLoadDepth;
+        if (outcome == ReloadOutcome::Busy) {
+          // Nothing ran; the next poll tries this save again.
+          return mod.registryRef;
+        }
+        if ((outcome != ReloadOutcome::Committed) &&
+            (outcome != ReloadOutcome::CommitFailed)) {
+          mod.lastFailedMtime = currentMtime;
+          return mod.registryRef;
+        }
+
+        // The new module table is on the stack; the old one still answers
+        // mod.registryRef while the live instances save their state.
+        const int stackTop = lua_gettop(g_state);
+        capture_entity_saved_state(i, mod);
+        lua_settop(g_state, stackTop);
         int newRef = LUA_NOREF;
         if (!protected_registry_ref(g_state, &newRef,
                                     "ref entity script module")) {
@@ -508,6 +522,7 @@ int get_or_load_entity_script_module(const char *path) noexcept {
         mod.lastFailedMtime = 0;
         mod.reloaded = true;
         g_hasPendingEntityReloads = true;
+        note_script_reloaded(path);
 
         char logBuf[256] = {};
         std::snprintf(logBuf, sizeof(logBuf), "hot-reloaded entity script: %s",
@@ -656,8 +671,7 @@ ReloadHookResult call_module_reload_hook(int moduleRef, runtime::Entity entity,
 /// created during the walk are excluded by the snapshot. The walk cannot
 /// nest with itself (only C callers reach it), so one buffer suffices.
 void dispatch_pending_entity_reloads() noexcept {
-  if (!g_hasPendingEntityReloads || (g_state == nullptr) ||
-      !runtime_bound()) {
+  if (!g_hasPendingEntityReloads || (g_state == nullptr) || !runtime_bound()) {
     return;
   }
 
@@ -807,8 +821,7 @@ void dispatch_entity_scripts_start() noexcept {
       continue;
     }
     runtime_binding().services->mark_begin_play_done(world, entity);
-    call_module_function(ref, "on_begin_play", "on_start", entity, false,
-                         0.0F);
+    call_module_function(ref, "on_begin_play", "on_start", entity, false, 0.0F);
   }
 }
 
@@ -818,8 +831,8 @@ void dispatch_entity_scripts_begin_play(runtime::World *world) noexcept {
   }
   ++g_modulePollSerial;
 
-  runtime_binding().services->for_each_needs_begin_play(world, &begin_play_visit,
-                                                        world);
+  runtime_binding().services->for_each_needs_begin_play(
+      world, &begin_play_visit, world);
 }
 
 bool in_end_play_dispatch() noexcept { return g_endPlayDispatchDepth > 0; }
@@ -918,8 +931,8 @@ void dispatch_entity_scripts_end_impl(runtime::World *world) noexcept {
     if (ref == LUA_NOREF) {
       continue;
     }
-    static_cast<void>(call_module_function(ref, "on_end_play", "on_end",
-                                           entity, false, 0.0F));
+    static_cast<void>(call_module_function(ref, "on_end_play", "on_end", entity,
+                                           false, 0.0F));
   }
 }
 

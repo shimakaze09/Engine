@@ -21,12 +21,12 @@ namespace {
 
 int g_failures = 0;
 
-#define CHECK(cond, msg)                                                     \
-  do {                                                                       \
-    if (!(cond)) {                                                           \
-      std::fprintf(stderr, "FAIL: %s (line %d)\n", (msg), __LINE__);         \
-      ++g_failures;                                                          \
-    }                                                                        \
+#define CHECK(cond, msg)                                                       \
+  do {                                                                         \
+    if (!(cond)) {                                                             \
+      std::fprintf(stderr, "FAIL: %s (line %d)\n", (msg), __LINE__);           \
+      ++g_failures;                                                            \
+    }                                                                          \
   } while (false)
 
 engine::content::AssetMetadata make_meta(engine::content::AssetId id,
@@ -74,10 +74,10 @@ int main() {
             store.get(),
             make_meta(scriptId, AssetTypeTag::Script, "assets/scripts/ai.lua")),
         "register script metadata");
-  CHECK(register_asset_metadata(
-            store.get(),
-            make_meta(meshId, AssetTypeTag::Mesh, "assets/props/rock.mesh")),
-        "register mesh metadata");
+  CHECK(
+      register_asset_metadata(store.get(), make_meta(meshId, AssetTypeTag::Mesh,
+                                                     "assets/props/rock.mesh")),
+      "register mesh metadata");
   const AssetMetadata *found = find_asset_metadata(store.get(), scriptId);
   CHECK((found != nullptr) && (found->typeTag == AssetTypeTag::Script),
         "script metadata round trips");
@@ -93,7 +93,8 @@ int main() {
   // Type query.
   AssetId meshes[4] = {};
   CHECK(query_assets_by_type(store.get(), AssetTypeTag::Mesh, meshes, 4U) ==
-            1U && meshes[0] == meshId,
+                1U &&
+            meshes[0] == meshId,
         "type scan finds exactly the mesh");
 
   // Cross-type dependency: the script depends on the mesh.
@@ -341,6 +342,51 @@ int main() {
   CHECK(notify_asset_changed(store.get(), kInvalidAssetId, record_visit,
                              &fromFile) == 0U,
         "the invalid id reaches nothing");
+
+  // Reload generation (#682): per record, moving exactly once per
+  // committed reload and never otherwise.
+  clear_asset_catalog(store.get());
+  const AssetId reloaded = make_asset_id_from_path("assets/reloaded.png");
+  CHECK(asset_reload_generation(store.get(), reloaded) == 0U,
+        "an uncatalogued asset reads generation zero");
+  const std::uint64_t beforeRefused = store->generation;
+  CHECK(!note_asset_reloaded(store.get(), reloaded),
+        "a reload of an uncatalogued asset is not recorded");
+  CHECK(store->generation == beforeRefused,
+        "a refused reload note moves nothing");
+  CHECK(register_asset_metadata(
+            store.get(),
+            make_meta(reloaded, AssetTypeTag::Texture, "assets/reloaded.png")),
+        "register the reloaded asset");
+  CHECK(asset_reload_generation(store.get(), reloaded) == 0U,
+        "a new record has never reloaded");
+  const std::uint64_t beforeNote = store->generation;
+  CHECK(note_asset_reloaded(store.get(), reloaded), "record a reload");
+  CHECK(asset_reload_generation(store.get(), reloaded) == 1U,
+        "a committed reload moves the generation by one");
+  CHECK(store->generation == beforeNote + 1U,
+        "and the catalog's generation with it");
+  CHECK(note_asset_reloaded(store.get(), reloaded) &&
+            (asset_reload_generation(store.get(), reloaded) == 2U),
+        "each reload counts once");
+  CHECK(register_asset_metadata(
+            store.get(),
+            make_meta(reloaded, AssetTypeTag::Texture, "assets/reloaded.png")),
+        "a loader rewrites the record");
+  CHECK(asset_reload_generation(store.get(), reloaded) == 2U,
+        "rewriting the record keeps the reload count");
+  const AssetId other = make_asset_id_from_path("assets/other.png");
+  CHECK(register_asset_metadata(
+            store.get(),
+            make_meta(other, AssetTypeTag::Texture, "assets/other.png")) &&
+            (asset_reload_generation(store.get(), other) == 0U),
+        "another asset keeps its own count");
+  clear_asset_catalog(store.get());
+  CHECK(register_asset_metadata(store.get(),
+                                make_meta(reloaded, AssetTypeTag::Texture,
+                                          "assets/reloaded.png")) &&
+            (asset_reload_generation(store.get(), reloaded) == 0U),
+        "a clear resets the count");
 
   if (g_failures != 0) {
     std::fprintf(stderr, "%d failure(s)\n", g_failures);
