@@ -10,6 +10,9 @@
 //   page_boots
 //       engine_editor_app.html, the shipped page: it boots in player mode
 //       and runs frames with no page error and no engine error line.
+//   save_persists
+//       engine_web_lifecycle.html: a save written through the production
+//       path is still there after the page reloads (#695).
 //
 // Usage: node run_lifecycle.mjs --dir <web build dir> --case <case>
 // Waits are hang guards, never assertions: every check is on state the
@@ -214,6 +217,28 @@ async function pageBootsCase(page, log, base) {
   check(errors.length === 0, `engine errors: ${errors.join(' | ')}`);
 }
 
+async function savePersistsCase(page, log, base) {
+  const url = `${base}/engine_web_lifecycle.html?case=save_persists`;
+  await page.goto(url);
+  await log.waitFor(/\[web-lifecycle\] case=save_persists$/, kRunFailure);
+  check(await page.evaluate(() => Module._web_lifecycle_save()) === 1,
+        'the save did not commit');
+  // A page without the persistent mount has nothing to flush: reload at
+  // once and let the load below report what survived.
+  await page.waitForFunction(
+      () => !Module.enginePersistIdle || Module.enginePersistIdle(), null,
+      { polling: 100, timeout: kHangGuardMs });
+  log.lines = [];
+  await page.reload();
+  await log.waitFor(/\[web-lifecycle\] case=save_persists$/, kRunFailure);
+  await page.evaluate(() => Module._web_lifecycle_load());
+  const loaded = await log.waitFor(/\[web-lifecycle\] loaded=/);
+  check(loaded.endsWith('loaded={"coins":8,"won":true}'),
+        `the save did not survive the reload: ${loaded}`);
+  const errors = log.unexpectedErrors([]);
+  check(errors.length === 0, `engine errors: ${errors.join(' | ')}`);
+}
+
 async function main() {
   const args = parseArgs(process.argv);
   check(args.dir && args.case, 'usage: --dir <web build dir> --case <case>');
@@ -239,6 +264,8 @@ async function main() {
   try {
     if (args.case === 'page_boots') {
       await pageBootsCase(page, log, base);
+    } else if (args.case === 'save_persists') {
+      await savePersistsCase(page, log, base);
     } else {
       await lifecycleCase(page, log, base, args.case);
     }

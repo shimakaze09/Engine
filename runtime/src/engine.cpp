@@ -178,6 +178,10 @@ bool bootstrap(const EngineConfig &config) noexcept {
   if (!adopt_config_strings(adopted)) {
     return false;
   }
+  // The mounted root is the project until projects carry a document of
+  // their own: it names the directory the game's saves and rebound input
+  // map live in, so two projects never share them.
+  adopted.core.projectRoot = adopted.assetRoot;
   g_activeConfig = adopted;
 
   if (consume_injected_failure(BootstrapStage::Core) ||

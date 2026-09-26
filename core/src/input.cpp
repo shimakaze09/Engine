@@ -19,6 +19,7 @@
 
 #include "engine/core/event_bus.h"
 #include "engine/core/logging.h"
+#include "engine/core/project_data.h"
 
 namespace engine::core {
 
@@ -401,9 +402,9 @@ void reset_step_state() noexcept {
 
 } // namespace
 
-/// Initializes the owning system for input. Persisted per-user rebindings
-/// are restored here when the file exists, and take precedence over script
-/// defaults registered later.
+/// Initializes the owning system for input. The named project's persisted
+/// per-user rebindings are restored here when the file exists, and take
+/// precedence over script defaults registered later.
 bool initialize_input() noexcept {
   if (g_inputInitialized) {
     return true;
@@ -421,8 +422,11 @@ bool initialize_input() noexcept {
   static_cast<void>(initialize_input_mapper());
   static_cast<void>(initialize_touch_input());
 
-  char bindingsPath[512] = {};
-  if (input_bindings_default_path(bindingsPath, sizeof(bindingsPath))) {
+  // Saved bindings belong to a project; a core with none named (a tool,
+  // a test) starts from the registered defaults.
+  char bindingsPath[1024] = {};
+  if (project_data_named() &&
+      input_bindings_default_path(bindingsPath, sizeof(bindingsPath))) {
     FILE *probe = nullptr;
 #ifdef _WIN32
     if ((fopen_s(&probe, bindingsPath, "rb") == 0) && (probe != nullptr)) {

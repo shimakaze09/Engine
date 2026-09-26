@@ -1,4 +1,4 @@
-// Implements the single-slot game save over the platform save directory:
+// Implements the single-slot game save over the project's data directory:
 // bounded JSON in, save.json on disk, with explicit-directory variants
 // for tests.
 
@@ -11,6 +11,7 @@
 #include "engine/core/file_read.h"
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
+#include "engine/core/project_data.h"
 
 namespace engine::runtime {
 
@@ -24,6 +25,36 @@ bool build_save_path(const char *directory, char *out,
   const int written =
       std::snprintf(out, capacity, "%s/%s", directory, kSaveFileName);
   return (written > 0) && (static_cast<std::size_t>(written) < capacity);
+}
+
+/// Says once per process that a save.json from before saves were scoped
+/// per project sits in the shared directory. Nothing in it names the
+/// project that wrote it, so it is neither read nor replaced: the player
+/// moves it into the project directory the log names if it is theirs.
+void note_unattributed_legacy_save() noexcept {
+  static bool noted = false;
+  if (noted) {
+    return;
+  }
+  char sharedDir[1024] = {};
+  char legacyPath[1100] = {};
+  if (!core::platform_get_save_dir(sharedDir, sizeof(sharedDir)) ||
+      !build_save_path(sharedDir, legacyPath, sizeof(legacyPath))) {
+    return;
+  }
+  char probe[1] = {};
+  std::size_t size = 0U;
+  if (core::read_whole_file(legacyPath, probe, sizeof(probe), &size) ==
+      core::FileReadResult::Absent) {
+    return;
+  }
+  noted = true;
+  char message[1300] = {};
+  std::snprintf(message, sizeof(message),
+                "%.1100s predates per-project saves and names no project; "
+                "it is left untouched and not loaded",
+                legacyPath);
+  core::log_message(core::LogLevel::Info, "save", message);
 }
 
 } // namespace
@@ -101,9 +132,9 @@ bool load_game_data_from(const char *directory, char *out,
 
 bool save_game_data(const char *json, std::size_t length) noexcept {
   char directory[1024] = {};
-  if (!core::platform_get_save_dir(directory, sizeof(directory))) {
+  if (!core::project_data_dir(directory, sizeof(directory))) {
     core::log_message(core::LogLevel::Error, "save",
-                      "platform save directory unavailable");
+                      "project save directory unavailable");
     return false;
   }
   return save_game_data_to(directory, json, length);
@@ -112,10 +143,14 @@ bool save_game_data(const char *json, std::size_t length) noexcept {
 bool load_game_data(char *out, std::size_t capacity,
                     std::size_t *outLength) noexcept {
   char directory[1024] = {};
-  if (!core::platform_get_save_dir(directory, sizeof(directory))) {
+  if (!core::project_data_dir(directory, sizeof(directory))) {
     return false;
   }
-  return load_game_data_from(directory, out, capacity, outLength);
+  if (load_game_data_from(directory, out, capacity, outLength)) {
+    return true;
+  }
+  note_unattributed_legacy_save();
+  return false;
 }
 
 } // namespace engine::runtime

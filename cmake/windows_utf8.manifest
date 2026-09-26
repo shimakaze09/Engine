@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- Every engine executable on Windows runs with UTF-8 as its active code
+     page, so the char paths the engine carries (UTF-8 throughout: SDL,
+     JSON documents, the VFS) mean the same file to the ANSI file APIs
+     and the C runtime as they do on every other platform. Needs Windows
+     10 version 1903 or newer; embedded by engine_add_executable_target. -->
+<assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <activeCodePage xmlns="http://schemas.microsoft.com/SMI/2019/WindowsSettings">UTF-8</activeCodePage>
+    </windowsSettings>
+  </application>
+</assembly>

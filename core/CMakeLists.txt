@@ -89,6 +89,7 @@ engine_add_module_library(engine_core
     src/linear_allocator.cpp
     src/logging.cpp
     src/platform.cpp
+    src/project_data.cpp
     src/profiler.cpp
     src/reflect.cpp
     src/service_locator.cpp

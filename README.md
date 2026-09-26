@@ -115,7 +115,9 @@ The engine centers on one canonical LLVM toolchain per platform, with two
 secondary compilers validated for portability:
 
 - **Tier 1 — canonical (used for development and primary CI)**
-	- Windows x64: `clang-cl`
+	- Windows x64: `clang-cl`. Executables embed a UTF-8 active-code-page
+	  manifest (`cmake/windows_utf8.manifest`), so running them needs
+	  Windows 10 version 1903 or newer
 	- Linux x64: `clang++` 19 or newer (clang 18 cannot compile libstdc++'s `<expected>`)
 	- macOS: AppleClang 16 (Xcode 16) or newer. macOS is an editor platform by
 	  [decision 0015](docs/decisions/0015-commercial-anime-engine-on-six-platforms.md)
@@ -259,9 +261,10 @@ save, one entry per OS and configuration:
   in `tests/web/` against the Linux Release lane's shader cook, then
   headless Chromium runs the `web`-labelled tests (the page boots and runs
   frames; maxFrames, quit and a fatal frame each close every engine tier
-  and a second bootstrap in the same page runs clean). It waits for the
-  build matrix for that cook, and restores the Linux sources cache without
-  saving one of its own
+  and a second bootstrap in the same page runs clean; a save survives a
+  page reload, since web saves live on an IndexedDB-backed mount). It
+  waits for the build matrix for that cook, and restores the Linux
+  sources cache without saving one of its own
 - Determinism hash comparison across every platform and build
   configuration, through the production pipeline
 - `cppcheck` static analysis plus the audit gates (source comments, comment

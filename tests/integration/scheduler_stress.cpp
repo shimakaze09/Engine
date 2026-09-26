@@ -1,4 +1,8 @@
-// Verifies scheduler stress behavior for the Engine test suite.
+// Verifies the job system under a 1,500-job graph run twice: every job
+// runs each round, the results hash the same both rounds, and the stats
+// counters are drained by consume_job_stats. Whether workers collided on
+// the ready queue depends on thread timing, so the contention count is
+// only ever reported, never required.
 
 #include "engine/core/bootstrap.h"
 #include "engine/core/job_system.h"
@@ -6,6 +10,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 
 namespace {
 
@@ -125,7 +130,9 @@ int main() {
   const std::uint64_t hashRound2 =
       run_stress_round(&executedJobsRound2, &queueContentionRound2);
 
-  const std::uint32_t observedThreadCount = engine::core::thread_count();
+  // Nothing ran since the last consume, so the counters must be empty.
+  const engine::core::JobSystemStats drained =
+      engine::core::consume_job_stats();
 
   engine::core::shutdown_core();
 
@@ -142,10 +149,16 @@ int main() {
     return 4;
   }
 
-  if ((queueContentionRound1 == 0U) && (queueContentionRound2 == 0U) &&
-      (observedThreadCount > 1U)) {
+  if ((drained.jobsExecuted != 0U) || (drained.queueContentionCount != 0U)) {
     return 5;
   }
+
+  std::printf("scheduler stress: %llu and %llu jobs, queue contention %llu "
+              "and %llu\n",
+              static_cast<unsigned long long>(executedJobsRound1),
+              static_cast<unsigned long long>(executedJobsRound2),
+              static_cast<unsigned long long>(queueContentionRound1),
+              static_cast<unsigned long long>(queueContentionRound2));
 
   return 0;
 }

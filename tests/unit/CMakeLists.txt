@@ -466,6 +466,18 @@ engine_add_test_executable(engine_unit_save_data
     engine_core
 )
 
+# Every engine file entry point opens a path holding CJK and accented
+# characters; on Windows this is what the UTF-8 code-page manifest fixes.
+engine_add_test_executable(engine_unit_unicode_path
+    SOURCES
+    unicode_path_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_core
+    LABELS
+    unit
+)
+
 engine_add_test_executable(engine_unit_physics_world_view
     SOURCES
     physics_world_view_test.cpp

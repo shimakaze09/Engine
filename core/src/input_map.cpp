@@ -5,7 +5,7 @@
 #include "engine/core/input.h"
 #include "engine/core/json.h"
 #include "engine/core/logging.h"
-#include "engine/core/platform.h"
+#include "engine/core/project_data.h"
 #include "input_steps_internal.h"
 
 #include <array>
@@ -619,13 +619,13 @@ bool input_bindings_default_path(char *outBuffer,
     return false;
   }
 
-  char saveDir[512] = {};
-  if (!platform_get_save_dir(saveDir, sizeof(saveDir))) {
+  char projectDir[1024] = {};
+  if (!project_data_dir(projectDir, sizeof(projectDir))) {
     return false;
   }
 
   const int written = std::snprintf(outBuffer, bufferCapacity,
-                                    "%s/input_bindings.json", saveDir);
+                                    "%s/input_bindings.json", projectDir);
   return (written > 0) && (static_cast<std::size_t>(written) < bufferCapacity);
 }
 

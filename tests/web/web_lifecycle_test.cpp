@@ -1,10 +1,11 @@
-// Browser lifecycle harness for the web frame loop (#341). The page runs
-// one case, named by its URL: a bounded smoke run, maxFrames=1, a platform
-// quit mid-run, or a fatal frame stage. Every case ends its loop inside
-// web_frame; the driver (run_lifecycle.mjs) then asks which engine tiers
-// are still open, starts a second bootstrap in the same page, and asks
-// again once that run ends too. Lines prefixed "[web-lifecycle]" are the
-// protocol the driver reads.
+// Browser lifecycle harness for the web frame loop (#341) and the web save
+// slot (#695). The page runs one case, named by its URL: a bounded smoke
+// run, maxFrames=1, a platform quit mid-run, a fatal frame stage, or
+// save_persists, where the driver saves, reloads the page and loads. Every
+// run case ends its loop inside web_frame; the driver (run_lifecycle.mjs)
+// then asks which engine tiers are still open, starts a second bootstrap in
+// the same page, and asks again once that run ends too. Lines prefixed
+// "[web-lifecycle]" are the protocol the driver reads.
 
 #include <emscripten.h>
 
@@ -18,9 +19,11 @@
 #include "engine/core/job_system.h"
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
+#include "engine/core/project_data.h"
 #include "engine/engine.h"
 #include "engine/renderer/render_device.h"
 #include "engine/runtime/editor_bridge.h"
+#include "engine/runtime/save_data.h"
 #include "engine/scripting/scripting.h"
 
 namespace {
@@ -136,6 +139,23 @@ EMSCRIPTEN_KEEPALIVE void web_lifecycle_second_run() {
   emscripten_async_call(&second_run, nullptr, 0);
 }
 
+/// Writes the save slot through the production path; 1 when it committed.
+EMSCRIPTEN_KEEPALIVE int web_lifecycle_save() {
+  static constexpr char kSave[] = "{\"coins\":8,\"won\":true}";
+  return engine::runtime::save_game_data(kSave, sizeof(kSave) - 1U) ? 1 : 0;
+}
+
+/// Prints what the save slot holds, or that it holds nothing.
+EMSCRIPTEN_KEEPALIVE void web_lifecycle_load() {
+  char buffer[256] = {};
+  std::size_t length = 0U;
+  if (engine::runtime::load_game_data(buffer, sizeof(buffer), &length)) {
+    std::printf("[web-lifecycle] loaded=%s\n", buffer);
+  } else {
+    std::printf("[web-lifecycle] loaded=none\n");
+  }
+}
+
 } // extern "C"
 
 /// Runs the case the page's URL named (the shell passes it through ENV).
@@ -144,6 +164,16 @@ int main() {
   static_cast<void>(
       engine::core::non_empty_env("ENGINE_WEB_TEST_CASE", name, sizeof(name)));
   std::uint32_t maxFrames = kSmokeFrames;
+  if (std::strcmp(name, "save_persists") == 0) {
+    // No run: the driver saves and loads through the exported calls, in
+    // the project a bootstrap would name from its mounted root.
+    if (!engine::core::set_project_data_root(".")) {
+      std::printf("[web-lifecycle] project root refused\n");
+      return 1;
+    }
+    std::printf("[web-lifecycle] case=%s\n", name);
+    return 0;
+  }
   if (std::strcmp(name, "max_frames_1") == 0) {
     g_case = LifecycleCase::MaxFramesOne;
     maxFrames = 1U;

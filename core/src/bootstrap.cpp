@@ -12,7 +12,6 @@
 #include "engine/core/debug_draw.h"
 #include "engine/core/engine_stats.h"
 #include "engine/core/engine_version.h"
-#include "engine/core/thread_affinity.h"
 #include "engine/core/event_bus.h"
 #include "engine/core/input.h"
 #include "engine/core/job_system.h"
@@ -20,7 +19,9 @@
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
 #include "engine/core/profiler.h"
+#include "engine/core/project_data.h"
 #include "engine/core/reflect.h"
+#include "engine/core/thread_affinity.h"
 #include "engine/core/vfs.h"
 
 namespace engine::core {
@@ -129,6 +130,13 @@ bool initialize_core(const CoreConfig &config) noexcept {
       platformInitialized = true;
     }
 
+    // Before input, which restores the project's saved bindings. A root
+    // that cannot be resolved is logged and leaves that data refused; it
+    // does not stop the engine.
+    if (config.projectRoot != nullptr) {
+      static_cast<void>(set_project_data_root(config.projectRoot));
+    }
+
     if (!initialize_input()) {
       failureMessage = "failed to initialize input";
       break;
@@ -228,6 +236,7 @@ bool initialize_core(const CoreConfig &config) noexcept {
     shutdown_logging();
   }
 
+  clear_project_data_root();
   g_mainFrameAllocator.reset();
   for (std::size_t i = 0U; i < kMaxThreadFrameAllocators; ++i) {
     g_threadFrameAllocators[i].reset();
@@ -258,6 +267,7 @@ void shutdown_core() noexcept {
   shutdown_profiler();
   shutdown_input();
   shutdown_platform();
+  clear_project_data_root();
   shutdown_event_bus();
   shutdown_vfs();
   shutdown_console();

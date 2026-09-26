@@ -7,6 +7,7 @@
 
 #include "engine/core/input.h"
 #include "engine/core/input_map.h"
+#include "engine/core/project_data.h"
 
 #include "../platform_event_from_sdl.h"
 
@@ -761,19 +762,31 @@ bool test_null_and_edge_cases() noexcept {
 }
 
 /// Round-trips bindings through a real file and checks the default-path
-/// shape (composition only — never writes the per-user file).
+/// shape (composition only — never writes the per-user file): it sits in
+/// the named project's data directory, and with no project it is refused
+/// rather than falling back to the directory every project shares.
 bool test_file_round_trip_and_default_path() noexcept {
-  char defaultPath[512] = {};
+  char defaultPath[1024] = {};
+  engine::core::clear_project_data_root();
   if (engine::core::input_bindings_default_path(defaultPath,
                                                 sizeof(defaultPath))) {
-    const std::size_t len = std::strlen(defaultPath);
-    const char *suffix = "input_bindings.json";
-    const std::size_t suffixLen = std::strlen(suffix);
-    if ((len <= suffixLen) ||
-        (std::strcmp(defaultPath + (len - suffixLen), suffix) != 0) ||
-        (std::strchr(defaultPath, '\\') != nullptr)) {
-      return false;
-    }
+    return false;
+  }
+  if (!engine::core::set_project_data_root(".") ||
+      !engine::core::input_bindings_default_path(defaultPath,
+                                                 sizeof(defaultPath))) {
+    engine::core::clear_project_data_root();
+    return false;
+  }
+  engine::core::clear_project_data_root();
+  const std::size_t len = std::strlen(defaultPath);
+  const char *suffix = "input_bindings.json";
+  const std::size_t suffixLen = std::strlen(suffix);
+  if ((len <= suffixLen) ||
+      (std::strcmp(defaultPath + (len - suffixLen), suffix) != 0) ||
+      (std::strstr(defaultPath, "/projects/") == nullptr) ||
+      (std::strchr(defaultPath, '\\') != nullptr)) {
+    return false;
   }
 
   if (!init_all()) {

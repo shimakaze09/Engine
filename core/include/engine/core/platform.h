@@ -222,13 +222,22 @@ bool platform_window_is_wayland() noexcept;
 /// Resident memory of the process in bytes (0 when unsupported).
 std::size_t process_memory_bytes() noexcept;
 
-/// Per-user save directory using the engine's default org/app names.
+/// Per-user save directory using the engine's default org/app names. On
+/// the web it sits under the page's IndexedDB-backed mount, so what is
+/// written there survives a reload (see platform_persist_after_write).
 bool platform_get_save_dir(char *outBuffer,
                            std::size_t bufferCapacity) noexcept;
 /// Per-user save directory for an explicit org/app pair.
 bool platform_get_save_dir(const char *organizationName,
                            const char *applicationName, char *outBuffer,
                            std::size_t bufferCapacity) noexcept;
+/// Called once a file at `path` has been committed. On the web, where the
+/// save base is an IndexedDB-backed mount the page reads in before main()
+/// (core/web/persistent_storage.js), a path under that mount schedules the
+/// flush that makes the file outlive the page and returns true; the flush
+/// is asynchronous and reports its own failure. Everywhere else, and for
+/// any other path, returns false: the file system already persists.
+bool platform_persist_after_write(const char *path) noexcept;
 /// Directory containing the running executable.
 bool platform_get_app_dir(char *outBuffer,
                           std::size_t bufferCapacity) noexcept;

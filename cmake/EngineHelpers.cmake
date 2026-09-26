@@ -2,6 +2,10 @@
 
 include(CMakeParseArguments)
 
+# Embedded in every engine executable on Windows: UTF-8 as the active code
+# page, so a UTF-8 path names the same file there as everywhere else.
+set(ENGINE_WINDOWS_UTF8_MANIFEST "${CMAKE_CURRENT_LIST_DIR}/windows_utf8.manifest")
+
 function(engine_set_cxx23 target visibility)
     target_compile_features(${target} ${visibility} cxx_std_23)
 endfunction()
@@ -88,6 +92,9 @@ function(engine_add_executable_target target)
     endif()
 
     add_executable(${target} ${ENGINE_EXE_SOURCES})
+    if(WIN32)
+        target_sources(${target} PRIVATE "${ENGINE_WINDOWS_UTF8_MANIFEST}")
+    endif()
     engine_set_cxx23(${target} PRIVATE)
     engine_apply_strict_compile_options(${target})
 

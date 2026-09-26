@@ -18,6 +18,11 @@ struct CoreConfig final {
   /// hardware thread minus the main thread.
   std::uint32_t workerThreads = 0U;
   PlatformConfig platform{};
+  /// Content root of the project whose per-user data (the save slot, the
+  /// rebound input map) this run reads and writes; see
+  /// engine/core/project_data.h. Named before input initializes, which
+  /// restores that map. Null names no project, and that data is refused.
+  const char *projectRoot = nullptr;
 };
 
 /// Initializes the owning system for core.

@@ -15,7 +15,8 @@ int lua_engine_restore(lua_State *state) noexcept;
 void clear_persist_bindings(lua_State *state) noexcept;
 
 /// Lua binding: engine.save_data(table) -> bool. Serializes a flat table
-/// (string keys; number/string/bool values) to the single JSON save slot.
+/// (string keys; number/string/bool values) to the running project's
+/// single JSON save slot.
 int lua_engine_save_data(lua_State *state) noexcept;
 
 /// Lua binding: engine.load_data() -> table | nil from the save slot.

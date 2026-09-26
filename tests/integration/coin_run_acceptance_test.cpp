@@ -8,9 +8,11 @@
 //
 // It passes when all eight coins are gone, the controller script has
 // announced the win exactly once, and a second play of the same scene ends
-// on the same World::state_hash. What a GPU or a speaker would show — the
-// frame, the sounds — is outside this test and stays an observation on
-// real hardware.
+// on the same World::state_hash. Run with --windowed
+// (engine_integration_coin_run_acceptance_gpu) it then plays the route again
+// in a real window with a render device drawing every frame, and that play
+// must end on the headless play's hash. What the frame looks like and what
+// a speaker would play stay an observation on real hardware.
 
 #include "engine/core/logging.h"
 #include "engine/engine.h"
@@ -267,10 +269,102 @@ PlayResult play_once(engine::EnginePipeline &pipeline) noexcept {
   return result;
 }
 
+struct SessionResult final {
+  bool bootstrapped = false;
+  bool pipelineReady = false;
+  bool sinkRegistered = false;
+  PlayResult first{};
+  PlayResult second{};
+};
+
+/// Bootstraps the engine, plays the route twice and shuts the engine down.
+/// `headless` selects the platform: a hidden dummy window with no device
+/// work, or a real window and render device that draws every frame.
+SessionResult run_session(bool headless) noexcept {
+  SessionResult session{};
+  engine::runtime::EditorBridge bridge{};
+  bridge.set_world = &capture_world;
+  bridge.is_playing = &bridge_is_playing;
+  bridge.is_paused = &bridge_is_paused;
+  engine::runtime::set_editor_bridge(&bridge);
+
+  engine::EngineConfig config{};
+  config.core.platform.headless = headless;
+  config.mainScriptPath = kMainScript;
+  session.bootstrapped = engine::bootstrap(config);
+  if (!session.bootstrapped) {
+    engine::runtime::set_editor_bridge(nullptr);
+    return session;
+  }
+  session.sinkRegistered = engine::core::log_register_sink(&watch_log, nullptr);
+  g_winsAnnounced = 0;
+  g_scriptErrors = 0;
+  {
+    engine::EnginePipeline pipeline;
+    session.pipelineReady = pipeline.initialize(0U) && (g_world != nullptr);
+    if (session.pipelineReady) {
+      session.first = play_once(pipeline);
+      session.second = play_once(pipeline);
+    }
+    pipeline.teardown();
+  }
+  engine::core::log_unregister_sink(&watch_log, nullptr);
+  engine::runtime::set_editor_bridge(nullptr);
+  engine::shutdown();
+  g_world = nullptr;
+  return session;
+}
+
+void print_session(const char *label, const SessionResult &session) noexcept {
+  const PlayResult &first = session.first;
+  const PlayResult &second = session.second;
+  std::printf("coin_run_acceptance_test (%s): first run %d coins left, %d "
+              "win(s), player at (%.3f, %.3f, %.3f), hash %llu; second run "
+              "%d left, %d win(s), hash %llu\n",
+              label, first.coinsLeft, first.wins,
+              static_cast<double>(first.finalPosition.x),
+              static_cast<double>(first.finalPosition.y),
+              static_cast<double>(first.finalPosition.z),
+              static_cast<unsigned long long>(first.hash), second.coinsLeft,
+              second.wins, static_cast<unsigned long long>(second.hash));
+}
+
+/// Checks one session's plays; returns the number of failed checks.
+int check_session(const SessionResult &session) noexcept {
+  int failures = 0;
+  const auto check = [&failures](bool condition, const char *what) noexcept {
+    if (!condition) {
+      std::fprintf(stderr, "FAIL: %s\n", what);
+      ++failures;
+    }
+  };
+  check(session.bootstrapped, "bootstrap");
+  check(session.pipelineReady, "pipeline initialize");
+  check(session.sinkRegistered, "the log sink registered");
+  check(session.first.ran && session.second.ran,
+        "both plays ran to the end of the route");
+  check(session.first.coinsLeft == 0,
+        "the first play collected all eight coins");
+  check(session.first.wins == 1,
+        "the first play announced the win exactly once");
+  check(session.second.coinsLeft == 0,
+        "the second play collected all eight coins");
+  check(session.second.wins == 1,
+        "the second play announced the win exactly once");
+  check(session.first.hash == session.second.hash,
+        "two plays of the scene end on the same state hash");
+  check(g_scriptErrors == 0, "no script raised an error");
+  return failures;
+}
+
 } // namespace
 
-/// Runs this executable or test program.
-int main() {
+/// Runs this executable or test program. With `--windowed` the route is
+/// played headless and then again in a real window with a render device,
+/// and both must end on one state hash: drawing frames must not change
+/// what the simulation computes.
+int main(int argc, char **argv) {
+  const bool windowed = (argc > 1) && (std::strcmp(argv[1], "--windowed") == 0);
   if (!set_working_directory_with_assets()) {
     std::fprintf(stderr, "FAIL: could not locate %s\n", kScene);
     return 1;
@@ -281,64 +375,22 @@ int main() {
     return 1;
   }
 
-  engine::runtime::EditorBridge bridge{};
-  bridge.set_world = &capture_world;
-  bridge.is_playing = &bridge_is_playing;
-  bridge.is_paused = &bridge_is_paused;
-  engine::runtime::set_editor_bridge(&bridge);
-
-  engine::EngineConfig config{};
-  config.core.platform.headless = true;
-  config.mainScriptPath = kMainScript;
-  if (!engine::bootstrap(config)) {
-    std::fprintf(stderr, "FAIL: bootstrap\n");
-    remove_files();
-    return 2;
-  }
-  const bool sinkRegistered =
-      engine::core::log_register_sink(&watch_log, nullptr);
-
-  int failures = 0;
-  {
-    engine::EnginePipeline pipeline;
-    if (!pipeline.initialize(0U) || (g_world == nullptr)) {
-      std::fprintf(stderr, "FAIL: pipeline initialize\n");
-      failures = 1;
-    } else {
-      const PlayResult first = play_once(pipeline);
-      const PlayResult second = play_once(pipeline);
-      std::printf("coin_run_acceptance_test: first run %d coins left, %d win(s), "
-                  "player at (%.3f, %.3f, %.3f), hash %llu; second run %d "
-                  "left, %d win(s), hash %llu\n",
-                  first.coinsLeft, first.wins,
-                  static_cast<double>(first.finalPosition.x),
-                  static_cast<double>(first.finalPosition.y),
-                  static_cast<double>(first.finalPosition.z),
-                  static_cast<unsigned long long>(first.hash),
-                  second.coinsLeft, second.wins,
-                  static_cast<unsigned long long>(second.hash));
-      const auto check = [&failures](bool condition, const char *what) noexcept {
-        if (!condition) {
-          std::fprintf(stderr, "FAIL: %s\n", what);
-          ++failures;
-        }
-      };
-      check(sinkRegistered, "the log sink registered");
-      check(first.ran && second.ran, "both plays ran to the end of the route");
-      check(first.coinsLeft == 0, "the first play collected all eight coins");
-      check(first.wins == 1, "the first play announced the win exactly once");
-      check(second.coinsLeft == 0, "the second play collected all eight coins");
-      check(second.wins == 1, "the second play announced the win exactly once");
-      check(first.hash == second.hash,
-            "two plays of the scene end on the same state hash");
-      check(g_scriptErrors == 0, "no script raised an error");
+  const SessionResult headless = run_session(true);
+  print_session("headless", headless);
+  int failures = check_session(headless);
+  if (windowed && (failures == 0)) {
+    const SessionResult rendered = run_session(false);
+    print_session("windowed", rendered);
+    failures += check_session(rendered);
+    if (rendered.first.hash != headless.first.hash) {
+      std::fprintf(stderr,
+                   "FAIL: the windowed play ends on hash %llu, the "
+                   "headless play on %llu\n",
+                   static_cast<unsigned long long>(rendered.first.hash),
+                   static_cast<unsigned long long>(headless.first.hash));
+      ++failures;
     }
-    pipeline.teardown();
   }
-
-  engine::core::log_unregister_sink(&watch_log, nullptr);
-  engine::runtime::set_editor_bridge(nullptr);
-  engine::shutdown();
   remove_files();
 
   if (failures != 0) {

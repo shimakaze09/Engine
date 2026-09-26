@@ -26,7 +26,7 @@ engine_package_web_page(engine_web_lifecycle
 
 find_program(ENGINE_NODE_EXECUTABLE node REQUIRED)
 
-foreach(web_case frames max_frames_1 quit fatal_stage page_boots)
+foreach(web_case frames max_frames_1 quit fatal_stage page_boots save_persists)
     if(web_case STREQUAL "page_boots")
         set(web_test engine_web_page_boots)
     else()

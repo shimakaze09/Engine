@@ -1,8 +1,8 @@
 // Verifies the Lua input-config sandbox boundary (audit N-06): caller
 // names for engine.save_input_config/load_input_config resolve strictly
-// under the platform save directory, escape attempts (absolute paths,
+// under the project's data directory, escape attempts (absolute paths,
 // drive designators, backslashes, ".." segments) are refused, authored
-// files outside the save directory survive byte-for-byte, and a
+// files outside that directory survive byte-for-byte, and a
 // legitimate name still round-trips through the production Lua entry
 // point.
 
@@ -14,7 +14,7 @@
 #include "engine/core/input.h"
 #include "engine/core/input_map.h"
 #include "engine/core/logging.h"
-#include "engine/core/platform.h"
+#include "engine/core/project_data.h"
 #include "engine/scripting/scripting.h"
 
 namespace {
@@ -62,10 +62,10 @@ std::string read_raw_file(const char *path) {
   return std::string(buffer, read);
 }
 
-/// Builds "<savedir>/<name>"; empty string when unavailable.
+/// Builds "<project data dir>/<name>"; empty string when unavailable.
 std::string save_dir_path(const char *name) {
-  char saveDir[512] = {};
-  if (!engine::core::platform_get_save_dir(saveDir, sizeof(saveDir))) {
+  char saveDir[1024] = {};
+  if (!engine::core::project_data_dir(saveDir, sizeof(saveDir))) {
     return {};
   }
   return std::string(saveDir) + "/" + name;
@@ -154,12 +154,16 @@ int main() {
     return 2;
   }
 
+  // The working directory stands in for the project a bootstrap names.
+  if (!engine::core::set_project_data_root(".")) {
+    return 3;
+  }
   cleanup();
   int result = 0;
-  char saveDir[512] = {};
+  char saveDir[1024] = {};
   std::error_code ec{};
 
-  if (!engine::core::platform_get_save_dir(saveDir, sizeof(saveDir))) {
+  if (!engine::core::project_data_dir(saveDir, sizeof(saveDir))) {
     result = 3;
   }
   if (result == 0) {
