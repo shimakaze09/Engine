@@ -18,6 +18,15 @@ engine_add_test_executable(engine_integration_pipeline_camera_prep
     gpu;integration
 )
 
+engine_add_test_executable(engine_integration_pipeline_paused_edit
+    SOURCES
+    pipeline_paused_edit_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    LABELS
+    integration
+)
+
 # Reads presented pixels back through the bgfx backend's private readback
 # hook, so it reaches into renderer/src the way the renderer unit suites do.
 engine_add_test_executable(engine_integration_deferred_tile_wrap_gpu
@@ -188,6 +197,21 @@ engine_add_test_executable(engine_integration_texture_mip_chain_gpu
     gpu;integration
 )
 set_tests_properties(engine_integration_texture_mip_chain_gpu PROPERTIES
+    SKIP_REGULAR_EXPRESSION "SKIPPED:")
+
+engine_add_test_executable(engine_integration_alpha_mask_shadow_gpu
+    SOURCES
+    alpha_mask_shadow_gpu_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/renderer/src
+    PRIVATE_DEPS
+    engine_runtime
+    engine_renderer
+    engine_content
+    LABELS
+    gpu;integration
+)
+set_tests_properties(engine_integration_alpha_mask_shadow_gpu PROPERTIES
     SKIP_REGULAR_EXPRESSION "SKIPPED:")
 
 engine_add_test_executable(engine_integration_scene_environment_gpu

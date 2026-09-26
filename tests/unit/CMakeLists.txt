@@ -1659,6 +1659,7 @@ engine_add_test_executable(engine_unit_shadow_caster_flush
     shadow_caster_flush_test.cpp
     ../fake_render_device.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_flush_shadows.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/shadow_caster_draw.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_context.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_math.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/render_settings.cpp
@@ -1764,6 +1765,7 @@ engine_add_test_executable(engine_unit_command_buffer_reload_contract
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_init_core.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_init_environment.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_init_lighting.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/shadow_masked_programs.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_init_post.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_sky.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_ibl.cpp

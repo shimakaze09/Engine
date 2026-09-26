@@ -16,6 +16,7 @@
 #include <cstring>
 #include <vector>
 
+#include "command_buffer_init_internal.h"
 #include "engine/core/cvar.h"
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
@@ -31,7 +32,7 @@
 #include "engine/renderer/shader_system.h"
 #include "engine/renderer/shadow_map.h"
 #include "engine/renderer/texture_loader.h"
-#include "command_buffer_init_internal.h"
+#include "shadow_masked_programs.h"
 
 namespace engine::renderer {
 
@@ -656,6 +657,8 @@ void init_backend_lighting(BackendState &backend,
     }
   }
 
+  // Alpha-mask shadow casters, for whichever shadow families came up.
+  init_masked_shadow_programs(backend, dev);
 }
 
 } // namespace engine::renderer

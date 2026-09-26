@@ -17,6 +17,7 @@
 #include <cstring>
 #include <vector>
 
+#include "command_buffer_init_internal.h"
 #include "engine/core/cvar.h"
 #include "engine/core/logging.h"
 #include "engine/math/mat4.h"
@@ -31,7 +32,7 @@
 #include "engine/renderer/shader_system.h"
 #include "engine/renderer/shadow_map.h"
 #include "engine/renderer/texture_loader.h"
-#include "command_buffer_init_internal.h"
+#include "shadow_masked_programs.h"
 
 namespace engine::renderer {
 
@@ -278,6 +279,7 @@ void refresh_backend_program_state(BackendState &backend,
                       "skinned shadow variant lost required state on shader "
                       "reload — skinned meshes cast bind-pose shadows");
   }
+  refresh_masked_shadow_programs(backend, dev);
 
   if ((backend.fxaaShaderHandle != kInvalidShaderProgram) &&
       !resolve_fxaa_program_state(backend, dev)) {
@@ -407,6 +409,7 @@ void destroy_backend_resources(BackendState *backend) noexcept {
     backend->shadowDepthShaderHandle = ShaderProgramHandle{};
   }
   backend->shadowDepthProgram = kInvalidDeviceProgram;
+  release_masked_shadow_programs(*backend);
 
   // Destroy spot shadow resources.
   shutdown_spot_shadow_maps(backend->spotShadowState);
