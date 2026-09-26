@@ -163,7 +163,9 @@ bool load_bootstrap_meshes(renderer::AssetManager *assetManager,
   // Catalogue the mount so a saved mesh id maps back to the path its
   // bytes live at and a picker can list what exists before it loads. A
   // loader's own record wins: the walk never replaces one that exists,
-  // and the material loader below updates the walk's in place.
+  // and the material loader below updates the walk's in place. The walk
+  // logs its own outcome, an Error naming every offending path when the
+  // mount does not index cleanly, so nothing here repeats it.
   static_cast<void>(content::register_mounted_assets(
       catalog, active_config().assetMount, active_config().assetRoot));
 
