@@ -10,8 +10,8 @@
 // dependencies, a cycle behind many loaded assets, and a repeated
 // traversal over the same store.
 
+#include "engine/content/asset_catalog.h"
 #include "engine/content/asset_metadata.h"
-#include "engine/content/metadata_store.h"
 
 #include <cstddef>
 #include <cstdio>
@@ -20,10 +20,10 @@
 
 namespace {
 
+using engine::content::AssetCatalog;
 using engine::content::AssetId;
 using engine::content::AssetMetadata;
 using engine::content::AssetTypeTag;
-using engine::content::MetadataStore;
 
 int g_failures = 0;
 
@@ -86,7 +86,7 @@ void reset_record() noexcept { g_record = LoadRecord{}; }
 
 /// Registers an asset under a synthesized path so every case works with
 /// real records rather than bare ids.
-bool register_asset(MetadataStore *store, AssetId id) noexcept {
+bool register_asset(AssetCatalog *store, AssetId id) noexcept {
   AssetMetadata meta{};
   meta.assetId = id;
   meta.typeTag = AssetTypeTag::Mesh;
@@ -101,11 +101,11 @@ bool register_asset(MetadataStore *store, AssetId id) noexcept {
 /// Runs this executable or test program.
 int main() {
   using engine::content::add_asset_dependency;
-  using engine::content::clear_metadata_store;
+  using engine::content::clear_asset_catalog;
   using engine::content::load_with_dependencies;
 
   // ~16 MB table: heap-allocate like production owners do.
-  std::unique_ptr<MetadataStore> store(new (std::nothrow) MetadataStore());
+  std::unique_ptr<AssetCatalog> store(new (std::nothrow) AssetCatalog());
   if (store == nullptr) {
     std::fprintf(stderr, "FAIL: store allocation\n");
     return 1;
@@ -158,7 +158,7 @@ int main() {
   const AssetId firstParent = firstHolder + kFillerHolders;
   const AssetId firstFillerLeaf = firstParent + kLateParents;
   {
-    clear_metadata_store(store.get());
+    clear_asset_catalog(store.get());
     CHECK(register_asset(store.get(), wideRoot) &&
               register_asset(store.get(), sharedLeaf),
           "wide graph root and shared leaf register");
@@ -253,7 +253,7 @@ int main() {
 
   // --- An id the store holds no record for is still deduplicated. ---
   {
-    clear_metadata_store(store.get());
+    clear_asset_catalog(store.get());
     const AssetId root = kFirstId + 400ULL;
     const AssetId danglingDep = kFirstId + 401ULL;
     CHECK(register_asset(store.get(), root), "dangling-dep root registers");
@@ -279,7 +279,7 @@ int main() {
 
   // --- A leaf with no dependencies loads exactly once. ---
   {
-    clear_metadata_store(store.get());
+    clear_asset_catalog(store.get());
     const AssetId lone = kFirstId + 450ULL;
     CHECK(register_asset(store.get(), lone), "lone asset registers");
 
@@ -292,7 +292,7 @@ int main() {
   // --- More unregistered ids than the traversal can remember is reported,
   // not met by silently loading a shared id twice. ---
   {
-    clear_metadata_store(store.get());
+    clear_asset_catalog(store.get());
     const AssetId root = kFirstId + 500ULL;
     CHECK(register_asset(store.get(), root), "overflow root registers");
 

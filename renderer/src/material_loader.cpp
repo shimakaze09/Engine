@@ -168,7 +168,7 @@ bool read_field(const core::JsonParser &parser, const core::JsonValue &object,
 /// True when metadata registration can insert or update this ID.
 bool metadata_slot_available(const AssetDatabase &database,
                              AssetId id) noexcept {
-  const content::MetadataStore &store = database.metadataStore;
+  const content::AssetCatalog &store = database.metadataStore;
   for (std::size_t index = 0U; index < store.entries.size(); ++index) {
     if (!store.occupied[index] || (store.entries[index].assetId == id)) {
       return true;

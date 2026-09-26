@@ -414,7 +414,7 @@ void clear_asset_database(AssetDatabase *database) noexcept {
   }
   database->materialIndex.clear();
 
-  content::clear_metadata_store(&database->metadataStore);
+  content::clear_asset_catalog(&database->metadataStore);
 }
 
 // --- Texture asset functions ---
@@ -764,7 +764,7 @@ bool release_texture_asset(AssetDatabase *database, AssetId id) noexcept {
 }
 
 // --- Metadata management: thin delegators into the
-// content-owned MetadataStore embedded in this database. ---
+// content-owned AssetCatalog embedded in this database. ---
 
 bool register_asset_metadata(AssetDatabase *database,
                              const AssetMetadata &metadata) noexcept {

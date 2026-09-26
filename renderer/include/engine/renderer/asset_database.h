@@ -7,7 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "engine/content/metadata_store.h"
+#include "engine/content/asset_catalog.h"
 #include "engine/core/fixed_hash_table.h"
 #include "engine/renderer/command_buffer.h"
 #include "engine/renderer/material.h"
@@ -212,8 +212,8 @@ struct AssetDatabase final {
   // The generic identity/tag/dependency table is content-owned;
   // this database embeds one store and delegates the metadata API to it.
   static constexpr std::size_t kMaxMetadata =
-      content::MetadataStore::kMaxMetadata;
-  content::MetadataStore metadataStore{};
+      content::AssetCatalog::kMaxMetadata;
+  content::AssetCatalog metadataStore{};
 
   std::uint64_t currentFrame = 0ULL;
 };

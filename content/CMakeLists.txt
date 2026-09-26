@@ -13,7 +13,7 @@ engine_add_module_library(engine_content
     src/asset_streaming.cpp
     src/asset_type_table.cpp
     src/lru_cache.cpp
-    src/metadata_store.cpp
+    src/asset_catalog_table.cpp
     PUBLIC_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     PUBLIC_DEPS

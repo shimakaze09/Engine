@@ -207,11 +207,11 @@ bool is_hidden(const std::filesystem::path &relative) noexcept {
 
 } // namespace
 
-MountRegistration register_mounted_assets(MetadataStore *store,
+MountRegistration register_mounted_assets(AssetCatalog *catalog,
                                           const char *mountPrefix,
                                           const char *osRoot) noexcept {
   MountRegistration result{};
-  if ((store == nullptr) || (mountPrefix == nullptr) ||
+  if ((catalog == nullptr) || (mountPrefix == nullptr) ||
       (mountPrefix[0] == '\0') || (osRoot == nullptr) || (osRoot[0] == '\0')) {
     return result;
   }
@@ -292,11 +292,13 @@ MountRegistration register_mounted_assets(MetadataStore *store,
       ++result.refused;
       continue;
     }
-    if (find_asset_metadata(store, metadata.assetId) != nullptr) {
+    const CatalogInsert insert =
+        register_asset_metadata_if_absent(catalog, metadata);
+    if (insert == CatalogInsert::AlreadyKnown) {
       ++result.alreadyKnown;
       continue;
     }
-    if (!register_asset_metadata(store, metadata)) {
+    if (insert == CatalogInsert::Refused) {
       core::log_path_diagnostic(core::LogLevel::Warning, "assets",
                                 metadata.filePath.data(),
                                 "asset catalog: the metadata table is full; "
