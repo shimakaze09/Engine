@@ -1,6 +1,7 @@
 // Declares the single-slot game save: a JSON document written to the
-// per-user platform save directory (best times, progress flags — the
-// small key/value data the v0.1 templates persist between runs).
+// project's data directory (engine/core/project_data.h), one per project
+// per user (best times, progress flags — the small key/value data the
+// v0.1 templates persist between runs).
 
 #pragma once
 
@@ -23,10 +24,14 @@ bool load_game_data_from(const char *directory, char *out,
                          std::size_t capacity,
                          std::size_t *outLength) noexcept;
 
-/// Writes the save slot to the per-user platform save directory.
+/// Writes the save slot to the project's data directory; false, logged,
+/// when no project is named.
 bool save_game_data(const char *json, std::size_t length) noexcept;
 
-/// Reads the save slot from the per-user platform save directory.
+/// Reads the save slot from the project's data directory. A save.json left
+/// in the shared per-user directory by an engine that predates per-project
+/// saves is never read, since nothing ties it to this project; its
+/// presence is logged once.
 bool load_game_data(char *out, std::size_t capacity,
                     std::size_t *outLength) noexcept;
 

@@ -17,7 +17,7 @@ extern "C" {
 #include "engine/core/input.h"
 #include "engine/core/input_map.h"
 #include "engine/core/logging.h"
-#include "engine/core/platform.h"
+#include "engine/core/project_data.h"
 #include "engine/core/vfs.h"
 
 namespace engine::scripting {
@@ -382,17 +382,18 @@ int lua_engine_rebind_action(lua_State *state) noexcept {
   return 1;
 }
 
-/// Confines a script-supplied config name strictly under the save directory.
+/// Confines a script-supplied config name strictly under the project's
+/// data directory.
 bool resolve_input_config_path(const char *name, char *out,
                                std::size_t capacity) noexcept {
   if (!script_path_in_jail(name, "input config")) {
     return false;
   }
-  char saveDir[512] = {};
-  if (!core::platform_get_save_dir(saveDir, sizeof(saveDir))) {
+  char projectDir[1024] = {};
+  if (!core::project_data_dir(projectDir, sizeof(projectDir))) {
     return false;
   }
-  const int written = std::snprintf(out, capacity, "%s/%s", saveDir, name);
+  const int written = std::snprintf(out, capacity, "%s/%s", projectDir, name);
   return (written > 0) && (static_cast<std::size_t>(written) < capacity);
 }
 
@@ -405,14 +406,14 @@ bool resolve_lua_config_path(const char *name, char *out,
   if (!resolve_input_config_path(name, out, capacity)) {
     core::log_message(core::LogLevel::Error, "scripting",
                       "input config path refused: must be a relative "
-                      "name under the save directory");
+                      "name under the project data directory");
     return false;
   }
   return true;
 }
 
 /// Lua binding: Lua engine.save_input_config([name]); defaults to the
-/// per-user bindings file; a name resolves under the save directory.
+/// per-user bindings file; a name resolves under the project data directory.
 int lua_engine_save_input_config(lua_State *state) noexcept {
   const char *name = lua_tostring(state, 1);
   char path[512] = {};
@@ -425,7 +426,7 @@ int lua_engine_save_input_config(lua_State *state) noexcept {
 }
 
 /// Lua binding: Lua engine.load_input_config([name]); defaults to the
-/// per-user bindings file; a name resolves under the save directory.
+/// per-user bindings file; a name resolves under the project data directory.
 int lua_engine_load_input_config(lua_State *state) noexcept {
   const char *name = lua_tostring(state, 1);
   char path[512] = {};

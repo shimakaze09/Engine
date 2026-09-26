@@ -1319,6 +1319,16 @@ engine_add_test_executable(engine_integration_engine_config_strings
     integration
 )
 
+engine_add_test_executable(engine_integration_project_save_scope
+    SOURCES
+    project_save_scope_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_scripting
+    LABELS
+    integration
+)
+
 engine_add_test_executable(engine_integration_gamepad_hotplug
     SOURCES
     gamepad_hotplug_test.cpp

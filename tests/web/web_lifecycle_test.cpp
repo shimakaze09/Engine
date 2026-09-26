@@ -19,6 +19,7 @@
 #include "engine/core/job_system.h"
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
+#include "engine/core/project_data.h"
 #include "engine/engine.h"
 #include "engine/renderer/render_device.h"
 #include "engine/runtime/editor_bridge.h"
@@ -164,7 +165,12 @@ int main() {
       engine::core::non_empty_env("ENGINE_WEB_TEST_CASE", name, sizeof(name)));
   std::uint32_t maxFrames = kSmokeFrames;
   if (std::strcmp(name, "save_persists") == 0) {
-    // No run: the driver saves and loads through the exported calls.
+    // No run: the driver saves and loads through the exported calls, in
+    // the project a bootstrap would name from its mounted root.
+    if (!engine::core::set_project_data_root(".")) {
+      std::printf("[web-lifecycle] project root refused\n");
+      return 1;
+    }
     std::printf("[web-lifecycle] case=%s\n", name);
     return 0;
   }

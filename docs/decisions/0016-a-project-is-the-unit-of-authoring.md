@@ -3,6 +3,12 @@
 **Date:** 2026-09-21. Owner decision, following the gap inventory that
 produced [0015](0015-commercial-anime-engine-on-six-platforms.md).
 
+**Status:** Point 5 is in place for a running game's per-user data: the
+save slot and the rebound input map live in a per-project directory
+(`core/include/engine/core/project_data.h`), named for now by the mounted
+content root because no `.project` document exists yet; its GUID takes
+that role once one does. The rest is not yet implemented.
+
 ## Context
 
 The engine has no notion of a project. `app/main.cpp` takes no arguments
