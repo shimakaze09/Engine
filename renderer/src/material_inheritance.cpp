@@ -3,8 +3,6 @@
 
 #include "engine/renderer/material_inheritance.h"
 
-#include <array>
-
 namespace engine::renderer {
 
 namespace {
@@ -111,6 +109,99 @@ bool material_chain_contains(const content::AssetCatalog *catalog,
   return false;
 }
 
+namespace {
+
+struct PropagationContext final {
+  AssetDatabase *database = nullptr;
+  const content::AssetCatalog *catalog = nullptr;
+};
+
+/// One dependent of a changed asset. A material that inherits from the
+/// cause takes every field it does not override from the cause's current
+/// values; a material that names the cause as a texture drops that slot's
+/// handle for resolve_material_textures to fetch again. Any other kind of
+/// dependent is not the renderer's material to update.
+void update_dependent_material(content::AssetId dependent,
+                               content::AssetId cause,
+                               void *userData) noexcept {
+  const auto &context = *static_cast<const PropagationContext *>(userData);
+  AssetDatabase *database = context.database;
+  const std::uint32_t *slot = database->materialIndex.find(dependent);
+  if ((slot == nullptr) || !database->materialOccupied[*slot]) {
+    return;
+  }
+  MaterialAssetRecord &record = database->materialAssets[*slot];
+  if (record.state != content::AssetState::Ready) {
+    return;
+  }
+
+  if (find_material_parent_id(context.catalog, dependent) == cause) {
+    const Material *parent = find_material_params(database, cause);
+    const MaterialTextureSlots *parentSlots =
+        find_material_texture_slots(database, cause);
+    if ((parent == nullptr) || (parentSlots == nullptr)) {
+      return;
+    }
+    const MaterialTextureSlots before = record.textureSlots;
+    inherit_from(*parent, *parentSlots, record.overriddenFields, &record.params,
+                 &record.textureSlots);
+    if (slots_differ(before, record.textureSlots)) {
+      record.unregisterableTextureSlots = 0U;
+    }
+    return;
+  }
+
+#define ENGINE_MATERIAL_DROP_CHANGED_TEXTURE(name, slot, handle, key)          \
+  if (record.textureSlots.slot == cause) {                                     \
+    record.params.handle = kInvalidTextureHandle;                              \
+  }
+  ENGINE_MATERIAL_TEXTURE_FIELDS(ENGINE_MATERIAL_DROP_CHANGED_TEXTURE)
+#undef ENGINE_MATERIAL_DROP_CHANGED_TEXTURE
+}
+
+/// Rewrites the material's catalog edges to match its live record: its
+/// parent, then every texture slot the material authors itself. An
+/// inherited slot is the parent's edge to carry, as at load. Writes only
+/// when the edges differ, so an edit that changes no reference leaves the
+/// catalog's generation where it was.
+void sync_material_edges(const AssetDatabase *database,
+                         content::AssetCatalog *catalog,
+                         content::AssetId materialId) noexcept {
+  const content::AssetMetadata *current =
+      content::find_asset_metadata(catalog, materialId);
+  const MaterialTextureSlots *slots =
+      find_material_texture_slots(database, materialId);
+  if ((current == nullptr) || (slots == nullptr)) {
+    return;
+  }
+  content::AssetMetadata next = *current;
+  next.dependencyCount = 0U;
+  next.dependencies = {};
+  const content::AssetId parent = find_material_parent_id(catalog, materialId);
+  if (parent != content::kInvalidAssetId) {
+    static_cast<void>(content::asset_metadata_add_dependency(&next, parent));
+  }
+  const std::uint16_t authored = material_overrides(database, materialId);
+#define ENGINE_MATERIAL_AUTHORED_EDGE(name, slot, handle, key)                 \
+  if (((authored & material_field::k##name) != 0U) &&                          \
+      (slots->slot != content::kInvalidAssetId)) {                             \
+    static_cast<void>(                                                         \
+        content::asset_metadata_add_dependency(&next, slots->slot));           \
+  }
+  ENGINE_MATERIAL_TEXTURE_FIELDS(ENGINE_MATERIAL_AUTHORED_EDGE)
+#undef ENGINE_MATERIAL_AUTHORED_EDGE
+
+  bool same = next.dependencyCount == current->dependencyCount;
+  for (std::size_t i = 0U; same && (i < next.dependencyCount); ++i) {
+    same = next.dependencies[i] == current->dependencies[i];
+  }
+  if (!same) {
+    static_cast<void>(content::register_asset_metadata(catalog, next));
+  }
+}
+
+} // namespace
+
 std::size_t
 propagate_material_to_dependents(AssetDatabase *database,
                                  const content::AssetCatalog *catalog,
@@ -119,51 +210,13 @@ propagate_material_to_dependents(AssetDatabase *database,
       (changedId == content::kInvalidAssetId)) {
     return 0U;
   }
-
-  // Breadth first from the changed material; every material enters the
-  // list once, so a cycle an edit introduced still ends.
-  std::array<content::AssetId, AssetDatabase::kMaxMaterialAssets + 1U>
-      visited{};
-  std::size_t visitedCount = 0U;
-  visited[visitedCount++] = changedId;
-  const auto seen = [&visited, &visitedCount](content::AssetId id) noexcept {
-    for (std::size_t i = 0U; i < visitedCount; ++i) {
-      if (visited[i] == id) {
-        return true;
-      }
-    }
-    return false;
-  };
-
-  for (std::size_t next = 0U; next < visitedCount; ++next) {
-    const content::AssetId parentId = visited[next];
-    const Material *parent = find_material_params(database, parentId);
-    const MaterialTextureSlots *parentSlots =
-        find_material_texture_slots(database, parentId);
-    if ((parent == nullptr) || (parentSlots == nullptr)) {
-      continue;
-    }
-    for (std::size_t i = 0U; i < database->materialAssets.size(); ++i) {
-      MaterialAssetRecord &record = database->materialAssets[i];
-      if (!database->materialOccupied[i] ||
-          (record.state != content::AssetState::Ready) || seen(record.id) ||
-          (find_material_parent_id(catalog, record.id) != parentId)) {
-        continue;
-      }
-      const MaterialTextureSlots before = record.textureSlots;
-      inherit_from(*parent, *parentSlots, record.overriddenFields,
-                   &record.params, &record.textureSlots);
-      if (slots_differ(before, record.textureSlots)) {
-        record.unregisterableTextureSlots = 0U;
-      }
-      visited[visitedCount++] = record.id;
-    }
-  }
-  return visitedCount - 1U;
+  PropagationContext context{database, catalog};
+  return content::notify_asset_changed(catalog, changedId,
+                                       &update_dependent_material, &context);
 }
 
 bool edit_material_asset(AssetDatabase *database,
-                         const content::AssetCatalog *catalog,
+                         content::AssetCatalog *catalog,
                          content::AssetId materialId, const Material &params,
                          const MaterialTextureSlots &textureSlots) noexcept {
   const Material *current = find_material_params(database, materialId);
@@ -181,7 +234,7 @@ bool edit_material_asset(AssetDatabase *database,
 }
 
 bool restore_material_asset(AssetDatabase *database,
-                            const content::AssetCatalog *catalog,
+                            content::AssetCatalog *catalog,
                             content::AssetId materialId, const Material &params,
                             const MaterialTextureSlots &textureSlots,
                             std::uint16_t overriddenFields) noexcept {
@@ -198,6 +251,7 @@ bool restore_material_asset(AssetDatabase *database,
       !set_material_overrides(database, materialId, overriddenFields)) {
     return false;
   }
+  sync_material_edges(database, catalog, materialId);
   static_cast<void>(
       propagate_material_to_dependents(database, catalog, materialId));
   return true;
