@@ -345,8 +345,15 @@ bool queue_mesh_reload(AssetManager *manager, AssetDatabase *database,
 }
 
 /// Advances this system for the current frame or tick for asset manager.
-bool update_asset_manager(AssetManager *manager,
-                          AssetDatabase *database,
+bool update_asset_manager(AssetManager *manager, AssetDatabase *database,
+                          GpuMeshRegistry *registry,
+                          std::size_t maxTransitions) noexcept {
+  return update_asset_manager(manager, database, nullptr, registry,
+                              maxTransitions);
+}
+
+bool update_asset_manager(AssetManager *manager, AssetDatabase *database,
+                          content::AssetCatalog *catalog,
                           GpuMeshRegistry *registry,
                           std::size_t maxTransitions) noexcept {
   if ((manager == nullptr) || (database == nullptr) || (registry == nullptr)) {
@@ -378,6 +385,9 @@ bool update_asset_manager(AssetManager *manager,
       break;
     case AssetRequestType::Reload:
       succeeded = process_load_like_request(database, registry, request, true);
+      if (succeeded && (catalog != nullptr)) {
+        static_cast<void>(content::note_asset_reloaded(catalog, request.id));
+      }
       break;
     case AssetRequestType::Unload:
       unload_record_mesh(&record, registry);

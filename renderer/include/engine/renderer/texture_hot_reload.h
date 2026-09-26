@@ -36,12 +36,13 @@ enum class TextureReload : std::uint8_t {
 
 /// Loads the texture `id` again from the path the catalog records for it.
 /// On success the record takes the new handle and becomes Ready, the
-/// previous handle is released through `releaseFn`, and
+/// previous handle is released through `releaseFn`, the catalog records
+/// the reload (content::note_asset_reloaded), and
 /// content::notify_asset_changed reaches every material that uses it:
 /// one that names it drops that slot's handle, one inheriting it takes the
 /// parent's, and the next resolve_material_textures fetches the new one.
 TextureReload reload_texture_asset(AssetDatabase *database,
-                                   const content::AssetCatalog *catalog,
+                                   content::AssetCatalog *catalog,
                                    content::AssetId id,
                                    MaterialTextureLoadFn loadFn,
                                    MaterialTextureReleaseFn releaseFn,
@@ -58,7 +59,7 @@ inline constexpr std::size_t kTextureReloadPollSlots = 64U;
 /// only: a player's content does not change under it. Returns how many
 /// textures reloaded.
 std::size_t poll_texture_changes(AssetDatabase *database,
-                                 const content::AssetCatalog *catalog,
+                                 content::AssetCatalog *catalog,
                                  MaterialTextureLoadFn loadFn,
                                  MaterialTextureReleaseFn releaseFn,
                                  void *userData) noexcept;

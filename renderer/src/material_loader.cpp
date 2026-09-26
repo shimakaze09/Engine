@@ -250,6 +250,11 @@ bool load_material_recursive(AssetDatabase *database,
                              content::AssetId *outId, Material *outParams,
                              MaterialTextureSlots *outSlots) noexcept;
 
+bool validate_material_file(AssetDatabase *database,
+                            content::AssetCatalog *catalog,
+                            const char *virtualPath,
+                            std::size_t depth) noexcept;
+
 /// material_field bits for the fields the document itself names; the rest
 /// its parent supplies.
 std::uint16_t authored_fields(const core::JsonParser &parser,
@@ -280,14 +285,19 @@ std::uint16_t authored_fields(const core::JsonParser &parser,
 /// JsonValues reference slices of it. Every mutation happens after
 /// every validation step below has already succeeded (the two
 /// slot-availability checks are last), so a parse failure at any point
-/// leaves a previously registered record for `id` completely untouched —
-/// the property reload_material_asset relies on.
+/// leaves a previously registered record for `id` completely untouched.
+///
+/// With `commit` false it only validates: a parent that is not loaded is
+/// validated from its file rather than loaded, and nothing is registered,
+/// so reload_material_asset can prove the whole document good before the
+/// commit pass loads anything.
 bool parse_material_text(AssetDatabase *database,
                          content::AssetCatalog *catalog,
                          const char *virtualPath, const char *text,
                          std::size_t size, std::size_t depth,
                          content::AssetId id, Material *outParams,
-                         MaterialTextureSlots *outSlots) noexcept {
+                         MaterialTextureSlots *outSlots,
+                         bool commit = true) noexcept {
   core::JsonParser parser{};
   if (!parser.parse(text, size)) {
     return log_material_error(virtualPath, "malformed JSON");
@@ -325,8 +335,26 @@ bool parse_material_text(AssetDatabase *database,
     // path is copied out rather than read through a record being replaced.
     char parentPath[sizeof(parent->filePath)] = {};
     std::memcpy(parentPath, parent->filePath.data(), sizeof(parentPath));
-    if (!load_material_recursive(database, catalog, parentPath, depth + 1U,
-                                 &parentId, &params, &slots)) {
+    const bool parentLoaded =
+        find_material_params(database, parent->assetId) != nullptr;
+    if (!commit && !parentLoaded) {
+      // Validation only: the parent must be loadable, but loading it is
+      // the commit pass's to do. Its values do not matter to validity.
+      if ((depth + 1U) >= kMaxMaterialParentDepth) {
+        return log_material_error(virtualPath,
+                                  "parent chain too deep (cycle or depth > 8)");
+      }
+      if (!validate_material_file(database, catalog, parentPath, depth + 1U)) {
+        return log_material_error(virtualPath, "failed to load parent");
+      }
+      parentId = parent->assetId;
+      if (parentId == id) {
+        return log_material_error(virtualPath,
+                                  "parent chain would become a cycle");
+      }
+    } else if (!load_material_recursive(database, catalog, parentPath,
+                                        depth + 1U, &parentId, &params,
+                                        &slots)) {
       return log_material_error(virtualPath, "failed to load parent");
     }
     // A parent already loaded skips the depth walk above, so a reload that
@@ -401,6 +429,9 @@ bool parse_material_text(AssetDatabase *database,
   if (!can_register_asset_metadata(catalog, id)) {
     return log_material_error(virtualPath, "metadata table is full");
   }
+  if (!commit) {
+    return true;
+  }
 
   if (!register_material_asset(database, id, virtualPath, params)) {
     return log_material_error(virtualPath,
@@ -474,6 +505,24 @@ bool load_material_recursive(AssetDatabase *database,
     *outId = id;
   }
   return loaded;
+}
+
+/// Validates the material file at `virtualPath` without registering
+/// anything; see parse_material_text's commit flag.
+bool validate_material_file(AssetDatabase *database,
+                            content::AssetCatalog *catalog,
+                            const char *virtualPath,
+                            std::size_t depth) noexcept {
+  char *text = nullptr;
+  std::size_t size = 0U;
+  if (!core::vfs_read_text(virtualPath, &text, &size)) {
+    return log_material_error(virtualPath, "failed to read file");
+  }
+  const bool valid = parse_material_text(
+      database, catalog, virtualPath, text, size, depth,
+      content::make_asset_id_from_path(virtualPath), nullptr, nullptr, false);
+  core::vfs_free(text);
+  return valid;
 }
 
 /// What resolving one texture slot did.
@@ -614,14 +663,20 @@ reload_material_asset(AssetDatabase *database, content::AssetCatalog *catalog,
     return std::unexpected(MaterialLoadError::Io);
   }
 
-  const bool loaded = parse_material_text(database, catalog, virtualPath, text,
-                                          size, 0U, id, nullptr, nullptr);
+  // Prepare and validate the whole document, a parent it newly names
+  // included, before anything is loaded or registered; only then commit.
+  // A failure in either pass leaves the database and the catalog as they
+  // were: the previously Ready record keeps serving.
+  const bool valid = parse_material_text(database, catalog, virtualPath, text,
+                                         size, 0U, id, nullptr, nullptr, false);
+  const bool loaded =
+      valid && parse_material_text(database, catalog, virtualPath, text, size,
+                                   0U, id, nullptr, nullptr);
   core::vfs_free(text);
   if (!loaded) {
-    // parse_material_text never mutated the database or the catalog (see its
-    // header comment): the previously Ready record is exactly as it was.
     return std::unexpected(MaterialLoadError::Parse);
   }
+  static_cast<void>(content::note_asset_reloaded(catalog, id));
   static_cast<void>(propagate_material_to_dependents(database, catalog, id));
   return id;
 }

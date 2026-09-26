@@ -6,6 +6,7 @@
 #include <cstring>
 #include <memory>
 #include <new>
+#include <vector>
 
 #include "engine/content/asset_catalog.h"
 #include "engine/core/logging.h"
@@ -72,11 +73,18 @@ int verify_reload_success(engine::renderer::AssetDatabase *database) {
     remove_file(kPath);
     return 12;
   }
+  const std::uint32_t generationBefore =
+      engine::content::asset_reload_generation(g_catalog, id);
   const auto reloadResult = engine::renderer::reload_material_asset(
       database, g_catalog, kVirtualPath);
   remove_file(kPath);
   if (!reloadResult.has_value() || (*reloadResult != id)) {
     return 13;
+  }
+  // #682: a committed reload moves the catalog's reload generation once.
+  if (engine::content::asset_reload_generation(g_catalog, id) !=
+      generationBefore + 1U) {
+    return 16;
   }
 
   const engine::renderer::Material *params =
@@ -120,12 +128,18 @@ int verify_reload_malformed_preserves_previous(
     remove_file(kPath);
     return 22;
   }
+  const std::uint32_t generationBefore =
+      engine::content::asset_reload_generation(g_catalog, id);
   const auto reloadResult = engine::renderer::reload_material_asset(
       database, g_catalog, kVirtualPath);
   remove_file(kPath);
   if (reloadResult.has_value() ||
       (reloadResult.error() != engine::renderer::MaterialLoadError::Parse)) {
     return 23;
+  }
+  if (engine::content::asset_reload_generation(g_catalog, id) !=
+      generationBefore) {
+    return 26;
   }
 
   // Previous valid values are exactly as they were before the bad reload.
@@ -141,6 +155,84 @@ int verify_reload_malformed_preserves_previous(
   }
 
   return 0;
+}
+
+/// The material tables and the catalog as raw bytes: what a failed reload
+/// must leave exactly as it found.
+struct LiveStateBytes final {
+  std::vector<unsigned char> bytes;
+};
+
+void append_bytes(std::vector<unsigned char> *out, const void *data,
+                  std::size_t size) {
+  const auto *begin = static_cast<const unsigned char *>(data);
+  out->insert(out->end(), begin, begin + size);
+}
+
+LiveStateBytes live_state(const engine::renderer::AssetDatabase &database) {
+  LiveStateBytes state{};
+  append_bytes(&state.bytes, &database.materialAssets,
+               sizeof(database.materialAssets));
+  append_bytes(&state.bytes, &database.materialOccupied,
+               sizeof(database.materialOccupied));
+  append_bytes(&state.bytes, &g_catalog->entries, sizeof(g_catalog->entries));
+  append_bytes(&state.bytes, &g_catalog->occupied, sizeof(g_catalog->occupied));
+  append_bytes(&state.bytes, &g_catalog->reloadGenerations,
+               sizeof(g_catalog->reloadGenerations));
+  append_bytes(&state.bytes, &g_catalog->generation,
+               sizeof(g_catalog->generation));
+  return state;
+}
+
+/// #682: a reload whose file newly names a parent nothing has loaded, and
+/// then fails on a field of its own, leaves the live state byte for byte:
+/// the parent is validated, never loaded, before the child is proven good.
+int verify_reload_failure_loads_no_parent(
+    engine::renderer::AssetDatabase *database) {
+  constexpr const char *kChildOs = "material_reload_child.json";
+  constexpr const char *kChildPath = "mat/material_reload_child.json";
+  constexpr const char *kParentOs = "material_reload_new_parent.json";
+  constexpr const char *kParentPath = "mat/material_reload_new_parent.json";
+  const auto finish = [&](int result) {
+    remove_file(kChildOs);
+    remove_file(kParentOs);
+    return result;
+  };
+  const auto parentRef =
+      engine::tests::catalog_material(g_catalog, kParentPath);
+  if (!write_material_file(kChildOs, "{\"version\":4,\"roughness\":0.4}") ||
+      !write_material_file(kParentOs, "{\"version\":4,\"metallic\":0.9}")) {
+    return finish(40);
+  }
+  if (!engine::renderer::load_material_asset(database, g_catalog, kChildPath)
+           .has_value()) {
+    return finish(41);
+  }
+
+  char broken[256] = {};
+  std::snprintf(broken, sizeof(broken),
+                "{\"version\":4,\"parent\":\"%s\",\"roughness\":\"high\"}",
+                parentRef.text);
+  if (!write_material_file(kChildOs, broken)) {
+    return finish(42);
+  }
+  const LiveStateBytes before = live_state(*database);
+  const auto reloadResult =
+      engine::renderer::reload_material_asset(database, g_catalog, kChildPath);
+  if (reloadResult.has_value()) {
+    return finish(43);
+  }
+  if (engine::renderer::material_asset_state(
+          database, engine::content::make_asset_id_from_path(kParentPath)) !=
+      engine::content::AssetState::Unloaded) {
+    std::printf("the failed reload loaded the parent it named\n");
+    return finish(44);
+  }
+  if (live_state(*database).bytes != before.bytes) {
+    std::printf("the failed reload changed the live state\n");
+    return finish(45);
+  }
+  return finish(0);
 }
 
 /// Reloading a material that was never loaded fails cleanly (no state to
@@ -186,6 +278,9 @@ int main() {
   }
   if (result == 0) {
     result = verify_reload_of_unknown_material(database.get());
+  }
+  if (result == 0) {
+    result = verify_reload_failure_loads_no_parent(database.get());
   }
 
   engine::core::shutdown_vfs();

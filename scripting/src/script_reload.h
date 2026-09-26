@@ -45,4 +45,9 @@ ReloadOutcome run_chunk_as_reload(lua_State *state, const char *label,
                                   int results, ReloadResultCheck check,
                                   void *userData) noexcept;
 
+/// The last step of a committed script reload: records it on the asset
+/// catalog through the runtime, so the script's reload generation moves by
+/// exactly one. A reload that did not commit never calls this.
+void note_script_reloaded(const char *path) noexcept;
+
 } // namespace engine::scripting

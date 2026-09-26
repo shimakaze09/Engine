@@ -522,6 +522,7 @@ int get_or_load_entity_script_module(const char *path) noexcept {
         mod.lastFailedMtime = 0;
         mod.reloaded = true;
         g_hasPendingEntityReloads = true;
+        note_script_reloaded(path);
 
         char logBuf[256] = {};
         std::snprintf(logBuf, sizeof(logBuf), "hot-reloaded entity script: %s",

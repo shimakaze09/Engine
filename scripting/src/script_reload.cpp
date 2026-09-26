@@ -8,6 +8,7 @@
 #include "binding_util.h"
 #include "debug_bindings.h"
 #include "reload_transaction.h"
+#include "runtime_binding.h"
 #include "scene_bindings.h"
 
 extern "C" {
@@ -424,6 +425,13 @@ ReloadOutcome run_chunk_as_reload(lua_State *state, const char *label,
   luaL_unref(state, LUA_REGISTRYINDEX, snapshotReference);
   return (commit == ReloadCommit::Applied) ? ReloadOutcome::Committed
                                            : ReloadOutcome::CommitFailed;
+}
+
+void note_script_reloaded(const char *path) noexcept {
+  const RuntimeServices *services = runtime_binding().services;
+  if ((services != nullptr) && (services->note_script_reloaded != nullptr)) {
+    services->note_script_reloaded(path);
+  }
 }
 
 } // namespace engine::scripting

@@ -29,6 +29,11 @@ struct AssetCatalog final {
   std::array<AssetMetadata, kMaxMetadata> entries =
       std::array<AssetMetadata, kMaxMetadata>();
   std::array<bool, kMaxMetadata> occupied{};
+  /// Per slot: how many reloads of the asset there have committed
+  /// (note_asset_reloaded). Kept across a replace of the record, so a
+  /// loader that rewrites the record keeps the count; zero for a slot a
+  /// new asset takes, and after a clear.
+  std::array<std::uint32_t, kMaxMetadata> reloadGenerations{};
   std::uint64_t generation = 0U;
 };
 
@@ -147,6 +152,32 @@ using AssetChangeVisitor = void (*)(AssetId dependent, AssetId cause,
 std::size_t notify_asset_changed(const AssetCatalog *catalog, AssetId changed,
                                  AssetChangeVisitor visit,
                                  void *userData) noexcept;
+
+// --- Reload contract ---
+//
+// Every hot reload of an asset, whatever its type, is one transaction in
+// this order: prepare the replacement (read and parse it) without
+// touching live state; validate it; then either roll back, leaving the
+// live data and every counter exactly as they were, or commit (swap the
+// replacement in), record the reload with note_asset_reloaded, and tell
+// the asset's dependents with notify_asset_changed. Recording comes before
+// notifying so a dependent that looks sees the new generation. Nothing
+// observable happens before validation, and a commit happens exactly
+// once. Materials, textures, meshes, the main script and entity modules
+// follow it. Shader programs are not catalogued, so their reload keeps
+// its own counter (renderer::shader_reload_epoch) with the same rule.
+
+/// How many reloads of `id` have committed since it was catalogued: zero
+/// for an asset never reloaded, and for one the catalog does not hold. A
+/// consumer that noted it can tell the data it holds was replaced.
+std::uint32_t asset_reload_generation(const AssetCatalog *catalog,
+                                      AssetId id) noexcept;
+
+/// Records a committed reload of `id`: its reload generation moves by
+/// exactly one, and the catalog's generation with it. Only a reload that
+/// committed calls this. False, with nothing moved, when the catalog does
+/// not hold the id.
+bool note_asset_reloaded(AssetCatalog *catalog, AssetId id) noexcept;
 
 /// Loads an asset and all its dependencies depth-first, dependency-first,
 /// invoking loadCallback exactly once per distinct asset in dependency

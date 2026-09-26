@@ -571,6 +571,18 @@ engine_add_test_executable(engine_integration_scene_flow
     integration
 )
 
+engine_add_test_executable(engine_integration_script_reload_generation
+    SOURCES
+    script_reload_generation_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_scripting
+    engine_renderer
+    engine_core
+    LABELS
+    integration
+)
+
 engine_add_test_executable(engine_integration_end_play_session_state
     SOURCES
     end_play_sees_session_state_test.cpp

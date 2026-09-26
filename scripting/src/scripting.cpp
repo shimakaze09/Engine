@@ -765,6 +765,10 @@ void check_script_reload() noexcept {
          protected_load_chunk(state, entry.path, "hot_reload"))
             ? run_chunk_as_reload(state, "hot_reload", 0, nullptr, nullptr)
             : ReloadOutcome::RolledBack;
+    if ((outcome == ReloadOutcome::Committed) ||
+        (outcome == ReloadOutcome::CommitFailed)) {
+      note_script_reloaded(entry.path);
+    }
     switch (outcome) {
     case ReloadOutcome::Committed:
       break;
