@@ -21,7 +21,7 @@ namespace {
 
 /// Finds the matching object or resource for mesh asset slot.
 std::size_t find_mesh_asset_slot(const AssetDatabase *database,
-                                 AssetId id) noexcept {
+                                 content::AssetId id) noexcept {
   return find_mesh_asset_record_slot(database, id);
 }
 
@@ -65,8 +65,8 @@ void rebuild_mesh_index(AssetDatabase *database) noexcept {
 } // namespace
 
 std::size_t find_mesh_asset_record_slot(const AssetDatabase *database,
-                                        AssetId id) noexcept {
-  if ((database == nullptr) || (id == kInvalidAssetId)) {
+                                        content::AssetId id) noexcept {
+  if ((database == nullptr) || (id == content::kInvalidAssetId)) {
     return database != nullptr ? database->meshAssets.size() : 0U;
   }
 
@@ -76,8 +76,8 @@ std::size_t find_mesh_asset_record_slot(const AssetDatabase *database,
 }
 
 std::size_t claim_mesh_asset_record_slot(AssetDatabase *database,
-                                         AssetId id) noexcept {
-  if ((database == nullptr) || (id == kInvalidAssetId)) {
+                                         content::AssetId id) noexcept {
+  if ((database == nullptr) || (id == content::kInvalidAssetId)) {
     return database != nullptr ? database->meshAssets.size() : 0U;
   }
 
@@ -111,7 +111,8 @@ bool mesh_asset_record_releasable(const MeshAssetRecord &record) noexcept {
 
 /// Unregisters the asset record; refused while it is still referenced or
 /// still owns a GPU mesh.
-bool unregister_mesh_asset(AssetDatabase *database, AssetId id) noexcept {
+bool unregister_mesh_asset(AssetDatabase *database,
+                           content::AssetId id) noexcept {
   if (database == nullptr) {
     return false;
   }
@@ -135,10 +136,10 @@ bool unregister_mesh_asset(AssetDatabase *database, AssetId id) noexcept {
   return true;
 }
 
-bool register_mesh_asset(AssetDatabase *database, AssetId id,
+bool register_mesh_asset(AssetDatabase *database, content::AssetId id,
                          const char *sourcePath,
                          MeshHandle runtimeMesh) noexcept {
-  if ((database == nullptr) || (id == kInvalidAssetId) ||
+  if ((database == nullptr) || (id == content::kInvalidAssetId) ||
       (runtimeMesh == kInvalidMeshHandle)) {
     return false;
   }
@@ -152,7 +153,7 @@ bool register_mesh_asset(AssetDatabase *database, AssetId id,
   record.id = id;
   record.runtimeMesh = runtimeMesh;
   record.refCount = (record.refCount == 0U) ? 1U : record.refCount;
-  record.state = AssetState::Ready;
+  record.state = content::AssetState::Ready;
   record.requestedResident = true;
   record.pinned = true;
   write_source_path(&record.sourcePath, sourcePath);
@@ -160,9 +161,10 @@ bool register_mesh_asset(AssetDatabase *database, AssetId id,
 }
 
 /// Marks a mesh asset as requested and loading without queuing a sync load.
-bool request_mesh_asset_streaming_load(AssetDatabase *database, AssetId id,
+bool request_mesh_asset_streaming_load(AssetDatabase *database,
+                                       content::AssetId id,
                                        const char *sourcePath) noexcept {
-  if ((database == nullptr) || (id == kInvalidAssetId)) {
+  if ((database == nullptr) || (id == content::kInvalidAssetId)) {
     return false;
   }
   if ((sourcePath != nullptr) &&
@@ -183,22 +185,22 @@ bool request_mesh_asset_streaming_load(AssetDatabase *database, AssetId id,
   }
   record.refCount = (record.refCount == 0U) ? 1U : record.refCount;
   record.requestedResident = true;
-  if (record.state != AssetState::Ready) {
+  if (record.state != content::AssetState::Ready) {
     record.runtimeMesh = kInvalidMeshHandle;
-    record.state = AssetState::Loading;
+    record.state = content::AssetState::Loading;
   }
   return true;
 }
 
-AssetState mesh_asset_state(const AssetDatabase *database,
-                            AssetId id) noexcept {
-  if ((database == nullptr) || (id == kInvalidAssetId)) {
-    return AssetState::Unloaded;
+content::AssetState mesh_asset_state(const AssetDatabase *database,
+                                     content::AssetId id) noexcept {
+  if ((database == nullptr) || (id == content::kInvalidAssetId)) {
+    return content::AssetState::Unloaded;
   }
 
   const std::size_t slot = find_mesh_asset_slot(database, id);
   if (slot == database->meshAssets.size()) {
-    return AssetState::Unloaded;
+    return content::AssetState::Unloaded;
   }
 
   return database->meshAssets[slot].state;
@@ -207,9 +209,10 @@ AssetState mesh_asset_state(const AssetDatabase *database,
 /// Sets the mesh asset state; a Ready transition stamps lastAccessFrame so
 /// a fresh upload gets a full eviction-hysteresis window even before its
 /// first draw resolves it.
-bool set_mesh_asset_state(AssetDatabase *database, AssetId id, AssetState state,
+bool set_mesh_asset_state(AssetDatabase *database, content::AssetId id,
+                          content::AssetState state,
                           MeshHandle runtimeMesh) noexcept {
-  if ((database == nullptr) || (id == kInvalidAssetId)) {
+  if ((database == nullptr) || (id == content::kInvalidAssetId)) {
     return false;
   }
 
@@ -219,12 +222,13 @@ bool set_mesh_asset_state(AssetDatabase *database, AssetId id, AssetState state,
   }
 
   MeshAssetRecord &record = database->meshAssets[slot];
-  if ((state == AssetState::Ready) && (runtimeMesh == kInvalidMeshHandle)) {
+  if ((state == content::AssetState::Ready) &&
+      (runtimeMesh == kInvalidMeshHandle)) {
     return false;
   }
 
   record.state = state;
-  if (state == AssetState::Ready) {
+  if (state == content::AssetState::Ready) {
     record.runtimeMesh = runtimeMesh;
     record.lastAccessFrame.store(database->currentFrame,
                                  std::memory_order_relaxed);
@@ -235,9 +239,9 @@ bool set_mesh_asset_state(AssetDatabase *database, AssetId id, AssetState state,
   return true;
 }
 
-bool set_mesh_asset_size(AssetDatabase *database, AssetId id,
+bool set_mesh_asset_size(AssetDatabase *database, content::AssetId id,
                          std::uint64_t sizeBytes) noexcept {
-  if ((database == nullptr) || (id == kInvalidAssetId)) {
+  if ((database == nullptr) || (id == content::kInvalidAssetId)) {
     return false;
   }
 
@@ -270,7 +274,8 @@ std::size_t evict_mesh_assets_over_budget(AssetDatabase *database,
       ++comingFree;
       continue;
     }
-    if ((record.state == AssetState::Ready) && record.requestedResident) {
+    if ((record.state == content::AssetState::Ready) &&
+        record.requestedResident) {
       residentBytes += record.sizeBytes;
     }
   }
@@ -286,7 +291,8 @@ std::size_t evict_mesh_assets_over_budget(AssetDatabase *database,
     std::uint64_t coldestFrame = 0ULL;
     for (std::size_t i = 0U; i < database->meshAssets.size(); ++i) {
       const MeshAssetRecord &record = database->meshAssets[i];
-      if (!database->occupied[i] || (record.state != AssetState::Ready) ||
+      if (!database->occupied[i] ||
+          (record.state != content::AssetState::Ready) ||
           !record.requestedResident || record.pinned ||
           (record.refCount > 1U) ||
           ((record.sizeBytes == 0ULL) && !recordPressure)) {
@@ -319,8 +325,8 @@ std::size_t evict_mesh_assets_over_budget(AssetDatabase *database,
 }
 
 bool mesh_asset_requested_resident(const AssetDatabase *database,
-                                   AssetId id) noexcept {
-  if ((database == nullptr) || (id == kInvalidAssetId)) {
+                                   content::AssetId id) noexcept {
+  if ((database == nullptr) || (id == content::kInvalidAssetId)) {
     return false;
   }
 
@@ -332,8 +338,9 @@ bool mesh_asset_requested_resident(const AssetDatabase *database,
   return database->meshAssets[slot].requestedResident;
 }
 
-MeshHandle resolve_mesh_asset(AssetDatabase *database, AssetId id) noexcept {
-  if ((database == nullptr) || (id == kInvalidAssetId)) {
+MeshHandle resolve_mesh_asset(AssetDatabase *database,
+                              content::AssetId id) noexcept {
+  if ((database == nullptr) || (id == content::kInvalidAssetId)) {
     return kInvalidMeshHandle;
   }
 
@@ -343,7 +350,7 @@ MeshHandle resolve_mesh_asset(AssetDatabase *database, AssetId id) noexcept {
   }
 
   MeshAssetRecord &record = database->meshAssets[slot];
-  if (record.state != AssetState::Ready) {
+  if (record.state != content::AssetState::Ready) {
     return kInvalidMeshHandle;
   }
 
@@ -352,8 +359,8 @@ MeshHandle resolve_mesh_asset(AssetDatabase *database, AssetId id) noexcept {
   return record.runtimeMesh;
 }
 
-bool retain_mesh_asset(AssetDatabase *database, AssetId id) noexcept {
-  if ((database == nullptr) || (id == kInvalidAssetId)) {
+bool retain_mesh_asset(AssetDatabase *database, content::AssetId id) noexcept {
+  if ((database == nullptr) || (id == content::kInvalidAssetId)) {
     return false;
   }
 
@@ -368,8 +375,8 @@ bool retain_mesh_asset(AssetDatabase *database, AssetId id) noexcept {
   return true;
 }
 
-bool release_mesh_asset(AssetDatabase *database, AssetId id) noexcept {
-  if ((database == nullptr) || (id == kInvalidAssetId)) {
+bool release_mesh_asset(AssetDatabase *database, content::AssetId id) noexcept {
+  if ((database == nullptr) || (id == content::kInvalidAssetId)) {
     return false;
   }
 
@@ -421,9 +428,9 @@ namespace {
 
 /// The record slot the index maps `id` to, or `capacity` when absent.
 template <typename Index>
-std::size_t indexed_slot(const Index &index, AssetId id,
+std::size_t indexed_slot(const Index &index, content::AssetId id,
                          std::size_t capacity) noexcept {
-  if (id == kInvalidAssetId) {
+  if (id == content::kInvalidAssetId) {
     return capacity;
   }
   const std::uint32_t *slot = index.find(id);
@@ -436,8 +443,8 @@ std::size_t indexed_slot(const Index &index, AssetId id,
 template <typename Index, std::size_t N>
 std::size_t indexed_insert_slot(const Index &index,
                                 const std::array<bool, N> &occupied,
-                                AssetId id) noexcept {
-  if (id == kInvalidAssetId) {
+                                content::AssetId id) noexcept {
+  if (id == content::kInvalidAssetId) {
     return N;
   }
   const std::size_t existing = indexed_slot(index, id, N);
@@ -457,7 +464,7 @@ std::size_t indexed_insert_slot(const Index &index,
 /// so this does not happen while a record slot is free.
 template <typename Index, std::size_t N>
 bool claim_indexed_slot(Index &index, std::array<bool, N> &occupied,
-                        std::size_t slot, AssetId id) noexcept {
+                        std::size_t slot, content::AssetId id) noexcept {
   if (occupied[slot]) {
     return true;
   }
@@ -469,7 +476,7 @@ bool claim_indexed_slot(Index &index, std::array<bool, N> &occupied,
 }
 
 std::size_t find_texture_slot(const AssetDatabase *database,
-                              AssetId id) noexcept {
+                              content::AssetId id) noexcept {
   if (database == nullptr) {
     return 0U;
   }
@@ -478,7 +485,7 @@ std::size_t find_texture_slot(const AssetDatabase *database,
 }
 
 std::size_t find_texture_insert_slot(const AssetDatabase *database,
-                                     AssetId id) noexcept {
+                                     content::AssetId id) noexcept {
   if (database == nullptr) {
     return 0U;
   }
@@ -487,7 +494,7 @@ std::size_t find_texture_insert_slot(const AssetDatabase *database,
 }
 
 std::size_t find_material_slot(const AssetDatabase *database,
-                               AssetId id) noexcept {
+                               content::AssetId id) noexcept {
   if (database == nullptr) {
     return 0U;
   }
@@ -496,7 +503,7 @@ std::size_t find_material_slot(const AssetDatabase *database,
 }
 
 std::size_t find_material_insert_slot(const AssetDatabase *database,
-                                      AssetId id) noexcept {
+                                      content::AssetId id) noexcept {
   if (database == nullptr) {
     return 0U;
   }
@@ -506,10 +513,10 @@ std::size_t find_material_insert_slot(const AssetDatabase *database,
 
 } // namespace
 
-bool register_material_asset(AssetDatabase *database, AssetId id,
+bool register_material_asset(AssetDatabase *database, content::AssetId id,
                              const char *sourcePath,
                              const Material &params) noexcept {
-  if ((database == nullptr) || (id == kInvalidAssetId)) {
+  if ((database == nullptr) || (id == content::kInvalidAssetId)) {
     return false;
   }
 
@@ -525,33 +532,33 @@ bool register_material_asset(AssetDatabase *database, AssetId id,
   MaterialAssetRecord &record = database->materialAssets[slot];
   record.id = id;
   record.params = params;
-  record.state = AssetState::Ready;
+  record.state = content::AssetState::Ready;
   write_source_path(&record.sourcePath, sourcePath);
   return true;
 }
 
 const Material *find_material_params(const AssetDatabase *database,
-                                     AssetId id) noexcept {
+                                     content::AssetId id) noexcept {
   const std::size_t slot = find_material_slot(database, id);
   if ((database == nullptr) || (slot == database->materialAssets.size()) ||
-      (database->materialAssets[slot].state != AssetState::Ready)) {
+      (database->materialAssets[slot].state != content::AssetState::Ready)) {
     return nullptr;
   }
 
   return &database->materialAssets[slot].params;
 }
 
-AssetState material_asset_state(const AssetDatabase *database,
-                                AssetId id) noexcept {
+content::AssetState material_asset_state(const AssetDatabase *database,
+                                         content::AssetId id) noexcept {
   const std::size_t slot = find_material_slot(database, id);
   if ((database == nullptr) || (slot == database->materialAssets.size())) {
-    return AssetState::Unloaded;
+    return content::AssetState::Unloaded;
   }
 
   return database->materialAssets[slot].state;
 }
 
-bool set_material_texture_slots(AssetDatabase *database, AssetId id,
+bool set_material_texture_slots(AssetDatabase *database, content::AssetId id,
                                 const MaterialTextureSlots &slots) noexcept {
   const std::size_t slot = find_material_slot(database, id);
   if ((database == nullptr) || (slot == database->materialAssets.size())) {
@@ -565,7 +572,7 @@ bool set_material_texture_slots(AssetDatabase *database, AssetId id,
 
 const MaterialTextureSlots *
 find_material_texture_slots(const AssetDatabase *database,
-                            AssetId id) noexcept {
+                            content::AssetId id) noexcept {
   const std::size_t slot = find_material_slot(database, id);
   if ((database == nullptr) || (slot == database->materialAssets.size())) {
     return nullptr;
@@ -574,7 +581,7 @@ find_material_texture_slots(const AssetDatabase *database,
   return &database->materialAssets[slot].textureSlots;
 }
 
-bool set_material_overrides(AssetDatabase *database, AssetId id,
+bool set_material_overrides(AssetDatabase *database, content::AssetId id,
                             std::uint16_t overriddenFields) noexcept {
   const std::size_t slot = find_material_slot(database, id);
   if ((database == nullptr) || (slot == database->materialAssets.size())) {
@@ -587,7 +594,7 @@ bool set_material_overrides(AssetDatabase *database, AssetId id,
 }
 
 std::uint16_t material_overrides(const AssetDatabase *database,
-                                 AssetId id) noexcept {
+                                 content::AssetId id) noexcept {
   const std::size_t slot = find_material_slot(database, id);
   if ((database == nullptr) || (slot == database->materialAssets.size())) {
     return material_field::kAll;
@@ -595,10 +602,10 @@ std::uint16_t material_overrides(const AssetDatabase *database,
   return database->materialAssets[slot].overriddenFields;
 }
 
-bool register_texture_asset(AssetDatabase *database, AssetId id,
+bool register_texture_asset(AssetDatabase *database, content::AssetId id,
                             const char *sourcePath,
                             TextureHandle runtimeTexture) noexcept {
-  if ((database == nullptr) || (id == kInvalidAssetId) ||
+  if ((database == nullptr) || (id == content::kInvalidAssetId) ||
       (runtimeTexture == kInvalidTextureHandle)) {
     return false;
   }
@@ -616,29 +623,29 @@ bool register_texture_asset(AssetDatabase *database, AssetId id,
   record.id = id;
   record.runtimeTexture = runtimeTexture;
   record.refCount = (record.refCount == 0U) ? 1U : record.refCount;
-  record.state = AssetState::Ready;
+  record.state = content::AssetState::Ready;
   record.requestedResident = true;
   write_source_path(&record.sourcePath, sourcePath);
   return true;
 }
 
 bool texture_asset_slot_available(const AssetDatabase *database,
-                                  AssetId id) noexcept {
-  return (database != nullptr) && (id != kInvalidAssetId) &&
+                                  content::AssetId id) noexcept {
+  return (database != nullptr) && (id != content::kInvalidAssetId) &&
          (find_texture_insert_slot(database, id) !=
           database->textureAssets.size());
 }
 
 bool material_asset_slot_available(const AssetDatabase *database,
-                                   AssetId id) noexcept {
-  return (database != nullptr) && (id != kInvalidAssetId) &&
+                                   content::AssetId id) noexcept {
+  return (database != nullptr) && (id != content::kInvalidAssetId) &&
          (find_material_insert_slot(database, id) !=
           database->materialAssets.size());
 }
 
-bool register_texture_asset_failed(AssetDatabase *database, AssetId id,
+bool register_texture_asset_failed(AssetDatabase *database, content::AssetId id,
                                    const char *sourcePath) noexcept {
-  if ((database == nullptr) || (id == kInvalidAssetId)) {
+  if ((database == nullptr) || (id == content::kInvalidAssetId)) {
     return false;
   }
 
@@ -654,31 +661,31 @@ bool register_texture_asset_failed(AssetDatabase *database, AssetId id,
   TextureAssetRecord &record = database->textureAssets[slot];
   record.id = id;
   record.runtimeTexture = kInvalidTextureHandle;
-  record.state = AssetState::Failed;
+  record.state = content::AssetState::Failed;
   record.requestedResident = false;
   write_source_path(&record.sourcePath, sourcePath);
   return true;
 }
 
-AssetState texture_asset_state(const AssetDatabase *database,
-                               AssetId id) noexcept {
-  if ((database == nullptr) || (id == kInvalidAssetId)) {
-    return AssetState::Unloaded;
+content::AssetState texture_asset_state(const AssetDatabase *database,
+                                        content::AssetId id) noexcept {
+  if ((database == nullptr) || (id == content::kInvalidAssetId)) {
+    return content::AssetState::Unloaded;
   }
 
   const std::size_t slot = find_texture_slot(database, id);
   if (slot == database->textureAssets.size()) {
-    return AssetState::Unloaded;
+    return content::AssetState::Unloaded;
   }
 
   return database->textureAssets[slot].state;
 }
 
 /// Sets the requested value for texture asset state.
-bool set_texture_asset_state(AssetDatabase *database, AssetId id,
-                             AssetState state,
+bool set_texture_asset_state(AssetDatabase *database, content::AssetId id,
+                             content::AssetState state,
                              TextureHandle runtimeTexture) noexcept {
-  if ((database == nullptr) || (id == kInvalidAssetId)) {
+  if ((database == nullptr) || (id == content::kInvalidAssetId)) {
     return false;
   }
 
@@ -688,13 +695,13 @@ bool set_texture_asset_state(AssetDatabase *database, AssetId id,
   }
 
   TextureAssetRecord &record = database->textureAssets[slot];
-  if ((state == AssetState::Ready) &&
+  if ((state == content::AssetState::Ready) &&
       (runtimeTexture == kInvalidTextureHandle)) {
     return false;
   }
 
   record.state = state;
-  if (state == AssetState::Ready) {
+  if (state == content::AssetState::Ready) {
     record.runtimeTexture = runtimeTexture;
   } else {
     record.runtimeTexture = kInvalidTextureHandle;
@@ -704,8 +711,8 @@ bool set_texture_asset_state(AssetDatabase *database, AssetId id,
 }
 
 TextureHandle resolve_texture_asset(AssetDatabase *database,
-                                    AssetId id) noexcept {
-  if ((database == nullptr) || (id == kInvalidAssetId)) {
+                                    content::AssetId id) noexcept {
+  if ((database == nullptr) || (id == content::kInvalidAssetId)) {
     return kInvalidTextureHandle;
   }
 
@@ -715,7 +722,7 @@ TextureHandle resolve_texture_asset(AssetDatabase *database,
   }
 
   TextureAssetRecord &record = database->textureAssets[slot];
-  if (record.state != AssetState::Ready) {
+  if (record.state != content::AssetState::Ready) {
     return kInvalidTextureHandle;
   }
 
@@ -723,8 +730,9 @@ TextureHandle resolve_texture_asset(AssetDatabase *database,
   return record.runtimeTexture;
 }
 
-bool retain_texture_asset(AssetDatabase *database, AssetId id) noexcept {
-  if ((database == nullptr) || (id == kInvalidAssetId)) {
+bool retain_texture_asset(AssetDatabase *database,
+                          content::AssetId id) noexcept {
+  if ((database == nullptr) || (id == content::kInvalidAssetId)) {
     return false;
   }
 
@@ -739,8 +747,9 @@ bool retain_texture_asset(AssetDatabase *database, AssetId id) noexcept {
   return true;
 }
 
-bool release_texture_asset(AssetDatabase *database, AssetId id) noexcept {
-  if ((database == nullptr) || (id == kInvalidAssetId)) {
+bool release_texture_asset(AssetDatabase *database,
+                           content::AssetId id) noexcept {
+  if ((database == nullptr) || (id == content::kInvalidAssetId)) {
     return false;
   }
 

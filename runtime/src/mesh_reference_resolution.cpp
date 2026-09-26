@@ -22,7 +22,7 @@ constexpr const char *kChannel = "assets";
 
 /// True when `id` was already reported for this content.
 bool already_reported(const UnresolvedMeshReports &reports,
-                      renderer::AssetId id) noexcept {
+                      content::AssetId id) noexcept {
   for (std::size_t i = 0U; i < reports.count; ++i) {
     if (reports.ids[i] == id) {
       return true;
@@ -33,7 +33,7 @@ bool already_reported(const UnresolvedMeshReports &reports,
 
 /// Logs one record for an id the catalog cannot place, the first time the
 /// id is met for this content; the table full is itself said once.
-void report_unresolved(UnresolvedMeshReports *reports, renderer::AssetId id,
+void report_unresolved(UnresolvedMeshReports *reports, content::AssetId id,
                        runtime::PersistentId entityId, const char *path,
                        const char *reason) noexcept {
   if (already_reported(*reports, id)) {
@@ -123,16 +123,16 @@ void report_unbound(UnresolvedMeshReports *reports, const char *kind,
 /// is retried, because an import can give it an asset later.
 void bind_reference(const runtime::EngineAssetDatabaseService *service,
                     UnresolvedMeshReports *reports, const char *kind,
-                    const core::AssetRef &ref,
-                    runtime::PersistentId entityId, MeshResolutionPass *pass,
-                    renderer::AssetId *outId) noexcept {
-  if (!core::asset_ref_is_valid(ref) ||
-      (*outId != renderer::kInvalidAssetId)) {
+                    const core::AssetRef &ref, runtime::PersistentId entityId,
+                    MeshResolutionPass *pass,
+                    content::AssetId *outId) noexcept {
+  if (!core::asset_ref_is_valid(ref) || (*outId != content::kInvalidAssetId)) {
     return;
   }
-  const renderer::AssetMetadata *metadata =
+  const content::AssetMetadata *metadata =
       content::find_asset_metadata_by_ref(service->catalog, ref);
-  if ((metadata == nullptr) || (metadata->assetId == renderer::kInvalidAssetId)) {
+  if ((metadata == nullptr) ||
+      (metadata->assetId == content::kInvalidAssetId)) {
     ++pass->unbound;
     report_unbound(reports, kind, ref, entityId);
     return;
@@ -143,22 +143,22 @@ void bind_reference(const runtime::EngineAssetDatabaseService *service,
 
 /// One bound id: places it, requests it, or reports it.
 void resolve_reference(runtime::EngineAssetDatabaseService *service,
-                       UnresolvedMeshReports *reports, renderer::AssetId id,
+                       UnresolvedMeshReports *reports, content::AssetId id,
                        runtime::PersistentId entityId,
                        MeshResolutionPass *pass) noexcept {
-  if (id == renderer::kInvalidAssetId) {
+  if (id == content::kInvalidAssetId) {
     return;
   }
   renderer::AssetDatabase *database = service->database;
   if (renderer::mesh_asset_state(database, id) !=
-      renderer::AssetState::Unloaded) {
+      content::AssetState::Unloaded) {
     return;
   }
 
-  const renderer::AssetMetadata *metadata =
+  const content::AssetMetadata *metadata =
       content::find_asset_metadata(service->catalog, id);
   if ((metadata == nullptr) ||
-      (metadata->typeTag != renderer::AssetTypeTag::Mesh) ||
+      (metadata->typeTag != content::AssetTypeTag::Mesh) ||
       (metadata->filePath[0] == '\0')) {
     ++pass->unresolved;
     report_unresolved(reports, id, entityId, nullptr,
@@ -192,7 +192,7 @@ void resolve_reference(runtime::EngineAssetDatabaseService *service,
                                 content::LoadPriority::Normal);
   if (!handle.valid()) {
     static_cast<void>(renderer::set_mesh_asset_state(
-        database, id, renderer::AssetState::Unloaded,
+        database, id, content::AssetState::Unloaded,
         renderer::kInvalidMeshHandle));
     return;
   }
@@ -201,22 +201,22 @@ void resolve_reference(runtime::EngineAssetDatabaseService *service,
 
 } // namespace
 
-bool note_mesh_asset_path(content::AssetCatalog *catalog, renderer::AssetId id,
+bool note_mesh_asset_path(content::AssetCatalog *catalog, content::AssetId id,
                           const char *virtualPath,
                           const core::AssetRef &ref) noexcept {
-  if ((catalog == nullptr) || (id == renderer::kInvalidAssetId) ||
+  if ((catalog == nullptr) || (id == content::kInvalidAssetId) ||
       (virtualPath == nullptr) || (virtualPath[0] == '\0')) {
     return false;
   }
-  renderer::AssetMetadata metadata{};
+  content::AssetMetadata metadata{};
   if (std::strlen(virtualPath) >= metadata.filePath.size()) {
     // An identity that does not fit whole would name a different asset.
     return false;
   }
   metadata.assetId = id;
-  metadata.typeTag = renderer::AssetTypeTag::Mesh;
+  metadata.typeTag = content::AssetTypeTag::Mesh;
   metadata.ref = ref;
-  renderer::write_metadata_path(&metadata.filePath, virtualPath);
+  content::write_metadata_path(&metadata.filePath, virtualPath);
   return content::register_asset_metadata_if_absent(catalog, metadata) !=
          content::CatalogInsert::Refused;
 }

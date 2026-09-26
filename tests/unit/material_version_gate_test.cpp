@@ -128,8 +128,8 @@ void run_load_case(engine::renderer::AssetDatabase *database,
           "refusal classified as Parse");
     // A refused fresh load must not have registered anything for the id the
     // path would have produced.
-    const engine::renderer::AssetId wouldBeId =
-        engine::renderer::make_asset_id_from_path(virtualPath);
+    const engine::content::AssetId wouldBeId =
+        engine::content::make_asset_id_from_path(virtualPath);
     check(engine::renderer::find_material_params(database, wouldBeId) ==
               nullptr,
           "refused load registered nothing");
@@ -154,7 +154,7 @@ void run_reload_cases(engine::renderer::AssetDatabase *database) noexcept {
     check(false, "load reload baseline");
     return;
   }
-  const engine::renderer::AssetId id = *baseline;
+  const engine::content::AssetId id = *baseline;
 
   for (const VersionCase &testCase : kCases) {
     if (testCase.accepted) {

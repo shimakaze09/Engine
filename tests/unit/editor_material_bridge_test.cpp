@@ -404,13 +404,13 @@ int check_child_clears_inherited_texture() noexcept {
   const engine::runtime::EditorMaterialState loaded =
       engine::runtime::editor_load_material(kChildVirtual);
   if (!loaded.found || !loaded.hasParent ||
-      (loaded.textureSlots.albedo == engine::renderer::kInvalidAssetId)) {
+      (loaded.textureSlots.albedo == engine::content::kInvalidAssetId)) {
     return finish(64); // the child starts out inheriting the albedo
   }
 
   // Clear the inherited slot, save, and reload from disk.
   engine::renderer::MaterialTextureSlots cleared = loaded.textureSlots;
-  cleared.albedo = engine::renderer::kInvalidAssetId;
+  cleared.albedo = engine::content::kInvalidAssetId;
   if (!engine::runtime::editor_set_material_params(loaded.materialId,
                                                    loaded.params, cleared) ||
       !engine::runtime::editor_save_material(kChildVirtual, kParentVirtual)) {
@@ -421,7 +421,7 @@ int check_child_clears_inherited_texture() noexcept {
   if (!reloaded.found) {
     return finish(66);
   }
-  if (reloaded.textureSlots.albedo != engine::renderer::kInvalidAssetId) {
+  if (reloaded.textureSlots.albedo != engine::content::kInvalidAssetId) {
     std::printf("cleared slot came back from the parent\n");
     return finish(67);
   }

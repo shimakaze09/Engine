@@ -866,8 +866,8 @@ bool EnginePipeline::Impl::initialize(std::uint32_t maxFrameCount) noexcept {
     return false;
   }
   scripting::set_default_mesh_asset_id(
-      (meshIds.cube != renderer::kInvalidAssetId) ? meshIds.cube
-                                                  : meshIds.bootstrap);
+      (meshIds.cube != content::kInvalidAssetId) ? meshIds.cube
+                                                 : meshIds.bootstrap);
   scripting::set_builtin_mesh_ids(meshIds.plane, meshIds.cube, meshIds.sphere,
                                   meshIds.cylinder, meshIds.capsule,
                                   meshIds.pyramid);
@@ -1119,8 +1119,8 @@ void EnginePipeline::Impl::end_play_session() noexcept {
   } else {
     runtime::bind_scripting_runtime(world.get(), serviceLocator);
     scripting::set_default_mesh_asset_id(
-        (meshIds.cube != renderer::kInvalidAssetId) ? meshIds.cube
-                                                    : meshIds.bootstrap);
+        (meshIds.cube != content::kInvalidAssetId) ? meshIds.cube
+                                                   : meshIds.bootstrap);
     scripting::set_builtin_mesh_ids(meshIds.plane, meshIds.cube,
                                     meshIds.sphere, meshIds.cylinder,
                                     meshIds.capsule, meshIds.pyramid);

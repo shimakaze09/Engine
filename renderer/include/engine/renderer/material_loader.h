@@ -90,7 +90,7 @@ enum class MaterialLoadError : std::uint8_t {
 /// dependency edges to the parent and every referenced texture), and
 /// returns its path-derived AssetId. Never call .value(): with exceptions
 /// disabled it aborts — check has_value() and use operator* / error().
-std::expected<AssetId, MaterialLoadError>
+std::expected<content::AssetId, MaterialLoadError>
 load_material_asset(AssetDatabase *database, content::AssetCatalog *catalog,
                     const char *virtualPath) noexcept;
 
@@ -102,7 +102,7 @@ load_material_asset(AssetDatabase *database, content::AssetCatalog *catalog,
 /// malformed JSON, bad parent, a parent cycle, full tables) the existing
 /// record is left completely untouched and the previous valid state keeps
 /// serving renders — never a partial or corrupt in-place update.
-std::expected<AssetId, MaterialLoadError>
+std::expected<content::AssetId, MaterialLoadError>
 reload_material_asset(AssetDatabase *database, content::AssetCatalog *catalog,
                       const char *virtualPath) noexcept;
 

@@ -378,8 +378,8 @@ int main() {
     return 116;
   }
 
-  const engine::renderer::AssetId asyncAssetId =
-      engine::renderer::make_asset_id_from_path("assets/missing_async.mesh");
+  const engine::content::AssetId asyncAssetId =
+      engine::content::make_asset_id_from_path("assets/missing_async.mesh");
   if (!engine::renderer::mesh_asset_requested_resident(
           scriptAssetDatabase.get(), asyncAssetId)) {
     remove_script_file();
@@ -433,8 +433,8 @@ int main() {
     return 121;
   }
 
-  const engine::renderer::AssetId streamingAssetId =
-      engine::renderer::make_asset_id_from_path("assets/streamed_async.mesh");
+  const engine::content::AssetId streamingAssetId =
+      engine::content::make_asset_id_from_path("assets/streamed_async.mesh");
   if (!engine::renderer::mesh_asset_requested_resident(
           scriptAssetDatabase.get(), streamingAssetId)) {
     scriptAssetService.streamingQueue = nullptr;
@@ -446,7 +446,7 @@ int main() {
   }
   if (engine::renderer::mesh_asset_state(scriptAssetDatabase.get(),
                                          streamingAssetId) !=
-      engine::renderer::AssetState::Loading) {
+      engine::content::AssetState::Loading) {
     scriptAssetService.streamingQueue = nullptr;
     engine::content::shutdown_asset_streaming(scriptStreamingQueue.get());
     engine::core::shutdown_cvars();

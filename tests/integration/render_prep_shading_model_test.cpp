@@ -172,9 +172,9 @@ int main() {
     return 2;
   }
   const char *meshPath = "integration://shading-model.mesh";
-  const engine::renderer::AssetId meshAssetId =
-      engine::renderer::make_asset_id_from_path(meshPath);
-  if ((meshAssetId == engine::renderer::kInvalidAssetId) ||
+  const engine::content::AssetId meshAssetId =
+      engine::content::make_asset_id_from_path(meshPath);
+  if ((meshAssetId == engine::content::kInvalidAssetId) ||
       !engine::renderer::register_mesh_asset(assetDatabase.get(), meshAssetId,
                                              meshPath, meshHandle)) {
     return 3;
@@ -195,7 +195,7 @@ int main() {
                                    float opacity) noexcept {
     const std::size_t index = static_cast<std::size_t>(model) +
                               ((opacity < 1.0F) ? 3U : 0U);
-    return engine::renderer::make_asset_id_from_path(kMaterialPaths[index]);
+    return engine::content::make_asset_id_from_path(kMaterialPaths[index]);
   };
   for (std::size_t model = 0U; model < engine::renderer::kShadingModelCount;
        ++model) {
@@ -205,12 +205,11 @@ int main() {
       params.opacity = (blend != 0) ? 0.5F : 1.0F;
       const std::size_t index =
           model + ((blend != 0) ? engine::renderer::kShadingModelCount : 0U);
-      const engine::renderer::AssetId materialId =
-          engine::renderer::make_asset_id_from_path(kMaterialPaths[index]);
-      if ((materialId == engine::renderer::kInvalidAssetId) ||
+      const engine::content::AssetId materialId =
+          engine::content::make_asset_id_from_path(kMaterialPaths[index]);
+      if ((materialId == engine::content::kInvalidAssetId) ||
           !engine::renderer::register_material_asset(
-              assetDatabase.get(), materialId, kMaterialPaths[index],
-              params)) {
+              assetDatabase.get(), materialId, kMaterialPaths[index], params)) {
         return 4;
       }
     }
@@ -227,7 +226,7 @@ int main() {
                                                 subject.opacity);
     component.opacity = subject.opacity;
     if ((entity == engine::runtime::kInvalidEntity) ||
-        (component.materialAssetId == engine::renderer::kInvalidAssetId) ||
+        (component.materialAssetId == engine::content::kInvalidAssetId) ||
         !world->add_mesh_component(entity, component)) {
       return 5;
     }

@@ -32,7 +32,7 @@ struct MaterialEditorState final {
   bool open = false;
   bool found = false;
   char virtualPath[260] = {};
-  renderer::AssetId materialId = renderer::kInvalidAssetId;
+  content::AssetId materialId = content::kInvalidAssetId;
   renderer::Material buffer{};
   renderer::MaterialTextureSlots textureSlots{};
   char parentVirtualPath[260] = {};
@@ -72,7 +72,7 @@ struct MaterialEditorState final {
 /// -- the same viewport-preview mutation a live drag already applies, so
 /// redo/undo is instant with no disk round trip.
 struct MaterialEditCommand final : EditorCommand {
-  renderer::AssetId materialId = renderer::kInvalidAssetId;
+  content::AssetId materialId = content::kInvalidAssetId;
   renderer::Material before{};
   renderer::MaterialTextureSlots slotsBefore{};
   renderer::Material after{};

@@ -98,7 +98,7 @@ int verify_successful_resolution(engine::renderer::AssetDatabase *database) {
   if (!loadResult.has_value()) {
     return 11;
   }
-  const engine::renderer::AssetId id = *loadResult;
+  const engine::content::AssetId id = *loadResult;
 
   FakeLoaderState state{};
   const std::size_t resolvedFirst = engine::renderer::resolve_material_textures(
@@ -155,7 +155,7 @@ int verify_failed_load_falls_back(engine::renderer::AssetDatabase *database) {
   if (!loadResult.has_value()) {
     return 21;
   }
-  const engine::renderer::AssetId id = *loadResult;
+  const engine::content::AssetId id = *loadResult;
 
   FakeLoaderState state{};
   static_cast<void>(engine::renderer::resolve_material_textures(
@@ -174,10 +174,10 @@ int verify_failed_load_falls_back(engine::renderer::AssetDatabase *database) {
 
   const engine::renderer::MaterialTextureSlots *slots =
       engine::renderer::find_material_texture_slots(database, id);
-  const engine::renderer::AssetId textureId =
-      (slots != nullptr) ? slots->albedo : engine::renderer::kInvalidAssetId;
+  const engine::content::AssetId textureId =
+      (slots != nullptr) ? slots->albedo : engine::content::kInvalidAssetId;
   if (engine::renderer::texture_asset_state(database, textureId) !=
-      engine::renderer::AssetState::Failed) {
+      engine::content::AssetState::Failed) {
     return 23;
   }
 
@@ -276,8 +276,8 @@ int verify_full_texture_table_is_not_reloaded(
        i <= engine::renderer::AssetDatabase::kMaxTextureAssets; ++i) {
     char path[64] = {};
     std::snprintf(path, sizeof(path), "assets/textures/filler_%zu.png", i);
-    const engine::renderer::AssetId id =
-        engine::renderer::make_asset_id_from_path(path);
+    const engine::content::AssetId id =
+        engine::content::make_asset_id_from_path(path);
     if (!engine::renderer::register_texture_asset(
             database, id, path,
             engine::renderer::TextureHandle{

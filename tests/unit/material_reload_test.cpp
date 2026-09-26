@@ -59,7 +59,7 @@ int verify_reload_success(engine::renderer::AssetDatabase *database) {
     remove_file(kPath);
     return 11;
   }
-  const engine::renderer::AssetId id = *loadResult;
+  const engine::content::AssetId id = *loadResult;
 
   char reloadJson[192] = {};
   std::snprintf(
@@ -88,8 +88,8 @@ int verify_reload_success(engine::renderer::AssetDatabase *database) {
 
   const engine::renderer::MaterialTextureSlots *slots =
       engine::renderer::find_material_texture_slots(database, id);
-  const engine::renderer::AssetId expectedAlbedo =
-      engine::renderer::make_asset_id_from_path("assets/textures/new.png");
+  const engine::content::AssetId expectedAlbedo =
+      engine::content::make_asset_id_from_path("assets/textures/new.png");
   if ((slots == nullptr) || (slots->albedo != expectedAlbedo)) {
     return 15;
   }
@@ -113,7 +113,7 @@ int verify_reload_malformed_preserves_previous(
     remove_file(kPath);
     return 21;
   }
-  const engine::renderer::AssetId id = *loadResult;
+  const engine::content::AssetId id = *loadResult;
 
   // Corrupt the file on disk (malformed JSON) and attempt a reload.
   if (!write_material_file(kPath, "{ this is not valid json")) {
@@ -136,7 +136,7 @@ int verify_reload_malformed_preserves_previous(
     return 24;
   }
   if (engine::renderer::material_asset_state(database, id) !=
-      engine::renderer::AssetState::Ready) {
+      engine::content::AssetState::Ready) {
     return 25;
   }
 

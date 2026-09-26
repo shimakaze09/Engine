@@ -130,7 +130,7 @@ int check_texture_asset_database() {
   // TextureAssetRecord is already compiled into asset_database;
   // this just verifies the struct is usable.
   engine::renderer::TextureAssetRecord record{};
-  if (record.id != engine::renderer::kInvalidAssetId) {
+  if (record.id != engine::content::kInvalidAssetId) {
     return 51;
   }
 
@@ -138,7 +138,7 @@ int check_texture_asset_database() {
     return 52;
   }
 
-  if (record.state != engine::renderer::AssetState::Unloaded) {
+  if (record.state != engine::content::AssetState::Unloaded) {
     return 53;
   }
 

@@ -273,11 +273,11 @@ int main() {
   }
 
   const char *meshPath = "integration://vertical-slice.mesh";
-  const engine::renderer::AssetId meshAssetId =
-      engine::renderer::make_asset_id_from_path(meshPath);
-  if ((meshAssetId == engine::renderer::kInvalidAssetId) ||
-      !engine::renderer::register_mesh_asset(
-          assetDatabase.get(), meshAssetId, meshPath, meshHandle)) {
+  const engine::content::AssetId meshAssetId =
+      engine::content::make_asset_id_from_path(meshPath);
+  if ((meshAssetId == engine::content::kInvalidAssetId) ||
+      !engine::renderer::register_mesh_asset(assetDatabase.get(), meshAssetId,
+                                             meshPath, meshHandle)) {
     engine::scripting::shutdown_scripting();
     return fail(5);
   }

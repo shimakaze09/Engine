@@ -170,12 +170,10 @@ bool read_field(const core::JsonParser &parser, const core::JsonValue &object,
 /// when the catalog has no asset by that identity, or when the asset it
 /// names is not of `type`: a material that loaded with the reference
 /// quietly gone would save back without it.
-const AssetMetadata *read_catalogued_ref(const core::JsonParser &parser,
-                                         const core::JsonValue &value,
-                                         const content::AssetCatalog &catalog,
-                                         AssetTypeTag type,
-                                         const char *virtualPath,
-                                         const char *what) noexcept {
+const content::AssetMetadata *read_catalogued_ref(
+    const core::JsonParser &parser, const core::JsonValue &value,
+    const content::AssetCatalog &catalog, content::AssetTypeTag type,
+    const char *virtualPath, const char *what) noexcept {
   core::AssetRef ref{};
   char message[160] = {};
   if (!content::read_asset_ref(parser, value, &ref)) {
@@ -184,7 +182,8 @@ const AssetMetadata *read_catalogued_ref(const core::JsonParser &parser,
     static_cast<void>(log_material_error(virtualPath, message));
     return nullptr;
   }
-  const AssetMetadata *record = find_asset_metadata_by_ref(&catalog, ref);
+  const content::AssetMetadata *record =
+      content::find_asset_metadata_by_ref(&catalog, ref);
   if (record == nullptr) {
     char refText[content::kAssetRefTextLength + 1U] = {};
     static_cast<void>(content::format_asset_ref(ref, refText, sizeof(refText)));
@@ -212,8 +211,9 @@ bool read_optional_texture_ref(const core::JsonParser &parser,
                                const core::JsonValue &object, const char *key,
                                bool hasParent,
                                const content::AssetCatalog &catalog,
-                               const char *virtualPath, AssetMetadata *metadata,
-                               AssetId *outId) noexcept {
+                               const char *virtualPath,
+                               content::AssetMetadata *metadata,
+                               content::AssetId *outId) noexcept {
   core::JsonValue field{};
   if (!parser.get_object_field(object, key, &field)) {
     return true;
@@ -227,16 +227,16 @@ bool read_optional_texture_ref(const core::JsonParser &parser,
                                 "null texture slot in a material with no "
                                 "parent");
     }
-    *outId = kInvalidAssetId;
+    *outId = content::kInvalidAssetId;
     return true;
   }
 
-  const AssetMetadata *texture = read_catalogued_ref(
-      parser, field, catalog, AssetTypeTag::Texture, virtualPath, key);
+  const content::AssetMetadata *texture = read_catalogued_ref(
+      parser, field, catalog, content::AssetTypeTag::Texture, virtualPath, key);
   if (texture == nullptr) {
     return false;
   }
-  if (!asset_metadata_add_dependency(metadata, texture->assetId)) {
+  if (!content::asset_metadata_add_dependency(metadata, texture->assetId)) {
     return log_material_error(virtualPath, "material dependency table is full");
   }
 
@@ -247,7 +247,7 @@ bool read_optional_texture_ref(const core::JsonParser &parser,
 bool load_material_recursive(AssetDatabase *database,
                              content::AssetCatalog *catalog,
                              const char *virtualPath, std::size_t depth,
-                             AssetId *outId, Material *outParams,
+                             content::AssetId *outId, Material *outParams,
                              MaterialTextureSlots *outSlots) noexcept;
 
 /// material_field bits for the fields the document itself names; the rest
@@ -285,8 +285,8 @@ std::uint16_t authored_fields(const core::JsonParser &parser,
 bool parse_material_text(AssetDatabase *database,
                          content::AssetCatalog *catalog,
                          const char *virtualPath, const char *text,
-                         std::size_t size, std::size_t depth, AssetId id,
-                         Material *outParams,
+                         std::size_t size, std::size_t depth,
+                         content::AssetId id, Material *outParams,
                          MaterialTextureSlots *outSlots) noexcept {
   core::JsonParser parser{};
   if (!parser.parse(text, size)) {
@@ -312,12 +312,12 @@ bool parse_material_text(AssetDatabase *database,
 
   Material params{};
   MaterialTextureSlots slots{};
-  AssetId parentId = kInvalidAssetId;
+  content::AssetId parentId = content::kInvalidAssetId;
   core::JsonValue parentValue{};
   if (parser.get_object_field(*root, "parent", &parentValue)) {
-    const AssetMetadata *parent =
-        read_catalogued_ref(parser, parentValue, *catalog,
-                            AssetTypeTag::Material, virtualPath, "parent");
+    const content::AssetMetadata *parent = read_catalogued_ref(
+        parser, parentValue, *catalog, content::AssetTypeTag::Material,
+        virtualPath, "parent");
     if (parent == nullptr) {
       return false;
     }
@@ -353,22 +353,23 @@ bool parse_material_text(AssetDatabase *database,
     return log_material_error(virtualPath, "malformed parameter field");
   }
 
-  AssetMetadata metadata{};
+  content::AssetMetadata metadata{};
   metadata.assetId = id;
-  metadata.typeTag = AssetTypeTag::Material;
+  metadata.typeTag = content::AssetTypeTag::Material;
   // Registering this record replaces whatever the catalog holds for this
   // path, and the mount walk got there first and resolved the identity
   // this material's sidecar authored. Carry that identity forward: a
   // document names a material by its GUID, so dropping it here would
   // leave every authored reference pointing at nothing, and a save would
   // write back the nil ref the entity was left holding.
-  if (const AssetMetadata *catalogued = find_asset_metadata(catalog, id);
+  if (const content::AssetMetadata *catalogued =
+          find_asset_metadata(catalog, id);
       catalogued != nullptr) {
     metadata.ref = catalogued->ref;
   }
-  write_metadata_path(&metadata.filePath, virtualPath);
-  if ((parentId != kInvalidAssetId) &&
-      !asset_metadata_add_dependency(&metadata, parentId)) {
+  content::write_metadata_path(&metadata.filePath, virtualPath);
+  if ((parentId != content::kInvalidAssetId) &&
+      !content::asset_metadata_add_dependency(&metadata, parentId)) {
     return log_material_error(virtualPath,
                               "material dependency table is full");
   }
@@ -381,9 +382,10 @@ bool parse_material_text(AssetDatabase *database,
     bool texturesOk = true;
 #define ENGINE_MATERIAL_READ_TEXTURE(name, slot, handle, key)                  \
   texturesOk = texturesOk &&                                                   \
-               read_optional_texture_ref(                                      \
-                   parser, texturesValue, key, parentId != kInvalidAssetId,    \
-                   *catalog, virtualPath, &metadata, &slots.slot);
+               read_optional_texture_ref(parser, texturesValue, key,           \
+                                         parentId != content::kInvalidAssetId, \
+                                         *catalog, virtualPath, &metadata,     \
+                                         &slots.slot);
     ENGINE_MATERIAL_TEXTURE_FIELDS(ENGINE_MATERIAL_READ_TEXTURE)
 #undef ENGINE_MATERIAL_READ_TEXTURE
     if (!texturesOk) {
@@ -428,7 +430,7 @@ bool parse_material_text(AssetDatabase *database,
 bool load_material_recursive(AssetDatabase *database,
                              content::AssetCatalog *catalog,
                              const char *virtualPath, std::size_t depth,
-                             AssetId *outId, Material *outParams,
+                             content::AssetId *outId, Material *outParams,
                              MaterialTextureSlots *outSlots) noexcept {
   if ((database == nullptr) || (catalog == nullptr) ||
       (virtualPath == nullptr) || (virtualPath[0] == '\0')) {
@@ -440,7 +442,7 @@ bool load_material_recursive(AssetDatabase *database,
                               "parent chain too deep (cycle or depth > 8)");
   }
 
-  const AssetId id = make_asset_id_from_path(virtualPath);
+  const content::AssetId id = content::make_asset_id_from_path(virtualPath);
 
   if (const Material *cached = find_material_params(database, id)) {
     if (outId != nullptr) {
@@ -492,25 +494,26 @@ enum class SlotOutcome : std::uint8_t {
 /// reload, and nothing is loaded while there is no table slot to record it.
 SlotOutcome resolve_one_texture_slot(AssetDatabase *database,
                                      const content::AssetCatalog *catalog,
-                                     AssetId textureId,
+                                     content::AssetId textureId,
                                      MaterialTextureLoadFn loadFn,
                                      void *userData,
                                      TextureHandle *outHandle) noexcept {
   *outHandle = kInvalidTextureHandle;
-  if (textureId == kInvalidAssetId) {
+  if (textureId == content::kInvalidAssetId) {
     return SlotOutcome::Unchanged;
   }
 
-  const AssetState state = texture_asset_state(database, textureId);
-  if (state == AssetState::Ready) {
+  const content::AssetState state = texture_asset_state(database, textureId);
+  if (state == content::AssetState::Ready) {
     *outHandle = resolve_texture_asset(database, textureId);
     return SlotOutcome::Unchanged;
   }
-  if (state == AssetState::Failed) {
+  if (state == content::AssetState::Failed) {
     return SlotOutcome::Unchanged;
   }
 
-  const AssetMetadata *metadata = find_asset_metadata(catalog, textureId);
+  const content::AssetMetadata *metadata =
+      find_asset_metadata(catalog, textureId);
   const char *path = ((metadata != nullptr) && (metadata->filePath[0] != '\0'))
                          ? metadata->filePath.data()
                          : nullptr;
@@ -553,7 +556,7 @@ SlotOutcome resolve_one_texture_slot(AssetDatabase *database,
 
 } // namespace
 
-std::expected<AssetId, MaterialLoadError>
+std::expected<content::AssetId, MaterialLoadError>
 load_material_asset(AssetDatabase *database, content::AssetCatalog *catalog,
                     const char *virtualPath) noexcept {
   if ((database == nullptr) || (catalog == nullptr) ||
@@ -562,7 +565,7 @@ load_material_asset(AssetDatabase *database, content::AssetCatalog *catalog,
     return std::unexpected(MaterialLoadError::InvalidArgument);
   }
 
-  const AssetId id = make_asset_id_from_path(virtualPath);
+  const content::AssetId id = content::make_asset_id_from_path(virtualPath);
   if (find_material_params(database, id) != nullptr) {
     return id;
   }
@@ -583,7 +586,7 @@ load_material_asset(AssetDatabase *database, content::AssetCatalog *catalog,
   return id;
 }
 
-std::expected<AssetId, MaterialLoadError>
+std::expected<content::AssetId, MaterialLoadError>
 reload_material_asset(AssetDatabase *database, content::AssetCatalog *catalog,
                       const char *virtualPath) noexcept {
   if ((database == nullptr) || (catalog == nullptr) ||
@@ -592,8 +595,8 @@ reload_material_asset(AssetDatabase *database, content::AssetCatalog *catalog,
     return std::unexpected(MaterialLoadError::InvalidArgument);
   }
 
-  const AssetId id = make_asset_id_from_path(virtualPath);
-  if (material_asset_state(database, id) != AssetState::Ready) {
+  const content::AssetId id = content::make_asset_id_from_path(virtualPath);
+  if (material_asset_state(database, id) != content::AssetState::Ready) {
     static_cast<void>(log_material_error(
         virtualPath, "reload requested for a material that was never loaded"));
     return std::unexpected(MaterialLoadError::InvalidArgument);
@@ -692,13 +695,13 @@ std::size_t resolve_material_textures(AssetDatabase *database,
       continue;
     }
     MaterialAssetRecord &record = database->materialAssets[i];
-    if (record.state != AssetState::Ready) {
+    if (record.state != content::AssetState::Ready) {
       continue;
     }
 
     const MaterialTextureSlots slots = record.textureSlots;
     struct SlotRef final {
-      AssetId id;
+      content::AssetId id;
       TextureHandle *handle;
     };
     const SlotRef refs[] = {

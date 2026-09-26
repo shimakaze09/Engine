@@ -23,19 +23,14 @@ using content::pending_asset_request_count;
 void clear_asset_manager(AssetManager *manager) noexcept;
 
 /// Queues a mesh load; false when the queue is full.
-bool queue_mesh_load(AssetManager *manager,
-                     AssetDatabase *database,
-                     AssetId id,
-                     const char *sourcePath) noexcept;
+bool queue_mesh_load(AssetManager *manager, AssetDatabase *database,
+                     content::AssetId id, const char *sourcePath) noexcept;
 /// Queues a mesh unload; false when the queue is full.
-bool queue_mesh_unload(AssetManager *manager,
-                       AssetDatabase *database,
-                       AssetId id) noexcept;
+bool queue_mesh_unload(AssetManager *manager, AssetDatabase *database,
+                       content::AssetId id) noexcept;
 /// Queues a mesh reload (unload + load); false when the queue is full.
-bool queue_mesh_reload(AssetManager *manager,
-                       AssetDatabase *database,
-                       AssetId id,
-                       const char *sourcePath) noexcept;
+bool queue_mesh_reload(AssetManager *manager, AssetDatabase *database,
+                       content::AssetId id, const char *sourcePath) noexcept;
 
 /// Processes up to maxTransitions queued transitions and auto-synchronizes
 /// requested residency intent from the asset database into explicit queues.

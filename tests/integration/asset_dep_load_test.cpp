@@ -17,10 +17,10 @@ engine::content::AssetCatalog *g_catalog = nullptr;
 
 /// Track the order in which assets are loaded.
 struct LoadTracker {
-  std::vector<engine::renderer::AssetId> loadOrder{};
+  std::vector<engine::content::AssetId> loadOrder{};
 };
 
-bool tracking_load_callback(engine::renderer::AssetId id, void *userData) {
+bool tracking_load_callback(engine::content::AssetId id, void *userData) {
   if (userData == nullptr) {
     return false;
   }
@@ -29,9 +29,9 @@ bool tracking_load_callback(engine::renderer::AssetId id, void *userData) {
   return true;
 }
 
-bool failing_load_callback(engine::renderer::AssetId id, void *userData) {
+bool failing_load_callback(engine::content::AssetId id, void *userData) {
   // Fail on a specific asset.
-  const auto failId = *static_cast<engine::renderer::AssetId *>(userData);
+  const auto failId = *static_cast<engine::content::AssetId *>(userData);
   return id != failId;
 }
 
@@ -46,6 +46,7 @@ int main() {
   }
   g_catalog = catalogOwner.get();
   using namespace engine::renderer;
+  using namespace engine::content;
 
   std::unique_ptr<AssetDatabase> database(new (std::nothrow) AssetDatabase());
   if (database == nullptr) {

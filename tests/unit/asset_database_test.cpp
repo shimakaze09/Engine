@@ -48,9 +48,9 @@ bool write_temp_file(const char *path, const char *contents) {
 /// Verifies unregister_mesh_asset frees slots for reuse without breaking
 /// probe chains (regression coverage for unbounded slot growth).
 int verify_mesh_slot_reclamation() {
+  using engine::content::AssetId;
+  using engine::content::AssetState;
   using engine::renderer::AssetDatabase;
-  using engine::renderer::AssetId;
-  using engine::renderer::AssetState;
   using engine::renderer::MeshHandle;
 
   std::unique_ptr<AssetDatabase> database(new (std::nothrow) AssetDatabase());
@@ -131,9 +131,9 @@ int verify_mesh_slot_reclamation() {
 /// Fills the table with exactly those ids, then churns it past the point
 /// where the index rebuilds, and bounds every hit and miss.
 int verify_full_table_probe_length() {
+  using engine::content::AssetId;
+  using engine::content::AssetState;
   using engine::renderer::AssetDatabase;
-  using engine::renderer::AssetId;
-  using engine::renderer::AssetState;
 
   std::unique_ptr<AssetDatabase> database(new (std::nothrow) AssetDatabase());
   if (database == nullptr) {
@@ -238,9 +238,9 @@ int verify_full_table_probe_length() {
 /// Verifies budget eviction clears the coldest unpinned records only, with
 /// age hysteresis and retain protection.
 int verify_mesh_cache_eviction() {
+  using engine::content::AssetId;
+  using engine::content::AssetState;
   using engine::renderer::AssetDatabase;
-  using engine::renderer::AssetId;
-  using engine::renderer::AssetState;
   using engine::renderer::MeshHandle;
 
   std::unique_ptr<AssetDatabase> database(new (std::nothrow) AssetDatabase());
@@ -338,9 +338,9 @@ int verify_mesh_cache_eviction() {
 /// streamed records and never the pinned builtin, which has no reload
 /// path.
 int verify_pinned_registration_budget() {
+  using engine::content::AssetId;
+  using engine::content::AssetState;
   using engine::renderer::AssetDatabase;
-  using engine::renderer::AssetId;
-  using engine::renderer::AssetState;
   using engine::renderer::MeshHandle;
 
   std::unique_ptr<AssetDatabase> database(new (std::nothrow) AssetDatabase());
@@ -399,18 +399,18 @@ int verify_pinned_registration_budget() {
 /// Verifies an over-long tag is rejected instead of silently truncated
 /// into an aliasing tag (audit M-28).
 int verify_overlong_tag_rejected() {
-  engine::renderer::AssetMetadata metadata{};
+  engine::content::AssetMetadata metadata{};
   char longTag[64] = {};
   for (std::size_t i = 0U; i < 40U; ++i) {
     longTag[i] = 'a';
   }
-  if (engine::renderer::asset_metadata_add_tag(&metadata, longTag)) {
+  if (engine::content::asset_metadata_add_tag(&metadata, longTag)) {
     return 800;
   }
   if (metadata.tagCount != 0U) {
     return 801;
   }
-  if (!engine::renderer::asset_metadata_add_tag(&metadata, "short")) {
+  if (!engine::content::asset_metadata_add_tag(&metadata, "short")) {
     return 802;
   }
   return 0;
@@ -424,9 +424,9 @@ int verify_overlong_tag_rejected() {
 /// refuses one past capacity, finds every id, and bounds every hit and
 /// miss.
 int verify_texture_material_probe_length() {
+  using engine::content::AssetId;
+  using engine::content::AssetState;
   using engine::renderer::AssetDatabase;
-  using engine::renderer::AssetId;
-  using engine::renderer::AssetState;
 
   std::unique_ptr<AssetDatabase> database(new (std::nothrow) AssetDatabase());
   if (database == nullptr) {
@@ -575,7 +575,7 @@ int main() {
 
   engine::content::clear_asset_catalog(g_catalog);
 
-  constexpr engine::renderer::AssetId kAssetId = 77ULL;
+  constexpr engine::content::AssetId kAssetId = 77ULL;
   constexpr engine::renderer::MeshHandle kMeshHandle{5U};
 
   if (!engine::renderer::register_mesh_asset(database.get(), kAssetId,
@@ -584,7 +584,7 @@ int main() {
   }
 
   if (engine::renderer::mesh_asset_state(database.get(), kAssetId) !=
-      engine::renderer::AssetState::Ready) {
+      engine::content::AssetState::Ready) {
     return 2;
   }
 
@@ -621,13 +621,13 @@ int main() {
   }
 
   if (!engine::renderer::set_mesh_asset_state(
-          database.get(), kAssetId, engine::renderer::AssetState::Loading,
+          database.get(), kAssetId, engine::content::AssetState::Loading,
           engine::renderer::kInvalidMeshHandle)) {
     return 10;
   }
 
   if (engine::renderer::mesh_asset_state(database.get(), kAssetId) !=
-      engine::renderer::AssetState::Loading) {
+      engine::content::AssetState::Loading) {
     return 11;
   }
 
@@ -637,7 +637,7 @@ int main() {
   }
 
   if (!engine::renderer::set_mesh_asset_state(
-          database.get(), kAssetId, engine::renderer::AssetState::Failed,
+          database.get(), kAssetId, engine::content::AssetState::Failed,
           engine::renderer::kInvalidMeshHandle)) {
     return 13;
   }
@@ -648,13 +648,13 @@ int main() {
   }
 
   if (engine::renderer::set_mesh_asset_state(
-          database.get(), kAssetId, engine::renderer::AssetState::Ready,
+          database.get(), kAssetId, engine::content::AssetState::Ready,
           engine::renderer::kInvalidMeshHandle)) {
     return 15;
   }
 
   if (!engine::renderer::set_mesh_asset_state(
-          database.get(), kAssetId, engine::renderer::AssetState::Ready,
+          database.get(), kAssetId, engine::content::AssetState::Ready,
           kMeshHandle)) {
     return 16;
   }
@@ -664,7 +664,7 @@ int main() {
     return 17;
   }
 
-  constexpr engine::renderer::AssetId kStreamingAssetId = 78ULL;
+  constexpr engine::content::AssetId kStreamingAssetId = 78ULL;
   if (!engine::renderer::request_mesh_asset_streaming_load(
           database.get(), kStreamingAssetId, "assets/streamed.mesh")) {
     return 28;
@@ -674,7 +674,7 @@ int main() {
     return 29;
   }
   if (engine::renderer::mesh_asset_state(database.get(), kStreamingAssetId) !=
-      engine::renderer::AssetState::Loading) {
+      engine::content::AssetState::Loading) {
     return 30;
   }
   if (engine::renderer::resolve_mesh_asset(database.get(),
@@ -692,11 +692,11 @@ int main() {
     return 18;
   }
 
-  const engine::renderer::AssetId idA1 =
-      engine::renderer::make_asset_id_from_file(tempA);
-  const engine::renderer::AssetId idB1 =
-      engine::renderer::make_asset_id_from_file(tempB);
-  if ((idA1 == engine::renderer::kInvalidAssetId) || (idA1 != idB1)) {
+  const engine::content::AssetId idA1 =
+      engine::content::make_asset_id_from_file(tempA);
+  const engine::content::AssetId idB1 =
+      engine::content::make_asset_id_from_file(tempB);
+  if ((idA1 == engine::content::kInvalidAssetId) || (idA1 != idB1)) {
     std::remove(tempA);
     std::remove(tempB);
     return 19;
@@ -708,37 +708,37 @@ int main() {
     return 20;
   }
 
-  const engine::renderer::AssetId idB2 =
-      engine::renderer::make_asset_id_from_file(tempB);
-  if ((idB2 == engine::renderer::kInvalidAssetId) || (idB2 == idB1)) {
+  const engine::content::AssetId idB2 =
+      engine::content::make_asset_id_from_file(tempB);
+  if ((idB2 == engine::content::kInvalidAssetId) || (idB2 == idB1)) {
     std::remove(tempA);
     std::remove(tempB);
     return 21;
   }
 
-  const engine::renderer::AssetId missingFileId =
-      engine::renderer::make_asset_id_from_file("definitely_missing.mesh");
-  const engine::renderer::AssetId missingPathId =
-      engine::renderer::make_asset_id_from_path("definitely_missing.mesh");
+  const engine::content::AssetId missingFileId =
+      engine::content::make_asset_id_from_file("definitely_missing.mesh");
+  const engine::content::AssetId missingPathId =
+      engine::content::make_asset_id_from_path("definitely_missing.mesh");
   std::remove(tempA);
   std::remove(tempB);
-  if ((missingFileId == engine::renderer::kInvalidAssetId) ||
+  if ((missingFileId == engine::content::kInvalidAssetId) ||
       (missingFileId != missingPathId)) {
     return 22;
   }
 
-  engine::renderer::AssetMetadata validMetadata{};
+  engine::content::AssetMetadata validMetadata{};
   validMetadata.assetId = 88ULL;
-  validMetadata.tagCount = engine::renderer::AssetMetadata::kMaxTags;
+  validMetadata.tagCount = engine::content::AssetMetadata::kMaxTags;
   validMetadata.dependencyCount =
-      engine::renderer::AssetMetadata::kMaxDependencies;
+      engine::content::AssetMetadata::kMaxDependencies;
   if (!engine::content::register_asset_metadata(g_catalog, validMetadata)) {
     return 23;
   }
 
-  engine::renderer::AssetMetadata invalidTags{};
+  engine::content::AssetMetadata invalidTags{};
   invalidTags.assetId = 89ULL;
-  invalidTags.tagCount = engine::renderer::AssetMetadata::kMaxTags + 1U;
+  invalidTags.tagCount = engine::content::AssetMetadata::kMaxTags + 1U;
   if (engine::content::register_asset_metadata(g_catalog, invalidTags)) {
     return 24;
   }
@@ -747,10 +747,10 @@ int main() {
     return 25;
   }
 
-  engine::renderer::AssetMetadata invalidDeps{};
+  engine::content::AssetMetadata invalidDeps{};
   invalidDeps.assetId = 90ULL;
   invalidDeps.dependencyCount =
-      engine::renderer::AssetMetadata::kMaxDependencies + 1U;
+      engine::content::AssetMetadata::kMaxDependencies + 1U;
   if (engine::content::register_asset_metadata(g_catalog, invalidDeps)) {
     return 26;
   }

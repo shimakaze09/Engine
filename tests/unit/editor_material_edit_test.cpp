@@ -412,7 +412,7 @@ int check_world_clear_resets_editor() noexcept {
   if (state.open || state.gestureActive || material_editor_is_dirty()) {
     return finish(45);
   }
-  if (state.materialId != engine::renderer::kInvalidAssetId) {
+  if (state.materialId != engine::content::kInvalidAssetId) {
     return finish(46);
   }
   if (editor_session().commandHistory.can_undo() ||

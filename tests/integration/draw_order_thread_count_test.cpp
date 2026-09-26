@@ -213,9 +213,9 @@ int main() {
     return 2;
   }
   const char *meshPath = "integration://draw-order.mesh";
-  const engine::renderer::AssetId meshAssetId =
-      engine::renderer::make_asset_id_from_path(meshPath);
-  if ((meshAssetId == engine::renderer::kInvalidAssetId) ||
+  const engine::content::AssetId meshAssetId =
+      engine::content::make_asset_id_from_path(meshPath);
+  if ((meshAssetId == engine::content::kInvalidAssetId) ||
       !engine::renderer::register_mesh_asset(assetDatabase.get(), meshAssetId,
                                              meshPath, meshHandle)) {
     return 3;

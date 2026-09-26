@@ -80,7 +80,7 @@ int verify_v2_full_load(engine::renderer::AssetDatabase *database) {
   if (!loadResult.has_value()) {
     return 11;
   }
-  const engine::renderer::AssetId id = *loadResult;
+  const engine::content::AssetId id = *loadResult;
 
   const engine::renderer::Material *params =
       engine::renderer::find_material_params(database, id);
@@ -111,18 +111,16 @@ int verify_v2_full_load(engine::renderer::AssetDatabase *database) {
   if (slots == nullptr) {
     return 15;
   }
-  const engine::renderer::AssetId expectedAlbedo =
-      engine::renderer::make_asset_id_from_path("assets/textures/albedo.png");
-  const engine::renderer::AssetId expectedMr =
-      engine::renderer::make_asset_id_from_path("assets/textures/mr.png");
-  const engine::renderer::AssetId expectedEmissive =
-      engine::renderer::make_asset_id_from_path(
-          "assets/textures/emissive.png");
-  const engine::renderer::AssetId expectedAo =
-      engine::renderer::make_asset_id_from_path("assets/textures/ao.png");
-  const engine::renderer::AssetId expectedOpacity =
-      engine::renderer::make_asset_id_from_path(
-          "assets/textures/opacity.png");
+  const engine::content::AssetId expectedAlbedo =
+      engine::content::make_asset_id_from_path("assets/textures/albedo.png");
+  const engine::content::AssetId expectedMr =
+      engine::content::make_asset_id_from_path("assets/textures/mr.png");
+  const engine::content::AssetId expectedEmissive =
+      engine::content::make_asset_id_from_path("assets/textures/emissive.png");
+  const engine::content::AssetId expectedAo =
+      engine::content::make_asset_id_from_path("assets/textures/ao.png");
+  const engine::content::AssetId expectedOpacity =
+      engine::content::make_asset_id_from_path("assets/textures/opacity.png");
   if ((slots->albedo != expectedAlbedo) ||
       (slots->metallicRoughness != expectedMr) ||
       (slots->emissive != expectedEmissive) ||
@@ -131,14 +129,14 @@ int verify_v2_full_load(engine::renderer::AssetDatabase *database) {
   }
 
   // Every texture slot resolved to the catalogued Texture record...
-  const engine::renderer::AssetMetadata *albedoMeta =
+  const engine::content::AssetMetadata *albedoMeta =
       engine::content::find_asset_metadata(g_catalog, expectedAlbedo);
   if ((albedoMeta == nullptr) ||
-      (albedoMeta->typeTag != engine::renderer::AssetTypeTag::Texture)) {
+      (albedoMeta->typeTag != engine::content::AssetTypeTag::Texture)) {
     return 17;
   }
   // ...and a dependency edge from the material to each texture.
-  engine::renderer::AssetId deps[8] = {};
+  engine::content::AssetId deps[8] = {};
   const std::size_t depCount =
       engine::content::get_dependencies(g_catalog, id, deps, 8U);
   if (depCount != 5U) {
@@ -238,7 +236,7 @@ int verify_every_field_is_read(engine::renderer::AssetDatabase *database) {
   if (!loadResult.has_value()) {
     return 41;
   }
-  const engine::renderer::AssetId id = *loadResult;
+  const engine::content::AssetId id = *loadResult;
 
   const engine::renderer::Material *params =
       engine::renderer::find_material_params(database, id);
@@ -325,11 +323,11 @@ int verify_v2_parent_texture_override(
   if (slots == nullptr) {
     return 52;
   }
-  const engine::renderer::AssetId expectedChildAlbedo =
-      engine::renderer::make_asset_id_from_path(
+  const engine::content::AssetId expectedChildAlbedo =
+      engine::content::make_asset_id_from_path(
           "assets/textures/child_albedo.png");
-  const engine::renderer::AssetId expectedBaseEmissive =
-      engine::renderer::make_asset_id_from_path(
+  const engine::content::AssetId expectedBaseEmissive =
+      engine::content::make_asset_id_from_path(
           "assets/textures/base_emissive.png");
   // Overridden slot wins...
   if (slots->albedo != expectedChildAlbedo) {
@@ -341,9 +339,9 @@ int verify_v2_parent_texture_override(
   }
   // The child never named a metallicRoughness/occlusion/opacity texture at
   // any level of the chain, so those stay unset.
-  if ((slots->metallicRoughness != engine::renderer::kInvalidAssetId) ||
-      (slots->occlusion != engine::renderer::kInvalidAssetId) ||
-      (slots->opacity != engine::renderer::kInvalidAssetId)) {
+  if ((slots->metallicRoughness != engine::content::kInvalidAssetId) ||
+      (slots->occlusion != engine::content::kInvalidAssetId) ||
+      (slots->opacity != engine::content::kInvalidAssetId)) {
     return 55;
   }
 
@@ -377,11 +375,11 @@ int verify_moved_assets_still_resolve() {
     const engine::tests::MaterialRefText parentRef =
         engine::tests::catalog_material_asset(
             g_catalog, kParentVirtualPaths[session],
-            engine::renderer::AssetTypeTag::Material, "moved-parent");
+            engine::content::AssetTypeTag::Material, "moved-parent");
     const engine::tests::MaterialRefText textureRef =
         engine::tests::catalog_material_asset(
             g_catalog, kTextureVirtualPaths[session],
-            engine::renderer::AssetTypeTag::Texture, "moved-albedo");
+            engine::content::AssetTypeTag::Texture, "moved-albedo");
     if (session == 0U) {
       char json[256] = {};
       std::snprintf(json, sizeof(json),
@@ -415,7 +413,7 @@ int verify_moved_assets_still_resolve() {
                                                       *childResult);
     if ((params == nullptr) || !exactly_equal(params->roughness, 0.625F) ||
         (slots == nullptr) ||
-        (slots->albedo != engine::renderer::make_asset_id_from_path(
+        (slots->albedo != engine::content::make_asset_id_from_path(
                               kTextureVirtualPaths[session]))) {
       remove_file(kChildPath);
       return 65 + static_cast<int>(session);

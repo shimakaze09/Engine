@@ -22,15 +22,15 @@ struct GpuMeshRegistry;
 
 /// Asset ids of the built-in procedural meshes registered at bootstrap.
 struct BootstrapMeshIds final {
-  renderer::AssetId bootstrap = renderer::kInvalidAssetId;
-  renderer::AssetId plane = renderer::kInvalidAssetId;
-  renderer::AssetId cube = renderer::kInvalidAssetId;
-  renderer::AssetId sphere = renderer::kInvalidAssetId;
-  renderer::AssetId cylinder = renderer::kInvalidAssetId;
-  renderer::AssetId capsule = renderer::kInvalidAssetId;
-  renderer::AssetId pyramid = renderer::kInvalidAssetId;
-  renderer::AssetId grass = renderer::kInvalidAssetId;
-  renderer::AssetId character = renderer::kInvalidAssetId;
+  content::AssetId bootstrap = content::kInvalidAssetId;
+  content::AssetId plane = content::kInvalidAssetId;
+  content::AssetId cube = content::kInvalidAssetId;
+  content::AssetId sphere = content::kInvalidAssetId;
+  content::AssetId cylinder = content::kInvalidAssetId;
+  content::AssetId capsule = content::kInvalidAssetId;
+  content::AssetId pyramid = content::kInvalidAssetId;
+  content::AssetId grass = content::kInvalidAssetId;
+  content::AssetId character = content::kInvalidAssetId;
 };
 
 /// Loads the sample mesh asset and registers every built-in primitive.

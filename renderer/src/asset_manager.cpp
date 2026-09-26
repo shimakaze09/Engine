@@ -15,7 +15,7 @@ namespace {
 
 /// Resolves an id to its record slot via the database's shared probe logic.
 std::size_t find_record_slot(const AssetDatabase *database,
-                             AssetId id) noexcept {
+                             content::AssetId id) noexcept {
   return find_mesh_asset_record_slot(database, id);
 }
 
@@ -36,12 +36,10 @@ bool has_source_path(const MeshAssetRecord &record) noexcept {
   return record.sourcePath[0] != '\0';
 }
 
-bool ensure_record(AssetDatabase *database,
-                   AssetId id,
-                   const char *sourcePath,
-                   std::size_t *outSlot) noexcept {
-  if ((database == nullptr) || (outSlot == nullptr)
-      || (id == kInvalidAssetId)) {
+bool ensure_record(AssetDatabase *database, content::AssetId id,
+                   const char *sourcePath, std::size_t *outSlot) noexcept {
+  if ((database == nullptr) || (outSlot == nullptr) ||
+      (id == content::kInvalidAssetId)) {
     return false;
   }
 
@@ -90,16 +88,16 @@ void sync_requested_residency(AssetManager *manager,
     }
 
     const MeshAssetRecord &record = database->meshAssets[i];
-    if (record.id == kInvalidAssetId) {
+    if (record.id == content::kInvalidAssetId) {
       continue;
     }
 
     if (!record.requestedResident) {
       // An Unloaded record is queued too when it can be released: a load
       // the streaming upload skipped ends Unloaded without passing here.
-      if ((record.state == AssetState::Ready) ||
-          (record.state == AssetState::Loading) ||
-          (record.state == AssetState::Failed) ||
+      if ((record.state == content::AssetState::Ready) ||
+          (record.state == content::AssetState::Loading) ||
+          (record.state == content::AssetState::Failed) ||
           mesh_asset_record_releasable(record)) {
         if (!content::has_pending_asset_request(
                 manager, AssetRequestType::Unload, record.id)) {
@@ -110,7 +108,7 @@ void sync_requested_residency(AssetManager *manager,
       continue;
     }
 
-    if (record.state == AssetState::Unloaded) {
+    if (record.state == content::AssetState::Unloaded) {
       if (!content::has_pending_asset_request(manager, AssetRequestType::Load, record.id)
           && !content::has_pending_asset_request(
               manager, AssetRequestType::Reload, record.id)) {
@@ -127,8 +125,8 @@ bool process_load_like_request(AssetDatabase *database,
                                GpuMeshRegistry *registry,
                                const AssetRequest &request,
                                bool forceReload) noexcept {
-  if ((database == nullptr) || (registry == nullptr)
-      || (request.id == kInvalidAssetId)) {
+  if ((database == nullptr) || (registry == nullptr) ||
+      (request.id == content::kInvalidAssetId)) {
     return false;
   }
 
@@ -146,10 +144,10 @@ bool process_load_like_request(AssetDatabase *database,
   // failure (missing/malformed input, registry capacity) returns with the
   // record byte-for-byte as it was: handle, state, source path, and
   // residency accounting all still describe the last valid resource.
-  const bool stagedReload =
-      forceReload && (record.state == AssetState::Ready) &&
-      (record.runtimeMesh != kInvalidMeshHandle) && record.requestedResident &&
-      (record.refCount > 0U);
+  const bool stagedReload = forceReload &&
+                            (record.state == content::AssetState::Ready) &&
+                            (record.runtimeMesh != kInvalidMeshHandle) &&
+                            record.requestedResident && (record.refCount > 0U);
   if (stagedReload) {
     const char *replacementPath = (request.sourcePath[0] != '\0')
                                       ? request.sourcePath.data()
@@ -188,7 +186,7 @@ bool process_load_like_request(AssetDatabase *database,
     unload_record_mesh(&record, registry);
     copy_source_path(&record.sourcePath, replacementPath);
     record.runtimeMesh = replacementHandle;
-    record.state = AssetState::Ready;
+    record.state = content::AssetState::Ready;
     record.lastAccessFrame.store(database->currentFrame,
                                  std::memory_order_relaxed);
     record.sizeBytes = estimated_mesh_size_bytes(replacementMesh);
@@ -201,17 +199,17 @@ bool process_load_like_request(AssetDatabase *database,
 
   if (forceReload) {
     unload_record_mesh(&record, registry);
-    record.state = AssetState::Unloaded;
+    record.state = content::AssetState::Unloaded;
   }
 
   if (!record.requestedResident || (record.refCount == 0U)) {
     unload_record_mesh(&record, registry);
-    record.state = AssetState::Unloaded;
+    record.state = content::AssetState::Unloaded;
     return true;
   }
 
   if (!has_source_path(record)) {
-    record.state = AssetState::Failed;
+    record.state = content::AssetState::Failed;
     record.runtimeMesh = kInvalidMeshHandle;
     core::log_message(core::LogLevel::Error,
                       "assets",
@@ -219,12 +217,12 @@ bool process_load_like_request(AssetDatabase *database,
     return false;
   }
 
-  record.state = AssetState::Loading;
+  record.state = content::AssetState::Loading;
 
   GpuMesh mesh{};
   if (!load_mesh_from_file(record.sourcePath.data(), &mesh)) {
-    record.state =
-        record.requestedResident ? AssetState::Failed : AssetState::Unloaded;
+    record.state = record.requestedResident ? content::AssetState::Failed
+                                            : content::AssetState::Unloaded;
     record.runtimeMesh = kInvalidMeshHandle;
     return false;
   }
@@ -232,8 +230,8 @@ bool process_load_like_request(AssetDatabase *database,
   const MeshHandle meshHandle = register_gpu_mesh(registry, mesh);
   if (meshHandle == kInvalidMeshHandle) {
     unload_mesh(&mesh);
-    record.state =
-        record.requestedResident ? AssetState::Failed : AssetState::Unloaded;
+    record.state = record.requestedResident ? content::AssetState::Failed
+                                            : content::AssetState::Unloaded;
     record.runtimeMesh = kInvalidMeshHandle;
     char message[640] = {};
     std::snprintf(message, sizeof(message),
@@ -247,11 +245,11 @@ bool process_load_like_request(AssetDatabase *database,
   record.runtimeMesh = meshHandle;
   if (!record.requestedResident || (record.refCount == 0U)) {
     unload_record_mesh(&record, registry);
-    record.state = AssetState::Unloaded;
+    record.state = content::AssetState::Unloaded;
     return true;
   }
 
-  record.state = AssetState::Ready;
+  record.state = content::AssetState::Ready;
   record.lastAccessFrame.store(database->currentFrame,
                                std::memory_order_relaxed);
   record.sizeBytes = estimated_mesh_size_bytes(mesh);
@@ -264,12 +262,10 @@ void clear_asset_manager(AssetManager *manager) noexcept {
   content::clear_asset_request_queue(manager);
 }
 
-bool queue_mesh_load(AssetManager *manager,
-                     AssetDatabase *database,
-                     AssetId id,
-                     const char *sourcePath) noexcept {
-  if ((manager == nullptr) || (database == nullptr)
-      || (id == kInvalidAssetId)) {
+bool queue_mesh_load(AssetManager *manager, AssetDatabase *database,
+                     content::AssetId id, const char *sourcePath) noexcept {
+  if ((manager == nullptr) || (database == nullptr) ||
+      (id == content::kInvalidAssetId)) {
     return false;
   }
 
@@ -284,7 +280,7 @@ bool queue_mesh_load(AssetManager *manager,
     record.refCount = 1U;
   }
 
-  if (record.state == AssetState::Ready) {
+  if (record.state == content::AssetState::Ready) {
     return true;
   }
 
@@ -296,11 +292,10 @@ bool queue_mesh_load(AssetManager *manager,
   return content::push_asset_request(manager, AssetRequestType::Load, id, sourcePath);
 }
 
-bool queue_mesh_unload(AssetManager *manager,
-                       AssetDatabase *database,
-                       AssetId id) noexcept {
-  if ((manager == nullptr) || (database == nullptr)
-      || (id == kInvalidAssetId)) {
+bool queue_mesh_unload(AssetManager *manager, AssetDatabase *database,
+                       content::AssetId id) noexcept {
+  if ((manager == nullptr) || (database == nullptr) ||
+      (id == content::kInvalidAssetId)) {
     return false;
   }
 
@@ -313,7 +308,7 @@ bool queue_mesh_unload(AssetManager *manager,
   record.requestedResident = false;
   record.refCount = 0U;
 
-  if (record.state == AssetState::Unloaded) {
+  if (record.state == content::AssetState::Unloaded) {
     return true;
   }
 
@@ -324,12 +319,10 @@ bool queue_mesh_unload(AssetManager *manager,
   return content::push_asset_request(manager, AssetRequestType::Unload, id, nullptr);
 }
 
-bool queue_mesh_reload(AssetManager *manager,
-                       AssetDatabase *database,
-                       AssetId id,
-                       const char *sourcePath) noexcept {
-  if ((manager == nullptr) || (database == nullptr)
-      || (id == kInvalidAssetId)) {
+bool queue_mesh_reload(AssetManager *manager, AssetDatabase *database,
+                       content::AssetId id, const char *sourcePath) noexcept {
+  if ((manager == nullptr) || (database == nullptr) ||
+      (id == content::kInvalidAssetId)) {
     return false;
   }
 
@@ -388,7 +381,7 @@ bool update_asset_manager(AssetManager *manager,
       break;
     case AssetRequestType::Unload:
       unload_record_mesh(&record, registry);
-      record.state = AssetState::Unloaded;
+      record.state = content::AssetState::Unloaded;
       record.runtimeMesh = kInvalidMeshHandle;
       // A record nobody wants back is released, or every mesh ever touched
       // would hold a slot for the rest of the process. A later request
@@ -427,7 +420,7 @@ void shutdown_asset_manager(AssetManager *manager,
 
     MeshAssetRecord &record = database->meshAssets[i];
     unload_record_mesh(&record, registry);
-    record.state = AssetState::Unloaded;
+    record.state = content::AssetState::Unloaded;
     record.refCount = 0U;
     record.requestedResident = false;
   }

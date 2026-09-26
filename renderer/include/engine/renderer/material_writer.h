@@ -20,7 +20,8 @@ namespace engine::renderer {
 /// Returns false when the material has no parent or its id/metadata cannot
 /// be resolved; outPath is left untouched in that case.
 bool find_material_parent_virtual_path(const content::AssetCatalog *catalog,
-                                       AssetId materialId, char *outPath,
+                                       content::AssetId materialId,
+                                       char *outPath,
                                        std::size_t outPathCapacity) noexcept;
 
 /// Serializes `params`/`textureSlots` as a material document and writes it

@@ -23,15 +23,15 @@ struct MaterialRefText final {
 /// content browser does.
 inline MaterialRefText
 catalog_material_asset(content::AssetCatalog *catalog, const char *virtualPath,
-                       renderer::AssetTypeTag type,
+                       content::AssetTypeTag type,
                        const char *guidSeed = nullptr) noexcept {
   MaterialRefText out{};
-  renderer::AssetMetadata metadata{};
-  metadata.assetId = renderer::make_asset_id_from_path(virtualPath);
+  content::AssetMetadata metadata{};
+  metadata.assetId = content::make_asset_id_from_path(virtualPath);
   metadata.ref = core::asset_ref_primary(content::builtin_asset_guid(
       (guidSeed != nullptr) ? guidSeed : virtualPath));
   metadata.typeTag = type;
-  renderer::write_metadata_path(&metadata.filePath, virtualPath);
+  content::write_metadata_path(&metadata.filePath, virtualPath);
   if (!content::register_asset_metadata(catalog, metadata) ||
       !content::format_asset_ref(metadata.ref, out.text, sizeof(out.text))) {
     out.text[0] = '\0';
@@ -43,14 +43,14 @@ catalog_material_asset(content::AssetCatalog *catalog, const char *virtualPath,
 inline MaterialRefText catalog_texture(content::AssetCatalog *catalog,
                                        const char *virtualPath) noexcept {
   return catalog_material_asset(catalog, virtualPath,
-                                renderer::AssetTypeTag::Texture);
+                                content::AssetTypeTag::Texture);
 }
 
 /// Catalogues a material fixture; see catalog_material_asset.
 inline MaterialRefText catalog_material(content::AssetCatalog *catalog,
                                         const char *virtualPath) noexcept {
   return catalog_material_asset(catalog, virtualPath,
-                                renderer::AssetTypeTag::Material);
+                                content::AssetTypeTag::Material);
 }
 
 } // namespace engine::tests

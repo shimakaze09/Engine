@@ -85,8 +85,8 @@ int verify_save_round_trip(engine::renderer::AssetDatabase *database) {
   if (textureRef.text[0] == '\0') {
     return 10;
   }
-  const engine::renderer::AssetId textureId =
-      engine::renderer::make_asset_id_from_path(kTextureVirtualPath);
+  const engine::content::AssetId textureId =
+      engine::content::make_asset_id_from_path(kTextureVirtualPath);
 
   engine::renderer::Material params{};
   params.albedo = engine::math::Vec3(0.2F, 0.4F, 0.6F);
@@ -169,21 +169,21 @@ int verify_unresolvable_texture_rejects_save() {
 
   // A texture known only by path: the record a load by file name leaves,
   // with no identity a document could name.
-  engine::renderer::AssetMetadata pathOnly{};
-  pathOnly.assetId = engine::renderer::make_asset_id_from_path(
+  engine::content::AssetMetadata pathOnly{};
+  pathOnly.assetId = engine::content::make_asset_id_from_path(
       "mat/material_writer_path_only.png");
-  pathOnly.typeTag = engine::renderer::AssetTypeTag::Texture;
-  engine::renderer::write_metadata_path(&pathOnly.filePath,
-                                        "mat/material_writer_path_only.png");
+  pathOnly.typeTag = engine::content::AssetTypeTag::Texture;
+  engine::content::write_metadata_path(&pathOnly.filePath,
+                                       "mat/material_writer_path_only.png");
   if (!engine::content::register_asset_metadata(g_catalog, pathOnly)) {
     remove_file(kOsPath);
     return 24;
   }
 
   // An id with no registered metadata at all, then one with no identity.
-  const engine::renderer::AssetId kUnsavable[] = {0xDEADBEEFULL,
-                                                  pathOnly.assetId};
-  for (const engine::renderer::AssetId id : kUnsavable) {
+  const engine::content::AssetId kUnsavable[] = {0xDEADBEEFULL,
+                                                 pathOnly.assetId};
+  for (const engine::content::AssetId id : kUnsavable) {
     engine::renderer::Material params{};
     engine::renderer::MaterialTextureSlots slots{};
     slots.albedo = id;
@@ -250,8 +250,8 @@ int verify_find_parent_path(engine::renderer::AssetDatabase *database) {
   }
 
   // The parent itself has no parent.
-  const engine::renderer::AssetId parentId =
-      engine::renderer::make_asset_id_from_path(kParentVirtualPath);
+  const engine::content::AssetId parentId =
+      engine::content::make_asset_id_from_path(kParentVirtualPath);
   char noParentPath[260] = {};
   if (engine::renderer::find_material_parent_virtual_path(
           g_catalog, parentId, noParentPath, sizeof(noParentPath))) {

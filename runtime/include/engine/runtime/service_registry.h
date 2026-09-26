@@ -42,7 +42,7 @@ struct EngineAudioService final {
 struct EngineAssetDatabaseService final {
   /// Stores Lua-visible async/preload handles for runtime asset requests.
   struct ScriptAssetLoadHandle final {
-    renderer::AssetId assetId = renderer::kInvalidAssetId;
+    content::AssetId assetId = content::kInvalidAssetId;
     content::LoadHandle streamingHandle = content::kInvalidLoadHandle;
     std::uint16_t generation = 0U;
     bool occupied = false;

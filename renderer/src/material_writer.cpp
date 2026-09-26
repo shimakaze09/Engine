@@ -92,8 +92,9 @@ void write_field(core::JsonWriter *writer, const char *key,
 /// would lose the reference the next time the file moved or loaded.
 bool write_catalogued_ref(core::JsonWriter *writer,
                           const content::AssetCatalog *catalog, const char *key,
-                          AssetId id, const char *virtualPath) noexcept {
-  const AssetMetadata *metadata = find_asset_metadata(catalog, id);
+                          content::AssetId id,
+                          const char *virtualPath) noexcept {
+  const content::AssetMetadata *metadata = find_asset_metadata(catalog, id);
   if ((metadata == nullptr) || !core::asset_ref_is_valid(metadata->ref)) {
     char message[160] = {};
     std::snprintf(message, sizeof(message),
@@ -109,9 +110,9 @@ bool write_catalogued_ref(core::JsonWriter *writer,
 /// texture reference).
 bool write_texture_slot(core::JsonWriter *writer,
                         const content::AssetCatalog *catalog, const char *key,
-                        AssetId textureId, bool clearsInherited,
+                        content::AssetId textureId, bool clearsInherited,
                         const char *virtualPath) noexcept {
-  if (textureId == kInvalidAssetId) {
+  if (textureId == content::kInvalidAssetId) {
     // A child that empties a slot its parent fills says so, or the next
     // load would inherit the parent's texture straight back.
     if (clearsInherited) {
@@ -125,13 +126,14 @@ bool write_texture_slot(core::JsonWriter *writer,
 } // namespace
 
 bool find_material_parent_virtual_path(const content::AssetCatalog *catalog,
-                                       AssetId materialId, char *outPath,
+                                       content::AssetId materialId,
+                                       char *outPath,
                                        std::size_t outPathCapacity) noexcept {
   if ((catalog == nullptr) || (outPath == nullptr) || (outPathCapacity == 0U)) {
     return false;
   }
 
-  const AssetMetadata *parent = find_asset_metadata(
+  const content::AssetMetadata *parent = find_asset_metadata(
       catalog, find_material_parent_id(catalog, materialId));
   if (parent == nullptr) {
     return false;
@@ -169,7 +171,7 @@ bool save_material_asset(const content::AssetCatalog *catalog,
   };
   if (hasParent &&
       !write_catalogued_ref(&writer, catalog, "parent",
-                            make_asset_id_from_path(parentVirtualPath),
+                            content::make_asset_id_from_path(parentVirtualPath),
                             virtualPath)) {
     return false;
   }
@@ -188,8 +190,8 @@ bool save_material_asset(const content::AssetCatalog *catalog,
 #define ENGINE_MATERIAL_OWN_SLOT(name, slot, handle, key)                      \
   if (writes(material_field::k##name)) {                                       \
     ownSlots.slot = textureSlots.slot;                                         \
-    hasAnyTexture =                                                            \
-        hasAnyTexture || hasParent || (ownSlots.slot != kInvalidAssetId);      \
+    hasAnyTexture = hasAnyTexture || hasParent ||                              \
+                    (ownSlots.slot != content::kInvalidAssetId);               \
   }
   ENGINE_MATERIAL_TEXTURE_FIELDS(ENGINE_MATERIAL_OWN_SLOT)
 #undef ENGINE_MATERIAL_OWN_SLOT

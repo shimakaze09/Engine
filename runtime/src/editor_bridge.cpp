@@ -49,13 +49,13 @@ std::uint64_t editor_request_mesh_asset(const char *virtualPath) noexcept {
       (g_editorAssetService == nullptr) ||
       (g_editorAssetService->database == nullptr) ||
       (g_editorAssetService->catalog == nullptr)) {
-    return renderer::kInvalidAssetId;
+    return content::kInvalidAssetId;
   }
 
-  const renderer::AssetId assetId =
-      renderer::make_asset_id_from_path(virtualPath);
-  if (assetId == renderer::kInvalidAssetId) {
-    return renderer::kInvalidAssetId;
+  const content::AssetId assetId =
+      content::make_asset_id_from_path(virtualPath);
+  if (assetId == content::kInvalidAssetId) {
+    return content::kInvalidAssetId;
   }
   // A mesh the editor names by path is catalogued under that path. The
   // identity stays whatever the mount walk already recorded for it: this
@@ -63,9 +63,9 @@ std::uint64_t editor_request_mesh_asset(const char *virtualPath) noexcept {
   static_cast<void>(note_mesh_asset_path(g_editorAssetService->catalog, assetId,
                                          virtualPath, core::AssetRef{}));
 
-  const renderer::AssetState state =
+  const content::AssetState state =
       renderer::mesh_asset_state(g_editorAssetService->database, assetId);
-  if (state == renderer::AssetState::Ready) {
+  if (state == content::AssetState::Ready) {
     return assetId;
   }
 
@@ -74,14 +74,14 @@ std::uint64_t editor_request_mesh_asset(const char *virtualPath) noexcept {
     core::log_message(core::LogLevel::Error, "editor",
                       "editor_request_mesh_asset: virtual path did not "
                       "resolve to an OS path");
-    return renderer::kInvalidAssetId;
+    return content::kInvalidAssetId;
   }
 
   if (!renderer::request_mesh_asset_streaming_load(
           g_editorAssetService->database, assetId, osPath)) {
     core::log_message(core::LogLevel::Error, "editor",
                       "editor_request_mesh_asset: streaming request rejected");
-    return renderer::kInvalidAssetId;
+    return content::kInvalidAssetId;
   }
 
   if (g_editorAssetService->streamingQueue != nullptr) {
@@ -90,11 +90,11 @@ std::uint64_t editor_request_mesh_asset(const char *virtualPath) noexcept {
         content::LoadPriority::High);
     if (!handle.valid()) {
       static_cast<void>(renderer::set_mesh_asset_state(
-          g_editorAssetService->database, assetId,
-          renderer::AssetState::Failed, renderer::kInvalidMeshHandle));
+          g_editorAssetService->database, assetId, content::AssetState::Failed,
+          renderer::kInvalidMeshHandle));
       core::log_message(core::LogLevel::Error, "editor",
                         "editor_request_mesh_asset: async load enqueue failed");
-      return renderer::kInvalidAssetId;
+      return content::kInvalidAssetId;
     }
   }
 
@@ -147,7 +147,7 @@ std::size_t editor_query_assets(content::AssetTypeTag typeTag,
   }
 
   constexpr std::size_t kScanCapacity = 512U;
-  renderer::AssetId candidateIds[kScanCapacity];
+  content::AssetId candidateIds[kScanCapacity];
   const std::size_t candidateCount = content::query_assets_by_type(
       g_editorAssetService->catalog, typeTag, candidateIds, kScanCapacity);
 
@@ -155,7 +155,7 @@ std::size_t editor_query_assets(content::AssetTypeTag typeTag,
   std::size_t written = 0U;
   for (std::size_t i = 0U; (i < candidateCount) && (written < maxResults);
       ++i) {
-    const renderer::AssetMetadata *metadata = content::find_asset_metadata(
+    const content::AssetMetadata *metadata = content::find_asset_metadata(
         g_editorAssetService->catalog, candidateIds[i]);
     if (metadata == nullptr) {
       continue;
@@ -175,12 +175,12 @@ std::size_t editor_query_assets(content::AssetTypeTag typeTag,
 bool editor_asset_display_path(std::uint64_t assetId, char *outPath,
                                std::size_t outPathSize) noexcept {
   if ((outPath == nullptr) || (outPathSize == 0U) ||
-      (assetId == renderer::kInvalidAssetId) ||
+      (assetId == content::kInvalidAssetId) ||
       (g_editorAssetService == nullptr) ||
       (g_editorAssetService->catalog == nullptr)) {
     return false;
   }
-  const renderer::AssetMetadata *metadata =
+  const content::AssetMetadata *metadata =
       content::find_asset_metadata(g_editorAssetService->catalog, assetId);
   if (metadata == nullptr) {
     return false;
@@ -190,12 +190,12 @@ bool editor_asset_display_path(std::uint64_t assetId, char *outPath,
 }
 
 core::AssetRef editor_asset_ref(std::uint64_t assetId) noexcept {
-  if ((assetId == renderer::kInvalidAssetId) ||
+  if ((assetId == content::kInvalidAssetId) ||
       (g_editorAssetService == nullptr) ||
       (g_editorAssetService->catalog == nullptr)) {
     return core::AssetRef{};
   }
-  const renderer::AssetMetadata *metadata =
+  const content::AssetMetadata *metadata =
       content::find_asset_metadata(g_editorAssetService->catalog, assetId);
   // A record without an identity is reported by the mount walk, not
   // invented here: the reference stays nil so the gesture cannot write a
@@ -207,7 +207,7 @@ namespace {
 
 /// Builds the state struct from an already-registered material id; false
 /// (state left default) when the id is not (or no longer) Ready.
-bool fill_material_state(renderer::AssetId materialId,
+bool fill_material_state(content::AssetId materialId,
                          EditorMaterialState *outState) noexcept {
   const renderer::Material *params = renderer::find_material_params(
       g_editorAssetService->database, materialId);
@@ -253,9 +253,9 @@ EditorMaterialState editor_load_material(const char *virtualPath) noexcept {
 }
 
 bool editor_set_material_params(
-    renderer::AssetId materialId, const renderer::Material &params,
+    content::AssetId materialId, const renderer::Material &params,
     const renderer::MaterialTextureSlots &textureSlots) noexcept {
-  if ((materialId == renderer::kInvalidAssetId) ||
+  if ((materialId == content::kInvalidAssetId) ||
       (g_editorAssetService == nullptr) ||
       (g_editorAssetService->database == nullptr) ||
       (g_editorAssetService->catalog == nullptr)) {
@@ -267,7 +267,7 @@ bool editor_set_material_params(
                                        materialId, params, textureSlots);
 }
 
-std::uint16_t editor_material_overrides(renderer::AssetId materialId) noexcept {
+std::uint16_t editor_material_overrides(content::AssetId materialId) noexcept {
   if ((g_editorAssetService == nullptr) ||
       (g_editorAssetService->database == nullptr)) {
     return renderer::material_field::kAll;
@@ -276,11 +276,11 @@ std::uint16_t editor_material_overrides(renderer::AssetId materialId) noexcept {
                                       materialId);
 }
 
-bool editor_restore_material(renderer::AssetId materialId,
+bool editor_restore_material(content::AssetId materialId,
                              const renderer::Material &params,
                              const renderer::MaterialTextureSlots &textureSlots,
                              std::uint16_t overrides) noexcept {
-  if ((materialId == renderer::kInvalidAssetId) ||
+  if ((materialId == content::kInvalidAssetId) ||
       (g_editorAssetService == nullptr) ||
       (g_editorAssetService->database == nullptr) ||
       (g_editorAssetService->catalog == nullptr)) {
@@ -300,8 +300,8 @@ bool editor_save_material(const char *virtualPath,
     return false;
   }
 
-  const renderer::AssetId materialId =
-      renderer::make_asset_id_from_path(virtualPath);
+  const content::AssetId materialId =
+      content::make_asset_id_from_path(virtualPath);
   const renderer::Material *params =
       renderer::find_material_params(g_editorAssetService->database, materialId);
   if (params == nullptr) {
@@ -397,11 +397,11 @@ editor_establish_asset_identity(const char *osPath) noexcept {
           c = '/';
         }
       }
-      renderer::AssetMetadata metadata{};
-      metadata.assetId = renderer::make_asset_id_from_path(virtualPath);
+      content::AssetMetadata metadata{};
+      metadata.assetId = content::make_asset_id_from_path(virtualPath);
       metadata.typeTag = content::classify_asset_path(virtualPath).tag;
       metadata.ref = content::asset_ref_primary(sidecar.guid);
-      renderer::write_metadata_path(&metadata.filePath, virtualPath);
+      content::write_metadata_path(&metadata.filePath, virtualPath);
       static_cast<void>(content::register_asset_metadata(
           g_editorAssetService->catalog, metadata));
     }

@@ -65,10 +65,10 @@ int verify_full_material_load(engine::renderer::AssetDatabase *database) {
       engine::renderer::load_material_asset(database, g_catalog, virtualPath);
   remove_file(kPath);
   if (!loadResult.has_value() ||
-      (*loadResult == engine::renderer::kInvalidAssetId)) {
+      (*loadResult == engine::content::kInvalidAssetId)) {
     return 11;
   }
-  const engine::renderer::AssetId id = *loadResult;
+  const engine::content::AssetId id = *loadResult;
 
   const engine::renderer::Material *params =
       engine::renderer::find_material_params(database, id);
@@ -88,14 +88,14 @@ int verify_full_material_load(engine::renderer::AssetDatabase *database) {
   }
 
   if (engine::renderer::material_asset_state(database, id) !=
-      engine::renderer::AssetState::Ready) {
+      engine::content::AssetState::Ready) {
     return 14;
   }
 
-  const engine::renderer::AssetMetadata *metadata =
+  const engine::content::AssetMetadata *metadata =
       engine::content::find_asset_metadata(g_catalog, id);
   if ((metadata == nullptr) ||
-      (metadata->typeTag != engine::renderer::AssetTypeTag::Material)) {
+      (metadata->typeTag != engine::content::AssetTypeTag::Material)) {
     return 15;
   }
 
@@ -119,7 +119,7 @@ int verify_partial_material_defaults(
   if (!loadResult.has_value()) {
     return 21;
   }
-  const engine::renderer::AssetId id = *loadResult;
+  const engine::content::AssetId id = *loadResult;
 
   const engine::renderer::Material *params =
       engine::renderer::find_material_params(database, id);
@@ -178,7 +178,7 @@ int verify_parent_chain_resolution(engine::renderer::AssetDatabase *database) {
   if (!grandResult.has_value()) {
     return 31;
   }
-  const engine::renderer::AssetId grandId = *grandResult;
+  const engine::content::AssetId grandId = *grandResult;
 
   const engine::renderer::Material *grand =
       engine::renderer::find_material_params(database, grandId);
@@ -196,8 +196,8 @@ int verify_parent_chain_resolution(engine::renderer::AssetDatabase *database) {
   }
 
   // The intermediate materials registered too, with their own values.
-  const engine::renderer::AssetId childId =
-      engine::renderer::make_asset_id_from_path("mat/material_test_child.mat");
+  const engine::content::AssetId childId =
+      engine::content::make_asset_id_from_path("mat/material_test_child.mat");
   const engine::renderer::Material *child =
       engine::renderer::find_material_params(database, childId);
   if ((child == nullptr) || !exactly_equal(child->metallic, 1.0F) ||
@@ -206,9 +206,9 @@ int verify_parent_chain_resolution(engine::renderer::AssetDatabase *database) {
   }
 
   // The dependency edge child -> base was recorded.
-  const engine::renderer::AssetId baseId =
-      engine::renderer::make_asset_id_from_path("mat/material_test_base.mat");
-  engine::renderer::AssetId deps[4] = {};
+  const engine::content::AssetId baseId =
+      engine::content::make_asset_id_from_path("mat/material_test_base.mat");
+  engine::content::AssetId deps[4] = {};
   const std::size_t depCount =
       engine::content::get_dependencies(g_catalog, childId, deps, 4U);
   if ((depCount != 1U) || (deps[0] != baseId)) {
@@ -339,8 +339,8 @@ int verify_material_load_failures(engine::renderer::AssetDatabase *database) {
 int verify_full_table_failures() {
   constexpr const char *kPath = "material_test_full_table.mat";
   constexpr const char *kVirtualPath = "mat/material_test_full_table.mat";
-  const engine::renderer::AssetId targetId =
-      engine::renderer::make_asset_id_from_path(kVirtualPath);
+  const engine::content::AssetId targetId =
+      engine::content::make_asset_id_from_path(kVirtualPath);
 
   {
     std::unique_ptr<engine::renderer::AssetDatabase> database(
@@ -351,12 +351,12 @@ int verify_full_table_failures() {
     engine::content::clear_asset_catalog(g_catalog);
 
     std::size_t inserted = 0U;
-    engine::renderer::AssetId candidate = 1U;
+    engine::content::AssetId candidate = 1U;
     while (inserted < engine::content::AssetCatalog::kMaxMetadata) {
       if (candidate != targetId) {
-        engine::renderer::AssetMetadata metadata{};
+        engine::content::AssetMetadata metadata{};
         metadata.assetId = candidate;
-        metadata.typeTag = engine::renderer::AssetTypeTag::Mesh;
+        metadata.typeTag = engine::content::AssetTypeTag::Mesh;
         if (!engine::content::register_asset_metadata(g_catalog, metadata)) {
           return 71;
         }
@@ -388,7 +388,7 @@ int verify_full_table_failures() {
 
     const engine::renderer::Material params{};
     std::size_t inserted = 0U;
-    engine::renderer::AssetId candidate = 1U;
+    engine::content::AssetId candidate = 1U;
     while (inserted < engine::renderer::AssetDatabase::kMaxMaterialAssets) {
       if (candidate != targetId) {
         if (!engine::renderer::register_material_asset(
@@ -421,7 +421,7 @@ int verify_material_database_edges(engine::renderer::AssetDatabase *database) {
     return 60;
   }
   if (engine::renderer::material_asset_state(database, 12345U) !=
-      engine::renderer::AssetState::Unloaded) {
+      engine::content::AssetState::Unloaded) {
     return 61;
   }
   if (engine::renderer::find_material_params(nullptr, 12345U) != nullptr) {
@@ -475,11 +475,11 @@ int verify_material_directory_discovery(
                  "mat/mat_discovery_test") != 2U) {
     result = 92;
   } else {
-    const engine::renderer::AssetId idA =
-        engine::renderer::make_asset_id_from_path(
+    const engine::content::AssetId idA =
+        engine::content::make_asset_id_from_path(
             "mat/mat_discovery_test/disc_a.mat");
-    const engine::renderer::AssetId idB =
-        engine::renderer::make_asset_id_from_path(
+    const engine::content::AssetId idB =
+        engine::content::make_asset_id_from_path(
             "mat/mat_discovery_test/disc_b.mat");
     const engine::renderer::Material *matA =
         engine::renderer::find_material_params(database, idA);
