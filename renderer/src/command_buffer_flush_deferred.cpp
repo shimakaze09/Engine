@@ -915,7 +915,11 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
     }
 
     const SkyModel skyModel = selected_sky_model();
-    const DeviceTextureHandle skyboxTexture = envSkyboxTexture;
+    // The environment lights every sky model; only the cubemap model shows
+    // it as the sky.
+    const DeviceTextureHandle skyboxTexture = (skyModel == SkyModel::Cubemap)
+                                                  ? envSkyboxTexture
+                                                  : kInvalidDeviceTexture;
     const math::Mat4 skyProj = sky_projection_matrix(
         renderer_context().activeCamera,
         (drawableHeight > 0)

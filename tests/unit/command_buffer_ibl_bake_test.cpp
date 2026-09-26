@@ -112,7 +112,7 @@ void check_state_restored(const char *what) noexcept {
 void test_prefilter_restores_state() noexcept {
   BackendState backend = make_bake_backend();
   const DeviceTextureHandle tex = ensure_prefiltered_environment(
-      backend, render_device(), DeviceTextureHandle{5U},
+      backend, render_device(), TextureHandle{3U}, DeviceTextureHandle{5U},
       ReflectionProbeBakeSettings{});
   CHECK(tex != kInvalidDeviceTexture, "prefilter bake succeeds");
   CHECK(backend.prefilteredEnvironmentTexture == tex,
@@ -129,7 +129,7 @@ void test_prefilter_target_failure_fails_clean() noexcept {
   engine::tests::fake_log().failKinds =
       engine::tests::fake_kind_bit(engine::tests::FakeKind::RenderTarget);
   const DeviceTextureHandle tex = ensure_prefiltered_environment(
-      backend, render_device(), DeviceTextureHandle{5U},
+      backend, render_device(), TextureHandle{3U}, DeviceTextureHandle{5U},
       ReflectionProbeBakeSettings{});
   CHECK(tex == kInvalidDeviceTexture,
         "failed face target fails the prefilter bake");
@@ -146,7 +146,7 @@ void test_prefilter_target_failure_fails_clean() noexcept {
 void test_irradiance_contracts() noexcept {
   BackendState backend = make_bake_backend();
   const DeviceTextureHandle tex = ensure_irradiance_environment(
-      backend, render_device(), DeviceTextureHandle{5U},
+      backend, render_device(), TextureHandle{3U}, DeviceTextureHandle{5U},
       ReflectionProbeBakeSettings{});
   CHECK(tex != kInvalidDeviceTexture, "irradiance bake succeeds");
   check_state_restored("irradiance leaves the back buffer bound");
@@ -155,7 +155,7 @@ void test_irradiance_contracts() noexcept {
   engine::tests::fake_log().failKinds =
       engine::tests::fake_kind_bit(engine::tests::FakeKind::RenderTarget);
   const DeviceTextureHandle failed = ensure_irradiance_environment(
-      failing, render_device(), DeviceTextureHandle{5U},
+      failing, render_device(), TextureHandle{3U}, DeviceTextureHandle{5U},
       ReflectionProbeBakeSettings{});
   CHECK(failed == kInvalidDeviceTexture,
         "failed face target fails the irradiance bake");
@@ -177,6 +177,42 @@ void test_brdf_lut_restores_state() noexcept {
   check_state_restored("brdf lut leaves the back buffer bound");
 }
 
+/// A new environment whose device texture reuses the handle of the one it
+/// replaced (bgfx recycles destroyed handles) is baked again rather than
+/// served the old bake; the same environment again is served from the
+/// cache.
+void test_bake_cache_follows_the_environment() noexcept {
+  BackendState backend = make_bake_backend();
+  const DeviceTextureHandle first = ensure_prefiltered_environment(
+      backend, render_device(), TextureHandle{3U}, DeviceTextureHandle{5U},
+      ReflectionProbeBakeSettings{});
+  const DeviceTextureHandle firstIrradiance = ensure_irradiance_environment(
+      backend, render_device(), TextureHandle{3U}, DeviceTextureHandle{5U},
+      ReflectionProbeBakeSettings{});
+  const int drawsAfterFirst = engine::tests::fake_log().draws;
+  CHECK(ensure_prefiltered_environment(
+            backend, render_device(), TextureHandle{3U},
+            DeviceTextureHandle{5U}, ReflectionProbeBakeSettings{}) == first,
+        "the same environment is served from the cache");
+  CHECK(engine::tests::fake_log().draws == drawsAfterFirst,
+        "a cached bake draws nothing");
+
+  // The texture slot's next generation: same device handle, new texture.
+  const DeviceTextureHandle second = ensure_prefiltered_environment(
+      backend, render_device(), TextureHandle{3U + 8192U},
+      DeviceTextureHandle{5U}, ReflectionProbeBakeSettings{});
+  const DeviceTextureHandle secondIrradiance = ensure_irradiance_environment(
+      backend, render_device(), TextureHandle{3U + 8192U},
+      DeviceTextureHandle{5U}, ReflectionProbeBakeSettings{});
+  CHECK((second != kInvalidDeviceTexture) && (second != first),
+        "a new environment on a reused device handle is prefiltered again");
+  CHECK((secondIrradiance != kInvalidDeviceTexture) &&
+            (secondIrradiance != firstIrradiance),
+        "and its irradiance is convolved again");
+  CHECK(engine::tests::fake_log().draws > drawsAfterFirst,
+        "the new bakes drew");
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -188,6 +224,7 @@ int main() {
   test_prefilter_target_failure_fails_clean();
   test_irradiance_contracts();
   test_brdf_lut_restores_state();
+  test_bake_cache_follows_the_environment();
   engine::core::shutdown_cvars();
 
   std::printf("\n%s (%d failure(s))\n",

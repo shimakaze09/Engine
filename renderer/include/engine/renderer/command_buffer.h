@@ -349,7 +349,11 @@ void set_shader_root_path(const char *path) noexcept;
 // instead of the full SDL drawable size.
 void set_scene_viewport_size(int width, int height) noexcept;
 
-/// Sets the active skybox cubemap. Pass kInvalidTextureHandle to disable it.
+/// Sets the scene's environment cubemap, or clears it with
+/// kInvalidTextureHandle. A set environment is the scene's image-based
+/// light (prefiltered specular and diffuse irradiance) under every sky
+/// model, and r_sky_model=cubemap also draws it as the sky. The caller owns
+/// the texture and must keep it loaded while it is set.
 void set_skybox_texture(TextureHandle cubemap) noexcept;
 /// Currently bound skybox cubemap handle (may be invalid).
 TextureHandle get_skybox_texture() noexcept;

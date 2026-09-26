@@ -17,18 +17,22 @@ namespace engine::renderer {
 /// name and takes no lock once the references have resolved.
 ReflectionProbeBakeSettings
 cvar_reflection_probe_bake_settings(const FlushCVars &cvars) noexcept;
-/// Prefilters sourceCubemap into the cached specular environment map and
-/// returns it (invalid when unavailable). Re-bakes when the source cubemap
-/// or bake settings change.
+/// Prefilters sourceCubemap, the device texture of sourceTexture, into the
+/// cached specular environment map and returns it (invalid when
+/// unavailable). Re-bakes when the source texture, its device texture or
+/// the bake settings change; the texture handle carries a generation, so a
+/// new environment that reuses a released one's device handle re-bakes.
 DeviceTextureHandle
 ensure_prefiltered_environment(BackendState &backend, const RenderDevice *dev,
+                               TextureHandle sourceTexture,
                                DeviceTextureHandle sourceCubemap,
                                ReflectionProbeBakeSettings settings) noexcept;
-/// Convolves sourceCubemap into the cached diffuse irradiance map and
-/// returns it (invalid when unavailable). Re-bakes when the source cubemap
-/// or bake settings change.
+/// Convolves sourceCubemap, the device texture of sourceTexture, into the
+/// cached diffuse irradiance map and returns it (invalid when
+/// unavailable). Re-bakes on the same changes as the prefilter.
 DeviceTextureHandle
 ensure_irradiance_environment(BackendState &backend, const RenderDevice *dev,
+                              TextureHandle sourceTexture,
                               DeviceTextureHandle sourceCubemap,
                               ReflectionProbeBakeSettings settings) noexcept;
 /// Renders the split-sum BRDF LUT if needed and returns it (invalid when

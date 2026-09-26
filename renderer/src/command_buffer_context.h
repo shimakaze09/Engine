@@ -296,6 +296,10 @@ struct BackendState final {
   ShaderParam environmentPrefilterRoughnessLoc{};
   DeviceTextureHandle prefilteredEnvironmentTexture{};
   DeviceTextureHandle prefilteredEnvironmentSource{};
+  // The texture the bake came from, with its generation: bgfx reuses a
+  // destroyed texture's device handle, so the device handle alone would
+  // take a new environment for the one it replaced.
+  TextureHandle prefilteredEnvironmentSourceTexture{};
   int prefilteredEnvironmentFaceSize = 0;
   int prefilteredEnvironmentMipLevels = 0;
 
@@ -307,6 +311,7 @@ struct BackendState final {
   ShaderParam environmentIrradianceTextureLoc{};
   DeviceTextureHandle irradianceEnvironmentTexture{};
   DeviceTextureHandle irradianceEnvironmentSource{};
+  TextureHandle irradianceEnvironmentSourceTexture{};
   int irradianceEnvironmentFaceSize = 0;
 
   bool environmentBrdfLutAvailable = false;
