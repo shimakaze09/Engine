@@ -11,6 +11,12 @@
 // without an environment only the renderer's small constant ambient
 // reaches it. So the lit centre must be far brighter than the unlit one,
 // and removing the sky light must bring back the unlit frame.
+//
+// Then the white furnace, on the deferred and the forward path: with
+// r_sky_model=cubemap the sky shows the environment itself, radiance 1,
+// and a white sphere lit only by it must come out as bright as the sky
+// around it, neither gaining energy nor losing more than the split-sum
+// approximation does.
 
 #include "../gpu_scene_fixture.h"
 
@@ -84,10 +90,8 @@ void remove_environment() noexcept {
   std::filesystem::remove(kMetaPath, ec);
 }
 
-/// Mean brightness of the 9x9 block at the frame's centre.
-double centre_level(const CapturedFrame &frame) noexcept {
-  const int cx = static_cast<int>(frame.width / 2U);
-  const int cy = static_cast<int>(frame.height / 2U);
+/// Mean brightness of the 9x9 block centred on (cx, cy).
+double block_level(const CapturedFrame &frame, int cx, int cy) noexcept {
   double sum = 0.0;
   int count = 0;
   for (int y = cy - 4; y <= cy + 4; ++y) {
@@ -100,6 +104,27 @@ double centre_level(const CapturedFrame &frame) noexcept {
     }
   }
   return sum / static_cast<double>(count);
+}
+
+/// Mean brightness of the 9x9 block at the frame's centre.
+double centre_level(const CapturedFrame &frame) noexcept {
+  return block_level(frame, static_cast<int>(frame.width / 2U),
+                     static_cast<int>(frame.height / 2U));
+}
+
+/// One white-furnace frame on the current path: the sphere's centre and
+/// a patch of sky in the frame's top-left corner, well clear of the
+/// sphere. False when the frame could not be captured.
+bool furnace_levels(engine::EnginePipeline &pipeline, const char *capture,
+                    double *outSphere, double *outSky) noexcept {
+  CapturedFrame frame{};
+  if (!engine::tests::settle_frames(pipeline, 20) ||
+      !engine::tests::capture_presented_frame(pipeline, capture, &frame)) {
+    return false;
+  }
+  *outSphere = centre_level(frame);
+  *outSky = block_level(frame, 30, 30);
+  return true;
 }
 
 int run(engine::EnginePipeline &pipeline, World &world) noexcept {
@@ -166,6 +191,31 @@ int run(engine::EnginePipeline &pipeline, World &world) noexcept {
     return 15;
   }
 
+  // The white furnace. The sky light goes back, and the sky shows it.
+  if (!world.add_sky_light_component(sky, skyLight)) {
+    return 18;
+  }
+  checked(engine::core::cvar_set_string("r_sky_model", "cubemap"),
+          "r_sky_model");
+  double deferredSphere = 0.0;
+  double deferredSky = 0.0;
+  double forwardSphere = 0.0;
+  double forwardSky = 0.0;
+  const bool furnaces =
+      furnace_levels(pipeline, "scene_env_furnace_deferred.tga",
+                     &deferredSphere, &deferredSky) &&
+      engine::core::cvar_set_bool("r_deferred", false) &&
+      furnace_levels(pipeline, "scene_env_furnace_forward.tga",
+                     &forwardSphere, &forwardSky);
+  checked(engine::core::cvar_set_string("r_sky_model", "hosek"),
+          "r_sky_model");
+  if (!furnaces) {
+    return 19;
+  }
+  std::printf("furnace: deferred sphere %.1f sky %.1f, forward sphere %.1f "
+              "sky %.1f\n",
+              deferredSphere, deferredSky, forwardSphere, forwardSky);
+
   const double unlitLevel = centre_level(unlit);
   const double litLevel = centre_level(lit);
   const double restoredLevel = centre_level(restored);
@@ -190,6 +240,26 @@ int run(engine::EnginePipeline &pipeline, World &world) noexcept {
                  "(%.1f against %.1f)\n",
                  restoredLevel, unlitLevel);
     return 17;
+  }
+  // The furnace: a white dielectric returns 1 - F of the environment
+  // diffusely and F times the BRDF table specularly, which for F0 = 0.04
+  // at normal incidence is within a couple of percent of 1. Four levels,
+  // under 2% of the sky's level, bounds that; a diffuse term off by a
+  // factor of pi, the bug this guards, reads some 18 levels over the sky.
+  const struct {
+    const char *path;
+    double sphere;
+    double skyLevel;
+  } furnace[] = {{"deferred", deferredSphere, deferredSky},
+                 {"forward", forwardSphere, forwardSky}};
+  for (const auto &row : furnace) {
+    if (std::fabs(row.sphere - row.skyLevel) > 4.0) {
+      std::fprintf(stderr,
+                   "FAIL: on the %s path the white sphere reads %.1f under "
+                   "a sky of %.1f\n",
+                   row.path, row.sphere, row.skyLevel);
+      return 20;
+    }
   }
   return 0;
 }
