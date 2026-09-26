@@ -94,7 +94,7 @@ const char *cgltf_result_name(cgltf_result result) {
 void print_usage() {
   std::fprintf(stderr,
                "usage: asset_packer <input.gltf|input.glb> <output.mesh> "
-               "[--dep <dependency_path>]... [--graph <asset_deps.json>] "
+               "[--dep <dependency_path>]... "
                "[--force] [--verify] [--sweep-orphans] "
                "[--platform <tag>]\n"
                "   or: asset_packer --shader-manifest <shaders.manifest> "
@@ -233,7 +233,6 @@ int main(int argc, char **argv) {
   bool sweepOrphans = false;
   const char *platformTag = kCookPlatformTag;
   std::vector<std::string> dependencyPaths{};
-  std::string graphPath{};
   for (int i = 3; i < argc; ++i) {
     if (std::strcmp(argv[i], "--dep") == 0) {
       if ((i + 1) >= argc) {
@@ -241,16 +240,6 @@ int main(int argc, char **argv) {
         return 8;
       }
       dependencyPaths.emplace_back(argv[i + 1]);
-      ++i;
-      continue;
-    }
-
-    if (std::strcmp(argv[i], "--graph") == 0) {
-      if ((i + 1) >= argc) {
-        print_usage();
-        return 8;
-      }
-      graphPath = argv[i + 1];
       ++i;
       continue;
     }
@@ -302,58 +291,13 @@ int main(int argc, char **argv) {
     return 11;
   }
 
-  engine::tools::DependencyGraph depGraph{};
-  const bool hasGraphPath = !graphPath.empty();
-  if (hasGraphPath && file_exists(graphPath.c_str()) &&
-      !engine::tools::read_dependency_graph_json(&depGraph,
-                                                 graphPath.c_str())) {
-    std::fprintf(stderr, "error: failed to read dependency graph: %s\n",
-                 graphPath.c_str());
-    return 15;
-  }
-
   const std::uint64_t meshAssetId = hash_path_to_asset_id(inputPath);
-  if (hasGraphPath && (meshAssetId != 0ULL)) {
-    engine::tools::register_asset_path(&depGraph, meshAssetId, inputPath);
 
-    // Graph-tracked dependencies (auto-discovered on earlier cooks) can
-    // force a repack beyond the explicit --dep flags.
-    // Every one of them: the graph is rewritten from this list below, so
-    // one left out here would leave the graph as well.
-    std::vector<engine::tools::DependencyGraph::AssetId> depIds(
-        engine::tools::get_dependencies(&depGraph, meshAssetId, nullptr, 0U));
-    const std::size_t depCount = engine::tools::get_dependencies(
-        &depGraph, meshAssetId, depIds.data(), depIds.size());
-    for (std::size_t i = 0U; i < depCount; ++i) {
-      auto pathIt = depGraph.assetPaths.find(depIds[i]);
-      if (pathIt != depGraph.assetPaths.end()) {
-        bool alreadyTracked = false;
-        for (const auto &d : dependencyDigests) {
-          if (d.path == pathIt->second) {
-            alreadyTracked = true;
-            break;
-          }
-        }
-        if (!alreadyTracked && file_exists(pathIt->second.c_str())) {
-          bool hashOk = false;
-          const std::uint64_t h =
-              hash_file_contents(pathIt->second.c_str(), &hashOk);
-          if (hashOk) {
-            DependencyDigest d{};
-            d.path = pathIt->second;
-            d.hash = h;
-            dependencyDigests.push_back(d);
-          }
-        }
-      }
-    }
-  }
-
-  // External glTF payloads (.bin buffers, images) must force a recook
-  // even when no --graph is supplied: dependency correctness is an
-  // invariant of the cooker, the graph only persists the relationships.
-  // A parse failure here is not fatal — the cook path
-  // below reports it with its usual diagnostics.
+  // External glTF payloads (.bin buffers, images) must force a recook:
+  // dependency correctness is an invariant of the cooker, and the stamp's
+  // DEP_HASH lines are where the relationships persist. A parse failure
+  // here is not fatal — the cook path below reports it with its usual
+  // diagnostics.
   {
     const engine::content::AssetClassification input =
         engine::content::classify_asset_path(inputPath);
@@ -561,59 +505,6 @@ int main(int argc, char **argv) {
   }
   apply_scale_to_primitive(&primitiveData, importSettings.scaleFactor);
 
-  std::vector<DependencyDigest> autoDiscoveredDeps{};
-  if (hasGraphPath && (meshAssetId != 0ULL)) {
-    auto fwdIt = depGraph.dependencies.find(meshAssetId);
-    if (fwdIt != depGraph.dependencies.end()) {
-      for (const auto oldDep : fwdIt->second) {
-        auto revIt = depGraph.dependents.find(oldDep);
-        if (revIt != depGraph.dependents.end()) {
-          revIt->second.erase(meshAssetId);
-          if (revIt->second.empty()) {
-            depGraph.dependents.erase(revIt);
-          }
-        }
-      }
-      depGraph.dependencies.erase(fwdIt);
-    }
-
-    if (!extract_gltf_dependencies(data, inputPath, meshAssetId, &depGraph,
-                                   &autoDiscoveredDeps)) {
-      std::fprintf(stderr,
-                   "error: glTF dependencies would make the graph invalid\n");
-      cgltf_free(data);
-      return 15;
-    }
-
-      for (const auto &manualDep : dependencyDigests) {
-      const std::uint64_t depId = hash_path_to_asset_id(manualDep.path.c_str());
-      if (depId != 0ULL) {
-        engine::tools::register_asset_path(&depGraph, depId,
-                                           manualDep.path.c_str());
-        if (!engine::tools::add_dependency(&depGraph, meshAssetId, depId)) {
-          std::fprintf(stderr,
-                       "error: dependency would make the graph invalid: %s\n",
-                       manualDep.path.c_str());
-          cgltf_free(data);
-          return 15;
-        }
-      }
-    }
-  }
-
-  for (const auto &autoDep : autoDiscoveredDeps) {
-    bool alreadyPresent = false;
-    for (const auto &existing : dependencyDigests) {
-      if (existing.path == autoDep.path) {
-        alreadyPresent = true;
-        break;
-      }
-    }
-    if (!alreadyPresent) {
-      dependencyDigests.push_back(autoDep);
-    }
-  }
-
   // Sort all dependencies by path for deterministic output.
   sort_dependency_digests(dependencyDigests);
 
@@ -668,15 +559,6 @@ int main(int argc, char **argv) {
     cookedOutputs.emplace_back(thumbPath);
     if (file_exists(thumbChecksumPath)) {
       cookedOutputs.emplace_back(thumbChecksumPath);
-    }
-  }
-
-  if (hasGraphPath) {
-    if (!engine::tools::write_dependency_graph_json(&depGraph,
-                                                    graphPath.c_str())) {
-      std::fprintf(stderr, "error: failed to write dependency graph: %s\n",
-                   graphPath.c_str());
-      return 16;
     }
   }
 

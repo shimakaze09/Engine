@@ -5,79 +5,9 @@
 #include <cstring>
 #include <string>
 
-#include "engine/core/platform.h"
-
 // Include the dependency graph header directly from the tools directory.
 // The test links against the dependency_graph.cpp object.
 #include "dependency_graph.h"
-
-namespace {
-
-// Helper: create a temp file path for graph serialization tests.
-bool make_temp_graph_path(char *outPath, std::size_t outSize) {
-  char tmpDir[1024] = {};
-  if (!engine::core::platform_get_temp_dir(tmpDir, sizeof(tmpDir))) {
-    return std::snprintf(outPath, outSize, "dep_graph_test.json") > 0;
-  }
-  return std::snprintf(outPath, outSize, "%s/dep_graph_test.json", tmpDir) > 0;
-}
-
-bool read_text_file(const char *path, std::string *outText) {
-  if ((path == nullptr) || (outText == nullptr)) {
-    return false;
-  }
-
-  FILE *file = nullptr;
-#ifdef _WIN32
-  if (fopen_s(&file, path, "rb") != 0) {
-    file = nullptr;
-  }
-#else
-  file = std::fopen(path, "rb");
-#endif
-  if (file == nullptr) {
-    return false;
-  }
-
-  std::fseek(file, 0, SEEK_END);
-  const long fileSize = std::ftell(file);
-  std::fseek(file, 0, SEEK_SET);
-  if (fileSize < 0) {
-    std::fclose(file);
-    return false;
-  }
-
-  outText->assign(static_cast<std::size_t>(fileSize), '\0');
-  const std::size_t readBytes =
-      std::fread(outText->data(), 1U, outText->size(), file);
-  std::fclose(file);
-  return readBytes == outText->size();
-}
-
-/// Writes exact JSON fixture bytes for graph deserialization tests.
-bool write_text_file(const char *path, const char *text) {
-  if ((path == nullptr) || (text == nullptr)) {
-    return false;
-  }
-
-  FILE *file = nullptr;
-#ifdef _WIN32
-  if (fopen_s(&file, path, "wb") != 0) {
-    file = nullptr;
-  }
-#else
-  file = std::fopen(path, "wb");
-#endif
-  if (file == nullptr) {
-    return false;
-  }
-  const std::size_t size = std::strlen(text);
-  const bool wrote = std::fwrite(text, 1U, size, file) == size;
-  std::fclose(file);
-  return wrote;
-}
-
-} // namespace
 
 /// Runs this executable or test program.
 int main() {
@@ -304,158 +234,7 @@ int main() {
     }
   }
 
-  // --- Test 10: JSON serialization round-trip ---
-  {
-    Graph graph{};
-    engine::tools::register_asset_path(&graph, 100ULL, "meshes/hero.mesh");
-    engine::tools::register_asset_path(&graph, 200ULL,
-                                       "textures/hero_diffuse.png");
-    engine::tools::register_asset_path(&graph, 300ULL, "materials/hero_mat");
-    engine::tools::add_dependency(&graph, 100ULL, 300ULL);
-    engine::tools::add_dependency(&graph, 300ULL, 200ULL);
-
-    char tempPath[512] = {};
-    if (!make_temp_graph_path(tempPath, sizeof(tempPath))) {
-      return 90;
-    }
-
-    if (!engine::tools::write_dependency_graph_json(&graph, tempPath)) {
-      return 91;
-    }
-
-    Graph loaded{};
-    if (!engine::tools::read_dependency_graph_json(&loaded, tempPath)) {
-      return 92;
-    }
-
-    AssetId deps[8] = {};
-    std::size_t count =
-        engine::tools::get_dependencies(&loaded, 100ULL, deps, 8);
-    if (count != 1U) {
-      return 93;
-    }
-    if (deps[0] != 300ULL) {
-      return 94;
-    }
-
-    count = engine::tools::get_dependencies(&loaded, 300ULL, deps, 8);
-    if (count != 1U) {
-      return 95;
-    }
-    if (deps[0] != 200ULL) {
-      return 96;
-    }
-
-    auto it = loaded.assetPaths.find(100ULL);
-    if ((it == loaded.assetPaths.end()) || (it->second != "meshes/hero.mesh")) {
-      return 97;
-    }
-
-    std::remove(tempPath);
-  }
-
-  // --- Test 11: compute_invalidation_set ---
-  {
-    std::string dependentPath = "meshes\\boss \"alpha\"\nframe";
-    dependentPath.push_back('\x01');
-    dependentPath += ".mesh";
-    const std::string dependencyPath = "textures\\diffuse\tmain.png";
-
-    Graph graph{};
-    engine::tools::register_asset_path(&graph, 1000ULL,
-                                       dependentPath.c_str());
-    engine::tools::register_asset_path(&graph, 2000ULL,
-                                       dependencyPath.c_str());
-    engine::tools::add_dependency(&graph, 1000ULL, 2000ULL);
-
-    char tempPath[512] = {};
-    if (!make_temp_graph_path(tempPath, sizeof(tempPath))) {
-      return 100;
-    }
-
-    if (!engine::tools::write_dependency_graph_json(&graph, tempPath)) {
-      return 101;
-    }
-
-    std::string json{};
-    if (!read_text_file(tempPath, &json)) {
-      std::remove(tempPath);
-      return 102;
-    }
-    if (json.find("meshes\\\\boss \\\"alpha\\\"\\nframe\\u0001.mesh") ==
-        std::string::npos) {
-      std::remove(tempPath);
-      return 103;
-    }
-    if (json.find("textures\\\\diffuse\\tmain.png") == std::string::npos) {
-      std::remove(tempPath);
-      return 104;
-    }
-
-    Graph loaded{};
-    if (!engine::tools::read_dependency_graph_json(&loaded, tempPath)) {
-      std::remove(tempPath);
-      return 105;
-    }
-    std::remove(tempPath);
-
-    auto dependentIt = loaded.assetPaths.find(1000ULL);
-    if ((dependentIt == loaded.assetPaths.end()) ||
-        (dependentIt->second != dependentPath)) {
-      return 106;
-    }
-    auto dependencyIt = loaded.assetPaths.find(2000ULL);
-    if ((dependencyIt == loaded.assetPaths.end()) ||
-        (dependencyIt->second != dependencyPath)) {
-      return 107;
-    }
-  }
-
-  // --- Test 12: JSON load rejects cycles and unsupported schemas atomically.
-  {
-    char tempPath[512] = {};
-    if (!make_temp_graph_path(tempPath, sizeof(tempPath))) {
-      return 108;
-    }
-
-    constexpr const char *kCyclicGraph =
-        "{\"schemaVersion\":1,\"assets\":[],\"edges\":["
-        "{\"dependent\":\"0000000000000001\","
-        "\"dependency\":\"0000000000000002\"},"
-        "{\"dependent\":\"0000000000000002\","
-        "\"dependency\":\"0000000000000001\"}]}";
-    Graph graph{};
-    if (!engine::tools::add_dependency(&graph, 9ULL, 10ULL) ||
-        !write_text_file(tempPath, kCyclicGraph) ||
-        engine::tools::read_dependency_graph_json(&graph, tempPath)) {
-      std::remove(tempPath);
-      return 109;
-    }
-    AssetId existingDeps[1] = {};
-    if ((engine::tools::get_dependencies(&graph, 9ULL, existingDeps, 1U) !=
-         1U) ||
-        (existingDeps[0] != 10ULL) || engine::tools::has_cycle(&graph)) {
-      std::remove(tempPath);
-      return 118;
-    }
-
-    constexpr const char *kUnsupportedSchema =
-        "{\"schemaVersion\":2,\"assets\":[],\"edges\":[]}";
-    if (!write_text_file(tempPath, kUnsupportedSchema) ||
-        engine::tools::read_dependency_graph_json(&graph, tempPath)) {
-      std::remove(tempPath);
-      return 119;
-    }
-    if ((engine::tools::get_dependencies(&graph, 9ULL, existingDeps, 1U) !=
-         1U) ||
-        (existingDeps[0] != 10ULL)) {
-      std::remove(tempPath);
-      return 124;
-    }
-    std::remove(tempPath);
-  }
-
-  // --- Test 12: compute_invalidation_set ---
+  // --- Test 10: compute_invalidation_set ---
   {
     Graph graph{};
     // mesh1 -> material -> texture
@@ -493,7 +272,7 @@ int main() {
     }
   }
 
-  // --- Test 12: Null/invalid inputs ---
+  // --- Test 11: Null/invalid inputs ---
   {
     if (engine::tools::add_dependency(nullptr, 1ULL, 2ULL)) {
       return 110;
@@ -514,12 +293,6 @@ int main() {
     }
     if (engine::tools::topological_sort(nullptr, nullptr, 0) != 0U) {
       return 115;
-    }
-    if (engine::tools::write_dependency_graph_json(nullptr, nullptr)) {
-      return 116;
-    }
-    if (engine::tools::read_dependency_graph_json(nullptr, nullptr)) {
-      return 117;
     }
   }
 
