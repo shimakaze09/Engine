@@ -66,6 +66,7 @@
 #include "editor_panels_material.h"
 #include "editor_panels_rendering.h"
 #include "editor_panels_viewport.h"
+#include "editor_preferences.h"
 #include "editor_scene_document.h"
 #include "editor_session.h"
 
@@ -158,6 +159,7 @@ void draw_editor_panels(float frameMs, float utilizationPct) noexcept {
   draw_console_panel();
   draw_material_editor_panel();
   draw_rendering_panel();
+  draw_editor_preferences_panel();
 }
 
 /// Applies the editor's visual theme: neutral dark palette, one restrained
@@ -255,6 +257,7 @@ bool initialize_editor(void *sdlWindow) noexcept {
   // Before any frame: takes layout persistence off ImGui's truncating
   // ini writer and restores the stored layout, so the docking flag above
   // is already set when the dock settings are parsed.
+  register_editor_preferences();
   static_cast<void>(editor_layout_initialize());
 
   static_cast<void>(core::cvar_register_float(
@@ -270,13 +273,11 @@ bool initialize_editor(void *sdlWindow) noexcept {
                         core::cvar_get_float("editor.ui_scale", 1.0F);
 
   // Proper UI font (the 13px bitmap default reads as a debug tool), with a
-  // CJK face merged behind it; see editor_fonts.h.
-  static_cast<void>(core::cvar_register_string(
-      "editor.cjk_font", "",
-      "Font file for Chinese and Japanese text in the editor; empty uses "
-      "the system's own"));
-  static_cast<void>(load_editor_fonts(
-      io.Fonts, 17.0F * uiScale, core::cvar_get_string("editor.cjk_font", "")));
+  // CJK face merged behind it; see editor_fonts.h. The preference that
+  // names it was restored with the layout above.
+  const EditorFontResult fonts = load_editor_fonts(
+      io.Fonts, 17.0F * uiScale, core::cvar_get_string("editor.cjk_font", ""));
+  set_loaded_cjk_font(fonts.cjkPath);
 
   apply_editor_style();
   ImGui::GetStyle().ScaleAllSizes(uiScale);

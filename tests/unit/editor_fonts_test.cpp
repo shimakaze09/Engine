@@ -1,16 +1,16 @@
 // The editor's font chain (#610): Roboto for Latin text with a CJK face
 // merged behind it, so a Chinese or Japanese entity name, folder or field
-// renders instead of drawing as missing-glyph boxes. Before, the editor
-// loaded Roboto alone and every CJK character fell through to the box.
-//
-// No CJK face ships with the engine; the chain uses the system's. On a
-// machine with none of the candidates the glyph checks cannot run and are
-// reported as skipped rather than passed.
+// renders instead of drawing as missing-glyph boxes. The face is the
+// author's chosen file, else the Noto Sans SC that ships in assets/fonts,
+// else a system font; so the glyph checks run on every machine, fonts or
+// not. The chosen file persists as a preference in the layout file.
 
 #include "editor_fonts.h"
+#include "editor_preferences.h"
 
 #include "../test_harness.h"
 
+#include "engine/core/cvar.h"
 #include "engine/core/logging.h"
 
 #include <imgui.h>
@@ -79,7 +79,7 @@ int main() {
   t.check(engine::core::log_register_sink(&count_override_warnings, nullptr),
           "register the warning sink");
 
-  // --- The system chain, no override.
+  // --- No override: the bundled face, on any machine.
   bool glyphsResolve = false;
   const EditorFontResult system =
       with_fonts("", [&glyphsResolve](ImFont *font) {
@@ -90,30 +90,15 @@ int main() {
                         font->IsGlyphInFont(0x30A2);
       });
   t.check(system.latin, "Roboto loads for Latin text");
-  // Whether this machine has a candidate is decided apart from the chain,
-  // so a chain that stopped merging fails here instead of looking like a
-  // machine without fonts.
-  bool candidatePresent = false;
-  std::size_t candidateCount = 0U;
-  const char *const *candidates =
-      engine::editor::editor_cjk_font_candidates(&candidateCount);
-  for (std::size_t i = 0U; i < candidateCount; ++i) {
-    std::error_code ec{};
-    candidatePresent =
-        candidatePresent || std::filesystem::exists(candidates[i], ec);
-  }
-  if (candidatePresent) {
-    t.check(system.cjk, "a system CJK font present is merged");
-    t.check(glyphsResolve,
-            "Chinese and Japanese characters resolve to glyphs in the editor "
-            "font");
-  } else {
-    t.skip("no system CJK font on this machine; set editor.cjk_font to "
-           "check the glyphs");
-  }
+  t.check(system.cjk && (std::strcmp(system.cjkPath,
+                                     engine::editor::kBundledCjkFontPath) == 0),
+          "the bundled CJK face is merged when no font is chosen");
+  t.check(glyphsResolve,
+          "Chinese and Japanese characters resolve to glyphs in the editor "
+          "font");
 
   // --- An override that cannot be read is reported and does not stop the
-  // system chain.
+  // chain.
   g_overrideWarnings = 0;
   const EditorFontResult missing =
       with_fonts("no/such/font.ttc", [](ImFont *) {});
@@ -121,7 +106,7 @@ int main() {
           "an unreadable editor.cjk_font is reported once");
   t.check((missing.cjk == system.cjk) &&
               (std::strcmp(missing.cjkPath, system.cjkPath) == 0),
-          "and the system chain still runs");
+          "and the bundled face still loads");
 
   // --- An override too small to be a font is refused before ImGui sees
   // it: ImGui asserts on one, which would abort an assert-enabled editor.
@@ -153,7 +138,35 @@ int main() {
       with_fonts("assets/fonts/Roboto-Medium.ttf", [](ImFont *) {});
   t.check(chosen.cjk && (std::strcmp(chosen.cjkPath,
                                      "assets/fonts/Roboto-Medium.ttf") == 0),
-          "editor.cjk_font is tried before the system fonts");
+          "editor.cjk_font is tried before the bundled and system fonts");
+
+  // --- The chosen file persists with the layout: the preferences section
+  // written into the layout file carries it, and loading that section
+  // restores it before the fonts are built.
+  {
+    ImGuiContext *context = ImGui::CreateContext();
+    t.check(engine::core::initialize_cvars(), "initialize cvars");
+    engine::editor::register_editor_preferences();
+    t.check(
+        engine::core::cvar_set_string("editor.cjk_font", "fonts/custom.ttf"),
+        "choose a font");
+    char section[256] = {};
+    const std::size_t written =
+        engine::editor::editor_preferences_section(section, sizeof(section));
+    t.check(
+        (written > 0U) &&
+            (std::strstr(section, "[EnginePreferences][Editor]") != nullptr) &&
+            (std::strstr(section, "CjkFont=fonts/custom.ttf") != nullptr),
+        "the layout file carries the chosen font");
+    t.check(engine::core::cvar_set_string("editor.cjk_font", ""),
+            "forget the choice");
+    ImGui::LoadIniSettingsFromMemory(section, written);
+    t.check(std::strcmp(engine::core::cvar_get_string("editor.cjk_font", ""),
+                        "fonts/custom.ttf") == 0,
+            "loading the layout restores it");
+    engine::core::shutdown_cvars();
+    ImGui::DestroyContext(context);
+  }
 
   engine::core::shutdown_logging();
   return t.finish("editor_fonts");

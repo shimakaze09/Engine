@@ -234,6 +234,11 @@ void draw_main_menu_bar() noexcept {
     if (ImGui::MenuItem("Rendering", nullptr, showRendering)) {
       core::cvar_set_bool("editor.show_rendering", !showRendering);
     }
+    const bool showPreferences =
+        core::cvar_get_bool("editor.show_preferences", false);
+    if (ImGui::MenuItem("Editor Settings", nullptr, showPreferences)) {
+      core::cvar_set_bool("editor.show_preferences", !showPreferences);
+    }
     ImGui::EndMenu();
   }
 
