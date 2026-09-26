@@ -1,21 +1,26 @@
 // Declares the shadow-caster draw the directional, spot and point shadow
 // passes share: choosing the program each caster needs (opaque, skinned,
 // alpha-masked, skinned and masked), uploading its transforms and mask, and
-// drawing it.
+// drawing it; and the directional cache key, which hashes what that draw
+// reads so a cached map is reused only while it would redraw the same.
 
 #pragma once
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 
 #include "engine/math/mat4.h"
 #include "engine/math/vec3.h"
+#include "engine/renderer/command_buffer.h"
 #include "engine/renderer/render_device.h"
+#include "engine/renderer/shadow_map.h"
 
 namespace engine::renderer {
 
 struct BackendState;
-struct DrawCommand;
 struct GpuMesh;
+struct GpuMeshRegistry;
 
 /// The shadow target one caster draws into.
 struct ShadowCasterPass final {
@@ -43,5 +48,20 @@ std::uint32_t draw_shadow_caster(BackendState &backend, const RenderDevice *dev,
                                  const GpuMesh &mesh,
                                  const DrawCommand &command,
                                  const ShadowCasterPass &pass) noexcept;
+
+/// Key of the directional cascades one frame would draw. Two frames with
+/// equal keys draw identical maps, so the pass reuses the cached ones: the
+/// key covers the light, the splits and cascade matrices, and per caster
+/// its identity and transform and what draw_shadow_caster resolves for it
+/// now -- the geometry its mesh handle finds in `registry` and, for a
+/// masked caster, the mask texture, cutoff and UV transform. A caster
+/// whose geometry or mask finishes loading therefore redraws the maps
+/// rather than leaving them as drawn without it.
+std::uint64_t directional_shadow_cache_key(
+    CommandBufferView commandBufferView, std::size_t opaqueCount,
+    const DirectionalLightData &light, const CascadeSplits &splits,
+    const std::array<math::Mat4, kShadowCascadeCount> &matrices,
+    CommandBufferView auxiliaryView, std::size_t auxiliaryOpaqueCount,
+    const GpuMeshRegistry *registry) noexcept;
 
 } // namespace engine::renderer
