@@ -1,7 +1,8 @@
 // Declares the runtime animation system: animation controller assets
-// (skeleton, clips, and a minimal state machine parsed from JSON), the
-// fixed-slot controller registry, per-step evaluation with crossfade and
-// clip-timeline events, and the parameter API gameplay drives.
+// (skeleton, clips, and a minimal state machine parsed from JSON, each
+// stored at the size its asset declares), the fixed-slot controller
+// registry, per-step evaluation with crossfade and clip-timeline events,
+// and the parameter API gameplay drives.
 
 #pragma once
 
@@ -9,17 +10,24 @@
 #include <cstdint>
 
 #include "engine/core/entity.h"
+#include "engine/core/nothrow_buffer.h"
 #include "engine/runtime/animation.h"
 
 namespace engine::runtime {
 
 class World;
 
-inline constexpr std::size_t kMaxAnimControllers = 16U;
-inline constexpr std::size_t kMaxAnimClips = 8U;
-inline constexpr std::size_t kMaxAnimStates = 8U;
-inline constexpr std::size_t kMaxAnimTransitions = 16U;
-inline constexpr std::size_t kMaxAnimEvents = 16U;
+/// Distinct controllers loaded at once; a slot costs a pointer until a
+/// controller loads into it.
+inline constexpr std::size_t kMaxAnimControllers = 256U;
+/// Per-controller ceilings. A controller's tables are allocated at load to
+/// the counts its asset declares, so these bound malformed or runaway
+/// assets rather than size storage; a controller past one is refused whole,
+/// with the file and the ceiling logged.
+inline constexpr std::size_t kMaxAnimClips = 256U;
+inline constexpr std::size_t kMaxAnimStates = 256U;
+inline constexpr std::size_t kMaxAnimTransitions = 1024U;
+inline constexpr std::size_t kMaxAnimEvents = 1024U;
 inline constexpr std::size_t kMaxFiredAnimEvents = 32U;
 
 /// Comparison a transition applies to its parameter value.
@@ -61,21 +69,22 @@ struct AnimEvent final {
 
 /// One loaded animation controller: the skeleton, its clips, and the
 /// state machine description shared by every entity referencing the same
-/// controller JSON.
+/// controller JSON. Each table holds exactly its count entries, allocated
+/// when the controller loads; evaluation only reads them.
 struct AnimControllerData final {
   bool active = false;
   char sourcePath[128] = {};
   AnimSkeleton skeleton{};
   std::uint32_t clipCount = 0U;
-  AnimationClip clips[kMaxAnimClips]{};
-  std::uint32_t clipNameHashes[kMaxAnimClips] = {};
+  core::NothrowBuffer<AnimationClip> clips{};
+  core::NothrowBuffer<std::uint32_t> clipNameHashes{};
   std::uint32_t initialState = 0U;
   std::uint32_t stateCount = 0U;
-  AnimState states[kMaxAnimStates]{};
+  core::NothrowBuffer<AnimState> states{};
   std::uint32_t transitionCount = 0U;
-  AnimTransition transitions[kMaxAnimTransitions]{};
+  core::NothrowBuffer<AnimTransition> transitions{};
   std::uint32_t eventCount = 0U;
-  AnimEvent events[kMaxAnimEvents]{};
+  core::NothrowBuffer<AnimEvent> events{};
 };
 
 /// One event fired during the last update_animations call.
