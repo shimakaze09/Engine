@@ -6,13 +6,14 @@
 #include "engine/core/job_system.h"
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <thread>
 
 namespace {
 
 constexpr std::uint32_t kJobsPerGraph = 64U;
-constexpr std::uint32_t kMaxAttempts = 20U;
 
 /// Thread-index observation captured by one job around a production wait().
 struct WaitObservation final {
@@ -22,6 +23,8 @@ struct WaitObservation final {
 };
 
 WaitObservation g_observations[kJobsPerGraph];
+/// Jobs of the current graph a worker thread has run.
+std::atomic<std::uint32_t> g_workerRuns{0U};
 
 /// Job body: records current_thread_index before and after calling the
 /// production wait() entry point (with an invalid handle so the call returns
@@ -32,13 +35,23 @@ void observing_job(void *data) noexcept {
   engine::core::wait(engine::core::JobHandle{});
   slot->after = engine::core::current_thread_index();
   slot->executed = true;
-
-  // Small busy spin so jobs overlap and workers pick up a share of the graph.
-  volatile std::uint32_t sink = 0U;
-  for (std::uint32_t i = 0U; i < 20000U; ++i) {
-    sink = sink + i;
+  if (slot->before != 0U) {
+    g_workerRuns.fetch_add(1U, std::memory_order_release);
+    return;
   }
-  static_cast<void>(sink);
+
+  // The main thread helps run the graph once wait_all dispatches it, and
+  // could run every job before a worker is scheduled. A job it takes holds
+  // it here until a worker has run one, so the graph is shared however the
+  // OS schedules the workers. The deadline only bounds a broken job system.
+  // wall-clock: harness-timeout
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(30);
+  while ((g_workerRuns.load(std::memory_order_acquire) == 0U) &&
+         // wall-clock: harness-timeout
+         (std::chrono::steady_clock::now() < deadline)) {
+    std::this_thread::yield();
+  }
 }
 
 /// Runs one graph of observing jobs; returns 0 on contract failure paths,
@@ -47,6 +60,7 @@ int run_observed_graph() noexcept {
   for (auto &slot : g_observations) {
     slot = WaitObservation{};
   }
+  g_workerRuns.store(0U, std::memory_order_relaxed);
 
   if (!engine::core::begin_frame_graph()) {
     return -1;
@@ -101,21 +115,13 @@ int main() {
     return 2;
   }
 
-  bool workerCovered = false;
-  for (std::uint32_t attempt = 0U; attempt < kMaxAttempts; ++attempt) {
-    const int result = run_observed_graph();
-    if (result < 0) {
-      std::fprintf(stderr, "graph run failed (%d)\n", result);
-      engine::core::shutdown_job_system();
-      return 3;
-    }
-    if (result > 0) {
-      workerCovered = true;
-      break;
-    }
+  const int result = run_observed_graph();
+  if (result < 0) {
+    std::fprintf(stderr, "graph run failed (%d)\n", result);
+    engine::core::shutdown_job_system();
+    return 3;
   }
-
-  if (!workerCovered) {
+  if (result == 0) {
     std::fprintf(stderr, "no job ever executed on a worker thread\n");
     engine::core::shutdown_job_system();
     return 4;
