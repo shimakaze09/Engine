@@ -157,6 +157,14 @@ void check_script_reload() noexcept;
 // legacy on_start/on_update/on_end names remain fallbacks. `self` is an opaque,
 // generation-checked handle. Multiple entities may share the same script file.
 //
+// A changed module file reloads under the same transaction as the main
+// script: its chunk's top-level bindings and effects commit only once it
+// has run cleanly and returned a module table, so a broken save leaves
+// nothing behind and the old module keeps serving. The live instances'
+// on_save_state hooks run only after that, when the swap is certain, and
+// on_reload receives what they returned. A broken save is tried once and
+// again only when the file changes.
+//
 // on_tick cadence: on_tick is a per-rendered-frame callback, not a
 // per-fixed-step one. It fires exactly once per frame that advanced
 // simulation, with dt equal to the total time simulated that frame — the sum
