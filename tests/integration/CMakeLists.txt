@@ -18,6 +18,15 @@ engine_add_test_executable(engine_integration_pipeline_camera_prep
     gpu;integration
 )
 
+engine_add_test_executable(engine_integration_pipeline_paused_edit
+    SOURCES
+    pipeline_paused_edit_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    LABELS
+    integration
+)
+
 # Reads presented pixels back through the bgfx backend's private readback
 # hook, so it reaches into renderer/src the way the renderer unit suites do.
 engine_add_test_executable(engine_integration_deferred_tile_wrap_gpu

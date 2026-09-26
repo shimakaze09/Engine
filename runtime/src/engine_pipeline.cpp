@@ -690,7 +690,6 @@ struct EnginePipeline::Impl final {
   std::array<renderer::SceneCaptureRequest, renderer::kMaxSceneCaptures>
       frameCaptureRequests{};
   std::size_t frameCaptureRequestCount = 0U;
-  bool frameCollectionValid = false;
   // Distinguishes fatal loop exits from graceful stops for engine::run.
   bool fatalError = false;
   LoopPlayState previousPlayState = LoopPlayState::Playing;
@@ -703,7 +702,6 @@ struct EnginePipeline::Impl final {
   bool isPaused = false;
   bool singleStepping = false;
   bool runPhysics = false;
-  bool runFrameGraph = false;
   renderer::DynamicResolutionState dynamicResolution{};
   // Per-frame tuning cvars read through handles so the frame stages never
   // scan the cvar table by name in steady state.
@@ -1004,7 +1002,11 @@ bool EnginePipeline::Impl::execute_frame() noexcept {
   RUN_STAGE(Audio, stage_audio());
   RUN_STAGE(Animation, stage_animation());
 
-  if (runFrameGraph) {
+  // Every frame prepares what it presents from the current World: a paused
+  // or stopped frame decides no step, so its simulation graph is empty,
+  // but transforms, cameras and render prep still pick up the edits made
+  // since the last frame.
+  {
     core::set_crash_stage(kStageSimulationGraph);
     bool simulationOk = false;
     {
@@ -1033,7 +1035,8 @@ bool EnginePipeline::Impl::execute_frame() noexcept {
 
   RUN_STAGE(MeasureFrame, stage_measure_frame());
   RUN_STAGE(Render, stage_render());
-  if (runFrameGraph) {
+  // A pending scene change waits out a pause, as the simulation does.
+  if (!isPaused || singleStepping) {
     RUN_STAGE(SceneCommit, stage_scene_commit());
   }
   RUN_STAGE(Diagnostics, stage_diagnostics());
@@ -1262,7 +1265,6 @@ void EnginePipeline::Impl::stage_play_transitions() noexcept {
   isPlaying = (playState == LoopPlayState::Playing);
   isPaused = (playState == LoopPlayState::Paused);
   runPhysics = isPlaying;
-  runFrameGraph = !isPaused;
 
   // A consumed editor single-step promotes this paused frame to a playing
   // frame; stage_timing then simulates exactly one fixed step.
@@ -1272,7 +1274,6 @@ void EnginePipeline::Impl::stage_play_transitions() noexcept {
   if (singleStepping) {
     isPlaying = true;
     runPhysics = true;
-    runFrameGraph = true;
   }
 
   if (isPlaying && enteredPlay && !singleStepping) {
@@ -1822,7 +1823,9 @@ void EnginePipeline::Impl::evaluate_cameras_for_step(
 void EnginePipeline::Impl::stage_camera() noexcept {
   world->begin_transform_phase();
 
-  if (!isPlaying) {
+  // Stopped, the editor owns the view. Paused, the game camera still
+  // follows edits, evaluated with no time passing below.
+  if (!isPlaying && !isPaused) {
     return;
   }
 
@@ -1852,10 +1855,11 @@ void EnginePipeline::Impl::stage_camera() noexcept {
   // would collapse the pair onto one pose and hold the camera still for a
   // frame while the world kept moving under it. Without a valid pair
   // there is nothing to carry, so that frame still evaluates, with no
-  // time passing.
+  // time passing. A paused frame evaluates the same way: nothing moves
+  // under it, and an edit to a camera shows at once.
   if (clock.stepsThisFrame > 0U) {
     evaluate_cameras_for_step(static_cast<float>(core::kFixedDeltaSeconds));
-  } else if (!cameraSampleValid) {
+  } else if (!cameraSampleValid || !isPlaying) {
     evaluate_cameras_for_step(0.0F);
   }
   cameraSampleEpoch = contentEpoch;
@@ -1993,7 +1997,6 @@ void EnginePipeline::Impl::collect_frame_scene_data() noexcept {
   frameSceneLights = collect_scene_lights(*world);
   frameCaptureRequestCount = collect_scene_captures(
       *world, frameCaptureRequests.data(), renderer::kMaxSceneCaptures);
-  frameCollectionValid = true;
 }
 
 /// Derives what render prep must keep beyond the camera frustum from the
@@ -2065,31 +2068,23 @@ void EnginePipeline::Impl::stage_post_frame() noexcept {
 // ---------------------------------------------------------------------------
 
 void EnginePipeline::Impl::stage_measure_frame() noexcept {
-  if (runFrameGraph) {
-    const auto frameGraphEnd = Clock::now();
-    frameMs =
-        std::chrono::duration<double, std::milli>(frameGraphEnd - frameStart)
-            .count();
+  const auto frameGraphEnd = Clock::now();
+  frameMs =
+      std::chrono::duration<double, std::milli>(frameGraphEnd - frameStart)
+          .count();
 
-    jobStats = core::consume_job_stats();
-    const auto frameNs = static_cast<double>(
-        std::chrono::duration_cast<std::chrono::nanoseconds>(frameGraphEnd -
-                                                             frameStart)
-            .count());
-    const double totalCapacityNs =
-        frameNs * static_cast<double>(frameThreadCount);
-    utilizationPct =
-        (totalCapacityNs > 0.0)
-            ? ((100.0 * static_cast<double>(jobStats.busyNanoseconds)) /
-               totalCapacityNs)
-            : 0.0;
-  } else {
-    frameMs =
-        std::chrono::duration<double, std::milli>(Clock::now() - frameStart)
-            .count();
-    jobStats = core::consume_job_stats();
-    utilizationPct = 0.0;
-  }
+  jobStats = core::consume_job_stats();
+  const auto frameNs =
+      static_cast<double>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                              frameGraphEnd - frameStart)
+                              .count());
+  const double totalCapacityNs =
+      frameNs * static_cast<double>(frameThreadCount);
+  utilizationPct =
+      (totalCapacityNs > 0.0)
+          ? ((100.0 * static_cast<double>(jobStats.busyNanoseconds)) /
+             totalCapacityNs)
+          : 0.0;
 }
 
 // ---------------------------------------------------------------------------
@@ -2140,19 +2135,12 @@ void EnginePipeline::Impl::stage_render() noexcept {
     bridge->new_frame();
   }
 
-  // A frame without the frame graph (nothing ran render prep) has had no
-  // flush since the last submission either, so collecting here keeps the
-  // single-epoch rule.
-  if (!frameCollectionValid) {
-    collect_frame_scene_data();
-  }
   renderer::set_scene_capture_requests(frameCaptureRequests.data(),
                                        frameCaptureRequestCount);
 
   renderer::flush_renderer(commandBuffer->view(), meshRegistry.get(),
                            static_cast<float>(clock.simulationSeconds),
                            frameSceneLights, auxiliaryCommandBuffer->view());
-  frameCollectionValid = false;
 
   if ((bridge != nullptr) && (bridge->render != nullptr)) {
     bridge->render(static_cast<float>(frameMs),
