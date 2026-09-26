@@ -144,6 +144,17 @@ jobs:
             env VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json \
             ctest --test-dir build --parallel 2 --output-on-failure --timeout 400 --label-regex gpu
 
+      # ---- The frame the windowed coin_run play ended on, as the player
+      # saw it: the test asserts only that it is a rendered picture, so a
+      # human can look at what it shows. Kept on failure too.
+      - name: Upload the slice's final frame
+        if: always() && matrix.os == 'ubuntu-24.04' && matrix.config == 'Release'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: coin-run-final-frame
+          path: build/coin_run_final_frame.tga
+          if-no-files-found: warn
+
       # ---- The bundled scene loads through the production loader with
       # every reference resolving; a dangling one fails here, not for an
       # author.
