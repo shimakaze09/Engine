@@ -56,4 +56,12 @@ void draw_scene_capture_preview(
 /// hints -- a new registry row appears here automatically.
 void draw_add_component_menu(runtime::Entity entity, bool editable) noexcept;
 
+/// Writes the component types the Add Component menu offers for `entity`
+/// into `out`, in registry order, and returns how many: every registry
+/// type the entity does not carry, less those whose Inspector metadata
+/// marks them not offered.
+std::size_t add_component_menu_candidates(runtime::Entity entity,
+                                          ComponentEditType *out,
+                                          std::size_t capacity) noexcept;
+
 } // namespace engine::editor

@@ -7,6 +7,7 @@
 // REFLECT_TYPE registration in this series).
 
 #include "editor_component_registry.h"
+#include "editor_panels_inspector_custom.h"
 #include "editor_session.h"
 
 #include "engine/math/vec3.h"
@@ -199,6 +200,50 @@ int check_camera_component_capture_apply_round_trip() noexcept {
 
 } // namespace
 
+/// EXPECTATION (#574): the Add Component menu does not offer a
+/// reflection probe, which no pass consumes, while it offers every other
+/// component the entity lacks and nothing it already carries. On base the
+/// menu offered every registry row.
+int check_add_menu_offers_only_consumed_components() noexcept {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 1;
+  }
+  SessionWorldScope scope(world.get());
+  const Entity entity = world->create_scene_object();
+  engine::runtime::PointLightComponent pointLight{};
+  if ((entity == engine::runtime::kInvalidEntity) ||
+      !world->add_point_light_component(entity, pointLight)) {
+    return 2;
+  }
+  ComponentEditType offered[engine::editor::kComponentEditTypeCount] = {};
+  const std::size_t count = engine::editor::add_component_menu_candidates(
+      entity, offered, engine::editor::kComponentEditTypeCount);
+  bool probe = false;
+  bool point = false;
+  bool spot = false;
+  for (std::size_t i = 0U; i < count; ++i) {
+    probe = probe || (offered[i] == ComponentEditType::ReflectionProbe);
+    point = point || (offered[i] == ComponentEditType::PointLight);
+    spot = spot || (offered[i] == ComponentEditType::SpotLight);
+  }
+  if (probe) {
+    return 3; // a component that changes nothing is offered
+  }
+  if (point) {
+    return 4; // a component the entity carries is offered again
+  }
+  if (!spot) {
+    return 5; // an ordinary missing component is not offered
+  }
+  // Transform is always present on a scene object, the point light is
+  // carried, and the probe is withheld: every other row is offered.
+  if (count != engine::editor::kComponentEditTypeCount - 3U) {
+    return 6;
+  }
+  return 0;
+}
+
 int main() {
   struct Case {
     const char *name;
@@ -212,6 +257,8 @@ int main() {
        check_light_component_capture_apply_round_trip},
       {"camera_component_capture_apply_round_trip",
        check_camera_component_capture_apply_round_trip},
+      {"add_menu_offers_only_consumed_components",
+       check_add_menu_offers_only_consumed_components},
   };
   for (const Case &c : cases) {
     const int result = c.fn();
