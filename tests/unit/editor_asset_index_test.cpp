@@ -450,7 +450,8 @@ int check_scene_open_routes_through_unsaved_gate() {
 
 /// EXPECTATION: execute_asset_open for a Mesh-kind entry dispatches
 /// through the real execute_asset_spawn production entry point (not a
-/// copy), creating a mesh entity and updating the selection.
+/// copy), creating a mesh entity, updating the selection, and recording
+/// the mesh in the engine's one asset catalog under its virtual path.
 int check_mesh_open_spawns_through_production_path() {
   constexpr const char *kMountPrefix = "asset_index_test_mount";
 
@@ -500,6 +501,16 @@ int check_mesh_open_spawns_through_production_path() {
   }
   if (std::strcmp(editor_session().selectedAssetPath, entry.osPath) != 0) {
     return finish(6);
+  }
+  // The open went through the one catalog the engine owns: the mesh is
+  // recorded there under the entry's virtual path, where a picker, a
+  // material load and a script's load_asset_async will find it.
+  const engine::content::AssetMetadata *record =
+      engine::content::find_asset_metadata_by_path(service.catalog,
+                                                   entry.virtualPath);
+  if ((record == nullptr) ||
+      (record->typeTag != engine::content::AssetTypeTag::Mesh)) {
+    return finish(7);
   }
   return finish(0);
 }
