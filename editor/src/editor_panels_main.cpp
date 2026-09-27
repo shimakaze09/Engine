@@ -309,12 +309,9 @@ void draw_main_menu_bar() noexcept {
   }
   draw_about_popup();
 
-  // Non-spamming status indicator: Fatal/high-severity errors
-  // stay visible in the menu bar even while the Console panel is closed.
-  draw_console_status_indicator();
-
-  // Document status: name plus a dirty marker, right-aligned
-  // in the menu bar; scene_document_update_window_title mirrors the same
+  // Right-aligned in the menu bar: unseen Console warnings and errors
+  // (nothing while all is well), then the document status: name plus a
+  // dirty marker; scene_document_update_window_title mirrors the same
   // state into the OS title bar once per frame. A failed save stands
   // beside it until the next save succeeds: File > Save As opens no
   // prompt, so this is where its refusal is seen.
@@ -322,15 +319,24 @@ void draw_main_menu_bar() noexcept {
   std::snprintf(status, sizeof(status), "%s%s", scene_document_display_name(),
                 scene_document_is_dirty() ? " *" : "");
   const char *saveError = scene_document_last_error();
-  const float statusWidth = ImGui::CalcTextSize(status).x;
-  float errorWidth = 0.0F;
-  if (saveError[0] != '\0') {
-    errorWidth = ImGui::CalcTextSize(saveError).x + 24.0F;
+  // Every gap and margin comes from the style, so the group stays inside
+  // the bar at any UI scale.
+  const ImGuiStyle &style = ImGui::GetStyle();
+  const float gap = style.ItemSpacing.x * 2.0F;
+  const float consoleWidth = console_status_indicator_width();
+  const float errorWidth =
+      (saveError[0] != '\0') ? ImGui::CalcTextSize(saveError).x : 0.0F;
+  float groupWidth = ImGui::CalcTextSize(status).x;
+  groupWidth += (consoleWidth > 0.0F) ? (consoleWidth + gap) : 0.0F;
+  groupWidth += (errorWidth > 0.0F) ? (errorWidth + gap) : 0.0F;
+  ImGui::SameLine(ImGui::GetWindowWidth() - groupWidth - style.WindowPadding.x);
+  if (consoleWidth > 0.0F) {
+    draw_console_status_indicator();
+    ImGui::SameLine(0.0F, gap);
   }
-  ImGui::SameLine(ImGui::GetWindowWidth() - statusWidth - errorWidth - 16.0F);
   if (saveError[0] != '\0') {
     ImGui::TextColored(ImVec4(0.9F, 0.35F, 0.35F, 1.0F), "%s", saveError);
-    ImGui::SameLine();
+    ImGui::SameLine(0.0F, gap);
   }
   ImGui::TextUnformatted(status);
 

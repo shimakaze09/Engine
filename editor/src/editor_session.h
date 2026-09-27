@@ -92,6 +92,9 @@ struct ConsolePanelState final {
   bool paused = false;
   bool collapseView = true;
   std::size_t pausedEntryCount = 0U;
+  /// Set by the menu-bar status: the next frame shows the Console and
+  /// brings it to the front.
+  bool focusRequested = false;
 };
 
 /// Inspector panel view state: the Add Component search text.

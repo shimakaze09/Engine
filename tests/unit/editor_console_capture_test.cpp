@@ -191,6 +191,29 @@ void check_default_filter_hides_trace() noexcept {
         "ticking Trace shows the captured Trace entry");
 }
 
+/// EXPECTATION: the menu-bar status says nothing while no warning or
+/// error is unseen, names each nonzero count with its plural, and refuses
+/// rather than truncates a buffer too small for it.
+void check_console_status_text() noexcept {
+  char status[64] = "stale";
+  check(!format_console_status(0U, 0U, status, sizeof(status)) &&
+            (status[0] == '\0'),
+        "nothing unseen shows nothing");
+  check(format_console_status(1U, 0U, status, sizeof(status)) &&
+            (std::strcmp(status, "1 error") == 0),
+        "one error");
+  check(format_console_status(0U, 3U, status, sizeof(status)) &&
+            (std::strcmp(status, "3 warnings") == 0),
+        "warnings alone");
+  check(format_console_status(2U, 1U, status, sizeof(status)) &&
+            (std::strcmp(status, "2 errors, 1 warning") == 0),
+        "errors then warnings");
+  char tiny[8] = "stale";
+  check(!format_console_status(2U, 1U, tiny, sizeof(tiny)) &&
+            (tiny[0] == '\0'),
+        "a status that does not fit is refused, not truncated");
+}
+
 /// EXPECTATION: a diagnostic record carrying a path and a line (what
 /// binding_util's log_lua_error emits) yields ScriptLocation navigation
 /// metadata with that path and 1-based line; a plain log line with the
@@ -471,6 +494,7 @@ int main() {
   check_bounded_overflow();
   check_filtering();
   check_default_filter_hides_trace();
+  check_console_status_text();
   check_script_location_navigation();
   check_asset_path_navigation();
   check_production_diagnostics_navigate();

@@ -109,6 +109,13 @@ std::uint32_t console_capture_unseen_warning_count() noexcept;
 /// visible/focused).
 void console_capture_mark_seen() noexcept;
 
+/// Writes the menu-bar status for `errors` and `warnings` unseen entries
+/// ("1 error, 2 warnings", "3 warnings") into `out`; false with `out`
+/// empty when both are zero, so the bar shows nothing while all is well.
+/// A status that does not fit `capacity` is refused, `out` empty.
+bool format_console_status(std::uint32_t errors, std::uint32_t warnings,
+                           char *out, std::size_t capacity) noexcept;
+
 /// Filter/search state the Console panel edits and applies at draw time;
 /// kept separate from ConsoleEntry so filtering never mutates captured
 /// data. Every field defaults to showing everything except Trace: Trace

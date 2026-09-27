@@ -191,6 +191,10 @@ void draw_console_panel() noexcept {
     return;
   }
 
+  if (console.focusRequested) {
+    ImGui::SetNextWindowFocus();
+    console.focusRequested = false;
+  }
   if (!ImGui::Begin("Console")) {
     ImGui::End();
     return;
@@ -314,24 +318,36 @@ void draw_console_panel() noexcept {
   ImGui::End();
 }
 
+float console_status_indicator_width() noexcept {
+  char status[64] = {};
+  if (!format_console_status(console_capture_unseen_error_count(),
+                             console_capture_unseen_warning_count(), status,
+                             sizeof(status))) {
+    return 0.0F;
+  }
+  return ImGui::CalcTextSize(status).x;
+}
+
 void draw_console_status_indicator() noexcept {
   const std::uint32_t errors = console_capture_unseen_error_count();
-  const std::uint32_t warnings = console_capture_unseen_warning_count();
-  if ((errors == 0U) && (warnings == 0U)) {
-    ImGui::TextUnformatted("Console");
+  char status[64] = {};
+  if (!format_console_status(errors, console_capture_unseen_warning_count(),
+                             status, sizeof(status))) {
     return;
   }
-
-  char badge[64] = {};
-  if (errors > 0U) {
-    std::snprintf(badge, sizeof(badge), "Console (%u error%s%s)", errors,
-                 (errors == 1U) ? "" : "s",
-                 (warnings > 0U) ? ", warnings" : "");
-    ImGui::TextColored(level_color(core::LogLevel::Error), "%s", badge);
-  } else {
-    std::snprintf(badge, sizeof(badge), "Console (%u warning%s)", warnings,
-                 (warnings == 1U) ? "" : "s");
-    ImGui::TextColored(level_color(core::LogLevel::Warning), "%s", badge);
+  ImGui::PushStyleColor(ImGuiCol_Text,
+                        level_color((errors > 0U) ? core::LogLevel::Error
+                                                  : core::LogLevel::Warning));
+  const bool clicked =
+      ImGui::Selectable(status, false, ImGuiSelectableFlags_None,
+                        ImVec2(ImGui::CalcTextSize(status).x, 0.0F));
+  ImGui::PopStyleColor();
+  if (ImGui::IsItemHovered()) {
+    ImGui::SetTooltip("Open the Console");
+  }
+  if (clicked) {
+    core::cvar_set_bool("editor.show_console", true);
+    editor_session().console.focusRequested = true;
   }
 }
 
