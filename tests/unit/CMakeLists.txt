@@ -2251,3 +2251,11 @@ engine_add_test_executable(engine_unit_forward_draw_uniforms
     engine_core
     engine_math
 )
+
+engine_add_test_executable(engine_unit_platform_rider_ccd
+    SOURCES
+    platform_rider_ccd_test.cpp
+    PRIVATE_DEPS
+    engine_physics
+    engine_runtime
+)

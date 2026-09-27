@@ -39,7 +39,10 @@ struct CcdSweepResult {
 /// @param collider  The entity's collider.
 /// @param transform The entity's current transform.
 /// @param dt        The timestep in seconds.
-/// @return CCD sweep result with time-of-impact if a hit was found.
+/// @return CCD sweep result with time-of-impact if a hit was found. A hit
+///         is only one the step could tunnel through: travel into the
+///         contact, along its normal, past half the thinner body. Resting
+///         and grazing contacts are left to the discrete solver.
 CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
                                      Entity entity, const RigidBody &body,
                                      const Collider &collider,
