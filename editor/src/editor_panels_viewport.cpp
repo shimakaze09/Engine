@@ -7,6 +7,7 @@
 
 #include "editor_commands.h"
 #include "editor_grid.h"
+#include "editor_light_gizmos.h"
 #include "editor_scene_query.h"
 #include "editor_session.h"
 #include "editor_transform_util.h"
@@ -524,6 +525,9 @@ void draw_scene_viewport_panel() noexcept {
   }
   if (selectedEntity != runtime::kInvalidEntity) {
     draw_selected_collider_overlay(selectedEntity);
+    if (editor_session().world != nullptr) {
+      draw_light_gizmos(*editor_session().world, selectedEntity);
+    }
     if (regionSize.y > 0.0F) {
       draw_selected_camera_frustum_overlay(selectedEntity,
                                            regionSize.x / regionSize.y);

@@ -6,6 +6,7 @@
 #include <cstddef>
 
 #include "engine/math/quat.h"
+#include "engine/runtime/light_pose.h"
 #include "engine/runtime/world.h"
 
 namespace engine {
@@ -100,26 +101,21 @@ collect_scene_lights(const runtime::World &world) noexcept {
     }
     if (lc->type == runtime::LightType::Directional) {
       if (sceneLights.directionalLightCount < renderer::kMaxDirectionalLights) {
-        const runtime::Entity lightEntity = world.light_entity_at(li);
-        const runtime::WorldTransform *wt =
-            world.get_world_transform_read_ptr(lightEntity);
         auto &dl =
             sceneLights.directionalLights[sceneLights.directionalLightCount];
-        dl.direction = (wt != nullptr)
-                           ? math::rotate_vector(lc->direction, wt->rotation)
-                           : lc->direction;
+        dl.direction = runtime::light_world_pose(
+                           world, world.light_entity_at(li), lc->direction)
+                           .direction;
         dl.color = lc->color;
         dl.intensity = lc->intensity;
         ++sceneLights.directionalLightCount;
       }
     } else if (lc->type == runtime::LightType::Point) {
       if (sceneLights.pointLightCount < renderer::kMaxPointLights) {
-        const runtime::Entity ple = world.light_entity_at(li);
-        const runtime::WorldTransform *wt =
-            world.get_world_transform_read_ptr(ple);
         auto &pl = sceneLights.pointLights[sceneLights.pointLightCount];
-        pl.position =
-            (wt != nullptr) ? wt->position : math::Vec3(0.0F, 0.0F, 0.0F);
+        pl.position = runtime::light_world_pose(
+                          world, world.light_entity_at(li), lc->direction)
+                          .position;
         pl.color = lc->color;
         pl.intensity = lc->intensity;
         ++sceneLights.pointLightCount;
@@ -136,11 +132,11 @@ collect_scene_lights(const runtime::World &world) noexcept {
     if (plc == nullptr) {
       continue;
     }
-    const runtime::Entity plEntity = world.point_light_entity_at(pi);
-    const runtime::WorldTransform *wt =
-        world.get_world_transform_read_ptr(plEntity);
     auto &pl = sceneLights.pointLights[sceneLights.pointLightCount];
-    pl.position = (wt != nullptr) ? wt->position : math::Vec3(0.0F, 0.0F, 0.0F);
+    pl.position =
+        runtime::light_world_pose(world, world.point_light_entity_at(pi),
+                                  math::Vec3(0.0F, 0.0F, 0.0F))
+            .position;
     pl.color = plc->color;
     pl.intensity = plc->intensity;
     pl.radius = plc->radius;
@@ -157,14 +153,11 @@ collect_scene_lights(const runtime::World &world) noexcept {
     if (slc == nullptr) {
       continue;
     }
-    const runtime::Entity slEntity = world.spot_light_entity_at(si);
-    const runtime::WorldTransform *wt =
-        world.get_world_transform_read_ptr(slEntity);
     auto &sl = sceneLights.spotLights[sceneLights.spotLightCount];
-    sl.position = (wt != nullptr) ? wt->position : math::Vec3(0.0F, 0.0F, 0.0F);
-    sl.direction = (wt != nullptr)
-                       ? math::rotate_vector(slc->direction, wt->rotation)
-                       : slc->direction;
+    const runtime::LightPose pose = runtime::light_world_pose(
+        world, world.spot_light_entity_at(si), slc->direction);
+    sl.position = pose.position;
+    sl.direction = pose.direction;
     sl.color = slc->color;
     sl.intensity = slc->intensity;
     sl.radius = slc->radius;
