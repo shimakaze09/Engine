@@ -8,6 +8,7 @@ engine_add_module_library(engine_content
     src/asset_provenance.cpp
     src/asset_ref_json.cpp
     src/asset_sidecar.cpp
+    src/project_document.cpp
     src/asset_request_queue.cpp
     src/asset_stale_check.cpp
     src/asset_streaming.cpp

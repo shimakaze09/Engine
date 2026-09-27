@@ -359,6 +359,13 @@ engine_add_test_executable(engine_unit_asset_sidecar
     engine_content
 )
 
+engine_add_test_executable(engine_unit_project_document
+    SOURCES
+    project_document_test.cpp
+    PRIVATE_DEPS
+    engine_content
+)
+
 engine_add_test_executable(engine_unit_content_dependency_dedup
     SOURCES
     content_dependency_dedup_test.cpp

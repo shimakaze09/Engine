@@ -7,7 +7,11 @@ produced [0015](0015-commercial-anime-engine-on-six-platforms.md).
 save slot and the rebound input map live in a per-project directory
 (`core/include/engine/core/project_data.h`), named for now by the mounted
 content root because no `.project` document exists yet; its GUID takes
-that role once one does. The rest is not yet implemented.
+that role once one does. Point 1's document format exists: the
+`.project` reader and writer (`content/include/engine/content/project_document.h`)
+own identity, roots, the scene list, the startup scene and the main script,
+and `engine_unit_project_document` pins them; nothing opens a project yet.
+The rest is not yet implemented.
 
 ## Context
 

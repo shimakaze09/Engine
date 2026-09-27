@@ -1,0 +1,300 @@
+// Verifies the project document through its production reader and
+// writer:
+// - a valid document round-trips, and formats to the same bytes each time,
+//   pinned against the exact text;
+// - every rule the schema states refuses its violation, naming the field
+//   and leaving the caller's document untouched;
+// - the scene list holds 1 to kMaxProjectScenes;
+// - a truncated file, an absent file and an oversized file are each
+//   reported as what they are.
+
+#include "engine/content/project_document.h"
+
+#include <cstdio>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <memory>
+#include <new>
+#include <string>
+
+#include "../test_harness.h"
+
+namespace {
+
+namespace ct = engine::content;
+
+constexpr const char *kGuid = "5fe40ece-6a1b-4c2d-9e3f-0a1b2c3d4e5f";
+
+/// The exact text the writer produces for the reference document.
+std::string reference_text() {
+  return std::string("{\n"
+                     "  \"schemaVersion\": 1,\n"
+                     "  \"identity\": {\n"
+                     "    \"name\": \"Island\",\n"
+                     "    \"organisation\": \"Engine \\\"Samples\\\"\",\n"
+                     "    \"version\": \"0.1.0\",\n"
+                     "    \"guid\": \"") +
+         kGuid +
+         "\"\n"
+         "  },\n"
+         "  \"roots\": {\n"
+         "    \"content\": \"assets\",\n"
+         "    \"cache\": \".cache\"\n"
+         "  },\n"
+         "  \"scenes\": [\n"
+         "    \"assets/coin_run.scene\",\n"
+         "    \"assets/main.scene\"\n"
+         "  ],\n"
+         "  \"startupScene\": \"assets/coin_run.scene\",\n"
+         "  \"mainScript\": \"assets/main.lua\"\n"
+         "}\n";
+}
+
+std::string replaced(std::string text, const char *from, const char *to) {
+  const std::size_t at = text.find(from);
+  if (at != std::string::npos) {
+    text.replace(at, std::strlen(from), to);
+  }
+  return text;
+}
+
+/// A document with `count` scenes, the first of them the startup scene.
+std::string with_scenes(std::size_t count) {
+  std::string list;
+  for (std::size_t i = 0U; i < count; ++i) {
+    char scene[64] = {};
+    std::snprintf(scene, sizeof(scene), "%s\"assets/s%zu.scene\"",
+                  (i == 0U) ? "" : ",", i);
+    list += scene;
+  }
+  std::string text = reference_text();
+  const std::size_t open = text.find("\"scenes\": [");
+  const std::size_t close = text.find(']', open);
+  text.replace(open, close - open + 1U, "\"scenes\": [" + list + "]");
+  return replaced(text, "\"startupScene\": \"assets/coin_run.scene\"",
+                  "\"startupScene\": \"assets/s0.scene\"");
+}
+
+std::unique_ptr<ct::ProjectDocument> fresh() {
+  std::unique_ptr<ct::ProjectDocument> document(new (std::nothrow)
+                                                    ct::ProjectDocument());
+  if (document != nullptr) {
+    std::snprintf(document->name, sizeof(document->name), "%s", "SENTINEL");
+  }
+  return document;
+}
+
+/// Parses `text` and checks it is refused as Malformed for `field`, with
+/// the destination left as it was.
+bool refused_for(const std::string &text, const char *field) {
+  std::unique_ptr<ct::ProjectDocument> document = fresh();
+  const auto result =
+      ct::parse_project_document(text.data(), text.size(), document.get());
+  const bool ok =
+      !result.has_value() &&
+      (result.error().kind == ct::ProjectReadFailureKind::Malformed) &&
+      (std::strcmp(result.error().field, field) == 0) &&
+      (std::strcmp(document->name, "SENTINEL") == 0);
+  if (!ok) {
+    std::fprintf(stderr, "  expected a refusal for '%s', got '%s' (%s)\n",
+                 field, result.has_value() ? "accepted" : result.error().field,
+                 result.has_value() ? "" : result.error().reason);
+  }
+  return ok;
+}
+
+void check_round_trip(engine::tests::TestContext &t) {
+  const std::string text = reference_text();
+  std::unique_ptr<ct::ProjectDocument> document = fresh();
+  const auto parsed =
+      ct::parse_project_document(text.data(), text.size(), document.get());
+  t.check(parsed.has_value(), "the reference document parses");
+  t.check(
+      (std::strcmp(document->name, "Island") == 0) &&
+          (std::strcmp(document->organisation, "Engine \"Samples\"") == 0) &&
+          (std::strcmp(document->version, "0.1.0") == 0) &&
+          (std::strcmp(document->contentRoot, "assets") == 0) &&
+          (std::strcmp(document->cacheRoot, ".cache") == 0) &&
+          (document->sceneCount == 2U) &&
+          (std::strcmp(document->scenes[1], "assets/main.scene") == 0) &&
+          (std::strcmp(document->startupScene, "assets/coin_run.scene") == 0) &&
+          (std::strcmp(document->mainScript, "assets/main.lua") == 0),
+      "every field reads back as written");
+
+  std::unique_ptr<char[]> out(
+      new (std::nothrow) char[ct::kMaxProjectDocumentBytes]);
+  std::size_t length = 0U;
+  t.check(ct::format_project_document(*document, out.get(),
+                                      ct::kMaxProjectDocumentBytes, &length) &&
+              (std::string(out.get(), length) == text),
+          "the writer produces exactly the reference text");
+
+  const std::string noScript =
+      replaced(text, ",\n  \"mainScript\": \"assets/main.lua\"", "");
+  std::unique_ptr<ct::ProjectDocument> bare = fresh();
+  t.check(
+      ct::parse_project_document(noScript.data(), noScript.size(), bare.get())
+              .has_value() &&
+          (bare->mainScript[0] == '\0') &&
+          ct::format_project_document(*bare, out.get(),
+                                      ct::kMaxProjectDocumentBytes, &length) &&
+          (std::string(out.get(), length) == noScript),
+      "a project without a main script omits the field both ways");
+
+  const std::filesystem::path path =
+      std::filesystem::temp_directory_path() / "engine_project_test.project";
+  std::unique_ptr<ct::ProjectDocument> fromFile = fresh();
+  t.check(
+      ct::write_project_document(path.string().c_str(), *document) &&
+          ct::read_project_document(path.string().c_str(), fromFile.get())
+              .has_value() &&
+          (std::strcmp(fromFile->startupScene, "assets/coin_run.scene") == 0),
+      "the file written reads back");
+  std::ifstream written(path, std::ios::binary);
+  const std::string bytes((std::istreambuf_iterator<char>(written)),
+                          std::istreambuf_iterator<char>());
+  t.check(bytes == text, "the file holds exactly the reference text");
+
+  // A refused write leaves the previous file exactly as it was.
+  ct::ProjectDocument invalid = *document;
+  invalid.name[0] = '\0';
+  t.check(!ct::write_project_document(path.string().c_str(), invalid),
+          "an invalid document is not written");
+  std::ifstream after(path, std::ios::binary);
+  const std::string kept((std::istreambuf_iterator<char>(after)),
+                         std::istreambuf_iterator<char>());
+  t.check(kept == text, "a refused write leaves the previous file intact");
+  const std::filesystem::path missingDir =
+      std::filesystem::temp_directory_path() / "engine_project_test_no_dir" /
+      "x.project";
+  t.check(!ct::write_project_document(missingDir.string().c_str(), *document) &&
+              !std::filesystem::exists(missingDir),
+          "a write into a missing directory fails and creates nothing");
+  std::error_code ec{};
+  std::filesystem::remove(path, ec);
+}
+
+void check_refusals(engine::tests::TestContext &t) {
+  const std::string text = reference_text();
+  struct Case final {
+    const char *from;
+    const char *to;
+    const char *field;
+  };
+  const Case cases[] = {
+      {"\"schemaVersion\": 1", "\"schemaVersion\": 2", "schemaVersion"},
+      {"\"schemaVersion\": 1", "\"schemaVersion\": 0", "schemaVersion"},
+      {"\"schemaVersion\": 1", "\"schemaVersion\": \"1\"", "schemaVersion"},
+      {"\"schemaVersion\": 1,\n", "", "schemaVersion"},
+      {"\"startupScene\"", "\"extra\": 1,\n  \"startupScene\"", "extra"},
+      {"\"startupScene\"", "\"scenes\": [],\n  \"startupScene\"", "scenes"},
+      {"\"version\": \"0.1.0\",",
+       "\"version\": \"0.1.0\",\n    \"colour\": \"red\",", "identity.colour"},
+      {"\"cache\": \".cache\"", "\"cache\": \".cache\",\n    \"x\": \"y\"",
+       "roots.x"},
+      {"\"name\": \"Island\",\n", "", "identity.name"},
+      {"\"name\": \"Island\"", "\"name\": \"\"", "identity.name"},
+      {"\"name\": \"Island\"", "\"name\": \"a/b\"", "identity.name"},
+      {"\"name\": \"Island\"", "\"name\": \"Island.\"", "identity.name"},
+      {"\"name\": \"Island\"", "\"name\": \"x\\ty\"", "identity.name"},
+      {"\"name\": \"Island\"", "\"name\": 7", "identity.name"},
+      {"\"name\": \"Island\"",
+       "\"name\": "
+       "\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+       "\"",
+       "identity.name"},
+      {"\"version\": \"0.1.0\"", "\"version\": \"\"", "identity.version"},
+      {kGuid, "00000000-0000-0000-0000-000000000000", "identity.guid"},
+      {kGuid, "not-a-guid", "identity.guid"},
+      {"\"content\": \"assets\"", "\"content\": \"/abs\"", "roots.content"},
+      {"\"content\": \"assets\"", "\"content\": \"../up\"", "roots.content"},
+      {"\"content\": \"assets\"", "\"content\": \"a\\\\b\"", "roots.content"},
+      {"\"content\": \"assets\"", "\"content\": \"C:/x\"", "roots.content"},
+      {"\"cache\": \".cache\"", "\"cache\": \"assets\"", "roots.cache"},
+      {"\"cache\": \".cache\"", "\"cache\": \"assets/cache\"", "roots.cache"},
+      {"\"roots\": {\n    \"content\": \"assets\",\n    \"cache\": "
+       "\".cache\"\n  }",
+       "\"roots\": 3", "roots"},
+      {"\"assets/main.scene\"", "\"assets/coin_run.scene\"", "scenes[1]"},
+      {"\"assets/main.scene\"", "\"other/main.scene\"", "scenes[1]"},
+      {"\"assets/main.scene\"", "\"assets/main.lua\"", "scenes[1]"},
+      {"\"assets/main.scene\"", "\"assets//main.scene\"", "scenes[1]"},
+      {"\"assets/main.scene\"", "4", "scenes[1]"},
+      {"\"startupScene\": \"assets/coin_run.scene\"",
+       "\"startupScene\": \"assets/elsewhere.scene\"", "startupScene"},
+      {"\"mainScript\": \"assets/main.lua\"", "\"mainScript\": \"\"",
+       "mainScript"},
+      {"\"mainScript\": \"assets/main.lua\"",
+       "\"mainScript\": \"assets/main.txt\"", "mainScript"},
+  };
+  bool all = true;
+  for (const Case &c : cases) {
+    all = refused_for(replaced(text, c.from, c.to), c.field) && all;
+  }
+  t.check(all, "each rule refuses its violation, naming the field");
+
+  const std::string twice =
+      replaced(text, "\"startupScene\"",
+               "\"mainScript\": \"assets/main.lua\",\n  \"startupScene\"");
+  t.check(refused_for(twice, "mainScript"), "a repeated key is refused");
+  t.check(refused_for(text.substr(0U, text.size() / 2U), ""),
+          "a truncated document is refused");
+  t.check(refused_for("[1,2]", ""), "a non-object document is refused");
+}
+
+void check_scene_bounds(engine::tests::TestContext &t) {
+  std::unique_ptr<ct::ProjectDocument> document = fresh();
+  const std::string one = with_scenes(1U);
+  const std::string full = with_scenes(ct::kMaxProjectScenes);
+  t.check(ct::parse_project_document(one.data(), one.size(), document.get())
+                  .has_value() &&
+              (document->sceneCount == 1U),
+          "one scene is accepted");
+  t.check(ct::parse_project_document(full.data(), full.size(), document.get())
+                  .has_value() &&
+              (document->sceneCount == ct::kMaxProjectScenes),
+          "the most scenes a project holds are accepted");
+  t.check(refused_for(with_scenes(0U), "scenes"), "no scenes are refused");
+  t.check(refused_for(with_scenes(ct::kMaxProjectScenes + 1U), "scenes"),
+          "one scene too many is refused, not cut short");
+}
+
+void check_file_outcomes(engine::tests::TestContext &t) {
+  std::unique_ptr<ct::ProjectDocument> document = fresh();
+  const std::filesystem::path absent =
+      std::filesystem::temp_directory_path() / "engine_project_absent.project";
+  std::error_code ec{};
+  std::filesystem::remove(absent, ec);
+  const auto missing =
+      ct::read_project_document(absent.string().c_str(), document.get());
+  t.check(!missing.has_value() &&
+              (missing.error().kind == ct::ProjectReadFailureKind::Absent),
+          "an absent file reads as Absent");
+
+  const std::filesystem::path large =
+      std::filesystem::temp_directory_path() / "engine_project_large.project";
+  {
+    std::ofstream out(large, std::ios::binary);
+    const std::string padding(ct::kMaxProjectDocumentBytes + 16U, ' ');
+    out << padding;
+  }
+  const auto tooLarge =
+      ct::read_project_document(large.string().c_str(), document.get());
+  t.check(!tooLarge.has_value() &&
+              (tooLarge.error().kind == ct::ProjectReadFailureKind::TooLarge) &&
+              (std::strcmp(document->name, "SENTINEL") == 0),
+          "an oversized file reads as TooLarge and changes nothing");
+  std::filesystem::remove(large, ec);
+}
+
+} // namespace
+
+int main() {
+  engine::tests::TestContext t;
+  check_round_trip(t);
+  check_refusals(t);
+  check_scene_bounds(t);
+  check_file_outcomes(t);
+  return t.finish("project_document");
+}
