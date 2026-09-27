@@ -1442,6 +1442,23 @@ def test_duplicate_primitive_gate():
             "std::filesystem::exists(\"assets/x.lua\", ec);\n")]) == 0,
               "duplicate primitives: calling the helper or probing a "
               "relative asset path is not a walk")
+        check(run([script, "--root", case(
+            "pixels", "editor/src/a.cpp",
+            "// Purpose.\nImGui::SetNextItemWidth(72.0F);\n")]) != 0,
+              "duplicate primitives: a literal pixel width is a finding")
+        check(run([script, "--root", case(
+            "pixels_pair", "editor/src/a.cpp",
+            "// Purpose.\nImGui::Dummy(ImVec2(avail.x, 24.0F));\n")]) != 0,
+              "duplicate primitives: a literal inside a size pair is a "
+              "finding")
+        check(run([script, "--root", case(
+            "pixels_scaled", "editor/src/a.cpp",
+            "// Purpose.\nImGui::SetNextItemWidth(editor_px(72.0F));\n"
+            "ImGui::SameLine(0.0F, gap);\nImGui::SetNextItemWidth(-1.0F);\n"
+            "ImGui::SetNextItemWidth(ImGui::CalcTextSize(\"100.00 m/s\").x);\n"
+            )]) == 0,
+              "duplicate primitives: editor_px, ImGui's auto and fill values "
+              "and a size measured from text pass")
         catalog = ("// Purpose.\nstruct Holder {\n"
                    "  content::AssetCatalog catalog{};\n};\n")
         check(run([script, "--root", case(

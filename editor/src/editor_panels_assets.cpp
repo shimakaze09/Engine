@@ -278,7 +278,8 @@ void draw_asset_row(const AssetIndexEntry &entry) noexcept {
         load_thumbnail_texture(entry.osPath);
     const std::uint64_t imguiTex = imgui_texture_id(tex);
     if (imguiTex != 0U) {
-      ImGui::Image(static_cast<ImTextureID>(imguiTex), ImVec2(20.0F, 20.0F));
+      ImGui::Image(static_cast<ImTextureID>(imguiTex),
+                   ImVec2(editor_px(20.0F), editor_px(20.0F)));
       ImGui::SameLine();
     }
   }
@@ -426,7 +427,8 @@ void draw_asset_browser_panel() noexcept {
     const std::uint64_t thumbTex = imgui_texture_id(
         load_thumbnail_texture(editor_session().selectedAssetPath));
     if (thumbTex != 0U) {
-      ImGui::Image(static_cast<ImTextureID>(thumbTex), ImVec2(64.0F, 64.0F));
+      ImGui::Image(static_cast<ImTextureID>(thumbTex),
+                   ImVec2(editor_px(64.0F), editor_px(64.0F)));
     }
 
     draw_import_settings_inspector(editor_session().selectedAssetPath);

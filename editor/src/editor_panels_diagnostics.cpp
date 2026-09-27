@@ -176,7 +176,7 @@ void draw_stats_panel(const core::EngineStats &stats) noexcept {
     }
     for (std::size_t i = 0U; i < count; ++i) {
       ImGui::Text("%s", core::mem_tag_name(snaps[i].tag));
-      ImGui::SameLine(100.0F);
+      ImGui::SameLine(editor_px(100.0F));
       if (!snaps[i].reported) {
         // Nothing reports under this tag: say so rather than draw a
         // zero that reads as a measurement.
@@ -205,16 +205,16 @@ void draw_in_game_stats_overlay(const core::EngineStats &stats) noexcept {
   // The stats are the Game view's frame, so they anchor inside its image
   // when it is shown, else inside the Scene view's; the old fixed position
   // sat on top of the docked Entities panel.
-  ImVec2 overlayPos(12.0F, 44.0F);
+  ImVec2 overlayPos(editor_px(12.0F), editor_px(44.0F));
   const EditorSession &session = editor_session();
   if (session.gameViewShown && (session.gameViewScreenSize.x > 0.0F) &&
       (session.gameViewScreenSize.y > 0.0F)) {
-    overlayPos = ImVec2(session.gameViewScreenPos.x + 12.0F,
-                        session.gameViewScreenPos.y + 12.0F);
+    overlayPos = ImVec2(session.gameViewScreenPos.x + editor_px(12.0F),
+                        session.gameViewScreenPos.y + editor_px(12.0F));
   } else if ((session.sceneViewportScreenSize.x > 0.0F) &&
              (session.sceneViewportScreenSize.y > 0.0F)) {
-    overlayPos = ImVec2(session.sceneViewportScreenPos.x + 12.0F,
-                        session.sceneViewportScreenPos.y + 12.0F);
+    overlayPos = ImVec2(session.sceneViewportScreenPos.x + editor_px(12.0F),
+                        session.sceneViewportScreenPos.y + editor_px(12.0F));
   }
   ImGui::SetNextWindowBgAlpha(0.40F);
   ImGui::SetNextWindowPos(overlayPos, ImGuiCond_Always);

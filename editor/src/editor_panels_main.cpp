@@ -465,14 +465,20 @@ void draw_toolbar() noexcept {
                          editor_session().gizmoOp == ImGuizmo::TRANSLATE)) {
     editor_session().gizmoOp = ImGuizmo::TRANSLATE;
   }
+  ImGui::SetItemTooltip("Move (%s)",
+                        editor_shortcut_text(EditorAction::GizmoTranslate));
   ImGui::SameLine();
   if (ImGui::RadioButton("R", editor_session().gizmoOp == ImGuizmo::ROTATE)) {
     editor_session().gizmoOp = ImGuizmo::ROTATE;
   }
+  ImGui::SetItemTooltip("Rotate (%s)",
+                        editor_shortcut_text(EditorAction::GizmoRotate));
   ImGui::SameLine();
   if (ImGui::RadioButton("S", editor_session().gizmoOp == ImGuizmo::SCALE)) {
     editor_session().gizmoOp = ImGuizmo::SCALE;
   }
+  ImGui::SetItemTooltip("Scale (%s)",
+                        editor_shortcut_text(EditorAction::GizmoScale));
   ImGui::SameLine();
   // Scale always works on the entity's own axes (ImGuizmo forces it: a
   // scale along a world axis would shear a rotated entity), so the toggle
@@ -497,7 +503,12 @@ void draw_toolbar() noexcept {
   ImGui::SetItemTooltip("The Scene view's ground grid; its spacing follows "
                         "the zoom");
   ImGui::SameLine();
-  ImGui::SetNextItemWidth(72.0F);
+  // Text-fitted widths follow the font, so the fields hold their widest
+  // value at every UI scale.
+  const float framePadding = ImGui::GetStyle().FramePadding.x * 2.0F;
+  ImGui::TextUnformatted("Speed");
+  ImGui::SameLine();
+  ImGui::SetNextItemWidth(ImGui::CalcTextSize("100.00 m/s").x + framePadding);
   float &flySpeed = editor_session().editorCamera.flySpeed;
   if (ImGui::DragFloat(
           "##FlySpeed", &flySpeed, 0.05F, EditorCamera::kMinFlySpeed,
@@ -511,7 +522,7 @@ void draw_toolbar() noexcept {
   ImGui::SameLine();
   ImGui::Checkbox("Snap", &editor_session().snapEnabled);
   ImGui::SameLine();
-  ImGui::SetNextItemWidth(64.0F);
+  ImGui::SetNextItemWidth(ImGui::CalcTextSize("90 deg").x + framePadding);
   if (editor_session().gizmoOp == ImGuizmo::ROTATE) {
     ImGui::DragFloat("##SnapStep", &editor_session().snapAngleDegrees, 1.0F,
                      1.0F, 90.0F, "%.0f deg");
@@ -678,7 +689,7 @@ void draw_entities_panel() noexcept {
   draw_entity_hierarchy();
 
   // Dropping onto the panel background clears the parent.
-  ImGui::Dummy(ImVec2(ImGui::GetContentRegionAvail().x, 24.0F));
+  ImGui::Dummy(ImVec2(ImGui::GetContentRegionAvail().x, editor_px(24.0F)));
   if (ImGui::BeginDragDropTarget()) {
     if (const ImGuiPayload *payload =
             ImGui::AcceptDragDropPayload("ENTITY_INDEX")) {

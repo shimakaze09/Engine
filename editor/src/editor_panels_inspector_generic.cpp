@@ -16,6 +16,7 @@
 
 #include "editor_inspector_metadata.h"
 #include "editor_inspector_widgets.h"
+#include "editor_session.h"
 #include "engine/core/reflect.h"
 #include "engine/math/vec2.h"
 #include "engine/math/vec3.h"
@@ -170,7 +171,7 @@ void draw_vec3_ranged_field(const char *label, math::Vec3 &value,
   ImGui::SameLine();
   const float speed = (meta.speed > 0.0F) ? meta.speed : 0.1F;
   const bool ranged = meta.max > meta.min;
-  ImGui::SetNextItemWidth(180.0F);
+  ImGui::SetNextItemWidth(editor_px(180.0F));
   bool changed = false;
   if (meta.widget == InspectorWidget::Slider && ranged) {
     changed = inspector_slider_float3("##v", &value.x, meta.min, meta.max);
@@ -213,7 +214,7 @@ void draw_euler_degrees_field(const char *label, math::Quat &value,
   ImGui::PushID(label);
   ImGui::TextUnformatted(label);
   ImGui::SameLine();
-  ImGui::SetNextItemWidth(180.0F);
+  ImGui::SetNextItemWidth(editor_px(180.0F));
   const bool changed = inspector_drag_float3("##euler", &degrees.x, 1.0F,
                                              0.0F, 0.0F, "%.1f");
   if (changed) {
@@ -259,7 +260,7 @@ void draw_layer_mask_field(const char *label, std::uint32_t &mask,
         ImGui::SameLine();
       }
       bool set = (mask & (1U << bit)) != 0U;
-      ImGui::SetNextItemWidth(90.0F);
+      ImGui::SetNextItemWidth(editor_px(90.0F));
       if (ImGui::Checkbox(inspector_layer_name(bit), &set)) {
         if (set) {
           mask |= (1U << bit);

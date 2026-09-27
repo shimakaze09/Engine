@@ -235,11 +235,11 @@ void draw_console_panel() noexcept {
   ImGui::SameLine();
   ImGui::Checkbox("This Session", &filter.sessionOnly);
 
-  ImGui::SetNextItemWidth(220.0F);
+  ImGui::SetNextItemWidth(editor_px(220.0F));
   ImGui::InputTextWithHint("##ConsoleSearch", "Search text...",
                            filter.searchText, sizeof(filter.searchText));
   ImGui::SameLine();
-  ImGui::SetNextItemWidth(140.0F);
+  ImGui::SetNextItemWidth(editor_px(140.0F));
   ImGui::InputTextWithHint("##ConsoleChannel", "Channel (exact)...",
                            filter.channelFilter, sizeof(filter.channelFilter));
 
