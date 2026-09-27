@@ -11,10 +11,8 @@
 #include "engine/editor/editor_camera.h"
 #include "engine/math/aabb.h"
 #include "engine/math/mat4.h"
-#include "engine/physics/collider.h"
 #include "engine/renderer/camera.h"
 #include "engine/runtime/editor_bridge.h"
-#include "engine/runtime/physics_bridge.h"
 
 namespace engine::editor {
 
@@ -59,41 +57,20 @@ void grow_by_entity(runtime::World &world, runtime::Entity entity,
     return;
   }
   bool extent = false;
-  const runtime::MeshComponent *mesh = world.get_mesh_component_ptr(entity);
-  math::Vec3 localCenter{};
-  math::Vec3 localHalf{};
-  if ((mesh != nullptr) && (meshBounds != nullptr) &&
-      meshBounds(mesh->meshAssetId, &localCenter, &localHalf)) {
-    math::Vec3 center{};
-    math::Vec3 half{};
-    math::transform_aabb(worldTransform->matrix, localCenter, localHalf,
-                         &center, &half);
+  math::Vec3 center{};
+  math::Vec3 half{};
+  if (entity_mesh_world_box(world, entity, meshBounds, &center, &half)) {
     box->grow(center, half);
     extent = true;
   }
-  const runtime::Collider *collider = world.get_collider_ptr(entity);
-  if (collider != nullptr) {
-    const physics::ConvexHullData *hull =
-        (collider->shape == runtime::ColliderShape::ConvexHull)
-            ? runtime::get_convex_hull_data(world, entity)
-            : nullptr;
-    physics::ColliderWorldGeometry geometry{};
-    if (physics::make_collider_world_geometry(*collider, worldTransform->matrix,
-                                              hull, &geometry)) {
-      box->grow(math::aabb_center(geometry.worldAabb),
-                math::aabb_half_extents(geometry.worldAabb));
-      extent = true;
-    }
+  if (entity_collider_world_box(world, entity, &center, &half)) {
+    box->grow(center, half);
+    extent = true;
   }
   if (!extent) {
     box->grow(math::transform_point(worldTransform->matrix, math::Vec3()),
               math::Vec3());
   }
-}
-
-bool bridge_mesh_bounds(std::uint64_t meshAssetId, math::Vec3 *center,
-                        math::Vec3 *halfExtents) noexcept {
-  return runtime::editor_mesh_local_bounds(meshAssetId, center, halfExtents);
 }
 
 } // namespace
@@ -153,7 +130,7 @@ bool frame_selection() noexcept {
   }
   FramingSphere sphere{};
   if (!selection_framing_sphere(*session.world, entities, count,
-                                &bridge_mesh_bounds, &sphere)) {
+                                &runtime::editor_mesh_local_bounds, &sphere)) {
     return false;
   }
   const renderer::CameraState camera =

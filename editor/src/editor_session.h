@@ -172,6 +172,13 @@ struct EditorSession final {
   // held: WASD/QE fly the camera (fly_editor_camera), so the shortcut
   // dispatcher stands down and W stays a move, not the Move tool.
   bool sceneFlying = false;
+  // A left press over the Scene view that may become a pick on release
+  // (editor_scene_query.h), where it went down, and where the last pick
+  // was made, so a click on the same spot can walk through what overlaps.
+  bool scenePressPending = false;
+  ImVec2 scenePressPos{};
+  bool hasLastPick = false;
+  ImVec2 lastPickPos{};
   bool snapEnabled = false;
   float snapStep = 0.5F;
   float snapAngleDegrees = 15.0F;

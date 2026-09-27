@@ -8,7 +8,8 @@
 #pragma once
 
 #include <cstddef>
-#include <cstdint>
+
+#include "editor_scene_query.h"
 
 #include "engine/math/vec3.h"
 #include "engine/runtime/world.h"
@@ -16,11 +17,6 @@
 namespace engine::editor {
 
 struct EditorCamera;
-
-/// Object-space bounds (centre, half extents) of mesh asset
-/// `meshAssetId`; false while it is not loaded.
-using MeshBoundsFn = bool (*)(std::uint64_t meshAssetId, math::Vec3 *center,
-                              math::Vec3 *halfExtents) noexcept;
 
 /// A sphere around what is framed.
 struct FramingSphere final {

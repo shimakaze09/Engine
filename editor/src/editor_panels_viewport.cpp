@@ -7,6 +7,7 @@
 
 #include "editor_commands.h"
 #include "editor_grid.h"
+#include "editor_scene_query.h"
 #include "editor_session.h"
 #include "editor_transform_util.h"
 
@@ -282,6 +283,67 @@ void draw_selected_collider_overlay(
   }
 }
 
+/// How far a press may travel and still count as a click, not a drag.
+constexpr float kClickSlopPixels = 4.0F;
+
+bool point_in_rect(const ImVec2 &point, const ImVec2 &min,
+                   const ImVec2 &size) noexcept {
+  return (point.x >= min.x) && (point.y >= min.y) &&
+         (point.x < (min.x + size.x)) && (point.y < (min.y + size.y));
+}
+
+/// Picks what lies under `mouse` in the Scene image at (imagePos,
+/// imageSize); see editor_scene_query.h. `additive` (Ctrl) toggles the
+/// pick in or out of the selection; otherwise it replaces the selection,
+/// and a click on empty space clears it.
+void pick_in_scene_view(const ImVec2 &mouse, const ImVec2 &imagePos,
+                        const ImVec2 &imageSize, bool additive) noexcept {
+  EditorSession &session = editor_session();
+  if ((session.world == nullptr) || (imageSize.x <= 0.0F) ||
+      (imageSize.y <= 0.0F)) {
+    return;
+  }
+  const renderer::CameraState cam = editor_camera_state(session.editorCamera);
+  const math::Mat4 view = math::look_at(cam.position, cam.target, cam.up);
+  const math::Mat4 projection =
+      renderer::camera_projection_matrix(cam, imageSize.x / imageSize.y);
+  const float ndcX = ((2.0F * (mouse.x - imagePos.x)) / imageSize.x) - 1.0F;
+  const float ndcY = 1.0F - ((2.0F * (mouse.y - imagePos.y)) / imageSize.y);
+  math::Ray ray{};
+  if (!viewport_ray(view, projection, renderer::device_depth_zero_one(), ndcX,
+                    ndcY, &ray)) {
+    return;
+  }
+  // The ray runs from the near plane to the far plane; queries take a
+  // unit direction and that span as their reach.
+  const float reach = math::length(ray.direction);
+  if (!(reach > 0.0F)) {
+    return;
+  }
+  ray.direction = math::mul(ray.direction, 1.0F / reach);
+
+  std::array<PickHit, 32> hits{};
+  const std::size_t count = scene_pick_hits(*session.world, ray, reach,
+                                            &runtime::editor_mesh_local_bounds,
+                                            hits.data(), hits.size());
+  const float mx = mouse.x - session.lastPickPos.x;
+  const float my = mouse.y - session.lastPickPos.y;
+  const bool sameSpot =
+      session.hasLastPick &&
+      (((mx * mx) + (my * my)) <= (kClickSlopPixels * kClickSlopPixels));
+  session.hasLastPick = true;
+  session.lastPickPos = mouse;
+  const runtime::Entity picked =
+      choose_pick(hits.data(), count, selected_entity(), sameSpot && !additive);
+  if (picked == runtime::kInvalidEntity) {
+    if (!additive) {
+      clear_entity_selection();
+    }
+    return;
+  }
+  select_entity(picked, additive);
+}
+
 /// Projects the current mouse position through the editor camera onto the
 /// y = 0 ground plane (falling back to a point ahead of the camera when
 /// the ray misses it within the far plane) to place viewport asset drops.
@@ -416,8 +478,10 @@ void draw_scene_viewport_panel() noexcept {
     }
   }
 
+  bool gizmoDrawn = false;
   if (editable && hasTransform && (regionSize.x > 0.0F) &&
       (regionSize.y > 0.0F)) {
+    gizmoDrawn = true;
     const renderer::CameraState cam =
         editor_camera_state(editor_session().editorCamera);
 
@@ -495,6 +559,33 @@ void draw_scene_viewport_panel() noexcept {
       }
     }
 
+  }
+
+  // A left click picks, as in Unity's Scene view: pressed over the image
+  // (not on the gizmo, not with Alt, which orbits) and released within a
+  // few pixels of where it went down; a drag is a marquee instead.
+  {
+    EditorSession &clickSession = editor_session();
+    const ImGuiIO &io = ImGui::GetIO();
+    const bool overGizmo =
+        gizmoDrawn && (ImGuizmo::IsOver() || ImGuizmo::IsUsing());
+    if (ImGui::IsWindowHovered() &&
+        ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !io.KeyAlt &&
+        !clickSession.sceneFlying && !overGizmo &&
+        point_in_rect(io.MousePos, cursorScreenPos, regionSize)) {
+      clickSession.scenePressPending = true;
+      clickSession.scenePressPos = io.MousePos;
+    }
+    if (clickSession.scenePressPending &&
+        ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
+      clickSession.scenePressPending = false;
+      const float dx = io.MousePos.x - clickSession.scenePressPos.x;
+      const float dy = io.MousePos.y - clickSession.scenePressPos.y;
+      if (((dx * dx) + (dy * dy)) <= (kClickSlopPixels * kClickSlopPixels)) {
+        pick_in_scene_view(clickSession.scenePressPos, cursorScreenPos,
+                           regionSize, io.KeyCtrl);
+      }
+    }
   }
 
   // Flythrough, as in Unity: the right button pressed over the Scene view
