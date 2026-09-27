@@ -19,6 +19,7 @@
 #include "engine/renderer/material_inheritance.h"
 #include "engine/renderer/material_loader.h"
 #include "engine/renderer/material_writer.h"
+#include "engine/renderer/mesh_loader.h"
 #include "engine/runtime/service_registry.h"
 #include "mesh_reference_resolution.h"
 
@@ -28,6 +29,7 @@ namespace {
 
 const EditorBridge *g_editorBridge = nullptr;
 EngineAssetDatabaseService *g_editorAssetService = nullptr;
+const renderer::GpuMeshRegistry *g_editorMeshRegistry = nullptr;
 
 } // namespace
 
@@ -42,6 +44,34 @@ const EditorBridge *editor_bridge() noexcept {
 
 void set_editor_asset_service(EngineAssetDatabaseService *service) noexcept {
   g_editorAssetService = service;
+}
+
+void set_editor_mesh_registry(
+    const renderer::GpuMeshRegistry *registry) noexcept {
+  g_editorMeshRegistry = registry;
+}
+
+bool editor_mesh_local_bounds(std::uint64_t meshAssetId, math::Vec3 *outCenter,
+                              math::Vec3 *outHalfExtents) noexcept {
+  if ((outCenter == nullptr) || (outHalfExtents == nullptr) ||
+      (g_editorAssetService == nullptr) ||
+      (g_editorAssetService->database == nullptr) ||
+      (g_editorMeshRegistry == nullptr)) {
+    return false;
+  }
+  // Peeked, as render prep culls: reading bounds is not a use of the mesh.
+  const renderer::MeshHandle handle =
+      renderer::peek_mesh_asset(g_editorAssetService->database, meshAssetId);
+  const renderer::GpuMesh *mesh =
+      (handle != renderer::kInvalidMeshHandle)
+          ? renderer::lookup_gpu_mesh(g_editorMeshRegistry, handle)
+          : nullptr;
+  if (mesh == nullptr) {
+    return false;
+  }
+  *outCenter = mesh->boundsCenter;
+  *outHalfExtents = mesh->boundsHalfExtents;
+  return true;
 }
 
 std::uint64_t editor_request_mesh_asset(const char *virtualPath) noexcept {

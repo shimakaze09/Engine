@@ -258,6 +258,8 @@ void draw_main_menu_bar() noexcept {
     editor_action_menu_item(EditorAction::Duplicate);
     editor_action_menu_item(EditorAction::Delete);
     ImGui::Separator();
+    editor_action_menu_item(EditorAction::FrameSelected);
+    ImGui::Separator();
     // Checked while running, as Unity's Edit menu shows play state.
     const PlayState state = editor_session().playState;
     editor_action_menu_item(EditorAction::PlayStop,
@@ -547,6 +549,14 @@ static bool draw_entity_row(runtime::Entity entity, bool hasChildren,
   if (ImGui::IsItemClicked(ImGuiMouseButton_Left) &&
       !ImGui::IsItemToggledOpen()) {
     select_entity(entity, ImGui::GetIO().KeyCtrl);
+  }
+  // A double-click frames the row in the Scene view, as in Unity.
+  if (ImGui::IsItemHovered() &&
+      ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) &&
+      !ImGui::IsItemToggledOpen()) {
+    select_entity(entity, false);
+    pending.kind = PendingHierarchyEdit::Kind::Action;
+    pending.action = EditorAction::FrameSelected;
   }
 
   if (ImGui::BeginPopupContextItem(label)) {

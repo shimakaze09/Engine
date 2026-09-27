@@ -903,6 +903,7 @@ bool EnginePipeline::Impl::initialize(std::uint32_t maxFrameCount) noexcept {
 
   bridge = runtime::editor_bridge();
   runtime::set_editor_asset_service(&assetDatabaseService);
+  runtime::set_editor_mesh_registry(meshRegistry.get());
 
   runtime::bind_scripting_runtime(world.get(), serviceLocator);
   // The run's game-binding state is pipeline-owned; the binding
@@ -1119,6 +1120,7 @@ void EnginePipeline::Impl::teardown() noexcept {
     content::reset_cooked_asset_stale_warnings();
 
     runtime::set_editor_asset_service(nullptr);
+    runtime::set_editor_mesh_registry(nullptr);
     scripting::bind_game_state(nullptr);
     runtime::unbind_scripting_runtime(serviceLocator);
   }

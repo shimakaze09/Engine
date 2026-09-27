@@ -19,7 +19,9 @@ struct EditorCamera final {
   static constexpr float kMinPitch = -1.5F;
   static constexpr float kMaxPitch = 1.5F;
   static constexpr float kMinDistance = 0.5F;
-  static constexpr float kMaxDistance = 200.0F;
+  // Far enough to frame a kilometre-wide selection; the clip planes
+  // follow the distance (editor_camera_state).
+  static constexpr float kMaxDistance = 1000.0F;
 };
 
 /// Update the orbit camera from mouse input in the scene viewport.

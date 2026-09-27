@@ -9,6 +9,7 @@
 #include "engine/renderer/asset_database.h"
 #include "engine/renderer/command_buffer.h"
 #include "engine/renderer/material.h"
+#include "engine/renderer/mesh_loader.h"
 
 namespace engine::core {
 struct PlatformEvent;
@@ -82,6 +83,17 @@ const EditorBridge *editor_bridge() noexcept;
 /// Publishes (or clears, with nullptr) the pipeline's asset service so
 /// editor authoring can request asset loads while the runtime is active.
 void set_editor_asset_service(EngineAssetDatabaseService *service) noexcept;
+/// Publishes (or clears, with nullptr) the pipeline's GPU mesh registry,
+/// alongside the asset service, so the editor can read a loaded mesh's
+/// bounds.
+void set_editor_mesh_registry(
+    const renderer::GpuMeshRegistry *registry) noexcept;
+/// The object-space bounds (centre, half extents) of mesh asset
+/// `meshAssetId`, read without counting as a use of it; false, outputs
+/// untouched, when no asset service or registry is published or the mesh
+/// is not loaded yet.
+bool editor_mesh_local_bounds(std::uint64_t meshAssetId, math::Vec3 *outCenter,
+                              math::Vec3 *outHalfExtents) noexcept;
 /// Requests an async mesh load for an editor-authored reference by virtual
 /// path and returns the path-derived asset id; 0 when no runtime asset
 /// service is published, the path cannot resolve, or the request fails.

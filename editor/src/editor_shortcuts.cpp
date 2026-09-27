@@ -9,6 +9,7 @@
 
 #include "editor_commands.h"
 #include "editor_entity_clipboard.h"
+#include "editor_frame_selection.h"
 #include "editor_scene_document.h"
 #include "editor_session.h"
 
@@ -68,6 +69,8 @@ constexpr std::array<EditorShortcut,
         // Unity's chord for its handle-rotation toggle.
         {EditorAction::GizmoSpace, "tools.toggle_space", "World/Local Axes",
          ImGuiKey_X, 0, false},
+        {EditorAction::FrameSelected, "view.frame_selected", "Frame Selected",
+         ImGuiKey_F, 0, false},
         // Unity's play chords, live while the game has the keyboard so a
         // running game can always be paused or stopped.
         {EditorAction::PlayStop, "play.play_stop", "Play",
@@ -280,6 +283,8 @@ bool editor_action_enabled(EditorAction action) noexcept {
   case EditorAction::GizmoScale:
   case EditorAction::GizmoSpace:
     return true;
+  case EditorAction::FrameSelected:
+    return has_selection();
   case EditorAction::PlayStop:
     // Play needs a world that can enter play; Stop needs a session.
     return (editor_session().world != nullptr) &&
@@ -352,6 +357,8 @@ bool run_editor_action(EditorAction action) noexcept {
   case EditorAction::GizmoScale:
     editor_session().gizmoOp = ImGuizmo::SCALE;
     return true;
+  case EditorAction::FrameSelected:
+    return frame_selection();
   case EditorAction::GizmoSpace:
     editor_session().gizmoWorldSpace = !editor_session().gizmoWorldSpace;
     if (ImGui::GetCurrentContext() != nullptr) {
