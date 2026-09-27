@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <new>
 
 #include "editor_component_registry.h"
 #include "editor_session.h"
@@ -227,8 +228,9 @@ runtime::Entity execute_primitive_spawn(EditorPrimitive primitive) noexcept;
 /// allocation failure or when the entity is not alive.
 EntityDeleteCommand *
 build_entity_delete_command(runtime::Entity entity) noexcept;
-/// Deletes the entity subtree through the command history (falling back to
-/// a plain non-undoable destroy when the capture cannot be allocated).
+/// Deletes the entity subtree through the command history. Refused, with
+/// an Error logged and the world untouched, when the capture cannot be
+/// allocated or the entity is not alive.
 bool execute_entity_delete(runtime::Entity entity) noexcept;
 
 /// Applies an inspector field edit through World validation immediately
@@ -282,6 +284,19 @@ bool gizmo_has_gesture() noexcept;
 /// Test hook: the next `count` command allocations fail as if out of
 /// memory, so the refuse and unrecorded-edit paths are exercisable.
 void editor_commands_inject_allocation_failures(std::size_t count) noexcept;
+/// Consumes one injected allocation failure when any is outstanding.
+/// False means the caller must behave as if the allocation failed.
+bool editor_command_allocation_allowed() noexcept;
+
+/// Every command allocation funnels through here so the out-of-memory
+/// paths are reachable from a test; a failed allocation is never a
+/// license to mutate the world outside the history.
+template <typename Command> Command *allocate_command() noexcept {
+  if (!editor_command_allocation_allowed()) {
+    return nullptr;
+  }
+  return new (std::nothrow) Command();
+}
 
 /// Returns the default-valued snapshot used when adding a component.
 ComponentEditSnapshot default_component_snapshot(
