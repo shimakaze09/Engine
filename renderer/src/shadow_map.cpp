@@ -18,48 +18,76 @@ namespace engine::renderer {
 
 namespace {
 
-/// Square Depth24 shadow array: one texture holds every cascade
-/// or spot slot as a layer, so the shaders sample the whole set through
-/// a single register (DXBC caps sampler registers at 16). Point
-/// sampling: the shaders take their own PCF taps and compare depths
-/// explicitly, and WebGL2 treats linear-filtered depth textures as
-/// incomplete; ClampEdge so border PCF taps
-/// never wrap to the map's opposite edge.
-DeviceTextureHandle create_shadow_depth_array(const RenderDevice *dev,
-                                              int resolution,
-                                              int layers) noexcept {
-  if ((dev == nullptr) || (dev->create_texture == nullptr)) {
-    return kInvalidDeviceTexture;
+/// Depth24 atlas of `tileResolution` tiles, kShadowAtlasTilesPerRow on
+/// a side, with one depth-only render target over it. Point sampling:
+/// the shaders take their own PCF taps and compare depths explicitly, and
+/// WebGL2 treats linear-filtered depth textures as incomplete. The
+/// shaders clamp each tap inside its tile, so a border PCF tap never
+/// reads the neighbouring map.
+bool create_shadow_depth_atlas(const RenderDevice *dev, int tileResolution,
+                               DeviceTextureHandle *outTexture,
+                               RenderTargetHandle *outTarget) noexcept {
+  if ((dev == nullptr) || (dev->create_texture == nullptr) ||
+      (dev->create_render_target == nullptr)) {
+    return false;
+  }
+  const int side = tileResolution * kShadowAtlasTilesPerRow;
+  if (side > dev->caps.maxTextureDimension) {
+    core::log_message(core::LogLevel::Error, "shadow_map",
+                      "shadow atlas is larger than the device's largest "
+                      "texture");
+    return false;
   }
   TextureDesc desc{};
-  desc.kind = TextureKind::Tex2DArray;
   desc.format = TextureFormat::Depth24;
-  desc.width = resolution;
-  desc.height = resolution;
-  desc.layers = layers;
+  desc.width = side;
+  desc.height = side;
   desc.filter = TextureFilter::Nearest;
   desc.wrap = TextureWrap::ClampEdge;
-  return dev->create_texture(desc);
+  const DeviceTextureHandle texture = dev->create_texture(desc);
+  if (texture == kInvalidDeviceTexture) {
+    return false;
+  }
+  RenderTargetDesc targetDesc{};
+  targetDesc.depth.texture = texture;
+  const RenderTargetHandle target = dev->create_render_target(targetDesc);
+  if (target.value == 0U) {
+    dev->destroy_texture(texture);
+    return false;
+  }
+  *outTexture = texture;
+  *outTarget = target;
+  return true;
 }
 
-/// Depth-only render target over one layer of a shadow depth array.
-RenderTargetHandle create_depth_layer_target(const RenderDevice *dev,
-                                             DeviceTextureHandle depthArray,
-                                             int layer) noexcept {
-  if ((dev == nullptr) || (dev->create_render_target == nullptr)) {
-    return RenderTargetHandle{};
+/// Releases an atlas create_shadow_depth_atlas made.
+void destroy_shadow_depth_atlas(const RenderDevice *dev,
+                                DeviceTextureHandle *texture,
+                                RenderTargetHandle *target) noexcept {
+  if (target->value != 0U) {
+    dev->destroy_render_target(*target);
+    *target = RenderTargetHandle{};
   }
-  RenderTargetDesc desc{};
-  desc.depth.texture = depthArray;
-  desc.depth.layer = layer;
-  return dev->create_render_target(desc);
+  if (*texture != kInvalidDeviceTexture) {
+    dev->destroy_texture(*texture);
+    *texture = kInvalidDeviceTexture;
+  }
 }
 
 } // namespace
 
+ShadowAtlasTile shadow_atlas_tile(std::size_t index,
+                                  int tileResolution) noexcept {
+  const std::size_t perRow = static_cast<std::size_t>(kShadowAtlasTilesPerRow);
+  ShadowAtlasTile tile{};
+  tile.x = static_cast<int>(index % perRow) * tileResolution;
+  tile.y = static_cast<int>(index / perRow) * tileResolution;
+  return tile;
+}
+
 int shadow_cascade_resolution(std::size_t cascadeIndex) noexcept {
-  // Uniform since the cascades became one texture array: array
-  // layers share dimensions, so every cascade renders at full size.
+  // Uniform: the cascades are equal tiles of one atlas, so every cascade
+  // renders at full size.
   static_cast<void>(cascadeIndex);
   return kShadowMapResolution;
 }
@@ -265,29 +293,13 @@ math::Mat4 snap_to_texel(const math::Mat4 &lightViewProj,
 
 /// Initializes the owning system for shadow maps.
 bool initialize_shadow_maps(ShadowMapState &state) noexcept {
-  const RenderDevice *dev = render_device();
-  if (dev == nullptr) {
-    return false;
-  }
-
-  state.depthArrayTexture = create_shadow_depth_array(
-      dev, kShadowMapResolution, static_cast<int>(kShadowCascadeCount));
-  if (state.depthArrayTexture == kInvalidDeviceTexture) {
+  if (!create_shadow_depth_atlas(render_device(), kShadowMapResolution,
+                                 &state.depthAtlasTexture,
+                                 &state.atlasTarget)) {
     core::log_message(core::LogLevel::Error, "shadow_map",
-                      "failed to create shadow cascade depth array");
+                      "failed to create the shadow cascade atlas");
     return false;
   }
-  for (std::size_t i = 0U; i < kShadowCascadeCount; ++i) {
-    state.depthTargets[i] = create_depth_layer_target(
-        dev, state.depthArrayTexture, static_cast<int>(i));
-    if (state.depthTargets[i].value == 0U) {
-      core::log_message(core::LogLevel::Error, "shadow_map",
-                        "failed to create shadow cascade render target");
-      shutdown_shadow_maps(state);
-      return false;
-    }
-  }
-
   state.initialized = true;
   return true;
 }
@@ -298,18 +310,7 @@ void shutdown_shadow_maps(ShadowMapState &state) noexcept {
   if (dev == nullptr) {
     return;
   }
-
-  for (std::size_t i = 0U; i < kShadowCascadeCount; ++i) {
-    if (state.depthTargets[i].value != 0U) {
-      dev->destroy_render_target(state.depthTargets[i]);
-      state.depthTargets[i] = RenderTargetHandle{};
-    }
-  }
-  if (state.depthArrayTexture != kInvalidDeviceTexture) {
-    dev->destroy_texture(state.depthArrayTexture);
-    state.depthArrayTexture = kInvalidDeviceTexture;
-  }
-
+  destroy_shadow_depth_atlas(dev, &state.depthAtlasTexture, &state.atlasTarget);
   state.initialized = false;
 }
 
@@ -350,29 +351,13 @@ math::Mat4 compute_spot_shadow_matrix(const math::Vec3 &position,
 
 /// Initializes the owning system for spot shadow maps.
 bool initialize_spot_shadow_maps(SpotShadowState &state) noexcept {
-  const RenderDevice *dev = render_device();
-  if (dev == nullptr) {
-    return false;
-  }
-
-  state.depthArrayTexture = create_shadow_depth_array(
-      dev, kSpotShadowMapResolution, static_cast<int>(kMaxSpotShadowLights));
-  if (state.depthArrayTexture == kInvalidDeviceTexture) {
+  if (!create_shadow_depth_atlas(render_device(), kSpotShadowMapResolution,
+                                 &state.depthAtlasTexture,
+                                 &state.atlasTarget)) {
     core::log_message(core::LogLevel::Error, "shadow_map",
-                      "failed to create spot shadow depth array");
+                      "failed to create the spot shadow atlas");
     return false;
   }
-  for (std::size_t i = 0U; i < kMaxSpotShadowLights; ++i) {
-    state.slots[i].depthTarget = create_depth_layer_target(
-        dev, state.depthArrayTexture, static_cast<int>(i));
-    if (state.slots[i].depthTarget.value == 0U) {
-      core::log_message(core::LogLevel::Error, "shadow_map",
-                        "failed to create spot shadow render target");
-      shutdown_spot_shadow_maps(state);
-      return false;
-    }
-  }
-
   state.initialized = true;
   return true;
 }
@@ -383,19 +368,10 @@ void shutdown_spot_shadow_maps(SpotShadowState &state) noexcept {
   if (dev == nullptr) {
     return;
   }
-
   for (std::size_t i = 0U; i < kMaxSpotShadowLights; ++i) {
-    if (state.slots[i].depthTarget.value != 0U) {
-      dev->destroy_render_target(state.slots[i].depthTarget);
-      state.slots[i].depthTarget = RenderTargetHandle{};
-    }
     state.slots[i].lightIndex = -1;
   }
-  if (state.depthArrayTexture != kInvalidDeviceTexture) {
-    dev->destroy_texture(state.depthArrayTexture);
-    state.depthArrayTexture = kInvalidDeviceTexture;
-  }
-
+  destroy_shadow_depth_atlas(dev, &state.depthAtlasTexture, &state.atlasTarget);
   state.initialized = false;
 }
 

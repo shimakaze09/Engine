@@ -87,15 +87,13 @@ void resolve_pbr_shadow_uniforms(BackendState &backend,
   char name[64] = {};
 
   backend.pbrShadowEnabledLoc = dev->shader_param(prog, "uShadowEnabled");
-  backend.pbrShadowMapArrayLoc =
-      dev->shader_param(prog, "uShadowMapArray");
+  backend.pbrShadowAtlasLoc = dev->shader_param(prog, "uShadowAtlas");
   backend.pbrShadowMatrixParam = dev->shader_param(prog, "uShadowMatrix");
   backend.pbrCascadeSplitsParam = dev->shader_param(prog, "uCascadeSplits");
 
   backend.pbrSpotShadowEnabledLoc =
       dev->shader_param(prog, "uSpotShadowEnabled");
-  backend.pbrSpotShadowMapArrayLoc =
-      dev->shader_param(prog, "uSpotShadowMapArray");
+  backend.pbrSpotShadowAtlasLoc = dev->shader_param(prog, "uSpotShadowAtlas");
   backend.pbrSpotShadowMatrixParam =
       dev->shader_param(prog, "uSpotShadowMatrix");
   backend.pbrSpotShadowLightIdxParam =
@@ -545,25 +543,7 @@ bool init_backend_core(BackendState &backend) noexcept {
     fallbackCube.facePixels = facePixels;
     backend.fallbackCubemap = dev->create_texture(fallbackCube);
 
-    // Arrays reject client texels (render-target only), so the array
-    // fallback is created empty: its contents are undefined, but the
-    // shaders only sample the shadow arrays behind their enabled flags
-    // and the descriptor just has to be valid. A device without arrays
-    // never enables either shadow set, so it gets no fallback and the
-    // array slots bind nothing.
-    if (dev->caps.textureArrays) {
-      TextureDesc fallbackArray{};
-      fallbackArray.kind = TextureKind::Tex2DArray;
-      fallbackArray.format = TextureFormat::Depth24;
-      fallbackArray.width = 1;
-      fallbackArray.height = 1;
-      fallbackArray.layers = 1;
-      fallbackArray.filter = TextureFilter::Nearest;
-      backend.fallbackTexture2DArray = dev->create_texture(fallbackArray);
-    }
     if ((backend.fallbackTexture2D == kInvalidDeviceTexture) ||
-        (dev->caps.textureArrays &&
-         (backend.fallbackTexture2DArray == kInvalidDeviceTexture)) ||
         (backend.fallbackCubemap == kInvalidDeviceTexture)) {
       core::log_message(core::LogLevel::Warning, "renderer",
                         "fallback sampler textures unavailable — disabled "

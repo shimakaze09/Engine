@@ -471,18 +471,16 @@ void bind_pbr_shadow_uniforms(const BackendState &backend,
     return;
   }
 
-  // Flat vocabulary, array samplers: the cascade and spot
-  // sets each bind one Tex2DArray (layer = slot); matrices go up as one
+  // Flat vocabulary, atlas samplers: the cascade and spot
+  // sets each bind one depth atlas (tile = slot); matrices go up as one
   // mat4 array, splits/light indices/pos+far as packed vec4 payloads.
-  // The disabled state still binds the array fallback: Vulkan-family
+  // The disabled state still binds the 2-D fallback: Vulkan-family
   // backends need every declared sampler descriptor valid at draw.
-  dev->bind_texture_slot(
-      static_cast<std::uint32_t>(kShadowCascadeArrayUnit),
-      shadowEnabled ? backend.shadowState.depthArrayTexture
-                    : backend.fallbackTexture2DArray);
-  if (backend.pbrShadowMapArrayLoc.valid()) {
-    dev->set_param_i32(backend.pbrShadowMapArrayLoc,
-                       kShadowCascadeArrayUnit);
+  dev->bind_texture_slot(static_cast<std::uint32_t>(kShadowCascadeAtlasUnit),
+                         shadowEnabled ? backend.shadowState.depthAtlasTexture
+                                       : backend.fallbackTexture2D);
+  if (backend.pbrShadowAtlasLoc.valid()) {
+    dev->set_param_i32(backend.pbrShadowAtlasLoc, kShadowCascadeAtlasUnit);
   }
   float shadowMatrices[kShadowCascadeCount * 16U] = {};
   float cascadeSplits[4] = {};
@@ -505,13 +503,12 @@ void bind_pbr_shadow_uniforms(const BackendState &backend,
     dev->set_param_i32(backend.pbrShadowEnabledLoc, shadowEnabled ? 1 : 0);
   }
 
-  dev->bind_texture_slot(
-      static_cast<std::uint32_t>(kSpotShadowArrayUnit),
-      spotShadowEnabled ? backend.spotShadowState.depthArrayTexture
-                        : backend.fallbackTexture2DArray);
-  if (backend.pbrSpotShadowMapArrayLoc.valid()) {
-    dev->set_param_i32(backend.pbrSpotShadowMapArrayLoc,
-                       kSpotShadowArrayUnit);
+  dev->bind_texture_slot(static_cast<std::uint32_t>(kSpotShadowAtlasUnit),
+                         spotShadowEnabled
+                             ? backend.spotShadowState.depthAtlasTexture
+                             : backend.fallbackTexture2D);
+  if (backend.pbrSpotShadowAtlasLoc.valid()) {
+    dev->set_param_i32(backend.pbrSpotShadowAtlasLoc, kSpotShadowAtlasUnit);
   }
   // Slot indices are scene indices; the forward shader compares them
   // against its position in the uploaded (nearest) light arrays.
@@ -582,9 +579,9 @@ void unbind_pbr_shadow_textures(const RenderDevice *dev) noexcept {
   if ((dev == nullptr) || (dev->bind_texture_slot == nullptr)) {
     return;
   }
-  dev->bind_texture_slot(static_cast<std::uint32_t>(kShadowCascadeArrayUnit),
+  dev->bind_texture_slot(static_cast<std::uint32_t>(kShadowCascadeAtlasUnit),
                          kInvalidDeviceTexture);
-  dev->bind_texture_slot(static_cast<std::uint32_t>(kSpotShadowArrayUnit),
+  dev->bind_texture_slot(static_cast<std::uint32_t>(kSpotShadowAtlasUnit),
                          kInvalidDeviceTexture);
   for (std::size_t s = 0U; s < kMaxPointShadowLights; ++s) {
     dev->bind_texture_slot(

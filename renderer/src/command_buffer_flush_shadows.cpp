@@ -112,8 +112,9 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
         const math::Mat4 &lightVP = lightMatrices[c];
         const int shadowResolution = shadow_cascade_resolution(c);
 
-        dev->bind_render_target(backend.shadowState.depthTargets[c]);
-        dev->set_viewport(0, 0, shadowResolution, shadowResolution);
+        const ShadowAtlasTile tile = shadow_atlas_tile(c, shadowResolution);
+        dev->bind_render_target(backend.shadowState.atlasTarget);
+        dev->set_viewport(tile.x, tile.y, shadowResolution, shadowResolution);
         dev->apply_render_state(RenderState{DepthTest::Less, true,
                                             BlendMode::Disabled,
                                             CullMode::Back});
@@ -197,8 +198,10 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
     dev->bind_program(backend.shadowDepthProgram);
     for (std::size_t s = 0U; s < activeSpotShadows; ++s) {
       const auto &slot = backend.spotShadowState.slots[s];
-      dev->bind_render_target(slot.depthTarget);
-      dev->set_viewport(0, 0, kSpotShadowMapResolution,
+      const ShadowAtlasTile tile =
+          shadow_atlas_tile(s, kSpotShadowMapResolution);
+      dev->bind_render_target(backend.spotShadowState.atlasTarget);
+      dev->set_viewport(tile.x, tile.y, kSpotShadowMapResolution,
                         kSpotShadowMapResolution);
       dev->apply_render_state(RenderState{DepthTest::Less, true,
                                           BlendMode::Disabled,

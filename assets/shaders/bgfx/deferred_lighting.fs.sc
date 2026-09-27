@@ -5,7 +5,7 @@ $input v_texcoord0
 // spot lights fetched from the R32F light-data and tile textures
 // (texelFetch; layouts match light_culling.h). Sampler stages are baked
 // to the flush's unit assignment (G-buffer 0-3, tile 4, SSAO 5, light
-// data 6, cascade array 7, spot array 8, point cubes 9-12, IBL
+// data 6, cascade atlas 7, spot atlas 8, point cubes 9-12, IBL
 // irradiance 13, prefiltered 14, BRDF table 15 — max register 15, inside
 // DXBC's 16-sampler cap) with full CSM/spot/point shadow sampling and,
 // when an environment is set, split-sum image-based ambient.
@@ -50,12 +50,12 @@ SAMPLER2D(uGBufferEmissive, 2);
 SAMPLER2D(uGBufferDepth, 3);
 SAMPLER2D(uTileLightTex, 4);
 SAMPLER2D(uSsaoTexture, 5);
-// Unit map: the cascade and spot sets are Tex2DArrays (one
+// Unit map: the cascade and spot sets are one atlas each (one
 // register each), so the deferred map tops out at register 12 and fits
 // DXBC's 16-sampler cap and WebGL2's 16-unit floor.
 SAMPLER2D(uLightDataTex, 6);
-SAMPLER2DARRAY(uShadowMapArray, 7);
-SAMPLER2DARRAY(uSpotShadowMapArray, 8);
+SAMPLER2D(uShadowAtlas, 7);
+SAMPLER2D(uSpotShadowAtlas, 8);
 SAMPLERCUBE(uPointShadowMap0, 9);
 SAMPLERCUBE(uPointShadowMap1, 10);
 SAMPLERCUBE(uPointShadowMap2, 11);
@@ -93,18 +93,28 @@ uniform vec4 uHeightFogStepCount;
 #define MAX_SPOT_SHADOW_LIGHTS 4
 #define MAX_POINT_SHADOW_LIGHTS 4
 
-// One tap from a shadow Tex2DArray at explicit LOD 0 (single-mip maps;
-// fxc also rejects gradient samples in the dynamic light loops). HLSL
-// samplers are typed structs, so the array form has its own entry
-// point shared by the hlsl/spirv/metal typed-sampler branch; the
-// plain-GLSL profiles (glsl/essl) route vec3 through textureLod.
+// One tap from a shadow atlas at explicit LOD 0 (single-mip maps; fxc
+// also rejects gradient samples in the dynamic light loops). Map _tile
+// is tile (_tile % 2, _tile / 2) of a 2x2 atlas counted from the top-left
+// of the render target, mirroring shadow_atlas_tile; the GL family's
+// render-target v runs bottom-up, so its row index flips. The tap is
+// clamped half a tile texel inside its tile, the way a separate map's
+// clamp-to-edge would stop it, so a border PCF tap never reads the
+// neighbouring map.
 #if BGFX_SHADER_LANGUAGE_GLSL
-#define ENGINE_SHADOW_ARRAY_TAP(_s, _uv, _layer) \
-    texture2DLod(_s, vec3(_uv, _layer), 0.0).r
+#define ENGINE_ATLAS_ROW(_row) (1.0 - (_row))
 #else
-#define ENGINE_SHADOW_ARRAY_TAP(_s, _uv, _layer) \
-    texture2DArrayLod(_s, vec3(_uv, _layer), 0.0).r
+#define ENGINE_ATLAS_ROW(_row) (_row)
 #endif
+vec2 engine_shadow_atlas_uv(vec2 uv, float tile, float tileTexel) {
+    vec2 local = clamp(uv, vec2_splat(0.5 * tileTexel),
+                       vec2_splat(1.0 - 0.5 * tileTexel));
+    float row = floor(tile * 0.5);
+    float column = tile - 2.0 * row;
+    return (local + vec2(column, ENGINE_ATLAS_ROW(row))) * 0.5;
+}
+#define ENGINE_SHADOW_ATLAS_TAP(_s, _uv, _tile, _tileTexel) \
+    texture2DLod(_s, engine_shadow_atlas_uv(_uv, _tile, _tileTexel), 0.0).r
 uniform vec4 uShadowEnabled;          // .x
 uniform mat4 uShadowMatrix[4];
 uniform vec4 uCascadeSplits;          // split distance per cascade
@@ -257,27 +267,29 @@ float linearize_depth(float depth) {
     return -viewPos.z / viewPos.w;
 }
 
+// 3x3 PCF over one cascade/spot map; the texel steps mirror
+// kShadowMapResolution (2048) and kSpotShadowMapResolution (1024) —
+// constants here because HLSL-path shaderc lacks textureSize.
+#define CASCADE_SHADOW_TEXEL (1.0 / 2048.0)
+#define SPOT_SHADOW_TEXEL (1.0 / 1024.0)
+
 // Shadow samples use explicit LOD 0: the maps are single-mip, so the
 // texel fetched is identical, and the dx11 profile's fxc rejects
 // gradient sampling inside the dynamic light loops that reach these
 // helpers (X3511 unroll explosion otherwise).
 float sample_shadow_pcf_at(vec2 uv, float compareDepth, int mapIdx) {
     float stored =
-        ENGINE_SHADOW_ARRAY_TAP(uShadowMapArray, uv, float(mapIdx));
+        ENGINE_SHADOW_ATLAS_TAP(uShadowAtlas, uv, float(mapIdx),
+                                CASCADE_SHADOW_TEXEL);
     return ((compareDepth - 0.002) > stored) ? 0.0 : 1.0;
 }
 
 float sample_spot_shadow_at(vec2 uv, float compareDepth, int mapIdx) {
     float stored =
-        ENGINE_SHADOW_ARRAY_TAP(uSpotShadowMapArray, uv, float(mapIdx));
+        ENGINE_SHADOW_ATLAS_TAP(uSpotShadowAtlas, uv, float(mapIdx),
+                                SPOT_SHADOW_TEXEL);
     return ((compareDepth - 0.002) > stored) ? 0.0 : 1.0;
 }
-
-// 3x3 PCF over one cascade/spot map; the texel steps mirror
-// kShadowMapResolution (2048) and kSpotShadowMapResolution (1024) —
-// constants here because HLSL-path shaderc lacks textureSize.
-#define CASCADE_SHADOW_TEXEL (1.0 / 2048.0)
-#define SPOT_SHADOW_TEXEL (1.0 / 1024.0)
 
 float shadow_pcf(vec3 projCoords, int mapIdx, bool spot) {
     if (projCoords.z > 1.0 || projCoords.x < 0.0 || projCoords.x > 1.0 ||

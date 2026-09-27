@@ -175,17 +175,20 @@ int main() {
           "essl depth-only fragment keeps a main definition");
   t.check(!contains(probeEssl, "void main ();"),
           "essl depth-only fragment is not a bodyless prototype");
-  // The shadow-array taps sample at explicit LOD 0; glsl-optimizer lowers
-  // them to an ES 2.0 extension name bgfx's GLES3 preamble does not map,
-  // which fails the WebGL2 compile at first submit (fatal in bgfx).
+  // The shadow-atlas taps sample at explicit LOD 0. glsl-optimizer can
+  // lower an LOD tap to an ES 2.0 extension name bgfx's GLES3 preamble
+  // does not map, which fails the WebGL2 compile at first submit (fatal
+  // in bgfx); the names that preamble maps onto textureLod are
+  // texture2DLod and textureLod itself.
   for (const char *output : {"deferred_lighting.frag.default.essl.bin",
                              "pbr.frag.PBR_FULL.essl.bin"}) {
     const std::vector<char> essl = read_file(outA / output);
-    t.check(!essl.empty(), "essl shadow-array consumer cooked");
-    t.check(!contains(essl, "texture2DArrayLodEXT"),
-            "essl carries no texture2DArrayLodEXT call");
-    t.check(contains(essl, "textureLod"),
-            "essl samples the shadow array through textureLod");
+    t.check(!essl.empty(), "essl shadow-atlas consumer cooked");
+    t.check(!contains(essl, "texture2DArrayLodEXT") &&
+                !contains(essl, "texture2DLodEXT"),
+            "essl carries no ES 2.0 LOD extension call");
+    t.check(contains(essl, "texture2DLod") || contains(essl, "textureLod"),
+            "essl samples the shadow atlas at an explicit LOD");
   }
 
   // Unchanged re-run: stamp-driven skip, bytes untouched.

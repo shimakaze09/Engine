@@ -533,10 +533,6 @@ void destroy_backend_resources(BackendState *backend) noexcept {
       dev->destroy_texture(backend->fallbackCubemap);
       backend->fallbackCubemap = kInvalidDeviceTexture;
     }
-    if (backend->fallbackTexture2DArray != kInvalidDeviceTexture) {
-      dev->destroy_texture(backend->fallbackTexture2DArray);
-      backend->fallbackTexture2DArray = kInvalidDeviceTexture;
-    }
   }
   backend->pbrProgram = kInvalidDeviceProgram;
   backend->defaultProgram = kInvalidDeviceProgram;

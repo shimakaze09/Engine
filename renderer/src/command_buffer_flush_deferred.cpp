@@ -681,17 +681,16 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
       // Flat vocabulary: per-slot samplers, one mat4 array per
       // shadow kind, splits/indices/pos+far as packed vec4 payloads.
       {
-        // Array samplers: one Tex2DArray for all cascades. The
-        // disabled state still binds the array fallback: Vulkan-family
+        // Atlas samplers: one depth atlas for all cascades. The
+        // disabled state still binds the 2-D fallback: Vulkan-family
         // backends need every declared sampler descriptor valid at
         // draw (same rule as the forward flush).
         dev->bind_texture_slot(
-            static_cast<std::uint32_t>(kShadowCascadeArrayUnit),
-            shadowEnabled ? backend.shadowState.depthArrayTexture
-                          : backend.fallbackTexture2DArray);
-        if (backend.dlShadowMapArrayLoc.valid()) {
-          dev->set_param_i32(backend.dlShadowMapArrayLoc,
-                             kShadowCascadeArrayUnit);
+            static_cast<std::uint32_t>(kShadowCascadeAtlasUnit),
+            shadowEnabled ? backend.shadowState.depthAtlasTexture
+                          : backend.fallbackTexture2D);
+        if (backend.dlShadowAtlasLoc.valid()) {
+          dev->set_param_i32(backend.dlShadowAtlasLoc, kShadowCascadeAtlasUnit);
         }
         float shadowMatrices[kShadowCascadeCount * 16U] = {};
         float cascadeSplits[4] = {};
@@ -720,13 +719,12 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
       }
 
       const bool spotShadowEnabled = doSpotShadows;
-      dev->bind_texture_slot(
-          static_cast<std::uint32_t>(kSpotShadowArrayUnit),
-          spotShadowEnabled ? backend.spotShadowState.depthArrayTexture
-                            : backend.fallbackTexture2DArray);
-      if (backend.dlSpotShadowMapArrayLoc.valid()) {
-        dev->set_param_i32(backend.dlSpotShadowMapArrayLoc,
-                           kSpotShadowArrayUnit);
+      dev->bind_texture_slot(static_cast<std::uint32_t>(kSpotShadowAtlasUnit),
+                             spotShadowEnabled
+                                 ? backend.spotShadowState.depthAtlasTexture
+                                 : backend.fallbackTexture2D);
+      if (backend.dlSpotShadowAtlasLoc.valid()) {
+        dev->set_param_i32(backend.dlSpotShadowAtlasLoc, kSpotShadowAtlasUnit);
       }
       if (spotShadowEnabled) {
         float spotMatrices[kMaxSpotShadowLights * 16U] = {};
@@ -905,11 +903,10 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
         dev->bind_texture_slot(5U, kInvalidDeviceTexture);
       }
       dev->bind_texture_slot(
-          static_cast<std::uint32_t>(kShadowCascadeArrayUnit),
+          static_cast<std::uint32_t>(kShadowCascadeAtlasUnit),
           kInvalidDeviceTexture);
-      dev->bind_texture_slot(
-          static_cast<std::uint32_t>(kSpotShadowArrayUnit),
-          kInvalidDeviceTexture);
+      dev->bind_texture_slot(static_cast<std::uint32_t>(kSpotShadowAtlasUnit),
+                             kInvalidDeviceTexture);
       dev->bind_program(kInvalidDeviceProgram);
       gpu_profiler_end_pass(GpuPassId::DeferredLighting);
     }

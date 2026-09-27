@@ -724,11 +724,11 @@ counting_create_texture(const engine::renderer::TextureDesc &desc) noexcept {
   return engine::tests::fake::create_texture(desc);
 }
 
-/// EXPECTATION: a device without texture arrays (bgfx under Emscripten) is
-/// never asked for one. Both array-backed shadow sets stay unavailable and
-/// no array fallback exists, while the cubemap-backed point shadows are
-/// unaffected.
-int check_no_texture_arrays_skips_array_shadow_sets() {
+/// EXPECTATION (#690): a device without texture arrays (bgfx under
+/// Emscripten) is never asked for one, and still gets cascade, spot and
+/// point shadows: the cascade and spot sets are 2-D depth atlases. On base
+/// both sets stayed off on such a device, so the web page drew none.
+int check_no_texture_arrays_keeps_every_shadow_set() {
   using namespace engine::renderer;
 
   reset_backend_harness();
@@ -743,11 +743,13 @@ int check_no_texture_arrays_skips_array_shadow_sets() {
     result = 380;
   } else if (g_arrayTextureRequests != 0U) {
     result = 381;
-  } else if (backend_state().shadowAvailable ||
-             backend_state().spotShadowAvailable) {
+  } else if (!backend_state().shadowAvailable ||
+             !backend_state().spotShadowAvailable) {
     result = 382;
-  } else if (backend_state().fallbackTexture2DArray !=
-             kInvalidDeviceTexture) {
+  } else if ((backend_state().shadowState.depthAtlasTexture ==
+              kInvalidDeviceTexture) ||
+             (backend_state().spotShadowState.depthAtlasTexture ==
+              kInvalidDeviceTexture)) {
     result = 383;
   } else if (!backend_state().pointShadowAvailable) {
     result = 384;
@@ -838,7 +840,7 @@ int main() {
     result = check_metal_profile_links_without_sidecars();
   }
   if (result == 0) {
-    result = check_no_texture_arrays_skips_array_shadow_sets();
+    result = check_no_texture_arrays_keeps_every_shadow_set();
   }
 
   std::filesystem::remove_all(kShaderDir, ec);
