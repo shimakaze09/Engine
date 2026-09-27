@@ -34,6 +34,8 @@ constexpr const char *kWindowMaximizedKey = "WindowMaximized=";
 constexpr const char *kShortcutKey = "Shortcut.";
 /// Which axes the move and rotate handles follow: World or Local.
 constexpr const char *kGizmoSpaceKey = "GizmoSpace=";
+/// Whether the Scene view draws its reference grid: 1 or 0.
+constexpr const char *kShowGridKey = "ShowGrid=";
 
 /// The geometry the layout file stored, and whether it waits to be
 /// applied.
@@ -96,6 +98,17 @@ void read_line(ImGuiContext *, ImGuiSettingsHandler *, void *,
     }
     return;
   }
+  const std::size_t gridKeyLength = std::strlen(kShowGridKey);
+  if (std::strncmp(line, kShowGridKey, gridKeyLength) == 0) {
+    const char *value = line + gridKeyLength;
+    if ((value[0] == '0' || value[0] == '1') && (value[1] == '\0')) {
+      editor_session().showGrid = value[0] == '1';
+    } else {
+      core::log_message(core::LogLevel::Warning, "editor",
+                        "stored ShowGrid is neither 0 nor 1; ignored");
+    }
+    return;
+  }
   const std::size_t keyLength = std::strlen(kCjkFontKey);
   if (std::strncmp(line, kCjkFontKey, keyLength) == 0) {
     static_cast<void>(core::cvar_set_string(kCjkFontCvar, line + keyLength));
@@ -149,6 +162,7 @@ void write_all(ImGuiContext *, ImGuiSettingsHandler *handler,
   }
   buffer->appendf("%s%s\n", kGizmoSpaceKey,
                   editor_session().gizmoWorldSpace ? "World" : "Local");
+  buffer->appendf("%s%d\n", kShowGridKey, editor_session().showGrid ? 1 : 0);
   for (std::size_t i = 0U; i < editor_shortcut_count(); ++i) {
     const EditorShortcut &row = editor_shortcut_at(i);
     char chord[40] = {};

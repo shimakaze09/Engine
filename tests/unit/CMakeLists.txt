@@ -2279,6 +2279,17 @@ engine_add_test_executable(engine_unit_editor_shortcuts
     SDL_MAIN_HANDLED
 )
 
+engine_add_test_executable(engine_unit_editor_grid
+    SOURCES
+    editor_grid_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/editor/src
+    PRIVATE_DEPS
+    engine_editor
+    COMPILE_DEFINITIONS
+    SDL_MAIN_HANDLED
+)
+
 engine_add_test_executable(engine_unit_editor_hierarchy_walk
     SOURCES
     editor_hierarchy_walk_test.cpp

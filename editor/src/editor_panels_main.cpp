@@ -482,6 +482,12 @@ void draw_toolbar() noexcept {
   ImGui::SameLine();
   ImGui::SeparatorEx(ImGuiSeparatorFlags_Vertical);
   ImGui::SameLine();
+  if (ImGui::Checkbox("Grid", &editor_session().showGrid)) {
+    ImGui::MarkIniSettingsDirty(); // a saved preference
+  }
+  ImGui::SetItemTooltip("The Scene view's ground grid; its spacing follows "
+                        "the zoom");
+  ImGui::SameLine();
   ImGui::Checkbox("Snap", &editor_session().snapEnabled);
   ImGui::SameLine();
   ImGui::SetNextItemWidth(64.0F);

@@ -166,6 +166,8 @@ struct EditorSession final {
   // own axes otherwise. Scale always uses the entity's axes: a scale along
   // a world axis would shear a rotated entity. A saved preference.
   bool gizmoWorldSpace = false;
+  // The Scene view's reference grid (editor_grid.h). A saved preference.
+  bool showGrid = true;
   bool snapEnabled = false;
   float snapStep = 0.5F;
   float snapAngleDegrees = 15.0F;

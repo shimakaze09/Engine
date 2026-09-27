@@ -542,6 +542,23 @@ void check_gizmo_space(engine::tests::TestContext &t) noexcept {
   t.check(!session.gizmoWorldSpace, "X switches back to the entity's axes");
 }
 
+/// The Scene grid's toggle is saved as ShowGrid=1 or 0; anything else
+/// stored is refused with the current choice kept.
+void check_grid_preference(engine::tests::TestContext &t) noexcept {
+  engine::editor::EditorSession &session = engine::editor::editor_session();
+  session.showGrid = true;
+  char section[2048] = {};
+  t.check((engine::editor::editor_preferences_section(section,
+                                                      sizeof(section)) > 0U) &&
+              (std::strstr(section, "ShowGrid=1\n") != nullptr),
+          "a shown grid is saved");
+  load_section("ShowGrid=0\n");
+  t.check(!session.showGrid, "a stored hidden grid is applied");
+  load_section("ShowGrid=yes\n");
+  t.check(!session.showGrid, "a malformed ShowGrid keeps the choice");
+  session.showGrid = true;
+}
+
 } // namespace
 
 int main() {
@@ -590,6 +607,7 @@ int main() {
   check_create_and_exit(t, *world);
   check_rebinding(t, *world);
   check_gizmo_space(t);
+  check_grid_preference(t);
 
   editor_set_world(nullptr);
   engine::core::platform_set_scripted_file_dialogs(false);

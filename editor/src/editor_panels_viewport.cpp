@@ -6,6 +6,7 @@
 #include "editor_panels_viewport.h"
 
 #include "editor_commands.h"
+#include "editor_grid.h"
 #include "editor_session.h"
 #include "editor_transform_util.h"
 
@@ -405,6 +406,10 @@ void draw_scene_viewport_panel() noexcept {
                             (editor_session().world->get_transform_read_ptr(
                                  selectedEntity) != nullptr);
 
+  if (editor_session().showGrid) {
+    const EditorCamera &orbit = editor_session().editorCamera;
+    emit_reference_grid(orbit.target, orbit.distance);
+  }
   if (selectedEntity != runtime::kInvalidEntity) {
     draw_selected_collider_overlay(selectedEntity);
     if (regionSize.y > 0.0F) {
