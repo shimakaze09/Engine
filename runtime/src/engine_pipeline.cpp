@@ -2269,6 +2269,7 @@ void EnginePipeline::Impl::stage_render() noexcept {
                    static_cast<float>(utilizationPct));
   }
   renderer::present_render_device();
+  core::platform_note_frame_presented();
 
   if (interpolateCamera) {
     renderer::set_active_camera(currentCameraSample);

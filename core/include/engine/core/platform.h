@@ -117,6 +117,23 @@ float content_scale_for(float displayScale, float pixelDensity) noexcept;
 /// the call.
 bool platform_set_window_title(const char *title) noexcept;
 
+/// Presented frames after which the window is shown. The window is created
+/// hidden: before its second present it is still being resized to the
+/// stored layout and its swapchain holds images nothing has drawn, which a
+/// visible window shows as a flash of garbage. The first frame is
+/// not enough, because ImGui hides windows created that frame and the
+/// swapchain is reset to the final size only after it.
+inline constexpr int kPresentsBeforeWindowShown = 2;
+
+/// Counts one presented frame and shows the window once
+/// kPresentsBeforeWindowShown have been presented. Idempotent past that; a
+/// headless window stays hidden but is counted the same way.
+void platform_note_frame_presented() noexcept;
+
+/// True once the window has been shown (or, headless, would have been).
+/// Reset when the platform shuts down.
+bool platform_window_revealed() noexcept;
+
 /// The main window's size in window units and whether it is maximized.
 /// While maximized the size is the one it restores to, so a layout saved
 /// maximized still knows its normal size.
