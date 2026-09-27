@@ -8,6 +8,7 @@
 // module that moves its entity every frame and records, in on_end_play,
 // where the entity was.
 
+#include "../asset_root.h"
 #include "editor_session.h"
 #include "engine/core/logging.h"
 #include "engine/editor/editor.h"
@@ -35,28 +36,6 @@ int g_failures = 0;
       ++g_failures;                                                            \
     }                                                                          \
   } while (false)
-
-bool set_working_directory_with_assets() noexcept {
-  const std::filesystem::path original = std::filesystem::current_path();
-  const std::filesystem::path candidates[] = {
-      original, original / "..", original / "../..", original / "../../..",
-      original / "../../../.."};
-  for (const std::filesystem::path &candidate : candidates) {
-    std::error_code ec{};
-    const std::filesystem::path normalized =
-        std::filesystem::weakly_canonical(candidate, ec);
-    if (ec) {
-      continue;
-    }
-    if (std::filesystem::exists(normalized / "assets/main.lua", ec) &&
-        std::filesystem::exists(
-            normalized / "assets/shaders/bgfx/shaders.manifest", ec)) {
-      std::filesystem::current_path(normalized, ec);
-      return !ec;
-    }
-  }
-  return false;
-}
 
 /// Moves its entity one unit along x per frame of play, and records in
 /// on_end_play where the entity is when the session ends.
@@ -104,7 +83,7 @@ float controller_x(const engine::runtime::World &world) noexcept {
 
 /// Runs this executable or test program.
 int main() {
-  if (!set_working_directory_with_assets() || !write_script()) {
+  if (!engine::tests::enter_asset_root() || !write_script()) {
     std::fprintf(stderr, "FAIL: fixture setup\n");
     return 1;
   }

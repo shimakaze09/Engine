@@ -22,6 +22,7 @@
 #include "engine/runtime/scene_serializer.h"
 #include "engine/runtime/world.h"
 
+#include "../asset_root.h"
 #include "../test_harness.h"
 
 namespace {
@@ -70,20 +71,6 @@ std::string meta(const char *guid) {
   return std::string("{\"schemaVersion\": 1, \"guid\": \"") + guid + "\"}\n";
 }
 
-/// The repository's assets directory, found by walking up from the
-/// working directory; empty when it is not found.
-std::filesystem::path repository_assets() {
-  std::error_code ec{};
-  std::filesystem::path dir = std::filesystem::current_path(ec);
-  for (int depth = 0; !ec && (depth < 6); ++depth) {
-    if (std::filesystem::exists(dir / "assets" / "triangle.mesh", ec)) {
-      return dir / "assets";
-    }
-    dir = dir.parent_path();
-  }
-  return {};
-}
-
 /// The bootstrap mesh from the repository, two environment maps and a
 /// texture, each with the sidecar that gives it its identity.
 bool write_project() {
@@ -92,7 +79,10 @@ bool write_project() {
   const std::filesystem::path root(kProject);
   std::filesystem::create_directories(root / "environments", ec);
   std::filesystem::create_directories(root / "textures", ec);
-  const std::filesystem::path assets = repository_assets();
+  std::filesystem::path assetRoot;
+  const std::filesystem::path assets =
+      engine::tests::find_asset_root(&assetRoot) ? (assetRoot / "assets")
+                                                 : std::filesystem::path();
   if (ec || assets.empty()) {
     return false;
   }

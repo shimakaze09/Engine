@@ -5,23 +5,24 @@
 // capture model; navigation comes from the record's fields, never from
 // the message text.
 
+#include "../asset_root.h"
+#include "../test_harness.h"
 #include "editor_console_capture.h"
 #include "editor_session.h"
+#include "engine/core/diagnostic.h"
+#include "engine/core/logging.h"
 #include "engine/editor/editor.h"
 #include "engine/renderer/shader_system.h"
 #include "engine/renderer/texture_loader.h"
-#include "engine/core/diagnostic.h"
-#include "engine/core/logging.h"
 #include "engine/runtime/world.h"
-#include "../test_harness.h"
 
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
-#include <system_error>
 #include <memory>
 #include <new>
+#include <system_error>
 #include <thread>
 #include <vector>
 
@@ -394,42 +395,13 @@ void check_concurrent_ingest_is_safe() noexcept {
        "distinct concurrent messages are never collapsed together");
 }
 
-/// Moves the working directory to the nearest ancestor carrying the
-/// bundled editor font (the pipeline tests' asset-walk technique):
-/// initialize_editor loads it by relative path, and this test's subject
-/// is the sink retry, so the font stage runs with its real asset present
-/// rather than through the missing-font fallback.
-bool set_working_directory_with_editor_font() noexcept {
-  std::error_code ec{};
-  const std::filesystem::path original = std::filesystem::current_path(ec);
-  if (ec) {
-    return false;
-  }
-  const std::filesystem::path candidates[] = {
-      original, original / "..", original / "../..", original / "../../..",
-      original / "../../../.."};
-  for (const std::filesystem::path &candidate : candidates) {
-    const std::filesystem::path normalized =
-        std::filesystem::weakly_canonical(candidate, ec);
-    if (ec) {
-      continue;
-    }
-    if (std::filesystem::exists(
-            normalized / "assets/fonts/Roboto-Medium.ttf", ec)) {
-      std::filesystem::current_path(normalized, ec);
-      return !ec;
-    }
-  }
-  return false;
-}
-
 /// EXPECTATION (#347): a failed initialize_editor releases the console
 /// sink it registered, so the next in-process editor bootstrap — after
 /// core shuts down and restarts logging, clearing the sink table — starts
 /// with a working Console capture instead of a stale registered flag that
 /// silently skips re-registration.
 void check_failed_editor_init_does_not_poison_capture_retry() noexcept {
-  if (!set_working_directory_with_editor_font()) {
+  if (!engine::tests::enter_asset_root()) {
     check(false, "the bundled editor font could be located");
     return;
   }

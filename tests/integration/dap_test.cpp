@@ -24,6 +24,7 @@
 #include "engine/scripting/dap_server.h"
 #include "engine/scripting/scripting.h"
 
+#include "../asset_root.h"
 #include "../scripting_clock.h"
 
 #if defined(_WIN32)
@@ -845,29 +846,6 @@ bool test_dap_large_breakpoint_list() noexcept {
 bool stopped_bridge_is_playing() noexcept { return false; }
 bool stopped_bridge_is_paused() noexcept { return false; }
 
-/// Walks upward from the current path until the bundled assets are found.
-bool set_working_directory_with_assets() noexcept {
-  const std::filesystem::path original = std::filesystem::current_path();
-  const std::filesystem::path candidates[] = {
-      original, original / "..", original / "../..", original / "../../..",
-      original / "../../../.."};
-  for (const std::filesystem::path &candidate : candidates) {
-    std::error_code ec{};
-    const std::filesystem::path normalized =
-        std::filesystem::weakly_canonical(candidate, ec);
-    if (ec) {
-      continue;
-    }
-    if (std::filesystem::exists(normalized / "assets/main.lua", ec) &&
-        std::filesystem::exists(normalized / "assets/shaders/bgfx/shaders.manifest",
-                                ec)) {
-      std::filesystem::current_path(normalized, ec);
-      return !ec;
-    }
-  }
-  return false;
-}
-
 /// Regression for #540: the transport was serviced only from the frame
 /// time publication, which the pipeline made only while playing, so a client
 /// could connect before Play but never get its initialize answered. The
@@ -875,7 +853,7 @@ bool set_working_directory_with_assets() noexcept {
 /// answer initialize and setBreakpoints in the same handshake without a
 /// Play, and drain both in one frame.
 bool test_dap_attach_while_stopped() noexcept {
-  if (!set_working_directory_with_assets()) {
+  if (!engine::tests::enter_asset_root()) {
     std::printf("(assets not found) ");
     return false;
   }

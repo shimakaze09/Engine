@@ -10,6 +10,7 @@
 
 #include "gpu_frame_capture.h"
 
+#include "asset_root.h"
 #include "engine/content/asset_metadata.h"
 #include "engine/core/cvar.h"
 #include "engine/engine.h"
@@ -55,29 +56,6 @@ inline bool (*g_sceneView)(engine::renderer::RenderViewDesc *) noexcept =
     nullptr;
 inline bool scene_view(engine::renderer::RenderViewDesc *outView) noexcept {
   return (g_sceneView != nullptr) && g_sceneView(outView);
-}
-
-/// Walks upward from the current path until the bundled assets are found.
-inline bool enter_asset_directory() noexcept {
-  const std::filesystem::path original = std::filesystem::current_path();
-  const std::filesystem::path candidates[] = {
-      original, original / "..", original / "../..", original / "../../..",
-      original / "../../../.."};
-  for (const std::filesystem::path &candidate : candidates) {
-    std::error_code ec{};
-    const std::filesystem::path normalized =
-        std::filesystem::weakly_canonical(candidate, ec);
-    if (ec) {
-      continue;
-    }
-    if (std::filesystem::exists(normalized / "assets/main.lua", ec) &&
-        std::filesystem::exists(normalized / "assets/shaders/bgfx/shaders.manifest",
-                                ec)) {
-      std::filesystem::current_path(normalized, ec);
-      return !ec;
-    }
-  }
-  return false;
 }
 
 } // namespace detail
@@ -181,7 +159,7 @@ inline bool settle_frames(engine::EnginePipeline &pipeline,
 inline int
 run_gpu_scene_test(const char *name, GpuSceneBody body,
                    GpuFirstFrameScene firstFrameScene = nullptr) noexcept {
-  if (!detail::enter_asset_directory()) {
+  if (!engine::tests::enter_asset_root()) {
     return 1;
   }
   engine::runtime::EditorBridge bridge{};

@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <filesystem>
 
+#include "../asset_root.h"
 #include "engine/engine.h"
 #include "engine/runtime/engine_pipeline.h"
 #include "engine/runtime/scene_serializer.h"
@@ -20,27 +21,6 @@ constexpr std::uint32_t kFrameCount = 240U;
 constexpr double kFrameSeconds = 1.0 / 60.0;
 constexpr const char *kMainScriptPath = "determinism_main.lua";
 constexpr const char *kRandomScriptPath = "determinism_random.lua";
-
-/// Walks upward from the current path until the bundled assets are found.
-bool set_working_directory_with_assets() noexcept {
-  const std::filesystem::path original = std::filesystem::current_path();
-  const std::filesystem::path candidates[] = {
-      original, original / "..", original / "../..", original / "../../..",
-      original / "../../../.."};
-  for (const std::filesystem::path &candidate : candidates) {
-    std::error_code ec{};
-    const std::filesystem::path normalized =
-        std::filesystem::weakly_canonical(candidate, ec);
-    if (ec) {
-      continue;
-    }
-    if (std::filesystem::exists(normalized / "assets/main.lua", ec)) {
-      std::filesystem::current_path(normalized, ec);
-      return !ec;
-    }
-  }
-  return false;
-}
 
 /// The run's main script does nothing. Script behaviour enters the hash
 /// through the entity module below instead, where it is one entity's
@@ -224,7 +204,7 @@ bool run_pipeline(std::uint32_t workerThreads, std::uint64_t *outHash,
 
 /// Runs this executable or test program.
 int main() {
-  if (!set_working_directory_with_assets() || !write_main_script() ||
+  if (!engine::tests::enter_asset_root() || !write_main_script() ||
       !write_random_script()) {
     std::printf("FAIL: determinism test setup\n");
     return 1;

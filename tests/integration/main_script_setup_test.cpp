@@ -7,6 +7,7 @@
 // report a rolled-back setup. The shipped assets/main.lua is an empty
 // template, so the sample is what exercises the controller.
 
+#include "../asset_root.h"
 #include "engine/core/logging.h"
 #include "engine/engine.h"
 #include "engine/runtime/engine_pipeline.h"
@@ -39,30 +40,6 @@ void count_rollbacks(engine::core::LogLevel, const char *, const char *message,
   }
 }
 
-/// Walks upward from the current path until the bundled assets are found
-/// (same technique as player_mode_test.cpp).
-bool set_working_directory_with_assets() noexcept {
-  const std::filesystem::path original = std::filesystem::current_path();
-  const std::filesystem::path candidates[] = {
-      original, original / "..", original / "../..", original / "../../..",
-      original / "../../../.."};
-  for (const std::filesystem::path &candidate : candidates) {
-    std::error_code ec{};
-    const std::filesystem::path normalized =
-        std::filesystem::weakly_canonical(candidate, ec);
-    if (ec) {
-      continue;
-    }
-    if (std::filesystem::exists(normalized / "assets/main.lua", ec) &&
-        std::filesystem::exists(
-            normalized / "assets/shaders/bgfx/shaders.manifest", ec)) {
-      std::filesystem::current_path(normalized, ec);
-      return !ec;
-    }
-  }
-  return false;
-}
-
 void set_player_env() noexcept {
 #ifdef _WIN32
   static_cast<void>(_putenv_s("ENGINE_CVAR_app_player_mode", "1"));
@@ -75,7 +52,7 @@ void set_player_env() noexcept {
 
 /// Runs this executable or test program.
 int main() {
-  if (!set_working_directory_with_assets()) {
+  if (!engine::tests::enter_asset_root()) {
     std::fprintf(stderr, "FAIL: could not locate bundled assets\n");
     return 1;
   }

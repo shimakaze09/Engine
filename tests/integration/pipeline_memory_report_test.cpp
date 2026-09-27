@@ -12,29 +12,12 @@
 #include <cstdio>
 #include <filesystem>
 
+#include "../asset_root.h"
 #include "../test_harness.h"
 
 namespace {
 
 engine::tests::TestContext g_tests{};
-
-/// Walks upward from the current path until the bundled assets are found.
-bool enter_asset_directory() noexcept {
-  const std::filesystem::path original = std::filesystem::current_path();
-  const std::filesystem::path candidates[] = {
-      original, original / "..", original / "../..", original / "../../..",
-      original / "../../../.."};
-  for (const std::filesystem::path &candidate : candidates) {
-    std::error_code ec{};
-    const std::filesystem::path normalized =
-        std::filesystem::weakly_canonical(candidate, ec);
-    if (!ec && std::filesystem::exists(normalized / "assets/main.lua", ec)) {
-      std::filesystem::current_path(normalized, ec);
-      return !ec;
-    }
-  }
-  return false;
-}
 
 std::int64_t bytes(engine::core::MemTag tag) noexcept {
   return engine::core::mem_tracker_current_bytes(tag);
@@ -44,7 +27,7 @@ std::int64_t bytes(engine::core::MemTag tag) noexcept {
 
 int main() {
   using engine::core::MemTag;
-  if (!enter_asset_directory()) {
+  if (!engine::tests::enter_asset_root()) {
     g_tests.fail("find the bundled assets");
     return g_tests.finish("pipeline memory report tests");
   }

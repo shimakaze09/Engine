@@ -8,11 +8,12 @@
 #include <new>
 #include <system_error>
 
+#include "../asset_root.h"
+#include "../scripting_clock.h"
 #include "engine/core/service_locator.h"
 #include "engine/runtime/scripting_bridge.h"
 #include "engine/runtime/world.h"
 #include "engine/scripting/scripting.h"
-#include "../scripting_clock.h"
 
 namespace {
 
@@ -33,33 +34,6 @@ bool open_file_for_write(const char *path, FILE **outFile) noexcept {
 
 void remove_script_file() noexcept {
   static_cast<void>(std::remove(kTempScriptPath));
-}
-
-/// Selects the nearest working-directory ancestor containing demo assets.
-bool set_working_directory_with_assets() noexcept {
-  std::error_code error{};
-  const std::filesystem::path original = std::filesystem::current_path(error);
-  if (error) {
-    return false;
-  }
-
-  const std::filesystem::path candidates[] = {
-      original, original / "..", original / "../..", original / "../../..",
-      original / "../../../.."};
-  for (const std::filesystem::path &candidate : candidates) {
-    error.clear();
-    const std::filesystem::path normalized =
-        std::filesystem::weakly_canonical(candidate, error);
-    if (error ||
-        !std::filesystem::exists(normalized / "assets/main.lua", error)) {
-      continue;
-    }
-
-    std::filesystem::current_path(normalized, error);
-    return !error;
-  }
-
-  return false;
 }
 
 /// Writes script file data.
@@ -1146,7 +1120,7 @@ bool verify_lua_scene_object_defaults(engine::runtime::World *world) noexcept {
 
 /// Runs this executable or test program.
 int main() {
-  if (!set_working_directory_with_assets()) {
+  if (!engine::tests::enter_asset_root()) {
     std::fprintf(stderr, "FAIL: locate demo assets\n");
     return 1;
   }

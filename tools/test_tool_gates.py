@@ -1426,6 +1426,22 @@ def test_duplicate_primitive_gate():
         check(run([script, "--root", case(
             "prod_seam", "renderer/src/render_device.cpp", seam)]) == 0,
               "duplicate primitives: the real device defines the seam")
+        walk = ("// Purpose.\nfor (const auto &candidate : candidates) {\n"
+                "  const auto n = std::filesystem::weakly_canonical(candidate, ec);\n"
+                "  if (std::filesystem::exists(n / \"assets/main.lua\", ec)) {}\n")
+        check(run([script, "--root", case(
+            "asset_walk", "tests/integration/a_test.cpp", walk)]) != 0,
+              "duplicate primitives: a test walking up for assets is a "
+              "finding")
+        check(run([script, "--root", case(
+            "asset_walk_owner", "tests/asset_root.h", walk)]) == 0,
+              "duplicate primitives: tests/asset_root.h owns the walk")
+        check(run([script, "--root", case(
+            "asset_use", "tests/integration/b_test.cpp",
+            "// Purpose.\nif (!engine::tests::enter_asset_root()) {}\n"
+            "std::filesystem::exists(\"assets/x.lua\", ec);\n")]) == 0,
+              "duplicate primitives: calling the helper or probing a "
+              "relative asset path is not a walk")
         catalog = ("// Purpose.\nstruct Holder {\n"
                    "  content::AssetCatalog catalog{};\n};\n")
         check(run([script, "--root", case(

@@ -8,6 +8,7 @@
 // could no longer release, so the ordering defect is observable without a
 // spy device inside the production link.
 
+#include "../asset_root.h"
 #include "engine/core/logging.h"
 #include "engine/core/vfs.h"
 #include "engine/engine.h"
@@ -60,33 +61,6 @@ void count_unreleased_warning(engine::core::LogLevel level, const char *,
                             "device") != nullptr)) {
     ++g_unreleasedWarnings;
   }
-}
-
-/// Walks upward from the current path until the bundled assets are found
-/// (same technique as pipeline_tick_cadence_test.cpp).
-bool set_working_directory_with_assets() noexcept {
-  const std::filesystem::path original = std::filesystem::current_path();
-  const std::filesystem::path candidates[] = {
-      original, original / "..", original / "../..", original / "../../..",
-      original / "../../../.."};
-
-  for (const std::filesystem::path &candidate : candidates) {
-    std::error_code ec{};
-    const std::filesystem::path normalized =
-        std::filesystem::weakly_canonical(candidate, ec);
-    if (ec) {
-      continue;
-    }
-
-    if (std::filesystem::exists(normalized / "assets/main.lua", ec) &&
-        std::filesystem::exists(normalized / "assets/shaders/bgfx/shaders.manifest",
-                                ec)) {
-      std::filesystem::current_path(normalized, ec);
-      return !ec;
-    }
-  }
-
-  return false;
 }
 
 /// One bootstrap → run → shutdown round; `loadTexture` decides whether the
@@ -154,7 +128,7 @@ void run_lifecycle_round(int round, bool loadTexture) noexcept {
 
 /// Runs this executable or test program.
 int main() {
-  if (!set_working_directory_with_assets()) {
+  if (!engine::tests::enter_asset_root()) {
     std::fprintf(stderr, "FAIL: could not locate bundled assets\n");
     return 1;
   }

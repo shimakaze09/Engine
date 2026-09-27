@@ -217,7 +217,7 @@ int run(engine::EnginePipeline &pipeline, World &world) noexcept {
 } // namespace
 
 int main() {
-  if (!engine::tests::detail::enter_asset_directory() || !write_environment()) {
+  if (!engine::tests::enter_asset_root() || !write_environment()) {
     std::fprintf(stderr, "FAIL: could not write the environment map\n");
     remove_environment();
     return 1;
