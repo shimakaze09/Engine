@@ -340,6 +340,9 @@ void content_browser_go_forward() noexcept;
 bool world_is_editable() noexcept;
 /// True when the attached world can run a scene load right now.
 bool world_can_load_scene() noexcept;
+/// Whether the game has the keyboard: in play, with the Game view focused
+/// and no text field taking typing. Editor shortcuts stay off meanwhile.
+bool game_owns_keyboard() noexcept;
 /// Returns whether the default scene file is available on disk.
 bool default_scene_file_exists() noexcept;
 

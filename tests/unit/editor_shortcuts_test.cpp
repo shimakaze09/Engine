@@ -1,0 +1,374 @@
+// Verifies the editor's action table and its key dispatch through the
+// production dispatcher on a headless ImGui frame. It covers chords
+// matched exactly, modifiers included (Ctrl+Shift+S is Save As, not Save,
+// and Ctrl+R is not the scale tool), creating actions that run once per
+// press while undo repeats, dispatch stopping under the unsaved-changes
+// prompt, a popup, a text field and a game-owned keyboard, and table
+// invariants: one row per action, unique ids, no chord bound twice.
+
+#include "editor_commands.h"
+#include "editor_scene_document.h"
+#include "editor_scene_document_fixture.h"
+#include "editor_session.h"
+#include "editor_shortcuts.h"
+
+#include "imgui_internal.h"
+
+#include "engine/core/logging.h"
+#include "engine/core/platform.h"
+#include "engine/editor/editor.h"
+#include "engine/runtime/scene_serializer.h"
+#include "engine/runtime/world.h"
+
+#include "../test_harness.h"
+
+#include <cstdio>
+#include <cstring>
+#include <filesystem>
+#include <memory>
+#include <new>
+#include <string>
+#include <system_error>
+
+namespace {
+
+using namespace engine::editor;
+using namespace engine::runtime;
+
+constexpr const char *kScratchRoot = "assets/engine_editor_shortcuts_test";
+
+/// One headless frame: key events queued before it are applied by
+/// NewFrame, then the production dispatcher runs, as editor_new_frame
+/// does. `drawPopup` keeps a popup open for the frames that want one;
+/// `focusText` gives a text field the keyboard.
+struct FrameOptions final {
+  bool openPopup = false;
+  bool keepPopup = false;
+  bool focusText = false;
+};
+
+void run_frame(const FrameOptions &options = FrameOptions{}) noexcept {
+  ImGui::NewFrame();
+  dispatch_editor_shortcuts();
+  ImGui::SetNextWindowPos(ImVec2(0.0F, 0.0F));
+  ImGui::SetNextWindowSize(ImVec2(300.0F, 200.0F));
+  ImGui::Begin("Host", nullptr, ImGuiWindowFlags_NoSavedSettings);
+  if (options.openPopup) {
+    ImGui::OpenPopup("Probe");
+  }
+  if ((options.openPopup || options.keepPopup) && ImGui::BeginPopup("Probe")) {
+    ImGui::TextUnformatted("probe");
+    ImGui::EndPopup();
+  }
+  static char text[32] = {};
+  if (options.focusText) {
+    ImGui::SetKeyboardFocusHere();
+  }
+  ImGui::InputText("Name", text, sizeof(text));
+  ImGui::End();
+  ImGui::Render();
+}
+
+void set_keys(ImGuiKeyChord chord, bool down) noexcept {
+  ImGuiIO &io = ImGui::GetIO();
+  if ((chord & ImGuiMod_Ctrl) != 0) {
+    io.AddKeyEvent(ImGuiMod_Ctrl, down);
+  }
+  if ((chord & ImGuiMod_Shift) != 0) {
+    io.AddKeyEvent(ImGuiMod_Shift, down);
+  }
+  if ((chord & ImGuiMod_Alt) != 0) {
+    io.AddKeyEvent(ImGuiMod_Alt, down);
+  }
+  io.AddKeyEvent(static_cast<ImGuiKey>(chord & ~ImGuiMod_Mask_), down);
+}
+
+/// Presses and releases `chord` over two frames.
+void tap(ImGuiKeyChord chord, const FrameOptions &options = FrameOptions{}) {
+  set_keys(chord, true);
+  run_frame(options);
+  set_keys(chord, false);
+  run_frame(options);
+}
+
+/// Holds `chord` for `frames` frames of the test's frame time, then
+/// releases it.
+void hold(ImGuiKeyChord chord, int frames) noexcept {
+  set_keys(chord, true);
+  for (int i = 0; i < frames; ++i) {
+    run_frame();
+  }
+  set_keys(chord, false);
+  run_frame();
+}
+
+bool scratch_path(const char *leaf, char *out, std::size_t capacity) noexcept {
+  std::error_code ec{};
+  std::filesystem::create_directories(kScratchRoot, ec);
+  const std::filesystem::path resolved = std::filesystem::weakly_canonical(
+      std::filesystem::path(kScratchRoot) / leaf, ec);
+  if (ec) {
+    return false;
+  }
+  const std::string text = resolved.string();
+  const int written = std::snprintf(out, capacity, "%s", text.c_str());
+  return (written > 0) && (static_cast<std::size_t>(written) < capacity);
+}
+
+Entity add_named(World &world, const char *name) noexcept {
+  const Entity entity = world.create_scene_object();
+  if (entity == kInvalidEntity) {
+    return kInvalidEntity;
+  }
+  NameComponent component{};
+  std::snprintf(component.name, sizeof(component.name), "%s", name);
+  return world.add_name_component(entity, component) ? entity : kInvalidEntity;
+}
+
+bool file_holds(const char *path, const char *name) noexcept {
+  std::unique_ptr<World> reader(new (std::nothrow) World());
+  return (reader != nullptr) && load_scene(*reader, path) &&
+         (reader->find_entity_by_name(name) != kInvalidEntity);
+}
+
+/// Cancels whichever native dialog the session is waiting on.
+void cancel_pending_dialog() noexcept {
+  const engine::core::FileDialogTicket ticket =
+      editor_session().document.activeDialog;
+  if (ticket != engine::core::kNoFileDialog) {
+    static_cast<void>(
+        engine::core::platform_answer_scripted_file_dialog(ticket, nullptr));
+    scene_document_poll_dialog_result();
+  }
+}
+
+void check_table_invariants(engine::tests::TestContext &t) noexcept {
+  const std::size_t count = editor_shortcut_count();
+  t.check(count == static_cast<std::size_t>(EditorAction::Count),
+          "one row per action");
+  bool rowsMatch = true;
+  bool idsUnique = true;
+  bool chordsUnique = true;
+  for (std::size_t i = 0U; i < count; ++i) {
+    const EditorShortcut &row = editor_shortcut_at(i);
+    rowsMatch = rowsMatch && (static_cast<std::size_t>(row.action) == i) &&
+                (row.id != nullptr) && (row.label != nullptr);
+    for (std::size_t j = i + 1U; j < count; ++j) {
+      const EditorShortcut &other = editor_shortcut_at(j);
+      idsUnique = idsUnique && (std::strcmp(row.id, other.id) != 0);
+      const ImGuiKeyChord mine[] = {row.chord, row.alternate};
+      const ImGuiKeyChord theirs[] = {other.chord, other.alternate};
+      for (const ImGuiKeyChord a : mine) {
+        for (const ImGuiKeyChord b : theirs) {
+          chordsUnique = chordsUnique && ((a == 0) || (a != b));
+        }
+      }
+    }
+    chordsUnique =
+        chordsUnique && ((row.alternate == 0) || (row.alternate != row.chord));
+  }
+  t.check(rowsMatch, "each row is its action's, with an id and a label");
+  t.check(idsUnique, "row ids are unique");
+  t.check(chordsUnique, "no chord runs two actions");
+  t.check(std::strcmp(editor_shortcut_text(EditorAction::SaveSceneAs),
+                      "Ctrl+Shift+S") == 0,
+          "the menu shows Save As's chord from the table");
+  t.check(std::strcmp(editor_shortcut_text(EditorAction::GizmoScale), "R") == 0,
+          "a bare key shows as the key alone");
+}
+
+void check_save_chords(engine::tests::TestContext &t, World &world) noexcept {
+  char path[512] = {};
+  if (!scratch_path("save_chords.json", path, sizeof(path))) {
+    t.fail("scratch path");
+    return;
+  }
+  static_cast<void>(std::remove(path));
+  t.check(perform_scene_new() &&
+              (add_named(world, "First") != kInvalidEntity) &&
+              perform_scene_save_as(path),
+          "the scene has a path");
+  t.check(add_named(world, "Second") != kInvalidEntity, "a second entity");
+
+  // Ctrl+Shift+S is Save As: a dialog, and the file is not overwritten.
+  // On base the Ctrl+S test matched it and saved in place.
+  tap(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_S);
+  t.check(editor_session().document.activeDialog != engine::core::kNoFileDialog,
+          "Ctrl+Shift+S opens the Save As dialog");
+  t.check(!file_holds(path, "Second"),
+          "Ctrl+Shift+S does not save over the open scene");
+  cancel_pending_dialog();
+
+  // Ctrl+S saves in place.
+  tap(ImGuiMod_Ctrl | ImGuiKey_S);
+  t.check(file_holds(path, "Second"), "Ctrl+S saves in place");
+  t.check(editor_session().document.activeDialog == engine::core::kNoFileDialog,
+          "Ctrl+S opens no dialog for a titled scene");
+}
+
+void check_tool_keys_match_exactly(engine::tests::TestContext &t) noexcept {
+  editor_session().gizmoOp = ImGuizmo::TRANSLATE;
+  tap(ImGuiMod_Ctrl | ImGuiKey_R);
+  t.check(editor_session().gizmoOp == ImGuizmo::TRANSLATE,
+          "Ctrl+R does not pick the scale tool");
+  tap(ImGuiMod_Alt | ImGuiKey_E);
+  t.check(editor_session().gizmoOp == ImGuizmo::TRANSLATE,
+          "Alt+E does not pick the rotate tool");
+  tap(ImGuiKey_R);
+  t.check(editor_session().gizmoOp == ImGuizmo::SCALE, "R picks scale");
+  tap(ImGuiKey_E);
+  t.check(editor_session().gizmoOp == ImGuizmo::ROTATE, "E picks rotate");
+  tap(ImGuiKey_W);
+  t.check(editor_session().gizmoOp == ImGuizmo::TRANSLATE, "W picks move");
+}
+
+void check_repeat_policy(engine::tests::TestContext &t, World &world) noexcept {
+  t.check(perform_scene_new(), "fresh scene");
+  const Entity original = add_named(world, "Original");
+  select_entity(original, false);
+  const std::size_t before = world.alive_entity_count();
+
+  // Held for a second, well past the key-repeat delay: one copy. On base
+  // Ctrl+D repeated and made a copy per repeat.
+  hold(ImGuiMod_Ctrl | ImGuiKey_D, 20);
+  t.check(world.alive_entity_count() == before + 1U,
+          "holding Ctrl+D duplicates once");
+
+  // Undo repeats while held, as in other editors.
+  select_entity(original, false);
+  t.check(run_editor_action(EditorAction::Duplicate), "second copy");
+  select_entity(original, false);
+  t.check(run_editor_action(EditorAction::Duplicate), "third copy");
+  t.check(world.alive_entity_count() == before + 3U, "three copies");
+  hold(ImGuiMod_Ctrl | ImGuiKey_Z, 20);
+  t.check(world.alive_entity_count() == before,
+          "holding Ctrl+Z undoes every copy");
+
+  // Ctrl+Y is Redo's second chord.
+  tap(ImGuiMod_Ctrl | ImGuiKey_Y);
+  t.check(world.alive_entity_count() == before + 1U, "Ctrl+Y redoes");
+  tap(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_Z);
+  t.check(world.alive_entity_count() == before + 2U, "Ctrl+Shift+Z redoes");
+}
+
+void check_blocked_contexts(engine::tests::TestContext &t,
+                            World &world) noexcept {
+  t.check(perform_scene_new(), "fresh scene");
+  const Entity original = add_named(world, "Original");
+  select_entity(original, false);
+  t.check(run_editor_action(EditorAction::Duplicate), "a dirty document");
+  select_entity(original, false);
+
+  // The unsaved-changes prompt is modal: nothing behind it changes. On
+  // base Ctrl+D duplicated under it.
+  request_scene_new();
+  t.check(scene_document_prompt_open(), "New asks first");
+  std::size_t count = world.alive_entity_count();
+  tap(ImGuiMod_Ctrl | ImGuiKey_D);
+  t.check(world.alive_entity_count() == count,
+          "no duplicate under the unsaved-changes prompt");
+  scene_document_prompt_choose_cancel();
+
+  // An open popup (a menu, a context menu) takes the keyboard.
+  FrameOptions popup{};
+  popup.openPopup = true;
+  run_frame(popup);
+  popup.openPopup = false;
+  popup.keepPopup = true;
+  editor_session().gizmoOp = ImGuizmo::TRANSLATE;
+  tap(ImGuiKey_R, popup);
+  t.check(editor_session().gizmoOp == ImGuizmo::TRANSLATE,
+          "no tool change while a popup is open");
+  run_frame(); // the popup is not drawn, so it closes
+
+  // A text field with the keyboard types the letter instead.
+  // The focus request lands a frame later, and io.WantTextInput reports
+  // the field a frame after that.
+  FrameOptions focus{};
+  focus.focusText = true;
+  run_frame(focus);
+  run_frame();
+  run_frame();
+  t.check(ImGui::GetIO().WantTextInput, "the text field has the keyboard");
+  tap(ImGuiKey_R);
+  t.check(editor_session().gizmoOp == ImGuizmo::TRANSLATE,
+          "no tool change while typing");
+  ImGui::ClearActiveID();
+  run_frame();
+  run_frame();
+
+  // The game has the keyboard while its view is focused in play.
+  editor_session().playState = PlayState::Playing;
+  editor_session().gameViewFocused = true;
+  tap(ImGuiKey_R);
+  t.check(editor_session().gizmoOp == ImGuizmo::TRANSLATE,
+          "no tool change while the game has the keyboard");
+  editor_session().gameViewFocused = false;
+  editor_session().playState = PlayState::Stopped;
+
+  count = world.alive_entity_count();
+  tap(ImGuiMod_Ctrl | ImGuiKey_D);
+  t.check(world.alive_entity_count() == count + 1U,
+          "dispatch resumes once nothing holds the keyboard");
+}
+
+void check_document_chords(engine::tests::TestContext &t,
+                           World &world) noexcept {
+  t.check(perform_scene_new() && (add_named(world, "Loose") != kInvalidEntity),
+          "an unsaved entity in a clean document");
+  tap(ImGuiMod_Ctrl | ImGuiKey_N);
+  t.check(world.alive_entity_count() == 0U, "Ctrl+N starts a new scene");
+  tap(ImGuiMod_Ctrl | ImGuiKey_O);
+  t.check(editor_session().document.activeDialog != engine::core::kNoFileDialog,
+          "Ctrl+O opens the Open dialog");
+  cancel_pending_dialog();
+}
+
+} // namespace
+
+int main() {
+  engine::tests::TestContext t;
+  static_cast<void>(engine::core::initialize_logging());
+
+  IMGUI_CHECKVERSION();
+  ImGui::CreateContext();
+  ImGuiIO &io = ImGui::GetIO();
+  io.DisplaySize = ImVec2(1280.0F, 720.0F);
+  io.DeltaTime = 0.05F;
+  io.IniFilename = nullptr;
+  // One event per key per frame is what the checks reason about.
+  io.ConfigInputTrickleEventQueue = false;
+  io.ConfigMacOSXBehaviors = false;
+  unsigned char *pixels = nullptr;
+  int width = 0;
+  int height = 0;
+  io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
+
+  engine::tests::RecentScenesGuard recentGuard;
+  std::error_code ec{};
+  std::filesystem::create_directories(kScratchRoot, ec);
+  if (ec || !recentGuard.arm("assets/engine_editor_shortcuts_test/recent")) {
+    return 98;
+  }
+  engine::core::platform_set_scripted_file_dialogs(true);
+
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 97;
+  }
+  editor_set_world(world.get());
+
+  check_table_invariants(t);
+  check_save_chords(t, *world);
+  check_tool_keys_match_exactly(t);
+  check_repeat_policy(t, *world);
+  check_blocked_contexts(t, *world);
+  check_document_chords(t, *world);
+
+  editor_set_world(nullptr);
+  engine::core::platform_set_scripted_file_dialogs(false);
+  t.check(recentGuard.disarm(), "the real recent-scenes file is untouched");
+  ImGui::DestroyContext();
+  engine::core::shutdown_logging();
+  return t.finish("editor_shortcuts");
+}

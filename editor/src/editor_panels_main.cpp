@@ -8,6 +8,7 @@
 #include "editor_panels_console.h"
 #include "editor_scene_document.h"
 #include "editor_session.h"
+#include "editor_shortcuts.h"
 
 #if defined(__clang__) && (defined(__x86_64__) || defined(__i386__)) &&        \
     !defined(__PRFCHWINTRIN_H)
@@ -126,24 +127,15 @@ void draw_main_menu_bar() noexcept {
   }
 
   if (ImGui::BeginMenu("File")) {
-    // Replacing or exporting the world stays available after a failed
-    // Stop restore; only overwriting the open scene in place needs
-    // the fully editable world.
-    const bool loadable = world_can_load_scene();
-    const bool editable = world_is_editable();
-    if (!loadable) {
-      ImGui::BeginDisabled();
-    }
-
-    if (ImGui::MenuItem("New Scene")) {
-      request_scene_new();
-    }
-    if (ImGui::MenuItem("Open Scene...")) {
-      request_open_scene_dialog();
-    }
+    // Every item's label, chord and enabled state come from the action
+    // table. Replacing or exporting the world stays available after a
+    // failed Stop restore; only saving in place needs the editable world.
+    editor_action_menu_item(EditorAction::NewScene);
+    editor_action_menu_item(EditorAction::OpenScene);
 
     const std::size_t recentCount = recent_scene_count();
-    if (ImGui::BeginMenu("Recent Scenes", recentCount > 0U)) {
+    if (ImGui::BeginMenu("Recent Scenes",
+                         world_can_load_scene() && (recentCount > 0U))) {
       for (std::size_t i = 0U; i < recentCount; ++i) {
         const char *path = recent_scene_at(i);
         const std::string label =
@@ -159,67 +151,17 @@ void draw_main_menu_bar() noexcept {
     }
 
     ImGui::Separator();
-
-    if (!editable && loadable) {
-      ImGui::BeginDisabled();
-    }
-    if (ImGui::MenuItem("Save", "Ctrl+S")) {
-      request_save_scene();
-    }
-    if (!editable && loadable) {
-      ImGui::EndDisabled();
-    }
-    if (ImGui::MenuItem("Save As...")) {
-      request_save_scene_as();
-    }
-
-    if (!loadable) {
-      ImGui::EndDisabled();
-    }
+    editor_action_menu_item(EditorAction::SaveScene);
+    editor_action_menu_item(EditorAction::SaveSceneAs);
 
     ImGui::EndMenu();
   }
 
   if (ImGui::BeginMenu("Edit")) {
-    const bool canUndo = editor_history_can_undo();
-    const bool canRedo = editor_history_can_redo();
-    if (!canUndo) {
-      ImGui::BeginDisabled();
-    }
-    if (ImGui::MenuItem("Undo", "Ctrl+Z")) {
-      editor_history_undo();
-    }
-    if (!canUndo) {
-      ImGui::EndDisabled();
-    }
-
-    if (!canRedo) {
-      ImGui::BeginDisabled();
-    }
-    if (ImGui::MenuItem("Redo", "Ctrl+Shift+Z")) {
-      editor_history_redo();
-    }
-    if (!canRedo) {
-      ImGui::EndDisabled();
-    }
-
+    editor_action_menu_item(EditorAction::Undo);
+    editor_action_menu_item(EditorAction::Redo);
     ImGui::Separator();
-    const runtime::Entity selection = selected_entity();
-    const bool canDuplicate =
-        world_is_editable() && (selection != runtime::kInvalidEntity);
-    if (!canDuplicate) {
-      ImGui::BeginDisabled();
-    }
-    if (ImGui::MenuItem("Duplicate", "Ctrl+D")) {
-      const runtime::Entity copy = execute_entity_duplicate(selection);
-      if (copy != runtime::kInvalidEntity) {
-        select_entity(copy, false);
-      }
-    }
-    if (!canDuplicate) {
-      ImGui::EndDisabled();
-    }
-
+    editor_action_menu_item(EditorAction::Duplicate);
     ImGui::EndMenu();
   }
 
@@ -464,21 +406,10 @@ static void draw_entity_node(runtime::Entity entity,
     if (!is_entity_selected(entity) && (selected_entity() != entity)) {
       select_entity(entity, false);
     }
+    editor_action_menu_item(EditorAction::Duplicate);
     const bool editable = world_is_editable();
-    if (!editable) {
-      ImGui::BeginDisabled();
-    }
-    if (ImGui::MenuItem("Duplicate", "Ctrl+D")) {
-      const runtime::Entity copy = execute_entity_duplicate(entity);
-      if (copy != runtime::kInvalidEntity) {
-        select_entity(copy, false);
-      }
-    }
-    if (ImGui::MenuItem("Delete", "Del")) {
+    if (ImGui::MenuItem("Delete", nullptr, false, editable)) {
       static_cast<void>(execute_entity_delete(entity));
-    }
-    if (!editable) {
-      ImGui::EndDisabled();
     }
     ImGui::EndPopup();
   }

@@ -2259,3 +2259,15 @@ engine_add_test_executable(engine_unit_platform_rider_ccd
     engine_physics
     engine_runtime
 )
+
+engine_add_test_executable(engine_unit_editor_shortcuts
+    SOURCES
+    editor_shortcuts_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/editor/src
+    ${CMAKE_SOURCE_DIR}/runtime/src
+    PRIVATE_DEPS
+    engine_editor
+    COMPILE_DEFINITIONS
+    SDL_MAIN_HANDLED
+)
