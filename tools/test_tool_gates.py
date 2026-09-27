@@ -1448,6 +1448,36 @@ def test_duplicate_primitive_gate():
             "catalog_owner", "runtime/src/engine_pipeline.cpp",
             "// Purpose.\nauto *c = new content::AssetCatalog();\n")]) == 0,
               "duplicate primitives: the pipeline owns the one catalog")
+        check(run([script, "--root", case(
+            "planes_columns", "runtime/src/a.cpp",
+            "// Purpose.\nauto p = {c0.w + c0.x, c1.w + c1.x};\n")]) != 0,
+              "duplicate primitives: a Gribb-Hartmann row combination on "
+              "columns is a finding")
+        check(run([script, "--root", case(
+            "planes_array", "renderer/src/a.cpp",
+            "// Purpose.\nauto p = vp[3] - vp[1];\n")]) != 0,
+              "duplicate primitives: a row combination on a float array is "
+              "a finding")
+        check(run([script, "--root", case(
+            "divide", "renderer/src/a.cpp",
+            "// Purpose.\nworld.x /= world.w;\n")]) != 0,
+              "duplicate primitives: a perspective divide is a finding")
+        check(run([script, "--root", case(
+            "reciprocal", "editor/src/a.cpp",
+            "// Purpose.\nconst float invW = 1.0F / clip.w;\n")]) != 0,
+              "duplicate primitives: a reciprocal of w is a finding")
+        check(run([script, "--root", case(
+            "not_planes", "physics/src/a.cpp",
+            "// Purpose.\nauto q = a.w * b.x + a.x * b.w;\n"
+            "auto v = a.w + b.x;\nauto r = m[3] + n[0];\n")]) == 0,
+              "duplicate primitives: products and mixed operands are not a "
+              "frustum or an unprojection")
+        frustum_owner = write_comment_fixture(
+            tmp / "frustum_owner", "math/include/engine/math/frustum.h",
+            "// Purpose.\nauto p = c0.w + c0.x;\nfloat i = 1.0F / w.w;\n")
+        check(run([script, "--root", str(frustum_owner)]) == 0,
+              "duplicate primitives: the frustum header owns extraction and "
+              "unprojection")
         owner = write_comment_fixture(
             tmp / "owner", "core/include/engine/core/hash.h",
             "// Purpose.\nconstexpr auto p = 1099511628211ULL;\n")

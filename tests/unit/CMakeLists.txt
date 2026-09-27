@@ -141,6 +141,13 @@ engine_add_test_executable(engine_unit_math
     engine_math
 )
 
+engine_add_test_executable(engine_unit_math_frustum
+    SOURCES
+    math_frustum_test.cpp
+    PRIVATE_DEPS
+    engine_math
+)
+
 engine_add_test_executable(engine_unit_scalar_determinism
     SOURCES
     scalar_determinism_test.cpp

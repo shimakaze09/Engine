@@ -3,6 +3,8 @@
 #include "engine/renderer/light_culling.h"
 
 #include "engine/core/logging.h"
+#include "engine/math/frustum.h"
+#include "engine/math/mat4.h"
 
 #include <algorithm>
 #include <cmath>
@@ -14,99 +16,28 @@ namespace engine::renderer {
 
 namespace {
 
-struct Vec4 final {
-  float x = 0.0F;
-  float y = 0.0F;
-  float z = 0.0F;
-  float w = 0.0F;
-};
-
-struct Frustum final {
-  Vec4 planes[6]; // left, right, bottom, top, near, far
-};
-
-// Multiply two 4x4 column-major matrices: out = a * b.
-void mat4_mul(const float *a, const float *b, float *out) noexcept {
-  for (int col = 0; col < 4; ++col) {
-    for (int row = 0; row < 4; ++row) {
-      float sum = 0.0F;
-      for (int k = 0; k < 4; ++k) {
-        sum += a[row + k * 4] * b[k + col * 4];
-      }
-      out[row + col * 4] = sum;
-    }
-  }
+/// Loads a column-major matrix handed over as 16 floats.
+math::Mat4 load_matrix(const float *m) noexcept {
+  return math::Mat4(math::Vec4(m[0], m[1], m[2], m[3]),
+                    math::Vec4(m[4], m[5], m[6], m[7]),
+                    math::Vec4(m[8], m[9], m[10], m[11]),
+                    math::Vec4(m[12], m[13], m[14], m[15]));
 }
 
-// Extract frustum planes from a view-projection matrix (column-major)
-// via the Gribb-Hartmann row combinations, in order left, right, bottom,
-// top, near, far. Planes are in world space, pointing inward, normalized.
-void extract_frustum_planes(const float *vp, Frustum &f) noexcept {
-  f.planes[0] = {vp[3] + vp[0], vp[7] + vp[4], vp[11] + vp[8], vp[15] + vp[12]};
-  f.planes[1] = {vp[3] - vp[0], vp[7] - vp[4], vp[11] - vp[8], vp[15] - vp[12]};
-  f.planes[2] = {vp[3] + vp[1], vp[7] + vp[5], vp[11] + vp[9], vp[15] + vp[13]};
-  f.planes[3] = {vp[3] - vp[1], vp[7] - vp[5], vp[11] - vp[9], vp[15] - vp[13]};
-  f.planes[4] = {vp[3] + vp[2], vp[7] + vp[6], vp[11] + vp[10],
-                 vp[15] + vp[14]};
-  f.planes[5] = {vp[3] - vp[2], vp[7] - vp[6], vp[11] - vp[10],
-                 vp[15] - vp[14]};
-
-  for (auto &p : f.planes) {
-    const float len = std::sqrt(p.x * p.x + p.y * p.y + p.z * p.z);
-    if (len > 1e-6F) {
-      const float inv = 1.0F / len;
-      p.x *= inv;
-      p.y *= inv;
-      p.z *= inv;
-      p.w *= inv;
-    }
-  }
-}
-
-// Test sphere (center, radius) against frustum.
-bool sphere_in_frustum(const Frustum &f, float cx, float cy, float cz,
-                       float radius) noexcept {
-  for (const auto &p : f.planes) {
-    const float dist = p.x * cx + p.y * cy + p.z * cz + p.w;
-    if (dist < -radius) {
-      return false;
-    }
-  }
-  return true;
-}
-
-// Build a tile frustum from pixel bounds [x0,x1) x [y0,y1) at screen size
-// (w,h): a clip-space scale/offset matrix maps the tile's NDC sub-range
-// back to the full [-1,1] range and left-multiplies the projection.
-void build_tile_vp(int x0, int y0, int x1, int y1, int screenW, int screenH,
-                   const float *viewMatrix, const float *projMatrix,
-                   float *tileVP) noexcept {
-  const float ndcLeft =
-      2.0F * static_cast<float>(x0) / static_cast<float>(screenW) - 1.0F;
-  const float ndcRight =
-      2.0F * static_cast<float>(x1) / static_cast<float>(screenW) - 1.0F;
-  const float ndcBottom =
-      2.0F * static_cast<float>(y0) / static_cast<float>(screenH) - 1.0F;
-  const float ndcTop =
-      2.0F * static_cast<float>(y1) / static_cast<float>(screenH) - 1.0F;
-
-  const float scaleX = 2.0F / (ndcRight - ndcLeft);
-  const float scaleY = 2.0F / (ndcTop - ndcBottom);
-  const float offsetX = -(ndcRight + ndcLeft) / (ndcRight - ndcLeft);
-  const float offsetY = -(ndcTop + ndcBottom) / (ndcTop - ndcBottom);
-
-  float tileClip[16];
-  std::memset(tileClip, 0, sizeof(tileClip));
-  tileClip[0] = scaleX;
-  tileClip[5] = scaleY;
-  tileClip[10] = 1.0F;
-  tileClip[12] = offsetX;
-  tileClip[13] = offsetY;
-  tileClip[15] = 1.0F;
-
-  float tileProj[16];
-  mat4_mul(tileClip, projMatrix, tileProj);
-  mat4_mul(tileProj, viewMatrix, tileVP);
+/// The frustum behind pixel bounds [x0,x1) x [y0,y1) of a (w,h) screen:
+/// the view restricted to the tile's NDC sub-rectangle.
+math::Frustum tile_frustum(int x0, int y0, int x1, int y1, int screenW,
+                           int screenH, const math::Mat4 &view,
+                           const math::Mat4 &projection,
+                           bool depthZeroToOne) noexcept {
+  const auto ndc = [](int pixel, int size) noexcept {
+    return (2.0F * static_cast<float>(pixel) / static_cast<float>(size)) - 1.0F;
+  };
+  const math::Mat4 tileProjection =
+      math::sub_rect_projection(projection, ndc(x0, screenW), ndc(y0, screenH),
+                                ndc(x1, screenW), ndc(y1, screenH));
+  return math::frustum_from_view_projection(math::mul(tileProjection, view),
+                                            depthZeroToOne);
 }
 
 } // namespace
@@ -161,7 +92,8 @@ bool compute_tile_texture_layout(int tileCountX, int tileCountY,
 }
 
 bool cull_lights_tiled(const SceneLightData &lightData, const float *viewMatrix,
-                       const float *projMatrix, int screenW, int screenH,
+                       const float *projMatrix, bool depthZeroToOne,
+                       int screenW, int screenH,
                        TileLightData &outData) noexcept {
   outData.tileCountX = 0;
   outData.tileCountY = 0;
@@ -193,6 +125,8 @@ bool cull_lights_tiled(const SceneLightData &lightData, const float *viewMatrix,
   outData.tileCountX = tileCountX;
   outData.tileCountY = tileCountY;
   outData.totalTiles = totalTiles;
+  const math::Mat4 view = load_matrix(viewMatrix);
+  const math::Mat4 projection = load_matrix(projMatrix);
 
   std::memset(outData.data, 0, requiredSize * sizeof(float));
 
@@ -215,17 +149,15 @@ bool cull_lights_tiled(const SceneLightData &lightData, const float *viewMatrix,
       const int px1 = std::min(px0 + kTileSize, screenW);
       const int py1 = std::min(py0 + kTileSize, screenH);
 
-      float tileVP[16];
-      build_tile_vp(px0, py0, px1, py1, screenW, screenH, viewMatrix,
-                    projMatrix, tileVP);
-      Frustum tileFrustum{};
-      extract_frustum_planes(tileVP, tileFrustum);
+      const math::Frustum tileFrustum =
+          tile_frustum(px0, py0, px1, py1, screenW, screenH, view, projection,
+                       depthZeroToOne);
 
       int tilePointCount = 0;
       for (int li = 0; li < pointCount; ++li) {
         const auto &pl = lightData.pointLights[li];
-        if (sphere_in_frustum(tileFrustum, pl.position.x, pl.position.y,
-                              pl.position.z, pl.radius)) {
+        if (!math::frustum_excludes_sphere(tileFrustum, pl.position,
+                                           pl.radius)) {
           if (tilePointCount >= kMaxPointLightsPerTile) {
             ++droppedPairs;
             continue;
@@ -240,8 +172,8 @@ bool cull_lights_tiled(const SceneLightData &lightData, const float *viewMatrix,
       int tileSpotCount = 0;
       for (int li = 0; li < spotCount; ++li) {
         const auto &sl = lightData.spotLights[li];
-        if (sphere_in_frustum(tileFrustum, sl.position.x, sl.position.y,
-                              sl.position.z, sl.radius)) {
+        if (!math::frustum_excludes_sphere(tileFrustum, sl.position,
+                                           sl.radius)) {
           if (tileSpotCount >= kMaxSpotLightsPerTile) {
             ++droppedPairs;
             continue;

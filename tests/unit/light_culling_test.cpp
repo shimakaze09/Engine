@@ -42,8 +42,8 @@ int verify_empty_scene_culling() {
   tiles.data = buffer.data();
   tiles.dataSize = bufSize;
 
-  if (!engine::renderer::cull_lights_tiled(lights, view, proj, kWidth, kHeight,
-                                           tiles)) {
+  if (!engine::renderer::cull_lights_tiled(lights, view, proj, false, kWidth,
+                                           kHeight, tiles)) {
     return 101;
   }
 
@@ -103,8 +103,8 @@ int verify_single_point_light_center() {
   tiles.data = buffer.data();
   tiles.dataSize = bufSize;
 
-  if (!engine::renderer::cull_lights_tiled(lights, view, proj, kWidth, kHeight,
-                                           tiles)) {
+  if (!engine::renderer::cull_lights_tiled(lights, view, proj, false, kWidth,
+                                           kHeight, tiles)) {
     return 201;
   }
 
@@ -168,8 +168,8 @@ int verify_ortho_projection_culling() {
   tiles.data = buffer.data();
   tiles.dataSize = bufSize;
 
-  if (!engine::renderer::cull_lights_tiled(lights, view, proj, kWidth, kHeight,
-                                           tiles)) {
+  if (!engine::renderer::cull_lights_tiled(lights, view, proj, false, kWidth,
+                                           kHeight, tiles)) {
     return 701;
   }
 
@@ -230,8 +230,8 @@ int verify_tile_dimensions() {
   tiles.data = buffer.data();
   tiles.dataSize = bufSize;
 
-  if (!engine::renderer::cull_lights_tiled(lights, view, proj, kWidth, kHeight,
-                                           tiles)) {
+  if (!engine::renderer::cull_lights_tiled(lights, view, proj, false, kWidth,
+                                           kHeight, tiles)) {
     return 301;
   }
 
@@ -300,8 +300,8 @@ int verify_256_lights_stress() {
   tiles.data = buffer.data();
   tiles.dataSize = bufSize;
 
-  if (!engine::renderer::cull_lights_tiled(lights, view, proj, kWidth, kHeight,
-                                           tiles)) {
+  if (!engine::renderer::cull_lights_tiled(lights, view, proj, false, kWidth,
+                                           kHeight, tiles)) {
     return 401;
   }
 
@@ -494,8 +494,8 @@ int verify_cull_failure_zeroes_output() {
   undersized.tileCountY = 9;
   undersized.data = tiny.data();
   undersized.dataSize = tiny.size();
-  if (engine::renderer::cull_lights_tiled(lights, identity, identity, 640, 480,
-                                          undersized)) {
+  if (engine::renderer::cull_lights_tiled(lights, identity, identity, false,
+                                          640, 480, undersized)) {
     return 600;
   }
   if ((undersized.totalTiles != 0) || (undersized.tileCountX != 0) ||
@@ -505,8 +505,8 @@ int verify_cull_failure_zeroes_output() {
 
   engine::renderer::TileLightData nullMats{};
   nullMats.totalTiles = 55;
-  if (engine::renderer::cull_lights_tiled(lights, nullptr, nullptr, 640, 480,
-                                          nullMats)) {
+  if (engine::renderer::cull_lights_tiled(lights, nullptr, nullptr, false, 640,
+                                          480, nullMats)) {
     return 602;
   }
   if (nullMats.totalTiles != 0) {
@@ -519,8 +519,8 @@ int verify_cull_failure_zeroes_output() {
   huge.data = buffer.data();
   huge.dataSize = buffer.size();
   const int hugeDim = 0x7FFFFFF0;
-  if (engine::renderer::cull_lights_tiled(lights, identity, identity, hugeDim,
-                                          hugeDim, huge)) {
+  if (engine::renderer::cull_lights_tiled(lights, identity, identity, false,
+                                          hugeDim, hugeDim, huge)) {
     return 604;
   }
   if (huge.totalTiles != 0) {
@@ -790,8 +790,8 @@ int verify_tile_cap_keeps_the_first_lights() {
 
   // Twice: the report is for the run, not for every frame that overflows.
   for (int frame = 0; frame < 2; ++frame) {
-    if (!engine::renderer::cull_lights_tiled(lights, view, proj, kSize, kSize,
-                                             tiles)) {
+    if (!engine::renderer::cull_lights_tiled(lights, view, proj, false, kSize,
+                                             kSize, tiles)) {
       return 900;
     }
   }
@@ -825,6 +825,73 @@ int verify_tile_cap_keeps_the_first_lights() {
 }
 
 /// Every case but the tile cap's, in the order they have always run.
+// ---------------------------------------------------------------------------
+// Tile frusta place their near plane by the projection's depth convention.
+// On a [0, 1] device, reading the matrix with GL's rule puts the near plane
+// where clip z is -w: at fn/(2f - n), about half the near distance. Light
+// culling did that on every device, so a light wholly between the camera
+// and the near plane, which can light nothing drawn, still took tile slots.
+// ---------------------------------------------------------------------------
+
+/// Tiles listing point light `index` after culling `lights` on a one-tile
+/// screen with the given convention; -1 when the cull fails.
+int tiles_listing(const engine::renderer::SceneLightData &lights,
+                  const float *proj, bool depthZeroToOne, int index) {
+  constexpr int kSize = engine::renderer::kTileSize * 2;
+  const float view[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+  std::vector<float> buffer(
+      engine::renderer::compute_tile_buffer_size(kSize, kSize), 0.0F);
+  engine::renderer::TileLightData tiles{};
+  tiles.data = buffer.data();
+  tiles.dataSize = buffer.size();
+  if (!engine::renderer::cull_lights_tiled(lights, view, proj, depthZeroToOne,
+                                           kSize, kSize, tiles)) {
+    return -1;
+  }
+  int listing = 0;
+  for (int t = 0; t < tiles.totalTiles; ++t) {
+    const std::size_t base =
+        static_cast<std::size_t>(t) *
+        static_cast<std::size_t>(engine::renderer::kTileDataWidth);
+    const int count = static_cast<int>(buffer[base]);
+    for (int i = 0; i < count; ++i) {
+      if (static_cast<int>(buffer[base + 1U + static_cast<std::size_t>(i)]) ==
+          index) {
+        ++listing;
+      }
+    }
+  }
+  return listing;
+}
+
+int verify_zero_to_one_near_plane() {
+  engine::renderer::SceneLightData lights{};
+  lights.pointLightCount = 2U;
+  // Wholly between the camera and the near plane at 1.
+  lights.pointLights[0].position = engine::math::Vec3(0.0F, 0.0F, -0.75F);
+  lights.pointLights[0].radius = 0.1F;
+  lights.pointLights[0].intensity = 1.0F;
+  // In view, so the cull is not vacuous.
+  lights.pointLights[1].position = engine::math::Vec3(0.0F, 0.0F, -5.0F);
+  lights.pointLights[1].radius = 0.5F;
+  lights.pointLights[1].intensity = 1.0F;
+
+  const engine::math::Mat4 zeroOne =
+      engine::math::perspective_zero_one(1.57079632679F, 1.0F, 1.0F, 100.0F);
+  const float *proj = &zeroOne.columns[0].x;
+  if (tiles_listing(lights, proj, true, 1) < 1) {
+    return 1100;
+  }
+  if (tiles_listing(lights, proj, true, 0) != 0) {
+    return 1101; // base: the near plane at 0.5025 kept the light
+  }
+  // Read with GL's rule, the same matrix keeps it: the convention decides.
+  if (tiles_listing(lights, proj, false, 0) < 1) {
+    return 1102;
+  }
+  return 0;
+}
+
 int run_cases() {
   int result = verify_empty_scene_culling();
   if (result != 0) {
@@ -857,6 +924,11 @@ int run_cases() {
   }
 
   result = verify_cull_failure_zeroes_output();
+  if (result != 0) {
+    return result;
+  }
+
+  result = verify_zero_to_one_near_plane();
   if (result != 0) {
     return result;
   }

@@ -118,6 +118,31 @@ RULES: tuple[Rule, ...] = (
         remedy="take a content::AssetCatalog pointer from "
         "EngineAssetDatabaseService or as a parameter instead of holding one",
     ),
+    Rule(
+        name="frustum plane extraction",
+        owner="math/include/engine/math/frustum.h",
+        # A Gribb-Hartmann copy adds or subtracts a matrix's x, y or z row
+        # to or from its w row: `c0.w + c0.x` on columns, `vp[3] + vp[0]`
+        # on a float array. Render prep and light culling each carried
+        # one, and only render prep's placed the near plane by the
+        # device's depth convention.
+        pattern=r"(\b\w+)\.w\s*[-+]\s*\1\.[xyz]\b"
+        r"|(\b\w+)\[3\]\s*[-+]\s*\2\[[012]\]",
+        remedy="include engine/math/frustum.h and use "
+        "frustum_from_view_projection and the frustum_excludes_* tests",
+    ),
+    Rule(
+        name="the perspective divide of an unprojection",
+        owner="math/include/engine/math/frustum.h",
+        # Dividing a homogeneous point's x, y or z by its own w, or taking
+        # its w's reciprocal, is what a copied unproject looks like. The
+        # shadow cascade fit and the editor camera each carried one, with
+        # different degenerate-w thresholds and failure handling.
+        pattern=r"(\b\w+)\.[xyz]\s*/=?\s*\1\.w\b"
+        r"|\b1\.0F?\s*/\s*\w+\.w\b",
+        remedy="include engine/math/frustum.h and use unproject_ndc or "
+        "frustum_corners",
+    ),
 )
 
 

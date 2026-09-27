@@ -477,7 +477,8 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
     const bool tileDataValid =
         tileLayoutValid &&
         cull_lights_tiled(lights, &viewMat.columns[0].x, &projMat.columns[0].x,
-                          drawableWidth, drawableHeight, tileData);
+                          device_depth_zero_one(), drawableWidth,
+                          drawableHeight, tileData);
     if (!tileDataValid) {
       static bool warnedCullFailure = false;
       if (!warnedCullFailure) {
