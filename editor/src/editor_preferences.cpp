@@ -9,9 +9,12 @@
 #include "editor_shortcuts.h"
 
 #include <algorithm>
+#include <cctype>
+#include <cerrno>
 #include <charconv>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <system_error>
 
@@ -106,10 +109,16 @@ void read_line(ImGuiContext *, ImGuiSettingsHandler *, void *,
   if (std::strncmp(line, kCameraSpeedKey, speedKeyLength) == 0) {
     const char *value = line + speedKeyLength;
     const char *end = value + std::strlen(value);
-    float speed = 0.0F;
-    const std::from_chars_result parsed = std::from_chars(value, end, speed);
-    if ((parsed.ec == std::errc()) && (parsed.ptr == end) &&
-        std::isfinite(speed) && (speed > 0.0F)) {
+    // strtof, not std::from_chars: AppleClang's libc++ deletes the
+    // floating-point overload. The checks keep from_chars's strictness:
+    // the whole token, no leading space, no overflow.
+    errno = 0;
+    char *parseEnd = nullptr;
+    const float speed = std::strtof(value, &parseEnd);
+    if ((value != end) &&
+        (std::isspace(static_cast<unsigned char>(value[0])) == 0) &&
+        (parseEnd == end) && (errno != ERANGE) && std::isfinite(speed) &&
+        (speed > 0.0F)) {
       editor_session().editorCamera.flySpeed = std::clamp(
           speed, EditorCamera::kMinFlySpeed, EditorCamera::kMaxFlySpeed);
     } else {

@@ -561,8 +561,8 @@ void check_grid_preference(engine::tests::TestContext &t) noexcept {
 
 /// While the Scene camera flies, WASD/QE move it: the dispatcher stands
 /// down so W is not the Move tool. The fly speed is saved and read back
-/// exactly; a stored speed out of range is clamped, and one that is not a
-/// positive number is refused with the current speed kept.
+/// exactly; a stored speed out of range is clamped, and one that is not
+/// wholly a finite positive number is refused with the current speed kept.
 void check_flying(engine::tests::TestContext &t) noexcept {
   engine::editor::EditorSession &session = engine::editor::editor_session();
   session.gizmoOp = ImGuizmo::ROTATE;
@@ -595,6 +595,18 @@ void check_flying(engine::tests::TestContext &t) noexcept {
   t.check(session.editorCamera.flySpeed ==
               engine::editor::EditorCamera::kMaxFlySpeed,
           "a malformed speed is refused");
+  // From a speed no accepted value would land on (5 as read, or the
+  // clamp bound for an infinite one), so each refusal is observable.
+  bool strict = true;
+  for (const char *stored :
+       {"CameraSpeed=5m\n", "CameraSpeed= 5\n", "CameraSpeed=\n",
+        "CameraSpeed=inf\n", "CameraSpeed=nan\n", "CameraSpeed=1e40\n"}) {
+    session.editorCamera.flySpeed = 3.0F;
+    load_section(stored);
+    strict = strict && (session.editorCamera.flySpeed == 3.0F);
+  }
+  t.check(strict, "trailing text, a leading space, an empty value, a "
+                  "non-finite or an overflowing speed is refused");
   session.editorCamera.flySpeed = 5.0F;
 }
 
