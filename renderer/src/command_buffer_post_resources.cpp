@@ -74,22 +74,23 @@ void destroy_bloom_resources(BackendState &b) noexcept {
     return;
   }
   for (int i = 0; i < BackendState::kBloomMipLevels; ++i) {
-    if (b.bloomMipTargets[i].value != 0U) {
-      dev->destroy_render_target(b.bloomMipTargets[i]);
-      b.bloomMipTargets[i] = RenderTargetHandle{};
+    if (b.view().bloomMipTargets[i].value != 0U) {
+      dev->destroy_render_target(b.view().bloomMipTargets[i]);
+      b.view().bloomMipTargets[i] = RenderTargetHandle{};
     }
-    if (b.bloomMipTextures[i] != kInvalidDeviceTexture) {
-      dev->destroy_texture(b.bloomMipTextures[i]);
-      b.bloomMipTextures[i] = kInvalidDeviceTexture;
+    if (b.view().bloomMipTextures[i] != kInvalidDeviceTexture) {
+      dev->destroy_texture(b.view().bloomMipTextures[i]);
+      b.view().bloomMipTextures[i] = kInvalidDeviceTexture;
     }
   }
-  b.bloomAllocatedWidth = 0;
-  b.bloomAllocatedHeight = 0;
+  b.view().bloomAllocatedWidth = 0;
+  b.view().bloomAllocatedHeight = 0;
 }
 
 bool ensure_bloom_resources(BackendState &b, int width, int height) noexcept {
-  if (b.bloomAllocatedWidth == width && b.bloomAllocatedHeight == height) {
-    return b.bloomMipTargets[0].value != 0U;
+  if (b.view().bloomAllocatedWidth == width &&
+      b.view().bloomAllocatedHeight == height) {
+    return b.view().bloomMipTargets[0].value != 0U;
   }
   destroy_bloom_resources(b);
   const auto *dev = render_device();
@@ -106,11 +107,12 @@ bool ensure_bloom_resources(BackendState &b, int width, int height) noexcept {
     if (h < 1) {
       h = 1;
     }
-    b.bloomMipWidths[i] = w;
-    b.bloomMipHeights[i] = h;
-    b.bloomMipTextures[i] = create_post_chain_texture(dev, w, h);
-    b.bloomMipTargets[i] = create_post_chain_target(dev, b.bloomMipTextures[i]);
-    if (b.bloomMipTargets[i].value == 0U) {
+    b.view().bloomMipWidths[i] = w;
+    b.view().bloomMipHeights[i] = h;
+    b.view().bloomMipTextures[i] = create_post_chain_texture(dev, w, h);
+    b.view().bloomMipTargets[i] =
+        create_post_chain_target(dev, b.view().bloomMipTextures[i]);
+    if (b.view().bloomMipTargets[i].value == 0U) {
       complete = false;
       break;
     }
@@ -123,8 +125,8 @@ bool ensure_bloom_resources(BackendState &b, int width, int height) noexcept {
                       "bloom mip chain creation failed; bloom stays off "
                       "until the drawable size changes");
   }
-  b.bloomAllocatedWidth = width;
-  b.bloomAllocatedHeight = height;
+  b.view().bloomAllocatedWidth = width;
+  b.view().bloomAllocatedHeight = height;
   return complete;
 }
 
@@ -135,35 +137,36 @@ void destroy_luminance_resources(BackendState &b) noexcept {
     return;
   }
   for (int i = 0; i < BackendState::kLuminanceMipLevels; ++i) {
-    if (b.lumMipTargets[i].value != 0U) {
-      dev->destroy_render_target(b.lumMipTargets[i]);
-      b.lumMipTargets[i] = RenderTargetHandle{};
+    if (b.view().lumMipTargets[i].value != 0U) {
+      dev->destroy_render_target(b.view().lumMipTargets[i]);
+      b.view().lumMipTargets[i] = RenderTargetHandle{};
     }
-    if (b.lumMipTextures[i] != kInvalidDeviceTexture) {
-      dev->destroy_texture(b.lumMipTextures[i]);
-      b.lumMipTextures[i] = kInvalidDeviceTexture;
+    if (b.view().lumMipTextures[i] != kInvalidDeviceTexture) {
+      dev->destroy_texture(b.view().lumMipTextures[i]);
+      b.view().lumMipTextures[i] = kInvalidDeviceTexture;
     }
   }
   for (int i = 0; i < 2; ++i) {
-    if (b.exposureTargets[i].value != 0U) {
-      dev->destroy_render_target(b.exposureTargets[i]);
-      b.exposureTargets[i] = RenderTargetHandle{};
+    if (b.view().exposureTargets[i].value != 0U) {
+      dev->destroy_render_target(b.view().exposureTargets[i]);
+      b.view().exposureTargets[i] = RenderTargetHandle{};
     }
-    if (b.exposureTextures[i] != kInvalidDeviceTexture) {
-      dev->destroy_texture(b.exposureTextures[i]);
-      b.exposureTextures[i] = kInvalidDeviceTexture;
+    if (b.view().exposureTextures[i] != kInvalidDeviceTexture) {
+      dev->destroy_texture(b.view().exposureTextures[i]);
+      b.view().exposureTextures[i] = kInvalidDeviceTexture;
     }
   }
-  b.exposureCurrent = 0;
-  b.exposureValid = false;
-  b.lumAllocatedWidth = 0;
-  b.lumAllocatedHeight = 0;
+  b.view().exposureCurrent = 0;
+  b.view().exposureValid = false;
+  b.view().lumAllocatedWidth = 0;
+  b.view().lumAllocatedHeight = 0;
 }
 
 bool ensure_luminance_resources(BackendState &b, int width,
                                 int height) noexcept {
-  if (b.lumAllocatedWidth == width && b.lumAllocatedHeight == height) {
-    return b.lumMipTargets[0].value != 0U;
+  if (b.view().lumAllocatedWidth == width &&
+      b.view().lumAllocatedHeight == height) {
+    return b.view().lumMipTargets[0].value != 0U;
   }
   destroy_luminance_resources(b);
   const auto *dev = render_device();
@@ -180,11 +183,12 @@ bool ensure_luminance_resources(BackendState &b, int width,
     if (h < 1) {
       h = 1;
     }
-    b.lumMipWidths[i] = w;
-    b.lumMipHeights[i] = h;
-    b.lumMipTextures[i] = create_post_chain_texture(dev, w, h);
-    b.lumMipTargets[i] = create_post_chain_target(dev, b.lumMipTextures[i]);
-    if (b.lumMipTargets[i].value == 0U) {
+    b.view().lumMipWidths[i] = w;
+    b.view().lumMipHeights[i] = h;
+    b.view().lumMipTextures[i] = create_post_chain_texture(dev, w, h);
+    b.view().lumMipTargets[i] =
+        create_post_chain_target(dev, b.view().lumMipTextures[i]);
+    if (b.view().lumMipTargets[i].value == 0U) {
       complete = false;
       break;
     }
@@ -192,9 +196,10 @@ bool ensure_luminance_resources(BackendState &b, int width,
     h /= 2;
   }
   for (int i = 0; complete && (i < 2); ++i) {
-    b.exposureTextures[i] = create_post_chain_texture(dev, 1, 1);
-    b.exposureTargets[i] = create_post_chain_target(dev, b.exposureTextures[i]);
-    complete = b.exposureTargets[i].value != 0U;
+    b.view().exposureTextures[i] = create_post_chain_texture(dev, 1, 1);
+    b.view().exposureTargets[i] =
+        create_post_chain_target(dev, b.view().exposureTextures[i]);
+    complete = b.view().exposureTargets[i].value != 0U;
   }
   if (!complete) {
     destroy_luminance_resources(b);
@@ -202,8 +207,8 @@ bool ensure_luminance_resources(BackendState &b, int width,
                       "luminance mip chain creation failed; auto exposure "
                       "stays off until the drawable size changes");
   }
-  b.lumAllocatedWidth = width;
-  b.lumAllocatedHeight = height;
+  b.view().lumAllocatedWidth = width;
+  b.view().lumAllocatedHeight = height;
   return complete;
 }
 

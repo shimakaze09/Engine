@@ -490,11 +490,11 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
         core::log_message(core::LogLevel::Warning, "renderer", message);
         warnedCullFailure = true;
       }
-      if (backend.tileLightTex != kInvalidDeviceTexture) {
-        dev->destroy_texture(backend.tileLightTex);
-        backend.tileLightTex = kInvalidDeviceTexture;
-        backend.tileLightTexWidth = 0;
-        backend.tileLightTexHeight = 0;
+      if (backend.view().tileLightTex != kInvalidDeviceTexture) {
+        dev->destroy_texture(backend.view().tileLightTex);
+        backend.view().tileLightTex = kInvalidDeviceTexture;
+        backend.view().tileLightTexWidth = 0;
+        backend.view().tileLightTexHeight = 0;
       }
     } else {
       // The flat CPU buffer (tileIdx * kTileDataWidth) reinterprets
@@ -503,20 +503,20 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
       // the row from the flat tile index with the same tilesPerRow.
       const int tileTexWidth = tileLayout.width;
       const int tileTexHeight = tileLayout.height;
-      if ((backend.tileLightTex != kInvalidDeviceTexture) &&
-          ((tileTexWidth != backend.tileLightTexWidth) ||
-           (tileTexHeight != backend.tileLightTexHeight))) {
-        dev->destroy_texture(backend.tileLightTex);
-        backend.tileLightTex = kInvalidDeviceTexture;
-        backend.tileLightTexWidth = 0;
-        backend.tileLightTexHeight = 0;
+      if ((backend.view().tileLightTex != kInvalidDeviceTexture) &&
+          ((tileTexWidth != backend.view().tileLightTexWidth) ||
+           (tileTexHeight != backend.view().tileLightTexHeight))) {
+        dev->destroy_texture(backend.view().tileLightTex);
+        backend.view().tileLightTex = kInvalidDeviceTexture;
+        backend.view().tileLightTexWidth = 0;
+        backend.view().tileLightTexHeight = 0;
       }
-      if (backend.tileLightTex == kInvalidDeviceTexture) {
-        backend.tileLightTex =
+      if (backend.view().tileLightTex == kInvalidDeviceTexture) {
+        backend.view().tileLightTex =
             create_r32f_data_texture(dev, tileTexWidth, tileTexHeight);
-        if (backend.tileLightTex != kInvalidDeviceTexture) {
-          backend.tileLightTexWidth = tileTexWidth;
-          backend.tileLightTexHeight = tileTexHeight;
+        if (backend.view().tileLightTex != kInvalidDeviceTexture) {
+          backend.view().tileLightTexWidth = tileTexWidth;
+          backend.view().tileLightTexHeight = tileTexHeight;
         } else {
           static bool warnedTileTexFailure = false;
           if (!warnedTileTexFailure) {
@@ -527,9 +527,10 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
           }
         }
       }
-      if (backend.tileLightTex != kInvalidDeviceTexture) {
-        dev->update_texture(backend.tileLightTex, backend.tileBuffer.data(),
-                            tileTexWidth, tileTexHeight);
+      if (backend.view().tileLightTex != kInvalidDeviceTexture) {
+        dev->update_texture(backend.view().tileLightTex,
+                            backend.tileBuffer.data(), tileTexWidth,
+                            tileTexHeight);
       }
     }
 
@@ -611,7 +612,7 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
       dev->bind_texture_slot(2U,
                              pass_resource_texture(passRes.gbufferEmissive));
       dev->bind_texture_slot(3U, pass_resource_texture(passRes.gbufferDepth));
-      dev->bind_texture_slot(4U, backend.tileLightTex);
+      dev->bind_texture_slot(4U, backend.view().tileLightTex);
       dev->bind_texture_slot(
           static_cast<std::uint32_t>(kDeferredLightDataUnit),
           backend.lightDataTex);
@@ -853,13 +854,13 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
 
       if (backend.dlCameraPosLoc.valid()) {
         dev->set_param_vec3(backend.dlCameraPosLoc,
-                              &renderer_context().activeCamera.position.x);
+                            &ctx.backend.view().camera.position.x);
       }
       if (backend.dlCameraForwardOrthoLoc.valid()) {
         // xyz = normalized view direction, w = 1 when orthographic:
         // the shader switches its view vector to the constant camera
         // forward under ortho — parallel rays have no per-pixel eye vector.
-        const CameraState &activeCam = renderer_context().activeCamera;
+        const CameraState &activeCam = ctx.backend.view().camera;
         const math::Vec3 fwd = math::normalize(
             math::sub(activeCam.target, activeCam.position));
         const float forwardOrtho[4] = {
@@ -918,11 +919,10 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
                                                   ? envSkyboxTexture
                                                   : kInvalidDeviceTexture;
     const math::Mat4 skyProj = sky_projection_matrix(
-        renderer_context().activeCamera,
-        (drawableHeight > 0)
-            ? (static_cast<float>(drawableWidth) /
-               static_cast<float>(drawableHeight))
-            : 1.0F);
+        ctx.backend.view().camera, (drawableHeight > 0)
+                                       ? (static_cast<float>(drawableWidth) /
+                                          static_cast<float>(drawableHeight))
+                                       : 1.0F);
     if (skyboxTexture != kInvalidDeviceTexture) {
       dev->bind_render_target(pass_resource_target(passRes.sceneColor));
       dev->set_viewport(0, 0, drawableWidth, drawableHeight);
@@ -974,7 +974,7 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
       }
       if (backend.pbrCameraPosLocation.valid()) {
         dev->set_param_vec3(backend.pbrCameraPosLocation,
-                              &renderer_context().activeCamera.position.x);
+                            &ctx.backend.view().camera.position.x);
       }
       if (backend.pbrViewLocation.valid()) {
         dev->set_param_mat4(backend.pbrViewLocation, &viewMat.columns[0].x);

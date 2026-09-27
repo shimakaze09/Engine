@@ -173,8 +173,8 @@ int chain_create_calls_since(int hdrBaseline, int targetBaseline) noexcept {
 /// invalid.
 bool bloom_chain_is_zeroed(const BackendState &backend) noexcept {
   for (int i = 0; i < BackendState::kBloomMipLevels; ++i) {
-    if ((backend.bloomMipTextures[i] != kInvalidDeviceTexture) ||
-        (backend.bloomMipTargets[i].value != 0U)) {
+    if ((backend.view().bloomMipTextures[i] != kInvalidDeviceTexture) ||
+        (backend.view().bloomMipTargets[i].value != 0U)) {
       return false;
     }
   }
@@ -185,14 +185,14 @@ bool bloom_chain_is_zeroed(const BackendState &backend) noexcept {
 /// render-target slot is invalid.
 bool luminance_chain_is_zeroed(const BackendState &backend) noexcept {
   for (int i = 0; i < BackendState::kLuminanceMipLevels; ++i) {
-    if ((backend.lumMipTextures[i] != kInvalidDeviceTexture) ||
-        (backend.lumMipTargets[i].value != 0U)) {
+    if ((backend.view().lumMipTextures[i] != kInvalidDeviceTexture) ||
+        (backend.view().lumMipTargets[i].value != 0U)) {
       return false;
     }
   }
   for (int i = 0; i < 2; ++i) {
-    if ((backend.exposureTextures[i] != kInvalidDeviceTexture) ||
-        (backend.exposureTargets[i].value != 0U)) {
+    if ((backend.view().exposureTextures[i] != kInvalidDeviceTexture) ||
+        (backend.view().exposureTargets[i].value != 0U)) {
       return false;
     }
   }
@@ -381,8 +381,8 @@ bool adaptation_frame(float timeSeconds) noexcept {
   FrameFlushContext ctx = make_context(lights, 640, 480, timeSeconds);
   flush_post_chain(ctx);
   const BackendState &backend = backend_state();
-  return (draw_on(backend.exposureTargets[0].value) != nullptr) ||
-         (draw_on(backend.exposureTargets[1].value) != nullptr);
+  return (draw_on(backend.view().exposureTargets[0].value) != nullptr) ||
+         (draw_on(backend.view().exposureTargets[1].value) != nullptr);
 }
 
 /// EXPECTATION (#541): with auto exposure on, each frame's adaptation pass
@@ -401,10 +401,12 @@ void test_auto_exposure_adapts_on_the_device() noexcept {
 
   CHECK(adaptation_frame(10.0F), "the first frame adapts");
   const std::uint32_t lastMip =
-      backend.lumMipTextures[BackendState::kLuminanceMipLevels - 1].value;
-  const DrawRecord *first = draw_on(backend.exposureTargets[1].value);
+      backend.view()
+          .lumMipTextures[BackendState::kLuminanceMipLevels - 1]
+          .value;
+  const DrawRecord *first = draw_on(backend.view().exposureTargets[1].value);
   CHECK((first != nullptr) && (first->unit0 == lastMip) &&
-            (first->unit1 == backend.exposureTextures[0].value),
+            (first->unit1 == backend.view().exposureTextures[0].value),
         "it averages the last mip and reads the other target");
   CHECK(g_adaptParams[3] == 0.0F,
         "with nothing adapted yet it snaps to the target");
@@ -413,15 +415,15 @@ void test_auto_exposure_adapts_on_the_device() noexcept {
   const DrawRecord *tonemap =
       draw_on(pass_resource_target(get_pass_resources().finalColor).value);
   CHECK((tonemap != nullptr) &&
-            (tonemap->unit2 == backend.exposureTextures[1].value),
+            (tonemap->unit2 == backend.view().exposureTextures[1].value),
         "tonemap samples the exposure just written");
   CHECK(g_tonemapAuto == 1, "tonemap is told to apply it");
   CHECK(g_tonemapExposure == 1.5F, "r_exposure is the compensation");
 
   CHECK(adaptation_frame(10.1F), "the next frame adapts again");
-  const DrawRecord *second = draw_on(backend.exposureTargets[0].value);
+  const DrawRecord *second = draw_on(backend.view().exposureTargets[0].value);
   CHECK((second != nullptr) &&
-            (second->unit1 == backend.exposureTextures[1].value),
+            (second->unit1 == backend.view().exposureTextures[1].value),
         "it reads last frame's exposure and writes the other target");
   CHECK(g_adaptParams[3] == 1.0F, "and blends from it");
   // Same single-precision inputs as the flush; the bound covers a libm

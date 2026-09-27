@@ -96,9 +96,12 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
     // character's shadow mid-animation.
     const bool cacheEnabled = backend.cvars.shadowCache.get_bool(true) &&
                               (skin_palette_count() == 0U);
+    // The cascade atlas is shared by the views: this view's cached maps
+    // survive only while no other view has drawn its own cascades there.
     directionalShadowCacheReused =
-        cacheEnabled && backend.directionalShadowCacheValid &&
-        (backend.directionalShadowCacheKey == cacheKey);
+        cacheEnabled && backend.view().directionalShadowCacheValid &&
+        (backend.view().directionalShadowCacheKey == cacheKey) &&
+        (backend.cascadeAtlasView == backend.currentView);
 
     if (directionalShadowCacheReused) {
       if (backend.cvars.shadowDebug.get_bool(false)) {
@@ -141,12 +144,13 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
       }
 
       gpu_profiler_end_pass(GpuPassId::ShadowMap);
-      backend.directionalShadowCacheKey = cacheKey;
-      backend.directionalShadowCacheValid = true;
+      backend.view().directionalShadowCacheKey = cacheKey;
+      backend.view().directionalShadowCacheValid = true;
+      backend.cascadeAtlasView = backend.currentView;
     }
   } else {
-    backend.directionalShadowCacheKey = 0U;
-    backend.directionalShadowCacheValid = false;
+    backend.view().directionalShadowCacheKey = 0U;
+    backend.view().directionalShadowCacheValid = false;
   }
 
   const bool doSpotShadows =
@@ -160,7 +164,7 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
 
     std::array<ShadowCandidate, kMaxSpotLights> spotCandidates{};
     std::size_t spotCandidateCount = 0U;
-    const math::Vec3 &camPos = renderer_context().activeCamera.position;
+    const math::Vec3 &camPos = ctx.backend.view().camera.position;
     for (std::size_t li = 0U; li < lights.spotLightCount; ++li) {
       if (!lights.spotLights[li].castShadow) {
         continue;
@@ -234,7 +238,7 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
 
     std::array<ShadowCandidate, kMaxPointLights> pointCandidates{};
     std::size_t pointCandidateCount = 0U;
-    const math::Vec3 &camPos = renderer_context().activeCamera.position;
+    const math::Vec3 &camPos = ctx.backend.view().camera.position;
     for (std::size_t li = 0U; li < lights.pointLightCount; ++li) {
       if (!lights.pointLights[li].castShadow) {
         continue;

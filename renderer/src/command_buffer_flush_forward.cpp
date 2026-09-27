@@ -84,13 +84,13 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
     }
     if (backend.pbrCameraPosLocation.valid()) {
       dev->set_param_vec3(backend.pbrCameraPosLocation,
-                            &renderer_context().activeCamera.position.x);
+                          &ctx.backend.view().camera.position.x);
     }
     if (backend.pbrCameraForwardOrthoLocation.valid()) {
       // xyz = normalized view direction, w = 1 when orthographic: the
       // shaders switch the view vector to the constant camera forward
       // under ortho — parallel rays have no per-pixel eye vector.
-      const CameraState &activeCam = renderer_context().activeCamera;
+      const CameraState &activeCam = ctx.backend.view().camera;
       const math::Vec3 fwd = math::normalize(
           math::sub(activeCam.target, activeCam.position));
       const float forwardOrtho[4] = {
@@ -262,11 +262,10 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
                                                   ? envSkyboxTexture
                                                   : kInvalidDeviceTexture;
     const math::Mat4 skyProj = sky_projection_matrix(
-        renderer_context().activeCamera,
-        (drawableHeight > 0)
-            ? (static_cast<float>(drawableWidth) /
-               static_cast<float>(drawableHeight))
-            : 1.0F);
+        ctx.backend.view().camera, (drawableHeight > 0)
+                                       ? (static_cast<float>(drawableWidth) /
+                                          static_cast<float>(drawableHeight))
+                                       : 1.0F);
     if (skyboxTexture != kInvalidDeviceTexture) {
       dev->bind_render_target(sceneTarget);
       dev->set_viewport(0, 0, drawableWidth, drawableHeight);

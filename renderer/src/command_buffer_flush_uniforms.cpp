@@ -134,9 +134,9 @@ std::size_t select_nearest(const Light *lights, std::size_t count,
   return selected;
 }
 
-ForwardLightSelection select_forward_lights(const SceneLightData &lights) noexcept {
+ForwardLightSelection select_forward_lights(const SceneLightData &lights,
+                                            const math::Vec3 &eye) noexcept {
   ForwardLightSelection selection{};
-  const math::Vec3 eye = renderer_context().activeCamera.position;
   selection.pointCount = select_nearest(
       lights.pointLights.data(), std::min(lights.pointLightCount, kMaxPointLights),
       kForwardMaxPointLights, eye, selection.point.data());
@@ -198,7 +198,8 @@ void upload_pbr_lighting_uniforms(const BackendState &backend,
                               static_cast<std::int32_t>(dirCount));
   }
 
-  const ForwardLightSelection selection = select_forward_lights(lights);
+  const ForwardLightSelection selection =
+      select_forward_lights(lights, backend.view().camera.position);
   const std::size_t pointCount = selection.pointCount;
   if (backend.pbrPointLightCountLocation.valid()) {
     dev->set_param_i32(backend.pbrPointLightCountLocation,
@@ -512,7 +513,8 @@ void bind_pbr_shadow_uniforms(const BackendState &backend,
   }
   // Slot indices are scene indices; the forward shader compares them
   // against its position in the uploaded (nearest) light arrays.
-  const ForwardLightSelection selection = select_forward_lights(lights);
+  const ForwardLightSelection selection =
+      select_forward_lights(lights, backend.view().camera.position);
   float spotMatrices[kMaxSpotShadowLights * 16U] = {};
   float spotLightIdx[4] = {};
   for (std::size_t s = 0U; s < kMaxSpotShadowLights; ++s) {

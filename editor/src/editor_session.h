@@ -19,7 +19,6 @@
 #include <memory>
 
 #include "engine/editor/command_history.h"
-#include "engine/editor/debug_camera.h"
 #include "engine/editor/editor_camera.h"
 #include "engine/math/transform.h"
 #include "engine/renderer/camera.h"
@@ -105,6 +104,10 @@ struct InspectorPanelState final {
 /// content epoch they were captured under: scene loads commit by whole-world
 /// assignment, which resets generations, so an epoch mismatch invalidates
 /// every retained handle even when index+generation would appear to match.
+/// The two viewport panels' window names.
+inline constexpr const char *kSceneViewWindow = "Scene";
+inline constexpr const char *kGameViewWindow = "Game";
+
 struct EditorSession final {
   bool initialized = false;
   runtime::World *world = nullptr;
@@ -163,9 +166,6 @@ struct EditorSession final {
   float snapStep = 0.5F;
   float snapAngleDegrees = 15.0F;
   CommandHistory commandHistory{};
-  DebugCamera debugCamera{};
-  renderer::CameraState frozenCameraState{};
-  bool debugCameraActive = false;
   char selectedAssetPath[512] = {};
   std::array<ThumbnailEntry, kMaxThumbnails> thumbnailCache =
       std::array<ThumbnailEntry, kMaxThumbnails>();
@@ -175,9 +175,25 @@ struct EditorSession final {
   /// Advanced once per editor frame (advance_thumbnail_frame).
   std::uint64_t thumbnailFrame = 1U;
   // Screen rect of the Scene panel's image, recorded each frame by the
-  // viewport panel so overlays can anchor inside the rendered scene.
+  // Scene panel for its drop ray and gizmo.
   ImVec2 sceneViewportScreenPos{};
   ImVec2 sceneViewportScreenSize{};
+  // The Scene view as the pipeline reads it next frame: whether its panel
+  // was shown, and its image size in pixels.
+  bool sceneViewShown = false;
+  int sceneViewPixelWidth = 0;
+  int sceneViewPixelHeight = 0;
+  // The Game panel: whether it was shown, focused and hovered last frame
+  // (game input follows focus), and its image's screen rect, where the
+  // in-game overlays anchor.
+  bool gameViewShown = true;
+  bool gameViewFocused = false;
+  bool gameViewHovered = false;
+  ImVec2 gameViewScreenPos{};
+  ImVec2 gameViewScreenSize{};
+  // A panel to bring to the front on the next frame: the Game view on
+  // Play, so input reaches the game, and the Scene view on Stop.
+  const char *pendingViewFocus = nullptr;
   char lastAppliedWindowTitle[640] = {};
   SceneDocumentState document{};
   ContentBrowserState contentBrowser{};

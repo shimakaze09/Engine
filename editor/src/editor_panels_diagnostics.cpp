@@ -46,7 +46,6 @@
 #include "ImGuizmo.h"
 
 #include "engine/editor/command_history.h"
-#include "engine/editor/debug_camera.h"
 
 #include <stb_image.h>
 
@@ -203,12 +202,17 @@ void draw_in_game_stats_overlay(const core::EngineStats &stats) noexcept {
       ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
       ImGuiWindowFlags_NoNav;
 
-  // Anchor inside the Scene panel's image when its rect is known; the old
-  // fixed position sat on top of the docked Entities panel.
+  // The stats are the Game view's frame, so they anchor inside its image
+  // when it is shown, else inside the Scene view's; the old fixed position
+  // sat on top of the docked Entities panel.
   ImVec2 overlayPos(12.0F, 44.0F);
   const EditorSession &session = editor_session();
-  if ((session.sceneViewportScreenSize.x > 0.0F) &&
-      (session.sceneViewportScreenSize.y > 0.0F)) {
+  if (session.gameViewShown && (session.gameViewScreenSize.x > 0.0F) &&
+      (session.gameViewScreenSize.y > 0.0F)) {
+    overlayPos = ImVec2(session.gameViewScreenPos.x + 12.0F,
+                        session.gameViewScreenPos.y + 12.0F);
+  } else if ((session.sceneViewportScreenSize.x > 0.0F) &&
+             (session.sceneViewportScreenSize.y > 0.0F)) {
     overlayPos = ImVec2(session.sceneViewportScreenPos.x + 12.0F,
                         session.sceneViewportScreenPos.y + 12.0F);
   }

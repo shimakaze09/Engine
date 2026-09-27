@@ -50,6 +50,12 @@ inline void capture_world(engine::runtime::World *world) noexcept {
 }
 inline bool always_playing() noexcept { return true; }
 inline bool never_paused() noexcept { return false; }
+/// A test body's editor Scene view, or null for none.
+inline bool (*g_sceneView)(engine::renderer::RenderViewDesc *) noexcept =
+    nullptr;
+inline bool scene_view(engine::renderer::RenderViewDesc *outView) noexcept {
+  return (g_sceneView != nullptr) && g_sceneView(outView);
+}
 
 /// Walks upward from the current path until the bundled assets are found.
 inline bool enter_asset_directory() noexcept {
@@ -182,6 +188,7 @@ run_gpu_scene_test(const char *name, GpuSceneBody body,
   bridge.set_world = &detail::capture_world;
   bridge.is_playing = &detail::always_playing;
   bridge.is_paused = &detail::never_paused;
+  bridge.scene_view = &detail::scene_view;
   engine::runtime::set_editor_bridge(&bridge);
 
   if (!engine::bootstrap()) {

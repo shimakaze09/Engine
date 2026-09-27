@@ -76,7 +76,12 @@ struct FrameFlushContext final {
   // sorted like the main list (opaque first) and tagged by passMask.
   CommandBufferView auxiliaryView{};
   std::size_t auxiliaryOpaqueCount = 0U;
+  // Whether this view clears and presents the back buffer (the Game view).
+  bool ownsBackBuffer = true;
 };
+
+/// Binds the window's back buffer at its full size and clears it.
+void clear_back_buffer(const RenderDevice *dev) noexcept;
 
 /// Visits every opaque shadow caster of the frame: the camera-visible
 /// opaque range, then the auxiliary opaque commands flagged as casters.

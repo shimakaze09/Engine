@@ -49,7 +49,6 @@
 #include "ImGuizmo.h"
 
 #include "engine/editor/command_history.h"
-#include "engine/editor/debug_camera.h"
 
 #include <stb_image.h>
 

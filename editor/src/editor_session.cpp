@@ -51,9 +51,8 @@
 
 #include "editor_console_capture.h"
 #include "editor_live_edit.h"
-#include "engine/editor/command_history.h"
-#include "engine/editor/debug_camera.h"
 #include "engine/content/asset_type_table.h"
+#include "engine/editor/command_history.h"
 
 #include <stb_image.h>
 
@@ -877,6 +876,8 @@ void start_play_mode() noexcept {
                              : runtime::PlayTransition::Start);
   editor_session().playState = PlayState::Playing;
   editor_session().stepRequested = false;
+  // Play brings the Game view forward, so the game has the input focus.
+  editor_session().pendingViewFocus = kGameViewWindow;
   // "Current session" in the Console's filter reads as "since I hit Play."
   console_capture_begin_session();
   core::log_message(core::LogLevel::Info, "editor", "play");
@@ -900,6 +901,7 @@ void stop_play_mode() noexcept {
   record_play_transition(runtime::PlayTransition::Stop);
   editor_session().playState = PlayState::Stopped;
   editor_session().stepRequested = false;
+  editor_session().pendingViewFocus = kSceneViewWindow;
   editor_session().playStopPending = true;
   // A gesture opened against the play-time world must not record against
   // the world the restore will bring back.

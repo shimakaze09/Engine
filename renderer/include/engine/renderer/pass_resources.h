@@ -2,13 +2,17 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 #include "engine/renderer/render_device.h"
+#include "engine/renderer/render_view.h"
 
 namespace engine::renderer {
 
-/// Identifies one render-target resource owned by PassResources.
+/// Identifies one render-target resource owned by PassResources. The id
+/// names the view the target belongs to, so it resolves without any
+/// "current view" state.
 struct PassResourceId final {
   std::uint32_t id = 0U;
 
@@ -18,7 +22,8 @@ struct PassResourceId final {
 
 inline constexpr PassResourceId kInvalidPassResource{};
 
-/// Frame render targets (scene color/depth, G-buffer, post chains).
+/// One render view's frame targets (scene color/depth, G-buffer, post
+/// chains); every view has its own set, sized to its drawable.
 struct PassResources final {
   // Scene pass writes:
   PassResourceId sceneColor; // RGBA16F
@@ -38,17 +43,20 @@ struct PassResources final {
   PassResourceId ssaoBlurTexture; // R32F — blurred ambient occlusion
 };
 
-/// Initializes the owning system for pass resources.
-bool initialize_pass_resources(int width, int height) noexcept;
-/// Shuts down the owning system for pass resources.
+/// Creates a view's targets at the given size; a no-op for a view that has
+/// them. `view` is a render_view_index; the Game view by default.
+bool initialize_pass_resources(int width, int height,
+                               std::size_t view = 0U) noexcept;
+/// Releases every view's targets.
 void shutdown_pass_resources() noexcept;
-/// Recreates size-dependent targets for the new drawable size; false when
-/// recreation failed and the previous valid targets were kept so the
-/// caller can retry at the next size change.
-bool resize_pass_resources(int width, int height) noexcept;
+/// Recreates a view's size-dependent targets for the new drawable size;
+/// false when recreation failed and the previous valid targets were kept
+/// so the caller can retry at the next size change.
+bool resize_pass_resources(int width, int height,
+                           std::size_t view = 0U) noexcept;
 
-/// Current pass-resource set.
-const PassResources &get_pass_resources() noexcept;
+/// A view's pass-resource set (all ids invalid before it is created).
+const PassResources &get_pass_resources(std::size_t view = 0U) noexcept;
 /// Device texture backing the resource (invalid when absent).
 DeviceTextureHandle pass_resource_texture(PassResourceId resource) noexcept;
 /// Render target whose color attachment is the resource (the scene target

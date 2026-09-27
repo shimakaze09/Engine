@@ -18,6 +18,17 @@ engine_add_test_executable(engine_integration_pipeline_camera_prep
     gpu;integration
 )
 
+engine_add_test_executable(engine_integration_pipeline_render_views
+    SOURCES
+    pipeline_render_views_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    LABELS
+    integration
+)
+set_tests_properties(engine_integration_pipeline_render_views PROPERTIES
+    SKIP_REGULAR_EXPRESSION "SKIPPED:")
+
 engine_add_test_executable(engine_integration_pipeline_paused_edit
     SOURCES
     pipeline_paused_edit_test.cpp
@@ -122,6 +133,21 @@ engine_add_test_executable(engine_integration_forward_tail_capture_gpu
     gpu;integration
 )
 set_tests_properties(engine_integration_forward_tail_capture_gpu PROPERTIES
+    SKIP_REGULAR_EXPRESSION "SKIPPED:")
+
+engine_add_test_executable(engine_integration_render_views_isolation_gpu
+    SOURCES
+    render_views_isolation_gpu_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/renderer/src
+    PRIVATE_DEPS
+    engine_runtime
+    engine_renderer
+    engine_content
+    LABELS
+    gpu;integration
+)
+set_tests_properties(engine_integration_render_views_isolation_gpu PROPERTIES
     SKIP_REGULAR_EXPRESSION "SKIPPED:")
 
 engine_add_test_executable(engine_integration_first_frame_shadows_gpu

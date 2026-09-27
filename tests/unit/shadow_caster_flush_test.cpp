@@ -363,7 +363,7 @@ void test_auxiliary_casters_are_drawn() noexcept {
 void test_slots_go_to_the_nearest_casters() noexcept {
   reset_backend();
   reset_fake_device();
-  const engine::math::Vec3 camera = renderer_context().activeCamera.position;
+  const engine::math::Vec3 camera = g_backend.view().camera.position;
   SceneLightData lights{};
   lights.spotLightCount = 10U;
   lights.pointLightCount = 10U;
@@ -400,7 +400,7 @@ void test_slots_go_to_the_nearest_casters() noexcept {
 void test_equidistant_casters_take_slots_in_index_order() noexcept {
   reset_backend();
   reset_fake_device();
-  const engine::math::Vec3 camera = renderer_context().activeCamera.position;
+  const engine::math::Vec3 camera = g_backend.view().camera.position;
   SceneLightData lights{};
   lights.spotLightCount = static_cast<std::uint32_t>(kMaxSpotLights);
   lights.pointLightCount = static_cast<std::uint32_t>(kMaxPointLights);
