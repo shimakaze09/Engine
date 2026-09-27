@@ -4,11 +4,14 @@
 // starts inside is skipped, so a room around the camera does not swallow
 // clicks; a mesh still loading is not pickable. A repeated click on the
 // same spot walks to the next hit behind the current pick, wrapping, and
-// any other click takes the nearest.
+// any other click takes the nearest. A marquee takes every mesh and
+// collider its sub-rectangle frustum does not exclude.
 
 #include "editor_scene_query.h"
 
+#include "engine/math/frustum.h"
 #include "engine/math/ray.h"
+#include "engine/math/transform.h"
 #include "engine/math/vec3.h"
 #include "engine/runtime/world.h"
 
@@ -134,6 +137,69 @@ void check_cycle(engine::tests::TestContext &t) noexcept {
           "no hits, no pick");
 }
 
+/// Collects what a marquee visits, in order.
+struct Visited final {
+  std::array<Entity, 16> entities{};
+  std::size_t count = 0U;
+};
+
+void record(void *context, Entity entity) noexcept {
+  auto *visited = static_cast<Visited *>(context);
+  if (visited->count < visited->entities.size()) {
+    visited->entities[visited->count++] = entity;
+  }
+}
+
+bool visited_has(const Visited &visited, Entity entity) noexcept {
+  for (std::size_t i = 0U; i < visited.count; ++i) {
+    if (visited.entities[i] == entity) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/// A marquee over the right half of a 90 degree view down -z takes what
+/// its frustum does not exclude: a mesh or a collider right of the centre
+/// line, and one straddling it, but not one left of it, one behind the
+/// camera, or a mesh still loading.
+void check_box_select(engine::tests::TestContext &t, World &world) noexcept {
+  const Entity rightMesh = place(world, Vec3(5.0F, 0.0F, -10.0F));
+  const Entity leftMesh = place(world, Vec3(-5.0F, 0.0F, -10.0F));
+  const Entity rightCollider = place(world, Vec3(3.0F, 0.0F, -20.0F));
+  const Entity straddling = place(world, Vec3(0.0F, 0.0F, -10.0F));
+  const Entity behind = place(world, Vec3(5.0F, 0.0F, 10.0F));
+  const Entity loading = place(world, Vec3(6.0F, 0.0F, -10.0F));
+  t.check(add_mesh(world, rightMesh, kUnitMesh) &&
+              add_mesh(world, leftMesh, kUnitMesh) &&
+              add_box_collider(world, rightCollider, 1.0F) &&
+              add_mesh(world, straddling, kUnitMesh) &&
+              add_mesh(world, behind, kUnitMesh) &&
+              add_mesh(world, loading, kLoadingMesh),
+          "build the marquee scene");
+  const engine::math::Mat4 projection =
+      engine::math::perspective(1.57079632679F, 1.0F, 1.0F, 100.0F);
+  const engine::math::Frustum rightHalf =
+      engine::math::frustum_from_view_projection(
+          engine::math::sub_rect_projection(projection, 0.0F, -1.0F, 1.0F,
+                                            1.0F),
+          false);
+  Visited visited{};
+  const std::size_t count = engine::editor::scene_box_select(
+      world, rightHalf, &fake_mesh_bounds, &record, &visited);
+  t.check((count == 3U) && (visited.count == 3U), "the marquee takes three");
+  t.check(visited_has(visited, rightMesh) &&
+              visited_has(visited, rightCollider) &&
+              visited_has(visited, straddling),
+          "a mesh and a collider inside, and a mesh straddling its edge");
+  t.check(!visited_has(visited, leftMesh) && !visited_has(visited, behind) &&
+              !visited_has(visited, loading),
+          "not what lies beside it or behind the camera, nor a loading mesh");
+  t.check(engine::editor::scene_box_select(world, rightHalf, &fake_mesh_bounds,
+                                           nullptr, nullptr) == 3U,
+          "a count needs no visitor");
+}
+
 } // namespace
 
 int main() {
@@ -144,5 +210,10 @@ int main() {
   }
   check_hits(t, *world);
   check_cycle(t);
+  std::unique_ptr<World> marqueeWorld(new (std::nothrow) World());
+  if (marqueeWorld == nullptr) {
+    return 98;
+  }
+  check_box_select(t, *marqueeWorld);
   return t.finish("editor_scene_query");
 }

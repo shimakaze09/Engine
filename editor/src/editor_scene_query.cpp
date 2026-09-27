@@ -154,4 +154,27 @@ runtime::Entity choose_pick(const PickHit *hits, std::size_t count,
   return hits[0].entity;
 }
 
+std::size_t scene_box_select(runtime::World &world,
+                             const math::Frustum &frustum,
+                             MeshBoundsFn meshBounds, BoxSelectVisit visit,
+                             void *context) noexcept {
+  std::size_t count = 0U;
+  world.for_each_alive([&](runtime::Entity entity) noexcept {
+    math::Vec3 center{};
+    math::Vec3 half{};
+    const bool inside =
+        (entity_mesh_world_box(world, entity, meshBounds, &center, &half) &&
+         !math::frustum_excludes_box(frustum, center, half)) ||
+        (entity_collider_world_box(world, entity, &center, &half) &&
+         !math::frustum_excludes_box(frustum, center, half));
+    if (inside) {
+      ++count;
+      if (visit != nullptr) {
+        visit(context, entity);
+      }
+    }
+  });
+  return count;
+}
+
 } // namespace engine::editor

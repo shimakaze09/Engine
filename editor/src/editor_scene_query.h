@@ -2,7 +2,7 @@
 // They run on the CPU against what the world already knows, as Godot's
 // editor picks, rather than through an ID buffer as Unity's and Unreal's
 // do: RenderDevice has no readback, the null device could not test an ID
-// pass, and a marquee will need world bounds anyway. A mesh is hit by its
+// pass, and a marquee needs world bounds anyway. A mesh is hit by its
 // bounds under its entity's transform, a collider by its exact shape.
 
 #pragma once
@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "engine/math/frustum.h"
 #include "engine/math/ray.h"
 #include "engine/runtime/world.h"
 
@@ -58,5 +59,17 @@ std::size_t scene_pick_hits(runtime::World &world, const math::Ray &ray,
 runtime::Entity choose_pick(const PickHit *hits, std::size_t count,
                             runtime::Entity current,
                             bool sameSpotAsLastClick) noexcept;
+
+/// Called once per entity a marquee takes.
+using BoxSelectVisit = void (*)(void *context, runtime::Entity entity) noexcept;
+
+/// Visits, in entity order, every entity within `frustum` (a marquee's
+/// sub-rectangle frustum): a mesh by its world bounds, a collider by its
+/// world bounds, tested conservatively, so a box outside only past a
+/// frustum corner may be taken. Returns how many were visited.
+std::size_t scene_box_select(runtime::World &world,
+                             const math::Frustum &frustum,
+                             MeshBoundsFn meshBounds, BoxSelectVisit visit,
+                             void *context) noexcept;
 
 } // namespace engine::editor

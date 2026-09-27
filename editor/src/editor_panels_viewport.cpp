@@ -40,6 +40,7 @@
 #include "engine/core/reflect.h"
 #include "engine/editor/editor_camera.h"
 #include "engine/engine.h"
+#include "engine/math/frustum.h"
 #include "engine/math/transform.h"
 #include "engine/math/vec2.h"
 #include "engine/math/vec4.h"
@@ -344,6 +345,57 @@ void pick_in_scene_view(const ImVec2 &mouse, const ImVec2 &imagePos,
   select_entity(picked, additive);
 }
 
+/// Adds `entity` to the selection unless it is already a member.
+void add_to_selection(void *, runtime::Entity entity) noexcept {
+  if (!is_entity_selected(entity)) {
+    select_entity(entity, true);
+  }
+}
+
+/// Selects what the marquee from `from` to `to` covers in the Scene image
+/// at (imagePos, imageSize), as Unity's rectangle selection does:
+/// `additive` (Shift or Ctrl) adds it to the selection, otherwise it
+/// replaces the selection. An empty marquee clears it unless additive.
+void box_select_in_scene_view(const ImVec2 &from, const ImVec2 &to,
+                              const ImVec2 &imagePos, const ImVec2 &imageSize,
+                              bool additive) noexcept {
+  EditorSession &session = editor_session();
+  if ((session.world == nullptr) || (imageSize.x <= 0.0F) ||
+      (imageSize.y <= 0.0F)) {
+    return;
+  }
+  const auto ndcX = [&](float x) noexcept {
+    return std::fmax(
+        -1.0F,
+        std::fmin(1.0F, ((2.0F * (x - imagePos.x)) / imageSize.x) - 1.0F));
+  };
+  const auto ndcY = [&](float y) noexcept {
+    return std::fmax(-1.0F, std::fmin(1.0F, 1.0F - ((2.0F * (y - imagePos.y)) /
+                                                    imageSize.y)));
+  };
+  const float minX = std::fmin(ndcX(from.x), ndcX(to.x));
+  const float maxX = std::fmax(ndcX(from.x), ndcX(to.x));
+  const float minY = std::fmin(ndcY(from.y), ndcY(to.y));
+  const float maxY = std::fmax(ndcY(from.y), ndcY(to.y));
+  if (!additive) {
+    clear_entity_selection();
+  }
+  if (!(maxX > minX) || !(maxY > minY)) {
+    return; // clipped away entirely
+  }
+  const renderer::CameraState cam = editor_camera_state(session.editorCamera);
+  const math::Mat4 view = math::look_at(cam.position, cam.target, cam.up);
+  const math::Mat4 projection =
+      renderer::camera_projection_matrix(cam, imageSize.x / imageSize.y);
+  const math::Frustum marquee = math::frustum_from_view_projection(
+      math::mul(math::sub_rect_projection(projection, minX, minY, maxX, maxY),
+                view),
+      renderer::device_depth_zero_one());
+  static_cast<void>(scene_box_select(*session.world, marquee,
+                                     &runtime::editor_mesh_local_bounds,
+                                     &add_to_selection, nullptr));
+}
+
 /// Projects the current mouse position through the editor camera onto the
 /// y = 0 ground plane (falling back to a point ahead of the camera when
 /// the ray misses it within the far plane) to place viewport asset drops.
@@ -576,14 +628,36 @@ void draw_scene_viewport_panel() noexcept {
       clickSession.scenePressPending = true;
       clickSession.scenePressPos = io.MousePos;
     }
+    const float dx = io.MousePos.x - clickSession.scenePressPos.x;
+    const float dy = io.MousePos.y - clickSession.scenePressPos.y;
+    const bool dragged =
+        ((dx * dx) + (dy * dy)) > (kClickSlopPixels * kClickSlopPixels);
+    if (clickSession.scenePressPending && dragged) {
+      // The marquee, clipped to the image.
+      const ImVec2 lo(
+          std::fmax(std::fmin(clickSession.scenePressPos.x, io.MousePos.x),
+                    cursorScreenPos.x),
+          std::fmax(std::fmin(clickSession.scenePressPos.y, io.MousePos.y),
+                    cursorScreenPos.y));
+      const ImVec2 hi(
+          std::fmin(std::fmax(clickSession.scenePressPos.x, io.MousePos.x),
+                    cursorScreenPos.x + regionSize.x),
+          std::fmin(std::fmax(clickSession.scenePressPos.y, io.MousePos.y),
+                    cursorScreenPos.y + regionSize.y));
+      ImDrawList *drawList = ImGui::GetWindowDrawList();
+      drawList->AddRectFilled(lo, hi, IM_COL32(90, 150, 255, 40));
+      drawList->AddRect(lo, hi, IM_COL32(90, 150, 255, 200));
+    }
     if (clickSession.scenePressPending &&
         ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
       clickSession.scenePressPending = false;
-      const float dx = io.MousePos.x - clickSession.scenePressPos.x;
-      const float dy = io.MousePos.y - clickSession.scenePressPos.y;
-      if (((dx * dx) + (dy * dy)) <= (kClickSlopPixels * kClickSlopPixels)) {
+      if (!dragged) {
         pick_in_scene_view(clickSession.scenePressPos, cursorScreenPos,
                            regionSize, io.KeyCtrl);
+      } else {
+        box_select_in_scene_view(clickSession.scenePressPos, io.MousePos,
+                                 cursorScreenPos, regionSize,
+                                 io.KeyShift || io.KeyCtrl);
       }
     }
   }
