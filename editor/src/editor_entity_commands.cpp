@@ -848,6 +848,16 @@ bool execute_selection_duplicate() noexcept {
                       "recorded for undo (out of memory or nothing alive)");
     return false;
   }
+  return execute_duplicate_and_select(command);
+}
+
+bool execute_duplicate_and_select(EntityDuplicateCommand *command) noexcept {
+  EditorSession &session = editor_session();
+  runtime::World *const world = session.world;
+  if ((world == nullptr) || (command == nullptr)) {
+    delete command;
+    return false;
+  }
   // A failed execute deletes the command; a successful one keeps it in
   // the history, so its records are read only after success.
   if (!session.commandHistory.execute(command)) {

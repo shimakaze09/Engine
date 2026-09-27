@@ -213,6 +213,10 @@ runtime::Entity execute_entity_duplicate(runtime::Entity entity) noexcept;
 /// root copies; false, with the world untouched, when nothing is selected
 /// or the copy is refused.
 bool execute_selection_duplicate() noexcept;
+/// Executes a built duplicate command through the history and makes its
+/// root copies the selection. Takes ownership of `command`; false, with
+/// the world untouched, when it is refused.
+bool execute_duplicate_and_select(EntityDuplicateCommand *command) noexcept;
 
 /// Creates a scene object with a default name through the command history;
 /// returns the new entity (kInvalidEntity on failure).

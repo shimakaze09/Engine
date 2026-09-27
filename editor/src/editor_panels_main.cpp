@@ -197,6 +197,9 @@ void draw_main_menu_bar() noexcept {
     editor_action_menu_item(EditorAction::Undo);
     editor_action_menu_item(EditorAction::Redo);
     ImGui::Separator();
+    editor_action_menu_item(EditorAction::Copy);
+    editor_action_menu_item(EditorAction::Paste);
+    editor_action_menu_item(EditorAction::PasteAsChild);
     editor_action_menu_item(EditorAction::Duplicate);
     editor_action_menu_item(EditorAction::Delete);
     ImGui::Separator();
@@ -455,10 +458,11 @@ static bool draw_entity_row(runtime::Entity entity, bool hasChildren,
     if (!is_entity_selected(entity) && (selected_entity() != entity)) {
       select_entity(entity, false);
     }
-    // Both act on the selection, which the right-click just made include
-    // this row.
+    // Each acts on the selection, which the right-click just made include
+    // this row; Paste As Child pastes under it.
     for (const EditorAction action :
-         {EditorAction::Duplicate, EditorAction::Delete}) {
+         {EditorAction::Copy, EditorAction::Paste, EditorAction::PasteAsChild,
+          EditorAction::Duplicate, EditorAction::Delete}) {
       if (editor_action_menu_item_clicked(action)) {
         pending.kind = PendingHierarchyEdit::Kind::Action;
         pending.action = action;

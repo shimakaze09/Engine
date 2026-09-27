@@ -8,6 +8,7 @@
 #include "editor_shortcuts.h"
 
 #include "editor_commands.h"
+#include "editor_entity_clipboard.h"
 #include "editor_scene_document.h"
 #include "editor_session.h"
 
@@ -36,6 +37,12 @@ constexpr std::array<EditorShortcut,
         {EditorAction::Redo, "edit.redo", "Redo",
          ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_Z,
          ImGuiMod_Ctrl | ImGuiKey_Y, true},
+        {EditorAction::Copy, "edit.copy", "Copy", ImGuiMod_Ctrl | ImGuiKey_C, 0,
+         false},
+        {EditorAction::Paste, "edit.paste", "Paste", ImGuiMod_Ctrl | ImGuiKey_V,
+         0, false},
+        {EditorAction::PasteAsChild, "edit.paste_as_child", "Paste As Child",
+         ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_V, 0, false},
         {EditorAction::Duplicate, "edit.duplicate", "Duplicate",
          ImGuiMod_Ctrl | ImGuiKey_D, 0, false},
         // Cmd+Backspace is the Mac chord (Ctrl maps to Cmd there), for
@@ -130,6 +137,14 @@ bool editor_action_enabled(EditorAction action) noexcept {
     return editor_history_can_undo();
   case EditorAction::Redo:
     return editor_history_can_redo();
+  case EditorAction::Copy:
+    // Copy only reads, so it works during play; the copy pastes after
+    // Stop, as in Unity.
+    return (editor_session().world != nullptr) && has_selection();
+  case EditorAction::Paste:
+    return world_is_editable() && entity_clipboard_has();
+  case EditorAction::PasteAsChild:
+    return world_is_editable() && entity_clipboard_has() && has_selection();
   case EditorAction::Duplicate:
   case EditorAction::Delete:
     return world_is_editable() && has_selection();
@@ -175,6 +190,12 @@ bool run_editor_action(EditorAction action) noexcept {
   case EditorAction::Redo:
     editor_history_redo();
     return true;
+  case EditorAction::Copy:
+    return entity_clipboard_copy();
+  case EditorAction::Paste:
+    return execute_entity_paste(runtime::kInvalidEntity);
+  case EditorAction::PasteAsChild:
+    return execute_entity_paste(selected_entity());
   case EditorAction::Duplicate:
     return execute_selection_duplicate();
   case EditorAction::Delete:
