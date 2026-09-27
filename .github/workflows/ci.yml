@@ -155,12 +155,17 @@ jobs:
           path: build/coin_run_final_frame.tga
           if-no-files-found: warn
 
-      # ---- The bundled scene loads through the production loader with
+      # ---- The bundled scenes (the startup template, the Island Hopper
+      # template and the samples) load through the production loader with
       # every reference resolving; a dangling one fails here, not for an
       # author.
       - name: Validate bundled scenes
         if: runner.os == 'Linux'
-        run: build/tools/engine_validate/engine_validate assets/main.scene
+        run: >-
+          build/tools/engine_validate/engine_validate assets/main.scene
+          assets/templates/island_hopper.scene
+          assets/samples/playground.scene assets/coin_run.scene
+          assets/shading_models.scene
 
       # ---- Determinism hash artifact: every platform and configuration
       # must produce one World::state_hash through the production pipeline.

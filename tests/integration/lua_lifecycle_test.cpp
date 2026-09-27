@@ -290,6 +290,7 @@ bool verify_shipped_module_manifest() noexcept {
 local SHIPPED_MODULES = {
     'assets/lib/utils.lua',
     'assets/main.lua',
+    'assets/samples/playground.lua',
     'assets/scripts/player.lua',
     'assets/scripts/island_hopper.lua',
     'assets/scripts/island_player.lua',
@@ -324,7 +325,7 @@ bool verify_demo_script_modules() noexcept {
 local require_module = engine.require
 local utils = require_module("assets/lib/utils.lua")
 local player = require_module("assets/scripts/player.lua")
-local scene = require_module("assets/main.lua")
+local scene = require_module("assets/samples/playground.lua")
 
 local function expect_equal(actual, expected, label)
     if actual ~= expected then

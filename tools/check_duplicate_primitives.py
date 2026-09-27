@@ -153,6 +153,18 @@ RULES: tuple[Rule, ...] = (
         remedy="include engine/math/mat4.h and use math::transform_point "
         "or math::transform_vector",
     ),
+    Rule(
+        name="the built-in primitive colliders",
+        owner="runtime/src/primitive_collider.cpp",
+        # Assigning a primitive's hull source, or writing the pyramid's
+        # 0.58 half-depth, is what a copy looks like: the editor's Create
+        # menu and Lua's spawn_shape each described the six primitives,
+        # and only one of them kept the plane's top on its surface.
+        pattern=r"=\s*(?:\w+::)*HullSource::(?:Cylinder|Pyramid)\b"
+        r"|\bVec3\s*\(\s*0\.5F?\s*,\s*0\.5F?\s*,\s*0\.58F?\s*\)",
+        remedy="include engine/runtime/primitive_collider.h and use "
+        "runtime::primitive_collider",
+    ),
 )
 
 

@@ -1200,9 +1200,9 @@ bool scripting_remove_camera_component_op(runtime::World *world,
   return (world != nullptr) && world->remove_camera_component(entity);
 }
 
-bool scripting_apply_primitive_hull(math::HullSource source,
-                                    runtime::Collider *collider) noexcept {
-  return (collider != nullptr) && runtime::apply_primitive_hull(source, collider);
+runtime::Collider
+scripting_primitive_collider(math::PrimitiveShape shape) noexcept {
+  return runtime::primitive_collider(shape);
 }
 
 // Game mode, owned by the World.
@@ -1418,7 +1418,7 @@ scripting::RuntimeServices make_scripting_runtime_services() noexcept {
   s.add_spring_arm_op = &scripting_add_spring_arm_op;
   s.add_camera_component_op = &scripting_add_camera_component_op;
   s.remove_camera_component_op = &scripting_remove_camera_component_op;
-  s.apply_primitive_hull = &scripting_apply_primitive_hull;
+  s.primitive_collider = &scripting_primitive_collider;
   s.game_mode_name = &scripting_game_mode_name;
   s.set_game_mode_name = &scripting_set_game_mode_name;
   s.game_mode_start = &scripting_game_mode_start;

@@ -947,7 +947,7 @@ bool EnginePipeline::Impl::initialize(std::uint32_t maxFrameCount) noexcept {
     return false;
   }
 
-  create_bootstrap_scene(world.get(), meshIds);
+  create_bootstrap_scene(world.get());
 
   core::cvar_register_int("r_vsync", 1,
                           "Present interval: 0 off, 1 on, -1 adaptive");

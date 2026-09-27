@@ -433,6 +433,26 @@ engine_add_test_executable(engine_integration_player_mode
     integration
 )
 
+engine_add_test_executable(engine_integration_startup_template
+    SOURCES
+    startup_template_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/runtime/src
+    PRIVATE_DEPS
+    engine_runtime
+    LABELS
+    integration
+)
+
+engine_add_test_executable(engine_integration_playground_sample
+    SOURCES
+    playground_sample_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    LABELS
+    integration
+)
+
 engine_add_test_executable(engine_integration_main_script_setup
     SOURCES
     main_script_setup_test.cpp

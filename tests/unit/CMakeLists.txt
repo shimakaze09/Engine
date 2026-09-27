@@ -545,6 +545,14 @@ engine_add_test_executable(engine_unit_collision_event_identity
     engine_runtime
 )
 
+engine_add_test_executable(engine_unit_primitive_collider
+    SOURCES
+    primitive_collider_test.cpp
+    PRIVATE_DEPS
+    engine_scripting
+    engine_runtime
+)
+
 engine_add_test_executable(engine_unit_spawn_shape_transaction
     SOURCES
     spawn_shape_transaction_test.cpp

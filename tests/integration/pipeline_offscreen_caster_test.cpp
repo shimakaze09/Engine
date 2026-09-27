@@ -7,6 +7,8 @@
 // the pipeline reports both counts. Full production bootstrap, headless,
 // on the null render device; observed through EngineStats.
 
+#include "../builtin_mesh_fixture.h"
+
 #include "engine/core/engine_stats.h"
 #include "engine/engine.h"
 #include "engine/math/vec3.h"
@@ -57,7 +59,7 @@ bool ticking_frame(engine::EnginePipeline &pipeline) noexcept {
   return pipeline.execute_frame();
 }
 
-/// Points the bootstrap scene's directional light along `direction`.
+/// Points the startup scene's directional light along `direction`.
 bool set_sun_direction(const engine::math::Vec3 &direction) noexcept {
   using namespace engine::runtime;
   Entity sun = kInvalidEntity;
@@ -124,8 +126,12 @@ int main() {
       engine::shutdown();
       return 3;
     }
-    // Settle so the bootstrap meshes are loaded and the camera is final.
-    if (!ticking_frame(pipeline) || !ticking_frame(pipeline)) {
+    // The startup scene is the empty template, so the suite authors a
+    // visible mesh: a built-in cube at the origin, in front of the
+    // template's camera. Settle so it draws and the camera is final.
+    if ((engine::tests::add_builtin_cube(*g_world, engine::math::Vec3()) ==
+         engine::runtime::kInvalidEntity) ||
+        !ticking_frame(pipeline) || !ticking_frame(pipeline)) {
       result = 4;
     }
 

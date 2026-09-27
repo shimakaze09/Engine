@@ -140,6 +140,9 @@ bool author_entity(engine::runtime::World &world,
     return true;
   }
   engine::runtime::CameraComponent camera{};
+  // Outranks the startup scene's Main Camera (priority 0), so the camera
+  // the live-scene guard reads is this one.
+  camera.priority = 1.0F;
   return world.add_camera_component(entity, camera);
 }
 

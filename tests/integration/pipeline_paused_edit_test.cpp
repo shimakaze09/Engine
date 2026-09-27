@@ -7,6 +7,8 @@
 // the draws, with no simulation step: paused frames that edit nothing
 // leave the World's state hash unchanged.
 
+#include "../builtin_mesh_fixture.h"
+
 #include "engine/core/cvar.h"
 #include "engine/core/engine_stats.h"
 #include "engine/core/simulation_clock.h"
@@ -55,20 +57,6 @@ bool set_working_directory_with_assets() noexcept {
   return false;
 }
 
-/// Copies the first mesh asset id found in the bootstrap scene.
-std::uint64_t
-find_any_mesh_asset_id(const engine::runtime::World &world) noexcept {
-  std::uint64_t assetId = 0ULL;
-  world.for_each<engine::runtime::MeshComponent>(
-      [&assetId](engine::runtime::Entity,
-                 const engine::runtime::MeshComponent &mesh) {
-        if (assetId == 0ULL) {
-          assetId = mesh.meshAssetId;
-        }
-      });
-  return assetId;
-}
-
 /// Adds a mesh entity at `position`; kInvalidEntity on failure.
 engine::runtime::Entity add_mesh(engine::runtime::World &world,
                                  std::uint64_t meshAssetId,
@@ -90,7 +78,7 @@ std::uint32_t draw_calls() noexcept {
 }
 
 int run(engine::EnginePipeline &pipeline) noexcept {
-  const std::uint64_t meshAssetId = find_any_mesh_asset_id(*g_world);
+  const std::uint64_t meshAssetId = engine::tests::builtin_cube_mesh_id();
   if (meshAssetId == 0ULL) {
     return 5;
   }
