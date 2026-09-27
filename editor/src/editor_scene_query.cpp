@@ -8,6 +8,7 @@
 #include "engine/math/aabb.h"
 #include "engine/math/mat4.h"
 #include "engine/physics/collider.h"
+#include "engine/runtime/light_pose.h"
 #include "engine/runtime/physics_bridge.h"
 
 namespace engine::editor {
@@ -154,6 +155,87 @@ runtime::Entity choose_pick(const PickHit *hits, std::size_t count,
   return hits[0].entity;
 }
 
+namespace {
+
+/// Where `entity`'s icon stands in the world; false without an icon.
+bool icon_position(const runtime::World &world, runtime::Entity entity,
+                   SceneIconKind *outKind, math::Vec3 *outPosition) noexcept {
+  const bool light = world.has_light_component(entity) ||
+                     world.has_point_light_component(entity) ||
+                     world.has_spot_light_component(entity);
+  if (!light && !world.has_camera_component(entity)) {
+    return false;
+  }
+  *outKind = light ? SceneIconKind::Light : SceneIconKind::Camera;
+  if (light) {
+    *outPosition =
+        runtime::light_world_pose(world, entity, math::Vec3()).position;
+  } else {
+    const runtime::WorldTransform *worldTransform =
+        world.get_world_transform_read_ptr(entity);
+    *outPosition =
+        (worldTransform != nullptr) ? worldTransform->position : math::Vec3();
+  }
+  return true;
+}
+
+} // namespace
+
+bool entity_has_icon(const runtime::World &world,
+                     runtime::Entity entity) noexcept {
+  SceneIconKind kind = SceneIconKind::Light;
+  math::Vec3 position{};
+  return icon_position(world, entity, &kind, &position);
+}
+
+std::size_t scene_icons(const runtime::World &world,
+                        const math::Mat4 &viewProjection, SceneIcon *out,
+                        std::size_t capacity) noexcept {
+  if (out == nullptr) {
+    return 0U;
+  }
+  std::size_t count = 0U;
+  world.for_each_alive([&](runtime::Entity entity) noexcept {
+    SceneIcon icon{};
+    math::Vec3 position{};
+    if ((count >= capacity) ||
+        !icon_position(world, entity, &icon.kind, &position) ||
+        !math::project_to_ndc(viewProjection, position, &icon.ndc) ||
+        (std::fabs(icon.ndc.x) > 1.0F) || (std::fabs(icon.ndc.y) > 1.0F)) {
+      return;
+    }
+    icon.entity = entity;
+    out[count++] = icon;
+  });
+  return count;
+}
+
+runtime::Entity pick_icon(const SceneIcon *icons, std::size_t count, float ndcX,
+                          float ndcY, float radiusX, float radiusY) noexcept {
+  if ((icons == nullptr) || !(radiusX > 0.0F) || !(radiusY > 0.0F)) {
+    return runtime::kInvalidEntity;
+  }
+  runtime::Entity best = runtime::kInvalidEntity;
+  float bestDistance = 0.0F;
+  float bestDepth = 0.0F;
+  for (std::size_t i = 0U; i < count; ++i) {
+    // Distance in units of the radius: 1 is the ellipse's edge.
+    const float dx = (icons[i].ndc.x - ndcX) / radiusX;
+    const float dy = (icons[i].ndc.y - ndcY) / radiusY;
+    const float distance = (dx * dx) + (dy * dy);
+    if (distance > 1.0F) {
+      continue;
+    }
+    if ((best == runtime::kInvalidEntity) || (distance < bestDistance) ||
+        ((distance == bestDistance) && (icons[i].ndc.z < bestDepth))) {
+      best = icons[i].entity;
+      bestDistance = distance;
+      bestDepth = icons[i].ndc.z;
+    }
+  }
+  return best;
+}
+
 std::size_t scene_box_select(runtime::World &world,
                              const math::Frustum &frustum,
                              MeshBoundsFn meshBounds, BoxSelectVisit visit,
@@ -162,11 +244,15 @@ std::size_t scene_box_select(runtime::World &world,
   world.for_each_alive([&](runtime::Entity entity) noexcept {
     math::Vec3 center{};
     math::Vec3 half{};
+    SceneIconKind kind = SceneIconKind::Light;
+    math::Vec3 iconPosition{};
     const bool inside =
         (entity_mesh_world_box(world, entity, meshBounds, &center, &half) &&
          !math::frustum_excludes_box(frustum, center, half)) ||
         (entity_collider_world_box(world, entity, &center, &half) &&
-         !math::frustum_excludes_box(frustum, center, half));
+         !math::frustum_excludes_box(frustum, center, half)) ||
+        (icon_position(world, entity, &kind, &iconPosition) &&
+         !math::frustum_excludes_sphere(frustum, iconPosition, 0.0F));
     if (inside) {
       ++count;
       if (visit != nullptr) {

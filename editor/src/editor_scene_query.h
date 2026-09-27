@@ -11,6 +11,7 @@
 #include <cstdint>
 
 #include "engine/math/frustum.h"
+#include "engine/math/mat4.h"
 #include "engine/math/ray.h"
 #include "engine/runtime/world.h"
 
@@ -60,13 +61,45 @@ runtime::Entity choose_pick(const PickHit *hits, std::size_t count,
                             runtime::Entity current,
                             bool sameSpotAsLastClick) noexcept;
 
+/// What a Scene view icon stands for.
+enum class SceneIconKind : std::uint8_t { Light, Camera };
+
+/// A light or camera shown as a screen-space icon, where it projects.
+struct SceneIcon final {
+  runtime::Entity entity = runtime::kInvalidEntity;
+  SceneIconKind kind = SceneIconKind::Light;
+  math::Vec3 ndc{}; // x, y on screen in [-1, 1]; z orders by depth
+};
+
+/// True when `entity` is shown as an icon: it has a light component of
+/// any kind, or a camera.
+bool entity_has_icon(const runtime::World &world,
+                     runtime::Entity entity) noexcept;
+
+/// The icons of every light and camera in front of the eye and within the
+/// view under `viewProjection`, in entity order, at most `capacity`. A
+/// light sits where runtime::light_world_pose puts it, a camera at its
+/// entity's world position.
+std::size_t scene_icons(const runtime::World &world,
+                        const math::Mat4 &viewProjection, SceneIcon *out,
+                        std::size_t capacity) noexcept;
+
+/// The icon under the cursor at (ndcX, ndcY): the nearest on screen
+/// within the ellipse of NDC radii (radiusX, radiusY), which a caller
+/// sizes to a circle of pixels, the nearer in depth on a tie.
+/// kInvalidEntity when none is that close. Icons are picked before
+/// geometry, as Unity's gizmo icons are.
+runtime::Entity pick_icon(const SceneIcon *icons, std::size_t count, float ndcX,
+                          float ndcY, float radiusX, float radiusY) noexcept;
+
 /// Called once per entity a marquee takes.
 using BoxSelectVisit = void (*)(void *context, runtime::Entity entity) noexcept;
 
 /// Visits, in entity order, every entity within `frustum` (a marquee's
 /// sub-rectangle frustum): a mesh by its world bounds, a collider by its
 /// world bounds, tested conservatively, so a box outside only past a
-/// frustum corner may be taken. Returns how many were visited.
+/// frustum corner may be taken, and a light or camera by its icon's
+/// position. Returns how many were visited.
 std::size_t scene_box_select(runtime::World &world,
                              const math::Frustum &frustum,
                              MeshBoundsFn meshBounds, BoxSelectVisit visit,

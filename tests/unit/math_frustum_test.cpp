@@ -221,6 +221,20 @@ void check_unprojection(engine::tests::TestContext &t) noexcept {
           "the far quad follows");
 }
 
+/// A point projects to where the view puts it; one behind the eye has no
+/// screen position.
+void check_projection(engine::tests::TestContext &t) noexcept {
+  Vec3 ndc{};
+  t.check(engine::math::project_to_ndc(projection(false),
+                                       Vec3(5.0F, -2.5F, -10.0F), &ndc) &&
+              near_abs(ndc.x, 0.5F, kPlaneTol) &&
+              near_abs(ndc.y, -0.25F, kPlaneTol),
+          "x = 5, y = -2.5 at depth 10 projects to (0.5, -0.25)");
+  t.check(!engine::math::project_to_ndc(projection(false),
+                                        Vec3(0.0F, 0.0F, 5.0F), &ndc),
+          "a point behind the eye does not project");
+}
+
 } // namespace
 
 int main() {
@@ -232,5 +246,6 @@ int main() {
   check_sphere_tests(t);
   check_sub_rect(t);
   check_unprojection(t);
+  check_projection(t);
   return t.finish("math_frustum");
 }

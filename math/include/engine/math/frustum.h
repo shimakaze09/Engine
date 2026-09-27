@@ -1,10 +1,10 @@
 // Declares the one view-frustum primitive every system culls and picks
 // with: planes extracted from a view-projection, conservative box, swept
-// box and sphere tests, sub-rectangle projections (light tiles, a marquee),
-// and unprojection of clip-space points and the frustum's corners. Both
-// clip depth conventions are handled: [-1, 1] on GL, [0, 1] on D3D, Metal
-// and Vulkan. Defined inline, like the rest of engine_math, so culling
-// loops stay inlinable.
+// box and sphere tests, sub-rectangle projections (light tiles, a
+// marquee), and projection to and from clip space (a screen icon, the
+// frustum's corners). Both clip depth conventions are handled: [-1, 1] on
+// GL, [0, 1] on D3D, Metal and Vulkan. Defined inline, like the rest of
+// engine_math, so culling loops stay inlinable.
 
 #pragma once
 
@@ -145,6 +145,21 @@ inline Mat4 sub_rect_projection(const Mat4 &projection, float minX, float minY,
   rect.columns[3].x = -(maxX + minX) / (maxX - minX);
   rect.columns[3].y = -(maxY + minY) / (maxY - minY);
   return mul(rect, projection);
+}
+
+/// The normalized device coordinates of world point `point` under
+/// `viewProjection`. False when the point is at or behind the eye (clip w
+/// not positive), where no screen position exists; the point may still
+/// lie outside the [-1, 1] square.
+inline bool project_to_ndc(const Mat4 &viewProjection, const Vec3 &point,
+                           Vec3 *out) noexcept {
+  const Vec4 clip = mul(viewProjection, Vec4(point.x, point.y, point.z, 1.0F));
+  if (!(clip.w > 1.0e-12F)) {
+    return false;
+  }
+  const float invW = 1.0F / clip.w;
+  *out = Vec3(clip.x * invW, clip.y * invW, clip.z * invW);
+  return true;
 }
 
 /// The world point at normalized device coordinates `ndc` under

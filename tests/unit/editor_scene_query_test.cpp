@@ -5,7 +5,8 @@
 // clicks; a mesh still loading is not pickable. A repeated click on the
 // same spot walks to the next hit behind the current pick, wrapping, and
 // any other click takes the nearest. A marquee takes every mesh and
-// collider its sub-rectangle frustum does not exclude.
+// collider its sub-rectangle frustum does not exclude. Lights and cameras
+// are screen icons, picked first and taken by a marquee by position.
 
 #include "editor_scene_query.h"
 
@@ -200,6 +201,77 @@ void check_box_select(engine::tests::TestContext &t, World &world) noexcept {
           "a count needs no visitor");
 }
 
+/// Lights and cameras are icons where they project: in front of the eye
+/// and within the view only. The icon nearest the cursor within its
+/// radius is picked, the nearer in depth on a tie, and a marquee takes an
+/// icon by its position.
+void check_icons(engine::tests::TestContext &t, World &world) noexcept {
+  const Entity point = place(world, Vec3(0.0F, 0.0F, -10.0F));
+  const Entity spot = place(world, Vec3(5.0F, 0.0F, -10.0F));
+  const Entity camera = place(world, Vec3(-5.0F, 0.0F, -10.0F));
+  const Entity behind = place(world, Vec3(0.0F, 0.0F, 10.0F));
+  const Entity aside = place(world, Vec3(20.0F, 0.0F, -10.0F));
+  const Entity deeper = place(world, Vec3(0.0F, 0.0F, -20.0F));
+  const Entity meshOnly = place(world, Vec3(1.0F, 0.0F, -10.0F));
+  engine::runtime::PointLightComponent pointLight{};
+  engine::runtime::SpotLightComponent spotLight{};
+  engine::runtime::CameraComponent cameraComponent{};
+  t.check(world.add_point_light_component(point, pointLight) &&
+              world.add_spot_light_component(spot, spotLight) &&
+              world.add_camera_component(camera, cameraComponent) &&
+              world.add_point_light_component(behind, pointLight) &&
+              world.add_point_light_component(aside, pointLight) &&
+              world.add_point_light_component(deeper, pointLight) &&
+              add_mesh(world, meshOnly, kUnitMesh),
+          "build the icon scene");
+  t.check(engine::editor::entity_has_icon(world, camera) &&
+              !engine::editor::entity_has_icon(world, meshOnly),
+          "lights and cameras have icons, meshes do not");
+
+  // 90 degrees down -z: x = 5 at depth 10 projects to x = 0.5.
+  const engine::math::Mat4 viewProjection =
+      engine::math::perspective(1.57079632679F, 1.0F, 1.0F, 100.0F);
+  std::array<engine::editor::SceneIcon, 8> icons{};
+  const std::size_t count = engine::editor::scene_icons(
+      world, viewProjection, icons.data(), icons.size());
+  t.check(count == 4U, "four icons are in view");
+  bool placed = true;
+  for (std::size_t i = 0U; i < count; ++i) {
+    const engine::editor::SceneIcon &icon = icons[i];
+    if (icon.entity == spot) {
+      placed = placed && near(icon.ndc.x, 0.5F) && near(icon.ndc.y, 0.0F) &&
+               (icon.kind == engine::editor::SceneIconKind::Light);
+    } else if (icon.entity == camera) {
+      placed = placed && near(icon.ndc.x, -0.5F) &&
+               (icon.kind == engine::editor::SceneIconKind::Camera);
+    } else {
+      placed = placed && ((icon.entity == point) || (icon.entity == deeper));
+    }
+  }
+  t.check(placed, "each icon sits where its entity projects");
+
+  using engine::editor::pick_icon;
+  t.check(pick_icon(icons.data(), count, 0.52F, 0.0F, 0.05F, 0.05F) == spot,
+          "an icon is picked within its radius");
+  t.check(pick_icon(icons.data(), count, 0.6F, 0.0F, 0.05F, 0.05F) ==
+              kInvalidEntity,
+          "nothing is picked outside it");
+  t.check(pick_icon(icons.data(), count, 0.0F, 0.0F, 0.05F, 0.05F) == point,
+          "of two icons on one spot, the nearer is picked");
+
+  Visited visited{};
+  const engine::math::Frustum rightHalf =
+      engine::math::frustum_from_view_projection(
+          engine::math::sub_rect_projection(viewProjection, 0.0F, -1.0F, 1.0F,
+                                            1.0F),
+          false);
+  static_cast<void>(engine::editor::scene_box_select(
+      world, rightHalf, &fake_mesh_bounds, &record, &visited));
+  t.check(visited_has(visited, spot) && !visited_has(visited, camera) &&
+              !visited_has(visited, aside),
+          "a marquee takes the icons within it");
+}
+
 } // namespace
 
 int main() {
@@ -215,5 +287,10 @@ int main() {
     return 98;
   }
   check_box_select(t, *marqueeWorld);
+  std::unique_ptr<World> iconWorld(new (std::nothrow) World());
+  if (iconWorld == nullptr) {
+    return 97;
+  }
+  check_icons(t, *iconWorld);
   return t.finish("editor_scene_query");
 }

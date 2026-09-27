@@ -287,6 +287,101 @@ void draw_selected_collider_overlay(
 
 /// How far a press may travel and still count as a click, not a drag.
 constexpr float kClickSlopPixels = 4.0F;
+/// An icon is picked within this many pixels of its centre.
+constexpr float kIconPickRadiusPixels = 10.0F;
+/// Icons one Scene view draws; lights and cameras beyond this many in
+/// view go undrawn.
+constexpr std::size_t kMaxSceneIcons = 256U;
+
+/// The Scene camera's view and projection for an image of `imageSize`
+/// (positive), through the renderer's projection builder, so every Scene
+/// view tool projects with the camera the view renders.
+struct SceneMatrices final {
+  math::Mat4 view{};
+  math::Mat4 projection{};
+};
+
+SceneMatrices scene_view_matrices(const ImVec2 &imageSize) noexcept {
+  const renderer::CameraState cam =
+      editor_camera_state(editor_session().editorCamera);
+  return SceneMatrices{
+      math::look_at(cam.position, cam.target, cam.up),
+      renderer::camera_projection_matrix(cam, imageSize.x / imageSize.y)};
+}
+
+/// A point on the Scene image as normalized device coordinates, +y up.
+ImVec2 image_to_ndc(const ImVec2 &point, const ImVec2 &imagePos,
+                    const ImVec2 &imageSize) noexcept {
+  return ImVec2(((2.0F * (point.x - imagePos.x)) / imageSize.x) - 1.0F,
+                1.0F - ((2.0F * (point.y - imagePos.y)) / imageSize.y));
+}
+
+/// Normalized device coordinates as a point on the Scene image.
+ImVec2 ndc_to_image(float ndcX, float ndcY, const ImVec2 &imagePos,
+                    const ImVec2 &imageSize) noexcept {
+  return ImVec2(imagePos.x + ((ndcX + 1.0F) * 0.5F * imageSize.x),
+                imagePos.y + ((1.0F - ndcY) * 0.5F * imageSize.y));
+}
+
+/// The icons of the lights and cameras the Scene image at (imagePos,
+/// imageSize) shows; see scene_icons.
+std::size_t collect_scene_icons(const ImVec2 &imageSize, SceneIcon *out,
+                                std::size_t capacity) noexcept {
+  const EditorSession &session = editor_session();
+  if ((session.world == nullptr) || (imageSize.x <= 0.0F) ||
+      (imageSize.y <= 0.0F)) {
+    return 0U;
+  }
+  const SceneMatrices matrices = scene_view_matrices(imageSize);
+  return scene_icons(*session.world,
+                     math::mul(matrices.projection, matrices.view), out,
+                     capacity);
+}
+
+/// Draws the Scene view's light and camera icons over its image, as
+/// Unity's gizmo icons: screen-sized glyphs that geometry does not hide,
+/// ringed when selected.
+void draw_scene_icons(const ImVec2 &imagePos,
+                      const ImVec2 &imageSize) noexcept {
+  std::array<SceneIcon, kMaxSceneIcons> icons =
+      std::array<SceneIcon, kMaxSceneIcons>();
+  const std::size_t count =
+      collect_scene_icons(imageSize, icons.data(), icons.size());
+  ImDrawList *drawList = ImGui::GetWindowDrawList();
+  constexpr ImU32 kLightColor = IM_COL32(255, 220, 90, 230);
+  constexpr ImU32 kCameraColor = IM_COL32(150, 200, 255, 230);
+  constexpr ImU32 kOutline = IM_COL32(20, 20, 20, 200);
+  for (std::size_t i = 0U; i < count; ++i) {
+    const ImVec2 c =
+        ndc_to_image(icons[i].ndc.x, icons[i].ndc.y, imagePos, imageSize);
+    if (icons[i].kind == SceneIconKind::Light) {
+      // A sun: a disc with eight rays.
+      for (int ray = 0; ray < 8; ++ray) {
+        const float angle = 0.78539816F * static_cast<float>(ray);
+        const ImVec2 dir(std::cos(angle), std::sin(angle));
+        drawList->AddLine(ImVec2(c.x + (dir.x * 6.0F), c.y + (dir.y * 6.0F)),
+                          ImVec2(c.x + (dir.x * 9.0F), c.y + (dir.y * 9.0F)),
+                          kLightColor, 1.5F);
+      }
+      drawList->AddCircleFilled(c, 4.5F, kLightColor);
+      drawList->AddCircle(c, 4.5F, kOutline);
+    } else {
+      // A camera: a body with a lens to its right.
+      drawList->AddRectFilled(ImVec2(c.x - 7.0F, c.y - 4.5F),
+                              ImVec2(c.x + 3.0F, c.y + 4.5F), kCameraColor,
+                              1.5F);
+      drawList->AddTriangleFilled(ImVec2(c.x + 3.0F, c.y),
+                                  ImVec2(c.x + 8.0F, c.y - 4.5F),
+                                  ImVec2(c.x + 8.0F, c.y + 4.5F), kCameraColor);
+      drawList->AddRect(ImVec2(c.x - 7.0F, c.y - 4.5F),
+                        ImVec2(c.x + 3.0F, c.y + 4.5F), kOutline, 1.5F);
+    }
+    if (is_entity_selected(icons[i].entity) ||
+        (selected_entity() == icons[i].entity)) {
+      drawList->AddCircle(c, 11.0F, IM_COL32(255, 255, 255, 220), 0, 1.5F);
+    }
+  }
+}
 
 bool point_in_rect(const ImVec2 &point, const ImVec2 &min,
                    const ImVec2 &size) noexcept {
@@ -305,15 +400,26 @@ void pick_in_scene_view(const ImVec2 &mouse, const ImVec2 &imagePos,
       (imageSize.y <= 0.0F)) {
     return;
   }
-  const renderer::CameraState cam = editor_camera_state(session.editorCamera);
-  const math::Mat4 view = math::look_at(cam.position, cam.target, cam.up);
-  const math::Mat4 projection =
-      renderer::camera_projection_matrix(cam, imageSize.x / imageSize.y);
-  const float ndcX = ((2.0F * (mouse.x - imagePos.x)) / imageSize.x) - 1.0F;
-  const float ndcY = 1.0F - ((2.0F * (mouse.y - imagePos.y)) / imageSize.y);
+  const ImVec2 ndc = image_to_ndc(mouse, imagePos, imageSize);
+  // Icons are picked before geometry, as Unity's gizmo icons are: a light
+  // inside a lamp mesh is reachable by its icon.
+  std::array<SceneIcon, kMaxSceneIcons> icons =
+      std::array<SceneIcon, kMaxSceneIcons>();
+  const std::size_t iconCount =
+      collect_scene_icons(imageSize, icons.data(), icons.size());
+  const runtime::Entity iconPick =
+      pick_icon(icons.data(), iconCount, ndc.x, ndc.y,
+                (2.0F * kIconPickRadiusPixels) / imageSize.x,
+                (2.0F * kIconPickRadiusPixels) / imageSize.y);
+  if (iconPick != runtime::kInvalidEntity) {
+    session.hasLastPick = false;
+    select_entity(iconPick, additive);
+    return;
+  }
+  const SceneMatrices matrices = scene_view_matrices(imageSize);
   math::Ray ray{};
-  if (!viewport_ray(view, projection, renderer::device_depth_zero_one(), ndcX,
-                    ndcY, &ray)) {
+  if (!viewport_ray(matrices.view, matrices.projection,
+                    renderer::device_depth_zero_one(), ndc.x, ndc.y, &ray)) {
     return;
   }
   // The ray runs from the near plane to the far plane; queries take a
@@ -365,32 +471,27 @@ void box_select_in_scene_view(const ImVec2 &from, const ImVec2 &to,
       (imageSize.y <= 0.0F)) {
     return;
   }
-  const auto ndcX = [&](float x) noexcept {
-    return std::fmax(
-        -1.0F,
-        std::fmin(1.0F, ((2.0F * (x - imagePos.x)) / imageSize.x) - 1.0F));
+  // The marquee in NDC, clipped to the image.
+  const auto clamp_ndc = [](float value) noexcept {
+    return std::fmax(-1.0F, std::fmin(1.0F, value));
   };
-  const auto ndcY = [&](float y) noexcept {
-    return std::fmax(-1.0F, std::fmin(1.0F, 1.0F - ((2.0F * (y - imagePos.y)) /
-                                                    imageSize.y)));
-  };
-  const float minX = std::fmin(ndcX(from.x), ndcX(to.x));
-  const float maxX = std::fmax(ndcX(from.x), ndcX(to.x));
-  const float minY = std::fmin(ndcY(from.y), ndcY(to.y));
-  const float maxY = std::fmax(ndcY(from.y), ndcY(to.y));
+  const ImVec2 a = image_to_ndc(from, imagePos, imageSize);
+  const ImVec2 b = image_to_ndc(to, imagePos, imageSize);
+  const float minX = clamp_ndc(std::fmin(a.x, b.x));
+  const float maxX = clamp_ndc(std::fmax(a.x, b.x));
+  const float minY = clamp_ndc(std::fmin(a.y, b.y));
+  const float maxY = clamp_ndc(std::fmax(a.y, b.y));
   if (!additive) {
     clear_entity_selection();
   }
   if (!(maxX > minX) || !(maxY > minY)) {
     return; // clipped away entirely
   }
-  const renderer::CameraState cam = editor_camera_state(session.editorCamera);
-  const math::Mat4 view = math::look_at(cam.position, cam.target, cam.up);
-  const math::Mat4 projection =
-      renderer::camera_projection_matrix(cam, imageSize.x / imageSize.y);
+  const SceneMatrices matrices = scene_view_matrices(imageSize);
   const math::Frustum marquee = math::frustum_from_view_projection(
-      math::mul(math::sub_rect_projection(projection, minX, minY, maxX, maxY),
-                view),
+      math::mul(math::sub_rect_projection(matrices.projection, minX, minY, maxX,
+                                          maxY),
+                matrices.view),
       renderer::device_depth_zero_one());
   static_cast<void>(scene_box_select(*session.world, marquee,
                                      &runtime::editor_mesh_local_bounds,
@@ -413,14 +514,11 @@ math::Vec3 viewport_drop_world_position(const ImVec2 &imagePos,
     return fallback;
   }
 
-  const ImVec2 mouse = ImGui::GetMousePos();
-  const float ndcX = (((mouse.x - imagePos.x) / imageSize.x) * 2.0F) - 1.0F;
-  const float ndcY = 1.0F - (((mouse.y - imagePos.y) / imageSize.y) * 2.0F);
-  const float aspect = imageSize.x / imageSize.y;
+  const ImVec2 ndc = image_to_ndc(ImGui::GetMousePos(), imagePos, imageSize);
+  const SceneMatrices matrices = scene_view_matrices(imageSize);
   math::Ray ray{};
-  if (!viewport_ray(math::look_at(cam.position, cam.target, cam.up),
-                    renderer::camera_projection_matrix(cam, aspect),
-                    renderer::device_depth_zero_one(), ndcX, ndcY, &ray) ||
+  if (!viewport_ray(matrices.view, matrices.projection,
+                    renderer::device_depth_zero_one(), ndc.x, ndc.y, &ray) ||
       (ray.direction.y >= 0.0F)) {
     return fallback;
   }
@@ -484,6 +582,7 @@ void draw_scene_viewport_panel() noexcept {
                 &editor_session().sceneViewPixelHeight);
 
   draw_view_image(renderer::RenderViewId::Scene, regionSize);
+  draw_scene_icons(cursorScreenPos, regionSize);
 
   // Dropping a browser mesh asset spawns it where the drop ray meets the
   // ground plane, as an undoable create.
@@ -538,16 +637,12 @@ void draw_scene_viewport_panel() noexcept {
   if (editable && hasTransform && (regionSize.x > 0.0F) &&
       (regionSize.y > 0.0F)) {
     gizmoDrawn = true;
-    const renderer::CameraState cam =
-        editor_camera_state(editor_session().editorCamera);
-
-    const float aspect = regionSize.x / regionSize.y;
-    const math::Mat4 viewMat = math::look_at(cam.position, cam.target, cam.up);
-    // The renderer's own builder, so the gizmo projects with the camera
-    // the Scene view renders. ImGuizmo reads only x and y and unprojects
-    // its picking ray between clip depths 0 and 1, which lie on the view
-    // ray under either depth convention.
-    const math::Mat4 projMat = renderer::camera_projection_matrix(cam, aspect);
+    // ImGuizmo reads only x and y and unprojects its picking ray between
+    // clip depths 0 and 1, which lie on the view ray under either depth
+    // convention.
+    const SceneMatrices matrices = scene_view_matrices(regionSize);
+    const math::Mat4 &viewMat = matrices.view;
+    const math::Mat4 &projMat = matrices.projection;
 
     runtime::Transform transform{};
     editor_session().world->get_transform(selectedEntity, &transform);
