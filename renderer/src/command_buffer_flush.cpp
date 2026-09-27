@@ -70,11 +70,28 @@ sanitize_scene_light_counts(const SceneLightData &lights,
 
 void flush_renderer(CommandBufferView commandBufferView,
                     const GpuMeshRegistry *registry, float timeSeconds,
-                    const SceneLightData &rawLights,
+                    const SceneLightData &lights,
                     CommandBufferView auxiliaryView) noexcept {
-  if (!initialize_backend()) {
+  RenderViewDesc game{};
+  game.id = RenderViewId::Game;
+  game.camera = renderer_context().activeCamera;
+  flush_renderer_view(game, commandBufferView, registry, timeSeconds, lights,
+                      auxiliaryView);
+}
+
+void flush_renderer_view(const RenderViewDesc &view,
+                         CommandBufferView commandBufferView,
+                         const GpuMeshRegistry *registry, float timeSeconds,
+                         const SceneLightData &rawLights,
+                         CommandBufferView auxiliaryView) noexcept {
+  const std::size_t viewIndex = render_view_index(view.id);
+  if ((viewIndex >= kMaxRenderViews) || !initialize_backend()) {
     return;
   }
+  // The Game view owns the frame: its flush runs first and does the
+  // once-per-frame work, clears and presents the back buffer, and reports
+  // the frame stats. Any other view renders into its own targets only.
+  const bool gameView = (view.id == RenderViewId::Game);
 
   // The flush runs on the render thread only, so one static sanitized
   // copy backs the rare oversized-count case without per-frame cost.
@@ -84,6 +101,7 @@ void flush_renderer(CommandBufferView commandBufferView,
 
   BackendState &backend = backend_state();
   const RenderDevice *dev = render_device();
+  backend.currentView = viewIndex;
 
   // A hot reload replaced device program objects, so every cached program
   // handle and shader param must be re-resolved before any pass binds one.
@@ -97,17 +115,15 @@ void flush_renderer(CommandBufferView commandBufferView,
   backend.lastGbufferBonePalette = 0xFFFFFFFFU;
   backend.lastShadowBonePalette = 0xFFFFFFFFU;
   backend.lastShadowMaskedBonePalette = 0xFFFFFFFFU;
-  gpu_profiler_begin_frame();
+  if (gameView) {
+    gpu_profiler_begin_frame();
+    apply_quality_preset_if_changed();
+  }
 
-  apply_quality_preset_if_changed();
-
-  int backbufferWidth = 1280;
-  int backbufferHeight = 720;
-  if ((renderer_context().sceneViewportWidth > 0) && (renderer_context().sceneViewportHeight > 0)) {
-    backbufferWidth = renderer_context().sceneViewportWidth;
-    backbufferHeight = renderer_context().sceneViewportHeight;
-  } else {
-    core::render_drawable_size(&backbufferWidth, &backbufferHeight);
+  int backbufferWidth = view.width;
+  int backbufferHeight = view.height;
+  if ((backbufferWidth <= 0) || (backbufferHeight <= 0)) {
+    game_view_size(&backbufferWidth, &backbufferHeight);
   }
   if (backbufferWidth <= 0) {
     backbufferWidth = 1;
@@ -126,22 +142,23 @@ void flush_renderer(CommandBufferView commandBufferView,
       1,
       static_cast<int>(static_cast<float>(backbufferHeight) * renderScale));
 
-  if (backend.lastWidth != drawableWidth ||
-      backend.lastHeight != drawableHeight) {
+  if (backend.view().lastWidth != drawableWidth ||
+      backend.view().lastHeight != drawableHeight) {
     // Record the size only when the targets actually exist at it, so a
     // failed create/resize retries next frame instead of rendering into
     // stale or missing targets forever.
     const bool resourcesReady =
-        (backend.lastWidth == 0 && backend.lastHeight == 0)
-            ? initialize_pass_resources(drawableWidth, drawableHeight)
-            : resize_pass_resources(drawableWidth, drawableHeight);
+        (backend.view().lastWidth == 0 && backend.view().lastHeight == 0)
+            ? initialize_pass_resources(drawableWidth, drawableHeight,
+                                        viewIndex)
+            : resize_pass_resources(drawableWidth, drawableHeight, viewIndex);
     if (resourcesReady) {
-      backend.lastWidth = drawableWidth;
-      backend.lastHeight = drawableHeight;
+      backend.view().lastWidth = drawableWidth;
+      backend.view().lastHeight = drawableHeight;
     }
   }
 
-  const PassResources &passRes = get_pass_resources();
+  const PassResources &passRes = get_pass_resources(viewIndex);
   const ReflectionProbeBakeSettings environmentBakeSettings =
       cvar_reflection_probe_bake_settings(backend.cvars);
   const DistanceFogSettings fogSettings =
@@ -175,20 +192,22 @@ void flush_renderer(CommandBufferView commandBufferView,
 
   const float aspect = static_cast<float>(backbufferWidth) /
                        static_cast<float>(backbufferHeight);
-  const math::Mat4 viewMat = math::look_at(
-      renderer_context().activeCamera.position, renderer_context().activeCamera.target, renderer_context().activeCamera.up);
-  const float nearP =
-      (renderer_context().activeCamera.nearPlane > 0.0F) ? renderer_context().activeCamera.nearPlane : kNearClip;
-  const float farP =
-      (renderer_context().activeCamera.farPlane > nearP) ? renderer_context().activeCamera.farPlane : kFarClip;
-  const math::Mat4 projMat =
-      camera_projection_matrix(renderer_context().activeCamera, aspect);
+  const CameraState &camera = view.camera;
+  const math::Mat4 viewMat =
+      math::look_at(camera.position, camera.target, camera.up);
+  const float nearP = (camera.nearPlane > 0.0F) ? camera.nearPlane : kNearClip;
+  const float farP = (camera.farPlane > nearP) ? camera.farPlane : kFarClip;
+  const math::Mat4 projMat = camera_projection_matrix(camera, aspect);
   const math::Mat4 viewProjection = math::mul(projMat, viewMat);
 
-  if (registry == nullptr) {
-    dev->bind_render_target(kBackBufferTarget);
+  if ((registry == nullptr) || !view.drawScene) {
+    if (gameView) {
+      clear_back_buffer(dev);
+    }
     return;
   }
+  backend.view().camera = view.camera;
+  ++backend.view().renderedFrames;
 
   if ((commandBufferView.count > 0U) && (commandBufferView.data == nullptr)) {
     core::log_message(core::LogLevel::Error, "renderer",
@@ -252,6 +271,7 @@ void flush_renderer(CommandBufferView commandBufferView,
                         gbufferDebugMode};
   ctx.backbufferWidth = backbufferWidth;
   ctx.backbufferHeight = backbufferHeight;
+  ctx.ownsBackBuffer = gameView;
   ctx.frameStats = frameStats;
   if ((auxiliaryView.data != nullptr) && (auxiliaryView.count > 0U)) {
     ctx.auxiliaryView = auxiliaryView;
@@ -264,13 +284,17 @@ void flush_renderer(CommandBufferView commandBufferView,
   }
 
   flush_shadow_passes(ctx);
-  flush_scene_captures(ctx);
+  if (gameView) {
+    flush_scene_captures(ctx);
+  }
   if (useDeferred) {
     flush_deferred_path(ctx);
   } else {
     flush_forward_path(ctx);
   }
-  flush_debug_overlay(ctx);
+  if (view.drawOverlays) {
+    flush_debug_overlay(ctx);
+  }
   flush_post_chain(ctx);
 
   frameStats = ctx.frameStats;
@@ -284,7 +308,9 @@ void flush_renderer(CommandBufferView commandBufferView,
   frameStats.gpuAutoExposureMs = gpu_profiler_pass_ms(GpuPassId::AutoExposure);
   // The deferred path reports its own G-buffer/lighting/SSAO timings into
   // ctx.frameStats; a forward frame leaves them at zero.
-  renderer_context().lastFrameStats = frameStats;
+  if (gameView) {
+    renderer_context().lastFrameStats = frameStats;
+  }
 }
 
 } // namespace engine::renderer

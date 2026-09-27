@@ -5,8 +5,9 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "engine/renderer/asset_database.h"
 #include "engine/content/asset_metadata.h"
+#include "engine/renderer/asset_database.h"
+#include "engine/renderer/command_buffer.h"
 #include "engine/renderer/material.h"
 
 namespace engine::core {
@@ -64,6 +65,13 @@ struct EditorBridge final {
   // hooks: the editor restores the pre-play world here, so the hooks saw
   // the world the session ended in. Null means the bridge owes nothing.
   void (*complete_play_stop)() noexcept = nullptr;
+  // The editor's Scene view for this frame: fills its camera and pixel
+  // size and returns true while its panel is shown, false (or null) for
+  // no Scene view. The pipeline culls and renders it beside the Game view.
+  bool (*scene_view)(renderer::RenderViewDesc *outView) noexcept = nullptr;
+  // Whether the Game view is shown this frame. False skips rendering it
+  // (the back buffer is still cleared for the editor UI); null means shown.
+  bool (*game_view_visible)() noexcept = nullptr;
 };
 
 /// Sets the requested value for editor bridge.

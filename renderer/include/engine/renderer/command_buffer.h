@@ -10,6 +10,7 @@
 #include "engine/math/vec3.h"
 #include "engine/renderer/camera.h"
 #include "engine/renderer/material.h"
+#include "engine/renderer/render_view.h"
 
 namespace engine::renderer {
 
@@ -316,10 +317,39 @@ struct RendererFrameStats final {
 /// Flushes queued work to the backing runtime system for renderer.
 /// `auxiliaryView` carries the camera-culled commands the shadow and
 /// capture passes still draw, each tagged by passMask.
+/// Renders the Game view: the active camera at the Game view size.
 void flush_renderer(CommandBufferView commandBufferView,
                     const GpuMeshRegistry *registry, float timeSeconds,
                     const SceneLightData &lights,
                     CommandBufferView auxiliaryView = {}) noexcept;
+
+/// One view for flush_renderer_view: which, from where, at what size, and
+/// what it draws beside the scene.
+struct RenderViewDesc final {
+  RenderViewId id = RenderViewId::Game;
+  CameraState camera{};
+  /// Pixels before the render scale; 0 uses game_view_size.
+  int width = 0;
+  int height = 0;
+  /// False draws no scene: the Game view whose panel is hidden still
+  /// clears the back buffer for the editor UI and does nothing else.
+  bool drawScene = true;
+  /// Draws and ages the debug-draw queue (editor gizmos, script lines).
+  /// Exactly one view per frame should: the Scene view when one renders,
+  /// else the Game view.
+  bool drawOverlays = true;
+};
+
+/// Renders one view into its own targets. The Game view goes first each
+/// frame: it owns the frame's once-only work (GPU profiler frame, quality
+/// preset, scene captures), the back-buffer clear and present, and the
+/// frame stats. Another view renders into its own targets only, from
+/// `commandBufferView` culled for its camera.
+void flush_renderer_view(const RenderViewDesc &view,
+                         CommandBufferView commandBufferView,
+                         const GpuMeshRegistry *registry, float timeSeconds,
+                         const SceneLightData &lights,
+                         CommandBufferView auxiliaryView = {}) noexcept;
 /// Opens a renderer lifetime, re-arming the lazy backend initialization
 /// that shutdown_renderer latched off. The backend itself is still built
 /// on demand by the first flush, so this call creates no device
@@ -346,10 +376,13 @@ const RenderDevice *acquire_render_device() noexcept;
 /// Sets the virtual root used for built-in renderer shaders.
 void set_shader_root_path(const char *path) noexcept;
 
-// Optional scene viewport override from editor UI. When set to positive
-// values, flush_renderer uses this size for projection and pass resources
-// instead of the full SDL drawable size.
-void set_scene_viewport_size(int width, int height) noexcept;
+/// The Game view's size in pixels, set by the editor's Game panel. When
+/// positive, flush_renderer renders the Game view at this size instead of
+/// the window's drawable size.
+void set_game_view_size(int width, int height) noexcept;
+/// The size the Game view renders at: the override when set, else the
+/// window's drawable size.
+void game_view_size(int *outWidth, int *outHeight) noexcept;
 
 /// Sets the scene's environment cubemap, or clears it with
 /// kInvalidTextureHandle. A set environment is the scene's image-based
@@ -360,9 +393,15 @@ void set_skybox_texture(TextureHandle cubemap) noexcept;
 /// Currently bound skybox cubemap handle (may be invalid).
 TextureHandle get_skybox_texture() noexcept;
 
-/// Device texture holding the tonemapped scene (final color). Valid after
-/// the first flush_renderer call; invalid if not yet available.
-DeviceTextureHandle get_scene_viewport_texture() noexcept;
+/// Device texture holding a view's final image from its last flush;
+/// invalid until that view has rendered.
+DeviceTextureHandle get_render_view_texture(RenderViewId view) noexcept;
+/// The camera a view last rendered its scene with (a default camera
+/// before it first did).
+CameraState render_view_camera(RenderViewId view) noexcept;
+/// How many frames a view has rendered its scene in this renderer
+/// lifetime; a hidden view's count stands still.
+std::uint64_t render_view_frame_count(RenderViewId view) noexcept;
 
 /// Live device clip-depth convention (false = GL [-1,1]); projection
 /// builders and frustum extraction key off this, defaulting to GL when

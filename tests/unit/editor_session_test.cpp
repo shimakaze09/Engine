@@ -14,6 +14,7 @@
 #include "engine/runtime/scene_serializer.h"
 #include "engine/runtime/world.h"
 
+#include <array>
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -377,9 +378,13 @@ int check_history_gated_while_playing() {
 /// is refused whole — set and primary both unchanged — so the Inspector's
 /// bulk target set and the gizmo target can never diverge; freeing a slot
 /// lets the same pick succeed normally.
-int check_selection_capacity_keeps_primary_in_set() {
+int check_selection_holds_many_entities() {
   using namespace engine::editor;
   using namespace engine::runtime;
+
+  // The selection covers every entity the World can hold, so selecting
+  // everything in a scene never runs out of room.
+  static_assert(EditorSession::kMaxSelectedEntities == World::kMaxEntities);
 
   std::unique_ptr<World> world(new (std::nothrow) World());
   if (world == nullptr) {
@@ -387,9 +392,10 @@ int check_selection_capacity_keeps_primary_in_set() {
   }
   editor_set_world(world.get());
 
-  constexpr std::size_t kCapacity = EditorSession::kMaxSelectedEntities;
-  Entity entities[kCapacity + 1U] = {};
-  for (std::size_t i = 0U; i <= kCapacity; ++i) {
+  // Far past the 64 members the selection once held.
+  constexpr std::size_t kCount = 300U;
+  std::array<Entity, kCount> entities{};
+  for (std::size_t i = 0U; i < kCount; ++i) {
     entities[i] = world->create_scene_object();
     if (entities[i] == kInvalidEntity) {
       editor_set_world(nullptr);
@@ -398,59 +404,78 @@ int check_selection_capacity_keeps_primary_in_set() {
   }
 
   select_entity(entities[0], false);
-  for (std::size_t i = 1U; i < kCapacity; ++i) {
+  for (std::size_t i = 1U; i < kCount; ++i) {
     select_entity(entities[i], true);
   }
-  const Entity lastInSet = entities[kCapacity - 1U];
-  if ((editor_session().selectedEntityCount != kCapacity) ||
-      (selected_entity() != lastInSet) || !is_entity_selected(lastInSet)) {
+  const Entity last = entities[kCount - 1U];
+  if ((editor_session().selectedEntityCount != kCount) ||
+      (selected_entity() != last)) {
     editor_set_world(nullptr);
     return 62;
   }
-
-  // The over-capacity pick changes nothing: not the set, not the primary.
-  const Entity overflow = entities[kCapacity];
-  select_entity(overflow, true);
-  if ((editor_session().selectedEntityCount != kCapacity) ||
-      is_entity_selected(overflow) || (selected_entity() != lastInSet) ||
-      !is_entity_selected(selected_entity())) {
-    editor_set_world(nullptr);
-    return 63;
+  for (std::size_t i = 0U; i < kCount; ++i) {
+    if (!is_entity_selected(entities[i]) ||
+        (editor_session().selectedEntities[i] != entities[i])) {
+      editor_set_world(nullptr);
+      return 63;
+    }
   }
 
-  // Repeating the refused pick stays stable.
-  select_entity(overflow, true);
-  if ((editor_session().selectedEntityCount != kCapacity) ||
-      is_entity_selected(overflow) || (selected_entity() != lastInSet)) {
+  // Ctrl-click removing a middle member keeps the others in pick order.
+  const Entity middle = entities[kCount / 2U];
+  select_entity(middle, true);
+  if ((editor_session().selectedEntityCount != kCount - 1U) ||
+      is_entity_selected(middle) || (selected_entity() != last) ||
+      (editor_session().selectedEntities[kCount / 2U] !=
+       entities[(kCount / 2U) + 1U])) {
     editor_set_world(nullptr);
     return 64;
   }
-
-  // Ctrl-click deselecting the primary retargets it to a set member.
-  select_entity(lastInSet, true);
-  if ((editor_session().selectedEntityCount != kCapacity - 1U) ||
-      is_entity_selected(lastInSet) ||
-      (selected_entity() != entities[kCapacity - 2U]) ||
-      !is_entity_selected(selected_entity())) {
-    editor_set_world(nullptr);
-    return 65;
+  for (std::size_t i = 0U; i < kCount; ++i) {
+    if ((i != kCount / 2U) && !is_entity_selected(entities[i])) {
+      editor_set_world(nullptr);
+      return 65;
+    }
   }
 
-  // With a slot free, the previously refused entity joins normally and
-  // becomes the primary.
-  select_entity(overflow, true);
-  if ((editor_session().selectedEntityCount != kCapacity) ||
-      !is_entity_selected(overflow) || (selected_entity() != overflow)) {
+  // Ctrl-click deselecting the primary retargets it to a set member.
+  select_entity(last, true);
+  if ((editor_session().selectedEntityCount != kCount - 2U) ||
+      is_entity_selected(last) ||
+      (selected_entity() != entities[kCount - 2U]) ||
+      !is_entity_selected(selected_entity())) {
     editor_set_world(nullptr);
     return 66;
   }
 
-  // A non-additive pick at capacity replaces the whole selection.
-  select_entity(overflow, false);
-  if ((editor_session().selectedEntityCount != 1U) ||
-      !is_entity_selected(overflow) || (selected_entity() != overflow)) {
+  // A removed entity joins again and becomes the primary.
+  select_entity(middle, true);
+  if ((editor_session().selectedEntityCount != kCount - 1U) ||
+      !is_entity_selected(middle) || (selected_entity() != middle)) {
     editor_set_world(nullptr);
     return 67;
+  }
+
+  // A non-additive pick replaces the whole selection.
+  select_entity(middle, false);
+  if ((editor_session().selectedEntityCount != 1U) ||
+      !is_entity_selected(middle) || (selected_entity() != middle) ||
+      is_entity_selected(entities[0])) {
+    editor_set_world(nullptr);
+    return 68;
+  }
+
+  // A destroyed member's recycled slot is not selected under its new
+  // generation.
+  select_entity(entities[1], true);
+  if (!world->destroy_entity(entities[1])) {
+    editor_set_world(nullptr);
+    return 69;
+  }
+  const Entity reused = world->create_scene_object();
+  if ((reused.index == entities[1].index) && is_entity_selected(reused)) {
+    editor_set_world(nullptr);
+    return 70;
   }
 
   clear_entity_selection();
@@ -870,7 +895,7 @@ int main() {
     return result;
   }
 
-  result = check_selection_capacity_keeps_primary_in_set();
+  result = check_selection_holds_many_entities();
   if (result != 0) {
     std::fprintf(stderr, "editor_session_test failed: %d\n", result);
     return result;

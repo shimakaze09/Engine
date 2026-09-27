@@ -54,6 +54,11 @@ namespace {
 
 bool g_platformRunning = false;
 SDL_Window *g_window = nullptr;
+/// The window's un-maximized size, followed through resize events while
+/// the window is neither maximized nor fullscreen, so a geometry read
+/// while maximized reports the size it restores to.
+int g_restoredWidth = 0;
+int g_restoredHeight = 0;
 bool g_headless = false;
 bool g_gamepadSubsystem = false;
 
@@ -227,6 +232,8 @@ void shutdown_platform_resources() noexcept {
     SDL_DestroyWindow(g_window);
     g_window = nullptr;
   }
+  g_restoredWidth = 0;
+  g_restoredHeight = 0;
   if (g_headless) {
     static_cast<void>(SDL_ResetHint(SDL_HINT_VIDEO_DRIVER));
     static_cast<void>(SDL_ResetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS));
@@ -310,6 +317,8 @@ bool initialize_platform_impl(int width, int height, const char *title,
   }
   static_cast<void>(SDL_SetWindowPosition(g_window, SDL_WINDOWPOS_CENTERED,
                                           SDL_WINDOWPOS_CENTERED));
+  static_cast<void>(
+      SDL_GetWindowSize(g_window, &g_restoredWidth, &g_restoredHeight));
   g_platformRunning = true;
   return true;
 }
@@ -793,6 +802,13 @@ bool platform_poll_event(PlatformEvent *outEvent) noexcept {
   if ((outEvent == nullptr) || !SDL_PollEvent(&g_polledEvent)) {
     return false;
   }
+  if ((g_polledEvent.type == SDL_EVENT_WINDOW_RESIZED) &&
+      (g_window != nullptr) &&
+      ((SDL_GetWindowFlags(g_window) &
+        (SDL_WINDOW_MAXIMIZED | SDL_WINDOW_FULLSCREEN)) == 0U)) {
+    g_restoredWidth = static_cast<int>(g_polledEvent.window.data1);
+    g_restoredHeight = static_cast<int>(g_polledEvent.window.data2);
+  }
   *outEvent = translate_event(g_polledEvent);
   return true;
 }
@@ -837,6 +853,64 @@ bool platform_set_window_title(const char *title) noexcept {
   if (!SDL_SetWindowTitle(g_window, title)) {
     log_sdl_error("failed to set the window title");
     return false;
+  }
+  return true;
+}
+
+WindowGeometry fit_window_geometry(const WindowGeometry &stored,
+                                   int usableWidth, int usableHeight) noexcept {
+  const auto fit = [](int side, int minimum, int usable) noexcept {
+    int fitted = (side > minimum) ? side : minimum;
+    if ((usable > 0) && (fitted > usable)) {
+      fitted = usable;
+    }
+    return fitted;
+  };
+  WindowGeometry fitted = stored;
+  fitted.width = fit(stored.width, kMinRestoredWindowWidth, usableWidth);
+  fitted.height = fit(stored.height, kMinRestoredWindowHeight, usableHeight);
+  return fitted;
+}
+
+bool platform_window_geometry(WindowGeometry *outGeometry) noexcept {
+  if ((g_window == nullptr) || (outGeometry == nullptr)) {
+    return false;
+  }
+  WindowGeometry geometry{};
+  geometry.maximized =
+      (SDL_GetWindowFlags(g_window) & SDL_WINDOW_MAXIMIZED) != 0U;
+  if (!geometry.maximized) {
+    static_cast<void>(
+        SDL_GetWindowSize(g_window, &g_restoredWidth, &g_restoredHeight));
+  }
+  geometry.width = g_restoredWidth;
+  geometry.height = g_restoredHeight;
+  *outGeometry = geometry;
+  return true;
+}
+
+bool platform_apply_window_geometry(const WindowGeometry &geometry) noexcept {
+  if ((g_window == nullptr) || (geometry.width <= 0) ||
+      (geometry.height <= 0)) {
+    return false;
+  }
+  SDL_Rect usable{};
+  const SDL_DisplayID display = SDL_GetDisplayForWindow(g_window);
+  if ((display == 0U) || !SDL_GetDisplayUsableBounds(display, &usable)) {
+    usable = SDL_Rect{};
+  }
+  const WindowGeometry fitted =
+      fit_window_geometry(geometry, usable.w, usable.h);
+  if (!SDL_SetWindowSize(g_window, fitted.width, fitted.height)) {
+    log_sdl_error("failed to restore the window size");
+    return false;
+  }
+  g_restoredWidth = fitted.width;
+  g_restoredHeight = fitted.height;
+  static_cast<void>(SDL_SetWindowPosition(g_window, SDL_WINDOWPOS_CENTERED,
+                                          SDL_WINDOWPOS_CENTERED));
+  if (fitted.maximized && !SDL_MaximizeWindow(g_window)) {
+    log_sdl_error("failed to restore the maximized window");
   }
   return true;
 }

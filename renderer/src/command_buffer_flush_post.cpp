@@ -61,9 +61,9 @@ void flush_post_chain(FrameFlushContext &ctx) noexcept {
     const DeviceTextureHandle sceneColorTexBloom =
         pass_resource_texture(passRes.sceneColor);
 
-    dev->bind_render_target(backend.bloomMipTargets[0]);
-    dev->set_viewport(0, 0, backend.bloomMipWidths[0],
-                      backend.bloomMipHeights[0]);
+    dev->bind_render_target(backend.view().bloomMipTargets[0]);
+    dev->set_viewport(0, 0, backend.view().bloomMipWidths[0],
+                      backend.view().bloomMipHeights[0]);
     dev->apply_render_state(RenderState{DepthTest::Disabled, true,
                                         BlendMode::Disabled, CullMode::Back});
     dev->bind_program(backend.bloomThresholdProgram);
@@ -79,17 +79,17 @@ void flush_post_chain(FrameFlushContext &ctx) noexcept {
 
     dev->bind_program(backend.bloomDownsampleProgram);
     for (int i = 1; i < BackendState::kBloomMipLevels; ++i) {
-      dev->bind_render_target(backend.bloomMipTargets[i]);
-      dev->set_viewport(0, 0, backend.bloomMipWidths[i],
-                        backend.bloomMipHeights[i]);
-      dev->bind_texture_slot(0U, backend.bloomMipTextures[i - 1]);
+      dev->bind_render_target(backend.view().bloomMipTargets[i]);
+      dev->set_viewport(0, 0, backend.view().bloomMipWidths[i],
+                        backend.view().bloomMipHeights[i]);
+      dev->bind_texture_slot(0U, backend.view().bloomMipTextures[i - 1]);
       if (backend.bloomDownInputLoc.valid()) {
         dev->set_param_i32(backend.bloomDownInputLoc, 0);
       }
       if (backend.bloomDownTexelSizeLoc.valid()) {
         const float ts[2] = {
-            1.0F / static_cast<float>(backend.bloomMipWidths[i - 1]),
-            1.0F / static_cast<float>(backend.bloomMipHeights[i - 1])};
+            1.0F / static_cast<float>(backend.view().bloomMipWidths[i - 1]),
+            1.0F / static_cast<float>(backend.view().bloomMipHeights[i - 1])};
         dev->set_param_vec2(backend.bloomDownTexelSizeLoc, ts);
       }
       dev->draw(backend.emptyGeometry, PrimitiveTopology::Triangles, 0, 3);
@@ -97,17 +97,17 @@ void flush_post_chain(FrameFlushContext &ctx) noexcept {
 
     dev->bind_program(backend.bloomUpsampleProgram);
     for (int i = BackendState::kBloomMipLevels - 2; i >= 0; --i) {
-      dev->bind_render_target(backend.bloomMipTargets[i]);
-      dev->set_viewport(0, 0, backend.bloomMipWidths[i],
-                        backend.bloomMipHeights[i]);
-      dev->bind_texture_slot(0U, backend.bloomMipTextures[i + 1]);
+      dev->bind_render_target(backend.view().bloomMipTargets[i]);
+      dev->set_viewport(0, 0, backend.view().bloomMipWidths[i],
+                        backend.view().bloomMipHeights[i]);
+      dev->bind_texture_slot(0U, backend.view().bloomMipTextures[i + 1]);
       if (backend.bloomUpInputLoc.valid()) {
         dev->set_param_i32(backend.bloomUpInputLoc, 0);
       }
       if (backend.bloomUpTexelSizeLoc.valid()) {
         const float ts[2] = {
-            1.0F / static_cast<float>(backend.bloomMipWidths[i + 1]),
-            1.0F / static_cast<float>(backend.bloomMipHeights[i + 1])};
+            1.0F / static_cast<float>(backend.view().bloomMipWidths[i + 1]),
+            1.0F / static_cast<float>(backend.view().bloomMipHeights[i + 1])};
         dev->set_param_vec2(backend.bloomUpTexelSizeLoc, ts);
       }
       dev->draw(backend.emptyGeometry, PrimitiveTopology::Triangles, 0, 3);
@@ -128,13 +128,14 @@ void flush_post_chain(FrameFlushContext &ctx) noexcept {
       ensure_luminance_resources(backend, drawableWidth, drawableHeight);
   if (!autoExposureEnabled) {
     // Resuming later adapts from that frame's scene, not a stale value.
-    backend.exposureValid = false;
+    backend.view().exposureValid = false;
   }
   if (autoExposureEnabled) {
     gpu_profiler_begin_pass(GpuPassId::AutoExposure);
 
-    dev->bind_render_target(backend.lumMipTargets[0]);
-    dev->set_viewport(0, 0, backend.lumMipWidths[0], backend.lumMipHeights[0]);
+    dev->bind_render_target(backend.view().lumMipTargets[0]);
+    dev->set_viewport(0, 0, backend.view().lumMipWidths[0],
+                      backend.view().lumMipHeights[0]);
     dev->apply_render_state(RenderState{DepthTest::Disabled, true,
                                         BlendMode::Disabled, CullMode::Back});
     dev->bind_program(backend.luminanceProgram);
@@ -149,17 +150,17 @@ void flush_post_chain(FrameFlushContext &ctx) noexcept {
     if (backend.bloomDownsampleProgram != kInvalidDeviceProgram) {
       dev->bind_program(backend.bloomDownsampleProgram);
       for (int i = 1; i < BackendState::kLuminanceMipLevels; ++i) {
-        dev->bind_render_target(backend.lumMipTargets[i]);
-        dev->set_viewport(0, 0, backend.lumMipWidths[i],
-                          backend.lumMipHeights[i]);
-        dev->bind_texture_slot(0U, backend.lumMipTextures[i - 1]);
+        dev->bind_render_target(backend.view().lumMipTargets[i]);
+        dev->set_viewport(0, 0, backend.view().lumMipWidths[i],
+                          backend.view().lumMipHeights[i]);
+        dev->bind_texture_slot(0U, backend.view().lumMipTextures[i - 1]);
         if (backend.bloomDownInputLoc.valid()) {
           dev->set_param_i32(backend.bloomDownInputLoc, 0);
         }
         if (backend.bloomDownTexelSizeLoc.valid()) {
           const float ts[2] = {
-              1.0F / static_cast<float>(backend.lumMipWidths[i - 1]),
-              1.0F / static_cast<float>(backend.lumMipHeights[i - 1])};
+              1.0F / static_cast<float>(backend.view().lumMipWidths[i - 1]),
+              1.0F / static_cast<float>(backend.view().lumMipHeights[i - 1])};
           dev->set_param_vec2(backend.bloomDownTexelSizeLoc, ts);
         }
         dev->draw(backend.emptyGeometry, PrimitiveTopology::Triangles, 0, 3);
@@ -177,25 +178,27 @@ void flush_post_chain(FrameFlushContext &ctx) noexcept {
     const float maxExposure =
         std::max(backend.cvars.autoExposureMax.get_float(10.0F), minExposure);
     const float elapsed =
-        std::clamp(ctx.timeSeconds - backend.lastExposureTimeSeconds, 0.0F,
-                   kMaxAdaptStepSeconds);
-    backend.lastExposureTimeSeconds = ctx.timeSeconds;
+        std::clamp(ctx.timeSeconds - backend.view().lastExposureTimeSeconds,
+                   0.0F, kMaxAdaptStepSeconds);
+    backend.view().lastExposureTimeSeconds = ctx.timeSeconds;
     const float adapt[4] = {1.0F - std::exp(-speed * elapsed), minExposure,
-                            maxExposure, backend.exposureValid ? 1.0F : 0.0F};
-    const int next = 1 - backend.exposureCurrent;
-    dev->bind_render_target(backend.exposureTargets[next]);
+                            maxExposure,
+                            backend.view().exposureValid ? 1.0F : 0.0F};
+    const int next = 1 - backend.view().exposureCurrent;
+    dev->bind_render_target(backend.view().exposureTargets[next]);
     dev->set_viewport(0, 0, 1, 1);
     dev->bind_program(backend.exposureAdaptProgram);
     dev->bind_texture_slot(
-        0U, backend.lumMipTextures[BackendState::kLuminanceMipLevels - 1]);
+        0U,
+        backend.view().lumMipTextures[BackendState::kLuminanceMipLevels - 1]);
     dev->set_param_i32(backend.adaptLuminanceLoc, 0);
-    dev->bind_texture_slot(1U,
-                           backend.exposureTextures[backend.exposureCurrent]);
+    dev->bind_texture_slot(
+        1U, backend.view().exposureTextures[backend.view().exposureCurrent]);
     dev->set_param_i32(backend.adaptPreviousLoc, 1);
     dev->set_param_vec4(backend.adaptParamsLoc, adapt);
     dev->draw(backend.emptyGeometry, PrimitiveTopology::Triangles, 0, 3);
-    backend.exposureCurrent = next;
-    backend.exposureValid = true;
+    backend.view().exposureCurrent = next;
+    backend.view().exposureValid = true;
 
     dev->bind_texture_slot(0U, kInvalidDeviceTexture);
     dev->bind_texture_slot(1U, kInvalidDeviceTexture);
@@ -225,9 +228,10 @@ void flush_post_chain(FrameFlushContext &ctx) noexcept {
   }
   if (backend.tonemapExposureTextureLoc.valid()) {
     dev->bind_texture_slot(
-        2U, autoExposureEnabled
-                ? backend.exposureTextures[backend.exposureCurrent]
-                : backend.fallbackTexture2D);
+        2U,
+        autoExposureEnabled
+            ? backend.view().exposureTextures[backend.view().exposureCurrent]
+            : backend.fallbackTexture2D);
     dev->set_param_i32(backend.tonemapExposureTextureLoc, 2);
   }
   if (backend.tonemapOperatorLocation.valid()) {
@@ -236,7 +240,7 @@ void flush_post_chain(FrameFlushContext &ctx) noexcept {
   }
 
   if (bloomEnabled) {
-    dev->bind_texture_slot(1U, backend.bloomMipTextures[0]);
+    dev->bind_texture_slot(1U, backend.view().bloomMipTextures[0]);
     if (backend.tonemapBloomTextureLoc.valid()) {
       dev->set_param_i32(backend.tonemapBloomTextureLoc, 1);
     }
@@ -265,7 +269,7 @@ void flush_post_chain(FrameFlushContext &ctx) noexcept {
   dev->bind_program(kInvalidDeviceProgram);
   gpu_profiler_end_pass(GpuPassId::Tonemap);
 
-  renderer_context().fxaaAppliedThisFrame = false;
+  ctx.backend.view().fxaaApplied = false;
   if ((backend.fxaaProgram != kInvalidDeviceProgram) &&
       backend.cvars.fxaa.get_bool()) {
     dev->bind_render_target(pass_resource_target(passRes.sceneColor));
@@ -290,22 +294,15 @@ void flush_post_chain(FrameFlushContext &ctx) noexcept {
     dev->bind_texture_slot(0U, kInvalidDeviceTexture);
     dev->bind_program(kInvalidDeviceProgram);
 
-    renderer_context().fxaaAppliedThisFrame = true;
+    ctx.backend.view().fxaaApplied = true;
   }
 
-  // The back buffer is the window, whatever size the scene was rendered
-  // at: ctx.backbuffer* follows a scene-viewport override, and a viewport
-  // of that size on the real back buffer would present one corner of the
-  // image, enlarged.
-  int windowWidth = ctx.backbufferWidth;
-  int windowHeight = ctx.backbufferHeight;
-  core::render_drawable_size(&windowWidth, &windowHeight);
-  dev->bind_render_target(kBackBufferTarget);
-  dev->set_viewport(0, 0, (windowWidth > 0) ? windowWidth : 1,
-                    (windowHeight > 0) ? windowHeight : 1);
-  dev->clear(ClearFlags::ColorDepth, 0.0F, 0.0F, 0.0F, 1.0F);
-  dev->apply_render_state(RenderState{DepthTest::Less, true,
-                                      BlendMode::Disabled, CullMode::Back});
+  // Only the Game view owns the back buffer; another view's image stays
+  // in its own targets for the editor to draw.
+  if (!ctx.ownsBackBuffer) {
+    return;
+  }
+  clear_back_buffer(dev);
 
   // Player mode: no editor overlay follows, so the final image is
   // drawn onto the back buffer here (FXAA pings back into sceneColor;
@@ -316,7 +313,7 @@ void flush_post_chain(FrameFlushContext &ctx) noexcept {
                                         BlendMode::Disabled, CullMode::Back});
     dev->bind_program(backend.presentBlitProgram);
     const DeviceTextureHandle finalTexture =
-        renderer_context().fxaaAppliedThisFrame
+        ctx.backend.view().fxaaApplied
             ? pass_resource_texture(passRes.sceneColor)
             : pass_resource_texture(passRes.finalColor);
     dev->bind_texture_slot(0U, finalTexture);
@@ -327,6 +324,21 @@ void flush_post_chain(FrameFlushContext &ctx) noexcept {
     dev->bind_texture_slot(0U, kInvalidDeviceTexture);
     dev->bind_program(kInvalidDeviceProgram);
   }
+}
+
+void clear_back_buffer(const RenderDevice *dev) noexcept {
+  // The back buffer is the window, whatever size a view was rendered at:
+  // a viewport of the view's size on the real back buffer would present
+  // one corner of the image, enlarged.
+  int windowWidth = 1;
+  int windowHeight = 1;
+  core::render_drawable_size(&windowWidth, &windowHeight);
+  dev->bind_render_target(kBackBufferTarget);
+  dev->set_viewport(0, 0, (windowWidth > 0) ? windowWidth : 1,
+                    (windowHeight > 0) ? windowHeight : 1);
+  dev->clear(ClearFlags::ColorDepth, 0.0F, 0.0F, 0.0F, 1.0F);
+  dev->apply_render_state(
+      RenderState{DepthTest::Less, true, BlendMode::Disabled, CullMode::Back});
 }
 
 } // namespace engine::renderer

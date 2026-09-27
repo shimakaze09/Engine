@@ -610,6 +610,16 @@ struct EnginePipeline::Impl final {
   /// Camera-culled draws the shadow and capture passes still need.
   std::unique_ptr<renderer::CommandBufferBuilder> auxiliaryCommandBuffer;
   runtime::RenderPrepAuxiliaryInputs frameAuxiliaryInputs{};
+  /// The editor's Scene view: its own cull, command lists and render-prep
+  /// context, created the first time the editor asks for one (an editor
+  /// pays for its second view; a player never allocates it).
+  std::unique_ptr<runtime::RenderPrepPipelineContext> sceneRenderPrep;
+  std::unique_ptr<renderer::CommandBufferBuilder> sceneCommandBuffer;
+  std::unique_ptr<renderer::CommandBufferBuilder> sceneAuxiliaryCommandBuffer;
+  bool sceneViewAllocationFailed = false;
+  /// Whether this frame culled and renders a Scene view, and its desc.
+  bool sceneViewThisFrame = false;
+  renderer::RenderViewDesc sceneView{};
   std::unique_ptr<renderer::GpuMeshRegistry> meshRegistry;
   std::unique_ptr<renderer::AssetDatabase> assetDatabase;
   /// The engine's one asset catalog. It outlives every consumer, which
@@ -787,6 +797,11 @@ struct EnginePipeline::Impl final {
   void stage_measure_frame() noexcept;
   void stage_render() noexcept;
   void collect_frame_scene_data() noexcept;
+  /// Whether the linked editor shows its own Scene view.
+  bool editor_has_scene_view() const noexcept;
+  /// The editor's Scene view for this frame, with its cull buffers ready;
+  /// false when there is none or its buffers cannot be created.
+  bool request_scene_view(renderer::RenderViewDesc *outView) noexcept;
   void build_auxiliary_inputs() noexcept;
   void stage_scene_commit() noexcept;
   void stage_diagnostics() noexcept;
@@ -1823,9 +1838,16 @@ void EnginePipeline::Impl::evaluate_cameras_for_step(
 void EnginePipeline::Impl::stage_camera() noexcept {
   world->begin_transform_phase();
 
-  // Stopped, the editor owns the view. Paused, the game camera still
-  // follows edits, evaluated with no time passing below.
+  // Stopped, an editor with its own Scene view leaves the Game view to
+  // the scene's cameras, evaluated with no time passing, so the Game view
+  // shows what play will start from. Without one the editor owns the only
+  // view and nothing is evaluated. Paused, the game camera still follows
+  // edits, evaluated with no time passing below.
   if (!isPlaying && !isPaused) {
+    if (editor_has_scene_view() &&
+        (world->camera_manager().camera_count() > 0U)) {
+      evaluate_cameras_for_step(0.0F);
+    }
     return;
   }
 
@@ -1909,7 +1931,7 @@ bool EnginePipeline::Impl::stage_render_prep_graph() noexcept {
   if (!graphFailed) {
     int vpW = 1;
     int vpH = 1;
-    core::render_drawable_size(&vpW, &vpH);
+    renderer::game_view_size(&vpW, &vpH);
     const float vpAspect =
         (vpH > 0) ? (static_cast<float>(vpW) / static_cast<float>(vpH)) : 1.0F;
     const renderer::CameraState cam = renderer::get_active_camera();
@@ -1938,6 +1960,31 @@ bool EnginePipeline::Impl::stage_render_prep_graph() noexcept {
     }
   }
 
+  // The editor's Scene view is culled for its own camera in the same
+  // graph, into its own lists, so both views draw this frame's world.
+  core::JobHandle sceneMergeHandle{};
+  sceneViewThisFrame = false;
+  if (!graphFailed && request_scene_view(&sceneView)) {
+    const float sceneAspect = static_cast<float>(sceneView.width) /
+                              static_cast<float>(sceneView.height);
+    const renderer::CameraState &sceneCam = sceneView.camera;
+    const math::Mat4 sceneVp = math::mul(
+        renderer::camera_projection_matrix(sceneCam, sceneAspect),
+        math::look_at(sceneCam.position, sceneCam.target, sceneCam.up));
+    if (!runtime::enqueue_render_prep_pipeline(
+            sceneRenderPrep.get(), world.get(), sceneCommandBuffer.get(),
+            assetDatabase.get(), meshRegistry.get(), renderPrepPhaseHandle,
+            renderPhaseHandle, &frameContext->frameGraphFailed,
+            &frameContext->droppedDrawCommands, frameThreadCount, kChunkSize,
+            sceneVp, isPlaying ? static_cast<float>(clock.renderAlpha) : 1.0F,
+            &sceneMergeHandle, sceneAuxiliaryCommandBuffer.get(),
+            &frameAuxiliaryInputs)) {
+      graphFailed = true;
+    } else {
+      sceneViewThisFrame = true;
+    }
+  }
+
   core::JobHandle endFrameHandle = submit_world_phase_job(
       frameContext.get(), world.get(), &phaseJobCursor, &end_frame_phase_job);
   if (!core::is_valid_handle(endFrameHandle)) {
@@ -1945,6 +1992,10 @@ bool EnginePipeline::Impl::stage_render_prep_graph() noexcept {
   }
 
   if (!graphFailed && !link_dependency(mergeHandle, endFrameHandle)) {
+    graphFailed = true;
+  }
+  if (!graphFailed && sceneViewThisFrame &&
+      !link_dependency(sceneMergeHandle, endFrameHandle)) {
     graphFailed = true;
   }
 
@@ -1988,6 +2039,43 @@ bool EnginePipeline::Impl::stage_render_prep_graph() noexcept {
     return false;
   }
 
+  return true;
+}
+
+bool EnginePipeline::Impl::editor_has_scene_view() const noexcept {
+  return (bridge != nullptr) && (bridge->scene_view != nullptr);
+}
+
+bool EnginePipeline::Impl::request_scene_view(
+    renderer::RenderViewDesc *outView) noexcept {
+  if (!editor_has_scene_view() || sceneViewAllocationFailed) {
+    return false;
+  }
+  renderer::RenderViewDesc view{};
+  if (!bridge->scene_view(&view) || (view.width <= 0) || (view.height <= 0)) {
+    return false;
+  }
+  if (sceneRenderPrep == nullptr) {
+    sceneRenderPrep.reset(new (std::nothrow)
+                              runtime::RenderPrepPipelineContext());
+    sceneCommandBuffer.reset(new (std::nothrow)
+                                 renderer::CommandBufferBuilder());
+    sceneAuxiliaryCommandBuffer.reset(new (std::nothrow)
+                                          renderer::CommandBufferBuilder());
+    if ((sceneRenderPrep == nullptr) || (sceneCommandBuffer == nullptr) ||
+        (sceneAuxiliaryCommandBuffer == nullptr)) {
+      sceneRenderPrep.reset();
+      sceneCommandBuffer.reset();
+      sceneAuxiliaryCommandBuffer.reset();
+      sceneViewAllocationFailed = true;
+      core::log_message(core::LogLevel::Error, "engine",
+                        "out of memory for the editor's Scene view; only the "
+                        "Game view renders this session");
+      return false;
+    }
+  }
+  view.id = renderer::RenderViewId::Scene;
+  *outView = view;
   return true;
 }
 
@@ -2138,9 +2226,27 @@ void EnginePipeline::Impl::stage_render() noexcept {
   renderer::set_scene_capture_requests(frameCaptureRequests.data(),
                                        frameCaptureRequestCount);
 
-  renderer::flush_renderer(commandBuffer->view(), meshRegistry.get(),
-                           static_cast<float>(clock.simulationSeconds),
-                           frameSceneLights, auxiliaryCommandBuffer->view());
+  // The Game view goes first: it owns the back buffer and the frame's
+  // once-only work. The Scene view, when the editor shows one, draws the
+  // debug overlays (gizmos, script lines) the way an authoring view does;
+  // without one the Game view draws them.
+  renderer::RenderViewDesc gameView{};
+  gameView.id = renderer::RenderViewId::Game;
+  gameView.camera = renderer::get_active_camera();
+  gameView.drawScene = (bridge == nullptr) ||
+                       (bridge->game_view_visible == nullptr) ||
+                       bridge->game_view_visible();
+  gameView.drawOverlays = !sceneViewThisFrame;
+  renderer::flush_renderer_view(
+      gameView, commandBuffer->view(), meshRegistry.get(),
+      static_cast<float>(clock.simulationSeconds), frameSceneLights,
+      auxiliaryCommandBuffer->view());
+  if (sceneViewThisFrame) {
+    renderer::flush_renderer_view(
+        sceneView, sceneCommandBuffer->view(), meshRegistry.get(),
+        static_cast<float>(clock.simulationSeconds), frameSceneLights,
+        sceneAuxiliaryCommandBuffer->view());
+  }
 
   if ((bridge != nullptr) && (bridge->render != nullptr)) {
     bridge->render(static_cast<float>(frameMs),

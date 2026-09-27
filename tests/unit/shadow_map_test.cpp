@@ -235,10 +235,10 @@ int verify_cascade_matrix_stable_for_sub_texel_motion() {
 
 // ---------------------------------------------------------------------------
 // Test 7: Every cascade reports the uniform full resolution. Contract
-// migration (#301): the cascades became layers of one Tex2DArray so the
-// whole set costs one sampler register, and array layers share
-// dimensions — the former lower-resolution distant cascades now render
-// full size (a quality gain traded against their memory saving).
+// migration (#301): the cascades share one texture so the whole set costs
+// one sampler register (since #690 as equal tiles of one atlas) — the
+// former lower-resolution distant cascades now render full size (a
+// quality gain traded against their memory saving).
 // ---------------------------------------------------------------------------
 int verify_shadow_cascade_lod_resolutions() {
   for (std::size_t i = 0U; i < engine::renderer::kShadowCascadeCount; ++i) {
@@ -269,13 +269,11 @@ int verify_shadow_state_defaults() {
   if (state.initialized) {
     return 600;
   }
-  if (state.depthArrayTexture != engine::renderer::kInvalidDeviceTexture) {
+  if (state.depthAtlasTexture != engine::renderer::kInvalidDeviceTexture) {
     return 601;
   }
-  for (std::size_t i = 0U; i < engine::renderer::kShadowCascadeCount; ++i) {
-    if (state.depthTargets[i].value != 0U) {
-      return 602;
-    }
+  if (state.atlasTarget.value != 0U) {
+    return 602;
   }
 
   return 0;

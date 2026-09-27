@@ -74,9 +74,8 @@ plays the bundled template. It is not production-complete.
 - Window/input: SDL3
 - Rendering: bgfx (Vulkan is the proven backend; D3D11, D3D12 and Metal
   are selectable but unproven; WebGL2 runs the shipped page error-free in
-  CI (`engine_web_page_boots`) without shadows, since bgfx exposes no
-  texture arrays there, and with no image check; shaderc-cooked `.sc`
-  shaders)
+  CI (`engine_web_page_boots`) with no image check, so its shadows have
+  not been observed in a browser; shaderc-cooked `.sc` shaders)
 - UI/editor: ImGui + ImGuizmo
 - Scripting: Lua 5.4 (C API)
 - Audio: miniaudio

@@ -410,10 +410,29 @@ CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
     }
 
     if (foundContact && (tLo < bestToi)) {
+      const math::Vec3 normal =
+          contact_normal(contactGeometry, otherGeometry, contactIntersection);
+      // Only a hit this step's motion could tunnel through is an impact:
+      // travel into the contact, along its normal, past half the thinner
+      // body. The same travel-versus-extent gate decides whether a sweep
+      // runs at all; a resting or grazing contact the motion runs along
+      // (a rider on a fast platform, a box sliding past a wall) is the
+      // discrete solver's to resolve, as in PhysX's and Box2D's TOI
+      // passes. Without it the clamp below held a fast platform still
+      // under its own rider.
+      const math::Vec3 movingHalf =
+          math::aabb_half_extents(movingGeometry.worldAabb);
+      const math::Vec3 otherHalf =
+          math::aabb_half_extents(otherGeometry.worldAabb);
+      const float thinnest = std::min({movingHalf.x, movingHalf.y, movingHalf.z,
+                                       otherHalf.x, otherHalf.y, otherHalf.z});
+      const float travelIntoContact = -math::dot(relativeDisplacement, normal);
+      if (travelIntoContact <= (thinnest * 0.5F)) {
+        continue;
+      }
       bestToi = tLo;
       anyHit = true;
-      bestNormal =
-          contact_normal(contactGeometry, otherGeometry, contactIntersection);
+      bestNormal = normal;
       bestContactPt = contact_point(contactGeometry, otherGeometry, bestNormal);
       bestHitEntity = entities[i].index;
       bestOtherVel = otherVel;

@@ -221,6 +221,65 @@ int check_batch_field_edit_single_command_preserves_sibling_field() noexcept {
   return 0;
 }
 
+/// EXPECTATION: a selection far past the 64 entities the editor once held
+/// takes one field edit as one undoable command over every member, and
+/// undo restores each member's own value.
+int check_batch_edit_over_many_entities() noexcept {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 90;
+  }
+  SessionWorldScope scope(world.get());
+
+  constexpr std::size_t kCount = 300U;
+  std::array<Entity, kCount> entities{};
+  for (std::size_t i = 0U; i < kCount; ++i) {
+    entities[i] = make_rigid_body_entity(*world, static_cast<float>(i + 1U),
+                                         static_cast<float>(i + 1U));
+    if (entities[i] == engine::runtime::kInvalidEntity) {
+      return 91;
+    }
+    select_entity(entities[i], i != 0U);
+  }
+  if (editor_session().selectedEntityCount != kCount) {
+    return 92;
+  }
+
+  const engine::core::TypeField *massField = rigid_body_field("inverseMass");
+  ComponentEditSnapshot representative{};
+  if ((massField == nullptr) ||
+      !selection_representative_component(ComponentEditType::RigidBody,
+                                          &representative)) {
+    return 93;
+  }
+  representative.rigidBody.inverseMass = 0.5F;
+  if (!apply_multi_field_edit(ComponentEditType::RigidBody, massField->offset,
+                              massField->size, representative)) {
+    return 94;
+  }
+  for (std::size_t i = 0U; i < kCount; ++i) {
+    RigidBody body{};
+    if (!world->get_rigid_body(entities[i], &body) ||
+        (body.inverseMass != 0.5F) ||
+        !uniform_inertia(body.inverseInertia, static_cast<float>(i + 1U))) {
+      return 95;
+    }
+  }
+
+  editor_session().commandHistory.undo();
+  for (std::size_t i = 0U; i < kCount; ++i) {
+    RigidBody body{};
+    if (!world->get_rigid_body(entities[i], &body) ||
+        (body.inverseMass != static_cast<float>(i + 1U))) {
+      return 96;
+    }
+  }
+  if (editor_session().commandHistory.can_undo()) {
+    return 97; // the whole batch was one history entry
+  }
+  return 0;
+}
+
 /// EXPECTATION (#548): a drag over a multi-selection is one gesture, one
 /// undo step. Every staged frame reaches every selected entity at once and
 /// leaves the still-mixed sibling field alone, nothing is recorded while
@@ -653,6 +712,8 @@ int main() {
        &check_common_components_and_mixed_fields},
       {"check_batch_field_edit_single_command_preserves_sibling_field",
        &check_batch_field_edit_single_command_preserves_sibling_field},
+      {"check_batch_edit_over_many_entities",
+       &check_batch_edit_over_many_entities},
       {"check_batch_edit_rolls_back_on_partial_failure",
        &check_batch_edit_rolls_back_on_partial_failure},
       {"check_drag_gesture_records_one_command",

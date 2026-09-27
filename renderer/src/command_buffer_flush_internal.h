@@ -25,11 +25,11 @@ constexpr float kClearBlue = 0.60F;
 // in 16 sampler registers (DXBC's hard cap, also WebGL2's floor).
 // Units 0-4 are per-pass (forward material maps / deferred G-buffer +
 // tile), 5 the deferred SSAO input, then the shared tail below. The
-// cascade and spot shadow sets each collapse into one Tex2DArray, so
+// cascade and spot shadow sets each collapse into one depth atlas, so
 // four maps cost one register.
 constexpr int kDeferredLightDataUnit = 6;
-constexpr int kShadowCascadeArrayUnit = 7;
-constexpr int kSpotShadowArrayUnit = 8;
+constexpr int kShadowCascadeAtlasUnit = 7;
+constexpr int kSpotShadowAtlasUnit = 8;
 constexpr int kPointShadowUnitBase = 9; // 9-12: four cube slots
 constexpr int kIblIrradianceUnit = 13;
 constexpr int kIblPrefilteredUnit = 14;
@@ -76,7 +76,12 @@ struct FrameFlushContext final {
   // sorted like the main list (opaque first) and tagged by passMask.
   CommandBufferView auxiliaryView{};
   std::size_t auxiliaryOpaqueCount = 0U;
+  // Whether this view clears and presents the back buffer (the Game view).
+  bool ownsBackBuffer = true;
 };
+
+/// Binds the window's back buffer at its full size and clears it.
+void clear_back_buffer(const RenderDevice *dev) noexcept;
 
 /// Visits every opaque shadow caster of the frame: the camera-visible
 /// opaque range, then the auxiliary opaque commands flagged as casters.

@@ -881,7 +881,7 @@ void test_cooked_pbr_full_variant(TestContext &t) {
   const RenderDevice *dev = render_device();
   const DeviceProgramHandle prog = shader_device_program(full);
   t.check(prog != kInvalidDeviceProgram, "PBR_FULL device program published");
-  t.check(dev->shader_param(prog, "uShadowMapArray").valid(),
+  t.check(dev->shader_param(prog, "uShadowAtlas").valid(),
           "cascade shadow sampler resolves on the full variant");
   t.check(dev->shader_param(prog, "uIrradianceMap").valid(),
           "IBL irradiance sampler resolves on the full variant");

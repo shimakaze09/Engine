@@ -123,12 +123,20 @@ EditorFontResult load_editor_fonts(ImFontAtlas *atlas, float sizePixels,
     if (hasOverride) {
       char message[640] = {};
       std::snprintf(message, sizeof(message),
-                    "editor.cjk_font could not be loaded; trying the system "
-                    "fonts: %s",
+                    "editor.cjk_font could not be loaded; using the bundled "
+                    "face: %s",
                     cjkOverride);
       core::log_message(core::LogLevel::Warning, "editor", message);
     }
+    if (merge_font(atlas, kBundledCjkFontPath, sizePixels)) {
+      result.cjk = true;
+      std::snprintf(result.cjkPath, sizeof(result.cjkPath), "%s",
+                    kBundledCjkFontPath);
+    }
     for (const char *candidate : kCjkCandidates) {
+      if (result.cjk) {
+        break;
+      }
       if (merge_font(atlas, candidate, sizePixels)) {
         result.cjk = true;
         std::snprintf(result.cjkPath, sizeof(result.cjkPath), "%s", candidate);
@@ -144,9 +152,10 @@ EditorFontResult load_editor_fonts(ImFontAtlas *atlas, float sizePixels,
     core::log_message(core::LogLevel::Info, "editor", message);
   } else {
     core::log_message(core::LogLevel::Warning, "editor",
-                      "no CJK font found; Chinese and Japanese text will "
-                      "draw as boxes. Set editor.cjk_font to a .ttf/.ttc/"
-                      ".otf file that has them");
+                      "no CJK font found (the bundled face is missing too); "
+                      "Chinese and Japanese text will draw as boxes. Choose a "
+                      ".ttf/.ttc/.otf file that has them in Window > Editor "
+                      "Settings");
   }
   return result;
 }

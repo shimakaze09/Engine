@@ -96,9 +96,12 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
     // character's shadow mid-animation.
     const bool cacheEnabled = backend.cvars.shadowCache.get_bool(true) &&
                               (skin_palette_count() == 0U);
+    // The cascade atlas is shared by the views: this view's cached maps
+    // survive only while no other view has drawn its own cascades there.
     directionalShadowCacheReused =
-        cacheEnabled && backend.directionalShadowCacheValid &&
-        (backend.directionalShadowCacheKey == cacheKey);
+        cacheEnabled && backend.view().directionalShadowCacheValid &&
+        (backend.view().directionalShadowCacheKey == cacheKey) &&
+        (backend.cascadeAtlasView == backend.currentView);
 
     if (directionalShadowCacheReused) {
       if (backend.cvars.shadowDebug.get_bool(false)) {
@@ -112,8 +115,9 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
         const math::Mat4 &lightVP = lightMatrices[c];
         const int shadowResolution = shadow_cascade_resolution(c);
 
-        dev->bind_render_target(backend.shadowState.depthTargets[c]);
-        dev->set_viewport(0, 0, shadowResolution, shadowResolution);
+        const ShadowAtlasTile tile = shadow_atlas_tile(c, shadowResolution);
+        dev->bind_render_target(backend.shadowState.atlasTarget);
+        dev->set_viewport(tile.x, tile.y, shadowResolution, shadowResolution);
         dev->apply_render_state(RenderState{DepthTest::Less, true,
                                             BlendMode::Disabled,
                                             CullMode::Back});
@@ -140,12 +144,13 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
       }
 
       gpu_profiler_end_pass(GpuPassId::ShadowMap);
-      backend.directionalShadowCacheKey = cacheKey;
-      backend.directionalShadowCacheValid = true;
+      backend.view().directionalShadowCacheKey = cacheKey;
+      backend.view().directionalShadowCacheValid = true;
+      backend.cascadeAtlasView = backend.currentView;
     }
   } else {
-    backend.directionalShadowCacheKey = 0U;
-    backend.directionalShadowCacheValid = false;
+    backend.view().directionalShadowCacheKey = 0U;
+    backend.view().directionalShadowCacheValid = false;
   }
 
   const bool doSpotShadows =
@@ -159,7 +164,7 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
 
     std::array<ShadowCandidate, kMaxSpotLights> spotCandidates{};
     std::size_t spotCandidateCount = 0U;
-    const math::Vec3 &camPos = renderer_context().activeCamera.position;
+    const math::Vec3 &camPos = ctx.backend.view().camera.position;
     for (std::size_t li = 0U; li < lights.spotLightCount; ++li) {
       if (!lights.spotLights[li].castShadow) {
         continue;
@@ -197,8 +202,10 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
     dev->bind_program(backend.shadowDepthProgram);
     for (std::size_t s = 0U; s < activeSpotShadows; ++s) {
       const auto &slot = backend.spotShadowState.slots[s];
-      dev->bind_render_target(slot.depthTarget);
-      dev->set_viewport(0, 0, kSpotShadowMapResolution,
+      const ShadowAtlasTile tile =
+          shadow_atlas_tile(s, kSpotShadowMapResolution);
+      dev->bind_render_target(backend.spotShadowState.atlasTarget);
+      dev->set_viewport(tile.x, tile.y, kSpotShadowMapResolution,
                         kSpotShadowMapResolution);
       dev->apply_render_state(RenderState{DepthTest::Less, true,
                                           BlendMode::Disabled,
@@ -231,7 +238,7 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
 
     std::array<ShadowCandidate, kMaxPointLights> pointCandidates{};
     std::size_t pointCandidateCount = 0U;
-    const math::Vec3 &camPos = renderer_context().activeCamera.position;
+    const math::Vec3 &camPos = ctx.backend.view().camera.position;
     for (std::size_t li = 0U; li < lights.pointLightCount; ++li) {
       if (!lights.pointLights[li].castShadow) {
         continue;

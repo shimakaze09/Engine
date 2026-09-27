@@ -163,6 +163,11 @@ Calling a rule enforced without one of these three is prohibited.
 
 ## Working conventions
 
+- Technical design questions are not escalated to the owner. Research
+  how mature engines and the field's established practice solve the
+  problem, adapt that to this codebase's rules, decide, and record the
+  reasoning in the change. The owner decides product direction and the
+  **[OWNER]** rules only.
 - Derive every change from the product goal and the architecture
   invariants, not from what a demo or a symptom needs today. A fix
   addresses the root cause at the layer that owns it; a symptom-level patch

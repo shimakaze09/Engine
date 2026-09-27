@@ -179,17 +179,15 @@ bool resolve_deferred_light_program_state(BackendState &backend,
   backend.dlShadowEnabledLoc =
       dev->shader_param(dlProg, "uShadowEnabled");
   // Flat vocabulary (shared with the pbr forward path): one
-  // Tex2DArray sampler per shadow kind, one mat4 array per
+  // atlas sampler per shadow kind, one mat4 array per
   // shadow kind, packed vec4 payloads.
-  backend.dlShadowMapArrayLoc =
-      dev->shader_param(dlProg, "uShadowMapArray");
+  backend.dlShadowAtlasLoc = dev->shader_param(dlProg, "uShadowAtlas");
   backend.dlShadowMatrixParam = dev->shader_param(dlProg, "uShadowMatrix");
   backend.dlCascadeSplitsParam = dev->shader_param(dlProg, "uCascadeSplits");
 
   backend.dlSpotShadowEnabledLoc =
       dev->shader_param(dlProg, "uSpotShadowEnabled");
-  backend.dlSpotShadowMapArrayLoc =
-      dev->shader_param(dlProg, "uSpotShadowMapArray");
+  backend.dlSpotShadowAtlasLoc = dev->shader_param(dlProg, "uSpotShadowAtlas");
   backend.dlSpotShadowMatrixParam =
       dev->shader_param(dlProg, "uSpotShadowMatrix");
   backend.dlSpotShadowLightIdxParam =
@@ -400,7 +398,9 @@ void init_backend_lighting(BackendState &backend,
                             "Exponential distance fog density");
   core::cvar_register_string("r_fog_color", "0.55 0.65 0.75",
                              "Distance fog RGB color");
-  core::cvar_register_bool("r_height_fog", true, "Enable height fog");
+  // Off by default: at ground level it greys every material; the
+  // editor's Rendering panel is where an author turns it on.
+  core::cvar_register_bool("r_height_fog", false, "Enable height fog");
   core::cvar_register_float("r_height_fog_base", 0.0F,
                             "Height fog base world Y");
   core::cvar_register_float("r_height_fog_density", 0.015F,
@@ -545,13 +545,7 @@ void init_backend_lighting(BackendState &backend,
   core::cvar_register_bool(
       "r_shadow_debug", false,
       "Log when shadow casters are dropped due to slot limits");
-  if ((dev != nullptr) && !dev->caps.textureArrays) {
-    // Both the cascade and the spot sets are Tex2DArrays; the spot set is
-    // gated on the cascade set below, so one refusal covers them.
-    core::log_message(core::LogLevel::Warning, "renderer",
-                      "the render device has no texture arrays — cascade "
-                      "and spot shadows disabled");
-  } else {
+  {
     const ShaderProgramHandle shadowShader = load_configured_shader_program(
         "shadow_depth.vert", "shadow_depth.frag");
     if (shadowShader != kInvalidShaderProgram) {

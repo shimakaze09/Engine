@@ -14,4 +14,9 @@ void draw_toolbar() noexcept;
 /// Draws the entity hierarchy panel.
 void draw_entities_panel() noexcept;
 
+/// Places the next button beside the last item when it fits within the
+/// window's content width, and otherwise leaves it to start the next line,
+/// so a row of buttons wraps in a narrow panel instead of clipping.
+void same_line_if_button_fits(const char *nextButtonLabel) noexcept;
+
 } // namespace engine::editor

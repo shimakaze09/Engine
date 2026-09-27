@@ -110,7 +110,8 @@ void reset_backend() noexcept {
   g_backend.pbrPointLightCountLocation = ShaderParam{kPointCountParam};
   g_backend.pbrPointShadowLightIdxParam = ShaderParam{kPointShadowIdxParam};
   g_backend.pbrSpotShadowLightIdxParam = ShaderParam{kSpotShadowIdxParam};
-  renderer_context().activeCamera.position = engine::math::Vec3(0.0F, 0.0F, 0.0F);
+  // Lights are selected nearest the camera of the view being rendered.
+  g_backend.view().camera.position = engine::math::Vec3(0.0F, 0.0F, 0.0F);
 }
 
 /// Twelve point lights: the four lowest indices sit 100 m away, the

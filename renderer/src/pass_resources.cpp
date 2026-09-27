@@ -2,6 +2,8 @@
 
 #include "engine/renderer/pass_resources.h"
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 
 #include "engine/core/logging.h"
@@ -23,6 +25,9 @@ constexpr std::uint32_t kGBufferEmissiveSlot = 6U;
 constexpr std::uint32_t kGBufferDepthSlot = 7U;
 constexpr std::uint32_t kSsaoTextureSlot = 8U;
 constexpr std::uint32_t kSsaoBlurTextureSlot = 9U;
+/// A resource id is its slot plus kViewStride times its view, so an id
+/// names the view whose target it is.
+constexpr std::uint32_t kViewStride = 16U;
 
 struct PassResourceState final {
   bool initialized = false;
@@ -52,7 +57,19 @@ struct PassResourceState final {
   PassResources resources{};
 };
 
-PassResourceState g_state{};
+std::array<PassResourceState, kMaxRenderViews> g_states{};
+
+/// The state an id belongs to, and the id's slot; null for an id outside
+/// every view.
+PassResourceState *state_for(PassResourceId resource,
+                             std::uint32_t *outSlot) noexcept {
+  const std::uint32_t view = resource.id / kViewStride;
+  if ((resource.id == 0U) || (view >= kMaxRenderViews)) {
+    return nullptr;
+  }
+  *outSlot = resource.id % kViewStride;
+  return &g_states[view];
+}
 
 /// Destroys or releases the requested object, handle, or resource for gpu resources.
 void destroy_gpu_resources(PassResourceState &state) noexcept {
@@ -104,8 +121,8 @@ bool fail_create(PassResourceState &state, const char *message) noexcept {
 /// final RGBA8 LDR (tonemapped editor-viewport output, no depth);
 /// G-Buffer RT0 albedo RGBA8, RT1 normals+roughness RGBA16F, RT2
 /// emissive+AO RGBA8, DEPTH24, bound as one MRT FBO; SSAO R32F.
-bool create_gpu_resources(PassResourceState *outState, int width,
-                          int height) noexcept {
+bool create_gpu_resources(PassResourceState *outState, std::size_t view,
+                          int width, int height) noexcept {
   if (outState == nullptr) {
     return false;
   }
@@ -180,9 +197,12 @@ bool create_gpu_resources(PassResourceState *outState, int width,
     return fail_create(next, "failed to create final render target");
   }
 
-  next.resources.sceneColor = PassResourceId{kSceneColorSlot};
-  next.resources.sceneDepth = PassResourceId{kSceneDepthSlot};
-  next.resources.finalColor = PassResourceId{kFinalColorSlot};
+  next.resources.sceneColor = PassResourceId{
+      kSceneColorSlot + (static_cast<std::uint32_t>(view) * kViewStride)};
+  next.resources.sceneDepth = PassResourceId{
+      kSceneDepthSlot + (static_cast<std::uint32_t>(view) * kViewStride)};
+  next.resources.finalColor = PassResourceId{
+      kFinalColorSlot + (static_cast<std::uint32_t>(view) * kViewStride)};
 
   next.gbufferAlbedoTex = makeTexture(TextureFormat::RGBA8);
   if (next.gbufferAlbedoTex == kInvalidDeviceTexture) {
@@ -217,10 +237,14 @@ bool create_gpu_resources(PassResourceState *outState, int width,
     return fail_create(next, "failed to create G-Buffer render target");
   }
 
-  next.resources.gbufferAlbedo = PassResourceId{kGBufferAlbedoSlot};
-  next.resources.gbufferNormal = PassResourceId{kGBufferNormalSlot};
-  next.resources.gbufferEmissive = PassResourceId{kGBufferEmissiveSlot};
-  next.resources.gbufferDepth = PassResourceId{kGBufferDepthSlot};
+  next.resources.gbufferAlbedo = PassResourceId{
+      kGBufferAlbedoSlot + (static_cast<std::uint32_t>(view) * kViewStride)};
+  next.resources.gbufferNormal = PassResourceId{
+      kGBufferNormalSlot + (static_cast<std::uint32_t>(view) * kViewStride)};
+  next.resources.gbufferEmissive = PassResourceId{
+      kGBufferEmissiveSlot + (static_cast<std::uint32_t>(view) * kViewStride)};
+  next.resources.gbufferDepth = PassResourceId{
+      kGBufferDepthSlot + (static_cast<std::uint32_t>(view) * kViewStride)};
 
   next.ssaoTex = makeTexture(TextureFormat::R32F);
   if (next.ssaoTex == kInvalidDeviceTexture) {
@@ -243,8 +267,10 @@ bool create_gpu_resources(PassResourceState *outState, int width,
     return fail_create(next, "failed to create SSAO blur render target");
   }
 
-  next.resources.ssaoTexture = PassResourceId{kSsaoTextureSlot};
-  next.resources.ssaoBlurTexture = PassResourceId{kSsaoBlurTextureSlot};
+  next.resources.ssaoTexture = PassResourceId{
+      kSsaoTextureSlot + (static_cast<std::uint32_t>(view) * kViewStride)};
+  next.resources.ssaoBlurTexture = PassResourceId{
+      kSsaoBlurTextureSlot + (static_cast<std::uint32_t>(view) * kViewStride)};
   next.initialized = true;
 
   *outState = next;
@@ -254,8 +280,13 @@ bool create_gpu_resources(PassResourceState *outState, int width,
 } // namespace
 
 /// Initializes the owning system for pass resources.
-bool initialize_pass_resources(int width, int height) noexcept {
-  if (g_state.initialized) {
+bool initialize_pass_resources(int width, int height,
+                               std::size_t view) noexcept {
+  if (view >= kMaxRenderViews) {
+    return false;
+  }
+  PassResourceState &state = g_states[view];
+  if (state.initialized) {
     return true;
   }
 
@@ -264,30 +295,35 @@ bool initialize_pass_resources(int width, int height) noexcept {
   }
 
   PassResourceState next{};
-  if (!create_gpu_resources(&next, width, height)) {
+  if (!create_gpu_resources(&next, view, width, height)) {
     return false;
   }
 
-  g_state = next;
+  state = next;
   return true;
 }
 
-/// Shuts down the owning system for pass resources.
+/// Shuts down the owning system for pass resources: every view's targets.
 void shutdown_pass_resources() noexcept {
-  if (!g_state.initialized) {
-    return;
+  for (PassResourceState &state : g_states) {
+    if (!state.initialized) {
+      continue;
+    }
+    if (render_device() == nullptr) {
+      core::log_message(core::LogLevel::Error, "pass_resources",
+                        "shutdown without a render device leaks GPU targets");
+    }
+    destroy_gpu_resources(state);
+    state = PassResourceState{};
   }
-
-  if (render_device() == nullptr) {
-    core::log_message(core::LogLevel::Error, "pass_resources",
-                      "shutdown without a render device leaks GPU targets");
-  }
-  destroy_gpu_resources(g_state);
-  g_state = PassResourceState{};
 }
 
-bool resize_pass_resources(int width, int height) noexcept {
-  if (!g_state.initialized) {
+bool resize_pass_resources(int width, int height, std::size_t view) noexcept {
+  if (view >= kMaxRenderViews) {
+    return false;
+  }
+  PassResourceState &state = g_states[view];
+  if (!state.initialized) {
     return false;
   }
 
@@ -295,74 +331,79 @@ bool resize_pass_resources(int width, int height) noexcept {
     return false;
   }
 
-  if ((width == g_state.width) && (height == g_state.height)) {
+  if ((width == state.width) && (height == state.height)) {
     return true;
   }
 
   PassResourceState next{};
-  if (!create_gpu_resources(&next, width, height)) {
+  if (!create_gpu_resources(&next, view, width, height)) {
     core::log_message(core::LogLevel::Error, "pass_resources",
                       "failed to recreate pass resources on resize — "
                       "keeping previous targets");
     return false;
   }
 
-  destroy_gpu_resources(g_state);
-  g_state = next;
+  destroy_gpu_resources(state);
+  state = next;
   return true;
 }
 
-const PassResources &get_pass_resources() noexcept { return g_state.resources; }
+const PassResources &get_pass_resources(std::size_t view) noexcept {
+  static const PassResources kNone{};
+  return (view < kMaxRenderViews) ? g_states[view].resources : kNone;
+}
 
 DeviceTextureHandle pass_resource_texture(PassResourceId resource) noexcept {
-  if (resource.id == kSceneColorSlot) {
-    return g_state.sceneColorTexture;
+  std::uint32_t slot = 0U;
+  const PassResourceState *state = state_for(resource, &slot);
+  if (state == nullptr) {
+    return kInvalidDeviceTexture;
   }
-  if (resource.id == kSceneDepthSlot) {
-    return g_state.sceneDepthTexture;
+  switch (slot) {
+  case kSceneColorSlot:
+    return state->sceneColorTexture;
+  case kSceneDepthSlot:
+    return state->sceneDepthTexture;
+  case kFinalColorSlot:
+    return state->finalColorTexture;
+  case kGBufferAlbedoSlot:
+    return state->gbufferAlbedoTex;
+  case kGBufferNormalSlot:
+    return state->gbufferNormalTex;
+  case kGBufferEmissiveSlot:
+    return state->gbufferEmissiveTex;
+  case kGBufferDepthSlot:
+    return state->gbufferDepthTex;
+  case kSsaoTextureSlot:
+    return state->ssaoTex;
+  case kSsaoBlurTextureSlot:
+    return state->ssaoBlurTex;
+  default:
+    return kInvalidDeviceTexture;
   }
-  if (resource.id == kFinalColorSlot) {
-    return g_state.finalColorTexture;
-  }
-  if (resource.id == kGBufferAlbedoSlot) {
-    return g_state.gbufferAlbedoTex;
-  }
-  if (resource.id == kGBufferNormalSlot) {
-    return g_state.gbufferNormalTex;
-  }
-  if (resource.id == kGBufferEmissiveSlot) {
-    return g_state.gbufferEmissiveTex;
-  }
-  if (resource.id == kGBufferDepthSlot) {
-    return g_state.gbufferDepthTex;
-  }
-  if (resource.id == kSsaoTextureSlot) {
-    return g_state.ssaoTex;
-  }
-  if (resource.id == kSsaoBlurTextureSlot) {
-    return g_state.ssaoBlurTex;
-  }
-  return kInvalidDeviceTexture;
 }
 
 RenderTargetHandle
 pass_resource_target(PassResourceId colorAttachment) noexcept {
-  if (colorAttachment.id == kSceneColorSlot) {
-    return g_state.sceneTarget;
+  std::uint32_t slot = 0U;
+  const PassResourceState *state = state_for(colorAttachment, &slot);
+  if (state == nullptr) {
+    return RenderTargetHandle{};
   }
-  if (colorAttachment.id == kFinalColorSlot) {
-    return g_state.finalTarget;
+  switch (slot) {
+  case kSceneColorSlot:
+    return state->sceneTarget;
+  case kFinalColorSlot:
+    return state->finalTarget;
+  case kGBufferAlbedoSlot:
+    return state->gbufferTarget;
+  case kSsaoTextureSlot:
+    return state->ssaoTarget;
+  case kSsaoBlurTextureSlot:
+    return state->ssaoBlurTarget;
+  default:
+    return RenderTargetHandle{};
   }
-  if (colorAttachment.id == kGBufferAlbedoSlot) {
-    return g_state.gbufferTarget;
-  }
-  if (colorAttachment.id == kSsaoTextureSlot) {
-    return g_state.ssaoTarget;
-  }
-  if (colorAttachment.id == kSsaoBlurTextureSlot) {
-    return g_state.ssaoBlurTarget;
-  }
-  return RenderTargetHandle{};
 }
 
 } // namespace engine::renderer

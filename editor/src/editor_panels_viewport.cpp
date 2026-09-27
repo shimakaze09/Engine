@@ -1,4 +1,6 @@
-// Implements the editor scene viewport panel, gizmos, and collider overlay.
+// Implements the editor's Scene and Game view panels, the Scene view's
+// gizmos and overlays, and the bridge hooks that hand both views to the
+// pipeline.
 // Split out of editor.cpp (REVIEW_FINDINGS A3).
 
 #include "editor_panels_viewport.h"
@@ -50,8 +52,8 @@
 
 #include "ImGuizmo.h"
 
+#include "engine/editor/camera_frustum_overlay.h"
 #include "engine/editor/command_history.h"
-#include "engine/editor/debug_camera.h"
 
 #include <stb_image.h>
 
@@ -323,31 +325,11 @@ math::Vec3 viewport_drop_world_position(const ImVec2 &imagePos,
 
 } // namespace
 
-void draw_scene_viewport_panel() noexcept {
-  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0F, 0.0F));
-  const bool visible = ImGui::Begin("Scene");
-  ImGui::PopStyleVar();
-
-  if (!visible) {
-    ImGui::End();
-    return;
-  }
-
-  const ImVec2 regionSize = ImGui::GetContentRegionAvail();
-  const ImVec2 cursorScreenPos = ImGui::GetCursorScreenPos();
-
-  editor_session().sceneViewportScreenPos = cursorScreenPos;
-  editor_session().sceneViewportScreenSize = regionSize;
-
-  // The panel rect is in logical points; the render target is sized in
-  // pixels so HiDPI displays get a native-resolution scene image.
-  const ImVec2 fbScale = ImGui::GetIO().DisplayFramebufferScale;
-  renderer::set_scene_viewport_size(
-      static_cast<int>(regionSize.x * fbScale.x),
-      static_cast<int>(regionSize.y * fbScale.y));
-
+/// Draws a render view's last image filling the panel's content region.
+void draw_view_image(renderer::RenderViewId view,
+                     const ImVec2 &regionSize) noexcept {
   const std::uint64_t texId =
-      imgui_texture_id(renderer::get_scene_viewport_texture());
+      imgui_texture_id(renderer::get_render_view_texture(view));
   if ((texId != 0U) && (regionSize.x > 0.0F) && (regionSize.y > 0.0F)) {
     // The pass chain is hop-neutral (see fullscreen.vs.sc), so display
     // parity reduces to the backend's render-target row order: GL-family
@@ -360,6 +342,38 @@ void draw_scene_viewport_panel() noexcept {
   } else {
     ImGui::TextUnformatted("Waiting for renderer...");
   }
+}
+
+/// A panel's content size in pixels: the rect is in logical points, and
+/// the render target is sized in pixels so HiDPI displays get a
+/// native-resolution image.
+void region_pixels(const ImVec2 &regionSize, int *outWidth,
+                   int *outHeight) noexcept {
+  const ImVec2 fbScale = ImGui::GetIO().DisplayFramebufferScale;
+  *outWidth = static_cast<int>(regionSize.x * fbScale.x);
+  *outHeight = static_cast<int>(regionSize.y * fbScale.y);
+}
+
+void draw_scene_viewport_panel() noexcept {
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0F, 0.0F));
+  const bool visible = ImGui::Begin(kSceneViewWindow);
+  ImGui::PopStyleVar();
+
+  editor_session().sceneViewShown = visible;
+  if (!visible) {
+    ImGui::End();
+    return;
+  }
+
+  const ImVec2 regionSize = ImGui::GetContentRegionAvail();
+  const ImVec2 cursorScreenPos = ImGui::GetCursorScreenPos();
+
+  editor_session().sceneViewportScreenPos = cursorScreenPos;
+  editor_session().sceneViewportScreenSize = regionSize;
+  region_pixels(regionSize, &editor_session().sceneViewPixelWidth,
+                &editor_session().sceneViewPixelHeight);
+
+  draw_view_image(renderer::RenderViewId::Scene, regionSize);
 
   // Dropping a browser mesh asset spawns it where the drop ray meets the
   // ground plane, as an undoable create.
@@ -480,41 +494,10 @@ void draw_scene_viewport_panel() noexcept {
 
   }
 
-  // Camera input: only when stopped/paused, viewport hovered, gizmo not active.
-  const bool debugDetach = core::cvar_get_bool("debug.camera_detach", false);
-  if (debugDetach && !editor_session().debugCameraActive) {
-    if (editor_session().playState == PlayState::Playing) {
-      editor_session().frozenCameraState = renderer::get_active_camera();
-    } else {
-      editor_session().frozenCameraState =
-          editor_camera_state(editor_session().editorCamera);
-    }
-    editor_session().debugCamera.position =
-        editor_session().frozenCameraState.position;
-    editor_session().debugCameraActive = true;
-  } else if (!debugDetach && editor_session().debugCameraActive) {
-    editor_session().debugCameraActive = false;
-  }
-
-  if (editor_session().debugCameraActive && ImGui::IsWindowHovered()) {
-    const ImGuiIO &io = ImGui::GetIO();
-    const bool rmbDown = ImGui::IsMouseDown(ImGuiMouseButton_Right);
-    const float dt = io.DeltaTime;
-    update_debug_camera(
-        editor_session().debugCamera, dt, ImGui::IsKeyDown(ImGuiKey_W),
-        ImGui::IsKeyDown(ImGuiKey_S), ImGui::IsKeyDown(ImGuiKey_A),
-        ImGui::IsKeyDown(ImGuiKey_D), ImGui::IsKeyDown(ImGuiKey_E),
-        ImGui::IsKeyDown(ImGuiKey_Q), io.KeyShift,
-        rmbDown ? static_cast<int>(io.MouseDelta.x) : 0,
-        rmbDown ? static_cast<int>(io.MouseDelta.y) : 0);
-    renderer::set_active_camera(
-        debug_camera_state(editor_session().debugCamera));
-
-    const float aspect =
-        (regionSize.y > 0.0F) ? (regionSize.x / regionSize.y) : 1.0F;
-    draw_camera_frustum_wireframe(editor_session().frozenCameraState, aspect);
-  } else if ((editor_session().playState != PlayState::Playing) &&
-             ImGui::IsWindowHovered() && !ImGuizmo::IsUsing()) {
+  // The editor camera flies whenever the Scene view is hovered and no
+  // gizmo drag holds the mouse, during play as well: the Scene view is the
+  // author's, and the game has its own view.
+  if (ImGui::IsWindowHovered() && !ImGuizmo::IsUsing()) {
     const ImGuiIO &io = ImGui::GetIO();
     const bool altHeld = io.KeyAlt;
     const bool lmbDown = ImGui::IsMouseDown(ImGuiMouseButton_Left);
@@ -528,14 +511,59 @@ void draw_scene_viewport_panel() noexcept {
                          altHeld && lmbDown, altHeld && mmbDown);
   }
 
-  // Push editor camera when not playing (and debug camera is not active).
-  if ((editor_session().playState != PlayState::Playing) &&
-      !editor_session().debugCameraActive) {
-    renderer::set_active_camera(
-        editor_camera_state(editor_session().editorCamera));
+  ImGui::End();
+}
+
+void draw_game_view_panel() noexcept {
+  // A layout saved before the Game view existed has no place for it: it
+  // opens as a tab beside the Scene view instead of floating.
+  const ImGuiWindow *sceneWindow = ImGui::FindWindowByName(kSceneViewWindow);
+  if ((sceneWindow != nullptr) && (sceneWindow->DockId != 0U)) {
+    ImGui::SetNextWindowDockID(sceneWindow->DockId, ImGuiCond_FirstUseEver);
+  }
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0F, 0.0F));
+  const bool visible = ImGui::Begin(kGameViewWindow);
+  ImGui::PopStyleVar();
+
+  EditorSession &session = editor_session();
+  session.gameViewShown = visible;
+  session.gameViewFocused = visible && ImGui::IsWindowFocused();
+  session.gameViewHovered = visible && ImGui::IsWindowHovered();
+  if (!visible) {
+    ImGui::End();
+    return;
   }
 
+  const ImVec2 regionSize = ImGui::GetContentRegionAvail();
+  session.gameViewScreenPos = ImGui::GetCursorScreenPos();
+  session.gameViewScreenSize = regionSize;
+  int width = 0;
+  int height = 0;
+  region_pixels(regionSize, &width, &height);
+  renderer::set_game_view_size(width, height);
+
+  draw_view_image(renderer::RenderViewId::Game, regionSize);
   ImGui::End();
+}
+
+bool editor_scene_view(renderer::RenderViewDesc *outView) noexcept {
+  const EditorSession &session = editor_session();
+  if ((outView == nullptr) || !session.sceneViewShown ||
+      (session.sceneViewPixelWidth <= 0) ||
+      (session.sceneViewPixelHeight <= 0)) {
+    return false;
+  }
+  outView->id = renderer::RenderViewId::Scene;
+  outView->camera = editor_camera_state(session.editorCamera);
+  outView->width = session.sceneViewPixelWidth;
+  outView->height = session.sceneViewPixelHeight;
+  outView->drawScene = true;
+  outView->drawOverlays = true;
+  return true;
+}
+
+bool editor_game_view_visible() noexcept {
+  return editor_session().gameViewShown;
 }
 
 } // namespace engine::editor

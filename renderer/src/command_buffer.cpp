@@ -20,6 +20,7 @@
 #include "command_buffer_init_internal.h"
 #include "engine/core/cvar.h"
 #include "engine/core/logging.h"
+#include "engine/core/platform.h"
 #include "engine/math/mat4.h"
 #include "engine/math/transform.h"
 #include "engine/renderer/camera.h"
@@ -329,13 +330,15 @@ void destroy_backend_resources(BackendState *backend) noexcept {
 
   const RenderDevice *dev = render_device();
 
-  // Destroy tile light texture.
-  if ((backend->tileLightTex != kInvalidDeviceTexture) && (dev != nullptr)) {
-    dev->destroy_texture(backend->tileLightTex);
-    backend->tileLightTex = kInvalidDeviceTexture;
+  // Destroy every view's tile light texture.
+  for (RenderViewResources &view : backend->views) {
+    if ((view.tileLightTex != kInvalidDeviceTexture) && (dev != nullptr)) {
+      dev->destroy_texture(view.tileLightTex);
+      view.tileLightTex = kInvalidDeviceTexture;
+    }
+    view.tileLightTexWidth = 0;
+    view.tileLightTexHeight = 0;
   }
-  backend->tileLightTexWidth = 0;
-  backend->tileLightTexHeight = 0;
   backend->tileBuffer.clear();
 
   // Destroy per-light data texture.
@@ -364,8 +367,13 @@ void destroy_backend_resources(BackendState *backend) noexcept {
   // Destroy scene capture render targets.
   destroy_scene_capture_targets(*backend, dev);
 
-  // Destroy bloom resources.
-  destroy_bloom_resources(*backend);
+  // Destroy every view's bloom and luminance chains.
+  for (std::size_t view = 0U; view < kMaxRenderViews; ++view) {
+    backend->currentView = view;
+    destroy_bloom_resources(*backend);
+    destroy_luminance_resources(*backend);
+  }
+  backend->currentView = 0U;
   if (backend->bloomUpsampleShaderHandle != kInvalidShaderProgram) {
     destroy_shader_program(backend->bloomUpsampleShaderHandle);
     backend->bloomUpsampleShaderHandle = ShaderProgramHandle{};
@@ -403,8 +411,11 @@ void destroy_backend_resources(BackendState *backend) noexcept {
   // Destroy shadow map resources.
   shutdown_shadow_maps(backend->shadowState);
   backend->shadowAvailable = false;
-  backend->directionalShadowCacheKey = 0U;
-  backend->directionalShadowCacheValid = false;
+  for (RenderViewResources &view : backend->views) {
+    view.directionalShadowCacheKey = 0U;
+    view.directionalShadowCacheValid = false;
+  }
+  backend->cascadeAtlasView = kMaxRenderViews;
   if (backend->shadowDepthShaderHandle != kInvalidShaderProgram) {
     destroy_shader_program(backend->shadowDepthShaderHandle);
     backend->shadowDepthShaderHandle = ShaderProgramHandle{};
@@ -425,8 +436,7 @@ void destroy_backend_resources(BackendState *backend) noexcept {
   }
   backend->shadowDepthPointProgram = kInvalidDeviceProgram;
 
-  // Destroy auto-exposure resources.
-  destroy_luminance_resources(*backend);
+  // Destroy auto-exposure programs (the chains went with each view above).
   if (backend->luminanceShaderHandle != kInvalidShaderProgram) {
     destroy_shader_program(backend->luminanceShaderHandle);
     backend->luminanceShaderHandle = ShaderProgramHandle{};
@@ -533,10 +543,6 @@ void destroy_backend_resources(BackendState *backend) noexcept {
       dev->destroy_texture(backend->fallbackCubemap);
       backend->fallbackCubemap = kInvalidDeviceTexture;
     }
-    if (backend->fallbackTexture2DArray != kInvalidDeviceTexture) {
-      dev->destroy_texture(backend->fallbackTexture2DArray);
-      backend->fallbackTexture2DArray = kInvalidDeviceTexture;
-    }
   }
   backend->pbrProgram = kInvalidDeviceProgram;
   backend->defaultProgram = kInvalidDeviceProgram;
@@ -626,10 +632,26 @@ void set_shader_root_path(const char *path) noexcept {
   }
 }
 
-/// Sets the requested value for scene viewport size.
-void set_scene_viewport_size(int width, int height) noexcept {
-  renderer_context().sceneViewportWidth = (width > 0) ? width : 0;
-  renderer_context().sceneViewportHeight = (height > 0) ? height : 0;
+/// Sets the Game view's size override.
+void set_game_view_size(int width, int height) noexcept {
+  renderer_context().gameViewWidth = (width > 0) ? width : 0;
+  renderer_context().gameViewHeight = (height > 0) ? height : 0;
+}
+
+void game_view_size(int *outWidth, int *outHeight) noexcept {
+  int width = renderer_context().gameViewWidth;
+  int height = renderer_context().gameViewHeight;
+  if ((width <= 0) || (height <= 0)) {
+    width = 1280;
+    height = 720;
+    core::render_drawable_size(&width, &height);
+  }
+  if (outWidth != nullptr) {
+    *outWidth = (width > 0) ? width : 1;
+  }
+  if (outHeight != nullptr) {
+    *outHeight = (height > 0) ? height : 1;
+  }
 }
 
 /// Sets the requested value for skybox texture.
@@ -645,12 +667,28 @@ CameraState get_active_camera() noexcept {
   return renderer_context().activeCamera;
 }
 
-DeviceTextureHandle get_scene_viewport_texture() noexcept {
-  const PassResources &passRes = get_pass_resources();
-  if (renderer_context().fxaaAppliedThisFrame) {
+DeviceTextureHandle get_render_view_texture(RenderViewId view) noexcept {
+  const std::size_t index = render_view_index(view);
+  if (index >= kMaxRenderViews) {
+    return kInvalidDeviceTexture;
+  }
+  const PassResources &passRes = get_pass_resources(index);
+  if (backend_state().views[index].fxaaApplied) {
     return pass_resource_texture(passRes.sceneColor);
   }
   return pass_resource_texture(passRes.finalColor);
+}
+
+CameraState render_view_camera(RenderViewId view) noexcept {
+  const std::size_t index = render_view_index(view);
+  return (index < kMaxRenderViews) ? backend_state().views[index].camera
+                                   : CameraState{};
+}
+
+std::uint64_t render_view_frame_count(RenderViewId view) noexcept {
+  const std::size_t index = render_view_index(view);
+  return (index < kMaxRenderViews) ? backend_state().views[index].renderedFrames
+                                   : 0U;
 }
 
 RendererFrameStats renderer_get_last_frame_stats() noexcept {

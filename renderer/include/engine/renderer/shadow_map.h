@@ -21,9 +21,27 @@ inline constexpr std::size_t kShadowCascadeCount = 4U;
 inline constexpr float kShadowCasterSweepDistance = 50.0F;
 
 /// Directional shadow map resolution (square). Every cascade renders at
-/// this size: the cascades live as layers of one Tex2DArray (one sampler
-/// register for all four), and array layers share dimensions.
+/// this size, as one tile of the cascade atlas.
 inline constexpr int kShadowMapResolution = 2048;
+
+/// Shadow atlases hold their maps as a square grid of equal tiles: map i
+/// sits at column i % kShadowAtlasTilesPerRow, row i /
+/// kShadowAtlasTilesPerRow, counted from the top-left of the render
+/// target. One 2-D depth texture per set keeps the whole set to one
+/// sampler register (DXBC caps them at 16, WebGL2 guarantees 16), and
+/// needs no texture arrays, which bgfx withholds under Emscripten. The
+/// shaders' shadow tap carries the same layout.
+inline constexpr int kShadowAtlasTilesPerRow = 2;
+
+/// Top-left pixel of one atlas tile.
+struct ShadowAtlasTile final {
+  int x = 0;
+  int y = 0;
+};
+
+/// The tile map `index` occupies in an atlas of `tileResolution` tiles.
+ShadowAtlasTile shadow_atlas_tile(std::size_t index,
+                                  int tileResolution) noexcept;
 
 /// Cascade split distances computed from camera near/far and a log/uniform
 /// blend factor (lambda). lambda=1 is fully logarithmic, lambda=0 is uniform.
@@ -37,13 +55,14 @@ struct CascadeData final {
   float splitDistance = 0.0F;
 };
 
-/// Full CSM state for one directional light. The cascades share one
-/// Tex2DArray (layer c = cascade c) sampled through a single register;
-/// each render target attaches its own layer.
+/// Full CSM state for one directional light. The cascades are tiles of
+/// one depth atlas (tile c = cascade c) sampled through a single
+/// register; each cascade renders into its tile through a viewport on the
+/// atlas's one render target.
 struct ShadowMapState final {
   CascadeData cascades[kShadowCascadeCount]{};
-  DeviceTextureHandle depthArrayTexture{};
-  RenderTargetHandle depthTargets[kShadowCascadeCount]{};
+  DeviceTextureHandle depthAtlasTexture{};
+  RenderTargetHandle atlasTarget{};
   bool initialized = false;
 };
 
@@ -81,7 +100,7 @@ math::Mat4 compute_cascade_matrix(const math::Mat4 &viewMatrix,
 math::Mat4 snap_to_texel(const math::Mat4 &lightViewProj,
                          int shadowMapSize) noexcept;
 
-/// Initialize shadow map GPU resources (depth textures + render targets).
+/// Initialize shadow map GPU resources (the depth atlas and its target).
 bool initialize_shadow_maps(ShadowMapState &state) noexcept;
 
 /// Destroy shadow map GPU resources.
@@ -92,20 +111,20 @@ void shutdown_shadow_maps(ShadowMapState &state) noexcept;
 inline constexpr std::size_t kMaxSpotShadowLights = 4U;
 inline constexpr int kSpotShadowMapResolution = 1024;
 
-/// One spot light's shadow slot: its layer's render target and light
-/// matrix (the depth texture is the shared array on SpotShadowState).
+/// One spot light's shadow slot: its light matrix (its map is tile s of
+/// the atlas on SpotShadowState).
 struct SpotShadowData final {
   math::Mat4 lightViewProjection{};
-  RenderTargetHandle depthTarget{};
   int lightIndex = -1; // index into SceneLightData::spotLights, -1 = unused
   float farPlane = 0.0F;
 };
 
-/// All spot shadow maps plus their allocation state. Slots share one
-/// Tex2DArray (layer s = slot s) sampled through a single register.
+/// All spot shadow maps plus their allocation state. Slots are tiles of
+/// one depth atlas (tile s = slot s) sampled through a single register.
 struct SpotShadowState final {
   SpotShadowData slots[kMaxSpotShadowLights]{};
-  DeviceTextureHandle depthArrayTexture{};
+  DeviceTextureHandle depthAtlasTexture{};
+  RenderTargetHandle atlasTarget{};
   bool initialized = false;
 };
 

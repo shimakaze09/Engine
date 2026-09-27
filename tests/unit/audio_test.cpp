@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "../test_harness.h"
+#include "audio_diagnostics.h"
 #include "engine/core/cvar.h"
 #include "engine/core/vfs.h"
 #include "sound_handle.h"
@@ -556,6 +557,60 @@ void test_positional_attenuation() noexcept {
   finish();
 }
 
+/// EXPECTATION (#573): a sound is decoded once, at load; every playback
+/// after that, positional or not, reads the decoded PCM and opens no
+/// decoder. Before, each one-shot opened its own decoder over the file,
+/// a header parse and an allocation per gameplay sound event.
+static void test_playback_opens_no_decoder() {
+  using namespace engine::audio;
+  namespace fs = std::filesystem;
+  std::error_code ec{};
+  const fs::path scratch = fs::current_path(ec) / "engine_audio_decode_test";
+  fs::remove_all(scratch, ec);
+  fs::create_directories(scratch, ec);
+  TEST_ASSERT(!ec);
+  TEST_ASSERT(write_wav(scratch / "tone.wav", 220U, 440U));
+  TEST_ASSERT(engine::core::initialize_vfs());
+  TEST_ASSERT(engine::core::mount("audiodecode", scratch.string().c_str()));
+  AudioConfig config{};
+  config.nullDevice = true;
+  if (!initialize_audio(config)) {
+    engine::core::shutdown_vfs();
+    fs::remove_all(scratch, ec);
+    g_tests.check(false, "audio initializes on the null device");
+    return;
+  }
+  set_listener(engine::math::Vec3(0.0F, 0.0F, 0.0F),
+               engine::math::Vec3(0.0F, 0.0F, -1.0F),
+               engine::math::Vec3(0.0F, 1.0F, 0.0F));
+
+  const std::size_t beforeLoad = engine::audio::audio_decoder_opens();
+  const SoundHandle handle = load_sound("audiodecode/tone.wav");
+  g_tests.check(handle != kInvalidSound, "the fixture loads");
+  g_tests.check(engine::audio::audio_decoder_opens() == beforeLoad + 1U,
+                "loading a sound opens one decoder");
+
+  const std::size_t afterLoad = engine::audio::audio_decoder_opens();
+  PlayParams params{};
+  int started = 0;
+  for (int i = 0; i < 8; ++i) {
+    started +=
+        play_sound_at(handle, engine::math::Vec3(0.0F, 0.0F, -2.0F), params)
+            ? 1
+            : 0;
+    started += play_sound_oneshot(handle, params) ? 1 : 0;
+  }
+  started += play_sound(handle, params) ? 1 : 0;
+  g_tests.check(started == 17, "every playback starts");
+  g_tests.check(engine::audio::audio_decoder_opens() == afterLoad,
+                "no playback opens a decoder");
+
+  unload_all_sounds();
+  shutdown_audio();
+  engine::core::shutdown_vfs();
+  fs::remove_all(scratch, ec);
+}
+
 /// Runs this executable or test program.
 int main() {
   RUN_TEST(test_double_init_and_shutdown);
@@ -573,6 +628,7 @@ int main() {
   RUN_TEST(test_positional_attenuation);
   RUN_TEST(test_decode_budgets);
   RUN_TEST(test_registry_boundaries);
+  RUN_TEST(test_playback_opens_no_decoder);
 
   test_sound_generation_wraps_skipping_zero();
 

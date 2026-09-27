@@ -6,8 +6,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
+#include "audio_diagnostics.h"
 #include "engine/core/cvar.h"
 #include "engine/core/logging.h"
 #include "engine/core/vfs.h"
@@ -53,24 +55,30 @@ namespace engine::audio {
 
 namespace {
 
+/// A loaded sound: its PCM decoded once at load, and the sound playing it
+/// through a reference that allocates nothing. Every one-shot reads the
+/// same PCM through a reference of its own, so playback never decodes.
 struct SoundEntry final {
   bool active = false;
   std::uint32_t generation = 1U;
-  ma_decoder decoder{};
+  void *pcm = nullptr;
+  ma_uint64 pcmFrames = 0U;
+  ma_format format = ma_format_unknown;
+  ma_uint32 channels = 0U;
+  ma_uint32 sampleRate = 0U;
+  ma_audio_buffer_ref source{};
   ma_sound sound{};
-  void *fileData = nullptr;
-  std::size_t fileSize = 0U;
 };
 
 constexpr std::size_t kMaxOneShotInstances = 32U;
 
-/// One fire-and-forget playback: its own decoder over the source sound's
-/// retained file buffer plus the playing ma_sound; sourceSlot lets
-/// unload_sound kill instances whose buffer is going away.
+/// One fire-and-forget playback: its own read cursor over the source
+/// sound's decoded PCM plus the playing ma_sound; sourceSlot lets
+/// unload_sound kill instances whose PCM is going away.
 struct OneShotInstance final {
   bool active = false;
   std::size_t sourceSlot = 0U;
-  ma_decoder decoder{};
+  ma_audio_buffer_ref source{};
   ma_sound sound{};
 };
 
@@ -90,13 +98,21 @@ struct AudioState final {
 
 AudioState g_audio{};
 
+/// Decoders opened since the process started; playback must open none.
+std::size_t g_decoderOpens = 0U;
+/// The one-shot pool's exhaustion warning, once per episode of loaded
+/// sounds: reset when they are all unloaded or audio shuts down.
+bool g_oneShotPoolWarned = false;
+
 // Input budgets, cvar-configurable and enforced before the bytes they
-// bound exist in memory: a sound file is read whole and every decoder
-// over it parses untrusted bytes, so the bytes read are capped by the
+// bound exist in memory: a sound file is read whole and decoded once at
+// load, parsing untrusted bytes, so the bytes read are capped by the
 // bounded VFS read on the handle it consumes, and the PCM a header claims
 // is capped from the decoder's reported length before the first frame
 // decodes. Streamed music never sits in memory whole, so it carries only
-// a file cap, checked from metadata before the stream opens.
+// a file cap, and that cap is advisory: it is checked from metadata before
+// the stream opens, and a file that grows after the check streams on
+// (decision 0021).
 constexpr int kDefaultMaxSoundFileBytes = 32 * 1024 * 1024;
 constexpr int kDefaultMaxMusicFileBytes = 512 * 1024 * 1024;
 constexpr int kDefaultMaxDecodedPcmBytes = 256 * 1024 * 1024;
@@ -113,8 +129,9 @@ void register_budget_cvars() noexcept {
       "before any of it is read"));
   static_cast<void>(core::cvar_register_int(
       kMaxMusicFileBytesCvar, kDefaultMaxMusicFileBytes,
-      "Largest file play_music streams (bytes); a larger file is refused "
-      "before the stream opens"));
+      "Largest file play_music opens (bytes), checked from its size before "
+      "the stream opens; advisory, since a file that grows while it streams "
+      "is not cut off"));
   static_cast<void>(core::cvar_register_int(
       kMaxDecodedPcmBytesCvar, kDefaultMaxDecodedPcmBytes,
       "Largest decoded PCM a loaded sound's header may claim (bytes); a "
@@ -152,7 +169,8 @@ bool file_within_budget(const char *virtualPath, const char *cvarName,
   if (fileBytes > limit) {
     char reason[192] = {};
     std::snprintf(reason, sizeof(reason),
-                  "file of %llu bytes exceeds %s (%llu)",
+                  "file of %llu bytes exceeds %s (%llu), an advisory cap "
+                  "checked before streaming",
                   static_cast<unsigned long long>(fileBytes), cvarName,
                   static_cast<unsigned long long>(limit));
     log_path_error(virtualPath, reason);
@@ -199,7 +217,7 @@ void reset_one_shot(OneShotInstance &instance) noexcept {
     return;
   }
   ma_sound_uninit(&instance.sound);
-  ma_decoder_uninit(&instance.decoder);
+  ma_audio_buffer_ref_uninit(&instance.source);
   instance = OneShotInstance{};
 }
 
@@ -249,12 +267,32 @@ ma_sound_group *bus_group(AudioBus bus) noexcept {
   return nullptr;
 }
 
-/// Starts a pooled one-shot from the entry's retained buffer; positional
+/// Points a fresh read cursor at the entry's decoded PCM. It allocates
+/// nothing: the reference only records where the frames are.
+bool init_pcm_source(const SoundEntry &entry,
+                     ma_audio_buffer_ref *source) noexcept {
+  if (ma_audio_buffer_ref_init(entry.format, entry.channels, entry.pcm,
+                               entry.pcmFrames, source) != MA_SUCCESS) {
+    return false;
+  }
+  source->sampleRate = entry.sampleRate;
+  return true;
+}
+
+/// Releases a loaded entry's sound and PCM (not its slot generation).
+void release_sound_pcm(SoundEntry &entry) noexcept {
+  ma_sound_uninit(&entry.sound);
+  ma_audio_buffer_ref_uninit(&entry.source);
+  std::free(entry.pcm);
+  entry.pcm = nullptr;
+}
+
+/// Starts a pooled one-shot from the entry's decoded PCM; positional
 /// playback spatializes at `position`.
 bool start_one_shot(SoundEntry *entry, std::size_t sourceSlot,
                     const PlayParams &params, AudioBus bus, bool positional,
                     const math::Vec3 &position) noexcept {
-  if ((entry == nullptr) || (entry->fileData == nullptr)) {
+  if ((entry == nullptr) || (entry->pcm == nullptr)) {
     return false;
   }
   if (!valid_play_params(params) || (positional && !finite_vec(position))) {
@@ -269,9 +307,8 @@ bool start_one_shot(SoundEntry *entry, std::size_t sourceSlot,
     }
   }
   if (slot == kMaxOneShotInstances) {
-    static bool warned = false;
-    if (!warned) {
-      warned = true;
+    if (!g_oneShotPoolWarned) {
+      g_oneShotPoolWarned = true;
       core::log_message(core::LogLevel::Warning, "audio",
                         "one-shot pool exhausted; sound dropped");
     }
@@ -279,20 +316,18 @@ bool start_one_shot(SoundEntry *entry, std::size_t sourceSlot,
   }
 
   OneShotInstance &instance = g_audio.oneShots[slot];
-  ma_decoder_config decoderConfig = ma_decoder_config_init_default();
-  if (ma_decoder_init_memory(entry->fileData, entry->fileSize, &decoderConfig,
-                             &instance.decoder) != MA_SUCCESS) {
+  if (!init_pcm_source(*entry, &instance.source)) {
     core::log_message(core::LogLevel::Error, "audio",
-                      "failed to decode one-shot instance");
+                      "failed to start a one-shot instance");
     return false;
   }
 
   const ma_uint32 flags =
       positional ? 0U : static_cast<ma_uint32>(MA_SOUND_FLAG_NO_SPATIALIZATION);
-  if (ma_sound_init_from_data_source(
-          &g_audio.engine, &instance.decoder, flags,
-          bus_group(bus), &instance.sound) != MA_SUCCESS) {
-    ma_decoder_uninit(&instance.decoder);
+  if (ma_sound_init_from_data_source(&g_audio.engine, &instance.source, flags,
+                                     bus_group(bus),
+                                     &instance.sound) != MA_SUCCESS) {
+    ma_audio_buffer_ref_uninit(&instance.source);
     core::log_message(core::LogLevel::Error, "audio",
                       "failed to create one-shot instance");
     return false;
@@ -354,11 +389,14 @@ SoundEntry *lookup_sound_entry(SoundHandle handle) noexcept {
 
 /// Clears a slot's resources and advances its generation.
 void reset_sound_entry(SoundEntry &entry) noexcept {
-  entry = SoundEntry{false, next_sound_generation(entry.generation), {}, {},
-                     nullptr};
+  const std::uint32_t generation = next_sound_generation(entry.generation);
+  entry = SoundEntry{};
+  entry.generation = generation;
 }
 
 } // namespace
+
+std::size_t audio_decoder_opens() noexcept { return g_decoderOpens; }
 
 bool initialize_audio() noexcept { return initialize_audio(AudioConfig{}); }
 
@@ -488,14 +526,10 @@ void unload_all_sounds() noexcept {
     if (!entry.active) {
       continue;
     }
-    ma_sound_uninit(&entry.sound);
-    ma_decoder_uninit(&entry.decoder);
-    if (entry.fileData != nullptr) {
-      core::vfs_free(entry.fileData);
-      entry.fileData = nullptr;
-    }
+    release_sound_pcm(entry);
     reset_sound_entry(entry);
   }
+  g_oneShotPoolWarned = false;
 }
 
 void shutdown_audio() noexcept {
@@ -517,14 +551,10 @@ void shutdown_audio() noexcept {
     if (!entry.active) {
       continue;
     }
-    ma_sound_uninit(&entry.sound);
-    ma_decoder_uninit(&entry.decoder);
-    if (entry.fileData != nullptr) {
-      core::vfs_free(entry.fileData);
-      entry.fileData = nullptr;
-    }
+    release_sound_pcm(entry);
     reset_sound_entry(entry);
   }
+  g_oneShotPoolWarned = false;
 
   ma_engine_uninit(&g_audio.engine);
   g_audio.engine = ma_engine{};
@@ -600,35 +630,66 @@ SoundHandle load_sound(const char *virtualPath) noexcept {
   }
 
   SoundEntry &entry = g_audio.sounds[slot];
-  entry.fileData = fileData;
-  entry.fileSize = fileSize;
-
+  ma_decoder decoder{};
   ma_decoder_config decoderConfig = ma_decoder_config_init_default();
-  ma_result res = ma_decoder_init_memory(
-      fileData, fileSize, &decoderConfig, &entry.decoder);
+  ++g_decoderOpens;
+  ma_result res =
+      ma_decoder_init_memory(fileData, fileSize, &decoderConfig, &decoder);
   if (res != MA_SUCCESS) {
     core::vfs_free(fileData);
-    entry.fileData = nullptr;
     log_path_error(virtualPath, "failed to decode sound file");
     return kInvalidSound;
   }
 
   // The header is parsed but no frame is decoded yet: a claimed length
-  // beyond the PCM budget is refused here, before the sound (and every
-  // one-shot decoder later opened over the same bytes) can decode it.
-  if (!decoded_pcm_within_budget(entry.decoder, virtualPath)) {
-    ma_decoder_uninit(&entry.decoder);
+  // beyond the PCM budget is refused here, before any frame decodes.
+  if (!decoded_pcm_within_budget(decoder, virtualPath)) {
+    ma_decoder_uninit(&decoder);
     core::vfs_free(fileData);
-    entry.fileData = nullptr;
     return kInvalidSound;
   }
 
-  res = ma_sound_init_from_data_source(
-      &g_audio.engine, &entry.decoder, 0U, nullptr, &entry.sound);
+  // Decoded once, here: every playback of this sound, one-shots included,
+  // reads these frames and never parses or allocates a decoder again.
+  ma_uint64 frames = 0U;
+  const ma_uint32 bytesPerFrame =
+      ma_get_bytes_per_frame(decoder.outputFormat, decoder.outputChannels);
+  void *pcm = nullptr;
+  if ((ma_decoder_get_length_in_pcm_frames(&decoder, &frames) == MA_SUCCESS) &&
+      (frames > 0U) && (bytesPerFrame > 0U)) {
+    pcm = std::malloc(static_cast<std::size_t>(frames) * bytesPerFrame);
+  }
+  ma_uint64 framesRead = 0U;
+  const bool decoded =
+      (pcm != nullptr) &&
+      (ma_decoder_read_pcm_frames(&decoder, pcm, frames, &framesRead) ==
+       MA_SUCCESS) &&
+      (framesRead > 0U);
+  entry.format = decoder.outputFormat;
+  entry.channels = decoder.outputChannels;
+  entry.sampleRate = decoder.outputSampleRate;
+  ma_decoder_uninit(&decoder);
+  core::vfs_free(fileData);
+  if (!decoded) {
+    std::free(pcm);
+    log_path_error(virtualPath, "failed to decode sound file");
+    return kInvalidSound;
+  }
+  entry.pcm = pcm;
+  entry.pcmFrames = framesRead;
+
+  if (!init_pcm_source(entry, &entry.source)) {
+    std::free(entry.pcm);
+    entry.pcm = nullptr;
+    log_path_error(virtualPath, "failed to create sound");
+    return kInvalidSound;
+  }
+  res = ma_sound_init_from_data_source(&g_audio.engine, &entry.source, 0U,
+                                       nullptr, &entry.sound);
   if (res != MA_SUCCESS) {
-    ma_decoder_uninit(&entry.decoder);
-    core::vfs_free(fileData);
-    entry.fileData = nullptr;
+    ma_audio_buffer_ref_uninit(&entry.source);
+    std::free(entry.pcm);
+    entry.pcm = nullptr;
     core::log_message(core::LogLevel::Error, "audio", "failed to create sound");
     return kInvalidSound;
   }
@@ -651,12 +712,7 @@ void unload_sound(SoundHandle handle) noexcept {
     }
   }
 
-  ma_sound_uninit(&entry->sound);
-  ma_decoder_uninit(&entry->decoder);
-  if (entry->fileData != nullptr) {
-    core::vfs_free(entry->fileData);
-    entry->fileData = nullptr;
-  }
+  release_sound_pcm(*entry);
   reset_sound_entry(*entry);
 }
 

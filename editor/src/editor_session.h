@@ -19,7 +19,6 @@
 #include <memory>
 
 #include "engine/editor/command_history.h"
-#include "engine/editor/debug_camera.h"
 #include "engine/editor/editor_camera.h"
 #include "engine/math/transform.h"
 #include "engine/renderer/camera.h"
@@ -44,8 +43,15 @@ struct ThumbnailEntry final {
   renderer::DeviceTextureHandle texture{};
   int width = 0;
   int height = 0;
+  /// Editor frame the entry was last drawn in; the least recent one not
+  /// drawn this frame is evicted first.
+  std::uint64_t lastUsedFrame = 0U;
 };
-constexpr std::size_t kMaxThumbnails = 128U;
+/// Thumbnail cache slots. The cache is an LRU bounded by these slots and by
+/// the texture bytes editor.thumbnail_cache_kb allows, so a folder larger
+/// than either still shows every thumbnail it draws: an entry drawn this
+/// frame is never evicted, and older ones make room.
+constexpr std::size_t kMaxThumbnails = 1024U;
 
 /// Bounded folder-navigation history for the content browser's back/forward
 /// controls; in-session only (browser folder/filter identity itself is
@@ -98,12 +104,26 @@ struct InspectorPanelState final {
 /// content epoch they were captured under: scene loads commit by whole-world
 /// assignment, which resets generations, so an epoch mismatch invalidates
 /// every retained handle even when index+generation would appear to match.
+/// The two viewport panels' window names.
+inline constexpr const char *kSceneViewWindow = "Scene";
+inline constexpr const char *kGameViewWindow = "Game";
+
 struct EditorSession final {
   bool initialized = false;
   runtime::World *world = nullptr;
   runtime::Entity selectedEntity{};
-  static constexpr std::size_t kMaxSelectedEntities = 64U;
-  std::array<runtime::Entity, kMaxSelectedEntities> selectedEntities{};
+  /// Every entity a World can hold can be selected at once: a box or
+  /// shift selection over a scatter of foliage, props or coins never stops
+  /// short of what the author picked.
+  static constexpr std::size_t kMaxSelectedEntities =
+      runtime::World::kMaxEntities;
+  /// Members in pick order; the last is the primary.
+  std::array<runtime::Entity, kMaxSelectedEntities> selectedEntities =
+      std::array<runtime::Entity, kMaxSelectedEntities>();
+  /// Position + 1 of the member at each entity index (0 = not a member),
+  /// so a membership test is one lookup however large the selection.
+  std::array<std::uint32_t, kMaxSelectedEntities> selectedSlotByIndex =
+      std::array<std::uint32_t, kMaxSelectedEntities>();
   std::size_t selectedEntityCount = 0U;
   std::uint32_t selectionEpoch = 0U;
   PlayState playState = PlayState::Stopped;
@@ -146,16 +166,34 @@ struct EditorSession final {
   float snapStep = 0.5F;
   float snapAngleDegrees = 15.0F;
   CommandHistory commandHistory{};
-  DebugCamera debugCamera{};
-  renderer::CameraState frozenCameraState{};
-  bool debugCameraActive = false;
   char selectedAssetPath[512] = {};
-  std::array<ThumbnailEntry, kMaxThumbnails> thumbnailCache{};
+  std::array<ThumbnailEntry, kMaxThumbnails> thumbnailCache =
+      std::array<ThumbnailEntry, kMaxThumbnails>();
   std::size_t thumbnailCount = 0U;
+  /// Texture bytes the cached thumbnails hold.
+  std::size_t thumbnailBytes = 0U;
+  /// Advanced once per editor frame (advance_thumbnail_frame).
+  std::uint64_t thumbnailFrame = 1U;
   // Screen rect of the Scene panel's image, recorded each frame by the
-  // viewport panel so overlays can anchor inside the rendered scene.
+  // Scene panel for its drop ray and gizmo.
   ImVec2 sceneViewportScreenPos{};
   ImVec2 sceneViewportScreenSize{};
+  // The Scene view as the pipeline reads it next frame: whether its panel
+  // was shown, and its image size in pixels.
+  bool sceneViewShown = false;
+  int sceneViewPixelWidth = 0;
+  int sceneViewPixelHeight = 0;
+  // The Game panel: whether it was shown, focused and hovered last frame
+  // (game input follows focus), and its image's screen rect, where the
+  // in-game overlays anchor.
+  bool gameViewShown = true;
+  bool gameViewFocused = false;
+  bool gameViewHovered = false;
+  ImVec2 gameViewScreenPos{};
+  ImVec2 gameViewScreenSize{};
+  // A panel to bring to the front on the next frame: the Game view on
+  // Play, so input reaches the game, and the Scene view on Stop.
+  const char *pendingViewFocus = nullptr;
   char lastAppliedWindowTitle[640] = {};
   SceneDocumentState document{};
   ContentBrowserState contentBrowser{};
@@ -250,12 +288,17 @@ const char *editor_asset_root() noexcept;
 renderer::TextureDesc thumbnail_texture_desc(int width, int height,
                                              const void *pixels) noexcept;
 /// Loads (and caches) the thumbnail texture for an asset path through the
-/// renderer's RenderDevice; invalid handle on miss.
+/// renderer's RenderDevice; invalid handle on miss, or when every cached
+/// thumbnail is drawn this frame and none can make room (logged once).
 renderer::DeviceTextureHandle
 load_thumbnail_texture(const char *assetPath) noexcept;
 /// Releases cached thumbnail textures owned by the editor through the
 /// renderer's RenderDevice.
 void clear_thumbnail_cache() noexcept;
+/// Marks the start of an editor frame for the thumbnail cache's LRU.
+void advance_thumbnail_frame() noexcept;
+/// Registers editor.thumbnail_cache_kb, the cache's texture-byte budget.
+void register_thumbnail_cache_cvars() noexcept;
 /// ImGui image id for a device texture. The editor's ImGui backend renders
 /// with the same graphics device, so this is the one sanctioned use of the
 /// device's native texture id; 0 when the handle is stale or no device.

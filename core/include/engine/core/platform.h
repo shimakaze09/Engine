@@ -117,6 +117,35 @@ float content_scale_for(float displayScale, float pixelDensity) noexcept;
 /// the call.
 bool platform_set_window_title(const char *title) noexcept;
 
+/// The main window's size in window units and whether it is maximized.
+/// While maximized the size is the one it restores to, so a layout saved
+/// maximized still knows its normal size.
+struct WindowGeometry final {
+  int width = 0;
+  int height = 0;
+  bool maximized = false;
+};
+
+/// Smallest window a restored geometry opens at, in window units.
+inline constexpr int kMinRestoredWindowWidth = 640;
+inline constexpr int kMinRestoredWindowHeight = 360;
+
+/// The window's current geometry. False when there is no window.
+bool platform_window_geometry(WindowGeometry *outGeometry) noexcept;
+
+/// Reopens the window at a stored geometry: the size fitted to the usable
+/// area of the display the window is on (fit_window_geometry), the window
+/// centred, then maximized if it was. False when there is no window, the
+/// geometry has no size, or the platform refuses.
+bool platform_apply_window_geometry(const WindowGeometry &geometry) noexcept;
+
+/// A stored geometry fitted to a display's usable area: each side at least
+/// the minimum restored size and at most the usable size, so a layout
+/// saved on a larger monitor never opens past the edges of a smaller one.
+/// A non-positive usable side leaves that side unbounded above.
+WindowGeometry fit_window_geometry(const WindowGeometry &stored,
+                                   int usableWidth, int usableHeight) noexcept;
+
 // ----- File dialogs ----------------------------------------------------------
 
 enum class FileDialogKind : std::uint8_t { Open, Save };

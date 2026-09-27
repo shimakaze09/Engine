@@ -953,6 +953,30 @@ engine_add_test_executable(engine_unit_editor_fonts
 set_tests_properties(engine_unit_editor_fonts PROPERTIES
     SKIP_REGULAR_EXPRESSION "SKIPPED:")
 
+engine_add_test_executable(engine_unit_editor_first_launch_layout
+    SOURCES
+    editor_first_launch_layout_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/editor/src
+    PRIVATE_DEPS
+    engine_editor
+    COMPILE_DEFINITIONS
+    SDL_MAIN_HANDLED
+)
+
+engine_add_test_executable(engine_unit_editor_thumbnail_cache
+    SOURCES
+    editor_thumbnail_cache_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/editor/include
+    ${CMAKE_SOURCE_DIR}/editor/src
+    ${CMAKE_SOURCE_DIR}/runtime/src
+    PRIVATE_DEPS
+    engine_editor
+    COMPILE_DEFINITIONS
+    SDL_MAIN_HANDLED
+)
+
 engine_add_test_executable(engine_unit_editor_session
     SOURCES
     editor_session_test.cpp
@@ -1796,6 +1820,7 @@ engine_add_test_executable(engine_unit_command_buffer_reload_contract
     ${CMAKE_SOURCE_DIR}/renderer/src/shadow_map.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/post_process_stack.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/render_settings.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/render_settings_table.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/texture_loader.cpp
     PRIVATE_INCLUDE_DIRS
     ${CMAKE_SOURCE_DIR}/renderer/include
@@ -2225,4 +2250,12 @@ engine_add_test_executable(engine_unit_forward_draw_uniforms
     PRIVATE_DEPS
     engine_core
     engine_math
+)
+
+engine_add_test_executable(engine_unit_platform_rider_ccd
+    SOURCES
+    platform_rider_ccd_test.cpp
+    PRIVATE_DEPS
+    engine_physics
+    engine_runtime
 )

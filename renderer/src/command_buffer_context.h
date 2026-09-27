@@ -119,8 +119,86 @@ struct MaskedShadowProgram final {
   ShaderParam uvOffsetLoc{};
 };
 
+/// What one render view owns: everything sized to its drawable or carrying
+/// history from its own previous frames. Programs, shadow atlases, IBL and
+/// fallbacks are shared by every view and stay on BackendState.
+struct RenderViewResources final {
+  // Tracked drawable dimensions for pass resource resize.
+  int lastWidth = 0;
+  int lastHeight = 0;
+
+  // Tile light texture (cpu-updatable, uploaded each frame by CPU
+  // culling). 2-D layout: one texel row per tile ROW, kTileDataWidth
+  // texels per tile along x — one row per tile overflowed D3D's 16384
+  // dimension cap at 4K. The allocated dimensions
+  // are tracked so any viewport change recreates it.
+  DeviceTextureHandle tileLightTex{};
+  int tileLightTexWidth = 0;
+  int tileLightTexHeight = 0;
+
+  // Bloom mip chain resources (managed internally).
+  static constexpr int kBloomMipLevels = 6;
+  DeviceTextureHandle bloomMipTextures[kBloomMipLevels] = {};
+  RenderTargetHandle bloomMipTargets[kBloomMipLevels] = {};
+  int bloomMipWidths[kBloomMipLevels] = {};
+  int bloomMipHeights[kBloomMipLevels] = {};
+  int bloomAllocatedWidth = 0;
+  int bloomAllocatedHeight = 0;
+
+  // Luminance mip chain for averaging.
+  static constexpr int kLuminanceMipLevels = 7;
+  DeviceTextureHandle lumMipTextures[kLuminanceMipLevels] = {};
+  RenderTargetHandle lumMipTargets[kLuminanceMipLevels] = {};
+  int lumMipWidths[kLuminanceMipLevels] = {};
+  int lumMipHeights[kLuminanceMipLevels] = {};
+  int lumAllocatedWidth = 0;
+  int lumAllocatedHeight = 0;
+
+  // Temporal adaptation targets (see BackendState's exposure programs).
+  DeviceTextureHandle exposureTextures[2] = {};
+  RenderTargetHandle exposureTargets[2] = {};
+  /// The target holding the latest exposure.
+  int exposureCurrent = 0;
+  /// Whether exposureTargets[exposureCurrent] holds an adapted value.
+  /// False once the targets are (re)created or auto exposure pauses, so
+  /// the next adaptation starts at its target instead of blending from
+  /// an undefined texel.
+  bool exposureValid = false;
+  /// Frame time of the last adaptation, for its blend step.
+  float lastExposureTimeSeconds = 0.0F;
+
+  // Directional shadow cache: the key of the cascades this view last drew
+  // into the shared atlas; valid only while no other view has drawn there
+  // since (BackendState::cascadeAtlasView).
+  std::uint64_t directionalShadowCacheKey = 0U;
+  bool directionalShadowCacheValid = false;
+
+  /// The camera this view is rendering, or rendered last.
+  CameraState camera{};
+  /// Frames this view has rendered its scene in.
+  std::uint64_t renderedFrames = 0U;
+
+  /// Whether this view's last post chain ended in sceneColor (FXAA ran)
+  /// rather than finalColor.
+  bool fxaaApplied = false;
+};
+
 /// Owns private GPU backend state for command buffer rendering.
 struct BackendState final {
+  static constexpr int kBloomMipLevels = RenderViewResources::kBloomMipLevels;
+  static constexpr int kLuminanceMipLevels =
+      RenderViewResources::kLuminanceMipLevels;
+  /// Per-view resources, indexed by RenderViewId; the flush selects one.
+  std::array<RenderViewResources, kMaxRenderViews> views{};
+  /// The view the current or last flush rendered.
+  std::size_t currentView = 0U;
+  /// The view whose cascades the shared cascade atlas holds; another
+  /// view's cached cascades are stale once this differs.
+  std::size_t cascadeAtlasView = kMaxRenderViews;
+  RenderViewResources &view() noexcept { return views[currentView]; }
+  const RenderViewResources &view() const noexcept {
+    return views[currentView];
+  }
   bool initialized = false;
   bool failed = false;
 
@@ -231,14 +309,14 @@ struct BackendState final {
 
   // PBR forward shadow uniforms (matrices as one mat4 array; cascade
   // splits and shadow-light indices packed into single vec4s; the
-  // cascade and spot maps are Tex2DArrays behind one sampler
+  // cascade and spot maps are depth atlases behind one sampler
   // each; only the point cubes stay per-slot).
   ShaderParam pbrShadowEnabledLoc{};
-  ShaderParam pbrShadowMapArrayLoc{};
+  ShaderParam pbrShadowAtlasLoc{};
   ShaderParam pbrShadowMatrixParam{};          // mat4[kShadowCascadeCount]
   ShaderParam pbrCascadeSplitsParam{};         // vec4: split per cascade
   ShaderParam pbrSpotShadowEnabledLoc{};
-  ShaderParam pbrSpotShadowMapArrayLoc{};
+  ShaderParam pbrSpotShadowAtlasLoc{};
   ShaderParam pbrSpotShadowMatrixParam{};      // mat4[kMaxSpotShadowLights]
   ShaderParam pbrSpotShadowLightIdxParam{};    // vec4: light index per slot
   ShaderParam pbrPointShadowEnabledLoc{};
@@ -276,9 +354,6 @@ struct BackendState final {
   // where GL merely tolerates unbound units on untaken branches.
   DeviceTextureHandle fallbackTexture2D{};
   DeviceTextureHandle fallbackCubemap{};
-  // Descriptor-validity stand-in for the shadow array samplers when
-  // shadows are disabled: array samplers need an array texture.
-  DeviceTextureHandle fallbackTexture2DArray{};
 
   // Skybox shader and cube geometry.
   bool skyboxAvailable = false;
@@ -339,10 +414,6 @@ struct BackendState final {
   DeviceProgramHandle environmentBrdfLutProgram{};
   DeviceTextureHandle brdfLutTexture{};
   int brdfLutSize = 0;
-
-  // Tracked drawable dimensions for pass resource resize.
-  int lastWidth = 0;
-  int lastHeight = 0;
 
   // Deferred rendering state.
   bool deferredAvailable = false;
@@ -446,14 +517,6 @@ struct BackendState final {
   DeviceGeometryHandle debugLineGeometry{};
   DeviceBufferHandle debugLineVbo{};
 
-  // Tile light texture (cpu-updatable, uploaded each frame by CPU
-  // culling). 2-D layout: one texel row per tile ROW, kTileDataWidth
-  // texels per tile along x — one row per tile overflowed D3D's 16384
-  // dimension cap at 4K. The allocated dimensions
-  // are tracked so any viewport change recreates it.
-  DeviceTextureHandle tileLightTex{};
-  int tileLightTexWidth = 0;
-  int tileLightTexHeight = 0;
   // Grow-only nothrow-allocating scratch buffer: a failed grow
   // leaves this at zero capacity instead of terminating, and the downstream
   // dataSize < requiredSize check in cull_lights_tiled already degrades
@@ -492,15 +555,6 @@ struct BackendState final {
   ShaderParam tonemapBloomTextureLoc{};
   ShaderParam tonemapBloomIntensityLoc{};
   ShaderParam tonemapBloomEnabledLoc{};
-
-  // Bloom mip chain resources (managed internally).
-  static constexpr int kBloomMipLevels = 6;
-  DeviceTextureHandle bloomMipTextures[kBloomMipLevels] = {};
-  RenderTargetHandle bloomMipTargets[kBloomMipLevels] = {};
-  int bloomMipWidths[kBloomMipLevels] = {};
-  int bloomMipHeights[kBloomMipLevels] = {};
-  int bloomAllocatedWidth = 0;
-  int bloomAllocatedHeight = 0;
 
   // SSAO state.
   bool ssaoAvailable = false;
@@ -542,18 +596,16 @@ struct BackendState final {
 
   // Deferred lighting shadow uniforms.
   ShaderParam dlShadowEnabledLoc{};
-  ShaderParam dlShadowMapArrayLoc{};
+  ShaderParam dlShadowAtlasLoc{};
   ShaderParam dlShadowMatrixParam{};        // mat4[kShadowCascadeCount]
   ShaderParam dlCascadeSplitsParam{};       // vec4: split per cascade
-  std::uint64_t directionalShadowCacheKey = 0U;
-  bool directionalShadowCacheValid = false;
 
   // Spot shadow state.
   SpotShadowState spotShadowState{};
   bool spotShadowAvailable = false;
 
   ShaderParam dlSpotShadowEnabledLoc{};
-  ShaderParam dlSpotShadowMapArrayLoc{};
+  ShaderParam dlSpotShadowAtlasLoc{};
   ShaderParam dlSpotShadowMatrixParam{};    // mat4[kMaxSpotShadowLights]
   ShaderParam dlSpotShadowLightIdxParam{};  // vec4: light index per slot
 
@@ -580,15 +632,6 @@ struct BackendState final {
   DeviceProgramHandle luminanceProgram{};
   ShaderParam lumSceneColorLoc{};
 
-  // Luminance mip chain for averaging.
-  static constexpr int kLuminanceMipLevels = 7;
-  DeviceTextureHandle lumMipTextures[kLuminanceMipLevels] = {};
-  RenderTargetHandle lumMipTargets[kLuminanceMipLevels] = {};
-  int lumMipWidths[kLuminanceMipLevels] = {};
-  int lumMipHeights[kLuminanceMipLevels] = {};
-  int lumAllocatedWidth = 0;
-  int lumAllocatedHeight = 0;
-
   // Temporal adaptation: a 1x1 pass turns the chain's average log
   // luminance into this frame's exposure, written into one of two 1x1
   // targets while the other holds last frame's; tonemap samples the
@@ -598,17 +641,6 @@ struct BackendState final {
   ShaderParam adaptLuminanceLoc{};
   ShaderParam adaptPreviousLoc{};
   ShaderParam adaptParamsLoc{};
-  DeviceTextureHandle exposureTextures[2] = {};
-  RenderTargetHandle exposureTargets[2] = {};
-  /// The target holding the latest exposure.
-  int exposureCurrent = 0;
-  /// Whether exposureTargets[exposureCurrent] holds an adapted value.
-  /// False once the targets are (re)created or auto exposure pauses, so
-  /// the next adaptation starts at its target instead of blending from
-  /// an undefined texel.
-  bool exposureValid = false;
-  /// Frame time of the last adaptation, for its blend step.
-  float lastExposureTimeSeconds = 0.0F;
 
   // Scene capture render targets (slot i backs capture request i).
   std::array<SceneCaptureTarget, kMaxSceneCaptures> sceneCaptureTargets{};
@@ -690,10 +722,10 @@ struct BackendState final {
 /// Owns renderer state for the default renderer context.
 struct RendererContext final {
   CameraState activeCamera{};
-  int sceneViewportWidth = 0;
-  int sceneViewportHeight = 0;
+  // The Game view size the editor's Game panel set (0 = window size).
+  int gameViewWidth = 0;
+  int gameViewHeight = 0;
   RendererFrameStats lastFrameStats{};
-  bool fxaaAppliedThisFrame = false;
   TextureHandle activeSkyboxTexture = kInvalidTextureHandle;
   char shaderRootPath[260] = "assets/shaders";
   std::array<SceneCaptureRequest, kMaxSceneCaptures> sceneCaptureRequests{};

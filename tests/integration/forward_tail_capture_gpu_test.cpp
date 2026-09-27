@@ -51,7 +51,7 @@ int run(engine::EnginePipeline &pipeline, World &world) noexcept {
   using engine::tests::settle_frames;
 
   // Fog is a whole-frame mix that would damp the very differences this
-  // measures, and its default reaches standing height (#641).
+  // measures, so both kinds are off whatever their defaults.
   engine::tests::checked(engine::core::cvar_set_string("r_fog_mode", "off"),
                          "r_fog_mode");
   engine::tests::checked(engine::core::cvar_set_bool("r_height_fog", false),

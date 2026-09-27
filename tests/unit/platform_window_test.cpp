@@ -1,7 +1,8 @@
 // The window surface the editor now reaches through the platform instead of
 // holding SDL_Window itself (#312 items 2-3): title, display scale, the
-// file-dialog handoff -- plus the event translation that replaced
-// SDL_Event above the platform layer (#312 item 1).
+// window geometry a layout restores, the file-dialog handoff -- plus the
+// event translation that replaced SDL_Event above the platform layer
+// (#312 item 1).
 //
 // A real dialog cannot open in CI -- there is no portal or desktop to show
 // it. The dialog cases here are the refusals, and the handoff driven by
@@ -159,6 +160,36 @@ int main() {
         "the capabilities report no window before the platform exists");
   CHECK(platform_content_scale() == 1.0F,
         "content scale is 1.0 with no window");
+  {
+    WindowGeometry none{};
+    CHECK(!platform_window_geometry(&none), "no geometry without a window");
+    CHECK(!platform_apply_window_geometry(WindowGeometry{1600, 900, false}),
+          "no geometry is applied without a window");
+  }
+
+  // A stored geometry fitted to the display it reopens on (#593): kept as
+  // stored when it fits, capped at the usable area of a smaller display,
+  // raised to the minimum when it was saved tiny, and unbounded above on a
+  // side the display could not report.
+  {
+    const WindowGeometry kept =
+        fit_window_geometry(WindowGeometry{1600, 900, true}, 3840, 2100);
+    CHECK((kept.width == 1600) && (kept.height == 900) && kept.maximized,
+          "a geometry that fits is restored as stored");
+    const WindowGeometry capped =
+        fit_window_geometry(WindowGeometry{3000, 2000, false}, 1920, 1040);
+    CHECK((capped.width == 1920) && (capped.height == 1040),
+          "a geometry from a larger display is capped to this one");
+    const WindowGeometry raised =
+        fit_window_geometry(WindowGeometry{100, 50, false}, 1920, 1040);
+    CHECK((raised.width == kMinRestoredWindowWidth) &&
+              (raised.height == kMinRestoredWindowHeight),
+          "a geometry saved tiny opens at the minimum");
+    const WindowGeometry unbounded =
+        fit_window_geometry(WindowGeometry{2500, 1500, false}, 0, -1);
+    CHECK((unbounded.width == 2500) && (unbounded.height == 1500),
+          "a display that reports no usable area bounds nothing");
+  }
 
   // Content scale per platform shape: the pixel density the renderer
   // already applies is divided out of the display scale.
@@ -272,6 +303,23 @@ int main() {
         "a window accepts a title");
   CHECK(!platform_set_window_title(nullptr), "a null title is refused");
 
+  // The geometry round trip a layout file makes: what is applied is what
+  // is read back, and a geometry with no size is refused.
+  {
+    WindowGeometry opened{};
+    CHECK(platform_window_geometry(&opened) && (opened.width > 0) &&
+              (opened.height > 0),
+          "a window reports its geometry");
+    CHECK(platform_apply_window_geometry(WindowGeometry{1000, 700, false}),
+          "a stored geometry is applied");
+    WindowGeometry restored{};
+    CHECK(platform_window_geometry(&restored) && (restored.width == 1000) &&
+              (restored.height == 700) && !restored.maximized,
+          "the applied size is the one read back");
+    CHECK(!platform_apply_window_geometry(WindowGeometry{0, 700, false}),
+          "a geometry with no size is refused");
+  }
+
   // Refusals that do not depend on a dialog backend.
   CHECK(platform_request_file_dialog(FileDialogKind::Save, nullptr, 1,
                                      nullptr) == kNoFileDialog,
@@ -287,6 +335,10 @@ int main() {
   shutdown_platform();
   CHECK(!platform_set_window_title("after shutdown"),
         "the window is gone after shutdown");
+  {
+    WindowGeometry after{};
+    CHECK(!platform_window_geometry(&after), "no geometry after shutdown");
+  }
   shutdown_logging();
 
   if (g_failures != 0) {

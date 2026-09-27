@@ -1,7 +1,8 @@
 // Verifies the production spot and point shadow passes (flush_shadow_passes)
 // against a fake render device: a light flagged castShadow gets a depth
-// pass (its slot's target bound, cleared, and the opaque draw list drawn
-// into it; six faces for a point light), an unflagged light gets none, and
+// pass (its slot's atlas tile bound, cleared, and the opaque draw list
+// drawn into it; six faces for a point light), an unflagged light gets
+// none, the cascades each render into their own atlas tile, and
 // the flush reports the passes as active for the lighting binds. Until
 // #522 no producer set the flag, so these passes never ran in any scene.
 // Auxiliary (camera-culled) casters are drawn into the same passes (#524).
@@ -49,6 +50,16 @@ struct FakeDeviceLog final {
   std::uint32_t currentProgram = 0U;
   std::uint32_t unit0Texture = 0U;
   float cutoff = -1.0F;
+  /// Every viewport set while a target was bound, with that target.
+  struct Viewport final {
+    std::uint32_t target = 0U;
+    std::int32_t x = 0;
+    std::int32_t y = 0;
+    std::int32_t w = 0;
+    std::int32_t h = 0;
+  };
+  Viewport viewports[kMaxBinds] = {};
+  std::size_t viewportCount = 0U;
 };
 
 /// The fake param slot the MASKED programs' cutoff resolves to.
@@ -63,6 +74,15 @@ void fake_bind_render_target(RenderTargetHandle target) noexcept {
   }
   ++g_log.bindCount;
   g_log.currentTarget = target.value;
+}
+void fake_set_viewport(std::int32_t x, std::int32_t y, std::int32_t w,
+                       std::int32_t h) noexcept {
+  if ((g_log.currentTarget != 0U) &&
+      (g_log.viewportCount < FakeDeviceLog::kMaxBinds)) {
+    g_log.viewports[g_log.viewportCount] =
+        FakeDeviceLog::Viewport{g_log.currentTarget, x, y, w, h};
+    ++g_log.viewportCount;
+  }
 }
 void fake_clear(ClearFlags, float, float, float, float) noexcept {
   if (g_log.currentTarget != 0U) {
@@ -115,7 +135,7 @@ void reset_fake_device() noexcept {
   device.set_param_vec2 = &tests::fake::set_param_vec2;
   device.set_param_mat4 = &tests::fake::set_param_mat4;
   device.set_param_vec3 = &tests::fake::set_param_vec3;
-  device.set_viewport = &tests::fake::set_viewport;
+  device.set_viewport = &fake_set_viewport;
   device.apply_render_state = &tests::fake::apply_render_state;
 }
 
@@ -161,7 +181,8 @@ int g_failures = 0;
     }                                                                          \
   } while (false)
 
-constexpr std::uint32_t kSpotTargetBase = 100U;
+constexpr std::uint32_t kSpotAtlasTarget = 100U;
+constexpr std::uint32_t kCascadeAtlasTarget = 300U;
 constexpr std::uint32_t kPointTargetBase = 200U;
 
 /// A backend whose spot and point shadow resources report available, with
@@ -174,10 +195,8 @@ void reset_backend() noexcept {
   g_backend.pointShadowAvailable = true;
   g_backend.shadowDepthProgram = DeviceProgramHandle{1U};
   g_backend.shadowDepthPointProgram = DeviceProgramHandle{2U};
-  for (std::size_t s = 0U; s < kMaxSpotShadowLights; ++s) {
-    g_backend.spotShadowState.slots[s].depthTarget =
-        RenderTargetHandle{kSpotTargetBase + static_cast<std::uint32_t>(s)};
-  }
+  g_backend.spotShadowState.atlasTarget = RenderTargetHandle{kSpotAtlasTarget};
+  g_backend.shadowState.atlasTarget = RenderTargetHandle{kCascadeAtlasTarget};
   for (std::size_t s = 0U; s < kMaxPointShadowLights; ++s) {
     for (std::uint32_t face = 0U; face < 6U; ++face) {
       g_backend.pointShadowState.slots[s].faceTargets[face] = RenderTargetHandle{
@@ -228,6 +247,22 @@ bool bound(std::uint32_t target) noexcept {
   return false;
 }
 
+/// Whether the flush drew into tile `index` of the atlas behind `target`:
+/// a viewport covering exactly that tile set while the atlas was bound.
+bool tile_rendered(std::uint32_t target, std::size_t index,
+                   int tileResolution) noexcept {
+  const ShadowAtlasTile tile = shadow_atlas_tile(index, tileResolution);
+  for (std::size_t i = 0U; i < g_log.viewportCount; ++i) {
+    const FakeDeviceLog::Viewport &viewport = g_log.viewports[i];
+    if ((viewport.target == target) && (viewport.x == tile.x) &&
+        (viewport.y == tile.y) && (viewport.w == tileResolution) &&
+        (viewport.h == tileResolution)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /// EXPECTATION: an unflagged spot light and an unflagged point light get
 /// no depth pass at all; the passes are reported inactive-with-no-slots.
 void test_unflagged_lights_cast_nothing() noexcept {
@@ -246,8 +281,8 @@ void test_unflagged_lights_cast_nothing() noexcept {
         "no point slot assigned");
 }
 
-/// EXPECTATION: a spot light flagged castShadow gets slot 0: its depth
-/// target is bound and cleared and both opaque draws land in it.
+/// EXPECTATION: a spot light flagged castShadow gets slot 0: its tile of
+/// the spot atlas is bound and cleared and both opaque draws land in it.
 void test_flagged_spot_light_renders_depth() noexcept {
   reset_backend();
   reset_fake_device();
@@ -263,8 +298,12 @@ void test_flagged_spot_light_renders_depth() noexcept {
         "the flagged light owns slot 0");
   CHECK(g_backend.spotShadowState.slots[1].lightIndex == -1,
         "the unflagged light owns nothing");
-  CHECK(bound(kSpotTargetBase), "slot 0 depth target bound");
-  CHECK(!bound(kSpotTargetBase + 1U), "slot 1 depth target untouched");
+  CHECK(bound(kSpotAtlasTarget), "spot atlas bound");
+  CHECK(tile_rendered(kSpotAtlasTarget, 0U, kSpotShadowMapResolution),
+        "slot 0 tile rendered");
+  CHECK(!tile_rendered(kSpotAtlasTarget, 1U, kSpotShadowMapResolution),
+        "slot 1 tile untouched");
+  CHECK(g_log.viewportCount == 1U, "one spot viewport");
   CHECK(g_log.clearsOnTargets == 1U, "one depth clear");
   CHECK(g_log.drawsOnTargets == 2U, "both opaque draws rendered into depth");
   CHECK(g_log.drawsOnBackBuffer == 0U, "nothing drawn to the back buffer");
@@ -324,7 +363,7 @@ void test_auxiliary_casters_are_drawn() noexcept {
 void test_slots_go_to_the_nearest_casters() noexcept {
   reset_backend();
   reset_fake_device();
-  const engine::math::Vec3 camera = renderer_context().activeCamera.position;
+  const engine::math::Vec3 camera = g_backend.view().camera.position;
   SceneLightData lights{};
   lights.spotLightCount = 10U;
   lights.pointLightCount = 10U;
@@ -361,7 +400,7 @@ void test_slots_go_to_the_nearest_casters() noexcept {
 void test_equidistant_casters_take_slots_in_index_order() noexcept {
   reset_backend();
   reset_fake_device();
-  const engine::math::Vec3 camera = renderer_context().activeCamera.position;
+  const engine::math::Vec3 camera = g_backend.view().camera.position;
   SceneLightData lights{};
   lights.spotLightCount = static_cast<std::uint32_t>(kMaxSpotLights);
   lights.pointLightCount = static_cast<std::uint32_t>(kMaxPointLights);
@@ -563,10 +602,6 @@ void test_directional_cache_follows_what_casters_draw() noexcept {
   reset_backend();
   g_backend.shadowAvailable = true;
   g_backend.shadowMasked = fake_masked_program(11U);
-  for (std::size_t c = 0U; c < kShadowCascadeCount; ++c) {
-    g_backend.shadowState.depthTargets[c] =
-        RenderTargetHandle{300U + static_cast<std::uint32_t>(c)};
-  }
   g_draws[1].material.alphaMode = AlphaMode::Mask;
   g_draws[1].material.alphaCutoff = 0.25F;
   g_draws[1].material.opacityTexture = TextureHandle{5U};
@@ -611,6 +646,44 @@ void test_directional_cache_follows_what_casters_draw() noexcept {
   g_draws[1].material = Material{};
 }
 
+/// EXPECTATION (#690): the four cascades render into the four tiles of
+/// the one cascade atlas, each through a viewport covering its whole tile,
+/// and each tile is cleared on its own, so no cascade draws over another.
+void test_cascades_render_into_their_own_tiles() noexcept {
+  reset_backend();
+  reset_fake_device();
+  g_backend.shadowAvailable = true;
+  SceneLightData lights{};
+  lights.directionalLightCount = 1U;
+  lights.directionalLights[0].direction = engine::math::Vec3(0.3F, -1.0F, 0.2F);
+  lights.directionalLights[0].intensity = 1.0F;
+  FrameFlushContext ctx = make_context(lights);
+  flush_shadow_passes(ctx);
+  CHECK(g_log.bindCount == kShadowCascadeCount, "one atlas bind per cascade");
+  for (std::size_t i = 0U; i < kShadowCascadeCount; ++i) {
+    CHECK(g_log.boundTargets[i] == kCascadeAtlasTarget,
+          "every cascade binds the cascade atlas");
+    CHECK(tile_rendered(kCascadeAtlasTarget, i, kShadowMapResolution),
+          "cascade renders into its own tile");
+  }
+  CHECK(g_log.viewportCount == kShadowCascadeCount, "one viewport each");
+  CHECK(g_log.clearsOnTargets == kShadowCascadeCount, "one clear per tile");
+  // The tiles tile the atlas: distinct, and inside its side.
+  for (std::size_t a = 0U; a < kShadowCascadeCount; ++a) {
+    const ShadowAtlasTile tileA = shadow_atlas_tile(a, kShadowMapResolution);
+    CHECK((tileA.x + kShadowMapResolution <=
+           kShadowMapResolution * kShadowAtlasTilesPerRow) &&
+              (tileA.y + kShadowMapResolution <=
+               kShadowMapResolution * kShadowAtlasTilesPerRow),
+          "tile inside the atlas");
+    for (std::size_t b = a + 1U; b < kShadowCascadeCount; ++b) {
+      const ShadowAtlasTile tileB = shadow_atlas_tile(b, kShadowMapResolution);
+      CHECK((tileA.x != tileB.x) || (tileA.y != tileB.y),
+            "no two cascades share a tile");
+    }
+  }
+}
+
 int main() {
   engine::core::cvar_register_bool("r_spot_shadows", true, "test");
   engine::core::cvar_register_bool("r_point_shadows", true, "test");
@@ -631,6 +704,7 @@ int main() {
   test_unmasked_casters_keep_the_pass_program();
   test_skinned_masked_casters_pick_the_fitting_program();
   test_directional_cache_follows_what_casters_draw();
+  test_cascades_render_into_their_own_tiles();
 
   if (g_failures != 0) {
     std::fprintf(stderr, "shadow_caster_flush_test: %d failure(s)\n",

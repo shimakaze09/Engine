@@ -27,6 +27,7 @@
 #include "engine/core/vfs.h"
 #include "engine/renderer/command_buffer.h"
 #include "engine/renderer/render_device.h"
+#include "engine/renderer/render_settings_table.h"
 #include "engine/renderer/shader_system.h"
 
 #include "../fake_render_device.h"
@@ -37,6 +38,7 @@
 #include <cstring>
 #include <filesystem>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -247,6 +249,66 @@ bool touch_shader_file(const char *fileName) noexcept {
 void reset_backend_harness() noexcept {
   engine::renderer::backend_state() = engine::renderer::BackendState{};
   engine::renderer::shutdown_shader_system();
+}
+
+/// EXPECTATION (#641): once the backend has registered its cvars, every
+/// entry of the editor-facing settings table names a registered cvar of
+/// the type its control writes, holding a value that control can show
+/// (a slider's default within its range, a choice's default among its
+/// choices), and height fog is off by default.
+int check_settings_table_matches_registered_cvars() {
+  using engine::renderer::RenderSettingKind;
+  std::vector<engine::core::CVarInfo> infos(1024U);
+  const std::size_t registered =
+      engine::core::cvar_get_all(infos.data(), infos.size());
+  std::size_t count = 0U;
+  const engine::renderer::RenderSettingEntry *entries =
+      engine::renderer::render_setting_entries(&count);
+  if (count == 0U) {
+    return 330;
+  }
+  for (std::size_t i = 0U; i < count; ++i) {
+    const engine::renderer::RenderSettingEntry &entry = entries[i];
+    const engine::core::CVarInfo *info = nullptr;
+    for (std::size_t c = 0U; c < registered; ++c) {
+      if (std::strcmp(infos[c].name, entry.cvar) == 0) {
+        info = &infos[c];
+      }
+    }
+    if (info == nullptr) {
+      std::fprintf(stderr, "settings entry %s names no cvar\n", entry.cvar);
+      return 331;
+    }
+    const engine::core::CVarType expected =
+        (entry.kind == RenderSettingKind::Toggle) ? engine::core::CVarType::Bool
+        : (entry.kind == RenderSettingKind::Slider)
+            ? engine::core::CVarType::Float
+            : engine::core::CVarType::String;
+    if (info->type != expected) {
+      std::fprintf(stderr, "settings entry %s has the wrong type\n",
+                   entry.cvar);
+      return 332;
+    }
+    if (entry.kind == RenderSettingKind::Slider) {
+      const float value = engine::core::cvar_get_float(entry.cvar, -1.0e9F);
+      if ((value < entry.minValue) || (value > entry.maxValue)) {
+        std::fprintf(stderr, "%s defaults outside its slider\n", entry.cvar);
+        return 333;
+      }
+    }
+    if (entry.kind == RenderSettingKind::Choice) {
+      const char *value = engine::core::cvar_get_string(entry.cvar, "");
+      bool listed = false;
+      for (std::size_t c = 0U; c < entry.choiceCount; ++c) {
+        listed = listed || (std::strcmp(value, entry.choices[c]) == 0);
+      }
+      if (!listed) {
+        std::fprintf(stderr, "%s defaults outside its choices\n", entry.cvar);
+        return 334;
+      }
+    }
+  }
+  return engine::core::cvar_get_bool("r_height_fog", true) ? 335 : 0;
 }
 
 /// EXPECTATION: a program that links while missing a required uniform
@@ -662,11 +724,11 @@ counting_create_texture(const engine::renderer::TextureDesc &desc) noexcept {
   return engine::tests::fake::create_texture(desc);
 }
 
-/// EXPECTATION: a device without texture arrays (bgfx under Emscripten) is
-/// never asked for one. Both array-backed shadow sets stay unavailable and
-/// no array fallback exists, while the cubemap-backed point shadows are
-/// unaffected.
-int check_no_texture_arrays_skips_array_shadow_sets() {
+/// EXPECTATION (#690): a device without texture arrays (bgfx under
+/// Emscripten) is never asked for one, and still gets cascade, spot and
+/// point shadows: the cascade and spot sets are 2-D depth atlases. On base
+/// both sets stayed off on such a device, so the web page drew none.
+int check_no_texture_arrays_keeps_every_shadow_set() {
   using namespace engine::renderer;
 
   reset_backend_harness();
@@ -681,11 +743,13 @@ int check_no_texture_arrays_skips_array_shadow_sets() {
     result = 380;
   } else if (g_arrayTextureRequests != 0U) {
     result = 381;
-  } else if (backend_state().shadowAvailable ||
-             backend_state().spotShadowAvailable) {
+  } else if (!backend_state().shadowAvailable ||
+             !backend_state().spotShadowAvailable) {
     result = 382;
-  } else if (backend_state().fallbackTexture2DArray !=
-             kInvalidDeviceTexture) {
+  } else if ((backend_state().shadowState.depthAtlasTexture ==
+              kInvalidDeviceTexture) ||
+             (backend_state().spotShadowState.depthAtlasTexture ==
+              kInvalidDeviceTexture)) {
     result = 383;
   } else if (!backend_state().pointShadowAvailable) {
     result = 384;
@@ -750,6 +814,9 @@ int main() {
     result = check_init_with_missing_required_uniform();
   }
   if (result == 0) {
+    result = check_settings_table_matches_registered_cvars();
+  }
+  if (result == 0) {
     result = check_reload_transitions();
   }
   if (result == 0) {
@@ -773,7 +840,7 @@ int main() {
     result = check_metal_profile_links_without_sidecars();
   }
   if (result == 0) {
-    result = check_no_texture_arrays_skips_array_shadow_sets();
+    result = check_no_texture_arrays_keeps_every_shadow_set();
   }
 
   std::filesystem::remove_all(kShaderDir, ec);

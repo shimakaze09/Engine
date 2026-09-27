@@ -206,7 +206,7 @@ int run(engine::EnginePipeline &pipeline, World &world) noexcept {
   // The reported size, reached the way the editor's viewport reaches any
   // size. The unlit frame is taken first and the lights then come back,
   // so the two captures differ only by them.
-  engine::renderer::set_scene_viewport_size(7680, 2160);
+  engine::renderer::set_game_view_size(7680, 2160);
   CapturedFrame wideUnlit{};
   CapturedFrame wideLit{};
   const bool wideCaptured =
@@ -216,7 +216,7 @@ int run(engine::EnginePipeline &pipeline, World &world) noexcept {
       world.add_point_light_component(green, pool_light(0.05F, 1.0F)) &&
       settle_frames(pipeline) &&
       capture_presented_frame(pipeline, "tile_wrap_wl.tga", &wideLit);
-  engine::renderer::set_scene_viewport_size(0, 0);
+  engine::renderer::set_game_view_size(0, 0);
   if (!wideCaptured) {
     return 17;
   }

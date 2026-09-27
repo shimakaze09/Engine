@@ -50,7 +50,6 @@
 #include "ImGuizmo.h"
 
 #include "engine/editor/command_history.h"
-#include "engine/editor/debug_camera.h"
 
 #include <stb_image.h>
 
@@ -228,6 +227,16 @@ void draw_main_menu_bar() noexcept {
     bool showConsole = core::cvar_get_bool("editor.show_console", true);
     if (ImGui::MenuItem("Console", nullptr, showConsole)) {
       core::cvar_set_bool("editor.show_console", !showConsole);
+    }
+    const bool showRendering =
+        core::cvar_get_bool("editor.show_rendering", false);
+    if (ImGui::MenuItem("Rendering", nullptr, showRendering)) {
+      core::cvar_set_bool("editor.show_rendering", !showRendering);
+    }
+    const bool showPreferences =
+        core::cvar_get_bool("editor.show_preferences", false);
+    if (ImGui::MenuItem("Editor Settings", nullptr, showPreferences)) {
+      core::cvar_set_bool("editor.show_preferences", !showPreferences);
     }
     ImGui::EndMenu();
   }
@@ -516,6 +525,21 @@ static void draw_entity_hierarchy() noexcept {
   });
 }
 
+void same_line_if_button_fits(const char *nextButtonLabel) noexcept {
+  const ImGuiWindow *window = ImGui::GetCurrentWindow();
+  if ((window == nullptr) || (nextButtonLabel == nullptr)) {
+    return;
+  }
+  const ImGuiStyle &style = ImGui::GetStyle();
+  const float buttonWidth =
+      ImGui::CalcTextSize(nextButtonLabel, nullptr, true).x +
+      (style.FramePadding.x * 2.0F);
+  const float nextLeft = ImGui::GetItemRectMax().x + style.ItemSpacing.x;
+  if (nextLeft + buttonWidth <= window->WorkRect.Max.x) {
+    ImGui::SameLine();
+  }
+}
+
 void draw_entities_panel() noexcept {
   if (!ImGui::Begin("Entities")) {
     ImGui::End();
@@ -560,7 +584,7 @@ void draw_entities_panel() noexcept {
     }
   }
 
-  ImGui::SameLine();
+  same_line_if_button_fits("Add Primitive");
   if (ImGui::Button("Add Primitive") && editable) {
     ImGui::OpenPopup("AddPrimitivePopup");
   }

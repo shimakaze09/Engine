@@ -17,10 +17,9 @@ BackendState &backend_state() noexcept {
 
 void reset_renderer_public_state() noexcept {
   renderer_context().activeCamera = CameraState{};
-  renderer_context().sceneViewportWidth = 0;
-  renderer_context().sceneViewportHeight = 0;
+  renderer_context().gameViewWidth = 0;
+  renderer_context().gameViewHeight = 0;
   renderer_context().lastFrameStats = RendererFrameStats{};
-  renderer_context().fxaaAppliedThisFrame = false;
   renderer_context().activeSkyboxTexture = kInvalidTextureHandle;
   renderer_context().sceneCaptureRequests = {};
   renderer_context().sceneCaptureRequestCount = 0U;

@@ -49,7 +49,6 @@
 #include "ImGuizmo.h"
 
 #include "engine/editor/command_history.h"
-#include "engine/editor/debug_camera.h"
 
 #include <stb_image.h>
 
@@ -64,7 +63,9 @@
 #include "editor_panels_inspector.h"
 #include "editor_panels_main.h"
 #include "editor_panels_material.h"
+#include "editor_panels_rendering.h"
 #include "editor_panels_viewport.h"
+#include "editor_preferences.h"
 #include "editor_scene_document.h"
 #include "editor_session.h"
 
@@ -77,6 +78,14 @@ namespace {
 /// is acquired — the failure shape a windowed run reaches when a backend
 /// refuses, which headless tests cannot provoke for real.
 bool g_forceInitializeFailureForTests = false;
+
+/// Whether the game has the keyboard: in play, with the Game view focused
+/// and no text field taking typing.
+bool game_owns_keyboard() noexcept {
+  const EditorSession &session = editor_session();
+  return (session.playState != PlayState::Stopped) && session.gameViewFocused &&
+         !ImGui::GetIO().WantTextInput;
+}
 
 void setup_default_dock_layout(ImGuiID dockspaceId) noexcept {
   ImGui::DockBuilderRemoveNode(dockspaceId);
@@ -96,12 +105,14 @@ void setup_default_dock_layout(ImGuiID dockspaceId) noexcept {
   ImGui::DockBuilderDockWindow("Stats", bottom);
   ImGui::DockBuilderDockWindow("Assets", bottom);
   ImGui::DockBuilderDockWindow("Console", bottom);
-  ImGui::DockBuilderDockWindow("Scene", center);
+  ImGui::DockBuilderDockWindow(kGameViewWindow, center);
+  ImGui::DockBuilderDockWindow(kSceneViewWindow, center);
 
   ImGui::DockBuilderFinish(dockspaceId);
 }
 
 void draw_editor_panels(float frameMs, float utilizationPct) noexcept {
+  advance_thumbnail_frame();
   static_cast<void>(frameMs);
   static_cast<void>(utilizationPct);
 
@@ -147,6 +158,12 @@ void draw_editor_panels(float frameMs, float utilizationPct) noexcept {
   ImGui::End();
 
   draw_scene_viewport_panel();
+  draw_game_view_panel();
+  // Play and Stop bring their view to the front once both panels exist.
+  if (editor_session().pendingViewFocus != nullptr) {
+    ImGui::SetWindowFocus(editor_session().pendingViewFocus);
+    editor_session().pendingViewFocus = nullptr;
+  }
   draw_entities_panel();
   draw_inspector_panel();
   if (showStats) {
@@ -156,6 +173,8 @@ void draw_editor_panels(float frameMs, float utilizationPct) noexcept {
   draw_asset_browser_panel();
   draw_console_panel();
   draw_material_editor_panel();
+  draw_rendering_panel();
+  draw_editor_preferences_panel();
 }
 
 /// Applies the editor's visual theme: neutral dark palette, one restrained
@@ -253,7 +272,9 @@ bool initialize_editor(void *sdlWindow) noexcept {
   // Before any frame: takes layout persistence off ImGui's truncating
   // ini writer and restores the stored layout, so the docking flag above
   // is already set when the dock settings are parsed.
+  register_editor_preferences();
   static_cast<void>(editor_layout_initialize());
+  apply_stored_window_geometry();
 
   static_cast<void>(core::cvar_register_float(
       "editor.ui_scale", 1.0F, "Editor UI scale multiplier"));
@@ -268,13 +289,11 @@ bool initialize_editor(void *sdlWindow) noexcept {
                         core::cvar_get_float("editor.ui_scale", 1.0F);
 
   // Proper UI font (the 13px bitmap default reads as a debug tool), with a
-  // CJK face merged behind it; see editor_fonts.h.
-  static_cast<void>(core::cvar_register_string(
-      "editor.cjk_font", "",
-      "Font file for Chinese and Japanese text in the editor; empty uses "
-      "the system's own"));
-  static_cast<void>(load_editor_fonts(
-      io.Fonts, 17.0F * uiScale, core::cvar_get_string("editor.cjk_font", "")));
+  // CJK face merged behind it; see editor_fonts.h. The preference that
+  // names it was restored with the layout above.
+  const EditorFontResult fonts = load_editor_fonts(
+      io.Fonts, 17.0F * uiScale, core::cvar_get_string("editor.cjk_font", ""));
+  set_loaded_cjk_font(fonts.cjkPath);
 
   apply_editor_style();
   ImGui::GetStyle().ScaleAllSizes(uiScale);
@@ -282,11 +301,9 @@ bool initialize_editor(void *sdlWindow) noexcept {
   static_cast<void>(core::cvar_register_bool(
       "editor.show_console", true,
       "Toggle the editor Console panel (Window menu)"));
+  register_rendering_panel_cvars();
+  register_thumbnail_cache_cvars();
   console_capture_initialize();
-
-  static_cast<void>(core::cvar_register_bool(
-      "debug.camera_detach", false,
-      "Detach debug free-fly camera from game camera"));
 
   // The bgfx ImGui backend owns its device objects; the platform
   // window handle is all SDL needs. A backend failure must release every
@@ -378,7 +395,9 @@ void editor_new_frame() noexcept {
   ImGuizmo::BeginFrame();
 
   const ImGuiIO &io = ImGui::GetIO();
-  if (!io.WantTextInput) {
+  // While the game has the keyboard (the Game view focused in play), its
+  // keys are the game's, not editor shortcuts: W is a move, not a gizmo.
+  if (!io.WantTextInput && !game_owns_keyboard()) {
     if (io.KeyCtrl && !io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_Z)) {
       editor_history_undo();
     }
@@ -494,11 +513,16 @@ bool editor_handle_quit_request() noexcept {
 
 namespace {
 
+// In play the game's input follows the Game view, as in other editors:
+// the keyboard while the Game view has focus, the mouse while it also
+// hovers it. Everywhere else the editor keeps the input it would have.
 bool editor_wants_capture_keyboard() noexcept {
   if (!editor_session().initialized) {
     return false;
   }
-
+  if (editor_session().playState != PlayState::Stopped) {
+    return !game_owns_keyboard();
+  }
   return ImGui::GetIO().WantCaptureKeyboard;
 }
 
@@ -506,7 +530,9 @@ bool editor_wants_capture_mouse() noexcept {
   if (!editor_session().initialized) {
     return false;
   }
-
+  if (editor_session().playState != PlayState::Stopped) {
+    return !(game_owns_keyboard() && editor_session().gameViewHovered);
+  }
   return ImGui::GetIO().WantCaptureMouse;
 }
 
@@ -525,6 +551,8 @@ const runtime::EditorBridge kRuntimeEditorBridge = {
     &editor_handle_quit_request,
     &consume_play_transition,
     &finish_play_stop,
+    &editor_scene_view,
+    &editor_game_view_visible,
 };
 
 [[maybe_unused]] const bool kEditorBridgeRegistered = []() noexcept {
