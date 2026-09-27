@@ -79,5 +79,9 @@ void dispatch_editor_shortcuts() noexcept;
 /// Draws the menu item for `action` with its label, chord and enabled
 /// state, and runs it when clicked. True when it ran.
 bool editor_action_menu_item(EditorAction action) noexcept;
+/// Draws the same menu item without running it: true when it was clicked
+/// while enabled. For callers that must apply the action later, such as a
+/// row inside a hierarchy walk.
+bool editor_action_menu_item_clicked(EditorAction action) noexcept;
 
 } // namespace engine::editor

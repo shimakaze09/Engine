@@ -210,13 +210,14 @@ void dispatch_editor_shortcuts() noexcept {
   }
 }
 
-bool editor_action_menu_item(EditorAction action) noexcept {
+bool editor_action_menu_item_clicked(EditorAction action) noexcept {
   const EditorShortcut &row = editor_shortcut(action);
-  if (!ImGui::MenuItem(row.label, editor_shortcut_text(action), false,
-                       editor_action_enabled(action))) {
-    return false;
-  }
-  return run_editor_action(action);
+  return ImGui::MenuItem(row.label, editor_shortcut_text(action), false,
+                         editor_action_enabled(action));
+}
+
+bool editor_action_menu_item(EditorAction action) noexcept {
+  return editor_action_menu_item_clicked(action) && run_editor_action(action);
 }
 
 } // namespace engine::editor

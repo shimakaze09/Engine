@@ -4,6 +4,7 @@
 #include "editor_panels_main.h"
 
 #include "editor_commands.h"
+#include "editor_hierarchy_walk.h"
 #include "editor_material_edit.h"
 #include "editor_panels_console.h"
 #include "editor_scene_document.h"
@@ -338,27 +339,25 @@ void draw_toolbar() noexcept {
   ImGui::End();
 }
 
-/// True when the entity's transform names parentId as its parent (or the
-/// entity has no transform and parentId is invalid, keeping
-/// transform-less entities visible at the root).
-static bool entity_has_parent(runtime::Entity entity,
-                              runtime::PersistentId parentId) noexcept {
-  runtime::Transform transform{};
-  if (!editor_session().world->get_transform(entity, &transform)) {
-    return parentId == runtime::kInvalidPersistentId;
-  }
-  return transform.parentId == parentId;
-}
-
 /// Hard bound on hierarchy tree nesting drawn per frame; deeper nodes
 /// render as leaves so corrupted or absurdly deep parent chains cannot
 /// grow the render call stack without limit.
 constexpr std::size_t kMaxHierarchyDrawDepth = 64U;
 
-/// Draws one hierarchy node with selection, drag-drop reparenting, and
-/// its children as a subtree (depth-capped by kMaxHierarchyDrawDepth).
-static void draw_entity_node(runtime::Entity entity,
-                             std::size_t depth) noexcept {
+/// An edit a hierarchy row asked for. It is applied once the walk ends:
+/// the walk follows the world's child links, which an edit made mid-walk
+/// would rewrite under it.
+struct PendingHierarchyEdit final {
+  enum class Kind : std::uint8_t { None, Duplicate, Delete, Reparent };
+  Kind kind = Kind::None;
+  runtime::Entity target{};
+  runtime::Entity newParent{};
+};
+
+/// Draws one hierarchy row with selection, its context menu and drag-drop
+/// reparenting; returns whether its tree node is open.
+static bool draw_entity_row(runtime::Entity entity, bool hasChildren,
+                            PendingHierarchyEdit &pending) noexcept {
   char label[160] = {};
   runtime::NameComponent name{};
   if (editor_session().world->get_name_component(entity, &name) &&
@@ -368,19 +367,6 @@ static void draw_entity_node(runtime::Entity entity,
   } else {
     std::snprintf(label, sizeof(label), "Entity [%u]###entity_%u",
                   entity.index, entity.index);
-  }
-
-  const runtime::PersistentId ownId =
-      editor_session().world->persistent_id(entity);
-  bool hasChildren = false;
-  if ((depth < kMaxHierarchyDrawDepth) &&
-      (ownId != runtime::kInvalidPersistentId)) {
-    editor_session().world->for_each_alive([&](runtime::Entity candidate) {
-      if (!hasChildren && (candidate != entity) &&
-          entity_has_parent(candidate, ownId)) {
-        hasChildren = true;
-      }
-    });
   }
 
   ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow |
@@ -406,10 +392,12 @@ static void draw_entity_node(runtime::Entity entity,
     if (!is_entity_selected(entity) && (selected_entity() != entity)) {
       select_entity(entity, false);
     }
-    editor_action_menu_item(EditorAction::Duplicate);
-    const bool editable = world_is_editable();
-    if (ImGui::MenuItem("Delete", nullptr, false, editable)) {
-      static_cast<void>(execute_entity_delete(entity));
+    if (editor_action_menu_item_clicked(EditorAction::Duplicate)) {
+      pending.kind = PendingHierarchyEdit::Kind::Duplicate;
+    }
+    if (ImGui::MenuItem("Delete", nullptr, false, world_is_editable())) {
+      pending.kind = PendingHierarchyEdit::Kind::Delete;
+      pending.target = entity;
     }
     ImGui::EndPopup();
   }
@@ -429,31 +417,42 @@ static void draw_entity_node(runtime::Entity entity,
           editor_session().world->find_entity_by_index(droppedIndex);
       if ((dropped != runtime::kInvalidEntity) && (dropped != entity) &&
           world_is_editable()) {
-        static_cast<void>(execute_reparent(dropped, entity));
+        pending.kind = PendingHierarchyEdit::Kind::Reparent;
+        pending.target = dropped;
+        pending.newParent = entity;
       }
     }
     ImGui::EndDragDropTarget();
   }
-
-  if (open) {
-    if (hasChildren) {
-      editor_session().world->for_each_alive([&](runtime::Entity candidate) {
-        if ((candidate != entity) && entity_has_parent(candidate, ownId)) {
-          draw_entity_node(candidate, depth + 1U);
-        }
-      });
-    }
-    ImGui::TreePop();
-  }
+  return open;
 }
 
-/// Draws every root entity (no transform parent) as a tree.
+/// Draws every root entity as a tree, then applies the edit a row asked
+/// for.
 static void draw_entity_hierarchy() noexcept {
-  editor_session().world->for_each_alive([](runtime::Entity entity) {
-    if (entity_has_parent(entity, runtime::kInvalidPersistentId)) {
-      draw_entity_node(entity, 0U);
-    }
-  });
+  PendingHierarchyEdit pending{};
+  walk_entity_hierarchy(
+      *editor_session().world, kMaxHierarchyDrawDepth,
+      [&pending](runtime::Entity entity, std::size_t,
+                 bool hasChildren) noexcept {
+        return draw_entity_row(entity, hasChildren, pending);
+      },
+      [](runtime::Entity) noexcept { ImGui::TreePop(); });
+
+  switch (pending.kind) {
+  case PendingHierarchyEdit::Kind::Duplicate:
+    static_cast<void>(run_editor_action(EditorAction::Duplicate));
+    break;
+  case PendingHierarchyEdit::Kind::Delete:
+    static_cast<void>(execute_entity_delete(pending.target));
+    break;
+  case PendingHierarchyEdit::Kind::Reparent:
+    static_cast<void>(execute_reparent(pending.target, pending.newParent));
+    break;
+  case PendingHierarchyEdit::Kind::None:
+  default:
+    break;
+  }
 }
 
 void same_line_if_button_fits(const char *nextButtonLabel) noexcept {
