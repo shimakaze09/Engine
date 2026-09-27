@@ -5,7 +5,7 @@
 // Stop's VM recycle, or a scene transition — plain teardown leaked them
 // into the next run. Drives real engine::bootstrap() + two full
 // EnginePipeline runs (the pipeline_tick_cadence_test.cpp pattern): run A
-// mutates game state from an entity script and loads the bootstrap
+// mutates game state from an entity script and loads an authored
 // character's animation controller, teardown must clear both, and run B
 // must start from defaults. Also pins that teardown forgets the cooked
 // asset generation verdicts, so a repaired asset is re-checked by the
@@ -13,6 +13,7 @@
 
 #include "../cook_fixture.h"
 #include "engine/audio/audio.h"
+#include "engine/content/asset_metadata.h"
 #include "engine/content/asset_staleness.h"
 #include "engine/core/input.h"
 #include "engine/engine.h"
@@ -122,6 +123,25 @@ bool game_state_is(const char *expected) noexcept {
   return (actual != nullptr) && (std::strcmp(actual, expected) == 0);
 }
 
+/// Adds the bundled rigged character (assets/character.mesh) with its
+/// idle/walk/jump controller; false on failure.
+bool add_bundled_character(engine::runtime::World &world) noexcept {
+  const char *mount = engine::active_config().assetMount;
+  char meshPath[256] = {};
+  std::snprintf(meshPath, sizeof(meshPath), "%s/character.mesh", mount);
+  engine::runtime::Transform transform{};
+  transform.position = engine::math::Vec3(-3.5F, 0.0F, 1.5F);
+  const engine::runtime::Entity entity = world.create_scene_object(transform);
+  engine::runtime::MeshComponent mesh{};
+  mesh.meshAssetId = engine::content::make_asset_id_from_path(meshPath);
+  engine::runtime::AnimationComponent animation{};
+  std::snprintf(animation.controllerPath, sizeof(animation.controllerPath),
+                "%s/character.animctrl", mount);
+  return (entity != engine::runtime::kInvalidEntity) &&
+         world.add_mesh_component(entity, mesh) &&
+         world.add_animation_component(entity, animation);
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -158,9 +178,12 @@ int main() {
       return 3;
     }
 
-    // Settle so the bootstrap scene begins play (its animated character
-    // acquires a controller slot), then let the test script's
-    // on_begin_play move the game state off its default.
+    // The startup scene is the empty template, so run A authors the
+    // animated character whose controller slot teardown must release: the
+    // bundled rigged character with its controller, as the old demo scene
+    // placed it. Settle so it begins play and acquires the slot, then let
+    // the test script's on_begin_play move the game state off its default.
+    CHECK(add_bundled_character(*g_world), "author the animated character");
     CHECK(ticking_frame(pipeline), "run A settle frame 1");
     CHECK(ticking_frame(pipeline), "run A settle frame 2");
     const engine::runtime::Entity scripted = g_world->create_scene_object();

@@ -199,6 +199,15 @@ Run the app after build:
 - Linux: `./build/engine_editor_app` (macOS cannot run it until the shader
   cook works there)
 
+It starts on an empty 3D scene, as a new Unity project does. The scene holds a
+Main Camera, a Directional Light, and a Scene Controller entity running
+`assets/main.lua`, whose hooks start empty. Player mode boots
+`assets/main.scene`, the same scene; `engine_integration_startup_template`
+keeps the two identical. File > Open Scene... opens the Island Hopper
+template (`assets/templates/island_hopper.scene`) and the sample scenes
+(`assets/samples/playground.scene`, `assets/coin_run.scene`,
+`assets/shading_models.scene`).
+
 Build benchmark targets as needed:
 
 ```powershell
@@ -305,6 +314,10 @@ Current script conventions in `assets/`:
 	  editor Stop, `on_end_play` runs before the authored scene is
 	  restored, so it reads the state the session ended in
 	- Legacy `on_start`/`on_update`/`on_end` names remain as fallbacks
+- Scene-level module example that spawns a controllable player and
+  physics props when play begins (`assets/samples/playground.lua`, run by
+  `assets/samples/playground.scene`; `engine_integration_playground_sample`
+  plays it)
 - Entity behavior module example (`assets/scripts/player.lua`)
 - Reusable utility module example (`assets/lib/utils.lua`)
 

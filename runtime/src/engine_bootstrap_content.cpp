@@ -1,6 +1,7 @@
 // Implements the built-in bootstrap content: registration of the procedural
-// primitive meshes and creation of the default editor scene (ground, demo
-// cubes, sun light, foliage patch, scene controller).
+// primitive meshes and creation of the startup scene, the empty 3D template
+// Unity starts a project from (a main camera and a directional light) plus
+// the scene controller that runs the project's main Lua module.
 
 #include "engine_bootstrap_content.h"
 
@@ -193,26 +194,11 @@ bool load_bootstrap_meshes(renderer::AssetManager *assetManager,
 // Bootstrap scene
 // ---------------------------------------------------------------------------
 
-void create_bootstrap_scene(runtime::World *world,
-                            const BootstrapMeshIds &meshIds) noexcept {
-  const content::AssetId defaultMesh =
-      (meshIds.cube != content::kInvalidAssetId) ? meshIds.cube
-                                                 : meshIds.bootstrap;
-
-  const runtime::Entity entity = world->create_scene_object();
-  const runtime::Entity stackedEntity = world->create_scene_object();
-  const runtime::Entity groundEntity = world->create_scene_object();
-  const runtime::Entity foliageEntity = world->create_scene_object();
+void create_bootstrap_scene(runtime::World *world) noexcept {
+  const runtime::Entity cameraEntity = world->create_scene_object();
   const runtime::Entity lightEntity = world->create_scene_object();
   const runtime::Entity sceneControllerEntity = world->create_scene_object();
-  const runtime::Entity characterEntity =
-      (meshIds.character != content::kInvalidAssetId)
-          ? world->create_scene_object()
-          : runtime::kInvalidEntity;
-  if ((entity == runtime::kInvalidEntity) ||
-      (stackedEntity == runtime::kInvalidEntity) ||
-      (groundEntity == runtime::kInvalidEntity) ||
-      (foliageEntity == runtime::kInvalidEntity) ||
+  if ((cameraEntity == runtime::kInvalidEntity) ||
       (lightEntity == runtime::kInvalidEntity) ||
       (sceneControllerEntity == runtime::kInvalidEntity)) {
     core::log_message(core::LogLevel::Error, "engine",
@@ -225,141 +211,36 @@ void create_bootstrap_scene(runtime::World *world,
     std::snprintf(n.name, sizeof(n.name), "%s", label);
     static_cast<void>(world->add_name_component(e, n));
   };
-  add_name(entity, "Red Cube");
-  add_name(stackedEntity, "Blue Cube");
-  add_name(groundEntity, "Ground");
-  add_name(foliageEntity, "Foliage Patch");
-  add_name(lightEntity, "Sun Light");
+  add_name(cameraEntity, "Main Camera");
+  add_name(lightEntity, "Directional Light");
   add_name(sceneControllerEntity, "Scene Controller");
-  if (characterEntity != runtime::kInvalidEntity) {
-    add_name(characterEntity, "Character");
-  }
 
-  // Rigged character: skinned mesh plus the idle/walk/jump controller.
-  if (characterEntity != runtime::kInvalidEntity) {
-    runtime::Transform t{};
-    t.position = math::Vec3(-3.5F, 0.0F, 1.5F);
-    static_cast<void>(world->add_transform(characterEntity, t));
-    runtime::MeshComponent mc{};
-    mc.meshAssetId = meshIds.character;
-    mc.albedo = math::Vec3(0.85F, 0.65F, 0.35F);
-    static_cast<void>(world->add_mesh_component(characterEntity, mc));
-    runtime::AnimationComponent anim{};
-    std::snprintf(anim.controllerPath, sizeof(anim.controllerPath),
-                  "%s/character.animctrl", active_config().assetMount);
-    static_cast<void>(world->add_animation_component(characterEntity, anim));
-  }
-
-  // Directional light.
-  {
-    runtime::Transform lt{};
-    lt.position = math::Vec3(0.0F, 10.0F, 0.0F);
-    static_cast<void>(world->add_transform(lightEntity, lt));
-    runtime::LightComponent sunLight{};
-    sunLight.type = runtime::LightType::Directional;
-    sunLight.color = math::Vec3(1.0F, 0.95F, 0.9F);
-    sunLight.direction = math::Vec3(0.4F, -1.0F, 0.6F);
-    sunLight.intensity = 1.2F;
-    static_cast<void>(world->add_light_component(lightEntity, sunLight));
-  }
-
-  // Red cube.
+  // Main Camera, where Unity's 3D template puts it: one metre up and ten
+  // back, looking along its -Z at the origin.
   {
     runtime::Transform t{};
-    t.position = math::Vec3(-3.0F, 0.5F, -3.0F);
-    static_cast<void>(world->add_transform(entity, t));
-    runtime::RigidBody rb{};
-    rb.velocity = math::Vec3(0.0F, 0.0F, 0.0F);
-    rb.inverseMass = 0.0F;
-    static_cast<void>(world->add_rigid_body(entity, rb));
-    runtime::Collider c{};
-    c.halfExtents = math::Vec3(0.5F, 0.5F, 0.5F);
-    static_cast<void>(world->add_collider(entity, c));
-    runtime::MeshComponent mc{};
-    mc.meshAssetId = defaultMesh;
-    mc.albedo = math::Vec3(0.9F, 0.2F, 0.2F);
-    static_cast<void>(world->add_mesh_component(entity, mc));
-  }
-
-  // Blue cube.
-  {
-    runtime::Transform t{};
-    t.position = math::Vec3(3.0F, 0.5F, -3.0F);
-    static_cast<void>(world->add_transform(stackedEntity, t));
-    runtime::RigidBody rb{};
-    rb.velocity = math::Vec3(0.0F, 0.0F, 0.0F);
-    rb.inverseMass = 0.0F;
-    static_cast<void>(world->add_rigid_body(stackedEntity, rb));
-    runtime::Collider c{};
-    c.halfExtents = math::Vec3(0.5F, 0.5F, 0.5F);
-    static_cast<void>(world->add_collider(stackedEntity, c));
-    runtime::MeshComponent mc{};
-    mc.meshAssetId = defaultMesh;
-    mc.albedo = math::Vec3(0.2F, 0.4F, 0.9F);
-    static_cast<void>(world->add_mesh_component(stackedEntity, mc));
-  }
-
-  // Ground plane.
-  {
-    runtime::Transform t{};
-    t.position = math::Vec3(0.0F, -0.5F, 0.0F);
-    static_cast<void>(world->add_transform(groundEntity, t));
-    runtime::Collider gc{};
-    gc.halfExtents = math::Vec3(5.0F, 0.5F, 5.0F);
-    gc.staticFriction = 0.9F;
-    gc.dynamicFriction = 0.7F;
-    gc.restitution = 0.1F;
-    static_cast<void>(world->add_collider(groundEntity, gc));
-    runtime::MeshComponent mc{};
-    mc.meshAssetId = (meshIds.plane != content::kInvalidAssetId)
-                         ? meshIds.plane
-                         : meshIds.bootstrap;
-    mc.albedo = math::Vec3(0.45F, 0.42F, 0.38F);
-    static_cast<void>(world->add_mesh_component(groundEntity, mc));
-  }
-
-  // Foliage patch demo.
-  {
-    runtime::Transform t{};
-    t.position = math::Vec3(0.0F, 0.0F, 1.3F);
-    static_cast<void>(world->add_transform(foliageEntity, t));
-
-    runtime::FoliagePatchComponent foliage{};
-    foliage.meshAssetIds[0] = (meshIds.grass != content::kInvalidAssetId)
-                                  ? meshIds.grass
-                                  : defaultMesh;
-    foliage.meshAssetIds[1] = foliage.meshAssetIds[0];
-    foliage.meshAssetIds[2] = foliage.meshAssetIds[1];
-    foliage.instanceCount = 35U;
-    foliage.density = 2.5F;
-    foliage.albedo = math::Vec3(0.18F, 0.62F, 0.22F);
-    foliage.roughness = 0.92F;
-    foliage.windStrength = 0.18F;
-    foliage.windFrequency = 1.9F;
-
-    std::uint32_t cursor = 0U;
-    for (std::uint32_t z = 0U; z < 5U; ++z) {
-      for (std::uint32_t x = 0U; x < 7U; ++x) {
-        runtime::FoliageInstance &instance = foliage.instances[cursor];
-        const float jitterX =
-            (static_cast<float>((x * 17U + z * 11U) % 5U) - 2.0F) * 0.05F;
-        const float jitterZ =
-            (static_cast<float>((x * 7U + z * 19U) % 5U) - 2.0F) * 0.05F;
-        instance.scale = 0.55F + (static_cast<float>((x + z) % 4U) * 0.08F);
-        instance.offset =
-            math::Vec3((static_cast<float>(x) - 3.0F) * 0.62F + jitterX, 0.0F,
-                       (static_cast<float>(z) - 2.0F) * 0.62F + jitterZ);
-        instance.phase = static_cast<float>(cursor) * 0.37F;
-        instance.lodIndex = ((x + z) % 5U == 0U) ? 1U : 0U;
-        ++cursor;
-      }
-    }
-
+    t.position = math::Vec3(0.0F, 1.0F, 10.0F);
+    static_cast<void>(world->add_transform(cameraEntity, t));
     static_cast<void>(
-        world->add_foliage_patch_component(foliageEntity, foliage));
+        world->add_camera_component(cameraEntity, runtime::CameraComponent{}));
   }
 
-  // Scene controller script.
+  // Directional Light, aimed as Unity's template aims its sun (pitched 50
+  // degrees down, turned 30 degrees), in its warm default colour.
+  {
+    runtime::Transform t{};
+    t.position = math::Vec3(0.0F, 3.0F, 0.0F);
+    static_cast<void>(world->add_transform(lightEntity, t));
+    runtime::LightComponent sun{};
+    sun.type = runtime::LightType::Directional;
+    sun.color = math::Vec3(1.0F, 0.957F, 0.839F);
+    sun.direction = math::Vec3(-0.321F, -0.766F, -0.557F);
+    sun.intensity = 1.0F;
+    static_cast<void>(world->add_light_component(lightEntity, sun));
+  }
+
+  // Scene Controller: the scene-level Lua module (assets/main.lua) the
+  // project's gameplay starts from.
   {
     runtime::ScriptComponent sc{};
     const char *mainScriptPath = active_config().mainScriptPath;

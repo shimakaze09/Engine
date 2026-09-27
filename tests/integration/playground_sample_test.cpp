@@ -1,17 +1,17 @@
-// Verifies the configured main script runs on the startup scene's
-// controller entity in player mode: engine::bootstrap in player mode,
-// headless, with the playground sample (assets/samples/playground.lua) as
-// the main script and no startup scene to replace the bootstrap one. Its
-// on_begin_play spawns the Player cube, three props and a ball; every
-// named entity must exist after the first frames, and the script must not
-// report a rolled-back setup. The shipped assets/main.lua is an empty
-// template, so the sample is what exercises the controller.
+// Verifies the playground sample plays as shipped: player mode boots
+// assets/samples/playground.scene headless at a fixed 60 Hz frame delta.
+// Every authored entity loads, the sample's controller spawns the Player,
+// three props and the Ball without rolling back, and the two bodies it
+// drops come to rest on the scene's ground rather than falling through
+// it. The sample no longer rides on the engine's startup scene (now the
+// empty template), so its floor must be its own.
 
 #include "engine/core/logging.h"
 #include "engine/engine.h"
 #include "engine/runtime/engine_pipeline.h"
 #include "engine/runtime/world.h"
 
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -40,7 +40,7 @@ void count_rollbacks(engine::core::LogLevel, const char *, const char *message,
 }
 
 /// Walks upward from the current path until the bundled assets are found
-/// (same technique as player_mode_test.cpp).
+/// (same technique as main_script_setup_test.cpp).
 bool set_working_directory_with_assets() noexcept {
   const std::filesystem::path original = std::filesystem::current_path();
   const std::filesystem::path candidates[] = {
@@ -53,7 +53,8 @@ bool set_working_directory_with_assets() noexcept {
     if (ec) {
       continue;
     }
-    if (std::filesystem::exists(normalized / "assets/main.lua", ec) &&
+    if (std::filesystem::exists(normalized / "assets/samples/playground.scene",
+                                ec) &&
         std::filesystem::exists(
             normalized / "assets/shaders/bgfx/shaders.manifest", ec)) {
       std::filesystem::current_path(normalized, ec);
@@ -71,6 +72,29 @@ void set_player_env() noexcept {
 #endif
 }
 
+/// Checks `name` rests on the ground: its centre is `restHeight` above the
+/// surface at y = 0, within physics_rest_test's bound on a settled body's
+/// centre (0.01 m, the solver's resting penetration plus contact jitter).
+void check_rests(const engine::runtime::World &world, const char *name,
+                 float restHeight) noexcept {
+  const engine::runtime::Entity entity = world.find_entity_by_name(name);
+  engine::runtime::Transform transform{};
+  if ((entity == engine::runtime::kInvalidEntity) ||
+      !world.get_transform(entity, &transform)) {
+    std::fprintf(stderr, "FAIL: '%s' has no transform\n", name);
+    ++g_failures;
+    return;
+  }
+  if (std::fabs(transform.position.y - restHeight) > 0.01F) {
+    std::fprintf(stderr,
+                 "FAIL: '%s' is at y = %.4f, not resting at %.2f on the "
+                 "ground\n",
+                 name, static_cast<double>(transform.position.y),
+                 static_cast<double>(restHeight));
+    ++g_failures;
+  }
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -83,10 +107,7 @@ int main() {
 
   engine::EngineConfig config{};
   config.core.platform.headless = true;
-  // No startup scene: player mode would otherwise replace the bootstrap
-  // scene, controller and all, on the first frames.
-  config.editorScenePath = "";
-  config.mainScriptPath = "assets/samples/playground.lua";
+  config.editorScenePath = "assets/samples/playground.scene";
   if (!engine::bootstrap(config)) {
     std::fprintf(stderr, "FAIL: bootstrap\n");
     return 2;
@@ -103,24 +124,32 @@ int main() {
       engine::shutdown();
       return 3;
     }
-    // Player mode plays from the first frame; the scene controller begins
-    // play on it and the Player's own script in a later pass.
-    for (int frame = 0; frame < 3; ++frame) {
+    CHECK(pipeline.set_frame_delta_override(1.0 / 60.0),
+          "fix the frame delta");
+    // Five simulated seconds: the Ball, dropped 1.5 m with restitution
+    // 0.5, has stopped bouncing well inside two.
+    for (int frame = 0; frame < 300; ++frame) {
       CHECK(pipeline.execute_frame(), "frame");
     }
     const engine::runtime::World *world = pipeline.world();
     CHECK(world != nullptr, "pipeline world available");
     if (world != nullptr) {
-      const char *names[] = {"Player", "Sphere Prop", "Cylinder Prop",
-                             "Pyramid Prop", "Ball"};
+      const char *names[] = {
+          "Main Camera",   "Sun Light",        "Red Cube",
+          "Blue Cube",     "Ground",           "Foliage Patch",
+          "Character",     "Scene Controller", "Player",
+          "Sphere Prop",   "Cylinder Prop",    "Pyramid Prop",
+          "Ball"};
       for (const char *name : names) {
         if (world->find_entity_by_name(name) ==
             engine::runtime::kInvalidEntity) {
-          std::fprintf(stderr, "FAIL: the main script did not spawn '%s'\n",
-                       name);
+          std::fprintf(stderr, "FAIL: the sample has no '%s'\n", name);
           ++g_failures;
         }
       }
+      // The Player is a unit cube and the Ball a unit-diameter sphere.
+      check_rests(*world, "Player", 0.5F);
+      check_rests(*world, "Ball", 0.5F);
     }
     CHECK(g_rollbacks == 0, "the scene controller's setup did not roll back");
     pipeline.teardown();
@@ -131,9 +160,10 @@ int main() {
   }
   engine::shutdown();
   if (g_failures != 0) {
-    std::fprintf(stderr, "main_script_setup_test: %d failure(s)\n", g_failures);
+    std::fprintf(stderr, "playground_sample_test: %d failure(s)\n",
+                 g_failures);
     return 1;
   }
-  std::printf("main_script_setup_test: all checks passed\n");
+  std::printf("playground_sample_test: all checks passed\n");
   return 0;
 }

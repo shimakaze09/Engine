@@ -6,6 +6,8 @@
 // that said only "entity dropped from frame". Full production bootstrap,
 // headless, on the null render device.
 
+#include "../builtin_mesh_fixture.h"
+
 #include "engine/core/engine_stats.h"
 #include "engine/engine.h"
 #include "engine/renderer/command_buffer.h"
@@ -86,10 +88,14 @@ int main() {
       engine::shutdown();
       return 3;
     }
-    // Settle so the bootstrap scene's meshes are loaded and drawing. The
-    // null device counts no draw calls, so the drop count asserted below
-    // is also the proof that the clones were visible draws.
-    if (!ticking_frame(pipeline) || !ticking_frame(pipeline)) {
+    // The startup scene is the empty template, so the suite authors the
+    // visible mesh it clones: a built-in cube at the origin, in front of
+    // the template's camera. Settle so it is drawing. The null device
+    // counts no draw calls, so the drop count asserted below is also the
+    // proof that the clones were visible draws.
+    if ((engine::tests::add_builtin_cube(*g_world, engine::math::Vec3()) ==
+         engine::runtime::kInvalidEntity) ||
+        !ticking_frame(pipeline) || !ticking_frame(pipeline)) {
       result = 4;
     }
 

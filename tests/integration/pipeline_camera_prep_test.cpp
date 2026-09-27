@@ -4,6 +4,8 @@
 // with a single mesh entity and a camera-manager camera, the frame that moves
 // the camera onto the mesh must draw it that same frame.
 
+#include "../builtin_mesh_fixture.h"
+
 #include "engine/core/cvar.h"
 #include "engine/core/engine_stats.h"
 #include "engine/engine.h"
@@ -57,20 +59,6 @@ bool set_working_directory_with_assets() noexcept {
   return false;
 }
 
-/// Copies the first mesh asset id found in the bootstrap scene.
-std::uint64_t find_any_mesh_asset_id(
-    const engine::runtime::World &world) noexcept {
-  std::uint64_t assetId = 0ULL;
-  world.for_each<engine::runtime::MeshComponent>(
-      [&assetId](engine::runtime::Entity,
-                 const engine::runtime::MeshComponent &mesh) {
-        if (assetId == 0ULL) {
-          assetId = mesh.meshAssetId;
-        }
-      });
-  return assetId;
-}
-
 /// Updates the single test camera with the given pose (instant: the entry's
 /// saturated blend weight makes evaluate snap to the new pose).
 bool push_test_camera(engine::runtime::World &world,
@@ -120,7 +108,7 @@ int main() {
 
   static_cast<void>(engine::core::cvar_set_int("r_max_fps", 30));
 
-  const std::uint64_t meshAssetId = find_any_mesh_asset_id(*g_world);
+  const std::uint64_t meshAssetId = engine::tests::builtin_cube_mesh_id();
   if (meshAssetId == 0ULL) {
     pipeline.teardown();
     engine::shutdown();

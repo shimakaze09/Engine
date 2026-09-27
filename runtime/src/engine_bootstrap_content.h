@@ -40,8 +40,9 @@ bool load_bootstrap_meshes(renderer::AssetManager *assetManager,
                            renderer::GpuMeshRegistry *meshRegistry,
                            BootstrapMeshIds *out) noexcept;
 
-/// Creates the default editor scene from the bootstrap meshes.
-void create_bootstrap_scene(runtime::World *world,
-                            const BootstrapMeshIds &meshIds) noexcept;
+/// Creates the startup scene, matching assets/main.scene: a "Main Camera",
+/// a "Directional Light" and a "Scene Controller" running the configured
+/// main script, and nothing else, as Unity's empty 3D template.
+void create_bootstrap_scene(runtime::World *world) noexcept;
 
 } // namespace engine
