@@ -9,10 +9,12 @@
 
 #include "editor_commands.h"
 #include "editor_entity_clipboard.h"
+#include "editor_frame_selection.h"
 #include "editor_scene_document.h"
 #include "editor_session.h"
 
 #include "ImGuizmo.h"
+#include "imgui_internal.h"
 
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
@@ -64,6 +66,11 @@ constexpr std::array<EditorShortcut,
          false},
         {EditorAction::GizmoScale, "tools.scale", "Scale", ImGuiKey_R, 0,
          false},
+        // Unity's chord for its handle-rotation toggle.
+        {EditorAction::GizmoSpace, "tools.toggle_space", "World/Local Axes",
+         ImGuiKey_X, 0, false},
+        {EditorAction::FrameSelected, "view.frame_selected", "Frame Selected",
+         ImGuiKey_F, 0, false},
         // Unity's play chords, live while the game has the keyboard so a
         // running game can always be paused or stopped.
         {EditorAction::PlayStop, "play.play_stop", "Play",
@@ -274,7 +281,10 @@ bool editor_action_enabled(EditorAction action) noexcept {
   case EditorAction::GizmoTranslate:
   case EditorAction::GizmoRotate:
   case EditorAction::GizmoScale:
+  case EditorAction::GizmoSpace:
     return true;
+  case EditorAction::FrameSelected:
+    return has_selection();
   case EditorAction::PlayStop:
     // Play needs a world that can enter play; Stop needs a session.
     return (editor_session().world != nullptr) &&
@@ -346,6 +356,14 @@ bool run_editor_action(EditorAction action) noexcept {
     return true;
   case EditorAction::GizmoScale:
     editor_session().gizmoOp = ImGuizmo::SCALE;
+    return true;
+  case EditorAction::FrameSelected:
+    return frame_selection();
+  case EditorAction::GizmoSpace:
+    editor_session().gizmoWorldSpace = !editor_session().gizmoWorldSpace;
+    if (ImGui::GetCurrentContext() != nullptr) {
+      ImGui::MarkIniSettingsDirty(); // the choice is a saved preference
+    }
     return true;
   case EditorAction::PlayStop:
     if (editor_session().playState == PlayState::Stopped) {
@@ -550,9 +568,10 @@ bool editor_shortcuts_blocked() noexcept {
   // A popup (a menu, a context menu, a combo, a modal) takes the keyboard
   // while open, and the unsaved-changes prompt counts from the moment it
   // is armed, before its modal is drawn.
-  // A chord being captured for a rebinding is not a command either.
+  // A chord being captured for a rebinding is not a command either, and
+  // while the Scene camera flies WASD/QE move it.
   return io.WantTextInput || scene_document_prompt_open() ||
-         (g_capturing != EditorAction::Count) ||
+         (g_capturing != EditorAction::Count) || editor_session().sceneFlying ||
          ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId |
                                     ImGuiPopupFlags_AnyPopupLevel);
 }

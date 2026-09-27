@@ -157,6 +157,100 @@ void check_clip_planes_follow_distance(engine::tests::TestContext &t) noexcept {
   }
 }
 
+/// The eye an orbit camera sits at.
+Vec3 eye_of(const EditorCamera &camera) noexcept {
+  return editor_camera_state(camera).position;
+}
+
+bool near_vec(const Vec3 &a, const Vec3 &b, float tol) noexcept {
+  return (std::fabs(a.x - b.x) <= tol) && (std::fabs(a.y - b.y) <= tol) &&
+         (std::fabs(a.z - b.z) <= tol);
+}
+
+/// Flythrough: the mouse turns the view about the eye, which stays put;
+/// WASD move along the view, Q/E along the world's up, Shift four times
+/// as fast; the wheel scales the speed by 1.2 a notch within its range.
+/// Positions of order 10 through float trig hold to 1e-5.
+void check_fly(engine::tests::TestContext &t) noexcept {
+  using engine::editor::fly_editor_camera;
+  using engine::editor::FlyInput;
+  constexpr float kTol = 1.0e-5F;
+  EditorCamera camera{};
+  camera.pitch = 0.3F;
+  camera.distance = 8.0F;
+  camera.flySpeed = 4.0F;
+
+  const Vec3 eye = eye_of(camera);
+  FlyInput look{};
+  look.lookX = 100.0F;
+  look.lookY = -20.0F;
+  fly_editor_camera(camera, look, 0.0F);
+  t.check(near_vec(eye_of(camera), eye, kTol) && (camera.distance == 8.0F),
+          "looking turns about the eye");
+  t.check((camera.yaw == -0.5F) && near_rel(camera.pitch, 0.2F, kTol),
+          "the mouse turns yaw and pitch");
+
+  const Vec3 before = eye_of(camera);
+  const Vec3 forward =
+      engine::math::normalize(engine::math::sub(camera.target, before));
+  FlyInput move{};
+  move.forward = 1;
+  fly_editor_camera(camera, move, 0.5F);
+  t.check(near_vec(engine::math::sub(eye_of(camera), before),
+                   engine::math::mul(forward, 2.0F), kTol),
+          "W moves the eye along the view at the fly speed");
+
+  const Vec3 beforeBoost = eye_of(camera);
+  move.boost = true;
+  fly_editor_camera(camera, move, 0.5F);
+  t.check(near_rel(engine::math::length(
+                       engine::math::sub(eye_of(camera), beforeBoost)),
+                   8.0F, kTol),
+          "Shift moves four times as far");
+
+  const Vec3 beforeUp = eye_of(camera);
+  FlyInput rise{};
+  rise.up = 1;
+  rise.right = 1;
+  fly_editor_camera(camera, rise, 0.25F);
+  const Vec3 right(std::cos(camera.yaw), 0.0F, -std::sin(camera.yaw));
+  t.check(near_vec(engine::math::sub(eye_of(camera), beforeUp),
+                   engine::math::add(Vec3(0.0F, 1.0F, 0.0F), right), kTol),
+          "E rises along the world's up and D steps right");
+
+  FlyInput still{};
+  still.forward = 1;
+  const Vec3 beforeStill = eye_of(camera);
+  fly_editor_camera(camera, still, 0.0F);
+  t.check(near_vec(eye_of(camera), beforeStill, kTol), "no time, no movement");
+
+  FlyInput wheel{};
+  wheel.wheel = 1;
+  camera.flySpeed = 5.0F;
+  fly_editor_camera(camera, wheel, 0.0F);
+  t.check(camera.flySpeed == 5.0F * 1.2F, "a wheel notch speeds up by 1.2");
+  wheel.wheel = -1;
+  fly_editor_camera(camera, wheel, 0.0F);
+  t.check(camera.flySpeed == (5.0F * 1.2F) / 1.2F,
+          "a notch back slows down by 1.2");
+  camera.flySpeed = 90.0F;
+  wheel.wheel = 2;
+  fly_editor_camera(camera, wheel, 0.0F);
+  t.check(camera.flySpeed == EditorCamera::kMaxFlySpeed,
+          "the speed tops out at 100 m/s");
+  camera.flySpeed = 0.011F;
+  wheel.wheel = -1;
+  fly_editor_camera(camera, wheel, 0.0F);
+  t.check(camera.flySpeed == EditorCamera::kMinFlySpeed,
+          "and bottoms out at 1 cm/s");
+
+  FlyInput up{};
+  up.lookY = -10000.0F;
+  fly_editor_camera(camera, up, 0.0F);
+  t.check(camera.pitch == EditorCamera::kMinPitch,
+          "looking up stops at the pitch limit");
+}
+
 } // namespace
 
 int main() {
@@ -164,6 +258,7 @@ int main() {
   check_convention(t, false, "[-1,1]: helpers succeed");
   check_convention(t, true, "[0,1]: helpers succeed");
   check_clip_planes_follow_distance(t);
+  check_fly(t);
 
   // A singular projection is refused, not unprojected into garbage.
   Vec3 corners[8]{};

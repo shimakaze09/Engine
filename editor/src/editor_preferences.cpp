@@ -5,10 +5,16 @@
 
 #include "editor_preferences.h"
 
+#include "editor_session.h"
 #include "editor_shortcuts.h"
 
+#include <algorithm>
+#include <cctype>
+#include <cerrno>
 #include <charconv>
+#include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <system_error>
 
@@ -31,6 +37,12 @@ constexpr const char *kWindowMaximizedKey = "WindowMaximized=";
 /// A rebound shortcut: Shortcut.<action id>=<chord>, one line per action
 /// whose chords differ from the default.
 constexpr const char *kShortcutKey = "Shortcut.";
+/// Which axes the move and rotate handles follow: World or Local.
+constexpr const char *kGizmoSpaceKey = "GizmoSpace=";
+/// Whether the Scene view draws its reference grid: 1 or 0.
+constexpr const char *kShowGridKey = "ShowGrid=";
+/// The Scene camera's fly speed in metres per second.
+constexpr const char *kCameraSpeedKey = "CameraSpeed=";
 
 /// The geometry the layout file stored, and whether it waits to be
 /// applied.
@@ -77,6 +89,54 @@ void read_line(ImGuiContext *, ImGuiSettingsHandler *, void *,
     }
     std::memcpy(idBuffer, id, idLength);
     static_cast<void>(stage_stored_shortcut(idBuffer, equals + 1));
+    return;
+  }
+  const std::size_t spaceKeyLength = std::strlen(kGizmoSpaceKey);
+  if (std::strncmp(line, kGizmoSpaceKey, spaceKeyLength) == 0) {
+    const char *value = line + spaceKeyLength;
+    if (std::strcmp(value, "World") == 0) {
+      editor_session().gizmoWorldSpace = true;
+    } else if (std::strcmp(value, "Local") == 0) {
+      editor_session().gizmoWorldSpace = false;
+    } else {
+      core::log_message(core::LogLevel::Warning, "editor",
+                        "stored GizmoSpace is neither World nor Local; "
+                        "ignored");
+    }
+    return;
+  }
+  const std::size_t speedKeyLength = std::strlen(kCameraSpeedKey);
+  if (std::strncmp(line, kCameraSpeedKey, speedKeyLength) == 0) {
+    const char *value = line + speedKeyLength;
+    const char *end = value + std::strlen(value);
+    // strtof, not std::from_chars: AppleClang's libc++ deletes the
+    // floating-point overload. The checks keep from_chars's strictness:
+    // the whole token, no leading space, no overflow.
+    errno = 0;
+    char *parseEnd = nullptr;
+    const float speed = std::strtof(value, &parseEnd);
+    if ((value != end) &&
+        (std::isspace(static_cast<unsigned char>(value[0])) == 0) &&
+        (parseEnd == end) && (errno != ERANGE) && std::isfinite(speed) &&
+        (speed > 0.0F)) {
+      editor_session().editorCamera.flySpeed = std::clamp(
+          speed, EditorCamera::kMinFlySpeed, EditorCamera::kMaxFlySpeed);
+    } else {
+      core::log_message(core::LogLevel::Warning, "editor",
+                        "stored CameraSpeed is not a positive number; "
+                        "ignored");
+    }
+    return;
+  }
+  const std::size_t gridKeyLength = std::strlen(kShowGridKey);
+  if (std::strncmp(line, kShowGridKey, gridKeyLength) == 0) {
+    const char *value = line + gridKeyLength;
+    if ((value[0] == '0' || value[0] == '1') && (value[1] == '\0')) {
+      editor_session().showGrid = value[0] == '1';
+    } else {
+      core::log_message(core::LogLevel::Warning, "editor",
+                        "stored ShowGrid is neither 0 nor 1; ignored");
+    }
     return;
   }
   const std::size_t keyLength = std::strlen(kCjkFontKey);
@@ -130,6 +190,11 @@ void write_all(ImGuiContext *, ImGuiSettingsHandler *handler,
                     geometry.height);
     buffer->appendf("%s%d\n", kWindowMaximizedKey, geometry.maximized ? 1 : 0);
   }
+  buffer->appendf("%s%s\n", kGizmoSpaceKey,
+                  editor_session().gizmoWorldSpace ? "World" : "Local");
+  buffer->appendf("%s%d\n", kShowGridKey, editor_session().showGrid ? 1 : 0);
+  buffer->appendf("%s%.9g\n", kCameraSpeedKey,
+                  static_cast<double>(editor_session().editorCamera.flySpeed));
   for (std::size_t i = 0U; i < editor_shortcut_count(); ++i) {
     const EditorShortcut &row = editor_shortcut_at(i);
     char chord[40] = {};

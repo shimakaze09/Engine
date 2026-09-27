@@ -7,11 +7,12 @@
 #include <cstdint>
 
 #include "engine/core/logging.h"
-#include "engine/renderer/command_buffer.h"
+#include "engine/math/frustum.h"
 #include "engine/math/mat4.h"
 #include "engine/math/transform.h"
 #include "engine/math/vec3.h"
 #include "engine/math/vec4.h"
+#include "engine/renderer/command_buffer.h"
 #include "engine/renderer/render_device.h"
 
 namespace engine::renderer {
@@ -125,31 +126,6 @@ math::Vec3 choose_light_up(const math::Vec3 &lightDir) noexcept {
                                         : math::Vec3(0.0F, 1.0F, 0.0F);
 }
 
-/// Extract 8 world-space frustum corners from inverse view-projection.
-void extract_frustum_corners(const math::Mat4 &invViewProj,
-                             math::Vec3 outCorners[8]) noexcept {
-  // Near-plane NDC z follows the device convention: -1 on GL, 0 on
-  // zero-to-one APIs — unprojecting -1 there lands inside the frustum
-  // (half the near distance) and over-extends every cascade's fit.
-  const float nearZ = device_depth_zero_one() ? 0.0F : -1.0F;
-  const float ndcCorners[8][3] = {
-      {-1.0F, -1.0F, nearZ}, {1.0F, -1.0F, nearZ}, {1.0F, 1.0F, nearZ},
-      {-1.0F, 1.0F, nearZ},  {-1.0F, -1.0F, 1.0F}, {1.0F, -1.0F, 1.0F},
-      {1.0F, 1.0F, 1.0F},    {-1.0F, 1.0F, 1.0F},
-  };
-
-  for (int i = 0; i < 8; ++i) {
-    math::Vec4 clip(ndcCorners[i][0], ndcCorners[i][1], ndcCorners[i][2], 1.0F);
-    math::Vec4 world = math::mul(invViewProj, clip);
-    if (std::abs(world.w) > 1e-7F) {
-      world.x /= world.w;
-      world.y /= world.w;
-      world.z /= world.w;
-    }
-    outCorners[i] = math::Vec3(world.x, world.y, world.z);
-  }
-}
-
 } // namespace
 
 /// Builds the light-space matrix for one cascade: the camera frustum's
@@ -170,8 +146,14 @@ math::Mat4 compute_cascade_matrix(const math::Mat4 &viewMatrix,
     return math::Mat4{};
   }
 
+  // The near corners follow the device's depth convention: unprojecting
+  // GL's -1 on a zero-to-one device lands inside the frustum, at about
+  // half the near distance, and over-extends every cascade's fit.
   math::Vec3 fullCorners[8]{};
-  extract_frustum_corners(invViewProj, fullCorners);
+  if (!math::frustum_corners(invViewProj, device_depth_zero_one(),
+                             fullCorners)) {
+    return math::Mat4{};
+  }
 
   const float nearRatio = (std::abs(projFar - projNear) > 1e-7F)
                               ? (cascadeNear - projNear) / (projFar - projNear)

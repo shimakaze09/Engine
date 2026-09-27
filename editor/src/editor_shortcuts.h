@@ -36,6 +36,8 @@ enum class EditorAction : std::uint8_t {
   GizmoTranslate,
   GizmoRotate,
   GizmoScale,
+  GizmoSpace,
+  FrameSelected,
   PlayStop,
   Pause,
   Step,

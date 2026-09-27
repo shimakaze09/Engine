@@ -87,4 +87,14 @@ inline Vec3 transform_aabb_half_extents(const Mat4 &worldMatrix,
                   (std::fabs(worldMatrix.columns[2].z) * halfZ));
 }
 
+/// The world-axis box of the local box (localCenter, localHalfExtents)
+/// under `worldMatrix`: its transformed centre and the conservative half
+/// extents of transform_aabb_half_extents.
+inline void transform_aabb(const Mat4 &worldMatrix, const Vec3 &localCenter,
+                           const Vec3 &localHalfExtents, Vec3 *outCenter,
+                           Vec3 *outHalfExtents) noexcept {
+  *outCenter = transform_point(worldMatrix, localCenter);
+  *outHalfExtents = transform_aabb_half_extents(worldMatrix, localHalfExtents);
+}
+
 } // namespace engine::math

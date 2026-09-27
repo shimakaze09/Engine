@@ -258,6 +258,8 @@ void draw_main_menu_bar() noexcept {
     editor_action_menu_item(EditorAction::Duplicate);
     editor_action_menu_item(EditorAction::Delete);
     ImGui::Separator();
+    editor_action_menu_item(EditorAction::FrameSelected);
+    ImGui::Separator();
     // Checked while running, as Unity's Edit menu shows play state.
     const PlayState state = editor_session().playState;
     editor_action_menu_item(EditorAction::PlayStop,
@@ -464,9 +466,41 @@ void draw_toolbar() noexcept {
   if (ImGui::RadioButton("S", editor_session().gizmoOp == ImGuizmo::SCALE)) {
     editor_session().gizmoOp = ImGuizmo::SCALE;
   }
+  ImGui::SameLine();
+  // Scale always works on the entity's own axes (ImGuizmo forces it: a
+  // scale along a world axis would shear a rotated entity), so the toggle
+  // shows Local while Scale is active and says why.
+  const bool scaling = editor_session().gizmoOp == ImGuizmo::SCALE;
+  const bool worldAxes = editor_session().gizmoWorldSpace && !scaling;
+  if (ImGui::Button(worldAxes ? "World" : "Local")) {
+    static_cast<void>(run_editor_action(EditorAction::GizmoSpace));
+  }
+  ImGui::SetItemTooltip(scaling ? "Scale always uses the entity's own axes "
+                                  "(%s switches move and rotate)"
+                                : "Handle axes: the world's or the entity's "
+                                  "own (%s)",
+                        editor_shortcut_text(EditorAction::GizmoSpace));
 
   ImGui::SameLine();
   ImGui::SeparatorEx(ImGuiSeparatorFlags_Vertical);
+  ImGui::SameLine();
+  if (ImGui::Checkbox("Grid", &editor_session().showGrid)) {
+    ImGui::MarkIniSettingsDirty(); // a saved preference
+  }
+  ImGui::SetItemTooltip("The Scene view's ground grid; its spacing follows "
+                        "the zoom");
+  ImGui::SameLine();
+  ImGui::SetNextItemWidth(72.0F);
+  float &flySpeed = editor_session().editorCamera.flySpeed;
+  if (ImGui::DragFloat(
+          "##FlySpeed", &flySpeed, 0.05F, EditorCamera::kMinFlySpeed,
+          EditorCamera::kMaxFlySpeed, "%.2f m/s",
+          ImGuiSliderFlags_AlwaysClamp | ImGuiSliderFlags_Logarithmic)) {
+    ImGui::MarkIniSettingsDirty();
+  }
+  ImGui::SetItemTooltip("Fly speed: hold the right mouse button in the "
+                        "Scene view and use WASD, Q/E; Shift is four times "
+                        "as fast, the wheel changes the speed");
   ImGui::SameLine();
   ImGui::Checkbox("Snap", &editor_session().snapEnabled);
   ImGui::SameLine();
@@ -527,6 +561,14 @@ static bool draw_entity_row(runtime::Entity entity, bool hasChildren,
   if (ImGui::IsItemClicked(ImGuiMouseButton_Left) &&
       !ImGui::IsItemToggledOpen()) {
     select_entity(entity, ImGui::GetIO().KeyCtrl);
+  }
+  // A double-click frames the row in the Scene view, as in Unity.
+  if (ImGui::IsItemHovered() &&
+      ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) &&
+      !ImGui::IsItemToggledOpen()) {
+    select_entity(entity, false);
+    pending.kind = PendingHierarchyEdit::Kind::Action;
+    pending.action = EditorAction::FrameSelected;
   }
 
   if (ImGui::BeginPopupContextItem(label)) {

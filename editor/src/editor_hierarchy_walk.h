@@ -58,4 +58,18 @@ void walk_entity_hierarchy(runtime::World &world, std::size_t maxDepth,
   });
 }
 
+/// Visits `root` and every descendant, pre-order, calling visit(entity)
+/// on each; a node `maxDepth` levels below `root` is visited but its
+/// children are not. The same no-edit rule as walk_entity_hierarchy holds.
+template <typename Visit>
+void walk_entity_subtree(runtime::World &world, runtime::Entity root,
+                         std::size_t maxDepth, Visit &&visit) noexcept {
+  auto enter = [&visit](runtime::Entity entity, std::size_t, bool) noexcept {
+    visit(entity);
+    return true;
+  };
+  auto leave = [](runtime::Entity) noexcept {};
+  detail::walk_entity_node(world, root, 0U, maxDepth, enter, leave);
+}
+
 } // namespace engine::editor

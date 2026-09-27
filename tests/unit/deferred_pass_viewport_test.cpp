@@ -139,7 +139,7 @@ bool compute_tile_texture_layout(int, int, int,
 }
 std::size_t compute_tile_buffer_size(int, int) noexcept { return 0U; }
 bool cull_lights_tiled(const SceneLightData &, const float *, const float *,
-                       int, int, TileLightData &outData) noexcept {
+                       bool, int, int, TileLightData &outData) noexcept {
   outData = TileLightData{};
   return false;
 }

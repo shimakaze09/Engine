@@ -517,6 +517,99 @@ void check_rebinding(engine::tests::TestContext &t, World &world) noexcept {
           "Restore defaults restores every chord");
 }
 
+/// X switches the move and rotate handles between the world's axes and
+/// the entity's own, as Unity's handle-rotation toggle does; the choice is
+/// saved as GizmoSpace=World or Local, and anything else stored is
+/// refused with the current choice kept.
+void check_gizmo_space(engine::tests::TestContext &t) noexcept {
+  engine::editor::EditorSession &session = engine::editor::editor_session();
+  session.gizmoWorldSpace = false;
+  tap(ImGuiKey_X);
+  t.check(session.gizmoWorldSpace, "X switches the handles to world axes");
+  tap(ImGuiMod_Ctrl | ImGuiKey_X);
+  t.check(session.gizmoWorldSpace, "Ctrl+X is not X");
+  char section[2048] = {};
+  t.check((engine::editor::editor_preferences_section(section,
+                                                      sizeof(section)) > 0U) &&
+              (std::strstr(section, "GizmoSpace=World\n") != nullptr),
+          "world axes are saved");
+  load_section("GizmoSpace=Local\n");
+  t.check(!session.gizmoWorldSpace, "a stored Local is applied");
+  tap(ImGuiKey_X);
+  load_section("GizmoSpace=Sideways\n");
+  t.check(session.gizmoWorldSpace, "a malformed GizmoSpace keeps the choice");
+  tap(ImGuiKey_X);
+  t.check(!session.gizmoWorldSpace, "X switches back to the entity's axes");
+}
+
+/// The Scene grid's toggle is saved as ShowGrid=1 or 0; anything else
+/// stored is refused with the current choice kept.
+void check_grid_preference(engine::tests::TestContext &t) noexcept {
+  engine::editor::EditorSession &session = engine::editor::editor_session();
+  session.showGrid = true;
+  char section[2048] = {};
+  t.check((engine::editor::editor_preferences_section(section,
+                                                      sizeof(section)) > 0U) &&
+              (std::strstr(section, "ShowGrid=1\n") != nullptr),
+          "a shown grid is saved");
+  load_section("ShowGrid=0\n");
+  t.check(!session.showGrid, "a stored hidden grid is applied");
+  load_section("ShowGrid=yes\n");
+  t.check(!session.showGrid, "a malformed ShowGrid keeps the choice");
+  session.showGrid = true;
+}
+
+/// While the Scene camera flies, WASD/QE move it: the dispatcher stands
+/// down so W is not the Move tool. The fly speed is saved and read back
+/// exactly; a stored speed out of range is clamped, and one that is not
+/// wholly a finite positive number is refused with the current speed kept.
+void check_flying(engine::tests::TestContext &t) noexcept {
+  engine::editor::EditorSession &session = engine::editor::editor_session();
+  session.gizmoOp = ImGuizmo::ROTATE;
+  session.sceneFlying = true;
+  tap(ImGuiKey_W);
+  t.check(session.gizmoOp == ImGuizmo::ROTATE, "W flies, not Move, in flight");
+  session.sceneFlying = false;
+  tap(ImGuiKey_W);
+  t.check(session.gizmoOp == ImGuizmo::TRANSLATE, "W is Move again after");
+
+  session.editorCamera.flySpeed = 5.0F * 1.2F * 1.2F * 1.2F;
+  const float saved = session.editorCamera.flySpeed;
+  char section[2048] = {};
+  t.check(engine::editor::editor_preferences_section(section, sizeof(section)) >
+              0U,
+          "the section is written");
+  session.editorCamera.flySpeed = 1.0F;
+  ImGui::LoadIniSettingsFromMemory(section, std::strlen(section));
+  t.check(session.editorCamera.flySpeed == saved,
+          "the fly speed reads back exactly");
+  load_section("CameraSpeed=500\n");
+  t.check(session.editorCamera.flySpeed ==
+              engine::editor::EditorCamera::kMaxFlySpeed,
+          "a stored speed out of range is clamped");
+  load_section("CameraSpeed=0\n");
+  t.check(session.editorCamera.flySpeed ==
+              engine::editor::EditorCamera::kMaxFlySpeed,
+          "a zero speed is refused");
+  load_section("CameraSpeed=fast\n");
+  t.check(session.editorCamera.flySpeed ==
+              engine::editor::EditorCamera::kMaxFlySpeed,
+          "a malformed speed is refused");
+  // From a speed no accepted value would land on (5 as read, or the
+  // clamp bound for an infinite one), so each refusal is observable.
+  bool strict = true;
+  for (const char *stored :
+       {"CameraSpeed=5m\n", "CameraSpeed= 5\n", "CameraSpeed=\n",
+        "CameraSpeed=inf\n", "CameraSpeed=nan\n", "CameraSpeed=1e40\n"}) {
+    session.editorCamera.flySpeed = 3.0F;
+    load_section(stored);
+    strict = strict && (session.editorCamera.flySpeed == 3.0F);
+  }
+  t.check(strict, "trailing text, a leading space, an empty value, a "
+                  "non-finite or an overflowing speed is refused");
+  session.editorCamera.flySpeed = 5.0F;
+}
+
 } // namespace
 
 int main() {
@@ -564,6 +657,9 @@ int main() {
   check_play_chords(t, *world);
   check_create_and_exit(t, *world);
   check_rebinding(t, *world);
+  check_gizmo_space(t);
+  check_grid_preference(t);
+  check_flying(t);
 
   editor_set_world(nullptr);
   engine::core::platform_set_scripted_file_dialogs(false);

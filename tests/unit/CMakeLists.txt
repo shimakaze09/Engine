@@ -141,6 +141,13 @@ engine_add_test_executable(engine_unit_math
     engine_math
 )
 
+engine_add_test_executable(engine_unit_math_frustum
+    SOURCES
+    math_frustum_test.cpp
+    PRIVATE_DEPS
+    engine_math
+)
+
 engine_add_test_executable(engine_unit_scalar_determinism
     SOURCES
     scalar_determinism_test.cpp
@@ -2266,6 +2273,51 @@ engine_add_test_executable(engine_unit_editor_shortcuts
     PRIVATE_INCLUDE_DIRS
     ${CMAKE_SOURCE_DIR}/editor/src
     ${CMAKE_SOURCE_DIR}/runtime/src
+    PRIVATE_DEPS
+    engine_editor
+    COMPILE_DEFINITIONS
+    SDL_MAIN_HANDLED
+)
+
+engine_add_test_executable(engine_unit_editor_frame_selection
+    SOURCES
+    editor_frame_selection_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/editor/src
+    ${CMAKE_SOURCE_DIR}/runtime/src
+    PRIVATE_DEPS
+    engine_editor
+    COMPILE_DEFINITIONS
+    SDL_MAIN_HANDLED
+)
+
+engine_add_test_executable(engine_unit_editor_scene_query
+    SOURCES
+    editor_scene_query_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/editor/src
+    PRIVATE_DEPS
+    engine_editor
+    COMPILE_DEFINITIONS
+    SDL_MAIN_HANDLED
+)
+
+engine_add_test_executable(engine_unit_editor_light_gizmos
+    SOURCES
+    editor_light_gizmos_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/editor/src
+    PRIVATE_DEPS
+    engine_editor
+    COMPILE_DEFINITIONS
+    SDL_MAIN_HANDLED
+)
+
+engine_add_test_executable(engine_unit_editor_grid
+    SOURCES
+    editor_grid_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/editor/src
     PRIVATE_DEPS
     engine_editor
     COMPILE_DEFINITIONS

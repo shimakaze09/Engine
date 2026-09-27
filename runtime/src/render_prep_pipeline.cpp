@@ -9,6 +9,7 @@
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
 #include "engine/math/aabb.h"
+#include "engine/math/frustum.h"
 #include "engine/math/mat4.h"
 #include "engine/math/transform.h"
 #include "engine/math/vec4.h"
@@ -17,80 +18,6 @@
 namespace engine::runtime {
 
 namespace {
-
-struct FrustumPlane final {
-  float a;
-  float b;
-  float c;
-  float d;
-};
-
-bool aabb_outside_plane(const FrustumPlane &p, const math::Vec3 &center,
-                        const math::Vec3 &half) noexcept {
-  const float px = center.x + (p.a >= 0.0F ? half.x : -half.x);
-  const float py = center.y + (p.b >= 0.0F ? half.y : -half.y);
-  const float pz = center.z + (p.c >= 0.0F ? half.z : -half.z);
-  return (p.a * px + p.b * py + p.c * pz + p.d) < 0.0F;
-}
-
-// Gribb-Hartmann: extract 6 frustum planes from a column-major VP matrix,
-// in order left, right, bottom, top, near, far.
-// Row j = (columns[0][j], columns[1][j], columns[2][j], columns[3][j])
-// where Vec4 x/y/z/w map to indices 0/1/2/3.
-void extract_frustum_planes(const math::Mat4 &vp, bool depthZeroOne,
-                            FrustumPlane planes[6]) noexcept {
-  const math::Vec4 c0 = vp.columns[0];
-  const math::Vec4 c1 = vp.columns[1];
-  const math::Vec4 c2 = vp.columns[2];
-  const math::Vec4 c3 = vp.columns[3];
-  planes[0] = {c0.w + c0.x, c1.w + c1.x, c2.w + c2.x, c3.w + c3.x};
-  planes[1] = {c0.w - c0.x, c1.w - c1.x, c2.w - c2.x, c3.w - c3.x};
-  planes[2] = {c0.w + c0.y, c1.w + c1.y, c2.w + c2.y, c3.w + c3.y};
-  planes[3] = {c0.w - c0.y, c1.w - c1.y, c2.w - c2.y, c3.w - c3.y};
-  // Near plane depends on the device clip-depth convention: GL clips at
-  // z = -w (row w+z), the zero-to-one APIs at z = 0 (row z alone).
-  if (depthZeroOne) {
-    planes[4] = {c0.z, c1.z, c2.z, c3.z};
-  } else {
-    planes[4] = {c0.w + c0.z, c1.w + c1.z, c2.w + c2.z, c3.w + c3.z};
-  }
-  planes[5] = {c0.w - c0.z, c1.w - c1.z, c2.w - c2.z, c3.w - c3.z};
-}
-
-bool aabb_culled_by_frustum(const FrustumPlane planes[6],
-                            const math::Vec3 &center,
-                            const math::Vec3 &half) noexcept {
-  for (int p = 0; p < 6; ++p) {
-    if (aabb_outside_plane(planes[p], center, half)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-/// Conservative test of the box swept along `sweep` (a direction scaled
-/// by the sweep distance) against the frustum: the swept solid lies
-/// entirely outside a plane only when the box's near corner plus the
-/// sweep's reach toward the plane still falls behind it.
-bool swept_aabb_culled_by_frustum(const FrustumPlane planes[6],
-                                  const math::Vec3 &center,
-                                  const math::Vec3 &half,
-                                  const math::Vec3 &sweep) noexcept {
-  for (int p = 0; p < 6; ++p) {
-    const FrustumPlane &plane = planes[p];
-    const float px = center.x + (plane.a >= 0.0F ? half.x : -half.x);
-    const float py = center.y + (plane.b >= 0.0F ? half.y : -half.y);
-    const float pz = center.z + (plane.c >= 0.0F ? half.z : -half.z);
-    const float along = (plane.a * sweep.x) + (plane.b * sweep.y) +
-                        (plane.c * sweep.z);
-    const float reach = (along > 0.0F) ? along : 0.0F;
-    if ((plane.a * px + plane.b * py + plane.c * pz + plane.d + reach) <
-        0.0F) {
-      return true;
-    }
-  }
-  return false;
-}
 
 /// Whether a sphere overlaps the axis-aligned box.
 bool aabb_intersects_sphere(const math::Vec3 &center, const math::Vec3 &half,
@@ -107,7 +34,7 @@ bool aabb_intersects_sphere(const math::Vec3 &center, const math::Vec3 &half,
 struct AuxiliaryCulling final {
   const RenderPrepAuxiliaryInputs *inputs = nullptr;
   math::Vec3 sweep{};
-  FrustumPlane capturePlanes[renderer::kMaxSceneCaptures][6] = {};
+  math::Frustum captureFrusta[renderer::kMaxSceneCaptures] = {};
 };
 
 void prepare_auxiliary_culling(const RenderPrepAuxiliaryInputs *inputs,
@@ -123,14 +50,14 @@ void prepare_auxiliary_culling(const RenderPrepAuxiliaryInputs *inputs,
           ? inputs->captureCount
           : renderer::kMaxSceneCaptures;
   for (std::size_t i = 0U; i < captureCount; ++i) {
-    extract_frustum_planes(inputs->captureViewProjections[i], depthZeroOne,
-                           out->capturePlanes[i]);
+    out->captureFrusta[i] = math::frustum_from_view_projection(
+        inputs->captureViewProjections[i], depthZeroOne);
   }
 }
 
 /// Which auxiliary passes want a draw the camera culled: zero drops it.
 std::uint16_t auxiliary_pass_mask(const AuxiliaryCulling &aux,
-                                  const FrustumPlane cameraPlanes[6],
+                                  const math::Frustum &cameraFrustum,
                                   const math::Vec3 &center,
                                   const math::Vec3 &half) noexcept {
   if (aux.inputs == nullptr) {
@@ -138,7 +65,8 @@ std::uint16_t auxiliary_pass_mask(const AuxiliaryCulling &aux,
   }
   std::uint16_t mask = 0U;
   if (aux.inputs->directionalShadow &&
-      !swept_aabb_culled_by_frustum(cameraPlanes, center, half, aux.sweep)) {
+      !math::frustum_excludes_swept_box(cameraFrustum, center, half,
+                                        aux.sweep)) {
     mask |= renderer::kPassShadowCaster;
   }
   if ((mask & renderer::kPassShadowCaster) == 0U) {
@@ -161,7 +89,7 @@ std::uint16_t auxiliary_pass_mask(const AuxiliaryCulling &aux,
           ? aux.inputs->captureCount
           : renderer::kMaxSceneCaptures;
   for (std::size_t i = 0U; i < captureCount; ++i) {
-    if (!aabb_culled_by_frustum(aux.capturePlanes[i], center, half)) {
+    if (!math::frustum_excludes_box(aux.captureFrusta[i], center, half)) {
       mask |= static_cast<std::uint16_t>(renderer::kPassCaptureBase
                                          << static_cast<unsigned int>(i));
     }
@@ -215,16 +143,6 @@ std::uint64_t build_draw_sort_key(const renderer::Material &material,
 }
 
 void mark_graph_failed(std::atomic<bool> *frameGraphFailed) noexcept;
-
-/// World-axis box of a mesh's object-space bounds under `model`.
-void world_mesh_bounds(const renderer::GpuMesh &mesh, const math::Mat4 &model,
-                       math::Vec3 *outCenter, math::Vec3 *outHalf) noexcept {
-  const math::Vec4 center4 =
-      math::mul(model, math::Vec4(mesh.boundsCenter.x, mesh.boundsCenter.y,
-                                  mesh.boundsCenter.z, 1.0F));
-  *outCenter = math::Vec3(center4.x, center4.y, center4.z);
-  *outHalf = math::transform_aabb_half_extents(model, mesh.boundsHalfExtents);
-}
 
 /// Submits a draw to the thread's buffer. A full buffer drops the draw and
 /// counts it; it is a per-frame degradation the pipeline reports once and
@@ -297,8 +215,8 @@ void render_prep_chunk_job(void *userData) noexcept {
       jobData->localBuffers[threadIndex];
 
   const math::Mat4 &vp = jobData->viewProjection;
-  FrustumPlane frustumPlanes[6];
-  extract_frustum_planes(vp, jobData->depthZeroOne, frustumPlanes);
+  const math::Frustum frustum =
+      math::frustum_from_view_projection(vp, jobData->depthZeroOne);
   AuxiliaryCulling auxiliary{};
   prepare_auxiliary_culling(jobData->auxiliary, jobData->depthZeroOne,
                             &auxiliary);
@@ -320,13 +238,14 @@ void render_prep_chunk_job(void *userData) noexcept {
       math::Vec3 center = transforms[i].position;
       math::Vec3 half(0.0F, 0.0F, 0.0F);
       if (peeked != nullptr) {
-        world_mesh_bounds(*peeked, transforms[i].matrix, &center, &half);
+        math::transform_aabb(transforms[i].matrix, peeked->boundsCenter,
+                             peeked->boundsHalfExtents, &center, &half);
       }
 
       const std::uint16_t passMask =
           (peeked == nullptr) ? std::uint16_t{0U}
-          : aabb_culled_by_frustum(frustumPlanes, center, half)
-              ? auxiliary_pass_mask(auxiliary, frustumPlanes, center, half)
+          : math::frustum_excludes_box(frustum, center, half)
+              ? auxiliary_pass_mask(auxiliary, frustum, center, half)
               : renderer::kPassCamera;
       if (passMask != 0U) {
         const renderer::MeshHandle runtimeMesh = renderer::resolve_mesh_asset(
@@ -466,12 +385,13 @@ void render_prep_chunk_job(void *userData) noexcept {
       // vertex stage sways x by up to the strength and z by 0.35 of it).
       math::Vec3 center{};
       math::Vec3 half{};
-      world_mesh_bounds(*mesh, model, &center, &half);
+      math::transform_aabb(model, mesh->boundsCenter, mesh->boundsHalfExtents,
+                           &center, &half);
       const float sway = std::fabs(foliage->windStrength);
       half = math::Vec3(half.x + sway, half.y, half.z + (0.35F * sway));
       const std::uint16_t passMask =
-          aabb_culled_by_frustum(frustumPlanes, center, half)
-              ? auxiliary_pass_mask(auxiliary, frustumPlanes, center, half)
+          math::frustum_excludes_box(frustum, center, half)
+              ? auxiliary_pass_mask(auxiliary, frustum, center, half)
               : renderer::kPassCamera;
       if (passMask == 0U) {
         continue;

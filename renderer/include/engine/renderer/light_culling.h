@@ -72,6 +72,9 @@ bool compute_tile_texture_layout(int tileCountX, int tileCountY,
 /// @param lightData  Scene light data (point + spot light arrays).
 /// @param viewMatrix View matrix (camera).
 /// @param projMatrix Projection matrix.
+/// @param depthZeroToOne The projection's clip depth range: true for
+///                   [0, 1] (D3D, Metal, Vulkan), false for GL's [-1, 1];
+///                   it places each tile frustum's near plane.
 /// @param screenW    Screen width in pixels.
 /// @param screenH    Screen height in pixels.
 /// @param outData    Output tile data (caller provides buffer).
@@ -79,7 +82,8 @@ bool compute_tile_texture_layout(int tileCountX, int tileCountY,
 /// overflow-large screen size, missing/undersized buffer) the tile counts
 /// in outData are zeroed so callers cannot consume stale dimensions.
 bool cull_lights_tiled(const SceneLightData &lightData, const float *viewMatrix,
-                       const float *projMatrix, int screenW, int screenH,
+                       const float *projMatrix, bool depthZeroToOne,
+                       int screenW, int screenH,
                        TileLightData &outData) noexcept;
 
 /// Compute the required buffer size for tile data.

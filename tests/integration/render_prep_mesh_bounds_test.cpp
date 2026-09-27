@@ -6,7 +6,8 @@
 // from its origin, a mesh larger than the unit cube, a big mesh with a
 // small collider, a foliage patch scaled by its transform, and a foliage
 // instance the wind sways into view are each drawn, and a mesh wholly
-// outside the frustum is still culled.
+// outside the frustum is still culled. The editor's Frame Selected reads
+// the same bounds through its bridge.
 
 #include "engine/core/job_system.h"
 #include "engine/math/mat4.h"
@@ -14,7 +15,9 @@
 #include "engine/renderer/asset_database.h"
 #include "engine/renderer/command_buffer.h"
 #include "engine/renderer/mesh_loader.h"
+#include "engine/runtime/editor_bridge.h"
 #include "engine/runtime/render_prep_pipeline.h"
+#include "engine/runtime/service_registry.h"
 #include "engine/runtime/world.h"
 
 #include <atomic>
@@ -209,6 +212,43 @@ bool drawn(const engine::renderer::CommandBufferView &view,
 } // namespace
 
 /// Runs this executable or test program.
+/// The editor reads the bounds render prep culls by, through the same
+/// peek: the offset mesh reports its centre (20, 0, 0) and unit half
+/// extents exactly. An unknown mesh, and any mesh while the registry is
+/// unpublished, report nothing and leave the outputs alone.
+int check_editor_mesh_bounds(engine::renderer::AssetDatabase *database,
+                             const engine::renderer::GpuMeshRegistry *registry,
+                             engine::content::AssetId offsetMesh) noexcept {
+  engine::runtime::EngineAssetDatabaseService service{};
+  service.database = database;
+  engine::runtime::set_editor_asset_service(&service);
+  engine::runtime::set_editor_mesh_registry(registry);
+  Vec3 center(-1.0F, -1.0F, -1.0F);
+  Vec3 half(-1.0F, -1.0F, -1.0F);
+  int result = 0;
+  if (!engine::runtime::editor_mesh_local_bounds(offsetMesh, &center, &half) ||
+      (center.x != 20.0F) || (center.y != 0.0F) || (center.z != 0.0F) ||
+      (half.x != 1.0F) || (half.y != 1.0F) || (half.z != 1.0F)) {
+    std::fprintf(stderr, "FAIL: the editor reads the mesh's bounds\n");
+    result = 20;
+  }
+  Vec3 untouched(-1.0F, -1.0F, -1.0F);
+  if (engine::runtime::editor_mesh_local_bounds(12345U, &untouched, &half) ||
+      (untouched.x != -1.0F)) {
+    std::fprintf(stderr, "FAIL: an unknown mesh reports no bounds\n");
+    result = 21;
+  }
+  engine::runtime::set_editor_mesh_registry(nullptr);
+  if (engine::runtime::editor_mesh_local_bounds(offsetMesh, &untouched,
+                                                &half) ||
+      (untouched.x != -1.0F)) {
+    std::fprintf(stderr, "FAIL: no registry, no bounds\n");
+    result = 22;
+  }
+  engine::runtime::set_editor_asset_service(nullptr);
+  return result;
+}
+
 int main() {
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
                                                     engine::runtime::World());
@@ -318,5 +358,8 @@ int main() {
       ++failures;
     }
   }
-  return (failures == 0) ? 0 : 10;
+  if (failures != 0) {
+    return 10;
+  }
+  return check_editor_mesh_bounds(db, registry, offsetMesh);
 }

@@ -41,13 +41,6 @@ namespace {
          std::fabs(value.columns[3].w - 1.0F) <= epsilon;
 }
 
-[[nodiscard]] math::Vec3 transform_point(const math::Mat4 &matrix,
-                                         const math::Vec3 &point) noexcept {
-  const math::Vec4 result =
-      math::mul(matrix, math::Vec4(point.x, point.y, point.z, 1.0F));
-  return math::Vec3(result.x, result.y, result.z);
-}
-
 [[nodiscard]] math::Vec3
 support_direction_local(const math::Mat4 &localToWorld,
                         const math::Vec3 &worldDirection) noexcept {
@@ -187,8 +180,8 @@ bool make_collider_world_geometry(
     return false;
   }
 
-  geometry.center =
-      transform_point(geometry.localToWorld, math::Vec3(0.0F, 0.0F, 0.0F));
+  geometry.center = math::transform_point(geometry.localToWorld,
+                                          math::Vec3(0.0F, 0.0F, 0.0F));
   geometry.shape = shape;
   geometry.halfExtents = math::Vec3(std::fabs(collider.halfExtents.x),
                                     std::fabs(collider.halfExtents.y),
@@ -227,8 +220,8 @@ math::Vec3 collider_support_point(const ColliderWorldGeometry &geometry,
   }
   const math::Vec3 localDirection =
       support_direction_local(geometry.localToWorld, worldDirection);
-  return transform_point(geometry.localToWorld,
-                         local_support_point(geometry, localDirection));
+  return math::transform_point(geometry.localToWorld,
+                               local_support_point(geometry, localDirection));
 }
 
 } // namespace engine::physics
