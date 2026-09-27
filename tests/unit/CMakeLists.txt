@@ -2259,3 +2259,47 @@ engine_add_test_executable(engine_unit_platform_rider_ccd
     engine_physics
     engine_runtime
 )
+
+engine_add_test_executable(engine_unit_editor_shortcuts
+    SOURCES
+    editor_shortcuts_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/editor/src
+    ${CMAKE_SOURCE_DIR}/runtime/src
+    PRIVATE_DEPS
+    engine_editor
+    COMPILE_DEFINITIONS
+    SDL_MAIN_HANDLED
+)
+
+engine_add_test_executable(engine_unit_editor_hierarchy_walk
+    SOURCES
+    editor_hierarchy_walk_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/editor/src
+    PRIVATE_DEPS
+    engine_editor
+    COMPILE_DEFINITIONS
+    SDL_MAIN_HANDLED
+)
+
+engine_add_test_executable(engine_unit_editor_delete_selection
+    SOURCES
+    editor_delete_selection_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/editor/src
+    ${CMAKE_SOURCE_DIR}/runtime/src
+    PRIVATE_DEPS
+    engine_editor
+    COMPILE_DEFINITIONS
+    SDL_MAIN_HANDLED
+)
+
+engine_add_test_executable(engine_unit_editor_camera
+    SOURCES
+    editor_camera_test.cpp
+    PRIVATE_DEPS
+    engine_editor
+    COMPILE_DEFINITIONS
+    SDL_MAIN_HANDLED
+)

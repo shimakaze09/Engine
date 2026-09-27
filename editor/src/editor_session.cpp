@@ -549,6 +549,12 @@ bool world_is_editable() noexcept {
          (editor_session().world->current_phase() == runtime::WorldPhase::Input);
 }
 
+bool game_owns_keyboard() noexcept {
+  const EditorSession &session = editor_session();
+  return (session.playState != PlayState::Stopped) && session.gameViewFocused &&
+         !ImGui::GetIO().WantTextInput;
+}
+
 // Everything world_is_editable requires except the restore latch: after a
 // failed Stop restore the preserved world must still be replaceable (New,
 // Open) and exportable (Save As), because that is the recovery path the
@@ -836,7 +842,9 @@ void start_play_mode() noexcept {
 
   if (editor_session().worldRestoreFailed) {
     core::log_message(core::LogLevel::Warning, "editor",
-                      "play blocked: load scene to recover from restore error");
+                      "play blocked after a failed Stop restore: Save As "
+                      "to export the preserved world, or New/Open to "
+                      "replace it");
     return;
   }
 

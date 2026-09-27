@@ -411,7 +411,9 @@ void draw_inspector_panel() noexcept {
   if (editor_session().worldRestoreFailed) {
     ImGui::TextColored(ImVec4(1.0F, 0.5F, 0.2F, 1.0F),
                        "Scene restore failed on Stop.");
-    ImGui::TextUnformatted("Use File -> Load Scene to recover.");
+    ImGui::TextWrapped("The play world is kept. Use File > Save As to "
+                       "export it, or File > New Scene or Open Scene to "
+                       "replace it.");
     ImGui::Separator();
   }
 

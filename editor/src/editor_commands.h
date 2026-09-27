@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <new>
 
 #include "editor_component_registry.h"
 #include "editor_session.h"
@@ -136,14 +137,20 @@ struct EntityDeleteRecord final {
   ComponentEditSnapshot components{};
 };
 
-/// Undoable entity deletion backed by parent-before-child subtree records;
-/// undo re-creates every member under its original persistent id so parent
-/// links and cross-references survive the round trip. The restore is
-/// transactional: when any member or component cannot be re-created, every
-/// member restored so far is destroyed again and undo reports failure.
+/// Undoable deletion of a forest of subtrees, one per deleted root, backed
+/// by parent-before-child records; undo re-creates every member under its
+/// original persistent id so parent links and cross-references survive the
+/// round trip. Execute resolves every root before destroying any, so a
+/// stale root refuses the whole command; a destroy that fails part-way
+/// restores the roots already destroyed. The restore is transactional:
+/// when any member or component cannot be re-created, every member
+/// restored so far is destroyed again and the step reports failure.
 struct EntityDeleteCommand final : EditorCommand {
   std::unique_ptr<EntityDeleteRecord[]> records{};
   std::size_t recordCount = 0U;
+  /// Where each root's subtree starts in `records`; one entry per root.
+  std::unique_ptr<std::size_t[]> rootRecords{};
+  std::size_t rootCount = 0U;
 
   bool execute() noexcept override;
   bool undo() noexcept override;
@@ -227,9 +234,22 @@ runtime::Entity execute_primitive_spawn(EditorPrimitive primitive) noexcept;
 /// allocation failure or when the entity is not alive.
 EntityDeleteCommand *
 build_entity_delete_command(runtime::Entity entity) noexcept;
-/// Deletes the entity subtree through the command history (falling back to
-/// a plain non-undoable destroy when the capture cannot be allocated).
+/// Captures `entities` as a forest into one delete command: an entity
+/// whose ancestor is also listed goes with that ancestor, dead or repeated
+/// entries are skipped, and each root takes its whole subtree. Null on
+/// allocation failure or when no listed entity is alive.
+EntityDeleteCommand *
+build_entity_delete_command(const runtime::Entity *entities,
+                            std::size_t count) noexcept;
+/// Deletes the entity subtree through the command history. Refused, with
+/// an Error logged and the world untouched, when the capture cannot be
+/// allocated or the entity is not alive.
 bool execute_entity_delete(runtime::Entity entity) noexcept;
+/// Deletes the whole selection as one undoable command, after committing
+/// any open Inspector or gizmo gesture, and clears the selection. False,
+/// with the world untouched, when nothing is selected or the capture
+/// cannot be allocated.
+bool execute_selection_delete() noexcept;
 
 /// Applies an inspector field edit through World validation immediately
 /// and folds it into the pending edit gesture (opened on the first change,
@@ -282,6 +302,19 @@ bool gizmo_has_gesture() noexcept;
 /// Test hook: the next `count` command allocations fail as if out of
 /// memory, so the refuse and unrecorded-edit paths are exercisable.
 void editor_commands_inject_allocation_failures(std::size_t count) noexcept;
+/// Consumes one injected allocation failure when any is outstanding.
+/// False means the caller must behave as if the allocation failed.
+bool editor_command_allocation_allowed() noexcept;
+
+/// Every command allocation funnels through here so the out-of-memory
+/// paths are reachable from a test; a failed allocation is never a
+/// license to mutate the world outside the history.
+template <typename Command> Command *allocate_command() noexcept {
+  if (!editor_command_allocation_allowed()) {
+    return nullptr;
+  }
+  return new (std::nothrow) Command();
+}
 
 /// Returns the default-valued snapshot used when adding a component.
 ComponentEditSnapshot default_component_snapshot(

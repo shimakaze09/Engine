@@ -68,6 +68,7 @@
 #include "editor_preferences.h"
 #include "editor_scene_document.h"
 #include "editor_session.h"
+#include "editor_shortcuts.h"
 
 namespace engine::editor {
 
@@ -78,14 +79,6 @@ namespace {
 /// is acquired — the failure shape a windowed run reaches when a backend
 /// refuses, which headless tests cannot provoke for real.
 bool g_forceInitializeFailureForTests = false;
-
-/// Whether the game has the keyboard: in play, with the Game view focused
-/// and no text field taking typing.
-bool game_owns_keyboard() noexcept {
-  const EditorSession &session = editor_session();
-  return (session.playState != PlayState::Stopped) && session.gameViewFocused &&
-         !ImGui::GetIO().WantTextInput;
-}
 
 void setup_default_dock_layout(ImGuiID dockspaceId) noexcept {
   ImGui::DockBuilderRemoveNode(dockspaceId);
@@ -394,38 +387,9 @@ void editor_new_frame() noexcept {
   ImGui::NewFrame();
   ImGuizmo::BeginFrame();
 
-  const ImGuiIO &io = ImGui::GetIO();
   // While the game has the keyboard (the Game view focused in play), its
   // keys are the game's, not editor shortcuts: W is a move, not a gizmo.
-  if (!io.WantTextInput && !game_owns_keyboard()) {
-    if (io.KeyCtrl && !io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_Z)) {
-      editor_history_undo();
-    }
-    if (io.KeyCtrl && io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_Z)) {
-      editor_history_redo();
-    }
-    if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_S)) {
-      request_save_scene();
-    }
-    if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_D)) {
-      const runtime::Entity selection = selected_entity();
-      if (world_is_editable() && (selection != runtime::kInvalidEntity)) {
-        const runtime::Entity copy = execute_entity_duplicate(selection);
-        if (copy != runtime::kInvalidEntity) {
-          select_entity(copy, false);
-        }
-      }
-    }
-    if (ImGui::IsKeyPressed(ImGuiKey_W)) {
-      editor_session().gizmoOp = ImGuizmo::TRANSLATE;
-    }
-    if (ImGui::IsKeyPressed(ImGuiKey_E)) {
-      editor_session().gizmoOp = ImGuizmo::ROTATE;
-    }
-    if (ImGui::IsKeyPressed(ImGuiKey_R)) {
-      editor_session().gizmoOp = ImGuizmo::SCALE;
-    }
-  }
+  dispatch_editor_shortcuts();
 }
 
 void editor_render(float frameMs, float utilizationPct) noexcept {

@@ -8,6 +8,7 @@ engine_add_module_library(engine_editor
     src/editor_asset_index.cpp
     src/editor_import_settings.cpp
     src/editor_commands.cpp
+    src/editor_entity_commands.cpp
     src/editor_console_capture.cpp
     src/editor_fonts.cpp
     src/editor_component_registry.cpp
@@ -31,6 +32,7 @@ engine_add_module_library(engine_editor
     src/editor_panels_viewport.cpp
     src/editor_scene_document.cpp
     src/editor_session.cpp
+    src/editor_shortcuts.cpp
     src/editor_camera.cpp
     PUBLIC_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/include

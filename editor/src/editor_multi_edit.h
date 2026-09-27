@@ -98,14 +98,14 @@ bool multi_edit_section_listed(ComponentEditType type) noexcept;
 /// type is exactly one of listed or deferred, enforced at compile time.
 bool multi_edit_type_deferred(ComponentEditType type) noexcept;
 
-/// Draws the Inspector's multi-selection body: one section per
-/// component common to every selected entity, each reflected field shown
-/// with a "(mixed)" suffix when the selection disagrees on its value, plus
-/// the shared Delete-selected and identity summary. No-ops when the
-/// selection has fewer than two entities (the single-entity Inspector
-/// handles that case). Draw-only; not exercised by headless tests (per
-/// CLAUDE.md's draw-code exemption) -- the functions above it carry the
-/// tested contract.
+/// Draws the Inspector's multi-selection body: the selection count, a
+/// Delete Selected button (the Delete action, one undoable command), and
+/// one section per component common to every selected entity, each
+/// reflected field shown with a "(mixed)" suffix when the selection
+/// disagrees on its value. No-ops when the selection has fewer than two
+/// entities (the single-entity Inspector handles that case). Draw code
+/// only: the functions above it and the Delete action carry the tested
+/// contract.
 void draw_multi_select_inspector_panel() noexcept;
 
 } // namespace engine::editor

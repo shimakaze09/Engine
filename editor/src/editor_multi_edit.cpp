@@ -1,6 +1,7 @@
 // Implements multi-entity Inspector support declared in editor_multi_edit.h.
 
 #include "editor_multi_edit.h"
+#include "editor_shortcuts.h"
 
 #if defined(__clang__) && (defined(__x86_64__) || defined(__i386__)) &&        \
     !defined(__PRFCHWINTRIN_H)
@@ -609,6 +610,14 @@ void draw_multi_select_inspector_panel() noexcept {
   }
 
   ImGui::Text("%zu entities selected", session.selectedEntityCount);
+  // The selection is gone once this runs, so nothing below may draw.
+  ImGui::BeginDisabled(!editor_action_enabled(EditorAction::Delete));
+  const bool deleted = ImGui::Button("Delete Selected") &&
+                       run_editor_action(EditorAction::Delete);
+  ImGui::EndDisabled();
+  if (deleted) {
+    return;
+  }
   ImGui::Separator();
 
   const bool editable = world_is_editable();
