@@ -181,6 +181,15 @@ public:
 
   /// Number of elements in an array value (0 for non-arrays).
   std::size_t array_size(const JsonValue &array) const noexcept;
+  /// Number of members of an object value (0 for non-objects), duplicate
+  /// keys counted each time they appear.
+  std::size_t object_size(const JsonValue &object) const noexcept;
+  /// Copies the member at `index`, in document order: its key as a String
+  /// value (copy_string decodes it) and its value. False out of range. A
+  /// strict reader walks these to refuse keys it does not know and keys
+  /// that appear twice, which get_object_field cannot see.
+  bool get_object_member(const JsonValue &object, std::size_t index,
+                         JsonValue *outKey, JsonValue *outValue) const noexcept;
   /// Elements parsed by get_array_element to reach requested indices since
   /// parse(); an ascending walk over N elements, nested walks included,
   /// costs O(N) of these. The unit tests pin the scaling with it.

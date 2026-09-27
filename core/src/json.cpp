@@ -1196,6 +1196,63 @@ std::size_t JsonParser::array_size(const JsonValue &array) const noexcept {
   return count;
 }
 
+std::size_t JsonParser::object_size(const JsonValue &object) const noexcept {
+  std::size_t count = 0U;
+  JsonValue key{};
+  JsonValue value{};
+  while (get_object_member(object, count, &key, &value)) {
+    ++count;
+  }
+  return count;
+}
+
+bool JsonParser::get_object_member(const JsonValue &object, std::size_t index,
+                                   JsonValue *outKey,
+                                   JsonValue *outValue) const noexcept {
+  if ((outKey == nullptr) || (outValue == nullptr) ||
+      (object.type != JsonValue::Type::Object) || (object.begin == nullptr) ||
+      (object.end == nullptr) || ((object.end - object.begin) < 2)) {
+    return false;
+  }
+
+  const char *cursor = object.begin + 1;
+  const char *end = object.end - 1;
+  skip_whitespace(cursor, end);
+  std::size_t current = 0U;
+  while (cursor < end) {
+    const char *keyBegin = nullptr;
+    const char *keyEnd = nullptr;
+    if (!parse_string_token(cursor, end, &keyBegin, &keyEnd)) {
+      return false;
+    }
+    skip_whitespace(cursor, end);
+    if ((cursor >= end) || (*cursor != ':')) {
+      return false;
+    }
+    ++cursor;
+    JsonValue value{};
+    if (!parse_value(cursor, end, &value, 1U)) {
+      return false;
+    }
+    if (current == index) {
+      outKey->type = JsonValue::Type::String;
+      outKey->begin = keyBegin;
+      outKey->end = keyEnd;
+      *outValue = value;
+      return true;
+    }
+    ++current;
+    skip_whitespace(cursor, end);
+    if ((cursor < end) && (*cursor == ',')) {
+      ++cursor;
+      skip_whitespace(cursor, end);
+      continue;
+    }
+    break;
+  }
+  return false;
+}
+
 bool JsonParser::as_float_array(const JsonValue &value, float *outValues,
                                 std::size_t expectedCount) const noexcept {
   if ((outValues == nullptr) || (value.type != JsonValue::Type::Array)) {
