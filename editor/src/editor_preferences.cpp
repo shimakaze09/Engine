@@ -8,7 +8,9 @@
 #include "editor_session.h"
 #include "editor_shortcuts.h"
 
+#include <algorithm>
 #include <charconv>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <system_error>
@@ -36,6 +38,8 @@ constexpr const char *kShortcutKey = "Shortcut.";
 constexpr const char *kGizmoSpaceKey = "GizmoSpace=";
 /// Whether the Scene view draws its reference grid: 1 or 0.
 constexpr const char *kShowGridKey = "ShowGrid=";
+/// The Scene camera's fly speed in metres per second.
+constexpr const char *kCameraSpeedKey = "CameraSpeed=";
 
 /// The geometry the layout file stored, and whether it waits to be
 /// applied.
@@ -94,6 +98,23 @@ void read_line(ImGuiContext *, ImGuiSettingsHandler *, void *,
     } else {
       core::log_message(core::LogLevel::Warning, "editor",
                         "stored GizmoSpace is neither World nor Local; "
+                        "ignored");
+    }
+    return;
+  }
+  const std::size_t speedKeyLength = std::strlen(kCameraSpeedKey);
+  if (std::strncmp(line, kCameraSpeedKey, speedKeyLength) == 0) {
+    const char *value = line + speedKeyLength;
+    const char *end = value + std::strlen(value);
+    float speed = 0.0F;
+    const std::from_chars_result parsed = std::from_chars(value, end, speed);
+    if ((parsed.ec == std::errc()) && (parsed.ptr == end) &&
+        std::isfinite(speed) && (speed > 0.0F)) {
+      editor_session().editorCamera.flySpeed = std::clamp(
+          speed, EditorCamera::kMinFlySpeed, EditorCamera::kMaxFlySpeed);
+    } else {
+      core::log_message(core::LogLevel::Warning, "editor",
+                        "stored CameraSpeed is not a positive number; "
                         "ignored");
     }
     return;
@@ -163,6 +184,8 @@ void write_all(ImGuiContext *, ImGuiSettingsHandler *handler,
   buffer->appendf("%s%s\n", kGizmoSpaceKey,
                   editor_session().gizmoWorldSpace ? "World" : "Local");
   buffer->appendf("%s%d\n", kShowGridKey, editor_session().showGrid ? 1 : 0);
+  buffer->appendf("%s%.9g\n", kCameraSpeedKey,
+                  static_cast<double>(editor_session().editorCamera.flySpeed));
   for (std::size_t i = 0U; i < editor_shortcut_count(); ++i) {
     const EditorShortcut &row = editor_shortcut_at(i);
     char chord[40] = {};

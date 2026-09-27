@@ -568,9 +568,10 @@ bool editor_shortcuts_blocked() noexcept {
   // A popup (a menu, a context menu, a combo, a modal) takes the keyboard
   // while open, and the unsaved-changes prompt counts from the moment it
   // is armed, before its modal is drawn.
-  // A chord being captured for a rebinding is not a command either.
+  // A chord being captured for a rebinding is not a command either, and
+  // while the Scene camera flies WASD/QE move it.
   return io.WantTextInput || scene_document_prompt_open() ||
-         (g_capturing != EditorAction::Count) ||
+         (g_capturing != EditorAction::Count) || editor_session().sceneFlying ||
          ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId |
                                     ImGuiPopupFlags_AnyPopupLevel);
 }

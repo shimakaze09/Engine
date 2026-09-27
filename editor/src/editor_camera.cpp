@@ -71,18 +71,59 @@ void update_editor_camera(EditorCamera &camera, int deltaX, int deltaY,
   }
 }
 
-renderer::CameraState editor_camera_state(const EditorCamera &camera) noexcept {
+namespace {
+
+/// The orbit offset from target to eye.
+math::Vec3 orbit_offset(const EditorCamera &camera) noexcept {
   const float cosPitch = std::cos(camera.pitch);
-  const float sinPitch = std::sin(camera.pitch);
-  const float cosYaw = std::cos(camera.yaw);
-  const float sinYaw = std::sin(camera.yaw);
+  return math::Vec3(cosPitch * std::sin(camera.yaw) * camera.distance,
+                    std::sin(camera.pitch) * camera.distance,
+                    cosPitch * std::cos(camera.yaw) * camera.distance);
+}
 
-  const math::Vec3 offset(cosPitch * sinYaw * camera.distance,
-                          sinPitch * camera.distance,
-                          cosPitch * cosYaw * camera.distance);
+constexpr float kFlyBoost = 4.0F;
+constexpr float kFlySpeedStep = 1.2F;
 
+} // namespace
+
+void fly_editor_camera(EditorCamera &camera, const FlyInput &input,
+                       float seconds) noexcept {
+  for (int notch = 0; notch < input.wheel; ++notch) {
+    camera.flySpeed *= kFlySpeedStep;
+  }
+  for (int notch = 0; notch > input.wheel; --notch) {
+    camera.flySpeed /= kFlySpeedStep;
+  }
+  camera.flySpeed = std::clamp(camera.flySpeed, EditorCamera::kMinFlySpeed,
+                               EditorCamera::kMaxFlySpeed);
+
+  // Turning about the eye: hold the eye, turn, and put the target back in
+  // front of it at the same distance.
+  const math::Vec3 eye = math::add(camera.target, orbit_offset(camera));
+  camera.yaw -= input.lookX * kOrbitSensitivity;
+  camera.pitch = std::clamp(camera.pitch + (input.lookY * kOrbitSensitivity),
+                            EditorCamera::kMinPitch, EditorCamera::kMaxPitch);
+  const math::Vec3 offset = orbit_offset(camera);
+  camera.target = math::sub(eye, offset);
+
+  if (!(seconds > 0.0F)) {
+    return;
+  }
+  const math::Vec3 forward = math::mul(offset, -1.0F / camera.distance);
+  const math::Vec3 right(std::cos(camera.yaw), 0.0F, -std::sin(camera.yaw));
+  const math::Vec3 up(0.0F, 1.0F, 0.0F);
+  const float step =
+      camera.flySpeed * (input.boost ? kFlyBoost : 1.0F) * seconds;
+  const math::Vec3 move = math::add(
+      math::add(math::mul(forward, static_cast<float>(input.forward) * step),
+                math::mul(right, static_cast<float>(input.right) * step)),
+      math::mul(up, static_cast<float>(input.up) * step));
+  camera.target = math::add(camera.target, move);
+}
+
+renderer::CameraState editor_camera_state(const EditorCamera &camera) noexcept {
   renderer::CameraState state{};
-  state.position = math::add(camera.target, offset);
+  state.position = math::add(camera.target, orbit_offset(camera));
   state.target = camera.target;
   state.up = math::Vec3(0.0F, 1.0F, 0.0F);
   // The clip planes follow the orbit distance, as Unity's scene camera

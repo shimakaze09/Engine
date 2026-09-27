@@ -559,6 +559,45 @@ void check_grid_preference(engine::tests::TestContext &t) noexcept {
   session.showGrid = true;
 }
 
+/// While the Scene camera flies, WASD/QE move it: the dispatcher stands
+/// down so W is not the Move tool. The fly speed is saved and read back
+/// exactly; a stored speed out of range is clamped, and one that is not a
+/// positive number is refused with the current speed kept.
+void check_flying(engine::tests::TestContext &t) noexcept {
+  engine::editor::EditorSession &session = engine::editor::editor_session();
+  session.gizmoOp = ImGuizmo::ROTATE;
+  session.sceneFlying = true;
+  tap(ImGuiKey_W);
+  t.check(session.gizmoOp == ImGuizmo::ROTATE, "W flies, not Move, in flight");
+  session.sceneFlying = false;
+  tap(ImGuiKey_W);
+  t.check(session.gizmoOp == ImGuizmo::TRANSLATE, "W is Move again after");
+
+  session.editorCamera.flySpeed = 5.0F * 1.2F * 1.2F * 1.2F;
+  const float saved = session.editorCamera.flySpeed;
+  char section[2048] = {};
+  t.check(engine::editor::editor_preferences_section(section, sizeof(section)) >
+              0U,
+          "the section is written");
+  session.editorCamera.flySpeed = 1.0F;
+  ImGui::LoadIniSettingsFromMemory(section, std::strlen(section));
+  t.check(session.editorCamera.flySpeed == saved,
+          "the fly speed reads back exactly");
+  load_section("CameraSpeed=500\n");
+  t.check(session.editorCamera.flySpeed ==
+              engine::editor::EditorCamera::kMaxFlySpeed,
+          "a stored speed out of range is clamped");
+  load_section("CameraSpeed=0\n");
+  t.check(session.editorCamera.flySpeed ==
+              engine::editor::EditorCamera::kMaxFlySpeed,
+          "a zero speed is refused");
+  load_section("CameraSpeed=fast\n");
+  t.check(session.editorCamera.flySpeed ==
+              engine::editor::EditorCamera::kMaxFlySpeed,
+          "a malformed speed is refused");
+  session.editorCamera.flySpeed = 5.0F;
+}
+
 } // namespace
 
 int main() {
@@ -608,6 +647,7 @@ int main() {
   check_rebinding(t, *world);
   check_gizmo_space(t);
   check_grid_preference(t);
+  check_flying(t);
 
   editor_set_world(nullptr);
   engine::core::platform_set_scripted_file_dialogs(false);

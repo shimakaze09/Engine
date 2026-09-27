@@ -497,10 +497,40 @@ void draw_scene_viewport_panel() noexcept {
 
   }
 
-  // The editor camera flies whenever the Scene view is hovered and no
-  // gizmo drag holds the mouse, during play as well: the Scene view is the
-  // author's, and the game has its own view.
-  if (ImGui::IsWindowHovered() && !ImGuizmo::IsUsing()) {
+  // Flythrough, as in Unity: the right button pressed over the Scene view
+  // starts it and releasing it anywhere ends it, so a drag that leaves the
+  // panel keeps flying.
+  EditorSession &flySession = editor_session();
+  if (flySession.sceneFlying && !ImGui::IsMouseDown(ImGuiMouseButton_Right)) {
+    flySession.sceneFlying = false;
+  }
+  if (!flySession.sceneFlying && ImGui::IsWindowHovered() &&
+      !ImGuizmo::IsUsing() && ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+    flySession.sceneFlying = true;
+  }
+  if (flySession.sceneFlying) {
+    const ImGuiIO &io = ImGui::GetIO();
+    const auto axis = [](ImGuiKey plus, ImGuiKey minus) noexcept {
+      return (ImGui::IsKeyDown(plus) ? 1 : 0) -
+             (ImGui::IsKeyDown(minus) ? 1 : 0);
+    };
+    FlyInput fly{};
+    fly.lookX = io.MouseDelta.x;
+    fly.lookY = io.MouseDelta.y;
+    fly.forward = axis(ImGuiKey_W, ImGuiKey_S);
+    fly.right = axis(ImGuiKey_D, ImGuiKey_A);
+    fly.up = axis(ImGuiKey_E, ImGuiKey_Q);
+    fly.boost = io.KeyShift;
+    fly.wheel = (io.MouseWheel > 0.0F) ? 1 : ((io.MouseWheel < 0.0F) ? -1 : 0);
+    const float speedBefore = flySession.editorCamera.flySpeed;
+    fly_editor_camera(flySession.editorCamera, fly, io.DeltaTime);
+    if (flySession.editorCamera.flySpeed != speedBefore) {
+      ImGui::MarkIniSettingsDirty(); // the speed is a saved preference
+    }
+  } else if (ImGui::IsWindowHovered() && !ImGuizmo::IsUsing()) {
+    // Orbit, pan and zoom whenever the Scene view is hovered and no gizmo
+    // drag holds the mouse, during play as well: the Scene view is the
+    // author's, and the game has its own view.
     const ImGuiIO &io = ImGui::GetIO();
     const bool altHeld = io.KeyAlt;
     const bool lmbDown = ImGui::IsMouseDown(ImGuiMouseButton_Left);

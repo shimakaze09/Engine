@@ -168,6 +168,10 @@ struct EditorSession final {
   bool gizmoWorldSpace = false;
   // The Scene view's reference grid (editor_grid.h). A saved preference.
   bool showGrid = true;
+  // The right mouse button went down over the Scene view and is still
+  // held: WASD/QE fly the camera (fly_editor_camera), so the shortcut
+  // dispatcher stands down and W stays a move, not the Move tool.
+  bool sceneFlying = false;
   bool snapEnabled = false;
   float snapStep = 0.5F;
   float snapAngleDegrees = 15.0F;

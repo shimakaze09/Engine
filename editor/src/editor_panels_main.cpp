@@ -490,6 +490,18 @@ void draw_toolbar() noexcept {
   ImGui::SetItemTooltip("The Scene view's ground grid; its spacing follows "
                         "the zoom");
   ImGui::SameLine();
+  ImGui::SetNextItemWidth(72.0F);
+  float &flySpeed = editor_session().editorCamera.flySpeed;
+  if (ImGui::DragFloat(
+          "##FlySpeed", &flySpeed, 0.05F, EditorCamera::kMinFlySpeed,
+          EditorCamera::kMaxFlySpeed, "%.2f m/s",
+          ImGuiSliderFlags_AlwaysClamp | ImGuiSliderFlags_Logarithmic)) {
+    ImGui::MarkIniSettingsDirty();
+  }
+  ImGui::SetItemTooltip("Fly speed: hold the right mouse button in the "
+                        "Scene view and use WASD, Q/E; Shift is four times "
+                        "as fast, the wheel changes the speed");
+  ImGui::SameLine();
   ImGui::Checkbox("Snap", &editor_session().snapEnabled);
   ImGui::SameLine();
   ImGui::SetNextItemWidth(64.0F);

@@ -15,6 +15,9 @@ struct EditorCamera final {
   float yaw = 0.0F;      // radians
   float pitch = 0.3F;    // radians (slight downward look)
   float distance = 8.0F; // distance from target
+  // Metres per second while flying (fly_editor_camera). A saved
+  // preference.
+  float flySpeed = 5.0F;
 
   static constexpr float kMinPitch = -1.5F;
   static constexpr float kMaxPitch = 1.5F;
@@ -22,7 +25,29 @@ struct EditorCamera final {
   // Far enough to frame a kilometre-wide selection; the clip planes
   // follow the distance (editor_camera_state).
   static constexpr float kMaxDistance = 1000.0F;
+  static constexpr float kMinFlySpeed = 0.01F;
+  static constexpr float kMaxFlySpeed = 100.0F;
 };
+
+/// One frame of flythrough input: the right mouse button is held.
+struct FlyInput final {
+  float lookX = 0.0F; // mouse pixels this frame, +x right
+  float lookY = 0.0F; // mouse pixels this frame, +y down
+  int forward = 0;    // W minus S
+  int right = 0;      // D minus A
+  int up = 0;         // E minus Q
+  bool boost = false; // Shift: four times as fast
+  int wheel = 0;      // wheel notches: each scales the speed by 1.2
+};
+
+/// Flies the camera for `seconds`, as Unity's Scene view flythrough and
+/// Godot's freelook do. The mouse turns the view about the eye, which
+/// stays put, and the keys move eye and orbit target together along the
+/// view (forward, right) and the world's up axis at flySpeed, clamped to
+/// [kMinFlySpeed, kMaxFlySpeed]. The orbit distance is unchanged, so
+/// releasing the button orbits about a point ahead of the eye.
+void fly_editor_camera(EditorCamera &camera, const FlyInput &input,
+                       float seconds) noexcept;
 
 /// Update the orbit camera from mouse input in the scene viewport.
 /// deltaX/deltaY: mouse pixel deltas. scrollDelta: mouse wheel ticks.
