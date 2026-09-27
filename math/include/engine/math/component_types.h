@@ -86,6 +86,18 @@ enum class HullSource : std::uint8_t {
   Pyramid = 2,
 };
 
+/// The engine's built-in blockout primitives, as every spawn path (the
+/// editor's Create menu, Lua's engine.spawn_shape) names them. What each
+/// one's collider is lives in one place: runtime::primitive_collider.
+enum class PrimitiveShape : std::uint8_t {
+  Cube = 0,
+  Sphere = 1,
+  Cylinder = 2,
+  Capsule = 3,
+  Pyramid = 4,
+  Plane = 5,
+};
+
 /// Shape + half extents + material/filter fields for collision.
 struct Collider final {
   Vec3 localPosition = Vec3(0.0F, 0.0F, 0.0F);

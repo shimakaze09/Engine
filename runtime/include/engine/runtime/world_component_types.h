@@ -30,6 +30,7 @@ using engine::math::Collider;
 using engine::math::ColliderShape;
 using engine::math::HullSource;
 using engine::math::MovementAuthority;
+using engine::math::PrimitiveShape;
 using engine::math::RigidBody;
 using engine::math::Transform;
 

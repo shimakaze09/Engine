@@ -94,7 +94,10 @@ int lua_engine_get_default_mesh_asset_id(lua_State *state) noexcept {
 // capsule encodes radius in .x and half height in .y); cylinder and
 // pyramid collide as convex hulls that match their render meshes, and
 // degrade to the bounding box if hull slots are exhausted so the prop
-// still collides instead of falling through the world.
+// still collides instead of falling through the world. A plane's thin box
+// sits below its surface, so what stands on it rests on the ground drawn.
+// The collider is runtime::primitive_collider's, the same one the
+// editor's Create menu installs.
 int lua_engine_spawn_shape(lua_State *state) noexcept {
   if (!can_create_entities_now() || !lua_isstring(state, 1) ||
       (reload_staging(ReloadEffect::CreateEntity) == ReloadStaging::Refused)) {
@@ -117,41 +120,30 @@ int lua_engine_spawn_shape(lua_State *state) noexcept {
 
   const char *shape = lua_tostring(state, 1);
 
-  std::uint64_t meshId = g_defaultMeshAssetId;
-  // Authored per shape: the collider a spawn keeps when the shape has no
-  // canonical hull, and the provenance the runtime resolves it from when it
-  // does.
-  runtime::Collider collider{};
-  collider.halfExtents = math::Vec3(0.5F, 0.5F, 0.5F);
-  collider.shape = runtime::ColliderShape::AABB;
-  runtime::HullSource hullSource = runtime::HullSource::None;
-
-  if (std::strcmp(shape, "cube") == 0) {
-    meshId =
-        (g_builtinCubeMesh != 0ULL) ? g_builtinCubeMesh : g_defaultMeshAssetId;
-  } else if (std::strcmp(shape, "sphere") == 0) {
-    meshId = (g_builtinSphereMesh != 0ULL) ? g_builtinSphereMesh
-                                           : g_defaultMeshAssetId;
-    collider.shape = runtime::ColliderShape::Sphere;
-  } else if (std::strcmp(shape, "cylinder") == 0) {
-    meshId = (g_builtinCylinderMesh != 0ULL) ? g_builtinCylinderMesh
-                                             : g_defaultMeshAssetId;
-    collider.shape = runtime::ColliderShape::Capsule;
-    hullSource = runtime::HullSource::Cylinder;
-  } else if (std::strcmp(shape, "capsule") == 0) {
-    meshId = (g_builtinCapsuleMesh != 0ULL) ? g_builtinCapsuleMesh
-                                            : g_defaultMeshAssetId;
-    collider.shape = runtime::ColliderShape::Capsule;
-  } else if (std::strcmp(shape, "pyramid") == 0) {
-    meshId = (g_builtinPyramidMesh != 0ULL) ? g_builtinPyramidMesh
-                                            : g_defaultMeshAssetId;
-    collider.halfExtents = math::Vec3(0.5F, 0.5F, 0.58F);
-    hullSource = runtime::HullSource::Pyramid;
-  } else if (std::strcmp(shape, "plane") == 0) {
-    meshId = (g_builtinPlaneMesh != 0ULL) ? g_builtinPlaneMesh
-                                          : g_defaultMeshAssetId;
-    collider.halfExtents = math::Vec3(5.0F, 0.1F, 5.0F);
-  } else {
+  // The name picks the primitive and its mesh; the collider is the one
+  // description the runtime tier gives every spawn path (the editor's
+  // Create menu included), hull provenance and a plane's offset below its
+  // surface with it, so a script spawn never describes one of its own.
+  struct ShapeRow final {
+    const char *name;
+    math::PrimitiveShape shape;
+    std::uint64_t mesh;
+  };
+  const ShapeRow rows[] = {
+      {"cube", math::PrimitiveShape::Cube, g_builtinCubeMesh},
+      {"sphere", math::PrimitiveShape::Sphere, g_builtinSphereMesh},
+      {"cylinder", math::PrimitiveShape::Cylinder, g_builtinCylinderMesh},
+      {"capsule", math::PrimitiveShape::Capsule, g_builtinCapsuleMesh},
+      {"pyramid", math::PrimitiveShape::Pyramid, g_builtinPyramidMesh},
+      {"plane", math::PrimitiveShape::Plane, g_builtinPlaneMesh},
+  };
+  const ShapeRow *row = nullptr;
+  for (const ShapeRow &candidate : rows) {
+    if (std::strcmp(shape, candidate.name) == 0) {
+      row = &candidate;
+    }
+  }
+  if (row == nullptr) {
     // An unrecognized shape name previously fell through to the default cube
     // mesh with a box collider, so a typo silently produced the wrong object.
     core::log_message(core::LogLevel::Warning, "scripting",
@@ -159,14 +151,15 @@ int lua_engine_spawn_shape(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
+  const std::uint64_t meshId =
+      (row->mesh != 0ULL) ? row->mesh : g_defaultMeshAssetId;
 
-  // Hull provenance is resolved by the runtime tier that owns collider
-  // installation: it sizes and tags the collider, and World::add_collider
-  // rebuilds the payload from that tag, so a script spawn never builds or
-  // carries a physics hull of its own.
+  // World::add_collider rebuilds a hull's payload from the provenance tag,
+  // so a script spawn never builds or carries a physics hull of its own.
   const RuntimeServices &services = *runtime_binding().services;
   runtime::World *const world = runtime_binding().world;
-  const bool hasHull = services.apply_primitive_hull(hullSource, &collider);
+  runtime::Collider collider = services.primitive_collider(row->shape);
+  const bool hasHull = (collider.shape == runtime::ColliderShape::ConvexHull);
 
   runtime::Transform transform{};
   transform.position = pos;

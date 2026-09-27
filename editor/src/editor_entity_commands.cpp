@@ -358,15 +358,12 @@ bool execute_asset_open(const AssetIndexEntry &entry) noexcept {
 }
 
 /// Per-primitive spawn description: display name, builtin mesh path,
-/// resting height, fallback collider, and hull provenance.
+/// resting height, and the primitive whose collider it installs.
 struct PrimitiveSpawnDesc final {
   const char *name = nullptr;
   const char *builtinPath = nullptr;
   float groundY = 0.5F;
-  math::ColliderShape fallbackShape = math::ColliderShape::AABB;
-  math::Vec3 halfExtents = math::Vec3(0.5F, 0.5F, 0.5F);
-  math::Vec3 colliderLocalPosition = math::Vec3(0.0F, 0.0F, 0.0F);
-  math::HullSource hullSource = math::HullSource::None;
+  math::PrimitiveShape shape = math::PrimitiveShape::Cube;
 };
 
 /// Returns the spawn description for a built-in blockout primitive.
@@ -381,41 +378,35 @@ primitive_spawn_desc(EditorPrimitive primitive) noexcept {
   case EditorPrimitive::Sphere:
     desc.name = "Sphere";
     desc.builtinPath = "builtin://sphere";
-    desc.fallbackShape = math::ColliderShape::Sphere;
+    desc.shape = math::PrimitiveShape::Sphere;
     break;
   case EditorPrimitive::Cylinder:
     desc.name = "Cylinder";
     desc.builtinPath = "builtin://cylinder";
-    desc.fallbackShape = math::ColliderShape::Capsule;
-    desc.hullSource = math::HullSource::Cylinder;
+    desc.shape = math::PrimitiveShape::Cylinder;
     break;
   case EditorPrimitive::Capsule:
     desc.name = "Capsule";
     desc.builtinPath = "builtin://capsule";
     desc.groundY = 1.0F;
-    desc.fallbackShape = math::ColliderShape::Capsule;
+    desc.shape = math::PrimitiveShape::Capsule;
     break;
   case EditorPrimitive::Pyramid:
     desc.name = "Pyramid";
     desc.builtinPath = "builtin://pyramid";
-    desc.halfExtents = math::Vec3(0.5F, 0.5F, 0.58F);
-    desc.hullSource = math::HullSource::Pyramid;
+    desc.shape = math::PrimitiveShape::Pyramid;
     break;
   case EditorPrimitive::Plane:
     desc.name = "Plane";
     desc.builtinPath = "builtin://plane";
-    // Both heights are derived from where the mesh puts its surface, so
-    // the spawn lands its ground on zero and the collider's top meets
-    // that ground, whatever the primitive does. They were hand-written
-    // offsets that cancelled a surface half a metre above the origin,
-    // which is the sort of correction that goes stale silently. Subtracted
-    // from zero rather than negated: negating a zero surface height gives
-    // negative zero, which compares equal but hashes and saves as a
-    // different value than the zero an author would type.
+    // The spawn lands the plane's surface on zero, wherever the mesh puts
+    // it; its collider's top meets that surface by the runtime's own
+    // description. Subtracted from zero rather than negated: negating a
+    // zero surface height gives negative zero, which compares equal but
+    // hashes and saves as a different value than the zero an author would
+    // type.
     desc.groundY = 0.0F - renderer::kBuiltinPlaneSurfaceY;
-    desc.halfExtents = math::Vec3(5.0F, 0.1F, 5.0F);
-    desc.colliderLocalPosition =
-        math::Vec3(0.0F, renderer::kBuiltinPlaneSurfaceY - 0.1F, 0.0F);
+    desc.shape = math::PrimitiveShape::Plane;
     break;
   }
   return desc;
@@ -452,14 +443,9 @@ runtime::Entity execute_primitive_spawn(EditorPrimitive primitive) noexcept {
   command->mesh.meshRef =
       content::asset_ref_primary(content::builtin_asset_guid(desc.builtinPath));
   command->hasCollider = true;
-  command->colliderComponent.shape = desc.fallbackShape;
-  command->colliderComponent.halfExtents = desc.halfExtents;
-  command->colliderComponent.localPosition = desc.colliderLocalPosition;
-  // The authored fallback above stands when the primitive names no hull;
-  // otherwise the runtime sizes and tags the collider from the one hull
-  // provenance every install path rebuilds from.
-  static_cast<void>(runtime::apply_primitive_hull(desc.hullSource,
-                                                  &command->colliderComponent));
+  // The runtime describes the collider, hull provenance and offset
+  // included, so Create and Lua's spawn_shape install the same one.
+  command->colliderComponent = runtime::primitive_collider(desc.shape);
   if (!editor_session().commandHistory.execute(command)) {
     return runtime::kInvalidEntity;
   }

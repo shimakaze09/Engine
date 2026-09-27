@@ -1482,6 +1482,20 @@ def test_duplicate_primitive_gate():
             "// Purpose.\nconst math::Vec3 p = math::transform_point(m, q);\n"
             "math::transform_aabb(m, c, h, &oc, &oh);\n")]) == 0,
               "duplicate primitives: calling the transforms is not a copy")
+        check(run([script, "--root", case(
+            "collider_copy", "scripting/src/a.cpp",
+            "// Purpose.\nhullSource = runtime::HullSource::Pyramid;\n")]) != 0,
+              "duplicate primitives: assigning a primitive hull is a copy")
+        check(run([script, "--root", case(
+            "pyramid_extents", "editor/src/a.cpp",
+            "// Purpose.\nc.halfExtents = math::Vec3(0.5F, 0.5F, 0.58F);\n")]) != 0,
+              "duplicate primitives: the pyramid's extents are a copy")
+        check(run([script, "--root", case(
+            "hull_range", "runtime/src/a.cpp",
+            "// Purpose.\nif (v > static_cast<int>(HullSource::Pyramid)) {}\n"
+            "Collider c = runtime::primitive_collider(shape);\n")]) == 0,
+              "duplicate primitives: range-checking a hull source or asking "
+              "the owner is not a copy")
         frustum_owner = write_comment_fixture(
             tmp / "frustum_owner", "math/include/engine/math/frustum.h",
             "// Purpose.\nauto p = c0.w + c0.x;\nfloat i = 1.0F / w.w;\n")

@@ -264,10 +264,10 @@ struct RuntimeServices final {
       const math::CameraComponent &component) noexcept = nullptr;
   bool (*remove_camera_component_op)(runtime::World *world,
                                      core::Entity entity) noexcept = nullptr;
-  /// Applies the canonical convex hull `source` names to `collider`; false
-  /// (collider untouched) when the source names no primitive hull.
-  bool (*apply_primitive_hull)(math::HullSource source,
-                               runtime::Collider *collider) noexcept = nullptr;
+  /// The collider every spawn path gives a built-in primitive, hull
+  /// provenance and offset included (runtime::primitive_collider).
+  runtime::Collider (*primitive_collider)(math::PrimitiveShape shape) noexcept =
+      nullptr;
 
   // Game mode, owned by the World.
   const char *(*game_mode_name)(runtime::World *world) noexcept = nullptr;
