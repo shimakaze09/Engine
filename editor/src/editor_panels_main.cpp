@@ -122,6 +122,41 @@ static void draw_unsaved_changes_prompt() noexcept {
   }
 }
 
+/// The simulation speed presets Unity's and Unreal's play toolbars offer.
+constexpr float kTimeScalePresets[] = {0.1F, 0.25F, 0.5F, 1.0F, 2.0F, 4.0F};
+
+/// The toolbar's simulation speed: a combo over sim.time_scale, drawn
+/// highlighted whenever the game does not run at real time so a slowed
+/// session is never mistaken for a slow game. The value is not saved: a
+/// new session always starts at 1.
+static void draw_time_scale_combo() noexcept {
+  const float scale = core::cvar_get_float("sim.time_scale", 1.0F);
+  char preview[16] = {};
+  std::snprintf(preview, sizeof(preview), "%gx", static_cast<double>(scale));
+  const bool offRealTime = scale != 1.0F;
+  if (offRealTime) {
+    ImGui::PushStyleColor(ImGuiCol_FrameBg,
+                          ImGui::GetStyleColorVec4(ImGuiCol_FrameBgActive));
+  }
+  ImGui::SetNextItemWidth(ImGui::CalcTextSize("0.25x").x +
+                          (ImGui::GetStyle().FramePadding.x * 2.0F) +
+                          ImGui::GetFrameHeight());
+  if (ImGui::BeginCombo("##time_scale", preview)) {
+    for (const float preset : kTimeScalePresets) {
+      char label[16] = {};
+      std::snprintf(label, sizeof(label), "%gx", static_cast<double>(preset));
+      if (ImGui::Selectable(label, preset == scale)) {
+        static_cast<void>(core::cvar_set_float("sim.time_scale", preset));
+      }
+    }
+    ImGui::EndCombo();
+  }
+  if (offRealTime) {
+    ImGui::PopStyleColor();
+  }
+  ImGui::SetItemTooltip("Simulation speed (sim.time_scale)");
+}
+
 void draw_main_menu_bar() noexcept {
   if (!ImGui::BeginMainMenuBar()) {
     return;
@@ -164,6 +199,13 @@ void draw_main_menu_bar() noexcept {
     ImGui::Separator();
     editor_action_menu_item(EditorAction::Duplicate);
     editor_action_menu_item(EditorAction::Delete);
+    ImGui::Separator();
+    // Checked while running, as Unity's Edit menu shows play state.
+    const PlayState state = editor_session().playState;
+    editor_action_menu_item(EditorAction::PlayStop,
+                            state != PlayState::Stopped);
+    editor_action_menu_item(EditorAction::Pause, state == PlayState::Paused);
+    editor_action_menu_item(EditorAction::Step);
     ImGui::EndMenu();
   }
 
@@ -255,7 +297,7 @@ void draw_toolbar() noexcept {
     }
   }
   const bool canPause =
-      hasWorld && (editor_session().playState == PlayState::Playing);
+      hasWorld && (editor_session().playState != PlayState::Stopped);
   const bool canStop =
       hasWorld && (editor_session().playState != PlayState::Stopped);
 
@@ -267,6 +309,8 @@ void draw_toolbar() noexcept {
   if (ImGui::Button("Play") && canPlay) {
     start_play_mode();
   }
+  ImGui::SetItemTooltip("Play (%s)",
+                        editor_shortcut_text(EditorAction::PlayStop));
   if (!canPlay) {
     ImGui::EndDisabled();
   }
@@ -275,8 +319,19 @@ void draw_toolbar() noexcept {
   if (!canPause) {
     ImGui::BeginDisabled();
   }
+  // A toggle: shown pressed while paused, and pressed again it resumes.
+  const bool paused = editor_session().playState == PlayState::Paused;
+  if (paused) {
+    ImGui::PushStyleColor(ImGuiCol_Button,
+                          ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+  }
   if (ImGui::Button("Pause") && canPause) {
     pause_play_mode();
+  }
+  ImGui::SetItemTooltip("Pause (%s)",
+                        editor_shortcut_text(EditorAction::Pause));
+  if (paused) {
+    ImGui::PopStyleColor();
   }
   if (!canPause) {
     ImGui::EndDisabled();
@@ -291,6 +346,7 @@ void draw_toolbar() noexcept {
   if (ImGui::Button("Step") && canStep) {
     editor_session().stepRequested = true;
   }
+  ImGui::SetItemTooltip("Step (%s)", editor_shortcut_text(EditorAction::Step));
   if (!canStep) {
     ImGui::EndDisabled();
   }
@@ -302,9 +358,14 @@ void draw_toolbar() noexcept {
   if (ImGui::Button("Stop") && canStop) {
     stop_play_mode();
   }
+  ImGui::SetItemTooltip("Stop (%s)",
+                        editor_shortcut_text(EditorAction::PlayStop));
   if (!canStop) {
     ImGui::EndDisabled();
   }
+
+  ImGui::SameLine();
+  draw_time_scale_combo();
 
   ImGui::SameLine();
   ImGui::SeparatorEx(ImGuiSeparatorFlags_Vertical);

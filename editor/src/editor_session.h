@@ -350,7 +350,8 @@ bool default_scene_file_exists() noexcept;
 bool capture_play_snapshot() noexcept;
 /// Enters play mode (captures the play snapshot first).
 void start_play_mode() noexcept;
-/// Toggles between Playing and Paused.
+/// Toggles between Playing and Paused: pauses a playing session and
+/// resumes a paused one (recording Pause or Resume); no-op while stopped.
 void pause_play_mode() noexcept;
 /// Stops play mode: records the Stop and owes the restore of the captured
 /// pre-play world. The pipeline dispatches the session's end hooks for the

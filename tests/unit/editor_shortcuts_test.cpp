@@ -3,7 +3,8 @@
 // matched exactly, modifiers included (Ctrl+Shift+S is Save As, not Save,
 // and Ctrl+R is not the scale tool), creating actions that run once per
 // press while undo repeats, dispatch stopping under the unsaved-changes
-// prompt, a popup, a text field and a game-owned keyboard, and table
+// prompt, a popup, a text field and a game-owned keyboard, the play
+// chords that alone stay live while the game has the keyboard, and table
 // invariants: one row per action, unique ids, no chord bound twice.
 
 #include "editor_commands.h"
@@ -324,6 +325,41 @@ void check_document_chords(engine::tests::TestContext &t,
   cancel_pending_dialog();
 }
 
+/// Unity's play chords: Ctrl+P plays and stops, Ctrl+Shift+P pauses and
+/// resumes, Ctrl+Alt+P steps (pausing first when playing). They are the
+/// only chords that still fire while the game has the keyboard.
+void check_play_chords(engine::tests::TestContext &t, World &world) noexcept {
+  t.check(perform_scene_new() && (add_named(world, "Actor") != kInvalidEntity),
+          "a scene to play");
+  tap(ImGuiMod_Ctrl | ImGuiKey_P);
+  t.check(editor_session().playState == PlayState::Playing, "Ctrl+P plays");
+
+  // The Game view has the keyboard now: tool keys are the game's, but the
+  // play controls still reach the editor.
+  editor_session().gameViewFocused = true;
+  editor_session().gizmoOp = ImGuizmo::TRANSLATE;
+  tap(ImGuiKey_R);
+  t.check(editor_session().gizmoOp == ImGuizmo::TRANSLATE,
+          "R is the game's while it has the keyboard");
+  tap(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_P);
+  t.check(editor_session().playState == PlayState::Paused,
+          "Ctrl+Shift+P pauses while the game has the keyboard");
+  tap(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_P);
+  t.check(editor_session().playState == PlayState::Playing,
+          "Ctrl+Shift+P again resumes");
+  editor_session().stepRequested = false;
+  tap(ImGuiMod_Ctrl | ImGuiMod_Alt | ImGuiKey_P);
+  t.check((editor_session().playState == PlayState::Paused) &&
+              editor_session().stepRequested,
+          "Ctrl+Alt+P pauses and steps once");
+  tap(ImGuiMod_Ctrl | ImGuiKey_P);
+  finish_play_stop();
+  t.check(editor_session().playState == PlayState::Stopped,
+          "Ctrl+P again stops");
+  editor_session().gameViewFocused = false;
+  editor_session().stepRequested = false;
+}
+
 } // namespace
 
 int main() {
@@ -364,6 +400,7 @@ int main() {
   check_repeat_policy(t, *world);
   check_blocked_contexts(t, *world);
   check_document_chords(t, *world);
+  check_play_chords(t, *world);
 
   editor_set_world(nullptr);
   engine::core::platform_set_scripted_file_dialogs(false);

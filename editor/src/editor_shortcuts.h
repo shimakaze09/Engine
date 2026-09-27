@@ -31,6 +31,9 @@ enum class EditorAction : std::uint8_t {
   GizmoTranslate,
   GizmoRotate,
   GizmoScale,
+  PlayStop,
+  Pause,
+  Step,
   Count,
 };
 
@@ -50,6 +53,10 @@ struct EditorShortcut final {
   /// rate. Only actions that are safe to run many times repeat; one that
   /// creates or writes something runs once per press.
   bool repeats = false;
+  /// Whether the chord still fires while the game has the keyboard (the
+  /// Game view focused in play). Only the play controls do, so the author
+  /// can always pause or stop a running game from the keyboard.
+  bool whileGameHasKeyboard = false;
 };
 
 /// Number of rows, one per EditorAction.
@@ -69,20 +76,23 @@ bool run_editor_action(EditorAction action) noexcept;
 /// stays valid until the table's chords change.
 const char *editor_shortcut_text(EditorAction action) noexcept;
 
-/// True while shortcuts must not fire: a text field has the keyboard, the
-/// game has it (the Game view focused in play), or a popup or the
-/// unsaved-changes prompt is open.
+/// True while no shortcut may fire: a text field has the keyboard, or a
+/// popup or the unsaved-changes prompt is open. While the game has the
+/// keyboard only rows marked whileGameHasKeyboard fire.
 bool editor_shortcuts_blocked() noexcept;
 /// Runs every action whose chord was pressed this frame, unless blocked.
 /// Call once per frame, after ImGui::NewFrame.
 void dispatch_editor_shortcuts() noexcept;
 
 /// Draws the menu item for `action` with its label, chord and enabled
-/// state, and runs it when clicked. True when it ran.
-bool editor_action_menu_item(EditorAction action) noexcept;
+/// state (checked when `checked`), and runs it when clicked. True when it
+/// ran.
+bool editor_action_menu_item(EditorAction action,
+                             bool checked = false) noexcept;
 /// Draws the same menu item without running it: true when it was clicked
 /// while enabled. For callers that must apply the action later, such as a
 /// row inside a hierarchy walk.
-bool editor_action_menu_item_clicked(EditorAction action) noexcept;
+bool editor_action_menu_item_clicked(EditorAction action,
+                                     bool checked = false) noexcept;
 
 } // namespace engine::editor

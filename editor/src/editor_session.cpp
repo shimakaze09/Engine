@@ -892,12 +892,26 @@ void start_play_mode() noexcept {
 }
 
 void pause_play_mode() noexcept {
-  if ((editor_session().world == nullptr) || (editor_session().playState != PlayState::Playing)) {
+  EditorSession &session = editor_session();
+  if (session.world == nullptr) {
+    return;
+  }
+  if (session.playState == PlayState::Paused) {
+    // Pause is a toggle, as in other editors: pressed again it resumes
+    // the same session, without the Play button's focus change or new
+    // console session.
+    record_play_transition(runtime::PlayTransition::Resume);
+    session.playState = PlayState::Playing;
+    session.stepRequested = false;
+    core::log_message(core::LogLevel::Info, "editor", "resume");
+    return;
+  }
+  if (session.playState != PlayState::Playing) {
     return;
   }
 
   record_play_transition(runtime::PlayTransition::Pause);
-  editor_session().playState = PlayState::Paused;
+  session.playState = PlayState::Paused;
   core::log_message(core::LogLevel::Info, "editor", "pause");
 }
 

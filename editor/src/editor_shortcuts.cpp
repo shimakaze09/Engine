@@ -2,7 +2,8 @@
 // matched exactly, modifiers included, the way Unity, Unreal and Godot
 // bind them: Ctrl+S never fires for Ctrl+Shift+S, and a bare W never fires
 // with Ctrl held. Actions that create or write something run once per
-// press; only undo and redo repeat while held, as in those editors.
+// press; only undo and redo repeat while held, as in those editors. While
+// the game has the keyboard only the play controls fire.
 
 #include "editor_shortcuts.h"
 
@@ -47,6 +48,14 @@ constexpr std::array<EditorShortcut,
          false},
         {EditorAction::GizmoScale, "tools.scale", "Scale", ImGuiKey_R, 0,
          false},
+        // Unity's play chords, live while the game has the keyboard so a
+        // running game can always be paused or stopped.
+        {EditorAction::PlayStop, "play.play_stop", "Play",
+         ImGuiMod_Ctrl | ImGuiKey_P, 0, false, true},
+        {EditorAction::Pause, "play.pause", "Pause",
+         ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_P, 0, false, true},
+        {EditorAction::Step, "play.step", "Step",
+         ImGuiMod_Ctrl | ImGuiMod_Alt | ImGuiKey_P, 0, false, true},
     }};
 
 // Each row sits at its action's index, so a lookup is an index.
@@ -128,6 +137,15 @@ bool editor_action_enabled(EditorAction action) noexcept {
   case EditorAction::GizmoRotate:
   case EditorAction::GizmoScale:
     return true;
+  case EditorAction::PlayStop:
+    // Play needs a world that can enter play; Stop needs a session.
+    return (editor_session().world != nullptr) &&
+           ((editor_session().playState != PlayState::Stopped) ||
+            !editor_session().worldRestoreFailed);
+  case EditorAction::Pause:
+  case EditorAction::Step:
+    return (editor_session().world != nullptr) &&
+           (editor_session().playState != PlayState::Stopped);
   case EditorAction::Count:
   default:
     return false;
@@ -176,6 +194,23 @@ bool run_editor_action(EditorAction action) noexcept {
   case EditorAction::GizmoScale:
     editor_session().gizmoOp = ImGuizmo::SCALE;
     return true;
+  case EditorAction::PlayStop:
+    if (editor_session().playState == PlayState::Stopped) {
+      start_play_mode();
+    } else {
+      stop_play_mode();
+    }
+    return true;
+  case EditorAction::Pause:
+    pause_play_mode();
+    return true;
+  case EditorAction::Step:
+    // As in Unity, Step while playing pauses first, then steps once.
+    if (editor_session().playState == PlayState::Playing) {
+      pause_play_mode();
+    }
+    editor_session().stepRequested = true;
+    return true;
   case EditorAction::Count:
   default:
     return false;
@@ -199,8 +234,7 @@ bool editor_shortcuts_blocked() noexcept {
   // A popup (a menu, a context menu, a combo, a modal) takes the keyboard
   // while open, and the unsaved-changes prompt counts from the moment it
   // is armed, before its modal is drawn.
-  return io.WantTextInput || game_owns_keyboard() ||
-         scene_document_prompt_open() ||
+  return io.WantTextInput || scene_document_prompt_open() ||
          ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId |
                                     ImGuiPopupFlags_AnyPopupLevel);
 }
@@ -209,7 +243,13 @@ void dispatch_editor_shortcuts() noexcept {
   if (editor_shortcuts_blocked()) {
     return;
   }
+  // While the game has the keyboard its keys are the game's (W is a move,
+  // not a gizmo), except the play controls.
+  const bool gameHasKeyboard = game_owns_keyboard();
   for (const EditorShortcut &row : kShortcuts) {
+    if (gameHasKeyboard && !row.whileGameHasKeyboard) {
+      continue;
+    }
     if (chord_pressed(row.chord, row.repeats) ||
         chord_pressed(row.alternate, row.repeats)) {
       static_cast<void>(run_editor_action(row.action));
@@ -217,14 +257,16 @@ void dispatch_editor_shortcuts() noexcept {
   }
 }
 
-bool editor_action_menu_item_clicked(EditorAction action) noexcept {
+bool editor_action_menu_item_clicked(EditorAction action,
+                                     bool checked) noexcept {
   const EditorShortcut &row = editor_shortcut(action);
-  return ImGui::MenuItem(row.label, editor_shortcut_text(action), false,
+  return ImGui::MenuItem(row.label, editor_shortcut_text(action), checked,
                          editor_action_enabled(action));
 }
 
-bool editor_action_menu_item(EditorAction action) noexcept {
-  return editor_action_menu_item_clicked(action) && run_editor_action(action);
+bool editor_action_menu_item(EditorAction action, bool checked) noexcept {
+  return editor_action_menu_item_clicked(action, checked) &&
+         run_editor_action(action);
 }
 
 } // namespace engine::editor
