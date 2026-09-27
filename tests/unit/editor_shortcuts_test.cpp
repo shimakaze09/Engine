@@ -360,6 +360,27 @@ void check_play_chords(engine::tests::TestContext &t, World &world) noexcept {
   editor_session().stepRequested = false;
 }
 
+/// Create Empty (Ctrl+Shift+N) makes an entity and selects it; Exit runs
+/// the window close's quit guard, so a dirty document asks before the
+/// editor quits.
+void check_create_and_exit(engine::tests::TestContext &t,
+                           World &world) noexcept {
+  t.check(perform_scene_new(), "a fresh scene");
+  tap(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_N);
+  t.check((world.alive_entity_count() == 1U) &&
+              (selected_entity() != kInvalidEntity),
+          "Ctrl+Shift+N creates an entity and selects it");
+  t.check(scene_document_is_dirty(), "the new entity dirties the document");
+
+  // The quit guard only protects a session the editor initialized.
+  editor_session().initialized = true;
+  t.check(run_editor_action(EditorAction::Exit), "File > Exit runs");
+  editor_session().initialized = false;
+  t.check(scene_document_prompt_open(),
+          "a dirty document asks before the editor quits");
+  scene_document_prompt_choose_cancel();
+}
+
 } // namespace
 
 int main() {
@@ -401,6 +422,7 @@ int main() {
   check_blocked_contexts(t, *world);
   check_document_chords(t, *world);
   check_play_chords(t, *world);
+  check_create_and_exit(t, *world);
 
   editor_set_world(nullptr);
   engine::core::platform_set_scripted_file_dialogs(false);

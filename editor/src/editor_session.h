@@ -347,6 +347,10 @@ bool world_can_load_scene() noexcept;
 /// Whether the game has the keyboard: in play, with the Game view focused
 /// and no text field taking typing. Editor shortcuts stay off meanwhile.
 bool game_owns_keyboard() noexcept;
+/// The quit guard a window close runs: stops play, then true when the
+/// editor may quit now, or false when the unsaved-changes prompt was armed
+/// and the quit waits on it.
+bool editor_handle_quit_request() noexcept;
 /// Returns whether the default scene file is available on disk.
 bool default_scene_file_exists() noexcept;
 

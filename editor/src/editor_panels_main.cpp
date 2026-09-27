@@ -30,12 +30,13 @@
 #include <string>
 #include <vector>
 
-#include "engine/core/platform.h"
 #include "engine/core/cvar.h"
 #include "engine/core/engine_stats.h"
+#include "engine/core/engine_version.h"
 #include "engine/core/json.h"
 #include "engine/core/logging.h"
 #include "engine/core/mem_tracker.h"
+#include "engine/core/platform.h"
 #include "engine/core/profiler.h"
 #include "engine/core/reflect.h"
 #include "engine/editor/editor_camera.h"
@@ -122,6 +123,58 @@ static void draw_unsaved_changes_prompt() noexcept {
   }
 }
 
+/// Draws one menu item per built-in primitive; the chosen one spawns at
+/// the editor camera's focus point and becomes the selection.
+static void draw_primitive_menu_items() noexcept {
+  constexpr struct {
+    const char *label;
+    EditorPrimitive primitive;
+  } kPrimitiveItems[] = {
+      {"Cube", EditorPrimitive::Cube},
+      {"Sphere", EditorPrimitive::Sphere},
+      {"Cylinder", EditorPrimitive::Cylinder},
+      {"Capsule", EditorPrimitive::Capsule},
+      {"Pyramid", EditorPrimitive::Pyramid},
+      {"Plane", EditorPrimitive::Plane},
+  };
+  const bool editable = world_is_editable();
+  for (const auto &item : kPrimitiveItems) {
+    if (ImGui::MenuItem(item.label, nullptr, false, editable)) {
+      const runtime::Entity spawned = execute_primitive_spawn(item.primitive);
+      if (spawned != runtime::kInvalidEntity) {
+        select_entity(spawned, false);
+      }
+    }
+  }
+}
+
+constexpr const char *kAboutPopupId = "About Engine";
+
+/// Help > About: the engine version and the one-line build identity a bug
+/// report should carry, with a button that copies it.
+static void draw_about_popup() noexcept {
+  if (!ImGui::BeginPopupModal(kAboutPopupId, nullptr,
+                              ImGuiWindowFlags_AlwaysAutoResize)) {
+    return;
+  }
+  ImGui::Text("Engine %s", core::engine_version_string());
+  ImGui::Separator();
+  ImGui::TextUnformatted("Revision: " ENGINE_BUILD_DESCRIBE);
+  ImGui::TextUnformatted("Compiler: " ENGINE_BUILD_COMPILER);
+  ImGui::TextUnformatted("Configuration: " ENGINE_BUILD_TYPE);
+  ImGui::TextUnformatted("Platform: " ENGINE_BUILD_PLATFORM);
+  ImGui::TextUnformatted("Floating point: " ENGINE_BUILD_FLOAT);
+  ImGui::Separator();
+  if (ImGui::Button("Copy build info")) {
+    ImGui::SetClipboardText(core::engine_build_id());
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Close")) {
+    ImGui::CloseCurrentPopup();
+  }
+  ImGui::EndPopup();
+}
+
 /// The simulation speed presets Unity's and Unreal's play toolbars offer.
 constexpr float kTimeScalePresets[] = {0.1F, 0.25F, 0.5F, 1.0F, 2.0F, 4.0F};
 
@@ -189,6 +242,8 @@ void draw_main_menu_bar() noexcept {
     ImGui::Separator();
     editor_action_menu_item(EditorAction::SaveScene);
     editor_action_menu_item(EditorAction::SaveSceneAs);
+    ImGui::Separator();
+    editor_action_menu_item(EditorAction::Exit);
 
     ImGui::EndMenu();
   }
@@ -212,6 +267,16 @@ void draw_main_menu_bar() noexcept {
     ImGui::EndMenu();
   }
 
+  // Unity's GameObject menu: what the Entities panel's buttons create.
+  if (ImGui::BeginMenu("Entity")) {
+    editor_action_menu_item(EditorAction::CreateEmpty);
+    if (ImGui::BeginMenu("3D Object", world_is_editable())) {
+      draw_primitive_menu_items();
+      ImGui::EndMenu();
+    }
+    ImGui::EndMenu();
+  }
+
   if (ImGui::BeginMenu("Window")) {
     bool showConsole = core::cvar_get_bool("editor.show_console", true);
     if (ImGui::MenuItem("Console", nullptr, showConsole)) {
@@ -229,6 +294,16 @@ void draw_main_menu_bar() noexcept {
     }
     ImGui::EndMenu();
   }
+
+  bool openAbout = false;
+  if (ImGui::BeginMenu("Help")) {
+    openAbout = ImGui::MenuItem("About");
+    ImGui::EndMenu();
+  }
+  if (openAbout) {
+    ImGui::OpenPopup(kAboutPopupId);
+  }
+  draw_about_popup();
 
   // Non-spamming status indicator: Fatal/high-severity errors
   // stay visible in the menu bar even while the Console panel is closed.
@@ -585,25 +660,7 @@ void draw_entities_panel() noexcept {
     ImGui::OpenPopup("AddPrimitivePopup");
   }
   if (ImGui::BeginPopup("AddPrimitivePopup")) {
-    constexpr struct {
-      const char *label;
-      EditorPrimitive primitive;
-    } kPrimitiveItems[] = {
-        {"Cube", EditorPrimitive::Cube},
-        {"Sphere", EditorPrimitive::Sphere},
-        {"Cylinder", EditorPrimitive::Cylinder},
-        {"Capsule", EditorPrimitive::Capsule},
-        {"Pyramid", EditorPrimitive::Pyramid},
-        {"Plane", EditorPrimitive::Plane},
-    };
-    for (const auto &item : kPrimitiveItems) {
-      if (ImGui::MenuItem(item.label) && editable) {
-        const runtime::Entity spawned = execute_primitive_spawn(item.primitive);
-        if (spawned != runtime::kInvalidEntity) {
-          select_entity(spawned, false);
-        }
-      }
-    }
+    draw_primitive_menu_items();
     ImGui::EndPopup();
   }
 

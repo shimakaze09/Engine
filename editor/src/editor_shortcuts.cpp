@@ -14,6 +14,8 @@
 
 #include "ImGuizmo.h"
 
+#include "engine/core/platform.h"
+
 #include <array>
 #include <cstdio>
 
@@ -32,6 +34,9 @@ constexpr std::array<EditorShortcut,
          ImGuiMod_Ctrl | ImGuiKey_S, 0, false},
         {EditorAction::SaveSceneAs, "file.save_as", "Save As...",
          ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_S, 0, false},
+        // No chord: the window manager's own close (Alt+F4, Cmd+Q) reaches
+        // the same quit guard.
+        {EditorAction::Exit, "file.exit", "Exit", 0, 0, false},
         {EditorAction::Undo, "edit.undo", "Undo", ImGuiMod_Ctrl | ImGuiKey_Z, 0,
          true},
         {EditorAction::Redo, "edit.redo", "Redo",
@@ -49,6 +54,8 @@ constexpr std::array<EditorShortcut,
         // keyboards without a forward-delete key.
         {EditorAction::Delete, "edit.delete", "Delete", ImGuiKey_Delete,
          ImGuiMod_Ctrl | ImGuiKey_Backspace, false},
+        {EditorAction::CreateEmpty, "entity.create_empty", "Create Empty",
+         ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_N, 0, false},
         {EditorAction::GizmoTranslate, "tools.translate", "Move", ImGuiKey_W, 0,
          false},
         {EditorAction::GizmoRotate, "tools.rotate", "Rotate", ImGuiKey_E, 0,
@@ -132,7 +139,10 @@ bool editor_action_enabled(EditorAction action) noexcept {
     // Available after a failed Stop restore: they are its recovery path.
     return world_can_load_scene();
   case EditorAction::SaveScene:
+  case EditorAction::CreateEmpty:
     return world_is_editable();
+  case EditorAction::Exit:
+    return true;
   case EditorAction::Undo:
     return editor_history_can_undo();
   case EditorAction::Redo:
@@ -184,6 +194,13 @@ bool run_editor_action(EditorAction action) noexcept {
   case EditorAction::SaveSceneAs:
     request_save_scene_as();
     return true;
+  case EditorAction::Exit:
+    // The same guard a window close runs: play stops first, and a dirty
+    // document asks before anything is lost.
+    if (editor_handle_quit_request()) {
+      core::request_platform_quit();
+    }
+    return true;
   case EditorAction::Undo:
     editor_history_undo();
     return true;
@@ -200,6 +217,14 @@ bool run_editor_action(EditorAction action) noexcept {
     return execute_selection_duplicate();
   case EditorAction::Delete:
     return execute_selection_delete();
+  case EditorAction::CreateEmpty: {
+    const runtime::Entity created = execute_entity_create();
+    if (created == runtime::kInvalidEntity) {
+      return false;
+    }
+    select_entity(created, false);
+    return true;
+  }
   case EditorAction::GizmoTranslate:
     editor_session().gizmoOp = ImGuizmo::TRANSLATE;
     return true;
