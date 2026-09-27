@@ -157,31 +157,39 @@ struct EntityDeleteCommand final : EditorCommand {
 };
 
 /// One member of a duplicated subtree: the components copied from the
-/// source member, the persistent id the copy was given on its first
-/// execute (so redo re-creates it under the same id, and later history
-/// entries keep resolving), and which record holds its parent copy.
+/// source member, the source's persistent id (so references inside the
+/// copy can be pointed at the copies), the persistent id the copy was
+/// given on its first execute (so redo re-creates it under the same id,
+/// and later history entries keep resolving), and which record holds its
+/// parent copy.
 struct EntityDuplicateRecord final {
   static constexpr std::size_t kNoParentRecord = static_cast<std::size_t>(-1);
 
+  runtime::PersistentId sourcePersistentId = runtime::kInvalidPersistentId;
   runtime::PersistentId persistentId = runtime::kInvalidPersistentId;
   /// Index of this member's parent within the same command; kNoParentRecord
-  /// for the duplicated root, whose parent link is copied verbatim and so
+  /// for a duplicated root, whose parent link is copied verbatim and so
   /// still names an entity outside the copy.
   std::size_t parentRecord = kNoParentRecord;
   std::array<bool, kComponentEditTypeCount> present{};
   ComponentEditSnapshot components{};
 };
 
-/// Undoable duplication of an entity's transform subtree: every
-/// persistent component is copied through the registry, the copies get
-/// fresh persistent ids, internal parent links are remapped onto the
-/// copies (the root keeps the source's parent) and the root copy gets a
-/// name no other entity holds. Parents are created before children, and a
+/// Undoable duplication of a forest of transform subtrees, one per copied
+/// root: every persistent component is copied through the registry, the
+/// copies get fresh persistent ids, internal parent links are remapped
+/// onto the copies (each root keeps its source's parent), an entity
+/// reference that points inside the copy (a mesh's scene-capture source)
+/// is pointed at the copy, and each root copy gets a name no other entity
+/// holds. Every member is created before any component is applied, and a
 /// member or component that cannot be created destroys what this execute
 /// made and reports failure, so history never records a partial copy.
 struct EntityDuplicateCommand final : EditorCommand {
   std::unique_ptr<EntityDuplicateRecord[]> records{};
   std::size_t recordCount = 0U;
+  /// Where each root's subtree starts in `records`; one entry per root.
+  std::unique_ptr<std::size_t[]> rootRecords{};
+  std::size_t rootCount = 0U;
 
   bool execute() noexcept override;
   bool undo() noexcept override;
@@ -191,9 +199,24 @@ struct EntityDuplicateCommand final : EditorCommand {
 /// on allocation failure or when the entity is not alive.
 EntityDuplicateCommand *
 build_entity_duplicate_command(runtime::Entity entity) noexcept;
+/// Captures `entities` as a forest into one duplicate command, with the
+/// same forest rules as build_entity_delete_command: a listed entity whose
+/// ancestor is also listed is copied with that ancestor. Null on
+/// allocation failure or when no listed entity is alive.
+EntityDuplicateCommand *
+build_entity_duplicate_command(const runtime::Entity *entities,
+                               std::size_t count) noexcept;
 /// Duplicates the entity subtree through the command history; returns the
 /// root copy (kInvalidEntity on failure).
 runtime::Entity execute_entity_duplicate(runtime::Entity entity) noexcept;
+/// Duplicates the whole selection as one undoable command and selects the
+/// root copies; false, with the world untouched, when nothing is selected
+/// or the copy is refused.
+bool execute_selection_duplicate() noexcept;
+/// Executes a built duplicate command through the history and makes its
+/// root copies the selection. Takes ownership of `command`; false, with
+/// the world untouched, when it is refused.
+bool execute_duplicate_and_select(EntityDuplicateCommand *command) noexcept;
 
 /// Creates a scene object with a default name through the command history;
 /// returns the new entity (kInvalidEntity on failure).

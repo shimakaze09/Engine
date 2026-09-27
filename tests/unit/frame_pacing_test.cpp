@@ -1,12 +1,15 @@
 // Verifies the pure frame pacing helpers: vsync interval normalization
 // to the supported set, exact frame-cap wait computation (uncapped,
 // under budget, exactly on budget, and over budget), frame-delta
-// snapping to the fixed step within its jitter band, and the fixed-step
-// count decision including the paused editor's single-step path.
+// snapping to the fixed step within its jitter band, the simulation time
+// scale (exactly the delta at 1, clamped to [0, 4], non-finite read as 1),
+// and the fixed-step count decision including the paused editor's
+// single-step path.
 
 #include "frame_pacing.h"
 
 #include <cstdio>
+#include <limits>
 
 namespace {
 
@@ -153,6 +156,39 @@ int check_playing_step_decision() {
   return 0;
 }
 
+/// EXPECTATION: scale 1 passes the delta through bit for bit; other
+/// scales multiply it; the scale clamps to [0, 4]; a NaN or infinite
+/// scale reads as 1, never stalling or flooding the accumulator.
+int check_time_scale() {
+  using engine::runtime::clamp_time_scale;
+  using engine::runtime::scaled_frame_delta;
+  const double deltas[] = {1.0 / 60.0, 1.0 / 144.0, 0.3, 1.0e-7, 0.0};
+  for (const double delta : deltas) {
+    if (scaled_frame_delta(delta, 1.0F) != delta) {
+      return 1;
+    }
+    if (scaled_frame_delta(delta, 0.5F) != delta * 0.5) {
+      return 2;
+    }
+    if (scaled_frame_delta(delta, 2.0F) != delta * 2.0) {
+      return 3;
+    }
+    if (scaled_frame_delta(delta, 0.0F) != 0.0) {
+      return 4;
+    }
+  }
+  if ((clamp_time_scale(9.0F) != engine::runtime::kMaxTimeScale) ||
+      (clamp_time_scale(-1.0F) != 0.0F) || (clamp_time_scale(0.25F) != 0.25F)) {
+    return 5;
+  }
+  if ((clamp_time_scale(std::numeric_limits<float>::quiet_NaN()) != 1.0F) ||
+      (clamp_time_scale(std::numeric_limits<float>::infinity()) != 1.0F) ||
+      (clamp_time_scale(-std::numeric_limits<float>::infinity()) != 1.0F)) {
+    return 6;
+  }
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -180,6 +216,11 @@ int main() {
   result = check_playing_step_decision();
   if (result != 0) {
     std::printf("playing step decision failed: %d\n", result);
+    return result;
+  }
+  result = check_time_scale();
+  if (result != 0) {
+    std::printf("time scale failed: %d\n", result);
     return result;
   }
   return 0;

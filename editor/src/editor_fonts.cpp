@@ -154,8 +154,8 @@ EditorFontResult load_editor_fonts(ImFontAtlas *atlas, float sizePixels,
     core::log_message(core::LogLevel::Warning, "editor",
                       "no CJK font found (the bundled face is missing too); "
                       "Chinese and Japanese text will draw as boxes. Choose a "
-                      ".ttf/.ttc/.otf file that has them in Window > Editor "
-                      "Settings");
+                      ".ttf/.ttc/.otf file that has them in Edit > "
+                      "Preferences");
   }
   return result;
 }

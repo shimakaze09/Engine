@@ -5,7 +5,7 @@
 // historical path. Also the gesture and allocation contracts of #567:
 // history moves record an open gesture first, a gizmo gesture binds its
 // own target, and a command the history cannot record never mutates the
-// world silently.
+// world silently. Pause toggles: pressed again it resumes the session.
 
 #include "editor_commands.h"
 #include "editor_scene_document.h"
@@ -304,6 +304,63 @@ int check_selection_invalidated_by_scene_load() {
 
 /// EXPECTATION: undo/redo must be inert while the world is not editable
 /// (during play), and work again once stopped.
+/// EXPECTATION: Pause is a toggle. Pressed while playing it pauses, and
+/// pressed again it resumes the same session, recording Start, Pause,
+/// Resume in order. On base the second press did nothing, so a paused
+/// session could only be resumed through Play.
+int check_pause_toggles() {
+  using namespace engine::editor;
+  using namespace engine::runtime;
+
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 150;
+  }
+  editor_set_world(world.get());
+  PlayTransition drained{};
+  while (consume_play_transition(&drained)) {
+  }
+
+  pause_play_mode();
+  if (editor_session().playState != PlayState::Stopped) {
+    editor_set_world(nullptr);
+    return 151; // no-op while stopped
+  }
+  start_play_mode();
+  pause_play_mode();
+  if (editor_session().playState != PlayState::Paused) {
+    editor_set_world(nullptr);
+    return 152;
+  }
+  editor_session().stepRequested = true;
+  pause_play_mode();
+  if ((editor_session().playState != PlayState::Playing) ||
+      editor_session().stepRequested) {
+    editor_set_world(nullptr);
+    return 153; // the second press resumes and drops a pending step
+  }
+  const PlayTransition expected[] = {
+      PlayTransition::Start, PlayTransition::Pause, PlayTransition::Resume};
+  for (const PlayTransition want : expected) {
+    PlayTransition got{};
+    if (!consume_play_transition(&got) || (got != want)) {
+      editor_set_world(nullptr);
+      return 154;
+    }
+  }
+  if (consume_play_transition(&drained)) {
+    editor_set_world(nullptr);
+    return 155;
+  }
+
+  stop_play_mode();
+  finish_play_stop();
+  while (consume_play_transition(&drained)) {
+  }
+  editor_set_world(nullptr);
+  return 0;
+}
+
 int check_history_gated_while_playing() {
   using namespace engine::editor;
   using namespace engine::runtime;
@@ -914,6 +971,12 @@ int main() {
   }
 
   result = check_allocation_failure_is_never_silent();
+  if (result != 0) {
+    std::fprintf(stderr, "editor_session_test failed: %d\n", result);
+    return result;
+  }
+
+  result = check_pause_toggles();
   if (result != 0) {
     std::fprintf(stderr, "editor_session_test failed: %d\n", result);
     return result;

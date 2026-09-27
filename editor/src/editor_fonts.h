@@ -3,7 +3,7 @@
 // text render instead of drawing as missing-glyph boxes.
 //
 // The CJK face is, in order: the file the author chose (`editor.cjk_font`,
-// set from Window > Editor Settings), the Noto Sans SC face that ships in
+// set from Edit > Preferences), the Noto Sans SC face that ships in
 // assets/fonts (Simplified and Traditional Chinese and Japanese kana, SIL
 // OFL), and the operating system's own (Microsoft YaHei on Windows,
 // PingFang or Hiragino on macOS, Noto CJK or WenQuanYi on Linux) should the

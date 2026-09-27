@@ -30,12 +30,13 @@
 #include <string>
 #include <vector>
 
-#include "engine/core/platform.h"
 #include "engine/core/cvar.h"
 #include "engine/core/engine_stats.h"
+#include "engine/core/engine_version.h"
 #include "engine/core/json.h"
 #include "engine/core/logging.h"
 #include "engine/core/mem_tracker.h"
+#include "engine/core/platform.h"
 #include "engine/core/profiler.h"
 #include "engine/core/reflect.h"
 #include "engine/editor/editor_camera.h"
@@ -78,7 +79,7 @@ static void draw_unsaved_changes_prompt() noexcept {
   }
 
   if (ImGui::BeginPopupModal(kPopupId, nullptr,
-                            ImGuiWindowFlags_AlwaysAutoResize)) {
+                             ImGuiWindowFlags_AlwaysAutoResize)) {
     // The prompt names every document it stands for, so Save and Discard
     // read as decisions about exactly those documents.
     const bool sceneDirty = scene_document_is_dirty();
@@ -122,6 +123,93 @@ static void draw_unsaved_changes_prompt() noexcept {
   }
 }
 
+/// Draws one menu item per built-in primitive; the chosen one spawns at
+/// the editor camera's focus point and becomes the selection.
+static void draw_primitive_menu_items() noexcept {
+  constexpr struct {
+    const char *label;
+    EditorPrimitive primitive;
+  } kPrimitiveItems[] = {
+      {"Cube", EditorPrimitive::Cube},
+      {"Sphere", EditorPrimitive::Sphere},
+      {"Cylinder", EditorPrimitive::Cylinder},
+      {"Capsule", EditorPrimitive::Capsule},
+      {"Pyramid", EditorPrimitive::Pyramid},
+      {"Plane", EditorPrimitive::Plane},
+  };
+  const bool editable = world_is_editable();
+  for (const auto &item : kPrimitiveItems) {
+    if (ImGui::MenuItem(item.label, nullptr, false, editable)) {
+      const runtime::Entity spawned = execute_primitive_spawn(item.primitive);
+      if (spawned != runtime::kInvalidEntity) {
+        select_entity(spawned, false);
+      }
+    }
+  }
+}
+
+constexpr const char *kAboutPopupId = "About Engine";
+
+/// Help > About: the engine version and the one-line build identity a bug
+/// report should carry, with a button that copies it.
+static void draw_about_popup() noexcept {
+  if (!ImGui::BeginPopupModal(kAboutPopupId, nullptr,
+                              ImGuiWindowFlags_AlwaysAutoResize)) {
+    return;
+  }
+  ImGui::Text("Engine %s", core::engine_version_string());
+  ImGui::Separator();
+  ImGui::TextUnformatted("Revision: " ENGINE_BUILD_DESCRIBE);
+  ImGui::TextUnformatted("Compiler: " ENGINE_BUILD_COMPILER);
+  ImGui::TextUnformatted("Configuration: " ENGINE_BUILD_TYPE);
+  ImGui::TextUnformatted("Platform: " ENGINE_BUILD_PLATFORM);
+  ImGui::TextUnformatted("Floating point: " ENGINE_BUILD_FLOAT);
+  ImGui::Separator();
+  if (ImGui::Button("Copy build info")) {
+    ImGui::SetClipboardText(core::engine_build_id());
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Close")) {
+    ImGui::CloseCurrentPopup();
+  }
+  ImGui::EndPopup();
+}
+
+/// The simulation speed presets Unity's and Unreal's play toolbars offer.
+constexpr float kTimeScalePresets[] = {0.1F, 0.25F, 0.5F, 1.0F, 2.0F, 4.0F};
+
+/// The toolbar's simulation speed: a combo over sim.time_scale, drawn
+/// highlighted whenever the game does not run at real time so a slowed
+/// session is never mistaken for a slow game. The value is not saved: a
+/// new session always starts at 1.
+static void draw_time_scale_combo() noexcept {
+  const float scale = core::cvar_get_float("sim.time_scale", 1.0F);
+  char preview[16] = {};
+  std::snprintf(preview, sizeof(preview), "%gx", static_cast<double>(scale));
+  const bool offRealTime = scale != 1.0F;
+  if (offRealTime) {
+    ImGui::PushStyleColor(ImGuiCol_FrameBg,
+                          ImGui::GetStyleColorVec4(ImGuiCol_FrameBgActive));
+  }
+  ImGui::SetNextItemWidth(ImGui::CalcTextSize("0.25x").x +
+                          (ImGui::GetStyle().FramePadding.x * 2.0F) +
+                          ImGui::GetFrameHeight());
+  if (ImGui::BeginCombo("##time_scale", preview)) {
+    for (const float preset : kTimeScalePresets) {
+      char label[16] = {};
+      std::snprintf(label, sizeof(label), "%gx", static_cast<double>(preset));
+      if (ImGui::Selectable(label, preset == scale)) {
+        static_cast<void>(core::cvar_set_float("sim.time_scale", preset));
+      }
+    }
+    ImGui::EndCombo();
+  }
+  if (offRealTime) {
+    ImGui::PopStyleColor();
+  }
+  ImGui::SetItemTooltip("Simulation speed (sim.time_scale)");
+}
+
 void draw_main_menu_bar() noexcept {
   if (!ImGui::BeginMainMenuBar()) {
     return;
@@ -154,6 +242,8 @@ void draw_main_menu_bar() noexcept {
     ImGui::Separator();
     editor_action_menu_item(EditorAction::SaveScene);
     editor_action_menu_item(EditorAction::SaveSceneAs);
+    ImGui::Separator();
+    editor_action_menu_item(EditorAction::Exit);
 
     ImGui::EndMenu();
   }
@@ -162,8 +252,36 @@ void draw_main_menu_bar() noexcept {
     editor_action_menu_item(EditorAction::Undo);
     editor_action_menu_item(EditorAction::Redo);
     ImGui::Separator();
+    editor_action_menu_item(EditorAction::Copy);
+    editor_action_menu_item(EditorAction::Paste);
+    editor_action_menu_item(EditorAction::PasteAsChild);
     editor_action_menu_item(EditorAction::Duplicate);
     editor_action_menu_item(EditorAction::Delete);
+    ImGui::Separator();
+    // Checked while running, as Unity's Edit menu shows play state.
+    const PlayState state = editor_session().playState;
+    editor_action_menu_item(EditorAction::PlayStop,
+                            state != PlayState::Stopped);
+    editor_action_menu_item(EditorAction::Pause, state == PlayState::Paused);
+    editor_action_menu_item(EditorAction::Step);
+    ImGui::Separator();
+    // Preferences sit under Edit, as in Unity; no reference editor has a
+    // top-level Settings menu.
+    const bool showPreferences =
+        core::cvar_get_bool("editor.show_preferences", false);
+    if (ImGui::MenuItem("Preferences...", nullptr, showPreferences)) {
+      core::cvar_set_bool("editor.show_preferences", !showPreferences);
+    }
+    ImGui::EndMenu();
+  }
+
+  // Unity's GameObject menu: what the Entities panel's buttons create.
+  if (ImGui::BeginMenu("Entity")) {
+    editor_action_menu_item(EditorAction::CreateEmpty);
+    if (ImGui::BeginMenu("3D Object", world_is_editable())) {
+      draw_primitive_menu_items();
+      ImGui::EndMenu();
+    }
     ImGui::EndMenu();
   }
 
@@ -177,13 +295,18 @@ void draw_main_menu_bar() noexcept {
     if (ImGui::MenuItem("Rendering", nullptr, showRendering)) {
       core::cvar_set_bool("editor.show_rendering", !showRendering);
     }
-    const bool showPreferences =
-        core::cvar_get_bool("editor.show_preferences", false);
-    if (ImGui::MenuItem("Editor Settings", nullptr, showPreferences)) {
-      core::cvar_set_bool("editor.show_preferences", !showPreferences);
-    }
     ImGui::EndMenu();
   }
+
+  bool openAbout = false;
+  if (ImGui::BeginMenu("Help")) {
+    openAbout = ImGui::MenuItem("About");
+    ImGui::EndMenu();
+  }
+  if (openAbout) {
+    ImGui::OpenPopup(kAboutPopupId);
+  }
+  draw_about_popup();
 
   // Non-spamming status indicator: Fatal/high-severity errors
   // stay visible in the menu bar even while the Console panel is closed.
@@ -196,7 +319,7 @@ void draw_main_menu_bar() noexcept {
   // prompt, so this is where its refusal is seen.
   char status[160] = {};
   std::snprintf(status, sizeof(status), "%s%s", scene_document_display_name(),
-               scene_document_is_dirty() ? " *" : "");
+                scene_document_is_dirty() ? " *" : "");
   const char *saveError = scene_document_last_error();
   const float statusWidth = ImGui::CalcTextSize(status).x;
   float errorWidth = 0.0F;
@@ -255,7 +378,7 @@ void draw_toolbar() noexcept {
     }
   }
   const bool canPause =
-      hasWorld && (editor_session().playState == PlayState::Playing);
+      hasWorld && (editor_session().playState != PlayState::Stopped);
   const bool canStop =
       hasWorld && (editor_session().playState != PlayState::Stopped);
 
@@ -267,6 +390,8 @@ void draw_toolbar() noexcept {
   if (ImGui::Button("Play") && canPlay) {
     start_play_mode();
   }
+  ImGui::SetItemTooltip("Play (%s)",
+                        editor_shortcut_text(EditorAction::PlayStop));
   if (!canPlay) {
     ImGui::EndDisabled();
   }
@@ -275,8 +400,19 @@ void draw_toolbar() noexcept {
   if (!canPause) {
     ImGui::BeginDisabled();
   }
+  // A toggle: shown pressed while paused, and pressed again it resumes.
+  const bool paused = editor_session().playState == PlayState::Paused;
+  if (paused) {
+    ImGui::PushStyleColor(ImGuiCol_Button,
+                          ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+  }
   if (ImGui::Button("Pause") && canPause) {
     pause_play_mode();
+  }
+  ImGui::SetItemTooltip("Pause (%s)",
+                        editor_shortcut_text(EditorAction::Pause));
+  if (paused) {
+    ImGui::PopStyleColor();
   }
   if (!canPause) {
     ImGui::EndDisabled();
@@ -291,6 +427,7 @@ void draw_toolbar() noexcept {
   if (ImGui::Button("Step") && canStep) {
     editor_session().stepRequested = true;
   }
+  ImGui::SetItemTooltip("Step (%s)", editor_shortcut_text(EditorAction::Step));
   if (!canStep) {
     ImGui::EndDisabled();
   }
@@ -302,9 +439,14 @@ void draw_toolbar() noexcept {
   if (ImGui::Button("Stop") && canStop) {
     stop_play_mode();
   }
+  ImGui::SetItemTooltip("Stop (%s)",
+                        editor_shortcut_text(EditorAction::PlayStop));
   if (!canStop) {
     ImGui::EndDisabled();
   }
+
+  ImGui::SameLine();
+  draw_time_scale_combo();
 
   ImGui::SameLine();
   ImGui::SeparatorEx(ImGuiSeparatorFlags_Vertical);
@@ -367,8 +509,8 @@ static bool draw_entity_row(runtime::Entity entity, bool hasChildren,
     std::snprintf(label, sizeof(label), "%s###entity_%u", name.name,
                   entity.index);
   } else {
-    std::snprintf(label, sizeof(label), "Entity [%u]###entity_%u",
-                  entity.index, entity.index);
+    std::snprintf(label, sizeof(label), "Entity [%u]###entity_%u", entity.index,
+                  entity.index);
   }
 
   ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow |
@@ -377,8 +519,7 @@ static bool draw_entity_row(runtime::Entity entity, bool hasChildren,
   if (!hasChildren) {
     flags |= ImGuiTreeNodeFlags_Leaf;
   }
-  if (is_entity_selected(entity) ||
-      (selected_entity() == entity)) {
+  if (is_entity_selected(entity) || (selected_entity() == entity)) {
     flags |= ImGuiTreeNodeFlags_Selected;
   }
 
@@ -394,10 +535,11 @@ static bool draw_entity_row(runtime::Entity entity, bool hasChildren,
     if (!is_entity_selected(entity) && (selected_entity() != entity)) {
       select_entity(entity, false);
     }
-    // Both act on the selection, which the right-click just made include
-    // this row.
+    // Each acts on the selection, which the right-click just made include
+    // this row; Paste As Child pastes under it.
     for (const EditorAction action :
-         {EditorAction::Duplicate, EditorAction::Delete}) {
+         {EditorAction::Copy, EditorAction::Paste, EditorAction::PasteAsChild,
+          EditorAction::Duplicate, EditorAction::Delete}) {
       if (editor_action_menu_item_clicked(action)) {
         pending.kind = PendingHierarchyEdit::Kind::Action;
         pending.action = action;
@@ -520,25 +662,7 @@ void draw_entities_panel() noexcept {
     ImGui::OpenPopup("AddPrimitivePopup");
   }
   if (ImGui::BeginPopup("AddPrimitivePopup")) {
-    constexpr struct {
-      const char *label;
-      EditorPrimitive primitive;
-    } kPrimitiveItems[] = {
-        {"Cube", EditorPrimitive::Cube},
-        {"Sphere", EditorPrimitive::Sphere},
-        {"Cylinder", EditorPrimitive::Cylinder},
-        {"Capsule", EditorPrimitive::Capsule},
-        {"Pyramid", EditorPrimitive::Pyramid},
-        {"Plane", EditorPrimitive::Plane},
-    };
-    for (const auto &item : kPrimitiveItems) {
-      if (ImGui::MenuItem(item.label) && editable) {
-        const runtime::Entity spawned = execute_primitive_spawn(item.primitive);
-        if (spawned != runtime::kInvalidEntity) {
-          select_entity(spawned, false);
-        }
-      }
-    }
+    draw_primitive_menu_items();
     ImGui::EndPopup();
   }
 

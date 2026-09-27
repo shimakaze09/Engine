@@ -437,6 +437,7 @@ void editor_set_world(runtime::World *world) noexcept {
     editor_session().worldRestoreFailed = false;
     // The old world's restore is moot, and the snapshot it needed is gone.
     editor_session().playStopPending = false;
+    ++editor_session().documentGeneration;
     scene_document_reset_for_world_switch();
   }
   editor_session().world = world;

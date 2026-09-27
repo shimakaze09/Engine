@@ -163,7 +163,11 @@ because each of these does:
 - **Frame time is injectable.** `set_frame_delta_override` is the only
   seam; nothing else reads a wall clock to decide how much to simulate.
   Tests assert step counts, never durations
-  (`tools/check_test_timing.py`).
+  (`tools/check_test_timing.py`). The `sim.time_scale` cvar (0 to 4)
+  scales the time a frame feeds the accumulator, never the fixed step, so
+  slow motion and fast forward change how many steps a frame takes and
+  nothing about what a step computes; a paused Step is one step at any
+  scale, and audio plays at real time.
 - **Input is replayable per step.** Which step an event lands in follows
   its wall-clock timestamp, so the input a run's steps read is recorded,
   not rederived: the input log (`core/src/input_log.cpp`) keeps each
@@ -370,7 +374,7 @@ The code is the detail.
 | `audio/` | Sound handles, bus groups, one-shot instance pool, 3D listener, streaming music, decode budgets. |
 | `scripting/` | Lua runtime and sandbox, DAP debugger, hot reload with state persist, generated bindings, per-domain binding translation units, game state and player controller. |
 | `runtime/` | Public bootstrap/run/shutdown, the frame pipeline (which owns the engine's one content asset catalog and hands it to every consumer), `World` ECS, scene and prefab serializers, the subsystem bridges, render prep, the scene environment (the first sky light's environment map, loaded to the renderer's IBL cubemap when it changes), skeletal animation, render interpolation, save data, timers, cameras, game mode, entity pool, mesh streaming callbacks and mesh reference resolution, frame pacing. |
-| `editor/` | ImGui editor: session and play lifecycle, hierarchy, undoable commands, one action table (every shortcut's chord, menu label and enabled test; chords match exactly and only undo/redo repeat), asset index and content browser, panels, the Scene view (editor camera and overlays, during play too) and the Game view (the gameplay camera; game input follows its focus), inspector metadata and drawers, material editor, live and multi edit, cameras, command history. |
+| `editor/` | ImGui editor: session and play lifecycle, hierarchy, undoable commands, one action table (every shortcut's chord, menu label and enabled test; chords match exactly, only undo/redo repeat, and Edit > Preferences rebinds them, saved with the layout), asset index and content browser, panels, the Scene view (editor camera and overlays, during play too) and the Game view (the gameplay camera; game input follows its focus), inspector metadata and drawers, the component menu (Reset and a one-slot component clipboard), the entity clipboard (Copy, Paste, Paste As Child, built on the duplicate command), material editor, live and multi edit, cameras, command history. |
 | `assets/` | Shaders and their cook manifest, sample scripts and meshes, the bundled prop pack, sounds, starter templates. |
 | `tools/` | Asset packer, `engine_validate` scene checker, binding generator, asset generators, the audit gates and their self-tests, CI helpers. |
 | `tests/` | Unit, integration, smoke (`gpu` label), benchmark, plus the shared harness. |

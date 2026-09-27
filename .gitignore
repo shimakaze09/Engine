@@ -513,3 +513,4 @@ assets/*.meta.json
 /assets/engine_scene_document_test/
 /assets/engine_scene_document_prompt_test/
 /assets/engine_scene_document_play_mode_test/
+/assets/engine_editor_shortcuts_test/

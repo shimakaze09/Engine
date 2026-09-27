@@ -24,13 +24,21 @@ enum class EditorAction : std::uint8_t {
   OpenScene,
   SaveScene,
   SaveSceneAs,
+  Exit,
   Undo,
   Redo,
+  Copy,
+  Paste,
+  PasteAsChild,
   Duplicate,
   Delete,
+  CreateEmpty,
   GizmoTranslate,
   GizmoRotate,
   GizmoScale,
+  PlayStop,
+  Pause,
+  Step,
   Count,
 };
 
@@ -50,9 +58,14 @@ struct EditorShortcut final {
   /// rate. Only actions that are safe to run many times repeat; one that
   /// creates or writes something runs once per press.
   bool repeats = false;
+  /// Whether the chord still fires while the game has the keyboard (the
+  /// Game view focused in play). Only the play controls do, so the author
+  /// can always pause or stop a running game from the keyboard.
+  bool whileGameHasKeyboard = false;
 };
 
-/// Number of rows, one per EditorAction.
+/// Number of rows, one per EditorAction. Rows carry the live bindings,
+/// the defaults below with any rebinding applied.
 std::size_t editor_shortcut_count() noexcept;
 /// The row at `index` (< editor_shortcut_count()).
 const EditorShortcut &editor_shortcut_at(std::size_t index) noexcept;
@@ -69,20 +82,62 @@ bool run_editor_action(EditorAction action) noexcept;
 /// stays valid until the table's chords change.
 const char *editor_shortcut_text(EditorAction action) noexcept;
 
-/// True while shortcuts must not fire: a text field has the keyboard, the
-/// game has it (the Game view focused in play), or a popup or the
-/// unsaved-changes prompt is open.
+/// True while no shortcut may fire: a text field has the keyboard, or a
+/// popup or the unsaved-changes prompt is open. While the game has the
+/// keyboard only rows marked whileGameHasKeyboard fire.
 bool editor_shortcuts_blocked() noexcept;
 /// Runs every action whose chord was pressed this frame, unless blocked.
 /// Call once per frame, after ImGui::NewFrame.
 void dispatch_editor_shortcuts() noexcept;
 
+/// Writes `chord` as saved text ("Ctrl+Shift+S", or "None" for no chord);
+/// false for a modifier alone or a key a binding cannot use.
+bool format_key_chord(ImGuiKeyChord chord, char *out,
+                      std::size_t capacity) noexcept;
+/// Reads text format_key_chord writes; false for anything else.
+bool parse_key_chord(const char *text, ImGuiKeyChord *out) noexcept;
+/// The action whose stable id is `id`.
+bool find_editor_action(const char *id, EditorAction *out) noexcept;
+
+/// Binds `chord` (0 unbinds) as `action`'s primary chord. Refused when
+/// another action already uses it, naming that action in *outConflict,
+/// or when the chord cannot be named.
+bool rebind_editor_action(EditorAction action, ImGuiKeyChord chord,
+                          EditorAction *outConflict) noexcept;
+/// True when `action`'s chords differ from its defaults.
+bool editor_action_rebound(EditorAction action) noexcept;
+/// Restores every default chord.
+void reset_editor_shortcuts() noexcept;
+
+/// Loads the bindings the preferences section stores, following the
+/// settings reader's phases: begin clears what was staged, stage records
+/// one stored line, and commit replaces every binding with the defaults
+/// plus the staged lines. Conflicts are judged on that final table, so a
+/// line may take a chord a later line frees. An unknown id or a malformed
+/// chord is refused when staged, and a chord two actions would share when
+/// committed, each with a logged warning; a refused action keeps its
+/// default.
+void begin_stored_shortcuts() noexcept;
+bool stage_stored_shortcut(const char *id, const char *chordText) noexcept;
+void commit_stored_shortcuts() noexcept;
+
+/// Starts capturing the next chord for `action` in Preferences; shortcuts
+/// do not dispatch meanwhile.
+void begin_shortcut_capture(EditorAction action) noexcept;
+/// The action being captured, or EditorAction::Count.
+EditorAction shortcut_capture_target() noexcept;
+/// Stops capturing.
+void end_shortcut_capture() noexcept;
+
 /// Draws the menu item for `action` with its label, chord and enabled
-/// state, and runs it when clicked. True when it ran.
-bool editor_action_menu_item(EditorAction action) noexcept;
+/// state (checked when `checked`), and runs it when clicked. True when it
+/// ran.
+bool editor_action_menu_item(EditorAction action,
+                             bool checked = false) noexcept;
 /// Draws the same menu item without running it: true when it was clicked
 /// while enabled. For callers that must apply the action later, such as a
 /// row inside a hierarchy walk.
-bool editor_action_menu_item_clicked(EditorAction action) noexcept;
+bool editor_action_menu_item_clicked(EditorAction action,
+                                     bool checked = false) noexcept;
 
 } // namespace engine::editor

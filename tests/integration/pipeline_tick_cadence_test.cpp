@@ -10,13 +10,14 @@
 // pipeline's frame delta override, never the wall clock, so every step
 // count below is exact on every machine.
 
+#include "engine/core/cvar.h"
+#include "engine/core/simulation_clock.h"
 #include "engine/engine.h"
 #include "engine/math/component_types.h"
 #include "engine/runtime/editor_bridge.h"
 #include "engine/runtime/engine_pipeline.h"
 #include "engine/runtime/scene_serializer.h"
 #include "engine/runtime/world.h"
-#include "engine/core/simulation_clock.h"
 #include "engine/scripting/scripting.h"
 
 #include <cstdio>
@@ -645,6 +646,52 @@ int main() {
     CHECK(engine::scripting::call_script_function_float("verify_timer_fired",
                                                          1.0F),
           "a timeout fires once");
+
+    std::printf("%s\n", g_failures == before ? "PASS" : "FAIL");
+  }
+
+  // --- Scenario 3f: sim.time_scale scales the time a frame feeds the
+  // accumulator, never the step. At 0.5, ten one-step frames simulate five
+  // steps; at 2 each simulates two; at 0 none; and a paused Step is one
+  // step whatever the scale. Each simulated step keeps the fixed delta. ---
+  {
+    std::printf("  %-52s ", "time scale changes steps per frame, not steps");
+    const int before = g_failures;
+    engine::runtime::reset_world(*g_world);
+    g_paused = false;
+    g_stepArmed = false;
+    CHECK(settle_frames(pipeline, 1), "settle");
+
+    const auto ticks_over = [&pipeline](float scale, int frames) noexcept {
+      static_cast<void>(engine::core::cvar_set_float("sim.time_scale", scale));
+      const std::uint64_t start =
+          engine::scripting::simulation_clock().tickIndex;
+      for (int i = 0; i < frames; ++i) {
+        if (!ticking_frame(pipeline)) {
+          return std::numeric_limits<std::uint64_t>::max();
+        }
+      }
+      return engine::scripting::simulation_clock().tickIndex - start;
+    };
+    CHECK(ticks_over(0.5F, 10) == 5U, "half speed: 5 steps in 10 frames");
+    CHECK(engine::scripting::simulation_clock().deltaSeconds == kOneStepSeconds,
+          "a half-speed step is still one fixed step");
+    CHECK(ticks_over(2.0F, 3) == 6U, "double speed: 2 steps a frame");
+    CHECK(engine::scripting::simulation_clock().stepsThisFrame == 2U,
+          "the double-speed frame publishes its two steps");
+    CHECK(ticks_over(0.0F, 4) == 0U, "scale 0: no steps while playing");
+    CHECK(ticks_over(1.0F, 3) == 3U, "scale 1: one step a frame again");
+
+    static_cast<void>(engine::core::cvar_set_float("sim.time_scale", 0.5F));
+    g_paused = true;
+    const std::uint64_t pausedTick =
+        engine::scripting::simulation_clock().tickIndex;
+    g_stepArmed = true;
+    CHECK(pipeline.execute_frame(), "single-step frame at half speed");
+    CHECK(engine::scripting::simulation_clock().tickIndex == pausedTick + 1U,
+          "a paused Step is one step at any scale");
+    g_paused = false;
+    static_cast<void>(engine::core::cvar_set_float("sim.time_scale", 1.0F));
 
     std::printf("%s\n", g_failures == before ? "PASS" : "FAIL");
   }

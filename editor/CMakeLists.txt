@@ -8,7 +8,9 @@ engine_add_module_library(engine_editor
     src/editor_asset_index.cpp
     src/editor_import_settings.cpp
     src/editor_commands.cpp
+    src/editor_component_ops.cpp
     src/editor_entity_commands.cpp
+    src/editor_entity_clipboard.cpp
     src/editor_console_capture.cpp
     src/editor_fonts.cpp
     src/editor_component_registry.cpp

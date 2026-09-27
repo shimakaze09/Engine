@@ -4,8 +4,11 @@
 // duplicated parent brings its children with their parent links pointing
 // at the copies (not the originals), the source keeps its own parent, and
 // the whole duplication is one undo step that redo restores under the
-// same persistent ids.
+// same persistent ids. A selection duplicates as one forest, and a
+// reference inside the copy (a mesh's scene-capture source) points at the
+// copy.
 
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -268,6 +271,132 @@ void test_invalid() noexcept {
         "the failed duplicate creates nothing");
 }
 
+/// A selection duplicates as one command: a selected entity whose parent
+/// is also selected is copied once, with that parent; each root copy
+/// keeps its source's parent; the copies become the selection; and one
+/// undo removes every copy.
+void test_selection_forest() noexcept {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    check(false, "allocate world");
+    return;
+  }
+  SessionWorldScope scope(world.get());
+  engine::editor::CommandHistory &history =
+      engine::editor::editor_session().commandHistory;
+  const Entity parent = add_named(*world, "Parent", Transform{});
+  Transform childLocal{};
+  childLocal.parentId = world->persistent_id(parent);
+  const Entity child = add_named(*world, "Child", childLocal);
+  const Entity loner = add_named(*world, "Loner", Transform{});
+  engine::editor::select_entity(child, false);
+  engine::editor::select_entity(parent, true);
+  engine::editor::select_entity(loner, true);
+  const std::size_t aliveBefore = world->alive_entity_count();
+
+  check(engine::editor::execute_selection_duplicate(),
+        "the selection duplicates");
+  check(world->alive_entity_count() == aliveBefore + 3U,
+        "parent, child and loner are copied once each");
+  check(engine::editor::editor_session().selectedEntityCount == 2U,
+        "the two root copies become the selection");
+  const Entity parentCopy = world->find_entity_by_name("Parent (2)");
+  const Entity lonerCopy = world->find_entity_by_name("Loner (2)");
+  check((parentCopy != engine::runtime::kInvalidEntity) &&
+            (lonerCopy != engine::runtime::kInvalidEntity) &&
+            engine::editor::is_entity_selected(parentCopy) &&
+            engine::editor::is_entity_selected(lonerCopy),
+        "each root copy is named uniquely and selected");
+  std::size_t copiedChildren = 0U;
+  world->for_each_alive([&](Entity entity) {
+    Transform transform{};
+    if (world->get_transform(entity, &transform) &&
+        (transform.parentId == world->persistent_id(parentCopy))) {
+      ++copiedChildren;
+    }
+  });
+  check(copiedChildren == 1U, "the child copy hangs under the parent copy");
+
+  check(history.undo() && (world->alive_entity_count() == aliveBefore),
+        "one undo removes every copy");
+}
+
+/// The copy of `rootCopy`'s child named `name`, or kInvalidEntity.
+Entity child_named(World &world, Entity rootCopy, const char *name) noexcept {
+  Entity found = engine::runtime::kInvalidEntity;
+  world.for_each_alive([&](Entity entity) {
+    Transform transform{};
+    NameComponent childName{};
+    if (world.get_transform(entity, &transform) &&
+        (transform.parentId == world.persistent_id(rootCopy)) &&
+        world.get_name_component(entity, &childName) &&
+        (std::strcmp(childName.name, name) == 0)) {
+      found = entity;
+    }
+  });
+  return found;
+}
+
+std::uint32_t capture_source_of(const World &world, Entity entity) noexcept {
+  engine::runtime::MeshComponent mesh{};
+  return world.get_mesh_component(entity, &mesh) ? mesh.sceneCaptureSourceId
+                                                 : 0U;
+}
+
+/// A reference into the duplicated set points at the copy, as Unity's
+/// Duplicate remaps references among everything it copies: a mesh that
+/// shows a sibling's scene capture shows the copied sibling's, and so does
+/// a mesh copied in the same command from outside that subtree. A
+/// reference to an entity that is not copied is kept. On base the copied
+/// screen still showed the original camera.
+void test_internal_reference_remap() noexcept {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    check(false, "allocate world");
+    return;
+  }
+  SessionWorldScope scope(world.get());
+  const Entity root = add_named(*world, "Monitor", Transform{});
+  Transform local{};
+  local.parentId = world->persistent_id(root);
+  const Entity camera = add_named(*world, "Camera", local);
+  const Entity screen = add_named(*world, "Screen", local);
+  const Entity outside = add_named(*world, "Outside", Transform{});
+  const Entity far = add_named(*world, "Far", Transform{});
+  engine::runtime::MeshComponent mesh{};
+  mesh.sceneCaptureSourceId = world->persistent_id(camera);
+  check(world->add_mesh_component(screen, mesh) &&
+            world->add_mesh_component(outside, mesh) &&
+            world->add_mesh_component(far, mesh),
+        "meshes that show the camera's capture");
+
+  const Entity pair[] = {root, outside};
+  engine::editor::EntityDuplicateCommand *command =
+      engine::editor::build_entity_duplicate_command(pair, 2U);
+  check((command != nullptr) &&
+            engine::editor::editor_session().commandHistory.execute(command),
+        "the monitor and the outside mesh duplicate");
+  const Entity rootCopy = world->find_entity_by_name("Monitor (2)");
+  const Entity cameraCopy = child_named(*world, rootCopy, "Camera");
+  const Entity screenCopy = child_named(*world, rootCopy, "Screen");
+  check((cameraCopy != engine::runtime::kInvalidEntity) &&
+            (screenCopy != engine::runtime::kInvalidEntity),
+        "the monitor's children are copied under the copy");
+  check(capture_source_of(*world, screenCopy) ==
+            world->persistent_id(cameraCopy),
+        "the copied screen shows the copied camera");
+  check(capture_source_of(*world, world->find_entity_by_name("Outside (2)")) ==
+            world->persistent_id(cameraCopy),
+        "a mesh copied in the same command shows the copied camera too");
+  check(capture_source_of(*world, screen) == world->persistent_id(camera),
+        "the source screen still shows the source camera");
+
+  // Copied alone, a reference to an entity that is not copied is kept.
+  const Entity copyOfFar = engine::editor::execute_entity_duplicate(far);
+  check(capture_source_of(*world, copyOfFar) == world->persistent_id(camera),
+        "a reference outside the copy is kept");
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -276,5 +405,7 @@ int main() {
   test_subtree();
   test_names();
   test_invalid();
+  test_selection_forest();
+  test_internal_reference_remap();
   return g_tests.finish("editor duplicate entity tests");
 }

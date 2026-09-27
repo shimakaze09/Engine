@@ -1,7 +1,8 @@
 // Declares frame pacing helpers for the engine pipeline: vsync interval
-// normalization, the pure frame-cap wait computation and fixed-step count
-// decision (unit-tested exactly; the wall clock stays in the pipeline),
-// and the hybrid sleep-then-spin wait.
+// normalization, the pure frame-cap wait computation, the simulation time
+// scale applied to a frame's delta, and the fixed-step count decision
+// (unit-tested exactly; the wall clock stays in the pipeline), and the
+// hybrid sleep-then-spin wait.
 
 #pragma once
 
@@ -26,6 +27,21 @@ double frame_cap_wait_seconds(double elapsedSeconds, int maxFps) noexcept;
 /// runs, hitches) pass through unchanged.
 double snap_delta_to_fixed_step(double deltaSeconds,
                                 double fixedDeltaSeconds) noexcept;
+
+/// Largest simulation time scale sim.time_scale accepts.
+inline constexpr float kMaxTimeScale = 4.0F;
+
+/// Clamps a simulation time scale to [0, kMaxTimeScale]. A non-finite
+/// scale reads as 1, so a malformed value can neither stall nor flood the
+/// accumulator.
+float clamp_time_scale(float timeScale) noexcept;
+
+/// The share of a frame's delta the fixed-step accumulator receives at
+/// `timeScale`: deltaSeconds * clamp_time_scale(timeScale). The fixed step
+/// itself never changes, so each step simulates exactly as at full speed
+/// and a scaled run steps the same states, only on a different frame
+/// schedule. At scale 1 the delta passes through exactly.
+double scaled_frame_delta(double deltaSeconds, float timeScale) noexcept;
 
 /// Blocks for waitSeconds using a coarse sleep followed by a spin so the
 /// cap stays precise despite OS timer granularity. No-op for waits <= 0.

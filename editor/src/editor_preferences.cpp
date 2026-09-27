@@ -5,12 +5,15 @@
 
 #include "editor_preferences.h"
 
+#include "editor_shortcuts.h"
+
 #include <charconv>
 #include <cstdio>
 #include <cstring>
 #include <system_error>
 
 #include "engine/core/cvar.h"
+#include "engine/core/logging.h"
 #include "engine/core/platform.h"
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -25,6 +28,9 @@ constexpr const char *kSectionType = "EnginePreferences";
 constexpr const char *kCjkFontKey = "CjkFont=";
 constexpr const char *kWindowSizeKey = "WindowSize=";
 constexpr const char *kWindowMaximizedKey = "WindowMaximized=";
+/// A rebound shortcut: Shortcut.<action id>=<chord>, one line per action
+/// whose chords differ from the default.
+constexpr const char *kShortcutKey = "Shortcut.";
 
 /// The geometry the layout file stored, and whether it waits to be
 /// applied.
@@ -44,8 +50,35 @@ void *read_open(ImGuiContext *, ImGuiSettingsHandler *,
                                             : nullptr;
 }
 
+/// Before the layout file is read: nothing staged yet.
+void read_init(ImGuiContext *, ImGuiSettingsHandler *) noexcept {
+  begin_stored_shortcuts();
+}
+
+/// After it is read: the stored bindings apply together, so their
+/// conflicts are judged on the final table (see commit_stored_shortcuts).
+void apply_all(ImGuiContext *, ImGuiSettingsHandler *) noexcept {
+  commit_stored_shortcuts();
+}
+
 void read_line(ImGuiContext *, ImGuiSettingsHandler *, void *,
                const char *line) noexcept {
+  const std::size_t shortcutKeyLength = std::strlen(kShortcutKey);
+  if (std::strncmp(line, kShortcutKey, shortcutKeyLength) == 0) {
+    const char *id = line + shortcutKeyLength;
+    const char *equals = std::strchr(id, '=');
+    char idBuffer[64] = {};
+    const std::size_t idLength =
+        (equals != nullptr) ? static_cast<std::size_t>(equals - id) : 0U;
+    if ((idLength == 0U) || (idLength >= sizeof(idBuffer))) {
+      core::log_message(core::LogLevel::Warning, "editor",
+                        "stored shortcut line without an action id ignored");
+      return;
+    }
+    std::memcpy(idBuffer, id, idLength);
+    static_cast<void>(stage_stored_shortcut(idBuffer, equals + 1));
+    return;
+  }
   const std::size_t keyLength = std::strlen(kCjkFontKey);
   if (std::strncmp(line, kCjkFontKey, keyLength) == 0) {
     static_cast<void>(core::cvar_set_string(kCjkFontCvar, line + keyLength));
@@ -97,7 +130,108 @@ void write_all(ImGuiContext *, ImGuiSettingsHandler *handler,
                     geometry.height);
     buffer->appendf("%s%d\n", kWindowMaximizedKey, geometry.maximized ? 1 : 0);
   }
+  for (std::size_t i = 0U; i < editor_shortcut_count(); ++i) {
+    const EditorShortcut &row = editor_shortcut_at(i);
+    char chord[40] = {};
+    if (editor_action_rebound(row.action) &&
+        format_key_chord(row.chord, chord, sizeof(chord))) {
+      buffer->appendf("%s%s=%s\n", kShortcutKey, row.id, chord);
+    }
+  }
   buffer->append("\n");
+}
+
+/// The key a capture takes: the first keyboard key other than a modifier
+/// pressed this frame, or ImGuiKey_None. Mouse buttons and gamepad keys
+/// never bind.
+ImGuiKey captured_key() noexcept {
+  for (int k = ImGuiKey_NamedKey_BEGIN; k < ImGuiKey_GamepadStart; ++k) {
+    const ImGuiKey key = static_cast<ImGuiKey>(k);
+    const bool modifier =
+        (key == ImGuiKey_LeftCtrl) || (key == ImGuiKey_RightCtrl) ||
+        (key == ImGuiKey_LeftShift) || (key == ImGuiKey_RightShift) ||
+        (key == ImGuiKey_LeftAlt) || (key == ImGuiKey_RightAlt) ||
+        (key == ImGuiKey_LeftSuper) || (key == ImGuiKey_RightSuper);
+    if (!modifier && ImGui::IsKeyPressed(key, false)) {
+      return key;
+    }
+  }
+  return ImGuiKey_None;
+}
+
+/// The Shortcuts section: every action's chord, rebound by clicking it and
+/// pressing the new one, or removed from its context menu. Escape,
+/// clicking it again or leaving the window cancels, so a capture never
+/// outlives the window's focus and swallows keys meant elsewhere. A chord
+/// another action holds is refused and named.
+void draw_shortcut_bindings() noexcept {
+  static char s_refusal[128] = {};
+  ImGui::SeparatorText("Shortcuts");
+  const EditorAction capturing = shortcut_capture_target();
+  if ((capturing != EditorAction::Count) &&
+      !ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)) {
+    end_shortcut_capture();
+  } else if (capturing != EditorAction::Count) {
+    const ImGuiKey key = captured_key();
+    if (key == ImGuiKey_Escape) {
+      end_shortcut_capture();
+    } else if (key != ImGuiKey_None) {
+      const ImGuiKeyChord chord =
+          static_cast<ImGuiKeyChord>(ImGui::GetIO().KeyMods) | key;
+      EditorAction conflict = EditorAction::Count;
+      if (rebind_editor_action(capturing, chord, &conflict)) {
+        s_refusal[0] = '\0';
+        ImGui::MarkIniSettingsDirty();
+      } else if (conflict != EditorAction::Count) {
+        std::snprintf(s_refusal, sizeof(s_refusal), "That chord is %s's.",
+                      editor_shortcut(conflict).label);
+      } else {
+        std::snprintf(s_refusal, sizeof(s_refusal),
+                      "That key cannot be bound.");
+      }
+      end_shortcut_capture();
+    }
+  }
+  if (ImGui::BeginTable("shortcuts", 2,
+                        ImGuiTableFlags_RowBg |
+                            ImGuiTableFlags_SizingFixedFit)) {
+    for (std::size_t i = 0U; i < editor_shortcut_count(); ++i) {
+      const EditorShortcut &row = editor_shortcut_at(i);
+      ImGui::TableNextRow();
+      ImGui::TableNextColumn();
+      ImGui::TextUnformatted(row.label);
+      ImGui::TableNextColumn();
+      ImGui::PushID(row.id);
+      const char *shown = (shortcut_capture_target() == row.action)
+                              ? "Press a chord..."
+                              : editor_shortcut_text(row.action);
+      if (ImGui::Button((shown[0] != '\0') ? shown : "(none)")) {
+        if (shortcut_capture_target() == row.action) {
+          end_shortcut_capture();
+        } else {
+          begin_shortcut_capture(row.action);
+        }
+        s_refusal[0] = '\0';
+      }
+      if (ImGui::BeginPopupContextItem("binding_menu")) {
+        if (ImGui::MenuItem("Remove Shortcut", nullptr, false,
+                            row.chord != 0) &&
+            rebind_editor_action(row.action, 0, nullptr)) {
+          ImGui::MarkIniSettingsDirty();
+        }
+        ImGui::EndPopup();
+      }
+      ImGui::PopID();
+    }
+    ImGui::EndTable();
+  }
+  if (s_refusal[0] != '\0') {
+    ImGui::TextColored(ImVec4(0.9F, 0.35F, 0.35F, 1.0F), "%s", s_refusal);
+  }
+  if (ImGui::Button("Restore defaults")) {
+    reset_editor_shortcuts();
+    ImGui::MarkIniSettingsDirty();
+  }
 }
 
 } // namespace
@@ -106,10 +240,10 @@ void register_editor_preferences() noexcept {
   static_cast<void>(core::cvar_register_string(
       kCjkFontCvar, "",
       "Font file for Chinese and Japanese text in the editor; empty uses the "
-      "bundled Noto Sans SC. Set from Window > Editor Settings"));
-  static_cast<void>(core::cvar_register_bool(
-      kShowPreferencesCvar, false,
-      "Toggle the Editor Settings window (Window menu)"));
+      "bundled Noto Sans SC. Set from Edit > Preferences"));
+  static_cast<void>(
+      core::cvar_register_bool(kShowPreferencesCvar, false,
+                               "Toggle the Preferences window (Edit menu)"));
   if ((ImGui::GetCurrentContext() == nullptr) ||
       (ImGui::FindSettingsHandler(kSectionType) != nullptr)) {
     return;
@@ -117,8 +251,10 @@ void register_editor_preferences() noexcept {
   ImGuiSettingsHandler handler{};
   handler.TypeName = kSectionType;
   handler.TypeHash = ImHashStr(kSectionType);
+  handler.ReadInitFn = &read_init;
   handler.ReadOpenFn = &read_open;
   handler.ReadLineFn = &read_line;
+  handler.ApplyAllFn = &apply_all;
   handler.WriteAllFn = &write_all;
   ImGui::AddSettingsHandler(&handler);
 }
@@ -139,6 +275,7 @@ void set_loaded_cjk_font(const char *path) noexcept {
 void draw_editor_preferences_panel() noexcept {
   if (!core::cvar_get_bool(kShowPreferencesCvar, false)) {
     g_draftSeeded = false;
+    end_shortcut_capture();
     return;
   }
   if (!g_draftSeeded) {
@@ -147,7 +284,7 @@ void draw_editor_preferences_panel() noexcept {
     g_draftSeeded = true;
   }
   bool open = true;
-  if (ImGui::Begin("Editor Settings", &open)) {
+  if (ImGui::Begin("Preferences", &open)) {
     ImGui::SeparatorText("Font");
     ImGui::TextWrapped("In use for Chinese and Japanese text: %s",
                        (g_loadedCjkFont[0] != '\0') ? g_loadedCjkFont : "none");
@@ -168,6 +305,9 @@ void draw_editor_preferences_panel() noexcept {
       ImGui::MarkIniSettingsDirty();
     }
     ImGui::TextDisabled("Takes effect the next time the editor starts.");
+    draw_shortcut_bindings();
+  } else {
+    end_shortcut_capture(); // collapsed
   }
   ImGui::End();
   if (!open) {
