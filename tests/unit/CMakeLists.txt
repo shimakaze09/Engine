@@ -2303,3 +2303,15 @@ engine_add_test_executable(engine_unit_editor_camera
     COMPILE_DEFINITIONS
     SDL_MAIN_HANDLED
 )
+
+engine_add_test_executable(engine_unit_editor_component_clipboard
+    SOURCES
+    editor_component_clipboard_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/editor/src
+    ${CMAKE_SOURCE_DIR}/runtime/src
+    PRIVATE_DEPS
+    engine_editor
+    COMPILE_DEFINITIONS
+    SDL_MAIN_HANDLED
+)

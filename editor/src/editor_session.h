@@ -187,6 +187,10 @@ struct EditorSession final {
   // (game input follows focus), and its image's screen rect, where the
   // in-game overlays anchor.
   bool gameViewShown = true;
+  /// Counts document switches (New, Open, a world rebind). A persistent
+  /// id names an entity only within one document, so a clipboard compares
+  /// generations before carrying entity references across.
+  std::uint64_t documentGeneration = 0U;
   bool gameViewFocused = false;
   bool gameViewHovered = false;
   ImVec2 gameViewScreenPos{};

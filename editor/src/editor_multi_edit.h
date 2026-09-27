@@ -98,6 +98,24 @@ bool multi_edit_section_listed(ComponentEditType type) noexcept;
 /// type is exactly one of listed or deferred, enforced at compile time.
 bool multi_edit_type_deferred(ComponentEditType type) noexcept;
 
+/// Decides one target's side of a batch component change: `exists` and
+/// `current` are the target's component now; the function writes what it
+/// should become into *outAfterExists and *outAfter (both start as the
+/// current state) and returns false to leave the target out.
+using ComponentChangeFn = bool (*)(void *context, runtime::Entity target,
+                                   bool exists,
+                                   const ComponentEditSnapshot &current,
+                                   bool *outAfterExists,
+                                   ComponentEditSnapshot *outAfter) noexcept;
+
+/// Applies `fill`'s change of `type` to each alive target as one undoable
+/// command, atomically: a target the world rejects rolls back every one
+/// already changed. Open Inspector and multi-edit gestures are recorded
+/// first. False when no target changes or the command is refused.
+bool execute_component_batch(ComponentEditType type,
+                             const runtime::Entity *targets, std::size_t count,
+                             ComponentChangeFn fill, void *context) noexcept;
+
 /// Draws the Inspector's multi-selection body: the selection count, a
 /// Delete Selected button (the Delete action, one undoable command), and
 /// one section per component common to every selected entity, each

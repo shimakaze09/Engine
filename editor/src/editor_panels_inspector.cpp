@@ -9,6 +9,7 @@
 #include "editor_panels_inspector.h"
 
 #include "editor_commands.h"
+#include "editor_component_ops.h"
 #include "editor_inspector_metadata.h"
 #include "editor_live_edit.h"
 #include "editor_multi_edit.h"
@@ -127,6 +128,7 @@ void draw_component_section(runtime::Entity entity, ComponentEditType type,
   ImGui::PushID(sectionLabel);
   const bool open = ImGui::CollapsingHeader(sectionLabel,
                                             ImGuiTreeNodeFlags_DefaultOpen);
+  draw_component_menu(&entity, 1U, type, authoredEditable);
   const bool removePressed =
       removable && draw_remove_component_button("remove", authoredEditable);
 

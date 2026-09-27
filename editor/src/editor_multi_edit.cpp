@@ -16,6 +16,7 @@
 #include <new>
 
 #include "editor_commands.h"
+#include "editor_component_ops.h"
 #include "editor_inspector_metadata.h"
 #include "editor_panels_inspector_generic.h"
 #include "editor_session.h"
@@ -468,6 +469,51 @@ bool apply_multi_component_remove(ComponentEditType type) noexcept {
   return session.commandHistory.execute(cmd);
 }
 
+bool execute_component_batch(ComponentEditType type,
+                             const runtime::Entity *targets, std::size_t count,
+                             ComponentChangeFn fill, void *context) noexcept {
+  EditorSession &session = editor_session();
+  runtime::World *const world = session.world;
+  if ((world == nullptr) || (targets == nullptr) || (count == 0U) ||
+      (fill == nullptr)) {
+    return false;
+  }
+  auto *cmd = new (std::nothrow) MultiComponentEditCommand();
+  if ((cmd == nullptr) || !cmd->entries.allocate(count)) {
+    delete cmd;
+    core::log_message(core::LogLevel::Error, "editor",
+                      "component edit refused: out of memory for its undo "
+                      "record");
+    return false;
+  }
+  cmd->type = type;
+  for (std::size_t i = 0U; i < count; ++i) {
+    const runtime::Entity entity = targets[i];
+    if (!world->is_alive(entity)) {
+      continue;
+    }
+    MultiEditEntry &entry = cmd->entries[cmd->entryCount];
+    entry.entity = entity;
+    entry.persistentId = world->persistent_id(entity);
+    entry.beforeExists =
+        capture_component_snapshot(type, entity, &entry.before);
+    entry.after = entry.before;
+    entry.afterExists = entry.beforeExists;
+    if (fill(context, entity, entry.beforeExists, entry.before,
+             &entry.afterExists, &entry.after)) {
+      ++cmd->entryCount;
+    }
+  }
+  if (cmd->entryCount == 0U) {
+    delete cmd;
+    return false;
+  }
+  // Open gestures record first, so this command undoes on its own.
+  multi_edit_commit_gesture();
+  inspector_commit_pending_edit();
+  return session.commandHistory.execute(cmd);
+}
+
 namespace {
 
 /// Reflected type names the multi Inspector's per-field editor covers (the
@@ -567,6 +613,9 @@ void draw_multi_component_section(const MultiSectionDesc &desc) noexcept {
   ImGui::PushID(desc.label);
   const bool open =
       ImGui::CollapsingHeader(desc.label, ImGuiTreeNodeFlags_DefaultOpen);
+  const EditorSession &session = editor_session();
+  draw_component_menu(session.selectedEntities.data(),
+                      session.selectedEntityCount, desc.type, true);
   bool removePressed = false;
   if (desc.removable) {
     ImGui::SameLine();

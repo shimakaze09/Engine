@@ -78,6 +78,7 @@ void reset_session_for_scene_switch() noexcept {
   clear_entity_selection();
   session.commandHistory.clear();
   session.document.unrecordedEdit = false;
+  ++session.documentGeneration;
   session.worldRestoreFailed = false;
   session.hasPlaySnapshot = false;
   session.playSnapshotSize = 0U;
