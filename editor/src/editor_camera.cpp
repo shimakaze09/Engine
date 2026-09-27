@@ -2,6 +2,7 @@
 
 #include "engine/editor/editor_camera.h"
 
+#include <algorithm>
 #include <cmath>
 
 #include "engine/math/mat4.h"
@@ -18,6 +19,9 @@ namespace {
 constexpr float kOrbitSensitivity = 0.005F;
 constexpr float kPanSensitivity = 0.01F;
 constexpr float kZoomFactor = 0.1F;
+/// Clip planes as multiples of the orbit distance (see editor_camera_state).
+constexpr float kNearPerDistance = 0.0025F;
+constexpr float kFarPerDistance = 2.5F;
 
 } // namespace
 
@@ -80,6 +84,17 @@ renderer::CameraState editor_camera_state(const EditorCamera &camera) noexcept {
   state.position = math::add(camera.target, offset);
   state.target = camera.target;
   state.up = math::Vec3(0.0F, 1.0F, 0.0F);
+  // The clip planes follow the orbit distance, as Unity's scene camera
+  // clips dynamically: the far plane keeps the target and one and a half
+  // times its distance beyond it in view at any zoom, and the near plane
+  // scales with it, so far:near stays at 1000 and the depth buffer keeps
+  // the precision it has at the defaults. Both planes start scaling at
+  // 40 m, below which they keep the renderer's defaults.
+  const renderer::CameraState defaults{};
+  state.nearPlane =
+      std::max(defaults.nearPlane, kNearPerDistance * camera.distance);
+  state.farPlane =
+      std::max(defaults.farPlane, kFarPerDistance * camera.distance);
   return state;
 }
 

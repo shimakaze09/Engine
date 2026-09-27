@@ -4,7 +4,8 @@
 // the near plane, and the frustum's corners sit on the near and far
 // planes. The frustum overlay had unprojected the GL cube on every
 // device, which puts its near face at half the near distance on a [0, 1]
-// device.
+// device. The Scene camera's clip planes follow its orbit distance, so
+// zooming out never clips the target.
 
 #include "engine/editor/editor_camera.h"
 
@@ -17,6 +18,8 @@
 #include "../test_harness.h"
 
 #include <cmath>
+#include <initializer_list>
+#include <limits>
 
 namespace {
 
@@ -118,12 +121,49 @@ void check_convention(engine::tests::TestContext &t, bool zeroOne,
                   : "[-1,1]: the far quad spans the field of view");
 }
 
+/// The clip planes follow the orbit distance: the target and 1.5 times
+/// its distance beyond it stay inside the far plane at every zoom, with
+/// far:near at most 1000; up to 40 m out the renderer's defaults hold
+/// exactly. On base the far plane was 100 m at every zoom, so beyond
+/// 100 m the target itself was clipped.
+void check_clip_planes_follow_distance(engine::tests::TestContext &t) noexcept {
+  const float distances[] = {
+      EditorCamera::kMinDistance, 8.0F, 40.0F, 60.0F, 100.0F, 150.0F,
+      EditorCamera::kMaxDistance};
+  bool contains = true;
+  bool ratio = true;
+  for (const float distance : distances) {
+    EditorCamera camera{};
+    camera.distance = distance;
+    const engine::renderer::CameraState state = editor_camera_state(camera);
+    contains = contains && (state.farPlane >= 2.5F * distance) &&
+               (state.nearPlane < distance);
+    // Exactly 1000 in real arithmetic once both planes scale; 0.0025 is
+    // not a float, so the two products round apart by a few ulps.
+    ratio =
+        ratio && (state.farPlane <=
+                  1000.0F * state.nearPlane *
+                      (1.0F + (4.0F * std::numeric_limits<float>::epsilon())));
+  }
+  t.check(contains, "the far plane holds the target and 1.5x beyond it");
+  t.check(ratio, "far:near stays within 1000");
+
+  for (const float distance : {EditorCamera::kMinDistance, 8.0F, 40.0F}) {
+    EditorCamera camera{};
+    camera.distance = distance;
+    const engine::renderer::CameraState state = editor_camera_state(camera);
+    t.check((state.nearPlane == 0.1F) && (state.farPlane == 100.0F),
+            "up to 40 m the default planes hold exactly");
+  }
+}
+
 } // namespace
 
 int main() {
   engine::tests::TestContext t;
   check_convention(t, false, "[-1,1]: helpers succeed");
   check_convention(t, true, "[0,1]: helpers succeed");
+  check_clip_planes_follow_distance(t);
 
   // A singular projection is refused, not unprojected into garbage.
   Vec3 corners[8]{};

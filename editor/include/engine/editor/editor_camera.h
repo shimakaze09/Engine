@@ -29,6 +29,9 @@ void update_editor_camera(EditorCamera &camera, int deltaX, int deltaY,
                           int scrollDelta, bool orbit, bool pan) noexcept;
 
 /// Convert the editor camera's spherical coordinates to a CameraState.
+/// Its clip planes follow the orbit distance d: near max(0.1, 0.0025 d)
+/// and far max(100, 2.5 d), so the target stays in view at every zoom and
+/// far:near never exceeds 1000.
 renderer::CameraState editor_camera_state(const EditorCamera &camera) noexcept;
 
 /// The world-space ray through a viewport point, (ndcX, ndcY) in [-1, 1]
