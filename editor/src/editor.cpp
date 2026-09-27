@@ -280,6 +280,7 @@ bool initialize_editor(void *sdlWindow) noexcept {
   // scale's 2x would size the UI twice.
   const float uiScale = core::platform_content_scale() *
                         core::cvar_get_float("editor.ui_scale", 1.0F);
+  editor_session().uiScale = uiScale;
 
   // Proper UI font (the 13px bitmap default reads as a debug tool), with a
   // CJK face merged behind it; see editor_fonts.h. The preference that
@@ -290,6 +291,24 @@ bool initialize_editor(void *sdlWindow) noexcept {
 
   apply_editor_style();
   ImGui::GetStyle().ScaleAllSizes(uiScale);
+  // ImGuizmo's line widths and handle sizes are pixels too; its overall
+  // extent is a fraction of the view (SetGizmoSizeClipSpace), so it
+  // already follows the viewport and is left as is.
+  const ImGuizmo::Style gizmoDefaults{};
+  ImGuizmo::Style &gizmoStyle = ImGuizmo::GetStyle();
+  gizmoStyle.TranslationLineThickness =
+      gizmoDefaults.TranslationLineThickness * uiScale;
+  gizmoStyle.TranslationLineArrowSize =
+      gizmoDefaults.TranslationLineArrowSize * uiScale;
+  gizmoStyle.RotationLineThickness =
+      gizmoDefaults.RotationLineThickness * uiScale;
+  gizmoStyle.RotationOuterLineThickness =
+      gizmoDefaults.RotationOuterLineThickness * uiScale;
+  gizmoStyle.ScaleLineThickness = gizmoDefaults.ScaleLineThickness * uiScale;
+  gizmoStyle.ScaleLineCircleSize = gizmoDefaults.ScaleLineCircleSize * uiScale;
+  gizmoStyle.HatchedAxisLineThickness =
+      gizmoDefaults.HatchedAxisLineThickness * uiScale;
+  gizmoStyle.CenterCircleSize = gizmoDefaults.CenterCircleSize * uiScale;
 
   static_cast<void>(core::cvar_register_bool(
       "editor.show_console", true,

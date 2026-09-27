@@ -5,6 +5,7 @@
 
 #include "editor_preferences.h"
 
+#include "editor_scene_query.h"
 #include "editor_session.h"
 #include "editor_shortcuts.h"
 
@@ -43,6 +44,8 @@ constexpr const char *kGizmoSpaceKey = "GizmoSpace=";
 constexpr const char *kShowGridKey = "ShowGrid=";
 /// The Scene camera's fly speed in metres per second.
 constexpr const char *kCameraSpeedKey = "CameraSpeed=";
+/// The Scene view's icon size, a multiple of the UI scale's.
+constexpr const char *kIconScaleKey = "IconScale=";
 
 /// The geometry the layout file stored, and whether it waits to be
 /// applied.
@@ -71,6 +74,25 @@ void read_init(ImGuiContext *, ImGuiSettingsHandler *) noexcept {
 /// conflicts are judged on the final table (see commit_stored_shortcuts).
 void apply_all(ImGuiContext *, ImGuiSettingsHandler *) noexcept {
   commit_stored_shortcuts();
+}
+
+/// Reads a stored positive number: the whole token, no leading space, no
+/// overflow, finite and above zero.
+bool parse_positive_float(const char *value, float *out) noexcept {
+  const char *end = value + std::strlen(value);
+  // strtof, not std::from_chars: AppleClang's libc++ deletes the
+  // floating-point overload. The checks keep from_chars's strictness.
+  errno = 0;
+  char *parseEnd = nullptr;
+  const float parsed = std::strtof(value, &parseEnd);
+  if ((value == end) ||
+      (std::isspace(static_cast<unsigned char>(value[0])) != 0) ||
+      (parseEnd != end) || (errno == ERANGE) || !std::isfinite(parsed) ||
+      (parsed <= 0.0F)) {
+    return false;
+  }
+  *out = parsed;
+  return true;
 }
 
 void read_line(ImGuiContext *, ImGuiSettingsHandler *, void *,
@@ -107,23 +129,26 @@ void read_line(ImGuiContext *, ImGuiSettingsHandler *, void *,
   }
   const std::size_t speedKeyLength = std::strlen(kCameraSpeedKey);
   if (std::strncmp(line, kCameraSpeedKey, speedKeyLength) == 0) {
-    const char *value = line + speedKeyLength;
-    const char *end = value + std::strlen(value);
-    // strtof, not std::from_chars: AppleClang's libc++ deletes the
-    // floating-point overload. The checks keep from_chars's strictness:
-    // the whole token, no leading space, no overflow.
-    errno = 0;
-    char *parseEnd = nullptr;
-    const float speed = std::strtof(value, &parseEnd);
-    if ((value != end) &&
-        (std::isspace(static_cast<unsigned char>(value[0])) == 0) &&
-        (parseEnd == end) && (errno != ERANGE) && std::isfinite(speed) &&
-        (speed > 0.0F)) {
+    float speed = 0.0F;
+    if (parse_positive_float(line + speedKeyLength, &speed)) {
       editor_session().editorCamera.flySpeed = std::clamp(
           speed, EditorCamera::kMinFlySpeed, EditorCamera::kMaxFlySpeed);
     } else {
       core::log_message(core::LogLevel::Warning, "editor",
                         "stored CameraSpeed is not a positive number; "
+                        "ignored");
+    }
+    return;
+  }
+  const std::size_t iconKeyLength = std::strlen(kIconScaleKey);
+  if (std::strncmp(line, kIconScaleKey, iconKeyLength) == 0) {
+    float scale = 0.0F;
+    if (parse_positive_float(line + iconKeyLength, &scale)) {
+      editor_session().iconScale =
+          std::clamp(scale, kMinSceneIconScale, kMaxSceneIconScale);
+    } else {
+      core::log_message(core::LogLevel::Warning, "editor",
+                        "stored IconScale is not a positive number; "
                         "ignored");
     }
     return;
@@ -195,6 +220,8 @@ void write_all(ImGuiContext *, ImGuiSettingsHandler *handler,
   buffer->appendf("%s%d\n", kShowGridKey, editor_session().showGrid ? 1 : 0);
   buffer->appendf("%s%.9g\n", kCameraSpeedKey,
                   static_cast<double>(editor_session().editorCamera.flySpeed));
+  buffer->appendf("%s%.9g\n", kIconScaleKey,
+                  static_cast<double>(editor_session().iconScale));
   for (std::size_t i = 0U; i < editor_shortcut_count(); ++i) {
     const EditorShortcut &row = editor_shortcut_at(i);
     char chord[40] = {};
@@ -370,6 +397,16 @@ void draw_editor_preferences_panel() noexcept {
       ImGui::MarkIniSettingsDirty();
     }
     ImGui::TextDisabled("Takes effect the next time the editor starts.");
+    ImGui::SeparatorText("Scene View");
+    if (ImGui::SliderFloat("Icon Size", &editor_session().iconScale,
+                           kMinSceneIconScale, kMaxSceneIconScale, "%.2fx",
+                           ImGuiSliderFlags_AlwaysClamp)) {
+      ImGui::MarkIniSettingsDirty();
+    }
+    if (ImGui::IsItemHovered()) {
+      ImGui::SetTooltip("Size of the light and camera icons in the Scene "
+                        "view, which are picked within what they draw");
+    }
     draw_shortcut_bindings();
   } else {
     end_shortcut_capture(); // collapsed

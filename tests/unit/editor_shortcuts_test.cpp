@@ -12,6 +12,7 @@
 #include "editor_preferences.h"
 #include "editor_scene_document.h"
 #include "editor_scene_document_fixture.h"
+#include "editor_scene_query.h"
 #include "editor_session.h"
 #include "editor_shortcuts.h"
 
@@ -621,6 +622,29 @@ void check_flying(engine::tests::TestContext &t) noexcept {
   t.check(strict, "trailing text, a leading space, an empty value, a "
                   "non-finite or an overflowing speed is refused");
   session.editorCamera.flySpeed = 5.0F;
+
+  // The Scene view's icon size saves and reads back the same way.
+  session.iconScale = 1.75F;
+  t.check(engine::editor::editor_preferences_section(section, sizeof(section)) >
+              0U,
+          "the section is written with the icon size");
+  session.iconScale = 1.0F;
+  ImGui::LoadIniSettingsFromMemory(section, std::strlen(section));
+  t.check(session.iconScale == 1.75F, "the icon size reads back exactly");
+  load_section("IconScale=9\n");
+  t.check(session.iconScale == engine::editor::kMaxSceneIconScale,
+          "a stored icon size out of range is clamped");
+  bool iconStrict = true;
+  for (const char *stored :
+       {"IconScale=0\n", "IconScale=big\n", "IconScale=2x\n", "IconScale=\n",
+        "IconScale=nan\n"}) {
+    session.iconScale = 1.25F;
+    load_section(stored);
+    iconStrict = iconStrict && (session.iconScale == 1.25F);
+  }
+  t.check(iconStrict, "a zero, malformed, empty or non-finite icon size is "
+                      "refused");
+  session.iconScale = 1.0F;
 }
 
 } // namespace

@@ -2,6 +2,7 @@
 
 #include "editor_scene_query.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 
@@ -186,6 +187,21 @@ bool entity_has_icon(const runtime::World &world,
   SceneIconKind kind = SceneIconKind::Light;
   math::Vec3 position{};
   return icon_position(world, entity, &kind, &position);
+}
+
+SceneIconMetrics scene_icon_metrics(float uiScale, float iconScale) noexcept {
+  const float ui =
+      (std::isfinite(uiScale) && (uiScale > 0.0F)) ? uiScale : 1.0F;
+  const float icon =
+      (std::isfinite(iconScale) && (iconScale > 0.0F))
+          ? std::clamp(iconScale, kMinSceneIconScale, kMaxSceneIconScale)
+          : 1.0F;
+  const float scale = ui * icon;
+  SceneIconMetrics metrics{};
+  metrics.radius = kSceneIconBasePixels * 0.5F * scale;
+  metrics.stroke = 1.5F * scale;
+  metrics.selectionRadius = metrics.radius + (2.0F * metrics.stroke);
+  return metrics;
 }
 
 std::size_t scene_icons(const runtime::World &world,

@@ -287,8 +287,6 @@ void draw_selected_collider_overlay(
 
 /// How far a press may travel and still count as a click, not a drag.
 constexpr float kClickSlopPixels = 4.0F;
-/// An icon is picked within this many pixels of its centre.
-constexpr float kIconPickRadiusPixels = 10.0F;
 /// Icons one Scene view draws; lights and cameras beyond this many in
 /// view go undrawn.
 constexpr std::size_t kMaxSceneIcons = 256U;
@@ -348,6 +346,11 @@ void draw_scene_icons(const ImVec2 &imagePos,
   const std::size_t count =
       collect_scene_icons(imageSize, icons.data(), icons.size());
   ImDrawList *drawList = ImGui::GetWindowDrawList();
+  const SceneIconMetrics metrics =
+      scene_icon_metrics(editor_session().uiScale, editor_session().iconScale);
+  // Every shape is a fraction of the icon's radius, so the whole glyph
+  // scales with it and stays within the radius it is picked by.
+  const float r = metrics.radius;
   constexpr ImU32 kLightColor = IM_COL32(255, 220, 90, 230);
   constexpr ImU32 kCameraColor = IM_COL32(150, 200, 255, 230);
   constexpr ImU32 kOutline = IM_COL32(20, 20, 20, 200);
@@ -359,26 +362,28 @@ void draw_scene_icons(const ImVec2 &imagePos,
       for (int ray = 0; ray < 8; ++ray) {
         const float angle = 0.78539816F * static_cast<float>(ray);
         const ImVec2 dir(std::cos(angle), std::sin(angle));
-        drawList->AddLine(ImVec2(c.x + (dir.x * 6.0F), c.y + (dir.y * 6.0F)),
-                          ImVec2(c.x + (dir.x * 9.0F), c.y + (dir.y * 9.0F)),
-                          kLightColor, 1.5F);
+        drawList->AddLine(
+            ImVec2(c.x + (dir.x * r * 0.66F), c.y + (dir.y * r * 0.66F)),
+            ImVec2(c.x + (dir.x * r * 0.95F), c.y + (dir.y * r * 0.95F)),
+            kLightColor, metrics.stroke);
       }
-      drawList->AddCircleFilled(c, 4.5F, kLightColor);
-      drawList->AddCircle(c, 4.5F, kOutline);
+      drawList->AddCircleFilled(c, r * 0.5F, kLightColor);
+      drawList->AddCircle(c, r * 0.5F, kOutline, 0, metrics.stroke * 0.66F);
     } else {
       // A camera: a body with a lens to its right.
-      drawList->AddRectFilled(ImVec2(c.x - 7.0F, c.y - 4.5F),
-                              ImVec2(c.x + 3.0F, c.y + 4.5F), kCameraColor,
-                              1.5F);
-      drawList->AddTriangleFilled(ImVec2(c.x + 3.0F, c.y),
-                                  ImVec2(c.x + 8.0F, c.y - 4.5F),
-                                  ImVec2(c.x + 8.0F, c.y + 4.5F), kCameraColor);
-      drawList->AddRect(ImVec2(c.x - 7.0F, c.y - 4.5F),
-                        ImVec2(c.x + 3.0F, c.y + 4.5F), kOutline, 1.5F);
+      const ImVec2 bodyMin(c.x - (r * 0.8F), c.y - (r * 0.5F));
+      const ImVec2 bodyMax(c.x + (r * 0.3F), c.y + (r * 0.5F));
+      drawList->AddRectFilled(bodyMin, bodyMax, kCameraColor, r * 0.15F);
+      drawList->AddTriangleFilled(
+          ImVec2(bodyMax.x, c.y), ImVec2(c.x + (r * 0.9F), bodyMin.y),
+          ImVec2(c.x + (r * 0.9F), bodyMax.y), kCameraColor);
+      drawList->AddRect(bodyMin, bodyMax, kOutline, r * 0.15F, 0,
+                        metrics.stroke * 0.66F);
     }
     if (is_entity_selected(icons[i].entity) ||
         (selected_entity() == icons[i].entity)) {
-      drawList->AddCircle(c, 11.0F, IM_COL32(255, 255, 255, 220), 0, 1.5F);
+      drawList->AddCircle(c, metrics.selectionRadius,
+                          IM_COL32(255, 255, 255, 220), 0, metrics.stroke);
     }
   }
 }
@@ -407,10 +412,12 @@ void pick_in_scene_view(const ImVec2 &mouse, const ImVec2 &imagePos,
       std::array<SceneIcon, kMaxSceneIcons>();
   const std::size_t iconCount =
       collect_scene_icons(imageSize, icons.data(), icons.size());
+  const SceneIconMetrics iconMetrics =
+      scene_icon_metrics(session.uiScale, session.iconScale);
   const runtime::Entity iconPick =
       pick_icon(icons.data(), iconCount, ndc.x, ndc.y,
-                (2.0F * kIconPickRadiusPixels) / imageSize.x,
-                (2.0F * kIconPickRadiusPixels) / imageSize.y);
+                (2.0F * iconMetrics.radius) / imageSize.x,
+                (2.0F * iconMetrics.radius) / imageSize.y);
   if (iconPick != runtime::kInvalidEntity) {
     session.hasLastPick = false;
     select_entity(iconPick, additive);

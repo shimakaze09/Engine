@@ -272,6 +272,32 @@ void check_icons(engine::tests::TestContext &t, World &world) noexcept {
           "a marquee takes the icons within it");
 }
 
+/// Icons are 32 px across at scale 1, grow with the UI scale and the
+/// icon-size preference, stay within the preference's range, and are
+/// picked within exactly the radius they are drawn in.
+void check_icon_metrics(engine::tests::TestContext &t) noexcept {
+  using engine::editor::scene_icon_metrics;
+  using engine::editor::SceneIconMetrics;
+  const SceneIconMetrics base = scene_icon_metrics(1.0F, 1.0F);
+  t.check((base.radius == 16.0F) && (base.stroke == 1.5F) &&
+              (base.selectionRadius == 19.0F),
+          "an icon is 32 px across at scale 1, ringed just outside it");
+  const SceneIconMetrics hiDpi = scene_icon_metrics(2.0F, 1.0F);
+  t.check((hiDpi.radius == 32.0F) && (hiDpi.stroke == 3.0F),
+          "the UI scale scales the icon");
+  const SceneIconMetrics larger = scene_icon_metrics(1.0F, 1.5F);
+  t.check(larger.radius == 24.0F, "the preference scales the icon");
+  t.check((scene_icon_metrics(1.0F, 10.0F).radius == 48.0F) &&
+              (scene_icon_metrics(1.0F, 0.1F).radius == 8.0F),
+          "the preference is clamped to 0.5x..3x");
+  t.check((scene_icon_metrics(0.0F, 1.0F).radius == 16.0F) &&
+              (scene_icon_metrics(std::nanf(""), 1.0F).radius == 16.0F) &&
+              (scene_icon_metrics(1.0F, -2.0F).radius == 16.0F),
+          "a scale that is not a positive number counts as 1");
+  t.check(base.selectionRadius > base.radius,
+          "the selection ring surrounds the icon");
+}
+
 } // namespace
 
 int main() {
@@ -292,5 +318,6 @@ int main() {
     return 97;
   }
   check_icons(t, *iconWorld);
+  check_icon_metrics(t);
   return t.finish("editor_scene_query");
 }

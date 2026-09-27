@@ -71,6 +71,28 @@ struct SceneIcon final {
   math::Vec3 ndc{}; // x, y on screen in [-1, 1]; z orders by depth
 };
 
+/// An icon's extent at scale 1, as Unity's default gizmo icons.
+inline constexpr float kSceneIconBasePixels = 32.0F;
+/// The icon-size preference's range, as Unity's 3D Icons slider.
+inline constexpr float kMinSceneIconScale = 0.5F;
+inline constexpr float kMaxSceneIconScale = 3.0F;
+
+/// Pixel sizes of the Scene view's light and camera icons.
+struct SceneIconMetrics final {
+  /// Half the icon's extent. An icon is drawn within it and picked within
+  /// it, so what is visible is exactly what is clickable.
+  float radius = 0.0F;
+  /// The ring drawn around a selected icon.
+  float selectionRadius = 0.0F;
+  /// Outline, ray and ring width.
+  float stroke = 0.0F;
+};
+
+/// Icon metrics at `uiScale` (the editor's UI scale) times `iconScale`
+/// (the icon-size preference, clamped to its range). A scale that is not
+/// a positive finite number counts as 1.
+SceneIconMetrics scene_icon_metrics(float uiScale, float iconScale) noexcept;
+
 /// True when `entity` is shown as an icon: it has a light component of
 /// any kind, or a camera.
 bool entity_has_icon(const runtime::World &world,
