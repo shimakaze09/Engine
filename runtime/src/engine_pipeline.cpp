@@ -719,6 +719,7 @@ struct EnginePipeline::Impl final {
   core::CVarRef dynamicResolutionCvar{"r_dynamic_resolution"};
   core::CVarRef dynamicResolutionMinCvar{"r_dynamic_resolution_min"};
   core::CVarRef maxFpsCvar{"r_max_fps"};
+  core::CVarRef timeScaleCvar{"sim.time_scale"};
   core::CVarRef cacheSizeMbCvar{"asset.cache_size_mb"};
   // dbg_fail_frame_stage is consulted by every graph stage every frame;
   // its string is re-read only when its change stamp moves.
@@ -952,6 +953,10 @@ bool EnginePipeline::Impl::initialize(std::uint32_t maxFrameCount) noexcept {
   core::cvar_register_int("r_max_fps", 0,
                           "Frame cap in FPS (0 = uncapped; applies on top "
                           "of vsync)");
+  core::cvar_register_float("sim.time_scale", 1.0F,
+                            "Simulation speed, 0 to 4 (1 = real time). It "
+                            "scales the time fed to the fixed step, never "
+                            "the step, so each step simulates the same");
 
   previousTick = Clock::now();
   accumulator = 0.0;
@@ -1304,17 +1309,26 @@ void EnginePipeline::Impl::stage_play_transitions() noexcept {
 void EnginePipeline::Impl::stage_timing() noexcept {
   if (isPlaying && !singleStepping) {
     const auto now = Clock::now();
+    // The time scale (slow motion, fast forward) scales how much time the
+    // frame feeds the accumulator, as Unity's timeScale does; the fixed
+    // step is untouched, so every step simulates exactly as at full speed
+    // and only how many steps a frame takes changes. A single step while
+    // paused is always one step.
+    const float timeScale = timeScaleCvar.get_float(1.0F);
     if (frameDeltaOverrideSeconds >= 0.0) {
       // An injected delta is exact by definition: it is the input a test
-      // or a replay chose, so it enters the accumulator untouched.
-      accumulator += frameDeltaOverrideSeconds;
+      // or a replay chose, so it enters the accumulator unrounded.
+      accumulator +=
+          runtime::scaled_frame_delta(frameDeltaOverrideSeconds, timeScale);
     } else {
       // A measured delta is snapped so vsync-at-fixed-rate frames drain
       // exactly one step instead of alternating 0/2 on measurement noise
-      // (frame_pacing).
-      accumulator += runtime::snap_delta_to_fixed_step(
-          std::chrono::duration<double>(now - previousTick).count(),
-          core::kFixedDeltaSeconds);
+      // (frame_pacing); the scale applies to the snapped delta.
+      accumulator += runtime::scaled_frame_delta(
+          runtime::snap_delta_to_fixed_step(
+              std::chrono::duration<double>(now - previousTick).count(),
+              core::kFixedDeltaSeconds),
+          timeScale);
     }
     previousTick = now;
   } else {

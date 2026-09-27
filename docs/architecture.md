@@ -163,7 +163,11 @@ because each of these does:
 - **Frame time is injectable.** `set_frame_delta_override` is the only
   seam; nothing else reads a wall clock to decide how much to simulate.
   Tests assert step counts, never durations
-  (`tools/check_test_timing.py`).
+  (`tools/check_test_timing.py`). The `sim.time_scale` cvar (0 to 4)
+  scales the time a frame feeds the accumulator, never the fixed step, so
+  slow motion and fast forward change how many steps a frame takes and
+  nothing about what a step computes; a paused Step is one step at any
+  scale, and audio plays at real time.
 - **Input is replayable per step.** Which step an event lands in follows
   its wall-clock timestamp, so the input a run's steps read is recorded,
   not rederived: the input log (`core/src/input_log.cpp`) keeps each

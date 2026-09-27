@@ -17,8 +17,11 @@
 // recorded hash at every tick the recording was observed, and each other's
 // at every tick they share. A control runs the same pushes live at one step
 // a frame and must diverge, which is what a replay that fell back to live
-// events would do.
+// events would do. A third replay reaches two steps a frame through the
+// simulation time scale rather than a longer frame, and must meet the
+// recording too: the scale changes the frame schedule, never a step.
 
+#include "engine/core/cvar.h"
 #include "engine/core/input.h"
 #include "engine/engine.h"
 #include "engine/runtime/engine_pipeline.h"
@@ -141,8 +144,11 @@ enum class Mode { Record, Replay, Live };
 
 /// One run of kTicks steps at `stepsPerFrame`, hashed after every frame.
 /// Record pushes the input and records it; Replay pushes only noise the
-/// replay must ignore; Live pushes the input with no log at all.
-TickHashes run(Mode mode, int stepsPerFrame) noexcept {
+/// replay must ignore; Live pushes the input with no log at all. A
+/// `timeScale` other than 1 reaches the same steps per frame through
+/// sim.time_scale over a shorter frame, as slow motion or fast forward
+/// would; a power of two keeps the scaled delta exact.
+TickHashes run(Mode mode, int stepsPerFrame, float timeScale = 1.0F) noexcept {
   TickHashes hashes{};
   engine::EnginePipeline pipeline;
   if (!pipeline.initialize(0U)) {
@@ -150,7 +156,10 @@ TickHashes run(Mode mode, int stepsPerFrame) noexcept {
     pipeline.teardown();
     return hashes;
   }
-  CHECK(pipeline.set_frame_delta_override(stepsPerFrame / 60.0),
+  CHECK(engine::core::cvar_set_float("sim.time_scale", timeScale),
+        "set the time scale");
+  CHECK(pipeline.set_frame_delta_override((stepsPerFrame / 60.0) /
+                                          static_cast<double>(timeScale)),
         "delta override");
   if (mode == Mode::Record) {
     CHECK(engine::core::begin_input_recording(kLogPath), "begin recording");
@@ -183,6 +192,8 @@ TickHashes run(Mode mode, int stepsPerFrame) noexcept {
     CHECK(!engine::core::input_replay_active(),
           "the replay ends with the log's last tick");
   }
+  CHECK(engine::core::cvar_set_float("sim.time_scale", 1.0F),
+        "restore the time scale");
   pipeline.teardown();
   // Leave the key up for the next run.
   CHECK(push_key(false, kNow), "release the key");
@@ -235,6 +246,9 @@ int main() {
   const TickHashes replayOne = run(Mode::Replay, 1);
   const TickHashes replayThree = run(Mode::Replay, 3);
   const TickHashes live = run(Mode::Live, 1);
+  // Fast forward: one-step frames at twice the speed simulate two steps a
+  // frame, and each step still reads what the recording read.
+  const TickHashes replayFastForward = run(Mode::Replay, 2, 2.0F);
 
   CHECK(compare(replayOne, recorded, "replay at 1 step/frame vs recording") ==
             kTicks / 3,
@@ -244,6 +258,13 @@ int main() {
         "the three-step replay meets it too");
   CHECK(compare(replayOne, replayThree, "the two replays") == kTicks / 3,
         "and the replays meet each other");
+  CHECK(compare(replayFastForward, recorded,
+                "replay at time scale 2 vs recording") == kTicks / 6,
+        "the replay at time scale 2 meets the recording at every shared "
+        "tick");
+  CHECK(compare(replayFastForward, replayOne,
+                "replay at time scale 2 vs one-step replay") == kTicks / 2,
+        "and the one-step replay at every tick it observed");
   int observed = 0;
   for (int tick = 1; tick <= kTicks; ++tick) {
     observed += replayOne.seen[tick] ? 1 : 0;

@@ -4,7 +4,9 @@
 
 #include "frame_pacing.h"
 
+#include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <thread>
 
 namespace engine::runtime {
@@ -67,6 +69,17 @@ FixedStepDecision fixed_step_decision(bool playing, bool singleStep,
   }
   decision.remainingAccumulator = accumulator;
   return decision;
+}
+
+float clamp_time_scale(float timeScale) noexcept {
+  if (!std::isfinite(timeScale)) {
+    return 1.0F;
+  }
+  return std::clamp(timeScale, 0.0F, kMaxTimeScale);
+}
+
+double scaled_frame_delta(double deltaSeconds, float timeScale) noexcept {
+  return deltaSeconds * static_cast<double>(clamp_time_scale(timeScale));
 }
 
 void wait_for_frame_cap(double waitSeconds) noexcept {
