@@ -71,7 +71,8 @@ const char *scene_document_path() noexcept;
 /// True once the document has been saved to or opened from a path.
 bool scene_document_has_path() noexcept;
 /// True when the command-history position has moved since the last save
-/// (or the saved position was evicted by history growth).
+/// (or the saved position was evicted by history growth), or while a
+/// failed Stop restore has left the preserved play world in place.
 bool scene_document_is_dirty() noexcept;
 /// Most recent save/open/save-as failure message ("" when none pending).
 const char *scene_document_last_error() noexcept;
@@ -94,6 +95,9 @@ bool perform_scene_save() noexcept;
 /// Saves to `path` after validating it resolves inside the editor asset
 /// root, then adopts it as the document identity on success. The
 /// previous document identity and dirty status are untouched on failure.
+/// After a failed Stop restore it exports the preserved play world, and
+/// success ends the recovery: the latch and undo history are cleared as
+/// if the written file had been opened.
 bool perform_scene_save_as(const char *path) noexcept;
 
 /// True when `path`'s parent directory resolves inside `root` — the
@@ -104,7 +108,8 @@ bool scene_path_passes_jail_under(const char *path, const char *root) noexcept;
 bool scene_path_passes_jail(const char *path) noexcept;
 
 /// Gated entry points: perform immediately when the document is clean;
-/// otherwise arm the unsaved-change prompt and defer.
+/// otherwise arm the unsaved-change prompt and defer. Refused while
+/// playing; available after a failed Stop restore, as the recovery path.
 void request_scene_new() noexcept;
 void request_scene_open(const char *path) noexcept;
 /// True when the caller may proceed with an immediate quit (the scene
@@ -122,8 +127,9 @@ bool scene_document_prompt_open() noexcept;
 bool scene_document_prompt_covers_material() noexcept;
 /// User chose Save from the confirm prompt: persists the material first
 /// when the prompt covers one, then the scene (in place, or through a Save
-/// As dialog for an untitled document); the prompt stays armed on any
-/// save failure so the user can retry or cancel.
+/// As dialog for an untitled document or after a failed Stop restore);
+/// the prompt stays armed on any save failure so the user can retry or
+/// cancel.
 void scene_document_prompt_choose_save() noexcept;
 /// User chose Discard: proceeds with the pending action unsaved.
 void scene_document_prompt_choose_discard() noexcept;
@@ -134,6 +140,8 @@ void scene_document_prompt_choose_cancel() noexcept;
 /// result re-applies the unsaved-change gate through request_scene_open.
 void request_open_scene_dialog() noexcept;
 /// File > Save: saves in place, or begins a Save As dialog when untitled.
+/// After a failed Stop restore an in-place save is refused with its
+/// reason in scene_document_last_error.
 void request_save_scene() noexcept;
 /// File > Save As: always begins a native save dialog.
 void request_save_scene_as() noexcept;

@@ -836,7 +836,9 @@ void start_play_mode() noexcept {
 
   if (editor_session().worldRestoreFailed) {
     core::log_message(core::LogLevel::Warning, "editor",
-                      "play blocked: load scene to recover from restore error");
+                      "play blocked after a failed Stop restore: Save As "
+                      "to export the preserved world, or New/Open to "
+                      "replace it");
     return;
   }
 

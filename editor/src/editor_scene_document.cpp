@@ -258,7 +258,10 @@ bool scene_document_has_path() noexcept {
 
 bool scene_document_is_dirty() noexcept {
   const EditorSession &session = editor_session();
-  return session.document.unrecordedEdit ||
+  // After a failed Stop restore the world is the preserved play world,
+  // not the file on disk: replacing it unasked would discard the state
+  // the recovery path exists to keep, so it counts as unsaved.
+  return session.worldRestoreFailed || session.document.unrecordedEdit ||
          (session.commandHistory.current_token() !=
           session.document.savedHistoryToken);
 }
@@ -470,6 +473,13 @@ bool perform_scene_save_as(const char *path) noexcept {
     return report_save_failure(session);
   }
 
+  if (session.worldRestoreFailed) {
+    // The export ends the recovery: the world now matches the file just
+    // written, so it becomes the document exactly as if it had been
+    // opened, and the undo history, which described the pre-Play world,
+    // goes with the latch.
+    reset_session_for_scene_switch();
+  }
   std::snprintf(session.document.path, sizeof(session.document.path), "%s",
                path);
   session.document.hasPath = true;
@@ -481,8 +491,11 @@ bool perform_scene_save_as(const char *path) noexcept {
   return true;
 }
 
+// The request entry points gate on world_can_load_scene, not
+// world_is_editable: after a failed Stop restore, New, Open and Save As
+// are the recovery path, and only Play and in-place Save stay refused.
 void request_scene_new() noexcept {
-  if (!world_is_editable()) {
+  if (!world_can_load_scene()) {
     return;
   }
   if (!scene_document_is_dirty()) {
@@ -493,7 +506,13 @@ void request_scene_new() noexcept {
 }
 
 void request_scene_open(const char *path) noexcept {
-  if (!world_is_editable() || (path == nullptr) || (path[0] == '\0')) {
+  if ((path == nullptr) || (path[0] == '\0')) {
+    return;
+  }
+  if (!world_can_load_scene()) {
+    // Reachable when an Open dialog answers after Play began.
+    core::log_message(core::LogLevel::Warning, kLogChannel,
+                      "a scene cannot be opened while playing; stop first");
     return;
   }
   if (!scene_document_is_dirty()) {
@@ -544,7 +563,10 @@ void scene_document_prompt_choose_save() noexcept {
     continue_pending_action();
     return;
   }
-  if (doc.hasPath) {
+  // After a failed Stop restore an in-place save is refused (it would
+  // overwrite the scene with the play world), so the prompt's Save is an
+  // export through Save As instead.
+  if (doc.hasPath && !editor_session().worldRestoreFailed) {
     if (perform_scene_save()) {
       continue_pending_action();
     }
@@ -570,7 +592,8 @@ void scene_document_prompt_choose_cancel() noexcept {
 
 void request_open_scene_dialog() noexcept {
   SceneDocumentState &doc = editor_session().document;
-  if (doc.dialogPendingKind != SceneDialogKind::None) {
+  if (!world_can_load_scene() ||
+      (doc.dialogPendingKind != SceneDialogKind::None)) {
     return;
   }
   static_cast<void>(
@@ -578,9 +601,11 @@ void request_open_scene_dialog() noexcept {
 }
 
 void request_save_scene() noexcept {
-  if (!world_is_editable()) {
+  if (!world_can_load_scene()) {
     return;
   }
+  // With the restore latch set, perform_scene_save refuses and says why
+  // in lastSaveError; an untitled document goes straight to Save As.
   if (editor_session().document.hasPath) {
     static_cast<void>(perform_scene_save());
     return;
@@ -590,7 +615,7 @@ void request_save_scene() noexcept {
 }
 
 void request_save_scene_as() noexcept {
-  if (!world_is_editable()) {
+  if (!world_can_load_scene()) {
     return;
   }
   editor_session().document.dialogContinuesPendingAction = false;
