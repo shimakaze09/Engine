@@ -455,7 +455,8 @@ void draw_scene_viewport_panel() noexcept {
 
     const bool manipulated = ImGuizmo::Manipulate(
         &viewMat.columns[0].x, &projMat.columns[0].x, editor_session().gizmoOp,
-        ImGuizmo::LOCAL, &modelMat.columns[0].x, nullptr, snap);
+        editor_session().gizmoWorldSpace ? ImGuizmo::WORLD : ImGuizmo::LOCAL,
+        &modelMat.columns[0].x, nullptr, snap);
 
     // Fed the pre-manipulation transform so an opening gesture records
     // the pose the drag started from; the closing frame reads the final

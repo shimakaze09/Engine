@@ -162,6 +162,10 @@ struct EditorSession final {
   bool autoplayConsumed = false;
   EditorCamera editorCamera{};
   ImGuizmo::OPERATION gizmoOp = ImGuizmo::TRANSLATE;
+  // Move and rotate handles follow the world axes when set, the entity's
+  // own axes otherwise. Scale always uses the entity's axes: a scale along
+  // a world axis would shear a rotated entity. A saved preference.
+  bool gizmoWorldSpace = false;
   bool snapEnabled = false;
   float snapStep = 0.5F;
   float snapAngleDegrees = 15.0F;

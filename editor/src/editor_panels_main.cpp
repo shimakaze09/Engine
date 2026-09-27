@@ -464,6 +464,20 @@ void draw_toolbar() noexcept {
   if (ImGui::RadioButton("S", editor_session().gizmoOp == ImGuizmo::SCALE)) {
     editor_session().gizmoOp = ImGuizmo::SCALE;
   }
+  ImGui::SameLine();
+  // Scale always works on the entity's own axes (ImGuizmo forces it: a
+  // scale along a world axis would shear a rotated entity), so the toggle
+  // shows Local while Scale is active and says why.
+  const bool scaling = editor_session().gizmoOp == ImGuizmo::SCALE;
+  const bool worldAxes = editor_session().gizmoWorldSpace && !scaling;
+  if (ImGui::Button(worldAxes ? "World" : "Local")) {
+    static_cast<void>(run_editor_action(EditorAction::GizmoSpace));
+  }
+  ImGui::SetItemTooltip(scaling ? "Scale always uses the entity's own axes "
+                                  "(%s switches move and rotate)"
+                                : "Handle axes: the world's or the entity's "
+                                  "own (%s)",
+                        editor_shortcut_text(EditorAction::GizmoSpace));
 
   ImGui::SameLine();
   ImGui::SeparatorEx(ImGuiSeparatorFlags_Vertical);

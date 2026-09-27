@@ -5,6 +5,7 @@
 
 #include "editor_preferences.h"
 
+#include "editor_session.h"
 #include "editor_shortcuts.h"
 
 #include <charconv>
@@ -31,6 +32,8 @@ constexpr const char *kWindowMaximizedKey = "WindowMaximized=";
 /// A rebound shortcut: Shortcut.<action id>=<chord>, one line per action
 /// whose chords differ from the default.
 constexpr const char *kShortcutKey = "Shortcut.";
+/// Which axes the move and rotate handles follow: World or Local.
+constexpr const char *kGizmoSpaceKey = "GizmoSpace=";
 
 /// The geometry the layout file stored, and whether it waits to be
 /// applied.
@@ -77,6 +80,20 @@ void read_line(ImGuiContext *, ImGuiSettingsHandler *, void *,
     }
     std::memcpy(idBuffer, id, idLength);
     static_cast<void>(stage_stored_shortcut(idBuffer, equals + 1));
+    return;
+  }
+  const std::size_t spaceKeyLength = std::strlen(kGizmoSpaceKey);
+  if (std::strncmp(line, kGizmoSpaceKey, spaceKeyLength) == 0) {
+    const char *value = line + spaceKeyLength;
+    if (std::strcmp(value, "World") == 0) {
+      editor_session().gizmoWorldSpace = true;
+    } else if (std::strcmp(value, "Local") == 0) {
+      editor_session().gizmoWorldSpace = false;
+    } else {
+      core::log_message(core::LogLevel::Warning, "editor",
+                        "stored GizmoSpace is neither World nor Local; "
+                        "ignored");
+    }
     return;
   }
   const std::size_t keyLength = std::strlen(kCjkFontKey);
@@ -130,6 +147,8 @@ void write_all(ImGuiContext *, ImGuiSettingsHandler *handler,
                     geometry.height);
     buffer->appendf("%s%d\n", kWindowMaximizedKey, geometry.maximized ? 1 : 0);
   }
+  buffer->appendf("%s%s\n", kGizmoSpaceKey,
+                  editor_session().gizmoWorldSpace ? "World" : "Local");
   for (std::size_t i = 0U; i < editor_shortcut_count(); ++i) {
     const EditorShortcut &row = editor_shortcut_at(i);
     char chord[40] = {};

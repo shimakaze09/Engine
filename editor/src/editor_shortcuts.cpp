@@ -13,6 +13,7 @@
 #include "editor_session.h"
 
 #include "ImGuizmo.h"
+#include "imgui_internal.h"
 
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
@@ -64,6 +65,9 @@ constexpr std::array<EditorShortcut,
          false},
         {EditorAction::GizmoScale, "tools.scale", "Scale", ImGuiKey_R, 0,
          false},
+        // Unity's chord for its handle-rotation toggle.
+        {EditorAction::GizmoSpace, "tools.toggle_space", "World/Local Axes",
+         ImGuiKey_X, 0, false},
         // Unity's play chords, live while the game has the keyboard so a
         // running game can always be paused or stopped.
         {EditorAction::PlayStop, "play.play_stop", "Play",
@@ -274,6 +278,7 @@ bool editor_action_enabled(EditorAction action) noexcept {
   case EditorAction::GizmoTranslate:
   case EditorAction::GizmoRotate:
   case EditorAction::GizmoScale:
+  case EditorAction::GizmoSpace:
     return true;
   case EditorAction::PlayStop:
     // Play needs a world that can enter play; Stop needs a session.
@@ -346,6 +351,12 @@ bool run_editor_action(EditorAction action) noexcept {
     return true;
   case EditorAction::GizmoScale:
     editor_session().gizmoOp = ImGuizmo::SCALE;
+    return true;
+  case EditorAction::GizmoSpace:
+    editor_session().gizmoWorldSpace = !editor_session().gizmoWorldSpace;
+    if (ImGui::GetCurrentContext() != nullptr) {
+      ImGui::MarkIniSettingsDirty(); // the choice is a saved preference
+    }
     return true;
   case EditorAction::PlayStop:
     if (editor_session().playState == PlayState::Stopped) {

@@ -517,6 +517,31 @@ void check_rebinding(engine::tests::TestContext &t, World &world) noexcept {
           "Restore defaults restores every chord");
 }
 
+/// X switches the move and rotate handles between the world's axes and
+/// the entity's own, as Unity's handle-rotation toggle does; the choice is
+/// saved as GizmoSpace=World or Local, and anything else stored is
+/// refused with the current choice kept.
+void check_gizmo_space(engine::tests::TestContext &t) noexcept {
+  engine::editor::EditorSession &session = engine::editor::editor_session();
+  session.gizmoWorldSpace = false;
+  tap(ImGuiKey_X);
+  t.check(session.gizmoWorldSpace, "X switches the handles to world axes");
+  tap(ImGuiMod_Ctrl | ImGuiKey_X);
+  t.check(session.gizmoWorldSpace, "Ctrl+X is not X");
+  char section[2048] = {};
+  t.check((engine::editor::editor_preferences_section(section,
+                                                      sizeof(section)) > 0U) &&
+              (std::strstr(section, "GizmoSpace=World\n") != nullptr),
+          "world axes are saved");
+  load_section("GizmoSpace=Local\n");
+  t.check(!session.gizmoWorldSpace, "a stored Local is applied");
+  tap(ImGuiKey_X);
+  load_section("GizmoSpace=Sideways\n");
+  t.check(session.gizmoWorldSpace, "a malformed GizmoSpace keeps the choice");
+  tap(ImGuiKey_X);
+  t.check(!session.gizmoWorldSpace, "X switches back to the entity's axes");
+}
+
 } // namespace
 
 int main() {
@@ -564,6 +589,7 @@ int main() {
   check_play_chords(t, *world);
   check_create_and_exit(t, *world);
   check_rebinding(t, *world);
+  check_gizmo_space(t);
 
   editor_set_world(nullptr);
   engine::core::platform_set_scripted_file_dialogs(false);
