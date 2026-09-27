@@ -64,7 +64,7 @@ int main() {
                 sizeof(editor_session().pickers.assetQuery), "%s", "barrel");
   editor_session().console.paused = true;
   editor_session().console.pausedEntryCount = 9U;
-  editor_session().console.filter.showTrace = false;
+  editor_session().console.filter.showTrace = !ConsoleFilter{}.showTrace;
   std::snprintf(editor_session().inspector.addComponentFilter,
                 sizeof(editor_session().inspector.addComponentFilter), "%s",
                 "light");
@@ -104,7 +104,8 @@ int main() {
             "picker search text starts over");
   ctx.check(!editor_session().console.paused &&
                 (editor_session().console.pausedEntryCount == 0U) &&
-                editor_session().console.filter.showTrace,
+                (editor_session().console.filter.showTrace ==
+                 ConsoleFilter{}.showTrace),
             "console view state starts over");
   ctx.check(editor_session().inspector.addComponentFilter[0] == '\0',
             "inspector search text starts over");

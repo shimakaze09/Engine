@@ -111,9 +111,14 @@ void console_capture_mark_seen() noexcept;
 
 /// Filter/search state the Console panel edits and applies at draw time;
 /// kept separate from ConsoleEntry so filtering never mutates captured
-/// data. Every field defaults to "show everything."
+/// data. Every field defaults to showing everything except Trace: Trace
+/// carries the engine's periodic diagnostics (frame, slice and job
+/// statistics), which belong to the stats overlay and profiler, so the
+/// Console opens on user messages, warnings and errors as Unity's, Unreal's
+/// and Godot's do. The Trace checkbox shows them; capture keeps them
+/// either way.
 struct ConsoleFilter final {
-  bool showTrace = true;
+  bool showTrace = false;
   bool showInfo = true;
   bool showWarning = true;
   bool showError = true;

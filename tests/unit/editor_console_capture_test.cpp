@@ -162,6 +162,35 @@ void check_filtering() noexcept {
        "entry after begin_session included");
 }
 
+/// EXPECTATION: the default filter hides Trace, the engine's periodic
+/// diagnostics, and shows every other severity; the entry is still
+/// captured, so ticking Trace shows it.
+void check_default_filter_hides_trace() noexcept {
+  console_capture_clear();
+  log_message(LogLevel::Trace, "slice", "frame=60 alive=3");
+  log_message(LogLevel::Info, "scripting", "player spawned");
+  log_message(LogLevel::Warning, "audio", "voice pool exhausted");
+  log_message(LogLevel::Error, "scripting", "lua error: nil index");
+
+  check(console_capture_entry_count() == 4U, "every severity is captured");
+  const ConsoleFilter defaults{};
+  ConsoleEntry entry{};
+  check(console_capture_get_entry(0U, &entry) &&
+            (entry.level == LogLevel::Trace) &&
+            !console_filter_matches(defaults, entry),
+        "the default filter hides a Trace entry");
+  for (std::size_t i = 1U; i < 4U; ++i) {
+    check(console_capture_get_entry(i, &entry) &&
+              console_filter_matches(defaults, entry),
+          "the default filter shows Info, Warning and Error");
+  }
+  ConsoleFilter withTrace{};
+  withTrace.showTrace = true;
+  check(console_capture_get_entry(0U, &entry) &&
+            console_filter_matches(withTrace, entry),
+        "ticking Trace shows the captured Trace entry");
+}
+
 /// EXPECTATION: a diagnostic record carrying a path and a line (what
 /// binding_util's log_lua_error emits) yields ScriptLocation navigation
 /// metadata with that path and 1-based line; a plain log line with the
@@ -441,6 +470,7 @@ int main() {
   check_duplicate_collapse();
   check_bounded_overflow();
   check_filtering();
+  check_default_filter_hides_trace();
   check_script_location_navigation();
   check_asset_path_navigation();
   check_production_diagnostics_navigate();
