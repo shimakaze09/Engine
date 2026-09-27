@@ -137,14 +137,20 @@ struct EntityDeleteRecord final {
   ComponentEditSnapshot components{};
 };
 
-/// Undoable entity deletion backed by parent-before-child subtree records;
-/// undo re-creates every member under its original persistent id so parent
-/// links and cross-references survive the round trip. The restore is
-/// transactional: when any member or component cannot be re-created, every
-/// member restored so far is destroyed again and undo reports failure.
+/// Undoable deletion of a forest of subtrees, one per deleted root, backed
+/// by parent-before-child records; undo re-creates every member under its
+/// original persistent id so parent links and cross-references survive the
+/// round trip. Execute resolves every root before destroying any, so a
+/// stale root refuses the whole command; a destroy that fails part-way
+/// restores the roots already destroyed. The restore is transactional:
+/// when any member or component cannot be re-created, every member
+/// restored so far is destroyed again and the step reports failure.
 struct EntityDeleteCommand final : EditorCommand {
   std::unique_ptr<EntityDeleteRecord[]> records{};
   std::size_t recordCount = 0U;
+  /// Where each root's subtree starts in `records`; one entry per root.
+  std::unique_ptr<std::size_t[]> rootRecords{};
+  std::size_t rootCount = 0U;
 
   bool execute() noexcept override;
   bool undo() noexcept override;
@@ -228,10 +234,22 @@ runtime::Entity execute_primitive_spawn(EditorPrimitive primitive) noexcept;
 /// allocation failure or when the entity is not alive.
 EntityDeleteCommand *
 build_entity_delete_command(runtime::Entity entity) noexcept;
+/// Captures `entities` as a forest into one delete command: an entity
+/// whose ancestor is also listed goes with that ancestor, dead or repeated
+/// entries are skipped, and each root takes its whole subtree. Null on
+/// allocation failure or when no listed entity is alive.
+EntityDeleteCommand *
+build_entity_delete_command(const runtime::Entity *entities,
+                            std::size_t count) noexcept;
 /// Deletes the entity subtree through the command history. Refused, with
 /// an Error logged and the world untouched, when the capture cannot be
 /// allocated or the entity is not alive.
 bool execute_entity_delete(runtime::Entity entity) noexcept;
+/// Deletes the whole selection as one undoable command, after committing
+/// any open Inspector or gizmo gesture, and clears the selection. False,
+/// with the world untouched, when nothing is selected or the capture
+/// cannot be allocated.
+bool execute_selection_delete() noexcept;
 
 /// Applies an inspector field edit through World validation immediately
 /// and folds it into the pending edit gesture (opened on the first change,

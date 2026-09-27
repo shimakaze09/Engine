@@ -27,6 +27,7 @@ enum class EditorAction : std::uint8_t {
   Undo,
   Redo,
   Duplicate,
+  Delete,
   GizmoTranslate,
   GizmoRotate,
   GizmoScale,

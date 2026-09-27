@@ -163,6 +163,7 @@ void draw_main_menu_bar() noexcept {
     editor_action_menu_item(EditorAction::Redo);
     ImGui::Separator();
     editor_action_menu_item(EditorAction::Duplicate);
+    editor_action_menu_item(EditorAction::Delete);
     ImGui::EndMenu();
   }
 
@@ -348,8 +349,9 @@ constexpr std::size_t kMaxHierarchyDrawDepth = 64U;
 /// the walk follows the world's child links, which an edit made mid-walk
 /// would rewrite under it.
 struct PendingHierarchyEdit final {
-  enum class Kind : std::uint8_t { None, Duplicate, Delete, Reparent };
+  enum class Kind : std::uint8_t { None, Action, Reparent };
   Kind kind = Kind::None;
+  EditorAction action = EditorAction::Count;
   runtime::Entity target{};
   runtime::Entity newParent{};
 };
@@ -392,12 +394,14 @@ static bool draw_entity_row(runtime::Entity entity, bool hasChildren,
     if (!is_entity_selected(entity) && (selected_entity() != entity)) {
       select_entity(entity, false);
     }
-    if (editor_action_menu_item_clicked(EditorAction::Duplicate)) {
-      pending.kind = PendingHierarchyEdit::Kind::Duplicate;
-    }
-    if (ImGui::MenuItem("Delete", nullptr, false, world_is_editable())) {
-      pending.kind = PendingHierarchyEdit::Kind::Delete;
-      pending.target = entity;
+    // Both act on the selection, which the right-click just made include
+    // this row.
+    for (const EditorAction action :
+         {EditorAction::Duplicate, EditorAction::Delete}) {
+      if (editor_action_menu_item_clicked(action)) {
+        pending.kind = PendingHierarchyEdit::Kind::Action;
+        pending.action = action;
+      }
     }
     ImGui::EndPopup();
   }
@@ -440,11 +444,8 @@ static void draw_entity_hierarchy() noexcept {
       [](runtime::Entity) noexcept { ImGui::TreePop(); });
 
   switch (pending.kind) {
-  case PendingHierarchyEdit::Kind::Duplicate:
-    static_cast<void>(run_editor_action(EditorAction::Duplicate));
-    break;
-  case PendingHierarchyEdit::Kind::Delete:
-    static_cast<void>(execute_entity_delete(pending.target));
+  case PendingHierarchyEdit::Kind::Action:
+    static_cast<void>(run_editor_action(pending.action));
     break;
   case PendingHierarchyEdit::Kind::Reparent:
     static_cast<void>(execute_reparent(pending.target, pending.newParent));

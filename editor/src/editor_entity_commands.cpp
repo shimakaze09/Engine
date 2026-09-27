@@ -148,39 +148,24 @@ static std::size_t collect_subtree_members(runtime::World &world,
   return count;
 }
 
-bool EntityDeleteCommand::execute() noexcept {
-  runtime::World *const world = editor_session().world;
-  if ((world == nullptr) || (recordCount == 0U)) {
-    return false;
-  }
-  const runtime::Entity root =
-      world->find_entity_by_persistent_id(records[0].persistentId);
-  if (root == runtime::kInvalidEntity) {
-    return false;
-  }
-  return world->destroy_entity(root);
-}
-
-bool EntityDeleteCommand::undo() noexcept {
-  runtime::World *const world = editor_session().world;
-  if (world == nullptr) {
-    return false;
-  }
+/// Re-creates records [begin, end) under their persistent ids, parents
+/// before children. All or nothing: on a failure every member this call
+/// created is destroyed again and it returns false.
+static bool restore_delete_records(runtime::World &world,
+                                   const EntityDeleteRecord *records,
+                                   std::size_t begin,
+                                   std::size_t end) noexcept {
   constexpr std::size_t transformSlot =
       static_cast<std::size_t>(ComponentEditType::Transform);
-  // All-or-nothing restore: `restored` tracks how many members exist so a
-  // mid-subtree failure (entity or component capacity, stale ids) can
-  // destroy exactly what this undo created and report failure with the
-  // world back in its pre-undo state.
-  std::size_t restored = 0U;
+  std::size_t restored = begin;
   bool ok = true;
-  for (std::size_t i = 0U; ok && (i < recordCount); ++i) {
+  for (std::size_t i = begin; ok && (i < end); ++i) {
     const EntityDeleteRecord &record = records[i];
     const runtime::Entity entity =
         record.present[transformSlot]
-            ? world->create_scene_object_with_persistent_id(
+            ? world.create_scene_object_with_persistent_id(
                   record.persistentId, record.components.transform)
-            : world->create_entity_with_persistent_id(record.persistentId);
+            : world.create_entity_with_persistent_id(record.persistentId);
     if (entity == runtime::kInvalidEntity) {
       ok = false;
       break;
@@ -198,16 +183,57 @@ bool EntityDeleteCommand::undo() noexcept {
       }
     }
   }
-  if (!ok) {
-    // Children before parents: destroy_entity takes whole transform
-    // subtrees, so reverse order never double-frees a member.
-    for (std::size_t i = restored; i > 0U; --i) {
-      const runtime::Entity member =
-          world->find_entity_by_persistent_id(records[i - 1U].persistentId);
-      if (member != runtime::kInvalidEntity) {
-        static_cast<void>(world->destroy_entity(member));
-      }
+  if (ok) {
+    return true;
+  }
+  // Children before parents: destroy_entity takes whole transform
+  // subtrees, so reverse order never double-frees a member.
+  for (std::size_t i = restored; i > begin; --i) {
+    const runtime::Entity member =
+        world.find_entity_by_persistent_id(records[i - 1U].persistentId);
+    if (member != runtime::kInvalidEntity) {
+      static_cast<void>(world.destroy_entity(member));
     }
+  }
+  return false;
+}
+
+bool EntityDeleteCommand::execute() noexcept {
+  runtime::World *const world = editor_session().world;
+  if ((world == nullptr) || (recordCount == 0U) || (rootCount == 0U)) {
+    return false;
+  }
+  // Every root must resolve before any is destroyed, so a stale root
+  // refuses the whole command instead of deleting part of the forest.
+  for (std::size_t k = 0U; k < rootCount; ++k) {
+    if (world->find_entity_by_persistent_id(
+            records[rootRecords[k]].persistentId) == runtime::kInvalidEntity) {
+      return false;
+    }
+  }
+  for (std::size_t k = 0U; k < rootCount; ++k) {
+    const runtime::Entity root = world->find_entity_by_persistent_id(
+        records[rootRecords[k]].persistentId);
+    if (!world->destroy_entity(root)) {
+      // Put back the roots already destroyed, so a failed step leaves the
+      // world as it found it.
+      if (!restore_delete_records(*world, records.get(), 0U, rootRecords[k])) {
+        core::log_message(core::LogLevel::Error, "editor",
+                          "entity delete failed part-way and the deleted "
+                          "entities could not all be restored");
+      }
+      return false;
+    }
+  }
+  return true;
+}
+
+bool EntityDeleteCommand::undo() noexcept {
+  runtime::World *const world = editor_session().world;
+  if (world == nullptr) {
+    return false;
+  }
+  if (!restore_delete_records(*world, records.get(), 0U, recordCount)) {
     core::log_message(
         core::LogLevel::Error, "editor",
         "entity delete undo could not restore the subtree — rolled back");
@@ -440,35 +466,89 @@ runtime::Entity execute_primitive_spawn(EditorPrimitive primitive) noexcept {
   return world->find_entity_by_persistent_id(command->persistentId);
 }
 
+/// True when an ancestor of `entity` is marked in `listed`. The walk is
+/// bounded by the alive count, so a corrupted parent cycle ends it.
+static bool has_listed_ancestor(const runtime::World &world,
+                                runtime::Entity entity,
+                                const bool *listed) noexcept {
+  runtime::Entity cursor = entity;
+  const std::size_t bound = world.alive_entity_count();
+  for (std::size_t step = 0U; step < bound; ++step) {
+    runtime::Transform transform{};
+    if (!world.get_transform(cursor, &transform) ||
+        (transform.parentId == runtime::kInvalidPersistentId)) {
+      return false;
+    }
+    cursor = world.find_entity_by_persistent_id(transform.parentId);
+    if ((cursor == runtime::kInvalidEntity) || (cursor == entity)) {
+      return false;
+    }
+    if (listed[cursor.index]) {
+      return true;
+    }
+  }
+  return false;
+}
+
 EntityDeleteCommand *
-build_entity_delete_command(runtime::Entity entity) noexcept {
+build_entity_delete_command(const runtime::Entity *entities,
+                            std::size_t count) noexcept {
   runtime::World *const world = editor_session().world;
-  if ((world == nullptr) || !world->is_alive(entity)) {
+  if ((world == nullptr) || (entities == nullptr) || (count == 0U)) {
     return nullptr;
   }
+  constexpr std::size_t kSlots = runtime::World::kMaxEntities + 1U;
   const std::size_t capacity = world->alive_entity_count();
-  std::unique_ptr<runtime::Entity[]> members(new (std::nothrow)
-                                                 runtime::Entity[capacity]);
-  std::unique_ptr<bool[]> visited(
-      new (std::nothrow) bool[runtime::World::kMaxEntities + 1U]());
-  if ((members == nullptr) || (visited == nullptr)) {
+  std::unique_ptr<bool[]> listed(new (std::nothrow) bool[kSlots]());
+  std::unique_ptr<bool[]> visited(new (std::nothrow) bool[kSlots]());
+  std::unique_ptr<runtime::Entity[]> members(
+      new (std::nothrow) runtime::Entity[(capacity > 0U) ? capacity : 1U]);
+  std::unique_ptr<std::size_t[]> rootRecords(new (std::nothrow)
+                                                 std::size_t[count]);
+  if ((listed == nullptr) || (visited == nullptr) || (members == nullptr) ||
+      (rootRecords == nullptr)) {
     return nullptr;
   }
-  const std::size_t count = collect_subtree_members(
-      *world, entity, members.get(), capacity, visited.get());
-  if (count == 0U) {
+  for (std::size_t i = 0U; i < count; ++i) {
+    if (world->is_alive(entities[i])) {
+      listed[entities[i].index] = true;
+    }
+  }
+
+  // Each listed entity without a listed ancestor is a root and takes its
+  // subtree; a repeat, or a member of an earlier root's subtree, is
+  // already visited.
+  std::size_t memberCount = 0U;
+  std::size_t rootCount = 0U;
+  for (std::size_t i = 0U; i < count; ++i) {
+    const runtime::Entity entity = entities[i];
+    if (!world->is_alive(entity) || visited[entity.index] ||
+        has_listed_ancestor(*world, entity, listed.get())) {
+      continue;
+    }
+    const std::size_t taken =
+        collect_subtree_members(*world, entity, members.get() + memberCount,
+                                capacity - memberCount, visited.get());
+    if (taken == 0U) {
+      continue;
+    }
+    rootRecords[rootCount++] = memberCount;
+    memberCount += taken;
+  }
+  if (rootCount == 0U) {
     return nullptr;
   }
+
   auto *command = allocate_command<EntityDeleteCommand>();
   if (command == nullptr) {
     return nullptr;
   }
-  command->records.reset(new (std::nothrow) EntityDeleteRecord[count]);
+  command->records.reset(new (std::nothrow) EntityDeleteRecord[memberCount]);
   if (command->records == nullptr) {
     delete command;
     return nullptr;
   }
-  for (std::size_t i = 0U; i < count; ++i) {
+  for (std::size_t i = 0U; i < memberCount; ++i) {
     EntityDeleteRecord &record = command->records[i];
     record.persistentId = world->persistent_id(members[i]);
     for (std::size_t typeIndex = 0U; typeIndex < kComponentEditTypeCount;
@@ -478,8 +558,15 @@ build_entity_delete_command(runtime::Entity entity) noexcept {
                                      members[i], &record.components);
     }
   }
-  command->recordCount = count;
+  command->recordCount = memberCount;
+  command->rootRecords = std::move(rootRecords);
+  command->rootCount = rootCount;
   return command;
+}
+
+EntityDeleteCommand *
+build_entity_delete_command(runtime::Entity entity) noexcept {
+  return build_entity_delete_command(&entity, 1U);
 }
 
 /// Writes a name no live entity holds into `name`: the source name, or
@@ -684,6 +771,38 @@ bool execute_entity_delete(runtime::Entity entity) noexcept {
     return false;
   }
   return editor_session().commandHistory.execute(command);
+}
+
+bool execute_selection_delete() noexcept {
+  // A gesture open on a member would otherwise record against an entity
+  // this command is about to remove.
+  inspector_commit_pending_edit();
+  gizmo_commit_gesture();
+  prune_entity_selection();
+  EditorSession &session = editor_session();
+  const runtime::Entity primary = selected_entity();
+  const runtime::Entity *entities = session.selectedEntities.data();
+  std::size_t count = session.selectedEntityCount;
+  if (count == 0U) {
+    if (primary == runtime::kInvalidEntity) {
+      return false;
+    }
+    entities = &primary;
+    count = 1U;
+  }
+  EntityDeleteCommand *const command =
+      build_entity_delete_command(entities, count);
+  if (command == nullptr) {
+    core::log_message(core::LogLevel::Error, "editor",
+                      "delete refused: the selection could not be recorded "
+                      "for undo (out of memory or nothing alive)");
+    return false;
+  }
+  if (!session.commandHistory.execute(command)) {
+    return false;
+  }
+  clear_entity_selection();
+  return true;
 }
 
 } // namespace engine::editor

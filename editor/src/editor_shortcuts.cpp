@@ -37,6 +37,10 @@ constexpr std::array<EditorShortcut,
          ImGuiMod_Ctrl | ImGuiKey_Y, true},
         {EditorAction::Duplicate, "edit.duplicate", "Duplicate",
          ImGuiMod_Ctrl | ImGuiKey_D, 0, false},
+        // Cmd+Backspace is the Mac chord (Ctrl maps to Cmd there), for
+        // keyboards without a forward-delete key.
+        {EditorAction::Delete, "edit.delete", "Delete", ImGuiKey_Delete,
+         ImGuiMod_Ctrl | ImGuiKey_Backspace, false},
         {EditorAction::GizmoTranslate, "tools.translate", "Move", ImGuiKey_W, 0,
          false},
         {EditorAction::GizmoRotate, "tools.rotate", "Rotate", ImGuiKey_E, 0,
@@ -118,6 +122,7 @@ bool editor_action_enabled(EditorAction action) noexcept {
   case EditorAction::Redo:
     return editor_history_can_redo();
   case EditorAction::Duplicate:
+  case EditorAction::Delete:
     return world_is_editable() && has_selection();
   case EditorAction::GizmoTranslate:
   case EditorAction::GizmoRotate:
@@ -160,6 +165,8 @@ bool run_editor_action(EditorAction action) noexcept {
     select_entity(copy, false);
     return true;
   }
+  case EditorAction::Delete:
+    return execute_selection_delete();
   case EditorAction::GizmoTranslate:
     editor_session().gizmoOp = ImGuizmo::TRANSLATE;
     return true;
