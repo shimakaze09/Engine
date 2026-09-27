@@ -14,10 +14,12 @@
 
 #include "ImGuizmo.h"
 
+#include "engine/core/logging.h"
 #include "engine/core/platform.h"
 
 #include <array>
 #include <cstdio>
+#include <cstring>
 
 namespace engine::editor {
 
@@ -84,24 +86,135 @@ constexpr bool rows_follow_action_order() noexcept {
 static_assert(rows_follow_action_order(),
               "kShortcuts rows must follow EditorAction order");
 
-/// Menu text per row, formatted on first use.
-std::array<std::array<char, 32>, kShortcuts.size()> g_chordText{};
+/// The live bindings: the defaults above, with any rebinding applied.
+std::array<EditorShortcut, kShortcuts.size()> g_rows = kShortcuts;
+
+/// Menu text per row, rebuilt when a binding changes.
+std::array<std::array<char, 40>, kShortcuts.size()> g_chordText{};
 bool g_chordTextBuilt = false;
 
-void format_chord(ImGuiKeyChord chord, char *out, std::size_t capacity) {
+/// The row being rebound in Preferences; Count while none.
+EditorAction g_capturing = EditorAction::Count;
+
+/// Bindings read from the preferences section, applied together by
+/// commit_stored_shortcuts.
+std::array<ImGuiKeyChord, kShortcuts.size()> g_staged =
+    std::array<ImGuiKeyChord, kShortcuts.size()>();
+std::array<bool, kShortcuts.size()> g_stagedSet =
+    std::array<bool, kShortcuts.size()>();
+
+/// A key's saved and shown name. The engine names keys itself: ImGui's
+/// key names are for debugging and may change between versions, and a
+/// saved binding must read back the same.
+struct KeyName final {
+  ImGuiKey key = ImGuiKey_None;
+  const char *name = nullptr;
+};
+
+constexpr KeyName kNamedKeys[] = {
+    {ImGuiKey_Delete, "Delete"},
+    {ImGuiKey_Backspace, "Backspace"},
+    {ImGuiKey_Insert, "Insert"},
+    {ImGuiKey_Home, "Home"},
+    {ImGuiKey_End, "End"},
+    {ImGuiKey_PageUp, "PageUp"},
+    {ImGuiKey_PageDown, "PageDown"},
+    {ImGuiKey_Space, "Space"},
+    {ImGuiKey_Enter, "Enter"},
+    {ImGuiKey_Escape, "Escape"},
+    {ImGuiKey_Tab, "Tab"},
+    {ImGuiKey_LeftArrow, "Left"},
+    {ImGuiKey_RightArrow, "Right"},
+    {ImGuiKey_UpArrow, "Up"},
+    {ImGuiKey_DownArrow, "Down"},
+    {ImGuiKey_Minus, "Minus"},
+    {ImGuiKey_Equal, "Equal"},
+    {ImGuiKey_LeftBracket, "LeftBracket"},
+    {ImGuiKey_RightBracket, "RightBracket"},
+    {ImGuiKey_Semicolon, "Semicolon"},
+    {ImGuiKey_Apostrophe, "Apostrophe"},
+    {ImGuiKey_Comma, "Comma"},
+    {ImGuiKey_Period, "Period"},
+    {ImGuiKey_Slash, "Slash"},
+    {ImGuiKey_Backslash, "Backslash"},
+    {ImGuiKey_GraveAccent, "GraveAccent"},
+};
+
+/// Writes `key`'s name into `out`; false for a key a binding cannot use.
+bool key_name(ImGuiKey key, char *out, std::size_t capacity) noexcept {
+  if ((key >= ImGuiKey_A) && (key <= ImGuiKey_Z)) {
+    std::snprintf(out, capacity, "%c", 'A' + (key - ImGuiKey_A));
+    return true;
+  }
+  if ((key >= ImGuiKey_0) && (key <= ImGuiKey_9)) {
+    std::snprintf(out, capacity, "%c", '0' + (key - ImGuiKey_0));
+    return true;
+  }
+  if ((key >= ImGuiKey_F1) && (key <= ImGuiKey_F12)) {
+    std::snprintf(out, capacity, "F%d", 1 + (key - ImGuiKey_F1));
+    return true;
+  }
+  for (const KeyName &named : kNamedKeys) {
+    if (named.key == key) {
+      std::snprintf(out, capacity, "%s", named.name);
+      return true;
+    }
+  }
+  return false;
+}
+
+/// The key named `name` (exactly as key_name writes it), or ImGuiKey_None.
+ImGuiKey key_from_name(const char *name, std::size_t length) noexcept {
+  char buffer[16] = {};
+  for (int k = ImGuiKey_NamedKey_BEGIN; k < ImGuiKey_NamedKey_END; ++k) {
+    if (key_name(static_cast<ImGuiKey>(k), buffer, sizeof(buffer)) &&
+        (std::strlen(buffer) == length) &&
+        (std::strncmp(buffer, name, length) == 0)) {
+      return static_cast<ImGuiKey>(k);
+    }
+  }
+  return ImGuiKey_None;
+}
+
+/// Writes `chord` as menu text: platform modifier names (Cmd and Option on
+/// a Mac) for display, or the saved names ("Ctrl+Shift+S") for a file.
+void write_chord(ImGuiKeyChord chord, bool forDisplay, char *out,
+                 std::size_t capacity) noexcept {
   out[0] = '\0';
-  if (chord == 0) {
+  char key[16] = {};
+  if ((chord == 0) || !key_name(static_cast<ImGuiKey>(chord & ~ImGuiMod_Mask_),
+                                key, sizeof(key))) {
     return;
   }
-  const bool mac = ImGui::GetIO().ConfigMacOSXBehaviors;
-  const ImGuiKey key = static_cast<ImGuiKey>(chord & ~ImGuiMod_Mask_);
-  std::snprintf(out, capacity, "%s%s%s%s%s",
-                ((chord & ImGuiMod_Ctrl) != 0) ? (mac ? "Cmd+" : "Ctrl+") : "",
-                ((chord & ImGuiMod_Shift) != 0) ? "Shift+" : "",
-                ((chord & ImGuiMod_Alt) != 0) ? (mac ? "Option+" : "Alt+") : "",
-                ((chord & ImGuiMod_Super) != 0) ? (mac ? "Ctrl+" : "Super+")
-                                                : "",
-                ImGui::GetKeyName(key));
+  const bool mac = forDisplay && ImGui::GetIO().ConfigMacOSXBehaviors;
+  std::snprintf(
+      out, capacity, "%s%s%s%s%s",
+      ((chord & ImGuiMod_Ctrl) != 0) ? (mac ? "Cmd+" : "Ctrl+") : "",
+      ((chord & ImGuiMod_Shift) != 0) ? "Shift+" : "",
+      ((chord & ImGuiMod_Alt) != 0) ? (mac ? "Option+" : "Alt+") : "",
+      ((chord & ImGuiMod_Super) != 0) ? (mac ? "Ctrl+" : "Super+") : "", key);
+}
+
+/// Makes `chord` row `index`'s primary chord, dropping an alternate it
+/// now repeats.
+void set_row_chord(std::size_t index, ImGuiKeyChord chord) noexcept {
+  g_rows[index].chord = chord;
+  if (g_rows[index].alternate == chord) {
+    g_rows[index].alternate = 0;
+  }
+  g_chordTextBuilt = false;
+}
+
+/// True when rows `a` and `b` share a chord, primary or alternate.
+bool rows_share_chord(const EditorShortcut &a,
+                      const EditorShortcut &b) noexcept {
+  const ImGuiKeyChord mine[] = {a.chord, a.alternate};
+  for (const ImGuiKeyChord chord : mine) {
+    if ((chord != 0) && ((chord == b.chord) || (chord == b.alternate))) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /// Exact match: the held modifiers are the chord's, no more and no fewer,
@@ -121,10 +234,10 @@ bool has_selection() noexcept {
 
 } // namespace
 
-std::size_t editor_shortcut_count() noexcept { return kShortcuts.size(); }
+std::size_t editor_shortcut_count() noexcept { return g_rows.size(); }
 
 const EditorShortcut &editor_shortcut_at(std::size_t index) noexcept {
-  return kShortcuts[(index < kShortcuts.size()) ? index : 0U];
+  return g_rows[(index < g_rows.size()) ? index : 0U];
 }
 
 const EditorShortcut &editor_shortcut(EditorAction action) noexcept {
@@ -259,9 +372,9 @@ bool run_editor_action(EditorAction action) noexcept {
 
 const char *editor_shortcut_text(EditorAction action) noexcept {
   if (!g_chordTextBuilt) {
-    for (std::size_t i = 0U; i < kShortcuts.size(); ++i) {
-      format_chord(kShortcuts[i].chord, g_chordText[i].data(),
-                   g_chordText[i].size());
+    for (std::size_t i = 0U; i < g_rows.size(); ++i) {
+      write_chord(g_rows[i].chord, true, g_chordText[i].data(),
+                  g_chordText[i].size());
     }
     g_chordTextBuilt = true;
   }
@@ -269,12 +382,177 @@ const char *editor_shortcut_text(EditorAction action) noexcept {
   return (index < g_chordText.size()) ? g_chordText[index].data() : "";
 }
 
+bool format_key_chord(ImGuiKeyChord chord, char *out,
+                      std::size_t capacity) noexcept {
+  if ((out == nullptr) || (capacity == 0U)) {
+    return false;
+  }
+  if (chord == 0) {
+    std::snprintf(out, capacity, "None");
+    return true;
+  }
+  write_chord(chord, false, out, capacity);
+  return out[0] != '\0';
+}
+
+bool parse_key_chord(const char *text, ImGuiKeyChord *out) noexcept {
+  if ((text == nullptr) || (out == nullptr)) {
+    return false;
+  }
+  if (std::strcmp(text, "None") == 0) {
+    *out = 0;
+    return true;
+  }
+  ImGuiKeyChord mods = 0;
+  const char *cursor = text;
+  constexpr struct {
+    const char *prefix;
+    ImGuiKeyChord mod;
+  } kMods[] = {{"Ctrl+", ImGuiMod_Ctrl},
+               {"Shift+", ImGuiMod_Shift},
+               {"Alt+", ImGuiMod_Alt},
+               {"Super+", ImGuiMod_Super}};
+  // Modifiers come first, each once, in the order write_chord writes them.
+  for (const auto &mod : kMods) {
+    const std::size_t length = std::strlen(mod.prefix);
+    if (std::strncmp(cursor, mod.prefix, length) == 0) {
+      mods |= mod.mod;
+      cursor += length;
+    }
+  }
+  const ImGuiKey key = key_from_name(cursor, std::strlen(cursor));
+  if (key == ImGuiKey_None) {
+    return false;
+  }
+  *out = mods | key;
+  return true;
+}
+
+bool find_editor_action(const char *id, EditorAction *out) noexcept {
+  for (const EditorShortcut &row : g_rows) {
+    if ((id != nullptr) && (std::strcmp(row.id, id) == 0)) {
+      if (out != nullptr) {
+        *out = row.action;
+      }
+      return true;
+    }
+  }
+  return false;
+}
+
+bool rebind_editor_action(EditorAction action, ImGuiKeyChord chord,
+                          EditorAction *outConflict) noexcept {
+  const auto index = static_cast<std::size_t>(action);
+  if (index >= g_rows.size()) {
+    return false;
+  }
+  char probe[40] = {};
+  if ((chord != 0) && !format_key_chord(chord, probe, sizeof(probe))) {
+    return false; // a modifier alone, or a key a binding cannot name
+  }
+  for (const EditorShortcut &row : g_rows) {
+    if ((chord != 0) && (row.action != action) &&
+        ((row.chord == chord) || (row.alternate == chord))) {
+      if (outConflict != nullptr) {
+        *outConflict = row.action;
+      }
+      return false;
+    }
+  }
+  set_row_chord(index, chord);
+  return true;
+}
+
+bool editor_action_rebound(EditorAction action) noexcept {
+  const auto index = static_cast<std::size_t>(action);
+  return (index < g_rows.size()) &&
+         ((g_rows[index].chord != kShortcuts[index].chord) ||
+          (g_rows[index].alternate != kShortcuts[index].alternate));
+}
+
+void reset_editor_shortcuts() noexcept {
+  g_rows = kShortcuts;
+  g_chordTextBuilt = false;
+  g_capturing = EditorAction::Count;
+}
+
+void begin_stored_shortcuts() noexcept { g_stagedSet.fill(false); }
+
+bool stage_stored_shortcut(const char *id, const char *chordText) noexcept {
+  EditorAction action = EditorAction::Count;
+  ImGuiKeyChord chord = 0;
+  char message[160] = {};
+  if (!find_editor_action(id, &action)) {
+    std::snprintf(message, sizeof(message),
+                  "stored shortcut for unknown action '%s' ignored", id);
+  } else if (!parse_key_chord(chordText, &chord)) {
+    std::snprintf(message, sizeof(message),
+                  "stored shortcut '%s' for %s is not a key chord; the "
+                  "default stays",
+                  chordText, id);
+  } else {
+    const auto index = static_cast<std::size_t>(action);
+    g_staged[index] = chord;
+    g_stagedSet[index] = true;
+    return true;
+  }
+  core::log_message(core::LogLevel::Warning, "editor", message);
+  return false;
+}
+
+void commit_stored_shortcuts() noexcept {
+  g_rows = kShortcuts;
+  g_chordTextBuilt = false;
+  g_capturing = EditorAction::Count;
+  for (std::size_t i = 0U; i < g_rows.size(); ++i) {
+    if (g_stagedSet[i]) {
+      set_row_chord(i, g_staged[i]);
+    }
+  }
+  // Conflicts are judged on the final table, so one line may take a chord
+  // a later line frees. A shared chord reverts a rebound row to its
+  // default (the later one when both are rebound; two defaults never
+  // share), and the table is checked again: each pass reverts a rebound
+  // row, so the loop ends.
+  for (bool shared = true; shared;) {
+    shared = false;
+    for (std::size_t a = 0U; !shared && (a < g_rows.size()); ++a) {
+      for (std::size_t b = a + 1U; !shared && (b < g_rows.size()); ++b) {
+        if (!rows_share_chord(g_rows[a], g_rows[b])) {
+          continue;
+        }
+        shared = true;
+        const std::size_t revert =
+            editor_action_rebound(g_rows[b].action) ? b : a;
+        const std::size_t holder = (revert == b) ? a : b;
+        char message[160] = {};
+        std::snprintf(message, sizeof(message),
+                      "stored shortcut for %s is already %s's; the default "
+                      "stays",
+                      g_rows[revert].id, g_rows[holder].id);
+        core::log_message(core::LogLevel::Warning, "editor", message);
+        g_rows[revert] = kShortcuts[revert];
+      }
+    }
+  }
+}
+
+void begin_shortcut_capture(EditorAction action) noexcept {
+  g_capturing = action;
+}
+
+EditorAction shortcut_capture_target() noexcept { return g_capturing; }
+
+void end_shortcut_capture() noexcept { g_capturing = EditorAction::Count; }
+
 bool editor_shortcuts_blocked() noexcept {
   const ImGuiIO &io = ImGui::GetIO();
   // A popup (a menu, a context menu, a combo, a modal) takes the keyboard
   // while open, and the unsaved-changes prompt counts from the moment it
   // is armed, before its modal is drawn.
+  // A chord being captured for a rebinding is not a command either.
   return io.WantTextInput || scene_document_prompt_open() ||
+         (g_capturing != EditorAction::Count) ||
          ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId |
                                     ImGuiPopupFlags_AnyPopupLevel);
 }
@@ -286,7 +564,7 @@ void dispatch_editor_shortcuts() noexcept {
   // While the game has the keyboard its keys are the game's (W is a move,
   // not a gizmo), except the play controls.
   const bool gameHasKeyboard = game_owns_keyboard();
-  for (const EditorShortcut &row : kShortcuts) {
+  for (const EditorShortcut &row : g_rows) {
     if (gameHasKeyboard && !row.whileGameHasKeyboard) {
       continue;
     }

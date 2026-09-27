@@ -79,7 +79,7 @@ static void draw_unsaved_changes_prompt() noexcept {
   }
 
   if (ImGui::BeginPopupModal(kPopupId, nullptr,
-                            ImGuiWindowFlags_AlwaysAutoResize)) {
+                             ImGuiWindowFlags_AlwaysAutoResize)) {
     // The prompt names every document it stands for, so Save and Discard
     // read as decisions about exactly those documents.
     const bool sceneDirty = scene_document_is_dirty();
@@ -264,6 +264,14 @@ void draw_main_menu_bar() noexcept {
                             state != PlayState::Stopped);
     editor_action_menu_item(EditorAction::Pause, state == PlayState::Paused);
     editor_action_menu_item(EditorAction::Step);
+    ImGui::Separator();
+    // Preferences sit under Edit, as in Unity; no reference editor has a
+    // top-level Settings menu.
+    const bool showPreferences =
+        core::cvar_get_bool("editor.show_preferences", false);
+    if (ImGui::MenuItem("Preferences...", nullptr, showPreferences)) {
+      core::cvar_set_bool("editor.show_preferences", !showPreferences);
+    }
     ImGui::EndMenu();
   }
 
@@ -286,11 +294,6 @@ void draw_main_menu_bar() noexcept {
         core::cvar_get_bool("editor.show_rendering", false);
     if (ImGui::MenuItem("Rendering", nullptr, showRendering)) {
       core::cvar_set_bool("editor.show_rendering", !showRendering);
-    }
-    const bool showPreferences =
-        core::cvar_get_bool("editor.show_preferences", false);
-    if (ImGui::MenuItem("Editor Settings", nullptr, showPreferences)) {
-      core::cvar_set_bool("editor.show_preferences", !showPreferences);
     }
     ImGui::EndMenu();
   }
@@ -316,7 +319,7 @@ void draw_main_menu_bar() noexcept {
   // prompt, so this is where its refusal is seen.
   char status[160] = {};
   std::snprintf(status, sizeof(status), "%s%s", scene_document_display_name(),
-               scene_document_is_dirty() ? " *" : "");
+                scene_document_is_dirty() ? " *" : "");
   const char *saveError = scene_document_last_error();
   const float statusWidth = ImGui::CalcTextSize(status).x;
   float errorWidth = 0.0F;
@@ -506,8 +509,8 @@ static bool draw_entity_row(runtime::Entity entity, bool hasChildren,
     std::snprintf(label, sizeof(label), "%s###entity_%u", name.name,
                   entity.index);
   } else {
-    std::snprintf(label, sizeof(label), "Entity [%u]###entity_%u",
-                  entity.index, entity.index);
+    std::snprintf(label, sizeof(label), "Entity [%u]###entity_%u", entity.index,
+                  entity.index);
   }
 
   ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow |
@@ -516,8 +519,7 @@ static bool draw_entity_row(runtime::Entity entity, bool hasChildren,
   if (!hasChildren) {
     flags |= ImGuiTreeNodeFlags_Leaf;
   }
-  if (is_entity_selected(entity) ||
-      (selected_entity() == entity)) {
+  if (is_entity_selected(entity) || (selected_entity() == entity)) {
     flags |= ImGuiTreeNodeFlags_Selected;
   }
 

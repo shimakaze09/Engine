@@ -1,8 +1,8 @@
-// Declares the editor's own preferences (the CJK font file and the main
-// window's geometry) and the Editor Settings window that edits them. They
-// persist in the editor's layout file, through an ImGui settings section,
-// so they are staged and replaced atomically with the layout rather than
-// kept in a file of their own.
+// Declares the editor's own preferences (the CJK font file, the main
+// window's geometry and rebound shortcuts) and the Preferences window that
+// edits them. They persist in the editor's layout file, through an ImGui
+// settings section, so they are staged and replaced atomically with the
+// layout rather than kept in a file of their own.
 
 #pragma once
 
@@ -23,7 +23,7 @@ void apply_stored_window_geometry() noexcept;
 /// Records the CJK font the editor loaded at startup, for display.
 void set_loaded_cjk_font(const char *path) noexcept;
 
-/// Draws the Editor Settings window while editor.show_preferences is set.
+/// Draws the Preferences window while editor.show_preferences is set.
 void draw_editor_preferences_panel() noexcept;
 
 /// The preferences section as ImGui writes it into the layout file, into

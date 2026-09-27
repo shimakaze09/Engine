@@ -4,10 +4,12 @@
 // and Ctrl+R is not the scale tool), creating actions that run once per
 // press while undo repeats, dispatch stopping under the unsaved-changes
 // prompt, a popup, a text field and a game-owned keyboard, the play
-// chords that alone stay live while the game has the keyboard, and table
-// invariants: one row per action, unique ids, no chord bound twice.
+// chords that alone stay live while the game has the keyboard, rebinding
+// with its persistence and refusals, and table invariants: one row per
+// action, unique ids, no chord bound twice.
 
 #include "editor_commands.h"
+#include "editor_preferences.h"
 #include "editor_scene_document.h"
 #include "editor_scene_document_fixture.h"
 #include "editor_session.h"
@@ -15,6 +17,7 @@
 
 #include "imgui_internal.h"
 
+#include "engine/core/cvar.h"
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
 #include "engine/editor/editor.h"
@@ -381,6 +384,139 @@ void check_create_and_exit(engine::tests::TestContext &t,
   scene_document_prompt_choose_cancel();
 }
 
+/// Reads `lines` as the stored preferences section, as the layout file
+/// load does.
+void load_section(const char *lines) noexcept {
+  char text[512] = {};
+  std::snprintf(text, sizeof(text), "[EnginePreferences][Editor]\n%s\n", lines);
+  ImGui::LoadIniSettingsFromMemory(text, std::strlen(text));
+}
+
+/// A rebinding moves the action to its new chord; one that collides is
+/// refused and names the holder. Rebound chords travel through the
+/// preferences section as Shortcut.<id>=<chord> lines. Reading them back
+/// refuses an unknown id, a malformed chord and a chord two actions would
+/// share, judged on the final table, while applying the rest. Every
+/// default chord survives a format-then-parse round trip.
+void check_rebinding(engine::tests::TestContext &t, World &world) noexcept {
+  bool roundTrips = true;
+  for (std::size_t i = 0U; i < editor_shortcut_count(); ++i) {
+    const EditorShortcut &row = editor_shortcut_at(i);
+    char text[40] = {};
+    ImGuiKeyChord parsed = -1;
+    roundTrips = roundTrips &&
+                 format_key_chord(row.chord, text, sizeof(text)) &&
+                 parse_key_chord(text, &parsed) && (parsed == row.chord);
+  }
+  t.check(roundTrips, "every default chord saves and reads back");
+
+  const ImGuiKeyChord moved = ImGuiMod_Ctrl | ImGuiMod_Alt | ImGuiKey_D;
+  t.check(rebind_editor_action(EditorAction::Duplicate, moved, nullptr),
+          "rebind Duplicate");
+  t.check(perform_scene_new(), "fresh scene");
+  const Entity entity = add_named(world, "Rebound");
+  select_entity(entity, false);
+  std::size_t count = world.alive_entity_count();
+  tap(ImGuiMod_Ctrl | ImGuiKey_D);
+  t.check(world.alive_entity_count() == count,
+          "the old chord no longer duplicates");
+  tap(moved);
+  t.check(world.alive_entity_count() == count + 1U, "the new chord duplicates");
+  t.check(std::strcmp(editor_shortcut_text(EditorAction::Duplicate),
+                      "Ctrl+Alt+D") == 0,
+          "the menu shows the new chord");
+
+  EditorAction conflict = EditorAction::Count;
+  t.check(!rebind_editor_action(EditorAction::Duplicate,
+                                ImGuiMod_Ctrl | ImGuiKey_S, &conflict) &&
+              (conflict == EditorAction::SaveScene),
+          "a chord Save holds is refused, naming Save");
+
+  char section[2048] = {};
+  t.check((engine::editor::editor_preferences_section(section,
+                                                      sizeof(section)) > 0U) &&
+              (std::strstr(section, "Shortcut.edit.duplicate=Ctrl+Alt+D\n") !=
+               nullptr) &&
+              (std::strstr(section, "Shortcut.edit.undo") == nullptr),
+          "only the rebound action is saved, with its saved names");
+
+  // The saved section reads back to the same table.
+  reset_editor_shortcuts();
+  ImGui::LoadIniSettingsFromMemory(section, std::strlen(section));
+  bool sameTable = true;
+  for (std::size_t i = 0U; i < editor_shortcut_count(); ++i) {
+    const EditorShortcut &row = editor_shortcut_at(i);
+    sameTable = sameTable && (row.action == EditorAction::Duplicate
+                                  ? (row.chord == moved)
+                                  : !editor_action_rebound(row.action));
+  }
+  t.check(sameTable, "the saved section reads back to the same bindings");
+
+  load_section("Shortcut.edit.duplicate=Ctrl+Alt+D\n"
+               "Shortcut.no.such_action=Ctrl+K\n"
+               "Shortcut.edit.copy=Ctrl+Nope\n"
+               "Shortcut.edit.paste=Ctrl+S\n");
+  t.check(editor_shortcut(EditorAction::Duplicate).chord == moved,
+          "a stored rebinding is applied");
+  t.check(editor_shortcut(EditorAction::Copy).chord ==
+              (ImGuiMod_Ctrl | ImGuiKey_C),
+          "a malformed stored chord leaves the default");
+  t.check(editor_shortcut(EditorAction::Paste).chord ==
+              (ImGuiMod_Ctrl | ImGuiKey_V),
+          "a stored chord another action holds leaves the default");
+
+  // Copy is saved before Delete, so its line takes the chord Delete's
+  // later line frees: conflicts are judged on the final table.
+  load_section("Shortcut.edit.copy=Delete\n"
+               "Shortcut.edit.delete=Ctrl+K\n");
+  t.check((editor_shortcut(EditorAction::Copy).chord == ImGuiKey_Delete) &&
+              (editor_shortcut(EditorAction::Delete).chord ==
+               (ImGuiMod_Ctrl | ImGuiKey_K)),
+          "a stored line may take a chord a later line frees");
+  t.check(!editor_action_rebound(EditorAction::Duplicate),
+          "a load replaces the bindings it does not name with defaults");
+
+  // Delete's line is refused, so Delete keeps its key, and Copy's claim
+  // on it is refused in turn.
+  load_section("Shortcut.edit.copy=Delete\n"
+               "Shortcut.edit.delete=Ctrl+Nope\n");
+  t.check((editor_shortcut(EditorAction::Delete).chord == ImGuiKey_Delete) &&
+              (editor_shortcut(EditorAction::Copy).chord ==
+               (ImGuiMod_Ctrl | ImGuiKey_C)),
+          "a refusal that keeps a default refuses the claim on it");
+
+  load_section("Shortcut.edit.copy=Ctrl+J\n"
+               "Shortcut.edit.paste=Ctrl+J\n");
+  t.check((editor_shortcut(EditorAction::Copy).chord ==
+           (ImGuiMod_Ctrl | ImGuiKey_J)) &&
+              (editor_shortcut(EditorAction::Paste).chord ==
+               (ImGuiMod_Ctrl | ImGuiKey_V)),
+          "of two stored claims on one chord, the later row's is refused");
+
+  // Remove Shortcut unbinds, and the removal is saved.
+  reset_editor_shortcuts();
+  t.check(rebind_editor_action(EditorAction::Duplicate, 0, nullptr),
+          "remove Duplicate's shortcut");
+  t.check(
+      (engine::editor::editor_preferences_section(section, sizeof(section)) >
+       0U) &&
+          (std::strstr(section, "Shortcut.edit.duplicate=None\n") != nullptr),
+      "a removed shortcut is saved as None");
+  reset_editor_shortcuts();
+  ImGui::LoadIniSettingsFromMemory(section, std::strlen(section));
+  t.check(editor_shortcut(EditorAction::Duplicate).chord == 0,
+          "a removed shortcut stays removed");
+  count = world.alive_entity_count();
+  select_entity(entity, false);
+  tap(ImGuiMod_Ctrl | ImGuiKey_D);
+  t.check(world.alive_entity_count() == count,
+          "a removed shortcut does nothing");
+
+  reset_editor_shortcuts();
+  t.check(!editor_action_rebound(EditorAction::Duplicate),
+          "Restore defaults restores every chord");
+}
+
 } // namespace
 
 int main() {
@@ -401,6 +537,10 @@ int main() {
   int height = 0;
   io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
 
+  if (!engine::core::initialize_cvars()) {
+    return 96;
+  }
+  engine::editor::register_editor_preferences();
   engine::tests::RecentScenesGuard recentGuard;
   std::error_code ec{};
   std::filesystem::create_directories(kScratchRoot, ec);
@@ -423,11 +563,13 @@ int main() {
   check_document_chords(t, *world);
   check_play_chords(t, *world);
   check_create_and_exit(t, *world);
+  check_rebinding(t, *world);
 
   editor_set_world(nullptr);
   engine::core::platform_set_scripted_file_dialogs(false);
   t.check(recentGuard.disarm(), "the real recent-scenes file is untouched");
   ImGui::DestroyContext();
+  engine::core::shutdown_cvars();
   engine::core::shutdown_logging();
   return t.finish("editor_shortcuts");
 }
