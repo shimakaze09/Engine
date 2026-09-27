@@ -175,14 +175,8 @@ bool run_editor_action(EditorAction action) noexcept {
   case EditorAction::Redo:
     editor_history_redo();
     return true;
-  case EditorAction::Duplicate: {
-    const runtime::Entity copy = execute_entity_duplicate(selected_entity());
-    if (copy == runtime::kInvalidEntity) {
-      return false;
-    }
-    select_entity(copy, false);
-    return true;
-  }
+  case EditorAction::Duplicate:
+    return execute_selection_duplicate();
   case EditorAction::Delete:
     return execute_selection_delete();
   case EditorAction::GizmoTranslate:

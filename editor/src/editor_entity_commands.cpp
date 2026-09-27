@@ -490,77 +490,93 @@ static bool has_listed_ancestor(const runtime::World &world,
   return false;
 }
 
+/// A captured forest: every member, root first within each subtree and
+/// every parent before its children, and where each root's subtree
+/// starts.
+struct Forest final {
+  std::unique_ptr<runtime::Entity[]> members;
+  std::size_t memberCount = 0U;
+  std::unique_ptr<std::size_t[]> rootStarts;
+  std::size_t rootCount = 0U;
+};
+
+/// Captures `entities` as a forest: each listed entity without a listed
+/// ancestor is a root and takes its subtree; a repeat, a dead entry, or a
+/// member of an earlier root's subtree is skipped. False on allocation
+/// failure or when no listed entity is alive.
+static bool collect_forest(runtime::World &world,
+                           const runtime::Entity *entities, std::size_t count,
+                           Forest *out) noexcept {
+  if ((entities == nullptr) || (count == 0U) || (out == nullptr)) {
+    return false;
+  }
+  constexpr std::size_t kSlots = runtime::World::kMaxEntities + 1U;
+  const std::size_t capacity = world.alive_entity_count();
+  std::unique_ptr<bool[]> listed(new (std::nothrow) bool[kSlots]());
+  std::unique_ptr<bool[]> visited(new (std::nothrow) bool[kSlots]());
+  out->members.reset(new (std::nothrow)
+                         runtime::Entity[(capacity > 0U) ? capacity : 1U]);
+  out->rootStarts.reset(new (std::nothrow) std::size_t[count]);
+  if ((listed == nullptr) || (visited == nullptr) ||
+      (out->members == nullptr) || (out->rootStarts == nullptr)) {
+    return false;
+  }
+  for (std::size_t i = 0U; i < count; ++i) {
+    if (world.is_alive(entities[i])) {
+      listed[entities[i].index] = true;
+    }
+  }
+  out->memberCount = 0U;
+  out->rootCount = 0U;
+  for (std::size_t i = 0U; i < count; ++i) {
+    const runtime::Entity entity = entities[i];
+    if (!world.is_alive(entity) || visited[entity.index] ||
+        has_listed_ancestor(world, entity, listed.get())) {
+      continue;
+    }
+    const std::size_t taken =
+        collect_subtree_members(world, entity, &out->members[out->memberCount],
+                                capacity - out->memberCount, visited.get());
+    if (taken == 0U) {
+      continue;
+    }
+    out->rootStarts[out->rootCount++] = out->memberCount;
+    out->memberCount += taken;
+  }
+  return out->rootCount > 0U;
+}
+
 EntityDeleteCommand *
 build_entity_delete_command(const runtime::Entity *entities,
                             std::size_t count) noexcept {
   runtime::World *const world = editor_session().world;
-  if ((world == nullptr) || (entities == nullptr) || (count == 0U)) {
+  Forest forest{};
+  if ((world == nullptr) || !collect_forest(*world, entities, count, &forest)) {
     return nullptr;
   }
-  constexpr std::size_t kSlots = runtime::World::kMaxEntities + 1U;
-  const std::size_t capacity = world->alive_entity_count();
-  std::unique_ptr<bool[]> listed(new (std::nothrow) bool[kSlots]());
-  std::unique_ptr<bool[]> visited(new (std::nothrow) bool[kSlots]());
-  std::unique_ptr<runtime::Entity[]> members(
-      new (std::nothrow) runtime::Entity[(capacity > 0U) ? capacity : 1U]);
-  std::unique_ptr<std::size_t[]> rootRecords(new (std::nothrow)
-                                                 std::size_t[count]);
-  if ((listed == nullptr) || (visited == nullptr) || (members == nullptr) ||
-      (rootRecords == nullptr)) {
-    return nullptr;
-  }
-  for (std::size_t i = 0U; i < count; ++i) {
-    if (world->is_alive(entities[i])) {
-      listed[entities[i].index] = true;
-    }
-  }
-
-  // Each listed entity without a listed ancestor is a root and takes its
-  // subtree; a repeat, or a member of an earlier root's subtree, is
-  // already visited.
-  std::size_t memberCount = 0U;
-  std::size_t rootCount = 0U;
-  for (std::size_t i = 0U; i < count; ++i) {
-    const runtime::Entity entity = entities[i];
-    if (!world->is_alive(entity) || visited[entity.index] ||
-        has_listed_ancestor(*world, entity, listed.get())) {
-      continue;
-    }
-    const std::size_t taken =
-        collect_subtree_members(*world, entity, &members[memberCount],
-                                capacity - memberCount, visited.get());
-    if (taken == 0U) {
-      continue;
-    }
-    rootRecords[rootCount++] = memberCount;
-    memberCount += taken;
-  }
-  if (rootCount == 0U) {
-    return nullptr;
-  }
-
   auto *command = allocate_command<EntityDeleteCommand>();
   if (command == nullptr) {
     return nullptr;
   }
-  command->records.reset(new (std::nothrow) EntityDeleteRecord[memberCount]);
+  command->records.reset(new (std::nothrow)
+                             EntityDeleteRecord[forest.memberCount]);
   if (command->records == nullptr) {
     delete command;
     return nullptr;
   }
-  for (std::size_t i = 0U; i < memberCount; ++i) {
+  for (std::size_t i = 0U; i < forest.memberCount; ++i) {
     EntityDeleteRecord &record = command->records[i];
-    record.persistentId = world->persistent_id(members[i]);
+    record.persistentId = world->persistent_id(forest.members[i]);
     for (std::size_t typeIndex = 0U; typeIndex < kComponentEditTypeCount;
          ++typeIndex) {
       record.present[typeIndex] =
           capture_component_snapshot(static_cast<ComponentEditType>(typeIndex),
-                                     members[i], &record.components);
+                                     forest.members[i], &record.components);
     }
   }
-  command->recordCount = memberCount;
-  command->rootRecords = std::move(rootRecords);
-  command->rootCount = rootCount;
+  command->recordCount = forest.memberCount;
+  command->rootRecords = std::move(forest.rootStarts);
+  command->rootCount = forest.rootCount;
   return command;
 }
 
@@ -605,38 +621,62 @@ void make_unique_entity_name(const runtime::World &world,
   }
 }
 
+/// The copy's persistent id for a reference to `sourceId`, when the
+/// source is itself part of the copy; `sourceId` unchanged otherwise.
+static runtime::PersistentId
+remap_into_copy(const EntityDuplicateRecord *records, std::size_t count,
+                runtime::PersistentId sourceId) noexcept {
+  if (sourceId == runtime::kInvalidPersistentId) {
+    return sourceId;
+  }
+  for (std::size_t i = 0U; i < count; ++i) {
+    if (records[i].sourcePersistentId == sourceId) {
+      return records[i].persistentId;
+    }
+  }
+  return sourceId;
+}
+
 bool EntityDuplicateCommand::execute() noexcept {
   runtime::World *const world = editor_session().world;
-  if ((world == nullptr) || (recordCount == 0U)) {
+  if ((world == nullptr) || (recordCount == 0U) || (rootCount == 0U)) {
     return false;
   }
   constexpr std::size_t transformSlot =
       static_cast<std::size_t>(ComponentEditType::Transform);
   constexpr std::size_t nameSlot =
       static_cast<std::size_t>(ComponentEditType::Name);
+  constexpr std::size_t meshSlot =
+      static_cast<std::size_t>(ComponentEditType::Mesh);
 
+  // Pass 1 creates every member, parents first, so pass 2 can point
+  // references at copies created later in the list.
   std::size_t created = 0U;
   bool ok = true;
+  std::size_t nextRoot = 0U;
   for (std::size_t i = 0U; ok && (i < recordCount); ++i) {
     EntityDuplicateRecord &record = records[i];
-    ComponentEditSnapshot components = record.components;
-    // Internal parent links point at the copies, not the originals; the
+    runtime::Transform transform = record.components.transform;
+    // Internal parent links point at the copies, not the originals; a
     // root's link is left as captured, so it stays under the same parent.
     if (record.parentRecord != EntityDuplicateRecord::kNoParentRecord) {
-      components.transform.parentId = records[record.parentRecord].persistentId;
+      transform.parentId = records[record.parentRecord].persistentId;
     }
-    if ((i == 0U) && record.present[nameSlot]) {
-      make_unique_entity_name(*world, &components.name);
-      record.components.name = components.name;
+    const bool isRoot = (nextRoot < rootCount) && (rootRecords[nextRoot] == i);
+    if (isRoot) {
+      ++nextRoot;
+      if (record.present[nameSlot]) {
+        make_unique_entity_name(*world, &record.components.name);
+      }
     }
     const runtime::Entity entity =
         (record.persistentId == runtime::kInvalidPersistentId)
             ? (record.present[transformSlot]
-                   ? world->create_scene_object(components.transform)
+                   ? world->create_scene_object(transform)
                    : world->create_entity())
             : (record.present[transformSlot]
                    ? world->create_scene_object_with_persistent_id(
-                         record.persistentId, components.transform)
+                         record.persistentId, transform)
                    : world->create_entity_with_persistent_id(
                          record.persistentId));
     if (entity == runtime::kInvalidEntity) {
@@ -645,6 +685,19 @@ bool EntityDuplicateCommand::execute() noexcept {
     }
     record.persistentId = world->persistent_id(entity);
     ++created;
+  }
+
+  // Pass 2 applies every other component, with references into the copy
+  // remapped onto the copies.
+  for (std::size_t i = 0U; ok && (i < recordCount); ++i) {
+    const EntityDuplicateRecord &record = records[i];
+    const runtime::Entity entity =
+        world->find_entity_by_persistent_id(record.persistentId);
+    ComponentEditSnapshot components = record.components;
+    if (record.present[meshSlot]) {
+      components.mesh.sceneCaptureSourceId = remap_into_copy(
+          records.get(), recordCount, components.mesh.sceneCaptureSourceId);
+    }
     for (std::size_t typeIndex = 0U; typeIndex < kComponentEditTypeCount;
          ++typeIndex) {
       if (!record.present[typeIndex] || (typeIndex == transformSlot)) {
@@ -678,67 +731,74 @@ bool EntityDuplicateCommand::undo() noexcept {
   if ((world == nullptr) || (recordCount == 0U)) {
     return false;
   }
-  // The root's destroy takes its whole transform subtree, which is every
-  // member this command created.
-  const runtime::Entity root =
-      world->find_entity_by_persistent_id(records[0].persistentId);
-  if (root == runtime::kInvalidEntity) {
-    return false;
+  // Each root's destroy takes its whole transform subtree, which is every
+  // member this command created under it.
+  bool ok = true;
+  for (std::size_t k = 0U; k < rootCount; ++k) {
+    const runtime::Entity root = world->find_entity_by_persistent_id(
+        records[rootRecords[k]].persistentId);
+    ok = (root != runtime::kInvalidEntity) && world->destroy_entity(root) && ok;
   }
-  return world->destroy_entity(root);
+  return ok;
 }
 
 EntityDuplicateCommand *
-build_entity_duplicate_command(runtime::Entity entity) noexcept {
+build_entity_duplicate_command(const runtime::Entity *entities,
+                               std::size_t count) noexcept {
   runtime::World *const world = editor_session().world;
-  if ((world == nullptr) || !world->is_alive(entity)) {
+  Forest forest{};
+  if ((world == nullptr) || !collect_forest(*world, entities, count, &forest)) {
     return nullptr;
   }
-  const std::size_t capacity = world->alive_entity_count();
-  std::unique_ptr<runtime::Entity[]> members(new (std::nothrow)
-                                                 runtime::Entity[capacity]);
-  std::unique_ptr<bool[]> visited(
-      new (std::nothrow) bool[runtime::World::kMaxEntities + 1U]());
-  if ((members == nullptr) || (visited == nullptr)) {
-    return nullptr;
-  }
-  const std::size_t count = collect_subtree_members(
-      *world, entity, members.get(), capacity, visited.get());
-  if (count == 0U) {
-    return nullptr;
-  }
+  // Each member's record index by entity index, so a parent's record is
+  // found in O(1).
+  constexpr std::size_t kSlots = runtime::World::kMaxEntities + 1U;
+  std::unique_ptr<std::size_t[]> recordOf(new (std::nothrow)
+                                              std::size_t[kSlots]);
   auto *command = allocate_command<EntityDuplicateCommand>();
-  if (command == nullptr) {
+  if ((recordOf == nullptr) || (command == nullptr)) {
+    delete command;
     return nullptr;
   }
-  command->records.reset(new (std::nothrow) EntityDuplicateRecord[count]);
+  command->records.reset(new (std::nothrow)
+                             EntityDuplicateRecord[forest.memberCount]);
   if (command->records == nullptr) {
     delete command;
     return nullptr;
   }
-  for (std::size_t i = 0U; i < count; ++i) {
+  std::size_t nextRoot = 0U;
+  for (std::size_t i = 0U; i < forest.memberCount; ++i) {
+    const runtime::Entity member = forest.members[i];
+    recordOf[member.index] = i;
     EntityDuplicateRecord &record = command->records[i];
+    record.sourcePersistentId = world->persistent_id(member);
     for (std::size_t typeIndex = 0U; typeIndex < kComponentEditTypeCount;
          ++typeIndex) {
       record.present[typeIndex] =
           capture_component_snapshot(static_cast<ComponentEditType>(typeIndex),
-                                     members[i], &record.components);
+                                     member, &record.components);
     }
-    if (i == 0U) {
+    if ((nextRoot < forest.rootCount) && (forest.rootStarts[nextRoot] == i)) {
+      ++nextRoot;
       continue;
     }
-    // collect_subtree_members walks parents before children, so the
-    // parent of every member past the root is already recorded.
-    const runtime::PersistentId parentId = record.components.transform.parentId;
-    for (std::size_t candidate = 0U; candidate < i; ++candidate) {
-      if (world->persistent_id(members[candidate]) == parentId) {
-        record.parentRecord = candidate;
-        break;
-      }
+    // The subtree walk visits parents before children, so the parent of
+    // every member past its root is already recorded.
+    const runtime::Entity parent = world->find_entity_by_persistent_id(
+        record.components.transform.parentId);
+    if (parent != runtime::kInvalidEntity) {
+      record.parentRecord = recordOf[parent.index];
     }
   }
-  command->recordCount = count;
+  command->recordCount = forest.memberCount;
+  command->rootRecords = std::move(forest.rootStarts);
+  command->rootCount = forest.rootCount;
   return command;
+}
+
+EntityDuplicateCommand *
+build_entity_duplicate_command(runtime::Entity entity) noexcept {
+  return build_entity_duplicate_command(&entity, 1U);
 }
 
 runtime::Entity execute_entity_duplicate(runtime::Entity entity) noexcept {
@@ -759,6 +819,51 @@ runtime::Entity execute_entity_duplicate(runtime::Entity entity) noexcept {
     return runtime::kInvalidEntity;
   }
   return world->find_entity_by_persistent_id(command->records[0].persistentId);
+}
+
+bool execute_selection_duplicate() noexcept {
+  runtime::World *const world = editor_session().world;
+  if (world == nullptr) {
+    return false;
+  }
+  inspector_commit_pending_edit();
+  gizmo_commit_gesture();
+  prune_entity_selection();
+  EditorSession &session = editor_session();
+  const runtime::Entity primary = selected_entity();
+  const runtime::Entity *entities = session.selectedEntities.data();
+  std::size_t count = session.selectedEntityCount;
+  if (count == 0U) {
+    if (primary == runtime::kInvalidEntity) {
+      return false;
+    }
+    entities = &primary;
+    count = 1U;
+  }
+  EntityDuplicateCommand *const command =
+      build_entity_duplicate_command(entities, count);
+  if (command == nullptr) {
+    core::log_message(core::LogLevel::Error, "editor",
+                      "duplicate refused: the selection could not be "
+                      "recorded for undo (out of memory or nothing alive)");
+    return false;
+  }
+  // A failed execute deletes the command; a successful one keeps it in
+  // the history, so its records are read only after success.
+  if (!session.commandHistory.execute(command)) {
+    return false;
+  }
+  // The copies become the selection, as in other editors, so a second
+  // Duplicate copies the copies.
+  clear_entity_selection();
+  for (std::size_t k = 0U; k < command->rootCount; ++k) {
+    const runtime::Entity copy = world->find_entity_by_persistent_id(
+        command->records[command->rootRecords[k]].persistentId);
+    if (copy != runtime::kInvalidEntity) {
+      select_entity(copy, true);
+    }
+  }
+  return true;
 }
 
 bool execute_entity_delete(runtime::Entity entity) noexcept {
