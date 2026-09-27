@@ -527,7 +527,7 @@ build_entity_delete_command(const runtime::Entity *entities,
       continue;
     }
     const std::size_t taken =
-        collect_subtree_members(*world, entity, members.get() + memberCount,
+        collect_subtree_members(*world, entity, &members[memberCount],
                                 capacity - memberCount, visited.get());
     if (taken == 0U) {
       continue;
