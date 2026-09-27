@@ -283,14 +283,9 @@ void draw_selected_collider_overlay(
   }
 }
 
-// Editor viewport projection constants shared by the gizmo and drop ray.
-constexpr float kViewportFov = 1.0471975512F;
-constexpr float kViewportNear = 0.1F;
-constexpr float kViewportFar = 100.0F;
-
 /// Projects the current mouse position through the editor camera onto the
 /// y = 0 ground plane (falling back to a point ahead of the camera when
-/// the ray misses) to place viewport asset drops.
+/// the ray misses it within the far plane) to place viewport asset drops.
 math::Vec3 viewport_drop_world_position(const ImVec2 &imagePos,
                                         const ImVec2 &imageSize) noexcept {
   const renderer::CameraState cam =
@@ -307,20 +302,21 @@ math::Vec3 viewport_drop_world_position(const ImVec2 &imagePos,
   const ImVec2 mouse = ImGui::GetMousePos();
   const float ndcX = (((mouse.x - imagePos.x) / imageSize.x) * 2.0F) - 1.0F;
   const float ndcY = 1.0F - (((mouse.y - imagePos.y) / imageSize.y) * 2.0F);
-  const float tanHalfFov = std::tan(kViewportFov * 0.5F);
   const float aspect = imageSize.x / imageSize.y;
-  const math::Vec3 right = math::normalize(math::cross(forward, cam.up));
-  const math::Vec3 up = math::cross(right, forward);
-  const math::Vec3 dir = math::normalize(
-      math::add(forward, math::add(math::mul(right, ndcX * tanHalfFov * aspect),
-                                   math::mul(up, ndcY * tanHalfFov))));
-  if (dir.y < 0.0F) {
-    const float t = -cam.position.y / dir.y;
-    if ((t > 0.0F) && (t <= kViewportFar)) {
-      return math::add(cam.position, math::mul(dir, t));
-    }
+  math::Ray ray{};
+  if (!viewport_ray(math::look_at(cam.position, cam.target, cam.up),
+                    renderer::camera_projection_matrix(cam, aspect),
+                    renderer::device_depth_zero_one(), ndcX, ndcY, &ray) ||
+      (ray.direction.y >= 0.0F)) {
+    return fallback;
   }
-  return fallback;
+  // The ray spans near to far plane at t in [0, 1]; a ground hit past the
+  // far plane is not on screen.
+  const float t = -ray.origin.y / ray.direction.y;
+  if ((t < 0.0F) || (t > 1.0F)) {
+    return fallback;
+  }
+  return math::add(ray.origin, math::mul(ray.direction, t));
 }
 
 } // namespace
@@ -424,8 +420,11 @@ void draw_scene_viewport_panel() noexcept {
 
     const float aspect = regionSize.x / regionSize.y;
     const math::Mat4 viewMat = math::look_at(cam.position, cam.target, cam.up);
-    const math::Mat4 projMat =
-        math::perspective(kViewportFov, aspect, kViewportNear, kViewportFar);
+    // The renderer's own builder, so the gizmo projects with the camera
+    // the Scene view renders. ImGuizmo reads only x and y and unprojects
+    // its picking ray between clip depths 0 and 1, which lie on the view
+    // ray under either depth convention.
+    const math::Mat4 projMat = renderer::camera_projection_matrix(cam, aspect);
 
     runtime::Transform transform{};
     editor_session().world->get_transform(selectedEntity, &transform);

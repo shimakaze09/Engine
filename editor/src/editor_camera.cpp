@@ -4,7 +4,11 @@
 
 #include <cmath>
 
+#include "engine/math/mat4.h"
+#include "engine/math/ray.h"
+#include "engine/math/transform.h"
 #include "engine/math/vec3.h"
+#include "engine/math/vec4.h"
 #include "engine/renderer/camera.h"
 
 namespace engine::editor {
@@ -77,6 +81,72 @@ renderer::CameraState editor_camera_state(const EditorCamera &camera) noexcept {
   state.target = camera.target;
   state.up = math::Vec3(0.0F, 1.0F, 0.0F);
   return state;
+}
+
+namespace {
+
+/// The clip-space depth of the near plane under the projection's
+/// convention; the far plane is 1 under both.
+constexpr float near_clip_depth(bool depthZeroToOne) noexcept {
+  return depthZeroToOne ? 0.0F : -1.0F;
+}
+
+bool unproject(const math::Mat4 &inverseViewProjection, float x, float y,
+               float z, math::Vec3 *out) noexcept {
+  const math::Vec4 world =
+      math::mul(inverseViewProjection, math::Vec4(x, y, z, 1.0F));
+  if (std::fabs(world.w) < 1.0e-12F) {
+    return false;
+  }
+  const float invW = 1.0F / world.w;
+  *out = math::Vec3(world.x * invW, world.y * invW, world.z * invW);
+  return true;
+}
+
+bool inverse_view_projection(const math::Mat4 &view,
+                             const math::Mat4 &projection,
+                             math::Mat4 *out) noexcept {
+  return math::inverse(math::mul(projection, view), out);
+}
+
+} // namespace
+
+bool viewport_ray(const math::Mat4 &view, const math::Mat4 &projection,
+                  bool depthZeroToOne, float ndcX, float ndcY,
+                  math::Ray *out) noexcept {
+  math::Mat4 inverseVP{};
+  math::Vec3 nearPoint{};
+  math::Vec3 farPoint{};
+  if ((out == nullptr) ||
+      !inverse_view_projection(view, projection, &inverseVP) ||
+      !unproject(inverseVP, ndcX, ndcY, near_clip_depth(depthZeroToOne),
+                 &nearPoint) ||
+      !unproject(inverseVP, ndcX, ndcY, 1.0F, &farPoint)) {
+    return false;
+  }
+  out->origin = nearPoint;
+  out->direction = math::sub(farPoint, nearPoint);
+  return true;
+}
+
+bool frustum_corners(const math::Mat4 &view, const math::Mat4 &projection,
+                     bool depthZeroToOne, math::Vec3 (&out)[8]) noexcept {
+  math::Mat4 inverseVP{};
+  if (!inverse_view_projection(view, projection, &inverseVP)) {
+    return false;
+  }
+  constexpr float kQuad[4][2] = {
+      {-1.0F, -1.0F}, {1.0F, -1.0F}, {1.0F, 1.0F}, {-1.0F, 1.0F}};
+  const float depths[2] = {near_clip_depth(depthZeroToOne), 1.0F};
+  for (int plane = 0; plane < 2; ++plane) {
+    for (int corner = 0; corner < 4; ++corner) {
+      if (!unproject(inverseVP, kQuad[corner][0], kQuad[corner][1],
+                     depths[plane], &out[(plane * 4) + corner])) {
+        return false;
+      }
+    }
+  }
+  return true;
 }
 
 } // namespace engine::editor

@@ -3,6 +3,9 @@
 
 #include "engine/editor/camera_frustum_overlay.h"
 
+#include "engine/editor/editor_camera.h"
+#include "engine/renderer/command_buffer.h"
+
 #include <cmath>
 
 #include "engine/core/debug_draw.h"
@@ -18,38 +21,15 @@ void draw_camera_frustum_wireframe(const renderer::CameraState &camera,
   const math::Mat4 view =
       math::look_at(camera.position, camera.target, camera.up);
   // Shares the renderer's projection builder so the overlay draws the
-  // true frustum shape for orthographic cameras too.
+  // true frustum shape for orthographic cameras too, and unprojects with
+  // the device's clip depth range: on a [0, 1] device the GL cube's near
+  // face at -1 lands between the eye and the real near plane.
   const math::Mat4 proj =
       renderer::camera_projection_matrix(camera, aspectRatio);
-  const math::Mat4 vp = math::mul(proj, view);
-
-  math::Mat4 invVP{};
-  if (!math::inverse(vp, &invVP)) {
-    return;
-  }
-
-  // NDC corners: 8 corners of the unit cube [-1,1]^3
-  // near z = -1, far z = 1 in OpenGL NDC
-  constexpr float kNDC[8][4] = {
-      {-1.0F, -1.0F, -1.0F, 1.0F}, // near-bottom-left
-      {1.0F, -1.0F, -1.0F, 1.0F},  // near-bottom-right
-      {1.0F, 1.0F, -1.0F, 1.0F},   // near-top-right
-      {-1.0F, 1.0F, -1.0F, 1.0F},  // near-top-left
-      {-1.0F, -1.0F, 1.0F, 1.0F},  // far-bottom-left
-      {1.0F, -1.0F, 1.0F, 1.0F},   // far-bottom-right
-      {1.0F, 1.0F, 1.0F, 1.0F},    // far-top-right
-      {-1.0F, 1.0F, 1.0F, 1.0F},   // far-top-left
-  };
-
   math::Vec3 corners[8]{};
-  for (int i = 0; i < 8; ++i) {
-    const math::Vec4 ndc(kNDC[i][0], kNDC[i][1], kNDC[i][2], kNDC[i][3]);
-    const math::Vec4 world = math::mul(invVP, ndc);
-    if (std::fabs(world.w) < 0.0001F) {
-      return;
-    }
-    const float invW = 1.0F / world.w;
-    corners[i] = math::Vec3(world.x * invW, world.y * invW, world.z * invW);
+  if (!frustum_corners(view, proj, renderer::device_depth_zero_one(),
+                       corners)) {
+    return;
   }
 
   const core::DebugColor color{1.0F, 1.0F, 0.0F, 1.0F};

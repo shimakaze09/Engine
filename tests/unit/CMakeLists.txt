@@ -2294,3 +2294,12 @@ engine_add_test_executable(engine_unit_editor_delete_selection
     COMPILE_DEFINITIONS
     SDL_MAIN_HANDLED
 )
+
+engine_add_test_executable(engine_unit_editor_camera
+    SOURCES
+    editor_camera_test.cpp
+    PRIVATE_DEPS
+    engine_editor
+    COMPILE_DEFINITIONS
+    SDL_MAIN_HANDLED
+)
