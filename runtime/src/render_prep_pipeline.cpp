@@ -144,16 +144,6 @@ std::uint64_t build_draw_sort_key(const renderer::Material &material,
 
 void mark_graph_failed(std::atomic<bool> *frameGraphFailed) noexcept;
 
-/// World-axis box of a mesh's object-space bounds under `model`.
-void world_mesh_bounds(const renderer::GpuMesh &mesh, const math::Mat4 &model,
-                       math::Vec3 *outCenter, math::Vec3 *outHalf) noexcept {
-  const math::Vec4 center4 =
-      math::mul(model, math::Vec4(mesh.boundsCenter.x, mesh.boundsCenter.y,
-                                  mesh.boundsCenter.z, 1.0F));
-  *outCenter = math::Vec3(center4.x, center4.y, center4.z);
-  *outHalf = math::transform_aabb_half_extents(model, mesh.boundsHalfExtents);
-}
-
 /// Submits a draw to the thread's buffer. A full buffer drops the draw and
 /// counts it; it is a per-frame degradation the pipeline reports once and
 /// surfaces in EngineStats, never a graph failure — treating it as one
@@ -248,7 +238,8 @@ void render_prep_chunk_job(void *userData) noexcept {
       math::Vec3 center = transforms[i].position;
       math::Vec3 half(0.0F, 0.0F, 0.0F);
       if (peeked != nullptr) {
-        world_mesh_bounds(*peeked, transforms[i].matrix, &center, &half);
+        math::transform_aabb(transforms[i].matrix, peeked->boundsCenter,
+                             peeked->boundsHalfExtents, &center, &half);
       }
 
       const std::uint16_t passMask =
@@ -394,7 +385,8 @@ void render_prep_chunk_job(void *userData) noexcept {
       // vertex stage sways x by up to the strength and z by 0.35 of it).
       math::Vec3 center{};
       math::Vec3 half{};
-      world_mesh_bounds(*mesh, model, &center, &half);
+      math::transform_aabb(model, mesh->boundsCenter, mesh->boundsHalfExtents,
+                           &center, &half);
       const float sway = std::fabs(foliage->windStrength);
       half = math::Vec3(half.x + sway, half.y, half.z + (0.35F * sway));
       const std::uint16_t passMask =

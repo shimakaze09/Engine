@@ -68,10 +68,8 @@ constexpr core::DebugColor kColliderWireColor{0.16F, 1.0F, 0.47F, 0.86F};
 void emit_collider_segment(const math::Mat4 &localToWorld,
                            const math::Vec3 &from,
                            const math::Vec3 &to) noexcept {
-  const math::Vec4 worldFrom =
-      math::mul(localToWorld, math::Vec4(from.x, from.y, from.z, 1.0F));
-  const math::Vec4 worldTo =
-      math::mul(localToWorld, math::Vec4(to.x, to.y, to.z, 1.0F));
+  const math::Vec3 worldFrom = math::transform_point(localToWorld, from);
+  const math::Vec3 worldTo = math::transform_point(localToWorld, to);
   core::debug_draw_line({worldFrom.x, worldFrom.y, worldFrom.z},
                         {worldTo.x, worldTo.y, worldTo.z}, kColliderWireColor);
 }

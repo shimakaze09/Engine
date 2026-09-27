@@ -27,14 +27,6 @@ struct FacePolygon final {
   math::Vec3 outwardNormal{};
 };
 
-/// Transforms a point by an affine matrix.
-[[nodiscard]] math::Vec3 transform_point(const math::Mat4 &matrix,
-                                         const math::Vec3 &point) noexcept {
-  const math::Vec4 result =
-      math::mul(matrix, math::Vec4(point.x, point.y, point.z, 1.0F));
-  return math::Vec3(result.x, result.y, result.z);
-}
-
 /// Multiplies a direction by the transpose of the matrix's linear 3×3 block.
 [[nodiscard]] math::Vec3 mul_transpose3(const math::Mat4 &matrix,
                                         const math::Vec3 &v) noexcept {
@@ -151,7 +143,8 @@ bool extract_box_face(const ColliderWorldGeometry &geometry,
   }
 
   for (std::size_t i = 0U; i < 4U; ++i) {
-    outFace->vertices[i] = transform_point(geometry.localToWorld, corners[i]);
+    outFace->vertices[i] =
+        math::transform_point(geometry.localToWorld, corners[i]);
   }
   outFace->count = 4U;
   return face_normal_world(geometry, localNormal, &outFace->outwardNormal);
@@ -190,7 +183,7 @@ bool extract_hull_face(const ColliderWorldGeometry &geometry,
         math::dot(plane.normal, hull->vertices[i]) - plane.distance;
     if (std::fabs(distance) <= epsilon) {
       outFace->vertices[outFace->count] =
-          transform_point(geometry.localToWorld, hull->vertices[i]);
+          math::transform_point(geometry.localToWorld, hull->vertices[i]);
       ++outFace->count;
     }
   }

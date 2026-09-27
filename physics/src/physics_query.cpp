@@ -30,22 +30,6 @@ bool passes_mask(const Collider &col, std::uint32_t mask) noexcept {
   return (col.collisionLayer & mask) != 0U;
 }
 
-/// Transforms a point by an affine matrix.
-math::Vec3 transform_point(const math::Mat4 &matrix,
-                           const math::Vec3 &point) noexcept {
-  const math::Vec4 result =
-      math::mul(matrix, math::Vec4(point.x, point.y, point.z, 1.0F));
-  return math::Vec3(result.x, result.y, result.z);
-}
-
-/// Transforms a vector by an affine matrix without applying translation.
-math::Vec3 transform_vector(const math::Mat4 &matrix,
-                            const math::Vec3 &vector) noexcept {
-  const math::Vec4 result =
-      math::mul(matrix, math::Vec4(vector.x, vector.y, vector.z, 0.0F));
-  return math::Vec3(result.x, result.y, result.z);
-}
-
 /// Maps a local-space surface normal through an affine collider transform.
 math::Vec3 transform_normal(const ColliderWorldGeometry &geometry,
                             const math::Vec3 &localNormal) noexcept {
@@ -343,8 +327,8 @@ bool ray_intersects_geometry(const PhysicsWorldView &world, Entity entity,
                              const math::Ray &worldRay, float maxDistance,
                              float *outT, math::Vec3 *outNormal) noexcept {
   const math::Ray localRay{
-      transform_point(geometry.worldToLocal, worldRay.origin),
-      transform_vector(geometry.worldToLocal, worldRay.direction)};
+      math::transform_point(geometry.worldToLocal, worldRay.origin),
+      math::transform_vector(geometry.worldToLocal, worldRay.direction)};
   float hitT = 0.0F;
   math::Vec3 localNormal(0.0F, 1.0F, 0.0F);
   bool hit = false;

@@ -96,6 +96,43 @@ bool check_transform_aabb_half_extents() {
          nearly_equal(half.z, 12.0F, 1.0e-4F);
 }
 
+/// transform_point applies the whole affine matrix (w = 1), and is bit
+/// for bit the multiply the physics and render-prep copies it replaced
+/// ran; transform_vector drops the translation (w = 0); transform_aabb
+/// moves the centre as a point and widens the half extents. Under
+/// translate (10, 20, 30), a quarter turn about z and scale (-2, 3, 4),
+/// x = 1 goes to (0, -2, 0) before translation. The quarter turn's cosine
+/// is -4.4e-8 in float, hence the 1e-4 bound on derived values.
+bool check_point_and_vector_transforms() {
+  constexpr float kHalfPi = 1.57079632679F;
+  const engine::math::Mat4 world = engine::math::compose_trs(
+      engine::math::Vec3(10.0F, 20.0F, 30.0F),
+      engine::math::from_axis_angle(engine::math::Vec3(0.0F, 0.0F, 1.0F),
+                                    kHalfPi),
+      engine::math::Vec3(-2.0F, 3.0F, 4.0F));
+  const engine::math::Vec3 unitX(1.0F, 0.0F, 0.0F);
+  const engine::math::Vec3 point = engine::math::transform_point(world, unitX);
+  const engine::math::Vec4 direct =
+      engine::math::mul(world, engine::math::Vec4(1.0F, 0.0F, 0.0F, 1.0F));
+  const engine::math::Vec3 vector =
+      engine::math::transform_vector(world, unitX);
+  engine::math::Vec3 center{};
+  engine::math::Vec3 half{};
+  engine::math::transform_aabb(
+      world, unitX, engine::math::Vec3(1.0F, 2.0F, 3.0F), &center, &half);
+  return (point.x == direct.x) && (point.y == direct.y) &&
+         (point.z == direct.z) && nearly_equal(point.x, 10.0F, 1.0e-4F) &&
+         nearly_equal(point.y, 18.0F, 1.0e-4F) &&
+         nearly_equal(point.z, 30.0F, 1.0e-4F) &&
+         nearly_equal(vector.x, 0.0F, 1.0e-4F) &&
+         nearly_equal(vector.y, -2.0F, 1.0e-4F) &&
+         nearly_equal(vector.z, 0.0F, 1.0e-4F) && (center.x == point.x) &&
+         (center.y == point.y) && (center.z == point.z) &&
+         nearly_equal(half.x, 6.0F, 1.0e-4F) &&
+         nearly_equal(half.y, 2.0F, 1.0e-4F) &&
+         nearly_equal(half.z, 12.0F, 1.0e-4F);
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -569,6 +606,9 @@ int main() {
   }
   if (!check_transform_aabb_half_extents()) {
     return 62;
+  }
+  if (!check_point_and_vector_transforms()) {
+    return 63;
   }
 
   return 0;

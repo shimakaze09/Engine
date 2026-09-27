@@ -7,6 +7,7 @@
 #include <cstddef>
 
 #include "engine/math/math_detail.h"
+#include "engine/math/vec3.h"
 #include "engine/math/vec4.h"
 
 namespace engine::math {
@@ -71,6 +72,21 @@ inline Vec4 mul(const Mat4 &lhs, const Vec4 &rhs) noexcept {
 inline Mat4 mul(const Mat4 &lhs, const Mat4 &rhs) noexcept {
   return Mat4(mul(lhs, rhs.columns[0]), mul(lhs, rhs.columns[1]),
               mul(lhs, rhs.columns[2]), mul(lhs, rhs.columns[3]));
+}
+
+/// The point `point` under the affine matrix (w = 1): rotated, scaled and
+/// translated. No perspective divide; for a projection use unproject_ndc
+/// (frustum.h).
+inline Vec3 transform_point(const Mat4 &matrix, const Vec3 &point) noexcept {
+  const Vec4 result = mul(matrix, Vec4(point.x, point.y, point.z, 1.0F));
+  return Vec3(result.x, result.y, result.z);
+}
+
+/// The direction `vector` under the affine matrix (w = 0): rotated and
+/// scaled, never translated.
+inline Vec3 transform_vector(const Mat4 &matrix, const Vec3 &vector) noexcept {
+  const Vec4 result = mul(matrix, Vec4(vector.x, vector.y, vector.z, 0.0F));
+  return Vec3(result.x, result.y, result.z);
 }
 
 /// Transposed copy.

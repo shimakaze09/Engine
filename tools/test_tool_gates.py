@@ -1472,6 +1472,16 @@ def test_duplicate_primitive_gate():
             "auto v = a.w + b.x;\nauto r = m[3] + n[0];\n")]) == 0,
               "duplicate primitives: products and mixed operands are not a "
               "frustum or an unprojection")
+        check(run([script, "--root", case(
+            "point_copy", "physics/src/a.cpp",
+            "// Purpose.\n[[nodiscard]] math::Vec3 transform_point(const "
+            "math::Mat4 &m,\n")]) != 0,
+              "duplicate primitives: a private transform_point is a finding")
+        check(run([script, "--root", case(
+            "point_call", "editor/src/a.cpp",
+            "// Purpose.\nconst math::Vec3 p = math::transform_point(m, q);\n"
+            "math::transform_aabb(m, c, h, &oc, &oh);\n")]) == 0,
+              "duplicate primitives: calling the transforms is not a copy")
         frustum_owner = write_comment_fixture(
             tmp / "frustum_owner", "math/include/engine/math/frustum.h",
             "// Purpose.\nauto p = c0.w + c0.x;\nfloat i = 1.0F / w.w;\n")

@@ -143,6 +143,16 @@ RULES: tuple[Rule, ...] = (
         remedy="include engine/math/frustum.h and use unproject_ndc or "
         "frustum_corners",
     ),
+    Rule(
+        name="the affine point and vector transforms",
+        owner="math/include/engine/math/mat4.h",
+        # Defining a Vec3-returning transform_point or transform_vector is
+        # what a copy looks like: the contact clipper, the collider
+        # geometry and the physics queries each defined their own.
+        pattern=r"\bVec3\s+transform_(?:point|vector)\s*\(",
+        remedy="include engine/math/mat4.h and use math::transform_point "
+        "or math::transform_vector",
+    ),
 )
 
 
