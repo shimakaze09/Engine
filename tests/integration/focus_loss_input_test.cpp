@@ -8,6 +8,7 @@
 // the routing as well as the handler -- a focus event the pipeline swallowed
 // before it reached input would fail here.
 
+#include "../asset_root.h"
 #include "engine/core/input.h"
 #include "engine/engine.h"
 #include "engine/runtime/engine_pipeline.h"
@@ -28,29 +29,6 @@ int g_failures = 0;
       ++g_failures;                                                          \
     }                                                                        \
   } while (false)
-
-/// Walks upward from the current path until the bundled assets are found.
-bool set_working_directory_with_assets() noexcept {
-  const std::filesystem::path original = std::filesystem::current_path();
-  const std::filesystem::path candidates[] = {
-      original, original / "..", original / "../..", original / "../../..",
-      original / "../../../.."};
-  for (const std::filesystem::path &candidate : candidates) {
-    std::error_code ec{};
-    const std::filesystem::path normalized =
-        std::filesystem::weakly_canonical(candidate, ec);
-    if (ec) {
-      continue;
-    }
-    if (std::filesystem::exists(normalized / "assets/main.lua", ec) &&
-        std::filesystem::exists(
-            normalized / "assets/shaders/bgfx/shaders.manifest", ec)) {
-      std::filesystem::current_path(normalized, ec);
-      return !ec;
-    }
-  }
-  return false;
-}
 
 bool push_key(SDL_Scancode scancode, bool down) noexcept {
   SDL_Event event{};
@@ -109,7 +87,7 @@ bool push_focus_lost() noexcept {
 
 /// Runs this executable or test program.
 int main() {
-  if (!set_working_directory_with_assets()) {
+  if (!engine::tests::enter_asset_root()) {
     std::fprintf(stderr, "FAIL: could not locate bundled assets\n");
     return 1;
   }

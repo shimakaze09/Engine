@@ -11,6 +11,7 @@
 #include <new>
 #include <system_error>
 
+#include "../asset_root.h"
 #include "engine/runtime/physics_bridge.h"
 #include "engine/runtime/scene_serializer.h"
 #include "engine/runtime/world.h"
@@ -19,32 +20,6 @@ namespace {
 
 constexpr const char *kTemplatePath = "assets/templates/island_hopper.scene";
 constexpr float kDt = 1.0F / 60.0F;
-
-/// Selects the nearest working-directory ancestor containing the template.
-bool set_working_directory_with_assets() noexcept {
-  std::error_code error{};
-  const std::filesystem::path original = std::filesystem::current_path(error);
-  if (error) {
-    return false;
-  }
-
-  const std::filesystem::path candidates[] = {
-      original, original / "..", original / "../..", original / "../../..",
-      original / "../../../.."};
-  for (const std::filesystem::path &candidate : candidates) {
-    error.clear();
-    const std::filesystem::path normalized =
-        std::filesystem::weakly_canonical(candidate, error);
-    if (error || !std::filesystem::exists(normalized / kTemplatePath, error)) {
-      continue;
-    }
-
-    std::filesystem::current_path(normalized, error);
-    return !error;
-  }
-
-  return false;
-}
 
 /// Reads one named entity's rigid body; false when either lookup fails.
 bool named_rigid_body(const engine::runtime::World &world, const char *name,
@@ -80,7 +55,7 @@ void step_once(engine::runtime::World &world) noexcept {
 
 /// Runs this executable or test program.
 int main() {
-  if (!set_working_directory_with_assets()) {
+  if (!engine::tests::enter_asset_root()) {
     std::fprintf(stderr, "FAIL: locate island template\n");
     return 1;
   }

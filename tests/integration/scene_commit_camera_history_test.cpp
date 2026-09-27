@@ -12,6 +12,7 @@
 // render callback (the camera the flush and the audio listener consumed),
 // and World::content_epoch() (whether a commit actually happened).
 
+#include "../asset_root.h"
 #include "engine/engine.h"
 #include "engine/math/vec3.h"
 #include "engine/renderer/camera.h"
@@ -72,33 +73,6 @@ void bridge_render(float, float) noexcept {
 bool vec3_equal(const engine::math::Vec3 &a,
                 const engine::math::Vec3 &b) noexcept {
   return (a.x == b.x) && (a.y == b.y) && (a.z == b.z);
-}
-
-/// Walks upward from the current path until the bundled assets are found
-/// (same technique as pipeline_tick_cadence_test.cpp).
-bool set_working_directory_with_assets() noexcept {
-  const std::filesystem::path original = std::filesystem::current_path();
-  const std::filesystem::path candidates[] = {
-      original, original / "..", original / "../..", original / "../../..",
-      original / "../../../.."};
-
-  for (const std::filesystem::path &candidate : candidates) {
-    std::error_code ec{};
-    const std::filesystem::path normalized =
-        std::filesystem::weakly_canonical(candidate, ec);
-    if (ec) {
-      continue;
-    }
-
-    if (std::filesystem::exists(normalized / "assets/main.lua", ec) &&
-        std::filesystem::exists(normalized / "assets/shaders/bgfx/shaders.manifest",
-                                ec)) {
-      std::filesystem::current_path(normalized, ec);
-      return !ec;
-    }
-  }
-
-  return false;
 }
 
 bool write_text_file(const char *path, const char *contents) noexcept {
@@ -197,7 +171,7 @@ bool commit_and_render_first_frame(
 /// Runs this executable or test program.
 int main() {
   cleanup_files();
-  if (!set_working_directory_with_assets()) {
+  if (!engine::tests::enter_asset_root()) {
     std::fprintf(stderr, "FAIL: could not locate bundled assets\n");
     return 1;
   }

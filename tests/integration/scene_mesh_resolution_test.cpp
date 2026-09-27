@@ -13,6 +13,7 @@
 // line, which reports mesh components and how many are Ready; the loop
 // is bounded by a frame count, never by time.
 
+#include "../asset_root.h"
 #include "engine/core/diagnostic.h"
 #include "engine/core/engine_stats.h"
 #include "engine/core/logging.h"
@@ -76,28 +77,6 @@ void watch_diagnostics(const engine::core::Diagnostic &record,
     ++g_unknownReports;
     g_unknownReportEntity = record.entityPersistentId;
   }
-}
-
-bool set_working_directory_with_assets() noexcept {
-  std::error_code ec{};
-  const std::filesystem::path original = std::filesystem::current_path(ec);
-  if (ec) {
-    return false;
-  }
-  const std::filesystem::path candidates[] = {
-      original, original / "..", original / "../..", original / "../../..",
-      original / "../../../.."};
-  for (const std::filesystem::path &candidate : candidates) {
-    ec.clear();
-    const std::filesystem::path normalized =
-        std::filesystem::weakly_canonical(candidate, ec);
-    if (ec || !std::filesystem::exists(normalized / kScene, ec)) {
-      continue;
-    }
-    std::filesystem::current_path(normalized, ec);
-    return !ec;
-  }
-  return false;
 }
 
 bool write_empty_main_script() noexcept {
@@ -234,7 +213,7 @@ void run(engine::EnginePipeline &pipeline) noexcept {
 
 /// Runs this executable or test program.
 int main() {
-  if (!set_working_directory_with_assets()) {
+  if (!engine::tests::enter_asset_root()) {
     std::fprintf(stderr, "FAIL: could not locate %s\n", kScene);
     return 1;
   }

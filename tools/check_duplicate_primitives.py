@@ -183,6 +183,17 @@ TEST_RULES: tuple[Rule, ...] = (
         remedy="link tests/fake_render_device.cpp and configure "
         "engine::tests::fake_device() instead",
     ),
+    Rule(
+        name="the bundled-asset root walk",
+        owner="tests/asset_root.h",
+        # Probing a candidate directory for a bundled file is what the walk
+        # looks like: 55 suites each carried one, under four names, each
+        # probing a different file of the same assets directory.
+        pattern=r"exists\([^;]*/\s*\"assets[/\"]"
+        r"|weakly_canonical\(\s*candidate\b",
+        remedy="include tests/asset_root.h and call "
+        "engine::tests::enter_asset_root() or find_asset_root()",
+    ),
 )
 
 

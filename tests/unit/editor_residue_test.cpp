@@ -12,6 +12,7 @@
 
 #include <imgui.h>
 
+#include "../asset_root.h"
 #include "../test_harness.h"
 #include "editor_asset_index.h"
 #include "editor_layout.h"
@@ -20,28 +21,6 @@
 namespace {
 
 using namespace engine::editor;
-
-/// Walks upward until the bundled assets are found, so the asset index
-/// has a root to walk.
-bool set_working_directory_with_assets() noexcept {
-  const std::filesystem::path original = std::filesystem::current_path();
-  const std::filesystem::path candidates[] = {
-      original, original / "..", original / "../..", original / "../../..",
-      original / "../../../.."};
-  for (const std::filesystem::path &candidate : candidates) {
-    std::error_code ec{};
-    const std::filesystem::path normalized =
-        std::filesystem::weakly_canonical(candidate, ec);
-    if (ec) {
-      continue;
-    }
-    if (std::filesystem::exists(normalized / "assets/main.lua", ec)) {
-      std::filesystem::current_path(normalized, ec);
-      return !ec;
-    }
-  }
-  return false;
-}
 
 bool write_file(const std::filesystem::path &path,
                 const std::string &content) noexcept {
@@ -69,7 +48,7 @@ constexpr const char *kProbeLayout = "[Window][Probe]\nPos=1,2\nSize=3,4\n\n";
 /// Runs this executable or test program.
 int main() {
   engine::tests::TestContext ctx;
-  if (!set_working_directory_with_assets()) {
+  if (!engine::tests::enter_asset_root()) {
     std::printf("FAIL: assets not found\n");
     return 1;
   }

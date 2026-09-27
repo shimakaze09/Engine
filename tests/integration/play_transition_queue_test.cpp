@@ -6,6 +6,7 @@
 // skipped. Drives real engine::bootstrap() + EnginePipeline frames with a
 // bridge that records transitions the way the editor does.
 
+#include "../asset_root.h"
 #include "engine/core/logging.h"
 #include "engine/engine.h"
 #include "engine/runtime/editor_bridge.h"
@@ -102,29 +103,6 @@ int g_failures = 0;
     }                                                                        \
   } while (false)
 
-/// Walks upward from the current path until the bundled assets are found.
-bool set_working_directory_with_assets() noexcept {
-  const std::filesystem::path original = std::filesystem::current_path();
-  const std::filesystem::path candidates[] = {
-      original, original / "..", original / "../..", original / "../../..",
-      original / "../../../.."};
-  for (const std::filesystem::path &candidate : candidates) {
-    std::error_code ec{};
-    const std::filesystem::path normalized =
-        std::filesystem::weakly_canonical(candidate, ec);
-    if (ec) {
-      continue;
-    }
-    if (std::filesystem::exists(normalized / "assets/main.lua", ec) &&
-        std::filesystem::exists(
-            normalized / "assets/shaders/bgfx/shaders.manifest", ec)) {
-      std::filesystem::current_path(normalized, ec);
-      return !ec;
-    }
-  }
-  return false;
-}
-
 // The two session hooks, written to the log so the trace survives the VM
 // recycle a Stop performs. on_tick stays silent: the trace is about
 // session boundaries, not about frames.
@@ -190,7 +168,7 @@ engine::runtime::Entity spawn_scripted(const char *scriptPath) noexcept {
 
 /// Runs this executable or test program.
 int main() {
-  if (!set_working_directory_with_assets()) {
+  if (!engine::tests::enter_asset_root()) {
     std::fprintf(stderr, "FAIL: could not locate bundled assets\n");
     return 1;
   }

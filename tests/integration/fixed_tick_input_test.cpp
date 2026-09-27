@@ -10,6 +10,7 @@
 // frame and at three; both must count one press, and both must have run
 // the same number of steps.
 
+#include "../asset_root.h"
 #include "engine/engine.h"
 #include "engine/runtime/engine_pipeline.h"
 #include "engine/scripting/bindable_api.h"
@@ -34,28 +35,6 @@ int g_failures = 0;
       ++g_failures;                                                            \
     }                                                                          \
   } while (false)
-
-bool set_working_directory_with_assets() noexcept {
-  const std::filesystem::path original = std::filesystem::current_path();
-  const std::filesystem::path candidates[] = {
-      original, original / "..", original / "../..", original / "../../..",
-      original / "../../../.."};
-  for (const std::filesystem::path &candidate : candidates) {
-    std::error_code ec{};
-    const std::filesystem::path normalized =
-        std::filesystem::weakly_canonical(candidate, ec);
-    if (ec) {
-      continue;
-    }
-    if (std::filesystem::exists(normalized / "assets/main.lua", ec) &&
-        std::filesystem::exists(
-            normalized / "assets/shaders/bgfx/shaders.manifest", ec)) {
-      std::filesystem::current_path(normalized, ec);
-      return !ec;
-    }
-  }
-  return false;
-}
 
 /// Counts, per fixed step, the key presses and the presses of an action
 /// mapped to the same key, and publishes them with the step count.
@@ -149,7 +128,7 @@ Counts run(int stepsPerFrame, int totalSteps) noexcept {
 
 /// Runs this executable or test program.
 int main() {
-  if (!set_working_directory_with_assets()) {
+  if (!engine::tests::enter_asset_root()) {
     std::fprintf(stderr, "FAIL: could not locate bundled assets\n");
     return 1;
   }

@@ -15,42 +15,17 @@
 
 #include <SDL3/SDL.h>
 
+#include "../asset_root.h"
+#include "../test_harness.h"
 #include "engine/core/input.h"
 #include "engine/core/platform.h"
 #include "engine/engine.h"
 #include "engine/runtime/engine_pipeline.h"
 #include "engine/scripting/scripting.h"
-#include "../test_harness.h"
 
 namespace {
 
 constexpr const char *kScriptPath = "gamepad_hotplug_test.lua";
-
-/// Walks upward from the current path until the bundled assets are found
-/// and makes that directory current, since the pipeline loads its
-/// bootstrap content from "assets/" (ctest starts in the build tree).
-bool set_working_directory_with_assets() noexcept {
-  const std::filesystem::path original = std::filesystem::current_path();
-  const std::filesystem::path candidates[] = {
-      original, original / "..", original / "../..", original / "../../..",
-      original / "../../../.."};
-
-  for (const std::filesystem::path &candidate : candidates) {
-    std::error_code ec{};
-    const std::filesystem::path normalized =
-        std::filesystem::weakly_canonical(candidate, ec);
-    if (ec) {
-      continue;
-    }
-    if (std::filesystem::exists(normalized / "assets/main.lua", ec) &&
-        std::filesystem::exists(normalized / "assets/shaders/bgfx/shaders.manifest",
-                                ec)) {
-      std::filesystem::current_path(normalized, ec);
-      return !ec;
-    }
-  }
-  return false;
-}
 
 /// Writes the Lua fixture that reads the controller through the script API.
 bool write_script_file() noexcept {
@@ -110,7 +85,7 @@ bool frames_until(engine::EnginePipeline &pipeline, Predicate predicate,
 /// Runs this executable or test program.
 int main() {
   engine::tests::TestContext ctx;
-  if (!set_working_directory_with_assets()) {
+  if (!engine::tests::enter_asset_root()) {
     ctx.fail("bundled assets located");
     return ctx.finish("gamepad_hotplug");
   }

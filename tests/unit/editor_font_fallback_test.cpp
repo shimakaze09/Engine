@@ -5,10 +5,11 @@
 // production initialize_editor entry point from a working directory with
 // no assets/ tree and reads the fallback through a registered log sink.
 
+#include "../asset_root.h"
+#include "../test_harness.h"
 #include "editor_session.h"
 #include "engine/core/logging.h"
 #include "engine/editor/editor.h"
-#include "../test_harness.h"
 
 #include <cstddef>
 #include <cstring>
@@ -55,32 +56,6 @@ std::size_t font_warnings_during_initialize() noexcept {
   return tally.fallbackWarnings;
 }
 
-/// Moves the working directory to the nearest ancestor carrying the
-/// bundled editor font (the pipeline tests' asset-walk technique).
-bool enter_directory_with_editor_font() noexcept {
-  std::error_code ec{};
-  const std::filesystem::path original = std::filesystem::current_path(ec);
-  if (ec) {
-    return false;
-  }
-  const std::filesystem::path candidates[] = {
-      original, original / "..", original / "../..", original / "../../..",
-      original / "../../../.."};
-  for (const std::filesystem::path &candidate : candidates) {
-    const std::filesystem::path normalized =
-        std::filesystem::weakly_canonical(candidate, ec);
-    if (ec) {
-      continue;
-    }
-    if (std::filesystem::exists(normalized / "assets/fonts/Roboto-Medium.ttf",
-                                ec)) {
-      std::filesystem::current_path(normalized, ec);
-      return !ec;
-    }
-  }
-  return false;
-}
-
 /// EXPECTATION (#408): from a working directory with no assets/ tree,
 /// initialize_editor reaches its fallback branch, one "editor font
 /// missing" warning through the production log path, instead of aborting
@@ -119,7 +94,7 @@ void check_missing_font_takes_fallback() noexcept {
 /// Control: with the bundled font present, the probe finds it and the
 /// fallback is not taken, so the warning is specific to a missing file.
 void check_present_font_is_loaded() noexcept {
-  if (!enter_directory_with_editor_font()) {
+  if (!engine::tests::enter_asset_root()) {
     g_tests.fail("the bundled editor font could be located");
     return;
   }

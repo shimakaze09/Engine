@@ -14,6 +14,7 @@
 #include "engine/runtime/scene_serializer.h"
 #include "engine/runtime/world.h"
 
+#include "../asset_root.h"
 #include "../test_harness.h"
 
 #include <cmath>
@@ -65,24 +66,6 @@ bool same_point(const engine::math::Vec3 &a,
          (std::fabs(a.z - b.z) <= kTolerance);
 }
 
-/// Walks upward from the current path until the bundled assets are found.
-bool enter_asset_directory() noexcept {
-  const std::filesystem::path original = std::filesystem::current_path();
-  const std::filesystem::path candidates[] = {
-      original, original / "..", original / "../..", original / "../../..",
-      original / "../../../.."};
-  for (const std::filesystem::path &candidate : candidates) {
-    std::error_code ec{};
-    const std::filesystem::path normalized =
-        std::filesystem::weakly_canonical(candidate, ec);
-    if (!ec && std::filesystem::exists(normalized / "assets/main.lua", ec)) {
-      std::filesystem::current_path(normalized, ec);
-      return !ec;
-    }
-  }
-  return false;
-}
-
 /// Runs one frame and checks both views drew from their own cameras.
 void check_views(engine::tests::TestContext &t,
                  engine::EnginePipeline &pipeline, const char *state) noexcept {
@@ -111,7 +94,7 @@ void check_views(engine::tests::TestContext &t,
 
 int main() {
   engine::tests::TestContext t;
-  if (!enter_asset_directory()) {
+  if (!engine::tests::enter_asset_root()) {
     return 1;
   }
 

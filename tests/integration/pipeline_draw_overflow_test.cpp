@@ -8,6 +8,7 @@
 
 #include "../builtin_mesh_fixture.h"
 
+#include "../asset_root.h"
 #include "engine/core/engine_stats.h"
 #include "engine/engine.h"
 #include "engine/renderer/command_buffer.h"
@@ -28,29 +29,6 @@ void capture_world(engine::runtime::World *world) noexcept { g_world = world; }
 bool bridge_is_playing() noexcept { return true; }
 bool bridge_is_paused() noexcept { return false; }
 
-/// Walks upward from the current path until the bundled assets are found.
-bool set_working_directory_with_assets() noexcept {
-  const std::filesystem::path original = std::filesystem::current_path();
-  const std::filesystem::path candidates[] = {
-      original, original / "..", original / "../..", original / "../../..",
-      original / "../../../.."};
-  for (const std::filesystem::path &candidate : candidates) {
-    std::error_code ec{};
-    const std::filesystem::path normalized =
-        std::filesystem::weakly_canonical(candidate, ec);
-    if (ec) {
-      continue;
-    }
-    if (std::filesystem::exists(normalized / "assets/main.lua", ec) &&
-        std::filesystem::exists(normalized / "assets/shaders/bgfx/shaders.manifest",
-                                ec)) {
-      std::filesystem::current_path(normalized, ec);
-      return !ec;
-    }
-  }
-  return false;
-}
-
 /// Runs one playing frame guaranteed to simulate at least one fixed step.
 bool ticking_frame(engine::EnginePipeline &pipeline) noexcept {
   std::this_thread::sleep_for(std::chrono::milliseconds(20));
@@ -61,7 +39,7 @@ bool ticking_frame(engine::EnginePipeline &pipeline) noexcept {
 
 /// Runs this executable or test program.
 int main() {
-  if (!set_working_directory_with_assets()) {
+  if (!engine::tests::enter_asset_root()) {
     std::fprintf(stderr, "FAIL: could not locate bundled assets\n");
     return 1;
   }

@@ -11,6 +11,7 @@
 #include <cstring>
 #include <filesystem>
 
+#include "../asset_root.h"
 #include "engine/audio/audio.h"
 #include "engine/core/bootstrap.h"
 #include "engine/core/job_system.h"
@@ -35,27 +36,6 @@ bool bridge_initialize(void *) noexcept {
   return true;
 }
 void bridge_shutdown() noexcept { ++g_bridgeShutdown; }
-
-/// Walks upward from the current path until the bundled assets are found.
-bool set_working_directory_with_assets() noexcept {
-  const std::filesystem::path original = std::filesystem::current_path();
-  const std::filesystem::path candidates[] = {
-      original, original / "..", original / "../..", original / "../../..",
-      original / "../../../.."};
-  for (const std::filesystem::path &candidate : candidates) {
-    std::error_code ec{};
-    const std::filesystem::path normalized =
-        std::filesystem::weakly_canonical(candidate, ec);
-    if (ec) {
-      continue;
-    }
-    if (std::filesystem::exists(normalized / "assets/main.lua", ec)) {
-      std::filesystem::current_path(normalized, ec);
-      return !ec;
-    }
-  }
-  return false;
-}
 
 engine::EngineConfig headless_config(bool playerMode) noexcept {
   engine::EngineConfig config{};
@@ -108,7 +88,7 @@ void check_failed_stage_rolls_back(engine::BootstrapStage stage,
 } // namespace
 
 int main() {
-  if (!set_working_directory_with_assets()) {
+  if (!engine::tests::enter_asset_root()) {
     std::printf("FAIL: assets not found\n");
     return 1;
   }

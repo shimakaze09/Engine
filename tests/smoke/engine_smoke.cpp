@@ -2,6 +2,7 @@
 
 #include "engine/engine.h"
 
+#include "../asset_root.h"
 #include "engine/core/cvar.h"
 #include "engine/core/engine_stats.h"
 #include "engine/renderer/gpu_profiler.h"
@@ -10,37 +11,11 @@
 
 namespace {
 
-/// Sets the requested value for working directory with assets.
-bool set_working_directory_with_assets() noexcept {
-  const std::filesystem::path original = std::filesystem::current_path();
-  const std::filesystem::path candidates[] = {
-      original, original / "..", original / "../..", original / "../../..",
-      original / "../../../.."};
-
-  for (const std::filesystem::path &candidate : candidates) {
-    std::error_code ec{};
-    const std::filesystem::path normalized =
-        std::filesystem::weakly_canonical(candidate, ec);
-    if (ec) {
-      continue;
-    }
-
-    if (std::filesystem::exists(normalized / "assets/main.lua", ec) &&
-        std::filesystem::exists(normalized / "assets/shaders/bgfx/shaders.manifest",
-                                ec)) {
-      std::filesystem::current_path(normalized, ec);
-      return !ec;
-    }
-  }
-
-  return false;
-}
-
 } // namespace
 
 /// Runs this executable or test program.
 int main() {
-  if (!set_working_directory_with_assets()) {
+  if (!engine::tests::enter_asset_root()) {
     return 1;
   }
 

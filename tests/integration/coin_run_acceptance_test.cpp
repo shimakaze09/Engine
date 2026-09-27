@@ -28,6 +28,7 @@
 #include "engine/runtime/world.h"
 #include "engine/scripting/scripting.h"
 
+#include "../asset_root.h"
 #include "../gpu_frame_capture.h"
 
 #include <SDL3/SDL.h>
@@ -83,28 +84,6 @@ void watch_log(engine::core::LogLevel, const char *, const char *message,
   if (std::strstr(message, "lua error") != nullptr) {
     ++g_scriptErrors;
   }
-}
-
-bool set_working_directory_with_assets() noexcept {
-  std::error_code ec{};
-  const std::filesystem::path original = std::filesystem::current_path(ec);
-  if (ec) {
-    return false;
-  }
-  const std::filesystem::path candidates[] = {
-      original, original / "..", original / "../..", original / "../../..",
-      original / "../../../.."};
-  for (const std::filesystem::path &candidate : candidates) {
-    ec.clear();
-    const std::filesystem::path normalized =
-        std::filesystem::weakly_canonical(candidate, ec);
-    if (ec || !std::filesystem::exists(normalized / kScene, ec)) {
-      continue;
-    }
-    std::filesystem::current_path(normalized, ec);
-    return !ec;
-  }
-  return false;
 }
 
 /// The controller keeps a best time through engine.save_data, which writes
@@ -446,7 +425,7 @@ int check_session(const SessionResult &session) noexcept {
 /// what the simulation computes.
 int main(int argc, char **argv) {
   const bool windowed = (argc > 1) && (std::strcmp(argv[1], "--windowed") == 0);
-  if (!set_working_directory_with_assets()) {
+  if (!engine::tests::enter_asset_root()) {
     std::fprintf(stderr, "FAIL: could not locate %s\n", kScene);
     return 1;
   }

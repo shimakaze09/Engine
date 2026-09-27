@@ -297,8 +297,7 @@ int run(engine::EnginePipeline &pipeline, World &world) noexcept {
 } // namespace
 
 int main() {
-  if (!engine::tests::detail::enter_asset_directory() ||
-      !write_project_files()) {
+  if (!engine::tests::enter_asset_root() || !write_project_files()) {
     std::fprintf(stderr, "FAIL: could not write the test assets\n");
     remove_project_files();
     return 1;

@@ -10,6 +10,7 @@
 
 #include "../test_harness.h"
 
+#include "../asset_root.h"
 #include "engine/core/cvar.h"
 #include "engine/core/logging.h"
 
@@ -53,25 +54,12 @@ EditorFontResult with_fonts(const char *cjkOverride, Probe &&probe) {
   return result;
 }
 
-bool find_repository_root() {
-  std::error_code ec{};
-  std::filesystem::path dir = std::filesystem::current_path(ec);
-  for (int i = 0; (i < 6) && !ec; ++i) {
-    if (std::filesystem::exists(dir / "assets/fonts/Roboto-Medium.ttf", ec)) {
-      std::filesystem::current_path(dir, ec);
-      return !ec;
-    }
-    dir = dir.parent_path();
-  }
-  return false;
-}
-
 } // namespace
 
 /// Runs this executable or test program.
 int main() {
   TestContext t;
-  if (!find_repository_root()) {
+  if (!engine::tests::enter_asset_root()) {
     t.fail("locate the repository's assets/fonts");
     return t.finish("editor_fonts");
   }
