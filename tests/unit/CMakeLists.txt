@@ -953,6 +953,17 @@ engine_add_test_executable(engine_unit_editor_fonts
 set_tests_properties(engine_unit_editor_fonts PROPERTIES
     SKIP_REGULAR_EXPRESSION "SKIPPED:")
 
+engine_add_test_executable(engine_unit_editor_first_launch_layout
+    SOURCES
+    editor_first_launch_layout_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/editor/src
+    PRIVATE_DEPS
+    engine_editor
+    COMPILE_DEFINITIONS
+    SDL_MAIN_HANDLED
+)
+
 engine_add_test_executable(engine_unit_editor_thumbnail_cache
     SOURCES
     editor_thumbnail_cache_test.cpp

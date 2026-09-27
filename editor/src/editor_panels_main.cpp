@@ -526,6 +526,21 @@ static void draw_entity_hierarchy() noexcept {
   });
 }
 
+void same_line_if_button_fits(const char *nextButtonLabel) noexcept {
+  const ImGuiWindow *window = ImGui::GetCurrentWindow();
+  if ((window == nullptr) || (nextButtonLabel == nullptr)) {
+    return;
+  }
+  const ImGuiStyle &style = ImGui::GetStyle();
+  const float buttonWidth =
+      ImGui::CalcTextSize(nextButtonLabel, nullptr, true).x +
+      (style.FramePadding.x * 2.0F);
+  const float nextLeft = ImGui::GetItemRectMax().x + style.ItemSpacing.x;
+  if (nextLeft + buttonWidth <= window->WorkRect.Max.x) {
+    ImGui::SameLine();
+  }
+}
+
 void draw_entities_panel() noexcept {
   if (!ImGui::Begin("Entities")) {
     ImGui::End();
@@ -570,7 +585,7 @@ void draw_entities_panel() noexcept {
     }
   }
 
-  ImGui::SameLine();
+  same_line_if_button_fits("Add Primitive");
   if (ImGui::Button("Add Primitive") && editable) {
     ImGui::OpenPopup("AddPrimitivePopup");
   }

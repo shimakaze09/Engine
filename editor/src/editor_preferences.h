@@ -1,8 +1,8 @@
-// Declares the editor's own preferences (today: the CJK font file) and the
-// Editor Settings window that edits them. They persist in the editor's
-// layout file, through an ImGui settings section, so they are staged and
-// replaced atomically with the layout rather than kept in a file of their
-// own.
+// Declares the editor's own preferences (the CJK font file and the main
+// window's geometry) and the Editor Settings window that edits them. They
+// persist in the editor's layout file, through an ImGui settings section,
+// so they are staged and replaced atomically with the layout rather than
+// kept in a file of their own.
 
 #pragma once
 
@@ -14,6 +14,11 @@ namespace engine::editor {
 /// them. Must run after the ImGui context exists and before the layout
 /// loads, so a stored preference is applied before the fonts are built.
 void register_editor_preferences() noexcept;
+
+/// Reopens the main window at the geometry the layout file stored, once,
+/// after the layout has loaded; a first launch, with nothing stored, keeps
+/// the display-scaled default the platform opened.
+void apply_stored_window_geometry() noexcept;
 
 /// Records the CJK font the editor loaded at startup, for display.
 void set_loaded_cjk_font(const char *path) noexcept;

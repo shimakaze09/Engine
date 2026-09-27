@@ -260,6 +260,7 @@ bool initialize_editor(void *sdlWindow) noexcept {
   // is already set when the dock settings are parsed.
   register_editor_preferences();
   static_cast<void>(editor_layout_initialize());
+  apply_stored_window_geometry();
 
   static_cast<void>(core::cvar_register_float(
       "editor.ui_scale", 1.0F, "Editor UI scale multiplier"));
