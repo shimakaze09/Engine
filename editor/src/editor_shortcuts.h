@@ -79,6 +79,10 @@ const EditorShortcut &editor_shortcut(EditorAction action) noexcept;
 bool editor_action_enabled(EditorAction action) noexcept;
 /// Runs `action` when it is enabled. True when it ran.
 bool run_editor_action(EditorAction action) noexcept;
+/// The label `action` shows now, in a menu or on a button: the row's own
+/// label, except that PlayStop reads "Stop" while a session runs, as
+/// Unity's Play toggle and UE5's play toolbar do.
+const char *editor_action_label(EditorAction action) noexcept;
 
 /// The chord as menu text ("Ctrl+Shift+S"); "" for no chord. The pointer
 /// stays valid until the table's chords change.

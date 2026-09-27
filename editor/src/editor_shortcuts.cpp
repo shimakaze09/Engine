@@ -594,10 +594,18 @@ void dispatch_editor_shortcuts() noexcept {
   }
 }
 
+const char *editor_action_label(EditorAction action) noexcept {
+  if ((action == EditorAction::PlayStop) &&
+      (editor_session().playState != PlayState::Stopped)) {
+    return "Stop";
+  }
+  return editor_shortcut(action).label;
+}
+
 bool editor_action_menu_item_clicked(EditorAction action,
                                      bool checked) noexcept {
-  const EditorShortcut &row = editor_shortcut(action);
-  return ImGui::MenuItem(row.label, editor_shortcut_text(action), checked,
+  return ImGui::MenuItem(editor_action_label(action),
+                         editor_shortcut_text(action), checked,
                          editor_action_enabled(action));
 }
 

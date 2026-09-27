@@ -329,13 +329,26 @@ void check_document_chords(engine::tests::TestContext &t,
 }
 
 /// Unity's play chords: Ctrl+P plays and stops, Ctrl+Shift+P pauses and
-/// resumes, Ctrl+Alt+P steps (pausing first when playing). They are the
+/// resumes, Ctrl+Alt+P steps (pausing first when playing). The play control
+/// the toolbar and the Edit menu draw reads Play or Stop. They are the
 /// only chords that still fire while the game has the keyboard.
 void check_play_chords(engine::tests::TestContext &t, World &world) noexcept {
   t.check(perform_scene_new() && (add_named(world, "Actor") != kInvalidEntity),
           "a scene to play");
+  t.check(std::strcmp(engine::editor::editor_action_label(
+                          engine::editor::EditorAction::PlayStop),
+                      "Play") == 0,
+          "the play control reads Play while stopped");
   tap(ImGuiMod_Ctrl | ImGuiKey_P);
   t.check(editor_session().playState == PlayState::Playing, "Ctrl+P plays");
+  // One toggle, as Unity's and UE5's: the same control now reads Stop,
+  // and Step is available without pausing by hand first.
+  t.check((std::strcmp(engine::editor::editor_action_label(
+                           engine::editor::EditorAction::PlayStop),
+                       "Stop") == 0) &&
+              engine::editor::editor_action_enabled(
+                  engine::editor::EditorAction::Step),
+          "while playing the control reads Stop and Step is enabled");
 
   // The Game view has the keyboard now: tool keys are the game's, but the
   // play controls still reach the editor.

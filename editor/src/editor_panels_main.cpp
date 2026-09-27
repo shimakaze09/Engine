@@ -260,10 +260,9 @@ void draw_main_menu_bar() noexcept {
     ImGui::Separator();
     editor_action_menu_item(EditorAction::FrameSelected);
     ImGui::Separator();
-    // Checked while running, as Unity's Edit menu shows play state.
+    // The play item reads Play or Stop; Pause is checked while it holds.
     const PlayState state = editor_session().playState;
-    editor_action_menu_item(EditorAction::PlayStop,
-                            state != PlayState::Stopped);
+    editor_action_menu_item(EditorAction::PlayStop);
     editor_action_menu_item(EditorAction::Pause, state == PlayState::Paused);
     editor_action_menu_item(EditorAction::Step);
     ImGui::Separator();
@@ -340,6 +339,40 @@ void draw_main_menu_bar() noexcept {
   draw_unsaved_changes_prompt();
 }
 
+/// A toolbar button that runs `action` through the action table: its live
+/// label, disabled when the action cannot run, drawn pressed while
+/// `pressed`, with the purpose and the shortcut in its tooltip.
+void toolbar_action_button(EditorAction action, bool pressed,
+                           const char *purpose) noexcept {
+  const bool enabled = editor_action_enabled(action);
+  if (!enabled) {
+    ImGui::BeginDisabled();
+  }
+  if (pressed) {
+    ImGui::PushStyleColor(ImGuiCol_Button,
+                          ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+  }
+  // The ### id keeps the button's identity while its label changes.
+  char label[64] = {};
+  std::snprintf(label, sizeof(label), "%s###toolbar_%d",
+                editor_action_label(action), static_cast<int>(action));
+  if (ImGui::Button(label) && enabled) {
+    static_cast<void>(run_editor_action(action));
+  }
+  if (pressed) {
+    ImGui::PopStyleColor();
+  }
+  if (!enabled) {
+    ImGui::EndDisabled();
+  }
+  const char *chord = editor_shortcut_text(action);
+  if (chord[0] != '\0') {
+    ImGui::SetItemTooltip("%s (%s)", purpose, chord);
+  } else {
+    ImGui::SetItemTooltip("%s", purpose);
+  }
+}
+
 void draw_toolbar() noexcept {
   const ImGuiViewport *viewport = ImGui::GetMainViewport();
   if (viewport == nullptr) {
@@ -358,7 +391,24 @@ void draw_toolbar() noexcept {
       ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoScrollbar |
       ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoSavedSettings;
 
-  if (!ImGui::Begin("##toolbar", nullptr, kToolbarFlags)) {
+  // While a session runs the toolbar takes an accent tint, the global
+  // cue Unity's Playmode tint gives: edits made now are reverted on Stop.
+  const bool running = editor_session().playState != PlayState::Stopped;
+  if (running) {
+    const ImVec4 base = ImGui::GetStyleColorVec4(ImGuiCol_WindowBg);
+    const ImVec4 accent(0.20F, 0.38F, 0.70F, base.w);
+    constexpr float kTint = 0.45F;
+    ImGui::PushStyleColor(ImGuiCol_WindowBg,
+                          ImVec4(base.x + ((accent.x - base.x) * kTint),
+                                 base.y + ((accent.y - base.y) * kTint),
+                                 base.z + ((accent.z - base.z) * kTint),
+                                 base.w));
+  }
+  const bool open = ImGui::Begin("##toolbar", nullptr, kToolbarFlags);
+  if (running) {
+    ImGui::PopStyleColor();
+  }
+  if (!open) {
     ImGui::End();
     return;
   }
@@ -379,73 +429,24 @@ void draw_toolbar() noexcept {
       start_play_mode();
     }
   }
-  const bool canPause =
-      hasWorld && (editor_session().playState != PlayState::Stopped);
-  const bool canStop =
-      hasWorld && (editor_session().playState != PlayState::Stopped);
-
-  if (!canPlay) {
-    ImGui::BeginDisabled();
-  }
-  // Plain-text labels: the default ImGui font has no glyphs for the
-  // media-control symbols (they render as "?").
-  if (ImGui::Button("Play") && canPlay) {
-    start_play_mode();
-  }
-  ImGui::SetItemTooltip("Play (%s)",
-                        editor_shortcut_text(EditorAction::PlayStop));
-  if (!canPlay) {
-    ImGui::EndDisabled();
-  }
-
+  // The play controls run the same actions as their shortcuts and the
+  // Edit menu, so the three can never disagree. Play is one toggle that
+  // reads Stop while a session runs, and Pause and Play are drawn pressed
+  // while they hold, as Unity's toolbar is; Step works while playing too,
+  // pausing first.
+  const PlayState state = editor_session().playState;
+  toolbar_action_button(EditorAction::PlayStop, state != PlayState::Stopped,
+                        (state == PlayState::Stopped)
+                            ? "Enter play mode"
+                            : "Leave play mode; changes made while playing "
+                              "are reverted");
   ImGui::SameLine();
-  if (!canPause) {
-    ImGui::BeginDisabled();
-  }
-  // A toggle: shown pressed while paused, and pressed again it resumes.
-  const bool paused = editor_session().playState == PlayState::Paused;
-  if (paused) {
-    ImGui::PushStyleColor(ImGuiCol_Button,
-                          ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-  }
-  if (ImGui::Button("Pause") && canPause) {
-    pause_play_mode();
-  }
-  ImGui::SetItemTooltip("Pause (%s)",
-                        editor_shortcut_text(EditorAction::Pause));
-  if (paused) {
-    ImGui::PopStyleColor();
-  }
-  if (!canPause) {
-    ImGui::EndDisabled();
-  }
-
+  toolbar_action_button(EditorAction::Pause, state == PlayState::Paused,
+                        (state == PlayState::Paused) ? "Resume"
+                                                     : "Pause the game");
   ImGui::SameLine();
-  const bool canStep =
-      hasWorld && (editor_session().playState == PlayState::Paused);
-  if (!canStep) {
-    ImGui::BeginDisabled();
-  }
-  if (ImGui::Button("Step") && canStep) {
-    editor_session().stepRequested = true;
-  }
-  ImGui::SetItemTooltip("Step (%s)", editor_shortcut_text(EditorAction::Step));
-  if (!canStep) {
-    ImGui::EndDisabled();
-  }
-
-  ImGui::SameLine();
-  if (!canStop) {
-    ImGui::BeginDisabled();
-  }
-  if (ImGui::Button("Stop") && canStop) {
-    stop_play_mode();
-  }
-  ImGui::SetItemTooltip("Stop (%s)",
-                        editor_shortcut_text(EditorAction::PlayStop));
-  if (!canStop) {
-    ImGui::EndDisabled();
-  }
+  toolbar_action_button(EditorAction::Step, false,
+                        "Advance one fixed step, pausing first");
 
   ImGui::SameLine();
   draw_time_scale_combo();
