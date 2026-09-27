@@ -533,8 +533,7 @@ constexpr MultiSectionDesc kMultiSections[] = {
     {ComponentEditType::Transform, kTransformTypeName, "Transform", false},
     {ComponentEditType::RigidBody, kRigidBodyTypeName, "Rigid Body", true},
     {ComponentEditType::Collider, kColliderTypeName, "Collider", true},
-    {ComponentEditType::Light, kLightTypeName, "Directional/Point Light",
-     true},
+    {ComponentEditType::Light, kLightTypeName, "Light", true},
     {ComponentEditType::PointLight, kPointLightTypeName, "Point Light", true},
     {ComponentEditType::SpotLight, kSpotLightTypeName, "Spot Light", true},
     {ComponentEditType::ReflectionProbe, kReflectionProbeTypeName,
@@ -593,8 +592,8 @@ static_assert(multi_edit_inventory_complete(),
 /// still overwrites every selected entity uniformly (the standard
 /// Unity/Unreal multi-edit convention -- editing a mixed field commits one
 /// new common value rather than exposing N independent widgets). A
-/// removable section also gets a "Remove from all" button, atomic across
-/// the selection like the field edit above.
+/// removable section's header menu also offers "Remove Component from
+/// All", atomic across the selection like the field edit above.
 void draw_multi_component_section(const MultiSectionDesc &desc) noexcept {
   const core::TypeDescriptor *typeDesc =
       core::global_type_registry().find_type(desc.typeName);
@@ -612,16 +611,12 @@ void draw_multi_component_section(const MultiSectionDesc &desc) noexcept {
 
   ImGui::PushID(desc.label);
   const bool open =
-      ImGui::CollapsingHeader(desc.label, ImGuiTreeNodeFlags_DefaultOpen);
+      ImGui::CollapsingHeader(desc.label, ImGuiTreeNodeFlags_DefaultOpen |
+                                              ImGuiTreeNodeFlags_AllowOverlap);
   const EditorSession &session = editor_session();
-  draw_component_menu(session.selectedEntities.data(),
-                      session.selectedEntityCount, desc.type, true);
-  bool removePressed = false;
-  if (desc.removable) {
-    ImGui::SameLine();
-    ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - 110.0F);
-    removePressed = ImGui::SmallButton("Remove from all");
-  }
+  const bool removePressed = draw_component_header_menu(
+      session.selectedEntities.data(), session.selectedEntityCount, desc.type,
+      true, desc.removable ? "Remove Component from All" : nullptr);
   if (removePressed) {
     static_cast<void>(apply_multi_component_remove(desc.type));
   }

@@ -41,18 +41,6 @@ namespace {
 /// UI state (g_pendingInspectorEdit in editor_commands.cpp).
 bool g_showAdvanced = false;
 
-bool draw_remove_component_button(const char *id, bool editable) noexcept {
-  if (!editable || (id == nullptr)) {
-    return false;
-  }
-  ImGui::SameLine();
-  ImGui::SetCursorPosX(ImGui::GetContentRegionMax().x - 20.0F);
-  ImGui::PushID(id);
-  const bool removePressed = ImGui::SmallButton("X");
-  ImGui::PopID();
-  return removePressed;
-}
-
 /// Draws the play-mode live-edit affordance row for one component section:
 /// a badge once the field has an uncommitted transient tweak this session,
 /// plus "Apply to authored value" (queues the current runtime value for
@@ -101,7 +89,9 @@ void draw_live_edit_row(runtime::Entity entity, ComponentEditType type) noexcept
 /// `liveEditable` (Playing/Paused with the opt-in live-edit toggle on,
 /// routes edits straight to the running world and never touches undo);
 /// the remove-component action stays authored-only since removing a
-/// component is a structural edit, not a value tweak.
+/// component is a structural edit, not a value tweak. A component the
+/// entity does not have draws nothing: Add Component offers it, as in
+/// Unity, Unreal and Godot.
 template <typename Component, typename DrawFn>
 void draw_component_section(runtime::Entity entity, ComponentEditType type,
                             const char *sectionLabel,
@@ -110,7 +100,6 @@ void draw_component_section(runtime::Entity entity, ComponentEditType type,
                             bool removable, DrawFn &&drawFn) noexcept {
   ComponentEditSnapshot snapshot{};
   if (!capture_component_snapshot(type, entity, &snapshot)) {
-    ImGui::Text("%s: <none>", sectionLabel);
     return;
   }
   const Component before = snapshot.*member;
@@ -126,11 +115,12 @@ void draw_component_section(runtime::Entity entity, ComponentEditType type,
       authoredEditable || (liveEditable && !liveBudgetBlocked);
 
   ImGui::PushID(sectionLabel);
-  const bool open = ImGui::CollapsingHeader(sectionLabel,
-                                            ImGuiTreeNodeFlags_DefaultOpen);
-  draw_component_menu(&entity, 1U, type, authoredEditable);
+  const bool open = ImGui::CollapsingHeader(
+      sectionLabel,
+      ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_AllowOverlap);
   const bool removePressed =
-      removable && draw_remove_component_button("remove", authoredEditable);
+      draw_component_header_menu(&entity, 1U, type, authoredEditable,
+                                 removable ? "Remove Component" : nullptr);
 
   bool modified = false;
   if (open) {
@@ -248,9 +238,8 @@ void draw_component_sections(runtime::Entity entity, bool authoredEditable,
       });
 
   draw_component_section(
-      entity, ComponentEditType::Light, "Directional/Point Light",
-      &ComponentEditSnapshot::light, authoredEditable, liveEditable, true,
-      [](runtime::LightComponent &c) {
+      entity, ComponentEditType::Light, "Light", &ComponentEditSnapshot::light,
+      authoredEditable, liveEditable, true, [](runtime::LightComponent &c) {
         bool modified = draw_light_type_combo(c);
         return draw_reflected_component_fields("engine::runtime::LightComponent",
                                                &c, g_showAdvanced) ||
@@ -535,9 +524,9 @@ void draw_inspector_panel() noexcept {
     return;
   }
 
-  ImGui::SameLine();
-  ImGui::Text("Entity [%u] gen=%u", entity.index, entity.generation);
   if (g_showAdvanced) {
+    ImGui::SameLine();
+    ImGui::Text("Entity [%u] gen=%u", entity.index, entity.generation);
     ImGui::Text("Persistent Id: %u",
                static_cast<unsigned>(editor_session().world->persistent_id(entity)));
   }
