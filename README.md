@@ -233,6 +233,13 @@ box naming it. The same messages appear in the editor's own Log panel, whose
 command line runs console commands (`help` lists them, `get` and `set` read and
 write cvars; Tab completes, Up and Down recall), as Unreal's Output Log does.
 
+F9, the Game view's Screenshot button, Edit > Take Screenshot or the
+`screenshot` console command saves what the Game view shows as a PNG under
+`Screenshots/` in the project's per-user data directory, as Unreal's F9 saves
+into `Saved/Screenshots`; the Log names the file. A Game view tab behind
+another comes to the front first, and nothing the editor draws over the view
+is in the picture.
+
 It starts on an empty 3D scene, as a new Unity project does. The scene holds a
 Main Camera, a Directional Light, and a Scene Controller entity running
 `assets/main.lua`, whose hooks start empty. Player mode boots
