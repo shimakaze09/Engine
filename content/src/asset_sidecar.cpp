@@ -217,11 +217,43 @@ SidecarReadResult read_asset_sidecar(const char *assetOsPath,
     hasMeshImport = true;
   }
 
+  // Labels are optional. Every one must be a valid label and distinct, and
+  // there may be no more than the catalog holds: a label that does not fit
+  // is refused, never shortened, because a shortened label is another one.
+  AssetLabels labels{};
+  const core::JsonValue *labelsValue = parser.get_object_field(*root, "labels");
+  if (labelsValue != nullptr) {
+    if (labelsValue->type != core::JsonValue::Type::Array) {
+      log_sidecar_problem(path, "has a labels field that is not an array");
+      return SidecarReadResult::Malformed;
+    }
+    const std::size_t count = parser.array_size(*labelsValue);
+    if (count > AssetMetadata::kMaxTags) {
+      log_sidecar_problem(path, "has more labels than an asset can carry");
+      return SidecarReadResult::Malformed;
+    }
+    for (std::size_t i = 0U; i < count; ++i) {
+      const core::JsonValue *element =
+          parser.get_array_element(*labelsValue, i);
+      char label[AssetMetadata::kMaxTagLength] = {};
+      if ((element == nullptr) ||
+          !parser.copy_string_strict(*element, label, sizeof(label)) ||
+          !asset_label_is_valid(label) || asset_labels_has(labels, label) ||
+          !asset_labels_add(&labels, label)) {
+        log_sidecar_problem(path, "has a label that is not a distinct label "
+                                  "of letters, digits, '_', '-' or '.' up to "
+                                  "31 characters");
+        return SidecarReadResult::Malformed;
+      }
+    }
+  }
+
   out->schemaVersion = version;
   out->guid = guid;
   out->folder = folder;
   out->hasMeshImport = hasMeshImport;
   out->meshImport = meshImport;
+  out->labels = labels;
   return SidecarReadResult::Ok;
 }
 
@@ -244,7 +276,8 @@ bool write_asset_sidecar(const char *assetOsPath,
   // Hand-built rather than routed through JsonWriter: the whole point of
   // the layout is one field per line, so a merge between two branches
   // that both imported assets resolves per field.
-  char document[768] = {};
+  // Room for every field at its widest: sixteen labels of 31 characters.
+  char document[2048] = {};
   int written = std::snprintf(
       document, sizeof(document),
       "{\n  \"schemaVersion\": %u,\n  \"guid\": \"%s\"",
@@ -285,6 +318,21 @@ bool write_asset_sidecar(const char *assetOsPath,
            static_cast<double>(sidecar.meshImport.scaleFactor),
            static_cast<int>(sidecar.meshImport.upAxis),
            sidecar.meshImport.generateNormals ? "true" : "false");
+  }
+  if (sidecar.labels.count > 0U) {
+    // One label per line, so labels two branches added both survive a merge.
+    append("%s", ",\n  \"labels\": [");
+    for (std::size_t i = 0U; i < sidecar.labels.count; ++i) {
+      const char *label = sidecar.labels.names[i].data();
+      if (!asset_label_is_valid(label)) {
+        log_sidecar_problem(path, "was not written: it carries a label that "
+                                  "is not a valid label");
+        return false;
+      }
+      append("\n    \"%s\"%s", label,
+             (i + 1U < sidecar.labels.count) ? "," : "");
+    }
+    append("%s", "\n  ]");
   }
   append("%s", "\n}\n");
   if (written <= 0) {

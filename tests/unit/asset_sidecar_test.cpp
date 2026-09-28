@@ -1,6 +1,8 @@
 // Pins the authored sidecar's contract on a scratch tree: the path it
 // derives and the predicate recognising one, a write/read round trip for an
-// asset and for a folder, the atomic write refusing a nil identity, and — the
+// asset and for a folder, labels (the exact bytes with and without them, a
+// round trip beside import settings, and a refusal per malformed form), the
+// atomic write refusing a nil identity, and — the
 // part that matters most — each read failure reporting which failure it was, so
 // no caller can mistake "could not read the identity" for "there is no identity
 // yet" and mint a new one over the top of a live asset.
@@ -164,15 +166,13 @@ void test_read_failures_are_distinct(
   const Malformed cases[] = {
       {"bad_json.gltf", "{ not json", "invalid JSON is Malformed"},
       {"not_object.gltf", "[1,2,3]", "a non-object root is Malformed"},
-      {"no_version.gltf",
-       "{\"guid\":\"01234567-89ab-cdef-fedc-ba9876543210\"}",
+      {"no_version.gltf", "{\"guid\":\"01234567-89ab-cdef-fedc-ba9876543210\"}",
        "a missing schemaVersion is Malformed"},
       {"future.gltf",
        "{\"schemaVersion\":9999,"
        "\"guid\":\"01234567-89ab-cdef-fedc-ba9876543210\"}",
        "a schema version from the future is refused, not guessed at"},
-      {"no_guid.gltf", "{\"schemaVersion\":1}",
-       "a missing guid is Malformed"},
+      {"no_guid.gltf", "{\"schemaVersion\":1}", "a missing guid is Malformed"},
       {"bad_guid.gltf", "{\"schemaVersion\":1,\"guid\":\"not-a-uuid\"}",
        "a guid that is not canonical UUID text is Malformed"},
       {"nil_guid.gltf",
@@ -183,6 +183,39 @@ void test_read_failures_are_distinct(
        "{\"schemaVersion\":1,"
        "\"guid\":\"01234567-89ab-cdef-fedc-ba9876543210\",\"folder\":7}",
        "a non-boolean folder flag is Malformed"},
+      {"labels_not_array.gltf",
+       "{\"schemaVersion\":1,"
+       "\"guid\":\"01234567-89ab-cdef-fedc-ba9876543210\",\"labels\":\"a\"}",
+       "labels that are not an array are Malformed"},
+      {"label_not_string.gltf",
+       "{\"schemaVersion\":1,"
+       "\"guid\":\"01234567-89ab-cdef-fedc-ba9876543210\",\"labels\":[3]}",
+       "a label that is not a string is Malformed"},
+      {"label_empty.gltf",
+       "{\"schemaVersion\":1,"
+       "\"guid\":\"01234567-89ab-cdef-fedc-ba9876543210\",\"labels\":[\"\"]}",
+       "an empty label is Malformed"},
+      {"label_space.gltf",
+       "{\"schemaVersion\":1,"
+       "\"guid\":\"01234567-89ab-cdef-fedc-ba9876543210\","
+       "\"labels\":[\"two words\"]}",
+       "a label with a space is Malformed"},
+      {"label_long.gltf",
+       "{\"schemaVersion\":1,"
+       "\"guid\":\"01234567-89ab-cdef-fedc-ba9876543210\","
+       "\"labels\":[\"abcdefghijklmnopqrstuvwxyz012345\"]}",
+       "a 32-character label is refused whole, not shortened"},
+      {"label_duplicate.gltf",
+       "{\"schemaVersion\":1,"
+       "\"guid\":\"01234567-89ab-cdef-fedc-ba9876543210\","
+       "\"labels\":[\"Hero\",\"hero\"]}",
+       "the same label twice, in any case, is Malformed"},
+      {"label_many.gltf",
+       "{\"schemaVersion\":1,"
+       "\"guid\":\"01234567-89ab-cdef-fedc-ba9876543210\",\"labels\":"
+       "[\"a\",\"b\",\"c\",\"d\",\"e\",\"f\",\"g\",\"h\",\"i\",\"j\","
+       "\"k\",\"l\",\"m\",\"n\",\"o\",\"p\",\"q\"]}",
+       "seventeen labels, one more than an asset carries, are Malformed"},
   };
   for (const Malformed &row : cases) {
     const std::string asset = root_path(row.leaf);
@@ -207,6 +240,97 @@ void test_read_failures_are_distinct(
   ctx.check(ct::read_asset_sidecar(huge.c_str(), &sidecar) ==
                 ct::SidecarReadResult::Unreadable,
             "an oversized sidecar is Unreadable, never Absent");
+}
+
+void test_labels(engine::tests::TestContext &ctx) noexcept {
+  const std::string asset = root_path("labelled.gltf");
+  ctx.check(write_text(asset, "x"), "the asset exists");
+  ct::AssetSidecar sidecar{};
+  ctx.check(ct::parse_asset_guid("01234567-89ab-cdef-fedc-ba9876543210",
+                                 &sidecar.guid),
+            "a fixed identity");
+
+  // Without labels the document is exactly what it was before labels
+  // existed, so no committed sidecar changes when this ships.
+  std::string document{};
+  ctx.check(ct::write_asset_sidecar(asset.c_str(), sidecar) &&
+                read_text(asset + ".meta", &document) &&
+                (document == "{\n  \"schemaVersion\": 1,\n  \"guid\": "
+                             "\"01234567-89ab-cdef-fedc-ba9876543210\"\n}\n"),
+            "an unlabelled sidecar is byte for byte the two-field document");
+
+  ctx.check(ct::asset_labels_add(&sidecar.labels, "Hero") &&
+                ct::asset_labels_add(&sidecar.labels, "env.rock-01") &&
+                ct::asset_labels_add(&sidecar.labels, "hero") &&
+                (sidecar.labels.count == 2U),
+            "labels add once each, whatever their case");
+  ctx.check(ct::write_asset_sidecar(asset.c_str(), sidecar) &&
+                read_text(asset + ".meta", &document) &&
+                (document ==
+                 "{\n  \"schemaVersion\": 1,\n  \"guid\": "
+                 "\"01234567-89ab-cdef-fedc-ba9876543210\",\n  \"labels\": [\n"
+                 "    \"Hero\",\n    \"env.rock-01\"\n  ]\n}\n"),
+            "labels are written one per line, in order, after the identity");
+  ct::AssetSidecar read{};
+  ctx.check((ct::read_asset_sidecar(asset.c_str(), &read) ==
+             ct::SidecarReadResult::Ok) &&
+                (read.labels == sidecar.labels),
+            "the labels read back as written");
+
+  // Labels and import settings live side by side and survive each other.
+  sidecar.hasMeshImport = true;
+  sidecar.meshImport.scaleFactor = 2.0F;
+  ct::AssetSidecar both{};
+  ctx.check(ct::write_asset_sidecar(asset.c_str(), sidecar) &&
+                (ct::read_asset_sidecar(asset.c_str(), &both) ==
+                 ct::SidecarReadResult::Ok) &&
+                (both.labels == sidecar.labels) && both.hasMeshImport &&
+                (both.meshImport == sidecar.meshImport),
+            "labels and import settings round-trip together");
+
+  // Sixteen labels of the longest length fit the document.
+  ct::AssetSidecar full{};
+  full.guid = sidecar.guid;
+  bool added = true;
+  for (int i = 0; i < 16; ++i) {
+    char label[40] = {};
+    std::snprintf(label, sizeof(label), "label_%02d_abcdefghijklmnopqrstuv", i);
+    added = added && (std::strlen(label) == 31U) &&
+            ct::asset_labels_add(&full.labels, label);
+  }
+  ct::AssetSidecar fullRead{};
+  ctx.check(added && !ct::asset_labels_add(&full.labels, "one_more") &&
+                ct::write_asset_sidecar(asset.c_str(), full) &&
+                (ct::read_asset_sidecar(asset.c_str(), &fullRead) ==
+                 ct::SidecarReadResult::Ok) &&
+                (fullRead.labels == full.labels),
+            "sixteen 31-character labels fit and round-trip; a seventeenth "
+            "is refused");
+
+  ctx.check(!ct::asset_labels_add(&full.labels, "") &&
+                !ct::asset_labels_add(&sidecar.labels, "two words") &&
+                !ct::asset_labels_add(&sidecar.labels,
+                                      "abcdefghijklmnopqrstuvwxyz012345") &&
+                (sidecar.labels.count == 2U),
+            "an invalid label is refused and the list is unchanged");
+  ctx.check(
+      ct::asset_labels_remove(&sidecar.labels, "HERO") &&
+          (sidecar.labels.count == 1U) &&
+          (std::strcmp(sidecar.labels.names[0].data(), "env.rock-01") == 0) &&
+          !ct::asset_labels_remove(&sidecar.labels, "hero"),
+      "a label is removed by any case, keeping the rest");
+
+  // A label poked into the struct past the checks is refused at write,
+  // leaving the file on disk as it was.
+  ct::AssetSidecar bad = sidecar;
+  bad.labels.names[0].fill('\0');
+  std::memcpy(bad.labels.names[0].data(), "no spaces", 9U);
+  std::string before{};
+  std::string after{};
+  ctx.check(read_text(asset + ".meta", &before) &&
+                !ct::write_asset_sidecar(asset.c_str(), bad) &&
+                read_text(asset + ".meta", &after) && (before == after),
+            "a sidecar carrying an invalid label is not written");
 }
 
 void test_write_refuses_nil(engine::tests::TestContext &ctx) noexcept {
@@ -297,6 +421,7 @@ int main() {
   test_round_trip(ctx);
   test_folder_sidecar(ctx);
   test_read_failures_are_distinct(ctx);
+  test_labels(ctx);
   test_write_refuses_nil(ctx);
   test_local_ids(ctx);
 
