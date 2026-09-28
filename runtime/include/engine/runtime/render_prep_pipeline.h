@@ -18,7 +18,8 @@ namespace engine::runtime {
 /// a draw the camera frustum culls still enters the frame, in the
 /// auxiliary list, when sweeping its bounds along the directional light
 /// by `sweepDistance` reaches the camera frustum, when a shadow-casting
-/// local light's range overlaps it, or when a capture camera sees it.
+/// local light's range overlaps it, when a capture camera sees it, or when
+/// a reflection probe's capture sphere reaches it.
 struct RenderPrepAuxiliaryInputs final {
   struct LocalCaster final {
     math::Vec3 position{};
@@ -32,6 +33,9 @@ struct RenderPrepAuxiliaryInputs final {
       localCasters{};
   std::size_t captureCount = 0U;
   std::array<math::Mat4, renderer::kMaxSceneCaptures> captureViewProjections{};
+  /// Each probe's capture position and distance.
+  std::size_t probeCount = 0U;
+  std::array<LocalCaster, renderer::kMaxReflectionProbes> probeSpheres{};
 };
 
 /// Inputs for one render-prep chunk job (world span -> local buffer).

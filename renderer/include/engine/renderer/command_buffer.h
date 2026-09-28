@@ -111,6 +111,11 @@ inline constexpr std::uint16_t kPassCamera = 1U;
 inline constexpr std::uint16_t kPassShadowCaster = 2U;
 /// Bit for scene capture `i` is kPassCaptureBase << i.
 inline constexpr std::uint16_t kPassCaptureBase = 4U;
+/// The eight scene-capture bits together.
+inline constexpr std::uint16_t kPassCaptureMask = 0x03FCU;
+/// A reflection probe's capture sphere reaches the draw (bit 10, above the
+/// capture bits).
+inline constexpr std::uint16_t kPassReflectionProbe = 1024U;
 
 // Field order is cache-conscious: sort key, hot per-draw identity, and
 // material are first. modelMatrix is appended last because it is only
@@ -247,6 +252,12 @@ inline constexpr std::size_t kMaxSceneCaptures = 8U;
 inline constexpr std::uint32_t kMinSceneCaptureSize = 16U;
 inline constexpr std::uint32_t kMaxSceneCaptureSize = 2048U;
 
+static_assert(kPassCaptureMask ==
+                  ((kPassCaptureBase << kMaxSceneCaptures) - kPassCaptureBase),
+              "one capture bit per capture slot");
+static_assert(kPassReflectionProbe == (kPassCaptureBase << kMaxSceneCaptures),
+              "the probe bit sits above the capture bits");
+
 /// One render-to-texture request: capture camera plus target resolution.
 struct SceneCaptureRequest final {
   CameraState camera{};
@@ -271,6 +282,76 @@ DeviceTextureHandle get_scene_capture_texture(std::size_t index) noexcept;
 /// set_scene_capture_requests; resolves to "no texture" until the slot's
 /// target is created by a flush.
 TextureHandle scene_capture_texture_handle(std::size_t index) noexcept;
+
+// Reflection probes: the scene captured into a cubemap at a point and
+// baked into an image-based-light environment. A view whose camera is
+// inside a probe's box is lit by that probe instead of the sky. When boxes
+// overlap, the one with the smaller volume wins, then the lower index.
+inline constexpr std::size_t kMaxReflectionProbes = 8U;
+
+/// One reflection probe for the coming frames: where it captures the scene,
+/// the box of camera positions it lights, and how its light is sampled.
+struct ReflectionProbeRequest final {
+  /// Stable identity (the probe entity's persistent id). A probe keeps its
+  /// bake while other probes come and go around it.
+  std::uint64_t id = 0U;
+  math::Vec3 position{};
+  /// World-axis-aligned bounds of the probe's box: the camera positions it
+  /// lights, and the walls box projection reflects against.
+  math::Vec3 boxMin{};
+  math::Vec3 boxMax{};
+  /// Far plane of the capture. Geometry beyond it is not captured, and
+  /// the sky shows through there instead.
+  float captureDistance = 10.0F;
+  /// Scales the diffuse and specular light the probe gives.
+  float intensity = 1.0F;
+  /// Parallax-corrects reflections against the box, for a probe that
+  /// fills a room.
+  bool boxProjection = false;
+  /// Cube face size of the capture and its specular prefilter chain, the
+  /// chain's length (one roughness step per level), and the diffuse
+  /// irradiance face size. Normalized like ReflectionProbeBakeSettings.
+  std::uint32_t faceSize = 128U;
+  std::uint32_t mipLevels = 5U;
+  std::uint32_t irradianceFaceSize = 32U;
+};
+
+/// Stores up to kMaxReflectionProbes probes for the coming flushes. More
+/// than that are dropped with a warning; count 0 removes every probe. A
+/// probe is captured again when its request, the sky or the requested bake
+/// generation changes, so resending the same probes every frame bakes
+/// nothing new.
+void set_reflection_probe_requests(const ReflectionProbeRequest *requests,
+                                   std::size_t count) noexcept;
+/// Number of probe requests currently stored.
+std::size_t reflection_probe_request_count() noexcept;
+/// Writes stored request `index`, with its values normalized, to `*out`;
+/// false when there is no such request. Readable without a render backend,
+/// so it shows what the runtime handed the renderer.
+bool get_reflection_probe_request(std::size_t index,
+                                  ReflectionProbeRequest *out) noexcept;
+/// Captures every probe again on the coming frames, for a scene whose
+/// geometry or lights changed after its probes were baked. Probes are
+/// baked one per frame.
+void request_reflection_probe_bake() noexcept;
+
+/// The renderer's state for one probe request.
+struct ReflectionProbeStatus final {
+  /// Its environment is baked and can light a view.
+  bool baked = false;
+  /// Captures completed for this probe since it was first requested.
+  std::uint32_t bakeCount = 0U;
+  /// Where the last capture was taken, and the normalized sizes it used.
+  math::Vec3 capturePosition{};
+  std::uint32_t faceSize = 0U;
+  std::uint32_t mipLevels = 0U;
+  std::uint32_t irradianceFaceSize = 0U;
+};
+
+/// Writes the state of request `index` to `*out`; false when there is no
+/// such request.
+bool get_reflection_probe_status(std::size_t index,
+                                 ReflectionProbeStatus *out) noexcept;
 
 /// Enumerates distance fog mode values used by the engine.
 enum class DistanceFogMode : std::uint8_t {
@@ -345,14 +426,17 @@ struct RenderViewDesc final {
 
 /// Renders one view into its own targets. The Game view goes first each
 /// frame: it owns the frame's once-only work (GPU profiler frame, quality
-/// preset, scene captures), the back-buffer clear and present, and the
-/// frame stats. Another view renders into its own targets only, from
-/// `commandBufferView` culled for its camera.
+/// preset, reflection-probe bakes, scene captures), the back-buffer clear and
+/// present, and the frame stats. Another view renders into its own targets
+/// only, from `commandBufferView` culled for its camera.
 void flush_renderer_view(const RenderViewDesc &view,
                          CommandBufferView commandBufferView,
                          const GpuMeshRegistry *registry, float timeSeconds,
                          const SceneLightData &lights,
                          CommandBufferView auxiliaryView = {}) noexcept;
+/// The probe request lighting the last flush of view `id`, or -1 when the
+/// sky environment does.
+int active_reflection_probe(RenderViewId id) noexcept;
 /// Opens a renderer lifetime, re-arming the lazy backend initialization
 /// that shutdown_renderer latched off. The backend itself is still built
 /// on demand by the first flush, so this call creates no device

@@ -25,6 +25,7 @@ engine_add_module_library(engine_renderer
     src/shadow_masked_programs.cpp
     src/command_buffer_flush_uniforms.cpp
     src/command_buffer_ibl.cpp
+    src/command_buffer_reflection_probes.cpp
     src/command_buffer_math.cpp
     src/command_buffer_post_resources.cpp
     src/command_buffer_skinning.cpp

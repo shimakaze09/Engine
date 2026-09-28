@@ -40,6 +40,15 @@ count_ready_mesh_components(const runtime::World &world,
 renderer::SceneLightData
 collect_scene_lights(const runtime::World &world) noexcept;
 
+/// Gathers the world's reflection probes into renderer requests: every
+/// probe when they fit `capacity`, otherwise the `capacity` whose boxes lie
+/// nearest `cameraPosition` (ties to the earlier probe). Requests keep the
+/// world's dense order. Returns the count written.
+std::size_t collect_reflection_probes(const runtime::World &world,
+                                      const math::Vec3 &cameraPosition,
+                                      renderer::ReflectionProbeRequest *out,
+                                      std::size_t capacity) noexcept;
+
 /// Gathers enabled scene-capture requests; returns the count written.
 std::size_t collect_scene_captures(const runtime::World &world,
                                    renderer::SceneCaptureRequest *outRequests,

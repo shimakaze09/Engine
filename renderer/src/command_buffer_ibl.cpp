@@ -128,29 +128,21 @@ cvar_reflection_probe_bake_settings(const FlushCVars &cvars) noexcept {
 
 /// Destroys or releases the requested object, handle, or resource for environment prefilter resources.
 void destroy_environment_prefilter_resources(BackendState &backend) noexcept {
-  const RenderDevice *dev = render_device();
-  if ((backend.prefilteredEnvironmentTexture != kInvalidDeviceTexture) &&
-      (dev != nullptr) && (dev->destroy_texture != nullptr)) {
-    dev->destroy_texture(backend.prefilteredEnvironmentTexture);
-  }
-  backend.prefilteredEnvironmentTexture = kInvalidDeviceTexture;
+  release_prefiltered_environment(backend.skyEnvironment);
   if (backend.environmentPrefilterShaderHandle != kInvalidShaderProgram) {
     destroy_shader_program(backend.environmentPrefilterShaderHandle);
     backend.environmentPrefilterShaderHandle = ShaderProgramHandle{};
   }
   backend.environmentPrefilterProgram = kInvalidDeviceProgram;
   backend.environmentPrefilterAvailable = false;
-  backend.prefilteredEnvironmentSource = kInvalidDeviceTexture;
-  backend.prefilteredEnvironmentSourceTexture = kInvalidTextureHandle;
-  backend.prefilteredEnvironmentFaceSize = 0;
-  backend.prefilteredEnvironmentMipLevels = 0;
 }
 
 DeviceTextureHandle
 ensure_prefiltered_environment(BackendState &backend, const RenderDevice *dev,
-                               TextureHandle sourceTexture,
-                               DeviceTextureHandle sourceCubemap,
+                               IblEnvironmentSet &set,
+                               const IblBakeSource &source,
                                ReflectionProbeBakeSettings settings) noexcept {
+  const DeviceTextureHandle sourceCubemap = source.cubemap;
   if (!backend.environmentPrefilterAvailable ||
       !backend.cvars.envPrefilter.get_bool(true) ||
       (sourceCubemap == kInvalidDeviceTexture) || !bake_device_ready(dev)) {
@@ -161,18 +153,14 @@ ensure_prefiltered_environment(BackendState &backend, const RenderDevice *dev,
   const int faceSize = static_cast<int>(settings.prefilteredFaceSize);
   const int mipLevels = static_cast<int>(settings.prefilteredMipLevels);
 
-  if ((backend.prefilteredEnvironmentTexture != kInvalidDeviceTexture) &&
-      (backend.prefilteredEnvironmentSource == sourceCubemap) &&
-      (backend.prefilteredEnvironmentSourceTexture == sourceTexture) &&
-      (backend.prefilteredEnvironmentFaceSize == faceSize) &&
-      (backend.prefilteredEnvironmentMipLevels == mipLevels)) {
-    return backend.prefilteredEnvironmentTexture;
+  if ((set.prefilteredTexture != kInvalidDeviceTexture) &&
+      (set.prefilteredSource == source) &&
+      (set.prefilteredFaceSize == faceSize) &&
+      (set.prefilteredMipLevels == mipLevels)) {
+    return set.prefilteredTexture;
   }
 
-  if (backend.prefilteredEnvironmentTexture != kInvalidDeviceTexture) {
-    dev->destroy_texture(backend.prefilteredEnvironmentTexture);
-    backend.prefilteredEnvironmentTexture = kInvalidDeviceTexture;
-  }
+  release_prefiltered_environment(set);
 
   const DeviceTextureHandle prefiltered =
       create_bake_cubemap(dev, faceSize, mipLevels);
@@ -247,38 +235,54 @@ ensure_prefiltered_environment(BackendState &backend, const RenderDevice *dev,
     return kInvalidDeviceTexture;
   }
 
-  backend.prefilteredEnvironmentTexture = prefiltered;
-  backend.prefilteredEnvironmentSource = sourceCubemap;
-  backend.prefilteredEnvironmentSourceTexture = sourceTexture;
-  backend.prefilteredEnvironmentFaceSize = faceSize;
-  backend.prefilteredEnvironmentMipLevels = mipLevels;
+  set.prefilteredTexture = prefiltered;
+  set.prefilteredSource = source;
+  set.prefilteredFaceSize = faceSize;
+  set.prefilteredMipLevels = mipLevels;
   return prefiltered;
+} // namespace
+
+void release_prefiltered_environment(IblEnvironmentSet &set) noexcept {
+  const RenderDevice *dev = render_device();
+  if ((set.prefilteredTexture != kInvalidDeviceTexture) && (dev != nullptr) &&
+      (dev->destroy_texture != nullptr)) {
+    dev->destroy_texture(set.prefilteredTexture);
+  }
+  set.prefilteredTexture = kInvalidDeviceTexture;
+  set.prefilteredSource = IblBakeSource{};
+  set.prefilteredFaceSize = 0;
+  set.prefilteredMipLevels = 0;
 }
 
-/// Destroys or releases the requested object, handle, or resource for environment irradiance resources.
-void destroy_environment_irradiance_resources(BackendState &backend) noexcept {
+void release_irradiance_environment(IblEnvironmentSet &set) noexcept {
   const RenderDevice *dev = render_device();
-  if ((backend.irradianceEnvironmentTexture != kInvalidDeviceTexture) &&
-      (dev != nullptr) && (dev->destroy_texture != nullptr)) {
-    dev->destroy_texture(backend.irradianceEnvironmentTexture);
+  if ((set.irradianceTexture != kInvalidDeviceTexture) && (dev != nullptr) &&
+      (dev->destroy_texture != nullptr)) {
+    dev->destroy_texture(set.irradianceTexture);
   }
-  backend.irradianceEnvironmentTexture = kInvalidDeviceTexture;
+  set.irradianceTexture = kInvalidDeviceTexture;
+  set.irradianceSource = IblBakeSource{};
+  set.irradianceFaceSize = 0;
+}
+
+/// Destroys or releases the requested object, handle, or resource for
+/// environment irradiance resources.
+void destroy_environment_irradiance_resources(BackendState &backend) noexcept {
+  release_irradiance_environment(backend.skyEnvironment);
   if (backend.environmentIrradianceShaderHandle != kInvalidShaderProgram) {
     destroy_shader_program(backend.environmentIrradianceShaderHandle);
     backend.environmentIrradianceShaderHandle = ShaderProgramHandle{};
   }
   backend.environmentIrradianceProgram = kInvalidDeviceProgram;
   backend.environmentIrradianceAvailable = false;
-  backend.irradianceEnvironmentSource = kInvalidDeviceTexture;
-  backend.irradianceEnvironmentSourceTexture = kInvalidTextureHandle;
-  backend.irradianceEnvironmentFaceSize = 0;
 }
 
 DeviceTextureHandle
 ensure_irradiance_environment(BackendState &backend, const RenderDevice *dev,
-                              TextureHandle sourceTexture,
-                              DeviceTextureHandle sourceCubemap,
+                              IblEnvironmentSet &set,
+                              const IblBakeSource &source,
                               ReflectionProbeBakeSettings settings) noexcept {
+  const DeviceTextureHandle sourceCubemap = source.cubemap;
   if (!backend.environmentIrradianceAvailable ||
       !backend.cvars.envIrradiance.get_bool(true) ||
       (sourceCubemap == kInvalidDeviceTexture) || !bake_device_ready(dev)) {
@@ -288,17 +292,13 @@ ensure_irradiance_environment(BackendState &backend, const RenderDevice *dev,
   settings = normalize_reflection_probe_bake_settings(settings);
   const int faceSize = static_cast<int>(settings.irradianceFaceSize);
 
-  if ((backend.irradianceEnvironmentTexture != kInvalidDeviceTexture) &&
-      (backend.irradianceEnvironmentSource == sourceCubemap) &&
-      (backend.irradianceEnvironmentSourceTexture == sourceTexture) &&
-      (backend.irradianceEnvironmentFaceSize == faceSize)) {
-    return backend.irradianceEnvironmentTexture;
+  if ((set.irradianceTexture != kInvalidDeviceTexture) &&
+      (set.irradianceSource == source) &&
+      (set.irradianceFaceSize == faceSize)) {
+    return set.irradianceTexture;
   }
 
-  if (backend.irradianceEnvironmentTexture != kInvalidDeviceTexture) {
-    dev->destroy_texture(backend.irradianceEnvironmentTexture);
-    backend.irradianceEnvironmentTexture = kInvalidDeviceTexture;
-  }
+  release_irradiance_environment(set);
 
   const DeviceTextureHandle irradiance = create_bake_cubemap(dev, faceSize, 1);
   if (irradiance == kInvalidDeviceTexture) {
@@ -358,10 +358,9 @@ ensure_irradiance_environment(BackendState &backend, const RenderDevice *dev,
     return kInvalidDeviceTexture;
   }
 
-  backend.irradianceEnvironmentTexture = irradiance;
-  backend.irradianceEnvironmentSource = sourceCubemap;
-  backend.irradianceEnvironmentSourceTexture = sourceTexture;
-  backend.irradianceEnvironmentFaceSize = faceSize;
+  set.irradianceTexture = irradiance;
+  set.irradianceSource = source;
+  set.irradianceFaceSize = faceSize;
   return irradiance;
 }
 
@@ -446,7 +445,7 @@ DeviceTextureHandle get_prefiltered_environment_texture() noexcept {
       !backend.cvars.envPrefilter.get_bool(true)) {
     return kInvalidDeviceTexture;
   }
-  return backend.prefilteredEnvironmentTexture;
+  return backend.skyEnvironment.prefilteredTexture;
 }
 
 DeviceTextureHandle get_irradiance_environment_texture() noexcept {
@@ -455,7 +454,7 @@ DeviceTextureHandle get_irradiance_environment_texture() noexcept {
       !backend.cvars.envIrradiance.get_bool(true)) {
     return kInvalidDeviceTexture;
   }
-  return backend.irradianceEnvironmentTexture;
+  return backend.skyEnvironment.irradianceTexture;
 }
 
 DeviceTextureHandle get_brdf_lut_texture() noexcept {
@@ -499,10 +498,13 @@ bake_reflection_probe(const ReflectionProbeBakeRequest &request) noexcept {
     return result;
   }
 
+  IblBakeSource source{};
+  source.cubemap = sourceCubemap;
+  source.texture = sourceTexture;
   result.prefilteredEnvironmentTexture = ensure_prefiltered_environment(
-      backend, dev, sourceTexture, sourceCubemap, result.settings);
+      backend, dev, backend.skyEnvironment, source, result.settings);
   result.irradianceEnvironmentTexture = ensure_irradiance_environment(
-      backend, dev, sourceTexture, sourceCubemap, result.settings);
+      backend, dev, backend.skyEnvironment, source, result.settings);
   result.brdfLutTexture = ensure_brdf_lut(backend, dev, result.settings);
   result.baked =
       (result.prefilteredEnvironmentTexture != kInvalidDeviceTexture) &&

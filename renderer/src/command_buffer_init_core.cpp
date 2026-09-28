@@ -200,6 +200,9 @@ bool resolve_pbr_program_state(BackendState &backend,
   backend.pbrBrdfLutLoc = dev->shader_param(pbrProgram, "uBrdfLut");
   backend.pbrPrefilteredMipsLoc =
       dev->shader_param(pbrProgram, "uPrefilteredMips");
+  backend.pbrProbeBoxMinLoc = dev->shader_param(pbrProgram, "uProbeBoxMin");
+  backend.pbrProbeBoxMaxLoc = dev->shader_param(pbrProgram, "uProbeBoxMax");
+  backend.pbrProbeCenterLoc = dev->shader_param(pbrProgram, "uProbeCenter");
   backend.pbrFoliageWindStrengthLocation =
       dev->shader_param(pbrProgram, "uFoliageWindStrength");
   backend.pbrFoliageWindFrequencyLocation =

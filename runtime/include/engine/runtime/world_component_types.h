@@ -53,17 +53,25 @@ struct WorldTransform final {
   math::Mat4 matrix = math::Mat4();
 };
 
-/// IBL reflection probe: bake resolutions, influence shape, bake flag.
+/// A reflection probe: the scene captured into a cubemap at the entity's
+/// position and baked into image-based light. A view whose camera is inside
+/// the probe's box is lit by it instead of the sky (the smaller box wins
+/// where boxes overlap). `boxExtents` are the box's half sizes along the
+/// world axes, whatever the entity's rotation; `radius` is how far the
+/// capture sees; `intensity` scales the light the probe gives;
+/// `boxProjection` reflects against the box's walls rather than at
+/// infinity. The resolutions and mip count size the capture and its bake.
+/// A probe is baked when it appears, moves, changes a field or sees a new
+/// sky, when a scene loads or its asset loads finish, and on the
+/// Inspector's Bake.
 struct ReflectionProbeComponent final {
   math::Vec3 boxExtents = math::Vec3(5.0F, 5.0F, 5.0F);
   float radius = 10.0F;
   float intensity = 1.0F;
   std::uint32_t prefilteredResolution = 128U;
   std::uint32_t irradianceResolution = 32U;
-  std::uint32_t brdfLutResolution = 512U;
   std::uint32_t mipLevels = 5U;
   bool boxProjection = false;
-  bool needsBake = true;
 };
 
 /// The scene's sky light: an environment map (an Environment asset, a

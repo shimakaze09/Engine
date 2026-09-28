@@ -6,6 +6,7 @@
 #include "command_buffer_ibl.h"
 #include "command_buffer_math.h"
 #include "command_buffer_post_resources.h"
+#include "command_buffer_reflection_probes.h"
 #include "command_buffer_sky.h"
 
 #include <algorithm>
@@ -453,6 +454,7 @@ void destroy_backend_resources(BackendState *backend) noexcept {
   destroy_brdf_lut_resources(*backend);
   destroy_environment_irradiance_resources(*backend);
   destroy_environment_prefilter_resources(*backend);
+  destroy_reflection_probe_resources(*backend);
   destroy_skybox_resources(*backend);
 
   if ((backend->emptyGeometry != kInvalidDeviceGeometry) &&

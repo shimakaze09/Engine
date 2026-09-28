@@ -285,6 +285,21 @@ engine_add_test_executable(engine_integration_scene_environment_gpu
 set_tests_properties(engine_integration_scene_environment_gpu PROPERTIES
     SKIP_REGULAR_EXPRESSION "SKIPPED:")
 
+engine_add_test_executable(engine_integration_reflection_probe_gpu
+    SOURCES
+    reflection_probe_gpu_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/renderer/src
+    PRIVATE_DEPS
+    engine_runtime
+    engine_renderer
+    engine_content
+    LABELS
+    gpu;integration
+)
+set_tests_properties(engine_integration_reflection_probe_gpu PROPERTIES
+    SKIP_REGULAR_EXPRESSION "SKIPPED:")
+
 # Drives the editor's ImGui bgfx renderer directly (editor/src is private),
 # so it links engine_editor normally: only the renderer's objects are
 # pulled in, and no editor bridge registers itself over the fixture's.
@@ -1651,6 +1666,17 @@ engine_add_test_executable(engine_integration_pipeline_memory_report
 engine_add_test_executable(engine_integration_pipeline_offscreen_caster
     SOURCES
     pipeline_offscreen_caster_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_renderer
+    engine_core
+    LABELS
+    integration
+)
+
+engine_add_test_executable(engine_integration_pipeline_reflection_probe
+    SOURCES
+    pipeline_reflection_probe_test.cpp
     PRIVATE_DEPS
     engine_runtime
     engine_renderer

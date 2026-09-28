@@ -97,6 +97,16 @@ BackendState make_bake_backend() noexcept {
 }
 
 /// Asserts the fake device is back in the ambient scene state.
+/// A skybox-style source: texture handle `texture` on device texture 5.
+IblBakeSource bake_source(std::uint32_t texture,
+                          std::uint32_t version = 0U) noexcept {
+  IblBakeSource source{};
+  source.cubemap = DeviceTextureHandle{5U};
+  source.texture = TextureHandle{texture};
+  source.version = version;
+  return source;
+}
+
 void check_state_restored(const char *what) noexcept {
   CHECK(engine::tests::fake_log().boundRenderTarget == 0U, what);
   CHECK(g_renderState.depthTest == DepthTest::Less, "depth test restored");
@@ -112,10 +122,10 @@ void check_state_restored(const char *what) noexcept {
 void test_prefilter_restores_state() noexcept {
   BackendState backend = make_bake_backend();
   const DeviceTextureHandle tex = ensure_prefiltered_environment(
-      backend, render_device(), TextureHandle{3U}, DeviceTextureHandle{5U},
+      backend, render_device(), backend.skyEnvironment, bake_source(3U),
       ReflectionProbeBakeSettings{});
   CHECK(tex != kInvalidDeviceTexture, "prefilter bake succeeds");
-  CHECK(backend.prefilteredEnvironmentTexture == tex,
+  CHECK(backend.skyEnvironment.prefilteredTexture == tex,
         "prefilter result cached");
   CHECK(engine::tests::fake_log().draws > 0, "prefilter bake drew");
   check_state_restored("prefilter leaves the back buffer bound");
@@ -129,11 +139,11 @@ void test_prefilter_target_failure_fails_clean() noexcept {
   engine::tests::fake_log().failKinds =
       engine::tests::fake_kind_bit(engine::tests::FakeKind::RenderTarget);
   const DeviceTextureHandle tex = ensure_prefiltered_environment(
-      backend, render_device(), TextureHandle{3U}, DeviceTextureHandle{5U},
+      backend, render_device(), backend.skyEnvironment, bake_source(3U),
       ReflectionProbeBakeSettings{});
   CHECK(tex == kInvalidDeviceTexture,
         "failed face target fails the prefilter bake");
-  CHECK(backend.prefilteredEnvironmentTexture == kInvalidDeviceTexture,
+  CHECK(backend.skyEnvironment.prefilteredTexture == kInvalidDeviceTexture,
         "no prefilter texture cached on failure");
   CHECK(engine::tests::fake_destroys(engine::tests::FakeKind::Texture) == 1,
         "staged cubemap destroyed");
@@ -146,7 +156,7 @@ void test_prefilter_target_failure_fails_clean() noexcept {
 void test_irradiance_contracts() noexcept {
   BackendState backend = make_bake_backend();
   const DeviceTextureHandle tex = ensure_irradiance_environment(
-      backend, render_device(), TextureHandle{3U}, DeviceTextureHandle{5U},
+      backend, render_device(), backend.skyEnvironment, bake_source(3U),
       ReflectionProbeBakeSettings{});
   CHECK(tex != kInvalidDeviceTexture, "irradiance bake succeeds");
   check_state_restored("irradiance leaves the back buffer bound");
@@ -155,11 +165,11 @@ void test_irradiance_contracts() noexcept {
   engine::tests::fake_log().failKinds =
       engine::tests::fake_kind_bit(engine::tests::FakeKind::RenderTarget);
   const DeviceTextureHandle failed = ensure_irradiance_environment(
-      failing, render_device(), TextureHandle{3U}, DeviceTextureHandle{5U},
+      failing, render_device(), failing.skyEnvironment, bake_source(3U),
       ReflectionProbeBakeSettings{});
   CHECK(failed == kInvalidDeviceTexture,
         "failed face target fails the irradiance bake");
-  CHECK(failing.irradianceEnvironmentTexture == kInvalidDeviceTexture,
+  CHECK(failing.skyEnvironment.irradianceTexture == kInvalidDeviceTexture,
         "no irradiance texture cached on failure");
   CHECK(engine::tests::fake_destroys(engine::tests::FakeKind::Texture) == 1,
         "staged irradiance destroyed");
@@ -184,26 +194,26 @@ void test_brdf_lut_restores_state() noexcept {
 void test_bake_cache_follows_the_environment() noexcept {
   BackendState backend = make_bake_backend();
   const DeviceTextureHandle first = ensure_prefiltered_environment(
-      backend, render_device(), TextureHandle{3U}, DeviceTextureHandle{5U},
+      backend, render_device(), backend.skyEnvironment, bake_source(3U),
       ReflectionProbeBakeSettings{});
   const DeviceTextureHandle firstIrradiance = ensure_irradiance_environment(
-      backend, render_device(), TextureHandle{3U}, DeviceTextureHandle{5U},
+      backend, render_device(), backend.skyEnvironment, bake_source(3U),
       ReflectionProbeBakeSettings{});
   const int drawsAfterFirst = engine::tests::fake_log().draws;
-  CHECK(ensure_prefiltered_environment(
-            backend, render_device(), TextureHandle{3U},
-            DeviceTextureHandle{5U}, ReflectionProbeBakeSettings{}) == first,
+  CHECK(ensure_prefiltered_environment(backend, render_device(),
+                                       backend.skyEnvironment, bake_source(3U),
+                                       ReflectionProbeBakeSettings{}) == first,
         "the same environment is served from the cache");
   CHECK(engine::tests::fake_log().draws == drawsAfterFirst,
         "a cached bake draws nothing");
 
   // The texture slot's next generation: same device handle, new texture.
   const DeviceTextureHandle second = ensure_prefiltered_environment(
-      backend, render_device(), TextureHandle{3U + 8192U},
-      DeviceTextureHandle{5U}, ReflectionProbeBakeSettings{});
+      backend, render_device(), backend.skyEnvironment, bake_source(3U + 8192U),
+      ReflectionProbeBakeSettings{});
   const DeviceTextureHandle secondIrradiance = ensure_irradiance_environment(
-      backend, render_device(), TextureHandle{3U + 8192U},
-      DeviceTextureHandle{5U}, ReflectionProbeBakeSettings{});
+      backend, render_device(), backend.skyEnvironment, bake_source(3U + 8192U),
+      ReflectionProbeBakeSettings{});
   CHECK((second != kInvalidDeviceTexture) && (second != first),
         "a new environment on a reused device handle is prefiltered again");
   CHECK((secondIrradiance != kInvalidDeviceTexture) &&
@@ -211,6 +221,16 @@ void test_bake_cache_follows_the_environment() noexcept {
         "and its irradiance is convolved again");
   CHECK(engine::tests::fake_log().draws > drawsAfterFirst,
         "the new bakes drew");
+
+  // A cubemap re-rendered in place keeps its handles and bumps its version.
+  const int drawsAfterSecond = engine::tests::fake_log().draws;
+  const DeviceTextureHandle third = ensure_prefiltered_environment(
+      backend, render_device(), backend.skyEnvironment,
+      bake_source(3U + 8192U, 1U), ReflectionProbeBakeSettings{});
+  CHECK((third != kInvalidDeviceTexture) && (third != second),
+        "new contents under the same handles are prefiltered again");
+  CHECK(engine::tests::fake_log().draws > drawsAfterSecond,
+        "the re-rendered source's bake drew");
 }
 
 } // namespace

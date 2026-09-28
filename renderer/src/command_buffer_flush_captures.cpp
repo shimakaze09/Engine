@@ -40,18 +40,124 @@
 
 namespace engine::renderer {
 
+OffscreenSceneInputs offscreen_scene_inputs(FrameFlushContext &ctx) noexcept {
+  OffscreenSceneInputs inputs{};
+  inputs.backend = &ctx.backend;
+  inputs.dev = ctx.dev;
+  inputs.registry = ctx.registry;
+  inputs.mainView = ctx.commandBufferView;
+  inputs.mainOpaqueCount = ctx.opaqueCount;
+  inputs.mainTotalCount = ctx.totalCount;
+  inputs.auxiliaryView = ctx.auxiliaryView;
+  inputs.auxiliaryOpaqueCount = ctx.auxiliaryOpaqueCount;
+  inputs.lights = &ctx.lights;
+  inputs.timeSeconds = ctx.timeSeconds;
+  inputs.fogSettings = ctx.fogSettings;
+  inputs.heightFogSettings = ctx.heightFogSettings;
+  inputs.frameStats = &ctx.frameStats;
+  return inputs;
+}
+
+void draw_offscreen_scene(const OffscreenSceneInputs &inputs,
+                          const OffscreenCamera &camera,
+                          const IblSelection &ibl) noexcept {
+  BackendState &backend = *inputs.backend;
+  const RenderDevice *dev = inputs.dev;
+  const std::size_t auxiliaryTotal =
+      static_cast<std::size_t>(inputs.auxiliaryView.count);
+  if (((inputs.mainView.data == nullptr) || (inputs.mainTotalCount == 0U)) &&
+      (auxiliaryTotal == 0U)) {
+    return;
+  }
+
+  const math::Mat4 viewProjection = math::mul(camera.projection, camera.view);
+  dev->bind_program(backend.pbrProgram);
+  if (backend.pbrTimeLocation.valid()) {
+    dev->set_param_f32(backend.pbrTimeLocation, inputs.timeSeconds);
+  }
+  if (backend.pbrCameraPosLocation.valid()) {
+    dev->set_param_vec3(backend.pbrCameraPosLocation, &camera.position.x);
+  }
+  if (backend.pbrViewLocation.valid()) {
+    dev->set_param_mat4(backend.pbrViewLocation, &camera.view.columns[0].x);
+  }
+  if (backend.pbrViewProjectionLocation.valid()) {
+    dev->set_param_mat4(backend.pbrViewProjectionLocation,
+                        &viewProjection.columns[0].x);
+  }
+  if (backend.pbrUseInstancingLocation.valid()) {
+    dev->set_param_i32(backend.pbrUseInstancingLocation, 0);
+  }
+  upload_pbr_lighting_uniforms(backend, dev, *inputs.lights);
+  upload_pbr_distance_fog_uniforms(backend, dev, inputs.fogSettings);
+  upload_pbr_height_fog_uniforms(backend, dev, inputs.heightFogSettings);
+  bind_pbr_shadow_uniforms(backend, dev, *inputs.lights, false, false, false);
+  apply_pbr_ibl_uniforms(backend, dev, ibl);
+  if (backend.pbrAlbedoMapLocation.valid()) {
+    dev->set_param_i32(backend.pbrAlbedoMapLocation, 0);
+  }
+
+  // Offscreen renders share pbrProgram, and its GL uniform state, with the
+  // main forward pass, so every draw here sets its own material uniforms
+  // even when its materials never use them; otherwise a draw would
+  // silently keep whatever texture the last forward draw left bound.
+  const ForwardDrawProgram program = pbr_forward_draw_program(backend);
+
+  // Commands render prep culled for the main camera but flagged for this
+  // camera ride in the auxiliary list.
+  auto drawRange = [&](const CommandBufferView &view, std::size_t start,
+                       std::size_t end, std::uint16_t requiredMask) {
+    // A mesh showing the target being rendered is drawn without it rather
+    // than sampling it.
+    ForwardDrawBindings bindings{};
+    bindings.passTarget = camera.renderTarget;
+    for (std::size_t i = start; (view.data != nullptr) && (i < end); ++i) {
+      const DrawCommand &command = view.data[i];
+      if ((requiredMask != 0U) && ((command.passMask & requiredMask) == 0U)) {
+        continue;
+      }
+      const GpuMesh *mesh = lookup_gpu_mesh(inputs.registry, command.mesh);
+      if ((mesh == nullptr) || (mesh->geometry == kInvalidDeviceGeometry) ||
+          (mesh->vertexCount == 0U)) {
+        continue;
+      }
+
+      upload_forward_material(program, backend, dev, command, &bindings);
+      draw_forward_command(program, dev, command, *mesh, viewProjection,
+                           inputs.frameStats);
+    }
+  };
+
+  dev->apply_render_state(
+      RenderState{DepthTest::Less, true, BlendMode::Disabled, camera.cull});
+  drawRange(inputs.mainView, 0U, inputs.mainOpaqueCount, 0U);
+  if (camera.auxiliaryMask != 0U) {
+    drawRange(inputs.auxiliaryView, 0U, inputs.auxiliaryOpaqueCount,
+              camera.auxiliaryMask);
+  }
+
+  if ((inputs.mainOpaqueCount < inputs.mainTotalCount) ||
+      (inputs.auxiliaryOpaqueCount < auxiliaryTotal)) {
+    dev->apply_render_state(
+        RenderState{DepthTest::Less, false, BlendMode::Alpha, CullMode::None});
+    drawRange(inputs.mainView, inputs.mainOpaqueCount, inputs.mainTotalCount,
+              0U);
+    if (camera.auxiliaryMask != 0U) {
+      drawRange(inputs.auxiliaryView, inputs.auxiliaryOpaqueCount,
+                auxiliaryTotal, camera.auxiliaryMask);
+    }
+  }
+  dev->apply_render_state(
+      RenderState{DepthTest::Less, true, BlendMode::Disabled, CullMode::Back});
+
+  dev->bind_texture_slot(0U, kInvalidDeviceTexture);
+  dev->bind_program(kInvalidDeviceProgram);
+}
+
 void flush_scene_captures(FrameFlushContext &ctx) noexcept {
   BackendState &backend = ctx.backend;
   const RenderDevice *dev = ctx.dev;
-  const SceneLightData &lights = ctx.lights;
-  const CommandBufferView &commandBufferView = ctx.commandBufferView;
-  const GpuMeshRegistry *registry = ctx.registry;
-  const std::size_t opaqueCount = ctx.opaqueCount;
-  const std::size_t totalCount = ctx.totalCount;
-  const float timeSeconds = ctx.timeSeconds;
-  const DistanceFogSettings &fogSettings = ctx.fogSettings;
-  const HeightFogSettings &heightFogSettings = ctx.heightFogSettings;
-  RendererFrameStats &frameStats = ctx.frameStats;
+  const OffscreenSceneInputs inputs = offscreen_scene_inputs(ctx);
   const std::size_t captureCount = scene_capture_request_count();
   for (std::size_t captureIndex = 0U; captureIndex < captureCount;
        ++captureIndex) {
@@ -73,107 +179,18 @@ void flush_scene_captures(FrameFlushContext &ctx) noexcept {
     dev->clear(ClearFlags::ColorDepth, kClearRed, kClearGreen, kClearBlue,
                1.0F);
 
-    if (((commandBufferView.data == nullptr) || (totalCount == 0U)) &&
-        (ctx.auxiliaryView.count == 0U)) {
-      continue;
-    }
-
     const float captureAspect = static_cast<float>(captureWidth) /
                                 static_cast<float>(captureHeight);
-    const math::Mat4 captureView = math::look_at(
-        request.camera.position, request.camera.target, request.camera.up);
-    const math::Mat4 captureProj =
-        camera_projection_matrix(request.camera, captureAspect);
-    const math::Mat4 captureViewProjection =
-        math::mul(captureProj, captureView);
-
-    dev->bind_program(backend.pbrProgram);
-    if (backend.pbrTimeLocation.valid()) {
-      dev->set_param_f32(backend.pbrTimeLocation, timeSeconds);
-    }
-    if (backend.pbrCameraPosLocation.valid()) {
-      dev->set_param_vec3(backend.pbrCameraPosLocation,
-                            &request.camera.position.x);
-    }
-    if (backend.pbrViewLocation.valid()) {
-      dev->set_param_mat4(backend.pbrViewLocation,
-                            &captureView.columns[0].x);
-    }
-    if (backend.pbrViewProjectionLocation.valid()) {
-      dev->set_param_mat4(backend.pbrViewProjectionLocation,
-                            &captureViewProjection.columns[0].x);
-    }
-    if (backend.pbrUseInstancingLocation.valid()) {
-      dev->set_param_i32(backend.pbrUseInstancingLocation, 0);
-    }
-    upload_pbr_lighting_uniforms(backend, dev, lights);
-    upload_pbr_distance_fog_uniforms(backend, dev, fogSettings);
-    upload_pbr_height_fog_uniforms(backend, dev, heightFogSettings);
-    bind_pbr_shadow_uniforms(backend, dev, lights, false, false, false);
-    // Captures skip sky and IBL by design.
-    apply_pbr_ibl_uniforms(backend, dev, false);
-    if (backend.pbrAlbedoMapLocation.valid()) {
-      dev->set_param_i32(backend.pbrAlbedoMapLocation, 0);
-    }
-
-    // Scene captures share pbrProgram, and its GL uniform state, with the
-    // main forward pass, so every draw here sets its own material
-    // uniforms even when a capture's own materials never use them —
-    // otherwise a capture would silently keep whatever texture the last
-    // forward draw left bound.
-    const ForwardDrawProgram captureProgram =
-        pbr_forward_draw_program(backend);
-
-    // Commands render prep culled for the main camera but flagged for
-    // this capture ride in the auxiliary list.
-    const std::uint16_t captureBit = static_cast<std::uint16_t>(
+    OffscreenCamera camera{};
+    camera.view = math::look_at(request.camera.position, request.camera.target,
+                                request.camera.up);
+    camera.projection = camera_projection_matrix(request.camera, captureAspect);
+    camera.position = request.camera.position;
+    camera.auxiliaryMask = static_cast<std::uint16_t>(
         kPassCaptureBase << static_cast<unsigned int>(captureIndex));
-    auto drawCaptureRange = [&](const CommandBufferView &view,
-                                std::size_t start, std::size_t end,
-                                std::uint16_t requiredMask) {
-      // A mesh showing this capture is drawn without it rather than
-      // sampling the target being rendered.
-      ForwardDrawBindings bindings{};
-      bindings.passTarget = target.colorTexture;
-      for (std::size_t i = start; (view.data != nullptr) && (i < end); ++i) {
-        const DrawCommand &command = view.data[i];
-        if ((requiredMask != 0U) &&
-            ((command.passMask & requiredMask) == 0U)) {
-          continue;
-        }
-        const GpuMesh *mesh = lookup_gpu_mesh(registry, command.mesh);
-        if ((mesh == nullptr) || (mesh->geometry == kInvalidDeviceGeometry) ||
-            (mesh->vertexCount == 0U)) {
-          continue;
-        }
-
-        upload_forward_material(captureProgram, backend, dev, command,
-                                &bindings);
-        draw_forward_command(captureProgram, dev, command, *mesh,
-                             captureViewProjection, &frameStats);
-      }
-    };
-
-    const std::size_t auxiliaryTotal =
-        static_cast<std::size_t>(ctx.auxiliaryView.count);
-    drawCaptureRange(commandBufferView, 0U, opaqueCount, 0U);
-    drawCaptureRange(ctx.auxiliaryView, 0U, ctx.auxiliaryOpaqueCount,
-                     captureBit);
-
-    if ((opaqueCount < totalCount) ||
-        (ctx.auxiliaryOpaqueCount < auxiliaryTotal)) {
-      dev->apply_render_state(RenderState{DepthTest::Less, false,
-                                          BlendMode::Alpha, CullMode::None});
-      drawCaptureRange(commandBufferView, opaqueCount, totalCount, 0U);
-      drawCaptureRange(ctx.auxiliaryView, ctx.auxiliaryOpaqueCount,
-                       auxiliaryTotal, captureBit);
-      dev->apply_render_state(RenderState{DepthTest::Less, true,
-                                          BlendMode::Disabled,
-                                          CullMode::Back});
-    }
-
-    dev->bind_texture_slot(0U, kInvalidDeviceTexture);
-    dev->bind_program(kInvalidDeviceProgram);
+    camera.renderTarget = target.colorTexture;
+    // Captures skip sky and IBL by design.
+    draw_offscreen_scene(inputs, camera, IblSelection{});
   }
   if ((captureCount > 0U) && (dev != nullptr) &&
       (dev->bind_render_target != nullptr)) {

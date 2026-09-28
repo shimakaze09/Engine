@@ -1896,6 +1896,22 @@ engine_add_test_executable(engine_unit_command_buffer_ibl_bake
     engine_math
 )
 
+engine_add_test_executable(engine_unit_reflection_probe_bake
+    SOURCES
+    reflection_probe_bake_test.cpp
+    ../fake_render_device.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_reflection_probes.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_ibl.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_context.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/render_settings.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/renderer/include
+    ${CMAKE_SOURCE_DIR}/renderer/src
+    PRIVATE_DEPS
+    engine_core
+    engine_math
+)
+
 engine_add_test_executable(engine_unit_command_buffer_debug_overlay
     SOURCES
     command_buffer_debug_overlay_test.cpp

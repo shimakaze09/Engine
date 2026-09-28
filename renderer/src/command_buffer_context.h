@@ -184,6 +184,58 @@ struct RenderViewResources final {
 };
 
 /// Owns private GPU backend state for command buffer rendering.
+
+/// What an IBL environment is baked from: the cubemap sampled, the texture
+/// it belongs to with its generation (bgfx reuses a destroyed texture's
+/// device handle, so the device handle alone would take a new environment
+/// for the one it replaced), and a version its owner bumps each time it
+/// renders new contents into the same texture.
+struct IblBakeSource final {
+  DeviceTextureHandle cubemap{};
+  TextureHandle texture{};
+  std::uint32_t version = 0U;
+
+  friend bool operator==(const IblBakeSource &,
+                         const IblBakeSource &) noexcept = default;
+};
+
+/// One baked image-based-light environment: the specular prefilter chain
+/// and the diffuse irradiance cube, each with what it was baked from and
+/// at which size, so a bake reruns only when one of those changes.
+struct IblEnvironmentSet final {
+  DeviceTextureHandle prefilteredTexture{};
+  IblBakeSource prefilteredSource{};
+  int prefilteredFaceSize = 0;
+  int prefilteredMipLevels = 0;
+  DeviceTextureHandle irradianceTexture{};
+  IblBakeSource irradianceSource{};
+  int irradianceFaceSize = 0;
+};
+
+/// One reflection probe's GPU state: the cubemap its capture renders into,
+/// the environment baked from it, and what that bake was taken for, so a
+/// probe is captured again only when one of those changes.
+struct ReflectionProbeSlot final {
+  /// Whether the slot holds a probe, and which (its request id).
+  bool used = false;
+  std::uint64_t id = 0U;
+  /// The request, sky and bake generation the slot was last captured for;
+  /// `captured` is false until the first capture attempt.
+  bool captured = false;
+  ReflectionProbeRequest capturedFor{};
+  TextureHandle capturedSky{};
+  std::uint8_t capturedSkyModel = 0U;
+  std::uint32_t capturedGeneration = 0U;
+  std::uint32_t bakeCount = 0U;
+  DeviceTextureHandle captureCube{};
+  DeviceTextureHandle captureDepth{};
+  int captureFaceSize = 0;
+  /// Bumped per capture so the environment bake sees new contents under
+  /// the same cube handle.
+  std::uint32_t captureVersion = 0U;
+  IblEnvironmentSet environment{};
+};
+
 struct BackendState final {
   static constexpr int kBloomMipLevels = RenderViewResources::kBloomMipLevels;
   static constexpr int kLuminanceMipLevels =
@@ -389,14 +441,6 @@ struct BackendState final {
   ShaderParam environmentPrefilterProjectionLoc{};
   ShaderParam environmentPrefilterTextureLoc{};
   ShaderParam environmentPrefilterRoughnessLoc{};
-  DeviceTextureHandle prefilteredEnvironmentTexture{};
-  DeviceTextureHandle prefilteredEnvironmentSource{};
-  // The texture the bake came from, with its generation: bgfx reuses a
-  // destroyed texture's device handle, so the device handle alone would
-  // take a new environment for the one it replaced.
-  TextureHandle prefilteredEnvironmentSourceTexture{};
-  int prefilteredEnvironmentFaceSize = 0;
-  int prefilteredEnvironmentMipLevels = 0;
 
   bool environmentIrradianceAvailable = false;
   ShaderProgramHandle environmentIrradianceShaderHandle{};
@@ -404,16 +448,24 @@ struct BackendState final {
   ShaderParam environmentIrradianceViewLoc{};
   ShaderParam environmentIrradianceProjectionLoc{};
   ShaderParam environmentIrradianceTextureLoc{};
-  DeviceTextureHandle irradianceEnvironmentTexture{};
-  DeviceTextureHandle irradianceEnvironmentSource{};
-  TextureHandle irradianceEnvironmentSourceTexture{};
-  int irradianceEnvironmentFaceSize = 0;
 
   bool environmentBrdfLutAvailable = false;
   ShaderProgramHandle environmentBrdfLutShaderHandle{};
   DeviceProgramHandle environmentBrdfLutProgram{};
   DeviceTextureHandle brdfLutTexture{};
   int brdfLutSize = 0;
+
+  // The sky's environment, baked from the active skybox cubemap.
+  IblEnvironmentSet skyEnvironment{};
+  // Reflection probes' captures and environments, matched to requests by
+  // id; a view's camera picks the one lighting it.
+  std::array<ReflectionProbeSlot, kMaxReflectionProbes> reflectionProbes{};
+  ShaderParam pbrProbeBoxMinLoc{};
+  ShaderParam pbrProbeBoxMaxLoc{};
+  ShaderParam pbrProbeCenterLoc{};
+  ShaderParam dlProbeBoxMinLoc{};
+  ShaderParam dlProbeBoxMaxLoc{};
+  ShaderParam dlProbeCenterLoc{};
 
   // Deferred rendering state.
   bool deferredAvailable = false;
@@ -732,6 +784,18 @@ struct RendererContext final {
   char shaderRootPath[260] = {};
   std::array<SceneCaptureRequest, kMaxSceneCaptures> sceneCaptureRequests{};
   std::size_t sceneCaptureRequestCount = 0U;
+  std::array<ReflectionProbeRequest, kMaxReflectionProbes>
+      reflectionProbeRequests{};
+  std::size_t reflectionProbeRequestCount = 0U;
+  // Bumped by request_reflection_probe_bake; a probe captured under an
+  // older generation is captured again.
+  std::uint32_t reflectionProbeBakeGeneration = 0U;
+  // Per view: the request index lighting its last flush, -1 for the sky.
+  std::array<int, kMaxRenderViews> activeReflectionProbe = [] {
+    std::array<int, kMaxRenderViews> none{};
+    none.fill(-1);
+    return none;
+  }();
   std::array<SkinPalette, kMaxSkinPalettes> skinPalettes =
       std::array<SkinPalette, kMaxSkinPalettes>();
   std::size_t skinPaletteCount = 0U;

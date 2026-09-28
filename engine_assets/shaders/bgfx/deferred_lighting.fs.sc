@@ -67,6 +67,9 @@ SAMPLER2D(uBrdfLut, 15);
 uniform vec4 uSsaoEnabled;        // .x
 uniform vec4 uIblEnabled;         // .x
 uniform vec4 uPrefilteredMips;    // .x
+uniform vec4 uProbeBoxMin;        // xyz box min, w 1 when box-projected
+uniform vec4 uProbeBoxMax;        // xyz box max, w intensity
+uniform vec4 uProbeCenter;        // xyz capture position
 uniform mat4 uInvProjection;
 uniform mat4 uInvView;
 uniform vec4 uDirLightDirection;  // .xyz
@@ -167,22 +170,48 @@ vec3 fresnel_schlick_roughness(float cosTheta, vec3 F0, float roughness) {
                 pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
 }
 
+// Where a reflection leaves the lighting probe's box, seen from the
+// point the probe was captured at (box projection): nearby walls then
+// reflect where they are rather than at infinity. Unprojected for the sky,
+// and for a point outside the box, where the box's walls do not surround it.
+vec3 probe_reflection_dir(vec3 worldPos, vec3 R) {
+    vec3 boxMin = uProbeBoxMin.xyz;
+    vec3 boxMax = uProbeBoxMax.xyz;
+    bool inside = worldPos.x >= boxMin.x && worldPos.y >= boxMin.y &&
+                  worldPos.z >= boxMin.z && worldPos.x <= boxMax.x &&
+                  worldPos.y <= boxMax.y && worldPos.z <= boxMax.z;
+    if (uProbeBoxMin.w == 0.0 || !inside) {
+        return R;
+    }
+    // A zero component keeps a direction, so no plane distance divides
+    // by zero.
+    vec3 safeR = (step(vec3_splat(0.0), R) * 2.0 - 1.0) *
+                 max(abs(R), vec3_splat(1.0e-5));
+    vec3 toMax = (boxMax - worldPos) / safeR;
+    vec3 toMin = (boxMin - worldPos) / safeR;
+    vec3 exits = max(toMax, toMin);
+    float exitDistance = min(min(exits.x, exits.y), exits.z);
+    return (worldPos + R * exitDistance) - uProbeCenter.xyz;
+}
+
 // Split-sum image-based ambient, the forward pbr program's term: the
 // irradiance map lights the diffuse lobe and the prefiltered map, weighted
-// by the BRDF table, the specular one.
-vec3 ibl_ambient(vec3 N, vec3 V, vec3 albedo, float metallic,
+// by the BRDF table, the specular one, both scaled by the environment's
+// intensity.
+vec3 ibl_ambient(vec3 worldPos, vec3 N, vec3 V, vec3 albedo, float metallic,
                  float roughness) {
     vec3 F0 = mix(vec3_splat(0.04), albedo, metallic);
     float NdotV = max(dot(N, V), 0.0);
     vec3 F = fresnel_schlick_roughness(NdotV, F0, roughness);
     vec3 kD = (vec3_splat(1.0) - F) * (1.0 - metallic);
     vec3 diffuse = textureCubeLod(uIrradianceMap, N, 0.0).rgb * albedo;
-    vec3 R = reflect(-V, N);
+    vec3 R = probe_reflection_dir(worldPos, reflect(-V, N));
     vec3 prefiltered =
         textureCubeLod(uPrefilteredMap, R,
                        roughness * max(uPrefilteredMips.x - 1.0, 0.0)).rgb;
     vec2 brdf = texture2DLod(uBrdfLut, vec2(NdotV, roughness), 0.0).rg;
-    return kD * diffuse + prefiltered * (F * brdf.x + brdf.y);
+    return (kD * diffuse + prefiltered * (F * brdf.x + brdf.y)) *
+           uProbeBoxMax.w;
 }
 
 vec3 cook_torrance(vec3 N, vec3 V, vec3 L, vec3 albedo, float metallic,
@@ -533,7 +562,7 @@ void main() {
         (uSsaoEnabled.x != 0.0) ? texture2D(uSsaoTexture, v_texcoord0).r
                                 : 1.0;
     vec3 ambient = (uIblEnabled.x != 0.0)
-                       ? ibl_ambient(N, V, albedo, metallic, roughness)
+                       ? ibl_ambient(worldPos, N, V, albedo, metallic, roughness)
                        : (vec3_splat(0.03) * albedo);
     ambient *= ao * ssaoFactor;
     vec3 color = ambient + Lo + emissive;

@@ -56,7 +56,7 @@ void draw_hosek_sky(const BackendState &, const RenderDevice *,
                     const math::Mat4 &, const math::Mat4 &,
                     const SceneLightData &, RendererFrameStats &) noexcept {}
 void apply_pbr_ibl_uniforms(const BackendState &, const RenderDevice *,
-                            bool) noexcept {}
+                            const IblSelection &) noexcept {}
 void bind_pbr_shadow_uniforms(const BackendState &, const RenderDevice *,
                               const SceneLightData &, bool, bool,
                               bool) noexcept {}
@@ -143,9 +143,7 @@ FrameFlushContext make_context(const SceneLightData &lights,
                            .fogSettings = {},
                            .heightFogSettings = {},
                            .envSkyboxTexture = {},
-                           .iblPrefilteredTex = {},
-                           .iblIrradianceTex = {},
-                           .iblAvailable = false,
+                           .ibl = {},
                            .viewMat = {},
                            .projMat = {},
                            .viewProjection = {},

@@ -7,12 +7,14 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "command_buffer_context.h"
 #include "engine/math/mat4.h"
+#include "engine/math/vec3.h"
+#include "engine/math/vec4.h"
 #include "engine/renderer/command_buffer.h"
 #include "engine/renderer/mesh_loader.h"
 #include "engine/renderer/pass_resources.h"
 #include "engine/renderer/render_device.h"
-#include "command_buffer_context.h"
 
 namespace engine::renderer {
 
@@ -35,6 +37,23 @@ constexpr int kIblIrradianceUnit = 13;
 constexpr int kIblPrefilteredUnit = 14;
 constexpr int kIblBrdfLutUnit = 15;
 
+/// The image-based light one view's geometry samples, and the prefilter
+/// chain length its roughness lookup spans; unavailable means the constant
+/// ambient fallback.
+struct IblSelection final {
+  DeviceTextureHandle prefiltered{};
+  DeviceTextureHandle irradiance{};
+  int prefilteredMipLevels = 0;
+  bool available = false;
+  // The probe lighting the view, for the shaders' box projection and
+  // scale: probeBoxMin.w is 1 when reflections are box-projected and
+  // probeBoxMax.w is the intensity. The sky leaves projection off at
+  // intensity 1.
+  math::Vec4 probeBoxMin = math::Vec4(0.0F, 0.0F, 0.0F, 0.0F);
+  math::Vec4 probeBoxMax = math::Vec4(0.0F, 0.0F, 0.0F, 1.0F);
+  math::Vec4 probeCenter = math::Vec4(0.0F, 0.0F, 0.0F, 0.0F);
+};
+
 /// Everything flush_renderer computes once per frame and the pass functions
 /// share: targets, camera matrices, partition counts, feature toggles, and
 /// the accumulated frame stats. Shadow toggles are written by
@@ -52,9 +71,7 @@ struct FrameFlushContext final {
   DistanceFogSettings fogSettings;
   HeightFogSettings heightFogSettings;
   DeviceTextureHandle envSkyboxTexture;
-  DeviceTextureHandle iblPrefilteredTex;
-  DeviceTextureHandle iblIrradianceTex;
-  bool iblAvailable;
+  IblSelection ibl;
   math::Mat4 viewMat;
   math::Mat4 projMat;
   math::Mat4 viewProjection;
@@ -102,6 +119,48 @@ void for_each_shadow_caster(const FrameFlushContext &ctx, Fn &&fn) noexcept {
   }
 }
 
+/// What an offscreen scene render draws: the frame's draw lists and the
+/// lighting they are shaded with. Scene captures and reflection-probe
+/// faces both render through draw_offscreen_scene.
+struct OffscreenSceneInputs final {
+  BackendState *backend = nullptr;
+  const RenderDevice *dev = nullptr;
+  const GpuMeshRegistry *registry = nullptr;
+  CommandBufferView mainView{};
+  std::size_t mainOpaqueCount = 0U;
+  std::size_t mainTotalCount = 0U;
+  CommandBufferView auxiliaryView{};
+  std::size_t auxiliaryOpaqueCount = 0U;
+  const SceneLightData *lights = nullptr;
+  float timeSeconds = 0.0F;
+  DistanceFogSettings fogSettings{};
+  HeightFogSettings heightFogSettings{};
+  RendererFrameStats *frameStats = nullptr;
+};
+
+/// One offscreen camera: its matrices and position, which auxiliary draws
+/// it takes (the main list is always drawn), the colour texture it renders
+/// into, which no draw may sample, and the face culling its target's
+/// orientation calls for.
+struct OffscreenCamera final {
+  math::Mat4 view{};
+  math::Mat4 projection{};
+  math::Vec3 position{};
+  std::uint16_t auxiliaryMask = 0U;
+  DeviceTextureHandle renderTarget{};
+  CullMode cull = CullMode::Back;
+};
+
+/// The offscreen inputs `ctx` carries for this frame.
+OffscreenSceneInputs offscreen_scene_inputs(FrameFlushContext &ctx) noexcept;
+
+/// Forward-draws the opaque then the transparent commands for `camera` into
+/// the bound target with the PBR program, lit by the scene lights and `ibl`,
+/// without shadows. Leaves the program and texture unit 0 unbound.
+void draw_offscreen_scene(const OffscreenSceneInputs &inputs,
+                          const OffscreenCamera &camera,
+                          const IblSelection &ibl) noexcept;
+
 /// Cascade, spot, and point shadow-map passes; writes the shadow feature
 /// toggles into the context.
 void flush_shadow_passes(FrameFlushContext &ctx) noexcept;
@@ -138,6 +197,12 @@ distance_fog_settings_from_cvars(BackendState &backend) noexcept;
 HeightFogSettings
 height_fog_settings_from_cvars(const FlushCVars &cvars) noexcept;
 
+/// Uploads `ibl`'s probe box, centre and intensity to one program's probe
+/// uniforms; an invalid location is skipped.
+void upload_probe_uniforms(const RenderDevice *dev, ShaderParam boxMinLoc,
+                           ShaderParam boxMaxLoc, ShaderParam centerLoc,
+                           const IblSelection &ibl) noexcept;
+
 /// Uploads the environment IBL uniforms for the forward PBR program and
 /// binds its textures when enabled; every pbrProgram pass must call this so
 /// stale program state never leaks between passes. The sampler units are
@@ -145,7 +210,8 @@ height_fog_settings_from_cvars(const FlushCVars &cvars) noexcept;
 /// unit 0 aliases the sampler2D albedo there, which is a draw-time
 /// GL_INVALID_OPERATION that corrupts every draw.
 void apply_pbr_ibl_uniforms(const BackendState &backend,
-                            const RenderDevice *dev, bool enabled) noexcept;
+                            const RenderDevice *dev,
+                            const IblSelection &ibl) noexcept;
 
 /// Uploads the forward PBR light arrays and counts.
 void upload_pbr_lighting_uniforms(const BackendState &backend,

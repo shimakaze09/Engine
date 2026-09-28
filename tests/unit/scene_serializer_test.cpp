@@ -191,7 +191,6 @@ int build_source_scene(const char *path) {
   thirdProbe.irradianceResolution = 64U;
   thirdProbe.mipLevels = 6U;
   thirdProbe.boxProjection = true;
-  thirdProbe.needsBake = false;
   if (!world->add_reflection_probe_component(third, thirdProbe)) {
     return 11;
   }
@@ -297,7 +296,6 @@ int build_source_buffer(
   thirdProbe.irradianceResolution = 64U;
   thirdProbe.mipLevels = 6U;
   thirdProbe.boxProjection = true;
-  thirdProbe.needsBake = false;
   if (!world->add_reflection_probe_component(third, thirdProbe)) {
     return 52;
   }
@@ -399,7 +397,7 @@ int verify_loaded_scene(const char *path) {
                                   (probe.prefilteredResolution == 256U) &&
                                   (probe.irradianceResolution == 64U) &&
                                   (probe.mipLevels == 6U) &&
-                                  probe.boxProjection && !probe.needsBake;
+                                  probe.boxProjection;
     }
 
     engine::runtime::SceneCaptureComponent capture{};
@@ -547,7 +545,7 @@ int verify_loaded_scene_from_buffer(
                                   (probe.prefilteredResolution == 256U) &&
                                   (probe.irradianceResolution == 64U) &&
                                   (probe.mipLevels == 6U) &&
-                                  probe.boxProjection && !probe.needsBake;
+                                  probe.boxProjection;
     }
 
     engine::runtime::SceneCaptureComponent capture{};
@@ -1913,6 +1911,47 @@ int check_gravity_round_trip() {
   return 0;
 }
 
+/// A reflection probe's bake request is runtime state and its BRDF LUT
+/// size was never its own (every environment shares one LUT): a scene
+/// written before they were retired still loads with its authored fields,
+/// and a save no longer carries them.
+int check_retired_probe_fields_are_ignored() {
+  using namespace engine::runtime;
+
+  constexpr const char *kLegacyScene =
+      "{\"version\":6,\"entities\":[{\"components\":{"
+      "\"ReflectionProbeComponent\":{\"radius\":3.5,\"needsBake\":false,"
+      "\"brdfLutResolution\":256}}}]}";
+  std::unique_ptr<World> loaded(new (std::nothrow) World());
+  if ((loaded == nullptr) ||
+      !load_scene(*loaded, kLegacyScene, std::strlen(kLegacyScene))) {
+    return 360;
+  }
+  if (loaded->reflection_probe_count() != 1U) {
+    return 361;
+  }
+  const ReflectionProbeComponent *probe = loaded->reflection_probe_at(0U);
+  if ((probe == nullptr) || (probe->radius != 3.5F)) {
+    return 362;
+  }
+
+  std::unique_ptr<std::array<char, engine::core::JsonWriter::kBufferBytes>>
+      buffer(new (std::nothrow)
+                 std::array<char, engine::core::JsonWriter::kBufferBytes>());
+  std::size_t size = 0U;
+  if ((buffer == nullptr) ||
+      !save_scene(*loaded, buffer->data(), buffer->size(), &size)) {
+    return 363;
+  }
+  const std::string saved(buffer->data(), size);
+  if ((saved.find("ReflectionProbeComponent") == std::string::npos) ||
+      (saved.find("needsBake") != std::string::npos) ||
+      (saved.find("brdfLutResolution") != std::string::npos)) {
+    return 364;
+  }
+  return 0;
+}
+
 /// No-op callback for arming a timer ahead of a save.
 void transient_timer_noop(engine::runtime::TimerId, void *) noexcept {}
 
@@ -2319,6 +2358,10 @@ int main() {
   }
 
   result = check_gravity_round_trip();
+  if (result != 0) {
+    return result;
+  }
+  result = check_retired_probe_fields_are_ignored();
   if (result != 0) {
     return result;
   }

@@ -23,6 +23,9 @@ void reset_renderer_public_state() noexcept {
   renderer_context().activeSkyboxTexture = kInvalidTextureHandle;
   renderer_context().sceneCaptureRequests = {};
   renderer_context().sceneCaptureRequestCount = 0U;
+  renderer_context().reflectionProbeRequests = {};
+  renderer_context().reflectionProbeRequestCount = 0U;
+  renderer_context().activeReflectionProbe.fill(-1);
   // Stored skin palettes outlive the frame that flushed them and disable
   // the directional shadow cache while any is present; a run that ends
   // with skinned meshes must not leave the next run's cache off.

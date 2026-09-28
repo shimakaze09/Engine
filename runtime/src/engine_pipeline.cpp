@@ -699,6 +699,14 @@ struct EnginePipeline::Impl final {
   std::array<renderer::SceneCaptureRequest, renderer::kMaxSceneCaptures>
       frameCaptureRequests{};
   std::size_t frameCaptureRequestCount = 0U;
+  std::array<renderer::ReflectionProbeRequest, renderer::kMaxReflectionProbes>
+      frameProbeRequests{};
+  std::size_t frameProbeRequestCount = 0U;
+  // A probe captures what the world held when it baked: a new scene, or
+  // the end of the loads a scene started, captures every probe again.
+  std::uint32_t probeContentEpoch = 0U;
+  bool probeContentEpochSeen = false;
+  bool probeAssetsWereLoading = false;
   // Distinguishes fatal loop exits from graceful stops for engine::run.
   bool fatalError = false;
   LoopPlayState previousPlayState = LoopPlayState::Playing;
@@ -2109,6 +2117,24 @@ void EnginePipeline::Impl::collect_frame_scene_data() noexcept {
   frameSceneLights = collect_scene_lights(*world);
   frameCaptureRequestCount = collect_scene_captures(
       *world, frameCaptureRequests.data(), renderer::kMaxSceneCaptures);
+  frameProbeRequestCount = collect_reflection_probes(
+      *world, renderer::get_active_camera().position, frameProbeRequests.data(),
+      renderer::kMaxReflectionProbes);
+  if (frameProbeRequestCount == 0U) {
+    return;
+  }
+  const std::uint32_t epoch = world->content_epoch();
+  const bool assetsLoading =
+      (count_mesh_asset_states(assetDatabase.get()).loading > 0U) ||
+      (renderer::pending_asset_request_count(assetManager.get()) > 0U) ||
+      (content::pending_load_count(assetStreamingQueue.get()) > 0U);
+  if ((probeContentEpochSeen && (epoch != probeContentEpoch)) ||
+      (probeAssetsWereLoading && !assetsLoading)) {
+    renderer::request_reflection_probe_bake();
+  }
+  probeContentEpoch = epoch;
+  probeContentEpochSeen = true;
+  probeAssetsWereLoading = assetsLoading;
 }
 
 /// Derives what render prep must keep beyond the camera frustum from the
@@ -2140,6 +2166,10 @@ void EnginePipeline::Impl::build_auxiliary_inputs() noexcept {
       inputs.localCasters[inputs.localCasterCount++] = {light.position,
                                                         light.radius};
     }
+  }
+  for (std::size_t i = 0U; i < frameProbeRequestCount; ++i) {
+    inputs.probeSpheres[inputs.probeCount++] = {
+        frameProbeRequests[i].position, frameProbeRequests[i].captureDistance};
   }
   for (std::size_t i = 0U; i < frameCaptureRequestCount; ++i) {
     const renderer::SceneCaptureRequest &request = frameCaptureRequests[i];
@@ -2249,6 +2279,8 @@ void EnginePipeline::Impl::stage_render() noexcept {
 
   renderer::set_scene_capture_requests(frameCaptureRequests.data(),
                                        frameCaptureRequestCount);
+  renderer::set_reflection_probe_requests(frameProbeRequests.data(),
+                                          frameProbeRequestCount);
 
   // The Game view goes first: it owns the back buffer and the frame's
   // once-only work. The Scene view, when the editor shows one, draws the
@@ -2419,13 +2451,16 @@ void EnginePipeline::Impl::stage_diagnostics() noexcept {
     const renderer::CommandBufferView auxiliary = auxiliaryCommandBuffer->view();
     std::uint32_t casters = 0U;
     std::uint32_t captureOnly = 0U;
+    std::uint32_t probeDraws = 0U;
     for (std::uint32_t i = 0U; i < auxiliary.count; ++i) {
       const std::uint16_t mask = auxiliary.data[i].passMask;
       casters += ((mask & renderer::kPassShadowCaster) != 0U) ? 1U : 0U;
-      captureOnly += (mask >= renderer::kPassCaptureBase) ? 1U : 0U;
+      captureOnly += ((mask & renderer::kPassCaptureMask) != 0U) ? 1U : 0U;
+      probeDraws += ((mask & renderer::kPassReflectionProbe) != 0U) ? 1U : 0U;
     }
     frameStats.offscreenShadowCasters = casters;
     frameStats.captureOnlyDraws = captureOnly;
+    frameStats.reflectionProbeDraws = probeDraws;
     frameStats.hotReloadPolls = frameHotReloadPolls;
   }
   frameStats.fixedSteps = clock.stepsThisFrame;
