@@ -1173,6 +1173,19 @@ engine_add_test_executable(engine_unit_editor_console_commands
     SDL_MAIN_HANDLED
 )
 
+engine_add_test_executable(engine_unit_editor_screenshot
+    SOURCES
+    editor_screenshot_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/editor/include
+    ${CMAKE_SOURCE_DIR}/editor/src
+    ${CMAKE_SOURCE_DIR}/runtime/src
+    PRIVATE_DEPS
+    engine_editor
+    COMPILE_DEFINITIONS
+    SDL_MAIN_HANDLED
+)
+
 engine_add_test_executable(engine_unit_editor_inspector_text_entry
     SOURCES
     editor_inspector_text_entry_test.cpp
@@ -1823,6 +1836,18 @@ engine_add_test_executable(engine_unit_screenshot_tga
     ${CMAKE_SOURCE_DIR}/renderer/src/screenshot_tga.cpp
     PRIVATE_INCLUDE_DIRS
     ${CMAKE_SOURCE_DIR}/renderer/src
+    PRIVATE_DEPS
+    engine_core
+)
+
+engine_add_test_executable(engine_unit_screenshot_png
+    SOURCES
+    screenshot_png_test.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/screenshot_png.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/renderer/src
+    ${CMAKE_SOURCE_DIR}/renderer/include
+    ${ENGINE_STB_INCLUDE_DIR}
     PRIVATE_DEPS
     engine_core
 )

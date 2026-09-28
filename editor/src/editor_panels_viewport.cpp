@@ -9,7 +9,9 @@
 #include "editor_grid.h"
 #include "editor_light_gizmos.h"
 #include "editor_scene_query.h"
+#include "editor_screenshot.h"
 #include "editor_session.h"
+#include "editor_shortcuts.h"
 #include "editor_transform_util.h"
 
 #if defined(__clang__) && (defined(__x86_64__) || defined(__i386__)) &&        \
@@ -20,6 +22,7 @@
 #include "imgui.h"
 #include "imgui_internal.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -818,6 +821,34 @@ void draw_scene_viewport_panel() noexcept {
   ImGui::End();
 }
 
+namespace {
+
+/// The Game view's own toolbar row above its image, as Unity's Game view
+/// has one: the Take Screenshot button. Its tooltip is not drawn in the
+/// frame a screenshot is taken, where it could overlap the image.
+void draw_game_view_toolbar(bool capturing) noexcept {
+  // Offset from where the content starts: a docked window's origin lies
+  // under its tab bar.
+  const ImGuiStyle &style = ImGui::GetStyle();
+  ImGui::SetCursorPos(
+      ImVec2(ImGui::GetCursorPosX() + style.ItemSpacing.x,
+             ImGui::GetCursorPosY() + (style.ItemSpacing.y * 0.5F)));
+  const bool enabled = editor_action_enabled(EditorAction::Screenshot);
+  ImGui::BeginDisabled(!enabled);
+  if (ImGui::SmallButton("Screenshot")) {
+    static_cast<void>(run_editor_action(EditorAction::Screenshot));
+  }
+  ImGui::EndDisabled();
+  if (!capturing && ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip |
+                                         ImGuiHoveredFlags_AllowWhenDisabled)) {
+    ImGui::SetTooltip("Save the Game view as a PNG in the project's "
+                      "Screenshots folder (%s)",
+                      editor_shortcut_text(EditorAction::Screenshot));
+  }
+}
+
+} // namespace
+
 void draw_game_view_panel() noexcept {
   // A layout saved before the Game view existed has no place for it: it
   // opens as a tab beside the Scene view instead of floating.
@@ -833,11 +864,13 @@ void draw_game_view_panel() noexcept {
   session.gameViewShown = visible;
   session.gameViewFocused = visible && ImGui::IsWindowFocused();
   session.gameViewHovered = visible && ImGui::IsWindowHovered();
+  const bool capturing = begin_game_view_screenshot_frame(visible);
   if (!visible) {
     ImGui::End();
     return;
   }
 
+  draw_game_view_toolbar(capturing);
   const ImVec2 regionSize = ImGui::GetContentRegionAvail();
   session.gameViewScreenPos = ImGui::GetCursorScreenPos();
   session.gameViewScreenSize = regionSize;
@@ -847,11 +880,27 @@ void draw_game_view_panel() noexcept {
   renderer::set_game_view_size(width, height);
 
   draw_view_image(renderer::RenderViewId::Game, regionSize);
+  if (capturing) {
+    // The part of the image the window shows: its border is drawn over
+    // the image's edge, inside the window's rect but outside its clip.
+    const ImRect clip = ImGui::GetCurrentWindow()->InnerClipRect;
+    const ImVec2 imageMin = session.gameViewScreenPos;
+    const ImVec2 visibleMin(std::max(imageMin.x, clip.Min.x),
+                            std::max(imageMin.y, clip.Min.y));
+    const ImVec2 visibleMax(std::min(imageMin.x + regionSize.x, clip.Max.x),
+                            std::min(imageMin.y + regionSize.y, clip.Max.y));
+    static_cast<void>(take_game_view_screenshot(game_view_screenshot_region(
+        visibleMin,
+        ImVec2(visibleMax.x - visibleMin.x, visibleMax.y - visibleMin.y),
+        ImGui::GetMainViewport()->Pos,
+        ImGui::GetIO().DisplayFramebufferScale)));
+  }
 
   // What stops the game from rendering, over the image where it shows,
-  // as Unity's "No cameras rendering"; nothing when one camera renders.
+  // as Unity's "No cameras rendering"; nothing when one camera renders,
+  // and nothing in the frame a screenshot is taken.
   char notice[192] = {};
-  if ((session.world != nullptr) &&
+  if (!capturing && (session.world != nullptr) &&
       game_camera_notice(*session.world, notice, sizeof(notice))) {
     const float wrapWidth = regionSize.x * 0.8F;
     const ImVec2 textSize =

@@ -48,6 +48,7 @@ engine_add_module_library(engine_renderer
     src/render_settings_table.cpp
     src/render_device_null.cpp
     src/renderer_backend_select.cpp
+    src/screenshot_png.cpp
     src/screenshot_tga.cpp
     src/shader_system.cpp
     src/shadow_map.cpp

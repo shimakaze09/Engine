@@ -3,7 +3,7 @@
 // bind them: Ctrl+S never fires for Ctrl+Shift+S, and a bare W never fires
 // with Ctrl held. Actions that create or write something run once per
 // press; only undo and redo repeat while held, as in those editors. While
-// the game has the keyboard only the play controls fire.
+// the game has the keyboard only the play controls and Take Screenshot fire.
 
 #include "editor_shortcuts.h"
 
@@ -11,6 +11,7 @@
 #include "editor_entity_clipboard.h"
 #include "editor_frame_selection.h"
 #include "editor_scene_document.h"
+#include "editor_screenshot.h"
 #include "editor_session.h"
 
 #include "ImGuizmo.h"
@@ -79,6 +80,9 @@ constexpr std::array<EditorShortcut,
          ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_P, 0, false, true},
         {EditorAction::Step, "play.step", "Step",
          ImGuiMod_Ctrl | ImGuiMod_Alt | ImGuiKey_P, 0, false, true},
+        // Unreal's screenshot key, live in play for the same reason.
+        {EditorAction::Screenshot, "view.screenshot", "Take Screenshot",
+         ImGuiKey_F9, 0, false, true},
     }};
 
 // Each row sits at its action's index, so a lookup is an index.
@@ -294,6 +298,9 @@ bool editor_action_enabled(EditorAction action) noexcept {
   case EditorAction::Step:
     return (editor_session().world != nullptr) &&
            (editor_session().playState != PlayState::Stopped);
+  case EditorAction::Screenshot:
+    // A hidden Game view tab comes to the front to be taken.
+    return true;
   case EditorAction::Count:
   default:
     return false;
@@ -381,6 +388,9 @@ bool run_editor_action(EditorAction action) noexcept {
       pause_play_mode();
     }
     editor_session().stepRequested = true;
+    return true;
+  case EditorAction::Screenshot:
+    request_game_view_screenshot();
     return true;
   case EditorAction::Count:
   default:

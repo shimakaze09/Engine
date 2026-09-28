@@ -68,6 +68,7 @@
 #include "editor_panels_viewport.h"
 #include "editor_preferences.h"
 #include "editor_scene_document.h"
+#include "editor_screenshot.h"
 #include "editor_session.h"
 #include "editor_shortcuts.h"
 
@@ -164,7 +165,8 @@ void draw_editor_panels(float frameMs, float utilizationPct) noexcept {
   draw_inspector_panel();
   // One lightweight overlay and one Profiler window, both off until asked
   // for, as Unity's Game view Stats and Profiler window are.
-  if (showStats) {
+  // Nothing is drawn over the Game view in the frame a screenshot takes.
+  if (showStats && !game_view_screenshot_capturing()) {
     draw_in_game_stats_overlay(stats);
   }
   draw_profiler_panel(stats);
@@ -322,6 +324,8 @@ bool initialize_editor(void *sdlWindow) noexcept {
   register_rendering_panel_cvars();
   register_thumbnail_cache_cvars();
   console_capture_initialize();
+  // A repeated initialization finds the command already registered.
+  static_cast<void>(register_screenshot_command());
 
   // The bgfx ImGui backend owns its device objects; the platform
   // window handle is all SDL needs. A backend failure must release every

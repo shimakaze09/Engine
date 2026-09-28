@@ -17,9 +17,11 @@
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
 #include "engine/core/thread_affinity.h"
+#include "engine/renderer/screenshot.h"
 #include "render_device_bgfx_context.h"
 #include "render_device_null.h"
 #include "renderer_backend_select.h"
+#include "screenshot_png.h"
 #include "screenshot_tga.h"
 #include "texel_downsample.h"
 
@@ -47,6 +49,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <mutex>
 #include <new>
 
 namespace engine::renderer {
@@ -86,9 +89,70 @@ using namespace bgfx_backend;
 
 namespace {
 
+// The one public screenshot request (request_screenshot): its path and
+// region, whether it is waiting for its frame or already handed to bgfx,
+// and the frames since, and the last finished request's result. Guarded by
+// the mutex: bgfx may hand the pixels back on its render thread.
+std::mutex g_screenshotMutex;
+char g_screenshotPath[kMaxScreenshotPath] = {};
+bool g_screenshotHasRegion = false;
+ScreenshotRegion g_screenshotRegion{};
+bool g_screenshotWaiting = false;
+bool g_screenshotSubmitted = false;
+std::uint32_t g_screenshotFramesSinceSubmit = 0U;
+ScreenshotResult g_screenshotResult{};
+
+/// Frames a submitted request may wait for its pixels before it is given
+/// up: bgfx delivers them within two.
+constexpr std::uint32_t kScreenshotDeliveryFrames = 8U;
+
+/// Records a finished public request. Caller holds g_screenshotMutex.
+void record_screenshot_result(bool succeeded) noexcept {
+  ++g_screenshotResult.sequence;
+  g_screenshotResult.succeeded = succeeded;
+  std::memcpy(g_screenshotResult.path, g_screenshotPath,
+              sizeof(g_screenshotResult.path));
+  g_screenshotWaiting = false;
+  g_screenshotSubmitted = false;
+  g_screenshotFramesSinceSubmit = 0U;
+}
+
+/// Writes bgfx's readback: a public request as a PNG of its region, and
+/// anything else (the tests' and ENGINE_BGFX_SCREENSHOT's diagnostic
+/// captures) as an uncompressed TGA, which needs no image codec.
+void finish_screenshot(const char *filePath, std::uint32_t width,
+                       std::uint32_t height, std::uint32_t pitch,
+                       const void *data, bool yflip) noexcept {
+  bool isRequest = false;
+  bool hasRegion = false;
+  ScreenshotRegion region{};
+  {
+    std::lock_guard<std::mutex> lock(g_screenshotMutex);
+    isRequest = g_screenshotSubmitted && (filePath != nullptr) &&
+                (std::strcmp(filePath, g_screenshotPath) == 0);
+    hasRegion = g_screenshotHasRegion;
+    region = g_screenshotRegion;
+  }
+  if (!isRequest) {
+    static_cast<void>(
+        write_bgra_tga(filePath, width, height, pitch, data, yflip));
+    return;
+  }
+  const bool written = write_bgra_png(filePath, width, height, pitch, data,
+                                      yflip, hasRegion ? &region : nullptr);
+  if (written) {
+    char message[640] = {};
+    std::snprintf(message, sizeof(message), "screenshot saved to %s", filePath);
+    core::log_message(core::LogLevel::Info, "renderer", message);
+  }
+  std::lock_guard<std::mutex> lock(g_screenshotMutex);
+  record_screenshot_result(written);
+}
+
 /// Routes bgfx fatal errors and (cvar-gated) trace output into the
-/// engine log; cache/screenshot/capture callbacks stay inert. Virtual
-/// dispatch is bgfx's callback contract and only runs on cold paths.
+/// engine log, and its screenshot readback to the screenshot writers;
+/// cache and capture callbacks stay inert. Virtual dispatch is bgfx's
+/// callback contract and only runs on cold paths.
 class BgfxCallback final : public bgfx::CallbackI {
 public:
   ~BgfxCallback() override = default;
@@ -142,8 +206,7 @@ public:
                   std::uint32_t height, std::uint32_t pitch,
                   bgfx::TextureFormat::Enum, const void *data,
                   std::uint32_t, bool yflip) override {
-    static_cast<void>(
-        write_bgra_tga(filePath, width, height, pitch, data, yflip));
+    finish_screenshot(filePath, width, height, pitch, data, yflip);
   }
   void captureBegin(std::uint32_t, std::uint32_t, std::uint32_t,
                     bgfx::TextureFormat::Enum, bool) override {}
@@ -1465,6 +1528,16 @@ void shutdown_render_device() noexcept {
     }
     bgfx::shutdown();
   }
+  {
+    // A request still waiting for its frame will never get one: finish it
+    // as failed so the next device takes requests again.
+    std::lock_guard<std::mutex> lock(g_screenshotMutex);
+    if (g_screenshotWaiting) {
+      core::log_message(core::LogLevel::Error, "renderer",
+                        "screenshot failed: the device shut down first");
+      record_screenshot_result(false);
+    }
+  }
   ctx.fullscreenVertex = BGFX_INVALID_HANDLE;
   ctx.fullscreenLayout = BGFX_INVALID_HANDLE;
   // Null-mode runs never create registry entries; this only clears
@@ -1490,6 +1563,40 @@ char g_requestedScreenshotPath[512] = {};
 
 } // namespace
 
+bool request_screenshot(const char *path,
+                        const ScreenshotRegion *region) noexcept {
+  const BgfxDeviceContext &ctx = device_context();
+  if (!ctx.initialized || (ctx.mode != BgfxBackendMode::Bgfx)) {
+    core::log_message(core::LogLevel::Warning, "renderer",
+                      "screenshot refused: no rendering device to read the "
+                      "frame back from");
+    return false;
+  }
+  if ((path == nullptr) || (path[0] == '\0') ||
+      (std::strlen(path) >= kMaxScreenshotPath)) {
+    core::log_message(core::LogLevel::Error, "renderer",
+                      "screenshot refused: the path is empty or too long");
+    return false;
+  }
+  std::lock_guard<std::mutex> lock(g_screenshotMutex);
+  if (g_screenshotWaiting) {
+    core::log_message(core::LogLevel::Warning, "renderer",
+                      "screenshot refused: the last one is still being taken");
+    return false;
+  }
+  std::memcpy(g_screenshotPath, path, std::strlen(path) + 1U);
+  g_screenshotHasRegion = (region != nullptr);
+  g_screenshotRegion = (region != nullptr) ? *region : ScreenshotRegion{};
+  g_screenshotWaiting = true;
+  g_screenshotSubmitted = false;
+  return true;
+}
+
+ScreenshotResult last_screenshot_result() noexcept {
+  std::lock_guard<std::mutex> lock(g_screenshotMutex);
+  return g_screenshotResult;
+}
+
 bool render_device_bgfx_request_screenshot(const char *path) noexcept {
   if (path == nullptr) {
     return false;
@@ -1514,6 +1621,21 @@ void render_device_bgfx_frame() noexcept {
   if (g_requestedScreenshotPath[0] != '\0') {
     bgfx::requestScreenShot(BGFX_INVALID_HANDLE, g_requestedScreenshotPath);
     g_requestedScreenshotPath[0] = '\0';
+  } else {
+    // A public request goes to bgfx with the frame after it was made, and
+    // is given up, with a log line, if its pixels never come back.
+    std::lock_guard<std::mutex> lock(g_screenshotMutex);
+    if (g_screenshotWaiting && !g_screenshotSubmitted) {
+      bgfx::requestScreenShot(BGFX_INVALID_HANDLE, g_screenshotPath);
+      g_screenshotSubmitted = true;
+      g_screenshotFramesSinceSubmit = 0U;
+    } else if (g_screenshotSubmitted &&
+               (++g_screenshotFramesSinceSubmit > kScreenshotDeliveryFrames)) {
+      core::log_message(core::LogLevel::Error, "renderer",
+                        "screenshot failed: the device never returned the "
+                        "frame");
+      record_screenshot_result(false);
+    }
   }
   // Diagnostic capture: with ENGINE_BGFX_SCREENSHOT=<path.tga> in the
   // environment, the presented back buffer is written there every ~2
