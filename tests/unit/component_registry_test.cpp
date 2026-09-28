@@ -268,7 +268,6 @@ void make_test_value(ReflectionProbeComponent *out) noexcept {
   out->intensity = 1.25F;
   out->prefilteredResolution = 64U;
   out->irradianceResolution = 16U;
-  out->brdfLutResolution = 128U;
   out->mipLevels = 4U;
   out->boxProjection = true;
 }
@@ -279,7 +278,6 @@ bool components_equal(const ReflectionProbeComponent &a,
          (a.intensity == b.intensity) &&
          (a.prefilteredResolution == b.prefilteredResolution) &&
          (a.irradianceResolution == b.irradianceResolution) &&
-         (a.brdfLutResolution == b.brdfLutResolution) &&
          (a.mipLevels == b.mipLevels) && (a.boxProjection == b.boxProjection);
 }
 

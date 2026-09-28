@@ -30,7 +30,6 @@ int verify_reflection_probe_crud() {
   probe.intensity = 1.5F;
   probe.prefilteredResolution = 256U;
   probe.irradianceResolution = 64U;
-  probe.brdfLutResolution = 512U;
   probe.mipLevels = 6U;
   probe.boxProjection = true;
 
@@ -60,8 +59,7 @@ int verify_reflection_probe_crud() {
   if (!nearly_equal(readBack.radius, 12.0F) ||
       !nearly_equal(readBack.intensity, 1.5F) ||
       (readBack.prefilteredResolution != 256U) ||
-      (readBack.irradianceResolution != 64U) ||
-      (readBack.brdfLutResolution != 512U) || (readBack.mipLevels != 6U) ||
+      (readBack.irradianceResolution != 64U) || (readBack.mipLevels != 6U) ||
       !readBack.boxProjection) {
     return 9;
   }

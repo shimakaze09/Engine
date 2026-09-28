@@ -1911,15 +1911,17 @@ int check_gravity_round_trip() {
   return 0;
 }
 
-/// A reflection probe's bake request is runtime state, not authored data:
-/// a scene written before the flag was retired still loads with its
-/// authored fields, and a save no longer carries it.
-int check_retired_probe_bake_flag_is_ignored() {
+/// A reflection probe's bake request is runtime state and its BRDF LUT
+/// size was never its own (every environment shares one LUT): a scene
+/// written before they were retired still loads with its authored fields,
+/// and a save no longer carries them.
+int check_retired_probe_fields_are_ignored() {
   using namespace engine::runtime;
 
   constexpr const char *kLegacyScene =
       "{\"version\":6,\"entities\":[{\"components\":{"
-      "\"ReflectionProbeComponent\":{\"radius\":3.5,\"needsBake\":false}}}]}";
+      "\"ReflectionProbeComponent\":{\"radius\":3.5,\"needsBake\":false,"
+      "\"brdfLutResolution\":256}}}]}";
   std::unique_ptr<World> loaded(new (std::nothrow) World());
   if ((loaded == nullptr) ||
       !load_scene(*loaded, kLegacyScene, std::strlen(kLegacyScene))) {
@@ -1943,7 +1945,8 @@ int check_retired_probe_bake_flag_is_ignored() {
   }
   const std::string saved(buffer->data(), size);
   if ((saved.find("ReflectionProbeComponent") == std::string::npos) ||
-      (saved.find("needsBake") != std::string::npos)) {
+      (saved.find("needsBake") != std::string::npos) ||
+      (saved.find("brdfLutResolution") != std::string::npos)) {
     return 364;
   }
   return 0;
@@ -2358,7 +2361,7 @@ int main() {
   if (result != 0) {
     return result;
   }
-  result = check_retired_probe_bake_flag_is_ignored();
+  result = check_retired_probe_fields_are_ignored();
   if (result != 0) {
     return result;
   }

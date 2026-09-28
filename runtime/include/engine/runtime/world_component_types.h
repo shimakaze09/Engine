@@ -60,7 +60,6 @@ struct ReflectionProbeComponent final {
   float intensity = 1.0F;
   std::uint32_t prefilteredResolution = 128U;
   std::uint32_t irradianceResolution = 32U;
-  std::uint32_t brdfLutResolution = 512U;
   std::uint32_t mipLevels = 5U;
   bool boxProjection = false;
 };
