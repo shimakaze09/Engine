@@ -325,6 +325,11 @@ void set_reflection_probe_requests(const ReflectionProbeRequest *requests,
                                    std::size_t count) noexcept;
 /// Number of probe requests currently stored.
 std::size_t reflection_probe_request_count() noexcept;
+/// Writes stored request `index`, with its values normalized, to `*out`;
+/// false when there is no such request. Readable without a render backend,
+/// so it shows what the runtime handed the renderer.
+bool get_reflection_probe_request(std::size_t index,
+                                  ReflectionProbeRequest *out) noexcept;
 /// Captures every probe again on the coming frames, for a scene whose
 /// geometry or lights changed after its probes were baked. Probes are
 /// baked one per frame.

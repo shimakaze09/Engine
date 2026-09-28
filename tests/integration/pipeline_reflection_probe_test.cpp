@@ -1,10 +1,14 @@
 // Regression for #765: a Reflection Probe could be added, configured and
 // saved, and nothing in the frame read it, so a placed probe changed
-// nothing. The pipeline now hands every probe to the renderer each frame,
-// render prep keeps the draws a probe's capture reaches, the Game view's
-// flush captures and bakes the probe, and a view whose camera is inside
-// the probe's box is lit by it. Full production bootstrap, headless, on
-// the null render device.
+// nothing. The pipeline now hands every probe to the renderer each frame
+// and render prep keeps the draws a probe's capture reaches; those checks
+// hold in every build. Where the renderer has a backend (a build with
+// cooked shaders), the Game view's flush also captures and bakes the
+// probe, and a view whose camera is inside the probe's box is lit by it.
+// Without one there is nothing to bake, and those checks are left to the
+// fake-device unit test and the GPU suite, which cover them in any build
+// that can. Full production bootstrap, headless, on the null render
+// device.
 
 #include "../builtin_mesh_fixture.h"
 
@@ -57,6 +61,23 @@ bool bake_settles(engine::EnginePipeline &pipeline, std::uint32_t bakes,
   return false;
 }
 
+/// True when request 0 is the probe at `at` with the suite's settings.
+bool requested_as_authored(const engine::math::Vec3 &at,
+                           engine::runtime::PersistentId id) noexcept {
+  engine::renderer::ReflectionProbeRequest request{};
+  return (engine::renderer::reflection_probe_request_count() == 1U) &&
+         engine::renderer::get_reflection_probe_request(0U, &request) &&
+         (request.id == id) && same_point(request.position, at) &&
+         same_point(
+             request.boxMin,
+             engine::math::sub(at, engine::math::Vec3(20.0F, 20.0F, 20.0F))) &&
+         same_point(
+             request.boxMax,
+             engine::math::add(at, engine::math::Vec3(20.0F, 20.0F, 20.0F))) &&
+         (request.captureDistance == 15.0F) && (request.faceSize == 64U) &&
+         (request.mipLevels == 3U) && (request.irradianceFaceSize == 16U);
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -91,6 +112,16 @@ int main() {
          engine::runtime::kInvalidEntity) ||
         !ticking_frame(pipeline) || !ticking_frame(pipeline)) {
       result = 4;
+    }
+    // A build without cooked shaders has no renderer backend: its views
+    // render nothing, so no probe can be captured.
+    const bool backend = engine::renderer::render_view_frame_count(
+                             engine::renderer::RenderViewId::Game) > 0U;
+    if (!backend) {
+      std::printf("note: no renderer backend (no cooked shaders in this "
+                  "build); bake and selection are covered by "
+                  "engine_unit_reflection_probe_bake and "
+                  "engine_integration_reflection_probe_gpu\n");
     }
 
     // A cube behind the camera: the main camera culls it.
@@ -130,20 +161,17 @@ int main() {
     const engine::runtime::Entity probeEntity =
         (result == 0) ? g_world->create_scene_object(probeTransform)
                       : engine::runtime::kInvalidEntity;
-    engine::renderer::ReflectionProbeStatus status{};
     if ((result == 0) &&
         ((probeEntity == engine::runtime::kInvalidEntity) ||
          !g_world->add_reflection_probe_component(probeEntity, probe) ||
-         !bake_settles(pipeline, 1U, &status))) {
-      std::fprintf(stderr, "FAIL: the probe was never baked\n");
+         !ticking_frame(pipeline))) {
       result = 7;
     }
-    if ((result == 0) &&
-        ((engine::renderer::reflection_probe_request_count() != 1U) ||
-         !same_point(status.capturePosition, probeAt) ||
-         (status.faceSize != 64U) || (status.mipLevels != 3U) ||
-         (status.irradianceFaceSize != 16U) || !status.baked)) {
-      std::fprintf(stderr, "FAIL: the probe was baked with other settings\n");
+    const engine::runtime::PersistentId probeId =
+        (result == 0) ? g_world->persistent_id(probeEntity) : 0U;
+    if ((result == 0) && !requested_as_authored(probeAt, probeId)) {
+      std::fprintf(stderr, "FAIL: the renderer was not handed the probe as "
+                           "authored\n");
       result = 8;
     }
     const engine::core::EngineStats withProbe =
@@ -159,25 +187,37 @@ int main() {
       std::fprintf(stderr, "FAIL: a probe draw counted as a capture draw\n");
       result = 10;
     }
-    if ((result == 0) && (engine::renderer::active_reflection_probe(
-                              engine::renderer::RenderViewId::Game) != 0)) {
-      std::fprintf(stderr,
-                   "FAIL: the camera inside the probe's box is not lit by "
-                   "it\n");
-      result = 11;
-    }
 
-    // An unchanged probe is not captured again; a moved one is, from where
-    // it now stands.
-    if (result == 0) {
+    // The bake, where there is a backend to bake with.
+    engine::renderer::ReflectionProbeStatus status{};
+    if ((result == 0) && backend) {
+      if (!bake_settles(pipeline, 1U, &status) || !status.baked ||
+          !same_point(status.capturePosition, probeAt) ||
+          (status.faceSize != 64U) || (status.mipLevels != 3U) ||
+          (status.irradianceFaceSize != 16U)) {
+        std::fprintf(stderr, "FAIL: the probe was not baked as authored\n");
+        result = 11;
+      } else if (engine::renderer::active_reflection_probe(
+                     engine::renderer::RenderViewId::Game) != 0) {
+        std::fprintf(stderr,
+                     "FAIL: the camera inside the probe's box is not lit by "
+                     "it\n");
+        result = 12;
+      }
+    }
+    // An unchanged probe is not captured again.
+    if ((result == 0) && backend) {
       const std::uint32_t bakes = status.bakeCount;
       if (!ticking_frame(pipeline) || !ticking_frame(pipeline) ||
           !engine::renderer::get_reflection_probe_status(0U, &status) ||
           (status.bakeCount != bakes)) {
         std::fprintf(stderr, "FAIL: an unchanged probe was captured again\n");
-        result = 12;
+        result = 13;
       }
     }
+
+    // A moved probe is requested, and where there is a backend captured
+    // again, from where it now stands.
     const engine::math::Vec3 movedTo =
         engine::math::add(probeAt, engine::math::Vec3(0.0F, 1.0F, 0.0F));
     if (result == 0) {
@@ -185,15 +225,20 @@ int main() {
       moved.position = movedTo;
       const std::uint32_t bakes = status.bakeCount;
       if (!g_world->add_transform(probeEntity, moved) ||
-          !bake_settles(pipeline, bakes + 1U, &status) ||
-          !same_point(status.capturePosition, movedTo)) {
+          !ticking_frame(pipeline) ||
+          !requested_as_authored(movedTo, probeId)) {
+        std::fprintf(stderr, "FAIL: a moved probe's request did not follow "
+                             "it\n");
+        result = 14;
+      } else if (backend && (!bake_settles(pipeline, bakes + 1U, &status) ||
+                             !same_point(status.capturePosition, movedTo))) {
         std::fprintf(stderr, "FAIL: a moved probe was not captured again\n");
-        result = 13;
+        result = 15;
       }
     }
 
     // A camera outside every box is lit by the sky.
-    if (result == 0) {
+    if ((result == 0) && backend) {
       engine::runtime::ReflectionProbeComponent small = probe;
       small.boxExtents = engine::math::Vec3(0.5F, 0.5F, 0.5F);
       if (!g_world->add_reflection_probe_component(probeEntity, small) ||
@@ -202,7 +247,7 @@ int main() {
                engine::renderer::RenderViewId::Game) != -1)) {
         std::fprintf(stderr,
                      "FAIL: a camera outside the probe's box is lit by it\n");
-        result = 14;
+        result = 16;
       }
     }
 
@@ -212,7 +257,7 @@ int main() {
           !ticking_frame(pipeline) ||
           (engine::renderer::reflection_probe_request_count() != 0U)) {
         std::fprintf(stderr, "FAIL: a removed probe is still requested\n");
-        result = 15;
+        result = 17;
       }
     }
     pipeline.teardown();

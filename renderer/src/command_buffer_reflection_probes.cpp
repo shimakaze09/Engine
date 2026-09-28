@@ -395,6 +395,16 @@ std::size_t reflection_probe_request_count() noexcept {
   return renderer_context().reflectionProbeRequestCount;
 }
 
+bool get_reflection_probe_request(std::size_t index,
+                                  ReflectionProbeRequest *out) noexcept {
+  const RendererContext &context = renderer_context();
+  if ((out == nullptr) || (index >= context.reflectionProbeRequestCount)) {
+    return false;
+  }
+  *out = context.reflectionProbeRequests[index];
+  return true;
+}
+
 void request_reflection_probe_bake() noexcept {
   ++renderer_context().reflectionProbeBakeGeneration;
 }
