@@ -20,6 +20,7 @@ widening the claim.
 ## Baseline — every change
 
 ```bash
+cmake --preset <host>-dev                                   # once: tests are opt-in (or -DENGINE_BUILD_TESTS=ON)
 cmake --build build --parallel                              # warning-free, first-party
 ctest --test-dir build --output-on-failure -LE gpu          # headless suite
 python tools/check_source_comments.py

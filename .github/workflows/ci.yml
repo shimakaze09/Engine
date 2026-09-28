@@ -481,7 +481,8 @@ jobs:
           restore-keys: deps-v4-ubuntu-24.04-sources-
 
       - name: Configure (needed for FetchContent headers)
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DENGINE_BGFX_SHADERC=OFF
+        # The analysis target covers tests/ too, which exist only when asked.
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DENGINE_BGFX_SHADERC=OFF -DENGINE_BUILD_TESTS=ON
 
       - name: Save _deps
         if: github.event_name == 'push' && steps.deps.outputs.cache-hit != 'true'

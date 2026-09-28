@@ -203,6 +203,7 @@ skill has what to run to prove a change — load it rather than assembling
 commands from memory.
 
 ```bash
+cmake --preset <host>-dev        # tests are opt-in; plain presets omit them
 cmake --build build --parallel
 ctest --test-dir build --output-on-failure -LE gpu
 ```
