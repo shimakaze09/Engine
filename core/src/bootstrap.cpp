@@ -130,10 +130,14 @@ bool initialize_core(const CoreConfig &config) noexcept {
       platformInitialized = true;
     }
 
-    // Before input, which restores the project's saved bindings. A root
-    // that cannot be resolved is logged and leaves that data refused; it
-    // does not stop the engine.
-    if (config.projectRoot != nullptr) {
+    // Before input, which restores the project's saved bindings. The
+    // project's GUID names it when there is one, so its data survives a
+    // move; otherwise the content root does. A root that cannot be
+    // resolved is logged and leaves that data refused; it does not stop
+    // the engine.
+    if (asset_guid_is_valid(config.projectGuid)) {
+      static_cast<void>(set_project_data_guid(config.projectGuid));
+    } else if (config.projectRoot != nullptr) {
       static_cast<void>(set_project_data_root(config.projectRoot));
     }
 

@@ -219,9 +219,9 @@ bool bootstrap(const EngineConfig &config) noexcept {
   if (!adopt_config_strings(adopted)) {
     return false;
   }
-  // The mounted root is the project until projects carry a document of
-  // their own: it names the directory the game's saves and rebound input
-  // map live in, so two projects never share them.
+  // A project opened from its document is named by its GUID (see
+  // open_project); the mounted root names one that was not, so two
+  // projects never share their saves and rebound input map.
   adopted.core.projectRoot = adopted.assetRoot;
   g_activeConfig = adopted;
 

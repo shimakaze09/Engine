@@ -1,15 +1,18 @@
 // Declares the per-project user data directory: where a running game keeps
 // what belongs to one player of one project (its save slot, its rebound
-// input map). It sits under the per-user platform save directory, in
-// projects/<16 hex digits>, the digits a hash of the project's identity, so
-// two projects on one machine never read or replace each other's files.
-// Until projects carry a document of their own, the identity is the
-// project's content root as an absolute path; a project GUID can take its
-// place without changing the call sites.
+// input map). It sits under the per-user platform save directory, so two
+// projects on one machine never read or replace each other's files. A
+// project opened from its .project document is named by the document's
+// GUID, in projects/<32 hex digits>, which survives renaming or moving the
+// directory; one named only by its content root (a test fixture, a tool
+// run on a bare directory) keeps projects/<16 hex digits>, a hash of the
+// absolute root. The two lengths never collide.
 
 #pragma once
 
 #include <cstddef>
+
+#include "engine/core/asset_identity.h"
 
 namespace engine::core {
 
@@ -21,6 +24,10 @@ namespace engine::core {
 /// and the previous project cleared, when the root cannot be resolved.
 bool set_project_data_root(const char *projectRoot) noexcept;
 
+/// Names the project by its persistent GUID, the identity its .project
+/// document carries, replacing any project named before. False, with an
+/// Error logged and the previous project cleared, for the nil GUID.
+bool set_project_data_guid(const AssetGuid &guid) noexcept;
 /// True while a project is named.
 bool project_data_named() noexcept;
 
