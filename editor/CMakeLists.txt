@@ -17,6 +17,7 @@ engine_add_module_library(engine_editor
     src/editor_light_gizmos.cpp
     src/editor_scene_query.cpp
     src/editor_console_capture.cpp
+    src/editor_console_commands.cpp
     src/editor_fonts.cpp
     src/editor_component_registry.cpp
     src/editor_inspector_metadata.cpp

@@ -7,6 +7,8 @@
 
 #include "engine/core/console.h"
 #include "engine/core/cvar.h"
+#include "engine/core/diagnostic.h"
+#include "engine/core/logging.h"
 
 using namespace engine::core;
 
@@ -405,6 +407,56 @@ static bool test_console_output_ring_buffer() noexcept {
   return true;
 }
 
+/// What the console logged, as a sink sees it.
+struct ConsoleLogRecord final {
+  int lines = 0;
+  bool sawEcho = false;
+  bool sawHelpHeader = false;
+  bool sawUnknown = false;
+  bool allOnConsoleChannel = true;
+};
+
+static void record_console_log(const Diagnostic &diagnostic,
+                               void *userData) noexcept {
+  ConsoleLogRecord *record = static_cast<ConsoleLogRecord *>(userData);
+  if (std::strcmp(diagnostic.channel, "console") != 0) {
+    return;
+  }
+  ++record->lines;
+  record->allOnConsoleChannel =
+      record->allOnConsoleChannel && (diagnostic.level == LogLevel::Info);
+  record->sawEcho =
+      record->sawEcho || (std::strcmp(diagnostic.message, "> help") == 0);
+  record->sawHelpHeader =
+      record->sawHelpHeader ||
+      (std::strcmp(diagnostic.message, "Registered commands:") == 0);
+  record->sawUnknown =
+      record->sawUnknown ||
+      (std::strstr(diagnostic.message, "Unknown command: 'no_such_cmd'") !=
+       nullptr);
+}
+
+/// Command output reaches the log, not only the console's own ring: the
+/// echoed line, the command's output and the unknown-command refusal all
+/// arrive at a log sink on the "console" channel at Info.
+static bool test_console_output_reaches_the_log() noexcept {
+  initialize_logging();
+  initialize_cvars();
+  initialize_console();
+  ConsoleLogRecord record{};
+  const bool registered =
+      log_register_diagnostic_sink(&record_console_log, &record);
+  const bool helped = console_execute("help");
+  const bool refused = !console_execute("no_such_cmd");
+  log_unregister_diagnostic_sink(&record_console_log, &record);
+  shutdown_console();
+  shutdown_cvars();
+  shutdown_logging();
+  return registered && helped && refused && record.sawEcho &&
+         record.sawHelpHeader && record.sawUnknown && (record.lines >= 4) &&
+         record.allOnConsoleChannel;
+}
+
 // ---- handle access ----
 
 /// A handle reads what the name reads, for every type, and sees a later
@@ -699,6 +751,7 @@ int main() {
       {"console_set_get_cvar", test_console_set_get_cvar},
       {"console_custom_command", test_console_custom_command},
       {"console_output_ring_buffer", test_console_output_ring_buffer},
+      {"console_output_reaches_the_log", test_console_output_reaches_the_log},
       {"cvar_console_threaded_access", test_cvar_console_threaded_access},
   };
 

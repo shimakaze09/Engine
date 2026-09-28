@@ -4,6 +4,7 @@
 #include "editor_panels_console.h"
 
 #include "editor_console_capture.h"
+#include "editor_console_commands.h"
 #include "editor_session.h"
 
 #if defined(__clang__) && (defined(__x86_64__) || defined(__i386__)) &&        \
@@ -14,10 +15,12 @@
 #include "imgui.h"
 #include "imgui_internal.h"
 
+#include "engine/core/console.h"
 #include "engine/core/cvar.h"
 #include "engine/core/logging.h"
 #include "engine/runtime/world.h"
 
+#include <cfloat>
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
@@ -177,6 +180,65 @@ void draw_entry_row(const ConsoleEntry &entry, std::size_t rowIndex) noexcept {
   ImGui::PopID();
 }
 
+/// Tab completes the word under the cursor; Up and Down step through the
+/// commands entered before.
+int command_line_callback(ImGuiInputTextCallbackData *data) noexcept {
+  ConsolePanelState *console = static_cast<ConsolePanelState *>(data->UserData);
+  const char *replacement = nullptr;
+  char completed[kConsoleCommandCapacity] = {};
+  if (data->EventFlag == ImGuiInputTextFlags_CallbackCompletion) {
+    char candidates[512] = {};
+    const std::size_t matches =
+        complete_console_line(data->Buf, completed, sizeof(completed),
+                              candidates, sizeof(candidates));
+    if (matches > 1U) {
+      core::log_message(core::LogLevel::Info, "console", candidates);
+    }
+    if (matches > 0U) {
+      replacement = completed;
+    }
+  } else if (data->EventFlag == ImGuiInputTextFlags_CallbackHistory) {
+    replacement = (data->EventKey == ImGuiKey_UpArrow)
+                      ? console->history.older()
+                      : console->history.newer();
+  }
+  if ((replacement != nullptr) && (std::strcmp(replacement, data->Buf) != 0)) {
+    data->DeleteChars(0, data->BufTextLen);
+    data->InsertChars(0, replacement);
+  }
+  return 0;
+}
+
+/// The command line under the log: Enter runs the line through the
+/// console, whose output reaches the log above it.
+void draw_command_line(ConsolePanelState &console) noexcept {
+  ImGui::Separator();
+  if (console.focusCommandLine) {
+    ImGui::SetKeyboardFocusHere();
+    console.focusCommandLine = false;
+  }
+  ImGui::SetNextItemWidth(-FLT_MIN);
+  constexpr ImGuiInputTextFlags kFlags =
+      ImGuiInputTextFlags_EnterReturnsTrue |
+      ImGuiInputTextFlags_CallbackCompletion |
+      ImGuiInputTextFlags_CallbackHistory;
+  if (!ImGui::InputTextWithHint(
+          "##ConsoleCommand", "Command (help lists them; Tab completes)",
+          console.commandLine, sizeof(console.commandLine), kFlags,
+          &command_line_callback, &console)) {
+    return;
+  }
+  if (console.commandLine[0] != '\0') {
+    console.history.push(console.commandLine);
+    static_cast<void>(core::console_execute(console.commandLine));
+    console.scrollToEnd = true;
+  }
+  console.commandLine[0] = '\0';
+  console.history.reset_cursor();
+  // Enter leaves the field; the next command goes straight in.
+  ImGui::SetKeyboardFocusHere(-1);
+}
+
 } // namespace
 
 void draw_console_panel() noexcept {
@@ -270,7 +332,9 @@ void draw_console_panel() noexcept {
   const std::size_t visibleCount =
       (pausedEntryCount < liveCount) ? pausedEntryCount : liveCount;
 
-  ImGui::BeginChild("##ConsoleScroll", ImVec2(0.0F, 0.0F), false,
+  // The log fills what the command line under it leaves.
+  ImGui::BeginChild("##ConsoleScroll",
+                    ImVec2(0.0F, -ImGui::GetFrameHeightWithSpacing()), false,
                     ImGuiWindowFlags_HorizontalScrollbar);
 
   // Collapse groups every identical line wherever it falls, first-seen
@@ -308,12 +372,15 @@ void draw_console_panel() noexcept {
     }
   }
 
-  if (autoScroll && !paused &&
-     (ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 1.0F)) {
+  if ((autoScroll && !paused &&
+       (ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 1.0F)) ||
+      console.scrollToEnd) {
     ImGui::SetScrollHereY(1.0F);
+    console.scrollToEnd = false;
   }
 
   ImGui::EndChild();
+  draw_command_line(console);
   ImGui::End();
 }
 

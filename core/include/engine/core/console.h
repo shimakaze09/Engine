@@ -7,7 +7,9 @@
 // Developer console command system.
 // Commands are registered by name with a callback.  `console_execute` parses
 // an input line, looks up the command, and dispatches it.
-// Output from commands is stored in a fixed-size ring buffer and readable via
+// Output from commands, the echoed command line included, is logged at Info
+// on the "console" channel, so it shows wherever the log does (the editor's
+// Log panel), and is also kept in a fixed-size ring buffer readable via
 // `console_get_output_line`.  Safe to call from any thread after
 // initialize_console().
 
@@ -38,7 +40,8 @@ bool console_register_command(const char *name, ConsoleCommandFn fn,
 // Returns false if the command is not found.
 bool console_execute(const char *line) noexcept;
 
-// Append a string to the output ring buffer (used internally and by C++ code).
+// Append a string to the output ring buffer and log it on the "console"
+// channel (used internally and by C++ code).
 void console_print(const char *text) noexcept;
 
 // Returns the number of lines currently in the output buffer.
