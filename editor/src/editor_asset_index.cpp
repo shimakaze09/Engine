@@ -196,8 +196,7 @@ bool contains_ci(const char *haystack, const char *needle) noexcept {
 bool AssetFilterState::operator==(const AssetFilterState &other) const noexcept {
   return (std::strcmp(query, other.query) == 0) &&
          (typeMask == other.typeMask) &&
-         (std::strcmp(folder, other.folder) == 0) &&
-         (flatSearch == other.flatSearch);
+         (std::strcmp(folder, other.folder) == 0);
 }
 
 content::AssetTypeTag classify_asset_kind(const char *osPath,
@@ -255,12 +254,8 @@ bool asset_entry_matches_filter(const AssetIndexEntry &entry,
   if ((filter.typeMask & asset_kind_bit(entry.kind)) == 0U) {
     return false;
   }
-  if (!filter.flatSearch &&
-      (std::strcmp(entry.folder, resolve_folder(filter.folder)) != 0)) {
-    return false;
-  }
   if (filter.query[0] == '\0') {
-    return true;
+    return std::strcmp(entry.folder, resolve_folder(filter.folder)) == 0;
   }
   return contains_ci(entry.name, filter.query) ||
          contains_ci(entry.virtualPath, filter.query);

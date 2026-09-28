@@ -3,8 +3,9 @@
 // animation-controller documents included, none of which is opened to
 // guess its kind — and skips sidecar/internal files, .meta included; the
 // filter cache only recomputes on an actual filter or generation change
-// and handles the empty-query and no-match boundaries; typed-action kind
-// routing is pure and correct; and execute_asset_open dispatches through real
+// and handles the empty-query and no-match boundaries; a search finds an
+// asset in any folder, not only the one being viewed; typed-action kind routing
+// is pure and correct; and execute_asset_open dispatches through real
 // production entry points — scene Open routes through the #158 unsaved-change
 // gate and a mesh Open spawns through execute_asset_spawn, not a copied model
 // of either.
@@ -266,7 +267,6 @@ int check_filter_cache_change_driven_and_boundaries() {
 
   AssetFilterState filter{};
   std::snprintf(filter.folder, sizeof(filter.folder), "%s", scratchFolder);
-  filter.flatSearch = false;
   filter.query[0] = '\0'; // empty query: every type-matching entry in scope
 
   AssetFilterCache cache{};
@@ -317,6 +317,56 @@ int check_filter_cache_change_driven_and_boundaries() {
   }
   if (!refresh_asset_filter_cache(filter, &cache)) {
     return 13;
+  }
+  return 0;
+}
+
+/// EXPECTATION: a non-empty query searches the whole project, not only
+/// the folder being viewed, so an asset is found by name from anywhere; an
+/// empty query lists only that folder's direct children.
+int check_search_spans_every_folder() {
+  if (!rebuild_scratch_tree() || !rebuild_asset_index()) {
+    return 1;
+  }
+  char scratchFolder[kMaxAssetIndexPath] = {};
+  if (!scratch_root(scratchFolder, sizeof(scratchFolder))) {
+    return 2;
+  }
+
+  AssetFilterState filter{};
+  std::snprintf(filter.folder, sizeof(filter.folder), "%s", scratchFolder);
+  AssetFilterCache cache{};
+  static_cast<void>(refresh_asset_filter_cache(filter, &cache));
+  for (const std::size_t index : cache.matches) {
+    const AssetIndexEntry *entry = asset_index_entry(index);
+    if ((entry == nullptr) ||
+        (std::strstr(entry->name, "nested.mesh") != nullptr)) {
+      return 3; // an empty query lists the viewed folder only
+    }
+  }
+
+  // Viewed from the scratch root, a subfolder's asset is found by name.
+  std::snprintf(filter.query, sizeof(filter.query), "%s", "NESTED.mesh");
+  static_cast<void>(refresh_asset_filter_cache(filter, &cache));
+  if (cache.matches.size() != 1U) {
+    return 4;
+  }
+  const AssetIndexEntry *found = asset_index_entry(cache.matches[0]);
+  if ((found == nullptr) || (std::strcmp(found->name, "nested.mesh") != 0)) {
+    return 5;
+  }
+
+  // Viewed from the subfolder, a root-level asset is found the same way.
+  const AssetIndexEntry *nestedEntry = find_entry_by_leaf("sub/nested.mesh");
+  if (nestedEntry == nullptr) {
+    return 6;
+  }
+  std::snprintf(filter.folder, sizeof(filter.folder), "%s",
+                nestedEntry->folder);
+  std::snprintf(filter.query, sizeof(filter.query), "%s", "thing.lua");
+  static_cast<void>(refresh_asset_filter_cache(filter, &cache));
+  if (cache.matches.size() != 1U) {
+    return 7;
   }
   return 0;
 }
@@ -621,6 +671,7 @@ int main() {
       {"check_classify_asset_kind_direct", &check_classify_asset_kind_direct},
       {"check_filter_cache_change_driven_and_boundaries",
        &check_filter_cache_change_driven_and_boundaries},
+      {"check_search_spans_every_folder", &check_search_spans_every_folder},
       {"check_resolve_asset_open_action_mapping",
        &check_resolve_asset_open_action_mapping},
       {"check_scene_open_routes_through_unsaved_gate",

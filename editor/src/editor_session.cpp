@@ -505,7 +505,7 @@ void content_browser_navigate(const char *folder) noexcept {
   hist.position = newPosition;
 
   std::snprintf(cb.filter.folder, sizeof(cb.filter.folder), "%s", target);
-  cb.filter.flatSearch = false;
+  cb.filter.query[0] = '\0';
   content_browser_state_persist();
 }
 
@@ -527,7 +527,7 @@ void content_browser_go_back() noexcept {
   --cb.navHistory.position;
   std::snprintf(cb.filter.folder, sizeof(cb.filter.folder), "%s",
                cb.navHistory.entries[cb.navHistory.position]);
-  cb.filter.flatSearch = false;
+  cb.filter.query[0] = '\0';
   content_browser_state_persist();
 }
 
@@ -539,7 +539,7 @@ void content_browser_go_forward() noexcept {
   ++cb.navHistory.position;
   std::snprintf(cb.filter.folder, sizeof(cb.filter.folder), "%s",
                cb.navHistory.entries[cb.navHistory.position]);
-  cb.filter.flatSearch = false;
+  cb.filter.query[0] = '\0';
   content_browser_state_persist();
 }
 
