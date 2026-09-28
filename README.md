@@ -240,6 +240,12 @@ into `Saved/Screenshots`; the Log names the file. A Game view tab behind
 another comes to the front first, and nothing the editor draws over the view
 is in the picture.
 
+Assets can be labelled, as Unity's Asset Labels are: select one in the Assets
+panel, type a label into the Labels row and press Enter; its button removes it.
+Labels are kept in the asset's `.meta` sidecar, so they are committed with the
+project, and `l:<label>` in the Assets search keeps the assets carrying it
+(`l:env rock` also needs "rock" in the name).
+
 It starts on an empty 3D scene, as a new Unity project does. The scene holds a
 Main Camera, a Directional Light, and a Scene Controller entity running
 `assets/main.lua`, whose hooks start empty. Player mode boots
