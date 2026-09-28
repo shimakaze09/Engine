@@ -100,7 +100,6 @@ REFLECT_FIELD(irradianceResolution, Uint32)
 REFLECT_FIELD(brdfLutResolution, Uint32)
 REFLECT_FIELD(mipLevels, Uint32)
 REFLECT_FIELD(boxProjection, Bool)
-REFLECT_FIELD(needsBake, Bool)
 REFLECT_END()
 
 REFLECT_TYPE(engine::runtime::SceneCaptureComponent)

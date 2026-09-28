@@ -271,7 +271,6 @@ void make_test_value(ReflectionProbeComponent *out) noexcept {
   out->brdfLutResolution = 128U;
   out->mipLevels = 4U;
   out->boxProjection = true;
-  out->needsBake = false;
 }
 
 bool components_equal(const ReflectionProbeComponent &a,
@@ -281,9 +280,7 @@ bool components_equal(const ReflectionProbeComponent &a,
          (a.prefilteredResolution == b.prefilteredResolution) &&
          (a.irradianceResolution == b.irradianceResolution) &&
          (a.brdfLutResolution == b.brdfLutResolution) &&
-         (a.mipLevels == b.mipLevels) &&
-         (a.boxProjection == b.boxProjection) &&
-         (a.needsBake == b.needsBake);
+         (a.mipLevels == b.mipLevels) && (a.boxProjection == b.boxProjection);
 }
 
 void make_test_value(SceneCaptureComponent *out) noexcept {

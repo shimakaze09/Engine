@@ -859,7 +859,6 @@ int main() {
   reflectionProbe.irradianceResolution = 64U;
   reflectionProbe.mipLevels = 6U;
   reflectionProbe.boxProjection = true;
-  reflectionProbe.needsBake = false;
   if (!world->add_reflection_probe_component(src, reflectionProbe)) {
     return 26;
   }
@@ -1006,7 +1005,7 @@ int main() {
       !nearly_equal(instProbe.intensity, 0.75F) ||
       (instProbe.prefilteredResolution != 256U) ||
       (instProbe.irradianceResolution != 64U) || (instProbe.mipLevels != 6U) ||
-      !instProbe.boxProjection || instProbe.needsBake) {
+      !instProbe.boxProjection) {
     remove_prefab_file();
     return 28;
   }

@@ -33,7 +33,6 @@ int verify_reflection_probe_crud() {
   probe.brdfLutResolution = 512U;
   probe.mipLevels = 6U;
   probe.boxProjection = true;
-  probe.needsBake = true;
 
   if (!world->add_reflection_probe_component(entity, probe)) {
     return 3;
@@ -63,7 +62,7 @@ int verify_reflection_probe_crud() {
       (readBack.prefilteredResolution != 256U) ||
       (readBack.irradianceResolution != 64U) ||
       (readBack.brdfLutResolution != 512U) || (readBack.mipLevels != 6U) ||
-      !readBack.boxProjection || !readBack.needsBake) {
+      !readBack.boxProjection) {
     return 9;
   }
 
@@ -72,9 +71,9 @@ int verify_reflection_probe_crud() {
   if (mutableProbe == nullptr) {
     return 10;
   }
-  mutableProbe->needsBake = false;
+  mutableProbe->intensity = 2.0F;
   if (!world->get_reflection_probe_component(entity, &readBack) ||
-      readBack.needsBake) {
+      !nearly_equal(readBack.intensity, 2.0F)) {
     return 11;
   }
 

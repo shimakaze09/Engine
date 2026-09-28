@@ -63,7 +63,6 @@ struct ReflectionProbeComponent final {
   std::uint32_t brdfLutResolution = 512U;
   std::uint32_t mipLevels = 5U;
   bool boxProjection = false;
-  bool needsBake = true;
 };
 
 /// The scene's sky light: an environment map (an Environment asset, a
