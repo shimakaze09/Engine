@@ -5,12 +5,16 @@ produced [0015](0015-commercial-anime-engine-on-six-platforms.md).
 
 **Status:** Point 5 is in place for a running game's per-user data: the
 save slot and the rebound input map live in a per-project directory
-(`core/include/engine/core/project_data.h`), named for now by the mounted
-content root because no `.project` document exists yet; its GUID takes
-that role once one does. Point 1's document format exists: the
-`.project` reader and writer (`content/include/engine/content/project_document.h`)
-own identity, roots, the scene list, the startup scene and the main script,
-and `engine_unit_project_document` pins them; nothing opens a project yet.
+(`core/include/engine/core/project_data.h`), named by the project's GUID
+when it was opened from its document (`engine_unit_project_data_guid`)
+and by its mounted content root otherwise. Point 1's document format
+exists: the `.project` reader and writer
+(`content/include/engine/content/project_document.h`) own identity, roots,
+the scene list, the startup scene and the main script, and
+`engine_unit_project_document` pins them. A project opens by path through
+`engine::open_project` (`runtime/include/engine/project.h`,
+`engine_integration_project_open`), which `engine_validate --project`
+uses; the editor and a player do not take a project path yet.
 Point 2 is in place with a prefix rather than a scheme: the engine's own
 content (shaders, fonts, the web shell, the bootstrap mesh) lives in
 `engine_assets/`, mounted at `engine/`, beside the game's `assets/`

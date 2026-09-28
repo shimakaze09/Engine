@@ -28,7 +28,7 @@ Each fact has one home. Nothing mirrors anything else.
 - Generated Lua binding pipeline for annotated scripting accessors
 - Asset examples under `assets/`
 - Test suites (unit, integration, smoke, benchmark, CMake configure-rejection) wired into CTest
-- Asset tooling: `asset_packer` (mesh, skeleton and animation cook, shader cook, metadata init) and the `engine_validate` scene checker
+- Asset tooling: `asset_packer` (mesh, skeleton and animation cook, shader cook, metadata init) and the `engine_validate` scene checker (`--project <dir>` checks every scene a project lists)
 - GitHub Actions CI under `.github/workflows/ci.yml`
 
 ## Core goals

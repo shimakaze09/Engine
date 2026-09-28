@@ -1506,6 +1506,16 @@ engine_add_test_executable(engine_integration_engine_config_strings
     integration
 )
 
+engine_add_test_executable(engine_integration_project_open
+    SOURCES
+    project_open_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_content
+    LABELS
+    integration
+)
+
 engine_add_test_executable(engine_integration_project_save_scope
     SOURCES
     project_save_scope_test.cpp
@@ -1725,5 +1735,29 @@ if(TARGET engine_validate)
         engine_validate_cli_refuses_unknown_option
         engine_validate_cli_refuses_missing_value
         engine_validate_cli_refuses_no_scene
+        PROPERTIES LABELS "integration" TIMEOUT 60)
+endif()
+
+# engine_validate --project opens a project through open_project and
+# validates the scenes it lists; a path holding no project is a usage error.
+if(TARGET engine_validate)
+    set(_validate_project_dir ${CMAKE_BINARY_DIR}/engine_validate_project)
+    file(MAKE_DIRECTORY ${_validate_project_dir}/assets)
+    file(WRITE ${_validate_project_dir}/Probe.project
+"{\"schemaVersion\":1,\"identity\":{\"name\":\"Probe\",\"organisation\":\"\",\"version\":\"0.1.0\",\"guid\":\"8f1c2d3e-4b5a-4c6d-8e7f-90a1b2c3d4e5\"},\"roots\":{\"content\":\"assets\",\"cache\":\".cache\"},\"scenes\":[\"assets/main.scene\"],\"startupScene\":\"assets/main.scene\"}\n")
+    configure_file(${CMAKE_SOURCE_DIR}/assets/main.scene
+        ${_validate_project_dir}/assets/main.scene COPYONLY)
+    add_test(NAME engine_validate_cli_validates_project
+        COMMAND $<TARGET_FILE:engine_validate> --project ${_validate_project_dir})
+    add_test(NAME engine_validate_cli_refuses_missing_project
+        COMMAND $<TARGET_FILE:engine_validate>
+            --project ${CMAKE_BINARY_DIR}/engine_validate_no_project)
+    set_tests_properties(engine_validate_cli_validates_project
+        PROPERTIES PASS_REGULAR_EXPRESSION "main.scene: [0-9]+ warning\\(s\\), 0 error\\(s\\)")
+    set_tests_properties(engine_validate_cli_refuses_missing_project
+        PROPERTIES PASS_REGULAR_EXPRESSION "no project found")
+    set_tests_properties(
+        engine_validate_cli_validates_project
+        engine_validate_cli_refuses_missing_project
         PROPERTIES LABELS "integration" TIMEOUT 60)
 endif()
