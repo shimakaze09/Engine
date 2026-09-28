@@ -66,7 +66,9 @@ void log_message(LogLevel level, const char* channel, const char* message) noexc
 /// this is where a run's messages outlive it. A file already at `path` is
 /// first renamed to `previousPath` (replacing an older one), so the last
 /// run's log survives this one. The file is flushed on Error and Fatal,
-/// like stdout, and closed by log_close_file or shutdown_logging. False,
+/// like stdout, and closed by log_close_file or shutdown_logging. Other
+/// processes may read it while it is open (a viewer tailing the run); a
+/// second writer is refused on Windows. False,
 /// with nothing opened and a Warning logged, when either path is null,
 /// empty or too long, or the file cannot be opened; lines keep reaching
 /// stdout and the sinks either way. Opening while a file is open closes

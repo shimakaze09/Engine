@@ -1,6 +1,7 @@
 // Verifies the run log file core logging keeps beside stdout
 // (log_open_file): every line lands in it, an Error is flushed to disk at
-// once, reopening keeps the previous run's file under its previous-run
+// once where another reader can see it while the file is still open,
+// reopening keeps the previous run's file under its previous-run
 // name, a path that cannot be opened is refused with lines still reaching
 // stdout, and the path of the last file opened outlives its closing so a
 // failed start can still name it.

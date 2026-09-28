@@ -17,6 +17,9 @@
 #include <ctime>
 #include <mutex>
 
+#if defined(_WIN32)
+#include <share.h>
+#endif
 
 namespace engine::core {
 
@@ -320,9 +323,10 @@ bool log_open_file(const char *path, const char *previousPath) noexcept {
   static_cast<void>(std::rename(path, previousPath));
   std::FILE *file = nullptr;
 #if defined(_WIN32)
-  if (fopen_s(&file, path, "w") != 0) {
-    file = nullptr;
-  }
+  // fopen_s opens without sharing, so nothing could read the log while the
+  // engine runs. _SH_DENYWR lets a viewer or `Get-Content -Wait` read it and
+  // keeps a second writer out.
+  file = _fsopen(path, "w", _SH_DENYWR);
 #else
   file = std::fopen(path, "w");
 #endif
