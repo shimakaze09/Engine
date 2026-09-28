@@ -547,12 +547,15 @@ add_test(
     NAME engine_integration_crash_report
     COMMAND ${CMAKE_COMMAND}
         "-DHELPER=$<TARGET_FILE:crash_report_helper>"
-        "-DASSET_ROOT=${CMAKE_SOURCE_DIR}"
+        "-DASSET_ROOT=${CMAKE_SOURCE_DIR}/samples/island"
         -P ${CMAKE_CURRENT_SOURCE_DIR}/crash_report_test.cmake
 )
+# The helper boots a default config from the sample project, so the
+# engine's content is found through ENGINE_ROOT.
 set_tests_properties(
     engine_integration_crash_report
     PROPERTIES LABELS integration
+    ENVIRONMENT "ENGINE_ROOT=${CMAKE_SOURCE_DIR}/engine_assets"
 )
 
 engine_add_executable_target(log_flush_helper
@@ -1052,7 +1055,7 @@ if(ENGINE_BUILD_TOOLS)
         NAME engine_integration_asset_packer_rejects_graph_option
         COMMAND ${CMAKE_COMMAND}
             "-DASSET_PACKER=$<TARGET_FILE:asset_packer>"
-            "-DSRC_GLTF=${CMAKE_SOURCE_DIR}/assets/props/coin.gltf"
+            "-DSRC_GLTF=${CMAKE_SOURCE_DIR}/samples/island/assets/props/coin.gltf"
             "-DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/graph_option_work"
             -P ${CMAKE_CURRENT_SOURCE_DIR}/asset_packer_graph_option_test.cmake
     )
@@ -1108,8 +1111,8 @@ if(ENGINE_BUILD_TOOLS)
         NAME engine_integration_asset_packer_bin_dependency
         COMMAND ${CMAKE_COMMAND}
             "-DASSET_PACKER=$<TARGET_FILE:asset_packer>"
-            "-DSRC_GLTF=${CMAKE_SOURCE_DIR}/assets/props/coin.gltf"
-            "-DSRC_BIN=${CMAKE_SOURCE_DIR}/assets/props/coin.bin"
+            "-DSRC_GLTF=${CMAKE_SOURCE_DIR}/samples/island/assets/props/coin.gltf"
+            "-DSRC_BIN=${CMAKE_SOURCE_DIR}/samples/island/assets/props/coin.bin"
             "-DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/bin_dep_work"
             -P ${CMAKE_CURRENT_SOURCE_DIR}/asset_packer_bin_dependency_test.cmake
     )
@@ -1122,8 +1125,8 @@ if(ENGINE_BUILD_TOOLS)
         NAME engine_integration_asset_packer_many_deps
         COMMAND ${CMAKE_COMMAND}
             "-DASSET_PACKER=$<TARGET_FILE:asset_packer>"
-            "-DSRC_GLTF=${CMAKE_SOURCE_DIR}/assets/props/coin.gltf"
-            "-DSRC_BIN=${CMAKE_SOURCE_DIR}/assets/props/coin.bin"
+            "-DSRC_GLTF=${CMAKE_SOURCE_DIR}/samples/island/assets/props/coin.gltf"
+            "-DSRC_BIN=${CMAKE_SOURCE_DIR}/samples/island/assets/props/coin.bin"
             "-DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/many_deps_work"
             -P ${CMAKE_CURRENT_SOURCE_DIR}/asset_packer_many_deps_test.cmake
     )
@@ -1136,8 +1139,8 @@ if(ENGINE_BUILD_TOOLS)
         NAME engine_integration_asset_packer_cookmeta_labels
         COMMAND ${CMAKE_COMMAND}
             "-DASSET_PACKER=$<TARGET_FILE:asset_packer>"
-            "-DSRC_GLTF=${CMAKE_SOURCE_DIR}/assets/character.gltf"
-            "-DSRC_BIN=${CMAKE_SOURCE_DIR}/assets/character.bin"
+            "-DSRC_GLTF=${CMAKE_SOURCE_DIR}/samples/island/assets/character.gltf"
+            "-DSRC_BIN=${CMAKE_SOURCE_DIR}/samples/island/assets/character.bin"
             "-DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/cookmeta_labels_work"
             -P ${CMAKE_CURRENT_SOURCE_DIR}/asset_packer_cookmeta_labels_test.cmake
     )
@@ -1150,8 +1153,8 @@ if(ENGINE_BUILD_TOOLS)
         NAME engine_integration_asset_packer_malformed_sidecar
         COMMAND ${CMAKE_COMMAND}
             "-DASSET_PACKER=$<TARGET_FILE:asset_packer>"
-            "-DSRC_GLTF=${CMAKE_SOURCE_DIR}/assets/props/coin.gltf"
-            "-DSRC_BIN=${CMAKE_SOURCE_DIR}/assets/props/coin.bin"
+            "-DSRC_GLTF=${CMAKE_SOURCE_DIR}/samples/island/assets/props/coin.gltf"
+            "-DSRC_BIN=${CMAKE_SOURCE_DIR}/samples/island/assets/props/coin.bin"
             "-DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/malformed_sidecar_work"
             -P ${CMAKE_CURRENT_SOURCE_DIR}/asset_packer_malformed_sidecar_test.cmake
     )
@@ -1175,8 +1178,8 @@ if(ENGINE_BUILD_TOOLS)
         COMMAND ${CMAKE_COMMAND}
             "-DASSET_PACKER=$<TARGET_FILE:asset_packer>"
             "-DSETTINGS_WRITER=$<TARGET_FILE:editor_import_settings_writer>"
-            "-DSRC_GLTF=${CMAKE_SOURCE_DIR}/assets/props/coin.gltf"
-            "-DSRC_BIN=${CMAKE_SOURCE_DIR}/assets/props/coin.bin"
+            "-DSRC_GLTF=${CMAKE_SOURCE_DIR}/samples/island/assets/props/coin.gltf"
+            "-DSRC_BIN=${CMAKE_SOURCE_DIR}/samples/island/assets/props/coin.bin"
             "-DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/editor_settings_work"
             -P ${CMAKE_CURRENT_SOURCE_DIR}/editor_settings_reach_cook_test.cmake
     )
@@ -1189,8 +1192,8 @@ if(ENGINE_BUILD_TOOLS)
         NAME engine_integration_asset_packer_thumbnail_settings
         COMMAND ${CMAKE_COMMAND}
             "-DASSET_PACKER=$<TARGET_FILE:asset_packer>"
-            "-DSRC_GLTF=${CMAKE_SOURCE_DIR}/assets/props/coin.gltf"
-            "-DSRC_BIN=${CMAKE_SOURCE_DIR}/assets/props/coin.bin"
+            "-DSRC_GLTF=${CMAKE_SOURCE_DIR}/samples/island/assets/props/coin.gltf"
+            "-DSRC_BIN=${CMAKE_SOURCE_DIR}/samples/island/assets/props/coin.bin"
             "-DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/thumb_settings_work"
             -P ${CMAKE_CURRENT_SOURCE_DIR}/asset_packer_thumbnail_settings_test.cmake
     )
@@ -1203,8 +1206,8 @@ if(ENGINE_BUILD_TOOLS)
         NAME engine_integration_asset_packer_stale_hull_removed
         COMMAND ${CMAKE_COMMAND}
             "-DASSET_PACKER=$<TARGET_FILE:asset_packer>"
-            "-DSRC_GLTF=${CMAKE_SOURCE_DIR}/assets/props/coin.gltf"
-            "-DSRC_BIN=${CMAKE_SOURCE_DIR}/assets/props/coin.bin"
+            "-DSRC_GLTF=${CMAKE_SOURCE_DIR}/samples/island/assets/props/coin.gltf"
+            "-DSRC_BIN=${CMAKE_SOURCE_DIR}/samples/island/assets/props/coin.bin"
             "-DHULLLESS_GLTF=${CMAKE_SOURCE_DIR}/tests/data/hullless_triangle.gltf"
             "-DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/stale_hull_work"
             -P ${CMAKE_CURRENT_SOURCE_DIR}/asset_packer_stale_hull_test.cmake
@@ -1218,8 +1221,8 @@ if(ENGINE_BUILD_TOOLS)
         NAME engine_integration_asset_packer_stale_anim_removed
         COMMAND ${CMAKE_COMMAND}
             "-DASSET_PACKER=$<TARGET_FILE:asset_packer>"
-            "-DSRC_GLTF=${CMAKE_SOURCE_DIR}/assets/character.gltf"
-            "-DSRC_BIN=${CMAKE_SOURCE_DIR}/assets/character.bin"
+            "-DSRC_GLTF=${CMAKE_SOURCE_DIR}/samples/island/assets/character.gltf"
+            "-DSRC_BIN=${CMAKE_SOURCE_DIR}/samples/island/assets/character.bin"
             "-DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/stale_anim_work"
             -P ${CMAKE_CURRENT_SOURCE_DIR}/asset_packer_stale_anim_test.cmake
     )
@@ -1232,8 +1235,8 @@ if(ENGINE_BUILD_TOOLS)
         NAME engine_integration_asset_packer_missing_sidecar_recook
         COMMAND ${CMAKE_COMMAND}
             "-DASSET_PACKER=$<TARGET_FILE:asset_packer>"
-            "-DSRC_GLTF=${CMAKE_SOURCE_DIR}/assets/character.gltf"
-            "-DSRC_BIN=${CMAKE_SOURCE_DIR}/assets/character.bin"
+            "-DSRC_GLTF=${CMAKE_SOURCE_DIR}/samples/island/assets/character.gltf"
+            "-DSRC_BIN=${CMAKE_SOURCE_DIR}/samples/island/assets/character.bin"
             "-DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/missing_sidecar_work"
             -P ${CMAKE_CURRENT_SOURCE_DIR}/asset_packer_missing_sidecar_test.cmake
     )
@@ -1246,8 +1249,8 @@ if(ENGINE_BUILD_TOOLS)
         NAME engine_integration_asset_packer_legacy_stamp_recook
         COMMAND ${CMAKE_COMMAND}
             "-DASSET_PACKER=$<TARGET_FILE:asset_packer>"
-            "-DSRC_GLTF=${CMAKE_SOURCE_DIR}/assets/character.gltf"
-            "-DSRC_BIN=${CMAKE_SOURCE_DIR}/assets/character.bin"
+            "-DSRC_GLTF=${CMAKE_SOURCE_DIR}/samples/island/assets/character.gltf"
+            "-DSRC_BIN=${CMAKE_SOURCE_DIR}/samples/island/assets/character.bin"
             "-DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/legacy_stamp_work"
             -P ${CMAKE_CURRENT_SOURCE_DIR}/asset_packer_legacy_stamp_test.cmake
     )
@@ -1260,8 +1263,8 @@ if(ENGINE_BUILD_TOOLS)
         NAME engine_integration_asset_packer_platform_tag
         COMMAND ${CMAKE_COMMAND}
             "-DASSET_PACKER=$<TARGET_FILE:asset_packer>"
-            "-DSRC_GLTF=${CMAKE_SOURCE_DIR}/assets/props/coin.gltf"
-            "-DSRC_BIN=${CMAKE_SOURCE_DIR}/assets/props/coin.bin"
+            "-DSRC_GLTF=${CMAKE_SOURCE_DIR}/samples/island/assets/props/coin.gltf"
+            "-DSRC_BIN=${CMAKE_SOURCE_DIR}/samples/island/assets/props/coin.bin"
             "-DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/platform_tag_work"
             -P ${CMAKE_CURRENT_SOURCE_DIR}/asset_packer_platform_tag_test.cmake
     )
@@ -1274,8 +1277,8 @@ if(ENGINE_BUILD_TOOLS)
         NAME engine_integration_asset_packer_orphan_sweep
         COMMAND ${CMAKE_COMMAND}
             "-DASSET_PACKER=$<TARGET_FILE:asset_packer>"
-            "-DSRC_GLTF=${CMAKE_SOURCE_DIR}/assets/props/coin.gltf"
-            "-DSRC_BIN=${CMAKE_SOURCE_DIR}/assets/props/coin.bin"
+            "-DSRC_GLTF=${CMAKE_SOURCE_DIR}/samples/island/assets/props/coin.gltf"
+            "-DSRC_BIN=${CMAKE_SOURCE_DIR}/samples/island/assets/props/coin.bin"
             "-DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/orphan_sweep_work"
             -P ${CMAKE_CURRENT_SOURCE_DIR}/asset_packer_orphan_sweep_test.cmake
     )
@@ -1293,8 +1296,8 @@ if(ENGINE_BUILD_TOOLS)
         NAME engine_integration_asset_packer_double_cook
         COMMAND ${CMAKE_COMMAND}
             "-DASSET_PACKER=$<TARGET_FILE:asset_packer>"
-            "-DSRC_GLTF=${CMAKE_SOURCE_DIR}/assets/character.gltf"
-            "-DSRC_BIN=${CMAKE_SOURCE_DIR}/assets/character.bin"
+            "-DSRC_GLTF=${CMAKE_SOURCE_DIR}/samples/island/assets/character.gltf"
+            "-DSRC_BIN=${CMAKE_SOURCE_DIR}/samples/island/assets/character.bin"
             "-DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/double_cook_work"
             -P ${CMAKE_CURRENT_SOURCE_DIR}/asset_packer_double_cook_test.cmake
     )
@@ -1315,8 +1318,8 @@ if(ENGINE_BUILD_TOOLS)
         COMMAND ${CMAKE_COMMAND}
             "-DASSET_PACKER=$<TARGET_FILE:asset_packer>"
             "-DSTALE_HOST=$<TARGET_FILE:asset_stale_load_host>"
-            "-DSRC_GLTF=${CMAKE_SOURCE_DIR}/assets/props/coin.gltf"
-            "-DSRC_BIN=${CMAKE_SOURCE_DIR}/assets/props/coin.bin"
+            "-DSRC_GLTF=${CMAKE_SOURCE_DIR}/samples/island/assets/props/coin.gltf"
+            "-DSRC_BIN=${CMAKE_SOURCE_DIR}/samples/island/assets/props/coin.bin"
             "-DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/runtime_stale_work"
             -P ${CMAKE_CURRENT_SOURCE_DIR}/asset_runtime_stale_test.cmake
     )
@@ -1337,8 +1340,8 @@ if(ENGINE_BUILD_TOOLS)
         COMMAND ${CMAKE_COMMAND}
             "-DASSET_PACKER=$<TARGET_FILE:asset_packer>"
             "-DSTALE_HOST=$<TARGET_FILE:asset_stale_skeletal_load_host>"
-            "-DSRC_GLTF=${CMAKE_SOURCE_DIR}/assets/character.gltf"
-            "-DSRC_BIN=${CMAKE_SOURCE_DIR}/assets/character.bin"
+            "-DSRC_GLTF=${CMAKE_SOURCE_DIR}/samples/island/assets/character.gltf"
+            "-DSRC_BIN=${CMAKE_SOURCE_DIR}/samples/island/assets/character.bin"
             "-DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/runtime_stale_skeletal_work"
             -P ${CMAKE_CURRENT_SOURCE_DIR}/asset_runtime_stale_skeletal_test.cmake
     )
@@ -1711,16 +1714,16 @@ engine_add_test_executable(engine_integration_draw_order_thread_count
 if(TARGET engine_validate)
     add_test(NAME engine_validate_cli_accepts_scene
         COMMAND $<TARGET_FILE:engine_validate> --assets assets assets/main.scene
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/samples/island)
     add_test(NAME engine_validate_cli_refuses_unknown_option
         COMMAND $<TARGET_FILE:engine_validate> --asets assets assets/main.scene
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/samples/island)
     add_test(NAME engine_validate_cli_refuses_missing_value
         COMMAND $<TARGET_FILE:engine_validate> assets/main.scene --assets
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/samples/island)
     add_test(NAME engine_validate_cli_refuses_no_scene
         COMMAND $<TARGET_FILE:engine_validate> --assets assets
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/samples/island)
     set_tests_properties(
         engine_validate_cli_refuses_unknown_option
         PROPERTIES PASS_REGULAR_EXPRESSION "--asets: unknown option")
@@ -1738,22 +1741,19 @@ if(TARGET engine_validate)
         PROPERTIES LABELS "integration" TIMEOUT 60)
 endif()
 
-# engine_validate --project opens a project through open_project and
-# validates the scenes it lists; a path holding no project is a usage error.
+# engine_validate --project opens the sample project through open_project
+# and validates every scene it lists; a path holding no project is a usage
+# error.
 if(TARGET engine_validate)
-    set(_validate_project_dir ${CMAKE_BINARY_DIR}/engine_validate_project)
-    file(MAKE_DIRECTORY ${_validate_project_dir}/assets)
-    file(WRITE ${_validate_project_dir}/Probe.project
-"{\"schemaVersion\":1,\"identity\":{\"name\":\"Probe\",\"organisation\":\"\",\"version\":\"0.1.0\",\"guid\":\"8f1c2d3e-4b5a-4c6d-8e7f-90a1b2c3d4e5\"},\"roots\":{\"content\":\"assets\",\"cache\":\".cache\"},\"scenes\":[\"assets/main.scene\"],\"startupScene\":\"assets/main.scene\"}\n")
-    configure_file(${CMAKE_SOURCE_DIR}/assets/main.scene
-        ${_validate_project_dir}/assets/main.scene COPYONLY)
     add_test(NAME engine_validate_cli_validates_project
-        COMMAND $<TARGET_FILE:engine_validate> --project ${_validate_project_dir})
+        COMMAND $<TARGET_FILE:engine_validate>
+            --project ${CMAKE_SOURCE_DIR}/samples/island)
     add_test(NAME engine_validate_cli_refuses_missing_project
         COMMAND $<TARGET_FILE:engine_validate>
             --project ${CMAKE_BINARY_DIR}/engine_validate_no_project)
+    # Exit 0 means every listed scene loaded with no Error finding.
     set_tests_properties(engine_validate_cli_validates_project
-        PROPERTIES PASS_REGULAR_EXPRESSION "main.scene: [0-9]+ warning\\(s\\), 0 error\\(s\\)")
+        PROPERTIES FAIL_REGULAR_EXPRESSION "did not load|[1-9][0-9]* error\\(s\\)")
     set_tests_properties(engine_validate_cli_refuses_missing_project
         PROPERTIES PASS_REGULAR_EXPRESSION "no project found")
     set_tests_properties(

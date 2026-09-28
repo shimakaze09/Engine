@@ -55,11 +55,14 @@ BACKTICKED = re.compile(r"`([^`\n]+)`")
 LINK = re.compile(r"\[[^\]\n]*\]\(([^)\s]+)\)")
 TEST_NAME = re.compile(r"\bengine_(?:unit|integration|bench)_[a-z0-9_]+\b")
 
+# The project a virtual content path (assets/...) in a document names.
+SAMPLE_PROJECT = "samples/island"
+
 # Top-level names a backticked path may start with. A token like
 # `a/b` in prose that is not rooted here is a phrase, not a path claim.
 ROOT_PREFIXES = (
     "app/", "assets/", "audio/", "cmake/", "content/", "core/", "docs/",
-    "engine_assets/",
+    "engine_assets/", "samples/",
     "editor/", "math/", "physics/", "renderer/", "runtime/", "scripting/",
     "tests/", "tools/", ".github/", ".claude/",
 )
@@ -141,7 +144,11 @@ def audit(root: pathlib.Path) -> list[str]:
                     path = path[2:]
                 if not path.startswith(ROOT_PREFIXES):
                     continue
-                if not (root / path).exists():
+                # A content path (assets/...) is spelled as every authored
+                # path is, virtually; it names the sample project's content.
+                target = (root / SAMPLE_PROJECT / path
+                          if path.startswith("assets/") else root / path)
+                if not target.exists():
                     findings.append(
                         f"{rel}:{number}: path does not exist: {token}")
             for name in TEST_NAME.findall(line):

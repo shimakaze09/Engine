@@ -11,7 +11,7 @@ import wave
 
 from gen_common import publish_set
 
-OUT_DIR = sys.argv[1] if len(sys.argv) > 1 else "assets/sounds"
+OUT_DIR = sys.argv[1] if len(sys.argv) > 1 else "samples/island/assets/sounds"
 RATE = 22050
 
 # (tmp, final) pairs staged by write_wav and published as one set behind

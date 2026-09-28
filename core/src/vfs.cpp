@@ -441,6 +441,13 @@ bool vfs_directory_exists(const char *virtualPath) noexcept {
   if (resolve(virtualPath, osPath, sizeof(osPath)) == 0U) {
     return false;
   }
+  return os_directory_exists(osPath);
+}
+
+bool os_directory_exists(const char *osPath) noexcept {
+  if ((osPath == nullptr) || (osPath[0] == '\0')) {
+    return false;
+  }
 #if defined(_WIN32)
   const DWORD attrs = GetFileAttributesA(osPath);
   return (attrs != INVALID_FILE_ATTRIBUTES) &&

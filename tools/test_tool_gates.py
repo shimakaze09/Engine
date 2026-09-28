@@ -805,15 +805,15 @@ def test_asset_identity_gate():
 
         check(run([script, "--root", str(write_identity_fixture(
             tmp / "clean", {
-                "assets/props/coin.gltf": "x\n",
-                "assets/props/coin.gltf.meta": sidecar_text(one),
-                "assets/scripts/hop.lua": "x\n",
-                "assets/scripts/hop.lua.meta": sidecar_text(two),
+                "samples/island/assets/props/coin.gltf": "x\n",
+                "samples/island/assets/props/coin.gltf.meta": sidecar_text(one),
+                "samples/island/assets/scripts/hop.lua": "x\n",
+                "samples/island/assets/scripts/hop.lua.meta": sidecar_text(two),
                 # A cooked output owns no identity of its own, so it needs
                 # no sidecar and must not be reported as missing one — but
                 # it does need the stamp that says whose output it is.
-                "assets/props/coin.mesh": "x\n",
-                "assets/props/coin.mesh.cookstamp":
+                "samples/island/assets/props/coin.mesh": "x\n",
+                "samples/island/assets/props/coin.mesh.cookstamp":
                     cook_stamp_text(one, ["coin.mesh"]),
             }))]) == 0,
               "identity: every source with a committed sidecar passes")
@@ -822,12 +822,12 @@ def test_asset_identity_gate():
         # clone, so the output's identity is unnameable everywhere else.
         orphan = write_identity_fixture(
             tmp / "orphan", {
-                "assets/props/coin.gltf": "x\n",
-                "assets/props/coin.gltf.meta": sidecar_text(one),
-                "assets/props/coin.mesh": "x\n",
+                "samples/island/assets/props/coin.gltf": "x\n",
+                "samples/island/assets/props/coin.gltf.meta": sidecar_text(one),
+                "samples/island/assets/props/coin.mesh": "x\n",
             },
             untracked={
-                "assets/props/coin.mesh.cookstamp":
+                "samples/island/assets/props/coin.mesh.cookstamp":
                     cook_stamp_text(one, ["coin.mesh"]),
             })
         completed = subprocess.run(
@@ -840,9 +840,9 @@ def test_asset_identity_gate():
 
         check(run([script, "--root", str(write_identity_fixture(
             tmp / "nostamp", {
-                "assets/props/coin.gltf": "x\n",
-                "assets/props/coin.gltf.meta": sidecar_text(one),
-                "assets/props/coin.mesh": "x\n",
+                "samples/island/assets/props/coin.gltf": "x\n",
+                "samples/island/assets/props/coin.gltf.meta": sidecar_text(one),
+                "samples/island/assets/props/coin.mesh": "x\n",
             }))]) != 0,
               "identity: a cooked output with no stamp at all fails")
 
@@ -850,10 +850,10 @@ def test_asset_identity_gate():
         # like-named claim one directory over must not cover this output.
         check(run([script, "--root", str(write_identity_fixture(
             tmp / "elsewhere", {
-                "assets/props/coin.gltf": "x\n",
-                "assets/props/coin.gltf.meta": sidecar_text(one),
-                "assets/props/coin.mesh": "x\n",
-                "assets/other/coin.mesh.cookstamp":
+                "samples/island/assets/props/coin.gltf": "x\n",
+                "samples/island/assets/props/coin.gltf.meta": sidecar_text(one),
+                "samples/island/assets/props/coin.mesh": "x\n",
+                "samples/island/assets/other/coin.mesh.cookstamp":
                     cook_stamp_text(one, ["coin.mesh"]),
             }))]) != 0,
               "identity: a stamp in another directory claims nothing here")
@@ -862,27 +862,27 @@ def test_asset_identity_gate():
         # kit a single source cooked into.
         check(run([script, "--root", str(write_identity_fixture(
             tmp / "siblings", {
-                "assets/hero.gltf": "x\n",
-                "assets/hero.gltf.meta": sidecar_text(one),
-                "assets/hero.mesh": "x\n",
-                "assets/hero.skel": "x\n",
-                "assets/hero.idle.anim": "x\n",
-                "assets/hero.mesh.cookstamp": cook_stamp_text(
+                "samples/island/assets/hero.gltf": "x\n",
+                "samples/island/assets/hero.gltf.meta": sidecar_text(one),
+                "samples/island/assets/hero.mesh": "x\n",
+                "samples/island/assets/hero.skel": "x\n",
+                "samples/island/assets/hero.idle.anim": "x\n",
+                "samples/island/assets/hero.mesh.cookstamp": cook_stamp_text(
                     one, ["hero.mesh", "hero.skel", "hero.idle.anim"]),
             }))]) == 0,
               "identity: one stamp claiming its whole cooked kit passes")
 
         check(run([script, "--root", str(write_identity_fixture(
             tmp / "missing", {
-                "assets/props/coin.gltf": "x\n",
+                "samples/island/assets/props/coin.gltf": "x\n",
             }))]) != 0,
               "identity: a source with no sidecar fails")
 
         duplicate = write_identity_fixture(tmp / "duplicate", {
-            "assets/props/coin.gltf": "x\n",
-            "assets/props/coin.gltf.meta": sidecar_text(one),
-            "assets/props/gem.gltf": "x\n",
-            "assets/props/gem.gltf.meta": sidecar_text(one),
+            "samples/island/assets/props/coin.gltf": "x\n",
+            "samples/island/assets/props/coin.gltf.meta": sidecar_text(one),
+            "samples/island/assets/props/gem.gltf": "x\n",
+            "samples/island/assets/props/gem.gltf.meta": sidecar_text(one),
         })
         completed = subprocess.run(
             [sys.executable, script, "--root", str(duplicate)],
@@ -894,8 +894,8 @@ def test_asset_identity_gate():
               "identity: a duplicate names every colliding path")
 
         across = write_identity_fixture(tmp / "across_roots", {
-            "assets/props/coin.gltf": "x\n",
-            "assets/props/coin.gltf.meta": sidecar_text(one),
+            "samples/island/assets/props/coin.gltf": "x\n",
+            "samples/island/assets/props/coin.gltf.meta": sidecar_text(one),
             "engine_assets/triangle.glb": "x\n",
             "engine_assets/triangle.glb.meta": sidecar_text(one),
         })
@@ -909,10 +909,10 @@ def test_asset_identity_gate():
               "identity: engine content without a sidecar fails too")
 
         collision = write_identity_fixture(tmp / "case", {
-            "assets/props/coin.gltf": "x\n",
-            "assets/props/coin.gltf.meta": sidecar_text(one),
-            "assets/props/Coin.gltf": "x\n",
-            "assets/props/Coin.gltf.meta": sidecar_text(two),
+            "samples/island/assets/props/coin.gltf": "x\n",
+            "samples/island/assets/props/coin.gltf.meta": sidecar_text(one),
+            "samples/island/assets/props/Coin.gltf": "x\n",
+            "samples/island/assets/props/Coin.gltf.meta": sidecar_text(two),
         })
         # A case-insensitive filesystem cannot hold the pair, so the case
         # is only meaningful where it can; skipping beats a false pass.
@@ -922,8 +922,8 @@ def test_asset_identity_gate():
             tracked = subprocess.run(
                 ["git", "-C", str(collision), "ls-files"],
                 capture_output=True, text=True, check=True).stdout
-            if ("assets/props/Coin.gltf" in tracked) and \
-                    ("assets/props/coin.gltf" in tracked):
+            if ("samples/island/assets/props/Coin.gltf" in tracked) and \
+                    ("samples/island/assets/props/coin.gltf" in tracked):
                 check(run([script, "--root", str(collision)]) != 0,
                       "identity: paths differing only by case fail")
 

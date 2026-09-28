@@ -4,7 +4,8 @@
 // project file, two documents, a malformed document, a missing content
 // root, startup scene or main script) names its reason and leaves the
 // caller's storage and config untouched; and a project opened this way
-// bootstraps headless with its per-user data named by its GUID.
+// bootstraps headless with its per-user data named by its GUID. The
+// bundled sample project opens and its document is in canonical form.
 
 #include "engine/project.h"
 
@@ -254,6 +255,32 @@ void test_bootstrap(const fs::path &root) {
   engine::shutdown();
 }
 
+/// The bundled sample project opens, and its document is exactly what the
+/// codec writes for it, so a hand edit cannot drift from the format.
+void test_bundled_sample() {
+  const std::string sample = engine::tests::sample_project_path();
+  engine::EngineConfig config{};
+  engine::ProjectStorage storage{};
+  if (sample.empty() ||
+      !engine::open_project(sample.c_str(), &storage, &config).has_value()) {
+    g_tests.fail("the bundled sample project opens");
+    return;
+  }
+  static char formatted[engine::content::kMaxProjectDocumentBytes] = {};
+  std::size_t length = 0U;
+  std::ifstream in(storage.projectFile, std::ios::binary);
+  const std::string onDisk((std::istreambuf_iterator<char>(in)),
+                           std::istreambuf_iterator<char>());
+  g_tests.check(engine::content::format_project_document(
+                    storage.document, formatted, sizeof(formatted), &length) &&
+                    (onDisk == std::string(formatted, length)),
+                "the sample's document is in the codec's canonical form");
+  g_tests.check(
+      (std::strcmp(storage.document.name, "island") == 0) &&
+          (std::strcmp(config.editorScenePath, "assets/main.scene") == 0),
+      "the sample opens on its main scene");
+}
+
 } // namespace
 
 int main() {
@@ -265,6 +292,7 @@ int main() {
 
   test_opens(root);
   test_refusals(root);
+  test_bundled_sample();
   engine::core::shutdown_logging();
   test_bootstrap(root);
 

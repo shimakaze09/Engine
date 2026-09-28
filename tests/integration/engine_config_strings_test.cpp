@@ -18,6 +18,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <string>
 
 namespace {
 
@@ -89,7 +90,8 @@ int main() {
   char *assetMount = heap_string("assets");
   char *assetRoot = heap_string("assets");
   char *engineMount = heap_string("engine");
-  char *engineRoot = heap_string("engine_assets");
+  const std::string engineRootPath = engine::tests::engine_root_path();
+  char *engineRoot = heap_string(engineRootPath.c_str());
   char *mainScriptPath = heap_string("assets/probe_main.lua");
   char *bootstrapMeshPath = heap_string("assets/probe.mesh");
   char *shaderRootPath = heap_string("assets/probe_shaders");
@@ -150,7 +152,7 @@ int main() {
           "assetRoot survives the caller overwriting its buffer");
     CHECK(adopted_equals(active.engineMount, "engine"),
           "engineMount survives the caller overwriting its buffer");
-    CHECK(adopted_equals(active.engineRoot, "engine_assets"),
+    CHECK(adopted_equals(active.engineRoot, engineRootPath.c_str()),
           "engineRoot survives the caller overwriting its buffer");
     CHECK(adopted_equals(active.mainScriptPath, "assets/probe_main.lua"),
           "mainScriptPath survives the caller overwriting its buffer");

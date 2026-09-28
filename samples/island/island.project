@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "identity": {
+    "name": "island",
+    "organisation": "",
+    "version": "0.1.0",
+    "guid": "c5cda74e-ce67-4632-a344-63e526219f0c"
+  },
+  "roots": {
+    "content": "assets",
+    "cache": ".cache"
+  },
+  "scenes": [
+    "assets/main.scene",
+    "assets/coin_run.scene",
+    "assets/shading_models.scene",
+    "assets/samples/playground.scene",
+    "assets/templates/island_hopper.scene"
+  ],
+  "startupScene": "assets/main.scene",
+  "mainScript": "assets/main.lua"
+}

@@ -195,6 +195,35 @@ void close_run_registries() noexcept { runtime::reset_anim_controllers(); }
 
 } // namespace
 
+namespace {
+
+/// Where the engine's own content lives when the config leaves engineRoot
+/// empty; see EngineConfig::engineRoot. Staged into `out`; the last
+/// candidate is returned even when missing, so the mount stage refuses it
+/// with the path in its message.
+const char *resolve_engine_root(char *out, std::size_t capacity) noexcept {
+  constexpr const char *kEngineDirectory = "engine_assets";
+  if (core::non_empty_env("ENGINE_ROOT", out, capacity)) {
+    return out;
+  }
+  char appDir[kMaxConfigStringLength + 1U] = {};
+  if (core::platform_get_app_dir(appDir, sizeof(appDir))) {
+    const std::size_t length = std::strlen(appDir);
+    const bool slash = (length > 0U) && ((appDir[length - 1U] == '/') ||
+                                         (appDir[length - 1U] == '\\'));
+    const int written = std::snprintf(out, capacity, "%s%s%s", appDir,
+                                      slash ? "" : "/", kEngineDirectory);
+    if ((written > 0) && (static_cast<std::size_t>(written) < capacity) &&
+        core::os_directory_exists(out)) {
+      return out;
+    }
+  }
+  std::snprintf(out, capacity, "%s", kEngineDirectory);
+  return out;
+}
+
+} // namespace
+
 bool bootstrap() noexcept {
   EngineConfig config{};
   config.core.frameAllocatorBytes = kFrameAllocatorBytes;
@@ -216,6 +245,10 @@ bool bootstrap(const EngineConfig &config) noexcept {
   // later, so the engine takes its own copies first. Staging into a local
   // keeps the active configuration intact when a string is rejected.
   EngineConfig adopted = config;
+  char engineRoot[kMaxConfigStringLength + 1U] = {};
+  if ((adopted.engineRoot != nullptr) && (adopted.engineRoot[0] == '\0')) {
+    adopted.engineRoot = resolve_engine_root(engineRoot, sizeof(engineRoot));
+  }
   if (!adopt_config_strings(adopted)) {
     return false;
   }

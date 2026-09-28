@@ -54,7 +54,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 TABLE_HEADER = "content/include/engine/content/asset_type_table.h"
 # The game's content and the engine's own, catalogued side by side at
 # runtime, so an identity must be unique across both.
-ASSET_ROOTS = ("assets", "engine_assets")
+ASSET_ROOTS = ("samples/island/assets", "engine_assets")
 SIDECAR_SUFFIX = ".meta"
 STAMP_SUFFIX = ".cookstamp"
 # "ASSET <16 hex> <path>" and "OUTPUT <16 hex> <path>", the stamp lines

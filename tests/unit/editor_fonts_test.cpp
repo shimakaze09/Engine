@@ -21,6 +21,7 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <string>
 
 namespace {
 
@@ -67,7 +68,9 @@ int main() {
   }
   // The engine mount as bootstrap makes it: the bundled faces load through
   // it.
-  t.check(engine::core::mount("engine", "engine_assets"),
+  const std::string engineRoot = engine::tests::engine_root_path();
+  const std::string roboto = engineRoot + "/fonts/Roboto-Medium.ttf";
+  t.check(engine::core::mount("engine", engineRoot.c_str()),
           "mount the engine content");
   t.check(engine::core::initialize_logging(), "initialize logging");
   t.check(engine::core::log_register_sink(&count_override_warnings, nullptr),
@@ -128,11 +131,8 @@ int main() {
   }
 
   // --- A readable override comes first. Any font file proves the order.
-  const EditorFontResult chosen =
-      with_fonts("engine_assets/fonts/Roboto-Medium.ttf", [](ImFont *) {});
-  t.check(chosen.cjk &&
-              (std::strcmp(chosen.cjkPath,
-                           "engine_assets/fonts/Roboto-Medium.ttf") == 0),
+  const EditorFontResult chosen = with_fonts(roboto.c_str(), [](ImFont *) {});
+  t.check(chosen.cjk && (std::strcmp(chosen.cjkPath, roboto.c_str()) == 0),
           "editor.cjk_font is tried before the bundled and system fonts");
 
   // --- The chosen file persists with the layout: the preferences section

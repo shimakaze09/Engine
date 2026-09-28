@@ -16,6 +16,7 @@
 #include <cstddef>
 #include <cstring>
 #include <filesystem>
+#include <string>
 #include <system_error>
 
 namespace {
@@ -96,7 +97,14 @@ void check_missing_font_takes_fallback() noexcept {
 /// Control: with the bundled font present, the probe finds it and the
 /// fallback is not taken, so the warning is specific to a missing file.
 void check_present_font_is_loaded() noexcept {
-  if (!engine::tests::enter_asset_root()) {
+  // The relative engine mount resolves from the directory holding
+  // engine_assets/.
+  const std::string engineRoot = engine::tests::engine_root_path();
+  std::error_code ec{};
+  if (engineRoot.empty() ||
+      (std::filesystem::current_path(
+           std::filesystem::path(engineRoot).parent_path(), ec),
+       ec)) {
     g_tests.fail("the bundled editor font could be located");
     return;
   }

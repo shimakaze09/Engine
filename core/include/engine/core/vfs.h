@@ -67,6 +67,9 @@ bool vfs_file_exists(const char *virtualPath) noexcept;
 /// True when the virtual path (a mount prefix alone included) resolves to
 /// an existing directory.
 bool vfs_directory_exists(const char *virtualPath) noexcept;
+/// True when the OS path (not a virtual one) names an existing directory;
+/// false for null or empty. No allocation.
+bool os_directory_exists(const char *osPath) noexcept;
 
 /// Size in bytes of the regular file the virtual path resolves to; false
 /// when the path does not resolve or names something other than a regular

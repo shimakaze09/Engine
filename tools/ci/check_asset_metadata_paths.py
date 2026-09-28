@@ -22,7 +22,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 # leaves this audit silently.
 TRACKED_PATTERNS = tuple(
     f"{root}/**/*.{suffix}"
-    for root in ("assets", "engine_assets")
+    for root in ("samples/island/assets", "engine_assets")
     for suffix in ("meta", "cookmeta", "cookstamp", "scene", "prefab", "mat",
                    "animctrl", "manifest", "json")
 )

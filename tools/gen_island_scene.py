@@ -9,7 +9,7 @@ import json
 import os
 import sys
 
-OUT_PATH = sys.argv[1] if len(sys.argv) > 1 else "assets/templates/island_hopper.scene"
+OUT_PATH = sys.argv[1] if len(sys.argv) > 1 else "samples/island/assets/templates/island_hopper.scene"
 
 FNV_OFFSET = 14695981039346656037
 FNV_PRIME = 1099511628211

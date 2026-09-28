@@ -26,7 +26,7 @@ Each fact has one home. Nothing mirrors anything else.
 - Runtime systems for ECS/world simulation, rendering, physics, audio, and scripting
 - Lua 5.4 gameplay scripting bridge (`engine` Lua API)
 - Generated Lua binding pipeline for annotated scripting accessors
-- Asset examples under `assets/`
+- A sample game, `samples/island/`: a project of its own (`island.project` and its `assets/`)
 - Test suites (unit, integration, smoke, benchmark, CMake configure-rejection) wired into CTest
 - Asset tooling: `asset_packer` (mesh, skeleton and animation cook, shader cook, metadata init) and the `engine_validate` scene checker (`--project <dir>` checks every scene a project lists)
 - GitHub Actions CI under `.github/workflows/ci.yml`
@@ -95,7 +95,7 @@ pinned commit; only SDL3 is looked up locally first.
 - `scripting/`: Lua runtime and engine bindings
 - `runtime/`: engine bootstrap/run loop, world/ECS, scene and prefab serialization
 - `editor/`: editor integration, camera, command history
-- `assets/`: the sample game's scripts, scenes and content, mounted at `assets/`
+- `samples/island/`: the sample game, a project of its own: `island.project` and the scripts, scenes and content under its `assets/`, mounted at `assets/`
 - `engine_assets/`: the engine's own content (shaders and their cook manifest, editor fonts, the web shell, the bootstrap mesh), mounted at `engine/`
 - `tests/`: unit, integration, smoke, benchmark, and CMake configure-rejection tests
 - `tools/`: asset packer (glTF/GLB → `.mesh`, shader-manifest cook, `--init-meta`), `engine_validate` scene checker, Lua binding generator, content generators, audit gates and their self-tests, CI helpers
@@ -219,6 +219,13 @@ Run the app after build:
 - macOS builds it as `build/engine_editor_app.app`, a bundle Finder launches
   without Terminal (it cannot run until the shader cook works there).
 
+The editor opens the project named on its command line, either the
+project's directory or its `.project` file (`engine_editor_app
+path/to/my_game`). Started with none, as from a file manager, it opens the
+sample project the build copies beside it (`build/samples/island`), until a
+project hub takes that role. A project that cannot be opened says why in an
+error box.
+
 Each windowed run writes its log to `logs/editor.log` under the per-user data
 directory (`logs/player.log` in player mode), keeping the previous run's as
 `editor-prev.log`, as Unity keeps `Editor.log`; a failed start shows an error
@@ -314,7 +321,7 @@ save, one entry per OS and configuration:
 
 The runtime exposes an `engine` table to Lua scripts.
 
-Current script conventions in `assets/`:
+Current script conventions in the sample's `assets/`:
 
 - Scene-level module (`assets/main.lua`)
 	- `M.on_begin_play(self)` is called once when play starts, or when
@@ -361,7 +368,7 @@ The scripting surface is still evolving. Some APIs are generated from annotated 
 
 ## Assets and mesh conversion
 
-The runtime mounts the game's content from `assets/` at `assets/` and the engine's own from `engine_assets/` at `engine/` (`EngineConfig::assetRoot` and `engineRoot`, both relative to the working directory; CMake copies both into the build output, and bootstrap refuses an engine root that is not there).
+The runtime mounts the open project's content root at `assets/` and the engine's own content from `engine_assets/` at `engine/` (`EngineConfig::assetRoot` and `engineRoot`). `engine::open_project` sets the content root from the project document. The engine's content is found through `ENGINE_ROOT`, then beside the executable, then in the working directory, unless the config names it; CMake copies it and the sample project into the build output, and bootstrap refuses an engine root that is not there.
 
 For mesh conversion, build and run `asset_packer`:
 
@@ -400,7 +407,7 @@ for any change to math, ECS, physics, renderer, or scripting behavior.
 - Configure fails because Python is missing:
 	- Install Python 3 and ensure it is available to CMake as `Python3_EXECUTABLE`.
 - App starts but assets are missing:
-	- Build from repository root and run from the build output where `assets/` and `engine_assets/` were copied.
+	- Build from repository root; the build output holds the copied `engine_assets/` and `samples/island/` beside the editor.
 - Shader or render issues:
 	- Verify the shaderc cook ran (`ENGINE_BGFX_SHADERC=ON`) and the cooked binaries exist under `build/engine_assets/shaders/bgfx/cooked/`.
 
