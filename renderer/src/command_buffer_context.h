@@ -184,6 +184,34 @@ struct RenderViewResources final {
 };
 
 /// Owns private GPU backend state for command buffer rendering.
+
+/// What an IBL environment is baked from: the cubemap sampled, the texture
+/// it belongs to with its generation (bgfx reuses a destroyed texture's
+/// device handle, so the device handle alone would take a new environment
+/// for the one it replaced), and a version its owner bumps each time it
+/// renders new contents into the same texture.
+struct IblBakeSource final {
+  DeviceTextureHandle cubemap{};
+  TextureHandle texture{};
+  std::uint32_t version = 0U;
+
+  friend bool operator==(const IblBakeSource &,
+                         const IblBakeSource &) noexcept = default;
+};
+
+/// One baked image-based-light environment: the specular prefilter chain
+/// and the diffuse irradiance cube, each with what it was baked from and
+/// at which size, so a bake reruns only when one of those changes.
+struct IblEnvironmentSet final {
+  DeviceTextureHandle prefilteredTexture{};
+  IblBakeSource prefilteredSource{};
+  int prefilteredFaceSize = 0;
+  int prefilteredMipLevels = 0;
+  DeviceTextureHandle irradianceTexture{};
+  IblBakeSource irradianceSource{};
+  int irradianceFaceSize = 0;
+};
+
 struct BackendState final {
   static constexpr int kBloomMipLevels = RenderViewResources::kBloomMipLevels;
   static constexpr int kLuminanceMipLevels =
@@ -389,14 +417,6 @@ struct BackendState final {
   ShaderParam environmentPrefilterProjectionLoc{};
   ShaderParam environmentPrefilterTextureLoc{};
   ShaderParam environmentPrefilterRoughnessLoc{};
-  DeviceTextureHandle prefilteredEnvironmentTexture{};
-  DeviceTextureHandle prefilteredEnvironmentSource{};
-  // The texture the bake came from, with its generation: bgfx reuses a
-  // destroyed texture's device handle, so the device handle alone would
-  // take a new environment for the one it replaced.
-  TextureHandle prefilteredEnvironmentSourceTexture{};
-  int prefilteredEnvironmentFaceSize = 0;
-  int prefilteredEnvironmentMipLevels = 0;
 
   bool environmentIrradianceAvailable = false;
   ShaderProgramHandle environmentIrradianceShaderHandle{};
@@ -404,16 +424,15 @@ struct BackendState final {
   ShaderParam environmentIrradianceViewLoc{};
   ShaderParam environmentIrradianceProjectionLoc{};
   ShaderParam environmentIrradianceTextureLoc{};
-  DeviceTextureHandle irradianceEnvironmentTexture{};
-  DeviceTextureHandle irradianceEnvironmentSource{};
-  TextureHandle irradianceEnvironmentSourceTexture{};
-  int irradianceEnvironmentFaceSize = 0;
 
   bool environmentBrdfLutAvailable = false;
   ShaderProgramHandle environmentBrdfLutShaderHandle{};
   DeviceProgramHandle environmentBrdfLutProgram{};
   DeviceTextureHandle brdfLutTexture{};
   int brdfLutSize = 0;
+
+  // The sky's environment, baked from the active skybox cubemap.
+  IblEnvironmentSet skyEnvironment{};
 
   // Deferred rendering state.
   bool deferredAvailable = false;

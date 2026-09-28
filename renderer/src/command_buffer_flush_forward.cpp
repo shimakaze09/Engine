@@ -60,7 +60,7 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
   const HeightFogSettings &heightFogSettings = ctx.heightFogSettings;
   const math::Mat4 &viewMat = ctx.viewMat;
   const math::Mat4 &viewProjection = ctx.viewProjection;
-  const bool iblAvailable = ctx.iblAvailable;
+  const IblSelection &ibl = ctx.ibl;
   const DeviceTextureHandle envSkyboxTexture = ctx.envSkyboxTexture;
   const bool shadowEnabled = ctx.shadowEnabled;
   const bool doSpotShadows = ctx.doSpotShadows;
@@ -112,7 +112,7 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
       dev->set_param_i32(backend.pbrUseInstancingLocation, 0);
     }
     upload_pbr_lighting_uniforms(backend, dev, lights);
-    apply_pbr_ibl_uniforms(backend, dev, iblAvailable);
+    apply_pbr_ibl_uniforms(backend, dev, ibl);
     upload_pbr_distance_fog_uniforms(backend, dev, fogSettings);
     upload_pbr_height_fog_uniforms(backend, dev, heightFogSettings);
     bind_pbr_shadow_uniforms(backend, dev, lights, shadowEnabled, doSpotShadows,
@@ -230,7 +230,7 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
       }
       dev->bind_program(program);
       boundProgram = program;
-      apply_pbr_ibl_uniforms(backend, dev, iblAvailable);
+      apply_pbr_ibl_uniforms(backend, dev, ibl);
       if (backend.pbrAlbedoMapLocation.valid()) {
         dev->set_param_i32(backend.pbrAlbedoMapLocation, 0);
       }

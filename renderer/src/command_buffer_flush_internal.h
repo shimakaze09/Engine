@@ -35,6 +35,16 @@ constexpr int kIblIrradianceUnit = 13;
 constexpr int kIblPrefilteredUnit = 14;
 constexpr int kIblBrdfLutUnit = 15;
 
+/// The image-based light one view's geometry samples, and the prefilter
+/// chain length its roughness lookup spans; unavailable means the constant
+/// ambient fallback.
+struct IblSelection final {
+  DeviceTextureHandle prefiltered{};
+  DeviceTextureHandle irradiance{};
+  int prefilteredMipLevels = 0;
+  bool available = false;
+};
+
 /// Everything flush_renderer computes once per frame and the pass functions
 /// share: targets, camera matrices, partition counts, feature toggles, and
 /// the accumulated frame stats. Shadow toggles are written by
@@ -52,9 +62,7 @@ struct FrameFlushContext final {
   DistanceFogSettings fogSettings;
   HeightFogSettings heightFogSettings;
   DeviceTextureHandle envSkyboxTexture;
-  DeviceTextureHandle iblPrefilteredTex;
-  DeviceTextureHandle iblIrradianceTex;
-  bool iblAvailable;
+  IblSelection ibl;
   math::Mat4 viewMat;
   math::Mat4 projMat;
   math::Mat4 viewProjection;
@@ -145,7 +153,8 @@ height_fog_settings_from_cvars(const FlushCVars &cvars) noexcept;
 /// unit 0 aliases the sampler2D albedo there, which is a draw-time
 /// GL_INVALID_OPERATION that corrupts every draw.
 void apply_pbr_ibl_uniforms(const BackendState &backend,
-                            const RenderDevice *dev, bool enabled) noexcept;
+                            const RenderDevice *dev,
+                            const IblSelection &ibl) noexcept;
 
 /// Uploads the forward PBR light arrays and counts.
 void upload_pbr_lighting_uniforms(const BackendState &backend,

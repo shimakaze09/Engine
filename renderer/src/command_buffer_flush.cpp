@@ -173,18 +173,22 @@ void flush_renderer_view(const RenderViewDesc &view,
   const TextureHandle envTexture = renderer_context().activeSkyboxTexture;
   const DeviceTextureHandle envSkyboxTexture =
       active_skybox_device_texture(backend);
-  DeviceTextureHandle iblPrefilteredTex{};
-  DeviceTextureHandle iblIrradianceTex{};
+  IblSelection skyIbl{};
   if (envSkyboxTexture != kInvalidDeviceTexture) {
-    iblPrefilteredTex = ensure_prefiltered_environment(
-        backend, dev, envTexture, envSkyboxTexture, environmentBakeSettings);
-    iblIrradianceTex = ensure_irradiance_environment(
-        backend, dev, envTexture, envSkyboxTexture, environmentBakeSettings);
+    IblBakeSource skySource{};
+    skySource.cubemap = envSkyboxTexture;
+    skySource.texture = envTexture;
+    skyIbl.prefiltered =
+        ensure_prefiltered_environment(backend, dev, backend.skyEnvironment,
+                                       skySource, environmentBakeSettings);
+    skyIbl.irradiance =
+        ensure_irradiance_environment(backend, dev, backend.skyEnvironment,
+                                      skySource, environmentBakeSettings);
+    skyIbl.prefilteredMipLevels = backend.skyEnvironment.prefilteredMipLevels;
   }
-  const bool iblAvailable =
-      (iblPrefilteredTex != kInvalidDeviceTexture) &&
-      (iblIrradianceTex != kInvalidDeviceTexture) &&
-      (backend.brdfLutTexture != kInvalidDeviceTexture);
+  skyIbl.available = (skyIbl.prefiltered != kInvalidDeviceTexture) &&
+                     (skyIbl.irradiance != kInvalidDeviceTexture) &&
+                     (backend.brdfLutTexture != kInvalidDeviceTexture);
 
   const bool useDeferred =
       backend.deferredAvailable && backend.cvars.deferred.get_bool(true);
@@ -257,9 +261,7 @@ void flush_renderer_view(const RenderViewDesc &view,
                         fogSettings,
                         heightFogSettings,
                         envSkyboxTexture,
-                        iblPrefilteredTex,
-                        iblIrradianceTex,
-                        iblAvailable,
+                        skyIbl,
                         viewMat,
                         projMat,
                         viewProjection,

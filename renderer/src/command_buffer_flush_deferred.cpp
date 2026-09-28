@@ -86,9 +86,7 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
   const math::Mat4 &viewMat = ctx.viewMat;
   const math::Mat4 &projMat = ctx.projMat;
   const math::Mat4 &viewProjection = ctx.viewProjection;
-  const bool iblAvailable = ctx.iblAvailable;
-  const DeviceTextureHandle iblPrefilteredTex = ctx.iblPrefilteredTex;
-  const DeviceTextureHandle iblIrradianceTex = ctx.iblIrradianceTex;
+  const IblSelection &ibl = ctx.ibl;
   const DeviceTextureHandle envSkyboxTexture = ctx.envSkyboxTexture;
   const int gbufferDebugMode = ctx.gbufferDebugMode;
   const bool shadowEnabled = ctx.shadowEnabled;
@@ -652,20 +650,19 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
       if (backend.dlBrdfLutLoc.valid()) {
         dev->set_param_i32(backend.dlBrdfLutLoc, kIblBrdfLutUnit);
       }
-      const bool dlIblEnabled = iblAvailable &&
+      const bool dlIblEnabled = ibl.available &&
                                 (backend.dlIblEnabledLoc.valid()) &&
                                 (dev->bind_texture_slot != nullptr);
       if (backend.dlIblEnabledLoc.valid()) {
         dev->set_param_i32(backend.dlIblEnabledLoc, dlIblEnabled ? 1 : 0);
       }
       if (dlIblEnabled) {
-        dev->bind_texture_slot(kIblIrradianceUnit, iblIrradianceTex);
-        dev->bind_texture_slot(kIblPrefilteredUnit, iblPrefilteredTex);
+        dev->bind_texture_slot(kIblIrradianceUnit, ibl.irradiance);
+        dev->bind_texture_slot(kIblPrefilteredUnit, ibl.prefiltered);
         dev->bind_texture_slot(kIblBrdfLutUnit, backend.brdfLutTexture);
         if (backend.dlPrefilteredMipsLoc.valid()) {
-          dev->set_param_f32(
-              backend.dlPrefilteredMipsLoc,
-              static_cast<float>(backend.prefilteredEnvironmentMipLevels));
+          dev->set_param_f32(backend.dlPrefilteredMipsLoc,
+                             static_cast<float>(ibl.prefilteredMipLevels));
         }
       } else if (dev->bind_texture_slot != nullptr) {
         // Vulkan-family backends need valid descriptors on the declared
@@ -988,7 +985,7 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
         dev->set_param_i32(backend.pbrUseInstancingLocation, 0);
       }
       upload_pbr_lighting_uniforms(backend, dev, lights);
-      apply_pbr_ibl_uniforms(backend, dev, iblAvailable);
+      apply_pbr_ibl_uniforms(backend, dev, ibl);
       upload_pbr_distance_fog_uniforms(backend, dev, fogSettings);
       upload_pbr_height_fog_uniforms(backend, dev, heightFogSettings);
       bind_pbr_shadow_uniforms(backend, dev, lights, shadowEnabled,
@@ -1026,7 +1023,7 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
         // Parameter values are registry-global by name and carry across a
         // bind, but a sampler uniform left at its default unit aliases
         // whatever sits there, so each newly bound program gets its units.
-        apply_pbr_ibl_uniforms(backend, dev, iblAvailable);
+        apply_pbr_ibl_uniforms(backend, dev, ibl);
         if (backend.pbrAlbedoMapLocation.valid()) {
           dev->set_param_i32(backend.pbrAlbedoMapLocation, 0);
         }

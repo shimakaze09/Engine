@@ -52,7 +52,7 @@ constexpr std::size_t kInstanceModelColumns = 4U;
 /// GL_INVALID_OPERATION that corrupts every draw.
 void apply_pbr_ibl_uniforms(const BackendState &backend,
                             const RenderDevice *dev,
-                            bool iblAvailable) noexcept {
+                            const IblSelection &ibl) noexcept {
   if (backend.pbrIrradianceMapLoc.valid()) {
     dev->set_param_i32(backend.pbrIrradianceMapLoc, kIblIrradianceUnit);
   }
@@ -63,7 +63,7 @@ void apply_pbr_ibl_uniforms(const BackendState &backend,
     dev->set_param_i32(backend.pbrBrdfLutLoc, kIblBrdfLutUnit);
   }
 
-  const bool enabled = iblAvailable && (backend.pbrIblEnabledLoc.valid()) &&
+  const bool enabled = ibl.available && (backend.pbrIblEnabledLoc.valid()) &&
                        (dev->bind_texture_slot != nullptr);
   if (backend.pbrIblEnabledLoc.valid()) {
     dev->set_param_i32(backend.pbrIblEnabledLoc, enabled ? 1 : 0);
@@ -79,15 +79,12 @@ void apply_pbr_ibl_uniforms(const BackendState &backend,
     return;
   }
 
-  dev->bind_texture_slot(kIblIrradianceUnit,
-                            backend.irradianceEnvironmentTexture);
-  dev->bind_texture_slot(kIblPrefilteredUnit,
-                            backend.prefilteredEnvironmentTexture);
+  dev->bind_texture_slot(kIblIrradianceUnit, ibl.irradiance);
+  dev->bind_texture_slot(kIblPrefilteredUnit, ibl.prefiltered);
   dev->bind_texture_slot(kIblBrdfLutUnit, backend.brdfLutTexture);
   if (backend.pbrPrefilteredMipsLoc.valid()) {
-    dev->set_param_f32(
-        backend.pbrPrefilteredMipsLoc,
-        static_cast<float>(backend.prefilteredEnvironmentMipLevels));
+    dev->set_param_f32(backend.pbrPrefilteredMipsLoc,
+                       static_cast<float>(ibl.prefilteredMipLevels));
   }
 }
 

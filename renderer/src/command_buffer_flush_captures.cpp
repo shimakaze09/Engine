@@ -111,7 +111,7 @@ void flush_scene_captures(FrameFlushContext &ctx) noexcept {
     upload_pbr_height_fog_uniforms(backend, dev, heightFogSettings);
     bind_pbr_shadow_uniforms(backend, dev, lights, false, false, false);
     // Captures skip sky and IBL by design.
-    apply_pbr_ibl_uniforms(backend, dev, false);
+    apply_pbr_ibl_uniforms(backend, dev, IblSelection{});
     if (backend.pbrAlbedoMapLocation.valid()) {
       dev->set_param_i32(backend.pbrAlbedoMapLocation, 0);
     }
