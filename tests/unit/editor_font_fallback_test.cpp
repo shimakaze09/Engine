@@ -3,12 +3,14 @@
 // takes the logged built-in-font fallback instead of tripping ImGui's hard
 // assert inside its file loader (regression test for #408). Drives the
 // production initialize_editor entry point from a working directory with
-// no assets/ tree and reads the fallback through a registered log sink.
+// no engine_assets/ tree under the engine mount bootstrap sets up, and
+// reads the fallback through a registered log sink.
 
 #include "../asset_root.h"
 #include "../test_harness.h"
 #include "editor_session.h"
 #include "engine/core/logging.h"
+#include "engine/core/vfs.h"
 #include "engine/editor/editor.h"
 
 #include <cstddef>
@@ -56,7 +58,7 @@ std::size_t font_warnings_during_initialize() noexcept {
   return tally.fallbackWarnings;
 }
 
-/// EXPECTATION (#408): from a working directory with no assets/ tree,
+/// EXPECTATION (#408): from a working directory with no engine_assets/,
 /// initialize_editor reaches its fallback branch, one "editor font
 /// missing" warning through the production log path, instead of aborting
 /// inside ImGui's font file loader. The unfixed revision never returns
@@ -81,7 +83,7 @@ void check_missing_font_takes_fallback() noexcept {
     return;
   }
   g_tests.check(
-      !std::filesystem::exists("assets/fonts/Roboto-Medium.ttf", ec),
+      !std::filesystem::exists("engine_assets/fonts/Roboto-Medium.ttf", ec),
       "scratch working directory carries no editor font");
 
   g_tests.check(font_warnings_during_initialize() == 1U,
@@ -107,6 +109,10 @@ void check_present_font_is_loaded() noexcept {
 /// Runs this executable or test program.
 int main() {
   g_tests.check(engine::core::initialize_logging(), "initialize_logging");
+  // The engine mount as bootstrap makes it: relative to the working
+  // directory, so each check's directory decides whether the font exists.
+  g_tests.check(engine::core::mount("engine", "engine_assets"),
+                "mount the engine content");
   check_missing_font_takes_fallback();
   check_present_font_is_loaded();
   engine::core::shutdown_logging();

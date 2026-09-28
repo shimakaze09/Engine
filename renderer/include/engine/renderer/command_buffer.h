@@ -376,8 +376,11 @@ void shutdown_renderer() noexcept;
 /// initialize_render_device themselves.
 const RenderDevice *acquire_render_device() noexcept;
 
-/// Sets the virtual root used for built-in renderer shaders.
-void set_shader_root_path(const char *path) noexcept;
+/// Sets the virtual root the built-in renderer shaders load from, with
+/// any trailing '/' dropped. A null, empty or overlong root is refused
+/// with an Error and the previous root kept: a cut path would name a
+/// different directory. No shader loads until a root is set.
+bool set_shader_root_path(const char *path) noexcept;
 
 /// The Game view's size in pixels, set by the editor's Game panel. When
 /// positive, flush_renderer renders the Game view at this size instead of

@@ -17,6 +17,7 @@
 #include <string>
 #include <system_error>
 
+#include "../asset_root.h"
 #include "engine/core/input_map.h"
 #include "engine/core/platform.h"
 #include "engine/engine.h"
@@ -71,6 +72,8 @@ bool bootstrap_project(const char *root) {
   config.core.platform.headless = true;
   config.assetMount = "assets";
   config.assetRoot = root;
+  const std::string engineRoot = engine::tests::engine_root_path();
+  config.engineRoot = engineRoot.c_str();
   config.mainScriptPath = "project_save_scope_missing_main.lua";
   config.bootstrapMeshPath = "project_save_scope_missing.mesh";
   config.editorScenePath = "project_save_scope_missing.scene";

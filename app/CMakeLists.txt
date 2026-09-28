@@ -20,5 +20,5 @@ target_link_libraries(engine_editor_app
 # Web: ship as an .html page from the share shell.
 if(ENGINE_TARGET_PLATFORM STREQUAL "Web")
     engine_package_web_page(engine_editor_app
-        "${ENGINE_ASSET_SOURCE_DIR}/web/shell.html")
+        "${ENGINE_ENGINE_ASSET_SOURCE_DIR}/web/shell.html")
 endif()

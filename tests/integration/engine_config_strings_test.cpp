@@ -1,5 +1,5 @@
 // Regression for #342: engine::bootstrap must take its own copies of the
-// configuration's borrowed strings. Before this fix EngineConfig's seven
+// configuration's borrowed strings. Before this fix EngineConfig's
 // const char* paths and the window title were shallow-copied into the
 // active configuration, so every later active_config() read — the asset
 // mount, the player-mode scene path, the editor's asset root — walked the
@@ -84,10 +84,12 @@ int main() {
   // Every value a rejection case later reads back differs from the
   // matching `EngineConfig` default, so an assertion that it survived
   // distinguishes preserved storage from storage overwritten with the
-  // default's identical text. The mount pair stays "assets" because
-  // bootstrap mounts it for real.
+  // default's identical text. The mount pairs stay as the defaults because
+  // bootstrap mounts them for real.
   char *assetMount = heap_string("assets");
   char *assetRoot = heap_string("assets");
+  char *engineMount = heap_string("engine");
+  char *engineRoot = heap_string("engine_assets");
   char *mainScriptPath = heap_string("assets/probe_main.lua");
   char *bootstrapMeshPath = heap_string("assets/probe.mesh");
   char *shaderRootPath = heap_string("assets/probe_shaders");
@@ -95,6 +97,7 @@ int main() {
   char *editorAssetRoot = heap_string("assets/probe_root");
   char *windowTitle = heap_string("config strings probe");
   if ((assetMount == nullptr) || (assetRoot == nullptr) ||
+      (engineMount == nullptr) || (engineRoot == nullptr) ||
       (mainScriptPath == nullptr) || (bootstrapMeshPath == nullptr) ||
       (shaderRootPath == nullptr) || (editorScenePath == nullptr) ||
       (editorAssetRoot == nullptr) || (windowTitle == nullptr)) {
@@ -109,6 +112,8 @@ int main() {
     config.core.platform.headless = true;
     config.assetMount = assetMount;
     config.assetRoot = assetRoot;
+    config.engineMount = engineMount;
+    config.engineRoot = engineRoot;
     config.mainScriptPath = mainScriptPath;
     config.bootstrapMeshPath = bootstrapMeshPath;
     config.shaderRootPath = shaderRootPath;
@@ -130,6 +135,8 @@ int main() {
 
     scribble(assetMount);
     scribble(assetRoot);
+    scribble(engineMount);
+    scribble(engineRoot);
     scribble(mainScriptPath);
     scribble(bootstrapMeshPath);
     scribble(shaderRootPath);
@@ -141,6 +148,10 @@ int main() {
           "assetMount survives the caller overwriting its buffer");
     CHECK(adopted_equals(active.assetRoot, "assets"),
           "assetRoot survives the caller overwriting its buffer");
+    CHECK(adopted_equals(active.engineMount, "engine"),
+          "engineMount survives the caller overwriting its buffer");
+    CHECK(adopted_equals(active.engineRoot, "engine_assets"),
+          "engineRoot survives the caller overwriting its buffer");
     CHECK(adopted_equals(active.mainScriptPath, "assets/probe_main.lua"),
           "mainScriptPath survives the caller overwriting its buffer");
     CHECK(adopted_equals(active.bootstrapMeshPath, "assets/probe.mesh"),
@@ -158,6 +169,8 @@ int main() {
     // sanitizer lane catches when the configuration only borrowed them.
     std::free(assetMount);
     std::free(assetRoot);
+    std::free(engineMount);
+    std::free(engineRoot);
     std::free(mainScriptPath);
     std::free(bootstrapMeshPath);
     std::free(shaderRootPath);

@@ -169,6 +169,10 @@ bool load_bootstrap_meshes(renderer::AssetManager *assetManager,
   // mount does not index cleanly, so nothing here repeats it.
   static_cast<void>(content::register_mounted_assets(
       catalog, active_config().assetMount, active_config().assetRoot));
+  // The engine's own content (shaders, the bootstrap mesh) is catalogued
+  // under its own mount, so its records keep their engine/... paths.
+  static_cast<void>(content::register_mounted_assets(
+      catalog, active_config().engineMount, active_config().engineRoot));
 
   // Discover project material JSONs so MeshComponent.materialAssetId
   // references resolve during render prep.

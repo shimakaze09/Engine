@@ -116,7 +116,7 @@ and runs `ctest -L web`; locally it needs emsdk 6.0.10 activated, a native
 build's cook, and the Playwright pinned in `tests/web/`:
 
 ```bash
-emcmake cmake -S . -B build-web -DCMAKE_BUILD_TYPE=Release -DENGINE_TARGET_PLATFORM=Web -DENGINE_BUILD_TESTS=ON -DENGINE_BUILD_TOOLS=OFF -DENGINE_WEB_COOKED_DIR=<native-build>/assets/shaders/bgfx/cooked
+emcmake cmake -S . -B build-web -DCMAKE_BUILD_TYPE=Release -DENGINE_TARGET_PLATFORM=Web -DENGINE_BUILD_TESTS=ON -DENGINE_BUILD_TOOLS=OFF -DENGINE_WEB_COOKED_DIR=<native-build>/engine_assets/shaders/bgfx/cooked
 cmake --build build-web --parallel
 npm ci --prefix tests/web
 npx --prefix tests/web playwright install chromium-headless-shell

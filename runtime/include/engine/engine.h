@@ -11,11 +11,20 @@ namespace engine {
 /// Describes app/runtime startup paths and core ownership.
 struct EngineConfig final {
   core::CoreConfig core{};
+  /// The game's content: mounted at `assetMount` from the OS directory
+  /// `assetRoot`, and addressed as `assets/...` by every authored path.
   const char *assetMount = "assets";
   const char *assetRoot = "assets";
+  /// The engine's own content (shaders, fonts, the web shell, the
+  /// bootstrap mesh): mounted at `engineMount` from the OS directory
+  /// `engineRoot`, kept apart from any project's content as Unreal's
+  /// Engine/Content is. Both roots resolve against the working directory;
+  /// bootstrap refuses a root that is not a directory.
+  const char *engineMount = "engine";
+  const char *engineRoot = "engine_assets";
   const char *mainScriptPath = "assets/main.lua";
-  const char *bootstrapMeshPath = "assets/triangle.mesh";
-  const char *shaderRootPath = "assets/shaders";
+  const char *bootstrapMeshPath = "engine/triangle.mesh";
+  const char *shaderRootPath = "engine/shaders";
   const char *editorScenePath = "assets/main.scene";
   const char *editorAssetRoot = "assets";
   /// Player mode: run the pure gameplay loop — the editor bridge

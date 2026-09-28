@@ -95,7 +95,8 @@ pinned commit; only SDL3 is looked up locally first.
 - `scripting/`: Lua runtime and engine bindings
 - `runtime/`: engine bootstrap/run loop, world/ECS, scene and prefab serialization
 - `editor/`: editor integration, camera, command history
-- `assets/`: scripts, shaders, and sample content
+- `assets/`: the sample game's scripts, scenes and content, mounted at `assets/`
+- `engine_assets/`: the engine's own content (shaders and their cook manifest, editor fonts, the web shell, the bootstrap mesh), mounted at `engine/`
 - `tests/`: unit, integration, smoke, benchmark, and CMake configure-rejection tests
 - `tools/`: asset packer (glTF/GLB → `.mesh`, shader-manifest cook, `--init-meta`), `engine_validate` scene checker, Lua binding generator, content generators, audit gates and their self-tests, CI helpers
 - `docs/`: architecture invariants, product vision, decision records
@@ -336,7 +337,7 @@ The scripting surface is still evolving. Some APIs are generated from annotated 
 
 ## Assets and mesh conversion
 
-The runtime loads assets from `assets/` (copied into the build output by CMake).
+The runtime mounts the game's content from `assets/` at `assets/` and the engine's own from `engine_assets/` at `engine/` (`EngineConfig::assetRoot` and `engineRoot`, both relative to the working directory; CMake copies both into the build output, and bootstrap refuses an engine root that is not there).
 
 For mesh conversion, build and run `asset_packer`:
 
@@ -375,9 +376,9 @@ for any change to math, ECS, physics, renderer, or scripting behavior.
 - Configure fails because Python is missing:
 	- Install Python 3 and ensure it is available to CMake as `Python3_EXECUTABLE`.
 - App starts but assets are missing:
-	- Build from repository root and run from the build output where `assets/` was copied.
+	- Build from repository root and run from the build output where `assets/` and `engine_assets/` were copied.
 - Shader or render issues:
-	- Verify the shaderc cook ran (`ENGINE_BGFX_SHADERC=ON`) and the cooked binaries exist under `build/assets/shaders/bgfx/cooked/`.
+	- Verify the shaderc cook ran (`ENGINE_BGFX_SHADERC=ON`) and the cooked binaries exist under `build/engine_assets/shaders/bgfx/cooked/`.
 
 ## License
 

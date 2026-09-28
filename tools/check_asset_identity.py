@@ -52,7 +52,9 @@ import sys
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 TABLE_HEADER = "content/include/engine/content/asset_type_table.h"
-ASSET_ROOT = "assets"
+# The game's content and the engine's own, catalogued side by side at
+# runtime, so an identity must be unique across both.
+ASSET_ROOTS = ("assets", "engine_assets")
 SIDECAR_SUFFIX = ".meta"
 STAMP_SUFFIX = ".cookstamp"
 # "ASSET <16 hex> <path>" and "OUTPUT <16 hex> <path>", the stamp lines
@@ -133,10 +135,11 @@ def stamp_claims(root: pathlib.Path,
 
 
 def on_disk_stamps(root: pathlib.Path) -> list[str]:
-    """Every cook stamp present under the asset root, tracked or not."""
+    """Every cook stamp present under the asset roots, tracked or not."""
     return sorted(
         path.relative_to(root).as_posix()
-        for path in (root / ASSET_ROOT).rglob("*" + STAMP_SUFFIX)
+        for asset_root in ASSET_ROOTS
+        for path in (root / asset_root).rglob("*" + STAMP_SUFFIX)
         if path.is_file())
 
 
@@ -169,9 +172,9 @@ def unclaimed_cooked_findings(root: pathlib.Path, tracked: set[str],
 
 
 def tracked_files(root: pathlib.Path) -> set[str]:
-    """Every tracked path under the asset root, as posix strings."""
+    """Every tracked path under the asset roots, as posix strings."""
     result = subprocess.run(
-        ["git", "ls-files", "-z", "--", ASSET_ROOT],
+        ["git", "ls-files", "-z", "--", *ASSET_ROOTS],
         cwd=root, capture_output=True, text=True, check=True)
     return {name for name in result.stdout.split("\0") if name}
 

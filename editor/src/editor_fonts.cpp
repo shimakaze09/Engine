@@ -3,6 +3,7 @@
 #include "editor_fonts.h"
 
 #include "engine/core/logging.h"
+#include "engine/core/vfs.h"
 
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -15,7 +16,8 @@ namespace engine::editor {
 
 namespace {
 
-constexpr const char *kLatinFontPath = "assets/fonts/Roboto-Medium.ttf";
+/// The Latin face that ships with the engine, under the engine mount.
+constexpr const char *kLatinFontPath = "engine/fonts/Roboto-Medium.ttf";
 
 #if defined(_WIN32)
 constexpr const char *kCjkCandidates[] = {
@@ -80,6 +82,13 @@ bool merge_font(ImFontAtlas *atlas, const char *path,
          nullptr;
 }
 
+/// Resolves a font shipped under the engine mount to its OS path; false
+/// when the mount is absent or the path does not fit.
+bool resolve_bundled_font(const char *virtualPath, char *outPath,
+                          std::size_t capacity) noexcept {
+  return core::vfs_resolve_os_path(virtualPath, outPath, capacity);
+}
+
 } // namespace
 
 const char *const *editor_cjk_font_candidates(std::size_t *outCount) noexcept {
@@ -100,7 +109,11 @@ EditorFontResult load_editor_fonts(ImFontAtlas *atlas, float sizePixels,
   // asserts on an unreadable file in assert-enabled builds, which would
   // turn a missing asset into an abort instead of the fallback below.
   int latinBytes = 0;
-  void *latin = read_font(kLatinFontPath, &latinBytes);
+  char latinPath[512] = {};
+  void *latin =
+      resolve_bundled_font(kLatinFontPath, latinPath, sizeof(latinPath))
+          ? read_font(latinPath, &latinBytes)
+          : nullptr;
   if (latin != nullptr) {
     result.latin =
         atlas->AddFontFromMemoryTTF(latin, latinBytes, sizePixels) != nullptr;
@@ -128,7 +141,10 @@ EditorFontResult load_editor_fonts(ImFontAtlas *atlas, float sizePixels,
                     cjkOverride);
       core::log_message(core::LogLevel::Warning, "editor", message);
     }
-    if (merge_font(atlas, kBundledCjkFontPath, sizePixels)) {
+    char bundledPath[512] = {};
+    if (resolve_bundled_font(kBundledCjkFontPath, bundledPath,
+                             sizeof(bundledPath)) &&
+        merge_font(atlas, bundledPath, sizePixels)) {
       result.cjk = true;
       std::snprintf(result.cjkPath, sizeof(result.cjkPath), "%s",
                     kBundledCjkFontPath);

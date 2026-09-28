@@ -20,6 +20,8 @@ namespace {
 struct ConfigStringStorage final {
   char assetMount[kMaxConfigStringLength + 1U] = {};
   char assetRoot[kMaxConfigStringLength + 1U] = {};
+  char engineMount[kMaxConfigStringLength + 1U] = {};
+  char engineRoot[kMaxConfigStringLength + 1U] = {};
   char mainScriptPath[kMaxConfigStringLength + 1U] = {};
   char bootstrapMeshPath[kMaxConfigStringLength + 1U] = {};
   char shaderRootPath[kMaxConfigStringLength + 1U] = {};
@@ -76,12 +78,13 @@ bool adopt_config_strings(EngineConfig &config) noexcept {
   // configuration cannot leave the active one half-overwritten.
   ConfigStringStorage staged{};
 
-  const std::array<AdoptionRow, 7U> rows{{
+  const std::array<AdoptionRow, 9U> rows{{
       {"assetMount", config.assetMount, staged.assetMount},
       {"assetRoot", config.assetRoot, staged.assetRoot},
+      {"engineMount", config.engineMount, staged.engineMount},
+      {"engineRoot", config.engineRoot, staged.engineRoot},
       {"mainScriptPath", config.mainScriptPath, staged.mainScriptPath},
-      {"bootstrapMeshPath", config.bootstrapMeshPath,
-       staged.bootstrapMeshPath},
+      {"bootstrapMeshPath", config.bootstrapMeshPath, staged.bootstrapMeshPath},
       {"shaderRootPath", config.shaderRootPath, staged.shaderRootPath},
       {"editorScenePath", config.editorScenePath, staged.editorScenePath},
       {"editorAssetRoot", config.editorAssetRoot, staged.editorAssetRoot},
@@ -108,6 +111,8 @@ bool adopt_config_strings(EngineConfig &config) noexcept {
 
   config.assetMount = g_strings.assetMount;
   config.assetRoot = g_strings.assetRoot;
+  config.engineMount = g_strings.engineMount;
+  config.engineRoot = g_strings.engineRoot;
   config.mainScriptPath = g_strings.mainScriptPath;
   config.bootstrapMeshPath = g_strings.bootstrapMeshPath;
   config.shaderRootPath = g_strings.shaderRootPath;

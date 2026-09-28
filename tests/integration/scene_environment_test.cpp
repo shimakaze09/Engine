@@ -71,7 +71,7 @@ std::string meta(const char *guid) {
   return std::string("{\"schemaVersion\": 1, \"guid\": \"") + guid + "\"}\n";
 }
 
-/// The bootstrap mesh from the repository, two environment maps and a
+/// two environment maps and a
 /// texture, each with the sidecar that gives it its identity.
 bool write_project() {
   std::error_code ec{};
@@ -79,19 +79,8 @@ bool write_project() {
   const std::filesystem::path root(kProject);
   std::filesystem::create_directories(root / "environments", ec);
   std::filesystem::create_directories(root / "textures", ec);
-  std::filesystem::path assetRoot;
-  const std::filesystem::path assets =
-      engine::tests::find_asset_root(&assetRoot) ? (assetRoot / "assets")
-                                                 : std::filesystem::path();
-  if (ec || assets.empty()) {
+  if (ec) {
     return false;
-  }
-  for (const char *name :
-       {"triangle.mesh", "triangle.mesh.cookmeta", "triangle.mesh.cookstamp"}) {
-    std::filesystem::copy_file(assets / name, root / name, ec);
-    if (ec) {
-      return false;
-    }
   }
   return write_file(root / "environments" / "sky.hdr", radiance(128)) &&
          write_file(root / "environments" / "sky.hdr.meta", meta(kSkyGuid)) &&
@@ -209,6 +198,8 @@ int main() {
   config.core.platform.headless = true;
   config.assetMount = "assets";
   config.assetRoot = kProject;
+  const std::string engineRoot = engine::tests::engine_root_path();
+  config.engineRoot = engineRoot.c_str();
   config.mainScriptPath = "scene_environment_missing_main.lua";
   if (!engine::bootstrap(config)) {
     g_tests.fail("bootstrap");

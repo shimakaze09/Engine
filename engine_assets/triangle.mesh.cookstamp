@@ -6,6 +6,6 @@ PLATFORM Linux
 SOURCE_GUID b556daf3-7c19-40a2-a93f-a22d07afea4a
 OUTPUT 59790f561b916840 triangle.mesh
 ASSET 432408a2e33116bc triangle.mesh
-OUTPUT ee0da4f1d7405797 triangle.mesh.cookmeta
+OUTPUT 4e8c106d65e7b2e7 triangle.mesh.cookmeta
 OUTPUT 50e3c997de316b6c .thumbnails/triangle.mesh.png
 OUTPUT cc8abc9d0793c8cf .thumbnails/triangle.mesh.checksum

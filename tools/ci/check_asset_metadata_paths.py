@@ -20,16 +20,11 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 # (the asset type table's convention: the suffix is the kind, never the
 # serialization format). A new authored document kind is added here, or it
 # leaves this audit silently.
-TRACKED_PATTERNS = (
-    "assets/**/*.meta",
-    "assets/**/*.cookmeta",
-    "assets/**/*.cookstamp",
-    "assets/**/*.scene",
-    "assets/**/*.prefab",
-    "assets/**/*.mat",
-    "assets/**/*.animctrl",
-    "assets/**/*.manifest",
-    "assets/**/*.json",
+TRACKED_PATTERNS = tuple(
+    f"{root}/**/*.{suffix}"
+    for root in ("assets", "engine_assets")
+    for suffix in ("meta", "cookmeta", "cookstamp", "scene", "prefab", "mat",
+                   "animctrl", "manifest", "json")
 )
 
 ABSOLUTE_PATH_RE = re.compile(

@@ -195,6 +195,12 @@ set(ENGINE_ASSET_SOURCE_DIR "${CMAKE_SOURCE_DIR}/assets" CACHE PATH
     "Asset directory synced for local editor/runtime builds")
 set(ENGINE_ASSET_OUTPUT_DIR "${CMAKE_BINARY_DIR}/assets" CACHE PATH
     "Build-tree asset directory used by local editor/runtime builds")
+# The engine's own content (shaders, fonts, web shell, bootstrap mesh),
+# kept apart from the game's and mounted at engine/ (EngineConfig::engineRoot).
+set(ENGINE_ENGINE_ASSET_SOURCE_DIR "${CMAKE_SOURCE_DIR}/engine_assets" CACHE PATH
+    "Engine content directory synced for local editor/runtime builds")
+set(ENGINE_ENGINE_ASSET_OUTPUT_DIR "${CMAKE_BINARY_DIR}/engine_assets" CACHE PATH
+    "Build-tree engine content directory, holding the cooked shaders")
 
 # The render backend option. bgfx is the engine's only render backend
 # (docs/decisions/0001). The cache variable survives so existing -D
@@ -626,12 +632,20 @@ if(EXISTS "${ENGINE_ASSET_SOURCE_DIR}")
         COMMENT "Syncing assets to build directory"
     )
 endif()
+if(EXISTS "${ENGINE_ENGINE_ASSET_SOURCE_DIR}")
+    add_custom_target(copy_engine_assets ALL
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${ENGINE_ENGINE_ASSET_SOURCE_DIR}"
+        "${ENGINE_ENGINE_ASSET_OUTPUT_DIR}"
+        COMMENT "Syncing engine content to build directory"
+    )
+endif()
 
-# Web pages ship the synced asset tree preloaded into the wasm FS, with
-# cooked bgfx shader binaries from a host cook: shaderc cannot build under
-# Emscripten, so ENGINE_WEB_COOKED_DIR names a native build's cooked output
-# (<native-build>/assets/shaders/bgfx/cooked), copied into the packaged
-# asset tree before every link. The .data archive only regenerates at link,
+# Web pages ship the synced asset and engine content trees preloaded into
+# the wasm FS, with cooked bgfx shader binaries from a host cook: shaderc
+# cannot build under Emscripten, so ENGINE_WEB_COOKED_DIR names a native
+# build's cooked output (<native-build>/engine_assets/shaders/bgfx/cooked),
+# copied into the packaged engine content tree before every link. The .data archive only regenerates at link,
 # so the copy stamp is a link dependency of every page
 # (engine_package_web_page) and a recook repackages instead of silently
 # shipping stale binaries.
@@ -642,7 +656,7 @@ if(ENGINE_TARGET_PLATFORM STREQUAL "Web")
         message(FATAL_ERROR
             "ENGINE_TARGET_PLATFORM=Web needs ENGINE_WEB_COOKED_DIR: the "
             "path to a native build's cooked shaders "
-            "(<native-build>/assets/shaders/bgfx/cooked); shaderc cannot "
+            "(<native-build>/engine_assets/shaders/bgfx/cooked); shaderc cannot "
             "build under Emscripten, so the web package consumes a host "
             "cook.")
     endif()
@@ -651,7 +665,7 @@ if(ENGINE_TARGET_PLATFORM STREQUAL "Web")
         OUTPUT "${ENGINE_WEB_COOK_STAMP}"
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${ENGINE_WEB_COOKED_DIR}"
-            "${ENGINE_ASSET_OUTPUT_DIR}/shaders/bgfx/cooked"
+            "${ENGINE_ENGINE_ASSET_OUTPUT_DIR}/shaders/bgfx/cooked"
         COMMAND ${CMAKE_COMMAND} -E touch "${ENGINE_WEB_COOK_STAMP}"
         DEPENDS "${ENGINE_WEB_COOKED_DIR}/bgfx_shaders.cookstamp"
         COMMENT "Packaging host-cooked bgfx shaders into the web assets")
@@ -675,9 +689,9 @@ endif()
 
 # bgfx shader cook: when the bgfx backend and tools are
 # both built, the packer cooks the manifest's shader variants per
-# profile into the build-tree asset dir with shaderc from the fetched
-# superproject; the cook stamp keeps incremental builds a no-op.
-if(ENGINE_BUILD_TOOLS AND ENGINE_BGFX_SHADERC AND TARGET copy_assets)
+# profile into the build-tree engine content dir with shaderc from the
+# fetched superproject; the cook stamp keeps incremental builds a no-op.
+if(ENGINE_BUILD_TOOLS AND ENGINE_BGFX_SHADERC AND TARGET copy_engine_assets)
     # Metal cooks on every host (glslang then SPIRV-Cross, no Apple tools),
     # so the lanes that cook prove it. DXIL (Direct3D 12) needs DXC, which
     # shaderc ships for Windows and Linux hosts only. Win64 also cooks DXBC
@@ -692,14 +706,14 @@ if(ENGINE_BUILD_TOOLS AND ENGINE_BGFX_SHADERC AND TARGET copy_assets)
     add_custom_target(bgfx_shader_cook ALL
         COMMAND $<TARGET_FILE:asset_packer>
             --shader-manifest
-            "${ENGINE_ASSET_SOURCE_DIR}/shaders/bgfx/shaders.manifest"
-            --shader-out "${ENGINE_ASSET_OUTPUT_DIR}/shaders/bgfx/cooked"
+            "${ENGINE_ENGINE_ASSET_SOURCE_DIR}/shaders/bgfx/shaders.manifest"
+            --shader-out "${ENGINE_ENGINE_ASSET_OUTPUT_DIR}/shaders/bgfx/cooked"
             --shaderc $<TARGET_FILE:shaderc>
             --shader-include "${bgfx_SOURCE_DIR}/bgfx/src"
             --profiles "${_ENGINE_SHADER_PROFILES}"
         COMMENT "Cooking bgfx shader variants"
     )
-    add_dependencies(bgfx_shader_cook asset_packer shaderc copy_assets)
+    add_dependencies(bgfx_shader_cook asset_packer shaderc copy_engine_assets)
 endif()
 
 if(ENGINE_BUILD_TESTS AND (ENGINE_TARGET_PLATFORM STREQUAL "Web"))

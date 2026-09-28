@@ -3,11 +3,11 @@
 // text render instead of drawing as missing-glyph boxes.
 //
 // The CJK face is, in order: the file the author chose (`editor.cjk_font`,
-// set from Edit > Preferences), the Noto Sans SC face that ships in
-// assets/fonts (Simplified and Traditional Chinese and Japanese kana, SIL
-// OFL), and the operating system's own (Microsoft YaHei on Windows,
-// PingFang or Hiragino on macOS, Noto CJK or WenQuanYi on Linux) should the
-// bundled file be missing.
+// set from Edit > Preferences), the Noto Sans SC face that ships in the
+// engine's content (engine/fonts; Simplified and Traditional Chinese and
+// Japanese kana, SIL OFL), and the operating system's own (Microsoft YaHei on
+// Windows, PingFang or Hiragino on macOS, Noto CJK or WenQuanYi on Linux)
+// should the bundled file be missing.
 
 #pragma once
 
@@ -17,9 +17,10 @@ struct ImFontAtlas;
 
 namespace engine::editor {
 
-/// The CJK face that ships with the engine, tried after the author's own.
+/// The CJK face that ships with the engine, tried after the author's own:
+/// a virtual path under the engine mount, resolved through the VFS.
 inline constexpr const char *kBundledCjkFontPath =
-    "assets/fonts/NotoSansSC-Medium.ttf";
+    "engine/fonts/NotoSansSC-Medium.ttf";
 
 /// The system font files tried for CJK glyphs, in order, for this platform.
 const char *const *editor_cjk_font_candidates(std::size_t *outCount) noexcept;

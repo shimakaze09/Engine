@@ -68,7 +68,7 @@ engine::content::AssetId texture_id(std::size_t index) {
       ("assets/textures/" + texture_name(index)).c_str());
 }
 
-/// The bootstrap mesh from the repository, kTextures textures, a shared
+/// kTextures textures, a shared
 /// texture, a material naming the first texture and one naming the
 /// shared texture.
 bool write_project() {
@@ -77,19 +77,8 @@ bool write_project() {
   const std::filesystem::path root(kProject);
   std::filesystem::create_directories(root / "textures", ec);
   std::filesystem::create_directories(root / "materials", ec);
-  std::filesystem::path assetRoot;
-  const std::filesystem::path assets =
-      engine::tests::find_asset_root(&assetRoot) ? (assetRoot / "assets")
-                                                 : std::filesystem::path();
-  if (ec || assets.empty()) {
+  if (ec) {
     return false;
-  }
-  for (const char *name :
-       {"triangle.mesh", "triangle.mesh.cookmeta", "triangle.mesh.cookstamp"}) {
-    std::filesystem::copy_file(assets / name, root / name, ec);
-    if (ec) {
-      return false;
-    }
   }
   const std::string pixel = png();
   for (std::size_t i = 0U; i < kTextures; ++i) {
@@ -181,6 +170,8 @@ int main() {
   config.core.platform.headless = true;
   config.assetMount = "assets";
   config.assetRoot = kProject;
+  const std::string engineRoot = engine::tests::engine_root_path();
+  config.engineRoot = engineRoot.c_str();
   config.editorAssetRoot = kProject;
   config.mainScriptPath = "pipeline_texture_release_missing_main.lua";
   config.editorScenePath = "pipeline_texture_release_missing.scene";

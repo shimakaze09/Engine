@@ -59,6 +59,7 @@ TEST_NAME = re.compile(r"\bengine_(?:unit|integration|bench)_[a-z0-9_]+\b")
 # `a/b` in prose that is not rooted here is a phrase, not a path claim.
 ROOT_PREFIXES = (
     "app/", "assets/", "audio/", "cmake/", "content/", "core/", "docs/",
+    "engine_assets/",
     "editor/", "math/", "physics/", "renderer/", "runtime/", "scripting/",
     "tests/", "tools/", ".github/", ".claude/",
 )

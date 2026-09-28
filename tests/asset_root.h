@@ -1,18 +1,21 @@
 // Declares the one way a test finds the bundled assets: the directory,
-// at or up to four levels above the working directory, that holds
-// assets/main.lua and the cooked-shader manifest. Tests run from their
-// build directory, whose parents hold the build's copy of assets/ and the
-// source tree's; either answers.
+// at or up to four levels above the working directory, that holds the
+// game's assets/main.lua and the engine content's shader manifest
+// (engine_assets/, mounted at engine/). Tests run from their build
+// directory, whose parents hold the build's copies of both and the source
+// tree's; either answers.
 
 #pragma once
 
 #include <filesystem>
+#include <string>
 #include <system_error>
 
 namespace engine::tests {
 
-/// Finds the directory holding the bundled assets/ and writes it to
-/// `*out`; false, `*out` untouched, when no candidate holds them.
+/// Finds the directory holding the bundled assets/ and engine_assets/ and
+/// writes it to `*out`; false, `*out` untouched, when no candidate holds
+/// them.
 inline bool find_asset_root(std::filesystem::path *out) noexcept {
   std::error_code ec{};
   const std::filesystem::path original = std::filesystem::current_path(ec);
@@ -26,7 +29,7 @@ inline bool find_asset_root(std::filesystem::path *out) noexcept {
         std::filesystem::weakly_canonical(candidate, ec);
     if (!ec && std::filesystem::exists(normalized / "assets/main.lua", ec) &&
         std::filesystem::exists(
-            normalized / "assets/shaders/bgfx/shaders.manifest", ec)) {
+            normalized / "engine_assets/shaders/bgfx/shaders.manifest", ec)) {
       *out = normalized;
       return true;
     }
@@ -46,6 +49,18 @@ inline bool enter_asset_root() noexcept {
   std::error_code ec{};
   std::filesystem::current_path(root, ec);
   return !ec;
+}
+
+/// The engine content directory (engine_assets/) beside the bundled
+/// assets, as an absolute path, for a test that bootstraps from a scratch
+/// working directory and so must name EngineConfig::engineRoot itself;
+/// empty when the assets cannot be found, which bootstrap then refuses.
+inline std::string engine_root_path() {
+  std::filesystem::path root;
+  if (!find_asset_root(&root)) {
+    return std::string();
+  }
+  return (root / "engine_assets").string();
 }
 
 } // namespace engine::tests
