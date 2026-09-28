@@ -312,6 +312,9 @@ struct RendererFrameStats final {
   float gpuSpotShadowMs = 0.0F;
   float gpuPointShadowMs = 0.0F;
   float gpuAutoExposureMs = 0.0F;
+  /// False when the device cannot measure pass times, so every gpu*Ms
+  /// above reads 0 without being a measurement.
+  bool gpuTimingAvailable = false;
 };
 
 /// Flushes queued work to the backing runtime system for renderer.

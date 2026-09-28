@@ -17,6 +17,7 @@
 
 #include "editor_material_edit.h"
 #include "editor_reference_pickers.h"
+#include "editor_session.h"
 #include "engine/content/asset_metadata.h"
 #include "engine/renderer/material.h"
 
@@ -159,7 +160,8 @@ void draw_material_editor_panel() noexcept {
   }
 
   bool stillOpen = true;
-  ImGui::SetNextWindowSize(ImVec2(420.0F, 520.0F), ImGuiCond_FirstUseEver);
+  ImGui::SetNextWindowSize(ImVec2(editor_px(420.0F), editor_px(520.0F)),
+                           ImGuiCond_FirstUseEver);
   const bool visible = ImGui::Begin("Material Editor", &stillOpen);
   update_undo_target(state);
 

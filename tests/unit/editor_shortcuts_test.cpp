@@ -9,9 +9,11 @@
 // action, unique ids, no chord bound twice.
 
 #include "editor_commands.h"
+#include "editor_panels_diagnostics.h"
 #include "editor_preferences.h"
 #include "editor_scene_document.h"
 #include "editor_scene_document_fixture.h"
+#include "editor_scene_query.h"
 #include "editor_session.h"
 #include "editor_shortcuts.h"
 
@@ -329,13 +331,26 @@ void check_document_chords(engine::tests::TestContext &t,
 }
 
 /// Unity's play chords: Ctrl+P plays and stops, Ctrl+Shift+P pauses and
-/// resumes, Ctrl+Alt+P steps (pausing first when playing). They are the
+/// resumes, Ctrl+Alt+P steps (pausing first when playing). The play control
+/// the toolbar and the Edit menu draw reads Play or Stop. They are the
 /// only chords that still fire while the game has the keyboard.
 void check_play_chords(engine::tests::TestContext &t, World &world) noexcept {
   t.check(perform_scene_new() && (add_named(world, "Actor") != kInvalidEntity),
           "a scene to play");
+  t.check(std::strcmp(engine::editor::editor_action_label(
+                          engine::editor::EditorAction::PlayStop),
+                      "Play") == 0,
+          "the play control reads Play while stopped");
   tap(ImGuiMod_Ctrl | ImGuiKey_P);
   t.check(editor_session().playState == PlayState::Playing, "Ctrl+P plays");
+  // One toggle, as Unity's and UE5's: the same control now reads Stop,
+  // and Step is available without pausing by hand first.
+  t.check((std::strcmp(engine::editor::editor_action_label(
+                           engine::editor::EditorAction::PlayStop),
+                       "Stop") == 0) &&
+              engine::editor::editor_action_enabled(
+                  engine::editor::EditorAction::Step),
+          "while playing the control reads Stop and Step is enabled");
 
   // The Game view has the keyboard now: tool keys are the game's, but the
   // play controls still reach the editor.
@@ -559,6 +574,32 @@ void check_grid_preference(engine::tests::TestContext &t) noexcept {
   session.showGrid = true;
 }
 
+/// The stats overlay's toggle is saved as ShowStats=1 or 0 into the
+/// r_showStats cvar; anything else stored is refused with the current
+/// choice kept.
+void check_stats_preference(engine::tests::TestContext &t) noexcept {
+  engine::editor::register_stats_cvars();
+  t.check(!engine::core::cvar_get_bool("r_showStats", true),
+          "the stats overlay is off by default");
+  t.check(engine::core::cvar_set_bool("r_showStats", true),
+          "the stats cvar is set");
+  char section[2048] = {};
+  t.check((engine::editor::editor_preferences_section(section,
+                                                      sizeof(section)) > 0U) &&
+              (std::strstr(section, "ShowStats=1\n") != nullptr),
+          "a shown overlay is saved");
+  load_section("ShowStats=0\n");
+  t.check(!engine::core::cvar_get_bool("r_showStats", true),
+          "a stored hidden overlay is applied");
+  load_section("ShowStats=on\n");
+  t.check(!engine::core::cvar_get_bool("r_showStats", true),
+          "a malformed ShowStats keeps the choice");
+  load_section("ShowStats=1\n");
+  t.check(engine::core::cvar_get_bool("r_showStats", false),
+          "a stored shown overlay is applied");
+  static_cast<void>(engine::core::cvar_set_bool("r_showStats", false));
+}
+
 /// While the Scene camera flies, WASD/QE move it: the dispatcher stands
 /// down so W is not the Move tool. The fly speed is saved and read back
 /// exactly; a stored speed out of range is clamped, and one that is not
@@ -608,6 +649,29 @@ void check_flying(engine::tests::TestContext &t) noexcept {
   t.check(strict, "trailing text, a leading space, an empty value, a "
                   "non-finite or an overflowing speed is refused");
   session.editorCamera.flySpeed = 5.0F;
+
+  // The Scene view's icon size saves and reads back the same way.
+  session.iconScale = 1.75F;
+  t.check(engine::editor::editor_preferences_section(section, sizeof(section)) >
+              0U,
+          "the section is written with the icon size");
+  session.iconScale = 1.0F;
+  ImGui::LoadIniSettingsFromMemory(section, std::strlen(section));
+  t.check(session.iconScale == 1.75F, "the icon size reads back exactly");
+  load_section("IconScale=9\n");
+  t.check(session.iconScale == engine::editor::kMaxSceneIconScale,
+          "a stored icon size out of range is clamped");
+  bool iconStrict = true;
+  for (const char *stored :
+       {"IconScale=0\n", "IconScale=big\n", "IconScale=2x\n", "IconScale=\n",
+        "IconScale=nan\n"}) {
+    session.iconScale = 1.25F;
+    load_section(stored);
+    iconStrict = iconStrict && (session.iconScale == 1.25F);
+  }
+  t.check(iconStrict, "a zero, malformed, empty or non-finite icon size is "
+                      "refused");
+  session.iconScale = 1.0F;
 }
 
 } // namespace
@@ -659,6 +723,7 @@ int main() {
   check_rebinding(t, *world);
   check_gizmo_space(t);
   check_grid_preference(t);
+  check_stats_preference(t);
   check_flying(t);
 
   editor_set_world(nullptr);

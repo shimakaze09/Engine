@@ -20,6 +20,7 @@
 
 #include <array>
 #include <cmath>
+#include <cstring>
 #include <memory>
 #include <new>
 
@@ -272,6 +273,70 @@ void check_icons(engine::tests::TestContext &t, World &world) noexcept {
           "a marquee takes the icons within it");
 }
 
+/// Icons are 32 px across at scale 1, grow with the UI scale and the
+/// icon-size preference, stay within the preference's range, and are
+/// picked within exactly the radius they are drawn in.
+void check_icon_metrics(engine::tests::TestContext &t) noexcept {
+  using engine::editor::scene_icon_metrics;
+  using engine::editor::SceneIconMetrics;
+  const SceneIconMetrics base = scene_icon_metrics(1.0F, 1.0F);
+  t.check((base.radius == 16.0F) && (base.stroke == 1.5F) &&
+              (base.selectionRadius == 19.0F),
+          "an icon is 32 px across at scale 1, ringed just outside it");
+  const SceneIconMetrics hiDpi = scene_icon_metrics(2.0F, 1.0F);
+  t.check((hiDpi.radius == 32.0F) && (hiDpi.stroke == 3.0F),
+          "the UI scale scales the icon");
+  const SceneIconMetrics larger = scene_icon_metrics(1.0F, 1.5F);
+  t.check(larger.radius == 24.0F, "the preference scales the icon");
+  t.check((scene_icon_metrics(1.0F, 10.0F).radius == 48.0F) &&
+              (scene_icon_metrics(1.0F, 0.1F).radius == 8.0F),
+          "the preference is clamped to 0.5x..3x");
+  t.check((scene_icon_metrics(0.0F, 1.0F).radius == 16.0F) &&
+              (scene_icon_metrics(std::nanf(""), 1.0F).radius == 16.0F) &&
+              (scene_icon_metrics(1.0F, -2.0F).radius == 16.0F),
+          "a scale that is not a positive number counts as 1");
+  t.check(base.selectionRadius > base.radius,
+          "the selection ring surrounds the icon");
+}
+
+/// The Game view names what stops the game rendering: no active camera,
+/// or a winner tied in priority; one camera alone gives no notice.
+void check_game_camera_notice(engine::tests::TestContext &t,
+                              World &world) noexcept {
+  using engine::editor::game_camera_notice;
+  char notice[192] = "stale";
+  t.check(game_camera_notice(world, notice, sizeof(notice)) &&
+              (std::strstr(notice, "No camera") != nullptr),
+          "a world with no camera says so");
+
+  engine::runtime::CameraComponent camera{};
+  camera.priority = 1.0F;
+  const Entity first = world.create_scene_object();
+  t.check(world.add_camera_component(first, camera), "add a camera");
+  t.check(!game_camera_notice(world, notice, sizeof(notice)) &&
+              (notice[0] == '\0'),
+          "one camera rendering alone gives no notice");
+
+  const Entity second = world.create_scene_object();
+  t.check(world.add_camera_component(second, camera), "add a tied camera");
+  t.check(
+      game_camera_notice(world, notice, sizeof(notice)) &&
+          (std::strstr(notice, "ties in priority with 1 other:") != nullptr),
+      "a priority tie names the count");
+
+  camera.active = false;
+  t.check(world.add_camera_component(second, camera),
+          "deactivate the second camera");
+  t.check(!game_camera_notice(world, notice, sizeof(notice)),
+          "an inactive camera does not tie");
+
+  char tiny[8] = "stale";
+  camera.active = true;
+  t.check(world.add_camera_component(second, camera), "tie again");
+  t.check(!game_camera_notice(world, tiny, sizeof(tiny)) && (tiny[0] == '\0'),
+          "a notice that does not fit is refused, not cut");
+}
+
 } // namespace
 
 int main() {
@@ -292,5 +357,11 @@ int main() {
     return 97;
   }
   check_icons(t, *iconWorld);
+  check_icon_metrics(t);
+  std::unique_ptr<World> cameraWorld(new (std::nothrow) World());
+  if (cameraWorld == nullptr) {
+    return 96;
+  }
+  check_game_camera_notice(t, *cameraWorld);
   return t.finish("editor_scene_query");
 }

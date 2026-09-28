@@ -2,12 +2,15 @@
 
 #include "editor_scene_query.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdio>
 
 #include "engine/math/aabb.h"
 #include "engine/math/mat4.h"
 #include "engine/physics/collider.h"
+#include "engine/runtime/camera_component_update.h"
 #include "engine/runtime/light_pose.h"
 #include "engine/runtime/physics_bridge.h"
 
@@ -186,6 +189,56 @@ bool entity_has_icon(const runtime::World &world,
   SceneIconKind kind = SceneIconKind::Light;
   math::Vec3 position{};
   return icon_position(world, entity, &kind, &position);
+}
+
+bool game_camera_notice(const runtime::World &world, char *out,
+                        std::size_t capacity) noexcept {
+  if ((out == nullptr) || (capacity == 0U)) {
+    return false;
+  }
+  out[0] = '\0';
+  std::uint32_t tieCount = 0U;
+  const runtime::Entity camera =
+      runtime::find_authored_active_camera(world, &tieCount);
+  int written = 0;
+  if (camera == runtime::kInvalidEntity) {
+    written = std::snprintf(out, capacity,
+                            "No camera renders the game: add a Camera "
+                            "component or make one active");
+  } else if (tieCount > 0U) {
+    runtime::NameComponent name{};
+    const char *label =
+        (world.get_name_component(camera, &name) && (name.name[0] != '\0'))
+            ? name.name
+            : "<unnamed>";
+    written = std::snprintf(
+        out, capacity,
+        "Camera \"%.48s\" ties in priority with %u other%s: raise the "
+        "priority of the one that should render",
+        label, tieCount, (tieCount == 1U) ? "" : "s");
+  } else {
+    return false;
+  }
+  if ((written < 0) || (static_cast<std::size_t>(written) >= capacity)) {
+    out[0] = '\0';
+    return false;
+  }
+  return true;
+}
+
+SceneIconMetrics scene_icon_metrics(float uiScale, float iconScale) noexcept {
+  const float ui =
+      (std::isfinite(uiScale) && (uiScale > 0.0F)) ? uiScale : 1.0F;
+  const float icon =
+      (std::isfinite(iconScale) && (iconScale > 0.0F))
+          ? std::clamp(iconScale, kMinSceneIconScale, kMaxSceneIconScale)
+          : 1.0F;
+  const float scale = ui * icon;
+  SceneIconMetrics metrics{};
+  metrics.radius = kSceneIconBasePixels * 0.5F * scale;
+  metrics.stroke = 1.5F * scale;
+  metrics.selectionRadius = metrics.radius + (2.0F * metrics.stroke);
+  return metrics;
 }
 
 std::size_t scene_icons(const runtime::World &world,

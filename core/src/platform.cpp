@@ -60,6 +60,8 @@ SDL_Window *g_window = nullptr;
 int g_restoredWidth = 0;
 int g_restoredHeight = 0;
 bool g_headless = false;
+int g_presentedFrames = 0;
+bool g_windowRevealed = false;
 bool g_gamepadSubsystem = false;
 
 /// One open controller: the instance id SDL announced it under and the
@@ -234,6 +236,8 @@ void shutdown_platform_resources() noexcept {
   }
   g_restoredWidth = 0;
   g_restoredHeight = 0;
+  g_presentedFrames = 0;
+  g_windowRevealed = false;
   if (g_headless) {
     static_cast<void>(SDL_ResetHint(SDL_HINT_VIDEO_DRIVER));
     static_cast<void>(SDL_ResetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS));
@@ -291,10 +295,19 @@ bool initialize_platform_impl(int width, int height, const char *title,
 
   // The render backend owns its device and swapchain: the window is
   // created without an OpenGL context, the backend reads the native
-  // handles below, and vsync is applied by the backend at its reset.
-  g_window = SDL_CreateWindow(title, width, height,
-                              SDL_WINDOW_RESIZABLE |
-                                  SDL_WINDOW_HIGH_PIXEL_DENSITY);
+  // handles below, and vsync is applied by the backend at its reset. A
+  // desktop window starts hidden and is shown by
+  // platform_note_frame_presented once the first real frames are on it;
+  // the web canvas is part of a page that is already showing, so it is
+  // never hidden.
+#if defined(__EMSCRIPTEN__)
+  constexpr SDL_WindowFlags kStartHidden = 0U;
+#else
+  constexpr SDL_WindowFlags kStartHidden = SDL_WINDOW_HIDDEN;
+#endif
+  g_window = SDL_CreateWindow(
+      title, width, height,
+      SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | kStartHidden);
   if (g_window == nullptr) {
     log_sdl_error("failed to create SDL window");
     shutdown_platform_resources();
@@ -845,6 +858,24 @@ float platform_content_scale() noexcept {
   return content_scale_for(SDL_GetWindowDisplayScale(g_window),
                            SDL_GetWindowPixelDensity(g_window));
 }
+
+void platform_note_frame_presented() noexcept {
+  if (g_window == nullptr) {
+    return;
+  }
+  if (g_presentedFrames < kPresentsBeforeWindowShown) {
+    ++g_presentedFrames;
+  }
+  if (g_windowRevealed || (g_presentedFrames < kPresentsBeforeWindowShown)) {
+    return;
+  }
+  g_windowRevealed = true;
+  if (!g_headless && !SDL_ShowWindow(g_window)) {
+    log_sdl_error("failed to show the window");
+  }
+}
+
+bool platform_window_revealed() noexcept { return g_windowRevealed; }
 
 bool platform_set_window_title(const char *title) noexcept {
   if ((g_window == nullptr) || (title == nullptr)) {

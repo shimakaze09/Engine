@@ -165,6 +165,21 @@ RULES: tuple[Rule, ...] = (
         remedy="include engine/runtime/primitive_collider.h and use "
         "runtime::primitive_collider",
     ),
+    Rule(
+        name="UI-scaled pixel sizes",
+        owner="editor/src/editor_session.h",
+        # A literal pixel size in a layout call is what an unscaled one
+        # looks like: the toolbar, Console, Inspector and remove buttons
+        # each laid out at fixed pixels, which stopped fitting as the
+        # font grew with the UI scale. Zero and -1 are ImGui's "auto" and
+        # "fill" values, not sizes; a literal inside editor_px or a string
+        # is scaled or is text.
+        pattern=r"\b(?:SetNextItemWidth|PushItemWidth|SameLine|SetCursorPos[XY]?"
+        r"|Indent|Dummy|SetNextWindowSize)\s*\([^;]*?"
+        r"(?<![-\w.\"])(?<!editor_px\()[1-9][0-9]*\.[0-9]*F?\b",
+        remedy="wrap the size in editor_px, or derive it from the style or "
+        "a text size",
+    ),
 )
 
 

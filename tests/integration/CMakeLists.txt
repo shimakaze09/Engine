@@ -453,6 +453,15 @@ engine_add_test_executable(engine_integration_playground_sample
     integration
 )
 
+engine_add_test_executable(engine_integration_slice_diagnostics
+    SOURCES
+    slice_diagnostics_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    LABELS
+    integration
+)
+
 engine_add_test_executable(engine_integration_main_script_setup
     SOURCES
     main_script_setup_test.cpp

@@ -206,9 +206,9 @@ constexpr ComponentMetadata kComponentMetadataTable[] = {
      "Defines the object's collision shape and physical material."},
     {"engine::runtime::MeshComponent", "Mesh", "Rendering",
      "Renders a mesh asset with a material."},
-    {"engine::runtime::LightComponent", "Directional/Point Light", "Rendering",
-     "Legacy combined light; prefer Point Light or Spot "
-     "Light for new objects."},
+    {"engine::runtime::LightComponent", "Light", "Rendering",
+     "Directional or point light, chosen by Type; a directional Light is "
+     "the scene's sun. Point Light and Spot Light add falloff control."},
     {"engine::runtime::PointLightComponent", "Point Light", "Rendering",
      "Omnidirectional light with a falloff range."},
     {"engine::runtime::SpotLightComponent", "Spot Light", "Rendering",

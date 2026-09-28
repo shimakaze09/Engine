@@ -1,6 +1,7 @@
 // The window surface the editor now reaches through the platform instead of
 // holding SDL_Window itself (#312 items 2-3): title, display scale, the
-// window geometry a layout restores, the file-dialog handoff -- plus the
+// window geometry a layout restores, when a hidden window is first shown
+// (#741), the file-dialog handoff -- plus the
 // event translation that replaced SDL_Event above the platform layer
 // (#312 item 1).
 //
@@ -297,6 +298,16 @@ int main() {
 
   CHECK(!platform_caps().hasWindow,
         "a headless window is not one a GPU backend can present to");
+
+  // The window stays hidden until its first real frames are on it (#741):
+  // shown on the second present, once, and never hidden again by later
+  // presents.
+  platform_note_frame_presented();
+  CHECK(!platform_window_revealed(), "one present does not show the window");
+  platform_note_frame_presented();
+  CHECK(platform_window_revealed(), "the second present shows the window");
+  platform_note_frame_presented();
+  CHECK(platform_window_revealed(), "later presents keep it shown");
   const float scale = platform_display_scale();
   CHECK(scale > 0.0F, "a window reports a positive display scale");
   CHECK(platform_set_window_title("platform window test - renamed"),
@@ -333,6 +344,10 @@ int main() {
         "a negative filter count is refused");
 
   shutdown_platform();
+  CHECK(!platform_window_revealed(), "a fresh platform starts hidden");
+  platform_note_frame_presented();
+  platform_note_frame_presented();
+  CHECK(!platform_window_revealed(), "no window, nothing is shown");
   CHECK(!platform_set_window_title("after shutdown"),
         "the window is gone after shutdown");
   {

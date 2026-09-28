@@ -95,7 +95,6 @@ void setup_default_dock_layout(ImGuiID dockspaceId) noexcept {
 
   ImGui::DockBuilderDockWindow("Entities", left);
   ImGui::DockBuilderDockWindow("Inspector", right);
-  ImGui::DockBuilderDockWindow("Stats", bottom);
   ImGui::DockBuilderDockWindow("Assets", bottom);
   ImGui::DockBuilderDockWindow("Console", bottom);
   ImGui::DockBuilderDockWindow(kGameViewWindow, center);
@@ -112,7 +111,7 @@ void draw_editor_panels(float frameMs, float utilizationPct) noexcept {
   draw_main_menu_bar();
   draw_toolbar();
 
-  const bool showStats = core::cvar_get_bool("r_showStats", true);
+  const bool showStats = core::cvar_get_bool(kShowStatsCvar, false);
   const core::EngineStats stats = core::get_engine_stats();
 
   const ImGuiViewport *viewport = ImGui::GetMainViewport();
@@ -159,10 +158,12 @@ void draw_editor_panels(float frameMs, float utilizationPct) noexcept {
   }
   draw_entities_panel();
   draw_inspector_panel();
+  // One lightweight overlay and one Profiler window, both off until asked
+  // for, as Unity's Game view Stats and Profiler window are.
   if (showStats) {
-    draw_stats_panel(stats);
     draw_in_game_stats_overlay(stats);
   }
+  draw_profiler_panel(stats);
   draw_asset_browser_panel();
   draw_console_panel();
   draw_material_editor_panel();
@@ -265,6 +266,8 @@ bool initialize_editor(void *sdlWindow) noexcept {
   // Before any frame: takes layout persistence off ImGui's truncating
   // ini writer and restores the stored layout, so the docking flag above
   // is already set when the dock settings are parsed.
+  // Before the layout is read: its preference lines set these.
+  register_stats_cvars();
   register_editor_preferences();
   static_cast<void>(editor_layout_initialize());
   apply_stored_window_geometry();
@@ -280,6 +283,7 @@ bool initialize_editor(void *sdlWindow) noexcept {
   // scale's 2x would size the UI twice.
   const float uiScale = core::platform_content_scale() *
                         core::cvar_get_float("editor.ui_scale", 1.0F);
+  editor_session().uiScale = uiScale;
 
   // Proper UI font (the 13px bitmap default reads as a debug tool), with a
   // CJK face merged behind it; see editor_fonts.h. The preference that
@@ -290,6 +294,24 @@ bool initialize_editor(void *sdlWindow) noexcept {
 
   apply_editor_style();
   ImGui::GetStyle().ScaleAllSizes(uiScale);
+  // ImGuizmo's line widths and handle sizes are pixels too; its overall
+  // extent is a fraction of the view (SetGizmoSizeClipSpace), so it
+  // already follows the viewport and is left as is.
+  const ImGuizmo::Style gizmoDefaults{};
+  ImGuizmo::Style &gizmoStyle = ImGuizmo::GetStyle();
+  gizmoStyle.TranslationLineThickness =
+      gizmoDefaults.TranslationLineThickness * uiScale;
+  gizmoStyle.TranslationLineArrowSize =
+      gizmoDefaults.TranslationLineArrowSize * uiScale;
+  gizmoStyle.RotationLineThickness =
+      gizmoDefaults.RotationLineThickness * uiScale;
+  gizmoStyle.RotationOuterLineThickness =
+      gizmoDefaults.RotationOuterLineThickness * uiScale;
+  gizmoStyle.ScaleLineThickness = gizmoDefaults.ScaleLineThickness * uiScale;
+  gizmoStyle.ScaleLineCircleSize = gizmoDefaults.ScaleLineCircleSize * uiScale;
+  gizmoStyle.HatchedAxisLineThickness =
+      gizmoDefaults.HatchedAxisLineThickness * uiScale;
+  gizmoStyle.CenterCircleSize = gizmoDefaults.CenterCircleSize * uiScale;
 
   static_cast<void>(core::cvar_register_bool(
       "editor.show_console", true,

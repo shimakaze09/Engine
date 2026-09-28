@@ -300,6 +300,7 @@ void flush_renderer_view(const RenderViewDesc &view,
   frameStats = ctx.frameStats;
 
   frameStats.gpuSceneMs = gpu_profiler_pass_ms(GpuPassId::Scene);
+  frameStats.gpuTimingAvailable = gpu_profiler_supported();
   frameStats.gpuTonemapMs = gpu_profiler_pass_ms(GpuPassId::Tonemap);
   frameStats.gpuBloomMs = gpu_profiler_pass_ms(GpuPassId::Bloom);
   frameStats.gpuShadowMapMs = gpu_profiler_pass_ms(GpuPassId::ShadowMap);

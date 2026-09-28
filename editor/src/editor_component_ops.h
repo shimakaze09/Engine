@@ -1,8 +1,8 @@
 // Declares the Inspector's per-component operations: Reset to the value
 // Add Component gives, and a one-slot component clipboard (Copy, Paste
 // Component Values, Paste Component As New), as in Unity's component menu,
-// and the menu that offers them. Each change to the world is one undoable
-// command over every target.
+// and the header options button and menu that offer them with Remove. Each
+// change to the world is one undoable command over every target.
 
 #pragma once
 
@@ -48,11 +48,21 @@ bool execute_component_paste_values(const runtime::Entity *targets,
 bool execute_component_paste_as_new(const runtime::Entity *targets,
                                     std::size_t count) noexcept;
 
-/// Draws the component menu on the item just drawn (a component header),
-/// opened by right-click: Reset, Copy Component, Paste Component Values
-/// and Paste Component As New over `targets`, the one entity or the
-/// selection the section edits. Changes need `editable`; Copy does not.
-void draw_component_menu(const runtime::Entity *targets, std::size_t count,
-                         ComponentEditType type, bool editable) noexcept;
+/// Draws the options button at the right edge of the component header
+/// just drawn (a CollapsingHeader drawn with ImGuiTreeNodeFlags_AllowOverlap),
+/// and the menu that button or a right-click on the header opens: Reset,
+/// Copy Component, Paste Component Values and Paste Component As New over
+/// `targets`, the one entity or the selection the section edits, then
+/// `removeLabel` when the section is removable (nullptr when it is not),
+/// as Unity's component ⋮ menu and Godot's context menu do. The button is
+/// a square of the header's height placed by the header's measured
+/// rectangle, so it stays inside the header at every UI scale. Changes
+/// need `editable`; Copy does not. Returns true on the frame the remove
+/// item is chosen; the caller removes, so a single entity and a
+/// selection each keep their own undoable command.
+bool draw_component_header_menu(const runtime::Entity *targets,
+                                std::size_t count, ComponentEditType type,
+                                bool editable,
+                                const char *removeLabel) noexcept;
 
 } // namespace engine::editor

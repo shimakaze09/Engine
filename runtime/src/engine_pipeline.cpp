@@ -704,6 +704,12 @@ struct EnginePipeline::Impl final {
   bool fatalError = false;
   LoopPlayState previousPlayState = LoopPlayState::Playing;
   std::size_t previousAliveCount = 0U;
+  // Entities spawned and destroyed since the last slice diagnostics line,
+  // and the failed-asset count that line reported; the line is periodic
+  // and repeats early only when the failure count moves.
+  std::size_t sliceSpawnedSinceLine = 0U;
+  std::size_t sliceDestroyedSinceLine = 0U;
+  std::size_t sliceReportedFailedAssets = 0U;
   std::size_t frameThreadCount = 0U;
 
   // --- Per-frame computed state ---
@@ -965,6 +971,9 @@ bool EnginePipeline::Impl::initialize(std::uint32_t maxFrameCount) noexcept {
   running = true;
   previousPlayState = query_editor_play_state();
   previousAliveCount = world->alive_entity_count();
+  sliceSpawnedSinceLine = 0U;
+  sliceDestroyedSinceLine = 0U;
+  sliceReportedFailedAssets = 0U;
   core::reset_engine_stats();
 
   // Player mode: boot the configured startup scene through the
@@ -2269,6 +2278,7 @@ void EnginePipeline::Impl::stage_render() noexcept {
                    static_cast<float>(utilizationPct));
   }
   renderer::present_render_device();
+  core::platform_note_frame_presented();
 
   if (interpolateCamera) {
     renderer::set_active_camera(currentCameraSample);
@@ -2320,19 +2330,22 @@ void EnginePipeline::Impl::stage_diagnostics() noexcept {
   }
 
   const std::size_t aliveCount = world->alive_entity_count();
-  const std::size_t spawnedCount = (aliveCount >= previousAliveCount)
-                                       ? (aliveCount - previousAliveCount)
-                                       : 0U;
-  const std::size_t destroyedCount = (previousAliveCount > aliveCount)
-                                         ? (previousAliveCount - aliveCount)
-                                         : 0U;
+  if (aliveCount >= previousAliveCount) {
+    sliceSpawnedSinceLine += aliveCount - previousAliveCount;
+  } else {
+    sliceDestroyedSinceLine += previousAliveCount - aliveCount;
+  }
 
   const MeshAssetStateCounts assetCounts =
       count_mesh_asset_states(assetDatabase.get());
 
+  // An engine diagnostic, not a user message: Trace, so the Console hides
+  // it by default, once a second of frames, and early only when the
+  // failed-asset count changes so a lasting failure is reported once
+  // rather than every frame.
   const bool shouldLogSliceDiagnostics =
       ((clock.frameIndex % kSliceDiagnosticsPeriodFrames) == 0U) ||
-      (spawnedCount > 0U) || (destroyedCount > 0U) || (assetCounts.failed > 0U);
+      (assetCounts.failed != sliceReportedFailedAssets);
   if (shouldLogSliceDiagnostics) {
     const std::size_t movingRigidBodyCount = count_moving_rigid_bodies(*world);
     const std::size_t meshComponentCount = count_mesh_components(*world);
@@ -2352,8 +2365,8 @@ void EnginePipeline::Impl::stage_diagnostics() noexcept {
         "assetRequests=%llu updateSteps=%llu",
         clock.frameIndex, world_phase_to_string(world->current_phase()),
         static_cast<unsigned long long>(aliveCount),
-        static_cast<unsigned long long>(spawnedCount),
-        static_cast<unsigned long long>(destroyedCount),
+        static_cast<unsigned long long>(sliceSpawnedSinceLine),
+        static_cast<unsigned long long>(sliceDestroyedSinceLine),
         static_cast<unsigned long long>(world->transform_count()),
         static_cast<unsigned long long>(world->world_transform_count()),
         static_cast<unsigned long long>(movingRigidBodyCount),
@@ -2365,7 +2378,10 @@ void EnginePipeline::Impl::stage_diagnostics() noexcept {
         static_cast<unsigned long long>(assetCounts.failed),
         static_cast<unsigned long long>(pendingAssetRequests),
         static_cast<unsigned long long>(clock.stepsThisFrame));
-    core::log_message(core::LogLevel::Info, "slice", diagnostics);
+    core::log_message(core::LogLevel::Trace, "slice", diagnostics);
+    sliceSpawnedSinceLine = 0U;
+    sliceDestroyedSinceLine = 0U;
+    sliceReportedFailedAssets = assetCounts.failed;
   }
 
   renderer::RendererFrameStats rendererStats =
@@ -2402,6 +2418,7 @@ void EnginePipeline::Impl::stage_diagnostics() noexcept {
   frameStats.memoryUsedMb = memoryUsedMbSample;
   frameStats.gpuSceneMs = rendererStats.gpuSceneMs;
   frameStats.gpuTonemapMs = rendererStats.gpuTonemapMs;
+  frameStats.gpuTimingAvailable = rendererStats.gpuTimingAvailable;
   frameStats.jobUtilizationPct = static_cast<float>(utilizationPct);
   frameStats.droppedDrawCommands = lastDroppedDrawCommands;
   frameStats.sceneLights = static_cast<std::uint32_t>(

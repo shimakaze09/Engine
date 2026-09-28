@@ -164,11 +164,48 @@ bool execute_component_paste_as_new(const runtime::Entity *targets,
                                  &fill_paste_as_new, nullptr);
 }
 
-void draw_component_menu(const runtime::Entity *targets, std::size_t count,
-                         ComponentEditType type, bool editable) noexcept {
-  if ((targets == nullptr) || (count == 0U) ||
-      !ImGui::BeginPopupContextItem("component_menu")) {
-    return;
+bool draw_component_header_menu(const runtime::Entity *targets,
+                                std::size_t count, ComponentEditType type,
+                                bool editable,
+                                const char *removeLabel) noexcept {
+  if ((targets == nullptr) || (count == 0U)) {
+    return false;
+  }
+  const bool headerRightClicked =
+      ImGui::IsItemHovered() && ImGui::IsMouseReleased(ImGuiMouseButton_Right);
+  const ImVec2 headerMin = ImGui::GetItemRectMin();
+  const ImVec2 headerMax = ImGui::GetItemRectMax();
+  const float side = headerMax.y - headerMin.y;
+
+  ImGui::SameLine();
+  ImGui::SetCursorScreenPos(ImVec2(headerMax.x - side, headerMin.y));
+  ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0F, 0.0F, 0.0F, 0.0F));
+  const bool buttonPressed =
+      ImGui::Button("##component_options", ImVec2(side, side));
+  ImGui::PopStyleColor();
+  // Three dots drawn rather than a glyph: the editor's Latin font has no
+  // vertical ellipsis, and a missing glyph renders as '?'.
+  const ImVec2 buttonMin = ImGui::GetItemRectMin();
+  const float centerX = buttonMin.x + (side * 0.5F);
+  const float centerY = buttonMin.y + (side * 0.5F);
+  const float spacing = side * 0.22F;
+  const float radius = side * 0.07F;
+  ImDrawList *drawList = ImGui::GetWindowDrawList();
+  const ImU32 dotColor = ImGui::GetColorU32(ImGuiCol_Text);
+  for (int dot = -1; dot <= 1; ++dot) {
+    drawList->AddCircleFilled(
+        ImVec2(centerX, centerY + (static_cast<float>(dot) * spacing)), radius,
+        dotColor);
+  }
+  if (ImGui::IsItemHovered()) {
+    ImGui::SetTooltip("Component options");
+  }
+
+  if (buttonPressed || headerRightClicked) {
+    ImGui::OpenPopup("component_menu");
+  }
+  if (!ImGui::BeginPopup("component_menu")) {
+    return false;
   }
   if (ImGui::MenuItem("Reset", nullptr, false,
                       editable && component_reset_available(type))) {
@@ -193,7 +230,13 @@ void draw_component_menu(const runtime::Entity *targets, std::size_t count,
                       editable && someoneLacks)) {
     static_cast<void>(execute_component_paste_as_new(targets, count));
   }
+  bool removeChosen = false;
+  if (removeLabel != nullptr) {
+    ImGui::Separator();
+    removeChosen = ImGui::MenuItem(removeLabel, nullptr, false, editable);
+  }
   ImGui::EndPopup();
+  return removeChosen;
 }
 
 } // namespace engine::editor

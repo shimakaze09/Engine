@@ -11,6 +11,7 @@
 #include <atomic>
 #include <cctype>
 #include <chrono>
+#include <cstdio>
 #include <cstring>
 #include <mutex>
 
@@ -231,6 +232,34 @@ std::uint32_t console_capture_unseen_warning_count() noexcept {
 void console_capture_mark_seen() noexcept {
   g_unseenErrors.store(0U, std::memory_order_relaxed);
   g_unseenWarnings.store(0U, std::memory_order_relaxed);
+}
+
+bool format_console_status(std::uint32_t errors, std::uint32_t warnings,
+                           char *out, std::size_t capacity) noexcept {
+  if ((out == nullptr) || (capacity == 0U)) {
+    return false;
+  }
+  out[0] = '\0';
+  if ((errors == 0U) && (warnings == 0U)) {
+    return false;
+  }
+  int written = 0;
+  if ((errors > 0U) && (warnings > 0U)) {
+    written = std::snprintf(out, capacity, "%u error%s, %u warning%s", errors,
+                            (errors == 1U) ? "" : "s", warnings,
+                            (warnings == 1U) ? "" : "s");
+  } else if (errors > 0U) {
+    written = std::snprintf(out, capacity, "%u error%s", errors,
+                            (errors == 1U) ? "" : "s");
+  } else {
+    written = std::snprintf(out, capacity, "%u warning%s", warnings,
+                            (warnings == 1U) ? "" : "s");
+  }
+  if ((written < 0) || (static_cast<std::size_t>(written) >= capacity)) {
+    out[0] = '\0';
+    return false;
+  }
+  return true;
 }
 
 namespace {

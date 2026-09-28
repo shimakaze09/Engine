@@ -1,5 +1,5 @@
-// Implements the editor stats panel, profiler flame graph, and in-game overlay.
-// Split out of editor.cpp (REVIEW_FINDINGS A3).
+// Implements the editor's Profiler window (frame numbers, CPU flame graph,
+// memory by subsystem) and the stats overlay over the Game or Scene view.
 
 #include "editor_panels_diagnostics.h"
 
@@ -31,14 +31,13 @@
 #include "engine/core/mem_tracker.h"
 #include "engine/core/profiler.h"
 #include "engine/core/reflect.h"
-#include "engine/engine.h"
 #include "engine/editor/editor_camera.h"
+#include "engine/engine.h"
 #include "engine/math/transform.h"
 #include "engine/math/vec2.h"
 #include "engine/math/vec4.h"
 #include "engine/renderer/camera.h"
 #include "engine/renderer/command_buffer.h"
-#include "engine/runtime/camera_component_update.h"
 #include "engine/runtime/editor_bridge.h"
 #include "engine/runtime/scene_serializer.h"
 #include "engine/runtime/world.h"
@@ -66,8 +65,12 @@ void draw_profiler_flame_graph() noexcept {
   const float frameMs = core::profiler_frame_time_ms();
   const float graphMs = (frameMs > 0.001F) ? frameMs : 0.001F;
   const float graphWidth = ImGui::GetContentRegionAvail().x;
-  const float barHeight = 16.0F;
-  const float barSpacing = 4.0F;
+  // A bar is one line of text tall, so its label fits inside it.
+  const float barHeight =
+      ImGui::GetFontSize() + ImGui::GetStyle().FramePadding.y;
+  const float barSpacing = editor_px(2.0F);
+  // Narrower than this, a bar shows no label rather than a clipped stub.
+  const float minLabelWidth = ImGui::CalcTextSize("MMM").x;
 
   std::array<float, 256U> startMs{};
 
@@ -90,14 +93,22 @@ void draw_profiler_flame_graph() noexcept {
         static_cast<int>((i * 37U + entry.depth * 19U) % 155U);
     const ImU32 color =
         IM_COL32(80 + colorSeed, 180, 240 - (colorSeed / 2), 220);
-    drawList->AddRectFilled(ImVec2(x0, y0), ImVec2(x1, y1), color, 2.0F);
+    drawList->AddRectFilled(ImVec2(x0, y0), ImVec2(x1, y1), color,
+                            editor_px(2.0F));
+    if ((x1 - x0) < minLabelWidth) {
+      continue;
+    }
 
     char label[96] = {};
     const char *name = (entry.name != nullptr) ? entry.name : "<unnamed>";
     std::snprintf(label, sizeof(label), "%s %.2fms", name,
                   static_cast<double>(entry.durationMs));
-    drawList->AddText(ImVec2(x0 + 2.0F, y0 + 1.0F), IM_COL32(0, 0, 0, 255),
-                      label);
+    // Clipped to its own bar, so a label never runs over its neighbours.
+    drawList->PushClipRect(ImVec2(x0, y0), ImVec2(x1, y1), true);
+    drawList->AddText(ImVec2(x0 + editor_px(3.0F),
+                             y0 + (ImGui::GetStyle().FramePadding.y * 0.5F)),
+                      IM_COL32(0, 0, 0, 255), label);
+    drawList->PopClipRect();
   }
 
   const float graphHeight =
@@ -105,96 +116,139 @@ void draw_profiler_flame_graph() noexcept {
   ImGui::Dummy(ImVec2(graphWidth, graphHeight));
 }
 
+/// One label and value row of a two-column table; a value the device
+/// cannot measure reads "not measured" rather than a zero.
+void stat_row(const char *label, const char *value, bool measured) noexcept {
+  ImGui::TableNextRow();
+  ImGui::TableSetColumnIndex(0);
+  ImGui::TextUnformatted(label);
+  ImGui::TableSetColumnIndex(1);
+  if (measured) {
+    ImGui::TextUnformatted(value);
+  } else {
+    ImGui::TextDisabled("not measured");
+  }
+}
+
+/// The frame's numbers as a label and value table.
+void draw_frame_table(const core::EngineStats &stats) noexcept {
+  if (!ImGui::BeginTable("##frame", 2, ImGuiTableFlags_SizingFixedFit)) {
+    return;
+  }
+  char value[64] = {};
+  std::snprintf(value, sizeof(value), "%.1f fps",
+                static_cast<double>(stats.fps));
+  stat_row("Frame rate", value, true);
+  std::snprintf(value, sizeof(value), "%.3f ms",
+                static_cast<double>(stats.frameTimeMs));
+  stat_row("Frame time", value, true);
+  std::snprintf(value, sizeof(value), "%u", stats.drawCalls);
+  stat_row("Draw calls", value, true);
+  std::snprintf(value, sizeof(value), "%llu",
+                static_cast<unsigned long long>(stats.triCount));
+  stat_row("Triangles", value, true);
+  std::snprintf(value, sizeof(value), "%zu", stats.entityCount);
+  stat_row("Entities", value, true);
+  std::snprintf(value, sizeof(value), "%.2f MB",
+                static_cast<double>(stats.memoryUsedMb));
+  stat_row("Memory", value, true);
+  std::snprintf(value, sizeof(value), "%.2f%%",
+                static_cast<double>(stats.jobUtilizationPct));
+  stat_row("Job utilization", value, true);
+  std::snprintf(value, sizeof(value), "%.3f ms",
+                static_cast<double>(stats.gpuSceneMs));
+  stat_row("GPU scene", value, stats.gpuTimingAvailable);
+  std::snprintf(value, sizeof(value), "%.3f ms",
+                static_cast<double>(stats.gpuTonemapMs));
+  stat_row("GPU tonemap", value, stats.gpuTimingAvailable);
+  ImGui::EndTable();
+}
+
+/// Memory by subsystem: each tag's name in a column as wide as the widest
+/// name, and its share of the largest as a bar.
+void draw_memory_table() noexcept {
+  std::array<core::MemTagSnapshot, core::kMemTagCount> snaps =
+      std::array<core::MemTagSnapshot, core::kMemTagCount>();
+  const std::size_t count =
+      core::mem_tracker_snapshot(snaps.data(), snaps.size());
+  float maxBytes = 1.0F;
+  float nameWidth = 0.0F;
+  for (std::size_t i = 0U; i < count; ++i) {
+    const float bytes = static_cast<float>(
+        snaps[i].currentBytes > 0 ? snaps[i].currentBytes : 0);
+    maxBytes = (bytes > maxBytes) ? bytes : maxBytes;
+    const float width = ImGui::CalcTextSize(core::mem_tag_name(snaps[i].tag)).x;
+    nameWidth = (width > nameWidth) ? width : nameWidth;
+  }
+  if (!ImGui::BeginTable("##memory", 2, ImGuiTableFlags_None)) {
+    return;
+  }
+  ImGui::TableSetupColumn("Subsystem", ImGuiTableColumnFlags_WidthFixed,
+                          nameWidth);
+  ImGui::TableSetupColumn("Bytes", ImGuiTableColumnFlags_WidthStretch);
+  for (std::size_t i = 0U; i < count; ++i) {
+    ImGui::TableNextRow();
+    ImGui::TableSetColumnIndex(0);
+    ImGui::TextUnformatted(core::mem_tag_name(snaps[i].tag));
+    ImGui::TableSetColumnIndex(1);
+    if (!snaps[i].reported) {
+      // Nothing reports under this tag: say so rather than draw a zero
+      // that reads as a measurement.
+      ImGui::TextDisabled("not measured");
+      continue;
+    }
+    const float bytes = static_cast<float>(
+        snaps[i].currentBytes > 0 ? snaps[i].currentBytes : 0);
+    char label[64] = {};
+    std::snprintf(label, sizeof(label), "%.2f MB",
+                  static_cast<double>(bytes / (1024.0F * 1024.0F)));
+    ImGui::ProgressBar(bytes / maxBytes, ImVec2(-1.0F, 0.0F), label);
+  }
+  ImGui::EndTable();
+}
 
 } // namespace
 
-void draw_stats_panel(const core::EngineStats &stats) noexcept {
-  if (!ImGui::Begin("Stats")) {
+void register_stats_cvars() noexcept {
+  static_cast<void>(core::cvar_register_bool(
+      kShowStatsCvar, false,
+      "Show the editor's stats overlay over the Game view (the Scene view "
+      "while the Game view is hidden); the toolbar's Stats toggle"));
+  static_cast<void>(core::cvar_register_bool(
+      kShowProfilerCvar, false,
+      "Toggle the editor Profiler window (Window menu)"));
+}
+
+void draw_profiler_panel(const core::EngineStats &stats) noexcept {
+  if (!core::cvar_get_bool(kShowProfilerCvar, false)) {
+    return;
+  }
+  // Opened beside the Console, where a layout without it has room.
+  const ImGuiWindow *console = ImGui::FindWindowByName("Console");
+  if ((console != nullptr) && (console->DockId != 0U)) {
+    ImGui::SetNextWindowDockID(console->DockId, ImGuiCond_FirstUseEver);
+  }
+  bool open = true;
+  const bool visible = ImGui::Begin("Profiler", &open);
+  if (!open) {
+    static_cast<void>(core::cvar_set_bool(kShowProfilerCvar, false));
+  }
+  if (!visible) {
     ImGui::End();
     return;
   }
 
-  ImGui::Text("FPS: %.1f", static_cast<double>(stats.fps));
-  ImGui::Text("Frame: %.3f ms", static_cast<double>(stats.frameTimeMs));
-  ImGui::Text("Draw Calls: %u", stats.drawCalls);
-  ImGui::Text("Triangles: %llu",
-              static_cast<unsigned long long>(stats.triCount));
-  ImGui::Text("Entities: %zu", stats.entityCount);
-  ImGui::Text("Memory: %.2f MB", static_cast<double>(stats.memoryUsedMb));
-  ImGui::Text("GPU Scene: %.3f ms", static_cast<double>(stats.gpuSceneMs));
-  ImGui::Text("GPU Tonemap: %.3f ms", static_cast<double>(stats.gpuTonemapMs));
-  ImGui::Text("Job Utilization: %.2f%%",
-              static_cast<double>(stats.jobUtilizationPct));
+  ImGui::SeparatorText("Frame");
+  draw_frame_table(stats);
 
-  ImGui::Separator();
-  // Scene-wide authored-camera status (conflicts and the no-camera
-  // state), independent of any selection --
-  // computed from CameraComponents directly so it reads correctly in Edit
-  // mode too, not only while CameraManager is populated during Play.
-  if (editor_session().world != nullptr) {
-    std::uint32_t tieCount = 0U;
-    const runtime::Entity activeCamera = runtime::find_authored_active_camera(
-        *editor_session().world, &tieCount);
-    if (activeCamera == runtime::kInvalidEntity) {
-      ImGui::TextColored(
-          ImVec4(1.0F, 0.5F, 0.2F, 1.0F),
-          "Game Camera: none (add and enable a Camera component)");
-    } else {
-      runtime::NameComponent name{};
-      const bool hasName =
-          editor_session().world->get_name_component(activeCamera, &name);
-      const char *label = (hasName && (name.name[0] != '\0')) ? name.name
-                                                               : "<unnamed>";
-      if (tieCount > 0U) {
-        ImGui::TextColored(ImVec4(1.0F, 0.8F, 0.2F, 1.0F),
-                           "Game Camera: %s (priority tied with %u other%s)",
-                           label, tieCount, (tieCount == 1U) ? "" : "s");
-      } else {
-        ImGui::Text("Game Camera: %s", label);
-      }
-    }
-  }
-
-  ImGui::Separator();
-  ImGui::TextUnformatted("CPU Flame Graph");
+  ImGui::SeparatorText("CPU");
   draw_profiler_flame_graph();
 
-  ImGui::Separator();
-  ImGui::TextUnformatted("Memory by Subsystem");
-  {
-    std::array<core::MemTagSnapshot, core::kMemTagCount> snaps =
-        std::array<core::MemTagSnapshot, core::kMemTagCount>();
-    const std::size_t count =
-        core::mem_tracker_snapshot(snaps.data(), snaps.size());
-    float maxBytes = 1.0F;
-    for (std::size_t i = 0U; i < count; ++i) {
-      const float bytes = static_cast<float>(
-          snaps[i].currentBytes > 0 ? snaps[i].currentBytes : 0);
-      if (bytes > maxBytes) {
-        maxBytes = bytes;
-      }
-    }
-    for (std::size_t i = 0U; i < count; ++i) {
-      ImGui::Text("%s", core::mem_tag_name(snaps[i].tag));
-      ImGui::SameLine(100.0F);
-      if (!snaps[i].reported) {
-        // Nothing reports under this tag: say so rather than draw a
-        // zero that reads as a measurement.
-        ImGui::TextDisabled("not measured");
-        continue;
-      }
-      const float bytes = static_cast<float>(
-          snaps[i].currentBytes > 0 ? snaps[i].currentBytes : 0);
-      const float mb = bytes / (1024.0F * 1024.0F);
-      char label[64]{};
-      std::snprintf(label, sizeof(label), "%.2f MB", static_cast<double>(mb));
-      ImGui::ProgressBar(bytes / maxBytes, ImVec2(-1.0F, 0.0F), label);
-    }
-  }
+  ImGui::SeparatorText("Memory by Subsystem");
+  draw_memory_table();
 
   ImGui::End();
 }
-
 
 void draw_in_game_stats_overlay(const core::EngineStats &stats) noexcept {
   constexpr ImGuiWindowFlags kOverlayFlags =
@@ -205,16 +259,16 @@ void draw_in_game_stats_overlay(const core::EngineStats &stats) noexcept {
   // The stats are the Game view's frame, so they anchor inside its image
   // when it is shown, else inside the Scene view's; the old fixed position
   // sat on top of the docked Entities panel.
-  ImVec2 overlayPos(12.0F, 44.0F);
+  ImVec2 overlayPos(editor_px(12.0F), editor_px(44.0F));
   const EditorSession &session = editor_session();
   if (session.gameViewShown && (session.gameViewScreenSize.x > 0.0F) &&
       (session.gameViewScreenSize.y > 0.0F)) {
-    overlayPos = ImVec2(session.gameViewScreenPos.x + 12.0F,
-                        session.gameViewScreenPos.y + 12.0F);
+    overlayPos = ImVec2(session.gameViewScreenPos.x + editor_px(12.0F),
+                        session.gameViewScreenPos.y + editor_px(12.0F));
   } else if ((session.sceneViewportScreenSize.x > 0.0F) &&
              (session.sceneViewportScreenSize.y > 0.0F)) {
-    overlayPos = ImVec2(session.sceneViewportScreenPos.x + 12.0F,
-                        session.sceneViewportScreenPos.y + 12.0F);
+    overlayPos = ImVec2(session.sceneViewportScreenPos.x + editor_px(12.0F),
+                        session.sceneViewportScreenPos.y + editor_px(12.0F));
   }
   ImGui::SetNextWindowBgAlpha(0.40F);
   ImGui::SetNextWindowPos(overlayPos, ImGuiCond_Always);

@@ -162,6 +162,58 @@ void check_filtering() noexcept {
        "entry after begin_session included");
 }
 
+/// EXPECTATION: the default filter hides Trace, the engine's periodic
+/// diagnostics, and shows every other severity; the entry is still
+/// captured, so ticking Trace shows it.
+void check_default_filter_hides_trace() noexcept {
+  console_capture_clear();
+  log_message(LogLevel::Trace, "slice", "frame=60 alive=3");
+  log_message(LogLevel::Info, "scripting", "player spawned");
+  log_message(LogLevel::Warning, "audio", "voice pool exhausted");
+  log_message(LogLevel::Error, "scripting", "lua error: nil index");
+
+  check(console_capture_entry_count() == 4U, "every severity is captured");
+  const ConsoleFilter defaults{};
+  ConsoleEntry entry{};
+  check(console_capture_get_entry(0U, &entry) &&
+            (entry.level == LogLevel::Trace) &&
+            !console_filter_matches(defaults, entry),
+        "the default filter hides a Trace entry");
+  for (std::size_t i = 1U; i < 4U; ++i) {
+    check(console_capture_get_entry(i, &entry) &&
+              console_filter_matches(defaults, entry),
+          "the default filter shows Info, Warning and Error");
+  }
+  ConsoleFilter withTrace{};
+  withTrace.showTrace = true;
+  check(console_capture_get_entry(0U, &entry) &&
+            console_filter_matches(withTrace, entry),
+        "ticking Trace shows the captured Trace entry");
+}
+
+/// EXPECTATION: the menu-bar status says nothing while no warning or
+/// error is unseen, names each nonzero count with its plural, and refuses
+/// rather than truncates a buffer too small for it.
+void check_console_status_text() noexcept {
+  char status[64] = "stale";
+  check(!format_console_status(0U, 0U, status, sizeof(status)) &&
+            (status[0] == '\0'),
+        "nothing unseen shows nothing");
+  check(format_console_status(1U, 0U, status, sizeof(status)) &&
+            (std::strcmp(status, "1 error") == 0),
+        "one error");
+  check(format_console_status(0U, 3U, status, sizeof(status)) &&
+            (std::strcmp(status, "3 warnings") == 0),
+        "warnings alone");
+  check(format_console_status(2U, 1U, status, sizeof(status)) &&
+            (std::strcmp(status, "2 errors, 1 warning") == 0),
+        "errors then warnings");
+  char tiny[8] = "stale";
+  check(!format_console_status(2U, 1U, tiny, sizeof(tiny)) &&
+            (tiny[0] == '\0'),
+        "a status that does not fit is refused, not truncated");
+}
+
 /// EXPECTATION: a diagnostic record carrying a path and a line (what
 /// binding_util's log_lua_error emits) yields ScriptLocation navigation
 /// metadata with that path and 1-based line; a plain log line with the
@@ -441,6 +493,8 @@ int main() {
   check_duplicate_collapse();
   check_bounded_overflow();
   check_filtering();
+  check_default_filter_hides_trace();
+  check_console_status_text();
   check_script_location_navigation();
   check_asset_path_navigation();
   check_production_diagnostics_navigate();

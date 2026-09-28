@@ -92,6 +92,9 @@ struct ConsolePanelState final {
   bool paused = false;
   bool collapseView = true;
   std::size_t pausedEntryCount = 0U;
+  /// Set by the menu-bar status: the next frame shows the Console and
+  /// brings it to the front.
+  bool focusRequested = false;
 };
 
 /// Inspector panel view state: the Add Component search text.
@@ -168,6 +171,13 @@ struct EditorSession final {
   bool gizmoWorldSpace = false;
   // The Scene view's reference grid (editor_grid.h). A saved preference.
   bool showGrid = true;
+  // The UI scale fixed at initialize: the platform content scale times the
+  // editor.ui_scale cvar. The font and the style are built at it; every
+  // other pixel size goes through editor_px.
+  float uiScale = 1.0F;
+  // The Scene view's light and camera icon size, a multiple of the UI
+  // scale's (scene_icon_metrics). A saved preference.
+  float iconScale = 1.0F;
   // The right mouse button went down over the Scene view and is still
   // held: WASD/QE fly the camera (fly_editor_camera), so the shortcut
   // dispatcher stands down and W stays a move, not the Move tool.
@@ -263,6 +273,13 @@ constexpr const char *kAnimationSectionLabel = "AnimationComponent";
 
 /// Returns the process-wide editor session state.
 EditorSession &editor_session() noexcept;
+
+/// `pixels` at a UI scale of 1, scaled to the editor's UI scale. Every
+/// pixel size a panel lays out with goes through this, so layouts keep
+/// their proportions as the font grows.
+inline float editor_px(float pixels) noexcept {
+  return pixels * editor_session().uiScale;
+}
 
 /// True when the exact entity handle is in the multi-selection and the
 /// selection still belongs to the attached world's current content epoch.

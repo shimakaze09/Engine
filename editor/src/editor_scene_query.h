@@ -71,6 +71,28 @@ struct SceneIcon final {
   math::Vec3 ndc{}; // x, y on screen in [-1, 1]; z orders by depth
 };
 
+/// An icon's extent at scale 1, as Unity's default gizmo icons.
+inline constexpr float kSceneIconBasePixels = 32.0F;
+/// The icon-size preference's range, as Unity's 3D Icons slider.
+inline constexpr float kMinSceneIconScale = 0.5F;
+inline constexpr float kMaxSceneIconScale = 3.0F;
+
+/// Pixel sizes of the Scene view's light and camera icons.
+struct SceneIconMetrics final {
+  /// Half the icon's extent. An icon is drawn within it and picked within
+  /// it, so what is visible is exactly what is clickable.
+  float radius = 0.0F;
+  /// The ring drawn around a selected icon.
+  float selectionRadius = 0.0F;
+  /// Outline, ray and ring width.
+  float stroke = 0.0F;
+};
+
+/// Icon metrics at `uiScale` (the editor's UI scale) times `iconScale`
+/// (the icon-size preference, clamped to its range). A scale that is not
+/// a positive finite number counts as 1.
+SceneIconMetrics scene_icon_metrics(float uiScale, float iconScale) noexcept;
+
 /// True when `entity` is shown as an icon: it has a light component of
 /// any kind, or a camera.
 bool entity_has_icon(const runtime::World &world,
@@ -91,6 +113,15 @@ std::size_t scene_icons(const runtime::World &world,
 /// geometry, as Unity's gizmo icons are.
 runtime::Entity pick_icon(const SceneIcon *icons, std::size_t count, float ndcX,
                           float ndcY, float radiusX, float radiusY) noexcept;
+
+/// The Game view's camera notice, as Unity's "No cameras rendering":
+/// written to `out` when no active camera renders the game or when the
+/// winner ties in priority with others, false with `out` empty when one
+/// camera renders alone. The camera name in a tie notice is display text
+/// and may be cut to fit; the notice as a whole is refused, `out` empty,
+/// when `capacity` cannot hold its fixed text.
+bool game_camera_notice(const runtime::World &world, char *out,
+                        std::size_t capacity) noexcept;
 
 /// Called once per entity a marquee takes.
 using BoxSelectVisit = void (*)(void *context, runtime::Entity entity) noexcept;

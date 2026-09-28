@@ -7,6 +7,7 @@
 #include "editor_hierarchy_walk.h"
 #include "editor_material_edit.h"
 #include "editor_panels_console.h"
+#include "editor_panels_diagnostics.h"
 #include "editor_scene_document.h"
 #include "editor_session.h"
 #include "editor_shortcuts.h"
@@ -260,10 +261,9 @@ void draw_main_menu_bar() noexcept {
     ImGui::Separator();
     editor_action_menu_item(EditorAction::FrameSelected);
     ImGui::Separator();
-    // Checked while running, as Unity's Edit menu shows play state.
+    // The play item reads Play or Stop; Pause is checked while it holds.
     const PlayState state = editor_session().playState;
-    editor_action_menu_item(EditorAction::PlayStop,
-                            state != PlayState::Stopped);
+    editor_action_menu_item(EditorAction::PlayStop);
     editor_action_menu_item(EditorAction::Pause, state == PlayState::Paused);
     editor_action_menu_item(EditorAction::Step);
     ImGui::Separator();
@@ -297,6 +297,10 @@ void draw_main_menu_bar() noexcept {
     if (ImGui::MenuItem("Rendering", nullptr, showRendering)) {
       core::cvar_set_bool("editor.show_rendering", !showRendering);
     }
+    const bool showProfiler = core::cvar_get_bool(kShowProfilerCvar, false);
+    if (ImGui::MenuItem("Profiler", nullptr, showProfiler)) {
+      core::cvar_set_bool(kShowProfilerCvar, !showProfiler);
+    }
     ImGui::EndMenu();
   }
 
@@ -310,12 +314,9 @@ void draw_main_menu_bar() noexcept {
   }
   draw_about_popup();
 
-  // Non-spamming status indicator: Fatal/high-severity errors
-  // stay visible in the menu bar even while the Console panel is closed.
-  draw_console_status_indicator();
-
-  // Document status: name plus a dirty marker, right-aligned
-  // in the menu bar; scene_document_update_window_title mirrors the same
+  // Right-aligned in the menu bar: unseen Console warnings and errors
+  // (nothing while all is well), then the document status: name plus a
+  // dirty marker; scene_document_update_window_title mirrors the same
   // state into the OS title bar once per frame. A failed save stands
   // beside it until the next save succeeds: File > Save As opens no
   // prompt, so this is where its refusal is seen.
@@ -323,21 +324,64 @@ void draw_main_menu_bar() noexcept {
   std::snprintf(status, sizeof(status), "%s%s", scene_document_display_name(),
                 scene_document_is_dirty() ? " *" : "");
   const char *saveError = scene_document_last_error();
-  const float statusWidth = ImGui::CalcTextSize(status).x;
-  float errorWidth = 0.0F;
-  if (saveError[0] != '\0') {
-    errorWidth = ImGui::CalcTextSize(saveError).x + 24.0F;
+  // Every gap and margin comes from the style, so the group stays inside
+  // the bar at any UI scale.
+  const ImGuiStyle &style = ImGui::GetStyle();
+  const float gap = style.ItemSpacing.x * 2.0F;
+  const float consoleWidth = console_status_indicator_width();
+  const float errorWidth =
+      (saveError[0] != '\0') ? ImGui::CalcTextSize(saveError).x : 0.0F;
+  float groupWidth = ImGui::CalcTextSize(status).x;
+  groupWidth += (consoleWidth > 0.0F) ? (consoleWidth + gap) : 0.0F;
+  groupWidth += (errorWidth > 0.0F) ? (errorWidth + gap) : 0.0F;
+  ImGui::SameLine(ImGui::GetWindowWidth() - groupWidth - style.WindowPadding.x);
+  if (consoleWidth > 0.0F) {
+    draw_console_status_indicator();
+    ImGui::SameLine(0.0F, gap);
   }
-  ImGui::SameLine(ImGui::GetWindowWidth() - statusWidth - errorWidth - 16.0F);
   if (saveError[0] != '\0') {
     ImGui::TextColored(ImVec4(0.9F, 0.35F, 0.35F, 1.0F), "%s", saveError);
-    ImGui::SameLine();
+    ImGui::SameLine(0.0F, gap);
   }
   ImGui::TextUnformatted(status);
 
   ImGui::EndMainMenuBar();
 
   draw_unsaved_changes_prompt();
+}
+
+/// A toolbar button that runs `action` through the action table: its live
+/// label, disabled when the action cannot run, drawn pressed while
+/// `pressed`, with the purpose and the shortcut in its tooltip.
+void toolbar_action_button(EditorAction action, bool pressed,
+                           const char *purpose) noexcept {
+  const bool enabled = editor_action_enabled(action);
+  if (!enabled) {
+    ImGui::BeginDisabled();
+  }
+  if (pressed) {
+    ImGui::PushStyleColor(ImGuiCol_Button,
+                          ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+  }
+  // The ### id keeps the button's identity while its label changes.
+  char label[64] = {};
+  std::snprintf(label, sizeof(label), "%s###toolbar_%d",
+                editor_action_label(action), static_cast<int>(action));
+  if (ImGui::Button(label) && enabled) {
+    static_cast<void>(run_editor_action(action));
+  }
+  if (pressed) {
+    ImGui::PopStyleColor();
+  }
+  if (!enabled) {
+    ImGui::EndDisabled();
+  }
+  const char *chord = editor_shortcut_text(action);
+  if (chord[0] != '\0') {
+    ImGui::SetItemTooltip("%s (%s)", purpose, chord);
+  } else {
+    ImGui::SetItemTooltip("%s", purpose);
+  }
 }
 
 void draw_toolbar() noexcept {
@@ -358,7 +402,24 @@ void draw_toolbar() noexcept {
       ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoScrollbar |
       ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoSavedSettings;
 
-  if (!ImGui::Begin("##toolbar", nullptr, kToolbarFlags)) {
+  // While a session runs the toolbar takes an accent tint, the global
+  // cue Unity's Playmode tint gives: edits made now are reverted on Stop.
+  const bool running = editor_session().playState != PlayState::Stopped;
+  if (running) {
+    const ImVec4 base = ImGui::GetStyleColorVec4(ImGuiCol_WindowBg);
+    const ImVec4 accent(0.20F, 0.38F, 0.70F, base.w);
+    constexpr float kTint = 0.45F;
+    ImGui::PushStyleColor(ImGuiCol_WindowBg,
+                          ImVec4(base.x + ((accent.x - base.x) * kTint),
+                                 base.y + ((accent.y - base.y) * kTint),
+                                 base.z + ((accent.z - base.z) * kTint),
+                                 base.w));
+  }
+  const bool open = ImGui::Begin("##toolbar", nullptr, kToolbarFlags);
+  if (running) {
+    ImGui::PopStyleColor();
+  }
+  if (!open) {
     ImGui::End();
     return;
   }
@@ -379,73 +440,24 @@ void draw_toolbar() noexcept {
       start_play_mode();
     }
   }
-  const bool canPause =
-      hasWorld && (editor_session().playState != PlayState::Stopped);
-  const bool canStop =
-      hasWorld && (editor_session().playState != PlayState::Stopped);
-
-  if (!canPlay) {
-    ImGui::BeginDisabled();
-  }
-  // Plain-text labels: the default ImGui font has no glyphs for the
-  // media-control symbols (they render as "?").
-  if (ImGui::Button("Play") && canPlay) {
-    start_play_mode();
-  }
-  ImGui::SetItemTooltip("Play (%s)",
-                        editor_shortcut_text(EditorAction::PlayStop));
-  if (!canPlay) {
-    ImGui::EndDisabled();
-  }
-
+  // The play controls run the same actions as their shortcuts and the
+  // Edit menu, so the three can never disagree. Play is one toggle that
+  // reads Stop while a session runs, and Pause and Play are drawn pressed
+  // while they hold, as Unity's toolbar is; Step works while playing too,
+  // pausing first.
+  const PlayState state = editor_session().playState;
+  toolbar_action_button(EditorAction::PlayStop, state != PlayState::Stopped,
+                        (state == PlayState::Stopped)
+                            ? "Enter play mode"
+                            : "Leave play mode; changes made while playing "
+                              "are reverted");
   ImGui::SameLine();
-  if (!canPause) {
-    ImGui::BeginDisabled();
-  }
-  // A toggle: shown pressed while paused, and pressed again it resumes.
-  const bool paused = editor_session().playState == PlayState::Paused;
-  if (paused) {
-    ImGui::PushStyleColor(ImGuiCol_Button,
-                          ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-  }
-  if (ImGui::Button("Pause") && canPause) {
-    pause_play_mode();
-  }
-  ImGui::SetItemTooltip("Pause (%s)",
-                        editor_shortcut_text(EditorAction::Pause));
-  if (paused) {
-    ImGui::PopStyleColor();
-  }
-  if (!canPause) {
-    ImGui::EndDisabled();
-  }
-
+  toolbar_action_button(EditorAction::Pause, state == PlayState::Paused,
+                        (state == PlayState::Paused) ? "Resume"
+                                                     : "Pause the game");
   ImGui::SameLine();
-  const bool canStep =
-      hasWorld && (editor_session().playState == PlayState::Paused);
-  if (!canStep) {
-    ImGui::BeginDisabled();
-  }
-  if (ImGui::Button("Step") && canStep) {
-    editor_session().stepRequested = true;
-  }
-  ImGui::SetItemTooltip("Step (%s)", editor_shortcut_text(EditorAction::Step));
-  if (!canStep) {
-    ImGui::EndDisabled();
-  }
-
-  ImGui::SameLine();
-  if (!canStop) {
-    ImGui::BeginDisabled();
-  }
-  if (ImGui::Button("Stop") && canStop) {
-    stop_play_mode();
-  }
-  ImGui::SetItemTooltip("Stop (%s)",
-                        editor_shortcut_text(EditorAction::PlayStop));
-  if (!canStop) {
-    ImGui::EndDisabled();
-  }
+  toolbar_action_button(EditorAction::Step, false,
+                        "Advance one fixed step, pausing first");
 
   ImGui::SameLine();
   draw_time_scale_combo();
@@ -458,14 +470,20 @@ void draw_toolbar() noexcept {
                          editor_session().gizmoOp == ImGuizmo::TRANSLATE)) {
     editor_session().gizmoOp = ImGuizmo::TRANSLATE;
   }
+  ImGui::SetItemTooltip("Move (%s)",
+                        editor_shortcut_text(EditorAction::GizmoTranslate));
   ImGui::SameLine();
   if (ImGui::RadioButton("R", editor_session().gizmoOp == ImGuizmo::ROTATE)) {
     editor_session().gizmoOp = ImGuizmo::ROTATE;
   }
+  ImGui::SetItemTooltip("Rotate (%s)",
+                        editor_shortcut_text(EditorAction::GizmoRotate));
   ImGui::SameLine();
   if (ImGui::RadioButton("S", editor_session().gizmoOp == ImGuizmo::SCALE)) {
     editor_session().gizmoOp = ImGuizmo::SCALE;
   }
+  ImGui::SetItemTooltip("Scale (%s)",
+                        editor_shortcut_text(EditorAction::GizmoScale));
   ImGui::SameLine();
   // Scale always works on the entity's own axes (ImGuizmo forces it: a
   // scale along a world axis would shear a rotated entity), so the toggle
@@ -490,7 +508,20 @@ void draw_toolbar() noexcept {
   ImGui::SetItemTooltip("The Scene view's ground grid; its spacing follows "
                         "the zoom");
   ImGui::SameLine();
-  ImGui::SetNextItemWidth(72.0F);
+  bool showStats = core::cvar_get_bool(kShowStatsCvar, false);
+  if (ImGui::Checkbox("Stats", &showStats)) {
+    static_cast<void>(core::cvar_set_bool(kShowStatsCvar, showStats));
+    ImGui::MarkIniSettingsDirty(); // a saved preference
+  }
+  ImGui::SetItemTooltip("Frame rate, draw calls and memory over the Game "
+                        "view; Window > Profiler has the detail");
+  ImGui::SameLine();
+  // Text-fitted widths follow the font, so the fields hold their widest
+  // value at every UI scale.
+  const float framePadding = ImGui::GetStyle().FramePadding.x * 2.0F;
+  ImGui::TextUnformatted("Speed");
+  ImGui::SameLine();
+  ImGui::SetNextItemWidth(ImGui::CalcTextSize("100.00 m/s").x + framePadding);
   float &flySpeed = editor_session().editorCamera.flySpeed;
   if (ImGui::DragFloat(
           "##FlySpeed", &flySpeed, 0.05F, EditorCamera::kMinFlySpeed,
@@ -504,7 +535,7 @@ void draw_toolbar() noexcept {
   ImGui::SameLine();
   ImGui::Checkbox("Snap", &editor_session().snapEnabled);
   ImGui::SameLine();
-  ImGui::SetNextItemWidth(64.0F);
+  ImGui::SetNextItemWidth(ImGui::CalcTextSize("90 deg").x + framePadding);
   if (editor_session().gizmoOp == ImGuizmo::ROTATE) {
     ImGui::DragFloat("##SnapStep", &editor_session().snapAngleDegrees, 1.0F,
                      1.0F, 90.0F, "%.0f deg");
@@ -671,7 +702,7 @@ void draw_entities_panel() noexcept {
   draw_entity_hierarchy();
 
   // Dropping onto the panel background clears the parent.
-  ImGui::Dummy(ImVec2(ImGui::GetContentRegionAvail().x, 24.0F));
+  ImGui::Dummy(ImVec2(ImGui::GetContentRegionAvail().x, editor_px(24.0F)));
   if (ImGui::BeginDragDropTarget()) {
     if (const ImGuiPayload *payload =
             ImGui::AcceptDragDropPayload("ENTITY_INDEX")) {

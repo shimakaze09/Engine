@@ -55,6 +55,10 @@ void gpu_profiler_end_pass(GpuPassId pass) noexcept;
 /// running (a disabled effect, a reused shadow cache, no lights of its kind)
 /// never keeps reporting its last measurement.
 float gpu_profiler_pass_ms(GpuPassId pass) noexcept;
+/// True when the render device measures GPU pass times: it exposes
+/// timestamp queries and the profiler initialized them. False before
+/// initialization and on a device without them, where every pass reads 0.
+bool gpu_profiler_supported() noexcept;
 /// Snapshot of the profiler bookkeeping counters.
 GpuProfilerDebugStats gpu_profiler_debug_stats() noexcept;
 
