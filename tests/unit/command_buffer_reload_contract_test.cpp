@@ -771,6 +771,8 @@ void shutdown_gpu_profiler() noexcept {}
 void destroy_scene_capture_targets(BackendState &,
                                    const RenderDevice *) noexcept {}
 
+void destroy_reflection_probe_resources(BackendState &) noexcept {}
+
 } // namespace engine::renderer
 
 /// Runs this executable or test program.

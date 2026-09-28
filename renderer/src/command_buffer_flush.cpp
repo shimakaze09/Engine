@@ -10,6 +10,7 @@
 #include "command_buffer_ibl.h"
 #include "command_buffer_math.h"
 #include "command_buffer_post_resources.h"
+#include "command_buffer_reflection_probes.h"
 #include "command_buffer_sky.h"
 
 #include <algorithm>
@@ -49,6 +50,18 @@ namespace {
 
 constexpr float kNearClip = 0.1F;
 constexpr float kFarClip = 100.0F;
+
+/// Length of the opaque run a sorted draw list starts with.
+std::size_t opaque_prefix_count(const CommandBufferView &view) noexcept {
+  std::size_t count = 0U;
+  for (std::size_t i = 0U; (view.data != nullptr) && (i < view.count); ++i) {
+    if (draw_key_is_transparent(view.data[i].sortKey)) {
+      break;
+    }
+    count = i + 1U;
+  }
+  return count;
+}
 
 } // namespace
 
@@ -204,6 +217,37 @@ void flush_renderer_view(const RenderViewDesc &view,
   const math::Mat4 projMat = camera_projection_matrix(camera, aspect);
   const math::Mat4 viewProjection = math::mul(projMat, viewMat);
 
+  if ((commandBufferView.count > 0U) && (commandBufferView.data == nullptr)) {
+    core::log_message(core::LogLevel::Error, "renderer",
+                      "draw command view is invalid");
+  }
+  const std::size_t totalCount =
+      (commandBufferView.data != nullptr)
+          ? static_cast<std::size_t>(commandBufferView.count)
+          : 0U;
+  const std::size_t opaqueCount = opaque_prefix_count(commandBufferView);
+  const std::size_t auxiliaryOpaqueCount = opaque_prefix_count(auxiliaryView);
+
+  // Probes bake in the Game view's flush whether or not the Game view is
+  // shown: the editor's Scene view is lit by them too.
+  if (gameView && (registry != nullptr)) {
+    OffscreenSceneInputs probeInputs{};
+    probeInputs.backend = &backend;
+    probeInputs.dev = dev;
+    probeInputs.registry = registry;
+    probeInputs.mainView = commandBufferView;
+    probeInputs.mainOpaqueCount = opaqueCount;
+    probeInputs.mainTotalCount = totalCount;
+    probeInputs.auxiliaryView = auxiliaryView;
+    probeInputs.auxiliaryOpaqueCount = auxiliaryOpaqueCount;
+    probeInputs.lights = &lights;
+    probeInputs.timeSeconds = timeSeconds;
+    probeInputs.fogSettings = fogSettings;
+    probeInputs.heightFogSettings = heightFogSettings;
+    probeInputs.frameStats = &frameStats;
+    bake_pending_reflection_probe(probeInputs, skyIbl, envSkyboxTexture);
+  }
+
   if ((registry == nullptr) || !view.drawScene) {
     if (gameView) {
       clear_back_buffer(dev);
@@ -212,24 +256,8 @@ void flush_renderer_view(const RenderViewDesc &view,
   }
   backend.view().camera = view.camera;
   ++backend.view().renderedFrames;
-
-  if ((commandBufferView.count > 0U) && (commandBufferView.data == nullptr)) {
-    core::log_message(core::LogLevel::Error, "renderer",
-                      "draw command view is invalid");
-  }
-
-  std::size_t opaqueCount = 0U;
-  std::size_t totalCount = 0U;
-
-  if ((commandBufferView.data != nullptr) && (commandBufferView.count > 0U)) {
-    totalCount = static_cast<std::size_t>(commandBufferView.count);
-    for (std::size_t i = 0U; i < totalCount; ++i) {
-      if (draw_key_is_transparent(commandBufferView.data[i].sortKey)) {
-        break;
-      }
-      opaqueCount = i + 1U;
-    }
-  }
+  const IblSelection viewIbl =
+      select_view_environment(backend, viewIndex, camera.position, skyIbl);
   if (backend.staticMeshBatches.size() < opaqueCount) {
     // A failed grow leaves the buffer empty instead of terminating the
     // process; build_static_mesh_batches already
@@ -261,7 +289,7 @@ void flush_renderer_view(const RenderViewDesc &view,
                         fogSettings,
                         heightFogSettings,
                         envSkyboxTexture,
-                        skyIbl,
+                        viewIbl,
                         viewMat,
                         projMat,
                         viewProjection,
@@ -277,12 +305,7 @@ void flush_renderer_view(const RenderViewDesc &view,
   ctx.frameStats = frameStats;
   if ((auxiliaryView.data != nullptr) && (auxiliaryView.count > 0U)) {
     ctx.auxiliaryView = auxiliaryView;
-    for (std::size_t i = 0U; i < auxiliaryView.count; ++i) {
-      if (draw_key_is_transparent(auxiliaryView.data[i].sortKey)) {
-        break;
-      }
-      ctx.auxiliaryOpaqueCount = i + 1U;
-    }
+    ctx.auxiliaryOpaqueCount = auxiliaryOpaqueCount;
   }
 
   flush_shadow_passes(ctx);

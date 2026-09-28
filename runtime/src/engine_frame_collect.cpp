@@ -3,9 +3,12 @@
 
 #include "engine_frame_collect.h"
 
+#include <array>
+#include <cmath>
 #include <cstddef>
 
 #include "engine/math/quat.h"
+#include "engine/math/vec3.h"
 #include "engine/runtime/light_pose.h"
 #include "engine/runtime/world.h"
 
@@ -168,6 +171,101 @@ collect_scene_lights(const runtime::World &world) noexcept {
   }
 
   return sceneLights;
+}
+
+// ---------------------------------------------------------------------------
+// Reflection probe collection
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// Squared distance from `point` to the box `[boxMin, boxMax]`; 0 inside.
+float squared_distance_to_box(const math::Vec3 &point, const math::Vec3 &boxMin,
+                              const math::Vec3 &boxMax) noexcept {
+  const float dx =
+      std::fmax(std::fmax(boxMin.x - point.x, point.x - boxMax.x), 0.0F);
+  const float dy =
+      std::fmax(std::fmax(boxMin.y - point.y, point.y - boxMax.y), 0.0F);
+  const float dz =
+      std::fmax(std::fmax(boxMin.z - point.z, point.z - boxMax.z), 0.0F);
+  return (dx * dx) + (dy * dy) + (dz * dz);
+}
+
+} // namespace
+
+// A probe's box is centred on its entity's world position, spans its
+// boxExtents (half sizes) along the world axes whatever the entity's
+// rotation, and its capture reaches `radius`.
+std::size_t collect_reflection_probes(const runtime::World &world,
+                                      const math::Vec3 &cameraPosition,
+                                      renderer::ReflectionProbeRequest *out,
+                                      std::size_t capacity) noexcept {
+  if ((out == nullptr) || (capacity == 0U)) {
+    return 0U;
+  }
+  constexpr std::size_t kMaxProbes =
+      runtime::World::kMaxReflectionProbeComponents;
+  std::array<renderer::ReflectionProbeRequest, kMaxProbes> candidates{};
+  std::array<float, kMaxProbes> distances{};
+  std::size_t candidateCount = 0U;
+  const std::size_t probeCount = world.reflection_probe_count();
+  for (std::size_t i = 0U; (i < probeCount) && (candidateCount < kMaxProbes);
+       ++i) {
+    const runtime::ReflectionProbeComponent *probe =
+        world.reflection_probe_at(i);
+    if (probe == nullptr) {
+      continue;
+    }
+    const runtime::Entity entity = world.reflection_probe_entity_at(i);
+    const runtime::WorldTransform *wt =
+        world.get_world_transform_read_ptr(entity);
+    const math::Vec3 position =
+        (wt != nullptr) ? wt->position : math::Vec3(0.0F, 0.0F, 0.0F);
+    const math::Vec3 half(std::fabs(probe->boxExtents.x),
+                          std::fabs(probe->boxExtents.y),
+                          std::fabs(probe->boxExtents.z));
+
+    renderer::ReflectionProbeRequest &request = candidates[candidateCount];
+    request = renderer::ReflectionProbeRequest{};
+    request.id = world.persistent_id(entity);
+    request.position = position;
+    request.boxMin = math::sub(position, half);
+    request.boxMax = math::add(position, half);
+    request.captureDistance = probe->radius;
+    request.intensity = probe->intensity;
+    request.boxProjection = probe->boxProjection;
+    request.faceSize = probe->prefilteredResolution;
+    request.mipLevels = probe->mipLevels;
+    request.irradianceFaceSize = probe->irradianceResolution;
+    distances[candidateCount] =
+        squared_distance_to_box(cameraPosition, request.boxMin, request.boxMax);
+    ++candidateCount;
+  }
+
+  // Keep the nearest `capacity`: drop the farthest (the later on a tie)
+  // until they fit, then write the rest in dense order.
+  std::array<bool, kMaxProbes> kept{};
+  for (std::size_t i = 0U; i < candidateCount; ++i) {
+    kept[i] = true;
+  }
+  for (std::size_t remaining = candidateCount; remaining > capacity;
+       --remaining) {
+    std::size_t farthest = kMaxProbes;
+    for (std::size_t i = 0U; i < candidateCount; ++i) {
+      if (kept[i] &&
+          ((farthest == kMaxProbes) || (distances[i] >= distances[farthest]))) {
+        farthest = i;
+      }
+    }
+    kept[farthest] = false;
+  }
+  std::size_t written = 0U;
+  for (std::size_t i = 0U; i < candidateCount; ++i) {
+    if (kept[i]) {
+      out[written++] = candidates[i];
+    }
+  }
+  return written;
 }
 
 // ---------------------------------------------------------------------------

@@ -17,6 +17,7 @@
 #include "editor_panels_inspector_generic.h"
 #include "editor_session.h"
 #include "engine/core/logging.h"
+#include "engine/renderer/command_buffer.h"
 
 #include "engine/runtime/camera_component_update.h"
 
@@ -291,10 +292,17 @@ void draw_component_sections(runtime::Entity entity, bool authoredEditable,
   draw_component_section(
       entity, ComponentEditType::ReflectionProbe, "Reflection Probe",
       &ComponentEditSnapshot::reflectionProbe, authoredEditable, liveEditable,
-      true,
-      [](runtime::ReflectionProbeComponent &c) {
-        return draw_reflected_component_fields(
+      true, [](runtime::ReflectionProbeComponent &c) {
+        const bool changed = draw_reflected_component_fields(
             "engine::runtime::ReflectionProbeComponent", &c, g_showAdvanced);
+        // A probe keeps what it saw when it baked; moving it or changing
+        // its settings bakes it again, and this covers a changed scene.
+        if (ImGui::Button("Bake")) {
+          renderer::request_reflection_probe_bake();
+        }
+        ImGui::SetItemTooltip("Capture every reflection probe again, after "
+                              "the scene around them has changed");
+        return changed;
       });
 
   draw_component_section(

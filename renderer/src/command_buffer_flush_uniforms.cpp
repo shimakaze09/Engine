@@ -44,6 +44,23 @@ namespace {
 constexpr std::size_t kInstanceModelColumns = 4U;
 } // namespace
 
+void upload_probe_uniforms(const RenderDevice *dev, ShaderParam boxMinLoc,
+                           ShaderParam boxMaxLoc, ShaderParam centerLoc,
+                           const IblSelection &ibl) noexcept {
+  if (dev->set_param_vec4 == nullptr) {
+    return;
+  }
+  if (boxMinLoc.valid()) {
+    dev->set_param_vec4(boxMinLoc, &ibl.probeBoxMin.x);
+  }
+  if (boxMaxLoc.valid()) {
+    dev->set_param_vec4(boxMaxLoc, &ibl.probeBoxMax.x);
+  }
+  if (centerLoc.valid()) {
+    dev->set_param_vec4(centerLoc, &ibl.probeCenter.x);
+  }
+}
+
 /// Uploads the environment IBL uniforms for the forward PBR program and
 /// binds its textures when enabled; every pbrProgram pass must call this so
 /// stale program state never leaks between passes. The sampler units are
@@ -68,6 +85,9 @@ void apply_pbr_ibl_uniforms(const BackendState &backend,
   if (backend.pbrIblEnabledLoc.valid()) {
     dev->set_param_i32(backend.pbrIblEnabledLoc, enabled ? 1 : 0);
   }
+  upload_probe_uniforms(dev, backend.pbrProbeBoxMinLoc,
+                        backend.pbrProbeBoxMaxLoc, backend.pbrProbeCenterLoc,
+                        ibl);
   if (!enabled) {
     if (dev->bind_texture_slot != nullptr) {
       // Vulkan-family backends need valid descriptors on the declared

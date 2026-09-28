@@ -145,10 +145,29 @@ constexpr FieldMetadata kFieldMetadataTable[] = {
     {"engine::runtime::LightComponent", "color", "Color", "Light", nullptr,
      nullptr, 0.0F, 0.0F, 0.0F, InspectorWidget::Color, false, false},
 
+    {"engine::runtime::ReflectionProbeComponent", "boxExtents", "Box Extents",
+     "Probe",
+     "Half size of the box around the probe, along the world axes. A view "
+     "whose camera is inside it is lit by this probe instead of the sky; "
+     "where boxes overlap, the smaller one wins.",
+     "m", 0.05F, 0.0F, 0.0F, InspectorWidget::Auto, false, false},
+    {"engine::runtime::ReflectionProbeComponent", "radius", "Capture Distance",
+     "Probe",
+     "How far the probe sees. Geometry beyond it is not captured, and the "
+     "sky shows through there instead.",
+     "m", 0.05F, 0.0F, 0.0F, InspectorWidget::Drag, false, false},
+    {"engine::runtime::ReflectionProbeComponent", "intensity", "Intensity",
+     "Probe", "Scales the diffuse and specular light the probe gives.", nullptr,
+     0.01F, 0.0F, 0.0F, InspectorWidget::Drag, false, false},
+    {"engine::runtime::ReflectionProbeComponent", "boxProjection",
+     "Box Projection", "Probe",
+     "Reflects against the box's walls rather than at infinity, for a probe "
+     "that fills a room.",
+     nullptr, 0.0F, 0.0F, 0.0F, InspectorWidget::Auto, false, false},
     {"engine::runtime::ReflectionProbeComponent", "prefilteredResolution",
-     "Prefiltered Resolution", "Bake",
-     "Cubemap face size for the specular "
-     "prefilter chain.",
+     "Resolution", "Bake",
+     "Cubemap face size of the capture and of its specular prefilter "
+     "chain.",
      "px", 0.0F, 0.0F, 0.0F, InspectorWidget::Auto, true, false},
     {"engine::runtime::ReflectionProbeComponent", "irradianceResolution",
      "Irradiance Resolution", "Bake",

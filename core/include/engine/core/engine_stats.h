@@ -29,11 +29,13 @@ struct EngineStats final {
   std::uint32_t sceneLights = 0U;
   /// Draw commands the main camera saw last frame, and the camera-culled
   /// commands render prep kept for the shadow passes (a sweep along the
-  /// light reaches the view, or a casting local light's range) and for
-  /// scene captures (a capture camera sees them).
+  /// light reaches the view, or a casting local light's range), for scene
+  /// captures (a capture camera sees them), and for reflection probes (a
+  /// probe's capture sphere reaches them).
   std::uint32_t drawCommands = 0U;
   std::uint32_t offscreenShadowCasters = 0U;
   std::uint32_t captureOnlyDraws = 0U;
+  std::uint32_t reflectionProbeDraws = 0U;
   /// Hot-reload polls the frame ran over the watched shaders and scripts:
   /// at most one per poll interval while an editor is attached, none in a
   /// player.

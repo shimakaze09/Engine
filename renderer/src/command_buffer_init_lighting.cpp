@@ -173,6 +173,9 @@ bool resolve_deferred_light_program_state(BackendState &backend,
   backend.dlBrdfLutLoc = dev->shader_param(dlProg, "uBrdfLut");
   backend.dlPrefilteredMipsLoc =
       dev->shader_param(dlProg, "uPrefilteredMips");
+  backend.dlProbeBoxMinLoc = dev->shader_param(dlProg, "uProbeBoxMin");
+  backend.dlProbeBoxMaxLoc = dev->shader_param(dlProg, "uProbeBoxMax");
+  backend.dlProbeCenterLoc = dev->shader_param(dlProg, "uProbeCenter");
   backend.dlSsaoTextureLoc = dev->shader_param(dlProg, "uSsaoTexture");
   backend.dlSsaoEnabledLoc = dev->shader_param(dlProg, "uSsaoEnabled");
 

@@ -94,6 +94,18 @@ std::uint16_t auxiliary_pass_mask(const AuxiliaryCulling &aux,
                                          << static_cast<unsigned int>(i));
     }
   }
+  const std::size_t probeCount =
+      (aux.inputs->probeCount < aux.inputs->probeSpheres.size())
+          ? aux.inputs->probeCount
+          : aux.inputs->probeSpheres.size();
+  for (std::size_t i = 0U; i < probeCount; ++i) {
+    const RenderPrepAuxiliaryInputs::LocalCaster &probe =
+        aux.inputs->probeSpheres[i];
+    if (aabb_intersects_sphere(center, half, probe.position, probe.radius)) {
+      mask |= renderer::kPassReflectionProbe;
+      break;
+    }
+  }
   return mask;
 }
 

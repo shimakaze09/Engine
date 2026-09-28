@@ -656,6 +656,9 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
       if (backend.dlIblEnabledLoc.valid()) {
         dev->set_param_i32(backend.dlIblEnabledLoc, dlIblEnabled ? 1 : 0);
       }
+      upload_probe_uniforms(dev, backend.dlProbeBoxMinLoc,
+                            backend.dlProbeBoxMaxLoc, backend.dlProbeCenterLoc,
+                            ibl);
       if (dlIblEnabled) {
         dev->bind_texture_slot(kIblIrradianceUnit, ibl.irradiance);
         dev->bind_texture_slot(kIblPrefilteredUnit, ibl.prefiltered);
