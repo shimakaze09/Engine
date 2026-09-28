@@ -1,13 +1,13 @@
 // Verifies the content-browser asset index (issue #157): cold rebuild
 // classifies every file kind from its suffix alone — scene, material and
 // animation-controller documents included, none of which is opened to
-// guess its kind — and skips sidecar/internal files; the filter cache
-// only recomputes on an actual filter or generation change and handles
-// the empty-query and no-match boundaries; typed-action kind routing is
-// pure and correct; and
-// execute_asset_open dispatches through real production entry points —
-// scene Open routes through the #158 unsaved-change gate and a mesh Open
-// spawns through execute_asset_spawn, not a copied model of either.
+// guess its kind — and skips sidecar/internal files, .meta included; the
+// filter cache only recomputes on an actual filter or generation change
+// and handles the empty-query and no-match boundaries; typed-action kind
+// routing is pure and correct; and execute_asset_open dispatches through real
+// production entry points — scene Open routes through the #158 unsaved-change
+// gate and a mesh Open spawns through execute_asset_spawn, not a copied model
+// of either.
 
 #include "editor_asset_index.h"
 #include "editor_commands.h"
@@ -99,6 +99,7 @@ bool rebuild_scratch_tree() noexcept {
   char materialPath[1024] = {};
   char controllerPath[1024] = {};
   char metaPath[1024] = {};
+  char sidecarPath[1024] = {};
   char subMeshPath[1024] = {};
   if (!make_scratch_path("thing.mesh", meshPath, sizeof(meshPath)) ||
       !make_scratch_path("thing.png", texPath, sizeof(texPath)) ||
@@ -107,10 +108,9 @@ bool rebuild_scratch_tree() noexcept {
       !make_scratch_path("thing.mat", materialPath, sizeof(materialPath)) ||
       !make_scratch_path("thing.animctrl", controllerPath,
                          sizeof(controllerPath)) ||
-      !make_scratch_path("thing.mesh.cookmeta", metaPath,
-                         sizeof(metaPath)) ||
-      !make_scratch_path("sub/nested.mesh", subMeshPath,
-                         sizeof(subMeshPath))) {
+      !make_scratch_path("thing.mesh.cookmeta", metaPath, sizeof(metaPath)) ||
+      !make_scratch_path("thing.png.meta", sidecarPath, sizeof(sidecarPath)) ||
+      !make_scratch_path("sub/nested.mesh", subMeshPath, sizeof(subMeshPath))) {
     return false;
   }
 
@@ -118,11 +118,11 @@ bool rebuild_scratch_tree() noexcept {
          write_text_file(texPath, "not a real png, kind is by extension") &&
          write_text_file(scriptPath, "-- lua\n") &&
          write_text_file(scenePath, "{\"entities\":[],\"version\":1}") &&
-         write_text_file(materialPath,
-                         "{\"version\":1,\"albedo\":[1,1,1]}") &&
+         write_text_file(materialPath, "{\"version\":1,\"albedo\":[1,1,1]}") &&
          write_text_file(controllerPath,
                          "{\"states\":{},\"clips\":{},\"initial\":\"idle\"}") &&
          write_text_file(metaPath, "{\"importSettings\":{}}") &&
+         write_text_file(sidecarPath, "{\"schemaVersion\":1}") &&
          write_text_file(subMeshPath, "nested mesh");
 }
 
@@ -152,7 +152,8 @@ const AssetIndexEntry *find_entry_by_leaf(const char *leaf) noexcept {
 
 /// EXPECTATION: rebuild_asset_index classifies every scratch file kind
 /// from its suffix alone — no file is opened to guess a kind — hides the
-/// .cookmeta sidecar from the index, and bumps the generation counter.
+/// .cookmeta and .meta sidecars from the index, and bumps the generation
+/// counter.
 int check_rebuild_classifies_and_hides_sidecars() {
   if (!rebuild_scratch_tree()) {
     return 1;
@@ -202,6 +203,9 @@ int check_rebuild_classifies_and_hides_sidecars() {
   }
   if (meta != nullptr) {
     return 12; // .cookmeta sidecars must never appear in the index
+  }
+  if (find_entry_by_leaf("thing.png.meta") != nullptr) {
+    return 14; // .meta sidecars are hidden as Unity hides them
   }
   if (mesh->virtualPath[0] == '\0') {
     return 13; // must resolve a VFS virtual path under the mount root

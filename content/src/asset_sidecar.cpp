@@ -71,6 +71,16 @@ void log_sidecar_problem(const char *path, const char *problem) noexcept {
 
 } // namespace
 
+bool is_asset_sidecar_path(const char *path) noexcept {
+  if (path == nullptr) {
+    return false;
+  }
+  const std::size_t length = std::strlen(path);
+  const std::size_t suffixLength = std::strlen(kSidecarSuffix);
+  return (length > suffixLength) &&
+         (std::strcmp(path + (length - suffixLength), kSidecarSuffix) == 0);
+}
+
 bool asset_sidecar_path(const char *assetOsPath, char *out,
                         std::size_t capacity) noexcept {
   if ((out == nullptr) || (capacity == 0U)) {

@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <string>
 
+#include "engine/content/asset_sidecar.h"
 #include "engine/core/logging.h"
 #include "engine/engine.h"
 
@@ -58,14 +59,16 @@ void lower_ascii(char *text) noexcept {
 }
 
 /// True for sidecar/internal files the browser hides from authors
-/// (import metadata, cook bookkeeping, and their cache directory).
+/// (import metadata, cook bookkeeping, and their cache directory), as
+/// Unity hides .meta files and Godot hides .import files.
 bool is_hidden_from_index(const std::filesystem::path &path) noexcept {
   const std::string generic = path.generic_string();
   if (generic.find("/.thumbnails/") != std::string::npos) {
     return true;
   }
   const std::string filename = path.filename().string();
-  return has_suffix(filename.c_str(), ".cookmeta") ||
+  return content::is_asset_sidecar_path(filename.c_str()) ||
+         has_suffix(filename.c_str(), ".cookmeta") ||
          has_suffix(filename.c_str(), ".cookstamp") ||
          has_suffix(filename.c_str(), ".checksum") ||
          (filename == "generated.manifest");
