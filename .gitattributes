@@ -43,3 +43,9 @@
 *.manifest linguist-language=JSON
 *.cookmeta linguist-language=JSON
 *.meta linguist-language=JSON
+
+# A project document is text, but its bytes are the codec's own: the engine
+# writes it with LF, and a check holds the committed document to exactly
+# that form, as Godot keeps project.godot. So it is LF on every checkout,
+# and a document the editor re-saves on Windows matches its checkout.
+*.project text eol=lf linguist-language=JSON
