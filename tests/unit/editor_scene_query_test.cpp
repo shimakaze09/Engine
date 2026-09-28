@@ -20,6 +20,7 @@
 
 #include <array>
 #include <cmath>
+#include <cstring>
 #include <memory>
 #include <new>
 
@@ -298,6 +299,44 @@ void check_icon_metrics(engine::tests::TestContext &t) noexcept {
           "the selection ring surrounds the icon");
 }
 
+/// The Game view names what stops the game rendering: no active camera,
+/// or a winner tied in priority; one camera alone gives no notice.
+void check_game_camera_notice(engine::tests::TestContext &t,
+                              World &world) noexcept {
+  using engine::editor::game_camera_notice;
+  char notice[192] = "stale";
+  t.check(game_camera_notice(world, notice, sizeof(notice)) &&
+              (std::strstr(notice, "No camera") != nullptr),
+          "a world with no camera says so");
+
+  engine::runtime::CameraComponent camera{};
+  camera.priority = 1.0F;
+  const Entity first = world.create_scene_object();
+  t.check(world.add_camera_component(first, camera), "add a camera");
+  t.check(!game_camera_notice(world, notice, sizeof(notice)) &&
+              (notice[0] == '\0'),
+          "one camera rendering alone gives no notice");
+
+  const Entity second = world.create_scene_object();
+  t.check(world.add_camera_component(second, camera), "add a tied camera");
+  t.check(
+      game_camera_notice(world, notice, sizeof(notice)) &&
+          (std::strstr(notice, "ties in priority with 1 other:") != nullptr),
+      "a priority tie names the count");
+
+  camera.active = false;
+  t.check(world.add_camera_component(second, camera),
+          "deactivate the second camera");
+  t.check(!game_camera_notice(world, notice, sizeof(notice)),
+          "an inactive camera does not tie");
+
+  char tiny[8] = "stale";
+  camera.active = true;
+  t.check(world.add_camera_component(second, camera), "tie again");
+  t.check(!game_camera_notice(world, tiny, sizeof(tiny)) && (tiny[0] == '\0'),
+          "a notice that does not fit is refused, not cut");
+}
+
 } // namespace
 
 int main() {
@@ -319,5 +358,10 @@ int main() {
   }
   check_icons(t, *iconWorld);
   check_icon_metrics(t);
+  std::unique_ptr<World> cameraWorld(new (std::nothrow) World());
+  if (cameraWorld == nullptr) {
+    return 96;
+  }
+  check_game_camera_notice(t, *cameraWorld);
   return t.finish("editor_scene_query");
 }

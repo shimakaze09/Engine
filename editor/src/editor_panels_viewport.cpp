@@ -847,6 +847,28 @@ void draw_game_view_panel() noexcept {
   renderer::set_game_view_size(width, height);
 
   draw_view_image(renderer::RenderViewId::Game, regionSize);
+
+  // What stops the game from rendering, over the image where it shows,
+  // as Unity's "No cameras rendering"; nothing when one camera renders.
+  char notice[192] = {};
+  if ((session.world != nullptr) &&
+      game_camera_notice(*session.world, notice, sizeof(notice))) {
+    const float wrapWidth = regionSize.x * 0.8F;
+    const ImVec2 textSize =
+        ImGui::CalcTextSize(notice, nullptr, false, wrapWidth);
+    const ImVec2 center(session.gameViewScreenPos.x + (regionSize.x * 0.5F),
+                        session.gameViewScreenPos.y + (regionSize.y * 0.5F));
+    const ImVec2 pad = ImGui::GetStyle().WindowPadding;
+    const ImVec2 textPos(center.x - (textSize.x * 0.5F),
+                         center.y - (textSize.y * 0.5F));
+    ImDrawList *drawList = ImGui::GetWindowDrawList();
+    drawList->AddRectFilled(
+        ImVec2(textPos.x - pad.x, textPos.y - pad.y),
+        ImVec2(textPos.x + textSize.x + pad.x, textPos.y + textSize.y + pad.y),
+        IM_COL32(20, 20, 20, 210), ImGui::GetStyle().WindowRounding);
+    drawList->AddText(ImGui::GetFont(), ImGui::GetFontSize(), textPos,
+                      IM_COL32(255, 190, 90, 255), notice, nullptr, wrapWidth);
+  }
   ImGui::End();
 }
 

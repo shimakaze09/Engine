@@ -114,6 +114,15 @@ std::size_t scene_icons(const runtime::World &world,
 runtime::Entity pick_icon(const SceneIcon *icons, std::size_t count, float ndcX,
                           float ndcY, float radiusX, float radiusY) noexcept;
 
+/// The Game view's camera notice, as Unity's "No cameras rendering":
+/// written to `out` when no active camera renders the game or when the
+/// winner ties in priority with others, false with `out` empty when one
+/// camera renders alone. The camera name in a tie notice is display text
+/// and may be cut to fit; the notice as a whole is refused, `out` empty,
+/// when `capacity` cannot hold its fixed text.
+bool game_camera_notice(const runtime::World &world, char *out,
+                        std::size_t capacity) noexcept;
+
 /// Called once per entity a marquee takes.
 using BoxSelectVisit = void (*)(void *context, runtime::Entity entity) noexcept;
 
