@@ -12,7 +12,7 @@ import sys
 from gen_common import publish_set
 from gltf_writer import GltfBufferBuilder
 
-OUT_DIR = sys.argv[1] if len(sys.argv) > 1 else "assets/props"
+OUT_DIR = sys.argv[1] if len(sys.argv) > 1 else "samples/island/assets/props"
 
 
 class MeshBuilder:

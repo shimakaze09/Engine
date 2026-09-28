@@ -109,7 +109,8 @@ void check_engine_root_lookup() {
           "an explicit engine root is used whatever ENGINE_ROOT says");
     engine::shutdown();
   }
-  CHECK(set_engine_root_env(nullptr), "clear ENGINE_ROOT");
+  CHECK(set_engine_root_env(engineRoot.c_str()),
+        "restore ENGINE_ROOT to the engine's content");
 }
 
 } // namespace
@@ -144,7 +145,7 @@ int main() {
                 "a missing engine root refuses bootstrap");
   check_refused("assets/main.lua", "engine/shaders", 1,
                 "an engine root that is a file refuses bootstrap");
-  check_refused("engine_assets", "", 0,
+  check_refused(engine::tests::engine_root_path().c_str(), "", 0,
                 "an empty shader root refuses bootstrap");
   check_engine_root_lookup();
 

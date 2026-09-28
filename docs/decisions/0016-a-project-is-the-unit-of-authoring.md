@@ -14,15 +14,21 @@ the scene list, the startup scene and the main script, and
 `engine_unit_project_document` pins them. A project opens by path through
 `engine::open_project` (`runtime/include/engine/project.h`,
 `engine_integration_project_open`), which `engine_validate --project`
-uses; the editor and a player do not take a project path yet.
+and the editor use.
 Point 2 is in place with a prefix rather than a scheme: the engine's own
 content (shaders, fonts, the web shell, the bootstrap mesh) lives in
-`engine_assets/`, mounted at `engine/`, beside the game's `assets/`
+`engine_assets/`, mounted at `engine/`, beside the project's content
 mounted at `assets/` (`EngineConfig::engineRoot`); every authored path
 was already spelled with the assets/ prefix and keyed by that spelling, so the
 disjoint mounts cost no content migration.
 `engine_integration_engine_mount` pins the refusal of a missing engine
-root. The rest is not yet implemented.
+root, and the engine finds its content through `ENGINE_ROOT` or beside its
+executable, wherever it is started. The sample game is a project of its
+own, `samples/island/` (`island.project`), which the editor opens by path
+or, started with none, from beside the executable
+(`engine_integration_project_open` opens it and checks its document is in
+canonical form). A player executable and the project hub are not yet
+implemented.
 
 ## Context
 

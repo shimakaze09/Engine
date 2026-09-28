@@ -495,7 +495,7 @@ build-*/
 imgui.ini
 
 # Stale sidecar spelling from before metadata moved to "<asset>.meta".
-assets/*.meta.json
+samples/island/assets/*.meta.json
 
 # Nothing here ignores a cook output. A cooked output's identity comes
 # only from the cook stamp that claims it, so a clone holding the output

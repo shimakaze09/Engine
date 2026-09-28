@@ -162,19 +162,19 @@ Categories=Development;
     endif()
 endfunction()
 
-# Web only: links <target> as an .html page from <shell> with the synced
-# asset tree preloaded at assets/ and the engine content tree, host-cooked
-# shaders included, at engine_assets/: the working-directory-relative roots
-# EngineConfig mounts.
+# Web only: links <target> as an .html page from <shell> with the sample
+# project's content preloaded at assets/ and the engine content tree,
+# host-cooked shaders included, at engine_assets/: the roots a default
+# EngineConfig mounts from the page's working directory.
 function(engine_package_web_page target shell)
     set_target_properties(${target} PROPERTIES
         SUFFIX ".html"
         LINK_DEPENDS "${ENGINE_WEB_COOK_STAMP}")
     target_link_options(${target} PRIVATE
-        "SHELL:--preload-file ${ENGINE_ASSET_OUTPUT_DIR}@assets"
+        "SHELL:--preload-file ${ENGINE_SAMPLE_PROJECT_OUTPUT_DIR}/assets@assets"
         "SHELL:--preload-file ${ENGINE_ENGINE_ASSET_OUTPUT_DIR}@engine_assets"
         "SHELL:--shell-file ${shell}")
-    add_dependencies(${target} copy_assets copy_engine_assets
+    add_dependencies(${target} copy_sample_project copy_engine_assets
         web_cooked_shaders)
 endfunction()
 

@@ -1,22 +1,31 @@
-// Declares the one way a test finds the bundled assets: the directory,
-// at or up to four levels above the working directory, that holds the
-// game's assets/main.lua and the engine content's shader manifest
-// (engine_assets/, mounted at engine/). Tests run from their build
-// directory, whose parents hold the build's copies of both and the source
-// tree's; either answers.
+// Declares the one way a test finds the bundled content: the sample
+// project (samples/island, holding island.project and its assets/) and
+// the engine's own content (engine_assets/), found together in the
+// directory at or up to four levels above the working directory. Tests
+// run from their build directory, whose parents hold the build's copies
+// of both and the source tree's; either answers. Entering the sample
+// project makes it the working directory, so the engine's relative
+// "assets" paths name its content, and points ENGINE_ROOT at the engine
+// content, which the engine looks up there when a config leaves
+// EngineConfig::engineRoot empty.
 
 #pragma once
 
+#include <cstdlib>
 #include <filesystem>
 #include <string>
 #include <system_error>
 
 namespace engine::tests {
 
-/// Finds the directory holding the bundled assets/ and engine_assets/ and
+/// The sample project, relative to the directory holding it and
+/// engine_assets/.
+inline constexpr const char *kSampleProjectDirectory = "samples/island";
+
+/// Finds the directory holding samples/island/ and engine_assets/ and
 /// writes it to `*out`; false, `*out` untouched, when no candidate holds
 /// them.
-inline bool find_asset_root(std::filesystem::path *out) noexcept {
+inline bool find_workspace_root(std::filesystem::path *out) noexcept {
   std::error_code ec{};
   const std::filesystem::path original = std::filesystem::current_path(ec);
   if (ec || (out == nullptr)) {
@@ -27,7 +36,9 @@ inline bool find_asset_root(std::filesystem::path *out) noexcept {
     ec.clear();
     const std::filesystem::path normalized =
         std::filesystem::weakly_canonical(candidate, ec);
-    if (!ec && std::filesystem::exists(normalized / "assets/main.lua", ec) &&
+    if (!ec &&
+        std::filesystem::exists(
+            normalized / kSampleProjectDirectory / "island.project", ec) &&
         std::filesystem::exists(
             normalized / "engine_assets/shaders/bgfx/shaders.manifest", ec)) {
       *out = normalized;
@@ -38,29 +49,48 @@ inline bool find_asset_root(std::filesystem::path *out) noexcept {
   return false;
 }
 
-/// Makes the directory find_asset_root finds the working directory, so the
-/// engine's relative "assets" paths resolve; false when it is not found or
-/// cannot be entered.
-inline bool enter_asset_root() noexcept {
+/// The sample project's directory, absolute; empty when it cannot be
+/// found.
+inline std::string sample_project_path() {
   std::filesystem::path root;
-  if (!find_asset_root(&root)) {
-    return false;
+  if (!find_workspace_root(&root)) {
+    return std::string();
   }
-  std::error_code ec{};
-  std::filesystem::current_path(root, ec);
-  return !ec;
+  return (root / kSampleProjectDirectory).string();
 }
 
-/// The engine content directory (engine_assets/) beside the bundled
-/// assets, as an absolute path, for a test that bootstraps from a scratch
-/// working directory and so must name EngineConfig::engineRoot itself;
-/// empty when the assets cannot be found, which bootstrap then refuses.
+/// The engine content directory (engine_assets/), absolute, for a test
+/// that names EngineConfig::engineRoot itself; empty when it cannot be
+/// found, which bootstrap then refuses.
 inline std::string engine_root_path() {
   std::filesystem::path root;
-  if (!find_asset_root(&root)) {
+  if (!find_workspace_root(&root)) {
     return std::string();
   }
   return (root / "engine_assets").string();
+}
+
+/// Makes the sample project the working directory and points ENGINE_ROOT
+/// at the engine content, so a default EngineConfig bootstraps the
+/// sample; false when either cannot be found or entered.
+inline bool enter_asset_root() noexcept {
+  std::filesystem::path root;
+  if (!find_workspace_root(&root)) {
+    return false;
+  }
+  const std::string engineRoot = (root / "engine_assets").string();
+#if defined(_WIN32)
+  if (_putenv_s("ENGINE_ROOT", engineRoot.c_str()) != 0) {
+    return false;
+  }
+#else
+  if (setenv("ENGINE_ROOT", engineRoot.c_str(), 1) != 0) {
+    return false;
+  }
+#endif
+  std::error_code ec{};
+  std::filesystem::current_path(root / kSampleProjectDirectory, ec);
+  return !ec;
 }
 
 } // namespace engine::tests

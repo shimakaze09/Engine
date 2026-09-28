@@ -191,10 +191,13 @@ if(ENGINE_SANITIZERS)
     endif()
 endif()
 
-set(ENGINE_ASSET_SOURCE_DIR "${CMAKE_SOURCE_DIR}/assets" CACHE PATH
-    "Asset directory synced for local editor/runtime builds")
-set(ENGINE_ASSET_OUTPUT_DIR "${CMAKE_BINARY_DIR}/assets" CACHE PATH
-    "Build-tree asset directory used by local editor/runtime builds")
+# The sample game is a project of its own (samples/island: island.project
+# and its assets/), copied whole into the build tree, where the editor
+# opens it when started without a project path.
+set(ENGINE_SAMPLE_PROJECT_SOURCE_DIR "${CMAKE_SOURCE_DIR}/samples/island" CACHE PATH
+    "The bundled sample project")
+set(ENGINE_SAMPLE_PROJECT_OUTPUT_DIR "${CMAKE_BINARY_DIR}/samples/island" CACHE PATH
+    "Build-tree copy of the bundled sample project")
 # The engine's own content (shaders, fonts, web shell, bootstrap mesh),
 # kept apart from the game's and mounted at engine/ (EngineConfig::engineRoot).
 set(ENGINE_ENGINE_ASSET_SOURCE_DIR "${CMAKE_SOURCE_DIR}/engine_assets" CACHE PATH
@@ -627,12 +630,12 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(stb)
 set(ENGINE_STB_INCLUDE_DIR ${stb_SOURCE_DIR})
 
-if(EXISTS "${ENGINE_ASSET_SOURCE_DIR}")
-    add_custom_target(copy_assets ALL
+if(EXISTS "${ENGINE_SAMPLE_PROJECT_SOURCE_DIR}")
+    add_custom_target(copy_sample_project ALL
         COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${ENGINE_ASSET_SOURCE_DIR}"
-        "${ENGINE_ASSET_OUTPUT_DIR}"
-        COMMENT "Syncing assets to build directory"
+        "${ENGINE_SAMPLE_PROJECT_SOURCE_DIR}"
+        "${ENGINE_SAMPLE_PROJECT_OUTPUT_DIR}"
+        COMMENT "Syncing the sample project to the build directory"
     )
 endif()
 if(EXISTS "${ENGINE_ENGINE_ASSET_SOURCE_DIR}")

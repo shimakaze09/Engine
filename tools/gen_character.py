@@ -10,7 +10,7 @@ import sys
 from gen_common import publish_set
 from gltf_writer import GltfBufferBuilder
 
-OUT_GLTF = sys.argv[1] if len(sys.argv) > 1 else "assets/character.gltf"
+OUT_GLTF = sys.argv[1] if len(sys.argv) > 1 else "samples/island/assets/character.gltf"
 OUT_BIN = OUT_GLTF.replace(".gltf", ".bin")
 BIN_URI = OUT_BIN.replace("\\", "/").split("/")[-1]
 
