@@ -268,6 +268,20 @@ bool platform_window_is_wayland() noexcept;
 /// Resident memory of the process in bytes (0 when unsupported).
 std::size_t process_memory_bytes() noexcept;
 
+/// Windows: a windowed (GUI-subsystem) build has no console of its own.
+/// When the process was started from a terminal, attaches to it and points
+/// stdout and stderr there, so a run from a shell still prints, as Godot
+/// does; started from Explorer, there is no terminal and nothing changes.
+/// True when a terminal was attached. Everywhere else a no-op returning
+/// false: the process already writes to whatever started it.
+bool platform_attach_parent_console() noexcept;
+
+/// Shows a modal error box with `title` and `message`: how a windowed
+/// application that failed to start says why when it has no console.
+/// Callable before or without the platform being initialized; a platform
+/// with no way to show one (headless, no display) does nothing.
+void platform_show_error_box(const char *title, const char *message) noexcept;
+
 /// Per-user save directory using the engine's default org/app names. On
 /// the web it sits under the page's IndexedDB-backed mount, so what is
 /// written there survives a reload (see platform_persist_after_write).

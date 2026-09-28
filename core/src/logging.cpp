@@ -25,6 +25,13 @@ namespace {
 std::atomic<bool> g_loggingInitialized{false};
 std::atomic<std::uint32_t> g_frameIndex{0U};
 
+/// The run's log file (log_open_file). Guarded by g_logFileMutex, which
+/// every writer takes for one line, so a line never interleaves another
+/// and closing never races a write in progress.
+std::mutex g_logFileMutex{};
+std::FILE *g_logFile = nullptr;
+char g_logFilePath[512] = {};
+
 /// One fixed sink table slot; unused slots have fn == nullptr. A retiring
 /// slot keeps its (fn, userData) pair matchable while its removal drains:
 /// dispatches skip it, registration treats it as occupied, and any remover
@@ -180,6 +187,16 @@ void emit(LogLevel level, const char *channel, const char *text,
 
   std::printf("[%s][%s][%s] %s\n", timestamp, log_level_to_string(level),
              channel, text);
+  {
+    std::lock_guard<std::mutex> lock(g_logFileMutex);
+    if (g_logFile != nullptr) {
+      std::fprintf(g_logFile, "[%s][%s][%s] %s\n", timestamp,
+                   log_level_to_string(level), channel, text);
+      if ((level == LogLevel::Error) || (level == LogLevel::Fatal)) {
+        std::fflush(g_logFile);
+      }
+    }
+  }
 
   // Sinks run even for Fatal so an editor-side capture still records the
   // message that is about to abort the process (the Fatal-only-abort
@@ -267,6 +284,7 @@ bool initialize_logging() noexcept {
 /// Shuts down the owning system for logging.
 void shutdown_logging() noexcept {
   g_loggingInitialized.store(false, std::memory_order_release);
+  log_close_file();
   // Drop any sink its owner failed to unregister so a dead sink is
   // never dispatched to after a later re-initialization. Teardown owes the
   // same lifetime barrier as unregister: it returns only once no dispatch is
@@ -282,6 +300,58 @@ void shutdown_logging() noexcept {
   }
   wait_for_slots_quiescent(lock, 0U, kMaxLogSinks);
   g_sinks = {};
+}
+
+bool log_open_file(const char *path, const char *previousPath) noexcept {
+  const std::size_t pathLength = (path != nullptr) ? std::strlen(path) : 0U;
+  const std::size_t previousLength =
+      (previousPath != nullptr) ? std::strlen(previousPath) : 0U;
+  if ((pathLength == 0U) || (pathLength >= sizeof(g_logFilePath)) ||
+      (previousLength == 0U)) {
+    log_message(LogLevel::Warning, "core",
+                "log file path is empty or too long; logging to the console "
+                "only");
+    return false;
+  }
+  log_close_file();
+  // The previous run's log is kept, not appended to: one file per run,
+  // the last one beside it. A missing file is not an error.
+  static_cast<void>(std::remove(previousPath));
+  static_cast<void>(std::rename(path, previousPath));
+  std::FILE *file = nullptr;
+#if defined(_WIN32)
+  if (fopen_s(&file, path, "w") != 0) {
+    file = nullptr;
+  }
+#else
+  file = std::fopen(path, "w");
+#endif
+  if (file == nullptr) {
+    char message[640] = {};
+    std::snprintf(message, sizeof(message),
+                  "could not open the log file %s; logging to the console "
+                  "only",
+                  path);
+    log_message(LogLevel::Warning, "core", message);
+    return false;
+  }
+  std::lock_guard<std::mutex> lock(g_logFileMutex);
+  g_logFile = file;
+  std::memcpy(g_logFilePath, path, pathLength + 1U);
+  return true;
+}
+
+void log_close_file() noexcept {
+  std::lock_guard<std::mutex> lock(g_logFileMutex);
+  if (g_logFile != nullptr) {
+    std::fclose(g_logFile);
+    g_logFile = nullptr;
+  }
+}
+
+const char *log_file_path() noexcept {
+  std::lock_guard<std::mutex> lock(g_logFileMutex);
+  return g_logFilePath;
 }
 
 const char *log_channel_name(LogChannel channel) noexcept {

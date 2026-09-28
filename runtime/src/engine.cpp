@@ -13,8 +13,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 
 #include "engine/audio/audio.h"
+#include "engine/core/atomic_file.h"
 #include "engine/core/bootstrap.h"
 #include "engine/core/crash_report.h"
 #include "engine/core/cvar.h"
@@ -38,6 +40,44 @@ namespace {
 
 constexpr std::size_t kFrameAllocatorBytes = 1024U * 1024U;
 EngineConfig g_activeConfig{};
+
+/// Opens this run's log file under the per-user data directory
+/// (logs/editor.log, or logs/player.log in player mode), keeping the last
+/// run's beside it, as Unity's Editor.log and Player.log are kept: a
+/// windowed build has no console, so this is where its messages outlive
+/// it. A headless run (tests, tools) writes none. Failing to open one is
+/// said and not fatal: the run goes on with the in-app log and stdout.
+void open_run_log() noexcept {
+  if (g_activeConfig.core.platform.headless) {
+    return;
+  }
+  char saveDir[512] = {};
+  if (!core::platform_get_save_dir(saveDir, sizeof(saveDir))) {
+    core::log_message(core::LogLevel::Warning, "engine",
+                      "no per-user data directory; this run keeps no log "
+                      "file");
+    return;
+  }
+  const std::size_t length = std::strlen(saveDir);
+  const bool endsInSeparator =
+      (length > 0U) &&
+      ((saveDir[length - 1U] == '/') || (saveDir[length - 1U] == '\\'));
+  char logDir[600] = {};
+  std::snprintf(logDir, sizeof(logDir), "%s%slogs", saveDir,
+                endsInSeparator ? "" : "/");
+  if (!core::create_directories_durably(logDir)) {
+    core::log_message(core::LogLevel::Warning, "engine",
+                      "could not create the log directory; this run keeps "
+                      "no log file");
+    return;
+  }
+  const char *name = g_activeConfig.playerMode ? "player" : "editor";
+  char path[640] = {};
+  char previous[640] = {};
+  std::snprintf(path, sizeof(path), "%s/%s.log", logDir, name);
+  std::snprintf(previous, sizeof(previous), "%s/%s-prev.log", logDir, name);
+  static_cast<void>(core::log_open_file(path, previous));
+}
 bool g_bootstrapped = false;
 
 // The bootstrap stack: each opened stage pushes the function that closes
@@ -190,6 +230,7 @@ bool bootstrap(const EngineConfig &config) noexcept {
     return fail_bootstrap();
   }
   open_stage(&close_core);
+  open_run_log();
 
   // Installed straight after core, so a fault in anything opened below
   // still names the build, frame and stage. A refusal is not fatal: the

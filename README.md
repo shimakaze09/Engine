@@ -196,9 +196,17 @@ headers; the package set CI passes to
 
 Run the app after build:
 
-- Windows: `build\engine_editor_app.exe`
-- Linux: `./build/engine_editor_app` (macOS cannot run it until the shader
-  cook works there)
+- Windows: `build\engine_editor_app.exe`, a windowed application that opens
+  no console window; started from a terminal, it prints there.
+- Linux: `./build/engine_editor_app`, or open `build/engine_editor_app.desktop`
+  from a file manager or launcher, which runs it without a terminal.
+- macOS builds it as `build/engine_editor_app.app`, a bundle Finder launches
+  without Terminal (it cannot run until the shader cook works there).
+
+Each windowed run writes its log to `logs/editor.log` under the per-user data
+directory (`logs/player.log` in player mode), keeping the previous run's as
+`editor-prev.log`, as Unity keeps `Editor.log`; a failed start shows an error
+box naming it. The same messages appear in the editor's own log panel.
 
 It starts on an empty 3D scene, as a new Unity project does. The scene holds a
 Main Camera, a Directional Light, and a Scene Controller entity running

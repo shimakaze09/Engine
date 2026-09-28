@@ -60,6 +60,25 @@ bool initialize_logging() noexcept;
 void shutdown_logging() noexcept;
 /// Writes one log line (level + channel + message) to the sinks.
 void log_message(LogLevel level, const char* channel, const char* message) noexcept;
+
+/// Also writes every log line to the file at `path`, as Unity's Editor.log
+/// and Godot's godot.log keep one: a windowed build has no console, so
+/// this is where a run's messages outlive it. A file already at `path` is
+/// first renamed to `previousPath` (replacing an older one), so the last
+/// run's log survives this one. The file is flushed on Error and Fatal,
+/// like stdout, and closed by log_close_file or shutdown_logging. False,
+/// with nothing opened and a Warning logged, when either path is null,
+/// empty or too long, or the file cannot be opened; lines keep reaching
+/// stdout and the sinks either way. Opening while a file is open closes
+/// that one first.
+bool log_open_file(const char *path, const char *previousPath) noexcept;
+/// Flushes and closes the log file log_open_file opened; a no-op when
+/// none is open.
+void log_close_file() noexcept;
+/// The path of the log file this process last opened, kept after it is
+/// closed so a failed start can still name it; empty when none was ever
+/// opened. Never null.
+const char *log_file_path() noexcept;
 /// Writes one log line under a named channel.
 void log_message(LogLevel level, LogChannel channel,
                  const char *message) noexcept;
