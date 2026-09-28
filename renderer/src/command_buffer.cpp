@@ -56,7 +56,8 @@ bool g_shutDownRefusalLogged = false;
 /// Builds a configured shader path from a shader file name.
 bool make_shader_path(const char *fileName, char *outPath,
                       std::size_t outCapacity) noexcept {
-  if ((fileName == nullptr) || (outPath == nullptr) || (outCapacity == 0U)) {
+  if ((fileName == nullptr) || (outPath == nullptr) || (outCapacity == 0U) ||
+      (renderer_context().shaderRootPath[0] == '\0')) {
     return false;
   }
   const int written =
@@ -616,20 +617,23 @@ void set_active_camera(const CameraState &camera) noexcept {
   renderer_context().activeCamera = camera;
 }
 
-/// Sets the virtual root used for built-in renderer shaders.
-void set_shader_root_path(const char *path) noexcept {
-  const char *source =
-      ((path != nullptr) && (path[0] != '\0')) ? path : "assets/shaders";
-  const std::size_t len = std::strlen(source);
-  const std::size_t maxCopy =
-      sizeof(renderer_context().shaderRootPath) - 1U;
-  const std::size_t copyLen = (len < maxCopy) ? len : maxCopy;
-  std::memcpy(renderer_context().shaderRootPath, source, copyLen);
-  renderer_context().shaderRootPath[copyLen] = '\0';
-  if ((copyLen > 0U) &&
-      (renderer_context().shaderRootPath[copyLen - 1U] == '/')) {
-    renderer_context().shaderRootPath[copyLen - 1U] = '\0';
+bool set_shader_root_path(const char *path) noexcept {
+  char *root = renderer_context().shaderRootPath;
+  const std::size_t capacity = sizeof(renderer_context().shaderRootPath);
+  const std::size_t len = (path != nullptr) ? std::strlen(path) : 0U;
+  if ((len == 0U) || (len >= capacity)) {
+    core::log_message(core::LogLevel::Error, "renderer",
+                      (len == 0U) ? "shader root path is empty; kept the "
+                                    "previous root"
+                                  : "shader root path does not fit; kept "
+                                    "the previous root");
+    return false;
   }
+  std::memcpy(root, path, len + 1U);
+  if (root[len - 1U] == '/') {
+    root[len - 1U] = '\0';
+  }
+  return true;
 }
 
 /// Sets the Game view's size override.

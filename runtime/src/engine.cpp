@@ -12,6 +12,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 
 #include "engine/audio/audio.h"
 #include "engine/core/bootstrap.h"
@@ -252,14 +253,30 @@ bool bootstrap(const EngineConfig &config) noexcept {
 
   static_cast<void>(physics::register_physics_cvars());
 
-  // The mount lives and dies with core, so it opens no stage of its own.
+  // The mounts live and die with core, so they open no stage of their
+  // own. The engine's content must be there: without it no shader, font
+  // or bootstrap mesh loads, so a missing root refuses here rather than
+  // as a string of load failures later.
   if (consume_injected_failure(BootstrapStage::Mount) ||
       !core::mount(g_activeConfig.assetMount, g_activeConfig.assetRoot)) {
     core::log_message(core::LogLevel::Error, "engine",
                       "failed to mount configured asset root");
     return fail_bootstrap();
   }
-  renderer::set_shader_root_path(g_activeConfig.shaderRootPath);
+  if (!core::mount(g_activeConfig.engineMount, g_activeConfig.engineRoot) ||
+      !core::vfs_directory_exists(g_activeConfig.engineMount)) {
+    char message[kMaxConfigStringLength + 96U] = {};
+    static_cast<void>(std::snprintf(
+        message, sizeof(message),
+        "engine content root '%s' is not a directory; nothing the engine "
+        "ships (shaders, fonts) can load",
+        g_activeConfig.engineRoot));
+    core::log_message(core::LogLevel::Error, "engine", message);
+    return fail_bootstrap();
+  }
+  if (!renderer::set_shader_root_path(g_activeConfig.shaderRootPath)) {
+    return fail_bootstrap();
+  }
   // Opens the renderer lifetime this bootstrap owns. A process that
   // bootstraps again after shutting down gets a renderer that initializes
   // on demand once more, instead of one still latched off by the previous

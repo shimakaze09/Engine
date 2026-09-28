@@ -436,6 +436,21 @@ bool vfs_file_exists(const char *virtualPath) noexcept {
 #endif
 }
 
+bool vfs_directory_exists(const char *virtualPath) noexcept {
+  char osPath[kMaxResolvedPathLength] = {};
+  if (resolve(virtualPath, osPath, sizeof(osPath)) == 0U) {
+    return false;
+  }
+#if defined(_WIN32)
+  const DWORD attrs = GetFileAttributesA(osPath);
+  return (attrs != INVALID_FILE_ATTRIBUTES) &&
+         ((attrs & FILE_ATTRIBUTE_DIRECTORY) != 0U);
+#else
+  struct stat st {};
+  return (stat(osPath, &st) == 0) && S_ISDIR(st.st_mode);
+#endif
+}
+
 bool vfs_file_size(const char *virtualPath, std::uint64_t *outSize) noexcept {
   if (outSize == nullptr) {
     return false;

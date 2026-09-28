@@ -44,7 +44,7 @@ import sys
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 MATERIAL_HEADER = "renderer/include/engine/renderer/material.h"
 VARIANT_SOURCE = "renderer/src/command_buffer_init_core.cpp"
-MANIFEST = "assets/shaders/bgfx/shaders.manifest"
+MANIFEST = "engine_assets/shaders/bgfx/shaders.manifest"
 FORWARD_SOURCE = "pbr.fs.sc"
 # The model whose program is the forward default: it needs no define,
 # because it is what every other model falls back to.

@@ -228,7 +228,7 @@ engine_add_test_executable(engine_unit_render_device_bgfx
 )
 if(TARGET bgfx_shader_cook)
     target_compile_definitions(engine_unit_render_device_bgfx PRIVATE
-        ENGINE_TEST_COOKED_SHADER_DIR="${ENGINE_ASSET_OUTPUT_DIR}/shaders/bgfx/cooked")
+        ENGINE_TEST_COOKED_SHADER_DIR="${ENGINE_ENGINE_ASSET_OUTPUT_DIR}/shaders/bgfx/cooked")
     add_dependencies(engine_unit_render_device_bgfx bgfx_shader_cook)
 
     # Shader cook lifecycle suite (#138 Phase C): drives the packer's
@@ -243,7 +243,7 @@ if(TARGET bgfx_shader_cook)
         ENGINE_TEST_ASSET_PACKER="$<TARGET_FILE:asset_packer>"
         ENGINE_TEST_SHADERC="$<TARGET_FILE:shaderc>"
         ENGINE_TEST_SHADER_INCLUDE="${bgfx_SOURCE_DIR}/bgfx/src"
-        ENGINE_TEST_SHADER_SOURCE_DIR="${ENGINE_ASSET_SOURCE_DIR}/shaders/bgfx")
+        ENGINE_TEST_SHADER_SOURCE_DIR="${ENGINE_ENGINE_ASSET_SOURCE_DIR}/shaders/bgfx")
     add_dependencies(engine_unit_shader_cook asset_packer shaderc)
     set_tests_properties(engine_unit_shader_cook PROPERTIES TIMEOUT 300)
 endif()

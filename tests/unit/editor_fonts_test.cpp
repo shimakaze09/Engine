@@ -1,9 +1,10 @@
 // The editor's font chain (#610): Roboto for Latin text with a CJK face
 // merged behind it, so a Chinese or Japanese entity name, folder or field
 // renders instead of drawing as missing-glyph boxes. The face is the
-// author's chosen file, else the Noto Sans SC that ships in assets/fonts,
-// else a system font; so the glyph checks run on every machine, fonts or
-// not. The chosen file persists as a preference in the layout file.
+// author's chosen file, else the Noto Sans SC that ships in the engine's
+// content (engine/fonts), else a system font; so the glyph checks run on
+// every machine, fonts or not. The chosen file persists as a preference in the
+// layout file.
 
 #include "editor_fonts.h"
 #include "editor_preferences.h"
@@ -13,6 +14,7 @@
 #include "../asset_root.h"
 #include "engine/core/cvar.h"
 #include "engine/core/logging.h"
+#include "engine/core/vfs.h"
 
 #include <imgui.h>
 
@@ -60,9 +62,13 @@ EditorFontResult with_fonts(const char *cjkOverride, Probe &&probe) {
 int main() {
   TestContext t;
   if (!engine::tests::enter_asset_root()) {
-    t.fail("locate the repository's assets/fonts");
+    t.fail("locate the repository's engine_assets/fonts");
     return t.finish("editor_fonts");
   }
+  // The engine mount as bootstrap makes it: the bundled faces load through
+  // it.
+  t.check(engine::core::mount("engine", "engine_assets"),
+          "mount the engine content");
   t.check(engine::core::initialize_logging(), "initialize logging");
   t.check(engine::core::log_register_sink(&count_override_warnings, nullptr),
           "register the warning sink");
@@ -123,9 +129,10 @@ int main() {
 
   // --- A readable override comes first. Any font file proves the order.
   const EditorFontResult chosen =
-      with_fonts("assets/fonts/Roboto-Medium.ttf", [](ImFont *) {});
-  t.check(chosen.cjk && (std::strcmp(chosen.cjkPath,
-                                     "assets/fonts/Roboto-Medium.ttf") == 0),
+      with_fonts("engine_assets/fonts/Roboto-Medium.ttf", [](ImFont *) {});
+  t.check(chosen.cjk &&
+              (std::strcmp(chosen.cjkPath,
+                           "engine_assets/fonts/Roboto-Medium.ttf") == 0),
           "editor.cjk_font is tried before the bundled and system fonts");
 
   // --- The chosen file persists with the layout: the preferences section

@@ -893,6 +893,21 @@ def test_asset_identity_gate():
               ("gem.gltf.meta" in completed.stdout),
               "identity: a duplicate names every colliding path")
 
+        across = write_identity_fixture(tmp / "across_roots", {
+            "assets/props/coin.gltf": "x\n",
+            "assets/props/coin.gltf.meta": sidecar_text(one),
+            "engine_assets/triangle.glb": "x\n",
+            "engine_assets/triangle.glb.meta": sidecar_text(one),
+        })
+        check(run([script, "--root", str(across)]) != 0,
+              "identity: a GUID claimed in both the game's and the engine's "
+              "content fails, since both are catalogued together")
+        unsidecared = write_identity_fixture(tmp / "engine_no_sidecar", {
+            "engine_assets/triangle.glb": "x\n",
+        })
+        check(run([script, "--root", str(unsidecared)]) != 0,
+              "identity: engine content without a sidecar fails too")
+
         collision = write_identity_fixture(tmp / "case", {
             "assets/props/coin.gltf": "x\n",
             "assets/props/coin.gltf.meta": sidecar_text(one),
@@ -936,7 +951,7 @@ def write_variant_fixture(root, models, rows, variants):
         "    const ModelVariant kModelVariants[] = {\n%s};\n" % table,
         encoding="utf-8")
 
-    manifest = root / "assets" / "shaders" / "bgfx"
+    manifest = root / "engine_assets" / "shaders" / "bgfx"
     manifest.mkdir(parents=True, exist_ok=True)
     (manifest / "shaders.manifest").write_text(
         json.dumps({"shaders": [

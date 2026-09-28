@@ -727,7 +727,9 @@ struct RendererContext final {
   int gameViewHeight = 0;
   RendererFrameStats lastFrameStats{};
   TextureHandle activeSkyboxTexture = kInvalidTextureHandle;
-  char shaderRootPath[260] = "assets/shaders";
+  // Empty until set_shader_root_path: EngineConfig::shaderRootPath is the
+  // one default, so the renderer keeps no second copy of it.
+  char shaderRootPath[260] = {};
   std::array<SceneCaptureRequest, kMaxSceneCaptures> sceneCaptureRequests{};
   std::size_t sceneCaptureRequestCount = 0U;
   std::array<SkinPalette, kMaxSkinPalettes> skinPalettes =

@@ -85,28 +85,16 @@ std::string meta(const char *guid) {
   return std::string("{\"schemaVersion\": 1, \"guid\": \"") + guid + "\"}\n";
 }
 
-/// cook records from the repository, a texture that does not load, a
-/// cook stamp from the repository, a texture that does not load, a
-/// material naming it and a material inheriting that one.
+/// A texture that does not load, a material naming it and a material
+/// inheriting that one.
 bool write_project() {
   std::error_code ec{};
   std::filesystem::remove_all(kProject, ec);
   const std::filesystem::path root(kProject);
   std::filesystem::create_directories(root / "textures", ec);
   std::filesystem::create_directories(root / "materials", ec);
-  std::filesystem::path assetRoot;
-  const std::filesystem::path assets =
-      engine::tests::find_asset_root(&assetRoot) ? (assetRoot / "assets")
-                                                 : std::filesystem::path();
-  if (ec || assets.empty()) {
+  if (ec) {
     return false;
-  }
-  for (const char *name :
-       {"triangle.mesh", "triangle.mesh.cookmeta", "triangle.mesh.cookstamp"}) {
-    std::filesystem::copy_file(assets / name, root / name, ec);
-    if (ec) {
-      return false;
-    }
   }
   return write_file(texture_file(), "not a png") &&
          write_file(root / "textures" / "albedo.png.meta",
@@ -220,6 +208,8 @@ int main() {
   config.core.platform.headless = true;
   config.assetMount = "assets";
   config.assetRoot = kProject;
+  const std::string engineRoot = engine::tests::engine_root_path();
+  config.engineRoot = engineRoot.c_str();
   config.editorAssetRoot = kProject;
   config.mainScriptPath = "pipeline_texture_hot_reload_missing_main.lua";
   config.editorScenePath = "pipeline_texture_hot_reload_missing.scene";

@@ -11,7 +11,14 @@ that role once one does. Point 1's document format exists: the
 `.project` reader and writer (`content/include/engine/content/project_document.h`)
 own identity, roots, the scene list, the startup scene and the main script,
 and `engine_unit_project_document` pins them; nothing opens a project yet.
-The rest is not yet implemented.
+Point 2 is in place with a prefix rather than a scheme: the engine's own
+content (shaders, fonts, the web shell, the bootstrap mesh) lives in
+`engine_assets/`, mounted at `engine/`, beside the game's `assets/`
+mounted at `assets/` (`EngineConfig::engineRoot`); every authored path
+was already spelled with the assets/ prefix and keyed by that spelling, so the
+disjoint mounts cost no content migration.
+`engine_integration_engine_mount` pins the refusal of a missing engine
+root. The rest is not yet implemented.
 
 ## Context
 
