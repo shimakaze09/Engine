@@ -41,6 +41,7 @@ enum class EditorAction : std::uint8_t {
   PlayStop,
   Pause,
   Step,
+  Screenshot,
   Count,
 };
 
@@ -62,7 +63,8 @@ struct EditorShortcut final {
   bool repeats = false;
   /// Whether the chord still fires while the game has the keyboard (the
   /// Game view focused in play). Only the play controls do, so the author
-  /// can always pause or stop a running game from the keyboard.
+  /// can always pause or stop a running game from the keyboard, and Take
+  /// Screenshot, as Unreal's F9 works in Play In Editor.
   bool whileGameHasKeyboard = false;
 };
 

@@ -267,6 +267,8 @@ void draw_main_menu_bar() noexcept {
     editor_action_menu_item(EditorAction::Pause, state == PlayState::Paused);
     editor_action_menu_item(EditorAction::Step);
     ImGui::Separator();
+    editor_action_menu_item(EditorAction::Screenshot);
+    ImGui::Separator();
     // Preferences sit under Edit, as in Unity; no reference editor has a
     // top-level Settings menu.
     const bool showPreferences =
