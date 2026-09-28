@@ -274,6 +274,21 @@ void check_window(engine::tests::TestContext &t) noexcept {
 } // namespace
 
 int main() {
+  // The index walks the whole relative "assets" root, which other suites
+  // fill with scratch trees they rewrite while running in parallel; a
+  // private working directory keeps this suite's root to its own files.
+  constexpr const char *kWorkDir = "engine_asset_usages_test_wd";
+  std::error_code ec{};
+  const std::filesystem::path previous = std::filesystem::current_path(ec);
+  std::filesystem::remove_all(kWorkDir, ec);
+  std::filesystem::create_directories(kWorkDir, ec);
+  if (ec) {
+    return 2;
+  }
+  std::filesystem::current_path(kWorkDir, ec);
+  if (ec) {
+    return 3;
+  }
   if (!engine::core::initialize_logging() ||
       !engine::core::log_register_sink(&count_warnings, nullptr)) {
     return 1;
@@ -281,12 +296,12 @@ int main() {
   engine::tests::TestContext t;
   check_documents(t);
   check_search(t);
-  check_limits(t);
   check_window(t);
+  check_limits(t);
 
-  std::error_code ec{};
-  std::filesystem::remove_all(kRoot, ec);
   engine::core::log_unregister_sink(&count_warnings, nullptr);
   engine::core::shutdown_logging();
+  std::filesystem::current_path(previous, ec);
+  std::filesystem::remove_all(kWorkDir, ec);
   return t.finish("editor_asset_usages");
 }
