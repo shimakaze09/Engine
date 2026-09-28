@@ -17,6 +17,8 @@
 
 #include "imgui.h"
 
+#include "editor_project_files.h"
+
 #include "engine/renderer/screenshot.h"
 
 #include <cstddef>
@@ -26,13 +28,11 @@ namespace engine::editor {
 
 /// Whether a file exists at `path`; the seam next_screenshot_path uses so
 /// tests can stage collisions.
-using ScreenshotPathExistsFn = bool (*)(const char *path,
-                                        void *userData) noexcept;
+using ScreenshotPathExistsFn = ProjectFileExistsFn;
 
-/// Writes `<directory>/Screenshot-YYYYMMDD-HHMMSS.png` for `time` into
-/// `out`, or, when that file exists, the first free of `-2` to `-99`
-/// before the extension. False, with `out` emptied, when every name is
-/// taken or the path does not fit `capacity` whole.
+/// next_timestamped_path for a screenshot:
+/// `<directory>/Screenshot-YYYYMMDD-HHMMSS.png`, `-2` to `-99` on a
+/// collision.
 bool next_screenshot_path(const char *directory, const std::tm &time,
                           ScreenshotPathExistsFn exists, void *userData,
                           char *out, std::size_t capacity) noexcept;

@@ -10,6 +10,7 @@
 #include "editor_commands.h"
 #include "editor_entity_clipboard.h"
 #include "editor_frame_selection.h"
+#include "editor_play_recording.h"
 #include "editor_scene_document.h"
 #include "editor_screenshot.h"
 #include "editor_session.h"
@@ -83,6 +84,10 @@ constexpr std::array<EditorShortcut,
         // Unreal's screenshot key, live in play for the same reason.
         {EditorAction::Screenshot, "view.screenshot", "Take Screenshot",
          ImGuiKey_F9, 0, false, true},
+        // Unreal's demorec and demoplay have no default chords either.
+        {EditorAction::RecordPlay, "play.record", "Record Play", 0, 0, false},
+        {EditorAction::ReplayLatest, "play.replay_latest",
+         "Replay Latest Recording", 0, 0, false},
     }};
 
 // Each row sits at its action's index, so a lookup is an index.
@@ -301,6 +306,9 @@ bool editor_action_enabled(EditorAction action) noexcept {
   case EditorAction::Screenshot:
     // A hidden Game view tab comes to the front to be taken.
     return true;
+  case EditorAction::RecordPlay:
+  case EditorAction::ReplayLatest:
+    return recorded_play_can_start();
   case EditorAction::Count:
   default:
     return false;
@@ -392,6 +400,10 @@ bool run_editor_action(EditorAction action) noexcept {
   case EditorAction::Screenshot:
     request_game_view_screenshot();
     return true;
+  case EditorAction::RecordPlay:
+    return start_recorded_play(nullptr);
+  case EditorAction::ReplayLatest:
+    return start_replay(nullptr);
   case EditorAction::Count:
   default:
     return false;
