@@ -117,13 +117,17 @@ bool find_asset_usages(const AssetIndexEntry &target,
     return false;
   }
   *out = AssetUsages{};
-  const std::unique_ptr<char[]> buffer(new (std::nothrow)
-                                           char[kMaxDocumentBytes + 1U]);
-  if (buffer == nullptr) {
+  // The null test is on the raw pointer, and the owner is not const: for a
+  // const unique_ptr initialized by a nothrow new past its constexpr array
+  // limit, Clang 19 folds `owner == nullptr` to true from its constant
+  // evaluator even though the allocation succeeded at run time.
+  char *raw = new (std::nothrow) char[kMaxDocumentBytes + 1U];
+  if (raw == nullptr) {
     core::log_message(core::LogLevel::Error, "editor",
                       "Find Usages: out of memory for the search buffer");
     return false;
   }
+  std::unique_ptr<char[]> buffer(raw);
   const std::size_t count = asset_index_count();
   for (std::size_t i = 0U; i < count; ++i) {
     const AssetIndexEntry *entry = asset_index_entry(i);
