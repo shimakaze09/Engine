@@ -93,9 +93,9 @@ int main() {
   // over one.
   float widestName = 0.0F;
   for (std::size_t i = 0U; i < tagCount; ++i) {
-    const float width =
+    const float tagWidth =
         ImGui::CalcTextSize(engine::core::mem_tag_name(snaps[i].tag)).x;
-    widestName = (width > widestName) ? width : widestName;
+    widestName = (tagWidth > widestName) ? tagWidth : widestName;
   }
   const ImGuiWindow *profiler = ImGui::FindWindowByName("Profiler");
   const ImGuiTable *memory =
