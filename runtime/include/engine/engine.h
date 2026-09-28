@@ -18,10 +18,14 @@ struct EngineConfig final {
   /// The engine's own content (shaders, fonts, the web shell, the
   /// bootstrap mesh): mounted at `engineMount` from the OS directory
   /// `engineRoot`, kept apart from any project's content as Unreal's
-  /// Engine/Content is. Both roots resolve against the working directory;
-  /// bootstrap refuses a root that is not a directory.
+  /// Engine/Content is. A relative root resolves against the working
+  /// directory. Empty (the default) finds it the way an installed engine
+  /// is found, independent of where it was started: the ENGINE_ROOT
+  /// environment variable, then engine_assets beside the executable, then
+  /// engine_assets in the working directory. Bootstrap refuses a root that
+  /// is not a directory.
   const char *engineMount = "engine";
-  const char *engineRoot = "engine_assets";
+  const char *engineRoot = "";
   const char *mainScriptPath = "assets/main.lua";
   const char *bootstrapMeshPath = "engine/triangle.mesh";
   const char *shaderRootPath = "engine/shaders";
