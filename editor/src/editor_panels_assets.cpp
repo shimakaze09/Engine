@@ -6,6 +6,7 @@
 #include "editor_panels_assets.h"
 
 #include "editor_asset_index.h"
+#include "editor_asset_labels.h"
 #include "editor_asset_usages.h"
 #include "editor_commands.h"
 #include "editor_session.h"
@@ -296,7 +297,7 @@ void draw_toolbar(ContentBrowserState &browser) noexcept {
   std::snprintf(query, sizeof(query), "%s", browser.filter.query);
   ImGui::SetNextItemWidth(-1.0F);
   if (ImGui::InputTextWithHint("##content_browser_search",
-                               "Search the whole project...", query,
+                               "Search the whole project (l:label)...", query,
                                sizeof(query))) {
     std::snprintf(browser.filter.query, sizeof(browser.filter.query), "%s",
                  query);
@@ -363,6 +364,7 @@ void draw_asset_browser_panel() noexcept {
                    ImVec2(editor_px(64.0F), editor_px(64.0F)));
     }
 
+    draw_asset_labels_row(editor_session().selectedAssetPath);
     draw_import_settings_inspector(editor_session().selectedAssetPath);
   }
 

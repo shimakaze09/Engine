@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "engine/content/asset_metadata.h"
 #include "engine/content/asset_type_table.h"
 
 namespace engine::editor {
@@ -44,6 +45,11 @@ struct AssetIndexEntry final {
   /// .mesh): browsable, but not the form the runtime loads.
   bool isSource = false;
   bool hasThumbnail = false;
+  /// True when the entry has a readable sidecar of its own, the only
+  /// place its labels can be kept (a cooked output has none).
+  bool hasSidecar = false;
+  /// The labels its sidecar carries, read by the walk.
+  content::AssetLabels labels{};
 };
 
 /// Rebuilds the process-wide asset index by walking editor_asset_root()
@@ -59,6 +65,11 @@ const AssetIndexEntry *asset_index_entry(std::size_t index) noexcept;
 /// Monotonic counter bumped by every rebuild_asset_index call so dependent
 /// filter caches can detect staleness without a deep compare.
 std::uint64_t asset_index_generation() noexcept;
+/// Replaces the labels of the entry at `osPath` after its sidecar was
+/// written, and bumps the generation so filter caches recompute. False
+/// when the index has no such entry.
+bool set_asset_index_labels(const char *osPath,
+                            const content::AssetLabels &labels) noexcept;
 /// True once rebuild_asset_index has run at least once this process.
 bool asset_index_built() noexcept;
 /// Drops the index and its root so the next editor session walks afresh;
