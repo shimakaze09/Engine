@@ -28,6 +28,7 @@
 
 #include "editor_asset_index.h"
 #include "editor_console_capture.h"
+#include "editor_console_commands.h"
 #include "editor_scene_document.h"
 
 namespace engine::editor {
@@ -95,6 +96,14 @@ struct ConsolePanelState final {
   /// Set by the menu-bar status: the next frame shows the Console and
   /// brings it to the front.
   bool focusRequested = false;
+  /// The command line under the log, the commands entered in it, and a
+  /// request to put the keyboard in it on the next frame.
+  char commandLine[kConsoleCommandCapacity] = {};
+  ConsoleHistory history{};
+  bool focusCommandLine = false;
+  /// Set when a command runs: the next frame scrolls the log to its end,
+  /// where the command's output lands.
+  bool scrollToEnd = false;
 };
 
 /// Inspector panel view state: the Add Component search text.

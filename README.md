@@ -229,7 +229,9 @@ error box.
 Each windowed run writes its log to `logs/editor.log` under the per-user data
 directory (`logs/player.log` in player mode), keeping the previous run's as
 `editor-prev.log`, as Unity keeps `Editor.log`; a failed start shows an error
-box naming it. The same messages appear in the editor's own log panel.
+box naming it. The same messages appear in the editor's own Log panel, whose
+command line runs console commands (`help` lists them, `get` and `set` read and
+write cvars; Tab completes, Up and Down recall), as Unreal's Output Log does.
 
 It starts on an empty 3D scene, as a new Unity project does. The scene holds a
 Main Camera, a Directional Light, and a Scene Controller entity running
