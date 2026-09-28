@@ -132,6 +132,11 @@ std::size_t find_duplicate_guid_records(const AssetCatalog *catalog,
 /// Adds a tag to the id's metadata; false when unknown or tags full.
 bool add_asset_tag(AssetCatalog *catalog, AssetId id, const char *tag) noexcept;
 
+/// Removes a tag from the id's metadata; false when the id is unknown or
+/// does not carry it.
+bool remove_asset_tag(AssetCatalog *catalog, AssetId id,
+                      const char *tag) noexcept;
+
 /// True when the id's metadata carries the tag.
 bool asset_has_tag(const AssetCatalog *catalog, AssetId id,
                    const char *tag) noexcept;

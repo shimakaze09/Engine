@@ -116,6 +116,26 @@ inline bool asset_metadata_add_tag(AssetMetadata *metadata,
   return true;
 }
 
+/// Removes a tag; false when absent or args are invalid. Keeps the order
+/// of the rest.
+inline bool asset_metadata_remove_tag(AssetMetadata *metadata,
+                                      const char *tag) noexcept {
+  if ((metadata == nullptr) || (tag == nullptr)) {
+    return false;
+  }
+  for (std::size_t i = 0U; i < metadata->tagCount; ++i) {
+    if (std::strcmp(metadata->tags[i].data(), tag) == 0) {
+      for (std::size_t j = i + 1U; j < metadata->tagCount; ++j) {
+        metadata->tags[j - 1U] = metadata->tags[j];
+      }
+      --metadata->tagCount;
+      metadata->tags[metadata->tagCount].fill('\0');
+      return true;
+    }
+  }
+  return false;
+}
+
 /// True when `text` can be an asset label (a tag an author gives an asset,
 /// as Unity's Asset Labels are): 1 to kMaxTagLength - 1 characters, each a
 /// letter, digit, '_', '-' or '.'. Spaces are out so that a search term
