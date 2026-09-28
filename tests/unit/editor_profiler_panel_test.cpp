@@ -105,6 +105,10 @@ int main() {
   g_tests.check((memory != nullptr) &&
                     (memory->Columns[0].WidthGiven >= widestName),
                 "the memory names' column fits the widest name");
+  g_tests.check((text.find("Frame time") != std::string::npos) &&
+                    (text.find("Draw calls") != std::string::npos) &&
+                    (text.find("Job utilization (%)") != std::string::npos),
+                "the Profiler graphs frame time, draw calls and jobs");
   g_tests.check(text.find("GPU scene") != std::string::npos,
                 "the GPU rows are listed");
   g_tests.check(text.find("not measured") != std::string::npos,

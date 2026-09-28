@@ -499,20 +499,4 @@ void log_unregister_diagnostic_sink(DiagnosticSinkFn fn,
   unregister_slot(nullptr, fn, userData);
 }
 
-void log_frame_metrics(std::uint32_t frameIndex,
-                       double frameMs,
-                       std::size_t frameBytes,
-                       std::size_t frameAllocations) noexcept {
-  if (!g_loggingInitialized.load(std::memory_order_acquire)) {
-    return;
-  }
-
-  std::printf(
-      "[Trace][frame] index=%u ms=%.3f frameBytes=%zu frameAllocs=%zu\n",
-      frameIndex,
-      frameMs,
-      frameBytes,
-      frameAllocations);
-}
-
 } // namespace engine::core

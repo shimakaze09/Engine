@@ -4,6 +4,7 @@
 #include "editor_panels_diagnostics.h"
 
 #include "editor_commands.h"
+#include "editor_frame_history.h"
 #include "editor_session.h"
 
 #if defined(__clang__) && (defined(__x86_64__) || defined(__i386__)) &&        \
@@ -116,6 +117,73 @@ void draw_profiler_flame_graph() noexcept {
   ImGui::Dummy(ImVec2(graphWidth, graphHeight));
 }
 
+/// Reads one kept frame's value of a series for ImGui::PlotLines.
+float plot_value(void *data, int index) noexcept {
+  const FrameSeries series = *static_cast<const FrameSeries *>(data);
+  return frame_history_value(series, static_cast<std::size_t>(index));
+}
+
+/// One series over the kept frames, as Unity's Profiler charts and
+/// Unreal's stat graphs draw them: the line, its current, average and
+/// maximum readouts, and, for frame time, guides at the 60 and 30 fps
+/// budgets so a spike past one reads at a glance.
+void draw_series_graph(const char *label, FrameSeries series, const char *unit,
+                       bool frameBudgets) noexcept {
+  FrameSeries plotted = series;
+  const FrameSeriesSummary summary = frame_history_summary(series);
+  char overlay[96] = {};
+  std::snprintf(overlay, sizeof(overlay), "%.2f%s  avg %.2f  max %.2f",
+                static_cast<double>(summary.current), unit,
+                static_cast<double>(summary.average),
+                static_cast<double>(summary.maximum));
+  // The scale holds the tallest frame kept, and both budgets when they
+  // are graphed, so the guides always sit inside the plot.
+  float scaleMax = summary.maximum * 1.1F;
+  if (frameBudgets && (scaleMax < 36.0F)) {
+    scaleMax = 36.0F;
+  }
+  if (scaleMax <= 0.0F) {
+    scaleMax = 1.0F;
+  }
+  ImGui::TextUnformatted(label);
+  ImGui::PlotLines("##graph", &plot_value, &plotted,
+                   static_cast<int>(frame_history_count()), 0, overlay, 0.0F,
+                   scaleMax, ImVec2(-1.0F, ImGui::GetTextLineHeight() * 4.0F));
+  if (!frameBudgets) {
+    return;
+  }
+  const ImVec2 min = ImGui::GetItemRectMin();
+  const ImVec2 max = ImGui::GetItemRectMax();
+  ImDrawList *drawList = ImGui::GetWindowDrawList();
+  constexpr float kBudgetsMs[] = {1000.0F / 60.0F, 1000.0F / 30.0F};
+  constexpr ImU32 kBudgetColors[] = {IM_COL32(120, 220, 120, 160),
+                                     IM_COL32(240, 170, 80, 160)};
+  for (std::size_t i = 0U; i < 2U; ++i) {
+    const float y = max.y - ((kBudgetsMs[i] / scaleMax) * (max.y - min.y));
+    drawList->AddLine(ImVec2(min.x, y), ImVec2(max.x, y), kBudgetColors[i]);
+  }
+}
+
+/// The kept frames as graphs, newest on the right.
+void draw_frame_graphs() noexcept {
+  ImGui::PushID("frame_graphs");
+  ImGui::PushID(0);
+  draw_series_graph("Frame time (ms; guides at 60 and 30 fps)",
+                    FrameSeries::FrameMs, " ms", true);
+  ImGui::PopID();
+  ImGui::PushID(1);
+  draw_series_graph("Draw calls", FrameSeries::DrawCalls, "", false);
+  ImGui::PopID();
+  ImGui::PushID(2);
+  draw_series_graph("Memory (MB)", FrameSeries::MemoryMb, " MB", false);
+  ImGui::PopID();
+  ImGui::PushID(3);
+  draw_series_graph("Job utilization (%)", FrameSeries::JobUtilizationPct, "%",
+                    false);
+  ImGui::PopID();
+  ImGui::PopID();
+}
+
 /// One label and value row of a two-column table; a value the device
 /// cannot measure reads "not measured" rather than a zero.
 void stat_row(const char *label, const char *value, bool measured) noexcept {
@@ -155,6 +223,10 @@ void draw_frame_table(const core::EngineStats &stats) noexcept {
   std::snprintf(value, sizeof(value), "%.2f%%",
                 static_cast<double>(stats.jobUtilizationPct));
   stat_row("Job utilization", value, true);
+  std::snprintf(value, sizeof(value), "%.1f KB in %zu allocations",
+                static_cast<double>(stats.frameAllocatorBytes) / 1024.0,
+                stats.frameAllocations);
+  stat_row("Frame allocator", value, true);
   std::snprintf(value, sizeof(value), "%.3f ms",
                 static_cast<double>(stats.gpuSceneMs));
   stat_row("GPU scene", value, stats.gpuTimingAvailable);
@@ -238,7 +310,10 @@ void draw_profiler_panel(const core::EngineStats &stats) noexcept {
     return;
   }
 
-  ImGui::SeparatorText("Frame");
+  ImGui::SeparatorText("Frames");
+  draw_frame_graphs();
+
+  ImGui::SeparatorText("This frame");
   draw_frame_table(stats);
 
   ImGui::SeparatorText("CPU");

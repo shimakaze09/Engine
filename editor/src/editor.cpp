@@ -55,6 +55,7 @@
 #include "editor_commands.h"
 #include "editor_console_capture.h"
 #include "editor_fonts.h"
+#include "editor_frame_history.h"
 #include "editor_layout.h"
 #include "editor_material_edit.h"
 #include "editor_panels_assets.h"
@@ -113,6 +114,9 @@ void draw_editor_panels(float frameMs, float utilizationPct) noexcept {
 
   const bool showStats = core::cvar_get_bool(kShowStatsCvar, false);
   const core::EngineStats stats = core::get_engine_stats();
+  // Kept whether or not the Profiler is open, so opening it shows the
+  // frames that just ran.
+  frame_history_push(stats);
 
   const ImGuiViewport *viewport = ImGui::GetMainViewport();
   if (viewport == nullptr) {

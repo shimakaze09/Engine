@@ -82,13 +82,6 @@ const char *log_file_path() noexcept;
 /// Writes one log line under a named channel.
 void log_message(LogLevel level, LogChannel channel,
                  const char *message) noexcept;
-/// Logs the per-frame timing/metrics line.
-void log_frame_metrics(
-    std::uint32_t frameIndex,
-    double frameMs,
-    std::size_t frameBytes,
-    std::size_t frameAllocations) noexcept;
-
 /// Publishes the simulation frame index active while log_message runs, so
 /// sinks can attach best-effort frame context; callers update it once per
 /// frame (e.g. EnginePipeline). Never gates or blocks log_message itself.
