@@ -66,8 +66,12 @@ void draw_profiler_flame_graph() noexcept {
   const float frameMs = core::profiler_frame_time_ms();
   const float graphMs = (frameMs > 0.001F) ? frameMs : 0.001F;
   const float graphWidth = ImGui::GetContentRegionAvail().x;
-  const float barHeight = 16.0F;
-  const float barSpacing = 4.0F;
+  // A bar is one line of text tall, so its label fits inside it.
+  const float barHeight =
+      ImGui::GetFontSize() + ImGui::GetStyle().FramePadding.y;
+  const float barSpacing = editor_px(2.0F);
+  // Narrower than this, a bar shows no label rather than a clipped stub.
+  const float minLabelWidth = ImGui::CalcTextSize("MMM").x;
 
   std::array<float, 256U> startMs{};
 
@@ -90,14 +94,22 @@ void draw_profiler_flame_graph() noexcept {
         static_cast<int>((i * 37U + entry.depth * 19U) % 155U);
     const ImU32 color =
         IM_COL32(80 + colorSeed, 180, 240 - (colorSeed / 2), 220);
-    drawList->AddRectFilled(ImVec2(x0, y0), ImVec2(x1, y1), color, 2.0F);
+    drawList->AddRectFilled(ImVec2(x0, y0), ImVec2(x1, y1), color,
+                            editor_px(2.0F));
+    if ((x1 - x0) < minLabelWidth) {
+      continue;
+    }
 
     char label[96] = {};
     const char *name = (entry.name != nullptr) ? entry.name : "<unnamed>";
     std::snprintf(label, sizeof(label), "%s %.2fms", name,
                   static_cast<double>(entry.durationMs));
-    drawList->AddText(ImVec2(x0 + 2.0F, y0 + 1.0F), IM_COL32(0, 0, 0, 255),
-                      label);
+    // Clipped to its own bar, so a label never runs over its neighbours.
+    drawList->PushClipRect(ImVec2(x0, y0), ImVec2(x1, y1), true);
+    drawList->AddText(ImVec2(x0 + editor_px(3.0F),
+                             y0 + (ImGui::GetStyle().FramePadding.y * 0.5F)),
+                      IM_COL32(0, 0, 0, 255), label);
+    drawList->PopClipRect();
   }
 
   const float graphHeight =
@@ -105,6 +117,96 @@ void draw_profiler_flame_graph() noexcept {
   ImGui::Dummy(ImVec2(graphWidth, graphHeight));
 }
 
+/// One label and value row of a two-column table; a value the device
+/// cannot measure reads "not measured" rather than a zero.
+void stat_row(const char *label, const char *value, bool measured) noexcept {
+  ImGui::TableNextRow();
+  ImGui::TableSetColumnIndex(0);
+  ImGui::TextUnformatted(label);
+  ImGui::TableSetColumnIndex(1);
+  if (measured) {
+    ImGui::TextUnformatted(value);
+  } else {
+    ImGui::TextDisabled("not measured");
+  }
+}
+
+/// The frame's numbers as a label and value table.
+void draw_frame_table(const core::EngineStats &stats) noexcept {
+  if (!ImGui::BeginTable("##frame", 2, ImGuiTableFlags_SizingFixedFit)) {
+    return;
+  }
+  char value[64] = {};
+  std::snprintf(value, sizeof(value), "%.1f fps",
+                static_cast<double>(stats.fps));
+  stat_row("Frame rate", value, true);
+  std::snprintf(value, sizeof(value), "%.3f ms",
+                static_cast<double>(stats.frameTimeMs));
+  stat_row("Frame time", value, true);
+  std::snprintf(value, sizeof(value), "%u", stats.drawCalls);
+  stat_row("Draw calls", value, true);
+  std::snprintf(value, sizeof(value), "%llu",
+                static_cast<unsigned long long>(stats.triCount));
+  stat_row("Triangles", value, true);
+  std::snprintf(value, sizeof(value), "%zu", stats.entityCount);
+  stat_row("Entities", value, true);
+  std::snprintf(value, sizeof(value), "%.2f MB",
+                static_cast<double>(stats.memoryUsedMb));
+  stat_row("Memory", value, true);
+  std::snprintf(value, sizeof(value), "%.2f%%",
+                static_cast<double>(stats.jobUtilizationPct));
+  stat_row("Job utilization", value, true);
+  std::snprintf(value, sizeof(value), "%.3f ms",
+                static_cast<double>(stats.gpuSceneMs));
+  stat_row("GPU scene", value, stats.gpuTimingAvailable);
+  std::snprintf(value, sizeof(value), "%.3f ms",
+                static_cast<double>(stats.gpuTonemapMs));
+  stat_row("GPU tonemap", value, stats.gpuTimingAvailable);
+  ImGui::EndTable();
+}
+
+/// Memory by subsystem: each tag's name in a column as wide as the widest
+/// name, and its share of the largest as a bar.
+void draw_memory_table() noexcept {
+  std::array<core::MemTagSnapshot, core::kMemTagCount> snaps =
+      std::array<core::MemTagSnapshot, core::kMemTagCount>();
+  const std::size_t count =
+      core::mem_tracker_snapshot(snaps.data(), snaps.size());
+  float maxBytes = 1.0F;
+  float nameWidth = 0.0F;
+  for (std::size_t i = 0U; i < count; ++i) {
+    const float bytes = static_cast<float>(
+        snaps[i].currentBytes > 0 ? snaps[i].currentBytes : 0);
+    maxBytes = (bytes > maxBytes) ? bytes : maxBytes;
+    const float width = ImGui::CalcTextSize(core::mem_tag_name(snaps[i].tag)).x;
+    nameWidth = (width > nameWidth) ? width : nameWidth;
+  }
+  if (!ImGui::BeginTable("##memory", 2, ImGuiTableFlags_None)) {
+    return;
+  }
+  ImGui::TableSetupColumn("Subsystem", ImGuiTableColumnFlags_WidthFixed,
+                          nameWidth);
+  ImGui::TableSetupColumn("Bytes", ImGuiTableColumnFlags_WidthStretch);
+  for (std::size_t i = 0U; i < count; ++i) {
+    ImGui::TableNextRow();
+    ImGui::TableSetColumnIndex(0);
+    ImGui::TextUnformatted(core::mem_tag_name(snaps[i].tag));
+    ImGui::TableSetColumnIndex(1);
+    if (!snaps[i].reported) {
+      // Nothing reports under this tag: say so rather than draw a zero
+      // that reads as a measurement.
+      ImGui::TextDisabled("not measured");
+      continue;
+    }
+    const float bytes = static_cast<float>(
+        snaps[i].currentBytes > 0 ? snaps[i].currentBytes : 0);
+    char label[64] = {};
+    std::snprintf(label, sizeof(label), "%.2f MB",
+                  static_cast<double>(bytes / (1024.0F * 1024.0F)));
+    ImGui::ProgressBar(bytes / maxBytes, ImVec2(-1.0F, 0.0F), label);
+  }
+  ImGui::EndTable();
+}
 
 } // namespace
 
@@ -137,17 +239,8 @@ void draw_profiler_panel(const core::EngineStats &stats) noexcept {
     return;
   }
 
-  ImGui::Text("FPS: %.1f", static_cast<double>(stats.fps));
-  ImGui::Text("Frame: %.3f ms", static_cast<double>(stats.frameTimeMs));
-  ImGui::Text("Draw Calls: %u", stats.drawCalls);
-  ImGui::Text("Triangles: %llu",
-              static_cast<unsigned long long>(stats.triCount));
-  ImGui::Text("Entities: %zu", stats.entityCount);
-  ImGui::Text("Memory: %.2f MB", static_cast<double>(stats.memoryUsedMb));
-  ImGui::Text("GPU Scene: %.3f ms", static_cast<double>(stats.gpuSceneMs));
-  ImGui::Text("GPU Tonemap: %.3f ms", static_cast<double>(stats.gpuTonemapMs));
-  ImGui::Text("Job Utilization: %.2f%%",
-              static_cast<double>(stats.jobUtilizationPct));
+  ImGui::SeparatorText("Frame");
+  draw_frame_table(stats);
 
   ImGui::Separator();
   // Scene-wide authored-camera status (conflicts and the no-camera
@@ -178,42 +271,11 @@ void draw_profiler_panel(const core::EngineStats &stats) noexcept {
     }
   }
 
-  ImGui::Separator();
-  ImGui::TextUnformatted("CPU Flame Graph");
+  ImGui::SeparatorText("CPU");
   draw_profiler_flame_graph();
 
-  ImGui::Separator();
-  ImGui::TextUnformatted("Memory by Subsystem");
-  {
-    std::array<core::MemTagSnapshot, core::kMemTagCount> snaps =
-        std::array<core::MemTagSnapshot, core::kMemTagCount>();
-    const std::size_t count =
-        core::mem_tracker_snapshot(snaps.data(), snaps.size());
-    float maxBytes = 1.0F;
-    for (std::size_t i = 0U; i < count; ++i) {
-      const float bytes = static_cast<float>(
-          snaps[i].currentBytes > 0 ? snaps[i].currentBytes : 0);
-      if (bytes > maxBytes) {
-        maxBytes = bytes;
-      }
-    }
-    for (std::size_t i = 0U; i < count; ++i) {
-      ImGui::Text("%s", core::mem_tag_name(snaps[i].tag));
-      ImGui::SameLine(editor_px(100.0F));
-      if (!snaps[i].reported) {
-        // Nothing reports under this tag: say so rather than draw a
-        // zero that reads as a measurement.
-        ImGui::TextDisabled("not measured");
-        continue;
-      }
-      const float bytes = static_cast<float>(
-          snaps[i].currentBytes > 0 ? snaps[i].currentBytes : 0);
-      const float mb = bytes / (1024.0F * 1024.0F);
-      char label[64]{};
-      std::snprintf(label, sizeof(label), "%.2f MB", static_cast<double>(mb));
-      ImGui::ProgressBar(bytes / maxBytes, ImVec2(-1.0F, 0.0F), label);
-    }
-  }
+  ImGui::SeparatorText("Memory by Subsystem");
+  draw_memory_table();
 
   ImGui::End();
 }

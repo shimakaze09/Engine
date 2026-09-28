@@ -2418,6 +2418,7 @@ void EnginePipeline::Impl::stage_diagnostics() noexcept {
   frameStats.memoryUsedMb = memoryUsedMbSample;
   frameStats.gpuSceneMs = rendererStats.gpuSceneMs;
   frameStats.gpuTonemapMs = rendererStats.gpuTonemapMs;
+  frameStats.gpuTimingAvailable = rendererStats.gpuTimingAvailable;
   frameStats.jobUtilizationPct = static_cast<float>(utilizationPct);
   frameStats.droppedDrawCommands = lastDroppedDrawCommands;
   frameStats.sceneLights = static_cast<std::uint32_t>(

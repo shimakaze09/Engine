@@ -17,6 +17,9 @@ struct EngineStats final {
   float memoryUsedMb = 0.0F;
   float gpuSceneMs = 0.0F;
   float gpuTonemapMs = 0.0F;
+  /// False when the render device cannot measure GPU pass times, so the
+  /// two timings above read 0 without being a measurement.
+  bool gpuTimingAvailable = false;
   float jobUtilizationPct = 0.0F;
   /// Draws render prep could not fit into a command buffer last frame; a
   /// nonzero value means the frame was drawn incomplete.

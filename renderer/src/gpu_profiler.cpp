@@ -281,6 +281,10 @@ float gpu_profiler_pass_ms(GpuPassId pass) noexcept {
   return (idx < kPassCount) ? g_gpuProfiler.passDurationsMs[idx] : 0.0F;
 }
 
+bool gpu_profiler_supported() noexcept {
+  return g_gpuProfiler.initialized && g_gpuProfiler.supported;
+}
+
 GpuProfilerDebugStats gpu_profiler_debug_stats() noexcept {
   return g_gpuProfiler.debugStats;
 }
