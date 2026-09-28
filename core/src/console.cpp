@@ -3,6 +3,7 @@
 #include "engine/core/console.h"
 
 #include "engine/core/cvar.h"
+#include "engine/core/logging.h"
 
 #include <array>
 #include <cstdio>
@@ -297,8 +298,12 @@ void console_print(const char *text) noexcept {
     return;
   }
 
-  std::lock_guard<std::mutex> lock(g_mutex);
-  print_unlocked(text);
+  {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    print_unlocked(text);
+  }
+  // Outside the lock: a log sink may itself run a console command.
+  log_message(LogLevel::Info, "console", text);
 }
 
 std::size_t console_output_line_count() noexcept {
