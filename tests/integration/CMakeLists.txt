@@ -1694,3 +1694,36 @@ engine_add_test_executable(engine_integration_draw_order_thread_count
     LABELS
     integration
 )
+
+# engine_validate's command line, through the real binary: a clean scene
+# passes, and an unknown option, a missing value and no scene at all are
+# usage errors (exit 2), never a silent run on the wrong input.
+if(TARGET engine_validate)
+    add_test(NAME engine_validate_cli_accepts_scene
+        COMMAND $<TARGET_FILE:engine_validate> --assets assets assets/main.scene
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    add_test(NAME engine_validate_cli_refuses_unknown_option
+        COMMAND $<TARGET_FILE:engine_validate> --asets assets assets/main.scene
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    add_test(NAME engine_validate_cli_refuses_missing_value
+        COMMAND $<TARGET_FILE:engine_validate> assets/main.scene --assets
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    add_test(NAME engine_validate_cli_refuses_no_scene
+        COMMAND $<TARGET_FILE:engine_validate> --assets assets
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    set_tests_properties(
+        engine_validate_cli_refuses_unknown_option
+        PROPERTIES PASS_REGULAR_EXPRESSION "--asets: unknown option")
+    set_tests_properties(
+        engine_validate_cli_refuses_missing_value
+        PROPERTIES PASS_REGULAR_EXPRESSION "--assets: option needs a value")
+    set_tests_properties(
+        engine_validate_cli_refuses_no_scene
+        PROPERTIES PASS_REGULAR_EXPRESSION "usage: engine_validate")
+    set_tests_properties(
+        engine_validate_cli_accepts_scene
+        engine_validate_cli_refuses_unknown_option
+        engine_validate_cli_refuses_missing_value
+        engine_validate_cli_refuses_no_scene
+        PROPERTIES LABELS "integration" TIMEOUT 60)
+endif()

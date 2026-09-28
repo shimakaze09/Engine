@@ -69,6 +69,7 @@ engine_add_module_library(engine_core
     src/asset_identity.cpp
     src/assertion.cpp
     src/bootstrap.cpp
+    src/command_line.cpp
     src/console.cpp
     src/crash_report.cpp
     src/cvar.cpp

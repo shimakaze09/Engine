@@ -37,6 +37,13 @@ engine_add_test_executable(engine_unit_foundation
     engine_math
 )
 
+engine_add_test_executable(engine_unit_command_line
+    SOURCES
+    command_line_test.cpp
+    PRIVATE_DEPS
+    engine_core
+)
+
 engine_add_test_executable(engine_unit_log_file
     SOURCES
     log_file_test.cpp

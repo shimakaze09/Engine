@@ -5,10 +5,10 @@
 // a dangling reference before an author does.
 
 #include <cstdio>
-#include <cstring>
 #include <memory>
 #include <new>
 
+#include "engine/core/command_line.h"
 #include "engine/core/logging.h"
 #include "engine/core/validation_report.h"
 #include "engine/core/vfs.h"
@@ -17,6 +17,10 @@
 #include "engine/runtime/world.h"
 
 namespace {
+
+constexpr engine::core::CommandLineOption kOptions[] = {
+    {"assets", engine::core::CommandLineOptionKind::Value},
+};
 
 void print_usage() {
   std::fprintf(stderr,
@@ -55,16 +59,24 @@ int validate_scene(engine::runtime::World &world, const char *path) {
 
 /// Runs this executable or test program.
 int main(int argc, char **argv) {
-  const char *assetsDirectory = "assets";
-  int first = 1;
-  if ((argc >= 3) && (std::strcmp(argv[1], "--assets") == 0)) {
-    assetsDirectory = argv[2];
-    first = 3;
-  }
-  if (first >= argc) {
+  const auto commandLine = engine::core::parse_command_line(
+      argc, argv, kOptions, sizeof(kOptions) / sizeof(kOptions[0]),
+      engine::core::kMaxCommandLinePositionals);
+  if (!commandLine.has_value()) {
+    const engine::core::CommandLineFailure failure = commandLine.error();
+    std::fprintf(stderr, "error: %s: %s\n",
+                 (failure.argumentIndex > 0) ? argv[failure.argumentIndex]
+                                             : "engine_validate",
+                 engine::core::command_line_failure_text(failure.kind));
     print_usage();
     return 2;
   }
+  if (commandLine->positional_count() == 0U) {
+    print_usage();
+    return 2;
+  }
+  const char *assetsDirectory =
+      commandLine->has("assets") ? commandLine->value("assets") : "assets";
 
   engine::runtime::ensure_runtime_reflection_registered();
   if (!engine::core::initialize_logging() || !engine::core::initialize_vfs() ||
@@ -82,8 +94,8 @@ int main(int argc, char **argv) {
   }
 
   int failures = 0;
-  for (int i = first; i < argc; ++i) {
-    failures += validate_scene(*world, argv[i]);
+  for (std::size_t i = 0U; i < commandLine->positional_count(); ++i) {
+    failures += validate_scene(*world, commandLine->positional(i));
   }
 
   engine::core::shutdown_vfs();
