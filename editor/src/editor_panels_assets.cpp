@@ -269,8 +269,9 @@ void draw_folder_row(const char *folderOsPath) noexcept {
 /// Draws one asset row: thumbnail (when cooked), name, drag source for
 /// meshes (preserving the pinned ASSET_VIRTUAL_PATH viewport-drop
 /// contract), single-click select, double-click typed Open, and the
-/// context menu.
-void draw_asset_row(const AssetIndexEntry &entry) noexcept {
+/// context menu. A search result also names the folder it lives in, since
+/// results come from every folder at once.
+void draw_asset_row(const AssetIndexEntry &entry, bool showFolder) noexcept {
   ImGui::PushID(entry.osPath);
 
   if (entry.hasThumbnail) {
@@ -284,9 +285,19 @@ void draw_asset_row(const AssetIndexEntry &entry) noexcept {
     }
   }
 
-  char label[256] = {};
-  std::snprintf(label, sizeof(label), "[%s] %s",
-               content::asset_type_label(entry.kind), entry.name);
+  // Display only: an overlong label truncates, the row keeps its identity
+  // through entry.osPath.
+  char label[512] = {};
+  const char *slash = std::strrchr(entry.virtualPath, '/');
+  if (showFolder && (slash != nullptr)) {
+    std::snprintf(label, sizeof(label), "[%s] %s   in %.*s",
+                  content::asset_type_label(entry.kind), entry.name,
+                  static_cast<int>(slash - entry.virtualPath),
+                  entry.virtualPath);
+  } else {
+    std::snprintf(label, sizeof(label), "[%s] %s",
+                  content::asset_type_label(entry.kind), entry.name);
+  }
   const bool isSelected =
       std::strcmp(editor_session().selectedAssetPath, entry.osPath) == 0;
 
@@ -359,16 +370,11 @@ void draw_toolbar(ContentBrowserState &browser) noexcept {
       (browser.filter.folder[0] != '\0') ? browser.filter.folder : "/";
   ImGui::TextDisabled("%s", shownFolder);
 
-  bool flatSearch = browser.filter.flatSearch;
-  if (ImGui::Checkbox("Search all folders", &flatSearch)) {
-    browser.filter.flatSearch = flatSearch;
-  }
-
   char query[sizeof(browser.filter.query)] = {};
   std::snprintf(query, sizeof(query), "%s", browser.filter.query);
   ImGui::SetNextItemWidth(-1.0F);
   if (ImGui::InputTextWithHint("##content_browser_search",
-                               "Search by name or path...", query,
+                               "Search the whole project...", query,
                                sizeof(query))) {
     std::snprintf(browser.filter.query, sizeof(browser.filter.query), "%s",
                  query);
@@ -400,7 +406,8 @@ void draw_asset_browser_panel() noexcept {
   // the index generation actually changed since their last apply.
   refresh_asset_filter_cache(browser.filter, &browser.filterCache);
 
-  if (!browser.filter.flatSearch) {
+  const bool searching = browser.filter.query[0] != '\0';
+  if (!searching) {
     refresh_child_folder_cache(browser.filter.folder,
                                &browser.childFolderCache);
     for (const std::string &child : browser.childFolderCache.children) {
@@ -414,8 +421,11 @@ void draw_asset_browser_panel() noexcept {
   for (const std::size_t matchIndex : browser.filterCache.matches) {
     const AssetIndexEntry *entry = asset_index_entry(matchIndex);
     if (entry != nullptr) {
-      draw_asset_row(*entry);
+      draw_asset_row(*entry, searching);
     }
+  }
+  if (searching && browser.filterCache.matches.empty()) {
+    ImGui::TextDisabled("No assets match \"%s\"", browser.filter.query);
   }
 
   draw_find_usages_popup();

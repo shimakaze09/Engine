@@ -361,17 +361,19 @@ void content_browser_state_set_directory_override_for_tests(
 void editor_set_initialize_failure_for_tests(bool fail) noexcept;
 
 /// Navigates the content browser to `folder` ("" = index root), recording
-/// history so back/forward can retrace it, and persists the new folder. A
-/// no-op when `folder` is already the current folder.
+/// history so back/forward can retrace it, ends any search so the folder's
+/// own contents show, and persists the new folder. A no-op when `folder`
+/// is already the current folder.
 void content_browser_navigate(const char *folder) noexcept;
 /// True when a back-navigation step is available.
 bool content_browser_can_go_back() noexcept;
 /// True when a forward-navigation step is available.
 bool content_browser_can_go_forward() noexcept;
-/// Steps the navigation history back one folder; no-op when unavailable.
+/// Steps the navigation history back one folder, ending any search; no-op
+/// when unavailable.
 void content_browser_go_back() noexcept;
-/// Steps the navigation history forward one folder; no-op when
-/// unavailable.
+/// Steps the navigation history forward one folder, ending any search;
+/// no-op when unavailable.
 void content_browser_go_forward() noexcept;
 
 /// True when the attached world exists, is stopped, and accepts edits.

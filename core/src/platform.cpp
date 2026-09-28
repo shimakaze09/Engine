@@ -1200,6 +1200,30 @@ std::size_t process_memory_bytes() noexcept {
 #endif
 }
 
+bool platform_attach_parent_console() noexcept {
+#if defined(_WIN32)
+  // A console-subsystem build already has one; only a GUI one attaches.
+  if (GetConsoleWindow() != nullptr) {
+    return false;
+  }
+  if (AttachConsole(ATTACH_PARENT_PROCESS) == 0) {
+    return false;
+  }
+  std::FILE *stream = nullptr;
+  static_cast<void>(freopen_s(&stream, "CONOUT$", "w", stdout));
+  static_cast<void>(freopen_s(&stream, "CONOUT$", "w", stderr));
+  return true;
+#else
+  return false;
+#endif
+}
+
+void platform_show_error_box(const char *title, const char *message) noexcept {
+  static_cast<void>(SDL_ShowSimpleMessageBox(
+      SDL_MESSAGEBOX_ERROR, (title != nullptr) ? title : "Error",
+      (message != nullptr) ? message : "", nullptr));
+}
+
 bool platform_get_save_dir(char *outBuffer,
                            std::size_t bufferCapacity) noexcept {
   return platform_get_save_dir(kDefaultOrganizationName,

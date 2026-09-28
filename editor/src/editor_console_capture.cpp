@@ -4,6 +4,8 @@
 
 #include "editor_console_capture.h"
 
+#include "engine/core/hash.h"
+
 #include "engine/core/diagnostic.h"
 #include "engine/core/fixed_ring.h"
 
@@ -140,6 +142,15 @@ void console_capture_sink(const core::Diagnostic &record,
                                   : ConsoleReferenceKind::AssetPath;
   }
   candidate.entityPersistentId = record.entityPersistentId;
+  std::uint64_t hash = core::fnv1a_64_append(
+      core::kFnv1a64Offset, static_cast<std::uint8_t>(candidate.level));
+  for (const char *text : {candidate.channel, candidate.message}) {
+    for (; *text != '\0'; ++text) {
+      hash = core::fnv1a_64_append(hash, static_cast<std::uint8_t>(*text));
+    }
+    hash = core::fnv1a_64_append(hash, 0U);
+  }
+  candidate.contentHash = hash;
 
   std::lock_guard<std::mutex> lock(g_captureMutex);
   ingest_locked(candidate);
@@ -164,6 +175,45 @@ void reset_state_locked() noexcept {
 }
 
 } // namespace
+
+void ConsoleCollapser::clear() noexcept {
+  m_slots.fill(0U);
+  m_count = 0U;
+}
+
+void ConsoleCollapser::add(const ConsoleEntry &entry,
+                           std::size_t captureIndex) noexcept {
+  std::size_t slot =
+      static_cast<std::size_t>(entry.contentHash) & (kSlots - 1U);
+  for (std::size_t probe = 0U; probe < kSlots; ++probe) {
+    const std::uint32_t occupant = m_slots[slot];
+    if (occupant == 0U) {
+      if (m_count >= kMaxConsoleEntries) {
+        return;
+      }
+      m_hashes[m_count] = entry.contentHash;
+      m_firstIndex[m_count] = captureIndex;
+      m_totals[m_count] = entry.repeatCount;
+      ++m_count;
+      m_slots[slot] = static_cast<std::uint32_t>(m_count);
+      return;
+    }
+    const std::size_t group = occupant - 1U;
+    if (m_hashes[group] == entry.contentHash) {
+      m_totals[group] += entry.repeatCount;
+      return;
+    }
+    slot = (slot + 1U) & (kSlots - 1U);
+  }
+}
+
+std::size_t ConsoleCollapser::first_index(std::size_t group) const noexcept {
+  return (group < m_count) ? m_firstIndex[group] : 0U;
+}
+
+std::uint32_t ConsoleCollapser::total(std::size_t group) const noexcept {
+  return (group < m_count) ? m_totals[group] : 0U;
+}
 
 void console_capture_initialize() noexcept {
   {

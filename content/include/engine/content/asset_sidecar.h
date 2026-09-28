@@ -72,6 +72,11 @@ enum class SidecarReadResult : std::uint8_t {
 bool asset_sidecar_path(const char *assetOsPath, char *out,
                         std::size_t capacity) noexcept;
 
+/// True when `path` names a sidecar itself ("<asset>.meta"), which tools
+/// that list assets hide as Unity's Project window hides its .meta files.
+/// False for null or a path that is only the suffix.
+bool is_asset_sidecar_path(const char *path) noexcept;
+
 /// Reads the sidecar beside `assetOsPath`. `*out` is left untouched for
 /// every result but Ok.
 SidecarReadResult read_asset_sidecar(const char *assetOsPath,

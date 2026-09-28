@@ -1,13 +1,14 @@
 // Verifies the content-browser asset index (issue #157): cold rebuild
 // classifies every file kind from its suffix alone — scene, material and
 // animation-controller documents included, none of which is opened to
-// guess its kind — and skips sidecar/internal files; the filter cache
-// only recomputes on an actual filter or generation change and handles
-// the empty-query and no-match boundaries; typed-action kind routing is
-// pure and correct; and
-// execute_asset_open dispatches through real production entry points —
-// scene Open routes through the #158 unsaved-change gate and a mesh Open
-// spawns through execute_asset_spawn, not a copied model of either.
+// guess its kind — and skips sidecar/internal files, .meta included; the
+// filter cache only recomputes on an actual filter or generation change
+// and handles the empty-query and no-match boundaries; a search finds an
+// asset in any folder, not only the one being viewed; typed-action kind routing
+// is pure and correct; and execute_asset_open dispatches through real
+// production entry points — scene Open routes through the #158 unsaved-change
+// gate and a mesh Open spawns through execute_asset_spawn, not a copied model
+// of either.
 
 #include "editor_asset_index.h"
 #include "editor_commands.h"
@@ -99,6 +100,7 @@ bool rebuild_scratch_tree() noexcept {
   char materialPath[1024] = {};
   char controllerPath[1024] = {};
   char metaPath[1024] = {};
+  char sidecarPath[1024] = {};
   char subMeshPath[1024] = {};
   if (!make_scratch_path("thing.mesh", meshPath, sizeof(meshPath)) ||
       !make_scratch_path("thing.png", texPath, sizeof(texPath)) ||
@@ -107,10 +109,9 @@ bool rebuild_scratch_tree() noexcept {
       !make_scratch_path("thing.mat", materialPath, sizeof(materialPath)) ||
       !make_scratch_path("thing.animctrl", controllerPath,
                          sizeof(controllerPath)) ||
-      !make_scratch_path("thing.mesh.cookmeta", metaPath,
-                         sizeof(metaPath)) ||
-      !make_scratch_path("sub/nested.mesh", subMeshPath,
-                         sizeof(subMeshPath))) {
+      !make_scratch_path("thing.mesh.cookmeta", metaPath, sizeof(metaPath)) ||
+      !make_scratch_path("thing.png.meta", sidecarPath, sizeof(sidecarPath)) ||
+      !make_scratch_path("sub/nested.mesh", subMeshPath, sizeof(subMeshPath))) {
     return false;
   }
 
@@ -118,11 +119,11 @@ bool rebuild_scratch_tree() noexcept {
          write_text_file(texPath, "not a real png, kind is by extension") &&
          write_text_file(scriptPath, "-- lua\n") &&
          write_text_file(scenePath, "{\"entities\":[],\"version\":1}") &&
-         write_text_file(materialPath,
-                         "{\"version\":1,\"albedo\":[1,1,1]}") &&
+         write_text_file(materialPath, "{\"version\":1,\"albedo\":[1,1,1]}") &&
          write_text_file(controllerPath,
                          "{\"states\":{},\"clips\":{},\"initial\":\"idle\"}") &&
          write_text_file(metaPath, "{\"importSettings\":{}}") &&
+         write_text_file(sidecarPath, "{\"schemaVersion\":1}") &&
          write_text_file(subMeshPath, "nested mesh");
 }
 
@@ -152,7 +153,8 @@ const AssetIndexEntry *find_entry_by_leaf(const char *leaf) noexcept {
 
 /// EXPECTATION: rebuild_asset_index classifies every scratch file kind
 /// from its suffix alone — no file is opened to guess a kind — hides the
-/// .cookmeta sidecar from the index, and bumps the generation counter.
+/// .cookmeta and .meta sidecars from the index, and bumps the generation
+/// counter.
 int check_rebuild_classifies_and_hides_sidecars() {
   if (!rebuild_scratch_tree()) {
     return 1;
@@ -202,6 +204,9 @@ int check_rebuild_classifies_and_hides_sidecars() {
   }
   if (meta != nullptr) {
     return 12; // .cookmeta sidecars must never appear in the index
+  }
+  if (find_entry_by_leaf("thing.png.meta") != nullptr) {
+    return 14; // .meta sidecars are hidden as Unity hides them
   }
   if (mesh->virtualPath[0] == '\0') {
     return 13; // must resolve a VFS virtual path under the mount root
@@ -262,7 +267,6 @@ int check_filter_cache_change_driven_and_boundaries() {
 
   AssetFilterState filter{};
   std::snprintf(filter.folder, sizeof(filter.folder), "%s", scratchFolder);
-  filter.flatSearch = false;
   filter.query[0] = '\0'; // empty query: every type-matching entry in scope
 
   AssetFilterCache cache{};
@@ -313,6 +317,56 @@ int check_filter_cache_change_driven_and_boundaries() {
   }
   if (!refresh_asset_filter_cache(filter, &cache)) {
     return 13;
+  }
+  return 0;
+}
+
+/// EXPECTATION: a non-empty query searches the whole project, not only
+/// the folder being viewed, so an asset is found by name from anywhere; an
+/// empty query lists only that folder's direct children.
+int check_search_spans_every_folder() {
+  if (!rebuild_scratch_tree() || !rebuild_asset_index()) {
+    return 1;
+  }
+  char scratchFolder[kMaxAssetIndexPath] = {};
+  if (!scratch_root(scratchFolder, sizeof(scratchFolder))) {
+    return 2;
+  }
+
+  AssetFilterState filter{};
+  std::snprintf(filter.folder, sizeof(filter.folder), "%s", scratchFolder);
+  AssetFilterCache cache{};
+  static_cast<void>(refresh_asset_filter_cache(filter, &cache));
+  for (const std::size_t index : cache.matches) {
+    const AssetIndexEntry *entry = asset_index_entry(index);
+    if ((entry == nullptr) ||
+        (std::strstr(entry->name, "nested.mesh") != nullptr)) {
+      return 3; // an empty query lists the viewed folder only
+    }
+  }
+
+  // Viewed from the scratch root, a subfolder's asset is found by name.
+  std::snprintf(filter.query, sizeof(filter.query), "%s", "NESTED.mesh");
+  static_cast<void>(refresh_asset_filter_cache(filter, &cache));
+  if (cache.matches.size() != 1U) {
+    return 4;
+  }
+  const AssetIndexEntry *found = asset_index_entry(cache.matches[0]);
+  if ((found == nullptr) || (std::strcmp(found->name, "nested.mesh") != 0)) {
+    return 5;
+  }
+
+  // Viewed from the subfolder, a root-level asset is found the same way.
+  const AssetIndexEntry *nestedEntry = find_entry_by_leaf("sub/nested.mesh");
+  if (nestedEntry == nullptr) {
+    return 6;
+  }
+  std::snprintf(filter.folder, sizeof(filter.folder), "%s",
+                nestedEntry->folder);
+  std::snprintf(filter.query, sizeof(filter.query), "%s", "thing.lua");
+  static_cast<void>(refresh_asset_filter_cache(filter, &cache));
+  if (cache.matches.size() != 1U) {
+    return 7;
   }
   return 0;
 }
@@ -617,6 +671,7 @@ int main() {
       {"check_classify_asset_kind_direct", &check_classify_asset_kind_direct},
       {"check_filter_cache_change_driven_and_boundaries",
        &check_filter_cache_change_driven_and_boundaries},
+      {"check_search_spans_every_folder", &check_search_spans_every_folder},
       {"check_resolve_asset_open_action_mapping",
        &check_resolve_asset_open_action_mapping},
       {"check_scene_open_routes_through_unsaved_gate",

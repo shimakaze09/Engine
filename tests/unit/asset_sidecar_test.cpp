@@ -1,9 +1,9 @@
 // Pins the authored sidecar's contract on a scratch tree: the path it
-// derives, a write/read round trip for an asset and for a folder, the
-// atomic write refusing a nil identity, and — the part that matters most
-// — each read failure reporting which failure it was, so no caller can
-// mistake "could not read the identity" for "there is no identity yet"
-// and mint a new one over the top of a live asset.
+// derives and the predicate recognising one, a write/read round trip for an
+// asset and for a folder, the atomic write refusing a nil identity, and — the
+// part that matters most — each read failure reporting which failure it was, so
+// no caller can mistake "could not read the identity" for "there is no identity
+// yet" and mint a new one over the top of a live asset.
 
 #include <cstdio>
 #include <cstring>
@@ -262,6 +262,24 @@ void test_local_ids(engine::tests::TestContext &ctx) noexcept {
 } // namespace
 
 /// Runs this executable or test program.
+void test_sidecar_predicate(engine::tests::TestContext &ctx) noexcept {
+  char derived[64] = {};
+  ctx.check(ct::asset_sidecar_path("assets/props/coin.png", derived,
+                                   sizeof(derived)) &&
+                ct::is_asset_sidecar_path(derived),
+            "every derived sidecar path is recognised as a sidecar");
+  ctx.check(ct::is_asset_sidecar_path("assets/props.meta"),
+            "a folder's sidecar is a sidecar");
+  ctx.check(!ct::is_asset_sidecar_path("assets/props/coin.png") &&
+                !ct::is_asset_sidecar_path("assets/coin.mesh.cookmeta") &&
+                !ct::is_asset_sidecar_path("assets/coin.metadata"),
+            "an asset, a cook record and a longer suffix are not sidecars");
+  ctx.check(!ct::is_asset_sidecar_path(".meta") &&
+                !ct::is_asset_sidecar_path("") &&
+                !ct::is_asset_sidecar_path(nullptr),
+            "the bare suffix, empty and null are not sidecars");
+}
+
 int main() {
   engine::tests::TestContext ctx;
   ctx.check(engine::core::initialize_logging(), "initialize logging");
@@ -275,6 +293,7 @@ int main() {
   }
 
   test_sidecar_path(ctx);
+  test_sidecar_predicate(ctx);
   test_round_trip(ctx);
   test_folder_sidecar(ctx);
   test_read_failures_are_distinct(ctx);

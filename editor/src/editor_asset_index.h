@@ -75,10 +75,11 @@ content::AssetTypeTag classify_asset_kind(const char *osPath,
 struct AssetFilterState final {
   char query[256] = {};
   std::uint32_t typeMask = kAssetKindMaskAll;
-  // "" scopes to the index root; folder-view scoping is ignored when
-  // flatSearch is set.
+  // The folder an empty query lists; "" is the index root. A non-empty
+  // query ignores it and searches the whole project, as Unity's Project
+  // window and Godot's FileSystem dock do, so typing a name finds the
+  // asset wherever it lives.
   char folder[kMaxAssetIndexPath] = {};
-  bool flatSearch = false;
 
   bool operator==(const AssetFilterState &other) const noexcept;
 };
@@ -99,8 +100,9 @@ bool refresh_asset_filter_cache(const AssetFilterState &filter,
                                 AssetFilterCache *cache) noexcept;
 
 /// True when `entry` matches `filter`: case-insensitive substring match on
-/// name/virtualPath for a non-empty query, the type mask, and (unless
-/// flatSearch) direct membership in the requested folder.
+/// name/virtualPath across every folder for a non-empty query, direct
+/// membership in the requested folder for an empty one, and the type mask
+/// either way.
 bool asset_entry_matches_filter(const AssetIndexEntry &entry,
                                 const AssetFilterState &filter) noexcept;
 

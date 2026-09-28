@@ -675,7 +675,6 @@ struct EnginePipeline::Impl final {
   Clock::time_point previousTick{};
   Clock::time_point frameStart{};
   // Last time the frame-metrics trace line was written (rate-limited).
-  Clock::time_point lastMetricsLogTime{};
   double accumulator = 0.0;
   // The clock every consumer of simulated time reads, published to
   // scripting at frame start (new frame index) and again once the frame's
@@ -2309,24 +2308,15 @@ void EnginePipeline::Impl::stage_scene_commit() noexcept {
 // ---------------------------------------------------------------------------
 
 void EnginePipeline::Impl::stage_diagnostics() noexcept {
-  // The stats panel/overlay surface these values live; keep the console
-  // traces at ~1 Hz so per-frame printf calls cannot throttle the loop.
-  const auto now = Clock::now();
-  const bool logTraceThisFrame =
-      (now - lastMetricsLogTime) >= std::chrono::seconds(1);
-  if (logTraceThisFrame) {
-    lastMetricsLogTime = now;
-    std::size_t threadFrameBytes = 0U;
-    std::size_t threadFrameAllocs = 0U;
-    for (std::size_t i = 0U; i < frameThreadCount; ++i) {
-      threadFrameBytes += core::thread_frame_allocator_bytes_used(i);
-      threadFrameAllocs += core::thread_frame_allocator_allocation_count(i);
-    }
-
-    core::log_frame_metrics(
-        clock.frameIndex, frameMs,
-        core::frame_allocator_bytes_used() + threadFrameBytes,
-        core::frame_allocator_allocation_count() + threadFrameAllocs);
+  // Performance numbers are published in core::EngineStats every frame for
+  // the editor's Profiler graphs and stats overlay, never logged: a line a
+  // second cannot show where a frame spiked, as Unity's Profiler and
+  // Unreal's stat graphs show it.
+  std::size_t frameAllocatorBytes = core::frame_allocator_bytes_used();
+  std::size_t frameAllocations = core::frame_allocator_allocation_count();
+  for (std::size_t i = 0U; i < frameThreadCount; ++i) {
+    frameAllocatorBytes += core::thread_frame_allocator_bytes_used(i);
+    frameAllocations += core::thread_frame_allocator_allocation_count(i);
   }
 
   const std::size_t aliveCount = world->alive_entity_count();
@@ -2440,19 +2430,9 @@ void EnginePipeline::Impl::stage_diagnostics() noexcept {
   }
   frameStats.fixedSteps = clock.stepsThisFrame;
   frameStats.interpolationAlpha = static_cast<float>(clock.renderAlpha);
+  frameStats.frameAllocatorBytes = frameAllocatorBytes;
+  frameStats.frameAllocations = frameAllocations;
   core::set_engine_stats(frameStats);
-
-  if (logTraceThisFrame) {
-    char jobMessage[192] = {};
-    std::snprintf(
-        jobMessage, sizeof(jobMessage),
-        "jobs=%llu busyMs=%.3f utilization=%.2f%% queueContention=%llu",
-        static_cast<unsigned long long>(jobStats.jobsExecuted),
-        static_cast<double>(jobStats.busyNanoseconds) / 1000000.0,
-        utilizationPct,
-        static_cast<unsigned long long>(jobStats.queueContentionCount));
-    core::log_message(core::LogLevel::Trace, "jobs", jobMessage);
-  }
 }
 
 // ---------------------------------------------------------------------------

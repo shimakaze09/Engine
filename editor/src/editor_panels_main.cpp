@@ -288,9 +288,9 @@ void draw_main_menu_bar() noexcept {
   }
 
   if (ImGui::BeginMenu("Window")) {
-    bool showConsole = core::cvar_get_bool("editor.show_console", true);
-    if (ImGui::MenuItem("Console", nullptr, showConsole)) {
-      core::cvar_set_bool("editor.show_console", !showConsole);
+    bool showLog = core::cvar_get_bool("editor.show_log", true);
+    if (ImGui::MenuItem("Log", nullptr, showLog)) {
+      core::cvar_set_bool("editor.show_log", !showLog);
     }
     const bool showRendering =
         core::cvar_get_bool("editor.show_rendering", false);
@@ -314,7 +314,7 @@ void draw_main_menu_bar() noexcept {
   }
   draw_about_popup();
 
-  // Right-aligned in the menu bar: unseen Console warnings and errors
+  // Right-aligned in the menu bar: unseen Log warnings and errors
   // (nothing while all is well), then the document status: name plus a
   // dirty marker; scene_document_update_window_title mirrors the same
   // state into the OS title bar once per frame. A failed save stands

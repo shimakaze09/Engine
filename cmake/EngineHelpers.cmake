@@ -82,7 +82,7 @@ function(engine_add_header_library target)
 endfunction()
 
 function(engine_add_executable_target target)
-    set(options)
+    set(options GUI)
     set(oneValueArgs RUNTIME_OUTPUT_DIRECTORY)
     set(multiValueArgs SOURCES PUBLIC_INCLUDE_DIRS PRIVATE_INCLUDE_DIRS PUBLIC_DEPS PRIVATE_DEPS COMPILE_DEFINITIONS)
     cmake_parse_arguments(ENGINE_EXE "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
@@ -94,6 +94,43 @@ function(engine_add_executable_target target)
     add_executable(${target} ${ENGINE_EXE_SOURCES})
     if(WIN32)
         target_sources(${target} PRIVATE "${ENGINE_WINDOWS_UTF8_MANIFEST}")
+    endif()
+    # GUI: a windowed application that runs without a terminal on every
+    # desktop platform, each the way that platform defines it:
+    # - Windows: the GUI subsystem, so no console window opens beside it
+    #   (what SDL3's SDL_main.h and every shipping engine do). The entry
+    #   point stays the portable int main: the CRT's mainCRTStartup calls
+    #   it, with the UTF-8 argv the manifest above gives, so no WinMain and
+    #   no SDL reach app code.
+    # - macOS: an .app bundle; Finder opens a bare executable in Terminal
+    #   and launches a bundle as an application.
+    # - Linux: a freedesktop desktop entry beside the binary with
+    #   Terminal=false, which is what launchers and file managers run; its
+    #   Path key starts the application in its own directory, where the
+    #   build copied its content.
+    if(ENGINE_EXE_GUI AND (ENGINE_TARGET_PLATFORM STREQUAL "Win64"))
+        set_target_properties(${target} PROPERTIES WIN32_EXECUTABLE TRUE)
+        if(MSVC)
+            target_link_options(${target} PRIVATE "/ENTRY:mainCRTStartup")
+        else()
+            target_link_options(${target} PRIVATE "-Wl,--entry,mainCRTStartup")
+        endif()
+    elseif(ENGINE_EXE_GUI AND (ENGINE_TARGET_PLATFORM STREQUAL "macOS"))
+        set_target_properties(${target} PROPERTIES
+            MACOSX_BUNDLE TRUE
+            MACOSX_BUNDLE_BUNDLE_NAME "${target}"
+            MACOSX_BUNDLE_GUI_IDENTIFIER "org.engine.${target}")
+    elseif(ENGINE_EXE_GUI AND (ENGINE_TARGET_PLATFORM STREQUAL "Linux"))
+        file(GENERATE
+            OUTPUT "$<TARGET_FILE_DIR:${target}>/${target}.desktop"
+            CONTENT "[Desktop Entry]
+Type=Application
+Name=${target}
+Exec=\"$<TARGET_FILE:${target}>\"
+Path=$<TARGET_FILE_DIR:${target}>
+Terminal=false
+Categories=Development;
+")
     endif()
     engine_set_cxx23(${target} PRIVATE)
     engine_apply_strict_compile_options(${target})

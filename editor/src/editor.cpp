@@ -55,6 +55,7 @@
 #include "editor_commands.h"
 #include "editor_console_capture.h"
 #include "editor_fonts.h"
+#include "editor_frame_history.h"
 #include "editor_layout.h"
 #include "editor_material_edit.h"
 #include "editor_panels_assets.h"
@@ -96,7 +97,7 @@ void setup_default_dock_layout(ImGuiID dockspaceId) noexcept {
   ImGui::DockBuilderDockWindow("Entities", left);
   ImGui::DockBuilderDockWindow("Inspector", right);
   ImGui::DockBuilderDockWindow("Assets", bottom);
-  ImGui::DockBuilderDockWindow("Console", bottom);
+  ImGui::DockBuilderDockWindow("Log", bottom);
   ImGui::DockBuilderDockWindow(kGameViewWindow, center);
   ImGui::DockBuilderDockWindow(kSceneViewWindow, center);
 
@@ -113,6 +114,9 @@ void draw_editor_panels(float frameMs, float utilizationPct) noexcept {
 
   const bool showStats = core::cvar_get_bool(kShowStatsCvar, false);
   const core::EngineStats stats = core::get_engine_stats();
+  // Kept whether or not the Profiler is open, so opening it shows the
+  // frames that just ran.
+  frame_history_push(stats);
 
   const ImGuiViewport *viewport = ImGui::GetMainViewport();
   if (viewport == nullptr) {
@@ -314,8 +318,7 @@ bool initialize_editor(void *sdlWindow) noexcept {
   gizmoStyle.CenterCircleSize = gizmoDefaults.CenterCircleSize * uiScale;
 
   static_cast<void>(core::cvar_register_bool(
-      "editor.show_console", true,
-      "Toggle the editor Console panel (Window menu)"));
+      "editor.show_log", true, "Toggle the editor Log panel (Window menu)"));
   register_rendering_panel_cvars();
   register_thumbnail_cache_cvars();
   console_capture_initialize();

@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <string>
 
+#include "engine/content/asset_sidecar.h"
 #include "engine/core/logging.h"
 #include "engine/engine.h"
 
@@ -58,14 +59,16 @@ void lower_ascii(char *text) noexcept {
 }
 
 /// True for sidecar/internal files the browser hides from authors
-/// (import metadata, cook bookkeeping, and their cache directory).
+/// (import metadata, cook bookkeeping, and their cache directory), as
+/// Unity hides .meta files and Godot hides .import files.
 bool is_hidden_from_index(const std::filesystem::path &path) noexcept {
   const std::string generic = path.generic_string();
   if (generic.find("/.thumbnails/") != std::string::npos) {
     return true;
   }
   const std::string filename = path.filename().string();
-  return has_suffix(filename.c_str(), ".cookmeta") ||
+  return content::is_asset_sidecar_path(filename.c_str()) ||
+         has_suffix(filename.c_str(), ".cookmeta") ||
          has_suffix(filename.c_str(), ".cookstamp") ||
          has_suffix(filename.c_str(), ".checksum") ||
          (filename == "generated.manifest");
@@ -193,8 +196,7 @@ bool contains_ci(const char *haystack, const char *needle) noexcept {
 bool AssetFilterState::operator==(const AssetFilterState &other) const noexcept {
   return (std::strcmp(query, other.query) == 0) &&
          (typeMask == other.typeMask) &&
-         (std::strcmp(folder, other.folder) == 0) &&
-         (flatSearch == other.flatSearch);
+         (std::strcmp(folder, other.folder) == 0);
 }
 
 content::AssetTypeTag classify_asset_kind(const char *osPath,
@@ -252,12 +254,8 @@ bool asset_entry_matches_filter(const AssetIndexEntry &entry,
   if ((filter.typeMask & asset_kind_bit(entry.kind)) == 0U) {
     return false;
   }
-  if (!filter.flatSearch &&
-      (std::strcmp(entry.folder, resolve_folder(filter.folder)) != 0)) {
-    return false;
-  }
   if (filter.query[0] == '\0') {
-    return true;
+    return std::strcmp(entry.folder, resolve_folder(filter.folder)) == 0;
   }
   return contains_ci(entry.name, filter.query) ||
          contains_ci(entry.virtualPath, filter.query);

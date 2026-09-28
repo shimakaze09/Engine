@@ -1,11 +1,12 @@
-// Declares the editor Console panel: log view, filters, and the menu-bar
-// status that shows unseen warnings and errors and opens the panel.
+// Declares the editor's Log panel (its log centre, apart from any OS
+// console): log view, filters, and the menu-bar status that shows unseen
+// warnings and errors and opens the panel.
 
 #pragma once
 
 namespace engine::editor {
 
-/// Draws the dockable Console panel (severity/search/channel/session
+/// Draws the dockable Log panel (severity/search/channel/session
 /// filters, collapse, pause/autoscroll, copy, clear, click-to-navigate).
 /// A no-op except for marking entries seen when the window is collapsed.
 void draw_console_panel() noexcept;
@@ -15,8 +16,8 @@ void draw_console_panel() noexcept;
 float console_status_indicator_width() noexcept;
 
 /// Draws the menu-bar console status: nothing while no warning or error
-/// has arrived since the Console was last visible, otherwise their counts
-/// in the severity's color, which a click answers by showing the Console
+/// has arrived since the Log was last visible, otherwise their counts
+/// in the severity's color, which a click answers by showing the Log
 /// and bringing it to the front, as Unity's status bar does.
 void draw_console_status_indicator() noexcept;
 

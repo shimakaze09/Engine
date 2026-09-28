@@ -37,6 +37,13 @@ engine_add_test_executable(engine_unit_foundation
     engine_math
 )
 
+engine_add_test_executable(engine_unit_log_file
+    SOURCES
+    log_file_test.cpp
+    PRIVATE_DEPS
+    engine_core
+)
+
 engine_add_test_executable(engine_unit_logging_sink
     SOURCES
     logging_sink_test.cpp
@@ -2357,6 +2364,17 @@ engine_add_test_executable(engine_unit_editor_hierarchy_walk
     SDL_MAIN_HANDLED
 )
 
+engine_add_test_executable(engine_unit_editor_frame_history
+    SOURCES
+    editor_frame_history_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/editor/src
+    PRIVATE_DEPS
+    engine_editor
+    COMPILE_DEFINITIONS
+    SDL_MAIN_HANDLED
+)
+
 engine_add_test_executable(engine_unit_editor_profiler_panel
     SOURCES
     editor_profiler_panel_test.cpp
@@ -2425,3 +2443,18 @@ engine_add_test_executable(engine_unit_editor_entity_clipboard
     COMPILE_DEFINITIONS
     SDL_MAIN_HANDLED
 )
+
+# The editor runs without a terminal on each desktop platform: read
+# from engine_editor_app's own build properties.
+if(TARGET engine_editor_app AND NOT (ENGINE_TARGET_PLATFORM STREQUAL "Web"))
+    engine_add_test_executable(engine_unit_app_gui_target
+        SOURCES
+        app_gui_target_test.cpp
+        PRIVATE_DEPS
+        engine_core
+        COMPILE_DEFINITIONS
+        "ENGINE_APP_WIN32_EXECUTABLE=$<BOOL:$<TARGET_PROPERTY:engine_editor_app,WIN32_EXECUTABLE>>"
+        "ENGINE_APP_MACOSX_BUNDLE=$<BOOL:$<TARGET_PROPERTY:engine_editor_app,MACOSX_BUNDLE>>"
+        "ENGINE_APP_DESKTOP_FILE=\"$<TARGET_FILE_DIR:engine_editor_app>/engine_editor_app.desktop\""
+    )
+endif()
