@@ -139,9 +139,10 @@ Notes:
 
 ## Quick start
 
-From repository root, configure with the canonical preset for your platform
-(`windows-clang-cl-debug`, `linux-clang-debug`, or `macos-clang-debug`),
-then build and test:
+From repository root, configure with the preset for your platform
+(`windows-clang-cl-debug`, `linux-clang-debug` or `macos-clang-debug`, or
+`-release` for an optimised build), then build. These presets build the
+engine, the editor and the tools only.
 
 On Windows, run from a Visual Studio Developer PowerShell: the preset is
 Ninja + clang-cl, which needs the MSVC environment.
@@ -149,7 +150,6 @@ Ninja + clang-cl, which needs the MSVC environment.
 ```powershell
 cmake --preset windows-clang-cl-debug
 cmake --build build --parallel
-ctest --test-dir build --output-on-failure
 ```
 
 ```bash
@@ -157,8 +157,24 @@ cmake --preset linux-clang-debug
 # macOS (Xcode 16 or newer, which shaderc needs):
 # cmake --preset macos-clang-debug
 cmake --build build --parallel
-ctest --test-dir build --output-on-failure
 ```
+
+### Contributing: building and running the tests
+
+The test suites are opt-in, as SDL3's `SDL_TESTS` and Godot's `tests=no`
+default: a user building the engine does not compile them. Contributors
+configure with the `-dev` preset (Debug plus tests; `-bench` is Release
+plus tests, for the benchmarks), which uses the same `build/` directory:
+
+```bash
+cmake --preset linux-clang-dev      # or windows-clang-cl-dev, macos-clang-dev
+cmake --build build --parallel
+ctest --preset linux-clang-dev-headless   # every suite but the gpu-labelled ones
+```
+
+A test preset run against a build without tests fails rather than passing
+empty. `ENGINE_BUILD_TESTS=ON` on any other configure does the same as a
+`-dev` preset.
 
 `cmake --list-presets=all` shows every configure/build/test preset
 available on the host, including the GCC flows and the ASAN+UBSAN presets.
@@ -177,7 +193,7 @@ plus the MSVC/GCC compatibility lanes.
 | `ENGINE_MAX_ENTITIES` | `65536` | ECS fixed capacity |
 | `ENGINE_DETERMINISTIC_FLOATS` | `ON` | `/fp:strict` / `-ffp-contract=off` |
 | `ENGINE_SANITIZERS` | `OFF` | ASAN + UBSAN (GCC/Clang; ignored on MSVC). TSAN has no option: CI passes `-fsanitize=thread` through `CMAKE_CXX_FLAGS` |
-| `ENGINE_BUILD_TESTS` | `ON` | CTest suites |
+| `ENGINE_BUILD_TESTS` | `OFF` | The CTest suites, for contributors; the `-dev` and `-bench` presets and CI turn it on |
 | `ENGINE_BUILD_TOOLS` | `ON` | `asset_packer`, `engine_validate` and the shader cook |
 
 Sanitizer flags are declared before the first `FetchContent_MakeAvailable`,

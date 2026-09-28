@@ -50,3 +50,29 @@ endif()
 # An outright invalid value must still be rejected too (pre-existing
 # behavior; covered here so the whole support-matrix gate has one home).
 engine_add_configure_reject_probe(rejects_unknown_value NintendoSwitch)
+
+# Tests are opt-in: the option defaults OFF, every user
+# preset leaves it OFF and every preset a test preset runs against turns
+# it ON. A script over CMakeLists.txt and CMakePresets.json, so it costs
+# no configure. The doctored copy proves the check can fail, and it must
+# fail for the doctored reason: any other error (a script fault, nothing
+# found to doctor) does not match and fails the probe.
+add_test(
+    NAME cmake_configure_tests_are_opt_in
+    COMMAND ${CMAKE_COMMAND}
+        -DENGINE_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/check_tests_opt_in.cmake
+)
+add_test(
+    NAME cmake_configure_tests_opt_in_rejects_default_on
+    COMMAND ${CMAKE_COMMAND}
+        -DENGINE_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DDOCTORED_DIR=${CMAKE_BINARY_DIR}/cmake_configure_probe/tests_default_on
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/doctor_tests_default.cmake
+)
+set_tests_properties(cmake_configure_tests_opt_in_rejects_default_on
+    PROPERTIES PASS_REGULAR_EXPRESSION "ENGINE_BUILD_TESTS does not default OFF")
+set_tests_properties(
+    cmake_configure_tests_are_opt_in
+    cmake_configure_tests_opt_in_rejects_default_on
+    PROPERTIES LABELS "cmake_configure" TIMEOUT 60)

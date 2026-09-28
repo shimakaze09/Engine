@@ -385,7 +385,10 @@ endif()
 # in cmake/EngineHelpers.cmake, applied by the module/executable helpers so
 # third-party FetchContent targets never inherit them.
 
-option(ENGINE_BUILD_TESTS "Build engine tests" ON)
+# Tests are for engine contributors: a user building the engine gets the
+# editor, runtime and tools only, as SDL3's SDL_TESTS and Godot's tests=no
+# default. The -dev and -bench presets and CI turn them on.
+option(ENGINE_BUILD_TESTS "Build the engine's test suites (contributors)" OFF)
 option(ENGINE_BUILD_TOOLS "Build engine tools" ON)
 
 # ---- Per-platform compile definitions ----
