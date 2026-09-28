@@ -54,17 +54,22 @@ bool is_runtime_form(const AssetClassification &classification) noexcept {
 /// "hero.gltf" and "hero.glb" has two equally plausible producers, and
 /// picking one silently binds every reference to the wrong asset.
 ///
+/// A source's sidecar also carries its labels, written to `*outLabels`;
+/// an output owns no sidecar and so no labels.
+///
 /// Returns a nil ref when nothing answers: the asset is still
 /// catalogued and still reachable by path, and the caller reports it.
 AssetRef resolve_authored_ref(const std::filesystem::path &osPath,
                               const std::string &relativePath,
                               const AssetClassification &classification,
                               const ProvenanceIndex &provenance,
+                              AssetLabels *outLabels,
                               const char **outWhy) noexcept {
   if (classification.source) {
     AssetSidecar sidecar{};
     switch (read_asset_sidecar(osPath.string().c_str(), &sidecar)) {
     case SidecarReadResult::Ok:
+      *outLabels = sidecar.labels;
       return asset_ref_primary(sidecar.guid);
     case SidecarReadResult::Absent:
       *outWhy = "has no .meta sidecar, so it has no identity; import it "
@@ -322,8 +327,15 @@ MountRegistration register_mounted_assets(AssetCatalog *catalog,
     metadata.assetId = make_asset_id_from_path(metadata.filePath.data());
     metadata.typeTag = classification.tag;
     const char *unidentifiedWhy = nullptr;
+    AssetLabels labels{};
     metadata.ref = resolve_authored_ref(entry.path(), generic, classification,
-                                        *provenance, &unidentifiedWhy);
+                                        *provenance, &labels, &unidentifiedWhy);
+    // The author's labels become the record's tags. Only added, never
+    // cleared: a record a loader registered first keeps tags of its own.
+    for (std::size_t i = 0U; i < labels.count; ++i) {
+      static_cast<void>(
+          asset_metadata_add_tag(&metadata, labels.names[i].data()));
+    }
     if (metadata.assetId == kInvalidAssetId) {
       ++result.refused;
       continue;
@@ -334,6 +346,10 @@ MountRegistration register_mounted_assets(AssetCatalog *catalog,
     const CatalogInsert insert =
         register_asset_metadata_if_absent(catalog, metadata);
     if (insert == CatalogInsert::AlreadyKnown) {
+      for (std::size_t i = 0U; i < labels.count; ++i) {
+        static_cast<void>(
+            add_asset_tag(catalog, metadata.assetId, labels.names[i].data()));
+      }
       ++result.alreadyKnown;
       continue;
     }

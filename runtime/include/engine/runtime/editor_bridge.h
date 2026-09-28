@@ -128,6 +128,17 @@ bool editor_asset_display_path(std::uint64_t assetId, char *outPath,
 /// and the reference is what a saved document names.
 core::AssetRef editor_asset_ref(std::uint64_t assetId) noexcept;
 
+/// Moves the catalog's tags for the asset at `virtualPath` from the labels
+/// `before` to `after`, as a label edit in the editor does: a label only in
+/// `before` is removed, one only in `after` is added, and any other tag
+/// the record carries stays. False, changing nothing, when no runtime asset
+/// service is published or the catalog does not know the asset; the
+/// sidecar, which the edit already wrote, stays the source of truth and
+/// the next mount reads it.
+bool editor_retag_asset(const char *virtualPath,
+                        const content::AssetLabels &before,
+                        const content::AssetLabels &after) noexcept;
+
 /// Why establishing an asset's identity did not succeed, so a caller can
 /// tell "already had one" from a fault it must report and roll back.
 enum class EditorIdentityResult : std::uint8_t {

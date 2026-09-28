@@ -175,6 +175,16 @@ void walk_directory(const std::filesystem::path &dir,
     indexed.hasThumbnail =
         std::filesystem::is_regular_file(thumbPath, thumbEc) && !thumbEc;
 
+    // The labels live in the entry's own sidecar; an entry without a
+    // readable one (a cooked output, an unimported file) carries none.
+    content::AssetSidecar sidecar{};
+    indexed.hasSidecar =
+        content::read_asset_sidecar(indexed.osPath, &sidecar) ==
+        content::SidecarReadResult::Ok;
+    if (indexed.hasSidecar) {
+      indexed.labels = sidecar.labels;
+    }
+
     g_index.push_back(indexed);
   }
 }
@@ -189,6 +199,63 @@ bool contains_ci(const char *haystack, const char *needle) noexcept {
   lower_ascii(h.data());
   lower_ascii(n.data());
   return h.find(n) != std::string::npos;
+}
+
+/// Most "l:<label>" terms one query can hold.
+constexpr std::size_t kMaxLabelTerms = 8U;
+
+/// The query split into its "l:<label>" terms, as Unity's Project search
+/// reads them, and the rest of its words joined by single spaces.
+struct ParsedQuery final {
+  char labels[kMaxLabelTerms][content::AssetMetadata::kMaxTagLength] = {};
+  std::size_t labelCount = 0U;
+  /// A label term that cannot be a label (too long, too many terms):
+  /// nothing carries it, so nothing matches.
+  bool impossible = false;
+  char rest[sizeof(AssetFilterState::query)] = {};
+};
+
+ParsedQuery parse_query(const char *query) noexcept {
+  ParsedQuery parsed{};
+  std::size_t restLength = 0U;
+  const char *cursor = query;
+  while (*cursor != '\0') {
+    while (*cursor == ' ') {
+      ++cursor;
+    }
+    const char *word = cursor;
+    while ((*cursor != '\0') && (*cursor != ' ')) {
+      ++cursor;
+    }
+    const std::size_t length = static_cast<std::size_t>(cursor - word);
+    if (length == 0U) {
+      continue;
+    }
+    if ((length >= 2U) && ((word[0] == 'l') || (word[0] == 'L')) &&
+        (word[1] == ':')) {
+      const std::size_t labelLength = length - 2U;
+      if (labelLength == 0U) {
+        continue; // "l:" alone is a term still being typed
+      }
+      if ((labelLength >= content::AssetMetadata::kMaxTagLength) ||
+          (parsed.labelCount == kMaxLabelTerms)) {
+        parsed.impossible = true;
+        continue;
+      }
+      std::memcpy(parsed.labels[parsed.labelCount], word + 2, labelLength);
+      ++parsed.labelCount;
+      continue;
+    }
+    if (restLength + length + 2U > sizeof(parsed.rest)) {
+      continue;
+    }
+    if (restLength > 0U) {
+      parsed.rest[restLength++] = ' ';
+    }
+    std::memcpy(parsed.rest + restLength, word, length);
+    restLength += length;
+  }
+  return parsed;
 }
 
 } // namespace
@@ -257,8 +324,36 @@ bool asset_entry_matches_filter(const AssetIndexEntry &entry,
   if (filter.query[0] == '\0') {
     return std::strcmp(entry.folder, resolve_folder(filter.folder)) == 0;
   }
-  return contains_ci(entry.name, filter.query) ||
-         contains_ci(entry.virtualPath, filter.query);
+  const ParsedQuery parsed = parse_query(filter.query);
+  if (parsed.impossible) {
+    return false;
+  }
+  for (std::size_t i = 0U; i < parsed.labelCount; ++i) {
+    if (!content::asset_labels_has(entry.labels, parsed.labels[i])) {
+      return false;
+    }
+  }
+  if (parsed.labelCount == 0U) {
+    return contains_ci(entry.name, filter.query) ||
+           contains_ci(entry.virtualPath, filter.query);
+  }
+  return (parsed.rest[0] == '\0') || contains_ci(entry.name, parsed.rest) ||
+         contains_ci(entry.virtualPath, parsed.rest);
+}
+
+bool set_asset_index_labels(const char *osPath,
+                            const content::AssetLabels &labels) noexcept {
+  if (osPath == nullptr) {
+    return false;
+  }
+  for (AssetIndexEntry &entry : g_index) {
+    if (std::strcmp(entry.osPath, osPath) == 0) {
+      entry.labels = labels;
+      ++g_generation;
+      return true;
+    }
+  }
+  return false;
 }
 
 bool refresh_asset_filter_cache(const AssetFilterState &filter,

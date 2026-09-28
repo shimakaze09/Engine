@@ -765,6 +765,82 @@ void test_large_project_mounts_whole() noexcept {
 } // namespace
 
 /// Runs this executable or test program.
+/// An author's labels, kept in the source's sidecar, become the record's
+/// tags when the mount walk catalogues it: queryable by tag, added beside
+/// the tags a loader gave a record it registered first, never clearing
+/// them, and removable one at a time.
+void test_labels_become_tags() noexcept {
+  constexpr const char *kLabelRoot = "asset_catalog_label_root";
+  std::error_code ec{};
+  std::filesystem::remove_all(kLabelRoot, ec);
+  const std::filesystem::path root(kLabelRoot);
+  engine::content::AssetSidecar labelled{};
+  labelled.guid = engine::content::generate_asset_guid();
+  engine::content::AssetSidecar plain{};
+  plain.guid = engine::content::generate_asset_guid();
+  const bool built =
+      write_file(root / "textures/rock.png") &&
+      write_file(root / "scripts/hop.lua") &&
+      engine::content::asset_labels_add(&labelled.labels, "env") &&
+      engine::content::asset_labels_add(&labelled.labels, "Rock") &&
+      engine::content::write_asset_sidecar(
+          (root / "textures/rock.png").string().c_str(), labelled) &&
+      engine::content::write_asset_sidecar(
+          (root / "scripts/hop.lua").string().c_str(), plain);
+  if (!built) {
+    g_tests.fail("the label tree could be written");
+    return;
+  }
+
+  std::unique_ptr<engine::content::AssetCatalog> store(
+      new (std::nothrow) engine::content::AssetCatalog());
+  if (store == nullptr) {
+    g_tests.fail("the label store could be allocated");
+    return;
+  }
+  // A loader registered the script first, with a tag of its own.
+  const engine::content::AssetId script =
+      engine::content::make_asset_id_from_path("kit/scripts/hop.lua");
+  engine::content::AssetMetadata early{};
+  early.assetId = script;
+  early.typeTag = engine::content::AssetTypeTag::Script;
+  engine::content::write_metadata_path(&early.filePath, "kit/scripts/hop.lua");
+  check(engine::content::asset_metadata_add_tag(&early, "loader") &&
+            engine::content::register_asset_metadata(store.get(), early),
+        "the script's record is in place before the walk");
+  // Its sidecar gains a label only now, so the walk meets it already known.
+  check(engine::content::asset_labels_add(&plain.labels, "gameplay") &&
+            engine::content::write_asset_sidecar(
+                (root / "scripts/hop.lua").string().c_str(), plain),
+        "the script is labelled");
+
+  static_cast<void>(engine::content::register_mounted_assets(
+      store.get(), kPrefix, kLabelRoot));
+  const engine::content::AssetId rock =
+      engine::content::make_asset_id_from_path("kit/textures/rock.png");
+  engine::content::AssetId hits[4] = {};
+  check(engine::content::asset_has_tag(store.get(), rock, "env") &&
+            engine::content::asset_has_tag(store.get(), rock, "Rock") &&
+            (engine::content::query_assets_by_tag(store.get(), "Rock", hits,
+                                                  4U) == 1U) &&
+            (hits[0] == rock),
+        "a labelled source's labels are its tags after the walk");
+  check(engine::content::asset_has_tag(store.get(), script, "gameplay") &&
+            engine::content::asset_has_tag(store.get(), script, "loader"),
+        "a record known before the walk gains its labels and keeps its tag");
+
+  const std::uint64_t before = store->generation;
+  check(engine::content::remove_asset_tag(store.get(), rock, "env") &&
+            !engine::content::asset_has_tag(store.get(), rock, "env") &&
+            engine::content::asset_has_tag(store.get(), rock, "Rock") &&
+            (store->generation != before),
+        "a tag is removed, the rest kept, and the catalog notices");
+  check(!engine::content::remove_asset_tag(store.get(), rock, "env") &&
+            !engine::content::remove_asset_tag(store.get(), 0U, "Rock"),
+        "removing an absent tag or from an unknown id does nothing");
+  std::filesystem::remove_all(kLabelRoot, ec);
+}
+
 int main() {
   if (!build_tree()) {
     g_tests.fail("the temporary asset tree could be written");
@@ -788,6 +864,7 @@ int main() {
   test_identity_validation_fails_closed();
   test_cook_dependencies_become_edges();
   test_large_project_mounts_whole();
+  test_labels_become_tags();
 
   remove_tree();
   return g_tests.finish("asset catalog tests");

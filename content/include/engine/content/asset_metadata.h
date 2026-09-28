@@ -116,6 +116,138 @@ inline bool asset_metadata_add_tag(AssetMetadata *metadata,
   return true;
 }
 
+/// Removes a tag; false when absent or args are invalid. Keeps the order
+/// of the rest.
+inline bool asset_metadata_remove_tag(AssetMetadata *metadata,
+                                      const char *tag) noexcept {
+  if ((metadata == nullptr) || (tag == nullptr)) {
+    return false;
+  }
+  for (std::size_t i = 0U; i < metadata->tagCount; ++i) {
+    if (std::strcmp(metadata->tags[i].data(), tag) == 0) {
+      for (std::size_t j = i + 1U; j < metadata->tagCount; ++j) {
+        metadata->tags[j - 1U] = metadata->tags[j];
+      }
+      --metadata->tagCount;
+      metadata->tags[metadata->tagCount].fill('\0');
+      return true;
+    }
+  }
+  return false;
+}
+
+/// True when `text` can be an asset label (a tag an author gives an asset,
+/// as Unity's Asset Labels are): 1 to kMaxTagLength - 1 characters, each a
+/// letter, digit, '_', '-' or '.'. Spaces are out so that a search term
+/// such as "l:hero" names exactly one label.
+inline bool asset_label_is_valid(const char *text) noexcept {
+  if ((text == nullptr) || (text[0] == '\0')) {
+    return false;
+  }
+  std::size_t length = 0U;
+  for (; text[length] != '\0'; ++length) {
+    const char c = text[length];
+    const bool allowed =
+        ((c >= 'a') && (c <= 'z')) || ((c >= 'A') && (c <= 'Z')) ||
+        ((c >= '0') && (c <= '9')) || (c == '_') || (c == '-') || (c == '.');
+    if (!allowed || (length + 1U >= AssetMetadata::kMaxTagLength)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/// True when two labels are the same label: labels compare without
+/// regard to ASCII case, so "Hero" and "hero" cannot both be given.
+inline bool asset_labels_equal(const char *a, const char *b) noexcept {
+  if ((a == nullptr) || (b == nullptr)) {
+    return false;
+  }
+  for (std::size_t i = 0U;; ++i) {
+    char x = a[i];
+    char y = b[i];
+    x = ((x >= 'A') && (x <= 'Z')) ? static_cast<char>(x - 'A' + 'a') : x;
+    y = ((y >= 'A') && (y <= 'Z')) ? static_cast<char>(y - 'A' + 'a') : y;
+    if (x != y) {
+      return false;
+    }
+    if (x == '\0') {
+      return true;
+    }
+  }
+}
+
+/// An asset's labels, as its sidecar stores them: at most kMaxTags, each
+/// valid by asset_label_is_valid and distinct by asset_labels_equal.
+struct AssetLabels final {
+  std::array<std::array<char, AssetMetadata::kMaxTagLength>,
+             AssetMetadata::kMaxTags>
+      names{};
+  std::size_t count = 0U;
+
+  friend bool operator==(const AssetLabels &a, const AssetLabels &b) noexcept {
+    if (a.count != b.count) {
+      return false;
+    }
+    for (std::size_t i = 0U; i < a.count; ++i) {
+      if (std::strcmp(a.names[i].data(), b.names[i].data()) != 0) {
+        return false;
+      }
+    }
+    return true;
+  }
+};
+
+/// True when `labels` holds `label` (compared as asset_labels_equal).
+inline bool asset_labels_has(const AssetLabels &labels,
+                             const char *label) noexcept {
+  for (std::size_t i = 0U; i < labels.count; ++i) {
+    if (asset_labels_equal(labels.names[i].data(), label)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/// Adds `label` at the end. True when it is added or already there; false,
+/// with `labels` unchanged, when it is not a valid label or the list is
+/// full. Never truncates: a shortened label would be a different one.
+inline bool asset_labels_add(AssetLabels *labels, const char *label) noexcept {
+  if ((labels == nullptr) || !asset_label_is_valid(label)) {
+    return false;
+  }
+  if (asset_labels_has(*labels, label)) {
+    return true;
+  }
+  if (labels->count >= AssetMetadata::kMaxTags) {
+    return false;
+  }
+  auto &dest = labels->names[labels->count];
+  dest.fill('\0');
+  std::memcpy(dest.data(), label, std::strlen(label));
+  ++labels->count;
+  return true;
+}
+
+/// Removes `label`, keeping the order of the rest; false when absent.
+inline bool asset_labels_remove(AssetLabels *labels,
+                                const char *label) noexcept {
+  if (labels == nullptr) {
+    return false;
+  }
+  for (std::size_t i = 0U; i < labels->count; ++i) {
+    if (asset_labels_equal(labels->names[i].data(), label)) {
+      for (std::size_t j = i + 1U; j < labels->count; ++j) {
+        labels->names[j - 1U] = labels->names[j];
+      }
+      --labels->count;
+      labels->names[labels->count].fill('\0');
+      return true;
+    }
+  }
+  return false;
+}
+
 /// Writes metadata path data.
 inline void write_metadata_path(std::array<char, 260U> *outPath,
                                 const char *path) noexcept {

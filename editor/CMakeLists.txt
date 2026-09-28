@@ -6,6 +6,7 @@ engine_add_module_library(engine_editor
     src/camera_frustum_overlay.cpp
     src/editor.cpp
     src/editor_asset_index.cpp
+    src/editor_asset_labels.cpp
     src/editor_asset_usages.cpp
     src/editor_import_settings.cpp
     src/editor_commands.cpp

@@ -49,6 +49,10 @@ struct AssetSidecar final {
   /// with no settings of its own, which then cooks at the defaults.
   bool hasMeshImport = false;
   MeshImportSettings meshImport{};
+  /// The author's labels, as Unity's Asset Labels: searchable in the
+  /// editor and loaded into the catalog as tags. Written only when there
+  /// are any, so an unlabelled sidecar is byte for byte what it was.
+  AssetLabels labels{};
 };
 
 /// Why a sidecar read did not produce a sidecar.

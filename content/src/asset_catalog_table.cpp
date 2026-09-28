@@ -365,6 +365,24 @@ bool add_asset_tag(AssetCatalog *catalog, AssetId id,
   return true;
 }
 
+bool remove_asset_tag(AssetCatalog *catalog, AssetId id,
+                      const char *tag) noexcept {
+  if ((catalog == nullptr) || (id == kInvalidAssetId) || (tag == nullptr)) {
+    return false;
+  }
+  const std::size_t found = find_record(catalog, id);
+  if (found == kNoRecord) {
+    return false;
+  }
+
+  ENGINE_ASSERT_MAIN_THREAD();
+  if (!asset_metadata_remove_tag(&record_at(*catalog, found), tag)) {
+    return false;
+  }
+  ++catalog->generation;
+  return true;
+}
+
 bool asset_has_tag(const AssetCatalog *catalog, AssetId id,
                    const char *tag) noexcept {
   if ((catalog == nullptr) || (id == kInvalidAssetId) || (tag == nullptr)) {

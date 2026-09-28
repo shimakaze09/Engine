@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "engine/content/asset_catalog.h"
 #include "engine/content/asset_sidecar.h"
 #include "engine/content/asset_streaming.h"
 #include "engine/content/asset_type_table.h"
@@ -231,6 +232,31 @@ core::AssetRef editor_asset_ref(std::uint64_t assetId) noexcept {
   // invented here: the reference stays nil so the gesture cannot write a
   // made-up identity into a document.
   return (metadata != nullptr) ? metadata->ref : core::AssetRef{};
+}
+
+bool editor_retag_asset(const char *virtualPath,
+                        const content::AssetLabels &before,
+                        const content::AssetLabels &after) noexcept {
+  if ((virtualPath == nullptr) || (g_editorAssetService == nullptr) ||
+      (g_editorAssetService->catalog == nullptr)) {
+    return false;
+  }
+  content::AssetCatalog *catalog = g_editorAssetService->catalog;
+  const content::AssetId id = content::make_asset_id_from_path(virtualPath);
+  if (content::find_asset_metadata(catalog, id) == nullptr) {
+    return false;
+  }
+  for (std::size_t i = 0U; i < before.count; ++i) {
+    if (!content::asset_labels_has(after, before.names[i].data())) {
+      static_cast<void>(
+          content::remove_asset_tag(catalog, id, before.names[i].data()));
+    }
+  }
+  for (std::size_t i = 0U; i < after.count; ++i) {
+    static_cast<void>(
+        content::add_asset_tag(catalog, id, after.names[i].data()));
+  }
+  return true;
 }
 
 namespace {
