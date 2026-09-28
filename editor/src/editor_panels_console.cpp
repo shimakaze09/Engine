@@ -187,15 +187,22 @@ void draw_console_panel() noexcept {
   bool &collapseView = console.collapseView;
   std::size_t &pausedEntryCount = console.pausedEntryCount;
 
-  if (!core::cvar_get_bool("editor.show_console", true)) {
+  if (!core::cvar_get_bool("editor.show_log", true)) {
     return;
+  }
+  // The Log is the editor's log centre, named as Unreal's Output Log is,
+  // apart from any operating-system console. A layout saved when it was
+  // called Console has no place for it: it opens beside the Assets panel.
+  const ImGuiWindow *assets = ImGui::FindWindowByName("Assets");
+  if ((assets != nullptr) && (assets->DockId != 0U)) {
+    ImGui::SetNextWindowDockID(assets->DockId, ImGuiCond_FirstUseEver);
   }
 
   if (console.focusRequested) {
     ImGui::SetNextWindowFocus();
     console.focusRequested = false;
   }
-  if (!ImGui::Begin("Console")) {
+  if (!ImGui::Begin("Log")) {
     ImGui::End();
     return;
   }
@@ -335,10 +342,10 @@ void draw_console_status_indicator() noexcept {
                         ImVec2(ImGui::CalcTextSize(status).x, 0.0F));
   ImGui::PopStyleColor();
   if (ImGui::IsItemHovered()) {
-    ImGui::SetTooltip("Open the Console");
+    ImGui::SetTooltip("Open the Log");
   }
   if (clicked) {
-    core::cvar_set_bool("editor.show_console", true);
+    core::cvar_set_bool("editor.show_log", true);
     editor_session().console.focusRequested = true;
   }
 }

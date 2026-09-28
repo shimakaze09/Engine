@@ -97,7 +97,7 @@ void setup_default_dock_layout(ImGuiID dockspaceId) noexcept {
   ImGui::DockBuilderDockWindow("Entities", left);
   ImGui::DockBuilderDockWindow("Inspector", right);
   ImGui::DockBuilderDockWindow("Assets", bottom);
-  ImGui::DockBuilderDockWindow("Console", bottom);
+  ImGui::DockBuilderDockWindow("Log", bottom);
   ImGui::DockBuilderDockWindow(kGameViewWindow, center);
   ImGui::DockBuilderDockWindow(kSceneViewWindow, center);
 
@@ -318,8 +318,7 @@ bool initialize_editor(void *sdlWindow) noexcept {
   gizmoStyle.CenterCircleSize = gizmoDefaults.CenterCircleSize * uiScale;
 
   static_cast<void>(core::cvar_register_bool(
-      "editor.show_console", true,
-      "Toggle the editor Console panel (Window menu)"));
+      "editor.show_log", true, "Toggle the editor Log panel (Window menu)"));
   register_rendering_panel_cvars();
   register_thumbnail_cache_cvars();
   console_capture_initialize();

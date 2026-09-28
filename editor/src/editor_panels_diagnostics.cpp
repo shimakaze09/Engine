@@ -295,8 +295,8 @@ void draw_profiler_panel(const core::EngineStats &stats) noexcept {
   if (!core::cvar_get_bool(kShowProfilerCvar, false)) {
     return;
   }
-  // Opened beside the Console, where a layout without it has room.
-  const ImGuiWindow *console = ImGui::FindWindowByName("Console");
+  // Opened beside the Log, where a layout without it has room.
+  const ImGuiWindow *console = ImGui::FindWindowByName("Log");
   if ((console != nullptr) && (console->DockId != 0U)) {
     ImGui::SetNextWindowDockID(console->DockId, ImGuiCond_FirstUseEver);
   }

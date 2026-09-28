@@ -18,7 +18,7 @@ inline constexpr const char *kShowProfilerCvar = "editor.show_profiler";
 /// Called before the layout is read, since its preferences set them.
 void register_stats_cvars() noexcept;
 /// Draws the Profiler window while editor.show_profiler is set; its close
-/// button clears the cvar. It opens as a tab beside the Console.
+/// button clears the cvar. It opens as a tab beside the Log.
 void draw_profiler_panel(const core::EngineStats &stats) noexcept;
 /// Draws the minimal stats overlay; the caller draws it only while
 /// r_showStats (the toolbar's Stats toggle) is set.

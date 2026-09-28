@@ -1,4 +1,4 @@
-// Declares the editor Console's bounded log capture, filtering, duplicate
+// Declares the editor Log panel's bounded log capture, filtering, duplicate
 // collapse, and the source/entity navigation metadata each entry carries
 // from its diagnostic record.
 // Panel-draw-code exempt: every symbol here is testable without ImGui.

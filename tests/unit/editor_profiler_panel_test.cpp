@@ -4,7 +4,7 @@
 // draws nothing, and setting its cvar draws the window. An open Profiler
 // names every memory subsystem in full (a fixed-width column used to cut
 // them off) and says "not measured" for GPU timings the device cannot
-// take instead of printing zeros.
+// take instead of printing zeros. The log centre draws as the Log panel.
 
 #if defined(__clang__) && (defined(__x86_64__) || defined(__i386__)) &&        \
     !defined(__PRFCHWINTRIN_H)
@@ -19,6 +19,7 @@
 #include <string>
 
 #include "../test_harness.h"
+#include "editor_panels_console.h"
 #include "editor_panels_diagnostics.h"
 #include "engine/core/cvar.h"
 #include "engine/core/engine_stats.h"
@@ -124,6 +125,17 @@ int main() {
   static_cast<void>(
       engine::core::cvar_set_bool(engine::editor::kShowProfilerCvar, false));
   g_tests.check(!profiler_frame(stats), "closing it again hides it");
+
+  // The log centre is the Log panel, named as Unreal's Output Log is,
+  // never after the operating-system console.
+  ImGui::NewFrame();
+  engine::editor::draw_console_panel();
+  ImGui::Render();
+  const ImGuiWindow *log = ImGui::FindWindowByName("Log");
+  g_tests.check((log != nullptr) && log->Active,
+                "the log centre draws as the Log panel");
+  g_tests.check(ImGui::FindWindowByName("Console") == nullptr,
+                "no panel is named Console");
 
   ImGui::DestroyContext();
   return g_tests.finish("editor_profiler_panel");
