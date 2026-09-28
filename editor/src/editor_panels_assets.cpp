@@ -6,6 +6,7 @@
 #include "editor_panels_assets.h"
 
 #include "editor_asset_index.h"
+#include "editor_asset_usages.h"
 #include "editor_commands.h"
 #include "editor_session.h"
 
@@ -27,10 +28,12 @@
 #include <vector>
 
 #include "editor_import_settings.h"
+#include "engine/content/asset_metadata.h"
 #include "engine/core/atomic_file.h"
 #include "engine/core/json.h"
 #include "engine/core/logging.h"
 #include "engine/renderer/camera.h"
+#include "engine/runtime/editor_bridge.h"
 #include "engine/runtime/world.h"
 
 #include <stb_image.h>
@@ -128,94 +131,13 @@ constexpr content::AssetTypeTag kFilterKinds[] = {
 static_assert(std::size(kFilterKinds) == content::kAssetTypeCount,
               "one filter checkbox per asset type");
 
-/// Result of the last "Find Usages" scan, shown in a modal popup. Populated
-/// only by an explicit context-menu click — never per frame.
-struct FindUsagesState final {
-  bool armed = false;
-  char targetName[kMaxAssetIndexName] = {};
-  static constexpr std::size_t kMaxMatches = 16U;
-  char matches[kMaxMatches][kMaxAssetIndexPath] = {};
-  std::size_t matchCount = 0U;
-};
-FindUsagesState g_findUsages{};
-
-/// True when the (small, already-bounded-size) file at `path` contains
-/// `needle` as a raw byte substring.
-bool file_contains_substring(const char *path, const char *needle) noexcept {
-  std::FILE *file = nullptr;
-#ifdef _WIN32
-  if (fopen_s(&file, path, "rb") != 0) {
-    file = nullptr;
-  }
-#else
-  file = std::fopen(path, "rb");
-#endif
-  if (file == nullptr) {
-    return false;
-  }
-  std::fseek(file, 0, SEEK_END);
-  const long size = std::ftell(file);
-  std::fseek(file, 0, SEEK_SET);
-  constexpr long kMaxScanBytes = 4L * 1024L * 1024L;
-  if ((size <= 0) || (size > kMaxScanBytes)) {
-    std::fclose(file);
-    return false;
-  }
-  std::vector<char> buffer(static_cast<std::size_t>(size) + 1U, '\0');
-  const std::size_t readCount =
-      std::fread(buffer.data(), 1U, static_cast<std::size_t>(size), file);
-  std::fclose(file);
-  buffer[readCount] = '\0';
-  return std::strstr(buffer.data(), needle) != nullptr;
-}
-
-/// Scans every indexed Scene entry for a reference to `target`'s virtual
-/// path; explicitly user-triggered from the context menu (never per frame)
-/// and bounded by the index size, so the O(scenes) file scan is acceptable
-/// here even though it would not be on a draw-loop hot path. A lightweight
-/// stand-in authoritative dependency graph, which will index
-/// usages for every asset kind instead of scene-file substring search.
+/// Searches the indexed documents for references to `target`, by the
+/// persistent reference the catalog holds for it (what scenes, prefabs and
+/// materials write) and by its path (what scripts and controllers use).
 void run_find_usages(const AssetIndexEntry &target) noexcept {
-  g_findUsages = FindUsagesState{};
-  std::snprintf(g_findUsages.targetName, sizeof(g_findUsages.targetName), "%s",
-               target.name);
-  g_findUsages.armed = true;
-  if (target.virtualPath[0] == '\0') {
-    return;
-  }
-  const std::size_t count = asset_index_count();
-  for (std::size_t i = 0U;
-       (i < count) && (g_findUsages.matchCount < FindUsagesState::kMaxMatches);
-       ++i) {
-    const AssetIndexEntry *entry = asset_index_entry(i);
-    if ((entry == nullptr) || (entry->kind != content::AssetTypeTag::Scene)) {
-      continue;
-    }
-    if (file_contains_substring(entry->osPath, target.virtualPath)) {
-      std::snprintf(g_findUsages.matches[g_findUsages.matchCount],
-                   kMaxAssetIndexPath, "%s", entry->osPath);
-      ++g_findUsages.matchCount;
-    }
-  }
-  ImGui::OpenPopup("Find Usages");
-}
-
-void draw_find_usages_popup() noexcept {
-  if (ImGui::BeginPopupModal("Find Usages", &g_findUsages.armed,
-                             ImGuiWindowFlags_AlwaysAutoResize)) {
-    ImGui::Text("Scene references to %s:", g_findUsages.targetName);
-    ImGui::Separator();
-    if (g_findUsages.matchCount == 0U) {
-      ImGui::TextDisabled("No scene references found in the indexed content.");
-    }
-    for (std::size_t i = 0U; i < g_findUsages.matchCount; ++i) {
-      ImGui::TextUnformatted(g_findUsages.matches[i]);
-    }
-    if (ImGui::Button("Close")) {
-      ImGui::CloseCurrentPopup();
-    }
-    ImGui::EndPopup();
-  }
+  request_find_usages(
+      target, runtime::editor_asset_ref(
+                  content::make_asset_id_from_path(target.virtualPath)));
 }
 
 /// Context menu for one browsed entry. Open/Show in Folder/Copy
