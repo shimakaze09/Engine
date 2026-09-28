@@ -1,5 +1,5 @@
-// Implements the editor stats panel, profiler flame graph, and in-game overlay.
-// Split out of editor.cpp (REVIEW_FINDINGS A3).
+// Implements the editor's Profiler window (frame numbers, CPU flame graph,
+// memory by subsystem) and the stats overlay over the Game or Scene view.
 
 #include "editor_panels_diagnostics.h"
 
@@ -108,8 +108,31 @@ void draw_profiler_flame_graph() noexcept {
 
 } // namespace
 
-void draw_stats_panel(const core::EngineStats &stats) noexcept {
-  if (!ImGui::Begin("Stats")) {
+void register_stats_cvars() noexcept {
+  static_cast<void>(core::cvar_register_bool(
+      kShowStatsCvar, false,
+      "Show the editor's stats overlay over the Game view (the Scene view "
+      "while the Game view is hidden); the toolbar's Stats toggle"));
+  static_cast<void>(core::cvar_register_bool(
+      kShowProfilerCvar, false,
+      "Toggle the editor Profiler window (Window menu)"));
+}
+
+void draw_profiler_panel(const core::EngineStats &stats) noexcept {
+  if (!core::cvar_get_bool(kShowProfilerCvar, false)) {
+    return;
+  }
+  // Opened beside the Console, where a layout without it has room.
+  const ImGuiWindow *console = ImGui::FindWindowByName("Console");
+  if ((console != nullptr) && (console->DockId != 0U)) {
+    ImGui::SetNextWindowDockID(console->DockId, ImGuiCond_FirstUseEver);
+  }
+  bool open = true;
+  const bool visible = ImGui::Begin("Profiler", &open);
+  if (!open) {
+    static_cast<void>(core::cvar_set_bool(kShowProfilerCvar, false));
+  }
+  if (!visible) {
     ImGui::End();
     return;
   }
@@ -194,7 +217,6 @@ void draw_stats_panel(const core::EngineStats &stats) noexcept {
 
   ImGui::End();
 }
-
 
 void draw_in_game_stats_overlay(const core::EngineStats &stats) noexcept {
   constexpr ImGuiWindowFlags kOverlayFlags =

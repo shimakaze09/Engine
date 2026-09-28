@@ -95,7 +95,6 @@ void setup_default_dock_layout(ImGuiID dockspaceId) noexcept {
 
   ImGui::DockBuilderDockWindow("Entities", left);
   ImGui::DockBuilderDockWindow("Inspector", right);
-  ImGui::DockBuilderDockWindow("Stats", bottom);
   ImGui::DockBuilderDockWindow("Assets", bottom);
   ImGui::DockBuilderDockWindow("Console", bottom);
   ImGui::DockBuilderDockWindow(kGameViewWindow, center);
@@ -112,7 +111,7 @@ void draw_editor_panels(float frameMs, float utilizationPct) noexcept {
   draw_main_menu_bar();
   draw_toolbar();
 
-  const bool showStats = core::cvar_get_bool("r_showStats", true);
+  const bool showStats = core::cvar_get_bool(kShowStatsCvar, false);
   const core::EngineStats stats = core::get_engine_stats();
 
   const ImGuiViewport *viewport = ImGui::GetMainViewport();
@@ -159,10 +158,12 @@ void draw_editor_panels(float frameMs, float utilizationPct) noexcept {
   }
   draw_entities_panel();
   draw_inspector_panel();
+  // One lightweight overlay and one Profiler window, both off until asked
+  // for, as Unity's Game view Stats and Profiler window are.
   if (showStats) {
-    draw_stats_panel(stats);
     draw_in_game_stats_overlay(stats);
   }
+  draw_profiler_panel(stats);
   draw_asset_browser_panel();
   draw_console_panel();
   draw_material_editor_panel();
@@ -265,6 +266,8 @@ bool initialize_editor(void *sdlWindow) noexcept {
   // Before any frame: takes layout persistence off ImGui's truncating
   // ini writer and restores the stored layout, so the docking flag above
   // is already set when the dock settings are parsed.
+  // Before the layout is read: its preference lines set these.
+  register_stats_cvars();
   register_editor_preferences();
   static_cast<void>(editor_layout_initialize());
   apply_stored_window_geometry();

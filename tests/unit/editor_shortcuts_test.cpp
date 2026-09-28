@@ -9,6 +9,7 @@
 // action, unique ids, no chord bound twice.
 
 #include "editor_commands.h"
+#include "editor_panels_diagnostics.h"
 #include "editor_preferences.h"
 #include "editor_scene_document.h"
 #include "editor_scene_document_fixture.h"
@@ -573,6 +574,32 @@ void check_grid_preference(engine::tests::TestContext &t) noexcept {
   session.showGrid = true;
 }
 
+/// The stats overlay's toggle is saved as ShowStats=1 or 0 into the
+/// r_showStats cvar; anything else stored is refused with the current
+/// choice kept.
+void check_stats_preference(engine::tests::TestContext &t) noexcept {
+  engine::editor::register_stats_cvars();
+  t.check(!engine::core::cvar_get_bool("r_showStats", true),
+          "the stats overlay is off by default");
+  t.check(engine::core::cvar_set_bool("r_showStats", true),
+          "the stats cvar is set");
+  char section[2048] = {};
+  t.check((engine::editor::editor_preferences_section(section,
+                                                      sizeof(section)) > 0U) &&
+              (std::strstr(section, "ShowStats=1\n") != nullptr),
+          "a shown overlay is saved");
+  load_section("ShowStats=0\n");
+  t.check(!engine::core::cvar_get_bool("r_showStats", true),
+          "a stored hidden overlay is applied");
+  load_section("ShowStats=on\n");
+  t.check(!engine::core::cvar_get_bool("r_showStats", true),
+          "a malformed ShowStats keeps the choice");
+  load_section("ShowStats=1\n");
+  t.check(engine::core::cvar_get_bool("r_showStats", false),
+          "a stored shown overlay is applied");
+  static_cast<void>(engine::core::cvar_set_bool("r_showStats", false));
+}
+
 /// While the Scene camera flies, WASD/QE move it: the dispatcher stands
 /// down so W is not the Move tool. The fly speed is saved and read back
 /// exactly; a stored speed out of range is clamped, and one that is not
@@ -696,6 +723,7 @@ int main() {
   check_rebinding(t, *world);
   check_gizmo_space(t);
   check_grid_preference(t);
+  check_stats_preference(t);
   check_flying(t);
 
   editor_set_world(nullptr);

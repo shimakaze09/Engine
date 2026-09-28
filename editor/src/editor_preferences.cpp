@@ -5,6 +5,8 @@
 
 #include "editor_preferences.h"
 
+#include "editor_panels_diagnostics.h"
+
 #include "editor_scene_query.h"
 #include "editor_session.h"
 #include "editor_shortcuts.h"
@@ -42,6 +44,8 @@ constexpr const char *kShortcutKey = "Shortcut.";
 constexpr const char *kGizmoSpaceKey = "GizmoSpace=";
 /// Whether the Scene view draws its reference grid: 1 or 0.
 constexpr const char *kShowGridKey = "ShowGrid=";
+/// Whether the stats overlay (r_showStats) is shown: 1 or 0.
+constexpr const char *kShowStatsKey = "ShowStats=";
 /// The Scene camera's fly speed in metres per second.
 constexpr const char *kCameraSpeedKey = "CameraSpeed=";
 /// The Scene view's icon size, a multiple of the UI scale's.
@@ -153,6 +157,17 @@ void read_line(ImGuiContext *, ImGuiSettingsHandler *, void *,
     }
     return;
   }
+  const std::size_t statsKeyLength = std::strlen(kShowStatsKey);
+  if (std::strncmp(line, kShowStatsKey, statsKeyLength) == 0) {
+    const char *value = line + statsKeyLength;
+    if ((value[0] == '0' || value[0] == '1') && (value[1] == '\0')) {
+      static_cast<void>(core::cvar_set_bool(kShowStatsCvar, value[0] == '1'));
+    } else {
+      core::log_message(core::LogLevel::Warning, "editor",
+                        "stored ShowStats is neither 0 nor 1; ignored");
+    }
+    return;
+  }
   const std::size_t gridKeyLength = std::strlen(kShowGridKey);
   if (std::strncmp(line, kShowGridKey, gridKeyLength) == 0) {
     const char *value = line + gridKeyLength;
@@ -218,6 +233,8 @@ void write_all(ImGuiContext *, ImGuiSettingsHandler *handler,
   buffer->appendf("%s%s\n", kGizmoSpaceKey,
                   editor_session().gizmoWorldSpace ? "World" : "Local");
   buffer->appendf("%s%d\n", kShowGridKey, editor_session().showGrid ? 1 : 0);
+  buffer->appendf("%s%d\n", kShowStatsKey,
+                  core::cvar_get_bool(kShowStatsCvar, false) ? 1 : 0);
   buffer->appendf("%s%.9g\n", kCameraSpeedKey,
                   static_cast<double>(editor_session().editorCamera.flySpeed));
   buffer->appendf("%s%.9g\n", kIconScaleKey,

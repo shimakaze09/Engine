@@ -202,10 +202,6 @@ bool bootstrap(const EngineConfig &config) noexcept {
                       "build, frame or stage");
   }
 
-  static_cast<void>(core::cvar_register_bool(
-      "r_showStats", true,
-      "Toggle in-game stats and profiling overlays in the editor"));
-
   static_cast<void>(core::cvar_register_int(
       "debug_dap_port", 0,
       "DAP debugger port (0 = disabled). Set to e.g. 4711 to enable."));

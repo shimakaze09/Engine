@@ -7,6 +7,7 @@
 #include "editor_hierarchy_walk.h"
 #include "editor_material_edit.h"
 #include "editor_panels_console.h"
+#include "editor_panels_diagnostics.h"
 #include "editor_scene_document.h"
 #include "editor_session.h"
 #include "editor_shortcuts.h"
@@ -296,6 +297,10 @@ void draw_main_menu_bar() noexcept {
     if (ImGui::MenuItem("Rendering", nullptr, showRendering)) {
       core::cvar_set_bool("editor.show_rendering", !showRendering);
     }
+    const bool showProfiler = core::cvar_get_bool(kShowProfilerCvar, false);
+    if (ImGui::MenuItem("Profiler", nullptr, showProfiler)) {
+      core::cvar_set_bool(kShowProfilerCvar, !showProfiler);
+    }
     ImGui::EndMenu();
   }
 
@@ -502,6 +507,14 @@ void draw_toolbar() noexcept {
   }
   ImGui::SetItemTooltip("The Scene view's ground grid; its spacing follows "
                         "the zoom");
+  ImGui::SameLine();
+  bool showStats = core::cvar_get_bool(kShowStatsCvar, false);
+  if (ImGui::Checkbox("Stats", &showStats)) {
+    static_cast<void>(core::cvar_set_bool(kShowStatsCvar, showStats));
+    ImGui::MarkIniSettingsDirty(); // a saved preference
+  }
+  ImGui::SetItemTooltip("Frame rate, draw calls and memory over the Game "
+                        "view; Window > Profiler has the detail");
   ImGui::SameLine();
   // Text-fitted widths follow the font, so the fields hold their widest
   // value at every UI scale.
