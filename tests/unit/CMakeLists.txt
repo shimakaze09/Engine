@@ -44,6 +44,13 @@ engine_add_test_executable(engine_unit_command_line
     engine_core
 )
 
+engine_add_test_executable(engine_unit_project_data_guid
+    SOURCES
+    project_data_guid_test.cpp
+    PRIVATE_DEPS
+    engine_core
+)
+
 engine_add_test_executable(engine_unit_log_file
     SOURCES
     log_file_test.cpp

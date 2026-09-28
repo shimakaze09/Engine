@@ -6,6 +6,7 @@
 #include <cstdint>
 
 #include "engine/core/allocator.h"
+#include "engine/core/asset_identity.h"
 #include "engine/core/platform.h"
 
 namespace engine::core {
@@ -23,6 +24,10 @@ struct CoreConfig final {
   /// engine/core/project_data.h. Named before input initializes, which
   /// restores that map. Null names no project, and that data is refused.
   const char *projectRoot = nullptr;
+  /// The project's persistent GUID, from its .project document. When valid
+  /// it names the project instead of projectRoot, so the data survives
+  /// renaming or moving the project directory.
+  AssetGuid projectGuid{};
 };
 
 /// Initializes the owning system for core.
