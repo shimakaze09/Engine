@@ -8,6 +8,7 @@
 #include "engine/core/logging.h"
 #include "engine/runtime/world.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 
@@ -58,6 +59,9 @@ struct ConsoleEntry final {
   /// Number of times this exact (level, channel, message) was logged back
   /// to back; incremented in place instead of pushing a new ring slot.
   std::uint32_t repeatCount = 1U;
+  /// 64-bit FNV-1a of the level, channel and message, taken at capture:
+  /// what the collapsed view groups identical entries by.
+  std::uint64_t contentHash = 0U;
 
   ConsoleReferenceKind referenceKind = ConsoleReferenceKind::None;
   char referencePath[kConsolePathCapacity] = {};
@@ -115,6 +119,42 @@ void console_capture_mark_seen() noexcept;
 /// A status that does not fit `capacity` is refused, `out` empty.
 bool format_console_status(std::uint32_t errors, std::uint32_t warnings,
                            char *out, std::size_t capacity) noexcept;
+
+/// Groups identical entries -- the same level, channel and message --
+/// wherever they fall in the log, in first-seen order, as Unity's Console
+/// Collapse does, rather than only a repeat that directly follows its
+/// twin. Entries are matched by ConsoleEntry::contentHash, one table
+/// lookup each: two different lines share a 64-bit FNV-1a fingerprint
+/// with odds far below anything a display grouping needs to guard. Fixed
+/// storage for kMaxConsoleEntries groups; allocates nothing.
+class ConsoleCollapser final {
+public:
+  /// Forgets every group.
+  void clear() noexcept;
+  /// Counts `entry`, found at capture index `captureIndex`, into its
+  /// group, opening one when it is the first of its kind. Past
+  /// kMaxConsoleEntries groups a new kind is not grouped (never happens
+  /// for a view over the capture ring, which holds no more entries).
+  void add(const ConsoleEntry &entry, std::size_t captureIndex) noexcept;
+  /// Groups so far.
+  std::size_t size() const noexcept { return m_count; }
+  /// Capture index of the group's first entry.
+  std::size_t first_index(std::size_t group) const noexcept;
+  /// Times the group's line was logged, every repeat included.
+  std::uint32_t total(std::size_t group) const noexcept;
+
+private:
+  /// Open-addressed slots holding a group index + 1 (0 = empty); twice
+  /// the group capacity keeps probes short.
+  static constexpr std::size_t kSlots = 2U * kMaxConsoleEntries;
+  static_assert((kSlots & (kSlots - 1U)) == 0U,
+                "slots are indexed by masking, so they are a power of two");
+  std::array<std::uint32_t, kSlots> m_slots{};
+  std::array<std::uint64_t, kMaxConsoleEntries> m_hashes{};
+  std::array<std::size_t, kMaxConsoleEntries> m_firstIndex{};
+  std::array<std::uint32_t, kMaxConsoleEntries> m_totals{};
+  std::size_t m_count = 0U;
+};
 
 /// Filter/search state the Console panel edits and applies at draw time;
 /// kept separate from ConsoleEntry so filtering never mutates captured

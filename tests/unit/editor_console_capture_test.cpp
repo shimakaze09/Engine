@@ -88,6 +88,45 @@ void check_duplicate_collapse() noexcept {
   check(entry.repeatCount == 1U, "post-interrupt repeat starts a new run");
 }
 
+/// EXPECTATION: the collapsed view groups every identical line wherever
+/// it falls, first-seen order, as Unity's Console Collapse does: A B A B
+/// C A is three rows (A x3, B x2, C x1), a back-to-back repeat adds its
+/// count, and the same text at another level or channel is its own row.
+void check_collapse_groups_interleaved_lines() noexcept {
+  console_capture_clear();
+  log_message(LogLevel::Warning, "scripting", "line A");
+  log_message(LogLevel::Warning, "scripting", "line B");
+  log_message(LogLevel::Warning, "scripting", "line A");
+  log_message(LogLevel::Warning, "scripting", "line A"); // back to back
+  log_message(LogLevel::Warning, "scripting", "line B");
+  log_message(LogLevel::Warning, "scripting", "line C");
+  log_message(LogLevel::Error, "scripting", "line A"); // another level
+  log_message(LogLevel::Warning, "physics", "line A"); // another channel
+  log_message(LogLevel::Warning, "scripting", "line A");
+
+  static ConsoleCollapser collapser{};
+  collapser.clear();
+  for (std::size_t i = 0U; i < console_capture_entry_count(); ++i) {
+    ConsoleEntry entry{};
+    if (console_capture_get_entry(i, &entry)) {
+      collapser.add(entry, i);
+    }
+  }
+  check(collapser.size() == 5U,
+        "A, B, C, and A at another level and channel are five rows");
+  check((collapser.total(0U) == 4U) && (collapser.first_index(0U) == 0U),
+        "A counts every occurrence, the back-to-back repeat included, and "
+        "sits where it first appeared");
+  check((collapser.total(1U) == 2U) && (collapser.first_index(1U) == 1U),
+        "B's two interleaved lines fold into one row");
+  check(collapser.total(2U) == 1U, "C appears once");
+  check((collapser.total(3U) == 1U) && (collapser.total(4U) == 1U),
+        "the same text at another level or channel is its own row");
+
+  collapser.clear();
+  check(collapser.size() == 0U, "clear forgets every group");
+}
+
 /// EXPECTATION: the ring never exceeds kMaxConsoleEntries; once full, the
 /// oldest entry is dropped to admit the newest (explicit drop policy).
 void check_bounded_overflow() noexcept {
@@ -491,6 +530,7 @@ int main() {
 
   check_basic_ingest_and_category();
   check_duplicate_collapse();
+  check_collapse_groups_interleaved_lines();
   check_bounded_overflow();
   check_filtering();
   check_default_filter_hides_trace();

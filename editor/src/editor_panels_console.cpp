@@ -266,48 +266,40 @@ void draw_console_panel() noexcept {
   ImGui::BeginChild("##ConsoleScroll", ImVec2(0.0F, 0.0F), false,
                     ImGuiWindowFlags_HorizontalScrollbar);
 
-  // Collapse-view groups adjacent-in-the-filtered-sequence duplicates the
-  // same way the capture layer collapses adjacent ingest-time repeats
-  // (bounded to one pass, one held-back row, no cross-entry hash table).
-  bool havePending = false;
-  ConsoleEntry pending{};
-  std::size_t pendingRow = 0U;
-  std::uint32_t pendingExtra = 0U;
-
-  auto flush_pending = [&]() noexcept {
-    if (!havePending) {
-      return;
+  // Collapse groups every identical line wherever it falls, first-seen
+  // order, as Unity's Console does; off, each captured entry draws on its
+  // own (a back-to-back repeat still shows its count).
+  if (collapseView) {
+    static ConsoleCollapser collapser{};
+    collapser.clear();
+    for (std::size_t i = 0U; i < visibleCount; ++i) {
+      ConsoleEntry entry{};
+      if (!console_capture_get_entry(i, &entry)) {
+        break;
+      }
+      if (console_filter_matches(filter, entry)) {
+        collapser.add(entry, i);
+      }
     }
-    ConsoleEntry toDraw = pending;
-    toDraw.repeatCount += pendingExtra;
-    draw_entry_row(toDraw, pendingRow);
-    havePending = false;
-    pendingExtra = 0U;
-  };
-
-  for (std::size_t i = 0U; i < visibleCount; ++i) {
-    ConsoleEntry entry{};
-    if (!console_capture_get_entry(i, &entry)) {
-      break;
+    for (std::size_t group = 0U; group < collapser.size(); ++group) {
+      ConsoleEntry entry{};
+      const std::size_t index = collapser.first_index(group);
+      if (console_capture_get_entry(index, &entry)) {
+        entry.repeatCount = collapser.total(group);
+        draw_entry_row(entry, index);
+      }
     }
-    if (!console_filter_matches(filter, entry)) {
-      continue;
+  } else {
+    for (std::size_t i = 0U; i < visibleCount; ++i) {
+      ConsoleEntry entry{};
+      if (!console_capture_get_entry(i, &entry)) {
+        break;
+      }
+      if (console_filter_matches(filter, entry)) {
+        draw_entry_row(entry, i);
+      }
     }
-
-    if (collapseView && havePending &&
-       (pending.level == entry.level) &&
-       (std::strcmp(pending.channel, entry.channel) == 0) &&
-       (std::strcmp(pending.message, entry.message) == 0)) {
-      pendingExtra += entry.repeatCount;
-      continue;
-    }
-
-    flush_pending();
-    pending = entry;
-    pendingRow = i;
-    havePending = true;
   }
-  flush_pending();
 
   if (autoScroll && !paused &&
      (ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 1.0F)) {
