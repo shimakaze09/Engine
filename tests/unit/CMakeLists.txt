@@ -1827,6 +1827,18 @@ engine_add_test_executable(engine_unit_screenshot_tga
     engine_core
 )
 
+engine_add_test_executable(engine_unit_screenshot_png
+    SOURCES
+    screenshot_png_test.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/screenshot_png.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/renderer/src
+    ${CMAKE_SOURCE_DIR}/renderer/include
+    ${ENGINE_STB_INCLUDE_DIR}
+    PRIVATE_DEPS
+    engine_core
+)
+
 engine_add_test_executable(engine_unit_command_buffer_post_chain
     SOURCES
     command_buffer_post_chain_test.cpp
