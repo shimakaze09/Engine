@@ -11,6 +11,7 @@
 
 #include "editor_commands.h"
 #include "editor_entity_clipboard.h"
+#include "editor_entity_rename.h"
 #include "editor_frame_selection.h"
 #include "editor_play_recording.h"
 #include "editor_scene_document.h"
@@ -66,6 +67,12 @@ constexpr std::array<EditorShortcut,
          ImGuiMod_Ctrl | ImGuiKey_Backspace, false, false, true},
         {EditorAction::CreateEmpty, "entity.create_empty", "Create Empty",
          ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_N, 0, false, false, true},
+        // Unity's chords for GameObject > Create Empty Child and Rename.
+        {EditorAction::CreateEmptyChild, "entity.create_empty_child",
+         "Create Empty Child", ImGuiMod_Alt | ImGuiMod_Shift | ImGuiKey_N, 0,
+         false, false, true},
+        {EditorAction::Rename, "entity.rename", "Rename", ImGuiKey_F2, 0, false,
+         false, true},
         {EditorAction::GizmoTranslate, "tools.translate", "Move", ImGuiKey_W, 0,
          false},
         {EditorAction::GizmoRotate, "tools.rotate", "Rotate", ImGuiKey_E, 0,
@@ -274,6 +281,11 @@ bool editor_action_enabled(EditorAction action) noexcept {
   case EditorAction::SaveScene:
   case EditorAction::CreateEmpty:
     return world_is_editable();
+  case EditorAction::CreateEmptyChild:
+  case EditorAction::Rename:
+    // Both act on one entity: the one selected.
+    return world_is_editable() &&
+           (selected_entity() != runtime::kInvalidEntity);
   case EditorAction::Exit:
     return true;
   case EditorAction::Undo:
@@ -367,6 +379,18 @@ bool run_editor_action(EditorAction action) noexcept {
     select_entity(created, false);
     return true;
   }
+  case EditorAction::CreateEmptyChild: {
+    EntitySpawnPlacement placement{};
+    placement.parent = selected_entity();
+    const runtime::Entity created = execute_entity_create(placement);
+    if (created == runtime::kInvalidEntity) {
+      return false;
+    }
+    select_entity(created, false);
+    return true;
+  }
+  case EditorAction::Rename:
+    return begin_entity_rename(selected_entity());
   case EditorAction::GizmoTranslate:
     editor_session().gizmoOp = ImGuizmo::TRANSLATE;
     return true;

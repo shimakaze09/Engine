@@ -4,6 +4,8 @@
 #include "editor_panels_main.h"
 
 #include "editor_commands.h"
+#include "editor_entity_menus.h"
+#include "editor_entity_rename.h"
 #include "editor_hierarchy_walk.h"
 #include "editor_material_edit.h"
 #include "editor_panels_console.h"
@@ -126,29 +128,11 @@ static void draw_unsaved_changes_prompt() noexcept {
   }
 }
 
-/// Draws one menu item per built-in primitive; the chosen one spawns at
-/// the editor camera's focus point and becomes the selection.
-static void draw_primitive_menu_items() noexcept {
-  constexpr struct {
-    const char *label;
-    EditorPrimitive primitive;
-  } kPrimitiveItems[] = {
-      {"Cube", EditorPrimitive::Cube},
-      {"Sphere", EditorPrimitive::Sphere},
-      {"Cylinder", EditorPrimitive::Cylinder},
-      {"Capsule", EditorPrimitive::Capsule},
-      {"Pyramid", EditorPrimitive::Pyramid},
-      {"Plane", EditorPrimitive::Plane},
-  };
-  const bool editable = world_is_editable();
-  for (const auto &item : kPrimitiveItems) {
-    if (ImGui::MenuItem(item.label, nullptr, false, editable)) {
-      const runtime::Entity spawned = execute_primitive_spawn(item.primitive);
-      if (spawned != runtime::kInvalidEntity) {
-        select_entity(spawned, false);
-      }
-    }
-  }
+/// Draws the primitives and spawns the chosen one at the editor camera's
+/// focus point, as the new selection.
+static void draw_primitive_menu_items_and_spawn() noexcept {
+  static_cast<void>(run_entity_menu_choice(draw_primitive_menu_items(),
+                                           EntitySpawnPlacement{}));
 }
 
 constexpr const char *kAboutPopupId = "About Engine";
@@ -297,7 +281,7 @@ void draw_main_menu_bar() noexcept {
   if (ImGui::BeginMenu("Entity")) {
     editor_action_menu_item(EditorAction::CreateEmpty);
     if (ImGui::BeginMenu("3D Object", world_is_editable())) {
-      draw_primitive_menu_items();
+      draw_primitive_menu_items_and_spawn();
       ImGui::EndMenu();
     }
     ImGui::EndMenu();
@@ -573,12 +557,40 @@ constexpr std::size_t kMaxHierarchyDrawDepth = 64U;
 /// the walk follows the world's child links, which an edit made mid-walk
 /// would rewrite under it.
 struct PendingHierarchyEdit final {
-  enum class Kind : std::uint8_t { None, Action, Reparent };
+  enum class Kind : std::uint8_t { None, Action, Menu, Reparent };
   Kind kind = Kind::None;
   EditorAction action = EditorAction::Count;
+  /// What a row's right-click menu asked for, and where it creates.
+  EntityMenuChoice menu{};
+  EntitySpawnPlacement placement{};
   runtime::Entity target{};
   runtime::Entity newParent{};
 };
+
+/// Draws the text field of a row being renamed over the row's label:
+/// Enter or clicking away commits, Escape cancels.
+static void draw_rename_field() noexcept {
+  EntityRenameState &rename = entity_rename_state();
+  ImGui::SameLine();
+  if (rename.focusPending) {
+    ImGui::SetKeyboardFocusHere();
+    rename.focusPending = false;
+  }
+  ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+  const bool entered = ImGui::InputText(
+      "##rename", rename.buffer, sizeof(rename.buffer),
+      ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
+  if (entered) {
+    static_cast<void>(commit_entity_rename());
+  } else if (ImGui::IsItemDeactivated()) {
+    // The field lets go of Escape in the frame it is pressed.
+    if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+      cancel_entity_rename();
+    } else {
+      static_cast<void>(commit_entity_rename());
+    }
+  }
+}
 
 /// Draws one hierarchy row with selection, its context menu and drag-drop
 /// reparenting; returns whether its tree node is open.
@@ -605,6 +617,14 @@ static bool draw_entity_row(runtime::Entity entity, bool hasChildren,
     flags |= ImGuiTreeNodeFlags_Selected;
   }
 
+  // A row being renamed keeps its node, so its children still draw, with
+  // the name field in place of the label taking all of the row's input.
+  if (entity_rename_active_for(entity)) {
+    std::snprintf(label, sizeof(label), "###entity_%u", entity.index);
+    const bool open = ImGui::TreeNodeEx(label, flags);
+    draw_rename_field();
+    return open;
+  }
   const bool open = ImGui::TreeNodeEx(label, flags);
   if (ImGui::IsItemClicked(ImGuiMouseButton_Left) &&
       !ImGui::IsItemToggledOpen()) {
@@ -621,19 +641,16 @@ static bool draw_entity_row(runtime::Entity entity, bool hasChildren,
 
   if (ImGui::BeginPopupContextItem(label)) {
     // A right-click selects the row first, so the actions below and the
-    // Edit menu's act on the same entity.
+    // Edit menu's act on the same entity: each acts on the selection, and
+    // a child is created under this row.
     if (!is_entity_selected(entity) && (selected_entity() != entity)) {
       select_entity(entity, false);
     }
-    // Each acts on the selection, which the right-click just made include
-    // this row; Paste As Child pastes under it.
-    for (const EditorAction action :
-         {EditorAction::Copy, EditorAction::Paste, EditorAction::PasteAsChild,
-          EditorAction::Duplicate, EditorAction::Delete}) {
-      if (editor_action_menu_item_clicked(action)) {
-        pending.kind = PendingHierarchyEdit::Kind::Action;
-        pending.action = action;
-      }
+    const EntityMenuChoice choice = draw_entity_menu_items();
+    if (choice.kind != EntityMenuChoice::Kind::None) {
+      pending.kind = PendingHierarchyEdit::Kind::Menu;
+      pending.menu = choice;
+      pending.placement.parent = entity;
     }
     ImGui::EndPopup();
   }
@@ -679,6 +696,9 @@ static void draw_entity_hierarchy() noexcept {
   case PendingHierarchyEdit::Kind::Action:
     static_cast<void>(run_editor_action(pending.action));
     break;
+  case PendingHierarchyEdit::Kind::Menu:
+    static_cast<void>(run_entity_menu_choice(pending.menu, pending.placement));
+    break;
   case PendingHierarchyEdit::Kind::Reparent:
     static_cast<void>(execute_reparent(pending.target, pending.newParent));
     break;
@@ -718,6 +738,15 @@ void draw_entities_panel() noexcept {
   prune_entity_selection();
   draw_entity_hierarchy();
 
+  // Right-clicking the panel's empty space, as in Unity's Hierarchy.
+  if (ImGui::BeginPopupContextWindow("entities_space_menu",
+                                     ImGuiPopupFlags_MouseButtonRight |
+                                         ImGuiPopupFlags_NoOpenOverItems)) {
+    const EntityMenuChoice choice = draw_empty_space_menu_items();
+    ImGui::EndPopup();
+    static_cast<void>(run_entity_menu_choice(choice, EntitySpawnPlacement{}));
+  }
+
   // Dropping onto the panel background clears the parent.
   ImGui::Dummy(ImVec2(ImGui::GetContentRegionAvail().x, editor_px(24.0F)));
   if (ImGui::BeginDragDropTarget()) {
@@ -752,7 +781,7 @@ void draw_entities_panel() noexcept {
     ImGui::OpenPopup("AddPrimitivePopup");
   }
   if (ImGui::BeginPopup("AddPrimitivePopup")) {
-    draw_primitive_menu_items();
+    draw_primitive_menu_items_and_spawn();
     ImGui::EndPopup();
   }
 

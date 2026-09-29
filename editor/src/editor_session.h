@@ -213,6 +213,16 @@ struct EditorSession final {
   // was made, so a click on the same spot can walk through what overlaps.
   bool scenePressPending = false;
   ImVec2 scenePressPos{};
+  // A right press over the Scene view: a drag flies the camera, and a
+  // release within the click slop opens the Scene view's menu instead, as
+  // Unreal's viewport does. Where it went down, and what the menu acts
+  // on: the entity under the cursor (kInvalidEntity over empty space) and
+  // the ground point a creation goes to.
+  bool sceneRightPressPending = false;
+  ImVec2 sceneRightPressPos{};
+  runtime::Entity sceneMenuEntity = runtime::kInvalidEntity;
+  bool sceneMenuHasGround = false;
+  math::Vec3 sceneMenuGround{};
   bool hasLastPick = false;
   ImVec2 lastPickPos{};
   bool snapEnabled = false;

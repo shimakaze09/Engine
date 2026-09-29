@@ -5,12 +5,14 @@
 // press while undo repeats, dispatch stopping under the unsaved-changes
 // prompt, a popup, a text field and a game-owned keyboard, the play
 // chords that alone stay live while the game has the keyboard, the entity
-// edits acting only while the Scene view or Entities panel has focus, rebinding
-// with its persistence and refusals, and table invariants: one row per
-// action, unique ids, no chord bound twice.
+// edits (Create Empty Child and Rename among them) acting only while the
+// Scene view or Entities panel has focus, rebinding with its persistence
+// and refusals, and table invariants: one row per action, unique ids, no
+// chord bound twice.
 
 #include "editor_commands.h"
 #include "editor_entity_clipboard.h"
+#include "editor_entity_rename.h"
 #include "editor_panels_diagnostics.h"
 #include "editor_preferences.h"
 #include "editor_scene_document.h"
@@ -462,17 +464,33 @@ void check_play_chords(engine::tests::TestContext &t, World &world) noexcept {
   editor_session().stepRequested = false;
 }
 
-/// Create Empty (Ctrl+Shift+N) makes an entity and selects it; Exit runs
-/// the window close's quit guard, so a dirty document asks before the
-/// editor quits.
+/// Create Empty (Ctrl+Shift+N) makes an entity and selects it, Create
+/// Empty Child (Alt+Shift+N) makes one under the selection, and F2
+/// renames the selection, as in Unity; Exit runs the window close's quit
+/// guard, so a dirty document asks before the editor quits.
 void check_create_and_exit(engine::tests::TestContext &t,
                            World &world) noexcept {
   t.check(perform_scene_new(), "a fresh scene");
+  tap(ImGuiMod_Alt | ImGuiMod_Shift | ImGuiKey_N);
+  tap(ImGuiKey_F2);
+  t.check(world.alive_entity_count() == 0U,
+          "without a selection Alt+Shift+N creates nothing");
   tap(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_N);
-  t.check((world.alive_entity_count() == 1U) &&
-              (selected_entity() != kInvalidEntity),
+  const Entity parent = selected_entity();
+  t.check((world.alive_entity_count() == 1U) && (parent != kInvalidEntity),
           "Ctrl+Shift+N creates an entity and selects it");
   t.check(scene_document_is_dirty(), "the new entity dirties the document");
+  tap(ImGuiMod_Alt | ImGuiMod_Shift | ImGuiKey_N);
+  const Entity child = selected_entity();
+  Transform childTransform{};
+  t.check((world.alive_entity_count() == 2U) && (child != parent) &&
+              world.get_transform(child, &childTransform) &&
+              (childTransform.parentId == world.persistent_id(parent)),
+          "Alt+Shift+N creates a child of the selection and selects it");
+  t.check(!entity_rename_active_for(child), "no rename before F2");
+  tap(ImGuiKey_F2);
+  t.check(entity_rename_active_for(child), "F2 renames the selection");
+  cancel_entity_rename();
 
   // The quit guard only protects a session the editor initialized.
   editor_session().initialized = true;

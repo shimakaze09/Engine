@@ -218,9 +218,22 @@ bool execute_selection_duplicate() noexcept;
 /// the world untouched, when it is refused.
 bool execute_duplicate_and_select(EntityDuplicateCommand *command) noexcept;
 
-/// Creates a scene object with a default name through the command history;
-/// returns the new entity (kInvalidEntity on failure).
-runtime::Entity execute_entity_create() noexcept;
+/// Where a created entity goes. With a `parent` it is created under it,
+/// at the parent's origin, as Unity's Create Empty Child and a child 3D
+/// Object are; otherwise at `position` when `hasPosition` (a Scene view
+/// right-click's ground point); otherwise where each creator puts it by
+/// default.
+struct EntitySpawnPlacement final {
+  runtime::Entity parent = runtime::kInvalidEntity;
+  bool hasPosition = false;
+  math::Vec3 position{};
+};
+
+/// Creates a scene object with a default name through the command history,
+/// at the world origin unless `placement` says otherwise; returns the new
+/// entity (kInvalidEntity on failure, or when the parent is not alive).
+runtime::Entity
+execute_entity_create(const EntitySpawnPlacement &placement = {}) noexcept;
 /// Spawns a scene object at `transform` referencing the mesh asset behind
 /// `virtualPath` (requesting its async load) through the command history;
 /// returns the new entity (kInvalidEntity on failure).
@@ -251,8 +264,11 @@ enum class EditorPrimitive : std::uint8_t {
 /// Spawns the built-in primitive as an undoable scene object (mesh plus
 /// the matching collider; cylinder/pyramid hull payloads are rebuilt on
 /// every execute) resting on the ground plane at the editor camera's
-/// focus point; returns the new entity (kInvalidEntity on failure).
-runtime::Entity execute_primitive_spawn(EditorPrimitive primitive) noexcept;
+/// focus point, or at the placement's position or under its parent;
+/// returns the new entity (kInvalidEntity on failure).
+runtime::Entity
+execute_primitive_spawn(EditorPrimitive primitive,
+                        const EntitySpawnPlacement &placement = {}) noexcept;
 /// Captures the entity's transform subtree into a delete command; null on
 /// allocation failure or when the entity is not alive.
 EntityDeleteCommand *

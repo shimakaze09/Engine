@@ -1,4 +1,5 @@
-// Declares the Scene view's queries: what a click or a marquee picks.
+// Declares the Scene view's queries: what a click or a marquee picks, and
+// where on the ground a right-click creates.
 // They run on the CPU against what the world already knows, as Godot's
 // editor picks, rather than through an ID buffer as Unity's and Unreal's
 // do: RenderDevice has no readback, the null device could not test an ID
@@ -60,6 +61,22 @@ std::size_t scene_pick_hits(runtime::World &world, const math::Ray &ray,
 runtime::Entity choose_pick(const PickHit *hits, std::size_t count,
                             runtime::Entity current,
                             bool sameSpotAsLastClick) noexcept;
+
+/// How far, in pixels, a press may travel and still count as a click
+/// rather than a drag: within it a left press picks and a right press
+/// opens the Scene view's menu; beyond it they draw a marquee and fly.
+inline constexpr float kClickSlopPixels = 4.0F;
+
+/// True when a press that has moved (dx, dy) pixels is still within the
+/// click slop.
+bool within_click_slop(float dx, float dy) noexcept;
+
+/// Where `ray` (unit direction) meets the ground plane y = 0 within
+/// `reach`, which is where a Scene view right-click creates an entity.
+/// False when the ray runs parallel to the ground, points away from it,
+/// or meets it beyond `reach`.
+bool ray_ground_point(const math::Ray &ray, float reach,
+                      math::Vec3 *out) noexcept;
 
 /// What a Scene view icon stands for.
 enum class SceneIconKind : std::uint8_t { Light, Camera };

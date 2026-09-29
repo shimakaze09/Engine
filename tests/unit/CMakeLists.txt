@@ -2548,6 +2548,18 @@ engine_add_test_executable(engine_unit_editor_inspector_header
     SDL_MAIN_HANDLED
 )
 
+engine_add_test_executable(engine_unit_editor_entity_menus
+    SOURCES
+    editor_entity_menus_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/editor/src
+    ${CMAKE_SOURCE_DIR}/runtime/src
+    PRIVATE_DEPS
+    engine_editor
+    COMPILE_DEFINITIONS
+    SDL_MAIN_HANDLED
+)
+
 engine_add_test_executable(engine_unit_editor_delete_selection
     SOURCES
     editor_delete_selection_test.cpp

@@ -6,6 +6,7 @@
 #include "editor_panels_viewport.h"
 
 #include "editor_commands.h"
+#include "editor_entity_menus.h"
 #include "editor_grid.h"
 #include "editor_light_gizmos.h"
 #include "editor_scene_query.h"
@@ -288,8 +289,6 @@ void draw_selected_collider_overlay(
   }
 }
 
-/// How far a press may travel and still count as a click, not a drag.
-constexpr float kClickSlopPixels = 4.0F;
 /// Icons one Scene view draws; lights and cameras beyond this many in
 /// view go undrawn.
 constexpr std::size_t kMaxSceneIcons = 256U;
@@ -397,20 +396,44 @@ bool point_in_rect(const ImVec2 &point, const ImVec2 &min,
          (point.x < (min.x + size.x)) && (point.y < (min.y + size.y));
 }
 
-/// Picks what lies under `mouse` in the Scene image at (imagePos,
-/// imageSize); see editor_scene_query.h. `additive` (Ctrl) toggles the
-/// pick in or out of the selection; otherwise it replaces the selection,
-/// and a click on empty space clears it.
-void pick_in_scene_view(const ImVec2 &mouse, const ImVec2 &imagePos,
-                        const ImVec2 &imageSize, bool additive) noexcept {
-  EditorSession &session = editor_session();
-  if ((session.world == nullptr) || (imageSize.x <= 0.0F) ||
-      (imageSize.y <= 0.0F)) {
-    return;
+/// The Scene view ray under `mouse` in the Scene image at (imagePos,
+/// imageSize), with a unit direction and the near-to-far span as `reach`;
+/// false when the image or the camera cannot give one.
+bool scene_view_ray(const ImVec2 &mouse, const ImVec2 &imagePos,
+                    const ImVec2 &imageSize, math::Ray *ray,
+                    float *reach) noexcept {
+  if ((imageSize.x <= 0.0F) || (imageSize.y <= 0.0F)) {
+    return false;
   }
   const ImVec2 ndc = image_to_ndc(mouse, imagePos, imageSize);
-  // Icons are picked before geometry, as Unity's gizmo icons are: a light
-  // inside a lamp mesh is reachable by its icon.
+  const SceneMatrices matrices = scene_view_matrices(imageSize);
+  if (!viewport_ray(matrices.view, matrices.projection,
+                    renderer::device_depth_zero_one(), ndc.x, ndc.y, ray)) {
+    return false;
+  }
+  // The ray runs from the near plane to the far plane; queries take a
+  // unit direction and that span as their reach.
+  *reach = math::length(ray->direction);
+  if (!(*reach > 0.0F)) {
+    return false;
+  }
+  ray->direction = math::mul(ray->direction, 1.0F / *reach);
+  return true;
+}
+
+/// What lies under `mouse` in the Scene image; see editor_scene_query.h.
+/// Icons are picked before geometry, as Unity's gizmo icons are: a light
+/// inside a lamp mesh is reachable by its icon. `walkOverlaps` lets a
+/// click on the spot of the last one pick the next hit behind the current
+/// selection. kInvalidEntity over empty space.
+runtime::Entity entity_under_cursor(const ImVec2 &mouse, const ImVec2 &imagePos,
+                                    const ImVec2 &imageSize,
+                                    bool walkOverlaps) noexcept {
+  EditorSession &session = editor_session();
+  if (session.world == nullptr) {
+    return runtime::kInvalidEntity;
+  }
+  const ImVec2 ndc = image_to_ndc(mouse, imagePos, imageSize);
   std::array<SceneIcon, kMaxSceneIcons> icons =
       std::array<SceneIcon, kMaxSceneIcons>();
   const std::size_t iconCount =
@@ -423,36 +446,38 @@ void pick_in_scene_view(const ImVec2 &mouse, const ImVec2 &imagePos,
                 (2.0F * iconMetrics.radius) / imageSize.y);
   if (iconPick != runtime::kInvalidEntity) {
     session.hasLastPick = false;
-    select_entity(iconPick, additive);
-    return;
+    return iconPick;
   }
-  const SceneMatrices matrices = scene_view_matrices(imageSize);
   math::Ray ray{};
-  if (!viewport_ray(matrices.view, matrices.projection,
-                    renderer::device_depth_zero_one(), ndc.x, ndc.y, &ray)) {
-    return;
+  float reach = 0.0F;
+  if (!scene_view_ray(mouse, imagePos, imageSize, &ray, &reach)) {
+    return runtime::kInvalidEntity;
   }
-  // The ray runs from the near plane to the far plane; queries take a
-  // unit direction and that span as their reach.
-  const float reach = math::length(ray.direction);
-  if (!(reach > 0.0F)) {
-    return;
-  }
-  ray.direction = math::mul(ray.direction, 1.0F / reach);
-
   std::array<PickHit, 32> hits{};
   const std::size_t count = scene_pick_hits(*session.world, ray, reach,
                                             &runtime::editor_mesh_local_bounds,
                                             hits.data(), hits.size());
-  const float mx = mouse.x - session.lastPickPos.x;
-  const float my = mouse.y - session.lastPickPos.y;
   const bool sameSpot =
-      session.hasLastPick &&
-      (((mx * mx) + (my * my)) <= (kClickSlopPixels * kClickSlopPixels));
+      session.hasLastPick && within_click_slop(mouse.x - session.lastPickPos.x,
+                                               mouse.y - session.lastPickPos.y);
   session.hasLastPick = true;
   session.lastPickPos = mouse;
+  return choose_pick(hits.data(), count, selected_entity(),
+                     sameSpot && walkOverlaps);
+}
+
+/// Picks what lies under `mouse` in the Scene image at (imagePos,
+/// imageSize). `additive` (Ctrl) toggles the pick in or out of the
+/// selection; otherwise it replaces the selection, and a click on empty
+/// space clears it.
+void pick_in_scene_view(const ImVec2 &mouse, const ImVec2 &imagePos,
+                        const ImVec2 &imageSize, bool additive) noexcept {
+  if ((editor_session().world == nullptr) || (imageSize.x <= 0.0F) ||
+      (imageSize.y <= 0.0F)) {
+    return;
+  }
   const runtime::Entity picked =
-      choose_pick(hits.data(), count, selected_entity(), sameSpot && !additive);
+      entity_under_cursor(mouse, imagePos, imageSize, !additive);
   if (picked == runtime::kInvalidEntity) {
     if (!additive) {
       clear_entity_selection();
@@ -460,6 +485,55 @@ void pick_in_scene_view(const ImVec2 &mouse, const ImVec2 &imagePos,
     return;
   }
   select_entity(picked, additive);
+}
+
+constexpr const char *kSceneViewMenu = "scene_view_menu";
+
+/// Opens the Scene view's menu for a right-click at `mouse`: on the entity
+/// under it, which joins the selection, or on empty space, recording the
+/// ground point a creation goes to.
+void open_scene_view_menu(const ImVec2 &mouse, const ImVec2 &imagePos,
+                          const ImVec2 &imageSize) noexcept {
+  EditorSession &session = editor_session();
+  if (session.world == nullptr) {
+    return;
+  }
+  session.sceneMenuEntity =
+      entity_under_cursor(mouse, imagePos, imageSize, false);
+  if ((session.sceneMenuEntity != runtime::kInvalidEntity) &&
+      !is_entity_selected(session.sceneMenuEntity) &&
+      (selected_entity() != session.sceneMenuEntity)) {
+    select_entity(session.sceneMenuEntity, false);
+  }
+  math::Ray ray{};
+  float reach = 0.0F;
+  session.sceneMenuHasGround =
+      scene_view_ray(mouse, imagePos, imageSize, &ray, &reach) &&
+      ray_ground_point(ray, reach, &session.sceneMenuGround);
+  ImGui::OpenPopup(kSceneViewMenu);
+}
+
+/// Draws the Scene view's menu while it is open, and runs its choice: on
+/// an entity its edits and children, on empty space creation at the
+/// ground point (the camera's focus when the click missed the ground).
+void draw_scene_view_menu() noexcept {
+  if (!ImGui::BeginPopup(kSceneViewMenu)) {
+    return;
+  }
+  EditorSession &session = editor_session();
+  const bool onEntity = (session.world != nullptr) &&
+                        session.world->is_alive(session.sceneMenuEntity);
+  const EntityMenuChoice choice =
+      onEntity ? draw_entity_menu_items() : draw_empty_space_menu_items();
+  ImGui::EndPopup();
+  EntitySpawnPlacement placement{};
+  if (onEntity) {
+    placement.parent = session.sceneMenuEntity;
+  } else if (session.sceneMenuHasGround) {
+    placement.hasPosition = true;
+    placement.position = session.sceneMenuGround;
+  }
+  static_cast<void>(run_entity_menu_choice(choice, placement));
 }
 
 /// Adds `entity` to the selection unless it is already a member.
@@ -737,10 +811,9 @@ void draw_scene_viewport_panel() noexcept {
       clickSession.scenePressPending = true;
       clickSession.scenePressPos = io.MousePos;
     }
-    const float dx = io.MousePos.x - clickSession.scenePressPos.x;
-    const float dy = io.MousePos.y - clickSession.scenePressPos.y;
     const bool dragged =
-        ((dx * dx) + (dy * dy)) > (kClickSlopPixels * kClickSlopPixels);
+        !within_click_slop(io.MousePos.x - clickSession.scenePressPos.x,
+                           io.MousePos.y - clickSession.scenePressPos.y);
     if (clickSession.scenePressPending && dragged) {
       // The marquee, clipped to the image.
       const ImVec2 lo(
@@ -773,15 +846,28 @@ void draw_scene_viewport_panel() noexcept {
 
   // Flythrough, as in Unity: the right button pressed over the Scene view
   // starts it and releasing it anywhere ends it, so a drag that leaves the
-  // panel keeps flying.
+  // panel keeps flying. A release within the click slop of the press is a
+  // right-click instead, which opens the Scene view's menu, as Unreal's
+  // viewport does.
   EditorSession &flySession = editor_session();
   if (flySession.sceneFlying && !ImGui::IsMouseDown(ImGuiMouseButton_Right)) {
     flySession.sceneFlying = false;
+    const ImVec2 released = ImGui::GetIO().MousePos;
+    if (flySession.sceneRightPressPending &&
+        within_click_slop(released.x - flySession.sceneRightPressPos.x,
+                          released.y - flySession.sceneRightPressPos.y)) {
+      open_scene_view_menu(released, cursorScreenPos, regionSize);
+    }
+    flySession.sceneRightPressPending = false;
   }
   if (!flySession.sceneFlying && ImGui::IsWindowHovered() &&
       !ImGuizmo::IsUsing() && ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
     flySession.sceneFlying = true;
+    flySession.sceneRightPressPending =
+        point_in_rect(ImGui::GetIO().MousePos, cursorScreenPos, regionSize);
+    flySession.sceneRightPressPos = ImGui::GetIO().MousePos;
   }
+  draw_scene_view_menu();
   if (flySession.sceneFlying) {
     const ImGuiIO &io = ImGui::GetIO();
     const auto axis = [](ImGuiKey plus, ImGuiKey minus) noexcept {

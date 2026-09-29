@@ -6,7 +6,9 @@
 // same spot walks to the next hit behind the current pick, wrapping, and
 // any other click takes the nearest. A marquee takes every mesh and
 // collider its sub-rectangle frustum does not exclude. Lights and cameras
-// are screen icons, picked first and taken by a marquee by position.
+// are screen icons, picked first and taken by a marquee by position. A
+// right-click creates where its ray meets the ground within reach, and a
+// press is a click until it moves beyond the slop.
 
 #include "editor_scene_query.h"
 
@@ -299,6 +301,61 @@ void check_icon_metrics(engine::tests::TestContext &t) noexcept {
           "the selection ring surrounds the icon");
 }
 
+/// A ray meets the ground plane y = 0 where it descends onto it within
+/// reach; one running level, climbing, or landing beyond reach does not.
+void check_ground_point(engine::tests::TestContext &t) noexcept {
+  using engine::editor::ray_ground_point;
+  engine::math::Ray ray{};
+  ray.origin = Vec3(1.0F, 4.0F, 2.0F);
+  ray.direction = Vec3(0.6F, -0.8F, 0.0F);
+  // 0.6 and 0.8 round in binary, so the landing point (4, 0, 2) is met to
+  // within a few float ulps at this magnitude: 1e-5 is ~40 ulps of 4.
+  const auto near = [](float a, float b) noexcept {
+    return std::fabs(a - b) <= 1.0e-5F;
+  };
+  const float landing = -ray.origin.y / ray.direction.y;
+  Vec3 hit(9.0F, 9.0F, 9.0F);
+  t.check(ray_ground_point(ray, 100.0F, &hit) && near(hit.x, 4.0F) &&
+              (hit.y == 0.0F) && (hit.z == 2.0F),
+          "a descending ray meets the ground where it lands");
+  t.check(ray_ground_point(ray, landing, &hit) && near(hit.x, 4.0F),
+          "a hit exactly at the reach counts");
+  hit = Vec3(9.0F, 9.0F, 9.0F);
+  t.check(!ray_ground_point(ray, landing * 0.999F, &hit) && (hit.x == 9.0F),
+          "a hit beyond the reach does not, and leaves the output");
+  ray.direction = Vec3(0.6F, 0.8F, 0.0F);
+  t.check(!ray_ground_point(ray, 100.0F, &hit), "a climbing ray misses");
+  ray.direction = Vec3(1.0F, 0.0F, 0.0F);
+  t.check(!ray_ground_point(ray, 100.0F, &hit), "a level ray misses");
+  ray.origin = Vec3(0.0F, -1.0F, 0.0F);
+  ray.direction = Vec3(0.0F, -1.0F, 0.0F);
+  t.check(!ray_ground_point(ray, 100.0F, &hit),
+          "a ray below the ground heading down misses");
+  ray.origin = Vec3(0.0F, 0.0F, 0.0F);
+  t.check(ray_ground_point(ray, 100.0F, &hit) && (hit.x == 0.0F) &&
+              (hit.z == 0.0F),
+          "a ray starting on the ground meets it there");
+  t.check(!ray_ground_point(ray, 100.0F, nullptr), "no output, no hit");
+}
+
+/// A press stays a click while it moves at most the slop, inclusive.
+void check_click_slop(engine::tests::TestContext &t) noexcept {
+  using engine::editor::kClickSlopPixels;
+  using engine::editor::within_click_slop;
+  t.check(within_click_slop(0.0F, 0.0F), "no movement is a click");
+  t.check(within_click_slop(kClickSlopPixels, 0.0F) &&
+              within_click_slop(0.0F, -kClickSlopPixels),
+          "movement of exactly the slop is still a click");
+  t.check(within_click_slop(3.0F * kClickSlopPixels / 5.0F,
+                            4.0F * kClickSlopPixels / 5.0F),
+          "the slop is a radius, not a box");
+  t.check(
+      !within_click_slop(kClickSlopPixels * 0.75F, kClickSlopPixels * 0.75F),
+      "a diagonal beyond the radius is a drag");
+  t.check(!within_click_slop(kClickSlopPixels + 0.01F, 0.0F),
+          "beyond the slop is a drag");
+}
+
 /// The Game view names what stops the game rendering: no active camera,
 /// or a winner tied in priority; one camera alone gives no notice.
 void check_game_camera_notice(engine::tests::TestContext &t,
@@ -358,6 +415,8 @@ int main() {
   }
   check_icons(t, *iconWorld);
   check_icon_metrics(t);
+  check_ground_point(t);
+  check_click_slop(t);
   std::unique_ptr<World> cameraWorld(new (std::nothrow) World());
   if (cameraWorld == nullptr) {
     return 96;
