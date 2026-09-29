@@ -294,11 +294,14 @@ report_case_collisions(const std::vector<RegisteredEntry> &entries) {
   return offenders;
 }
 
-/// Thumbnail caches and dot-files are never assets.
+/// Thumbnail caches, dot-files and '~' folders are never assets.
 bool is_hidden(const std::filesystem::path &relative) noexcept {
   for (const std::filesystem::path &part : relative) {
     const std::string name = part.string();
-    if (!name.empty() && (name[0] == '.')) {
+    // A name ending in '~' ships beside the content without being part of
+    // it, as Unity never imports a "Samples~" folder: the engine's project
+    // template, whose copies each project owns.
+    if (!name.empty() && ((name[0] == '.') || (name.back() == '~'))) {
       return true;
     }
   }

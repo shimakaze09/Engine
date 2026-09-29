@@ -108,7 +108,7 @@ int main() {
     return 1;
   }
   const std::string templateDir =
-      (fs::path(engineRoot) / "templates/empty_project").string();
+      (fs::path(engineRoot) / "templates~/empty_project").string();
   std::error_code ec{};
   const fs::path scratch =
       fs::temp_directory_path(ec) / "engine_new_project_test";

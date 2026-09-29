@@ -260,11 +260,13 @@ struct MountRegistration final {
 /// Registers every runtime-form asset file under `osRoot` as
 /// `mountPrefix/<relative path>`, typed by the asset type table: the
 /// cooked form of a cooked or derived type, the authored form of a source
-/// type. Entries under a `.thumbnails` directory and dot-files are
-/// hidden. Never registers a path that would not fit a record whole. A
-/// cooked output records, as its dependencies, the files its cook stamp
-/// says the cook read beside the source (a glTF's external buffers and
-/// images), so a change to one reaches it through notify_asset_changed.
+/// type. Entries under a `.thumbnails` directory, dot-files and anything
+/// under a folder whose name ends in '~' (Unity's convention for content
+/// shipped beside a mount but never imported) are hidden. Never registers a
+/// path that would not fit a record whole. A cooked output records, as its
+/// dependencies, the files its cook stamp says the cook read beside the source
+/// (a glTF's external buffers and images), so a change to one reaches it
+/// through notify_asset_changed.
 ///
 /// Validates identity as it goes and fails closed: an asset with no
 /// identity, two assets claiming one (in this mount, or one here and one

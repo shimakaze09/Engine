@@ -36,7 +36,7 @@ runs the real binary on the sample. The runtime half of the project hub
 is in place: the engine runs with no project open, mounting only its own
 content (`engine::configure_without_project`,
 `engine_integration_bootstrap_without_project`); `engine::create_project`
-makes a project from `engine_assets/templates/empty_project/`, staged
+makes a project from `engine_assets/templates~/empty_project/`, staged
 beside its destination and moved into place whole
 (`engine_integration_new_project`); and a run hands the next project, or
 the hub, to its executable through `engine::request_project_switch`. The

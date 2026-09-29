@@ -902,6 +902,41 @@ void test_identity_claimed_across_mounts() noexcept {
   std::filesystem::remove_all(kPackageRoot, ec);
 }
 
+/// A folder whose name ends in '~' ships beside a mount's content without
+/// being part of it, as Unity's "Samples~" does: nothing under it is
+/// catalogued, however deep, while its siblings are.
+void test_tilde_folders_are_not_assets() noexcept {
+  constexpr const char *kTildeRoot = "asset_catalog_tilde_root";
+  std::error_code ec{};
+  std::filesystem::remove_all(kTildeRoot, ec);
+  std::unique_ptr<engine::content::AssetCatalog> store(
+      new (std::nothrow) engine::content::AssetCatalog());
+  if (store == nullptr) {
+    g_tests.fail("the tilde store could be allocated");
+    return;
+  }
+  const std::filesystem::path root(kTildeRoot);
+  check(write_file(root / "scripts/hop.lua") &&
+            write_file(root / "templates~/empty/assets/main.lua") &&
+            write_file(root / "lib/Samples~/demo.lua"),
+        "a tree with '~' folders is written");
+  static_cast<void>(identify(root, "scripts/hop.lua"));
+  static_cast<void>(identify(root, "templates~/empty/assets/main.lua"));
+  static_cast<void>(identify(root, "lib/Samples~/demo.lua"));
+  const engine::content::MountRegistration walked =
+      engine::content::register_mounted_assets(store.get(), "kit", kTildeRoot);
+  check(walked.ok && (walked.registered == 1U) &&
+            has_path_and_type(*store, "kit/scripts/hop.lua",
+                              engine::content::AssetTypeTag::Script),
+        "the content beside '~' folders is catalogued");
+  check((engine::content::find_asset_metadata_by_path(
+             store.get(), "kit/templates~/empty/assets/main.lua") == nullptr) &&
+            (engine::content::find_asset_metadata_by_path(
+                 store.get(), "kit/lib/Samples~/demo.lua") == nullptr),
+        "nothing under a '~' folder is catalogued, however deep");
+  std::filesystem::remove_all(kTildeRoot, ec);
+}
+
 int main() {
   if (!build_tree()) {
     g_tests.fail("the temporary asset tree could be written");
@@ -927,6 +962,7 @@ int main() {
   test_large_project_mounts_whole();
   test_labels_become_tags();
   test_identity_claimed_across_mounts();
+  test_tilde_folders_are_not_assets();
 
   remove_tree();
   return g_tests.finish("asset catalog tests");

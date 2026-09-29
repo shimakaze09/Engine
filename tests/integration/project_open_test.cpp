@@ -370,7 +370,7 @@ bool make_packaged_project(const fs::path &dir, bool withFolder,
   }
   std::error_code ec{};
   const fs::path templateScene = fs::path(engine::tests::engine_root_path()) /
-                                 "templates/empty_project/assets/main.scene";
+                                 "templates~/empty_project/assets/main.scene";
   fs::copy_file(templateScene, dir / "assets" / "main.scene",
                 fs::copy_options::overwrite_existing, ec);
   engine::content::ProjectDocument doc = make_document("");
