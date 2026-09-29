@@ -1057,6 +1057,7 @@ int main() {
         "    engine.set_name(src, 'clone_source')\n"
         "    engine.add_light(src, 'directional')\n"
         "    engine.set_light_color(src, 0.1, 0.2, 0.3)\n"
+        "    engine.add_camera_component(src, 1.0, 0.1, 100.0, 0.0)\n"
         "    engine.add_spring_arm(src, 7.5, 0.0, 2.0, 0.0)\n"
         "    engine.add_script_component(src, 'scripts/cloned.lua')\n"
         "    local c = engine.clone_entity(src)\n"

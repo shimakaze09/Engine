@@ -2000,6 +2000,41 @@
     "name": "IslandController"
    },
    "persistentId": 41
+  },
+  {
+   "components": {
+    "CameraComponent": {
+     "active": true,
+     "blendSpeed": 5,
+     "farPlane": 100,
+     "fovRadians": 1.0471976,
+     "nearPlane": 0.1,
+     "orthographicSize": 5,
+     "priority": 0,
+     "projection": 0
+    },
+    "Transform": {
+     "parentId": 0,
+     "position": [
+      0.0,
+      3.65,
+      11.5
+     ],
+     "rotation": [
+      -0.1825574,
+      0.0,
+      0.0,
+      0.9831952
+     ],
+     "scale": [
+      1,
+      1,
+      1
+     ]
+    },
+    "name": "Main Camera"
+   },
+   "persistentId": 42
   }
  ],
  "version": 6

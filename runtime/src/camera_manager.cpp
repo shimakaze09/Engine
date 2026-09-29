@@ -220,6 +220,9 @@ void CameraManager::evaluate(float dt, CameraEntry *outCamera) noexcept {
 
   const CameraEntry *best = active_camera();
   if (best == nullptr) {
+    // Nothing is live, so the next camera has nothing to blend from: it
+    // cuts in, as a first camera does.
+    m_hasEvaluated = false;
     outCamera->position = m_currentPosition;
     outCamera->target = m_currentTarget;
     outCamera->up = m_currentUp;
@@ -236,7 +239,11 @@ void CameraManager::evaluate(float dt, CameraEntry *outCamera) noexcept {
       continue;
     }
     if (&cam == best) {
-      cam.blendWeight = clamp01(cam.blendWeight + cam.blendSpeed * dt);
+      // A camera that cuts in is fully live at once; with no time passing
+      // (stopped, paused) a blend from zero would otherwise never start.
+      cam.blendWeight = m_hasEvaluated
+                            ? clamp01(cam.blendWeight + cam.blendSpeed * dt)
+                            : 1.0F;
     } else {
       cam.blendWeight = clamp01(cam.blendWeight - cam.blendSpeed * dt);
     }

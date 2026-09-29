@@ -97,18 +97,7 @@ struct RuntimeRaycastHit final {
 /// Every pointer is null until the runtime binds the table; callers test
 /// the ones they use.
 struct RuntimeServices final {
-  void (*set_camera_position)(float x, float y, float z) noexcept = nullptr;
-  void (*set_camera_target)(float x, float y, float z) noexcept = nullptr;
-  void (*set_camera_up)(float x, float y, float z) noexcept = nullptr;
-  void (*set_camera_fov)(float fovRadians) noexcept = nullptr;
-
-  // Camera manager operations.
-  bool (*push_camera_op)(runtime::World *world, core::Entity entity,
-                         float posX, float posY, float posZ, float tgtX,
-                         float tgtY, float tgtZ, float priority,
-                         float blendSpeed) noexcept = nullptr;
-  bool (*pop_camera_op)(runtime::World *world,
-                        core::Entity entity) noexcept = nullptr;
+  // The camera that renders, as the camera manager last evaluated it.
   bool (*get_active_camera_op)(runtime::World *world, float *outPosX,
                                float *outPosY, float *outPosZ, float *outTgtX,
                                float *outTgtY, float *outTgtZ,

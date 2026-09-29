@@ -445,13 +445,6 @@ bool bindable_has_light(std::uint64_t entity) noexcept {
       runtime_binding().world, decoded);
 }
 
-void bindable_set_camera_fov(float fov) noexcept {
-  if ((runtime_binding().services != nullptr) &&
-      (runtime_binding().services->set_camera_fov != nullptr)) {
-    runtime_binding().services->set_camera_fov(fov);
-  }
-}
-
 void bindable_set_master_volume(float volume) noexcept {
   if ((runtime_binding().services != nullptr) &&
       (runtime_binding().services->set_master_volume != nullptr)) {

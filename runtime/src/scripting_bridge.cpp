@@ -142,30 +142,6 @@ content::LoadPriority script_asset_priority(std::uint8_t priority) noexcept {
   }
 }
 
-void scripting_set_camera_position(float x, float y, float z) noexcept {
-  renderer::CameraState camera = renderer::get_active_camera();
-  camera.position = math::Vec3(x, y, z);
-  renderer::set_active_camera(camera);
-}
-
-void scripting_set_camera_target(float x, float y, float z) noexcept {
-  renderer::CameraState camera = renderer::get_active_camera();
-  camera.target = math::Vec3(x, y, z);
-  renderer::set_active_camera(camera);
-}
-
-void scripting_set_camera_up(float x, float y, float z) noexcept {
-  renderer::CameraState camera = renderer::get_active_camera();
-  camera.up = math::Vec3(x, y, z);
-  renderer::set_active_camera(camera);
-}
-
-void scripting_set_camera_fov(float fovRadians) noexcept {
-  renderer::CameraState camera = renderer::get_active_camera();
-  camera.fovRadians = fovRadians;
-  renderer::set_active_camera(camera);
-}
-
 static_assert(scripting::kMaxWorldEntities == runtime::World::kMaxEntities,
               "scripting's entity capacity must match the World's");
 static_assert(scripting::kMaxTimerSlots == runtime::TimerManager::kMaxTimers,
@@ -184,29 +160,6 @@ static_assert(static_cast<int>(scripting::GameModeState::WaitingToStart) ==
                   static_cast<int>(scripting::GameModeState::Ended) ==
                       static_cast<int>(runtime::GameMode::State::Ended),
               "scripting's game mode states must mirror the runtime's");
-
-// Camera manager bridge functions
-bool scripting_push_camera(runtime::World *world, runtime::Entity entity,
-                           float posX, float posY, float posZ, float tgtX,
-                           float tgtY, float tgtZ, float priority,
-                           float blendSpeed) noexcept {
-  if ((world == nullptr) || !world->is_alive(entity)) {
-    return false;
-  }
-  runtime::CameraEntry entry{};
-  entry.position = math::Vec3(posX, posY, posZ);
-  entry.target = math::Vec3(tgtX, tgtY, tgtZ);
-  entry.blendSpeed = blendSpeed;
-  return world->camera_manager().push_camera(entity, entry, priority);
-}
-
-bool scripting_pop_camera(runtime::World *world,
-                          runtime::Entity entity) noexcept {
-  if ((world == nullptr) || !world->is_alive(entity)) {
-    return false;
-  }
-  return world->camera_manager().pop_camera(entity);
-}
 
 bool scripting_get_active_camera(runtime::World *world, float *outPosX,
                                  float *outPosY, float *outPosZ, float *outTgtX,
@@ -1186,7 +1139,10 @@ bool scripting_remove_script_component_op(runtime::World *world,
 bool scripting_add_spring_arm_op(
     runtime::World *world, runtime::Entity entity,
     const runtime::SpringArmComponent &component) noexcept {
-  return (world != nullptr) && world->add_spring_arm(entity, component);
+  // A spring arm places a camera; without a Camera on the entity there
+  // is nothing for it to place, and it must not become one itself.
+  return (world != nullptr) && world->has_camera_component(entity) &&
+         world->add_spring_arm(entity, component);
 }
 
 bool scripting_add_camera_component_op(
@@ -1353,12 +1309,6 @@ void scripting_entity_pool_reset_all() noexcept {
 /// can never be bound to the wrong slot.
 scripting::RuntimeServices make_scripting_runtime_services() noexcept {
   scripting::RuntimeServices s{};
-  s.set_camera_position = &scripting_set_camera_position;
-  s.set_camera_target = &scripting_set_camera_target;
-  s.set_camera_up = &scripting_set_camera_up;
-  s.set_camera_fov = &scripting_set_camera_fov;
-  s.push_camera_op = &scripting_push_camera;
-  s.pop_camera_op = &scripting_pop_camera;
   s.get_active_camera_op = &scripting_get_active_camera;
   s.camera_shake_op = &scripting_camera_shake;
   s.is_input_phase = &scripting_is_input_phase;

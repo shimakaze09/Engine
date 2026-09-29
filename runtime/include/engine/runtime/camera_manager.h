@@ -74,7 +74,9 @@ public:
   /// Evaluate the final camera state for this frame into one struct:
   /// advances blend weights and shake timers by @p dt and writes the pose,
   /// lens, projection kind, and orthographic size the frame renders with.
-  /// A null output evaluates nothing (no time advances).
+  /// The first camera after none was live cuts in at full weight rather
+  /// than blending from a pose no camera holds. A null output evaluates
+  /// nothing (no time advances).
   void evaluate(float dt, CameraEntry *outCamera) noexcept;
 
   /// Clear all cameras and shakes.

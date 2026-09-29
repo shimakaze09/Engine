@@ -410,6 +410,19 @@ Current scripting/runtime support in the tree includes:
   simulation steps, not rendered frames), and `engine.wait_until()`
 - Sandbox, generated binding, and hot-reload coverage in integration tests
 
+Only a Camera renders the game, as in Unity and Godot. The Game view and
+the player draw the highest-priority active Camera component, from its
+entity's transform; with none, they show black, and the editor's Game
+view says so and offers **Create Camera** (also Entity > Camera and the
+Entities panel's right-click menu). A camera only renders. Following a
+character is a script moving the camera's entity, e.g.
+`engine.set_position(cam, x, y, z)` then `engine.look_at(cam, px, py, pz)`,
+and `engine.add_spring_arm` works only on an entity with a Camera. No
+script reaches the editor's Scene view camera, and there is no hidden
+script camera (`engine_integration_game_camera_gpu`,
+`engine_integration_camera_producer_removal`,
+`engine_unit_editor_entity_menus`).
+
 Scripts run sandboxed: `io`, `os`, `debug` and `package` are not there, all
 scripts share a budget of Lua instructions per frame (1,000,000 by default;
 a script that runs past it stops with an error rather than freezing the

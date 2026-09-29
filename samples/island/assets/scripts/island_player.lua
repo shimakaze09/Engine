@@ -2,8 +2,10 @@
 --
 -- Island Hopper player: WASD/arrow movement with a grounded space-bar jump,
 -- animation state driven through speed/jump parameters (footstep events play
--- positional audio), jump/land sounds, water respawn, and a smoothed
--- third-person follow camera pushed through the camera manager.
+-- positional audio), jump/land sounds, water respawn, and a third-person
+-- follow camera: this script moves the scene's "Main Camera" behind the
+-- player and turns it toward them, as a Unity follow script moves its
+-- camera. A camera renders; it follows only because a script moves it.
 -- Reference pattern: one module table serves every entity on this script,
 -- so per-entity state (airborne flag, ground sample) is keyed by the entity
 -- handle (generation-checked, so reused slots never alias); shared sound
@@ -63,6 +65,19 @@ local function ground_entity(self, x, y, z)
     return nil
 end
 
+-- Moves the scene's "Main Camera" behind and above the player and turns it
+-- toward them. A scene without one has no camera to move, and shows
+-- nothing, as it should: only a Camera renders the game.
+local function follow_with_camera(self)
+    local camera = engine.find_entity_by_name("Main Camera")
+    local x, y, z = engine.get_position(self)
+    if camera == nil or x == nil then
+        return
+    end
+    engine.set_position(camera, x, y + CAMERA_UP, z + CAMERA_BACK)
+    engine.look_at(camera, x, y + 1.0, z)
+end
+
 -- Locks rotation, hooks footstep events to positional audio, and frames
 -- the follow camera.
 function M.on_begin_play(self)
@@ -74,11 +89,7 @@ function M.on_begin_play(self)
     acquire_sounds()
     ensure_anim_handler()
 
-    local x, y, z = engine.get_position(self)
-    if x ~= nil then
-        engine.push_camera(self, x, y + CAMERA_UP, z + CAMERA_BACK,
-            x, y + 1.0, z, 10.0, 4.0)
-    end
+    follow_with_camera(self)
 end
 
 -- Preserves this player's movement state (and the module's event-handler
@@ -229,8 +240,7 @@ function M.on_tick(self, dt)
     local input_speed = math.sqrt(move_x * move_x + move_z * move_z)
     engine.set_anim_param(self, "speed", input_speed)
 
-    engine.push_camera(self, x, y + CAMERA_UP, z + CAMERA_BACK,
-        x, y + 1.0, z, 10.0, 4.0)
+    follow_with_camera(self)
 end
 
 return M

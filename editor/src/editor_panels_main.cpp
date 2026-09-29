@@ -290,6 +290,11 @@ void draw_main_menu_bar() noexcept {
       draw_primitive_menu_items_and_spawn();
       ImGui::EndMenu();
     }
+    if (draw_camera_menu_item()) {
+      EntityMenuChoice choice{};
+      choice.kind = EntityMenuChoice::Kind::CreateCamera;
+      static_cast<void>(run_entity_menu_choice(choice, EntitySpawnPlacement{}));
+    }
     ImGui::EndMenu();
   }
 

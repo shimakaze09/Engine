@@ -484,7 +484,9 @@ void set_skybox_texture(TextureHandle cubemap) noexcept;
 TextureHandle get_skybox_texture() noexcept;
 
 /// Device texture holding a view's final image from its last flush;
-/// invalid until that view has rendered.
+/// invalid until that view has rendered, and whenever its last flush drew
+/// no scene (a Game view with no Camera), so an older frame is never shown
+/// as the current one.
 DeviceTextureHandle get_render_view_texture(RenderViewId view) noexcept;
 /// The camera a view last rendered its scene with (a default camera
 /// before it first did).

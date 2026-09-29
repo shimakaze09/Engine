@@ -300,8 +300,8 @@ constexpr const char *kFailingRefused =
     "if engine.game_mode_start() then\n"
     "    error('game_mode_start must be refused under reload')\n"
     "end\n"
-    "if engine.push_camera(E, 0, 0, 0, 0, 0, 1, 1) then\n"
-    "    error('push_camera must be refused under reload')\n"
+    "if engine.camera_shake(1, 1, 1) then\n"
+    "    error('camera_shake must be refused under reload')\n"
     "end\n"
     "error('intentional reload failure')\n";
 

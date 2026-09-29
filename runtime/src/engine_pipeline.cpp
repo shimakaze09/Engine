@@ -770,6 +770,9 @@ struct EnginePipeline::Impl final {
   renderer::CameraState currentCameraSample{};
   bool cameraSampleValid = false;
   std::uint32_t cameraSampleEpoch = 0U;
+  /// Whether the last camera evaluation found a Camera to render the game
+  /// through; without one the Game view draws nothing.
+  bool gameCameraPresent = false;
   double frameMs = 0.0;
   double utilizationPct = 0.0;
   core::JobSystemStats jobStats{};
@@ -1873,7 +1876,8 @@ void EnginePipeline::Impl::evaluate_cameras_for_step(
   runtime::update_persistent_cameras(*world, deltaSeconds);
   runtime::CameraEntry evaluated{};
   world->camera_manager().evaluate(deltaSeconds, &evaluated);
-  if (world->camera_manager().camera_count() > 0U) {
+  gameCameraPresent = world->camera_manager().camera_count() > 0U;
+  if (gameCameraPresent) {
     renderer::CameraState cam{};
     cam.position = evaluated.position;
     cam.target = evaluated.target;
@@ -1901,8 +1905,11 @@ void EnginePipeline::Impl::stage_camera() noexcept {
   // view and nothing is evaluated. Paused, the game camera still follows
   // edits, evaluated with no time passing below.
   if (!isPlaying && !isPaused) {
-    if (editor_has_scene_view() &&
-        (world->camera_manager().camera_count() > 0U)) {
+    // Every stopped frame: the scene's Camera components publish only
+    // through this evaluation, so gating it on a camera already being
+    // published would keep a freshly loaded scene's camera from ever
+    // showing until play.
+    if (editor_has_scene_view()) {
       evaluate_cameras_for_step(0.0F);
     }
     return;
@@ -2314,9 +2321,14 @@ void EnginePipeline::Impl::stage_render() noexcept {
   renderer::RenderViewDesc gameView{};
   gameView.id = renderer::RenderViewId::Game;
   gameView.camera = renderer::get_active_camera();
-  gameView.drawScene = (bridge == nullptr) ||
-                       (bridge->game_view_visible == nullptr) ||
-                       bridge->game_view_visible();
+  // Only a Camera renders the game: with none published the view draws
+  // nothing but its clear, as Unity's "No cameras rendering" and Godot's
+  // camera-less viewport do, rather than the scene from a pose no camera
+  // holds.
+  gameView.drawScene =
+      gameCameraPresent &&
+      ((bridge == nullptr) || (bridge->game_view_visible == nullptr) ||
+       bridge->game_view_visible());
   gameView.drawOverlays = !sceneViewThisFrame;
   renderer::flush_renderer_view(
       gameView, commandBuffer->view(), meshRegistry.get(),

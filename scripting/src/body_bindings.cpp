@@ -6,6 +6,7 @@
 
 #include "binding_util.h"
 #include "deferred_mutations.h"
+#include "engine/math/quat.h"
 #include "entity_handle.h"
 #include "lua_state.h"
 #include "runtime_binding.h"
@@ -349,6 +350,37 @@ int lua_engine_set_rotation(lua_State *state) noexcept {
   return 1;
 }
 
+/// engine.look_at(entity, x, y, z): turns the entity so its forward (-Z,
+/// the way a camera looks) points at the point, its +Y kept upright, as
+/// Unity's Transform.LookAt and Godot's look_at do. The point is in the
+/// space the entity's position is in: world space for an entity with no
+/// parent. False, changing nothing, for a point at the entity's own
+/// position or straight above or below it, where no one rotation is meant.
+int lua_engine_look_at(lua_State *state) noexcept {
+  runtime::Entity entity{};
+  if (!read_entity(state, 1, &entity) || !lua_isnumber(state, 2) ||
+      !lua_isnumber(state, 3) || !lua_isnumber(state, 4)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  const math::Vec3 point(static_cast<float>(lua_tonumber(state, 2)),
+                         static_cast<float>(lua_tonumber(state, 3)),
+                         static_cast<float>(lua_tonumber(state, 4)));
+  runtime::Transform transform{};
+  math::Quat rotation{};
+  if (!latest_transform(entity, &transform) ||
+      !math::look_rotation(math::sub(point, transform.position),
+                           math::Vec3(0.0F, 1.0F, 0.0F), &rotation)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  transform.rotation = rotation;
+  const bool ok = apply_or_queue_transform(entity, transform, true,
+                                           runtime::MovementAuthority::Script);
+  lua_pushboolean(state, ok ? 1 : 0);
+  return 1;
+}
+
 int lua_engine_get_scale(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity)) {
@@ -553,6 +585,8 @@ void register_body_bindings(lua_State *state) noexcept {
   lua_setfield(state, -2, "get_rotation");
   lua_pushcfunction(state, &lua_engine_set_rotation);
   lua_setfield(state, -2, "set_rotation");
+  lua_pushcfunction(state, &lua_engine_look_at);
+  lua_setfield(state, -2, "look_at");
   lua_pushcfunction(state, &lua_engine_get_scale);
   lua_setfield(state, -2, "get_scale");
   lua_pushcfunction(state, &lua_engine_set_scale);

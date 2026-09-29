@@ -1,9 +1,10 @@
 // Regression test for #346: a committed scene replacement must retire the
-// pipeline's camera interpolation history and give a camera-less
-// replacement scene an explicit default view. Drives the production
-// EnginePipeline headlessly (the pipeline_clock_reset_test.cpp bootstrap
-// pattern) through script-style scene requests and reads the camera the
-// render stage used from the editor bridge's render callback, which the
+// pipeline's camera interpolation history and reset a camera-less
+// replacement scene's camera state (the pose the audio listener follows)
+// to the default; with no Camera the Game view itself draws nothing. Drives the
+// production EnginePipeline headlessly (the pipeline_clock_reset_test.cpp
+// bootstrap pattern) through script-style scene requests and reads the camera
+// the render stage used from the editor bridge's render callback, which the
 // pipeline invokes after the flush and before it restores the
 // un-interpolated sample — the same point the editor overlay reads it.
 //
@@ -217,7 +218,7 @@ int main() {
                    kNearPosition),
         "guard: the live scene's camera is active before any transition");
 
-  // --- Case 1: a camera-less replacement presents the default camera. ---
+  // --- Case 1: a camera-less replacement resets to the default camera. ---
   // Base behavior: nothing republishes a camera for the new World, so the
   // discarded scene's view (and the listener that follows it) stays
   // active indefinitely.
@@ -234,10 +235,10 @@ int main() {
           "camera-less: the replacement publishes no camera");
     CHECK(vec3_equal(engine::renderer::get_active_camera().position,
                      defaultCamera.position),
-          "camera-less replacement presents the default camera, not the "
+          "camera-less replacement resets to the default camera, not the "
           "discarded scene's view");
     CHECK(vec3_equal(rendered.position, defaultCamera.position),
-          "camera-less: the first rendered frame used the default camera");
+          "camera-less: the first frame's camera state is the default");
   }
 
   // --- Case 2: the replacement's first frame is not blended from the
@@ -299,9 +300,9 @@ int main() {
           "new scene: the reset committed");
     CHECK(vec3_equal(engine::renderer::get_active_camera().position,
                      defaultCamera.position),
-          "new scene presents the default camera");
+          "new scene resets to the default camera");
     CHECK(vec3_equal(rendered.position, defaultCamera.position),
-          "new scene: the first rendered frame used the default camera");
+          "new scene: the first frame's camera state is the default");
   }
 
   // --- Case 5: repeated transitions keep the contract. ---

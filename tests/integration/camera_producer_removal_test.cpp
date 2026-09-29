@@ -1,9 +1,12 @@
 // Verifies that removing an entity's camera producers revokes its published
 // CameraManager entry (#392): the update passes visit only components that
 // still exist, so the World's component removal is the one place that can
-// see a producer disappear while the entity stays alive. A removal that
-// leaves the other producer standing must keep the entry, and a failed
-// removal must not touch a camera published by someone else (a Lua push).
+// see a producer disappear while the entity stays alive. Only a Camera
+// renders the game (#796): a spring arm places its entity's Camera and
+// publishes nothing alone, so removing the Camera from a spring-arm rig
+// revokes the entry, while removing the spring arm leaves the Camera
+// publishing; and a failed removal must not touch a camera published by
+// someone else.
 
 #include <cstdio>
 #include <memory>
@@ -65,9 +68,9 @@ bool test_remove_lone_camera_component_revokes_entry() noexcept {
   return world->camera_manager().camera_count() == 0U;
 }
 
-/// EXPECTATION (#392): removing a spring-arm-only producer revokes the
-/// manager entry the same way.
-bool test_remove_lone_spring_arm_revokes_entry() noexcept {
+/// EXPECTATION (#796): a spring arm with no Camera on its entity publishes
+/// nothing, however often it updates; removing it then changes nothing.
+bool test_spring_arm_without_camera_publishes_nothing() noexcept {
   std::unique_ptr<World> world(new (std::nothrow) World());
   if (world == nullptr) {
     return false;
@@ -82,25 +85,18 @@ bool test_remove_lone_spring_arm_revokes_entry() noexcept {
     return false;
   }
   update_spring_arm_cameras(*world, 1.0F);
-  if (world->camera_manager().camera_count() != 1U) {
-    return false;
-  }
-
-  if (!world->remove_spring_arm(entity)) {
-    return false;
-  }
+  update_spring_arm_cameras(*world, 1.0F);
   if (world->camera_manager().camera_count() != 0U) {
     return false;
   }
-
-  update_spring_arm_cameras(*world, 1.0F);
-  return world->camera_manager().camera_count() == 0U;
+  return world->remove_spring_arm(entity) &&
+         (world->camera_manager().camera_count() == 0U);
 }
 
-/// EXPECTATION (#392): on the combined rig, removing the CameraComponent
-/// keeps the entry — the spring arm still publishes the owner (falling back
-/// to its default lens/priority on the next update).
-bool test_remove_camera_component_keeps_spring_arm_producer() noexcept {
+/// EXPECTATION (#796): on the combined rig, removing the CameraComponent
+/// revokes the entry: the spring arm left behind only placed the Camera and
+/// publishes nothing on the next update either.
+bool test_remove_camera_component_revokes_spring_arm_rig() noexcept {
   std::unique_ptr<World> world(new (std::nothrow) World());
   if (world == nullptr) {
     return false;
@@ -120,23 +116,19 @@ bool test_remove_camera_component_keeps_spring_arm_producer() noexcept {
     return false;
   }
   update_spring_arm_cameras(*world, 1.0F);
-  if (world->camera_manager().camera_count() != 1U) {
+  const CameraEntry *active = world->camera_manager().active_camera();
+  if ((active == nullptr) || (active->priority != 42.0F)) {
     return false;
   }
 
   if (!world->remove_camera_component(entity)) {
     return false;
   }
-  if (world->camera_manager().camera_count() != 1U) {
+  if (world->camera_manager().camera_count() != 0U) {
     return false;
   }
-
   update_spring_arm_cameras(*world, 1.0F);
-  const CameraEntry *active = world->camera_manager().active_camera();
-  // The next republish drops back to the spring arm's default priority (10)
-  // now that no CameraComponent supplies one.
-  return (active != nullptr) && (active->ownerEntity == entity) &&
-         (active->priority == 10.0F);
+  return world->camera_manager().camera_count() == 0U;
 }
 
 /// EXPECTATION (#392): on the combined rig, removing the SpringArmComponent
@@ -252,10 +244,10 @@ int main() {
 
   run("test_remove_lone_camera_component_revokes_entry",
       test_remove_lone_camera_component_revokes_entry);
-  run("test_remove_lone_spring_arm_revokes_entry",
-      test_remove_lone_spring_arm_revokes_entry);
-  run("test_remove_camera_component_keeps_spring_arm_producer",
-      test_remove_camera_component_keeps_spring_arm_producer);
+  run("test_spring_arm_without_camera_publishes_nothing",
+      test_spring_arm_without_camera_publishes_nothing);
+  run("test_remove_camera_component_revokes_spring_arm_rig",
+      test_remove_camera_component_revokes_spring_arm_rig);
   run("test_remove_spring_arm_keeps_camera_component_producer",
       test_remove_spring_arm_keeps_camera_component_producer);
   run("test_remove_then_readd_in_one_phase",

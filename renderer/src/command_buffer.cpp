@@ -675,7 +675,7 @@ CameraState get_active_camera() noexcept {
 
 DeviceTextureHandle get_render_view_texture(RenderViewId view) noexcept {
   const std::size_t index = render_view_index(view);
-  if (index >= kMaxRenderViews) {
+  if ((index >= kMaxRenderViews) || !backend_state().views[index].hasImage) {
     return kInvalidDeviceTexture;
   }
   const PassResources &passRes = get_pass_resources(index);

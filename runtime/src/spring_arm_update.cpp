@@ -21,19 +21,20 @@ namespace engine::runtime {
 /// When collision is enabled, a sphere sweep from the pivot (skipping the
 /// owning entity and its compound body) clamps the arm to the first hit so
 /// the camera never lags through geometry; lag smoothing still governs how
-/// the arm extends back toward the authored length. A CameraComponent on
-/// the same entity supplies the lens (fov/near/far) and priority/blendSpeed
-/// -- the standard authored third-person rig -- and an
-/// explicitly disabled one (active == false) suppresses the push entirely;
-/// with no CameraComponent authored the previous hardcoded lens/priority
-/// stay exactly as before, so existing spring-arm-only scenes are unchanged.
+/// the arm extends back toward the authored length. The arm places the
+/// active CameraComponent on the same entity, which supplies the lens
+/// (fov/near/far), priority and blend speed -- the authored third-person
+/// rig. Without an active Camera on the entity the arm publishes nothing:
+/// only a Camera renders the game.
 void update_spring_arm_cameras(World &world, float dt) noexcept {
   CameraManager &camMgr = world.camera_manager();
 
   world.for_each<SpringArmComponent>([&](core::Entity entity,
                                          const SpringArmComponent &arm) {
+    // A spring arm places the entity's Camera; with no active Camera on
+    // the entity it renders nothing, as only a Camera renders the game.
     const CameraComponent *camComp = world.get_camera_component_ptr(entity);
-    if ((camComp != nullptr) && !camComp->active) {
+    if ((camComp == nullptr) || !camComp->active) {
       static_cast<void>(camMgr.pop_camera(entity));
       return;
     }
@@ -103,19 +104,14 @@ void update_spring_arm_cameras(World &world, float dt) noexcept {
     entry.position = camPos;
     entry.target = pivot;
     entry.up = math::Vec3(0.0F, 1.0F, 0.0F);
-    if (camComp != nullptr) {
-      entry.fovRadians = camComp->fovRadians;
-      entry.nearPlane = camComp->nearPlane;
-      entry.farPlane = camComp->farPlane;
-      entry.projection = camComp->projection;
-      entry.orthographicSize = camComp->orthographicSize;
-      entry.blendSpeed = camComp->blendSpeed;
-    } else {
-      entry.blendSpeed = 5.0F;
-    }
-    const float priority = (camComp != nullptr) ? camComp->priority : 10.0F;
+    entry.fovRadians = camComp->fovRadians;
+    entry.nearPlane = camComp->nearPlane;
+    entry.farPlane = camComp->farPlane;
+    entry.projection = camComp->projection;
+    entry.orthographicSize = camComp->orthographicSize;
+    entry.blendSpeed = camComp->blendSpeed;
 
-    camMgr.push_camera(entity, entry, priority);
+    camMgr.push_camera(entity, entry, camComp->priority);
   });
 }
 

@@ -259,8 +259,9 @@ int main() {
   }
 
   // --- Case 3: engine.new_scene. The commit frame renders the outgoing
-  // World whole; the emptied World renders the default camera under its
-  // new epoch from its first frame. ---
+  // World whole; the emptied World's frames carry the default camera state
+  // (no Camera, so the Game view draws nothing) under its new epoch from
+  // its first frame. ---
   {
     const std::uint32_t epochBefore = g_world->content_epoch();
     CHECK(engine::scripting::load_script(kNewSceneScript),
@@ -274,8 +275,8 @@ int main() {
     const std::uint32_t emptyEpoch = g_world->content_epoch();
     CHECK(ticking_frame(pipeline, &frame), "new scene: first frame");
     CHECK(frame_is_single_epoch(frame, emptyEpoch, defaultCamera.position),
-          "new scene: the emptied World renders the default camera under "
-          "its own epoch");
+          "new scene: the emptied World's frame has the default camera "
+          "state under its own epoch");
   }
 
   // --- Case 4: repeated transitions keep the contract. ---

@@ -223,8 +223,8 @@ bool game_camera_notice(const runtime::World &world, char *out,
   int written = 0;
   if (camera == runtime::kInvalidEntity) {
     written = std::snprintf(out, capacity,
-                            "No camera renders the game: add a Camera "
-                            "component or make one active");
+                            "No camera renders the game. Create one, or "
+                            "make a Camera active.");
   } else if (tieCount > 0U) {
     runtime::NameComponent name{};
     const char *label =
@@ -244,6 +244,11 @@ bool game_camera_notice(const runtime::World &world, char *out,
     return false;
   }
   return true;
+}
+
+bool game_view_has_camera(const runtime::World &world) noexcept {
+  return runtime::find_authored_active_camera(world, nullptr) !=
+         runtime::kInvalidEntity;
 }
 
 SceneIconMetrics scene_icon_metrics(float uiScale, float iconScale) noexcept {

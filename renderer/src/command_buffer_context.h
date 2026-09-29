@@ -177,6 +177,9 @@ struct RenderViewResources final {
   CameraState camera{};
   /// Frames this view has rendered its scene in.
   std::uint64_t renderedFrames = 0U;
+  /// Whether the last flush drew the scene into this view's targets; when
+  /// it did not, they hold an older frame.
+  bool hasImage = false;
 
   /// Whether this view's last post chain ended in sceneColor (FXAA ran)
   /// rather than finalColor.
