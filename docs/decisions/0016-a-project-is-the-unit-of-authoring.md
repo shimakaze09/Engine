@@ -10,7 +10,8 @@ when it was opened from its document (`engine_unit_project_data_guid`)
 and by its mounted content root otherwise. Point 1's document format
 exists: the `.project` reader and writer
 (`content/include/engine/content/project_document.h`) own identity, roots,
-the scene list, the startup scene and the main script, and
+the scene list, the startup scene, the main script and its sandbox
+budgets (edited in the editor's Project Settings), and
 `engine_unit_project_document` pins them. A project opens by path through
 `engine::open_project` (`runtime/include/engine/project.h`,
 `engine_integration_project_open`), which `engine_validate --project`
