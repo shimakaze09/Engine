@@ -729,6 +729,27 @@ void same_line_if_button_fits(const char *nextButtonLabel) noexcept {
   }
 }
 
+/// The Entities panel's one creation button, as Unity's Hierarchy has its
+/// "+": it opens the menu right-clicking the panel's empty space opens, so
+/// a newcomer finds creation without knowing to right-click.
+static void draw_create_button() noexcept {
+  ImGui::Separator();
+  ImGui::BeginDisabled(!world_is_editable());
+  if (ImGui::Button("+ Create")) {
+    ImGui::OpenPopup("entities_create_menu");
+  }
+  ImGui::EndDisabled();
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+    ImGui::SetTooltip("Create an entity (also on right-click in the "
+                      "panel's empty space)");
+  }
+  if (ImGui::BeginPopup("entities_create_menu")) {
+    const EntityMenuChoice choice = draw_empty_space_menu_items();
+    ImGui::EndPopup();
+    static_cast<void>(run_entity_menu_choice(choice, EntitySpawnPlacement{}));
+  }
+}
+
 void draw_entities_panel() noexcept {
   if (!ImGui::Begin(kEntitiesWindow)) {
     ImGui::End();
@@ -769,32 +790,7 @@ void draw_entities_panel() noexcept {
     ImGui::EndDragDropTarget();
   }
 
-  ImGui::Separator();
-  const bool editable = world_is_editable();
-  if (!editable) {
-    ImGui::BeginDisabled();
-  }
-
-  if (ImGui::Button("Create Entity") && editable) {
-    const runtime::Entity newEntity = execute_entity_create();
-    if (newEntity != runtime::kInvalidEntity) {
-      select_entity(newEntity, false);
-    }
-  }
-
-  same_line_if_button_fits("Add Primitive");
-  if (ImGui::Button("Add Primitive") && editable) {
-    ImGui::OpenPopup("AddPrimitivePopup");
-  }
-  if (ImGui::BeginPopup("AddPrimitivePopup")) {
-    draw_primitive_menu_items_and_spawn();
-    ImGui::EndPopup();
-  }
-
-  if (!editable) {
-    ImGui::EndDisabled();
-  }
-
+  draw_create_button();
   ImGui::End();
 }
 

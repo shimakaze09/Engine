@@ -9,7 +9,8 @@
 // pasting adds it as one undo step. The Game view's toolbar row offers
 // Take Screenshot, the recording items and the Stats overlay toggle,
 // while a right-click on its image, which belongs to the game, opens
-// nothing.
+// nothing. The Log's toolbar and the Inspector no longer repeat what the
+// menus and the Delete action offer: no Copy All button, no Delete Entity.
 
 #if defined(__clang__) && (defined(__x86_64__) || defined(__i386__)) &&        \
     !defined(__PRFCHWINTRIN_H)
@@ -139,6 +140,9 @@ void check_log() noexcept {
   const PanelFn log = [] { draw_console_panel(); };
   settle(log);
   check(console_capture_entry_count() > 0U, "the log holds a line");
+  const std::string toolbar = frame(log);
+  check(has(toolbar, "Clear") && !has(toolbar, "Copy All"),
+        "the Log's toolbar keeps Clear and leaves Copy All to its menus");
   // The log's scroll region fills the panel above its command line.
   const ImGuiWindow *logWindow = ImGui::FindWindowByName(kLogWindow);
   if (logWindow == nullptr) {
@@ -200,6 +204,8 @@ void check_inspector(World &world) noexcept {
   component_clipboard_clear();
   const PanelFn inspector = [] { draw_inspector_panel(); };
   settle(inspector);
+  check(!has(frame(inspector), "Delete Entity"),
+        "the Inspector has no Delete button; deleting is the scene's edit");
 
   const ImVec2 empty = bottom_of(kInspectorWindow);
   std::string text = right_click(inspector, empty);
