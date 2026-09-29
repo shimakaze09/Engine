@@ -9,6 +9,7 @@
 #include "editor_panels_console.h"
 #include "editor_panels_diagnostics.h"
 #include "editor_play_recording.h"
+#include "editor_project_hub.h"
 #include "editor_scene_document.h"
 #include "editor_session.h"
 #include "editor_shortcuts.h"
@@ -244,6 +245,16 @@ void draw_main_menu_bar() noexcept {
     ImGui::Separator();
     editor_action_menu_item(EditorAction::SaveScene);
     editor_action_menu_item(EditorAction::SaveSceneAs);
+    ImGui::Separator();
+    // Leaving the project ends this run: the executable opens the next
+    // one, or the hub, once any unsaved document is resolved.
+    if (ImGui::MenuItem("Open Project...")) {
+      project_hub_request_open_dialog();
+    }
+    if (ImGui::MenuItem("Close Project")) {
+      project_hub_close_project();
+    }
+    ImGui::SetItemTooltip("Back to the project list");
     ImGui::Separator();
     editor_action_menu_item(EditorAction::Exit);
 

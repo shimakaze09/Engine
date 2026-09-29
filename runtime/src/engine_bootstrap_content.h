@@ -30,7 +30,6 @@ struct BootstrapMeshIds final {
   content::AssetId capsule = content::kInvalidAssetId;
   content::AssetId pyramid = content::kInvalidAssetId;
   content::AssetId grass = content::kInvalidAssetId;
-  content::AssetId character = content::kInvalidAssetId;
 };
 
 /// Loads the sample mesh asset and registers every built-in primitive.

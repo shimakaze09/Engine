@@ -4,9 +4,13 @@
 // terminal it was started from, if any, and says why in an error box when
 // it cannot start, since it has no console to say it in. It opens the
 // project named on its command line (a directory or a .project document);
-// with none, the sample project beside the executable, until the project
-// hub takes that role; and where there is none either (the web page, whose
-// content is preloaded at assets/), the engine's default content paths.
+// with none, the project hub, where a project is chosen or created. A run
+// ends by quitting or by switching projects (File > Open Project, Close
+// Project, or a choice in the hub): the engine then shuts down and boots
+// again with the next project, or the hub, as Godot's editor relaunches
+// on a project chosen in its project manager. The web page has no
+// filesystem to choose from: it runs once, on the content preloaded at
+// the engine's default paths.
 
 #include "engine/core/command_line.h"
 #include "engine/core/logging.h"
@@ -15,6 +19,7 @@
 #include "engine/project.h"
 
 #include <cstdio>
+#include <cstring>
 
 namespace {
 
@@ -29,6 +34,19 @@ int fail_to_start(const char *message) noexcept {
   engine::core::platform_show_error_box("Engine", text);
   return static_cast<int>(engine::ExitCode::BootstrapFailed);
 }
+
+#if !defined(ENGINE_PLATFORM_WEB)
+/// Shows why the project at `path` did not open and returns the bootstrap
+/// failure code.
+int fail_to_open(const char *path,
+                 engine::ProjectOpenFailureKind kind) noexcept {
+  char message[768] = {};
+  std::snprintf(message, sizeof(message),
+                "The project could not be opened.\n\n%.400s: %s", path,
+                engine::project_open_failure_text(kind));
+  return fail_to_start(message);
+}
+#endif
 
 } // namespace
 
@@ -52,33 +70,59 @@ int main(int argc, char **argv) {
     return static_cast<int>(engine::ExitCode::BootstrapFailed);
   }
 
-  // Static: about 18 KB, and the config points into it until bootstrap has
-  // copied what it keeps.
-  static engine::ProjectStorage project{};
+#if defined(ENGINE_PLATFORM_WEB)
   engine::EngineConfig config{};
-  char bundled[600] = {};
-  const char *projectPath = commandLine->positional(0U);
-  if ((projectPath == nullptr) &&
-      engine::find_bundled_sample_project(bundled, sizeof(bundled))) {
-    projectPath = bundled;
-  }
-  if (projectPath != nullptr) {
-    const auto opened = engine::open_project(projectPath, &project, &config);
-    if (!opened.has_value()) {
-      char message[768] = {};
-      std::snprintf(message, sizeof(message),
-                    "The project could not be opened.\n\n%.400s: %s",
-                    projectPath,
-                    engine::project_open_failure_text(opened.error().kind));
-      return fail_to_start(message);
-    }
-  }
-
   if (!engine::bootstrap(config)) {
     return fail_to_start("The editor could not start.");
   }
-
-  const engine::RunResult result = engine::run(0);
+  const engine::RunResult webResult = engine::run(0);
   engine::shutdown();
-  return engine::run_result_exit_code(result);
+  return engine::run_result_exit_code(webResult);
+#else
+  // Static: about 18 KB, and the config points into it until bootstrap has
+  // copied what it keeps.
+  static engine::ProjectStorage project{};
+  // The project the next run opens; empty is the hub.
+  char next[engine::kProjectOsPathCapacity] = {};
+  const char *named = commandLine->positional(0U);
+  if (named != nullptr) {
+    if (std::strlen(named) >= sizeof(next)) {
+      return fail_to_open(named, engine::ProjectOpenFailureKind::PathTooLong);
+    }
+    std::snprintf(next, sizeof(next), "%s", named);
+  }
+  bool fromCommandLine = (named != nullptr);
+
+  for (;;) {
+    engine::EngineConfig config{};
+    if (next[0] == '\0') {
+      engine::configure_without_project(&config);
+    } else {
+      const auto opened = engine::open_project(next, &project, &config);
+      if (!opened.has_value()) {
+        // The project the user named at launch is the one they wanted, so
+        // it fails the start; one chosen in the hub or a menu was checked
+        // when chosen, and one that has gone since goes back to the hub.
+        if (fromCommandLine) {
+          return fail_to_open(next, opened.error().kind);
+        }
+        engine::configure_without_project(&config);
+      }
+    }
+    fromCommandLine = false;
+
+    if (!engine::bootstrap(config)) {
+      return fail_to_start("The editor could not start.");
+    }
+    const engine::RunResult result = engine::run(0);
+    engine::shutdown();
+    if (result != engine::RunResult::Stopped) {
+      return engine::run_result_exit_code(result);
+    }
+    bool toHub = false;
+    if (!engine::take_project_switch(next, sizeof(next), &toHub)) {
+      return engine::run_result_exit_code(result);
+    }
+  }
+#endif
 }

@@ -45,6 +45,7 @@ engine_add_module_library(engine_editor
     src/editor_panels_viewport.cpp
     src/editor_scene_document.cpp
     src/editor_recent_list.cpp
+    src/editor_project_hub.cpp
     src/editor_session.cpp
     src/editor_shortcuts.cpp
     src/editor_camera.cpp

@@ -68,6 +68,7 @@
 #include "editor_panels_viewport.h"
 #include "editor_play_recording.h"
 #include "editor_preferences.h"
+#include "editor_project_hub.h"
 #include "editor_scene_document.h"
 #include "editor_screenshot.h"
 #include "editor_session.h"
@@ -107,9 +108,16 @@ void setup_default_dock_layout(ImGuiID dockspaceId) noexcept {
 }
 
 void draw_editor_panels(float frameMs, float utilizationPct) noexcept {
-  advance_thumbnail_frame();
   static_cast<void>(frameMs);
   static_cast<void>(utilizationPct);
+  project_hub_poll_dialogs();
+  // With no project open the editor is the project hub, as Unity Hub and
+  // Godot's project manager are: nothing else has content to show.
+  if (!has_open_project()) {
+    draw_project_hub();
+    return;
+  }
+  advance_thumbnail_frame();
 
   draw_main_menu_bar();
   draw_toolbar();
@@ -350,6 +358,11 @@ bool initialize_editor(void *sdlWindow) noexcept {
   }
 
   editor_session().initialized = true;
+  scene_document_arm_startup_scene();
+  project_hub_note_open_project();
+  if (!has_open_project()) {
+    project_hub_seed_bundled_sample();
+  }
   return true;
 }
 
@@ -400,6 +413,7 @@ void reset_editor_session_residue() noexcept {
   editor_session().pickers = ReferencePickerState{};
   editor_session().console = ConsolePanelState{};
   editor_session().inspector = InspectorPanelState{};
+  project_hub_reset();
 }
 
 void editor_new_frame() noexcept {
@@ -411,6 +425,7 @@ void editor_new_frame() noexcept {
   // refreshes the title bar before drawing, so both reflect this frame's
   // document state rather than lagging one frame behind.
   scene_document_poll_dialog_result();
+  scene_document_open_startup_scene();
   scene_document_update_window_title();
 
   ImGui_ImplBgfx_NewFrame();
@@ -420,7 +435,10 @@ void editor_new_frame() noexcept {
 
   // While the game has the keyboard (the Game view focused in play), its
   // keys are the game's, not editor shortcuts: W is a move, not a gizmo.
-  dispatch_editor_shortcuts();
+  // The hub has no scene for them to act on.
+  if (has_open_project()) {
+    dispatch_editor_shortcuts();
+  }
 }
 
 void editor_render(float frameMs, float utilizationPct) noexcept {
