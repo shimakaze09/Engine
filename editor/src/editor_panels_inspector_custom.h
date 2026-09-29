@@ -56,6 +56,10 @@ void draw_scene_capture_preview(
 /// hints -- a new registry row appears here automatically.
 void draw_add_component_menu(runtime::Entity entity, bool editable) noexcept;
 
+/// Draws the same choices as an "Add Component" submenu of a context menu,
+/// one submenu per category; disabled unless `editable`.
+void draw_add_component_submenu(runtime::Entity entity, bool editable) noexcept;
+
 /// Writes the component types the Add Component menu offers for `entity`
 /// into `out`, in registry order, and returns how many: every registry
 /// type the entity does not carry, less those whose Inspector metadata

@@ -9,6 +9,8 @@
 #include "editor_entity_menus.h"
 #include "editor_grid.h"
 #include "editor_light_gizmos.h"
+#include "editor_panels_diagnostics.h"
+#include "editor_play_recording.h"
 #include "editor_scene_query.h"
 #include "editor_screenshot.h"
 #include "editor_session.h"
@@ -933,6 +935,33 @@ void draw_game_view_toolbar(bool capturing) noexcept {
   }
 }
 
+constexpr const char *kGameViewMenu = "game_view_menu";
+
+/// The Game view's own menu: its toolbar's actions and the stats overlay.
+/// A right-click on the toolbar row opens it; the image belongs to the
+/// game, which needs its right mouse button, so a right-click there opens
+/// nothing, as neither Unity's Game view nor Unreal's play viewport takes
+/// one. Nothing opens in the frame a screenshot is taken.
+void draw_game_view_menu(float imageTop, bool capturing) noexcept {
+  if (!capturing && ImGui::IsWindowHovered() &&
+      ImGui::IsMouseReleased(ImGuiMouseButton_Right) &&
+      (ImGui::GetIO().MousePos.y < imageTop)) {
+    ImGui::OpenPopup(kGameViewMenu);
+  }
+  if (!ImGui::BeginPopup(kGameViewMenu)) {
+    return;
+  }
+  editor_action_menu_item(EditorAction::Screenshot);
+  ImGui::Separator();
+  draw_recording_menu_items();
+  ImGui::Separator();
+  bool showStats = core::cvar_get_bool(kShowStatsCvar, false);
+  if (ImGui::MenuItem("Stats", nullptr, &showStats)) {
+    static_cast<void>(core::cvar_set_bool(kShowStatsCvar, showStats));
+  }
+  ImGui::EndPopup();
+}
+
 } // namespace
 
 void draw_game_view_panel() noexcept {
@@ -959,6 +988,7 @@ void draw_game_view_panel() noexcept {
   draw_game_view_toolbar(capturing);
   const ImVec2 regionSize = ImGui::GetContentRegionAvail();
   session.gameViewScreenPos = ImGui::GetCursorScreenPos();
+  draw_game_view_menu(session.gameViewScreenPos.y, capturing);
   session.gameViewScreenSize = regionSize;
   int width = 0;
   int height = 0;
