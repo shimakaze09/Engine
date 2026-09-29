@@ -710,6 +710,9 @@ struct EnginePipeline::Impl final {
   bool probeAssetsWereLoading = false;
   // Distinguishes fatal loop exits from graceful stops for engine::run.
   bool fatalError = false;
+  // The player's startup scene is requested and not yet committed; its
+  // commit failing stops the run.
+  bool startupScenePending = false;
   LoopPlayState previousPlayState = LoopPlayState::Playing;
   std::size_t previousAliveCount = 0U;
   // Entities spawned and destroyed since the last slice diagnostics line,
@@ -985,12 +988,22 @@ bool EnginePipeline::Impl::initialize(std::uint32_t maxFrameCount) noexcept {
   core::reset_engine_stats();
 
   // Player mode: boot the configured startup scene through the
-  // deferred transition engine.load_scene uses — a failed load logs and
-  // keeps the bootstrap scene rather than corrupting the run.
+  // deferred transition engine.load_scene uses. A player has nothing to
+  // show without it, so a startup scene that cannot load stops the run
+  // (stage_scene_commit) rather than playing the empty bootstrap world.
   if (active_config().playerMode) {
     const char *scenePath = active_config().editorScenePath;
     if ((scenePath != nullptr) && (scenePath[0] != '\0')) {
-      static_cast<void>(scripting::request_scene_load(scenePath));
+      if (!scripting::request_scene_load(scenePath)) {
+        char message[320] = {};
+        std::snprintf(message, sizeof(message),
+                      "the startup scene '%s' could not be requested; the "
+                      "player stops",
+                      scenePath);
+        core::log_message(core::LogLevel::Error, "engine", message);
+        return false;
+      }
+      startupScenePending = true;
     }
   }
 
@@ -2344,7 +2357,20 @@ void EnginePipeline::Impl::stage_render() noexcept {
 // so a mutation a handler defers is still applied before this commit
 // decides what content the transition replaces.
 void EnginePipeline::Impl::stage_scene_commit() noexcept {
-  static_cast<void>(runtime::process_pending_scene_op(*world));
+  const bool committed = runtime::process_pending_scene_op(*world);
+  if (!startupScenePending) {
+    return;
+  }
+  startupScenePending = false;
+  if (!committed) {
+    char message[320] = {};
+    std::snprintf(message, sizeof(message),
+                  "the startup scene '%s' could not load; the player stops",
+                  active_config().editorScenePath);
+    core::log_message(core::LogLevel::Error, "engine", message);
+    fatalError = true;
+    running = false;
+  }
 }
 
 // ---------------------------------------------------------------------------
