@@ -3,7 +3,10 @@
 // cost N stat calls per frame (and a missing script kept polling per
 // entity after its retry budget was spent). A dispatch frame now polls
 // each cached module at most once, and a changed file is still picked up
-// on the very next dispatch, through the production scripting bridge.
+// on the very next dispatch, through the production scripting bridge. A
+// module addressed through a mount whose directory is not the working
+// directory, as every project's scripts are once a project opens by path,
+// is picked up on change the same way.
 
 #include <chrono>
 #include <cstdio>
@@ -11,9 +14,12 @@
 #include <filesystem>
 #include <memory>
 #include <new>
+#include <string>
+#include <system_error>
 
 #include "../test_harness.h"
 #include "engine/core/service_locator.h"
+#include "engine/core/vfs.h"
 #include "engine/runtime/scripting_bridge.h"
 #include "engine/runtime/world.h"
 #include "engine/scripting/scripting.h"
@@ -64,10 +70,66 @@ bool spawn_scripted(rt::World &world, const char *path,
   return true;
 }
 
+/// A module under a mount away from the working directory: its path
+/// names nothing relative to the cwd, so only the mount finds its file.
+void check_mounted_module_reloads(engine::tests::TestContext &ctx,
+                                  rt::World &world) noexcept {
+  std::error_code error{};
+  const std::filesystem::path root =
+      std::filesystem::temp_directory_path(error) /
+      "engine_script_poll_cadence_mount";
+  std::filesystem::remove_all(root, error);
+  std::filesystem::create_directories(root, error);
+  const std::string rootText = root.string();
+  const std::filesystem::path file = root / "mounted.lua";
+  const std::string fileText = file.string();
+  ctx.check(!error && engine::core::mount("pollmount", rootText.c_str()),
+            "mount a script directory away from the cwd");
+  ctx.check(!std::filesystem::exists("pollmount", error),
+            "the mounted path names nothing relative to the cwd");
+
+  ctx.check(write_file(fileText.c_str(), "local M = {}\n"
+                                         "g_mounted = 1\n"
+                                         "function M.on_tick(self, dt) end\n"
+                                         "return M\n"),
+            "write the mounted module");
+  ctx.check(write_file(kDriverScript,
+                       "function check_mounted_two()\n"
+                       "    if g_mounted ~= 2 then error('stale') end\n"
+                       "end\n") &&
+                sc::load_script(kDriverScript),
+            "load the mounted-module driver");
+  ctx.check(spawn_scripted(world, "pollmount/mounted.lua", 1U),
+            "spawn an entity running the mounted module");
+  sc::dispatch_entity_scripts_begin_play(&world);
+  sc::dispatch_entity_scripts_update(1.0F / 60.0F);
+
+  const auto mtime = std::filesystem::last_write_time(file, error);
+  ctx.check(!error && write_file(fileText.c_str(),
+                                 "local M = {}\n"
+                                 "g_mounted = 2\n"
+                                 "function M.on_tick(self, dt) end\n"
+                                 "return M\n"),
+            "write the mounted module's second generation");
+  std::filesystem::last_write_time(file, mtime + std::chrono::seconds(2),
+                                   error);
+  ctx.check(!error, "advance the mounted module's timestamp");
+  sc::dispatch_entity_scripts_update(1.0F / 60.0F);
+  ctx.check(sc::call_script_function("check_mounted_two"),
+            "a mounted module is reloaded when its file changes");
+
+  static_cast<void>(engine::core::unmount("pollmount"));
+  std::filesystem::remove_all(root, error);
+}
+
 } // namespace
 
 /// Runs this executable or test program.
 int main() {
+  if (!engine::core::initialize_vfs()) {
+    std::fprintf(stderr, "FAIL: initialize_vfs\n");
+    return 1;
+  }
   if (!sc::initialize_scripting()) {
     std::fprintf(stderr, "FAIL: initialize_scripting\n");
     return 1;
@@ -131,7 +193,10 @@ int main() {
   ctx.check(sc::call_script_function("check_generation_two"),
             "the next dispatch after the change runs the new generation");
 
+  check_mounted_module_reloads(ctx, *world);
+
   sc::shutdown_scripting();
+  engine::core::shutdown_vfs();
   static_cast<void>(std::remove(kSharedScript));
   static_cast<void>(std::remove(kDriverScript));
   return ctx.finish("script_module_poll_cadence");

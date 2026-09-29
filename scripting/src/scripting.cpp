@@ -341,6 +341,18 @@ int open_libraries_trampoline(lua_State *state) noexcept {
   return 0;
 }
 
+/// Modification time of a script (the watched main script, an entity or a
+/// required module) read where its chunk is loaded from: through the mount
+/// when the path is mounted, so a script under a content root away from
+/// the cwd, as every opened project's is, hot-reloads like one beside it.
+std::int64_t script_file_mtime_ns(const char *path) noexcept {
+  char osPath[1024] = {};
+  if (!resolve_script_os_path(path, osPath, sizeof(osPath))) {
+    return 0;
+  }
+  return core::file_mtime_ns(osPath);
+}
+
 } // namespace
 
 /// Accounting lua_Alloc: sandbox-gated cap, wrap-safe, counted from creation.
@@ -476,7 +488,7 @@ bool initialize_scripting() noexcept {
   configure_entity_script_bindings(
       state,
       EntityScriptBindingCallbacks{&push_entity_handle, &log_lua_error,
-                                   &refresh_lua_hook, &core::file_mtime_ns});
+                                   &refresh_lua_hook, &script_file_mtime_ns});
 
   lua_pushcfunction(state, &open_libraries_trampoline);
   if (lua_pcall(state, 0, 0, 0) != LUA_OK) {
@@ -699,17 +711,6 @@ std::size_t active_timer_ref_count() noexcept {
 }
 
 std::size_t active_entity_pool_count() noexcept { return pool_slot_count(); }
-
-/// Modification time of a watched script read where its chunk is loaded
-/// from: through the mount when the path is mounted, so a script
-/// under an asset root away from the cwd hot-reloads like one beside it.
-std::int64_t script_file_mtime_ns(const char *path) noexcept {
-  char osPath[1024] = {};
-  if (!resolve_script_os_path(path, osPath, sizeof(osPath))) {
-    return 0;
-  }
-  return core::file_mtime_ns(osPath);
-}
 
 /// Adds a script to the hot-reload watch table (or refreshes its mtime when
 /// already watched). Watching a new file no longer drops earlier watches;
