@@ -1,9 +1,9 @@
 // Declares the project document: "<name>.project" at a project
 // directory's root, the file that makes a directory a project (decision
 // 0016). It owns the project's identity, its roots, its scene list, its
-// startup scene, its main script and its script limits; every other
-// per-project table joins it as a schema field when the epic that needs it
-// lands.
+// startup scene, its main script, its script limits and the packages it
+// depends on; every other per-project table joins it as a schema field
+// when the epic that needs it lands.
 //
 // The document is authored and committed. Reading refuses anything this
 // schema does not describe exactly: an unknown version, an unknown or
@@ -49,6 +49,29 @@ inline constexpr std::size_t kProjectPathCapacity = 256U;
 /// The virtual mount every content path in the document is under. The
 /// content root, wherever it is on disk, is mounted here.
 inline constexpr const char *kProjectContentMount = "assets";
+
+/// The virtual mount every package's content is under: package `name` is
+/// mounted at "packages/<name>", disjoint from the content mount and the
+/// engine's own.
+inline constexpr const char *kProjectPackagesMount = "packages";
+
+/// Most packages a project depends on; a list past it is refused.
+inline constexpr std::size_t kMaxProjectPackages = 16U;
+
+/// A package name's capacity, terminator included.
+inline constexpr std::size_t kProjectPackageNameCapacity = 49U;
+
+/// One package the project depends on (Unity's manifest dependencies,
+/// Godot's addons). Its assets are addressed "packages/<name>/...", with
+/// their identities in their own sidecars, exactly as the project's are.
+struct ProjectPackage final {
+  /// Lower-case letters, digits, '_' and '-', starting with a letter or a
+  /// digit, so it is the same file name on every filesystem.
+  char name[kProjectPackageNameCapacity] = {};
+  /// Where the package comes from. The only kind this schema reads is an
+  /// embedded package, the project directory's "packages/<name>".
+  char source[kProjectRootCapacity] = {};
+};
 
 /// The script limits a project may set, bounded so a typo cannot stop the
 /// project opening (a Lua VM that cannot allocate its own libraries fails
@@ -104,6 +127,10 @@ struct ProjectDocument final {
   char mainScript[kProjectPathCapacity] = {};
   /// The script limits the project sets, if any.
   ProjectScriptLimits scriptLimits{};
+  /// The packages the project depends on, in the author's order; none is
+  /// written as no "dependencies" key.
+  ProjectPackage packages[kMaxProjectPackages] = {};
+  std::size_t packageCount = 0U;
 };
 
 /// Why a project document was not read or not accepted.

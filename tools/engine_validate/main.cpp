@@ -4,7 +4,8 @@
 // non-zero when a scene fails to load or reports an Error, so CI catches
 // a dangling reference before an author does. Given --project, it opens
 // the project through engine::open_project and validates every scene the
-// project lists, with the project's content root mounted.
+// project lists, with the project's content root and its packages
+// mounted.
 
 #include <cstdio>
 #include <cstring>
@@ -106,6 +107,17 @@ int main(int argc, char **argv) {
     std::fprintf(stderr, "error: could not mount %s as assets\n",
                  assetsDirectory);
     return 2;
+  }
+  // A project's packages are mounted as the engine mounts them, so a scene
+  // naming a package's asset validates as it loads.
+  for (std::size_t i = 0U; byProject && (i < project.document.packageCount);
+       ++i) {
+    if (!engine::core::mount(project.packages[i].mount,
+                             project.packages[i].root)) {
+      std::fprintf(stderr, "error: could not mount %s as %s\n",
+                   project.packages[i].root, project.packages[i].mount);
+      return 2;
+    }
   }
 
   std::unique_ptr<engine::runtime::World> world(new (std::nothrow)

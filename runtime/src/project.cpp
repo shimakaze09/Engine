@@ -173,7 +173,32 @@ open_project(const char *path, ProjectStorage *storage,
     }
   }
 
+  static_assert(content::kMaxProjectPackages <= kMaxPackageMounts);
+  for (std::size_t i = 0U; i < staged->document.packageCount; ++i) {
+    const content::ProjectPackage &package = staged->document.packages[i];
+    const std::filesystem::path root =
+        (directory / package.source).lexically_normal();
+    std::snprintf(staged->packageMounts[i], sizeof(staged->packageMounts[i]),
+                  "%s/%s", content::kProjectPackagesMount, package.name);
+    if (!store_path(root, staged->packageRoots[i],
+                    sizeof(staged->packageRoots[i]))) {
+      return refuse(path, ProjectOpenFailureKind::PathTooLong,
+                    "move the project to a shorter path");
+    }
+    if (!std::filesystem::is_directory(root, ec) || ec) {
+      return refuse(path, ProjectOpenFailureKind::PackageMissing,
+                    staged->packageRoots[i]);
+    }
+  }
+
   *storage = *staged;
+  for (std::size_t i = 0U; i < storage->document.packageCount; ++i) {
+    storage->packages[i] =
+        ContentMount{storage->packageMounts[i], storage->packageRoots[i]};
+  }
+  config->packages =
+      (storage->document.packageCount > 0U) ? storage->packages : nullptr;
+  config->packageCount = storage->document.packageCount;
   config->assetMount = content::kProjectContentMount;
   config->assetRoot = storage->contentRoot;
   config->projectFile = storage->projectFile;
@@ -222,6 +247,8 @@ const char *project_open_failure_text(ProjectOpenFailureKind kind) noexcept {
     return "the startup scene is missing";
   case ProjectOpenFailureKind::MainScriptMissing:
     return "the main script is missing";
+  case ProjectOpenFailureKind::PackageMissing:
+    return "a package the project depends on is missing";
   case ProjectOpenFailureKind::PathTooLong:
     return "a project path is too long";
   }
@@ -237,6 +264,8 @@ void configure_without_project(EngineConfig *config) noexcept {
   config->editorAssetRoot = "";
   config->editorScenePath = "";
   config->mainScriptPath = "";
+  config->packages = nullptr;
+  config->packageCount = 0U;
   const ScriptLimits defaults{};
   config->scriptInstructionLimit = defaults.instructionLimit;
   config->scriptMemoryLimitBytes = defaults.memoryLimitBytes;

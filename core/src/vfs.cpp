@@ -28,7 +28,7 @@ namespace engine::core {
 
 namespace {
 
-constexpr std::size_t kMaxMounts = 16U;
+constexpr std::size_t kMaxMounts = 32U;
 constexpr std::size_t kMaxPrefixLength = 64U;
 constexpr std::size_t kMaxOsPathLength = 260U;
 constexpr std::size_t kMaxResolvedPathLength = 512U;

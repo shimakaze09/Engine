@@ -33,7 +33,7 @@ namespace fs = std::filesystem;
 
 constexpr const char *kNewProjectPopup = "New Project";
 /// The engine content's empty-project template, under the engine root.
-constexpr const char *kEmptyProjectTemplate = "templates/empty_project";
+constexpr const char *kEmptyProjectTemplate = "templates~/empty_project";
 
 /// The hub's per-session state.
 struct HubState final {

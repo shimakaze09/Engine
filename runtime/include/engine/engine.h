@@ -10,6 +10,17 @@
 
 namespace engine {
 
+/// One content directory mounted beside the project's own: the virtual
+/// prefix it answers to and the OS directory it reads.
+struct ContentMount final {
+  const char *mount = "";
+  const char *root = "";
+};
+
+/// Most package mounts a configuration carries; the project document
+/// refuses a list longer than this.
+inline constexpr std::size_t kMaxPackageMounts = 16U;
+
 /// Describes app/runtime startup paths and core ownership.
 struct EngineConfig final {
   core::CoreConfig core{};
@@ -36,6 +47,13 @@ struct EngineConfig final {
   /// is not a directory.
   const char *engineMount = "engine";
   const char *engineRoot = "";
+  /// The packages the project depends on, each mounted at its own prefix
+  /// ("packages/<name>") from its own directory, catalogued like the
+  /// project's content. open_project fills them; bootstrap refuses more
+  /// than kMaxPackageMounts, a null table with a count, packages with no
+  /// project, and a root that is not a directory.
+  const ContentMount *packages = nullptr;
+  std::size_t packageCount = 0U;
   const char *mainScriptPath = "assets/main.lua";
   const char *bootstrapMeshPath = "engine/triangle.mesh";
   const char *shaderRootPath = "engine/shaders";

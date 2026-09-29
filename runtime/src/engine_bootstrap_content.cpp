@@ -23,6 +23,23 @@
 
 namespace engine {
 
+namespace {
+
+/// Loads the materials in `<root>/materials` as `<mount>/materials/...`.
+std::size_t load_materials_of(renderer::AssetDatabase *assetDatabase,
+                              content::AssetCatalog *catalog, const char *mount,
+                              const char *root) noexcept {
+  char materialsDir[512] = {};
+  std::snprintf(materialsDir, sizeof(materialsDir), "%s/materials", root);
+  char materialsPrefix[512] = {};
+  std::snprintf(materialsPrefix, sizeof(materialsPrefix), "%s/materials",
+                mount);
+  return renderer::load_material_assets_in_directory(
+      assetDatabase, catalog, materialsDir, materialsPrefix);
+}
+
+} // namespace
+
 bool resolve_mesh_asset_path(char *outPath, std::size_t outCapacity) noexcept {
   if ((outPath == nullptr) || (outCapacity == 0U)) {
     return false;
@@ -153,17 +170,25 @@ bool load_bootstrap_meshes(renderer::AssetManager *assetManager,
   }
   static_cast<void>(content::register_mounted_assets(
       catalog, active_config().assetMount, active_config().assetRoot));
+  // Each package after the project, so an asset of a package that claims
+  // an identity the project (or an earlier package) holds is the one
+  // named, and the project's own keeps resolving.
+  for (std::size_t i = 0U; i < active_config().packageCount; ++i) {
+    static_cast<void>(content::register_mounted_assets(
+        catalog, active_config().packages[i].mount,
+        active_config().packages[i].root));
+  }
 
-  // Discover project material JSONs so MeshComponent.materialAssetId
-  // references resolve during render prep.
-  char materialsDir[512] = {};
-  std::snprintf(materialsDir, sizeof(materialsDir), "%s/materials",
-                active_config().assetRoot);
-  char materialsPrefix[512] = {};
-  std::snprintf(materialsPrefix, sizeof(materialsPrefix), "%s/materials",
-                active_config().assetMount);
-  const std::size_t materialCount = renderer::load_material_assets_in_directory(
-      assetDatabase, catalog, materialsDir, materialsPrefix);
+  // Discover the material JSONs of the project and of each package so
+  // MeshComponent.materialAssetId references resolve during render prep.
+  std::size_t materialCount =
+      load_materials_of(assetDatabase, catalog, active_config().assetMount,
+                        active_config().assetRoot);
+  for (std::size_t i = 0U; i < active_config().packageCount; ++i) {
+    materialCount += load_materials_of(assetDatabase, catalog,
+                                       active_config().packages[i].mount,
+                                       active_config().packages[i].root);
+  }
   if (materialCount > 0U) {
     char logBuffer[128] = {};
     std::snprintf(logBuffer, sizeof(logBuffer), "loaded %zu material assets",

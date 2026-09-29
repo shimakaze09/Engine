@@ -3,7 +3,7 @@
 // "Directional Light" and a "Scene Controller" running the configured
 // main script, and nothing else; the sample's assets/main.scene, which
 // player mode boots, and the new-project template's (in engine_assets/
-// templates/empty_project) both load to that same scene. None of them can
+// templates~/empty_project) both load to that same scene. None of them can
 // drift apart: changing one without the others fails here, and a mismatch
 // writes the scene the engine builds to the temp directory for comparison.
 
@@ -107,7 +107,7 @@ int main() {
   const std::string built(builtBytes.data(), builtSize);
   const std::string templateScene =
       (std::filesystem::path(engine::tests::engine_root_path()) /
-       "templates/empty_project/assets/main.scene")
+       "templates~/empty_project/assets/main.scene")
           .string();
   check_shipped_scene(built, "assets/main.scene");
   check_shipped_scene(built, templateScene.c_str());
