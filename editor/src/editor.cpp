@@ -350,6 +350,7 @@ bool initialize_editor(void *sdlWindow) noexcept {
   }
 
   editor_session().initialized = true;
+  scene_document_arm_startup_scene();
   return true;
 }
 
@@ -411,6 +412,7 @@ void editor_new_frame() noexcept {
   // refreshes the title bar before drawing, so both reflect this frame's
   // document state rather than lagging one frame behind.
   scene_document_poll_dialog_result();
+  scene_document_open_startup_scene();
   scene_document_update_window_title();
 
   ImGui_ImplBgfx_NewFrame();

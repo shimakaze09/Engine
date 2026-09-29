@@ -60,6 +60,9 @@ struct SceneDocumentState final {
                           kMaxRecentScenes, &recent_entry_is_file};
 
   char lastSaveError[kMaxDocumentPathLength + 64U] = {};
+  // Set when a session starts inside a project: its startup scene opens
+  // on the first frame with a world, once.
+  bool startupScenePending = false;
 };
 
 /// Returns the document's display name ("Untitled Scene" when unsaved).
@@ -170,6 +173,17 @@ void recent_scenes_load_once() noexcept;
 void recent_scenes_add(const char *path) noexcept;
 std::size_t recent_scene_count() noexcept;
 const char *recent_scene_at(std::size_t index) noexcept;
+
+/// Arms the project's startup scene (EngineConfig::editorScenePath) to
+/// open on the next scene_document_open_startup_scene; nothing with no
+/// project open.
+void scene_document_arm_startup_scene() noexcept;
+/// Opens the armed startup scene into the bound world as the document, as
+/// Unity and Godot open a project on its scene, and disarms it: once per
+/// session, only while no document is open and nothing is unsaved. A
+/// scene that does not open leaves the built-in world, with a Warning
+/// naming it. Does nothing until a world is bound.
+void scene_document_open_startup_scene() noexcept;
 
 /// Refreshes the OS window title from the document identity/dirty state;
 /// a no-op past the first call in a frame where nothing changed.

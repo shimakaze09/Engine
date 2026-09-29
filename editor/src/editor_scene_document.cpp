@@ -17,6 +17,8 @@
 
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
+#include "engine/core/vfs.h"
+#include "engine/engine.h"
 #include "engine/runtime/editor_bridge.h"
 #include "engine/runtime/scene_serializer.h"
 #include "engine/runtime/world.h"
@@ -599,6 +601,36 @@ std::size_t recent_scene_count() noexcept {
 
 const char *recent_scene_at(std::size_t index) noexcept {
   return recent_list_at(&editor_session().document.recentScenes, index);
+}
+
+void scene_document_arm_startup_scene() noexcept {
+  editor_session().document.startupScenePending = has_open_project();
+}
+
+void scene_document_open_startup_scene() noexcept {
+  EditorSession &session = editor_session();
+  if (!session.document.startupScenePending || (session.world == nullptr)) {
+    return;
+  }
+  session.document.startupScenePending = false;
+  // Something already opened, or edited, stays as it is.
+  if (session.document.hasPath || scene_document_is_dirty()) {
+    return;
+  }
+  const char *scene = editor_scene_path();
+  // Opened by its file, as a scene chosen in a dialog is, so the document
+  // and Recent Scenes name the file wherever the editor was started.
+  char osPath[kMaxDocumentPathLength] = {};
+  if ((scene[0] == '\0') ||
+      !core::vfs_resolve_os_path(scene, osPath, sizeof(osPath)) ||
+      !perform_scene_open(osPath)) {
+    char message[kMaxDocumentPathLength + 128U] = {};
+    std::snprintf(message, sizeof(message),
+                  "the project's startup scene '%s' did not open; the editor "
+                  "shows the built-in scene",
+                  scene);
+    core::log_message(core::LogLevel::Warning, kLogChannel, message);
+  }
 }
 
 void scene_document_update_window_title() noexcept {
