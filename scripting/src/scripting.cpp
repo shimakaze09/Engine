@@ -15,6 +15,7 @@
 #include "deterministic_math_library.h"
 #include "engine/scripting/bindable_api.h"
 #include "engine/scripting/dap_server.h"
+#include "engine/scripting/script_limits.h"
 #include "entity_handle.h"
 #include "entity_lifecycle_bindings.h"
 #include "entity_pool_bindings.h"
@@ -87,8 +88,7 @@ std::size_t g_watchedScriptCount = 0U;
 /// Returns the Lua state owned by the scripting context.
 lua_State *lua_state() noexcept { return current_lua_state(); }
 
-// Memory limit for the Lua allocator (bytes). Default 64MB.
-constexpr std::size_t kDefaultMemoryLimit = 64U * 1024U * 1024U;
+// Memory limit for the Lua allocator (bytes).
 std::size_t g_memoryLimit = kDefaultMemoryLimit;
 std::size_t g_memoryUsed = 0U;
 

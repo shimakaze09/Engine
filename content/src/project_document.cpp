@@ -4,6 +4,7 @@
 
 #include "engine/content/project_document.h"
 
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -129,6 +130,34 @@ const char *content_path_problem(const char *path,
                                                 : "is not a .lua module";
   }
   return nullptr;
+}
+
+/// True for 0, which is unlimited, or a value within [minimum, maximum].
+bool limit_in_range(std::uint32_t value, std::uint32_t minimum,
+                    std::uint32_t maximum) noexcept {
+  return (value == 0U) || ((value >= minimum) && (value <= maximum));
+}
+
+/// Reads an optional limit: absent leaves it unset; present must be a
+/// non-negative integer that fits, and range is left to validation.
+std::expected<void, ProjectReadFailure>
+read_limit(const core::JsonParser &parser, const core::JsonValue &object,
+           const char *key, const char *field, bool *outSet,
+           std::uint32_t *out) noexcept {
+  core::JsonValue value{};
+  if (!parser.get_object_field(object, key, &value)) {
+    return {};
+  }
+  std::int64_t number = 0;
+  if (!parser.as_int64(value, &number)) {
+    return refuse(field, "is not an integer");
+  }
+  if ((number < 0) || (number > static_cast<std::int64_t>(UINT32_MAX))) {
+    return refuse(field, "is out of range");
+  }
+  *outSet = true;
+  *out = static_cast<std::uint32_t>(number);
+  return {};
 }
 
 /// Checks an object holds only `allowed` keys, each at most once.
@@ -288,6 +317,19 @@ validate_project_document(const ProjectDocument &document) noexcept {
       return refuse("mainScript", problem);
     }
   }
+  const ProjectScriptLimits &limits = document.scriptLimits;
+  if (limits.instructionLimitSet &&
+      !limit_in_range(limits.instructionLimit, kProjectMinInstructionLimit,
+                      kProjectMaxInstructionLimit)) {
+    return refuse("scripting.instructionLimit",
+                  "is neither 0 (unlimited) nor from 100000 to 1000000000");
+  }
+  if (limits.memoryLimitSet &&
+      !limit_in_range(limits.memoryLimitMiB, kProjectMinMemoryLimitMiB,
+                      kProjectMaxMemoryLimitMiB)) {
+    return refuse("scripting.memoryLimitMiB",
+                  "is neither 0 (unlimited) nor from 16 to 2048");
+  }
   return {};
 }
 
@@ -322,13 +364,15 @@ parse_project_document(const char *text, std::size_t length,
     return refuse("schemaVersion", "is not the version this build reads");
   }
 
-  constexpr const char *kTopKeys[] = {"schemaVersion", "identity",
-                                      "roots",         "scenes",
-                                      "startupScene",  "mainScript"};
+  constexpr const char *kTopKeys[] = {
+      "schemaVersion", "identity",   "roots",    "scenes",
+      "startupScene",  "mainScript", "scripting"};
   constexpr const char *kIdentityKeys[] = {"name", "organisation", "version",
                                            "guid"};
   constexpr const char *kRootKeys[] = {"content", "cache"};
-  if (auto checked = check_members(parser, root, kTopKeys, 6U, "");
+  constexpr const char *kScriptingKeys[] = {"instructionLimit",
+                                            "memoryLimitMiB"};
+  if (auto checked = check_members(parser, root, kTopKeys, 7U, "");
       !checked.has_value()) {
     return checked;
   }
@@ -440,6 +484,36 @@ parse_project_document(const char *text, std::size_t length,
     }
   }
 
+  core::JsonValue scripting{};
+  if (parser.get_object_field(root, "scripting", &scripting)) {
+    if (scripting.type != core::JsonValue::Type::Object) {
+      return refuse("scripting", "is not an object");
+    }
+    if (auto r =
+            check_members(parser, scripting, kScriptingKeys, 2U, "scripting");
+        !r.has_value()) {
+      return r;
+    }
+    ProjectScriptLimits &limits = staged->scriptLimits;
+    if (auto r = read_limit(
+            parser, scripting, "instructionLimit", "scripting.instructionLimit",
+            &limits.instructionLimitSet, &limits.instructionLimit);
+        !r.has_value()) {
+      return r;
+    }
+    if (auto r = read_limit(parser, scripting, "memoryLimitMiB",
+                            "scripting.memoryLimitMiB", &limits.memoryLimitSet,
+                            &limits.memoryLimitMiB);
+        !r.has_value()) {
+      return r;
+    }
+    if (!limits.instructionLimitSet && !limits.memoryLimitSet) {
+      // Absent is how a project keeps the engine's limits; an empty object
+      // would be a second spelling of the same thing.
+      return refuse("scripting", "is empty; omit it instead");
+    }
+  }
+
   if (auto r = validate_project_document(*staged); !r.has_value()) {
     return r;
   }
@@ -526,6 +600,23 @@ bool format_project_document(const ProjectDocument &document, char *out,
   if (document.mainScript[0] != '\0') {
     a.text(",\n  \"mainScript\": ");
     a.quoted(document.mainScript);
+  }
+  const ProjectScriptLimits &limits = document.scriptLimits;
+  if (limits.instructionLimitSet || limits.memoryLimitSet) {
+    char number[16] = {};
+    a.text(",\n  \"scripting\": {");
+    if (limits.instructionLimitSet) {
+      std::snprintf(number, sizeof(number), "%u", limits.instructionLimit);
+      a.text("\n    \"instructionLimit\": ");
+      a.text(number);
+    }
+    if (limits.memoryLimitSet) {
+      std::snprintf(number, sizeof(number), "%u", limits.memoryLimitMiB);
+      a.text(limits.instructionLimitSet ? ",\n    \"memoryLimitMiB\": "
+                                        : "\n    \"memoryLimitMiB\": ");
+      a.text(number);
+    }
+    a.text("\n  }");
   }
   a.text("\n}\n");
   if (!a.ok) {

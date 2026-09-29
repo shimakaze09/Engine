@@ -1,8 +1,9 @@
 // Declares the project document: "<name>.project" at a project
 // directory's root, the file that makes a directory a project (decision
 // 0016). It owns the project's identity, its roots, its scene list, its
-// startup scene and its main script; every other per-project table joins
-// it as a schema field when the epic that needs it lands.
+// startup scene, its main script and its script limits; every other
+// per-project table joins it as a schema field when the epic that needs it
+// lands.
 //
 // The document is authored and committed. Reading refuses anything this
 // schema does not describe exactly: an unknown version, an unknown or
@@ -49,6 +50,30 @@ inline constexpr std::size_t kProjectPathCapacity = 256U;
 /// content root, wherever it is on disk, is mounted here.
 inline constexpr const char *kProjectContentMount = "assets";
 
+/// The script limits a project may set, bounded so a typo cannot stop the
+/// project opening (a Lua VM that cannot allocate its own libraries fails
+/// to start) or overflow a 32-bit size. 0 means unlimited for both.
+inline constexpr std::uint32_t kProjectMinInstructionLimit = 100000U;
+inline constexpr std::uint32_t kProjectMaxInstructionLimit = 1000000000U;
+inline constexpr std::uint32_t kProjectMinMemoryLimitMiB = 16U;
+inline constexpr std::uint32_t kProjectMaxMemoryLimitMiB = 2048U;
+
+/// The Lua sandbox limits a project sets, each only when the author chose
+/// one; an unset limit runs at the engine's default, so a project the
+/// author never tuned follows the engine as its default moves. Written as
+/// the optional "scripting" object, omitted when neither is set.
+struct ProjectScriptLimits final {
+  bool instructionLimitSet = false;
+  /// Lua instructions all scripts share per frame; 0 is unlimited,
+  /// otherwise within [kProjectMinInstructionLimit,
+  /// kProjectMaxInstructionLimit].
+  std::uint32_t instructionLimit = 0U;
+  bool memoryLimitSet = false;
+  /// MiB the Lua allocator may hold; 0 is unlimited, otherwise within
+  /// [kProjectMinMemoryLimitMiB, kProjectMaxMemoryLimitMiB].
+  std::uint32_t memoryLimitMiB = 0U;
+};
+
 /// A project document's contents.
 struct ProjectDocument final {
   /// The project's name, also its file name: "<name>.project". No path
@@ -77,6 +102,8 @@ struct ProjectDocument final {
   /// The scene-level Lua module the startup scene's controller runs; empty
   /// when the project has none.
   char mainScript[kProjectPathCapacity] = {};
+  /// The script limits the project sets, if any.
+  ProjectScriptLimits scriptLimits{};
 };
 
 /// Why a project document was not read or not accepted.
