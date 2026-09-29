@@ -240,6 +240,15 @@ into `Saved/Screenshots`; the Log names the file. A Game view tab behind
 another comes to the front first, and nothing the editor draws over the view
 is in the picture.
 
+Edit > Record Play (or `demorec [name]` in the Log) enters Play and records the
+session, as Unreal's `demorec` does; Stop saves it under `Recordings/` in the
+project's per-user data directory. Edit > Replay Latest Recording, the Replay
+submenu or `demoplay [name]` enters Play again with the recorded input in place
+of the live devices, from the same scene, and the Log reports whether the
+replay reproduced the recording (the world's state hash at every tick both runs
+observed) or the first tick and state (transforms, rigid bodies, random...) that
+differ. `demostop` stops either. The toolbar shows REC or REPLAY meanwhile.
+
 Assets can be labelled, as Unity's Asset Labels are: select one in the Assets
 panel, type a label into the Labels row and press Enter; its button removes it.
 Labels are kept in the asset's `.meta` sidecar, so they are committed with the
@@ -349,8 +358,10 @@ Current script conventions in the sample's `assets/`:
 	  that reacts to input belongs here. What each step read can be
 	  recorded to an input log and replayed, reproducing the run at any
 	  frame rate (`core::begin_input_recording` and
-	  `core::begin_input_replay` in `core/include/engine/core/input.h`);
-	  input read in `on_tick` is not recorded
+	  `core::begin_input_replay` in `core/include/engine/core/input.h`;
+	  the editor's Record Play and Replay check the replay against
+	  the recording through `engine/runtime/play_recording.h`); input
+	  read in `on_tick` is not recorded
 	- `M.on_tick(self, dt)` is called once per rendered frame that
 	  advanced simulation (not once per fixed step); `dt` is that
 	  frame's total simulated time, summing every catch-up fixed step

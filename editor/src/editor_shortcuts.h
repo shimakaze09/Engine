@@ -42,6 +42,8 @@ enum class EditorAction : std::uint8_t {
   Pause,
   Step,
   Screenshot,
+  RecordPlay,
+  ReplayLatest,
   Count,
 };
 

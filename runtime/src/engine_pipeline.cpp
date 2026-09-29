@@ -22,57 +22,58 @@
 #endif
 
 #include "engine/audio/audio.h"
+#include "engine/content/asset_staleness.h"
+#include "engine/content/asset_streaming.h"
 #include "engine/core/bootstrap.h"
 #include "engine/core/crash_report.h"
 #include "engine/core/cvar.h"
-#include "engine/core/string_util.h"
 #include "engine/core/engine_stats.h"
 #include "engine/core/input.h"
 #include "engine/core/job_system.h"
 #include "engine/core/logging.h"
 #include "engine/core/mem_tracker.h"
-#include "engine/core/simulation_clock.h"
 #include "engine/core/platform.h"
 #include "engine/core/platform_event.h"
 #include "engine/core/profiler.h"
+#include "engine/core/simulation_clock.h"
+#include "engine/core/string_util.h"
 #include "engine/core/vfs.h"
 #include "engine/engine.h"
 #include "engine/math/transform.h"
+#include "engine/physics/physics_context.h"
 #include "engine/renderer/asset_database.h"
-#include "engine/renderer/material_loader.h"
 #include "engine/renderer/asset_manager.h"
-#include "engine/content/asset_streaming.h"
 #include "engine/renderer/camera.h"
-#include "engine/renderer/shadow_map.h"
 #include "engine/renderer/command_buffer.h"
 #include "engine/renderer/dynamic_resolution.h"
-#include "engine/renderer/render_device.h"
+#include "engine/renderer/material_loader.h"
 #include "engine/renderer/mesh_loader.h"
 #include "engine/renderer/mesh_primitives.h"
-#include "engine/physics/physics_context.h"
+#include "engine/renderer/render_device.h"
 #include "engine/renderer/shader_system.h"
+#include "engine/renderer/shadow_map.h"
 #include "engine/renderer/texture_hot_reload.h"
 #include "engine/renderer/texture_loader.h"
+#include "engine/runtime/animation_system.h"
+#include "engine/runtime/camera_component_update.h"
 #include "engine/runtime/editor_bridge.h"
-#include "engine/scripting/game_binding_state.h"
 #include "engine/runtime/physics_bridge.h"
+#include "engine/runtime/play_recording.h"
 #include "engine/runtime/render_prep_pipeline.h"
 #include "engine/runtime/scene_serializer.h"
 #include "engine/runtime/scripting_bridge.h"
 #include "engine/runtime/service_registry.h"
-#include "engine/runtime/animation_system.h"
-#include "engine/runtime/camera_component_update.h"
 #include "engine/runtime/spring_arm_update.h"
-#include "frame_pacing.h"
+#include "engine/runtime/world.h"
+#include "engine/scripting/dap_server.h"
+#include "engine/scripting/game_binding_state.h"
+#include "engine/scripting/scripting.h"
 #include "engine_bootstrap_content.h"
 #include "engine_frame_collect.h"
 #include "engine_runtime_streaming.h"
+#include "frame_pacing.h"
 #include "mesh_reference_resolution.h"
 #include "scene_environment.h"
-#include "engine/runtime/world.h"
-#include "engine/scripting/dap_server.h"
-#include "engine/scripting/scripting.h"
-#include "engine/content/asset_staleness.h"
 
 namespace engine {
 
@@ -1030,6 +1031,11 @@ bool EnginePipeline::Impl::execute_frame() noexcept {
   // stage; the handler turns the index back into the name with no
   // formatting, which is why the names are a static table rather than a
   // string the pipeline builds.
+  // A play recording or replay observes the committed world between
+  // frames; the first frame's start is the session's tick 0.
+  if (world != nullptr) {
+    runtime::observe_play_checkpoint(clock.tickIndex, *world);
+  }
   RUN_STAGE(Input, stage_input());
   RUN_STAGE(PlayTransitions, stage_play_transitions());
   RUN_STAGE(Timing, stage_timing());
@@ -1080,6 +1086,9 @@ bool EnginePipeline::Impl::execute_frame() noexcept {
   RUN_STAGE(FrameCleanup, stage_frame_cleanup());
   RUN_STAGE(FramePacing, stage_frame_pacing());
   core::set_crash_stage(kStageBetweenFrames);
+  if (world != nullptr) {
+    runtime::observe_play_checkpoint(clock.tickIndex, *world);
+  }
 
   core::profiler_end_frame();
   return running;
@@ -1092,8 +1101,11 @@ bool EnginePipeline::Impl::execute_frame() noexcept {
 namespace {
 
 /// Closes the session's input log: a recording commits what it holds and a
-/// replay stops, since the next session's ticks start again at zero.
+/// replay stops, since the next session's ticks start again at zero. A
+/// play recording seals its manifest over the log, and a play replay logs
+/// its summary; a log opened directly through core ends with them.
 void end_input_log() noexcept {
+  static_cast<void>(runtime::end_play_log());
   static_cast<void>(core::end_input_recording());
   core::end_input_replay();
 }

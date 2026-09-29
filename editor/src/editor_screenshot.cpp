@@ -5,25 +5,21 @@
 
 #include "editor_screenshot.h"
 
+#include "editor_project_files.h"
 #include "editor_session.h"
 #include "editor_shortcuts.h"
 
-#include "engine/core/atomic_file.h"
 #include "engine/core/console.h"
 #include "engine/core/logging.h"
-#include "engine/core/project_data.h"
 
 #include <cmath>
 #include <cstdio>
 #include <cstring>
-#include <filesystem>
-#include <system_error>
 
 namespace engine::editor {
 
 namespace {
 
-constexpr int kMaxNameSuffix = 99;
 constexpr int kNoFrame = -1;
 /// Frames a request waits for a hidden Game view to come to the front.
 constexpr int kMaxShowFrames = 10;
@@ -35,13 +31,6 @@ int g_requestFrame = kNoFrame;
 int g_captureFrame = kNoFrame;
 int g_shownSince = kNoFrame;
 int g_lastShown = kNoFrame;
-
-// Paths are UTF-8, which every executable's narrow code page is (on
-// Windows through its manifest), so a path converts as it stands.
-bool file_exists(const char *path, void *) noexcept {
-  std::error_code ec{};
-  return std::filesystem::exists(std::filesystem::path(path), ec);
-}
 
 int current_frame() noexcept {
   return (ImGui::GetCurrentContext() != nullptr) ? ImGui::GetFrameCount() : 0;
@@ -57,35 +46,8 @@ void screenshot_command(const char *const *, int, void *) noexcept {
 bool next_screenshot_path(const char *directory, const std::tm &time,
                           ScreenshotPathExistsFn exists, void *userData,
                           char *out, std::size_t capacity) noexcept {
-  if ((out == nullptr) || (capacity == 0U)) {
-    return false;
-  }
-  out[0] = '\0';
-  if ((directory == nullptr) || (exists == nullptr)) {
-    return false;
-  }
-  char stamp[32] = {};
-  std::snprintf(stamp, sizeof(stamp), "%04d%02d%02d-%02d%02d%02d",
-                time.tm_year + 1900, time.tm_mon + 1, time.tm_mday,
-                time.tm_hour, time.tm_min, time.tm_sec);
-  for (int suffix = 1; suffix <= kMaxNameSuffix; ++suffix) {
-    char suffixText[8] = {};
-    if (suffix > 1) {
-      std::snprintf(suffixText, sizeof(suffixText), "-%d", suffix);
-    }
-    const int written =
-        std::snprintf(out, capacity, "%s/Screenshot-%s%s.png", directory,
-                      stamp, suffixText);
-    if ((written < 0) || (static_cast<std::size_t>(written) >= capacity)) {
-      out[0] = '\0';
-      return false;
-    }
-    if (!exists(out, userData)) {
-      return true;
-    }
-  }
-  out[0] = '\0';
-  return false;
+  return next_timestamped_path(directory, "Screenshot", ".png", time, exists,
+                               userData, out, capacity);
 }
 
 renderer::ScreenshotRegion
@@ -153,34 +115,16 @@ bool game_view_screenshot_capturing() noexcept {
 bool take_game_view_screenshot(
     const renderer::ScreenshotRegion &region) noexcept {
   char directory[1024] = {};
-  if (!core::project_data_dir(directory, sizeof(directory))) {
-    return false; // project_data_dir logged why
-  }
-  const std::size_t length = std::strlen(directory);
-  static constexpr char kSubdirectory[] = "/Screenshots";
-  if (length + sizeof(kSubdirectory) > sizeof(directory)) {
+  if (!project_data_subdirectory("Screenshots", directory, sizeof(directory))) {
     core::log_message(core::LogLevel::Error, "editor",
-                      "screenshot refused: the project data path is too long");
+                      "screenshot refused: the project's Screenshots "
+                      "directory is unavailable");
     return false;
   }
-  std::memcpy(directory + length, kSubdirectory, sizeof(kSubdirectory));
-  if (!core::create_directories_durably(directory)) {
-    char message[1100] = {};
-    std::snprintf(message, sizeof(message),
-                  "screenshot refused: cannot create %s", directory);
-    core::log_message(core::LogLevel::Error, "editor", message);
-    return false;
-  }
-  const std::time_t now = std::time(nullptr);
-  std::tm local{};
-#if defined(_WIN32)
-  localtime_s(&local, &now);
-#else
-  localtime_r(&now, &local);
-#endif
+  const std::tm local = local_time_now();
   char path[renderer::kMaxScreenshotPath] = {};
-  if (!next_screenshot_path(directory, local, &file_exists, nullptr, path,
-                            sizeof(path))) {
+  if (!next_screenshot_path(directory, local, &project_file_exists, nullptr,
+                            path, sizeof(path))) {
     core::log_message(core::LogLevel::Error, "editor",
                       "screenshot refused: no free file name fits under the "
                       "project's Screenshots directory");

@@ -468,7 +468,7 @@ bool begin_input_recording(const char *path) noexcept {
   return true;
 }
 
-bool end_input_recording() noexcept {
+bool end_input_recording(InputLogSeal *outSeal) noexcept {
   if (!g_recorder.open) {
     return false;
   }
@@ -490,6 +490,8 @@ bool end_input_recording() noexcept {
       log_message(LogLevel::Error, "input",
                   "input recording could not be sealed; the destination is "
                   "unchanged");
+    } else if (outSeal != nullptr) {
+      *outSeal = InputLogSeal{g_recorder.stepCount, g_recorder.checksum};
     }
   }
   recorder_reset();
@@ -519,7 +521,7 @@ void input_log_record_step(const InputStepRecord &step) noexcept {
 
 // ----- Replay API ------------------------------------------------------------
 
-bool begin_input_replay(const char *path) noexcept {
+bool begin_input_replay(const char *path, InputLogSeal *outSeal) noexcept {
   if ((path == nullptr) || (path[0] == '\0')) {
     log_message(LogLevel::Error, "input",
                 "input replay refused: no log path; nothing changed");
@@ -535,6 +537,12 @@ bool begin_input_replay(const char *path) noexcept {
   if (reason != nullptr) {
     log_refusal(path, reason);
     return false;
+  }
+  if (outSeal != nullptr) {
+    // Validation proved the footer is whole, so its checksum is the last
+    // eight bytes.
+    ByteReader footer{staged.data(), staged.size(), staged.size() - 8U, true};
+    *outSeal = InputLogSeal{stepCount, footer.u64()};
   }
   g_replay.bytes = std::move(staged);
   g_replay.offset = kHeaderBytes;

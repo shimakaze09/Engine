@@ -21,6 +21,8 @@ engine_add_module_library(engine_editor
     src/editor_console_capture.cpp
     src/editor_console_commands.cpp
     src/editor_screenshot.cpp
+    src/editor_project_files.cpp
+    src/editor_play_recording.cpp
     src/editor_fonts.cpp
     src/editor_component_registry.cpp
     src/editor_inspector_metadata.cpp

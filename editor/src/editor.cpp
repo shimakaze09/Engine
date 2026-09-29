@@ -66,6 +66,7 @@
 #include "editor_panels_material.h"
 #include "editor_panels_rendering.h"
 #include "editor_panels_viewport.h"
+#include "editor_play_recording.h"
 #include "editor_preferences.h"
 #include "editor_scene_document.h"
 #include "editor_screenshot.h"
@@ -326,6 +327,7 @@ bool initialize_editor(void *sdlWindow) noexcept {
   console_capture_initialize();
   // A repeated initialization finds the command already registered.
   static_cast<void>(register_screenshot_command());
+  static_cast<void>(register_recording_commands());
 
   // The bgfx ImGui backend owns its device objects; the platform
   // window handle is all SDL needs. A backend failure must release every

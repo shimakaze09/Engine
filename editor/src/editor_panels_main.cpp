@@ -8,6 +8,7 @@
 #include "editor_material_edit.h"
 #include "editor_panels_console.h"
 #include "editor_panels_diagnostics.h"
+#include "editor_play_recording.h"
 #include "editor_scene_document.h"
 #include "editor_session.h"
 #include "editor_shortcuts.h"
@@ -267,6 +268,8 @@ void draw_main_menu_bar() noexcept {
     editor_action_menu_item(EditorAction::Pause, state == PlayState::Paused);
     editor_action_menu_item(EditorAction::Step);
     ImGui::Separator();
+    draw_recording_menu_items();
+    ImGui::Separator();
     editor_action_menu_item(EditorAction::Screenshot);
     ImGui::Separator();
     // Preferences sit under Edit, as in Unity; no reference editor has a
@@ -460,6 +463,7 @@ void draw_toolbar() noexcept {
   ImGui::SameLine();
   toolbar_action_button(EditorAction::Step, false,
                         "Advance one fixed step, pausing first");
+  draw_recording_status();
 
   ImGui::SameLine();
   draw_time_scale_combo();

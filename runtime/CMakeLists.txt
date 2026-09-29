@@ -23,6 +23,7 @@ engine_add_module_library(engine_runtime
     src/prefab_serializer.cpp
     src/primitive_collider.cpp
     src/render_prep_pipeline.cpp
+    src/play_recording.cpp
     src/save_data.cpp
     src/reflect_types.cpp
     src/scene_serializer.cpp

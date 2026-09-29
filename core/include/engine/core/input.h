@@ -98,14 +98,26 @@ inline constexpr std::uint32_t kInputLogVersion = 1U;
 /// length.
 inline constexpr std::size_t kInputLogRingCapacity = 256U;
 
+/// What identifies one sealed log: its step count and the checksum its
+/// footer carries, which covers every byte before it. A document that
+/// names a log (a play recording's manifest) keeps this to tell that log
+/// from any other written at the same path.
+struct InputLogSeal final {
+  std::uint64_t stepCount = 0U;
+  std::uint64_t checksum = 0U;
+
+  bool operator==(const InputLogSeal &) const noexcept = default;
+};
+
 /// Starts recording every fixed step to `path`. False, with nothing
 /// changed, while a recording is open or when the staged file cannot be
 /// created.
 bool begin_input_recording(const char *path) noexcept;
-/// Seals the recording and atomically replaces its destination. False when
+/// Seals the recording and atomically replaces its destination, writing
+/// the committed log's seal to `outSeal` when it is not null. False when
 /// no recording is open or a write failed, which leaves the destination as
-/// it was.
-bool end_input_recording() noexcept;
+/// it was and `outSeal` untouched.
+bool end_input_recording(InputLogSeal *outSeal = nullptr) noexcept;
 /// True while a recording is open and has not failed.
 bool input_recording_active() noexcept;
 
@@ -118,8 +130,10 @@ bool input_recording_active() noexcept;
 /// included. A step whose tick is not the log's next ends the replay with
 /// an error. The live steps are still built from the events throughout, so
 /// the steps after a replay read the live devices as if it had never run,
-/// with no event lost.
-bool begin_input_replay(const char *path) noexcept;
+/// with no event lost. The loaded log's seal is written to `outSeal` when
+/// it is not null and the replay starts.
+bool begin_input_replay(const char *path,
+                        InputLogSeal *outSeal = nullptr) noexcept;
 /// Stops a replay; the next step reads the live devices.
 void end_input_replay() noexcept;
 /// True while a replay has steps left to give.
