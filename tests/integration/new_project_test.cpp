@@ -1,7 +1,9 @@
 // Verifies create_project makes a project from the engine's empty-project
 // template, whole or not at all: the new directory holds the template's
 // content and a "<name>.project" with a fresh GUID, open_project accepts
-// it, and it bootstraps and runs headless with no Error. Names a project
+// it, and it bootstraps and runs headless with no Error, none on any
+// channel naming one of its files (the engine loads nothing from a
+// project by name). Names a project
 // document refuses, an existing destination, a missing location and a
 // template that is not one are refused with nothing written; a template
 // holding a file too large to copy fails part-way and leaves nothing at
@@ -52,11 +54,24 @@ bool is_project_channel(const char *channel) noexcept {
     }                                                                          \
   } while (false)
 
-/// Counts every Error from what creating and running a project involves.
+/// The new project's directory while it runs; an Error on any channel
+/// naming a file under it is the project's.
+std::string g_projectDirectory;
+int g_projectFileErrors = 0;
+
+/// Counts every Error from what creating and running a project involves,
+/// and every Error naming one of the project's files.
 void count_errors(engine::core::LogLevel level, const char *channel,
-                  const char *, void *) noexcept {
-  if ((level == engine::core::LogLevel::Error) && is_project_channel(channel)) {
+                  const char *message, void *) noexcept {
+  if (level != engine::core::LogLevel::Error) {
+    return;
+  }
+  if (is_project_channel(channel)) {
     ++g_errors;
+  }
+  if (!g_projectDirectory.empty() && (message != nullptr) &&
+      (std::strstr(message, g_projectDirectory.c_str()) != nullptr)) {
+    ++g_projectFileErrors;
   }
 }
 
@@ -133,6 +148,8 @@ int main() {
   engine::EngineConfig config{};
   config.core.platform.headless = true;
   g_errors = 0;
+  g_projectFileErrors = 0;
+  g_projectDirectory = project.generic_string();
   CHECK(engine::open_project(projectFile, &storage, &config).has_value(),
         "open_project accepts it");
   CHECK(engine::bootstrap(config), "it bootstraps");
@@ -141,6 +158,10 @@ int main() {
   CHECK(engine::run(10U) == engine::RunResult::Stopped, "and runs");
   engine::shutdown();
   CHECK(g_errors == 0, "no Error is logged creating and running it");
+  // The engine loads nothing from a project by name, so a project without
+  // the sample's files runs without an Error about them.
+  CHECK(g_projectFileErrors == 0, "and no Error names a file of the project");
+  g_projectDirectory.clear();
   // Shutdown stops logging and forgets its sinks.
   static_cast<void>(engine::core::initialize_logging());
   static_cast<void>(engine::core::log_register_sink(&count_errors, nullptr));

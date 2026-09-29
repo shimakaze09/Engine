@@ -137,30 +137,6 @@ bool load_bootstrap_meshes(renderer::AssetManager *assetManager,
                                        "builtin://grass");
   }
 
-  // Bundled rigged character (cooked skinned .mesh loaded from disk).
-  {
-    char characterVirtualPath[512] = {};
-    std::snprintf(characterVirtualPath, sizeof(characterVirtualPath),
-                  "%s/character.mesh", active_config().assetMount);
-    char characterPath[512] = {};
-    if (core::vfs_resolve_os_path(characterVirtualPath, characterPath,
-                                  sizeof(characterPath))) {
-      const content::AssetId characterId =
-          content::make_asset_id_from_path(characterVirtualPath);
-      if (renderer::queue_mesh_load(assetManager, assetDatabase, characterId,
-                                    characterPath) &&
-          renderer::update_asset_manager(assetManager, assetDatabase,
-                                         meshRegistry, 8U) &&
-          (renderer::mesh_asset_state(assetDatabase, characterId) ==
-           content::AssetState::Ready)) {
-        out->character = characterId;
-      } else {
-        core::log_message(core::LogLevel::Warning, "engine",
-                          "rigged character mesh failed to load");
-      }
-    }
-  }
-
   // Catalogue the mounts so a saved mesh id maps back to the path its
   // bytes live at and a picker can list what exists before it loads. A
   // loader's own record wins: the walk never replaces one that exists,
