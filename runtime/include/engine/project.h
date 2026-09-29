@@ -38,6 +38,14 @@ struct ProjectStorage final {
   char projectDirectory[kProjectOsPathCapacity] = {};
   /// The content root, absolute; mounted at content::kProjectContentMount.
   char contentRoot[kProjectOsPathCapacity] = {};
+  /// Each package's mount ("packages/<name>") and directory, absolute, in
+  /// the document's order, and the table the config's `packages` points
+  /// at. The table points into this storage; open_project sets it, so a
+  /// copy of the storage must not be used in its place.
+  char packageMounts[content::kMaxProjectPackages]
+                    [content::kProjectPackageNameCapacity + 16U] = {};
+  char packageRoots[content::kMaxProjectPackages][kProjectOsPathCapacity] = {};
+  ContentMount packages[content::kMaxProjectPackages] = {};
 };
 
 /// Why a project was not opened.
@@ -58,6 +66,8 @@ enum class ProjectOpenFailureKind : std::uint8_t {
   StartupSceneMissing,
   /// The document names a main script that is not a file.
   MainScriptMissing,
+  /// A package the document depends on has no directory.
+  PackageMissing,
   /// A resolved path does not fit kProjectOsPathCapacity.
   PathTooLong,
 };
@@ -72,10 +82,11 @@ struct ProjectOpenFailure final {
 /// document, or the document itself. On success fills `*storage` and
 /// points `*config`'s content fields at it: the assets mount and its root,
 /// the .project file, the editor's asset root and startup scene, the main
-/// script, the script limits, and the project GUID that names its
-/// per-user data. Every other config field is left as the caller set it. On
-/// failure logs an Error naming the path and the reason, and leaves `*storage`
-/// and `*config` untouched. Cold path: resolves paths through std::filesystem.
+/// script, the script limits, the packages, and the project GUID that
+/// names its per-user data. Every other config field is left as the caller set
+/// it. On failure logs an Error naming the path and the reason, and leaves
+/// `*storage` and `*config` untouched. Cold path: resolves paths through
+/// std::filesystem.
 std::expected<void, ProjectOpenFailure>
 open_project(const char *path, ProjectStorage *storage,
              EngineConfig *config) noexcept;
@@ -98,7 +109,8 @@ const char *project_open_failure_text(ProjectOpenFailureKind kind) noexcept;
 
 /// Points `*config` at no project: empties the asset root, the .project
 /// file, the editor's asset root and startup scene and the main script,
-/// restores the default script limits, and clears the project GUID, so
+/// restores the default script limits, drops the packages, and clears the
+/// project GUID, so
 /// bootstrap mounts only the engine's content. Every other field is left as the
 /// caller set it.
 void configure_without_project(EngineConfig *config) noexcept;

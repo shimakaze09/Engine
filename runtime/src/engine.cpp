@@ -224,15 +224,17 @@ const char *resolve_engine_root(char *out, std::size_t capacity) noexcept {
 
 /// False, with an Error naming the field, when `config` runs no project
 /// (an empty asset root) yet names project content: a main script, a
-/// startup scene or an editor asset root would resolve against whatever
-/// happens to be in the working directory. Its strings are the adopted,
-/// non-null copies.
+/// startup scene, an editor asset root or packages would resolve against
+/// whatever happens to be in the working directory. Its strings are the
+/// adopted, non-null copies.
 bool project_fields_consistent(const EngineConfig &config) noexcept {
   if (config.assetRoot[0] != '\0') {
     return true;
   }
   const char *field = nullptr;
-  if (config.mainScriptPath[0] != '\0') {
+  if (config.packageCount > 0U) {
+    field = "packages";
+  } else if (config.mainScriptPath[0] != '\0') {
     field = "mainScriptPath";
   } else if (config.editorScenePath[0] != '\0') {
     field = "editorScenePath";
@@ -378,6 +380,20 @@ bool bootstrap(const EngineConfig &config) noexcept {
         g_activeConfig.engineRoot));
     core::log_message(core::LogLevel::Error, "engine", message);
     return fail_bootstrap();
+  }
+  for (std::size_t i = 0U; i < g_activeConfig.packageCount; ++i) {
+    const ContentMount &package = g_activeConfig.packages[i];
+    if (!core::mount(package.mount, package.root) ||
+        !core::vfs_directory_exists(package.mount)) {
+      char message[(2U * kMaxConfigStringLength) + 96U] = {};
+      static_cast<void>(std::snprintf(
+          message, sizeof(message),
+          "package '%s' could not be mounted from '%s', which is not a "
+          "directory",
+          package.mount, package.root));
+      core::log_message(core::LogLevel::Error, "engine", message);
+      return fail_bootstrap();
+    }
   }
   if (!renderer::set_shader_root_path(g_activeConfig.shaderRootPath)) {
     return fail_bootstrap();

@@ -7,10 +7,14 @@
 // engine::bootstrap entry point with heap-backed strings the caller then
 // overwrites and frees, and covers the adoption boundaries: a null path,
 // one character past the limit, a path exactly at the limit, and the
-// rollback that keeps a previously adopted configuration intact.
+// rollback that keeps a previously adopted configuration intact. A
+// configuration's package table is adopted the same way, and refused
+// past its limit, without a table, without a project, or when a
+// package's root is not a directory.
 
 #include "../asset_root.h"
 #include "engine/core/bootstrap.h"
+#include "engine/core/vfs.h"
 #include "engine/engine.h"
 
 #include <cstddef>
@@ -19,6 +23,7 @@
 #include <cstring>
 #include <filesystem>
 #include <string>
+#include <system_error>
 
 namespace {
 
@@ -35,6 +40,17 @@ int g_failures = 0;
       ++g_failures;                                                    \
     }                                                                  \
   } while (false)
+
+/// True when a bootstrap was refused with nothing left running. One that
+/// unexpectedly succeeds is shut down here, so a regression fails the
+/// check instead of leaving the engine up for the rest of the test.
+bool refused(bool booted) noexcept {
+  if (booted) {
+    engine::shutdown();
+    return false;
+  }
+  return !engine::core::is_core_initialized();
+}
 
 /// Builds a heap copy of `text`, standing in for the dynamically built
 /// path an embedder passes and then releases.
@@ -291,6 +307,90 @@ int main() {
           "the stored path keeps every character of the limit");
 
     engine::shutdown();
+  }
+
+  // --- A package table is adopted like every other string. ---
+  {
+    std::error_code ec{};
+    const std::filesystem::path packageDir =
+        std::filesystem::temp_directory_path(ec) /
+        "engine_config_strings_package";
+    std::filesystem::create_directories(packageDir, ec);
+    const std::string packageRootText = packageDir.string();
+    char *packageMount = heap_string("packages/probe");
+    char *packageRoot = heap_string(packageRootText.c_str());
+    engine::ContentMount *table = static_cast<engine::ContentMount *>(
+        std::malloc(sizeof(engine::ContentMount)));
+    if ((packageMount == nullptr) || (packageRoot == nullptr) ||
+        (table == nullptr) || ec) {
+      std::fprintf(stderr, "FAIL: could not build the package table\n");
+      return 1;
+    }
+    table[0] = engine::ContentMount{packageMount, packageRoot};
+    engine::EngineConfig config{};
+    config.core.platform.headless = true;
+    config.packages = table;
+    config.packageCount = 1U;
+    const bool booted = engine::bootstrap(config);
+    CHECK(booted, "a configuration with a package boots");
+    if (booted) {
+      const engine::EngineConfig &active = engine::active_config();
+      CHECK(active.packages != table,
+            "the package table is engine storage, not the caller's");
+      scribble(packageMount);
+      scribble(packageRoot);
+      std::free(packageMount);
+      std::free(packageRoot);
+      std::free(table);
+      CHECK(
+          (active.packageCount == 1U) &&
+              adopted_equals(active.packages[0].mount, "packages/probe") &&
+              adopted_equals(active.packages[0].root, packageRootText.c_str()),
+          "a package survives the caller freeing its strings and table");
+      CHECK(engine::core::vfs_directory_exists("packages/probe"),
+            "the package is mounted at its prefix");
+      engine::shutdown();
+    } else {
+      std::free(packageMount);
+      std::free(packageRoot);
+      std::free(table);
+    }
+
+    engine::ContentMount one[1] = {{"packages/probe", packageRootText.c_str()}};
+    engine::EngineConfig tooMany{};
+    tooMany.core.platform.headless = true;
+    tooMany.packages = one;
+    tooMany.packageCount = engine::kMaxPackageMounts + 1U;
+    CHECK(refused(engine::bootstrap(tooMany)),
+          "a package count past the limit is refused before anything starts");
+
+    engine::EngineConfig noTable{};
+    noTable.core.platform.headless = true;
+    noTable.packageCount = 1U;
+    CHECK(refused(engine::bootstrap(noTable)),
+          "a package count with no table is refused");
+
+    engine::EngineConfig noProject{};
+    noProject.core.platform.headless = true;
+    noProject.assetRoot = "";
+    noProject.mainScriptPath = "";
+    noProject.editorScenePath = "";
+    noProject.editorAssetRoot = "";
+    noProject.packages = one;
+    noProject.packageCount = 1U;
+    CHECK(refused(engine::bootstrap(noProject)),
+          "packages with no project open are refused");
+
+    const std::string absent = (packageDir / "absent").string();
+    engine::ContentMount missing[1] = {{"packages/probe", absent.c_str()}};
+    engine::EngineConfig missingRoot{};
+    missingRoot.core.platform.headless = true;
+    missingRoot.packages = missing;
+    missingRoot.packageCount = 1U;
+    CHECK(refused(engine::bootstrap(missingRoot)),
+          "a package whose root is not a directory refuses the bootstrap, "
+          "rolled back");
+    std::filesystem::remove_all(packageDir, ec);
   }
 
   std::fprintf(stdout, "engine_config_strings_test: %d failures\n",

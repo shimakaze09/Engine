@@ -7,7 +7,10 @@
 // bootstraps headless with its per-user data named by its GUID. A
 // project's script limits reach the config (the engine's defaults where it
 // sets none, whatever the caller held) and the running VM at bootstrap,
-// and a later run of a project that sets none is back on the defaults.
+// and a later run of a project that sets none is back on the defaults. A
+// project's packages open with it, each mounted at packages/<name>; one
+// whose folder is missing refuses the open; and a package's assets are
+// catalogued under their own identities and its scripts load.
 // The bundled sample project opens and its document is in canonical form.
 
 #include "engine/project.h"
@@ -21,9 +24,15 @@
 
 #include "../asset_root.h"
 #include "../test_harness.h"
+#include "engine/content/asset_catalog.h"
+#include "engine/content/asset_metadata.h"
+#include "engine/content/asset_sidecar.h"
 #include "engine/content/project_document.h"
 #include "engine/core/logging.h"
 #include "engine/core/project_data.h"
+#include "engine/core/vfs.h"
+#include "engine/runtime/editor_bridge.h"
+#include "engine/runtime/engine_pipeline.h"
 #include "engine/scripting/script_limits.h"
 #include "engine/scripting/scripting.h"
 
@@ -91,6 +100,7 @@ struct Untouched final {
            !engine::core::asset_guid_is_valid(config.core.projectGuid) &&
            (config.scriptInstructionLimit == defaults.scriptInstructionLimit) &&
            (config.scriptMemoryLimitBytes == defaults.scriptMemoryLimitBytes) &&
+           (config.packageCount == 0U) && (config.packages == nullptr) &&
            (std::strcmp(storage.contentRoot, "before") == 0) &&
            (storage.document.name[0] == '\0');
   }
@@ -349,6 +359,102 @@ void test_script_limits(const fs::path &root) {
   engine::shutdown();
 }
 
+/// A project in `dir` depending on the package "ui_kit", whose folder
+/// holds `lib/util.lua` with a sidecar identity (returned through
+/// `outGuid`) unless `withFolder` is false. Its startup scene is the
+/// empty-project template's, so a pipeline can open it.
+bool make_packaged_project(const fs::path &dir, bool withFolder,
+                           engine::core::AssetGuid *outGuid) {
+  if (!make_project(dir, false)) {
+    return false;
+  }
+  std::error_code ec{};
+  const fs::path templateScene = fs::path(engine::tests::engine_root_path()) /
+                                 "templates/empty_project/assets/main.scene";
+  fs::copy_file(templateScene, dir / "assets" / "main.scene",
+                fs::copy_options::overwrite_existing, ec);
+  engine::content::ProjectDocument doc = make_document("");
+  std::snprintf(doc.packages[0].name, sizeof(doc.packages[0].name), "%s",
+                "ui_kit");
+  std::snprintf(doc.packages[0].source, sizeof(doc.packages[0].source), "%s",
+                "packages/ui_kit");
+  doc.packageCount = 1U;
+  const std::string file = (dir / "Island.project").string();
+  if (ec || !engine::content::write_project_document(file.c_str(), doc)) {
+    return false;
+  }
+  if (!withFolder) {
+    return true;
+  }
+  const fs::path script = dir / "packages" / "ui_kit" / "lib" / "util.lua";
+  engine::content::AssetSidecar sidecar{};
+  sidecar.guid = engine::content::generate_asset_guid();
+  *outGuid = sidecar.guid;
+  const std::string scriptText = script.string();
+  return write_text(script, "ui_kit_loaded = true\n") &&
+         engine::content::write_asset_sidecar(scriptText.c_str(), sidecar);
+}
+
+void test_packages(const fs::path &root) {
+  const fs::path dir = root / "packaged";
+  engine::core::AssetGuid guid{};
+  g_tests.check(make_packaged_project(dir, true, &guid),
+                "write a project depending on a package");
+  const std::string dirText = dir.string();
+  const std::string expectedRoot =
+      (dir / "packages" / "ui_kit").lexically_normal().generic_string();
+
+  engine::EngineConfig config{};
+  engine::ProjectStorage storage{};
+  g_tests.check(
+      engine::open_project(dirText.c_str(), &storage, &config).has_value() &&
+          (config.packageCount == 1U) && (config.packages != nullptr) &&
+          (std::strcmp(config.packages[0].mount, "packages/ui_kit") == 0) &&
+          (std::string(config.packages[0].root) == expectedRoot),
+      "a project's package reaches the config, mounted at packages/<name>");
+
+  engine::EngineConfig cleared = config;
+  engine::configure_without_project(&cleared);
+  g_tests.check((cleared.packageCount == 0U) && (cleared.packages == nullptr),
+                "no project carries no packages");
+
+  const fs::path missingDir = root / "missing_package";
+  engine::core::AssetGuid unused{};
+  g_tests.check(make_packaged_project(missingDir, false, &unused),
+                "write a project whose package folder is missing");
+  const std::string missingText = missingDir.string();
+  expect_refusal(missingText.c_str(), ProjectOpenFailureKind::PackageMissing,
+                 "a missing package folder refuses the open, untouched");
+
+  config.core.platform.headless = true;
+  const std::string engineRoot = engine::tests::engine_root_path();
+  config.engineRoot = engineRoot.c_str();
+  if (!engine::bootstrap(config)) {
+    g_tests.fail("a project with a package bootstraps headless");
+    return;
+  }
+  g_tests.check(engine::core::vfs_file_exists("packages/ui_kit/lib/util.lua"),
+                "the package's files are reachable at its mount");
+  {
+    engine::EnginePipeline pipeline;
+    if (pipeline.initialize(0U)) {
+      const engine::core::AssetRef ref = engine::runtime::editor_asset_ref(
+          engine::content::make_asset_id_from_path(
+              "packages/ui_kit/lib/util.lua"));
+      g_tests.check(engine::core::asset_ref_is_valid(ref) && (ref.guid == guid),
+                    "the package's asset is catalogued under its own "
+                    "identity");
+      g_tests.check(
+          engine::scripting::load_script("packages/ui_kit/lib/util.lua"),
+          "a package's script loads from its mount");
+      pipeline.teardown();
+    } else {
+      g_tests.fail("the pipeline initializes on a project with a package");
+    }
+  }
+  engine::shutdown();
+}
+
 /// The bundled sample project opens, and its document is exactly what the
 /// codec writes for it, so a hand edit cannot drift from the format.
 void test_bundled_sample() {
@@ -390,6 +496,7 @@ int main() {
   engine::core::shutdown_logging();
   test_bootstrap(root);
   test_script_limits(root);
+  test_packages(root);
 
   fs::remove_all(root, ec);
   return g_tests.finish("project_open");

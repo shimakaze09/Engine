@@ -29,6 +29,9 @@ struct ConfigStringStorage final {
   char editorScenePath[kMaxConfigStringLength + 1U] = {};
   char editorAssetRoot[kMaxConfigStringLength + 1U] = {};
   char windowTitle[kMaxConfigStringLength + 1U] = {};
+  char packageMounts[kMaxPackageMounts][kMaxConfigStringLength + 1U] = {};
+  char packageRoots[kMaxPackageMounts][kMaxConfigStringLength + 1U] = {};
+  ContentMount packages[kMaxPackageMounts] = {};
 };
 
 ConfigStringStorage g_strings{};
@@ -98,6 +101,26 @@ bool adopt_config_strings(EngineConfig &config) noexcept {
     }
   }
 
+  if ((config.packageCount > kMaxPackageMounts) ||
+      ((config.packageCount > 0U) && (config.packages == nullptr))) {
+    char message[160] = {};
+    static_cast<void>(std::snprintf(
+        message, sizeof(message),
+        "configuration names %zu packages; the limit is %zu, and a count "
+        "needs a table",
+        config.packageCount, kMaxPackageMounts));
+    core::log_message(core::LogLevel::Error, "engine", message);
+    return false;
+  }
+  for (std::size_t i = 0U; i < config.packageCount; ++i) {
+    if (!stage_string({"packages[].mount", config.packages[i].mount,
+                       staged.packageMounts[i]}) ||
+        !stage_string({"packages[].root", config.packages[i].root,
+                       staged.packageRoots[i]})) {
+      return false;
+    }
+  }
+
   // The window title is optional at this layer: core's platform layer
   // substitutes its own default for a null title, so a null passes
   // through unchanged instead of being rejected here or shadowed by a
@@ -124,6 +147,11 @@ bool adopt_config_strings(EngineConfig &config) noexcept {
   if (hasTitle) {
     config.core.platform.title = g_strings.windowTitle;
   }
+  for (std::size_t i = 0U; i < config.packageCount; ++i) {
+    g_strings.packages[i] =
+        ContentMount{g_strings.packageMounts[i], g_strings.packageRoots[i]};
+  }
+  config.packages = (config.packageCount > 0U) ? g_strings.packages : nullptr;
 
   return true;
 }
