@@ -1,6 +1,8 @@
-// Implements open_project: finds the .project document, reads it through
-// content's codec, checks that what it names exists on disk, and points an
-// EngineConfig at the result.
+// Implements opening and switching projects: open_project finds the
+// .project document, reads it through content's codec, checks that what it
+// names exists on disk, and points an EngineConfig at the result;
+// configure_without_project points one at none; the switch handoff holds
+// the next project a run asked for until the executable's loop takes it.
 
 #include "engine/project.h"
 
@@ -19,6 +21,15 @@ namespace engine {
 namespace {
 
 constexpr const char *kLogChannel = "project";
+
+/// The switch a run asked for, held across the engine's shutdown until the
+/// executable's loop takes it. Main thread only.
+struct PendingSwitch final {
+  bool pending = false;
+  char path[kProjectOsPathCapacity] = {};
+};
+
+PendingSwitch g_switch{};
 
 /// Logs the refusal and returns it.
 std::unexpected<ProjectOpenFailure>
@@ -165,6 +176,7 @@ open_project(const char *path, ProjectStorage *storage,
   *storage = *staged;
   config->assetMount = content::kProjectContentMount;
   config->assetRoot = storage->contentRoot;
+  config->projectFile = storage->projectFile;
   config->editorAssetRoot = storage->contentRoot;
   config->editorScenePath = storage->document.startupScene;
   config->mainScriptPath = storage->document.mainScript;
@@ -197,6 +209,56 @@ const char *project_open_failure_text(ProjectOpenFailureKind kind) noexcept {
     return "a project path is too long";
   }
   return "the project could not be opened";
+}
+
+void configure_without_project(EngineConfig *config) noexcept {
+  if (config == nullptr) {
+    return;
+  }
+  config->assetRoot = "";
+  config->projectFile = "";
+  config->editorAssetRoot = "";
+  config->editorScenePath = "";
+  config->mainScriptPath = "";
+  config->core.projectGuid = core::AssetGuid{};
+}
+
+bool request_project_switch(const char *path) noexcept {
+  if (path == nullptr) {
+    return false;
+  }
+  const std::size_t length = std::strlen(path);
+  if (length >= sizeof(g_switch.path)) {
+    char message[160] = {};
+    std::snprintf(message, sizeof(message),
+                  "cannot switch to a project path of %zu characters; the "
+                  "limit is %zu",
+                  length, sizeof(g_switch.path) - 1U);
+    core::log_message(core::LogLevel::Error, kLogChannel, message);
+    return false;
+  }
+  std::memcpy(g_switch.path, path, length + 1U);
+  g_switch.pending = true;
+  core::request_platform_quit();
+  return true;
+}
+
+bool take_project_switch(char *out, std::size_t capacity,
+                         bool *toHub) noexcept {
+  if ((out == nullptr) || (capacity == 0U)) {
+    return false;
+  }
+  out[0] = '\0';
+  const std::size_t length = std::strlen(g_switch.path);
+  if (!g_switch.pending || (length >= capacity)) {
+    return false;
+  }
+  std::memcpy(out, g_switch.path, length + 1U);
+  if (toHub != nullptr) {
+    *toHub = (length == 0U);
+  }
+  g_switch = PendingSwitch{};
+  return true;
 }
 
 bool find_bundled_sample_project(char *out, std::size_t capacity) noexcept {

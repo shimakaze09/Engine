@@ -1,9 +1,14 @@
-// Declares open_project: turns a project on disk (its directory, or its
-// .project document) into the EngineConfig that runs it. The document is
+// Declares the project entry points the editor, the player and tools
+// share. open_project turns a project on disk (its directory, or its
+// .project document) into the EngineConfig that runs it: the document is
 // read and validated, its content root must exist, and so must the
 // startup scene and main script it names, so a project that cannot run is
-// refused here with a reason rather than half-starting. The same entry
-// point serves the editor, the player and tools.
+// refused here with a reason rather than half-starting.
+// configure_without_project points a config at no project, as the project
+// hub runs. The project-switch handoff carries the choice of the next
+// project (or the hub) out of a run to the executable's loop, which shuts
+// the engine down and bootstraps it again, as Godot's project manager
+// relaunches its editor.
 
 #pragma once
 
@@ -65,8 +70,9 @@ struct ProjectOpenFailure final {
 /// Opens the project at `path`: a directory holding exactly one .project
 /// document, or the document itself. On success fills `*storage` and
 /// points `*config`'s content fields at it: the assets mount and its root,
-/// the editor's asset root and startup scene, the main script, and the
-/// project GUID that names its per-user data. Every other config field is
+/// the .project file, the editor's asset root and startup scene, the main
+/// script, and the project GUID that names its per-user data. Every other
+/// config field is
 /// left as the caller set it. On failure logs an Error naming the path and
 /// the reason, and leaves `*storage` and `*config` untouched. Cold path:
 /// resolves paths through std::filesystem.
@@ -76,6 +82,27 @@ open_project(const char *path, ProjectStorage *storage,
 
 /// A short English description of `kind`, for a tool's error line.
 const char *project_open_failure_text(ProjectOpenFailureKind kind) noexcept;
+
+/// Points `*config` at no project: empties the asset root, the .project
+/// file, the editor's asset root and startup scene and the main script,
+/// and clears the project GUID, so bootstrap mounts only the engine's
+/// content. Every other field is left as the caller set it.
+void configure_without_project(EngineConfig *config) noexcept;
+
+/// Asks the executable running the engine to switch projects once this
+/// run ends: to the project at `path` (as open_project takes it), or, for
+/// an empty path, back to the project hub. Also asks the platform to quit,
+/// so the run ends at the end of this frame. False, with nothing
+/// requested, for a null path or one longer than kProjectOsPathCapacity
+/// allows. A later request replaces an earlier one. Main thread.
+bool request_project_switch(const char *path) noexcept;
+
+/// Takes the pending switch, if any, clearing it: true with the project's
+/// path in `out` (empty for the hub) and `*toHub` set when one was
+/// requested; false, `out` emptied, when none was, which means the run
+/// ended to quit, or when the path does not fit `capacity` (which leaves
+/// it pending; kProjectOsPathCapacity always fits).
+bool take_project_switch(char *out, std::size_t capacity, bool *toHub) noexcept;
 
 /// Writes the sample project the build puts beside the executables
 /// (`<app dir>/samples/island`) into `out`, the project the editor and the

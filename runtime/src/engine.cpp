@@ -222,6 +222,34 @@ const char *resolve_engine_root(char *out, std::size_t capacity) noexcept {
   return out;
 }
 
+/// False, with an Error naming the field, when `config` runs no project
+/// (an empty asset root) yet names project content: a main script, a
+/// startup scene or an editor asset root would resolve against whatever
+/// happens to be in the working directory. Its strings are the adopted,
+/// non-null copies.
+bool project_fields_consistent(const EngineConfig &config) noexcept {
+  if (config.assetRoot[0] != '\0') {
+    return true;
+  }
+  const char *field = nullptr;
+  if (config.mainScriptPath[0] != '\0') {
+    field = "mainScriptPath";
+  } else if (config.editorScenePath[0] != '\0') {
+    field = "editorScenePath";
+  } else if (config.editorAssetRoot[0] != '\0') {
+    field = "editorAssetRoot";
+  }
+  if (field == nullptr) {
+    return true;
+  }
+  char message[160] = {};
+  static_cast<void>(std::snprintf(
+      message, sizeof(message),
+      "configuration names '%s' but no project (assetRoot is empty)", field));
+  core::log_message(core::LogLevel::Error, "engine", message);
+  return false;
+}
+
 } // namespace
 
 bool bootstrap() noexcept {
@@ -249,13 +277,15 @@ bool bootstrap(const EngineConfig &config) noexcept {
   if ((adopted.engineRoot != nullptr) && (adopted.engineRoot[0] == '\0')) {
     adopted.engineRoot = resolve_engine_root(engineRoot, sizeof(engineRoot));
   }
-  if (!adopt_config_strings(adopted)) {
+  if (!adopt_config_strings(adopted) || !project_fields_consistent(adopted)) {
     return false;
   }
   // A project opened from its document is named by its GUID (see
   // open_project); the mounted root names one that was not, so two
-  // projects never share their saves and rebound input map.
-  adopted.core.projectRoot = adopted.assetRoot;
+  // projects never share their saves and rebound input map. A run with no
+  // project has no per-project data.
+  adopted.core.projectRoot =
+      (adopted.assetRoot[0] != '\0') ? adopted.assetRoot : nullptr;
   g_activeConfig = adopted;
 
   if (consume_injected_failure(BootstrapStage::Core) ||
@@ -332,7 +362,8 @@ bool bootstrap(const EngineConfig &config) noexcept {
   // or bootstrap mesh loads, so a missing root refuses here rather than
   // as a string of load failures later.
   if (consume_injected_failure(BootstrapStage::Mount) ||
-      !core::mount(g_activeConfig.assetMount, g_activeConfig.assetRoot)) {
+      (has_open_project() &&
+       !core::mount(g_activeConfig.assetMount, g_activeConfig.assetRoot))) {
     core::log_message(core::LogLevel::Error, "engine",
                       "failed to mount configured asset root");
     return fail_bootstrap();
@@ -462,6 +493,11 @@ bool bootstrap(const EngineConfig &config) noexcept {
 
 /// Returns the active engine configuration for runtime/editor systems.
 const EngineConfig &active_config() noexcept { return g_activeConfig; }
+
+bool has_open_project() noexcept {
+  return (g_activeConfig.assetRoot != nullptr) &&
+         (g_activeConfig.assetRoot[0] != '\0');
+}
 
 bool is_bootstrapped() noexcept { return g_bootstrapped; }
 

@@ -161,18 +161,22 @@ bool load_bootstrap_meshes(renderer::AssetManager *assetManager,
     }
   }
 
-  // Catalogue the mount so a saved mesh id maps back to the path its
+  // Catalogue the mounts so a saved mesh id maps back to the path its
   // bytes live at and a picker can list what exists before it loads. A
   // loader's own record wins: the walk never replaces one that exists,
   // and the material loader below updates the walk's in place. The walk
   // logs its own outcome, an Error naming every offending path when the
-  // mount does not index cleanly, so nothing here repeats it.
-  static_cast<void>(content::register_mounted_assets(
-      catalog, active_config().assetMount, active_config().assetRoot));
-  // The engine's own content (shaders, the bootstrap mesh) is catalogued
-  // under its own mount, so its records keep their engine/... paths.
+  // mount does not index cleanly, so nothing here repeats it. The
+  // engine's own content (shaders, the bootstrap mesh) is catalogued
+  // under its own mount, so its records keep their engine/... paths; with
+  // no project open it is all there is.
   static_cast<void>(content::register_mounted_assets(
       catalog, active_config().engineMount, active_config().engineRoot));
+  if (!has_open_project()) {
+    return true;
+  }
+  static_cast<void>(content::register_mounted_assets(
+      catalog, active_config().assetMount, active_config().assetRoot));
 
   // Discover project material JSONs so MeshComponent.materialAssetId
   // references resolve during render prep.
@@ -244,12 +248,12 @@ void create_bootstrap_scene(runtime::World *world) noexcept {
   }
 
   // Scene Controller: the scene-level Lua module (assets/main.lua) the
-  // project's gameplay starts from.
-  {
+  // project's gameplay starts from; a project without a main script (or no
+  // project) gives it none.
+  const char *mainScriptPath = active_config().mainScriptPath;
+  if ((mainScriptPath != nullptr) && (mainScriptPath[0] != '\0')) {
     runtime::ScriptComponent sc{};
-    const char *mainScriptPath = active_config().mainScriptPath;
-    std::snprintf(sc.scriptPath, sizeof(sc.scriptPath), "%s",
-                  (mainScriptPath != nullptr) ? mainScriptPath : "");
+    std::snprintf(sc.scriptPath, sizeof(sc.scriptPath), "%s", mainScriptPath);
     static_cast<void>(world->add_script_component(sceneControllerEntity, sc));
   }
 }
