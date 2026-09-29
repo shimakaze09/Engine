@@ -23,16 +23,31 @@ namespace engine::runtime {
 
 // --- Whole-file IO ---------------------------------------------------------
 
+/// The longest OS path a document read or write resolves a virtual path to.
+inline constexpr std::size_t kMaxDocumentOsPath = 1024U;
+
+/// The OS path a scene, prefab or other document at `path` lives at: a
+/// path under a mounted virtual prefix ("assets/level.scene") resolves
+/// through the VFS into `buffer`, so it names the project's file wherever
+/// the process was started; any other path (an OS path from a file
+/// dialog, or one under no mount) is returned as it is. A virtual path
+/// whose resolution does not fit `buffer` is returned unresolved, and
+/// then names no file.
+const char *resolve_document_path(const char *path, char *buffer,
+                                  std::size_t capacity) noexcept;
+
 /// Opens `path` for binary reading; false on null args or open failure.
 /// Deliberately read-only: every production write goes through
 /// write_text_file's atomic replacement, so this header offers no
 /// truncating-open counterpart for a caller to bypass it with.
 bool open_file_for_read(const char *path, FILE **outFile) noexcept;
-/// Reads an entire file into a null-terminated heap buffer.
-/// Fails on empty files, short reads, or allocation failure.
+/// Reads an entire file, at `path` as resolve_document_path resolves it,
+/// into a null-terminated heap buffer. Fails on empty files, short reads,
+/// or allocation failure.
 bool read_text_file(const char *path, std::unique_ptr<char[]> *outBuffer,
                     std::size_t *outSize) noexcept;
-/// Writes `size` bytes to `path`; false unless every byte lands.
+/// Writes `size` bytes to `path`, as resolve_document_path resolves it,
+/// through the staged atomic replace; false unless every byte lands.
 bool write_text_file(const char *path, const char *text,
                      std::size_t size) noexcept;
 

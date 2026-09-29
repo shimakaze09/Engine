@@ -770,6 +770,14 @@ engine_add_test_executable(engine_unit_scene_validation_report
     engine_core
 )
 
+engine_add_test_executable(engine_unit_scene_document_path
+    SOURCES
+    scene_document_path_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_core
+)
+
 engine_add_test_executable(engine_unit_entity_handle_epoch
     SOURCES
     entity_handle_epoch_test.cpp

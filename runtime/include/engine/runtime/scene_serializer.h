@@ -32,12 +32,16 @@ struct SceneSaveBlockers final {
 /// Collects the live state save_scene would refuse to drop.
 SceneSaveBlockers collect_scene_save_blockers(const World &world) noexcept;
 
-/// Saves the requested resource for scene.
+/// Saves the world's scene to `path` through a staged atomic replace. A
+/// path under a mounted virtual prefix ("assets/level.scene") names the
+/// mounted file wherever the process was started; any other path is an OS
+/// path, used as it is.
 bool save_scene(const World &world, const char *path) noexcept;
 /// Saves the requested resource for scene.
 bool save_scene(const World &world, char *buffer, std::size_t capacity,
                 std::size_t *outSize) noexcept;
-/// Loads the scene at `path` into the world. A malformed document is
+/// Loads the scene at `path` (resolved as save_scene resolves it) into
+/// the world. A malformed document is
 /// refused with the world untouched; a well-formed one whose references
 /// do not resolve still loads, and each such reference is a Warning in
 /// *outReport (when given) and a logged diagnostic: `dangling_parent`

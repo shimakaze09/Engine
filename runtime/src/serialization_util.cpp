@@ -5,6 +5,8 @@
 
 #include "serialization_util.h"
 
+#include "engine/core/vfs.h"
+
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -109,6 +111,14 @@ bool open_file_for_read(const char *path, FILE **outFile) noexcept {
 #endif
 }
 
+const char *resolve_document_path(const char *path, char *buffer,
+                                  std::size_t capacity) noexcept {
+  if ((path == nullptr) || (buffer == nullptr) || (capacity == 0U)) {
+    return path;
+  }
+  return core::vfs_resolve_os_path(path, buffer, capacity) ? buffer : path;
+}
+
 bool read_text_file(const char *path, std::unique_ptr<char[]> *outBuffer,
                     std::size_t *outSize) noexcept {
   if ((path == nullptr) || (outBuffer == nullptr) || (outSize == nullptr)) {
@@ -118,8 +128,11 @@ bool read_text_file(const char *path, std::unique_ptr<char[]> *outBuffer,
   outBuffer->reset();
   *outSize = 0U;
 
+  char resolved[kMaxDocumentOsPath] = {};
   FILE *file = nullptr;
-  if (!open_file_for_read(path, &file) || (file == nullptr)) {
+  if (!open_file_for_read(
+          resolve_document_path(path, resolved, sizeof(resolved)), &file) ||
+      (file == nullptr)) {
     return false;
   }
 
@@ -162,7 +175,9 @@ bool read_text_file(const char *path, std::unique_ptr<char[]> *outBuffer,
 
 bool write_text_file(const char *path, const char *text,
                      std::size_t size) noexcept {
-  return core::atomic_write_file(path, text, size);
+  char resolved[kMaxDocumentOsPath] = {};
+  return core::atomic_write_file(
+      resolve_document_path(path, resolved, sizeof(resolved)), text, size);
 }
 
 void write_vec2(core::JsonWriter &writer, const char *key,
