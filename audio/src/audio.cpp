@@ -2,6 +2,7 @@
 
 #include "engine/audio/audio.h"
 
+#include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -72,14 +73,25 @@ struct SoundEntry final {
 
 constexpr std::size_t kMaxOneShotInstances = 32U;
 
-/// One fire-and-forget playback: its own read cursor over the source
-/// sound's decoded PCM plus the playing ma_sound; sourceSlot lets
-/// unload_sound kill instances whose PCM is going away.
+/// A mixer voice made once, when audio starts, and re-pointed at a sound's
+/// decoded PCM on each playback, so playing allocates nothing: a sound
+/// made per playback would build a mixer node, a heap allocation per
+/// gameplay sound event. A voice mixes a fixed channel count, fixed when
+/// it is made, so each slot holds a mono and a stereo voice.
+struct OneShotVoice final {
+  bool ready = false;
+  ma_audio_buffer_ref source{};
+  ma_sound sound{};
+};
+
+/// One fire-and-forget playback slot. sourceSlot lets unload_sound stop
+/// a playback whose PCM is going away.
 struct OneShotInstance final {
   bool active = false;
   std::size_t sourceSlot = 0U;
-  ma_audio_buffer_ref source{};
-  ma_sound sound{};
+  OneShotVoice *playing = nullptr;
+  OneShotVoice mono{};
+  OneShotVoice stereo{};
 };
 
 struct AudioState final {
@@ -100,6 +112,21 @@ AudioState g_audio{};
 
 /// Decoders opened since the process started; playback must open none.
 std::size_t g_decoderOpens = 0U;
+/// Heap allocations the mixer made, counted by its allocation callbacks.
+/// Atomic because miniaudio may allocate from its device thread.
+std::atomic<std::size_t> g_mixerAllocations{0U};
+
+void *counted_malloc(std::size_t size, void * /*userData*/) {
+  g_mixerAllocations.fetch_add(1U, std::memory_order_relaxed);
+  return std::malloc(size);
+}
+
+void *counted_realloc(void *block, std::size_t size, void * /*userData*/) {
+  g_mixerAllocations.fetch_add(1U, std::memory_order_relaxed);
+  return std::realloc(block, size);
+}
+
+void counted_free(void *block, void * /*userData*/) { std::free(block); }
 /// The one-shot pool's exhaustion warning, once per episode of loaded
 /// sounds: reset when they are all unloaded or audio shuts down.
 bool g_oneShotPoolWarned = false;
@@ -211,14 +238,55 @@ bool decoded_pcm_within_budget(ma_decoder &decoder,
   return true;
 }
 
-/// Releases one one-shot instance's playback resources.
+/// Silent PCM a voice reads while no playback holds it, so it never
+/// points at a sound's freed PCM.
+constexpr float kSilentFrame[2] = {0.0F, 0.0F};
+
+/// Ends a one-shot's playback and returns its slot to the pool. The voice
+/// is detached from the mix before its source is pointed back at
+/// silence: detaching waits out a mix in progress, so no mix reads the
+/// sound's PCM after this returns and the PCM can be freed.
 void reset_one_shot(OneShotInstance &instance) noexcept {
   if (!instance.active) {
     return;
   }
-  ma_sound_uninit(&instance.sound);
-  ma_audio_buffer_ref_uninit(&instance.source);
-  instance = OneShotInstance{};
+  OneShotVoice &voice = *instance.playing;
+  ma_sound_stop(&voice.sound);
+  ma_node_detach_output_bus(&voice.sound, 0U);
+  const ma_uint32 channels = (&voice == &instance.stereo) ? 2U : 1U;
+  ma_audio_buffer_ref_uninit(&voice.source);
+  static_cast<void>(ma_audio_buffer_ref_init(ma_format_f32, channels,
+                                             kSilentFrame, 1U, &voice.source));
+  instance.active = false;
+  instance.playing = nullptr;
+}
+
+/// Makes one pooled voice of `channels` channels over silence, detached
+/// from the mix until a playback routes it; false leaves it unusable.
+bool make_voice(OneShotVoice &voice, ma_uint32 channels) noexcept {
+  if (ma_audio_buffer_ref_init(ma_format_f32, channels, kSilentFrame, 1U,
+                               &voice.source) != MA_SUCCESS) {
+    return false;
+  }
+  voice.source.sampleRate = ma_engine_get_sample_rate(&g_audio.engine);
+  if (ma_sound_init_from_data_source(&g_audio.engine, &voice.source, 0U,
+                                     nullptr, &voice.sound) != MA_SUCCESS) {
+    ma_audio_buffer_ref_uninit(&voice.source);
+    return false;
+  }
+  ma_node_detach_output_bus(&voice.sound, 0U);
+  voice.ready = true;
+  return true;
+}
+
+/// Releases a pooled voice at shutdown.
+void release_voice(OneShotVoice &voice) noexcept {
+  if (!voice.ready) {
+    return;
+  }
+  ma_sound_uninit(&voice.sound);
+  ma_audio_buffer_ref_uninit(&voice.source);
+  voice = OneShotVoice{};
 }
 
 /// True when every component is a finite float; positions and listener
@@ -252,6 +320,15 @@ bool bus_valid(AudioBus bus) noexcept {
 }
 
 /// Group routing for a bus; nullptr = the engine endpoint (Master).
+ma_sound_group *bus_group(AudioBus bus) noexcept;
+
+/// The mixer node a bus's sounds feed: its group, or the engine endpoint.
+ma_node *bus_node(AudioBus bus) noexcept {
+  ma_sound_group *group = bus_group(bus);
+  return (group != nullptr) ? static_cast<ma_node *>(group)
+                            : ma_engine_get_endpoint(&g_audio.engine);
+}
+
 ma_sound_group *bus_group(AudioBus bus) noexcept {
   if (!g_audio.busesReady) {
     return nullptr;
@@ -315,41 +392,55 @@ bool start_one_shot(SoundEntry *entry, std::size_t sourceSlot,
     return false;
   }
 
+  // Loading brings every sound to one or two channels; a voice mixes no
+  // other count, so anything else is refused rather than misread.
+  if ((entry->channels != 1U) && (entry->channels != 2U)) {
+    core::log_message(core::LogLevel::Error, "audio",
+                      "one-shots play mono or stereo sounds only");
+    return false;
+  }
   OneShotInstance &instance = g_audio.oneShots[slot];
-  if (!init_pcm_source(*entry, &instance.source)) {
+  OneShotVoice &voice =
+      (entry->channels == 1U) ? instance.mono : instance.stereo;
+  if (!voice.ready) {
+    core::log_message(core::LogLevel::Error, "audio",
+                      "no one-shot voice for this channel count");
+    return false;
+  }
+  // Re-pointing allocates nothing: the source only records where the
+  // frames are, and the voice takes the sound's sample rate by rescaling
+  // its resampler, which the mix does on its next block once the recorded
+  // pitch no longer matches.
+  ma_audio_buffer_ref_uninit(&voice.source);
+  if (!init_pcm_source(*entry, &voice.source)) {
+    static_cast<void>(ma_audio_buffer_ref_init(
+        ma_format_f32, entry->channels, kSilentFrame, 1U, &voice.source));
     core::log_message(core::LogLevel::Error, "audio",
                       "failed to start a one-shot instance");
     return false;
   }
-
-  const ma_uint32 flags =
-      positional ? 0U : static_cast<ma_uint32>(MA_SOUND_FLAG_NO_SPATIALIZATION);
-  if (ma_sound_init_from_data_source(&g_audio.engine, &instance.source, flags,
-                                     bus_group(bus),
-                                     &instance.sound) != MA_SUCCESS) {
-    ma_audio_buffer_ref_uninit(&instance.source);
-    core::log_message(core::LogLevel::Error, "audio",
-                      "failed to create one-shot instance");
-    return false;
-  }
-
+  voice.sound.engineNode.sampleRate = entry->sampleRate;
+  voice.sound.engineNode.oldPitch = -1.0F;
   instance.active = true;
   instance.sourceSlot = sourceSlot;
-  ma_sound_set_volume(&instance.sound, params.volume);
-  ma_sound_set_pitch(&instance.sound, params.pitch);
-  ma_sound_set_looping(&instance.sound, MA_FALSE);
+  instance.playing = &voice;
+
+  ma_sound_set_spatialization_enabled(&voice.sound,
+                                      positional ? MA_TRUE : MA_FALSE);
+  ma_node_attach_output_bus(&voice.sound, 0U, bus_node(bus), 0U);
+  ma_sound_set_volume(&voice.sound, params.volume);
+  ma_sound_set_pitch(&voice.sound, params.pitch);
+  ma_sound_set_looping(&voice.sound, MA_FALSE);
   if (positional) {
-    ma_sound_set_position(&instance.sound, position.x, position.y,
-                          position.z);
+    ma_sound_set_position(&voice.sound, position.x, position.y, position.z);
     // Explicit attenuation: the mixer's own defaults hold full volume
     // only within one metre, which silences everything a third-person
     // camera hears.
-    ma_sound_set_attenuation_model(&instance.sound,
-                                   ma_attenuation_model_inverse);
-    ma_sound_set_min_distance(&instance.sound, params.minDistance);
-    ma_sound_set_rolloff(&instance.sound, params.rolloff);
+    ma_sound_set_attenuation_model(&voice.sound, ma_attenuation_model_inverse);
+    ma_sound_set_min_distance(&voice.sound, params.minDistance);
+    ma_sound_set_rolloff(&voice.sound, params.rolloff);
   }
-  if (ma_sound_start(&instance.sound) != MA_SUCCESS) {
+  if (ma_sound_start(&voice.sound) != MA_SUCCESS) {
     reset_one_shot(instance);
     return false;
   }
@@ -397,6 +488,55 @@ void reset_sound_entry(SoundEntry &entry) noexcept {
 } // namespace
 
 std::size_t audio_decoder_opens() noexcept { return g_decoderOpens; }
+
+std::size_t audio_mixer_allocations() noexcept {
+  return g_mixerAllocations.load(std::memory_order_relaxed);
+}
+
+bool audio_mix_null_device(std::uint32_t frames, float *peak, float *leftPeak,
+                           float *rightPeak) noexcept {
+  if (!g_audio.initialized || !g_audio.nullDevice) {
+    return false;
+  }
+  // Mixed in fixed chunks into fixed storage, so mixing allocates nothing.
+  constexpr std::uint32_t kChunkFrames = 256U;
+  static float chunk[kChunkFrames * 8U] = {};
+  const ma_uint32 channels = ma_engine_get_channels(&g_audio.engine);
+  if ((channels == 0U) || (channels > 8U)) {
+    return false;
+  }
+  float loudest = 0.0F;
+  float left = 0.0F;
+  float right = 0.0F;
+  std::uint32_t remaining = frames;
+  while (remaining > 0U) {
+    const std::uint32_t count =
+        (remaining < kChunkFrames) ? remaining : kChunkFrames;
+    if (ma_engine_read_pcm_frames(&g_audio.engine, chunk, count, nullptr) !=
+        MA_SUCCESS) {
+      return false;
+    }
+    for (std::uint32_t i = 0U; i < (count * channels); ++i) {
+      loudest = std::fmax(loudest, std::fabs(chunk[i]));
+      if ((i % channels) == 0U) {
+        left = std::fmax(left, std::fabs(chunk[i]));
+      } else if ((i % channels) == 1U) {
+        right = std::fmax(right, std::fabs(chunk[i]));
+      }
+    }
+    remaining -= count;
+  }
+  if (peak != nullptr) {
+    *peak = loudest;
+  }
+  if (leftPeak != nullptr) {
+    *leftPeak = left;
+  }
+  if (rightPeak != nullptr) {
+    *rightPeak = right;
+  }
+  return true;
+}
 
 bool initialize_audio() noexcept { return initialize_audio(AudioConfig{}); }
 
@@ -452,6 +592,9 @@ bool initialize_audio(const AudioConfig &audioConfig) noexcept {
 
   ma_engine_config config = ma_engine_config_init();
   config.noDevice = audioConfig.nullDevice ? MA_TRUE : MA_FALSE;
+  config.allocationCallbacks.onMalloc = &counted_malloc;
+  config.allocationCallbacks.onRealloc = &counted_realloc;
+  config.allocationCallbacks.onFree = &counted_free;
   if (audioConfig.nullDevice) {
     // Without a device the engine has no format to take over, so the mix
     // format is fixed here.
@@ -502,6 +645,18 @@ bool initialize_audio(const AudioConfig &audioConfig) noexcept {
   g_audio.busVolumes[1] = 1.0F;
   g_audio.busVolumes[2] = 1.0F;
 
+  // Every one-shot voice is made now, so playback never allocates.
+  std::size_t voicesMissing = 0U;
+  for (auto &instance : g_audio.oneShots) {
+    voicesMissing += make_voice(instance.mono, 1U) ? 0U : 1U;
+    voicesMissing += make_voice(instance.stereo, 2U) ? 0U : 1U;
+  }
+  if (voicesMissing > 0U) {
+    core::log_message(core::LogLevel::Warning, "audio",
+                      "some one-shot voices could not be made; fewer "
+                      "one-shots can play at once");
+  }
+
   g_audio.initialized = true;
   g_audio.nullDevice = audioConfig.nullDevice;
   core::log_message(core::LogLevel::Info, "audio",
@@ -539,6 +694,8 @@ void shutdown_audio() noexcept {
 
   for (auto &instance : g_audio.oneShots) {
     reset_one_shot(instance);
+    release_voice(instance.mono);
+    release_voice(instance.stereo);
   }
   stop_music();
   if (g_audio.busesReady) {
@@ -572,7 +729,7 @@ void update_audio() noexcept {
   }
   for (auto &instance : g_audio.oneShots) {
     if (instance.active &&
-        (ma_sound_is_playing(&instance.sound) == MA_FALSE)) {
+        (ma_sound_is_playing(&instance.playing->sound) == MA_FALSE)) {
       reset_one_shot(instance);
     }
   }
@@ -635,6 +792,14 @@ SoundHandle load_sound(const char *virtualPath) noexcept {
   ++g_decoderOpens;
   ma_result res =
       ma_decoder_init_memory(fileData, fileSize, &decoderConfig, &decoder);
+  if ((res == MA_SUCCESS) && (decoder.outputChannels > 2U)) {
+    // One-shot voices mix one or two channels, so a sound with more is
+    // decoded down to stereo, once, here.
+    ma_decoder_uninit(&decoder);
+    decoderConfig.channels = 2U;
+    ++g_decoderOpens;
+    res = ma_decoder_init_memory(fileData, fileSize, &decoderConfig, &decoder);
+  }
   if (res != MA_SUCCESS) {
     core::vfs_free(fileData);
     log_path_error(virtualPath, "failed to decode sound file");

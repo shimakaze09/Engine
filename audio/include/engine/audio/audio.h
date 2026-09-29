@@ -82,6 +82,8 @@ void update_audio() noexcept;
 /// `audio.max_sound_file_bytes` (checked from file metadata before any of
 /// it is read) or its header claims more decoded PCM than
 /// `audio.max_decoded_pcm_bytes` (checked before the first frame decodes).
+/// The sound is decoded once, here, at its own sample rate; a sound of
+/// more than two channels is decoded down to stereo.
 SoundHandle load_sound(const char *virtualPath) noexcept;
 // Releases every loaded sound, live one-shot, and the streamed music while
 // the device stays up: sounds are run-scoped scene content and must not
@@ -124,9 +126,10 @@ void set_listener(const math::Vec3 &position, const math::Vec3 &forward,
                   const math::Vec3 &up) noexcept;
 
 /// Fire-and-forget spatialized one-shot at a world position on the given
-/// bus. Instances come from a fixed pool recycled by update_audio; loop
-/// is ignored so a one-shot can never pin a pool slot. False when the
-/// handle is stale or the pool is exhausted (logged once).
+/// bus. Instances come from a fixed pool of voices made when audio starts
+/// and recycled by update_audio, so playing allocates nothing; loop is
+/// ignored so a one-shot can never pin a pool slot. False when the handle
+/// is stale or the pool is exhausted (logged once).
 bool play_sound_at(SoundHandle handle, const math::Vec3 &position,
                    const PlayParams &params,
                    AudioBus bus = AudioBus::Sfx) noexcept;

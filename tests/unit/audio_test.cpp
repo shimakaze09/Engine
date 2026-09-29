@@ -273,29 +273,31 @@ static void put_le(std::vector<std::uint8_t> &out, std::uint32_t value,
   }
 }
 
-/// Writes a 16-bit PCM mono WAV of `frames` silent frames whose data chunk
-/// header claims `claimedDataBytes`; the claim is what a decoder derives
-/// its frame count from, so it can exceed the bytes actually present.
+/// Writes a 16-bit PCM WAV of `frames` frames, every sample `value`
+/// (silent by default), mono at 22050 Hz unless told otherwise, whose data
+/// chunk header claims `claimedDataBytes`; the claim is what a decoder
+/// derives its frame count from, so it can exceed the bytes present.
 static bool write_wav(const std::filesystem::path &path, std::uint32_t frames,
-                      std::uint32_t claimedDataBytes) {
-  constexpr std::uint32_t kSampleRate = 22050U;
-  constexpr std::uint32_t kChannels = 1U;
-  constexpr std::uint32_t kBlockAlign = kChannels * 2U;
+                      std::uint32_t claimedDataBytes, std::int16_t value = 0,
+                      std::uint32_t channels = 1U,
+                      std::uint32_t sampleRate = 22050U) {
+  const std::uint32_t blockAlign = channels * 2U;
   std::vector<std::uint8_t> bytes;
   bytes.insert(bytes.end(), {'R', 'I', 'F', 'F'});
   put_le(bytes, 36U + claimedDataBytes, 4U);
   bytes.insert(bytes.end(), {'W', 'A', 'V', 'E', 'f', 'm', 't', ' '});
   put_le(bytes, 16U, 4U);
   put_le(bytes, 1U, 2U); // PCM
-  put_le(bytes, kChannels, 2U);
-  put_le(bytes, kSampleRate, 4U);
-  put_le(bytes, kSampleRate * kBlockAlign, 4U);
-  put_le(bytes, kBlockAlign, 2U);
+  put_le(bytes, channels, 2U);
+  put_le(bytes, sampleRate, 4U);
+  put_le(bytes, sampleRate * blockAlign, 4U);
+  put_le(bytes, blockAlign, 2U);
   put_le(bytes, 16U, 2U);
   bytes.insert(bytes.end(), {'d', 'a', 't', 'a'});
   put_le(bytes, claimedDataBytes, 4U);
-  bytes.resize(bytes.size() + static_cast<std::size_t>(frames) * kBlockAlign,
-               0U);
+  for (std::uint32_t i = 0U; i < (frames * channels); ++i) {
+    put_le(bytes, static_cast<std::uint16_t>(value), 2U);
+  }
   std::FILE *file = nullptr;
 #ifdef _WIN32
   if (fopen_s(&file, path.string().c_str(), "wb") != 0) {
@@ -611,6 +613,181 @@ static void test_playback_opens_no_decoder() {
   fs::remove_all(scratch, ec);
 }
 
+/// EXPECTATION (#573 row 3): playing a sound allocates nothing. The
+/// one-shot pool's voices are made once, when audio starts; a playback
+/// points a free voice at the sound's decoded PCM, whatever its sample
+/// rate and channel count, and a finished one frees its voice for the
+/// next. Before, every one-shot built its own mixer node, a heap
+/// allocation per gameplay sound event. Hundreds of plays, more than the
+/// pool holds at once, each heard in the mix, allocate nothing.
+static void test_playback_allocates_nothing() {
+  using namespace engine::audio;
+  namespace fs = std::filesystem;
+  std::error_code ec{};
+  const fs::path scratch = fs::current_path(ec) / "engine_audio_pool_test";
+  fs::remove_all(scratch, ec);
+  fs::create_directories(scratch, ec);
+  TEST_ASSERT(!ec);
+  // Short, loud and constant, so a playback is heard in the mix and ends
+  // within one mixed block: mono at 22050 Hz, stereo at 44100 Hz, and six
+  // channels, which loading brings down to stereo.
+  TEST_ASSERT(write_wav(scratch / "mono.wav", 220U, 440U, 12000));
+  TEST_ASSERT(
+      write_wav(scratch / "stereo.wav", 441U, 441U * 4U, 12000, 2U, 44100U));
+  TEST_ASSERT(
+      write_wav(scratch / "surround.wav", 441U, 441U * 12U, 12000, 6U, 44100U));
+  TEST_ASSERT(engine::core::initialize_vfs());
+  TEST_ASSERT(engine::core::mount("audiopool", scratch.string().c_str()));
+  AudioConfig config{};
+  config.nullDevice = true;
+  if (!initialize_audio(config)) {
+    engine::core::shutdown_vfs();
+    fs::remove_all(scratch, ec);
+    g_tests.check(false, "audio initializes on the null device");
+    return;
+  }
+  set_listener(engine::math::Vec3(0.0F, 0.0F, 0.0F),
+               engine::math::Vec3(0.0F, 0.0F, -1.0F),
+               engine::math::Vec3(0.0F, 1.0F, 0.0F));
+  const SoundHandle sounds[] = {load_sound("audiopool/mono.wav"),
+                                load_sound("audiopool/stereo.wav"),
+                                load_sound("audiopool/surround.wav")};
+  g_tests.check((sounds[0] != kInvalidSound) && (sounds[1] != kInvalidSound) &&
+                    (sounds[2] != kInvalidSound),
+                "mono, stereo and six-channel sounds load");
+
+  float peak = 0.0F;
+  g_tests.check(audio_mix_null_device(4800U, &peak) && (peak == 0.0F),
+                "the mix is silent before anything plays");
+
+  const std::size_t before = audio_mixer_allocations();
+  const PlayParams params{};
+  int started = 0;
+  int heard = 0;
+  constexpr int kRounds = 100;
+  for (int round = 0; round < kRounds; ++round) {
+    const SoundHandle sound = sounds[round % 3];
+    // Two at once, positional and not, so voices of both kinds are in
+    // use and recycled.
+    started +=
+        play_sound_at(sound, engine::math::Vec3(0.0F, 0.0F, -2.0F), params) ? 1
+                                                                            : 0;
+    started += play_sound_oneshot(sound, params, AudioBus::Sfx) ? 1 : 0;
+    // 100 ms at 48 kHz outlasts every fixture, so both voices finish.
+    peak = 0.0F;
+    heard += (audio_mix_null_device(4800U, &peak) && (peak > 0.05F)) ? 1 : 0;
+    update_audio();
+  }
+  g_tests.check(started == (2 * kRounds),
+                "every playback starts: finished voices return to the pool");
+  g_tests.check(heard == kRounds, "every round is heard in the mix");
+  g_tests.check(audio_mixer_allocations() == before,
+                "no playback allocates in the mixer");
+  g_tests.check(audio_mix_null_device(4800U, &peak) && (peak == 0.0F),
+                "the mix is silent once every playback has finished");
+
+  unload_all_sounds();
+  shutdown_audio();
+  engine::core::shutdown_vfs();
+  fs::remove_all(scratch, ec);
+}
+
+/// Plays `sound` as a one-shot and returns how many frames of the 48 kHz
+/// mix carry it, mixed in 16-frame blocks.
+static int audible_frames(engine::audio::SoundHandle sound) noexcept {
+  using namespace engine::audio;
+  if (!play_sound_oneshot(sound, PlayParams{}, AudioBus::Sfx)) {
+    return -1;
+  }
+  int frames = 0;
+  for (int block = 0; block < 400; ++block) {
+    float peak = 0.0F;
+    if (!audio_mix_null_device(16U, &peak)) {
+      return -1;
+    }
+    frames += (peak > 0.05F) ? 16 : 0;
+  }
+  update_audio();
+  return frames;
+}
+
+/// EXPECTATION (#573 row 3): a pooled voice plays each sound at that
+/// sound's own sample rate, even straight after one of another rate on
+/// the same voice. 882 frames at 44.1 kHz last 960 frames of the 48 kHz
+/// mix; 220 frames at 22.05 kHz last 479. Measured in 16-frame blocks, so
+/// a count is within one block plus the resampler's few frames of
+/// latency of the ideal: 32 frames either way. Playing the second at the
+/// first's rate would last 239 frames; at the mix's own rate, 220. The
+/// voice also follows its bus's volume, and one played without a
+/// position after a positional playback is not left where that one was.
+static void test_voice_takes_each_sounds_rate() {
+  using namespace engine::audio;
+  namespace fs = std::filesystem;
+  std::error_code ec{};
+  const fs::path scratch = fs::current_path(ec) / "engine_audio_rate_test";
+  fs::remove_all(scratch, ec);
+  fs::create_directories(scratch, ec);
+  TEST_ASSERT(!ec);
+  TEST_ASSERT(
+      write_wav(scratch / "fast.wav", 882U, 882U * 2U, 12000, 1U, 44100U));
+  TEST_ASSERT(write_wav(scratch / "slow.wav", 220U, 440U, 12000));
+  TEST_ASSERT(engine::core::initialize_vfs());
+  TEST_ASSERT(engine::core::mount("audiorate", scratch.string().c_str()));
+  AudioConfig config{};
+  config.nullDevice = true;
+  if (!initialize_audio(config)) {
+    engine::core::shutdown_vfs();
+    fs::remove_all(scratch, ec);
+    g_tests.check(false, "audio initializes on the null device");
+    return;
+  }
+  const SoundHandle fast = load_sound("audiorate/fast.wav");
+  const SoundHandle slow = load_sound("audiorate/slow.wav");
+  const auto near = [](int measured, int ideal) noexcept {
+    return (measured >= (ideal - 32)) && (measured <= (ideal + 32));
+  };
+  const int fastFrames = audible_frames(fast);
+  const int slowFrames = audible_frames(slow);
+  char what[128] = {};
+  std::snprintf(what, sizeof(what),
+                "a 44.1 kHz sound lasts its length in the mix (%d frames)",
+                fastFrames);
+  g_tests.check(near(fastFrames, 960), what);
+  std::snprintf(what, sizeof(what),
+                "then a 22.05 kHz sound on the same voice lasts its own "
+                "(%d frames)",
+                slowFrames);
+  g_tests.check(near(slowFrames, 479), what);
+
+  // A voice is routed to its bus on each playback: muting the bus
+  // silences it, and restoring it brings the sound back.
+  set_bus_volume(AudioBus::Sfx, 0.0F);
+  g_tests.check(audible_frames(slow) == 0,
+                "a one-shot on the muted Sfx bus is silent");
+  set_bus_volume(AudioBus::Sfx, 1.0F);
+  // A voice last played in the world, off to the listener's left, pans
+  // hard left; played next without a position, the same voice is not
+  // placed at all, and a mono sound plays the same in both channels.
+  float left = 0.0F;
+  float right = 0.0F;
+  g_tests.check(play_sound_at(slow, engine::math::Vec3(-5.0F, 0.0F, 0.0F),
+                              PlayParams{}) &&
+                    audio_mix_null_device(4800U, nullptr, &left, &right) &&
+                    (left > (2.0F * right)),
+                "a positional one-shot to the left pans left");
+  update_audio();
+  g_tests.check(play_sound_oneshot(slow, PlayParams{}, AudioBus::Sfx) &&
+                    audio_mix_null_device(4800U, nullptr, &left, &right) &&
+                    (left > 0.05F) && (left == right),
+                "the same voice played without a position is not panned");
+  update_audio();
+
+  unload_all_sounds();
+  shutdown_audio();
+  engine::core::shutdown_vfs();
+  fs::remove_all(scratch, ec);
+}
+
 /// Runs this executable or test program.
 int main() {
   RUN_TEST(test_double_init_and_shutdown);
@@ -629,6 +806,8 @@ int main() {
   RUN_TEST(test_decode_budgets);
   RUN_TEST(test_registry_boundaries);
   RUN_TEST(test_playback_opens_no_decoder);
+  RUN_TEST(test_playback_allocates_nothing);
+  RUN_TEST(test_voice_takes_each_sounds_rate);
 
   test_sound_generation_wraps_skipping_zero();
 
