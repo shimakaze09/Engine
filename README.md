@@ -425,7 +425,7 @@ The scripting surface is still evolving. Some APIs are generated from annotated 
 
 ## Assets and mesh conversion
 
-The runtime mounts the open project's content root at `assets/` and the engine's own content from `engine_assets/` at `engine/` (`EngineConfig::assetRoot` and `engineRoot`). `engine::open_project` sets the content root from the project document. The engine's content is found through `ENGINE_ROOT`, then beside the executable, then in the working directory, unless the config names it; CMake copies it and the sample project into the build output, and bootstrap refuses an engine root that is not there.
+The runtime mounts the open project's content root at `assets/` and the engine's own content from `engine_assets/` at `engine/` (`EngineConfig::assetRoot` and `engineRoot`). `engine::open_project` sets the content root from the project document. A project's packages, the add-ons it depends on (Unity's packages, Godot's addons), are listed in its `.project` document as `"dependencies": [{"name": "ui_kit", "source": "packages/ui_kit"}]`; each lives in the project's `packages/<name>/` folder, is mounted at `packages/<name>/` and catalogued like the project's own content, so its assets are referenced and its scripts loaded by those paths (`engine_integration_project_open`). A package asset that claims another's identity is reported by path at startup (`engine_unit_asset_catalog`). The Assets panel does not list packages yet (#759). The engine's content is found through `ENGINE_ROOT`, then beside the executable, then in the working directory, unless the config names it; CMake copies it and the sample project into the build output, and bootstrap refuses an engine root that is not there.
 
 For mesh conversion, build and run `asset_packer`:
 
