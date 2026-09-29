@@ -54,6 +54,7 @@
 
 #include "editor_commands.h"
 #include "editor_console_capture.h"
+#include "editor_entity_rename.h"
 #include "editor_fonts.h"
 #include "editor_frame_history.h"
 #include "editor_layout.h"
@@ -488,6 +489,7 @@ void editor_set_world(runtime::World *world) noexcept {
     editor_session().playStopPending = false;
     ++editor_session().documentGeneration;
     scene_document_reset_for_world_switch();
+    cancel_entity_rename();
   }
   editor_session().world = world;
 }

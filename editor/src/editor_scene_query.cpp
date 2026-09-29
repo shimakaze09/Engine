@@ -142,6 +142,26 @@ std::size_t scene_pick_hits(runtime::World &world, const math::Ray &ray,
   return count;
 }
 
+bool within_click_slop(float dx, float dy) noexcept {
+  return ((dx * dx) + (dy * dy)) <= (kClickSlopPixels * kClickSlopPixels);
+}
+
+bool ray_ground_point(const math::Ray &ray, float reach,
+                      math::Vec3 *out) noexcept {
+  // A direction this flat meets the ground too far out to be meant.
+  constexpr float kMinDescent = 1.0e-4F;
+  if ((out == nullptr) || !(ray.direction.y < -kMinDescent)) {
+    return false;
+  }
+  const float distance = -ray.origin.y / ray.direction.y;
+  if (!(distance >= 0.0F) || !(distance <= reach)) {
+    return false;
+  }
+  *out = math::Vec3(ray.origin.x + (ray.direction.x * distance), 0.0F,
+                    ray.origin.z + (ray.direction.z * distance));
+  return true;
+}
+
 runtime::Entity choose_pick(const PickHit *hits, std::size_t count,
                             runtime::Entity current,
                             bool sameSpotAsLastClick) noexcept {

@@ -242,9 +242,38 @@ bool EntityDeleteCommand::undo() noexcept {
   return true;
 }
 
-runtime::Entity execute_entity_create() noexcept {
+/// Applies `placement` to a new entity's transform: parented at the
+/// parent's origin, or at the placement's position with `groundY` added
+/// (a primitive's lift to rest on the ground), or left as it came.
+/// False when a parent is named but is not alive.
+static bool place_new_entity(const runtime::World &world,
+                             const EntitySpawnPlacement &placement,
+                             float groundY,
+                             runtime::Transform *transform) noexcept {
+  if (placement.parent != runtime::kInvalidEntity) {
+    if (!world.is_alive(placement.parent)) {
+      return false;
+    }
+    transform->position = math::Vec3(0.0F, 0.0F, 0.0F);
+    transform->parentId = world.persistent_id(placement.parent);
+    return true;
+  }
+  if (placement.hasPosition) {
+    transform->position =
+        math::Vec3(placement.position.x, placement.position.y + groundY,
+                   placement.position.z);
+  }
+  return true;
+}
+
+runtime::Entity
+execute_entity_create(const EntitySpawnPlacement &placement) noexcept {
   runtime::World *const world = editor_session().world;
   if (world == nullptr) {
+    return runtime::kInvalidEntity;
+  }
+  runtime::Transform transform{};
+  if (!place_new_entity(*world, placement, 0.0F, &transform)) {
     return runtime::kInvalidEntity;
   }
   auto *command = allocate_command<EntityCreateCommand>();
@@ -254,6 +283,7 @@ runtime::Entity execute_entity_create() noexcept {
                       "undo (out of memory)");
     return runtime::kInvalidEntity;
   }
+  command->transform = transform;
   if (!editor_session().commandHistory.execute(command)) {
     return runtime::kInvalidEntity;
   }
@@ -412,7 +442,9 @@ primitive_spawn_desc(EditorPrimitive primitive) noexcept {
   return desc;
 }
 
-runtime::Entity execute_primitive_spawn(EditorPrimitive primitive) noexcept {
+runtime::Entity
+execute_primitive_spawn(EditorPrimitive primitive,
+                        const EntitySpawnPlacement &placement) noexcept {
   runtime::World *const world = editor_session().world;
   if (world == nullptr) {
     return runtime::kInvalidEntity;
@@ -423,15 +455,18 @@ runtime::Entity execute_primitive_spawn(EditorPrimitive primitive) noexcept {
     return runtime::kInvalidEntity;
   }
 
+  const renderer::CameraState cam =
+      editor_camera_state(editor_session().editorCamera);
+  runtime::Transform transform{};
+  transform.position = math::Vec3(cam.target.x, desc.groundY, cam.target.z);
+  if (!place_new_entity(*world, placement, desc.groundY, &transform)) {
+    return runtime::kInvalidEntity;
+  }
   auto *command = allocate_command<EntityCreateCommand>();
   if (command == nullptr) {
     return runtime::kInvalidEntity;
   }
-
-  const renderer::CameraState cam =
-      editor_camera_state(editor_session().editorCamera);
-  command->transform.position =
-      math::Vec3(cam.target.x, desc.groundY, cam.target.z);
+  command->transform = transform;
   std::snprintf(command->name.name, sizeof(command->name.name), "%s",
                 desc.name);
   command->hasMesh = true;

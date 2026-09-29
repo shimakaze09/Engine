@@ -33,6 +33,8 @@ enum class EditorAction : std::uint8_t {
   Duplicate,
   Delete,
   CreateEmpty,
+  CreateEmptyChild,
+  Rename,
   GizmoTranslate,
   GizmoRotate,
   GizmoScale,
@@ -69,10 +71,10 @@ struct EditorShortcut final {
   /// Screenshot, as Unreal's F9 works in Play In Editor.
   bool whileGameHasKeyboard = false;
   /// Whether the action edits the scene's entities (Copy, Paste,
-  /// Duplicate, Delete, Create Empty, Frame Selected), so its chord and
-  /// the Edit menu's item work only while the Scene view or the Entities
-  /// panel is the last focused panel, as Unity routes them to the focused
-  /// window. Everything else works from anywhere.
+  /// Duplicate, Delete, Create Empty, Rename, Frame Selected), so its
+  /// chord and the Edit menu's item work only while the Scene view or the
+  /// Entities panel is the last focused panel, as Unity routes them to the
+  /// focused window. Everything else works from anywhere.
   bool sceneEditing = false;
 };
 
