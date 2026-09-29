@@ -1,11 +1,12 @@
 // Verifies the unsaved-change confirm-prompt state machine (issue #158):
 // New/Open/quit run immediately on a clean document, dirty documents arm
 // the Save/Discard/Cancel prompt instead, Cancel leaves everything
-// untouched, Discard proceeds without saving, and Save either saves in
-// place (titled document) or resolves through the async Save As dialog
-// handoff (untitled document) before continuing the deferred action. A
-// failed Save keeps the prompt armed instead of silently losing the
-// pending action. It also pins the dialog-session boundary (audit #390):
+// untouched, Discard proceeds without saving (leaving the project too:
+// the switch is requested only once the prompt resolves), and Save either
+// saves in place (titled document) or resolves through the async Save As
+// dialog handoff (untitled document) before continuing the deferred
+// action. A failed Save keeps the prompt armed instead of silently losing
+// the pending action. It also pins the dialog-session boundary (audit #390):
 // a native dialog result that arrives after its session was retired is
 // discarded, a fresh dialog afterwards completes normally, and request
 // records are never reused while a callback may still write them. ImGui
@@ -18,6 +19,7 @@
 #include "editor_session.h"
 #include "engine/core/platform.h"
 #include "engine/editor/editor.h"
+#include "engine/project.h"
 #include "engine/runtime/scene_serializer.h"
 #include "engine/runtime/world.h"
 
@@ -244,11 +246,11 @@ int check_dirty_open_save_continues_with_titled_document() {
   }
 
   scene_document_prompt_choose_save();
-  const bool ok = !scene_document_prompt_open() && !scene_document_is_dirty() &&
-                  scene_document_has_path() &&
-                  (std::strcmp(scene_document_path(), targetPath) == 0) &&
-                  (world->find_entity_by_name("TargetEntity") !=
-                   kInvalidEntity);
+  const bool ok =
+      !scene_document_prompt_open() && !scene_document_is_dirty() &&
+      scene_document_has_path() &&
+      (std::strcmp(scene_document_path(), targetPath) == 0) &&
+      (world->find_entity_by_name("TargetEntity") != kInvalidEntity);
   editor_set_world(nullptr);
   if (!ok) {
     return 8;
@@ -321,11 +323,10 @@ int check_dirty_new_save_as_continuation_via_simulated_dialog() {
 
   scene_document_poll_dialog_result();
 
-  const bool ok = !scene_document_prompt_open() && !scene_document_has_path() &&
-                  !scene_document_is_dirty() &&
-                  (world->alive_entity_count() == 0U) &&
-                  (std::strcmp(scene_document_display_name(),
-                              "Untitled Scene") == 0);
+  const bool ok =
+      !scene_document_prompt_open() && !scene_document_has_path() &&
+      !scene_document_is_dirty() && (world->alive_entity_count() == 0U) &&
+      (std::strcmp(scene_document_display_name(), "Untitled Scene") == 0);
   editor_set_world(nullptr);
   if (!ok) {
     return 7;
@@ -333,8 +334,7 @@ int check_dirty_new_save_as_continuation_via_simulated_dialog() {
 
   std::unique_ptr<World> verifyWorld(new (std::nothrow) World());
   if ((verifyWorld == nullptr) || !load_scene(*verifyWorld, untitledSavePath) ||
-      (verifyWorld->find_entity_by_name("UntitledEntity") ==
-       kInvalidEntity)) {
+      (verifyWorld->find_entity_by_name("UntitledEntity") == kInvalidEntity)) {
     return 8;
   }
   return 0;
@@ -360,7 +360,7 @@ int check_save_failure_keeps_prompt_armed() {
   // directory) without exercising the real Save As dialog.
   SceneDocumentState &doc = editor_session().document;
   std::snprintf(doc.path, sizeof(doc.path),
-               "/engine_scene_document_prompt_test_nonexistent_dir/x.json");
+                "/engine_scene_document_prompt_test_nonexistent_dir/x.json");
   doc.hasPath = true;
 
   request_scene_open("/also/does/not/matter.json"); // arms Save/Discard/Cancel
@@ -375,6 +375,48 @@ int check_save_failure_keeps_prompt_armed() {
                   scene_document_is_dirty();
   editor_set_world(nullptr);
   return ok ? 0 : 4;
+}
+
+/// EXPECTATION: leaving the project is gated like quitting: on a clean
+/// document request_scene_project_switch() allows the switch at once and
+/// requests nothing itself; on a dirty one it arms the prompt, Cancel
+/// requests nothing, and Discard requests the switch to the path given.
+int check_project_switch_gate_defers_while_dirty() {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 1;
+  }
+  editor_set_world(world.get());
+  char taken[engine::kProjectOsPathCapacity] = {};
+  bool toHub = false;
+  if (!request_scene_project_switch("next/game.project") ||
+      engine::take_project_switch(taken, sizeof(taken), &toHub)) {
+    editor_set_world(nullptr);
+    return 2; // clean: the caller switches, nothing is requested here
+  }
+  const Entity entity = add_named_entity(*world, "SwitchGuard");
+  if ((entity == kInvalidEntity) || !push_transform_edit(*world, entity) ||
+      request_scene_project_switch("next/game.project") ||
+      !scene_document_prompt_open()) {
+    editor_set_world(nullptr);
+    return 3; // dirty: the prompt holds the switch back
+  }
+  scene_document_prompt_choose_cancel();
+  if (engine::take_project_switch(taken, sizeof(taken), &toHub)) {
+    editor_set_world(nullptr);
+    return 4;
+  }
+  if (request_scene_project_switch("") || !scene_document_prompt_open()) {
+    editor_set_world(nullptr);
+    return 5;
+  }
+  scene_document_prompt_choose_discard();
+  const bool ok = !scene_document_prompt_open() &&
+                  engine::take_project_switch(taken, sizeof(taken), &toHub) &&
+                  (taken[0] == '\0') && toHub;
+  // The platform quit the request raised belongs to no platform here.
+  editor_set_world(nullptr);
+  return ok ? 0 : 6;
 }
 
 /// EXPECTATION: the runtime quit-gate contract: request_scene_quit()
@@ -482,8 +524,7 @@ int check_retired_dialog_result_is_discarded() {
   scene_document_poll_dialog_result();
   if ((later->find_entity_by_name("FromRetiredSession") != kInvalidEntity) ||
       scene_document_has_path() ||
-      (editor_session().document.dialogPendingKind !=
-       SceneDialogKind::None)) {
+      (editor_session().document.dialogPendingKind != SceneDialogKind::None)) {
     editor_set_world(nullptr);
     return 6;
   }
@@ -512,10 +553,9 @@ int check_retired_dialog_result_is_discarded() {
   scene_dialog_deliver_for_tests(staleSaveRequest, staleSave);
   scene_document_poll_dialog_result();
   std::error_code ec{};
-  const bool ok = !std::filesystem::exists(staleSave, ec) &&
-                  !scene_document_has_path() &&
-                  (editor_session().document.dialogPendingKind ==
-                   SceneDialogKind::None);
+  const bool ok =
+      !std::filesystem::exists(staleSave, ec) && !scene_document_has_path() &&
+      (editor_session().document.dialogPendingKind == SceneDialogKind::None);
   editor_set_world(nullptr);
   return ok ? 0 : 10;
 }
@@ -613,8 +653,8 @@ int check_fresh_dialog_after_retire_completes() {
   }
   scene_dialog_deliver_for_tests(currentCancel, nullptr);
   scene_document_poll_dialog_result();
-  const bool ok = !scene_document_prompt_open() &&
-                  (later->alive_entity_count() != 0U);
+  const bool ok =
+      !scene_document_prompt_open() && (later->alive_entity_count() != 0U);
   editor_set_world(nullptr);
   return ok ? 0 : 14;
 }
@@ -751,6 +791,8 @@ int main() {
        &check_save_failure_keeps_prompt_armed},
       {"check_quit_gate_defers_while_dirty",
        &check_quit_gate_defers_while_dirty},
+      {"check_project_switch_gate_defers_while_dirty",
+       &check_project_switch_gate_defers_while_dirty},
       {"check_retired_dialog_result_is_discarded",
        &check_retired_dialog_result_is_discarded},
       {"check_fresh_dialog_after_retire_completes",
@@ -777,8 +819,7 @@ int main() {
   for (const auto &check : checks) {
     const int result = check.fn();
     if (result != 0) {
-      std::fprintf(stderr,
-                   "editor_scene_document_prompt_test: %s failed: %d\n",
+      std::fprintf(stderr, "editor_scene_document_prompt_test: %s failed: %d\n",
                    check.name, result);
       static_cast<void>(recentGuard.disarm());
       return result;

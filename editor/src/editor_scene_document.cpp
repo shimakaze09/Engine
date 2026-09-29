@@ -19,6 +19,7 @@
 #include "engine/core/platform.h"
 #include "engine/core/vfs.h"
 #include "engine/engine.h"
+#include "engine/project.h"
 #include "engine/runtime/editor_bridge.h"
 #include "engine/runtime/scene_serializer.h"
 #include "engine/runtime/world.h"
@@ -107,6 +108,9 @@ void continue_pending_action() noexcept {
     break;
   case PendingSceneAction::Quit:
     core::request_platform_quit();
+    break;
+  case PendingSceneAction::SwitchProject:
+    static_cast<void>(engine::request_project_switch(doc.pendingOpenPath));
     break;
   case PendingSceneAction::None:
   default:
@@ -442,6 +446,15 @@ bool request_scene_quit() noexcept {
   return false;
 }
 
+bool request_scene_project_switch(const char *path) noexcept {
+  if (!scene_document_is_dirty() && !material_editor_is_dirty()) {
+    return true;
+  }
+  arm_pending_action(PendingSceneAction::SwitchProject,
+                     (path != nullptr) ? path : "");
+  return false;
+}
+
 bool scene_document_prompt_open() noexcept {
   return editor_session().document.unsavedPromptOpen;
 }
@@ -449,7 +462,8 @@ bool scene_document_prompt_open() noexcept {
 bool scene_document_prompt_covers_material() noexcept {
   const SceneDocumentState &doc = editor_session().document;
   return doc.unsavedPromptOpen &&
-         (doc.pendingAction == PendingSceneAction::Quit) &&
+         ((doc.pendingAction == PendingSceneAction::Quit) ||
+          (doc.pendingAction == PendingSceneAction::SwitchProject)) &&
          material_editor_is_dirty();
 }
 
@@ -639,9 +653,13 @@ void scene_document_update_window_title() noexcept {
     return;
   }
   char title[640] = {};
-  std::snprintf(title, sizeof(title), "Engine Editor - %s%s",
-               scene_document_display_name(),
-               scene_document_is_dirty() ? " *" : "");
+  if (!has_open_project()) {
+    std::snprintf(title, sizeof(title), "Engine - Projects");
+  } else {
+    std::snprintf(title, sizeof(title), "Engine Editor - %s%s",
+                  scene_document_display_name(),
+                  scene_document_is_dirty() ? " *" : "");
+  }
   if (std::strcmp(title, session.lastAppliedWindowTitle) == 0) {
     return;
   }

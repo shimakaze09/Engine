@@ -21,7 +21,15 @@ static_assert(kMaxDocumentPathLength == kMaxRecentPathLength,
               "a scene path fits the recent list whole");
 
 /// Enumerates a document action deferred behind the unsaved-change prompt.
-enum class PendingSceneAction : std::uint8_t { None, New, OpenPath, Quit };
+/// What the unsaved-change prompt holds back: SwitchProject leaves this
+/// project for the one in pendingOpenPath (the hub when it is empty).
+enum class PendingSceneAction : std::uint8_t {
+  None,
+  New,
+  OpenPath,
+  Quit,
+  SwitchProject
+};
 
 /// Enumerates the outstanding native file dialog kind, if any.
 enum class SceneDialogKind : std::uint8_t { None, Open, SaveAs };
@@ -118,13 +126,18 @@ void request_scene_open(const char *path) noexcept;
 /// the prompt was armed and the caller must not quit until the prompt
 /// resolves the pending PendingSceneAction::Quit.
 bool request_scene_quit() noexcept;
+/// As request_scene_quit, for leaving this project for the project at
+/// `path` (the hub when empty): true when nothing is unsaved and the
+/// caller may switch at once; false means the prompt was armed and the
+/// switch is requested when it resolves.
+bool request_scene_project_switch(const char *path) noexcept;
 
 /// True while the unsaved-change confirm prompt should be drawn.
 bool scene_document_prompt_open() noexcept;
 /// True while the open prompt also stands for an unsaved material
-/// document: only the quit prompt does, because quit ends every document,
-/// whereas New/Open replace the scene alone. Save then persists the
-/// material as well; Discard abandons it along with the scene.
+/// document: only the quit and project-switch prompts do, because they
+/// end every document, whereas New/Open replace the scene alone. Save then
+/// persists the material as well; Discard abandons it along with the scene.
 bool scene_document_prompt_covers_material() noexcept;
 /// User chose Save from the confirm prompt: persists the material first
 /// when the prompt covers one, then the scene (in place, or through a Save
