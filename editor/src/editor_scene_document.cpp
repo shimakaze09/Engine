@@ -15,9 +15,6 @@
 #include <filesystem>
 #include <system_error>
 
-#include "engine/core/atomic_file.h"
-#include "engine/core/file_read.h"
-#include "engine/core/json.h"
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
 #include "engine/runtime/editor_bridge.h"
@@ -33,13 +30,6 @@ namespace engine::editor {
 namespace {
 
 constexpr const char *kLogChannel = "editor.scene_document";
-constexpr const char *kRecentScenesFileName = "editor_recent_scenes.json";
-
-/// Test-only override directory for recent-scenes persistence; empty
-/// means "use the real platform save directory". Single-threaded like
-/// the rest of editor session state.
-char g_recentScenesDirectoryOverride[900] = {};
-
 /// Clears identity/dirty/pending-prompt fields only; the recent-scenes
 /// cache and any in-flight dialog state are session-lifetime and survive
 /// New/Open (see the field comments in SceneDocumentState).
@@ -84,91 +74,6 @@ void reset_session_for_scene_switch() noexcept {
   session.playSnapshotSize = 0U;
   session.playSnapshotWorld = nullptr;
   session.playStopPending = false;
-}
-
-/// Resolves the recent-scenes persistence directory: the test override
-/// when set, otherwise the real per-user platform save directory.
-bool resolve_recent_scenes_directory(char *out, std::size_t capacity) noexcept {
-  if (g_recentScenesDirectoryOverride[0] != '\0') {
-    const int written =
-        std::snprintf(out, capacity, "%s", g_recentScenesDirectoryOverride);
-    return (written > 0) && (static_cast<std::size_t>(written) < capacity);
-  }
-  return core::platform_get_save_dir(out, capacity);
-}
-
-bool build_recent_scenes_path(char *out, std::size_t capacity) noexcept {
-  char directory[900] = {};
-  if (!resolve_recent_scenes_directory(directory, sizeof(directory))) {
-    return false;
-  }
-  const int written =
-      std::snprintf(out, capacity, "%s/%s", directory, kRecentScenesFileName);
-  return (written > 0) && (static_cast<std::size_t>(written) < capacity);
-}
-
-void recent_scenes_persist() noexcept {
-  const SceneDocumentState &doc = editor_session().document;
-  // The stored list was never read this session, so the in-memory list is
-  // not a superset of it; writing would replace bytes that may still be
-  // good. The diagnostic was logged once when the fault latched.
-  if (doc.recentScenesLoadFailed) {
-    return;
-  }
-
-  char directory[900] = {};
-  if (resolve_recent_scenes_directory(directory, sizeof(directory)) &&
-      !core::create_directories_durably(directory)) {
-    return;
-  }
-
-  char path[1024] = {};
-  if (!build_recent_scenes_path(path, sizeof(path))) {
-    return;
-  }
-
-  core::JsonWriter writer{};
-  writer.begin_object();
-  writer.begin_array("scenes");
-  for (std::size_t i = 0U; i < doc.recentSceneCount; ++i) {
-    writer.write_string_value(doc.recentScenes[i]);
-  }
-  writer.end_array();
-  writer.end_object();
-  if (writer.failed()) {
-    core::log_message(core::LogLevel::Error, kLogChannel,
-                      "failed to serialize recent scenes list");
-    return;
-  }
-
-  if (!core::atomic_write_file(path, writer.result(), writer.result_size())) {
-    core::log_message(core::LogLevel::Error, kLogChannel,
-                      "failed to write recent scenes list");
-  }
-}
-
-/// Drops `path` from the recent list (no-op when absent) and persists.
-void recent_scenes_remove(const char *path) noexcept {
-  SceneDocumentState &doc = editor_session().document;
-  std::size_t writeIndex = 0U;
-  for (std::size_t i = 0U; i < doc.recentSceneCount; ++i) {
-    if (std::strcmp(doc.recentScenes[i], path) == 0) {
-      continue;
-    }
-    if (writeIndex != i) {
-      // Rows never overlap (writeIndex < i on every reshuffle here), but
-      // both are sub-objects of the same recentScenes array, so an
-      // snprintf(dst, ..., "%s", src) pair the compiler cannot prove
-      // disjoint trips -Wrestrict; std::memmove sidesteps that.
-      std::memmove(doc.recentScenes[writeIndex], doc.recentScenes[i],
-                  kMaxDocumentPathLength);
-    }
-    ++writeIndex;
-  }
-  if (writeIndex != doc.recentSceneCount) {
-    doc.recentSceneCount = writeIndex;
-    recent_scenes_persist();
-  }
 }
 
 void arm_pending_action(PendingSceneAction action, const char *path) noexcept {
@@ -292,7 +197,7 @@ bool perform_scene_open(const char *path) noexcept {
   if (!runtime::load_scene(*session.world, path)) {
     // load_scene is transactional: the live world, document identity, and
     // undo history are all still exactly as they were before this call.
-    recent_scenes_remove(path);
+    recent_list_remove(&editor_session().document.recentScenes, path);
     return false;
   }
 
@@ -681,128 +586,19 @@ void scene_document_poll_dialog_result() noexcept {
 }
 
 void recent_scenes_load_once() noexcept {
-  SceneDocumentState &doc = editor_session().document;
-  if (doc.recentScenesLoaded) {
-    return;
-  }
-  doc.recentScenesLoaded = true;
-  doc.recentSceneCount = 0U;
-  doc.recentScenesLoadFailed = false;
-
-  char path[1024] = {};
-  if (!build_recent_scenes_path(path, sizeof(path))) {
-    return;
-  }
-
-  char buffer[8192] = {};
-  std::size_t size = 0U;
-  // Absent is the fresh-profile case and starts an empty list that persists
-  // normally. Any other non-Ok outcome means a stored list exists that this
-  // session could not read: the list stays empty in memory, but persistence
-  // is latched off so the unread file is preserved for a later session (or
-  // the user) instead of being replaced by an empty list.
-  const core::FileReadResult readResult =
-      core::read_whole_file(path, buffer, sizeof(buffer), &size);
-  if (readResult == core::FileReadResult::Absent) {
-    return;
-  }
-  if (readResult != core::FileReadResult::Ok) {
-    doc.recentScenesLoadFailed = true;
-    char message[1200] = {};
-    std::snprintf(message, sizeof(message),
-                  "recent scenes list could not be read (%s): %s; the list "
-                  "starts empty and will not be saved this session so the "
-                  "stored file is kept intact",
-                  (readResult == core::FileReadResult::TooLarge)
-                      ? "file larger than the 8 KiB reader buffer"
-                      : "read fault",
-                  path);
-    core::log_message(core::LogLevel::Warning, kLogChannel, message);
-    return;
-  }
-
-  core::JsonParser parser{};
-  if (!parser.parse(buffer, size)) {
-    return;
-  }
-  const core::JsonValue *root = parser.root();
-  if ((root == nullptr) || (root->type != core::JsonValue::Type::Object)) {
-    return;
-  }
-  core::JsonValue scenesValue{};
-  if (!parser.get_object_field(*root, "scenes", &scenesValue) ||
-      (scenesValue.type != core::JsonValue::Type::Array)) {
-    return;
-  }
-
-  const std::size_t count = parser.array_size(scenesValue);
-  bool anyPruned = false;
-  for (std::size_t i = 0U;
-       (i < count) && (doc.recentSceneCount < kMaxRecentScenes); ++i) {
-    core::JsonValue element{};
-    if (!parser.get_array_element(scenesValue, i, &element)) {
-      continue;
-    }
-    char entryPath[kMaxDocumentPathLength] = {};
-    if (!parser.copy_string(element, entryPath, sizeof(entryPath))) {
-      continue;
-    }
-    std::error_code ec{};
-    if (!std::filesystem::is_regular_file(entryPath, ec) || ec) {
-      // Gracefully handle a moved/deleted file: drop it instead of
-      // listing a recent entry the user cannot open.
-      anyPruned = true;
-      continue;
-    }
-    std::snprintf(doc.recentScenes[doc.recentSceneCount],
-                  kMaxDocumentPathLength, "%s", entryPath);
-    ++doc.recentSceneCount;
-  }
-
-  if (anyPruned) {
-    recent_scenes_persist();
-  }
+  recent_list_load_once(&editor_session().document.recentScenes);
 }
 
 void recent_scenes_add(const char *path) noexcept {
-  if ((path == nullptr) || (path[0] == '\0')) {
-    return;
-  }
-  recent_scenes_load_once();
-  SceneDocumentState &doc = editor_session().document;
-
-  char reordered[kMaxRecentScenes][kMaxDocumentPathLength] = {};
-  std::size_t writeIndex = 0U;
-  std::snprintf(reordered[writeIndex++], kMaxDocumentPathLength, "%s", path);
-  for (std::size_t i = 0U;
-       (i < doc.recentSceneCount) && (writeIndex < kMaxRecentScenes); ++i) {
-    if (std::strcmp(doc.recentScenes[i], path) == 0) {
-      continue;
-    }
-    std::snprintf(reordered[writeIndex++], kMaxDocumentPathLength, "%.*s",
-                  static_cast<int>(kMaxDocumentPathLength - 1U),
-                  doc.recentScenes[i]);
-  }
-  for (std::size_t i = 0U; i < writeIndex; ++i) {
-    std::snprintf(doc.recentScenes[i], kMaxDocumentPathLength, "%.*s",
-                  static_cast<int>(kMaxDocumentPathLength - 1U), reordered[i]);
-  }
-  doc.recentSceneCount = writeIndex;
-  recent_scenes_persist();
+  recent_list_add(&editor_session().document.recentScenes, path);
 }
 
 std::size_t recent_scene_count() noexcept {
-  recent_scenes_load_once();
-  return editor_session().document.recentSceneCount;
+  return recent_list_count(&editor_session().document.recentScenes);
 }
 
 const char *recent_scene_at(std::size_t index) noexcept {
-  recent_scenes_load_once();
-  const SceneDocumentState &doc = editor_session().document;
-  if (index >= doc.recentSceneCount) {
-    return "";
-  }
-  return doc.recentScenes[index];
+  return recent_list_at(&editor_session().document.recentScenes, index);
 }
 
 void scene_document_update_window_title() noexcept {
@@ -864,17 +660,10 @@ void scene_dialog_deliver_for_tests(core::FileDialogTicket ticket,
 
 void recent_scenes_set_directory_override_for_tests(
     const char *directory) noexcept {
-  if (directory == nullptr) {
-    directory = "";
-  }
-  std::snprintf(g_recentScenesDirectoryOverride,
-               sizeof(g_recentScenesDirectoryOverride), "%s", directory);
-  // A new directory invalidates the in-memory cache so the next accessor
-  // reloads from the (possibly now-empty) overridden location; the load
-  // fault latch belongs to the file that was unreadable, so it clears too.
-  editor_session().document.recentScenesLoaded = false;
-  editor_session().document.recentSceneCount = 0U;
-  editor_session().document.recentScenesLoadFailed = false;
+  recent_lists_set_directory_override_for_tests(directory);
+  // A new directory invalidates the cache, so the next access reads the
+  // (possibly empty) overridden location.
+  recent_list_forget(&editor_session().document.recentScenes);
 }
 
 } // namespace engine::editor

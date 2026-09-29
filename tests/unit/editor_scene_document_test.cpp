@@ -665,13 +665,14 @@ int check_recent_scenes_unreadable_file_never_overwritten() {
     return 4;
   }
 
-  // 1. TooLarge: a list-shaped document whose bytes exceed the 8 KiB reader
-  //    buffer. The reader reports TooLarge before parsing, so these bytes
-  //    are never interpreted; the path is spliced in unescaped and the
-  //    document is only valid JSON where the path has no escapable
-  //    characters. What matters is that the bytes are exact and survive.
+  // 1. TooLarge: a list-shaped document whose bytes exceed the longest
+  //    list the reader accepts (kMaxStoredRecentListBytes). The reader reports
+  //    TooLarge before parsing, so these bytes are never interpreted; the path
+  //    is spliced in unescaped and the document is only valid JSON where the
+  //    path has no escapable characters. What matters is that the bytes are
+  //    exact and survive.
   std::string oversized = "{\"scenes\":[";
-  while (oversized.size() < 9000U) {
+  while (oversized.size() <= kMaxStoredRecentListBytes + 1024U) {
     oversized += "\"";
     oversized += scenePath;
     oversized += "\",";

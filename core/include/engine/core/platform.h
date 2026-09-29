@@ -165,7 +165,9 @@ WindowGeometry fit_window_geometry(const WindowGeometry &stored,
 
 // ----- File dialogs ----------------------------------------------------------
 
-enum class FileDialogKind : std::uint8_t { Open, Save };
+/// Open and Save pick a file; Folder picks a directory and takes no
+/// filters.
+enum class FileDialogKind : std::uint8_t { Open, Save, Folder };
 
 /// One entry in a dialog's file-type list: a display name and a
 /// semicolon-separated list of extensions without dots ("scene",
@@ -217,11 +219,11 @@ enum class FileDialogPoll : std::uint8_t {
   Unknown,
 };
 
-/// Shows a native open or save dialog parented to the platform window,
-/// starting at `defaultLocation` (may be null), and returns its ticket.
-/// kNoFileDialog means no dialog was shown: no window, a bad filter list,
-/// or every slot is held by a dialog that has not closed. The refusal is
-/// logged. Main thread only.
+/// Shows a native open, save or folder dialog parented to the platform
+/// window, starting at `defaultLocation` (may be null), and returns its
+/// ticket. kNoFileDialog means no dialog was shown: no window, a bad filter
+/// list (a folder dialog takes none), or every slot is held by a dialog
+/// that has not closed. The refusal is logged. Main thread only.
 ///
 /// The OS answers on a thread of its choosing (a portal worker on Linux).
 /// The platform keeps the answer until the requester takes it with

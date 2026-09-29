@@ -85,6 +85,17 @@ void check_dialog_handoff() {
             (result.path[0] == '\0'),
         "a cancel arrives as Cancelled with an empty path");
 
+  // A folder dialog answers with a directory the same way.
+  const FileDialogTicket folder =
+      platform_request_file_dialog(FileDialogKind::Folder, nullptr, 0, nullptr);
+  CHECK((folder != kNoFileDialog) &&
+            platform_answer_scripted_file_dialog(folder, "/tmp/projects") &&
+            (platform_take_file_dialog_result(folder, &result) ==
+             FileDialogPoll::Ready) &&
+            (result.outcome == FileDialogOutcome::Chosen) &&
+            (std::strcmp(result.path, "/tmp/projects") == 0),
+        "a folder dialog with no filters answers with the folder chosen");
+
   // A path that does not fit is refused, not cut.
   static char longPath[kMaxFileDialogPathLength + 1U] = {};
   std::memset(longPath, 'a', kMaxFileDialogPathLength);
@@ -342,6 +353,9 @@ int main() {
   CHECK(platform_request_file_dialog(FileDialogKind::Save, &filter, -1,
                                      nullptr) == kNoFileDialog,
         "a negative filter count is refused");
+  CHECK(platform_request_file_dialog(FileDialogKind::Folder, &filter, 1,
+                                     nullptr) == kNoFileDialog,
+        "a folder dialog with a filter is refused");
 
   shutdown_platform();
   CHECK(!platform_window_revealed(), "a fresh platform starts hidden");

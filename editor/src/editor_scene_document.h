@@ -7,6 +7,8 @@
 
 #include "engine/core/platform.h"
 
+#include "editor_recent_list.h"
+
 #include <cstddef>
 #include <cstdint>
 
@@ -15,6 +17,8 @@ namespace engine::editor {
 constexpr std::size_t kMaxDocumentPathLength = 512U;
 constexpr std::size_t kMaxDocumentDisplayNameLength = 128U;
 constexpr std::size_t kMaxRecentScenes = 10U;
+static_assert(kMaxDocumentPathLength == kMaxRecentPathLength,
+              "a scene path fits the recent list whole");
 
 /// Enumerates a document action deferred behind the unsaved-change prompt.
 enum class PendingSceneAction : std::uint8_t { None, New, OpenPath, Quit };
@@ -51,15 +55,9 @@ struct SceneDocumentState final {
   // As with no follow-up action.
   bool dialogContinuesPendingAction = false;
 
-  char recentScenes[kMaxRecentScenes][kMaxDocumentPathLength] = {};
-  std::size_t recentSceneCount = 0U;
-  bool recentScenesLoaded = false;
-  // Latched when the persisted list exists but could not be read (a read
-  // fault or a file past the fixed buffer): the in-memory list starts
-  // empty for the session, and automatic persistence is refused so the
-  // unread bytes are never replaced by that empty or reduced list. An
-  // absent file is not a fault and never sets this.
-  bool recentScenesLoadFailed = false;
+  // The scenes opened or saved last, kept per user across projects.
+  RecentList recentScenes{"editor_recent_scenes.json", "scenes",
+                          kMaxRecentScenes, &recent_entry_is_file};
 
   char lastSaveError[kMaxDocumentPathLength + 64U] = {};
 };
