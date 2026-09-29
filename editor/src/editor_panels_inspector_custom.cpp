@@ -399,12 +399,12 @@ std::size_t add_component_menu_candidates(runtime::Entity entity,
   return count;
 }
 
-void draw_add_component_menu(runtime::Entity entity, bool editable) noexcept {
-  if (!editable || (editor_session().world == nullptr)) {
-    return;
-  }
-
-  AddMenuEntry candidates[kComponentEditTypeCount];
+/// The Add Component entries for `entity`, grouped by category in a
+/// stable order so each category draws under one heading, without
+/// reordering the registry table itself (its row order is cross-checked
+/// against World's type list). Returns how many.
+static std::size_t add_menu_entries(runtime::Entity entity,
+                                    AddMenuEntry *candidates) noexcept {
   ComponentEditType offered[kComponentEditTypeCount] = {};
   const std::size_t candidateCount =
       add_component_menu_candidates(entity, offered, kComponentEditTypeCount);
@@ -416,20 +416,25 @@ void draw_add_component_menu(runtime::Entity entity, bool editable) noexcept {
     entry.category = (meta != nullptr) ? meta->category : "General";
     entry.tooltip = (meta != nullptr) ? meta->tooltip : nullptr;
   }
-
-  // Stable sort by category so same-category entries render contiguously
-  // under one header, without reordering the authoritative registry table
-  // itself (its row order is cross-checked against World's type list).
   for (std::size_t i = 1U; i < candidateCount; ++i) {
     AddMenuEntry key = candidates[i];
     std::size_t j = i;
     while ((j > 0U) &&
-          (std::strcmp(candidates[j - 1U].category, key.category) > 0)) {
+           (std::strcmp(candidates[j - 1U].category, key.category) > 0)) {
       candidates[j] = candidates[j - 1U];
       --j;
     }
     candidates[j] = key;
   }
+  return candidateCount;
+}
+
+void draw_add_component_menu(runtime::Entity entity, bool editable) noexcept {
+  if (!editable || (editor_session().world == nullptr)) {
+    return;
+  }
+  AddMenuEntry candidates[kComponentEditTypeCount];
+  const std::size_t candidateCount = add_menu_entries(entity, candidates);
 
   ImGui::Separator();
   if (!ImGui::BeginCombo("##addcomp", "Add Component...")) {
@@ -467,6 +472,42 @@ void draw_add_component_menu(runtime::Entity entity, bool editable) noexcept {
   }
 
   ImGui::EndCombo();
+}
+
+void draw_add_component_submenu(runtime::Entity entity,
+                                bool editable) noexcept {
+  const bool usable = editable && (editor_session().world != nullptr);
+  if (!ImGui::BeginMenu("Add Component", usable)) {
+    return;
+  }
+  AddMenuEntry candidates[kComponentEditTypeCount];
+  const std::size_t candidateCount = add_menu_entries(entity, candidates);
+  // One submenu per category, as Unity's Add Component groups them.
+  std::size_t first = 0U;
+  while (first < candidateCount) {
+    const char *category = candidates[first].category;
+    std::size_t end = first;
+    while ((end < candidateCount) &&
+           (std::strcmp(candidates[end].category, category) == 0)) {
+      ++end;
+    }
+    if (ImGui::BeginMenu(category)) {
+      for (std::size_t i = first; i < end; ++i) {
+        if (ImGui::MenuItem(candidates[i].displayName)) {
+          execute_component_add(
+              entity, candidates[i].type,
+              default_component_snapshot(entity, candidates[i].type));
+        }
+        if ((candidates[i].tooltip != nullptr) &&
+            ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip)) {
+          ImGui::SetTooltip("%s", candidates[i].tooltip);
+        }
+      }
+      ImGui::EndMenu();
+    }
+    first = end;
+  }
+  ImGui::EndMenu();
 }
 
 } // namespace engine::editor

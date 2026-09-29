@@ -399,6 +399,26 @@ static_assert(kComponentEditTypeCount == 16U,
              "in draw_component_sections and an entry in "
              "editor_inspector_metadata's ComponentMetadata table");
 
+/// The menu a right-click on the Inspector's empty space opens: Add
+/// Component, and Paste Component As New, enabled only while the component
+/// clipboard holds a component this entity lacks, as Unity's Inspector
+/// offers it. A component's own menu opens on its header.
+void draw_inspector_space_menu(runtime::Entity entity, bool editable) noexcept {
+  if (!ImGui::BeginPopupContextWindow("inspector_space_menu",
+                                      ImGuiPopupFlags_MouseButtonRight |
+                                          ImGuiPopupFlags_NoOpenOverItems)) {
+    return;
+  }
+  draw_add_component_submenu(entity, editable);
+  ComponentEditType copied = ComponentEditType::Transform;
+  const bool canPaste = editable && component_clipboard_type(&copied) &&
+                        !has_component_of_type(copied, entity);
+  if (ImGui::MenuItem("Paste Component As New", nullptr, false, canPaste)) {
+    static_cast<void>(execute_component_paste_as_new(&entity, 1U));
+  }
+  ImGui::EndPopup();
+}
+
 } // namespace
 
 void draw_inspector_panel() noexcept {
@@ -558,6 +578,10 @@ void draw_inspector_panel() noexcept {
   draw_component_sections(entity, authoredEditable, liveEditable);
 
   draw_add_component_menu(entity, authoredEditable);
+  // Empty space below Add Component, as Unity's Inspector keeps, so the
+  // Inspector's own menu is reachable however long the entity's sections.
+  ImGui::Dummy(ImVec2(0.0F, editor_px(48.0F)));
+  draw_inspector_space_menu(entity, authoredEditable);
 
   if (inspector_has_pending_edit() && !ImGui::IsAnyItemActive()) {
     inspector_commit_pending_edit();

@@ -95,6 +95,54 @@ void first_line(const char *message, char *out, std::size_t outCapacity) noexcep
   }
 }
 
+/// Copies every entry the filters show, one line each, oldest first: a
+/// plain-text export of what the Log is showing. Built only when asked.
+void copy_shown_log(const ConsoleFilter &filter) noexcept {
+  std::string copyText;
+  const std::size_t count = console_capture_entry_count();
+  for (std::size_t i = 0U; i < count; ++i) {
+    ConsoleEntry entry{};
+    if (!console_capture_get_entry(i, &entry) ||
+        !console_filter_matches(filter, entry)) {
+      continue;
+    }
+    char line[kConsoleMessageCapacity + 96] = {};
+    std::snprintf(line, sizeof(line), "[%s][%s] %s%s\n",
+                  core::log_level_to_string(entry.level), entry.channel,
+                  entry.message, (entry.repeatCount > 1U) ? " (repeated)" : "");
+    copyText += line;
+  }
+  ImGui::SetClipboardText(copyText.c_str());
+}
+
+/// The items every right-click in the log offers, on a line or not: what
+/// the Log's own buttons and toggles do, as Unreal's Output Log offers
+/// Clear Log and Copy wherever it is right-clicked.
+void draw_log_menu_items(ConsolePanelState &console) noexcept {
+  if (ImGui::MenuItem("Clear")) {
+    console_capture_clear();
+  }
+  if (ImGui::MenuItem("Copy All")) {
+    copy_shown_log(console.filter);
+  }
+  ImGui::Separator();
+  ImGui::MenuItem("Collapse", nullptr, &console.collapseView);
+  ImGui::MenuItem("Autoscroll", nullptr, &console.autoScroll);
+  ImGui::MenuItem("Pause", nullptr, &console.paused);
+}
+
+/// The menu a right-click on the log's empty space opens; a line's own
+/// menu, over the line, ends with the same items.
+void draw_log_space_menu(ConsolePanelState &console) noexcept {
+  if (!ImGui::BeginPopupContextWindow("log_space_menu",
+                                      ImGuiPopupFlags_MouseButtonRight |
+                                          ImGuiPopupFlags_NoOpenOverItems)) {
+    return;
+  }
+  draw_log_menu_items(console);
+  ImGui::EndPopup();
+}
+
 void draw_entry_row(const ConsoleEntry &entry, std::size_t rowIndex) noexcept {
   ImGui::PushID(static_cast<int>(rowIndex));
   ImGui::PushStyleColor(ImGuiCol_Text, level_color(entry.level));
@@ -134,7 +182,7 @@ void draw_entry_row(const ConsoleEntry &entry, std::size_t rowIndex) noexcept {
                       entry.truncated ? "\n[...diagnostic truncated...]" : "");
   }
 
-  if (hasNavigation && ImGui::BeginPopupContextItem("entry_context")) {
+  if (ImGui::BeginPopupContextItem("entry_context")) {
     if (entry.referenceKind == ConsoleReferenceKind::ScriptLocation) {
       char pathLine[kConsolePathCapacity + 16] = {};
       std::snprintf(pathLine, sizeof(pathLine), "%s:%d", entry.referencePath,
@@ -157,24 +205,15 @@ void draw_entry_row(const ConsoleEntry &entry, std::size_t rowIndex) noexcept {
       const runtime::Entity resolved = console_capture_resolve_entity(
           entry.entityPersistentId, editor_session().world);
       const bool canSelect = (resolved != runtime::kInvalidEntity);
-      if (!canSelect) {
-        ImGui::BeginDisabled();
-      }
-      if (ImGui::MenuItem("Select Entity") && canSelect) {
+      if (ImGui::MenuItem("Select Entity", nullptr, false, canSelect)) {
         select_entity(resolved, false);
       }
-      if (!canSelect) {
-        ImGui::EndDisabled();
-      }
     }
     if (ImGui::MenuItem("Copy Message")) {
       ImGui::SetClipboardText(entry.message);
     }
-    ImGui::EndPopup();
-  } else if (!hasNavigation && ImGui::BeginPopupContextItem("entry_context")) {
-    if (ImGui::MenuItem("Copy Message")) {
-      ImGui::SetClipboardText(entry.message);
-    }
+    ImGui::Separator();
+    draw_log_menu_items(editor_session().console);
     ImGui::EndPopup();
   }
   ImGui::PopID();
@@ -275,25 +314,7 @@ void draw_console_panel() noexcept {
   }
   ImGui::SameLine();
   if (ImGui::Button("Copy All")) {
-    // Built only on click (not every frame): every currently filtered
-    // entry, one line per entry, oldest first — a plain-text export of
-    // exactly what the filters are currently showing.
-    std::string copyText;
-    const std::size_t count = console_capture_entry_count();
-    for (std::size_t i = 0U; i < count; ++i) {
-      ConsoleEntry entry{};
-      if (!console_capture_get_entry(i, &entry) ||
-         !console_filter_matches(filter, entry)) {
-        continue;
-      }
-      char line[kConsoleMessageCapacity + 96] = {};
-      std::snprintf(line, sizeof(line), "[%s][%s] %s%s\n",
-                   core::log_level_to_string(entry.level), entry.channel,
-                   entry.message,
-                   (entry.repeatCount > 1U) ? " (repeated)" : "");
-      copyText += line;
-    }
-    ImGui::SetClipboardText(copyText.c_str());
+    copy_shown_log(filter);
   }
   ImGui::SameLine();
   ImGui::Checkbox("Pause", &paused);
@@ -379,6 +400,7 @@ void draw_console_panel() noexcept {
     console.scrollToEnd = false;
   }
 
+  draw_log_space_menu(console);
   ImGui::EndChild();
   draw_command_line(console);
   ImGui::End();
