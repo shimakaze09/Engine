@@ -132,6 +132,23 @@ const char *content_path_problem(const char *path,
   return nullptr;
 }
 
+/// A package name: lower-case letters, digits, '_' and '-', starting with
+/// a letter or a digit, so it names the same folder on every filesystem.
+const char *package_name_problem(const char *name) noexcept {
+  if (name[0] == '\0') {
+    return "is empty";
+  }
+  for (const char *c = name; *c != '\0'; ++c) {
+    const bool letterOrDigit =
+        ((*c >= 'a') && (*c <= 'z')) || ((*c >= '0') && (*c <= '9'));
+    if (!letterOrDigit && (((*c != '_') && (*c != '-')) || (c == name))) {
+      return "is not lower-case letters, digits, '_' and '-', starting with "
+             "a letter or a digit";
+    }
+  }
+  return nullptr;
+}
+
 /// True for 0, which is unlimited, or a value within [minimum, maximum].
 bool limit_in_range(std::uint32_t value, std::uint32_t minimum,
                     std::uint32_t maximum) noexcept {
@@ -165,7 +182,10 @@ std::expected<void, ProjectReadFailure>
 check_members(const core::JsonParser &parser, const core::JsonValue &object,
               const char *const *allowed, std::size_t allowedCount,
               const char *prefix) noexcept {
-  bool seen[8] = {};
+  bool seen[16] = {};
+  if (allowedCount > (sizeof(seen) / sizeof(seen[0]))) {
+    return refuse(prefix, "names more keys than the reader can track");
+  }
   const std::size_t members = parser.object_size(object);
   for (std::size_t i = 0U; i < members; ++i) {
     core::JsonValue key{};
@@ -222,6 +242,57 @@ read_object(const core::JsonParser &parser, const core::JsonValue &object,
   if (out->type != core::JsonValue::Type::Object) {
     return refuse(key, "is not an object");
   }
+  return {};
+}
+
+/// Reads the "dependencies" array: each element an object holding exactly
+/// a name and a source. Names and sources are checked by validation.
+std::expected<void, ProjectReadFailure>
+read_packages(const core::JsonParser &parser, const core::JsonValue &array,
+              ProjectDocument *out) noexcept {
+  if (array.type != core::JsonValue::Type::Array) {
+    return refuse("dependencies", "is not an array");
+  }
+  const std::size_t count = parser.array_size(array);
+  if (count == 0U) {
+    // Absent is how a project says it depends on nothing; an empty list
+    // would be a second spelling of the same thing.
+    return refuse("dependencies", "is empty; omit it instead");
+  }
+  if (count > kMaxProjectPackages) {
+    return refuse("dependencies",
+                  "lists more packages than a project can hold");
+  }
+  constexpr const char *kPackageKeys[] = {"name", "source"};
+  for (std::size_t i = 0U; i < count; ++i) {
+    char field[40] = {};
+    std::snprintf(field, sizeof(field), "dependencies[%zu]", i);
+    core::JsonValue element{};
+    if (!parser.get_array_element(array, i, &element) ||
+        (element.type != core::JsonValue::Type::Object)) {
+      return refuse(field, "is not an object");
+    }
+    if (auto r = check_members(parser, element, kPackageKeys, 2U, field);
+        !r.has_value()) {
+      return r;
+    }
+    ProjectPackage &package = out->packages[i];
+    char nameField[64] = {};
+    std::snprintf(nameField, sizeof(nameField), "%s.name", field);
+    if (auto r = read_string(parser, element, "name", nameField, package.name,
+                             sizeof(package.name));
+        !r.has_value()) {
+      return r;
+    }
+    char sourceField[64] = {};
+    std::snprintf(sourceField, sizeof(sourceField), "%s.source", field);
+    if (auto r = read_string(parser, element, "source", sourceField,
+                             package.source, sizeof(package.source));
+        !r.has_value()) {
+      return r;
+    }
+  }
+  out->packageCount = count;
   return {};
 }
 
@@ -317,6 +388,37 @@ validate_project_document(const ProjectDocument &document) noexcept {
       return refuse("mainScript", problem);
     }
   }
+  if (document.packageCount > kMaxProjectPackages) {
+    return refuse("dependencies", "lists more packages than a project can "
+                                  "hold");
+  }
+  for (std::size_t i = 0U; i < document.packageCount; ++i) {
+    const ProjectPackage &package = document.packages[i];
+    char field[64] = {};
+    std::snprintf(field, sizeof(field), "dependencies[%zu].name", i);
+    if (const char *problem = package_name_problem(package.name)) {
+      return refuse(field, problem);
+    }
+    for (std::size_t j = 0U; j < i; ++j) {
+      if (std::strcmp(package.name, document.packages[j].name) == 0) {
+        return refuse(field, "repeats an earlier package");
+      }
+    }
+    char embedded[kProjectRootCapacity] = {};
+    std::snprintf(embedded, sizeof(embedded), "%s/%s", kProjectPackagesMount,
+                  package.name);
+    std::snprintf(field, sizeof(field), "dependencies[%zu].source", i);
+    if (std::strcmp(package.source, embedded) != 0) {
+      return refuse(field, "is not the embedded package folder "
+                           "'packages/<name>', the only source this "
+                           "schema reads");
+    }
+    if (roots_overlap(document.contentRoot, package.source) ||
+        roots_overlap(document.cacheRoot, package.source)) {
+      return refuse(field, "is the content or cache root or is nested with "
+                           "it");
+    }
+  }
   const ProjectScriptLimits &limits = document.scriptLimits;
   if (limits.instructionLimitSet &&
       !limit_in_range(limits.instructionLimit, kProjectMinInstructionLimit,
@@ -365,14 +467,14 @@ parse_project_document(const char *text, std::size_t length,
   }
 
   constexpr const char *kTopKeys[] = {
-      "schemaVersion", "identity",   "roots",    "scenes",
-      "startupScene",  "mainScript", "scripting"};
+      "schemaVersion", "identity",   "roots",     "scenes",
+      "startupScene",  "mainScript", "scripting", "dependencies"};
   constexpr const char *kIdentityKeys[] = {"name", "organisation", "version",
                                            "guid"};
   constexpr const char *kRootKeys[] = {"content", "cache"};
   constexpr const char *kScriptingKeys[] = {"instructionLimit",
                                             "memoryLimitMiB"};
-  if (auto checked = check_members(parser, root, kTopKeys, 7U, "");
+  if (auto checked = check_members(parser, root, kTopKeys, 8U, "");
       !checked.has_value()) {
     return checked;
   }
@@ -514,6 +616,14 @@ parse_project_document(const char *text, std::size_t length,
     }
   }
 
+  core::JsonValue dependencies{};
+  if (parser.get_object_field(root, "dependencies", &dependencies)) {
+    if (auto r = read_packages(parser, dependencies, staged.get());
+        !r.has_value()) {
+      return r;
+    }
+  }
+
   if (auto r = validate_project_document(*staged); !r.has_value()) {
     return r;
   }
@@ -617,6 +727,17 @@ bool format_project_document(const ProjectDocument &document, char *out,
       a.text(number);
     }
     a.text("\n  }");
+  }
+  if (document.packageCount > 0U) {
+    a.text(",\n  \"dependencies\": [");
+    for (std::size_t i = 0U; i < document.packageCount; ++i) {
+      a.text((i == 0U) ? "\n    {\"name\": " : ",\n    {\"name\": ");
+      a.quoted(document.packages[i].name);
+      a.text(", \"source\": ");
+      a.quoted(document.packages[i].source);
+      a.text("}");
+    }
+    a.text("\n  ]");
   }
   a.text("\n}\n");
   if (!a.ok) {

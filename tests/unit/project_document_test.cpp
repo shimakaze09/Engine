@@ -8,7 +8,10 @@
 // - a truncated file, an absent file and an oversized file are each
 //   reported as what they are;
 // - the optional script limits read and write exactly, stay out of a
-//   document that sets none, and are refused outside their range.
+//   document that sets none, and are refused outside their range;
+// - the optional package list reads and writes exactly, stays out of a
+//   document that depends on nothing, and refuses a bad name, a repeat, a
+//   source other than the embedded folder and a list past its limit.
 
 #include "engine/content/project_document.h"
 
@@ -409,10 +412,132 @@ void check_script_limits(engine::tests::TestContext &t) {
           "the writer refuses a limit its reader would refuse");
 }
 
+/// The reference document with `dependencies` appended as its last member.
+std::string with_dependencies(const char *dependencies) {
+  return replaced(reference_text(), "\"assets/main.lua\"\n}",
+                  (std::string("\"assets/main.lua\",\n  \"dependencies\": ") +
+                   dependencies + "\n}")
+                      .c_str());
+}
+
+void check_packages(engine::tests::TestContext &t) {
+  std::unique_ptr<char[]> out(
+      new (std::nothrow) char[ct::kMaxProjectDocumentBytes]);
+  std::size_t length = 0U;
+
+  const std::string plain = reference_text();
+  std::unique_ptr<ct::ProjectDocument> none = fresh();
+  t.check(ct::parse_project_document(plain.data(), plain.size(), none.get())
+                  .has_value() &&
+              (none->packageCount == 0U),
+          "a document with no dependencies has no packages");
+
+  const std::string two = with_dependencies(
+      "[\n    {\"name\": \"input_system\", \"source\": "
+      "\"packages/input_system\"},\n    {\"name\": \"text-mesh2\", "
+      "\"source\": \"packages/text-mesh2\"}\n  ]");
+  std::unique_ptr<ct::ProjectDocument> read = fresh();
+  t.check(
+      ct::parse_project_document(two.data(), two.size(), read.get())
+              .has_value() &&
+          (read->packageCount == 2U) &&
+          (std::strcmp(read->packages[0].name, "input_system") == 0) &&
+          (std::strcmp(read->packages[1].source, "packages/text-mesh2") == 0),
+      "two packages read back in the author's order");
+  t.check(ct::format_project_document(*read, out.get(),
+                                      ct::kMaxProjectDocumentBytes, &length) &&
+              (std::string(out.get(), length) == two),
+          "a document with packages writes exactly its text");
+
+  const auto package = [](const char *name, const char *source) {
+    return std::string("[{\"name\": \"") + name + "\", \"source\": \"" +
+           source + "\"}]";
+  };
+  t.check(refused_for(with_dependencies("[]"), "dependencies"),
+          "an empty dependencies list is refused; omit it instead");
+  t.check(refused_for(with_dependencies("{}"), "dependencies"),
+          "dependencies that are not an array are refused");
+  t.check(refused_for(with_dependencies("[5]"), "dependencies[0]"),
+          "a package that is not an object is refused");
+  t.check(refused_for(with_dependencies("[{\"name\": \"a\"}]"),
+                      "dependencies[0].source"),
+          "a package with no source is refused");
+  t.check(refused_for(with_dependencies("[{\"name\": \"a\", \"source\": "
+                                        "\"packages/a\", \"version\": 1}]"),
+                      "dependencies[0].version"),
+          "an unknown package key is refused");
+  t.check(
+      refused_for(with_dependencies(package("Input", "packages/Input").c_str()),
+                  "dependencies[0].name"),
+      "an upper-case package name is refused");
+  t.check(refused_for(with_dependencies(package("-a", "packages/-a").c_str()),
+                      "dependencies[0].name"),
+          "a package name starting with '-' is refused");
+  t.check(refused_for(with_dependencies(package("a b", "packages/a b").c_str()),
+                      "dependencies[0].name"),
+          "a package name holding a space is refused");
+  t.check(refused_for(with_dependencies(package("", "packages/").c_str()),
+                      "dependencies[0].name"),
+          "an empty package name is refused");
+  const std::string longName(ct::kProjectPackageNameCapacity, 'a');
+  t.check(
+      refused_for(with_dependencies(package(longName.c_str(),
+                                            ("packages/" + longName).c_str())
+                                        .c_str()),
+                  "dependencies[0].name"),
+      "a package name that does not fit is refused, not cut short");
+  const std::string fits(ct::kProjectPackageNameCapacity - 1U, 'a');
+  std::unique_ptr<ct::ProjectDocument> longest = fresh();
+  const std::string fitsText = with_dependencies(
+      package(fits.c_str(), ("packages/" + fits).c_str()).c_str());
+  t.check(ct::parse_project_document(fitsText.data(), fitsText.size(),
+                                     longest.get())
+              .has_value(),
+          "the longest package name that fits is accepted");
+  t.check(refused_for(with_dependencies(package("a", "vendor/a").c_str()),
+                      "dependencies[0].source"),
+          "a source other than the embedded folder is refused");
+  t.check(refused_for(with_dependencies(package("a", "packages/b").c_str()),
+                      "dependencies[0].source"),
+          "a source naming another package's folder is refused");
+  t.check(refused_for(with_dependencies("[{\"name\": \"a\", \"source\": "
+                                        "\"packages/a\"}, {\"name\": \"a\", "
+                                        "\"source\": \"packages/a\"}]"),
+                      "dependencies[1].name"),
+          "a repeated package is refused");
+  t.check(refused_for(
+              replaced(with_dependencies(package("a", "packages/a").c_str()),
+                       "\"content\": \"assets\"", "\"content\": \"packages\""),
+              "dependencies[0].source"),
+          "a package inside the content root is refused");
+
+  std::string many = "[";
+  for (std::size_t i = 0U; i <= ct::kMaxProjectPackages; ++i) {
+    char name[16] = {};
+    std::snprintf(name, sizeof(name), "p%zu", i);
+    many += (i == 0U) ? "" : ",";
+    many += "{\"name\": \"" + std::string(name) +
+            "\", \"source\": \"packages/" + name + "\"}";
+    if (i + 1U == ct::kMaxProjectPackages) {
+      std::unique_ptr<ct::ProjectDocument> full = fresh();
+      const std::string atLimit = with_dependencies((many + "]").c_str());
+      t.check(
+          ct::parse_project_document(atLimit.data(), atLimit.size(), full.get())
+                  .has_value() &&
+              (full->packageCount == ct::kMaxProjectPackages),
+          "a project may depend on as many packages as it can hold");
+    }
+  }
+  many += "]";
+  t.check(refused_for(with_dependencies(many.c_str()), "dependencies"),
+          "one package past the limit is refused");
+}
+
 int main() {
   engine::tests::TestContext t;
   check_round_trip(t);
   check_script_limits(t);
+  check_packages(t);
   check_refusals(t);
   check_scene_bounds(t);
   check_file_outcomes(t);
