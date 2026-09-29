@@ -52,12 +52,17 @@ struct AssetIndexEntry final {
   content::AssetLabels labels{};
 };
 
-/// Rebuilds the process-wide asset index by walking editor_asset_root()
-/// once. Cold path: called on explicit rescan and editor startup, never
-/// per frame. Skips sidecar/internal files (.cookmeta, .cookstamp,
-/// .checksum) and the .thumbnails cache directories. False when the asset
-/// root does not exist (the index is cleared either way).
+/// Rebuilds the process-wide asset index, and the folders it lists, by
+/// walking editor_asset_root() once. Cold path: called on explicit rescan and
+/// editor startup, never per frame. Skips sidecar/internal files (.cookmeta,
+/// .cookstamp, .checksum) and the .thumbnails cache directories. False when the
+/// asset root does not exist (the index is cleared either way).
 bool rebuild_asset_index() noexcept;
+/// The VFS form ("<mount>/<relative>") of `osPath`, a path under the
+/// editor's asset root. False, with `out` empty, when the path lies
+/// outside the root or does not fit whole.
+bool asset_virtual_path(const char *osPath, char *out,
+                        std::size_t capacity) noexcept;
 /// Number of currently indexed entries.
 std::size_t asset_index_count() noexcept;
 /// Entry at `index`, or nullptr when out of range.
@@ -117,8 +122,9 @@ bool refresh_asset_filter_cache(const AssetFilterState &filter,
 bool asset_entry_matches_filter(const AssetIndexEntry &entry,
                                 const AssetFilterState &filter) noexcept;
 
-/// Cached listing of one folder's distinct immediate child folder OS paths
-/// (deduped, sorted); recomputed only when the requested folder or the
+/// Cached listing of one folder's immediate child folder OS paths, sorted,
+/// an empty folder included, as Unity's Project window and Godot's
+/// FileSystem dock list one; recomputed only when the requested folder or the
 /// index generation differs from what produced the cached children —
 /// mirrors AssetFilterCache so folder-view draw code never re-walks the
 /// index every frame.

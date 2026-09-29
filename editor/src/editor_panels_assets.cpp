@@ -1,10 +1,12 @@
 // Implements the editor content browser panel: cached-index folder/search
-// views, type filters, typed Open dispatch, drag-spawn, and the mesh/gltf
-// import settings inspector. Split out of editor.cpp (REVIEW_FINDINGS A3);
+// views, type filters, typed Open dispatch, drag-spawn, the right-click
+// menus with their Create name prompt, and the mesh/gltf import settings
+// inspector. Split out of editor.cpp (REVIEW_FINDINGS A3);
 // rebuilt on the index/filter-cache backend.
 
 #include "editor_panels_assets.h"
 
+#include "editor_asset_create.h"
 #include "editor_asset_index.h"
 #include "editor_asset_labels.h"
 #include "editor_asset_usages.h"
@@ -141,10 +143,101 @@ void run_find_usages(const AssetIndexEntry &target) noexcept {
                   content::make_asset_id_from_path(target.virtualPath)));
 }
 
-/// Context menu for one browsed entry. Open/Show in Folder/Copy
-/// Reference/Find Usages are implemented against production entry points;
-/// Rename/Move/Duplicate/Delete/Reimport/Find Dependencies stay disabled:
-/// they need a stable asset identity and dependency graph to be safe.
+/// The name prompt a Create menu item opens, as Godot's FileSystem dock
+/// asks for a new folder's, scene's or script's name before writing it.
+struct NewAssetPrompt final {
+  bool openRequested = false;
+  NewAssetKind kind = NewAssetKind::Folder;
+  char folder[kMaxAssetIndexPath] = {};
+  char name[kMaxNewAssetName + 1U] = {};
+  /// Why the last Create was refused, shown until the name changes.
+  char error[320] = {};
+  /// Gives the name field the keyboard: when the prompt opens, and after a
+  /// refusal, since Enter ends the field's editing.
+  bool focusName = false;
+};
+
+NewAssetPrompt g_newAsset{};
+
+constexpr const char *kNewAssetPopup = "Create Asset";
+
+/// Draws the Create submenu's items; the one chosen asks for a name for a
+/// new asset of its kind in `folder` ("" is the asset root).
+void draw_create_menu(const char *folder) noexcept {
+  if (!ImGui::BeginMenu("Create")) {
+    return;
+  }
+  for (const NewAssetKind kind :
+       {NewAssetKind::Folder, NewAssetKind::Material, NewAssetKind::Scene,
+        NewAssetKind::LuaScript}) {
+    char label[64] = {};
+    std::snprintf(label, sizeof(label), "%s...", new_asset_label(kind));
+    if (ImGui::MenuItem(label)) {
+      g_newAsset.openRequested = true;
+      g_newAsset.kind = kind;
+      std::snprintf(g_newAsset.folder, sizeof(g_newAsset.folder), "%s",
+                    (folder != nullptr) ? folder : "");
+      std::snprintf(g_newAsset.name, sizeof(g_newAsset.name), "%s",
+                    new_asset_default_name(kind));
+      g_newAsset.error[0] = '\0';
+    }
+  }
+  ImGui::EndMenu();
+}
+
+/// Draws the name prompt while it is open. Create (or Enter) makes the
+/// asset and selects it; a refusal keeps the prompt open with the reason.
+void draw_new_asset_prompt() noexcept {
+  if (g_newAsset.openRequested) {
+    g_newAsset.openRequested = false;
+    g_newAsset.focusName = true;
+    ImGui::OpenPopup(kNewAssetPopup);
+  }
+  if (!ImGui::BeginPopupModal(kNewAssetPopup, nullptr,
+                              ImGuiWindowFlags_AlwaysAutoResize)) {
+    return;
+  }
+  ImGui::Text("Name of the new %s:", new_asset_label(g_newAsset.kind));
+  if (g_newAsset.focusName) {
+    g_newAsset.focusName = false;
+    ImGui::SetKeyboardFocusHere();
+  }
+  ImGui::SetNextItemWidth(editor_px(280.0F));
+  bool create = ImGui::InputText(
+      "##new_asset_name", g_newAsset.name, sizeof(g_newAsset.name),
+      ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
+  if (ImGui::IsItemEdited()) {
+    g_newAsset.error[0] = '\0';
+  }
+  if (g_newAsset.error[0] != '\0') {
+    ImGui::TextWrapped("%s", g_newAsset.error);
+  }
+  create = ImGui::Button("Create") || create;
+  ImGui::SameLine();
+  if (ImGui::Button("Cancel") || ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+    ImGui::CloseCurrentPopup();
+  } else if (create) {
+    const NewAssetResult result =
+        create_new_asset(g_newAsset.kind, g_newAsset.folder, g_newAsset.name);
+    if (result.failure == NewAssetFailure::None) {
+      if (g_newAsset.kind != NewAssetKind::Folder) {
+        std::snprintf(editor_session().selectedAssetPath,
+                      sizeof(editor_session().selectedAssetPath), "%s",
+                      result.osPath);
+      }
+      ImGui::CloseCurrentPopup();
+    } else {
+      std::snprintf(g_newAsset.error, sizeof(g_newAsset.error), "%s",
+                    new_asset_failure_text(result.failure));
+      g_newAsset.focusName = true;
+    }
+  }
+  ImGui::EndPopup();
+}
+
+/// Context menu for one browsed entry: Open, Show in Folder, Copy
+/// Reference and Find Usages. Rename, Move, Duplicate and Delete wait for
+/// asset moves that keep every reference whole.
 void draw_context_menu(const AssetIndexEntry &entry) noexcept {
   if (!ImGui::BeginPopupContextItem()) {
     return;
@@ -163,18 +256,12 @@ void draw_context_menu(const AssetIndexEntry &entry) noexcept {
   if (ImGui::MenuItem("Find Usages")) {
     run_find_usages(entry);
   }
-  ImGui::Separator();
-  ImGui::MenuItem("Find Dependencies (needs #150)", nullptr, false, false);
-  ImGui::MenuItem("Rename... (needs #150)", nullptr, false, false);
-  ImGui::MenuItem("Move... (needs #150)", nullptr, false, false);
-  ImGui::MenuItem("Duplicate (needs #150)", nullptr, false, false);
-  ImGui::MenuItem("Delete (needs #150)", nullptr, false, false);
-  ImGui::MenuItem("Reimport (needs #150)", nullptr, false, false);
   ImGui::EndPopup();
 }
 
 /// Draws one folder row in the folder-scoped view; double-click navigates
-/// into it (recorded in the back/forward history).
+/// into it (recorded in the back/forward history), and its menu opens it
+/// or creates inside it.
 void draw_folder_row(const char *folderOsPath) noexcept {
   const std::filesystem::path path(folderOsPath);
   const std::string name = path.filename().string();
@@ -185,6 +272,13 @@ void draw_folder_row(const char *folderOsPath) noexcept {
   if (ImGui::Selectable(label, false, ImGuiSelectableFlags_AllowDoubleClick) &&
       ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
     content_browser_navigate(folderOsPath);
+  }
+  if (ImGui::BeginPopupContextItem()) {
+    if (ImGui::MenuItem("Open")) {
+      content_browser_navigate(folderOsPath);
+    }
+    draw_create_menu(folderOsPath);
+    ImGui::EndPopup();
   }
   ImGui::PopID();
 }
@@ -351,6 +445,18 @@ void draw_asset_browser_panel() noexcept {
     ImGui::TextDisabled("No assets match \"%s\"", browser.filter.query);
   }
 
+  // Right-clicking the empty space, as in Unity's Project window.
+  if (ImGui::BeginPopupContextWindow("assets_space_menu",
+                                     ImGuiPopupFlags_MouseButtonRight |
+                                         ImGuiPopupFlags_NoOpenOverItems)) {
+    draw_create_menu(browser.filter.folder);
+    ImGui::Separator();
+    if (ImGui::MenuItem("Refresh")) {
+      static_cast<void>(rebuild_asset_index());
+    }
+    ImGui::EndPopup();
+  }
+  draw_new_asset_prompt();
   draw_find_usages_popup();
 
   if (editor_session().selectedAssetPath[0] != '\0') {

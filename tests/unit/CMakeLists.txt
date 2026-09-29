@@ -1384,6 +1384,19 @@ engine_add_test_executable(engine_unit_editor_asset_index
     SDL_MAIN_HANDLED
 )
 
+engine_add_test_executable(engine_unit_editor_asset_create
+    SOURCES
+    editor_asset_create_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/editor/include
+    ${CMAKE_SOURCE_DIR}/editor/src
+    ${CMAKE_SOURCE_DIR}/runtime/src
+    PRIVATE_DEPS
+    engine_editor
+    COMPILE_DEFINITIONS
+    SDL_MAIN_HANDLED
+)
+
 engine_add_test_executable(engine_unit_editor_asset_labels
     SOURCES
     editor_asset_labels_test.cpp
