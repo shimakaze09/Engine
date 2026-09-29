@@ -195,15 +195,29 @@ void check_refusals() noexcept {
          NewAssetFailure::WriteFailed) &&
             !on_disk(root / "Lost.mat") && !on_disk(root / "Lost.mat.meta"),
         "a material that cannot be written leaves nothing");
+}
 
+/// A path that would not fit the 512-byte field whole is refused, for a
+/// file and a folder. Setting it up needs a real folder about 400
+/// characters deep, which Windows refuses past its 260-character MAX_PATH
+/// unless long paths are enabled; there the case cannot be built and is
+/// skipped with that reason, and the lanes whose OS allows the folder run
+/// it.
+void check_too_long() noexcept {
+  const fs::path root("assets");
   const std::string deep(200, 'd');
-  const std::string deepFolder = (root / deep).string();
   std::error_code ec{};
   fs::create_directories(root / deep / deep, ec);
-  check(!ec && (create_new_asset(NewAssetKind::LuaScript,
-                                 (root / deep / deep).string().c_str(),
-                                 std::string(120, 'n').c_str())
-                    .failure == NewAssetFailure::TooLong),
+  if (ec) {
+    std::printf("note: this OS refuses a %zu-character folder path, so the "
+                "too-long cases cannot be set up here\n",
+                (root / deep / deep).string().size());
+    return;
+  }
+  check(create_new_asset(NewAssetKind::LuaScript,
+                         (root / deep / deep).string().c_str(),
+                         std::string(120, 'n').c_str())
+                .failure == NewAssetFailure::TooLong,
         "a path that would not fit whole is refused");
   check((create_new_asset(NewAssetKind::Folder,
                           (root / deep / deep).string().c_str(),
@@ -386,6 +400,7 @@ int main() {
   check_create(catalog.get());
   check_panel();
   check_refusals();
+  check_too_long();
 
   engine::runtime::set_editor_asset_service(nullptr);
   ImGui::DestroyContext();
