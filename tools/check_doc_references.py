@@ -63,7 +63,8 @@ SAMPLE_PROJECT = "samples/island"
 ROOT_PREFIXES = (
     "app/", "assets/", "audio/", "cmake/", "content/", "core/", "docs/",
     "engine_assets/", "samples/",
-    "editor/", "math/", "physics/", "renderer/", "runtime/", "scripting/",
+    "editor/", "math/", "physics/", "player/", "renderer/", "runtime/",
+    "scripting/",
     "tests/", "tools/", ".github/", ".claude/",
 )
 

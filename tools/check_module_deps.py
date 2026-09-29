@@ -8,7 +8,7 @@ TUs without tripping anything. This gate makes the target graph the
 enforced source of truth, in the shape of the existing comment audits:
 it reports findings and exits non-zero, and CI holds it at zero.
 
-Four checks, one root cause each:
+Six checks, one root cause each:
 
   1. Declared-graph direction. Every `#include "engine/<module>/..."`
      — quoted or angle-bracketed — is validated against
@@ -46,6 +46,12 @@ Four checks, one root cause each:
      that removes it -- none remain. Includes are what spread it: seven
      editor TUs carried SDL and the backend header with no symbol from
      either, and nothing noticed until an audit counted them.
+
+  6. Link edges. Every `engine_<module>` target an audited module's
+     CMakeLists names (a dependency list, a target_link_libraries line, a
+     WHOLE_ARCHIVE link) must be one its declared set allows. Checks 1-4
+     read headers, and a link needs none: the player (decision 0016,
+     point 4) linking engine_editor whole-archive would pass them all.
 
 Today's known violations are listed in KNOWN_VIOLATIONS with the issue
 that tracks each. An entry that no longer matches anything is itself a
@@ -125,6 +131,11 @@ ALLOWED_DEPENDENCIES: dict[str, frozenset[str]] = {
             "core",
             "math",
         }
+    ),
+    # The player runs a game without the editor (decision 0016, point 4):
+    # the runtime and everything under it, and nothing from editor/.
+    "player": frozenset(
+        {"runtime", "renderer", "physics", "scripting", "audio", "content", "core", "math"}
     ),
     # Offline tools sit above the engine and consume it like an
     # application would; they are never consumed by it.
@@ -467,6 +478,42 @@ def check_cmake_grants(
     return findings
 
 
+# `engine_<module>` as a whole CMake word: engine_editor, not
+# engine_editor_app or engine_add_executable_target.
+LINK_TARGET_RE = re.compile(r"(?<![\w$])engine_([a-z]+)(?![\w])")
+
+
+def check_cmake_links(root: pathlib.Path) -> list[Finding]:
+    """Flags an engine_<module> target a module's CMakeLists may not use."""
+    findings: list[Finding] = []
+    for module in sorted(ALLOWED_DEPENDENCIES):
+        module_dir = root / module
+        if not module_dir.is_dir():
+            continue
+        for lists_file in sorted(module_dir.rglob("CMakeLists.txt")):
+            relative = lists_file.relative_to(root).as_posix()
+            for number, line in enumerate(
+                lists_file.read_text(encoding="utf-8").splitlines(), start=1
+            ):
+                code = line.split("#", 1)[0]
+                for match in LINK_TARGET_RE.finditer(code):
+                    target = match.group(1)
+                    if (
+                        target not in ALLOWED_DEPENDENCIES
+                        or target == module
+                        or target in ALLOWED_DEPENDENCIES[module]
+                    ):
+                        continue
+                    findings.append(
+                        Finding(
+                            f"{relative}:{number}",
+                            f"names engine_{target}, which {module} may not "
+                            "depend on",
+                        )
+                    )
+    return findings
+
+
 def public_dependency_targets(root: pathlib.Path, module: str) -> set[str]:
     """Returns the targets a module declares as PUBLIC deps of its library.
 
@@ -673,6 +720,7 @@ def main() -> int:
 
     findings = check_include_edges(root, used_includes, allowlisted)
     findings += check_cmake_grants(root, used_grants, allowlisted)
+    findings += check_cmake_links(root)
     findings += check_public_dependency_visibility(root)
     findings += check_sdl_containment(root, used_sdl, allowlisted)
     if allowlisted:

@@ -45,24 +45,14 @@ import pathlib
 import re
 import sys
 
+from source_roots import ENGINE_SOURCE_ROOTS
+
 CPP_SUFFIXES = {".cpp", ".cc", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".inl"}
 
 # First-party trees. Third-party sources are fetched into the build tree
 # and never audited. Tests are included: they build on the Windows lanes
 # under the same flags as the engine.
-AUDITED_ROOTS = (
-    "app",
-    "audio",
-    "content",
-    "core",
-    "editor",
-    "math",
-    "physics",
-    "renderer",
-    "runtime",
-    "scripting",
-    "tests",
-)
+AUDITED_ROOTS = ENGINE_SOURCE_ROOTS + ("tests",)
 
 # Macros that select the Windows branch, and macros whose presence means
 # the branch is for some other platform.
