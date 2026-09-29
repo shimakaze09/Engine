@@ -4,11 +4,13 @@
 // and Ctrl+R is not the scale tool), creating actions that run once per
 // press while undo repeats, dispatch stopping under the unsaved-changes
 // prompt, a popup, a text field and a game-owned keyboard, the play
-// chords that alone stay live while the game has the keyboard, rebinding
+// chords that alone stay live while the game has the keyboard, the entity
+// edits acting only while the Scene view or Entities panel has focus, rebinding
 // with its persistence and refusals, and table invariants: one row per
 // action, unique ids, no chord bound twice.
 
 #include "editor_commands.h"
+#include "editor_entity_clipboard.h"
 #include "editor_panels_diagnostics.h"
 #include "editor_preferences.h"
 #include "editor_scene_document.h"
@@ -51,6 +53,8 @@ struct FrameOptions final {
   bool openPopup = false;
   bool keepPopup = false;
   bool focusText = false;
+  /// A docked panel's window to draw and focus this frame, or null.
+  const char *panel = nullptr;
 };
 
 void run_frame(const FrameOptions &options = FrameOptions{}) noexcept {
@@ -72,6 +76,13 @@ void run_frame(const FrameOptions &options = FrameOptions{}) noexcept {
   }
   ImGui::InputText("Name", text, sizeof(text));
   ImGui::End();
+  if (options.panel != nullptr) {
+    ImGui::SetNextWindowPos(ImVec2(320.0F, 0.0F));
+    ImGui::SetNextWindowSize(ImVec2(200.0F, 200.0F));
+    ImGui::SetNextWindowFocus();
+    ImGui::Begin(options.panel, nullptr, ImGuiWindowFlags_NoSavedSettings);
+    ImGui::End();
+  }
   ImGui::Render();
 }
 
@@ -255,6 +266,79 @@ void check_repeat_policy(engine::tests::TestContext &t, World &world) noexcept {
   t.check(world.alive_entity_count() == before + 1U, "Ctrl+Y redoes");
   tap(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_Z);
   t.check(world.alive_entity_count() == before + 2U, "Ctrl+Shift+Z redoes");
+}
+
+/// Focuses `panel` for a frame, so the next dispatch sees it.
+void focus_panel(const char *panel) noexcept {
+  FrameOptions focus{};
+  focus.panel = panel;
+  run_frame(focus);
+}
+
+/// The entity edits act only where entities are edited: with the Assets or
+/// Log panel focused, Delete, Ctrl+C, Ctrl+V and Ctrl+D leave the scene
+/// and the entity clipboard alone, and the Edit menu disables them; with
+/// the Entities panel or the Scene view focused they act. A menu or a
+/// window that is no panel does not move the focus the edits follow, and
+/// Undo works from anywhere. Red on base, where the chords were global.
+void check_focus_scope(engine::tests::TestContext &t, World &world) noexcept {
+  t.check(perform_scene_new(), "fresh scene");
+  const Entity kept = add_named(world, "Kept");
+  select_entity(kept, false);
+  entity_clipboard_clear();
+  const std::size_t before = world.alive_entity_count();
+
+  for (const char *panel : {kAssetsWindow, kLogWindow, kInspectorWindow}) {
+    focus_panel(panel);
+    FrameOptions options{};
+    options.panel = panel;
+    tap(ImGuiKey_Delete, options);
+    tap(ImGuiMod_Ctrl | ImGuiKey_D, options);
+    tap(ImGuiMod_Ctrl | ImGuiKey_C, options);
+    char what[96] = {};
+    std::snprintf(what, sizeof(what),
+                  "with %s focused the entity edits leave the scene alone",
+                  panel);
+    t.check(world.is_alive(kept) && (world.alive_entity_count() == before) &&
+                !entity_clipboard_has(),
+            what);
+    t.check(!editor_action_in_focus_scope(EditorAction::Delete) &&
+                !editor_action_in_focus_scope(EditorAction::Copy) &&
+                editor_action_in_focus_scope(EditorAction::Undo),
+            "the Edit menu's entity edits are out of scope there, Undo is not");
+  }
+
+  // A popup, and a window that is no panel, keep the last panel.
+  focus_panel(kAssetsWindow);
+  FrameOptions popup{};
+  popup.openPopup = true;
+  run_frame(popup);
+  run_frame();
+  t.check(editor_session().lastFocusedPanel == EditorPanel::Assets,
+          "a popup or the host window does not move the edits' focus");
+
+  focus_panel(kEntitiesWindow);
+  FrameOptions entities{};
+  entities.panel = kEntitiesWindow;
+  tap(ImGuiMod_Ctrl | ImGuiKey_C, entities);
+  t.check(entity_clipboard_has(), "with Entities focused Ctrl+C copies");
+  tap(ImGuiMod_Ctrl | ImGuiKey_D, entities);
+  t.check(world.alive_entity_count() == before + 1U, "and Ctrl+D duplicates");
+  focus_panel(kSceneViewWindow);
+  select_entity(kept, false);
+  FrameOptions scene{};
+  scene.panel = kSceneViewWindow;
+  tap(ImGuiKey_Delete, scene);
+  t.check(!world.is_alive(kept), "with the Scene view focused Delete deletes");
+
+  focus_panel(kAssetsWindow);
+  FrameOptions assets{};
+  assets.panel = kAssetsWindow;
+  tap(ImGuiMod_Ctrl | ImGuiKey_Z, assets);
+  t.check(world.alive_entity_count() == before + 1U,
+          "Undo works from any panel");
+  focus_panel(kSceneViewWindow);
+  entity_clipboard_clear();
 }
 
 void check_blocked_contexts(engine::tests::TestContext &t,
@@ -717,6 +801,7 @@ int main() {
   check_tool_keys_match_exactly(t);
   check_repeat_policy(t, *world);
   check_blocked_contexts(t, *world);
+  check_focus_scope(t, *world);
   check_document_chords(t, *world);
   check_play_chords(t, *world);
   check_create_and_exit(t, *world);

@@ -264,7 +264,7 @@ void draw_console_panel() noexcept {
     ImGui::SetNextWindowFocus();
     console.focusRequested = false;
   }
-  if (!ImGui::Begin("Log")) {
+  if (!ImGui::Begin(kLogWindow)) {
     ImGui::End();
     return;
   }

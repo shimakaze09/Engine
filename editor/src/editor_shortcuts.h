@@ -68,6 +68,12 @@ struct EditorShortcut final {
   /// can always pause or stop a running game from the keyboard, and Take
   /// Screenshot, as Unreal's F9 works in Play In Editor.
   bool whileGameHasKeyboard = false;
+  /// Whether the action edits the scene's entities (Copy, Paste,
+  /// Duplicate, Delete, Create Empty, Frame Selected), so its chord and
+  /// the Edit menu's item work only while the Scene view or the Entities
+  /// panel is the last focused panel, as Unity routes them to the focused
+  /// window. Everything else works from anywhere.
+  bool sceneEditing = false;
 };
 
 /// Number of rows, one per EditorAction. Rows carry the live bindings,
@@ -138,6 +144,22 @@ void begin_shortcut_capture(EditorAction action) noexcept;
 EditorAction shortcut_capture_target() noexcept;
 /// Stops capturing.
 void end_shortcut_capture() noexcept;
+
+/// Notes which docked panel has focus in editor_session().lastFocusedPanel.
+/// A focused menu, popup, toolbar or other window leaves it as it was.
+/// dispatch_editor_shortcuts calls it first.
+void update_focused_panel() noexcept;
+
+/// True when `action` may act from the panel that last had focus: always,
+/// except for a scene-editing row, which needs the Scene view or the
+/// Entities panel.
+bool editor_action_in_focus_scope(EditorAction action) noexcept;
+
+/// The Edit menu's form of editor_action_menu_item: also disabled while
+/// the action is out of focus scope, since the menu acts on the panel the
+/// author was working in. A panel's own context menu uses
+/// editor_action_menu_item, being in scope by where it opened.
+bool editor_edit_menu_item(EditorAction action, bool checked = false) noexcept;
 
 /// Draws the menu item for `action` with its label, chord and enabled
 /// state (checked when `checked`), and runs it when clicked. True when it

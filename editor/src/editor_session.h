@@ -119,6 +119,23 @@ struct InspectorPanelState final {
 /// The two viewport panels' window names.
 inline constexpr const char *kSceneViewWindow = "Scene";
 inline constexpr const char *kGameViewWindow = "Game";
+/// The other docked panels' window names.
+inline constexpr const char *kEntitiesWindow = "Entities";
+inline constexpr const char *kInspectorWindow = "Inspector";
+inline constexpr const char *kAssetsWindow = "Assets";
+inline constexpr const char *kLogWindow = "Log";
+
+/// The docked panel an edit command belongs to. Tracked as the panel that
+/// last had focus, so opening a menu or clicking the toolbar does not
+/// change which window Copy, Paste, Duplicate or Delete act in.
+enum class EditorPanel : std::uint8_t {
+  Scene,
+  Game,
+  Entities,
+  Inspector,
+  Assets,
+  Log,
+};
 
 struct EditorSession final {
   bool initialized = false;
@@ -234,6 +251,8 @@ struct EditorSession final {
   // A panel to bring to the front on the next frame: the Game view on
   // Play, so input reaches the game, and the Scene view on Stop.
   const char *pendingViewFocus = nullptr;
+  /// The docked panel that last had focus; Scene until one is focused.
+  EditorPanel lastFocusedPanel = EditorPanel::Scene;
   char lastAppliedWindowTitle[640] = {};
   SceneDocumentState document{};
   ContentBrowserState contentBrowser{};
