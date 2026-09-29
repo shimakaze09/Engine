@@ -1206,12 +1206,28 @@ bool platform_attach_parent_console() noexcept {
   if (GetConsoleWindow() != nullptr) {
     return false;
   }
+  // A stream the parent redirected (a pipe, a file) already goes where the
+  // parent wants it; pointing it at the console would lose it.
+  const auto redirected = [](DWORD which) noexcept {
+    const HANDLE handle = GetStdHandle(which);
+    return (handle != nullptr) && (handle != INVALID_HANDLE_VALUE) &&
+           (GetFileType(handle) != FILE_TYPE_UNKNOWN);
+  };
+  const bool outRedirected = redirected(STD_OUTPUT_HANDLE);
+  const bool errRedirected = redirected(STD_ERROR_HANDLE);
+  if (outRedirected && errRedirected) {
+    return false;
+  }
   if (AttachConsole(ATTACH_PARENT_PROCESS) == 0) {
     return false;
   }
   std::FILE *stream = nullptr;
-  static_cast<void>(freopen_s(&stream, "CONOUT$", "w", stdout));
-  static_cast<void>(freopen_s(&stream, "CONOUT$", "w", stderr));
+  if (!outRedirected) {
+    static_cast<void>(freopen_s(&stream, "CONOUT$", "w", stdout));
+  }
+  if (!errRedirected) {
+    static_cast<void>(freopen_s(&stream, "CONOUT$", "w", stderr));
+  }
   return true;
 #else
   return false;
