@@ -1772,8 +1772,11 @@ if(TARGET engine_player AND NOT ENGINE_TARGET_PLATFORM STREQUAL "Web")
             "-DSAMPLE=${ENGINE_SAMPLE_PROJECT_OUTPUT_DIR}"
             "-DSCRATCH=${CMAKE_CURRENT_BINARY_DIR}/player_executable_test"
             -P ${CMAKE_CURRENT_SOURCE_DIR}/player_executable_test.cmake)
+    # A macOS bundle keeps no engine content inside it yet, so the player
+    # is pointed at the build's, as a packaged game would carry its own.
     set_tests_properties(engine_player_executable
-        PROPERTIES LABELS integration TIMEOUT 300)
+        PROPERTIES LABELS integration TIMEOUT 300
+        ENVIRONMENT "ENGINE_ROOT=${ENGINE_ENGINE_ASSET_OUTPUT_DIR}")
 endif()
 
 # engine_validate's command line, through the real binary: a clean scene

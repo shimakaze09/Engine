@@ -3,7 +3,8 @@
 # working directory other than the project's (#776) and exits 0; a path
 # with no project, and a frame count that is not one, are refused with
 # exit 1 and a reason; a project whose startup scene does not load stops
-# the player with exit 3 rather than playing an empty world.
+# the player with exit 3 rather than playing an empty world. Every case is
+# --headless, so no error box waits for a click.
 #
 # Inputs: PLAYER (the executable), SAMPLE (the sample project directory),
 # SCRATCH (a directory this test may replace).
@@ -42,14 +43,18 @@ endfunction()
 file(REMOVE_RECURSE "${SCRATCH}")
 file(MAKE_DIRECTORY "${SCRATCH}")
 
-expect_player(sample 0 "player: running 'island'" "\\[Error\\]"
+# A lane without cooked shaders logs the renderer's missing programs; what
+# the player owns (the engine, the project, its scenes and scripts) must
+# log no error.
+set(player_errors "\\[Error\\]\\[(engine|project|scene|scripting|player|assets)\\]")
+expect_player(sample 0 "player: running 'island'" "${player_errors}"
     --headless --max-frames 120 "${SAMPLE}")
 expect_player(missing_project 1 "no project found" ""
     --headless "${SCRATCH}/nowhere")
 expect_player(bad_frame_count 1
     "--max-frames: the frame count must be a positive whole number.*Usage: engine_player"
-    "" --max-frames 0)
-expect_player(unknown_option 1 "--bogus: unknown option" "" --bogus)
+    "" --headless --max-frames 0)
+expect_player(unknown_option 1 "--bogus: unknown option" "" --headless --bogus)
 
 # A project like the sample whose startup scene is not a scene.
 set(broken "${SCRATCH}/broken")

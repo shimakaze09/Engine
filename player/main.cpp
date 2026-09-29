@@ -6,8 +6,9 @@
 // with the project's name; --headless runs it without a window and
 // --max-frames stops it after that many frames, for tests and servers. It
 // prints to the terminal it was started from, if any, and says why in an
-// error box when it cannot start. On the web it is the shared page, whose
-// content is preloaded at the engine's default paths.
+// error box when it cannot start (on the terminal alone when headless). On
+// the web it is the shared page, whose content is preloaded at the
+// engine's default paths.
 
 #include "engine/core/command_line.h"
 #include "engine/core/logging.h"
@@ -17,6 +18,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 
 namespace {
 
@@ -29,17 +31,32 @@ constexpr const char *kUsage =
     "Usage: engine_player [--headless] [--max-frames <count>] [<project "
     "directory or .project file>]";
 
-/// Says why the player cannot start, on the terminal and in an error box,
-/// naming the log when there is one, and returns the bootstrap failure
-/// code.
-int fail_to_start(const char *title, const char *message) noexcept {
+/// Says why the player cannot start on the terminal and, unless the run is
+/// headless (no one is there to dismiss a box, as in a test or on a
+/// server), in an error box, naming the log when there is one. Returns the
+/// bootstrap failure code.
+int fail_to_start(const char *title, const char *message,
+                  bool headless) noexcept {
   char text[1024] = {};
   const char *logPath = engine::core::log_file_path();
   std::snprintf(text, sizeof(text), "%s%s%s", message,
                 (logPath[0] != '\0') ? "\n\nThe log says why:\n" : "", logPath);
   std::fprintf(stderr, "%s\n", text);
-  engine::core::platform_show_error_box(title, text);
+  if (!headless) {
+    engine::core::platform_show_error_box(title, text);
+  }
   return static_cast<int>(engine::ExitCode::BootstrapFailed);
+}
+
+/// True when "--headless" is among the arguments, read before the command
+/// line is parsed so a line the parser refuses still honours it.
+bool asks_headless(int argc, char **argv) noexcept {
+  for (int i = 1; i < argc; ++i) {
+    if ((argv[i] != nullptr) && (std::strcmp(argv[i], "--headless") == 0)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /// Reads a frame count: a positive decimal that fits 32 bits, nothing
@@ -71,6 +88,7 @@ bool parse_frame_count(const char *text, std::uint32_t *out) noexcept {
 /// Runs the player.
 int main(int argc, char **argv) {
   static_cast<void>(engine::core::platform_attach_parent_console());
+  const bool headless = asks_headless(argc, argv);
 
   const auto commandLine = engine::core::parse_command_line(
       argc, argv, kOptions, sizeof(kOptions) / sizeof(kOptions[0]), 1U);
@@ -92,7 +110,9 @@ int main(int argc, char **argv) {
     std::snprintf(message, sizeof(message), "%s: %s\n\n%s", badArgument, reason,
                   kUsage);
     std::fprintf(stderr, "%s\n", message);
-    engine::core::platform_show_error_box("Engine Player", message);
+    if (!headless) {
+      engine::core::platform_show_error_box("Engine Player", message);
+    }
     return static_cast<int>(engine::ExitCode::BootstrapFailed);
   }
 
@@ -101,7 +121,7 @@ int main(int argc, char **argv) {
   static engine::ProjectStorage project{};
   engine::EngineConfig config{};
   config.playerMode = true;
-  config.core.platform.headless = commandLine->has("headless");
+  config.core.platform.headless = headless;
   char bundled[600] = {};
   const char *projectPath = commandLine->positional(0U);
   if ((projectPath == nullptr) &&
@@ -116,14 +136,14 @@ int main(int argc, char **argv) {
       std::snprintf(message, sizeof(message),
                     "The game could not be opened.\n\n%.400s: %s", projectPath,
                     engine::project_open_failure_text(opened.error().kind));
-      return fail_to_start(title, message);
+      return fail_to_start(title, message, headless);
     }
     title = project.document.name;
   }
   config.core.platform.title = title;
 
   if (!engine::bootstrap(config)) {
-    return fail_to_start(title, "The game could not start.");
+    return fail_to_start(title, "The game could not start.", headless);
   }
   char running[256] = {};
   std::snprintf(running, sizeof(running), "player: running '%s'", title);
