@@ -410,6 +410,17 @@ Current scripting/runtime support in the tree includes:
   simulation steps, not rendered frames), and `engine.wait_until()`
 - Sandbox, generated binding, and hot-reload coverage in integration tests
 
+Scripts run sandboxed: `io`, `os`, `debug` and `package` are not there, all
+scripts share a budget of Lua instructions per frame (1,000,000 by default;
+a script that runs past it stops with an error rather than freezing the
+game), and the Lua allocator is capped (64 MiB by default). A project sets
+its own limits in Edit > Project Settings..., 0 for unlimited; they are
+saved in its `.project` document (an optional `"scripting"` object with
+`instructionLimit` and `memoryLimitMiB`, left out while both are the
+defaults), take effect at once, and apply wherever the project runs,
+editor or player (`engine_unit_editor_project_settings`,
+`engine_integration_project_open`).
+
 The scripting surface is still evolving. Some APIs are generated from annotated accessors, while the hand-written surface lives in domain binding translation units under `scripting/src/` (entity lifecycle, body, mesh/material, physics, lights, camera, audio, input, timers, coroutines, and more).
 
 ## Assets and mesh conversion

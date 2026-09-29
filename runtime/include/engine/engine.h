@@ -2,9 +2,11 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 #include "engine/core/bootstrap.h"
+#include "engine/scripting/script_limits.h"
 
 namespace engine {
 
@@ -44,6 +46,12 @@ struct EngineConfig final {
   /// to the back buffer. The app.player_mode cvar also enables it (the
   /// web share page's default, seeded through ENGINE_CVAR_app_player_mode).
   bool playerMode = false;
+  /// The Lua sandbox limits the run starts with, applied before the VM is
+  /// created: the instruction budget every script shares per frame and the
+  /// allocator's byte cap, 0 unlimited for both. open_project sets them
+  /// from the project's document.
+  int scriptInstructionLimit = scripting::kDefaultInstructionLimit;
+  std::size_t scriptMemoryLimitBytes = scripting::kDefaultMemoryLimit;
   /// Mix audio into no device; a headless platform forces this on, the
   /// way it forces the null render device.
   bool audioNullDevice = false;

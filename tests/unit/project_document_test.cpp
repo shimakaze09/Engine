@@ -6,7 +6,9 @@
 //   and leaving the caller's document untouched;
 // - the scene list holds 1 to kMaxProjectScenes;
 // - a truncated file, an absent file and an oversized file are each
-//   reported as what they are.
+//   reported as what they are;
+// - the optional script limits read and write exactly, stay out of a
+//   document that sets none, and are refused outside their range.
 
 #include "engine/content/project_document.h"
 
@@ -290,9 +292,127 @@ void check_file_outcomes(engine::tests::TestContext &t) {
 
 } // namespace
 
+/// The reference document with `scripting` appended as its last member.
+std::string with_scripting(const char *scripting) {
+  return replaced(reference_text(), "\"assets/main.lua\"\n}",
+                  (std::string("\"assets/main.lua\",\n  \"scripting\": ") +
+                   scripting + "\n}")
+                      .c_str());
+}
+
+void check_script_limits(engine::tests::TestContext &t) {
+  std::unique_ptr<char[]> out(
+      new (std::nothrow) char[ct::kMaxProjectDocumentBytes]);
+  std::size_t length = 0U;
+
+  const std::string plain = reference_text();
+  std::unique_ptr<ct::ProjectDocument> none = fresh();
+  t.check(ct::parse_project_document(plain.data(), plain.size(), none.get())
+                  .has_value() &&
+              !none->scriptLimits.instructionLimitSet &&
+              !none->scriptLimits.memoryLimitSet,
+          "a document with no scripting section sets no limit");
+
+  const std::string both =
+      with_scripting("{\n    \"instructionLimit\": 2500000,\n    "
+                     "\"memoryLimitMiB\": 128\n  }");
+  std::unique_ptr<ct::ProjectDocument> set = fresh();
+  t.check(ct::parse_project_document(both.data(), both.size(), set.get())
+                  .has_value() &&
+              set->scriptLimits.instructionLimitSet &&
+              (set->scriptLimits.instructionLimit == 2500000U) &&
+              set->scriptLimits.memoryLimitSet &&
+              (set->scriptLimits.memoryLimitMiB == 128U),
+          "both limits read back as written");
+  t.check(ct::format_project_document(*set, out.get(),
+                                      ct::kMaxProjectDocumentBytes, &length) &&
+              (std::string(out.get(), length) == both),
+          "a document setting both limits writes exactly its text");
+
+  const std::string memoryOnly =
+      with_scripting("{\n    \"memoryLimitMiB\": 0\n  }");
+  std::unique_ptr<ct::ProjectDocument> one = fresh();
+  t.check(ct::parse_project_document(memoryOnly.data(), memoryOnly.size(),
+                                     one.get())
+                  .has_value() &&
+              !one->scriptLimits.instructionLimitSet &&
+              one->scriptLimits.memoryLimitSet &&
+              (one->scriptLimits.memoryLimitMiB == 0U) &&
+              ct::format_project_document(
+                  *one, out.get(), ct::kMaxProjectDocumentBytes, &length) &&
+              (std::string(out.get(), length) == memoryOnly),
+          "one limit, 0 for unlimited, round-trips alone");
+
+  struct Bound final {
+    const char *scripting;
+    bool accepted;
+    const char *field;
+  };
+  const Bound bounds[] = {
+      {"{\"instructionLimit\": 0}", true, ""},
+      {"{\"instructionLimit\": 100000}", true, ""},
+      {"{\"instructionLimit\": 99999}", false, "scripting.instructionLimit"},
+      {"{\"instructionLimit\": 1}", false, "scripting.instructionLimit"},
+      {"{\"instructionLimit\": 1000000000}", true, ""},
+      {"{\"instructionLimit\": 1000000001}", false,
+       "scripting.instructionLimit"},
+      {"{\"memoryLimitMiB\": 16}", true, ""},
+      {"{\"memoryLimitMiB\": 15}", false, "scripting.memoryLimitMiB"},
+      {"{\"memoryLimitMiB\": 2048}", true, ""},
+      {"{\"memoryLimitMiB\": 2049}", false, "scripting.memoryLimitMiB"},
+  };
+  for (const Bound &bound : bounds) {
+    const std::string text = with_scripting(bound.scripting);
+    std::unique_ptr<ct::ProjectDocument> document = fresh();
+    const bool accepted =
+        ct::parse_project_document(text.data(), text.size(), document.get())
+            .has_value();
+    char label[160] = {};
+    std::snprintf(label, sizeof(label), "%s is %s", bound.scripting,
+                  bound.accepted ? "accepted" : "refused");
+    t.check(bound.accepted ? accepted : refused_for(text, bound.field), label);
+  }
+
+  t.check(refused_for(with_scripting("{}"), "scripting"),
+          "an empty scripting section is refused; omit it instead");
+  t.check(refused_for(with_scripting("5"), "scripting"),
+          "a scripting section that is not an object is refused");
+  t.check(
+      refused_for(with_scripting("{\"cpuLimit\": 5}"), "scripting.cpuLimit"),
+      "an unknown scripting key is refused");
+  t.check(refused_for(with_scripting("{\"memoryLimitMiB\": 64, "
+                                     "\"memoryLimitMiB\": 64}"),
+                      "scripting.memoryLimitMiB"),
+          "a repeated scripting key is refused");
+  t.check(refused_for(with_scripting("{\"instructionLimit\": 150000.5}"),
+                      "scripting.instructionLimit"),
+          "a fractional limit is refused");
+  t.check(refused_for(with_scripting("{\"instructionLimit\": \"150000\"}"),
+                      "scripting.instructionLimit"),
+          "a limit written as a string is refused");
+  t.check(refused_for(with_scripting("{\"memoryLimitMiB\": -64}"),
+                      "scripting.memoryLimitMiB"),
+          "a negative limit is refused");
+  t.check(refused_for(with_scripting("{\"memoryLimitMiB\": 4294967360}"),
+                      "scripting.memoryLimitMiB"),
+          "a limit past 32 bits is refused, not wrapped");
+
+  std::unique_ptr<ct::ProjectDocument> invalid = fresh();
+  t.check(ct::parse_project_document(plain.data(), plain.size(), invalid.get())
+              .has_value(),
+          "the reference parses for the writer check");
+  invalid->scriptLimits.memoryLimitSet = true;
+  invalid->scriptLimits.memoryLimitMiB = 8U;
+  t.check(!ct::format_project_document(*invalid, out.get(),
+                                       ct::kMaxProjectDocumentBytes, &length) &&
+              (out[0] == '\0'),
+          "the writer refuses a limit its reader would refuse");
+}
+
 int main() {
   engine::tests::TestContext t;
   check_round_trip(t);
+  check_script_limits(t);
   check_refusals(t);
   check_scene_bounds(t);
   check_file_outcomes(t);

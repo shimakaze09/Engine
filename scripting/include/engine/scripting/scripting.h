@@ -237,19 +237,22 @@ void reset_run_state() noexcept;
 void bind_game_state(GameBindingState *state) noexcept;
 
 // --- Sandbox configuration ---
-// Enable or disable the Lua sandbox (restricted globals, CPU/memory limits).
+// Enable or disable enforcing the two limits below. The unsafe libraries
+// (io, os, debug, package) are never opened, whatever this is set to.
 void set_sandbox_enabled(bool enabled) noexcept;
 /// Returns whether is sandbox enabled.
 bool is_sandbox_enabled() noexcept;
 
-// CPU instruction budget per frame, shared across all dispatches,
+// CPU instruction budget per frame (kDefaultInstructionLimit in
+// script_limits.h until set), shared across all dispatches,
 // coroutines, and hooks; refilled when the published clock's frame index
 // changes (0 = unlimited).
 void set_instruction_limit(int limit) noexcept;
 /// Current per-frame shared Lua instruction cap (0 = unlimited).
 int get_instruction_limit() noexcept;
 
-// Memory limit for the Lua allocator in bytes (0 = unlimited).
+// Memory limit for the Lua allocator in bytes (0 = unlimited;
+// kDefaultMemoryLimit in script_limits.h until set).
 void set_memory_limit(std::size_t limit) noexcept;
 /// Current Lua allocator byte cap (0 = unlimited).
 std::size_t get_memory_limit() noexcept;

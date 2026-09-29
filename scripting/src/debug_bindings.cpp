@@ -3,6 +3,7 @@
 #include "debug_bindings.h"
 
 #include "dap_server_internal.h"
+#include "engine/scripting/script_limits.h"
 
 extern "C" {
 #include "lauxlib.h"
@@ -36,7 +37,6 @@ struct DebugBreakpoint final {
 };
 
 constexpr std::size_t kMaxDebugWatches = 32U;
-constexpr int kDefaultInstructionLimit = 1000000;
 constexpr int kInstructionQuantum = 1000;
 
 lua_State *g_hookState = nullptr;
