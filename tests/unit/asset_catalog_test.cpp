@@ -841,6 +841,67 @@ void test_labels_become_tags() noexcept {
   std::filesystem::remove_all(kLabelRoot, ec);
 }
 
+/// A package's asset that claims the identity of an asset in a mount
+/// catalogued before it (the project's, here) fails the package's walk,
+/// naming it; the project's own keeps resolving to the project's asset,
+/// and two mounts with distinct identities index cleanly together.
+void test_identity_claimed_across_mounts() noexcept {
+  constexpr const char *kProjectRoot = "asset_catalog_cross_project";
+  constexpr const char *kPackageRoot = "asset_catalog_cross_package";
+  std::error_code ec{};
+  std::filesystem::remove_all(kProjectRoot, ec);
+  std::filesystem::remove_all(kPackageRoot, ec);
+  std::unique_ptr<engine::content::AssetCatalog> store(
+      new (std::nothrow) engine::content::AssetCatalog());
+  if (store == nullptr) {
+    g_tests.fail("the cross-mount store could be allocated");
+    return;
+  }
+  check(write_file(std::filesystem::path(kProjectRoot) / "scripts/hop.lua") &&
+            write_file(std::filesystem::path(kPackageRoot) / "lib/util.lua"),
+        "a project and a package tree are written");
+  const engine::content::AssetGuid projectGuid =
+      identify(std::filesystem::path(kProjectRoot), "scripts/hop.lua");
+  static_cast<void>(
+      identify(std::filesystem::path(kPackageRoot), "lib/util.lua"));
+
+  engine::content::MountRegistration project =
+      engine::content::register_mounted_assets(store.get(), "assets",
+                                               kProjectRoot);
+  engine::content::MountRegistration package =
+      engine::content::register_mounted_assets(store.get(), "packages/util",
+                                               kPackageRoot);
+  check(project.ok && package.ok && (package.duplicateRefs == 0U) &&
+            (package.registered == 1U),
+        "two mounts with distinct identities index cleanly together");
+
+  // The package's sidecar is a copy of the project's: one GUID, two
+  // mounts.
+  engine::content::clear_asset_catalog(store.get());
+  std::filesystem::copy_file(
+      std::filesystem::path(kProjectRoot) / "scripts/hop.lua.meta",
+      std::filesystem::path(kPackageRoot) / "lib/util.lua.meta",
+      std::filesystem::copy_options::overwrite_existing, ec);
+  project = engine::content::register_mounted_assets(store.get(), "assets",
+                                                     kProjectRoot);
+  package = engine::content::register_mounted_assets(
+      store.get(), "packages/util", kPackageRoot);
+  check(!ec && project.ok, "the project's own walk is clean");
+  check(!package.ok && (package.duplicateRefs == 1U),
+        "a package asset claiming a project asset's identity fails the "
+        "package's walk, naming it");
+  engine::core::AssetRef ref{};
+  ref.guid = projectGuid;
+  const engine::content::AssetMetadata *resolved =
+      engine::content::find_asset_metadata_by_ref(store.get(), ref);
+  check((resolved != nullptr) && (std::strcmp(resolved->filePath.data(),
+                                              "assets/scripts/hop.lua") == 0),
+        "the identity still resolves to the project's asset");
+
+  std::filesystem::remove_all(kProjectRoot, ec);
+  std::filesystem::remove_all(kPackageRoot, ec);
+}
+
 int main() {
   if (!build_tree()) {
     g_tests.fail("the temporary asset tree could be written");
@@ -865,6 +926,7 @@ int main() {
   test_cook_dependencies_become_edges();
   test_large_project_mounts_whole();
   test_labels_become_tags();
+  test_identity_claimed_across_mounts();
 
   remove_tree();
   return g_tests.finish("asset catalog tests");

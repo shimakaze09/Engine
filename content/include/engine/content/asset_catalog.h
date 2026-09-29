@@ -267,8 +267,9 @@ struct MountRegistration final {
 /// images), so a change to one reaches it through notify_asset_changed.
 ///
 /// Validates identity as it goes and fails closed: an asset with no
-/// identity, two assets claiming one, and two paths differing only by
-/// case are each reported by path and clear `ok`. Indexing is where
+/// identity, two assets claiming one (in this mount, or one here and one
+/// in a mount catalogued earlier), and two paths differing only by case
+/// are each reported by path and clear `ok`. Indexing is where
 /// these have to be caught — the CI gate catches them before they are
 /// committed, but a project assembled on a machine is not obliged to
 /// have gone through CI, and silently accepting a nil identity means a

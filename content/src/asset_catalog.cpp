@@ -151,6 +151,12 @@ std::vector<std::size_t> sorted_indices(std::size_t count, Less less) {
   return order;
 }
 
+/// Orders refs by GUID then local id, for sorting and binary search.
+bool ref_less(const AssetRef &a, const AssetRef &b) noexcept {
+  const int guid = std::memcmp(&a.guid, &b.guid, sizeof(a.guid));
+  return (guid != 0) ? (guid < 0) : (a.localId < b.localId);
+}
+
 /// Names every path in every set of entries that share an AssetRef, and
 /// returns how many entries were involved. Never picks a winner: a
 /// duplicate identity is an error to repair, and choosing between them
@@ -158,10 +164,7 @@ std::vector<std::size_t> sorted_indices(std::size_t count, Less less) {
 /// it linear-logarithmic in the size of the mount.
 std::size_t report_duplicate_refs(const std::vector<RegisteredEntry> &entries) {
   const auto refLess = [&entries](std::size_t lhs, std::size_t rhs) {
-    const AssetRef &a = entries[lhs].ref;
-    const AssetRef &b = entries[rhs].ref;
-    const int guid = std::memcmp(&a.guid, &b.guid, sizeof(a.guid));
-    return (guid != 0) ? (guid < 0) : (a.localId < b.localId);
+    return ref_less(entries[lhs].ref, entries[rhs].ref);
   };
   const std::vector<std::size_t> order =
       sorted_indices(entries.size(), refLess);
@@ -192,6 +195,61 @@ std::size_t report_duplicate_refs(const std::vector<RegisteredEntry> &entries) {
       }
     }
     start = end;
+  }
+  return offenders;
+}
+
+/// Every identity the catalog held before this mount was walked, with the
+/// path that holds it, sorted by ref: another mount's assets (the engine's,
+/// the project's, an earlier package's) that a new asset must not claim.
+std::vector<RegisteredEntry> snapshot_prior_refs(const AssetCatalog *catalog) {
+  std::vector<RegisteredEntry> prior{};
+  const std::size_t count = asset_catalog_record_count(catalog);
+  prior.reserve(count);
+  for (std::size_t i = 0U; i < count; ++i) {
+    const AssetMetadata *record = asset_catalog_record(catalog, i);
+    if ((record != nullptr) && asset_ref_is_valid(record->ref)) {
+      prior.push_back(
+          RegisteredEntry{std::string(record->filePath.data()), record->ref});
+    }
+  }
+  std::sort(prior.begin(), prior.end(),
+            [](const RegisteredEntry &a, const RegisteredEntry &b) {
+              return ref_less(a.ref, b.ref);
+            });
+  return prior;
+}
+
+/// Names every asset this walk registered whose identity an asset of an
+/// earlier mount already holds, and returns how many there were. Two
+/// mounts are separate directories, so a GUID in both is a copied
+/// sidecar, and a reference to it would resolve to whichever was
+/// catalogued first.
+std::size_t
+report_refs_held_elsewhere(const std::vector<RegisteredEntry> &prior,
+                           const std::vector<RegisteredEntry> &registered) {
+  std::size_t offenders = 0U;
+  for (const RegisteredEntry &entry : registered) {
+    if (!asset_ref_is_valid(entry.ref)) {
+      continue;
+    }
+    const auto found =
+        std::lower_bound(prior.begin(), prior.end(), entry.ref,
+                         [](const RegisteredEntry &held, const AssetRef &ref) {
+                           return ref_less(held.ref, ref);
+                         });
+    if ((found == prior.end()) || !(found->ref == entry.ref)) {
+      continue;
+    }
+    char message[512] = {};
+    std::snprintf(message, sizeof(message),
+                  "asset catalog: claims the identity of %s, from another "
+                  "mount; give one of them a new identity rather than "
+                  "letting references resolve to whichever indexed first",
+                  found->virtualPath.c_str());
+    core::log_path_diagnostic(core::LogLevel::Error, "assets",
+                              entry.virtualPath.c_str(), message);
+    ++offenders;
   }
   return offenders;
 }
@@ -279,8 +337,10 @@ MountRegistration register_mounted_assets(AssetCatalog *catalog,
       build_provenance_index(osRoot, mountPrefix, provenance.get()));
 
   // Collected so identity can be validated across the whole mount once
-  // the walk has seen every asset, rather than per file.
+  // the walk has seen every asset, rather than per file, and against the
+  // mounts catalogued before it.
   std::vector<RegisteredEntry> registered{};
+  const std::vector<RegisteredEntry> prior = snapshot_prior_refs(catalog);
 
   const std::filesystem::recursive_directory_iterator end{};
   for (; it != end; it.increment(ec)) {
@@ -378,7 +438,8 @@ MountRegistration register_mounted_assets(AssetCatalog *catalog,
     }
   }
 
-  result.duplicateRefs = report_duplicate_refs(registered);
+  result.duplicateRefs = report_duplicate_refs(registered) +
+                         report_refs_held_elsewhere(prior, registered);
   result.caseCollisions = report_case_collisions(registered);
   result.ok = (result.refused == 0U) && (result.unidentified == 0U) &&
               (result.duplicateRefs == 0U) && (result.caseCollisions == 0U);
