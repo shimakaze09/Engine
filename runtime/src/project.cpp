@@ -180,6 +180,10 @@ open_project(const char *path, ProjectStorage *storage,
   config->editorAssetRoot = storage->contentRoot;
   config->editorScenePath = storage->document.startupScene;
   config->mainScriptPath = storage->document.mainScript;
+  const ScriptLimits limits =
+      project_script_limits(storage->document.scriptLimits);
+  config->scriptInstructionLimit = limits.instructionLimit;
+  config->scriptMemoryLimitBytes = limits.memoryLimitBytes;
   config->core.projectGuid = storage->document.guid;
 
   char message[512] = {};
@@ -187,6 +191,19 @@ open_project(const char *path, ProjectStorage *storage,
                 storage->document.name, storage->projectFile);
   core::log_message(core::LogLevel::Info, kLogChannel, message);
   return {};
+}
+
+ScriptLimits
+project_script_limits(const content::ProjectScriptLimits &limits) noexcept {
+  ScriptLimits result{};
+  if (limits.instructionLimitSet) {
+    result.instructionLimit = static_cast<int>(limits.instructionLimit);
+  }
+  if (limits.memoryLimitSet) {
+    result.memoryLimitBytes =
+        static_cast<std::size_t>(limits.memoryLimitMiB) * 1024U * 1024U;
+  }
+  return result;
 }
 
 const char *project_open_failure_text(ProjectOpenFailureKind kind) noexcept {
@@ -220,6 +237,9 @@ void configure_without_project(EngineConfig *config) noexcept {
   config->editorAssetRoot = "";
   config->editorScenePath = "";
   config->mainScriptPath = "";
+  const ScriptLimits defaults{};
+  config->scriptInstructionLimit = defaults.instructionLimit;
+  config->scriptMemoryLimitBytes = defaults.memoryLimitBytes;
   config->core.projectGuid = core::AssetGuid{};
 }
 

@@ -437,6 +437,11 @@ bool bootstrap(const EngineConfig &config) noexcept {
     open_stage(&close_editor_bridge);
   }
 
+  // The limits persist across VMs, so every run sets its own before the
+  // VM exists: the allocator enforces the byte cap from state creation,
+  // and a previous run's project must not leak its limits into this one.
+  scripting::set_memory_limit(g_activeConfig.scriptMemoryLimitBytes);
+  scripting::set_instruction_limit(g_activeConfig.scriptInstructionLimit);
   if (consume_injected_failure(BootstrapStage::Scripting) ||
       !scripting::initialize_scripting()) {
     core::log_message(core::LogLevel::Error, "scripting",

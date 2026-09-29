@@ -72,22 +72,35 @@ struct ProjectOpenFailure final {
 /// document, or the document itself. On success fills `*storage` and
 /// points `*config`'s content fields at it: the assets mount and its root,
 /// the .project file, the editor's asset root and startup scene, the main
-/// script, and the project GUID that names its per-user data. Every other
-/// config field is
-/// left as the caller set it. On failure logs an Error naming the path and
-/// the reason, and leaves `*storage` and `*config` untouched. Cold path:
-/// resolves paths through std::filesystem.
+/// script, the script limits, and the project GUID that names its
+/// per-user data. Every other config field is left as the caller set it. On
+/// failure logs an Error naming the path and the reason, and leaves `*storage`
+/// and `*config` untouched. Cold path: resolves paths through std::filesystem.
 std::expected<void, ProjectOpenFailure>
 open_project(const char *path, ProjectStorage *storage,
              EngineConfig *config) noexcept;
+
+/// The Lua limits a project runs under.
+struct ScriptLimits final {
+  /// Instructions all scripts share per frame; 0 is unlimited.
+  int instructionLimit = scripting::kDefaultInstructionLimit;
+  /// Bytes the Lua allocator may hold; 0 is unlimited.
+  std::size_t memoryLimitBytes = scripting::kDefaultMemoryLimit;
+};
+
+/// The limits a project's document asks for: each limit it sets, and the
+/// engine's default for each it leaves unset.
+ScriptLimits
+project_script_limits(const content::ProjectScriptLimits &limits) noexcept;
 
 /// A short English description of `kind`, for a tool's error line.
 const char *project_open_failure_text(ProjectOpenFailureKind kind) noexcept;
 
 /// Points `*config` at no project: empties the asset root, the .project
 /// file, the editor's asset root and startup scene and the main script,
-/// and clears the project GUID, so bootstrap mounts only the engine's
-/// content. Every other field is left as the caller set it.
+/// restores the default script limits, and clears the project GUID, so
+/// bootstrap mounts only the engine's content. Every other field is left as the
+/// caller set it.
 void configure_without_project(EngineConfig *config) noexcept;
 
 /// Why a project was not created.

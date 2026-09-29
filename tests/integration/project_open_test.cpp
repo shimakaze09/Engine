@@ -4,8 +4,11 @@
 // project file, two documents, a malformed document, a missing content
 // root, startup scene or main script) names its reason and leaves the
 // caller's storage and config untouched; and a project opened this way
-// bootstraps headless with its per-user data named by its GUID. The
-// bundled sample project opens and its document is in canonical form.
+// bootstraps headless with its per-user data named by its GUID. A
+// project's script limits reach the config (the engine's defaults where it
+// sets none, whatever the caller held) and the running VM at bootstrap,
+// and a later run of a project that sets none is back on the defaults.
+// The bundled sample project opens and its document is in canonical form.
 
 #include "engine/project.h"
 
@@ -21,6 +24,8 @@
 #include "engine/content/project_document.h"
 #include "engine/core/logging.h"
 #include "engine/core/project_data.h"
+#include "engine/scripting/script_limits.h"
+#include "engine/scripting/scripting.h"
 
 namespace {
 
@@ -84,6 +89,8 @@ struct Untouched final {
            (config.editorScenePath == defaults.editorScenePath) &&
            (config.mainScriptPath == defaults.mainScriptPath) &&
            !engine::core::asset_guid_is_valid(config.core.projectGuid) &&
+           (config.scriptInstructionLimit == defaults.scriptInstructionLimit) &&
+           (config.scriptMemoryLimitBytes == defaults.scriptMemoryLimitBytes) &&
            (std::strcmp(storage.contentRoot, "before") == 0) &&
            (storage.document.name[0] == '\0');
   }
@@ -255,6 +262,93 @@ void test_bootstrap(const fs::path &root) {
   engine::shutdown();
 }
 
+/// A project that sets limits, in `dir`: 2,500,000 instructions and an
+/// unlimited allocator.
+bool make_limited_project(const fs::path &dir) {
+  if (!make_project(dir, false)) {
+    return false;
+  }
+  engine::content::ProjectDocument doc = make_document("");
+  doc.scriptLimits.instructionLimitSet = true;
+  doc.scriptLimits.instructionLimit = 2500000U;
+  doc.scriptLimits.memoryLimitSet = true;
+  doc.scriptLimits.memoryLimitMiB = 0U;
+  const std::string file = (dir / "Island.project").string();
+  return engine::content::write_project_document(file.c_str(), doc);
+}
+
+bool bootstrap_headless(engine::EngineConfig config) {
+  config.core.platform.headless = true;
+  const std::string engineRoot = engine::tests::engine_root_path();
+  config.engineRoot = engineRoot.c_str();
+  config.bootstrapMeshPath = "project_open_missing.mesh";
+  return engine::bootstrap(config);
+}
+
+void test_script_limits(const fs::path &root) {
+  namespace sc = engine::scripting;
+  const fs::path plainDir = root / "plain";
+  const fs::path limitedDir = root / "limited";
+  g_tests.check(make_project(plainDir, false) &&
+                    make_limited_project(limitedDir),
+                "write a project with limits and one without");
+  const std::string plainText = plainDir.string();
+  const std::string limitedText = limitedDir.string();
+
+  engine::EngineConfig plain{};
+  plain.scriptInstructionLimit = 5;
+  plain.scriptMemoryLimitBytes = 5U;
+  engine::ProjectStorage plainStorage{};
+  g_tests.check(
+      engine::open_project(plainText.c_str(), &plainStorage, &plain)
+              .has_value() &&
+          (plain.scriptInstructionLimit == sc::kDefaultInstructionLimit) &&
+          (plain.scriptMemoryLimitBytes == sc::kDefaultMemoryLimit),
+      "a project setting no limits runs at the engine's defaults, not at "
+      "what the config held");
+
+  engine::EngineConfig limited{};
+  engine::ProjectStorage limitedStorage{};
+  g_tests.check(
+      engine::open_project(limitedText.c_str(), &limitedStorage, &limited)
+              .has_value() &&
+          (limited.scriptInstructionLimit == 2500000) &&
+          (limited.scriptMemoryLimitBytes == 0U),
+      "a project's own limits reach the config");
+
+  engine::EngineConfig cleared = limited;
+  engine::configure_without_project(&cleared);
+  g_tests.check(
+      (cleared.scriptInstructionLimit == sc::kDefaultInstructionLimit) &&
+          (cleared.scriptMemoryLimitBytes == sc::kDefaultMemoryLimit),
+      "no project restores the default limits");
+
+  const engine::content::ProjectScriptLimits memoryOnly{false, 0U, true, 32U};
+  const engine::ScriptLimits resolved =
+      engine::project_script_limits(memoryOnly);
+  g_tests.check((resolved.instructionLimit == sc::kDefaultInstructionLimit) &&
+                    (resolved.memoryLimitBytes == 32U * 1024U * 1024U),
+                "one limit set leaves the other at its default");
+
+  if (!bootstrap_headless(limited)) {
+    g_tests.fail("the project with limits bootstraps headless");
+    return;
+  }
+  g_tests.check((sc::get_instruction_limit() == 2500000) &&
+                    (sc::get_memory_limit() == 0U),
+                "bootstrap puts the project's limits on the running VM");
+  engine::shutdown();
+  if (!bootstrap_headless(plain)) {
+    g_tests.fail("the project without limits bootstraps headless");
+    return;
+  }
+  g_tests.check((sc::get_instruction_limit() == sc::kDefaultInstructionLimit) &&
+                    (sc::get_memory_limit() == sc::kDefaultMemoryLimit),
+                "the next run, of a project setting none, is back on the "
+                "defaults");
+  engine::shutdown();
+}
+
 /// The bundled sample project opens, and its document is exactly what the
 /// codec writes for it, so a hand edit cannot drift from the format.
 void test_bundled_sample() {
@@ -295,6 +389,7 @@ int main() {
   test_bundled_sample();
   engine::core::shutdown_logging();
   test_bootstrap(root);
+  test_script_limits(root);
 
   fs::remove_all(root, ec);
   return g_tests.finish("project_open");
