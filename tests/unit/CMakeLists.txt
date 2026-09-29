@@ -2559,9 +2559,10 @@ engine_add_test_executable(engine_unit_editor_entity_clipboard
     SDL_MAIN_HANDLED
 )
 
-# The editor runs without a terminal on each desktop platform: read
-# from engine_editor_app's own build properties.
-if(TARGET engine_editor_app AND NOT (ENGINE_TARGET_PLATFORM STREQUAL "Web"))
+# The editor and the player run without a terminal on each desktop
+# platform: read from each target's own build properties.
+if(TARGET engine_editor_app AND TARGET engine_player
+   AND NOT (ENGINE_TARGET_PLATFORM STREQUAL "Web"))
     engine_add_test_executable(engine_unit_app_gui_target
         SOURCES
         app_gui_target_test.cpp
@@ -2571,5 +2572,8 @@ if(TARGET engine_editor_app AND NOT (ENGINE_TARGET_PLATFORM STREQUAL "Web"))
         "ENGINE_APP_WIN32_EXECUTABLE=$<BOOL:$<TARGET_PROPERTY:engine_editor_app,WIN32_EXECUTABLE>>"
         "ENGINE_APP_MACOSX_BUNDLE=$<BOOL:$<TARGET_PROPERTY:engine_editor_app,MACOSX_BUNDLE>>"
         "ENGINE_APP_DESKTOP_FILE=\"$<TARGET_FILE_DIR:engine_editor_app>/engine_editor_app.desktop\""
+        "ENGINE_PLAYER_WIN32_EXECUTABLE=$<BOOL:$<TARGET_PROPERTY:engine_player,WIN32_EXECUTABLE>>"
+        "ENGINE_PLAYER_MACOSX_BUNDLE=$<BOOL:$<TARGET_PROPERTY:engine_player,MACOSX_BUNDLE>>"
+        "ENGINE_PLAYER_DESKTOP_FILE=\"$<TARGET_FILE_DIR:engine_player>/engine_player.desktop\""
     )
 endif()

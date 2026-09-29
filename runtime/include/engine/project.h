@@ -77,4 +77,11 @@ open_project(const char *path, ProjectStorage *storage,
 /// A short English description of `kind`, for a tool's error line.
 const char *project_open_failure_text(ProjectOpenFailureKind kind) noexcept;
 
+/// Writes the sample project the build puts beside the executables
+/// (`<app dir>/samples/island`) into `out`, the project the editor and the
+/// player open when none is named. False, with `out` emptied, when the
+/// executable's directory is unknown, the path does not fit `capacity`
+/// whole, or no such directory exists (an installed or web build).
+bool find_bundled_sample_project(char *out, std::size_t capacity) noexcept;
+
 } // namespace engine
