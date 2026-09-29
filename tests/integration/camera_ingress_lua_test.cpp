@@ -1,8 +1,10 @@
 // Regression for issue #393's production Lua ingress: NaN/Infinity and
 // out-of-range camera and shake parameters supplied by a script are
-// refused at the CameraManager boundary — the Lua calls return false, no
-// entry or shake activates, a valid push still works afterward, and the
-// evaluated camera stays finite.
+// refused — the Lua calls return false, no bad value reaches the camera
+// or a shake, a valid Camera still renders afterward, and the evaluated
+// camera stays finite. A script reaches a camera only through an entity
+// with a Camera component (#796): its lens and priority setters and
+// look_at are the ingress.
 
 #include <cmath>
 #include <cstdio>
@@ -13,6 +15,7 @@
 #include "engine/core/logging.h"
 #include "engine/core/service_locator.h"
 #include "engine/math/vec3.h"
+#include "engine/runtime/camera_component_update.h"
 #include "engine/runtime/camera_manager.h"
 #include "engine/runtime/scripting_bridge.h"
 #include "engine/runtime/world.h"
@@ -70,18 +73,22 @@ int main() {
       "    e = engine.spawn_entity()\n"
       "    local nan = 0.0 / 0.0\n"
       "    local inf = 1.0 / 0.0\n"
-      "    local ok = true\n"
-      "    if engine.push_camera(e, nan, 0, 0, 1, 0, 0, 1.0) ~= false then\n"
+      "    local ok = engine.add_camera_component(e, 1.0, 0.1, 100, 1.0)\n"
+      "    if engine.add_camera_component(engine.spawn_entity(), nan, 0.1,\n"
+      "        100, 1.0) ~= false then\n"
       "        ok = false\n"
       "    end\n"
-      "    if engine.push_camera(e, 0, 0, 5, inf, 0, 0, 1.0) ~= false then\n"
+      "    if engine.set_camera_component_priority(e, nan) ~= false then\n"
       "        ok = false\n"
       "    end\n"
-      "    if engine.push_camera(e, 0, 0, 5, 0, 0, 0, nan) ~= false then\n"
-      "        ok = false\n"
-      "    end\n"
-      "    if engine.push_camera(e, 0, 0, 5, 0, 0, 0, 1.0, -2.0) ~= false\n"
+      "    if engine.set_camera_component_blend_speed(e, -2.0) ~= false\n"
       "    then\n"
+      "        ok = false\n"
+      "    end\n"
+      "    if engine.look_at(e, nan, 0, 0) ~= false then\n"
+      "        ok = false\n"
+      "    end\n"
+      "    if engine.look_at(e, 0, inf, -1) ~= false then\n"
       "        ok = false\n"
       "    end\n"
       "    if engine.camera_shake(nan, 15, 1) ~= false then\n"
@@ -93,7 +100,8 @@ int main() {
       "    if engine.camera_shake(-0.1, 15, 1) ~= false then\n"
       "        ok = false\n"
       "    end\n"
-      "    if engine.push_camera(e, 0, 0, 5, 0, 0, 0, 1.0) ~= true then\n"
+      "    if engine.set_position(e, 0, 0, 5) ~= true or\n"
+      "        engine.look_at(e, 0, 0, 0) ~= true then\n"
       "        ok = false\n"
       "    end\n"
       "    local m = engine.spawn_entity()\n"
@@ -128,6 +136,7 @@ int main() {
 
   // Exactly the one valid camera survived the refusals, and evaluation
   // stays finite.
+  engine::runtime::update_persistent_cameras(*world, 0.0F);
   if ((failure == 0) &&
       (world->camera_manager().camera_count() != 1U)) {
     failure = 6;

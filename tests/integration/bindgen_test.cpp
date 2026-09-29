@@ -102,7 +102,12 @@ bool test_generated_bindings() noexcept {
       "  if type(engine.has_light(1)) ~= 'boolean' then error('has_light "
       "type') end\n"
       "\n"
-      "  engine.set_camera_fov(75.0)\n"
+      "  for _, gone in ipairs({'set_camera_fov', 'set_camera_position',\n"
+      "      'set_camera_target', 'set_camera_up', 'push_camera',\n"
+      "      'pop_camera'}) do\n"
+      "    if engine[gone] ~= nil then error(gone .. ' reaches a camera "
+      "that is not one') end\n"
+      "  end\n"
       "  engine.set_master_volume(0.5)\n"
       "  engine.stop_all_sounds()\n"
       "end\n";

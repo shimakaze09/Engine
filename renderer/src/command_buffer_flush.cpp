@@ -249,6 +249,7 @@ void flush_renderer_view(const RenderViewDesc &view,
   }
 
   if ((registry == nullptr) || !view.drawScene) {
+    backend.view().hasImage = false;
     if (gameView) {
       clear_back_buffer(dev);
     }
@@ -256,6 +257,7 @@ void flush_renderer_view(const RenderViewDesc &view,
   }
   backend.view().camera = view.camera;
   ++backend.view().renderedFrames;
+  backend.view().hasImage = true;
   const IblSelection viewIbl =
       select_view_environment(backend, viewIndex, camera.position, skyIbl);
   if (backend.staticMeshBatches.size() < opaqueCount) {

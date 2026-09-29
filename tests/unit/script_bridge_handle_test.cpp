@@ -107,11 +107,6 @@ void run(rt::World *world, const sc::RuntimeServices *services) noexcept {
   check(!services->set_movement_authority_op(world, first,
                                              rt::MovementAuthority::Script),
         "stale handle cannot take movement authority");
-  check(!services->push_camera_op(world, first, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F,
-                                  1.0F, 1.0F, 5.0F),
-        "stale handle cannot push a camera");
-  check(!services->pop_camera_op(world, first),
-        "stale handle cannot pop a camera");
   check(!services->is_sleeping(world, first),
         "stale handle is not a sleeping body");
   services->wake_body(world, first);

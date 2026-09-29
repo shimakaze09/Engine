@@ -1,6 +1,7 @@
-// Implements camera Lua bindings (active camera, camera manager stack,
-// shake, spring arms)
-// for the scripting module. Split out of scripting.cpp (REVIEW_FINDINGS A3).
+// Implements camera Lua bindings for the scripting module: reading the
+// camera that renders, shake, spring arms and Camera components. A script
+// moves a camera only by moving an entity that has a Camera component;
+// nothing here reaches a camera that is not one, or the editor's.
 
 #include "camera_bindings.h"
 
@@ -17,8 +18,9 @@ extern "C" {
 #include "lualib.h"
 }
 
-#include <cstdint>
+#include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <limits>
@@ -32,91 +34,6 @@ extern "C" {
 namespace engine::scripting {
 
 namespace {
-
-int lua_engine_set_camera_position(lua_State *state) noexcept {
-  math::Vec3 pos{};
-  if (!read_vec3_args(state, 1, &pos) || (runtime_binding().services == nullptr) ||
-      (runtime_binding().services->set_camera_position == nullptr) ||
-      reload_refuses("set_camera_position")) {
-    return 0;
-  }
-  runtime_binding().services->set_camera_position(pos.x, pos.y, pos.z);
-  return 0;
-}
-
-int lua_engine_set_camera_target(lua_State *state) noexcept {
-  math::Vec3 target{};
-  if (!read_vec3_args(state, 1, &target) || (runtime_binding().services == nullptr) ||
-      (runtime_binding().services->set_camera_target == nullptr) ||
-      reload_refuses("set_camera_target")) {
-    return 0;
-  }
-  runtime_binding().services->set_camera_target(target.x, target.y, target.z);
-  return 0;
-}
-
-int lua_engine_set_camera_up(lua_State *state) noexcept {
-  math::Vec3 up{};
-  if (!read_vec3_args(state, 1, &up) || (runtime_binding().services == nullptr) ||
-      (runtime_binding().services->set_camera_up == nullptr) ||
-      reload_refuses("set_camera_up")) {
-    return 0;
-  }
-  runtime_binding().services->set_camera_up(up.x, up.y, up.z);
-  return 0;
-}
-
-// -- Camera Manager Lua bindings ------------------------------------------
-
-// Engine.push_camera(entityIndex, posX,posY,posZ, tgtX,tgtY,tgtZ, priority
-// [, blendSpeed])
-int lua_engine_push_camera(lua_State *state) noexcept {
-  if (!runtime_bound() ||
-      (runtime_binding().services->push_camera_op == nullptr) ||
-      reload_refuses("push_camera")) {
-    lua_pushboolean(state, 0);
-    return 1;
-  }
-  runtime::Entity entity{};
-  if (!read_entity(state, 1, &entity)) {
-    lua_pushboolean(state, 0);
-    return 1;
-  }
-  const float posX = static_cast<float>(luaL_checknumber(state, 2));
-  const float posY = static_cast<float>(luaL_checknumber(state, 3));
-  const float posZ = static_cast<float>(luaL_checknumber(state, 4));
-  const float tgtX = static_cast<float>(luaL_checknumber(state, 5));
-  const float tgtY = static_cast<float>(luaL_checknumber(state, 6));
-  const float tgtZ = static_cast<float>(luaL_checknumber(state, 7));
-  const float priority = static_cast<float>(luaL_checknumber(state, 8));
-  float blendSpeed = 5.0F;
-  if (lua_isnumber(state, 9)) {
-    blendSpeed = static_cast<float>(lua_tonumber(state, 9));
-  }
-  const bool ok =
-      runtime_binding().services->push_camera_op(runtime_binding().world, entity, posX, posY, posZ, tgtX,
-                                 tgtY, tgtZ, priority, blendSpeed);
-  lua_pushboolean(state, ok ? 1 : 0);
-  return 1;
-}
-
-// Engine.pop_camera(entityIndex)
-int lua_engine_pop_camera(lua_State *state) noexcept {
-  if (!runtime_bound() ||
-      (runtime_binding().services->pop_camera_op == nullptr) ||
-      reload_refuses("pop_camera")) {
-    lua_pushboolean(state, 0);
-    return 1;
-  }
-  runtime::Entity entity{};
-  if (!read_entity(state, 1, &entity)) {
-    lua_pushboolean(state, 0);
-    return 1;
-  }
-  const bool ok = runtime_binding().services->pop_camera_op(runtime_binding().world, entity);
-  lua_pushboolean(state, ok ? 1 : 0);
-  return 1;
-}
 
 // Engine.get_active_camera() -> posX,posY,posZ, tgtX,tgtY,tgtZ, fov | nil
 int lua_engine_get_active_camera(lua_State *state) noexcept {
@@ -229,10 +146,27 @@ int lua_engine_get_spring_arm(lua_State *state) noexcept {
 // Pose always comes from the entity's Transform (never supplied here); these
 // bindings only touch fov/near/far/priority/blendSpeed/active so behaviour
 // scripts can enable/disable/select/blend authored cameras by stable entity
-// reference. fovRadians matches engine.set_camera_fov's existing convention.
+// reference. fovRadians is in radians, as the component stores it.
 
 // Engine.add_camera_component(entityIndex, fovRadians, nearPlane, farPlane,
 // priority [, blendSpeed] [, active]) -> bool
+/// The values a camera can render with, as the camera manager accepts
+/// them: finite, a near plane in front and a far one beyond it, no
+/// negative blend speed, a positive size when orthographic. A script's
+/// camera is refused here, at the setter, so a bad value never reaches the
+/// frame that would drop it.
+bool camera_component_valid(const runtime::CameraComponent &camera) noexcept {
+  if (!std::isfinite(camera.fovRadians) || !std::isfinite(camera.nearPlane) ||
+      !std::isfinite(camera.farPlane) ||
+      !std::isfinite(camera.orthographicSize) ||
+      !std::isfinite(camera.blendSpeed) || !std::isfinite(camera.priority)) {
+    return false;
+  }
+  return (camera.nearPlane > 0.0F) && (camera.farPlane > camera.nearPlane) &&
+         (camera.blendSpeed >= 0.0F) &&
+         ((camera.projection == 0U) || (camera.orthographicSize > 0.0F));
+}
+
 int lua_engine_add_camera_component(lua_State *state) noexcept {
   if (!runtime_bound()) {
     lua_pushboolean(state, 0);
@@ -269,7 +203,8 @@ int lua_engine_add_camera_component(lua_State *state) noexcept {
   if (lua_isnumber(state, 9)) {
     camera.orthographicSize = static_cast<float>(lua_tonumber(state, 9));
   }
-  const bool ok = apply_or_queue_camera_component(entity, camera);
+  const bool ok = camera_component_valid(camera) &&
+                  apply_or_queue_camera_component(entity, camera);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
@@ -339,7 +274,8 @@ bool set_camera_component_field(runtime::Entity entity,
     return false;
   }
   apply(camera);
-  return apply_or_queue_camera_component(entity, camera);
+  return camera_component_valid(camera) &&
+         apply_or_queue_camera_component(entity, camera);
 }
 
 // Engine.set_camera_component_active(entityIndex, active) -> bool
@@ -360,7 +296,7 @@ int lua_engine_set_camera_component_active(lua_State *state) noexcept {
 
 // Engine.set_camera_component_priority(entityIndex, priority) -> bool
 // The mechanism for selecting which authored camera is active: the highest
-// active priority wins CameraManager's stack (matches engine.push_camera).
+// active priority wins CameraManager's stack.
 int lua_engine_set_camera_component_priority(lua_State *state) noexcept {
   runtime::Entity entity{};
   if (!read_entity(state, 1, &entity)) {
@@ -397,16 +333,6 @@ int lua_engine_set_camera_component_blend_speed(lua_State *state) noexcept {
 /// Registers this module's engine-table bindings; expects the table at the
 /// top of the Lua stack.
 void register_camera_bindings(lua_State *state) noexcept {
-  lua_pushcfunction(state, &lua_engine_set_camera_position);
-  lua_setfield(state, -2, "set_camera_position");
-  lua_pushcfunction(state, &lua_engine_set_camera_target);
-  lua_setfield(state, -2, "set_camera_target");
-  lua_pushcfunction(state, &lua_engine_set_camera_up);
-  lua_setfield(state, -2, "set_camera_up");
-  lua_pushcfunction(state, &lua_engine_push_camera);
-  lua_setfield(state, -2, "push_camera");
-  lua_pushcfunction(state, &lua_engine_pop_camera);
-  lua_setfield(state, -2, "pop_camera");
   lua_pushcfunction(state, &lua_engine_get_active_camera);
   lua_setfield(state, -2, "get_active_camera");
   lua_pushcfunction(state, &lua_engine_camera_shake);

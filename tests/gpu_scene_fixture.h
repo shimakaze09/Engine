@@ -14,6 +14,7 @@
 #include "engine/content/asset_metadata.h"
 #include "engine/core/cvar.h"
 #include "engine/engine.h"
+#include "engine/math/quat.h"
 #include "engine/math/transform.h"
 #include "engine/renderer/mesh_primitives.h"
 #include "engine/renderer/render_device.h"
@@ -115,24 +116,28 @@ framed_floor_transform(float extent) noexcept {
   return transform;
 }
 
-/// Points the view at target from position. The blend is saturated at
-/// once, so the first frames already show this pose rather than easing
-/// toward it.
+/// Points the view at target from position: a Camera entity there, turned
+/// toward target, as a scene authors one (only a Camera renders the game).
+/// The blend is saturated at once, so the first frames already show this
+/// pose rather than easing toward it.
 inline bool look_from(engine::runtime::World &world,
                       const engine::math::Vec3 &position,
                       const engine::math::Vec3 &target) noexcept {
-  const engine::runtime::Entity owner = world.create_scene_object();
-  if (owner == engine::runtime::kInvalidEntity) {
+  engine::runtime::Transform transform{};
+  transform.position = position;
+  if (!engine::math::look_rotation(engine::math::sub(target, position),
+                                   engine::math::Vec3(0.0F, 1.0F, 0.0F),
+                                   &transform.rotation)) {
     return false;
   }
-  engine::runtime::CameraEntry entry{};
-  entry.position = position;
-  entry.target = target;
-  entry.up = engine::math::Vec3(0.0F, 1.0F, 0.0F);
-  entry.blendSpeed = 1000.0F;
-  entry.nearPlane = 0.1F;
-  entry.farPlane = 200.0F;
-  return world.camera_manager().push_camera(owner, entry, 10.0F);
+  const engine::runtime::Entity owner = world.create_scene_object(transform);
+  engine::runtime::CameraComponent camera{};
+  camera.blendSpeed = 1000.0F;
+  camera.nearPlane = 0.1F;
+  camera.farPlane = 200.0F;
+  camera.priority = 10.0F;
+  return (owner != engine::runtime::kInvalidEntity) &&
+         world.add_camera_component(owner, camera);
 }
 
 /// Runs frames so a changed cvar or scene has reached the presented image.

@@ -21,6 +21,14 @@ constexpr Entity kOwnerA{1U, 1U};
 constexpr Entity kOwnerB{2U, 1U};
 
 /// Returns whether two floats are close enough for camera tests.
+/// A spring arm places its entity's Camera: without one it publishes
+/// nothing, since only a Camera renders the game.
+bool give_camera(World &world, Entity entity) noexcept {
+  CameraComponent camera{};
+  camera.active = true;
+  return world.add_camera_component(entity, camera);
+}
+
 bool nearly(float lhs, float rhs) noexcept {
   return std::fabs(lhs - rhs) <= 0.0001F;
 }
@@ -126,6 +134,59 @@ bool test_blend_interpolation() noexcept {
   }
 
   return true;
+}
+
+/// The first camera after none was live cuts in, fully live, even with no
+/// time passing (a stopped editor evaluates with dt 0): it neither blends
+/// from the pose the last camera left nor stays stuck at weight zero, and
+/// its own later moves are followed exactly. A switch between two live
+/// cameras still blends.
+bool test_camera_after_none_cuts_in() noexcept {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  auto &cm = world->camera_manager();
+  CameraEntry first{};
+  first.position = math::Vec3(10.0F, 0.0F, 0.0F);
+  first.blendSpeed = 0.5F;
+  CameraEntry evaluated{};
+  if (!cm.push_camera(kOwnerA, first, 1.0F)) {
+    return false;
+  }
+  cm.evaluate(0.0F, &evaluated);
+  if (!cm.pop_camera(kOwnerA)) {
+    return false;
+  }
+  cm.evaluate(0.0F, &evaluated);
+
+  CameraEntry next{};
+  next.position = math::Vec3(-4.0F, 2.0F, 7.0F);
+  next.blendSpeed = 0.5F;
+  if (!cm.push_camera(kOwnerB, next, 1.0F)) {
+    return false;
+  }
+  cm.evaluate(0.0F, &evaluated);
+  if ((evaluated.position.x != -4.0F) || (evaluated.position.y != 2.0F) ||
+      (evaluated.position.z != 7.0F)) {
+    return false;
+  }
+  next.position = math::Vec3(1.0F, 1.0F, 1.0F);
+  if (!cm.push_camera(kOwnerB, next, 1.0F)) {
+    return false;
+  }
+  cm.evaluate(0.0F, &evaluated);
+  if ((evaluated.position.x != 1.0F) || (evaluated.position.y != 1.0F) ||
+      (evaluated.position.z != 1.0F)) {
+    return false;
+  }
+
+  // A second, higher camera while one is live blends, as before.
+  CameraEntry higher{};
+  higher.position = math::Vec3(21.0F, 1.0F, 1.0F);
+  higher.blendSpeed = 5.0F;
+  if (!cm.push_camera(kOwnerA, higher, 10.0F)) {
+    return false;
+  }
+  cm.evaluate(0.1F, &evaluated);
+  return (evaluated.position.x > 1.0F) && (evaluated.position.x < 21.0F);
 }
 
 bool test_camera_shake_nonzero_during_and_zero_after() noexcept {
@@ -465,7 +526,7 @@ bool test_spring_arm_updates_camera_position() noexcept {
   arm.currentLength = 8.0F;
   arm.offset = math::Vec3(0.0F, 2.0F, 0.0F);
   arm.lagSpeed = 100.0F;
-  if (!world->add_spring_arm(entity, arm)) {
+  if (!give_camera(*world, entity) || !world->add_spring_arm(entity, arm)) {
     return false;
   }
 
@@ -499,7 +560,7 @@ bool test_spring_arm_composes_rotation_and_scale() noexcept {
   arm.offset = math::Vec3(1.0F, 0.0F, 0.0F);
   arm.lagSpeed = 100.0F;
   arm.collisionEnabled = false;
-  if (!world->add_spring_arm(entity, arm)) {
+  if (!give_camera(*world, entity) || !world->add_spring_arm(entity, arm)) {
     return false;
   }
 
@@ -538,7 +599,7 @@ bool test_spring_arm_uses_parent_composed_transform() noexcept {
   arm.offset = math::Vec3(0.0F, 2.0F, 0.0F);
   arm.lagSpeed = 100.0F;
   arm.collisionEnabled = false;
-  if (!world->add_spring_arm(child, arm)) {
+  if (!give_camera(*world, child) || !world->add_spring_arm(child, arm)) {
     return false;
   }
 
@@ -590,7 +651,7 @@ bool test_spring_arm_collision_clamps_length() noexcept {
   arm.lagSpeed = 100.0F;
   arm.collisionRadius = 0.25F;
   arm.collisionEnabled = true;
-  if (!world->add_spring_arm(owner, arm)) {
+  if (!give_camera(*world, owner) || !world->add_spring_arm(owner, arm)) {
     return false;
   }
 
@@ -1249,6 +1310,7 @@ int main() {
   run("test_push_pop_camera", test_push_pop_camera);
   run("test_priority_stack", test_priority_stack);
   run("test_blend_interpolation", test_blend_interpolation);
+  run("test_camera_after_none_cuts_in", test_camera_after_none_cuts_in);
   run("test_camera_shake_nonzero_then_zero",
       test_camera_shake_nonzero_during_and_zero_after);
   run("test_multiple_shakes_additive", test_multiple_shakes_additive);

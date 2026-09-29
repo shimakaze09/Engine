@@ -1,14 +1,16 @@
 // Verifies the editor's two views through the production EnginePipeline on
 // the null render device: the Scene view renders from the editor's camera
-// and the Game view from the scene's camera manager, Stopped, Playing and
-// Paused alike, each at its own size; a hidden view renders nothing; and
-// without an editor Scene view the one view keeps the camera it was given.
-// Before this the editor had one viewport that changed owner on Play.
+// and the Game view from the scene's Camera component, Stopped, Playing and
+// Paused alike, each at its own size; a hidden view renders nothing. Only a
+// Camera renders the game (#796): with none the Game view renders nothing
+// while the Scene view goes on, and a Camera added while stopped shows in
+// the Game view at once. Before this the editor had one viewport that
+// changed owner on Play.
 
 #include "engine/core/cvar.h"
 #include "engine/engine.h"
+#include "engine/math/quat.h"
 #include "engine/renderer/command_buffer.h"
-#include "engine/runtime/camera_manager.h"
 #include "engine/runtime/editor_bridge.h"
 #include "engine/runtime/engine_pipeline.h"
 #include "engine/runtime/scene_serializer.h"
@@ -38,6 +40,29 @@ bool g_gameShown = true;
 const engine::math::Vec3 kEditorEye(30.0F, 20.0F, 30.0F);
 const engine::math::Vec3 kGameEye(0.0F, 2.0F, -8.0F);
 const engine::math::Vec3 kGameTarget(0.0F, 1.0F, 0.0F);
+const engine::math::Vec3 kOtherEye(6.0F, 3.0F, 6.0F);
+
+/// Creates an entity with an active Camera at `eye`, looking at
+/// kGameTarget; kInvalidEntity when any step fails.
+engine::runtime::Entity add_camera(engine::runtime::World &world,
+                                   const engine::math::Vec3 &eye) noexcept {
+  engine::runtime::Transform transform{};
+  transform.position = eye;
+  if (!engine::math::look_rotation(engine::math::sub(kGameTarget, eye),
+                                   engine::math::Vec3(0.0F, 1.0F, 0.0F),
+                                   &transform.rotation)) {
+    return engine::runtime::kInvalidEntity;
+  }
+  const engine::runtime::Entity entity = world.create_scene_object(transform);
+  engine::runtime::CameraComponent camera{};
+  camera.priority = 10.0F;
+  camera.blendSpeed = 1000.0F;
+  if ((entity == engine::runtime::kInvalidEntity) ||
+      !world.add_camera_component(entity, camera)) {
+    return engine::runtime::kInvalidEntity;
+  }
+  return entity;
+}
 
 void capture_world(engine::runtime::World *world) noexcept { g_world = world; }
 bool is_playing() noexcept { return g_playing; }
@@ -58,8 +83,8 @@ bool scene_view(RenderViewDesc *outView) noexcept {
 
 bool same_point(const engine::math::Vec3 &a,
                 const engine::math::Vec3 &b) noexcept {
-  // The camera manager blends to the pushed pose with a saturated blend
-  // weight, so the evaluated position is the pushed one to rounding.
+  // The camera manager blends to the published pose with a saturated blend
+  // weight, so the evaluated position is the Camera's to rounding.
   constexpr float kTolerance = 1.0e-4F;
   return (std::fabs(a.x - b.x) <= kTolerance) &&
          (std::fabs(a.y - b.y) <= kTolerance) &&
@@ -124,16 +149,9 @@ int main() {
     }
     engine::runtime::reset_world(*g_world);
 
-    // The scene's own camera, which play renders from.
-    const engine::runtime::Entity owner = g_world->create_scene_object();
-    engine::runtime::CameraEntry entry{};
-    entry.position = kGameEye;
-    entry.target = kGameTarget;
-    entry.up = engine::math::Vec3(0.0F, 1.0F, 0.0F);
-    entry.blendSpeed = 1000.0F;
-    t.check((owner != engine::runtime::kInvalidEntity) &&
-                g_world->camera_manager().push_camera(owner, entry, 10.0F),
-            "the scene has a camera");
+    // The scene's own Camera, which play renders from.
+    const engine::runtime::Entity owner = add_camera(*g_world, kGameEye);
+    t.check(owner != engine::runtime::kInvalidEntity, "the scene has a camera");
 
     // A build without cooked shaders has no renderer backend: no view can
     // render, so there is nothing here to verify.
@@ -188,18 +206,31 @@ int main() {
     g_gameShown = true;
     g_playing = false;
 
-    // --- Without an editor Scene view, stopped, the one view keeps the
-    // camera it was given, as it always has.
-    bridge.scene_view = nullptr;
-    CameraState given{};
-    given.position = engine::math::Vec3(-5.0F, 5.0F, -5.0F);
-    engine::renderer::set_active_camera(given);
-    t.check(pipeline.execute_frame(), "frame without a Scene view");
+    // --- No Camera: the Game view renders nothing, the Scene view goes on.
+    t.check(g_world->remove_camera_component(owner), "the Camera is removed");
+    scene = engine::renderer::render_view_frame_count(RenderViewId::Scene);
+    game = engine::renderer::render_view_frame_count(RenderViewId::Game);
+    t.check(pipeline.execute_frame() && pipeline.execute_frame(),
+            "frames with no Camera");
+    t.check((engine::renderer::render_view_frame_count(RenderViewId::Game) ==
+             game) &&
+                (engine::renderer::render_view_frame_count(
+                     RenderViewId::Scene) == scene + 2U),
+            "with no Camera the Game view renders nothing, not the scene "
+            "from a pose no camera holds");
+
+    // --- A Camera added while stopped shows in the Game view at once.
+    const engine::runtime::Entity added = add_camera(*g_world, kOtherEye);
+    t.check(added != engine::runtime::kInvalidEntity, "a new Camera is added");
+    game = engine::renderer::render_view_frame_count(RenderViewId::Game);
+    t.check(pipeline.execute_frame(), "frame with the new Camera");
     t.check(
-        same_point(
-            engine::renderer::render_view_camera(RenderViewId::Game).position,
-            given.position),
-        "without a Scene view the Game view keeps the given camera");
+        (engine::renderer::render_view_frame_count(RenderViewId::Game) ==
+         game + 1U) &&
+            same_point(engine::renderer::render_view_camera(RenderViewId::Game)
+                           .position,
+                       kOtherEye),
+        "a Camera added while stopped renders the Game view at once");
 
     pipeline.teardown();
   }

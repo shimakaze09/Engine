@@ -51,9 +51,6 @@ bool bindable_is_alive(std::uint64_t entity) noexcept;
 // LUA_BIND: has_light(entity: uint64) -> bool
 bool bindable_has_light(std::uint64_t entity) noexcept;
 
-// LUA_BIND: set_camera_fov(fov: float) -> void
-void bindable_set_camera_fov(float fov) noexcept;
-
 // LUA_BIND: set_master_volume(volume: float) -> void
 void bindable_set_master_volume(float volume) noexcept;
 
