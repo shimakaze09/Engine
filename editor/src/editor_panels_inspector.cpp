@@ -402,7 +402,7 @@ static_assert(kComponentEditTypeCount == 16U,
 } // namespace
 
 void draw_inspector_panel() noexcept {
-  if (!ImGui::Begin("Inspector")) {
+  if (!ImGui::Begin(kInspectorWindow)) {
     ImGui::End();
     return;
   }

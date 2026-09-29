@@ -309,7 +309,7 @@ void draw_toolbar(ContentBrowserState &browser) noexcept {
 } // namespace
 
 void draw_asset_browser_panel() noexcept {
-  if (!ImGui::Begin("Assets")) {
+  if (!ImGui::Begin(kAssetsWindow)) {
     ImGui::End();
     return;
   }

@@ -3,7 +3,9 @@
 // bind them: Ctrl+S never fires for Ctrl+Shift+S, and a bare W never fires
 // with Ctrl held. Actions that create or write something run once per
 // press; only undo and redo repeat while held, as in those editors. While
-// the game has the keyboard only the play controls and Take Screenshot fire.
+// the game has the keyboard only the play controls and Take Screenshot fire,
+// and the entity edits fire only while the Scene view or the Entities panel
+// is the panel last focused, as Unity routes them to the focused window.
 
 #include "editor_shortcuts.h"
 
@@ -48,20 +50,22 @@ constexpr std::array<EditorShortcut,
         {EditorAction::Redo, "edit.redo", "Redo",
          ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_Z,
          ImGuiMod_Ctrl | ImGuiKey_Y, true},
+        // The entity edits act where the author is editing entities: the
+        // Scene view or the Entities panel.
         {EditorAction::Copy, "edit.copy", "Copy", ImGuiMod_Ctrl | ImGuiKey_C, 0,
-         false},
+         false, false, true},
         {EditorAction::Paste, "edit.paste", "Paste", ImGuiMod_Ctrl | ImGuiKey_V,
-         0, false},
+         0, false, false, true},
         {EditorAction::PasteAsChild, "edit.paste_as_child", "Paste As Child",
-         ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_V, 0, false},
+         ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_V, 0, false, false, true},
         {EditorAction::Duplicate, "edit.duplicate", "Duplicate",
-         ImGuiMod_Ctrl | ImGuiKey_D, 0, false},
+         ImGuiMod_Ctrl | ImGuiKey_D, 0, false, false, true},
         // Cmd+Backspace is the Mac chord (Ctrl maps to Cmd there), for
         // keyboards without a forward-delete key.
         {EditorAction::Delete, "edit.delete", "Delete", ImGuiKey_Delete,
-         ImGuiMod_Ctrl | ImGuiKey_Backspace, false},
+         ImGuiMod_Ctrl | ImGuiKey_Backspace, false, false, true},
         {EditorAction::CreateEmpty, "entity.create_empty", "Create Empty",
-         ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_N, 0, false},
+         ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_N, 0, false, false, true},
         {EditorAction::GizmoTranslate, "tools.translate", "Move", ImGuiKey_W, 0,
          false},
         {EditorAction::GizmoRotate, "tools.rotate", "Rotate", ImGuiKey_E, 0,
@@ -72,7 +76,7 @@ constexpr std::array<EditorShortcut,
         {EditorAction::GizmoSpace, "tools.toggle_space", "World/Local Axes",
          ImGuiKey_X, 0, false},
         {EditorAction::FrameSelected, "view.frame_selected", "Frame Selected",
-         ImGuiKey_F, 0, false},
+         ImGuiKey_F, 0, false, false, true},
         // Unity's play chords, live while the game has the keyboard so a
         // running game can always be paused or stopped.
         {EditorAction::PlayStop, "play.play_stop", "Play",
@@ -598,7 +602,45 @@ bool editor_shortcuts_blocked() noexcept {
                                     ImGuiPopupFlags_AnyPopupLevel);
 }
 
+void update_focused_panel() noexcept {
+  const ImGuiContext *context = ImGui::GetCurrentContext();
+  if ((context == nullptr) || (context->NavWindow == nullptr)) {
+    return;
+  }
+  // A child of a panel (the Scene view's image, a list) counts as the
+  // panel; a popup or menu is a root of its own and matches none.
+  const ImGuiWindow *root = context->NavWindow->RootWindow;
+  const char *name = (root != nullptr) ? root->Name : "";
+  struct PanelName final {
+    const char *name;
+    EditorPanel panel;
+  };
+  static constexpr std::array<PanelName, 6U> kPanels = {{
+      {kSceneViewWindow, EditorPanel::Scene},
+      {kGameViewWindow, EditorPanel::Game},
+      {kEntitiesWindow, EditorPanel::Entities},
+      {kInspectorWindow, EditorPanel::Inspector},
+      {kAssetsWindow, EditorPanel::Assets},
+      {kLogWindow, EditorPanel::Log},
+  }};
+  for (const PanelName &entry : kPanels) {
+    if (std::strcmp(name, entry.name) == 0) {
+      editor_session().lastFocusedPanel = entry.panel;
+      return;
+    }
+  }
+}
+
+bool editor_action_in_focus_scope(EditorAction action) noexcept {
+  if (!editor_shortcut(action).sceneEditing) {
+    return true;
+  }
+  const EditorPanel panel = editor_session().lastFocusedPanel;
+  return (panel == EditorPanel::Scene) || (panel == EditorPanel::Entities);
+}
+
 void dispatch_editor_shortcuts() noexcept {
+  update_focused_panel();
   if (editor_shortcuts_blocked()) {
     return;
   }
@@ -606,7 +648,8 @@ void dispatch_editor_shortcuts() noexcept {
   // not a gizmo), except the play controls.
   const bool gameHasKeyboard = game_owns_keyboard();
   for (const EditorShortcut &row : g_rows) {
-    if (gameHasKeyboard && !row.whileGameHasKeyboard) {
+    if ((gameHasKeyboard && !row.whileGameHasKeyboard) ||
+        !editor_action_in_focus_scope(row.action)) {
       continue;
     }
     if (chord_pressed(row.chord, row.repeats) ||
@@ -629,6 +672,14 @@ bool editor_action_menu_item_clicked(EditorAction action,
   return ImGui::MenuItem(editor_action_label(action),
                          editor_shortcut_text(action), checked,
                          editor_action_enabled(action));
+}
+
+bool editor_edit_menu_item(EditorAction action, bool checked) noexcept {
+  const bool enabled =
+      editor_action_in_focus_scope(action) && editor_action_enabled(action);
+  return ImGui::MenuItem(editor_action_label(action),
+                         editor_shortcut_text(action), checked, enabled) &&
+         run_editor_action(action);
 }
 
 bool editor_action_menu_item(EditorAction action, bool checked) noexcept {

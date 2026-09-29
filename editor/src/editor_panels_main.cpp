@@ -254,13 +254,13 @@ void draw_main_menu_bar() noexcept {
     editor_action_menu_item(EditorAction::Undo);
     editor_action_menu_item(EditorAction::Redo);
     ImGui::Separator();
-    editor_action_menu_item(EditorAction::Copy);
-    editor_action_menu_item(EditorAction::Paste);
-    editor_action_menu_item(EditorAction::PasteAsChild);
-    editor_action_menu_item(EditorAction::Duplicate);
-    editor_action_menu_item(EditorAction::Delete);
+    editor_edit_menu_item(EditorAction::Copy);
+    editor_edit_menu_item(EditorAction::Paste);
+    editor_edit_menu_item(EditorAction::PasteAsChild);
+    editor_edit_menu_item(EditorAction::Duplicate);
+    editor_edit_menu_item(EditorAction::Delete);
     ImGui::Separator();
-    editor_action_menu_item(EditorAction::FrameSelected);
+    editor_edit_menu_item(EditorAction::FrameSelected);
     ImGui::Separator();
     // The play item reads Play or Stop; Pause is checked while it holds.
     const PlayState state = editor_session().playState;
@@ -693,7 +693,7 @@ void same_line_if_button_fits(const char *nextButtonLabel) noexcept {
 }
 
 void draw_entities_panel() noexcept {
-  if (!ImGui::Begin("Entities")) {
+  if (!ImGui::Begin(kEntitiesWindow)) {
     ImGui::End();
     return;
   }
