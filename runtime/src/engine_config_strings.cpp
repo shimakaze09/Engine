@@ -20,6 +20,7 @@ namespace {
 struct ConfigStringStorage final {
   char assetMount[kMaxConfigStringLength + 1U] = {};
   char assetRoot[kMaxConfigStringLength + 1U] = {};
+  char projectFile[kMaxConfigStringLength + 1U] = {};
   char engineMount[kMaxConfigStringLength + 1U] = {};
   char engineRoot[kMaxConfigStringLength + 1U] = {};
   char mainScriptPath[kMaxConfigStringLength + 1U] = {};
@@ -78,9 +79,10 @@ bool adopt_config_strings(EngineConfig &config) noexcept {
   // configuration cannot leave the active one half-overwritten.
   ConfigStringStorage staged{};
 
-  const std::array<AdoptionRow, 9U> rows{{
+  const std::array<AdoptionRow, 10U> rows{{
       {"assetMount", config.assetMount, staged.assetMount},
       {"assetRoot", config.assetRoot, staged.assetRoot},
+      {"projectFile", config.projectFile, staged.projectFile},
       {"engineMount", config.engineMount, staged.engineMount},
       {"engineRoot", config.engineRoot, staged.engineRoot},
       {"mainScriptPath", config.mainScriptPath, staged.mainScriptPath},
@@ -111,6 +113,7 @@ bool adopt_config_strings(EngineConfig &config) noexcept {
 
   config.assetMount = g_strings.assetMount;
   config.assetRoot = g_strings.assetRoot;
+  config.projectFile = g_strings.projectFile;
   config.engineMount = g_strings.engineMount;
   config.engineRoot = g_strings.engineRoot;
   config.mainScriptPath = g_strings.mainScriptPath;

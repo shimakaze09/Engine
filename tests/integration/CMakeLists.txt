@@ -484,6 +484,24 @@ engine_add_test_executable(engine_integration_playground_sample
     integration
 )
 
+engine_add_test_executable(engine_integration_bootstrap_without_project
+    SOURCES
+    bootstrap_without_project_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    LABELS
+    integration
+)
+
+engine_add_test_executable(engine_integration_new_project
+    SOURCES
+    new_project_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    LABELS
+    integration
+)
+
 engine_add_test_executable(engine_integration_engine_mount
     SOURCES
     engine_mount_test.cpp

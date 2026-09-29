@@ -13,8 +13,16 @@ struct EngineConfig final {
   core::CoreConfig core{};
   /// The game's content: mounted at `assetMount` from the OS directory
   /// `assetRoot`, and addressed as `assets/...` by every authored path.
+  /// An empty `assetRoot` runs with no project, as the project hub does:
+  /// only the engine's content is mounted, and no main script, startup
+  /// scene or per-project data is used. Bootstrap refuses such a config
+  /// if it still names a main script, a startup scene or an editor asset
+  /// root (configure_without_project in engine/project.h clears them).
   const char *assetMount = "assets";
   const char *assetRoot = "assets";
+  /// The project's .project document, absolute, when it was opened from
+  /// one (open_project); empty otherwise.
+  const char *projectFile = "";
   /// The engine's own content (shaders, fonts, the web shell, the
   /// bootstrap mesh): mounted at `engineMount` from the OS directory
   /// `engineRoot`, kept apart from any project's content as Unreal's
@@ -84,6 +92,9 @@ bool bootstrap(const EngineConfig &config) noexcept;
 bool is_bootstrapped() noexcept;
 /// Returns the active engine configuration for runtime/editor systems.
 const EngineConfig &active_config() noexcept;
+/// True when the active configuration runs a project: its asset root is
+/// not empty.
+bool has_open_project() noexcept;
 /// Test-only fault injection: the next bootstrap fails at `stage` through
 /// that stage's production failure path; consumed once.
 void inject_bootstrap_failure(BootstrapStage stage) noexcept;
