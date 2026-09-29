@@ -10,7 +10,9 @@
 // dead parent creates nothing. Rename edits the row in place: Enter
 // commits one undoable edit, Escape leaves the name, an empty or unchanged
 // name changes nothing, an unnamed entity gains a name, and switching
-// worlds ends a rename.
+// worlds ends a rename. Camera, on the empty-space menu, creates an active
+// "Main Camera" (then "Camera") up and back from its target, facing it, in
+// one undo step.
 
 #if defined(__clang__) && (defined(__x86_64__) || defined(__i386__)) &&        \
     !defined(__PRFCHWINTRIN_H)
@@ -20,6 +22,7 @@
 #include "imgui.h"
 #include "imgui_internal.h"
 
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -35,6 +38,7 @@
 #include "editor_shortcuts.h"
 #include "engine/core/logging.h"
 #include "engine/editor/editor.h"
+#include "engine/math/quat.h"
 #include "engine/runtime/world.h"
 
 namespace {
@@ -215,8 +219,10 @@ void check_menus(World &world, Entity alpha, Entity beta) noexcept {
   const std::string spaceMenu = click(empty_space(), ImGuiMouseButton_Right);
   check((spaceMenu.find("Create Empty") != std::string::npos) &&
             (spaceMenu.find("3D Object") != std::string::npos) &&
+            (spaceMenu.find("Camera") != std::string::npos) &&
             (spaceMenu.find("Paste") != std::string::npos),
-        "the empty-space menu lists Create Empty, 3D Object and Paste");
+        "the empty-space menu lists Create Empty, 3D Object, Camera and "
+        "Paste");
   for (const char *item :
        {"Copy", "Duplicate", "Delete", "Rename", "Frame Selected", "Child"}) {
     char what[96] = {};
@@ -333,6 +339,73 @@ void check_placement(World &world, Entity alpha) noexcept {
              kInvalidEntity) &&
             (world.alive_entity_count() == before) && !history.can_undo(),
         "a dead parent creates nothing and records no undo step");
+}
+
+/// True when `camera` is an active Camera at `position`, looking along
+/// `forward`. The pose is built from exact inputs; 1e-5 bounds only the
+/// float rounding of the rotation's basis and its re-application.
+bool camera_posed(const World &world, Entity camera,
+                  const engine::math::Vec3 &position,
+                  const engine::math::Vec3 &forward) noexcept {
+  engine::runtime::CameraComponent component{};
+  Transform transform{};
+  if (!world.get_camera_component(camera, &component) || !component.active ||
+      !world.get_transform(camera, &transform)) {
+    return false;
+  }
+  const engine::math::Vec3 look = engine::math::rotate_vector(
+      engine::math::Vec3(0.0F, 0.0F, -1.0F), transform.rotation);
+  const engine::math::Vec3 want = engine::math::normalize(forward);
+  constexpr float kBound = 1.0e-5F;
+  return (transform.position.x == position.x) &&
+         (transform.position.y == position.y) &&
+         (transform.position.z == position.z) &&
+         (std::fabs(look.x - want.x) <= kBound) &&
+         (std::fabs(look.y - want.y) <= kBound) &&
+         (std::fabs(look.z - want.z) <= kBound);
+}
+
+/// Camera on the empty-space menu creates an active "Main Camera" two up
+/// and five back from the origin, facing it, selected, in one undo step;
+/// a second is "Camera"; a placement moves its target; a dead parent
+/// creates nothing.
+void check_camera_create(World &world) noexcept {
+  auto &history = editor_session().commandHistory;
+  history.clear();
+  settle();
+  const std::size_t before = world.alive_entity_count();
+  static_cast<void>(click(empty_space(), ImGuiMouseButton_Right));
+  // Create Empty, 3D Object, Camera: the third row, with no separator
+  // above it.
+  static_cast<void>(
+      click(menu_row(open_menu(), 2, true), ImGuiMouseButton_Left));
+  const Entity main = selected_entity();
+  check((world.alive_entity_count() == before + 1U) &&
+            (name_of(world, main) == "Main Camera") &&
+            camera_posed(world, main, engine::math::Vec3(0.0F, 2.0F, 5.0F),
+                         engine::math::Vec3(0.0F, -2.0F, -5.0F)),
+        "Camera creates an active Main Camera facing the origin, selected");
+
+  EntitySpawnPlacement at{};
+  at.hasPosition = true;
+  at.position = engine::math::Vec3(3.0F, 0.0F, -2.0F);
+  const Entity second = execute_camera_create(at);
+  check((name_of(world, second) == "Camera") &&
+            camera_posed(world, second, engine::math::Vec3(3.0F, 2.0F, 3.0F),
+                         engine::math::Vec3(0.0F, -2.0F, -5.0F)),
+        "a second camera is \"Camera\", framing the placement's point");
+  check(history.undo() && history.undo() &&
+            (world.alive_entity_count() == before) && !history.can_undo(),
+        "each camera is one undo step");
+
+  const Entity doomed = add_named(world, "Doomed");
+  static_cast<void>(world.destroy_entity(doomed));
+  EntitySpawnPlacement dead{};
+  dead.parent = doomed;
+  check((execute_camera_create(dead) == kInvalidEntity) &&
+            (world.alive_entity_count() == before) && !history.can_undo(),
+        "a dead parent creates no camera and records no undo step");
+  settle();
 }
 
 /// Types `text` into the focused field and presses `key`, a frame each.
@@ -465,6 +538,7 @@ int main() {
   check_menus(*world, alpha, beta);
   check_create_button(*world, alpha, beta);
   check_placement(*world, alpha);
+  check_camera_create(*world);
   check_rename_in_panel(*world, alpha);
   check_rename_contract(*world, alpha);
   check_enabled_states(alpha);

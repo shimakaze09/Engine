@@ -22,6 +22,7 @@
 #include "engine/content/asset_metadata.h"
 #include "engine/core/logging.h"
 #include "engine/editor/editor_camera.h"
+#include "engine/math/quat.h"
 #include "engine/math/transform.h"
 #include "engine/renderer/camera.h"
 #include "engine/renderer/mesh_primitives.h"
@@ -60,6 +61,9 @@ bool EntityCreateCommand::execute() noexcept {
   }
   if (ok && hasCollider) {
     ok = world->add_collider(entity, colliderComponent);
+  }
+  if (ok && hasCamera) {
+    ok = world->add_camera_component(entity, camera);
   }
   if (!ok) {
     core::log_message(core::LogLevel::Error, "editor",
@@ -481,6 +485,50 @@ execute_primitive_spawn(EditorPrimitive primitive,
   // The runtime describes the collider, hull provenance and offset
   // included, so Create and Lua's spawn_shape install the same one.
   command->colliderComponent = runtime::primitive_collider(desc.shape);
+  if (!editor_session().commandHistory.execute(command)) {
+    return runtime::kInvalidEntity;
+  }
+  return world->find_entity_by_persistent_id(command->persistentId);
+}
+
+/// True when any alive entity carries a Camera component.
+static bool world_has_camera(const runtime::World &world) noexcept {
+  bool found = false;
+  world.for_each_alive([&](runtime::Entity entity) {
+    found = found || world.has_camera_component(entity);
+  });
+  return found;
+}
+
+runtime::Entity
+execute_camera_create(const EntitySpawnPlacement &placement) noexcept {
+  runtime::World *const world = editor_session().world;
+  if (world == nullptr) {
+    return runtime::kInvalidEntity;
+  }
+  // Unity's new-scene camera pose: up and back from what it looks at, so
+  // the target is framed at once.
+  const math::Vec3 lookOffset(0.0F, 2.0F, 5.0F);
+  runtime::Transform transform{};
+  if (!place_new_entity(*world, placement, 0.0F, &transform)) {
+    return runtime::kInvalidEntity;
+  }
+  transform.position = math::add(transform.position, lookOffset);
+  if (!math::look_rotation(math::sub(math::Vec3(), lookOffset),
+                           math::Vec3(0.0F, 1.0F, 0.0F), &transform.rotation)) {
+    return runtime::kInvalidEntity;
+  }
+  auto *command = allocate_command<EntityCreateCommand>();
+  if (command == nullptr) {
+    core::log_message(core::LogLevel::Error, "editor",
+                      "camera create refused: it could not be recorded for "
+                      "undo (out of memory)");
+    return runtime::kInvalidEntity;
+  }
+  command->transform = transform;
+  std::snprintf(command->name.name, sizeof(command->name.name), "%s",
+                world_has_camera(*world) ? "Camera" : "Main Camera");
+  command->hasCamera = true;
   if (!editor_session().commandHistory.execute(command)) {
     return runtime::kInvalidEntity;
   }

@@ -59,6 +59,10 @@ EntityMenuChoice draw_primitive_menu_items() noexcept {
   return choice;
 }
 
+bool draw_camera_menu_item() noexcept {
+  return ImGui::MenuItem("Camera", nullptr, false, world_is_editable());
+}
+
 EntityMenuChoice draw_entity_menu_items() noexcept {
   EntityMenuChoice choice{};
   for (const EditorAction action :
@@ -85,6 +89,9 @@ EntityMenuChoice draw_empty_space_menu_items() noexcept {
     choice.kind = EntityMenuChoice::Kind::CreateEmpty;
   }
   primitive_submenu("3D Object", &choice);
+  if (draw_camera_menu_item()) {
+    choice.kind = EntityMenuChoice::Kind::CreateCamera;
+  }
   ImGui::Separator();
   action_item(EditorAction::Paste, &choice);
   return choice;
@@ -101,6 +108,9 @@ bool run_entity_menu_choice(const EntityMenuChoice &choice,
     break;
   case EntityMenuChoice::Kind::CreatePrimitive:
     created = execute_primitive_spawn(choice.primitive, placement);
+    break;
+  case EntityMenuChoice::Kind::CreateCamera:
+    created = execute_camera_create(placement);
     break;
   case EntityMenuChoice::Kind::None:
   default:

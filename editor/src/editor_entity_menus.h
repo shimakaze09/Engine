@@ -2,8 +2,8 @@
 // Entities panel and the Scene view, as Unity's Hierarchy and Scene view
 // menus are: one on an entity (its edits, Rename, Frame Selected, and
 // creating a child) and one on empty space (Create Empty, 3D Object,
-// Paste). Every item is an action table row or a primitive, so its label,
-// chord and enabled state agree with the Edit and Entity menus. Drawing
+// Camera, Paste). Every item is an action table row or a primitive, so its
+// label, chord and enabled state agree with the Edit and Entity menus. Drawing
 // only reports the choice; the caller runs it once it is done iterating
 // what it drew, so no menu edits the world mid-walk.
 
@@ -26,6 +26,8 @@ struct EntityMenuChoice final {
     CreateEmpty,
     /// Spawn `primitive` at the menu's placement.
     CreatePrimitive,
+    /// Create a Camera looking at the menu's placement.
+    CreateCamera,
   };
   Kind kind = Kind::None;
   EditorAction action = EditorAction::Count;
@@ -40,8 +42,12 @@ struct EntityMenuChoice final {
 EntityMenuChoice draw_entity_menu_items() noexcept;
 
 /// Draws the items of the menu on empty space: Create Empty, 3D Object,
-/// and Paste.
+/// Camera, and Paste.
 EntityMenuChoice draw_empty_space_menu_items() noexcept;
+
+/// Draws the Camera item, disabled while the world cannot be edited; true
+/// when it was clicked.
+bool draw_camera_menu_item() noexcept;
 
 /// Draws one item per built-in primitive (Cube, Sphere, Cylinder,
 /// Capsule, Pyramid, Plane), each disabled while the world cannot be

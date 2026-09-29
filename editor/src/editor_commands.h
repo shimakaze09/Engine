@@ -124,6 +124,8 @@ struct EntityCreateCommand final : EditorCommand {
   runtime::MeshComponent mesh{};
   bool hasCollider = false;
   runtime::Collider colliderComponent{};
+  bool hasCamera = false;
+  runtime::CameraComponent camera{};
 
   bool execute() noexcept override;
   bool undo() noexcept override;
@@ -269,6 +271,14 @@ enum class EditorPrimitive : std::uint8_t {
 runtime::Entity
 execute_primitive_spawn(EditorPrimitive primitive,
                         const EntitySpawnPlacement &placement = {}) noexcept;
+/// Creates an active Camera through the command history, as Unity's
+/// GameObject > Camera: named "Main Camera" when the scene has no camera
+/// yet (else "Camera"), two metres up and five back from its target and
+/// turned toward it. The target is the placement's position, the origin
+/// without one, or the parent's origin under a parent. Returns the new
+/// entity (kInvalidEntity on failure).
+runtime::Entity
+execute_camera_create(const EntitySpawnPlacement &placement = {}) noexcept;
 /// Captures the entity's transform subtree into a delete command; null on
 /// allocation failure or when the entity is not alive.
 EntityDeleteCommand *

@@ -11,6 +11,9 @@
 // while a right-click on its image, which belongs to the game, opens
 // nothing. The Log's toolbar and the Inspector no longer repeat what the
 // menus and the Delete action offer: no Copy All button, no Delete Entity.
+// With no Camera the Game view says nothing renders the game and offers
+// Create Camera, which adds an active Main Camera in one undo step and
+// takes the notice away.
 
 #if defined(__clang__) && (defined(__x86_64__) || defined(__i386__)) &&        \
     !defined(__PRFCHWINTRIN_H)
@@ -289,6 +292,53 @@ void check_game_view() noexcept {
   settle(game);
 }
 
+/// With no Camera the Game view names why nothing renders and offers
+/// Create Camera; the button makes one, the notice goes, one undo brings
+/// it back.
+void check_game_view_camera_notice(World &world) noexcept {
+  const PanelFn game = [] { draw_game_view_panel(); };
+  settle(game);
+  const std::string before = frame(game);
+  check(has(before, "No camera renders the game") &&
+            has(before, "Create Camera"),
+        "with no Camera the Game view says so and offers Create Camera");
+  // The button is the last item the view draws: its line ends where the
+  // window's cursor stood after it.
+  const ImGuiWindow *window = ImGui::FindWindowByName(kGameViewWindow);
+  if (window == nullptr) {
+    check(false, "the Game view draws");
+    return;
+  }
+  const ImGuiStyle &style = ImGui::GetStyle();
+  const ImVec2 button(window->DC.CursorPosPrevLine.x - style.FramePadding.x -
+                          (ImGui::CalcTextSize("Create Camera").x * 0.5F),
+                      window->DC.CursorPosPrevLine.y +
+                          (ImGui::GetFrameHeight() * 0.5F));
+  const std::size_t count = world.alive_entity_count();
+  click(game, button, ImGuiMouseButton_Left);
+  Entity camera = engine::runtime::kInvalidEntity;
+  world.for_each_alive([&](Entity entity) {
+    if (world.has_camera_component(entity)) {
+      camera = entity;
+    }
+  });
+  engine::runtime::NameComponent name{};
+  check((world.alive_entity_count() == count + 1U) &&
+            world.get_name_component(camera, &name) &&
+            (std::string(name.name) == "Main Camera"),
+        "Create Camera adds a Main Camera");
+  const std::string after = frame(game);
+  check(!has(after, "No camera renders the game") &&
+            !has(after, "Create Camera"),
+        "and the notice goes");
+  auto &history = editor_session().commandHistory;
+  check(history.undo() && (world.alive_entity_count() == count) &&
+            has(frame(game), "Create Camera"),
+        "one undo removes it and the notice returns");
+  history.clear();
+  settle(game);
+}
+
 } // namespace
 
 int main() {
@@ -318,6 +368,7 @@ int main() {
   check_log();
   check_inspector(*world);
   check_game_view();
+  check_game_view_camera_notice(*world);
 
   editor_set_world(nullptr);
   ImGui::DestroyContext();

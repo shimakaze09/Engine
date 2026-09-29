@@ -633,8 +633,14 @@ void draw_view_image(renderer::RenderViewId view,
     ImGui::Image(static_cast<ImTextureID>(texId), regionSize,
                  ImVec2(0.0F, flipV ? 1.0F : 0.0F),
                  ImVec2(1.0F, flipV ? 0.0F : 1.0F));
-  } else {
-    ImGui::TextUnformatted("Waiting for renderer...");
+  } else if ((regionSize.x > 0.0F) && (regionSize.y > 0.0F)) {
+    // No image this frame (a Game view with no Camera, or a view not yet
+    // rendered): the region is black, never an older frame.
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+    ImGui::GetWindowDrawList()->AddRectFilled(
+        origin, ImVec2(origin.x + regionSize.x, origin.y + regionSize.y),
+        IM_COL32(0, 0, 0, 255));
+    ImGui::Dummy(regionSize);
   }
 }
 
@@ -962,6 +968,53 @@ void draw_game_view_menu(float imageTop, bool capturing) noexcept {
   ImGui::EndPopup();
 }
 
+/// The Game view's camera notice, centred over its image in a dark box;
+/// with no camera at all it also offers Create Camera, as the one-click
+/// fix, when the world can be edited.
+void draw_game_camera_notice(const char *notice, bool offerCreate,
+                             const ImVec2 &imagePos,
+                             const ImVec2 &regionSize) noexcept {
+  const ImGuiStyle &style = ImGui::GetStyle();
+  const float wrapWidth = regionSize.x * 0.8F;
+  const ImVec2 textSize =
+      ImGui::CalcTextSize(notice, nullptr, false, wrapWidth);
+  const char *buttonLabel = "Create Camera";
+  const ImVec2 buttonSize(ImGui::CalcTextSize(buttonLabel).x +
+                              (style.FramePadding.x * 2.0F),
+                          ImGui::GetFrameHeight());
+  const float blockHeight =
+      textSize.y + (offerCreate ? (style.ItemSpacing.y + buttonSize.y) : 0.0F);
+  const ImVec2 center(imagePos.x + (regionSize.x * 0.5F),
+                      imagePos.y + (regionSize.y * 0.5F));
+  const ImVec2 textPos(center.x - (textSize.x * 0.5F),
+                       center.y - (blockHeight * 0.5F));
+  const ImVec2 pad = style.WindowPadding;
+  const float boxWidth = std::max(textSize.x, buttonSize.x);
+  ImGui::GetWindowDrawList()->AddRectFilled(
+      ImVec2(center.x - (boxWidth * 0.5F) - pad.x, textPos.y - pad.y),
+      ImVec2(center.x + (boxWidth * 0.5F) + pad.x,
+             textPos.y + blockHeight + pad.y),
+      IM_COL32(20, 20, 20, 210), style.WindowRounding);
+  ImGui::SetCursorScreenPos(textPos);
+  // The wrap position is in window coordinates, not screen ones.
+  ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + textSize.x);
+  ImGui::TextColored(ImVec4(1.0F, 0.75F, 0.35F, 1.0F), "%s", notice);
+  ImGui::PopTextWrapPos();
+  if (!offerCreate) {
+    return;
+  }
+  ImGui::SetCursorScreenPos(
+      ImVec2(center.x - (buttonSize.x * 0.5F),
+             textPos.y + textSize.y + style.ItemSpacing.y));
+  ImGui::BeginDisabled(!world_is_editable());
+  if (ImGui::Button(buttonLabel, buttonSize)) {
+    EntityMenuChoice choice{};
+    choice.kind = EntityMenuChoice::Kind::CreateCamera;
+    static_cast<void>(run_entity_menu_choice(choice, EntitySpawnPlacement{}));
+  }
+  ImGui::EndDisabled();
+}
+
 } // namespace
 
 void draw_game_view_panel() noexcept {
@@ -1018,21 +1071,8 @@ void draw_game_view_panel() noexcept {
   char notice[192] = {};
   if (!capturing && (session.world != nullptr) &&
       game_camera_notice(*session.world, notice, sizeof(notice))) {
-    const float wrapWidth = regionSize.x * 0.8F;
-    const ImVec2 textSize =
-        ImGui::CalcTextSize(notice, nullptr, false, wrapWidth);
-    const ImVec2 center(session.gameViewScreenPos.x + (regionSize.x * 0.5F),
-                        session.gameViewScreenPos.y + (regionSize.y * 0.5F));
-    const ImVec2 pad = ImGui::GetStyle().WindowPadding;
-    const ImVec2 textPos(center.x - (textSize.x * 0.5F),
-                         center.y - (textSize.y * 0.5F));
-    ImDrawList *drawList = ImGui::GetWindowDrawList();
-    drawList->AddRectFilled(
-        ImVec2(textPos.x - pad.x, textPos.y - pad.y),
-        ImVec2(textPos.x + textSize.x + pad.x, textPos.y + textSize.y + pad.y),
-        IM_COL32(20, 20, 20, 210), ImGui::GetStyle().WindowRounding);
-    drawList->AddText(ImGui::GetFont(), ImGui::GetFontSize(), textPos,
-                      IM_COL32(255, 190, 90, 255), notice, nullptr, wrapWidth);
+    draw_game_camera_notice(notice, !game_view_has_camera(*session.world),
+                            session.gameViewScreenPos, regionSize);
   }
   ImGui::End();
 }

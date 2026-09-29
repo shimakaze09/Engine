@@ -140,6 +140,10 @@ runtime::Entity pick_icon(const SceneIcon *icons, std::size_t count, float ndcX,
 bool game_camera_notice(const runtime::World &world, char *out,
                         std::size_t capacity) noexcept;
 
+/// True when an active Camera renders the game; false shows the Game view
+/// black, with the notice offering Create Camera.
+bool game_view_has_camera(const runtime::World &world) noexcept;
+
 /// Called once per entity a marquee takes.
 using BoxSelectVisit = void (*)(void *context, runtime::Entity entity) noexcept;
 
