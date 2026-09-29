@@ -222,10 +222,18 @@ Run the app after build:
 
 The editor opens the project named on its command line, either the
 project's directory or its `.project` file (`engine_editor_app
-path/to/my_game`). Started with none, as from a file manager, it opens the
-sample project the build copies beside it (`build/samples/island`), until a
-project hub takes that role. A project that cannot be opened says why in an
-error box.
+path/to/my_game`), on its startup scene. Started with none, as from a file
+manager, it shows the project hub, as Unity Hub and Godot's project manager
+do:
+- the projects opened recently (the first start lists the sample the build
+  copies beside it, `build/samples/island`); Open or double-click one;
+- **Open...** picks a `.project` file;
+- **New Project...** makes one from the empty 3D template (a camera, a light
+  and an empty main script) in a folder you pick, and opens it.
+
+File > Open Project... and File > Close Project leave the open project for
+another or for the hub, asking about unsaved changes first. A project named
+on the command line that cannot be opened says why in an error box.
 
 `engine_player` runs a game without the editor, as a Unity player build or a
 Godot export does: `engine_player path/to/my_game` (the sample beside it

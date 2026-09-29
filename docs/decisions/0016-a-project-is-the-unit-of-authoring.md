@@ -38,7 +38,10 @@ makes a project from `engine_assets/templates/empty_project/`, staged
 beside its destination and moved into place whole
 (`engine_integration_new_project`); and a run hands the next project, or
 the hub, to its executable through `engine::request_project_switch`. The
-hub's editor screen is not yet implemented.
+editor started with no project is the hub (`editor/src/editor_project_hub.h`,
+`engine_unit_editor_project_hub`): recent projects, Open, and New Project;
+File > Open Project and Close Project return to it, and a project opens on
+its startup scene (`engine_unit_editor_startup_scene`).
 
 ## Context
 
