@@ -373,6 +373,17 @@ bool editor_save_material(const char *virtualPath,
       renderer::material_overrides(g_editorAssetService->database, materialId));
 }
 
+bool editor_create_material(const char *virtualPath) noexcept {
+  if ((virtualPath == nullptr) || (virtualPath[0] == '\0') ||
+      (g_editorAssetService == nullptr) ||
+      (g_editorAssetService->catalog == nullptr)) {
+    return false;
+  }
+  return renderer::save_material_asset(
+      g_editorAssetService->catalog, virtualPath, renderer::Material{},
+      renderer::MaterialTextureSlots{}, nullptr, 0U);
+}
+
 EditorMaterialState editor_reload_material(const char *virtualPath) noexcept {
   EditorMaterialState state{};
   if ((virtualPath == nullptr) || (virtualPath[0] == '\0') ||

@@ -26,6 +26,9 @@ constexpr const char *kLogChannel = "editor.asset_index";
 constexpr std::size_t kMaxAssetTreeDepth = 32U;
 
 std::vector<AssetIndexEntry> g_index{};
+// Every folder the walk entered, as its OS path, so a folder shows in the
+// browser whether or not it holds an asset yet.
+std::vector<std::string> g_folders{};
 std::uint64_t g_generation = 0ULL;
 bool g_built = false;
 // OS path the index was built from; "" folder in AssetFilterState/
@@ -131,6 +134,7 @@ void walk_directory(const std::filesystem::path &dir,
     if (entry.is_directory(kindEc) && !kindEc) {
       // Never descend into the generated thumbnail cache directories.
       if (entry.path().filename() != ".thumbnails") {
+        g_folders.push_back(entry.path().string());
         walk_directory(entry.path(), root, depth + 1U);
       }
       continue;
@@ -278,6 +282,7 @@ content::AssetTypeTag classify_asset_kind(const char *osPath,
 
 bool rebuild_asset_index() noexcept {
   g_index.clear();
+  g_folders.clear();
   g_built = true;
   ++g_generation;
 
@@ -295,11 +300,29 @@ bool rebuild_asset_index() noexcept {
   return true;
 }
 
+bool asset_virtual_path(const char *osPath, char *out,
+                        std::size_t capacity) noexcept {
+  if ((out == nullptr) || (capacity == 0U)) {
+    return false;
+  }
+  out[0] = '\0';
+  if ((osPath == nullptr) || (osPath[0] == '\0')) {
+    return false;
+  }
+  return make_virtual_path(
+             std::filesystem::path(osPath),
+             std::filesystem::path(active_config().editorAssetRoot), out,
+             capacity) &&
+         (out[0] != '\0');
+}
+
 std::size_t asset_index_count() noexcept { return g_index.size(); }
 
 void asset_index_reset() noexcept {
   g_index.clear();
   g_index.shrink_to_fit();
+  g_folders.clear();
+  g_folders.shrink_to_fit();
   g_rootOsPath.clear();
   g_built = false;
   ++g_generation;
@@ -392,25 +415,10 @@ bool refresh_child_folder_cache(const char *folder,
 
   const std::filesystem::path parent(resolve_folder(requested));
   cache->children.clear();
-  for (const AssetIndexEntry &entry : g_index) {
-    const std::filesystem::path entryFolder(entry.folder);
-    if (entryFolder == parent) {
-      continue; // direct child file, not a subfolder.
+  for (const std::string &walked : g_folders) {
+    if (std::filesystem::path(walked).parent_path() == parent) {
+      cache->children.push_back(walked);
     }
-    std::error_code ec{};
-    const std::filesystem::path relative =
-        std::filesystem::relative(entryFolder, parent, ec);
-    if (ec || relative.empty() || (*relative.begin() == "..")) {
-      continue;
-    }
-    const std::string childName = (*relative.begin()).string();
-    std::string childStr = (parent / childName).string();
-
-    if (std::find(cache->children.begin(), cache->children.end(),
-                  childStr) != cache->children.end()) {
-      continue;
-    }
-    cache->children.push_back(std::move(childStr));
   }
 
   std::sort(cache->children.begin(), cache->children.end());

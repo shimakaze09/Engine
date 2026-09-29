@@ -227,6 +227,13 @@ bool editor_restore_material(content::AssetId materialId,
 bool editor_save_material(const char *virtualPath,
                           const char *parentVirtualPath) noexcept;
 
+/// Writes a new material with the engine's default parameters and no
+/// parent or textures at the OS path behind `virtualPath`, through
+/// save_material_asset (staged atomic write). The caller has made sure
+/// nothing is there. False, with nothing written, without an asset service
+/// or when the write fails.
+bool editor_create_material(const char *virtualPath) noexcept;
+
 /// Re-reads `virtualPath` from disk (reload_material_asset) and, on
 /// success, returns the freshly loaded state with found=true. On failure
 /// the live in-memory record is left exactly as it was (reload_material_
