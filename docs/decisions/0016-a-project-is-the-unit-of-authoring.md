@@ -27,7 +27,10 @@ executable, wherever it is started. The sample game is a project of its
 own, `samples/island/` (`island.project`), which the editor opens by path
 or, started with none, from beside the executable
 (`engine_integration_project_open` opens it and checks its document is in
-canonical form). A player executable and the project hub are not yet
+canonical form). The player is `engine_player` (`player/`), which links
+`engine_runtime` and nothing from `editor/`; `tools/check_module_deps.py`
+rejects an editor include or link there, and `engine_player_executable`
+runs the real binary on the sample. The project hub is not yet
 implemented.
 
 ## Context

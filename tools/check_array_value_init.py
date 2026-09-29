@@ -35,12 +35,13 @@ import pathlib
 import re
 import sys
 
+from source_roots import ENGINE_SOURCE_ROOTS
+
 # Below this many elements the braced form costs well under a millisecond
 # per translation unit, so it is not worth a finding.
 MIN_ELEMENTS = 256
 
-MODULES = ("app", "audio", "content", "core", "editor", "math", "physics",
-           "renderer", "runtime", "scripting", "tests", "tools")
+MODULES = ENGINE_SOURCE_ROOTS + ("tests", "tools")
 SUFFIXES = (".h", ".hpp", ".cpp")
 
 FUNDAMENTAL = re.compile(

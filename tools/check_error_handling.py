@@ -24,23 +24,13 @@ import pathlib
 import re
 import sys
 
+from source_roots import ENGINE_SOURCE_ROOTS
+
 CPP_SUFFIXES = {".cpp", ".cc", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".inl"}
 
 # Directories holding first-party engine code. Third-party sources are
 # fetched into the build tree and never audited.
-AUDITED_ROOTS = (
-    "app",
-    "audio",
-    "content",
-    "core",
-    "editor",
-    "math",
-    "physics",
-    "renderer",
-    "runtime",
-    "scripting",
-    "tools",
-)
+AUDITED_ROOTS = ENGINE_SOURCE_ROOTS + ("tools",)
 
 VALUE_CALL_RE = re.compile(r"\.\s*value\s*\(\s*\)")
 

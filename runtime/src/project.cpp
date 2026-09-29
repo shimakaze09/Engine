@@ -11,6 +11,8 @@
 #include <system_error>
 
 #include "engine/core/logging.h"
+#include "engine/core/platform.h"
+#include "engine/core/vfs.h"
 
 namespace engine {
 
@@ -195,6 +197,28 @@ const char *project_open_failure_text(ProjectOpenFailureKind kind) noexcept {
     return "a project path is too long";
   }
   return "the project could not be opened";
+}
+
+bool find_bundled_sample_project(char *out, std::size_t capacity) noexcept {
+  if ((out == nullptr) || (capacity == 0U)) {
+    return false;
+  }
+  out[0] = '\0';
+  char appDir[512] = {};
+  if (!core::platform_get_app_dir(appDir, sizeof(appDir))) {
+    return false;
+  }
+  const std::size_t length = std::strlen(appDir);
+  const bool slash = (length > 0U) && ((appDir[length - 1U] == '/') ||
+                                       (appDir[length - 1U] == '\\'));
+  const int written = std::snprintf(out, capacity, "%s%ssamples/island", appDir,
+                                    slash ? "" : "/");
+  if ((written <= 0) || (static_cast<std::size_t>(written) >= capacity) ||
+      !core::os_directory_exists(out)) {
+    out[0] = '\0';
+    return false;
+  }
+  return true;
 }
 
 } // namespace engine

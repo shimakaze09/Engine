@@ -376,6 +376,46 @@ def test_module_dependency_gate():
         ]))]) == 0,
               "module deps: own-module dirs sharing a line are not grants")
 
+        # The player runs a game without the editor (decision 0016): an
+        # editor include is an upward edge, and a link to engine_editor
+        # (check 6) is one too although no header names it.
+        player_include = tmp / "player_include"
+        write_source(player_include, "player/main.cpp",
+                     ["engine/editor/editor.h"])
+        check(run([script, "--root", str(player_include)]) != 0,
+              "module deps: the player including an editor header fails")
+
+        def link_case(name, module, line):
+            case = tmp / name
+            write_source(case, f"{module}/main.cpp", ["engine/runtime/world.h"])
+            (case / module / "CMakeLists.txt").write_text(
+                "# Synthetic fixture for the module dependency gate; the\n"
+                "# player never links engine_editor.\n"
+                f"{line}\n", encoding="utf-8")
+            return case
+
+        check(run([script, "--root", str(link_case(
+            "player_links_editor", "player",
+            "target_link_libraries(engine_player PRIVATE "
+            "$<LINK_LIBRARY:WHOLE_ARCHIVE,engine_editor>)"))]) != 0,
+              "module deps: the player linking engine_editor fails")
+        check(run([script, "--root", str(link_case(
+            "runtime_links_editor", "runtime",
+            "engine_add_module_library(engine_runtime PUBLIC_DEPS "
+            "engine_editor)"))]) != 0,
+              "module deps: an upward link from runtime fails")
+        check(run([script, "--root", str(link_case(
+            "player_links_runtime", "player",
+            "engine_add_executable_target(engine_player PRIVATE_DEPS "
+            "engine_runtime engine_core)"))]) == 0,
+              "module deps: the player linking the runtime passes, and a "
+              "comment naming engine_editor is not a link")
+        check(run([script, "--root", str(link_case(
+            "app_links_editor", "app",
+            "target_link_libraries(engine_editor_app PRIVATE "
+            "$<LINK_LIBRARY:WHOLE_ARCHIVE,engine_editor>)"))]) == 0,
+              "module deps: the editor app linking the editor passes")
+
         # Public-header dependency visibility (check 4). A module whose
         # public headers include another module's headers must declare
         # that dep PUBLIC; PRIVATE leaves consumers compiling through

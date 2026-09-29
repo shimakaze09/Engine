@@ -1762,6 +1762,23 @@ engine_add_test_executable(engine_integration_draw_order_thread_count
     integration
 )
 
+# The player, through the real binary: the sample plays and exits 0, and
+# a missing project, a bad option or a broken startup scene is refused
+# with its exit code and reason (player_executable_test.cmake).
+if(TARGET engine_player AND NOT ENGINE_TARGET_PLATFORM STREQUAL "Web")
+    add_test(NAME engine_player_executable
+        COMMAND ${CMAKE_COMMAND}
+            "-DPLAYER=$<TARGET_FILE:engine_player>"
+            "-DSAMPLE=${ENGINE_SAMPLE_PROJECT_OUTPUT_DIR}"
+            "-DSCRATCH=${CMAKE_CURRENT_BINARY_DIR}/player_executable_test"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/player_executable_test.cmake)
+    # A macOS bundle keeps no engine content inside it yet, so the player
+    # is pointed at the build's, as a packaged game would carry its own.
+    set_tests_properties(engine_player_executable
+        PROPERTIES LABELS integration TIMEOUT 300
+        ENVIRONMENT "ENGINE_ROOT=${ENGINE_ENGINE_ASSET_OUTPUT_DIR}")
+endif()
+
 # engine_validate's command line, through the real binary: a clean scene
 # passes, and an unknown option, a missing value and no scene at all are
 # usage errors (exit 2), never a silent run on the wrong input.

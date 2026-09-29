@@ -10,7 +10,9 @@
 // begins play: player mode boots that scene through the deferred
 // engine.load_scene transition after the pipeline installed its collision
 // dispatch, and the handler must observe the pair on the frames that
-// follow (regression for #410).
+// follow (regression for #410). A second run whose startup scene is
+// malformed must stop on a fatal error rather than play the empty
+// bootstrap world (#608).
 
 #include "../asset_root.h"
 #include "engine/core/cvar.h"
@@ -27,6 +29,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <new>
 #include <thread>
@@ -36,6 +39,7 @@ namespace {
 constexpr const char *kScriptPath = "player_mode_test.lua";
 constexpr const char *kCollisionScriptPath = "player_mode_collision.lua";
 constexpr const char *kCollisionScenePath = "player_mode_collision.scene";
+constexpr const char *kBrokenScenePath = "player_mode_broken.scene";
 
 engine::runtime::World *g_world = nullptr;
 
@@ -262,8 +266,33 @@ int main() {
     }
     pipeline.teardown();
   }
-
   engine::shutdown();
+
+  // A startup scene that does not load leaves a player nothing to show:
+  // the run stops on a fatal error instead of playing the empty bootstrap
+  // world.
+  {
+    {
+      std::ofstream broken(kBrokenScenePath, std::ios::binary);
+      broken << "{ not a scene";
+      CHECK(static_cast<bool>(broken), "write a malformed startup scene");
+    }
+    config.editorScenePath = kBrokenScenePath;
+    CHECK(engine::bootstrap(config), "bootstrap the broken player");
+    engine::EnginePipeline pipeline;
+    CHECK(pipeline.initialize(0U), "its pipeline initializes");
+    bool stopped = false;
+    for (int frame = 0; (frame < 3) && !stopped; ++frame) {
+      stopped = !pipeline.execute_frame();
+    }
+    CHECK(stopped && pipeline.had_fatal_error(),
+          "a startup scene that cannot load stops the player on a fatal "
+          "error");
+    pipeline.teardown();
+    engine::shutdown();
+    std::remove(kBrokenScenePath);
+  }
+
   remove_script_file();
 
   if (g_failures != 0) {

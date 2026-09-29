@@ -1,4 +1,5 @@
-// Implements the Engine editor application's entry point: a windowed
+// Implements the Engine editor application's entry point (the game runs
+// without it in engine_player, player/main.cpp): a windowed
 // application (no console window on Windows) that prints to the
 // terminal it was started from, if any, and says why in an error box when
 // it cannot start, since it has no console to say it in. It opens the
@@ -10,12 +11,10 @@
 #include "engine/core/command_line.h"
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
-#include "engine/core/vfs.h"
 #include "engine/engine.h"
 #include "engine/project.h"
 
 #include <cstdio>
-#include <cstring>
 
 namespace {
 
@@ -29,22 +28,6 @@ int fail_to_start(const char *message) noexcept {
   std::fprintf(stderr, "%s\n", text);
   engine::core::platform_show_error_box("Engine", text);
   return static_cast<int>(engine::ExitCode::BootstrapFailed);
-}
-
-/// The sample project beside the executable, into `out`; false when there
-/// is none.
-bool find_bundled_project(char *out, std::size_t capacity) noexcept {
-  char appDir[512] = {};
-  if (!engine::core::platform_get_app_dir(appDir, sizeof(appDir))) {
-    return false;
-  }
-  const std::size_t length = std::strlen(appDir);
-  const bool slash = (length > 0U) && ((appDir[length - 1U] == '/') ||
-                                       (appDir[length - 1U] == '\\'));
-  const int written = std::snprintf(out, capacity, "%s%ssamples/island", appDir,
-                                    slash ? "" : "/");
-  return (written > 0) && (static_cast<std::size_t>(written) < capacity) &&
-         engine::core::os_directory_exists(out);
 }
 
 } // namespace
@@ -76,7 +59,7 @@ int main(int argc, char **argv) {
   char bundled[600] = {};
   const char *projectPath = commandLine->positional(0U);
   if ((projectPath == nullptr) &&
-      find_bundled_project(bundled, sizeof(bundled))) {
+      engine::find_bundled_sample_project(bundled, sizeof(bundled))) {
     projectPath = bundled;
   }
   if (projectPath != nullptr) {

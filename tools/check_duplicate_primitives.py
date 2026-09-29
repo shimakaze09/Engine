@@ -32,23 +32,13 @@ import pathlib
 import re
 import sys
 
+from source_roots import ENGINE_SOURCE_ROOTS
+
 CPP_SUFFIXES = {".cpp", ".cc", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".inl"}
 
 # First-party roots holding production and tool code. `tests` is excluded;
 # see the module docstring.
-AUDITED_ROOTS = (
-    "app",
-    "audio",
-    "content",
-    "core",
-    "editor",
-    "math",
-    "physics",
-    "renderer",
-    "runtime",
-    "scripting",
-    "tools",
-)
+AUDITED_ROOTS = ENGINE_SOURCE_ROOTS + ("tools",)
 
 
 class Rule:

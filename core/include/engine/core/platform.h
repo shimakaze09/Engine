@@ -272,7 +272,9 @@ std::size_t process_memory_bytes() noexcept;
 /// When the process was started from a terminal, attaches to it and points
 /// stdout and stderr there, so a run from a shell still prints, as Godot
 /// does; started from Explorer, there is no terminal and nothing changes.
-/// True when a terminal was attached. Everywhere else a no-op returning
+/// A stream the parent redirected to a pipe or a file is left where it
+/// goes, so a test or a script capturing the output still gets it. True
+/// when a terminal was attached. Everywhere else a no-op returning
 /// false: the process already writes to whatever started it.
 bool platform_attach_parent_console() noexcept;
 

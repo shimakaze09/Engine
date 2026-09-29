@@ -8,8 +8,9 @@
 //       mode displaced is back, and a second bootstrap in the same page
 //       starts, runs and closes every tier again.
 //   page_boots
-//       engine_editor_app.html, the shipped page: it boots in player mode
-//       and runs frames with no page error and no engine error line.
+//       engine_player.html, the shipped page: the player boots with no
+//       editor linked and runs frames with no page error and no engine
+//       error line.
 //   save_persists
 //       engine_web_lifecycle.html: a save written through the production
 //       path is still there after the page reloads (#695).
@@ -202,10 +203,10 @@ async function lifecycleCase(page, log, base, name) {
 }
 
 async function pageBootsCase(page, log, base) {
-  await page.goto(`${base}/engine_editor_app.html`);
-  await log.waitFor(/\[engine\] bootstrap complete/);
-  check(log.lines.some((l) => /environment override: app\.player_mode = 1/.test(l)),
-        'the share shell did not seed player mode');
+  await page.goto(`${base}/engine_player.html`);
+  await log.waitFor(/\[player\] player: running/);
+  check(!log.lines.some((l) => /\[editor\]/.test(l)),
+        'the shared page ran editor code');
   // One engine frame per animation frame: 120 of them is past startup
   // and asset streaming into steady-state play.
   await page.evaluate(async () => {

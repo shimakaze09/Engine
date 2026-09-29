@@ -22,7 +22,7 @@ Each fact has one home. Nothing mirrors anything else.
 
 ## What this repository contains
 
-- A runnable editor application: `engine_editor_app`
+- A runnable editor application, `engine_editor_app`, and a player, `engine_player`, that runs a game without the editor
 - Runtime systems for ECS/world simulation, rendering, physics, audio, and scripting
 - Lua 5.4 gameplay scripting bridge (`engine` Lua API)
 - Generated Lua binding pipeline for annotated scripting accessors
@@ -85,7 +85,8 @@ pinned commit; only SDL3 is looked up locally first.
 
 ## Repository layout
 
-- `app/`: executable entry point (`engine_editor_app`)
+- `app/`: the editor's entry point (`engine_editor_app`)
+- `player/`: the player's entry point (`engine_player`), which links no editor code
 - `core/`: platform, input, job system, logging, reflection base, VFS
 - `math/`: math primitives and transforms
 - `content/`: asset catalog, identity and `.meta` sidecars, cook-stamp staleness checks, streaming
@@ -226,8 +227,19 @@ sample project the build copies beside it (`build/samples/island`), until a
 project hub takes that role. A project that cannot be opened says why in an
 error box.
 
+`engine_player` runs a game without the editor, as a Unity player build or a
+Godot export does: `engine_player path/to/my_game` (the sample beside it
+with none) opens a window titled with the project's name and plays its
+startup scene. `--headless` runs it without a window and `--max-frames N`
+stops it after N frames. It exits 0 when the game quits, 1 when the project
+cannot be opened or an option is wrong (the reason is printed, and shown in
+a box when windowed), and 3 when the startup scene does not load
+(`engine_player_executable` runs the real binary through each case). On the
+web, `engine_player.html` is the page a game is shared as, and
+`engine_editor_app.html` is the editor.
+
 Each windowed run writes its log to `logs/editor.log` under the per-user data
-directory (`logs/player.log` in player mode), keeping the previous run's as
+directory (`logs/player.log` for `engine_player`), keeping the previous run's as
 `editor-prev.log`, as Unity keeps `Editor.log`; a failed start shows an error
 box naming it. The same messages appear in the editor's own Log panel, whose
 command line runs console commands (`help` lists them, `get` and `set` read and
@@ -257,7 +269,7 @@ project, and `l:<label>` in the Assets search keeps the assets carrying it
 
 It starts on an empty 3D scene, as a new Unity project does. The scene holds a
 Main Camera, a Directional Light, and a Scene Controller entity running
-`assets/main.lua`, whose hooks start empty. Player mode boots
+`assets/main.lua`, whose hooks start empty. The player boots
 `assets/main.scene`, the same scene; `engine_integration_startup_template`
 keeps the two identical. File > Open Scene... opens the Island Hopper
 template (`assets/templates/island_hopper.scene`) and the sample scenes
