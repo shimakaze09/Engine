@@ -133,6 +133,54 @@ bool check_point_and_vector_transforms() {
          nearly_equal(half.z, 12.0F, 1.0e-4F);
 }
 
+/// look_rotation points -Z along the forward it is given, keeps +Y on the
+/// up hint's side and the right axis level, and refuses a zero forward or
+/// one parallel to up. The bound is a few dozen ulps of 1: the result
+/// passes through one normalize, two cross products, Shepperd's sqrt and
+/// a final normalize, each within a few ulps.
+bool check_look_rotation() {
+  using engine::math::Quat;
+  using engine::math::Vec3;
+  constexpr float kBound = 1.0e-5F;
+  const Vec3 up(0.0F, 1.0F, 0.0F);
+  const Vec3 forwards[] = {Vec3(0.0F, 0.0F, -1.0F), Vec3(0.0F, 0.0F, 1.0F),
+                           Vec3(1.0F, 0.0F, 0.0F),  Vec3(-3.0F, 0.0F, 0.0F),
+                           Vec3(1.0F, -1.0F, 1.0F), Vec3(0.2F, 0.97F, 0.1F),
+                           Vec3(0.0F, -5.0F, 4.0F)};
+  for (const Vec3 &forward : forwards) {
+    Quat q{};
+    if (!engine::math::look_rotation(forward, up, &q)) {
+      return false;
+    }
+    const Vec3 lookDir =
+        engine::math::rotate_vector(Vec3(0.0F, 0.0F, -1.0F), q);
+    const Vec3 rotatedUp =
+        engine::math::rotate_vector(Vec3(0.0F, 1.0F, 0.0F), q);
+    const Vec3 rotatedRight =
+        engine::math::rotate_vector(Vec3(1.0F, 0.0F, 0.0F), q);
+    if (!nearly_equal_vec3(lookDir, engine::math::normalize(forward), kBound) ||
+        !nearly_equal(engine::math::dot(q, q), 1.0F, kBound) ||
+        !(rotatedUp.y > 0.0F) ||
+        !nearly_equal(engine::math::dot(rotatedUp, lookDir), 0.0F, kBound) ||
+        !nearly_equal(rotatedRight.y, 0.0F, kBound)) {
+      return false;
+    }
+  }
+  // Facing -Z with +Y up is no rotation at all.
+  Quat identity(0.5F, 0.5F, 0.5F, 0.5F);
+  if (!engine::math::look_rotation(Vec3(0.0F, 0.0F, -2.0F), up, &identity) ||
+      !nearly_equal_quat(identity, Quat(), kBound)) {
+    return false;
+  }
+  const Quat sentinel(0.5F, 0.5F, 0.5F, 0.5F);
+  Quat untouched = sentinel;
+  return !engine::math::look_rotation(Vec3(0.0F, 0.0F, 0.0F), up, &untouched) &&
+         !engine::math::look_rotation(Vec3(0.0F, 3.0F, 0.0F), up, &untouched) &&
+         !engine::math::look_rotation(Vec3(0.0F, -1.0F, 0.0F), up,
+                                      &untouched) &&
+         (untouched.x == sentinel.x) && (untouched.w == sentinel.w);
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -609,6 +657,9 @@ int main() {
   }
   if (!check_point_and_vector_transforms()) {
     return 63;
+  }
+  if (!check_look_rotation()) {
+    return 64;
   }
 
   return 0;

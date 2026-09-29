@@ -1,8 +1,8 @@
 // Rotation quaternion (x, y, z, w) with conversions to/from axis-angle,
-// Euler angles, and Mat4, defined inline for hot transform/physics paths.
-// Every trigonometric evaluation goes through the deterministic scalar
-// set, so a rotation integrated on one platform matches another bit for
-// bit.
+// Euler angles, Mat4 and a look direction, defined inline for hot
+// transform/physics paths. Every trigonometric evaluation goes through the
+// deterministic scalar set, so a rotation integrated on one platform matches
+// another bit for bit.
 
 #pragma once
 
@@ -227,6 +227,27 @@ constexpr Vec3 rotate_vector(const Vec3 &v, const Quat &q) noexcept {
   const Vec3 qxyz(q.x, q.y, q.z);
   const Vec3 t = mul(cross(qxyz, v), 2.0F);
   return add(add(v, mul(t, q.w)), cross(qxyz, t));
+}
+
+/// The rotation that points an entity's forward (-Z, the camera
+/// convention) along `forward`, with its +Y as near `up` as the forward
+/// allows. False, `*out` untouched, when `forward` is zero or parallel to
+/// `up`, where no one rotation is meant; neither needs to be unit length.
+inline bool look_rotation(const Vec3 &forward, const Vec3 &up,
+                          Quat *out) noexcept {
+  const Vec3 back = normalize(Vec3(-forward.x, -forward.y, -forward.z));
+  const Vec3 right = cross(up, back);
+  const float rightLength = length(right);
+  if ((out == nullptr) || (length(back) <= 0.0F) ||
+      !(rightLength > 1.0e-6F * length(up))) {
+    return false;
+  }
+  const Vec3 x = mul(right, 1.0F / rightLength);
+  const Vec3 y = cross(back, x);
+  *out = normalize(from_mat4(
+      Mat4(Vec4(x.x, x.y, x.z, 0.0F), Vec4(y.x, y.y, y.z, 0.0F),
+           Vec4(back.x, back.y, back.z, 0.0F), Vec4(0.0F, 0.0F, 0.0F, 1.0F))));
+  return true;
 }
 
 // Euler convention: pitch is rotation about +X, yaw about +Y, roll about +Z.
