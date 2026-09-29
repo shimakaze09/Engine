@@ -9,7 +9,11 @@ disagree, that is a defect in one of them; report it.
 
 ```
 app → editor → runtime → renderer / physics / scripting / audio → content → core / math
+      player → runtime
 ```
+
+The player sits beside the editor, not above it: it reaches the runtime
+and everything under it, and nothing in `editor/`.
 
 The chain states direction, not adjacency: reaching further down
 (`editor → renderer`) is legal. Within the bottom tier the direction is
@@ -375,6 +379,7 @@ The code is the detail.
 | Module | Responsibility |
 | --- | --- |
 | `app/` | Editor entry point; whole-archives the editor so its bridge registers before bootstrap. |
+| `player/` | The player (`engine_player`): opens a project, boots the engine in player mode (no editor bridge, the startup scene loaded and required) and runs it, windowed or headless, for a frame budget or until quit; the web share page. Links `engine_runtime` only, which `tools/check_module_deps.py` holds for both its includes and its CMake links. |
 | `core/` | Bootstrap/config, the command-line parser every executable shares, platform (SDL glue, paths, native handles, platform events, touch), logging and crash reports, cvars, console, event bus, input and input maps, VFS, JSON, atomic and durable file writes, job system, allocators, profiler, reflection, entity handle, service locator, `AssetGuid`/`AssetRef` value types, mesh and animation asset formats, `Rng`, simulation clock, debug draw, shared primitives such as `FixedHashTable`. |
 | `math/` | Header-only vectors, matrices, quaternions, transforms, bounding volumes, the view frustum every system culls and picks with (`frustum.h`: planes under either clip depth convention, box, swept-box and sphere tests, sub-rectangle projections, projection to and from clip space), the deterministic scalar set (`scalar.h`), component PODs. |
 | `content/` | Generic asset layer: identity and `.meta` sidecars (an asset's GUID, import settings and labels; labels become the catalog record's tags at mount), the `.project` document (a project's identity, roots, scene list, startup scene and main script; refused whole on any unknown, repeated, missing or ill-fitting field), the asset catalog (the one record of every asset's path, identity, type and dependencies, with a change generation; it grows in pages as assets are catalogued, up to a configured limit, and reports its memory under the Assets tag) and the mount walk that fills it from the asset type table, cook contract and cook-stamp validation (torn, mixed, newer-schema and foreign-tool cooks are refused), provenance, dependency edges (a material's parent and textures, a cooked output's cook-stamp dependencies) with change notification (a change reaches every dependent, transitively, found by scanning the forward edges) and ordered load, runtime staleness warnings for a cooked asset whose source or cook dependency changed, the reload contract every hot-reload executor follows (prepare, validate, commit or roll back, record the asset's reload generation, notify dependents), transition queue, async streaming on worker threads. |
