@@ -533,27 +533,12 @@ void draw_inspector_panel() noexcept {
     }
   }
 
-  ImGui::Separator();
-
-  if (!authoredEditable) {
-    ImGui::BeginDisabled();
-  }
-
-  const bool deletePressed = ImGui::Button("Delete Entity");
-
-  if (!authoredEditable) {
-    ImGui::EndDisabled();
-  }
-
-  if (authoredEditable && deletePressed) {
-    static_cast<void>(execute_entity_delete(entity));
-    clear_entity_selection();
-    ImGui::End();
-    return;
-  }
-
+  // Deleting is an edit of the scene, not of the entity's components, so
+  // the Inspector offers no button for it, as Unity's does not: Delete,
+  // Edit > Delete and the Entities panel's and Scene view's right-click
+  // menus delete the selection.
   if (g_showAdvanced) {
-    ImGui::SameLine();
+    ImGui::Separator();
     ImGui::Text("Entity [%u] gen=%u", entity.index, entity.generation);
     ImGui::Text("Persistent Id: %u",
                static_cast<unsigned>(editor_session().world->persistent_id(entity)));

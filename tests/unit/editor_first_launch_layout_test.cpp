@@ -1,7 +1,7 @@
 // Verifies the two halves of the editor's first-launch layout that a test
 // can reach without a display: a row of panel buttons wraps to the next
 // line when the panel is too narrow for it rather than clipping the second
-// button (the Entities panel's Add Primitive), and the main window's
+// button (as the Assets toolbar's Refresh does), and the main window's
 // geometry travels through the layout file's preferences section, so the
 // window a session left is the one the next one opens.
 

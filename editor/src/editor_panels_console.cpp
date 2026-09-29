@@ -309,12 +309,10 @@ void draw_console_panel() noexcept {
   }
   console_capture_mark_seen();
 
+  // Clear stays on the toolbar, as in Unity's Console, being the Log's
+  // most frequent action; Copy All is in every right-click menu.
   if (ImGui::Button("Clear")) {
     console_capture_clear();
-  }
-  ImGui::SameLine();
-  if (ImGui::Button("Copy All")) {
-    copy_shown_log(filter);
   }
   ImGui::SameLine();
   ImGui::Checkbox("Pause", &paused);

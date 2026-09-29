@@ -239,6 +239,52 @@ void check_menus(World &world, Entity alpha, Entity beta) noexcept {
   settle();
 }
 
+/// The centre of the panel's "+ Create" button, the last thing it draws:
+/// its line ends where the window's cursor stood after it.
+ImVec2 create_button() noexcept {
+  const ImGuiWindow *const window = ImGui::FindWindowByName(kEntitiesWindow);
+  if (window == nullptr) {
+    return ImVec2(-1.0F, -1.0F);
+  }
+  const ImGuiStyle &style = ImGui::GetStyle();
+  return ImVec2(window->DC.CursorPosPrevLine.x - style.FramePadding.x -
+                    (ImGui::CalcTextSize("+ Create").x * 0.5F),
+                window->DC.CursorPosPrevLine.y +
+                    (ImGui::GetFrameHeight() * 0.5F));
+}
+
+/// The panel's one creation button opens the menu its empty space does,
+/// so creation is found without knowing to right-click, and its Create
+/// Empty makes a selected root in one undo step.
+void check_create_button(World &world, Entity alpha, Entity beta) noexcept {
+  settle();
+  const std::string panel = entities_frame();
+  check(panel.find("+ Create") != std::string::npos,
+        "the panel shows its + Create button");
+  check((panel.find("Create Entity") == std::string::npos) &&
+            (panel.find("Add Primitive") == std::string::npos),
+        "the two buttons the menus replace are gone");
+  const std::string menu = click(create_button(), ImGuiMouseButton_Left);
+  check((menu.find("Create Empty") != std::string::npos) &&
+            (menu.find("3D Object") != std::string::npos) &&
+            (menu.find("Paste") != std::string::npos) &&
+            (menu.find("Duplicate") == std::string::npos),
+        "+ Create opens the empty-space menu, and only it");
+  const std::size_t before = world.alive_entity_count();
+  static_cast<void>(
+      click(menu_row(open_menu(), 0, true), ImGuiMouseButton_Left));
+  const Entity root = selected_entity();
+  Transform transform{};
+  check((world.alive_entity_count() == before + 1U) && (root != alpha) &&
+            (root != beta) && world.get_transform(root, &transform) &&
+            (transform.parentId == engine::runtime::kInvalidPersistentId),
+        "+ Create > Create Empty creates a root, selected");
+  check(editor_session().commandHistory.undo() &&
+            (world.alive_entity_count() == before),
+        "one undo removes it");
+  settle();
+}
+
 /// A placement parents a creation at its parent's origin, or puts it at a
 /// point (a primitive lifted by its rest height); a dead parent creates
 /// nothing and records no undo step.
@@ -417,6 +463,7 @@ int main() {
         "two named roots");
 
   check_menus(*world, alpha, beta);
+  check_create_button(*world, alpha, beta);
   check_placement(*world, alpha);
   check_rename_in_panel(*world, alpha);
   check_rename_contract(*world, alpha);

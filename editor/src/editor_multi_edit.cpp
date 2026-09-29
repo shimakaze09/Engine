@@ -653,15 +653,9 @@ void draw_multi_select_inspector_panel() noexcept {
     return;
   }
 
+  // Deleting the selection is Delete, Edit > Delete or a right-click
+  // menu's, as for one entity; the Inspector edits components.
   ImGui::Text("%zu entities selected", session.selectedEntityCount);
-  // The selection is gone once this runs, so nothing below may draw.
-  ImGui::BeginDisabled(!editor_action_enabled(EditorAction::Delete));
-  const bool deleted = ImGui::Button("Delete Selected") &&
-                       run_editor_action(EditorAction::Delete);
-  ImGui::EndDisabled();
-  if (deleted) {
-    return;
-  }
   ImGui::Separator();
 
   const bool editable = world_is_editable();

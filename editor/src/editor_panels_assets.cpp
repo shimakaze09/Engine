@@ -5,6 +5,7 @@
 // rebuilt on the index/filter-cache backend.
 
 #include "editor_panels_assets.h"
+#include "editor_panels_main.h"
 
 #include "editor_asset_create.h"
 #include "editor_asset_index.h"
@@ -378,8 +379,10 @@ void draw_toolbar(ContentBrowserState &browser) noexcept {
     content_browser_go_forward();
   }
   ImGui::EndDisabled();
-  ImGui::SameLine();
-  if (ImGui::Button("Rescan")) {
+  // The index notices no change made outside the editor, so Refresh stays
+  // a visible button as well as a menu item, named as the menu names it.
+  same_line_if_button_fits("Refresh");
+  if (ImGui::Button("Refresh")) {
     static_cast<void>(rebuild_asset_index());
   }
   ImGui::SameLine();
@@ -408,7 +411,7 @@ void draw_asset_browser_panel() noexcept {
     return;
   }
 
-  // Cold: only runs once per process (or on the explicit Rescan button),
+  // Cold: only runs once per process (or on the explicit Refresh button),
   // never per frame.
   if (!asset_index_built()) {
     static_cast<void>(rebuild_asset_index());
