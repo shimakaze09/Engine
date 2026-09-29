@@ -70,6 +70,7 @@
 #include "editor_play_recording.h"
 #include "editor_preferences.h"
 #include "editor_project_hub.h"
+#include "editor_project_settings.h"
 #include "editor_scene_document.h"
 #include "editor_screenshot.h"
 #include "editor_session.h"
@@ -185,6 +186,7 @@ void draw_editor_panels(float frameMs, float utilizationPct) noexcept {
   draw_material_editor_panel();
   draw_rendering_panel();
   draw_editor_preferences_panel();
+  draw_project_settings_panel();
 }
 
 /// Applies the editor's visual theme: neutral dark palette, one restrained
@@ -285,6 +287,7 @@ bool initialize_editor(void *sdlWindow) noexcept {
   // Before the layout is read: its preference lines set these.
   register_stats_cvars();
   register_editor_preferences();
+  register_project_settings();
   static_cast<void>(editor_layout_initialize());
   apply_stored_window_geometry();
 

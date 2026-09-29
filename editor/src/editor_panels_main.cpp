@@ -267,8 +267,14 @@ void draw_main_menu_bar() noexcept {
     ImGui::Separator();
     editor_action_menu_item(EditorAction::Screenshot);
     ImGui::Separator();
-    // Preferences sit under Edit, as in Unity; no reference editor has a
-    // top-level Settings menu.
+    // Project Settings and Preferences sit under Edit, as in Unity; no
+    // reference editor has a top-level Settings menu.
+    const bool showProjectSettings =
+        core::cvar_get_bool("editor.show_project_settings", false);
+    if (ImGui::MenuItem("Project Settings...", nullptr, showProjectSettings,
+                        has_open_project())) {
+      core::cvar_set_bool("editor.show_project_settings", !showProjectSettings);
+    }
     const bool showPreferences =
         core::cvar_get_bool("editor.show_preferences", false);
     if (ImGui::MenuItem("Preferences...", nullptr, showPreferences)) {
