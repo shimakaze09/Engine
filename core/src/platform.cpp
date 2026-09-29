@@ -957,7 +957,8 @@ platform_request_file_dialog(FileDialogKind kind,
     return kNoFileDialog;
   }
   if ((filterCount < 0) || (filterCount > kMaxFileDialogFilters) ||
-      ((filterCount > 0) && (filters == nullptr))) {
+      ((filterCount > 0) && (filters == nullptr)) ||
+      ((kind == FileDialogKind::Folder) && (filterCount != 0))) {
     log_message(LogLevel::Warning, "platform",
                 "native file dialog refused: bad filter list");
     return kNoFileDialog;
@@ -1003,6 +1004,9 @@ platform_request_file_dialog(FileDialogKind kind,
   if (kind == FileDialogKind::Save) {
     SDL_ShowSaveFileDialog(&dialog_trampoline, &slot, g_window, sdlFilters,
                            filterCount, defaultLocation);
+  } else if (kind == FileDialogKind::Folder) {
+    SDL_ShowOpenFolderDialog(&dialog_trampoline, &slot, g_window,
+                             defaultLocation, false);
   } else {
     SDL_ShowOpenFileDialog(&dialog_trampoline, &slot, g_window, sdlFilters,
                            filterCount, defaultLocation, false);
