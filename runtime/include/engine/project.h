@@ -5,7 +5,8 @@
 // startup scene and main script it names, so a project that cannot run is
 // refused here with a reason rather than half-starting.
 // configure_without_project points a config at no project, as the project
-// hub runs. The project-switch handoff carries the choice of the next
+// hub runs. create_project makes a new project from a template, whole or
+// not at all. The project-switch handoff carries the choice of the next
 // project (or the hub) out of a run to the executable's loop, which shuts
 // the engine down and bootstraps it again, as Godot's project manager
 // relaunches its editor.
@@ -88,6 +89,49 @@ const char *project_open_failure_text(ProjectOpenFailureKind kind) noexcept;
 /// and clears the project GUID, so bootstrap mounts only the engine's
 /// content. Every other field is left as the caller set it.
 void configure_without_project(EngineConfig *config) noexcept;
+
+/// Why a project was not created.
+enum class ProjectCreateFailureKind : std::uint8_t {
+  /// A null or empty argument, or no room for the result.
+  InvalidArgument,
+  /// The name is not one a .project document accepts (empty, too long, a
+  /// path separator or a character some filesystem refuses).
+  InvalidName,
+  /// The location is not a directory.
+  LocationMissing,
+  /// Something already exists where the project would go.
+  AlreadyExists,
+  /// The template is not a directory, holds no content root, or holds a
+  /// file that cannot be read.
+  TemplateUnusable,
+  /// A path does not fit kProjectOsPathCapacity.
+  PathTooLong,
+  /// Writing the staged project, or moving it into place, failed.
+  WriteFailed,
+};
+
+/// Longest template file create_project copies; a template holds a
+/// starting scene and script, far below it.
+inline constexpr std::size_t kMaxProjectTemplateFileBytes = 1024U * 1024U;
+
+/// Creates the project `name` in the directory `location`: the directory
+/// `<location>/<name>` holding a copy of `templateDirectory` (its content
+/// root is "assets", with the startup scene "assets/main.scene" and, when
+/// the template has it, the main script "assets/main.lua") and a new
+/// "<name>.project" with a fresh GUID. Everything is written into the
+/// hidden sibling "<location>/.<name>.creating", each file durably, and
+/// renamed into place only when complete, so a failure (logged with the
+/// reason) leaves nothing at `<location>/<name>`; a stage left by an
+/// interrupted earlier attempt is replaced. On success writes the new
+/// .project file's path to `outProjectFile`, ready for open_project.
+/// Cold path: std::filesystem, one heap buffer per call.
+std::expected<void, ProjectCreateFailureKind>
+create_project(const char *location, const char *name,
+               const char *templateDirectory, char *outProjectFile,
+               std::size_t capacity) noexcept;
+
+/// A short English description of `kind`, for a dialog or a tool.
+const char *project_create_failure_text(ProjectCreateFailureKind kind) noexcept;
 
 /// Asks the executable running the engine to switch projects once this
 /// run ends: to the project at `path` (as open_project takes it), or, for
