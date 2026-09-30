@@ -354,6 +354,30 @@ bool find_reflected_component_descriptors(
   return true;
 }
 
+namespace {
+
+// True when every byte of the field is zero: the value an optional field
+// is omitted at and read back as. A field lying outside the type is not
+// zero, so the write below reaches its own refusal.
+bool field_bytes_are_zero(const core::TypeDescriptor &descriptor,
+                          const core::TypeField &field,
+                          const void *instance) noexcept {
+  if ((field.offset > descriptor.size) ||
+      (field.size > (descriptor.size - field.offset))) {
+    return false;
+  }
+  const auto *bytes =
+      static_cast<const unsigned char *>(instance) + field.offset;
+  for (std::size_t i = 0U; i < field.size; ++i) {
+    if (bytes[i] != 0U) {
+      return false;
+    }
+  }
+  return true;
+}
+
+} // namespace
+
 bool write_reflected_component(core::JsonWriter &writer,
                                const char *componentName,
                                const core::TypeDescriptor &descriptor,
@@ -368,6 +392,10 @@ bool write_reflected_component(core::JsonWriter &writer,
   for (std::size_t i = 0U; i < descriptor.fieldCount; ++i) {
     const core::TypeField &field = descriptor.fields[i];
     if (field.key == nullptr) {
+      continue;
+    }
+    if (field.omitWhenZero &&
+        field_bytes_are_zero(descriptor, field, instance)) {
       continue;
     }
 
@@ -471,6 +499,16 @@ bool read_reflected_component(const core::JsonParser &parser,
 
     core::JsonValue fieldValue{};
     if (!parser.get_object_field(componentObject, field.key, &fieldValue)) {
+      // An optional field is written only while nonzero, so its absence
+      // means zero whatever the instance held.
+      if (field.omitWhenZero) {
+        if ((field.offset > descriptor.size) ||
+            (field.size > (descriptor.size - field.offset))) {
+          return false;
+        }
+        std::memset(static_cast<unsigned char *>(instance) + field.offset, 0,
+                    field.size);
+      }
       continue;
     }
 

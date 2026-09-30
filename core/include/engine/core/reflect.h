@@ -42,6 +42,11 @@ struct TypeField final {
     Vec4,
     Quat,
   } kind = Kind::Float;
+  /// True when the serializers write this field only while its bytes are
+  /// not all zero, and an absent key reads as zero. It lets a field join a
+  /// type without changing a byte of the documents that never set it, so
+  /// adding it needs no schema version.
+  bool omitWhenZero = false;
 };
 
 // TypeDescriptor holds all reflected fields for one type.
@@ -63,7 +68,8 @@ struct TypeDescriptor final {
   /// trip. A null fieldKey uses the member name as the key.
   bool add_field(const char *fieldName, std::size_t fieldOffset,
                  std::size_t fieldSize, TypeField::Kind fieldKind,
-                 const char *fieldKey = nullptr) noexcept;
+                 const char *fieldKey = nullptr,
+                 bool omitWhenZero = false) noexcept;
 
   // O(fieldCount) string lookup; migrate to field IDs if this becomes hot.
   const TypeField *find_field(const char *fieldName) const noexcept;
@@ -128,8 +134,8 @@ struct TypeRegistry final {
   /// the field. A null fieldKey uses the member name as the wire key.
   bool add_field(TypeDescriptor *descriptor, const char *fieldName,
                  std::size_t fieldOffset, std::size_t fieldSize,
-                 TypeField::Kind fieldKind,
-                 const char *fieldKey = nullptr) noexcept;
+                 TypeField::Kind fieldKind, const char *fieldKey = nullptr,
+                 bool omitWhenZero = false) noexcept;
   // O(typeCount) string lookup; migrate to type IDs if this becomes hot.
   const TypeDescriptor *find_type(const char *name) const noexcept;
   /// Number of registered types.
@@ -181,6 +187,16 @@ bool report_reflection_registration_drops() noexcept;
       desc, #FieldName, offsetof(T, FieldName),                                \
       sizeof(decltype(T::FieldName)),                                          \
       ::engine::core::TypeField::Kind::KindEnum, WireKey));
+
+// REFLECT_FIELD_OPTIONAL serializes under the member name, but only while
+// the value is nonzero; an absent key reads as zero. Use it for a field
+// added to a type that existing documents already carry, so they stay
+// byte-identical and need no schema version.
+#define REFLECT_FIELD_OPTIONAL(FieldName, KindEnum)                            \
+  static_cast<void>(::engine::core::global_type_registry().add_field(          \
+      desc, #FieldName, offsetof(T, FieldName),                                \
+      sizeof(decltype(T::FieldName)),                                          \
+      ::engine::core::TypeField::Kind::KindEnum, nullptr, true));
 
 #define REFLECT_END()                                                          \
   return true;                                                                 \
