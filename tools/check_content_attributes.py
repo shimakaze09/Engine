@@ -44,6 +44,7 @@ HASHED_SUFFIXES = (
     ".wav",
     ".ogg",
     ".mp3",
+    ".flac",
     ".ttf",
     ".mesh",
     ".hull",

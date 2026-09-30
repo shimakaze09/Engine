@@ -10,6 +10,13 @@
 
 namespace engine::audio {
 
+/// Every file extension load_sound and play_music decode, lowercase. The
+/// build refuses to compile when miniaudio lacks a decoder for one of them
+/// (miniaudio_impl.cpp), and the asset type table's Sound row lists exactly
+/// these (engine_unit_audio_formats).
+inline constexpr const char *kLoadableSoundExtensions[] = {".wav", ".ogg",
+                                                           ".mp3", ".flac"};
+
 /// Opaque id of a loaded sound (0 = invalid; generation-encoded).
 struct SoundHandle final {
   std::uint32_t id = 0U;
@@ -77,7 +84,8 @@ void shutdown_audio() noexcept;
 // Drive the audio engine pump.  Call once per frame.
 void update_audio() noexcept;
 
-/// Loads a sound from a VFS path (.wav, .mp3, .ogg, .flac) into memory.
+/// Loads a sound from a VFS path (one of kLoadableSoundExtensions) into
+/// memory.
 /// Refused with a logged diagnostic naming the path when the file exceeds
 /// `audio.max_sound_file_bytes` (checked from file metadata before any of
 /// it is read) or its header claims more decoded PCM than

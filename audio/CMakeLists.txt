@@ -3,6 +3,7 @@
 engine_add_module_library(engine_audio
     SOURCES
     src/audio.cpp
+    src/miniaudio_impl.cpp
     PUBLIC_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     PUBLIC_DEPS
@@ -11,7 +12,8 @@ engine_add_module_library(engine_audio
 )
 
 # miniaudio is a single-header library — we only need its include path.
-# The implementation is compiled inside audio.cpp via MINIAUDIO_IMPLEMENTATION.
+# The implementation is compiled in miniaudio_impl.cpp, which also compiles
+# the stb_vorbis decoder shipped in the same checkout (extras/).
 # Pinned by commit SHA like every other FetchContent dependency: a tag can
 # be moved by the upstream, a commit cannot (tools/check_dependency_pins.py
 # enforces this).
@@ -28,3 +30,5 @@ target_include_directories(engine_audio
     PRIVATE
     ${miniaudio_SOURCE_DIR}
 )
+# Both translation units must see the same miniaudio configuration.
+target_compile_definitions(engine_audio PRIVATE MA_NO_GENERATION)

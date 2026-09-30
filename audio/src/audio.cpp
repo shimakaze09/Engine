@@ -20,13 +20,12 @@
 #include <emscripten.h>
 #endif
 
-// Silence warnings from miniaudio in third-party code.
+// miniaudio's declarations; its implementation is compiled once, in
+// miniaudio_impl.cpp, with the decoders the engine loads.
 #if defined(__clang__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wtautological-constant-out-of-range-compare"
 #pragma clang diagnostic ignored "-Wunused-but-set-variable"
-// miniaudio's Emscripten backend uses EM_JS ($-identifiers), legacy
-// version macros, and unused callback params.
 #pragma clang diagnostic ignored "-Wdollar-in-identifier-extension"
 #pragma clang diagnostic ignored "-Wdeprecated-pragma"
 #pragma clang diagnostic ignored "-Wunused-parameter"
@@ -38,11 +37,7 @@
 #pragma GCC diagnostic ignored "-Wunused-result"
 #endif
 
-#define MINIAUDIO_IMPLEMENTATION
-#define MA_NO_GENERATION
 #include "miniaudio.h"
-#include "engine/core/diagnostic.h"
-#include "engine/core/thread_affinity.h"
 
 #if defined(__clang__)
 #pragma clang diagnostic pop
@@ -51,6 +46,9 @@
 #elif defined(__GNUC__)
 #pragma GCC diagnostic pop
 #endif
+
+#include "engine/core/diagnostic.h"
+#include "engine/core/thread_affinity.h"
 
 namespace engine::audio {
 

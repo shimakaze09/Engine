@@ -1468,6 +1468,18 @@ engine_add_test_executable(engine_unit_audio
 set_tests_properties(engine_unit_audio PROPERTIES
     SKIP_REGULAR_EXPRESSION "SKIPPED:")
 
+engine_add_test_executable(engine_unit_audio_formats
+    SOURCES
+    audio_formats_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/audio/src
+    PRIVATE_DEPS
+    engine_audio
+    engine_content
+)
+target_compile_definitions(engine_unit_audio_formats PRIVATE
+    ENGINE_AUDIO_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/data/audio")
+
 engine_add_test_executable(engine_unit_texture_loader
     SOURCES
     texture_loader_test.cpp
