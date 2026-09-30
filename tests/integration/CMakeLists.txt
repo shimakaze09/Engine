@@ -737,6 +737,18 @@ engine_add_test_executable(engine_integration_pipeline_stage_profile
     integration
 )
 
+engine_add_test_executable(engine_integration_play_session_audio
+    SOURCES
+    play_session_audio_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/audio/src
+    PRIVATE_DEPS
+    engine_runtime
+    engine_audio
+    LABELS
+    integration
+)
+
 engine_add_test_executable(engine_integration_play_transition_queue
     SOURCES
     play_transition_queue_test.cpp
