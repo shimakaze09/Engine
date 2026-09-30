@@ -330,6 +330,14 @@ engine_add_test_executable(engine_unit_mesh_loader
     engine_math
 )
 
+engine_add_test_executable(engine_unit_asset_check_capacity
+    SOURCES
+    asset_check_capacity_test.cpp
+    PRIVATE_DEPS
+    engine_content
+    engine_core
+)
+
 engine_add_test_executable(engine_unit_asset_generation_check
     SOURCES
     asset_generation_check_test.cpp

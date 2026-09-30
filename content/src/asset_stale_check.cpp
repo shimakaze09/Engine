@@ -6,7 +6,8 @@
 // manifest against the files on disk so a torn or mixed cook is rejected
 // before a load accepts it). Both run on the CPU load
 // path only (sync loads and the streaming worker), never per frame; the
-// once-per-asset memories are fixed lock-free tables.
+// once-per-asset memories are lock-free tables that grow with the
+// project.
 
 #include "engine/content/asset_staleness.h"
 
@@ -30,33 +31,123 @@ namespace engine::content {
 
 namespace {
 
-constexpr std::size_t kMaxCheckedAssets = 512U;
 constexpr std::size_t kMaxMetaFileBytes = 1024U * 1024U;
 
-/// Fixed CAS-insert table of already-checked cooked-path hashes; the
-/// staleness check (and its file IO) runs once per asset per session.
-std::atomic<std::uint64_t> g_checkedPaths[kMaxCheckedAssets] = {};
+/// A lock-free set of cooked-path hashes, each carrying one atomic value,
+/// that grows with the project: segment k holds kFirstSegmentSlots << k
+/// slots and is allocated only when every earlier one is too full to take
+/// a key, so the streaming worker and the main thread insert and look up
+/// concurrently with no lock, and nothing is ever moved. A slot, once
+/// claimed, is never emptied until reset, which is what makes a probe that
+/// finds a full window move on safely: the key it wants cannot appear
+/// there later. Only allocation failure -- memory exhausted, or the last
+/// segment full, some 2^31 paths -- leaves a key without a slot, and that
+/// is logged once; each caller then does what a miss costs it.
+class CookedPathTable final {
+public:
+  constexpr CookedPathTable() noexcept = default;
+  CookedPathTable(const CookedPathTable &) = delete;
+  CookedPathTable &operator=(const CookedPathTable &) = delete;
+  ~CookedPathTable() { clear(); }
 
-/// Marks the path checked; false when it already was (or the table is
-/// full, which disables further checks rather than re-warning).
-bool try_mark_checked(std::uint64_t pathHash) noexcept {
-  for (std::size_t i = 0U; i < kMaxCheckedAssets; ++i) {
-    std::uint64_t current = g_checkedPaths[i].load(std::memory_order_acquire);
-    if (current == pathHash) {
-      return false;
+  /// The value slot for `pathHash`, claimed if new (`*inserted` true);
+  /// null when no slot can be had.
+  std::atomic<std::uint64_t> *find_or_insert(std::uint64_t pathHash,
+                                             bool *inserted) noexcept {
+    // 0 marks an empty slot; FNV-1a gives 0 for nothing a path spells.
+    const std::uint64_t key = (pathHash == 0ULL) ? 1ULL : pathHash;
+    *inserted = false;
+    for (std::size_t segment = 0U; segment < kMaxSegments; ++segment) {
+      Slot *slots = segment_at(segment);
+      if (slots == nullptr) {
+        report_exhausted();
+        return nullptr;
+      }
+      const std::size_t mask = (kFirstSegmentSlots << segment) - 1U;
+      std::size_t index = static_cast<std::size_t>(key) & mask;
+      for (std::size_t probe = 0U; probe < kProbeWindow; ++probe) {
+        Slot &slot = slots[index];
+        std::uint64_t current = slot.key.load(std::memory_order_acquire);
+        if (current == 0ULL) {
+          if (slot.key.compare_exchange_strong(current, key,
+                                               std::memory_order_acq_rel)) {
+            *inserted = true;
+            return &slot.value;
+          }
+        }
+        if (current == key) {
+          return &slot.value;
+        }
+        index = (index + 1U) & mask;
+      }
     }
-    if (current == 0ULL) {
-      std::uint64_t expected = 0ULL;
-      if (g_checkedPaths[i].compare_exchange_strong(
-              expected, pathHash, std::memory_order_acq_rel)) {
-        return true;
-      }
-      if (expected == pathHash) {
-        return false;
-      }
+    report_exhausted();
+    return nullptr;
+  }
+
+  /// Frees every segment. Only while no check is in flight: a run's
+  /// teardown, or a test between cases.
+  void clear() noexcept {
+    for (std::atomic<Slot *> &segment : m_segments) {
+      delete[] segment.exchange(nullptr, std::memory_order_acq_rel);
+    }
+    m_exhaustedLogged.store(false, std::memory_order_relaxed);
+  }
+
+private:
+  struct Slot final {
+    std::atomic<std::uint64_t> key{0ULL};
+    std::atomic<std::uint64_t> value{0ULL};
+  };
+
+  static constexpr std::size_t kFirstSegmentSlots = 512U;
+  static constexpr std::size_t kMaxSegments = 23U;
+  /// Slots a key may sit from its home before the next segment is tried:
+  /// long enough that a segment fills well past half before it spills.
+  static constexpr std::size_t kProbeWindow = 32U;
+
+  /// Segment `index`, allocated on first use; null when out of memory. Two
+  /// threads may both allocate one; the loser frees its copy.
+  Slot *segment_at(std::size_t index) noexcept {
+    Slot *slots = m_segments[index].load(std::memory_order_acquire);
+    if (slots != nullptr) {
+      return slots;
+    }
+    Slot *fresh = new (std::nothrow) Slot[kFirstSegmentSlots << index];
+    if (fresh == nullptr) {
+      return nullptr;
+    }
+    if (m_segments[index].compare_exchange_strong(slots, fresh,
+                                                  std::memory_order_acq_rel)) {
+      return fresh;
+    }
+    delete[] fresh;
+    return slots;
+  }
+
+  void report_exhausted() noexcept {
+    if (!m_exhaustedLogged.exchange(true, std::memory_order_relaxed)) {
+      core::log_message(core::LogLevel::Warning, "assets",
+                        "the cooked-asset check tables could not grow; "
+                        "further assets are checked without caching and "
+                        "their staleness is not reported");
     }
   }
-  return false;
+
+  std::atomic<Slot *> m_segments[kMaxSegments] = {};
+  std::atomic<bool> m_exhaustedLogged{false};
+};
+
+/// The cooked paths whose staleness has been checked: the check (and its
+/// file IO) runs once per asset per session.
+CookedPathTable g_checkedPaths;
+
+/// Marks the path checked; false when it already was (or no slot can be
+/// had, which skips the check rather than repeat it on every load).
+bool try_mark_checked(std::uint64_t pathHash) noexcept {
+  bool inserted = false;
+  return (g_checkedPaths.find_or_insert(pathHash, &inserted) != nullptr) &&
+         inserted;
 }
 
 /// Largest file the load path re-hashes; a stamp or sidecar naming
@@ -212,19 +303,17 @@ bool read_meta_source_record(const char *cookedPath, char (&outSourcePath)[512],
 // ---- Cook-generation validation ------------------------------
 
 constexpr std::size_t kMaxStampFileBytes = 1024U * 1024U;
-constexpr std::size_t kMaxVerdictEntries = 512U;
 constexpr std::uint32_t kVerdictPending = 0U;
 constexpr std::uint32_t kVerdictOk = 1U;
 constexpr std::uint32_t kVerdictRejected = 2U;
 
-/// Fixed CAS-claimed verdict cache so each cooked path's outputs are hashed
-/// once per stamp: an entry is the verdict in the low two bits over the
-/// stamp's content key, in one atomic so a reader never pairs one stamp's
-/// key with another's verdict. A recook rewrites the stamp, so its next
-/// check validates afresh. A full table or an in-flight entry just
+/// Each cooked path's generation verdict, so its outputs are hashed once
+/// per stamp: an entry is the verdict in the low two bits over the stamp's
+/// content key, in one atomic so a reader never pairs one stamp's key with
+/// another's verdict. A recook rewrites the stamp, so its next check
+/// validates afresh. An in-flight entry, or a path with no slot, just
 /// revalidates without caching, which is correct and merely slower.
-std::atomic<std::uint64_t> g_verdictPaths[kMaxVerdictEntries] = {};
-std::atomic<std::uint64_t> g_verdictValues[kMaxVerdictEntries] = {};
+CookedPathTable g_verdicts;
 
 /// The 62-bit key a verdict is cached under: the stamp's content hash, or
 /// a fixed key for an asset with no stamp.
@@ -564,38 +653,23 @@ bool cooked_asset_generation_ok(const char *cookedPath) noexcept {
     stampKey = hash & kStampKeyMask;
   }
 
-  const std::uint64_t pathHash = core::fnv1a_64(cookedPath);
-  std::size_t slot = kMaxVerdictEntries;
-  for (std::size_t i = 0U; i < kMaxVerdictEntries; ++i) {
-    std::uint64_t current = g_verdictPaths[i].load(std::memory_order_acquire);
-    if (current == 0ULL) {
-      std::uint64_t expected = 0ULL;
-      if (g_verdictPaths[i].compare_exchange_strong(
-              expected, pathHash, std::memory_order_acq_rel)) {
-        slot = i;
-        break;
-      }
-      current = expected;
+  bool inserted = false;
+  std::atomic<std::uint64_t> *slot =
+      g_verdicts.find_or_insert(core::fnv1a_64(cookedPath), &inserted);
+  if ((slot != nullptr) && !inserted) {
+    const std::uint64_t cached = slot->load(std::memory_order_acquire);
+    const auto verdict = static_cast<std::uint32_t>(cached & 3U);
+    if ((verdict != kVerdictPending) && ((cached >> 2U) == stampKey)) {
+      return verdict == kVerdictOk;
     }
-    if (current == pathHash) {
-      const std::uint64_t cached =
-          g_verdictValues[i].load(std::memory_order_acquire);
-      const auto verdict = static_cast<std::uint32_t>(cached & 3U);
-      if ((verdict != kVerdictPending) && ((cached >> 2U) == stampKey)) {
-        return verdict == kVerdictOk;
-      }
-      // Pending on another thread, or cached under a stamp since
-      // rewritten: validate now, and record the result for this stamp.
-      slot = i;
-      break;
-    }
+    // Pending on another thread, or cached under a stamp since rewritten:
+    // validate now, and record the result for this stamp.
   }
 
   const std::uint32_t verdict = compute_generation_verdict(
       cookedPath, hasStamp ? stampText.get() : nullptr);
-  if (slot < kMaxVerdictEntries) {
-    g_verdictValues[slot].store(pack_verdict(stampKey, verdict),
-                                std::memory_order_release);
+  if (slot != nullptr) {
+    slot->store(pack_verdict(stampKey, verdict), std::memory_order_release);
   }
   return verdict == kVerdictOk;
 }
@@ -721,13 +795,8 @@ void warn_if_cooked_asset_stale(const char *cookedPath) noexcept {
 }
 
 void reset_cooked_asset_stale_warnings() noexcept {
-  for (std::size_t i = 0U; i < kMaxCheckedAssets; ++i) {
-    g_checkedPaths[i].store(0ULL, std::memory_order_release);
-  }
-  for (std::size_t i = 0U; i < kMaxVerdictEntries; ++i) {
-    g_verdictValues[i].store(0ULL, std::memory_order_release);
-    g_verdictPaths[i].store(0ULL, std::memory_order_release);
-  }
+  g_checkedPaths.clear();
+  g_verdicts.clear();
 }
 
 } // namespace engine::content
