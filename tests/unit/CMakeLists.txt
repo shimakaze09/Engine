@@ -2537,6 +2537,19 @@ engine_add_test_executable(engine_unit_editor_scene_query
     SDL_MAIN_HANDLED
 )
 
+engine_add_test_executable(engine_unit_editor_view_drag
+    SOURCES
+    editor_view_drag_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/editor/src
+    PRIVATE_DEPS
+    # Reads where SDL put the cursor back and queues a focus loss.
+    ${ENGINE_SDL_TARGET}
+    engine_editor
+    COMPILE_DEFINITIONS
+    SDL_MAIN_HANDLED
+)
+
 engine_add_test_executable(engine_unit_editor_light_gizmos
     SOURCES
     editor_light_gizmos_test.cpp

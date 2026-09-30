@@ -21,6 +21,7 @@ engine_add_module_library(engine_editor
     src/editor_grid.cpp
     src/editor_light_gizmos.cpp
     src/editor_scene_query.cpp
+    src/editor_view_drag.cpp
     src/editor_console_capture.cpp
     src/editor_console_commands.cpp
     src/editor_screenshot.cpp

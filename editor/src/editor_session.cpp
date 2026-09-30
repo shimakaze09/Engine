@@ -899,7 +899,9 @@ void start_play_mode() noexcept {
                              : runtime::PlayTransition::Start);
   editor_session().playState = PlayState::Playing;
   editor_session().stepRequested = false;
-  // Play brings the Game view forward, so the game has the input focus.
+  // Play brings the Game view forward, so the game has the input focus,
+  // and a Scene view camera drag lets the mouse go for it.
+  cancel_view_drag(editor_session().sceneDrag);
   editor_session().pendingViewFocus = kGameViewWindow;
   // "Current session" in the Console's filter reads as "since I hit Play."
   console_capture_begin_session();

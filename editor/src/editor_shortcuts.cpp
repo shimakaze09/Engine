@@ -621,7 +621,8 @@ bool editor_shortcuts_blocked() noexcept {
   // A chord being captured for a rebinding is not a command either, and
   // while the Scene camera flies WASD/QE move it.
   return io.WantTextInput || scene_document_prompt_open() ||
-         (g_capturing != EditorAction::Count) || editor_session().sceneFlying ||
+         (g_capturing != EditorAction::Count) ||
+         (editor_session().sceneDrag.kind == ViewDragKind::Fly) ||
          ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId |
                                     ImGuiPopupFlags_AnyPopupLevel);
 }
