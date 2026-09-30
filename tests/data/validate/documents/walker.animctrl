@@ -1,0 +1,11 @@
+{
+  "skeleton": "assets/walker.skel",
+  "clips": [
+    {"name": "walk", "path": "assets/walker.walk.anim"}
+  ],
+  "initial": "walk",
+  "states": [
+    {"name": "walk", "clip": "walk", "loop": true}
+  ],
+  "transitions": []
+}

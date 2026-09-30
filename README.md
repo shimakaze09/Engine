@@ -28,7 +28,7 @@ Each fact has one home. Nothing mirrors anything else.
 - Generated Lua binding pipeline for annotated scripting accessors
 - A sample game, `samples/island/`: a project of its own (`island.project` and its `assets/`)
 - Test suites (unit, integration, smoke, benchmark, CMake configure-rejection) wired into CTest
-- Asset tooling: `asset_packer` (mesh, skeleton and animation cook, shader cook, metadata init) and the `engine_validate` scene checker (`--project <dir>` catalogues the project as the engine does and checks every scene it lists; any reference that names no file or catalogued asset, or a mount that does not index cleanly, fails it)
+- Asset tooling: `asset_packer` (mesh, skeleton and animation cook, shader cook, metadata init) and the `engine_validate` content checker (`--project <dir>` catalogues the project as the engine does, checks every scene it lists, and loads every catalogued prefab, material and animation controller through its own loader; any reference that names no file or catalogued asset, a document that does not load, or a mount that does not index cleanly, fails it)
 - GitHub Actions CI under `.github/workflows/ci.yml`
 
 ## Core goals
@@ -100,7 +100,7 @@ pinned commit; only SDL3 is looked up locally first.
 - `samples/island/`: the sample game, a project of its own: `island.project` and the scripts, scenes and content under its `assets/`, mounted at `assets/`
 - `engine_assets/`: the engine's own content (shaders and their cook manifest, editor fonts, the web shell, the bootstrap mesh), mounted at `engine/`
 - `tests/`: unit, integration, smoke, benchmark, and CMake configure-rejection tests
-- `tools/`: asset packer (glTF/GLB → `.mesh`, shader-manifest cook, `--init-meta`), `engine_validate` scene checker, Lua binding generator, content generators, audit gates and their self-tests, CI helpers
+- `tools/`: asset packer (glTF/GLB → `.mesh`, shader-manifest cook, `--init-meta`), `engine_validate` content checker, Lua binding generator, content generators, audit gates and their self-tests, CI helpers
 - `docs/`: architecture invariants, product vision, decision records
 - `.claude/skills/`: the procedures agents and contributors follow
 - `.github/workflows/`: CI definitions

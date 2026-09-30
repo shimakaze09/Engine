@@ -12,6 +12,9 @@
 namespace engine::audio {
 
 inline constexpr std::size_t kMaxSounds = 256U;
+/// Longest virtual path a loaded sound is keyed by, terminator included; a
+/// longer one is refused whole rather than cut to a different key.
+inline constexpr std::size_t kMaxSoundPathBytes = 256U;
 inline constexpr unsigned kSoundSlotBits = 9U;
 inline constexpr std::uint32_t kSoundSlotMask = (1U << kSoundSlotBits) - 1U;
 // A handle packs (generation << kSoundSlotBits) | slotToken into 32 bits, so

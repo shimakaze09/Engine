@@ -1,8 +1,9 @@
 // Counters private to the audio module that its unit test reads to prove
 // a cost is paid where the contract says: a decoder is opened once per
 // sound load and never per playback, and the mixer allocates while it is
-// set up and while sounds load, never while they play. With them, a way
-// to run the mixer on the null device, which has no device thread to.
+// set up and while sounds load, never while they play. With them, what is
+// loaded and playing, and a way to run the mixer on the null device,
+// which has no device thread to.
 
 #pragma once
 
@@ -19,6 +20,13 @@ std::size_t audio_decoder_opens() noexcept;
 /// has made since the process started. Playback, one-shots included, adds
 /// none.
 std::size_t audio_mixer_allocations() noexcept;
+
+/// Sounds loaded now: distinct paths, each counted once however many
+/// references it holds.
+std::size_t audio_loaded_sound_count() noexcept;
+
+/// Whether a music track is open.
+bool audio_music_active() noexcept;
 
 /// Mixes `frames` frames on the null device, as a device thread would, so
 /// sounds advance and finish. Writes the peak absolute sample mixed to

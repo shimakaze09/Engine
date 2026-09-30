@@ -2,6 +2,7 @@
 
 #include "engine/audio/audio.h"
 
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
@@ -415,9 +416,11 @@ static void test_decode_budgets() {
 
 /// Live-handle registry boundaries: an unloaded handle is stale (it no
 /// longer plays, and the reloaded slot mints a different handle that does
-/// not revive it), the registry admits exactly kMaxSounds live sounds and
-/// refuses the next load, and unload_all_sounds invalidates every handle.
-/// Reported skipped, not passed, when no audio device initializes.
+/// not revive it), a loaded path is shared (300 loads take one slot and
+/// decode once, and only the last unload frees it), the registry admits
+/// exactly kMaxSounds distinct paths and refuses the next, and
+/// unload_all_sounds invalidates every handle. Reported skipped, not
+/// passed, when no audio device initializes.
 static void test_registry_boundaries() {
   using namespace engine::audio;
   namespace fs = std::filesystem;
@@ -428,6 +431,13 @@ static void test_registry_boundaries() {
   fs::create_directories(scratch, ec);
   TEST_ASSERT(!ec);
   TEST_ASSERT(write_wav(scratch / "tone.wav", 220U, 440U));
+  // One more distinct path than the registry holds.
+  for (std::size_t i = 0U; i <= engine::audio::kMaxSounds; ++i) {
+    char name[32] = {};
+    std::snprintf(name, sizeof(name), "tone%03zu.wav", i);
+    fs::copy_file(scratch / "tone.wav", scratch / name, ec);
+    TEST_ASSERT(!ec);
+  }
   TEST_ASSERT(engine::core::initialize_vfs());
   TEST_ASSERT(engine::core::mount("audioreg", scratch.string().c_str()));
   if (!initialize_audio()) {
@@ -447,19 +457,46 @@ static void test_registry_boundaries() {
   g_tests.check(!play_sound(first, {}),
                 "stale handle stays rejected after its slot is reused");
 
-  std::size_t live = 1U;
+  // One path loaded by 300 scripts is one sound (#893).
+  const std::size_t decodesBefore = audio_decoder_opens();
+  bool allShared = true;
+  for (int i = 0; i < 299; ++i) {
+    allShared = allShared && (load_sound("audioreg/tone.wav") == reloaded);
+  }
+  g_tests.check(allShared, "a loaded path returns its own handle again");
+  g_tests.check(audio_decoder_opens() == decodesBefore,
+                "a loaded path is not decoded again");
+  for (int i = 0; i < 299; ++i) {
+    unload_sound(reloaded);
+  }
+  g_tests.check(play_sound(reloaded, {}),
+                "the sound lives until its last reference is returned");
+  unload_sound(reloaded);
+  g_tests.check(!play_sound(reloaded, {}),
+                "the last unload frees the shared sound");
+
+  std::size_t live = 0U;
+  SoundHandle last = kInvalidSound;
   while (live < engine::audio::kMaxSounds) {
-    if (load_sound("audioreg/tone.wav") == kInvalidSound) {
+    char path[48] = {};
+    std::snprintf(path, sizeof(path), "audioreg/tone%03zu.wav", live);
+    last = load_sound(path);
+    if (last == kInvalidSound) {
       break;
     }
     ++live;
   }
   g_tests.check(live == engine::audio::kMaxSounds,
-                "registry fills to exactly kMaxSounds live sounds");
-  g_tests.check(load_sound("audioreg/tone.wav") == kInvalidSound,
-                "load past the registry capacity is refused");
+                "registry holds exactly kMaxSounds distinct sounds");
+  char pastPath[48] = {};
+  std::snprintf(pastPath, sizeof(pastPath), "audioreg/tone%03zu.wav",
+                engine::audio::kMaxSounds);
+  g_tests.check(load_sound(pastPath) == kInvalidSound,
+                "a distinct sound past the registry capacity is refused");
+  g_tests.check(load_sound("audioreg/tone000.wav") != kInvalidSound,
+                "a full registry still shares a loaded path");
   unload_all_sounds();
-  g_tests.check(!play_sound(reloaded, {}),
+  g_tests.check(!play_sound(last, {}),
                 "unload_all_sounds invalidates live handles");
   g_tests.check(load_sound("audioreg/tone.wav") != kInvalidSound,
                 "registry accepts loads again after unload_all_sounds");
@@ -788,6 +825,84 @@ static void test_voice_takes_each_sounds_rate() {
   fs::remove_all(scratch, ec);
 }
 
+/// play_sound plays a pooled voice on the SFX bus (#805): the bus's
+/// volume applies to it, a second play layers a second voice instead of
+/// restarting the first, a looping play sounds past the sound's end until
+/// stop_sound, and stop_sound silences every voice of the sound.
+static void test_play_sound_uses_sfx_voices() {
+  using namespace engine::audio;
+  namespace fs = std::filesystem;
+  std::error_code ec{};
+  const fs::path scratch = fs::current_path(ec) / "engine_audio_sfx_test";
+  fs::remove_all(scratch, ec);
+  fs::create_directories(scratch, ec);
+  TEST_ASSERT(!ec);
+  // A constant level, so two voices started together sum exactly.
+  TEST_ASSERT(write_wav(scratch / "level.wav", 4410U, 4410U * 2U, 8000));
+  TEST_ASSERT(engine::core::initialize_vfs());
+  TEST_ASSERT(engine::core::mount("audiosfx", scratch.string().c_str()));
+  AudioConfig config{};
+  config.nullDevice = true;
+  if (!initialize_audio(config)) {
+    engine::core::shutdown_vfs();
+    fs::remove_all(scratch, ec);
+    g_tests.check(false, "audio initializes on the null device");
+    return;
+  }
+  const SoundHandle level = load_sound("audiosfx/level.wav");
+  g_tests.check(level != kInvalidSound, "the fixture loads");
+  const auto peak_of_next_mix = []() noexcept {
+    float peak = -1.0F;
+    return audio_mix_null_device(480U, &peak) ? peak : -1.0F;
+  };
+
+  set_bus_volume(AudioBus::Sfx, 0.0F);
+  g_tests.check(play_sound(level, PlayParams{}) && (peak_of_next_mix() == 0.0F),
+                "play_sound on the muted SFX bus is silent");
+  stop_sound(level);
+  set_bus_volume(AudioBus::Sfx, 1.0F);
+
+  g_tests.check(play_sound(level, PlayParams{}), "a first play starts");
+  const float one = peak_of_next_mix();
+  stop_sound(level);
+  update_audio();
+  g_tests.check(play_sound(level, PlayParams{}) &&
+                    play_sound(level, PlayParams{}),
+                "a second play of the same sound starts");
+  const float two = peak_of_next_mix();
+  char what[128] = {};
+  std::snprintf(what, sizeof(what),
+                "two plays layer two voices (peak %.3f against %.3f)",
+                static_cast<double>(two), static_cast<double>(one));
+  // The same frames on two voices started in the same block sum; float
+  // mixing leaves at most a rounding step between 2 x one and two.
+  g_tests.check((one > 0.1F) && (std::fabs(two - (2.0F * one)) < 1.0e-4F),
+                what);
+  stop_sound(level);
+  update_audio();
+  g_tests.check(peak_of_next_mix() == 0.0F,
+                "stop_sound silences every voice of the sound");
+
+  PlayParams looping{};
+  looping.loop = true;
+  g_tests.check(play_sound(level, looping), "a looping play starts");
+  // 0.2 s of sound, mixed for half a second: still sounding.
+  for (int block = 0; block < 50; ++block) {
+    static_cast<void>(peak_of_next_mix());
+    update_audio();
+  }
+  g_tests.check(peak_of_next_mix() > 0.1F,
+                "a looping play sounds past the sound's end");
+  stop_sound(level);
+  update_audio();
+  g_tests.check(peak_of_next_mix() == 0.0F, "stop_sound ends a loop");
+
+  unload_all_sounds();
+  shutdown_audio();
+  engine::core::shutdown_vfs();
+  fs::remove_all(scratch, ec);
+}
+
 /// Runs this executable or test program.
 int main() {
   RUN_TEST(test_double_init_and_shutdown);
@@ -808,6 +923,7 @@ int main() {
   RUN_TEST(test_playback_opens_no_decoder);
   RUN_TEST(test_playback_allocates_nothing);
   RUN_TEST(test_voice_takes_each_sounds_rate);
+  RUN_TEST(test_play_sound_uses_sfx_voices);
 
   test_sound_generation_wraps_skipping_zero();
 

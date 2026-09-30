@@ -1,0 +1,17 @@
+{
+  "version": 6,
+  "entities": [
+    {
+      "persistentId": 1,
+      "components": {
+        "Transform": {
+          "position": [
+            0,
+            0,
+            0
+          ]
+        }
+      }
+    }
+  ]
+}

@@ -33,6 +33,11 @@ namespace engine::scripting {
 
 namespace {
 
+// engine.load_sound(path) → sound id, 0 on failure. A path already loaded
+// returns the same id and takes one more reference, so every instance of
+// a script may load the sounds it uses; engine.unload_sound returns one,
+// and the last frees the sound. Every sound goes when the play session
+// ends.
 int lua_engine_load_sound(lua_State *state) noexcept {
   if (!lua_isstring(state, 1)) {
     lua_pushinteger(state, 0);
@@ -104,6 +109,10 @@ int lua_engine_unload_sound(lua_State *state) noexcept {
   return 0;
 }
 
+// engine.play_sound(sound [, volume, pitch, loop]) → bool. A new voice on
+// the SFX bus, so engine.set_bus_volume("sfx", …) applies, and a second
+// play layers rather than restarting the first; a loop sounds until
+// engine.stop_sound(sound), which stops every voice of the sound.
 int lua_engine_play_sound(lua_State *state) noexcept {
   if ((runtime_binding().services == nullptr) || (runtime_binding().services->play_sound == nullptr)) {
     lua_pushboolean(state, 0);

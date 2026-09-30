@@ -57,16 +57,21 @@ namespace {
 /// A loaded sound: its PCM decoded once at load, and the sound playing it
 /// through a reference that allocates nothing. Every one-shot reads the
 /// same PCM through a reference of its own, so playback never decodes.
+/// A loaded sound: decoded PCM and nothing that plays. Every playback is
+/// a pooled voice pointed at these frames, so one sound can sound many
+/// times at once, each on its bus. Loaded once per path and shared, as
+/// Unity's AudioClip and Godot's AudioStream are: a repeated load_sound
+/// of a loaded path takes a reference, and the last unload frees it.
 struct SoundEntry final {
   bool active = false;
   std::uint32_t generation = 1U;
+  std::uint32_t references = 0U;
+  char path[kMaxSoundPathBytes] = {};
   void *pcm = nullptr;
   ma_uint64 pcmFrames = 0U;
   ma_format format = ma_format_unknown;
   ma_uint32 channels = 0U;
   ma_uint32 sampleRate = 0U;
-  ma_audio_buffer_ref source{};
-  ma_sound sound{};
 };
 
 constexpr std::size_t kMaxOneShotInstances = 32U;
@@ -356,17 +361,16 @@ bool init_pcm_source(const SoundEntry &entry,
 
 /// Releases a loaded entry's sound and PCM (not its slot generation).
 void release_sound_pcm(SoundEntry &entry) noexcept {
-  ma_sound_uninit(&entry.sound);
-  ma_audio_buffer_ref_uninit(&entry.source);
   std::free(entry.pcm);
   entry.pcm = nullptr;
 }
 
-/// Starts a pooled one-shot from the entry's decoded PCM; positional
-/// playback spatializes at `position`.
+/// Starts a pooled voice from the entry's decoded PCM; positional
+/// playback spatializes at `position`. A looping voice keeps its pool slot
+/// until stop_sound, stop_all or the sound's unload ends it.
 bool start_one_shot(SoundEntry *entry, std::size_t sourceSlot,
                     const PlayParams &params, AudioBus bus, bool positional,
-                    const math::Vec3 &position) noexcept {
+                    const math::Vec3 &position, bool loop) noexcept {
   if ((entry == nullptr) || (entry->pcm == nullptr)) {
     return false;
   }
@@ -428,7 +432,7 @@ bool start_one_shot(SoundEntry *entry, std::size_t sourceSlot,
   ma_node_attach_output_bus(&voice.sound, 0U, bus_node(bus), 0U);
   ma_sound_set_volume(&voice.sound, params.volume);
   ma_sound_set_pitch(&voice.sound, params.pitch);
-  ma_sound_set_looping(&voice.sound, MA_FALSE);
+  ma_sound_set_looping(&voice.sound, loop ? MA_TRUE : MA_FALSE);
   if (positional) {
     ma_sound_set_position(&voice.sound, position.x, position.y, position.z);
     // Explicit attenuation: the mixer's own defaults hold full volume
@@ -486,6 +490,16 @@ void reset_sound_entry(SoundEntry &entry) noexcept {
 } // namespace
 
 std::size_t audio_decoder_opens() noexcept { return g_decoderOpens; }
+
+std::size_t audio_loaded_sound_count() noexcept {
+  std::size_t count = 0U;
+  for (const SoundEntry &entry : g_audio.sounds) {
+    count += entry.active ? 1U : 0U;
+  }
+  return count;
+}
+
+bool audio_music_active() noexcept { return g_audio.musicActive; }
 
 std::size_t audio_mixer_allocations() noexcept {
   return g_mixerAllocations.load(std::memory_order_relaxed);
@@ -739,12 +753,24 @@ SoundHandle load_sound(const char *virtualPath) noexcept {
   if ((virtualPath == nullptr) || !g_audio.initialized) {
     return kInvalidSound;
   }
+  // The path is the sound's key, so one that does not fit is refused
+  // rather than cut to a key another path could share.
+  if (std::strlen(virtualPath) >= kMaxSoundPathBytes) {
+    log_path_error(virtualPath, "sound path is too long");
+    return kInvalidSound;
+  }
 
+  // A loaded path is shared: its PCM is decoded once, and each load takes
+  // a reference the matching unload returns.
   std::size_t slot = kMaxSounds;
   for (std::size_t i = 0U; i < kMaxSounds; ++i) {
-    if (!g_audio.sounds[i].active) {
+    SoundEntry &candidate = g_audio.sounds[i];
+    if (candidate.active && (std::strcmp(candidate.path, virtualPath) == 0)) {
+      ++candidate.references;
+      return make_sound_handle(i);
+    }
+    if (!candidate.active && (slot == kMaxSounds)) {
       slot = i;
-      break;
     }
   }
 
@@ -840,23 +866,8 @@ SoundHandle load_sound(const char *virtualPath) noexcept {
   }
   entry.pcm = pcm;
   entry.pcmFrames = framesRead;
-
-  if (!init_pcm_source(entry, &entry.source)) {
-    std::free(entry.pcm);
-    entry.pcm = nullptr;
-    log_path_error(virtualPath, "failed to create sound");
-    return kInvalidSound;
-  }
-  res = ma_sound_init_from_data_source(&g_audio.engine, &entry.source, 0U,
-                                       nullptr, &entry.sound);
-  if (res != MA_SUCCESS) {
-    ma_audio_buffer_ref_uninit(&entry.source);
-    std::free(entry.pcm);
-    entry.pcm = nullptr;
-    core::log_message(core::LogLevel::Error, "audio", "failed to create sound");
-    return kInvalidSound;
-  }
-
+  std::memcpy(entry.path, virtualPath, std::strlen(virtualPath) + 1U);
+  entry.references = 1U;
   entry.active = true;
   return make_sound_handle(slot);
 }
@@ -864,6 +875,11 @@ SoundHandle load_sound(const char *virtualPath) noexcept {
 void unload_sound(SoundHandle handle) noexcept {
   SoundEntry *entry = lookup_sound_entry(handle);
   if (entry == nullptr) {
+    return;
+  }
+  // Another load of the same path still holds it.
+  if (entry->references > 1U) {
+    --entry->references;
     return;
   }
 
@@ -882,39 +898,36 @@ void unload_sound(SoundHandle handle) noexcept {
 bool play_sound(SoundHandle handle, const PlayParams &params) noexcept {
   ENGINE_ASSERT_MAIN_THREAD();
   SoundEntry *entry = lookup_sound_entry(handle);
-  if ((entry == nullptr) || !valid_play_params(params)) {
+  if (entry == nullptr) {
     return false;
   }
-
-  ma_sound_set_volume(&entry->sound, params.volume);
-  ma_sound_set_pitch(&entry->sound, params.pitch);
-  ma_sound_set_looping(&entry->sound, params.loop ? MA_TRUE : MA_FALSE);
-
-  ma_sound_seek_to_pcm_frame(&entry->sound, 0);
-
-  const ma_result res = ma_sound_start(&entry->sound);
-  return res == MA_SUCCESS;
+  const std::size_t sourceSlot =
+      static_cast<std::size_t>(entry - &g_audio.sounds[0]);
+  return start_one_shot(entry, sourceSlot, params, AudioBus::Sfx, false,
+                        math::Vec3(0.0F, 0.0F, 0.0F), params.loop);
 }
 
 void stop_sound(SoundHandle handle) noexcept {
   SoundEntry *entry = lookup_sound_entry(handle);
-  if (entry != nullptr) {
-    ma_sound_stop(&entry->sound);
+  if (entry == nullptr) {
+    return;
+  }
+  const std::size_t sourceSlot =
+      static_cast<std::size_t>(entry - &g_audio.sounds[0]);
+  for (auto &instance : g_audio.oneShots) {
+    if (instance.active && (instance.sourceSlot == sourceSlot)) {
+      reset_one_shot(instance);
+    }
   }
 }
 
-/// Stops everything that can be audible: direct playback of every loaded
-/// sound, every pooled one-shot instance, and the streamed music track.
+/// Stops everything that can be audible: every pooled voice and the
+/// streamed music track.
 void stop_all() noexcept {
   if (!g_audio.initialized) {
     return;
   }
 
-  for (auto &entry : g_audio.sounds) {
-    if (entry.active) {
-      ma_sound_stop(&entry.sound);
-    }
-  }
   for (auto &instance : g_audio.oneShots) {
     reset_one_shot(instance);
   }
@@ -1013,7 +1026,7 @@ bool play_sound_at(SoundHandle handle, const math::Vec3 &position,
   }
   const std::size_t sourceSlot =
       static_cast<std::size_t>(entry - &g_audio.sounds[0]);
-  return start_one_shot(entry, sourceSlot, params, bus, true, position);
+  return start_one_shot(entry, sourceSlot, params, bus, true, position, false);
 }
 
 bool play_sound_oneshot(SoundHandle handle, const PlayParams &params,
@@ -1026,7 +1039,7 @@ bool play_sound_oneshot(SoundHandle handle, const PlayParams &params,
   const std::size_t sourceSlot =
       static_cast<std::size_t>(entry - &g_audio.sounds[0]);
   return start_one_shot(entry, sourceSlot, params, bus, false,
-                        math::Vec3(0.0F, 0.0F, 0.0F));
+                        math::Vec3(0.0F, 0.0F, 0.0F), false);
 }
 
 bool play_music(const char *virtualPath, float volume, bool loop) noexcept {

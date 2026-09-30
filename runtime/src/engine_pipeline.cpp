@@ -1240,6 +1240,12 @@ void EnginePipeline::Impl::end_play_session() noexcept {
   scripting::dispatch_entity_scripts_end();
   scripting::clear_entity_script_modules();
   scripting::shutdown_scripting();
+  // Every sound the session loaded, every voice still sounding and its
+  // music go with it, as Unreal's play-in-editor world and Unity's play
+  // mode take theirs: only the session's scripts load sounds, and their
+  // VM, which held the handles, has just gone. Otherwise a looping track
+  // plays on in edit mode and each Play fills the registry further.
+  audio::unload_all_sounds();
   if (!scripting::initialize_scripting()) {
     core::log_message(core::LogLevel::Error, "scripting",
                       "failed to reinitialize scripting on stop");

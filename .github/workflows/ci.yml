@@ -158,9 +158,10 @@ jobs:
       # ---- Every scene the sample project lists (the startup template,
       # the Island Hopper template and the samples) loads through the
       # production loader with every reference resolving against the
-      # content catalog the engine builds; a dangling one fails here, not
-      # for an author.
-      - name: Validate bundled scenes
+      # content catalog the engine builds, and so does every prefab,
+      # material and animation controller it catalogues; a dangling one
+      # fails here, not for an author.
+      - name: Validate bundled content
         if: runner.os == 'Linux'
         run: build/tools/engine_validate/engine_validate --project samples/island
 
