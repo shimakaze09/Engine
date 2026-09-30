@@ -1,5 +1,6 @@
 // Verifies vertical slice integration behavior for the Engine test suite.
 
+#include "../render_prep_harness.h"
 #include "engine/core/job_system.h"
 #include "engine/core/service_locator.h"
 #include "engine/math/transform.h"
@@ -100,131 +101,6 @@ bool find_entity_by_name(const engine::runtime::World &world, const char *name,
       });
 
   return *outEntity != engine::runtime::kInvalidEntity;
-}
-
-/// Enumerates world phase op values used by the engine.
-enum class WorldPhaseOp : std::uint8_t {
-  BeginRenderPrep,
-  BeginRender,
-  EndFrame,
-};
-
-struct WorldPhaseJobData final {
-  engine::runtime::World *world = nullptr;
-  WorldPhaseOp op = WorldPhaseOp::BeginRenderPrep;
-};
-
-void world_phase_job(void *userData) noexcept {
-  auto *jobData = static_cast<WorldPhaseJobData *>(userData);
-  if ((jobData == nullptr) || (jobData->world == nullptr)) {
-    return;
-  }
-
-  switch (jobData->op) {
-  case WorldPhaseOp::BeginRenderPrep:
-    jobData->world->begin_render_prep_phase();
-    break;
-  case WorldPhaseOp::BeginRender:
-    jobData->world->begin_render_phase();
-    break;
-  case WorldPhaseOp::EndFrame:
-    jobData->world->end_frame_phase();
-    break;
-  }
-}
-
-/// Runs the configured command, loop, or tool for render prep pipeline.
-bool run_render_prep_pipeline(
-    engine::runtime::World *world,
-    engine::runtime::RenderPrepPipelineContext *pipelineContext,
-    engine::renderer::CommandBufferBuilder *commandBuffer,
-    engine::renderer::AssetDatabase *assetDatabase,
-    const engine::renderer::GpuMeshRegistry *meshRegistry) noexcept {
-  if ((world == nullptr) || (pipelineContext == nullptr) ||
-      (commandBuffer == nullptr) || (assetDatabase == nullptr) ||
-      (meshRegistry == nullptr)) {
-    return false;
-  }
-
-  if (!engine::core::begin_frame_graph()) {
-    return false;
-  }
-
-  std::atomic<bool> frameGraphFailed = false;
-
-  WorldPhaseJobData renderPrepPhaseData{};
-  renderPrepPhaseData.world = world;
-  renderPrepPhaseData.op = WorldPhaseOp::BeginRenderPrep;
-  engine::core::Job renderPrepPhaseJob{};
-  renderPrepPhaseJob.function = &world_phase_job;
-  renderPrepPhaseJob.data = &renderPrepPhaseData;
-  const engine::core::JobHandle renderPrepPhaseHandle =
-      engine::core::submit(renderPrepPhaseJob);
-  if (!engine::core::is_valid_handle(renderPrepPhaseHandle)) {
-    static_cast<void>(engine::core::end_frame_graph());
-    return false;
-  }
-
-  WorldPhaseJobData renderPhaseData{};
-  renderPhaseData.world = world;
-  renderPhaseData.op = WorldPhaseOp::BeginRender;
-  engine::core::Job renderPhaseJob{};
-  renderPhaseJob.function = &world_phase_job;
-  renderPhaseJob.data = &renderPhaseData;
-  const engine::core::JobHandle renderPhaseHandle =
-      engine::core::submit(renderPhaseJob);
-  if (!engine::core::is_valid_handle(renderPhaseHandle) ||
-      !engine::core::add_dependency(renderPrepPhaseHandle, renderPhaseHandle)) {
-    static_cast<void>(engine::core::end_frame_graph());
-    world->end_frame_phase();
-    return false;
-  }
-
-  engine::core::JobHandle mergeHandle{};
-  const std::size_t frameThreadCount =
-      static_cast<std::size_t>(engine::core::thread_count());
-  // Compute a view-projection matrix from the default camera so that frustum
-  // culling mirrors what a real frame would produce.
-  const engine::renderer::CameraState cam =
-      engine::renderer::get_active_camera();
-  constexpr float kDefaultAspect = 16.0F / 9.0F;
-  const engine::math::Mat4 vpMatrix = engine::math::mul(
-      engine::math::perspective(cam.fovRadians, kDefaultAspect, cam.nearPlane,
-                                cam.farPlane),
-      engine::math::look_at(cam.position, cam.target, cam.up));
-
-  std::atomic<std::uint32_t> droppedDrawCommands{0U};
-  if (!engine::runtime::enqueue_render_prep_pipeline(
-          pipelineContext, world, commandBuffer, assetDatabase, meshRegistry,
-          renderPrepPhaseHandle, renderPhaseHandle, &frameGraphFailed,
-          &droppedDrawCommands, frameThreadCount, 256U, vpMatrix, 1.0F,
-          &mergeHandle, nullptr, nullptr)) {
-    static_cast<void>(engine::core::end_frame_graph());
-    world->end_frame_phase();
-    return false;
-  }
-
-  WorldPhaseJobData endFrameData{};
-  endFrameData.world = world;
-  endFrameData.op = WorldPhaseOp::EndFrame;
-  engine::core::Job endFrameJob{};
-  endFrameJob.function = &world_phase_job;
-  endFrameJob.data = &endFrameData;
-  const engine::core::JobHandle endFrameHandle =
-      engine::core::submit(endFrameJob);
-  if (!engine::core::is_valid_handle(endFrameHandle) ||
-      !engine::core::add_dependency(mergeHandle, endFrameHandle)) {
-    static_cast<void>(engine::core::end_frame_graph());
-    world->end_frame_phase();
-    return false;
-  }
-
-  engine::core::wait_all();
-  const bool jobsFailed = frameGraphFailed.load(std::memory_order_acquire);
-  const bool frameGraphEnded =
-      static_cast<bool>(engine::core::end_frame_graph());
-
-  return frameGraphEnded && !jobsFailed;
 }
 
 } // namespace
@@ -388,9 +264,10 @@ int main() {
       }
     }
 
-    if (!run_render_prep_pipeline(world.get(), renderPrepPipeline.get(),
-                                  commandBuffer.get(), assetDatabase.get(),
-                                  meshRegistry.get())) {
+    if (!engine::tests::run_render_prep(
+            world.get(), renderPrepPipeline.get(), commandBuffer.get(),
+            assetDatabase.get(), meshRegistry.get(),
+            engine::tests::active_camera_render_prep_view(16.0F / 9.0F))) {
       engine::core::shutdown_job_system();
       remove_script_file();
       engine::scripting::shutdown_scripting();

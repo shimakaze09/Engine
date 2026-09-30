@@ -48,9 +48,6 @@ namespace engine::renderer {
 
 namespace {
 
-constexpr float kNearClip = 0.1F;
-constexpr float kFarClip = 100.0F;
-
 /// Length of the opaque run a sorted draw list starts with.
 std::size_t opaque_prefix_count(const CommandBufferView &view) noexcept {
   std::size_t count = 0U;
@@ -212,8 +209,9 @@ void flush_renderer_view(const RenderViewDesc &view,
   const CameraState &camera = view.camera;
   const math::Mat4 viewMat =
       math::look_at(camera.position, camera.target, camera.up);
-  const float nearP = (camera.nearPlane > 0.0F) ? camera.nearPlane : kNearClip;
-  const float farP = (camera.farPlane > nearP) ? camera.farPlane : kFarClip;
+  const CameraDepthRange depthRange = camera_depth_range(camera);
+  const float nearP = depthRange.nearPlane;
+  const float farP = depthRange.farPlane;
   const math::Mat4 projMat = camera_projection_matrix(camera, aspect);
   const math::Mat4 viewProjection = math::mul(projMat, viewMat);
 

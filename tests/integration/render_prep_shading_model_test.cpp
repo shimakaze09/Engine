@@ -5,6 +5,7 @@
 // program per run rather than per draw, so a scene may mix a toon
 // character, an unlit effect quad and a physically-lit prop in one frame.
 
+#include "../render_prep_harness.h"
 #include "engine/core/job_system.h"
 #include "engine/math/mat4.h"
 #include "engine/math/transform.h"
@@ -25,105 +26,6 @@
 namespace {
 
 using engine::renderer::ShadingModel;
-
-/// Enumerates the world phase transitions the prep frame needs as jobs.
-enum class WorldPhaseOp : std::uint8_t {
-  BeginRenderPrep,
-  BeginRender,
-  EndFrame,
-};
-
-struct WorldPhaseJobData final {
-  engine::runtime::World *world = nullptr;
-  WorldPhaseOp op = WorldPhaseOp::BeginRenderPrep;
-};
-
-void world_phase_job(void *userData) noexcept {
-  auto *jobData = static_cast<WorldPhaseJobData *>(userData);
-  if ((jobData == nullptr) || (jobData->world == nullptr)) {
-    return;
-  }
-  switch (jobData->op) {
-  case WorldPhaseOp::BeginRenderPrep:
-    jobData->world->begin_render_prep_phase();
-    break;
-  case WorldPhaseOp::BeginRender:
-    jobData->world->begin_render_phase();
-    break;
-  case WorldPhaseOp::EndFrame:
-    jobData->world->end_frame_phase();
-    break;
-  }
-}
-
-/// Runs one render prep frame through the production pipeline, leaving the
-/// sorted draws in `commandBuffer`.
-bool run_render_prep(engine::runtime::World *world,
-                     engine::runtime::RenderPrepPipelineContext *context,
-                     engine::renderer::CommandBufferBuilder *commandBuffer,
-                     engine::renderer::AssetDatabase *assetDatabase,
-                     const engine::renderer::GpuMeshRegistry *meshRegistry,
-                     const engine::math::Mat4 &viewProjection) noexcept {
-  if (!engine::core::begin_frame_graph()) {
-    return false;
-  }
-
-  std::atomic<bool> frameGraphFailed = false;
-
-  WorldPhaseJobData prepPhaseData{world, WorldPhaseOp::BeginRenderPrep};
-  engine::core::Job prepPhaseJob{};
-  prepPhaseJob.function = &world_phase_job;
-  prepPhaseJob.data = &prepPhaseData;
-  const engine::core::JobHandle prepPhaseHandle =
-      engine::core::submit(prepPhaseJob);
-
-  WorldPhaseJobData renderPhaseData{world, WorldPhaseOp::BeginRender};
-  engine::core::Job renderPhaseJob{};
-  renderPhaseJob.function = &world_phase_job;
-  renderPhaseJob.data = &renderPhaseData;
-  const engine::core::JobHandle renderPhaseHandle =
-      engine::core::submit(renderPhaseJob);
-
-  if (!engine::core::is_valid_handle(prepPhaseHandle) ||
-      !engine::core::is_valid_handle(renderPhaseHandle) ||
-      !engine::core::add_dependency(prepPhaseHandle, renderPhaseHandle)) {
-    static_cast<void>(engine::core::end_frame_graph());
-    world->end_frame_phase();
-    return false;
-  }
-
-  engine::core::JobHandle mergeHandle{};
-  std::atomic<std::uint32_t> droppedDrawCommands{0U};
-  if (!engine::runtime::enqueue_render_prep_pipeline(
-          context, world, commandBuffer, assetDatabase, meshRegistry,
-          prepPhaseHandle, renderPhaseHandle, &frameGraphFailed,
-          &droppedDrawCommands,
-          static_cast<std::size_t>(engine::core::thread_count()), 256U,
-          viewProjection, 1.0F, &mergeHandle, nullptr, nullptr)) {
-    static_cast<void>(engine::core::end_frame_graph());
-    world->end_frame_phase();
-    return false;
-  }
-
-  WorldPhaseJobData endFrameData{world, WorldPhaseOp::EndFrame};
-  engine::core::Job endFrameJob{};
-  endFrameJob.function = &world_phase_job;
-  endFrameJob.data = &endFrameData;
-  const engine::core::JobHandle endFrameHandle =
-      engine::core::submit(endFrameJob);
-  if (!engine::core::is_valid_handle(endFrameHandle) ||
-      !engine::core::add_dependency(mergeHandle, endFrameHandle)) {
-    static_cast<void>(engine::core::end_frame_graph());
-    world->end_frame_phase();
-    return false;
-  }
-
-  engine::core::wait_all();
-  const bool jobsFailed = frameGraphFailed.load(std::memory_order_acquire);
-  const bool ended = static_cast<bool>(engine::core::end_frame_graph());
-  return ended && !jobsFailed &&
-         (droppedDrawCommands.load(std::memory_order_acquire) == 0U);
-}
 
 /// One authored draw: where it sits, how it is lit, and whether it is
 /// transparent.
@@ -236,17 +138,12 @@ int main() {
     return 6;
   }
 
-  const engine::renderer::CameraState camera =
-      engine::renderer::get_active_camera();
-  constexpr float kAspect = 16.0F / 9.0F;
-  const engine::math::Mat4 viewProjection = engine::math::mul(
-      engine::math::perspective(camera.fovRadians, kAspect, camera.nearPlane,
-                                camera.farPlane),
-      engine::math::look_at(camera.position, camera.target, camera.up));
+  const engine::runtime::RenderPrepView prepView =
+      engine::tests::active_camera_render_prep_view(16.0F / 9.0F);
 
-  const bool prepared =
-      run_render_prep(world.get(), prepContext.get(), commandBuffer.get(),
-                      assetDatabase.get(), meshRegistry.get(), viewProjection);
+  const bool prepared = engine::tests::run_render_prep(
+      world.get(), prepContext.get(), commandBuffer.get(), assetDatabase.get(),
+      meshRegistry.get(), prepView);
   engine::core::shutdown_job_system();
   if (!prepared) {
     return 7;

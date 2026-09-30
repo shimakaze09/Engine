@@ -55,11 +55,20 @@ bool device_target_origin_bottom_left() noexcept {
   return (dev == nullptr) || dev->caps.textureOriginBottomLeft;
 }
 
+CameraDepthRange camera_depth_range(const CameraState &camera) noexcept {
+  CameraDepthRange range{};
+  range.nearPlane = (camera.nearPlane > 0.0F) ? camera.nearPlane : 0.1F;
+  range.farPlane =
+      (camera.farPlane > range.nearPlane) ? camera.farPlane : 100.0F;
+  return range;
+}
+
 math::Mat4 camera_projection_matrix(const CameraState &camera,
                                     float aspect) noexcept {
   const float safeAspect = (aspect > 0.0F) ? aspect : 1.0F;
-  const float nearP = (camera.nearPlane > 0.0F) ? camera.nearPlane : 0.1F;
-  const float farP = (camera.farPlane > nearP) ? camera.farPlane : 100.0F;
+  const CameraDepthRange range = camera_depth_range(camera);
+  const float nearP = range.nearPlane;
+  const float farP = range.farPlane;
   if (camera.projection == CameraState::kProjectionOrthographic) {
     const float halfH =
         (camera.orthographicSize > 0.0F) ? camera.orthographicSize : 5.0F;

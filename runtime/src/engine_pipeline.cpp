@@ -2017,12 +2017,10 @@ bool EnginePipeline::Impl::stage_render_prep_graph() noexcept {
     renderer::game_view_size(&vpW, &vpH);
     const float vpAspect =
         (vpH > 0) ? (static_cast<float>(vpW) / static_cast<float>(vpH)) : 1.0F;
-    const renderer::CameraState cam = renderer::get_active_camera();
     // Shares the flush path's projection builder so CPU culling can never
     // disagree with the GPU frustum.
-    const math::Mat4 vpMatrix =
-        math::mul(renderer::camera_projection_matrix(cam, vpAspect),
-                  math::look_at(cam.position, cam.target, cam.up));
+    const runtime::RenderPrepView gameView =
+        runtime::make_render_prep_view(renderer::get_active_camera(), vpAspect);
 
     // Lights and captures are collected now, in the same mutation epoch
     // the draw list is built in, so render prep can keep the
@@ -2035,8 +2033,7 @@ bool EnginePipeline::Impl::stage_render_prep_graph() noexcept {
             assetDatabase.get(), meshRegistry.get(), renderPrepPhaseHandle,
             renderPhaseHandle, &frameContext->frameGraphFailed,
             &frameContext->droppedDrawCommands, frameThreadCount, kChunkSize,
-            vpMatrix,
-            isPlaying ? static_cast<float>(clock.renderAlpha) : 1.0F,
+            gameView, isPlaying ? static_cast<float>(clock.renderAlpha) : 1.0F,
             &mergeHandle, auxiliaryCommandBuffer.get(),
             &frameAuxiliaryInputs)) {
       graphFailed = true;
@@ -2050,16 +2047,15 @@ bool EnginePipeline::Impl::stage_render_prep_graph() noexcept {
   if (!graphFailed && request_scene_view(&sceneView)) {
     const float sceneAspect = static_cast<float>(sceneView.width) /
                               static_cast<float>(sceneView.height);
-    const renderer::CameraState &sceneCam = sceneView.camera;
-    const math::Mat4 sceneVp = math::mul(
-        renderer::camera_projection_matrix(sceneCam, sceneAspect),
-        math::look_at(sceneCam.position, sceneCam.target, sceneCam.up));
+    const runtime::RenderPrepView scenePrepView =
+        runtime::make_render_prep_view(sceneView.camera, sceneAspect);
     if (!runtime::enqueue_render_prep_pipeline(
             sceneRenderPrep.get(), world.get(), sceneCommandBuffer.get(),
             assetDatabase.get(), meshRegistry.get(), renderPrepPhaseHandle,
             renderPhaseHandle, &frameContext->frameGraphFailed,
             &frameContext->droppedDrawCommands, frameThreadCount, kChunkSize,
-            sceneVp, isPlaying ? static_cast<float>(clock.renderAlpha) : 1.0F,
+            scenePrepView,
+            isPlaying ? static_cast<float>(clock.renderAlpha) : 1.0F,
             &sceneMergeHandle, sceneAuxiliaryCommandBuffer.get(),
             &frameAuxiliaryInputs)) {
       graphFailed = true;
