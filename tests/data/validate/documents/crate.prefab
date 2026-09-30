@@ -1,0 +1,15 @@
+{
+  "version": 5,
+  "components": {
+    "Transform": {
+      "position": [
+        0,
+        0,
+        0
+      ]
+    },
+    "MeshComponent": {
+      "mesh": "44444444-4444-4444-8444-444444444444"
+    }
+  }
+}

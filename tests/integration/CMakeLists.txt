@@ -1947,9 +1947,25 @@ if(TARGET engine_validate)
         COMMAND $<TARGET_FILE:engine_validate>
             --assets ${_validate_data}/unidentified
             ${_validate_data}/unidentified/clean.scene)
+    # A prefab naming a mesh, a material naming a texture and an animation
+    # controller naming a skeleton and clip that do not exist: each goes
+    # through its own loader, is named with its code, and fails the tool
+    # although the scene given is clean.
+    add_test(NAME engine_validate_cli_names_dangling_document_refs
+        COMMAND $<TARGET_FILE:engine_validate>
+            --assets ${_validate_data}/documents
+            ${_validate_data}/documents/clean.scene)
+    set_tests_properties(engine_validate_cli_names_dangling_document_refs
+        PROPERTIES PASS_REGULAR_EXPRESSION
+            "checking 1 prefab\\(s\\), 1 material\\(s\\) and 1 animation controller\\(s\\).*barrel.mat: error: unloadable_material .*55555555.*crate.prefab: warning: missing_mesh 44444444.*walker.animctrl: error: unloadable_controller ")
+    add_test(NAME engine_validate_cli_fails_dangling_document_refs
+        COMMAND $<TARGET_FILE:engine_validate>
+            --assets ${_validate_data}/documents
+            ${_validate_data}/documents/clean.scene)
     set_tests_properties(
         engine_validate_cli_fails_dangling_asset_refs
         engine_validate_cli_fails_unindexed_mount
+        engine_validate_cli_fails_dangling_document_refs
         PROPERTIES WILL_FAIL TRUE)
     set_tests_properties(
         engine_validate_cli_validates_project
@@ -1958,6 +1974,8 @@ if(TARGET engine_validate)
         engine_validate_cli_fails_dangling_asset_refs
         engine_validate_cli_names_unindexed_mount
         engine_validate_cli_fails_unindexed_mount
+        engine_validate_cli_names_dangling_document_refs
+        engine_validate_cli_fails_dangling_document_refs
         PROPERTIES LABELS "integration" TIMEOUT 60
             ENVIRONMENT "ENGINE_ROOT=${ENGINE_ENGINE_ASSET_OUTPUT_DIR}")
 endif()

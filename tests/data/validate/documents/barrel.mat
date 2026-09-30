@@ -1,0 +1,16 @@
+{
+  "version": 4,
+  "albedo": [0.8, 0.8, 0.82],
+  "emissive": [0, 0, 0],
+  "roughness": 0.35,
+  "metallic": 0.1,
+  "opacity": 1,
+  "shadingModel": "pbr",
+  "alphaMode": "opaque",
+  "alphaCutoff": 0.5,
+  "uvTiling": [1, 1],
+  "uvOffset": [0, 0],
+  "textures": {
+    "albedo": "55555555-5555-4555-8555-555555555555"
+  }
+}
