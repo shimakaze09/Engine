@@ -18,6 +18,7 @@
 #include "engine/renderer/material_loader.h"
 #include "engine/renderer/mesh_loader.h"
 #include "engine/renderer/mesh_primitives.h"
+#include "engine/runtime/content_catalog.h"
 #include "engine/runtime/world.h"
 
 namespace engine {
@@ -156,24 +157,12 @@ bool load_bootstrap_meshes(renderer::AssetManager *assetManager,
   // loader's own record wins: the walk never replaces one that exists,
   // and the material loader below updates the walk's in place. The walk
   // logs its own outcome, an Error naming every offending path when the
-  // mount does not index cleanly, so nothing here repeats it. The
-  // engine's own content (shaders, the bootstrap mesh) is catalogued
-  // under its own mount, so its records keep their engine/... paths; with
-  // no project open it is all there is.
-  static_cast<void>(content::register_mounted_assets(
-      catalog, active_config().engineMount, active_config().engineRoot));
+  // mount does not index cleanly, so nothing here repeats it. With no
+  // project open the engine's own content is all there is.
+  static_cast<void>(
+      runtime::catalogue_engine_content(catalog, active_config()));
   if (!has_open_project()) {
     return true;
-  }
-  static_cast<void>(content::register_mounted_assets(
-      catalog, active_config().assetMount, active_config().assetRoot));
-  // Each package after the project, so an asset of a package that claims
-  // an identity the project (or an earlier package) holds is the one
-  // named, and the project's own keeps resolving.
-  for (std::size_t i = 0U; i < active_config().packageCount; ++i) {
-    static_cast<void>(content::register_mounted_assets(
-        catalog, active_config().packages[i].mount,
-        active_config().packages[i].root));
   }
 
   // Discover the material JSONs of the project and of each package so
@@ -260,5 +249,42 @@ void create_bootstrap_scene(runtime::World *world) noexcept {
 // Scene light collection
 // ---------------------------------------------------------------------------
 
+bool runtime::catalogue_engine_content(content::AssetCatalog *catalog,
+                                       const EngineConfig &config) noexcept {
+  if (catalog == nullptr) {
+    return false;
+  }
+  bool ok = true;
+  // The engine's own content (shaders, the bootstrap mesh) under its own
+  // mount, so its records keep their engine/... paths.
+  if ((config.engineRoot != nullptr) && (config.engineRoot[0] != '\0')) {
+    ok = content::register_mounted_assets(catalog, config.engineMount,
+                                          config.engineRoot)
+             .ok &&
+         ok;
+  }
+  if ((config.assetRoot != nullptr) && (config.assetRoot[0] != '\0')) {
+    ok = content::register_mounted_assets(catalog, config.assetMount,
+                                          config.assetRoot)
+             .ok &&
+         ok;
+    // Each package after the project, so an asset of a package that claims
+    // an identity the project (or an earlier package) holds is the one
+    // named, and the project's own keeps resolving.
+    for (std::size_t i = 0U; i < config.packageCount; ++i) {
+      ok = content::register_mounted_assets(catalog, config.packages[i].mount,
+                                            config.packages[i].root)
+               .ok &&
+           ok;
+    }
+  }
+  for (std::size_t i = 0U;
+       i < static_cast<std::size_t>(content::BuiltinMesh::Count); ++i) {
+    ok = content::register_builtin_mesh_record(
+             catalog, static_cast<content::BuiltinMesh>(i)) &&
+         ok;
+  }
+  return ok;
+}
 
 } // namespace engine

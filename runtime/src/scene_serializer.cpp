@@ -12,6 +12,7 @@
 #include <new>
 
 #include "component_registry.h"
+#include "engine/content/asset_catalog.h"
 #include "engine/core/diagnostic.h"
 #include "engine/core/json.h"
 #include "engine/core/logging.h"
@@ -125,6 +126,33 @@ void validate_scene_references(const World &staged,
                        "scene animation controller path names no file");
     }
   });
+}
+
+/// Checks one authored asset reference against the catalog and records
+/// it when it names nothing, or names an asset of another type. A nil
+/// reference is an empty slot, not a finding.
+void check_asset_reference(const content::AssetCatalog &catalog,
+                           const core::AssetRef &ref,
+                           content::AssetTypeTag expected, const char *field,
+                           const char *missingCode, PersistentId id,
+                           core::ValidationReport *report) noexcept {
+  if (!core::asset_ref_is_valid(ref)) {
+    return;
+  }
+  char key[content::kAssetRefTextLength + 1U] = {};
+  static_cast<void>(content::format_asset_ref(ref, key, sizeof(key)));
+  const content::AssetMetadata *metadata =
+      content::find_asset_metadata_by_ref(&catalog, ref);
+  if ((metadata == nullptr) ||
+      (metadata->assetId == content::kInvalidAssetId)) {
+    report_reference(report, missingCode, field, key, id,
+                     "scene asset reference names no catalogued asset");
+    return;
+  }
+  if (metadata->typeTag != expected) {
+    report_reference(report, "wrong_asset_type", field, key, id,
+                     "scene asset reference names an asset of another type");
+  }
 }
 
 // ---- Registry-driven component codec ----------------------------
@@ -779,6 +807,36 @@ bool load_scene(World &world, const char *buffer, std::size_t size,
   // and never serialized).
   reset_anim_controllers();
   return true;
+}
+
+void validate_scene_asset_references(const World &world,
+                                     const content::AssetCatalog &catalog,
+                                     core::ValidationReport *report) noexcept {
+  using content::AssetTypeTag;
+  world.for_each_alive([&](Entity entity) noexcept {
+    const PersistentId id = world.persistent_id(entity);
+    const MeshComponent *mesh = world.get_mesh_component_ptr(entity);
+    if (mesh != nullptr) {
+      check_asset_reference(catalog, mesh->meshRef, AssetTypeTag::Mesh, "mesh",
+                            "missing_mesh", id, report);
+      check_asset_reference(catalog, mesh->materialRef, AssetTypeTag::Material,
+                            "material", "missing_material", id, report);
+    }
+    SkyLightComponent sky{};
+    if (world.get_sky_light_component(entity, &sky)) {
+      check_asset_reference(catalog, sky.environmentRef,
+                            AssetTypeTag::Environment, "environment",
+                            "missing_environment", id, report);
+    }
+    const FoliagePatchComponent *foliage =
+        world.get_foliage_patch_component_ptr(entity);
+    if (foliage != nullptr) {
+      for (const core::AssetRef &lod : foliage->meshRefs) {
+        check_asset_reference(catalog, lod, AssetTypeTag::Mesh, "meshRefs",
+                              "missing_mesh", id, report);
+      }
+    }
+  });
 }
 
 } // namespace engine::runtime

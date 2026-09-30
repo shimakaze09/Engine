@@ -56,6 +56,7 @@
 #include "engine/renderer/texture_loader.h"
 #include "engine/runtime/animation_system.h"
 #include "engine/runtime/camera_component_update.h"
+#include "engine/runtime/content_catalog.h"
 #include "engine/runtime/editor_bridge.h"
 #include "engine/runtime/physics_bridge.h"
 #include "engine/runtime/play_recording.h"
@@ -858,7 +859,7 @@ bool EnginePipeline::Impl::initialize(std::uint32_t maxFrameCount) noexcept {
                                    renderer::CommandBufferBuilder());
   meshRegistry.reset(new (std::nothrow) renderer::GpuMeshRegistry());
   assetDatabase.reset(new (std::nothrow) renderer::AssetDatabase());
-  assetCatalog.reset(new (std::nothrow) content::AssetCatalog());
+  assetCatalog = runtime::create_asset_catalog();
   assetManager.reset(new (std::nothrow) renderer::AssetManager());
   assetStreamingQueue.reset(new (std::nothrow) content::AssetStreamingQueue());
   assetStreamingState.reset(new (std::nothrow) RuntimeAssetStreamingState());
@@ -2634,6 +2635,14 @@ void EnginePipeline::teardown() noexcept {
     m_impl->teardown();
   }
   m_impl.reset();
+}
+
+// The one place a catalog is constructed: the run's own below, and a
+// tool's that runs no engine (engine_validate).
+std::unique_ptr<content::AssetCatalog>
+runtime::create_asset_catalog() noexcept {
+  return std::unique_ptr<content::AssetCatalog>(new (std::nothrow)
+                                                    content::AssetCatalog());
 }
 
 } // namespace engine
