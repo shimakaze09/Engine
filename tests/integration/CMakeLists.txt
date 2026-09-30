@@ -1270,6 +1270,20 @@ if(ENGINE_BUILD_TOOLS)
     )
 
     add_test(
+        NAME engine_integration_asset_packer_uncooked_primitives
+        COMMAND ${CMAKE_COMMAND}
+            "-DASSET_PACKER=$<TARGET_FILE:asset_packer>"
+            "-DMULTI_GLTF=${CMAKE_SOURCE_DIR}/tests/data/multi_primitive.gltf"
+            "-DSINGLE_GLTF=${CMAKE_SOURCE_DIR}/tests/data/hullless_triangle.gltf"
+            "-DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/uncooked_primitives_work"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/asset_packer_uncooked_primitives_test.cmake
+    )
+    set_tests_properties(
+        engine_integration_asset_packer_uncooked_primitives
+        PROPERTIES LABELS integration
+    )
+
+    add_test(
         NAME engine_integration_asset_packer_malformed_sidecar
         COMMAND ${CMAKE_COMMAND}
             "-DASSET_PACKER=$<TARGET_FILE:asset_packer>"

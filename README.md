@@ -504,7 +504,11 @@ build\tools\asset_packer\asset_packer.exe <input.gltf|input.glb> <output.mesh>
 Tool behavior:
 
 - Deterministic cook: identical inputs produce byte-identical outputs
-- Imports glTF meshes plus skeletons and animation clips
+- Imports one primitive of one glTF mesh per `.mesh` (chosen by
+  `importSettings.meshIndex` and `primitiveIndex` in the source's `.meta`,
+  mesh 0 primitive 0 by default), plus skeletons and animation clips. A
+  cook names on stderr every primitive it leaves out
+  (`engine_integration_asset_packer_uncooked_primitives`)
 - Writes `.mesh`, `.cookmeta`, `.cookstamp` and a collision `.hull`, plus
   `.skel` and `<clip>.anim` for rigged input
 - Generates asset thumbnails, and records in the cook stamp every file the
