@@ -32,3 +32,9 @@ target_include_directories(engine_audio
 )
 # Both translation units must see the same miniaudio configuration.
 target_compile_definitions(engine_audio PRIVATE MA_NO_GENERATION)
+# MSVC's optimizer reports stb_vorbis's possibly uninitialized locals and
+# unreachable code from the command-line warning state, which the pragma
+# region in miniaudio_impl.cpp cannot reach, so that one third-party file
+# drops them here.
+set_source_files_properties(src/miniaudio_impl.cpp PROPERTIES
+    COMPILE_OPTIONS "$<$<CXX_COMPILER_ID:MSVC>:/wd4701;/wd4702;/wd4703>")

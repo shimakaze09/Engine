@@ -52,14 +52,6 @@
 #pragma GCC diagnostic pop
 #endif
 
-// MSVC judges its code-generation warnings (a possibly uninitialized local,
-// unreachable code) when it compiles each function, after the pop above
-// has restored /W4, so they are off for this whole file. Nothing below
-// defines a function.
-#if defined(_MSC_VER) && !defined(__clang__)
-#pragma warning(disable : 4701 4702 4703)
-#endif
-
 #if !defined(MA_HAS_WAV) || !defined(MA_HAS_FLAC) || !defined(MA_HAS_MP3) ||   \
     !defined(MA_HAS_VORBIS)
 #error "miniaudio is built without a decoder kLoadableSoundExtensions names"
