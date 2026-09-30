@@ -11,11 +11,12 @@
 #include <memory>
 #include <new>
 
+#include "component_registry.h"
 #include "engine/core/diagnostic.h"
 #include "engine/core/json.h"
 #include "engine/core/logging.h"
-#include "engine/core/vfs.h"
 #include "engine/core/reflect.h"
+#include "engine/core/vfs.h"
 #include "engine/math/quat.h"
 #include "engine/math/vec2.h"
 #include "engine/math/vec3.h"
@@ -25,7 +26,6 @@
 #include "engine/runtime/reflect_types.h"
 #include "engine/runtime/serialization_keys.h"
 #include "engine/runtime/world.h"
-#include "component_registry.h"
 #include "serialization_util.h"
 
 namespace engine::runtime {
@@ -69,14 +69,14 @@ void report_reference(core::ValidationReport *report, const char *code,
                       PersistentId entityPersistentId,
                       const char *what) noexcept {
   if (report != nullptr) {
-    static_cast<void>(report->add(core::ValidationSeverity::Warning, code,
-                                  key, entityPersistentId));
+    static_cast<void>(report->add(core::ValidationSeverity::Warning, code, key,
+                                  entityPersistentId));
   }
   char message[320] = {};
   std::snprintf(message, sizeof(message), "%s (entity %u, %s = %s)", what,
                 entityPersistentId, field, key);
-  core::Diagnostic record = core::make_diagnostic(core::LogLevel::Warning,
-                                                  kSceneLogChannel, message);
+  core::Diagnostic record =
+      core::make_diagnostic(core::LogLevel::Warning, kSceneLogChannel, message);
   record.kind = core::FailureKind::NotFound;
   record.entityPersistentId = entityPersistentId;
   std::snprintf(record.field, sizeof(record.field), "%s", field);
@@ -126,7 +126,6 @@ void validate_scene_references(const World &staged,
     }
   });
 }
-
 
 // ---- Registry-driven component codec ----------------------------
 // Membership and row order for both serializer directions expand from
@@ -294,9 +293,9 @@ bool deserialize_scene_entities(const core::JsonParser &parser,
 /// Counts alive entities carrying the component through the public get
 /// accessor, so commit invariants can compare worlds without new World API.
 template <typename Component>
-std::size_t count_components(
-    const World &world,
-    bool (World::*getComponent)(Entity, Component *) const noexcept) noexcept {
+std::size_t count_components(const World &world,
+                             bool (World::*getComponent)(Entity, Component *)
+                                 const noexcept) noexcept {
   std::size_t count = 0U;
   world.for_each_alive([&](Entity entity) noexcept {
     Component component{};
@@ -454,15 +453,15 @@ bool serialize_scene_to_writer(const World &world,
     writer.begin_object();
 
 #define ENGINE_SCENE_WRITE_ROW(Type, Key, GetFn, AddFn, RemoveFn)              \
-    {                                                                          \
-      Type component{};                                                        \
-      if (world.GetFn(entity, &component) &&                                   \
-          !encode_scene_component(writer, scene_component_key<Type>(Key),      \
-                                  descs, component)) {                         \
-        writeFailed = true;                                                    \
-        return;                                                                \
-      }                                                                        \
-    }
+  {                                                                            \
+    Type component{};                                                          \
+    if (world.GetFn(entity, &component) &&                                     \
+        !encode_scene_component(writer, scene_component_key<Type>(Key), descs, \
+                                component)) {                                  \
+      writeFailed = true;                                                      \
+      return;                                                                  \
+    }                                                                          \
+  }
     ENGINE_PERSISTENT_COMPONENT_TABLE(ENGINE_SCENE_WRITE_ROW)
 #undef ENGINE_SCENE_WRITE_ROW
 
@@ -560,6 +559,16 @@ void reset_world(World &world, SceneTeardownHook beforeTeardown) noexcept {
 }
 
 /// Saves the requested resource for scene.
+core::FileReadResult document_fingerprint(const char *path,
+                                          core::FileFingerprint *out) noexcept {
+  if ((path == nullptr) || (out == nullptr)) {
+    return core::FileReadResult::Unreadable;
+  }
+  char resolved[kMaxDocumentOsPath] = {};
+  return core::file_fingerprint(
+      resolve_document_path(path, resolved, sizeof(resolved)), out);
+}
+
 bool save_scene(const World &world, const char *path) noexcept {
   if (path == nullptr) {
     core::log_message(core::LogLevel::Error, kSceneLogChannel,

@@ -4,6 +4,7 @@
 
 #include <cstddef>
 
+#include "engine/core/file_read.h"
 #include "engine/core/validation_report.h"
 
 namespace engine::runtime {
@@ -40,6 +41,11 @@ bool save_scene(const World &world, const char *path) noexcept;
 /// Saves the requested resource for scene.
 bool save_scene(const World &world, char *buffer, std::size_t capacity,
                 std::size_t *outSize) noexcept;
+/// Fingerprints the document at `path`, resolved as save_scene resolves
+/// it, so an editor can tell whether the file changed on disk since it
+/// loaded or wrote it (core::file_fingerprint).
+core::FileReadResult document_fingerprint(const char *path,
+                                          core::FileFingerprint *out) noexcept;
 /// Loads the scene at `path` (resolved as save_scene resolves it) into
 /// the world. A malformed document is
 /// refused with the world untouched; a well-formed one whose references

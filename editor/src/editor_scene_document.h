@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include "engine/core/file_read.h"
 #include "engine/core/platform.h"
 
 #include "editor_recent_list.h"
@@ -68,6 +69,15 @@ struct SceneDocumentState final {
                           kMaxRecentScenes, &recent_entry_is_file};
 
   char lastSaveError[kMaxDocumentPathLength + 64U] = {};
+
+  // What the document's file held when it was opened or last saved. A Save
+  // compares the file with it first, so a file changed on disk since --
+  // a pull, a regeneration -- is not silently written over; the author
+  // chooses Overwrite, Reload or Save As instead.
+  core::FileFingerprint diskFingerprint{};
+  bool diskConflictOpen = false;
+  // Set by Overwrite: the next Save writes whatever the file now holds.
+  bool overwriteDiskConflict = false;
   // Set when a session starts inside a project: its startup scene opens
   // on the first frame with a world, once.
   bool startupScenePending = false;
@@ -131,6 +141,18 @@ bool request_scene_quit() noexcept;
 /// caller may switch at once; false means the prompt was armed and the
 /// switch is requested when it resolves.
 bool request_scene_project_switch(const char *path) noexcept;
+
+/// True while the file-changed-on-disk prompt should be drawn: a Save found
+/// the document's file changed since it was opened or last saved.
+bool scene_document_conflict_open() noexcept;
+/// Overwrite: saves over the changed file, discarding what it now holds.
+void scene_document_conflict_choose_overwrite() noexcept;
+/// Reload: opens the file as it is now, discarding the unsaved edits.
+void scene_document_conflict_choose_reload() noexcept;
+/// Save As: keeps both, writing the edits to a new file.
+void scene_document_conflict_choose_save_as() noexcept;
+/// Cancel: nothing is written; the document stays as it is.
+void scene_document_conflict_choose_cancel() noexcept;
 
 /// True while the unsaved-change confirm prompt should be drawn.
 bool scene_document_prompt_open() noexcept;

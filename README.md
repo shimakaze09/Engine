@@ -235,6 +235,13 @@ File > Open Project... and File > Close Project leave the open project for
 another or for the hub, asking about unsaved changes first. A project named
 on the command line that cannot be opened says why in an error box.
 
+Save never writes over a scene or material whose file changed on disk after
+the editor opened or last saved it (a teammate's pull, another tool). It stops
+with the file untouched and offers Overwrite, Reload or Save As (a material:
+Overwrite or Reload from Disk), as Unity and Godot ask about an asset changed
+outside the editor. A file deleted in the meantime is simply written again
+(`engine_unit_editor_scene_document`, `engine_unit_editor_material_edit`).
+
 `engine_player` runs a game without the editor, as a Unity player build or a
 Godot export does: `engine_player path/to/my_game` (the sample beside it
 with none) opens a window titled with the project's name and plays its
@@ -453,7 +460,10 @@ and bodies, and keep state across scene loads in Lua globals, which live
 for the whole run (`engine_integration_scene_flow`); `engine.save_data` and
 `engine.load_data` keep it between runs. The console's `spawn <prefab>
 [x y z]` instantiates a prefab by a path inside the project
-(`engine_integration_sandbox`).
+(`engine_integration_sandbox`). It changes the running game, so the
+editor's Log runs it only in Play; in Edit mode it is refused, since the
+entity would bypass undo and the unsaved-changes prompt: use the Create
+menu or drag the prefab in instead (`engine_unit_editor_console_commands`).
 
 Scripts run sandboxed: `io`, `os`, `debug` and `package` are not there, all
 scripts share a budget of Lua instructions per frame (1,000,000 by default;

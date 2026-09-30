@@ -36,6 +36,19 @@ void shutdown_console() noexcept;
 bool console_register_command(const char *name, ConsoleCommandFn fn,
                               void *userData, const char *description) noexcept;
 
+// Register a command that changes the running World (spawning, say), as
+// console_register_command does. A host that also edits an authored scene
+// -- the editor -- runs such a command only in a play session, where the
+// change is thrown away at Stop, since it bypasses the host's undo and
+// unsaved-change tracking.
+bool console_register_world_command(const char *name, ConsoleCommandFn fn,
+                                    void *userData,
+                                    const char *description) noexcept;
+
+// True when the first word of `line` names a command registered with
+// console_register_world_command.
+bool console_line_changes_world(const char *line) noexcept;
+
 // Parse `line`, find the command, and invoke its callback.
 // Returns false if the command is not found.
 bool console_execute(const char *line) noexcept;
