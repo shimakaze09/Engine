@@ -91,22 +91,31 @@ void update_audio() noexcept;
 /// it is read) or its header claims more decoded PCM than
 /// `audio.max_decoded_pcm_bytes` (checked before the first frame decodes).
 /// The sound is decoded once, here, at its own sample rate; a sound of
-/// more than two channels is decoded down to stereo.
+/// more than two channels is decoded down to stereo. Loading a path that
+/// is already loaded decodes nothing and returns the same handle with one
+/// more reference, as Unity shares an AudioClip, so any number of scripts
+/// may load the sounds they use; a path too long to key the sound by is
+/// refused.
 SoundHandle load_sound(const char *virtualPath) noexcept;
 // Releases every loaded sound, live one-shot, and the streamed music while
 // the device stays up: sounds are run-scoped scene content and must not
 // survive EnginePipeline::teardown into a later run.
 void unload_all_sounds() noexcept;
-/// Releases the sound's slot; the handle becomes stale.
+/// Returns one reference; the last one stops the sound's playback and frees
+/// it, and the handle becomes stale.
 void unload_sound(SoundHandle handle) noexcept;
 
-/// Starts playback with the given params; false for stale handles or
-/// invalid params.
+/// Plays the sound on the SFX bus, so the bus's volume applies, as a new
+/// voice from the same pool play_sound_oneshot uses: playing it again while
+/// it sounds layers a second voice instead of restarting the first. A
+/// looping voice holds its pool slot until stop_sound, stop_all or the
+/// sound's unload. False for a stale handle, invalid params or an
+/// exhausted pool (logged once).
 bool play_sound(SoundHandle handle, const PlayParams &params) noexcept;
-/// Stops all playback of this sound.
+/// Stops every voice playing this sound.
 void stop_sound(SoundHandle handle) noexcept;
-/// Stops everything audible: direct playback of loaded sounds, all pooled
-/// one-shot instances, and the streamed music track.
+/// Stops everything audible: every pooled voice and the streamed music
+/// track.
 void stop_all() noexcept;
 
 /// Sets the Master bus volume; identical to set_bus_volume(Master, v) —
