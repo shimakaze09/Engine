@@ -466,8 +466,8 @@ void shutdown_texture_system() noexcept {
   g_texState.initialized = false;
 }
 
-/// Loads the requested resource for texture.
-TextureHandle load_texture(const char *virtualPath) noexcept {
+TextureHandle load_texture(const char *virtualPath,
+                           TextureColorSpace space) noexcept {
   if ((virtualPath == nullptr) || !g_texState.initialized) {
     return kInvalidTextureHandle;
   }
@@ -510,8 +510,13 @@ TextureHandle load_texture(const char *virtualPath) noexcept {
   // Reject over-budget decodes from the header, before stb
   // allocates the full decoded image.
   const bool decodeAsHdr = stbi_is_hdr_from_memory(fileBytes, stbFileSize) != 0;
-  if (!texture_decode_within_budget(fileBytes, stbFileSize, decodeAsHdr, 0,
-                                    virtualPath, nullptr)) {
+  // An sRGB texture is expanded to RGBA8, the one 8-bit format devices
+  // sample as sRGB, so its budget is checked at four channels; a data
+  // texture keeps its channel count.
+  const bool srgb = !decodeAsHdr && (space == TextureColorSpace::Srgb);
+  const int desiredChannels = srgb ? 4 : 0;
+  if (!texture_decode_within_budget(fileBytes, stbFileSize, decodeAsHdr,
+                                    desiredChannels, virtualPath, nullptr)) {
     core::vfs_free(fileData);
     return kInvalidTextureHandle;
   }
@@ -543,8 +548,11 @@ TextureHandle load_texture(const char *virtualPath) noexcept {
     stbi_image_free(pixels);
     isHdr = true;
   } else {
-      unsigned char *pixels = stbi_load_from_memory(
-        fileBytes, stbFileSize, &width, &height, &channels, 0);
+    unsigned char *pixels = stbi_load_from_memory(
+        fileBytes, stbFileSize, &width, &height, &channels, desiredChannels);
+    if (srgb) {
+      channels = 4;
+    }
     core::vfs_free(fileData);
 
     if (pixels == nullptr) {
@@ -563,6 +571,7 @@ TextureHandle load_texture(const char *virtualPath) noexcept {
       desc.filter = TextureFilter::LinearMipmap;
       desc.wrap = TextureWrap::Repeat;
       desc.pixelData = TexelData::U8;
+      desc.srgb = srgb;
       desc.pixels = pixels;
       deviceTexture = dev->create_texture(desc);
     }

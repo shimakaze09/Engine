@@ -45,14 +45,19 @@ struct LoaderLog final {
   std::size_t loads = 0U;
   std::size_t releases = 0U;
   TextureHandle lastReleased{};
+  engine::renderer::TextureColorSpace lastSpace =
+      engine::renderer::TextureColorSpace::Linear;
 };
 
 LoaderLog g_log{};
 
 /// Loads a file whose text starts with "good" as a fresh handle; anything
 /// else, or a missing file, fails.
-TextureHandle recording_load(const char *virtualPath, void *) noexcept {
+TextureHandle recording_load(const char *virtualPath,
+                             engine::renderer::TextureColorSpace space,
+                             void *) noexcept {
   ++g_log.loads;
+  g_log.lastSpace = space;
   void *bytes = nullptr;
   std::size_t size = 0U;
   const bool read = static_cast<bool>(

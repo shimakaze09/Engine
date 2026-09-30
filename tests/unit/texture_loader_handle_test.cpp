@@ -47,6 +47,52 @@ constexpr unsigned char kTinyPng[] = {
     0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60,
     0x82};
 
+// 1x1 8-bit greyscale PNG, value 128.
+constexpr unsigned char kGreyPng[] = {
+    0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D,
+    0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+    0x08, 0x00, 0x00, 0x00, 0x00, 0x3A, 0x7E, 0x9B, 0x55, 0x00, 0x00, 0x00,
+    0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x68, 0x00, 0x00, 0x00,
+    0x82, 0x00, 0x81, 0x77, 0xCD, 0x72, 0xB6, 0x00, 0x00, 0x00, 0x00, 0x49,
+    0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82};
+
+/// A colour texture is created sRGB, expanded to RGBA8 (the one 8-bit
+/// format devices sample as sRGB) whatever its channel count; a data
+/// texture keeps its channels and is created linear (issue #810).
+int check_color_space_reaches_the_device() {
+  using engine::renderer::TextureColorSpace;
+  using engine::renderer::TextureFormat;
+  constexpr const char *kGreyPath = "tex/texture_color_space_grey.png";
+  engine::renderer::reset_fake_device();
+  if (!engine::core::initialize_vfs() || !engine::core::mount("tex", ".") ||
+      !engine::core::vfs_write_binary(kGreyPath, kGreyPng, sizeof(kGreyPng)) ||
+      !engine::renderer::initialize_texture_system()) {
+    engine::core::shutdown_vfs();
+    return 60;
+  }
+  int result = 0;
+  const engine::renderer::TextureDesc &last =
+      engine::tests::fake_log().lastTexture;
+  const engine::renderer::TextureHandle colour =
+      engine::renderer::load_texture(kGreyPath, TextureColorSpace::Srgb);
+  if ((colour == engine::renderer::kInvalidTextureHandle) || !last.srgb ||
+      (last.format != TextureFormat::RGBA8)) {
+    result = 61;
+  }
+  const engine::renderer::TextureHandle data =
+      engine::renderer::load_texture(kGreyPath, TextureColorSpace::Linear);
+  if ((result == 0) && ((data == engine::renderer::kInvalidTextureHandle) ||
+                        last.srgb || (last.format != TextureFormat::R8))) {
+    result = 62;
+  }
+  engine::renderer::unload_texture(colour);
+  engine::renderer::unload_texture(data);
+  engine::renderer::shutdown_texture_system();
+  static_cast<void>(std::remove("texture_color_space_grey.png"));
+  engine::core::shutdown_vfs();
+  return result;
+}
+
 int check_texture_handle_generation() {
   engine::renderer::reset_fake_device();
   if (!engine::core::initialize_vfs()) {
@@ -385,6 +431,11 @@ int main() {
   const int fillResult = check_loader_fills_every_slot();
   if (fillResult != 0) {
     return fillResult;
+  }
+
+  const int colourResult = check_color_space_reaches_the_device();
+  if (colourResult != 0) {
+    return colourResult;
   }
 
   return check_texture_handle_generation();

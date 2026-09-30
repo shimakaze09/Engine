@@ -52,6 +52,16 @@ vec3 tonemap_uncharted2(vec3 hdr) {
     return curr * whiteScale;
 }
 
+/// The sRGB transfer function (IEC 61966-2-1) displays expect: linear
+/// below 0.0031308, a 1/2.4 power above. A bare 1/2.2 power darkens the
+/// shadows it should lift.
+vec3 linear_to_srgb(vec3 c) {
+    c = clamp(c, vec3_splat(0.0), vec3_splat(1.0));
+    vec3 low = c * 12.92;
+    vec3 high = 1.055 * pow(c, vec3_splat(1.0 / 2.4)) - 0.055;
+    return mix(low, high, step(vec3_splat(0.0031308), c));
+}
+
 void main() {
     vec3 hdr = texture2D(u_sceneColor, v_texcoord0).rgb;
     if (u_bloomEnabled.x != 0.0) {
@@ -72,5 +82,5 @@ void main() {
     } else {
         mapped = tonemap_reinhard(hdr);
     }
-    gl_FragColor = vec4(pow(mapped, vec3_splat(1.0 / 2.2)), 1.0);
+    gl_FragColor = vec4(linear_to_srgb(mapped), 1.0);
 }

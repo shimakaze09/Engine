@@ -24,8 +24,17 @@ bool initialize_texture_system() noexcept;
 /// Shuts down the owning system for texture system.
 void shutdown_texture_system() noexcept;
 
-/// Loads the requested resource for texture.
-TextureHandle load_texture(const char *virtualPath) noexcept;
+/// How a texture's texels are read. A material slot decides it: base
+/// colour and emissive maps are authored in sRGB (as glTF defines them),
+/// every other map holds linear data.
+enum class TextureColorSpace : std::uint8_t { Linear, Srgb };
+
+/// Loads an image file as a texture. An sRGB colour texture is decoded to
+/// RGBA8 and created sRGB, so the device samples it as linear light and
+/// its mips are averaged there; an HDR image is linear whatever is asked.
+TextureHandle
+load_texture(const char *virtualPath,
+             TextureColorSpace space = TextureColorSpace::Linear) noexcept;
 /// Loads the requested resource for hdr equirect cubemap.
 TextureHandle load_hdr_equirect_cubemap(const char *virtualPath,
                                         std::int32_t faceSize) noexcept;

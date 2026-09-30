@@ -70,6 +70,12 @@ struct TextureAssetRecord final {
   /// record's current state was last loaded or refused; the hot-reload
   /// poll reloads the texture when the file's time moves off it.
   std::int64_t sourceWriteTime = 0;
+  /// The colour space the file was loaded in, set by the first material
+  /// slot that asked for it; a hot reload loads it the same way.
+  TextureColorSpace colorSpace = TextureColorSpace::Linear;
+  /// Set once a slot of the other colour space has asked for the file, so
+  /// that is logged once rather than every frame.
+  bool colorSpaceConflictLogged = false;
 };
 
 /// Authored texture-slot references for one material (path-derived asset
@@ -137,6 +143,16 @@ ENGINE_MATERIAL_TEXTURE_FIELDS(ENGINE_MATERIAL_FIELD_BIT)
 
 inline constexpr std::uint16_t kAll =
     static_cast<std::uint16_t>((1U << kFieldCount) - 1U);
+
+/// The colour space a texture slot's map is authored in: base colour and
+/// emissive are sRGB, as glTF defines them and Unity and Godot sample
+/// them; roughness, occlusion and opacity maps are linear data.
+constexpr TextureColorSpace
+texture_color_space(std::uint16_t fieldBit) noexcept {
+  return ((fieldBit == kAlbedoTexture) || (fieldBit == kEmissiveTexture))
+             ? TextureColorSpace::Srgb
+             : TextureColorSpace::Linear;
+}
 } // namespace material_field
 
 /// One material slot: id, source path, and the fully resolved parameters,
@@ -326,9 +342,10 @@ std::uint16_t material_overrides(const AssetDatabase *database,
                                  content::AssetId id) noexcept;
 
 // Texture asset management.
-bool register_texture_asset(AssetDatabase *database, content::AssetId id,
-                            const char *sourcePath,
-                            TextureHandle runtimeTexture) noexcept;
+bool register_texture_asset(
+    AssetDatabase *database, content::AssetId id, const char *sourcePath,
+    TextureHandle runtimeTexture,
+    TextureColorSpace colorSpace = TextureColorSpace::Linear) noexcept;
 /// True when register_texture_asset or register_texture_asset_failed can
 /// record this id: it is already in the table, or the table has room.
 bool texture_asset_slot_available(const AssetDatabase *database,
@@ -341,8 +358,16 @@ bool material_asset_slot_available(const AssetDatabase *database,
 /// resolve_material_textures does not retry it every frame; the source
 /// path is kept for diagnostics. It stays Failed until its file changes and
 /// the editor's hot-reload poll loads it again (texture_hot_reload.h).
-bool register_texture_asset_failed(AssetDatabase *database, content::AssetId id,
-                                   const char *sourcePath) noexcept;
+bool register_texture_asset_failed(
+    AssetDatabase *database, content::AssetId id, const char *sourcePath,
+    TextureColorSpace colorSpace = TextureColorSpace::Linear) noexcept;
+/// True the first time a slot asks for the recorded texture `id` in a
+/// colour space other than the one it was loaded in (one file used as both
+/// a colour and a data map), so the caller logs it once; the texture keeps
+/// its first colour space, as a Unity texture has one import setting.
+bool claim_texture_color_space_conflict(AssetDatabase *database,
+                                        content::AssetId id,
+                                        TextureColorSpace requested) noexcept;
 /// Lifecycle state for the texture id (Unloaded when unknown).
 content::AssetState texture_asset_state(const AssetDatabase *database,
                                         content::AssetId id) noexcept;

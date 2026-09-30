@@ -305,7 +305,7 @@ const bgfx::Memory *stage_texels(const BgfxTexelUpload &shape,
 /// stages and submits one level. Logs and stops at the first level whose
 /// staging buffer cannot be allocated, so the levels written stay valid.
 template <typename UploadLevel>
-void upload_texel_chain(const BgfxTexelUpload &shape, TexelData data,
+void upload_texel_chain(const BgfxTexelUpload &shape, TexelData data, bool srgb,
                         std::int32_t width, std::int32_t height,
                         std::int32_t levels, const void *pixels,
                         UploadLevel upload) noexcept {
@@ -327,7 +327,7 @@ void upload_texel_chain(const BgfxTexelUpload &shape, TexelData data,
                          static_cast<std::size_t>(levelHeight) * texelBytes]);
     if ((texels == nullptr) ||
         !downsample_texels(data, components, source, sourceWidth, sourceHeight,
-                           texels.get())) {
+                           texels.get(), srgb)) {
       core::log_message(core::LogLevel::Error, "render_device",
                         "bgfx backend: out of memory generating a mip "
                         "chain; the levels below this one stay empty");
@@ -555,6 +555,31 @@ void bgfx_bind_uniform_buffer_slot(std::uint32_t,
 
 // --- Textures ---
 
+/// Whether the device can sample `desc` as sRGB: U8 RGBA8 texels in a
+/// format the device lists with sRGB support. A texture it cannot is
+/// created linear, with one warning, so it still draws (lighter than
+/// authored) rather than not at all.
+bool srgb_texture_supported(const TextureDesc &desc) noexcept {
+  const std::uint32_t formatCaps =
+      bgfx::getCaps()->formats[bgfx::TextureFormat::RGBA8];
+  const std::uint32_t needed = (desc.kind == TextureKind::Cube)
+                                   ? BGFX_CAPS_FORMAT_TEXTURE_CUBE_SRGB
+                                   : BGFX_CAPS_FORMAT_TEXTURE_2D_SRGB;
+  if ((desc.format == TextureFormat::RGBA8) &&
+      (desc.pixelData == TexelData::U8) && ((formatCaps & needed) != 0U)) {
+    return true;
+  }
+  static bool warned = false;
+  if (!warned) {
+    warned = true;
+    core::log_message(core::LogLevel::Warning, "render_device",
+                      "bgfx backend: this device cannot sample the texture "
+                      "as sRGB; colour textures are read as linear and look "
+                      "lighter than authored");
+  }
+  return false;
+}
+
 DeviceTextureHandle bgfx_create_texture(const TextureDesc &desc) noexcept {
   const bool hasPixels = (desc.kind == TextureKind::Cube)
                              ? (desc.facePixels != nullptr)
@@ -626,6 +651,10 @@ DeviceTextureHandle bgfx_create_texture(const TextureDesc &desc) noexcept {
   record.renderTarget = !hasPixels && !desc.cpuUpdatable;
   record.immutable = hasPixels;
   std::uint64_t flags = bgfx_sampler_flags(desc.filter, desc.wrap);
+  const bool srgb = desc.srgb && srgb_texture_supported(desc);
+  if (srgb) {
+    flags |= BGFX_TEXTURE_SRGB;
+  }
   if (record.renderTarget) {
     flags |= BGFX_TEXTURE_RT;
     if (desc.format == TextureFormat::Depth24) {
@@ -675,7 +704,7 @@ DeviceTextureHandle bgfx_create_texture(const TextureDesc &desc) noexcept {
   if ((desc.kind == TextureKind::Tex2D) && (desc.pixels != nullptr)) {
     const bgfx::TextureHandle handle = record.handle;
     upload_texel_chain(
-        shape, desc.pixelData, desc.width, desc.height, record.mipLevels,
+        shape, desc.pixelData, srgb, desc.width, desc.height, record.mipLevels,
         desc.pixels,
         [&shape, handle](std::int32_t level, std::int32_t width,
                          std::int32_t height, const void *texels) noexcept {
@@ -695,7 +724,7 @@ DeviceTextureHandle bgfx_create_texture(const TextureDesc &desc) noexcept {
         continue;
       }
       upload_texel_chain(
-          shape, desc.pixelData, desc.width, desc.width, record.mipLevels,
+          shape, desc.pixelData, srgb, desc.width, desc.width, record.mipLevels,
           desc.facePixels[face],
           [&shape, handle, face](std::int32_t level, std::int32_t width,
                                  std::int32_t height,

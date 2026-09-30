@@ -70,7 +70,8 @@ void destroy_buffer(renderer::DeviceBufferHandle buffer) noexcept {
 }
 
 renderer::DeviceTextureHandle
-create_texture(const renderer::TextureDesc &) noexcept {
+create_texture(const renderer::TextureDesc &desc) noexcept {
+  fake_log().lastTexture = desc;
   return renderer::DeviceTextureHandle{fake_create(FakeKind::Texture)};
 }
 

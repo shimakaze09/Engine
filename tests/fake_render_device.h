@@ -66,6 +66,10 @@ struct FakeDeviceLog final {
   int draws = 0;
   int drawsToBackBuffer = 0;
 
+  /// The descriptor of the last texture created (its pixel pointers are
+  /// the caller's and dangle after the call; the shape fields do not).
+  renderer::TextureDesc lastTexture{};
+
   /// When false, render_device() answers as it does with no device live.
   bool present = true;
   /// What initialize_render_device() returns.

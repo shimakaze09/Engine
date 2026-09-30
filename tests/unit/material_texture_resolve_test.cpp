@@ -12,6 +12,7 @@
 #include <cstring>
 #include <memory>
 #include <new>
+#include <string>
 
 #include "engine/content/asset_catalog.h"
 #include "engine/core/logging.h"
@@ -55,12 +56,20 @@ void remove_file(const char *path) noexcept {
 struct FakeLoaderState final {
   std::uint32_t callCount = 0U;
   std::uint32_t nextHandle = 1U;
+  /// The paths loaded as sRGB, joined with '|'.
+  std::string srgbPaths;
 };
 
-engine::renderer::TextureHandle fake_load_texture(const char *path,
-                                                  void *userData) noexcept {
+engine::renderer::TextureHandle
+fake_load_texture(const char *path, engine::renderer::TextureColorSpace space,
+                  void *userData) noexcept {
   auto *state = static_cast<FakeLoaderState *>(userData);
   ++state->callCount;
+  if ((path != nullptr) &&
+      (space == engine::renderer::TextureColorSpace::Srgb)) {
+    state->srgbPaths += path;
+    state->srgbPaths += '|';
+  }
   if ((path == nullptr) || (std::strstr(path, "missing") != nullptr)) {
     return engine::renderer::kInvalidTextureHandle;
   }
@@ -109,6 +118,13 @@ int verify_successful_resolution(engine::renderer::AssetDatabase *database) {
   }
   if (state.callCount != 5U) {
     return 13;
+  }
+  // The base colour and emissive maps are authored in sRGB, as glTF
+  // defines them; roughness, occlusion and opacity are linear data.
+  if (state.srgbPaths !=
+      "assets/textures/ok_albedo.png|assets/textures/ok_emissive.png|") {
+    std::printf("sRGB loads: %s\n", state.srgbPaths.c_str());
+    return 16;
   }
 
   const engine::renderer::Material *params =
@@ -414,6 +430,34 @@ int verify_unreferenced_textures_are_released(
 
 } // namespace
 
+/// A file keeps the colour space its first slot loaded it in; a slot of
+/// the other space is reported once (one file used as both a colour and a
+/// data map), and a slot of the same space never is.
+int verify_color_space_conflict_is_reported_once() {
+  using engine::renderer::TextureColorSpace;
+  std::unique_ptr<engine::renderer::AssetDatabase> database(
+      new (std::nothrow) engine::renderer::AssetDatabase());
+  if (database == nullptr) {
+    return 90;
+  }
+  const engine::content::AssetId id =
+      engine::content::make_asset_id_from_path("assets/textures/shared.png");
+  if (!engine::renderer::register_texture_asset(
+          database.get(), id, "assets/textures/shared.png",
+          engine::renderer::TextureHandle{7U}, TextureColorSpace::Srgb)) {
+    return 91;
+  }
+  if (engine::renderer::claim_texture_color_space_conflict(
+          database.get(), id, TextureColorSpace::Srgb) ||
+      !engine::renderer::claim_texture_color_space_conflict(
+          database.get(), id, TextureColorSpace::Linear) ||
+      engine::renderer::claim_texture_color_space_conflict(
+          database.get(), id, TextureColorSpace::Linear)) {
+    return 92;
+  }
+  return 0;
+}
+
 int main() {
   std::unique_ptr<engine::content::AssetCatalog> catalogOwner(
       new (std::nothrow) engine::content::AssetCatalog());
@@ -442,6 +486,9 @@ int main() {
   engine::content::clear_asset_catalog(g_catalog);
 
   int result = verify_successful_resolution(database.get());
+  if (result == 0) {
+    result = verify_color_space_conflict_is_reported_once();
+  }
   if (result == 0) {
     result = verify_failed_load_falls_back(database.get());
   }
