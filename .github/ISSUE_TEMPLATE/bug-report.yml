@@ -30,7 +30,7 @@ body:
     id: area
     attributes:
       label: Area
-      description: Every subsystem the defect or feature touches; each becomes an `area:*` label.
+      description: Every subsystem the defect or feature touches; each becomes an area label.
       multiple: true
       options:
         - core

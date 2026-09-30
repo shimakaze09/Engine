@@ -47,7 +47,7 @@ so match the tier. The tiers are the severity scale in `CLAUDE.md`
 
 ## P3 — fix inline
 
-- A P3 is `class:deferred` unless it is observed in normal use. It is
+- A P3 is `deferred` unless it is observed in normal use. It is
   fixed inside a change that already touches those files, with the
   existing tests passing: no regression suite, no scope table.
 - Age triggers triage, never a close.

@@ -4,6 +4,11 @@
 stand-alone P3 rule in point 3 of
 [0014](0014-severity-is-impact.md).
 
+**Status:** Amended 2026-09-30 at the owner's request: the labels drop
+their prefixes (`class:blocker` is now `blocker`, `found:use` is
+`observed`, `area:render` is `render`). `.github/labels.json` holds the
+current names and colours; the decision itself is unchanged.
+
 ## Context
 
 Two weeks of fixing closed 155 issues. About two thirds of them came from
