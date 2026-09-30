@@ -11,6 +11,7 @@
 #if defined(__clang__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wtautological-constant-out-of-range-compare"
+#pragma clang diagnostic ignored "-Wtautological-compare"
 #pragma clang diagnostic ignored "-Wunused-but-set-variable"
 #pragma clang diagnostic ignored "-Wunused-value"
 #pragma clang diagnostic ignored "-Wunused-function"
@@ -49,6 +50,14 @@
 #pragma warning(pop)
 #elif defined(__GNUC__)
 #pragma GCC diagnostic pop
+#endif
+
+// MSVC judges its code-generation warnings (a possibly uninitialized local,
+// unreachable code) when it compiles each function, after the pop above
+// has restored /W4, so they are off for this whole file. Nothing below
+// defines a function.
+#if defined(_MSC_VER) && !defined(__clang__)
+#pragma warning(disable : 4701 4702 4703)
 #endif
 
 #if !defined(MA_HAS_WAV) || !defined(MA_HAS_FLAC) || !defined(MA_HAS_MP3) ||   \
