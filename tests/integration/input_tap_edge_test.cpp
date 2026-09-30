@@ -161,14 +161,14 @@ int main() {
     CHECK(push_gamepad_button(kSouth, false), "push south up");
     CHECK(pipeline.execute_frame(), "the button tap frame");
     CHECK(engine::core::is_gamepad_button_pressed(
-              engine::core::kGamepadButton_South),
+              engine::core::kGamepadButton_South, 0),
           "a gamepad tap inside one frame reads as pressed");
     CHECK(!engine::core::is_gamepad_button_down(
-              engine::core::kGamepadButton_South),
+              engine::core::kGamepadButton_South, 0),
           "and is up afterwards");
     CHECK(pipeline.execute_frame(), "the frame after the button tap");
     CHECK(!engine::core::is_gamepad_button_pressed(
-              engine::core::kGamepadButton_South),
+              engine::core::kGamepadButton_South, 0),
           "the gamepad press edge does not linger");
 
     // --- And through the action mapper, which authors bind to.

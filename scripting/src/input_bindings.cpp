@@ -246,35 +246,62 @@ int lua_engine_get_axis_value(lua_State *state) noexcept {
   return 1;
 }
 
-/// Lua binding: Lua engine.is_gamepad_connected().
+/// Reads the optional controller slot at `index`: nil or absent means any
+/// connected controller (`*outAny`); otherwise an integer slot from 0.
+/// False for anything else, which the callers answer as "not down".
+bool read_gamepad_slot(lua_State *state, int index, bool *outAny,
+                       int *outSlot) noexcept {
+  *outAny = lua_isnoneornil(state, index);
+  *outSlot = 0;
+  return *outAny || read_int_arg(state, index, outSlot);
+}
+
+/// Lua binding: Lua engine.is_gamepad_connected([slot]).
 int lua_engine_is_gamepad_connected(lua_State *state) noexcept {
-  static_cast<void>(state);
-  lua_pushboolean(state, core::is_gamepad_connected() ? 1 : 0);
+  bool any = true;
+  int slot = 0;
+  const bool connected =
+      read_gamepad_slot(state, 1, &any, &slot) &&
+      (any ? core::any_gamepad_connected() : core::is_gamepad_connected(slot));
+  lua_pushboolean(state, connected ? 1 : 0);
   return 1;
 }
 
-/// Lua binding: Lua engine.is_gamepad_button_down(button).
+/// Lua binding: Lua engine.gamepad_count().
+int lua_engine_gamepad_count(lua_State *state) noexcept {
+  lua_pushinteger(state,
+                  static_cast<lua_Integer>(core::connected_gamepad_count()));
+  return 1;
+}
+
+/// Lua binding: Lua engine.is_gamepad_button_down(button[, slot]).
 int lua_engine_is_gamepad_button_down(lua_State *state) noexcept {
   int button = 0;
-  if (!read_int_arg(state, 1, &button)) {
-    lua_pushboolean(state, 0);
-    return 1;
-  }
-  lua_pushboolean(state, core::is_gamepad_button_down(button) ? 1 : 0);
+  bool any = true;
+  int slot = 0;
+  const bool down = read_int_arg(state, 1, &button) &&
+                    read_gamepad_slot(state, 2, &any, &slot) &&
+                    (any ? core::any_gamepad_button_down(button)
+                         : core::is_gamepad_button_down(button, slot));
+  lua_pushboolean(state, down ? 1 : 0);
   return 1;
 }
 
-/// Lua binding: Lua engine.gamepad_axis_value(axis[, deadzone]).
+/// Lua binding: Lua engine.gamepad_axis_value(axis[, deadzone[, slot]]).
 int lua_engine_gamepad_axis_value(lua_State *state) noexcept {
   int axis = 0;
   int deadzone = 8000;
+  bool any = true;
+  int slot = 0;
   if (!read_int_arg(state, 1, &axis) ||
-      (!lua_isnoneornil(state, 2) && !read_int_arg(state, 2, &deadzone))) {
+      (!lua_isnoneornil(state, 2) && !read_int_arg(state, 2, &deadzone)) ||
+      !read_gamepad_slot(state, 3, &any, &slot)) {
     lua_pushnumber(state, 0.0);
     return 1;
   }
-  lua_pushnumber(
-      state, static_cast<lua_Number>(core::gamepad_axis_value(axis, deadzone)));
+  const float value = any ? core::any_gamepad_axis_value(axis, deadzone)
+                          : core::gamepad_axis_value(axis, deadzone, slot);
+  lua_pushnumber(state, static_cast<lua_Number>(value));
   return 1;
 }
 
@@ -537,6 +564,7 @@ void register_input_bindings(lua_State *state) noexcept {
   set_engine_function(state, "axis_value", &lua_engine_get_axis_value);
   set_engine_function(state, "is_gamepad_connected",
                       &lua_engine_is_gamepad_connected);
+  set_engine_function(state, "gamepad_count", &lua_engine_gamepad_count);
   set_engine_function(state, "is_gamepad_button_down",
                       &lua_engine_is_gamepad_button_down);
   set_engine_function(state, "gamepad_axis_value",

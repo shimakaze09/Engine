@@ -259,14 +259,14 @@ bool test_gamepad_axis_deadzone() noexcept {
   ev.gaxis.axis = SDL_GAMEPAD_AXIS_LEFTX;
   ev.gaxis.value = 4000; // under default deadzone
   input_process_event(engine::tests::from_sdl(ev));
-  if (gamepad_axis_value(SDL_GAMEPAD_AXIS_LEFTX) != 0.0F) {
+  if (gamepad_axis_value(SDL_GAMEPAD_AXIS_LEFTX, 8000, 0) != 0.0F) {
     shutdown_input();
     return false;
   }
 
   ev.gaxis.value = 20000;
   input_process_event(engine::tests::from_sdl(ev));
-  if (gamepad_axis_value(SDL_GAMEPAD_AXIS_LEFTX) <= 0.0F) {
+  if (gamepad_axis_value(SDL_GAMEPAD_AXIS_LEFTX, 8000, 0) <= 0.0F) {
     shutdown_input();
     return false;
   }
@@ -287,7 +287,7 @@ bool test_gamepad_button_state() noexcept {
   ev.type = SDL_EVENT_GAMEPAD_BUTTON_DOWN;
   ev.gbutton.button = SDL_GAMEPAD_BUTTON_SOUTH;
   input_process_event(engine::tests::from_sdl(ev));
-  if (!is_gamepad_button_down(SDL_GAMEPAD_BUTTON_SOUTH)) {
+  if (!is_gamepad_button_down(SDL_GAMEPAD_BUTTON_SOUTH, 0)) {
     shutdown_input();
     return false;
   }
@@ -295,7 +295,7 @@ bool test_gamepad_button_state() noexcept {
   ev.type = SDL_EVENT_GAMEPAD_BUTTON_UP;
   ev.gbutton.button = SDL_GAMEPAD_BUTTON_SOUTH;
   input_process_event(engine::tests::from_sdl(ev));
-  if (is_gamepad_button_down(SDL_GAMEPAD_BUTTON_SOUTH)) {
+  if (is_gamepad_button_down(SDL_GAMEPAD_BUTTON_SOUTH, 0)) {
     shutdown_input();
     return false;
   }
@@ -329,9 +329,10 @@ bool test_gamepad_slots_keyed_by_instance_id() noexcept {
   ev.gbutton.which = 9U;
   ev.gbutton.button = SDL_GAMEPAD_BUTTON_SOUTH;
   input_process_event(engine::tests::from_sdl(ev));
+  // A query that names no controller hears every one.
   ok = ok && is_gamepad_button_down(kGamepadButton_South, 1) &&
        !is_gamepad_button_down(kGamepadButton_South, 0) &&
-       !is_gamepad_button_down(kGamepadButton_South);
+       any_gamepad_button_down(kGamepadButton_South);
 
   // Axis on the first controller only.
   ev.type = SDL_EVENT_GAMEPAD_AXIS_MOTION;
@@ -339,7 +340,7 @@ bool test_gamepad_slots_keyed_by_instance_id() noexcept {
   ev.gaxis.axis = SDL_GAMEPAD_AXIS_LEFTX;
   ev.gaxis.value = 20000;
   input_process_event(engine::tests::from_sdl(ev));
-  ok = ok && (gamepad_axis_value(kGamepadAxis_LeftX) > 0.0F) &&
+  ok = ok && (gamepad_axis_value(kGamepadAxis_LeftX, 8000, 0) > 0.0F) &&
        (gamepad_axis_value(kGamepadAxis_LeftX, 8000, 1) == 0.0F);
 
   // A device SDL never announced has no slot; its event changes nothing.

@@ -175,13 +175,11 @@ bool evaluate_binding(const InputBinding &binding) noexcept {
     return (binding.code >= 0) && (is_mouse_button_down(binding.code) ||
                                    is_mouse_button_pressed(binding.code));
   case InputBindingType::GamepadButton:
-    return is_gamepad_connected() && (is_gamepad_button_down(binding.code) ||
-                                      is_gamepad_button_pressed(binding.code));
+    // A binding names no controller, so any connected one drives it.
+    return any_gamepad_button_down(binding.code) ||
+           any_gamepad_button_pressed(binding.code);
   case InputBindingType::GamepadAxis: {
-    if (!is_gamepad_connected()) {
-      return false;
-    }
-    const float raw = gamepad_axis_value(binding.code);
+    const float raw = any_gamepad_axis_value(binding.code);
     const float scaled = raw * binding.axisScale;
     return (scaled >= binding.axisThreshold) ||
            (scaled <= -binding.axisThreshold);
@@ -201,11 +199,11 @@ float evaluate_axis_source(const InputAxisSource &src) noexcept {
     return (pos ? 1.0F : -1.0F) * src.scale;
   }
   case AxisSourceType::GamepadAxis: {
-    if (!is_gamepad_connected() || (src.axisIndex < 0)) {
+    if (src.axisIndex < 0) {
       return 0.0F;
     }
     const int rawDeadZone = static_cast<int>(src.deadZone * 32767.0F);
-    const float raw = gamepad_axis_value(src.axisIndex, rawDeadZone);
+    const float raw = any_gamepad_axis_value(src.axisIndex, rawDeadZone);
     return raw * src.scale;
   }
   case AxisSourceType::MouseDeltaX:

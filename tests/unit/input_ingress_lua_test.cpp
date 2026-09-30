@@ -11,6 +11,7 @@
 #include "engine/core/input.h"
 #include "engine/core/input_map.h"
 #include "engine/core/logging.h"
+#include "engine/core/platform_event.h"
 #include "engine/scripting/scripting.h"
 
 namespace {
@@ -109,6 +110,31 @@ constexpr const char *kScriptContents =
     "        error('a non-string action name was not refused')\n"
     "    end\n"
     "end\n"
+    // A second controller, the first unplugged, is heard with no slot and
+    // by its own slot 1; slot 0 is empty and a bad slot reads nothing.
+    "function second_controller()\n"
+    "    local south = engine.GAMEPAD_BUTTON_SOUTH\n"
+    "    if engine.gamepad_count() ~= 1 then\n"
+    "        error('gamepad_count is not 1')\n"
+    "    end\n"
+    "    if not engine.is_gamepad_connected() or\n"
+    "       engine.is_gamepad_connected(0) or\n"
+    "       not engine.is_gamepad_connected(1) then\n"
+    "        error('connected slots are wrong')\n"
+    "    end\n"
+    "    if not engine.is_gamepad_button_down(south) or\n"
+    "       not engine.is_gamepad_button_down(south, 1) or\n"
+    "       engine.is_gamepad_button_down(south, 0) or\n"
+    "       engine.is_gamepad_button_down(south, 'x') then\n"
+    "        error('the second controller button is not heard by slot')\n"
+    "    end\n"
+    "    local lx = engine.GAMEPAD_AXIS_LEFT_X\n"
+    "    if engine.gamepad_axis_value(lx) <= 0.5 or\n"
+    "       engine.gamepad_axis_value(lx, 8000, 1) <= 0.5 or\n"
+    "       engine.gamepad_axis_value(lx, 8000, 0) ~= 0 then\n"
+    "        error('the second controller stick is not heard by slot')\n"
+    "    end\n"
+    "end\n"
     "function accept_valid_registrations()\n"
     "    local b = {\n"
     "        { type = 0, code = engine.KEY_SPACE },\n"
@@ -156,11 +182,29 @@ int main() {
     result = 4;
   }
 
+  // Two controllers arrive and the first leaves: the second stays in
+  // slot 1, holding South and the left stick right.
+  const auto pad = [](engine::core::PlatformEventKind kind,
+                      std::uint32_t device) noexcept {
+    engine::core::PlatformEvent event{};
+    event.kind = kind;
+    event.deviceId = device;
+    event.gamepadButton = engine::core::kGamepadButton_South;
+    event.gamepadAxis = engine::core::kGamepadAxis_LeftX;
+    event.axisValue = 30000;
+    engine::core::input_process_event(event);
+  };
+  pad(engine::core::PlatformEventKind::GamepadAdded, 7U);
+  pad(engine::core::PlatformEventKind::GamepadAdded, 9U);
+  pad(engine::core::PlatformEventKind::GamepadRemoved, 7U);
+  pad(engine::core::PlatformEventKind::GamepadButtonDown, 9U);
+  pad(engine::core::PlatformEventKind::GamepadAxis, 9U);
+
   const char *cases[] = {
-      "refuse_bad_action_type",   "refuse_bad_axis_type",
-      "refuse_truncating_code",   "refuse_wrapping_rebind",
+      "refuse_bad_action_type",    "refuse_bad_axis_type",
+      "refuse_truncating_code",    "refuse_wrapping_rebind",
       "refuse_non_integer_fields", "query_boundaries",
-      "accept_valid_registrations",
+      "second_controller",         "accept_valid_registrations",
   };
   int caseCode = 10;
   for (const char *name : cases) {

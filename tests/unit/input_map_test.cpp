@@ -131,6 +131,60 @@ std::string read_raw_file(const char *path) {
 // Tests
 // ---------------------------------------------------------------------------
 
+/// Sends one SDL gamepad event for device `which` through the input pump.
+void sim_gamepad(SDL_EventType type, std::uint32_t which, int code,
+                 std::int16_t value) noexcept {
+  SDL_Event ev{};
+  ev.type = type;
+  if ((type == SDL_EVENT_GAMEPAD_ADDED) ||
+      (type == SDL_EVENT_GAMEPAD_REMOVED)) {
+    ev.gdevice.which = which;
+  } else if (type == SDL_EVENT_GAMEPAD_AXIS_MOTION) {
+    ev.gaxis.which = which;
+    ev.gaxis.axis = static_cast<std::uint8_t>(code);
+    ev.gaxis.value = value;
+  } else {
+    ev.gbutton.which = which;
+    ev.gbutton.button = static_cast<std::uint8_t>(code);
+  }
+  input_process_event(engine::tests::from_sdl(ev));
+}
+
+/// A binding names no controller, so any connected one drives it: with
+/// the first of two controllers unplugged, the second sits in slot 1 and
+/// still fires the action and moves the axis. The mapper used to read
+/// slot 0 alone, so a live pad outside it was unreachable.
+bool test_second_controller_drives_actions() noexcept {
+  if (!init_all()) {
+    return false;
+  }
+  InputBinding fire{};
+  fire.type = InputBindingType::GamepadButton;
+  fire.code = kGamepadButton_South;
+  InputAxisSource stick{};
+  stick.type = AxisSourceType::GamepadAxis;
+  stick.axisIndex = kGamepadAxis_LeftX;
+  bool ok =
+      add_input_action("fire", &fire, 1U) && add_input_axis("move", &stick, 1U);
+
+  begin_input_frame();
+  sim_gamepad(SDL_EVENT_GAMEPAD_ADDED, 7U, 0, 0);
+  sim_gamepad(SDL_EVENT_GAMEPAD_ADDED, 9U, 0, 0);
+  sim_gamepad(SDL_EVENT_GAMEPAD_REMOVED, 7U, 0, 0);
+  sim_gamepad(SDL_EVENT_GAMEPAD_BUTTON_DOWN, 9U, SDL_GAMEPAD_BUTTON_SOUTH, 0);
+  sim_gamepad(SDL_EVENT_GAMEPAD_AXIS_MOTION, 9U, SDL_GAMEPAD_AXIS_LEFTX, 30000);
+  end_input_frame();
+
+  ok = ok && !is_gamepad_connected(0) && is_gamepad_connected(1) &&
+       any_gamepad_connected();
+  ok = ok && is_mapped_action_down("fire") &&
+       any_gamepad_button_down(kGamepadButton_South);
+  ok = ok && (mapped_axis_value("move") > 0.5F) &&
+       (any_gamepad_axis_value(kGamepadAxis_LeftX) > 0.5F);
+  shutdown_all();
+  return ok;
+}
+
 bool test_add_action_and_poll() noexcept {
   if (!init_all()) {
     return false;
@@ -1596,6 +1650,8 @@ int main() {
 
   std::printf("--- input_map tests ---\n");
   run("add_action_and_poll", &test_add_action_and_poll);
+  run("second_controller_drives_actions",
+      &test_second_controller_drives_actions);
   run("action_pressed_detection", &test_action_pressed_detection);
   run("action_callback", &test_action_callback);
   run("multi_binding_action", &test_multi_binding_action);

@@ -209,24 +209,37 @@ std::size_t gameplay_axis_count() noexcept;
 
 // ----- Gamepad ------------------------------------------------------------
 // Up to kMaxGamepads controllers are tracked in the order they arrive;
-// `gamepad` is that slot index, and slot 0 is the first controller, so
-// single-controller callers omit it. A slot follows its device's hotplug
+// `gamepad` is that slot index. A slot follows its device's hotplug
 // arrival and removal (the platform opens and closes the device behind
 // it), and its button and axis state is keyed to that device's instance
-// id, so a second controller never aliases the first.
+// id, so a second controller never aliases the first. Slots are not
+// compacted: unplugging the first controller leaves the second in slot 1.
+// So a caller that does not care which controller it hears asks the
+// any_gamepad_* queries, as Godot's device -1 and Unity's unpaired
+// actions read every device; the per-slot queries are for one player's
+// own controller.
 
 /// True while a device occupies the slot.
-bool is_gamepad_connected(int gamepad = 0) noexcept;
+bool is_gamepad_connected(int gamepad) noexcept;
 /// Number of slots a device currently occupies.
 int connected_gamepad_count() noexcept;
 /// Returns whether is gamepad button down.
-bool is_gamepad_button_down(int button, int gamepad = 0) noexcept;
+bool is_gamepad_button_down(int button, int gamepad) noexcept;
 /// True in the frame the button went down, even if it came up again
 /// before the frame ended.
-bool is_gamepad_button_pressed(int button, int gamepad = 0) noexcept;
+bool is_gamepad_button_pressed(int button, int gamepad) noexcept;
 // Returns normalized axis value in [-1, 1] with deadzone applied.
-float gamepad_axis_value(int axis, int deadzone = 8000,
-                         int gamepad = 0) noexcept;
+float gamepad_axis_value(int axis, int deadzone, int gamepad) noexcept;
+
+/// True while any slot holds a controller.
+bool any_gamepad_connected() noexcept;
+/// True while the button is down on any connected controller.
+bool any_gamepad_button_down(int button) noexcept;
+/// True when the button went down this frame on any connected controller.
+bool any_gamepad_button_pressed(int button) noexcept;
+/// The axis value, deadzone applied, of whichever connected controller
+/// pushes it furthest from rest (the lower slot on a tie).
+float any_gamepad_axis_value(int axis, int deadzone = 8000) noexcept;
 
 // Gamepad button and axis codes: the engine's own vocabulary for scripts
 // and persisted bindings. Their values match SDL_GAMEPAD_BUTTON_* and

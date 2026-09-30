@@ -113,7 +113,7 @@ int main() {
     return ctx.finish("gamepad_hotplug");
   }
 
-  ctx.check(!engine::core::is_gamepad_connected(),
+  ctx.check(!engine::core::is_gamepad_connected(0),
             "no controller before one arrives");
 
   // A virtual controller arrives: the next frames pump its arrival, the
@@ -129,7 +129,7 @@ int main() {
 
   ctx.check(frames_until(
                 pipeline,
-                []() noexcept { return engine::core::is_gamepad_connected(); },
+                []() noexcept { return engine::core::is_gamepad_connected(0); },
                 20),
             "the pumped arrival connects the controller");
   ctx.check(engine::core::connected_gamepad_count() == 1,
@@ -150,9 +150,10 @@ int main() {
                 pipeline,
                 []() noexcept {
                   return engine::core::is_gamepad_button_down(
-                             engine::core::kGamepadButton_South) &&
+                             engine::core::kGamepadButton_South, 0) &&
                          (engine::core::gamepad_axis_value(
-                              engine::core::kGamepadAxis_LeftX) > 0.0F);
+                              engine::core::kGamepadAxis_LeftX, 8000, 0) >
+                          0.0F);
                 },
                 20),
             "button and axis edges reach the input API");
@@ -171,18 +172,18 @@ int main() {
                 pipeline,
                 []() noexcept {
                   return !engine::core::is_gamepad_button_down(
-                      engine::core::kGamepadButton_South);
+                      engine::core::kGamepadButton_South, 0);
                 },
                 20),
             "the release edge reaches the input API");
 
   // Removal frees the slot.
   ctx.check(SDL_DetachVirtualJoystick(virtualId), "virtual controller detached");
-  ctx.check(frames_until(
-                pipeline,
-                []() noexcept { return !engine::core::is_gamepad_connected(); },
-                20),
-            "the pumped removal disconnects the controller");
+  ctx.check(
+      frames_until(
+          pipeline,
+          []() noexcept { return !engine::core::is_gamepad_connected(0); }, 20),
+      "the pumped removal disconnects the controller");
   ctx.check(engine::core::connected_gamepad_count() == 0,
             "no controller slot in use after removal");
 
