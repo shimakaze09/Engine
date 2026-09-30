@@ -709,10 +709,10 @@ void check_stats_preference(engine::tests::TestContext &t) noexcept {
 void check_flying(engine::tests::TestContext &t) noexcept {
   engine::editor::EditorSession &session = engine::editor::editor_session();
   session.gizmoOp = ImGuizmo::ROTATE;
-  session.sceneFlying = true;
+  session.sceneDrag.kind = engine::editor::ViewDragKind::Fly;
   tap(ImGuiKey_W);
   t.check(session.gizmoOp == ImGuizmo::ROTATE, "W flies, not Move, in flight");
-  session.sceneFlying = false;
+  session.sceneDrag.kind = engine::editor::ViewDragKind::None;
   tap(ImGuiKey_W);
   t.check(session.gizmoOp == ImGuizmo::TRANSLATE, "W is Move again after");
 

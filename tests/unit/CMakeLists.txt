@@ -330,6 +330,14 @@ engine_add_test_executable(engine_unit_mesh_loader
     engine_math
 )
 
+engine_add_test_executable(engine_unit_asset_check_capacity
+    SOURCES
+    asset_check_capacity_test.cpp
+    PRIVATE_DEPS
+    engine_content
+    engine_core
+)
+
 engine_add_test_executable(engine_unit_asset_generation_check
     SOURCES
     asset_generation_check_test.cpp
@@ -2532,6 +2540,19 @@ engine_add_test_executable(engine_unit_editor_scene_query
     PRIVATE_INCLUDE_DIRS
     ${CMAKE_SOURCE_DIR}/editor/src
     PRIVATE_DEPS
+    engine_editor
+    COMPILE_DEFINITIONS
+    SDL_MAIN_HANDLED
+)
+
+engine_add_test_executable(engine_unit_editor_view_drag
+    SOURCES
+    editor_view_drag_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/editor/src
+    PRIVATE_DEPS
+    # Reads where SDL put the cursor back and queues a focus loss.
+    ${ENGINE_SDL_TARGET}
     engine_editor
     COMPILE_DEFINITIONS
     SDL_MAIN_HANDLED

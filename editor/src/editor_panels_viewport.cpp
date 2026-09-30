@@ -16,6 +16,7 @@
 #include "editor_session.h"
 #include "editor_shortcuts.h"
 #include "editor_transform_util.h"
+#include "editor_view_drag.h"
 
 #if defined(__clang__) && (defined(__x86_64__) || defined(__i386__)) &&        \
     !defined(__PRFCHWINTRIN_H)
@@ -661,6 +662,8 @@ void draw_scene_viewport_panel() noexcept {
 
   editor_session().sceneViewShown = visible;
   if (!visible) {
+    // A drag cannot outlive the view it turns.
+    cancel_view_drag(editor_session().sceneDrag);
     ImGui::End();
     return;
   }
@@ -814,7 +817,7 @@ void draw_scene_viewport_panel() noexcept {
         gizmoDrawn && (ImGuizmo::IsOver() || ImGuizmo::IsUsing());
     if (ImGui::IsWindowHovered() &&
         ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !io.KeyAlt &&
-        !clickSession.sceneFlying && !overGizmo &&
+        (clickSession.sceneDrag.kind == ViewDragKind::None) && !overGizmo &&
         point_in_rect(io.MousePos, cursorScreenPos, regionSize)) {
       clickSession.scenePressPending = true;
       clickSession.scenePressPos = io.MousePos;
@@ -852,39 +855,48 @@ void draw_scene_viewport_panel() noexcept {
     }
   }
 
-  // Flythrough, as in Unity: the right button pressed over the Scene view
-  // starts it and releasing it anywhere ends it, so a drag that leaves the
-  // panel keeps flying. A release within the click slop of the press is a
+  // The camera drags, as one state machine (editor_view_drag.h):
+  // flythrough, as in Unity, starts on a right press over the Scene view
+  // and ends on its release anywhere, so a drag that leaves the panel
+  // keeps flying; a release within the click slop of the press is a
   // right-click instead, which opens the Scene view's menu, as Unreal's
-  // viewport does.
+  // viewport does. Alt+left orbits and Alt+middle pans. Once a drag moves
+  // the platform holds the mouse, so the camera keeps turning at the
+  // screen edge, and the cursor comes back where the drag began. Escape
+  // or a lost window focus ends it at once.
   EditorSession &flySession = editor_session();
-  if (flySession.sceneFlying && !ImGui::IsMouseDown(ImGuiMouseButton_Right)) {
-    flySession.sceneFlying = false;
-    const ImVec2 released = ImGui::GetIO().MousePos;
-    if (flySession.sceneRightPressPending &&
-        within_click_slop(released.x - flySession.sceneRightPressPos.x,
-                          released.y - flySession.sceneRightPressPos.y)) {
-      open_scene_view_menu(released, cursorScreenPos, regionSize);
-    }
-    flySession.sceneRightPressPending = false;
-  }
-  if (!flySession.sceneFlying && ImGui::IsWindowHovered() &&
-      !ImGuizmo::IsUsing() && ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
-    flySession.sceneFlying = true;
-    flySession.sceneRightPressPending =
-        point_in_rect(ImGui::GetIO().MousePos, cursorScreenPos, regionSize);
-    flySession.sceneRightPressPos = ImGui::GetIO().MousePos;
+  const ImGuiIO &io = ImGui::GetIO();
+  ViewDragInput dragInput{};
+  dragInput.canStart = ImGui::IsWindowHovered() && !ImGuizmo::IsUsing();
+  dragInput.overImage = point_in_rect(io.MousePos, cursorScreenPos, regionSize);
+  dragInput.altHeld = io.KeyAlt;
+  dragInput.rightPressed = ImGui::IsMouseClicked(ImGuiMouseButton_Right);
+  dragInput.leftPressed = ImGui::IsMouseClicked(ImGuiMouseButton_Left);
+  dragInput.middlePressed = ImGui::IsMouseClicked(ImGuiMouseButton_Middle);
+  dragInput.rightDown = ImGui::IsMouseDown(ImGuiMouseButton_Right);
+  dragInput.leftDown = ImGui::IsMouseDown(ImGuiMouseButton_Left);
+  dragInput.middleDown = ImGui::IsMouseDown(ImGuiMouseButton_Middle);
+  dragInput.mouseX = io.MousePos.x;
+  dragInput.mouseY = io.MousePos.y;
+  dragInput.deltaX = flySession.sceneMouseDeltaX;
+  dragInput.deltaY = flySession.sceneMouseDeltaY;
+  dragInput.cancel =
+      flySession.sceneFocusLost || ImGui::IsKeyPressed(ImGuiKey_Escape, false);
+  flySession.sceneFocusLost = false;
+  const ViewDragStep drag = step_view_drag(flySession.sceneDrag, dragInput);
+  if (drag.openMenu) {
+    open_scene_view_menu(ImVec2(drag.menuX, drag.menuY), cursorScreenPos,
+                         regionSize);
   }
   draw_scene_view_menu();
-  if (flySession.sceneFlying) {
-    const ImGuiIO &io = ImGui::GetIO();
+  if (drag.active == ViewDragKind::Fly) {
     const auto axis = [](ImGuiKey plus, ImGuiKey minus) noexcept {
       return (ImGui::IsKeyDown(plus) ? 1 : 0) -
              (ImGui::IsKeyDown(minus) ? 1 : 0);
     };
     FlyInput fly{};
-    fly.lookX = io.MouseDelta.x;
-    fly.lookY = io.MouseDelta.y;
+    fly.lookX = drag.deltaX;
+    fly.lookY = drag.deltaY;
     fly.forward = axis(ImGuiKey_W, ImGuiKey_S);
     fly.right = axis(ImGuiKey_D, ImGuiKey_A);
     fly.up = axis(ImGuiKey_E, ImGuiKey_Q);
@@ -895,21 +907,17 @@ void draw_scene_viewport_panel() noexcept {
     if (flySession.editorCamera.flySpeed != speedBefore) {
       ImGui::MarkIniSettingsDirty(); // the speed is a saved preference
     }
-  } else if (ImGui::IsWindowHovered() && !ImGuizmo::IsUsing()) {
-    // Orbit, pan and zoom whenever the Scene view is hovered and no gizmo
-    // drag holds the mouse, during play as well: the Scene view is the
-    // author's, and the game has its own view.
-    const ImGuiIO &io = ImGui::GetIO();
-    const bool altHeld = io.KeyAlt;
-    const bool lmbDown = ImGui::IsMouseDown(ImGuiMouseButton_Left);
-    const bool mmbDown = ImGui::IsMouseDown(ImGuiMouseButton_Middle);
+  } else if ((drag.active != ViewDragKind::None) ||
+             (ImGui::IsWindowHovered() && !ImGuizmo::IsUsing())) {
+    // Orbit and pan while their drag lasts, and zoom whenever the Scene
+    // view is hovered and no gizmo drag holds the mouse, during play as
+    // well: the Scene view is the author's, and the game has its own view.
     const int scrollDelta =
         (io.MouseWheel > 0.0F) ? 1 : ((io.MouseWheel < 0.0F) ? -1 : 0);
-
-    update_editor_camera(editor_session().editorCamera,
-                         static_cast<int>(io.MouseDelta.x),
-                         static_cast<int>(io.MouseDelta.y), scrollDelta,
-                         altHeld && lmbDown, altHeld && mmbDown);
+    update_editor_camera(flySession.editorCamera, static_cast<int>(drag.deltaX),
+                         static_cast<int>(drag.deltaY), scrollDelta,
+                         drag.active == ViewDragKind::Orbit,
+                         drag.active == ViewDragKind::Pan);
   }
 
   ImGui::End();

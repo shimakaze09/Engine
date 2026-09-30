@@ -62,6 +62,77 @@
 
 namespace {
 
+/// A .mesh holds one primitive, so a cook takes one mesh's one primitive
+/// and nothing else of the file. Says so, naming what it leaves behind
+/// and how to choose another, and says when a requested index is out of
+/// range and the first is cooked instead, so no part of a model goes
+/// missing without a word -- Unreal's importer reports what it skipped
+/// in the same way. At most kListed parts are named; the rest are
+/// counted.
+void report_uncooked_primitives(const cgltf_data &data,
+                                const ImportSettings &requested,
+                                cgltf_size meshIdx, cgltf_size primIdx,
+                                const char *inputPath) noexcept {
+  if (static_cast<cgltf_size>(requested.meshIndex) != meshIdx) {
+    std::fprintf(stderr,
+                 "warning: importSettings.meshIndex %d is out of range (%s "
+                 "holds %zu meshes); mesh %zu is cooked\n",
+                 requested.meshIndex, inputPath,
+                 static_cast<std::size_t>(data.meshes_count),
+                 static_cast<std::size_t>(meshIdx));
+  }
+  if ((static_cast<cgltf_size>(requested.meshIndex) == meshIdx) &&
+      (static_cast<cgltf_size>(requested.primitiveIndex) != primIdx)) {
+    std::fprintf(
+        stderr,
+        "warning: importSettings.primitiveIndex %d is out of range "
+        "(mesh %zu holds %zu primitives); primitive %zu is cooked\n",
+        requested.primitiveIndex, static_cast<std::size_t>(meshIdx),
+        static_cast<std::size_t>(data.meshes[meshIdx].primitives_count),
+        static_cast<std::size_t>(primIdx));
+  }
+
+  std::size_t total = 0U;
+  for (cgltf_size m = 0U; m < data.meshes_count; ++m) {
+    total += static_cast<std::size_t>(data.meshes[m].primitives_count);
+  }
+  if (total <= 1U) {
+    return;
+  }
+  std::fprintf(stderr,
+               "warning: %s holds %zu meshes with %zu primitives; a .mesh "
+               "holds one, so mesh %zu primitive %zu is cooked and the other "
+               "%zu are not imported (choose one with importSettings.meshIndex "
+               "and primitiveIndex in %s.meta):\n",
+               inputPath, static_cast<std::size_t>(data.meshes_count), total,
+               static_cast<std::size_t>(meshIdx),
+               static_cast<std::size_t>(primIdx), total - 1U, inputPath);
+  constexpr std::size_t kListed = 16U;
+  std::size_t listed = 0U;
+  for (cgltf_size m = 0U; m < data.meshes_count; ++m) {
+    const cgltf_mesh &mesh = data.meshes[m];
+    for (cgltf_size p = 0U; p < mesh.primitives_count; ++p) {
+      if ((m == meshIdx) && (p == primIdx)) {
+        continue;
+      }
+      if (listed == kListed) {
+        std::fprintf(stderr, "  ... and %zu more\n", total - 1U - kListed);
+        return;
+      }
+      const cgltf_material *material = mesh.primitives[p].material;
+      std::fprintf(
+          stderr,
+          "  not imported: mesh %zu '%s' primitive %zu (material '%s')\n",
+          static_cast<std::size_t>(m), (mesh.name != nullptr) ? mesh.name : "",
+          static_cast<std::size_t>(p),
+          ((material != nullptr) && (material->name != nullptr))
+              ? material->name
+              : "");
+      ++listed;
+    }
+  }
+}
+
 /// Human-readable name for a cgltf result in a diagnostic; a fixed
 /// placeholder for any result the enumeration adds later.
 const char *cgltf_result_name(cgltf_result result) {
@@ -470,6 +541,9 @@ int main(int argc, char **argv) {
            selectedMesh.primitives_count)
           ? static_cast<cgltf_size>(importSettings.primitiveIndex)
           : 0U;
+
+  report_uncooked_primitives(*data, importSettings, meshIdx, primIdx,
+                             inputPath);
 
   // What was cooked, which the sidecar records: an index out of range
   // falls back to the first, and the sidecar must not claim the request.

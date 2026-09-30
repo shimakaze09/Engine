@@ -134,6 +134,28 @@ void platform_note_frame_presented() noexcept;
 /// Reset when the platform shuts down.
 bool platform_window_revealed() noexcept;
 
+// ----- Mouse capture ---------------------------------------------------------
+
+/// Holds the mouse for a drag that turns or moves a camera, as Unreal's
+/// and Godot's viewports do: the cursor is hidden and motion keeps
+/// arriving as relative deltas (PlatformEvent::deltaX/deltaY) at the
+/// screen edge, where an uncaptured cursor stops. True when the mouse is
+/// held; false, with the drag left to work uncaptured, when the platform
+/// refuses -- a browser that denies pointer lock, a window without focus.
+/// The first refusal is logged, the rest are not. Headless there is no
+/// cursor, so the capture is only recorded. Main thread only.
+bool platform_begin_mouse_capture() noexcept;
+
+/// Lets the mouse go and puts the cursor at (x, y) in window units, where
+/// the drag began, so it reappears where the author left it. Harmless
+/// when nothing is held. The platform also lets go by itself when the
+/// window loses focus and when it shuts down, so a capture never
+/// outlives the window's attention. Main thread only.
+void platform_end_mouse_capture(float x, float y) noexcept;
+
+/// True while platform_begin_mouse_capture holds the mouse.
+bool platform_mouse_captured() noexcept;
+
 /// The main window's size in window units and whether it is maximized.
 /// While maximized the size is the one it restores to, so a layout saved
 /// maximized still knows its normal size.

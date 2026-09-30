@@ -377,6 +377,9 @@ void shutdown_editor() noexcept {
     return;
   }
 
+  // A camera drag in progress lets the mouse go before the editor does.
+  cancel_view_drag(editor_session().sceneDrag);
+
   // Persisted while the context still exists; a failed write leaves the
   // previously stored layout intact rather than emptying it.
   static_cast<void>(editor_layout_save());
@@ -418,6 +421,10 @@ void reset_editor_session_residue() noexcept {
   editor_session().pickers = ReferencePickerState{};
   editor_session().console = ConsolePanelState{};
   editor_session().inspector = InspectorPanelState{};
+  editor_session().sceneDrag = ViewDragState{};
+  editor_session().sceneMouseDeltaX = 0.0F;
+  editor_session().sceneMouseDeltaY = 0.0F;
+  editor_session().sceneFocusLost = false;
   project_hub_reset();
 }
 
@@ -452,6 +459,9 @@ void editor_render(float frameMs, float utilizationPct) noexcept {
   }
 
   draw_editor_panels(frameMs, utilizationPct);
+  // The frame's relative motion is spent, whether or not a drag read it.
+  editor_session().sceneMouseDeltaX = 0.0F;
+  editor_session().sceneMouseDeltaY = 0.0F;
   ImGui::Render();
   ImGui_ImplBgfx_RenderDrawData(ImGui::GetDrawData());
 
@@ -462,10 +472,24 @@ void editor_render(float frameMs, float utilizationPct) noexcept {
 }
 
 void editor_process_event(const core::PlatformEvent &event) noexcept {
-  // Only the native event is read here: the ImGui SDL3 backend is written
-  // against SDL and consumes events the engine does not model (pointer
-  // enter and leave, text, IME), which is why every event reaches it.
-  if (!editor_session().initialized || (event.native == nullptr)) {
+  if (!editor_session().initialized) {
+    return;
+  }
+  // The Scene view's camera drags read the platform's relative motion,
+  // which keeps coming while a captured cursor stands still, and end when
+  // the window loses focus (editor_view_drag.h).
+  if (event.kind == core::PlatformEventKind::MouseMove) {
+    editor_session().sceneMouseDeltaX += event.deltaX;
+    editor_session().sceneMouseDeltaY += event.deltaY;
+  } else if (event.kind == core::PlatformEventKind::WindowFocusLost) {
+    editor_session().sceneFocusLost = true;
+  }
+
+  // Otherwise only the native event is read here: the ImGui SDL3 backend
+  // is written against SDL and consumes events the engine does not model
+  // (pointer enter and leave, text, IME), which is why every event
+  // reaches it.
+  if (event.native == nullptr) {
     return;
   }
 

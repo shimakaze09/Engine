@@ -1,9 +1,9 @@
 // The window surface the editor now reaches through the platform instead of
 // holding SDL_Window itself (#312 items 2-3): title, display scale, the
 // window geometry a layout restores, when a hidden window is first shown
-// (#741), the file-dialog handoff -- plus the
-// event translation that replaced SDL_Event above the platform layer
-// (#312 item 1).
+// (#741), the file-dialog handoff, the mouse capture a camera drag holds
+// -- plus the event translation that replaced SDL_Event above the
+// platform layer (#312 item 1).
 //
 // A real dialog cannot open in CI -- there is no portal or desktop to show
 // it. The dialog cases here are the refusals, and the handoff driven by
@@ -321,6 +321,32 @@ int main() {
   CHECK(platform_window_revealed(), "later presents keep it shown");
   const float scale = platform_display_scale();
   CHECK(scale > 0.0F, "a window reports a positive display scale");
+
+  // Mouse capture for camera drags: held until let go, let go by a lost
+  // window focus whoever held it, and never held past shutdown.
+  CHECK(!platform_mouse_captured(), "the mouse starts free");
+  CHECK(platform_begin_mouse_capture(), "a window captures the mouse");
+  CHECK(platform_mouse_captured(), "the capture is held");
+  CHECK(platform_begin_mouse_capture(), "a second capture is the same one");
+  platform_end_mouse_capture(10.0F, 20.0F);
+  CHECK(!platform_mouse_captured(), "ending the capture lets the mouse go");
+  platform_end_mouse_capture(10.0F, 20.0F);
+  CHECK(!platform_mouse_captured(), "ending it twice is harmless");
+  CHECK(platform_begin_mouse_capture(), "the mouse is captured again");
+  {
+    SDL_Event focusLost{};
+    focusLost.type = SDL_EVENT_WINDOW_FOCUS_LOST;
+    CHECK(SDL_PushEvent(&focusLost), "a focus loss is queued");
+    PlatformEvent polled{};
+    bool sawFocusLost = false;
+    while (platform_poll_event(&polled)) {
+      sawFocusLost =
+          sawFocusLost || (polled.kind == PlatformEventKind::WindowFocusLost);
+    }
+    CHECK(sawFocusLost, "the focus loss is delivered");
+    CHECK(!platform_mouse_captured(), "a lost focus lets the mouse go");
+  }
+  CHECK(platform_begin_mouse_capture(), "captured before shutdown");
   CHECK(platform_set_window_title("platform window test - renamed"),
         "a window accepts a title");
   CHECK(!platform_set_window_title(nullptr), "a null title is refused");
@@ -358,6 +384,8 @@ int main() {
         "a folder dialog with a filter is refused");
 
   shutdown_platform();
+  CHECK(!platform_mouse_captured(), "shutdown lets the mouse go");
+  CHECK(!platform_begin_mouse_capture(), "no window, no capture");
   CHECK(!platform_window_revealed(), "a fresh platform starts hidden");
   platform_note_frame_presented();
   platform_note_frame_presented();

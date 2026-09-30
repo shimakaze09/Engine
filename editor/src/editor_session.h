@@ -30,6 +30,7 @@
 #include "editor_console_capture.h"
 #include "editor_console_commands.h"
 #include "editor_scene_document.h"
+#include "editor_view_drag.h"
 
 namespace engine::editor {
 
@@ -204,22 +205,25 @@ struct EditorSession final {
   // The Scene view's light and camera icon size, a multiple of the UI
   // scale's (scene_icon_metrics). A saved preference.
   float iconScale = 1.0F;
-  // The right mouse button went down over the Scene view and is still
-  // held: WASD/QE fly the camera (fly_editor_camera), so the shortcut
-  // dispatcher stands down and W stays a move, not the Move tool.
-  bool sceneFlying = false;
+  // The Scene view's camera drag (editor_view_drag.h). While it flies --
+  // the right button held -- WASD/QE move the camera (fly_editor_camera),
+  // so the shortcut dispatcher stands down and W stays a move, not the
+  // Move tool.
+  ViewDragState sceneDrag{};
+  // The platform's relative mouse motion since the last editor frame,
+  // which a captured drag reads because the held cursor does not move,
+  // and a lost window focus the drag has not yet ended on.
+  float sceneMouseDeltaX = 0.0F;
+  float sceneMouseDeltaY = 0.0F;
+  bool sceneFocusLost = false;
   // A left press over the Scene view that may become a pick on release
   // (editor_scene_query.h), where it went down, and where the last pick
   // was made, so a click on the same spot can walk through what overlaps.
   bool scenePressPending = false;
   ImVec2 scenePressPos{};
-  // A right press over the Scene view: a drag flies the camera, and a
-  // release within the click slop opens the Scene view's menu instead, as
-  // Unreal's viewport does. Where it went down, and what the menu acts
-  // on: the entity under the cursor (kInvalidEntity over empty space) and
-  // the ground point a creation goes to.
-  bool sceneRightPressPending = false;
-  ImVec2 sceneRightPressPos{};
+  // What the Scene view's menu, opened by a right click, acts on: the
+  // entity under the cursor (kInvalidEntity over empty space) and the
+  // ground point a creation goes to.
   runtime::Entity sceneMenuEntity = runtime::kInvalidEntity;
   bool sceneMenuHasGround = false;
   math::Vec3 sceneMenuGround{};
