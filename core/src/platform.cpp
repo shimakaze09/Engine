@@ -63,6 +63,10 @@ bool g_headless = false;
 int g_presentedFrames = 0;
 bool g_windowRevealed = false;
 bool g_gamepadSubsystem = false;
+/// platform_begin_mouse_capture holds the mouse; whether its first refusal
+/// has been logged.
+bool g_mouseCaptured = false;
+bool g_mouseCaptureRefusalLogged = false;
 
 /// One open controller: the instance id SDL announced it under and the
 /// handle its events are delivered through while open.
@@ -228,8 +232,34 @@ void log_sdl_error(const char *message) noexcept {
   log_message(LogLevel::Error, "platform", buffer);
 }
 
+/// Lets a held mouse go. With `restore`, the cursor is first put at
+/// (x, y): SDL records a warp made in relative mode and moves the cursor
+/// there as relative mode ends, so it reappears once, in place.
+void release_mouse_capture(bool restore, float x, float y) noexcept {
+  if (!g_mouseCaptured) {
+    return;
+  }
+  g_mouseCaptured = false;
+  if (g_window == nullptr) {
+    return;
+  }
+  // Headless the warp still moves SDL's own record of the cursor, which
+  // is how a test sees where a drag put it back.
+  if (restore) {
+    SDL_WarpMouseInWindow(g_window, x, y);
+  }
+  if (g_headless) {
+    return;
+  }
+  if (!SDL_SetWindowRelativeMouseMode(g_window, false)) {
+    log_sdl_error("failed to release the mouse");
+  }
+}
+
 /// Shuts down the owning system for platform resources.
 void shutdown_platform_resources() noexcept {
+  release_mouse_capture(false, 0.0F, 0.0F);
+  g_mouseCaptureRefusalLogged = false;
   if (g_window != nullptr) {
     SDL_DestroyWindow(g_window);
     g_window = nullptr;
@@ -823,6 +853,11 @@ bool platform_poll_event(PlatformEvent *outEvent) noexcept {
     g_restoredHeight = static_cast<int>(g_polledEvent.window.data2);
   }
   *outEvent = translate_event(g_polledEvent);
+  // A window that loses focus gives up the mouse at once, so no drag can
+  // leave the cursor hidden and held while the author is elsewhere.
+  if (outEvent->kind == PlatformEventKind::WindowFocusLost) {
+    release_mouse_capture(false, 0.0F, 0.0F);
+  }
   return true;
 }
 
@@ -876,6 +911,37 @@ void platform_note_frame_presented() noexcept {
 }
 
 bool platform_window_revealed() noexcept { return g_windowRevealed; }
+
+bool platform_begin_mouse_capture() noexcept {
+  ENGINE_ASSERT_MAIN_THREAD();
+  if (g_mouseCaptured) {
+    return true;
+  }
+  if (g_window == nullptr) {
+    return false;
+  }
+  if (!g_headless && !SDL_SetWindowRelativeMouseMode(g_window, true)) {
+    if (!g_mouseCaptureRefusalLogged) {
+      g_mouseCaptureRefusalLogged = true;
+      char buffer[256] = {};
+      std::snprintf(buffer, sizeof(buffer),
+                    "the mouse cannot be captured (%s); camera drags stop "
+                    "at the screen edge",
+                    SDL_GetError());
+      log_message(LogLevel::Warning, "platform", buffer);
+    }
+    return false;
+  }
+  g_mouseCaptured = true;
+  return true;
+}
+
+void platform_end_mouse_capture(float x, float y) noexcept {
+  ENGINE_ASSERT_MAIN_THREAD();
+  release_mouse_capture(true, x, y);
+}
+
+bool platform_mouse_captured() noexcept { return g_mouseCaptured; }
 
 bool platform_set_window_title(const char *title) noexcept {
   if ((g_window == nullptr) || (title == nullptr)) {
