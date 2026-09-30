@@ -70,6 +70,10 @@ struct FakeDeviceLog final {
   /// the caller's and dangle after the call; the shape fields do not).
   renderer::TextureDesc lastTexture{};
 
+  /// Textures fake::texture_slots_free counts against: the room left is
+  /// this minus the textures alive. 0 means no table.
+  std::uint32_t textureCapacity = 0U;
+
   /// When false, render_device() answers as it does with no device live.
   bool present = true;
   /// What initialize_render_device() returns.
@@ -112,6 +116,7 @@ void destroy_buffer(renderer::DeviceBufferHandle buffer) noexcept;
 renderer::DeviceTextureHandle
 create_texture(const renderer::TextureDesc &) noexcept;
 void destroy_texture(renderer::DeviceTextureHandle texture) noexcept;
+std::uint32_t texture_slots_free() noexcept;
 void bind_texture_slot(std::uint32_t, renderer::DeviceTextureHandle) noexcept;
 
 renderer::DeviceProgramHandle create_program_binary(const void *,

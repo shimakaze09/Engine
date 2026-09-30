@@ -2,6 +2,7 @@
 // handles resolve to their payload, release bumps the slot generation so
 // stale handle copies fail resolve instead of aliasing the slot's next
 // occupant, exhaustion reports failure instead of recycling live slots,
+// free_count tracks the slots allocate can still hand out,
 // clear() invalidates every outstanding handle, and the invalid encoding
 // (0) never resolves.
 
@@ -66,19 +67,23 @@ void test_stale_handle_does_not_alias_reused_slot() noexcept {
 void test_exhaustion_reports_failure() noexcept {
   DeviceSlotTable<Payload, 4U> table{}; // 3 usable slots (slot 0 reserved)
 
+  CHECK(table.free_count() == 3U, "a fresh table counts its usable slots");
   std::uint32_t handles[3] = {};
   for (std::uint32_t i = 0U; i < 3U; ++i) {
     handles[i] = table.allocate(Payload{i});
     CHECK(handles[i] != 0U, "allocation inside capacity succeeds");
+    CHECK(table.free_count() == 2U - i, "each allocation takes one slot");
   }
   CHECK(table.allocate(Payload{99U}) == 0U,
         "allocation past capacity fails instead of recycling live slots");
+  CHECK(table.free_count() == 0U, "a full table has no free slot");
   for (std::uint32_t i = 0U; i < 3U; ++i) {
     CHECK(table.resolve(handles[i]) != nullptr,
           "live handles survive an exhausted allocation");
   }
 
   CHECK(table.release(handles[1]), "releasing frees capacity");
+  CHECK(table.free_count() == 1U, "a released slot counts as free");
   CHECK(table.allocate(Payload{7U}) != 0U,
         "allocation succeeds again after a release");
 }

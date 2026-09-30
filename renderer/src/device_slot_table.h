@@ -103,6 +103,12 @@ public:
     m_freeCount = 0U;
   }
 
+  /// Slots allocate can still hand out: released ones plus those never
+  /// used. Slot 0 is the invalid handle, so a fresh table has Capacity - 1.
+  std::size_t free_count() const noexcept {
+    return m_freeCount + (Capacity - m_highWater);
+  }
+
   /// Number of live entries (diagnostics/tests).
   std::size_t live_count() const noexcept {
     std::size_t count = 0U;

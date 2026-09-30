@@ -346,6 +346,11 @@ struct DeviceCaps final {
   // drawable wraps onto more rows instead of failing to exist. The
   // default is the D3D11/12 limit, the smallest among the desktop APIs.
   std::int32_t maxTextureDimension = 16384;
+  // Textures the device can hold at once, the engine's own render targets
+  // included; 0 means the backend keeps no fixed table. A loader asks
+  // texture_slots_free before it decodes a file, so a full table refuses
+  // the texture with one diagnostic instead of after the upload.
+  std::uint32_t maxTextures = 0U;
   // Depth attachments copy between render targets through copy_depth;
   // false means the backend cannot blit depth (bgfx's Vulkan/WebGL
   // paths) and the caller must seed depth with a draw instead.
@@ -410,6 +415,9 @@ struct RenderDevice final {
                          std::int32_t width,
                          std::int32_t height) noexcept = nullptr;
   void (*destroy_texture)(DeviceTextureHandle texture) noexcept = nullptr;
+  // Textures create_texture can still make before the table is full, when
+  // caps.maxTextures is nonzero; null when the backend keeps no table.
+  std::uint32_t (*texture_slots_free)() noexcept = nullptr;
   // Makes the texture readable by shader samplers pointed at `slot`
   // (see set_param_i32 for sampler-to-slot assignment). An invalid
   // handle unbinds the slot.
