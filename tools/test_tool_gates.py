@@ -858,6 +858,29 @@ def test_asset_identity_gate():
             }))]) == 0,
               "identity: every source with a committed sidecar passes")
 
+        # Issue #1093: a stamp keyed to the host that cooked it is stale on
+        # every other OS, so each cook there rewrites it; the neutral tag
+        # passes.
+        def platform_fixture(name, platform):
+            stamp = cook_stamp_text(one, ["coin.mesh"]).replace(
+                "SOURCE_GUID", "PLATFORM %s\nSOURCE_GUID" % platform)
+            return write_identity_fixture(tmp / name, {
+                "samples/island/assets/props/coin.gltf": "x\n",
+                "samples/island/assets/props/coin.gltf.meta": sidecar_text(one),
+                "samples/island/assets/props/coin.mesh": "x\n",
+                "samples/island/assets/props/coin.mesh.cookstamp": stamp,
+            })
+        check(run([script, "--root", str(platform_fixture("neutral", "Any"))])
+              == 0, "identity: a stamp keyed to no platform passes")
+        completed = subprocess.run(
+            [sys.executable, script, "--root",
+             str(platform_fixture("hostkeyed", "Linux"))],
+            capture_output=True, text=True)
+        check(completed.returncode != 0,
+              "identity: a committed stamp keyed to a host fails")
+        check("PLATFORM Linux" in completed.stdout,
+              "identity: the finding names the platform the stamp is keyed to")
+
         # Issue #631: the stamp is on the machine that cooked it and in no
         # clone, so the output's identity is unnameable everywhere else.
         orphan = write_identity_fixture(

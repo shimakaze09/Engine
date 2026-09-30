@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Audit asset identity: a committed sidecar, unique, and portable.
 
-Four ways a project loses track of which asset is which, all of them
+Five ways a project loses track of which asset is which, all of them
 silent until somebody else clones the repository.
 
 **A missing sidecar.** An asset's persistent GUID lives in its
@@ -27,6 +27,14 @@ every reference to it fails to resolve while the file sits right there.
 This is how "assets/character.mesh" lost its mesh, skeleton and three
 animation clips: an ignore rule anchored to "assets/" dropped the stamp
 while the identical files under "assets/props/" were committed.
+
+**A committed stamp keyed to one platform.** A committed cook must be up
+to date on every machine that clones it. A stamp whose PLATFORM line
+names a host or target rather than the asset cook's neutral "Any" is
+stale everywhere else, so the next cook on another OS rewrites it and
+every output it certifies, and the one after that flips them back. A
+target-specific cook belongs in a per-platform cache, not beside its
+source.
 
 **A case-only path collision.** "Foo.png" and "foo.png" are two assets on
 Linux and one on Windows and macOS, so a project holding both builds for
@@ -57,6 +65,10 @@ TABLE_HEADER = "content/include/engine/content/asset_type_table.h"
 ASSET_ROOTS = ("samples/island/assets", "engine_assets")
 SIDECAR_SUFFIX = ".meta"
 STAMP_SUFFIX = ".cookstamp"
+# The asset cook's host-neutral platform tag (kAssetCookPlatformTag in
+# tools/asset_packer/packer_shared.h).
+NEUTRAL_PLATFORM = "Any"
+STAMP_PLATFORM_RE = re.compile(r"^PLATFORM\s+(\S+)\s*$", re.MULTILINE)
 # "ASSET <16 hex> <path>" and "OUTPUT <16 hex> <path>", the stamp lines
 # naming what a cook produced, with paths relative to the stamp.
 STAMP_CLAIM_RE = re.compile(r"^(?:ASSET|OUTPUT)\s+[0-9a-fA-F]+\s+(.+)$",
@@ -171,6 +183,27 @@ def unclaimed_cooked_findings(root: pathlib.Path, tracked: set[str],
     return findings
 
 
+def platform_keyed_stamp_findings(root: pathlib.Path,
+                                  tracked: set[str]) -> list[str]:
+    """One finding per tracked stamp keyed to a platform other than the
+    neutral one, which any cook on another OS would rewrite."""
+    findings: list[str] = []
+    for name in sorted(tracked):
+        if not name.lower().endswith(STAMP_SUFFIX):
+            continue
+        try:
+            text = (root / name).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        match = STAMP_PLATFORM_RE.search(text)
+        if (match is not None) and (match.group(1) != NEUTRAL_PLATFORM):
+            findings.append(
+                f"  {name}: keyed to PLATFORM {match.group(1)}, so a cook on "
+                f"any other platform rewrites it; recook with the default "
+                f"tag ({NEUTRAL_PLATFORM})")
+    return findings
+
+
 def tracked_files(root: pathlib.Path) -> set[str]:
     """Every tracked path under the asset roots, as posix strings."""
     result = subprocess.run(
@@ -242,6 +275,7 @@ def main() -> int:
     findings.extend(case_collision_findings(tracked))
     cooked_suffixes = cooked_output_suffixes(root)
     findings.extend(unclaimed_cooked_findings(root, tracked, cooked_suffixes))
+    findings.extend(platform_keyed_stamp_findings(root, tracked))
     cooked = sum(1 for name in tracked
                  if any(name.lower().endswith(suffix)
                         for suffix in cooked_suffixes))
@@ -270,7 +304,8 @@ def main() -> int:
 
     print(f"asset identity audit passed: {audited} identity-bearing asset(s) "
           f"with {len(sidecars)} sidecar(s), {cooked} cooked output(s) each "
-          f"claimed by a tracked cook stamp, no duplicate GUID and no "
+          f"claimed by a tracked cook stamp keyed to no platform, no "
+          f"duplicate GUID and no "
           f"case-only collision among {len(tracked)} tracked path(s)")
     return 0
 
