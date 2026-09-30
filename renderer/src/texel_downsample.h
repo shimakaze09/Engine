@@ -27,10 +27,19 @@ std::size_t client_texel_bytes(TexelData data,
 /// dimension the last one also takes the extra source row or column, so
 /// every source texel contributes; a 1-texel dimension stays one texel.
 /// U8 averages round half up.
+/// With `srgb` (U8 only) the colour components are sRGB-encoded: each is
+/// decoded to linear light, averaged there and encoded back to the nearest
+/// 8-bit value, since averaging the encoded bytes darkens every edge a
+/// level down. A fourth component (alpha) is linear and averaged as is.
 /// False, writing nothing, for a null buffer, a non-positive size or
 /// components outside 1..4.
 bool downsample_texels(TexelData data, std::int32_t components, const void *src,
-                       std::int32_t srcWidth, std::int32_t srcHeight,
-                       void *dst) noexcept;
+                       std::int32_t srcWidth, std::int32_t srcHeight, void *dst,
+                       bool srgb = false) noexcept;
+
+/// The linear-light value of an 8-bit sRGB-encoded component (IEC 61966-2-1).
+float srgb_byte_to_linear(std::uint8_t encoded) noexcept;
+/// The 8-bit sRGB encoding whose linear value is nearest `linear`.
+std::uint8_t linear_to_srgb_byte(float linear) noexcept;
 
 } // namespace engine::renderer

@@ -270,9 +270,11 @@ constexpr std::uint32_t kSliceDiagnosticsPeriodFrames = 60U;
 /// every other texture consumer (skybox, character textures) already calls.
 /// Only ever invoked from stage_assets, on the main thread that owns the
 /// render device.
-renderer::TextureHandle load_material_texture_production(
-    const char *virtualPath, void * /*userData*/) noexcept {
-  return renderer::load_texture(virtualPath);
+renderer::TextureHandle
+load_material_texture_production(const char *virtualPath,
+                                 renderer::TextureColorSpace space,
+                                 void * /*userData*/) noexcept {
+  return renderer::load_texture(virtualPath, space);
 }
 
 void release_material_texture_production(renderer::TextureHandle handle,

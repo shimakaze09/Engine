@@ -62,7 +62,7 @@ TextureReload reload_texture_asset(AssetDatabase *database,
   // Read before the load, as the first load does, so a save that lands
   // during it is picked up by the next poll.
   const std::int64_t writeTime = core::vfs_file_mtime(path);
-  const TextureHandle loaded = loadFn(path, userData);
+  const TextureHandle loaded = loadFn(path, record->colorSpace, userData);
   record->sourceWriteTime = writeTime;
   if (loaded == kInvalidTextureHandle) {
     char message[512] = {};

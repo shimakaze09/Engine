@@ -187,6 +187,11 @@ struct TextureDesc final {
   // are rejected; a texture refreshed per frame must be created this
   // way (the tile/light culling data textures).
   bool cpuUpdatable = false;
+  // U8 RGBA8 colour data authored in sRGB (a base colour or emissive map):
+  // the device decodes it to linear light when sampled, and its generated
+  // mips are averaged in linear light. Data textures (roughness, occlusion,
+  // masks) and float textures stay linear.
+  bool srgb = false;
   const void *pixels = nullptr;
   const void *const *facePixels = nullptr; // 6 entries when kind == Cube
 };

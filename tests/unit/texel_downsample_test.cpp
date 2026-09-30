@@ -2,8 +2,10 @@
 // #709): each level is the exact box average of the level above, for 8-bit
 // and float texels, with odd extents folding their last row or column into
 // the final destination texel and 1-texel extents kept; bad arguments are
-// refused with nothing written.
+// refused with nothing written. An sRGB texture's colour components are
+// averaged in linear light and encoded back (issue #810), its alpha as is.
 
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -17,7 +19,9 @@ namespace {
 engine::tests::TestContext g_tests{};
 
 using engine::renderer::downsample_texels;
+using engine::renderer::linear_to_srgb_byte;
 using engine::renderer::mip_extent;
+using engine::renderer::srgb_byte_to_linear;
 using engine::renderer::TexelData;
 
 void check_extents() {
@@ -92,6 +96,37 @@ void check_f32() {
       "HDR values average unclamped");
 }
 
+void check_srgb() {
+  // IEC 61966-2-1: code 128 is linear 0.2158605, code 188 is 0.5029.
+  g_tests.check(std::fabs(srgb_byte_to_linear(128U) - 0.2158605F) < 1.0e-6F,
+                "sRGB code 128 decodes to linear 0.2158605");
+  g_tests.check((srgb_byte_to_linear(0U) == 0.0F) &&
+                    (srgb_byte_to_linear(255U) == 1.0F),
+                "black and white decode exactly");
+  bool roundTrips = true;
+  for (int code = 0; code < 256; ++code) {
+    const auto byte = static_cast<std::uint8_t>(code);
+    roundTrips =
+        roundTrips && (linear_to_srgb_byte(srgb_byte_to_linear(byte)) == byte);
+  }
+  g_tests.check(roundTrips, "every sRGB code encodes back to itself");
+
+  // A black-and-white checker averages to half the light, code 188, not
+  // to the byte average 128, which is a fifth of it and reads dark.
+  const std::uint8_t checker[2 * 2 * 4] = {
+      0, 0, 0, 0, 255, 255, 255, 255, 255, 255, 255, 0, 0, 0, 0, 255};
+  std::uint8_t mean[4] = {};
+  g_tests.check(
+      downsample_texels(TexelData::U8, 4, checker, 2, 2, mean, true) &&
+          (mean[0] == 188U) && (mean[1] == 188U) && (mean[2] == 188U),
+      "sRGB colour averages in linear light");
+  g_tests.check(mean[3] == 128U, "sRGB alpha averages as linear bytes");
+  std::uint8_t plain[4] = {};
+  g_tests.check(downsample_texels(TexelData::U8, 4, checker, 2, 2, plain) &&
+                    (plain[0] == 128U),
+                "a linear texture still averages its bytes");
+}
+
 void check_refusals() {
   const std::uint8_t src[4] = {1U, 2U, 3U, 4U};
   std::uint8_t dst = 0x5AU;
@@ -111,6 +146,7 @@ int main() {
   check_extents();
   check_u8();
   check_f32();
+  check_srgb();
   check_refusals();
   return g_tests.finish("texel downsample tests");
 }

@@ -544,6 +544,7 @@ enum class SlotOutcome : std::uint8_t {
 SlotOutcome resolve_one_texture_slot(AssetDatabase *database,
                                      const content::AssetCatalog *catalog,
                                      content::AssetId textureId,
+                                     TextureColorSpace space,
                                      MaterialTextureLoadFn loadFn,
                                      void *userData,
                                      TextureHandle *outHandle) noexcept {
@@ -553,6 +554,21 @@ SlotOutcome resolve_one_texture_slot(AssetDatabase *database,
   }
 
   const content::AssetState state = texture_asset_state(database, textureId);
+  if ((state != content::AssetState::Unloaded) &&
+      claim_texture_color_space_conflict(database, textureId, space)) {
+    const content::AssetMetadata *metadata =
+        find_asset_metadata(catalog, textureId);
+    char message[768] = {};
+    std::snprintf(message, sizeof(message),
+                  "one texture is used as both a colour map (base colour, "
+                  "emissive) and a data map; it keeps the colour space it "
+                  "was first loaded in, so one of those uses shades wrong: "
+                  "%.400s",
+                  ((metadata != nullptr) && (metadata->filePath[0] != '\0'))
+                      ? metadata->filePath.data()
+                      : "(no source path)");
+    core::log_message(core::LogLevel::Warning, kMaterialLogChannel, message);
+  }
   if (state == content::AssetState::Ready) {
     *outHandle = resolve_texture_asset(database, textureId);
     return SlotOutcome::Unchanged;
@@ -577,7 +593,8 @@ SlotOutcome resolve_one_texture_slot(AssetDatabase *database,
     return SlotOutcome::Unregisterable;
   }
   if ((path == nullptr) || (loadFn == nullptr)) {
-    static_cast<void>(register_texture_asset_failed(database, textureId, path));
+    static_cast<void>(
+        register_texture_asset_failed(database, textureId, path, space));
     *outHandle = kInvalidTextureHandle;
     core::log_message(
         core::LogLevel::Error, kMaterialLogChannel,
@@ -588,9 +605,10 @@ SlotOutcome resolve_one_texture_slot(AssetDatabase *database,
   // Read before the load, so a save that lands during it moves the time
   // off the recorded one and the hot-reload poll picks the file up again.
   const std::int64_t writeTime = core::vfs_file_mtime(path);
-  const TextureHandle loaded = loadFn(path, userData);
+  const TextureHandle loaded = loadFn(path, space, userData);
   if (loaded == kInvalidTextureHandle) {
-    static_cast<void>(register_texture_asset_failed(database, textureId, path));
+    static_cast<void>(
+        register_texture_asset_failed(database, textureId, path, space));
     set_texture_source_write_time(database, textureId, writeTime);
     char message[512] = {};
     std::snprintf(message, sizeof(message),
@@ -602,7 +620,8 @@ SlotOutcome resolve_one_texture_slot(AssetDatabase *database,
   }
 
   // Cannot fail: the slot was checked above and nothing ran in between.
-  static_cast<void>(register_texture_asset(database, textureId, path, loaded));
+  static_cast<void>(
+      register_texture_asset(database, textureId, path, loaded, space));
   set_texture_source_write_time(database, textureId, writeTime);
   *outHandle = loaded;
   return SlotOutcome::Resolved;
@@ -763,11 +782,13 @@ std::size_t resolve_material_textures(AssetDatabase *database,
     const MaterialTextureSlots slots = record.textureSlots;
     struct SlotRef final {
       content::AssetId id;
+      TextureColorSpace space;
       TextureHandle *handle;
     };
     const SlotRef refs[] = {
 #define ENGINE_MATERIAL_SLOT_REF(name, slot, handle, key)                      \
-  {slots.slot, &record.params.handle},
+  {slots.slot, material_field::texture_color_space(material_field::k##name),   \
+   &record.params.handle},
         ENGINE_MATERIAL_TEXTURE_FIELDS(ENGINE_MATERIAL_SLOT_REF)
 #undef ENGINE_MATERIAL_SLOT_REF
     };
@@ -778,8 +799,9 @@ std::size_t resolve_material_textures(AssetDatabase *database,
       if ((record.unregisterableTextureSlots & bit) != 0U) {
         continue;
       }
-      switch (resolve_one_texture_slot(database, catalog, refs[slot].id, loadFn,
-                                       userData, refs[slot].handle)) {
+      switch (resolve_one_texture_slot(database, catalog, refs[slot].id,
+                                       refs[slot].space, loadFn, userData,
+                                       refs[slot].handle)) {
       case SlotOutcome::Resolved:
         ++resolvedCount;
         break;

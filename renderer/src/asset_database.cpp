@@ -631,7 +631,8 @@ std::uint16_t material_overrides(const AssetDatabase *database,
 
 bool register_texture_asset(AssetDatabase *database, content::AssetId id,
                             const char *sourcePath,
-                            TextureHandle runtimeTexture) noexcept {
+                            TextureHandle runtimeTexture,
+                            TextureColorSpace colorSpace) noexcept {
   if ((database == nullptr) || (id == content::kInvalidAssetId) ||
       (runtimeTexture == kInvalidTextureHandle)) {
     return false;
@@ -651,6 +652,8 @@ bool register_texture_asset(AssetDatabase *database, content::AssetId id,
   record.runtimeTexture = runtimeTexture;
   record.state = content::AssetState::Ready;
   record.requestedResident = true;
+  record.colorSpace = colorSpace;
+  record.colorSpaceConflictLogged = false;
   write_source_path(&record.sourcePath, sourcePath);
   return true;
 }
@@ -670,7 +673,8 @@ bool material_asset_slot_available(const AssetDatabase *database,
 }
 
 bool register_texture_asset_failed(AssetDatabase *database, content::AssetId id,
-                                   const char *sourcePath) noexcept {
+                                   const char *sourcePath,
+                                   TextureColorSpace colorSpace) noexcept {
   if ((database == nullptr) || (id == content::kInvalidAssetId)) {
     return false;
   }
@@ -689,7 +693,27 @@ bool register_texture_asset_failed(AssetDatabase *database, content::AssetId id,
   record.runtimeTexture = kInvalidTextureHandle;
   record.state = content::AssetState::Failed;
   record.requestedResident = false;
+  record.colorSpace = colorSpace;
+  record.colorSpaceConflictLogged = false;
   write_source_path(&record.sourcePath, sourcePath);
+  return true;
+}
+
+bool claim_texture_color_space_conflict(AssetDatabase *database,
+                                        content::AssetId id,
+                                        TextureColorSpace requested) noexcept {
+  if ((database == nullptr) || (id == content::kInvalidAssetId)) {
+    return false;
+  }
+  const std::size_t slot = find_texture_slot(database, id);
+  if (slot == database->textureAssets.size()) {
+    return false;
+  }
+  TextureAssetRecord &record = database->textureAssets[slot];
+  if ((record.colorSpace == requested) || record.colorSpaceConflictLogged) {
+    return false;
+  }
+  record.colorSpaceConflictLogged = true;
   return true;
 }
 

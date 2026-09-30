@@ -116,12 +116,14 @@ std::size_t load_material_assets_in_directory(
     AssetDatabase *database, content::AssetCatalog *catalog,
     const char *osDirectory, const char *virtualPrefix) noexcept;
 
-/// Loads one texture from a VFS virtual path and returns its handle
+/// Loads one texture from a VFS virtual path in the colour space the slot
+/// asking for it is authored in, and returns its handle
 /// (kInvalidTextureHandle on failure); the production texture-loader
 /// callback resolve_material_textures is driven with. A live render device
 /// is required.
 using MaterialTextureLoadFn = TextureHandle (*)(const char *virtualPath,
-                                                 void *userData) noexcept;
+                                                TextureColorSpace space,
+                                                void *userData) noexcept;
 
 /// Releases a texture handle the database no longer serves; paired with
 /// the MaterialTextureLoadFn that made it.
