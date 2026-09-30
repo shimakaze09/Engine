@@ -142,7 +142,8 @@ Calling a rule enforced without one of these three is prohibited.
   justifies a downgrade. Zero open findings is not a reachable state for
   an engine.
 - **[OWNER]** Every open issue carries exactly one class label, which
-  decides the work order; `needs-triage` marks one without it
+  decides the work order (the pinned `roadmap` index, which orders the
+  rest, takes none); `needs-triage` marks one without it
   (`.github/workflows/issue-triage.yml`). **`blocker`**: data loss
   or corruption, a crash, a leak or unbounded growth in normal operation,
   a regression, or any defect a normal user of a claimed workflow hits

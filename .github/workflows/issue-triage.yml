@@ -4,7 +4,8 @@
 # label change the issue carries `needs-triage` exactly while it lacks a
 # single class label (blocker, deferred or feature), so an unclassified or
 # doubly classified issue is visible in one filter. Labelling an issue
-# `roadmap` pins it to the top of the tracker.
+# `roadmap` pins it to the top of the tracker; that index is the one open
+# issue that takes no class.
 name: Issue triage
 
 on:
@@ -86,7 +87,8 @@ jobs:
                 { id: issue.node_id });
             }
 
-            const classified = labels.filter((l) => CLASSES.includes(l)).length === 1;
+            const classified = labels.includes('roadmap') ||
+                labels.filter((l) => CLASSES.includes(l)).length === 1;
             const marked = labels.includes('needs-triage');
             if (!classified && !marked) {
               await github.rest.issues.addLabels({ ...params, labels: ['needs-triage'] });
