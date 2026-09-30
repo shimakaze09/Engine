@@ -52,9 +52,9 @@ struct DeferredMutation final {
   runtime::SpotLightComponent spotLightComponent{};
   math::SpringArmComponent springArm{};
   math::CameraComponent cameraComponent{};
-  runtime::MovementAuthority movementAuthority =
-      runtime::MovementAuthority::None;
-  bool setMovementAuthority = false;
+  // A script transform write is a teleport: the moved body wakes, so a
+  // sleeper taken somewhere new never hangs there asleep.
+  bool wakeBody = false;
   // World content epoch at queue time. A scene replacement assigns a fresh
   // World over the live one and restarts entity generations, so the new
   // scene's entity at the same index carries the same {index, generation}
@@ -404,62 +404,62 @@ bool apply_or_queue_destroy_entity(runtime::Entity entity) noexcept {
 }
 
 /// Applies or queues a transform update based on the current World phase.
+namespace {
+
+// Wakes the entity's own rigid body, when it has one, after a teleport.
+void wake_moved_body(const ScriptingRuntimeBinding &binding,
+                     runtime::Entity entity) noexcept {
+  if (binding.services->wake_body != nullptr) {
+    binding.services->wake_body(binding.world, entity);
+  }
+}
+
+} // namespace
+
+/// Applies or queues a transform update based on the current World phase.
 bool apply_or_queue_transform(runtime::Entity entity,
                               const runtime::Transform &transform,
-                              bool setAuthority,
-                              runtime::MovementAuthority authority) noexcept {
+                              bool wakeBody) noexcept {
   const ScriptingRuntimeBinding &binding = runtime_binding();
   if ((binding.world == nullptr) || (binding.services == nullptr)) {
     return false;
   }
 
   if (can_apply_mutations_now()) {
-    const bool transformUpdated =
-        binding.services->add_transform_op(binding.world, entity,
-                                           transform);
-    if (!transformUpdated) {
+    if (!binding.services->add_transform_op(binding.world, entity, transform)) {
       return false;
     }
-    return !setAuthority ||
-           binding.services->set_movement_authority_op(binding.world,
-                                                       entity, authority);
+    if (wakeBody) {
+      wake_moved_body(binding, entity);
+    }
+    return true;
   }
 
   DeferredMutation mutation{};
   mutation.type = DeferredMutationType::SetTransform;
   mutation.entity = entity;
   mutation.transform = transform;
-  mutation.setMovementAuthority = setAuthority;
-  mutation.movementAuthority = authority;
+  mutation.wakeBody = wakeBody;
   return queue_deferred_mutation(mutation);
 }
 
-/// Applies or queues a rigid body update based on the current World phase;
-/// releaseAuthority additionally returns the entity to physics control.
+/// Applies or queues a rigid body update based on the current World phase.
 bool apply_or_queue_rigid_body(runtime::Entity entity,
-                               const runtime::RigidBody &rigidBody,
-                               bool releaseAuthority) noexcept {
+                               const runtime::RigidBody &rigidBody) noexcept {
   const ScriptingRuntimeBinding &binding = runtime_binding();
   if ((binding.world == nullptr) || (binding.services == nullptr)) {
     return false;
   }
 
   if (can_apply_mutations_now()) {
-    if (!binding.services->add_rigid_body_op(binding.world, entity,
-                                             rigidBody)) {
-      return false;
-    }
-    return !releaseAuthority ||
-           binding.services->set_movement_authority_op(
-               binding.world, entity, runtime::MovementAuthority::None);
+    return binding.services->add_rigid_body_op(binding.world, entity,
+                                               rigidBody);
   }
 
   DeferredMutation mutation{};
   mutation.type = DeferredMutationType::AddRigidBody;
   mutation.entity = entity;
   mutation.rigidBody = rigidBody;
-  mutation.setMovementAuthority = releaseAuthority;
-  mutation.movementAuthority = runtime::MovementAuthority::None;
   return queue_deferred_mutation(mutation);
 }
 
@@ -797,22 +797,15 @@ std::size_t flush_deferred_mutations_prefix(std::size_t limit) noexcept {
       const bool transformUpdated = binding.services->add_transform_op(
           binding.world, mutation.entity, mutation.transform);
       note(transformUpdated);
-      if (transformUpdated && mutation.setMovementAuthority) {
-        note(binding.services->set_movement_authority_op(
-            binding.world, mutation.entity, mutation.movementAuthority));
+      if (transformUpdated && mutation.wakeBody) {
+        wake_moved_body(binding, mutation.entity);
       }
       break;
     }
-    case DeferredMutationType::AddRigidBody: {
-      const bool bodyUpdated = binding.services->add_rigid_body_op(
-          binding.world, mutation.entity, mutation.rigidBody);
-      note(bodyUpdated);
-      if (bodyUpdated && mutation.setMovementAuthority) {
-        note(binding.services->set_movement_authority_op(
-            binding.world, mutation.entity, mutation.movementAuthority));
-      }
+    case DeferredMutationType::AddRigidBody:
+      note(binding.services->add_rigid_body_op(binding.world, mutation.entity,
+                                               mutation.rigidBody));
       break;
-    }
     case DeferredMutationType::AddCollider:
       note(binding.services->add_collider_op(binding.world,
                                              mutation.entity,

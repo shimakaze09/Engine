@@ -15,7 +15,6 @@ namespace {
 
 using engine::physics::Collider;
 using engine::physics::Entity;
-using engine::physics::MovementAuthority;
 using engine::physics::PhysicsContext;
 using engine::physics::PhysicsTransform;
 using engine::physics::PhysicsWorldView;
@@ -104,11 +103,6 @@ public:
       Entity /*colliderEntity*/,
       const SimulationAccessToken & /*token*/) const noexcept override {
     return engine::physics::kInvalidEntity;
-  }
-
-  MovementAuthority
-  movement_authority(Entity /*entity*/) const noexcept override {
-    return MovementAuthority::None;
   }
 
   PhysicsContext &physics_context() noexcept override { return m_ctx; }

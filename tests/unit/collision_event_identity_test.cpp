@@ -133,10 +133,8 @@ bool start_scenario(Scenario &s, const char *script) noexcept {
 }
 
 // Scenario scenes place overlapping static colliders at the origin (and
-// spawn_shape cubes for a second, spatially separate pair): Lua
-// engine.set_position grants MovementAuthority::Script, which removes an
-// entity from physics pair testing, so positions must come from the spawn
-// itself.
+// spawn_shape cubes for a second, spatially separate pair), placed by the
+// spawn itself.
 // Shared Lua verdict helper: classifies one delivered participant slot
 // against the recycled replacement. 'retargeted' is the #395 defect.
 constexpr const char *kClassifyHelper =

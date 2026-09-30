@@ -23,6 +23,8 @@ constexpr const char *kColliderShapeLabels[] = {"Box", "Sphere", "Capsule"};
 constexpr const char *kLightTypeLabels[] = {"Directional", "Point"};
 constexpr const char *kCameraProjectionLabels[] = {"Perspective",
                                                     "Orthographic"};
+// Indexed by math::BodyType.
+constexpr const char *kBodyTypeLabels[] = {"Dynamic", "Kinematic", "Static"};
 
 // One row per annotated field. Fields with no row here still draw through
 // the generic Auto path -- omission never hides a field.
@@ -51,9 +53,17 @@ constexpr FieldMetadata kFieldMetadataTable[] = {
      "Hierarchy panel instead of editing this directly.",
      nullptr, 0.0F, 0.0F, 0.0F, InspectorWidget::Auto, true, true},
 
+    {"engine::runtime::RigidBody", "bodyType", "Body Type", "Physics",
+     "Dynamic: moved by gravity, forces and collisions. Kinematic: moved "
+     "only by its velocity or a script, pushing and carrying what it "
+     "touches without being pushed back (a moving platform, a door). "
+     "Static: never moves.",
+     nullptr, 0.0F, 0.0F, 0.0F, InspectorWidget::Enum, false, false,
+     kBodyTypeLabels, 3U},
     {"engine::runtime::RigidBody", "inverseMass", "Inverse Mass", "Physics",
-     "1 / mass in kg^-1. 0 means infinite mass (static or kinematic).", "1/kg",
-     0.01F, 0.0F, 1000.0F, InspectorWidget::Drag, false, false},
+     "1 / mass in kg^-1, used while the body is Dynamic. 0 on a Dynamic "
+     "body means infinite mass; prefer Body Type Kinematic or Static.",
+     "1/kg", 0.01F, 0.0F, 1000.0F, InspectorWidget::Drag, false, false},
     {"engine::runtime::RigidBody", "gravityScale", "Gravity Scale", "Physics",
      "How much of the world's gravity the body feels: 1 the full pull, 0 "
      "none (a driven platform, a held rock).",

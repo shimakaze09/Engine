@@ -73,18 +73,16 @@ bool latest_camera_component(runtime::Entity entity,
 bool apply_or_queue_destroy_entity(runtime::Entity entity) noexcept;
 
 /// Applies or queues a transform update based on the current World phase.
+/// wakeBody marks a teleport (a script moving the entity): the entity's own
+/// rigid body, if any, wakes once the write lands. The body keeps its type,
+/// its velocity and its collisions, as a teleport does in Jolt and Unity.
 bool apply_or_queue_transform(runtime::Entity entity,
                               const runtime::Transform &transform,
-                              bool setAuthority,
-                              runtime::MovementAuthority authority) noexcept;
+                              bool wakeBody) noexcept;
 
 /// Applies or queues a rigid body update based on the current World phase.
-/// releaseAuthority hands movement authority back to physics — velocity
-/// writes pass true so a teleported entity resumes simulating; body
-/// configuration writes pass false and leave script movers untouched.
 bool apply_or_queue_rigid_body(runtime::Entity entity,
-                               const runtime::RigidBody &rigidBody,
-                               bool releaseAuthority = false) noexcept;
+                               const runtime::RigidBody &rigidBody) noexcept;
 
 /// Applies or queues a collider update based on the current World phase.
 bool apply_or_queue_collider(runtime::Entity entity,

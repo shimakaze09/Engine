@@ -176,6 +176,9 @@ int main() {
       "function wake_with_velocity()\n"
       "    engine.set_velocity(spawned, 8.0, 0.0, -2.0)\n"
       "end\n"
+      "function teleport_only()\n"
+      "    engine.set_position(spawned, 2.0, 3.0, 4.0)\n"
+      "end\n"
       "function teleport_then_release()\n"
       "    -- Values match what later position/velocity assertions expect.\n"
       "    engine.set_position(spawned, 2.0, 3.0, 4.0)\n"
@@ -280,13 +283,29 @@ int main() {
     return 129;
   }
 
+  // A teleported sleeper wakes: it must not hang asleep where it landed
+  // (#980).
+  sleepingBody->sleepFrameCount = 60U;
+  sleepingBody->sleeping = true;
+  if (!engine::scripting::call_script_function("teleport_only") ||
+      sleepingBody->sleeping) {
+    remove_script_file();
+    engine::scripting::shutdown_scripting();
+    return 263;
+  }
+
   if (!engine::scripting::call_script_function("teleport_then_release")) {
     remove_script_file();
     engine::scripting::shutdown_scripting();
     return 130;
   }
-  if (world->movement_authority(initialSpawned) !=
-      engine::runtime::MovementAuthority::None) {
+  // A script teleport leaves the body what it was: still dynamic, so
+  // still simulated and colliding, and awake (#980).
+  engine::runtime::RigidBody teleported{};
+  if (!world->get_rigid_body(initialSpawned, &teleported) ||
+      (engine::math::body_type(teleported) !=
+       engine::math::BodyType::Dynamic) ||
+      teleported.sleeping) {
     remove_script_file();
     engine::scripting::shutdown_scripting();
     return 131;

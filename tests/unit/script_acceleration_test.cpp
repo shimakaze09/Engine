@@ -152,10 +152,8 @@ int main() {
   ctx.check(sc::call_script_function("drop"), "drop on sleeping body");
   ctx.check(!rigidBody->sleeping && (rigidBody->sleepFrameCount == 0U),
             "acceleration change wakes the sleeping body");
-  // setup_body's set_position granted Script authority; the motion command
-  // must hand the body back to physics or it stays frozen while awake.
-  ctx.check(world->movement_authority(body) == rt::MovementAuthority::None,
-            "acceleration write returns the body to physics control");
+  // setup_body placed the body with set_position; a script teleport never
+  // takes a body out of the simulation (#980), so the woken body falls.
   rt::Transform before{};
   ctx.check(world->get_transform(body, &before), "read pre-step transform");
   bool stepped = true;

@@ -21,6 +21,9 @@ REFLECT_FIELD(parentId, Uint32)
 REFLECT_END()
 
 REFLECT_TYPE(engine::runtime::RigidBody)
+// Optional: written only for a Kinematic or Static body, so every scene
+// and prefab saved before body types existed reads unchanged as Dynamic.
+REFLECT_FIELD_OPTIONAL(bodyType, Uint32)
 REFLECT_FIELD(velocity, Vec3)
 REFLECT_FIELD(acceleration, Vec3)
 REFLECT_FIELD(angularVelocity, Vec3)

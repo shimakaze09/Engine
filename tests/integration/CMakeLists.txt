@@ -793,6 +793,15 @@ engine_add_test_executable(engine_integration_determinism
     integration
 )
 
+engine_add_test_executable(engine_integration_script_moved_bodies
+    SOURCES
+    script_moved_bodies_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    LABELS
+    integration
+)
+
 engine_add_test_executable(engine_integration_ecs_stress_50k
     SOURCES
     ecs_stress_50k.cpp
