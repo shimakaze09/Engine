@@ -138,11 +138,19 @@ std::uint64_t build_draw_sort_key(const renderer::Material &material,
                                   renderer::kDrawKeyMeshMask)
                                  << renderer::kDrawKeyMeshShift;
 
-  const math::Vec4 clipPos = math::mul(
-      view.viewProjection, math::Vec4(center.x, center.y, center.z, 1.0F));
-  const float linearDepth = (clipPos.w > 0.0F) ? clipPos.w : 0.0F;
-  const float normalizedDepth =
-      (linearDepth < 200.0F) ? (linearDepth / 200.0F) : 1.0F;
+  // Distance to the view plane, as Unity and Unreal sort translucency: it
+  // orders an orthographic view as well as a perspective one, and it is
+  // measured over the camera's own depth range, so a far plane past any
+  // fixed constant still spreads its draws over the whole field.
+  const float viewDepth = math::dot(math::sub(center, view.eye), view.forward);
+  const float range = view.farPlane - view.nearPlane;
+  float normalizedDepth =
+      (range > 0.0F) ? ((viewDepth - view.nearPlane) / range) : 0.0F;
+  if (!(normalizedDepth > 0.0F)) {
+    normalizedDepth = 0.0F;
+  } else if (normalizedDepth > 1.0F) {
+    normalizedDepth = 1.0F;
+  }
   std::uint16_t depthQuantized =
       static_cast<std::uint16_t>(normalizedDepth * 65535.0F);
 

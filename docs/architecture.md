@@ -346,7 +346,10 @@ See the `serialization` skill for the procedure.
 - The sort key's bit layout lives once, in `command_buffer.h` beside
   `DrawKey`. Render prep, the sort and the flush use the published
   constants and accessors; a copied shift is rejected by
-  `tools/check_duplicate_primitives.py`.
+  `tools/check_duplicate_primitives.py`. Its depth field is the draw's
+  distance along the view direction over the camera's own near and far
+  planes, so an orthographic view and a far plane of any length order
+  their draws (`engine_integration_render_prep_depth_order`).
 
 ## Physics
 

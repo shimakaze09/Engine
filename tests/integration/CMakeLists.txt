@@ -1862,6 +1862,15 @@ engine_add_test_executable(engine_integration_render_prep_shading_model
     integration
 )
 
+engine_add_test_executable(engine_integration_render_prep_depth_order
+    SOURCES
+    render_prep_depth_order_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    LABELS
+    integration
+)
+
 engine_add_test_executable(engine_integration_render_prep_mesh_bounds
     SOURCES
     render_prep_mesh_bounds_test.cpp
