@@ -764,6 +764,9 @@ bool load_scene(World &world, const char *buffer, std::size_t size,
     beforeTeardown();
   }
 
+  // The World's id policy is the caller's (the editor draws authored ids
+  // scattered), not the scene's: it survives the replacement.
+  committedWorld->set_persistent_id_policy(world.persistent_id_policy());
   world = *committedWorld;
   // Explicitly, not by inheriting the staged world's untouched default:
   // where the random stream stands is simulation state, and a scene that

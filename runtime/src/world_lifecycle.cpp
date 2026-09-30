@@ -46,6 +46,15 @@ Entity World::create_scene_object_with_persistent_id(
   return kInvalidEntity;
 }
 
+void World::set_persistent_id_policy(
+    const PersistentIdPolicy &policy) noexcept {
+  m_idPolicy = policy;
+}
+
+PersistentIdPolicy World::persistent_id_policy() const noexcept {
+  return m_idPolicy;
+}
+
 Entity
 World::create_entity_with_persistent_id(PersistentId persistentId) noexcept {
   if (!is_mutation_phase()) {
@@ -81,6 +90,27 @@ World::create_entity_with_persistent_id(PersistentId persistentId) noexcept {
 
   if (m_entityGenerations[index] == 0U) {
     m_entityGenerations[index] = 1U;
+  }
+
+  if ((persistentId == kInvalidPersistentId) &&
+      (m_idPolicy.source == PersistentIdSource::Scattered)) {
+    // SplitMix64 over the stream; a draw that is zero or taken is skipped.
+    // The id table holds at most kMaxEntities of 2^32 values, so a free one
+    // is all but certain within a few draws; the sequential scan below is
+    // the fallback that cannot miss.
+    for (int attempt = 0; attempt < 64; ++attempt) {
+      m_idPolicy.streamState += 0x9E3779B97F4A7C15ULL;
+      std::uint64_t z = m_idPolicy.streamState;
+      z = (z ^ (z >> 30U)) * 0xBF58476D1CE4E5B9ULL;
+      z = (z ^ (z >> 27U)) * 0x94D049BB133111EBULL;
+      z ^= z >> 31U;
+      const auto candidate = static_cast<PersistentId>(z ^ (z >> 32U));
+      if ((candidate != kInvalidPersistentId) &&
+          (find_persistent_index(candidate) == 0U)) {
+        persistentId = candidate;
+        break;
+      }
+    }
   }
 
   if (persistentId == kInvalidPersistentId) {

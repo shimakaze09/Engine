@@ -494,6 +494,7 @@ void editor_set_world(runtime::World *world) noexcept {
     ++editor_session().documentGeneration;
     scene_document_reset_for_world_switch();
     cancel_entity_rename();
+    use_authoring_ids(world);
   }
   editor_session().world = world;
 }

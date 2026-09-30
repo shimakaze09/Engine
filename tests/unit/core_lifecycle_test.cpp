@@ -29,7 +29,6 @@ int g_failures = 0;
 
 engine::core::CoreConfig headless_config() noexcept {
   engine::core::CoreConfig config{};
-  config.frameAllocatorBytes = 1024U * 1024U;
   config.initializePlatform = false;
   return config;
 }

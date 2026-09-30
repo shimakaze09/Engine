@@ -78,7 +78,8 @@ plays the bundled template. It is not production-complete.
   not been observed in a browser; shaderc-cooked `.sc` shaders)
 - UI/editor: ImGui + ImGuizmo
 - Scripting: Lua 5.4 (C API)
-- Audio: miniaudio
+- Audio: miniaudio (WAV, Ogg Vorbis through the stb_vorbis decoder in the
+  same miniaudio checkout, MP3, FLAC)
 
 Every third-party dependency is fetched through CMake `FetchContent` at a
 pinned commit; only SDL3 is looked up locally first.
@@ -464,6 +465,17 @@ for the whole run (`engine_integration_scene_flow`); `engine.save_data` and
 editor's Log runs it only in Play; in Edit mode it is refused, since the
 entity would bypass undo and the unsaved-changes prompt: use the Create
 menu or drag the prefab in instead (`engine_unit_editor_console_commands`).
+
+Up to four controllers are tracked, each in the slot it arrived in; a slot
+is not reused by another controller while its own stays connected, so
+unplugging the first leaves the second in slot 1. Actions and axes bound to
+a gamepad button or stick read any connected controller, as Unity's and
+Godot's unpaired actions do, and so do `engine.is_gamepad_connected()`,
+`engine.is_gamepad_button_down(button)` and `engine.gamepad_axis_value(axis)`
+with no slot. Pass a slot from 0 (`engine.is_gamepad_button_down(button, 1)`,
+`engine.gamepad_axis_value(axis, deadzone, 1)`) to read one player's own
+controller; `engine.gamepad_count()` says how many are connected
+(`engine_unit_input_map`, `engine_unit_input_ingress_lua`).
 
 Scripts run sandboxed: `io`, `os`, `debug` and `package` are not there, all
 scripts share a budget of Lua instructions per frame (1,000,000 by default;

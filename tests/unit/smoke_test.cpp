@@ -112,7 +112,6 @@ int main() {
   }
 
   engine::core::CoreConfig headlessCore{};
-  headlessCore.frameAllocatorBytes = 1024U * 1024U;
   headlessCore.initializePlatform = false;
   if (!engine::core::initialize_core(headlessCore)) {
     return 26;

@@ -109,6 +109,25 @@ struct StateHashSections final {
   std::uint64_t random = 0U;
 };
 
+/// Where create_entity draws the persistent id a caller does not supply.
+enum class PersistentIdSource : std::uint8_t {
+  /// The next unused id after the last one handed out. Deterministic: what
+  /// play and every runtime spawn use, and the default.
+  Sequential,
+  /// An unused id from a caller-seeded pseudo-random stream over the whole
+  /// 32-bit range. For authoring: two people who each add an entity to one
+  /// scene on separate branches take different ids (a collision needs about
+  /// nA * nB / 2^32 luck), and an id a saved scene once held is not handed
+  /// out again after a reload, as Unity's random fileIDs are not.
+  Scattered,
+};
+
+/// A World's persistent-id source and the stream state it draws from.
+struct PersistentIdPolicy final {
+  PersistentIdSource source = PersistentIdSource::Sequential;
+  std::uint64_t streamState = 0U;
+};
+
 class World final : public physics::PhysicsWorldView {
 public:
   static constexpr std::size_t kMaxEntities = ENGINE_MAX_ENTITIES;
@@ -175,6 +194,11 @@ public:
   Entity create_entity() noexcept;
   /// Allocates a raw entity with a caller-supplied persistent id.
   Entity create_entity_with_persistent_id(PersistentId persistentId) noexcept;
+  /// Chooses where ids the caller does not supply come from; a Scattered
+  /// policy draws from `streamState` onward. A scene load keeps the policy.
+  void set_persistent_id_policy(const PersistentIdPolicy &policy) noexcept;
+  /// The current id policy, stream position included.
+  PersistentIdPolicy persistent_id_policy() const noexcept;
   /// Creates a scene object with the supplied local transform (identity by
   /// default); rolls the entity allocation back if the transform cannot be
   /// installed.
@@ -1174,6 +1198,7 @@ private:
   core::Status m_lastRefusal{};
   std::uint32_t m_nextEntityIndex = 1U;
   PersistentId m_nextPersistentId = 1U;
+  PersistentIdPolicy m_idPolicy{};
   std::uint32_t m_contentEpoch = 0U;
   std::array<std::uint32_t, kMaxEntities + 1U> m_entityGenerations{};
   std::array<PersistentId, kMaxEntities + 1U> m_entityPersistentIds{};

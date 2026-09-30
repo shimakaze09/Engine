@@ -428,6 +428,10 @@ bool editor_handle_quit_request() noexcept;
 /// Returns whether the default scene file is available on disk.
 bool default_scene_file_exists() noexcept;
 
+/// Draws the ids of entities authored in `world` from a stream seeded with
+/// OS entropy, so two authors adding to one scene on separate branches do
+/// not take the same id (a play session draws sequentially meanwhile).
+void use_authoring_ids(runtime::World *world) noexcept;
 /// Serializes the current world so Stop can restore the pre-play state.
 bool capture_play_snapshot() noexcept;
 /// Enters play mode (captures the play snapshot first).

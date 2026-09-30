@@ -607,6 +607,9 @@ struct EnginePipeline::Impl final {
   runtime::EngineServiceRegistry serviceRegistry;
   scripting::GameBindingState gameBindingState{};
   std::unique_ptr<runtime::World> world;
+  // The World's id policy while no session runs (the editor draws authored
+  // ids scattered); a play session draws sequentially and gives it back.
+  runtime::PersistentIdPolicy authoringIdPolicy{};
   std::unique_ptr<renderer::CommandBufferBuilder> commandBuffer;
   /// Camera-culled draws the shadow and capture passes still need.
   std::unique_ptr<renderer::CommandBufferBuilder> auxiliaryCommandBuffer;
@@ -957,12 +960,12 @@ bool EnginePipeline::Impl::initialize(std::uint32_t maxFrameCount) noexcept {
     return false;
   }
 
-  frameThreadCount = core::thread_frame_allocator_count();
+  frameThreadCount = static_cast<std::size_t>(core::thread_count());
   if ((frameThreadCount == 0U) ||
       (frameThreadCount >
        frameContext->renderPrepPipeline.localCommandBuffers.size())) {
     core::log_message(core::LogLevel::Error, "engine",
-                      "invalid thread allocator count");
+                      "invalid job thread count");
     teardown();
     return false;
   }
@@ -1216,6 +1219,12 @@ runtime::PlayTransition inferred_transition(LoopPlayState previous,
 } // namespace
 
 void EnginePipeline::Impl::begin_play_session() noexcept {
+  // Everything a session spawns takes the next sequential id, so a replay
+  // and every worker count see the same ids whatever the author did.
+  authoringIdPolicy = world->persistent_id_policy();
+  runtime::PersistentIdPolicy playIds = authoringIdPolicy;
+  playIds.source = runtime::PersistentIdSource::Sequential;
+  world->set_persistent_id_policy(playIds);
   const char *mainScriptPath = active_config().mainScriptPath;
   if (mainScriptPath != nullptr) {
     scripting::watch_script_file(mainScriptPath);
@@ -1224,6 +1233,7 @@ void EnginePipeline::Impl::begin_play_session() noexcept {
 }
 
 void EnginePipeline::Impl::end_play_session() noexcept {
+  world->set_persistent_id_policy(authoringIdPolicy);
   scripting::dispatch_entity_scripts_end();
   scripting::clear_entity_script_modules();
   scripting::shutdown_scripting();
@@ -2394,13 +2404,6 @@ void EnginePipeline::Impl::stage_diagnostics() noexcept {
   // the editor's Profiler graphs and stats overlay, never logged: a line a
   // second cannot show where a frame spiked, as Unity's Profiler and
   // Unreal's stat graphs show it.
-  std::size_t frameAllocatorBytes = core::frame_allocator_bytes_used();
-  std::size_t frameAllocations = core::frame_allocator_allocation_count();
-  for (std::size_t i = 0U; i < frameThreadCount; ++i) {
-    frameAllocatorBytes += core::thread_frame_allocator_bytes_used(i);
-    frameAllocations += core::thread_frame_allocator_allocation_count(i);
-  }
-
   const std::size_t aliveCount = world->alive_entity_count();
   if (aliveCount >= previousAliveCount) {
     sliceSpawnedSinceLine += aliveCount - previousAliveCount;
@@ -2515,8 +2518,6 @@ void EnginePipeline::Impl::stage_diagnostics() noexcept {
   }
   frameStats.fixedSteps = clock.stepsThisFrame;
   frameStats.interpolationAlpha = static_cast<float>(clock.renderAlpha);
-  frameStats.frameAllocatorBytes = frameAllocatorBytes;
-  frameStats.frameAllocations = frameAllocations;
   core::set_engine_stats(frameStats);
 }
 
@@ -2525,9 +2526,6 @@ void EnginePipeline::Impl::stage_diagnostics() noexcept {
 // ---------------------------------------------------------------------------
 
 void EnginePipeline::Impl::stage_frame_cleanup() noexcept {
-  core::reset_frame_allocator();
-  core::reset_thread_frame_allocators();
-
   previousPlayState = playState;
   previousAliveCount = world->alive_entity_count();
   ++clock.frameIndex;

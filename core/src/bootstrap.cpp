@@ -2,7 +2,6 @@
 
 #include "engine/core/bootstrap.h"
 
-#include <array>
 #include <cstddef>
 #include <cstdio>
 #include <thread>
@@ -15,7 +14,6 @@
 #include "engine/core/event_bus.h"
 #include "engine/core/input.h"
 #include "engine/core/job_system.h"
-#include "engine/core/linear_allocator.h"
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
 #include "engine/core/profiler.h"
@@ -28,23 +26,7 @@ namespace engine::core {
 
 namespace {
 
-constexpr std::size_t kMaxFrameAllocatorBytes = 4U * 1024U * 1024U;
-constexpr std::size_t kMaxThreadFrameAllocators = 16U;
-constexpr std::size_t kThreadFrameAllocatorBytes = 256U * 1024U;
-
 bool g_coreInitialized = false;
-LinearAllocator g_mainFrameAllocator;
-Allocator g_mainFrameAllocatorInterface{};
-std::array<std::byte, kMaxFrameAllocatorBytes> g_mainFrameAllocatorMemory{};
-
-std::array<LinearAllocator, kMaxThreadFrameAllocators>
-    g_threadFrameAllocators{};
-std::array<Allocator, kMaxThreadFrameAllocators>
-    g_threadFrameAllocatorInterfaces{};
-std::array<std::array<std::byte, kThreadFrameAllocatorBytes>,
-           kMaxThreadFrameAllocators>
-    g_threadFrameAllocatorMemory{};
-std::size_t g_threadFrameAllocatorCount = 1U;
 
 } // namespace
 
@@ -56,14 +38,6 @@ bool initialize_core(const CoreConfig &config) noexcept {
   // Whoever initializes core owns the main thread: the platform queue, the
   // renderer and the Lua VM all run where this call ran.
   set_main_thread();
-
-  const std::size_t frameAllocatorBytes = config.frameAllocatorBytes;
-  if ((frameAllocatorBytes == 0U) ||
-      (frameAllocatorBytes > kMaxFrameAllocatorBytes)) {
-    log_message(LogLevel::Error, "core",
-                "invalid frame allocator size for core initialization");
-    return false;
-  }
 
   bool loggingInitialized = false;
   bool cvarsInitialized = false;
@@ -77,10 +51,6 @@ bool initialize_core(const CoreConfig &config) noexcept {
   bool jobSystemInitialized = false;
   bool initializedSuccessfully = false;
   const char *failureMessage = nullptr;
-
-  g_mainFrameAllocator.init(g_mainFrameAllocatorMemory.data(),
-                            frameAllocatorBytes);
-  g_mainFrameAllocatorInterface = make_allocator(&g_mainFrameAllocator);
 
   do {
     if (!initialize_logging()) {
@@ -168,20 +138,6 @@ bool initialize_core(const CoreConfig &config) noexcept {
     }
     jobSystemInitialized = true;
 
-    g_threadFrameAllocatorCount = static_cast<std::size_t>(thread_count());
-    if ((g_threadFrameAllocatorCount == 0U) ||
-        (g_threadFrameAllocatorCount > kMaxThreadFrameAllocators)) {
-      failureMessage = "thread frame allocator count is out of range";
-      break;
-    }
-
-    for (std::size_t i = 0U; i < g_threadFrameAllocatorCount; ++i) {
-      g_threadFrameAllocators[i].init(g_threadFrameAllocatorMemory[i].data(),
-                                      kThreadFrameAllocatorBytes);
-      g_threadFrameAllocatorInterfaces[i] =
-          make_allocator(&g_threadFrameAllocators[i]);
-    }
-
     initializedSuccessfully = true;
   } while (false);
 
@@ -241,22 +197,9 @@ bool initialize_core(const CoreConfig &config) noexcept {
   }
 
   clear_project_data_root();
-  g_mainFrameAllocator.reset();
-  for (std::size_t i = 0U; i < kMaxThreadFrameAllocators; ++i) {
-    g_threadFrameAllocators[i].reset();
-    g_threadFrameAllocatorInterfaces[i] = Allocator{};
-  }
-  g_threadFrameAllocatorCount = 1U;
   clear_main_thread();
 
   return false;
-}
-
-/// Initializes the owning system for core.
-bool initialize_core(std::size_t frameAllocatorBytes) noexcept {
-  CoreConfig config{};
-  config.frameAllocatorBytes = frameAllocatorBytes;
-  return initialize_core(config);
 }
 
 /// Shuts down the owning system for core.
@@ -278,11 +221,6 @@ void shutdown_core() noexcept {
   shutdown_cvars();
   shutdown_logging();
 
-  g_mainFrameAllocator.reset();
-  for (std::size_t i = 0U; i < g_threadFrameAllocatorCount; ++i) {
-    g_threadFrameAllocators[i].reset();
-  }
-
   // The published stats snapshot is run-scoped; a later core in this
   // process must not read the previous run's numbers before its own.
   reset_engine_stats();
@@ -291,55 +229,5 @@ void shutdown_core() noexcept {
 
 /// Returns whether is core initialized.
 bool is_core_initialized() noexcept { return g_coreInitialized; }
-
-Allocator frame_allocator() noexcept { return g_mainFrameAllocatorInterface; }
-
-Allocator thread_frame_allocator(std::size_t threadIndex) noexcept {
-  if (threadIndex >= g_threadFrameAllocatorCount) {
-    return Allocator{};
-  }
-
-  return g_threadFrameAllocatorInterfaces[threadIndex];
-}
-
-/// Resets this object back to its reusable empty state for frame allocator.
-void reset_frame_allocator() noexcept { g_mainFrameAllocator.reset(); }
-
-/// Resets this object back to its reusable empty state for thread frame allocators.
-void reset_thread_frame_allocators() noexcept {
-  for (std::size_t i = 0U; i < g_threadFrameAllocatorCount; ++i) {
-    g_threadFrameAllocators[i].reset();
-  }
-}
-
-std::size_t frame_allocator_bytes_used() noexcept {
-  return g_mainFrameAllocator.bytes_used();
-}
-
-std::size_t frame_allocator_allocation_count() noexcept {
-  return g_mainFrameAllocator.allocation_count();
-}
-
-std::size_t
-thread_frame_allocator_bytes_used(std::size_t threadIndex) noexcept {
-  if (threadIndex >= g_threadFrameAllocatorCount) {
-    return 0U;
-  }
-
-  return g_threadFrameAllocators[threadIndex].bytes_used();
-}
-
-std::size_t
-thread_frame_allocator_allocation_count(std::size_t threadIndex) noexcept {
-  if (threadIndex >= g_threadFrameAllocatorCount) {
-    return 0U;
-  }
-
-  return g_threadFrameAllocators[threadIndex].allocation_count();
-}
-
-std::size_t thread_frame_allocator_count() noexcept {
-  return g_threadFrameAllocatorCount;
-}
 
 } // namespace engine::core

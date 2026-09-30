@@ -20,6 +20,7 @@
 *.wav binary
 *.ogg binary
 *.mp3 binary
+*.flac binary
 *.ttf binary
 
 # Cooked outputs and their sidecars.

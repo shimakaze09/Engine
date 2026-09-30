@@ -396,7 +396,7 @@ int main() {
     return 13;
   }
 
-  if (!engine::core::initialize_core(1024U * 1024U)) {
+  if (!engine::core::initialize_core(engine::core::CoreConfig{})) {
     return 4;
   }
 

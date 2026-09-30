@@ -309,8 +309,8 @@ bool load_mesh_data_from_file(const char *path, CpuMeshData *outData,
     return false;
   }
 
-  // Heap allocation here is intentional: mesh data is variable-size and may
-  // exceed the frame allocator budget. This function performs CPU IO only.
+  // Heap allocation here is intentional: mesh data is variable-size, and a
+  // load runs off the hot path. This function performs CPU IO only.
   // The buffers are the allocation truth for every later bounds check, and
   // allocation failure stays a recoverable load failure.
   CpuMeshData decoded{};

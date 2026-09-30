@@ -13,6 +13,7 @@
 #endif
 
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -984,6 +985,37 @@ float gamepad_axis_value(int axis, int deadzone, int gamepad) noexcept {
     normalized = 1.0F;
   }
   return (raw < 0) ? -normalized : normalized;
+}
+
+bool any_gamepad_connected() noexcept { return connected_gamepad_count() > 0; }
+
+bool any_gamepad_button_down(int button) noexcept {
+  for (int slot = 0; slot < kMaxGamepads; ++slot) {
+    if (is_gamepad_button_down(button, slot)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool any_gamepad_button_pressed(int button) noexcept {
+  for (int slot = 0; slot < kMaxGamepads; ++slot) {
+    if (is_gamepad_button_pressed(button, slot)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+float any_gamepad_axis_value(int axis, int deadzone) noexcept {
+  float strongest = 0.0F;
+  for (int slot = 0; slot < kMaxGamepads; ++slot) {
+    const float value = gamepad_axis_value(axis, deadzone, slot);
+    if (std::fabs(value) > std::fabs(strongest)) {
+      strongest = value;
+    }
+  }
+  return strongest;
 }
 
 } // namespace engine::core

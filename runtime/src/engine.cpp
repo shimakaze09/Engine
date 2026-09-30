@@ -39,7 +39,6 @@ namespace engine {
 
 namespace {
 
-constexpr std::size_t kFrameAllocatorBytes = 1024U * 1024U;
 EngineConfig g_activeConfig{};
 
 /// Opens this run's log file under the per-user data directory
@@ -280,7 +279,6 @@ bool project_fields_consistent(const EngineConfig &config) noexcept {
 
 bool bootstrap() noexcept {
   EngineConfig config{};
-  config.core.frameAllocatorBytes = kFrameAllocatorBytes;
   return bootstrap(config);
 }
 
