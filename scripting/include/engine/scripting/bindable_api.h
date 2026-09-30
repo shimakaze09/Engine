@@ -21,26 +21,14 @@ int bindable_frame_count() noexcept;
 // LUA_BIND: get_entity_count() -> int
 int bindable_get_entity_count() noexcept;
 
-// LUA_BIND: is_god_mode() -> bool
-bool bindable_is_god_mode() noexcept;
-
-// LUA_BIND: is_noclip() -> bool
-bool bindable_is_noclip() noexcept;
-
 // LUA_BIND: get_action_value(name: string) -> float
 float bindable_get_action_value(const char *name) noexcept;
 
 // LUA_BIND: get_axis_value(name: string) -> float
 float bindable_get_axis_value(const char *name) noexcept;
 
-// LUA_BIND: set_game_mode(name: string) -> bool
-bool bindable_set_game_mode(const char *name) noexcept;
-
 // LUA_BIND: get_game_state() -> string
 const char *bindable_get_game_state() noexcept;
-
-// LUA_BIND: get_game_mode() -> string
-const char *bindable_get_game_mode() noexcept;
 
 // LUA_BIND: set_game_state(name: string) -> bool
 bool bindable_set_game_state(const char *name) noexcept;

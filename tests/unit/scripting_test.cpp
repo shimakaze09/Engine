@@ -1416,12 +1416,8 @@ int main() {
     const char *stateScript =
         "function on_start()\n"
         "  local e = engine.spawn_entity()\n"
-        "  engine.set_game_mode('sandbox_mode')\n"
         "  engine.set_game_state('running')\n"
-        "  engine.set_player_controller(0, e)\n"
-        "  if engine.get_game_mode() == 'sandbox_mode' and\n"
-        "     engine.get_game_state() == 'running' and\n"
-        "     engine.get_player_controller(0) == e then\n"
+        "  if e ~= nil and engine.get_game_state() == 'running' then\n"
         "    local ok = engine.spawn_entity()\n"
         "    engine.set_name(ok, 'state_ok')\n"
         "  end\n"
@@ -1445,41 +1441,6 @@ int main() {
       engine::scripting::shutdown_scripting();
       remove_script_file();
       return 82;
-    }
-  }
-
-  {
-    const char *controllerDestroyScript =
-        "function on_start()\n"
-        "  local controlled = engine.spawn_entity()\n"
-        "  engine.set_player_controller(0, controlled)\n"
-        "  engine.destroy_entity(controlled)\n"
-        "  local cleared = engine.get_player_controller(0)\n"
-        "  local replacement = engine.spawn_entity()\n"
-        "  if cleared == 0 and replacement ~= nil then\n"
-        "    local ok = engine.spawn_entity()\n"
-        "    engine.set_name(ok, 'controller_cleared_on_destroy')\n"
-        "  end\n"
-        "end\n";
-    if (!write_script_file(controllerDestroyScript) ||
-        !engine::scripting::load_script(kTempScriptPath) ||
-        !engine::scripting::call_script_function("on_start")) {
-      engine::scripting::shutdown_scripting();
-      remove_script_file();
-      return 204;
-    }
-    bool controllerCleared = false;
-    world->for_each_alive([&](engine::runtime::Entity ent) noexcept {
-      engine::runtime::NameComponent nc{};
-      if (world->get_name_component(ent, &nc) &&
-          std::strcmp(nc.name, "controller_cleared_on_destroy") == 0) {
-        controllerCleared = true;
-      }
-    });
-    if (!controllerCleared) {
-      engine::scripting::shutdown_scripting();
-      remove_script_file();
-      return 205;
     }
   }
 

@@ -151,16 +151,6 @@ static_assert(scripting::kMaxGameSaveBytes == runtime::kMaxSaveDataBytes,
 static_assert(scripting::kMaxEntityPoolSize ==
                   runtime::EntityPool::kMaxPoolSize,
               "scripting's pool size must match the entity pool's");
-static_assert(static_cast<int>(scripting::GameModeState::WaitingToStart) ==
-                      static_cast<int>(runtime::GameMode::State::WaitingToStart) &&
-                  static_cast<int>(scripting::GameModeState::InProgress) ==
-                      static_cast<int>(runtime::GameMode::State::InProgress) &&
-                  static_cast<int>(scripting::GameModeState::Paused) ==
-                      static_cast<int>(runtime::GameMode::State::Paused) &&
-                  static_cast<int>(scripting::GameModeState::Ended) ==
-                      static_cast<int>(runtime::GameMode::State::Ended),
-              "scripting's game mode states must mirror the runtime's");
-
 bool scripting_get_active_camera(runtime::World *world, float *outPosX,
                                  float *outPosY, float *outPosZ, float *outTgtX,
                                  float *outTgtY, float *outTgtZ,
@@ -1161,62 +1151,6 @@ scripting_primitive_collider(math::PrimitiveShape shape) noexcept {
   return runtime::primitive_collider(shape);
 }
 
-// Game mode, owned by the World.
-const char *scripting_game_mode_name(runtime::World *world) noexcept {
-  return (world != nullptr) ? world->game_mode().name : "";
-}
-
-bool scripting_set_game_mode_name(runtime::World *world,
-                                  const char *name) noexcept {
-  if ((world == nullptr) || (name == nullptr)) {
-    return false;
-  }
-  std::snprintf(world->game_mode().name, runtime::GameMode::kMaxNameLength,
-                "%s", name);
-  return true;
-}
-
-bool scripting_game_mode_start(runtime::World *world) noexcept {
-  return (world != nullptr) && world->game_mode().start();
-}
-
-bool scripting_game_mode_pause(runtime::World *world) noexcept {
-  return (world != nullptr) && world->game_mode().pause();
-}
-
-bool scripting_game_mode_end(runtime::World *world) noexcept {
-  return (world != nullptr) && world->game_mode().end();
-}
-
-scripting::GameModeState
-scripting_game_mode_state(runtime::World *world) noexcept {
-  if (world == nullptr) {
-    return scripting::GameModeState::WaitingToStart;
-  }
-  return static_cast<scripting::GameModeState>(world->game_mode().state);
-}
-
-bool scripting_game_mode_set_rule(runtime::World *world, const char *key,
-                                  const char *value) noexcept {
-  return (world != nullptr) && world->game_mode().set_rule(key, value);
-}
-
-const char *scripting_game_mode_get_rule(runtime::World *world,
-                                         const char *key) noexcept {
-  return (world != nullptr) ? world->game_mode().get_rule(key) : nullptr;
-}
-
-std::uint32_t scripting_game_mode_max_players(runtime::World *world) noexcept {
-  return (world != nullptr) ? world->game_mode().maxPlayers : 0U;
-}
-
-void scripting_set_game_mode_max_players(runtime::World *world,
-                                         std::uint32_t maxPlayers) noexcept {
-  if (world != nullptr) {
-    world->game_mode().maxPlayers = maxPlayers;
-  }
-}
-
 // Timers, owned by the World.
 std::uint32_t scripting_timer_set(runtime::World *world, float seconds,
                                   bool repeat,
@@ -1369,16 +1303,6 @@ scripting::RuntimeServices make_scripting_runtime_services() noexcept {
   s.add_camera_component_op = &scripting_add_camera_component_op;
   s.remove_camera_component_op = &scripting_remove_camera_component_op;
   s.primitive_collider = &scripting_primitive_collider;
-  s.game_mode_name = &scripting_game_mode_name;
-  s.set_game_mode_name = &scripting_set_game_mode_name;
-  s.game_mode_start = &scripting_game_mode_start;
-  s.game_mode_pause = &scripting_game_mode_pause;
-  s.game_mode_end = &scripting_game_mode_end;
-  s.game_mode_state = &scripting_game_mode_state;
-  s.game_mode_set_rule = &scripting_game_mode_set_rule;
-  s.game_mode_get_rule = &scripting_game_mode_get_rule;
-  s.game_mode_max_players = &scripting_game_mode_max_players;
-  s.set_game_mode_max_players = &scripting_set_game_mode_max_players;
   s.timer_set = &scripting_timer_set;
   s.timer_cancel = &scripting_timer_cancel;
   s.timer_slot_for_id = &scripting_timer_slot_for_id;

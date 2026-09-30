@@ -21,11 +21,10 @@
 #include "engine/physics/inertia.h"
 #include "engine/physics/physics_world_view.h"
 #include "engine/runtime/animation.h"
+#include "engine/runtime/camera_manager.h"
+#include "engine/runtime/timer_manager.h"
 #include "engine/runtime/world_component_types.h"
 #include "engine/runtime/world_query.h"
-#include "engine/runtime/camera_manager.h"
-#include "engine/runtime/game_mode.h"
-#include "engine/runtime/timer_manager.h"
 
 namespace engine::runtime {
 
@@ -690,10 +689,6 @@ public:
   /// Current WorldPhase; component mutation is only legal in Input.
   WorldPhase current_phase() const noexcept;
 
-  // Game mode (owned by World — reset on scene load). -------------------
-  GameMode &game_mode() noexcept { return m_gameMode; }
-  const GameMode &game_mode() const noexcept { return m_gameMode; }
-
   // Per-World timer manager (reset on scene load). -------------------------
   TimerManager &timer_manager() noexcept { return m_timerManager; }
   const TimerManager &timer_manager() const noexcept { return m_timerManager; }
@@ -1309,7 +1304,6 @@ private:
           std::array<WorldTransformHistoryEntry, kMaxEntities + 1U>();
   std::uint64_t m_worldTransformHistoryEpoch = 0U;
   physics::PhysicsContext m_physicsContext{};
-  GameMode m_gameMode{};
   TimerManager m_timerManager{};
   CameraManager m_cameraManager{};
 
