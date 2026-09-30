@@ -214,7 +214,10 @@ bool create_gpu_resources(PassResourceState *outState, std::size_t view,
     return fail_create(next, "failed to create G-Buffer normal texture");
   }
 
-  next.gbufferEmissiveTex = makeTexture(TextureFormat::RGBA8);
+  // HDR, as the forward path's scene target is: emission above 1 is what
+  // bloom picks up, and an 8-bit target would clamp it on every deferred
+  // surface while the same material glows when forward-shaded.
+  next.gbufferEmissiveTex = makeTexture(TextureFormat::RGBA16F);
   if (next.gbufferEmissiveTex == kInvalidDeviceTexture) {
     return fail_create(next, "failed to create G-Buffer emissive texture");
   }
