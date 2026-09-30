@@ -423,6 +423,21 @@ script camera (`engine_integration_game_camera_gpu`,
 `engine_integration_camera_producer_removal`,
 `engine_unit_editor_entity_menus`).
 
+A rigid body has a type, as in Jolt, Unity and Godot:
+- **Dynamic** (the default): moved by gravity, forces and collisions.
+- **Kinematic**: moved only by its velocity or a script. It pushes and
+  carries what it touches but is never pushed back, feels no gravity and
+  never sleeps. Use it for moving platforms, doors and lifts.
+- **Static**: never moves.
+
+Set the type with the Inspector's Body Type or
+`engine.set_body_type(e, "kinematic")`, and read it with
+`engine.get_body_type(e)`. `engine.set_position`, `set_rotation`,
+`look_at` and `set_scale` teleport an entity: its body keeps its type,
+velocity and collisions, and wakes. Drive a moving platform with
+`engine.set_velocity` on a kinematic body, so contacts see its motion
+(`engine_integration_script_moved_bodies`, `engine_unit_body_type`).
+
 Gameplay is written in scripts, as in Unity and Godot: the engine has no
 built-in player controller, game mode, score store or cheat flags. Scripts
 read input (`engine.is_key_down`, `engine.is_action_down`), move entities
