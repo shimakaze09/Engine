@@ -253,6 +253,14 @@ box naming it. The same messages appear in the editor's own Log panel, whose
 command line runs console commands (`help` lists them, `get` and `set` read and
 write cvars; Tab completes, Up and Down recall), as Unreal's Output Log does.
 
+If the editor has to close on an internal error or a graphics-device failure
+(a driver reset, a lost GPU), it first saves the unsaved scene to `Recovery/`
+in the project's per-user data directory, as Unity keeps a `_Recovery`
+folder, and the error box names the file; open it with File > Open Scene.
+During Play the copy is the scene as it was before Play. A device failure
+exits with code 4 (`engine_integration_fatal_recovery`,
+`engine_integration_fatal_device_recovery`).
+
 F9, the Game view's Screenshot button, Edit > Take Screenshot or the
 `screenshot` console command saves what the Game view shows as a PNG under
 `Screenshots/` in the project's per-user data directory, as Unreal's F9 saves

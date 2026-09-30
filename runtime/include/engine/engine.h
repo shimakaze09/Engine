@@ -93,6 +93,9 @@ enum class ExitCode : int {
   BootstrapFailed = 1,
   FatalInitialization = 2,
   FatalFrame = 3,
+  /// The graphics device failed (lost, reset, or a fatal backend error);
+  /// the process ends inside the renderer, after the recovery copy.
+  FatalDevice = 4,
 };
 
 /// Bootstrap stages a test may fail on purpose; None injects nothing.
@@ -128,6 +131,11 @@ void inject_bootstrap_failure(BootstrapStage stage) noexcept;
 RunResult run(std::uint32_t maxFrames = 0U) noexcept;
 /// Maps a run result to its ExitCode value (0 only for Stopped).
 int run_result_exit_code(RunResult result) noexcept;
+/// After a run that ended fatally: the one-line note for the user saying
+/// where the unsaved work was saved, or "" when nothing needed saving or
+/// nothing could be. Kept until the next bootstrap, so it can be shown
+/// after shutdown.
+const char *fatal_recovery_note() noexcept;
 /// Closes every stage bootstrap opened; idempotent.
 void shutdown() noexcept;
 

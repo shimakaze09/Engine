@@ -857,6 +857,30 @@ engine_add_test_executable(engine_integration_end_play_session_state
     integration
 )
 
+engine_add_test_executable(engine_integration_fatal_recovery
+    SOURCES
+    fatal_recovery_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/editor/src
+    PRIVATE_DEPS
+    engine_editor
+    engine_runtime
+    engine_scripting
+    LABELS
+    integration
+)
+
+add_test(
+    NAME engine_integration_fatal_device_recovery
+    COMMAND ${CMAKE_COMMAND}
+        "-DHELPER=$<TARGET_FILE:engine_integration_fatal_recovery>"
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/run_fatal_device_recovery.cmake
+)
+set_tests_properties(
+    engine_integration_fatal_device_recovery
+    PROPERTIES LABELS integration
+)
+
 engine_add_test_executable(engine_integration_scene_load_collision_dispatch
     SOURCES
     scene_load_collision_dispatch_test.cpp

@@ -20,6 +20,7 @@
 #include "engine/core/bootstrap.h"
 #include "engine/core/crash_report.h"
 #include "engine/core/cvar.h"
+#include "engine/core/fatal_exit.h"
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
 #include "engine/core/vfs.h"
@@ -157,6 +158,29 @@ bool fail_bootstrap() noexcept {
 void close_core() noexcept { core::shutdown_core(); }
 
 void close_crash_report() noexcept { core::shutdown_crash_report(); }
+
+// The note a fatal's recovery left for the user, kept past shutdown.
+char g_fatalRecoveryNote[640] = {};
+
+/// The fatal recovery hook: asks the editor, when one is attached, to
+/// save a recovery copy of the unsaved scene, and says where it went. The
+/// player has no document to lose, and its bridge is displaced.
+void write_fatal_recovery(char *note, std::size_t capacity) noexcept {
+  const runtime::EditorBridge *bridge = runtime::editor_bridge();
+  if ((bridge == nullptr) || (bridge->write_recovery_copy == nullptr)) {
+    return;
+  }
+  char path[runtime::kRecoveryPathCapacity] = {};
+  if (!bridge->write_recovery_copy(path, sizeof(path))) {
+    return;
+  }
+  std::snprintf(note, capacity,
+                "The unsaved scene was saved to:\n%s\nOpen it with "
+                "File > Open Scene.",
+                path);
+}
+
+void close_fatal_recovery() noexcept { core::set_fatal_recovery_hook(nullptr); }
 
 void close_renderer() noexcept { renderer::shutdown_renderer(); }
 
@@ -308,6 +332,9 @@ bool bootstrap(const EngineConfig &config) noexcept {
                       "crash reporting unavailable; a fault will leave no "
                       "build, frame or stage");
   }
+  g_fatalRecoveryNote[0] = '\0';
+  core::set_fatal_recovery_hook(&write_fatal_recovery);
+  open_stage(&close_fatal_recovery);
 
   static_cast<void>(core::cvar_register_int(
       "debug_dap_port", 0,
@@ -539,6 +566,8 @@ void web_frame(void *arg) noexcept {
     if (pipeline->had_fatal_error()) {
       core::log_message(core::LogLevel::Error, "engine",
                         "engine stopped on a fatal frame error");
+      static_cast<void>(core::run_fatal_recovery_hook(
+          g_fatalRecoveryNote, sizeof(g_fatalRecoveryNote)));
     }
     pipeline->teardown();
     emscripten_cancel_main_loop();
@@ -584,10 +613,23 @@ RunResult run(std::uint32_t maxFrames) noexcept {
 
   const RunResult result = pipeline.had_fatal_error() ? RunResult::FatalFrame
                                                       : RunResult::Stopped;
+  // Before teardown, which detaches the editor from its World: a fatal
+  // frame ends the run, so this is the last moment the unsaved scene can
+  // be saved.
+  if (result == RunResult::FatalFrame) {
+    static_cast<void>(core::run_fatal_recovery_hook(
+        g_fatalRecoveryNote, sizeof(g_fatalRecoveryNote)));
+  }
   pipeline.teardown();
   return result;
 #endif
 }
+
+static_assert(static_cast<int>(ExitCode::FatalDevice) ==
+                  core::kFatalDeviceExitCode,
+              "the renderer exits with core's device-fatal code");
+
+const char *fatal_recovery_note() noexcept { return g_fatalRecoveryNote; }
 
 int run_result_exit_code(RunResult result) noexcept {
   switch (result) {
