@@ -83,7 +83,11 @@ void attach_world(engine::runtime::World *world) noexcept {
 
 engine::runtime::EditorBridge g_bridge{};
 
-bool boot() noexcept {
+/// Boots headless with `projectFolder` as the per-project data root. The
+/// device child and the in-process cases each have their own, since ctest
+/// runs the two tests at once and a recovery file one of them removes must
+/// never be the other's.
+bool boot(const char *projectFolder) noexcept {
   g_bridge.set_world = &attach_world;
   g_bridge.is_playing = &engine::editor::editor_is_playing;
   g_bridge.is_paused = &engine::editor::editor_is_paused;
@@ -100,8 +104,8 @@ bool boot() noexcept {
   }
   // A project of the test's own, so its Recovery folder is private.
   std::error_code ec;
-  std::filesystem::create_directories("fatal_recovery_test_project", ec);
-  return engine::core::set_project_data_root("fatal_recovery_test_project");
+  std::filesystem::create_directories(projectFolder, ec);
+  return engine::core::set_project_data_root(projectFolder);
 }
 
 /// The path the recovery note names, or "".
@@ -127,7 +131,7 @@ std::string read_file(const std::string &path) {
 /// ("" when the note names none) after removing the file.
 std::string run_fatal(Setup setup, engine::RunResult *outResult) {
   g_setup = setup;
-  if (!boot()) {
+  if (!boot("fatal_recovery_test_project")) {
     std::fprintf(stderr, "FAIL: bootstrap\n");
     ++g_failures;
     return std::string();
@@ -150,7 +154,7 @@ std::string run_fatal(Setup setup, engine::RunResult *outResult) {
 
 int run_device_child() {
   g_setup = Setup::UnsavedStopped;
-  if (!boot()) {
+  if (!boot("fatal_device_recovery_test_project")) {
     return 90;
   }
   // The pipeline attaches the World; a frame of it runs, then the device
