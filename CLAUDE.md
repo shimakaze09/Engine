@@ -142,24 +142,26 @@ Calling a rule enforced without one of these three is prohibited.
   justifies a downgrade. Zero open findings is not a reachable state for
   an engine.
 - **[OWNER]** Every open issue carries exactly one class label, which
-  decides the work order; `needs-triage` marks one without it
-  (`.github/workflows/issue-triage.yml`). **`class:blocker`**: data loss
+  decides the work order (the pinned `roadmap` index, which orders the
+  rest, takes none); `needs-triage` marks one without it
+  (`.github/workflows/issue-triage.yml`). **`blocker`**: data loss
   or corruption, a crash, a leak or unbounded growth in normal operation,
   a regression, or any defect a normal user of a claimed workflow hits
   (authoring, play, save/load, cook, build, a supported platform),
-  whoever found it. **`class:deferred`**: real but off the normal path —
+  whoever found it. **`deferred`**: real but off the normal path —
   extreme capacities, contrived input, hygiene, cosmetics, debt with no
   current symptom; promoted the moment it is observed in normal use.
-  **`class:feature`**: a capability not yet claimed, UI/UX included; a
+  **`feature`**: a capability not yet claimed, UI/UX included; a
   missing piece of a claimed one is a defect. Work blockers first, by
   severity, then foundation layer first (core, platform, content,
   renderer/physics/audio, scripting, editor); deferred rides only inside
   a change already touching its files; features start when no blocker is
   open. Audits continue, and a finding is classified when filed — a new
   blocker takes its place by severity, never ahead because it is new.
-  Age triggers triage, never a close. Labels also carry `P0`–`P3`,
-  `area:*` and one `found:*` (`use`, `audit`, `regression`); the count of
-  `found:regression` is the health signal to report.
+  Age triggers triage, never a close. Labels also carry `P0`–`P3`, a
+  kind (`bug`, `tech-debt`), areas, and one found-by label (`observed`,
+  `audit`, `regression`); the count of `regression` is the health signal
+  to report. `.github/labels.json` defines every label and its colour.
 
 ## Working conventions
 

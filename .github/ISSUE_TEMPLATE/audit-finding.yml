@@ -2,7 +2,7 @@
 name: Audit finding
 description: A defect found by a code audit or review sweep (correctness, safety, security, determinism)
 title: "[Audit] <short defect statement>"
-labels: ["found:audit"]
+labels: ["audit"]
 body:
   - type: markdown
     attributes:
@@ -41,7 +41,7 @@ body:
     id: area
     attributes:
       label: Area
-      description: Every subsystem the defect or feature touches; each becomes an `area:*` label.
+      description: Every subsystem the defect or feature touches; each becomes an area label.
       multiple: true
       options:
         - core

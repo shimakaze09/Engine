@@ -24,7 +24,7 @@ the correction program. Supersedes the flow counts in
    stop-the-line; a consolidation is allowed for a P0 only as its
    owning-layer fix.
 3. *(Superseded by [0020](0020-issues-are-classified-before-they-are-worked.md):
-   a P3 is `class:deferred` and rides inside a change already touching
+   a P3 is `deferred` and rides inside a change already touching
    its files; age still never closes it.)* **P3 stands alone only for
    bounded structural value**: deleting a
    substantial obsolete API or dead code, unblocking a migration, removing

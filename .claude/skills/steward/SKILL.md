@@ -62,10 +62,10 @@ an event duplicating one you already handled.
 
 ## Choosing the next piece of work
 
-Take the next open `class:blocker` in the order CLAUDE.md's class rule
+Take the next open `blocker` in the order CLAUDE.md's class rule
 gives: severity first, then the foundation layer. An issue labelled
 `needs-triage` is classified before anything is chosen. Never select a
-`class:deferred` issue on its own, and start no `class:feature` while a
+`deferred` issue on its own, and start no `feature` while a
 blocker is open.
 
 ## A failing test is never normalized

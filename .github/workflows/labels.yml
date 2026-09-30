@@ -1,0 +1,115 @@
+# Applies .github/labels.json to the repository's labels. Each label gets
+# exactly the name, colour and description the file gives it, and every
+# name listed under `from` is folded into it: of the label and its old
+# names, the one carrying the most issues is kept and renamed, and the
+# others' issues move onto it before they are deleted. Rerunning is safe;
+# a partly applied run resumes where it stopped. Labels the file does not
+# mention are listed in the log and left alone.
+name: Labels
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/labels.json
+      - .github/workflows/labels.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: labels
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Apply the label schema
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const fs = require('fs');
+            const schema = JSON.parse(fs.readFileSync('.github/labels.json', 'utf8'));
+            const repo = { owner: context.repo.owner, repo: context.repo.repo };
+
+            const current = new Map();
+            for (const label of await github.paginate(
+                github.rest.issues.listLabelsForRepo, { ...repo, per_page: 100 })) {
+              current.set(label.name, label);
+            }
+
+            // Issues and pull requests carrying a label, read in one query.
+            const usage = async (name) => {
+              const result = await github.graphql(
+                `query($owner: String!, $repo: String!, $name: String!) {
+                   repository(owner: $owner, name: $repo) {
+                     label(name: $name) {
+                       issues { totalCount }
+                       pullRequests { totalCount }
+                     }
+                   }
+                 }`,
+                { owner: repo.owner, repo: repo.repo, name });
+              const label = result.repository.label;
+              return label ? label.issues.totalCount + label.pullRequests.totalCount : 0;
+            };
+
+            // Moves every issue and pull request from one label to another,
+            // then deletes the emptied label.
+            const fold = async (from, into) => {
+              const items = await github.paginate(github.rest.issues.listForRepo,
+                { ...repo, labels: from, state: 'all', per_page: 100 });
+              for (const item of items) {
+                if (!item.labels.some((label) => label.name === into)) {
+                  await github.rest.issues.addLabels(
+                    { ...repo, issue_number: item.number, labels: [into] });
+                }
+                await github.rest.issues.removeLabel(
+                  { ...repo, issue_number: item.number, name: from });
+              }
+              await github.rest.issues.deleteLabel({ ...repo, name: from });
+              core.info(`folded '${from}' into '${into}' (${items.length} items)`);
+            };
+
+            const declared = new Set();
+            for (const spec of schema.labels) {
+              declared.add(spec.name);
+              spec.from.forEach((name) => declared.add(name));
+              const style = { color: spec.color, description: spec.description };
+
+              const present = [spec.name, ...spec.from].filter((name) => current.has(name));
+              if (present.length === 0) {
+                await github.rest.issues.createLabel({ ...repo, name: spec.name, ...style });
+                core.info(`created '${spec.name}'`);
+                continue;
+              }
+              // Keep the busiest label so the fewest issues are touched.
+              let keep = present[0];
+              let keepCount = await usage(keep);
+              for (const name of present.slice(1)) {
+                const count = await usage(name);
+                if (count > keepCount) {
+                  keep = name;
+                  keepCount = count;
+                }
+              }
+              for (const name of present) {
+                if (name !== keep) {
+                  await fold(name, keep);
+                }
+              }
+              await github.rest.issues.updateLabel(
+                { ...repo, name: keep, new_name: spec.name, ...style });
+              core.info(keep === spec.name ? `styled '${spec.name}'`
+                                           : `renamed '${keep}' to '${spec.name}'`);
+            }
+
+            const unknown = [...current.keys()].filter((name) => !declared.has(name));
+            if (unknown.length > 0) {
+              core.notice(`labels not in .github/labels.json: ${unknown.join(', ')}`);
+            }
