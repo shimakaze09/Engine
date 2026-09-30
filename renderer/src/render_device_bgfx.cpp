@@ -580,6 +580,22 @@ bool srgb_texture_supported(const TextureDesc &desc) noexcept {
   return false;
 }
 
+/// Textures create can still make: the room left in the engine's table and
+/// in bgfx's own, whichever is smaller.
+std::uint32_t bgfx_texture_slots_free() noexcept {
+  const std::size_t tableFree = device_context().textures.free_count();
+  const bgfx::Caps *caps = bgfx::getCaps();
+  const bgfx::Stats *stats = bgfx::getStats();
+  std::size_t bgfxFree = tableFree;
+  if ((caps != nullptr) && (stats != nullptr)) {
+    const std::size_t limit = caps->limits.maxTextures;
+    const std::size_t live = stats->numTextures;
+    bgfxFree = (live < limit) ? (limit - live) : 0U;
+  }
+  return static_cast<std::uint32_t>((tableFree < bgfxFree) ? tableFree
+                                                           : bgfxFree);
+}
+
 DeviceTextureHandle bgfx_create_texture(const TextureDesc &desc) noexcept {
   const bool hasPixels = (desc.kind == TextureKind::Cube)
                              ? (desc.facePixels != nullptr)
@@ -609,6 +625,11 @@ DeviceTextureHandle bgfx_create_texture(const TextureDesc &desc) noexcept {
       drop_operation("create_texture: the device has no texture arrays");
       return kInvalidDeviceTexture;
     }
+  }
+  // Refused before bgfx creates it, so a full table costs no upload.
+  if (bgfx_texture_slots_free() == 0U) {
+    drop_operation("create_texture: table full");
+    return kInvalidDeviceTexture;
   }
   if (desc.cpuUpdatable && ((desc.kind != TextureKind::Tex2D) || hasPixels)) {
     // cpuUpdatable means "created empty, filled through update_texture":
@@ -1341,6 +1362,12 @@ void fill_bgfx_render_device(RenderDevice *device) noexcept {
       (bgfx::getCaps()->supported & BGFX_CAPS_TEXTURE_2D_ARRAY) != 0U;
   // Valid here: this fill runs after bgfx::init. WebGL2 reports its
   // 16-unit floor through this, gating the deferred pass off on web.
+  {
+    const std::size_t limit = bgfx::getCaps()->limits.maxTextures;
+    const std::size_t table = kMaxDeviceTextures - 1U;
+    device->caps.maxTextures =
+        static_cast<std::uint32_t>((limit < table) ? limit : table);
+  }
   device->caps.maxTextureSamplers = static_cast<std::uint16_t>(
       bgfx::getCaps()->limits.maxTextureSamplers);
   {
@@ -1368,6 +1395,7 @@ void fill_bgfx_render_device(RenderDevice *device) noexcept {
   device->create_texture = &bgfx_create_texture;
   device->update_texture = &bgfx_update_texture;
   device->destroy_texture = &bgfx_destroy_texture;
+  device->texture_slots_free = &bgfx_texture_slots_free;
   device->bind_texture_slot = &bgfx_bind_texture_slot;
   device->create_program_binary = &bgfx_backend::bgfx_create_program_binary;
   device->create_program_binary_introspected =

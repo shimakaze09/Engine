@@ -1,5 +1,6 @@
-// Verifies texture handle generation prevents stale slot reuse, and that
-// the loader serves every slot its handle can name.
+// Verifies texture handle generation prevents stale slot reuse, that the
+// loader serves every slot its handle can name, and that a device whose
+// texture table is full refuses a texture before the file is read.
 
 #include "engine/core/logging.h"
 #include "engine/core/vfs.h"
@@ -353,6 +354,79 @@ int check_shutdown_reports_textures_it_cannot_release() {
   return result;
 }
 
+/// Counts the full-table refusals reaching the log, and whether each named
+/// the device's capacity.
+int g_fullTableErrors = 0;
+bool g_fullTableNamedCap = true;
+
+void count_full_table_error(engine::core::LogLevel level, const char *,
+                            const char *message, void *) noexcept {
+  if ((level == engine::core::LogLevel::Error) && (message != nullptr) &&
+      (std::strstr(message, "texture table is full") != nullptr)) {
+    ++g_fullTableErrors;
+    g_fullTableNamedCap = g_fullTableNamedCap &&
+                          (std::strstr(message, "(2 textures)") != nullptr);
+  }
+}
+
+/// A device whose texture table is full refuses the next texture with one
+/// diagnostic naming its capacity, before the loader reads or decodes the
+/// file, so nothing reaches create_texture; a freed slot takes a texture
+/// again (issue #925).
+int check_full_device_table_refuses_before_decode() {
+  engine::renderer::reset_fake_device();
+  engine::tests::fake_device().caps.maxTextures = 2U;
+  engine::tests::fake_device().texture_slots_free =
+      &engine::tests::fake::texture_slots_free;
+  engine::tests::fake_log().textureCapacity = 2U;
+  g_fullTableErrors = 0;
+  g_fullTableNamedCap = true;
+  if (!engine::core::initialize_logging() ||
+      !engine::core::log_register_sink(&count_full_table_error, nullptr)) {
+    return 80;
+  }
+  int result = 0;
+  if (!engine::core::initialize_vfs() || !engine::core::mount("tex", ".") ||
+      !engine::core::vfs_write_binary(kTexturePath, kTinyPng,
+                                      sizeof(kTinyPng)) ||
+      !engine::renderer::initialize_texture_system()) {
+    result = 81;
+  }
+  using engine::renderer::kInvalidTextureHandle;
+  using engine::renderer::load_texture;
+  const auto creates = [] {
+    return engine::tests::fake_creates(engine::tests::FakeKind::Texture);
+  };
+  engine::renderer::TextureHandle first = kInvalidTextureHandle;
+  if (result == 0) {
+    first = load_texture(kTexturePath);
+    const engine::renderer::TextureHandle second = load_texture(kTexturePath);
+    if ((first == kInvalidTextureHandle) || (second == kInvalidTextureHandle) ||
+        (creates() != 2) || (g_fullTableErrors != 0)) {
+      result = 82;
+    }
+  }
+  if ((result == 0) && ((load_texture(kTexturePath) != kInvalidTextureHandle) ||
+                        (creates() != 2))) {
+    result = 83; // loaded, or reached the device, past the table
+  }
+  if ((result == 0) && ((g_fullTableErrors != 1) || !g_fullTableNamedCap)) {
+    result = 84; // not exactly one diagnostic naming the capacity
+  }
+  if (result == 0) {
+    engine::renderer::unload_texture(first);
+    if ((load_texture(kTexturePath) == kInvalidTextureHandle) ||
+        (creates() != 3) || (g_fullTableErrors != 1)) {
+      result = 85; // a freed slot does not take a texture again
+    }
+  }
+  engine::renderer::shutdown_texture_system();
+  engine::core::shutdown_vfs();
+  engine::core::log_unregister_sink(&count_full_table_error, nullptr);
+  static_cast<void>(std::remove("texture_handle_reuse.png"));
+  return result;
+}
+
 /// Encoded generations wrap inside their 22-bit field without becoming zero.
 int check_texture_generation_wrap() noexcept {
   namespace codec = engine::renderer::texture_handle_detail;
@@ -431,6 +505,11 @@ int main() {
   const int fillResult = check_loader_fills_every_slot();
   if (fillResult != 0) {
     return fillResult;
+  }
+
+  const int fullResult = check_full_device_table_refuses_before_decode();
+  if (fullResult != 0) {
+    return fullResult;
   }
 
   const int colourResult = check_color_space_reaches_the_device();

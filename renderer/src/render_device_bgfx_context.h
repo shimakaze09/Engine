@@ -19,7 +19,9 @@ namespace engine::renderer::bgfx_backend {
 // Fixed capacities of the device slot tables; the engine registries
 // above the device are sized within them.
 inline constexpr std::size_t kMaxDeviceBuffers = 8704U;
-inline constexpr std::size_t kMaxDeviceTextures = 1024U;
+// bgfx's own texture limit (BGFX_CONFIG_MAX_TEXTURES); the table keeps
+// slot 0 as the invalid handle, so it holds one fewer.
+inline constexpr std::size_t kMaxDeviceTextures = 4096U;
 inline constexpr std::size_t kMaxDevicePrograms = 128U;
 inline constexpr std::size_t kMaxDeviceGeometries = 4352U;
 inline constexpr std::size_t kMaxDeviceTargets = 256U;

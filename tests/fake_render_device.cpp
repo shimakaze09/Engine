@@ -79,6 +79,12 @@ void destroy_texture(renderer::DeviceTextureHandle texture) noexcept {
   fake_destroy(FakeKind::Texture, texture.value);
 }
 
+std::uint32_t texture_slots_free() noexcept {
+  const int alive = fake_alive(FakeKind::Texture);
+  const auto capacity = static_cast<int>(fake_log().textureCapacity);
+  return (alive < capacity) ? static_cast<std::uint32_t>(capacity - alive) : 0U;
+}
+
 void bind_texture_slot(std::uint32_t, renderer::DeviceTextureHandle) noexcept {}
 
 renderer::DeviceProgramHandle create_program_binary(const void *,

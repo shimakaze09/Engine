@@ -199,6 +199,23 @@ void log_texture_path_error(const char *path, const char *reason) noexcept {
                             path, reason);
 }
 
+/// False, with one diagnostic naming the device's capacity, when the device
+/// keeps a texture table and it has no room: checked before the file is
+/// read, so a texture the device cannot hold costs no decode or upload.
+bool device_has_texture_room(const RenderDevice *dev,
+                             const char *path) noexcept {
+  if ((dev == nullptr) || (dev->texture_slots_free == nullptr) ||
+      (dev->texture_slots_free() > 0U)) {
+    return true;
+  }
+  char reason[128] = {};
+  std::snprintf(reason, sizeof(reason),
+                "not loaded: the GPU texture table is full (%u textures)",
+                static_cast<unsigned>(dev->caps.maxTextures));
+  log_texture_path_error(path, reason);
+  return false;
+}
+
 /// Logs one decode-budget rejection with the offending numbers.
 void log_decode_budget_rejection(const char *label, const char *reason,
                                  long long a, long long b) noexcept {
@@ -479,6 +496,10 @@ TextureHandle load_texture(const char *virtualPath,
     return kInvalidTextureHandle;
   }
 
+  if (!device_has_texture_room(render_device(), virtualPath)) {
+    return kInvalidTextureHandle;
+  }
+
   void *fileData = nullptr;
   std::size_t fileSize = 0U;
   if (!core::vfs_read_binary(virtualPath, &fileData, &fileSize)) {
@@ -605,6 +626,10 @@ TextureHandle load_hdr_equirect_cubemap(const char *virtualPath,
   if (freeSlot == 0U) {
     core::log_message(core::LogLevel::Error, "renderer",
                       "texture registry full");
+    return kInvalidTextureHandle;
+  }
+
+  if (!device_has_texture_room(render_device(), virtualPath)) {
     return kInvalidTextureHandle;
   }
 
