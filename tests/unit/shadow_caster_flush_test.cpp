@@ -151,8 +151,8 @@ const GpuMesh *lookup_gpu_mesh(const GpuMeshRegistry *, MeshHandle) noexcept {
   return g_meshResolves ? &g_mesh : nullptr;
 }
 bool g_paletteUploads = false;
-bool upload_bone_palette(BackendState &, const RenderDevice *, std::uint32_t,
-                         ShaderParam, std::uint32_t *) noexcept {
+bool upload_bone_palette(const RenderDevice *, std::uint32_t, ShaderParam,
+                         std::uint32_t *) noexcept {
   return g_paletteUploads;
 }
 std::size_t skin_palette_count() noexcept { return 0U; }

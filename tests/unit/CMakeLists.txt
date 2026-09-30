@@ -1831,6 +1831,7 @@ engine_add_test_executable(engine_unit_forward_light_selection
     forward_light_selection_test.cpp
     ../fake_render_device.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_flush_uniforms.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_skinning.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_context.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_math.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/render_settings.cpp
@@ -1850,6 +1851,7 @@ engine_add_test_executable(engine_unit_scene_capture_flush
     ../fake_render_device.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_flush_captures.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_flush_uniforms.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_skinning.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_capture.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_context.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_math.cpp
@@ -2076,6 +2078,7 @@ engine_add_test_executable(engine_unit_command_buffer_alloc_safety
     command_buffer_alloc_safety_test.cpp
     ../fake_render_device.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_flush_uniforms.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_skinning.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_context.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_math.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/render_settings.cpp
@@ -2451,6 +2454,7 @@ engine_add_test_executable(engine_unit_forward_draw_uniforms
     forward_draw_uniforms_test.cpp
     ../fake_render_device.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_flush_uniforms.cpp
+    ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_skinning.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_context.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/command_buffer_math.cpp
     ${CMAKE_SOURCE_DIR}/renderer/src/render_settings.cpp

@@ -123,8 +123,10 @@ void draw_offscreen_scene(const OffscreenSceneInputs &inputs,
       }
 
       upload_forward_material(program, backend, dev, command, &bindings);
-      draw_forward_command(program, dev, command, *mesh, viewProjection,
-                           inputs.frameStats);
+      // Captures bind the physically-based program throughout.
+      draw_forward_command(program, backend, dev,
+                           shading_program_id(ShadingModel::Pbr), command,
+                           *mesh, viewProjection, inputs.frameStats);
     }
   };
 

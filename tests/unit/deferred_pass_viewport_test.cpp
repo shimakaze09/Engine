@@ -114,8 +114,8 @@ void gpu_profiler_end_pass(GpuPassId) noexcept {}
 const GpuMesh *lookup_gpu_mesh(const GpuMeshRegistry *, MeshHandle) noexcept {
   return &g_mesh;
 }
-bool upload_bone_palette(BackendState &, const RenderDevice *, std::uint32_t,
-                         ShaderParam, std::uint32_t *) noexcept {
+bool upload_bone_palette(const RenderDevice *, std::uint32_t, ShaderParam,
+                         std::uint32_t *) noexcept {
   return false;
 }
 std::size_t skin_palette_count() noexcept { return 0U; }

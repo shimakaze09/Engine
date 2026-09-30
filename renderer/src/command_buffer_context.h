@@ -299,6 +299,17 @@ struct BackendState final {
   /// running off the end of a three-entry table.
   ShaderProgramHandle shadingProgramShaderHandles[kMaxShadingPrograms]{};
   DeviceProgramHandle shadingPrograms[kMaxShadingPrograms]{};
+  /// Each shading program's skinned sibling, indexed the same way: the
+  /// same fragment cooked with SKINNED over pbr_skinned.vs.sc, bound for
+  /// a draw whose mesh carries a skin and whose command names a palette.
+  /// An empty entry leaves that model's skinned draws in bind pose, said
+  /// once. Written by register_shading_program's skinned counterpart and
+  /// re-read by refresh_shading_programs, like the table above.
+  ShaderProgramHandle shadingSkinnedShaderHandles[kMaxShadingPrograms]{};
+  DeviceProgramHandle shadingSkinnedPrograms[kMaxShadingPrograms]{};
+  /// The skinned siblings' palette, u_bones: a name of its own so no
+  /// other pass's upload cache can describe its value.
+  ShaderParam forwardBonesParam{};
 
   // PBR uniform locations.
   ShaderParam pbrModelLocation{};

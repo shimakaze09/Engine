@@ -309,12 +309,14 @@ bool upload_instance_matrices(BackendState &backend, const RenderDevice *dev,
                               CommandBufferView commandBufferView,
                               const StaticMeshBatch &batch) noexcept;
 
-/// Uploads the frame palette at paletteIndex into the bone-palette uniform
-/// buffer, skipping the upload when that palette is already resident from
-/// an earlier pass this flush; false when skinning is unavailable or the
-/// index is out of range (the caller then draws the mesh in bind pose).
-bool upload_bone_palette(BackendState &backend, const RenderDevice *dev,
-                         std::uint32_t paletteIndex, ShaderParam bonesParam,
+/// Uploads the frame palette at paletteIndex into `bonesParam`, skipping
+/// the upload when `*lastUploaded` says that palette is already resident;
+/// false when the param or the device's array upload is missing, or the
+/// index is out of range or names an empty palette (the caller then draws
+/// the mesh in bind pose). Whether a skinned program exists is the
+/// caller's to know: it has bound one before asking.
+bool upload_bone_palette(const RenderDevice *dev, std::uint32_t paletteIndex,
+                         ShaderParam bonesParam,
                          std::uint32_t *lastUploaded) noexcept;
 
 /// Uploads every uniform the bound skinned G-buffer program needs for one
@@ -426,16 +428,24 @@ void upload_forward_material(const ForwardDrawProgram &program,
 
 /// Uploads one draw's transform through `program` and issues it,
 /// accumulating draw and triangle counts. The caller has already
-/// uploaded the material.
+/// uploaded the material and bound `programId`'s program.
+///
+/// A skinned mesh whose command names a palette is posed: the draw binds
+/// `programId`'s skinned sibling, uploads the palette to it, and rebinds
+/// the run's program after. Posing therefore follows the mesh on every
+/// forward path -- every shading model, transparency, a device without
+/// the deferred path, and captures -- rather than only the G-buffer. A
+/// model with no skinned sibling draws the mesh in bind pose and says so
+/// once.
 ///
 /// Together with upload_forward_material this is the whole per-draw
 /// forward path. The three passes that used to carry a copy of it now
 /// differ only in which range they walk, which program they pass, and
 /// their render state.
 void draw_forward_command(const ForwardDrawProgram &program,
-                          const RenderDevice *dev, const DrawCommand &command,
-                          const GpuMesh &mesh,
-                          const math::Mat4 &viewProjection,
+                          const BackendState &backend, const RenderDevice *dev,
+                          std::uint8_t programId, const DrawCommand &command,
+                          const GpuMesh &mesh, const math::Mat4 &viewProjection,
                           RendererFrameStats *frameStats) noexcept;
 
 } // namespace engine::renderer
