@@ -55,7 +55,7 @@ ImVec4 level_color(core::LogLevel level) noexcept {
 /// is the documented fallback scope).
 void select_asset_in_browser(const char *path) noexcept {
   std::snprintf(editor_session().selectedAssetPath,
-               sizeof(editor_session().selectedAssetPath), "%s", path);
+                sizeof(editor_session().selectedAssetPath), "%s", path);
 }
 
 /// Runs an entry's primary navigation action (double-click or the detail
@@ -64,7 +64,7 @@ void select_asset_in_browser(const char *path) noexcept {
 /// resolves against the attached world.
 void navigate_to_entry(const ConsoleEntry &entry) noexcept {
   if (entry.referenceKind == ConsoleReferenceKind::ScriptLocation ||
-     entry.referenceKind == ConsoleReferenceKind::AssetPath) {
+      entry.referenceKind == ConsoleReferenceKind::AssetPath) {
     select_asset_in_browser(entry.referencePath);
     return;
   }
@@ -81,11 +81,11 @@ void navigate_to_entry(const ConsoleEntry &entry) noexcept {
 /// Copies `message` up to its first newline into `out` (a Lua traceback
 /// carries "\n\t..." frames; the row stays one line and the full text,
 /// newlines included, is available in the hover tooltip instead).
-void first_line(const char *message, char *out, std::size_t outCapacity) noexcept {
+void first_line(const char *message, char *out,
+                std::size_t outCapacity) noexcept {
   std::size_t i = 0U;
-  for (; (i + 1U < outCapacity) && (message[i] != '\0') &&
-        (message[i] != '\n');
-      ++i) {
+  for (; (i + 1U < outCapacity) && (message[i] != '\0') && (message[i] != '\n');
+       ++i) {
     out[i] = message[i];
   }
   out[i] = '\0';
@@ -149,8 +149,8 @@ void draw_entry_row(const ConsoleEntry &entry, std::size_t rowIndex) noexcept {
 
   char header[64] = {};
   std::snprintf(header, sizeof(header), "%6.2fs [%-7s] %s",
-               static_cast<double>(entry.captureTimeMs) / 1000.0,
-               core::log_level_to_string(entry.level), entry.channel);
+                static_cast<double>(entry.captureTimeMs) / 1000.0,
+                core::log_level_to_string(entry.level), entry.channel);
 
   char messageLine[kConsoleMessageCapacity] = {};
   first_line(entry.message, messageLine, sizeof(messageLine));
@@ -158,7 +158,7 @@ void draw_entry_row(const ConsoleEntry &entry, std::size_t rowIndex) noexcept {
   char label[kConsoleMessageCapacity + 96] = {};
   if (entry.repeatCount > 1U) {
     std::snprintf(label, sizeof(label), "%s  %s  (x%u)", header, messageLine,
-                 entry.repeatCount);
+                  entry.repeatCount);
   } else {
     std::snprintf(label, sizeof(label), "%s  %s", header, messageLine);
   }
@@ -166,8 +166,7 @@ void draw_entry_row(const ConsoleEntry &entry, std::size_t rowIndex) noexcept {
   const bool hasNavigation =
       (entry.referenceKind != ConsoleReferenceKind::None) ||
       (entry.entityPersistentId != runtime::kInvalidPersistentId);
-  if (ImGui::Selectable(label, false,
-                        ImGuiSelectableFlags_AllowDoubleClick)) {
+  if (ImGui::Selectable(label, false, ImGuiSelectableFlags_AllowDoubleClick)) {
     if (hasNavigation && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
       navigate_to_entry(entry);
     }
@@ -186,7 +185,7 @@ void draw_entry_row(const ConsoleEntry &entry, std::size_t rowIndex) noexcept {
     if (entry.referenceKind == ConsoleReferenceKind::ScriptLocation) {
       char pathLine[kConsolePathCapacity + 16] = {};
       std::snprintf(pathLine, sizeof(pathLine), "%s:%d", entry.referencePath,
-                   entry.referenceLine);
+                    entry.referenceLine);
       if (ImGui::MenuItem("Select Script in Assets")) {
         select_asset_in_browser(entry.referencePath);
       }
@@ -269,7 +268,8 @@ void draw_command_line(ConsolePanelState &console) noexcept {
   }
   if (console.commandLine[0] != '\0') {
     console.history.push(console.commandLine);
-    static_cast<void>(core::console_execute(console.commandLine));
+    static_cast<void>(run_console_line(
+        console.commandLine, editor_session().playState != PlayState::Stopped));
     console.scrollToEnd = true;
   }
   console.commandLine[0] = '\0';

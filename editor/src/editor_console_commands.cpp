@@ -3,6 +3,7 @@
 
 #include "editor_console_commands.h"
 
+#include <cstdio>
 #include <cstring>
 
 #include "engine/core/console.h"
@@ -126,6 +127,23 @@ const char *ConsoleHistory::newer() noexcept {
   }
   ++m_cursor;
   return (m_cursor == m_count) ? "" : at(m_cursor);
+}
+
+bool run_console_line(const char *line, bool playing) noexcept {
+  if ((line == nullptr) || (line[0] == '\0')) {
+    return false;
+  }
+  if (!playing && core::console_line_changes_world(line)) {
+    char echo[kConsoleCommandCapacity + 4U] = {};
+    std::snprintf(echo, sizeof(echo), "> %s", line);
+    core::console_print(echo);
+    core::console_print("Refused: this command changes the running game and "
+                        "works only in Play. In Edit mode, add objects with "
+                        "the Create menu or by dragging a prefab from Assets, "
+                        "so they can be undone and saved.");
+    return false;
+  }
+  return core::console_execute(line);
 }
 
 std::size_t complete_console_line(const char *line, char *out,

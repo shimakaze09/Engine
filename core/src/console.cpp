@@ -30,6 +30,7 @@ struct CommandEntry final {
   ConsoleCommandFn fn = nullptr;
   void *userData = nullptr;
   bool used = false;
+  bool changesWorld = false;
 };
 
 // ---- ring buffer for output ----
@@ -55,8 +56,8 @@ struct CommandInfoSnapshot final {
 thread_local CommandInfoSnapshot g_commandInfoSnapshot{};
 
 bool register_command_unlocked(const char *name, ConsoleCommandFn fn,
-                               void *userData,
-                               const char *description) noexcept {
+                               void *userData, const char *description,
+                               bool changesWorld = false) noexcept {
   if ((name == nullptr) || (fn == nullptr) || (description == nullptr)) {
     return false;
   }
@@ -75,6 +76,7 @@ bool register_command_unlocked(const char *name, ConsoleCommandFn fn,
   entry.fn = fn;
   entry.userData = userData;
   entry.used = true;
+  entry.changesWorld = changesWorld;
   return true;
 }
 
@@ -223,12 +225,12 @@ bool initialize_console() noexcept {
   g_outputCount = 0U;
   g_initialized = true;
 
-  static_cast<void>(register_command_unlocked(
-      "help", builtin_help, nullptr, "List all registered commands"));
+  static_cast<void>(register_command_unlocked("help", builtin_help, nullptr,
+                                              "List all registered commands"));
   static_cast<void>(register_command_unlocked(
       "set", builtin_set, nullptr, "Set a CVar: set <name> <value>"));
-  static_cast<void>(register_command_unlocked(
-      "get", builtin_get, nullptr, "Get a CVar value: get <name>"));
+  static_cast<void>(register_command_unlocked("get", builtin_get, nullptr,
+                                              "Get a CVar value: get <name>"));
   return true;
 }
 
@@ -248,6 +250,33 @@ bool console_register_command(const char *name, ConsoleCommandFn fn,
                               const char *description) noexcept {
   std::lock_guard<std::mutex> lock(g_mutex);
   return register_command_unlocked(name, fn, userData, description);
+}
+
+bool console_register_world_command(const char *name, ConsoleCommandFn fn,
+                                    void *userData,
+                                    const char *description) noexcept {
+  std::lock_guard<std::mutex> lock(g_mutex);
+  return register_command_unlocked(name, fn, userData, description, true);
+}
+
+bool console_line_changes_world(const char *line) noexcept {
+  if (line == nullptr) {
+    return false;
+  }
+  char lineBuf[kMaxInputLen] = {};
+  std::snprintf(lineBuf, kMaxInputLen - 1U + 1U, "%s", line);
+  const char *argPtrs[kMaxArgs] = {};
+  const char *const *args = nullptr;
+  if (tokenize(lineBuf, &args, argPtrs, kMaxArgs) == 0) {
+    return false;
+  }
+  std::lock_guard<std::mutex> lock(g_mutex);
+  for (std::size_t i = 0U; i < g_commandCount; ++i) {
+    if (g_commands[i].used && (std::strcmp(g_commands[i].name, args[0]) == 0)) {
+      return g_commands[i].changesWorld;
+    }
+  }
+  return false;
 }
 
 bool console_execute(const char *line) noexcept {

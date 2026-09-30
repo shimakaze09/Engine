@@ -696,10 +696,15 @@ bool test_console_spawn_path_jailed() noexcept {
   const bool spawned = saved && engine::core::console_execute(inside) &&
                        (world->alive_entity_count() == before + 1U);
 
+  // spawn changes the World outside any editor command, so it registers
+  // as a world command, which the editor runs only in Play (#1091).
+  const bool markedWorldCommand =
+      engine::core::console_line_changes_world(inside);
+
   std::remove(kPrefab);
   engine::scripting::shutdown_scripting();
   engine::core::shutdown_console();
-  return refused && spawned;
+  return refused && spawned && markedWorldCommand;
 }
 
 } // namespace
