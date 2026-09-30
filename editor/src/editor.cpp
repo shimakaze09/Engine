@@ -71,6 +71,7 @@
 #include "editor_preferences.h"
 #include "editor_project_hub.h"
 #include "editor_project_settings.h"
+#include "editor_recovery.h"
 #include "editor_scene_document.h"
 #include "editor_screenshot.h"
 #include "editor_session.h"
@@ -572,6 +573,7 @@ const runtime::EditorBridge kRuntimeEditorBridge = {
     &finish_play_stop,
     &editor_scene_view,
     &editor_game_view_visible,
+    &write_recovery_copy,
 };
 
 [[maybe_unused]] const bool kEditorBridgeRegistered = []() noexcept {

@@ -39,4 +39,25 @@ FileReadResult read_whole_file(const char *path, char *out,
                                std::size_t capacity,
                                std::size_t *outSize) noexcept;
 
+/// What a file on disk holds, compared rather than read: whether it
+/// exists, its size, and a 64-bit FNV-1a of its bytes. An editor keeps the
+/// fingerprint of the document it loaded or last wrote, and compares it
+/// before a save, so a file changed on disk since then is not silently
+/// written over. The content hash, not the modification time, decides:
+/// file systems keep times too coarsely, and a checkout can restore one.
+struct FileFingerprint final {
+  bool exists = false;
+  std::uint64_t size = 0U;
+  std::uint64_t hash = 0U;
+
+  bool operator==(const FileFingerprint &) const noexcept = default;
+};
+
+/// Fingerprints the file at `path`, streaming it through a small fixed
+/// buffer. Ok with the fingerprint; Absent with a fingerprint whose
+/// `exists` is false; Unreadable, with `out` left zeroed, when the file is
+/// there but could not be read whole.
+FileReadResult file_fingerprint(const char *path,
+                                FileFingerprint *out) noexcept;
+
 } // namespace engine::core

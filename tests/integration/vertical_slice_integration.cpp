@@ -295,6 +295,9 @@ int main() {
       "    engine.set_name(mover, \"SliceMover\")\n"
       "    engine.set_position(mover, x, 1.0, 0.0)\n"
       "    engine.add_rigid_body(mover, 1.0)\n"
+      "    -- Moved by script each frame, so kinematic: a dynamic body would\n"
+      "    -- also fall under gravity between the writes (#980).\n"
+      "    engine.set_body_type(mover, \"kinematic\")\n"
       "    local meshId = engine.get_default_mesh_asset_id()\n"
       "    if meshId ~= nil then\n"
       "        engine.set_mesh(mover, meshId)\n"
@@ -432,8 +435,10 @@ int main() {
       return fail(17);
     }
 
-    if (world->movement_authority(mover) !=
-        engine::runtime::MovementAuthority::Script) {
+    engine::runtime::RigidBody moverBody{};
+    if (!world->get_rigid_body(mover, &moverBody) ||
+        (engine::math::body_type(moverBody) !=
+         engine::math::BodyType::Kinematic)) {
       engine::core::shutdown_job_system();
       remove_script_file();
       engine::scripting::shutdown_scripting();

@@ -93,10 +93,6 @@ public:
   rigid_body_owner(Entity colliderEntity,
                    const SimulationAccessToken &token) const noexcept = 0;
 
-  // --- Movement authority ---------------------------------------------------
-  virtual MovementAuthority
-  movement_authority(Entity entity) const noexcept = 0;
-
   // --- Identity -------------------------------------------------------------
   /// Serialization-stable id of a live entity, for diagnostics that must
   /// name an entity in a way that survives a reload; kInvalidPersistentId

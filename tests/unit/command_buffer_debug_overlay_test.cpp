@@ -89,7 +89,8 @@ ForwardDrawProgram pbr_forward_draw_program(const BackendState &) noexcept {
 void upload_forward_material(const ForwardDrawProgram &, const BackendState &,
                              const RenderDevice *, const DrawCommand &,
                              ForwardDrawBindings *) noexcept {}
-void draw_forward_command(const ForwardDrawProgram &, const RenderDevice *,
+void draw_forward_command(const ForwardDrawProgram &, const BackendState &,
+                          const RenderDevice *, std::uint8_t,
                           const DrawCommand &, const GpuMesh &,
                           const math::Mat4 &, RendererFrameStats *) noexcept {}
 /// One run covering the whole range: this suite submits no draws with a

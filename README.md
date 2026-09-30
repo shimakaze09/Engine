@@ -235,6 +235,13 @@ File > Open Project... and File > Close Project leave the open project for
 another or for the hub, asking about unsaved changes first. A project named
 on the command line that cannot be opened says why in an error box.
 
+Save never writes over a scene or material whose file changed on disk after
+the editor opened or last saved it (a teammate's pull, another tool). It stops
+with the file untouched and offers Overwrite, Reload or Save As (a material:
+Overwrite or Reload from Disk), as Unity and Godot ask about an asset changed
+outside the editor. A file deleted in the meantime is simply written again
+(`engine_unit_editor_scene_document`, `engine_unit_editor_material_edit`).
+
 `engine_player` runs a game without the editor, as a Unity player build or a
 Godot export does: `engine_player path/to/my_game` (the sample beside it
 with none) opens a window titled with the project's name and plays its
@@ -252,6 +259,14 @@ directory (`logs/player.log` for `engine_player`), keeping the previous run's as
 box naming it. The same messages appear in the editor's own Log panel, whose
 command line runs console commands (`help` lists them, `get` and `set` read and
 write cvars; Tab completes, Up and Down recall), as Unreal's Output Log does.
+
+If the editor has to close on an internal error or a graphics-device failure
+(a driver reset, a lost GPU), it first saves the unsaved scene to `Recovery/`
+in the project's per-user data directory, as Unity keeps a `_Recovery`
+folder, and the error box names the file; open it with File > Open Scene.
+During Play the copy is the scene as it was before Play. A device failure
+exits with code 4 (`engine_integration_fatal_recovery`,
+`engine_integration_fatal_device_recovery`).
 
 F9, the Game view's Screenshot button, Edit > Take Screenshot or the
 `screenshot` console command saves what the Game view shows as a PNG under
@@ -423,6 +438,21 @@ script camera (`engine_integration_game_camera_gpu`,
 `engine_integration_camera_producer_removal`,
 `engine_unit_editor_entity_menus`).
 
+A rigid body has a type, as in Jolt, Unity and Godot:
+- **Dynamic** (the default): moved by gravity, forces and collisions.
+- **Kinematic**: moved only by its velocity or a script. It pushes and
+  carries what it touches but is never pushed back, feels no gravity and
+  never sleeps. Use it for moving platforms, doors and lifts.
+- **Static**: never moves.
+
+Set the type with the Inspector's Body Type or
+`engine.set_body_type(e, "kinematic")`, and read it with
+`engine.get_body_type(e)`. `engine.set_position`, `set_rotation`,
+`look_at` and `set_scale` teleport an entity: its body keeps its type,
+velocity and collisions, and wakes. Drive a moving platform with
+`engine.set_velocity` on a kinematic body, so contacts see its motion
+(`engine_integration_script_moved_bodies`, `engine_unit_body_type`).
+
 Gameplay is written in scripts, as in Unity and Godot: the engine has no
 built-in player controller, game mode, score store or cheat flags. Scripts
 read input (`engine.is_key_down`, `engine.is_action_down`), move entities
@@ -430,7 +460,10 @@ and bodies, and keep state across scene loads in Lua globals, which live
 for the whole run (`engine_integration_scene_flow`); `engine.save_data` and
 `engine.load_data` keep it between runs. The console's `spawn <prefab>
 [x y z]` instantiates a prefab by a path inside the project
-(`engine_integration_sandbox`).
+(`engine_integration_sandbox`). It changes the running game, so the
+editor's Log runs it only in Play; in Edit mode it is refused, since the
+entity would bypass undo and the unsaved-changes prompt: use the Create
+menu or drag the prefab in instead (`engine_unit_editor_console_commands`).
 
 Scripts run sandboxed: `io`, `os`, `debug` and `package` are not there, all
 scripts share a budget of Lua instructions per frame (1,000,000 by default;

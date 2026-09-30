@@ -128,6 +128,55 @@ static void draw_unsaved_changes_prompt() noexcept {
   }
 }
 
+/// Draws the Overwrite/Reload/Save As/Cancel modal a Save raises when the
+/// scene's file changed on disk since it was opened or last saved, as
+/// Unity asks about a scene modified outside the editor. The decisions are
+/// scene_document_conflict_*; this only presents them.
+static void draw_disk_conflict_prompt() noexcept {
+  if (!scene_document_conflict_open()) {
+    return;
+  }
+  constexpr const char *kPopupId = "File Changed on Disk###scene_disk_conflict";
+  if (!ImGui::IsPopupOpen(kPopupId)) {
+    ImGui::OpenPopup(kPopupId);
+  }
+  const ImGuiViewport *viewport = ImGui::GetMainViewport();
+  if (viewport != nullptr) {
+    ImGui::SetNextWindowPos(viewport->GetCenter(), ImGuiCond_Appearing,
+                            ImVec2(0.5F, 0.5F));
+  }
+  if (ImGui::BeginPopupModal(kPopupId, nullptr,
+                             ImGuiWindowFlags_AlwaysAutoResize)) {
+    ImGui::TextUnformatted(scene_document_last_error());
+    ImGui::TextUnformatted(
+        "Overwrite replaces the file with your edits. Reload discards your "
+        "edits and opens the file as it is now. Save As keeps both.");
+    if (ImGui::Button("Overwrite")) {
+      ImGui::CloseCurrentPopup();
+      scene_document_conflict_choose_overwrite();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Reload")) {
+      ImGui::CloseCurrentPopup();
+      scene_document_conflict_choose_reload();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Save As...")) {
+      ImGui::CloseCurrentPopup();
+      scene_document_conflict_choose_save_as();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel")) {
+      ImGui::CloseCurrentPopup();
+      scene_document_conflict_choose_cancel();
+    }
+    if (!scene_document_conflict_open()) {
+      ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+  }
+}
+
 /// Draws the primitives and spawns the chosen one at the editor camera's
 /// focus point, as the new selection.
 static void draw_primitive_menu_items_and_spawn() noexcept {
@@ -359,6 +408,7 @@ void draw_main_menu_bar() noexcept {
   ImGui::EndMainMenuBar();
 
   draw_unsaved_changes_prompt();
+  draw_disk_conflict_prompt();
 }
 
 /// A toolbar button that runs `action` through the action table: its live

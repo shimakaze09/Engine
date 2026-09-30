@@ -18,27 +18,6 @@ bool same(const math::Vec2 &lhs, const math::Vec2 &rhs) noexcept {
 /// Scalars and enums compare as themselves.
 template <typename T> bool same(T lhs, T rhs) noexcept { return lhs == rhs; }
 
-/// material_field bits for the fields where `next` differs from `current`.
-std::uint16_t changed_fields(const Material &current,
-                             const MaterialTextureSlots &currentSlots,
-                             const Material &next,
-                             const MaterialTextureSlots &nextSlots) noexcept {
-  std::uint16_t changed = 0U;
-#define ENGINE_MATERIAL_MARK_PARAM(name, member, key)                          \
-  if (!same(current.member, next.member)) {                                    \
-    changed = static_cast<std::uint16_t>(changed | material_field::k##name);   \
-  }
-  ENGINE_MATERIAL_PARAM_FIELDS(ENGINE_MATERIAL_MARK_PARAM)
-#undef ENGINE_MATERIAL_MARK_PARAM
-#define ENGINE_MATERIAL_MARK_TEXTURE(name, slot, handle, key)                  \
-  if (currentSlots.slot != nextSlots.slot) {                                   \
-    changed = static_cast<std::uint16_t>(changed | material_field::k##name);   \
-  }
-  ENGINE_MATERIAL_TEXTURE_FIELDS(ENGINE_MATERIAL_MARK_TEXTURE)
-#undef ENGINE_MATERIAL_MARK_TEXTURE
-  return changed;
-}
-
 /// Takes every field `overridden` does not cover from the parent. An
 /// inherited texture slot takes the parent's asset and the parent's handle
 /// for it: the same texture, resolved or waiting for
@@ -64,6 +43,25 @@ void inherit_from(const Material &parent,
 }
 
 } // namespace
+
+std::uint16_t material_changed_fields(
+    const Material &current, const MaterialTextureSlots &currentSlots,
+    const Material &next, const MaterialTextureSlots &nextSlots) noexcept {
+  std::uint16_t changed = 0U;
+#define ENGINE_MATERIAL_MARK_PARAM(name, member, key)                          \
+  if (!same(current.member, next.member)) {                                    \
+    changed = static_cast<std::uint16_t>(changed | material_field::k##name);   \
+  }
+  ENGINE_MATERIAL_PARAM_FIELDS(ENGINE_MATERIAL_MARK_PARAM)
+#undef ENGINE_MATERIAL_MARK_PARAM
+#define ENGINE_MATERIAL_MARK_TEXTURE(name, slot, handle, key)                  \
+  if (currentSlots.slot != nextSlots.slot) {                                   \
+    changed = static_cast<std::uint16_t>(changed | material_field::k##name);   \
+  }
+  ENGINE_MATERIAL_TEXTURE_FIELDS(ENGINE_MATERIAL_MARK_TEXTURE)
+#undef ENGINE_MATERIAL_MARK_TEXTURE
+  return changed;
+}
 
 content::AssetId find_material_parent_id(const content::AssetCatalog *catalog,
                                          content::AssetId materialId) noexcept {
@@ -219,7 +217,7 @@ bool edit_material_asset(AssetDatabase *database,
 
   const std::uint16_t overridden = static_cast<std::uint16_t>(
       material_overrides(database, materialId) |
-      changed_fields(*current, *currentSlots, params, textureSlots));
+      material_changed_fields(*current, *currentSlots, params, textureSlots));
   return restore_material_asset(database, catalog, materialId, params,
                                 textureSlots, overridden);
 }

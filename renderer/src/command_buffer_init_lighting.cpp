@@ -613,34 +613,18 @@ void init_backend_lighting(BackendState &backend,
   // GPU skinning (soft-fail: skinned meshes render in bind pose). The
   // shared vocabulary uploads palettes as plain mat4 arrays into
   // each skinned program, so no uniform buffer (and no
-  // caps.uniformBlocks dependency) remains.
-  {
-    if (backend.deferredAvailable && (dev->set_param_mat4_array != nullptr)) {
-      const ShaderDefine skinnedDefine{"SKINNED", "1"};
+  // caps.uniformBlocks dependency) remains. The G-buffer variant exists
+  // only with the deferred path; the shadow variant only needs shadows,
+  // because a skinned mesh casts from its pose whichever path lights it.
+  if (dev->set_param_mat4_array != nullptr) {
+    const ShaderDefine skinnedDefine{"SKINNED", "1"};
+    if (backend.deferredAvailable) {
       const ShaderProgramHandle skinnedGbufferShader =
           load_configured_shader_variant("gbuffer.vert", "gbuffer.frag",
                                          &skinnedDefine, 1U);
       backend.gbufferSkinnedShaderHandle = skinnedGbufferShader;
       if (resolve_gbuffer_skinned_program_state(backend, dev)) {
         backend.skinningAvailable = true;
-
-        if (backend.skinningAvailable && backend.shadowAvailable) {
-          const ShaderProgramHandle skinnedShadowShader =
-              load_configured_shader_variant("shadow_depth.vert",
-                                             "shadow_depth.frag",
-                                             &skinnedDefine, 1U);
-          backend.shadowDepthSkinnedShaderHandle = skinnedShadowShader;
-          if (!resolve_shadow_depth_skinned_program_state(backend, dev)) {
-            if (skinnedShadowShader != kInvalidShaderProgram) {
-              destroy_shader_program(skinnedShadowShader);
-            }
-            backend.shadowDepthSkinnedShaderHandle = ShaderProgramHandle{};
-            backend.shadowDepthSkinnedProgram = kInvalidDeviceProgram;
-            core::log_message(core::LogLevel::Warning, "renderer",
-                              "skinned shadow shader not available — skinned "
-                              "meshes cast bind-pose shadows");
-          }
-        }
       } else {
         if (skinnedGbufferShader != kInvalidShaderProgram) {
           destroy_shader_program(skinnedGbufferShader);
@@ -650,6 +634,22 @@ void init_backend_lighting(BackendState &backend,
         core::log_message(core::LogLevel::Warning, "renderer",
                           "skinned G-buffer shader not available — GPU "
                           "skinning disabled");
+      }
+    }
+    if (backend.shadowAvailable) {
+      const ShaderProgramHandle skinnedShadowShader =
+          load_configured_shader_variant(
+              "shadow_depth.vert", "shadow_depth.frag", &skinnedDefine, 1U);
+      backend.shadowDepthSkinnedShaderHandle = skinnedShadowShader;
+      if (!resolve_shadow_depth_skinned_program_state(backend, dev)) {
+        if (skinnedShadowShader != kInvalidShaderProgram) {
+          destroy_shader_program(skinnedShadowShader);
+        }
+        backend.shadowDepthSkinnedShaderHandle = ShaderProgramHandle{};
+        backend.shadowDepthSkinnedProgram = kInvalidDeviceProgram;
+        core::log_message(core::LogLevel::Warning, "renderer",
+                          "skinned shadow shader not available — skinned "
+                          "meshes cast bind-pose shadows");
       }
     }
   }

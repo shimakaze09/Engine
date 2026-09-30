@@ -18,6 +18,14 @@
 
 namespace engine::renderer {
 
+/// material_field bits for every authored field where `next` differs from
+/// `current`, exactly compared, expanded from ENGINE_MATERIAL_PARAM_FIELDS
+/// and ENGINE_MATERIAL_TEXTURE_FIELDS so a field added to the tables is
+/// compared here too. Zero when nothing differs.
+std::uint16_t material_changed_fields(
+    const Material &current, const MaterialTextureSlots &currentSlots,
+    const Material &next, const MaterialTextureSlots &nextSlots) noexcept;
+
 /// The material `materialId` inherits from: its one Material-tagged
 /// dependency. kInvalidAssetId when it has none or is unknown.
 content::AssetId find_material_parent_id(const content::AssetCatalog *catalog,

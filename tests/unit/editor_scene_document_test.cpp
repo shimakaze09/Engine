@@ -10,11 +10,11 @@
 #include "editor_scene_document.h"
 #include "editor_scene_document_fixture.h"
 #include "editor_session.h"
+#include "engine/content/asset_sidecar.h"
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
 #include "engine/editor/editor.h"
 #include "engine/runtime/scene_serializer.h"
-#include "engine/content/asset_sidecar.h"
 #include "engine/runtime/world.h"
 
 #include <cstdio>
@@ -108,10 +108,10 @@ int check_default_state_is_untitled_and_clean() {
   }
   editor_set_world(world.get());
 
-  const bool ok = !scene_document_has_path() &&
-                  (std::strcmp(scene_document_display_name(),
-                              "Untitled Scene") == 0) &&
-                  !scene_document_is_dirty();
+  const bool ok =
+      !scene_document_has_path() &&
+      (std::strcmp(scene_document_display_name(), "Untitled Scene") == 0) &&
+      !scene_document_is_dirty();
   editor_set_world(nullptr);
   return ok ? 0 : 2;
 }
@@ -348,7 +348,7 @@ int check_jail_validates_destination_root() {
     return 2;
   }
   std::snprintf(root, sizeof(root), "%s/engine_scene_document_test/jail_root",
-               tempDir);
+                tempDir);
   std::error_code ec{};
   std::filesystem::create_directories(std::filesystem::path(root), ec);
   if (ec) {
@@ -363,7 +363,7 @@ int check_jail_validates_destination_root() {
 
   char newSubdirPath[1000] = {};
   std::snprintf(newSubdirPath, sizeof(newSubdirPath),
-               "%s/not_yet_created/scene.json", root);
+                "%s/not_yet_created/scene.json", root);
   if (!scene_path_passes_jail_under(newSubdirPath, root)) {
     return 5; // Save As into a not-yet-existing subfolder must still pass
   }
@@ -414,7 +414,7 @@ int check_save_as_rejects_destination_outside_jail() {
   }
   char outsidePath[1000] = {};
   std::snprintf(outsidePath, sizeof(outsidePath), "%s/escaped_save.json",
-               tempDir);
+                tempDir);
 
   if (perform_scene_save_as(outsidePath)) {
     editor_set_world(nullptr);
@@ -478,7 +478,7 @@ int check_save_failures_log_an_error() {
   }
   char outsidePath[1000] = {};
   std::snprintf(outsidePath, sizeof(outsidePath), "%s/escaped_save.json",
-               tempDir);
+                tempDir);
   if (perform_scene_save_as(outsidePath) || (g_editorErrorLines != 1) ||
       (std::strstr(g_lastEditorError, "outside the project asset root") ==
        nullptr) ||
@@ -602,8 +602,8 @@ bool write_file_bytes(const char *path, const std::string &contents) noexcept {
   if (file == nullptr) {
     return false;
   }
-  const bool ok =
-      std::fwrite(contents.data(), 1U, contents.size(), file) == contents.size();
+  const bool ok = std::fwrite(contents.data(), 1U, contents.size(), file) ==
+                  contents.size();
   return (std::fclose(file) == 0) && ok;
 }
 
@@ -735,8 +735,7 @@ int check_recent_scenes_unreadable_file_never_overwritten() {
   //    the session that loaded it (the latch was per unreadable file), so
   //    a further add is visible to the session after that.
   char secondScene[1000] = {};
-  std::snprintf(secondScene, sizeof(secondScene), "%s/second.json",
-                recentDir);
+  std::snprintf(secondScene, sizeof(secondScene), "%s/second.json", recentDir);
   ok = write_file_bytes(secondScene, "{}");
   recent_scenes_add(secondScene);
   ok = ok && (recent_scene_count() == 2U);
@@ -767,8 +766,8 @@ int check_save_as_establishes_scene_identity() {
     return 2;
   }
   char sidecarPath[600] = {};
-  const int written = std::snprintf(sidecarPath, sizeof(sidecarPath),
-                                    "%s.meta", scenePath);
+  const int written =
+      std::snprintf(sidecarPath, sizeof(sidecarPath), "%s.meta", scenePath);
   if ((written <= 0) ||
       (static_cast<std::size_t>(written) >= sizeof(sidecarPath))) {
     return 3;
@@ -831,6 +830,144 @@ int check_save_as_establishes_scene_identity() {
   return 0;
 }
 
+/// Writes a one-entity scene named `name` to `path`, as a teammate's
+/// commit or a regeneration would change the file under the editor.
+bool write_external_scene(const char *path, const char *name) noexcept {
+  std::unique_ptr<World> writer(new (std::nothrow) World());
+  return (writer != nullptr) &&
+         (add_named_entity(*writer, name) != kInvalidEntity) &&
+         save_scene(*writer, path);
+}
+
+/// Whether the file at `path` currently holds the text `needle`.
+bool file_holds(const char *path, const char *needle) {
+  std::FILE *file = nullptr;
+#ifdef _WIN32
+  if (fopen_s(&file, path, "rb") != 0) {
+    file = nullptr;
+  }
+#else
+  file = std::fopen(path, "rb");
+#endif
+  if (file == nullptr) {
+    return false;
+  }
+  std::string text;
+  char chunk[1024];
+  std::size_t count = 0U;
+  while ((count = std::fread(chunk, 1U, sizeof(chunk), file)) > 0U) {
+    text.append(chunk, count);
+  }
+  std::fclose(file);
+  return text.find(needle) != std::string::npos;
+}
+
+/// EXPECTATION (#987): a Save never silently writes over a scene file that
+/// changed on disk since the editor opened or last saved it. It stops with
+/// the file untouched and asks: Cancel keeps both as they are, Overwrite
+/// writes the edits, Reload takes the file's version. A file made
+/// unparsable on disk is a conflict too, and a Reload that cannot read the
+/// file keeps the edits open. A file deleted on disk is not: nothing there
+/// is lost, so Save writes it again.
+int check_save_over_external_change() {
+  if (!ensure_scratch_root()) {
+    return 1;
+  }
+  char scenePath[512] = {};
+  if (!make_scratch_path("external_change.json", scenePath,
+                         sizeof(scenePath)) ||
+      !write_external_scene(scenePath, "Original")) {
+    return 2;
+  }
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 3;
+  }
+  editor_set_world(world.get());
+  const auto finish = [&](int result) {
+    editor_set_world(nullptr);
+    static_cast<void>(std::remove(scenePath));
+    return result;
+  };
+  if (!perform_scene_open(scenePath)) {
+    return finish(4);
+  }
+  const Entity original = world->find_entity_by_name("Original");
+  if ((original == kInvalidEntity) || !push_transform_edit(*world, original)) {
+    return finish(5);
+  }
+
+  // A save with nothing changed on disk goes straight through, and so
+  // does the next one: the editor's own write is not a conflict.
+  if (!perform_scene_save() || scene_document_conflict_open() ||
+      !push_transform_edit(*world, original) || !perform_scene_save()) {
+    return finish(6);
+  }
+
+  // Changed on disk: the save stops, the file keeps the other version.
+  if (!write_external_scene(scenePath, "Teammate") ||
+      !push_transform_edit(*world, original)) {
+    return finish(7);
+  }
+  if (perform_scene_save() || !scene_document_conflict_open() ||
+      !file_holds(scenePath, "Teammate") || !scene_document_is_dirty()) {
+    return finish(8);
+  }
+  scene_document_conflict_choose_cancel();
+  if (scene_document_conflict_open() || !file_holds(scenePath, "Teammate")) {
+    return finish(9);
+  }
+
+  // Overwrite writes the edits over it.
+  if (perform_scene_save() || !scene_document_conflict_open()) {
+    return finish(10);
+  }
+  scene_document_conflict_choose_overwrite();
+  if (scene_document_conflict_open() || file_holds(scenePath, "Teammate") ||
+      !file_holds(scenePath, "Original") || scene_document_is_dirty()) {
+    return finish(11);
+  }
+
+  // Reload takes the file's version and drops the edits.
+  if (!write_external_scene(scenePath, "Teammate") ||
+      !push_transform_edit(*world, original) || perform_scene_save()) {
+    return finish(12);
+  }
+  scene_document_conflict_choose_reload();
+  if (scene_document_conflict_open() || scene_document_is_dirty() ||
+      (world->find_entity_by_name("Teammate") == kInvalidEntity) ||
+      (world->find_entity_by_name("Original") != kInvalidEntity)) {
+    return finish(13);
+  }
+
+  // Deleted on disk: Save writes the file again, with no conflict.
+  const Entity teammate = world->find_entity_by_name("Teammate");
+  static_cast<void>(std::remove(scenePath));
+  if (!push_transform_edit(*world, teammate) || !perform_scene_save() ||
+      scene_document_conflict_open()) {
+    return finish(14);
+  }
+  if (!file_holds(scenePath, "Teammate") || scene_document_is_dirty()) {
+    return finish(15);
+  }
+
+  // Unparsable on disk: a conflict; a Reload that cannot read it keeps the
+  // edits and the document as they were.
+  if (!write_file_bytes(scenePath, "{ not a scene") ||
+      !push_transform_edit(*world, teammate) || perform_scene_save() ||
+      !scene_document_conflict_open()) {
+    return finish(16);
+  }
+  scene_document_conflict_choose_reload();
+  if ((world->find_entity_by_name("Teammate") == kInvalidEntity) ||
+      !scene_document_is_dirty() ||
+      (std::strcmp(scene_document_path(), scenePath) != 0) ||
+      (scene_document_last_error()[0] == '\0')) {
+    return finish(17);
+  }
+  return finish(0);
+}
+
 int main() {
   struct NamedCheck {
     const char *name;
@@ -855,12 +992,12 @@ int main() {
        &check_save_as_rejects_destination_outside_jail},
       {"check_save_as_establishes_scene_identity",
        &check_save_as_establishes_scene_identity},
-      {"check_save_failures_log_an_error",
-       &check_save_failures_log_an_error},
+      {"check_save_failures_log_an_error", &check_save_failures_log_an_error},
       {"check_recent_scenes_persist_and_prune",
        &check_recent_scenes_persist_and_prune},
       {"check_recent_scenes_unreadable_file_never_overwritten",
        &check_recent_scenes_unreadable_file_never_overwritten},
+      {"check_save_over_external_change", &check_save_over_external_change},
   };
 
   char recentScratch[1000] = {};

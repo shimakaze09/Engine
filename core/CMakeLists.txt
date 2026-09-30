@@ -72,6 +72,7 @@ engine_add_module_library(engine_core
     src/command_line.cpp
     src/console.cpp
     src/crash_report.cpp
+    src/fatal_exit.cpp
     src/cvar.cpp
     src/debug_draw.cpp
     src/durable_replace.cpp

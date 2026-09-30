@@ -4,11 +4,10 @@
 
 #include "editor_scene_document.h"
 
-#if defined(__clang__) && (defined(__x86_64__) || defined(__i386__)) &&      \
+#if defined(__clang__) && (defined(__x86_64__) || defined(__i386__)) &&        \
     !defined(__PRFCHWINTRIN_H)
 #define __PRFCHWINTRIN_H // NOLINT(bugprone-reserved-identifier)
 #endif
-
 
 #include <cstdio>
 #include <cstring>
@@ -46,6 +45,18 @@ void reset_document_identity(SceneDocumentState &doc) noexcept {
   doc.pendingAction = PendingSceneAction::None;
   doc.pendingOpenPath[0] = '\0';
   doc.lastSaveError[0] = '\0';
+  doc.diskFingerprint = core::FileFingerprint{};
+  doc.diskConflictOpen = false;
+  doc.overwriteDiskConflict = false;
+}
+
+/// Remembers what the document's file holds now, after an open or a save.
+void record_disk_fingerprint(SceneDocumentState &doc) noexcept {
+  doc.diskFingerprint = core::FileFingerprint{};
+  static_cast<void>(
+      runtime::document_fingerprint(doc.path, &doc.diskFingerprint));
+  doc.diskConflictOpen = false;
+  doc.overwriteDiskConflict = false;
 }
 
 void set_display_name_from_path(SceneDocumentState &doc,
@@ -84,8 +95,7 @@ void arm_pending_action(PendingSceneAction action, const char *path) noexcept {
   doc.pendingAction = action;
   doc.pendingOpenPath[0] = '\0';
   if (path != nullptr) {
-    std::snprintf(doc.pendingOpenPath, sizeof(doc.pendingOpenPath), "%s",
-                  path);
+    std::snprintf(doc.pendingOpenPath, sizeof(doc.pendingOpenPath), "%s", path);
   }
   doc.unsavedPromptOpen = true;
 }
@@ -142,8 +152,7 @@ void begin_save_scene_as_dialog() noexcept {
   if (doc.dialogPendingKind != SceneDialogKind::None) {
     return; // one native dialog at a time
   }
-  const char *defaultLocation =
-      doc.hasPath ? doc.path : editor_asset_root();
+  const char *defaultLocation = doc.hasPath ? doc.path : editor_asset_root();
   if (!begin_scene_dialog(doc, SceneDialogKind::SaveAs, defaultLocation) &&
       doc.dialogContinuesPendingAction) {
     // No dialog will answer, so treat it as dismissed: the action waiting
@@ -209,7 +218,7 @@ bool perform_scene_open(const char *path) noexcept {
 
   reset_session_for_scene_switch();
   std::snprintf(session.document.path, sizeof(session.document.path), "%s",
-               path);
+                path);
   session.document.hasPath = true;
   set_display_name_from_path(session.document, path);
   session.document.savedHistoryToken = session.commandHistory.current_token();
@@ -218,6 +227,7 @@ bool perform_scene_open(const char *path) noexcept {
   session.document.pendingAction = PendingSceneAction::None;
   session.document.pendingOpenPath[0] = '\0';
   session.document.lastSaveError[0] = '\0';
+  record_disk_fingerprint(session.document);
   recent_scenes_add(path);
   return true;
 }
@@ -277,6 +287,28 @@ bool perform_scene_save() noexcept {
                       : "the scene cannot be saved while playing");
     return report_save_failure(session);
   }
+  if (!session.document.overwriteDiskConflict) {
+    core::FileFingerprint onDisk{};
+    const core::FileReadResult read =
+        runtime::document_fingerprint(session.document.path, &onDisk);
+    // A file deleted since is no conflict: nothing on disk is lost by
+    // writing it again, as text editors recreate a deleted file on Save.
+    const bool unreadable = (read == core::FileReadResult::Unreadable);
+    if (unreadable ||
+        (onDisk.exists && !(onDisk == session.document.diskFingerprint))) {
+      session.document.diskConflictOpen = true;
+      std::snprintf(session.document.lastSaveError,
+                    sizeof(session.document.lastSaveError),
+                    unreadable ? "%s could not be read to check it for "
+                                 "outside changes; Overwrite or Save As"
+                               : "%s changed on disk since it was opened; "
+                                 "Overwrite, Reload or Save As",
+                    session.document.path);
+      core::log_message(core::LogLevel::Warning, "editor",
+                        session.document.lastSaveError);
+      return false;
+    }
+  }
   if (!runtime::save_scene(*session.world, session.document.path)) {
     set_save_failure_message(session, session.document.path);
     return report_save_failure(session);
@@ -284,11 +316,11 @@ bool perform_scene_save() noexcept {
   session.document.savedHistoryToken = session.commandHistory.current_token();
   session.document.unrecordedEdit = false;
   session.document.lastSaveError[0] = '\0';
+  record_disk_fingerprint(session.document);
   return true;
 }
 
-bool scene_path_passes_jail_under(const char *path,
-                                  const char *root) noexcept {
+bool scene_path_passes_jail_under(const char *path, const char *root) noexcept {
   if ((path == nullptr) || (path[0] == '\0') || (root == nullptr) ||
       (root[0] == '\0')) {
     return false;
@@ -393,12 +425,13 @@ bool perform_scene_save_as(const char *path) noexcept {
     reset_session_for_scene_switch();
   }
   std::snprintf(session.document.path, sizeof(session.document.path), "%s",
-               path);
+                path);
   session.document.hasPath = true;
   set_display_name_from_path(session.document, path);
   session.document.savedHistoryToken = session.commandHistory.current_token();
   session.document.unrecordedEdit = false;
   session.document.lastSaveError[0] = '\0';
+  record_disk_fingerprint(session.document);
   recent_scenes_add(path);
   return true;
 }
@@ -453,6 +486,40 @@ bool request_scene_project_switch(const char *path) noexcept {
   arm_pending_action(PendingSceneAction::SwitchProject,
                      (path != nullptr) ? path : "");
   return false;
+}
+
+bool scene_document_conflict_open() noexcept {
+  return editor_session().document.diskConflictOpen;
+}
+
+void scene_document_conflict_choose_overwrite() noexcept {
+  SceneDocumentState &doc = editor_session().document;
+  doc.diskConflictOpen = false;
+  doc.overwriteDiskConflict = true;
+  static_cast<void>(perform_scene_save());
+  doc.overwriteDiskConflict = false;
+}
+
+void scene_document_conflict_choose_reload() noexcept {
+  SceneDocumentState &doc = editor_session().document;
+  doc.diskConflictOpen = false;
+  // perform_scene_open writes the document path, so it reads a copy.
+  char path[kMaxDocumentPathLength] = {};
+  std::snprintf(path, sizeof(path), "%s", doc.path);
+  if (!perform_scene_open(path)) {
+    std::snprintf(doc.lastSaveError, sizeof(doc.lastSaveError),
+                  "%s could not be reloaded; the edits are still open", path);
+    core::log_message(core::LogLevel::Error, "editor", doc.lastSaveError);
+  }
+}
+
+void scene_document_conflict_choose_save_as() noexcept {
+  editor_session().document.diskConflictOpen = false;
+  request_save_scene_as();
+}
+
+void scene_document_conflict_choose_cancel() noexcept {
+  editor_session().document.diskConflictOpen = false;
 }
 
 bool scene_document_prompt_open() noexcept {
@@ -669,7 +736,7 @@ void scene_document_update_window_title() noexcept {
     return;
   }
   std::snprintf(session.lastAppliedWindowTitle,
-               sizeof(session.lastAppliedWindowTitle), "%s", title);
+                sizeof(session.lastAppliedWindowTitle), "%s", title);
 }
 
 void scene_document_reset_for_world_switch() noexcept {

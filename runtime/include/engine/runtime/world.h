@@ -309,12 +309,6 @@ public:
   /// is stale or the component is absent (no logging).
   const WorldTransform *
   get_world_transform_read_ptr(Entity entity) const noexcept;
-  /// Sets the requested value for movement authority.
-  bool set_movement_authority(Entity entity,
-                              MovementAuthority authority) noexcept;
-  /// Who currently drives this entity's transform (physics vs script).
-  MovementAuthority movement_authority(Entity entity) const noexcept override;
-
   /// Adds or replaces the entity's rigid body. Requires the Input phase and a
   /// live entity; logs and returns false otherwise or when storage is full.
   bool add_rigid_body(Entity entity, const RigidBody &rigidBody) noexcept;
@@ -1183,7 +1177,6 @@ private:
   std::uint32_t m_contentEpoch = 0U;
   std::array<std::uint32_t, kMaxEntities + 1U> m_entityGenerations{};
   std::array<PersistentId, kMaxEntities + 1U> m_entityPersistentIds{};
-  std::array<MovementAuthority, kMaxEntities + 1U> m_movementAuthorities{};
   core::FixedHashTable<PersistentId, std::uint32_t, kPersistentIndexCapacity>
       m_persistentIndex{};
   std::array<bool, kMaxEntities + 1U> m_entityAlive{};

@@ -102,9 +102,6 @@ void run(rt::World *world, const sc::RuntimeServices *services) noexcept {
   engine::math::SpringArmComponent arm{};
   check(!services->add_spring_arm_op(world, first, arm),
         "stale handle cannot add a spring arm");
-  check(!services->set_movement_authority_op(world, first,
-                                             rt::MovementAuthority::Script),
-        "stale handle cannot take movement authority");
   check(!services->is_sleeping(world, first),
         "stale handle is not a sleeping body");
   services->wake_body(world, first);

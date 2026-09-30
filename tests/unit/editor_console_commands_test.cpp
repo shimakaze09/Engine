@@ -97,11 +97,11 @@ void check_completion() noexcept {
                 "one matching command completes whole");
 
   static_cast<void>(engine::core::console_register_command(
-      "spawn_test_a", [](const char *const *, int, void *) noexcept {},
-      nullptr, "test"));
+      "spawn_test_a", [](const char *const *, int, void *) noexcept {}, nullptr,
+      "test"));
   static_cast<void>(engine::core::console_register_command(
-      "spawn_test_b", [](const char *const *, int, void *) noexcept {},
-      nullptr, "test"));
+      "spawn_test_b", [](const char *const *, int, void *) noexcept {}, nullptr,
+      "test"));
   g_tests.check((complete_console_line("spawn_t", out, sizeof(out), candidates,
                                        sizeof(candidates)) == 2U) &&
                     same(out, "spawn_test_") &&
@@ -113,18 +113,16 @@ void check_completion() noexcept {
                     same(out, "zzz"),
                 "no match leaves the line as it was");
 
-  g_tests.check((complete_console_line("set console.test.bl", out,
-                                       sizeof(out), candidates,
-                                       sizeof(candidates)) == 1U) &&
+  g_tests.check((complete_console_line("set console.test.bl", out, sizeof(out),
+                                       candidates, sizeof(candidates)) == 1U) &&
                     same(out, "set console.test.bloom "),
                 "after set, a cvar name completes");
-  g_tests.check((complete_console_line("get console.test.bl", out,
-                                       sizeof(out), candidates,
-                                       sizeof(candidates)) == 1U) &&
+  g_tests.check((complete_console_line("get console.test.bl", out, sizeof(out),
+                                       candidates, sizeof(candidates)) == 1U) &&
                     same(out, "get console.test.bloom "),
                 "after get, a cvar name completes");
-  g_tests.check((complete_console_line("help con", out, sizeof(out),
-                                       candidates, sizeof(candidates)) == 0U) &&
+  g_tests.check((complete_console_line("help con", out, sizeof(out), candidates,
+                                       sizeof(candidates)) == 0U) &&
                     same(out, "help con"),
                 "only set and get take a cvar name");
 
@@ -201,6 +199,40 @@ void check_panel() noexcept {
   g_tests.check(line[0] == '\0', "Down past the newest returns a fresh line");
 }
 
+int g_worldCommandRuns = 0;
+
+/// A command that changes the World runs from the Log's command line only
+/// in a play session (#1091): in Edit mode it would change the authored
+/// scene outside undo and the unsaved-change prompt.
+void check_world_commands() noexcept {
+  engine::editor::EditorSession &session = engine::editor::editor_session();
+  g_tests.check(engine::core::console_register_world_command(
+                    "world_test",
+                    [](const char *const *, int, void *) noexcept {
+                      ++g_worldCommandRuns;
+                    },
+                    nullptr, "changes the world"),
+                "a world command registers");
+  g_tests.check(engine::core::console_line_changes_world("world_test 1 2") &&
+                    !engine::core::console_line_changes_world("help"),
+                "the console knows which commands change the world");
+
+  session.playState = engine::editor::PlayState::Stopped;
+  type_text("world_test");
+  press(ImGuiKey_Enter);
+  g_tests.check(g_worldCommandRuns == 0,
+                "in Edit mode the Log refuses a command that changes the "
+                "world");
+  g_tests.check(log_holds("> world_test"),
+                "the refused line is echoed so the author sees what ran");
+
+  session.playState = engine::editor::PlayState::Playing;
+  type_text("world_test");
+  press(ImGuiKey_Enter);
+  g_tests.check(g_worldCommandRuns == 1, "in Play the command runs");
+  session.playState = engine::editor::PlayState::Stopped;
+}
+
 } // namespace
 
 int main() {
@@ -218,13 +250,14 @@ int main() {
   static_cast<void>(engine::core::initialize_logging());
   static_cast<void>(engine::core::initialize_cvars());
   static_cast<void>(engine::core::initialize_console());
-  static_cast<void>(engine::core::cvar_register_bool(
-      "console.test.bloom", true, "completion test cvar"));
+  static_cast<void>(engine::core::cvar_register_bool("console.test.bloom", true,
+                                                     "completion test cvar"));
   engine::editor::console_capture_initialize();
 
   check_history();
   check_completion();
   check_panel();
+  check_world_commands();
 
   engine::editor::console_capture_shutdown();
   engine::core::shutdown_console();

@@ -58,8 +58,10 @@ void cmd_spawn(const char *const *args, int argCount,
 } // namespace
 
 void register_console_commands() noexcept {
-  core::console_register_command("spawn", cmd_spawn, nullptr,
-                                 "Spawn a prefab: spawn <path> [x y z]");
+  // Changes the World outside any editor command, so an editor runs it in
+  // Play only.
+  core::console_register_world_command("spawn", cmd_spawn, nullptr,
+                                       "Spawn a prefab: spawn <path> [x y z]");
 }
 
 } // namespace engine::scripting

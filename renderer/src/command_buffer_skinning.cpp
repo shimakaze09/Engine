@@ -48,13 +48,12 @@ std::size_t skin_palette_count() noexcept {
   return renderer_context().skinPaletteCount;
 }
 
-bool upload_bone_palette(BackendState &backend, const RenderDevice *dev,
-                         std::uint32_t paletteIndex, ShaderParam bonesParam,
+bool upload_bone_palette(const RenderDevice *dev, std::uint32_t paletteIndex,
+                         ShaderParam bonesParam,
                          std::uint32_t *lastUploaded) noexcept {
   const RendererContext &context = renderer_context();
-  if (!backend.skinningAvailable || !bonesParam.valid() ||
-      (dev == nullptr) || (dev->set_param_mat4_array == nullptr) ||
-      (lastUploaded == nullptr) ||
+  if (!bonesParam.valid() || (dev == nullptr) ||
+      (dev->set_param_mat4_array == nullptr) || (lastUploaded == nullptr) ||
       (paletteIndex >= context.skinPaletteCount)) {
     return false;
   }

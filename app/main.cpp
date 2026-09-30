@@ -36,6 +36,21 @@ int fail_to_start(const char *message) noexcept {
 }
 
 #if !defined(ENGINE_PLATFORM_WEB)
+/// Says that the run stopped on a fatal frame error, where the unsaved
+/// scene was saved, if it was, and where the log is. Called before
+/// shutdown, while the log file is still open.
+void report_fatal_frame() noexcept {
+  char text[1400] = {};
+  const char *note = engine::fatal_recovery_note();
+  const char *logPath = engine::core::log_file_path();
+  std::snprintf(text, sizeof(text),
+                "The editor stopped on an internal error.%s%s%s%s",
+                (note[0] != '\0') ? "\n\n" : "", note,
+                (logPath[0] != '\0') ? "\n\nThe log says why:\n" : "", logPath);
+  std::fprintf(stderr, "%s\n", text);
+  engine::core::platform_show_error_box("Engine", text);
+}
+
 /// Shows why the project at `path` did not open and returns the bootstrap
 /// failure code.
 int fail_to_open(const char *path,
@@ -115,6 +130,9 @@ int main(int argc, char **argv) {
       return fail_to_start("The editor could not start.");
     }
     const engine::RunResult result = engine::run(0);
+    if (result == engine::RunResult::FatalFrame) {
+      report_fatal_frame();
+    }
     engine::shutdown();
     if (result != engine::RunResult::Stopped) {
       return engine::run_result_exit_code(result);

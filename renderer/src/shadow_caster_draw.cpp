@@ -167,8 +167,7 @@ std::uint32_t draw_shadow_caster(BackendState &backend, const RenderDevice *dev,
     const MaskedShadowProgram &program = backend.shadowSkinnedMasked;
     dev->bind_program(program.program);
     baseBound = false;
-    if (upload_bone_palette(backend, dev, command.skinPalette,
-                            program.bonesParam,
+    if (upload_bone_palette(dev, command.skinPalette, program.bonesParam,
                             &backend.lastShadowMaskedBonePalette)) {
       dev->set_param_mat4(program.lightMvpLoc, &lightMvp.columns[0].x);
       upload_mask(dev, program, command.material, mask);
@@ -180,7 +179,7 @@ std::uint32_t draw_shadow_caster(BackendState &backend, const RenderDevice *dev,
   if (posed && (backend.shadowDepthSkinnedProgram != kInvalidDeviceProgram)) {
     dev->bind_program(backend.shadowDepthSkinnedProgram);
     baseBound = false;
-    if (upload_bone_palette(backend, dev, command.skinPalette,
+    if (upload_bone_palette(dev, command.skinPalette,
                             backend.shadowSkinnedBonesParam,
                             &backend.lastShadowBonePalette)) {
       if (backend.shadowSkinnedLightMvpLoc.valid()) {

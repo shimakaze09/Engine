@@ -55,6 +55,13 @@ private:
 /// spaces to `candidates` (display text, cut to fit). Returns the number of
 /// matches; with none, or when the completed line would not fit `capacity`,
 /// `out` holds `line` unchanged.
+/// Runs one line from the Log panel's command line. A command that changes
+/// the World (core::console_register_world_command) runs only while
+/// `playing`: in Edit mode it would change the authored scene outside the
+/// undo history and the unsaved-change prompt, so it is refused with a
+/// line saying why and where to do it instead. True when a command ran.
+bool run_console_line(const char *line, bool playing) noexcept;
+
 std::size_t complete_console_line(const char *line, char *out,
                                   std::size_t capacity, char *candidates,
                                   std::size_t candidatesCapacity) noexcept;

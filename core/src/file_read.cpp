@@ -5,6 +5,8 @@
 #include <cerrno>
 #include <cstdio>
 
+#include "engine/core/hash.h"
+
 namespace engine::core {
 
 namespace {
@@ -28,8 +30,8 @@ std::FILE *open_file_for_read(const char *path,
   errno = 0;
   file = std::fopen(path, "rb");
   if (file == nullptr) {
-    *outFailure = (errno == ENOENT) ? FileReadResult::Absent
-                                    : FileReadResult::Unreadable;
+    *outFailure =
+        (errno == ENOENT) ? FileReadResult::Absent : FileReadResult::Unreadable;
   }
 #endif
   return file;
@@ -67,6 +69,41 @@ FileReadResult read_whole_file(const char *path, char *out,
   if (outSize != nullptr) {
     *outSize = readCount;
   }
+  return FileReadResult::Ok;
+}
+
+FileReadResult file_fingerprint(const char *path,
+                                FileFingerprint *out) noexcept {
+  if ((path == nullptr) || (out == nullptr)) {
+    return FileReadResult::Unreadable;
+  }
+  *out = FileFingerprint{};
+  FileReadResult openFailure = FileReadResult::Absent;
+  std::FILE *file = open_file_for_read(path, &openFailure);
+  if (file == nullptr) {
+    return openFailure;
+  }
+  std::uint64_t hash = kFnv1a64Offset;
+  std::uint64_t size = 0U;
+  unsigned char chunk[4096];
+  for (;;) {
+    const std::size_t count = std::fread(chunk, 1U, sizeof(chunk), file);
+    for (std::size_t i = 0U; i < count; ++i) {
+      hash = fnv1a_64_append(hash, chunk[i]);
+    }
+    size += count;
+    if (count < sizeof(chunk)) {
+      break;
+    }
+  }
+  const bool hitError = std::ferror(file) != 0;
+  static_cast<void>(std::fclose(file));
+  if (hitError) {
+    return FileReadResult::Unreadable;
+  }
+  out->exists = true;
+  out->size = size;
+  out->hash = hash;
   return FileReadResult::Ok;
 }
 

@@ -874,10 +874,10 @@ void narrow_phase_sphere_sphere(const PairContext &pair) noexcept {
   record_single_point_contact_cache(
       pair.physicsCtx, pair.entityA, pair.entityB, contactPt, contactNormal,
       overlap, appliedImpulse,
-      (pair.bodyA != nullptr) ? pair.bodyA->inverseInertia
-          : engine::math::Vec3(0.0F, 0.0F, 0.0F),
-      (pair.bodyB != nullptr) ? pair.bodyB->inverseInertia
-          : engine::math::Vec3(0.0F, 0.0F, 0.0F),
+      (pair.bodyA != nullptr) ? simulated_inverse_inertia(*pair.bodyA)
+                              : engine::math::Vec3(0.0F, 0.0F, 0.0F),
+      (pair.bodyB != nullptr) ? simulated_inverse_inertia(*pair.bodyB)
+                              : engine::math::Vec3(0.0F, 0.0F, 0.0F),
       pair.physicsCtx.solverFrameNumber);
 }
 
@@ -997,10 +997,10 @@ void narrow_phase_aabb_sphere(const PairContext &pair) noexcept {
   record_single_point_contact_cache(
       pair.physicsCtx, pair.entityA, pair.entityB, closestPt, aabbSphNormal,
       overlap, appliedImpulse,
-      (pair.bodyA != nullptr) ? pair.bodyA->inverseInertia
-          : engine::math::Vec3(0.0F, 0.0F, 0.0F),
-      (pair.bodyB != nullptr) ? pair.bodyB->inverseInertia
-          : engine::math::Vec3(0.0F, 0.0F, 0.0F),
+      (pair.bodyA != nullptr) ? simulated_inverse_inertia(*pair.bodyA)
+                              : engine::math::Vec3(0.0F, 0.0F, 0.0F),
+      (pair.bodyB != nullptr) ? simulated_inverse_inertia(*pair.bodyB)
+                              : engine::math::Vec3(0.0F, 0.0F, 0.0F),
       pair.physicsCtx.solverFrameNumber);
 }
 
@@ -1113,10 +1113,10 @@ void narrow_phase_aabb_aabb(const PairContext &pair) noexcept {
   record_single_point_contact_cache(
       pair.physicsCtx, pair.entityA, pair.entityB, midPt, aabbNormal,
       pushAmount, appliedImpulse,
-      (pair.bodyA != nullptr) ? pair.bodyA->inverseInertia
-          : engine::math::Vec3(0.0F, 0.0F, 0.0F),
-      (pair.bodyB != nullptr) ? pair.bodyB->inverseInertia
-          : engine::math::Vec3(0.0F, 0.0F, 0.0F),
+      (pair.bodyA != nullptr) ? simulated_inverse_inertia(*pair.bodyA)
+                              : engine::math::Vec3(0.0F, 0.0F, 0.0F),
+      (pair.bodyB != nullptr) ? simulated_inverse_inertia(*pair.bodyB)
+                              : engine::math::Vec3(0.0F, 0.0F, 0.0F),
       pair.physicsCtx.solverFrameNumber);
 }
 

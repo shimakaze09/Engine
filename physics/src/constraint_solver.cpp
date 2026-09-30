@@ -400,8 +400,10 @@ void solve_constraints(PhysicsWorldView &world, float deltaSeconds) noexcept {
 
     RigidBody *bodyA = world.get_rigid_body_ptr(j.entityA);
     RigidBody *bodyB = world.get_rigid_body_ptr(j.entityB);
-    const float invMassA = (bodyA != nullptr) ? bodyA->inverseMass : 0.0F;
-    const float invMassB = (bodyB != nullptr) ? bodyB->inverseMass : 0.0F;
+    const float invMassA =
+        (bodyA != nullptr) ? simulated_inverse_mass(*bodyA) : 0.0F;
+    const float invMassB =
+        (bodyB != nullptr) ? simulated_inverse_mass(*bodyB) : 0.0F;
     const float invMassSum = invMassA + invMassB;
     if (invMassSum <= 0.0F) {
       continue;
@@ -454,14 +456,16 @@ void solve_constraints(PhysicsWorldView &world, float deltaSeconds) noexcept {
       JointSolveContext solveCtx{};
       solveCtx.bodyA = bodyA;
       solveCtx.bodyB = bodyB;
-      solveCtx.invMassA = (bodyA != nullptr) ? bodyA->inverseMass : 0.0F;
-      solveCtx.invMassB = (bodyB != nullptr) ? bodyB->inverseMass : 0.0F;
+      solveCtx.invMassA =
+          (bodyA != nullptr) ? simulated_inverse_mass(*bodyA) : 0.0F;
+      solveCtx.invMassB =
+          (bodyB != nullptr) ? simulated_inverse_mass(*bodyB) : 0.0F;
       const math::Vec3 lockedInertia(0.0F, 0.0F, 0.0F);
-      solveCtx.invInertiaA = ((bodyA != nullptr) && (bodyA->inverseMass > 0.0F))
-                                 ? bodyA->inverseInertia
+      solveCtx.invInertiaA = (bodyA != nullptr)
+                                 ? simulated_inverse_inertia(*bodyA)
                                  : lockedInertia;
-      solveCtx.invInertiaB = ((bodyB != nullptr) && (bodyB->inverseMass > 0.0F))
-                                 ? bodyB->inverseInertia
+      solveCtx.invInertiaB = (bodyB != nullptr)
+                                 ? simulated_inverse_inertia(*bodyB)
                                  : lockedInertia;
 
       Transform scratchA{};

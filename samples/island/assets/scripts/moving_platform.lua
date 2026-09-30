@@ -1,11 +1,11 @@
 -- assets/scripts/moving_platform.lua
 --
--- Oscillates a heavy kinematic-style platform along X between its authored
--- position and AMPLITUDE units further. The platform is a near-infinite-mass
--- rigid body driven by velocity (not teleported), so contact friction can
--- carry a rider and the player controller can read its velocity to ride it.
--- Author its Rigid Body with Gravity Scale 0: the script drives it and it
--- must not fall.
+-- Oscillates a platform along X between its authored position and
+-- AMPLITUDE units further. Author its Rigid Body with Body Type Kinematic:
+-- a kinematic body follows its velocity exactly, feels no gravity, never
+-- sleeps and is never pushed back, and it is driven by velocity (not
+-- teleported) so contact friction carries a rider and the player
+-- controller can read its velocity to ride it.
 -- Reference pattern: the engine caches ONE module table per script path and
 -- calls it for every entity using the script, so per-entity state must live
 -- in a table keyed by the entity handle (handles encode index, generation,
@@ -14,8 +14,8 @@
 local M = {}
 
 -- Sweep sized so the far end stops just short of the goal islet's wall
--- (platform face 11.9 vs islet face 12.0) — the platform must never try
--- to push through static geometry or it stalls against it.
+-- (platform face 11.9 vs islet face 12.0): a kinematic body passes through
+-- static geometry rather than stopping at it.
 local AMPLITUDE = 2.0
 local SPEED = 0.25
 local TWO_PI = 2.0 * math.pi
@@ -58,22 +58,8 @@ local function sweep_x(base, phase)
     return base.x + AMPLITUDE * (0.5 - 0.5 * math.cos(phase * TWO_PI))
 end
 
--- Clamps a corrective velocity so a stalled platform catches up smoothly
--- instead of catapulting its rider.
-local MAX_CORRECTIVE = 3.5
-local function clamped(v)
-    if v > MAX_CORRECTIVE then
-        return MAX_CORRECTIVE
-    elseif v < -MAX_CORRECTIVE then
-        return -MAX_CORRECTIVE
-    end
-    return v
-end
-
 -- Drives the body's velocity toward the next sweep sample so contacts see
--- real platform motion; the platform is kept awake because the solver
--- would otherwise sleep it at the slow ends of the sweep and the script's
--- velocity writes would stall until a contact wakes it.
+-- real platform motion.
 function M.on_tick(self, dt)
     local s = g_instances[self]
     if s == nil or s.base == nil or dt <= 0.0 then
@@ -84,12 +70,9 @@ function M.on_tick(self, dt)
     if x == nil then
         return
     end
-    engine.wake_body(self)
     local target_x = sweep_x(s.base, s.phase)
-    engine.set_velocity(self,
-        clamped((target_x - x) / dt),
-        clamped((s.base.y - y) / dt),
-        clamped((s.base.z - z) / dt))
+    engine.set_velocity(self, (target_x - x) / dt, (s.base.y - y) / dt,
+        (s.base.z - z) / dt)
 end
 
 return M

@@ -35,7 +35,6 @@ using engine::math::HullSource;
 using engine::math::LightComponent;
 using engine::math::LightType;
 using engine::math::MeshComponent;
-using engine::math::MovementAuthority;
 using engine::math::NameComponent;
 using engine::math::PointLightComponent;
 using engine::math::RigidBody;
@@ -197,9 +196,6 @@ struct RuntimeServices final {
   bool (*add_transform_op)(runtime::World *world, core::Entity entity,
                            const runtime::Transform &transform) noexcept =
       nullptr;
-  bool (*set_movement_authority_op)(
-      runtime::World *world, core::Entity entity,
-      runtime::MovementAuthority authority) noexcept = nullptr;
   bool (*add_rigid_body_op)(runtime::World *world, core::Entity entity,
                             const runtime::RigidBody &rigidBody) noexcept =
       nullptr;

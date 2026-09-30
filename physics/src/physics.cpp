@@ -53,12 +53,12 @@ float effective_inverse_mass(const RigidBody *body,
     return kStaticInverseMass;
   }
   if (!body->sleeping) {
-    return body->inverseMass;
+    return simulated_inverse_mass(*body);
   }
   const bool wokenByPartner =
       (partner != nullptr) &&
       (engine::math::length_sq(partner->velocity) > kSleepThreshold);
-  return wokenByPartner ? body->inverseMass : kStaticInverseMass;
+  return wokenByPartner ? simulated_inverse_mass(*body) : kStaticInverseMass;
 }
 
 // Advances a stamp generation, clearing the stamps on wrap so stale marks
@@ -359,7 +359,7 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
       const RigidBody *bodyI = (bodyOwner != kInvalidEntity)
                                    ? world.get_rigid_body_ptr(bodyOwner)
                                    : nullptr;
-      if ((bodyI != nullptr) && (bodyI->inverseMass > 0.0F)) {
+      if ((bodyI != nullptr) && body_moves(*bodyI)) {
         const engine::math::Vec3 centerOffset =
             engine::math::sub(geometries[i].center, bodyCenters[i]);
         const engine::math::Vec3 pointVelocity = engine::math::add(
@@ -406,12 +406,6 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
         continue;
       }
       const Entity entityA = entities[i];
-      const Entity authorityEntityA =
-          (bodyOwners[i] != kInvalidEntity) ? bodyOwners[i] : entityA;
-      if (world.movement_authority(authorityEntityA) ==
-          MovementAuthority::Script) {
-        continue;
-      }
 
       const float ax = posX[i];
       const float ay = posY[i];
@@ -450,13 +444,6 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
             ((boundsJ.max.z + expandZ[j]) < (boundsI.min.z - expandZ[i]))) {
           return;
         }
-        const Entity authorityEntityB =
-            (bodyOwners[j] != kInvalidEntity) ? bodyOwners[j] : entityB;
-        if (world.movement_authority(authorityEntityB) ==
-            MovementAuthority::Script) {
-          return;
-        }
-
         if ((bodyOwners[i] != kInvalidEntity) &&
             (bodyOwners[i] == bodyOwners[j])) {
           return;
@@ -702,7 +689,7 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
   (void)rigidBodyEntities;
   for (std::size_t i = 0U; i < rigidBodyCount; ++i) {
     RigidBody *body = &rigidBodies[i];
-    if ((body->inverseMass <= 0.0F) || body->sleeping) {
+    if (!(simulated_inverse_mass(*body) > 0.0F) || body->sleeping) {
       continue;
     }
     const float energy = engine::math::length_sq(body->velocity) +

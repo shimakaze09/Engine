@@ -1,6 +1,7 @@
-// Implements rigid-body integration for one fixed step: gravity, CCD
-// sweeps with snapshot-gated candidates, positional advance, and angular
-// velocity integration with light air damping.
+// Implements rigid-body integration for one fixed step: for dynamic
+// bodies gravity, CCD sweeps with snapshot-gated candidates, positional
+// advance and angular integration with light air damping; for kinematic
+// bodies an exact advance by their own velocities.
 
 #include <algorithm>
 #include <cmath>
@@ -26,6 +27,30 @@ constexpr float kAngularDampingPerSecond = 0.4F;
 
 bool step_physics_range(PhysicsWorldView &world, std::size_t startIndex,
                         std::size_t count, float deltaSeconds) noexcept;
+
+namespace {
+
+// The transform a kinematic body reaches after deltaSeconds of its linear
+// and angular velocity, undamped and unclamped: the author's motion is
+// the motion.
+Transform advance_kinematic(const RigidBody &body, Transform transform,
+                            float deltaSeconds) noexcept {
+  transform.position = engine::math::add(
+      transform.position, engine::math::mul(body.velocity, deltaSeconds));
+  const float angSpeedSq = engine::math::length_sq(body.angularVelocity);
+  if (angSpeedSq > 1e-12F) {
+    const float angSpeed = std::sqrt(angSpeedSq);
+    const engine::math::Vec3 axis =
+        engine::math::div(body.angularVelocity, angSpeed);
+    const engine::math::Quat deltaRot =
+        engine::math::from_axis_angle(axis, angSpeed * deltaSeconds);
+    transform.rotation = engine::math::normalize(
+        engine::math::mul(deltaRot, transform.rotation));
+  }
+  return transform;
+}
+
+} // namespace
 
 bool step_physics(PhysicsWorldView &world, float deltaSeconds) noexcept {
   return step_physics_range(world, 0U, world.transform_count(), deltaSeconds);
@@ -66,11 +91,6 @@ bool step_physics_range(PhysicsWorldView &world, std::size_t startIndex,
 
   for (std::size_t i = 0U; i < count; ++i) {
     const Entity entity = entities[i];
-    if (world.movement_authority(entity) == MovementAuthority::Script) {
-      writeTransforms[i] = readTransforms[i];
-      continue;
-    }
-
     RigidBody *body = world.get_rigid_body_ptr(entity);
     Transform updated = readTransforms[i];
 
@@ -79,7 +99,16 @@ bool step_physics_range(PhysicsWorldView &world, std::size_t startIndex,
       continue;
     }
 
-    if ((body != nullptr) && (body->inverseMass > 0.0F)) {
+    if ((body != nullptr) && (body_type(*body) != BodyType::Dynamic)) {
+      // A kinematic body follows its velocities exactly: no gravity, no
+      // contact ever changes them, and it sweeps nothing (what it meets
+      // is resolved against it as an immovable mover). A static body has
+      // no velocity, so the same advance leaves it where it is.
+      writeTransforms[i] = advance_kinematic(*body, updated, deltaSeconds);
+      continue;
+    }
+
+    if ((body != nullptr) && (simulated_inverse_mass(*body) > 0.0F)) {
       const engine::math::Vec3 totalAccel = engine::math::add(
           body->acceleration,
           engine::math::mul(physicsCtx.gravity, body->gravityScale));
