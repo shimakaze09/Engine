@@ -423,6 +423,15 @@ script camera (`engine_integration_game_camera_gpu`,
 `engine_integration_camera_producer_removal`,
 `engine_unit_editor_entity_menus`).
 
+Gameplay is written in scripts, as in Unity and Godot: the engine has no
+built-in player controller, game mode, score store or cheat flags. Scripts
+read input (`engine.is_key_down`, `engine.is_action_down`), move entities
+and bodies, and keep state across scene loads in Lua globals, which live
+for the whole run (`engine_integration_scene_flow`); `engine.save_data` and
+`engine.load_data` keep it between runs. The console's `spawn <prefab>
+[x y z]` instantiates a prefab by a path inside the project
+(`engine_integration_sandbox`).
+
 Scripts run sandboxed: `io`, `os`, `debug` and `package` are not there, all
 scripts share a budget of Lua instructions per frame (1,000,000 by default;
 a script that runs past it stops with an error rather than freezing the
