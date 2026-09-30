@@ -10,7 +10,8 @@
 // load_scene/save_scene, save_prefab/instantiate, load_asset_async,
 // load_sound/play_music) and no file outside the jail is created or read.
 //
-// watch_script_file (issue #115c) is covered here too, portably: unlike the
+// watch_script_file is covered here too, its length (issue #115c) and its
+// jail (an absolute or parent-relative path is refused), portably: unlike the
 // sites above, watching a path never reads the file at registration time,
 // so proving rejection needs no on-disk fixture at the truncated length —
 // the >511-char-fixture staging problem that left this site's rejection
@@ -247,6 +248,13 @@ int main() {
   ctx.check(sc::watched_script_count() == watchedBefore,
             "over-long watch_script_file path leaves the watch table "
             "unchanged");
+
+  // The watch table keeps to the jail every other script path does: an
+  // absolute path and a parent-relative one are refused, not watched.
+  sc::watch_script_file("/tmp/jail_watch_absolute.lua");
+  sc::watch_script_file("../jail_watch_parent.lua");
+  ctx.check(sc::watched_script_count() == watchedBefore,
+            "absolute and parent-relative watch paths are refused");
 
   const std::string maxWatchPath = padded_name(511U, ".lua");
   sc::watch_script_file(maxWatchPath.c_str());

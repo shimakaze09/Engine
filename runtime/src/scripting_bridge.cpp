@@ -151,16 +151,6 @@ static_assert(scripting::kMaxGameSaveBytes == runtime::kMaxSaveDataBytes,
 static_assert(scripting::kMaxEntityPoolSize ==
                   runtime::EntityPool::kMaxPoolSize,
               "scripting's pool size must match the entity pool's");
-static_assert(static_cast<int>(scripting::GameModeState::WaitingToStart) ==
-                      static_cast<int>(runtime::GameMode::State::WaitingToStart) &&
-                  static_cast<int>(scripting::GameModeState::InProgress) ==
-                      static_cast<int>(runtime::GameMode::State::InProgress) &&
-                  static_cast<int>(scripting::GameModeState::Paused) ==
-                      static_cast<int>(runtime::GameMode::State::Paused) &&
-                  static_cast<int>(scripting::GameModeState::Ended) ==
-                      static_cast<int>(runtime::GameMode::State::Ended),
-              "scripting's game mode states must mirror the runtime's");
-
 bool scripting_get_active_camera(runtime::World *world, float *outPosX,
                                  float *outPosY, float *outPosZ, float *outTgtX,
                                  float *outTgtY, float *outTgtZ,
@@ -747,12 +737,6 @@ std::size_t scripting_alive_entity_count(runtime::World *world) noexcept {
   return (world != nullptr) ? world->alive_entity_count() : 0U;
 }
 
-runtime::Entity scripting_find_entity_by_index(runtime::World *world,
-                                               std::uint32_t index) noexcept {
-  return (world != nullptr) ? world->find_entity_by_index(index)
-                            : runtime::kInvalidEntity;
-}
-
 runtime::Entity scripting_find_entity_by_name(runtime::World *world,
                                               const char *name) noexcept {
   return ((world != nullptr) && (name != nullptr))
@@ -955,12 +939,6 @@ runtime::Entity scripting_clone_entity_op(runtime::World *world,
 
 // Component reads. Each forwards the handle unchanged; the World's own
 // liveness check refuses a stale one.
-const runtime::Transform *
-scripting_get_transform_read_ptr(runtime::World *world,
-                                 runtime::Entity entity) noexcept {
-  return (world != nullptr) ? world->get_transform_read_ptr(entity) : nullptr;
-}
-
 bool scripting_get_transform_op(runtime::World *world, runtime::Entity entity,
                                 runtime::Transform *outTransform) noexcept {
   return (world != nullptr) && (outTransform != nullptr) &&
@@ -971,12 +949,6 @@ bool scripting_get_rigid_body_op(runtime::World *world, runtime::Entity entity,
                                  runtime::RigidBody *outRigidBody) noexcept {
   return (world != nullptr) && (outRigidBody != nullptr) &&
          world->get_rigid_body(entity, outRigidBody);
-}
-
-const runtime::MeshComponent *
-scripting_get_mesh_component_ptr(runtime::World *world,
-                                 runtime::Entity entity) noexcept {
-  return (world != nullptr) ? world->get_mesh_component_ptr(entity) : nullptr;
 }
 
 bool scripting_get_mesh_component_op(
@@ -1161,62 +1133,6 @@ scripting_primitive_collider(math::PrimitiveShape shape) noexcept {
   return runtime::primitive_collider(shape);
 }
 
-// Game mode, owned by the World.
-const char *scripting_game_mode_name(runtime::World *world) noexcept {
-  return (world != nullptr) ? world->game_mode().name : "";
-}
-
-bool scripting_set_game_mode_name(runtime::World *world,
-                                  const char *name) noexcept {
-  if ((world == nullptr) || (name == nullptr)) {
-    return false;
-  }
-  std::snprintf(world->game_mode().name, runtime::GameMode::kMaxNameLength,
-                "%s", name);
-  return true;
-}
-
-bool scripting_game_mode_start(runtime::World *world) noexcept {
-  return (world != nullptr) && world->game_mode().start();
-}
-
-bool scripting_game_mode_pause(runtime::World *world) noexcept {
-  return (world != nullptr) && world->game_mode().pause();
-}
-
-bool scripting_game_mode_end(runtime::World *world) noexcept {
-  return (world != nullptr) && world->game_mode().end();
-}
-
-scripting::GameModeState
-scripting_game_mode_state(runtime::World *world) noexcept {
-  if (world == nullptr) {
-    return scripting::GameModeState::WaitingToStart;
-  }
-  return static_cast<scripting::GameModeState>(world->game_mode().state);
-}
-
-bool scripting_game_mode_set_rule(runtime::World *world, const char *key,
-                                  const char *value) noexcept {
-  return (world != nullptr) && world->game_mode().set_rule(key, value);
-}
-
-const char *scripting_game_mode_get_rule(runtime::World *world,
-                                         const char *key) noexcept {
-  return (world != nullptr) ? world->game_mode().get_rule(key) : nullptr;
-}
-
-std::uint32_t scripting_game_mode_max_players(runtime::World *world) noexcept {
-  return (world != nullptr) ? world->game_mode().maxPlayers : 0U;
-}
-
-void scripting_set_game_mode_max_players(runtime::World *world,
-                                         std::uint32_t maxPlayers) noexcept {
-  if (world != nullptr) {
-    world->game_mode().maxPlayers = maxPlayers;
-  }
-}
-
 // Timers, owned by the World.
 std::uint32_t scripting_timer_set(runtime::World *world, float seconds,
                                   bool repeat,
@@ -1318,7 +1234,6 @@ scripting::RuntimeServices make_scripting_runtime_services() noexcept {
   s.random_double = &scripting_random_double;
   s.random_range = &scripting_random_range;
   s.seed_random = &scripting_seed_random;
-  s.find_entity_by_index = &scripting_find_entity_by_index;
   s.find_entity_by_name = &scripting_find_entity_by_name;
   s.find_entity_by_persistent_id = &scripting_find_entity_by_persistent_id;
   s.persistent_id = &scripting_persistent_id;
@@ -1332,10 +1247,8 @@ scripting::RuntimeServices make_scripting_runtime_services() noexcept {
   s.for_each_scripted_entity = &scripting_for_each_scripted_entity;
   s.has_begun_play = &scripting_has_begun_play;
   s.mark_begin_play_done = &scripting_mark_begin_play_done;
-  s.get_transform_read_ptr = &scripting_get_transform_read_ptr;
   s.get_transform_op = &scripting_get_transform_op;
   s.get_rigid_body_op = &scripting_get_rigid_body_op;
-  s.get_mesh_component_ptr = &scripting_get_mesh_component_ptr;
   s.get_mesh_component_op = &scripting_get_mesh_component_op;
   s.get_name_component_op = &scripting_get_name_component_op;
   s.get_collider_op = &scripting_get_collider_op;
@@ -1369,16 +1282,6 @@ scripting::RuntimeServices make_scripting_runtime_services() noexcept {
   s.add_camera_component_op = &scripting_add_camera_component_op;
   s.remove_camera_component_op = &scripting_remove_camera_component_op;
   s.primitive_collider = &scripting_primitive_collider;
-  s.game_mode_name = &scripting_game_mode_name;
-  s.set_game_mode_name = &scripting_set_game_mode_name;
-  s.game_mode_start = &scripting_game_mode_start;
-  s.game_mode_pause = &scripting_game_mode_pause;
-  s.game_mode_end = &scripting_game_mode_end;
-  s.game_mode_state = &scripting_game_mode_state;
-  s.game_mode_set_rule = &scripting_game_mode_set_rule;
-  s.game_mode_get_rule = &scripting_game_mode_get_rule;
-  s.game_mode_max_players = &scripting_game_mode_max_players;
-  s.set_game_mode_max_players = &scripting_set_game_mode_max_players;
   s.timer_set = &scripting_timer_set;
   s.timer_cancel = &scripting_timer_cancel;
   s.timer_slot_for_id = &scripting_timer_slot_for_id;

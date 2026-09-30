@@ -14,9 +14,8 @@
 // component writes and destroys, through the deferred buffer, which a
 // read of the same component sees before commit (read-your-writes);
 // entity liveness and name lookup read the committed World. Refused
-// while a scope is open: pool creation, joint removal and limits, the
-// game mode, persistent game state, player controllers, gravity and the
-// camera stack, because none can be undone. Resource loads (sounds,
+// while a scope is open: pool creation, joint removal and limits, gravity
+// and camera shake, because none can be undone. Resource loads (sounds,
 // streamed assets) run at once and are not undone: they are caches, not
 // gameplay state.
 

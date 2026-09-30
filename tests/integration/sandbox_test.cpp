@@ -1,18 +1,22 @@
 // Integration tests for Lua sandboxing (P1-M2-G2).
 // Tests: restricted globals, CPU instruction limit, memory limit, removed
-// file loaders, and text-only chunk loading.
+// file loaders, text-only chunk loading, and the console spawn command's
+// path jail.
 
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <memory>
 #include <new>
 
+#include "../scripting_clock.h"
+#include "engine/core/console.h"
 #include "engine/core/logging.h"
 #include "engine/core/service_locator.h"
+#include "engine/runtime/prefab_serializer.h"
 #include "engine/runtime/scripting_bridge.h"
 #include "engine/runtime/world.h"
 #include "engine/scripting/scripting.h"
-#include "../scripting_clock.h"
 
 namespace {
 
@@ -650,6 +654,54 @@ bool test_bytecode_script_file_refused() noexcept {
   return refused && markerAbsent && textLoads;
 }
 
+// -----------------------------------------------------------------------
+// The console spawn command takes a path from whoever types it and hands
+// it to the prefab loader: it keeps to the same VFS jail as every script
+// path, so an absolute path to a real prefab spawns nothing, while the
+// same prefab by its relative path still spawns.
+// -----------------------------------------------------------------------
+bool test_console_spawn_path_jailed() noexcept {
+  static const char *kPrefab = "sandbox_spawn_jail.prefab";
+  if (!engine::core::initialize_console()) {
+    return false;
+  }
+  engine::scripting::initialize_scripting();
+  auto world = std::unique_ptr<engine::runtime::World>(
+      new (std::nothrow) engine::runtime::World());
+  if (!world) {
+    engine::scripting::shutdown_scripting();
+    engine::core::shutdown_console();
+    return false;
+  }
+  engine::core::ServiceLocator serviceLocator{};
+  engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
+
+  const engine::runtime::Entity source = world->create_scene_object();
+  std::error_code error;
+  const std::filesystem::path absolute =
+      std::filesystem::absolute(kPrefab, error);
+  const bool saved = (source != engine::runtime::kInvalidEntity) && !error &&
+                     engine::runtime::save_prefab(*world, source, kPrefab) &&
+                     world->destroy_entity(source);
+  const std::size_t before = world->alive_entity_count();
+
+  char outside[512] = {};
+  std::snprintf(outside, sizeof(outside), "spawn %s",
+                absolute.generic_string().c_str());
+  const bool refused = saved && engine::core::console_execute(outside) &&
+                       (world->alive_entity_count() == before);
+
+  char inside[128] = {};
+  std::snprintf(inside, sizeof(inside), "spawn %s", kPrefab);
+  const bool spawned = saved && engine::core::console_execute(inside) &&
+                       (world->alive_entity_count() == before + 1U);
+
+  std::remove(kPrefab);
+  engine::scripting::shutdown_scripting();
+  engine::core::shutdown_console();
+  return refused && spawned;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -668,7 +720,8 @@ int main() {
       {"instruction_limit", test_instruction_limit},
       {"coroutine_instruction_limit", test_coroutine_instruction_limit},
       {"raw_coroutine_instruction_limit", test_raw_coroutine_instruction_limit},
-      {"coroutine_wrap_instruction_limit", test_coroutine_wrap_instruction_limit},
+      {"coroutine_wrap_instruction_limit",
+       test_coroutine_wrap_instruction_limit},
       {"coroutine_budget_shared_per_frame",
        test_coroutine_budget_shared_per_frame},
       {"memory_limit", test_memory_limit},
@@ -678,6 +731,7 @@ int main() {
       {"file_loaders_removed_and_load_text_only",
        test_file_loaders_removed_and_load_text_only},
       {"bytecode_script_file_refused", test_bytecode_script_file_refused},
+      {"console_spawn_path_jailed", test_console_spawn_path_jailed},
   };
 
   for (const auto &tc : tests) {

@@ -82,13 +82,6 @@ int seed_non_entity_scene_state(engine::runtime::World &world) {
     return 81;
   }
 
-  if (!world.game_mode().set_rule("round", "warmup")) {
-    return 82;
-  }
-  if (!world.game_mode().start()) {
-    return 83;
-  }
-
   return 0;
 }
 
@@ -99,16 +92,6 @@ int verify_non_entity_scene_state_cleared(const engine::runtime::World &world) {
   }
   if (world.camera_manager().camera_count() != 0U) {
     return 85;
-  }
-  if (world.game_mode().state !=
-      engine::runtime::GameMode::State::WaitingToStart) {
-    return 86;
-  }
-  if (std::strcmp(world.game_mode().name, "default") != 0) {
-    return 89;
-  }
-  if (world.game_mode().ruleCount != 0U) {
-    return 90;
   }
 
   return 0;

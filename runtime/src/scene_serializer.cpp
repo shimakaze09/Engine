@@ -538,7 +538,7 @@ SceneSaveBlockers collect_scene_save_blockers(const World &world) noexcept {
 /// removal releases its physics/camera bookkeeping while those managers
 /// still exist, then the scene-authored physics state (gravity and joints,
 /// which load_scene replaces through the commit copy and a reset must
-/// match), timers, cameras, game mode, the content epoch, and last
+/// match), timers, cameras, the content epoch, and last
 /// the animation controller registry, which must only reset once no
 /// component can still hold a controllerSlot into it.
 void reset_world(World &world, SceneTeardownHook beforeTeardown) noexcept {
@@ -554,7 +554,6 @@ void reset_world(World &world, SceneTeardownHook beforeTeardown) noexcept {
   physics::reset_physics_content(world.physics_context());
   world.timer_manager().clear();
   world.camera_manager().clear();
-  world.game_mode().reset();
   world.seed_random(kSceneRandomSeed);
   world.mark_content_replaced(world.content_epoch());
   reset_anim_controllers();

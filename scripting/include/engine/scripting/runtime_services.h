@@ -63,14 +63,6 @@ constexpr std::size_t kMaxEntityPoolSize = 1024U;
 /// save slot's hard ceiling; the runtime asserts it matches.
 constexpr std::size_t kMaxGameSaveBytes = 4U * 1024U * 1024U;
 
-/// Game mode state machine position, mirrored from the runtime's GameMode.
-enum class GameModeState : std::uint8_t {
-  WaitingToStart = 0,
-  InProgress,
-  Paused,
-  Ended,
-};
-
 /// Visitor for the entity iteration operations.
 using EntityVisitFn = void (*)(core::Entity entity, void *context) noexcept;
 /// Visitor over entities that carry a ScriptComponent.
@@ -124,8 +116,6 @@ struct RuntimeServices final {
                                std::int64_t maximum) noexcept = nullptr;
   void (*seed_random)(runtime::World *world,
                       std::uint64_t seed) noexcept = nullptr;
-  core::Entity (*find_entity_by_index)(runtime::World *world,
-                                       std::uint32_t index) noexcept = nullptr;
   core::Entity (*find_entity_by_name)(runtime::World *world,
                                       const char *name) noexcept = nullptr;
   core::Entity (*find_entity_by_persistent_id)(
@@ -164,15 +154,11 @@ struct RuntimeServices final {
                                core::Entity entity) noexcept = nullptr;
 
   // Component reads.
-  const runtime::Transform *(*get_transform_read_ptr)(
-      runtime::World *world, core::Entity entity) noexcept = nullptr;
   bool (*get_transform_op)(runtime::World *world, core::Entity entity,
                            runtime::Transform *outTransform) noexcept = nullptr;
   bool (*get_rigid_body_op)(runtime::World *world, core::Entity entity,
                             runtime::RigidBody *outRigidBody) noexcept =
       nullptr;
-  const runtime::MeshComponent *(*get_mesh_component_ptr)(
-      runtime::World *world, core::Entity entity) noexcept = nullptr;
   bool (*get_mesh_component_op)(
       runtime::World *world, core::Entity entity,
       runtime::MeshComponent *outComponent) noexcept = nullptr;
@@ -256,24 +242,6 @@ struct RuntimeServices final {
   /// The collider every spawn path gives a built-in primitive, hull
   /// provenance and offset included (runtime::primitive_collider).
   runtime::Collider (*primitive_collider)(math::PrimitiveShape shape) noexcept =
-      nullptr;
-
-  // Game mode, owned by the World.
-  const char *(*game_mode_name)(runtime::World *world) noexcept = nullptr;
-  bool (*set_game_mode_name)(runtime::World *world,
-                             const char *name) noexcept = nullptr;
-  bool (*game_mode_start)(runtime::World *world) noexcept = nullptr;
-  bool (*game_mode_pause)(runtime::World *world) noexcept = nullptr;
-  bool (*game_mode_end)(runtime::World *world) noexcept = nullptr;
-  GameModeState (*game_mode_state)(runtime::World *world) noexcept = nullptr;
-  bool (*game_mode_set_rule)(runtime::World *world, const char *key,
-                             const char *value) noexcept = nullptr;
-  const char *(*game_mode_get_rule)(runtime::World *world,
-                                    const char *key) noexcept = nullptr;
-  std::uint32_t (*game_mode_max_players)(runtime::World *world) noexcept =
-      nullptr;
-  void (*set_game_mode_max_players)(runtime::World *world,
-                                    std::uint32_t maxPlayers) noexcept =
       nullptr;
 
   // Timers, owned by the World. Ids are opaque and 0 is invalid; a slot is

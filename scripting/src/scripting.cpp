@@ -7,8 +7,8 @@
 #include "binding_util.h"
 #include "body_bindings.h"
 #include "camera_bindings.h"
-#include "cheat_bindings.h"
 #include "collision_bindings.h"
+#include "console_commands.h"
 #include "coroutine_bindings.h"
 #include "debug_bindings.h"
 #include "deferred_mutations.h"
@@ -164,39 +164,6 @@ void register_engine_bindings(lua_State *state) noexcept {
   lua_setfield(state, -2, "on_gesture");
   lua_pushcfunction(state, &lua_engine_set_touch_mouse_emulation);
   lua_setfield(state, -2, "set_touch_mouse_emulation");
-
-  lua_pushcfunction(state, &lua_engine_set_player_controller);
-  lua_setfield(state, -2, "set_player_controller");
-  lua_pushcfunction(state, &lua_engine_get_player_controller);
-  lua_setfield(state, -2, "get_player_controller");
-
-  lua_pushcfunction(state, &lua_engine_game_mode_start);
-  lua_setfield(state, -2, "game_mode_start");
-  lua_pushcfunction(state, &lua_engine_game_mode_pause);
-  lua_setfield(state, -2, "game_mode_pause");
-  lua_pushcfunction(state, &lua_engine_game_mode_end);
-  lua_setfield(state, -2, "game_mode_end");
-  lua_pushcfunction(state, &lua_engine_game_mode_state);
-  lua_setfield(state, -2, "game_mode_state");
-  lua_pushcfunction(state, &lua_engine_game_mode_set_rule);
-  lua_setfield(state, -2, "game_mode_set_rule");
-  lua_pushcfunction(state, &lua_engine_game_mode_get_rule);
-  lua_setfield(state, -2, "game_mode_get_rule");
-  lua_pushcfunction(state, &lua_engine_game_mode_max_players);
-  lua_setfield(state, -2, "game_mode_max_players");
-
-  lua_pushcfunction(state, &lua_engine_game_state_set_number);
-  lua_setfield(state, -2, "game_state_set_number");
-  lua_pushcfunction(state, &lua_engine_game_state_get_number);
-  lua_setfield(state, -2, "game_state_get_number");
-  lua_pushcfunction(state, &lua_engine_game_state_set_string);
-  lua_setfield(state, -2, "game_state_set_string");
-  lua_pushcfunction(state, &lua_engine_game_state_get_string);
-  lua_setfield(state, -2, "game_state_get_string");
-  lua_pushcfunction(state, &lua_engine_game_state_has);
-  lua_setfield(state, -2, "game_state_has");
-  lua_pushcfunction(state, &lua_engine_game_state_clear);
-  lua_setfield(state, -2, "game_state_clear");
 
   lua_pushcfunction(state, &lua_engine_profiler_enable);
   lua_setfield(state, -2, "profiler_enable");
@@ -491,7 +458,7 @@ bool initialize_scripting() noexcept {
     shutdown_scripting();
     return false;
   }
-  register_cheat_commands();
+  register_console_commands();
 
   refresh_lua_hook();
   return true;
@@ -533,7 +500,6 @@ void reset_run_state() noexcept {
   reset_mesh_material_bindings();
   clear_deferred_mutations();
   reset_scene_bindings();
-  reset_cheat_bindings();
   reset_entity_pool_bindings();
   reset_game_bindings();
   reset_clock_bindings();
@@ -710,6 +676,11 @@ std::size_t active_entity_pool_count() noexcept { return pool_slot_count(); }
 /// the table is capped and overflow is logged.
 void watch_script_file(const char *path) noexcept {
   if ((path == nullptr) || (path[0] == '\0')) {
+    return;
+  }
+  // The watch table re-reads the file on change, so it keeps to the jail
+  // every other script path does.
+  if (!script_path_in_jail(path, "watch_script_file")) {
     return;
   }
 

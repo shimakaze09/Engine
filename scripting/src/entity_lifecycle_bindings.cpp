@@ -7,7 +7,6 @@
 #include "binding_util.h"
 #include "deferred_mutations.h"
 #include "entity_handle.h"
-#include "game_bindings.h"
 #include "lua_state.h"
 #include "reload_transaction.h"
 #include "runtime_binding.h"
@@ -71,14 +70,7 @@ int lua_engine_destroy_entity(lua_State *state) noexcept {
     return 1;
   }
 
-  // Ownership is released only once the destroy is applied or committed to
-  // the deferred queue: a rejected destroy must leave the entity alive AND
-  // still possessed rather than silently unpossessing a live pawn.
-  const bool ok = apply_or_queue_destroy_entity(entity);
-  if (ok) {
-    clear_player_controller_entity(entity);
-  }
-  lua_pushboolean(state, ok ? 1 : 0);
+  lua_pushboolean(state, apply_or_queue_destroy_entity(entity) ? 1 : 0);
   return 1;
 }
 

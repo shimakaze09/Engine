@@ -60,8 +60,6 @@ void run(rt::World *world, const sc::RuntimeServices *services) noexcept {
   rt::Transform read{};
   check(!services->get_transform_op(world, first, &read),
         "stale handle reads no transform");
-  check(services->get_transform_read_ptr(world, first) == nullptr,
-        "stale handle reads no transform pointer");
   rt::RigidBody body{};
   check(!services->get_rigid_body_op(world, first, &body),
         "stale handle reads no rigid body");
