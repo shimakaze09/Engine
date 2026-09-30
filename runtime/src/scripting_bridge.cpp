@@ -737,12 +737,6 @@ std::size_t scripting_alive_entity_count(runtime::World *world) noexcept {
   return (world != nullptr) ? world->alive_entity_count() : 0U;
 }
 
-runtime::Entity scripting_find_entity_by_index(runtime::World *world,
-                                               std::uint32_t index) noexcept {
-  return (world != nullptr) ? world->find_entity_by_index(index)
-                            : runtime::kInvalidEntity;
-}
-
 runtime::Entity scripting_find_entity_by_name(runtime::World *world,
                                               const char *name) noexcept {
   return ((world != nullptr) && (name != nullptr))
@@ -945,12 +939,6 @@ runtime::Entity scripting_clone_entity_op(runtime::World *world,
 
 // Component reads. Each forwards the handle unchanged; the World's own
 // liveness check refuses a stale one.
-const runtime::Transform *
-scripting_get_transform_read_ptr(runtime::World *world,
-                                 runtime::Entity entity) noexcept {
-  return (world != nullptr) ? world->get_transform_read_ptr(entity) : nullptr;
-}
-
 bool scripting_get_transform_op(runtime::World *world, runtime::Entity entity,
                                 runtime::Transform *outTransform) noexcept {
   return (world != nullptr) && (outTransform != nullptr) &&
@@ -961,12 +949,6 @@ bool scripting_get_rigid_body_op(runtime::World *world, runtime::Entity entity,
                                  runtime::RigidBody *outRigidBody) noexcept {
   return (world != nullptr) && (outRigidBody != nullptr) &&
          world->get_rigid_body(entity, outRigidBody);
-}
-
-const runtime::MeshComponent *
-scripting_get_mesh_component_ptr(runtime::World *world,
-                                 runtime::Entity entity) noexcept {
-  return (world != nullptr) ? world->get_mesh_component_ptr(entity) : nullptr;
 }
 
 bool scripting_get_mesh_component_op(
@@ -1252,7 +1234,6 @@ scripting::RuntimeServices make_scripting_runtime_services() noexcept {
   s.random_double = &scripting_random_double;
   s.random_range = &scripting_random_range;
   s.seed_random = &scripting_seed_random;
-  s.find_entity_by_index = &scripting_find_entity_by_index;
   s.find_entity_by_name = &scripting_find_entity_by_name;
   s.find_entity_by_persistent_id = &scripting_find_entity_by_persistent_id;
   s.persistent_id = &scripting_persistent_id;
@@ -1266,10 +1247,8 @@ scripting::RuntimeServices make_scripting_runtime_services() noexcept {
   s.for_each_scripted_entity = &scripting_for_each_scripted_entity;
   s.has_begun_play = &scripting_has_begun_play;
   s.mark_begin_play_done = &scripting_mark_begin_play_done;
-  s.get_transform_read_ptr = &scripting_get_transform_read_ptr;
   s.get_transform_op = &scripting_get_transform_op;
   s.get_rigid_body_op = &scripting_get_rigid_body_op;
-  s.get_mesh_component_ptr = &scripting_get_mesh_component_ptr;
   s.get_mesh_component_op = &scripting_get_mesh_component_op;
   s.get_name_component_op = &scripting_get_name_component_op;
   s.get_collider_op = &scripting_get_collider_op;

@@ -116,8 +116,6 @@ struct RuntimeServices final {
                                std::int64_t maximum) noexcept = nullptr;
   void (*seed_random)(runtime::World *world,
                       std::uint64_t seed) noexcept = nullptr;
-  core::Entity (*find_entity_by_index)(runtime::World *world,
-                                       std::uint32_t index) noexcept = nullptr;
   core::Entity (*find_entity_by_name)(runtime::World *world,
                                       const char *name) noexcept = nullptr;
   core::Entity (*find_entity_by_persistent_id)(
@@ -156,15 +154,11 @@ struct RuntimeServices final {
                                core::Entity entity) noexcept = nullptr;
 
   // Component reads.
-  const runtime::Transform *(*get_transform_read_ptr)(
-      runtime::World *world, core::Entity entity) noexcept = nullptr;
   bool (*get_transform_op)(runtime::World *world, core::Entity entity,
                            runtime::Transform *outTransform) noexcept = nullptr;
   bool (*get_rigid_body_op)(runtime::World *world, core::Entity entity,
                             runtime::RigidBody *outRigidBody) noexcept =
       nullptr;
-  const runtime::MeshComponent *(*get_mesh_component_ptr)(
-      runtime::World *world, core::Entity entity) noexcept = nullptr;
   bool (*get_mesh_component_op)(
       runtime::World *world, core::Entity entity,
       runtime::MeshComponent *outComponent) noexcept = nullptr;
