@@ -14,6 +14,7 @@
 #include "engine/core/vfs.h"
 #include "engine/editor/editor.h"
 #include "engine/renderer/asset_database.h"
+#include "engine/renderer/material_inheritance.h"
 #include "engine/runtime/editor_bridge.h"
 #include "engine/runtime/service_registry.h"
 #include "engine/runtime/world.h"
@@ -31,7 +32,8 @@ using namespace engine::editor;
 
 constexpr const char *kMountPrefix = "edmatpanel";
 constexpr const char *kOsPath = "editor_material_edit_test.json";
-constexpr const char *kVirtualPath = "edmatpanel/editor_material_edit_test.json";
+constexpr const char *kVirtualPath =
+    "edmatpanel/editor_material_edit_test.json";
 
 bool exactly_equal(float lhs, float rhs) noexcept { return lhs == rhs; }
 
@@ -86,7 +88,7 @@ struct MaterialEditScope final {
       new (std::nothrow) engine::content::AssetCatalog()};
 
   MaterialEditScope() noexcept
-      : database(new (std::nothrow) engine::renderer::AssetDatabase()) {
+      : database(new(std::nothrow) engine::renderer::AssetDatabase()) {
     service.database = database.get();
     service.catalog = serviceCatalog.get();
     engine::runtime::set_editor_asset_service(&service);
@@ -223,7 +225,8 @@ int check_save_and_reload() noexcept {
   const engine::renderer::Material before = state.buffer;
   const engine::renderer::MaterialTextureSlots beforeSlots = state.textureSlots;
   state.buffer.roughness = 0.77F;
-  material_editor_apply_frame(before, beforeSlots, true, false); // ends immediately
+  material_editor_apply_frame(before, beforeSlots, true,
+                              false); // ends immediately
 
   if (!save_material_editor() || material_editor_is_dirty()) {
     return finish(23);
@@ -382,8 +385,8 @@ int check_world_clear_resets_editor() noexcept {
     return finish(41);
   }
 
-  std::unique_ptr<engine::runtime::World> world(
-      new (std::nothrow) engine::runtime::World());
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
   if (world == nullptr) {
     return finish(42);
   }
@@ -398,8 +401,7 @@ int check_world_clear_resets_editor() noexcept {
   // Leave a gesture in flight so the reset path (not close's finalize) is
   // what must handle it.
   const engine::renderer::Material beforeParams = state.buffer;
-  const engine::renderer::MaterialTextureSlots beforeSlots =
-      state.textureSlots;
+  const engine::renderer::MaterialTextureSlots beforeSlots = state.textureSlots;
   state.buffer.roughness = 0.7F;
   material_editor_apply_frame(beforeParams, beforeSlots, true, true);
   if (!state.gestureActive) {
@@ -421,6 +423,82 @@ int check_world_clear_resets_editor() noexcept {
   }
 
   return finish(0);
+}
+
+// Moves one field of any type the material tables list to a different
+// value, so the table-driven check below needs no per-field code.
+void perturb(float *value) noexcept { *value += 0.25F; }
+void perturb(engine::math::Vec3 *value) noexcept { value->x += 0.25F; }
+void perturb(engine::math::Vec2 *value) noexcept { value->x += 0.25F; }
+void perturb(engine::renderer::ShadingModel *value) noexcept {
+  *value = (*value == engine::renderer::ShadingModel::Toon)
+               ? engine::renderer::ShadingModel::Pbr
+               : engine::renderer::ShadingModel::Toon;
+}
+void perturb(engine::renderer::AlphaMode *value) noexcept {
+  *value = (*value == engine::renderer::AlphaMode::Mask)
+               ? engine::renderer::AlphaMode::Opaque
+               : engine::renderer::AlphaMode::Mask;
+}
+
+/// One gesture that changes only `field` of the open material must leave
+/// exactly one undo step and an unsaved document, and its undo must bring
+/// the buffer back. Returns 0 or a failure code offset by `base`.
+template <typename Mutate>
+int check_single_field_gesture(int base, Mutate mutate) noexcept {
+  if (!write_file(kOsPath, "{\"version\":4,\"roughness\":0.3}")) {
+    return base + 1;
+  }
+  MaterialEditScope scope;
+  const auto finish = [&](int result) noexcept {
+    remove_file(kOsPath);
+    return result;
+  };
+  if (!scope.valid()) {
+    return finish(base + 2);
+  }
+  open_material_editor(kVirtualPath);
+  MaterialEditorState &state = material_editor_state();
+  if (!state.found || material_editor_is_dirty()) {
+    return finish(base + 3);
+  }
+  const engine::renderer::Material before = state.buffer;
+  const engine::renderer::MaterialTextureSlots beforeSlots = state.textureSlots;
+  mutate(&state.buffer);
+  material_editor_apply_frame(before, beforeSlots, true, false);
+  if (!material_editor_history().can_undo()) {
+    return finish(base + 4); // the change left no undo step
+  }
+  if (!material_editor_is_dirty()) {
+    return finish(base + 5); // the change left the document reading saved
+  }
+  // Undo restores the live record, which is what the panel re-reads.
+  if (!material_editor_history().undo() ||
+      (engine::renderer::material_changed_fields(
+           before, beforeSlots,
+           engine::runtime::editor_load_material(kVirtualPath).params,
+           beforeSlots) != 0U)) {
+    return finish(base + 6); // undo did not bring the field back
+  }
+  return finish(0);
+}
+
+/// EXPECTATION (#1054): every authored parameter the material table lists
+/// -- the shading model included -- is an undoable, dirtying edit on its
+/// own. Driven from the table, so a field added later is covered too.
+int check_every_field_is_an_undo_step() noexcept {
+  int base = 100;
+  int result = 0;
+#define ENGINE_CHECK_FIELD(name, member, key)                                  \
+  if (result == 0) {                                                           \
+    result = check_single_field_gesture(                                       \
+        base,                                                                  \
+        [](engine::renderer::Material *m) noexcept { perturb(&m->member); });  \
+    base += 10;                                                                \
+  }
+  ENGINE_MATERIAL_PARAM_FIELDS(ENGINE_CHECK_FIELD)
+#undef ENGINE_CHECK_FIELD
+  return result;
 }
 
 int main() {
@@ -447,6 +525,9 @@ int main() {
   }
   if (result == 0) {
     result = check_undo_returns_field_to_parent();
+  }
+  if (result == 0) {
+    result = check_every_field_is_an_undo_step();
   }
 
   engine::core::shutdown_vfs();
