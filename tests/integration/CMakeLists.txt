@@ -1894,3 +1894,18 @@ if(TARGET engine_validate)
         engine_validate_cli_refuses_missing_project
         PROPERTIES LABELS "integration" TIMEOUT 60)
 endif()
+
+# Every committed scene, prefab and material is what the engine writes.
+engine_add_test_executable(engine_integration_canonical_documents
+    SOURCES
+    canonical_documents_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_renderer
+    engine_content
+    engine_core
+    COMPILE_DEFINITIONS
+    "ENGINE_SOURCE_ROOT=\"${CMAKE_SOURCE_DIR}\""
+    LABELS
+    integration
+)

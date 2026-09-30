@@ -258,6 +258,16 @@ nothing invents an identity an asset does not have. A material names
 its parent and textures the same way (material schema v4). Not yet true
 of script and animation-controller paths (#627).
 
+Scenes, prefabs and materials are written one field per line
+(`core::JsonLayout::Lines`: an object member per line, a vector or colour
+on its member's line, each entity on its own lines, keys in registry
+order, floats in the fewest digits that read back as the same float), as
+Unity's text scenes are, so a diff names the field that changed and two
+authors' edits to different fields merge. In-memory snapshots stay compact.
+Every committed document is in exactly the form the engine writes
+(`engine_integration_canonical_documents`, whose `--rewrite` argument
+brings a hand-edited or generated one into it).
+
 An authored document's schema version gate is exact: the one current
 revision loads, an older or newer one is refused, and a document naming
 no revision is refused with them (the input map still defaults a missing

@@ -727,9 +727,9 @@ int verify_child_prefab_instantiates_as_root() {
     return 505;
   }
   char foreign[48] = {};
-  std::snprintf(foreign, sizeof(foreign), "\"parentId\":%u",
+  std::snprintf(foreign, sizeof(foreign), "\"parentId\": %u",
                 static_cast<unsigned>(parentId));
-  if ((std::strstr(text, "\"parentId\":0") == nullptr) ||
+  if ((std::strstr(text, "\"parentId\": 0") == nullptr) ||
       (std::strstr(text, foreign) != nullptr)) {
     return 506;
   }

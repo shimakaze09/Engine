@@ -156,7 +156,7 @@ bool save_material_asset(const content::AssetCatalog *catalog,
     return log_save_error(virtualPath, "invalid arguments");
   }
 
-  core::JsonWriter writer{};
+  core::JsonWriter writer{core::JsonLayout::Lines};
   writer.begin_object();
   writer.write_uint("version", kMaterialDocumentVersion);
   const bool hasParent =

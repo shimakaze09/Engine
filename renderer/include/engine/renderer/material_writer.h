@@ -24,8 +24,9 @@ bool find_material_parent_virtual_path(const content::AssetCatalog *catalog,
                                        char *outPath,
                                        std::size_t outPathCapacity) noexcept;
 
-/// Serializes `params`/`textureSlots` as a material document and writes it
-/// to the OS path behind `virtualPath` with staged atomic replacement.
+/// Serializes `params`/`textureSlots` as a material document, one field per
+/// line, and writes it to the OS path behind `virtualPath` with staged
+/// atomic replacement.
 /// `parentVirtualPath` may be null/empty for no parent. With no parent every
 /// field is written; with one, only the fields `overriddenFields`
 /// (material_field bits, see material_overrides) names, so the saved

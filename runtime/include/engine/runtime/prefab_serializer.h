@@ -10,7 +10,8 @@ using engine::core::Entity;
 
 class World;
 
-// Save a single entity and all its components to a JSON prefab file. A
+// Save a single entity and all its components to a JSON prefab file, one
+// field per line as a scene file is. A
 // path under a mounted virtual prefix names the mounted file wherever the
 // process was started; any other path is an OS path. Returns false and
 // logs on error.

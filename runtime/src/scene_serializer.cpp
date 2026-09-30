@@ -446,8 +446,6 @@ bool serialize_scene_to_writer(const World &world,
 
     writer.begin_object();
     writer.write_uint(kPersistentIdKey, world.persistent_id(entity));
-    writer.write_uint("index", entity.index);
-    writer.write_uint("generation", entity.generation);
 
     writer.write_key(kComponentsKey);
     writer.begin_object();
@@ -576,7 +574,8 @@ bool save_scene(const World &world, const char *path) noexcept {
     return false;
   }
 
-  core::JsonWriter writer{};
+  // A scene file is read and merged by people: one field per line.
+  core::JsonWriter writer{core::JsonLayout::Lines};
   if (!serialize_scene_to_writer(world, &writer)) {
     return false;
   }
