@@ -1,8 +1,10 @@
 // Implements the console commands the scripting system registers: spawn,
-// which instantiates a prefab through the runtime bridge.
+// which instantiates a prefab through the runtime bridge, from a path kept
+// to the same VFS jail as every script path.
 
 #include "console_commands.h"
 
+#include "binding_util.h"
 #include "runtime_binding.h"
 
 #include <cstdio>
@@ -18,6 +20,11 @@ void cmd_spawn(const char *const *args, int argCount,
                void * /*userData*/) noexcept {
   if (argCount < 2) {
     core::console_print("Usage: spawn <prefab> [x y z]");
+    return;
+  }
+  if (!script_path_in_jail(args[1], "spawn")) {
+    core::console_print("Spawn refused: the prefab path must stay inside the "
+                        "project (relative, no '..')");
     return;
   }
   if (!runtime_bound() ||
