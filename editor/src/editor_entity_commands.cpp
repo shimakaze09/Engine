@@ -19,6 +19,7 @@
 #include <utility>
 #include <vector>
 
+#include "engine/content/asset_catalog.h"
 #include "engine/content/asset_metadata.h"
 #include "engine/core/logging.h"
 #include "engine/editor/editor_camera.h"
@@ -407,32 +408,35 @@ primitive_spawn_desc(EditorPrimitive primitive) noexcept {
   switch (primitive) {
   case EditorPrimitive::Cube:
     desc.name = "Cube";
-    desc.builtinPath = "builtin://cube";
+    desc.builtinPath = content::builtin_mesh_path(content::BuiltinMesh::Cube);
     break;
   case EditorPrimitive::Sphere:
     desc.name = "Sphere";
-    desc.builtinPath = "builtin://sphere";
+    desc.builtinPath = content::builtin_mesh_path(content::BuiltinMesh::Sphere);
     desc.shape = math::PrimitiveShape::Sphere;
     break;
   case EditorPrimitive::Cylinder:
     desc.name = "Cylinder";
-    desc.builtinPath = "builtin://cylinder";
+    desc.builtinPath =
+        content::builtin_mesh_path(content::BuiltinMesh::Cylinder);
     desc.shape = math::PrimitiveShape::Cylinder;
     break;
   case EditorPrimitive::Capsule:
     desc.name = "Capsule";
-    desc.builtinPath = "builtin://capsule";
+    desc.builtinPath =
+        content::builtin_mesh_path(content::BuiltinMesh::Capsule);
     desc.groundY = 1.0F;
     desc.shape = math::PrimitiveShape::Capsule;
     break;
   case EditorPrimitive::Pyramid:
     desc.name = "Pyramid";
-    desc.builtinPath = "builtin://pyramid";
+    desc.builtinPath =
+        content::builtin_mesh_path(content::BuiltinMesh::Pyramid);
     desc.shape = math::PrimitiveShape::Pyramid;
     break;
   case EditorPrimitive::Plane:
     desc.name = "Plane";
-    desc.builtinPath = "builtin://plane";
+    desc.builtinPath = content::builtin_mesh_path(content::BuiltinMesh::Plane);
     // The spawn lands the plane's surface on zero, wherever the mesh puts
     // it; its collider's top meets that surface by the runtime's own
     // description. Subtracted from zero rather than negated: negating a

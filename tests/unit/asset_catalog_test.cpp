@@ -147,6 +147,45 @@ std::size_t count_of_type(const engine::content::AssetCatalog &store,
   return engine::content::query_assets_by_type(&store, tag, ids, 64U);
 }
 
+/// Every built-in mesh is catalogued as a Mesh at its "builtin://" path,
+/// found by the reference its path derives, so a scene naming one resolves
+/// in a catalog that no GPU mesh has touched (engine_validate's).
+void test_builtin_mesh_records() noexcept {
+  using engine::content::BuiltinMesh;
+  std::unique_ptr<engine::content::AssetCatalog> catalog(
+      new (std::nothrow) engine::content::AssetCatalog());
+  if (catalog == nullptr) {
+    g_tests.fail("the built-in store could be allocated");
+    return;
+  }
+  const auto count = static_cast<std::size_t>(BuiltinMesh::Count);
+  bool allFound = true;
+  for (std::size_t i = 0U; i < count; ++i) {
+    const auto mesh = static_cast<BuiltinMesh>(i);
+    const char *path = engine::content::builtin_mesh_path(mesh);
+    const bool registered =
+        engine::content::register_builtin_mesh_record(catalog.get(), mesh);
+    const engine::content::AssetMetadata *found =
+        (path == nullptr) ? nullptr
+                          : engine::content::find_asset_metadata_by_ref(
+                                catalog.get(),
+                                engine::content::asset_ref_primary(
+                                    engine::content::builtin_asset_guid(path)));
+    allFound = allFound && registered && (found != nullptr) &&
+               (found->typeTag == engine::content::AssetTypeTag::Mesh) &&
+               (std::strcmp(found->filePath.data(), path) == 0);
+  }
+  check(allFound, "every built-in mesh is catalogued at its path, by its ref");
+  check(engine::content::builtin_mesh_path(BuiltinMesh::Count) == nullptr,
+        "a value past the enum names no built-in");
+  check(!engine::content::register_builtin_mesh_record(catalog.get(),
+                                                       BuiltinMesh::Count),
+        "a value past the enum registers nothing");
+  check(engine::content::register_builtin_mesh_record(catalog.get(),
+                                                      BuiltinMesh::Cube),
+        "registering a built-in again keeps its record");
+}
+
 void test_invalid_arguments(engine::content::AssetCatalog *store) noexcept {
   using engine::content::MountRegistration;
   using engine::content::register_mounted_assets;
@@ -963,6 +1002,7 @@ int main() {
   test_labels_become_tags();
   test_identity_claimed_across_mounts();
   test_tilde_folders_are_not_assets();
+  test_builtin_mesh_records();
 
   remove_tree();
   return g_tests.finish("asset catalog tests");

@@ -21,6 +21,14 @@ struct ContentMount final {
 /// refuses a list longer than this.
 inline constexpr std::size_t kMaxPackageMounts = 16U;
 
+/// Where the engine's own content lives when a config leaves engineRoot
+/// empty (EngineConfig::engineRoot): the ENGINE_ROOT environment
+/// variable, then engine_assets beside the executable, then engine_assets
+/// in the working directory. Staged into `out`; the last candidate is
+/// returned even when it does not exist, so a caller that mounts it
+/// refuses it with the path in its message.
+const char *resolve_engine_root(char *out, std::size_t capacity) noexcept;
+
 /// Describes app/runtime startup paths and core ownership.
 struct EngineConfig final {
   core::CoreConfig core{};

@@ -218,12 +218,6 @@ void close_run_registries() noexcept { runtime::reset_anim_controllers(); }
 
 } // namespace
 
-namespace {
-
-/// Where the engine's own content lives when the config leaves engineRoot
-/// empty; see EngineConfig::engineRoot. Staged into `out`; the last
-/// candidate is returned even when missing, so the mount stage refuses it
-/// with the path in its message.
 const char *resolve_engine_root(char *out, std::size_t capacity) noexcept {
   constexpr const char *kEngineDirectory = "engine_assets";
   if (core::non_empty_env("ENGINE_ROOT", out, capacity)) {
@@ -244,6 +238,8 @@ const char *resolve_engine_root(char *out, std::size_t capacity) noexcept {
   std::snprintf(out, capacity, "%s", kEngineDirectory);
   return out;
 }
+
+namespace {
 
 /// False, with an Error naming the field, when `config` runs no project
 /// (an empty asset root) yet names project content: a main script, a

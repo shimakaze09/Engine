@@ -7,6 +7,10 @@
 #include "engine/core/file_read.h"
 #include "engine/core/validation_report.h"
 
+namespace engine::content {
+struct AssetCatalog;
+} // namespace engine::content
+
 namespace engine::runtime {
 
 class World;
@@ -63,6 +67,19 @@ bool load_scene(World &world, const char *path,
 bool load_scene(World &world, const char *buffer, std::size_t size,
                 SceneTeardownHook beforeTeardown = nullptr,
                 core::ValidationReport *outReport = nullptr) noexcept;
+/// Checks every asset reference the world's components carry — a mesh's
+/// mesh and material, a sky light's environment, a foliage patch's LOD
+/// meshes — against `catalog`, and records each one that names no
+/// catalogued asset as a Warning in *report (when given) and a logged
+/// diagnostic, as load_scene records a path that names no file:
+/// `missing_mesh`, `missing_material`, `missing_environment`, or
+/// `wrong_asset_type` for one naming an asset of another type. The world
+/// is not changed. The runtime draws such an entity without the asset;
+/// engine_validate, which catalogues a project as the engine does, fails
+/// on any finding.
+void validate_scene_asset_references(const World &world,
+                                     const content::AssetCatalog &catalog,
+                                     core::ValidationReport *report) noexcept;
 /// Resets this object back to its reusable empty state for world.
 void reset_world(World &world,
                  SceneTeardownHook beforeTeardown = nullptr) noexcept;

@@ -1899,15 +1899,53 @@ if(TARGET engine_validate)
     add_test(NAME engine_validate_cli_refuses_missing_project
         COMMAND $<TARGET_FILE:engine_validate>
             --project ${CMAKE_BINARY_DIR}/engine_validate_no_project)
-    # Exit 0 means every listed scene loaded with no Error finding.
+    # Exit 0 means every mount indexed cleanly and every listed scene
+    # loaded with every reference resolving.
     set_tests_properties(engine_validate_cli_validates_project
-        PROPERTIES FAIL_REGULAR_EXPRESSION "did not load|[1-9][0-9]* error\\(s\\)")
+        PROPERTIES FAIL_REGULAR_EXPRESSION
+            "did not load|does not index cleanly|[1-9][0-9]* finding\\(s\\)")
     set_tests_properties(engine_validate_cli_refuses_missing_project
         PROPERTIES PASS_REGULAR_EXPRESSION "no project found")
+    # A scene naming a material, a mesh and an environment the catalog does
+    # not hold, and a mesh reference that names a scene: each is named, and
+    # the tool fails. The built-in cube it also names resolves.
+    set(_validate_data ${CMAKE_SOURCE_DIR}/tests/data/validate)
+    add_test(NAME engine_validate_cli_names_dangling_asset_refs
+        COMMAND $<TARGET_FILE:engine_validate>
+            --assets ${_validate_data}/dangling
+            ${_validate_data}/dangling/broken.scene)
+    set_tests_properties(engine_validate_cli_names_dangling_asset_refs
+        PROPERTIES PASS_REGULAR_EXPRESSION
+            "missing_material 1111.*missing_mesh 2222.*missing_environment 3333.*wrong_asset_type 5a1d.*4 finding")
+    add_test(NAME engine_validate_cli_fails_dangling_asset_refs
+        COMMAND $<TARGET_FILE:engine_validate>
+            --assets ${_validate_data}/dangling
+            ${_validate_data}/dangling/broken.scene)
+    # A content file with no sidecar has no identity: the mount does not
+    # index cleanly, and that fails the tool although the scene is clean.
+    add_test(NAME engine_validate_cli_names_unindexed_mount
+        COMMAND $<TARGET_FILE:engine_validate>
+            --assets ${_validate_data}/unidentified
+            ${_validate_data}/unidentified/clean.scene)
+    set_tests_properties(engine_validate_cli_names_unindexed_mount
+        PROPERTIES PASS_REGULAR_EXPRESSION "does not index cleanly")
+    add_test(NAME engine_validate_cli_fails_unindexed_mount
+        COMMAND $<TARGET_FILE:engine_validate>
+            --assets ${_validate_data}/unidentified
+            ${_validate_data}/unidentified/clean.scene)
+    set_tests_properties(
+        engine_validate_cli_fails_dangling_asset_refs
+        engine_validate_cli_fails_unindexed_mount
+        PROPERTIES WILL_FAIL TRUE)
     set_tests_properties(
         engine_validate_cli_validates_project
         engine_validate_cli_refuses_missing_project
-        PROPERTIES LABELS "integration" TIMEOUT 60)
+        engine_validate_cli_names_dangling_asset_refs
+        engine_validate_cli_fails_dangling_asset_refs
+        engine_validate_cli_names_unindexed_mount
+        engine_validate_cli_fails_unindexed_mount
+        PROPERTIES LABELS "integration" TIMEOUT 60
+            ENVIRONMENT "ENGINE_ROOT=${ENGINE_ENGINE_ASSET_OUTPUT_DIR}")
 endif()
 
 # Every committed scene, prefab and material is what the engine writes.
