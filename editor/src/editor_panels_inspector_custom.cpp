@@ -390,7 +390,7 @@ std::size_t add_component_menu_candidates(runtime::Entity entity,
         ComponentEditType::ENGINE_ICR_ALIAS(Type);                             \
     const ComponentMetadata *meta = component_metadata_for(editType);          \
     if ((count < capacity) && !has_component_of_type(editType, entity) &&      \
-        ((meta == nullptr) || meta->offeredInAddMenu)) {                       \
+        ((meta == nullptr) || (meta->notOfferedReason == nullptr))) {          \
       out[count++] = editType;                                                 \
     }                                                                          \
   }

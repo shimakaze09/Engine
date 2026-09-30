@@ -74,11 +74,13 @@ struct ComponentMetadata final {
   const char *displayName = nullptr;
   const char *category = "General";
   const char *tooltip = nullptr;
-  /// False keeps a component no pass consumes yet out of the Add Component
-  /// menu: an entity that already carries one still shows it in the
-  /// Inspector and can remove it, but an author is not offered a component
-  /// that changes nothing.
-  bool offeredInAddMenu = true;
+  /// Why the Add Component menu does not offer this component, or null
+  /// when it does. A component is withheld only with its reason written
+  /// here -- one no pass consumes yet changes nothing -- so none can be
+  /// hidden by an unexplained flag and forgotten once it works. An entity
+  /// that already carries a withheld component still shows it in the
+  /// Inspector and can remove it.
+  const char *notOfferedReason = nullptr;
 };
 
 /// Looks up component metadata by core::TypeDescriptor name
