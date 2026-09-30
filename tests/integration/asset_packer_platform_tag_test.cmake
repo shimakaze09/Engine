@@ -1,5 +1,6 @@
-# Verifies the platform tag in the cook key (issue #81): same-platform
-# reruns skip, a different --platform recooks, a pre-platform stamp
+# Verifies the platform tag in the cook key (issue #81): a default cook
+# carries the host-neutral tag, same-platform reruns skip, a different
+# --platform recooks, a pre-platform stamp
 # (no PLATFORM line) invalidates exactly once, repeated cooks stay
 # byte-identical, and a whitespace tag is rejected.
 
@@ -25,8 +26,12 @@ if(NOT result EQUAL 0)
     message(FATAL_ERROR "initial cook failed: ${cook_error}")
 endif()
 file(READ "${stamp}" stamp_text)
-if(NOT stamp_text MATCHES "PLATFORM [^ \n]+\n")
-    message(FATAL_ERROR "stamp carries no platform tag: ${stamp_text}")
+# A default cook is keyed to no host (#1093): the stamp is committed, and
+# one naming the OS that cooked it would be rewritten by every cook on
+# another.
+if(NOT stamp_text MATCHES "\nPLATFORM Any\n")
+    message(FATAL_ERROR
+        "a default cook must carry the neutral platform tag: ${stamp_text}")
 endif()
 
 # Boundary: rerun under the same default platform must skip the cook.

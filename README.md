@@ -511,6 +511,10 @@ Tool behavior:
   (`engine_integration_asset_packer_uncooked_primitives`)
 - Writes `.mesh`, `.cookmeta`, `.cookstamp` and a collision `.hull`, plus
   `.skel` and `<clip>.anim` for rigged input
+- Keys a cook to no host: the stamp reads `PLATFORM Any`, so a cook
+  committed on one OS is up to date on every other, and
+  `tools/check_asset_identity.py` fails a committed stamp keyed to a
+  platform. `--platform <tag>` keys a target-specific cook
 - Generates asset thumbnails, and records in the cook stamp every file the
   cook read beside the source, so an edit to one forces a recook
 

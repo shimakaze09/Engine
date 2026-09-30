@@ -302,7 +302,7 @@ int main(int argc, char **argv) {
   bool forceRepack = false;
   bool verifyOutputs = false;
   bool sweepOrphans = false;
-  const char *platformTag = kCookPlatformTag;
+  const char *platformTag = kAssetCookPlatformTag;
   std::vector<std::string> dependencyPaths{};
   for (int i = 3; i < argc; ++i) {
     if (std::strcmp(argv[i], "--dep") == 0) {

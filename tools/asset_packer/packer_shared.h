@@ -60,9 +60,20 @@ inline constexpr const char *kMeshCookLogicRevision = "mesh-cook-logic-1";
 #define ENGINE_COOK_PLATFORM "Unknown"
 #endif
 
-/// Default target-platform tag in the cook key: stamps for one
-/// platform never certify a cook for another; overridable via --platform.
+/// The build's target platform: the shader cook's default tag, since the
+/// profiles it compiles depend on the target and its outputs live in the
+/// build tree, never in a committed file.
 inline constexpr const char *kCookPlatformTag = ENGINE_COOK_PLATFORM;
+
+/// The asset cook's default tag. A mesh, skeleton or clip cooks to the
+/// same bytes for every target, and those outputs and their stamps are
+/// committed beside their sources, so the host that ran the cook must not
+/// enter its key: a cook on Windows would otherwise rewrite every stamp a
+/// Linux cook committed, and the next Linux cook flip them back. Unity
+/// and Godot keep imports out of version control per machine, and
+/// Unreal keys derived data by a target chosen explicitly, never by the
+/// host. An explicit --platform still keys a target-specific cook.
+inline constexpr const char *kAssetCookPlatformTag = "Any";
 
 /// The packer's name for the one shared definition in content. Authored
 /// in the source's ".meta" sidecar, never invented here.
