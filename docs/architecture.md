@@ -268,6 +268,16 @@ Every committed document is in exactly the form the engine writes
 (`engine_integration_canonical_documents`, whose `--rewrite` argument
 brings a hand-edited or generated one into it).
 
+An entity's persistent id is what a document's parent links name. The
+editor draws the ids of entities it authors from a stream over the whole
+32-bit range seeded with OS entropy (`PersistentIdSource::Scattered`), as
+Unity's scene fileIDs are random, so two authors who each add an entity on
+separate branches do not both take the next id, and an id a saved scene
+once held does not come back after a reload. A play session, and every
+runtime without an editor, draws sequentially, so what a session spawns
+is deterministic; a scene load keeps the World's policy
+(`engine_integration_persistent_id_policy`).
+
 An authored document's schema version gate is exact: the one current
 revision loads, an older or newer one is refused, and a document naming
 no revision is refused with them (the input map still defaults a missing

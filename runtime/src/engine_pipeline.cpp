@@ -607,6 +607,9 @@ struct EnginePipeline::Impl final {
   runtime::EngineServiceRegistry serviceRegistry;
   scripting::GameBindingState gameBindingState{};
   std::unique_ptr<runtime::World> world;
+  // The World's id policy while no session runs (the editor draws authored
+  // ids scattered); a play session draws sequentially and gives it back.
+  runtime::PersistentIdPolicy authoringIdPolicy{};
   std::unique_ptr<renderer::CommandBufferBuilder> commandBuffer;
   /// Camera-culled draws the shadow and capture passes still need.
   std::unique_ptr<renderer::CommandBufferBuilder> auxiliaryCommandBuffer;
@@ -1216,6 +1219,12 @@ runtime::PlayTransition inferred_transition(LoopPlayState previous,
 } // namespace
 
 void EnginePipeline::Impl::begin_play_session() noexcept {
+  // Everything a session spawns takes the next sequential id, so a replay
+  // and every worker count see the same ids whatever the author did.
+  authoringIdPolicy = world->persistent_id_policy();
+  runtime::PersistentIdPolicy playIds = authoringIdPolicy;
+  playIds.source = runtime::PersistentIdSource::Sequential;
+  world->set_persistent_id_policy(playIds);
   const char *mainScriptPath = active_config().mainScriptPath;
   if (mainScriptPath != nullptr) {
     scripting::watch_script_file(mainScriptPath);
@@ -1224,6 +1233,7 @@ void EnginePipeline::Impl::begin_play_session() noexcept {
 }
 
 void EnginePipeline::Impl::end_play_session() noexcept {
+  world->set_persistent_id_policy(authoringIdPolicy);
   scripting::dispatch_entity_scripts_end();
   scripting::clear_entity_script_modules();
   scripting::shutdown_scripting();

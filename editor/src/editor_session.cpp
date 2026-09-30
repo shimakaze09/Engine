@@ -835,6 +835,21 @@ void editor_history_redo() noexcept {
   }
 }
 
+void use_authoring_ids(runtime::World *world) noexcept {
+  if (world == nullptr) {
+    return;
+  }
+  runtime::PersistentIdPolicy policy = world->persistent_id_policy();
+  policy.source = runtime::PersistentIdSource::Scattered;
+  if (!core::platform_random_bytes(&policy.streamState,
+                                   sizeof(policy.streamState))) {
+    // No OS entropy: the clock still separates two authors' machines far
+    // better than the next small integer would.
+    policy.streamState = core::platform_ticks_ns();
+  }
+  world->set_persistent_id_policy(policy);
+}
+
 void start_play_mode() noexcept {
   if (editor_session().world == nullptr) {
     return;

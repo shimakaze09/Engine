@@ -1909,3 +1909,12 @@ engine_add_test_executable(engine_integration_canonical_documents
     LABELS
     integration
 )
+
+engine_add_test_executable(engine_integration_persistent_id_policy
+    SOURCES
+    persistent_id_policy_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    LABELS
+    integration
+)
