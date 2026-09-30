@@ -135,7 +135,9 @@ void clear_pending_scene_op() noexcept;
 /// false when the path fails jail/length validation.
 bool request_scene_load(const char *path) noexcept;
 
-// Begin watching a Lua script file for changes (hot-reload).
+// Begin watching a Lua script file for changes (hot-reload). A path
+// outside the VFS jail (absolute, a drive, a backslash or a '..' segment)
+// is refused with a logged Error and the watch table left unchanged.
 void watch_script_file(const char *path) noexcept;
 /// Count of scripts currently in the hot-reload watch table; unchanged by
 /// a rejected (over-long or jailed) watch_script_file call.

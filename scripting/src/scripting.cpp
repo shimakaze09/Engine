@@ -678,6 +678,11 @@ void watch_script_file(const char *path) noexcept {
   if ((path == nullptr) || (path[0] == '\0')) {
     return;
   }
+  // The watch table re-reads the file on change, so it keeps to the jail
+  // every other script path does.
+  if (!script_path_in_jail(path, "watch_script_file")) {
+    return;
+  }
 
   for (std::size_t i = 0U; i < g_watchedScriptCount; ++i) {
     if (std::strcmp(g_watchedScripts[i].path, path) == 0) {
