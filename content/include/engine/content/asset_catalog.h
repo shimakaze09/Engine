@@ -284,4 +284,30 @@ MountRegistration register_mounted_assets(AssetCatalog *catalog,
                                           const char *mountPrefix,
                                           const char *osRoot) noexcept;
 
+/// The primitive meshes that ship with the engine under "builtin://".
+/// They carry no sidecar and no file, so no mount walk finds them; the
+/// engine builds their geometry at boot and a validator, which builds
+/// none, still has to know they exist.
+enum class BuiltinMesh : std::uint8_t {
+  Plane,
+  Cube,
+  Sphere,
+  Cylinder,
+  Capsule,
+  Pyramid,
+  GrassTuft,
+  Count,
+};
+
+/// The virtual path of a built-in mesh ("builtin://cube"); nullptr for a
+/// value outside the enum.
+const char *builtin_mesh_path(BuiltinMesh mesh) noexcept;
+
+/// Catalogues a built-in mesh as a Mesh record under its path, identified
+/// by builtin_asset_guid of that path, so a saved reference to it resolves.
+/// A record the id already has is kept. False for a value outside the
+/// enum or a full catalog.
+bool register_builtin_mesh_record(AssetCatalog *catalog,
+                                  BuiltinMesh mesh) noexcept;
+
 } // namespace engine::content

@@ -468,4 +468,41 @@ MountRegistration register_mounted_assets(AssetCatalog *catalog,
   return result;
 }
 
+const char *builtin_mesh_path(BuiltinMesh mesh) noexcept {
+  switch (mesh) {
+  case BuiltinMesh::Plane:
+    return "builtin://plane";
+  case BuiltinMesh::Cube:
+    return "builtin://cube";
+  case BuiltinMesh::Sphere:
+    return "builtin://sphere";
+  case BuiltinMesh::Cylinder:
+    return "builtin://cylinder";
+  case BuiltinMesh::Capsule:
+    return "builtin://capsule";
+  case BuiltinMesh::Pyramid:
+    return "builtin://pyramid";
+  case BuiltinMesh::GrassTuft:
+    return "builtin://grass";
+  case BuiltinMesh::Count:
+  default:
+    return nullptr;
+  }
+}
+
+bool register_builtin_mesh_record(AssetCatalog *catalog,
+                                  BuiltinMesh mesh) noexcept {
+  const char *path = builtin_mesh_path(mesh);
+  if ((catalog == nullptr) || (path == nullptr)) {
+    return false;
+  }
+  AssetMetadata metadata{};
+  metadata.assetId = make_asset_id_from_path(path);
+  metadata.typeTag = AssetTypeTag::Mesh;
+  metadata.ref = asset_ref_primary(builtin_asset_guid(path));
+  write_metadata_path(&metadata.filePath, path);
+  return register_asset_metadata_if_absent(catalog, metadata) !=
+         CatalogInsert::Refused;
+}
+
 } // namespace engine::content

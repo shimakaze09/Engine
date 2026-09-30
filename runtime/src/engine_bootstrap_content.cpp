@@ -12,14 +12,13 @@
 
 #include "engine/content/asset_catalog.h"
 #include "engine/core/logging.h"
-#include "engine/engine.h"
-#include "engine/renderer/material_loader.h"
 #include "engine/core/vfs.h"
+#include "engine/engine.h"
 #include "engine/renderer/asset_manager.h"
+#include "engine/renderer/material_loader.h"
 #include "engine/renderer/mesh_loader.h"
 #include "engine/renderer/mesh_primitives.h"
 #include "engine/runtime/world.h"
-#include "mesh_reference_resolution.h"
 
 namespace engine {
 
@@ -56,7 +55,8 @@ content::AssetId register_builtin_mesh(renderer::GpuMeshRegistry *registry,
                                        renderer::AssetDatabase *database,
                                        content::AssetCatalog *catalog,
                                        const renderer::GpuMesh &mesh,
-                                       const char *builtinPath) noexcept {
+                                       content::BuiltinMesh builtin) noexcept {
+  const char *builtinPath = content::builtin_mesh_path(builtin);
   const renderer::MeshHandle handle = renderer::register_gpu_mesh(registry, mesh);
   if (handle == renderer::kInvalidMeshHandle) {
     return content::kInvalidAssetId;
@@ -69,12 +69,9 @@ content::AssetId register_builtin_mesh(renderer::GpuMeshRegistry *registry,
     return content::kInvalidAssetId;
   }
   // The catalog lists the primitive beside the project's meshes so a
-  // picker offers it and a saved reference to it resolves. Its identity is
-  // derived from its path rather than generated: a built-in ships with the
-  // engine, carries no sidecar, and must be the same asset in every build.
-  static_cast<void>(note_mesh_asset_path(
-      catalog, id, builtinPath,
-      content::asset_ref_primary(content::builtin_asset_guid(builtinPath))));
+  // picker offers it and a saved reference to it resolves; the record is
+  // content's, which engine_validate catalogues the same way.
+  static_cast<void>(content::register_builtin_mesh_record(catalog, builtin));
   const std::uint64_t vertexFloats = mesh.hasUVs ? 8ULL : 6ULL;
   const std::uint64_t sizeEstimate =
       (static_cast<std::uint64_t>(mesh.vertexCount) * vertexFloats *
@@ -121,37 +118,37 @@ bool load_bootstrap_meshes(renderer::AssetManager *assetManager,
   renderer::GpuMesh m{};
   if (renderer::build_plane_mesh(&m)) {
     out->plane = register_builtin_mesh(meshRegistry, assetDatabase, catalog, m,
-                                       "builtin://plane");
+                                       content::BuiltinMesh::Plane);
   }
   m = renderer::GpuMesh{};
   if (renderer::build_cube_mesh(&m)) {
     out->cube = register_builtin_mesh(meshRegistry, assetDatabase, catalog, m,
-                                      "builtin://cube");
+                                      content::BuiltinMesh::Cube);
   }
   m = renderer::GpuMesh{};
   if (renderer::build_sphere_mesh(&m)) {
     out->sphere = register_builtin_mesh(meshRegistry, assetDatabase, catalog, m,
-                                        "builtin://sphere");
+                                        content::BuiltinMesh::Sphere);
   }
   m = renderer::GpuMesh{};
   if (renderer::build_cylinder_mesh(&m)) {
     out->cylinder = register_builtin_mesh(meshRegistry, assetDatabase, catalog,
-                                          m, "builtin://cylinder");
+                                          m, content::BuiltinMesh::Cylinder);
   }
   m = renderer::GpuMesh{};
   if (renderer::build_capsule_mesh(&m)) {
     out->capsule = register_builtin_mesh(meshRegistry, assetDatabase, catalog,
-                                         m, "builtin://capsule");
+                                         m, content::BuiltinMesh::Capsule);
   }
   m = renderer::GpuMesh{};
   if (renderer::build_pyramid_mesh(&m)) {
     out->pyramid = register_builtin_mesh(meshRegistry, assetDatabase, catalog,
-                                         m, "builtin://pyramid");
+                                         m, content::BuiltinMesh::Pyramid);
   }
   m = renderer::GpuMesh{};
   if (renderer::build_grass_tuft_mesh(&m)) {
     out->grass = register_builtin_mesh(meshRegistry, assetDatabase, catalog, m,
-                                       "builtin://grass");
+                                       content::BuiltinMesh::GrassTuft);
   }
 
   // Catalogue the mounts so a saved mesh id maps back to the path its
