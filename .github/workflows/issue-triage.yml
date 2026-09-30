@@ -82,9 +82,16 @@ jobs:
 
             if (context.payload.action === 'labeled' &&
                 context.payload.label.name === 'roadmap') {
-              await github.graphql(
-                'mutation($id: ID!) { pinIssue(input: {issueId: $id}) { issue { number } } }',
+              // Pinning an already pinned issue is an error, so ask first;
+              // relabelling the index must not turn the run red.
+              const state = await github.graphql(
+                'query($id: ID!) { node(id: $id) { ... on Issue { isPinned } } }',
                 { id: issue.node_id });
+              if (!state.node.isPinned) {
+                await github.graphql(
+                  'mutation($id: ID!) { pinIssue(input: {issueId: $id}) { issue { number } } }',
+                  { id: issue.node_id });
+              }
             }
 
             const classified = labels.includes('roadmap') ||
