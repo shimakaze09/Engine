@@ -198,7 +198,7 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
     return false;
   }
 
-  core::JsonWriter w{};
+  core::JsonWriter w{core::JsonLayout::Lines};
   w.begin_object();
   w.write_uint(kSchemaVersionKey, kPrefabVersion);
   w.write_key("components");

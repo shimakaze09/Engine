@@ -1,105 +1,58 @@
 {
- "entities": [
-  {
-   "components": {
-    "CameraComponent": {
-     "active": true,
-     "blendSpeed": 5,
-     "farPlane": 100,
-     "fovRadians": 1.0471976,
-     "nearPlane": 0.1,
-     "orthographicSize": 5,
-     "priority": 0,
-     "projection": 0
+  "version": 6,
+  "entities": [
+    {
+      "persistentId": 1,
+      "components": {
+        "Transform": {
+          "position": [0, 1, 1e+01],
+          "rotation": [0, 0, 0, 1],
+          "scale": [1, 1, 1],
+          "parentId": 0
+        },
+        "name": "Main Camera",
+        "CameraComponent": {
+          "projection": 0,
+          "fovRadians": 1.0471976,
+          "orthographicSize": 5,
+          "nearPlane": 0.1,
+          "farPlane": 1e+02,
+          "priority": 0,
+          "blendSpeed": 5,
+          "active": true
+        }
+      }
     },
-    "Transform": {
-     "parentId": 0,
-     "position": [
-      0,
-      1,
-      10
-     ],
-     "rotation": [
-      0,
-      0,
-      0,
-      1
-     ],
-     "scale": [
-      1,
-      1,
-      1
-     ]
+    {
+      "persistentId": 2,
+      "components": {
+        "Transform": {
+          "position": [0, 3, 0],
+          "rotation": [0, 0, 0, 1],
+          "scale": [1, 1, 1],
+          "parentId": 0
+        },
+        "name": "Directional Light",
+        "LightComponent": {
+          "color": [1, 0.957, 0.839],
+          "direction": [-0.321, -0.766, -0.557],
+          "intensity": 1,
+          "type": 0
+        }
+      }
     },
-    "name": "Main Camera"
-   },
-   "persistentId": 1
-  },
-  {
-   "components": {
-    "LightComponent": {
-     "color": [
-      1,
-      0.957,
-      0.839
-     ],
-     "direction": [
-      -0.321,
-      -0.766,
-      -0.557
-     ],
-     "intensity": 1,
-     "type": 0
-    },
-    "Transform": {
-     "parentId": 0,
-     "position": [
-      0,
-      3,
-      0
-     ],
-     "rotation": [
-      0,
-      0,
-      0,
-      1
-     ],
-     "scale": [
-      1,
-      1,
-      1
-     ]
-    },
-    "name": "Directional Light"
-   },
-   "persistentId": 2
-  },
-  {
-   "components": {
-    "ScriptComponent": "assets/main.lua",
-    "Transform": {
-     "parentId": 0,
-     "position": [
-      0,
-      0,
-      0
-     ],
-     "rotation": [
-      0,
-      0,
-      0,
-      1
-     ],
-     "scale": [
-      1,
-      1,
-      1
-     ]
-    },
-    "name": "Scene Controller"
-   },
-   "persistentId": 3
-  }
- ],
- "version": 6
+    {
+      "persistentId": 3,
+      "components": {
+        "Transform": {
+          "position": [0, 0, 0],
+          "rotation": [0, 0, 0, 1],
+          "scale": [1, 1, 1],
+          "parentId": 0
+        },
+        "name": "Scene Controller",
+        "ScriptComponent": "assets/main.lua"
+      }
+    }
+  ]
 }

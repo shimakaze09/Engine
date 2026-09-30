@@ -19,13 +19,26 @@ struct JsonValue final {
   const char *end = nullptr;
 };
 
+/// How a JsonWriter lays out its document.
+enum class JsonLayout : std::uint8_t {
+  /// No whitespace: in-memory snapshots and messages no person reads.
+  Compact,
+  /// One object member per line, indented two spaces a level, ending in a
+  /// newline. An array of scalars (a vector, a colour) stays on its
+  /// member's line; an array of objects puts each on its own lines. For
+  /// authored documents people diff and merge, as Unity's text scenes put
+  /// one property per line.
+  Lines,
+};
+
 /// Appends JSON into a fixed buffer; failure is sticky (check ok()).
 class JsonWriter final {
 public:
   static constexpr std::size_t kBufferBytes = 256U * 1024U;
   static constexpr std::size_t kMaxBufferBytes = 16U * 1024U * 1024U;
 
-  JsonWriter() noexcept;
+  /// A writer that lays its document out as `layout` says, across resets.
+  explicit JsonWriter(JsonLayout layout = JsonLayout::Compact) noexcept;
   ~JsonWriter() noexcept;
 
   JsonWriter(const JsonWriter &) = delete;
@@ -96,10 +109,15 @@ private:
     ContainerKind kind = ContainerKind::Object;
     bool firstElement = true;
     bool expectingValue = false;
+    /// An array holding an object or array closes on its own line.
+    bool hasContainerChild = false;
   };
 
-  /// Begins the requested operation or profiling range for value.
-  bool begin_value() noexcept;
+  /// Places the next value: its separator and, in the Lines layout, the
+  /// line break a `container` element of an array starts with.
+  bool begin_value(bool container = false) noexcept;
+  /// In the Lines layout, starts a new line indented `depth` levels.
+  bool append_line_break(std::size_t depth) noexcept;
   /// Grows usage bookkeeping; false (sticky failure) on overflow.
   bool ensure_capacity(std::size_t additionalBytes) noexcept;
   /// Appends one raw character.
@@ -110,7 +128,8 @@ private:
   bool append_cstr(const char *value) noexcept;
   /// Appends a string with JSON escaping applied.
   bool append_escaped(const char *value) noexcept;
-  /// Appends a float in round-trip-stable decimal form.
+  /// Appends a float as the fewest significant digits that read back as
+  /// the same float, so an authored 0.15 is written as 0.15.
   bool append_float(float value) noexcept;
   /// Appends a double in round-trip-stable decimal form.
   bool append_double(double value) noexcept;
@@ -131,6 +150,7 @@ private:
   std::size_t m_pos = 0U;
   std::size_t m_depth = 0U;
   bool m_failed = false;
+  JsonLayout m_layout = JsonLayout::Compact;
 };
 
 /// Replaces (or inserts) the value of one top-level field in a JSON

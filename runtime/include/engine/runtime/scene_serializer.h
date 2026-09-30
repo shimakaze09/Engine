@@ -33,12 +33,14 @@ struct SceneSaveBlockers final {
 /// Collects the live state save_scene would refuse to drop.
 SceneSaveBlockers collect_scene_save_blockers(const World &world) noexcept;
 
-/// Saves the world's scene to `path` through a staged atomic replace. A
-/// path under a mounted virtual prefix ("assets/level.scene") names the
-/// mounted file wherever the process was started; any other path is an OS
-/// path, used as it is.
+/// Saves the world's scene to `path` through a staged atomic replace, one
+/// field per line (core::JsonLayout::Lines) so a diff or a merge works per
+/// field. A path under a mounted virtual prefix ("assets/level.scene")
+/// names the mounted file wherever the process was started; any other path
+/// is an OS path, used as it is.
 bool save_scene(const World &world, const char *path) noexcept;
-/// Saves the requested resource for scene.
+/// Saves the scene into `buffer` as compact JSON, for in-memory snapshots
+/// no person reads (the Play snapshot).
 bool save_scene(const World &world, char *buffer, std::size_t capacity,
                 std::size_t *outSize) noexcept;
 /// Fingerprints the document at `path`, resolved as save_scene resolves

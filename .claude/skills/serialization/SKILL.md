@@ -88,8 +88,11 @@ Determinism-sensitive by definition, so:
 
 - Round-trip through the production entry point — never a copied
   serializer model.
-- Byte-identical output for identical input.
-- `-R 'determinism|scene_serializer|scene_version_gate|prefab|component_registry|reflect_wire_key|save_data|project_document|json_object_members'`
+- Byte-identical output for identical input. A writer change re-saves the
+  committed scenes, prefabs and materials in the same change
+  (`engine_integration_canonical_documents --rewrite`), so the test that
+  holds them to the engine's form stays green.
+- `-R 'determinism|scene_serializer|scene_version_gate|prefab|component_registry|reflect_wire_key|save_data|project_document|json_object_members|json_writer_layout|canonical_documents'`
   (one regex; CTest keeps only the last `-R`).
 - A refusal test per ingress you made strict, red on base.
 - Boundary cases: empty document, one entity, at capacity, one past

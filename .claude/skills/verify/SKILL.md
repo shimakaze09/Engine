@@ -135,7 +135,7 @@ still needs the page looked at in a browser on a real GPU.
 - Byte-identical output for unchanged input (the deterministic-cook
   contract) where the format promises it.
 - Pair with
-  `-R 'determinism|scene_serializer|scene_version_gate|prefab|component_registry|reflect_wire_key|save_data|project_document|json_object_members'`.
+  `-R 'determinism|scene_serializer|scene_version_gate|prefab|component_registry|reflect_wire_key|save_data|project_document|json_object_members|json_writer_layout|canonical_documents'`.
 - A format change carries a migration and a test that reads the old form.
 
 ## Tier: physics, math

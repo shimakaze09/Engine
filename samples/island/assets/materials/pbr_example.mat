@@ -1,22 +1,13 @@
 {
   "version": 4,
-  "shadingModel": "pbr",
-  "albedo": [
-    0.8,
-    0.8,
-    0.82
-  ],
+  "albedo": [0.8, 0.8, 0.82],
+  "emissive": [0, 0, 0],
   "roughness": 0.35,
   "metallic": 0.1,
-  "opacity": 1.0,
+  "opacity": 1,
+  "shadingModel": "pbr",
   "alphaMode": "opaque",
   "alphaCutoff": 0.5,
-  "uvTiling": [
-    1.0,
-    1.0
-  ],
-  "uvOffset": [
-    0.0,
-    0.0
-  ]
+  "uvTiling": [1, 1],
+  "uvOffset": [0, 0]
 }

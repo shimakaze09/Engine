@@ -298,7 +298,7 @@ int verify_child_writes_only_overrides() {
     return 41;
   }
   const std::string parentKey =
-      std::string("\"parent\":\"") + parentRef.text + "\"";
+      std::string("\"parent\": \"") + parentRef.text + "\"";
   if ((content.find(parentKey) == std::string::npos) ||
       (content.find("\"roughness\"") == std::string::npos) ||
       (content.find("\"metallic\"") != std::string::npos) ||

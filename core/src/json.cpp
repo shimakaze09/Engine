@@ -455,7 +455,9 @@ bool token_equals(const char *tokenBegin, const char *tokenEnd,
 
 } // namespace
 
-JsonWriter::JsonWriter() noexcept { reset(); }
+JsonWriter::JsonWriter(JsonLayout layout) noexcept : m_layout(layout) {
+  reset();
+}
 
 JsonWriter::~JsonWriter() noexcept = default;
 
@@ -473,7 +475,7 @@ void JsonWriter::reset() noexcept {
   m_buffer[0] = '\0';
 }
 
-bool JsonWriter::begin_value() noexcept {
+bool JsonWriter::begin_value(bool container) noexcept {
   if (m_failed) {
     return false;
   }
@@ -498,11 +500,35 @@ bool JsonWriter::begin_value() noexcept {
     return true;
   }
 
-  if (!state.firstElement) {
-    return append_char(',');
-  }
-
+  const bool first = state.firstElement;
   state.firstElement = false;
+  if (!first && !append_char(',')) {
+    return false;
+  }
+  if (m_layout == JsonLayout::Lines) {
+    if (container) {
+      state.hasContainerChild = true;
+      return append_line_break(m_depth);
+    }
+    if (!first) {
+      return append_char(' ');
+    }
+  }
+  return true;
+}
+
+bool JsonWriter::append_line_break(std::size_t depth) noexcept {
+  if (m_layout != JsonLayout::Lines) {
+    return true;
+  }
+  if (!append_char('\n')) {
+    return false;
+  }
+  for (std::size_t level = 0U; level < depth; ++level) {
+    if (!append_bytes("  ", 2U)) {
+      return false;
+    }
+  }
   return true;
 }
 
@@ -664,12 +690,22 @@ bool JsonWriter::append_float(float value) noexcept {
     return false;
   }
 
+  // Nine significant digits always read back as the same float; fewer
+  // often do, and the reader parses with strtof, so the check below is
+  // exactly the reader's view.
   char numberBuffer[32] = {};
-  const int written = std::snprintf(numberBuffer, sizeof(numberBuffer), "%.9g",
-                                    static_cast<double>(value));
-  if ((written <= 0) || (written >= static_cast<int>(sizeof(numberBuffer)))) {
-    m_failed = true;
-    return false;
+  int written = 0;
+  for (int precision = 1; precision <= 9; ++precision) {
+    written = std::snprintf(numberBuffer, sizeof(numberBuffer), "%.*g",
+                            precision, static_cast<double>(value));
+    if ((written <= 0) || (written >= static_cast<int>(sizeof(numberBuffer)))) {
+      m_failed = true;
+      return false;
+    }
+    const float parsed = std::strtof(numberBuffer, nullptr);
+    if (std::memcmp(&parsed, &value, sizeof(float)) == 0) {
+      break;
+    }
   }
 
   return append_bytes(numberBuffer, static_cast<std::size_t>(written));
@@ -738,6 +774,7 @@ bool JsonWriter::push_container(ContainerKind kind) noexcept {
   state.kind = kind;
   state.firstElement = true;
   state.expectingValue = false;
+  state.hasContainerChild = false;
   ++m_depth;
   return true;
 }
@@ -764,7 +801,7 @@ bool JsonWriter::pop_container(ContainerKind kind) noexcept {
 }
 
 void JsonWriter::begin_object() noexcept {
-  if (!begin_value()) {
+  if (!begin_value(true)) {
     return;
   }
 
@@ -776,11 +813,17 @@ void JsonWriter::begin_object() noexcept {
 }
 
 void JsonWriter::end_object() noexcept {
+  const bool hadMembers = (m_depth > 0U) && !m_stack[m_depth - 1U].firstElement;
   if (!pop_container(ContainerKind::Object)) {
     return;
   }
 
-  static_cast<void>(append_char('}'));
+  if (hadMembers && !append_line_break(m_depth)) {
+    return;
+  }
+  if (append_char('}') && (m_depth == 0U)) {
+    static_cast<void>(append_line_break(0U));
+  }
 }
 
 void JsonWriter::begin_array(const char *key) noexcept {
@@ -789,7 +832,7 @@ void JsonWriter::begin_array(const char *key) noexcept {
 }
 
 void JsonWriter::begin_array() noexcept {
-  if (!begin_value()) {
+  if (!begin_value(true)) {
     return;
   }
 
@@ -801,11 +844,18 @@ void JsonWriter::begin_array() noexcept {
 }
 
 void JsonWriter::end_array() noexcept {
+  const bool hadContainers =
+      (m_depth > 0U) && m_stack[m_depth - 1U].hasContainerChild;
   if (!pop_container(ContainerKind::Array)) {
     return;
   }
 
-  static_cast<void>(append_char(']'));
+  if (hadContainers && !append_line_break(m_depth)) {
+    return;
+  }
+  if (append_char(']') && (m_depth == 0U)) {
+    static_cast<void>(append_line_break(0U));
+  }
 }
 
 void JsonWriter::write_key(const char *key) noexcept {
@@ -828,11 +878,14 @@ void JsonWriter::write_key(const char *key) noexcept {
 
   state.firstElement = false;
 
-  if (!append_escaped(key)) {
+  if (!append_line_break(m_depth) || !append_escaped(key)) {
     return;
   }
 
   if (!append_char(':')) {
+    return;
+  }
+  if ((m_layout == JsonLayout::Lines) && !append_char(' ')) {
     return;
   }
 
