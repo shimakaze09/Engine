@@ -6,7 +6,9 @@
 // material would shade differently depending on which pass drew it. They
 // now share one helper, and this suite asserts what that helper writes:
 // every location the program declares, the albedo fallback rather than a
-// dangling render target, and the instancing toggle cleared per draw.
+// dangling render target, and the instancing toggle cleared per draw. A
+// skinned mesh with a palette is posed through its run's skinned sibling,
+// whichever forward path draws it.
 //
 // The partition and the program resolution are here too because they are
 // the other half of one contract: a pass binds a program once per run, so
@@ -84,6 +86,33 @@ void fake_draw_indexed(DeviceGeometryHandle, std::int32_t) noexcept {
 void fake_draw(DeviceGeometryHandle, PrimitiveTopology, std::int32_t,
                std::int32_t) noexcept {
   ++g_draw;
+}
+
+/// The program bound at each point, and what each skinned-path call saw.
+std::uint32_t g_boundProgram = 0U;
+std::vector<std::uint32_t> g_programBinds;
+/// The program bound when each draw was issued, and each palette upload:
+/// its parameter, joint count and the program it landed on.
+std::vector<std::uint32_t> g_drawPrograms;
+struct PaletteUpload final {
+  std::int32_t param = -1;
+  std::int32_t joints = 0;
+  std::uint32_t program = 0U;
+};
+std::vector<PaletteUpload> g_paletteUploads;
+
+void fake_bind_program(DeviceProgramHandle program) noexcept {
+  g_boundProgram = program.value;
+  g_programBinds.push_back(program.value);
+}
+void fake_set_param_mat4_array(ShaderParam p, const float *,
+                               std::int32_t count) noexcept {
+  g_paletteUploads.push_back(PaletteUpload{p.value, count, g_boundProgram});
+}
+void fake_draw_indexed_recording_program(DeviceGeometryHandle,
+                                         std::int32_t) noexcept {
+  ++g_drawIndexed;
+  g_drawPrograms.push_back(g_boundProgram);
 }
 
 RenderDevice make_recording_device() noexcept {
@@ -167,6 +196,9 @@ int write_count(std::int32_t param) noexcept {
 }
 
 void reset() noexcept {
+  g_programBinds.clear();
+  g_drawPrograms.clear();
+  g_paletteUploads.clear();
   g_calls.clear();
   g_textureSlots.clear();
   g_drawIndexed = 0;
@@ -229,6 +261,7 @@ int main() {
 
   const RenderDevice device = make_recording_device();
   const ForwardDrawProgram program = make_program();
+  const std::uint8_t kPbrId = shading_program_id(ShadingModel::Pbr);
 
   BackendState backend{};
   backend.fallbackTexture2D = DeviceTextureHandle{7};
@@ -252,7 +285,7 @@ int main() {
     reset();
     ForwardDrawBindings bindings{};
     upload_forward_material(program, backend, &device, command, &bindings);
-    draw_forward_command(program, &device, command, mesh,
+    draw_forward_command(program, backend, &device, kPbrId, command, mesh,
                          engine::math::Mat4(), nullptr);
     check(g_drawIndexed == 0,
           "a null stats pointer draws nothing rather than crashing");
@@ -262,7 +295,7 @@ int main() {
     ForwardDrawBindings drawBindings{};
     upload_forward_material(program, backend, &device, command,
                             &drawBindings);
-    draw_forward_command(program, &device, command, mesh,
+    draw_forward_command(program, backend, &device, kPbrId, command, mesh,
                          engine::math::Mat4(), &stats);
 
     check(wrote(program.albedo.value), "the draw writes albedo");
@@ -333,7 +366,7 @@ int main() {
     reset();
     ForwardDrawBindings bindings{};
     upload_forward_material(partial, backend, &device, command, &bindings);
-    draw_forward_command(partial, &device, command, mesh,
+    draw_forward_command(partial, backend, &device, kPbrId, command, mesh,
                          engine::math::Mat4(), &stats);
     check(write_count(kInvalidShaderParam.value) == 0,
           "an undeclared location is never written");
@@ -349,11 +382,114 @@ int main() {
     unindexed.indexCount = 0U;
     unindexed.vertexCount = 6U;
     reset();
-    draw_forward_command(program, &device, command, unindexed,
+    draw_forward_command(program, backend, &device, kPbrId, command, unindexed,
                          engine::math::Mat4(), &stats);
     check((g_drawIndexed == 0) && (g_draw == 1) && (stats.drawCalls == 1U) &&
               (stats.triangleCount == 2U),
           "an unindexed mesh draws non-indexed and counts two triangles");
+  }
+
+  // A skinned mesh is posed on every forward path, not only in the
+  // G-buffer (#809): a Toon, Unlit or transparent skinned surface, or any
+  // skinned surface on a device without the deferred path, draws here. The
+  // draw binds its run's skinned sibling, uploads the command's palette to
+  // it, draws, and rebinds the run's program; before this every forward
+  // draw of a skinned mesh stood in bind pose while its shadow moved.
+  {
+    RenderDevice skinDevice = make_recording_device();
+    skinDevice.bind_program = &fake_bind_program;
+    skinDevice.set_param_mat4_array = &fake_set_param_mat4_array;
+    skinDevice.draw_indexed = &fake_draw_indexed_recording_program;
+
+    const std::uint8_t toonId = shading_program_id(ShadingModel::Toon);
+    const std::uint8_t unlitId = shading_program_id(ShadingModel::Unlit);
+    BackendState skin{};
+    skin.fallbackTexture2D = DeviceTextureHandle{7};
+    skin.pbrProgram = DeviceProgramHandle{11};
+    skin.shadingPrograms[kPbrId] = skin.pbrProgram;
+    skin.shadingPrograms[toonId] = DeviceProgramHandle{22};
+    skin.shadingPrograms[unlitId] = DeviceProgramHandle{33};
+    skin.shadingSkinnedPrograms[kPbrId] = DeviceProgramHandle{111};
+    skin.shadingSkinnedPrograms[toonId] = DeviceProgramHandle{222};
+    skin.forwardBonesParam = ShaderParam{900};
+
+    SkinPalette palettes[2] = {};
+    palettes[0].jointCount = 3U;
+    palettes[1].jointCount = 5U;
+    set_skin_palettes(palettes, 2U);
+
+    GpuMesh skinned = mesh;
+    skinned.hasSkin = true;
+    DrawCommand posed = command;
+    posed.skinPalette = 1U;
+    RendererFrameStats stats{};
+
+    reset();
+    g_boundProgram = 22U;
+    draw_forward_command(program, skin, &skinDevice, toonId, posed, skinned,
+                         engine::math::Mat4(), &stats);
+    check((g_drawPrograms.size() == 1U) && (g_drawPrograms[0] == 222U),
+          "a skinned Toon draw is issued with the Toon skinned program");
+    check((g_paletteUploads.size() == 1U) &&
+              (g_paletteUploads[0].param == 900) &&
+              (g_paletteUploads[0].joints == 5) &&
+              (g_paletteUploads[0].program == 222U),
+          "its command's palette, all five joints, uploads to the skinned "
+          "program's bones before the draw");
+    check(wrote(program.mvp.value) && wrote(program.normalMatrix.value),
+          "the posed draw still writes its transform");
+    check(g_boundProgram == 22U,
+          "the run's Toon program is bound again after the posed draw");
+
+    reset();
+    g_boundProgram = 11U;
+    draw_forward_command(program, skin, &skinDevice, kPbrId, posed, skinned,
+                         engine::math::Mat4(), &stats);
+    check((g_drawPrograms.size() == 1U) && (g_drawPrograms[0] == 111U) &&
+              (g_boundProgram == 11U),
+          "a skinned physically-based forward draw (transparent, capture, "
+          "no deferred path) poses through its own sibling");
+
+    // Nothing to pose: an unskinned mesh, or a skinned one whose command
+    // names no palette, never leaves the run's program.
+    reset();
+    g_boundProgram = 22U;
+    draw_forward_command(program, skin, &skinDevice, toonId, command, mesh,
+                         engine::math::Mat4(), &stats);
+    DrawCommand unposed = command;
+    unposed.skinPalette = kInvalidSkinPalette;
+    draw_forward_command(program, skin, &skinDevice, toonId, unposed, skinned,
+                         engine::math::Mat4(), &stats);
+    check(g_programBinds.empty() && g_paletteUploads.empty() &&
+              (g_drawPrograms.size() == 2U) && (g_drawPrograms[0] == 22U) &&
+              (g_drawPrograms[1] == 22U),
+          "an unskinned mesh, or one with no palette, draws with the run's "
+          "program and uploads no palette");
+
+    // A model with no skinned sibling draws the mesh in bind pose rather
+    // than borrowing another model's shading.
+    reset();
+    g_boundProgram = 33U;
+    draw_forward_command(program, skin, &skinDevice, unlitId, posed, skinned,
+                         engine::math::Mat4(), &stats);
+    check(g_programBinds.empty() && g_paletteUploads.empty() &&
+              (g_drawPrograms.size() == 1U) && (g_drawPrograms[0] == 33U),
+          "a model with no skinned program draws in bind pose with its own "
+          "program");
+
+    // A palette the frame does not hold cannot pose the mesh: the draw
+    // returns to the run's program before it is issued, in bind pose.
+    reset();
+    g_boundProgram = 22U;
+    DrawCommand stale = command;
+    stale.skinPalette = 7U;
+    draw_forward_command(program, skin, &skinDevice, toonId, stale, skinned,
+                         engine::math::Mat4(), &stats);
+    check(g_paletteUploads.empty() && (g_drawPrograms.size() == 1U) &&
+              (g_drawPrograms[0] == 22U) && (g_boundProgram == 22U),
+          "a palette the frame lacks draws in bind pose with the run's "
+          "program");
+    set_skin_palettes(nullptr, 0U);
   }
 
   // The run partition. Render prep sorts the shading model directly

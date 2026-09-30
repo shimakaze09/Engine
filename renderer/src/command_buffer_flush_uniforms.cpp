@@ -868,13 +868,59 @@ void upload_forward_material(const ForwardDrawProgram &program,
                                 bindings->materialSlots);
 }
 
+namespace {
+
+/// The skinned sibling `programId` draws a posed mesh with, or invalid
+/// when there is none, said once per process: an author whose animated
+/// character stands in bind pose is owed the reason.
+DeviceProgramHandle skinned_shading_program(const BackendState &backend,
+                                            std::uint8_t programId) noexcept {
+  const DeviceProgramHandle program =
+      shading_program_id_is_addressable(programId)
+          ? backend.shadingSkinnedPrograms[static_cast<std::size_t>(programId)]
+          : kInvalidDeviceProgram;
+  if ((program == kInvalidDeviceProgram) ||
+      !backend.forwardBonesParam.valid()) {
+    static bool warnedMissingSkinned = false;
+    if (!warnedMissingSkinned) {
+      warnedMissingSkinned = true;
+      core::log_message(core::LogLevel::Warning, "renderer",
+                        "a skinned mesh draws forward with a shading model "
+                        "that has no skinned program; it is drawn in bind "
+                        "pose");
+    }
+    return kInvalidDeviceProgram;
+  }
+  return program;
+}
+
+} // namespace
+
 void draw_forward_command(const ForwardDrawProgram &program,
-                          const RenderDevice *dev, const DrawCommand &command,
-                          const GpuMesh &mesh,
-                          const math::Mat4 &viewProjection,
+                          const BackendState &backend, const RenderDevice *dev,
+                          std::uint8_t programId, const DrawCommand &command,
+                          const GpuMesh &mesh, const math::Mat4 &viewProjection,
                           RendererFrameStats *frameStats) noexcept {
   if ((dev == nullptr) || (frameStats == nullptr)) {
     return;
+  }
+  // Parameter tokens are global-registry indices, so the uploads below
+  // reach the skinned sibling as they reach the run's program. The
+  // palette is uploaded for every posed draw rather than cached: skinned
+  // forward draws are few, and a cache would have to survive the other
+  // programs a run rebinds between them.
+  DeviceProgramHandle skinned = kInvalidDeviceProgram;
+  if (mesh.hasSkin && (command.skinPalette != kInvalidSkinPalette)) {
+    skinned = skinned_shading_program(backend, programId);
+    if (skinned != kInvalidDeviceProgram) {
+      dev->bind_program(skinned);
+      std::uint32_t uploaded = kInvalidSkinPalette;
+      if (!upload_bone_palette(dev, command.skinPalette,
+                               backend.forwardBonesParam, &uploaded)) {
+        dev->bind_program(shading_program(backend, programId));
+        skinned = kInvalidDeviceProgram;
+      }
+    }
   }
   const math::Mat4 model = compute_model_matrix(command);
   const math::Mat4 mvp = compute_mvp(model, viewProjection);
@@ -902,6 +948,9 @@ void draw_forward_command(const ForwardDrawProgram &program,
     frameStats->triangleCount += (mesh.vertexCount / 3U);
     dev->draw(mesh.geometry, PrimitiveTopology::Triangles, 0,
               static_cast<std::int32_t>(mesh.vertexCount));
+  }
+  if (skinned != kInvalidDeviceProgram) {
+    dev->bind_program(shading_program(backend, programId));
   }
 }
 

@@ -197,7 +197,7 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
           for (std::uint32_t local = 0U; local < batch.count; ++local) {
             const std::size_t commandIndex =
                 batchFirst + static_cast<std::size_t>(local);
-            draw_forward_command(forwardProgram, dev,
+            draw_forward_command(forwardProgram, backend, dev, model,
                                  commandBufferView.data[commandIndex], *mesh,
                                  viewProjection, &frameStats);
           }
@@ -215,8 +215,8 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
 
         upload_forward_material(forwardProgram, backend, dev, command,
                                 &bindings);
-        draw_forward_command(forwardProgram, dev, command, *mesh,
-                             viewProjection, &frameStats);
+        draw_forward_command(forwardProgram, backend, dev, model, command,
+                             *mesh, viewProjection, &frameStats);
       }
     };
 

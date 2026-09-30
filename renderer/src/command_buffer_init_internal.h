@@ -195,8 +195,17 @@ ShadingProgramRegistration
 register_shading_program(BackendState &backend, std::uint8_t programId,
                          ShaderProgramHandle handle) noexcept;
 
+/// Points `programId`'s skinned sibling at `handle`: the program a draw
+/// of that id binds for a skinned mesh with a palette. Same refusals as
+/// register_shading_program; an id left without one draws its skinned
+/// meshes in bind pose.
+ShadingProgramRegistration
+register_skinned_shading_program(BackendState &backend, std::uint8_t programId,
+                                 ShaderProgramHandle handle) noexcept;
+
 /// Re-reads every registered program's device program from its handle,
-/// which a reload replaces and destroys. Part of the refresh above
+/// which a reload replaces and destroys, skinned siblings included. Part
+/// of the refresh above
 /// rather than a separate step: a table left behind binds programs the
 /// shader system has already destroyed.
 void refresh_shading_programs(BackendState &backend) noexcept;

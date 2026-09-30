@@ -300,6 +300,21 @@ register_shading_program(BackendState &backend, std::uint8_t programId,
   return ShadingProgramRegistration::Registered;
 }
 
+ShadingProgramRegistration
+register_skinned_shading_program(BackendState &backend, std::uint8_t programId,
+                                 ShaderProgramHandle handle) noexcept {
+  if (!shading_program_id_is_addressable(programId)) {
+    return ShadingProgramRegistration::NotAddressable;
+  }
+  if (handle == kInvalidShaderProgram) {
+    return ShadingProgramRegistration::ProgramUnavailable;
+  }
+  const std::size_t slot = static_cast<std::size_t>(programId);
+  backend.shadingSkinnedShaderHandles[slot] = handle;
+  backend.shadingSkinnedPrograms[slot] = shader_device_program(handle);
+  return ShadingProgramRegistration::Registered;
+}
+
 void refresh_shading_programs(BackendState &backend) noexcept {
   // A reload destroys the device program behind a handle and links a new
   // one, so every cached device program is re-read from its handle. The
@@ -319,6 +334,13 @@ void refresh_shading_programs(BackendState &backend) noexcept {
     // draws naming it fall back with the rest rather than binding a dead
     // program.
     backend.shadingPrograms[slot] = shader_device_program(handle);
+  }
+  for (std::size_t slot = 0U; slot < kMaxShadingPrograms; ++slot) {
+    const ShaderProgramHandle handle =
+        backend.shadingSkinnedShaderHandles[slot];
+    if (handle != kInvalidShaderProgram) {
+      backend.shadingSkinnedPrograms[slot] = shader_device_program(handle);
+    }
   }
 }
 
@@ -475,6 +497,56 @@ bool init_backend_core(BackendState &backend) noexcept {
       core::log_message(core::LogLevel::Info, "renderer",
                         "instanced PBR program unavailable — batches "
                         "draw per command");
+    }
+  }
+
+  // Skinned siblings, one per shading model (soft-fail: that model's
+  // skinned meshes draw in bind pose, said once). Skinning belongs to the
+  // mesh, not to the render path: a Toon, Unlit or transparent skinned
+  // surface, and every skinned surface on a device without the deferred
+  // path, draws forward, so the forward programs carry the same
+  // linear-blend skinning the G-buffer and shadow programs do. Each
+  // requests exactly its model's define set plus SKINNED, which the
+  // manifest cooks for both stages, so no stage falls back to an unposed
+  // or differently shaded default.
+  if (dev->set_param_mat4_array != nullptr) {
+    struct SkinnedVariant final {
+      ShadingModel model;
+      const char *define;
+      const char *name;
+    };
+    const SkinnedVariant kSkinnedVariants[] = {
+        {ShadingModel::Pbr, nullptr, "physically-based"},
+        {ShadingModel::Toon, "ENGINE_SHADING_TOON", "toon"},
+        {ShadingModel::Unlit, "ENGINE_SHADING_UNLIT", "unlit"}};
+    for (const SkinnedVariant &variant : kSkinnedVariants) {
+      ShaderDefine defines[3] = {};
+      std::size_t defineCount = 0U;
+      defines[defineCount++] = ShaderDefine{"SKINNED", "1"};
+      if (variant.define != nullptr) {
+        defines[defineCount++] = ShaderDefine{variant.define, "1"};
+      }
+      if (forwardFullSamplers) {
+        defines[defineCount++] = ShaderDefine{"PBR_FULL", "1"};
+      }
+      const ShaderProgramHandle handle = load_configured_shader_variant(
+          "pbr.vert", "pbr.frag", defines, defineCount);
+      if (register_skinned_shading_program(
+              backend, shading_program_id(variant.model), handle) !=
+          ShadingProgramRegistration::Registered) {
+        char message[160] = {};
+        std::snprintf(message, sizeof(message),
+                      "the skinned %s forward program did not load; those "
+                      "skinned meshes draw in bind pose",
+                      variant.name);
+        core::log_message(core::LogLevel::Warning, "renderer", message);
+        continue;
+      }
+      if (!backend.forwardBonesParam.valid()) {
+        backend.forwardBonesParam = dev->shader_param(
+            backend.shadingSkinnedPrograms[shading_program_id(variant.model)],
+            "u_bones");
+      }
     }
   }
 

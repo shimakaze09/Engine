@@ -290,10 +290,9 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
               (backend.gbufferSkinnedProgram != kInvalidDeviceProgram);
           if (skinnedDraw) {
             dev->bind_program(backend.gbufferSkinnedProgram);
-            skinnedDraw =
-                upload_bone_palette(backend, dev, singleCommand.skinPalette,
-                                    backend.gbufSkinnedBonesParam,
-                                    &backend.lastGbufferBonePalette);
+            skinnedDraw = upload_bone_palette(dev, singleCommand.skinPalette,
+                                              backend.gbufSkinnedBonesParam,
+                                              &backend.lastGbufferBonePalette);
             if (!skinnedDraw) {
               dev->bind_program(backend.gbufferProgram);
             }
@@ -999,7 +998,8 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
       const ForwardDrawProgram transparentProgram =
           pbr_forward_draw_program(backend);
 
-      auto drawForwardTransparent = [&](std::size_t start, std::size_t end) {
+      auto drawForwardTransparent = [&](std::size_t start, std::size_t end,
+                                        std::uint8_t programId) {
         ForwardDrawBindings bindings{};
         for (std::size_t i = start; i < end; ++i) {
           const DrawCommand &cmd = commandBufferView.data[i];
@@ -1011,8 +1011,8 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
           }
           upload_forward_material(transparentProgram, backend, dev, cmd,
                                   &bindings);
-          draw_forward_command(transparentProgram, dev, cmd, *mesh,
-                               viewProjection, &frameStats);
+          draw_forward_command(transparentProgram, backend, dev, programId, cmd,
+                               *mesh, viewProjection, &frameStats);
         }
       };
 
@@ -1041,7 +1041,7 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
           continue;
         }
         bindProgramForRun(shading_program(backend, run.programId));
-        drawForwardTransparent(run.first, run.first + run.count);
+        drawForwardTransparent(run.first, run.first + run.count, run.programId);
       }
 
       if (opaqueCount < totalCount) {
@@ -1052,7 +1052,8 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
         for (std::size_t cursor = opaqueCount;
              next_program_run(commandBufferView, &cursor, totalCount, &run);) {
           bindProgramForRun(shading_program(backend, run.programId));
-          drawForwardTransparent(run.first, run.first + run.count);
+          drawForwardTransparent(run.first, run.first + run.count,
+                                 run.programId);
         }
         dev->apply_render_state(RenderState{DepthTest::Less, true,
                                             BlendMode::Disabled,
