@@ -72,8 +72,7 @@ int lua_engine_set_position(lua_State *state) noexcept {
   static_cast<void>(latest_transform(entity, &transform));
   transform.position = position;
 
-  const bool ok = apply_or_queue_transform(entity, transform, true,
-                                           runtime::MovementAuthority::Script);
+  const bool ok = apply_or_queue_transform(entity, transform, true);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
@@ -119,6 +118,22 @@ int lua_engine_add_rigid_body(lua_State *state) noexcept {
   return 1;
 }
 
+/// True, with a warning, when a velocity write targets a Static body: a
+/// static body has no motion, so the write could only be discarded.
+bool refuse_static_motion(const runtime::RigidBody &rigidBody,
+                          const char *apiName) noexcept {
+  if (math::body_type(rigidBody) != math::BodyType::Static) {
+    return false;
+  }
+  char message[128] = {};
+  std::snprintf(message, sizeof(message),
+                "%s: the body is static and cannot move; make it kinematic "
+                "or dynamic with engine.set_body_type",
+                apiName);
+  core::log_message(core::LogLevel::Warning, "scripting", message);
+  return true;
+}
+
 int lua_engine_set_velocity(lua_State *state) noexcept {
   runtime::Entity entity{};
   math::Vec3 velocity{};
@@ -134,6 +149,10 @@ int lua_engine_set_velocity(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
+  if (refuse_static_motion(rigidBody, "set_velocity")) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
   rigidBody.velocity = velocity;
   if ((velocity.x != 0.0F) || (velocity.y != 0.0F) ||
       (velocity.z != 0.0F)) {
@@ -141,7 +160,7 @@ int lua_engine_set_velocity(lua_State *state) noexcept {
     rigidBody.sleepFrameCount = 0U;
   }
 
-  const bool ok = apply_or_queue_rigid_body(entity, rigidBody, true);
+  const bool ok = apply_or_queue_rigid_body(entity, rigidBody);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
@@ -199,7 +218,7 @@ int lua_engine_set_acceleration(lua_State *state) noexcept {
       math::clamp(math::sub(acceleration, current_world_gravity()),
                   -kMaxScriptAcceleration, kMaxScriptAcceleration));
 
-  const bool ok = apply_or_queue_rigid_body(entity, rigidBody, true);
+  const bool ok = apply_or_queue_rigid_body(entity, rigidBody);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
@@ -229,7 +248,7 @@ int lua_engine_set_additional_acceleration(lua_State *state) noexcept {
       &rigidBody, math::clamp(additionalAcceleration, -kMaxScriptAcceleration,
                               kMaxScriptAcceleration));
 
-  const bool ok = apply_or_queue_rigid_body(entity, rigidBody, true);
+  const bool ok = apply_or_queue_rigid_body(entity, rigidBody);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
@@ -268,6 +287,10 @@ int lua_engine_set_angular_velocity(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
+  if (refuse_static_motion(rigidBody, "set_angular_velocity")) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
   rigidBody.angularVelocity = angVel;
   // Match set_velocity: commanding motion on a sleeping body has to wake it
   // or the command is integrated only once the body happens to wake.
@@ -276,7 +299,7 @@ int lua_engine_set_angular_velocity(lua_State *state) noexcept {
     rigidBody.sleepFrameCount = 0U;
   }
 
-  const bool ok = apply_or_queue_rigid_body(entity, rigidBody, true);
+  const bool ok = apply_or_queue_rigid_body(entity, rigidBody);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
@@ -344,8 +367,7 @@ int lua_engine_set_rotation(lua_State *state) noexcept {
   static_cast<void>(latest_transform(entity, &transform));
   transform.rotation = math::Quat(qx, qy, qz, qw);
 
-  const bool ok = apply_or_queue_transform(entity, transform, true,
-                                           runtime::MovementAuthority::Script);
+  const bool ok = apply_or_queue_transform(entity, transform, true);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
@@ -375,8 +397,7 @@ int lua_engine_look_at(lua_State *state) noexcept {
     return 1;
   }
   transform.rotation = rotation;
-  const bool ok = apply_or_queue_transform(entity, transform, true,
-                                           runtime::MovementAuthority::Script);
+  const bool ok = apply_or_queue_transform(entity, transform, true);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
@@ -410,8 +431,7 @@ int lua_engine_set_scale(lua_State *state) noexcept {
   static_cast<void>(latest_transform(entity, &transform));
   transform.scale = scale;
 
-  const bool ok = apply_or_queue_transform(entity, transform, true,
-                                           runtime::MovementAuthority::Script);
+  const bool ok = apply_or_queue_transform(entity, transform, true);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
@@ -459,6 +479,71 @@ int lua_engine_set_inverse_mass(lua_State *state) noexcept {
   return 1;
 }
 
+// --- RigidBody: body type ---
+
+// Lua names of the BodyType values, indexed by the enumeration.
+constexpr const char *kBodyTypeNames[math::kBodyTypeCount] = {
+    "dynamic", "kinematic", "static"};
+
+// engine.get_body_type(entity) -> "dynamic" | "kinematic" | "static" | nil
+int lua_engine_get_body_type(lua_State *state) noexcept {
+  runtime::Entity entity{};
+  runtime::RigidBody rigidBody{};
+  if (!read_entity(state, 1, &entity) ||
+      !latest_rigid_body(entity, &rigidBody)) {
+    lua_pushnil(state);
+    return 1;
+  }
+  lua_pushstring(
+      state,
+      kBodyTypeNames[static_cast<std::uint32_t>(math::body_type(rigidBody))]);
+  return 1;
+}
+
+// engine.set_body_type(entity, "dynamic" | "kinematic" | "static") -> bool.
+// The authored mass and inertia are kept, so switching back restores
+// them. A body made static loses its velocities; a dynamic one wakes.
+int lua_engine_set_body_type(lua_State *state) noexcept {
+  runtime::Entity entity{};
+  if (!read_entity(state, 1, &entity) || (lua_type(state, 2) != LUA_TSTRING)) {
+    core::log_message(core::LogLevel::Warning, "scripting",
+                      "set_body_type expects an entity and \"dynamic\", "
+                      "\"kinematic\" or \"static\"");
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  const char *name = lua_tostring(state, 2);
+  std::uint32_t type = math::kBodyTypeCount;
+  for (std::uint32_t i = 0U; i < math::kBodyTypeCount; ++i) {
+    if (std::strcmp(name, kBodyTypeNames[i]) == 0) {
+      type = i;
+    }
+  }
+  if (type == math::kBodyTypeCount) {
+    char message[128] = {};
+    std::snprintf(message, sizeof(message),
+                  "set_body_type: unknown body type '%.32s'; expected "
+                  "dynamic, kinematic or static",
+                  name);
+    core::log_message(core::LogLevel::Warning, "scripting", message);
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  runtime::RigidBody rigidBody{};
+  if (!latest_rigid_body(entity, &rigidBody)) {
+    core::log_message(core::LogLevel::Warning, "scripting",
+                      "set_body_type requires an existing RigidBody");
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  rigidBody.bodyType = type;
+  rigidBody.sleeping = false;
+  rigidBody.sleepFrameCount = 0U;
+  const bool ok = apply_or_queue_rigid_body(entity, rigidBody);
+  lua_pushboolean(state, ok ? 1 : 0);
+  return 1;
+}
+
 // --- Transform hierarchy: parent/children ---
 
 // engine.set_parent(child, parent|nil) → bool
@@ -495,8 +580,7 @@ int lua_engine_set_parent(lua_State *state) noexcept {
   }
   transform.parentId = parentId;
 
-  const bool ok = apply_or_queue_transform(child, transform, false,
-                                           runtime::MovementAuthority::None);
+  const bool ok = apply_or_queue_transform(child, transform, false);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
 }
@@ -601,6 +685,10 @@ void register_body_bindings(lua_State *state) noexcept {
   lua_setfield(state, -2, "get_parent");
   lua_pushcfunction(state, &lua_engine_get_children);
   lua_setfield(state, -2, "get_children");
+  lua_pushcfunction(state, &lua_engine_get_body_type);
+  lua_setfield(state, -2, "get_body_type");
+  lua_pushcfunction(state, &lua_engine_set_body_type);
+  lua_setfield(state, -2, "set_body_type");
 }
 
 } // namespace engine::scripting

@@ -38,9 +38,9 @@ void log_drop(const char *what, const char *typeName,
 } // namespace
 
 bool TypeDescriptor::add_field(const char *fieldName, std::size_t fieldOffset,
-                               std::size_t fieldSize,
-                               TypeField::Kind fieldKind,
-                               const char *fieldKey) noexcept {
+                               std::size_t fieldSize, TypeField::Kind fieldKind,
+                               const char *fieldKey,
+                               bool omitWhenZero) noexcept {
   const char *key = (fieldKey != nullptr) ? fieldKey : fieldName;
   const FieldId id = (key != nullptr) ? fnv1a_32(key) : 0U;
   const char *reason = nullptr;
@@ -72,6 +72,7 @@ bool TypeDescriptor::add_field(const char *fieldName, std::size_t fieldOffset,
   field.offset = fieldOffset;
   field.size = fieldSize;
   field.kind = fieldKind;
+  field.omitWhenZero = omitWhenZero;
   return true;
 }
 
@@ -150,8 +151,8 @@ TypeDescriptor *TypeRegistry::register_type(const char *name,
 
 bool TypeRegistry::add_field(TypeDescriptor *descriptor, const char *fieldName,
                              std::size_t fieldOffset, std::size_t fieldSize,
-                             TypeField::Kind fieldKind,
-                             const char *fieldKey) noexcept {
+                             TypeField::Kind fieldKind, const char *fieldKey,
+                             bool omitWhenZero) noexcept {
   if (descriptor == nullptr) {
     // The type itself was refused; its fields can only be counted here.
     ++droppedFieldCount;
@@ -160,7 +161,7 @@ bool TypeRegistry::add_field(TypeDescriptor *descriptor, const char *fieldName,
   }
 
   if (!descriptor->add_field(fieldName, fieldOffset, fieldSize, fieldKind,
-                             fieldKey)) {
+                             fieldKey, omitWhenZero)) {
     ++droppedFieldCount;
     return false;
   }

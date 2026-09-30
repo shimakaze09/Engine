@@ -81,8 +81,7 @@ void capture_blocked_body_commands(PhysicsWorldView &world) noexcept {
   for (std::size_t i = 0U; i < count; ++i) {
     const RigidBody &body = bodies[i];
     const bool eligible =
-        (body.inverseMass > 0.0F) && !body.sleeping &&
-        (world.movement_authority(entities[i]) != MovementAuthority::Script);
+        (simulated_inverse_mass(body) > 0.0F) && !body.sleeping;
     store->blockedCommandedSpeeds[i] =
         eligible ? engine::math::length(body.velocity) : -1.0F;
   }

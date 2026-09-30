@@ -27,6 +27,22 @@ struct Transform final {
   PersistentId parentId = kInvalidPersistentId;
 };
 
+/// How the simulation moves a body, as in Jolt's motion types and Unity's
+/// isKinematic. Stored in RigidBody::bodyType as its numeric value.
+enum class BodyType : std::uint32_t {
+  /// Moved by forces, gravity and contacts; its inverse mass is its own.
+  Dynamic = 0U,
+  /// Moved only by its velocity and by script writes. It collides, never
+  /// yields to a contact (infinite mass), feels no gravity and never
+  /// sleeps, so the bodies it meets are pushed and carried by its motion.
+  Kinematic = 1U,
+  /// Never moves on its own and has no velocity; it collides as immovable.
+  Static = 2U,
+};
+
+/// Number of BodyType values; a stored bodyType at or past it is invalid.
+inline constexpr std::uint32_t kBodyTypeCount = 3U;
+
 /// Linear/angular velocities, inverse mass/inertia, and sleep state.
 struct RigidBody final {
   Vec3 velocity = Vec3(0.0F, 0.0F, 0.0F);
@@ -51,7 +67,42 @@ struct RigidBody final {
   /// world's gravity value, which is what an acceleration that cancels
   /// gravity would.
   float gravityScale = 1.0F;
+  /// BodyType as its numeric value (Dynamic when zero). Authored. A
+  /// Kinematic or Static body keeps its authored inverseMass and
+  /// inverseInertia so switching back to Dynamic restores them; the
+  /// simulation reads simulated_inverse_mass and simulated_inverse_inertia.
+  std::uint32_t bodyType = 0U;
 };
+
+/// The body's type; a stored value past the enumeration reads as Dynamic
+/// (the World refuses one at ingress, so only a raw write can reach this).
+[[nodiscard]] constexpr BodyType body_type(const RigidBody &body) noexcept {
+  return (body.bodyType < kBodyTypeCount) ? static_cast<BodyType>(body.bodyType)
+                                          : BodyType::Dynamic;
+}
+
+/// The inverse mass the simulation uses: the authored one for a Dynamic
+/// body, zero (immovable) for Kinematic and Static bodies.
+[[nodiscard]] constexpr float
+simulated_inverse_mass(const RigidBody &body) noexcept {
+  return (body_type(body) == BodyType::Dynamic) ? body.inverseMass : 0.0F;
+}
+
+/// True for a body a step moves: every Kinematic body, and a Dynamic one
+/// with mass. Such a body integrates in world space, so it must be a
+/// transform root.
+[[nodiscard]] constexpr bool body_moves(const RigidBody &body) noexcept {
+  return (body_type(body) == BodyType::Kinematic) ||
+         (simulated_inverse_mass(body) > 0.0F);
+}
+
+/// The inverse inertia the simulation uses: the authored one for a
+/// Dynamic body with mass, zero for every immovable body.
+[[nodiscard]] constexpr Vec3
+simulated_inverse_inertia(const RigidBody &body) noexcept {
+  return (simulated_inverse_mass(body) > 0.0F) ? body.inverseInertia
+                                               : Vec3(0.0F, 0.0F, 0.0F);
+}
 
 /// Inverse inertia a freshly constructed RigidBody carries, and the tensor
 /// an automatic body takes while it owns no collider geometry or is
@@ -111,12 +162,6 @@ struct Collider final {
   std::uint32_t collisionMask = 0xFFFFFFFFU;
   ColliderShape shape = ColliderShape::AABB;
   HullSource hullSource = HullSource::None;
-};
-
-/// Enumerates movement authority values used by the engine.
-enum class MovementAuthority : std::uint8_t {
-  None,
-  Script,
 };
 
 } // namespace engine::math

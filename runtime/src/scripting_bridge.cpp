@@ -1034,12 +1034,6 @@ bool scripting_add_transform_op(runtime::World *world, runtime::Entity entity,
   return (world != nullptr) && world->add_transform(entity, transform);
 }
 
-bool scripting_set_movement_authority_op(
-    runtime::World *world, runtime::Entity entity,
-    runtime::MovementAuthority authority) noexcept {
-  return (world != nullptr) && world->set_movement_authority(entity, authority);
-}
-
 bool scripting_add_rigid_body_op(runtime::World *world, runtime::Entity entity,
                                  const runtime::RigidBody &rigidBody) noexcept {
   return (world != nullptr) && world->add_rigid_body(entity, rigidBody);
@@ -1262,7 +1256,6 @@ scripting::RuntimeServices make_scripting_runtime_services() noexcept {
   s.has_convex_hull_payload = &scripting_has_convex_hull_payload;
   s.destroy_entity_op = &scripting_destroy_entity_op;
   s.add_transform_op = &scripting_add_transform_op;
-  s.set_movement_authority_op = &scripting_set_movement_authority_op;
   s.add_rigid_body_op = &scripting_add_rigid_body_op;
   s.add_collider_op = &scripting_add_collider_op;
   s.add_mesh_component_op = &scripting_add_mesh_component_op;

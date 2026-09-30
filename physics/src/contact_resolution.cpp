@@ -110,9 +110,9 @@ void resolve_contact(PhysicsWorldView &world,
   // zero for a static endpoint.
   const engine::math::Vec3 zeroInertia(0.0F, 0.0F, 0.0F);
   const engine::math::Vec3 invInertiaA =
-      (bodyA != nullptr) ? bodyA->inverseInertia : zeroInertia;
+      (bodyA != nullptr) ? simulated_inverse_inertia(*bodyA) : zeroInertia;
   const engine::math::Vec3 invInertiaB =
-      (bodyB != nullptr) ? bodyB->inverseInertia : zeroInertia;
+      (bodyB != nullptr) ? simulated_inverse_inertia(*bodyB) : zeroInertia;
   record_single_point_contact_cache(physicsCtx, colliderEntityA,
                                     colliderEntityB, contactPt, normal,
                                     overlap, appliedImpulse, invInertiaA,
@@ -540,9 +540,9 @@ float apply_velocity_impulse(RigidBody *bodyA, RigidBody *bodyB,
   const engine::math::Vec3 angVelB =
       (bodyB != nullptr) ? bodyB->angularVelocity : zeroVec;
   const engine::math::Vec3 invInertiaA =
-      (bodyA != nullptr) ? bodyA->inverseInertia : zeroVec;
+      (bodyA != nullptr) ? simulated_inverse_inertia(*bodyA) : zeroVec;
   const engine::math::Vec3 invInertiaB =
-      (bodyB != nullptr) ? bodyB->inverseInertia : zeroVec;
+      (bodyB != nullptr) ? simulated_inverse_inertia(*bodyB) : zeroVec;
   const bool angularA = (invMassA > 0.0F) && math::has_rotational_dof(invInertiaA);
   const bool angularB = (invMassB > 0.0F) && math::has_rotational_dof(invInertiaB);
   const engine::math::Vec3 pointVelA = engine::math::add(
@@ -691,10 +691,12 @@ void relax_one_manifold(
   // skipping the whole pair) is what lets a box resting on an
   // already-asleep lower box keep converging instead of losing its extra
   // passes the moment the lower box crosses the sleep threshold.
-  const float invMassA =
-      ((bodyA != nullptr) && !bodyA->sleeping) ? bodyA->inverseMass : 0.0F;
-  const float invMassB =
-      ((bodyB != nullptr) && !bodyB->sleeping) ? bodyB->inverseMass : 0.0F;
+  const float invMassA = ((bodyA != nullptr) && !bodyA->sleeping)
+                             ? simulated_inverse_mass(*bodyA)
+                             : 0.0F;
+  const float invMassB = ((bodyB != nullptr) && !bodyB->sleeping)
+                             ? simulated_inverse_mass(*bodyB)
+                             : 0.0F;
   const float invMassSum = invMassA + invMassB;
   if (invMassSum <= 0.0F) {
     return;

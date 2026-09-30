@@ -453,13 +453,13 @@ CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
     result.targetVelocity = bestOtherVel;
     result.combinedRestitution =
         combine_restitution(collider.restitution, bestOtherRestitution);
-    // inverseMass is Input-phase-only state, safe to read beside the
-    // parallel chunk jobs that only write velocities.
+    // inverseMass and bodyType are Input-phase-only state, safe to read
+    // beside the parallel chunk jobs that only write velocities.
     const RigidBody *otherBody = (bestOtherOwner != kInvalidEntity)
                                      ? world.get_rigid_body_ptr(bestOtherOwner)
                                      : nullptr;
     result.targetInverseMass =
-        (otherBody != nullptr) ? otherBody->inverseMass : 0.0F;
+        (otherBody != nullptr) ? simulated_inverse_mass(*otherBody) : 0.0F;
     // Reproduces the TARGET's own two-part entry gate (speed threshold AND
     // travel-vs-extent) instead of only the speed half: a target fast enough
     // to pass the speed gate can still be gated out of its own sweep by a

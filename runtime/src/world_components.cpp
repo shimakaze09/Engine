@@ -56,11 +56,13 @@ bool validate_transform_ingress(const Transform &transform) noexcept {
          finite_vec3(transform.scale);
 }
 
-/// Ingress validation: rigid body fields must be finite and the inverse
-/// mass and every inverse inertia axis non-negative.
+/// Ingress validation: rigid body fields must be finite, the inverse mass
+/// and every inverse inertia axis non-negative, and the body type one of
+/// the enumeration's values.
 bool validate_rigid_body_ingress(const RigidBody &rigidBody) noexcept {
   const math::Vec3 &inertia = rigidBody.inverseInertia;
-  return finite_vec3(rigidBody.velocity) &&
+  return (rigidBody.bodyType < math::kBodyTypeCount) &&
+         finite_vec3(rigidBody.velocity) &&
          finite_vec3(rigidBody.acceleration) &&
          finite_vec3(rigidBody.angularVelocity) &&
          std::isfinite(rigidBody.inverseMass) &&
@@ -292,10 +294,11 @@ bool World::add_transform(Entity entity, const Transform &transform) noexcept {
   }
 
   const RigidBody *body = m_rigidBodies.get_ptr(entity);
-  if ((body != nullptr) && (body->inverseMass > 0.0F) &&
+  if ((body != nullptr) && math::body_moves(*body) &&
       (transform.parentId != kInvalidPersistentId)) {
     core::log_message(core::LogLevel::Error, "world",
-                      "dynamic rigid bodies must be transform roots");
+                      "dynamic and kinematic rigid bodies must be transform "
+                      "roots");
     return false;
   }
 
@@ -389,24 +392,6 @@ const Transform *World::get_transform_read_ptr(Entity entity) const noexcept {
   return m_transforms.get_ptr(entity, m_readStateIndex);
 }
 
-bool World::set_movement_authority(Entity entity,
-                                   MovementAuthority authority) noexcept {
-  if (!check_component_mutation(entity, "set_movement_authority")) {
-    return false;
-  }
-
-  m_movementAuthorities[entity.index] = authority;
-  return true;
-}
-
-MovementAuthority World::movement_authority(Entity entity) const noexcept {
-  if (!is_valid_entity(entity)) {
-    return MovementAuthority::None;
-  }
-
-  return m_movementAuthorities[entity.index];
-}
-
 bool World::add_rigid_body(Entity entity, const RigidBody &rigidBody) noexcept {
   if (!check_component_mutation(entity, "add_rigid_body")) {
     return false;
@@ -415,19 +400,33 @@ bool World::add_rigid_body(Entity entity, const RigidBody &rigidBody) noexcept {
   if (!validate_rigid_body_ingress(rigidBody)) {
     core::log_message(
         core::LogLevel::Error, "world",
-        "add_rigid_body rejected non-finite or negative fields");
+        "add_rigid_body rejected non-finite or negative fields or an "
+        "unknown body type");
     return false;
   }
 
   const Transform *transform = m_transforms.get_ptr(entity, m_readStateIndex);
-  if ((rigidBody.inverseMass > 0.0F) && (transform != nullptr) &&
+  if (math::body_moves(rigidBody) && (transform != nullptr) &&
       (transform->parentId != kInvalidPersistentId)) {
     core::log_message(core::LogLevel::Error, "world",
-                      "dynamic rigid bodies must be transform roots");
+                      "dynamic and kinematic rigid bodies must be transform "
+                      "roots");
     return false;
   }
 
   RigidBody sanitized = rigidBody;
+  // A static body has no motion to carry, and only a dynamic body sleeps;
+  // storing the rule keeps every reader from having to apply it.
+  const math::BodyType type = math::body_type(sanitized);
+  if (type == math::BodyType::Static) {
+    sanitized.velocity = math::Vec3(0.0F, 0.0F, 0.0F);
+    sanitized.acceleration = math::Vec3(0.0F, 0.0F, 0.0F);
+    sanitized.angularVelocity = math::Vec3(0.0F, 0.0F, 0.0F);
+  }
+  if (type != math::BodyType::Dynamic) {
+    sanitized.sleeping = false;
+    sanitized.sleepFrameCount = 0U;
+  }
   if (sanitize_rigid_body_ingress(sanitized)) {
     char message[96] = {};
     std::snprintf(message, sizeof(message),

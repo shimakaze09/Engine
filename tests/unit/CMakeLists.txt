@@ -1640,6 +1640,15 @@ engine_add_test_executable(engine_unit_gravity_scale
     engine_runtime
 )
 
+engine_add_test_executable(engine_unit_body_type
+    SOURCES
+    body_type_test.cpp
+    PRIVATE_DEPS
+    engine_core
+    engine_physics
+    engine_runtime
+)
+
 engine_add_test_executable(engine_unit_joint_rank_deficient
     SOURCES
     joint_rank_deficient_test.cpp

@@ -115,11 +115,9 @@ World::create_entity_with_persistent_id(PersistentId persistentId) noexcept {
 
   m_entityAlive[index] = true;
   m_entityPersistentIds[index] = persistentId;
-  m_movementAuthorities[index] = MovementAuthority::None;
   if (!insert_persistent_index(persistentId, index)) {
     m_entityAlive[index] = false;
     m_entityPersistentIds[index] = kInvalidPersistentId;
-    m_movementAuthorities[index] = MovementAuthority::None;
     if (m_freeEntityCount < m_freeEntityIndices.size()) {
       m_freeEntityIndices[m_freeEntityCount] = index;
       ++m_freeEntityCount;
@@ -400,7 +398,6 @@ void World::remove_all_components(Entity entity) noexcept {
   ENGINE_WORLD_UNIFORM_STORAGE_TABLE(ENGINE_WUS_REMOVE)
 #undef ENGINE_WUS_REMOVE
 
-  m_movementAuthorities[entity.index] = MovementAuthority::None;
   reset_transform_cache(entity.index);
   if (hadName && (removedName.name[0] != '\0')) {
     name_lookup_erase(core::fnv1a_32(removedName.name), entity.index);

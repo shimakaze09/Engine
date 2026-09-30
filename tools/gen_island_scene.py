@@ -102,6 +102,14 @@ def dynamic_body(gravity=True, inverse_mass=1.0):
     }
 
 
+def kinematic_body():
+    # RigidBody.bodyType 1 (Kinematic): moved only by its velocity, never
+    # by gravity or contacts, so a driven platform carries its rider.
+    body = dynamic_body(gravity=False)
+    body["bodyType"] = 1
+    return body
+
+
 SAND = (0.83, 0.75, 0.55)
 GRASS = (0.28, 0.58, 0.24)
 WATER = (0.12, 0.35, 0.55)
@@ -184,7 +192,7 @@ entity("MovingPlatform", (9.0, 2.2, -4.0), mesh=PROP("platform_round"),
        albedo=(0.55, 0.50, 0.60),
        collider=box_collider((0.9, 0.1, 0.9), (0.0, 0.1, 0.0),
                              friction=(0.95, 0.85)),
-       body=dynamic_body(gravity=False, inverse_mass=0.001),
+       body=kinematic_body(),
        script="assets/scripts/moving_platform.lua")
 entity("FallingRock", (8.2, 6.0, -2.5), mesh=PROP("rock_large"),
        albedo=(0.35, 0.33, 0.35),
