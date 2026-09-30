@@ -73,7 +73,17 @@ struct EditorBridge final {
   // Whether the Game view is shown this frame. False skips rendering it
   // (the back buffer is still cleared for the editor UI); null means shown.
   bool (*game_view_visible)() noexcept = nullptr;
+  // Called once when the run ends fatally (a fatal frame, or a device
+  // fatal inside the renderer), before the World is torn down: saves a
+  // recovery copy of the unsaved scene and writes its path into `outPath`.
+  // False when there was nothing unsaved or the copy could not be written
+  // (the editor logs which). Null means nothing to save.
+  bool (*write_recovery_copy)(char *outPath,
+                              std::size_t capacity) noexcept = nullptr;
 };
+
+/// Capacity a recovery copy's path is written into.
+inline constexpr std::size_t kRecoveryPathCapacity = 512U;
 
 /// Sets the requested value for editor bridge.
 void set_editor_bridge(const EditorBridge *bridge) noexcept;

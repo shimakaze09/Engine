@@ -14,6 +14,7 @@
 #include "render_device_bgfx.h"
 
 #include "engine/core/cvar.h"
+#include "engine/core/fatal_exit.h"
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
 #include "engine/core/thread_affinity.h"
@@ -166,9 +167,16 @@ public:
                   static_cast<unsigned>(line), (str != nullptr) ? str : "");
     core::log_message(core::LogLevel::Error, "bgfx", msg);
     // bgfx's CallbackI contract: returning from a non-DebugCheck fatal
-    // continues into undefined state, so the process must stop here.
+    // continues into undefined state, so the process must stop here. bgfx
+    // cannot recreate a lost device, so it stops -- but through the
+    // detected-fatal exit, which saves the unsaved scene first, rather
+    // than abort().
     if (code != bgfx::Fatal::DebugCheck) {
-      std::abort();
+      core::terminate_after_fatal(
+          (code == bgfx::Fatal::DeviceLost)
+              ? "the graphics device was lost (driver reset or GPU removed)"
+              : "the graphics backend hit an unrecoverable error",
+          core::kFatalDeviceExitCode);
     }
   }
 
