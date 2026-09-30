@@ -40,10 +40,6 @@ struct EngineStats final {
   /// at most one per poll interval while an editor is attached, none in a
   /// player.
   std::uint32_t hotReloadPolls = 0U;
-  /// Bytes and allocations the frame allocators (main and per worker)
-  /// served last frame.
-  std::size_t frameAllocatorBytes = 0U;
-  std::size_t frameAllocations = 0U;
   /// Fixed simulation steps last frame ran (0 while paused or stopped).
   std::uint32_t fixedSteps = 0U;
   /// Blend factor render prep used between the previous and current step

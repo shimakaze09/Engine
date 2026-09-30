@@ -223,10 +223,6 @@ void draw_frame_table(const core::EngineStats &stats) noexcept {
   std::snprintf(value, sizeof(value), "%.2f%%",
                 static_cast<double>(stats.jobUtilizationPct));
   stat_row("Job utilization", value, true);
-  std::snprintf(value, sizeof(value), "%.1f KB in %zu allocations",
-                static_cast<double>(stats.frameAllocatorBytes) / 1024.0,
-                stats.frameAllocations);
-  stat_row("Frame allocator", value, true);
   std::snprintf(value, sizeof(value), "%.3f ms",
                 static_cast<double>(stats.gpuSceneMs));
   stat_row("GPU scene", value, stats.gpuTimingAvailable);

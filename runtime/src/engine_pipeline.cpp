@@ -960,12 +960,12 @@ bool EnginePipeline::Impl::initialize(std::uint32_t maxFrameCount) noexcept {
     return false;
   }
 
-  frameThreadCount = core::thread_frame_allocator_count();
+  frameThreadCount = static_cast<std::size_t>(core::thread_count());
   if ((frameThreadCount == 0U) ||
       (frameThreadCount >
        frameContext->renderPrepPipeline.localCommandBuffers.size())) {
     core::log_message(core::LogLevel::Error, "engine",
-                      "invalid thread allocator count");
+                      "invalid job thread count");
     teardown();
     return false;
   }
@@ -2404,13 +2404,6 @@ void EnginePipeline::Impl::stage_diagnostics() noexcept {
   // the editor's Profiler graphs and stats overlay, never logged: a line a
   // second cannot show where a frame spiked, as Unity's Profiler and
   // Unreal's stat graphs show it.
-  std::size_t frameAllocatorBytes = core::frame_allocator_bytes_used();
-  std::size_t frameAllocations = core::frame_allocator_allocation_count();
-  for (std::size_t i = 0U; i < frameThreadCount; ++i) {
-    frameAllocatorBytes += core::thread_frame_allocator_bytes_used(i);
-    frameAllocations += core::thread_frame_allocator_allocation_count(i);
-  }
-
   const std::size_t aliveCount = world->alive_entity_count();
   if (aliveCount >= previousAliveCount) {
     sliceSpawnedSinceLine += aliveCount - previousAliveCount;
@@ -2525,8 +2518,6 @@ void EnginePipeline::Impl::stage_diagnostics() noexcept {
   }
   frameStats.fixedSteps = clock.stepsThisFrame;
   frameStats.interpolationAlpha = static_cast<float>(clock.renderAlpha);
-  frameStats.frameAllocatorBytes = frameAllocatorBytes;
-  frameStats.frameAllocations = frameAllocations;
   core::set_engine_stats(frameStats);
 }
 
@@ -2535,9 +2526,6 @@ void EnginePipeline::Impl::stage_diagnostics() noexcept {
 // ---------------------------------------------------------------------------
 
 void EnginePipeline::Impl::stage_frame_cleanup() noexcept {
-  core::reset_frame_allocator();
-  core::reset_thread_frame_allocators();
-
   previousPlayState = playState;
   previousAliveCount = world->alive_entity_count();
   ++clock.frameIndex;

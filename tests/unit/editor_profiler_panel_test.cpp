@@ -4,7 +4,8 @@
 // draws nothing, and setting its cvar draws the window. An open Profiler
 // names every memory subsystem in full (a fixed-width column used to cut
 // them off) and says "not measured" for GPU timings the device cannot
-// take instead of printing zeros. The log centre draws as the Log panel.
+// take instead of printing zeros, and lists no row for an allocator
+// nothing allocates from. The log centre draws as the Log panel.
 
 #if defined(__clang__) && (defined(__x86_64__) || defined(__i386__)) &&        \
     !defined(__PRFCHWINTRIN_H)
@@ -114,6 +115,10 @@ int main() {
                 "the GPU rows are listed");
   g_tests.check(text.find("not measured") != std::string::npos,
                 "unmeasurable GPU timings read \"not measured\"");
+  // Nothing allocates from a frame arena, so no row reports one: a
+  // constant "0.0 KB in 0 allocations" read as a measured zero.
+  g_tests.check(text.find("Frame allocator") == std::string::npos,
+                "the Profiler lists no frame-allocator row");
 
   engine::core::EngineStats measured{};
   measured.gpuTimingAvailable = true;

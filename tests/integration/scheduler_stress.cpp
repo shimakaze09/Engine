@@ -116,7 +116,7 @@ std::uint64_t run_stress_round(std::uint64_t *outExecutedJobs,
 
 /// Runs this executable or test program.
 int main() {
-  if (!engine::core::initialize_core(1024U * 1024U)) {
+  if (!engine::core::initialize_core(engine::core::CoreConfig{})) {
     return 1;
   }
 
