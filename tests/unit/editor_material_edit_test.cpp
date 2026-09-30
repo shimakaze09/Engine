@@ -501,6 +501,67 @@ int check_every_field_is_an_undo_step() noexcept {
   return result;
 }
 
+/// EXPECTATION (#987): saving a material whose file changed on disk since
+/// it was opened stops with the file untouched and diskConflict set;
+/// Overwrite then writes the edits, and a later save with no change on
+/// disk goes straight through. A file deleted on disk is written again.
+int check_save_over_external_change() noexcept {
+  if (!write_file(kOsPath, "{\"version\":4,\"roughness\":0.3}")) {
+    return 200;
+  }
+  MaterialEditScope scope;
+  const auto finish = [&](int result) noexcept {
+    remove_file(kOsPath);
+    return result;
+  };
+  if (!scope.valid()) {
+    return finish(201);
+  }
+  open_material_editor(kVirtualPath);
+  MaterialEditorState &state = material_editor_state();
+  if (!state.found) {
+    return finish(202);
+  }
+  const engine::renderer::Material before = state.buffer;
+  const engine::renderer::MaterialTextureSlots beforeSlots = state.textureSlots;
+  state.buffer.roughness = 0.8F;
+  material_editor_apply_frame(before, beforeSlots, true, false);
+
+  // A teammate's version lands on disk under the open material.
+  constexpr const char *kTheirs = "{\"version\":4,\"roughness\":0.05}";
+  char onDisk[256] = {};
+  if (!write_file(kOsPath, kTheirs)) {
+    return finish(203);
+  }
+  if (save_material_editor() || !state.diskConflict ||
+      !read_file(kOsPath, onDisk, sizeof(onDisk)) ||
+      (std::strcmp(onDisk, kTheirs) != 0) || !material_editor_is_dirty()) {
+    return finish(204); // the save wrote over the changed file
+  }
+  if (!save_material_editor_overwrite() || state.diskConflict ||
+      material_editor_is_dirty() ||
+      !read_file(kOsPath, onDisk, sizeof(onDisk)) ||
+      (std::strstr(onDisk, "0.8") == nullptr)) {
+    return finish(205);
+  }
+  // Its own write is not a conflict for the next save.
+  if (!save_material_editor() || state.diskConflict) {
+    return finish(206);
+  }
+  // Deleted on disk: nothing there is lost, so Save writes it again.
+  remove_file(kOsPath);
+  const engine::renderer::Material edited = state.buffer;
+  const engine::renderer::MaterialTextureSlots editedSlots = state.textureSlots;
+  state.buffer.roughness = 0.6F;
+  material_editor_apply_frame(edited, editedSlots, true, false);
+  if (!save_material_editor() || state.diskConflict ||
+      !read_file(kOsPath, onDisk, sizeof(onDisk)) ||
+      (std::strstr(onDisk, "0.6") == nullptr)) {
+    return finish(207);
+  }
+  return finish(0);
+}
+
 int main() {
   if (!engine::core::initialize_vfs()) {
     return 1;
@@ -528,6 +589,9 @@ int main() {
   }
   if (result == 0) {
     result = check_every_field_is_an_undo_step();
+  }
+  if (result == 0) {
+    result = check_save_over_external_change();
   }
 
   engine::core::shutdown_vfs();

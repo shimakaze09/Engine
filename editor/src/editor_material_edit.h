@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "engine/core/file_read.h"
 #include "engine/editor/command_history.h"
 #include "engine/renderer/asset_database.h"
 #include "engine/renderer/material.h"
@@ -60,6 +61,13 @@ struct MaterialEditorState final {
   PendingMaterialAction pendingAction = PendingMaterialAction::None;
   char pendingOpenPath[260] = {};
   char lastSaveError[320] = {};
+
+  /// What the material's file held when it was opened, reloaded or last
+  /// saved. A Save compares the file with it first, so one changed on disk
+  /// since is not silently written over (diskConflict, then Overwrite or
+  /// Reload from Disk).
+  core::FileFingerprint diskFingerprint{};
+  bool diskConflict = false;
 
   bool gestureActive = false;
   renderer::Material gestureBeforeParams{};
@@ -157,10 +165,15 @@ void material_editor_apply_frame(
     bool anyFieldChangedThisFrame, bool anyItemActive) noexcept;
 
 /// Persists the current buffer to disk (staged atomic write); marks the
-/// state clean on success. False on failure (logged by the bridge/writer
+/// state clean on success. Refused, with diskConflict set and the file
+/// untouched, when the file changed on disk since it was opened, reloaded
+/// or last saved. False on failure (logged by the bridge/writer
 /// layer; lastSaveError names the material); the previous file on disk is
 /// guaranteed untouched.
 bool save_material_editor() noexcept;
+/// Save after a disk conflict: writes the edits over the file whatever it
+/// now holds, as the author chose Overwrite.
+bool save_material_editor_overwrite() noexcept;
 
 /// Re-reads the file from disk, discarding any unsaved live edits; a
 /// malformed file leaves the current buffer and the live database record

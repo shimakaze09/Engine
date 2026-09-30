@@ -12,6 +12,7 @@
 #include "engine/core/logging.h"
 #include "engine/renderer/material_inheritance.h"
 #include "engine/runtime/editor_bridge.h"
+#include "engine/runtime/scene_serializer.h"
 
 namespace engine::editor {
 
@@ -68,6 +69,57 @@ void finalize_pending_gesture() noexcept {
 
 /// Copies a loaded bridge state into the panel state and marks the
 /// document clean at the current history position.
+/// Remembers what the material's file holds now, after an open, a reload or
+/// a save.
+void record_disk_fingerprint() noexcept {
+  g_state.diskFingerprint = core::FileFingerprint{};
+  static_cast<void>(runtime::document_fingerprint(g_state.virtualPath,
+                                                  &g_state.diskFingerprint));
+  g_state.diskConflict = false;
+}
+
+/// Writes the open material, checking first, unless `overwrite`, that its
+/// file still holds what it held when opened or last saved.
+bool save_material(bool overwrite) noexcept {
+  if (!g_state.open || !g_state.found) {
+    return false;
+  }
+  finalize_pending_gesture();
+
+  if (!overwrite) {
+    core::FileFingerprint onDisk{};
+    const core::FileReadResult read =
+        runtime::document_fingerprint(g_state.virtualPath, &onDisk);
+    // A file deleted since is no conflict: writing it again loses nothing.
+    const bool unreadable = (read == core::FileReadResult::Unreadable);
+    if (unreadable || (onDisk.exists && !(onDisk == g_state.diskFingerprint))) {
+      g_state.diskConflict = true;
+      std::snprintf(g_state.lastSaveError, sizeof(g_state.lastSaveError),
+                    unreadable ? "%.200s could not be read to check it for "
+                                 "outside changes; Overwrite or Reload from "
+                                 "Disk"
+                               : "%.200s changed on disk since it was opened; "
+                                 "Overwrite or Reload from Disk",
+                    g_state.virtualPath);
+      core::log_message(core::LogLevel::Warning, kLogChannel,
+                        g_state.lastSaveError);
+      return false;
+    }
+  }
+
+  const char *parent = g_state.hasParent ? g_state.parentVirtualPath : nullptr;
+  if (!runtime::editor_save_material(g_state.virtualPath, parent)) {
+    std::snprintf(g_state.lastSaveError, sizeof(g_state.lastSaveError),
+                  "failed to write material %s", g_state.virtualPath);
+    return false;
+  }
+  g_state.lastSaveError[0] = '\0';
+  g_state.savedHistoryToken = g_history.current_token();
+  g_state.unrecordedEdit = false;
+  record_disk_fingerprint();
+  return true;
+}
+
 void adopt_loaded_state(const runtime::EditorMaterialState &loaded) noexcept {
   g_state.materialId = loaded.materialId;
   g_state.buffer = loaded.params;
@@ -77,6 +129,7 @@ void adopt_loaded_state(const runtime::EditorMaterialState &loaded) noexcept {
                 "%s", loaded.parentVirtualPath);
   g_state.savedHistoryToken = g_history.current_token();
   g_state.unrecordedEdit = false;
+  record_disk_fingerprint();
 }
 
 /// Loads `virtualPath` into a fresh state (history dropped): the previous
@@ -276,23 +329,9 @@ void material_editor_apply_frame(
   }
 }
 
-bool save_material_editor() noexcept {
-  if (!g_state.open || !g_state.found) {
-    return false;
-  }
-  finalize_pending_gesture();
+bool save_material_editor() noexcept { return save_material(false); }
 
-  const char *parent = g_state.hasParent ? g_state.parentVirtualPath : nullptr;
-  if (!runtime::editor_save_material(g_state.virtualPath, parent)) {
-    std::snprintf(g_state.lastSaveError, sizeof(g_state.lastSaveError),
-                  "failed to write material %s", g_state.virtualPath);
-    return false;
-  }
-  g_state.lastSaveError[0] = '\0';
-  g_state.savedHistoryToken = g_history.current_token();
-  g_state.unrecordedEdit = false;
-  return true;
-}
+bool save_material_editor_overwrite() noexcept { return save_material(true); }
 
 bool reload_material_editor_from_disk() noexcept {
   if (!g_state.open) {

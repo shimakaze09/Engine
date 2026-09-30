@@ -235,6 +235,13 @@ File > Open Project... and File > Close Project leave the open project for
 another or for the hub, asking about unsaved changes first. A project named
 on the command line that cannot be opened says why in an error box.
 
+Save never writes over a scene or material whose file changed on disk after
+the editor opened or last saved it (a teammate's pull, another tool). It stops
+with the file untouched and offers Overwrite, Reload or Save As (a material:
+Overwrite or Reload from Disk), as Unity and Godot ask about an asset changed
+outside the editor. A file deleted in the meantime is simply written again
+(`engine_unit_editor_scene_document`, `engine_unit_editor_material_edit`).
+
 `engine_player` runs a game without the editor, as a Unity player build or a
 Godot export does: `engine_player path/to/my_game` (the sample beside it
 with none) opens a window titled with the project's name and plays its

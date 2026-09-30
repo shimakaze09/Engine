@@ -30,8 +30,7 @@ constexpr const char *kAlphaModeNames[] = {"Opaque", "Mask", "Blend"};
 // depends on; a new model needs a name here or it cannot be picked.
 constexpr const char *kShadingModelNames[] = {"Physically Based", "Toon",
                                               "Unlit"};
-static_assert(std::size(kShadingModelNames) ==
-                  renderer::kShadingModelCount,
+static_assert(std::size(kShadingModelNames) == renderer::kShadingModelCount,
               "name every shading model the renderer defines");
 
 /// Draws every scalar/vector/enum field; returns true if any changed.
@@ -47,12 +46,11 @@ bool draw_scalar_fields(renderer::Material &params) noexcept {
   }
   changed |= ImGui::ColorEdit3("Albedo", &params.albedo.x);
   changed |= ImGui::ColorEdit3("Emissive", &params.emissive.x);
-  changed |= ImGui::SliderFloat("Roughness", &params.roughness, 0.0F, 1.0F,
-                                "%.2f");
+  changed |=
+      ImGui::SliderFloat("Roughness", &params.roughness, 0.0F, 1.0F, "%.2f");
   changed |=
       ImGui::SliderFloat("Metallic", &params.metallic, 0.0F, 1.0F, "%.2f");
-  changed |=
-      ImGui::SliderFloat("Opacity", &params.opacity, 0.0F, 1.0F, "%.2f");
+  changed |= ImGui::SliderFloat("Opacity", &params.opacity, 0.0F, 1.0F, "%.2f");
 
   int alphaMode = static_cast<int>(params.alphaMode);
   if (ImGui::Combo("Alpha Mode", &alphaMode, kAlphaModeNames, 3)) {
@@ -205,6 +203,12 @@ void draw_material_editor_panel() noexcept {
     ImGui::SameLine();
     if (ImGui::Button("Reload from Disk")) {
       static_cast<void>(reload_material_editor_from_disk());
+    }
+    if (state.diskConflict) {
+      ImGui::SameLine();
+      if (ImGui::Button("Overwrite")) {
+        static_cast<void>(save_material_editor_overwrite());
+      }
     }
     if (state.lastSaveError[0] != '\0') {
       ImGui::TextColored(ImVec4(0.9F, 0.35F, 0.35F, 1.0F), "%s",
