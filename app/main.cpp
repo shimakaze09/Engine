@@ -35,6 +35,7 @@ int fail_to_start(const char *message) noexcept {
   return static_cast<int>(engine::ExitCode::BootstrapFailed);
 }
 
+#if !defined(ENGINE_PLATFORM_WEB)
 /// Says that the run stopped on a fatal frame error, where the unsaved
 /// scene was saved, if it was, and where the log is. Called before
 /// shutdown, while the log file is still open.
@@ -50,7 +51,6 @@ void report_fatal_frame() noexcept {
   engine::core::platform_show_error_box("Engine", text);
 }
 
-#if !defined(ENGINE_PLATFORM_WEB)
 /// Shows why the project at `path` did not open and returns the bootstrap
 /// failure code.
 int fail_to_open(const char *path,
