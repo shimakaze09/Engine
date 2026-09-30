@@ -78,7 +78,8 @@ plays the bundled template. It is not production-complete.
   not been observed in a browser; shaderc-cooked `.sc` shaders)
 - UI/editor: ImGui + ImGuizmo
 - Scripting: Lua 5.4 (C API)
-- Audio: miniaudio
+- Audio: miniaudio (WAV, Ogg Vorbis through the stb_vorbis decoder in the
+  same miniaudio checkout, MP3, FLAC)
 
 Every third-party dependency is fetched through CMake `FetchContent` at a
 pinned commit; only SDL3 is looked up locally first.
