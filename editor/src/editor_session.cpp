@@ -850,6 +850,48 @@ void use_authoring_ids(runtime::World *world) noexcept {
   world->set_persistent_id_policy(policy);
 }
 
+/// Rebuilds the attached World from the snapshot Play just took, so the
+/// session runs on the World a load produces -- the one Stop restores and
+/// the player starts from -- and never on storage shaped by the edit
+/// history: a delete reorders component arrays, and contact resolution,
+/// the state hash and script dispatch all walk storage. Unreal's
+/// play-in-editor likewise duplicates the editor world rather than
+/// playing on it. The selection follows its entities by persistent id.
+/// False, with the World unchanged, when the snapshot does not load.
+static bool rebuild_world_for_play() noexcept {
+  EditorSession &session = editor_session();
+  // The primary is always the last member, so restoring in member order
+  // brings it back as the primary.
+  const std::size_t memberCount =
+      selection_epoch_valid() ? session.selectedEntityCount : 0U;
+  std::unique_ptr<runtime::PersistentId[]> selectedIds(
+      (memberCount > 0U) ? new (std::nothrow) runtime::PersistentId[memberCount]
+                         : nullptr);
+  std::size_t keptCount = 0U;
+  if (selectedIds != nullptr) {
+    for (std::size_t i = 0U; i < memberCount; ++i) {
+      const runtime::Entity member = session.selectedEntities[i];
+      if (session.world->is_alive(member)) {
+        selectedIds[keptCount] = session.world->persistent_id(member);
+        ++keptCount;
+      }
+    }
+  }
+  if (!runtime::load_scene(*session.world, session.playSnapshotBuffer.get(),
+                           session.playSnapshotSize)) {
+    return false;
+  }
+  clear_entity_selection();
+  for (std::size_t i = 0U; i < keptCount; ++i) {
+    const runtime::Entity member =
+        session.world->find_entity_by_persistent_id(selectedIds[i]);
+    if (member != runtime::kInvalidEntity) {
+      select_entity(member, i > 0U);
+    }
+  }
+  return true;
+}
+
 void start_play_mode() noexcept {
   if (editor_session().world == nullptr) {
     return;
@@ -885,6 +927,13 @@ void start_play_mode() noexcept {
     if (!capture_play_snapshot()) {
       core::log_message(core::LogLevel::Error, "editor",
                         "failed to capture pre-play scene snapshot");
+      return;
+    }
+    if (!rebuild_world_for_play()) {
+      core::log_message(core::LogLevel::Error, "editor",
+                        "play refused: the scene could not be rebuilt from "
+                        "its own snapshot, so Stop could not restore it");
+      editor_session().hasPlaySnapshot = false;
       return;
     }
     // Fresh play session: a prior session's live-edit baselines/queued

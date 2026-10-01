@@ -929,6 +929,19 @@ engine_add_test_executable(engine_integration_end_play_session_state
     integration
 )
 
+engine_add_test_executable(engine_integration_play_matches_reload
+    SOURCES
+    play_matches_reload_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/editor/src
+    PRIVATE_DEPS
+    engine_editor
+    engine_runtime
+    engine_scripting
+    LABELS
+    integration
+)
+
 engine_add_test_executable(engine_integration_fatal_recovery
     SOURCES
     fatal_recovery_test.cpp

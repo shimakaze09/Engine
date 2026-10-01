@@ -408,6 +408,14 @@ Current script conventions in the sample's `assets/`:
 	  editor Stop, `on_end_play` runs before the authored scene is
 	  restored, so it reads the state the session ended in
 	- Legacy `on_start`/`on_update`/`on_end` names remain as fallbacks
+	- Every hook visits the scripted entities in one order, ascending
+	  entity index: the scene file's own entity order, which a save and a
+	  load keep, with entities spawned during play in the slot they take.
+	  Removing and re-adding a script does not move its entity. Editor
+	  Play rebuilds the scene from the snapshot it takes, as Stop does
+	  and as the player loads it, so the first Play after an edit runs
+	  exactly as every later one and as the shipped game
+	  (`engine_integration_play_matches_reload`)
 - Scene-level module example that spawns a controllable player and
   physics props when play begins (`assets/samples/playground.lua`, run by
   `assets/samples/playground.scene`; `engine_integration_playground_sample`

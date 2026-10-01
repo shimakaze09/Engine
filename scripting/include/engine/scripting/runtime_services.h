@@ -64,7 +64,8 @@ constexpr std::size_t kMaxGameSaveBytes = 4U * 1024U * 1024U;
 
 /// Visitor for the entity iteration operations.
 using EntityVisitFn = void (*)(core::Entity entity, void *context) noexcept;
-/// Visitor over entities that carry a ScriptComponent.
+/// Visitor over entities that carry a ScriptComponent, in ascending entity
+/// index: the one order every script hook dispatches in.
 using ScriptedEntityVisitFn = void (*)(core::Entity entity,
                                        const math::ScriptComponent &script,
                                        void *context) noexcept;

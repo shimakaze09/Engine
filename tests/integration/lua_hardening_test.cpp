@@ -387,9 +387,10 @@ bool test_tick_destroy_no_skipped_ticks() noexcept {
   }
 
   if (ok) {
-    for (const engine::runtime::Entity entity : firstWave) {
-      static_cast<void>(world->destroy_entity(entity));
-    }
+    // Hooks run in ascending entity index, so the killer must take a lower
+    // index than its victim. The second wave is created before the first
+    // is destroyed, on fresh indices in creation order, so the order does
+    // not hang on which freed slot the World hands back first.
     engine::scripting::clear_entity_script_modules();
     ok = engine::scripting::load_script(kTempScript) &&
          (add_scripted_entity(world, "hardening_killer.lua") !=
@@ -400,6 +401,9 @@ bool test_tick_destroy_no_skipped_ticks() noexcept {
           engine::runtime::kInvalidEntity) &&
          (add_scripted_entity(world, "hardening_counter_b.lua") !=
           engine::runtime::kInvalidEntity);
+    for (const engine::runtime::Entity entity : firstWave) {
+      static_cast<void>(world->destroy_entity(entity));
+    }
   }
 
   if (ok) {
