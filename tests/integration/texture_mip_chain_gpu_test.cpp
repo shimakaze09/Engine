@@ -12,6 +12,7 @@
 // the mount walk and the materials folder load a project's own.
 
 #include "../gpu_scene_fixture.h"
+#include "../png_fixture.h"
 
 #include "engine/content/asset_identity.h"
 
@@ -54,75 +55,9 @@ bool write_text(const std::string &path, const std::string &text) {
   return write_bytes(path.c_str(), text.data(), text.size());
 }
 
-/// CRC-32 as PNG chunks use it.
-std::uint32_t crc32(const std::vector<unsigned char> &bytes, std::size_t from) {
-  std::uint32_t crc = 0xFFFFFFFFU;
-  for (std::size_t i = from; i < bytes.size(); ++i) {
-    crc ^= bytes[i];
-    for (int bit = 0; bit < 8; ++bit) {
-      crc = (crc >> 1U) ^ (0xEDB88320U & (0U - (crc & 1U)));
-    }
-  }
-  return ~crc;
-}
-
-void put_u32(std::vector<unsigned char> *out, std::uint32_t value) {
-  for (int shift = 24; shift >= 0; shift -= 8) {
-    out->push_back(static_cast<unsigned char>((value >> shift) & 0xFFU));
-  }
-}
-
-void put_chunk(std::vector<unsigned char> *png, const char *type,
-               const std::vector<unsigned char> &data) {
-  put_u32(png, static_cast<std::uint32_t>(data.size()));
-  const std::size_t start = png->size();
-  png->insert(png->end(), type, type + 4);
-  png->insert(png->end(), data.begin(), data.end());
-  std::vector<unsigned char> crcInput(
-      png->begin() + static_cast<std::ptrdiff_t>(start), png->end());
-  put_u32(png, crc32(crcInput, 0U));
-}
-
-/// A 256x256 opaque white RGB PNG, stored uncompressed (deflate "stored"
-/// blocks), so the test needs no compressor.
+/// A 256x256 opaque white RGB PNG.
 std::vector<unsigned char> white_png() {
-  constexpr std::uint32_t kSize = 256U;
-  std::vector<unsigned char> raw{};
-  for (std::uint32_t y = 0U; y < kSize; ++y) {
-    raw.push_back(0U); // filter: none
-    raw.insert(raw.end(), kSize * 3U, 255U);
-  }
-  std::vector<unsigned char> zlib{0x78U, 0x01U};
-  std::uint32_t a = 1U;
-  std::uint32_t b = 0U;
-  for (const unsigned char byte : raw) {
-    a = (a + byte) % 65521U;
-    b = (b + a) % 65521U;
-  }
-  for (std::size_t offset = 0U; offset < raw.size(); offset += 65535U) {
-    const std::size_t length =
-        ((raw.size() - offset) < 65535U) ? (raw.size() - offset) : 65535U;
-    const bool last = (offset + length) == raw.size();
-    zlib.push_back(last ? 1U : 0U);
-    zlib.push_back(static_cast<unsigned char>(length & 0xFFU));
-    zlib.push_back(static_cast<unsigned char>((length >> 8U) & 0xFFU));
-    zlib.push_back(static_cast<unsigned char>(~length & 0xFFU));
-    zlib.push_back(static_cast<unsigned char>((~length >> 8U) & 0xFFU));
-    zlib.insert(zlib.end(), raw.begin() + static_cast<std::ptrdiff_t>(offset),
-                raw.begin() + static_cast<std::ptrdiff_t>(offset + length));
-  }
-  put_u32(&zlib, (b << 16U) | a);
-
-  std::vector<unsigned char> png{0x89U, 'P',   'N',   'G',
-                                 0x0DU, 0x0AU, 0x1AU, 0x0AU};
-  std::vector<unsigned char> header{};
-  put_u32(&header, kSize);
-  put_u32(&header, kSize);
-  header.insert(header.end(), {8U, 2U, 0U, 0U, 0U}); // 8-bit RGB
-  put_chunk(&png, "IHDR", header);
-  put_chunk(&png, "IDAT", zlib);
-  put_chunk(&png, "IEND", {});
-  return png;
+  return engine::tests::uniform_rgb8_png(256U, 255U);
 }
 
 std::string meta(const char *guid) {

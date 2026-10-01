@@ -1520,6 +1520,15 @@ def test_duplicate_primitive_gate():
             "std::filesystem::exists(\"assets/x.lua\", ec);\n")]) == 0,
               "duplicate primitives: calling the helper or probing a "
               "relative asset path is not a walk")
+        png = ("// Purpose.\nstd::uint32_t crc = 0xEDB88320U;\n"
+               "put_chunk(&png, \"IHDR\", header);\n")
+        check(run([script, "--root", case(
+            "png_encoder", "tests/integration/a_test.cpp", png)]) != 0,
+              "duplicate primitives: a test encoding its own PNG is a "
+              "finding")
+        check(run([script, "--root", case(
+            "png_encoder_owner", "tests/png_fixture.h", png)]) == 0,
+              "duplicate primitives: tests/png_fixture.h owns the encoder")
         prep = ("// Purpose.\nif (!engine::runtime::enqueue_render_prep_pipeline("
                 "ctx, world, buf, db, reg, a, b, &f, &d, 1U, 8U, view, 1.0F, "
                 "&m)) {}\n")

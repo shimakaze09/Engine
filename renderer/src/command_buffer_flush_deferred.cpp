@@ -1001,6 +1001,7 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
       auto drawForwardTransparent = [&](std::size_t start, std::size_t end,
                                         std::uint8_t programId) {
         ForwardDrawBindings bindings{};
+        bindings.lights = &lights;
         for (std::size_t i = start; i < end; ++i) {
           const DrawCommand &cmd = commandBufferView.data[i];
           const GpuMesh *mesh = lookup_gpu_mesh(registry, cmd.mesh);
@@ -1009,6 +1010,7 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
               (mesh->vertexCount == 0U)) {
             continue;
           }
+          select_forward_command_lights(backend, dev, cmd, *mesh, &bindings);
           upload_forward_material(transparentProgram, backend, dev, cmd,
                                   &bindings);
           draw_forward_command(transparentProgram, backend, dev, programId, cmd,
