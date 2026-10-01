@@ -198,6 +198,17 @@ RULES: tuple[Rule, ...] = (
         remedy="include engine/core/string_util.h and use core::ascii_lower "
         "or core::contains_ignoring_case",
     ),
+    Rule(
+        name="the linear colour field",
+        owner="editor/src/editor_inspector_widgets.cpp",
+        # Calling ImGui's colour widget directly is what a copy looks like:
+        # it shows the stored linear floats as display colours, so the
+        # material, light and mesh tint pickers each showed a swatch lighter
+        # than the colour the renderer drew.
+        pattern=r"\bImGui::Color(?:Edit|Picker)[34]\s*\(",
+        remedy="include editor_inspector_widgets.h and use "
+        "inspector_linear_color3",
+    ),
 )
 
 

@@ -1558,6 +1558,14 @@ def test_duplicate_primitive_gate():
             "case_fold_owner", "core/include/engine/core/string_util.h",
             "// Purpose.\nconstexpr char ascii_lower(char c) noexcept;\n")]) == 0,
               "duplicate primitives: the core helper itself is not a finding")
+        colour = "// Purpose.\nImGui::ColorEdit3(\"Tint\", &tint.x);\n"
+        check(run([script, "--root", case(
+            "colour_field", "editor/src/a.cpp", colour)]) != 0,
+              "duplicate primitives: a raw colour widget is a finding")
+        check(run([script, "--root", case(
+            "colour_field_owner", "editor/src/editor_inspector_widgets.cpp",
+            colour)]) == 0,
+              "duplicate primitives: the linear colour field owns the widget")
         check(run([script, "--root", case(
             "pixels", "editor/src/a.cpp",
             "// Purpose.\nImGui::SetNextItemWidth(72.0F);\n")]) != 0,

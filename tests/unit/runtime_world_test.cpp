@@ -1046,6 +1046,41 @@ int verify_identity_paths_refuse_overflow() {
   return 0;
 }
 
+/// A stored rotation is a unit quaternion: one clearly off unit length is
+/// normalized, a zero one refused with the transform unchanged, and one
+/// within rounding of a hand-typed value kept bit for bit.
+int verify_transform_rotation_ingress() {
+  using namespace engine::runtime;
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 1300;
+  }
+  const Entity entity = world->create_entity();
+  Transform transform{};
+  transform.rotation = engine::math::Quat(0.0F, 0.0F, 0.0F, 0.5F);
+  Transform stored{};
+  if (!world->add_transform(entity, transform) ||
+      !world->get_transform(entity, &stored) || (stored.rotation.w != 1.0F) ||
+      (stored.rotation.x != 0.0F)) {
+    return 1301;
+  }
+  Transform zero{};
+  zero.rotation = engine::math::Quat(0.0F, 0.0F, 0.0F, 0.0F);
+  zero.position = engine::math::Vec3(9.0F, 0.0F, 0.0F);
+  if (world->add_transform(entity, zero) ||
+      !world->get_transform(entity, &stored) || (stored.position.x != 0.0F)) {
+    return 1302;
+  }
+  Transform typed{};
+  typed.rotation = engine::math::Quat(0.0F, 0.707F, 0.0F, 0.707F);
+  if (!world->add_transform(entity, typed) ||
+      !world->get_transform(entity, &stored) || (stored.rotation.y != 0.707F) ||
+      (stored.rotation.w != 0.707F)) {
+    return 1303;
+  }
+  return 0;
+}
+
 /// EXPECTATION (audit H-06): component and gravity ingress rejects
 /// non-finite, non-positive-extent, and negative-mass/material values with
 /// the destination unchanged, while valid values keep being accepted.
@@ -1645,6 +1680,11 @@ int main() {
   }
 
   result = verify_physics_ingress_validation();
+  if (result != 0) {
+    return result;
+  }
+
+  result = verify_transform_rotation_ingress();
   if (result != 0) {
     return result;
   }

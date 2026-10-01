@@ -302,7 +302,10 @@ public:
   }
 
   /// Adds or replaces the entity's transform. Requires the Input phase and a
-  /// live entity; logs and returns false otherwise or when storage is full.
+  /// live entity; logs and returns false otherwise, when storage is full,
+  /// for a non-finite field or a zero rotation. A rotation whose squared
+  /// length is off 1 by more than 1e-3 is stored normalized, with a
+  /// Warning; one within that is stored bit for bit.
   bool add_transform(Entity entity, const Transform &transform) noexcept;
   /// Removes the entity's transform. Requires the Input phase and a live
   /// entity; logs and returns false otherwise or when the component is absent.

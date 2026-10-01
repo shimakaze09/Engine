@@ -383,15 +383,22 @@ void register_thumbnail_cache_cvars() noexcept;
 /// device's native texture id; 0 when the handle is stale or no device.
 std::uint64_t imgui_texture_id(renderer::DeviceTextureHandle texture) noexcept;
 
-/// Loads the persisted content-browser folder/filter (last-used folder and
-/// type mask) once per process; no-op after the first call or when no
-/// state was ever saved (defaults stand: index root, every type shown).
+/// Loads the open project's content-browser state (last-used folder and
+/// type mask) once per project; no-op after the first call, with no
+/// project open, or when none was ever saved (defaults stand: the asset
+/// root, every type shown). The folder is stored relative to the asset
+/// root and restored only if it is still a folder inside it; otherwise
+/// the browser starts at the root, with an Info line.
 void content_browser_state_load_once() noexcept;
-/// Persists the current folder + type mask to the platform save directory
-/// (or the test override directory, when set).
+/// Persists the current folder, relative to the asset root, and type mask
+/// to the open project's per-user data directory (or the test override
+/// directory, when set).
 void content_browser_state_persist() noexcept;
+/// Returns the browser to its defaults and re-arms the load, so the next
+/// project opened reads its own state; the editor's session reset runs it.
+void content_browser_state_reset() noexcept;
 /// Test-only override for the content-browser state persistence directory;
-/// an empty string restores the default per-user platform save directory.
+/// an empty string restores the open project's data directory.
 void content_browser_state_set_directory_override_for_tests(
     const char *directory) noexcept;
 

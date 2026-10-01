@@ -5,6 +5,7 @@
 
 #include <cassert>
 #include <cmath>
+#include <cstddef>
 
 #include "engine/math/mat4.h"
 #include "engine/math/quat.h"
@@ -24,8 +25,25 @@ inline Mat4 compose_trs(const Vec3 &translation, const Quat &rotation,
   return result;
 }
 
-/// Splits a TRS matrix back into translation/rotation/scale; returns false
-/// for degenerate scale. A negative determinant is folded into scale.z.
+/// Largest |cosine| allowed between two basis axes of a matrix taken as
+/// TRS: 1e-3 is about 0.06 degrees off square, far above the float
+/// round-off of composing, inverting and multiplying TRS matrices, and far
+/// below the shear a non-uniformly scaled parent puts on a rotated child.
+inline constexpr float kTrsShearTolerance = 1.0e-3F;
+
+/// Smallest basis length taken as a scale; below it the matrix is
+/// singular for TRS purposes.
+inline constexpr float kTrsMinScale = 1.0e-8F;
+
+/// Splits a matrix into translation, rotation and scale. Returns false,
+/// leaving the outputs unset, for a matrix that is not TRS: a non-finite
+/// value, a basis axis shorter than kTrsMinScale (singular), or two axes
+/// further from perpendicular than kTrsShearTolerance (sheared, as a
+/// rotated child of a non-uniformly scaled parent is), since any rotation
+/// taken from such a basis is not a rotation. The rotation returned is
+/// unit length. A mirrored basis (negative determinant) is accepted and
+/// folded into a negative scale.z; a caller that cannot hold a mirror
+/// (the skeleton importer) refuses a negative scale.z itself.
 inline bool decompose_trs(const Mat4 &value, Vec3 *outTranslation,
                           Quat *outRotation, Vec3 *outScale) noexcept {
   if ((outTranslation == nullptr) || (outRotation == nullptr) ||
@@ -35,36 +53,88 @@ inline bool decompose_trs(const Mat4 &value, Vec3 *outTranslation,
 
   const Vec3 translation(value.columns[3].x, value.columns[3].y,
                          value.columns[3].z);
-  const Vec3 basisX(value.columns[0].x, value.columns[0].y, value.columns[0].z);
-  const Vec3 basisY(value.columns[1].x, value.columns[1].y, value.columns[1].z);
-  const Vec3 basisZ(value.columns[2].x, value.columns[2].y, value.columns[2].z);
-
-  float scaleX = length(basisX);
-  float scaleY = length(basisY);
-  float scaleZ = length(basisZ);
-
-  if ((scaleX <= 0.0F) || (scaleY <= 0.0F) || (scaleZ <= 0.0F)) {
+  if (!std::isfinite(translation.x) || !std::isfinite(translation.y) ||
+      !std::isfinite(translation.z)) {
+    return false;
+  }
+  Vec3 scale(
+      length(Vec3(value.columns[0].x, value.columns[0].y, value.columns[0].z)),
+      length(Vec3(value.columns[1].x, value.columns[1].y, value.columns[1].z)),
+      length(Vec3(value.columns[2].x, value.columns[2].y, value.columns[2].z)));
+  // Written so a NaN or infinite length fails too.
+  if (!(scale.x > kTrsMinScale) || !(scale.y > kTrsMinScale) ||
+      !(scale.z > kTrsMinScale) || !std::isfinite(scale.x) ||
+      !std::isfinite(scale.y) || !std::isfinite(scale.z)) {
     return false;
   }
 
-  Vec3 normX = div(basisX, scaleX);
-  Vec3 normY = div(basisY, scaleY);
-  Vec3 normZ = div(basisZ, scaleZ);
-
-  const Vec3 crossXY = cross(normX, normY);
-  if (dot(crossXY, normZ) < 0.0F) {
-    scaleZ = -scaleZ;
-    normZ = mul(normZ, -1.0F);
+  Mat4 rotationOnly = value;
+  rotationOnly.columns[3] = Vec4(0.0F, 0.0F, 0.0F, 1.0F);
+  for (std::size_t column = 0U; column < 3U; ++column) {
+    const float axisScale = (column == 0U)   ? scale.x
+                            : (column == 1U) ? scale.y
+                                             : scale.z;
+    rotationOnly.columns[column].x /= axisScale;
+    rotationOnly.columns[column].y /= axisScale;
+    rotationOnly.columns[column].z /= axisScale;
   }
 
-  Mat4 rotationMat(Vec4(normX.x, normX.y, normX.z, 0.0F),
-                   Vec4(normY.x, normY.y, normY.z, 0.0F),
-                   Vec4(normZ.x, normZ.y, normZ.z, 0.0F),
-                   Vec4(0.0F, 0.0F, 0.0F, 1.0F));
+  Vec4 &c0 = rotationOnly.columns[0];
+  Vec4 &c1 = rotationOnly.columns[1];
+  Vec4 &c2 = rotationOnly.columns[2];
+  const float dot01 = (c0.x * c1.x) + (c0.y * c1.y) + (c0.z * c1.z);
+  const float dot02 = (c0.x * c2.x) + (c0.y * c2.y) + (c0.z * c2.z);
+  const float dot12 = (c1.x * c2.x) + (c1.y * c2.y) + (c1.z * c2.z);
+  if ((std::fabs(dot01) > kTrsShearTolerance) ||
+      (std::fabs(dot02) > kTrsShearTolerance) ||
+      (std::fabs(dot12) > kTrsShearTolerance)) {
+    return false;
+  }
+
+  const float determinant = c0.x * (c1.y * c2.z - c1.z * c2.y) -
+                            c1.x * (c0.y * c2.z - c0.z * c2.y) +
+                            c2.x * (c0.y * c1.z - c0.z * c1.y);
+  if (determinant < 0.0F) {
+    scale.z = -scale.z;
+    c2.x = -c2.x;
+    c2.y = -c2.y;
+    c2.z = -c2.z;
+  }
 
   *outTranslation = translation;
-  *outScale = Vec3(scaleX, scaleY, scaleZ);
-  *outRotation = from_mat4(rotationMat);
+  *outScale = scale;
+  *outRotation = normalize(from_mat4(rotationOnly));
+  return true;
+}
+
+/// The rotation of a matrix's basis with scale and shear removed: the X
+/// axis kept, Y made perpendicular to it, Z completing a right-handed
+/// frame (Gram-Schmidt). Unlike decompose_trs it accepts a sheared basis,
+/// for comparing two poses of one sheared matrix; false for a singular
+/// one.
+inline bool basis_rotation(const Mat4 &value, Quat *outRotation) noexcept {
+  if (outRotation == nullptr) {
+    return false;
+  }
+  const Vec3 x(value.columns[0].x, value.columns[0].y, value.columns[0].z);
+  const Vec3 y(value.columns[1].x, value.columns[1].y, value.columns[1].z);
+  const float lengthX = length(x);
+  if (!(lengthX > kTrsMinScale) || !std::isfinite(lengthX)) {
+    return false;
+  }
+  const Vec3 axisX = div(x, lengthX);
+  const Vec3 rejected = sub(y, mul(axisX, dot(y, axisX)));
+  const float lengthY = length(rejected);
+  if (!(lengthY > kTrsMinScale) || !std::isfinite(lengthY)) {
+    return false;
+  }
+  const Vec3 axisY = div(rejected, lengthY);
+  const Vec3 axisZ = cross(axisX, axisY);
+  const Mat4 frame(Vec4(axisX.x, axisX.y, axisX.z, 0.0F),
+                   Vec4(axisY.x, axisY.y, axisY.z, 0.0F),
+                   Vec4(axisZ.x, axisZ.y, axisZ.z, 0.0F),
+                   Vec4(0.0F, 0.0F, 0.0F, 1.0F));
+  *outRotation = normalize(from_mat4(frame));
   return true;
 }
 

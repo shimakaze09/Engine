@@ -369,7 +369,7 @@ void draw_field(const core::TypeDescriptor &desc, void *instance,
       break;
     }
     if ((meta != nullptr) && (meta->widget == InspectorWidget::Color)) {
-      mark_modified(modified, ImGui::ColorEdit3(label, &value->x));
+      mark_modified(modified, inspector_linear_color3(label, &value->x));
     } else if ((meta != nullptr) &&
               ((meta->widget == InspectorWidget::Drag) ||
                (meta->widget == InspectorWidget::Slider))) {

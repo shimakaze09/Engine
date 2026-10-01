@@ -27,17 +27,19 @@
 #include "editor_material_edit.h"
 #include "editor_multi_edit.h"
 #include "engine/core/atomic_file.h"
-#include "engine/core/file_read.h"
 #include "engine/core/cvar.h"
 #include "engine/core/engine_stats.h"
+#include "engine/core/file_read.h"
 #include "engine/core/json.h"
 #include "engine/core/logging.h"
 #include "engine/core/mem_tracker.h"
 #include "engine/core/platform.h"
 #include "engine/core/profiler.h"
+#include "engine/core/project_data.h"
 #include "engine/core/reflect.h"
-#include "engine/engine.h"
+#include "engine/core/string_util.h"
 #include "engine/editor/editor_camera.h"
+#include "engine/engine.h"
 #include "engine/math/transform.h"
 #include "engine/math/vec2.h"
 #include "engine/math/vec4.h"
@@ -314,8 +316,11 @@ constexpr const char *kContentBrowserStateFileName =
     "editor_content_browser_state.json";
 char g_contentBrowserDirectoryOverride[512] = {};
 
-/// Resolves the content-browser state persistence directory: the test
-/// override when set, otherwise the real per-user platform save directory.
+/// Resolves the content-browser state directory: the test override when
+/// set, otherwise the open project's per-user data directory, so each
+/// project keeps its own browser state, as Unity keeps the Project
+/// window's in the project's UserSettings. False with no project open:
+/// the hub has no browser state to keep.
 bool resolve_content_browser_directory(char *out,
                                        std::size_t capacity) noexcept {
   if (g_contentBrowserDirectoryOverride[0] != '\0') {
@@ -323,7 +328,54 @@ bool resolve_content_browser_directory(char *out,
         std::snprintf(out, capacity, "%s", g_contentBrowserDirectoryOverride);
     return (written > 0) && (static_cast<std::size_t>(written) < capacity);
   }
-  return core::platform_get_save_dir(out, capacity);
+  return core::project_data_named() && core::project_data_dir(out, capacity);
+}
+
+/// The browser folder as a path below the project's asset root, "" for
+/// the root itself or for a folder outside it, which is never stored.
+void folder_below_asset_root(const char *folder, char *out,
+                             std::size_t capacity) noexcept {
+  out[0] = '\0';
+  if ((folder == nullptr) || (folder[0] == '\0')) {
+    return;
+  }
+  const std::filesystem::path relative =
+      std::filesystem::path(folder).lexically_relative(
+          std::filesystem::path(active_config().editorAssetRoot));
+  const std::string text = relative.generic_string();
+  if (relative.empty() || (text == ".") || (text.rfind("..", 0) == 0)) {
+    return;
+  }
+  static_cast<void>(core::copy_string_strict(out, capacity, text.c_str()));
+}
+
+/// Resolves a stored folder, a path below the asset root, to the folder
+/// the browser lists. True with "" for the root. False, leaving `out`
+/// empty, for a path that leaves the root (absolute, or naming "." or
+/// "..") or a folder that no longer exists.
+bool folder_from_asset_root(const char *stored, char *out,
+                            std::size_t capacity) noexcept {
+  out[0] = '\0';
+  if (stored[0] == '\0') {
+    return true;
+  }
+  const std::filesystem::path relative(stored);
+  if (relative.has_root_name() || relative.has_root_directory()) {
+    return false;
+  }
+  for (const std::filesystem::path &part : relative) {
+    if ((part == ".") || (part == "..")) {
+      return false;
+    }
+  }
+  const std::filesystem::path folder =
+      std::filesystem::path(active_config().editorAssetRoot) / relative;
+  std::error_code ec{};
+  if (!std::filesystem::is_directory(folder, ec) || ec) {
+    return false;
+  }
+  return core::copy_string_strict(out, capacity,
+                                  folder.generic_string().c_str());
 }
 
 bool build_content_browser_state_path(char *out,
@@ -364,6 +416,12 @@ void content_browser_state_set_directory_override_for_tests(
   g_contentBrowserRefusalLogged = false;
 }
 
+void content_browser_state_reset() noexcept {
+  editor_session().contentBrowser = ContentBrowserState{};
+  g_contentBrowserLoadFailed = false;
+  g_contentBrowserRefusalLogged = false;
+}
+
 void content_browser_state_persist() noexcept {
   if (g_contentBrowserLoadFailed) {
     if (!g_contentBrowserRefusalLogged) {
@@ -388,9 +446,13 @@ void content_browser_state_persist() noexcept {
     return;
   }
 
+  // Relative to the asset root, so a moved project keeps its folder and
+  // no other project can be sent to it.
+  char folder[kMaxAssetIndexPath] = {};
+  folder_below_asset_root(cb.filter.folder, folder, sizeof(folder));
   core::JsonWriter writer{};
   writer.begin_object();
-  writer.write_string("folder", cb.filter.folder);
+  writer.write_string("folder", folder);
   writer.write_uint("typeMask", cb.filter.typeMask);
   // How many type bits the mask was written with, so a later session with
   // more asset types shows the new ones instead of reading them as hidden.
@@ -452,11 +514,22 @@ void content_browser_state_load_once() noexcept {
     parser.set_read_tracker(&readTracker);
   }
 
-  char folder[kMaxAssetIndexPath] = {};
+  char stored[kMaxAssetIndexPath] = {};
   const core::JsonValue *folderValue = parser.get_object_field(*root, "folder");
   if ((folderValue != nullptr) &&
-      parser.copy_string(*folderValue, folder, sizeof(folder))) {
-    std::snprintf(cb.filter.folder, sizeof(cb.filter.folder), "%s", folder);
+      parser.copy_string(*folderValue, stored, sizeof(stored))) {
+    char folder[kMaxAssetIndexPath] = {};
+    if (folder_from_asset_root(stored, folder, sizeof(folder))) {
+      std::snprintf(cb.filter.folder, sizeof(cb.filter.folder), "%s", folder);
+    } else {
+      char message[kMaxAssetIndexPath + 96] = {};
+      std::snprintf(message, sizeof(message),
+                    "the stored folder '%s' is not in this project's assets; "
+                    "starting at the root",
+                    stored);
+      core::log_message(core::LogLevel::Info, kContentBrowserLogChannel,
+                        message);
+    }
   }
 
   const core::JsonValue *maskValue =

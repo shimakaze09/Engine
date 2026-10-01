@@ -226,9 +226,68 @@ int check_far_ray_sphere() noexcept {
 } // namespace
 
 /// Runs this executable or test program.
+/// decompose_trs takes only TRS: the sheared basis a rotated child of a
+/// (2,1,1) parent has, a singular basis and a non-finite one are refused;
+/// what it returns has a unit rotation; a mirror folds into scale.z; and
+/// basis_rotation still names the rotation of the sheared basis.
+int check_decompose_refuses_non_trs() noexcept {
+  using namespace engine::math;
+  const Mat4 parent =
+      compose_trs(Vec3(0.0F, 0.0F, 0.0F), Quat(), Vec3(2.0F, 1.0F, 1.0F));
+  Mat4 inverseParent{};
+  if (!inverse(parent, &inverseParent)) {
+    return 240;
+  }
+  const Quat turn = from_axis_angle(Vec3(0.0F, 0.0F, 1.0F), 0.785398163F);
+  const Mat4 sheared = mul(mul(inverseParent, to_mat4(turn)), parent);
+  Vec3 t{};
+  Quat r{};
+  Vec3 s{};
+  if (decompose_trs(sheared, &t, &r, &s)) {
+    return 241;
+  }
+  Mat4 singular = identity();
+  singular.columns[1] = singular.columns[0];
+  if (decompose_trs(singular, &t, &r, &s)) {
+    return 242;
+  }
+  Mat4 flat = identity();
+  flat.columns[2] = Vec4(0.0F, 0.0F, 0.0F, 0.0F);
+  Mat4 notFinite = identity();
+  notFinite.columns[3].x = std::numeric_limits<float>::infinity();
+  if (decompose_trs(flat, &t, &r, &s) || decompose_trs(notFinite, &t, &r, &s)) {
+    return 243;
+  }
+  // A TRS matrix decomposes, with a rotation of unit length; one ulp of
+  // float around 1 bounds the length's error.
+  const Quat q = normalize(Quat(0.1F, 0.7F, -0.3F, 0.6F));
+  if (!decompose_trs(
+          compose_trs(Vec3(1.0F, 2.0F, 3.0F), q, Vec3(0.5F, 3.0F, 1.5F)), &t,
+          &r, &s) ||
+      (std::fabs(std::sqrt(dot(r, r)) - 1.0F) > 1.2e-7F)) {
+    return 244;
+  }
+  // A mirror folds into a negative scale.z.
+  if (!decompose_trs(compose_trs(Vec3(), Quat(), Vec3(1.0F, 1.0F, -2.0F)), &t,
+                     &r, &s) ||
+      (s.z != -2.0F) || (s.x != 1.0F)) {
+    return 245;
+  }
+  // The sheared basis still has a rotation: its X axis turned 45 degrees.
+  Quat basis{};
+  if (!basis_rotation(mul(to_mat4(turn), parent), &basis) ||
+      !nearly_equal_quat(basis, turn, 1.0e-6F)) {
+    return 246;
+  }
+  return 0;
+}
+
 int main() {
   if (const int farRay = check_far_ray_sphere(); farRay != 0) {
     return farRay;
+  }
+  if (const int trs = check_decompose_refuses_non_trs(); trs != 0) {
+    return trs;
   }
 
   const engine::math::Vec2 v2a(1.0F, 2.0F);
