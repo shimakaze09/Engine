@@ -11,7 +11,6 @@
 
 #include "imgui.h"
 
-#include <cctype>
 #include <cstdio>
 #include <cstring>
 
@@ -21,6 +20,7 @@
 #include "editor_material_edit.h"
 #include "editor_reference_pickers.h"
 #include "editor_session.h"
+#include "engine/core/string_util.h"
 #include "engine/renderer/asset_database.h"
 #include "engine/runtime/editor_bridge.h"
 
@@ -331,30 +331,6 @@ void draw_scene_capture_preview(
 
 namespace {
 
-bool contains_ci_local(const char *haystack, const char *needle) noexcept {
-  if ((haystack == nullptr) || (needle == nullptr) || (needle[0] == '\0')) {
-    return true;
-  }
-  const std::size_t haystackLen = std::strlen(haystack);
-  const std::size_t needleLen = std::strlen(needle);
-  if (needleLen > haystackLen) {
-    return false;
-  }
-  for (std::size_t start = 0U; start <= (haystackLen - needleLen); ++start) {
-    std::size_t i = 0U;
-    for (; i < needleLen; ++i) {
-      if (std::tolower(static_cast<unsigned char>(haystack[start + i])) !=
-          std::tolower(static_cast<unsigned char>(needle[i]))) {
-        break;
-      }
-    }
-    if (i == needleLen) {
-      return true;
-    }
-  }
-  return false;
-}
-
 /// One Add Component menu candidate, gathered from the persistent-component
 /// registry so a new registry row appears here without a matching manual
 /// branch.
@@ -454,7 +430,7 @@ void draw_add_component_menu(runtime::Entity entity, bool editable) noexcept {
   const char *lastCategory = nullptr;
   for (std::size_t i = 0U; i < candidateCount; ++i) {
     const AddMenuEntry &entry = candidates[i];
-    if (!contains_ci_local(entry.displayName, filter)) {
+    if (!core::contains_ignoring_case(entry.displayName, filter)) {
       continue;
     }
     if ((lastCategory == nullptr) ||

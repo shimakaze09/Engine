@@ -3,8 +3,8 @@
 // the pipeline's published asset service.
 
 #include "engine/runtime/editor_bridge.h"
+#include "engine/core/string_util.h"
 
-#include <cctype>
 #include <cstdio>
 #include <cstring>
 
@@ -132,41 +132,6 @@ std::uint64_t editor_request_mesh_asset(const char *virtualPath) noexcept {
   return assetId;
 }
 
-namespace {
-
-/// Case-insensitive substring test ("" needle always matches).
-bool contains_ci(const char *haystack, const char *needle) noexcept {
-  if ((haystack == nullptr) || (needle == nullptr)) {
-    return false;
-  }
-  if (needle[0] == '\0') {
-    return true;
-  }
-  const std::size_t haystackLen = std::strlen(haystack);
-  const std::size_t needleLen = std::strlen(needle);
-  if (needleLen > haystackLen) {
-    return false;
-  }
-  for (std::size_t start = 0U; start <= (haystackLen - needleLen); ++start) {
-    std::size_t i = 0U;
-    for (; i < needleLen; ++i) {
-      const unsigned char a =
-          static_cast<unsigned char>(std::tolower(haystack[start + i]));
-      const unsigned char b =
-          static_cast<unsigned char>(std::tolower(needle[i]));
-      if (a != b) {
-        break;
-      }
-    }
-    if (i == needleLen) {
-      return true;
-    }
-  }
-  return false;
-}
-
-} // namespace
-
 std::size_t editor_query_assets(content::AssetTypeTag typeTag,
                                 const char *query,
                                 EditorAssetSearchResult *outResults,
@@ -191,7 +156,8 @@ std::size_t editor_query_assets(content::AssetTypeTag typeTag,
     if (metadata == nullptr) {
       continue;
     }
-    if (!contains_ci(metadata->filePath.data(), effectiveQuery)) {
+    if (!core::contains_ignoring_case(metadata->filePath.data(),
+                                      effectiveQuery)) {
       continue;
     }
     EditorAssetSearchResult &result = outResults[written];

@@ -1548,6 +1548,16 @@ def test_duplicate_primitive_gate():
             "prep_driver_owner", "tests/render_prep_harness.h", prep)]) == 0,
               "duplicate primitives: tests/render_prep_harness.h owns the "
               "render prep driver")
+        fold = ("// Purpose.\nif (std::tolower(static_cast<unsigned char>(a)) "
+                "!= std::tolower(static_cast<unsigned char>(b))) {}\n")
+        check(run([script, "--root", case(
+            "case_fold", "editor/src/a.cpp", fold)]) != 0,
+              "duplicate primitives: folding case with the C library is a "
+              "finding")
+        check(run([script, "--root", case(
+            "case_fold_owner", "core/include/engine/core/string_util.h",
+            "// Purpose.\nconstexpr char ascii_lower(char c) noexcept;\n")]) == 0,
+              "duplicate primitives: the core helper itself is not a finding")
         check(run([script, "--root", case(
             "pixels", "editor/src/a.cpp",
             "// Purpose.\nImGui::SetNextItemWidth(72.0F);\n")]) != 0,

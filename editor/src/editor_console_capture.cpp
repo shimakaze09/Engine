@@ -5,13 +5,13 @@
 #include "editor_console_capture.h"
 
 #include "engine/core/hash.h"
+#include "engine/core/string_util.h"
 
 #include "engine/core/diagnostic.h"
 #include "engine/core/fixed_ring.h"
 
 #include <array>
 #include <atomic>
-#include <cctype>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -312,40 +312,6 @@ bool format_console_status(std::uint32_t errors, std::uint32_t warnings,
   return true;
 }
 
-namespace {
-
-/// Case-insensitive substring test; std::string-free to match the fixed-
-/// buffer style of the rest of this module.
-bool contains_ci(const char *haystack, const char *needle) noexcept {
-  if ((needle == nullptr) || (needle[0] == '\0')) {
-    return true;
-  }
-  if (haystack == nullptr) {
-    return false;
-  }
-  const std::size_t needleLen = std::strlen(needle);
-  const std::size_t haystackLen = std::strlen(haystack);
-  if (needleLen > haystackLen) {
-    return false;
-  }
-  for (std::size_t start = 0U; start + needleLen <= haystackLen; ++start) {
-    bool matches = true;
-    for (std::size_t i = 0U; i < needleLen; ++i) {
-      if (std::tolower(static_cast<unsigned char>(haystack[start + i])) !=
-          std::tolower(static_cast<unsigned char>(needle[i]))) {
-        matches = false;
-        break;
-      }
-    }
-    if (matches) {
-      return true;
-    }
-  }
-  return false;
-}
-
-} // namespace
-
 bool console_filter_matches(const ConsoleFilter &filter,
                             const ConsoleEntry &entry) noexcept {
   switch (entry.level) {
@@ -388,8 +354,8 @@ bool console_filter_matches(const ConsoleFilter &filter,
   }
 
   if (filter.searchText[0] != '\0') {
-    if (!contains_ci(entry.message, filter.searchText) &&
-       !contains_ci(entry.channel, filter.searchText)) {
+    if (!core::contains_ignoring_case(entry.message, filter.searchText) &&
+        !core::contains_ignoring_case(entry.channel, filter.searchText)) {
       return false;
     }
   }

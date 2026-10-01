@@ -3,8 +3,8 @@
 // the enum at compile time so a row and its tag can never disagree.
 
 #include "engine/content/asset_type_table.h"
+#include "engine/core/string_util.h"
 
-#include <cctype>
 #include <cstring>
 #include <iterator>
 
@@ -61,9 +61,7 @@ bool ends_with_ignoring_case(const char *path, std::size_t pathLength,
   }
   const char *tail = path + (pathLength - suffixLength);
   for (std::size_t i = 0U; i < suffixLength; ++i) {
-    const int a = std::tolower(static_cast<unsigned char>(tail[i]));
-    const int b = std::tolower(static_cast<unsigned char>(suffix[i]));
-    if (a != b) {
+    if (core::ascii_lower(tail[i]) != core::ascii_lower(suffix[i])) {
       return false;
     }
   }
