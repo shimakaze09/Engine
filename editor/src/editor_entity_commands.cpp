@@ -1,10 +1,12 @@
 // Implements the editor's undoable entity-lifetime commands: create
-// (empty, from an asset, from a built-in primitive), delete and duplicate,
+// (empty, from a built-in primitive), delete and duplicate,
 // each capturing whole subtrees so undo restores identity and hierarchy.
 // Split from editor_commands.cpp, which keeps component, reparent and
 // gizmo edits.
 
 #include "editor_commands.h"
+
+#include "editor_asset_place.h"
 
 #include "editor_material_edit.h"
 
@@ -295,10 +297,8 @@ execute_entity_create(const EntitySpawnPlacement &placement) noexcept {
   return world->find_entity_by_persistent_id(command->persistentId);
 }
 
-/// Copies the file stem of a virtual asset path into a name component
-/// ("assets/props/rock.mesh" names the spawn "rock").
-static void make_asset_spawn_name(const char *virtualPath,
-                                  runtime::NameComponent *outName) noexcept {
+void make_asset_spawn_name(const char *virtualPath,
+                           runtime::NameComponent *outName) noexcept {
   if ((virtualPath == nullptr) || (outName == nullptr)) {
     return;
   }
@@ -328,55 +328,24 @@ static void make_asset_spawn_name(const char *virtualPath,
   }
 }
 
-runtime::Entity
-execute_asset_spawn(const char *virtualPath,
-                    const runtime::Transform &transform) noexcept {
-  runtime::World *const world = editor_session().world;
-  if ((world == nullptr) || (virtualPath == nullptr) ||
-      (virtualPath[0] == '\0')) {
-    return runtime::kInvalidEntity;
-  }
-
-  const std::uint64_t assetId = runtime::editor_request_mesh_asset(virtualPath);
-  if (assetId == 0ULL) {
-    return runtime::kInvalidEntity;
-  }
-
-  auto *command = allocate_command<EntityCreateCommand>();
-  if (command == nullptr) {
-    core::log_message(core::LogLevel::Error, "editor",
-                      "asset spawn refused: it could not be recorded for "
-                      "undo (out of memory)");
-    return runtime::kInvalidEntity;
-  }
-
-  command->transform = transform;
-  make_asset_spawn_name(virtualPath, &command->name);
-  command->hasMesh = true;
-  command->mesh.meshAssetId = assetId;
-  command->mesh.meshRef = runtime::editor_asset_ref(assetId);
-  if (!editor_session().commandHistory.execute(command)) {
-    return runtime::kInvalidEntity;
-  }
-  return world->find_entity_by_persistent_id(command->persistentId);
-}
-
 bool execute_asset_open(const AssetIndexEntry &entry) noexcept {
   std::snprintf(editor_session().selectedAssetPath,
                 sizeof(editor_session().selectedAssetPath), "%s", entry.osPath);
 
   switch (resolve_asset_open_action(entry.kind, entry.isSource)) {
-  case AssetOpenAction::SpawnMesh: {
+  case AssetOpenAction::PlaceAsset: {
+    // Placed on the ground under the editor camera's focus.
+    AssetPlacePayload asset{};
+    if (!make_asset_place_payload(entry, &asset)) {
+      return false;
+    }
     const renderer::CameraState cam =
         editor_camera_state(editor_session().editorCamera);
-    runtime::Transform transform{};
-    transform.position = math::Vec3(cam.target.x, 0.5F, cam.target.z);
-    const runtime::Entity spawned =
-        execute_asset_spawn(entry.virtualPath, transform);
-    if (spawned != runtime::kInvalidEntity) {
-      select_entity(spawned, false);
-    }
-    return spawned != runtime::kInvalidEntity;
+    EntitySpawnPlacement placement{};
+    placement.hasPosition = true;
+    placement.position = math::Vec3(cam.target.x, 0.0F, cam.target.z);
+    return execute_asset_instantiate(asset, placement) !=
+           runtime::kInvalidEntity;
   }
   case AssetOpenAction::OpenScene:
     // Gated: proceeds immediately when the current document is clean, or

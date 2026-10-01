@@ -24,8 +24,18 @@ void push_entity_handle(lua_State *state, core::Entity entity) noexcept;
 bool decode_lua_entity_handle(lua_State *state, int index,
                               core::Entity *outEntity) noexcept;
 
-/// Reads a live entity handle from Lua.
+/// Reads a live entity handle from Lua, the argument every binding that
+/// acts on an entity takes. A value that is not one -- not a handle, a
+/// handle from before the last scene load, or one naming a destroyed
+/// entity -- is refused, and the first refusal at each script line logs a
+/// Warning naming the line, the binding and the reason, as Unity,
+/// Godot and Unreal report a call on a destroyed object. The binding then
+/// answers false or nil as before.
 bool read_entity(lua_State *state, int index,
                  core::Entity *outEntity) noexcept;
+
+/// Forgets which script lines already reported an entity argument, so a
+/// new run reports them again.
+void reset_entity_argument_reports() noexcept;
 
 } // namespace engine::scripting

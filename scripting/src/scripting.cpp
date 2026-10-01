@@ -498,6 +498,7 @@ void reset_run_state() noexcept {
     clear_lua_coroutines(state);
   }
   reset_mesh_material_bindings();
+  reset_entity_argument_reports();
   clear_deferred_mutations();
   reset_scene_bindings();
   reset_entity_pool_bindings();

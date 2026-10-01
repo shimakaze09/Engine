@@ -1,6 +1,6 @@
 // Host for the asset-spawn entity-name truncation regression (issue #86
 // L-07): drags a short and then a very long virtual asset path through the
-// production drag-spawn entry point (execute_asset_spawn) so the driving
+// production placement entry point (execute_asset_instantiate) so the driving
 // CMake script can assert the truncation diagnostic on stdout instead of
 // the previous silent clip into NameComponent's fixed 32-byte field.
 
@@ -9,6 +9,7 @@
 #include <memory>
 #include <new>
 
+#include "editor_asset_place.h"
 #include "editor_commands.h"
 #include "editor_session.h"
 #include "engine/content/asset_catalog.h"
@@ -26,8 +27,13 @@ constexpr const char *kMountPrefix = "spawntest";
 /// Spawns one asset entity and prints its resulting name for the driving
 /// CMake script to inspect alongside the stdout warning it may have logged.
 bool spawn_and_report(const char *virtualPath) noexcept {
-  const engine::runtime::Entity entity = engine::editor::execute_asset_spawn(
-      virtualPath, engine::runtime::Transform{});
+  engine::editor::AssetPlacePayload asset{};
+  std::snprintf(asset.virtualPath, sizeof(asset.virtualPath), "%s",
+                virtualPath);
+  asset.kind = engine::content::AssetTypeTag::Mesh;
+  const engine::runtime::Entity entity =
+      engine::editor::execute_asset_instantiate(
+          asset, engine::editor::EntitySpawnPlacement{});
   if (entity == engine::runtime::kInvalidEntity) {
     std::fprintf(stderr, "error: spawn failed for %s\n", virtualPath);
     return false;

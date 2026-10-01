@@ -4,7 +4,15 @@
 
 #include "runtime_binding.h"
 
+#include <cstdio>
 #include <limits>
+
+#include "engine/core/hash.h"
+#include "engine/core/logging.h"
+
+extern "C" {
+#include "lauxlib.h"
+}
 
 namespace engine::scripting {
 namespace {
@@ -143,6 +151,82 @@ bool decode_lua_entity_handle(lua_State *state, int index,
                                     outEntity);
 }
 
+namespace {
+
+/// Script lines that reported an entity argument this run. Past the table
+/// one more line says the rest go unlisted, so a script failing on many
+/// lines never logs every frame.
+constexpr std::size_t kMaxReportedSites = 256U;
+std::uint64_t g_reportedSites[kMaxReportedSites]{};
+std::size_t g_reportedSiteCount = 0U;
+
+/// Why a Lua value is not a live entity.
+const char *entity_argument_problem(lua_State *state, int index) noexcept {
+  if (!lua_isinteger(state, index) || (lua_tointeger(state, index) <= 0)) {
+    return "is not an entity handle";
+  }
+  const auto raw = static_cast<std::uint64_t>(lua_tointeger(state, index));
+  const std::uint32_t entityIndex =
+      static_cast<std::uint32_t>(raw & kLuaEntityIndexMask);
+  if ((entityIndex == 0U) ||
+      (entityIndex > static_cast<std::uint32_t>(kMaxWorldEntities))) {
+    return "is not an entity handle";
+  }
+  if (((raw >> kLuaEntityEpochShift) & kLuaEntityEpochMask) !=
+      bound_world_epoch()) {
+    return "is a handle from before the last scene load";
+  }
+  return "names an entity that was destroyed";
+}
+
+/// Logs a refused entity argument once per calling script line. The
+/// location and binding name come from lua_getinfo, which reads them in
+/// place, so the report allocates nothing on the Lua heap.
+void report_entity_argument(lua_State *state, int index) noexcept {
+  lua_Debug binding{};
+  lua_Debug caller{};
+  const bool hasBinding = (lua_getstack(state, 0, &binding) != 0) &&
+                          (lua_getinfo(state, "n", &binding) != 0);
+  const bool hasCaller = (lua_getstack(state, 1, &caller) != 0) &&
+                         (lua_getinfo(state, "Sl", &caller) != 0);
+  const char *const name =
+      (hasBinding && (binding.name != nullptr)) ? binding.name : "?";
+  const char *const source = hasCaller ? caller.short_src : "?";
+  const int line = hasCaller ? caller.currentline : 0;
+
+  std::uint64_t site = core::fnv1a_64(source);
+  site = core::fnv1a_64_append_u64(site, core::fnv1a_64(name));
+  site = core::fnv1a_64_append_u64(
+      site, static_cast<std::uint64_t>(static_cast<std::uint32_t>(line)));
+  const std::size_t recorded = (g_reportedSiteCount < kMaxReportedSites)
+                                   ? g_reportedSiteCount
+                                   : kMaxReportedSites;
+  for (std::size_t i = 0U; i < recorded; ++i) {
+    if (g_reportedSites[i] == site) {
+      return;
+    }
+  }
+  if (g_reportedSiteCount > kMaxReportedSites) {
+    return;
+  }
+  char message[384] = {};
+  std::snprintf(message, sizeof(message),
+                "%s:%d: engine.%s: argument %d %s; the call does nothing%s",
+                source, line, name, index,
+                entity_argument_problem(state, index),
+                (g_reportedSiteCount == kMaxReportedSites)
+                    ? " (further lines with bad entity arguments are not "
+                      "listed)"
+                    : "");
+  if (g_reportedSiteCount < kMaxReportedSites) {
+    g_reportedSites[g_reportedSiteCount] = site;
+  }
+  ++g_reportedSiteCount;
+  core::log_message(core::LogLevel::Warning, "scripting", message);
+}
+
+} // namespace
+
 bool read_entity(lua_State *state, int index,
                  core::Entity *outEntity) noexcept {
   if (!runtime_bound() || (outEntity == nullptr)) {
@@ -152,11 +236,14 @@ bool read_entity(lua_State *state, int index,
   core::Entity decoded{};
   if (!decode_lua_entity_handle(state, index, &decoded) ||
       !runtime_binding().services->is_alive(runtime_binding().world, decoded)) {
+    report_entity_argument(state, index);
     return false;
   }
 
   *outEntity = decoded;
   return true;
 }
+
+void reset_entity_argument_reports() noexcept { g_reportedSiteCount = 0U; }
 
 } // namespace engine::scripting

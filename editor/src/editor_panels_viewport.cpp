@@ -5,6 +5,7 @@
 
 #include "editor_panels_viewport.h"
 
+#include "editor_asset_place.h"
 #include "editor_commands.h"
 #include "editor_entity_menus.h"
 #include "editor_grid.h"
@@ -585,11 +586,27 @@ void box_select_in_scene_view(const ImVec2 &from, const ImVec2 &to,
                                      &add_to_selection, nullptr));
 }
 
-/// Projects the current mouse position through the editor camera onto the
-/// y = 0 ground plane (falling back to a point ahead of the camera when
-/// the ray misses it within the far plane) to place viewport asset drops.
+/// Where an asset dropped at the mouse lands: on the nearest object under
+/// the cursor (by its bounds, as a click picks it), as Unity and Unreal
+/// place a dragged asset on the surface beneath it; else on the y = 0
+/// ground plane; else, when the ray misses both within the far plane, at
+/// a point ahead of the camera.
 math::Vec3 viewport_drop_world_position(const ImVec2 &imagePos,
                                         const ImVec2 &imageSize) noexcept {
+  EditorSession &session = editor_session();
+  math::Ray pickRay{};
+  float reach = 0.0F;
+  if ((session.world != nullptr) &&
+      scene_view_ray(ImGui::GetMousePos(), imagePos, imageSize, &pickRay,
+                     &reach)) {
+    std::array<PickHit, 1> hit{};
+    if (scene_pick_hits(*session.world, pickRay, reach,
+                        &runtime::editor_mesh_local_bounds, hit.data(),
+                        hit.size()) > 0U) {
+      return math::add(pickRay.origin,
+                       math::mul(pickRay.direction, hit[0].distance));
+    }
+  }
   const renderer::CameraState cam =
       editor_camera_state(editor_session().editorCamera);
   const math::Vec3 forward =
@@ -679,28 +696,16 @@ void draw_scene_viewport_panel() noexcept {
   draw_view_image(renderer::RenderViewId::Scene, regionSize);
   draw_scene_icons(cursorScreenPos, regionSize);
 
-  // Dropping a browser mesh asset spawns it where the drop ray meets the
-  // ground plane, as an undoable create.
+  // A prefab, mesh or model dropped here is placed where the cursor
+  // points, as one undoable step.
   if (ImGui::BeginDragDropTarget()) {
-    if (const ImGuiPayload *payload =
-            ImGui::AcceptDragDropPayload("ASSET_VIRTUAL_PATH")) {
-      char virtualPath[512] = {};
-      if ((payload->Data != nullptr) && (payload->DataSize > 0) &&
-          (static_cast<std::size_t>(payload->DataSize) <=
-           sizeof(virtualPath)) &&
-          world_is_editable()) {
-        std::memcpy(virtualPath, payload->Data,
-                    static_cast<std::size_t>(payload->DataSize));
-        virtualPath[sizeof(virtualPath) - 1U] = '\0';
-        runtime::Transform spawnTransform{};
-        spawnTransform.position =
-            viewport_drop_world_position(cursorScreenPos, regionSize);
-        const runtime::Entity spawned =
-            execute_asset_spawn(virtualPath, spawnTransform);
-        if (spawned != runtime::kInvalidEntity) {
-          select_entity(spawned, false);
-        }
-      }
+    AssetPlacePayload asset{};
+    if (accept_asset_place_payload(&asset)) {
+      EntitySpawnPlacement placement{};
+      placement.hasPosition = true;
+      placement.position =
+          viewport_drop_world_position(cursorScreenPos, regionSize);
+      static_cast<void>(execute_asset_instantiate(asset, placement));
     }
     ImGui::EndDragDropTarget();
   }

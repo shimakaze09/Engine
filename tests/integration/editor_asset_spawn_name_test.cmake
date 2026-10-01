@@ -1,7 +1,7 @@
 # Verifies the editor's drag-spawn entity naming (issue #86 L-07): a
 # dragged asset filename that fits NameComponent's fixed 32-byte field
 # spawns silently as before, but one that would overflow it must log a
-# truncation warning through the production execute_asset_spawn path
+# truncation warning through the production execute_asset_instantiate path
 # instead of clipping the name with no diagnostic.
 
 if(NOT DEFINED SPAWN_HOST)
