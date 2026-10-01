@@ -97,11 +97,30 @@ void draw_offscreen_scene(const OffscreenSceneInputs &inputs,
     dev->set_param_i32(backend.pbrAlbedoMapLocation, 0);
   }
 
-  // Offscreen renders share pbrProgram, and its GL uniform state, with the
-  // main forward pass, so every draw here sets its own material uniforms
-  // even when its materials never use them; otherwise a draw would
-  // silently keep whatever texture the last forward draw left bound.
+  // Offscreen renders share their programs, and their GL uniform state,
+  // with the main forward pass, so every draw here sets its own material
+  // uniforms even when its materials never use them; otherwise a draw
+  // would silently keep whatever texture the last forward draw left bound.
+  // Parameter locations are registry-global by name, so one location set
+  // serves every shading program.
   const ForwardDrawProgram program = pbr_forward_draw_program(backend);
+
+  // A capture shades each material with its own program, as the main view
+  // does: the key groups draws by program, so each run binds its program
+  // once. A newly bound program gets its sampler units again, since a
+  // sampler left at its default unit aliases whatever sits there.
+  DeviceProgramHandle boundProgram = backend.pbrProgram;
+  auto bindProgramForRun = [&](DeviceProgramHandle runProgram) {
+    if (runProgram == boundProgram) {
+      return;
+    }
+    dev->bind_program(runProgram);
+    boundProgram = runProgram;
+    apply_pbr_ibl_uniforms(backend, dev, ibl);
+    if (backend.pbrAlbedoMapLocation.valid()) {
+      dev->set_param_i32(backend.pbrAlbedoMapLocation, 0);
+    }
+  };
 
   // Commands render prep culled for the main camera but flagged for this
   // camera ride in the auxiliary list.
@@ -111,22 +130,29 @@ void draw_offscreen_scene(const OffscreenSceneInputs &inputs,
     // than sampling it.
     ForwardDrawBindings bindings{};
     bindings.passTarget = camera.renderTarget;
-    for (std::size_t i = start; (view.data != nullptr) && (i < end); ++i) {
-      const DrawCommand &command = view.data[i];
-      if ((requiredMask != 0U) && ((command.passMask & requiredMask) == 0U)) {
-        continue;
+    ShadingProgramRun run{};
+    for (std::size_t cursor = start;
+         (view.data != nullptr) &&
+         next_program_run(view, &cursor, end, &run);) {
+      bool bound = false;
+      for (std::size_t i = run.first; i < (run.first + run.count); ++i) {
+        const DrawCommand &command = view.data[i];
+        if ((requiredMask != 0U) && ((command.passMask & requiredMask) == 0U)) {
+          continue;
+        }
+        const GpuMesh *mesh = lookup_gpu_mesh(inputs.registry, command.mesh);
+        if ((mesh == nullptr) || (mesh->geometry == kInvalidDeviceGeometry) ||
+            (mesh->vertexCount == 0U)) {
+          continue;
+        }
+        if (!bound) {
+          bindProgramForRun(shading_program(backend, run.programId));
+          bound = true;
+        }
+        upload_forward_material(program, backend, dev, command, &bindings);
+        draw_forward_command(program, backend, dev, run.programId, command,
+                             *mesh, viewProjection, inputs.frameStats);
       }
-      const GpuMesh *mesh = lookup_gpu_mesh(inputs.registry, command.mesh);
-      if ((mesh == nullptr) || (mesh->geometry == kInvalidDeviceGeometry) ||
-          (mesh->vertexCount == 0U)) {
-        continue;
-      }
-
-      upload_forward_material(program, backend, dev, command, &bindings);
-      // Captures bind the physically-based program throughout.
-      draw_forward_command(program, backend, dev,
-                           shading_program_id(ShadingModel::Pbr), command,
-                           *mesh, viewProjection, inputs.frameStats);
     }
   };
 

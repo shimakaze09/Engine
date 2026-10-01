@@ -3,7 +3,9 @@
 // (a monitor that its own capture camera can see) is drawn with the
 // fallback texture instead of sampling that capture's colour target while
 // the pass renders into it, and a mesh with an ordinary texture, or showing
-// another capture, still samples it.
+// another capture, still samples it. Each draw is shaded with its own
+// material's program, as the main view shades it: a Toon draw in a capture
+// is issued with the Toon program, not the physically-based one.
 
 #include "command_buffer_context.h"
 #include "command_buffer_flush_internal.h"
@@ -34,12 +36,14 @@ GpuMesh g_mesh{};
 struct DrawRecord final {
   std::uint32_t albedo = 0U;
   std::uint32_t target = 0U;
+  std::uint32_t program = 0U;
 };
 constexpr std::size_t kMaxDraws = 16U;
 DrawRecord g_drawLog[kMaxDraws] = {};
 std::size_t g_drawCount = 0U;
 std::uint32_t g_slot0 = 0U;
 std::uint32_t g_boundTarget = 0U;
+std::uint32_t g_boundProgram = 0U;
 
 void record_bind_texture_slot(std::uint32_t slot,
                               DeviceTextureHandle texture) noexcept {
@@ -52,9 +56,13 @@ void record_bind_render_target(RenderTargetHandle target) noexcept {
   g_boundTarget = target.value;
 }
 
+void record_bind_program(DeviceProgramHandle program) noexcept {
+  g_boundProgram = program.value;
+}
+
 void record_draw_indexed(DeviceGeometryHandle, std::int32_t) noexcept {
   if (g_drawCount < kMaxDraws) {
-    g_drawLog[g_drawCount] = DrawRecord{g_slot0, g_boundTarget};
+    g_drawLog[g_drawCount] = DrawRecord{g_slot0, g_boundTarget, g_boundProgram};
   }
   ++g_drawCount;
 }
@@ -68,7 +76,7 @@ void reset_fake_device() noexcept {
   device.destroy_render_target = &tests::fake::destroy_render_target;
   device.bind_render_target = &record_bind_render_target;
   device.bind_texture_slot = &record_bind_texture_slot;
-  device.bind_program = &tests::fake::bind_program;
+  device.bind_program = &record_bind_program;
   device.draw_indexed = &record_draw_indexed;
   device.set_param_f32 = &tests::fake::set_param_f32;
   device.set_param_i32 = &tests::fake::set_param_i32;
@@ -85,6 +93,7 @@ void reset_fake_device() noexcept {
   g_drawCount = 0U;
   g_slot0 = 0U;
   g_boundTarget = 0U;
+  g_boundProgram = 0U;
 }
 
 } // namespace
@@ -239,10 +248,69 @@ void test_capture_never_samples_its_own_target() noexcept {
   set_scene_capture_requests(nullptr, 0U);
 }
 
+/// EXPECTATION: a capture seeing a physically-based draw and a Toon draw
+/// issues each with its own material's program, and the transparent half
+/// binds per run as well.
+void test_capture_shades_each_material_with_its_program() noexcept {
+  reset_fake_device();
+  BackendState &backend = backend_state();
+  constexpr DeviceProgramHandle kPbr{1U};
+  constexpr DeviceProgramHandle kToon{22U};
+  backend.pbrProgram = kPbr;
+  backend.shadingPrograms[shading_program_id(ShadingModel::Pbr)] = kPbr;
+  backend.shadingPrograms[shading_program_id(ShadingModel::Toon)] = kToon;
+  backend.fallbackTexture2D = DeviceTextureHandle{9000U};
+  g_mesh = GpuMesh{};
+  g_mesh.geometry = DeviceGeometryHandle{1U};
+  g_mesh.vertexCount = 3U;
+  g_mesh.indexCount = 3U;
+
+  SceneCaptureRequest request{};
+  request.width = 64U;
+  request.height = 64U;
+  request.camera.position = engine::math::Vec3(0.0F, 0.0F, 5.0F);
+  request.camera.target = engine::math::Vec3(0.0F, 0.0F, 0.0F);
+  set_scene_capture_requests(&request, 1U);
+
+  // Sorted as render prep leaves them: opaque Pbr, opaque Toon, then a
+  // transparent Toon draw.
+  const ShadingModel models[kDrawCount] = {
+      ShadingModel::Pbr, ShadingModel::Toon, ShadingModel::Toon};
+  for (std::size_t i = 0U; i < kDrawCount; ++i) {
+    g_draws[i] = DrawCommand{};
+    g_draws[i].mesh = MeshHandle{1U};
+    g_draws[i].material.shadingModel = models[i];
+    g_draws[i].material.opacity = (i < 2U) ? 1.0F : 0.5F;
+    g_draws[i].sortKey.value = draw_key_shading_model_bits(models[i]) |
+                               ((i < 2U) ? 0ULL : kDrawKeyTransparentBit);
+  }
+
+  SceneLightData lights{};
+  FrameFlushContext ctx = make_context(lights);
+  ctx.opaqueCount = 2U;
+  flush_scene_captures(ctx);
+  g_drawCount = 0U;
+  flush_scene_captures(ctx);
+
+  CHECK(g_drawCount == kDrawCount, "the capture draws every mesh");
+  if (g_drawCount == kDrawCount) {
+    CHECK(g_drawLog[0].program == kPbr.value,
+          "the physically-based draw is issued with the PBR program");
+    CHECK(g_drawLog[1].program == kToon.value,
+          "the opaque Toon draw is issued with the Toon program");
+    CHECK(g_drawLog[2].program == kToon.value,
+          "the transparent Toon draw is issued with the Toon program");
+  }
+  backend.shadingPrograms[shading_program_id(ShadingModel::Toon)] =
+      DeviceProgramHandle{};
+  set_scene_capture_requests(nullptr, 0U);
+}
+
 } // namespace
 
 int main() {
   test_capture_never_samples_its_own_target();
+  test_capture_shades_each_material_with_its_program();
   if (g_failures != 0) {
     std::fprintf(stderr, "%d check(s) failed\n", g_failures);
     return 1;

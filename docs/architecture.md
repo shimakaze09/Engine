@@ -329,7 +329,9 @@ See the `serialization` skill for the procedure.
   `kMaxShadingPrograms` = 128; the Pbr, Toon and Unlit presets are ids
   0–2). Opaque draws group into one contiguous run per program; the
   transparent half sorts back to front first, so a program recurs there
-  wherever depth interleaves it (#669). A pass binds one program per run.
+  wherever depth interleaves it (#669). A pass binds one program per run;
+  scene captures and reflection-probe faces do too, so a capture shades a
+  material as the main view does (`engine_unit_scene_capture_flush`).
   Adding a program means registering it and its run, never a global mode,
   a cvar or an engine code change
   ([0018](decisions/0018-authors-compose-shading.md); materials still
