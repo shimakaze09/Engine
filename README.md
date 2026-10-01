@@ -387,10 +387,11 @@ A run holds up to 1,024 distinct script files, entity scripts and
 `engine.require`d modules together. Past that a script does not load,
 and the Log names each refused file once.
 
-`engine.start_coroutine`, `engine.on_collision_handler` and
-`engine.pool_create` return an id, or `nil` and a reason. The reason
-separates a bad argument from a full table. The tables hold 1,024
-coroutines, 64 collision handlers and 64 pools of up to 1,024 entities each.
+`engine.start_coroutine`, `engine.on_collision_handler`,
+`engine.on_trigger_handler` and `engine.pool_create` return an id, or `nil`
+and a reason. The reason separates a bad argument from a full table. The
+tables hold 1,024 coroutines, 64 collision handlers, 64 trigger handlers and
+64 pools of up to 1,024 entities each.
 The first refusal by a full table logs a Warning.
 
 `print` writes to the log, so its line shows in the editor's Log panel and
@@ -450,7 +451,7 @@ Current scripting/runtime support in the tree includes:
 - Spawning entities
 - Setting transforms and materials
 - Adding rigid bodies and colliders
-- Reacting to key input and collisions
+- Reacting to key input, collisions and trigger volumes
 - Scheduling timers with `engine.set_timeout()` and `engine.set_interval()`
 - Coroutine helpers such as `engine.wait()`, `engine.wait_frames()` (fixed
   simulation steps, not rendered frames), and `engine.wait_until()`
@@ -481,6 +482,22 @@ when at least one of the two bodies can move. Two colliders that cannot
 (static, kinematic, or asleep and undisturbed) have no response and report
 nothing, as in Unity, so overlapping level geometry costs no events
 (`engine_unit_collision_frame_events`).
+
+A collider marked **Is Trigger** (the Inspector, or
+`engine.set_trigger(e, true)`; `engine.is_trigger(e)` reads it) reports
+overlaps instead of colliding, as Unity's triggers and Godot's areas do.
+Bodies pass through it, it adds no mass to its body, and raycasts, sweeps
+and overlap queries ignore it. `engine.on_trigger_handler(function(trigger,
+other, phase) ... end)` is called with `phase` `"enter"` when a solid
+collider begins overlapping a trigger and `"exit"` when it stops; remove
+one with `engine.remove_trigger_handler(id)`. A pair reports only when at
+least one side has a dynamic or kinematic body. Two triggers never report
+each other, a sleeping body stays inside, and a destroyed participant
+reports its exit as `nil`. Events reach the handlers once per rendered
+frame in step order, each step's exits before its enters, ordered by
+entity, not by storage. Up to 1,024 trigger overlaps are tracked at once;
+past that the Log warns and events wait until the count falls
+(`engine_unit_physics_trigger`, `engine_integration_lua_trigger_events`).
 
 Set the type with the Inspector's Body Type or
 `engine.set_body_type(e, "kinematic")`, and read it with

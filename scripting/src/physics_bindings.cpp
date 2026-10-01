@@ -297,6 +297,45 @@ int lua_engine_set_collision_mask(lua_State *state) noexcept {
   return 1;
 }
 
+// engine.set_trigger(entity, is_trigger) → bool: makes the entity's
+// collider a trigger (true) or a solid collider (false).
+int lua_engine_set_trigger(lua_State *state) noexcept {
+  runtime::Entity entity{};
+  if (!read_entity(state, 1, &entity)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  if (!lua_isboolean(state, 2)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  runtime::Collider collider{};
+  if (!latest_collider(entity, &collider)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  collider.isTrigger = lua_toboolean(state, 2) != 0;
+  const bool ok = apply_or_queue_collider(entity, collider);
+  lua_pushboolean(state, ok ? 1 : 0);
+  return 1;
+}
+
+// engine.is_trigger(entity) → bool, or nil when it has no collider.
+int lua_engine_is_trigger(lua_State *state) noexcept {
+  runtime::Entity entity{};
+  if (!read_entity(state, 1, &entity)) {
+    lua_pushnil(state);
+    return 1;
+  }
+  runtime::Collider collider{};
+  if (!latest_collider(entity, &collider)) {
+    lua_pushnil(state);
+    return 1;
+  }
+  lua_pushboolean(state, collider.isTrigger ? 1 : 0);
+  return 1;
+}
+
 // engine.set_gravity([x [, y [, z]]]); an omitted component is zero, a
 // present one must be a finite number or the whole call is rejected.
 int lua_engine_set_gravity(lua_State *state) noexcept {
@@ -937,6 +976,10 @@ void register_physics_bindings(lua_State *state) noexcept {
   lua_setfield(state, -2, "set_collision_layer");
   lua_pushcfunction(state, &lua_engine_set_collision_mask);
   lua_setfield(state, -2, "set_collision_mask");
+  lua_pushcfunction(state, &lua_engine_set_trigger);
+  lua_setfield(state, -2, "set_trigger");
+  lua_pushcfunction(state, &lua_engine_is_trigger);
+  lua_setfield(state, -2, "is_trigger");
   lua_pushcfunction(state, &lua_engine_set_gravity);
   lua_setfield(state, -2, "set_gravity");
   lua_pushcfunction(state, &lua_engine_get_gravity);

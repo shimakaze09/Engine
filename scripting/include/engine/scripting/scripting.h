@@ -84,6 +84,15 @@ bool debugger_add_breakpoint(const char *file, int line) noexcept;
 void dispatch_physics_callbacks(const core::Entity *pairData,
                                 std::size_t pairCount) noexcept;
 
+// Dispatch Lua trigger handlers for each begin/end event: pairData is
+// [trigger, other, ...] and entered[i] is 1 for a begin, 0 for an end (the
+// physics TriggerDispatchFn contract). Handlers receive (trigger, other,
+// "enter" or "exit"); a participant no longer alive under its recorded
+// generation arrives as nil. No-op without a VM or registered handlers.
+void dispatch_trigger_callbacks(const core::Entity *pairData,
+                                const std::uint8_t *entered,
+                                std::size_t eventCount) noexcept;
+
 // Dispatch registered Lua handlers and the global on_anim_event fallback
 // for every animation event fired by the last fixed-step animation update.
 void dispatch_animation_event_callbacks() noexcept;

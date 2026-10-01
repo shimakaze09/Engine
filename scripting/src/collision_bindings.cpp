@@ -1,4 +1,5 @@
-// Owns Lua collision callback bindings for the Engine scripting system.
+// Owns Lua collision and trigger callback bindings for the Engine scripting
+// system.
 
 #include "collision_bindings.h"
 
@@ -36,6 +37,10 @@ std::array<int, kMaxCollisionHandlers> g_collisionHandlers = empty_handlers();
 /// succeeds again, so a script retrying every frame logs one line.
 bool g_handlersFullReported = false;
 
+// Trigger handlers: a table of their own, the same size and policy.
+std::array<int, kMaxCollisionHandlers> g_triggerHandlers = empty_handlers();
+bool g_triggerHandlersFullReported = false;
+
 /// Carries one collision callback invocation into the protected trampoline.
 struct CollisionCallArgs final {
   PushEntityHandleFn pushEntityHandle = nullptr;
@@ -67,20 +72,51 @@ int collision_call_trampoline(lua_State *state) noexcept {
   return 0;
 }
 
-} // namespace
+/// Carries one trigger event into the protected trampoline.
+struct TriggerCallArgs final {
+  PushEntityHandleFn pushEntityHandle = nullptr;
+  core::Entity trigger{};
+  core::Entity other{};
+  bool entered = false;
+  int handlerRef = LUA_NOREF;
+};
 
-int lua_engine_on_collision_register(lua_State *state) noexcept {
+/// Protected trampoline for one trigger handler: pushes the recorded
+/// identities and the phase name, so a stale participant arrives as nil.
+int trigger_call_trampoline(lua_State *state) noexcept {
+  auto *args = static_cast<TriggerCallArgs *>(lua_touserdata(state, 1));
+  lua_rawgeti(state, LUA_REGISTRYINDEX, args->handlerRef);
+  if (lua_isfunction(state, -1) == 0) {
+    return 0;
+  }
+  args->pushEntityHandle(state, args->trigger);
+  args->pushEntityHandle(state, args->other);
+  if (args->entered) {
+    lua_pushliteral(state, "enter");
+  } else {
+    lua_pushliteral(state, "exit");
+  }
+  lua_call(state, 3, 0);
+  return 0;
+}
+
+/// Registers the function at stack index 1 in `handlers`, returning its id
+/// or nil and a reason; the first refusal of a full table logs a Warning.
+int register_handler(lua_State *state,
+                     std::array<int, kMaxCollisionHandlers> &handlers,
+                     bool *fullReported, const char *apiName,
+                     const char *tableName) noexcept {
   if (!lua_isfunction(state, 1)) {
     lua_pushnil(state);
-    lua_pushliteral(state, "on_collision_handler expects a function");
+    lua_pushfstring(state, "%s expects a function", apiName);
     return 2;
   }
 
   for (std::size_t i = 0U; i < kMaxCollisionHandlers; ++i) {
-    if (g_collisionHandlers[i] == LUA_NOREF) {
+    if (handlers[i] == LUA_NOREF) {
       lua_pushvalue(state, 1);
-      g_collisionHandlers[i] = luaL_ref(state, LUA_REGISTRYINDEX);
-      g_handlersFullReported = false;
+      handlers[i] = luaL_ref(state, LUA_REGISTRYINDEX);
+      *fullReported = false;
       lua_pushinteger(state, static_cast<lua_Integer>(i));
       return 1;
     }
@@ -88,10 +124,10 @@ int lua_engine_on_collision_register(lua_State *state) noexcept {
 
   char message[96] = {};
   std::snprintf(message, sizeof(message),
-                "collision handler table full (%zu registered)",
+                "%s handler table full (%zu registered)", tableName,
                 kMaxCollisionHandlers);
-  if (!g_handlersFullReported) {
-    g_handlersFullReported = true;
+  if (!*fullReported) {
+    *fullReported = true;
     core::log_message(core::LogLevel::Warning, "scripting", message);
   }
   lua_pushnil(state);
@@ -99,31 +135,64 @@ int lua_engine_on_collision_register(lua_State *state) noexcept {
   return 2;
 }
 
-int lua_engine_remove_collision_handler(lua_State *state) noexcept {
+/// Releases handler `id` (the integer at stack index 1) if it is live.
+void remove_handler(lua_State *state,
+                    std::array<int, kMaxCollisionHandlers> &handlers) noexcept {
   if (!lua_isnumber(state, 1)) {
-    return 0;
+    return;
   }
-
   const auto id = static_cast<std::size_t>(lua_tointeger(state, 1));
-  if ((id < kMaxCollisionHandlers) && (g_collisionHandlers[id] != LUA_NOREF)) {
-    luaL_unref(state, LUA_REGISTRYINDEX, g_collisionHandlers[id]);
-    g_collisionHandlers[id] = LUA_NOREF;
+  if ((id < kMaxCollisionHandlers) && (handlers[id] != LUA_NOREF)) {
+    luaL_unref(state, LUA_REGISTRYINDEX, handlers[id]);
+    handlers[id] = LUA_NOREF;
   }
+}
+
+/// Releases every live handler in `handlers`.
+void clear_handlers(lua_State *state,
+                    std::array<int, kMaxCollisionHandlers> &handlers) noexcept {
+  if (state == nullptr) {
+    return;
+  }
+  for (std::size_t i = 0U; i < kMaxCollisionHandlers; ++i) {
+    if (handlers[i] != LUA_NOREF) {
+      luaL_unref(state, LUA_REGISTRYINDEX, handlers[i]);
+      handlers[i] = LUA_NOREF;
+    }
+  }
+}
+
+} // namespace
+
+int lua_engine_on_collision_register(lua_State *state) noexcept {
+  return register_handler(state, g_collisionHandlers, &g_handlersFullReported,
+                          "on_collision_handler", "collision");
+}
+
+int lua_engine_remove_collision_handler(lua_State *state) noexcept {
+  remove_handler(state, g_collisionHandlers);
   return 0;
 }
 
 void clear_collision_handlers(lua_State *state) noexcept {
   g_handlersFullReported = false;
-  if (state == nullptr) {
-    return;
-  }
+  clear_handlers(state, g_collisionHandlers);
+}
 
-  for (std::size_t i = 0U; i < kMaxCollisionHandlers; ++i) {
-    if (g_collisionHandlers[i] != LUA_NOREF) {
-      luaL_unref(state, LUA_REGISTRYINDEX, g_collisionHandlers[i]);
-      g_collisionHandlers[i] = LUA_NOREF;
-    }
-  }
+int lua_engine_on_trigger_register(lua_State *state) noexcept {
+  return register_handler(state, g_triggerHandlers,
+                          &g_triggerHandlersFullReported, "on_trigger_handler",
+                          "trigger");
+}
+
+int lua_engine_remove_trigger_handler(lua_State *state) noexcept {
+  remove_handler(state, g_triggerHandlers);
+  return 0;
+}
+
+void clear_trigger_handlers(lua_State *state) noexcept {
+  g_triggerHandlersFullReported = false;
+  clear_handlers(state, g_triggerHandlers);
 }
 
 void dispatch_collision_handlers(lua_State *state,
@@ -155,6 +224,33 @@ void dispatch_collision_handlers(lua_State *state,
     args.handlerRef = LUA_NOREF;
     static_cast<void>(protected_engine_dispatch(
         state, &collision_call_trampoline, &args, 0, "on_collision"));
+  }
+}
+
+void dispatch_trigger_handlers(lua_State *state, const core::Entity *pairData,
+                               const std::uint8_t *entered,
+                               std::size_t eventCount,
+                               PushEntityHandleFn pushEntityHandle) noexcept {
+  if ((state == nullptr) || (pairData == nullptr) || (entered == nullptr) ||
+      (eventCount == 0U) || (pushEntityHandle == nullptr)) {
+    return;
+  }
+
+  for (std::size_t i = 0U; i < eventCount; ++i) {
+    TriggerCallArgs args{};
+    args.pushEntityHandle = pushEntityHandle;
+    args.trigger = pairData[i * 2U];
+    args.other = pairData[(i * 2U) + 1U];
+    args.entered = entered[i] != 0U;
+
+    for (std::size_t h = 0U; h < kMaxCollisionHandlers; ++h) {
+      if (g_triggerHandlers[h] == LUA_NOREF) {
+        continue;
+      }
+      args.handlerRef = g_triggerHandlers[h];
+      static_cast<void>(protected_engine_dispatch(
+          state, &trigger_call_trampoline, &args, 0, "on_trigger_handler"));
+    }
   }
 }
 

@@ -942,6 +942,7 @@ bool EnginePipeline::Impl::initialize(std::uint32_t maxFrameCount) noexcept {
 
   runtime::set_collision_dispatch(*world,
                                   &scripting::dispatch_physics_callbacks);
+  runtime::set_trigger_dispatch(*world, &scripting::dispatch_trigger_callbacks);
 
   if (!load_bootstrap_meshes(assetManager.get(), assetDatabase.get(),
                              assetCatalog.get(), meshRegistry.get(),

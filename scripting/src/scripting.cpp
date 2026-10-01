@@ -197,6 +197,10 @@ void register_engine_bindings(lua_State *state) noexcept {
   lua_setfield(state, -2, "on_collision_handler");
   lua_pushcfunction(state, &lua_engine_remove_collision_handler);
   lua_setfield(state, -2, "remove_collision_handler");
+  lua_pushcfunction(state, &lua_engine_on_trigger_register);
+  lua_setfield(state, -2, "on_trigger_handler");
+  lua_pushcfunction(state, &lua_engine_remove_trigger_handler);
+  lua_setfield(state, -2, "remove_trigger_handler");
 
   lua_pushcfunction(state, &lua_engine_set_anim_param);
   lua_setfield(state, -2, "set_anim_param");
@@ -525,6 +529,7 @@ void reset_run_state() noexcept {
     reset_entity_script_bindings();
     clear_lua_timer_bindings(state);
     clear_collision_handlers(state);
+    clear_trigger_handlers(state);
     clear_anim_event_handlers(state);
     clear_lua_coroutines(state);
   }
@@ -633,6 +638,13 @@ void dispatch_physics_callbacks(const core::Entity *pairData,
                                 std::size_t pairCount) noexcept {
   dispatch_collision_handlers(lua_state(), pairData, pairCount,
                               push_entity_handle);
+}
+
+void dispatch_trigger_callbacks(const core::Entity *pairData,
+                                const std::uint8_t *entered,
+                                std::size_t eventCount) noexcept {
+  dispatch_trigger_handlers(lua_state(), pairData, entered, eventCount,
+                            push_entity_handle);
 }
 
 void dispatch_animation_event_callbacks() noexcept {
