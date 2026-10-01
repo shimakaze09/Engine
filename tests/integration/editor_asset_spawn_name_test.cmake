@@ -1,8 +1,8 @@
-# Verifies the editor's drag-spawn entity naming (issue #86 L-07): a
-# dragged asset filename that fits NameComponent's fixed 32-byte field
-# spawns silently as before, but one that would overflow it must log a
-# truncation warning through the production execute_asset_instantiate path
-# instead of clipping the name with no diagnostic.
+# Verifies the editor's drag-spawn entity naming: a dragged asset filename
+# that fits NameComponent's 127-byte field spawns whole and silently, a
+# 50-character one included (it was cut to 31 before), and one that would
+# overflow it is cut with one truncation warning through the production
+# execute_asset_instantiate path instead of clipping with no diagnostic.
 
 if(NOT DEFINED SPAWN_HOST)
     message(FATAL_ERROR "SPAWN_HOST required")
@@ -23,10 +23,16 @@ if(NOT spawn_output MATCHES "SPAWN_NAME len=10 name=short_name")
     message(FATAL_ERROR "short name was not preserved verbatim: ${spawn_output}")
 endif()
 
-# The long filename's stem (50 'x' chars) must still clip to the 31-char
-# field (naming stays cosmetic, the spawn itself must not fail)...
-if(NOT spawn_output MATCHES "SPAWN_NAME len=31 name=x+")
-    message(FATAL_ERROR "long name was not bounded to 31 chars: ${spawn_output}")
+# A 50-character asset name, as long as real asset names run, is kept
+# whole and does not warn.
+if(NOT spawn_output MATCHES "SPAWN_NAME len=50 name=x+\n")
+    message(FATAL_ERROR "a 50-character name was not kept whole: ${spawn_output}")
+endif()
+
+# The 150-character stem must still clip to the 127-byte field (naming
+# stays cosmetic, the spawn itself must not fail)...
+if(NOT spawn_output MATCHES "SPAWN_NAME len=127 name=y+")
+    message(FATAL_ERROR "long name was not bounded to 127 bytes: ${spawn_output}")
 endif()
 
 # ...but the clip must now be diagnosable instead of silent.
@@ -34,6 +40,6 @@ string(REGEX MATCHALL "asset spawn name truncated" warn_matches "${spawn_output}
 list(LENGTH warn_matches warn_count)
 if(NOT warn_count EQUAL 1)
     message(FATAL_ERROR
-        "expected exactly one truncation warning (short name must not "
-        "warn), got ${warn_count}: ${spawn_output}")
+        "expected exactly one truncation warning (the short and 50-character "
+        "names must not warn), got ${warn_count}: ${spawn_output}")
 endif()

@@ -4,6 +4,7 @@
 #include <cstring>
 #include <memory>
 #include <new>
+#include <string>
 
 #include "engine/content/asset_identity.h"
 #include "engine/core/logging.h"
@@ -594,11 +595,13 @@ int verify_overlong_prefab_name_rejected() {
     return 400;
   }
 
-  // 32 'n's: one byte past the 31-char capacity.
-  const char *overlong =
+  // One byte past the name capacity.
+  const std::string overlongText =
       "{\"version\":5,\"components\":{\"Transform\":{},"
-      "\"NameComponent\":{\"name\":"
-      "\"nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn\"}}}";
+      "\"NameComponent\":{\"name\":\"" +
+      std::string(engine::runtime::NameComponent::kMaxNameLength + 1U, 'n') +
+      "\"}}}";
+  const char *overlong = overlongText.c_str();
   {
     std::FILE *file = nullptr;
 #ifdef _WIN32
@@ -629,11 +632,13 @@ int verify_overlong_prefab_name_rejected() {
     return 404;
   }
 
-  // Boundary: exactly 31 characters instantiates with the name intact.
-  const char *boundary =
+  // Boundary: exactly the capacity instantiates with the name intact.
+  const std::string boundaryText =
       "{\"version\":5,\"components\":{\"Transform\":{},"
-      "\"NameComponent\":{\"name\":"
-      "\"nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn\"}}}";
+      "\"NameComponent\":{\"name\":\"" +
+      std::string(engine::runtime::NameComponent::kMaxNameLength, 'n') +
+      "\"}}}";
+  const char *boundary = boundaryText.c_str();
   {
     std::FILE *file = nullptr;
 #ifdef _WIN32

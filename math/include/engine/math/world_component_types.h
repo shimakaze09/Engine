@@ -14,9 +14,11 @@
 
 namespace engine::math {
 
-/// Fixed-capacity display name (31 chars + terminator).
+/// An entity's name: up to 127 bytes of UTF-8 plus the terminator, room
+/// for long asset filenames and about 40 CJK characters. Names are looked
+/// up by hash, so a longer one is refused, never cut.
 struct NameComponent final {
-  static constexpr std::size_t kMaxNameLength = 31U; // +1 for null terminator
+  static constexpr std::size_t kMaxNameLength = 127U; // +1 for null terminator
   char name[kMaxNameLength + 1U] = {};
 };
 

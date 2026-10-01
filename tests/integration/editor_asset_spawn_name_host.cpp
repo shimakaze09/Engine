@@ -1,8 +1,9 @@
-// Host for the asset-spawn entity-name truncation regression (issue #86
-// L-07): drags a short and then a very long virtual asset path through the
-// production placement entry point (execute_asset_instantiate) so the driving
-// CMake script can assert the truncation diagnostic on stdout instead of
-// the previous silent clip into NameComponent's fixed 32-byte field.
+// Host for the asset-spawn entity-name regressions: drags a short, a
+// 50-character and a 150-character virtual asset path through the
+// production placement entry point (execute_asset_instantiate) so the
+// driving CMake script can check that a long asset name is kept whole and
+// that only one past NameComponent's 127-byte capacity is cut, with a
+// diagnostic on stdout rather than silently.
 
 #include <cstdio>
 #include <cstring>
@@ -88,13 +89,18 @@ int main() {
   char shortPath[128] = {};
   std::snprintf(shortPath, sizeof(shortPath), "%s/short_name.mesh",
                kMountPrefix);
-  char longPath[128] = {};
-  std::snprintf(
-      longPath, sizeof(longPath),
-      "%s/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.mesh",
-      kMountPrefix);
+  char mediumPath[128] = {};
+  std::snprintf(mediumPath, sizeof(mediumPath),
+                "%s/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.mesh",
+                kMountPrefix);
+  char longStem[151] = {};
+  std::memset(longStem, 'y', sizeof(longStem) - 1U);
+  char longPath[256] = {};
+  std::snprintf(longPath, sizeof(longPath), "%s/%s.mesh", kMountPrefix,
+                longStem);
 
   bool ok = spawn_and_report(shortPath);
+  ok = spawn_and_report(mediumPath) && ok;
   ok = spawn_and_report(longPath) && ok;
 
   session.world = nullptr;

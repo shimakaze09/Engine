@@ -1141,10 +1141,12 @@ int verify_material_and_light_float_fields_reject_malformed() {
 /// destination World untouched; capacity-sized data still round-trips
 /// byte-identically.
 int verify_over_capacity_authored_data_rejected() {
-  // 32 'n's: one byte past NameComponent's 31-char capacity.
-  constexpr const char *kOverlongNameScene =
-      "{\"version\":6,\"entities\":[{\"components\":{"
-      "\"name\":\"nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn\"}}]}";
+  // One byte past NameComponent's capacity.
+  const std::string overlongNameScene =
+      "{\"version\":6,\"entities\":[{\"components\":{\"name\":\"" +
+      std::string(engine::runtime::NameComponent::kMaxNameLength + 1U, 'n') +
+      "\"}}]}";
+  const char *kOverlongNameScene = overlongNameScene.c_str();
   // One LOD slot past the fixed capacity: refused whole rather than
   // dropping the authored tail.
   constexpr const char *kFourLodScene =
@@ -1218,10 +1220,10 @@ int verify_over_capacity_authored_data_rejected() {
     }
   }
 
-  // Capacity boundary: a 31-char name, all three LOD ids, and exactly
-  // kMaxInstances instances load whole, and a save of the loaded World is
-  // byte-identical to a save of the authored one — nothing was dropped or
-  // normalized on the way through.
+  // Capacity boundary: a name at NameComponent's capacity, all three LOD ids,
+  // and exactly kMaxInstances instances load whole, and a save of the loaded
+  // World is byte-identical to a save of the authored one — nothing was dropped
+  // or normalized on the way through.
   std::unique_ptr<engine::runtime::World> authored(
       new (std::nothrow) engine::runtime::World());
   if (authored == nullptr) {
