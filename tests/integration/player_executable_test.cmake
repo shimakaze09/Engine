@@ -3,8 +3,9 @@
 # working directory other than the project's (#776) and exits 0; a path
 # with no project, and a frame count that is not one, are refused with
 # exit 1 and a reason; a project whose startup scene does not load stops
-# the player with exit 3 rather than playing an empty world. Every case is
-# --headless, so no error box waits for a click.
+# the player with exit 3 rather than playing an empty world; the startup
+# scene's on_begin_play runs once. Every case is --headless, so no error
+# box waits for a click.
 #
 # Inputs: PLAYER (the executable), SAMPLE (the sample project directory),
 # SCRATCH (a directory this test may replace).
@@ -65,5 +66,33 @@ file(WRITE "${broken}/assets/main.lua" "return {}\n")
 expect_player(broken_startup_scene 3
     "the startup scene 'assets/main.scene' could not load; the player stops"
     "" --headless --max-frames 120 "${broken}")
+
+# The startup scene's main script begins play exactly once at boot. The
+# player used to play its first frame on the bootstrap World, so the
+# script's on_begin_play ran there and then again in the loaded scene, and
+# every side effect it had outside the World happened twice.
+set(once "${SCRATCH}/once")
+file(COPY "${SAMPLE}/" DESTINATION "${once}")
+file(WRITE "${once}/assets/main.lua"
+    "local M = {}\n"
+    "function M.on_begin_play(_self)\n"
+    "  engine.log('BEGIN_PLAY_MARK')\n"
+    "end\n"
+    "return M\n")
+execute_process(
+    COMMAND "${PLAYER}" --headless --max-frames 30 "${once}"
+    WORKING_DIRECTORY "${SCRATCH}"
+    RESULT_VARIABLE code
+    OUTPUT_VARIABLE out
+    ERROR_VARIABLE err
+    TIMEOUT 120)
+string(REGEX MATCHALL "BEGIN_PLAY_MARK" marks "${out}${err}")
+list(LENGTH marks markCount)
+if(NOT code STREQUAL "0" OR NOT markCount EQUAL 1)
+    message(FATAL_ERROR
+        "begin_play_once: exit ${code}, on_begin_play ran ${markCount} "
+        "time(s), expected exit 0 and once:\n${out}${err}")
+endif()
+message(STATUS "begin_play_once: on_begin_play ran once")
 
 file(REMOVE_RECURSE "${SCRATCH}")

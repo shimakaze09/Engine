@@ -7,10 +7,10 @@
 // engine::bootstrap() + a full EnginePipeline run with a pre-registered
 // bridge that bootstrap has to displace. The configured startup scene is
 // a contact scene whose script registers a Lua collision handler when it
-// begins play: player mode boots that scene through the deferred
-// engine.load_scene transition after the pipeline installed its collision
-// dispatch, and the handler must observe the pair on the frames that
-// follow (regression for #410). A second run whose startup scene is
+// begins play: player mode loads that scene at pipeline initialize,
+// through the engine.load_scene transition, after the pipeline installed
+// its collision dispatch, and the handler must observe the pair on the
+// frames that follow (regression for #410). A second run whose startup scene is
 // malformed must stop on a fatal error rather than play the empty
 // bootstrap world (#608).
 
@@ -207,7 +207,7 @@ int main() {
   // device stands in so the pipeline runs on every CI lane.
   engine::EngineConfig config{};
   config.core.platform.headless = true;
-  // The startup scene player mode boots through the deferred load.
+  // The startup scene player mode loads at pipeline initialize.
   config.editorScenePath = kCollisionScenePath;
   if (!engine::bootstrap(config)) {
     std::fprintf(stderr, "FAIL: bootstrap\n");
@@ -237,8 +237,8 @@ int main() {
     CHECK(ticking_frame(pipeline), "settle frame 1");
     CHECK(ticking_frame(pipeline), "settle frame 2");
 
-    // The first frame commits the startup scene after its simulation; the
-    // scripted entity begins play on the next frame, and the contact is
+    // Initialize committed the startup scene; its scripted entity begins
+    // play on the first frame, and the contact is
     // reported through the pipeline's dispatch on that frame's step. A
     // few more frames are allowed so the check is about the dispatch, not
     // the exact frame the handler lands on.

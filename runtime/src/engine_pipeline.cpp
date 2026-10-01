@@ -716,9 +716,10 @@ struct EnginePipeline::Impl final {
   bool probeAssetsWereLoading = false;
   // Distinguishes fatal loop exits from graceful stops for engine::run.
   bool fatalError = false;
-  // The player's startup scene is requested and not yet committed; its
-  // commit failing stops the run.
-  bool startupScenePending = false;
+  // The player's startup scene failed to load at initialize, so no frame
+  // runs: the first one reports the fatal error instead of playing the
+  // bootstrap World.
+  bool startupSceneFailed = false;
   LoopPlayState previousPlayState = LoopPlayState::Playing;
   std::size_t previousAliveCount = 0U;
   // Entities spawned and destroyed since the last slice diagnostics line,
@@ -996,10 +997,15 @@ bool EnginePipeline::Impl::initialize(std::uint32_t maxFrameCount) noexcept {
   sliceReportedFailedAssets = 0U;
   core::reset_engine_stats();
 
-  // Player mode: boot the configured startup scene through the
-  // deferred transition engine.load_scene uses. A player has nothing to
-  // show without it, so a startup scene that cannot load stops the run
-  // (stage_scene_commit) rather than playing the empty bootstrap world.
+  // Player mode: load the configured startup scene now, through the
+  // transition engine.load_scene uses, so the first frame is the game's.
+  // Deferring it to the first frame's scene commit, as a script's load
+  // is, played that frame on the bootstrap World and ran the main
+  // script's on_begin_play there, then again in the scene: every side
+  // effect it had outside the World happened twice. Unity and Unreal
+  // likewise load the first scene before any gameplay code runs. A player
+  // has nothing to show without it, so a startup scene that cannot load
+  // stops the run at its first frame.
   if (active_config().playerMode) {
     const char *scenePath = active_config().editorScenePath;
     if ((scenePath != nullptr) && (scenePath[0] != '\0')) {
@@ -1012,7 +1018,17 @@ bool EnginePipeline::Impl::initialize(std::uint32_t maxFrameCount) noexcept {
         core::log_message(core::LogLevel::Error, "engine", message);
         return false;
       }
-      startupScenePending = true;
+      if (!runtime::process_pending_scene_op(*world)) {
+        char message[320] = {};
+        std::snprintf(message, sizeof(message),
+                      "the startup scene '%s' could not load; the player "
+                      "stops",
+                      scenePath);
+        core::log_message(core::LogLevel::Error, "engine", message);
+        fatalError = true;
+        running = false;
+        startupSceneFailed = true;
+      }
     }
   }
 
@@ -1024,6 +1040,9 @@ bool EnginePipeline::Impl::initialize(std::uint32_t maxFrameCount) noexcept {
 // ---------------------------------------------------------------------------
 
 bool EnginePipeline::Impl::execute_frame() noexcept {
+  if (startupSceneFailed) {
+    return false;
+  }
   core::profiler_begin_frame();
   // Published before any stage runs so every log_message call this frame
   // (including early stages ahead of stage_scripting) tags itself with the
@@ -2384,20 +2403,7 @@ void EnginePipeline::Impl::stage_render() noexcept {
 // so a mutation a handler defers is still applied before this commit
 // decides what content the transition replaces.
 void EnginePipeline::Impl::stage_scene_commit() noexcept {
-  const bool committed = runtime::process_pending_scene_op(*world);
-  if (!startupScenePending) {
-    return;
-  }
-  startupScenePending = false;
-  if (!committed) {
-    char message[320] = {};
-    std::snprintf(message, sizeof(message),
-                  "the startup scene '%s' could not load; the player stops",
-                  active_config().editorScenePath);
-    core::log_message(core::LogLevel::Error, "engine", message);
-    fatalError = true;
-    running = false;
-  }
+  static_cast<void>(runtime::process_pending_scene_op(*world));
 }
 
 // ---------------------------------------------------------------------------
