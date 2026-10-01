@@ -387,6 +387,21 @@ int check_resolve_asset_open_action_mapping() {
       AssetOpenAction::EditMaterial) {
     return 4;
   }
+  // The index flags every source-listed file as a source, a .scene and a
+  // .mat included; those are the asset itself and keep their action. Only
+  // the source of a cooked type (a .gltf beside its .mesh) selects.
+  if (resolve_asset_open_action(engine::content::AssetTypeTag::Scene, true) !=
+      AssetOpenAction::OpenScene) {
+    return 5;
+  }
+  if (resolve_asset_open_action(engine::content::AssetTypeTag::Material,
+                                true) != AssetOpenAction::EditMaterial) {
+    return 6;
+  }
+  if (resolve_asset_open_action(engine::content::AssetTypeTag::Mesh, true) !=
+      AssetOpenAction::SelectOnly) {
+    return 7;
+  }
   const engine::content::AssetTypeTag selectOnlyKinds[] = {
       engine::content::AssetTypeTag::Texture,   engine::content::AssetTypeTag::Script,
       engine::content::AssetTypeTag::Animation, engine::content::AssetTypeTag::AnimationController,

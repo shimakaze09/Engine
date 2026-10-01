@@ -431,10 +431,15 @@ bool refresh_child_folder_cache(const char *folder,
 
 AssetOpenAction resolve_asset_open_action(content::AssetTypeTag kind,
                                           bool isSource) noexcept {
-  if (isSource) {
+  const content::AssetTypeDescriptor &descriptor =
+      content::asset_type_descriptor(kind);
+  // Only the source of a cooked type (a .gltf beside its .mesh) stops at
+  // selecting it, since the runtime loads the cooked file; a source-policy
+  // file (a .scene, a .mat) is the asset itself and takes its action.
+  if (isSource && (descriptor.policy == content::AssetSourcePolicy::Cooked)) {
     return AssetOpenAction::SelectOnly;
   }
-  switch (content::asset_type_descriptor(kind).action) {
+  switch (descriptor.action) {
   case content::AssetPrimaryAction::Instantiate:
     return AssetOpenAction::SpawnMesh;
   case content::AssetPrimaryAction::OpenDocument:
