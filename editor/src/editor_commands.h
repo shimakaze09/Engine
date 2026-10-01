@@ -41,6 +41,7 @@ struct TransformEditCommand final : EditorCommand {
            editor_session().world->add_transform(
                resolve_command_target(entity, persistentId), oldTransform);
   }
+  std::size_t memory_bytes() const noexcept override { return sizeof(*this); }
 };
 
 // ComponentEditType, ComponentEditSnapshot, capture_component_snapshot, and
@@ -71,6 +72,8 @@ struct ComponentEditCommand final : EditorCommand {
   bool execute() noexcept override { return apply_state(afterExists, after); }
 
   bool undo() noexcept override { return apply_state(beforeExists, before); }
+
+  std::size_t memory_bytes() const noexcept override { return sizeof(*this); }
 
 private:
   /// Applies one endpoint of the edit. Removing a component that is
@@ -104,6 +107,7 @@ struct ReparentCommand final : EditorCommand {
 
   bool execute() noexcept override;
   bool undo() noexcept override;
+  std::size_t memory_bytes() const noexcept override { return sizeof(*this); }
 };
 
 /// Reparents through the command history; false when the child has no
@@ -129,6 +133,7 @@ struct EntityCreateCommand final : EditorCommand {
 
   bool execute() noexcept override;
   bool undo() noexcept override;
+  std::size_t memory_bytes() const noexcept override { return sizeof(*this); }
 };
 
 /// One captured subtree member of a deleted entity: its persistent id
@@ -156,6 +161,10 @@ struct EntityDeleteCommand final : EditorCommand {
 
   bool execute() noexcept override;
   bool undo() noexcept override;
+  std::size_t memory_bytes() const noexcept override {
+    return sizeof(*this) + (recordCount * sizeof(EntityDeleteRecord)) +
+           (rootCount * sizeof(std::size_t));
+  }
 };
 
 /// One member of a duplicated subtree: the components copied from the
@@ -195,6 +204,10 @@ struct EntityDuplicateCommand final : EditorCommand {
 
   bool execute() noexcept override;
   bool undo() noexcept override;
+  std::size_t memory_bytes() const noexcept override {
+    return sizeof(*this) + (recordCount * sizeof(EntityDuplicateRecord)) +
+           (rootCount * sizeof(std::size_t));
+  }
 };
 
 /// Captures the entity's transform subtree into a duplicate command; null

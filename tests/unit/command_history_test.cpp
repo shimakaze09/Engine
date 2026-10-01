@@ -2,10 +2,11 @@
 
 #include "editor_commands.h"
 #include "editor_transform_util.h"
+#include "engine/content/asset_metadata.h"
+#include "engine/core/logging.h"
 #include "engine/editor/command_history.h"
 #include "engine/math/transform.h"
 #include "engine/physics/primitive_hulls.h"
-#include "engine/content/asset_metadata.h"
 #include "engine/runtime/physics_bridge.h"
 #include "engine/runtime/world.h"
 
@@ -23,6 +24,18 @@ int g_destroyedCommands = 0;
 int g_executeCount = 0;
 int g_undoCount = 0;
 int g_redoCount = 0;
+/// Bytes each CountingCommand reports to the history's budget.
+std::size_t g_commandBytes = 100U;
+int g_historyWarnings = 0;
+
+void count_history_warning(engine::core::LogLevel level, const char *channel,
+                           const char *message, void * /*userData*/) noexcept {
+  if ((level == engine::core::LogLevel::Warning) && (channel != nullptr) &&
+      (std::strcmp(channel, "editor") == 0) && (message != nullptr) &&
+      (std::strstr(message, "undo history is full") != nullptr)) {
+    ++g_historyWarnings;
+  }
+}
 
 void reset_counts() noexcept {
   g_liveCommands = 0;
@@ -54,6 +67,8 @@ struct CountingCommand final : engine::editor::EditorCommand {
     ++g_redoCount;
     return true;
   }
+
+  std::size_t memory_bytes() const noexcept override { return g_commandBytes; }
 };
 
 engine::editor::EditorCommand *make_command() noexcept {
@@ -159,28 +174,102 @@ int check_redo_entries_are_released() noexcept {
   return 0;
 }
 
-int check_capacity_eviction_releases_oldest_command() noexcept {
+/// Far more edits than the old 64-slot ring held all stay undoable, in
+/// order, and none is dropped.
+int check_history_holds_past_the_old_cap() noexcept {
   reset_counts();
+  constexpr int kEdits = 1000;
   {
     engine::editor::CommandHistory history{};
-    for (std::size_t i = 0U;
-         i < engine::editor::CommandHistory::kMaxHistory + 1U; ++i) {
-      history.execute(make_command());
+    for (int i = 0; i < kEdits; ++i) {
+      if (!history.execute(make_command())) {
+        return 30;
+      }
     }
-
-    if ((g_liveCommands !=
-         static_cast<int>(engine::editor::CommandHistory::kMaxHistory)) ||
-        (g_destroyedCommands != 1)) {
-      return 30;
+    if ((g_liveCommands != kEdits) || (g_destroyedCommands != 0) ||
+        (history.command_count() != static_cast<std::size_t>(kEdits)) ||
+        (history.evicted_count() != 0U) ||
+        (history.used_bytes() != static_cast<std::size_t>(kEdits) * 100U)) {
+      return 31;
+    }
+    int undone = 0;
+    while (history.undo()) {
+      ++undone;
+    }
+    if ((undone != kEdits) || (g_undoCount != kEdits)) {
+      return 32;
     }
   }
-
-  if ((g_liveCommands != 0) ||
-      (g_destroyedCommands !=
-       static_cast<int>(engine::editor::CommandHistory::kMaxHistory + 1U))) {
-    return 31;
+  if ((g_liveCommands != 0) || (g_destroyedCommands != kEdits)) {
+    return 33;
   }
   return 0;
+}
+
+/// Past its byte budget the history drops the oldest command, says so
+/// once per history, keeps exactly what fits, and always keeps the newest
+/// even when it alone is over budget; a smaller budget applies at once.
+int check_budget_eviction_releases_oldest_command() noexcept {
+  reset_counts();
+  if (!engine::core::initialize_logging() ||
+      !engine::core::log_register_sink(&count_history_warning, nullptr)) {
+    return 34;
+  }
+  g_historyWarnings = 0;
+  int result = 0;
+  {
+    engine::editor::CommandHistory history{};
+    history.set_budget_bytes(1000U);
+    for (int i = 0; i < 11; ++i) {
+      history.execute(make_command());
+    }
+    if ((g_liveCommands != 10) || (g_destroyedCommands != 1) ||
+        (history.evicted_count() != 1U) || (history.used_bytes() != 1000U) ||
+        (g_historyWarnings != 1)) {
+      result = 35;
+    }
+    for (int i = 0; (result == 0) && (i < 5); ++i) {
+      history.execute(make_command());
+    }
+    if ((result == 0) &&
+        ((g_liveCommands != 10) || (history.evicted_count() != 6U) ||
+         (g_historyWarnings != 1))) {
+      result = 36;
+    }
+    int undone = 0;
+    while ((result == 0) && history.undo()) {
+      ++undone;
+    }
+    if ((result == 0) && (undone != 10)) {
+      result = 37;
+    }
+
+    history.clear();
+    history.set_budget_bytes(1000U);
+    g_commandBytes = 5000U;
+    if ((result == 0) &&
+        (!history.execute(make_command()) || !history.can_undo() ||
+         (history.command_count() != 1U))) {
+      result = 38;
+    }
+    g_commandBytes = 100U;
+    for (int i = 0; (result == 0) && (i < 8); ++i) {
+      history.execute(make_command());
+    }
+    if ((result == 0) &&
+        ((history.command_count() != 8U) || (g_historyWarnings != 2))) {
+      result = 39; // the over-budget command went, warned once more
+    }
+    history.set_budget_bytes(300U);
+    if ((result == 0) &&
+        ((history.command_count() != 3U) || (history.used_bytes() != 300U))) {
+      result = 40;
+    }
+  }
+  g_commandBytes = 100U;
+  engine::core::log_unregister_sink(&count_history_warning, nullptr);
+  engine::core::shutdown_logging();
+  return result;
 }
 
 int check_undo_redo_dispatch() noexcept {
@@ -1421,7 +1510,11 @@ int main() {
     return result;
   }
 
-  result = check_capacity_eviction_releases_oldest_command();
+  result = check_history_holds_past_the_old_cap();
+  if (result != 0) {
+    return result;
+  }
+  result = check_budget_eviction_releases_oldest_command();
   if (result != 0) {
     std::fprintf(stderr, "command_history_test failed: %d\n", result);
     return result;

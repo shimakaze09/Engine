@@ -92,6 +92,7 @@ struct MaterialEditCommand final : EditorCommand {
 
   bool execute() noexcept override;
   bool undo() noexcept override;
+  std::size_t memory_bytes() const noexcept override { return sizeof(*this); }
 };
 
 /// Returns the process-wide material editor panel state.

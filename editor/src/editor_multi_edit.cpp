@@ -145,6 +145,9 @@ struct MultiComponentEditCommand final : EditorCommand {
 
   bool execute() noexcept override { return apply_all(true); }
   bool undo() noexcept override { return apply_all(false); }
+  std::size_t memory_bytes() const noexcept override {
+    return sizeof(*this) + (entries.size() * sizeof(MultiEditEntry));
+  }
 
 private:
   bool apply_all(bool useAfter) noexcept {

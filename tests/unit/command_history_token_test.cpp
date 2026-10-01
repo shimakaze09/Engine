@@ -1,8 +1,9 @@
 // Verifies CommandHistory::current_token() as the dirty-tracking primitive
 // (issue #158): a saved-state marker compared against this token must
 // clear dirty exactly when undo/redo returns to the saved position, and
-// must never falsely read clean once that position is evicted by history
-// growth beyond capacity.
+// must never falsely read clean once the history drops commands past its
+// byte budget: with nothing left to undo, the token is the newest dropped
+// command's, whose edit stays applied.
 
 #include "engine/editor/command_history.h"
 
@@ -16,6 +17,7 @@ namespace {
 struct NoopCommand final : engine::editor::EditorCommand {
   bool execute() noexcept override { return true; }
   bool undo() noexcept override { return true; }
+  std::size_t memory_bytes() const noexcept override { return 64U; }
 };
 
 engine::editor::EditorCommand *make_command() noexcept {
@@ -106,46 +108,45 @@ int check_full_undo_returns_to_empty_token() {
   return 0;
 }
 
-/// EXPECTATION: once a saved position is pushed out of the fixed-size ring
-/// by later commands (capacity eviction), no future undo/redo can ever
-/// reproduce that token again — the document must stay permanently dirty
-/// until the next explicit save, never falsely read clean.
+/// EXPECTATION: once the history drops commands past its budget, undoing
+/// everything left lands on the newest dropped command's token, never on
+/// the empty-history 0: a document saved before any edit stays dirty
+/// (the dropped edits remain applied), while one saved exactly at the
+/// dropped position correctly reads clean there, since that is the state
+/// the world is back in.
 int check_evicted_token_never_reproduced() {
   engine::editor::CommandHistory history;
+  history.set_budget_bytes(64U * 10U);
+  const std::uint64_t savedFresh = history.current_token();
 
-  if (!history.execute(make_command())) {
-    return 30;
-  }
-  const std::uint64_t evictedToken = history.current_token();
-
-  // Fill well past kMaxHistory so the first command's slot is recycled.
-  for (std::size_t i = 0U;
-       i < (engine::editor::CommandHistory::kMaxHistory * 2U); ++i) {
+  std::uint64_t tokens[12] = {};
+  for (std::size_t i = 0U; i < 12U; ++i) {
     if (!history.execute(make_command())) {
-      return 31;
+      return 30;
     }
+    tokens[i] = history.current_token();
+  }
+  if (history.command_count() != 10U) {
+    return 31;
   }
 
-  // Walk every reachable position via undo and confirm the evicted token
-  // never reappears. Undoing all the way to the token-0 sentinel is
-  // itself expected here (it means every ring-resident command was
-  // undone) and correctly still reads dirty against evictedToken, since
-  // the commands the ring silently dropped were never undone and remain
-  // permanently applied underneath.
+  // The first two were dropped; the second is the floor.
   std::uint64_t token = history.current_token();
-  if (token == evictedToken) {
-    return 32;
-  }
   while (history.can_undo()) {
     if (!history.undo()) {
       return 33;
     }
     token = history.current_token();
-    if (token == evictedToken) {
+    if (token == tokens[0]) {
       return 34;
     }
   }
-
+  if (token == savedFresh) {
+    return 32;
+  }
+  if (token != tokens[1]) {
+    return 35;
+  }
   return 0;
 }
 
