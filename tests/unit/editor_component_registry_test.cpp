@@ -47,10 +47,9 @@ struct SessionWorldScope final {
 };
 
 /// The registry row count generated from the runtime table matches the
-/// production World's persistent-component count (16 since the sky light,
-/// #580).
+/// production World's persistent-component count (17 since entity tags).
 int check_component_edit_type_count() noexcept {
-  if (engine::editor::kComponentEditTypeCount != 16U) {
+  if (engine::editor::kComponentEditTypeCount != 17U) {
     return 1;
   }
   return 0;
@@ -239,9 +238,10 @@ int check_add_menu_offers_every_missing_component() noexcept {
   if (!spot) {
     return 5; // an ordinary missing component is not offered
   }
-  // Transform is always present on a scene object and the point light is
-  // carried: every other row is offered.
-  if (count != engine::editor::kComponentEditTypeCount - 2U) {
+  // Transform is always present on a scene object, the point light is
+  // carried, and Tags are added in their row under the name, not from the
+  // menu: every other row is offered.
+  if (count != engine::editor::kComponentEditTypeCount - 3U) {
     return 6;
   }
   std::size_t rowCount = 0U;

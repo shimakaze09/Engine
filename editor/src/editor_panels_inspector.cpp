@@ -10,6 +10,7 @@
 
 #include "editor_commands.h"
 #include "editor_component_ops.h"
+#include "editor_entity_tags.h"
 #include "editor_inspector_metadata.h"
 #include "editor_live_edit.h"
 #include "editor_multi_edit.h"
@@ -351,11 +352,12 @@ void draw_component_sections(runtime::Entity entity, bool authoredEditable,
         return modified;
       });
 }
-// 14 sections above cover every registry row except Name and Transform.
-static_assert(kComponentEditTypeCount == 16U,
-             "a new persistent-component registry row needs both a section "
-             "in draw_component_sections and an entry in "
-             "editor_inspector_metadata's ComponentMetadata table");
+// 14 sections above cover every registry row except Name, Tags and
+// Transform; Name and Tags are rows under the entity header.
+static_assert(kComponentEditTypeCount == 17U,
+              "a new persistent-component registry row needs both a section "
+              "in draw_component_sections and an entry in "
+              "editor_inspector_metadata's ComponentMetadata table");
 
 /// The menu a right-click on the Inspector's empty space opens: Add
 /// Component, and Paste Component As New, enabled only while the component
@@ -531,6 +533,8 @@ void draw_inspector_panel() noexcept {
       ImGui::EndDisabled();
     }
   }
+
+  draw_entity_tags_row(entity, authoredEditable);
 
   // Deleting is an edit of the scene, not of the entity's components, so
   // the Inspector offers no button for it, as Unity's does not: Delete,
