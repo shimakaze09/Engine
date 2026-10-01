@@ -870,9 +870,8 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
             math::sub(activeCam.target, activeCam.position));
         const float forwardOrtho[4] = {
             fwd.x, fwd.y, fwd.z,
-            (activeCam.projection == CameraState::kProjectionOrthographic)
-                ? 1.0F
-                : 0.0F};
+            math::projection_is_orthographic(activeCam.projection) ? 1.0F
+                                                                   : 0.0F};
         dev->set_param_vec4(backend.dlCameraForwardOrthoLoc, forwardOrtho);
       }
       if (backend.dlScreenSizeLoc.valid()) {

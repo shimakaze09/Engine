@@ -1937,6 +1937,70 @@ int check_retired_probe_fields_are_ignored() {
   return 0;
 }
 
+/// A Light type or camera projection this build does not know (a newer
+/// build's light, a hand edit) is refused by name at load, and the
+/// destination World keeps what it had. Before, an unknown light type
+/// loaded as Directional and saved back as 0, and an unknown projection
+/// was orthographic to the camera manager but perspective to the renderer.
+int check_unknown_enum_values_are_refused() {
+  using namespace engine::runtime;
+
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 380;
+  }
+  const Entity kept = world->create_entity();
+  if (kept == kInvalidEntity) {
+    return 381;
+  }
+
+  constexpr const char *kUnknownLight =
+      "{\"version\":6,\"entities\":[{\"components\":{"
+      "\"LightComponent\":{\"intensity\":1,\"type\":2}}}]}";
+  if (load_scene(*world, kUnknownLight, std::strlen(kUnknownLight))) {
+    return 382;
+  }
+  if ((world->alive_entity_count() != 1U) || (world->light_count() != 0U)) {
+    return 383;
+  }
+
+  constexpr const char *kUnknownProjection =
+      "{\"version\":6,\"entities\":[{\"components\":{"
+      "\"CameraComponent\":{\"projection\":2,\"orthographicSize\":5}}}]}";
+  if (load_scene(*world, kUnknownProjection, std::strlen(kUnknownProjection))) {
+    return 384;
+  }
+  if (world->alive_entity_count() != 1U) {
+    return 385;
+  }
+
+  // The last value of each domain still loads and keeps its value.
+  constexpr const char *kKnown =
+      "{\"version\":6,\"entities\":[{\"components\":{"
+      "\"LightComponent\":{\"type\":1},"
+      "\"CameraComponent\":{\"projection\":1,\"orthographicSize\":5}}}]}";
+  if (!load_scene(*world, kKnown, std::strlen(kKnown))) {
+    return 386;
+  }
+  const LightComponent *light = world->light_at(0U);
+  if ((world->light_count() != 1U) || (light == nullptr) ||
+      (light->type != LightType::Point)) {
+    return 387;
+  }
+
+  // The World refuses the same values from any other ingress.
+  const Entity entity = world->create_entity();
+  LightComponent unknownLight{};
+  unknownLight.type = static_cast<LightType>(2U);
+  CameraComponent unknownCamera{};
+  unknownCamera.projection = 2U;
+  if (world->add_light_component(entity, unknownLight) ||
+      world->add_camera_component(entity, unknownCamera)) {
+    return 388;
+  }
+  return 0;
+}
+
 /// No-op callback for arming a timer ahead of a save.
 void transient_timer_noop(engine::runtime::TimerId, void *) noexcept {}
 
@@ -2347,6 +2411,10 @@ int main() {
     return result;
   }
   result = check_retired_probe_fields_are_ignored();
+  if (result != 0) {
+    return result;
+  }
+  result = check_unknown_enum_values_are_refused();
   if (result != 0) {
     return result;
   }

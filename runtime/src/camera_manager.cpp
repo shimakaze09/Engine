@@ -6,6 +6,7 @@
 #include <cstdint>
 
 #include "engine/core/logging.h"
+#include "engine/math/world_component_types.h"
 
 namespace engine::runtime {
 
@@ -29,8 +30,8 @@ bool finite_vec3(const math::Vec3 &v) noexcept {
 /// contaminates blend state, the view/culling camera, and the audio
 /// listener until a clear resets it — and the documented range
 /// relationships hold: a positive near plane, far beyond near, a
-/// nonnegative blend speed, and a positive orthographic size when the
-/// entry selects the orthographic projection.
+/// nonnegative blend speed, a projection this build knows, and a positive
+/// orthographic size when the entry selects the orthographic projection.
 bool camera_entry_valid(const CameraEntry &entry, float priority) noexcept {
   if (!finite_vec3(entry.position) || !finite_vec3(entry.target) ||
       !finite_vec3(entry.up)) {
@@ -48,7 +49,9 @@ bool camera_entry_valid(const CameraEntry &entry, float priority) noexcept {
   if (entry.blendSpeed < 0.0F) {
     return false;
   }
-  if ((entry.projection != 0U) && !(entry.orthographicSize > 0.0F)) {
+  if (!math::camera_projection_known(entry.projection) ||
+      (math::projection_is_orthographic(entry.projection) &&
+       !(entry.orthographicSize > 0.0F))) {
     return false;
   }
   return true;

@@ -405,10 +405,16 @@ bool test_manager_rejects_invalid_parameters() noexcept {
   CameraEntry zeroOrthoSize = valid;
   zeroOrthoSize.projection = 1U;
   zeroOrthoSize.orthographicSize = 0.0F;
+  // A projection this build does not know: the manager once read any
+  // non-zero value as orthographic while the renderer drew perspective.
+  CameraEntry unknownProjection = valid;
+  unknownProjection.projection = 2U;
 
   const CameraEntry *invalid[] = {
-      &nanPosition, &infTarget,     &nanUp,  &nanFov,        &zeroNear,
-      &negativeNear, &farInsideNear, &infFar, &negativeBlend, &zeroOrthoSize};
+      &nanPosition,   &infTarget,        &nanUp,
+      &nanFov,        &zeroNear,         &negativeNear,
+      &farInsideNear, &infFar,           &negativeBlend,
+      &zeroOrthoSize, &unknownProjection};
   for (const CameraEntry *entry : invalid) {
     if (cm.push_camera(kOwnerB, *entry, 1.0F) ||
         cm.push_camera(kOwnerA, *entry, 1.0F)) {

@@ -883,6 +883,15 @@ Entity World::find_entity_by_name(const char *name) const noexcept {
 
 bool World::add_light_component(Entity entity,
                                 const LightComponent &component) noexcept {
+  if (!math::light_type_known(static_cast<std::uint32_t>(component.type))) {
+    char message[96] = {};
+    std::snprintf(message, sizeof(message),
+                  "add_light_component rejected unknown light type %u",
+                  static_cast<unsigned int>(component.type));
+    core::log_message(core::LogLevel::Error, "world", message);
+    note_refusal(core::FailureKind::InvalidArgument);
+    return false;
+  }
   return static_cast<bool>(add_component_checked(m_lightComponents, entity, component,
                                "add_light_component"));
 }
@@ -1267,6 +1276,15 @@ World::get_spring_arm_ptr(Entity entity) const noexcept {
 
 bool World::add_camera_component(Entity entity,
                                  const CameraComponent &component) noexcept {
+  if (!math::camera_projection_known(component.projection)) {
+    char message[96] = {};
+    std::snprintf(message, sizeof(message),
+                  "add_camera_component rejected unknown projection %u",
+                  static_cast<unsigned int>(component.projection));
+    core::log_message(core::LogLevel::Error, "world", message);
+    note_refusal(core::FailureKind::InvalidArgument);
+    return false;
+  }
   return static_cast<bool>(add_component_checked(m_cameraComponents, entity, component,
                                "add_camera_component"));
 }

@@ -69,7 +69,7 @@ math::Mat4 camera_projection_matrix(const CameraState &camera,
   const CameraDepthRange range = camera_depth_range(camera);
   const float nearP = range.nearPlane;
   const float farP = range.farPlane;
-  if (camera.projection == CameraState::kProjectionOrthographic) {
+  if (math::projection_is_orthographic(camera.projection)) {
     const float halfH =
         (camera.orthographicSize > 0.0F) ? camera.orthographicSize : 5.0F;
     const float halfW = halfH * safeAspect;

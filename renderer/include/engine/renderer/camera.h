@@ -6,15 +6,18 @@
 
 #include "engine/math/mat4.h"
 #include "engine/math/vec3.h"
+#include "engine/math/world_component_types.h"
 
 namespace engine::renderer {
 
 /// Position/target/up plus projection parameters for a camera.
 struct CameraState final {
-  /// Projection kinds mirrored from the runtime's CameraProjection encoding
-  /// (a plain uint32 so the renderer never includes runtime headers).
-  static constexpr std::uint32_t kProjectionPerspective = 0U;
-  static constexpr std::uint32_t kProjectionOrthographic = 1U;
+  /// Projection kinds, the math layer's CameraProjection values; whether
+  /// one is orthographic is math::projection_is_orthographic's to say.
+  static constexpr std::uint32_t kProjectionPerspective =
+      static_cast<std::uint32_t>(math::CameraProjection::Perspective);
+  static constexpr std::uint32_t kProjectionOrthographic =
+      static_cast<std::uint32_t>(math::CameraProjection::Orthographic);
 
   math::Vec3 position = math::Vec3(0.0F, 2.0F, 5.0F);
   math::Vec3 target   = math::Vec3(0.0F, 0.0F, 0.0F);

@@ -29,6 +29,7 @@ extern "C" {
 #include "engine/core/logging.h"
 #include "engine/core/string_util.h"
 #include "engine/math/quat.h"
+#include "engine/math/world_component_types.h"
 #include "engine/scripting/runtime_services.h"
 
 namespace engine::scripting {
@@ -164,7 +165,9 @@ bool camera_component_valid(const runtime::CameraComponent &camera) noexcept {
   }
   return (camera.nearPlane > 0.0F) && (camera.farPlane > camera.nearPlane) &&
          (camera.blendSpeed >= 0.0F) &&
-         ((camera.projection == 0U) || (camera.orthographicSize > 0.0F));
+         math::camera_projection_known(camera.projection) &&
+         (!math::projection_is_orthographic(camera.projection) ||
+          (camera.orthographicSize > 0.0F));
 }
 
 int lua_engine_add_camera_component(lua_State *state) noexcept {
@@ -232,12 +235,9 @@ int lua_engine_get_camera_component(lua_State *state) noexcept {
   lua_pushnumber(state, static_cast<double>(camera.priority));
   lua_pushnumber(state, static_cast<double>(camera.blendSpeed));
   lua_pushboolean(state, camera.active ? 1 : 0);
-  lua_pushstring(state,
-                 (camera.projection ==
-                  static_cast<std::uint32_t>(
-                      runtime::CameraProjection::Orthographic))
-                     ? "orthographic"
-                     : "perspective");
+  lua_pushstring(state, math::projection_is_orthographic(camera.projection)
+                            ? "orthographic"
+                            : "perspective");
   lua_pushnumber(state, static_cast<double>(camera.orthographicSize));
   return 8;
 }

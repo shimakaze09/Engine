@@ -25,6 +25,15 @@ struct NameComponent final {
 /// Enumerates light type values used by the engine.
 enum class LightType : std::uint8_t { Directional = 0, Point = 1 };
 
+/// Number of LightType values; a stored type at or past it is one this
+/// build does not know, and every ingress refuses it rather than guess.
+inline constexpr std::uint32_t kLightTypeCount = 2U;
+
+/// True when `type` names a LightType this build knows.
+[[nodiscard]] constexpr bool light_type_known(std::uint32_t type) noexcept {
+  return type < kLightTypeCount;
+}
+
 /// Directional or point light: color, direction, and intensity.
 struct LightComponent final {
   math::Vec3 color = math::Vec3(1.0F, 1.0F, 1.0F);
@@ -95,6 +104,24 @@ struct MeshComponent final {
 /// other numeric fields; this alias exists only for readable C++ compares.
 enum class CameraProjection : std::uint32_t { Perspective = 0U,
                                               Orthographic = 1U };
+
+/// Number of CameraProjection values; a stored projection at or past it is
+/// one this build does not know, and every ingress refuses it.
+inline constexpr std::uint32_t kCameraProjectionCount = 2U;
+
+/// True when `projection` names a CameraProjection this build knows.
+[[nodiscard]] constexpr bool
+camera_projection_known(std::uint32_t projection) noexcept {
+  return projection < kCameraProjectionCount;
+}
+
+/// The one test for an orthographic projection, shared by the camera
+/// manager, the renderer and the scripting bridge so they cannot disagree.
+[[nodiscard]] constexpr bool
+projection_is_orthographic(std::uint32_t projection) noexcept {
+  return projection ==
+         static_cast<std::uint32_t>(CameraProjection::Orthographic);
+}
 
 /// First-class authored camera. Pose is never stored here: it
 /// comes from the entity's world transform (looks along the rotated -Z

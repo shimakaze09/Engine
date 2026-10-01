@@ -304,7 +304,12 @@ top-level members verbatim through a rewrite
 (`engine_unit_asset_sidecar`, `engine_unit_material_writer`); the
 per-machine stores (input bindings, editor state, recent lists) name
 theirs in the log instead (`engine_unit_input_map`,
-`engine_unit_editor_recent_list`).
+`engine_unit_editor_recent_list`). An enum value this build does not
+know, such as a light type or camera projection from a newer build, is
+refused by name at load and at the World's ingress, never mapped to a
+default, and one predicate decides an orthographic projection for the
+camera manager, the renderer and Lua (`engine_unit_scene_serializer`,
+`engine_integration_camera`).
 
 The input log is the one binary document: a magic, an exact `u32`
 version, the steps, and a footer carrying the step count and an FNV-1a
