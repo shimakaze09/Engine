@@ -687,8 +687,12 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
     return false;
   }
   (void)rigidBodyEntities;
+  std::size_t sleepingCount = 0U;
   for (std::size_t i = 0U; i < rigidBodyCount; ++i) {
     RigidBody *body = &rigidBodies[i];
+    if (body->sleeping) {
+      ++sleepingCount;
+    }
     if (!(simulated_inverse_mass(*body) > 0.0F) || body->sleeping) {
       continue;
     }
@@ -697,6 +701,7 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
     if (energy < kSleepThreshold) {
       if (body->sleepFrameCount >= kSleepFramesRequired) {
         body->sleeping = true;
+        ++sleepingCount;
         body->velocity = engine::math::Vec3(0.0F, 0.0F, 0.0F);
         body->angularVelocity = engine::math::Vec3(0.0F, 0.0F, 0.0F);
       } else {
@@ -706,6 +711,8 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
       body->sleepFrameCount = 0U;
     }
   }
+
+  physicsCtx.sleepingBodyCount = sleepingCount;
 
   // Capture owner velocities into the CCD snapshot LAST: the next step's CCD
   // consumes them instead of live RigidBody reads (which race with parallel
@@ -735,7 +742,27 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
 
 /// Sets the requested value for gravity.
 void set_gravity(PhysicsWorldView &world, float x, float y, float z) noexcept {
-  world.physics_context().gravity = engine::math::Vec3(x, y, z);
+  const engine::math::Vec3 gravity(x, y, z);
+  engine::math::Vec3 &current = world.physics_context().gravity;
+  const bool changed = (current.x != gravity.x) || (current.y != gravity.y) ||
+                       (current.z != gravity.z);
+  current = gravity;
+  if (!changed) {
+    return;
+  }
+  // A sleeping body skips gravity, so a body asleep under the old pull
+  // would hang under the new one; every body wakes to feel it.
+  const std::size_t count = world.rigid_body_count();
+  const Entity *entities = nullptr;
+  RigidBody *bodies = nullptr;
+  if ((count == 0U) ||
+      !world.get_rigid_body_range(0U, count, &entities, &bodies)) {
+    return;
+  }
+  for (std::size_t i = 0U; i < count; ++i) {
+    bodies[i].sleeping = false;
+    bodies[i].sleepFrameCount = 0U;
+  }
 }
 
 engine::math::Vec3 get_gravity(const PhysicsWorldView &world) noexcept {
@@ -842,6 +869,42 @@ void reset_physics_content(PhysicsContext &context) noexcept {
     }
   }
   context.jointCount = 0U;
+}
+
+void wake_bodies_near_collider(PhysicsWorldView &world,
+                               Entity entity) noexcept {
+  // Resting contacts sit within a few millimetres; a margin a size larger
+  // still only wakes neighbours, which is always safe.
+  constexpr float kWakeMargin = 0.1F;
+  PhysicsContext &context = world.physics_context();
+  PhysicsShapeStore *store = context.shapeStore.get();
+  if ((store == nullptr) || (context.sleepingBodyCount == 0U) ||
+      (entity.index >= store->ccdSlotByEntityIndex.size())) {
+    return;
+  }
+  const std::size_t count = context.ccdColliderCount;
+  const std::uint32_t slot = store->ccdSlotByEntityIndex[entity.index];
+  if ((slot >= count) || (store->ccdColliderEntities[slot] != entity)) {
+    return;
+  }
+  math::AABB near = store->ccdColliderAabbs[slot];
+  near.min =
+      math::sub(near.min, math::Vec3(kWakeMargin, kWakeMargin, kWakeMargin));
+  near.max =
+      math::add(near.max, math::Vec3(kWakeMargin, kWakeMargin, kWakeMargin));
+  const Entity self = store->ccdColliderOwners[slot];
+  for (std::size_t i = 0U; i < count; ++i) {
+    const Entity owner = store->ccdColliderOwners[i];
+    if ((i == slot) || (owner == kInvalidEntity) || (owner == self) ||
+        !math::aabb_intersects(near, store->ccdColliderAabbs[i])) {
+      continue;
+    }
+    RigidBody *body = world.get_rigid_body_ptr(owner);
+    if ((body != nullptr) && body->sleeping) {
+      body->sleeping = false;
+      body->sleepFrameCount = 0U;
+    }
+  }
 }
 
 void wake_body(PhysicsWorldView &world, Entity entity) noexcept {

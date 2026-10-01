@@ -253,6 +253,11 @@ struct PhysicsContext final {
   // Monotonic resolve counter stamping manifold-cache use for eviction.
   std::uint32_t solverFrameNumber = 0U;
 
+  // Bodies asleep at the end of the last resolve. A wake elsewhere leaves
+  // it high until the next resolve recounts, which only costs a scan;
+  // zero lets wake_bodies_near_collider skip one.
+  std::size_t sleepingBodyCount = 0U;
+
   // Broad-phase overflow diagnostic: overflowActive is set while any
   // collider is served by the brute-force overflow list (per-collider
   // cell-span cap or spatial-node pool exhaustion) and logs once per

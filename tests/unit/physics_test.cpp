@@ -1405,6 +1405,9 @@ int check_collision_wakes_body() {
   }
 
   world->end_frame_phase();
+  // Gravity goes off first: a gravity change wakes every sleeper, which
+  // would wake the ball this check needs asleep.
+  engine::runtime::set_gravity(*world, 0.0F, 0.0F, 0.0F);
 
   // A manually-sleeping ball and a fast projectile that hits it. No gravity.
   const engine::runtime::Entity ball = world->create_entity();
@@ -1444,8 +1447,6 @@ int check_collision_wakes_body() {
       !world->add_rigid_body(projectile, projBody)) {
     return 164;
   }
-
-  engine::runtime::set_gravity(*world, 0.0F, 0.0F, 0.0F);
 
   if (!engine::runtime::is_sleeping(*world, ball)) {
     engine::runtime::set_gravity(*world, 0.0F, -9.8F, 0.0F);

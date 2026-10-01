@@ -83,6 +83,14 @@ const ConvexHullData *get_hull_data_ptr(const PhysicsContext &context,
                                         Entity entity) noexcept;
 /// Removes non-primitive shape payload data for an entity.
 void remove_shape_payloads(PhysicsContext &context, Entity entity) noexcept;
+/// Wakes every sleeping body with a collider whose bounds, as the last
+/// resolve saw them, come within a small margin of the collider `entity`'s
+/// bounds, as Jolt's ActivateBodiesInAABox does when a body is removed or
+/// moved. A body asleep on a support produces no contact, so nothing else
+/// would tell it the support is gone: the world calls this before a
+/// collider leaves (destroyed or removed) or is teleported, and what
+/// rested on it falls. Nothing is scanned while no body sleeps.
+void wake_bodies_near_collider(PhysicsWorldView &world, Entity entity) noexcept;
 /// Retires every joint attached to an entity that is leaving the world, so
 /// a joint never outlives a body: the solver would skip it, but it would
 /// still count as unserializable state and block every later save.

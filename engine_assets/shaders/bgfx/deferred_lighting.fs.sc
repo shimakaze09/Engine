@@ -72,8 +72,13 @@ uniform vec4 uProbeBoxMax;        // xyz box max, w intensity
 uniform vec4 uProbeCenter;        // xyz capture position
 uniform mat4 uInvProjection;
 uniform mat4 uInvView;
-uniform vec4 uDirLightDirection;  // .xyz
-uniform vec4 uDirLightColor;      // .xyz
+// The directional lights, as many as the forward program holds, so a
+// surface lit deferred and one lit forward see the same suns. The colour
+// carries the intensity premultiplied; only the first casts the cascades.
+#define MAX_DIR_LIGHTS 4
+uniform vec4 uDirLightCount;                    // .x
+uniform vec4 uDirLightDirection[MAX_DIR_LIGHTS]; // .xyz
+uniform vec4 uDirLightColor[MAX_DIR_LIGHTS];     // .rgb
 uniform vec4 uCameraPos;          // .xyz
 uniform vec4 uCameraForwardOrtho; // xyz forward, w 1 when orthographic
 uniform vec4 uTileCountX;         // .x
@@ -462,10 +467,16 @@ void main() {
 
     vec3 Lo = vec3_splat(0.0);
 
-    vec3 L_dir = normalize(-uDirLightDirection.xyz);
-    float shadowFactor = compute_shadow(worldPos, depth);
-    Lo += cook_torrance(N, V, L_dir, albedo, metallic, roughness,
-                        uDirLightColor.xyz, 1.0) * shadowFactor;
+    int dirCount = int(uDirLightCount.x);
+    for (int i = 0; i < MAX_DIR_LIGHTS; ++i) {
+        if (i >= dirCount) {
+            break;
+        }
+        vec3 L_dir = normalize(-uDirLightDirection[i].xyz);
+        float shadowFactor = (i == 0) ? compute_shadow(worldPos, depth) : 1.0;
+        Lo += cook_torrance(N, V, L_dir, albedo, metallic, roughness,
+                            uDirLightColor[i].xyz, 1.0) * shadowFactor;
+    }
 
     // Clamped to the tile grid: edge fragments past the last whole tile
     // must not read a neighboring row of the 2-D tile table (the clamp

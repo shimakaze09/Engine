@@ -431,6 +431,14 @@ engine_add_test_executable(engine_unit_physics
     engine_runtime
 )
 
+engine_add_test_executable(engine_unit_physics_wake
+    SOURCES
+    physics_wake_test.cpp
+    PRIVATE_DEPS
+    engine_physics
+    engine_runtime
+)
+
 engine_add_test_executable(engine_unit_physics_broadphase
     SOURCES
     physics_broadphase_test.cpp

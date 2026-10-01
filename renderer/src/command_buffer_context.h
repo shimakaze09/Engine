@@ -543,6 +543,7 @@ struct BackendState final {
   ShaderParam dlTileTableRowTilesLoc{};
   ShaderParam dlInvProjectionLoc{};
   ShaderParam dlInvViewLoc{};
+  ShaderParam dlDirLightCountLoc{};
   ShaderParam dlDirLightDirLoc{};
   ShaderParam dlDirLightColorLoc{};
   ShaderParam dlCameraPosLoc{};
