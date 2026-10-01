@@ -282,15 +282,37 @@ World::World() noexcept {
   ensure_runtime_reflection_registered();
 }
 
-bool World::add_transform(Entity entity, const Transform &transform) noexcept {
+bool World::add_transform(Entity entity, const Transform &incoming) noexcept {
   if (!check_component_mutation(entity, "add_transform")) {
     return false;
   }
 
-  if (!validate_transform_ingress(transform)) {
+  if (!validate_transform_ingress(incoming)) {
     core::log_message(core::LogLevel::Error, "world",
                       "add_transform rejected non-finite fields");
     return false;
+  }
+
+  // A rotation is a unit quaternion. One saved to nine significant digits
+  // is off unit length by about 1e-8 in its squared length, and one typed
+  // by hand to three decimals (0.707) by about 3e-4, so both are kept bit
+  // for bit; one further off than 1e-3 came from an invalid computation
+  // (a sheared decomposition gives 3e-2) and is normalized, with a
+  // Warning. A zero one names no rotation and is refused.
+  Transform transform = incoming;
+  const float lengthSq = math::dot(transform.rotation, transform.rotation);
+  if (!(lengthSq > 1.0e-12F)) {
+    core::log_message(core::LogLevel::Error, "world",
+                      "add_transform rejected a zero rotation");
+    return false;
+  }
+  if (std::fabs(lengthSq - 1.0F) > 1.0e-3F) {
+    transform.rotation = math::normalize(transform.rotation);
+    char message[96] = {};
+    std::snprintf(message, sizeof(message),
+                  "add_transform normalized a rotation of length %.6g",
+                  static_cast<double>(std::sqrt(lengthSq)));
+    log_entity_warning(m_entityPersistentIds[entity.index], message);
   }
 
   const RigidBody *body = m_rigidBodies.get_ptr(entity);

@@ -771,6 +771,8 @@ void draw_scene_viewport_panel() noexcept {
       snap = snapValues;
     }
 
+    // The matrix the gizmo starts this step from, to tell what it changed.
+    const math::Mat4 beforeMat = modelMat;
     const bool manipulated = ImGuizmo::Manipulate(
         &viewMat.columns[0].x, &projMat.columns[0].x, editor_session().gizmoOp,
         editor_session().gizmoWorldSpace ? ImGuizmo::WORLD : ImGuizmo::LOCAL,
@@ -783,21 +785,30 @@ void draw_scene_viewport_panel() noexcept {
     gizmo_track_gesture(selectedEntity, gizmoUsing, transform);
 
     if (manipulated) {
-      const math::Mat4 *parentWorldMatrix = nullptr;
+      const runtime::World &world = *editor_session().world;
+      physics::PhysicsTransform entityWorld{};
+      physics::PhysicsTransform parentWorld{};
+      bool hasParent = false;
+      bool posed = world.get_physics_transform(selectedEntity, &entityWorld);
       if (transform.parentId != runtime::kInvalidPersistentId) {
         const runtime::Entity parent =
-            editor_session().world->find_entity_by_persistent_id(
-                transform.parentId);
-        const runtime::WorldTransform *parentWorld =
-            editor_session().world->get_world_transform_read_ptr(parent);
-        if (parentWorld != nullptr) {
-          parentWorldMatrix = &parentWorld->matrix;
-        }
+            world.find_entity_by_persistent_id(transform.parentId);
+        hasParent = world.get_physics_transform(parent, &parentWorld);
+        posed = posed && hasParent;
       }
+      // Only the channel the gizmo changed is written, so rotating a child
+      // of a non-uniformly scaled parent never rewrites its scale.
+      const GizmoChannel channel =
+          (editor_session().gizmoOp == ImGuizmo::ROTATE) ? GizmoChannel::Rotate
+          : (editor_session().gizmoOp == ImGuizmo::SCALE)
+              ? GizmoChannel::Scale
+              : GizmoChannel::Translate;
 
       runtime::Transform localTransform{};
-      if (!world_matrix_to_local_transform(modelMat, parentWorldMatrix,
-                                           transform, &localTransform)) {
+      if (!posed ||
+          !gizmo_step_to_local(channel, beforeMat, modelMat, entityWorld,
+                               hasParent ? &parentWorld : nullptr, transform,
+                               &localTransform)) {
         core::log_message(
             core::LogLevel::Warning, "editor",
             "gizmo transform could not be converted to local space");

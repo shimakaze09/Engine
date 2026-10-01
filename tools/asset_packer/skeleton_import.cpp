@@ -9,6 +9,7 @@
 #include <cgltf.h>
 
 #include "engine/math/mat4.h"
+#include "engine/math/transform.h"
 
 namespace engine::tools {
 namespace {
@@ -87,68 +88,18 @@ bool compose_joint_local(const cgltf_skin &skin, const cgltf_node *jointNode,
 }
 
 /// Decomposes a joint-relative local matrix into TRS rest-pose values
-/// (scale from column lengths, rotation from the scale-normalized linear
-/// block). Rejects transforms a TRS decomposition cannot represent —
+/// through math::decompose_trs, so the importer and the editor share one
+/// rule. Rejects transforms a TRS decomposition cannot represent —
 /// negative determinant (mirroring), degenerate zero-scale axes, and
-/// shear beyond exporter noise — instead of emitting a corrupt rotation.
-/// The 1e-3 orthogonality tolerance admits float exporter
-/// round-off while catching real shear.
+/// shear beyond exporter noise (math::kTrsShearTolerance) — instead of
+/// emitting a corrupt rotation.
 bool decompose_rest_pose(const math::Mat4 &matrix, math::Vec3 *outTranslation,
                          math::Quat *outRotation,
                          math::Vec3 *outScale) noexcept {
-  *outTranslation =
-      math::Vec3(matrix.columns[3].x, matrix.columns[3].y, matrix.columns[3].z);
-
-  const math::Vec3 scale(
-      std::sqrt(matrix.columns[0].x * matrix.columns[0].x +
-                matrix.columns[0].y * matrix.columns[0].y +
-                matrix.columns[0].z * matrix.columns[0].z),
-      std::sqrt(matrix.columns[1].x * matrix.columns[1].x +
-                matrix.columns[1].y * matrix.columns[1].y +
-                matrix.columns[1].z * matrix.columns[1].z),
-      std::sqrt(matrix.columns[2].x * matrix.columns[2].x +
-                matrix.columns[2].y * matrix.columns[2].y +
-                matrix.columns[2].z * matrix.columns[2].z));
-  *outScale = scale;
-
-  if ((scale.x <= 1.0e-8F) || (scale.y <= 1.0e-8F) || (scale.z <= 1.0e-8F)) {
-    return false;
-  }
-
-  math::Mat4 rotationOnly = matrix;
-  rotationOnly.columns[3] = math::Vec4(0.0F, 0.0F, 0.0F, 1.0F);
-  for (std::size_t column = 0U; column < 3U; ++column) {
-    const float axisScale = (column == 0U) ? scale.x
-                            : (column == 1U) ? scale.y
-                                             : scale.z;
-    rotationOnly.columns[column].x /= axisScale;
-    rotationOnly.columns[column].y /= axisScale;
-    rotationOnly.columns[column].z /= axisScale;
-  }
-
-  const math::Vec4 &c0 = rotationOnly.columns[0];
-  const math::Vec4 &c1 = rotationOnly.columns[1];
-  const math::Vec4 &c2 = rotationOnly.columns[2];
-  const float determinant =
-      c0.x * (c1.y * c2.z - c1.z * c2.y) -
-      c1.x * (c0.y * c2.z - c0.z * c2.y) +
-      c2.x * (c0.y * c1.z - c0.z * c1.y);
-  if (determinant < 0.0F) {
-    return false;
-  }
-
-  constexpr float kShearTolerance = 1.0e-3F;
-  const float dot01 = (c0.x * c1.x) + (c0.y * c1.y) + (c0.z * c1.z);
-  const float dot02 = (c0.x * c2.x) + (c0.y * c2.y) + (c0.z * c2.z);
-  const float dot12 = (c1.x * c2.x) + (c1.y * c2.y) + (c1.z * c2.z);
-  if ((std::fabs(dot01) > kShearTolerance) ||
-      (std::fabs(dot02) > kShearTolerance) ||
-      (std::fabs(dot12) > kShearTolerance)) {
-    return false;
-  }
-
-  *outRotation = math::normalize(math::from_mat4(rotationOnly));
-  return true;
+  // The shared TRS rule (shear, singular scale, non-finite values), plus a
+  // refusal of a mirrored joint, which a skeleton pose cannot hold.
+  return math::decompose_trs(matrix, outTranslation, outRotation, outScale) &&
+         (outScale->z > 0.0F);
 }
 
 } // namespace

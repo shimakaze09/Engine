@@ -332,9 +332,8 @@ bool local_keeping_world_pose(const runtime::World &world,
   if (hasParent && !world.get_physics_transform(newParent, &parentWorld)) {
     return false;
   }
-  if (!world_matrix_to_local_transform(
-          childWorld.matrix, hasParent ? &parentWorld.matrix : nullptr, before,
-          out)) {
+  if (!local_transform_keeping_world_pose(
+          childWorld, hasParent ? &parentWorld : nullptr, before, out)) {
     return false;
   }
   // A non-uniform scale on a rotated parent shears the child, which no
