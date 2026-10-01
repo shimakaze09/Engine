@@ -44,14 +44,31 @@ AUDITED_ROOTS = ENGINE_SOURCE_ROOTS + ("tools",)
 class Rule:
     """One consolidated primitive and the evidence that it was copied."""
 
-    def __init__(self, name: str, owner: str, pattern: str, remedy: str) -> None:
+    def __init__(self, name: str, owner: str, pattern: str, remedy: str,
+                 allowed: tuple[str, ...] = ()) -> None:
         self.name = name
         self.owner = owner
         self.pattern = re.compile(pattern)
         self.remedy = remedy
+        # Files that match the pattern for a different primitive, each
+        # named with the reason beside the rule.
+        self.allowed = allowed
 
 
 RULES: tuple[Rule, ...] = (
+    Rule(
+        name="strict float-token parsing",
+        owner="core/src/text_parse.cpp",
+        # Parsing a whole token as a finite float is what a cvar value, a
+        # stored preference and a console argument share; the cvar and
+        # the preference reader each carried a copy, and the console
+        # parsed with atof, which turned a typo into 0. The JSON reader
+        # parses its own number grammar and the fog-colour reader scans a
+        # list with a cursor, so both may call strtof themselves.
+        pattern=r"\bstd::(?:strtof|strtod|atof)\s*\(",
+        remedy="include engine/core/text_parse.h and use parse_float_token",
+        allowed=("core/src/json.cpp", "renderer/src/render_settings.cpp"),
+    ),
     Rule(
         name="FNV-1a hashing",
         owner="core/include/engine/core/hash.h",
@@ -247,7 +264,7 @@ def check_file(path: pathlib.Path, rel: str, rules=RULES) -> list[str]:
         return findings
 
     for rule in rules:
-        if rel == rule.owner:
+        if rel == rule.owner or rel in rule.allowed:
             continue
         for number, line in enumerate(lines, 1):
             if rule.pattern.search(line):
