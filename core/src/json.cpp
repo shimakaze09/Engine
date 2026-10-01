@@ -453,7 +453,172 @@ bool token_equals(const char *tokenBegin, const char *tokenEnd,
   return std::memcmp(tokenBegin, text, tokenLength) == 0;
 }
 
+/// State of one json_visit_unread_members walk: the path being built and
+/// the running count.
+struct UnreadWalk final {
+  static constexpr std::size_t kPathBytes = 256U;
+
+  const JsonReadTracker *tracker = nullptr;
+  JsonUnreadVisitor visit = nullptr;
+  void *userData = nullptr;
+  char path[kPathBytes] = {};
+  std::size_t count = 0U;
+};
+
+/// Appends a path segment at `length`, cutting it to the buffer; returns
+/// the new length.
+std::size_t append_path(UnreadWalk &walk, std::size_t length,
+                        const char *segment,
+                        std::size_t segmentLength) noexcept {
+  const std::size_t room = UnreadWalk::kPathBytes - 1U - length;
+  const std::size_t copied = (segmentLength < room) ? segmentLength : room;
+  std::memcpy(walk.path + length, segment, copied);
+  walk.path[length + copied] = '\0';
+  return length + copied;
+}
+
+void walk_unread_value(UnreadWalk &walk, const JsonValue &value,
+                       std::size_t pathLength, std::uint32_t depth) noexcept;
+
+/// Visits the unread members of one object and walks into the read ones.
+void walk_unread_object(UnreadWalk &walk, const JsonValue &object,
+                        std::size_t pathLength, std::uint32_t depth) noexcept {
+  const char *cursor = object.begin + 1;
+  const char *end = object.end - 1;
+  skip_whitespace(cursor, end);
+  while (cursor < end) {
+    const char *keyBegin = nullptr;
+    const char *keyEnd = nullptr;
+    if (!parse_string_token(cursor, end, &keyBegin, &keyEnd)) {
+      return;
+    }
+    skip_whitespace(cursor, end);
+    if ((cursor >= end) || (*cursor != ':')) {
+      return;
+    }
+    ++cursor;
+    JsonValue member{};
+    if (!parse_value(cursor, end, &member, 1U)) {
+      return;
+    }
+    std::size_t length = pathLength;
+    if (length > 0U) {
+      length = append_path(walk, length, ".", 1U);
+    }
+    length = append_path(walk, length, keyBegin,
+                         static_cast<std::size_t>(keyEnd - keyBegin));
+    if (!walk.tracker->was_read(member.begin)) {
+      ++walk.count;
+      walk.visit(walk.path, walk.userData);
+    } else {
+      walk_unread_value(walk, member, length, depth + 1U);
+    }
+    walk.path[pathLength] = '\0';
+    skip_whitespace(cursor, end);
+    if ((cursor < end) && (*cursor == ',')) {
+      ++cursor;
+      skip_whitespace(cursor, end);
+    }
+  }
+}
+
+/// Walks into a value that was read: an object's members, or the objects
+/// and arrays an array holds.
+void walk_unread_value(UnreadWalk &walk, const JsonValue &value,
+                       std::size_t pathLength, std::uint32_t depth) noexcept {
+  if ((depth > kMaxJsonDepth) || (value.begin == nullptr) ||
+      (value.end == nullptr) || ((value.end - value.begin) < 2)) {
+    return;
+  }
+  if (value.type == JsonValue::Type::Object) {
+    walk_unread_object(walk, value, pathLength, depth);
+    return;
+  }
+  if (value.type != JsonValue::Type::Array) {
+    return;
+  }
+  const char *cursor = value.begin + 1;
+  const char *end = value.end - 1;
+  skip_whitespace(cursor, end);
+  std::size_t index = 0U;
+  while (cursor < end) {
+    JsonValue element{};
+    if (!parse_value(cursor, end, &element, 1U)) {
+      return;
+    }
+    if ((element.type == JsonValue::Type::Object) ||
+        (element.type == JsonValue::Type::Array)) {
+      char segment[24] = {};
+      const int written =
+          std::snprintf(segment, sizeof(segment), "[%zu]", index);
+      const std::size_t length =
+          append_path(walk, pathLength, segment,
+                      (written > 0) ? static_cast<std::size_t>(written) : 0U);
+      walk_unread_value(walk, element, length, depth + 1U);
+      walk.path[pathLength] = '\0';
+    }
+    ++index;
+    skip_whitespace(cursor, end);
+    if ((cursor < end) && (*cursor == ',')) {
+      ++cursor;
+      skip_whitespace(cursor, end);
+    }
+  }
+}
+
 } // namespace
+
+bool JsonReadTracker::reset_for(const char *text, std::size_t length) noexcept {
+  m_bits.reset();
+  m_text = nullptr;
+  m_length = 0U;
+  if ((text == nullptr) || (length == 0U)) {
+    return false;
+  }
+  const std::size_t bytes = (length + 7U) / 8U;
+  m_bits.reset(new (std::nothrow) std::uint8_t[bytes]());
+  if (m_bits == nullptr) {
+    return false;
+  }
+  m_text = text;
+  m_length = length;
+  return true;
+}
+
+void JsonReadTracker::record(const char *valueBegin) noexcept {
+  if ((m_bits == nullptr) || (valueBegin < m_text) ||
+      (valueBegin >= m_text + m_length)) {
+    return;
+  }
+  const auto offset = static_cast<std::size_t>(valueBegin - m_text);
+  m_bits[offset / 8U] = static_cast<std::uint8_t>(
+      m_bits[offset / 8U] | static_cast<std::uint8_t>(1U << (offset % 8U)));
+}
+
+bool JsonReadTracker::was_read(const char *valueBegin) const noexcept {
+  if ((m_bits == nullptr) || (valueBegin < m_text) ||
+      (valueBegin >= m_text + m_length)) {
+    return false;
+  }
+  const auto offset = static_cast<std::size_t>(valueBegin - m_text);
+  return (m_bits[offset / 8U] & (1U << (offset % 8U))) != 0U;
+}
+
+std::size_t json_visit_unread_members(const JsonValue &root,
+                                      const JsonReadTracker &tracker,
+                                      JsonUnreadVisitor visit,
+                                      void *userData) noexcept {
+  if (!tracker.armed() || (visit == nullptr) ||
+      (root.type != JsonValue::Type::Object)) {
+    return 0U;
+  }
+  UnreadWalk walk{};
+  walk.tracker = &tracker;
+  walk.visit = visit;
+  walk.userData = userData;
+  walk_unread_value(walk, root, 0U, 0U);
+  return walk.count;
+}
 
 JsonWriter::JsonWriter(JsonLayout layout) noexcept : m_layout(layout) {
   reset();
@@ -1093,6 +1258,9 @@ bool JsonParser::get_object_field(const JsonValue &object,
     }
 
     if (token_equals(keyBegin, keyEnd, fieldName)) {
+      if (m_readTracker != nullptr) {
+        m_readTracker->record(value.begin);
+      }
       *outValue = value;
       return true;
     }

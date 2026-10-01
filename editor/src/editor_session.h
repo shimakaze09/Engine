@@ -176,7 +176,6 @@ struct EditorSession final {
   // live edits stay outside command history regardless of this flag.
   bool liveEditEnabled = false;
   std::unique_ptr<char[]> playSnapshotBuffer{};
-  std::size_t playSnapshotCapacity = 0U;
   std::size_t playSnapshotSize = 0U;
   bool hasPlaySnapshot = false;
   // World the Play snapshot was captured from; Stop refuses to restore

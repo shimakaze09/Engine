@@ -1,12 +1,15 @@
 // Verifies World name-lookup behavior across add, rename, remove, destroy,
 // duplicate names, and heavy churn (regression coverage for the incremental
-// tombstone-based lookup that replaced full-table rebuilds).
+// tombstone-based lookup that replaced full-table rebuilds), and that names
+// as long as real asset names and CJK text run are kept whole through a
+// scene save and load.
 
 #include <cstdio>
 #include <cstring>
 #include <memory>
 #include <new>
 
+#include "engine/runtime/scene_serializer.h"
 #include "engine/runtime/world.h"
 
 namespace {
@@ -228,6 +231,47 @@ int test_overlong_name_refused(World &world) {
   return 0;
 }
 
+/// Names past the old 31-byte field: a long asset name and 40 CJK
+/// characters (120 bytes) are accepted whole, found by their full
+/// spelling, and survive a scene save and load.
+int test_long_real_names(World &world) {
+  constexpr const char *kAssetName = "SM_Environment_Rock_Cliff_Large_03";
+  const Entity rock = spawn_named(world, kAssetName);
+  if ((rock == kInvalidEntity) ||
+      (world.find_entity_by_name(kAssetName) != rock)) {
+    return 70;
+  }
+  NameComponent cjk{};
+  for (std::size_t i = 0U; i < 40U; ++i) {
+    std::memcpy(cjk.name + (i * 3U), "\xe5\xb2\xa9", 3U);
+  }
+  const Entity cliff = world.create_entity();
+  if ((cliff == kInvalidEntity) || !world.add_name_component(cliff, cjk) ||
+      (world.find_entity_by_name(cjk.name) != cliff)) {
+    return 71;
+  }
+
+  std::unique_ptr<char[]> saved{};
+  std::size_t savedSize = 0U;
+  std::unique_ptr<World> loaded(new (std::nothrow) World());
+  if ((loaded == nullptr) ||
+      !engine::runtime::save_scene(world, &saved, &savedSize) ||
+      !engine::runtime::load_scene(*loaded, saved.get(), savedSize)) {
+    return 72;
+  }
+  NameComponent readBack{};
+  if ((loaded->find_entity_by_name(kAssetName) == kInvalidEntity) ||
+      !loaded->get_name_component(loaded->find_entity_by_name(cjk.name),
+                                  &readBack) ||
+      (std::strcmp(readBack.name, cjk.name) != 0)) {
+    return 73;
+  }
+  if (!world.destroy_entity(rock) || !world.destroy_entity(cliff)) {
+    return 74;
+  }
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -238,10 +282,14 @@ int main() {
   }
 
   const int results[] = {
-      test_basic_lookup(*world), test_rename(*world),
-      test_remove(*world),       test_destroy(*world),
-      test_duplicate_names(*world), test_churn(*world),
+      test_basic_lookup(*world),
+      test_rename(*world),
+      test_remove(*world),
+      test_destroy(*world),
+      test_duplicate_names(*world),
+      test_churn(*world),
       test_overlong_name_refused(*world),
+      test_long_real_names(*world),
   };
 
   for (const int result : results) {

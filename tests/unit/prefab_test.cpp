@@ -4,10 +4,12 @@
 #include <cstring>
 #include <memory>
 #include <new>
+#include <string>
 
+#include "engine/content/asset_identity.h"
+#include "engine/core/logging.h"
 #include "engine/physics/physics.h"
 #include "engine/physics/primitive_hulls.h"
-#include "engine/content/asset_identity.h"
 #include "engine/runtime/prefab_serializer.h"
 #include "engine/runtime/world.h"
 
@@ -593,11 +595,13 @@ int verify_overlong_prefab_name_rejected() {
     return 400;
   }
 
-  // 32 'n's: one byte past the 31-char capacity.
-  const char *overlong =
+  // One byte past the name capacity.
+  const std::string overlongText =
       "{\"version\":5,\"components\":{\"Transform\":{},"
-      "\"NameComponent\":{\"name\":"
-      "\"nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn\"}}}";
+      "\"NameComponent\":{\"name\":\"" +
+      std::string(engine::runtime::NameComponent::kMaxNameLength + 1U, 'n') +
+      "\"}}}";
+  const char *overlong = overlongText.c_str();
   {
     std::FILE *file = nullptr;
 #ifdef _WIN32
@@ -628,11 +632,13 @@ int verify_overlong_prefab_name_rejected() {
     return 404;
   }
 
-  // Boundary: exactly 31 characters instantiates with the name intact.
-  const char *boundary =
+  // Boundary: exactly the capacity instantiates with the name intact.
+  const std::string boundaryText =
       "{\"version\":5,\"components\":{\"Transform\":{},"
-      "\"NameComponent\":{\"name\":"
-      "\"nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn\"}}}";
+      "\"NameComponent\":{\"name\":\"" +
+      std::string(engine::runtime::NameComponent::kMaxNameLength, 'n') +
+      "\"}}}";
+  const char *boundary = boundaryText.c_str();
   {
     std::FILE *file = nullptr;
 #ifdef _WIN32
@@ -826,6 +832,59 @@ int verify_prefab_save_refuses_a_parent() {
     return 605;
   }
   remove_prefab_file();
+  return 0;
+}
+
+/// Unknown-key warnings on the prefab channel: those naming the misspelt
+/// Transform, and any other.
+int g_unknownKeyWarnings = 0;
+int g_otherUnknownKeyWarnings = 0;
+
+void note_unknown_key(engine::core::LogLevel level, const char *channel,
+                      const char *message, void * /*userData*/) noexcept {
+  if ((level != engine::core::LogLevel::Warning) || (channel == nullptr) ||
+      (message == nullptr) || (std::strcmp(channel, "prefab") != 0) ||
+      (std::strstr(message, "is not read by this build") == nullptr)) {
+    return;
+  }
+  if (std::strstr(message, "key 'components.Transfrom'") != nullptr) {
+    ++g_unknownKeyWarnings;
+  } else {
+    ++g_otherUnknownKeyWarnings;
+  }
+}
+
+/// A prefab key no reader looks up (a misspelt component) still
+/// instantiates, and the prefab channel logs one Warning naming its path,
+/// so it is not lost unseen when the prefab is saved again.
+int verify_prefab_reports_unknown_keys() {
+  remove_prefab_file();
+  constexpr const char *kTypoPrefab =
+      "{\"version\":5,\"components\":{\"Transform\":{\"position\":[0,1,0]},"
+      "\"Transfrom\":{\"position\":[1,2,3]}}}";
+  if (!write_prefab_text(kTypoPrefab)) {
+    return 700;
+  }
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  if ((world == nullptr) || !engine::core::initialize_logging() ||
+      !engine::core::log_register_sink(&note_unknown_key, nullptr)) {
+    remove_prefab_file();
+    return 701;
+  }
+  g_unknownKeyWarnings = 0;
+  g_otherUnknownKeyWarnings = 0;
+  const engine::runtime::Entity entity =
+      engine::runtime::instantiate_prefab(*world, kPrefabPath);
+  engine::core::log_unregister_sink(&note_unknown_key, nullptr);
+  engine::core::shutdown_logging();
+  remove_prefab_file();
+  if (entity == engine::runtime::kInvalidEntity) {
+    return 702;
+  }
+  if ((g_unknownKeyWarnings != 1) || (g_otherUnknownKeyWarnings != 0)) {
+    return 703;
+  }
   return 0;
 }
 
@@ -1157,6 +1216,12 @@ int main() {
   }
 
   result = verify_prefab_save_refuses_a_parent();
+  if (result != 0) {
+    remove_prefab_file();
+    return result;
+  }
+
+  result = verify_prefab_reports_unknown_keys();
   if (result != 0) {
     remove_prefab_file();
     return result;

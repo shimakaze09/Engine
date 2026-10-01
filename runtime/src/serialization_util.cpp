@@ -1097,4 +1097,94 @@ bool read_animation_component(const core::JsonParser &parser,
   return true;
 }
 
+namespace {
+
+/// Keys earlier formats wrote that this build drops on purpose, matched
+/// against the end of a member's path. ReflectionProbeComponent's
+/// needsBake was a runtime dirty flag and brdfLutResolution a renderer
+/// constant; neither is authored state, so old scenes carrying them load
+/// silently.
+constexpr const char *kRetiredKeyPaths[] = {
+    "components.ReflectionProbeComponent.needsBake",
+    "components.ReflectionProbeComponent.brdfLutResolution",
+};
+
+constexpr std::size_t kUnreadKeysLogged = 32U;
+
+bool is_retired_key_path(const char *path) noexcept {
+  const std::size_t pathLength = std::strlen(path);
+  for (const char *retired : kRetiredKeyPaths) {
+    const std::size_t retiredLength = std::strlen(retired);
+    if ((pathLength >= retiredLength) &&
+        (std::memcmp(path + (pathLength - retiredLength), retired,
+                     retiredLength) == 0) &&
+        ((pathLength == retiredLength) ||
+         (path[pathLength - retiredLength - 1U] == '.'))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/// What report_unread_document_keys hands its visitor.
+struct UnreadKeyReport final {
+  const char *noun = nullptr;
+  const char *documentPath = nullptr;
+  const char *channel = nullptr;
+  core::ValidationReport *report = nullptr;
+  std::size_t reported = 0U;
+};
+
+void report_unread_key(const char *path, void *userData) noexcept {
+  auto *state = static_cast<UnreadKeyReport *>(userData);
+  if (is_retired_key_path(path)) {
+    return;
+  }
+  ++state->reported;
+  if (state->report != nullptr) {
+    static_cast<void>(state->report->add(core::ValidationSeverity::Warning,
+                                         "unknown_key", path, 0U));
+  }
+  if (state->reported <= kUnreadKeysLogged) {
+    char message[512] = {};
+    std::snprintf(message, sizeof(message),
+                  "%s '%s': key '%s' is not read by this build and will be "
+                  "lost on the next save",
+                  state->noun, state->documentPath, path);
+    core::log_message(core::LogLevel::Warning, state->channel, message);
+  }
+}
+
+} // namespace
+
+std::size_t report_unread_document_keys(
+    const core::JsonValue &root, const core::JsonReadTracker &tracker,
+    const char *noun, const char *documentPath, const char *channel,
+    core::ValidationReport *report) noexcept {
+  UnreadKeyReport state{};
+  state.noun = (noun != nullptr) ? noun : "document";
+  state.documentPath = (documentPath != nullptr) ? documentPath : "<memory>";
+  state.channel = channel;
+  state.report = report;
+  if (!tracker.armed()) {
+    char message[320] = {};
+    std::snprintf(message, sizeof(message),
+                  "%s '%s': unknown keys not checked (out of memory)",
+                  state.noun, state.documentPath);
+    core::log_message(core::LogLevel::Info, channel, message);
+    return 0U;
+  }
+  static_cast<void>(core::json_visit_unread_members(
+      root, tracker, &report_unread_key, &state));
+  if (state.reported > kUnreadKeysLogged) {
+    char message[320] = {};
+    std::snprintf(message, sizeof(message),
+                  "%s '%s': %zu keys are not read by this build; further keys "
+                  "are not listed",
+                  state.noun, state.documentPath, state.reported);
+    core::log_message(core::LogLevel::Warning, channel, message);
+  }
+  return state.reported;
+}
+
 } // namespace engine::runtime

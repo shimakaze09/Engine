@@ -20,7 +20,7 @@ namespace engine::editor {
 /// its display name.
 struct EntityPickerResult final {
   runtime::PersistentId persistentId = runtime::kInvalidPersistentId;
-  char name[32] = {};
+  char name[runtime::NameComponent::kMaxNameLength + 1U] = {};
 };
 
 /// Searches the world's alive entities for a NameComponent whose name

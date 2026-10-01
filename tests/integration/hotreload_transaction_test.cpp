@@ -83,7 +83,7 @@ bool record_play_sound(std::uint32_t, float, float, bool) noexcept {
   rt::NameComponent name{};
   if ((g_world != nullptr) &&
       g_world->get_name_component(g_marker, &name)) {
-    char entry[48] = {};
+    char entry[sizeof(name.name) + 16U] = {};
     std::snprintf(entry, sizeof(entry), "play_sound:%s", name.name);
     record(entry);
   } else {

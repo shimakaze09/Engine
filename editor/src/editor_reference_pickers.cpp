@@ -127,7 +127,7 @@ bool draw_entity_reference_picker(
     }
   }
 
-  char previewText[40] = "<none>";
+  char previewText[runtime::NameComponent::kMaxNameLength + 1U] = "<none>";
   if (resolved) {
     const runtime::Entity resolvedEntity =
         world->find_entity_by_persistent_id(*value);

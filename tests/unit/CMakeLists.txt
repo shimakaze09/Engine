@@ -683,6 +683,13 @@ engine_add_test_executable(engine_unit_json_object_members
     engine_core
 )
 
+engine_add_test_executable(engine_unit_json_read_tracker
+    SOURCES
+    json_read_tracker_test.cpp
+    PRIVATE_DEPS
+    engine_core
+)
+
 engine_add_test_executable(engine_unit_json_scratch
     SOURCES
     json_scratch_test.cpp
