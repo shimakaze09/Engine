@@ -516,8 +516,8 @@ int check_reparent_resolves_persistent_id_after_recreate() noexcept {
   }
   command->child = child;
   command->childPersistentId = childId;
-  command->beforeParentId = engine::runtime::kInvalidPersistentId;
-  command->afterParentId = parentId;
+  command->before.parentId = engine::runtime::kInvalidPersistentId;
+  command->after.parentId = parentId;
 
   engine::editor::CommandHistory history{};
   history.execute(command);
@@ -1416,6 +1416,163 @@ int check_reparent_refuses_deep_descendant() noexcept {
   return finish(0);
 }
 
+int g_reparentWarnings = 0;
+
+void count_reparent_warning(engine::core::LogLevel level, const char *channel,
+                            const char *message, void * /*userData*/) noexcept {
+  if ((level == engine::core::LogLevel::Warning) && (channel != nullptr) &&
+      (std::strcmp(channel, "editor") == 0) && (message != nullptr) &&
+      (std::strstr(message, "reparent") != nullptr)) {
+    ++g_reparentWarnings;
+  }
+}
+
+/// Largest difference between two world matrices' entries.
+float matrix_deviation(const engine::math::Mat4 &a,
+                       const engine::math::Mat4 &b) noexcept {
+  float deviation = 0.0F;
+  for (int c = 0; c < 4; ++c) {
+    deviation =
+        std::fmax(deviation, std::fabs(a.columns[c].x - b.columns[c].x));
+    deviation =
+        std::fmax(deviation, std::fabs(a.columns[c].y - b.columns[c].y));
+    deviation =
+        std::fmax(deviation, std::fabs(a.columns[c].z - b.columns[c].z));
+    deviation =
+        std::fmax(deviation, std::fabs(a.columns[c].w - b.columns[c].w));
+  }
+  return deviation;
+}
+
+bool same_local(const engine::runtime::Transform &a,
+                const engine::runtime::Transform &b) noexcept {
+  return (a.parentId == b.parentId) &&
+         (std::memcmp(&a.position, &b.position, sizeof(a.position)) == 0) &&
+         (std::memcmp(&a.rotation, &b.rotation, sizeof(a.rotation)) == 0) &&
+         (std::memcmp(&a.scale, &b.scale, sizeof(a.scale)) == 0);
+}
+
+/// Reparenting by drag keeps the child where it is in the world, as
+/// Unity's SetParent, Godot's reparent and Unreal's attach do: under a
+/// translated, rotated and scaled parent and back to the root the child's
+/// world matrix holds, and undo and redo restore the exact local
+/// transforms. A parent whose non-uniform scale shears the child keeps
+/// the child's position and warns; a zero-scale parent is refused.
+int check_reparent_keeps_world_pose() noexcept {
+  using engine::math::Vec3;
+  using engine::runtime::Entity;
+  using engine::runtime::Transform;
+  using engine::runtime::World;
+
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if ((world == nullptr) || !engine::core::initialize_logging() ||
+      !engine::core::log_register_sink(&count_reparent_warning, nullptr)) {
+    return 200;
+  }
+  auto &session = engine::editor::editor_session();
+  World *const previousWorld = session.world;
+  session.world = world.get();
+  const auto finish = [&session, previousWorld](int result) noexcept {
+    session.commandHistory.clear();
+    session.world = previousWorld;
+    engine::core::log_unregister_sink(&count_reparent_warning, nullptr);
+    engine::core::shutdown_logging();
+    return result;
+  };
+  // float32 round-off of an inverse, a product and a decomposition on
+  // entries up to about 20: a few dozen ulps (an ulp at 16 is 1.9e-6).
+  constexpr float kTolerance = 1.0e-4F;
+
+  Transform parentLocal{};
+  parentLocal.position = Vec3(10.0F, 0.0F, -4.0F);
+  parentLocal.rotation =
+      engine::math::from_axis_angle(Vec3(0.0F, 1.0F, 0.0F), 1.5707964F);
+  parentLocal.scale = Vec3(2.0F, 2.0F, 2.0F);
+  Transform childLocal{};
+  childLocal.position = Vec3(1.0F, 2.0F, 3.0F);
+  childLocal.rotation =
+      engine::math::from_axis_angle(Vec3(1.0F, 0.0F, 0.0F), 0.5235988F);
+  childLocal.scale = Vec3(1.0F, 0.5F, 1.0F);
+  const Entity parent = world->create_scene_object(parentLocal);
+  const Entity child = world->create_scene_object(childLocal);
+  engine::physics::PhysicsTransform before{};
+  if ((parent == engine::runtime::kInvalidEntity) ||
+      (child == engine::runtime::kInvalidEntity) ||
+      !world->get_physics_transform(child, &before)) {
+    return finish(201);
+  }
+
+  engine::physics::PhysicsTransform under{};
+  Transform parented{};
+  if (!engine::editor::execute_reparent(child, parent) ||
+      !world->get_physics_transform(child, &under) ||
+      !world->get_transform(child, &parented) ||
+      (parented.parentId != world->persistent_id(parent))) {
+    return finish(202);
+  }
+  if (matrix_deviation(before.matrix, under.matrix) > kTolerance) {
+    return finish(203); // the child moved in the world
+  }
+
+  Transform undone{};
+  Transform redone{};
+  if (!session.commandHistory.undo() || !world->get_transform(child, &undone) ||
+      !same_local(undone, childLocal) || !session.commandHistory.redo() ||
+      !world->get_transform(child, &redone) || !same_local(redone, parented)) {
+    return finish(204);
+  }
+
+  engine::physics::PhysicsTransform rooted{};
+  Transform unparented{};
+  if (!engine::editor::execute_reparent(child,
+                                        engine::runtime::kInvalidEntity) ||
+      !world->get_physics_transform(child, &rooted) ||
+      !world->get_transform(child, &unparented) ||
+      (unparented.parentId != engine::runtime::kInvalidPersistentId) ||
+      (matrix_deviation(before.matrix, rooted.matrix) > kTolerance)) {
+    return finish(205);
+  }
+  if (g_reparentWarnings != 0) {
+    return finish(206); // a uniform parent needs no warning
+  }
+
+  // A rotated parent with a non-uniform scale shears a rotated child.
+  Transform stretched{};
+  stretched.rotation =
+      engine::math::from_axis_angle(Vec3(0.0F, 0.0F, 1.0F), 0.7853982F);
+  stretched.scale = Vec3(1.0F, 3.0F, 1.0F);
+  const Entity stretchParent = world->create_scene_object(stretched);
+  engine::physics::PhysicsTransform sheared{};
+  if ((stretchParent == engine::runtime::kInvalidEntity) ||
+      !engine::editor::execute_reparent(child, stretchParent) ||
+      !world->get_physics_transform(child, &sheared)) {
+    return finish(207);
+  }
+  const Vec3 kept(sheared.matrix.columns[3].x, sheared.matrix.columns[3].y,
+                  sheared.matrix.columns[3].z);
+  if ((g_reparentWarnings != 1) ||
+      (std::fabs(kept.x - before.matrix.columns[3].x) > kTolerance) ||
+      (std::fabs(kept.y - before.matrix.columns[3].y) > kTolerance) ||
+      (std::fabs(kept.z - before.matrix.columns[3].z) > kTolerance)) {
+    return finish(208);
+  }
+
+  // A zero scale cannot be inverted: refused, the child untouched.
+  Transform flat{};
+  flat.scale = Vec3(0.0F, 1.0F, 1.0F);
+  const Entity flatParent = world->create_scene_object(flat);
+  Transform beforeRefusal{};
+  Transform afterRefusal{};
+  if ((flatParent == engine::runtime::kInvalidEntity) ||
+      !world->get_transform(child, &beforeRefusal) ||
+      engine::editor::execute_reparent(child, flatParent) ||
+      !world->get_transform(child, &afterRefusal) ||
+      !same_local(beforeRefusal, afterRefusal)) {
+    return finish(209);
+  }
+  return finish(0);
+}
+
 /// The primitive spawn helper must produce a named scene object resting
 /// on the ground with the builtin mesh id, undoable through the session
 /// history.
@@ -1505,6 +1662,12 @@ int main() {
   }
 
   result = check_redo_entries_are_released();
+  if (result != 0) {
+    std::fprintf(stderr, "command_history_test failed: %d\n", result);
+    return result;
+  }
+
+  result = check_reparent_keeps_world_pose();
   if (result != 0) {
     std::fprintf(stderr, "command_history_test failed: %d\n", result);
     return result;

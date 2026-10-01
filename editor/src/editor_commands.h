@@ -96,22 +96,29 @@ private:
   }
 };
 
-/// Undoable reparent: rewrites the child transform's parent persistent
-/// id (add_transform enforces the dynamic-body-root rule, so an invalid
-/// reparent simply fails and the command records no change).
+/// Undoable reparent that keeps the child where it is in the world, as
+/// Unity's SetParent (worldPositionStays), Godot's reparent and Unreal's
+/// attach do: it stores the child's whole local transform before and
+/// after, the after one recomputed against the new parent. add_transform
+/// enforces the dynamic-body-root rule, so an invalid reparent fails and
+/// the command records no change.
 struct ReparentCommand final : EditorCommand {
   runtime::Entity child{};
   runtime::PersistentId childPersistentId = runtime::kInvalidPersistentId;
-  runtime::PersistentId beforeParentId = runtime::kInvalidPersistentId;
-  runtime::PersistentId afterParentId = runtime::kInvalidPersistentId;
+  runtime::Transform before{};
+  runtime::Transform after{};
 
   bool execute() noexcept override;
   bool undo() noexcept override;
   std::size_t memory_bytes() const noexcept override { return sizeof(*this); }
 };
 
-/// Reparents through the command history; false when the child has no
-/// transform, the parent is invalid, or the reparent would cycle.
+/// Reparents through the command history, keeping the child's world
+/// position, rotation and scale; under a parent whose non-uniform scale is
+/// rotated against the child, where no local TRS reproduces the child's
+/// shape, the position and rotation are kept and a Warning says the scale
+/// is approximate. False when the child has no transform, the parent is
+/// invalid or has a degenerate (zero) scale, or the reparent would cycle.
 bool execute_reparent(runtime::Entity child,
                       runtime::Entity newParent) noexcept;
 

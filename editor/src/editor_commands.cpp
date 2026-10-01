@@ -6,6 +6,7 @@
 #include "editor_commands.h"
 
 #include "editor_material_edit.h"
+#include "editor_transform_util.h"
 
 #if defined(__clang__) && (defined(__x86_64__) || defined(__i386__)) &&        \
     !defined(__PRFCHWINTRIN_H)
@@ -17,6 +18,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -286,10 +288,10 @@ void execute_component_remove(runtime::Entity entity,
   editor_session().commandHistory.execute(cmd);
 }
 
-
-/// Applies a parent persistent id onto the child's transform.
-static bool apply_parent_id(runtime::Entity child,
-                            runtime::PersistentId parentId) noexcept {
+/// Writes `transform` (parent included) onto the child.
+static bool
+apply_child_transform(runtime::Entity child,
+                      const runtime::Transform &transform) noexcept {
   runtime::World *world = editor_session().world;
   if (world == nullptr) {
     return false;
@@ -299,23 +301,72 @@ static bool apply_parent_id(runtime::Entity child,
       (resolved.generation != child.generation)) {
     return false;
   }
-  runtime::Transform transform{};
-  if (!world->get_transform(resolved, &transform)) {
-    return false;
-  }
-  transform.parentId = parentId;
   return world->add_transform(resolved, transform);
 }
 
 bool ReparentCommand::execute() noexcept {
-  return apply_parent_id(
-      resolve_command_target(child, childPersistentId), afterParentId);
+  return apply_child_transform(resolve_command_target(child, childPersistentId),
+                               after);
 }
 
 bool ReparentCommand::undo() noexcept {
-  return apply_parent_id(
-      resolve_command_target(child, childPersistentId), beforeParentId);
+  return apply_child_transform(resolve_command_target(child, childPersistentId),
+                               before);
 }
+
+namespace {
+
+/// The child's local transform under `newParent` (kInvalidEntity for the
+/// root) that keeps its world pose. False when a matrix cannot be
+/// inverted or decomposed (a zero scale).
+bool local_keeping_world_pose(const runtime::World &world,
+                              runtime::Entity child, runtime::Entity newParent,
+                              const runtime::Transform &before,
+                              runtime::Transform *out) noexcept {
+  physics::PhysicsTransform childWorld{};
+  if (!world.get_physics_transform(child, &childWorld)) {
+    return false;
+  }
+  physics::PhysicsTransform parentWorld{};
+  const bool hasParent = newParent != runtime::kInvalidEntity;
+  if (hasParent && !world.get_physics_transform(newParent, &parentWorld)) {
+    return false;
+  }
+  if (!world_matrix_to_local_transform(
+          childWorld.matrix, hasParent ? &parentWorld.matrix : nullptr, before,
+          out)) {
+    return false;
+  }
+  // A non-uniform scale on a rotated parent shears the child, which no
+  // local TRS can hold: the decomposition keeps position and rotation and
+  // approximates the scale, and the author is told.
+  const math::Mat4 local =
+      math::compose_trs(out->position, out->rotation, out->scale);
+  const math::Mat4 recomposed =
+      hasParent ? math::mul(parentWorld.matrix, local) : local;
+  float largest = 0.0F;
+  float deviation = 0.0F;
+  for (int c = 0; c < 3; ++c) {
+    const math::Vec4 &a = childWorld.matrix.columns[c];
+    const math::Vec4 &b = recomposed.columns[c];
+    largest =
+        std::max({largest, std::fabs(a.x), std::fabs(a.y), std::fabs(a.z)});
+    deviation = std::max({deviation, std::fabs(a.x - b.x), std::fabs(a.y - b.y),
+                          std::fabs(a.z - b.z)});
+  }
+  // float32 round-off of an inverse, a product and a decomposition stays
+  // within a few hundred ulps of the basis length; shear is far larger.
+  if (deviation > (largest * 1.0e-4F)) {
+    core::log_message(core::LogLevel::Warning, "editor",
+                      "reparent: the new parent's non-uniform scale shears "
+                      "the child, which a local transform cannot hold; its "
+                      "position and rotation are kept, its scale is "
+                      "approximate");
+  }
+  return true;
+}
+
+} // namespace
 
 bool execute_reparent(runtime::Entity child,
                       runtime::Entity newParent) noexcept {
@@ -364,10 +415,20 @@ bool execute_reparent(runtime::Entity child,
     return true;
   }
 
+  runtime::Transform after{};
+  if (!local_keeping_world_pose(*world, child, newParent, before, &after)) {
+    core::log_message(core::LogLevel::Warning, "editor",
+                      "reparent refused: the child's place in the world "
+                      "cannot be expressed under the new parent (a zero "
+                      "scale)");
+    return false;
+  }
+  after.parentId = afterId;
+
   // Prove the reparent is legal (add_transform enforces the
   // dynamic-body-root rule) before recording it, then revert and route
   // the real application through the command history.
-  if (!apply_parent_id(child, afterId)) {
+  if (!apply_child_transform(child, after)) {
     return false;
   }
   runtime::Transform applied{};
@@ -375,7 +436,7 @@ bool execute_reparent(runtime::Entity child,
       (applied.parentId != afterId)) {
     return false;
   }
-  static_cast<void>(apply_parent_id(child, before.parentId));
+  static_cast<void>(apply_child_transform(child, before));
 
   auto *command = allocate_command<ReparentCommand>();
   if (command == nullptr) {
@@ -386,8 +447,8 @@ bool execute_reparent(runtime::Entity child,
   }
   command->child = child;
   command->childPersistentId = world->persistent_id(child);
-  command->beforeParentId = before.parentId;
-  command->afterParentId = afterId;
+  command->before = before;
+  command->after = after;
   return editor_session().commandHistory.execute(command);
 }
 
