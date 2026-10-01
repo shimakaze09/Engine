@@ -25,6 +25,8 @@ int lua_engine_wait_until(lua_State *state) noexcept;
 
 /// Starts a Lua coroutine using the supplied scheduler clock; the refresh
 /// hook arms sandbox/debug hooks on the new thread before its first resume.
+/// Returns the coroutine's id, or nil and a reason: a non-function
+/// argument, or a full table, whose first refusal logs a Warning.
 int start_lua_coroutine(lua_State *state, float totalSeconds,
                         std::uint64_t tickIndex,
                         CoroutineLogLuaErrorFn logLuaError,

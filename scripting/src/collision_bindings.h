@@ -13,7 +13,9 @@ namespace engine::scripting {
 using PushEntityHandleFn = void (*)(lua_State *state,
                                     core::Entity entity) noexcept;
 
-/// Lua binding: Lua engine.on_collision_register(callback).
+/// Lua binding: engine.on_collision_handler(callback). Returns the
+/// handler's id, or nil and a reason: a non-function argument, or a full
+/// table, whose first refusal logs a Warning.
 int lua_engine_on_collision_register(lua_State *state) noexcept;
 /// Lua binding: Lua engine.remove_collision_handler(handler_id).
 int lua_engine_remove_collision_handler(lua_State *state) noexcept;

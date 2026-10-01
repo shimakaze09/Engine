@@ -568,13 +568,13 @@ bool test_invalid_waits_do_not_consume_slots() noexcept {
   engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
   engine::scripting::set_default_mesh_asset_id(1U);
 
-  // 40 engine.wait attempts and 8 raw yields exceed the scheduler's 32
-  // slots on their own; the 32 valid starts that follow can only succeed
-  // if none of them was kept.
+  // 1,040 engine.wait attempts and 8 raw yields exceed the scheduler's
+  // 1,024 slots on their own; the 1,024 valid starts that follow can only
+  // succeed if none of them was kept.
   const char *script =
       "function on_start()\n"
       "  local invalid = {0/0, 1/0, -1/0, -1}\n"
-      "  for round = 1, 10 do\n"
+      "  for round = 1, 260 do\n"
       "    for _, seconds in ipairs(invalid) do\n"
       "      engine.start_coroutine(function()\n"
       "        engine.wait(seconds)\n"
@@ -590,7 +590,7 @@ bool test_invalid_waits_do_not_consume_slots() noexcept {
       "      engine.set_name(e, 'raw_done')\n"
       "    end)\n"
       "  end\n"
-      "  for i = 1, 32 do\n"
+      "  for i = 1, 1024 do\n"
       "    engine.start_coroutine(function()\n"
       "      engine.wait(0.1)\n"
       "      local e = engine.spawn_entity()\n"
@@ -622,7 +622,7 @@ bool test_invalid_waits_do_not_consume_slots() noexcept {
   engine::tests::publish_frame_time(0.2F, 0.2F);
   engine::tests::publish_frame_index(1U);
   engine::scripting::tick_coroutines();
-  bool ok = (count_named(world.get(), "valid_done") == 32) &&
+  bool ok = (count_named(world.get(), "valid_done") == 1024) &&
             (count_named(world.get(), "invalid_done") == 0) &&
             (count_named(world.get(), "raw_done") == 0);
 
@@ -642,7 +642,7 @@ bool test_invalid_waits_do_not_consume_slots() noexcept {
   engine::tests::publish_frame_time(0.2F, 0.8F);
   engine::tests::publish_frame_index(4U);
   engine::scripting::tick_coroutines();
-  ok = ok && (count_named(world.get(), "valid_done") == 64) &&
+  ok = ok && (count_named(world.get(), "valid_done") == 2048) &&
        (count_named(world.get(), "invalid_done") == 0) &&
        (count_named(world.get(), "raw_done") == 0);
 

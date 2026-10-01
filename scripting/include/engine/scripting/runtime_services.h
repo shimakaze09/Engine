@@ -55,8 +55,10 @@ namespace engine::scripting {
 constexpr std::size_t kMaxWorldEntities = ENGINE_MAX_ENTITIES;
 /// Timer slots the World's timer manager holds; the runtime asserts it.
 constexpr std::size_t kMaxTimerSlots = 256U;
-/// Entity pools a run may hold and the entities one pool may seed.
-constexpr std::size_t kMaxEntityPools = 16U;
+/// Entity pools a scene may hold and the entities one pool may seed. A
+/// game pools each kind it spawns often (bullets, coins, enemies,
+/// effects), so 16 kinds were met; a pool is about 13 KB of fixed storage.
+constexpr std::size_t kMaxEntityPools = 64U;
 constexpr std::size_t kMaxEntityPoolSize = 1024U;
 /// Largest document save_game_data accepts and load_game_data returns, the
 /// save slot's hard ceiling; the runtime asserts it matches.
