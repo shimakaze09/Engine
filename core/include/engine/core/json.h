@@ -218,6 +218,9 @@ public:
   bool parse(const char *input, std::size_t length) noexcept;
   /// Root value of the last successful parse, or nullptr.
   const JsonValue *root() const noexcept;
+  /// Byte offset where the last failed parse() stopped, so a refusal can
+  /// say where a document is broken; 0 after a successful parse.
+  std::size_t error_offset() const noexcept { return m_errorOffset; }
 
   // Pointer-returning navigation helpers are transient: do not keep returned
   // pointers across additional pointer-returning navigation calls. They
@@ -303,6 +306,7 @@ private:
 
   const char *m_input = nullptr;
   JsonReadTracker *m_readTracker = nullptr;
+  std::size_t m_errorOffset = 0U;
   std::size_t m_length = 0U;
   JsonValue m_root{};
   bool m_hasRoot = false;

@@ -63,6 +63,9 @@ constexpr std::size_t kMaxEntityPoolSize = 1024U;
 /// Largest document save_game_data accepts and load_game_data returns, the
 /// save slot's hard ceiling; the runtime asserts it matches.
 constexpr std::size_t kMaxGameSaveBytes = 4U * 1024U * 1024U;
+/// What reading the game save slot found; the runtime's SaveReadResult,
+/// asserted value for value.
+enum class GameSaveRead : std::uint8_t { Ok, Absent, Unreadable };
 
 /// Visitor for the entity iteration operations.
 using EntityVisitFn = void (*)(core::Entity entity, void *context) noexcept;
@@ -365,8 +368,14 @@ struct RuntimeServices final {
   void (*stop_music)() noexcept = nullptr;
   bool (*save_game_data)(const char *json,
                          std::size_t length) noexcept = nullptr;
-  bool (*load_game_data)(char *out, std::size_t capacity,
-                         std::size_t *outLength) noexcept = nullptr;
+  GameSaveRead (*load_game_data)(char *out, std::size_t capacity,
+                                 std::size_t *outLength) noexcept = nullptr;
+  /// Holds the save slot after a load could not read it or found its
+  /// document corrupt or from a newer build: save_game_data refuses until
+  /// discard_game_save.
+  void (*hold_game_save)() noexcept = nullptr;
+  /// Moves the save aside (never deleting it) and lifts the hold.
+  bool (*discard_game_save)() noexcept = nullptr;
 
   bool (*save_scene)(const runtime::World *world,
                      const char *path) noexcept = nullptr;

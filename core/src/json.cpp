@@ -1165,6 +1165,7 @@ bool JsonParser::parse(const char *input, std::size_t length) noexcept {
   m_scratchExhausted = false;
   m_arrayMemos.fill(ArrayMemo{});
   m_arrayElementScans = 0U;
+  m_errorOffset = 0U;
 
   if ((input == nullptr) || (length == 0U)) {
     return false;
@@ -1176,11 +1177,13 @@ bool JsonParser::parse(const char *input, std::size_t length) noexcept {
 
   JsonValue parsedRoot{};
   if (!parse_value(cursor, end, &parsedRoot, 0U)) {
+    m_errorOffset = static_cast<std::size_t>(cursor - input);
     return false;
   }
 
   skip_whitespace(cursor, end);
   if (cursor != end) {
+    m_errorOffset = static_cast<std::size_t>(cursor - input);
     return false;
   }
 
