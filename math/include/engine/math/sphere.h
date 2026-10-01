@@ -48,21 +48,31 @@ inline bool ray_intersects_sphere(const Ray &ray, const Sphere &sphere,
     return false;
   }
 
-  const float b = 2.0F * dot(oc, ray.direction);
-  const float c = dot(oc, oc) - (sphere.radius * sphere.radius);
-  const float discriminant = b * b - 4.0F * a * c;
-
+  // The discriminant comes from the ray's closest approach to the centre
+  // (Ray Tracing Gems, ch. 7): r^2 - |oc - (b/a) d|^2, scaled by a. The
+  // textbook b^2 - 4ac subtracts two values of the order of the squared
+  // distance to the sphere, so at 100 m a 5 cm sphere's miss margin was
+  // rounding noise and rays passing beside it reported hits.
+  const float b = dot(oc, ray.direction);
+  const Vec3 closest = sub(oc, mul(ray.direction, b / a));
+  const float discriminant =
+      a * ((sphere.radius * sphere.radius) - length_sq(closest));
   if (discriminant < 0.0F) {
     return false;
   }
 
-  const float sqrtDisc = std::sqrt(discriminant);
-  // Direct division: a reciprocal of 2a overflows to infinity for tiny a
+  // Stable roots: q takes the sign of b so the sum never cancels, and the
+  // second root is c / q rather than a difference of near-equal values.
+  // Direct division: a reciprocal of a overflows to infinity for tiny a
   // (turning huge finite hits into inf), while the division itself stays
   // finite whenever the true quotient is representable.
-  const float twoA = 2.0F * a;
-  const float t0 = (-b - sqrtDisc) / twoA;
-  const float t1 = (-b + sqrtDisc) / twoA;
+  const float c = length_sq(oc) - (sphere.radius * sphere.radius);
+  const float sqrtDisc = std::sqrt(discriminant);
+  const float q = -(b + std::copysign(sqrtDisc, b));
+  const float rootA = q / a;
+  const float rootB = (q != 0.0F) ? (c / q) : rootA;
+  const float t0 = std::fmin(rootA, rootB);
+  const float t1 = std::fmax(rootA, rootB);
   const float t = (t0 >= 0.0F) ? t0 : t1;
 
   if (t < 0.0F) {
