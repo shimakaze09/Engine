@@ -29,6 +29,7 @@
 #include "engine/renderer/render_device.h"
 #include "engine/renderer/texture_loader.h"
 #include "engine/runtime/animation_system.h"
+#include "engine/runtime/collision_layers.h"
 #include "engine/runtime/editor_bridge.h"
 #include "engine/runtime/engine_pipeline.h"
 #include "engine/scripting/dap_server.h"
@@ -479,6 +480,8 @@ bool bootstrap(const EngineConfig &config) noexcept {
   // and a previous run's project must not leak its limits into this one.
   scripting::set_memory_limit(g_activeConfig.scriptMemoryLimitBytes);
   scripting::set_instruction_limit(g_activeConfig.scriptInstructionLimit);
+  // Likewise the layers: the run's World and its scripts see this project's.
+  runtime::set_project_collision_layers(g_activeConfig.collisionLayers);
   if (consume_injected_failure(BootstrapStage::Scripting) ||
       !scripting::initialize_scripting()) {
     core::log_message(core::LogLevel::Error, "scripting",

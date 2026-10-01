@@ -293,8 +293,7 @@ CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
     if (other.isTrigger) {
       continue;
     }
-    if (((collider.collisionLayer & other.collisionMask) == 0U) ||
-        ((other.collisionLayer & collider.collisionMask) == 0U)) {
+    if (!colliders_may_collide(collider, other, physicsCtx.collisionMatrix)) {
       continue;
     }
 

@@ -24,15 +24,19 @@ struct SweepHit final {
 
 // ------ Query Functions------------------------------------------------------
 // No query hits a trigger collider: rays, sweeps and overlaps pass through
-// it, as Godot's queries skip areas by default.
+// it, as Godot's queries skip areas by default. Every query takes a layer
+// mask and hits only colliders whose layer is in it; as in Unity, a query
+// is filtered by its mask alone, never by the layer collision matrix.
 
-/// Returns the nearest ray intersection. skipEntity excludes that entity's
-/// collider and every compound collider it owns (the sweeps' rule), so a
-/// probe from a body's root never hits its own children at t = 0.
+/// Returns the nearest ray intersection with a collider whose layer is in
+/// `mask`. skipEntity excludes that entity's collider and every compound
+/// collider it owns (the sweeps' rule), so a probe from a body's root
+/// never hits its own children at t = 0. The mask comes last so callers
+/// that skip an entity keep their spelling.
 bool raycast(const PhysicsWorldView &world, const math::Vec3 &origin,
              const math::Vec3 &direction, float maxDistance,
-             PhysicsRaycastHit *outHit,
-             Entity skipEntity = kInvalidEntity) noexcept;
+             PhysicsRaycastHit *outHit, Entity skipEntity = kInvalidEntity,
+             std::uint32_t mask = 0xFFFFFFFFU) noexcept;
 
 /// Returns the nearest maxHits ray intersections sorted by distance.
 /// Direction is normalized internally; maxDistance must be finite and

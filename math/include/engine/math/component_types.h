@@ -158,7 +158,12 @@ struct Collider final {
   float staticFriction = 0.5F;
   float dynamicFriction = 0.3F;
   float density = 1.0F;
+  /// The layer bits this collider is on (usually one). The project names
+  /// the 32 bits and sets which layers collide; two colliders collide only
+  /// when each one's layer is in the other's mask and that matrix lets
+  /// their layers meet. Queries hit it when its layer is in their mask.
   std::uint32_t collisionLayer = 1U;
+  /// The layers this collider collides with.
   std::uint32_t collisionMask = 0xFFFFFFFFU;
   ColliderShape shape = ColliderShape::AABB;
   HullSource hullSource = HullSource::None;

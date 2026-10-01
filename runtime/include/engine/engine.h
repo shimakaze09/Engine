@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "engine/content/project_document.h"
 #include "engine/core/bootstrap.h"
 #include "engine/scripting/script_limits.h"
 
@@ -78,6 +79,10 @@ struct EngineConfig final {
   /// from the project's document.
   int scriptInstructionLimit = scripting::kDefaultInstructionLimit;
   std::size_t scriptMemoryLimitBytes = scripting::kDefaultMemoryLimit;
+  /// The project's collision layer names and matrix, applied at bootstrap
+  /// (runtime::project_collision_layers) and installed on the run's World.
+  /// open_project sets them from the project's document.
+  content::ProjectCollisionLayers collisionLayers{};
   /// Mix audio into no device; a headless platform forces this on, the
   /// way it forces the null render device.
   bool audioNullDevice = false;

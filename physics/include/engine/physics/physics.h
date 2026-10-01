@@ -10,6 +10,7 @@
 
 namespace engine::physics {
 
+struct CollisionLayerMatrix;
 struct PhysicsContext;
 class PhysicsWorldView;
 
@@ -105,6 +106,16 @@ void wake_bodies_near_collider(PhysicsWorldView &world, Entity entity) noexcept;
 /// a joint never outlives a body: the solver would skip it, but it would
 /// still count as unserializable state and block every later save.
 void remove_joints_for_entity(PhysicsContext &context, Entity entity) noexcept;
+/// Installs the layer collision matrix the world's pair filter applies on
+/// top of every collider's own mask. The matrix must be symmetric. A
+/// change wakes every body, since a body asleep on a layer it no longer
+/// collides with must fall, and one asleep beside a layer it now collides
+/// with must be pushed.
+void set_collision_matrix(PhysicsWorldView &world,
+                          const CollisionLayerMatrix &matrix) noexcept;
+/// The layer collision matrix the world's pair filter applies.
+const CollisionLayerMatrix &
+get_collision_matrix(const PhysicsWorldView &world) noexcept;
 /// Returns the scene-authored physics state — gravity and every joint — to
 /// what a fresh world carries, keeping the run-tier collision and trigger
 /// dispatches. Trigger overlaps and undelivered trigger events are dropped

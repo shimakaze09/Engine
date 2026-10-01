@@ -704,7 +704,8 @@ bool collider_geometries_overlap(const ColliderWorldGeometry &a,
 
 bool raycast(const PhysicsWorldView &world, const math::Vec3 &origin,
              const math::Vec3 &direction, float maxDistance,
-             PhysicsRaycastHit *outHit, Entity skipEntity) noexcept {
+             PhysicsRaycastHit *outHit, Entity skipEntity,
+             std::uint32_t mask) noexcept {
   math::Vec3 normalizedDirection{};
   if (!normalize_query_direction(direction, maxDistance,
                                  &normalizedDirection)) {
@@ -724,7 +725,7 @@ bool raycast(const PhysicsWorldView &world, const math::Vec3 &origin,
   float closestDistance = maxDistance;
   bool found = false;
   for (std::size_t i = 0U; i < count; ++i) {
-    if (colliders[i].isTrigger) {
+    if (!passes_mask(colliders[i], mask)) {
       continue;
     }
     if ((skipEntity != kInvalidEntity) &&

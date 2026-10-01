@@ -128,9 +128,10 @@ void dispatch_collision_callbacks(World &world) noexcept {
 
 bool raycast(const World &world, const math::Vec3 &origin,
              const math::Vec3 &direction, float maxDistance,
-             PhysicsRaycastHit *outHit, Entity skipEntity) noexcept {
+             PhysicsRaycastHit *outHit, Entity skipEntity,
+             std::uint32_t mask) noexcept {
   return physics::raycast(world, origin, direction, maxDistance, outHit,
-                          skipEntity);
+                          skipEntity, mask);
 }
 
 physics::JointId add_distance_joint(World &world, Entity entityA,

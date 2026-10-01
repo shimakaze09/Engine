@@ -48,11 +48,12 @@ void dispatch_collision_callbacks(World &world) noexcept;
 
 /// Closest-hit raycast using a normalized copy of direction; false when
 /// maxDistance is not finite and positive or nothing is hit within it.
-/// skipEntity excludes that entity and the compound colliders it owns.
+/// skipEntity excludes that entity and the compound colliders it owns;
+/// only colliders whose layer is in `mask` are hit.
 bool raycast(const World &world, const math::Vec3 &origin,
              const math::Vec3 &direction, float maxDistance,
-             PhysicsRaycastHit *outHit,
-             Entity skipEntity = kInvalidEntity) noexcept;
+             PhysicsRaycastHit *outHit, Entity skipEntity = kInvalidEntity,
+             std::uint32_t mask = 0xFFFFFFFFU) noexcept;
 
 /// Creates a distance joint holding the entities `distance` apart;
 /// kInvalidJointId on failure.

@@ -7,7 +7,8 @@
 // bootstraps headless with its per-user data named by its GUID. A
 // project's script limits reach the config (the engine's defaults where it
 // sets none, whatever the caller held) and the running VM at bootstrap,
-// and a later run of a project that sets none is back on the defaults. A
+// and a later run of a project that sets none is back on the defaults; its
+// collision layers reach the config and the running engine the same way. A
 // project's packages open with it, each mounted at packages/<name>; one
 // whose folder is missing refuses the open; and a package's assets are
 // catalogued under their own identities and its scripts load.
@@ -31,6 +32,7 @@
 #include "engine/core/logging.h"
 #include "engine/core/project_data.h"
 #include "engine/core/vfs.h"
+#include "engine/runtime/collision_layers.h"
 #include "engine/runtime/editor_bridge.h"
 #include "engine/runtime/engine_pipeline.h"
 #include "engine/scripting/script_limits.h"
@@ -273,7 +275,8 @@ void test_bootstrap(const fs::path &root) {
 }
 
 /// A project that sets limits, in `dir`: 2,500,000 instructions and an
-/// unlimited allocator.
+/// unlimited allocator; it also names layer 3 "Player" and ignores the
+/// Player-layer 4 pair.
 bool make_limited_project(const fs::path &dir) {
   if (!make_project(dir, false)) {
     return false;
@@ -283,6 +286,10 @@ bool make_limited_project(const fs::path &dir) {
   doc.scriptLimits.instructionLimit = 2500000U;
   doc.scriptLimits.memoryLimitSet = true;
   doc.scriptLimits.memoryLimitMiB = 0U;
+  std::snprintf(doc.collisionLayers.names[3],
+                sizeof(doc.collisionLayers.names[3]), "%s", "Player");
+  engine::content::set_collision_layer_pair(&doc.collisionLayers, 3U, 4U,
+                                            false);
   const std::string file = (dir / "Island.project").string();
   return engine::content::write_project_document(file.c_str(), doc);
 }
@@ -325,13 +332,21 @@ void test_script_limits(const fs::path &root) {
           (limited.scriptInstructionLimit == 2500000) &&
           (limited.scriptMemoryLimitBytes == 0U),
       "a project's own limits reach the config");
+  g_tests.check(
+      (std::strcmp(limited.collisionLayers.names[3], "Player") == 0) &&
+          (limited.collisionLayers.collides[3] == ~(1U << 4U)) &&
+          engine::content::collision_layers_are_default(plain.collisionLayers),
+      "a project's collision layers reach the config, and a project naming "
+      "none has the defaults");
 
   engine::EngineConfig cleared = limited;
   engine::configure_without_project(&cleared);
   g_tests.check(
       (cleared.scriptInstructionLimit == sc::kDefaultInstructionLimit) &&
-          (cleared.scriptMemoryLimitBytes == sc::kDefaultMemoryLimit),
-      "no project restores the default limits");
+          (cleared.scriptMemoryLimitBytes == sc::kDefaultMemoryLimit) &&
+          engine::content::collision_layers_are_default(
+              cleared.collisionLayers),
+      "no project restores the default limits and layers");
 
   const engine::content::ProjectScriptLimits memoryOnly{false, 0U, true, 32U};
   const engine::ScriptLimits resolved =
@@ -347,6 +362,9 @@ void test_script_limits(const fs::path &root) {
   g_tests.check((sc::get_instruction_limit() == 2500000) &&
                     (sc::get_memory_limit() == 0U),
                 "bootstrap puts the project's limits on the running VM");
+  g_tests.check(engine::content::find_collision_layer(
+                    engine::runtime::project_collision_layers(), "player") == 3,
+                "bootstrap makes the project's layers the running ones");
   engine::shutdown();
   if (!bootstrap_headless(plain)) {
     g_tests.fail("the project without limits bootstraps headless");
@@ -356,6 +374,9 @@ void test_script_limits(const fs::path &root) {
                     (sc::get_memory_limit() == sc::kDefaultMemoryLimit),
                 "the next run, of a project setting none, is back on the "
                 "defaults");
+  g_tests.check(engine::content::collision_layers_are_default(
+                    engine::runtime::project_collision_layers()),
+                "and its layers are the defaults again");
   engine::shutdown();
 }
 

@@ -210,6 +210,16 @@ RULES: tuple[Rule, ...] = (
         "core::name_token_is_valid",
     ),
     Rule(
+        name="the collision pair filter",
+        owner="physics/src/physics_internal.h",
+        # One collider's layer tested against the other's mask is what a
+        # copy looks like: resolve and CCD each carried one, so a filter
+        # that learns the layer matrix in one place and not the other lets
+        # a body tunnel through what it would otherwise hit.
+        pattern=r"\.collisionLayer\s*&\s*\w+\.collisionMask\b",
+        remedy="include physics_internal.h and use colliders_may_collide",
+    ),
+    Rule(
         name="the linear colour field",
         owner="editor/src/editor_inspector_widgets.cpp",
         # Calling ImGui's colour widget directly is what a copy looks like:

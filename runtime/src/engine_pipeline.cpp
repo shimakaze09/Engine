@@ -56,6 +56,7 @@
 #include "engine/renderer/texture_loader.h"
 #include "engine/runtime/animation_system.h"
 #include "engine/runtime/camera_component_update.h"
+#include "engine/runtime/collision_layers.h"
 #include "engine/runtime/content_catalog.h"
 #include "engine/runtime/editor_bridge.h"
 #include "engine/runtime/physics_bridge.h"
@@ -943,6 +944,9 @@ bool EnginePipeline::Impl::initialize(std::uint32_t maxFrameCount) noexcept {
   runtime::set_collision_dispatch(*world,
                                   &scripting::dispatch_physics_callbacks);
   runtime::set_trigger_dispatch(*world, &scripting::dispatch_trigger_callbacks);
+  // The project's layer matrix, kept like the dispatches through every
+  // scene load and editor Stop restore.
+  runtime::apply_project_collision_layers(*world);
 
   if (!load_bootstrap_meshes(assetManager.get(), assetDatabase.get(),
                              assetCatalog.get(), meshRegistry.get(),

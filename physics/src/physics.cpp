@@ -579,8 +579,8 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
         const Collider &colliderA = colliders[i];
         const Collider &colliderB = colliders[j];
 
-        if (((colliderA.collisionLayer & colliderB.collisionMask) == 0U) ||
-            ((colliderB.collisionLayer & colliderA.collisionMask) == 0U)) {
+        if (!colliders_may_collide(colliderA, colliderB,
+                                   physicsCtx.collisionMatrix)) {
           return;
         }
 
@@ -911,6 +911,33 @@ void set_gravity(PhysicsWorldView &world, float x, float y, float z) noexcept {
 
 engine::math::Vec3 get_gravity(const PhysicsWorldView &world) noexcept {
   return world.physics_context().gravity;
+}
+
+void set_collision_matrix(PhysicsWorldView &world,
+                          const CollisionLayerMatrix &matrix) noexcept {
+  CollisionLayerMatrix &current = world.physics_context().collisionMatrix;
+  if (current.rows == matrix.rows) {
+    return;
+  }
+  current = matrix;
+  // A sleeping body produces no contact, so one asleep on a layer it no
+  // longer collides with would hang there; every body wakes to re-test.
+  const std::size_t count = world.rigid_body_count();
+  const Entity *entities = nullptr;
+  RigidBody *bodies = nullptr;
+  if ((count == 0U) ||
+      !world.get_rigid_body_range(0U, count, &entities, &bodies)) {
+    return;
+  }
+  for (std::size_t i = 0U; i < count; ++i) {
+    bodies[i].sleeping = false;
+    bodies[i].sleepFrameCount = 0U;
+  }
+}
+
+const CollisionLayerMatrix &
+get_collision_matrix(const PhysicsWorldView &world) noexcept {
+  return world.physics_context().collisionMatrix;
 }
 
 /// Sets the requested value for collision dispatch.
