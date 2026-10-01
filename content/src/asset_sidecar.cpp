@@ -63,10 +63,52 @@ bool read_bool_field(const core::JsonParser &parser,
 /// Reports a sidecar the reader could not use, naming the file so the
 /// author can go and look at it.
 void log_sidecar_problem(const char *path, const char *problem) noexcept {
+  if (path == nullptr) {
+    return; // the writer reading back what it replaces stays quiet
+  }
   char message[512] = {};
   std::snprintf(message, sizeof(message), "asset sidecar: %s: %s", path,
                 problem);
   core::log_message(core::LogLevel::Error, kLogChannel, message);
+}
+
+/// Unknown-key warnings logged this process; a newer build's key sits in
+/// every sidecar, so past the first few the scan says so once.
+std::size_t g_unknownKeyReports = 0U;
+constexpr std::size_t kUnknownKeyReportsLogged = 16U;
+
+struct UnknownKeyContext final {
+  const char *path = nullptr;
+};
+
+void report_unknown_sidecar_key(const char *key, void *userData) noexcept {
+  const auto *context = static_cast<const UnknownKeyContext *>(userData);
+  ++g_unknownKeyReports;
+  if (g_unknownKeyReports > kUnknownKeyReportsLogged) {
+    if (g_unknownKeyReports == kUnknownKeyReportsLogged + 1U) {
+      core::log_message(core::LogLevel::Warning, kLogChannel,
+                        "asset sidecar: further keys this build does not "
+                        "read are not listed");
+    }
+    return;
+  }
+  char message[640] = {};
+  std::snprintf(message, sizeof(message),
+                "asset sidecar: %s: key '%s' is not read by this build; a "
+                "top-level key is kept when this build rewrites the sidecar",
+                context->path, key);
+  core::log_message(core::LogLevel::Warning, kLogChannel, message);
+}
+
+/// Names each member of a sidecar that no lookup read, as the scene loader
+/// names a scene's: a newer build's key, or a typo.
+void report_unknown_sidecar_keys(
+    const char *path, const core::JsonValue &root,
+    const core::JsonReadTracker &tracker) noexcept {
+  UnknownKeyContext context{};
+  context.path = path;
+  static_cast<void>(core::json_visit_unread_members(
+      root, tracker, &report_unknown_sidecar_key, &context));
 }
 
 } // namespace
@@ -99,39 +141,22 @@ bool asset_sidecar_path(const char *assetOsPath, char *out,
   return true;
 }
 
-SidecarReadResult read_asset_sidecar(const char *assetOsPath,
-                                     AssetSidecar *out) noexcept {
-  if (out == nullptr) {
-    return SidecarReadResult::Malformed;
-  }
-  char path[1024] = {};
-  if (!asset_sidecar_path(assetOsPath, path, sizeof(path))) {
-    return SidecarReadResult::Malformed;
-  }
+namespace {
 
-  // The buffer is static-sized rather than allocated: this runs on the
-  // editor's cold scan over every asset in the project.
-  static char buffer[kMaxAssetSidecarBytes] = {};
-  std::size_t size = 0U;
-  switch (core::read_whole_file(path, buffer, sizeof(buffer), &size)) {
-  case core::FileReadResult::Ok:
-    break;
-  case core::FileReadResult::Absent:
-    return SidecarReadResult::Absent;
-  case core::FileReadResult::Unreadable:
-    log_sidecar_problem(path, "exists but could not be read; the identity on "
-                              "disk is left untouched");
-    return SidecarReadResult::Unreadable;
-  case core::FileReadResult::TooLarge:
-    log_sidecar_problem(path, "is larger than a sidecar can be; the identity "
-                              "on disk is left untouched");
-    return SidecarReadResult::Unreadable;
-  }
-
-  core::JsonParser parser{};
-  if (!parser.parse(buffer, size)) {
+/// Reads a sidecar's text, already loaded from `path` (null: report
+/// nothing), into `*out` (left untouched for every result but Ok). With a
+/// tracker, every member the reader looks up is recorded in it, so the members
+/// it never looked up are the ones this build does not know.
+SidecarReadResult parse_sidecar(const char *path, const char *text,
+                                std::size_t size, core::JsonParser &parser,
+                                core::JsonReadTracker *tracker,
+                                AssetSidecar *out) noexcept {
+  if (!parser.parse(text, size)) {
     log_sidecar_problem(path, "is not valid JSON");
     return SidecarReadResult::Malformed;
+  }
+  if ((tracker != nullptr) && tracker->reset_for(text, size)) {
+    parser.set_read_tracker(tracker);
   }
   const core::JsonValue *root = parser.root();
   if ((root == nullptr) || (root->type != core::JsonValue::Type::Object)) {
@@ -257,6 +282,47 @@ SidecarReadResult read_asset_sidecar(const char *assetOsPath,
   return SidecarReadResult::Ok;
 }
 
+} // namespace
+
+SidecarReadResult read_asset_sidecar(const char *assetOsPath,
+                                     AssetSidecar *out) noexcept {
+  if (out == nullptr) {
+    return SidecarReadResult::Malformed;
+  }
+  char path[1024] = {};
+  if (!asset_sidecar_path(assetOsPath, path, sizeof(path))) {
+    return SidecarReadResult::Malformed;
+  }
+
+  // The buffer is static-sized rather than allocated: this runs on the
+  // editor's cold scan over every asset in the project.
+  static char buffer[kMaxAssetSidecarBytes] = {};
+  std::size_t size = 0U;
+  switch (core::read_whole_file(path, buffer, sizeof(buffer), &size)) {
+  case core::FileReadResult::Ok:
+    break;
+  case core::FileReadResult::Absent:
+    return SidecarReadResult::Absent;
+  case core::FileReadResult::Unreadable:
+    log_sidecar_problem(path, "exists but could not be read; the identity on "
+                              "disk is left untouched");
+    return SidecarReadResult::Unreadable;
+  case core::FileReadResult::TooLarge:
+    log_sidecar_problem(path, "is larger than a sidecar can be; the identity "
+                              "on disk is left untouched");
+    return SidecarReadResult::Unreadable;
+  }
+
+  core::JsonParser parser{};
+  core::JsonReadTracker tracker{};
+  const SidecarReadResult result =
+      parse_sidecar(path, buffer, size, parser, &tracker, out);
+  if (result == SidecarReadResult::Ok) {
+    report_unknown_sidecar_keys(path, *parser.root(), tracker);
+  }
+  return result;
+}
+
 bool write_asset_sidecar(const char *assetOsPath,
                          const AssetSidecar &sidecar) noexcept {
   char path[1024] = {};
@@ -276,8 +342,11 @@ bool write_asset_sidecar(const char *assetOsPath,
   // Hand-built rather than routed through JsonWriter: the whole point of
   // the layout is one field per line, so a merge between two branches
   // that both imported assets resolves per field.
-  // Room for every field at its widest: sixteen labels of 31 characters.
-  char document[2048] = {};
+  // Room for a whole sidecar: every known field at its widest plus the
+  // members a newer build wrote, carried below. Static, as the reader's
+  // buffer is: sidecars are written on the editor's and packer's single
+  // thread.
+  static char document[kMaxAssetSidecarBytes] = {};
   int written = std::snprintf(
       document, sizeof(document),
       "{\n  \"schemaVersion\": %u,\n  \"guid\": \"%s\"",
@@ -334,8 +403,33 @@ bool write_asset_sidecar(const char *assetOsPath,
     }
     append("%s", "\n  ]");
   }
+  // Members this build does not read are carried from the sidecar on
+  // disk, so an older build relabelling an asset never erases what a
+  // newer one wrote there, as Unity keeps fields its types do not know.
+  static char previous[kMaxAssetSidecarBytes] = {};
+  std::size_t previousSize = 0U;
+  if (core::read_whole_file(path, previous, sizeof(previous), &previousSize) ==
+      core::FileReadResult::Ok) {
+    core::JsonParser parser{};
+    core::JsonReadTracker tracker{};
+    AssetSidecar ignored{};
+    if (parse_sidecar(nullptr, previous, previousSize, parser, &tracker,
+                      &ignored) == SidecarReadResult::Ok) {
+      const auto carry = [](const char *key, std::size_t keyLength,
+                            const char *value, std::size_t valueLength,
+                            void *userData) noexcept {
+        (*static_cast<decltype(append) *>(userData))(
+            ",\n  \"%.*s\": %.*s", static_cast<int>(keyLength), key,
+            static_cast<int>(valueLength), value);
+      };
+      static_cast<void>(core::json_visit_unread_top_level_members(
+          parser, *parser.root(), tracker, carry, &append));
+    }
+  }
   append("%s", "\n}\n");
   if (written <= 0) {
+    log_sidecar_problem(path, "was not written: it would not fit in a "
+                              "sidecar; the previous one is left as it was");
     return false;
   }
 

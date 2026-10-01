@@ -144,14 +144,24 @@ void recent_list_load_once(RecentList *list) noexcept {
 
   core::JsonParser parser{};
   core::JsonValue entries{};
+  core::JsonReadTracker readTracker{};
   const core::JsonValue *root =
       parser.parse(buffer, size) ? parser.root() : nullptr;
+  if ((root != nullptr) && readTracker.reset_for(buffer, size)) {
+    parser.set_read_tracker(&readTracker);
+  }
   if ((root == nullptr) || (root->type != core::JsonValue::Type::Object) ||
       !parser.get_object_field(*root, list->arrayKey, &entries) ||
       (entries.type != core::JsonValue::Type::Array)) {
     refuse_stored_file(list, path, "not a recent list");
     return;
   }
+
+  // The list is rewritten from what was read, so a key this build does
+  // not read is named before the next save drops it.
+  static_cast<void>(
+      core::json_log_unread_members(*root, readTracker, "editor", path,
+                                    "the next change to the list drops it"));
 
   const std::size_t stored = parser.array_size(entries);
   const std::size_t capacity = capacity_of(*list);

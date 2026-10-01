@@ -298,7 +298,13 @@ field from a newer build) still loads, and is named by path as an
 save drops it. The JSON parser records each member a reader finds, and
 the loader walks the document for the rest; keys retired on purpose are
 listed so that older files load silently
-(`engine_unit_scene_validation_report`, `engine_unit_prefab`).
+(`engine_unit_scene_validation_report`, `engine_unit_prefab`). Sidecars
+and materials, which other builds also write, keep their unread
+top-level members verbatim through a rewrite
+(`engine_unit_asset_sidecar`, `engine_unit_material_writer`); the
+per-machine stores (input bindings, editor state, recent lists) name
+theirs in the log instead (`engine_unit_input_map`,
+`engine_unit_editor_recent_list`).
 
 The input log is the one binary document: a magic, an exact `u32`
 version, the steps, and a footer carrying the step count and an FNV-1a

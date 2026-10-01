@@ -1,4 +1,7 @@
-// Verifies input map test behavior for the Engine test suite.
+// Verifies input map test behavior for the Engine test suite, including
+// that a bindings document carrying keys this build does not read (a newer
+// build's) still loads and names each such key, since the next save drops
+// it.
 
 #include <cstdio>
 #include <cstring>
@@ -7,6 +10,7 @@
 
 #include "engine/core/input.h"
 #include "engine/core/input_map.h"
+#include "engine/core/logging.h"
 #include "engine/core/project_data.h"
 
 #include "../platform_event_from_sdl.h"
@@ -694,6 +698,34 @@ bool test_out_of_range_numbers_rejected() noexcept {
                                                       std::strlen(accepted));
   shutdown_all();
   return kept && loaded;
+}
+
+int g_unreadKeyWarnings = 0;
+
+void note_unread_key(LogLevel level, const char * /*channel*/,
+                     const char *message, void * /*userData*/) noexcept {
+  if ((level == LogLevel::Warning) && (message != nullptr) &&
+      (std::strstr(message, "is not read by this build") != nullptr) &&
+      ((std::strstr(message, "'futureRoot'") != nullptr) ||
+       (std::strstr(message, "'actions[0].futureField'") != nullptr))) {
+    ++g_unreadKeyWarnings;
+  }
+}
+
+bool test_unknown_keys_are_named() noexcept {
+  if (!init_all() || !initialize_logging() ||
+      !log_register_sink(&note_unread_key, nullptr)) {
+    return false;
+  }
+  g_unreadKeyWarnings = 0;
+  const char *doc =
+      "{\"futureRoot\":1,\"actions\":[{\"name\":\"a\",\"futureField\":true,"
+      "\"bindings\":[{\"type\":0,\"code\":44}]}],\"axes\":[]}";
+  const bool loaded = load_input_bindings_from_buffer(doc, std::strlen(doc));
+  log_unregister_sink(&note_unread_key, nullptr);
+  shutdown_logging();
+  shutdown_all();
+  return loaded && (g_unreadKeyWarnings == 2);
 }
 
 bool test_save_load_roundtrip() noexcept {
@@ -1665,6 +1697,7 @@ int main() {
       &test_legacy_and_mapped_actions_share_one_registry);
   run("out_of_range_numbers_rejected", &test_out_of_range_numbers_rejected);
   run("save_load_roundtrip", &test_save_load_roundtrip);
+  run("unknown_keys_are_named", &test_unknown_keys_are_named);
   run("file_round_trip_and_default_path",
       &test_file_round_trip_and_default_path);
   run("wrong_shape_load_preserves_bindings",

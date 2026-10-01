@@ -447,6 +447,10 @@ void content_browser_state_load_once() noexcept {
   if ((root == nullptr) || (root->type != core::JsonValue::Type::Object)) {
     return;
   }
+  core::JsonReadTracker readTracker{};
+  if (readTracker.reset_for(buffer, size)) {
+    parser.set_read_tracker(&readTracker);
+  }
 
   char folder[kMaxAssetIndexPath] = {};
   const core::JsonValue *folderValue = parser.get_object_field(*root, "folder");
@@ -476,6 +480,11 @@ void content_browser_state_load_once() noexcept {
           (mask | (kAssetKindMaskAll & ~knownBits)) & kAssetKindMaskAll;
     }
   }
+  // The state is rewritten from what was read, so a key this build does
+  // not read is named before the next save drops it.
+  static_cast<void>(core::json_log_unread_members(
+      *root, readTracker, kContentBrowserLogChannel, path,
+      "the next change to the browser state drops it"));
 }
 
 void content_browser_navigate(const char *folder) noexcept {

@@ -302,6 +302,12 @@ bool parse_material_text(AssetDatabase *database,
   if (!parser.parse(text, size)) {
     return log_material_error(virtualPath, "malformed JSON");
   }
+  // Every member the reader looks up is recorded, so the ones it never
+  // looks up (a newer build's key, a typo) are named once it has loaded.
+  core::JsonReadTracker readTracker{};
+  if (readTracker.reset_for(text, size)) {
+    parser.set_read_tracker(&readTracker);
+  }
 
   const core::JsonValue *root = parser.root();
   if ((root == nullptr) || (root->type != core::JsonValue::Type::Object)) {
@@ -452,6 +458,13 @@ bool parse_material_text(AssetDatabase *database,
   }
   if (outSlots != nullptr) {
     *outSlots = slots;
+  }
+  if (commit) {
+    char document[320] = {};
+    std::snprintf(document, sizeof(document), "material '%s'", virtualPath);
+    static_cast<void>(core::json_log_unread_members(
+        *root, readTracker, kMaterialLogChannel, document,
+        "a top-level key is kept when the material is saved"));
   }
   return true;
 }

@@ -63,6 +63,12 @@ public:
 
   /// Writes key data.
   void write_key(const char *key) noexcept;
+  /// Writes one object member verbatim: `escapedKey` is a key as it is
+  /// written between the quotes of a JSON document, `rawValue` a complete
+  /// JSON value's source text. A writer uses it to carry, unchanged, a
+  /// member a reader did not know (json_visit_unread_top_level_members).
+  void write_raw_member(const char *escapedKey, std::size_t keyLength,
+                        const char *rawValue, std::size_t valueLength) noexcept;
   /// Writes float data.
   void write_float(const char *key, float value) noexcept;
   /// Writes a double at round-trip precision (%.17g); non-finite fails.
@@ -210,6 +216,36 @@ std::size_t json_visit_unread_members(const JsonValue &root,
                                       const JsonReadTracker &tracker,
                                       JsonUnreadVisitor visit,
                                       void *userData) noexcept;
+
+/// Logs one Warning per member under `root` that no lookup read
+/// (json_visit_unread_members), worded "<document>: key '<path>' is not
+/// read by this build; <consequence>". For a reader whose document has no
+/// ValidationReport. Returns the number logged.
+std::size_t json_log_unread_members(const JsonValue &root,
+                                    const JsonReadTracker &tracker,
+                                    const char *channel, const char *document,
+                                    const char *consequence) noexcept;
+
+class JsonParser;
+
+/// Called once per carried member with its key as written between the
+/// quotes and its value's exact source text (a string with its quotes).
+using JsonRawMemberVisitor = void (*)(const char *key, std::size_t keyLength,
+                                      const char *value,
+                                      std::size_t valueLength,
+                                      void *userData) noexcept;
+
+/// Visits each top-level member of `object` that no get_object_field call
+/// read while `tracker` was set on `parser`, skipping one whose key a read
+/// member shares (a repeated key the reader already resolved). A writer
+/// re-emits these verbatim, so an older build rewriting a document keeps
+/// the members a newer build added. Returns the number visited; 0 when the
+/// tracker is unarmed.
+std::size_t json_visit_unread_top_level_members(const JsonParser &parser,
+                                                const JsonValue &object,
+                                                const JsonReadTracker &tracker,
+                                                JsonRawMemberVisitor visit,
+                                                void *userData) noexcept;
 
 /// Parses JSON into fixed storage; query values via JsonValue handles.
 class JsonParser final {

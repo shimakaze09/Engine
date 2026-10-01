@@ -2,7 +2,8 @@
 // derives and the predicate recognising one, a write/read round trip for an
 // asset and for a folder, labels (the exact bytes with and without them, a
 // round trip beside import settings, and a refusal per malformed form), the
-// atomic write refusing a nil identity, and — the
+// atomic write refusing a nil identity, keys a newer build wrote surviving
+// an older build's rewrite (and being named on read), and — the
 // part that matters most — each read failure reporting which failure it was, so
 // no caller can mistake "could not read the identity" for "there is no identity
 // yet" and mint a new one over the top of a live asset.
@@ -13,6 +14,7 @@
 #include <fstream>
 #include <string>
 #include <system_error>
+#include <vector>
 
 #include "../test_harness.h"
 #include "engine/content/asset_sidecar.h"
@@ -404,6 +406,87 @@ void test_sidecar_predicate(engine::tests::TestContext &ctx) noexcept {
             "the bare suffix, empty and null are not sidecars");
 }
 
+std::vector<std::string> g_warnings{};
+
+void note_warning(engine::core::LogLevel level, const char * /*channel*/,
+                  const char *message, void * /*userData*/) noexcept {
+  if ((level == engine::core::LogLevel::Warning) && (message != nullptr)) {
+    g_warnings.emplace_back(message);
+  }
+}
+
+std::size_t count_of(const std::string &text, const char *needle) {
+  std::size_t count = 0U;
+  for (std::size_t at = text.find(needle); at != std::string::npos;
+       at = text.find(needle, at + 1U)) {
+    ++count;
+  }
+  return count;
+}
+
+/// A sidecar a newer build wrote keeps its new keys through an older
+/// build's rewrite (here a label edit, the editor's path): every top-level
+/// member the reader does not know is carried verbatim, once, while a
+/// known key the writer now omits (all labels removed) stays gone. The
+/// read names each unknown key, nested ones included.
+void test_unknown_keys_survive_a_rewrite(
+    engine::tests::TestContext &ctx) noexcept {
+  const std::string asset = root_path("newer.png");
+  ctx.check(write_text(asset, "x") &&
+                write_text(asset + ".meta",
+                           "{\n  \"schemaVersion\": 1,\n  \"guid\": "
+                           "\"11111111-2222-4333-8444-555555555555\",\n"
+                           "  \"colorSpace\": \"linear\",\n"
+                           "  \"importSettings\": {\"meshIndex\": 0, "
+                           "\"primitiveIndex\": -1, \"scaleFactor\": 1, "
+                           "\"upAxis\": 1, \"generateNormals\": false, "
+                           "\"futureNested\": 3},\n"
+                           "  \"labels\": [\"old\"],\n"
+                           "  \"futureBlock\": {\"a\": [1, 2]}\n}\n"),
+            "a sidecar with keys from a newer build");
+  g_warnings.clear();
+  ct::AssetSidecar sidecar{};
+  ctx.check(ct::read_asset_sidecar(asset.c_str(), &sidecar) ==
+                ct::SidecarReadResult::Ok,
+            "it still reads");
+  std::size_t named = 0U;
+  for (const std::string &warning : g_warnings) {
+    if ((warning.find("'colorSpace'") != std::string::npos) ||
+        (warning.find("'futureBlock'") != std::string::npos) ||
+        (warning.find("'importSettings.futureNested'") != std::string::npos)) {
+      ++named;
+    }
+  }
+  ctx.check((named == 3U) && (g_warnings.size() == 3U),
+            "the read names each unknown key, nested ones included");
+
+  sidecar.labels = ct::AssetLabels{};
+  ctx.check(ct::asset_labels_add(&sidecar.labels, "relabelled"),
+            "relabel as the editor does");
+  std::string document{};
+  ctx.check(ct::write_asset_sidecar(asset.c_str(), sidecar) &&
+                read_text(asset + ".meta", &document),
+            "the rewrite succeeds");
+  ctx.check((count_of(document, "\"colorSpace\": \"linear\"") == 1U) &&
+                (count_of(document, "\"futureBlock\": {\"a\": [1, 2]}") == 1U),
+            "each top-level key the build does not know is carried once, "
+            "verbatim");
+  ctx.check((document.find("\"relabelled\"") != std::string::npos) &&
+                (document.find("\"old\"") == std::string::npos),
+            "the known keys carry the new values");
+
+  sidecar.labels = ct::AssetLabels{};
+  ct::AssetSidecar reread{};
+  ctx.check(ct::write_asset_sidecar(asset.c_str(), sidecar) &&
+                read_text(asset + ".meta", &document) &&
+                (document.find("\"labels\"") == std::string::npos) &&
+                (count_of(document, "\"colorSpace\"") == 1U) &&
+                (ct::read_asset_sidecar(asset.c_str(), &reread) ==
+                 ct::SidecarReadResult::Ok),
+            "a known key the writer omits is not carried back, and the "
+            "result still reads");
+}
+
 int main() {
   engine::tests::TestContext ctx;
   ctx.check(engine::core::initialize_logging(), "initialize logging");
@@ -422,6 +505,15 @@ int main() {
   test_folder_sidecar(ctx);
   test_read_failures_are_distinct(ctx);
   test_labels(ctx);
+  ctx.check(engine::core::log_register_sink(&note_warning, nullptr),
+            "warning sink");
+  test_unknown_keys_survive_a_rewrite(ctx);
+  {
+    std::string d;
+    read_text(root_path("newer.png") + ".meta", &d);
+    std::fputs(d.c_str(), stderr);
+  }
+  engine::core::log_unregister_sink(&note_warning, nullptr);
   test_write_refuses_nil(ctx);
   test_local_ids(ctx);
 

@@ -123,6 +123,59 @@ bool write_texture_slot(core::JsonWriter *writer,
   return write_catalogued_ref(writer, catalog, key, textureId, virtualPath);
 }
 
+/// Looks up every key the material reader knows, through the same field
+/// tables it reads by, so a tracker set on `parser` marks exactly those.
+void mark_known_material_keys(const core::JsonParser &parser,
+                              const core::JsonValue &root) noexcept {
+  core::JsonValue value{};
+  static_cast<void>(parser.get_object_field(root, "version", &value));
+  static_cast<void>(parser.get_object_field(root, "parent", &value));
+#define ENGINE_MATERIAL_MARK_PARAM(name, member, key)                          \
+  static_cast<void>(parser.get_object_field(root, key, &value));
+  ENGINE_MATERIAL_PARAM_FIELDS(ENGINE_MATERIAL_MARK_PARAM)
+#undef ENGINE_MATERIAL_MARK_PARAM
+  core::JsonValue textures{};
+  if (parser.get_object_field(root, "textures", &textures)) {
+#define ENGINE_MATERIAL_MARK_TEXTURE(name, slot, handle, key)                  \
+  static_cast<void>(parser.get_object_field(textures, key, &value));
+    ENGINE_MATERIAL_TEXTURE_FIELDS(ENGINE_MATERIAL_MARK_TEXTURE)
+#undef ENGINE_MATERIAL_MARK_TEXTURE
+  }
+}
+
+void carry_member(const char *key, std::size_t keyLength, const char *value,
+                  std::size_t valueLength, void *userData) noexcept {
+  static_cast<core::JsonWriter *>(userData)->write_raw_member(
+      key, keyLength, value, valueLength);
+}
+
+/// Carries every top-level member of the material on disk that this build
+/// does not read into `writer`, so an older build saving the material
+/// never erases what a newer one wrote there.
+void carry_unknown_material_members(const char *virtualPath,
+                                    core::JsonWriter *writer) noexcept {
+  if (!core::vfs_file_exists(virtualPath)) {
+    return;
+  }
+  char *previous = nullptr;
+  std::size_t size = 0U;
+  if (!core::vfs_read_text(virtualPath, &previous, &size)) {
+    return;
+  }
+  core::JsonParser parser{};
+  core::JsonReadTracker tracker{};
+  if (parser.parse(previous, size) && tracker.reset_for(previous, size) &&
+      (parser.root()->type == core::JsonValue::Type::Object)) {
+    parser.set_read_tracker(&tracker);
+    const core::JsonValue root = *parser.root();
+    mark_known_material_keys(parser, root);
+    parser.set_read_tracker(nullptr);
+    static_cast<void>(core::json_visit_unread_top_level_members(
+        parser, root, tracker, &carry_member, writer));
+  }
+  core::vfs_free(previous);
+}
+
 } // namespace
 
 bool find_material_parent_virtual_path(const content::AssetCatalog *catalog,
@@ -213,6 +266,7 @@ bool save_material_asset(const content::AssetCatalog *catalog,
   if (!textureSlotsOk) {
     return false;
   }
+  carry_unknown_material_members(virtualPath, &writer);
 
   writer.end_object();
   if (!writer.ok()) {
