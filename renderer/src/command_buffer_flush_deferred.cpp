@@ -821,34 +821,39 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
           dev->set_param_mat4(backend.dlInvViewLoc, &invView.columns[0].x);
       }
 
-      // Directional light (use first if available). Always upload: the
-      // shader evaluates the light unconditionally, so a zero-light scene
-      // must overwrite stale values with a black color and a valid (unit)
-      // direction — a zero direction would NaN inside normalize().
+      // Every directional light the forward program shades, so the two
+      // paths light a surface alike. The shader shades each at unit
+      // intensity, so the authored intensity premultiplies into the
+      // colour here (the forward path multiplies it in the shader from a
+      // packed colour+intensity array). The count always uploads, so a
+      // scene that loses its suns stops shading them.
       {
-        const bool hasDirLight = lights.directionalLightCount > 0U;
-        const math::Vec3 kNoLightDir(0.0F, -1.0F, 0.0F);
-        const math::Vec3 kNoLightColor(0.0F, 0.0F, 0.0F);
-        if (backend.dlDirLightDirLoc.valid()) {
-          const math::Vec3 &dir = hasDirLight
-                                      ? lights.directionalLights[0].direction
-                                      : kNoLightDir;
-          dev->set_param_vec3(backend.dlDirLightDirLoc, &dir.x);
+        const std::size_t dirCount =
+            std::min(lights.directionalLightCount, kMaxDirectionalLights);
+        if (backend.dlDirLightCountLoc.valid()) {
+          dev->set_param_i32(backend.dlDirLightCountLoc,
+                             static_cast<std::int32_t>(dirCount));
         }
-        if (backend.dlDirLightColorLoc.valid()) {
-          // The shader shades the sun at unit intensity, so the authored
-          // intensity premultiplies into the color here — uploading raw
-          // color rendered every intensity != 1 sun wrong (dark for the
-          // common brighter-than-1 case; the forward path multiplies
-          // intensity in-shader from its packed color+intensity array).
-          math::Vec3 color = kNoLightColor;
-          if (hasDirLight) {
-            const auto &sun = lights.directionalLights[0];
-            color = math::Vec3(sun.color.x * sun.intensity,
-                               sun.color.y * sun.intensity,
-                               sun.color.z * sun.intensity);
+        if ((dirCount > 0U) && (dev->set_param_vec4_array != nullptr)) {
+          float direction[kMaxDirectionalLights * 4U] = {};
+          float color[kMaxDirectionalLights * 4U] = {};
+          for (std::size_t i = 0U; i < dirCount; ++i) {
+            const auto &sun = lights.directionalLights[i];
+            direction[(i * 4U) + 0U] = sun.direction.x;
+            direction[(i * 4U) + 1U] = sun.direction.y;
+            direction[(i * 4U) + 2U] = sun.direction.z;
+            color[(i * 4U) + 0U] = sun.color.x * sun.intensity;
+            color[(i * 4U) + 1U] = sun.color.y * sun.intensity;
+            color[(i * 4U) + 2U] = sun.color.z * sun.intensity;
           }
-          dev->set_param_vec3(backend.dlDirLightColorLoc, &color.x);
+          if (backend.dlDirLightDirLoc.valid()) {
+            dev->set_param_vec4_array(backend.dlDirLightDirLoc, direction,
+                                      static_cast<std::int32_t>(dirCount));
+          }
+          if (backend.dlDirLightColorLoc.valid()) {
+            dev->set_param_vec4_array(backend.dlDirLightColorLoc, color,
+                                      static_cast<std::int32_t>(dirCount));
+          }
         }
       }
 

@@ -136,6 +136,8 @@ bool resolve_deferred_light_program_state(BackendState &backend,
   backend.dlInvProjectionLoc =
       required_param(&ok, dev, dlProg, "uInvProjection");
   backend.dlInvViewLoc = required_param(&ok, dev, dlProg, "uInvView");
+  backend.dlDirLightCountLoc =
+      required_param(&ok, dev, dlProg, "uDirLightCount");
   backend.dlDirLightDirLoc =
       required_param(&ok, dev, dlProg, "uDirLightDirection");
   backend.dlDirLightColorLoc =
