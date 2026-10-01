@@ -169,6 +169,12 @@ bool revert_live_component_edit(runtime::Entity entity,
     return false;
   }
   *slot = LiveEditBaseline{};
+  // A queued apply of the value just reverted would write it onto the
+  // authored scene at Stop, contradicting the revert.
+  PendingAuthoredApply *pending = find_pending(id, type);
+  if (pending != nullptr) {
+    *pending = PendingAuthoredApply{};
+  }
   return true;
 }
 

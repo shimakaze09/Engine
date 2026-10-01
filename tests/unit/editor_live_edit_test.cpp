@@ -4,16 +4,28 @@
 // the play-session baseline, and a queued "Apply to authored value" replays
 // as one ordinary undoable command once Stop has restored the authored
 // world -- proving the apply path integrates with the normal undo/dirty
-// contract instead of bypassing it.
+// contract instead of bypassing it. Revert withdraws a queued apply, and
+// the Inspector's live-edit row offers Cancel queued apply, so a queued
+// write can always be taken back.
+
+#if defined(__clang__) && (defined(__x86_64__) || defined(__i386__)) &&        \
+    !defined(__PRFCHWINTRIN_H)
+#define __PRFCHWINTRIN_H // NOLINT(bugprone-reserved-identifier)
+#endif
+
+#include "imgui.h"
+#include "imgui_internal.h"
 
 #include "editor_commands.h"
 #include "editor_live_edit.h"
+#include "editor_panels_inspector.h"
 #include "editor_session.h"
 #include "engine/runtime/world.h"
 
 #include <cstdio>
 #include <memory>
 #include <new>
+#include <string>
 
 namespace {
 
@@ -309,6 +321,127 @@ int check_cancel_apply_to_authored() noexcept {
   return 0;
 }
 
+/// EXPECTATION: Revert runtime edit withdraws an apply queued for the same
+/// pair. Reverting the running value while the apply of the edited value
+/// stayed queued wrote that value onto the authored scene at Stop.
+int check_revert_withdraws_queued_apply() noexcept {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 140;
+  }
+  SessionWorldScope scope(world.get());
+  const Entity entity = make_rigid_body_entity(*world, 1.0F);
+  if (entity == engine::runtime::kInvalidEntity) {
+    return 141;
+  }
+  editor_session().liveEditEnabled = true;
+  start_play_mode();
+
+  ComponentEditSnapshot after{};
+  after.rigidBody.inverseMass = 4.0F;
+  if (!apply_live_component_edit(entity, ComponentEditType::RigidBody, after) ||
+      !queue_apply_to_authored(entity, ComponentEditType::RigidBody)) {
+    return 142;
+  }
+  if (!revert_live_component_edit(entity, ComponentEditType::RigidBody) ||
+      has_pending_apply_to_authored(entity, ComponentEditType::RigidBody) ||
+      (pending_apply_to_authored_count() != 0U)) {
+    return 143;
+  }
+
+  stop_play_mode();
+  finish_play_stop();
+  RigidBody authored{};
+  if (!world->get_rigid_body(entity, &authored) ||
+      (authored.inverseMass != 1.0F)) {
+    return 144; // the reverted edit must not reach the authored scene
+  }
+  if (editor_session().commandHistory.can_undo()) {
+    return 145; // and no command may be pushed for it
+  }
+  return 0;
+}
+
+/// Draws `entity`'s live-edit row for RigidBody in one headless ImGui
+/// frame and returns what it rendered as text.
+std::string live_edit_row_text(Entity entity) noexcept {
+  ImGui::NewFrame();
+  ImGui::LogToBuffer();
+  ImGui::SetNextWindowPos(ImVec2(0.0F, 0.0F));
+  ImGui::SetNextWindowSize(ImVec2(900.0F, 300.0F));
+  ImGui::Begin("Inspector");
+  draw_live_edit_row(entity, ComponentEditType::RigidBody);
+  ImGui::End();
+  std::string text = GImGui->LogBuffer.c_str();
+  ImGui::LogFinish();
+  ImGui::Render();
+  return text;
+}
+
+/// EXPECTATION: the Inspector's live-edit row offers Cancel queued apply
+/// for a queued pair, and with the queue full it tells the author to use
+/// it, a control that before existed only in this test's API calls.
+int check_row_offers_cancel_queued_apply() noexcept {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 150;
+  }
+  SessionWorldScope scope(world.get());
+  const std::size_t capacity = pending_apply_to_authored_capacity();
+  std::unique_ptr<Entity[]> entities(new (std::nothrow) Entity[capacity + 1U]);
+  if ((entities == nullptr) || (live_edit_baseline_capacity() < 2U)) {
+    return 151;
+  }
+  for (std::size_t i = 0U; i <= capacity; ++i) {
+    entities[i] = make_rigid_body_entity(*world, 1.0F);
+    if (entities[i] == engine::runtime::kInvalidEntity) {
+      return 152;
+    }
+  }
+  editor_session().liveEditEnabled = true;
+  start_play_mode();
+  for (std::size_t i = 0U; i < capacity; ++i) {
+    if (!queue_apply_to_authored(entities[i], ComponentEditType::RigidBody)) {
+      return 153;
+    }
+  }
+  ComponentEditSnapshot after{};
+  after.rigidBody.inverseMass = 2.0F;
+  const Entity queued = entities[0];
+  const Entity blocked = entities[capacity];
+  if (!apply_live_component_edit(queued, ComponentEditType::RigidBody, after) ||
+      !apply_live_component_edit(blocked, ComponentEditType::RigidBody,
+                                 after)) {
+    return 154;
+  }
+
+  IMGUI_CHECKVERSION();
+  ImGui::CreateContext();
+  ImGuiIO &io = ImGui::GetIO();
+  io.DisplaySize = ImVec2(1280.0F, 720.0F);
+  io.DeltaTime = 1.0F / 60.0F;
+  io.IniFilename = nullptr;
+  unsigned char *pixels = nullptr;
+  int width = 0;
+  int height = 0;
+  io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
+  const std::string queuedRow = live_edit_row_text(queued);
+  const std::string blockedRow = live_edit_row_text(blocked);
+  ImGui::DestroyContext();
+
+  if ((queuedRow.find("Queued:") == std::string::npos) ||
+      (queuedRow.find("Cancel queued apply") == std::string::npos)) {
+    return 155;
+  }
+  if ((blockedRow.find("Apply queue full") == std::string::npos) ||
+      (blockedRow.find("Queued:") != std::string::npos)) {
+    return 156;
+  }
+  stop_play_mode();
+  finish_play_stop();
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -508,6 +641,10 @@ int main() {
       {"check_baseline_budget_blocks_edit_before_mutation",
        &check_baseline_budget_blocks_edit_before_mutation},
       {"check_pending_apply_budget", &check_pending_apply_budget},
+      {"check_revert_withdraws_queued_apply",
+       &check_revert_withdraws_queued_apply},
+      {"check_row_offers_cancel_queued_apply",
+       &check_row_offers_cancel_queued_apply},
   };
 
   for (const auto &check : checks) {

@@ -38,8 +38,9 @@ bool has_live_component_edit(runtime::Entity entity,
                              ComponentEditType type) noexcept;
 
 /// Restores `entity`'s component of `type` to its play-session baseline
-/// and drops the tracking entry; false when there is no baseline to
-/// restore (nothing was live-edited) or the world rejected the write.
+/// and drops the tracking entry and any apply-to-authored queued for the
+/// pair; false when there is no baseline to restore (nothing was
+/// live-edited) or the world rejected the write.
 bool revert_live_component_edit(runtime::Entity entity,
                                 ComponentEditType type) noexcept;
 
