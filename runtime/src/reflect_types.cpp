@@ -44,6 +44,9 @@ REFLECT_FIELD(dynamicFriction, Float)
 REFLECT_FIELD(density, Float)
 REFLECT_FIELD(collisionLayer, Uint32)
 REFLECT_FIELD(collisionMask, Uint32)
+// Optional: written only for a trigger, so every collider saved before
+// triggers existed reads unchanged as solid.
+REFLECT_FIELD_OPTIONAL(isTrigger, Bool)
 REFLECT_END()
 
 REFLECT_TYPE(engine::runtime::NameComponent)

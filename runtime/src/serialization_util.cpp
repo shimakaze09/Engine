@@ -782,6 +782,11 @@ bool write_collider_component(core::JsonWriter &writer,
   writer.write_float("density", component.density);
   writer.write_uint("collisionLayer", component.collisionLayer);
   writer.write_uint("collisionMask", component.collisionMask);
+  // Written only for a trigger, so solid colliders saved before triggers
+  // existed stay byte-identical with no schema version change.
+  if (component.isTrigger) {
+    writer.write_bool("isTrigger", true);
+  }
   writer.end_object();
   return !writer.failed();
 }
@@ -846,6 +851,10 @@ bool read_collider_component(const core::JsonParser &parser,
   }
   if (parser.get_object_field(colliderObject, "collisionMask", &value) &&
       !parser.as_uint(value, &component.collisionMask)) {
+    return false;
+  }
+  if (parser.get_object_field(colliderObject, "isTrigger", &value) &&
+      !parser.as_bool(value, &component.isTrigger)) {
     return false;
   }
 
