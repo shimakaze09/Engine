@@ -245,6 +245,10 @@ void World::rebuild_hierarchy_links() noexcept {
     node.present = true;
     node.orphan = false;
   }
+  // Linked in ascending entity index, the order the propagation pass
+  // links in, so a rebuild never reorders a parent's children.
+  std::sort(m_transformActiveIndices.data(),
+            m_transformActiveIndices.data() + m_transformActiveCount);
   for (std::size_t i = 0U; i < m_transformActiveCount; ++i) {
     const std::uint32_t index = m_transformActiveIndices[i];
     const Entity entity{index, m_entityGenerations[index]};
@@ -317,14 +321,29 @@ void World::link_transform_node(std::uint32_t index, PersistentId parentId,
   }
   if (parentIndex != 0U) {
     node.parentIndex = parentIndex;
+    // Inserted at its ascending-index place among the siblings, the order
+    // every rebuild produces. The walk starts at the last child, where a
+    // newly created entity's index almost always belongs.
     TransformNode &parent = m_transformNodes[parentIndex];
-    if (parent.firstChild == 0U) {
-      parent.firstChild = index;
-    } else {
-      m_transformNodes[parent.lastChild].nextSibling = index;
-      node.prevSibling = parent.lastChild;
+    std::uint32_t before = parent.lastChild;
+    while ((before != 0U) && (before > index)) {
+      before = m_transformNodes[before].prevSibling;
     }
-    parent.lastChild = index;
+    const std::uint32_t after = (before != 0U)
+                                    ? m_transformNodes[before].nextSibling
+                                    : parent.firstChild;
+    node.prevSibling = before;
+    node.nextSibling = after;
+    if (before != 0U) {
+      m_transformNodes[before].nextSibling = index;
+    } else {
+      parent.firstChild = index;
+    }
+    if (after != 0U) {
+      m_transformNodes[after].prevSibling = index;
+    } else {
+      parent.lastChild = index;
+    }
   }
   // A transform that just appeared may be the parent an orphan authored;
   // the next walk rebuilds rather than guess.

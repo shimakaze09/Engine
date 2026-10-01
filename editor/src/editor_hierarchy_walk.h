@@ -38,8 +38,8 @@ void walk_entity_node(runtime::World &world, runtime::Entity entity,
 
 /// Walks `world`'s hierarchy in Entities-panel order: each root (an entity
 /// with no parent, or no transform) in entity-index order, pre-order, with
-/// each node's children in the world's child-link order, which is the
-/// order they were attached. enter(entity, depth, hasChildren) is called
+/// each node's children in the world's child order, ascending entity
+/// index, as the roots are. enter(entity, depth, hasChildren) is called
 /// per row and returns whether the row is open; an open row's children
 /// follow, then leave(entity). A node at `maxDepth` reports no children,
 /// so a deep chain cannot grow the call stack without bound. The world

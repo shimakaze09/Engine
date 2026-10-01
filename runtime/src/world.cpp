@@ -657,9 +657,13 @@ bool World::propagate_world_transforms() noexcept {
     }
   }
 
+  // Children are linked in ascending entity index, never in the dense
+  // storage order filled above: removing any transform swaps the last one
+  // into its slot, so that order reshuffles a parent's children whenever an
+  // unrelated entity is deleted. Index order is the scene file's own order,
+  // which a save and a load keep, and it changes only with the hierarchy.
   std::size_t rootCount = 0U;
-  for (std::size_t i = 0U; i < m_transformActiveCount; ++i) {
-    const std::uint32_t index = m_transformActiveIndices[i];
+  for (std::uint32_t index = 1U; index < m_nextEntityIndex; ++index) {
     if (!m_transformNodes[index].present) {
       continue;
     }

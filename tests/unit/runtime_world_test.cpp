@@ -5,6 +5,7 @@
 #include <limits>
 #include <memory>
 #include <new>
+#include <string>
 #include <vector>
 
 #include "engine/physics/physics.h"
@@ -1469,6 +1470,109 @@ int verify_subtree_operations_cost_the_subtree() {
   return 0;
 }
 
+/// The names of `parent`'s children, in the order the World lists them.
+std::string child_names(engine::runtime::World &world,
+                        engine::runtime::Entity parent) {
+  std::string names;
+  world.for_each_child(parent, [&](engine::runtime::Entity child) noexcept {
+    engine::runtime::NameComponent name{};
+    if (world.get_name_component(child, &name)) {
+      names += name.name;
+    }
+  });
+  return names;
+}
+
+/// A parent's children keep one order: ascending entity index, the scene
+/// file's order. Deleting an unrelated entity used to reshuffle them, since
+/// the child links were rebuilt from the transform array's storage order,
+/// which swap-and-pop removal rearranges; a save and reload then put them
+/// back, so the editor and the player saw different orders.
+int verify_sibling_order_is_stable() {
+  using namespace engine::runtime;
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 280;
+  }
+  auto named = [&world](const char *label, PersistentId parentId) noexcept {
+    Transform transform{};
+    transform.parentId = parentId;
+    const Entity entity = world->create_scene_object(transform);
+    NameComponent name{};
+    std::snprintf(name.name, sizeof(name.name), "%s", label);
+    return ((entity != kInvalidEntity) &&
+            world->add_name_component(entity, name))
+               ? entity
+               : kInvalidEntity;
+  };
+  auto settle = [&world]() noexcept {
+    world->begin_render_prep_phase();
+    world->end_frame_phase();
+  };
+  const Entity unrelated = named("X", kInvalidPersistentId);
+  const Entity late = named("D", kInvalidPersistentId);
+  const Entity parent = named("P", kInvalidPersistentId);
+  if ((unrelated == kInvalidEntity) || (late == kInvalidEntity) ||
+      (parent == kInvalidEntity)) {
+    return 281;
+  }
+  const PersistentId parentId = world->persistent_id(parent);
+  if ((named("A", parentId) == kInvalidEntity) ||
+      (named("B", parentId) == kInvalidEntity) ||
+      (named("C", parentId) == kInvalidEntity)) {
+    return 282;
+  }
+  settle();
+  if (child_names(*world, parent) != "ABC") {
+    return 283;
+  }
+
+  if (!world->destroy_entity(unrelated)) {
+    return 284;
+  }
+  settle();
+  if (child_names(*world, parent) != "ABC") {
+    std::fprintf(stderr, "FAIL: deleting an unrelated entity left %s\n",
+                 child_names(*world, parent).c_str());
+    return 285;
+  }
+
+  // An older entity attached later takes its index's place, the same
+  // before and after the next pass rebuilds the links.
+  Transform lateTransform{};
+  if (!world->get_transform(late, &lateTransform)) {
+    return 286;
+  }
+  lateTransform.parentId = parentId;
+  if (!world->add_transform(late, lateTransform) ||
+      (child_names(*world, parent) != "DABC")) {
+    return 287;
+  }
+  settle();
+  if (child_names(*world, parent) != "DABC") {
+    return 288;
+  }
+
+  // A save and a load keep the order.
+  static char document[65536] = {};
+  std::size_t size = 0U;
+  std::unique_ptr<World> reloaded(new (std::nothrow) World());
+  if ((reloaded == nullptr) ||
+      !save_scene(*world, document, sizeof(document), &size) ||
+      !load_scene(*reloaded, document, size)) {
+    return 289;
+  }
+  const Entity reloadedParent = reloaded->find_entity_by_name("P");
+  reloaded->begin_render_prep_phase();
+  reloaded->end_frame_phase();
+  if (child_names(*reloaded, reloadedParent) != "DABC") {
+    std::fprintf(stderr, "FAIL: a reload listed %s\n",
+                 child_names(*reloaded, reloadedParent).c_str());
+    return 290;
+  }
+  return 0;
+}
+
 int main() {
   int result = verify_raw_and_scene_object_creation();
   if (result != 0) {
@@ -1556,6 +1660,11 @@ int main() {
   }
 
   result = verify_for_each_alive_visits_all_while_destroying();
+  if (result != 0) {
+    return result;
+  }
+
+  result = verify_sibling_order_is_stable();
   if (result != 0) {
     return result;
   }

@@ -67,7 +67,10 @@ Every mutable subsystem has exactly one owner, in four tiers:
   services. Its `teardown` is the single audit point for run residue: a
   second pipeline run in one process starts clean.
 - **World tier** — `World` owns ECS, hierarchy, persistent ids, the physics
-  context, timers, cameras and the gameplay random stream.
+  context, timers, cameras and the gameplay random stream. A parent's
+  children are listed in ascending entity index, the scene file's order,
+  which a save and a load keep and deleting an unrelated entity never
+  changes (`engine_unit_runtime_world`).
 - **Editor tier** — `EditorSession`, behind the bridge. A world rebind is a
   full session transition.
 

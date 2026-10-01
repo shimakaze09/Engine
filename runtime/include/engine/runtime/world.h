@@ -788,8 +788,9 @@ public:
   }
 
   // Invoke fn(Entity) for every alive direct child of the entity's
-  // transform, in child-link order (transform insertion order). Costs the
-  // children. Must not create or destroy entities while iterating.
+  // transform, in ascending entity index: the scene file's order, which a
+  // save and a load keep and deleting an unrelated entity never changes.
+  // Costs the children. Must not create or destroy entities while iterating.
   template <typename Fn> void for_each_child(Entity parent, Fn &&fn) noexcept {
     if (!is_valid_entity(parent)) {
       return;

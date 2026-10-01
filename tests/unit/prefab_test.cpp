@@ -769,7 +769,12 @@ int verify_child_prefab_instantiates_as_root() {
   }
 
   // Boundary: a root source stays a root, and the parent entity keeps its
-  // own persistent id through every instantiate above.
+  // own persistent id through every instantiate above. The child is
+  // detached first: a prefab holds one entity, so a parent is refused.
+  childTransform.parentId = engine::core::kInvalidPersistentId;
+  if (!world->add_transform(child, childTransform)) {
+    return 513;
+  }
   remove_prefab_file();
   if (!save_prefab(*world, parent, kPrefabPath)) {
     return 511;
@@ -782,6 +787,45 @@ int verify_child_prefab_instantiates_as_root() {
       (world->persistent_id(parent) != parentId)) {
     return 512;
   }
+  return 0;
+}
+
+/// Saving an entity with children is refused and writes nothing. The
+/// prefab format holds one entity, and the save used to report success
+/// with the children left out, so a script saving a hierarchy got back a
+/// childless prefab and no line saying why.
+int verify_prefab_save_refuses_a_parent() {
+  using namespace engine::runtime;
+
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 600;
+  }
+  const Entity parent = world->create_scene_object();
+  const Entity child = world->create_scene_object();
+  Transform childTransform{};
+  if ((parent == kInvalidEntity) || (child == kInvalidEntity) ||
+      !world->get_transform(child, &childTransform)) {
+    return 601;
+  }
+  childTransform.parentId = world->persistent_id(parent);
+  if (!world->add_transform(child, childTransform)) {
+    return 602;
+  }
+
+  remove_prefab_file();
+  if (save_prefab(*world, parent, kPrefabPath)) {
+    return 603;
+  }
+  char text[64] = {};
+  if (read_prefab_text(text, sizeof(text)) != 0U) {
+    return 604;
+  }
+  // The child itself holds no children, so it saves (as a root).
+  if (!save_prefab(*world, child, kPrefabPath)) {
+    return 605;
+  }
+  remove_prefab_file();
   return 0;
 }
 
@@ -1107,6 +1151,12 @@ int main() {
   }
 
   result = verify_child_prefab_instantiates_as_root();
+  if (result != 0) {
+    remove_prefab_file();
+    return result;
+  }
+
+  result = verify_prefab_save_refuses_a_parent();
   if (result != 0) {
     remove_prefab_file();
     return result;

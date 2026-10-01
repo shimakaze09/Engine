@@ -193,6 +193,28 @@ bool save_prefab(const World &world, Entity entity, const char *path) noexcept {
     return false;
   }
 
+  // The prefab format holds one entity, so children would be left out of
+  // the file while the save reported success. A parent is refused, as the
+  // payloads above are, naming how many children it has.
+  const PersistentId parentId = world.persistent_id(entity);
+  std::size_t childCount = 0U;
+  world.for_each_alive([&](Entity other) noexcept {
+    Transform transform{};
+    if ((other != entity) && world.get_transform(other, &transform) &&
+        (transform.parentId == parentId)) {
+      ++childCount;
+    }
+  });
+  if (childCount > 0U) {
+    char message[192] = {};
+    std::snprintf(message, sizeof(message),
+                  "save_prefab refused: the entity has %zu child "
+                  "entit%s, and a prefab holds a single entity",
+                  childCount, (childCount == 1U) ? "y" : "ies");
+    core::log_message(core::LogLevel::Error, kPrefabLogChannel, message);
+    return false;
+  }
+
   ReflectedComponentDescriptors descs{};
   if (!find_reflected_component_descriptors(&descs, kPrefabLogChannel)) {
     return false;
