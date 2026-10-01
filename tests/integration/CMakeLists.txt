@@ -1093,6 +1093,16 @@ engine_add_test_executable(engine_integration_script_module_cache
     integration
 )
 
+engine_add_test_executable(engine_integration_lua_entity_argument_report
+    SOURCES
+    lua_entity_argument_report_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_scripting
+    LABELS
+    integration
+)
+
 engine_add_test_executable(engine_integration_script_table_capacity
     SOURCES
     script_table_capacity_test.cpp

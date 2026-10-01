@@ -393,6 +393,12 @@ separates a bad argument from a full table. The tables hold 1,024
 coroutines, 64 collision handlers and 64 pools of up to 1,024 entities each.
 The first refusal by a full table logs a Warning.
 
+An `engine.*` call given an entity it cannot act on still returns `false`
+or `nil`. This covers a value that is not a handle, a handle from before
+the last scene load, or one naming a destroyed entity. The first such
+call from each script line logs a Warning naming the file, the line, the
+binding and the reason (`engine_integration_lua_entity_argument_report`).
+
 Current script conventions in the sample's `assets/`:
 
 - Scene-level module (`assets/main.lua`)
