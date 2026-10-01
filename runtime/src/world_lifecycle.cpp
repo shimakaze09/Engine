@@ -10,6 +10,7 @@
 #include "engine/core/logging.h"
 #include "engine/core/string_util.h"
 #include "engine/math/transform.h"
+#include "engine/physics/physics.h"
 #include "engine/runtime/reflect_types.h"
 #include "world_internal.h"
 
@@ -416,6 +417,10 @@ void World::remove_all_components(Entity entity) noexcept {
 
   m_cameraManager.on_entity_destroyed(entity);
 
+  // What rested on a dying collider wakes before it goes, or it would hang.
+  if (m_colliders.get_ptr(entity) != nullptr) {
+    physics::wake_bodies_near_collider(*this, entity);
+  }
   physics::remove_shape_payloads(m_physicsContext, entity);
   physics::remove_joints_for_entity(m_physicsContext, entity);
   unlink_transform_node(entity.index);

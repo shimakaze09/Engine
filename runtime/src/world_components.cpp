@@ -318,6 +318,11 @@ bool World::add_transform(Entity entity, const Transform &transform) noexcept {
   const Entity ownerBefore = (movesGeometry && hadTransform)
                                  ? find_rigid_body_owner(entity, m_readStateIndex)
                                  : kInvalidEntity;
+  // A collider moved by its transform (a teleport, a script set_position)
+  // leaves what rested on it behind; that wakes and falls.
+  if (hadTransform && (m_colliders.get_ptr(entity) != nullptr)) {
+    physics::wake_bodies_near_collider(*this, entity);
+  }
   if (!m_transforms.add(entity, transform)) {
     note_refusal(core::FailureKind::CapacityExhausted);
     return false;
@@ -642,6 +647,10 @@ bool World::remove_collider(Entity entity) noexcept {
     return false;
   }
 
+  // What rested on the collider wakes before it goes, or it would hang.
+  if (m_colliders.get_ptr(entity) != nullptr) {
+    physics::wake_bodies_near_collider(*this, entity);
+  }
   const bool removed = m_colliders.remove(entity);
   if (removed) {
     physics::remove_shape_payloads(m_physicsContext, entity);
