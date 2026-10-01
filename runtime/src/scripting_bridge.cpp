@@ -826,11 +826,19 @@ void scripting_for_each_scripted_entity(runtime::World *world,
   if ((world == nullptr) || (visit == nullptr)) {
     return;
   }
-  world->for_each<runtime::ScriptComponent>(
-      [visit, context](runtime::Entity entity,
-                       const runtime::ScriptComponent &script) noexcept {
-        visit(entity, script, context);
-      });
+  // Ascending entity index, not the component array's order: removing a
+  // script swaps the last one into its slot, so the array's order is an
+  // edit history the editor, a reloaded scene and the player would each
+  // see differently. Index order is the scene's own order after any load,
+  // and the order begin-play reaches entities spawned later.
+  const runtime::World &view = *world;
+  view.for_each_alive([&view, visit, context](runtime::Entity entity) noexcept {
+    const runtime::ScriptComponent *script =
+        view.get_script_component_ptr(entity);
+    if (script != nullptr) {
+      visit(entity, *script, context);
+    }
+  });
 }
 
 bool scripting_has_begun_play(runtime::World *world,
