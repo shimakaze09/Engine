@@ -628,7 +628,7 @@ MaterialShaderVariantSelection select_material_shader_defines(
   if (has_emissive_value(material.emissive)) {
     append_material_shader_define(selection, "HAS_EMISSIVE");
   }
-  if (material.opacity < 1.0F) {
+  if (material_is_transparent(material)) {
     append_material_shader_define(selection, "MATERIAL_TRANSLUCENT");
   }
   if (skinned) {

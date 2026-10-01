@@ -122,7 +122,7 @@ std::uint64_t build_draw_sort_key(const renderer::Material &material,
                                   renderer::MeshHandle runtimeMesh,
                                   const math::Vec3 &center,
                                   const RenderPrepView &view) noexcept {
-  const bool transparent = (material.opacity < 1.0F);
+  const bool transparent = renderer::material_is_transparent(material);
   const std::uint64_t transparentBit =
       transparent ? renderer::kDrawKeyTransparentBit : 0ULL;
 

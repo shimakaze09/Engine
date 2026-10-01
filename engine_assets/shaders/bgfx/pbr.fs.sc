@@ -542,6 +542,11 @@ void main() {
         discard;
     }
     float opacity = clamp(u_opacity.x, 0.0, 1.0);
+    // Blend fades with the opacity texture, as glTF's BLEND does with
+    // base-colour alpha; Mask only cuts out, above.
+    if (int(u_alphaMode.x) == 2) {
+        opacity *= maskAlpha;
+    }
 
 #if ENGINE_SHADING_UNLIT
     // Unlit answers no light: no loops, no ambient, no image-based term,

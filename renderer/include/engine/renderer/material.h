@@ -11,10 +11,15 @@
 
 namespace engine::renderer {
 
-/// Alpha handling for a draw. Opaque and Blend match the pre-existing
-/// opacity-driven transparency classification (build_draw_sort_key keys off
-/// opacity < 1, unchanged by this enum); Mask adds an alpha-tested cutout
-/// (fragment discard below alphaCutoff) that v1 materials never had.
+/// Alpha handling for a draw, as glTF's alphaMode defines it. Mask is an
+/// alpha-tested cutout: a fragment whose opacity-texture value is below
+/// alphaCutoff is discarded, and the rest is opaque. Blend blends the
+/// surface over what is behind it with alpha = opacity x the opacity
+/// texture, so a soft-edged card (hair, eyelashes, foliage fringes) fades
+/// out where its texture does; a Blend material with opacity 1 and no
+/// texture still draws in the transparent half, sorted back to front and
+/// writing no depth. An opacity below 1 makes any material transparent,
+/// as it always has (see material_is_transparent).
 enum class AlphaMode : std::uint8_t { Opaque = 0U, Mask = 1U, Blend = 2U };
 
 /// How a draw's surface is lit. This is the material's own property, not a
@@ -87,7 +92,14 @@ struct Material final {
   TextureHandle metallicRoughnessTexture = kInvalidTextureHandle;
   TextureHandle emissiveTexture = kInvalidTextureHandle;
   TextureHandle occlusionTexture = kInvalidTextureHandle; // AO, R channel
-  TextureHandle opacityTexture = kInvalidTextureHandle;   // mask, R channel
+  TextureHandle opacityTexture = kInvalidTextureHandle;   // alpha, R channel
 };
+
+/// Whether a draw of `material` blends: its alpha mode is Blend, or its
+/// opacity is below 1. Render prep keys the transparent half of the draw
+/// list off this, and the shader variant selection follows it.
+constexpr bool material_is_transparent(const Material &material) noexcept {
+  return (material.alphaMode == AlphaMode::Blend) || (material.opacity < 1.0F);
+}
 
 } // namespace engine::renderer
