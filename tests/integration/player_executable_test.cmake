@@ -8,9 +8,11 @@
 # box waits for a click.
 #
 # Inputs: PLAYER (the executable), SAMPLE (the sample project directory),
+# SAMPLE_SOURCE (the sample's source tree, which no test writes to, so a
+# copy of it never races the scratch files other tests make in SAMPLE),
 # SCRATCH (a directory this test may replace).
 
-foreach(var PLAYER SAMPLE SCRATCH)
+foreach(var PLAYER SAMPLE SAMPLE_SOURCE SCRATCH)
     if(NOT DEFINED ${var})
         message(FATAL_ERROR "${var} is required")
     endif()
@@ -72,7 +74,7 @@ expect_player(broken_startup_scene 3
 # script's on_begin_play ran there and then again in the loaded scene, and
 # every side effect it had outside the World happened twice.
 set(once "${SCRATCH}/once")
-file(COPY "${SAMPLE}/" DESTINATION "${once}")
+file(COPY "${SAMPLE_SOURCE}/" DESTINATION "${once}")
 file(WRITE "${once}/assets/main.lua"
     "local M = {}\n"
     "function M.on_begin_play(_self)\n"
