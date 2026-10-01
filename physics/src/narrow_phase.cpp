@@ -228,7 +228,8 @@ void resolve_pair_manifold(const PairContext &pair,
 }
 
 /// Records the colliding pair, wakes sleeping bodies, and returns whether a
-/// positional/impulse response is required (false for static-static pairs).
+/// positional/impulse response is required. The pair loop already skips a
+/// pair with no movable side, so every pair reaching here is answered true.
 bool record_pair_and_wake(const PairContext &pair) noexcept {
   record_collision_pair(pair.world, pair.entityA, pair.entityB);
   const float vA2 = (pair.bodyA != nullptr)

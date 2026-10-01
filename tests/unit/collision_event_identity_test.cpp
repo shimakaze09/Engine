@@ -132,9 +132,9 @@ bool start_scenario(Scenario &s, const char *script) noexcept {
   return marker_exists(*s.world, expected);
 }
 
-// Scenario scenes place overlapping static colliders at the origin (and
-// spawn_shape cubes for a second, spatially separate pair), placed by the
-// spawn itself.
+// Scenario scenes overlap a static collider and a dynamic one at the origin
+// (and spawn_shape cubes for a second, spatially separate pair), placed by
+// the spawn itself. Two static colliders would report no event.
 // Shared Lua verdict helper: classifies one delivered participant slot
 // against the recycled replacement. 'retargeted' is the #395 defect.
 constexpr const char *kClassifyHelper =
@@ -159,27 +159,27 @@ constexpr const char *kClassifyHelper =
 /// registered handlers run in registration order, the legacy global last.
 int check_registered_to_registered() noexcept {
   Scenario s{};
-  std::string script =
-      "verdict = 'unseen'\n"
-      "order = ''\n"
-      "function on_start()\n"
-      "    a = engine.spawn_entity()\n"
-      "    engine.add_collider(a, 0.5, 0.5, 0.5)\n"
-      "    b = engine.spawn_entity()\n"
-      "    engine.add_collider(b, 0.5, 0.5, 0.5)\n"
-      "    engine.on_collision_handler(function(x, y)\n"
-      "        order = order .. '1'\n"
-      "        engine.destroy_entity(a)\n"
-      "        replacement = engine.spawn_entity()\n"
-      "    end)\n"
-      "    engine.on_collision_handler(function(x, y)\n"
-      "        order = order .. '2'\n"
-      "        verdict = classify(x, y)\n"
-      "    end)\n"
-      "end\n"
-      "function on_collision(x, y)\n"
-      "    order = order .. 'g'\n"
-      "end\n";
+  std::string script = "verdict = 'unseen'\n"
+                       "order = ''\n"
+                       "function on_start()\n"
+                       "    a = engine.spawn_entity()\n"
+                       "    engine.add_collider(a, 0.5, 0.5, 0.5)\n"
+                       "    b = engine.spawn_entity()\n"
+                       "    engine.add_collider(b, 0.5, 0.5, 0.5)\n"
+                       "    engine.add_rigid_body(b, 1.0)\n"
+                       "    engine.on_collision_handler(function(x, y)\n"
+                       "        order = order .. '1'\n"
+                       "        engine.destroy_entity(a)\n"
+                       "        replacement = engine.spawn_entity()\n"
+                       "    end)\n"
+                       "    engine.on_collision_handler(function(x, y)\n"
+                       "        order = order .. '2'\n"
+                       "        verdict = classify(x, y)\n"
+                       "    end)\n"
+                       "end\n"
+                       "function on_collision(x, y)\n"
+                       "    order = order .. 'g'\n"
+                       "end\n";
   script += kClassifyHelper;
   script += "function report_order()\n"
             "    local m = engine.spawn_entity()\n"
@@ -205,21 +205,21 @@ int check_registered_to_registered() noexcept {
 /// on_collision fallback rather than a registered handler.
 int check_registered_to_legacy_global() noexcept {
   Scenario s{};
-  std::string script =
-      "verdict = 'unseen'\n"
-      "function on_start()\n"
-      "    a = engine.spawn_entity()\n"
-      "    engine.add_collider(a, 0.5, 0.5, 0.5)\n"
-      "    b = engine.spawn_entity()\n"
-      "    engine.add_collider(b, 0.5, 0.5, 0.5)\n"
-      "    engine.on_collision_handler(function(x, y)\n"
-      "        engine.destroy_entity(a)\n"
-      "        replacement = engine.spawn_entity()\n"
-      "    end)\n"
-      "end\n"
-      "function on_collision(x, y)\n"
-      "    verdict = classify(x, y)\n"
-      "end\n";
+  std::string script = "verdict = 'unseen'\n"
+                       "function on_start()\n"
+                       "    a = engine.spawn_entity()\n"
+                       "    engine.add_collider(a, 0.5, 0.5, 0.5)\n"
+                       "    b = engine.spawn_entity()\n"
+                       "    engine.add_collider(b, 0.5, 0.5, 0.5)\n"
+                       "    engine.add_rigid_body(b, 1.0)\n"
+                       "    engine.on_collision_handler(function(x, y)\n"
+                       "        engine.destroy_entity(a)\n"
+                       "        replacement = engine.spawn_entity()\n"
+                       "    end)\n"
+                       "end\n"
+                       "function on_collision(x, y)\n"
+                       "    verdict = classify(x, y)\n"
+                       "end\n";
   script += kClassifyHelper;
   if (!start_scenario(s, script.c_str())) {
     return 20;
@@ -241,6 +241,7 @@ int check_destroyed_without_recycle() noexcept {
       "    engine.add_collider(a, 0.5, 0.5, 0.5)\n"
       "    b = engine.spawn_entity()\n"
       "    engine.add_collider(b, 0.5, 0.5, 0.5)\n"
+      "    engine.add_rigid_body(b, 1.0)\n"
       "    engine.on_collision_handler(function(x, y)\n"
       "        engine.destroy_entity(b)\n"
       "    end)\n"
@@ -271,28 +272,29 @@ int check_destroyed_without_recycle() noexcept {
 /// collide in the same step.
 int check_cross_pair_recycle() noexcept {
   Scenario s{};
-  std::string script =
-      "verdict = 'unseen'\n"
-      "acted = false\n"
-      "function on_start()\n"
-      "    a = engine.spawn_entity()\n"
-      "    engine.add_collider(a, 0.5, 0.5, 0.5)\n"
-      "    b = engine.spawn_entity()\n"
-      "    engine.add_collider(b, 0.5, 0.5, 0.5)\n"
-      "    c = engine.spawn_shape('cube', 10.0, 0.25, 0.0)\n"
-      "    d = engine.spawn_shape('cube', 10.0, 0.0, 0.0)\n"
-      "    engine.on_collision_handler(function(x, y)\n"
-      "        if x == a or y == a or x == b or y == b then\n"
-      "            if not acted then\n"
-      "                acted = true\n"
-      "                engine.destroy_entity(c)\n"
-      "                replacement = engine.spawn_entity()\n"
-      "            end\n"
-      "        elseif acted then\n"
-      "            verdict = classify(x, y)\n"
-      "        end\n"
-      "    end)\n"
-      "end\n";
+  std::string script = "verdict = 'unseen'\n"
+                       "acted = false\n"
+                       "function on_start()\n"
+                       "    a = engine.spawn_entity()\n"
+                       "    engine.add_collider(a, 0.5, 0.5, 0.5)\n"
+                       "    b = engine.spawn_entity()\n"
+                       "    engine.add_collider(b, 0.5, 0.5, 0.5)\n"
+                       "    engine.add_rigid_body(b, 1.0)\n"
+                       "    c = engine.spawn_shape('cube', 10.0, 0.25, 0.0)\n"
+                       "    d = engine.spawn_shape('cube', 10.0, 0.0, 0.0)\n"
+                       "    engine.add_rigid_body(d, 1.0)\n"
+                       "    engine.on_collision_handler(function(x, y)\n"
+                       "        if x == a or y == a or x == b or y == b then\n"
+                       "            if not acted then\n"
+                       "                acted = true\n"
+                       "                engine.destroy_entity(c)\n"
+                       "                replacement = engine.spawn_entity()\n"
+                       "            end\n"
+                       "        elseif acted then\n"
+                       "            verdict = classify(x, y)\n"
+                       "        end\n"
+                       "    end)\n"
+                       "end\n";
   script += kClassifyHelper;
   if (!start_scenario(s, script.c_str())) {
     return 40;
@@ -318,6 +320,11 @@ int check_catchup_second_delivery() noexcept {
       "    engine.add_collider(a, 0.5, 0.5, 0.5)\n"
       "    b = engine.spawn_entity()\n"
       "    engine.add_collider(b, 0.5, 0.5, 0.5)\n"
+      "    engine.add_rigid_body(b, 1.0)\n"
+      "    -- B rests 0.01 m deep on A under gravity, so the contact\n"
+      "    -- persists into the frame's second step.\n"
+      "    engine.set_position(b, 0.0, 0.99, 0.0)\n"
+      "    engine.set_gravity(0.0, -9.8, 0.0)\n"
       "    engine.on_collision_handler(function(x, y)\n"
       "        deliveries = deliveries + 1\n"
       "        if deliveries == 1 then\n"

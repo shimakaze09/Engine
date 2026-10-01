@@ -271,6 +271,10 @@ struct PhysicsContext final {
   // test can hold pair testing to the pairs that can touch.
   std::uint32_t narrowPhasePairTests = 0U;
 
+  // Overlapping pairs the last resolve skipped before the narrow phase
+  // because neither side can move: no response and no collision event.
+  std::uint32_t immovablePairsSkipped = 0U;
+
   // Collision-pair buffer diagnostic: pairs recorded past
   // kMaxCollisionPairs are counted per step and reported once per
   // overflow episode. The kept set is the first kMaxCollisionPairs in
