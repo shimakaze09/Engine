@@ -139,7 +139,7 @@ public:
       return false;
     }
     lua_rawgeti(state, LUA_REGISTRYINDEX, condRef);
-    if (lua_pcall(state, 0, 1, 0) != LUA_OK) {
+    if (!traced_pcall(state, 0, 1)) {
       if (logLuaError != nullptr) {
         logLuaError(state, "wait_until condition");
       } else {
@@ -307,15 +307,13 @@ int start_lua_coroutine(lua_State *state, float totalSeconds,
       return 1;
     }
 
-    luaL_unref(state, LUA_REGISTRYINDEX, threadRef);
     if (refreshLuaHook != nullptr) {
       refreshLuaHook(state);
     }
-    if (lua_isstring(thread, -1) != 0) {
-      lua_xmove(thread, state, 1);
-    } else {
-      lua_pushstring(state, "start_coroutine error (non-string)");
-    }
+    // Read while the registry still holds the thread: building the
+    // traceback allocates, and an unreferenced thread could be collected.
+    push_coroutine_traceback(state, thread);
+    luaL_unref(state, LUA_REGISTRYINDEX, threadRef);
     if (logLuaError != nullptr) {
       logLuaError(state, "start_coroutine");
     } else {
@@ -363,16 +361,8 @@ void tick_lua_coroutines(lua_State *state, float totalSeconds,
         g_coroutineScheduler.reject_yield(state, entry, logLuaError);
       }
     } else {
-      bool haveMessage = true;
-      if (lua_isstring(entry.thread, -1) != 0) {
-        lua_xmove(entry.thread, state, 1);
-      } else {
-        haveMessage =
-            push_message_protected(state, "coroutine error (non-string)");
-      }
-      if (!haveMessage) {
-        // The protected push already logged why it failed.
-      } else if (logLuaError != nullptr) {
+      push_coroutine_traceback(state, entry.thread);
+      if (logLuaError != nullptr) {
         logLuaError(state, "coroutine");
       } else {
         lua_pop(state, 1);

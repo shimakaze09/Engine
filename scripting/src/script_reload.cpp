@@ -395,7 +395,7 @@ ReloadOutcome run_chunk_as_reload(lua_State *state, const char *label,
     return ReloadOutcome::Busy;
   }
   arm_debug_lua_hook(state);
-  bool failed = (lua_pcall(state, 0, results, 0) != LUA_OK);
+  bool failed = !traced_pcall(state, 0, results);
   bool resultsOnStack = !failed;
   if (failed) {
     log_lua_error(state, context);

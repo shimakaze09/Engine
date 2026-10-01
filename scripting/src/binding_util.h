@@ -47,11 +47,26 @@ bool script_path_in_jail(const char *path, const char *context) noexcept;
 bool resolve_script_os_path(const char *path, char *out,
                             std::size_t outCapacity) noexcept;
 
-/// Logs the Lua error on top of the stack with a traceback, then pops it.
+/// Logs the Lua error on top of the stack, then pops it. The error carries
+/// its call stack when it came from traced_pcall or
+/// push_coroutine_traceback, which capture it before the stack unwinds.
 void log_lua_error(const char *context) noexcept;
 
 /// Same, but on an explicit stack (e.g. a coroutine thread's caller).
 void log_lua_error(lua_State *state, const char *context) noexcept;
+
+/// lua_pcall of the function and `nargs` arguments on top of the stack,
+/// with a message handler that appends the call stack to the error while
+/// the failing frames still exist; after lua_pcall returns they are gone,
+/// so a traceback built later describes only its own caller. Same stack
+/// effect as lua_pcall: results, or the traced error, on top.
+bool traced_pcall(lua_State *state, int nargs, int nresults) noexcept;
+
+/// Replaces the error on top of a failed coroutine's stack with that
+/// error and the coroutine's call stack, pushed on `state`; the failed
+/// coroutine keeps its frames, so they are read from it. Leaves a plain
+/// message when the traceback cannot be built.
+void push_coroutine_traceback(lua_State *state, lua_State *coroutine) noexcept;
 
 /// Signature for protected-dispatch trampolines: a lua_CFunction body that
 /// receives its argument struct as a light userdata at stack index 1.

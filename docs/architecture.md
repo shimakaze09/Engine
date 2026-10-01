@@ -377,6 +377,13 @@ usage; preserve traceback, sandbox and hot-reload behavior. Scripting
 consumes the engine only through sanctioned bridge APIs — never core or
 runtime internals.
 
+A call into script code goes through `traced_pcall`
+(`scripting/src/binding_util.h`), whose message handler appends the call
+stack while the failing frames still exist; a failed coroutine's trace is
+read from the coroutine, which keeps its frames. A traceback built after
+`lua_pcall` returns describes only its own caller
+(`engine_unit_lua_error_diagnostic`).
+
 Every script-reachable filesystem path is VFS-jailed as defence in depth:
 relative, forward slashes, no drive designators, no `..`. Script chunks
 and their hot-reload watches resolve through the VFS mount when the

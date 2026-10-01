@@ -23,12 +23,32 @@ extern "C" {
 namespace engine::scripting {
 namespace {
 
-/// Protected traceback helper: receives the raw error message via light
-/// userdata so an allocation failure inside luaL_traceback stays catchable
-/// instead of reaching the panic handler.
-int traceback_trampoline(lua_State *state) noexcept {
-  const char *message = static_cast<const char *>(lua_touserdata(state, 1));
+/// lua_pcall message handler: the error with the call stack appended,
+/// built while the failing frames are still on the stack. A non-string
+/// error is described by its __tostring, or by its type.
+int traceback_message_handler(lua_State *state) noexcept {
+  const char *message = lua_tostring(state, 1);
+  if (message == nullptr) {
+    if ((luaL_callmeta(state, 1, "__tostring") != 0) &&
+        (lua_type(state, -1) == LUA_TSTRING)) {
+      message = lua_tostring(state, -1);
+    } else {
+      message = lua_pushfstring(state, "(error object is a %s value)",
+                                luaL_typename(state, 1));
+    }
+  }
   luaL_traceback(state, state, message, 1);
+  return 1;
+}
+
+/// Protected body of push_coroutine_traceback: the coroutine arrives as
+/// light userdata, and luaL_traceback's allocations stay catchable.
+int coroutine_traceback_trampoline(lua_State *state) noexcept {
+  auto *coroutine = static_cast<lua_State *>(lua_touserdata(state, 1));
+  const char *message = lua_tostring(coroutine, -1);
+  luaL_traceback(
+      state, coroutine,
+      (message != nullptr) ? message : "coroutine error (non-string)", 0);
   return 1;
 }
 
@@ -199,17 +219,7 @@ void log_lua_error(lua_State *state, const char *context) noexcept {
   if (message == nullptr) {
     message = "unknown lua error";
   }
-
-  lua_pushcfunction(state, &traceback_trampoline);
-  lua_pushlightuserdata(state,
-                        const_cast<void *>(static_cast<const void *>(message)));
   const char *trace = message;
-  if (lua_pcall(state, 1, 1, 0) == LUA_OK) {
-    const char *result = lua_tostring(state, -1);
-    if (result != nullptr) {
-      trace = result;
-    }
-  }
 
   char logBuffer[1024] = {};
   if ((context != nullptr) && (context[0] != '\0')) {
@@ -223,7 +233,29 @@ void log_lua_error(lua_State *state, const char *context) noexcept {
   record.kind = core::FailureKind::InvariantViolated;
   fill_lua_where(message, &record);
   core::log_diagnostic(record);
-  lua_pop(state, 2);
+  lua_pop(state, 1);
+}
+
+bool traced_pcall(lua_State *state, int nargs, int nresults) noexcept {
+  const int handler = lua_gettop(state) - nargs;
+  lua_pushcfunction(state, &traceback_message_handler);
+  lua_insert(state, handler);
+  const int status = lua_pcall(state, nargs, nresults, handler);
+  lua_remove(state, handler);
+  return status == LUA_OK;
+}
+
+void push_coroutine_traceback(lua_State *state, lua_State *coroutine) noexcept {
+  lua_pushcfunction(state, &coroutine_traceback_trampoline);
+  lua_pushlightuserdata(state, coroutine);
+  if (lua_pcall(state, 1, 1, 0) != LUA_OK) {
+    // The traceback could not be built (no memory): keep the bare error,
+    // as the plain move did.
+    lua_pop(state, 1);
+    lua_xmove(coroutine, state, 1);
+    return;
+  }
+  lua_pop(coroutine, 1);
 }
 
 bool protected_c_operation(lua_State *state, LuaDispatchFn trampoline,
@@ -235,7 +267,7 @@ bool protected_c_operation(lua_State *state, LuaDispatchFn trampoline,
 
   lua_pushcfunction(state, trampoline);
   lua_pushlightuserdata(state, args);
-  if (lua_pcall(state, 1, nresults, 0) != LUA_OK) {
+  if (!traced_pcall(state, 1, nresults)) {
     log_lua_error(state, context);
     return false;
   }

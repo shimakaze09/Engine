@@ -370,7 +370,7 @@ int attempt_module_load(const char *path) noexcept {
 
   refresh_lua_hook();
 
-  if (lua_pcall(g_state, 0, 1, 0) != LUA_OK) {
+  if (!traced_pcall(g_state, 0, 1)) {
     log_script_error("exec entity script");
     --g_moduleLoadDepth;
     return LUA_NOREF;

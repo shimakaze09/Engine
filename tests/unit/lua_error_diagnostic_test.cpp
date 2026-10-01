@@ -72,6 +72,47 @@ int main() {
   ctx.check(std::strstr(g_last.message, "boom") != nullptr,
             "the message text is the Lua error");
 
+  // An error two calls deep logs the call chain that reached it. The
+  // traceback used to be built after lua_pcall had unwound the stack, so
+  // it described only the logger's own call and named no script frame.
+  ctx.check(write_script("local function inner()\n"
+                         "  error('deep')\n"
+                         "end\n"
+                         "local function outer()\n"
+                         "  inner()\n"
+                         "end\n"
+                         "outer()\n"),
+            "write the nested failing script");
+  g_scriptingRecords = 0;
+  ctx.check(!engine::scripting::load_script(kScriptPath),
+            "the nested failing script fails to load");
+  std::printf("nested error record: %s\n", g_last.message);
+  ctx.check((g_scriptingRecords >= 1) && (g_last.line == 2),
+            "the record names the line that raised");
+  ctx.check(std::strstr(g_last.message, "'inner'") != nullptr,
+            "the traceback names the function that raised");
+  ctx.check(std::strstr(g_last.message, "'outer'") != nullptr,
+            "the traceback names its caller");
+  ctx.check(std::strstr(g_last.message, "lua_error_diagnostic_test.lua:5:") !=
+                nullptr,
+            "the traceback gives the caller's line");
+
+  // A coroutine that fails keeps its frames, so its error carries the
+  // coroutine's own call chain, read from the coroutine.
+  ctx.check(write_script("local function failing()\n"
+                         "  error('in coroutine')\n"
+                         "end\n"
+                         "engine.start_coroutine(function()\n"
+                         "  failing()\n"
+                         "end)\n"),
+            "write the failing coroutine script");
+  g_scriptingRecords = 0;
+  static_cast<void>(engine::scripting::load_script(kScriptPath));
+  ctx.check((g_scriptingRecords >= 1) &&
+                (std::strstr(g_last.message, "in coroutine") != nullptr) &&
+                (std::strstr(g_last.message, "'failing'") != nullptr),
+            "a coroutine's error names the function that raised in it");
+
   // A syntax error is reported the same way, on its own line.
   ctx.check(write_script("local ok = true\nthis is not lua\n"),
             "write the unparsable script");

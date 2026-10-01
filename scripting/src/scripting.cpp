@@ -531,7 +531,7 @@ bool load_script(const char *path) noexcept {
 
   arm_debug_lua_hook(state);
 
-  if (lua_pcall(state, 0, 0, 0) != LUA_OK) {
+  if (!traced_pcall(state, 0, 0)) {
     log_lua_error("load_script");
     return false;
   }
