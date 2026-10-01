@@ -374,6 +374,13 @@ engine_add_test_executable(engine_unit_asset_catalog
     engine_content
 )
 
+engine_add_test_executable(engine_unit_asset_type_query
+    SOURCES
+    asset_type_query_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+)
+
 engine_add_test_executable(engine_unit_asset_identity
     SOURCES
     asset_identity_test.cpp

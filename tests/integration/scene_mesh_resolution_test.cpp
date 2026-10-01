@@ -112,7 +112,7 @@ bool query_lists(const char *path) noexcept {
   constexpr std::size_t kMaxHits = 128U;
   engine::runtime::EditorAssetSearchResult hits[kMaxHits];
   const std::size_t count = engine::runtime::editor_query_assets(
-      engine::content::AssetTypeTag::Mesh, "", hits, kMaxHits);
+      engine::content::AssetTypeTag::Mesh, "", hits, kMaxHits, nullptr);
   for (std::size_t i = 0U; i < count; ++i) {
     if (std::strcmp(hits[i].path, path) == 0) {
       return true;

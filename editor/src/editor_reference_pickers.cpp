@@ -198,8 +198,9 @@ bool draw_asset_reference_picker(const char *label,
 
     constexpr std::size_t kMaxHits = 64U;
     runtime::EditorAssetSearchResult hits[kMaxHits];
-    const std::size_t hitCount =
-        runtime::editor_query_assets(typeTag, query, hits, kMaxHits);
+    std::size_t matchCount = 0U;
+    const std::size_t hitCount = runtime::editor_query_assets(
+        typeTag, query, hits, kMaxHits, &matchCount);
     for (std::size_t i = 0U; i < hitCount; ++i) {
       ImGui::PushID(static_cast<int>(i));
       const bool isSelected = (*value == hits[i].assetId);
@@ -209,8 +210,9 @@ bool draw_asset_reference_picker(const char *label,
       }
       ImGui::PopID();
     }
-    if (hitCount == kMaxHits) {
-      ImGui::TextDisabled("More results than shown -- refine the search.");
+    if (matchCount > hitCount) {
+      ImGui::TextDisabled("Showing %zu of %zu -- refine the search.", hitCount,
+                          matchCount);
     }
     ImGui::EndCombo();
   }

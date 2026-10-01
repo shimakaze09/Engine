@@ -150,6 +150,19 @@ std::size_t query_assets_by_type(const AssetCatalog *catalog,
                                  AssetTypeTag typeTag, AssetId *outIds,
                                  std::size_t maxIds) noexcept;
 
+/// Searches every catalogued asset of `typeTag` for a file path containing
+/// `query`, ignoring ASCII case ("" or null matches each one), and returns
+/// how many match in all, which may exceed maxIds. Writes the maxIds
+/// matches whose paths sort first, in byte order, so a capped answer names
+/// the same assets on every machine whatever order the mount walk found
+/// them in. The filter runs inside the search, as Unity's FindAssets and
+/// Unreal's asset registry filter do, so no asset is out of reach of a
+/// query however many share its type. Cost: one pass over the records plus
+/// a binary insertion per kept match.
+std::size_t find_assets_of_type(const AssetCatalog *catalog,
+                                AssetTypeTag typeTag, const char *query,
+                                AssetId *outIds, std::size_t maxIds) noexcept;
+
 /// Copies up to maxIds direct dependencies of the id; returns the count.
 std::size_t get_dependencies(const AssetCatalog *catalog, AssetId id,
                              AssetId *outIds, std::size_t maxIds) noexcept;

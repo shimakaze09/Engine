@@ -135,33 +135,38 @@ std::uint64_t editor_request_mesh_asset(const char *virtualPath) noexcept {
 std::size_t editor_query_assets(content::AssetTypeTag typeTag,
                                 const char *query,
                                 EditorAssetSearchResult *outResults,
-                                std::size_t maxResults) noexcept {
+                                std::size_t maxResults,
+                                std::size_t *outMatchCount) noexcept {
+  if (outMatchCount != nullptr) {
+    *outMatchCount = 0U;
+  }
   if ((outResults == nullptr) || (maxResults == 0U) ||
       (g_editorAssetService == nullptr) ||
       (g_editorAssetService->catalog == nullptr)) {
     return 0U;
   }
 
-  constexpr std::size_t kScanCapacity = 512U;
-  content::AssetId candidateIds[kScanCapacity];
-  const std::size_t candidateCount = content::query_assets_by_type(
-      g_editorAssetService->catalog, typeTag, candidateIds, kScanCapacity);
+  const content::AssetCatalog *catalog = g_editorAssetService->catalog;
+  const std::size_t wanted = (maxResults < kMaxEditorAssetSearchResults)
+                                 ? maxResults
+                                 : kMaxEditorAssetSearchResults;
+  content::AssetId ids[kMaxEditorAssetSearchResults] = {};
+  const std::size_t matches =
+      content::find_assets_of_type(catalog, typeTag, query, ids, wanted);
+  if (outMatchCount != nullptr) {
+    *outMatchCount = matches;
+  }
 
-  const char *effectiveQuery = (query != nullptr) ? query : "";
+  const std::size_t found = (matches < wanted) ? matches : wanted;
   std::size_t written = 0U;
-  for (std::size_t i = 0U; (i < candidateCount) && (written < maxResults);
-      ++i) {
-    const content::AssetMetadata *metadata = content::find_asset_metadata(
-        g_editorAssetService->catalog, candidateIds[i]);
+  for (std::size_t i = 0U; i < found; ++i) {
+    const content::AssetMetadata *metadata =
+        content::find_asset_metadata(catalog, ids[i]);
     if (metadata == nullptr) {
       continue;
     }
-    if (!core::contains_ignoring_case(metadata->filePath.data(),
-                                      effectiveQuery)) {
-      continue;
-    }
     EditorAssetSearchResult &result = outResults[written];
-    result.assetId = candidateIds[i];
+    result.assetId = ids[i];
     std::snprintf(result.path, sizeof(result.path), "%s",
                   metadata->filePath.data());
     ++written;
