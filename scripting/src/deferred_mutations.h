@@ -138,6 +138,15 @@ bool apply_or_queue_spring_arm(runtime::Entity entity,
 bool apply_or_queue_camera_component(
     runtime::Entity entity, const math::CameraComponent &component) noexcept;
 
+/// Reads the entity's tag set through any pending queued write.
+bool latest_tag_set_component(runtime::Entity entity,
+                              math::TagSetComponent *outComponent) noexcept;
+/// Applies or queues a tag set replacement based on the current World
+/// phase.
+bool apply_or_queue_tag_set_component(
+    runtime::Entity entity, const math::TagSetComponent &component) noexcept;
+/// Applies or queues tag set removal based on the current World phase.
+bool apply_or_queue_remove_tag_set_component(runtime::Entity entity) noexcept;
 /// Applies or queues camera component removal based on the current World
 /// phase.
 bool apply_or_queue_remove_camera_component(runtime::Entity entity) noexcept;

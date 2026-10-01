@@ -506,6 +506,21 @@ hemisphere centers a and b in any orientation, as Unity's `CapsuleCast`
 does. Each returns the entity hit, the distance, the shape's center at
 impact and the surface normal, or `nil` (`engine_unit_physics_query`).
 
+Entities carry gameplay tags, as Godot's groups and Unreal's actor Tags
+do, so scripts find what they act on without a unique name. Give tags in
+the Inspector's Tags row under the name, or from Lua:
+- `engine.add_tag(e, "coin")` returns `true`, or `false` and why;
+- `engine.remove_tag(e, "coin")` and `engine.has_tag(e, "coin")`;
+- `engine.get_tags(e)` returns the entity's tags in order;
+- `local list, total = engine.find_entities_by_tag("coin")` returns the
+  entities that carry it, in entity-index order, and how many do (the list
+  holds at most 1,024).
+
+A tag is 1 to 31 letters, digits, `_`, `-` or `.`, compared ignoring case;
+an entity carries up to 8. Scenes and prefabs save them as
+`"Tags": ["coin", "gold"]` (`engine_unit_world_tag_set`,
+`engine_integration_lua_entity_tags`, `engine_unit_editor_entity_tags`).
+
 Set the type with the Inspector's Body Type or
 `engine.set_body_type(e, "kinematic")`, and read it with
 `engine.get_body_type(e)`. `engine.set_position`, `set_rotation`,
