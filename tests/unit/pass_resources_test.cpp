@@ -5,8 +5,9 @@
 
 #include "../fake_render_device.h"
 
-#include <cstdio>
+#include <cstddef>
 #include <cstdint>
+#include <cstdio>
 
 namespace engine::renderer {
 
@@ -15,11 +16,34 @@ namespace {
 // Textures created with a mip chain; pass resources never ask for one.
 int g_mipChainTextures = 0;
 
+// The format each created texture was asked for, by handle.
+constexpr std::size_t kMaxRecordedTextures = 64U;
+std::uint32_t g_recordedHandles[kMaxRecordedTextures] = {};
+TextureFormat g_recordedFormats[kMaxRecordedTextures] = {};
+std::size_t g_recordedCount = 0U;
+
 DeviceTextureHandle count_mip_chains(const TextureDesc &desc) noexcept {
   if (desc.mipLevels != 1) {
     ++g_mipChainTextures;
   }
-  return tests::fake::create_texture(desc);
+  const DeviceTextureHandle handle = tests::fake::create_texture(desc);
+  if (g_recordedCount < kMaxRecordedTextures) {
+    g_recordedHandles[g_recordedCount] = handle.value;
+    g_recordedFormats[g_recordedCount] = desc.format;
+    ++g_recordedCount;
+  }
+  return handle;
+}
+
+/// Whether `handle` was created with `format`.
+bool created_with_format(DeviceTextureHandle handle,
+                         TextureFormat format) noexcept {
+  for (std::size_t i = g_recordedCount; i > 0U; --i) {
+    if (g_recordedHandles[i - 1U] == handle.value) {
+      return g_recordedFormats[i - 1U] == format;
+    }
+  }
+  return false;
 }
 
 void reset_device() noexcept {
@@ -27,6 +51,7 @@ void reset_device() noexcept {
 
   tests::reset_fake_device();
   g_mipChainTextures = 0;
+  g_recordedCount = 0U;
   RenderDevice &device = tests::fake_device();
   device.create_texture = &count_mip_chains;
   device.destroy_texture = &tests::fake::destroy_texture;
@@ -79,6 +104,14 @@ void test_success_shutdown_releases_all() noexcept {
   // for a mip chain that would hold stale data forever.
   CHECK(g_mipChainTextures == 0,
         "no pass texture requests a generated mip chain");
+  // Emission above 1 feeds bloom, so the deferred path keeps
+  // it in a float target, as the forward path's scene target does.
+  CHECK(created_with_format(pass_resource_texture(resources.gbufferEmissive),
+                            TextureFormat::RGBA16F),
+        "the G-buffer's emissive target holds values above 1");
+  CHECK(created_with_format(pass_resource_texture(resources.sceneColor),
+                            TextureFormat::RGBA16F),
+        "the forward path's scene target holds values above 1");
 
   shutdown_pass_resources();
   CHECK(no_live_resources(), "shutdown releases all resources");

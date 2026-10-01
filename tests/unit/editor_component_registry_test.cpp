@@ -7,6 +7,7 @@
 // REFLECT_TYPE registration in this series).
 
 #include "editor_component_registry.h"
+#include "editor_inspector_metadata.h"
 #include "editor_panels_inspector_custom.h"
 #include "editor_session.h"
 
@@ -15,6 +16,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <memory>
 #include <new>
 
@@ -200,11 +202,12 @@ int check_camera_component_capture_apply_round_trip() noexcept {
 
 } // namespace
 
-/// EXPECTATION (#574): the Add Component menu does not offer a
-/// reflection probe, which no pass consumes, while it offers every other
-/// component the entity lacks and nothing it already carries. On base the
-/// menu offered every registry row.
-int check_add_menu_offers_only_consumed_components() noexcept {
+/// EXPECTATION (#838): the Add Component menu offers every component the
+/// entity lacks -- the reflection probe included, now that the renderer
+/// bakes and reads it -- and nothing it already carries, and no row is
+/// withheld without a reason, nor with its description saying it does
+/// nothing. On base the probe was withheld with "Not rendered yet".
+int check_add_menu_offers_every_missing_component() noexcept {
   std::unique_ptr<World> world(new (std::nothrow) World());
   if (world == nullptr) {
     return 1;
@@ -227,8 +230,8 @@ int check_add_menu_offers_only_consumed_components() noexcept {
     point = point || (offered[i] == ComponentEditType::PointLight);
     spot = spot || (offered[i] == ComponentEditType::SpotLight);
   }
-  if (probe) {
-    return 3; // a component that changes nothing is offered
+  if (!probe) {
+    return 3; // a component the renderer consumes is withheld
   }
   if (point) {
     return 4; // a component the entity carries is offered again
@@ -236,10 +239,24 @@ int check_add_menu_offers_only_consumed_components() noexcept {
   if (!spot) {
     return 5; // an ordinary missing component is not offered
   }
-  // Transform is always present on a scene object, the point light is
-  // carried, and the probe is withheld: every other row is offered.
-  if (count != engine::editor::kComponentEditTypeCount - 3U) {
+  // Transform is always present on a scene object and the point light is
+  // carried: every other row is offered.
+  if (count != engine::editor::kComponentEditTypeCount - 2U) {
     return 6;
+  }
+  std::size_t rowCount = 0U;
+  const engine::editor::ComponentMetadata *rows =
+      engine::editor::component_metadata_rows(&rowCount);
+  for (std::size_t i = 0U; i < rowCount; ++i) {
+    const char *tooltip = rows[i].tooltip;
+    if ((tooltip != nullptr) &&
+        (std::strstr(tooltip, "Not rendered") != nullptr)) {
+      return 7; // a description still says the component does nothing
+    }
+    if ((rows[i].notOfferedReason != nullptr) &&
+        (rows[i].notOfferedReason[0] == '\0')) {
+      return 8; // withheld with an empty reason
+    }
   }
   return 0;
 }
@@ -257,8 +274,8 @@ int main() {
        check_light_component_capture_apply_round_trip},
       {"camera_component_capture_apply_round_trip",
        check_camera_component_capture_apply_round_trip},
-      {"add_menu_offers_only_consumed_components",
-       check_add_menu_offers_only_consumed_components},
+      {"add_menu_offers_every_missing_component",
+       check_add_menu_offers_every_missing_component},
   };
   for (const Case &c : cases) {
     const int result = c.fn();

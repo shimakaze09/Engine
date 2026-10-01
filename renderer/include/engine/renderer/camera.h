@@ -26,6 +26,19 @@ struct CameraState final {
   float orthographicSize = 5.0F; ///< Half-height, world units; Orthographic.
 };
 
+/// A camera's near and far planes after the projection's fallbacks: what
+/// the projection actually clips to.
+struct CameraDepthRange final {
+  float nearPlane = 0.1F;
+  float farPlane = 100.0F;
+};
+
+/// The depth range camera_projection_matrix builds with: a near plane that
+/// is not positive falls back to 0.1, a far plane not beyond the near one
+/// to 100. Anything that measures depth against the camera's range reads
+/// it here, so it can never disagree with the projection.
+CameraDepthRange camera_depth_range(const CameraState &camera) noexcept;
+
 // Builds the camera's projection matrix for the given aspect with the
 // flush path's sanitization (fov/near/far/ortho-size fallbacks). Every
 // consumer of the active camera's projection — the GL flush, render-prep

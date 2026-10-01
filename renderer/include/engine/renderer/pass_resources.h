@@ -35,7 +35,7 @@ struct PassResources final {
   // G-Buffer pass writes (deferred path):
   PassResourceId gbufferAlbedo;   // RGBA8  — rgb=albedo, a=metallic
   PassResourceId gbufferNormal;   // RGBA16F — rgb=worldNormal, a=roughness
-  PassResourceId gbufferEmissive; // RGBA8  — rgb=emissive, a=AO
+  PassResourceId gbufferEmissive; // RGBA16F — rgb=emissive (HDR), a=AO
   PassResourceId gbufferDepth;    // DEPTH24 — shared with deferred lighting
 
   // SSAO pass (deferred path):

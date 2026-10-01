@@ -8,6 +8,7 @@
 
 #include "engine/core/job_system.h"
 #include "engine/renderer/asset_database.h"
+#include "engine/renderer/camera.h"
 #include "engine/renderer/command_buffer.h"
 #include "engine/renderer/mesh_loader.h"
 #include "engine/runtime/world.h"
@@ -38,6 +39,28 @@ struct RenderPrepAuxiliaryInputs final {
   std::array<LocalCaster, renderer::kMaxReflectionProbes> probeSpheres{};
 };
 
+/// The camera a render prep pass culls and orders its draws for. Culling
+/// reads the view-projection; draw order reads the distance of a draw's
+/// centre along the view direction, measured over the camera's own near
+/// and far planes, which means the same thing under a perspective and an
+/// orthographic projection (the clip-space w an orthographic projection
+/// gives is 1 everywhere).
+struct RenderPrepView final {
+  math::Mat4 viewProjection{};
+  math::Vec3 eye{};
+  /// Unit length.
+  math::Vec3 forward = math::Vec3(0.0F, 0.0F, -1.0F);
+  float nearPlane = 0.1F;
+  float farPlane = 100.0F;
+};
+
+/// The render prep view of `camera` at `aspect`, with the projection and
+/// depth range the flush draws it with (renderer::camera_projection_matrix
+/// and renderer::camera_depth_range). Main thread only: the projection
+/// reads the device's clip-depth convention.
+RenderPrepView make_render_prep_view(const renderer::CameraState &camera,
+                                     float aspect) noexcept;
+
 /// Inputs for one render-prep chunk job (world span -> local buffer).
 struct RenderPrepChunkJobData final {
   const World *world = nullptr;
@@ -51,7 +74,7 @@ struct RenderPrepChunkJobData final {
   /// Draws that did not fit a buffer this frame; a full buffer degrades
   /// the frame, it does not fail the graph.
   std::atomic<std::uint32_t> *droppedDrawCommands = nullptr;
-  math::Mat4 viewProjection{};
+  RenderPrepView view{};
   /// The device's clip-depth convention, read on the main thread when the
   /// graph is built: the chunk jobs run on workers, and the render device
   /// is main-thread only.
@@ -98,7 +121,7 @@ bool enqueue_render_prep_pipeline(
     std::atomic<bool> *frameGraphFailed,
     std::atomic<std::uint32_t> *droppedDrawCommands,
     std::size_t frameThreadCount, std::size_t chunkSize,
-    const math::Mat4 &viewProjection, float interpolationAlpha,
+    const RenderPrepView &view, float interpolationAlpha,
     core::JobHandle *outMergeHandle,
     renderer::CommandBufferBuilder *mergedAuxiliaryBuffer = nullptr,
     const RenderPrepAuxiliaryInputs *auxiliary = nullptr) noexcept;

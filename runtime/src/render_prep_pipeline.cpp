@@ -121,7 +121,7 @@ std::uint16_t auxiliary_pass_mask(const AuxiliaryCulling &aux,
 std::uint64_t build_draw_sort_key(const renderer::Material &material,
                                   renderer::MeshHandle runtimeMesh,
                                   const math::Vec3 &center,
-                                  const math::Mat4 &viewProjection) noexcept {
+                                  const RenderPrepView &view) noexcept {
   const bool transparent = (material.opacity < 1.0F);
   const std::uint64_t transparentBit =
       transparent ? renderer::kDrawKeyTransparentBit : 0ULL;
@@ -138,11 +138,19 @@ std::uint64_t build_draw_sort_key(const renderer::Material &material,
                                   renderer::kDrawKeyMeshMask)
                                  << renderer::kDrawKeyMeshShift;
 
-  const math::Vec4 clipPos =
-      math::mul(viewProjection, math::Vec4(center.x, center.y, center.z, 1.0F));
-  const float linearDepth = (clipPos.w > 0.0F) ? clipPos.w : 0.0F;
-  const float normalizedDepth =
-      (linearDepth < 200.0F) ? (linearDepth / 200.0F) : 1.0F;
+  // Distance to the view plane, as Unity and Unreal sort translucency: it
+  // orders an orthographic view as well as a perspective one, and it is
+  // measured over the camera's own depth range, so a far plane past any
+  // fixed constant still spreads its draws over the whole field.
+  const float viewDepth = math::dot(math::sub(center, view.eye), view.forward);
+  const float range = view.farPlane - view.nearPlane;
+  float normalizedDepth =
+      (range > 0.0F) ? ((viewDepth - view.nearPlane) / range) : 0.0F;
+  if (!(normalizedDepth > 0.0F)) {
+    normalizedDepth = 0.0F;
+  } else if (normalizedDepth > 1.0F) {
+    normalizedDepth = 1.0F;
+  }
   std::uint16_t depthQuantized =
       static_cast<std::uint16_t>(normalizedDepth * 65535.0F);
 
@@ -226,7 +234,8 @@ void render_prep_chunk_job(void *userData) noexcept {
   renderer::CommandBufferBuilder &localBuffer =
       jobData->localBuffers[threadIndex];
 
-  const math::Mat4 &vp = jobData->viewProjection;
+  const RenderPrepView &view = jobData->view;
+  const math::Mat4 &vp = view.viewProjection;
   const math::Frustum frustum =
       math::frustum_from_view_projection(vp, jobData->depthZeroOne);
   AuxiliaryCulling auxiliary{};
@@ -334,8 +343,8 @@ void render_prep_chunk_job(void *userData) noexcept {
             if (animation != nullptr) {
               command.skinPalette = animation->paletteSlot;
             }
-            command.sortKey.value =
-                build_draw_sort_key(command.material, runtimeMesh, center, vp);
+            command.sortKey.value = build_draw_sort_key(
+                command.material, runtimeMesh, center, view);
             command.passMask = passMask;
 
             // Counted and skipped: every later submit into a full buffer
@@ -423,7 +432,7 @@ void render_prep_chunk_job(void *userData) noexcept {
       command.foliageWindPhase = instance.phase;
       command.foliageLodIndex = lodIndex;
       command.sortKey.value =
-          build_draw_sort_key(command.material, runtimeMesh, center, vp);
+          build_draw_sort_key(command.material, runtimeMesh, center, view);
 
       static_cast<void>(submit_render_command(
           localBuffer, command, jobData->droppedDrawCommands));
@@ -483,6 +492,25 @@ bool link_dependency(core::JobHandle prerequisite,
 
 } // namespace
 
+RenderPrepView make_render_prep_view(const renderer::CameraState &camera,
+                                     float aspect) noexcept {
+  RenderPrepView view{};
+  view.viewProjection =
+      math::mul(renderer::camera_projection_matrix(camera, aspect),
+                math::look_at(camera.position, camera.target, camera.up));
+  view.eye = camera.position;
+  const math::Vec3 forward =
+      math::normalize(math::sub(camera.target, camera.position));
+  if (math::length_sq(forward) > 0.0F) {
+    view.forward = forward;
+  }
+  const renderer::CameraDepthRange depthRange =
+      renderer::camera_depth_range(camera);
+  view.nearPlane = depthRange.nearPlane;
+  view.farPlane = depthRange.farPlane;
+  return view;
+}
+
 bool enqueue_render_prep_pipeline(
     RenderPrepPipelineContext *context, const World *world,
     renderer::CommandBufferBuilder *mergedCommandBuffer,
@@ -492,7 +520,7 @@ bool enqueue_render_prep_pipeline(
     std::atomic<bool> *frameGraphFailed,
     std::atomic<std::uint32_t> *droppedDrawCommands,
     std::size_t frameThreadCount, std::size_t chunkSize,
-    const math::Mat4 &viewProjection, float interpolationAlpha,
+    const RenderPrepView &view, float interpolationAlpha,
     core::JobHandle *outMergeHandle,
     renderer::CommandBufferBuilder *mergedAuxiliaryBuffer,
     const RenderPrepAuxiliaryInputs *auxiliary) noexcept {
@@ -545,7 +573,7 @@ bool enqueue_render_prep_pipeline(
     prepData.meshRegistry = meshRegistry;
     prepData.frameGraphFailed = frameGraphFailed;
     prepData.droppedDrawCommands = droppedDrawCommands;
-    prepData.viewProjection = viewProjection;
+    prepData.view = view;
     prepData.depthZeroOne = depthZeroOne;
     prepData.interpolationAlpha = interpolationAlpha;
     prepData.auxiliary =

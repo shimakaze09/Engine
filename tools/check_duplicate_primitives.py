@@ -199,6 +199,16 @@ TEST_RULES: tuple[Rule, ...] = (
         remedy="include tests/asset_root.h and call "
         "engine::tests::enter_asset_root() or find_asset_root()",
     ),
+    Rule(
+        name="the render prep frame driver",
+        owner="tests/render_prep_harness.h",
+        # Enqueuing render prep by hand is where a copied driver starts:
+        # four suites each carried the phase jobs, the enqueue and the end
+        # of the frame, and every signature change had to touch all four.
+        pattern=r"(?<!\w)enqueue_render_prep_pipeline\(",
+        remedy="include tests/render_prep_harness.h and call "
+        "engine::tests::run_render_prep()",
+    ),
 )
 
 

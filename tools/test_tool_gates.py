@@ -1520,6 +1520,17 @@ def test_duplicate_primitive_gate():
             "std::filesystem::exists(\"assets/x.lua\", ec);\n")]) == 0,
               "duplicate primitives: calling the helper or probing a "
               "relative asset path is not a walk")
+        prep = ("// Purpose.\nif (!engine::runtime::enqueue_render_prep_pipeline("
+                "ctx, world, buf, db, reg, a, b, &f, &d, 1U, 8U, view, 1.0F, "
+                "&m)) {}\n")
+        check(run([script, "--root", case(
+            "prep_driver", "tests/integration/a_test.cpp", prep)]) != 0,
+              "duplicate primitives: a test enqueuing render prep by hand "
+              "is a finding")
+        check(run([script, "--root", case(
+            "prep_driver_owner", "tests/render_prep_harness.h", prep)]) == 0,
+              "duplicate primitives: tests/render_prep_harness.h owns the "
+              "render prep driver")
         check(run([script, "--root", case(
             "pixels", "editor/src/a.cpp",
             "// Purpose.\nImGui::SetNextItemWidth(72.0F);\n")]) != 0,

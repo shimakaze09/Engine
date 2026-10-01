@@ -245,9 +245,10 @@ constexpr ComponentMetadata kComponentMetadataTable[] = {
      "Cone-shaped light with inner/outer falloff angles."},
     {"engine::runtime::ReflectionProbeComponent", "Reflection Probe",
      "Rendering",
-     "Not rendered yet: no pass reads reflection probes, so a probe changes "
-     "nothing. Scene-wide reflections come from a Sky Light.",
-     false},
+     "Captures the scene around it into a cubemap that lights and reflects "
+     "on everything a camera inside its box sees; the smallest box around "
+     "the camera wins, and a Sky Light lights the views outside every box. "
+     "Bake captures it again."},
     {"engine::runtime::SkyLightComponent", "Sky Light", "Rendering",
      "Lights the whole scene from an environment map (.hdr): image-based "
      "specular and diffuse light under any sky."},

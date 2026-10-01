@@ -45,7 +45,11 @@ bool draw_scalar_fields(renderer::Material &params) noexcept {
     changed = true;
   }
   changed |= ImGui::ColorEdit3("Albedo", &params.albedo.x);
-  changed |= ImGui::ColorEdit3("Emissive", &params.emissive.x);
+  // HDR, as Unity's emission colour is: a glowing surface is authored
+  // above 1 so bloom picks it up.
+  changed |=
+      ImGui::ColorEdit3("Emissive", &params.emissive.x,
+                        ImGuiColorEditFlags_HDR | ImGuiColorEditFlags_Float);
   changed |=
       ImGui::SliderFloat("Roughness", &params.roughness, 0.0F, 1.0F, "%.2f");
   changed |=
