@@ -8,18 +8,29 @@
 #include "runtime_binding.h"
 
 #include <cstdio>
-#include <cstdlib>
 
 #include "engine/core/console.h"
+#include "engine/core/text_parse.h"
 
 namespace engine::scripting {
 namespace {
 
-/// Spawns a prefab from the console.
+/// Spawns a prefab from the console, at x y z when given. Only the
+/// position is placed: the prefab keeps its authored rotation and scale,
+/// as Unity's Instantiate(prefab, position, rotation) and a Godot
+/// instance moved after instantiate() keep theirs. Coordinates that are
+/// not three finite numbers refuse the command before anything spawns.
 void cmd_spawn(const char *const *args, int argCount,
                void * /*userData*/) noexcept {
-  if (argCount < 2) {
+  if ((argCount != 2) && (argCount != 5)) {
     core::console_print("Usage: spawn <prefab> [x y z]");
+    return;
+  }
+  math::Vec3 position{};
+  if ((argCount == 5) && (!core::parse_float_token(args[2], &position.x) ||
+                          !core::parse_float_token(args[3], &position.y) ||
+                          !core::parse_float_token(args[4], &position.z))) {
+    core::console_print("Spawn refused: x, y and z must be finite numbers");
     return;
   }
   if (!script_path_in_jail(args[1], "spawn")) {
@@ -27,28 +38,31 @@ void cmd_spawn(const char *const *args, int argCount,
                         "project (relative, no '..')");
     return;
   }
-  if (!runtime_bound() ||
-      (runtime_binding().services->instantiate_prefab == nullptr)) {
+  const RuntimeServices *const services = runtime_binding().services;
+  if (!runtime_bound() || (services->instantiate_prefab == nullptr) ||
+      (services->get_transform_op == nullptr) ||
+      (services->add_transform_op == nullptr) ||
+      (services->destroy_entity_op == nullptr)) {
     core::console_print("Cannot spawn: world not ready");
     return;
   }
-  const runtime::Entity spawned =
-      runtime_binding().services->instantiate_prefab(runtime_binding().world,
-                                                     args[1]);
+  runtime::World *const world = runtime_binding().world;
+  const runtime::Entity spawned = services->instantiate_prefab(world, args[1]);
   if (spawned == runtime::kInvalidEntity) {
     core::console_print("Spawn failed (prefab not found?)");
     return;
   }
-  if ((argCount >= 5) &&
-      (runtime_binding().services->add_transform_op != nullptr)) {
+  if (argCount == 5) {
     runtime::Transform transform{};
-    transform.position.x = static_cast<float>(std::atof(args[2]));
-    transform.position.y = static_cast<float>(std::atof(args[3]));
-    transform.position.z = static_cast<float>(std::atof(args[4]));
-    transform.scale = {1.0F, 1.0F, 1.0F};
-    transform.rotation = {0.0F, 0.0F, 0.0F, 1.0F};
-    runtime_binding().services->add_transform_op(runtime_binding().world,
-                                                 spawned, transform);
+    if (!services->get_transform_op(world, spawned, &transform)) {
+      transform = runtime::Transform{};
+    }
+    transform.position = position;
+    if (!services->add_transform_op(world, spawned, transform)) {
+      static_cast<void>(services->destroy_entity_op(world, spawned));
+      core::console_print("Spawn failed: the instance could not be placed");
+      return;
+    }
   }
   char buffer[64] = {};
   std::snprintf(buffer, sizeof(buffer), "Spawned entity %u", spawned.index);

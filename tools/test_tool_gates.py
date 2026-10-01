@@ -1490,6 +1490,14 @@ def test_duplicate_primitive_gate():
             "// Purpose.\nauto h = core::fnv1a_64(\"x\");\n")]) == 0,
               "duplicate primitives: using the primitive passes")
         check(run([script, "--root", case(
+            "float_copy", "scripting/src/a.cpp",
+            "// Purpose.\nfloat x = std::atof(arg);\n")]) != 0,
+              "duplicate primitives: parsing a float by hand is a finding")
+        check(run([script, "--root", case(
+            "float_allowed", "core/src/json.cpp",
+            "// Purpose.\nfloat x = std::strtof(b, &e);\n")]) == 0,
+              "duplicate primitives: the JSON number reader is allowed")
+        check(run([script, "--root", case(
             "tests_exempt", "tests/integration/a.cpp",
             "// Purpose.\nauto h = 1099511628211ULL;\n")]) == 0,
               "duplicate primitives: the test tree is out of scope")

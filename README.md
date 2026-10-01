@@ -393,6 +393,10 @@ separates a bad argument from a full table. The tables hold 1,024
 coroutines, 64 collision handlers and 64 pools of up to 1,024 entities each.
 The first refusal by a full table logs a Warning.
 
+`print` writes to the log, so its line shows in the editor's Log panel and
+the log file, prefixed by the calling script's file and line, at Info
+(`engine_integration_lua_print_log`).
+
 An `engine.*` call given an entity it cannot act on still returns `false`
 or `nil`. This covers a value that is not a handle, a handle from before
 the last scene load, or one naming a destroyed entity. The first such
@@ -492,8 +496,9 @@ read input (`engine.is_key_down`, `engine.is_action_down`), move entities
 and bodies, and keep state across scene loads in Lua globals, which live
 for the whole run (`engine_integration_scene_flow`); `engine.save_data` and
 `engine.load_data` keep it between runs. The console's `spawn <prefab>
-[x y z]` instantiates a prefab by a path inside the project
-(`engine_integration_sandbox`). It changes the running game, so the
+[x y z]` instantiates a prefab by a path inside the project, placed at
+x y z when given while keeping the prefab's rotation and scale; anything
+but three finite numbers refuses the command (`engine_integration_sandbox`). It changes the running game, so the
 editor's Log runs it only in Play; in Edit mode it is refused, since the
 entity would bypass undo and the unsaved-changes prompt: use the Create
 menu or drag the prefab in instead (`engine_unit_editor_console_commands`).

@@ -13,7 +13,6 @@
 
 #include <algorithm>
 #include <cctype>
-#include <cerrno>
 #include <charconv>
 #include <cmath>
 #include <cstdio>
@@ -24,6 +23,7 @@
 #include "engine/core/cvar.h"
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
+#include "engine/core/text_parse.h"
 #include "imgui.h"
 #include "imgui_internal.h"
 
@@ -83,16 +83,8 @@ void apply_all(ImGuiContext *, ImGuiSettingsHandler *) noexcept {
 /// Reads a stored positive number: the whole token, no leading space, no
 /// overflow, finite and above zero.
 bool parse_positive_float(const char *value, float *out) noexcept {
-  const char *end = value + std::strlen(value);
-  // strtof, not std::from_chars: AppleClang's libc++ deletes the
-  // floating-point overload. The checks keep from_chars's strictness.
-  errno = 0;
-  char *parseEnd = nullptr;
-  const float parsed = std::strtof(value, &parseEnd);
-  if ((value == end) ||
-      (std::isspace(static_cast<unsigned char>(value[0])) != 0) ||
-      (parseEnd != end) || (errno == ERANGE) || !std::isfinite(parsed) ||
-      (parsed <= 0.0F)) {
+  float parsed = 0.0F;
+  if (!core::parse_float_token(value, &parsed) || (parsed <= 0.0F)) {
     return false;
   }
   *out = parsed;
