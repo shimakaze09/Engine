@@ -85,6 +85,14 @@ change and needs the migration path below.
   through `get_object_field`, which is what records a key as read. A field
   you retire on purpose goes into `kRetiredKeyPaths` in
   `runtime/src/serialization_util.cpp`, or every older file warns.
+  Other documents follow one of two policies. A file other builds and
+  tools also write (a `.meta` sidecar, a material) **carries** its unread
+  top-level members through a rewrite verbatim
+  (`json_visit_unread_top_level_members`, `JsonWriter::write_raw_member`),
+  so a newer build's data survives an older editor's save. A store only
+  this machine writes (input bindings, editor state, recent lists)
+  **reports** them (`json_log_unread_members`), naming what its next save
+  drops.
 - **Writes are staged and atomically replaced**, never truncated in place.
   Multi-file output commits as a transaction or a manifest.
 

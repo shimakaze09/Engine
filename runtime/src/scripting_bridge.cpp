@@ -148,6 +148,13 @@ static_assert(scripting::kMaxTimerSlots == runtime::TimerManager::kMaxTimers,
               "scripting's timer slot count must match the timer manager's");
 static_assert(scripting::kMaxGameSaveBytes == runtime::kMaxSaveDataBytes,
               "scripting save ceiling must match the runtime save slot");
+static_assert(static_cast<int>(scripting::GameSaveRead::Ok) ==
+                      static_cast<int>(runtime::SaveReadResult::Ok) &&
+                  static_cast<int>(scripting::GameSaveRead::Absent) ==
+                      static_cast<int>(runtime::SaveReadResult::Absent) &&
+                  static_cast<int>(scripting::GameSaveRead::Unreadable) ==
+                      static_cast<int>(runtime::SaveReadResult::Unreadable),
+              "scripting's save read results must match the runtime's");
 static_assert(scripting::kMaxEntityPoolSize ==
                   runtime::EntityPool::kMaxPoolSize,
               "scripting's pool size must match the entity pool's");
@@ -524,9 +531,17 @@ bool scripting_save_game_data(const char *json,
   return runtime::save_game_data(json, length);
 }
 
-bool scripting_load_game_data(char *out, std::size_t capacity,
-                              std::size_t *outLength) noexcept {
-  return runtime::load_game_data(out, capacity, outLength);
+scripting::GameSaveRead
+scripting_load_game_data(char *out, std::size_t capacity,
+                         std::size_t *outLength) noexcept {
+  return static_cast<scripting::GameSaveRead>(
+      runtime::read_game_data(out, capacity, outLength));
+}
+
+void scripting_hold_game_save() noexcept { runtime::hold_game_save(); }
+
+bool scripting_discard_game_save() noexcept {
+  return runtime::discard_game_save();
 }
 
 bool scripting_save_scene(const runtime::World *world,
@@ -1324,6 +1339,8 @@ scripting::RuntimeServices make_scripting_runtime_services() noexcept {
   s.stop_music = &scripting_stop_music;
   s.save_game_data = &scripting_save_game_data;
   s.load_game_data = &scripting_load_game_data;
+  s.hold_game_save = &scripting_hold_game_save;
+  s.discard_game_save = &scripting_discard_game_save;
   s.save_scene = &scripting_save_scene;
   s.save_prefab = &scripting_save_prefab;
   s.instantiate_prefab = &scripting_instantiate_prefab;

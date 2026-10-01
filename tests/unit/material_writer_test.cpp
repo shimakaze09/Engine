@@ -3,13 +3,17 @@
 // reference rejects the save without touching the destination file (staged
 // atomic write internals are already covered by atomic_file_test.cpp), and
 // find_material_parent_virtual_path picks the Material-tagged dependency
-// out of a mix that also includes texture dependencies.
+// out of a mix that also includes texture dependencies. A material a newer
+// build wrote keeps its new top-level keys through this build's save, while
+// a known key the save now omits stays gone, and the load names each key
+// it does not read.
 
 #include <cstdio>
 #include <cstring>
 #include <memory>
 #include <new>
 #include <string>
+#include <vector>
 
 #include "engine/content/asset_catalog.h"
 #include "engine/core/logging.h"
@@ -311,6 +315,76 @@ int verify_child_writes_only_overrides() {
   return 0;
 }
 
+std::vector<std::string> g_warnings{};
+
+void note_warning(engine::core::LogLevel level, const char * /*channel*/,
+                  const char *message, void * /*userData*/) noexcept {
+  if ((level == engine::core::LogLevel::Warning) && (message != nullptr)) {
+    g_warnings.emplace_back(message);
+  }
+}
+
+std::size_t count_of(const std::string &text, const char *needle) {
+  std::size_t count = 0U;
+  for (std::size_t at = text.find(needle); at != std::string::npos;
+       at = text.find(needle, at + 1U)) {
+    ++count;
+  }
+  return count;
+}
+
+int verify_unknown_keys_survive_a_save(
+    engine::renderer::AssetDatabase *database) {
+  constexpr const char *kOsPath = "material_writer_future.json";
+  constexpr const char *kVirtualPath = "mat/material_writer_future.json";
+  const std::string planted =
+      "{\"version\": " +
+      std::to_string(engine::renderer::kMaterialDocumentVersion) +
+      ", \"metallic\": 0.5, \"futureKey\": \"x\",\n"
+      " \"futureBlock\": {\"y\": [1, 2]}, \"textures\": {}}";
+  if (!write_material_file(kOsPath, planted.c_str())) {
+    return 50;
+  }
+  g_warnings.clear();
+  const auto loaded =
+      engine::renderer::load_material_asset(database, g_catalog, kVirtualPath);
+  std::size_t named = 0U;
+  for (const std::string &warning : g_warnings) {
+    if ((warning.find("'futureKey'") != std::string::npos) ||
+        (warning.find("'futureBlock'") != std::string::npos)) {
+      ++named;
+    }
+  }
+  if (!loaded.has_value() || (named != 2U) || (g_warnings.size() != 2U)) {
+    remove_file(kOsPath);
+    return 51; // the load names each key it does not read, once
+  }
+
+  engine::renderer::Material params{};
+  params.roughness = 0.3F;
+  if (!engine::renderer::save_material_asset(
+          g_catalog, kVirtualPath, params,
+          engine::renderer::MaterialTextureSlots{}, nullptr,
+          engine::renderer::material_field::kAll)) {
+    remove_file(kOsPath);
+    return 52;
+  }
+  std::string content;
+  const bool read = read_whole_file(kOsPath, &content);
+  remove_file(kOsPath);
+  if (!read || (count_of(content, "\"futureKey\": \"x\"") != 1U) ||
+      (count_of(content, "\"futureBlock\": {\"y\": [1, 2]}") != 1U)) {
+    std::printf("saved document: %s\n", content.c_str());
+    return 53; // a newer build's keys are carried, once, verbatim
+  }
+  if ((content.find("\"textures\"") != std::string::npos) ||
+      (count_of(content, "\"metallic\"") != 1U)) {
+    std::printf("saved document: %s\n", content.c_str());
+    return 54; // known keys are this save's own, never carried back
+  }
+  return 0;
+}
+
 } // namespace
 
 int main() {
@@ -345,6 +419,12 @@ int main() {
   }
   if (result == 0) {
     result = verify_child_writes_only_overrides();
+  }
+  if ((result == 0) && engine::core::initialize_logging() &&
+      engine::core::log_register_sink(&note_warning, nullptr)) {
+    result = verify_unknown_keys_survive_a_save(database.get());
+    engine::core::log_unregister_sink(&note_warning, nullptr);
+    engine::core::shutdown_logging();
   }
 
   engine::core::shutdown_vfs();

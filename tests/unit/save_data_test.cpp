@@ -4,7 +4,9 @@
 // while one byte past it is refused with the previous save intact, the
 // capacity-overflow guard on load, the read-capacity boundaries, and that a
 // failed read is reported as a load failure rather than as a successful load
-// of truncated data.
+// of truncated data. A held slot (one a load could not use) refuses every
+// save with the file untouched, and discarding it moves the file aside,
+// never deleting it, before the next save starts a new one.
 
 #include <cstdio>
 #include <cstring>
@@ -385,8 +387,102 @@ int check_read_error_is_not_a_successful_load() {
 } // namespace
 
 /// Runs this executable or test program.
+/// Reads a whole file into a string; empty when it cannot be read.
+std::string read_file_text(const char *path) {
+  std::string text{};
+  std::FILE *file = nullptr;
+#ifdef _WIN32
+  if (fopen_s(&file, path, "rb") != 0) {
+    file = nullptr;
+  }
+#else
+  file = std::fopen(path, "rb");
+#endif
+  if (file == nullptr) {
+    return text;
+  }
+  char chunk[256] = {};
+  std::size_t read = 0U;
+  while ((read = std::fread(chunk, 1U, sizeof(chunk), file)) > 0U) {
+    text.append(chunk, read);
+  }
+  std::fclose(file);
+  return text;
+}
+
+/// EXPECTATION: a held slot is never overwritten. A save into it is
+/// refused and the corrupt file stays byte for byte; discarding moves it
+/// to save.json.discarded-1 and lifts the hold, so the next save writes a
+/// fresh save.json; a second discard picks discarded-2; discarding a slot
+/// with no file only lifts the hold.
+int check_held_slot_is_kept_until_discarded() {
+  namespace rt = engine::runtime;
+  char directory[576] = {};
+  if (!make_scratch_dir(directory, sizeof(directory))) {
+    std::puts("temp dir unavailable");
+    return 1;
+  }
+  cleanup(directory);
+  char slot[640] = {};
+  make_slot_path(directory, slot, sizeof(slot));
+  char first[700] = {};
+  char second[700] = {};
+  std::snprintf(first, sizeof(first), "%s.discarded-1", slot);
+  std::snprintf(second, sizeof(second), "%s.discarded-2", slot);
+  static_cast<void>(std::remove(first));
+  static_cast<void>(std::remove(second));
+
+  const char corrupt[] = "{\"entries\":[{\"k\":\"coins\",\"v\":";
+  if (!write_slot_bytes(directory, corrupt, sizeof(corrupt) - 1U)) {
+    std::puts("corrupt slot plant failed");
+    return 1;
+  }
+  rt::hold_game_save_in(directory);
+  const char fresh[] = "{\"version\":1,\"entries\":[]}";
+  if (!rt::game_save_held_in(directory) ||
+      rt::save_game_data_to(directory, fresh, sizeof(fresh) - 1U)) {
+    std::puts("a held slot accepted a save");
+    return 1;
+  }
+  if (read_file_text(slot) != corrupt) {
+    std::puts("the held save was changed");
+    return 1;
+  }
+
+  if (!rt::discard_game_save_in(directory) ||
+      rt::game_save_held_in(directory) || (read_file_text(first) != corrupt)) {
+    std::puts("discard did not move the save aside intact");
+    return 1;
+  }
+  if (!rt::save_game_data_to(directory, fresh, sizeof(fresh) - 1U) ||
+      (read_file_text(slot) != fresh)) {
+    std::puts("the save after a discard did not write");
+    return 1;
+  }
+  rt::hold_game_save_in(directory);
+  if (!rt::discard_game_save_in(directory) ||
+      (read_file_text(second) != fresh) || (read_file_text(first) != corrupt)) {
+    std::puts("a second discard overwrote the first");
+    return 1;
+  }
+  rt::hold_game_save_in(directory);
+  if (!rt::discard_game_save_in(directory) ||
+      rt::game_save_held_in(directory)) {
+    std::puts("discarding an empty slot did not lift the hold");
+    return 1;
+  }
+  static_cast<void>(std::remove(first));
+  static_cast<void>(std::remove(second));
+  cleanup(directory);
+  return 0;
+}
+
 int main() {
   int result = check_roundtrip_with_directory_creation();
+  if (result != 0) {
+    return result;
+  }
+  result = check_held_slot_is_kept_until_discarded();
   if (result != 0) {
     return result;
   }

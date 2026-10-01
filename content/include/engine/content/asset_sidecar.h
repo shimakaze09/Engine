@@ -82,7 +82,8 @@ bool asset_sidecar_path(const char *assetOsPath, char *out,
 bool is_asset_sidecar_path(const char *path) noexcept;
 
 /// Reads the sidecar beside `assetOsPath`. `*out` is left untouched for
-/// every result but Ok.
+/// every result but Ok. A key this build does not read (a newer build's,
+/// or a typo) is named in a logged Warning.
 SidecarReadResult read_asset_sidecar(const char *assetOsPath,
                                      AssetSidecar *out) noexcept;
 
@@ -90,7 +91,9 @@ SidecarReadResult read_asset_sidecar(const char *assetOsPath,
 /// replacement, so an interrupted write leaves the previous identity
 /// intact rather than a truncated file. Refuses a nil guid: a sidecar
 /// that names no identity is worse than none, because a reader would
-/// take it as authoritative.
+/// take it as authoritative. Top-level members of the sidecar on disk that
+/// this build does not read are carried into the new one verbatim, so an
+/// older build never erases what a newer one wrote.
 ///
 /// Call this ONLY from an import, migration or Duplicate transaction.
 bool write_asset_sidecar(const char *assetOsPath,

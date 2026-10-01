@@ -2,7 +2,9 @@
 // tracker set records each member get_object_field finds, and the walk
 // names every member no lookup found, by path, without entering it. A
 // scene or prefab loader relies on this to report the keys it would
-// otherwise drop on the next save.
+// otherwise drop on the next save. The top-level variant hands a writer
+// each unread member's exact text, so it can carry a newer build's keys
+// through a rewrite.
 
 #include "engine/core/json.h"
 
@@ -18,6 +20,12 @@ std::vector<std::string> g_paths{};
 
 void collect(const char *path, void * /*userData*/) noexcept {
   g_paths.emplace_back(path);
+}
+
+void collect_raw(const char *key, std::size_t keyLength, const char *value,
+                 std::size_t valueLength, void * /*userData*/) noexcept {
+  g_paths.emplace_back(std::string(key, keyLength) + "=" +
+                       std::string(value, valueLength));
 }
 
 bool paths_are(const std::vector<std::string> &expected) {
@@ -96,5 +104,22 @@ int main() {
               (engine::core::json_visit_unread_members(
                    *parser.root(), arrayTracker, &collect, nullptr) == 0U),
           "a root that is not an object has no members to report");
+  const char *carried = "{\"known\":1, \"s\":\"a \\\"q\\\"\", "
+                        "\"n\":{\"x\": [1, 2]}, \"known\":2, \"t\":true}";
+  JsonReadTracker carryTracker{};
+  t.check(parser.parse(carried, std::strlen(carried)) &&
+              carryTracker.reset_for(carried, std::strlen(carried)),
+          "a document with members a reader does not know");
+  parser.set_read_tracker(&carryTracker);
+  t.check(parser.get_object_field(*parser.root(), "known", &value),
+          "the reader looks up the one key it knows");
+  parser.set_read_tracker(nullptr);
+  g_paths.clear();
+  t.check((engine::core::json_visit_unread_top_level_members(
+               parser, *parser.root(), carryTracker, &collect_raw, nullptr) ==
+           3U) &&
+              paths_are({"s=\"a \\\"q\\\"\"", "n={\"x\": [1, 2]}", "t=true"}),
+          "each unread member's exact text, a string with its quotes, and "
+          "not the repeat of a key that was read");
   return t.finish("json_read_tracker");
 }

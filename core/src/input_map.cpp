@@ -758,6 +758,12 @@ bool load_input_bindings_from_buffer(const char *buffer,
                 "load_input_bindings: JSON parse failed");
     return false;
   }
+  // Every member the loader looks up is recorded, so the ones it never
+  // looks up (a newer build's field, a typo) are named once it has loaded.
+  JsonReadTracker readTracker{};
+  if (readTracker.reset_for(buffer, size)) {
+    parser.set_read_tracker(&readTracker);
+  }
 
   const JsonValue *root = parser.root();
   if ((root == nullptr) || (root->type != JsonValue::Type::Object)) {
@@ -1002,6 +1008,9 @@ bool load_input_bindings_from_buffer(const char *buffer,
   g_mappedAxes = staged->axes;
   g_actionDown = {};
   g_prevActionDown = {};
+  static_cast<void>(json_log_unread_members(
+      *root, readTracker, kLogChannel, "input bindings",
+      "it is lost the next time the bindings are saved"));
   return true;
 }
 

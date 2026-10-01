@@ -495,7 +495,15 @@ built-in player controller, game mode, score store or cheat flags. Scripts
 read input (`engine.is_key_down`, `engine.is_action_down`), move entities
 and bodies, and keep state across scene loads in Lua globals, which live
 for the whole run (`engine_integration_scene_flow`); `engine.save_data` and
-`engine.load_data` keep it between runs. The console's `spawn <prefab>
+`engine.load_data` keep it between runs. `local data, status =
+engine.load_data()` answers the table and `"ok"`, or nil and why: `"absent"`
+(no save yet), `"corrupt"` (it does not parse; the log says near which
+byte), `"unsupported"` (a newer build wrote it) or `"unreadable"`. A save
+that did not load is kept, never overwritten, as Unreal's
+`DoesSaveGameExist` keeps a damaged slot apart from a missing one:
+`engine.save_data` refuses until the game calls `engine.discard_save()`,
+which moves it aside to `save.json.discarded-<n>`
+(`engine_integration_save_corrupt_kept`). The console's `spawn <prefab>
 [x y z]` instantiates a prefab by a path inside the project, placed at
 x y z when given while keeping the prefab's rotation and scale; anything
 but three finite numbers refuses the command (`engine_integration_sandbox`). It changes the running game, so the

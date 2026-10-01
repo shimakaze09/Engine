@@ -5,10 +5,12 @@
 // removes an entry, persists across a session (a forgotten cache reads the
 // stored file back), drops stored entries that no longer exist, and never
 // overwrites a stored file this session could not read: a file too large,
-// unreadable, or not a list stays byte for byte as it was.
+// unreadable, or not a list stays byte for byte as it was. A stored key
+// this build does not read is named in the log.
 
 #include "../test_harness.h"
 #include "editor_recent_list.h"
+#include "engine/core/logging.h"
 
 #include <cstdio>
 #include <cstring>
@@ -47,6 +49,17 @@ bool write_bytes(const fs::path &path, const std::string &bytes) {
   std::ofstream out(path, std::ios::binary | std::ios::trunc);
   out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
   return static_cast<bool>(out);
+}
+
+int g_unreadKeyWarnings = 0;
+
+/// Counts the Warnings that name the stored file's unread `pinned` key.
+void note_unread_key(engine::core::LogLevel level, const char * /*channel*/,
+                     const char *message, void * /*userData*/) noexcept {
+  if ((level == engine::core::LogLevel::Warning) && (message != nullptr) &&
+      (std::strstr(message, "'pinned' is not read by this build") != nullptr)) {
+    ++g_unreadKeyWarnings;
+  }
 }
 
 /// The entry at `index` equals `text`.
@@ -142,6 +155,19 @@ int main() {
           "a stored entry that no longer exists is dropped on load");
   t.check(read_bytes(stored).find("gone.txt") == std::string::npos,
           "and is gone from the stored file too");
+
+  // A key this build does not read is named, since the next save drops it.
+  const bool sinkRegistered =
+      engine::core::initialize_logging() &&
+      engine::core::log_register_sink(&note_unread_key, nullptr);
+  t.check(write_bytes(stored, "{\"items\":[\"w\"],\"pinned\":[\"w\"]}"),
+          "a stored list with a key this build does not read");
+  RecentList newer = make_list(3U, false);
+  t.check(sinkRegistered && engine::editor::recent_list_count(&newer) == 1U &&
+              is(&newer, 0U, "w") && g_unreadKeyWarnings == 1,
+          "it loads, and the unread key is named once");
+  engine::core::log_unregister_sink(&note_unread_key, nullptr);
+  engine::core::shutdown_logging();
 
   // A stored file the session cannot use is never overwritten.
   const std::string notAList = "{\"other\":[\"n\"]}";

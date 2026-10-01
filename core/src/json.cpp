@@ -1057,6 +1057,34 @@ void JsonWriter::write_key(const char *key) noexcept {
   state.expectingValue = true;
 }
 
+void JsonWriter::write_raw_member(const char *escapedKey, std::size_t keyLength,
+                                  const char *rawValue,
+                                  std::size_t valueLength) noexcept {
+  if (m_failed || (escapedKey == nullptr) || (rawValue == nullptr) ||
+      (valueLength == 0U) || (m_depth == 0U)) {
+    m_failed = true;
+    return;
+  }
+  ContainerState &state = m_stack[m_depth - 1U];
+  if ((state.kind != ContainerKind::Object) || state.expectingValue) {
+    m_failed = true;
+    return;
+  }
+  if (!state.firstElement && !append_char(',')) {
+    return;
+  }
+  state.firstElement = false;
+  if (!append_line_break(m_depth) || !append_char('"') ||
+      !append_bytes(escapedKey, keyLength) || !append_char('"') ||
+      !append_char(':')) {
+    return;
+  }
+  if ((m_layout == JsonLayout::Lines) && !append_char(' ')) {
+    return;
+  }
+  static_cast<void>(append_bytes(rawValue, valueLength));
+}
+
 void JsonWriter::write_float(const char *key, float value) noexcept {
   write_key(key);
   write_float_value(value);
@@ -1165,6 +1193,7 @@ bool JsonParser::parse(const char *input, std::size_t length) noexcept {
   m_scratchExhausted = false;
   m_arrayMemos.fill(ArrayMemo{});
   m_arrayElementScans = 0U;
+  m_errorOffset = 0U;
 
   if ((input == nullptr) || (length == 0U)) {
     return false;
@@ -1176,11 +1205,13 @@ bool JsonParser::parse(const char *input, std::size_t length) noexcept {
 
   JsonValue parsedRoot{};
   if (!parse_value(cursor, end, &parsedRoot, 0U)) {
+    m_errorOffset = static_cast<std::size_t>(cursor - input);
     return false;
   }
 
   skip_whitespace(cursor, end);
   if (cursor != end) {
+    m_errorOffset = static_cast<std::size_t>(cursor - input);
     return false;
   }
 
@@ -1834,6 +1865,92 @@ bool JsonParser::copy_string_strict(const JsonValue &value, char *out,
     return false;
   }
   return true;
+}
+
+namespace {
+
+/// True when a member of `object` other than the one at `skip`, named like
+/// `key`, was read.
+bool same_key_was_read(const JsonParser &parser, const JsonValue &object,
+                       std::size_t skip, const JsonValue &key,
+                       const JsonReadTracker &tracker) noexcept {
+  const std::size_t members = parser.object_size(object);
+  const auto length = static_cast<std::size_t>(key.end - key.begin);
+  for (std::size_t i = 0U; i < members; ++i) {
+    JsonValue otherKey{};
+    JsonValue otherValue{};
+    if ((i != skip) &&
+        parser.get_object_member(object, i, &otherKey, &otherValue) &&
+        tracker.was_read(otherValue.begin) &&
+        (static_cast<std::size_t>(otherKey.end - otherKey.begin) == length) &&
+        (std::memcmp(otherKey.begin, key.begin, length) == 0)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+} // namespace
+
+std::size_t json_visit_unread_top_level_members(const JsonParser &parser,
+                                                const JsonValue &object,
+                                                const JsonReadTracker &tracker,
+                                                JsonRawMemberVisitor visit,
+                                                void *userData) noexcept {
+  if (!tracker.armed() || (visit == nullptr) ||
+      (object.type != JsonValue::Type::Object)) {
+    return 0U;
+  }
+  std::size_t visited = 0U;
+  const std::size_t members = parser.object_size(object);
+  for (std::size_t i = 0U; i < members; ++i) {
+    JsonValue key{};
+    JsonValue value{};
+    if (!parser.get_object_member(object, i, &key, &value) ||
+        tracker.was_read(value.begin) ||
+        same_key_was_read(parser, object, i, key, tracker)) {
+      continue;
+    }
+    // A string's span is its contents; its quotes sit just outside it.
+    const bool quoted = value.type == JsonValue::Type::String;
+    const char *begin = quoted ? (value.begin - 1) : value.begin;
+    const char *end = quoted ? (value.end + 1) : value.end;
+    visit(key.begin, static_cast<std::size_t>(key.end - key.begin), begin,
+          static_cast<std::size_t>(end - begin), userData);
+    ++visited;
+  }
+  return visited;
+}
+
+namespace {
+
+/// What json_log_unread_members says about each member.
+struct UnreadLog final {
+  const char *channel = nullptr;
+  const char *document = nullptr;
+  const char *consequence = nullptr;
+};
+
+void log_unread_member(const char *path, void *userData) noexcept {
+  const auto *log = static_cast<const UnreadLog *>(userData);
+  char message[512] = {};
+  std::snprintf(message, sizeof(message),
+                "%s: key '%s' is not read by this build; %s", log->document,
+                path, log->consequence);
+  log_message(LogLevel::Warning, log->channel, message);
+}
+
+} // namespace
+
+std::size_t json_log_unread_members(const JsonValue &root,
+                                    const JsonReadTracker &tracker,
+                                    const char *channel, const char *document,
+                                    const char *consequence) noexcept {
+  UnreadLog log{};
+  log.channel = channel;
+  log.document = (document != nullptr) ? document : "document";
+  log.consequence = (consequence != nullptr) ? consequence : "";
+  return json_visit_unread_members(root, tracker, &log_unread_member, &log);
 }
 
 } // namespace engine::core

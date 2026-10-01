@@ -1,7 +1,9 @@
 // Owns Lua persistence bindings for the Engine scripting system: the
 // in-memory hot-reload persist table plus the on-disk single-slot save
-// (engine.save_data / engine.load_data, flat table <-> JSON, bounded by the
-// save slot's document ceiling rather than by per-key or per-value caps).
+// (engine.save_data / engine.load_data / engine.discard_save, a versioned
+// flat table <-> JSON, bounded by the save slot's document ceiling rather
+// than by per-key or per-value caps). A save that does not load is held,
+// never overwritten, until the game discards it.
 
 #include "persist_bindings.h"
 
@@ -34,6 +36,11 @@ int g_persistRef = LUA_NOREF;
 // Key count and string values are bounded only by the document ceiling.
 constexpr std::size_t kMaxSaveKeyBytes = 128U;
 
+/// The save document's format version, written as "version" at its root.
+/// A document naming a newer one came from a newer build and is held, not
+/// read; one naming none predates the key and reads as this version.
+constexpr std::int64_t kSaveFormatVersion = 1;
+
 /// Logs why engine.save_data refused the table; the script sees false.
 void log_save_refusal(const char *key, const char *reason) noexcept {
   char message[256] = {};
@@ -44,18 +51,39 @@ void log_save_refusal(const char *key, const char *reason) noexcept {
   core::log_message(core::LogLevel::Error, "scripting", message);
 }
 
-/// Logs why engine.load_data refused the document and returns nil to the
-/// script; a malformed field refuses the load rather than substituting.
-int refuse_load(lua_State *state, std::size_t entryIndex,
-                const char *reason) noexcept {
-  char message[192] = {};
+/// Pushes engine.load_data's two results: nil and `status`.
+int push_load_failure(lua_State *state, const char *status) noexcept {
+  lua_pushnil(state);
+  lua_pushstring(state, status);
+  return 2;
+}
+
+/// Logs why engine.load_data refused the document, holds the save slot so
+/// the next save_data cannot replace what may be the only copy of the
+/// player's progress, and returns (nil, `status`) to the script.
+int refuse_document(lua_State *state, const char *status,
+                    const char *reason) noexcept {
+  char message[320] = {};
   std::snprintf(message, sizeof(message),
-                "engine.load_data refused the save: entry %zu %s", entryIndex,
+                "engine.load_data refused the save: %s; it is kept and "
+                "engine.save_data refuses until engine.discard_save() moves "
+                "it aside",
                 reason);
   core::log_message(core::LogLevel::Error, "scripting", message);
+  if ((runtime_binding().services != nullptr) &&
+      (runtime_binding().services->hold_game_save != nullptr)) {
+    runtime_binding().services->hold_game_save();
+  }
+  return push_load_failure(state, status);
+}
+
+/// refuse_document for one malformed entry; drops the half-built table.
+int refuse_entry(lua_State *state, std::size_t entryIndex,
+                 const char *reason) noexcept {
+  char detail[192] = {};
+  std::snprintf(detail, sizeof(detail), "entry %zu %s", entryIndex, reason);
   lua_pop(state, 1);
-  lua_pushnil(state);
-  return 1;
+  return refuse_document(state, "corrupt", detail);
 }
 
 /// Logs a save refused for exceeding the document ceiling.
@@ -119,6 +147,7 @@ int lua_engine_save_data(lua_State *state) noexcept {
 
   core::JsonWriter writer{};
   writer.begin_object();
+  writer.write_int64("version", kSaveFormatVersion);
   writer.begin_array("entries");
   bool valid = true;
   lua_pushnil(state);
@@ -213,8 +242,7 @@ int lua_engine_save_data(lua_State *state) noexcept {
 int lua_engine_load_data(lua_State *state) noexcept {
   if ((runtime_binding().services == nullptr) ||
       (runtime_binding().services->load_game_data == nullptr)) {
-    lua_pushnil(state);
-    return 1;
+    return push_load_failure(state, "unreadable");
   }
 
   // A cold path: one ceiling-sized buffer from the Lua heap per load, kept
@@ -224,27 +252,52 @@ int lua_engine_load_data(lua_State *state) noexcept {
   auto *buffer =
       static_cast<char *>(lua_newuserdatauv(state, kMaxGameSaveBytes + 1U, 0));
   std::size_t length = 0U;
-  if (!runtime_binding().services->load_game_data(
-          buffer, kMaxGameSaveBytes + 1U, &length)) {
-    lua_pushnil(state);
-    return 1;
+  const GameSaveRead read = runtime_binding().services->load_game_data(
+      buffer, kMaxGameSaveBytes + 1U, &length);
+  if (read == GameSaveRead::Absent) {
+    return push_load_failure(state, "absent");
+  }
+  if (read != GameSaveRead::Ok) {
+    return refuse_document(state, "unreadable", "the file could not be read");
   }
   // Every decoded string fits in the document it came from, so one
   // scratch buffer of the document's size holds any value.
   auto *text = static_cast<char *>(lua_newuserdatauv(state, length + 1U, 0));
 
   core::JsonParser parser{};
-  const core::JsonValue *root = nullptr;
-  if (!parser.parse(buffer, length) || ((root = parser.root()) == nullptr) ||
-      (root->type != core::JsonValue::Type::Object)) {
-    lua_pushnil(state);
-    return 1;
+  if (!parser.parse(buffer, length)) {
+    char reason[96] = {};
+    std::snprintf(reason, sizeof(reason),
+                  "it is not valid JSON (it breaks near byte %zu)",
+                  parser.error_offset());
+    return refuse_document(state, "corrupt", reason);
+  }
+  const core::JsonValue *root = parser.root();
+  if ((root == nullptr) || (root->type != core::JsonValue::Type::Object)) {
+    return refuse_document(state, "corrupt", "its root is not an object");
+  }
+  core::JsonValue versionValue{};
+  if (parser.get_object_field(*root, "version", &versionValue)) {
+    std::int64_t version = 0;
+    if (!parser.as_int64(versionValue, &version) || (version < 1)) {
+      return refuse_document(state, "corrupt",
+                             "its version is not a positive integer");
+    }
+    if (version > kSaveFormatVersion) {
+      char reason[128] = {};
+      std::snprintf(reason, sizeof(reason),
+                    "a newer build wrote it (version %lld; this build reads "
+                    "%lld)",
+                    static_cast<long long>(version),
+                    static_cast<long long>(kSaveFormatVersion));
+      return refuse_document(state, "unsupported", reason);
+    }
   }
 
   core::JsonValue entries{};
-  if (!parser.get_object_field(*root, "entries", &entries)) {
-    lua_pushnil(state);
-    return 1;
+  if (!parser.get_object_field(*root, "entries", &entries) ||
+      (entries.type != core::JsonValue::Type::Array)) {
+    return refuse_document(state, "corrupt", "it has no entries array");
   }
 
   lua_newtable(state);
@@ -257,14 +310,15 @@ int lua_engine_load_data(lua_State *state) noexcept {
     if (!parser.get_array_element(entries, i, &entry) ||
         !parser.get_object_field(entry, "k", &keyValue) ||
         !parser.get_object_field(entry, "v", &value)) {
-      return refuse_load(state, i, "is not a {k, v} object");
+      return refuse_entry(state, i, "is not a {k, v} object");
     }
     // Strict copies: a key or string the buffer cannot hold is a corrupt
     // or hand-edited save and refuses the load, never a truncated value
     // handed back under the cut spelling.
     if (!parser.copy_string_strict(keyValue, key, sizeof(key))) {
-      return refuse_load(state, i, "has a key that is not a string of at "
-                                   "most 127 bytes");
+      return refuse_entry(state, i,
+                          "has a key that is not a string of at "
+                          "most 127 bytes");
     }
     std::int64_t integer = 0;
     double number = 0.0;
@@ -277,28 +331,39 @@ int lua_engine_load_data(lua_State *state) noexcept {
       } else if (parser.as_double(value, &number)) {
         lua_pushnumber(state, static_cast<lua_Number>(number));
       } else {
-        return refuse_load(state, i, "has a number that does not parse");
+        return refuse_entry(state, i, "has a number that does not parse");
       }
     } else if (value.type == core::JsonValue::Type::Bool) {
       if (!parser.as_bool(value, &flag)) {
-        return refuse_load(state, i, "has a boolean that does not parse");
+        return refuse_entry(state, i, "has a boolean that does not parse");
       }
       lua_pushboolean(state, flag ? 1 : 0);
     } else if (value.type == core::JsonValue::Type::String) {
       std::size_t textLength = 0U;
       if (!parser.copy_string(value, text, length + 1U, &textLength) ||
           (textLength > length) || (std::strlen(text) != textLength)) {
-        return refuse_load(state, i,
-                           "has a string that does not decode or "
-                           "holds a NUL byte");
+        return refuse_entry(state, i,
+                            "has a string that does not decode or "
+                            "holds a NUL byte");
       }
       lua_pushlstring(state, text, textLength);
     } else {
-      return refuse_load(state, i, "has a value that is not a number, "
-                                   "string or boolean");
+      return refuse_entry(state, i,
+                          "has a value that is not a number, "
+                          "string or boolean");
     }
     lua_setfield(state, -2, key);
   }
+  lua_pushstring(state, "ok");
+  return 2;
+}
+
+int lua_engine_discard_save(lua_State *state) noexcept {
+  const bool discarded =
+      (runtime_binding().services != nullptr) &&
+      (runtime_binding().services->discard_game_save != nullptr) &&
+      runtime_binding().services->discard_game_save();
+  lua_pushboolean(state, discarded ? 1 : 0);
   return 1;
 }
 

@@ -4,10 +4,13 @@
 // larger than the read buffer) must not be treated as a fresh profile —
 // before this change, the next persist atomically committed defaults over
 // the file the session had just failed to read. Absent stays the ordinary
-// fresh-profile case and keeps persisting enabled.
+// fresh-profile case and keeps persisting enabled. A stored key this build
+// does not read is named in the log.
 
 #include "editor_asset_index.h"
 #include "editor_session.h"
+
+#include "engine/core/logging.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -47,6 +50,18 @@ bool write_file(const std::filesystem::path &path,
       std::fwrite(content.data(), 1U, content.size(), file);
   std::fclose(file);
   return written == content.size();
+}
+
+int g_unreadKeyWarnings = 0;
+
+/// Counts the Warnings that name the stored state's unread `futureKey`.
+void note_unread_key(engine::core::LogLevel level, const char * /*channel*/,
+                     const char *message, void * /*userData*/) noexcept {
+  if ((level == engine::core::LogLevel::Warning) && (message != nullptr) &&
+      (std::strstr(message, "'futureKey' is not read by this build") !=
+       nullptr)) {
+    ++g_unreadKeyWarnings;
+  }
 }
 
 /// Reads the file's byte size; SIZE_MAX when absent/unreadable.
@@ -116,6 +131,26 @@ int main() {
   check(editor_session().contentBrowser.filter.typeMask ==
             (kAssetKindMaskAll & ~1U),
         "a legacy mask keeps its hidden type and shows every newer type");
+
+  // A key this build does not read is named, since the next save drops it.
+  const fs::path newerDir = root / "newer";
+  check(fs::create_directories(newerDir, ec) && !ec, "create newer dir");
+  check(write_file(newerDir / kStateFileName,
+                   "{\"folder\":\"props\",\"futureKey\":1}"),
+        "write a state with a key this build does not read");
+  const bool sinkRegistered =
+      engine::core::initialize_logging() &&
+      engine::core::log_register_sink(&note_unread_key, nullptr);
+  rebind_state_directory(newerDir);
+  editor_session().contentBrowser.filter = {};
+  content_browser_state_load_once();
+  check(sinkRegistered &&
+            std::strcmp(editor_session().contentBrowser.filter.folder,
+                        "props") == 0 &&
+            g_unreadKeyWarnings == 1,
+        "the state loads, and the unread key is named once");
+  engine::core::log_unregister_sink(&note_unread_key, nullptr);
+  engine::core::shutdown_logging();
 
   // A mask written with the current width is taken as it is.
   const fs::path currentDir = root / "current";
