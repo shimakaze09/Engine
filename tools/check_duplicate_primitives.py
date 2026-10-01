@@ -200,6 +200,15 @@ TEST_RULES: tuple[Rule, ...] = (
         "engine::tests::enter_asset_root() or find_asset_root()",
     ),
     Rule(
+        name="the test PNG encoder",
+        owner="tests/png_fixture.h",
+        # The chunk CRC polynomial and the header chunk name are what a
+        # hand-written PNG encoder carries: three GPU suites each had one.
+        pattern=r"0xEDB88320|\"IHDR\"",
+        remedy="include tests/png_fixture.h and call "
+        "engine::tests::encode_rgb8_png() or uniform_rgb8_png()",
+    ),
+    Rule(
         name="the render prep frame driver",
         owner="tests/render_prep_harness.h",
         # Enqueuing render prep by hand is where a copied driver starts:

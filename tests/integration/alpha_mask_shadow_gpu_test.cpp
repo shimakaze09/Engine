@@ -16,6 +16,7 @@
 // reports it without an identity; the scene reaches it by path.
 
 #include "../gpu_scene_fixture.h"
+#include "../png_fixture.h"
 
 #include "engine/content/asset_identity.h"
 #include "engine/core/mesh_asset.h"
@@ -89,70 +90,18 @@ bool write_quad_mesh() {
   return write_bytes(kMeshPath, bytes.data(), bytes.size());
 }
 
-/// CRC-32 as PNG chunks use it.
-std::uint32_t crc32(const std::vector<unsigned char> &bytes) {
-  std::uint32_t crc = 0xFFFFFFFFU;
-  for (const unsigned char byte : bytes) {
-    crc ^= byte;
-    for (int bit = 0; bit < 8; ++bit) {
-      crc = (crc >> 1U) ^ (0xEDB88320U & (0U - (crc & 1U)));
-    }
-  }
-  return ~crc;
-}
-
-void put_u32(std::vector<unsigned char> *out, std::uint32_t value) {
-  for (int shift = 24; shift >= 0; shift -= 8) {
-    out->push_back(static_cast<unsigned char>((value >> shift) & 0xFFU));
-  }
-}
-
-void put_chunk(std::vector<unsigned char> *png, const char *type,
-               const std::vector<unsigned char> &data) {
-  put_u32(png, static_cast<std::uint32_t>(data.size()));
-  std::vector<unsigned char> body(type, type + 4);
-  body.insert(body.end(), data.begin(), data.end());
-  png->insert(png->end(), body.begin(), body.end());
-  put_u32(png, crc32(body));
-}
-
-/// A 4x4 RGB PNG whose red channel is a checkerboard of 0 and 255, one
-/// texel per cell, stored uncompressed (deflate "stored" blocks).
+/// A 4x4 RGB PNG whose channels are a checkerboard of 0 and 255, one
+/// texel per cell.
 std::vector<unsigned char> checker_png() {
   constexpr std::uint32_t kSize = 4U;
-  std::vector<unsigned char> raw{};
+  std::vector<unsigned char> rgb{};
   for (std::uint32_t y = 0U; y < kSize; ++y) {
-    raw.push_back(0U); // filter: none
     for (std::uint32_t x = 0U; x < kSize; ++x) {
       const unsigned char value = (((x + y) % 2U) == 0U) ? 255U : 0U;
-      raw.insert(raw.end(), {value, value, value});
+      rgb.insert(rgb.end(), {value, value, value});
     }
   }
-  std::vector<unsigned char> zlib{0x78U, 0x01U, 1U};
-  const std::size_t length = raw.size();
-  zlib.push_back(static_cast<unsigned char>(length & 0xFFU));
-  zlib.push_back(static_cast<unsigned char>((length >> 8U) & 0xFFU));
-  zlib.push_back(static_cast<unsigned char>(~length & 0xFFU));
-  zlib.push_back(static_cast<unsigned char>((~length >> 8U) & 0xFFU));
-  zlib.insert(zlib.end(), raw.begin(), raw.end());
-  std::uint32_t a = 1U;
-  std::uint32_t b = 0U;
-  for (const unsigned char byte : raw) {
-    a = (a + byte) % 65521U;
-    b = (b + a) % 65521U;
-  }
-  put_u32(&zlib, (b << 16U) | a);
-
-  std::vector<unsigned char> png{0x89U, 'P',   'N',   'G',
-                                 0x0DU, 0x0AU, 0x1AU, 0x0AU};
-  std::vector<unsigned char> header{};
-  put_u32(&header, kSize);
-  put_u32(&header, kSize);
-  header.insert(header.end(), {8U, 2U, 0U, 0U, 0U}); // 8-bit RGB
-  put_chunk(&png, "IHDR", header);
-  put_chunk(&png, "IDAT", zlib);
-  put_chunk(&png, "IEND", {});
-  return png;
+  return engine::tests::encode_rgb8_png(kSize, kSize, rgb);
 }
 
 std::string meta(const char *guid) {
