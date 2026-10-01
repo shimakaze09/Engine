@@ -3,6 +3,7 @@
 #pragma once
 
 #include <cstddef>
+#include <memory>
 
 #include "engine/core/file_read.h"
 #include "engine/core/validation_report.h"
@@ -43,9 +44,15 @@ SceneSaveBlockers collect_scene_save_blockers(const World &world) noexcept;
 /// names the mounted file wherever the process was started; any other path
 /// is an OS path, used as it is.
 bool save_scene(const World &world, const char *path) noexcept;
-/// Saves the scene into `buffer` as compact JSON, for in-memory snapshots
-/// no person reads (the Play snapshot).
+/// Saves the scene into `buffer` as compact JSON; false, with an Error,
+/// when it needs more than `capacity` bytes.
 bool save_scene(const World &world, char *buffer, std::size_t capacity,
+                std::size_t *outSize) noexcept;
+/// Saves the scene as compact JSON into a buffer sized to it, for
+/// in-memory snapshots no person reads (the Play snapshot): serialized
+/// once, never retried for room, so it fails only when the document
+/// cannot be produced at all.
+bool save_scene(const World &world, std::unique_ptr<char[]> *outBuffer,
                 std::size_t *outSize) noexcept;
 /// Fingerprints the document at `path`, resolved as save_scene resolves
 /// it, so an editor can tell whether the file changed on disk since it

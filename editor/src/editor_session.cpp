@@ -20,6 +20,7 @@
 #include <filesystem>
 #include <limits>
 #include <memory>
+#include <utility>
 #include <vector>
 
 #include "editor_commands.h"
@@ -575,49 +576,19 @@ bool capture_play_snapshot() noexcept {
   if (editor_session().world == nullptr) {
     return false;
   }
-
-  std::size_t capacity = editor_session().playSnapshotCapacity;
-  if (capacity < core::JsonWriter::kBufferBytes) {
-    capacity = core::JsonWriter::kBufferBytes;
+  // Serialized once into a buffer sized to the document: guessing a size
+  // and retrying logged a capacity Error on the first Play of any scene
+  // past a few hundred entities, and serialized the world again per try.
+  std::unique_ptr<char[]> snapshot{};
+  std::size_t snapshotSize = 0U;
+  if (!runtime::save_scene(*editor_session().world, &snapshot, &snapshotSize)) {
+    return false;
   }
-
-  const std::size_t estimatedCapacity =
-      (editor_session().world->alive_entity_count() * 256U) + 4096U;
-  if (capacity < estimatedCapacity) {
-    capacity = estimatedCapacity;
-  }
-
-  for (std::size_t attempt = 0U; attempt < 6U; ++attempt) {
-    std::unique_ptr<char[]> candidate(new (std::nothrow) char[capacity]);
-    if (candidate == nullptr) {
-      return false;
-    }
-
-    std::size_t snapshotSize = 0U;
-    if (runtime::save_scene(*editor_session().world, candidate.get(), capacity,
-                            &snapshotSize)) {
-      editor_session().playSnapshotBuffer.swap(candidate);
-      editor_session().playSnapshotCapacity = capacity;
-      editor_session().playSnapshotSize = snapshotSize;
-      editor_session().hasPlaySnapshot = true;
-      editor_session().playSnapshotWorld = editor_session().world;
-      return true;
-    }
-
-    if (capacity >= core::JsonWriter::kMaxBufferBytes) {
-      break;
-    }
-
-    const std::size_t doubledCapacity = capacity * 2U;
-    if ((doubledCapacity <= capacity) ||
-        (doubledCapacity > core::JsonWriter::kMaxBufferBytes)) {
-      capacity = core::JsonWriter::kMaxBufferBytes;
-    } else {
-      capacity = doubledCapacity;
-    }
-  }
-
-  return false;
+  editor_session().playSnapshotBuffer = std::move(snapshot);
+  editor_session().playSnapshotSize = snapshotSize;
+  editor_session().hasPlaySnapshot = true;
+  editor_session().playSnapshotWorld = editor_session().world;
+  return true;
 }
 
 /// True when retained selection handles may still be dereferenced: the

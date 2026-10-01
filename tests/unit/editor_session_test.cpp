@@ -6,10 +6,13 @@
 // history moves record an open gesture first, a gizmo gesture binds its
 // own target, and a command the history cannot record never mutates the
 // world silently. Pause toggles: pressed again it resumes the session.
+// The Play snapshot of a 1,000-entity scene is taken without an Error and
+// reloads whole (it used to guess a size and log a capacity Error first).
 
 #include "editor_commands.h"
 #include "editor_scene_document.h"
 #include "editor_session.h"
+#include "engine/core/logging.h"
 #include "engine/editor/editor.h"
 #include "engine/runtime/scene_serializer.h"
 #include "engine/runtime/world.h"
@@ -915,6 +918,70 @@ int check_allocation_failure_is_never_silent() {
 }
 
 /// Runs this executable or test program.
+int g_snapshotErrors = 0;
+
+void count_errors(engine::core::LogLevel level, const char * /*channel*/,
+                  const char * /*message*/, void * /*userData*/) noexcept {
+  if (level == engine::core::LogLevel::Error) {
+    ++g_snapshotErrors;
+  }
+}
+
+/// EXPECTATION: the Play snapshot of a 1,000-entity scene, whose entities
+/// serialize to far more than the 256 bytes the old size guess allowed, is
+/// taken with no Error and reloads every entity.
+int check_large_scene_snapshot_logs_no_error() {
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  std::unique_ptr<engine::runtime::World> reloaded(
+      new (std::nothrow) engine::runtime::World());
+  if ((world == nullptr) || (reloaded == nullptr) ||
+      !engine::core::initialize_logging()) {
+    return 70;
+  }
+  constexpr int kEntities = 1000;
+  for (int i = 0; i < kEntities; ++i) {
+    engine::runtime::Transform transform{};
+    transform.position = engine::math::Vec3(static_cast<float>(i), 0.5F, 0.0F);
+    const engine::runtime::Entity entity =
+        world->create_scene_object(transform);
+    engine::runtime::NameComponent name{};
+    std::snprintf(name.name, sizeof(name.name), "Crate %04d", i);
+    engine::runtime::Collider collider{};
+    collider.halfExtents = engine::math::Vec3(0.5F, 0.5F, 0.5F);
+    if ((entity == engine::runtime::kInvalidEntity) ||
+        !world->add_name_component(entity, name) ||
+        !world->add_collider(entity, collider)) {
+      return 71;
+    }
+  }
+  engine::editor::editor_set_world(world.get());
+  g_snapshotErrors = 0;
+  if (!engine::core::log_register_sink(&count_errors, nullptr)) {
+    engine::editor::editor_set_world(nullptr);
+    return 72;
+  }
+  const bool captured = engine::editor::capture_play_snapshot();
+  engine::core::log_unregister_sink(&count_errors, nullptr);
+  int result = 0;
+  if (!captured) {
+    result = 73;
+  } else if (g_snapshotErrors != 0) {
+    std::fprintf(stderr, "the snapshot logged %d Error(s)\n", g_snapshotErrors);
+    result = 74;
+  } else if (!engine::runtime::load_scene(
+                 *reloaded,
+                 engine::editor::editor_session().playSnapshotBuffer.get(),
+                 engine::editor::editor_session().playSnapshotSize) ||
+             (reloaded->alive_entity_count() !=
+              static_cast<std::size_t>(kEntities))) {
+    result = 75;
+  }
+  engine::editor::editor_set_world(nullptr);
+  engine::core::shutdown_logging();
+  return result;
+}
+
 int main() {
   int result = check_world_switch_resets_session();
   if (result != 0) {
@@ -977,6 +1044,12 @@ int main() {
   }
 
   result = check_pause_toggles();
+  if (result != 0) {
+    std::fprintf(stderr, "editor_session_test failed: %d\n", result);
+    return result;
+  }
+
+  result = check_large_scene_snapshot_logs_no_error();
   if (result != 0) {
     std::fprintf(stderr, "editor_session_test failed: %d\n", result);
     return result;

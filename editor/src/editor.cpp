@@ -402,7 +402,6 @@ void shutdown_editor() noexcept {
   clear_entity_selection();
   editor_session().playState = PlayState::Stopped;
   editor_session().playSnapshotBuffer.reset();
-  editor_session().playSnapshotCapacity = 0U;
   editor_session().playSnapshotSize = 0U;
   editor_session().hasPlaySnapshot = false;
   editor_session().worldRestoreFailed = false;

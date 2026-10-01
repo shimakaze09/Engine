@@ -10,6 +10,7 @@
 #include <cstring>
 #include <memory>
 #include <new>
+#include <utility>
 
 #include "component_registry.h"
 #include "engine/content/asset_catalog.h"
@@ -640,6 +641,31 @@ bool save_scene(const World &world, char *buffer, std::size_t capacity,
 
   std::memcpy(buffer, writer.result(), resultSize);
   buffer[resultSize] = '\0';
+  *outSize = resultSize;
+  return true;
+}
+
+bool save_scene(const World &world, std::unique_ptr<char[]> *outBuffer,
+                std::size_t *outSize) noexcept {
+  if ((outBuffer == nullptr) || (outSize == nullptr)) {
+    core::log_message(core::LogLevel::Error, kSceneLogChannel,
+                      "save_scene called with no output");
+    return false;
+  }
+  core::JsonWriter writer{};
+  if (!serialize_scene_to_writer(world, &writer)) {
+    return false;
+  }
+  const std::size_t resultSize = writer.result_size();
+  std::unique_ptr<char[]> buffer(new (std::nothrow) char[resultSize + 1U]);
+  if (buffer == nullptr) {
+    core::log_message(core::LogLevel::Error, kSceneLogChannel,
+                      "save_scene: out of memory for the scene document");
+    return false;
+  }
+  std::memcpy(buffer.get(), writer.result(), resultSize);
+  buffer[resultSize] = '\0';
+  *outBuffer = std::move(buffer);
   *outSize = resultSize;
   return true;
 }
