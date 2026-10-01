@@ -42,48 +42,6 @@ namespace {
 /// UI state (g_pendingInspectorEdit in editor_commands.cpp).
 bool g_showAdvanced = false;
 
-/// Draws the play-mode live-edit affordance row for one component section:
-/// a badge once the field has an uncommitted transient tweak this session,
-/// plus "Apply to authored value" (queues the current runtime value for
-/// Stop to replay as an ordinary undoable edit) and "Revert runtime edit"
-/// (writes the play-session baseline straight back). No-op when the
-/// component was never live-edited this session.
-void draw_live_edit_row(runtime::Entity entity, ComponentEditType type) noexcept {
-  if (!has_live_component_edit(entity, type)) {
-    return;
-  }
-  ImGui::TextColored(ImVec4(1.0F, 0.8F, 0.2F, 1.0F), "Live edit (transient)");
-  ImGui::SameLine();
-  // Re-queueing an already-queued pair replaces in place and never
-  // allocates, so only a first-time queue request is blocked by a full
-  // queue; the disabled button plus the reason line below make the failed
-  // state actionable instead of a silently ignored click.
-  const bool alreadyQueued = has_pending_apply_to_authored(entity, type);
-  const bool queueFull = pending_apply_to_authored_count() >=
-                         pending_apply_to_authored_capacity();
-  const bool canQueue = alreadyQueued || !queueFull;
-  ImGui::BeginDisabled(!canQueue);
-  if (ImGui::SmallButton("Apply to authored value") &&
-      !queue_apply_to_authored(entity, type)) {
-    core::log_message(core::LogLevel::Warning, "editor",
-                      "apply-to-authored request failed; edit not queued");
-  }
-  ImGui::EndDisabled();
-  ImGui::SameLine();
-  if (ImGui::SmallButton("Revert runtime edit")) {
-    static_cast<void>(revert_live_component_edit(entity, type));
-  }
-  if (has_pending_apply_to_authored(entity, type)) {
-    ImGui::TextDisabled("Queued: will apply to the authored scene on Stop.");
-  }
-  if (!canQueue) {
-    ImGui::TextColored(ImVec4(1.0F, 0.6F, 0.3F, 1.0F),
-                       "Apply queue full (%zu): Stop to apply queued edits, "
-                       "or cancel one first.",
-                       pending_apply_to_authored_capacity());
-  }
-}
-
 /// Shared capture -> draw -> stage/remove boilerplate for one component
 /// section; `drawFn` is `bool(Component&)`. Fields render disabled unless
 /// `authoredEditable` (Stopped, routes edits through command history) or
@@ -420,6 +378,47 @@ void draw_inspector_space_menu(runtime::Entity entity, bool editable) noexcept {
 }
 
 } // namespace
+
+void draw_live_edit_row(runtime::Entity entity,
+                        ComponentEditType type) noexcept {
+  if (!has_live_component_edit(entity, type)) {
+    return;
+  }
+  ImGui::TextColored(ImVec4(1.0F, 0.8F, 0.2F, 1.0F), "Live edit (transient)");
+  ImGui::SameLine();
+  // Re-queueing an already-queued pair replaces in place and never
+  // allocates, so only a first-time queue request is blocked by a full
+  // queue; the disabled button plus the reason line below make the failed
+  // state actionable instead of a silently ignored click.
+  const bool alreadyQueued = has_pending_apply_to_authored(entity, type);
+  const bool queueFull =
+      pending_apply_to_authored_count() >= pending_apply_to_authored_capacity();
+  const bool canQueue = alreadyQueued || !queueFull;
+  ImGui::BeginDisabled(!canQueue);
+  if (ImGui::SmallButton("Apply to authored value") &&
+      !queue_apply_to_authored(entity, type)) {
+    core::log_message(core::LogLevel::Warning, "editor",
+                      "apply-to-authored request failed; edit not queued");
+  }
+  ImGui::EndDisabled();
+  ImGui::SameLine();
+  if (ImGui::SmallButton("Revert runtime edit")) {
+    static_cast<void>(revert_live_component_edit(entity, type));
+  }
+  if (has_pending_apply_to_authored(entity, type)) {
+    ImGui::TextDisabled("Queued: will apply to the authored scene on Stop.");
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Cancel queued apply")) {
+      cancel_apply_to_authored(entity, type);
+    }
+  }
+  if (!canQueue) {
+    ImGui::TextColored(ImVec4(1.0F, 0.6F, 0.3F, 1.0F),
+                       "Apply queue full (%zu): Stop to apply the queued "
+                       "edits, or Cancel queued apply on one of them.",
+                       pending_apply_to_authored_capacity());
+  }
+}
 
 void draw_inspector_panel() noexcept {
   if (!ImGui::Begin(kInspectorWindow)) {
