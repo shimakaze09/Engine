@@ -87,6 +87,14 @@ std::uint64_t World::state_hash(StateHashSections *outSections) const noexcept {
   for (std::size_t i = 0U; i < physics.collisionPairCount * 2U; ++i) {
     h.entity(physics.collisionPairData[i]);
   }
+  const physics::PhysicsShapeStore *const shapeStore = physics.shapeStore.get();
+  const std::size_t triggerOverlapCount =
+      (shapeStore != nullptr) ? shapeStore->triggerOverlapCount : 0U;
+  h.u32(static_cast<std::uint32_t>(triggerOverlapCount));
+  for (std::size_t i = 0U; i < triggerOverlapCount; ++i) {
+    h.entity(shapeStore->triggerOverlaps[i].trigger);
+    h.entity(shapeStore->triggerOverlaps[i].other);
+  }
   sections.physics = h.hash;
 
   h.u32(static_cast<std::uint32_t>(m_timerManager.active_count()));

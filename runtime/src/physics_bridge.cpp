@@ -22,6 +22,9 @@ math::Vec3 get_gravity(const PhysicsWorldView &world) noexcept;
 void set_collision_dispatch(PhysicsWorldView &world,
                             CollisionDispatchFn fn) noexcept;
 void dispatch_collision_callbacks(PhysicsWorldView &world) noexcept;
+/// Sets the requested value for trigger dispatch.
+void set_trigger_dispatch(PhysicsWorldView &world,
+                          TriggerDispatchFn fn) noexcept;
 JointId add_distance_joint(PhysicsWorldView &world, Entity entityA,
                            Entity entityB, float distance) noexcept;
 bool remove_joint(PhysicsWorldView &world, JointId id) noexcept;
@@ -104,6 +107,15 @@ void set_collision_dispatch(World &world,
     return;
   }
   physics::set_collision_dispatch(world, fn);
+}
+
+/// Sets the requested value for trigger dispatch.
+void set_trigger_dispatch(World &world,
+                          physics::TriggerDispatchFn fn) noexcept {
+  if (!require_phase(world, WorldPhase::Input, "set_trigger_dispatch")) {
+    return;
+  }
+  physics::set_trigger_dispatch(world, fn);
 }
 
 void dispatch_collision_callbacks(World &world) noexcept {

@@ -38,6 +38,20 @@ static constexpr std::size_t kCollisionPairHashBuckets = 4096U;
 static constexpr std::size_t kMaxColliders = ENGINE_MAX_ENTITIES;
 static constexpr std::size_t kMaxConvexHulls = 256U;
 static constexpr std::size_t kMaxHeightfields = 16U;
+// Trigger/other collider pairs overlapping at once. A step that finds more
+// keeps the previous step's set and reports nothing (see
+// PhysicsShapeStore::triggerOverlaps), so events arrive late, never wrong.
+static constexpr std::size_t kMaxTriggerOverlaps = 1024U;
+// Trigger events one rendered frame can carry: every overlap ending and
+// as many beginning in each catch-up step, so accumulation never drops.
+static constexpr std::size_t kMaxTriggerFrameEvents =
+    kMaxTriggerOverlaps * 2U * kMaxCollisionFrameSteps;
+
+/// One trigger collider and the non-trigger collider overlapping it.
+struct TriggerOverlap final {
+  Entity trigger = kInvalidEntity;
+  Entity other = kInvalidEntity;
+};
 
 /// Enumerates joint type values used by the engine.
 enum class JointType : std::uint8_t {
@@ -173,6 +187,21 @@ struct PhysicsShapeStore final {
   std::uint32_t blockedWarningCount = 0U;
   std::uint32_t blockedLastEntityIndex = 0U;
   std::uint32_t blockedLastBlockerIndex = 0U;
+
+  // Trigger overlaps the last resolve found, sorted by (trigger, other)
+  // entity identity so the set and the events diffed from it do not
+  // depend on collider storage order. Persistent world state: copied with
+  // the world and hashed, and cleared without events by a content reset.
+  std::array<TriggerOverlap, kMaxTriggerOverlaps> triggerOverlaps =
+      std::array<TriggerOverlap, kMaxTriggerOverlaps>();
+  std::size_t triggerOverlapCount = 0U;
+  // Begin/end events every fixed step appends in step order (each step's
+  // ends first, then its begins, each in set order); the rendered frame's
+  // dispatch drains them as [trigger, other] pairs plus an entered flag.
+  std::array<Entity, kMaxTriggerFrameEvents * 2U> frameTriggerEventPairs =
+      std::array<Entity, kMaxTriggerFrameEvents * 2U>();
+  std::array<std::uint8_t, kMaxTriggerFrameEvents> frameTriggerEventEntered{};
+  std::size_t frameTriggerEventCount = 0U;
 };
 
 /// World-owned physics storage: gravity, joints, pair/stamp scratch,
@@ -188,12 +217,12 @@ inline constexpr math::Vec3 kDefaultGravity{0.0F, -9.8F, 0.0F};
 struct PhysicsContext final {
   PhysicsContext() noexcept;
   /// Copies context data and deep-copies owned shape payloads; the
-  /// transient resolve scratch and the run-tier collisionDispatch are
-  /// deliberately not copied (a copy starts with no dispatch installed).
+  /// transient resolve scratch and the run-tier collision and trigger
+  /// dispatches are deliberately not copied (a copy starts with none).
   PhysicsContext(const PhysicsContext &other) noexcept;
   /// Copies context data and deep-copies owned shape payloads; the
   /// transient resolve scratch is deliberately not copied and the
-  /// destination keeps its own collisionDispatch (run-tier state, not
+  /// destination keeps its own dispatches (run-tier state, not
   /// world content, so a scene commit cannot detach the live callbacks).
   PhysicsContext &operator=(const PhysicsContext &other) noexcept;
   // Out-of-line (ResolveScratch is incomplete here).
@@ -216,6 +245,9 @@ struct PhysicsContext final {
   // Run-tier callback installed by the World's owner (the pipeline) for the
   // life of the run; survives every content copy into this context.
   CollisionDispatchFn collisionDispatch = nullptr;
+  // Run-tier trigger-event callback, installed and kept like
+  // collisionDispatch.
+  TriggerDispatchFn triggerDispatch = nullptr;
 
   // Frame-accumulated pairs: every fixed step appends its kept
   // pairs in step order and dispatch drains once per rendered frame, so a
@@ -283,6 +315,15 @@ struct PhysicsContext final {
   std::uint32_t collisionPairDropCount = 0U;
   bool collisionPairOverflowActive = false;
   std::uint32_t collisionPairOverflowEpisodes = 0U;
+
+  // Trigger-overlap diagnostic: a step that found more than
+  // kMaxTriggerOverlaps overlaps keeps the previous set and reports no
+  // trigger event, logged once per episode.
+  bool triggerOverlapOverflowActive = false;
+  std::uint32_t triggerOverlapOverflowEpisodes = 0U;
+  // Set when steps filled the frame's trigger event buffer without a
+  // dispatch draining it; cleared by the next drain.
+  bool triggerEventBufferFullReported = false;
 
   // Raw per-step cvar cache written by refresh_step_cvar_cache on the
   // serial begin-step path so step/resolve code never takes the global

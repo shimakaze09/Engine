@@ -95,12 +95,13 @@ PhysicsContext::operator=(const PhysicsContext &other) noexcept {
     return *this;
   }
 
-  // collisionDispatch is deliberately not copied: it is run-tier state the
-  // engine installs on the live World once per run, not world content. A
-  // scene commit assigns a freshly staged World over the live one, and a
-  // staged World never carries a dispatch, so copying it here would silently
-  // detach every collision callback on each scene load or editor Stop
-  // restore. The destination keeps whatever dispatch its owner installed.
+  // collisionDispatch and triggerDispatch are deliberately not copied: they
+  // are run-tier state the engine installs on the live World once per run,
+  // not world content. A scene commit assigns a freshly staged World over
+  // the live one, and a staged World never carries a dispatch, so copying
+  // here would silently detach every collision and trigger callback on each
+  // scene load or editor Stop restore. The destination keeps whatever
+  // dispatches its owner installed.
   gravity = other.gravity;
   jointCount = other.jointCount;
   collisionPairData = other.collisionPairData;
@@ -121,6 +122,9 @@ PhysicsContext::operator=(const PhysicsContext &other) noexcept {
   collisionPairDropCount = other.collisionPairDropCount;
   collisionPairOverflowActive = other.collisionPairOverflowActive;
   collisionPairOverflowEpisodes = other.collisionPairOverflowEpisodes;
+  triggerOverlapOverflowActive = other.triggerOverlapOverflowActive;
+  triggerOverlapOverflowEpisodes = other.triggerOverlapOverflowEpisodes;
+  triggerEventBufferFullReported = other.triggerEventBufferFullReported;
   ccdThresholdCvar = other.ccdThresholdCvar;
   blockedWarnStepsCvar = other.blockedWarnStepsCvar;
   solverIterationsCvar = other.solverIterationsCvar;

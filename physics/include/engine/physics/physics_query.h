@@ -23,6 +23,8 @@ struct SweepHit final {
 };
 
 // ------ Query Functions------------------------------------------------------
+// No query hits a trigger collider: rays, sweeps and overlaps pass through
+// it, as Godot's queries skip areas by default.
 
 /// Returns the nearest ray intersection. skipEntity excludes that entity's
 /// collider and every compound collider it owns (the sweeps' rule), so a

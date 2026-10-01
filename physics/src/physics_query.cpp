@@ -15,6 +15,7 @@
 #include "engine/physics/physics_context.h"
 #include "engine/physics/physics_world_view.h"
 #include "narrow_phase.h"
+#include "physics_internal.h"
 
 #include <algorithm>
 #include <cmath>
@@ -25,9 +26,11 @@ namespace engine::physics {
 
 namespace {
 
-// Check if collision mask includes the entity's layer.
+// True when a query may hit the collider: its layer is in the mask and it
+// is not a trigger. Queries pass through triggers, as Godot's do by
+// default, so a ground probe or a shot never stops at a pickup volume.
 bool passes_mask(const Collider &col, std::uint32_t mask) noexcept {
-  return (col.collisionLayer & mask) != 0U;
+  return !col.isTrigger && ((col.collisionLayer & mask) != 0U);
 }
 
 /// Maps a local-space surface normal through an affine collider transform.
@@ -694,6 +697,11 @@ bool normalize_query_direction(const math::Vec3 &direction, float maxDistance,
 
 } // namespace
 
+bool collider_geometries_overlap(const ColliderWorldGeometry &a,
+                                 const ColliderWorldGeometry &b) noexcept {
+  return geometries_overlap(a, b);
+}
+
 bool raycast(const PhysicsWorldView &world, const math::Vec3 &origin,
              const math::Vec3 &direction, float maxDistance,
              PhysicsRaycastHit *outHit, Entity skipEntity) noexcept {
@@ -716,6 +724,9 @@ bool raycast(const PhysicsWorldView &world, const math::Vec3 &origin,
   float closestDistance = maxDistance;
   bool found = false;
   for (std::size_t i = 0U; i < count; ++i) {
+    if (colliders[i].isTrigger) {
+      continue;
+    }
     if ((skipEntity != kInvalidEntity) &&
         ((entities[i] == skipEntity) ||
          (world.rigid_body_owner(entities[i]) == skipEntity))) {

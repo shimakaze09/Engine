@@ -162,6 +162,11 @@ struct Collider final {
   std::uint32_t collisionMask = 0xFFFFFFFFU;
   ColliderShape shape = ColliderShape::AABB;
   HullSource hullSource = HullSource::None;
+  /// A trigger reports overlaps instead of colliding: no contact response,
+  /// no collision event, no CCD stop, no part in its body's mass
+  /// properties, and physics queries pass through it. Physics reports when
+  /// a non-trigger collider begins and ends overlapping it.
+  bool isTrigger = false;
 };
 
 } // namespace engine::math
