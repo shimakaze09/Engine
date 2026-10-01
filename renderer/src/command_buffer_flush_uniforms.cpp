@@ -180,11 +180,16 @@ std::size_t select_reaching(const Light *lights, std::size_t count,
     }
   }
   const std::size_t selected = std::min(reaching, limit);
-  std::partial_sort(
-      order.data(), order.data() + selected, order.data() + reaching,
-      [&](std::uint32_t a, std::uint32_t b) noexcept {
-        return (distSq[a] < distSq[b]) || ((distSq[a] == distSq[b]) && (a < b));
-      });
+  std::partial_sort(order.data(), order.data() + selected,
+                    order.data() + reaching,
+                    [&](std::uint32_t a, std::uint32_t b) noexcept {
+                      const float da = distSq[a];
+                      const float db = distSq[b];
+                      if (da != db) {
+                        return da < db;
+                      }
+                      return a < b;
+                    });
   for (std::size_t i = 0U; i < selected; ++i) {
     out[i] = order[i];
   }
