@@ -4,7 +4,10 @@
 
 #include "editor_inspector_metadata.h"
 
+#include <cstdio>
 #include <cstring>
+
+#include "engine/runtime/collision_layers.h"
 
 namespace engine::editor {
 
@@ -335,8 +338,8 @@ math::Quat quat_from_euler_degrees(const math::Vec3 &degrees) noexcept {
 }
 
 const char *inspector_layer_name(std::uint32_t index) noexcept {
-  // Fixed literal table (no lazy static init, no per-call formatting) until
-  // replaces these placeholder names with project-authored ones.
+  // The project's name for the bit, else a fixed literal (no lazy static
+  // init, no per-call formatting).
   static constexpr const char *kNames[kInspectorLayerCount] = {
       "Layer 0",  "Layer 1",  "Layer 2",  "Layer 3",  "Layer 4",  "Layer 5",
       "Layer 6",  "Layer 7",  "Layer 8",  "Layer 9",  "Layer 10", "Layer 11",
@@ -348,7 +351,43 @@ const char *inspector_layer_name(std::uint32_t index) noexcept {
   if (index >= kInspectorLayerCount) {
     return nullptr;
   }
-  return kNames[index];
+  const char *name = runtime::project_collision_layers().names[index];
+  return (name[0] != '\0') ? name : kNames[index];
+}
+
+void layer_mask_summary(std::uint32_t mask, char *out,
+                        std::size_t capacity) noexcept {
+  if ((out == nullptr) || (capacity == 0U)) {
+    return;
+  }
+  if ((mask == 0U) || (mask == 0xFFFFFFFFU)) {
+    std::snprintf(out, capacity, "%s", (mask == 0U) ? "Nothing" : "Everything");
+    return;
+  }
+  // Room for ", +NN" is kept back so the count of what did not fit always
+  // shows.
+  constexpr std::size_t kSuffixRoom = 6U;
+  out[0] = '\0';
+  std::size_t length = 0U;
+  std::uint32_t omitted = 0U;
+  for (std::uint32_t bit = 0U; bit < kInspectorLayerCount; ++bit) {
+    if ((mask & (1U << bit)) == 0U) {
+      continue;
+    }
+    const char *name = inspector_layer_name(bit);
+    const std::size_t needed = std::strlen(name) + ((length > 0U) ? 2U : 0U);
+    if ((omitted > 0U) || (length + needed + kSuffixRoom >= capacity)) {
+      ++omitted;
+      continue;
+    }
+    std::snprintf(out + length, capacity - length, "%s%s",
+                  (length > 0U) ? ", " : "", name);
+    length += needed;
+  }
+  if (omitted > 0U) {
+    std::snprintf(out + length, capacity - length, "%s+%u",
+                  (length > 0U) ? ", " : "", omitted);
+  }
 }
 
 } // namespace engine::editor

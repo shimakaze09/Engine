@@ -10,8 +10,14 @@
 // - a refused draft (out of range, or below what running scripts hold), a
 //   missing document and a malformed one each change neither the file nor
 //   the running limits;
-// - the window, drawn on a headless ImGui frame, shows the project and
-//   its limits, or says the document will not read.
+// - the Physics section refuses a layer name that is not a token or
+//   repeats another, and a one-sided matrix, naming the layer;
+// - its Apply writes the layers into the document, keeping every other
+//   field, then makes them the project's and installs the matrix on the
+//   world; saving the defaults back leaves the document byte-identical,
+//   and a refused set changes neither the file nor the running layers;
+// - the window, drawn on a headless ImGui frame, shows the project, its
+//   limits and its physics section, or says the document will not read.
 
 #if defined(__clang__) && (defined(__x86_64__) || defined(__i386__)) &&        \
     !defined(__PRFCHWINTRIN_H)
@@ -26,6 +32,8 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <memory>
+#include <new>
 #include <string>
 #include <system_error>
 
@@ -34,6 +42,10 @@
 #include "engine/content/project_document.h"
 #include "engine/core/cvar.h"
 #include "engine/core/logging.h"
+#include "engine/physics/physics.h"
+#include "engine/physics/physics_context.h"
+#include "engine/runtime/collision_layers.h"
+#include "engine/runtime/world.h"
 #include "engine/scripting/script_limits.h"
 #include "engine/scripting/scripting.h"
 
@@ -237,6 +249,88 @@ void check_save(const fs::path &root) {
         "change");
 }
 
+bool layers_equal(const ct::ProjectCollisionLayers &a,
+                  const ct::ProjectCollisionLayers &b) noexcept {
+  for (std::size_t i = 0U; i < ct::kMaxCollisionLayers; ++i) {
+    if ((a.collides[i] != b.collides[i]) ||
+        (std::strcmp(a.names[i], b.names[i]) != 0)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+void check_physics(const fs::path &root) {
+  char problem[160] = {};
+  ct::ProjectCollisionLayers layers{};
+  check(!project_physics_problem(layers, problem, sizeof(problem)),
+        "physics: the default layers have no problem");
+  std::snprintf(layers.names[3], sizeof(layers.names[3]), "%s", "Two words");
+  check(project_physics_problem(layers, problem, sizeof(problem)) &&
+            (std::strstr(problem, "Layer 3's name") != nullptr),
+        "physics: a name that is not a token is a problem naming the layer");
+  std::snprintf(layers.names[3], sizeof(layers.names[3]), "%s", "Player");
+  std::snprintf(layers.names[9], sizeof(layers.names[9]), "%s", "PLAYER");
+  check(project_physics_problem(layers, problem, sizeof(problem)) &&
+            (std::strstr(problem, "Layer 9's name") != nullptr),
+        "physics: a name repeated ignoring case is a problem");
+  layers.names[9][0] = '\0';
+  layers.collides[2] &= ~(1U << 5U);
+  check(project_physics_problem(layers, problem, sizeof(problem)) &&
+            (std::strstr(problem, "collision matrix") != nullptr),
+        "physics: a one-sided matrix is a problem");
+  layers.collides[2] = 0xFFFFFFFFU;
+
+  const fs::path file = root / "Physics.project";
+  const std::string original = write_plain_project(file);
+  const std::string path = file.string();
+  std::unique_ptr<engine::runtime::World> world(new (std::nothrow)
+                                                    engine::runtime::World());
+  check(!original.empty() && (world != nullptr),
+        "physics: a project and a world to apply to");
+  if (world == nullptr) {
+    return;
+  }
+  world->end_frame_phase();
+  engine::runtime::set_project_collision_layers(ct::ProjectCollisionLayers{});
+
+  std::snprintf(layers.names[4], sizeof(layers.names[4]), "%s", "Enemy");
+  ct::set_collision_layer_pair(&layers, 3U, 4U, false);
+  check(save_project_physics(path.c_str(), layers, world.get()),
+        "physics: Apply saves named layers and an ignored pair");
+  ct::ProjectDocument reread{};
+  check(ct::read_project_document(path.c_str(), &reread).has_value() &&
+            layers_equal(reread.collisionLayers, layers),
+        "physics: the document holds the layers");
+  check((reread.sceneCount == 2U) &&
+            (std::strcmp(reread.mainScript, "assets/main.lua") == 0) &&
+            !reread.scriptLimits.instructionLimitSet,
+        "physics: every other field is kept");
+  check(layers_equal(engine::runtime::project_collision_layers(), layers),
+        "physics: the project's layers are the saved ones at once");
+  check(engine::physics::get_collision_matrix(*world).rows[3] == ~(1U << 4U),
+        "physics: the world's matrix is the saved one at once");
+
+  ct::ProjectCollisionLayers repeated = layers;
+  std::snprintf(repeated.names[5], sizeof(repeated.names[5]), "%s", "enemy");
+  const std::string beforeRefusal = read_all(file);
+  check(!save_project_physics(path.c_str(), repeated, world.get()) &&
+            (read_all(file) == beforeRefusal) &&
+            layers_equal(engine::runtime::project_collision_layers(), layers),
+        "physics: a refused set changes neither the file nor the running "
+        "layers");
+
+  check(save_project_physics(path.c_str(), ct::ProjectCollisionLayers{},
+                             world.get()),
+        "physics: Apply saves the default layers");
+  check(read_all(file) == original,
+        "physics: the defaults leave the document byte-identical to one "
+        "that never named a layer");
+  check(engine::physics::get_collision_matrix(*world).rows ==
+            engine::physics::CollisionLayerMatrix{}.rows,
+        "physics: and the world is back on the default matrix");
+}
+
 std::string draw_frame(const char *projectFile) noexcept {
   ImGui::NewFrame();
   ImGui::LogToBuffer();
@@ -263,6 +357,10 @@ void check_window(const fs::path &root) {
   check((text.find("Apply") != std::string::npos) &&
             (text.find("Restore Defaults") != std::string::npos),
         "the window offers Apply and Restore Defaults");
+  check((text.find("Physics") != std::string::npos) &&
+            (text.find("Layer Names") != std::string::npos) &&
+            (text.find("Layer Collision Matrix") != std::string::npos),
+        "the window shows the physics section");
   const std::string broken = (root / "Broken.project").string();
   const std::string refused = draw_frame(broken.c_str());
   check((refused.find("will not read") != std::string::npos) &&
@@ -298,6 +396,7 @@ int main() {
   check_draft();
   check_problems();
   check_save(root);
+  check_physics(root);
   check_window(root);
 
   fs::remove_all(root, ec);

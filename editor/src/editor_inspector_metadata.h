@@ -110,15 +110,17 @@ math::Vec3 euler_degrees_from_quat(const math::Quat &rotation) noexcept;
 /// quaternion (from_euler composes three unit rotations).
 math::Quat quat_from_euler_degrees(const math::Vec3 &degrees) noexcept;
 
-/// Number of named collision-layer bit slots the LayerMask widget offers.
-/// Named per-project layers are scope (gameplay tags/named
-/// collision layers); until that lands, the widget still replaces raw
-/// integer entry with per-bit checkboxes labeled by slot index so the
-/// author never has to compute a bitmask by hand.
+/// Number of collision-layer bit slots the LayerMask widget offers: one
+/// checkbox per bit, so the author never computes a bitmask by hand.
 inline constexpr std::size_t kInspectorLayerCount = 32U;
-/// Returns the display label for collision-layer bit `index` ("Layer N"
-/// until adds a project-level name table); nullptr when index is
-/// out of range.
+/// Returns the display label for collision-layer bit `index`: the name the
+/// project gives it (Project Settings > Physics), else "Layer N"; nullptr
+/// when index is out of range.
 const char *inspector_layer_name(std::uint32_t index) noexcept;
+/// Writes a one-line summary of `mask` into `out`: "Nothing", "Everything",
+/// or the set layers' labels in bit order, ending ", +N" for the N that do
+/// not fit `capacity`.
+void layer_mask_summary(std::uint32_t mask, char *out,
+                        std::size_t capacity) noexcept;
 
 } // namespace engine::editor

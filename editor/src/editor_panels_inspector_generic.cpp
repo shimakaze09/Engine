@@ -250,18 +250,24 @@ void draw_enum_combo_field(const char *label, std::uint32_t &value,
   }
 }
 
-/// Draws a Uint32 bitmask field as per-bit named checkboxes.
+/// Draws a Uint32 bitmask field as per-bit checkboxes labelled with the
+/// project's layer names, under a node that summarises the mask.
 void draw_layer_mask_field(const char *label, std::uint32_t &mask,
                            bool *modified) noexcept {
   ImGui::PushID(label);
-  if (ImGui::TreeNode(label)) {
+  char summary[128] = {};
+  layer_mask_summary(mask, summary, sizeof(summary));
+  if (ImGui::TreeNode("##layers", "%s: %s", label, summary)) {
     for (std::uint32_t bit = 0U; bit < kInspectorLayerCount; ++bit) {
       if ((bit % 4U) != 0U) {
         ImGui::SameLine();
       }
       bool set = (mask & (1U << bit)) != 0U;
+      ImGui::PushID(static_cast<int>(bit));
       ImGui::SetNextItemWidth(editor_px(90.0F));
-      if (ImGui::Checkbox(inspector_layer_name(bit), &set)) {
+      const bool changed = ImGui::Checkbox(inspector_layer_name(bit), &set);
+      ImGui::PopID();
+      if (changed) {
         if (set) {
           mask |= (1U << bit);
         } else {

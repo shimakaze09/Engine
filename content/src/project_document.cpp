@@ -498,6 +498,37 @@ void set_collision_layer_pair(ProjectCollisionLayers *layers, std::uint32_t a,
 }
 
 std::expected<void, ProjectReadFailure>
+validate_collision_layers(const ProjectCollisionLayers &layers) noexcept {
+  for (std::uint32_t i = 0U; i < kMaxCollisionLayers; ++i) {
+    char field[48] = {};
+    std::snprintf(field, sizeof(field), "physics.layers[%u].name", i);
+    const char *name = layers.names[i];
+    if (std::memchr(name, '\0', kCollisionLayerNameCapacity) == nullptr) {
+      return refuse(field, "is too long");
+    }
+    if (name[0] != '\0') {
+      if (!core::name_token_is_valid(name, kCollisionLayerNameCapacity - 1U)) {
+        return refuse(field, "is not letters, digits, '_', '-' and '.'");
+      }
+      for (std::uint32_t j = 0U; j < i; ++j) {
+        if (core::equals_ignoring_case(name, layers.names[j])) {
+          return refuse(field, "repeats an earlier layer's name");
+        }
+      }
+    }
+    for (std::uint32_t j = 0U; j < kMaxCollisionLayers; ++j) {
+      const bool ij = (layers.collides[i] & (1U << j)) != 0U;
+      const bool ji = (layers.collides[j] & (1U << i)) != 0U;
+      if (ij != ji) {
+        return refuse("physics.ignoredPairs",
+                      "is not symmetric: a pair collides one way round only");
+      }
+    }
+  }
+  return {};
+}
+
+std::expected<void, ProjectReadFailure>
 validate_project_document(const ProjectDocument &document) noexcept {
   if (const char *problem = name_problem(document.name)) {
     return refuse("identity.name", problem);
@@ -596,34 +627,7 @@ validate_project_document(const ProjectDocument &document) noexcept {
     return refuse("scripting.memoryLimitMiB",
                   "is neither 0 (unlimited) nor from 16 to 2048");
   }
-  const ProjectCollisionLayers &layers = document.collisionLayers;
-  for (std::uint32_t i = 0U; i < kMaxCollisionLayers; ++i) {
-    char field[48] = {};
-    std::snprintf(field, sizeof(field), "physics.layers[%u].name", i);
-    const char *name = layers.names[i];
-    if (std::memchr(name, '\0', kCollisionLayerNameCapacity) == nullptr) {
-      return refuse(field, "is too long");
-    }
-    if (name[0] != '\0') {
-      if (!core::name_token_is_valid(name, kCollisionLayerNameCapacity - 1U)) {
-        return refuse(field, "is not letters, digits, '_', '-' and '.'");
-      }
-      for (std::uint32_t j = 0U; j < i; ++j) {
-        if (core::equals_ignoring_case(name, layers.names[j])) {
-          return refuse(field, "repeats an earlier layer's name");
-        }
-      }
-    }
-    for (std::uint32_t j = 0U; j < kMaxCollisionLayers; ++j) {
-      const bool ij = (layers.collides[i] & (1U << j)) != 0U;
-      const bool ji = (layers.collides[j] & (1U << i)) != 0U;
-      if (ij != ji) {
-        return refuse("physics.ignoredPairs",
-                      "is not symmetric: a pair collides one way round only");
-      }
-    }
-  }
-  return {};
+  return validate_collision_layers(document.collisionLayers);
 }
 
 std::expected<void, ProjectReadFailure>

@@ -1,7 +1,7 @@
-// Implements the Project Settings window: the draft the Scripting section
-// edits, the range and headroom checks Apply waits on, and the save that
-// rewrites only the document's script limits before applying them to the
-// running VM.
+// Implements the Project Settings window: the drafts the Scripting and
+// Physics sections edit, the checks each Apply waits on, and the saves
+// that rewrite only their own part of the document before applying it to
+// the running engine.
 
 #include "editor_project_settings.h"
 
@@ -17,6 +17,7 @@
 #include "engine/core/logging.h"
 #include "engine/engine.h"
 #include "engine/project.h"
+#include "engine/runtime/collision_layers.h"
 #include "engine/scripting/script_limits.h"
 #include "engine/scripting/scripting.h"
 
@@ -39,6 +40,10 @@ struct ProjectSettingsWindow final {
   /// The limits the document holds, and the edits not yet applied.
   ProjectSettingsDraft saved{};
   ProjectSettingsDraft draft{};
+  /// The collision layers the document holds, and the edits not yet
+  /// applied.
+  content::ProjectCollisionLayers savedLayers{};
+  content::ProjectCollisionLayers draftLayers{};
   /// The outcome of the last Apply, shown until the next.
   char status[160] = {};
   bool statusIsError = false;
@@ -74,6 +79,19 @@ void seed_window(const char *projectFile) noexcept {
                 document->name);
   g_window.saved = project_settings_draft(document->scriptLimits);
   g_window.draft = g_window.saved;
+  g_window.savedLayers = document->collisionLayers;
+  g_window.draftLayers = g_window.savedLayers;
+}
+
+bool layers_equal(const content::ProjectCollisionLayers &a,
+                  const content::ProjectCollisionLayers &b) noexcept {
+  for (std::size_t i = 0U; i < content::kMaxCollisionLayers; ++i) {
+    if ((a.collides[i] != b.collides[i]) ||
+        (std::strcmp(a.names[i], b.names[i]) != 0)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 void set_status(const char *text, bool isError) noexcept {
@@ -138,7 +156,198 @@ void draw_scripting_section() noexcept {
   }
 }
 
+/// The label a layer goes by in the matrix: its draft name, else
+/// "Layer N".
+const char *layer_label(const content::ProjectCollisionLayers &layers,
+                        std::uint32_t bit, char *scratch,
+                        std::size_t capacity) noexcept {
+  if (layers.names[bit][0] != '\0') {
+    return layers.names[bit];
+  }
+  std::snprintf(scratch, capacity, "Layer %u", bit);
+  return scratch;
+}
+
+/// Unity's triangular Layer Collision Matrix over the layers worth
+/// showing: the named ones and any whose row is not the default.
+void draw_layer_matrix(content::ProjectCollisionLayers &layers) noexcept {
+  std::uint32_t shown[content::kMaxCollisionLayers] = {};
+  int count = 0;
+  for (std::uint32_t bit = 0U; bit < content::kMaxCollisionLayers; ++bit) {
+    if ((layers.names[bit][0] != '\0') ||
+        (layers.collides[bit] != 0xFFFFFFFFU)) {
+      shown[count++] = bit;
+    }
+  }
+  if (count == 0) {
+    ImGui::TextDisabled("Name a layer to choose which layers it collides "
+                        "with.");
+    return;
+  }
+  constexpr ImGuiTableFlags kFlags = ImGuiTableFlags_SizingFixedFit |
+                                     ImGuiTableFlags_BordersInnerV |
+                                     ImGuiTableFlags_NoHostExtendX;
+  if (!ImGui::BeginTable("##layer_matrix", count + 1, kFlags)) {
+    return;
+  }
+  char scratch[24] = {};
+  ImGui::TableSetupColumn("##rows", ImGuiTableColumnFlags_WidthFixed);
+  // Columns run from the highest layer down, so each row's boxes start at
+  // its own layer and the grid is a triangle, as Unity draws it.
+  for (int k = count - 1; k >= 0; --k) {
+    ImGui::TableSetupColumn(
+        layer_label(layers, shown[k], scratch, sizeof(scratch)),
+        ImGuiTableColumnFlags_AngledHeader | ImGuiTableColumnFlags_WidthFixed);
+  }
+  ImGui::TableAngledHeadersRow();
+  for (int r = 0; r < count; ++r) {
+    const std::uint32_t row = shown[r];
+    ImGui::TableNextRow();
+    ImGui::TableNextColumn();
+    ImGui::TextUnformatted(layer_label(layers, row, scratch, sizeof(scratch)));
+    for (int k = count - 1; k >= 0; --k) {
+      ImGui::TableNextColumn();
+      const std::uint32_t column = shown[k];
+      if (column < row) {
+        continue;
+      }
+      bool collide = (layers.collides[row] & (1U << column)) != 0U;
+      ImGui::PushID(
+          static_cast<int>((row * content::kMaxCollisionLayers) + column));
+      if (ImGui::Checkbox("##pair", &collide)) {
+        content::set_collision_layer_pair(&layers, row, column, collide);
+      }
+      if (ImGui::IsItemHovered()) {
+        char other[24] = {};
+        ImGui::SetTooltip("%s and %s",
+                          layer_label(layers, row, scratch, sizeof(scratch)),
+                          layer_label(layers, column, other, sizeof(other)));
+      }
+      ImGui::PopID();
+    }
+  }
+  ImGui::EndTable();
+}
+
+void draw_physics_section() noexcept {
+  ImGui::SeparatorText("Physics");
+  content::ProjectCollisionLayers &layers = g_window.draftLayers;
+  if (ImGui::TreeNode("Layer Names")) {
+    ImGui::TextDisabled("Names label the 32 collision layer bits; a scene "
+                        "keeps its bits whatever they are called.");
+    for (std::uint32_t bit = 0U; bit < content::kMaxCollisionLayers; ++bit) {
+      if ((bit % 2U) != 0U) {
+        ImGui::SameLine(editor_px(260.0F));
+      }
+      ImGui::PushID(static_cast<int>(bit));
+      ImGui::AlignTextToFramePadding();
+      ImGui::Text("%2u", bit);
+      ImGui::SameLine();
+      ImGui::SetNextItemWidth(editor_px(200.0F));
+      ImGui::InputTextWithHint("##name", "unnamed", layers.names[bit],
+                               sizeof(layers.names[bit]));
+      ImGui::PopID();
+    }
+    ImGui::TreePop();
+  }
+  if (ImGui::TreeNode("Layer Collision Matrix")) {
+    draw_layer_matrix(layers);
+    ImGui::TreePop();
+  }
+
+  char problem[160] = {};
+  const bool hasProblem =
+      project_physics_problem(layers, problem, sizeof(problem));
+  if (hasProblem) {
+    ImGui::TextColored(ImVec4(1.0F, 0.55F, 0.35F, 1.0F), "%s", problem);
+  }
+  const bool changed = !layers_equal(layers, g_window.savedLayers);
+  ImGui::PushID("physics");
+  ImGui::BeginDisabled(hasProblem || !changed);
+  if (ImGui::Button("Apply")) {
+    if (save_project_physics(g_window.projectFile, layers,
+                             editor_session().world)) {
+      g_window.savedLayers = layers;
+      set_status("Saved to the project and applied.", false);
+    } else {
+      set_status("Not saved; the Log says why.", true);
+    }
+  }
+  ImGui::EndDisabled();
+  ImGui::SameLine();
+  ImGui::BeginDisabled(!changed);
+  if (ImGui::Button("Revert")) {
+    layers = g_window.savedLayers;
+  }
+  ImGui::EndDisabled();
+  ImGui::SameLine();
+  if (ImGui::Button("Restore Defaults")) {
+    layers = content::ProjectCollisionLayers{};
+  }
+  ImGui::PopID();
+}
+
 } // namespace
+
+bool project_physics_problem(const content::ProjectCollisionLayers &layers,
+                             char *out, std::size_t capacity) noexcept {
+  const auto valid = content::validate_collision_layers(layers);
+  if (valid.has_value()) {
+    return false;
+  }
+  if ((out != nullptr) && (capacity > 0U)) {
+    // The document's field names a layer by its bit, which is how the
+    // window numbers them.
+    constexpr const char *kPrefix = "physics.layers[";
+    const char *field = valid.error().field;
+    const std::size_t prefixLength = std::strlen(kPrefix);
+    if (std::strncmp(field, kPrefix, prefixLength) == 0) {
+      const char *digits = field + prefixLength;
+      const char *close = std::strchr(digits, ']');
+      const int length =
+          (close != nullptr) ? static_cast<int>(close - digits) : 0;
+      std::snprintf(out, capacity, "Layer %.*s's name %s.", length, digits,
+                    valid.error().reason);
+    } else {
+      std::snprintf(out, capacity, "The collision matrix %s.",
+                    valid.error().reason);
+    }
+  }
+  return true;
+}
+
+bool save_project_physics(const char *projectFile,
+                          const content::ProjectCollisionLayers &layers,
+                          runtime::World *world) noexcept {
+  if ((projectFile == nullptr) || (projectFile[0] == '\0')) {
+    return false;
+  }
+  char problem[160] = {};
+  if (project_physics_problem(layers, problem, sizeof(problem))) {
+    core::log_message(core::LogLevel::Error, kLogChannel, problem);
+    return false;
+  }
+  std::unique_ptr<content::ProjectDocument> document(
+      new (std::nothrow) content::ProjectDocument());
+  if ((document == nullptr) ||
+      !content::read_project_document(projectFile, document.get())
+           .has_value()) {
+    return false; // the reader logged why
+  }
+  document->collisionLayers = layers;
+  if (!content::write_project_document(projectFile, *document)) {
+    return false; // the writer logged why
+  }
+  runtime::set_project_collision_layers(layers);
+  if (world != nullptr) {
+    static_cast<void>(runtime::apply_project_collision_layers(*world));
+  }
+  char message[400] = {};
+  std::snprintf(message, sizeof(message),
+                "collision layers saved to %.300s and applied", projectFile);
+  core::log_message(core::LogLevel::Info, kLogChannel, message);
+  return true;
+}
 
 ProjectSettingsDraft
 project_settings_draft(const content::ProjectScriptLimits &limits) noexcept {
@@ -238,7 +447,7 @@ void draw_project_settings_window(const char *projectFile) noexcept {
     seed_window(projectFile);
   }
   bool open = true;
-  ImGui::SetNextWindowSize(ImVec2(editor_px(560.0F), editor_px(300.0F)),
+  ImGui::SetNextWindowSize(ImVec2(editor_px(560.0F), editor_px(460.0F)),
                            ImGuiCond_FirstUseEver);
   if (ImGui::Begin("Project Settings", &open)) {
     if (g_window.readFailed) {
@@ -254,6 +463,7 @@ void draw_project_settings_window(const char *projectFile) noexcept {
                          g_window.projectFile);
       ImGui::PopStyleColor();
       draw_scripting_section();
+      draw_physics_section();
     }
   }
   ImGui::End();

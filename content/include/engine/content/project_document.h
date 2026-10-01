@@ -214,6 +214,12 @@ parse_project_document(const char *text, std::size_t length,
 std::expected<void, ProjectReadFailure>
 read_project_document(const char *osPath, ProjectDocument *out) noexcept;
 
+/// Checks collision layers against the document's rules: every name a
+/// name token unique ignoring case, and a symmetric matrix. The failure
+/// names the field as the document spells it ("physics.layers[3].name").
+std::expected<void, ProjectReadFailure>
+validate_collision_layers(const ProjectCollisionLayers &layers) noexcept;
+
 /// Checks `document` against every rule the reader enforces, so a writer
 /// never produces a file its own reader would refuse.
 std::expected<void, ProjectReadFailure>
