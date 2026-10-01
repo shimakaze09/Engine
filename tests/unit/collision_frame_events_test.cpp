@@ -3,6 +3,7 @@
 // substep), catch-up and one-step-per-frame execution deliver the same
 // sequence, and drop accounting covers the whole rendered frame. Frames
 // mirror the production pipeline's per-step phase/step/resolve sequence.
+// Pairs that cannot respond -- neither side movable -- report no event.
 
 #include "engine/math/component_types.h"
 #include "engine/math/vec3.h"
@@ -66,6 +67,46 @@ void reset_recorder() noexcept {
     world->end_frame_phase();
   }
   return world;
+}
+
+/// Adds a sphere collider at `position`, with a body of `type` unless
+/// `type` is null (a plain static collider). Invalid on any refusal.
+engine::runtime::Entity add_sphere(engine::runtime::World &world,
+                                   const engine::math::Vec3 &position,
+                                   const engine::runtime::BodyType *type) {
+  engine::runtime::Transform t{};
+  t.position = position;
+  const engine::runtime::Entity entity = world.create_scene_object(t);
+  engine::runtime::Collider col{};
+  col.shape = engine::runtime::ColliderShape::Sphere;
+  col.halfExtents = engine::math::Vec3(0.5F, 0.5F, 0.5F);
+  if ((entity == engine::runtime::kInvalidEntity) ||
+      !world.add_collider(entity, col)) {
+    return engine::runtime::kInvalidEntity;
+  }
+  if (type != nullptr) {
+    engine::runtime::RigidBody body{};
+    body.inverseMass = 1.0F;
+    body.bodyType = static_cast<std::uint32_t>(*type);
+    if (!world.add_rigid_body(entity, body)) {
+      return engine::runtime::kInvalidEntity;
+    }
+  }
+  return entity;
+}
+
+/// A dynamic sphere resting 0.01 m deep on a static one at `x`, pressed
+/// down by gravity so the contact persists from step to step. Returns the
+/// two entities, static first. A pair of static colliders would report
+/// nothing, since neither can respond.
+bool add_resting_pair(engine::runtime::World &world, float x,
+                      engine::runtime::Entity *outBase,
+                      engine::runtime::Entity *outBall) {
+  const engine::runtime::BodyType dynamic = engine::runtime::BodyType::Dynamic;
+  *outBase = add_sphere(world, engine::math::Vec3(x, 0.0F, 0.0F), nullptr);
+  *outBall = add_sphere(world, engine::math::Vec3(x, 0.99F, 0.0F), &dynamic);
+  return (*outBase != engine::runtime::kInvalidEntity) &&
+         (*outBall != engine::runtime::kInvalidEntity);
 }
 
 /// Runs one rendered frame of `stepCount` fixed steps through the
@@ -178,24 +219,12 @@ int check_once_per_substep_and_empty_frame() noexcept {
     return 20;
   }
 
-  engine::runtime::set_gravity(*world, 0.0F, 0.0F, 0.0F);
   engine::runtime::set_collision_dispatch(*world, &record_collision_pairs);
 
-  engine::runtime::Transform first{};
-  const engine::runtime::Entity a = world->create_scene_object(first);
-  engine::runtime::Transform second{};
-  second.position = engine::math::Vec3(0.5F, 0.0F, 0.0F);
-  const engine::runtime::Entity b = world->create_scene_object(second);
-  if ((a == engine::runtime::kInvalidEntity) ||
-      (b == engine::runtime::kInvalidEntity)) {
+  engine::runtime::Entity a{};
+  engine::runtime::Entity b{};
+  if (!add_resting_pair(*world, 0.0F, &a, &b)) {
     return 21;
-  }
-
-  engine::runtime::Collider collider{};
-  collider.shape = engine::runtime::ColliderShape::Sphere;
-  collider.halfExtents = engine::math::Vec3(0.5F, 0.5F, 0.5F);
-  if (!world->add_collider(a, collider) || !world->add_collider(b, collider)) {
-    return 22;
   }
 
   reset_recorder();
@@ -215,8 +244,8 @@ int check_once_per_substep_and_empty_frame() noexcept {
     }
   }
 
-  // Zero-collision boundary: static overlap cannot vanish, so re-use the
-  // pair-free follow-up by removing one collider before the next frame.
+  // Zero-collision boundary: a resting contact does not end on its own, so
+  // the pair-free follow-up removes one collider before the next frame.
   if (!world->remove_collider(b)) {
     return 26;
   }
@@ -300,24 +329,17 @@ int check_frame_overflow_accounting() noexcept {
     return 40;
   }
 
-  engine::runtime::set_gravity(*world, 0.0F, 0.0F, 0.0F);
   engine::runtime::set_collision_dispatch(*world, &record_collision_pairs);
 
-  // 1030 well-separated overlapping static pairs: 6 drops per step at the
-  // 1024-pair step cap (the H-08 workload).
+  // 1030 well-separated resting pairs: 6 drops per step at the 1024-pair
+  // step cap (the H-08 workload).
   constexpr int kPairCount = 1030;
   for (int p = 0; p < kPairCount; ++p) {
-    for (int half = 0; half < 2; ++half) {
-      const auto entity = world->create_entity();
-      engine::runtime::Transform t{};
-      t.position = engine::math::Vec3(static_cast<float>(p) * 10.0F +
-                                          (static_cast<float>(half) * 0.5F),
-                                      0.0F, 0.0F);
-      world->add_transform(entity, t);
-      engine::runtime::Collider col{};
-      col.shape = engine::runtime::ColliderShape::Sphere;
-      col.halfExtents = engine::math::Vec3(0.5F, 0.5F, 0.5F);
-      world->add_collider(entity, col);
+    engine::runtime::Entity base{};
+    engine::runtime::Entity ball{};
+    if (!add_resting_pair(*world, static_cast<float>(p) * 10.0F, &base,
+                          &ball)) {
+      return 47;
     }
   }
 
@@ -353,6 +375,85 @@ int check_frame_overflow_accounting() noexcept {
   return 0;
 }
 
+/// Two colliders that cannot move -- static against static, kinematic
+/// against static -- have no response and report no event, as in Unity,
+/// Jolt and Box2D. A blocked-out level overlapping 1,100 static pairs used
+/// to be re-recorded every step: the pair cap filled with them, the one
+/// dynamic contact past it was dropped, and Lua was called for each.
+int check_immovable_pairs_are_not_reported() noexcept {
+  std::unique_ptr<engine::runtime::World> world = make_world();
+  if (world == nullptr) {
+    return 50;
+  }
+  engine::runtime::set_gravity(*world, 0.0F, 0.0F, 0.0F);
+  engine::runtime::set_collision_dispatch(*world, &record_collision_pairs);
+
+  constexpr int kStaticPairs = 1100;
+  for (int p = 0; p < kStaticPairs; ++p) {
+    const float x = static_cast<float>(p) * 10.0F;
+    if ((add_sphere(*world, engine::math::Vec3(x, 0.0F, 0.0F), nullptr) ==
+         engine::runtime::kInvalidEntity) ||
+        (add_sphere(*world, engine::math::Vec3(x + 0.5F, 0.0F, 0.0F),
+                    nullptr) == engine::runtime::kInvalidEntity)) {
+      return 51;
+    }
+  }
+  // A kinematic sphere at rest inside a static one, and last in traversal
+  // order, a dynamic sphere sunk into a static one: the only pair that can
+  // respond.
+  const engine::runtime::BodyType kinematic =
+      engine::runtime::BodyType::Kinematic;
+  const engine::runtime::BodyType dynamic = engine::runtime::BodyType::Dynamic;
+  const engine::math::Vec3 kinematicAt(0.0F, 100.0F, 0.0F);
+  const engine::math::Vec3 dynamicAt(0.0F, 200.0F, 0.0F);
+  const engine::runtime::Entity floor = add_sphere(*world, dynamicAt, nullptr);
+  if ((add_sphere(*world, kinematicAt, nullptr) ==
+       engine::runtime::kInvalidEntity) ||
+      (add_sphere(
+           *world,
+           engine::math::add(kinematicAt, engine::math::Vec3(0.5F, 0.0F, 0.0F)),
+           &kinematic) == engine::runtime::kInvalidEntity) ||
+      (floor == engine::runtime::kInvalidEntity)) {
+    return 52;
+  }
+  const engine::runtime::Entity ball = add_sphere(
+      *world,
+      engine::math::add(dynamicAt, engine::math::Vec3(0.5F, 0.0F, 0.0F)),
+      &dynamic);
+  if (ball == engine::runtime::kInvalidEntity) {
+    return 53;
+  }
+
+  reset_recorder();
+  if (!run_frame_steps(*world, 1U)) {
+    return 54;
+  }
+  const engine::physics::PhysicsContext &ctx = world->physics_context();
+  if ((ctx.narrowPhasePairTests != 1U) ||
+      (ctx.immovablePairsSkipped != (kStaticPairs + 1U))) {
+    std::fprintf(stderr,
+                 "immovable pairs: %u narrow-phase tests (1 expected), %u "
+                 "skipped (%d expected)\n",
+                 ctx.narrowPhasePairTests, ctx.immovablePairsSkipped,
+                 kStaticPairs + 1);
+    return 55;
+  }
+  if (ctx.frameCollisionPairDropCount != 0U) {
+    std::fprintf(stderr, "immovable pairs: %u pairs dropped\n",
+                 ctx.frameCollisionPairDropCount);
+    return 56;
+  }
+  engine::runtime::dispatch_collision_callbacks(*world);
+  if ((g_recordedCount != 1U) || !recorded_pair_is(0U, floor, ball)) {
+    std::fprintf(stderr,
+                 "immovable pairs: %zu events delivered; only the dynamic "
+                 "contact should be\n",
+                 g_recordedCount);
+    return 57;
+  }
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -373,6 +474,11 @@ int main() {
   }
 
   result = check_frame_overflow_accounting();
+  if (result != 0) {
+    return result;
+  }
+
+  result = check_immovable_pairs_are_not_reported();
   if (result != 0) {
     return result;
   }

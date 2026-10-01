@@ -179,6 +179,7 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
   physicsCtx.collisionPairCount = 0U;
   physicsCtx.collisionPairDropCount = 0U;
   physicsCtx.narrowPhasePairTests = 0U;
+  physicsCtx.immovablePairsSkipped = 0U;
   ++physicsCtx.solverFrameNumber;
   begin_generation(&physicsCtx.pairHashGeneration,
                    physicsCtx.pairHashStamps.data(),
@@ -472,6 +473,17 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
         const float invMassA = effective_inverse_mass(bodyA, bodyB);
         const float invMassB = effective_inverse_mass(bodyB, bodyA);
         const float invMassSum = invMassA + invMassB;
+        // Neither side can move this step (static, kinematic, or asleep and
+        // not disturbed by its partner), so no response exists and no event
+        // is reported: Unity, Jolt and Box2D generate none between two
+        // immovable colliders. Overlapping level geometry would otherwise be
+        // re-recorded every step, spending the pair cap and the Lua budget
+        // on events nothing can act on. A sleeper is woken only by a partner
+        // fast enough to give it mass here, so skipping loses no wake.
+        if (invMassSum <= 0.0F) {
+          ++physicsCtx.immovablePairsSkipped;
+          return;
+        }
 
         const auto shapeA = colliderA.shape;
         const auto shapeB = colliderB.shape;

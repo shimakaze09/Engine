@@ -446,6 +446,12 @@ A rigid body has a type, as in Jolt, Unity and Godot:
   never sleeps. Use it for moving platforms, doors and lifts.
 - **Static**: never moves.
 
+A collision is reported to `on_collision` and the collision handlers only
+when at least one of the two bodies can move. Two colliders that cannot
+(static, kinematic, or asleep and undisturbed) have no response and report
+nothing, as in Unity, so overlapping level geometry costs no events
+(`engine_unit_collision_frame_events`).
+
 Set the type with the Inspector's Body Type or
 `engine.set_body_type(e, "kinematic")`, and read it with
 `engine.get_body_type(e)`. `engine.set_position`, `set_rotation`,

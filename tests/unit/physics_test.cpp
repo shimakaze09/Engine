@@ -3777,8 +3777,9 @@ int check_heightfield_hull_uses_real_shape() {
 /// reported once per overflow episode instead of vanishing silently, the
 /// kept set must fill the buffer exactly, and a workload trimmed back to
 /// the cap must clear the episode without logging a new one. 1030
-/// well-separated static overlapping pairs produce 6 drops; removing six
-/// pairs' colliders lands exactly at capacity (the zero-drop boundary).
+/// well-separated pairs, each a dynamic sphere resting 0.01 m deep on a
+/// static one (two static spheres report nothing), produce 6 drops; removing
+/// six pairs' colliders lands exactly at capacity (the zero-drop boundary).
 int check_collision_pair_cap_loud() {
   auto world = std::unique_ptr<engine::runtime::World>(
       new (std::nothrow) engine::runtime::World());
@@ -3786,7 +3787,6 @@ int check_collision_pair_cap_loud() {
     return 1090;
   }
   world->end_frame_phase();
-  engine::runtime::set_gravity(*world, 0.0F, 0.0F, 0.0F);
 
   constexpr int kPairCount = 1030;
   engine::runtime::Entity extras[12] = {};
@@ -3795,14 +3795,18 @@ int check_collision_pair_cap_loud() {
     for (int half = 0; half < 2; ++half) {
       const auto entity = world->create_entity();
       engine::runtime::Transform t{};
-      t.position = engine::math::Vec3(static_cast<float>(p) * 10.0F +
-                                          (static_cast<float>(half) * 0.5F),
-                                      0.0F, 0.0F);
+      t.position = engine::math::Vec3(static_cast<float>(p) * 10.0F,
+                                      static_cast<float>(half) * 0.99F, 0.0F);
       world->add_transform(entity, t);
       engine::runtime::Collider col{};
       col.shape = engine::runtime::ColliderShape::Sphere;
       col.halfExtents = engine::math::Vec3(0.5F, 0.5F, 0.5F);
       world->add_collider(entity, col);
+      if (half == 1) {
+        engine::runtime::RigidBody body{};
+        body.inverseMass = 1.0F;
+        world->add_rigid_body(entity, body);
+      }
       if ((p >= kPairCount - 6) && (extraCount < 12)) {
         extras[extraCount] = entity;
         ++extraCount;
@@ -3810,9 +3814,11 @@ int check_collision_pair_cap_loud() {
     }
   }
 
+  // A full fixed step, so gravity keeps each ball pressed into its base.
   auto run_resolve = [&world]() noexcept -> bool {
     world->begin_update_phase();
-    const bool resolved = engine::runtime::resolve_collisions(*world);
+    const bool resolved = engine::runtime::step_physics(*world, 1.0F / 60.0F) &&
+                          engine::runtime::resolve_collisions(*world);
     world->commit_update_phase();
     world->begin_render_prep_phase();
     world->end_frame_phase();
