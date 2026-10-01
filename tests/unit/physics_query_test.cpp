@@ -509,6 +509,91 @@ int test_sweep_box_shape_accurate() noexcept {
   return 0;
 }
 
+// sweep_capsule against a wall face: a vertical capsule (hemisphere
+// centers y = -0.5 and 0.5, radius 0.25) from x = -5 meets the face of a
+// box at x = -0.5 when its center reaches x = -0.75, distance 4.25. The
+// capsule takes the conservative-advancement path, so the 1e-3 tolerance
+// of the shape-accurate sweeps above applies.
+int test_sweep_capsule_wall() noexcept {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 1;
+  }
+  world->end_frame_phase();
+  const Entity wall = make_box(*world, math::Vec3(0.0F, 0.0F, 0.0F),
+                               math::Vec3(0.5F, 2.0F, 2.0F));
+
+  physics::SweepHit hit{};
+  if (!physics::sweep_capsule(*world, math::Vec3(-5.0F, -0.5F, 0.0F),
+                              math::Vec3(-5.0F, 0.5F, 0.0F), 0.25F,
+                              math::Vec3(1.0F, 0.0F, 0.0F), 10.0F, &hit) ||
+      (hit.entityIndex != wall.index)) {
+    std::printf("FAIL sweep_capsule_wall: no hit\n");
+    return 2;
+  }
+  if (std::fabs(hit.distance - 4.25F) > 1.0e-3F) {
+    std::printf("FAIL sweep_capsule_wall: dist=%.4f\n",
+                static_cast<double>(hit.distance));
+    return 3;
+  }
+  // Coincident hemisphere centers sweep a sphere: 5 - 0.5 - 0.25.
+  if (!physics::sweep_capsule(*world, math::Vec3(-5.0F, 0.0F, 0.0F),
+                              math::Vec3(-5.0F, 0.0F, 0.0F), 0.25F,
+                              math::Vec3(1.0F, 0.0F, 0.0F), 10.0F, &hit) ||
+      (std::fabs(hit.distance - 4.25F) > 1.0e-3F)) {
+    std::printf("FAIL sweep_capsule_wall: degenerate capsule\n");
+    return 4;
+  }
+  // Malformed arguments are refused.
+  const float nan = std::nanf("");
+  if (physics::sweep_capsule(*world, math::Vec3(-5.0F, 0.0F, 0.0F),
+                             math::Vec3(-5.0F, nan, 0.0F), 0.25F,
+                             math::Vec3(1.0F, 0.0F, 0.0F), 10.0F, &hit) ||
+      physics::sweep_capsule(*world, math::Vec3(-5.0F, 0.0F, 0.0F),
+                             math::Vec3(-5.0F, 1.0F, 0.0F), -0.25F,
+                             math::Vec3(1.0F, 0.0F, 0.0F), 10.0F, &hit)) {
+    std::printf("FAIL sweep_capsule_wall: malformed arguments accepted\n");
+    return 5;
+  }
+  return 0;
+}
+
+// sweep_capsule honours its orientation. A 0.1-radius capsule lying in the
+// y-z plane on the line y + z = 2 sweeps along +X past a unit sphere at the
+// origin: its axis passes 2/sqrt(2) = 1.414 from the sphere's center, more
+// than 1.1, so it misses, although its bounds overlap the sphere's. Moved
+// to y + z = 1.2 (axis 0.8485 from the center, the closest point inside
+// the segment), contact comes at x = -sqrt(1.1^2 - 0.72) = -0.7, distance
+// 4.3 from x = -5.
+int test_sweep_capsule_orientation() noexcept {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 1;
+  }
+  world->end_frame_phase();
+  make_sphere(*world, math::Vec3(0.0F, 0.0F, 0.0F), 1.0F);
+
+  physics::SweepHit hit{};
+  if (physics::sweep_capsule(*world, math::Vec3(-5.0F, 2.0F, 0.0F),
+                             math::Vec3(-5.0F, 0.0F, 2.0F), 0.1F,
+                             math::Vec3(1.0F, 0.0F, 0.0F), 10.0F, &hit)) {
+    std::printf("FAIL sweep_capsule_orientation: diagonal false positive\n");
+    return 2;
+  }
+  if (!physics::sweep_capsule(*world, math::Vec3(-5.0F, 1.2F, 0.0F),
+                              math::Vec3(-5.0F, 0.0F, 1.2F), 0.1F,
+                              math::Vec3(1.0F, 0.0F, 0.0F), 10.0F, &hit)) {
+    std::printf("FAIL sweep_capsule_orientation: real hit missed\n");
+    return 3;
+  }
+  if (std::fabs(hit.distance - 4.3F) > 1.0e-3F) {
+    std::printf("FAIL sweep_capsule_orientation: dist=%.4f\n",
+                static_cast<double>(hit.distance));
+    return 4;
+  }
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -860,6 +945,8 @@ int main() {
       {"sweep_box_wall", test_sweep_box_wall},
       {"sweep_sphere_shape_accurate", test_sweep_sphere_shape_accurate},
       {"sweep_box_shape_accurate", test_sweep_box_shape_accurate},
+      {"sweep_capsule_wall", test_sweep_capsule_wall},
+      {"sweep_capsule_orientation", test_sweep_capsule_orientation},
       {"parented_trs_collider_queries", test_parented_trs_collider_queries},
       {"sweep_sphere_skip_entity", test_sweep_sphere_skip_entity},
       {"sweep_box_skip_entity", test_sweep_box_skip_entity},

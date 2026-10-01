@@ -328,4 +328,13 @@ bool sweep_box(const World &world, const math::Vec3 &center,
                             outHit, mask, skipEntity);
 }
 
+bool sweep_capsule(const World &world, const math::Vec3 &pointA,
+                   const math::Vec3 &pointB, float radius,
+                   const math::Vec3 &direction, float maxDistance,
+                   physics::SweepHit *outHit, std::uint32_t mask,
+                   Entity skipEntity) noexcept {
+  return physics::sweep_capsule(world, pointA, pointB, radius, direction,
+                                maxDistance, outHit, mask, skipEntity);
+}
+
 } // namespace engine::runtime

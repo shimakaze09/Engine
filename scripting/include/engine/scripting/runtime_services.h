@@ -315,6 +315,12 @@ struct RuntimeServices final {
                     float maxDistance, RuntimeRaycastHit *outHit,
                     std::uint32_t mask,
                     core::Entity skipEntity) noexcept = nullptr;
+  /// Capsule between hemisphere centers a and b of the given radius.
+  bool (*sweep_capsule)(runtime::World *world, float ax, float ay, float az,
+                        float bx, float by, float bz, float radius, float dx,
+                        float dy, float dz, float maxDistance,
+                        RuntimeRaycastHit *outHit, std::uint32_t mask,
+                        core::Entity skipEntity) noexcept = nullptr;
   /// Joint constructors return the joint id or 0 for every failure —
   /// invalid entities, invalid parameters, self-joints, and a full joint
   /// table all share the one sentinel.

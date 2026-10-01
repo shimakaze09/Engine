@@ -967,19 +967,23 @@ std::size_t overlap_box(const PhysicsWorldView &world, const math::Vec3 &center,
   return resultCount < maxResults ? resultCount : maxResults;
 }
 
-// ---------- sweep_sphere -----------------------------------------------------
+// ---------- shape sweeps -----------------------------------------------------
 
-bool sweep_sphere(const PhysicsWorldView &world, const math::Vec3 &origin,
-                  float radius, const math::Vec3 &direction, float maxDistance,
-                  SweepHit *outHit, std::uint32_t mask,
-                  Entity skipEntity) noexcept {
-  math::Vec3 normalizedDirection{};
-  if (!std::isfinite(radius) || (radius < 0.0F) ||
-      !normalize_query_direction(direction, maxDistance,
-                                 &normalizedDirection)) {
-    return false;
-  }
+namespace {
 
+/// The loop every shape sweep shares. `cull` is the query shape's bounds
+/// test against a target's world box, returning the entry distance along
+/// the sweep; with `exactBoxTargets`, an unrotated box target takes that
+/// distance as exact, and every other target is refined by conservative
+/// advancement against `queryGeometry`. The hit point is the swept shape's
+/// center at impact.
+template <typename Cull>
+bool sweep_query_shape(const PhysicsWorldView &world,
+                       const ColliderWorldGeometry &queryGeometry,
+                       const math::Vec3 &start,
+                       const math::Vec3 &normalizedDirection, float maxDistance,
+                       bool exactBoxTargets, const Cull &cull, SweepHit *outHit,
+                       std::uint32_t mask, Entity skipEntity) noexcept {
   const std::size_t count = world.collider_count();
   if (count == 0U) {
     return false;
@@ -988,12 +992,6 @@ bool sweep_sphere(const PhysicsWorldView &world, const math::Vec3 &origin,
   const Entity *entities = nullptr;
   const Collider *colliders = nullptr;
   if (!world.get_collider_range(0U, count, &entities, &colliders)) {
-    return false;
-  }
-
-  ColliderWorldGeometry queryGeometry{};
-  if (!query_geometry(ColliderShape::Sphere, origin,
-                      math::Vec3(radius, radius, radius), &queryGeometry)) {
     return false;
   }
 
@@ -1019,12 +1017,12 @@ bool sweep_sphere(const PhysicsWorldView &world, const math::Vec3 &origin,
     float hitT = 0.0F;
     const math::AABB &targetBox = geometry.worldAabb;
 
-    if (!swept_sphere_aabb(origin, radius, normalizedDirection, bestT,
-                           targetBox, hitT)) {
+    if (!cull(bestT, targetBox, hitT)) {
       continue;
     }
 
-    const bool exactBoxTarget = (geometry.shape == ColliderShape::AABB) &&
+    const bool exactBoxTarget = exactBoxTargets &&
+                                (geometry.shape == ColliderShape::AABB) &&
                                 !has_non_identity_linear_transform(geometry);
     if (!exactBoxTarget &&
         !sweep_geometry_conservative(queryGeometry, normalizedDirection, bestT,
@@ -1040,7 +1038,7 @@ bool sweep_sphere(const PhysicsWorldView &world, const math::Vec3 &origin,
         outHit->timeOfImpact = hitT / maxDistance;
         outHit->distance = hitT;
         outHit->contactPoint =
-            math::add(origin, math::mul(normalizedDirection, hitT));
+            math::add(start, math::mul(normalizedDirection, hitT));
         if (exactBoxTarget) {
           const math::Vec3 boxCenter =
               math::mul(math::add(targetBox.min, targetBox.max), 0.5F);
@@ -1059,7 +1057,46 @@ bool sweep_sphere(const PhysicsWorldView &world, const math::Vec3 &origin,
   return found;
 }
 
-// ---------- sweep_box --------------------------------------------------------
+/// Rotation taking the local +Y axis onto the unit vector `axis`, built
+/// from the half-way vector so no trigonometry enters a query.
+math::Quat rotation_from_y(const math::Vec3 &axis) noexcept {
+  const math::Vec3 up(0.0F, 1.0F, 0.0F);
+  const float cosine = math::dot(up, axis);
+  if (cosine < -0.9999F) {
+    return math::Quat(1.0F, 0.0F, 0.0F, 0.0F); // half turn about X
+  }
+  const math::Vec3 axisCross = math::cross(up, axis);
+  return math::normalize(
+      math::Quat(axisCross.x, axisCross.y, axisCross.z, 1.0F + cosine));
+}
+
+} // namespace
+
+bool sweep_sphere(const PhysicsWorldView &world, const math::Vec3 &origin,
+                  float radius, const math::Vec3 &direction, float maxDistance,
+                  SweepHit *outHit, std::uint32_t mask,
+                  Entity skipEntity) noexcept {
+  math::Vec3 normalizedDirection{};
+  if (!std::isfinite(radius) || (radius < 0.0F) ||
+      !normalize_query_direction(direction, maxDistance,
+                                 &normalizedDirection)) {
+    return false;
+  }
+
+  ColliderWorldGeometry queryGeometry{};
+  if (!query_geometry(ColliderShape::Sphere, origin,
+                      math::Vec3(radius, radius, radius), &queryGeometry)) {
+    return false;
+  }
+
+  const auto cull = [&](float maxT, const math::AABB &targetBox,
+                        float &outT) noexcept {
+    return swept_sphere_aabb(origin, radius, normalizedDirection, maxT,
+                             targetBox, outT);
+  };
+  return sweep_query_shape(world, queryGeometry, origin, normalizedDirection,
+                           maxDistance, true, cull, outHit, mask, skipEntity);
+}
 
 bool sweep_box(const PhysicsWorldView &world, const math::Vec3 &center,
                const math::Vec3 &halfExtents, const math::Vec3 &direction,
@@ -1074,83 +1111,72 @@ bool sweep_box(const PhysicsWorldView &world, const math::Vec3 &center,
     return false;
   }
 
-  const std::size_t count = world.collider_count();
-  if (count == 0U) {
-    return false;
-  }
-
-  const Entity *entities = nullptr;
-  const Collider *colliders = nullptr;
-  if (!world.get_collider_range(0U, count, &entities, &colliders)) {
-    return false;
-  }
-
   ColliderWorldGeometry queryGeometry{};
   if (!query_geometry(ColliderShape::AABB, center, halfExtents,
                       &queryGeometry)) {
     return false;
   }
 
-  bool found = false;
-  float bestT = maxDistance;
+  const auto cull = [&](float maxT, const math::AABB &targetBox,
+                        float &outT) noexcept {
+    return swept_box_aabb(center, halfExtents, normalizedDirection, maxT,
+                          targetBox, outT);
+  };
+  return sweep_query_shape(world, queryGeometry, center, normalizedDirection,
+                           maxDistance, true, cull, outHit, mask, skipEntity);
+}
 
-  for (std::size_t i = 0U; i < count; ++i) {
-    const Collider &col = colliders[i];
-    if (!passes_mask(col, mask)) {
-      continue;
-    }
-    if ((skipEntity != kInvalidEntity) &&
-        ((entities[i] == skipEntity) ||
-         (world.rigid_body_owner(entities[i]) == skipEntity))) {
-      continue;
-    }
-
-    ColliderWorldGeometry geometry{};
-    if (!collider_geometry(world, entities[i], col, &geometry)) {
-      continue;
-    }
-
-    float hitT = 0.0F;
-    const math::AABB &targetBox = geometry.worldAabb;
-
-    if (!swept_box_aabb(center, halfExtents, normalizedDirection, bestT,
-                        targetBox, hitT)) {
-      continue;
-    }
-
-    const bool exactBoxTarget = (geometry.shape == ColliderShape::AABB) &&
-                                !has_non_identity_linear_transform(geometry);
-    if (!exactBoxTarget &&
-        !sweep_geometry_conservative(queryGeometry, normalizedDirection, bestT,
-                                     geometry, &hitT)) {
-      continue;
-    }
-
-    if (hitT <= bestT) {
-      bestT = hitT;
-      found = true;
-      if (outHit != nullptr) {
-        outHit->entityIndex = entities[i].index;
-        outHit->timeOfImpact = hitT / maxDistance;
-        outHit->distance = hitT;
-        outHit->contactPoint =
-            math::add(center, math::mul(normalizedDirection, hitT));
-        if (exactBoxTarget) {
-          const math::Vec3 boxCenter =
-              math::mul(math::add(targetBox.min, targetBox.max), 0.5F);
-          const math::Vec3 boxHalfExtents =
-              math::mul(math::sub(targetBox.max, targetBox.min), 0.5F);
-          outHit->normal =
-              aabb_hit_normal(outHit->contactPoint, boxCenter, boxHalfExtents);
-        } else {
-          outHit->normal = sweep_contact_normal(outHit->contactPoint, geometry,
-                                                normalizedDirection);
-        }
-      }
-    }
+bool sweep_capsule(const PhysicsWorldView &world, const math::Vec3 &pointA,
+                   const math::Vec3 &pointB, float radius,
+                   const math::Vec3 &direction, float maxDistance,
+                   SweepHit *outHit, std::uint32_t mask,
+                   Entity skipEntity) noexcept {
+  math::Vec3 normalizedDirection{};
+  if (!std::isfinite(pointA.x) || !std::isfinite(pointA.y) ||
+      !std::isfinite(pointA.z) || !std::isfinite(pointB.x) ||
+      !std::isfinite(pointB.y) || !std::isfinite(pointB.z) ||
+      !std::isfinite(radius) || (radius < 0.0F) ||
+      !normalize_query_direction(direction, maxDistance,
+                                 &normalizedDirection)) {
+    return false;
   }
 
-  return found;
+  // A capsule collider runs along its local Y axis between hemisphere
+  // centers halfExtents.y either side of its center; coincident endpoints
+  // leave a sphere.
+  const math::Vec3 segment = math::sub(pointB, pointA);
+  const float segmentLength = math::length(segment);
+  if (!std::isfinite(segmentLength)) {
+    return false;
+  }
+  const math::Vec3 center = math::mul(math::add(pointA, pointB), 0.5F);
+  const math::Quat rotation =
+      (segmentLength > 1.0e-6F)
+          ? rotation_from_y(math::mul(segment, 1.0F / segmentLength))
+          : math::Quat();
+  Collider queryCollider{};
+  queryCollider.shape = ColliderShape::Capsule;
+  queryCollider.halfExtents = math::Vec3(radius, 0.5F * segmentLength, radius);
+  ColliderWorldGeometry queryGeometry{};
+  if (!make_collider_world_geometry(
+          queryCollider,
+          math::compose_trs(center, rotation, math::Vec3(1.0F, 1.0F, 1.0F)),
+          nullptr, &queryGeometry)) {
+    return false;
+  }
+
+  // The capsule's world box culls; every target is then refined against
+  // the capsule itself.
+  const math::Vec3 boundsHalfExtents = math::mul(
+      math::sub(queryGeometry.worldAabb.max, queryGeometry.worldAabb.min),
+      0.5F);
+  const auto cull = [&](float maxT, const math::AABB &targetBox,
+                        float &outT) noexcept {
+    return swept_box_aabb(center, boundsHalfExtents, normalizedDirection, maxT,
+                          targetBox, outT);
+  };
+  return sweep_query_shape(world, queryGeometry, center, normalizedDirection,
+                           maxDistance, false, cull, outHit, mask, skipEntity);
 }
 
 } // namespace engine::physics

@@ -77,4 +77,15 @@ bool sweep_box(const PhysicsWorldView &world, const math::Vec3 &center,
                std::uint32_t mask = 0xFFFFFFFFU,
                Entity skipEntity = kInvalidEntity) noexcept;
 
+/// Sweeps a capsule whose hemisphere centers are pointA and pointB (a
+/// sphere when they coincide), in any orientation, along a normalized copy
+/// of direction, as Unity's CapsuleCast does. Returns the earliest hit when
+/// maxDistance is finite and positive; the hit point is the capsule's
+/// center at impact. skipEntity follows the other sweeps' rule.
+bool sweep_capsule(const PhysicsWorldView &world, const math::Vec3 &pointA,
+                   const math::Vec3 &pointB, float radius,
+                   const math::Vec3 &direction, float maxDistance,
+                   SweepHit *outHit, std::uint32_t mask = 0xFFFFFFFFU,
+                   Entity skipEntity = kInvalidEntity) noexcept;
+
 } // namespace engine::physics
