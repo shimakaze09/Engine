@@ -18,6 +18,7 @@
 #include "engine/math/color_space.h"
 
 #include <cmath>
+#include <cstddef>
 
 namespace engine::editor {
 

@@ -17,6 +17,7 @@
 #include "imgui_internal.h"
 
 #include <cmath>
+#include <cstddef>
 #include <cstdio>
 #include <string>
 
