@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 
@@ -213,7 +214,43 @@ void apply_pbr_ibl_uniforms(const BackendState &backend,
                             const RenderDevice *dev,
                             const IblSelection &ibl) noexcept;
 
-/// Uploads the forward PBR light arrays and counts.
+/// Which scene lights fill the forward program's fixed arrays, as
+/// indices into the scene arrays. The program holds kForwardMax* of each
+/// kind, so a scene with more picks per draw (see
+/// select_forward_lights_for_bounds).
+struct ForwardLightSelection final {
+  std::array<std::uint32_t, kForwardMaxPointLights> point{};
+  std::size_t pointCount = 0U;
+  std::array<std::uint32_t, kForwardMaxSpotLights> spot{};
+  std::size_t spotCount = 0U;
+};
+
+/// Same lights, same order.
+bool operator==(const ForwardLightSelection &a,
+                const ForwardLightSelection &b) noexcept;
+
+/// The lights a forward draw bounded by the sphere (`center`, `radius`)
+/// is shaded with, per object as Unity's forward path picks them. A kind
+/// with no more lights than the program holds takes all of them, in scene
+/// order, so a scene within the limit uploads one set for every draw.
+/// Past the limit, a draw takes the lights whose range reaches its
+/// bounds, nearest its centre first (ties by index), so a surface is lit
+/// by the lights beside it wherever the camera is.
+ForwardLightSelection
+select_forward_lights_for_bounds(const SceneLightData &lights,
+                                 const math::Vec3 &center,
+                                 float radius) noexcept;
+
+/// Uploads a selection's point and spot arrays and counts, and the
+/// positions the shadow slots' lights hold in them.
+void upload_forward_light_selection(
+    const BackendState &backend, const RenderDevice *dev,
+    const SceneLightData &lights,
+    const ForwardLightSelection &selection) noexcept;
+
+/// Uploads the forward PBR light arrays and counts: the directional
+/// lights, and the local lights nearest the view's camera, which a pass
+/// that selects per draw replaces draw by draw.
 void upload_pbr_lighting_uniforms(const BackendState &backend,
                                   const RenderDevice *dev,
                                   const SceneLightData &lights) noexcept;
@@ -380,7 +417,34 @@ struct ForwardDrawBindings final {
   /// a texture while rendering into it is undefined on GL and Vulkan and a
   /// dropped draw on WebGL.
   DeviceTextureHandle passTarget{};
+  /// The scene's lights, when the pass selects local lights per draw;
+  /// null keeps the pass-wide set. The selection last uploaded rides
+  /// along, so a draw lit by the same lights as the one before uploads
+  /// nothing.
+  const SceneLightData *lights = nullptr;
+  ForwardLightSelection uploadedLights{};
+  bool lightsUploaded = false;
 };
+
+/// The world-space bounding sphere of `command` drawing `mesh`.
+void forward_draw_bounds(const DrawCommand &command, const GpuMesh &mesh,
+                         math::Vec3 *outCenter, float *outRadius) noexcept;
+
+/// Selects and, when it differs from the last, uploads the local lights
+/// for a draw bounded by (`center`, `radius`). Does nothing when the
+/// bindings carry no lights.
+void select_forward_draw_lights(const BackendState &backend,
+                                const RenderDevice *dev,
+                                const math::Vec3 &center, float radius,
+                                ForwardDrawBindings *bindings) noexcept;
+
+/// select_forward_draw_lights for one command's bounds: what every
+/// forward pass calls before drawing a command on its own.
+void select_forward_command_lights(const BackendState &backend,
+                                   const RenderDevice *dev,
+                                   const DrawCommand &command,
+                                   const GpuMesh &mesh,
+                                   ForwardDrawBindings *bindings) noexcept;
 
 /// One maximal run of consecutive draws sharing a shading program.
 /// Render prep sorts the program id directly below the transparency bit,

@@ -93,6 +93,14 @@ void draw_forward_command(const ForwardDrawProgram &, const BackendState &,
                           const RenderDevice *, std::uint8_t,
                           const DrawCommand &, const GpuMesh &,
                           const math::Mat4 &, RendererFrameStats *) noexcept {}
+void forward_draw_bounds(const DrawCommand &, const GpuMesh &, math::Vec3 *,
+                         float *) noexcept {}
+void select_forward_draw_lights(const BackendState &, const RenderDevice *,
+                                const math::Vec3 &, float,
+                                ForwardDrawBindings *) noexcept {}
+void select_forward_command_lights(const BackendState &, const RenderDevice *,
+                                   const DrawCommand &, const GpuMesh &,
+                                   ForwardDrawBindings *) noexcept {}
 /// One run covering the whole range: this suite submits no draws with a
 /// shading model, and the overlay it tests runs after the geometry.
 bool next_program_run(const CommandBufferView &view, std::size_t *cursor,

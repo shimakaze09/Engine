@@ -5,7 +5,9 @@
 // the pass renders into it, and a mesh with an ordinary texture, or showing
 // another capture, still samples it. Each draw is shaded with its own
 // material's program, as the main view shades it: a Toon draw in a capture
-// is issued with the Toon program, not the physically-based one.
+// is issued with the Toon program, not the physically-based one. Past the
+// eight point lights the program holds, each draw is lit by the lights
+// that reach it, not by the ones nearest the camera.
 
 #include "command_buffer_context.h"
 #include "command_buffer_flush_internal.h"
@@ -19,6 +21,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 
 namespace engine::renderer {
 
@@ -56,6 +59,34 @@ void record_bind_render_target(RenderTargetHandle target) noexcept {
   g_boundTarget = target.value;
 }
 
+/// The point-light positions uploaded last, and those in effect at each
+/// draw.
+constexpr ShaderParam kPointPosRadiusParam{40};
+float g_pointPositions[8U * 4U] = {};
+std::int32_t g_pointCount = 0;
+struct DrawLights final {
+  float positions[8U * 4U] = {};
+  std::int32_t count = 0;
+};
+DrawLights g_drawLights[kMaxDraws] = {};
+
+constexpr ShaderParam kPointCountParam{41};
+
+void record_vec4_array(ShaderParam param, const float *values,
+                       std::int32_t count) noexcept {
+  if ((param == kPointPosRadiusParam) && (count >= 0) && (count <= 8)) {
+    std::memcpy(g_pointPositions, values,
+                sizeof(float) * 4U * static_cast<std::size_t>(count));
+  }
+}
+
+/// The shader reads only as many lights as the count says.
+void record_i32(ShaderParam param, std::int32_t value) noexcept {
+  if (param == kPointCountParam) {
+    g_pointCount = value;
+  }
+}
+
 void record_bind_program(DeviceProgramHandle program) noexcept {
   g_boundProgram = program.value;
 }
@@ -63,6 +94,9 @@ void record_bind_program(DeviceProgramHandle program) noexcept {
 void record_draw_indexed(DeviceGeometryHandle, std::int32_t) noexcept {
   if (g_drawCount < kMaxDraws) {
     g_drawLog[g_drawCount] = DrawRecord{g_slot0, g_boundTarget, g_boundProgram};
+    std::memcpy(g_drawLights[g_drawCount].positions, g_pointPositions,
+                sizeof(g_pointPositions));
+    g_drawLights[g_drawCount].count = g_pointCount;
   }
   ++g_drawCount;
 }
@@ -79,13 +113,13 @@ void reset_fake_device() noexcept {
   device.bind_program = &record_bind_program;
   device.draw_indexed = &record_draw_indexed;
   device.set_param_f32 = &tests::fake::set_param_f32;
-  device.set_param_i32 = &tests::fake::set_param_i32;
+  device.set_param_i32 = &record_i32;
   device.set_param_vec2 = &tests::fake::set_param_vec2;
   device.set_param_vec3 = &tests::fake::set_param_vec3;
   device.set_param_vec4 = &tests::fake::set_param_vec4;
   device.set_param_mat3 = &tests::fake::set_param_mat3;
   device.set_param_mat4 = &tests::fake::set_param_mat4;
-  device.set_param_vec4_array = &tests::fake::set_param_vec4_array;
+  device.set_param_vec4_array = &record_vec4_array;
   device.set_param_mat4_array = &tests::fake::set_param_mat4_array;
   device.set_viewport = &tests::fake::set_viewport;
   device.apply_render_state = &tests::fake::apply_render_state;
@@ -94,6 +128,7 @@ void reset_fake_device() noexcept {
   g_slot0 = 0U;
   g_boundTarget = 0U;
   g_boundProgram = 0U;
+  g_pointCount = 0;
 }
 
 } // namespace
@@ -306,11 +341,92 @@ void test_capture_shades_each_material_with_its_program() noexcept {
   set_scene_capture_requests(nullptr, 0U);
 }
 
+/// Whether the point light at `x` was among the draw's uploaded lights.
+bool draw_lit_by(const DrawLights &lights, float x) noexcept {
+  for (std::int32_t i = 0; i < lights.count; ++i) {
+    if (lights.positions[static_cast<std::size_t>(i) * 4U] == x) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/// EXPECTATION: with twelve point lights, ten clustered at the origin and
+/// two beside a draw a hundred units away, that far draw is lit by its
+/// two, and the near draw by eight of the cluster. The camera's nearest
+/// eight are all in the cluster, so a per-camera choice leaves the far
+/// draw unlit by the lamps beside it.
+void test_capture_lights_each_draw_by_its_bounds() noexcept {
+  reset_fake_device();
+  BackendState &backend = backend_state();
+  constexpr DeviceProgramHandle kPbr{1U};
+  backend.pbrProgram = kPbr;
+  backend.shadingPrograms[shading_program_id(ShadingModel::Pbr)] = kPbr;
+  backend.pbrPointLightPosRadiusParam = kPointPosRadiusParam;
+  backend.pbrPointLightCountLocation = kPointCountParam;
+  backend.fallbackTexture2D = DeviceTextureHandle{9000U};
+  g_mesh = GpuMesh{};
+  g_mesh.geometry = DeviceGeometryHandle{1U};
+  g_mesh.vertexCount = 3U;
+  g_mesh.indexCount = 3U;
+  g_mesh.boundsHalfExtents = engine::math::Vec3(0.5F, 0.5F, 0.5F);
+
+  SceneCaptureRequest request{};
+  request.width = 64U;
+  request.height = 64U;
+  request.camera.position = engine::math::Vec3(0.0F, 0.0F, 5.0F);
+  request.camera.target = engine::math::Vec3(0.0F, 0.0F, 0.0F);
+  set_scene_capture_requests(&request, 1U);
+
+  for (std::size_t i = 0U; i < kDrawCount; ++i) {
+    g_draws[i] = DrawCommand{};
+    g_draws[i].mesh = MeshHandle{1U};
+    g_draws[i].material.opacity = 1.0F;
+  }
+  g_draws[1].modelMatrix.columns[3] =
+      engine::math::Vec4(100.0F, 0.0F, 0.0F, 1.0F);
+  g_draws[2].modelMatrix.columns[3] =
+      engine::math::Vec4(-100.0F, 0.0F, 0.0F, 1.0F);
+
+  SceneLightData lights{};
+  lights.pointLightCount = 12U;
+  for (std::size_t i = 0U; i < 10U; ++i) {
+    lights.pointLights[i].position =
+        engine::math::Vec3(0.1F * static_cast<float>(i), 0.0F, 1.0F);
+    lights.pointLights[i].radius = 3.0F;
+    lights.pointLights[i].intensity = 1.0F;
+  }
+  lights.pointLights[10].position = engine::math::Vec3(101.0F, 0.0F, 0.0F);
+  lights.pointLights[10].radius = 3.0F;
+  lights.pointLights[11].position = engine::math::Vec3(99.0F, 1.0F, 0.0F);
+  lights.pointLights[11].radius = 3.0F;
+
+  FrameFlushContext ctx = make_context(lights);
+  flush_scene_captures(ctx);
+  g_drawCount = 0U;
+  flush_scene_captures(ctx);
+
+  CHECK(g_drawCount == kDrawCount, "the capture draws every mesh");
+  if (g_drawCount == kDrawCount) {
+    CHECK(g_drawLights[0].count == 8,
+          "the draw inside the cluster takes eight of its lights");
+    CHECK((g_drawLights[1].count == 2) &&
+              draw_lit_by(g_drawLights[1], 101.0F) &&
+              draw_lit_by(g_drawLights[1], 99.0F),
+          "the far draw is lit by the two lights beside it");
+    CHECK(g_drawLights[2].count == 0, "a draw no light reaches is lit by none");
+  }
+  backend.pbrPointLightPosRadiusParam = ShaderParam{};
+  backend.pbrPointLightCountLocation = ShaderParam{};
+  set_scene_capture_requests(nullptr, 0U);
+}
+
 } // namespace
 
 int main() {
   test_capture_never_samples_its_own_target();
   test_capture_shades_each_material_with_its_program();
+  test_capture_lights_each_draw_by_its_bounds();
   if (g_failures != 0) {
     std::fprintf(stderr, "%d check(s) failed\n", g_failures);
     return 1;

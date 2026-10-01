@@ -130,6 +130,7 @@ void draw_offscreen_scene(const OffscreenSceneInputs &inputs,
     // than sampling it.
     ForwardDrawBindings bindings{};
     bindings.passTarget = camera.renderTarget;
+    bindings.lights = inputs.lights;
     ShadingProgramRun run{};
     for (std::size_t cursor = start;
          (view.data != nullptr) &&
@@ -149,6 +150,7 @@ void draw_offscreen_scene(const OffscreenSceneInputs &inputs,
           bindProgramForRun(shading_program(backend, run.programId));
           bound = true;
         }
+        select_forward_command_lights(backend, dev, command, *mesh, &bindings);
         upload_forward_material(program, backend, dev, command, &bindings);
         draw_forward_command(program, backend, dev, run.programId, command,
                              *mesh, viewProjection, inputs.frameStats);

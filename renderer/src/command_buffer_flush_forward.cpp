@@ -43,6 +43,39 @@
 
 namespace engine::renderer {
 
+namespace {
+
+/// A sphere around every instance of `batch`: the box around each
+/// instance's bounding sphere, then the sphere around that box.
+void batch_light_bounds(const CommandBufferView &view,
+                        const StaticMeshBatch &batch, const GpuMesh &mesh,
+                        math::Vec3 *outCenter, float *outRadius) noexcept {
+  math::Vec3 lo{};
+  math::Vec3 hi{};
+  for (std::uint32_t local = 0U; local < batch.count; ++local) {
+    math::Vec3 center{};
+    float radius = 0.0F;
+    forward_draw_bounds(view.data[batch.first + local], mesh, &center, &radius);
+    const math::Vec3 instanceLo(center.x - radius, center.y - radius,
+                                center.z - radius);
+    const math::Vec3 instanceHi(center.x + radius, center.y + radius,
+                                center.z + radius);
+    if (local == 0U) {
+      lo = instanceLo;
+      hi = instanceHi;
+      continue;
+    }
+    lo = math::Vec3(std::min(lo.x, instanceLo.x), std::min(lo.y, instanceLo.y),
+                    std::min(lo.z, instanceLo.z));
+    hi = math::Vec3(std::max(hi.x, instanceHi.x), std::max(hi.y, instanceHi.y),
+                    std::max(hi.z, instanceHi.z));
+  }
+  *outCenter = math::mul(math::add(lo, hi), 0.5F);
+  *outRadius = math::length(math::sub(hi, lo)) * 0.5F;
+}
+
+} // namespace
+
 void flush_forward_path(FrameFlushContext &ctx) noexcept {
   BackendState &backend = ctx.backend;
   const RenderDevice *dev = ctx.dev;
@@ -135,6 +168,7 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
     auto drawRange = [&](std::size_t start, std::size_t end, bool batched,
                          std::uint8_t model) {
       ForwardDrawBindings bindings{};
+      bindings.lights = &lights;
 
       if (batched) {
         for (std::size_t batchIndex = 0U; batchIndex < opaqueBatchCount;
@@ -175,6 +209,14 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
                instancedViaProgram) &&
               upload_instance_matrices(backend, dev, *mesh, commandBufferView,
                                        batch)) {
+            // One draw call shades the whole batch, so it takes the
+            // lights that reach any of its instances.
+            math::Vec3 batchCenter{};
+            float batchRadius = 0.0F;
+            batch_light_bounds(commandBufferView, batch, *mesh, &batchCenter,
+                               &batchRadius);
+            select_forward_draw_lights(backend, dev, batchCenter, batchRadius,
+                                       &bindings);
             if (instancedViaProgram) {
               dev->bind_program(backend.pbrInstancedProgram);
             } else {
@@ -197,6 +239,9 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
           for (std::uint32_t local = 0U; local < batch.count; ++local) {
             const std::size_t commandIndex =
                 batchFirst + static_cast<std::size_t>(local);
+            select_forward_command_lights(backend, dev,
+                                          commandBufferView.data[commandIndex],
+                                          *mesh, &bindings);
             draw_forward_command(forwardProgram, backend, dev, model,
                                  commandBufferView.data[commandIndex], *mesh,
                                  viewProjection, &frameStats);
@@ -213,6 +258,7 @@ void flush_forward_path(FrameFlushContext &ctx) noexcept {
           continue;
         }
 
+        select_forward_command_lights(backend, dev, command, *mesh, &bindings);
         upload_forward_material(forwardProgram, backend, dev, command,
                                 &bindings);
         draw_forward_command(forwardProgram, backend, dev, model, command,
