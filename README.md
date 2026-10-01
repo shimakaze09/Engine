@@ -496,7 +496,9 @@ controller; `engine.gamepad_count()` says how many are connected
 Scripts run sandboxed: `io`, `os`, `debug` and `package` are not there, all
 scripts share a budget of Lua instructions per frame (1,000,000 by default;
 a script that runs past it stops with an error rather than freezing the
-game), and the Lua allocator is capped (64 MiB by default). A project sets
+game, and only that script stops: the hooks after it that frame are
+skipped and run again the next (`engine_integration_lua_hardening`)), and
+the Lua allocator is capped (64 MiB by default). A project sets
 its own limits in Edit > Project Settings..., 0 for unlimited; they are
 saved in its `.project` document (an optional `"scripting"` object with
 `instructionLimit` and `memoryLimitMiB`, left out while both are the

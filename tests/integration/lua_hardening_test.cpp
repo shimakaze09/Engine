@@ -422,6 +422,77 @@ bool test_tick_destroy_no_skipped_ticks() noexcept {
 }
 
 // -----------------------------------------------------------------------
+// One script spending the frame's shared instruction budget faults that
+// script alone. Every hook dispatched after it that frame used to fail at
+// its first instruction and fault its own entity, so a single runaway loop
+// disabled the player, camera and UI scripts for the rest of the session.
+// They are skipped for the frame instead, and tick again the next.
+// -----------------------------------------------------------------------
+bool test_budget_overrun_faults_only_the_spender() noexcept {
+  ScriptingSession session{};
+  if (!session.ok) {
+    return false;
+  }
+  engine::scripting::set_instruction_limit(10000);
+
+  const char *runaway = "local M = {}\n"
+                        "function M.on_tick(self, dt)\n"
+                        "  runaway_ticks = runaway_ticks + 1\n"
+                        "  while true do end\n"
+                        "end\n"
+                        "return M\n";
+  const char *innocent = "local M = {}\n"
+                         "function M.on_tick(self, dt)\n"
+                         "  innocent_ticks = innocent_ticks + 1\n"
+                         "end\n"
+                         "return M\n";
+  const char *prelude =
+      "runaway_ticks = 0\n"
+      "innocent_ticks = 0\n"
+      "function verify_overrun_frame()\n"
+      "  if runaway_ticks ~= 1 then error('runaway ' .. runaway_ticks) end\n"
+      "  if innocent_ticks ~= 0 then error('innocent ' .. innocent_ticks) end\n"
+      "end\n"
+      "function verify_later_frames()\n"
+      "  if runaway_ticks ~= 1 then error('runaway2 ' .. runaway_ticks) end\n"
+      "  if innocent_ticks ~= 2 then error('innocent2 ' .. innocent_ticks) "
+      "end\n"
+      "end\n";
+  bool ok = write_file_at("hardening_runaway.lua", runaway) &&
+            write_file_at("hardening_innocent.lua", innocent) &&
+            write_script(prelude) &&
+            engine::scripting::load_script(kTempScript);
+
+  engine::runtime::World *world = session.world.get();
+  // The runaway takes the lower index, so it is dispatched first.
+  ok = ok &&
+       (add_scripted_entity(world, "hardening_runaway.lua") !=
+        engine::runtime::kInvalidEntity) &&
+       (add_scripted_entity(world, "hardening_innocent.lua") !=
+        engine::runtime::kInvalidEntity);
+  if (ok) {
+    engine::scripting::dispatch_entity_scripts_begin_play(world);
+    engine::tests::publish_frame_index(1U);
+    engine::scripting::dispatch_entity_scripts_update(1.0F / 60.0F);
+    engine::tests::publish_frame_index(2U);
+    ok = engine::scripting::call_script_function("verify_overrun_frame");
+  }
+  if (ok) {
+    engine::tests::publish_frame_index(3U);
+    engine::scripting::dispatch_entity_scripts_update(1.0F / 60.0F);
+    engine::tests::publish_frame_index(4U);
+    engine::scripting::dispatch_entity_scripts_update(1.0F / 60.0F);
+    engine::tests::publish_frame_index(5U);
+    ok = engine::scripting::call_script_function("verify_later_frames");
+  }
+
+  std::remove("hardening_runaway.lua");
+  std::remove("hardening_innocent.lua");
+  remove_script();
+  return ok;
+}
+
+// -----------------------------------------------------------------------
 // #65 item 1: a first-time module load under an exhausted sandbox memory
 // cap raises LUA_ERRMEM from C context (luaL_loadfile's chunk-name push,
 // the module-table luaL_ref) — it must fail cleanly and the engine must
@@ -927,6 +998,8 @@ int main() {
       {"tick_dispatch_survives_hostile_module_metatable",
        test_tick_dispatch_survives_hostile_module_metatable},
       {"tick_destroy_no_skipped_ticks", test_tick_destroy_no_skipped_ticks},
+      {"budget_overrun_faults_only_the_spender",
+       test_budget_overrun_faults_only_the_spender},
       {"module_load_survives_memory_exhaustion",
        test_module_load_survives_memory_exhaustion},
       {"module_reload_survives_memory_exhaustion",

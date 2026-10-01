@@ -3,6 +3,7 @@
 #include "debug_bindings.h"
 
 #include "dap_server_internal.h"
+#include "engine/core/logging.h"
 #include "engine/scripting/script_limits.h"
 
 extern "C" {
@@ -57,6 +58,9 @@ bool g_sandboxEnabled = true;
 int g_instructionLimit = kDefaultInstructionLimit;
 std::int64_t g_frameBudgetRemaining = kDefaultInstructionLimit;
 bool g_instructionBudgetExhausted = false;
+// Whether this frame already reported that its spent budget skipped a
+// dispatch; one line a frame, not one per skipped script.
+bool g_budgetSkipReported = false;
 /// Instructions the current debugger evaluation may still spend. Separate
 /// from the frame budget: an evaluation is debugger work performed while
 /// the frame is paused, so it neither draws on nor is limited by what the
@@ -497,9 +501,27 @@ bool debug_instruction_budget_exhausted() noexcept {
   return g_instructionBudgetExhausted;
 }
 
+bool skip_dispatch_for_spent_budget(const char *context) noexcept {
+  if (!g_instructionBudgetExhausted) {
+    return false;
+  }
+  if (!g_budgetSkipReported) {
+    g_budgetSkipReported = true;
+    char message[256] = {};
+    std::snprintf(message, sizeof(message),
+                  "the frame's Lua instruction budget is spent: later script "
+                  "hooks this frame are skipped and run again next frame "
+                  "(first skipped: %s)",
+                  (context != nullptr) ? context : "");
+    core::log_message(core::LogLevel::Warning, "scripting", message);
+  }
+  return true;
+}
+
 void refill_debug_instruction_budget() noexcept {
   g_frameBudgetRemaining = g_instructionLimit;
   g_instructionBudgetExhausted = false;
+  g_budgetSkipReported = false;
   refresh_debug_lua_hook();
 }
 
@@ -520,6 +542,7 @@ void reset_debug_bindings() noexcept {
   g_dapStepDepth = 0;
   g_frameBudgetRemaining = g_instructionLimit;
   g_instructionBudgetExhausted = false;
+  g_budgetSkipReported = false;
 }
 
 void debugger_clear_breakpoints() noexcept {

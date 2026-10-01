@@ -38,6 +38,10 @@ void refresh_debug_lua_hook() noexcept;
 void arm_debug_lua_hook(lua_State *state) noexcept;
 /// True once this frame's shared instruction budget is exhausted.
 bool debug_instruction_budget_exhausted() noexcept;
+/// True when this frame's budget is already spent, so a dispatch must not
+/// start: it would fail at its first instruction through no fault of its
+/// own. The first skip in a frame logs one Warning naming `context`.
+bool skip_dispatch_for_spent_budget(const char *context) noexcept;
 /// Refills the shared per-frame instruction budget; called when the
 /// published clock's frame index changes and on limit/sandbox
 /// reconfiguration.
