@@ -707,6 +707,82 @@ bool test_console_spawn_path_jailed() noexcept {
   return refused && spawned && markedWorldCommand;
 }
 
+// -----------------------------------------------------------------------
+// spawn <prefab> x y z places the instance and changes nothing else: the
+// prefab keeps its authored rotation and scale. It used to replace the
+// whole transform, so every spawned prefab lost both. Coordinates that
+// are not exactly three finite numbers refuse the command, and nothing
+// spawns; atof had turned a typo into 0 and still reported success.
+// -----------------------------------------------------------------------
+bool test_console_spawn_places_only_the_position() noexcept {
+  static const char *kPrefab = "sandbox_spawn_place.prefab";
+  if (!engine::core::initialize_console()) {
+    return false;
+  }
+  engine::scripting::initialize_scripting();
+  auto world = std::unique_ptr<engine::runtime::World>(
+      new (std::nothrow) engine::runtime::World());
+  if (!world) {
+    engine::scripting::shutdown_scripting();
+    engine::core::shutdown_console();
+    return false;
+  }
+  engine::core::ServiceLocator serviceLocator{};
+  engine::runtime::bind_scripting_runtime(world.get(), serviceLocator);
+
+  // Authored at (9, 9, 9), scale 2, turned 90 degrees about +Y.
+  engine::runtime::Transform authored{};
+  authored.position = engine::math::Vec3(9.0F, 9.0F, 9.0F);
+  authored.scale = engine::math::Vec3(2.0F, 2.0F, 2.0F);
+  authored.rotation = engine::math::Quat(0.0F, 0.70710677F, 0.0F, 0.70710677F);
+  const engine::runtime::Entity source = world->create_scene_object(authored);
+  const bool saved = (source != engine::runtime::kInvalidEntity) &&
+                     engine::runtime::save_prefab(*world, source, kPrefab) &&
+                     world->destroy_entity(source);
+
+  const std::size_t before = world->alive_entity_count();
+  char line[128] = {};
+  std::snprintf(line, sizeof(line), "spawn %s 1 2 3", kPrefab);
+  const bool ran = saved && engine::core::console_execute(line) &&
+                   (world->alive_entity_count() == before + 1U);
+  bool placed = false;
+  world->for_each_alive([&](engine::runtime::Entity entity) noexcept {
+    engine::runtime::Transform t{};
+    if (world->get_transform(entity, &t)) {
+      placed = (t.position.x == 1.0F) && (t.position.y == 2.0F) &&
+               (t.position.z == 3.0F) && (t.scale.x == 2.0F) &&
+               (t.scale.y == 2.0F) && (t.scale.z == 2.0F) &&
+               (t.rotation.x == authored.rotation.x) &&
+               (t.rotation.y == authored.rotation.y) &&
+               (t.rotation.z == authored.rotation.z) &&
+               (t.rotation.w == authored.rotation.w);
+    }
+  });
+  if (!placed) {
+    std::fprintf(stderr, "spawn x y z did not keep the prefab's rotation "
+                         "and scale\n");
+  }
+
+  // Each of these is refused before anything spawns.
+  const char *const refusedArgs[] = {"1 2",     "1 2 3 4", "a b c",
+                                     "nan 0 0", "inf 0 0", "1 2 3x"};
+  bool allRefused = true;
+  const std::size_t afterSpawn = world->alive_entity_count();
+  for (const char *args : refusedArgs) {
+    std::snprintf(line, sizeof(line), "spawn %s %s", kPrefab, args);
+    static_cast<void>(engine::core::console_execute(line));
+    if (world->alive_entity_count() != afterSpawn) {
+      std::fprintf(stderr, "spawn with '%s' was not refused\n", args);
+      allRefused = false;
+    }
+  }
+
+  std::remove(kPrefab);
+  engine::scripting::shutdown_scripting();
+  engine::core::shutdown_console();
+  return ran && placed && allRefused;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
@@ -737,6 +813,8 @@ int main() {
        test_file_loaders_removed_and_load_text_only},
       {"bytecode_script_file_refused", test_bytecode_script_file_refused},
       {"console_spawn_path_jailed", test_console_spawn_path_jailed},
+      {"console_spawn_places_only_the_position",
+       test_console_spawn_places_only_the_position},
   };
 
   for (const auto &tc : tests) {
