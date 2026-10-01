@@ -41,6 +41,7 @@ using engine::math::RigidBody;
 using engine::math::ScriptComponent;
 using engine::math::SpotLightComponent;
 using engine::math::SpringArmComponent;
+using engine::math::TagSetComponent;
 using engine::math::Transform;
 
 } // namespace engine::runtime
@@ -192,6 +193,14 @@ struct RuntimeServices final {
   bool (*get_camera_component_op)(
       runtime::World *world, core::Entity entity,
       math::CameraComponent *outComponent) noexcept = nullptr;
+  bool (*get_tag_set_component_op)(
+      runtime::World *world, core::Entity entity,
+      math::TagSetComponent *outComponent) noexcept = nullptr;
+  /// World::find_entities_by_tag: up to `capacity` entities carrying `tag`
+  /// in ascending entity index; returns how many carry it.
+  std::size_t (*find_entities_by_tag)(runtime::World *world, const char *tag,
+                                      core::Entity *out,
+                                      std::size_t capacity) noexcept = nullptr;
   /// True when the entity's collider carries a resident convex hull.
   bool (*has_convex_hull_payload)(runtime::World *world,
                                   core::Entity entity) noexcept = nullptr;
@@ -241,6 +250,11 @@ struct RuntimeServices final {
       const math::CameraComponent &component) noexcept = nullptr;
   bool (*remove_camera_component_op)(runtime::World *world,
                                      core::Entity entity) noexcept = nullptr;
+  bool (*add_tag_set_component_op)(
+      runtime::World *world, core::Entity entity,
+      const math::TagSetComponent &component) noexcept = nullptr;
+  bool (*remove_tag_set_component_op)(runtime::World *world,
+                                      core::Entity entity) noexcept = nullptr;
   /// The collider every spawn path gives a built-in primitive, hull
   /// provenance and offset included (runtime::primitive_collider).
   runtime::Collider (*primitive_collider)(math::PrimitiveShape shape) noexcept =

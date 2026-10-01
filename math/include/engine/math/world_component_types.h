@@ -1,5 +1,5 @@
 // Declares the plain-data scene component types the runtime World stores
-// and the scripting bridge carries: names, lights, scripts, meshes,
+// and the scripting bridge carries: names, tags, lights, scripts, meshes,
 // cameras and spring arms. They live below both modules, like the
 // transform and physics components, so scripting binds them without a
 // runtime header and the World re-exports them unchanged.
@@ -8,8 +8,10 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 
 #include "engine/core/asset_identity.h"
+#include "engine/core/string_util.h"
 #include "engine/math/vec3.h"
 
 namespace engine::math {
@@ -21,6 +23,106 @@ struct NameComponent final {
   static constexpr std::size_t kMaxNameLength = 127U; // +1 for null terminator
   char name[kMaxNameLength + 1U] = {};
 };
+
+/// The gameplay tags an entity carries, as Godot's groups and Unreal's actor
+/// Tags are: up to kMaxTags name tokens (core::name_token_is_valid, at most
+/// kMaxTagLength characters), distinct ignoring ASCII case, in the order
+/// they were given. Scripts and tools find entities by tag instead of by a
+/// unique name (World::find_entities_by_tag). Tags are free-form; a project
+/// list of known tags is a later layer over the same text.
+struct TagSetComponent final {
+  static constexpr std::size_t kMaxTags = 8U;
+  static constexpr std::size_t kMaxTagLength = 31U;
+  std::uint32_t count = 0U;
+  char tags[kMaxTags][kMaxTagLength + 1U] = {};
+};
+
+/// True when `tags` holds `tag`, compared ignoring ASCII case.
+[[nodiscard]] inline bool tag_set_has(const TagSetComponent &tags,
+                                      const char *tag) noexcept {
+  const std::size_t count = (tags.count < TagSetComponent::kMaxTags)
+                                ? tags.count
+                                : TagSetComponent::kMaxTags;
+  for (std::size_t i = 0U; i < count; ++i) {
+    if (core::equals_ignoring_case(tags.tags[i], tag)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/// True when every tag is a terminated name token, the count fits, and no
+/// two tags are equal ignoring case: the only sets a World stores.
+[[nodiscard]] inline bool
+tag_set_is_valid(const TagSetComponent &tags) noexcept {
+  if (tags.count > TagSetComponent::kMaxTags) {
+    return false;
+  }
+  for (std::size_t i = 0U; i < tags.count; ++i) {
+    const char *tag = tags.tags[i];
+    if ((std::memchr(tag, '\0', TagSetComponent::kMaxTagLength + 1U) ==
+         nullptr) ||
+        !core::name_token_is_valid(tag, TagSetComponent::kMaxTagLength)) {
+      return false;
+    }
+    for (std::size_t j = 0U; j < i; ++j) {
+      if (core::equals_ignoring_case(tags.tags[j], tag)) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+/// What adding a tag to a set did.
+enum class TagSetAdd : std::uint8_t {
+  Added,
+  AlreadyPresent,
+  InvalidTag,
+  Full,
+};
+
+/// Appends `tag` unless it is already there (ignoring case), is not a name
+/// token of at most kMaxTagLength characters, or the set is full; the set
+/// is unchanged on anything but Added. Never truncates.
+inline TagSetAdd tag_set_add(TagSetComponent *tags, const char *tag) noexcept {
+  if ((tags == nullptr) ||
+      !core::name_token_is_valid(tag, TagSetComponent::kMaxTagLength)) {
+    return TagSetAdd::InvalidTag;
+  }
+  if (tag_set_has(*tags, tag)) {
+    return TagSetAdd::AlreadyPresent;
+  }
+  if (tags->count >= TagSetComponent::kMaxTags) {
+    return TagSetAdd::Full;
+  }
+  char *slot = tags->tags[tags->count];
+  std::memset(slot, 0, TagSetComponent::kMaxTagLength + 1U);
+  std::memcpy(slot, tag, std::strlen(tag));
+  ++tags->count;
+  return TagSetAdd::Added;
+}
+
+/// Removes `tag` (ignoring case), keeping the others in order; false when
+/// the set does not hold it.
+inline bool tag_set_remove(TagSetComponent *tags, const char *tag) noexcept {
+  if (tags == nullptr) {
+    return false;
+  }
+  for (std::size_t i = 0U; i < tags->count; ++i) {
+    if (core::equals_ignoring_case(tags->tags[i], tag)) {
+      for (std::size_t j = i + 1U; j < tags->count; ++j) {
+        std::memcpy(tags->tags[j - 1U], tags->tags[j],
+                    TagSetComponent::kMaxTagLength + 1U);
+      }
+      --tags->count;
+      std::memset(tags->tags[tags->count], 0,
+                  TagSetComponent::kMaxTagLength + 1U);
+      return true;
+    }
+  }
+  return false;
+}
 
 /// Enumerates light type values used by the engine.
 enum class LightType : std::uint8_t { Directional = 0, Point = 1 };

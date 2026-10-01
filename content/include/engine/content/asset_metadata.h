@@ -9,6 +9,7 @@
 
 #include "engine/content/asset_identity.h"
 #include "engine/content/asset_type_table.h"
+#include "engine/core/string_util.h"
 
 namespace engine::content {
 
@@ -137,48 +138,15 @@ inline bool asset_metadata_remove_tag(AssetMetadata *metadata,
 }
 
 /// True when `text` can be an asset label (a tag an author gives an asset,
-/// as Unity's Asset Labels are): 1 to kMaxTagLength - 1 characters, each a
-/// letter, digit, '_', '-' or '.'. Spaces are out so that a search term
-/// such as "l:hero" names exactly one label.
+/// as Unity's Asset Labels are): a core name token of at most
+/// kMaxTagLength - 1 characters. Labels compare ignoring ASCII case
+/// (core::equals_ignoring_case), so "Hero" and "hero" cannot both be given.
 inline bool asset_label_is_valid(const char *text) noexcept {
-  if ((text == nullptr) || (text[0] == '\0')) {
-    return false;
-  }
-  std::size_t length = 0U;
-  for (; text[length] != '\0'; ++length) {
-    const char c = text[length];
-    const bool allowed =
-        ((c >= 'a') && (c <= 'z')) || ((c >= 'A') && (c <= 'Z')) ||
-        ((c >= '0') && (c <= '9')) || (c == '_') || (c == '-') || (c == '.');
-    if (!allowed || (length + 1U >= AssetMetadata::kMaxTagLength)) {
-      return false;
-    }
-  }
-  return true;
-}
-
-/// True when two labels are the same label: labels compare without
-/// regard to ASCII case, so "Hero" and "hero" cannot both be given.
-inline bool asset_labels_equal(const char *a, const char *b) noexcept {
-  if ((a == nullptr) || (b == nullptr)) {
-    return false;
-  }
-  for (std::size_t i = 0U;; ++i) {
-    char x = a[i];
-    char y = b[i];
-    x = ((x >= 'A') && (x <= 'Z')) ? static_cast<char>(x - 'A' + 'a') : x;
-    y = ((y >= 'A') && (y <= 'Z')) ? static_cast<char>(y - 'A' + 'a') : y;
-    if (x != y) {
-      return false;
-    }
-    if (x == '\0') {
-      return true;
-    }
-  }
+  return core::name_token_is_valid(text, AssetMetadata::kMaxTagLength - 1U);
 }
 
 /// An asset's labels, as its sidecar stores them: at most kMaxTags, each
-/// valid by asset_label_is_valid and distinct by asset_labels_equal.
+/// valid by asset_label_is_valid and distinct by core::equals_ignoring_case.
 struct AssetLabels final {
   std::array<std::array<char, AssetMetadata::kMaxTagLength>,
              AssetMetadata::kMaxTags>
@@ -198,11 +166,11 @@ struct AssetLabels final {
   }
 };
 
-/// True when `labels` holds `label` (compared as asset_labels_equal).
+/// True when `labels` holds `label`, compared ignoring ASCII case.
 inline bool asset_labels_has(const AssetLabels &labels,
                              const char *label) noexcept {
   for (std::size_t i = 0U; i < labels.count; ++i) {
-    if (asset_labels_equal(labels.names[i].data(), label)) {
+    if (core::equals_ignoring_case(labels.names[i].data(), label)) {
       return true;
     }
   }
@@ -236,7 +204,7 @@ inline bool asset_labels_remove(AssetLabels *labels,
     return false;
   }
   for (std::size_t i = 0U; i < labels->count; ++i) {
-    if (asset_labels_equal(labels->names[i].data(), label)) {
+    if (core::equals_ignoring_case(labels->names[i].data(), label)) {
       for (std::size_t j = i + 1U; j < labels->count; ++j) {
         labels->names[j - 1U] = labels->names[j];
       }

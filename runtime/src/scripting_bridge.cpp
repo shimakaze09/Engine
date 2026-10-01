@@ -1165,6 +1165,33 @@ bool scripting_remove_camera_component_op(runtime::World *world,
   return (world != nullptr) && world->remove_camera_component(entity);
 }
 
+bool scripting_get_tag_set_component_op(
+    runtime::World *world, runtime::Entity entity,
+    runtime::TagSetComponent *outComponent) noexcept {
+  return (world != nullptr) && (outComponent != nullptr) &&
+         (world->get_tag_set_component_ptr(entity) != nullptr) &&
+         world->get_tag_set_component(entity, outComponent);
+}
+
+bool scripting_add_tag_set_component_op(
+    runtime::World *world, runtime::Entity entity,
+    const runtime::TagSetComponent &component) noexcept {
+  return (world != nullptr) && world->add_tag_set_component(entity, component);
+}
+
+bool scripting_remove_tag_set_component_op(runtime::World *world,
+                                           runtime::Entity entity) noexcept {
+  return (world != nullptr) && world->remove_tag_set_component(entity);
+}
+
+std::size_t scripting_find_entities_by_tag(runtime::World *world,
+                                           const char *tag,
+                                           runtime::Entity *out,
+                                           std::size_t capacity) noexcept {
+  return (world != nullptr) ? world->find_entities_by_tag(tag, out, capacity)
+                            : 0U;
+}
+
 runtime::Collider
 scripting_primitive_collider(math::PrimitiveShape shape) noexcept {
   return runtime::primitive_collider(shape);
@@ -1317,6 +1344,10 @@ scripting::RuntimeServices make_scripting_runtime_services() noexcept {
   s.add_spring_arm_op = &scripting_add_spring_arm_op;
   s.add_camera_component_op = &scripting_add_camera_component_op;
   s.remove_camera_component_op = &scripting_remove_camera_component_op;
+  s.get_tag_set_component_op = &scripting_get_tag_set_component_op;
+  s.add_tag_set_component_op = &scripting_add_tag_set_component_op;
+  s.remove_tag_set_component_op = &scripting_remove_tag_set_component_op;
+  s.find_entities_by_tag = &scripting_find_entities_by_tag;
   s.primitive_collider = &scripting_primitive_collider;
   s.timer_set = &scripting_timer_set;
   s.timer_cancel = &scripting_timer_cancel;

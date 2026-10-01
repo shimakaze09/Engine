@@ -393,6 +393,24 @@ bool components_equal(const SkyLightComponent &a,
   return a.environmentRef == b.environmentRef;
 }
 
+void make_test_value(engine::runtime::TagSetComponent *out) noexcept {
+  static_cast<void>(engine::runtime::tag_set_add(out, "coin"));
+  static_cast<void>(engine::runtime::tag_set_add(out, "Pickup.Gold"));
+}
+
+bool components_equal(const engine::runtime::TagSetComponent &a,
+                      const engine::runtime::TagSetComponent &b) noexcept {
+  if (a.count != b.count) {
+    return false;
+  }
+  for (std::uint32_t i = 0U; i < a.count; ++i) {
+    if (std::strcmp(a.tags[i], b.tags[i]) != 0) {
+      return false;
+    }
+  }
+  return true;
+}
+
 /// Round-trips one registry row's component through both production
 /// serializers and compares the reloaded value field-by-field. Returns 0 on
 /// success or a stage code identifying the first failing step.
@@ -552,7 +570,7 @@ int verify_prefab_mesh_reference_parity() {
 // Count tripwire: bumping this is an intentional act that accompanies a new
 // registry row, a World::PersistentComponentTypes entry, and the test-value/
 // comparator overloads above.
-static_assert(engine::runtime::kPersistentComponentTypeCount == 16U,
+static_assert(engine::runtime::kPersistentComponentTypeCount == 17U,
               "new persistent component type: extend the registry table, the "
               "World type list, and this suite's overloads together");
 

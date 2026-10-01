@@ -1430,4 +1430,67 @@ World::get_sky_light_component_ptr(Entity entity) const noexcept {
   return get_component_ptr_checked(m_skyLights, entity);
 }
 
+bool World::add_tag_set_component(Entity entity,
+                                  const TagSetComponent &component) noexcept {
+  if (!tag_set_is_valid(component)) {
+    core::log_message(core::LogLevel::Error, "world",
+                      "add_tag_set_component rejected a tag set: each tag is "
+                      "1 to 31 letters, digits, '_', '-' or '.', at most 8, "
+                      "none repeated ignoring case");
+    note_refusal(core::FailureKind::InvalidArgument);
+    return false;
+  }
+  return static_cast<bool>(add_component_checked(m_tagSets, entity, component,
+                                                 "add_tag_set_component"));
+}
+
+bool World::remove_tag_set_component(Entity entity) noexcept {
+  return remove_component_checked(m_tagSets, entity,
+                                  "remove_tag_set_component");
+}
+
+bool World::get_tag_set_component(
+    Entity entity, TagSetComponent *outComponent) const noexcept {
+  return get_component_checked(m_tagSets, entity, outComponent,
+                               "get_tag_set_component");
+}
+
+const TagSetComponent *
+World::get_tag_set_component_ptr(Entity entity) const noexcept {
+  return get_component_ptr_checked(m_tagSets, entity);
+}
+
+std::size_t World::find_entities_by_tag(const char *tag, Entity *out,
+                                        std::size_t capacity) const noexcept {
+  if ((tag == nullptr) || (tag[0] == '\0')) {
+    return 0U;
+  }
+  // Insertion into `out` keeps it sorted by entity index; once full, a
+  // match with a smaller index displaces the largest so the first
+  // `capacity` by index are kept whatever the storage order.
+  std::size_t found = 0U;
+  std::size_t kept = 0U;
+  for (std::size_t i = 0U; i < m_tagSets.count(); ++i) {
+    const Entity entity = m_tagSets.entity_at(i);
+    if (!is_valid_entity(entity) ||
+        !tag_set_has(m_tagSets.component_at(i), tag)) {
+      continue;
+    }
+    ++found;
+    if ((out == nullptr) || (capacity == 0U)) {
+      continue;
+    }
+    if ((kept == capacity) && (entity.index >= out[kept - 1U].index)) {
+      continue;
+    }
+    std::size_t slot = (kept < capacity) ? kept++ : (kept - 1U);
+    while ((slot > 0U) && (out[slot - 1U].index > entity.index)) {
+      out[slot] = out[slot - 1U];
+      --slot;
+    }
+    out[slot] = entity;
+  }
+  return found;
+}
+
 } // namespace engine::runtime

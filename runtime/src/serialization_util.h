@@ -265,6 +265,19 @@ bool read_foliage_patch_component(const core::JsonParser &parser,
                                   const core::JsonValue &foliageObject,
                                   FoliagePatchComponent *outComponent) noexcept;
 
+// --- TagSetComponent -------------------------------------------------------
+
+/// Writes the entity's tags as a string array under `key`, in their order.
+void write_tag_set_component(core::JsonWriter &writer, const char *key,
+                             const TagSetComponent &component) noexcept;
+/// Reads a tag array. Strict: a value that is not an array of strings, more
+/// than kMaxTags entries, a tag that is not a name token of at most
+/// kMaxTagLength characters, or a repeat ignoring case fails the read;
+/// nothing is truncated or dropped.
+bool read_tag_set_component(const core::JsonParser &parser,
+                            const core::JsonValue &tagArray,
+                            TagSetComponent *outComponent) noexcept;
+
 // --- AnimationComponent ----------------------------------------------------
 
 /// Writes the animation component under `key`, carrying every authored

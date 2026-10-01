@@ -51,8 +51,8 @@ namespace engine::runtime {
   X(FoliagePatchComponent, m_foliagePatches)                                   \
   X(AnimationComponent, m_animationComponents)                                 \
   X(CameraComponent, m_cameraComponents)                                       \
-  X(SkyLightComponent, m_skyLights)
-
+  X(SkyLightComponent, m_skyLights)                                            \
+  X(TagSetComponent, m_tagSets)
 
 #ifndef ENGINE_MAX_ENTITIES
 #define ENGINE_MAX_ENTITIES 65536U
@@ -148,6 +148,9 @@ public:
   static constexpr std::size_t kMaxAnimationComponents = 256U;
   static constexpr std::size_t kMaxCameraComponents = 32U;
   static constexpr std::size_t kMaxSkyLightComponents = 8U;
+  /// Entities that carry tags at once: every pickup, enemy and checkpoint
+  /// of a level, about 2.4 MB of storage.
+  static constexpr std::size_t kMaxTagSetComponents = 8192U;
   static constexpr std::size_t kNameLookupCapacity = kMaxNameComponents * 2U;
   static constexpr std::size_t kStateBufferCount = 2U;
   static constexpr std::size_t kPersistentIndexCapacity = kMaxEntities * 2U;
@@ -164,7 +167,7 @@ public:
                  PointLightComponent, SpotLightComponent,
                  ReflectionProbeComponent, SceneCaptureComponent,
                  FoliagePatchComponent, AnimationComponent, CameraComponent,
-                 SkyLightComponent>;
+                 SkyLightComponent, TagSetComponent>;
   /// Number of persistent component types, derived from the list above.
   static constexpr std::size_t kPersistentComponentTypeCount =
       std::tuple_size_v<PersistentComponentTypes>;
@@ -688,6 +691,31 @@ public:
   const SkyLightComponent *
   get_sky_light_component_ptr(Entity entity) const noexcept;
 
+  /// Adds or replaces the entity's tag set. Requires the Input phase and a
+  /// live entity. A set tag_set_is_valid refuses (a tag that is not a name
+  /// token, a duplicate ignoring case, more than kMaxTags) is refused
+  /// whole with an Error and the entity's tags unchanged.
+  bool add_tag_set_component(Entity entity,
+                             const TagSetComponent &component) noexcept;
+  /// Removes the entity's tag set. Requires the Input phase and a live
+  /// entity; logs and returns false otherwise or when it is absent.
+  bool remove_tag_set_component(Entity entity) noexcept;
+  /// Copies the entity's tag set into the out parameter; logs and returns
+  /// false for stale or dead entities or when it is absent.
+  bool get_tag_set_component(Entity entity,
+                             TagSetComponent *outComponent) const noexcept;
+  /// Pointer to the entity's tag set, or nullptr when the handle is stale
+  /// or the component is absent (no logging).
+  const TagSetComponent *
+  get_tag_set_component_ptr(Entity entity) const noexcept;
+  /// Writes up to `capacity` live entities carrying `tag` (compared
+  /// ignoring ASCII case) to `out`, in ascending entity index so the order
+  /// never follows storage, and returns how many carry it, which can
+  /// exceed `capacity`. Reads the tag sets directly: no index to keep in
+  /// step, and allocation-free.
+  std::size_t find_entities_by_tag(const char *tag, Entity *out,
+                                   std::size_t capacity) const noexcept;
+
   /// Enters Simulation for the frame's first fixed step: refreshes the
   /// physics per-step cvar cache, snapshots TRS history, opens the write
   /// buffer.
@@ -954,6 +982,8 @@ private:
   using SkyLightSet =
       core::CompactSparseSet<Entity, SkyLightComponent, kMaxEntities,
                              kMaxSkyLightComponents>;
+  using TagSetSet = core::CompactSparseSet<Entity, TagSetComponent,
+                                           kMaxEntities, kMaxTagSetComponents>;
 
   /// True for every persistent component type plus the derived
   /// WorldTransform; membership comes from PersistentComponentTypes so the
@@ -1322,6 +1352,7 @@ private:
   AnimationComponentSet m_animationComponents{};
   CameraComponentSet m_cameraComponents{};
   SkyLightSet m_skyLights{};
+  TagSetSet m_tagSets{};
   std::array<WorldTransformHistoryEntry, kMaxEntities + 1U>
       m_worldTransformHistory =
           std::array<WorldTransformHistoryEntry, kMaxEntities + 1U>();

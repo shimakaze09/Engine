@@ -44,6 +44,12 @@ using engine::math::PointLightComponent;
 using engine::math::ScriptComponent;
 using engine::math::SpotLightComponent;
 using engine::math::SpringArmComponent;
+using engine::math::tag_set_add;
+using engine::math::tag_set_has;
+using engine::math::tag_set_is_valid;
+using engine::math::tag_set_remove;
+using engine::math::TagSetAdd;
+using engine::math::TagSetComponent;
 
 /// Propagated world-space transform plus its cached composite matrix.
 struct WorldTransform final {

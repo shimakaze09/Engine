@@ -885,6 +885,13 @@ engine_add_test_executable(engine_unit_world_name_lookup
     engine_runtime
 )
 
+engine_add_test_executable(engine_unit_world_tag_set
+    SOURCES
+    world_tag_set_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+)
+
 engine_add_test_executable(engine_unit_vfs
     SOURCES
     vfs_test.cpp
@@ -1237,6 +1244,19 @@ engine_add_test_executable(engine_unit_editor_font_fallback
 engine_add_test_executable(engine_unit_editor_inspector_edit
     SOURCES
     editor_inspector_edit_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/editor/include
+    ${CMAKE_SOURCE_DIR}/editor/src
+    ${CMAKE_SOURCE_DIR}/runtime/src
+    PRIVATE_DEPS
+    engine_editor
+    COMPILE_DEFINITIONS
+    SDL_MAIN_HANDLED
+)
+
+engine_add_test_executable(engine_unit_editor_entity_tags
+    SOURCES
+    editor_entity_tags_test.cpp
     PRIVATE_INCLUDE_DIRS
     ${CMAKE_SOURCE_DIR}/editor/include
     ${CMAKE_SOURCE_DIR}/editor/src

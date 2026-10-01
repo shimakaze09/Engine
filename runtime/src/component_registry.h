@@ -47,31 +47,33 @@
   X(NameComponent, kJsonKeyNameComponent, get_name_component,                  \
     add_name_component, remove_name_component)                                 \
   X(LightComponent, kJsonKeyLightComponent, get_light_component,               \
-    add_light_component, remove_light_component)                              \
+    add_light_component, remove_light_component)                               \
   X(ScriptComponent, kJsonKeyScriptComponent, get_script_component,            \
-    add_script_component, remove_script_component)                            \
+    add_script_component, remove_script_component)                             \
   X(SpringArmComponent, kJsonKeySpringArmComponent, get_spring_arm,            \
-    add_spring_arm, remove_spring_arm)                                        \
+    add_spring_arm, remove_spring_arm)                                         \
   X(PointLightComponent, kJsonKeyPointLightComponent,                          \
-    get_point_light_component, add_point_light_component,                     \
-    remove_point_light_component)                                             \
+    get_point_light_component, add_point_light_component,                      \
+    remove_point_light_component)                                              \
   X(SpotLightComponent, kJsonKeySpotLightComponent, get_spot_light_component,  \
-    add_spot_light_component, remove_spot_light_component)                    \
+    add_spot_light_component, remove_spot_light_component)                     \
   X(ReflectionProbeComponent, kJsonKeyReflectionProbeComponent,                \
     get_reflection_probe_component, add_reflection_probe_component,            \
-    remove_reflection_probe_component)                                        \
+    remove_reflection_probe_component)                                         \
   X(SceneCaptureComponent, kJsonKeySceneCaptureComponent,                      \
     get_scene_capture_component, add_scene_capture_component,                  \
-    remove_scene_capture_component)                                           \
+    remove_scene_capture_component)                                            \
   X(FoliagePatchComponent, kJsonKeyFoliagePatchComponent,                      \
     get_foliage_patch_component, add_foliage_patch_component,                  \
-    remove_foliage_patch_component)                                           \
+    remove_foliage_patch_component)                                            \
   X(AnimationComponent, kJsonKeyAnimationComponent, get_animation_component,   \
-    add_animation_component, remove_animation_component)                     \
-  X(CameraComponent, kJsonKeyCameraComponent, get_camera_component,           \
+    add_animation_component, remove_animation_component)                       \
+  X(CameraComponent, kJsonKeyCameraComponent, get_camera_component,            \
     add_camera_component, remove_camera_component)                             \
   X(SkyLightComponent, kJsonKeySkyLightComponent, get_sky_light_component,     \
-    add_sky_light_component, remove_sky_light_component)
+    add_sky_light_component, remove_sky_light_component)                       \
+  X(TagSetComponent, kJsonKeyTagSetComponent, get_tag_set_component,           \
+    add_tag_set_component, remove_tag_set_component)
 
 namespace engine::runtime {
 

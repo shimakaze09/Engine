@@ -18,6 +18,8 @@ using engine::core::ascii_lower;
 using engine::core::contains_ignoring_case;
 using engine::core::copy_string;
 using engine::core::copy_string_strict;
+using engine::core::equals_ignoring_case;
+using engine::core::name_token_is_valid;
 
 static_assert(ascii_lower('A') == 'a' && ascii_lower('Z') == 'z' &&
                   ascii_lower('a') == 'a' && ascii_lower('@') == '@' &&
@@ -115,13 +117,35 @@ int check_truncating_copy() {
   return 0;
 }
 
+/// The name-token rule: letters, digits, '_', '-' and '.', 1 to maxLength
+/// characters, never truncated; and case-insensitive equality.
+int check_name_tokens() {
+  if (!name_token_is_valid("coin", 4U) || !name_token_is_valid("a", 1U) ||
+      !name_token_is_valid("Enemy_2.boss-A", 31U)) {
+    return 40;
+  }
+  if (name_token_is_valid("coins", 4U) || name_token_is_valid("", 31U) ||
+      name_token_is_valid(nullptr, 31U) || name_token_is_valid("a b", 31U) ||
+      name_token_is_valid("a/b", 31U) || name_token_is_valid("\xC3\xA9", 31U)) {
+    return 41;
+  }
+  if (!equals_ignoring_case("Hero", "hERO") ||
+      equals_ignoring_case("hero", "heroes") ||
+      equals_ignoring_case("hero", nullptr) ||
+      equals_ignoring_case(nullptr, nullptr) ||
+      equals_ignoring_case("\xC3\x89", "\xC3\xA9")) {
+    return 42;
+  }
+  return 0;
+}
+
 } // namespace
 
 int main() {
   const int results[] = {
       check_strict_bound(),           check_strict_unterminated_source(),
       check_strict_null_arguments(),  check_truncating_copy(),
-      check_contains_ignoring_case(),
+      check_contains_ignoring_case(), check_name_tokens(),
   };
   for (const int result : results) {
     if (result != 0) {

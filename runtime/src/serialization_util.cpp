@@ -862,6 +862,44 @@ bool read_collider_component(const core::JsonParser &parser,
   return true;
 }
 
+void write_tag_set_component(core::JsonWriter &writer, const char *key,
+                             const TagSetComponent &component) noexcept {
+  writer.begin_array(key);
+  const std::size_t count = (component.count < TagSetComponent::kMaxTags)
+                                ? component.count
+                                : TagSetComponent::kMaxTags;
+  for (std::size_t i = 0U; i < count; ++i) {
+    writer.write_string_value(component.tags[i]);
+  }
+  writer.end_array();
+}
+
+bool read_tag_set_component(const core::JsonParser &parser,
+                            const core::JsonValue &tagArray,
+                            TagSetComponent *outComponent) noexcept {
+  if ((outComponent == nullptr) ||
+      (tagArray.type != core::JsonValue::Type::Array)) {
+    return false;
+  }
+  const std::size_t count = parser.array_size(tagArray);
+  if (count > TagSetComponent::kMaxTags) {
+    return false;
+  }
+  TagSetComponent component{};
+  for (std::size_t i = 0U; i < count; ++i) {
+    core::JsonValue element{};
+    char tag[TagSetComponent::kMaxTagLength + 1U] = {};
+    if (!parser.get_array_element(tagArray, i, &element) ||
+        (element.type != core::JsonValue::Type::String) ||
+        !parser.copy_string_strict(element, tag, sizeof(tag)) ||
+        (tag_set_add(&component, tag) != TagSetAdd::Added)) {
+      return false;
+    }
+  }
+  *outComponent = component;
+  return true;
+}
+
 void write_foliage_patch_component(
     core::JsonWriter &writer, const FoliagePatchComponent &component) noexcept {
   writer.write_key(kJsonKeyFoliagePatchComponent);

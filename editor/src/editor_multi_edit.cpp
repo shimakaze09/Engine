@@ -552,7 +552,7 @@ constexpr ComponentEditType kMultiEditDeferredTypes[] = {
     ComponentEditType::Name,         ComponentEditType::Mesh,
     ComponentEditType::FoliagePatch, ComponentEditType::Script,
     ComponentEditType::Animation,    ComponentEditType::SceneCapture,
-    ComponentEditType::SkyLight,
+    ComponentEditType::SkyLight,     ComponentEditType::Tags,
 };
 
 constexpr bool multi_section_row_exists(ComponentEditType type) noexcept {

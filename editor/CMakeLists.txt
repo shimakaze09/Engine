@@ -15,6 +15,7 @@ engine_add_module_library(engine_editor
     src/editor_entity_commands.cpp
     src/editor_asset_place.cpp
     src/editor_entity_rename.cpp
+    src/editor_entity_tags.cpp
     src/editor_entity_menus.cpp
     src/editor_entity_clipboard.cpp
     src/editor_frame_history.cpp

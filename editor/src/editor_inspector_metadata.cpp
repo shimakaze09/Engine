@@ -235,6 +235,10 @@ constexpr ComponentMetadata kComponentMetadataTable[] = {
      "Position, rotation, and scale. Every scene object owns one."},
     {"engine::runtime::NameComponent", "Name", "Core",
      "Display name. Every scene object owns one."},
+    {"engine::runtime::TagSetComponent", "Tags", "Core",
+     "Gameplay tags scripts find entities by "
+     "(engine.find_entities_by_tag), up to 8 per entity.",
+     "tags are added in the Tags row under the name"},
     {"engine::runtime::RigidBody", "Rigid Body", "Physics",
      "Makes the object simulate under physics (gravity, forces, impacts)."},
     {"engine::runtime::Collider", "Collider", "Physics",

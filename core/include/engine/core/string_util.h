@@ -5,7 +5,9 @@
 // looked up, asset and script paths), where a truncated copy would
 // silently address something other than what the caller named. The
 // ASCII case fold and the case-insensitive substring test every search
-// field uses live here too, so no module folds case its own way.
+// field uses live here too, so no module folds case its own way, and so
+// does the one rule for the short names authors type into lists: asset
+// labels, entity tags and recording names.
 
 #pragma once
 
@@ -89,6 +91,45 @@ inline bool copy_string_strict(char *dst, std::size_t dstCapacity,
     }
   }
   return false;
+}
+
+/// True when `a` and `b` are the same text ignoring ASCII case. Null equals
+/// nothing, not even null.
+[[nodiscard]] inline bool equals_ignoring_case(const char *a,
+                                               const char *b) noexcept {
+  if ((a == nullptr) || (b == nullptr)) {
+    return false;
+  }
+  for (std::size_t i = 0U;; ++i) {
+    if (ascii_lower(a[i]) != ascii_lower(b[i])) {
+      return false;
+    }
+    if (a[i] == '\0') {
+      return true;
+    }
+  }
+}
+
+/// True when `text` is a name token: 1 to `maxLength` characters, each a
+/// letter, digit, '_', '-' or '.'. Asset labels, entity tags and recording
+/// names are tokens, so a search term such as "l:hero" names exactly one
+/// label, a tag never needs quoting and a name is always a safe file stem.
+/// Never truncates: text longer than `maxLength` is not a token.
+[[nodiscard]] inline bool name_token_is_valid(const char *text,
+                                              std::size_t maxLength) noexcept {
+  if ((text == nullptr) || (text[0] == '\0')) {
+    return false;
+  }
+  for (std::size_t length = 0U; text[length] != '\0'; ++length) {
+    const char c = text[length];
+    const bool allowed =
+        ((c >= 'a') && (c <= 'z')) || ((c >= 'A') && (c <= 'Z')) ||
+        ((c >= '0') && (c <= '9')) || (c == '_') || (c == '-') || (c == '.');
+    if (!allowed || (length >= maxLength)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 } // namespace engine::core

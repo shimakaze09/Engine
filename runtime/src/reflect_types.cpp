@@ -56,6 +56,12 @@ static_cast<void>(desc);
 // REFLECT_FIELD metadata.
 REFLECT_END()
 
+REFLECT_TYPE(engine::runtime::TagSetComponent)
+static_cast<void>(desc);
+// Intentionally registers a zero-field descriptor: the tags are a fixed
+// array of fixed char arrays, serialized and edited by hand.
+REFLECT_END()
+
 REFLECT_TYPE(engine::runtime::ScriptComponent)
 static_cast<void>(desc);
 // Intentionally registers a zero-field descriptor. ScriptComponent::scriptPath
