@@ -78,7 +78,11 @@ change and needs the migration path below.
   fields may truncate with a warning.
 - **Malformed is not missing.** An absent optional field takes its
   default; a present-but-malformed field rejects the document. Conflating
-  the two silently rewrites authored data.
+  the two silently rewrites authored data. An enum value this build does
+  not know is malformed too: refuse it by name, never map it to a default
+  (the light type and camera projection checks in
+  `math/include/engine/math/world_component_types.h`, which the codec, the
+  World and every consumer share).
 - **Unknown is not silent.** A scene or prefab key no reader looks up
   still loads, and is reported as `unknown_key`, by path, in the load's
   report and the log, because the next save drops it. Codecs read members

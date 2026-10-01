@@ -18,6 +18,7 @@
 #include "engine/core/hash.h"
 #include "engine/core/logging.h"
 #include "engine/core/mem_tracker.h"
+#include "engine/core/string_util.h"
 #include "engine/core/thread_affinity.h"
 #include "engine/core/vfs.h"
 
@@ -426,6 +427,58 @@ std::size_t query_assets_by_type(const AssetCatalog *catalog,
     }
   }
   return count;
+}
+
+std::size_t find_assets_of_type(const AssetCatalog *catalog,
+                                AssetTypeTag typeTag, const char *query,
+                                AssetId *outIds, std::size_t maxIds) noexcept {
+  if (catalog == nullptr) {
+    return 0U;
+  }
+  const std::size_t keep = (outIds != nullptr) ? maxIds : 0U;
+  const auto path_of = [catalog](AssetId id) noexcept -> const char * {
+    const AssetMetadata *record = find_asset_metadata(catalog, id);
+    return (record != nullptr) ? record->filePath.data() : "";
+  };
+
+  std::size_t matches = 0U;
+  std::size_t kept = 0U;
+  for (std::size_t i = 0U; i < catalog->recordCount; ++i) {
+    const AssetMetadata &record = record_at(*catalog, i);
+    if ((record.typeTag != typeTag) ||
+        !core::contains_ignoring_case(record.filePath.data(), query)) {
+      continue;
+    }
+    ++matches;
+    if (keep == 0U) {
+      continue;
+    }
+    const char *path = record.filePath.data();
+    if ((kept == keep) &&
+        (std::strcmp(path, path_of(outIds[kept - 1U])) >= 0)) {
+      continue;
+    }
+    // Binary search for the first kept path that sorts after this one.
+    std::size_t low = 0U;
+    std::size_t high = kept;
+    while (low < high) {
+      const std::size_t mid = low + ((high - low) / 2U);
+      if (std::strcmp(path_of(outIds[mid]), path) <= 0) {
+        low = mid + 1U;
+      } else {
+        high = mid;
+      }
+    }
+    const std::size_t last = (kept < keep) ? kept : (keep - 1U);
+    for (std::size_t slot = last; slot > low; --slot) {
+      outIds[slot] = outIds[slot - 1U];
+    }
+    outIds[low] = record.assetId;
+    if (kept < keep) {
+      ++kept;
+    }
+  }
+  return matches;
 }
 
 // --- Dependency management ---

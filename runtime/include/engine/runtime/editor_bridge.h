@@ -117,15 +117,22 @@ struct EditorAssetSearchResult final {
   char path[260] = {};
 };
 
-/// Searches assets of `typeTag` already known to the asset database whose
-/// registered file path contains `query` as a case-insensitive substring
-/// ("" matches every known asset of that type); writes up to maxResults hits
-/// and returns the count actually written. Returns 0 (no results, not an
-/// error) when no runtime asset service is published yet.
+/// Most hits one editor_query_assets call writes.
+inline constexpr std::size_t kMaxEditorAssetSearchResults = 256U;
+
+/// Searches every catalogued asset of `typeTag` whose registered file path
+/// contains `query` as a case-insensitive substring ("" matches every one,
+/// however many there are), through content::find_assets_of_type. Writes
+/// up to maxResults hits (at most kMaxEditorAssetSearchResults), those
+/// whose paths sort first, and returns the count written; `outMatchCount`,
+/// when given, receives how many assets match in all, so a picker can say
+/// how many it is not showing. Returns 0 (no results, not an error) when no
+/// runtime asset service is published yet.
 std::size_t editor_query_assets(content::AssetTypeTag typeTag,
                                 const char *query,
                                 EditorAssetSearchResult *outResults,
-                                std::size_t maxResults) noexcept;
+                                std::size_t maxResults,
+                                std::size_t *outMatchCount) noexcept;
 /// Display path for a known asset id; false (outPath left untouched) when
 /// the id is not registered in the asset database -- the signal an asset
 /// reference picker uses to render its broken-reference state.

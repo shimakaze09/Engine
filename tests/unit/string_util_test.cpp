@@ -3,7 +3,9 @@
 // refusing copy_string_strict copies only a string that fits whole, leaves
 // the destination empty otherwise, and never reads past the destination's
 // capacity in the source (so an unterminated same-sized array is refused,
-// not scanned).
+// not scanned). Also the ASCII case fold, which leaves non-letters and
+// UTF-8 bytes alone, and the case-insensitive substring test every search
+// field shares.
 
 #include "engine/core/string_util.h"
 
@@ -12,8 +14,44 @@
 
 namespace {
 
+using engine::core::ascii_lower;
+using engine::core::contains_ignoring_case;
 using engine::core::copy_string;
 using engine::core::copy_string_strict;
+
+static_assert(ascii_lower('A') == 'a' && ascii_lower('Z') == 'z' &&
+                  ascii_lower('a') == 'a' && ascii_lower('@') == '@' &&
+                  ascii_lower('[') == '[' &&
+                  ascii_lower(static_cast<char>(0xC3)) ==
+                      static_cast<char>(0xC3),
+              "only ASCII letters fold");
+
+/// Matches anywhere, ignoring ASCII case; an empty or null needle matches
+/// everything, a null haystack only that, and a needle longer than the
+/// haystack or one that runs off its end does not match.
+int check_contains_ignoring_case() {
+  if (!contains_ignoring_case("assets/Textures/Rock_Albedo.png", "rock_al") ||
+      !contains_ignoring_case("ABC", "abc") ||
+      !contains_ignoring_case("xxabc", "ABC") ||
+      !contains_ignoring_case("abc", "") ||
+      !contains_ignoring_case("abc", nullptr) ||
+      !contains_ignoring_case(nullptr, "")) {
+    return 40;
+  }
+  if (contains_ignoring_case("ab", "abc") ||
+      contains_ignoring_case("xxab", "abc") ||
+      contains_ignoring_case("abd", "abc") ||
+      contains_ignoring_case(nullptr, "a") || contains_ignoring_case("", "a")) {
+    return 41;
+  }
+  // A UTF-8 name matches itself byte for byte and is never case-folded.
+  if (!contains_ignoring_case("\xE6\xA4\x85\xE5\xAD\x90.mesh",
+                              "\xE5\xAD\x90") ||
+      contains_ignoring_case("\xC3\x89", "\xC3\xA9")) {
+    return 42;
+  }
+  return 0;
+}
 
 /// A string one shorter than the capacity fits whole; exactly the capacity
 /// (no room for the terminator) is refused with an empty destination.
@@ -81,10 +119,9 @@ int check_truncating_copy() {
 
 int main() {
   const int results[] = {
-      check_strict_bound(),
-      check_strict_unterminated_source(),
-      check_strict_null_arguments(),
-      check_truncating_copy(),
+      check_strict_bound(),           check_strict_unterminated_source(),
+      check_strict_null_arguments(),  check_truncating_copy(),
+      check_contains_ignoring_case(),
   };
   for (const int result : results) {
     if (result != 0) {

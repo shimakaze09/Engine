@@ -187,6 +187,17 @@ RULES: tuple[Rule, ...] = (
         remedy="wrap the size in editor_px, or derive it from the style or "
         "a text size",
     ),
+    Rule(
+        name="the ASCII case fold and case-insensitive search",
+        owner="core/include/engine/core/string_util.h",
+        # Folding case with the C library is what a copy looks like: the
+        # reference pickers, the asset query, the Log filter and the Add
+        # Component menu each carried a case-insensitive substring loop,
+        # and std::tolower answers by the C locale besides.
+        pattern=r"(?<![\w.])(?:std::)?to(?:lower|upper)\s*\(",
+        remedy="include engine/core/string_util.h and use core::ascii_lower "
+        "or core::contains_ignoring_case",
+    ),
 )
 
 

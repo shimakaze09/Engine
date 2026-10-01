@@ -3,7 +3,9 @@
 // for display text and log/scratch buffers; copy_string_strict is the
 // refusing form for identity-bearing fields (names that are hashed or
 // looked up, asset and script paths), where a truncated copy would
-// silently address something other than what the caller named.
+// silently address something other than what the caller named. The
+// ASCII case fold and the case-insensitive substring test every search
+// field uses live here too, so no module folds case its own way.
 
 #pragma once
 
@@ -50,6 +52,40 @@ inline bool copy_string_strict(char *dst, std::size_t dstCapacity,
     if (src[i] == '\0') {
       std::memcpy(dst, src, i + 1U);
       return true;
+    }
+  }
+  return false;
+}
+
+/// Folds an ASCII letter to lower case and leaves every other byte as it
+/// is. Unlike std::tolower it ignores the C locale, so a search or an
+/// extension match is the same on every machine, and a UTF-8 byte is never
+/// rewritten.
+[[nodiscard]] constexpr char ascii_lower(char c) noexcept {
+  return ((c >= 'A') && (c <= 'Z')) ? static_cast<char>(c - 'A' + 'a') : c;
+}
+
+/// True when `needle` occurs in `haystack` ignoring ASCII case. An empty or
+/// null needle matches everything; a null haystack matches only that.
+[[nodiscard]] inline bool contains_ignoring_case(const char *haystack,
+                                                 const char *needle) noexcept {
+  if ((needle == nullptr) || (needle[0] == '\0')) {
+    return true;
+  }
+  if (haystack == nullptr) {
+    return false;
+  }
+  for (const char *start = haystack; *start != '\0'; ++start) {
+    std::size_t i = 0U;
+    while ((needle[i] != '\0') && (start[i] != '\0') &&
+           (ascii_lower(start[i]) == ascii_lower(needle[i]))) {
+      ++i;
+    }
+    if (needle[i] == '\0') {
+      return true;
+    }
+    if (start[i] == '\0') {
+      return false;
     }
   }
   return false;

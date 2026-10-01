@@ -10,51 +10,17 @@
 
 #include "imgui.h"
 
-#include <cctype>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
 
+#include "engine/core/string_util.h"
 #include "engine/engine.h"
 #include "engine/runtime/editor_bridge.h"
 
 #include "editor_session.h"
 
 namespace engine::editor {
-
-namespace {
-
-bool contains_ci(const char *haystack, const char *needle) noexcept {
-  if ((haystack == nullptr) || (needle == nullptr)) {
-    return false;
-  }
-  if (needle[0] == '\0') {
-    return true;
-  }
-  const std::size_t haystackLen = std::strlen(haystack);
-  const std::size_t needleLen = std::strlen(needle);
-  if (needleLen > haystackLen) {
-    return false;
-  }
-  for (std::size_t start = 0U; start <= (haystackLen - needleLen); ++start) {
-    std::size_t i = 0U;
-    for (; i < needleLen; ++i) {
-      const unsigned char a =
-          static_cast<unsigned char>(std::tolower(haystack[start + i]));
-      const unsigned char b =
-          static_cast<unsigned char>(std::tolower(needle[i]));
-      if (a != b) {
-        break;
-      }
-    }
-    if (i == needleLen) {
-      return true;
-    }
-  }
-  return false;
-}
-
-} // namespace
 
 std::size_t filter_entities_by_name(
     const runtime::World &world, const char *query,
@@ -76,7 +42,7 @@ std::size_t filter_entities_by_name(
     if (!world.get_name_component(entity, &name)) {
       return;
     }
-    if (!contains_ci(name.name, effectiveQuery)) {
+    if (!core::contains_ignoring_case(name.name, effectiveQuery)) {
       return;
     }
     const runtime::PersistentId persistentId = world.persistent_id(entity);
@@ -232,8 +198,9 @@ bool draw_asset_reference_picker(const char *label,
 
     constexpr std::size_t kMaxHits = 64U;
     runtime::EditorAssetSearchResult hits[kMaxHits];
-    const std::size_t hitCount =
-        runtime::editor_query_assets(typeTag, query, hits, kMaxHits);
+    std::size_t matchCount = 0U;
+    const std::size_t hitCount = runtime::editor_query_assets(
+        typeTag, query, hits, kMaxHits, &matchCount);
     for (std::size_t i = 0U; i < hitCount; ++i) {
       ImGui::PushID(static_cast<int>(i));
       const bool isSelected = (*value == hits[i].assetId);
@@ -243,8 +210,9 @@ bool draw_asset_reference_picker(const char *label,
       }
       ImGui::PopID();
     }
-    if (hitCount == kMaxHits) {
-      ImGui::TextDisabled("More results than shown -- refine the search.");
+    if (matchCount > hitCount) {
+      ImGui::TextDisabled("Showing %zu of %zu -- refine the search.", hitCount,
+                          matchCount);
     }
     ImGui::EndCombo();
   }
@@ -307,7 +275,7 @@ std::size_t scan_paths_by_extension(const std::filesystem::path &dir,
       continue;
     }
     const std::string generic = relative.generic_string();
-    if (!contains_ci(generic.c_str(), query)) {
+    if (!core::contains_ignoring_case(generic.c_str(), query)) {
       continue;
     }
     std::snprintf(outPaths[written], 196, "%s/%s",

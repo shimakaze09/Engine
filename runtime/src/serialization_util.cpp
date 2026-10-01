@@ -733,9 +733,20 @@ bool read_light_component(const core::JsonParser &parser,
       return false;
     }
   }
-  component.type = (type == static_cast<std::uint32_t>(LightType::Point))
-                       ? LightType::Point
-                       : LightType::Directional;
+  // A type this build does not know (a newer build's light, a hand edit)
+  // is refused by name: mapping it to Directional would light the level
+  // with a sun and write that back as the light's type on the next save.
+  if (!math::light_type_known(type)) {
+    char message[160] = {};
+    static_cast<void>(
+        std::snprintf(message, sizeof(message),
+                      "Light 'type' %u is not a light type this build knows (0 "
+                      "Directional, 1 Point); refusing the load",
+                      static_cast<unsigned int>(type)));
+    core::log_message(core::LogLevel::Error, kSerializationLogChannel, message);
+    return false;
+  }
+  component.type = static_cast<LightType>(type);
 
   *outComponent = component;
   return true;

@@ -5,7 +5,6 @@
 #include "editor_asset_index.h"
 
 #include <algorithm>
-#include <cctype>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -13,6 +12,7 @@
 
 #include "engine/content/asset_sidecar.h"
 #include "engine/core/logging.h"
+#include "engine/core/string_util.h"
 #include "engine/engine.h"
 
 namespace engine::editor {
@@ -56,8 +56,7 @@ bool has_suffix(const char *path, const char *suffix) noexcept {
 /// Lowercases an ASCII extension in place for case-insensitive comparison.
 void lower_ascii(char *text) noexcept {
   for (char *c = text; *c != '\0'; ++c) {
-    *c = static_cast<char>(
-        std::tolower(static_cast<unsigned char>(*c)));
+    *c = core::ascii_lower(*c);
   }
 }
 
