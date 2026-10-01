@@ -11,7 +11,11 @@
 //   document that sets none, and are refused outside their range;
 // - the optional package list reads and writes exactly, stays out of a
 //   document that depends on nothing, and refuses a bad name, a repeat, a
-//   source other than the embedded folder and a list past its limit.
+//   source other than the embedded folder and a list past its limit;
+// - the optional collision layers (names and ignored pairs) read in any
+//   order and write in one canonical order, stay out of a document with
+//   the default layers, and refuse a bad or repeated name, a repeated bit
+//   or pair, a bit outside 0..31, an empty section and a one-sided matrix.
 
 #include "engine/content/project_document.h"
 
@@ -533,11 +537,181 @@ void check_packages(engine::tests::TestContext &t) {
           "one package past the limit is refused");
 }
 
+/// The reference document with `physics` appended as its last member.
+std::string with_physics(const char *physics) {
+  return replaced(
+      reference_text(), "\"assets/main.lua\"\n}",
+      (std::string("\"assets/main.lua\",\n  \"physics\": ") + physics + "\n}")
+          .c_str());
+}
+
+void check_collision_layers(engine::tests::TestContext &t) {
+  std::unique_ptr<char[]> out(
+      new (std::nothrow) char[ct::kMaxProjectDocumentBytes]);
+  std::size_t length = 0U;
+
+  const std::string plain = reference_text();
+  std::unique_ptr<ct::ProjectDocument> none = fresh();
+  t.check(ct::parse_project_document(plain.data(), plain.size(), none.get())
+                  .has_value() &&
+              ct::collision_layers_are_default(none->collisionLayers),
+          "a document with no physics section has the default layers");
+
+  const std::string canonical = with_physics(
+      "{\n    \"layers\": [\n      {\"bit\": 0, \"name\": \"Default\"},\n"
+      "      {\"bit\": 3, \"name\": \"Player\"},\n      {\"bit\": 31, "
+      "\"name\": \"Enemy.Projectile\"}\n    ],\n    \"ignoredPairs\": [\n"
+      "      [3, 3],\n      [3, 31]\n    ]\n  }");
+  std::unique_ptr<ct::ProjectDocument> read = fresh();
+  const bool parsed =
+      ct::parse_project_document(canonical.data(), canonical.size(), read.get())
+          .has_value();
+  const ct::ProjectCollisionLayers &layers = read->collisionLayers;
+  t.check(parsed && (std::strcmp(layers.names[3], "Player") == 0) &&
+              (ct::find_collision_layer(layers, "player") == 3) &&
+              (ct::find_collision_layer(layers, "ENEMY.projectile") == 31) &&
+              (ct::find_collision_layer(layers, "Ghost") == -1) &&
+              (ct::find_collision_layer(layers, "") == -1) &&
+              (layers.names[1][0] == '\0'),
+          "names read by bit and are found ignoring case");
+  t.check(parsed && (layers.collides[3] == ~((1U << 3U) | (1U << 31U))) &&
+              (layers.collides[31] == ~(1U << 3U)) &&
+              (layers.collides[0] == 0xFFFFFFFFU),
+          "ignored pairs clear both rows, a layer's pair with itself one bit");
+  t.check(ct::format_project_document(*read, out.get(),
+                                      ct::kMaxProjectDocumentBytes, &length) &&
+              (std::string(out.get(), length) == canonical),
+          "named layers and ignored pairs write exactly their canonical text");
+
+  const std::string shuffled = with_physics(
+      "{\"ignoredPairs\": [[31, 3], [3, 3]], \"layers\": [{\"name\": "
+      "\"Enemy.Projectile\", \"bit\": 31}, {\"bit\": 3, \"name\": "
+      "\"Player\"}, {\"bit\": 0, \"name\": \"Default\"}]}");
+  std::unique_ptr<ct::ProjectDocument> reordered = fresh();
+  t.check(ct::parse_project_document(shuffled.data(), shuffled.size(),
+                                     reordered.get())
+                  .has_value() &&
+              ct::format_project_document(*reordered, out.get(),
+                                          ct::kMaxProjectDocumentBytes,
+                                          &length) &&
+              (std::string(out.get(), length) == canonical),
+          "any order reads, and writes back in the one canonical order");
+
+  const std::string namesOnly = with_physics(
+      "{\n    \"layers\": [\n      {\"bit\": 5, \"name\": \"Water\"}\n    "
+      "]\n  }");
+  const std::string pairsOnly =
+      with_physics("{\n    \"ignoredPairs\": [\n      [0, 1]\n    ]\n  }");
+  for (const std::string *text : {&namesOnly, &pairsOnly}) {
+    std::unique_ptr<ct::ProjectDocument> one = fresh();
+    t.check(ct::parse_project_document(text->data(), text->size(), one.get())
+                    .has_value() &&
+                ct::format_project_document(
+                    *one, out.get(), ct::kMaxProjectDocumentBytes, &length) &&
+                (std::string(out.get(), length) == *text),
+            "names alone and pairs alone each round-trip");
+  }
+
+  std::string all = "{\"layers\": [";
+  for (int bit = 0; bit < 32; ++bit) {
+    char entry[48] = {};
+    std::snprintf(entry, sizeof(entry), "%s{\"bit\": %d, \"name\": \"L%d\"}",
+                  (bit == 0) ? "" : ",", bit, bit);
+    all += entry;
+  }
+  std::unique_ptr<ct::ProjectDocument> full = fresh();
+  const std::string thirtyTwo = with_physics((all + "]}").c_str());
+  t.check(
+      ct::parse_project_document(thirtyTwo.data(), thirtyTwo.size(), full.get())
+              .has_value() &&
+          (ct::find_collision_layer(full->collisionLayers, "L31") == 31),
+      "all 32 layers may be named");
+  t.check(refused_for(with_physics((all + ",{\"bit\": 0, \"name\": "
+                                          "\"Extra\"}]}")
+                                       .c_str()),
+                      "physics.layers"),
+          "a 33rd layer entry is refused");
+
+  struct Refusal final {
+    const char *physics;
+    const char *field;
+    const char *what;
+  };
+  const Refusal refusals[] = {
+      {"{}", "physics", "an empty physics section"},
+      {"[]", "physics", "a physics section that is not an object"},
+      {"{\"gravity\": 1}", "physics.gravity", "an unknown physics key"},
+      {"{\"layers\": []}", "physics.layers", "an empty layer list"},
+      {"{\"ignoredPairs\": []}", "physics.ignoredPairs", "an empty pair list"},
+      {"{\"layers\": [{\"bit\": 32, \"name\": \"Far\"}]}",
+       "physics.layers[0].bit", "a bit past 31"},
+      {"{\"layers\": [{\"bit\": -1, \"name\": \"Neg\"}]}",
+       "physics.layers[0].bit", "a negative bit"},
+      {"{\"layers\": [{\"bit\": 1.5, \"name\": \"Half\"}]}",
+       "physics.layers[0].bit", "a fractional bit"},
+      {"{\"layers\": [{\"bit\": 1}]}", "physics.layers[0].name",
+       "a layer with no name"},
+      {"{\"layers\": [{\"bit\": 1, \"name\": \"\"}]}", "physics.layers[0].name",
+       "an empty name"},
+      {"{\"layers\": [{\"bit\": 1, \"name\": \"Two words\"}]}",
+       "physics.layers[1].name", "a name that is not a token"},
+      {"{\"layers\": [{\"bit\": 1, \"name\": "
+       "\"abcdefghijklmnopqrstuvwxyz012345\"}]}",
+       "physics.layers[0].name", "a 32-character name, refused not cut"},
+      {"{\"layers\": [{\"bit\": 1, \"name\": \"A\"}, {\"bit\": 1, "
+       "\"name\": \"B\"}]}",
+       "physics.layers[1].bit", "a repeated bit"},
+      {"{\"layers\": [{\"bit\": 1, \"name\": \"Water\"}, {\"bit\": 2, "
+       "\"name\": \"WATER\"}]}",
+       "physics.layers[2].name", "a name repeated ignoring case"},
+      {"{\"layers\": [{\"bit\": 1, \"name\": \"A\", \"color\": 1}]}",
+       "physics.layers[0].color", "an unknown layer key"},
+      {"{\"ignoredPairs\": [[1]]}", "physics.ignoredPairs[0]",
+       "a pair of one layer"},
+      {"{\"ignoredPairs\": [[1, 2, 3]]}", "physics.ignoredPairs[0]",
+       "a pair of three layers"},
+      {"{\"ignoredPairs\": [[1, 32]]}", "physics.ignoredPairs[0]",
+       "a pair naming a bit past 31"},
+      {"{\"ignoredPairs\": [[1, 2], [2, 1]]}", "physics.ignoredPairs[1]",
+       "a pair repeated the other way round"},
+      {"{\"ignoredPairs\": [\"1,2\"]}", "physics.ignoredPairs[0]",
+       "a pair that is not an array"},
+  };
+  for (const Refusal &refusal : refusals) {
+    char label[160] = {};
+    std::snprintf(label, sizeof(label), "%s is refused", refusal.what);
+    t.check(refused_for(with_physics(refusal.physics), refusal.field), label);
+  }
+
+  std::unique_ptr<ct::ProjectDocument> invalid = fresh();
+  t.check(ct::parse_project_document(plain.data(), plain.size(), invalid.get())
+              .has_value(),
+          "the reference parses for the writer checks");
+  invalid->collisionLayers.collides[4] &= ~(1U << 6U);
+  t.check(!ct::format_project_document(*invalid, out.get(),
+                                       ct::kMaxProjectDocumentBytes, &length) &&
+              (out[0] == '\0'),
+          "the writer refuses a matrix that is not symmetric");
+  ct::set_collision_layer_pair(&invalid->collisionLayers, 4U, 6U, false);
+  t.check(ct::format_project_document(*invalid, out.get(),
+                                      ct::kMaxProjectDocumentBytes, &length),
+          "set_collision_layer_pair keeps the matrix symmetric");
+  ct::set_collision_layer_pair(&invalid->collisionLayers, 4U, 6U, true);
+  t.check(ct::collision_layers_are_default(invalid->collisionLayers),
+          "re-allowing the pair restores the default matrix");
+  std::snprintf(invalid->collisionLayers.names[7],
+                sizeof(invalid->collisionLayers.names[7]), "%s", "a/b");
+  t.check(!ct::format_project_document(*invalid, out.get(),
+                                       ct::kMaxProjectDocumentBytes, &length),
+          "the writer refuses a name its reader would refuse");
+}
+
 int main() {
   engine::tests::TestContext t;
   check_round_trip(t);
   check_script_limits(t);
   check_packages(t);
+  check_collision_layers(t);
   check_refusals(t);
   check_scene_bounds(t);
   check_file_outcomes(t);
