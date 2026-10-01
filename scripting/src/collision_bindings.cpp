@@ -9,13 +9,32 @@ extern "C" {
 #include "lua.h"
 }
 
+#include <array>
+#include <cstdio>
+
+#include "engine/core/logging.h"
+
 namespace engine::scripting {
 namespace {
 
-constexpr std::size_t kMaxCollisionHandlers = 8U;
-int g_collisionHandlers[kMaxCollisionHandlers] = {
-    LUA_NOREF, LUA_NOREF, LUA_NOREF, LUA_NOREF,
-    LUA_NOREF, LUA_NOREF, LUA_NOREF, LUA_NOREF};
+// Global collision handlers a run may register. Entity scripts have no
+// collision hook of their own yet, so every behaviour that reacts to
+// contacts registers one here; 8 was met by a game with that many such
+// behaviours. Unity, Godot and Unreal bound listeners only by memory.
+constexpr std::size_t kMaxCollisionHandlers = 64U;
+
+/// A table of empty handler slots.
+std::array<int, kMaxCollisionHandlers> empty_handlers() noexcept {
+  std::array<int, kMaxCollisionHandlers> handlers =
+      std::array<int, kMaxCollisionHandlers>();
+  handlers.fill(LUA_NOREF);
+  return handlers;
+}
+
+std::array<int, kMaxCollisionHandlers> g_collisionHandlers = empty_handlers();
+/// Set by the first refusal of a full table and cleared once a register
+/// succeeds again, so a script retrying every frame logs one line.
+bool g_handlersFullReported = false;
 
 /// Carries one collision callback invocation into the protected trampoline.
 struct CollisionCallArgs final {
@@ -53,20 +72,31 @@ int collision_call_trampoline(lua_State *state) noexcept {
 int lua_engine_on_collision_register(lua_State *state) noexcept {
   if (!lua_isfunction(state, 1)) {
     lua_pushnil(state);
-    return 1;
+    lua_pushliteral(state, "on_collision_handler expects a function");
+    return 2;
   }
 
   for (std::size_t i = 0U; i < kMaxCollisionHandlers; ++i) {
     if (g_collisionHandlers[i] == LUA_NOREF) {
       lua_pushvalue(state, 1);
       g_collisionHandlers[i] = luaL_ref(state, LUA_REGISTRYINDEX);
+      g_handlersFullReported = false;
       lua_pushinteger(state, static_cast<lua_Integer>(i));
       return 1;
     }
   }
 
+  char message[96] = {};
+  std::snprintf(message, sizeof(message),
+                "collision handler table full (%zu registered)",
+                kMaxCollisionHandlers);
+  if (!g_handlersFullReported) {
+    g_handlersFullReported = true;
+    core::log_message(core::LogLevel::Warning, "scripting", message);
+  }
   lua_pushnil(state);
-  return 1;
+  lua_pushstring(state, message);
+  return 2;
 }
 
 int lua_engine_remove_collision_handler(lua_State *state) noexcept {
@@ -83,6 +113,7 @@ int lua_engine_remove_collision_handler(lua_State *state) noexcept {
 }
 
 void clear_collision_handlers(lua_State *state) noexcept {
+  g_handlersFullReported = false;
   if (state == nullptr) {
     return;
   }

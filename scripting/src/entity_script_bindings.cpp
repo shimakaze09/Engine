@@ -18,6 +18,7 @@ extern "C" {
 #include <cstdio>
 #include <cstring>
 
+#include "engine/core/hash.h"
 #include "engine/core/logging.h"
 #include "engine/core/thread_affinity.h"
 #include "runtime_binding.h"
@@ -43,7 +44,18 @@ struct EntityScriptModule final {
   std::uint64_t polledSerial = 0U;
 };
 
-constexpr std::size_t kMaxEntityScriptModules = 32U;
+// Distinct script files (entity scripts and engine.require libraries) one
+// run can hold. Unity, Godot and Unreal bound script types only by memory;
+// a fixed table keeps this allocation-free, so it is sized past what a
+// project of this engine's scale reaches (an entry is under 200 bytes),
+// and lookups go through a hash index rather than a scan.
+constexpr std::size_t kMaxEntityScriptModules = 1024U;
+// Open-addressed path index: slot + 1 per bucket, 0 for empty. Twice the
+// table, a power of two, so a probe ends quickly.
+constexpr std::size_t kModuleIndexBuckets = 2U * kMaxEntityScriptModules;
+// The first refused paths are each reported once; one more line says the
+// rest go unlisted, so a project far past the limit never logs per frame.
+constexpr std::size_t kMaxReportedRefusals = 64U;
 constexpr std::uint8_t kMaxModuleLoadAttempts = 8U;
 constexpr std::size_t kMaxFaultedEntities = ENGINE_MAX_ENTITIES + 1U;
 constexpr std::size_t kMaxModuleLoadDepth = 32U;
@@ -74,7 +86,9 @@ std::size_t g_entityScriptModuleCount = 0U;
 // a script that appears between passes visible to the next one.
 std::uint64_t g_modulePollSerial = 1U;
 std::uint64_t g_mtimePolls = 0U;
-bool g_moduleCapacityWarned = false;
+std::uint16_t g_moduleIndex[kModuleIndexBuckets]{};
+std::uint64_t g_reportedRefusals[kMaxReportedRefusals]{};
+std::size_t g_reportedRefusalCount = 0U;
 bool g_hasPendingEntityReloads = false;
 core::Entity g_entityFaulted[kMaxFaultedEntities]{};
 EntitySavedState g_entitySavedState[kMaxFaultedEntities]{};
@@ -96,6 +110,75 @@ std::size_t g_captureDepth = 0U;
 std::int64_t file_mtime(const char *path) noexcept {
   ++g_mtimePolls;
   return (g_callbacks.fileMtime != nullptr) ? g_callbacks.fileMtime(path) : 0;
+}
+
+/// The table slot holding `path`, or kInvalidModuleSlot.
+std::size_t find_module_slot(const char *path) noexcept {
+  std::size_t bucket = static_cast<std::size_t>(core::fnv1a_64(path)) &
+                       (kModuleIndexBuckets - 1U);
+  for (std::size_t probe = 0U; probe < kModuleIndexBuckets; ++probe) {
+    const std::uint16_t entry = g_moduleIndex[bucket];
+    if (entry == 0U) {
+      return kInvalidModuleSlot;
+    }
+    const std::size_t slot = static_cast<std::size_t>(entry) - 1U;
+    if (std::strcmp(g_entityScriptModules[slot].path, path) == 0) {
+      return slot;
+    }
+    bucket = (bucket + 1U) & (kModuleIndexBuckets - 1U);
+  }
+  return kInvalidModuleSlot;
+}
+
+/// Rebuilds the path index from the table. Runs only when a module enters
+/// or leaves the table, never per dispatch.
+void rebuild_module_index() noexcept {
+  for (std::uint16_t &entry : g_moduleIndex) {
+    entry = 0U;
+  }
+  for (std::size_t slot = 0U; slot < g_entityScriptModuleCount; ++slot) {
+    std::size_t bucket = static_cast<std::size_t>(
+                             core::fnv1a_64(g_entityScriptModules[slot].path)) &
+                         (kModuleIndexBuckets - 1U);
+    while (g_moduleIndex[bucket] != 0U) {
+      bucket = (bucket + 1U) & (kModuleIndexBuckets - 1U);
+    }
+    g_moduleIndex[bucket] = static_cast<std::uint16_t>(slot + 1U);
+  }
+}
+
+/// Logs a full table's refusal of `path` once per path, so each script
+/// that could not load is named rather than only the first.
+void report_module_refusal(const char *path) noexcept {
+  const std::uint64_t hash = core::fnv1a_64(path);
+  const std::size_t recorded = (g_reportedRefusalCount < kMaxReportedRefusals)
+                                   ? g_reportedRefusalCount
+                                   : kMaxReportedRefusals;
+  for (std::size_t i = 0U; i < recorded; ++i) {
+    if (g_reportedRefusals[i] == hash) {
+      return;
+    }
+  }
+  if (g_reportedRefusalCount > kMaxReportedRefusals) {
+    return;
+  }
+  char msg[256] = {};
+  if (g_reportedRefusalCount == kMaxReportedRefusals) {
+    // One last line, so a project far past the limit is not logged per
+    // frame for every refused path.
+    std::snprintf(msg, sizeof(msg),
+                  "entity script module table full (%u modules loaded): "
+                  "cannot load %s; further refused paths are not listed",
+                  static_cast<unsigned>(kMaxEntityScriptModules), path);
+  } else {
+    g_reportedRefusals[g_reportedRefusalCount] = hash;
+    std::snprintf(msg, sizeof(msg),
+                  "entity script module table full (%u modules loaded): "
+                  "cannot load %s",
+                  static_cast<unsigned>(kMaxEntityScriptModules), path);
+  }
+  ++g_reportedRefusalCount;
+  core::log_message(core::LogLevel::Error, "scripting", msg);
 }
 
 /// Logs the current Lua stack error through the configured callback.
@@ -460,8 +543,9 @@ int get_or_load_entity_script_module(const char *path) noexcept {
     return LUA_NOREF;
   }
 
-  for (std::size_t i = 0U; i < g_entityScriptModuleCount; ++i) {
-    if (std::strcmp(g_entityScriptModules[i].path, path) == 0) {
+  {
+    const std::size_t i = find_module_slot(path);
+    if (i != kInvalidModuleSlot) {
       EntityScriptModule &mod = g_entityScriptModules[i];
       if (mod.polledSerial == g_modulePollSerial) {
         // Already polled this frame: the answer stands for every entity
@@ -551,16 +635,7 @@ int get_or_load_entity_script_module(const char *path) noexcept {
   } else {
     slot = find_evictable_negative_slot();
     if (slot == kInvalidModuleSlot) {
-      if (!g_moduleCapacityWarned) {
-        char msg[256] = {};
-        std::snprintf(msg, sizeof(msg),
-                      "entity script module cache full (%u loaded): cannot "
-                      "load %s; further capacity errors suppressed until the "
-                      "cache is cleared",
-                      static_cast<unsigned>(kMaxEntityScriptModules), path);
-        core::log_message(core::LogLevel::Error, "scripting", msg);
-        g_moduleCapacityWarned = true;
-      }
+      report_module_refusal(path);
       return LUA_NOREF;
     }
     clear_entity_saved_state_for_module(slot);
@@ -570,6 +645,7 @@ int get_or_load_entity_script_module(const char *path) noexcept {
   mod = EntityScriptModule{};
   std::memcpy(mod.path, stagedPath, sizeof(mod.path));
   mod.lastFailedMtime = -1;
+  rebuild_module_index();
   return retry_negative_module_entry(mod, path);
 }
 
@@ -1041,7 +1117,7 @@ void dispatch_entity_scripts_end_for_transition() noexcept {
 void clear_entity_script_modules() noexcept {
   clear_lock_rotation_captures();
   clear_entity_saved_state();
-  g_moduleCapacityWarned = false;
+  g_reportedRefusalCount = 0U;
   g_hasPendingEntityReloads = false;
   for (core::Entity &faultedEntity : g_entityFaulted) {
     faultedEntity = core::kInvalidEntity;
@@ -1060,6 +1136,7 @@ void clear_entity_script_modules() noexcept {
     }
   }
   g_entityScriptModuleCount = 0U;
+  rebuild_module_index();
 }
 
 void reset_entity_script_bindings() noexcept {

@@ -10,8 +10,12 @@ extern "C" {
 #include "lua.h"
 }
 
+#include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdio>
+
+#include "engine/core/logging.h"
 
 namespace engine::scripting {
 namespace {
@@ -67,7 +71,11 @@ char kWaitConditionTag;
 /// Owns pending Lua coroutine entries for the scripting module.
 class CoroutineScheduler final {
 public:
-  static constexpr std::size_t kCapacity = 32U;
+  // Coroutines running at once. Unity bounds StartCoroutine only by
+  // memory; a fixed table keeps the scheduler allocation-free, so it is
+  // sized past one waiting routine per actor of a busy level (it held 32,
+  // which a level of NPCs met). An entry is a few dozen bytes.
+  static constexpr std::size_t kCapacity = 1024U;
 
   /// Parses yield values and stores the next wake criteria. The wait_until
   /// condition is ref'd under protection (this runs from the C-context
@@ -178,10 +186,14 @@ public:
     entry = CoroutineEntry{};
   }
 
-  CoroutineEntry m_entries[kCapacity]{};
+  std::array<CoroutineEntry, kCapacity> m_entries =
+      std::array<CoroutineEntry, kCapacity>();
 };
 
 CoroutineScheduler g_coroutineScheduler;
+/// Set by the first refusal of a full table and cleared once a start
+/// succeeds again, so a script retrying every frame logs one line.
+bool g_coroutineFullReported = false;
 
 // #115b: Lua's lua_newthread (the C function behind coroutine.create)
 // already copies the creating thread's hookmask/hook/basehookcount into
@@ -265,13 +277,15 @@ int start_lua_coroutine(lua_State *state, float totalSeconds,
                         CoroutineRefreshHookFn refreshLuaHook) noexcept {
   if (lua_isfunction(state, 1) == 0) {
     lua_pushnil(state);
-    return 1;
+    lua_pushliteral(state, "start_coroutine expects a function");
+    return 2;
   }
   for (std::size_t i = 0U; i < CoroutineScheduler::kCapacity; ++i) {
     auto &entry = g_coroutineScheduler.m_entries[i];
     if (entry.active) {
       continue;
     }
+    g_coroutineFullReported = false;
 
     lua_State *thread = lua_newthread(state);
     if (thread == nullptr) {
@@ -322,8 +336,16 @@ int start_lua_coroutine(lua_State *state, float totalSeconds,
     lua_pushnil(state);
     return 1;
   }
+  char message[96] = {};
+  std::snprintf(message, sizeof(message), "coroutine table full (%zu running)",
+                CoroutineScheduler::kCapacity);
+  if (!g_coroutineFullReported) {
+    g_coroutineFullReported = true;
+    core::log_message(core::LogLevel::Warning, "scripting", message);
+  }
   lua_pushnil(state);
-  return 1;
+  lua_pushstring(state, message);
+  return 2;
 }
 
 void tick_lua_coroutines(lua_State *state, float totalSeconds,
@@ -373,6 +395,7 @@ void tick_lua_coroutines(lua_State *state, float totalSeconds,
 }
 
 void clear_lua_coroutines(lua_State *state) noexcept {
+  g_coroutineFullReported = false;
   for (std::size_t i = 0U; i < CoroutineScheduler::kCapacity; ++i) {
     g_coroutineScheduler.release_entry(state, g_coroutineScheduler.m_entries[i]);
   }

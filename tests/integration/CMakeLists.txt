@@ -1093,6 +1093,16 @@ engine_add_test_executable(engine_integration_script_module_cache
     integration
 )
 
+engine_add_test_executable(engine_integration_script_table_capacity
+    SOURCES
+    script_table_capacity_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_scripting
+    LABELS
+    integration
+)
+
 engine_add_test_executable(engine_integration_script_path_ingress
     SOURCES
     script_path_ingress_test.cpp
@@ -1949,6 +1959,7 @@ if(TARGET engine_player AND NOT ENGINE_TARGET_PLATFORM STREQUAL "Web")
         COMMAND ${CMAKE_COMMAND}
             "-DPLAYER=$<TARGET_FILE:engine_player>"
             "-DSAMPLE=${ENGINE_SAMPLE_PROJECT_OUTPUT_DIR}"
+            "-DSAMPLE_SOURCE=${ENGINE_SAMPLE_PROJECT_SOURCE_DIR}"
             "-DSCRATCH=${CMAKE_CURRENT_BINARY_DIR}/player_executable_test"
             -P ${CMAKE_CURRENT_SOURCE_DIR}/player_executable_test.cmake)
     # A macOS bundle keeps no engine content inside it yet, so the player

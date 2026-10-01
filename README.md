@@ -383,6 +383,16 @@ save, one entry per OS and configuration:
 
 The runtime exposes an `engine` table to Lua scripts.
 
+A run holds up to 1,024 distinct script files, entity scripts and
+`engine.require`d modules together. Past that a script does not load,
+and the Log names each refused file once.
+
+`engine.start_coroutine`, `engine.on_collision_handler` and
+`engine.pool_create` return an id, or `nil` and a reason. The reason
+separates a bad argument from a full table. The tables hold 1,024
+coroutines, 64 collision handlers and 64 pools of up to 1,024 entities each.
+The first refusal by a full table logs a Warning.
+
 Current script conventions in the sample's `assets/`:
 
 - Scene-level module (`assets/main.lua`)
