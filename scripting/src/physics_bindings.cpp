@@ -657,6 +657,57 @@ int lua_engine_sweep_box(lua_State *state) noexcept {
   return 8;
 }
 
+// engine.sweep_capsule(ax,ay,az, bx,by,bz, radius, dx,dy,dz, max_dist
+//                     [, mask [, skip_entity]])
+// a and b are the hemisphere centers; returns what sweep_sphere returns.
+int lua_engine_sweep_capsule(lua_State *state) noexcept {
+  if (!runtime_bound() ||
+      (runtime_binding().services->sweep_capsule == nullptr)) {
+    lua_pushnil(state);
+    return 1;
+  }
+  math::Vec3 pointA{};
+  math::Vec3 pointB{};
+  float radius = 0.0F;
+  math::Vec3 direction{};
+  float maxDist = 0.0F;
+  if (!read_vec3_args(state, 1, &pointA) ||
+      !read_vec3_args(state, 4, &pointB) ||
+      !read_finite_number_arg(state, 7, &radius) ||
+      !read_vec3_args(state, 8, &direction) ||
+      !read_finite_number_arg(state, 11, &maxDist)) {
+    lua_pushnil(state);
+    return 1;
+  }
+  const std::uint32_t mask =
+      lua_isnumber(state, 12)
+          ? static_cast<std::uint32_t>(lua_tointeger(state, 12))
+          : 0xFFFFFFFFU;
+  runtime::Entity skipEntity = runtime::kInvalidEntity;
+  if (!read_optional_skip_entity(state, 13, &skipEntity)) {
+    lua_pushnil(state);
+    return 1;
+  }
+
+  RuntimeRaycastHit hit{};
+  if (!runtime_binding().services->sweep_capsule(
+          runtime_binding().world, pointA.x, pointA.y, pointA.z, pointB.x,
+          pointB.y, pointB.z, radius, direction.x, direction.y, direction.z,
+          maxDist, &hit, mask, skipEntity)) {
+    lua_pushnil(state);
+    return 1;
+  }
+  push_entity_handle(state, hit.entity);
+  lua_pushnumber(state, static_cast<lua_Number>(hit.distance));
+  lua_pushnumber(state, static_cast<lua_Number>(hit.pointX));
+  lua_pushnumber(state, static_cast<lua_Number>(hit.pointY));
+  lua_pushnumber(state, static_cast<lua_Number>(hit.pointZ));
+  lua_pushnumber(state, static_cast<lua_Number>(hit.normalX));
+  lua_pushnumber(state, static_cast<lua_Number>(hit.normalY));
+  lua_pushnumber(state, static_cast<lua_Number>(hit.normalZ));
+  return 8;
+}
+
 /// Pushes a joint constructor result: nil for the unified 0 failure
 /// sentinel, the id otherwise. A joint added under a hot reload is
 /// recorded so a failed reload removes it again.
@@ -996,6 +1047,8 @@ void register_physics_bindings(lua_State *state) noexcept {
   lua_setfield(state, -2, "sweep_sphere");
   lua_pushcfunction(state, &lua_engine_sweep_box);
   lua_setfield(state, -2, "sweep_box");
+  lua_pushcfunction(state, &lua_engine_sweep_capsule);
+  lua_setfield(state, -2, "sweep_capsule");
   lua_pushcfunction(state, &lua_engine_add_distance_joint);
   lua_setfield(state, -2, "add_distance_joint");
   lua_pushcfunction(state, &lua_engine_add_hinge_joint);

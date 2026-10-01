@@ -147,4 +147,13 @@ bool sweep_box(const World &world, const math::Vec3 &center,
                std::uint32_t mask = 0xFFFFFFFFU,
                Entity skipEntity = kInvalidEntity) noexcept;
 
+/// Sweeps a capsule between hemisphere centers pointA and pointB along a
+/// normalized copy of direction (physics::sweep_capsule); maxDistance must
+/// be finite and positive, and skipEntity follows the other sweeps' rule.
+bool sweep_capsule(const World &world, const math::Vec3 &pointA,
+                   const math::Vec3 &pointB, float radius,
+                   const math::Vec3 &direction, float maxDistance,
+                   physics::SweepHit *outHit, std::uint32_t mask = 0xFFFFFFFFU,
+                   Entity skipEntity = kInvalidEntity) noexcept;
+
 } // namespace engine::runtime

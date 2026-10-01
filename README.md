@@ -499,6 +499,13 @@ entity, not by storage. Up to 1,024 trigger overlaps are tracked at once;
 past that the Log warns and events wait until the count falls
 (`engine_unit_physics_trigger`, `engine_integration_lua_trigger_events`).
 
+Shape casts come as `engine.sweep_sphere`, `engine.sweep_box` and
+`engine.sweep_capsule(ax, ay, az, bx, by, bz, radius, dx, dy, dz,
+max_dist [, mask [, skip_entity]])`, whose capsule runs between the
+hemisphere centers a and b in any orientation, as Unity's `CapsuleCast`
+does. Each returns the entity hit, the distance, the shape's center at
+impact and the surface normal, or `nil` (`engine_unit_physics_query`).
+
 Set the type with the Inspector's Body Type or
 `engine.set_body_type(e, "kinematic")`, and read it with
 `engine.get_body_type(e)`. `engine.set_position`, `set_rotation`,

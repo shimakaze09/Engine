@@ -356,6 +356,26 @@ bool scripting_sweep_box(runtime::World *world, float cx, float cy, float cz,
   return true;
 }
 
+bool scripting_sweep_capsule(runtime::World *world, float ax, float ay,
+                             float az, float bx, float by, float bz,
+                             float radius, float dx, float dy, float dz,
+                             float maxDistance,
+                             scripting::RuntimeRaycastHit *outHit,
+                             std::uint32_t mask,
+                             runtime::Entity skipEntity) noexcept {
+  if ((world == nullptr) || (outHit == nullptr)) {
+    return false;
+  }
+  physics::SweepHit sh{};
+  if (!runtime::sweep_capsule(
+          *world, math::Vec3(ax, ay, az), math::Vec3(bx, by, bz), radius,
+          math::Vec3(dx, dy, dz), maxDistance, &sh, mask, skipEntity)) {
+    return false;
+  }
+  copy_sweep_hit(*world, sh, outHit);
+  return true;
+}
+
 /// Folds the native kInvalidJointId onto the bridge's single 0 failure
 /// sentinel; valid ids always carry a non-zero generation.
 std::uint32_t normalize_joint_id(physics::JointId id) noexcept {
@@ -1317,6 +1337,7 @@ scripting::RuntimeServices make_scripting_runtime_services() noexcept {
   s.overlap_box = &scripting_overlap_box;
   s.sweep_sphere = &scripting_sweep_sphere;
   s.sweep_box = &scripting_sweep_box;
+  s.sweep_capsule = &scripting_sweep_capsule;
   s.add_distance_joint = &scripting_add_distance_joint;
   s.add_hinge_joint = &scripting_add_hinge_joint;
   s.add_ball_socket_joint = &scripting_add_ball_socket_joint;
