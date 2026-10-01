@@ -144,7 +144,7 @@ int main() {
     }
   }
 
-  const engine::runtime::RenderPrepView view =
+  const engine::runtime::RenderPrepView prepView =
       engine::tests::active_camera_render_prep_view(16.0F / 9.0F);
 
   constexpr std::array<std::uint32_t, 4> kWorkerCounts = {1U, 2U, 4U, 8U};
@@ -169,7 +169,7 @@ int main() {
     }
     const bool prepared = engine::tests::run_render_prep(
         world.get(), prepContext.get(), commandBuffer.get(),
-        assetDatabase.get(), meshRegistry.get(), view, kChunkSize);
+        assetDatabase.get(), meshRegistry.get(), prepView, kChunkSize);
     if (!prepared) {
       engine::core::shutdown_job_system();
       std::fprintf(stderr, "FAIL: render prep failed at %u workers\n",
