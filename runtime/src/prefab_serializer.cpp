@@ -278,6 +278,10 @@ Entity instantiate_prefab(World &world, const char *path) noexcept {
                       "instantiate_prefab: JSON parse error");
     return kInvalidEntity;
   }
+  core::JsonReadTracker readTracker{};
+  if (readTracker.reset_for(buf.get(), sz)) {
+    parser.set_read_tracker(&readTracker);
+  }
   const core::JsonValue *rootPtr = parser.root();
   if ((rootPtr == nullptr) ||
       (rootPtr->type != core::JsonValue::Type::Object)) {
@@ -337,6 +341,8 @@ Entity instantiate_prefab(World &world, const char *path) noexcept {
   ENGINE_PERSISTENT_COMPONENT_TABLE(ENGINE_PREFAB_READ_ROW)
 #undef ENGINE_PREFAB_READ_ROW
 
+  static_cast<void>(report_unread_document_keys(
+      root, readTracker, "prefab", path, kPrefabLogChannel, nullptr));
   return entity;
 }
 

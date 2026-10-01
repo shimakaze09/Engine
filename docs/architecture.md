@@ -291,7 +291,14 @@ guessed would drop the fields it no longer knows and resave the document
 as a reduction of itself. A format change carries the tree migration and
 production-path tests for the new revision and for the refusal of the
 old. Parse, load or restore failure leaves the destination unchanged; a
-scene load stages into a replacement World and commits only on success.
+scene load stages into a replacement World and commits only on success. A
+scene or prefab key that no reader looks up (a misspelt component, a
+field from a newer build) still loads, and is named by path as an
+`unknown_key` Warning in the load's report and the log, since the next
+save drops it. The JSON parser records each member a reader finds, and
+the loader walks the document for the rest; keys retired on purpose are
+listed so that older files load silently
+(`engine_unit_scene_validation_report`, `engine_unit_prefab`).
 
 The input log is the one binary document: a magic, an exact `u32`
 version, the steps, and a footer carrying the step count and an FNV-1a

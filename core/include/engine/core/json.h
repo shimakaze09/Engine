@@ -171,6 +171,46 @@ bool json_replace_top_level_field(const char *documentText,
                                   std::size_t outCapacity,
                                   std::size_t *outLength) noexcept;
 
+/// Remembers which object members a reader looked up, so a loader can name
+/// the keys it never read: a misspelt component, a field from a newer
+/// build, a key a codec forgot. It holds one bit per byte of the document,
+/// keyed by where each member's value starts, so recording costs O(1) and
+/// can never run out of room however often a field is read.
+class JsonReadTracker final {
+public:
+  /// Sizes the tracker for the document `text` and clears it. False, with
+  /// the tracker unarmed, when the memory is unavailable or the text empty.
+  bool reset_for(const char *text, std::size_t length) noexcept;
+  /// True once reset_for succeeded.
+  bool armed() const noexcept { return m_bits != nullptr; }
+  /// Marks the value starting at `valueBegin` as read; a pointer outside
+  /// the document is ignored.
+  void record(const char *valueBegin) noexcept;
+  /// True when record() saw `valueBegin`.
+  bool was_read(const char *valueBegin) const noexcept;
+
+private:
+  std::unique_ptr<std::uint8_t[]> m_bits{};
+  const char *m_text = nullptr;
+  std::size_t m_length = 0U;
+};
+
+/// Called once per unread member with its path, keys joined by '.' and
+/// array elements as [i]: "entities[3].components.Colider".
+using JsonUnreadVisitor = void (*)(const char *path, void *userData) noexcept;
+
+/// Visits every object member under `root` (an object) that no
+/// get_object_field call looked up while `tracker` was set on the parser.
+/// It descends into the objects of members that were read and into the
+/// object elements of arrays that were read; an unread member is visited
+/// once and not entered. Paths longer than 255 bytes are cut. Returns the
+/// number of unread members, or 0 with nothing visited when the tracker
+/// is unarmed.
+std::size_t json_visit_unread_members(const JsonValue &root,
+                                      const JsonReadTracker &tracker,
+                                      JsonUnreadVisitor visit,
+                                      void *userData) noexcept;
+
 /// Parses JSON into fixed storage; query values via JsonValue handles.
 class JsonParser final {
 public:
@@ -191,6 +231,11 @@ public:
   /// Finds a field by name in an object; false when missing.
   bool get_object_field(const JsonValue &object, const char *fieldName,
                         JsonValue *outValue) const noexcept;
+  /// Records every member get_object_field finds in `tracker` from now on
+  /// (nullptr stops). The tracker must be sized for the parsed text.
+  void set_read_tracker(JsonReadTracker *tracker) noexcept {
+    m_readTracker = tracker;
+  }
 
   /// Element at index, or nullptr out of range.
   const JsonValue *get_array_element(const JsonValue &array,
@@ -257,6 +302,7 @@ private:
   const JsonValue *push_scratch(const JsonValue &value) const noexcept;
 
   const char *m_input = nullptr;
+  JsonReadTracker *m_readTracker = nullptr;
   std::size_t m_length = 0U;
   JsonValue m_root{};
   bool m_hasRoot = false;

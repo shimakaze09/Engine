@@ -13,6 +13,7 @@
 #include "engine/core/asset_identity.h"
 #include "engine/core/json.h"
 #include "engine/core/reflect.h"
+#include "engine/core/validation_report.h"
 #include "engine/math/quat.h"
 #include "engine/math/vec2.h"
 #include "engine/math/vec3.h"
@@ -76,6 +77,21 @@ bool schema_version_supported(const core::JsonParser &parser,
                               std::uint32_t currentVersion, const char *noun,
                               const char *channel,
                               std::uint32_t *outVersion = nullptr) noexcept;
+
+/// Names every key of a scene or prefab document that no reader looked
+/// up, so a misspelt component, a field from a newer build or a key a
+/// codec forgot is reported instead of vanishing on the next save.
+/// `tracker` must have been set on the parser for the whole read. Each
+/// unread key is a Warning `unknown_key` in `report` (when given, keyed by
+/// its path) and in the log on `channel`, naming `noun` and `documentPath`;
+/// the first 32 are logged one by one, then one line gives the total.
+/// Keys a past format carried and this build retires on purpose are not
+/// reported. The document still loads. Returns the number reported; an
+/// unarmed tracker skips the check with one Info line and returns 0.
+std::size_t report_unread_document_keys(
+    const core::JsonValue &root, const core::JsonReadTracker &tracker,
+    const char *noun, const char *documentPath, const char *channel,
+    core::ValidationReport *report) noexcept;
 
 // --- Vector / quaternion JSON fields (fixed-size float arrays) -------------
 

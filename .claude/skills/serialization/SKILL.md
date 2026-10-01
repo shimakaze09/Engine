@@ -79,6 +79,12 @@ change and needs the migration path below.
 - **Malformed is not missing.** An absent optional field takes its
   default; a present-but-malformed field rejects the document. Conflating
   the two silently rewrites authored data.
+- **Unknown is not silent.** A scene or prefab key no reader looks up
+  still loads, and is reported as `unknown_key`, by path, in the load's
+  report and the log, because the next save drops it. Codecs read members
+  through `get_object_field`, which is what records a key as read. A field
+  you retire on purpose goes into `kRetiredKeyPaths` in
+  `runtime/src/serialization_util.cpp`, or every older file warns.
 - **Writes are staged and atomically replaced**, never truncated in place.
   Multi-file output commits as a transaction or a manifest.
 

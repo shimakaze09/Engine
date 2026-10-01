@@ -66,7 +66,9 @@ core::FileReadResult document_fingerprint(const char *path,
 /// *outReport (when given) and a logged diagnostic: `dangling_parent`
 /// (a Transform parent no entity carries; the child loads as a root),
 /// `missing_script` and `missing_controller` (a path under a mounted
-/// prefix that names no file; unmounted prefixes are not judged).
+/// prefix that names no file; unmounted prefixes are not judged). A key no
+/// reader looks up is `unknown_key`, keyed by its path
+/// ("entities[3].components.Colider"); the next save would drop it.
 bool load_scene(World &world, const char *path,
                 SceneTeardownHook beforeTeardown = nullptr,
                 core::ValidationReport *outReport = nullptr) noexcept;

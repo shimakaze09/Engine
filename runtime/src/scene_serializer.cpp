@@ -670,6 +670,17 @@ bool save_scene(const World &world, std::unique_ptr<char[]> *outBuffer,
   return true;
 }
 
+namespace {
+
+/// The body of both load_scene overloads; `documentPath` names the file
+/// in diagnostics, or nullptr for a buffer.
+bool load_scene_document(World &world, const char *buffer, std::size_t size,
+                         const char *documentPath,
+                         SceneTeardownHook beforeTeardown,
+                         core::ValidationReport *outReport) noexcept;
+
+} // namespace
+
 /// Loads the requested resource for scene.
 bool load_scene(World &world, const char *path,
                 SceneTeardownHook beforeTeardown,
@@ -688,8 +699,8 @@ bool load_scene(World &world, const char *path,
     return false;
   }
 
-  return load_scene(world, fileBuffer.get(), fileSize, beforeTeardown,
-                    outReport);
+  return load_scene_document(world, fileBuffer.get(), fileSize, path,
+                             beforeTeardown, outReport);
 }
 
 /// Loads the requested resource for scene. Declared reset order:
@@ -702,6 +713,16 @@ bool load_scene(World &world, const char *path,
 bool load_scene(World &world, const char *buffer, std::size_t size,
                 SceneTeardownHook beforeTeardown,
                 core::ValidationReport *outReport) noexcept {
+  return load_scene_document(world, buffer, size, nullptr, beforeTeardown,
+                             outReport);
+}
+
+namespace {
+
+bool load_scene_document(World &world, const char *buffer, std::size_t size,
+                         const char *documentPath,
+                         SceneTeardownHook beforeTeardown,
+                         core::ValidationReport *outReport) noexcept {
   if (outReport != nullptr) {
     *outReport = core::ValidationReport{};
   }
@@ -722,6 +743,12 @@ bool load_scene(World &world, const char *buffer, std::size_t size,
     core::log_message(core::LogLevel::Error, kSceneLogChannel,
                       "malformed scene JSON");
     return false;
+  }
+  // Every member a reader looks up is recorded, so the keys none looked up
+  // are reported once the entities are staged.
+  core::JsonReadTracker readTracker{};
+  if (readTracker.reset_for(buffer, size)) {
+    parser.set_read_tracker(&readTracker);
   }
 
   const core::JsonValue *root = parser.root();
@@ -773,6 +800,8 @@ bool load_scene(World &world, const char *buffer, std::size_t size,
     return false;
   }
   validate_scene_references(*stagedWorld, outReport);
+  static_cast<void>(report_unread_document_keys(
+      *root, readTracker, "scene", documentPath, kSceneLogChannel, outReport));
 
   // Legacy "timers" blocks are ignored:
   // the serialized timing carried no callback identity, so a restored
@@ -834,6 +863,8 @@ bool load_scene(World &world, const char *buffer, std::size_t size,
   reset_anim_controllers();
   return true;
 }
+
+} // namespace
 
 void validate_scene_asset_references(const World &world,
                                      const content::AssetCatalog &catalog,

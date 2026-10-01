@@ -3,7 +3,11 @@
 // load with a fallback and leave a named Warning in the report and a
 // diagnostic naming the entity; a path under an unmounted prefix is not
 // judged; a clean scene reports nothing; past capacity the report counts
-// what it dropped.
+// what it dropped. A key no reader looks up, at the root, on an entity,
+// among the components or inside one, loads and is named as unknown_key
+// in the report and the log, so it is not lost silently on the next
+// save; keys retired on purpose and a scene this build saved report
+// nothing.
 
 #include <cstdio>
 #include <cstring>
@@ -130,6 +134,81 @@ int main() {
                   presentReport.clean(),
               "a present script reports nothing");
     static_cast<void>(std::remove("scene_validation_present.lua"));
+  }
+
+  // --- Keys no reader looks up are named, at every level ---
+  {
+    core::ValidationReport report{};
+    g_sceneWarnings = 0;
+    const std::string json =
+        "{\"version\":6,\"unknownRoot\":1,\"entities\":[{\"persistentId\":11,"
+        "\"extraEntityKey\":true,\"components\":{\"Colider\":{\"shape\":"
+        "\"box\"},\"Transform\":{\"position\":[1,2,3],\"futureField\":5}}}]}";
+    ctx.check(load(*world, json, &report),
+              "a scene with unknown keys still loads");
+    const rt::Entity entity = world->find_entity_by_persistent_id(11U);
+    rt::Transform transform{};
+    ctx.check(world->get_transform(entity, &transform) &&
+                  (transform.position.y == 2.0F),
+              "the keys it knows are read");
+    const char *const expected[] = {
+        "unknownRoot", "entities[0].extraEntityKey",
+        "entities[0].components.Colider",
+        "entities[0].components.Transform.futureField"};
+    bool named = report.count == 4U;
+    for (std::size_t i = 0U; named && (i < 4U); ++i) {
+      named =
+          (std::strcmp(report.entries[i].code, "unknown_key") == 0) &&
+          (report.entries[i].severity == core::ValidationSeverity::Warning) &&
+          (std::strcmp(report.entries[i].key, expected[i]) == 0);
+    }
+    ctx.check(named, "the report names each unknown key by its path");
+    ctx.check(g_sceneWarnings == 4, "each unknown key is logged once");
+  }
+
+  // --- Retired keys, and a scene this build saved, report nothing ---
+  {
+    core::ValidationReport report{};
+    const std::string retired =
+        "{\"version\":6,\"entities\":[{\"components\":{"
+        "\"ReflectionProbeComponent\":{\"radius\":3.5,\"needsBake\":false,"
+        "\"brdfLutResolution\":256}}}]}";
+    ctx.check(load(*world, retired, &report) && report.clean(),
+              "the retired probe fields load without a finding");
+
+    const std::string authored =
+        "{\"version\":6,\"gravity\":[0,-9.81,0],\"entities\":["
+        "{\"persistentId\":20,\"components\":{\"name\":\"Crate\","
+        "\"Transform\":{\"position\":[0,1,0]},\"RigidBody\":{},"
+        "\"Collider\":{\"shape\":0,\"halfExtents\":[0.5,0.5,0.5]}}},"
+        "{\"persistentId\":21,\"components\":{\"Transform\":{\"parentId\":20},"
+        "\"LightComponent\":{\"type\":1},"
+        "\"ReflectionProbeComponent\":{}}}]}";
+    ctx.check(load(*world, authored, &report) && report.clean(),
+              "the authored scene loads clean");
+    std::unique_ptr<char[]> saved{};
+    std::size_t savedSize = 0U;
+    core::ValidationReport reloaded{};
+    ctx.check(
+        rt::save_scene(*world, &saved, &savedSize) &&
+            load(*world, std::string(saved.get(), savedSize), &reloaded) &&
+            reloaded.clean(),
+        "every key the writer emits is read back");
+  }
+
+  // --- Past 32 unknown keys the log stops listing them ---
+  {
+    core::ValidationReport report{};
+    g_sceneWarnings = 0;
+    std::string json = "{\"version\":6,\"entities\":[";
+    for (unsigned i = 0U; i < 40U; ++i) {
+      json += (i == 0U) ? "{\"bogus\":1}" : ",{\"bogus\":1}";
+    }
+    json += "]}";
+    ctx.check(load(*world, json, &report) && (report.count == 40U),
+              "every unknown key is in the report");
+    ctx.check(g_sceneWarnings == 33,
+              "32 are logged, then one line gives the total");
   }
 
   // --- A clean scene, and a report that fills ---
