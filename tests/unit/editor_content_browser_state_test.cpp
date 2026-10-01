@@ -5,17 +5,23 @@
 // before this change, the next persist atomically committed defaults over
 // the file the session had just failed to read. Absent stays the ordinary
 // fresh-profile case and keeps persisting enabled. A stored key this build
-// does not read is named in the log.
+// does not read is named in the log. The state belongs to the open project:
+// its folder is stored relative to the asset root and restored only while
+// it is still a folder inside it, and a second project opened after the
+// first starts at its own root rather than at the first one's folder.
 
 #include "editor_asset_index.h"
 #include "editor_session.h"
 
 #include "engine/core/logging.h"
+#include "engine/core/project_data.h"
 
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <string>
 
 #include "../test_harness.h"
@@ -33,8 +39,7 @@ constexpr const char *kStateFileName = "editor_content_browser_state.json";
 /// Writes `content` to the path; false on any short write. The open is
 /// guarded per CRT: the Windows lanes build with /W4 /WX, where a bare
 /// fopen is a deprecation error.
-bool write_file(const std::filesystem::path &path,
-                const std::string &content) {
+bool write_file(const std::filesystem::path &path, const std::string &content) {
   std::FILE *file = nullptr;
 #ifdef _WIN32
   if (fopen_s(&file, path.string().c_str(), "wb") != 0) {
@@ -81,19 +86,90 @@ void rebind_state_directory(const std::filesystem::path &directory) {
 
 } // namespace
 
+/// The folder the browser lists, as the asset index spells it.
+std::string listed_folder() {
+  return engine::editor::editor_session().contentBrowser.filter.folder;
+}
+
+/// Loads the state stored in `directory` into a fresh browser and returns
+/// the folder it opens at.
+std::string restore_from(const std::filesystem::path &directory,
+                         const std::string &content) {
+  if (!write_file(directory / kStateFileName, content)) {
+    return "<unwritten>";
+  }
+  rebind_state_directory(directory);
+  engine::editor::editor_session().contentBrowser.filter = {};
+  engine::editor::content_browser_state_load_once();
+  return listed_folder();
+}
+
+/// Project A browses a subfolder; project B, opened next in the same
+/// editor, starts at its own root. Each keeps its state in its own
+/// per-user project directory, through the production path (no override).
+void check_projects_keep_their_own_folder(const std::filesystem::path &root) {
+  namespace fs = std::filesystem;
+  using namespace engine::editor;
+  std::error_code ec{};
+  const fs::path projectA = root / "project_a";
+  const fs::path projectB = root / "project_b";
+  check(fs::create_directories(projectA, ec) && !ec &&
+            fs::create_directories(projectB, ec) && !ec,
+        "create the two project roots");
+  content_browser_state_set_directory_override_for_tests("");
+
+  check(engine::core::set_project_data_root(projectA.string().c_str()),
+        "project A is open");
+  content_browser_state_reset();
+  content_browser_state_load_once();
+  content_browser_navigate("assets/props");
+  char fileA[1024] = {};
+  check(engine::core::project_data_dir(fileA, sizeof(fileA)),
+        "project A has a data directory");
+
+  check(engine::core::set_project_data_root(projectB.string().c_str()),
+        "project B is open");
+  content_browser_state_reset();
+  content_browser_state_load_once();
+  check(listed_folder().empty(),
+        "project B starts at its root, not at project A's folder");
+
+  check(engine::core::set_project_data_root(projectA.string().c_str()),
+        "project A is open again");
+  content_browser_state_reset();
+  content_browser_state_load_once();
+  check(listed_folder() == "assets/props", "project A reopens its folder");
+
+  content_browser_state_reset();
+  fs::remove(fs::path(fileA) / kStateFileName, ec);
+  check(engine::core::set_project_data_root(projectB.string().c_str()),
+        "project B is open to clean up");
+  char fileB[1024] = {};
+  if (engine::core::project_data_dir(fileB, sizeof(fileB))) {
+    fs::remove(fs::path(fileB) / kStateFileName, ec);
+  }
+  engine::core::clear_project_data_root();
+}
+
 /// Runs this executable or test program.
 int main() {
   namespace fs = std::filesystem;
   using namespace engine::editor;
 
-  const fs::path root =
-      fs::temp_directory_path() / "engine_cb_state_test";
+  const fs::path root = fs::temp_directory_path() / "engine_cb_state_test";
   std::error_code ec{};
   fs::remove_all(root, ec);
   if (!fs::create_directories(root, ec) || ec) {
     std::fprintf(stderr, "FAIL: could not create test directory\n");
     return 1;
   }
+  // The browser's asset root is the relative "assets" the editor defaults
+  // to, so the test works inside its own directory.
+  const fs::path previousDirectory = fs::current_path(ec);
+  fs::current_path(root, ec);
+  check(!ec && fs::create_directories("assets/props", ec) && !ec &&
+            fs::create_directories("assets/sounds", ec) && !ec,
+        "create the asset folders");
 
   // Fresh profile: no stored file, so load adopts defaults and persisting
   // stays enabled — a first session must still be able to store its state.
@@ -103,7 +179,7 @@ int main() {
   content_browser_state_load_once();
   std::snprintf(editor_session().contentBrowser.filter.folder,
                 sizeof(editor_session().contentBrowser.filter.folder), "%s",
-                "props");
+                "assets/props");
   content_browser_state_persist();
   const fs::path freshFile = freshDir / kStateFileName;
   check(fs::exists(freshFile, ec) && !ec,
@@ -113,9 +189,30 @@ int main() {
   rebind_state_directory(freshDir);
   editor_session().contentBrowser.filter = {};
   content_browser_state_load_once();
-  check(std::strcmp(editor_session().contentBrowser.filter.folder,
-                    "props") == 0,
-        "stored folder restored");
+  check(listed_folder() == "assets/props", "stored folder restored");
+
+  // The folder is stored below the asset root, never as an OS path.
+  {
+    std::ifstream in(freshFile);
+    std::string stored((std::istreambuf_iterator<char>(in)),
+                       std::istreambuf_iterator<char>());
+    check(stored.find("\"folder\": \"props\"") != std::string::npos ||
+              stored.find("\"folder\":\"props\"") != std::string::npos,
+          "the folder is stored relative to the asset root");
+  }
+
+  // A stored folder is restored only while it is a folder inside the
+  // asset root; otherwise the browser starts at the root.
+  const fs::path checkedDir = root / "checked";
+  check(fs::create_directories(checkedDir, ec) && !ec, "create checked dir");
+  check(restore_from(checkedDir, "{\"folder\":\"sounds\"}") == "assets/sounds",
+        "a folder inside the root is restored");
+  check(restore_from(checkedDir, "{\"folder\":\"gone\"}").empty(),
+        "a folder that no longer exists starts at the root");
+  check(restore_from(checkedDir, "{\"folder\":\"../props\"}").empty(),
+        "a folder outside the root starts at the root");
+  check(restore_from(checkedDir, "{\"folder\":\"/tmp\"}").empty(),
+        "an absolute folder starts at the root");
 
   // A mask written before the type count was recorded covered nine types;
   // the types added since must come back visible, and a hidden legacy bit
@@ -144,10 +241,8 @@ int main() {
   rebind_state_directory(newerDir);
   editor_session().contentBrowser.filter = {};
   content_browser_state_load_once();
-  check(sinkRegistered &&
-            std::strcmp(editor_session().contentBrowser.filter.folder,
-                        "props") == 0 &&
-            g_unreadKeyWarnings == 1,
+  check(sinkRegistered && (listed_folder() == "assets/props") &&
+            (g_unreadKeyWarnings == 1),
         "the state loads, and the unread key is named once");
   engine::core::log_unregister_sink(&note_unread_key, nullptr);
   engine::core::shutdown_logging();
@@ -209,7 +304,10 @@ int main() {
   check(fs::exists(recoveryDir / kStateFileName, ec) && !ec,
         "persisting resumes at a healthy location");
 
+  check_projects_keep_their_own_folder(root);
+
   content_browser_state_set_directory_override_for_tests(nullptr);
+  fs::current_path(previousDirectory, ec);
   fs::remove_all(root, ec);
   return g_tests.finish("editor content browser state tests");
 }
