@@ -383,6 +383,10 @@ save, one entry per OS and configuration:
 
 The runtime exposes an `engine` table to Lua scripts.
 
+A run holds up to 1,024 distinct script files, entity scripts and
+`engine.require`d modules together. Past that a script does not load,
+and the Log names each refused file once.
+
 Current script conventions in the sample's `assets/`:
 
 - Scene-level module (`assets/main.lua`)
