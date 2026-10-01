@@ -143,7 +143,7 @@ bool refresh_child_folder_cache(const char *folder,
 
 /// Enumerates the routed behavior for a double-click/typed Open action.
 enum class AssetOpenAction : std::uint8_t {
-  SpawnMesh,
+  PlaceAsset,
   OpenScene,
   EditMaterial,
   SelectOnly,
@@ -151,7 +151,8 @@ enum class AssetOpenAction : std::uint8_t {
 
 /// Maps an asset type's primary action from the type table to its typed
 /// Open behavior (pure — the caller performs the actual side effect
-/// through the production entry point: execute_asset_spawn for SpawnMesh,
+/// through the production entry point: execute_asset_instantiate for
+/// PlaceAsset,
 /// request_scene_open for OpenScene). The authored source of a cooked type
 /// only selects: the runtime cannot load it.
 AssetOpenAction resolve_asset_open_action(content::AssetTypeTag kind,

@@ -3,6 +3,7 @@
 
 #include "editor_panels_main.h"
 
+#include "editor_asset_place.h"
 #include "editor_commands.h"
 #include "editor_entity_menus.h"
 #include "editor_entity_rename.h"
@@ -618,7 +619,7 @@ constexpr std::size_t kMaxHierarchyDrawDepth = 64U;
 /// the walk follows the world's child links, which an edit made mid-walk
 /// would rewrite under it.
 struct PendingHierarchyEdit final {
-  enum class Kind : std::uint8_t { None, Action, Menu, Reparent };
+  enum class Kind : std::uint8_t { None, Action, Menu, Reparent, PlaceAsset };
   Kind kind = Kind::None;
   EditorAction action = EditorAction::Count;
   /// What a row's right-click menu asked for, and where it creates.
@@ -626,6 +627,8 @@ struct PendingHierarchyEdit final {
   EntitySpawnPlacement placement{};
   runtime::Entity target{};
   runtime::Entity newParent{};
+  /// An asset dropped on a row, placed as that row's child.
+  AssetPlacePayload asset{};
 };
 
 /// Draws the text field of a row being renamed over the row's label:
@@ -736,6 +739,11 @@ static bool draw_entity_row(runtime::Entity entity, bool hasChildren,
         pending.newParent = entity;
       }
     }
+    if (accept_asset_place_payload(&pending.asset)) {
+      pending.kind = PendingHierarchyEdit::Kind::PlaceAsset;
+      pending.placement = EntitySpawnPlacement{};
+      pending.placement.parent = entity;
+    }
     ImGui::EndDragDropTarget();
   }
   return open;
@@ -762,6 +770,10 @@ static void draw_entity_hierarchy() noexcept {
     break;
   case PendingHierarchyEdit::Kind::Reparent:
     static_cast<void>(execute_reparent(pending.target, pending.newParent));
+    break;
+  case PendingHierarchyEdit::Kind::PlaceAsset:
+    static_cast<void>(
+        execute_asset_instantiate(pending.asset, pending.placement));
     break;
   case PendingHierarchyEdit::Kind::None:
   default:
@@ -829,9 +841,15 @@ void draw_entities_panel() noexcept {
     static_cast<void>(run_entity_menu_choice(choice, EntitySpawnPlacement{}));
   }
 
-  // Dropping onto the panel background clears the parent.
+  // Dropping onto the panel background clears an entity's parent, or
+  // places an asset at the root.
   ImGui::Dummy(ImVec2(ImGui::GetContentRegionAvail().x, editor_px(24.0F)));
   if (ImGui::BeginDragDropTarget()) {
+    AssetPlacePayload asset{};
+    if (accept_asset_place_payload(&asset)) {
+      static_cast<void>(
+          execute_asset_instantiate(asset, EntitySpawnPlacement{}));
+    }
     if (const ImGuiPayload *payload =
             ImGui::AcceptDragDropPayload("ENTITY_INDEX")) {
       const std::uint32_t droppedIndex =

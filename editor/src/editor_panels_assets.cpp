@@ -10,6 +10,7 @@
 #include "editor_asset_create.h"
 #include "editor_asset_index.h"
 #include "editor_asset_labels.h"
+#include "editor_asset_place.h"
 #include "editor_asset_usages.h"
 #include "editor_commands.h"
 #include "editor_session.h"
@@ -330,13 +331,9 @@ void draw_asset_row(const AssetIndexEntry &entry, bool showFolder) noexcept {
     }
   }
 
-  if ((entry.kind == content::AssetTypeTag::Mesh) && !entry.isSource &&
-      (entry.virtualPath[0] != '\0') && ImGui::BeginDragDropSource()) {
-    ImGui::SetDragDropPayload("ASSET_VIRTUAL_PATH", entry.virtualPath,
-                              std::strlen(entry.virtualPath) + 1U);
-    ImGui::TextUnformatted(entry.name);
-    ImGui::EndDragDropSource();
-  }
+  // A prefab, mesh or model drags into the Scene view or the Entities
+  // panel to place it.
+  asset_place_drag_source(entry);
 
   draw_context_menu(entry);
   ImGui::PopID();

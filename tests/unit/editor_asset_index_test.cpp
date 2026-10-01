@@ -7,8 +7,8 @@
 // asset in any folder, not only the one being viewed; typed-action kind routing
 // is pure and correct; and execute_asset_open dispatches through real
 // production entry points — scene Open routes through the #158 unsaved-change
-// gate and a mesh Open spawns through execute_asset_spawn, not a copied model
-// of either.
+// gate and a mesh Open places through execute_asset_instantiate, not a copied
+// model of either.
 
 #include "editor_asset_index.h"
 #include "editor_commands.h"
@@ -374,7 +374,7 @@ int check_search_spans_every_folder() {
 /// EXPECTATION: resolve_asset_open_action's kind->action mapping is exact.
 int check_resolve_asset_open_action_mapping() {
   if (resolve_asset_open_action(engine::content::AssetTypeTag::Mesh) !=
-      AssetOpenAction::SpawnMesh) {
+      AssetOpenAction::PlaceAsset) {
     return 1;
   }
   if (resolve_asset_open_action(engine::content::AssetTypeTag::Scene) !=
@@ -518,7 +518,7 @@ int check_scene_open_routes_through_unsaved_gate() {
 }
 
 /// EXPECTATION: execute_asset_open for a Mesh-kind entry dispatches
-/// through the real execute_asset_spawn production entry point (not a
+/// through the real execute_asset_instantiate production entry point (not a
 /// copy), creating a mesh entity, updating the selection, and recording
 /// the mesh in the engine's one asset catalog under its virtual path.
 int check_mesh_open_spawns_through_production_path() {

@@ -236,21 +236,21 @@ struct EntitySpawnPlacement final {
 /// entity (kInvalidEntity on failure, or when the parent is not alive).
 runtime::Entity
 execute_entity_create(const EntitySpawnPlacement &placement = {}) noexcept;
-/// Spawns a scene object at `transform` referencing the mesh asset behind
-/// `virtualPath` (requesting its async load) through the command history;
-/// returns the new entity (kInvalidEntity on failure).
-runtime::Entity execute_asset_spawn(const char *virtualPath,
-                                    const runtime::Transform &transform) noexcept;
+/// Copies the file stem of a virtual asset path into a name component
+/// ("assets/props/rock.mesh" names the entity "rock"), logging a warning
+/// when the stem does not fit whole.
+void make_asset_spawn_name(const char *virtualPath,
+                           runtime::NameComponent *outName) noexcept;
 
 /// Dispatches the content browser's typed double-click/Open action for
-/// `entry` through its production entry point: a mesh spawns at the
-/// editor camera's focus point (mirroring execute_primitive_spawn's
-/// placement) and becomes the selection; a scene routes through the
-/// gated open flow (request_scene_open), which may defer behind the
-/// unsaved-change prompt instead of switching immediately; every other
-/// kind only updates the browser selection since no dedicated editor
-/// exists yet for it. Always updates selectedAssetPath. Returns false
-/// only when a SpawnMesh dispatch's actual spawn failed.
+/// `entry` through its production entry point: a prefab or cooked mesh is
+/// placed on the ground under the editor camera's focus through
+/// execute_asset_instantiate and becomes the selection; a scene routes
+/// through the gated open flow (request_scene_open), which may defer
+/// behind the unsaved-change prompt instead of switching immediately; a
+/// material opens in the material editor; every other kind only updates
+/// the browser selection. Always updates selectedAssetPath. Returns false
+/// only when a placement failed.
 bool execute_asset_open(const AssetIndexEntry &entry) noexcept;
 
 /// Enumerates the built-in blockout primitives the editor can spawn.

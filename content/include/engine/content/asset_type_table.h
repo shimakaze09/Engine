@@ -54,7 +54,7 @@ enum class AssetPrimaryAction : std::uint8_t {
   X(AnimationController, "Anim Controller", Source, Select, (".animctrl"), ()) \
   X(Audio, "Sound", Source, Select, (".wav", ".ogg", ".mp3", ".flac"), ())     \
   X(Unknown, "Other", Source, Select, (), ())                                  \
-  X(Prefab, "Prefab", Source, Select, (".prefab"), ())                         \
+  X(Prefab, "Prefab", Source, Instantiate, (".prefab"), ())                    \
   X(Shader, "Shader", Cooked, Select, (".sc"), ())                             \
   X(Environment, "Environment", Source, Select, (".hdr"), ())
 

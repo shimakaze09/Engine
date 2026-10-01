@@ -491,6 +491,14 @@ for the whole run (`engine_integration_scene_flow`); `engine.save_data` and
 editor's Log runs it only in Play; in Edit mode it is refused, since the
 entity would bypass undo and the unsaved-changes prompt: use the Create
 menu or drag the prefab in instead (`engine_unit_editor_console_commands`).
+A prefab, a cooked mesh or a model dragged from the Assets panel into the
+Scene view lands on what the cursor points at (the ground when nothing),
+and dropped on an entity in the Entities panel it becomes that entity's
+child; double-clicking one places it under the camera's focus. Each is
+one Undo step. A prefab instance keeps every component and its
+rotation and scale. A model places the mesh cooked from it, and a skinned
+mesh plays the animation controller in its folder that drives its
+skeleton, when exactly one does (`engine_unit_editor_asset_place`).
 
 Up to four controllers are tracked, each in the slot it arrived in; a slot
 is not reused by another controller while its own stays connected, so

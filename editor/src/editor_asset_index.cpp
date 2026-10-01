@@ -441,7 +441,7 @@ AssetOpenAction resolve_asset_open_action(content::AssetTypeTag kind,
   }
   switch (descriptor.action) {
   case content::AssetPrimaryAction::Instantiate:
-    return AssetOpenAction::SpawnMesh;
+    return AssetOpenAction::PlaceAsset;
   case content::AssetPrimaryAction::OpenDocument:
     return AssetOpenAction::OpenScene;
   case content::AssetPrimaryAction::EditInPlace:
