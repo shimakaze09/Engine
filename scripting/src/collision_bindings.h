@@ -1,8 +1,10 @@
-// Declares private Lua collision callback bindings for the scripting module.
+// Declares private Lua collision and trigger callback bindings for the
+// scripting module.
 
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 
 #include "engine/core/entity.h"
 
@@ -33,5 +35,23 @@ void dispatch_collision_handlers(lua_State *state,
                                  const core::Entity *pairData,
                                  std::size_t pairCount,
                                  PushEntityHandleFn pushEntityHandle) noexcept;
+
+/// Lua binding: engine.on_trigger_handler(callback). The callback receives
+/// (trigger, other, phase) with phase "enter" or "exit". Returns the
+/// handler's id, or nil and a reason, as on_collision_handler does.
+int lua_engine_on_trigger_register(lua_State *state) noexcept;
+/// Lua binding: engine.remove_trigger_handler(handler_id).
+int lua_engine_remove_trigger_handler(lua_State *state) noexcept;
+
+/// Releases all registered Lua trigger callback refs.
+void clear_trigger_handlers(lua_State *state) noexcept;
+
+/// Dispatches each trigger event to every registered trigger handler in
+/// id order. Events carry the identities recorded when they happened, as
+/// collision pairs do: a participant no longer alive pushes as nil.
+void dispatch_trigger_handlers(lua_State *state, const core::Entity *pairData,
+                               const std::uint8_t *entered,
+                               std::size_t eventCount,
+                               PushEntityHandleFn pushEntityHandle) noexcept;
 
 } // namespace engine::scripting

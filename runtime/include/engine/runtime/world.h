@@ -244,7 +244,8 @@ public:
   /// dense storage order: every alive entity's index, generation and
   /// persistent id; each transform's TRS bits and parent; each rigid
   /// body's velocities and sleep state; world gravity; the collision
-  /// pairs of the last step; the active timers; and each animation
+  /// pairs of the last step and the trigger overlaps it left standing;
+  /// the active timers; and each animation
   /// component's state-machine position and times. It does not fold
   /// masses, inertia, colliders, joints, materials or script state, so
   /// equal hashes mean the observed subset evolved identically, not that

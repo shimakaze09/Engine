@@ -9,6 +9,7 @@
 #include <memory>
 #include <new>
 #include <string>
+#include <vector>
 
 #include "engine/content/asset_identity.h"
 #include "engine/core/json.h"
@@ -2001,6 +2002,78 @@ int check_unknown_enum_values_are_refused() {
   return 0;
 }
 
+/// Reads the loaded world's only collider's trigger flag; false when the
+/// world does not hold exactly one collider.
+bool only_collider_is_trigger(const engine::runtime::World &world,
+                              bool *outIsTrigger) noexcept {
+  const engine::runtime::Entity *entities = nullptr;
+  const engine::runtime::Collider *colliders = nullptr;
+  if ((world.collider_count() != 1U) ||
+      !world.get_collider_range(0U, 1U, &entities, &colliders)) {
+    return false;
+  }
+  *outIsTrigger = colliders[0].isTrigger;
+  return true;
+}
+
+/// A trigger collider round-trips; a solid one writes no isTrigger key, so
+/// scenes saved before triggers existed stay byte-identical and load as
+/// solid; a present but non-boolean isTrigger refuses the document.
+int check_trigger_flag_round_trip() {
+  using namespace engine::runtime;
+
+  std::unique_ptr<World> source(new (std::nothrow) World());
+  std::unique_ptr<World> loaded(new (std::nothrow) World());
+  if ((source == nullptr) || (loaded == nullptr)) {
+    return 470;
+  }
+  const Entity entity = source->create_entity();
+  Collider trigger{};
+  trigger.isTrigger = true;
+  if ((entity == kInvalidEntity) || !source->add_collider(entity, trigger)) {
+    return 471;
+  }
+  std::vector<char> buffer(64U * 1024U);
+  std::size_t size = 0U;
+  if (!save_scene(*source, buffer.data(), buffer.size(), &size)) {
+    return 472;
+  }
+  const std::string triggerText(buffer.data(), size);
+  if (triggerText.find("\"isTrigger\":true") == std::string::npos) {
+    return 473;
+  }
+  bool isTrigger = false;
+  if (!load_scene(*loaded, buffer.data(), size) ||
+      !only_collider_is_trigger(*loaded, &isTrigger) || !isTrigger) {
+    return 474;
+  }
+
+  Collider solid{};
+  if (!source->add_collider(entity, solid) ||
+      !save_scene(*source, buffer.data(), buffer.size(), &size)) {
+    return 475;
+  }
+  const std::string solidText(buffer.data(), size);
+  if (solidText.find("isTrigger") != std::string::npos) {
+    return 476;
+  }
+  if (!load_scene(*loaded, buffer.data(), size) ||
+      !only_collider_is_trigger(*loaded, &isTrigger) || isTrigger) {
+    return 477;
+  }
+
+  constexpr const char *kMalformed =
+      "{\"version\":6,\"entities\":[{\"components\":{"
+      "\"Collider\":{\"isTrigger\":1}}}]}";
+  if (load_scene(*loaded, kMalformed, std::strlen(kMalformed))) {
+    return 478;
+  }
+  if (!only_collider_is_trigger(*loaded, &isTrigger) || isTrigger) {
+    return 479; // the refused load leaves the previous world in place
+  }
+  return 0;
+}
+
 /// No-op callback for arming a timer ahead of a save.
 void transient_timer_noop(engine::runtime::TimerId, void *) noexcept {}
 
@@ -2415,6 +2488,10 @@ int main() {
     return result;
   }
   result = check_unknown_enum_values_are_refused();
+  if (result != 0) {
+    return result;
+  }
+  result = check_trigger_flag_round_trip();
   if (result != 0) {
     return result;
   }

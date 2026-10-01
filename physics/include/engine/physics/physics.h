@@ -72,6 +72,16 @@ constexpr JointId kInvalidJointId = 0xFFFFFFFFU;
 using CollisionDispatchFn = void (*)(const Entity *pairs,
                                      std::size_t pairCount) noexcept;
 
+// Trigger overlap events ------------------------------------------------------
+// pairs points to [trigger0, other0, trigger1, other1, ...]: the trigger
+// collider's entity, then the non-trigger collider that began or ended
+// overlapping it. entered[i] is 1 for a begin (enter) event and 0 for an
+// end (exit) event. Generation-bearing for the reason CollisionDispatchFn
+// gives; an exit can name an entity destroyed since the overlap began.
+using TriggerDispatchFn = void (*)(const Entity *pairs,
+                                   const std::uint8_t *entered,
+                                   std::size_t eventCount) noexcept;
+
 /// Sets the requested value for convex hull payload data.
 bool set_convex_hull_data(PhysicsContext &context, Entity entity,
                           const ConvexHullData &hull) noexcept;
@@ -96,7 +106,9 @@ void wake_bodies_near_collider(PhysicsWorldView &world, Entity entity) noexcept;
 /// still count as unserializable state and block every later save.
 void remove_joints_for_entity(PhysicsContext &context, Entity entity) noexcept;
 /// Returns the scene-authored physics state — gravity and every joint — to
-/// what a fresh world carries, keeping the run-tier collision dispatch.
+/// what a fresh world carries, keeping the run-tier collision and trigger
+/// dispatches. Trigger overlaps and undelivered trigger events are dropped
+/// without end events, since every entity they name is gone.
 void reset_physics_content(PhysicsContext &context) noexcept;
 /// Drops the payloads that the given collider shape cannot consume, so a
 /// collider replaced with a different shape never keeps a stale hull or

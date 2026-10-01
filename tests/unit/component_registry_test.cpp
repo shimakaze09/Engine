@@ -148,6 +148,7 @@ void make_test_value(Collider *out) noexcept {
   out->density = 2.5F;
   out->collisionLayer = 3U;
   out->collisionMask = 5U;
+  out->isTrigger = true;
 }
 
 bool components_equal(const Collider &a, const Collider &b) noexcept {
@@ -157,9 +158,9 @@ bool components_equal(const Collider &a, const Collider &b) noexcept {
          vec3_equal(a.halfExtents, b.halfExtents) &&
          (a.restitution == b.restitution) &&
          (a.staticFriction == b.staticFriction) &&
-         (a.dynamicFriction == b.dynamicFriction) &&
-         (a.density == b.density) && (a.collisionLayer == b.collisionLayer) &&
-         (a.collisionMask == b.collisionMask);
+         (a.dynamicFriction == b.dynamicFriction) && (a.density == b.density) &&
+         (a.collisionLayer == b.collisionLayer) &&
+         (a.collisionMask == b.collisionMask) && (a.isTrigger == b.isTrigger);
 }
 
 void make_test_value(MeshComponent *out) noexcept {

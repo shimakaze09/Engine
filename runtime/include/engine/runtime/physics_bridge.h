@@ -36,9 +36,15 @@ bool get_gravity(const World &world, float *outX, float *outY,
 /// Sets the requested value for collision dispatch.
 void set_collision_dispatch(World &world,
                             physics::CollisionDispatchFn fn) noexcept;
+/// Installs the run's trigger begin/end event callback.
+void set_trigger_dispatch(World &world, physics::TriggerDispatchFn fn) noexcept;
 /// Forwards the rendered frame's accumulated per-step collision pairs
-/// (once per substep, in step order) to the registered dispatch.
+/// (once per substep, in step order) to the registered dispatch, then the
+/// frame's trigger begin and end events (in step order) to the trigger
+/// dispatch.
 void dispatch_collision_callbacks(World &world) noexcept;
+
+// Every query below passes through trigger colliders.
 
 /// Closest-hit raycast using a normalized copy of direction; false when
 /// maxDistance is not finite and positive or nothing is hit within it.

@@ -214,7 +214,8 @@ CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
 
   CcdSweepResult result{};
 
-  if (!std::isfinite(dt) || (dt <= 0.0F)) {
+  // A trigger stops at nothing, so it has nothing to sweep for.
+  if (!std::isfinite(dt) || (dt <= 0.0F) || collider.isTrigger) {
     return result;
   }
 
@@ -289,6 +290,9 @@ CcdSweepResult bilateral_advance_ccd(const PhysicsWorldView &world,
     }
 
     const Collider &other = colliders[i];
+    if (other.isTrigger) {
+      continue;
+    }
     if (((collider.collisionLayer & other.collisionMask) == 0U) ||
         ((other.collisionLayer & collider.collisionMask) == 0U)) {
       continue;

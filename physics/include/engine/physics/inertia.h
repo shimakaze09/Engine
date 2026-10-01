@@ -23,6 +23,7 @@ struct InertiaAccumulator final {
 /// Adds one collider's unit-mass-weight contribution to the accumulator.
 /// `offset` and `rotation` place the collider's own frame in the body's
 /// frame (the collider's local placement composed with any child transform).
+/// A trigger collider adds nothing: it has no mass.
 void accumulate_collider_inertia(InertiaAccumulator *accumulator,
                                  const math::Collider &collider,
                                  const math::Vec3 &offset,

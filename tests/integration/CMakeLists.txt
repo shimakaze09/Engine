@@ -554,6 +554,16 @@ engine_add_test_executable(engine_integration_player_mode
     integration
 )
 
+engine_add_test_executable(engine_integration_lua_trigger_events
+    SOURCES
+    lua_trigger_events_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_scripting
+    LABELS
+    integration
+)
+
 engine_add_test_executable(engine_integration_startup_template
     SOURCES
     startup_template_test.cpp

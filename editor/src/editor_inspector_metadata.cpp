@@ -117,6 +117,11 @@ constexpr FieldMetadata kFieldMetadataTable[] = {
     {"engine::runtime::Collider", "collisionMask", "Collides With", "Collision",
      "Layers this collider is tested against.", nullptr, 0.0F, 0.0F, 0.0F,
      InspectorWidget::LayerMask, false, false},
+    {"engine::runtime::Collider", "isTrigger", "Is Trigger", "Collision",
+     "Reports when other colliders enter and leave it instead of blocking "
+     "them (Lua engine.on_trigger_handler). Raycasts and other queries pass "
+     "through it.",
+     nullptr, 0.0F, 0.0F, 0.0F, InspectorWidget::Auto, false, false},
     {"engine::runtime::Collider", "localPosition", "Local Position", "Shape",
      nullptr, "m", 0.02F, 0.0F, 0.0F, InspectorWidget::Drag, false, false},
     {"engine::runtime::Collider", "halfExtents", "Half Extents", "Shape",

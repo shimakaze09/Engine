@@ -477,6 +477,14 @@ engine_add_test_executable(engine_unit_collision_frame_events
     engine_runtime
 )
 
+engine_add_test_executable(engine_unit_physics_trigger
+    SOURCES
+    physics_trigger_test.cpp
+    PRIVATE_DEPS
+    engine_physics
+    engine_runtime
+)
+
 engine_add_test_executable(engine_unit_capsule_contact_stability
     SOURCES
     capsule_contact_stability_test.cpp

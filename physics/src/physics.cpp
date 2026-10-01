@@ -98,6 +98,125 @@ constexpr std::int32_t kMinCellCoord = -1000000000;
 constexpr std::int32_t kMaxCellCoord = 1000000000;
 constexpr std::int64_t kMaxCellsPerCollider = 256;
 
+/// True when a body can move at all: dynamic (awake or asleep) or
+/// kinematic. A collider with no body, or a static body, cannot.
+bool body_can_move(const RigidBody *body) noexcept {
+  return (body != nullptr) && (body_type(*body) != BodyType::Static);
+}
+
+/// Records one overlapping trigger pair for this step. Two triggers never
+/// report each other (Box2D's sensors do not detect sensors), and neither
+/// does a pair where nothing can move (Unity requires a Rigidbody, Jolt a
+/// non-static body): only motion can change whether it overlaps, and level
+/// geometry inside a volume would otherwise fill the set. Unlike a contact,
+/// a sleeping body still counts, so it stays inside rather than leaving.
+void note_trigger_overlap(ResolveScratch &scratch, Entity entityA,
+                          const Collider &colliderA, const RigidBody *bodyA,
+                          const ColliderWorldGeometry &geometryA,
+                          Entity entityB, const Collider &colliderB,
+                          const RigidBody *bodyB,
+                          const ColliderWorldGeometry &geometryB) noexcept {
+  if ((colliderA.isTrigger && colliderB.isTrigger) ||
+      (!body_can_move(bodyA) && !body_can_move(bodyB)) ||
+      !collider_geometries_overlap(geometryA, geometryB)) {
+    return;
+  }
+  if (scratch.stepTriggerOverlapCount >= kMaxTriggerOverlaps) {
+    scratch.stepTriggerOverflow = true;
+    return;
+  }
+  TriggerOverlap &overlap =
+      scratch.stepTriggerOverlaps[scratch.stepTriggerOverlapCount];
+  overlap.trigger = colliderA.isTrigger ? entityA : entityB;
+  overlap.other = colliderA.isTrigger ? entityB : entityA;
+  ++scratch.stepTriggerOverlapCount;
+}
+
+/// Orders overlaps by entity identity: trigger first, then other, each by
+/// index and then generation.
+bool trigger_overlap_less(const TriggerOverlap &a,
+                          const TriggerOverlap &b) noexcept {
+  if (a.trigger.index != b.trigger.index) {
+    return a.trigger.index < b.trigger.index;
+  }
+  if (a.trigger.generation != b.trigger.generation) {
+    return a.trigger.generation < b.trigger.generation;
+  }
+  if (a.other.index != b.other.index) {
+    return a.other.index < b.other.index;
+  }
+  return a.other.generation < b.other.generation;
+}
+
+/// Appends one begin or end event to the rendered frame's buffer. The
+/// buffer holds every event the pipeline's step cap can produce; a caller
+/// that steps without ever draining is told once.
+void append_trigger_event(PhysicsContext &context, PhysicsShapeStore &store,
+                          const TriggerOverlap &overlap,
+                          bool entered) noexcept {
+  if (store.frameTriggerEventCount >= kMaxTriggerFrameEvents) {
+    if (!context.triggerEventBufferFullReported) {
+      context.triggerEventBufferFullReported = true;
+      core::log_message(core::LogLevel::Warning, "physics",
+                        "trigger event buffer full: events were stepped "
+                        "past without a dispatch draining them, and the "
+                        "newest are dropped");
+    }
+    return;
+  }
+  const std::size_t slot = store.frameTriggerEventCount;
+  store.frameTriggerEventPairs[slot * 2U] = overlap.trigger;
+  store.frameTriggerEventPairs[(slot * 2U) + 1U] = overlap.other;
+  store.frameTriggerEventEntered[slot] = entered ? 1U : 0U;
+  ++store.frameTriggerEventCount;
+}
+
+/// Turns this step's overlaps into the persistent set, appending an end
+/// event for each pair that left it, then a begin event for each that
+/// joined, each in set order. A step that found more overlaps than the set
+/// holds changes nothing and reports nothing, so a pair is never reported
+/// as leaving only because it did not fit; the next step that fits
+/// reports what changed.
+void commit_trigger_overlaps(PhysicsContext &context,
+                             ResolveScratch &scratch) noexcept {
+  PhysicsShapeStore *const store = context.shapeStore.get();
+  if (store == nullptr) {
+    return;
+  }
+  if (scratch.stepTriggerOverflow) {
+    if (!context.triggerOverlapOverflowActive) {
+      context.triggerOverlapOverflowActive = true;
+      ++context.triggerOverlapOverflowEpisodes;
+      core::log_message(core::LogLevel::Warning, "physics",
+                        "more trigger overlaps than kMaxTriggerOverlaps; "
+                        "trigger events wait until the count falls");
+    }
+    return;
+  }
+  context.triggerOverlapOverflowActive = false;
+
+  TriggerOverlap *const current = scratch.stepTriggerOverlaps.data();
+  const std::size_t currentCount = scratch.stepTriggerOverlapCount;
+  std::sort(current, current + currentCount, &trigger_overlap_less);
+  const TriggerOverlap *const previous = store->triggerOverlaps.data();
+  const std::size_t previousCount = store->triggerOverlapCount;
+
+  for (std::size_t i = 0U; i < previousCount; ++i) {
+    if (!std::binary_search(current, current + currentCount, previous[i],
+                            &trigger_overlap_less)) {
+      append_trigger_event(context, *store, previous[i], false);
+    }
+  }
+  for (std::size_t i = 0U; i < currentCount; ++i) {
+    if (!std::binary_search(previous, previous + previousCount, current[i],
+                            &trigger_overlap_less)) {
+      append_trigger_event(context, *store, current[i], true);
+    }
+  }
+  std::copy(current, current + currentCount, store->triggerOverlaps.begin());
+  store->triggerOverlapCount = currentCount;
+}
+
 } // namespace
 
 /// Publishes owners, live owner velocities, the identity slot map, and
@@ -210,6 +329,9 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
                       "resolve_collisions scratch allocation failed");
     return false;
   }
+
+  resolveScratch->stepTriggerOverlapCount = 0U;
+  resolveScratch->stepTriggerOverflow = false;
 
   capture_blocked_body_commands(world);
 
@@ -470,6 +592,14 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
         RigidBody *bodyB = (bodyEntityB != kInvalidEntity)
                                ? world.get_rigid_body_ptr(bodyEntityB)
                                : nullptr;
+        // A trigger pair overlaps or not; it never reaches a contact
+        // response, a collision event or the manifold cache.
+        if (colliderA.isTrigger || colliderB.isTrigger) {
+          note_trigger_overlap(*resolveScratch, entityA, colliderA, bodyA,
+                               geometries[i], entityB, colliderB, bodyB,
+                               geometries[j]);
+          return;
+        }
         const float invMassA = effective_inverse_mass(bodyA, bodyB);
         const float invMassB = effective_inverse_mass(bodyB, bodyA);
         const float invMassSum = invMassA + invMassB;
@@ -650,6 +780,8 @@ bool resolve_collisions(PhysicsWorldView &world, float deltaSeconds) noexcept {
     physicsCtx.broadphaseOverflowActive = false;
   }
 
+  commit_trigger_overlaps(physicsCtx, *resolveScratch);
+
   // Append this step's kept pairs to the frame buffer in step order.
   std::uint32_t frameAppendDropCount = 0U;
   for (std::size_t i = 0U; i < physicsCtx.collisionPairCount; ++i) {
@@ -787,8 +919,15 @@ void set_collision_dispatch(PhysicsWorldView &world,
   world.physics_context().collisionDispatch = fn;
 }
 
+/// Sets the requested value for trigger dispatch.
+void set_trigger_dispatch(PhysicsWorldView &world,
+                          TriggerDispatchFn fn) noexcept {
+  world.physics_context().triggerDispatch = fn;
+}
+
 // Drains the frame-accumulated pairs so every catch-up step's callbacks
-// reach the dispatch in step order once per rendered frame.
+// reach the dispatch in step order once per rendered frame: collisions
+// first, then trigger begin and end events.
 void dispatch_collision_callbacks(PhysicsWorldView &world) noexcept {
   PhysicsContext &ctx = world.physics_context();
   if ((ctx.collisionDispatch != nullptr) &&
@@ -799,6 +938,19 @@ void dispatch_collision_callbacks(PhysicsWorldView &world) noexcept {
   ctx.frameCollisionPairCount = 0U;
   ctx.frameCollisionPairDropCount = 0U;
   ctx.collisionPairCount = 0U;
+
+  PhysicsShapeStore *const store = ctx.shapeStore.get();
+  if (store == nullptr) {
+    return;
+  }
+  if ((ctx.triggerDispatch != nullptr) &&
+      (store->frameTriggerEventCount > 0U)) {
+    ctx.triggerDispatch(store->frameTriggerEventPairs.data(),
+                        store->frameTriggerEventEntered.data(),
+                        store->frameTriggerEventCount);
+  }
+  store->frameTriggerEventCount = 0U;
+  ctx.triggerEventBufferFullReported = false;
 }
 
 JointId add_distance_joint(PhysicsWorldView &world, Entity entityA,
@@ -872,6 +1024,10 @@ void reset_physics_content(PhysicsContext &context) noexcept {
   context.gravity = kDefaultGravity;
   PhysicsShapeStore *store = context.shapeStore.get();
   if (store != nullptr) {
+    // Every entity is gone, as in a fresh world: nothing overlaps, and no
+    // end event is owed for a scene that no longer exists.
+    store->triggerOverlapCount = 0U;
+    store->frameTriggerEventCount = 0U;
     // Retire rather than clear so a JointId held across the reset stays
     // stale instead of resolving to a joint the next scene creates.
     for (std::size_t i = 0U; i < context.jointCount; ++i) {

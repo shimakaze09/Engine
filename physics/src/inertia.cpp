@@ -103,7 +103,10 @@ void accumulate_collider_inertia(InertiaAccumulator *accumulator,
                                  const math::Collider &collider,
                                  const math::Vec3 &offset,
                                  const math::Quat &rotation) noexcept {
-  if (accumulator == nullptr) {
+  // A trigger has no mass, as PhysX and Unity leave trigger shapes out of
+  // a body's mass properties: adding a pickup volume never changes how
+  // its body turns.
+  if ((accumulator == nullptr) || collider.isTrigger) {
     return;
   }
   math::Vec3 unitInertia{};

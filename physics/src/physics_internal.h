@@ -58,7 +58,19 @@ struct ResolveScratch final {
   std::array<bool, kMaxColliders> isOverflow{};
   // One collider's broadphase candidates, sorted before any is tested.
   std::array<std::uint32_t, kMaxColliders> candidates{};
+  // Trigger overlaps this step found, in pair-traversal order until sorted;
+  // stepTriggerOverflow records a step that found more than fit.
+  std::array<TriggerOverlap, kMaxTriggerOverlaps> stepTriggerOverlaps =
+      std::array<TriggerOverlap, kMaxTriggerOverlaps>();
+  std::size_t stepTriggerOverlapCount = 0U;
+  bool stepTriggerOverflow = false;
 };
+
+/// True when two colliders' world geometries intersect: GJK for convex
+/// shapes, bounds alone where a heightfield is involved (as the overlap
+/// queries decide). Trigger overlap tracking shares the queries' test.
+bool collider_geometries_overlap(const ColliderWorldGeometry &a,
+                                 const ColliderWorldGeometry &b) noexcept;
 
 /// True when a step delta is usable: finite and strictly positive. NaN
 /// passes every ordering comparison and would integrate straight into
