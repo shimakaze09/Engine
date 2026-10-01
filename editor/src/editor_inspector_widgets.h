@@ -9,7 +9,9 @@
 // while the field is being typed into and hand it over on Enter, Tab or
 // a click elsewhere; Escape discards it. A drag scrubbed with the mouse
 // still applies continuously. Each returns true on the frame the value
-// changed, the way the ImGui call it wraps does for a scrub.
+// changed, the way the ImGui call it wraps does for a scrub. The colour
+// field edits a colour stored in linear light, the way the renderer reads
+// it, through its sRGB encoding, so the swatch shows what is drawn.
 
 #pragma once
 
@@ -43,5 +45,14 @@ bool inspector_drag_float3(const char *label, float *values, float speed,
 bool inspector_slider_float3(const char *label, float *values, float min,
                              float max,
                              const char *format = "%.3f") noexcept;
+
+/// ColorEdit3 for a colour stored in linear light (material, light and
+/// mesh tints). Shows and picks the sRGB encoding, as Unity's and Godot's
+/// colour fields do, and writes back the linear decode of only the
+/// channels the author changed, so an untouched channel never drifts.
+/// `flags` are ImGuiColorEditFlags; HDR values above 1 continue the
+/// curve. `linear` points at three floats.
+bool inspector_linear_color3(const char *label, float *linear,
+                             int flags = 0) noexcept;
 
 } // namespace engine::editor

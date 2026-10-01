@@ -15,6 +15,8 @@
 #include "imgui.h"
 #include "imgui_internal.h"
 
+#include "engine/math/color_space.h"
+
 #include <cmath>
 
 namespace engine::editor {
@@ -149,6 +151,29 @@ bool inspector_slider_float3(const char *label, float *values, float min,
   return draw_three(label, values, [&](const char *l, float *v) noexcept {
     return inspector_slider_float(l, v, min, max, format);
   });
+}
+
+bool inspector_linear_color3(const char *label, float *linear,
+                             int flags) noexcept {
+  if (linear == nullptr) {
+    return false;
+  }
+  float shown[3] = {};
+  for (std::size_t i = 0U; i < 3U; ++i) {
+    shown[i] = math::linear_to_srgb(linear[i]);
+  }
+  const float before[3] = {shown[0], shown[1], shown[2]};
+  if (!ImGui::ColorEdit3(label, shown, flags)) {
+    return false;
+  }
+  bool changed = false;
+  for (std::size_t i = 0U; i < 3U; ++i) {
+    if (shown[i] != before[i]) {
+      linear[i] = math::srgb_to_linear(shown[i]);
+      changed = true;
+    }
+  }
+  return changed;
 }
 
 } // namespace engine::editor

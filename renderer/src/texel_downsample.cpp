@@ -6,6 +6,8 @@
 #include <array>
 #include <cmath>
 
+#include "engine/math/color_space.h"
+
 namespace engine::renderer {
 
 std::int32_t mip_extent(std::int32_t extent, std::int32_t level) noexcept {
@@ -90,10 +92,8 @@ const std::array<float, 256U> &srgb_decode_table() noexcept {
   static const std::array<float, 256U> table = []() noexcept {
     std::array<float, 256U> values{};
     for (std::size_t i = 0U; i < values.size(); ++i) {
-      const double encoded = static_cast<double>(i) / 255.0;
       values[i] = static_cast<float>(
-          (encoded <= 0.04045) ? (encoded / 12.92)
-                               : std::pow((encoded + 0.055) / 1.055, 2.4));
+          math::srgb_to_linear(static_cast<double>(i) / 255.0));
     }
     return values;
   }();

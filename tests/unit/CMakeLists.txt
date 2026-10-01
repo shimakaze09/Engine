@@ -1278,6 +1278,19 @@ engine_add_test_executable(engine_unit_editor_play_recording
     SDL_MAIN_HANDLED
 )
 
+engine_add_test_executable(engine_unit_editor_linear_color
+    SOURCES
+    editor_linear_color_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/editor/include
+    ${CMAKE_SOURCE_DIR}/editor/src
+    ${CMAKE_SOURCE_DIR}/runtime/src
+    PRIVATE_DEPS
+    engine_editor
+    COMPILE_DEFINITIONS
+    SDL_MAIN_HANDLED
+)
+
 engine_add_test_executable(engine_unit_editor_inspector_text_entry
     SOURCES
     editor_inspector_text_entry_test.cpp

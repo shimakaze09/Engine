@@ -82,7 +82,7 @@ bool draw_mesh_component_fields(runtime::Entity entity,
       open_material_editor(materialPath);
     }
   }
-  mark_modified(modified, ImGui::ColorEdit3("Albedo", &mesh.albedo.x));
+  mark_modified(modified, inspector_linear_color3("Albedo", &mesh.albedo.x));
   mark_modified(modified, inspector_slider_float("Roughness", &mesh.roughness,
                                                  0.0F, 1.0F, "%.2f"));
   mark_modified(modified, inspector_slider_float("Metallic", &mesh.metallic,
@@ -207,7 +207,7 @@ void draw_foliage_patch_fields(runtime::Entity entity,
 
   mark_modified(modified, inspector_drag_float("Density", &foliage.density,
                                                0.05F, 0.0F, 100.0F, "%.2f"));
-  mark_modified(modified, ImGui::ColorEdit3("Albedo", &foliage.albedo.x));
+  mark_modified(modified, inspector_linear_color3("Albedo", &foliage.albedo.x));
   mark_modified(modified, inspector_slider_float("Roughness",
                                                  &foliage.roughness, 0.0F,
                                                  1.0F, "%.2f"));

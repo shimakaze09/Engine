@@ -15,6 +15,7 @@
 
 #include "imgui.h"
 
+#include "editor_inspector_widgets.h"
 #include "editor_material_edit.h"
 #include "editor_reference_pickers.h"
 #include "editor_session.h"
@@ -44,12 +45,14 @@ bool draw_scalar_fields(renderer::Material &params) noexcept {
     params.shadingModel = static_cast<renderer::ShadingModel>(shadingModel);
     changed = true;
   }
-  changed |= ImGui::ColorEdit3("Albedo", &params.albedo.x);
+  // Both are linear, as the shaders read them; the fields show and pick
+  // their sRGB encoding so the swatch matches the surface.
+  changed |= inspector_linear_color3("Albedo", &params.albedo.x);
   // HDR, as Unity's emission colour is: a glowing surface is authored
   // above 1 so bloom picks it up.
-  changed |=
-      ImGui::ColorEdit3("Emissive", &params.emissive.x,
-                        ImGuiColorEditFlags_HDR | ImGuiColorEditFlags_Float);
+  changed |= inspector_linear_color3("Emissive", &params.emissive.x,
+                                     ImGuiColorEditFlags_HDR |
+                                         ImGuiColorEditFlags_Float);
   changed |=
       ImGui::SliderFloat("Roughness", &params.roughness, 0.0F, 1.0F, "%.2f");
   changed |=
