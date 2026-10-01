@@ -1558,6 +1558,16 @@ def test_duplicate_primitive_gate():
             "case_fold_owner", "core/include/engine/core/string_util.h",
             "// Purpose.\nconstexpr char ascii_lower(char c) noexcept;\n")]) == 0,
               "duplicate primitives: the core helper itself is not a finding")
+        token = ("// Purpose.\nconst bool ok = (c == '_') || (c == '-') || "
+                 "(c == '.');\n")
+        check(run([script, "--root", case(
+            "name_token", "runtime/src/a.cpp", token)]) != 0,
+              "duplicate primitives: a written-out name-token test is a "
+              "finding")
+        check(run([script, "--root", case(
+            "name_token_owner", "core/include/engine/core/string_util.h",
+            token)]) == 0,
+              "duplicate primitives: string_util.h owns the name-token rule")
         colour = "// Purpose.\nImGui::ColorEdit3(\"Tint\", &tint.x);\n"
         check(run([script, "--root", case(
             "colour_field", "editor/src/a.cpp", colour)]) != 0,

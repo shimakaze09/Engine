@@ -17,6 +17,7 @@
 
 #include "engine/core/console.h"
 #include "engine/core/logging.h"
+#include "engine/core/string_util.h"
 #include "engine/runtime/play_recording.h"
 
 #include <cstdio>
@@ -81,20 +82,9 @@ void demostop_command(const char *const *, int, void *) noexcept {
 } // namespace
 
 bool recording_name_is_valid(const char *name) noexcept {
-  if ((name == nullptr) || (name[0] == '\0') || (name[0] == '.')) {
-    return false;
-  }
-  std::size_t length = 0U;
-  for (; name[length] != '\0'; ++length) {
-    const char c = name[length];
-    const bool allowed =
-        ((c >= 'a') && (c <= 'z')) || ((c >= 'A') && (c <= 'Z')) ||
-        ((c >= '0') && (c <= '9')) || (c == '_') || (c == '-') || (c == '.');
-    if (!allowed || (length == kMaxRecordingName)) {
-      return false;
-    }
-  }
-  return true;
+  // A leading '.' would hide the file or name a directory entry.
+  return (name != nullptr) && (name[0] != '.') &&
+         core::name_token_is_valid(name, kMaxRecordingName);
 }
 
 bool recording_path_for_name(const char *directory, const char *name, char *out,

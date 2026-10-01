@@ -199,6 +199,17 @@ RULES: tuple[Rule, ...] = (
         "or core::contains_ignoring_case",
     ),
     Rule(
+        name="the name-token rule",
+        owner="core/include/engine/core/string_util.h",
+        # The letter, digit, '_', '-', '.' test written out is what a copy
+        # looks like: asset labels and recording names each carried one,
+        # and entity tags would have been the third.
+        pattern=r"==\s*'_'\)\s*\|\|\s*\(\s*\w+\s*==\s*'-'\)\s*\|\|"
+        r"\s*\(\s*\w+\s*==\s*'\.'\)",
+        remedy="include engine/core/string_util.h and use "
+        "core::name_token_is_valid",
+    ),
+    Rule(
         name="the linear colour field",
         owner="editor/src/editor_inspector_widgets.cpp",
         # Calling ImGui's colour widget directly is what a copy looks like:
