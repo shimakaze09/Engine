@@ -506,6 +506,28 @@ hemisphere centers a and b in any orientation, as Unity's `CapsuleCast`
 does. Each returns the entity hit, the distance, the shape's center at
 impact and the surface normal, or `nil` (`engine_unit_physics_query`).
 
+Collision layers are the 32 bits of a collider's layer and mask. A project
+names them and chooses which layers collide in Edit > Project Settings... >
+Physics (Godot's layer names, Unity's Layer Collision Matrix); the names
+only label the bits, so naming or renaming a layer changes no scene. Two
+colliders collide when each one's layer is in the other's mask and the
+matrix lets their layers meet; triggers follow the same rule. The
+Inspector labels the layer and mask checkboxes with the project's names.
+From Lua, `engine.layer_mask("Player", "Enemy")` returns the mask of the
+named layers (Unity's `LayerMask.GetMask`; an unknown name is an error,
+never a mask that means every layer), `engine.layer_bit(name)` the bit
+index and `engine.layer_name(bit)` the name or `nil`;
+`engine.set_collision_layer(e, bits)`, `engine.set_collision_mask(e, bits)`
+and `engine.get_collision_layer(e)` / `engine.get_collision_mask(e)` read
+and write a collider's. Every query takes a mask and hits only colliders on
+those layers, ignoring the matrix as Unity's queries do: `raycast_all`,
+the overlaps and the sweeps take it where their signatures show it, and
+`engine.raycast(ox, oy, oz, dx, dy, dz, max_dist [, skip_entity [,
+mask]])` after the skip entity. `~engine.layer_mask("Enemy")` is every
+layer but Enemy; a mask that is not an integer fails the query with a
+warning (`engine_unit_collision_layer_matrix`,
+`engine_integration_lua_collision_layers`).
+
 Entities carry gameplay tags, as Godot's groups and Unreal's actor Tags
 do, so scripts find what they act on without a unique name. Give tags in
 the Inspector's Tags row under the name, or from Lua:
@@ -580,7 +602,10 @@ saved in its `.project` document (an optional `"scripting"` object with
 `instructionLimit` and `memoryLimitMiB`, left out while both are the
 defaults), take effect at once, and apply wherever the project runs,
 editor or player (`engine_unit_editor_project_settings`,
-`engine_integration_project_open`).
+`engine_integration_project_open`). Its collision layers are saved there
+too, as an optional `"physics"` object: `"layers": [{"bit": 3, "name":
+"Player"}]` and `"ignoredPairs": [[3, 4]]`, left out while every layer is
+unnamed and every pair collides.
 
 The scripting surface is still evolving. Some APIs are generated from annotated accessors, while the hand-written surface lives in domain binding translation units under `scripting/src/` (entity lifecycle, body, mesh/material, physics, lights, camera, audio, input, timers, coroutines, and more).
 
