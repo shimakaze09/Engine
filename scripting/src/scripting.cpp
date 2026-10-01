@@ -272,10 +272,39 @@ int text_only_load(lua_State *state) noexcept {
   return lua_gettop(state) - 4;
 }
 
+/// Lua's print, sent to the log: the editor's Log panel and the log file
+/// show it, as Unity's print reaches the Console and Godot's the Output
+/// panel. The stock print wrote to stdout, which an editor started as a
+/// GUI program has none of. Arguments are joined with tabs through
+/// tostring, as the stock one joins them, after the caller's file:line.
+int lua_print_to_log(lua_State *state) noexcept {
+  const int count = lua_gettop(state);
+  luaL_Buffer buffer;
+  luaL_buffinit(state, &buffer);
+  lua_Debug caller{};
+  if ((lua_getstack(state, 1, &caller) != 0) &&
+      (lua_getinfo(state, "Sl", &caller) != 0) && (caller.currentline > 0)) {
+    lua_pushfstring(state, "%s:%d: ", caller.short_src, caller.currentline);
+    luaL_addvalue(&buffer);
+  }
+  for (int i = 1; i <= count; ++i) {
+    if (i > 1) {
+      luaL_addchar(&buffer, '\t');
+    }
+    luaL_tolstring(state, i, nullptr);
+    luaL_addvalue(&buffer);
+  }
+  luaL_pushresult(&buffer);
+  core::log_message(core::LogLevel::Info, "scripting", lua_tostring(state, -1));
+  return 0;
+}
+
 /// Protected trampoline: opens the safe library set and registers bindings.
 int open_libraries_trampoline(lua_State *state) noexcept {
   luaL_requiref(state, LUA_GNAME, luaopen_base, 1);
   lua_pop(state, 1);
+  lua_pushcfunction(state, &lua_print_to_log);
+  lua_setglobal(state, "print");
   // The base library's file loaders open OS paths straight through libc,
   // outside every VFS jail check, so the sandbox keeps only the string
   // loader, and that one text-only.
