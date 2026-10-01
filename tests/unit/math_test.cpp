@@ -181,10 +181,56 @@ bool check_look_rotation() {
          (untouched.x == sentinel.x) && (untouched.w == sentinel.w);
 }
 
+/// A ray beside or through a small sphere far down its path. The textbook
+/// discriminant b^2 - 4ac subtracts two values near 4 D^2, so at 100 m the
+/// miss margin of a 5 cm sphere was rounding noise: a ray 6 cm off its
+/// centre reported a hit, and at 10 km any ray within 2 m did. Returns 0,
+/// or the failing row's code.
+int check_far_ray_sphere() noexcept {
+  const float distances[3] = {100.0F, 1000.0F, 10000.0F};
+  constexpr float kRadius = 0.05F;
+  int code = 900;
+  for (const float distance : distances) {
+    engine::math::Ray ray{};
+    ray.origin = engine::math::Vec3(0.0F, 0.0F, 0.0F);
+    ray.direction = engine::math::Vec3(0.0F, 0.0F, -1.0F);
+    engine::math::Sphere sphere{};
+    sphere.radius = kRadius;
+
+    // Passing 1 cm outside the surface: a miss at every range.
+    sphere.center = engine::math::Vec3(0.06F, 0.0F, -distance);
+    if (engine::math::ray_intersects_sphere(ray, sphere, nullptr)) {
+      return code;
+    }
+    // 1 cm inside the silhouette: still a hit.
+    sphere.center = engine::math::Vec3(0.04F, 0.0F, -distance);
+    if (!engine::math::ray_intersects_sphere(ray, sphere, nullptr)) {
+      return code + 1;
+    }
+    // Through the centre: the near surface at D - r. The root is c / q
+    // with c = D^2 - r^2 and q = D + r, each rounded once, so the result
+    // is within a few roundings of D; four ulps of D bounds it.
+    sphere.center = engine::math::Vec3(0.0F, 0.0F, -distance);
+    float t = -1.0F;
+    const float tolerance =
+        4.0F * distance * std::numeric_limits<float>::epsilon();
+    if (!engine::math::ray_intersects_sphere(ray, sphere, &t) ||
+        (std::fabs(t - (distance - kRadius)) > tolerance)) {
+      return code + 2;
+    }
+    code += 10;
+  }
+  return 0;
+}
+
 } // namespace
 
 /// Runs this executable or test program.
 int main() {
+  if (const int farRay = check_far_ray_sphere(); farRay != 0) {
+    return farRay;
+  }
+
   const engine::math::Vec2 v2a(1.0F, 2.0F);
   const engine::math::Vec2 v2b(3.0F, 4.0F);
   const engine::math::Vec2 v2c = engine::math::add(v2a, v2b);

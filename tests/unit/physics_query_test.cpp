@@ -781,6 +781,65 @@ int test_raycast_hits_hugely_scaled_colliders() noexcept {
   return 0;
 }
 
+// A ray passing beside, or through, a thin sphere or capsule far down its
+// path. The textbook discriminant cancels at range: a ray 1 cm outside a
+// 5 cm sphere at 1 km reported a hit, as did one beside a capsule's side or
+// end cap. Each probe is one collider in an otherwise empty world, cast at
+// from the origin along -Z.
+int test_raycast_far_thin_colliders() noexcept {
+  std::unique_ptr<World> world(new (std::nothrow) World());
+  if (world == nullptr) {
+    return 1;
+  }
+  world->end_frame_phase();
+
+  constexpr float kRadius = 0.05F;
+  constexpr float kHalfHeight = 0.5F;
+  struct Probe final {
+    engine::runtime::ColliderShape shape;
+    float x;
+    float y;
+    bool hit;
+  };
+  // Capsule cap probes sit 2 cm above the side's top (y = 0.52 from the
+  // capsule centre), so only the upper hemisphere can be reached.
+  constexpr Probe kProbes[] = {
+      {engine::runtime::ColliderShape::Sphere, 0.06F, 0.0F, false},
+      {engine::runtime::ColliderShape::Sphere, 0.04F, 0.0F, true},
+      {engine::runtime::ColliderShape::Capsule, 0.06F, 0.0F, false},
+      {engine::runtime::ColliderShape::Capsule, 0.04F, 0.0F, true},
+      {engine::runtime::ColliderShape::Capsule, 0.06F, -0.52F, false},
+      {engine::runtime::ColliderShape::Capsule, 0.03F, -0.52F, true},
+  };
+  const float distances[3] = {100.0F, 1000.0F, 10000.0F};
+  int code = 10;
+  for (const float distance : distances) {
+    for (const Probe &probe : kProbes) {
+      const Entity e = world->create_entity();
+      Transform t{};
+      t.position = math::Vec3(probe.x, probe.y, -distance);
+      Collider col{};
+      col.shape = probe.shape;
+      col.halfExtents = math::Vec3(kRadius, kHalfHeight, kRadius);
+      if (!world->add_transform(e, t) || !world->add_collider(e, col)) {
+        return code;
+      }
+      PhysicsRaycastHit hit{};
+      const std::size_t count = physics::raycast_all(
+          *world, math::Vec3(0.0F, 0.0F, 0.0F), math::Vec3(0.0F, 0.0F, -1.0F),
+          2.0F * distance, &hit, 1U);
+      if ((count == 1U) != probe.hit) {
+        return code + 1;
+      }
+      if (!world->destroy_entity(e)) {
+        return code + 2;
+      }
+      code += 10;
+    }
+  }
+  return 0;
+}
+
 int main() {
   struct TestCase {
     const char *name;
@@ -807,6 +866,7 @@ int main() {
       {"raycast_skip_entity", test_raycast_skip_entity},
       {"raycast_hits_hugely_scaled_colliders",
        test_raycast_hits_hugely_scaled_colliders},
+      {"raycast_far_thin_colliders", test_raycast_far_thin_colliders},
   };
 
   int failures = 0;

@@ -246,7 +246,9 @@ outside the editor. A file deleted in the meantime is simply written again
 `engine_player` runs a game without the editor, as a Unity player build or a
 Godot export does: `engine_player path/to/my_game` (the sample beside it
 with none) opens a window titled with the project's name and plays its
-startup scene. `--headless` runs it without a window and `--max-frames N`
+startup scene, loaded before the first frame so its scripts begin play
+once, as Unity and Unreal load the first scene before any gameplay code
+runs. `--headless` runs it without a window and `--max-frames N`
 stops it after N frames. It exits 0 when the game quits, 1 when the project
 cannot be opened or an option is wrong (the reason is printed, and shown in
 a box when windowed), and 3 when the startup scene does not load
@@ -494,7 +496,9 @@ controller; `engine.gamepad_count()` says how many are connected
 Scripts run sandboxed: `io`, `os`, `debug` and `package` are not there, all
 scripts share a budget of Lua instructions per frame (1,000,000 by default;
 a script that runs past it stops with an error rather than freezing the
-game), and the Lua allocator is capped (64 MiB by default). A project sets
+game, and only that script stops: the hooks after it that frame are
+skipped and run again the next (`engine_integration_lua_hardening`)), and
+the Lua allocator is capped (64 MiB by default). A project sets
 its own limits in Edit > Project Settings..., 0 for unlimited; they are
 saved in its `.project` document (an optional `"scripting"` object with
 `instructionLimit` and `memoryLimitMiB`, left out while both are the

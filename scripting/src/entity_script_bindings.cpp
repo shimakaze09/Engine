@@ -370,7 +370,7 @@ int attempt_module_load(const char *path) noexcept {
 
   refresh_lua_hook();
 
-  if (lua_pcall(g_state, 0, 1, 0) != LUA_OK) {
+  if (!traced_pcall(g_state, 0, 1)) {
     log_script_error("exec entity script");
     --g_moduleLoadDepth;
     return LUA_NOREF;
@@ -612,6 +612,16 @@ bool call_module_function(int moduleRef, const char *funcName,
     return false;
   }
 
+  // The instruction budget is shared by the frame, so once one script has
+  // spent it every later hook would fail at its first instruction. Those
+  // scripts did nothing wrong: they are skipped, not faulted, and run again
+  // next frame, so which scripts run in an over-budget frame is decided by
+  // the dispatch order and the budget alone. Only a hook whose own run
+  // fails -- an error, or the run that exhausted the budget -- faults its
+  // entity.
+  if (skip_dispatch_for_spent_budget(funcName)) {
+    return false;
+  }
   ModuleCallArgs args{};
   args.moduleRef = moduleRef;
   args.funcName = funcName;

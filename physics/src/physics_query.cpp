@@ -127,27 +127,39 @@ bool ray_intersects_capsule(const math::Ray &ray, float halfHeight,
   float bestT = maxDistance + 1.0F;
   math::Vec3 bestNormal(0.0F, 1.0F, 0.0F);
 
+  // The side is a circle in XZ, solved like math::ray_intersects_sphere:
+  // the discriminant from the ray's closest approach to the axis, and
+  // stable roots, since b^2 - 4ac cancels at range and reported hits on
+  // rays passing beside a thin capsule.
   const float cylinderA =
       ray.direction.x * ray.direction.x + ray.direction.z * ray.direction.z;
-  const float cylinderB =
-      2.0F * (ray.origin.x * ray.direction.x + ray.origin.z * ray.direction.z);
-  const float cylinderC = ray.origin.x * ray.origin.x +
-                          ray.origin.z * ray.origin.z - radius * radius;
-  const float cylinderDiscriminant =
-      cylinderB * cylinderB - 4.0F * cylinderA * cylinderC;
-  if ((cylinderA > 1.0e-12F) && (cylinderDiscriminant >= 0.0F)) {
-    const float root = std::sqrt(cylinderDiscriminant);
-    const float inverseDenominator = 1.0F / (2.0F * cylinderA);
-    const float candidates[2] = {(-cylinderB - root) * inverseDenominator,
-                                 (-cylinderB + root) * inverseDenominator};
-    for (float candidate : candidates) {
-      const float hitY = ray.origin.y + ray.direction.y * candidate;
-      if ((candidate >= 0.0F) && (candidate < bestT) && (hitY >= -halfHeight) &&
-          (hitY <= halfHeight)) {
-        bestT = candidate;
-        bestNormal = math::normalize(
-            math::Vec3(ray.origin.x + ray.direction.x * candidate, 0.0F,
-                       ray.origin.z + ray.direction.z * candidate));
+  if (cylinderA > 1.0e-12F) {
+    const float cylinderB =
+        ray.origin.x * ray.direction.x + ray.origin.z * ray.direction.z;
+    const float along = cylinderB / cylinderA;
+    const float closestX = ray.origin.x - (ray.direction.x * along);
+    const float closestZ = ray.origin.z - (ray.direction.z * along);
+    const float cylinderDiscriminant =
+        cylinderA *
+        ((radius * radius) - ((closestX * closestX) + (closestZ * closestZ)));
+    if (cylinderDiscriminant >= 0.0F) {
+      const float cylinderC = (ray.origin.x * ray.origin.x) +
+                              (ray.origin.z * ray.origin.z) - (radius * radius);
+      const float q =
+          -(cylinderB +
+            std::copysign(std::sqrt(cylinderDiscriminant), cylinderB));
+      const float rootA = q / cylinderA;
+      const float candidates[2] = {rootA,
+                                   (q != 0.0F) ? (cylinderC / q) : rootA};
+      for (float candidate : candidates) {
+        const float hitY = ray.origin.y + ray.direction.y * candidate;
+        if ((candidate >= 0.0F) && (candidate < bestT) &&
+            (hitY >= -halfHeight) && (hitY <= halfHeight)) {
+          bestT = candidate;
+          bestNormal = math::normalize(
+              math::Vec3(ray.origin.x + ray.direction.x * candidate, 0.0F,
+                         ray.origin.z + ray.direction.z * candidate));
+        }
       }
     }
   }
