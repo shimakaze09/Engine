@@ -6,6 +6,7 @@
 #include "engine/runtime/scripting_bridge.h"
 
 #include "engine/audio/audio.h"
+#include "engine/content/asset_streaming.h"
 #include "engine/core/logging.h"
 #include "engine/core/rng.h"
 #include "engine/core/vfs.h"
@@ -14,13 +15,13 @@
 #include "engine/physics/physics_query.h"
 #include "engine/renderer/asset_database.h"
 #include "engine/renderer/asset_manager.h"
-#include "engine/content/asset_streaming.h"
 #include "engine/renderer/camera.h"
 #include "engine/runtime/animation_system.h"
+#include "engine/runtime/collision_layers.h"
 #include "engine/runtime/entity_pool.h"
 #include "engine/runtime/physics_bridge.h"
-#include "engine/runtime/primitive_collider.h"
 #include "engine/runtime/prefab_serializer.h"
+#include "engine/runtime/primitive_collider.h"
 #include "engine/runtime/save_data.h"
 #include "engine/runtime/scene_serializer.h"
 #include "engine/runtime/service_registry.h"
@@ -208,6 +209,27 @@ bool scripting_get_gravity(runtime::World *world, float *outX, float *outY,
   return runtime::get_gravity(*world, outX, outY, outZ);
 }
 
+int scripting_collision_layer_bit(const char *name) noexcept {
+  return content::find_collision_layer(runtime::project_collision_layers(),
+                                       name);
+}
+
+bool scripting_collision_layer_name(std::uint32_t bit, char *out,
+                                    std::size_t capacity) noexcept {
+  const content::ProjectCollisionLayers &layers =
+      runtime::project_collision_layers();
+  if ((out == nullptr) || (capacity == 0U) ||
+      (bit >= content::kMaxCollisionLayers) || (layers.names[bit][0] == '\0')) {
+    return false;
+  }
+  const std::size_t length = std::strlen(layers.names[bit]);
+  if (length >= capacity) {
+    return false;
+  }
+  std::memcpy(out, layers.names[bit], length + 1U);
+  return true;
+}
+
 /// Mirrors a physics raycast hit into the bridge's flat hit record.
 void copy_raycast_hit(const runtime::PhysicsRaycastHit &hit,
                       scripting::RuntimeRaycastHit *outHit) noexcept {
@@ -238,13 +260,14 @@ void copy_sweep_hit(const runtime::World &world, const physics::SweepHit &hit,
 bool scripting_raycast(runtime::World *world, float ox, float oy, float oz,
                        float dx, float dy, float dz, float maxDistance,
                        scripting::RuntimeRaycastHit *outHit,
-                       runtime::Entity skipEntity) noexcept {
+                       runtime::Entity skipEntity,
+                       std::uint32_t mask) noexcept {
   if ((world == nullptr) || (outHit == nullptr)) {
     return false;
   }
   runtime::PhysicsRaycastHit hit{};
   if (!runtime::raycast(*world, math::Vec3(ox, oy, oz), math::Vec3(dx, dy, dz),
-                        maxDistance, &hit, skipEntity)) {
+                        maxDistance, &hit, skipEntity, mask)) {
     return false;
   }
   copy_raycast_hit(hit, outHit);
@@ -1362,6 +1385,8 @@ scripting::RuntimeServices make_scripting_runtime_services() noexcept {
   s.entity_pool_reset_all = &scripting_entity_pool_reset_all;
   s.set_gravity = &scripting_set_gravity;
   s.get_gravity = &scripting_get_gravity;
+  s.collision_layer_bit = &scripting_collision_layer_bit;
+  s.collision_layer_name = &scripting_collision_layer_name;
   s.raycast = &scripting_raycast;
   s.raycast_all = &scripting_raycast_all;
   s.overlap_sphere = &scripting_overlap_sphere;
