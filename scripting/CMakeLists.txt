@@ -32,6 +32,7 @@ engine_add_module_library(engine_scripting
     src/random_bindings.cpp
     src/mesh_material_bindings.cpp
     src/physics_bindings.cpp
+    src/navigation_bindings.cpp
     src/console_commands.cpp
     src/collision_bindings.cpp
     src/coroutine_bindings.cpp

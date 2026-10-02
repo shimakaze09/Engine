@@ -570,6 +570,14 @@ surface's file, again whenever a bake rewrites it; a file that is missing
 or damaged leaves that surface without a mesh and is logged, and loading a
 scene reports a missing one as `missing_nav_mesh`
 (`engine_unit_nav_mesh_surface`, `engine_unit_editor_nav_mesh_bake`).
+`local path, why = engine.find_path(sx, sy, sz, ex, ey, ez)` asks the mesh
+whose box holds the start for the shortest walk to the end, as Unity's
+`NavMesh.CalculatePath` does: `path` lists its corners as `{x=, y=, z=}`
+tables, from the start to the end, each snapped onto the mesh. Otherwise
+`path` is nil and `why` is `"off_mesh"` (the start or end is not on a
+mesh), `"unreachable"` (no walkable route joins them), `"too_long"` (more
+than 256 corners) or `"invalid"` (an argument that is not a number). A query
+allocates nothing (`engine_integration_lua_navigation`).
 
 Entities carry gameplay tags, as Godot's groups and Unreal's actor Tags
 do, so scripts find what they act on without a unique name. Give tags in

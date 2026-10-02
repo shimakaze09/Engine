@@ -25,6 +25,7 @@
 #include "engine/runtime/prefab_serializer.h"
 #include "engine/runtime/primitive_collider.h"
 #include "engine/runtime/save_data.h"
+#include "engine/runtime/scene_navigation.h"
 #include "engine/runtime/scene_serializer.h"
 #include "engine/runtime/service_registry.h"
 #include "engine/runtime/world.h"
@@ -1290,6 +1291,45 @@ bool scripting_move_character_op(
   return true;
 }
 
+// Scripting cannot see navigation, so it spells the path results itself.
+static_assert(
+    (static_cast<int>(scripting::RuntimePathResult::Found) ==
+     static_cast<int>(navigation::NavPathResult::Found)) &&
+        (static_cast<int>(scripting::RuntimePathResult::OffMesh) ==
+         static_cast<int>(navigation::NavPathResult::OffMesh)) &&
+        (static_cast<int>(scripting::RuntimePathResult::Unreachable) ==
+         static_cast<int>(navigation::NavPathResult::Unreachable)) &&
+        (static_cast<int>(scripting::RuntimePathResult::TooLong) ==
+         static_cast<int>(navigation::NavPathResult::TooLong)),
+    "the scripting path results mirror the navigation ones");
+
+scripting::RuntimePathResult
+scripting_find_path_op(runtime::World *, float sx, float sy, float sz, float ex,
+                       float ey, float ez, scripting::RuntimePathPoint *out,
+                       std::size_t capacity, std::size_t *outCount) noexcept {
+  // The corners a script can be handed at once; the binding's own buffer
+  // is this size.
+  constexpr std::size_t kMaxCorners = 256U;
+  runtime::SceneNavigation *navigation = runtime::bound_scene_navigation();
+  if ((navigation == nullptr) || (out == nullptr) || (outCount == nullptr)) {
+    return scripting::RuntimePathResult::OffMesh;
+  }
+  math::Vec3 corners[kMaxCorners];
+  std::size_t count = 0U;
+  const navigation::NavPathResult result = navigation->find_path(
+      math::Vec3(sx, sy, sz), math::Vec3(ex, ey, ez), corners,
+      (capacity < kMaxCorners) ? capacity : kMaxCorners, &count);
+  *outCount = 0U;
+  if (result == navigation::NavPathResult::Found) {
+    for (std::size_t i = 0U; i < count; ++i) {
+      out[i] =
+          scripting::RuntimePathPoint{corners[i].x, corners[i].y, corners[i].z};
+    }
+    *outCount = count;
+  }
+  return static_cast<scripting::RuntimePathResult>(result);
+}
+
 bool scripting_remove_tag_set_component_op(runtime::World *world,
                                            runtime::Entity entity) noexcept {
   return (world != nullptr) && world->remove_tag_set_component(entity);
@@ -1462,6 +1502,7 @@ scripting::RuntimeServices make_scripting_runtime_services() noexcept {
   s.add_character_controller_op = &scripting_add_character_controller_op;
   s.remove_character_controller_op = &scripting_remove_character_controller_op;
   s.move_character_op = &scripting_move_character_op;
+  s.find_path_op = &scripting_find_path_op;
   s.find_entities_by_tag = &scripting_find_entities_by_tag;
   s.primitive_collider = &scripting_primitive_collider;
   s.timer_set = &scripting_timer_set;
