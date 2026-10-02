@@ -85,6 +85,27 @@ struct ResolveScratch final {
   bool stepTriggerOverflow = false;
 };
 
+/// A collider's authoritative world geometry, through its entity's
+/// parent-aware physics transform (and its hull payload for a hull).
+bool world_collider_geometry(const PhysicsWorldView &world, Entity entity,
+                             const Collider &collider,
+                             ColliderWorldGeometry *outGeometry) noexcept;
+
+/// The world-space capsule query geometry between hemisphere centers
+/// `pointA` and `pointB`, as the capsule sweep and the character move use.
+bool capsule_query_geometry(const math::Vec3 &pointA, const math::Vec3 &pointB,
+                            float radius,
+                            ColliderWorldGeometry *outGeometry) noexcept;
+
+/// The shared conservative-advancement sweep of a convex query geometry
+/// along a unit `direction` against one target's real shape: the travel at
+/// first contact, within ~2e-5 of the surface, or false when there is none
+/// within `maxT` (a long grazing approach is reported as a miss).
+bool sweep_convex_geometry(const ColliderWorldGeometry &query,
+                           const math::Vec3 &direction, float maxT,
+                           const ColliderWorldGeometry &target,
+                           float *outT) noexcept;
+
 /// True when two colliders' world geometries intersect: GJK for convex
 /// shapes, bounds alone where a heightfield is involved (as the overlap
 /// queries decide). Trigger overlap tracking shares the queries' test.

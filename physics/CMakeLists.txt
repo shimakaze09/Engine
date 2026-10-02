@@ -16,6 +16,7 @@ engine_add_module_library(engine_physics
     src/contact_manifold.cpp
     src/narrow_phase.cpp
     src/physics_query.cpp
+    src/character_move.cpp
     src/primitive_hulls.cpp
     src/joints/distance_joint.cpp
     src/joints/hinge_joint.cpp
