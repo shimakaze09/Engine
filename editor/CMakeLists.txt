@@ -47,6 +47,7 @@ engine_add_module_library(engine_editor
     src/editor_panels_inspector.cpp
     src/editor_panels_inspector_generic.cpp
     src/editor_panels_inspector_custom.cpp
+    src/editor_nav_mesh_bake.cpp
     src/editor_panels_main.cpp
     src/editor_panels_material.cpp
     src/editor_panels_viewport.cpp

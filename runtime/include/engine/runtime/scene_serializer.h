@@ -65,8 +65,9 @@ core::FileReadResult document_fingerprint(const char *path,
 /// do not resolve still loads, and each such reference is a Warning in
 /// *outReport (when given) and a logged diagnostic: `dangling_parent`
 /// (a Transform parent no entity carries; the child loads as a root),
-/// `missing_script` and `missing_controller` (a path under a mounted
-/// prefix that names no file; unmounted prefixes are not judged). A key no
+/// `missing_script`, `missing_controller` and `missing_nav_mesh` (a path
+/// under a mounted prefix that names no file; unmounted prefixes are not
+/// judged). A key no
 /// reader looks up is `unknown_key`, keyed by its path
 /// ("entities[3].components.Colider"); the next save would drop it.
 bool load_scene(World &world, const char *path,

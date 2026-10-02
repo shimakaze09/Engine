@@ -95,8 +95,8 @@ bool mounted_path_missing(const char *path) noexcept {
 
 /// Checks every reference the staged scene carries and records the ones
 /// that resolve to nothing. The scene still loads: a dangling parent
-/// roots its child, a missing script or controller stays authored, and
-/// the report says so.
+/// roots its child, a missing script, controller or .navmesh stays
+/// authored, and the report says so.
 void validate_scene_references(const World &staged,
                                core::ValidationReport *report) noexcept {
   staged.for_each_alive([&](Entity entity) noexcept {
@@ -125,6 +125,16 @@ void validate_scene_references(const World &staged,
       report_reference(report, "missing_controller", "controllerPath",
                        animation->controllerPath, id,
                        "scene animation controller path names no file");
+    }
+    NavMeshSurfaceComponent surface{};
+    if (staged.has_nav_mesh_surface(entity) &&
+        staged.get_nav_mesh_surface(entity, &surface) &&
+        (surface.navMeshPath[0] != '\0') &&
+        mounted_path_missing(surface.navMeshPath)) {
+      report_reference(report, "missing_nav_mesh", "navMeshPath",
+                       surface.navMeshPath, id,
+                       "scene navigation surface names no .navmesh file; "
+                       "bake it to write one");
     }
   });
 }
@@ -190,6 +200,8 @@ bool decode_scene_component(const core::JsonParser &parser,
     return read_mesh_component(parser, value, out);
   } else if constexpr (std::is_same_v<T, SkyLightComponent>) {
     return read_sky_light_component(parser, value, out);
+  } else if constexpr (std::is_same_v<T, NavMeshSurfaceComponent>) {
+    return read_nav_mesh_surface_component(parser, value, out);
   } else if constexpr (std::is_same_v<T, LightComponent>) {
     return read_light_component(parser, value, out);
   } else if constexpr (std::is_same_v<T, FoliagePatchComponent>) {
@@ -227,6 +239,9 @@ bool encode_scene_component(core::JsonWriter &writer, const char *key,
     return true;
   } else if constexpr (std::is_same_v<T, SkyLightComponent>) {
     write_sky_light_component(writer, component);
+    return true;
+  } else if constexpr (std::is_same_v<T, NavMeshSurfaceComponent>) {
+    write_nav_mesh_surface_component(writer, component);
     return true;
   } else if constexpr (std::is_same_v<T, LightComponent>) {
     write_light_component(writer, component);

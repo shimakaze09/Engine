@@ -324,6 +324,15 @@ constexpr const char *kEnvironmentRefField = "environment";
 constexpr const char *kFoliageMeshRefsField = "meshes";
 
 constexpr const char *kAnimationControllerPathField = "controllerPath";
+
+// NavMeshSurfaceComponent's field names, shared by its writer and reader.
+constexpr const char *kNavHalfExtentsField = "halfExtents";
+constexpr const char *kNavCellSizeField = "cellSize";
+constexpr const char *kNavAgentRadiusField = "agentRadius";
+constexpr const char *kNavAgentHeightField = "agentHeight";
+constexpr const char *kNavMaxClimbField = "maxClimb";
+constexpr const char *kNavMaxSlopeField = "maxSlopeDegrees";
+constexpr const char *kNavMeshPathField = "navMeshPath";
 constexpr const char *kAnimationPlayingField = "playing";
 constexpr const char *kAnimationPlaybackSpeedField = "playbackSpeed";
 
@@ -1088,6 +1097,59 @@ bool read_foliage_patch_component(
     component.instanceCount = requestedCount;
   }
 
+  *outComponent = component;
+  return true;
+}
+
+void write_nav_mesh_surface_component(
+    core::JsonWriter &writer,
+    const NavMeshSurfaceComponent &component) noexcept {
+  writer.write_key(kJsonKeyNavMeshSurfaceComponent);
+  writer.begin_object();
+  write_vec3(writer, kNavHalfExtentsField, component.halfExtents);
+  writer.write_float(kNavCellSizeField, component.cellSize);
+  writer.write_float(kNavAgentRadiusField, component.agentRadius);
+  writer.write_float(kNavAgentHeightField, component.agentHeight);
+  writer.write_float(kNavMaxClimbField, component.maxClimb);
+  writer.write_float(kNavMaxSlopeField, component.maxSlopeDegrees);
+  if (component.navMeshPath[0] != '\0') {
+    writer.write_string(kNavMeshPathField, component.navMeshPath);
+  }
+  writer.end_object();
+}
+
+bool read_nav_mesh_surface_component(
+    const core::JsonParser &parser, const core::JsonValue &value,
+    NavMeshSurfaceComponent *outComponent) noexcept {
+  if ((outComponent == nullptr) ||
+      (value.type != core::JsonValue::Type::Object)) {
+    return false;
+  }
+  NavMeshSurfaceComponent component{};
+  core::JsonValue field{};
+  if (parser.get_object_field(value, kNavHalfExtentsField, &field) &&
+      !read_vec3(parser, field, &component.halfExtents)) {
+    return false;
+  }
+  if (!read_optional_float_strict(parser, value, kNavCellSizeField,
+                                  &component.cellSize) ||
+      !read_optional_float_strict(parser, value, kNavAgentRadiusField,
+                                  &component.agentRadius) ||
+      !read_optional_float_strict(parser, value, kNavAgentHeightField,
+                                  &component.agentHeight) ||
+      !read_optional_float_strict(parser, value, kNavMaxClimbField,
+                                  &component.maxClimb) ||
+      !read_optional_float_strict(parser, value, kNavMaxSlopeField,
+                                  &component.maxSlopeDegrees)) {
+    return false;
+  }
+  // The path names the file a load reads, so one that does not fit whole
+  // is refused rather than cut to the name of some other file.
+  if (parser.get_object_field(value, kNavMeshPathField, &field) &&
+      !parser.copy_string_strict(field, component.navMeshPath,
+                                 sizeof(component.navMeshPath))) {
+    return false;
+  }
   *outComponent = component;
   return true;
 }

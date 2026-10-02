@@ -56,7 +56,8 @@ enum class AssetPrimaryAction : std::uint8_t {
   X(Unknown, "Other", Source, Select, (), ())                                  \
   X(Prefab, "Prefab", Source, Instantiate, (".prefab"), ())                    \
   X(Shader, "Shader", Cooked, Select, (".sc"), ())                             \
-  X(Environment, "Environment", Source, Select, (".hdr"), ())
+  X(Environment, "Environment", Source, Select, (".hdr"), ())                  \
+  X(NavMesh, "Nav Mesh", Source, Select, (".navmesh"), ())
 
 /// Tags every asset record, index entry and query carries.
 enum class AssetTypeTag : std::uint8_t {

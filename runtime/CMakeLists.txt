@@ -24,6 +24,8 @@ engine_add_module_library(engine_runtime
     src/collision_layers.cpp
     src/character_controller.cpp
     src/navigation_bake.cpp
+    src/nav_mesh_surface.cpp
+    src/scene_navigation.cpp
     src/prefab_serializer.cpp
     src/primitive_collider.cpp
     src/render_prep_pipeline.cpp

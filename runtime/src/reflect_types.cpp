@@ -77,6 +77,14 @@ static_cast<void>(desc);
 // are runtime state and are never persisted.
 REFLECT_END()
 
+REFLECT_TYPE(engine::runtime::NavMeshSurfaceComponent)
+static_cast<void>(desc);
+// Intentionally registers a zero-field descriptor. The .navmesh path is a
+// fixed char array, which reflection has no field kind for, so the whole
+// component is serialized manually by write_nav_mesh_surface_component /
+// read_nav_mesh_surface_component.
+REFLECT_END()
+
 REFLECT_TYPE(engine::runtime::SpringArmComponent)
 REFLECT_FIELD(armLength, Float)
 REFLECT_FIELD(currentLength, Float)

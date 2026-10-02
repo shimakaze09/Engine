@@ -36,6 +36,14 @@ bool draw_script_component_fields(runtime::ScriptComponent &script) noexcept;
 bool draw_animation_component_fields(
     runtime::AnimationComponent &animation) noexcept;
 
+/// Draws NavMeshSurfaceComponent's volume, agent and .navmesh path, and a
+/// Bake button (enabled while `bakeable`, outside Play) that bakes the
+/// surface over the editing World and writes the file; a bake that names
+/// a path for the first time writes it into `surface`.
+bool draw_nav_mesh_surface_fields(runtime::Entity entity,
+                                  runtime::NavMeshSurfaceComponent &surface,
+                                  bool bakeable) noexcept;
+
 /// Draws FoliagePatchComponent's full custom editor: LOD mesh pickers,
 /// density/material sliders, and the per-instance array editor. Structural
 /// edits (add/remove instance) route directly through the command history

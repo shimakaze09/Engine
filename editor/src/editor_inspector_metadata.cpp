@@ -278,6 +278,11 @@ constexpr ComponentMetadata kComponentMetadataTable[] = {
      "Renders the scene from this object's transform into a texture."},
     {"engine::runtime::FoliagePatchComponent", "Foliage Patch", "Rendering",
      "Instanced foliage placement with wind and LODs."},
+    {"engine::runtime::NavMeshSurfaceComponent", "Nav Mesh Surface",
+     "Navigation",
+     "Where agents can walk: Bake samples the static colliders inside its "
+     "box for an agent of its size and saves the mesh to a .navmesh file, "
+     "which the scene loads."},
     {"engine::runtime::CharacterControllerComponent", "Character Controller",
      "Physics",
      "Moves this object's Capsule Collider from a script "
