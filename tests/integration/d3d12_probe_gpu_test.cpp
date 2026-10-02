@@ -11,6 +11,7 @@
 #include "../gpu_scene_fixture.h"
 
 #include "command_buffer_context.h"
+#include "command_buffer_ibl.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -76,8 +77,13 @@ void print_grid(const char *label, const CapturedFrame &frame,
 /// destroyed at once when `destroyNow`, otherwise kept until after the
 /// readback. With `switchAway` another target is bound and cleared after
 /// the draw, so the device leaves the bake target before it goes.
+/// The pipeline the probes run under, for a probe that lets frames pass.
+engine::EnginePipeline *g_pipeline = nullptr;
+
 void probe_bake(const char *label, int kSize, r::TextureFormat format,
-                bool destroyNow, bool switchAway) noexcept {
+                bool destroyNow, bool switchAway,
+                r::TextureFilter filter = r::TextureFilter::Nearest,
+                int pipelineFrames = 0) noexcept {
   const r::BackendState &backend = r::backend_state();
   const r::RenderDevice *dev = r::render_device();
   r::TextureDesc desc{};
@@ -85,7 +91,7 @@ void probe_bake(const char *label, int kSize, r::TextureFormat format,
   desc.format = format;
   desc.width = kSize;
   desc.height = kSize;
-  desc.filter = r::TextureFilter::Nearest;
+  desc.filter = filter;
   desc.wrap = r::TextureWrap::ClampEdge;
   const r::DeviceTextureHandle texture = dev->create_texture(desc);
   r::RenderTargetDesc targetDesc{};
@@ -120,8 +126,13 @@ void probe_bake(const char *label, int kSize, r::TextureFormat format,
   if (destroyNow) {
     dev->destroy_render_target(target);
   }
-  r::present_render_device();
-  r::present_render_device();
+  if ((pipelineFrames > 0) && (g_pipeline != nullptr)) {
+    static_cast<void>(
+        engine::tests::settle_frames(*g_pipeline, pipelineFrames));
+  } else {
+    r::present_render_device();
+    r::present_render_device();
+  }
   CapturedFrame frame{};
   char path[64] = {};
   std::snprintf(path, sizeof(path), "d3d12_probe_%s.tga", label);
@@ -196,6 +207,32 @@ int run(engine::EnginePipeline &pipeline, engine::runtime::World &) noexcept {
   probe_bake("rgba8_kept", 128, r::TextureFormat::RGBA8, false, false);
 
   probe_bake("rg16f_512_destroyed", 512, r::TextureFormat::RG16F, true, false);
+  g_pipeline = &pipeline;
+  probe_bake("rg16f_512_linear_destroyed", 512, r::TextureFormat::RG16F, true,
+             false, r::TextureFilter::Linear);
+  probe_bake("rg16f_512_after_frames", 512, r::TextureFormat::RG16F, true,
+             false, r::TextureFilter::Nearest, 3);
+
+  // The renderer's own bake function, called here between frames rather
+  // than from inside a frame's flush.
+  {
+    // Only the texture goes: the bake program is the backend's to keep.
+    r::BackendState &mutableBackend = r::backend_state();
+    r::render_device()->destroy_texture(mutableBackend.brdfLutTexture);
+    mutableBackend.brdfLutTexture = r::kInvalidDeviceTexture;
+    mutableBackend.brdfLutSize = 0;
+    const r::DeviceTextureHandle lut = r::ensure_brdf_lut(
+        r::backend_state(), r::render_device(),
+        r::cvar_reflection_probe_bake_settings(backend.cvars));
+    CapturedFrame direct{};
+    if ((lut != r::kInvalidDeviceTexture) &&
+        read_back(lut, backend.brdfLutSize, "d3d12_probe_ensure.tga",
+                  &direct)) {
+      print_grid("ensure_outside_flush", direct, backend.brdfLutSize);
+    } else {
+      std::printf("probe ensure_outside_flush: no lookup or readback\n");
+    }
+  }
 
   // The renderer's own bake again, in a frame long after the first: a
   // new size makes the next flush bake a new lookup.
