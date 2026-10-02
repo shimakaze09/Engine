@@ -170,8 +170,10 @@ bool start_recorded_play(const char *name) noexcept {
     return false;
   }
   if ((name != nullptr) && !recording_name_is_valid(name)) {
-    log_refusal(kWhat, "a recording name is 1 to 64 letters, digits, '_', "
-                       "'-' or '.', not starting with '.'");
+    log_refusal(kWhat,
+                "a recording name is 1 to 64 bytes of letters (CJK, kana "
+                "and Hangul included), digits, '_', '-' or '.', not "
+                "starting with '.'");
     return false;
   }
   char directory[kMaxPath] = {};

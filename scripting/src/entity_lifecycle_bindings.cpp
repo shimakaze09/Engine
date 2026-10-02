@@ -172,7 +172,8 @@ int lua_engine_add_tag(lua_State *state) noexcept {
     return 1;
   case math::TagSetAdd::InvalidTag:
     lua_pushboolean(state, 0);
-    lua_pushliteral(state, "a tag is 1 to 31 letters, digits, '_', '-' or '.'");
+    lua_pushliteral(state, "a tag is 1 to 31 bytes of letters, digits, '_', "
+                           "'-' or '.'");
     return 2;
   case math::TagSetAdd::Full:
     lua_pushboolean(state, 0);

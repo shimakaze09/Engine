@@ -508,7 +508,8 @@ validate_collision_layers(const ProjectCollisionLayers &layers) noexcept {
     }
     if (name[0] != '\0') {
       if (!core::name_token_is_valid(name, kCollisionLayerNameCapacity - 1U)) {
-        return refuse(field, "is not letters, digits, '_', '-' and '.'");
+        return refuse(field, "is not 1 to 31 bytes of letters (CJK, kana and "
+                             "Hangul included), digits, '_', '-' and '.'");
       }
       for (std::uint32_t j = 0U; j < i; ++j) {
         if (core::equals_ignoring_case(name, layers.names[j])) {

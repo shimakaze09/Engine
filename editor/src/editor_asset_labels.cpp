@@ -126,7 +126,8 @@ void draw_asset_labels_row(const char *assetOsPath) noexcept {
                                ImGuiInputTextFlags_EnterReturnsTrue)) {
     content::AssetLabels edited = labels;
     if (!content::asset_label_is_valid(g_edit.typed)) {
-      g_edit.problem = "A label is 1 to 31 letters, digits, '_', '-' or '.'.";
+      g_edit.problem = "A label is 1 to 31 bytes of letters (CJK, kana and "
+                       "Hangul included), digits, '_', '-' or '.'.";
     } else if (content::asset_labels_has(labels, g_edit.typed)) {
       g_edit.problem = nullptr;
       g_edit.typed[0] = '\0';

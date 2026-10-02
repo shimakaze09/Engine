@@ -662,6 +662,22 @@ void check_collision_layers(engine::tests::TestContext &t) {
               (std::string(out.get(), length) == canonical),
           "named layers and ignored pairs write exactly their canonical text");
 
+  // A layer named in the author's own script (地面, "ground") reads and
+  // writes back byte for byte (#1185).
+  const std::string cjkLayers =
+      with_physics("{\n    \"layers\": [\n      {\"bit\": 4, \"name\": "
+                   "\"\xE5\x9C\xB0\xE9\x9D\xA2\"}\n    ]\n  }");
+  std::unique_ptr<ct::ProjectDocument> cjk = fresh();
+  t.check(
+      ct::parse_project_document(cjkLayers.data(), cjkLayers.size(), cjk.get())
+              .has_value() &&
+          (ct::find_collision_layer(cjk->collisionLayers,
+                                    "\xE5\x9C\xB0\xE9\x9D\xA2") == 4) &&
+          ct::format_project_document(*cjk, out.get(),
+                                      ct::kMaxProjectDocumentBytes, &length) &&
+          (std::string(out.get(), length) == cjkLayers),
+      "a CJK layer name reads and writes back byte for byte");
+
   const std::string shuffled = with_physics(
       "{\"ignoredPairs\": [[31, 3], [3, 3]], \"layers\": [{\"name\": "
       "\"Enemy.Projectile\", \"bit\": 31}, {\"bit\": 3, \"name\": "

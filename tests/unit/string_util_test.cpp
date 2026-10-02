@@ -11,6 +11,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <initializer_list>
 
 namespace {
 
@@ -117,8 +118,9 @@ int check_truncating_copy() {
   return 0;
 }
 
-/// The name-token rule: letters, digits, '_', '-' and '.', 1 to maxLength
-/// characters, never truncated; and case-insensitive equality.
+/// The name-token rule: letters (CJK, kana and Hangul included), digits,
+/// '_', '-' and '.', 1 to maxLength bytes of well-formed UTF-8, never
+/// truncated; and case-insensitive equality.
 int check_name_tokens() {
   if (!name_token_is_valid("coin", 4U) || !name_token_is_valid("a", 1U) ||
       !name_token_is_valid("Enemy_2.boss-A", 31U)) {
@@ -126,8 +128,47 @@ int check_name_tokens() {
   }
   if (name_token_is_valid("coins", 4U) || name_token_is_valid("", 31U) ||
       name_token_is_valid(nullptr, 31U) || name_token_is_valid("a b", 31U) ||
-      name_token_is_valid("a/b", 31U) || name_token_is_valid("\xC3\xA9", 31U)) {
+      name_token_is_valid("a/b", 31U)) {
     return 41;
+  }
+  // Authors name things in their own script (#1185): 敌人 (Chinese), 地面,
+  // 角色, がめん and パワー (kana with the prolonged-sound mark), 주인공
+  // (Hangul), café (Latin-1), and full-width Ａ１.
+  for (const char *name :
+       {"\xE6\x95\x8C\xE4\xBA\xBA", "\xE5\x9C\xB0\xE9\x9D\xA2",
+        "\xE8\xA7\x92\xE8\x89\xB2", "\xE3\x81\x8C\xE3\x82\x81\xE3\x82\x93",
+        "\xE3\x83\x91\xE3\x83\xAF\xE3\x83\xBC",
+        "\xEC\xA3\xBC\xEC\x9D\xB8\xEA\xB3\xB5", "caf\xC3\xA9",
+        "\xEF\xBC\xA1\xEF\xBC\x91", "enemy_\xE6\x95\x8C"}) {
+    if (!name_token_is_valid(name, 31U)) {
+      return 43;
+    }
+  }
+  // The limit is bytes: 主角 is six.
+  if (!name_token_is_valid("\xE4\xB8\xBB\xE8\xA7\x92", 6U) ||
+      name_token_is_valid("\xE4\xB8\xBB\xE8\xA7\x92", 5U)) {
+    return 44;
+  }
+  // Not UTF-8: an overlong '/', a lone continuation byte, a truncated
+  // sequence, an encoded surrogate, a code point past U+10FFFF.
+  for (const char *name :
+       {"\xC0\xAF", "\x80", "a\xE4\xB8", "\xED\xA0\x80", "\xF4\x90\x80\x80"}) {
+    if (name_token_is_valid(name, 31U)) {
+      return 45;
+    }
+  }
+  // Not letters: an arrow, an emoji, a CJK full stop, a no-break space, and
+  // the decomposed (NFD) spelling of が -- か then a combining voiced mark --
+  // so a name has one spelling only.
+  for (const char *name : {"a\xE2\x86\x92"
+                           "b",
+                           "\xF0\x9F\x98\x80", "\xE3\x80\x82",
+                           "a\xC2\xA0"
+                           "b",
+                           "\xE3\x81\x8B\xE3\x82\x99"}) {
+    if (name_token_is_valid(name, 31U)) {
+      return 46;
+    }
   }
   if (!equals_ignoring_case("Hero", "hERO") ||
       equals_ignoring_case("hero", "heroes") ||

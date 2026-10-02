@@ -61,8 +61,8 @@ const char *slot_argument(lua_State *state, int index) noexcept {
   if ((std::strlen(slot) != length) ||
       !core::name_token_is_valid(slot, kGameSaveSlotNameCapacity - 1U)) {
     luaL_argerror(state, index,
-                  "a save slot name is 1 to 31 letters, digits, '_', '-' "
-                  "or '.'");
+                  "a save slot name is 1 to 31 bytes of letters, digits, '_', "
+                  "'-' or '.'");
     return nullptr;
   }
   return slot;

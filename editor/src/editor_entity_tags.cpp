@@ -60,7 +60,8 @@ const char *apply_typed_tag(const runtime::TagSetComponent &current,
     return nullptr;
   case runtime::TagSetAdd::InvalidTag:
     *out = current;
-    return "A tag is 1 to 31 letters, digits, '_', '-' or '.'.";
+    return "A tag is 1 to 31 bytes of letters (CJK, kana and Hangul "
+           "included), digits, '_', '-' or '.'.";
   case runtime::TagSetAdd::Full:
     *out = current;
     return "An entity carries at most 8 tags.";
