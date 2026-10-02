@@ -101,7 +101,8 @@ PhysicsContext::operator=(const PhysicsContext &other) noexcept {
   // the live one, and a staged World never carries a dispatch, so copying
   // here would silently detach every collision and trigger callback on each
   // scene load or editor Stop restore. The destination keeps whatever
-  // dispatches its owner installed.
+  // dispatches its owner installed. collisionMatrix is the project's
+  // configuration, installed the same way and kept for the same reason.
   gravity = other.gravity;
   jointCount = other.jointCount;
   collisionPairData = other.collisionPairData;

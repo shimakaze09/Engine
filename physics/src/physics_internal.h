@@ -8,11 +8,30 @@
 #include "engine/physics/collider.h"
 #include "engine/physics/physics_context.h"
 
-#include <array>
 #include <algorithm>
+#include <array>
+#include <bit>
 #include <cmath>
 
 namespace engine::physics {
+
+// The one pair filter every contact path applies (resolve, triggers and
+// CCD): each collider's layer must be in the other's mask, and some layer
+// bit of one must collide with some layer bit of the other in the world's
+// layer matrix. For single-bit layers that is exactly Unity's rule; a
+// collider on several layers collides through any of them.
+inline bool colliders_may_collide(const Collider &a, const Collider &b,
+                                  const CollisionLayerMatrix &matrix) noexcept {
+  if (((a.collisionLayer & b.collisionMask) == 0U) ||
+      ((b.collisionLayer & a.collisionMask) == 0U)) {
+    return false;
+  }
+  std::uint32_t reach = 0U;
+  for (std::uint32_t bits = a.collisionLayer; bits != 0U; bits &= bits - 1U) {
+    reach |= matrix.rows[static_cast<std::size_t>(std::countr_zero(bits))];
+  }
+  return (reach & b.collisionLayer) != 0U;
+}
 
 // Broadphase spatial-hash shape shared by the resolve scratch below and
 // physics.cpp's grid passes.

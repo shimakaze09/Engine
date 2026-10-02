@@ -4,12 +4,16 @@
 // ones, every metadata row resolves against the runtime reflection schema
 // (#177 item 4), and the Euler round trip is exact away from the pitch =
 // +-90 deg gimbal pole and stays a valid (renormalized) rotation at the
-// pole.
+// pole. Collision layer labels follow the project's names, falling back
+// to "Layer N", and a mask summary names its layers in bit order, says
+// "Nothing" and "Everything", and counts what does not fit.
 
 #include "editor_inspector_metadata.h"
 
+#include "engine/content/project_document.h"
 #include "engine/core/reflect.h"
 #include "engine/math/quat.h"
+#include "engine/runtime/collision_layers.h"
 #include "engine/runtime/reflect_types.h"
 
 #include <cmath>
@@ -289,6 +293,67 @@ int check_layer_names_bounded() noexcept {
   return 0;
 }
 
+/// Labels come from the project's layers, and unnamed bits keep theirs.
+int check_layer_names_follow_project() noexcept {
+  engine::content::ProjectCollisionLayers layers{};
+  std::snprintf(layers.names[3], sizeof(layers.names[3]), "%s", "Player");
+  engine::runtime::set_project_collision_layers(layers);
+  const bool named =
+      std::strcmp(engine::editor::inspector_layer_name(3U), "Player") == 0;
+  const bool unnamed =
+      std::strcmp(engine::editor::inspector_layer_name(4U), "Layer 4") == 0;
+  engine::runtime::set_project_collision_layers(
+      engine::content::ProjectCollisionLayers{});
+  const bool restored =
+      std::strcmp(engine::editor::inspector_layer_name(3U), "Layer 3") == 0;
+  if (!named) {
+    return 1;
+  }
+  if (!unnamed) {
+    return 2;
+  }
+  return restored ? 0 : 3;
+}
+
+/// The summary a LayerMask node shows.
+int check_layer_mask_summary() noexcept {
+  engine::content::ProjectCollisionLayers layers{};
+  std::snprintf(layers.names[1], sizeof(layers.names[1]), "%s", "Player");
+  std::snprintf(layers.names[4], sizeof(layers.names[4]), "%s", "Enemy");
+  engine::runtime::set_project_collision_layers(layers);
+  char text[64] = {};
+  int result = 0;
+  engine::editor::layer_mask_summary(0U, text, sizeof(text));
+  if (std::strcmp(text, "Nothing") != 0) {
+    result = 1;
+  }
+  engine::editor::layer_mask_summary(0xFFFFFFFFU, text, sizeof(text));
+  if ((result == 0) && (std::strcmp(text, "Everything") != 0)) {
+    result = 2;
+  }
+  engine::editor::layer_mask_summary((1U << 4U) | (1U << 1U), text,
+                                     sizeof(text));
+  if ((result == 0) && (std::strcmp(text, "Player, Enemy") != 0)) {
+    result = 3;
+  }
+  engine::editor::layer_mask_summary((1U << 1U) | (1U << 7U), text,
+                                     sizeof(text));
+  if ((result == 0) && (std::strcmp(text, "Player, Layer 7") != 0)) {
+    result = 4;
+  }
+  // Every layer but one: 31 labels never fit 24 bytes, so the ones that do
+  // are followed by the count of the rest.
+  char small[24] = {};
+  engine::editor::layer_mask_summary(~1U, small, sizeof(small));
+  if ((result == 0) && (std::strcmp(small, "Player, Layer 2, +29") != 0)) {
+    std::fprintf(stderr, "  summary: \"%s\"\n", small);
+    result = 5;
+  }
+  engine::runtime::set_project_collision_layers(
+      engine::content::ProjectCollisionLayers{});
+  return result;
+}
+
 } // namespace
 
 int main() {
@@ -306,7 +371,10 @@ int main() {
       {"euler_identity", check_euler_identity},
       {"euler_yaw_only", check_euler_yaw_only},
       {"layer_names_bounded", check_layer_names_bounded},
-      {"metadata_rows_resolve_to_schema", check_metadata_rows_resolve_to_schema},
+      {"layer_names_follow_project", check_layer_names_follow_project},
+      {"layer_mask_summary", check_layer_mask_summary},
+      {"metadata_rows_resolve_to_schema",
+       check_metadata_rows_resolve_to_schema},
   };
   for (const Case &c : cases) {
     const int result = c.fn();

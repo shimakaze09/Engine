@@ -1568,6 +1568,14 @@ def test_duplicate_primitive_gate():
             "name_token_owner", "core/include/engine/core/string_util.h",
             token)]) == 0,
               "duplicate primitives: string_util.h owns the name-token rule")
+        pair = ("// Purpose.\nif ((a.collisionLayer & b.collisionMask) == 0U) "
+                "{}\n")
+        check(run([script, "--root", case(
+            "pair_filter", "physics/src/a.cpp", pair)]) != 0,
+              "duplicate primitives: a written-out pair filter is a finding")
+        check(run([script, "--root", case(
+            "pair_filter_owner", "physics/src/physics_internal.h", pair)]) == 0,
+              "duplicate primitives: physics_internal.h owns the pair filter")
         colour = "// Purpose.\nImGui::ColorEdit3(\"Tint\", &tint.x);\n"
         check(run([script, "--root", case(
             "colour_field", "editor/src/a.cpp", colour)]) != 0,

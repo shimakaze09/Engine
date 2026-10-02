@@ -1,16 +1,22 @@
 // Declares the Project Settings window (Edit > Project Settings..., as in
 // Unity; Godot's Project > Project Settings): the settings a project
 // carries in its .project document, for everyone who opens it, where
-// Preferences hold one user's editor settings. It edits the Lua sandbox
-// limits: the instructions every script shares per frame and the memory
-// the Lua allocator may hold. Apply saves the document through its staged
-// writer and applies the limits to the running VM at once.
+// Preferences hold one user's editor settings. Its Scripting section edits
+// the Lua sandbox limits: the instructions every script shares per frame
+// and the memory the Lua allocator may hold. Its Physics section names the
+// collision layers and sets which layers collide (Unity's Layer Collision
+// Matrix). Each section's Apply saves the document through its staged
+// writer and only then applies the change to the running engine.
 
 #pragma once
 
 #include <cstddef>
 
 #include "engine/content/project_document.h"
+
+namespace engine::runtime {
+class World;
+} // namespace engine::runtime
 
 namespace engine::editor {
 
@@ -44,6 +50,23 @@ const char *project_settings_problem(const ProjectSettingsDraft &draft,
 /// and logs why.
 bool save_project_settings(const char *projectFile,
                            const ProjectSettingsDraft &draft) noexcept;
+
+/// Writes why `layers` cannot be applied into `out` and returns true, or
+/// returns false when they can: a name that is not a name token or repeats
+/// another ignoring case, or a one-sided matrix.
+bool project_physics_problem(const content::ProjectCollisionLayers &layers,
+                             char *out, std::size_t capacity) noexcept;
+
+/// Saves `layers` into the document at `projectFile` and, once it is
+/// written, makes them the project's layers for Lua and the Inspector and
+/// installs their matrix on `world` (when not null). The document is read
+/// afresh so nothing else in it is lost; the default layers write no
+/// "physics" section. A refused set, a document that will not read or a
+/// failed write leaves the file, the project's layers and the world as
+/// they were, and logs why.
+bool save_project_physics(const char *projectFile,
+                          const content::ProjectCollisionLayers &layers,
+                          runtime::World *world) noexcept;
 
 /// Registers the cvar that shows the window.
 void register_project_settings() noexcept;

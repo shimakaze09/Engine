@@ -14,6 +14,7 @@
 #include "engine/core/file_read.h"
 #include "engine/core/json.h"
 #include "engine/core/logging.h"
+#include "engine/core/string_util.h"
 #include "engine/core/vfs.h"
 
 namespace engine::content {
@@ -296,6 +297,131 @@ read_packages(const core::JsonParser &parser, const core::JsonValue &array,
   return {};
 }
 
+/// Reads a layer bit: an integer from 0 to kMaxCollisionLayers - 1.
+std::expected<void, ProjectReadFailure>
+read_layer_bit(const core::JsonParser &parser, const core::JsonValue &value,
+               const char *field, std::uint32_t *out) noexcept {
+  std::int64_t number = 0;
+  if (!parser.as_int64(value, &number)) {
+    return refuse(field, "is not an integer");
+  }
+  if ((number < 0) ||
+      (number >= static_cast<std::int64_t>(kMaxCollisionLayers))) {
+    return refuse(field, "is not a layer from 0 to 31");
+  }
+  *out = static_cast<std::uint32_t>(number);
+  return {};
+}
+
+/// Reads the "physics" object: "layers", each {"bit", "name"}, and
+/// "ignoredPairs", each [a, b]. Either may be absent, neither may be empty,
+/// and no bit, name or pair may repeat; names and symmetry are left to
+/// validation.
+std::expected<void, ProjectReadFailure>
+read_physics(const core::JsonParser &parser, const core::JsonValue &physics,
+             ProjectCollisionLayers *out) noexcept {
+  if (physics.type != core::JsonValue::Type::Object) {
+    return refuse("physics", "is not an object");
+  }
+  constexpr const char *kPhysicsKeys[] = {"layers", "ignoredPairs"};
+  if (auto r = check_members(parser, physics, kPhysicsKeys, 2U, "physics");
+      !r.has_value()) {
+    return r;
+  }
+  if (parser.object_size(physics) == 0U) {
+    // Absent is how a project keeps the default layers; an empty object
+    // would be a second spelling of the same thing.
+    return refuse("physics", "is empty; omit it instead");
+  }
+  core::JsonValue layers{};
+  if (parser.get_object_field(physics, "layers", &layers)) {
+    if (layers.type != core::JsonValue::Type::Array) {
+      return refuse("physics.layers", "is not an array");
+    }
+    const std::size_t count = parser.array_size(layers);
+    if (count == 0U) {
+      return refuse("physics.layers", "is empty; omit it instead");
+    }
+    if (count > kMaxCollisionLayers) {
+      return refuse("physics.layers", "names more than 32 layers");
+    }
+    constexpr const char *kLayerKeys[] = {"bit", "name"};
+    for (std::size_t i = 0U; i < count; ++i) {
+      char field[40] = {};
+      std::snprintf(field, sizeof(field), "physics.layers[%zu]", i);
+      core::JsonValue element{};
+      if (!parser.get_array_element(layers, i, &element) ||
+          (element.type != core::JsonValue::Type::Object)) {
+        return refuse(field, "is not an object");
+      }
+      if (auto r = check_members(parser, element, kLayerKeys, 2U, field);
+          !r.has_value()) {
+        return r;
+      }
+      char bitField[64] = {};
+      std::snprintf(bitField, sizeof(bitField), "%s.bit", field);
+      core::JsonValue bitValue{};
+      if (!parser.get_object_field(element, "bit", &bitValue)) {
+        return refuse(bitField, "is missing");
+      }
+      std::uint32_t bit = 0U;
+      if (auto r = read_layer_bit(parser, bitValue, bitField, &bit);
+          !r.has_value()) {
+        return r;
+      }
+      if (out->names[bit][0] != '\0') {
+        return refuse(bitField, "names a layer an earlier entry named");
+      }
+      char nameField[64] = {};
+      std::snprintf(nameField, sizeof(nameField), "%s.name", field);
+      if (auto r = read_string(parser, element, "name", nameField,
+                               out->names[bit], sizeof(out->names[bit]));
+          !r.has_value()) {
+        return r;
+      }
+      if (out->names[bit][0] == '\0') {
+        return refuse(nameField, "is empty; leave the layer out instead");
+      }
+    }
+  }
+  core::JsonValue pairs{};
+  if (parser.get_object_field(physics, "ignoredPairs", &pairs)) {
+    if (pairs.type != core::JsonValue::Type::Array) {
+      return refuse("physics.ignoredPairs", "is not an array");
+    }
+    const std::size_t count = parser.array_size(pairs);
+    if (count == 0U) {
+      return refuse("physics.ignoredPairs", "is empty; omit it instead");
+    }
+    for (std::size_t i = 0U; i < count; ++i) {
+      char field[48] = {};
+      std::snprintf(field, sizeof(field), "physics.ignoredPairs[%zu]", i);
+      core::JsonValue element{};
+      if (!parser.get_array_element(pairs, i, &element) ||
+          (element.type != core::JsonValue::Type::Array) ||
+          (parser.array_size(element) != 2U)) {
+        return refuse(field, "is not a pair of layers");
+      }
+      std::uint32_t bits[2] = {};
+      for (std::size_t k = 0U; k < 2U; ++k) {
+        core::JsonValue bitValue{};
+        if (!parser.get_array_element(element, k, &bitValue)) {
+          return refuse(field, "is not a pair of layers");
+        }
+        if (auto r = read_layer_bit(parser, bitValue, field, &bits[k]);
+            !r.has_value()) {
+          return r;
+        }
+      }
+      if ((out->collides[bits[0]] & (1U << bits[1])) == 0U) {
+        return refuse(field, "repeats an earlier pair");
+      }
+      set_collision_layer_pair(out, bits[0], bits[1], false);
+    }
+  }
+  return {};
+}
+
 /// Appends text whole; sticky failure once it does not fit.
 struct Appender final {
   char *out;
@@ -332,6 +458,75 @@ struct Appender final {
 };
 
 } // namespace
+
+bool collision_layers_are_default(
+    const ProjectCollisionLayers &layers) noexcept {
+  for (std::size_t i = 0U; i < kMaxCollisionLayers; ++i) {
+    if ((layers.names[i][0] != '\0') || (layers.collides[i] != 0xFFFFFFFFU)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+int find_collision_layer(const ProjectCollisionLayers &layers,
+                         const char *name) noexcept {
+  if ((name == nullptr) || (name[0] == '\0')) {
+    return -1;
+  }
+  for (std::size_t i = 0U; i < kMaxCollisionLayers; ++i) {
+    if (core::equals_ignoring_case(layers.names[i], name)) {
+      return static_cast<int>(i);
+    }
+  }
+  return -1;
+}
+
+void set_collision_layer_pair(ProjectCollisionLayers *layers, std::uint32_t a,
+                              std::uint32_t b, bool collide) noexcept {
+  if ((layers == nullptr) || (a >= kMaxCollisionLayers) ||
+      (b >= kMaxCollisionLayers)) {
+    return;
+  }
+  if (collide) {
+    layers->collides[a] |= (1U << b);
+    layers->collides[b] |= (1U << a);
+  } else {
+    layers->collides[a] &= ~(1U << b);
+    layers->collides[b] &= ~(1U << a);
+  }
+}
+
+std::expected<void, ProjectReadFailure>
+validate_collision_layers(const ProjectCollisionLayers &layers) noexcept {
+  for (std::uint32_t i = 0U; i < kMaxCollisionLayers; ++i) {
+    char field[48] = {};
+    std::snprintf(field, sizeof(field), "physics.layers[%u].name", i);
+    const char *name = layers.names[i];
+    if (std::memchr(name, '\0', kCollisionLayerNameCapacity) == nullptr) {
+      return refuse(field, "is too long");
+    }
+    if (name[0] != '\0') {
+      if (!core::name_token_is_valid(name, kCollisionLayerNameCapacity - 1U)) {
+        return refuse(field, "is not letters, digits, '_', '-' and '.'");
+      }
+      for (std::uint32_t j = 0U; j < i; ++j) {
+        if (core::equals_ignoring_case(name, layers.names[j])) {
+          return refuse(field, "repeats an earlier layer's name");
+        }
+      }
+    }
+    for (std::uint32_t j = 0U; j < kMaxCollisionLayers; ++j) {
+      const bool ij = (layers.collides[i] & (1U << j)) != 0U;
+      const bool ji = (layers.collides[j] & (1U << i)) != 0U;
+      if (ij != ji) {
+        return refuse("physics.ignoredPairs",
+                      "is not symmetric: a pair collides one way round only");
+      }
+    }
+  }
+  return {};
+}
 
 std::expected<void, ProjectReadFailure>
 validate_project_document(const ProjectDocument &document) noexcept {
@@ -432,7 +627,7 @@ validate_project_document(const ProjectDocument &document) noexcept {
     return refuse("scripting.memoryLimitMiB",
                   "is neither 0 (unlimited) nor from 16 to 2048");
   }
-  return {};
+  return validate_collision_layers(document.collisionLayers);
 }
 
 std::expected<void, ProjectReadFailure>
@@ -467,14 +662,14 @@ parse_project_document(const char *text, std::size_t length,
   }
 
   constexpr const char *kTopKeys[] = {
-      "schemaVersion", "identity",   "roots",     "scenes",
-      "startupScene",  "mainScript", "scripting", "dependencies"};
+      "schemaVersion", "identity",  "roots",        "scenes", "startupScene",
+      "mainScript",    "scripting", "dependencies", "physics"};
   constexpr const char *kIdentityKeys[] = {"name", "organisation", "version",
                                            "guid"};
   constexpr const char *kRootKeys[] = {"content", "cache"};
   constexpr const char *kScriptingKeys[] = {"instructionLimit",
                                             "memoryLimitMiB"};
-  if (auto checked = check_members(parser, root, kTopKeys, 8U, "");
+  if (auto checked = check_members(parser, root, kTopKeys, 9U, "");
       !checked.has_value()) {
     return checked;
   }
@@ -624,6 +819,14 @@ parse_project_document(const char *text, std::size_t length,
     }
   }
 
+  core::JsonValue physics{};
+  if (parser.get_object_field(root, "physics", &physics)) {
+    if (auto r = read_physics(parser, physics, &staged->collisionLayers);
+        !r.has_value()) {
+      return r;
+    }
+  }
+
   if (auto r = validate_project_document(*staged); !r.has_value()) {
     return r;
   }
@@ -738,6 +941,53 @@ bool format_project_document(const ProjectDocument &document, char *out,
       a.text("}");
     }
     a.text("\n  ]");
+  }
+  const ProjectCollisionLayers &layers = document.collisionLayers;
+  if (!collision_layers_are_default(layers)) {
+    // Layers by bit and pairs as (low, high) in ascending order, so the
+    // same layers always write the same bytes however they were read.
+    char number[48] = {};
+    bool anyName = false;
+    bool anyPair = false;
+    for (std::uint32_t i = 0U; i < kMaxCollisionLayers; ++i) {
+      anyName = anyName || (layers.names[i][0] != '\0');
+      anyPair = anyPair || (layers.collides[i] != 0xFFFFFFFFU);
+    }
+    a.text(",\n  \"physics\": {");
+    if (anyName) {
+      a.text("\n    \"layers\": [");
+      bool first = true;
+      for (std::uint32_t i = 0U; i < kMaxCollisionLayers; ++i) {
+        if (layers.names[i][0] == '\0') {
+          continue;
+        }
+        std::snprintf(number, sizeof(number), "{\"bit\": %u, \"name\": ", i);
+        a.text(first ? "\n      " : ",\n      ");
+        a.text(number);
+        a.quoted(layers.names[i]);
+        a.text("}");
+        first = false;
+      }
+      a.text("\n    ]");
+    }
+    if (anyPair) {
+      a.text(anyName ? ",\n    \"ignoredPairs\": ["
+                     : "\n    \"ignoredPairs\": [");
+      bool first = true;
+      for (std::uint32_t i = 0U; i < kMaxCollisionLayers; ++i) {
+        for (std::uint32_t j = i; j < kMaxCollisionLayers; ++j) {
+          if ((layers.collides[i] & (1U << j)) != 0U) {
+            continue;
+          }
+          std::snprintf(number, sizeof(number), "[%u, %u]", i, j);
+          a.text(first ? "\n      " : ",\n      ");
+          a.text(number);
+          first = false;
+        }
+      }
+      a.text("\n    ]");
+    }
+    a.text("\n  }");
   }
   a.text("\n}\n");
   if (!a.ok) {

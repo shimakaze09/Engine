@@ -209,6 +209,7 @@ open_project(const char *path, ProjectStorage *storage,
       project_script_limits(storage->document.scriptLimits);
   config->scriptInstructionLimit = limits.instructionLimit;
   config->scriptMemoryLimitBytes = limits.memoryLimitBytes;
+  config->collisionLayers = storage->document.collisionLayers;
   config->core.projectGuid = storage->document.guid;
 
   char message[512] = {};
@@ -269,6 +270,7 @@ void configure_without_project(EngineConfig *config) noexcept {
   const ScriptLimits defaults{};
   config->scriptInstructionLimit = defaults.instructionLimit;
   config->scriptMemoryLimitBytes = defaults.memoryLimitBytes;
+  config->collisionLayers = content::ProjectCollisionLayers{};
   config->core.projectGuid = core::AssetGuid{};
 }
 

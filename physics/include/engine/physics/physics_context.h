@@ -214,16 +214,34 @@ struct ResolveScratch;
 /// only when it differs from this, and reset_world returns to it.
 inline constexpr math::Vec3 kDefaultGravity{0.0F, -9.8F, 0.0F};
 
+/// Collision layers: the 32 bits of Collider::collisionLayer and
+/// collisionMask.
+inline constexpr std::size_t kCollisionLayerCount = 32U;
+
+/// Which collision layers may collide, Unity's Layer Collision Matrix: bit
+/// j of rows[i] is set when layer i may collide with layer j. Kept
+/// symmetric by its owner. All set, the default, filters nothing beyond
+/// the colliders' own masks.
+struct CollisionLayerMatrix final {
+  std::array<std::uint32_t, kCollisionLayerCount> rows = [] {
+    std::array<std::uint32_t, kCollisionLayerCount> all{};
+    all.fill(0xFFFFFFFFU);
+    return all;
+  }();
+};
+
 struct PhysicsContext final {
   PhysicsContext() noexcept;
   /// Copies context data and deep-copies owned shape payloads; the
-  /// transient resolve scratch and the run-tier collision and trigger
-  /// dispatches are deliberately not copied (a copy starts with none).
+  /// transient resolve scratch, the run-tier collision and trigger
+  /// dispatches and the layer matrix are deliberately not copied (a copy
+  /// starts with none and the default matrix).
   PhysicsContext(const PhysicsContext &other) noexcept;
   /// Copies context data and deep-copies owned shape payloads; the
   /// transient resolve scratch is deliberately not copied and the
-  /// destination keeps its own dispatches (run-tier state, not
-  /// world content, so a scene commit cannot detach the live callbacks).
+  /// destination keeps its own dispatches and layer matrix (run-tier
+  /// state, not world content, so a scene commit cannot detach the live
+  /// callbacks or drop the project's matrix).
   PhysicsContext &operator=(const PhysicsContext &other) noexcept;
   // Out-of-line (ResolveScratch is incomplete here).
   PhysicsContext(PhysicsContext &&other) noexcept;
@@ -248,6 +266,12 @@ struct PhysicsContext final {
   // Run-tier trigger-event callback, installed and kept like
   // collisionDispatch.
   TriggerDispatchFn triggerDispatch = nullptr;
+  // The project's layer collision matrix: run-tier configuration the
+  // World's owner installs from the project, kept like the dispatches, so a
+  // scene load or an editor Stop restore cannot reset it to the default. It
+  // is configuration, not simulation state, so the state hash leaves it
+  // out, as it does the solver cvars.
+  CollisionLayerMatrix collisionMatrix{};
 
   // Frame-accumulated pairs: every fixed step appends its kept
   // pairs in step order and dispatch drains once per rendered frame, so a

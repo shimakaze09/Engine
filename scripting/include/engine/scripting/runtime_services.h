@@ -298,13 +298,20 @@ struct RuntimeServices final {
                       float z) noexcept = nullptr;
   bool (*get_gravity)(runtime::World *world, float *outX, float *outY,
                       float *outZ) noexcept = nullptr;
+  /// The bit of the project's collision layer named `name`, matched
+  /// ignoring case; -1 when no layer has that name.
+  int (*collision_layer_bit)(const char *name) noexcept = nullptr;
+  /// Copies the name of collision layer `bit` into `out` whole; false when
+  /// the layer is unnamed, the bit is past 31 or the name does not fit.
+  bool (*collision_layer_name)(std::uint32_t bit, char *out,
+                               std::size_t capacity) noexcept = nullptr;
   /// Ray queries take the same skipEntity as the sweeps (kInvalidEntity
   /// for none): that entity's colliders and the compound colliders it owns
   /// are excluded.
   bool (*raycast)(runtime::World *world, float ox, float oy, float oz, float dx,
                   float dy, float dz, float maxDistance,
-                  RuntimeRaycastHit *outHit,
-                  core::Entity skipEntity) noexcept = nullptr;
+                  RuntimeRaycastHit *outHit, core::Entity skipEntity,
+                  std::uint32_t mask) noexcept = nullptr;
   std::size_t (*raycast_all)(runtime::World *world, float ox, float oy,
                              float oz, float dx, float dy, float dz,
                              float maxDistance, RuntimeRaycastHit *outHits,

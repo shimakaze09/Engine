@@ -1,9 +1,9 @@
 // Declares the project document: "<name>.project" at a project
 // directory's root, the file that makes a directory a project (decision
 // 0016). It owns the project's identity, its roots, its scene list, its
-// startup scene, its main script, its script limits and the packages it
-// depends on; every other per-project table joins it as a schema field
-// when the epic that needs it lands.
+// startup scene, its main script, its script limits, its named collision
+// layers and the packages it depends on; every other per-project table joins it
+// as a schema field when the epic that needs it lands.
 //
 // The document is authored and committed. Reading refuses anything this
 // schema does not describe exactly: an unknown version, an unknown or
@@ -97,6 +97,52 @@ struct ProjectScriptLimits final {
   std::uint32_t memoryLimitMiB = 0U;
 };
 
+/// Physics collision layers: the 32 bits of Collider::collisionLayer and
+/// collisionMask, as Godot's and Unity's are.
+inline constexpr std::size_t kMaxCollisionLayers = 32U;
+
+/// A layer name's capacity, terminator included.
+inline constexpr std::size_t kCollisionLayerNameCapacity = 32U;
+
+/// The project's collision layers: a name for each bit the author named
+/// (Godot's layer_names/3d_physics) and which layers may collide (Unity's
+/// Layer Collision Matrix). Names only label the bits a collider already
+/// carries, so naming, renaming or clearing one changes no scene. Written
+/// as the optional "physics" object, omitted while every name is empty and
+/// every pair collides.
+struct ProjectCollisionLayers final {
+  /// The name of each bit, or empty when the author left it unnamed. A
+  /// name is a name token ([A-Za-z0-9_.-], at most 31 characters) and no
+  /// two names match ignoring case, so Lua and the editor can look a layer
+  /// up by it.
+  char names[kMaxCollisionLayers][kCollisionLayerNameCapacity] = {};
+  /// Bit j of collides[i] is set when layer i may collide with layer j.
+  /// Symmetric, so a pair reads the same either way round; all set by
+  /// default, which is the engine's behaviour without a matrix.
+  std::uint32_t collides[kMaxCollisionLayers] = {
+      0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU,
+      0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU,
+      0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU,
+      0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU,
+      0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU,
+      0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU, 0xFFFFFFFFU,
+      0xFFFFFFFFU, 0xFFFFFFFFU};
+};
+
+/// True when no layer is named and every pair collides.
+bool collision_layers_are_default(
+    const ProjectCollisionLayers &layers) noexcept;
+
+/// The bit named `name` (matched ignoring case), or -1 when no layer has
+/// that name.
+int find_collision_layer(const ProjectCollisionLayers &layers,
+                         const char *name) noexcept;
+
+/// Sets whether layers `a` and `b` may collide, both ways round. Ignored
+/// for a bit past kMaxCollisionLayers.
+void set_collision_layer_pair(ProjectCollisionLayers *layers, std::uint32_t a,
+                              std::uint32_t b, bool collide) noexcept;
+
 /// A project document's contents.
 struct ProjectDocument final {
   /// The project's name, also its file name: "<name>.project". No path
@@ -127,6 +173,8 @@ struct ProjectDocument final {
   char mainScript[kProjectPathCapacity] = {};
   /// The script limits the project sets, if any.
   ProjectScriptLimits scriptLimits{};
+  /// The project's collision layer names and matrix.
+  ProjectCollisionLayers collisionLayers{};
   /// The packages the project depends on, in the author's order; none is
   /// written as no "dependencies" key.
   ProjectPackage packages[kMaxProjectPackages] = {};
@@ -165,6 +213,12 @@ parse_project_document(const char *text, std::size_t length,
 /// path, the field and the reason. `*out` is written only on success.
 std::expected<void, ProjectReadFailure>
 read_project_document(const char *osPath, ProjectDocument *out) noexcept;
+
+/// Checks collision layers against the document's rules: every name a
+/// name token unique ignoring case, and a symmetric matrix. The failure
+/// names the field as the document spells it ("physics.layers[3].name").
+std::expected<void, ProjectReadFailure>
+validate_collision_layers(const ProjectCollisionLayers &layers) noexcept;
 
 /// Checks `document` against every rule the reader enforces, so a writer
 /// never produces a file its own reader would refuse.

@@ -11,8 +11,8 @@ and by its mounted content root otherwise. Point 1's document format
 exists: the `.project` reader and writer
 (`content/include/engine/content/project_document.h`) own identity, roots,
 the scene list, the startup scene, the main script and its sandbox
-budgets (edited in the editor's Project Settings) and the packages it
-depends on (each mounted at `packages/<name>`, #759), and
+budgets and the collision layers and their matrix (both edited in the
+editor's Project Settings) and the packages it depends on (each mounted at `packages/<name>`, #759), and
 `engine_unit_project_document` pins them. A project opens by path through
 `engine::open_project` (`runtime/include/engine/project.h`,
 `engine_integration_project_open`), which `engine_validate --project`

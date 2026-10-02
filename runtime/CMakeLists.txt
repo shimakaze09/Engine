@@ -21,6 +21,7 @@ engine_add_module_library(engine_runtime
     src/mesh_reference_resolution.cpp
     src/scene_environment.cpp
     src/physics_bridge.cpp
+    src/collision_layers.cpp
     src/prefab_serializer.cpp
     src/primitive_collider.cpp
     src/render_prep_pipeline.cpp

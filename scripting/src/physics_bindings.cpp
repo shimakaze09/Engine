@@ -44,6 +44,42 @@ struct LockRotationCapture final {
 constexpr std::size_t kMaxLockCaptures = ENGINE_MAX_ENTITIES + 1U;
 LockRotationCapture g_lockRotationCaptures[kMaxLockCaptures]{};
 
+/// Reads a layer or mask argument: a Lua integer whose low 32 bits are the
+/// layer bits, so `~engine.layer_mask("Player")` (a negative integer in
+/// Lua 5.4) means every layer but Player. Anything else - a string, a
+/// fraction, a value past 32 bits either way - is refused with a Warning
+/// naming `what`, never read as some other mask.
+bool read_layer_bits(lua_State *state, int index, const char *what,
+                     std::uint32_t *out) noexcept {
+  int isInteger = 0;
+  const lua_Integer value = (lua_type(state, index) == LUA_TNUMBER)
+                                ? lua_tointegerx(state, index, &isInteger)
+                                : 0;
+  constexpr lua_Integer kLimit = static_cast<lua_Integer>(0x100000000LL);
+  if ((isInteger == 0) || (value >= kLimit) || (value < -kLimit)) {
+    char message[160] = {};
+    std::snprintf(message, sizeof(message),
+                  "%s is not an integer of 32 layer bits", what);
+    core::log_message(core::LogLevel::Warning, "scripting", message);
+    return false;
+  }
+  *out = static_cast<std::uint32_t>(static_cast<std::uint64_t>(value) &
+                                    0xFFFFFFFFULL);
+  return true;
+}
+
+/// Reads an optional query mask: absent or nil is every layer, anything
+/// else must be layer bits. A present but malformed mask fails the query
+/// rather than silently hitting every layer.
+bool read_optional_layer_mask(lua_State *state, int index,
+                              std::uint32_t *out) noexcept {
+  *out = 0xFFFFFFFFU;
+  if (lua_isnoneornil(state, index)) {
+    return true;
+  }
+  return read_layer_bits(state, index, "query mask", out);
+}
+
 // engine.add_capsule_collider(entity, half_height, radius) → bool
 int lua_engine_add_capsule_collider(lua_State *state) noexcept {
   runtime::Entity entity{};
@@ -260,7 +296,8 @@ int lua_engine_set_collision_layer(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
-  if (!lua_isnumber(state, 2)) {
+  std::uint32_t bits = 0U;
+  if (!read_layer_bits(state, 2, "collision layer", &bits)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -269,7 +306,7 @@ int lua_engine_set_collision_layer(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
-  collider.collisionLayer = static_cast<std::uint32_t>(lua_tointeger(state, 2));
+  collider.collisionLayer = bits;
   const bool ok = apply_or_queue_collider(entity, collider);
   lua_pushboolean(state, ok ? 1 : 0);
   return 1;
@@ -282,7 +319,8 @@ int lua_engine_set_collision_mask(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
-  if (!lua_isnumber(state, 2)) {
+  std::uint32_t bits = 0U;
+  if (!read_layer_bits(state, 2, "collision mask", &bits)) {
     lua_pushboolean(state, 0);
     return 1;
   }
@@ -291,9 +329,93 @@ int lua_engine_set_collision_mask(lua_State *state) noexcept {
     lua_pushboolean(state, 0);
     return 1;
   }
-  collider.collisionMask = static_cast<std::uint32_t>(lua_tointeger(state, 2));
+  collider.collisionMask = bits;
   const bool ok = apply_or_queue_collider(entity, collider);
   lua_pushboolean(state, ok ? 1 : 0);
+  return 1;
+}
+
+// engine.get_collision_layer(entity) → layer bits, or nil without a
+// collider.
+int lua_engine_get_collision_layer(lua_State *state) noexcept {
+  runtime::Entity entity{};
+  runtime::Collider collider{};
+  if (!read_entity(state, 1, &entity) || !latest_collider(entity, &collider)) {
+    lua_pushnil(state);
+    return 1;
+  }
+  lua_pushinteger(state, static_cast<lua_Integer>(collider.collisionLayer));
+  return 1;
+}
+
+// engine.get_collision_mask(entity) → mask bits, or nil without a collider.
+int lua_engine_get_collision_mask(lua_State *state) noexcept {
+  runtime::Entity entity{};
+  runtime::Collider collider{};
+  if (!read_entity(state, 1, &entity) || !latest_collider(entity, &collider)) {
+    lua_pushnil(state);
+    return 1;
+  }
+  lua_pushinteger(state, static_cast<lua_Integer>(collider.collisionMask));
+  return 1;
+}
+
+/// The bit of the project layer named by the string at `index`, or -1
+/// when it is not a string or names no layer; the caller raises.
+int project_layer_bit(lua_State *state, int index) noexcept {
+  if ((lua_type(state, index) != LUA_TSTRING) || !runtime_bound() ||
+      (runtime_binding().services->collision_layer_bit == nullptr)) {
+    return -1;
+  }
+  return runtime_binding().services->collision_layer_bit(
+      lua_tostring(state, index));
+}
+
+// engine.layer_mask(name, ...) → the mask with each named layer's bit set,
+// as Unity's LayerMask.GetMask. An unknown name is a Lua error: a nil mask
+// would mean every layer to a query, so it must never stand in for a typo.
+int lua_engine_layer_mask(lua_State *state) noexcept {
+  const int count = lua_gettop(state);
+  if (count == 0) {
+    return luaL_error(state, "layer_mask expects at least one layer name");
+  }
+  std::uint32_t mask = 0U;
+  for (int i = 1; i <= count; ++i) {
+    const int bit = project_layer_bit(state, i);
+    if (bit < 0) {
+      return luaL_error(
+          state, "layer_mask: argument %d is not a project layer name", i);
+    }
+    mask |= (1U << static_cast<std::uint32_t>(bit));
+  }
+  lua_pushinteger(state, static_cast<lua_Integer>(mask));
+  return 1;
+}
+
+// engine.layer_bit(name) → the layer's bit index (0-31), as Unity's
+// LayerMask.NameToLayer; an unknown name is a Lua error.
+int lua_engine_layer_bit(lua_State *state) noexcept {
+  const int bit = project_layer_bit(state, 1);
+  if (bit < 0) {
+    return luaL_error(state, "layer_bit: not a project layer name");
+  }
+  lua_pushinteger(state, static_cast<lua_Integer>(bit));
+  return 1;
+}
+
+// engine.layer_name(bit) → the layer's name, or nil when it is unnamed.
+int lua_engine_layer_name(lua_State *state) noexcept {
+  int isInteger = 0;
+  const lua_Integer bit = lua_tointegerx(state, 1, &isInteger);
+  char name[64] = {};
+  if ((isInteger == 0) || (bit < 0) || (bit > 31) || !runtime_bound() ||
+      (runtime_binding().services->collision_layer_name == nullptr) ||
+      !runtime_binding().services->collision_layer_name(
+          static_cast<std::uint32_t>(bit), name, sizeof(name))) {
+    lua_pushnil(state);
+    return 1;
+  }
+  lua_pushstring(state, name);
   return 1;
 }
 
@@ -376,9 +498,10 @@ int lua_engine_get_gravity(lua_State *state) noexcept {
 bool read_optional_skip_entity(lua_State *state, int index,
                                runtime::Entity *outSkipEntity) noexcept;
 
-// engine.raycast(ox,oy,oz, dx,dy,dz, max_dist [, skip_entity])
+// engine.raycast(ox,oy,oz, dx,dy,dz, max_dist [, skip_entity [, mask]])
 // skip_entity excludes that entity's colliders and any compound-body
-// colliders it owns, as the sweeps do.
+// colliders it owns, as the sweeps do; the mask, after it so existing
+// calls keep their meaning, limits hits to those layers.
 int lua_engine_raycast(lua_State *state) noexcept {
   if (!runtime_bound()) {
     lua_pushnil(state);
@@ -395,13 +518,18 @@ int lua_engine_raycast(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
+  std::uint32_t mask = 0xFFFFFFFFU;
+  if (!read_optional_layer_mask(state, 9, &mask)) {
+    lua_pushnil(state);
+    return 1;
+  }
 
   RuntimeRaycastHit hit{};
-  if ((runtime_binding().services == nullptr) || (runtime_binding().services->raycast == nullptr) ||
-      !runtime_binding().services->raycast(runtime_binding().world, origin.x,
-                                           origin.y, origin.z, direction.x,
-                                           direction.y, direction.z, maxDist,
-                                           &hit, skipEntity)) {
+  if ((runtime_binding().services == nullptr) ||
+      (runtime_binding().services->raycast == nullptr) ||
+      !runtime_binding().services->raycast(
+          runtime_binding().world, origin.x, origin.y, origin.z, direction.x,
+          direction.y, direction.z, maxDist, &hit, skipEntity, mask)) {
     lua_pushnil(state);
     return 1;
   }
@@ -433,10 +561,11 @@ int lua_engine_raycast_all(lua_State *state) noexcept {
     lua_newtable(state);
     return 1;
   }
-  const std::uint32_t mask =
-      lua_isnumber(state, 8)
-          ? static_cast<std::uint32_t>(lua_tointeger(state, 8))
-          : 0xFFFFFFFFU;
+  std::uint32_t mask = 0xFFFFFFFFU;
+  if (!read_optional_layer_mask(state, 8, &mask)) {
+    lua_newtable(state);
+    return 1;
+  }
   runtime::Entity skipEntity = runtime::kInvalidEntity;
   if (!read_optional_skip_entity(state, 9, &skipEntity)) {
     lua_newtable(state);
@@ -487,10 +616,11 @@ int lua_engine_overlap_sphere(lua_State *state) noexcept {
     lua_newtable(state);
     return 1;
   }
-  const std::uint32_t mask =
-      lua_isnumber(state, 5)
-          ? static_cast<std::uint32_t>(lua_tointeger(state, 5))
-          : 0xFFFFFFFFU;
+  std::uint32_t mask = 0xFFFFFFFFU;
+  if (!read_optional_layer_mask(state, 5, &mask)) {
+    lua_newtable(state);
+    return 1;
+  }
 
   constexpr std::size_t kMaxResults = 64U;
   runtime::Entity entities[kMaxResults]{};
@@ -520,10 +650,11 @@ int lua_engine_overlap_box(lua_State *state) noexcept {
     lua_newtable(state);
     return 1;
   }
-  const std::uint32_t mask =
-      lua_isnumber(state, 7)
-          ? static_cast<std::uint32_t>(lua_tointeger(state, 7))
-          : 0xFFFFFFFFU;
+  std::uint32_t mask = 0xFFFFFFFFU;
+  if (!read_optional_layer_mask(state, 7, &mask)) {
+    lua_newtable(state);
+    return 1;
+  }
 
   constexpr std::size_t kMaxResults = 64U;
   runtime::Entity entities[kMaxResults]{};
@@ -578,10 +709,11 @@ int lua_engine_sweep_sphere(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
-  const std::uint32_t mask =
-      lua_isnumber(state, 9)
-          ? static_cast<std::uint32_t>(lua_tointeger(state, 9))
-          : 0xFFFFFFFFU;
+  std::uint32_t mask = 0xFFFFFFFFU;
+  if (!read_optional_layer_mask(state, 9, &mask)) {
+    lua_pushnil(state);
+    return 1;
+  }
   runtime::Entity skipEntity = runtime::kInvalidEntity;
   if (!read_optional_skip_entity(state, 10, &skipEntity)) {
     lua_pushnil(state);
@@ -628,10 +760,11 @@ int lua_engine_sweep_box(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
-  const std::uint32_t mask =
-      lua_isnumber(state, 11)
-          ? static_cast<std::uint32_t>(lua_tointeger(state, 11))
-          : 0xFFFFFFFFU;
+  std::uint32_t mask = 0xFFFFFFFFU;
+  if (!read_optional_layer_mask(state, 11, &mask)) {
+    lua_pushnil(state);
+    return 1;
+  }
   runtime::Entity skipEntity = runtime::kInvalidEntity;
   if (!read_optional_skip_entity(state, 12, &skipEntity)) {
     lua_pushnil(state);
@@ -679,10 +812,11 @@ int lua_engine_sweep_capsule(lua_State *state) noexcept {
     lua_pushnil(state);
     return 1;
   }
-  const std::uint32_t mask =
-      lua_isnumber(state, 12)
-          ? static_cast<std::uint32_t>(lua_tointeger(state, 12))
-          : 0xFFFFFFFFU;
+  std::uint32_t mask = 0xFFFFFFFFU;
+  if (!read_optional_layer_mask(state, 12, &mask)) {
+    lua_pushnil(state);
+    return 1;
+  }
   runtime::Entity skipEntity = runtime::kInvalidEntity;
   if (!read_optional_skip_entity(state, 13, &skipEntity)) {
     lua_pushnil(state);
@@ -1027,6 +1161,16 @@ void register_physics_bindings(lua_State *state) noexcept {
   lua_setfield(state, -2, "set_collision_layer");
   lua_pushcfunction(state, &lua_engine_set_collision_mask);
   lua_setfield(state, -2, "set_collision_mask");
+  lua_pushcfunction(state, &lua_engine_get_collision_layer);
+  lua_setfield(state, -2, "get_collision_layer");
+  lua_pushcfunction(state, &lua_engine_get_collision_mask);
+  lua_setfield(state, -2, "get_collision_mask");
+  lua_pushcfunction(state, &lua_engine_layer_mask);
+  lua_setfield(state, -2, "layer_mask");
+  lua_pushcfunction(state, &lua_engine_layer_bit);
+  lua_setfield(state, -2, "layer_bit");
+  lua_pushcfunction(state, &lua_engine_layer_name);
+  lua_setfield(state, -2, "layer_name");
   lua_pushcfunction(state, &lua_engine_set_trigger);
   lua_setfield(state, -2, "set_trigger");
   lua_pushcfunction(state, &lua_engine_is_trigger);
