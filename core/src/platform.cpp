@@ -820,6 +820,43 @@ void shutdown_platform() noexcept {
 }
 
 /// Returns whether is platform running.
+#if defined(ENGINE_PLATFORM_WEB)
+namespace {
+
+struct HostedLoop final {
+  PlatformFrameFn frame = nullptr;
+  PlatformLoopEndFn end = nullptr;
+  void *context = nullptr;
+};
+HostedLoop g_hostedLoop{};
+
+/// One requestAnimationFrame tick of the browser-owned loop.
+void hosted_frame(void *arg) noexcept {
+  auto *loop = static_cast<HostedLoop *>(arg);
+  if (!loop->frame(loop->context)) {
+    emscripten_cancel_main_loop();
+    loop->end(loop->context);
+  }
+}
+
+} // namespace
+#endif
+
+void platform_run_loop(PlatformFrameFn frame, PlatformLoopEndFn end,
+                       void *context) noexcept {
+#if defined(ENGINE_PLATFORM_WEB)
+  // The browser owns the loop: hand the frame to requestAnimationFrame and
+  // unwind (simulate_infinite unwinds through the JS event loop; frame
+  // pacing collapses into the animation frame).
+  g_hostedLoop = HostedLoop{frame, end, context};
+  emscripten_set_main_loop_arg(&hosted_frame, &g_hostedLoop, 0, 1);
+#else
+  while (frame(context)) {
+  }
+  end(context);
+#endif
+}
+
 bool is_platform_running() noexcept { return g_platformRunning; }
 
 void request_platform_quit() noexcept { g_platformRunning = false; }

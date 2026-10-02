@@ -102,6 +102,19 @@ bool initialize_platform() noexcept;
 bool initialize_platform(const PlatformConfig &config) noexcept;
 /// Shuts down the owning system for platform.
 void shutdown_platform() noexcept;
+/// One frame of a run loop; false ends the loop.
+using PlatformFrameFn = bool (*)(void *context) noexcept;
+/// Called once, after the last frame.
+using PlatformLoopEndFn = void (*)(void *context) noexcept;
+
+/// Runs `frame` until it returns false, then calls `end` once. Where the
+/// OS owns the main loop (PlatformCaps::ownsMainLoop) the frames run from
+/// its callback and this call never returns, so everything `frame` and
+/// `end` touch must outlive the caller's stack. Elsewhere the loop runs
+/// here and the call returns after `end`.
+void platform_run_loop(PlatformFrameFn frame, PlatformLoopEndFn end,
+                       void *context) noexcept;
+
 /// Returns whether is platform running.
 bool is_platform_running() noexcept;
 /// Requests the platform loop to exit after the current frame.

@@ -35,7 +35,6 @@ int fail_to_start(const char *message) noexcept {
   return static_cast<int>(engine::ExitCode::BootstrapFailed);
 }
 
-#if !defined(ENGINE_PLATFORM_WEB)
 /// Says that the run stopped on a fatal frame error, where the unsaved
 /// scene was saved, if it was, and where the log is. Called before
 /// shutdown, while the log file is still open.
@@ -61,7 +60,6 @@ int fail_to_open(const char *path,
                 engine::project_open_failure_text(kind));
   return fail_to_start(message);
 }
-#endif
 
 } // namespace
 
@@ -85,15 +83,19 @@ int main(int argc, char **argv) {
     return static_cast<int>(engine::ExitCode::BootstrapFailed);
   }
 
-#if defined(ENGINE_PLATFORM_WEB)
-  engine::EngineConfig config{};
-  if (!engine::bootstrap(config)) {
-    return fail_to_start("The editor could not start.");
+  // Where the OS owns the main loop (the browser), run() hands the frames
+  // to it and never returns, so there is one session: no hub and no
+  // project switch.
+  if (engine::core::platform_caps().ownsMainLoop) {
+    engine::EngineConfig config{};
+    if (!engine::bootstrap(config)) {
+      return fail_to_start("The editor could not start.");
+    }
+    const engine::RunResult hostedResult = engine::run(0);
+    engine::shutdown();
+    return engine::run_result_exit_code(hostedResult);
   }
-  const engine::RunResult webResult = engine::run(0);
-  engine::shutdown();
-  return engine::run_result_exit_code(webResult);
-#else
+
   // Static: about 18 KB, and the config points into it until bootstrap has
   // copied what it keeps.
   static engine::ProjectStorage project{};
@@ -142,5 +144,4 @@ int main(int argc, char **argv) {
       return engine::run_result_exit_code(result);
     }
   }
-#endif
 }

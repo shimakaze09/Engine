@@ -53,6 +53,11 @@ Six checks, one root cause each:
      read headers, and a link needs none: the player (decision 0016,
      point 4) linking engine_editor whole-archive would pass them all.
 
+  7. Web branches. An `#if` on ENGINE_PLATFORM_WEB is legal only in the
+     platform layer's own sources (core/src/platform*). Elsewhere what a
+     platform does differently is a PlatformCaps field or a per-OS
+     translation unit chosen in CMake (issue #312 item 10).
+
 Today's known violations are listed in KNOWN_VIOLATIONS with the issue
 that tracks each. An entry that no longer matches anything is itself a
 finding, so entries cannot be left behind once fixed: the fix that
@@ -279,6 +284,19 @@ SANCTIONED_SDL_USERS: dict[str, str] = {
 # document code. An entry that stops matching is a finding, so this stays
 # empty unless someone deliberately adds a tracked exception.
 KNOWN_SDL_USERS: dict[str, str] = {}
+
+
+# Check 7: a build-time branch on the web platform macro. What differs per
+# platform is a PlatformCaps field or a per-OS translation unit chosen in
+# CMake (issue #312 item 10), so the macro is the platform layer's alone.
+WEB_PLATFORM_BRANCH_RE = re.compile(
+    r"^\s*#\s*(?:if|ifdef|ifndef|elif)\b.*\bENGINE_PLATFORM_WEB\b", re.MULTILINE
+)
+
+
+def sanctioned_web_platform_branch(relative: str) -> bool:
+    """The platform layer's own sources may branch on the web macro."""
+    return relative.startswith("core/src/platform")
 
 
 class Finding:
@@ -679,6 +697,26 @@ def check_sdl_containment(
     return findings
 
 
+def check_web_platform_branches(root: pathlib.Path) -> list[Finding]:
+    """Flags a branch on ENGINE_PLATFORM_WEB outside the platform layer."""
+    findings: list[Finding] = []
+    for path in audited_sources(root):
+        relative = path.relative_to(root).as_posix()
+        if sanctioned_web_platform_branch(relative):
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if WEB_PLATFORM_BRANCH_RE.search(text) is not None:
+            findings.append(
+                Finding(
+                    relative,
+                    "branches on ENGINE_PLATFORM_WEB: read a PlatformCaps "
+                    "field, or move the platform's code into a per-OS "
+                    "translation unit chosen in CMake (issue #312)",
+                )
+            )
+    return findings
+
+
 def check_stale_sdl_allowlist(used: set[str]) -> list[Finding]:
     """Flags KNOWN_SDL_USERS entries whose file no longer includes SDL."""
     findings: list[Finding] = []
@@ -748,6 +786,7 @@ def main() -> int:
     findings += check_cmake_links(root)
     findings += check_public_dependency_visibility(root)
     findings += check_sdl_containment(root, used_sdl, allowlisted)
+    findings += check_web_platform_branches(root)
     if allowlisted:
         findings += check_stale_allowlist(used_includes, used_grants)
         findings += check_stale_sdl_allowlist(used_sdl)

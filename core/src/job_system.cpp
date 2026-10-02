@@ -22,10 +22,11 @@ namespace engine::core {
 namespace {
 
 constexpr std::uint32_t kMaxWorkers = 15U;
-#if defined(ENGINE_PLATFORM_WEB)
-// The page's share of its prewarmed pthread pool (see the root
-// CMakeLists): a worker past the pool would start only after the main
-// thread yields, so shutdown's join on it would hang the page.
+#if defined(ENGINE_WEB_JOB_WORKERS)
+// A build whose threads come from a fixed prewarmed pool (the web page's,
+// see the root CMakeLists) gives the job system a share of it: a worker
+// past the pool would start only after the main thread yields, so
+// shutdown's join on it would hang the page.
 constexpr std::uint32_t kSpawnableWorkers = ENGINE_WEB_JOB_WORKERS;
 #else
 constexpr std::uint32_t kSpawnableWorkers = kMaxWorkers;

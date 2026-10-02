@@ -6,10 +6,6 @@
 
 #include "engine/engine.h"
 
-#if defined(ENGINE_PLATFORM_WEB)
-#include <emscripten.h>
-#endif
-
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -562,30 +558,42 @@ void inject_bootstrap_failure(BootstrapStage stage) noexcept {
   g_injectedFailure = stage;
 }
 
-#if defined(ENGINE_PLATFORM_WEB)
 namespace {
 
-/// Browser frame callback: one engine frame per requestAnimationFrame
-/// tick. When the loop ends the pipeline tears down and the engine tier
-/// closes after it, exactly as a native run returning to main() would;
-/// the pipeline outlives run()'s unwound stack as a static.
-void web_frame(void *arg) noexcept {
-  auto *pipeline = static_cast<EnginePipeline *>(arg);
-  if (!pipeline->execute_frame()) {
-    if (pipeline->had_fatal_error()) {
-      core::log_message(core::LogLevel::Error, "engine",
-                        "engine stopped on a fatal frame error");
-      static_cast<void>(core::run_fatal_recovery_hook(
-          g_fatalRecoveryNote, sizeof(g_fatalRecoveryNote)));
-    }
-    pipeline->teardown();
-    emscripten_cancel_main_loop();
+/// A run's pipeline and its outcome, kept together so a run the OS drives
+/// from its own loop can keep them past run()'s stack.
+struct RunState final {
+  EnginePipeline pipeline;
+  RunResult result = RunResult::Stopped;
+  /// The OS owns the loop: main() never regains control, so the run's end
+  /// also shuts the engine down.
+  bool hosted = false;
+};
+
+bool run_frame(void *context) noexcept {
+  return static_cast<RunState *>(context)->pipeline.execute_frame();
+}
+
+void end_run(void *context) noexcept {
+  auto *state = static_cast<RunState *>(context);
+  state->result = state->pipeline.had_fatal_error() ? RunResult::FatalFrame
+                                                    : RunResult::Stopped;
+  // Before teardown, which detaches the editor from its World: a fatal
+  // frame ends the run, so this is the last moment the unsaved scene can
+  // be saved.
+  if (state->result == RunResult::FatalFrame) {
+    core::log_message(core::LogLevel::Error, "engine",
+                      "engine stopped on a fatal frame error");
+    static_cast<void>(core::run_fatal_recovery_hook(
+        g_fatalRecoveryNote, sizeof(g_fatalRecoveryNote)));
+  }
+  state->pipeline.teardown();
+  if (state->hosted) {
     shutdown();
   }
 }
 
 } // namespace
-#endif
 
 /// Runs the main loop; reports whether it stopped gracefully or fatally.
 RunResult run(std::uint32_t maxFrames) noexcept {
@@ -594,44 +602,23 @@ RunResult run(std::uint32_t maxFrames) noexcept {
                       "run: the engine has not been bootstrapped");
     return RunResult::FatalInitialization;
   }
-#if defined(ENGINE_PLATFORM_WEB)
-  // The browser owns the loop: hand execute_frame to
-  // requestAnimationFrame and unwind out of run() (simulate_infinite
-  // unwinds via the JS event loop, so the static pipeline must own the
-  // state; frame pacing collapses into RAF).
-  static EnginePipeline pipeline;
-  if (!pipeline.initialize(maxFrames)) {
+  RunState localState{};
+  RunState *state = &localState;
+  if (core::platform_caps().ownsMainLoop) {
+    // run() unwinds before the OS runs the first frame, so the hosted run
+    // lives past this stack.
+    static RunState hostedState{};
+    state = &hostedState;
+    state->hosted = true;
+  }
+  if (!state->pipeline.initialize(maxFrames)) {
     core::log_message(core::LogLevel::Error, "engine",
                       "runtime pipeline initialization failed");
-    pipeline.teardown();
+    state->pipeline.teardown();
     return RunResult::FatalInitialization;
   }
-  emscripten_set_main_loop_arg(&web_frame, &pipeline, 0, 1);
-  return RunResult::Stopped; // unreachable: the call above unwinds
-#else
-  EnginePipeline pipeline;
-  if (!pipeline.initialize(maxFrames)) {
-    core::log_message(core::LogLevel::Error, "engine",
-                      "runtime pipeline initialization failed");
-    pipeline.teardown();
-    return RunResult::FatalInitialization;
-  }
-
-  while (pipeline.execute_frame()) {
-  }
-
-  const RunResult result = pipeline.had_fatal_error() ? RunResult::FatalFrame
-                                                      : RunResult::Stopped;
-  // Before teardown, which detaches the editor from its World: a fatal
-  // frame ends the run, so this is the last moment the unsaved scene can
-  // be saved.
-  if (result == RunResult::FatalFrame) {
-    static_cast<void>(core::run_fatal_recovery_hook(
-        g_fatalRecoveryNote, sizeof(g_fatalRecoveryNote)));
-  }
-  pipeline.teardown();
-  return result;
-#endif
+  core::platform_run_loop(&run_frame, &end_run, state);
+  return state->result; // where the OS owns the loop, unreachable
 }
 
 static_assert(static_cast<int>(ExitCode::FatalDevice) ==

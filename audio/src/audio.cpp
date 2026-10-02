@@ -13,39 +13,12 @@
 #include "audio_diagnostics.h"
 #include "engine/core/cvar.h"
 #include "engine/core/logging.h"
+#include "engine/core/platform.h"
 #include "engine/core/vfs.h"
 #include "sound_handle.h"
 
-#if defined(ENGINE_PLATFORM_WEB)
-#include <emscripten.h>
-#endif
-
-// miniaudio's declarations; its implementation is compiled once, in
-// miniaudio_impl.cpp, with the decoders the engine loads.
-#if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wtautological-constant-out-of-range-compare"
-#pragma clang diagnostic ignored "-Wunused-but-set-variable"
-#pragma clang diagnostic ignored "-Wdollar-in-identifier-extension"
-#pragma clang diagnostic ignored "-Wdeprecated-pragma"
-#pragma clang diagnostic ignored "-Wunused-parameter"
-#elif defined(_MSC_VER)
-#pragma warning(push, 0)
-#elif defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-but-set-variable"
-#pragma GCC diagnostic ignored "-Wunused-result"
-#endif
-
-#include "miniaudio.h"
-
-#if defined(__clang__)
-#pragma clang diagnostic pop
-#elif defined(_MSC_VER)
-#pragma warning(pop)
-#elif defined(__GNUC__)
-#pragma GCC diagnostic pop
-#endif
+#include "audio_device_start.h"
+#include "miniaudio_include.h"
 
 #include "engine/core/diagnostic.h"
 #include "engine/core/thread_affinity.h"
@@ -558,43 +531,6 @@ bool audio_uses_null_device() noexcept {
 
 bool audio_is_initialized() noexcept { return g_audio.initialized; }
 
-#if defined(ENGINE_PLATFORM_WEB)
-namespace {
-
-/// miniaudio's WebAudio start calls AudioContext.resume() and drops the
-/// promise. It stays pending until the page's first user gesture, and a
-/// shutdown in between closes the context under it, which rejects it as an
-/// unhandled "Cannot resume a closed AudioContext". Observing every resume
-/// on this device's context settles that case quietly; a resume that fails
-/// while the context is still open is still reported.
-void observe_webaudio_resume(const ma_device &device) noexcept {
-#if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdollar-in-identifier-extension"
-#endif
-  EM_ASM(
-      {
-        var context = miniaudio.get_device_by_index($0).webaudio;
-        var resume = context.resume.bind(context);
-        context.resume = function() {
-          var pending = resume();
-          pending.catch(function(error) {
-            if (context.state !== 'closed') {
-              console.error('audio: AudioContext resume failed', error);
-            }
-          });
-          return pending;
-        };
-      },
-      device.webaudio.deviceIndex);
-#if defined(__clang__)
-#pragma clang diagnostic pop
-#endif
-}
-
-} // namespace
-#endif
-
 /// Initializes the owning system for audio.
 bool initialize_audio(const AudioConfig &audioConfig) noexcept {
   if (g_audio.initialized) {
@@ -613,10 +549,11 @@ bool initialize_audio(const AudioConfig &audioConfig) noexcept {
     config.channels = 2U;
     config.sampleRate = 48000U;
   }
-#if defined(ENGINE_PLATFORM_WEB)
-  // Started by hand below, once its context's resume is observed.
-  config.noAutoStart = MA_TRUE;
-#endif
+  // Where audio waits for the user's first gesture, the device is started
+  // by hand below, after the platform has prepared it for that wait.
+  const bool awaitsUnlock =
+      core::platform_caps().needsAudioUnlock && !audioConfig.nullDevice;
+  config.noAutoStart = awaitsUnlock ? MA_TRUE : MA_FALSE;
 
   const ma_result result = ma_engine_init(&config, &g_audio.engine);
   if (result != MA_SUCCESS) {
@@ -624,17 +561,12 @@ bool initialize_audio(const AudioConfig &audioConfig) noexcept {
         core::LogLevel::Error, "audio", "failed to initialize audio engine");
     return false;
   }
-#if defined(ENGINE_PLATFORM_WEB)
-  if (!audioConfig.nullDevice) {
-    observe_webaudio_resume(*ma_engine_get_device(&g_audio.engine));
-    if (ma_engine_start(&g_audio.engine) != MA_SUCCESS) {
-      core::log_message(core::LogLevel::Error, "audio",
-                        "failed to start audio engine");
-      ma_engine_uninit(&g_audio.engine);
-      return false;
-    }
+  if (awaitsUnlock && !start_device_awaiting_unlock(&g_audio.engine)) {
+    core::log_message(core::LogLevel::Error, "audio",
+                      "failed to start audio engine");
+    ma_engine_uninit(&g_audio.engine);
+    return false;
   }
-#endif
 
   // Both groups or neither: a partial pair would leak the first group,
   // because shutdown releases them only when busesReady is set.

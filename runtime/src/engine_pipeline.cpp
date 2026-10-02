@@ -2559,11 +2559,11 @@ void EnginePipeline::Impl::stage_frame_cleanup() noexcept {
 // ---------------------------------------------------------------------------
 
 void EnginePipeline::Impl::stage_frame_pacing() noexcept {
-#if defined(ENGINE_PLATFORM_WEB)
-  // The browser's animation loop paces the frame; a wait here would spin
-  // the page's only thread.
-  return;
-#else
+  // Where the OS owns the loop (the browser's animation frame) it paces
+  // the frame; a wait here would block a thread that must not block.
+  if (core::platform_caps().ownsMainLoop) {
+    return;
+  }
   const int maxFps = maxFpsCvar.get_int(0);
   if (maxFps <= 0) {
     return;
@@ -2572,7 +2572,6 @@ void EnginePipeline::Impl::stage_frame_pacing() noexcept {
       std::chrono::duration<double>(Clock::now() - frameStart).count();
   runtime::wait_for_frame_cap(
       runtime::frame_cap_wait_seconds(elapsedSeconds, maxFps));
-#endif
 }
 
 // ===========================================================================

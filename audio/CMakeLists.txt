@@ -1,8 +1,17 @@
 # Configures audio build settings for the Engine repository.
 
+# The device start a platform needs when its audio awaits the user's first
+# gesture: the browser's, or the plain one.
+if(ENGINE_TARGET_PLATFORM STREQUAL "Web")
+    set(_ENGINE_AUDIO_DEVICE_START src/audio_device_start_web.cpp)
+else()
+    set(_ENGINE_AUDIO_DEVICE_START src/audio_device_start_native.cpp)
+endif()
+
 engine_add_module_library(engine_audio
     SOURCES
     src/audio.cpp
+    ${_ENGINE_AUDIO_DEVICE_START}
     src/miniaudio_impl.cpp
     PUBLIC_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/include
