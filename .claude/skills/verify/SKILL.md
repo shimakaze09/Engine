@@ -83,8 +83,10 @@ suites on Mesa's software Vulkan (lavapipe) under Xvfb, so a crash in the
 device path, an unbound pass or a readback those suites assert fails
 there, as does a windowed coin_run play whose presented frame is not a
 rendered picture (the frame is kept as the `coin-run-final-frame`
-artifact). Nothing runs them on a hardware GPU, on D3D11/D3D12, Metal or
-OpenGL, or judges what a frame looks like. The web lane draws frames on SwiftShader's
+artifact). The Windows Release lane runs the same suites twice on WARP,
+Microsoft's software rasterizer, once on D3D11 and once on D3D12
+(`ENGINE_CVAR_r_bgfx_software_adapter=1`). Nothing runs them on a hardware
+GPU, on Metal or OpenGL, or judges what a frame looks like. The web lane draws frames on SwiftShader's
 WebGL2 but only fails on an error; it compares no image. Treat a green CI
 run as evidence for what those suites assert, and nothing more.
 
@@ -97,7 +99,9 @@ Required:
 2. Run the `gpu`-labelled suites: `ctest --test-dir build -L gpu`. With
    no GPU, CI's form runs them on lavapipe:
    `xvfb-run -a env VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json ctest --test-dir build -L gpu`
-   (packages `xvfb`, `mesa-vulkan-drivers`). That is a software result,
+   (packages `xvfb`, `mesa-vulkan-drivers`); on Windows,
+   `ENGINE_CVAR_r_bgfx_software_adapter=1 ENGINE_CVAR_r_bgfx_renderer=d3d12 ctest --test-dir build -L gpu`
+   draws on WARP. That is a software result,
    not the hardware observation of step 4.
 3. Run the editor windowed and look at what you changed. Toggle it off and
    on. A feature you cannot see change is a feature you have not verified.
