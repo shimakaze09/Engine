@@ -300,10 +300,10 @@ void check_steps() {
     Vec3 feet = kStanding;
     bool grounded = true;
     for (int frame = 0; frame < 60; ++frame) {
-      const CharacterMoveResult r =
+      const CharacterMoveResult frameMove =
           move(*world, feet, Vec3(0.05F, -0.003F, 0.0F), settings(grounded));
-      feet = engine::math::add(feet, r.translation);
-      grounded = r.grounded;
+      feet = engine::math::add(feet, frameMove.translation);
+      grounded = frameMove.grounded;
     }
     if (height < 0.3F) {
       check((feet.x > 2.5F) && near(feet.y, height + kSkin, 2.0e-3F) &&
