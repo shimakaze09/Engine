@@ -375,6 +375,21 @@ engine_add_test_executable(engine_integration_scene_environment_gpu
 set_tests_properties(engine_integration_scene_environment_gpu PROPERTIES
     SKIP_REGULAR_EXPRESSION "SKIPPED:")
 
+engine_add_test_executable(engine_integration_deferred_sky_gpu
+    SOURCES
+    deferred_sky_gpu_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/renderer/src
+    PRIVATE_DEPS
+    engine_runtime
+    engine_renderer
+    engine_content
+    LABELS
+    gpu;integration
+)
+set_tests_properties(engine_integration_deferred_sky_gpu PROPERTIES
+    SKIP_REGULAR_EXPRESSION "SKIPPED:")
+
 engine_add_test_executable(engine_integration_screenshot_region_gpu
     SOURCES
     screenshot_region_gpu_test.cpp
