@@ -11,12 +11,14 @@
 #include "engine/core/rng.h"
 #include "engine/core/vfs.h"
 #include "engine/math/vec3.h"
+#include "engine/physics/character_move.h"
 #include "engine/physics/physics.h"
 #include "engine/physics/physics_query.h"
 #include "engine/renderer/asset_database.h"
 #include "engine/renderer/asset_manager.h"
 #include "engine/renderer/camera.h"
 #include "engine/runtime/animation_system.h"
+#include "engine/runtime/character_controller.h"
 #include "engine/runtime/collision_layers.h"
 #include "engine/runtime/entity_pool.h"
 #include "engine/runtime/physics_bridge.h"
@@ -1202,6 +1204,52 @@ bool scripting_add_tag_set_component_op(
   return (world != nullptr) && world->add_tag_set_component(entity, component);
 }
 
+bool scripting_get_character_controller_op(
+    runtime::World *world, runtime::Entity entity,
+    runtime::CharacterControllerComponent *outComponent) noexcept {
+  return (world != nullptr) && world->has_character_controller(entity) &&
+         world->get_character_controller(entity, outComponent);
+}
+
+bool scripting_add_character_controller_op(
+    runtime::World *world, runtime::Entity entity,
+    const runtime::CharacterControllerComponent &component) noexcept {
+  return (world != nullptr) &&
+         world->add_character_controller(entity, component);
+}
+
+bool scripting_remove_character_controller_op(runtime::World *world,
+                                              runtime::Entity entity) noexcept {
+  return (world != nullptr) && world->remove_character_controller(entity);
+}
+
+// Scripting cannot see physics, so it spells the collision bits itself:
+// engine.COLLIDED_BELOW, _SIDES and _ABOVE are 1, 2 and 4.
+static_assert((physics::kCharacterCollidedBelow == 1U) &&
+                  (physics::kCharacterCollidedSides == 2U) &&
+                  (physics::kCharacterCollidedAbove == 4U),
+              "the Lua collision constants mirror the physics bits");
+
+bool scripting_move_character_op(
+    runtime::World *world, runtime::Entity entity, float dx, float dy, float dz,
+    scripting::RuntimeCharacterMove *out) noexcept {
+  runtime::CharacterMoveOutcome outcome{};
+  if ((world == nullptr) ||
+      !runtime::move_character(*world, entity, math::Vec3(dx, dy, dz),
+                               &outcome)) {
+    return false;
+  }
+  if (out != nullptr) {
+    out->grounded = outcome.grounded;
+    out->flags = outcome.flags;
+    out->ground = outcome.ground;
+    out->normalX = outcome.groundNormal.x;
+    out->normalY = outcome.groundNormal.y;
+    out->normalZ = outcome.groundNormal.z;
+  }
+  return true;
+}
+
 bool scripting_remove_tag_set_component_op(runtime::World *world,
                                            runtime::Entity entity) noexcept {
   return (world != nullptr) && world->remove_tag_set_component(entity);
@@ -1370,6 +1418,10 @@ scripting::RuntimeServices make_scripting_runtime_services() noexcept {
   s.get_tag_set_component_op = &scripting_get_tag_set_component_op;
   s.add_tag_set_component_op = &scripting_add_tag_set_component_op;
   s.remove_tag_set_component_op = &scripting_remove_tag_set_component_op;
+  s.get_character_controller_op = &scripting_get_character_controller_op;
+  s.add_character_controller_op = &scripting_add_character_controller_op;
+  s.remove_character_controller_op = &scripting_remove_character_controller_op;
+  s.move_character_op = &scripting_move_character_op;
   s.find_entities_by_tag = &scripting_find_entities_by_tag;
   s.primitive_collider = &scripting_primitive_collider;
   s.timer_set = &scripting_timer_set;

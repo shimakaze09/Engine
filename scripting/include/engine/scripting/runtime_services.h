@@ -29,6 +29,7 @@ using engine::core::kInvalidPersistentId;
 using engine::core::PersistentId;
 using engine::math::CameraComponent;
 using engine::math::CameraProjection;
+using engine::math::CharacterControllerComponent;
 using engine::math::Collider;
 using engine::math::ColliderShape;
 using engine::math::HullSource;
@@ -78,6 +79,17 @@ using ScriptedEntityVisitFn = void (*)(core::Entity entity,
 /// Callback a runtime timer fires with its own id.
 using TimerCallbackFn = void (*)(std::uint32_t timerId,
                                  void *userData) noexcept;
+
+/// What a character's move found, as scripting sees it.
+struct RuntimeCharacterMove final {
+  bool grounded = false;
+  /// physics::kCharacterCollided* bits: 1 below, 2 sides, 4 above.
+  std::uint32_t flags = 0U;
+  core::Entity ground{};
+  float normalX = 0.0F;
+  float normalY = 0.0F;
+  float normalZ = 0.0F;
+};
 
 /// Raycast hit mirrored into scripting-friendly fields.
 struct RuntimeRaycastHit final {
@@ -196,6 +208,9 @@ struct RuntimeServices final {
   bool (*get_tag_set_component_op)(
       runtime::World *world, core::Entity entity,
       math::TagSetComponent *outComponent) noexcept = nullptr;
+  bool (*get_character_controller_op)(
+      runtime::World *world, core::Entity entity,
+      math::CharacterControllerComponent *outComponent) noexcept = nullptr;
   /// World::find_entities_by_tag: up to `capacity` entities carrying `tag`
   /// in ascending entity index; returns how many carry it.
   std::size_t (*find_entities_by_tag)(runtime::World *world, const char *tag,
@@ -255,6 +270,16 @@ struct RuntimeServices final {
       const math::TagSetComponent &component) noexcept = nullptr;
   bool (*remove_tag_set_component_op)(runtime::World *world,
                                       core::Entity entity) noexcept = nullptr;
+  bool (*add_character_controller_op)(
+      runtime::World *world, core::Entity entity,
+      const math::CharacterControllerComponent &component) noexcept = nullptr;
+  bool (*remove_character_controller_op)(
+      runtime::World *world, core::Entity entity) noexcept = nullptr;
+  /// runtime::move_character: moves the character at once; false, with a
+  /// logged reason and nothing changed, when it cannot.
+  bool (*move_character_op)(runtime::World *world, core::Entity entity,
+                            float dx, float dy, float dz,
+                            RuntimeCharacterMove *out) noexcept = nullptr;
   /// The collider every spawn path gives a built-in primitive, hull
   /// provenance and offset included (runtime::primitive_collider).
   runtime::Collider (*primitive_collider)(math::PrimitiveShape shape) noexcept =
