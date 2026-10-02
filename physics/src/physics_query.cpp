@@ -697,6 +697,19 @@ bool normalize_query_direction(const math::Vec3 &direction, float maxDistance,
 
 } // namespace
 
+bool world_collider_geometry(const PhysicsWorldView &world, Entity entity,
+                             const Collider &collider,
+                             ColliderWorldGeometry *outGeometry) noexcept {
+  return collider_geometry(world, entity, collider, outGeometry);
+}
+
+bool sweep_convex_geometry(const ColliderWorldGeometry &query,
+                           const math::Vec3 &direction, float maxT,
+                           const ColliderWorldGeometry &target,
+                           float *outT) noexcept {
+  return sweep_geometry_conservative(query, direction, maxT, target, outT);
+}
+
 bool collider_geometries_overlap(const ColliderWorldGeometry &a,
                                  const ColliderWorldGeometry &b) noexcept {
   return geometries_overlap(a, b);
@@ -1073,6 +1086,32 @@ math::Quat rotation_from_y(const math::Vec3 &axis) noexcept {
 
 } // namespace
 
+bool capsule_query_geometry(const math::Vec3 &pointA, const math::Vec3 &pointB,
+                            float radius,
+                            ColliderWorldGeometry *outGeometry) noexcept {
+  // A capsule collider runs along its local Y axis between hemisphere
+  // centers halfExtents.y either side of its center; coincident endpoints
+  // leave a sphere.
+  const math::Vec3 segment = math::sub(pointB, pointA);
+  const float segmentLength = math::length(segment);
+  if (!std::isfinite(segmentLength) || !std::isfinite(radius) ||
+      (radius < 0.0F)) {
+    return false;
+  }
+  const math::Vec3 center = math::mul(math::add(pointA, pointB), 0.5F);
+  const math::Quat rotation =
+      (segmentLength > 1.0e-6F)
+          ? rotation_from_y(math::mul(segment, 1.0F / segmentLength))
+          : math::Quat();
+  Collider queryCollider{};
+  queryCollider.shape = ColliderShape::Capsule;
+  queryCollider.halfExtents = math::Vec3(radius, 0.5F * segmentLength, radius);
+  return make_collider_world_geometry(
+      queryCollider,
+      math::compose_trs(center, rotation, math::Vec3(1.0F, 1.0F, 1.0F)),
+      nullptr, outGeometry);
+}
+
 bool sweep_sphere(const PhysicsWorldView &world, const math::Vec3 &origin,
                   float radius, const math::Vec3 &direction, float maxDistance,
                   SweepHit *outHit, std::uint32_t mask,
@@ -1142,29 +1181,11 @@ bool sweep_capsule(const PhysicsWorldView &world, const math::Vec3 &pointA,
     return false;
   }
 
-  // A capsule collider runs along its local Y axis between hemisphere
-  // centers halfExtents.y either side of its center; coincident endpoints
-  // leave a sphere.
-  const math::Vec3 segment = math::sub(pointB, pointA);
-  const float segmentLength = math::length(segment);
-  if (!std::isfinite(segmentLength)) {
-    return false;
-  }
-  const math::Vec3 center = math::mul(math::add(pointA, pointB), 0.5F);
-  const math::Quat rotation =
-      (segmentLength > 1.0e-6F)
-          ? rotation_from_y(math::mul(segment, 1.0F / segmentLength))
-          : math::Quat();
-  Collider queryCollider{};
-  queryCollider.shape = ColliderShape::Capsule;
-  queryCollider.halfExtents = math::Vec3(radius, 0.5F * segmentLength, radius);
   ColliderWorldGeometry queryGeometry{};
-  if (!make_collider_world_geometry(
-          queryCollider,
-          math::compose_trs(center, rotation, math::Vec3(1.0F, 1.0F, 1.0F)),
-          nullptr, &queryGeometry)) {
+  if (!capsule_query_geometry(pointA, pointB, radius, &queryGeometry)) {
     return false;
   }
+  const math::Vec3 center = queryGeometry.center;
 
   // The capsule's world box culls; every target is then refined against
   // the capsule itself.

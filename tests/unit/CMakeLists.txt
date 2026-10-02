@@ -1721,6 +1721,14 @@ engine_add_test_executable(engine_unit_collision_layer
     engine_runtime
 )
 
+engine_add_test_executable(engine_unit_character_move
+    SOURCES
+    character_move_test.cpp
+    PRIVATE_DEPS
+    engine_physics
+    engine_runtime
+)
+
 engine_add_test_executable(engine_unit_collision_layer_matrix
     SOURCES
     collision_layer_matrix_test.cpp

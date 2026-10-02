@@ -147,6 +147,21 @@ bool apply_or_queue_tag_set_component(
     runtime::Entity entity, const math::TagSetComponent &component) noexcept;
 /// Applies or queues tag set removal based on the current World phase.
 bool apply_or_queue_remove_tag_set_component(runtime::Entity entity) noexcept;
+
+/// Reads the entity's character controller through any pending queued
+/// write.
+bool latest_character_controller(
+    runtime::Entity entity,
+    math::CharacterControllerComponent *outComponent) noexcept;
+/// Applies or queues a character controller replacement based on the
+/// current World phase.
+bool apply_or_queue_character_controller(
+    runtime::Entity entity,
+    const math::CharacterControllerComponent &component) noexcept;
+/// Applies or queues character controller removal based on the current
+/// World phase.
+bool apply_or_queue_remove_character_controller(
+    runtime::Entity entity) noexcept;
 /// Applies or queues camera component removal based on the current World
 /// phase.
 bool apply_or_queue_remove_camera_component(runtime::Entity entity) noexcept;

@@ -295,6 +295,8 @@ constexpr const char *kSpotLightTypeName =
     "engine::runtime::SpotLightComponent";
 constexpr const char *kSpringArmTypeName =
     "engine::runtime::SpringArmComponent";
+constexpr const char *kCharacterControllerTypeName =
+    "engine::runtime::CharacterControllerComponent";
 constexpr const char *kSceneCaptureTypeName =
     "engine::runtime::SceneCaptureComponent";
 constexpr const char *kCameraTypeName = "engine::runtime::CameraComponent";

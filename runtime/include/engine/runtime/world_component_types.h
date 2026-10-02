@@ -36,6 +36,8 @@ using engine::math::Transform;
 
 using engine::math::CameraComponent;
 using engine::math::CameraProjection;
+using engine::math::character_controller_is_valid;
+using engine::math::CharacterControllerComponent;
 using engine::math::LightComponent;
 using engine::math::LightType;
 using engine::math::MeshComponent;

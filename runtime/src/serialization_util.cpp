@@ -307,6 +307,8 @@ constexpr const char *kSpotLightTypeName =
 constexpr const char *kSceneCaptureTypeName =
     "engine::runtime::SceneCaptureComponent";
 constexpr const char *kCameraTypeName = "engine::runtime::CameraComponent";
+constexpr const char *kCharacterControllerTypeName =
+    "engine::runtime::CharacterControllerComponent";
 
 // Object-shape field names for AnimationComponent. Named
 // rather than repeated as literals because the writer and reader below are
@@ -340,11 +342,14 @@ bool find_reflected_component_descriptors(
   outDescs->spotLight = registry.find_type(kSpotLightTypeName);
   outDescs->sceneCapture = registry.find_type(kSceneCaptureTypeName);
   outDescs->camera = registry.find_type(kCameraTypeName);
+  outDescs->characterController =
+      registry.find_type(kCharacterControllerTypeName);
   if ((outDescs->transform == nullptr) || (outDescs->rigidBody == nullptr) ||
       (outDescs->springArm == nullptr) ||
       (outDescs->reflectionProbe == nullptr) ||
       (outDescs->pointLight == nullptr) || (outDescs->spotLight == nullptr) ||
-      (outDescs->sceneCapture == nullptr) || (outDescs->camera == nullptr)) {
+      (outDescs->sceneCapture == nullptr) || (outDescs->camera == nullptr) ||
+      (outDescs->characterController == nullptr)) {
     if (logChannel != nullptr) {
       core::log_message(core::LogLevel::Error, logChannel,
                         "missing runtime reflection descriptors");

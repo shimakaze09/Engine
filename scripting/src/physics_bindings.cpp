@@ -419,6 +419,116 @@ int lua_engine_layer_name(lua_State *state) noexcept {
   return 1;
 }
 
+// engine.add_character_controller(entity [, slope_limit [, step_offset
+// [, skin_width]]]) → bool: adds a character controller, or changes the
+// one the entity has, keeping any setting left out. A setting out of its
+// range refuses the call with a Warning.
+int lua_engine_add_character_controller(lua_State *state) noexcept {
+  runtime::Entity entity{};
+  if (!runtime_bound() || !read_entity(state, 1, &entity)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  math::CharacterControllerComponent controller{};
+  static_cast<void>(latest_character_controller(entity, &controller));
+  if (!read_optional_finite_number_arg(state, 2, controller.slopeLimit,
+                                       &controller.slopeLimit) ||
+      !read_optional_finite_number_arg(state, 3, controller.stepOffset,
+                                       &controller.stepOffset) ||
+      !read_optional_finite_number_arg(state, 4, controller.skinWidth,
+                                       &controller.skinWidth) ||
+      !math::character_controller_is_valid(controller)) {
+    core::log_message(core::LogLevel::Warning, "scripting",
+                      "add_character_controller: slope limit 0-89, step "
+                      "offset 0-10 and skin width 0.001-1 are the ranges");
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  lua_pushboolean(
+      state, apply_or_queue_character_controller(entity, controller) ? 1 : 0);
+  return 1;
+}
+
+// engine.get_character_controller(entity) → slope_limit, step_offset,
+// skin_width, or nil without one.
+int lua_engine_get_character_controller(lua_State *state) noexcept {
+  runtime::Entity entity{};
+  math::CharacterControllerComponent controller{};
+  if (!runtime_bound() || !read_entity(state, 1, &entity) ||
+      !latest_character_controller(entity, &controller)) {
+    lua_pushnil(state);
+    return 1;
+  }
+  lua_pushnumber(state, static_cast<lua_Number>(controller.slopeLimit));
+  lua_pushnumber(state, static_cast<lua_Number>(controller.stepOffset));
+  lua_pushnumber(state, static_cast<lua_Number>(controller.skinWidth));
+  return 3;
+}
+
+// engine.remove_character_controller(entity) → bool
+int lua_engine_remove_character_controller(lua_State *state) noexcept {
+  runtime::Entity entity{};
+  if (!runtime_bound() || !read_entity(state, 1, &entity)) {
+    lua_pushboolean(state, 0);
+    return 1;
+  }
+  lua_pushboolean(state,
+                  apply_or_queue_remove_character_controller(entity) ? 1 : 0);
+  return 1;
+}
+
+// engine.move_character(entity, dx, dy, dz) → grounded, collisions, ground:
+// moves the character at once (Unity's CharacterController.Move), sliding
+// along what it meets. `collisions` holds engine.COLLIDED_BELOW, _SIDES and
+// _ABOVE bits; `ground` is what it stands on, or nil. Nil, with a Warning
+// naming why, when it cannot move: a move is never queued, since a script
+// reads where it went straight back.
+int lua_engine_move_character(lua_State *state) noexcept {
+  runtime::Entity entity{};
+  math::Vec3 displacement{};
+  if (!runtime_bound() || !read_entity(state, 1, &entity) ||
+      !read_vec3_args(state, 2, &displacement)) {
+    lua_pushnil(state);
+    return 1;
+  }
+  if (!can_apply_mutations_now()) {
+    core::log_message(core::LogLevel::Warning, "scripting",
+                      "move_character runs only from a script hook, while "
+                      "the world takes changes");
+    lua_pushnil(state);
+    return 1;
+  }
+  RuntimeCharacterMove result{};
+  if ((runtime_binding().services->move_character_op == nullptr) ||
+      !runtime_binding().services->move_character_op(
+          runtime_binding().world, entity, displacement.x, displacement.y,
+          displacement.z, &result)) {
+    lua_pushnil(state);
+    return 1;
+  }
+  lua_pushboolean(state, result.grounded ? 1 : 0);
+  lua_pushinteger(state, static_cast<lua_Integer>(result.flags));
+  if (result.grounded) {
+    push_entity_handle(state, result.ground);
+  } else {
+    lua_pushnil(state);
+  }
+  return 3;
+}
+
+// engine.is_grounded(entity) → bool: whether the character's last move
+// ended on walkable ground.
+int lua_engine_is_grounded(lua_State *state) noexcept {
+  runtime::Entity entity{};
+  math::CharacterControllerComponent controller{};
+  lua_pushboolean(state, (runtime_bound() && read_entity(state, 1, &entity) &&
+                          latest_character_controller(entity, &controller) &&
+                          controller.grounded)
+                             ? 1
+                             : 0);
+  return 1;
+}
+
 // engine.set_trigger(entity, is_trigger) → bool: makes the entity's
 // collider a trigger (true) or a solid collider (false).
 int lua_engine_set_trigger(lua_State *state) noexcept {
@@ -1175,6 +1285,23 @@ void register_physics_bindings(lua_State *state) noexcept {
   lua_setfield(state, -2, "set_trigger");
   lua_pushcfunction(state, &lua_engine_is_trigger);
   lua_setfield(state, -2, "is_trigger");
+  lua_pushcfunction(state, &lua_engine_add_character_controller);
+  lua_setfield(state, -2, "add_character_controller");
+  lua_pushcfunction(state, &lua_engine_get_character_controller);
+  lua_setfield(state, -2, "get_character_controller");
+  lua_pushcfunction(state, &lua_engine_remove_character_controller);
+  lua_setfield(state, -2, "remove_character_controller");
+  lua_pushcfunction(state, &lua_engine_move_character);
+  lua_setfield(state, -2, "move_character");
+  lua_pushcfunction(state, &lua_engine_is_grounded);
+  lua_setfield(state, -2, "is_grounded");
+  // The kCharacterCollided* bits move_character reports.
+  lua_pushinteger(state, 1);
+  lua_setfield(state, -2, "COLLIDED_BELOW");
+  lua_pushinteger(state, 2);
+  lua_setfield(state, -2, "COLLIDED_SIDES");
+  lua_pushinteger(state, 4);
+  lua_setfield(state, -2, "COLLIDED_ABOVE");
   lua_pushcfunction(state, &lua_engine_set_gravity);
   lua_setfield(state, -2, "set_gravity");
   lua_pushcfunction(state, &lua_engine_get_gravity);

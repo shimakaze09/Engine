@@ -52,7 +52,8 @@ namespace engine::runtime {
   X(AnimationComponent, m_animationComponents)                                 \
   X(CameraComponent, m_cameraComponents)                                       \
   X(SkyLightComponent, m_skyLights)                                            \
-  X(TagSetComponent, m_tagSets)
+  X(TagSetComponent, m_tagSets)                                                \
+  X(CharacterControllerComponent, m_characterControllers)
 
 #ifndef ENGINE_MAX_ENTITIES
 #define ENGINE_MAX_ENTITIES 65536U
@@ -151,6 +152,8 @@ public:
   /// Entities that carry tags at once: every pickup, enemy and checkpoint
   /// of a level, about 2.4 MB of storage.
   static constexpr std::size_t kMaxTagSetComponents = 8192U;
+  /// Characters moving at once: every player, NPC and enemy a level runs.
+  static constexpr std::size_t kMaxCharacterControllerComponents = 1024U;
   static constexpr std::size_t kNameLookupCapacity = kMaxNameComponents * 2U;
   static constexpr std::size_t kStateBufferCount = 2U;
   static constexpr std::size_t kPersistentIndexCapacity = kMaxEntities * 2U;
@@ -161,13 +164,12 @@ public:
   /// serialized name and World accessor pair and static-asserts exact
   /// agreement with this list, so extending the World's serializable set
   /// without a registry row (or vice versa) fails to compile.
-  using PersistentComponentTypes =
-      std::tuple<Transform, RigidBody, Collider, MeshComponent, NameComponent,
-                 LightComponent, ScriptComponent, SpringArmComponent,
-                 PointLightComponent, SpotLightComponent,
-                 ReflectionProbeComponent, SceneCaptureComponent,
-                 FoliagePatchComponent, AnimationComponent, CameraComponent,
-                 SkyLightComponent, TagSetComponent>;
+  using PersistentComponentTypes = std::tuple<
+      Transform, RigidBody, Collider, MeshComponent, NameComponent,
+      LightComponent, ScriptComponent, SpringArmComponent, PointLightComponent,
+      SpotLightComponent, ReflectionProbeComponent, SceneCaptureComponent,
+      FoliagePatchComponent, AnimationComponent, CameraComponent,
+      SkyLightComponent, TagSetComponent, CharacterControllerComponent>;
   /// Number of persistent component types, derived from the list above.
   static constexpr std::size_t kPersistentComponentTypeCount =
       std::tuple_size_v<PersistentComponentTypes>;
@@ -619,6 +621,17 @@ public:
   const SceneCaptureComponent *
   get_scene_capture_component_ptr(Entity entity) const noexcept;
 
+  /// Adds or replaces the character controller; a setting out of its
+  /// range is refused with a logged diagnostic and nothing changed.
+  bool add_character_controller(
+      Entity entity, const CharacterControllerComponent &component) noexcept;
+  bool remove_character_controller(Entity entity) noexcept;
+  bool get_character_controller(
+      Entity entity, CharacterControllerComponent *outComponent) const noexcept;
+  bool has_character_controller(Entity entity) const noexcept;
+  CharacterControllerComponent *
+  get_character_controller_ptr(Entity entity) noexcept;
+
   /// Adds or replaces the entity's spring arm. Requires the Input phase and a
   /// live entity; logs and returns false otherwise or when storage is full.
   bool add_spring_arm(Entity entity,
@@ -958,6 +971,9 @@ private:
   using SpringArmSet =
       core::CompactSparseSet<Entity, SpringArmComponent, kMaxEntities,
                              kMaxSpringArmComponents>;
+  using CharacterControllerSet =
+      core::CompactSparseSet<Entity, CharacterControllerComponent, kMaxEntities,
+                             kMaxCharacterControllerComponents>;
   using PointLightSet =
       core::CompactSparseSet<Entity, PointLightComponent, kMaxEntities,
                              kMaxPointLightComponents>;
@@ -1344,6 +1360,7 @@ private:
   LightComponentSet m_lightComponents{};
   ScriptComponentSet m_scriptComponents{};
   SpringArmSet m_springArms{};
+  CharacterControllerSet m_characterControllers{};
   PointLightSet m_pointLights{};
   SpotLightSet m_spotLights{};
   ReflectionProbeSet m_reflectionProbes{};

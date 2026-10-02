@@ -542,6 +542,8 @@ constexpr MultiSectionDesc kMultiSections[] = {
     {ComponentEditType::ReflectionProbe, kReflectionProbeTypeName,
      "Reflection Probe", true},
     {ComponentEditType::SpringArm, kSpringArmTypeName, "Spring Arm", true},
+    {ComponentEditType::CharacterController, kCharacterControllerTypeName,
+     "Character Controller", true},
     {ComponentEditType::Camera, kCameraTypeName, "Camera", true},
 };
 

@@ -528,6 +528,27 @@ layer but Enemy; a mask that is not an integer fails the query with a
 warning (`engine_unit_collision_layer_matrix`,
 `engine_integration_lua_collision_layers`).
 
+A Character Controller (Add Component > Physics, or
+`engine.add_character_controller(e [, slope_limit [, step_offset [,
+skin_width]]])`) moves its entity's own Capsule Collider the way Unity's
+CharacterController does: `local grounded, collisions, ground =
+engine.move_character(e, dx, dy, dz)` carries it by a displacement at once,
+sliding along walls, climbing steps no higher than the step offset (0.3 m by
+default), treating slopes steeper than the limit (45 degrees) as walls,
+keeping the skin width (0.02 m) between it and what it touches, and keeping
+a grounded character on the ground walking down. `collisions` holds
+`engine.COLLIDED_BELOW`, `engine.COLLIDED_SIDES` and `engine.COLLIDED_ABOVE`
+bits, `ground` is what it stands on, and `engine.is_grounded(e)` reads the
+last move. It is not a rigid body: gravity, jumping and speed are the
+script's, as in Unity. Triggers and layers the matrix keeps apart never
+block it; dynamic bodies block it without being pushed. The capsule stays
+upright, and the entity must be a transform root, scaled uniformly, with no
+rigid body or a kinematic one; `engine.get_character_controller(e)` and
+`engine.remove_character_controller(e)` read and remove it
+(`engine_unit_character_move`, `engine_integration_lua_character_controller`).
+Like the shape sweeps and overlaps, it meets a heightfield as its bounding
+box, so a character cannot yet walk heightfield terrain.
+
 Entities carry gameplay tags, as Godot's groups and Unreal's actor Tags
 do, so scripts find what they act on without a unique name. Give tags in
 the Inspector's Tags row under the name, or from Lua:

@@ -219,6 +219,16 @@ constexpr FieldMetadata kFieldMetadataTable[] = {
      "Orthographic Size", "Camera",
      "Half-height of the orthographic view volume, in world units.", "m", 0.1F,
      0.01F, 0.0F, InspectorWidget::Drag, false, false},
+    {"engine::runtime::CharacterControllerComponent", "slopeLimit",
+     "Slope Limit", "Character",
+     "The steepest slope walked on; a steeper one is a wall.", "deg", 0.5F,
+     0.0F, 89.0F, InspectorWidget::Drag, false, false},
+    {"engine::runtime::CharacterControllerComponent", "stepOffset",
+     "Step Offset", "Character", "The highest step climbed without jumping.",
+     "m", 0.01F, 0.0F, 10.0F, InspectorWidget::Drag, false, false},
+    {"engine::runtime::CharacterControllerComponent", "skinWidth", "Skin Width",
+     "Character", "The gap kept between the capsule and what it touches.", "m",
+     0.001F, 0.001F, 1.0F, InspectorWidget::Drag, false, false},
     {"engine::runtime::CameraComponent", "nearPlane", "Near Plane", "Camera",
      nullptr, "m", 0.01F, 0.001F, 0.0F, InspectorWidget::Drag, false, false},
     {"engine::runtime::CameraComponent", "farPlane", "Far Plane", "Camera",
@@ -268,6 +278,11 @@ constexpr ComponentMetadata kComponentMetadataTable[] = {
      "Renders the scene from this object's transform into a texture."},
     {"engine::runtime::FoliagePatchComponent", "Foliage Patch", "Rendering",
      "Instanced foliage placement with wind and LODs."},
+    {"engine::runtime::CharacterControllerComponent", "Character Controller",
+     "Physics",
+     "Moves this object's Capsule Collider from a script "
+     "(engine.move_character), sliding along walls, climbing steps and "
+     "keeping off steep slopes."},
     {"engine::runtime::SpringArmComponent", "Spring Arm", "Gameplay",
      "Camera boom that resolves collisions between its owner and a target "
      "length."},

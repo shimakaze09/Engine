@@ -266,4 +266,33 @@ struct SpringArmComponent final {
   bool collisionEnabled = true;  ///< Sweep-clamp the arm against colliders.
 };
 
+/// Character controller (Unity's CharacterController, Godot's
+/// CharacterBody3D): its entity's own Capsule Collider, moved by a script's
+/// displacement through runtime::move_character, which slides it along what
+/// it meets, climbs steps and keeps it off steep slopes. It is not a
+/// rigid body: gravity, jumping and speed are the script's. Only the three
+/// settings are authored; the rest is what the last move found, never
+/// serialized.
+struct CharacterControllerComponent final {
+  /// The steepest slope walked on, in degrees, from 0 to 89.
+  float slopeLimit = 45.0F;
+  /// The highest step climbed without jumping, in metres, from 0 to 10.
+  float stepOffset = 0.3F;
+  /// The gap kept between the capsule and what it touches, in metres, from
+  /// 0.001 to 1.
+  float skinWidth = 0.02F;
+  /// Whether the last move ended on walkable ground.
+  bool grounded = false;
+  /// What the last move touched: physics::kCharacterCollided* bits.
+  std::uint32_t collisionFlags = 0U;
+};
+
+/// True when every setting is finite and in its range.
+inline bool
+character_controller_is_valid(const CharacterControllerComponent &c) noexcept {
+  return (c.slopeLimit >= 0.0F) && (c.slopeLimit <= 89.0F) &&
+         (c.stepOffset >= 0.0F) && (c.stepOffset <= 10.0F) &&
+         (c.skinWidth >= 0.001F) && (c.skinWidth <= 1.0F);
+}
+
 } // namespace engine::math

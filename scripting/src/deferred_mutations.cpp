@@ -38,6 +38,8 @@ enum class DeferredMutationType : std::uint8_t {
   RemoveCameraComponent,
   AddTagSetComponent,
   RemoveTagSetComponent,
+  AddCharacterController,
+  RemoveCharacterController,
 };
 
 struct DeferredMutation final {
@@ -55,6 +57,7 @@ struct DeferredMutation final {
   math::SpringArmComponent springArm{};
   math::CameraComponent cameraComponent{};
   math::TagSetComponent tagSetComponent{};
+  math::CharacterControllerComponent characterController{};
   // A script transform write is a teleport: the moved body wakes, so a
   // sleeper taken somewhere new never hangs there asleep.
   bool wakeBody = false;
@@ -385,6 +388,29 @@ bool latest_tag_set_component(runtime::Entity entity,
   }
   return binding.services->get_tag_set_component_op(binding.world, entity,
                                                     outComponent);
+}
+
+bool latest_character_controller(
+    runtime::Entity entity,
+    math::CharacterControllerComponent *outComponent) noexcept {
+  const ScriptingRuntimeBinding &binding = runtime_binding();
+  if (!runtime_bound() || (outComponent == nullptr)) {
+    return false;
+  }
+  DeferredMutation pending{};
+  switch (find_pending_snapshot(
+      entity, DeferredMutationType::AddCharacterController,
+      DeferredMutationType::RemoveCharacterController, true, &pending)) {
+  case PendingRead::Value:
+    *outComponent = pending.characterController;
+    return true;
+  case PendingRead::Removed:
+    return false;
+  case PendingRead::None:
+    break;
+  }
+  return binding.services->get_character_controller_op(binding.world, entity,
+                                                       outComponent);
 }
 
 bool can_create_entities_now() noexcept {
@@ -778,6 +804,44 @@ bool apply_or_queue_remove_tag_set_component(runtime::Entity entity) noexcept {
   return queue_deferred_mutation(mutation);
 }
 
+bool apply_or_queue_character_controller(
+    runtime::Entity entity,
+    const math::CharacterControllerComponent &component) noexcept {
+  const ScriptingRuntimeBinding &binding = runtime_binding();
+  if (!runtime_bound()) {
+    return false;
+  }
+
+  if (can_apply_mutations_now()) {
+    return binding.services->add_character_controller_op(binding.world, entity,
+                                                         component);
+  }
+
+  DeferredMutation mutation{};
+  mutation.type = DeferredMutationType::AddCharacterController;
+  mutation.entity = entity;
+  mutation.characterController = component;
+  return queue_deferred_mutation(mutation);
+}
+
+bool apply_or_queue_remove_character_controller(
+    runtime::Entity entity) noexcept {
+  const ScriptingRuntimeBinding &binding = runtime_binding();
+  if (!runtime_bound()) {
+    return false;
+  }
+
+  if (can_apply_mutations_now()) {
+    return binding.services->remove_character_controller_op(binding.world,
+                                                            entity);
+  }
+
+  DeferredMutation mutation{};
+  mutation.type = DeferredMutationType::RemoveCharacterController;
+  mutation.entity = entity;
+  return queue_deferred_mutation(mutation);
+}
+
 bool apply_or_queue_remove_camera_component(runtime::Entity entity) noexcept {
   const ScriptingRuntimeBinding &binding = runtime_binding();
   if (!runtime_bound()) {
@@ -934,6 +998,14 @@ std::size_t flush_deferred_mutations_prefix(std::size_t limit) noexcept {
     case DeferredMutationType::RemoveTagSetComponent:
       note(binding.services->remove_tag_set_component_op(binding.world,
                                                          mutation.entity));
+      break;
+    case DeferredMutationType::AddCharacterController:
+      note(binding.services->add_character_controller_op(
+          binding.world, mutation.entity, mutation.characterController));
+      break;
+    case DeferredMutationType::RemoveCharacterController:
+      note(binding.services->remove_character_controller_op(binding.world,
+                                                            mutation.entity));
       break;
     }
   }
