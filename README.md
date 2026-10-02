@@ -546,6 +546,8 @@ upright, and the entity must be a transform root, scaled uniformly, with no
 rigid body or a kinematic one; `engine.get_character_controller(e)` and
 `engine.remove_character_controller(e)` read and remove it
 (`engine_unit_character_move`, `engine_integration_lua_character_controller`).
+Like the shape sweeps and overlaps, it meets a heightfield as its bounding
+box, so a character cannot yet walk heightfield terrain.
 
 Entities carry gameplay tags, as Godot's groups and Unreal's actor Tags
 do, so scripts find what they act on without a unique name. Give tags in
