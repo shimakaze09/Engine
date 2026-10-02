@@ -627,6 +627,11 @@ validate_project_document(const ProjectDocument &document) noexcept {
     return refuse("scripting.memoryLimitMiB",
                   "is neither 0 (unlimited) nor from 16 to 2048");
   }
+  const ProjectSaveSettings &saves = document.saveSettings;
+  if (saves.maxSlotMiBSet && ((saves.maxSlotMiB < kProjectMinSaveSlotMiB) ||
+                              (saves.maxSlotMiB > kProjectMaxSaveSlotMiB))) {
+    return refuse("saves.maxSlotMiB", "is not from 1 to 256");
+  }
   return validate_collision_layers(document.collisionLayers);
 }
 
@@ -662,14 +667,15 @@ parse_project_document(const char *text, std::size_t length,
   }
 
   constexpr const char *kTopKeys[] = {
-      "schemaVersion", "identity",  "roots",        "scenes", "startupScene",
-      "mainScript",    "scripting", "dependencies", "physics"};
+      "schemaVersion", "identity",  "roots",        "scenes",  "startupScene",
+      "mainScript",    "scripting", "dependencies", "physics", "saves"};
   constexpr const char *kIdentityKeys[] = {"name", "organisation", "version",
                                            "guid"};
   constexpr const char *kRootKeys[] = {"content", "cache"};
   constexpr const char *kScriptingKeys[] = {"instructionLimit",
                                             "memoryLimitMiB"};
-  if (auto checked = check_members(parser, root, kTopKeys, 9U, "");
+  constexpr const char *kSavesKeys[] = {"maxSlotMiB"};
+  if (auto checked = check_members(parser, root, kTopKeys, 10U, "");
       !checked.has_value()) {
     return checked;
   }
@@ -824,6 +830,28 @@ parse_project_document(const char *text, std::size_t length,
     if (auto r = read_physics(parser, physics, &staged->collisionLayers);
         !r.has_value()) {
       return r;
+    }
+  }
+
+  core::JsonValue saves{};
+  if (parser.get_object_field(root, "saves", &saves)) {
+    if (saves.type != core::JsonValue::Type::Object) {
+      return refuse("saves", "is not an object");
+    }
+    if (auto r = check_members(parser, saves, kSavesKeys, 1U, "saves");
+        !r.has_value()) {
+      return r;
+    }
+    ProjectSaveSettings &settings = staged->saveSettings;
+    if (auto r = read_limit(parser, saves, "maxSlotMiB", "saves.maxSlotMiB",
+                            &settings.maxSlotMiBSet, &settings.maxSlotMiB);
+        !r.has_value()) {
+      return r;
+    }
+    if (!settings.maxSlotMiBSet) {
+      // Absent is how a project keeps the engine's default; an empty
+      // object would be a second spelling of the same thing.
+      return refuse("saves", "is empty; omit it instead");
     }
   }
 
@@ -987,6 +1015,14 @@ bool format_project_document(const ProjectDocument &document, char *out,
       }
       a.text("\n    ]");
     }
+    a.text("\n  }");
+  }
+  if (document.saveSettings.maxSlotMiBSet) {
+    char number[16] = {};
+    std::snprintf(number, sizeof(number), "%u",
+                  document.saveSettings.maxSlotMiB);
+    a.text(",\n  \"saves\": {\n    \"maxSlotMiB\": ");
+    a.text(number);
     a.text("\n  }");
   }
   a.text("\n}\n");
