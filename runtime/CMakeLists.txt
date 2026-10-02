@@ -23,6 +23,7 @@ engine_add_module_library(engine_runtime
     src/physics_bridge.cpp
     src/collision_layers.cpp
     src/character_controller.cpp
+    src/navigation_bake.cpp
     src/prefab_serializer.cpp
     src/primitive_collider.cpp
     src/render_prep_pipeline.cpp
@@ -48,6 +49,7 @@ engine_add_module_library(engine_runtime
     # right, not something to reach through engine_renderer.
     engine_content
     engine_physics
+    engine_navigation
     engine_scripting
     engine_renderer
     engine_audio
