@@ -1,13 +1,12 @@
-// Diagnostic probe for the two Direct3D 12 defects the WARP lane pins:
-// the BRDF lookup reading back as zeros and the deferred sky ignoring
-// its uniforms. It prints what each variant reads and always passes; it
-// exists only to choose between causes, and leaves with the fix.
+// Diagnostic probe for the Direct3D 12 BRDF lookup reading back as zeros.
+// It prints what each variant reads and always passes; it exists only to
+// choose between causes, and leaves with the fix.
 //
-// The lookup: the renderer's own bake, then the bake program drawn by
-// this test into fresh targets of three formats, with the target either
-// destroyed in the frame of its draw (as the renderer does) or kept.
-// The sky: the deferred sky at two turbidities under r_debug_probe 0
-// (as shipped), 1 (the depth seed in a view of its own) and 2 (no seed).
+// The renderer's own lookup; the bake program drawn by this test straight
+// into the back buffer and into fresh targets of three formats and two
+// sizes, the target destroyed in the frame of its draw (as the renderer
+// does) or kept; and the renderer baking its lookup again long after its
+// first frame.
 
 #include "../gpu_scene_fixture.h"
 
@@ -77,11 +76,10 @@ void print_grid(const char *label, const CapturedFrame &frame,
 /// destroyed at once when `destroyNow`, otherwise kept until after the
 /// readback. With `switchAway` another target is bound and cleared after
 /// the draw, so the device leaves the bake target before it goes.
-void probe_bake(const char *label, r::TextureFormat format, bool destroyNow,
-                bool switchAway) noexcept {
+void probe_bake(const char *label, int kSize, r::TextureFormat format,
+                bool destroyNow, bool switchAway) noexcept {
   const r::BackendState &backend = r::backend_state();
   const r::RenderDevice *dev = r::render_device();
-  constexpr int kSize = 128;
   r::TextureDesc desc{};
   desc.kind = r::TextureKind::Tex2D;
   desc.format = format;
@@ -178,27 +176,8 @@ void probe_bake_direct() noexcept {
   }
 }
 
-/// Mean RGB over the frame's upper middle.
-void print_sky(const char *label, const CapturedFrame &frame) noexcept {
-  double sum[3] = {};
-  std::uint32_t count = 0U;
-  for (std::uint32_t y = frame.height / 8U; y < frame.height / 2U; ++y) {
-    for (std::uint32_t x = frame.width / 4U; x < (frame.width * 3U) / 4U; ++x) {
-      sum[0] += frame.channel(x, y, 2U);
-      sum[1] += frame.channel(x, y, 1U);
-      sum[2] += frame.channel(x, y, 0U);
-      ++count;
-    }
-  }
-  std::printf("probe %s: sky %.1f %.1f %.1f\n", label, sum[0] / count,
-              sum[1] / count, sum[2] / count);
-}
-
-int run(engine::EnginePipeline &pipeline,
-        engine::runtime::World &world) noexcept {
+int run(engine::EnginePipeline &pipeline, engine::runtime::World &) noexcept {
   using engine::tests::checked;
-  static_cast<void>(engine::core::cvar_register_int(
-      "r_debug_probe", 0, "Direct3D 12 diagnostic probe"));
   if (!engine::tests::settle_frames(pipeline, 2)) {
     return 10;
   }
@@ -209,42 +188,34 @@ int run(engine::EnginePipeline &pipeline,
     print_grid("shipped", shipped, backend.brdfLutSize);
   }
   probe_bake_direct();
-  probe_bake("rg16f_destroyed", r::TextureFormat::RG16F, true, false);
-  probe_bake("rg16f_kept", r::TextureFormat::RG16F, false, false);
-  probe_bake("rg16f_switched_destroyed", r::TextureFormat::RG16F, true, true);
-  probe_bake("rgba16f_kept", r::TextureFormat::RGBA16F, false, false);
-  probe_bake("rgba8_kept", r::TextureFormat::RGBA8, false, false);
+  probe_bake("rg16f_destroyed", 128, r::TextureFormat::RG16F, true, false);
+  probe_bake("rg16f_kept", 128, r::TextureFormat::RG16F, false, false);
+  probe_bake("rg16f_switched_destroyed", 128, r::TextureFormat::RG16F, true,
+             true);
+  probe_bake("rgba16f_kept", 128, r::TextureFormat::RGBA16F, false, false);
+  probe_bake("rgba8_kept", 128, r::TextureFormat::RGBA8, false, false);
 
-  checked(engine::core::cvar_set_string("r_fog_mode", "off"), "r_fog_mode");
-  checked(engine::core::cvar_set_bool("r_bloom", false), "r_bloom");
-  checked(engine::core::cvar_set_bool("r_ssao", false), "r_ssao");
-  checked(engine::core::cvar_set_string("r_sky_model", "hosek"), "r_sky_model");
-  if (!engine::tests::look_from(world, engine::math::Vec3(0.0F, 0.0F, 0.0F),
-                                engine::math::Vec3(0.0F, 10.0F, -4.0F))) {
-    return 11;
-  }
-  for (int probe = 0; probe < 3; ++probe) {
-    checked(engine::core::cvar_set_int("r_debug_probe", probe),
-            "r_debug_probe");
-    for (const float turbidity : {2.0F, 8.0F}) {
-      checked(engine::core::cvar_set_float("r_sky_turbidity", turbidity),
-              "r_sky_turbidity");
-      CapturedFrame frame{};
-      char path[64] = {};
-      std::snprintf(path, sizeof(path), "d3d12_probe_sky_%d_%d.tga", probe,
-                    static_cast<int>(turbidity));
-      if (engine::tests::settle_frames(pipeline, 6) &&
-          engine::tests::capture_presented_frame(pipeline, path, &frame)) {
-        char label[48] = {};
-        std::snprintf(label, sizeof(label), "deferred probe %d turbidity %d",
-                      probe, static_cast<int>(turbidity));
-        print_sky(label, frame);
-      }
+  probe_bake("rg16f_512_destroyed", 512, r::TextureFormat::RG16F, true, false);
+
+  // The renderer's own bake again, in a frame long after the first: a
+  // new size makes the next flush bake a new lookup.
+  for (const int size : {256, 512}) {
+    checked(engine::core::cvar_set_int("r_env_brdf_lut_size", size),
+            "r_env_brdf_lut_size");
+    CapturedFrame rebaked{};
+    char label[32] = {};
+    std::snprintf(label, sizeof(label), "rebaked_%d", size);
+    char path[64] = {};
+    std::snprintf(path, sizeof(path), "d3d12_probe_%s.tga", label);
+    if (engine::tests::settle_frames(pipeline, 3) &&
+        (backend.brdfLutSize == size) &&
+        read_back(backend.brdfLutTexture, size, path, &rebaked)) {
+      print_grid(label, rebaked, size);
+    } else {
+      std::printf("probe %s: no rebake or readback (size %d)\n", label,
+                  backend.brdfLutSize);
     }
   }
-  checked(engine::core::cvar_set_int("r_debug_probe", 0), "r_debug_probe");
-  checked(engine::core::cvar_set_float("r_sky_turbidity", 3.0F),
-          "r_sky_turbidity");
   return 0;
 }
 
