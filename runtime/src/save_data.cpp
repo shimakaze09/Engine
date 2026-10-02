@@ -611,8 +611,10 @@ SaveReadResult read_game_data_from(const char *directory, const char *slot,
                            "changed after it was written");
     return SaveReadResult::Corrupt;
   }
+  // Moving the owner keeps the allocation where it is, so the payload
+  // pointer taken from it stays valid.
+  out->data = text + payloadOffset;
   out->storage = std::move(buffer);
-  out->data = out->storage.get() + payloadOffset;
   out->length = payloadLength;
   return SaveReadResult::Ok;
 }
