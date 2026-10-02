@@ -577,15 +577,30 @@ built-in player controller, game mode, score store or cheat flags. Scripts
 read input (`engine.is_key_down`, `engine.is_action_down`), move entities
 and bodies, and keep state across scene loads in Lua globals, which live
 for the whole run (`engine_integration_scene_flow`); `engine.save_data` and
-`engine.load_data` keep it between runs. `local data, status =
-engine.load_data()` answers the table and `"ok"`, or nil and why: `"absent"`
-(no save yet), `"corrupt"` (it does not parse; the log says near which
-byte), `"unsupported"` (a newer build wrote it) or `"unreadable"`. A save
-that did not load is kept, never overwritten, as Unreal's
-`DoesSaveGameExist` keeps a damaged slot apart from a missing one:
-`engine.save_data` refuses until the game calls `engine.discard_save()`,
-which moves it aside to `save.json.discarded-<n>`
-(`engine_integration_save_corrupt_kept`). The console's `spawn <prefab>
+`engine.load_data` keep it between runs, in named save slots as Unreal's
+`SaveGameToSlot` has them. Each takes an optional slot name, `"default"`
+when left out: 1 to 31 letters, digits, `_`, `-` or `.`, case ignored
+(`engine.save_data(t, "slot2")`); any other name is a Lua error rather
+than a save somewhere else. A slot is `saves/<slot>.save` in the
+project's per-user data, a one-line header (format version, save time,
+payload length and checksum) and then the data, so a file cut off or
+changed after it was written is caught rather than read as a shorter save.
+`local data, status = engine.load_data(slot)` answers the table and
+`"ok"`, or nil and why: `"absent"` (no save yet), `"corrupt"` (the file is
+damaged or cut off, or it does not parse; the log says where),
+`"unsupported"` (a newer build wrote it) or `"unreadable"`. A slot that
+did not load is kept, never overwritten, as Unreal's `DoesSaveGameExist`
+keeps a damaged slot apart from a missing one: `engine.save_data` refuses
+that slot until the game calls `engine.discard_save(slot)`, which moves it
+aside to `<slot>.save.discarded-<n>` (`engine_integration_save_corrupt_kept`).
+`engine.list_saves()` answers every slot, sorted, as `{slot, saved_at,
+bytes, status, legacy}` read from the headers alone, and
+`engine.get_save_limit()` the largest save the project allows (4 MiB
+unless Project Settings sets another); a project holds at most 256
+slots. A `save.json` from before slots existed loads as the `"default"`
+slot until the game next saves it, which moves it aside to
+`save.json.migrated-<n>` (`engine_unit_save_data`,
+`engine_unit_save_data_bindings`). The console's `spawn <prefab>
 [x y z]` instantiates a prefab by a path inside the project, placed at
 x y z when given while keeping the prefab's rotation and scale; anything
 but three finite numbers refuses the command (`engine_integration_sandbox`). It changes the running game, so the
@@ -626,7 +641,10 @@ editor or player (`engine_unit_editor_project_settings`,
 `engine_integration_project_open`). Its collision layers are saved there
 too, as an optional `"physics"` object: `"layers": [{"bit": 3, "name":
 "Player"}]` and `"ignoredPairs": [[3, 4]]`, left out while every layer is
-unnamed and every pair collides.
+unnamed and every pair collides. Its largest save slot, set in Project
+Settings > Saves from 1 to 256 MiB, is saved as `"saves": {"maxSlotMiB":
+16}`, left out at the 4 MiB default; a lower limit still loads the larger
+saves written before it.
 
 The scripting surface is still evolving. Some APIs are generated from annotated accessors, while the hand-written surface lives in domain binding translation units under `scripting/src/` (entity lifecycle, body, mesh/material, physics, lights, camera, audio, input, timers, coroutines, and more).
 
