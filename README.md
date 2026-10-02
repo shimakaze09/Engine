@@ -345,7 +345,7 @@ The suite includes targets such as:
 Some tests are labeled `gpu`: they open a device and draw. CI runs them on
 the Linux Release lane, on Mesa's software Vulkan (lavapipe) under Xvfb, and
 on the Windows Release lane, on WARP (Microsoft's software rasterizer)
-through both D3D11 and D3D12; every other lane excludes the label. The
+through D3D11; every other lane excludes the label. The
 `r_bgfx_software_adapter` cvar (set it with
 `ENGINE_CVAR_r_bgfx_software_adapter=1`) asks for that software adapter on
 any machine.
@@ -363,7 +363,7 @@ save, one entry per OS and configuration:
   toolchains (`clang-cl` via Ninja, `clang++-19`, AppleClang),
   with headless-safe CTest filtering; the Linux Release lane also runs the
   `gpu`-labelled suites on lavapipe (software Vulkan) under Xvfb, and the
-  Windows Release lane runs them on WARP through D3D11 and D3D12
+  Windows Release lane runs them on WARP through D3D11
 - MSVC (Windows) and GCC (Linux) Release compatibility lanes (build + test)
 - A web lane: Emscripten builds the shipped page and the lifecycle harness
   in `tests/web/` against the Linux Release lane's shader cook, then
