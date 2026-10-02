@@ -139,6 +139,7 @@ struct ReflectedComponentDescriptors final {
   const core::TypeDescriptor *spotLight = nullptr;
   const core::TypeDescriptor *sceneCapture = nullptr;
   const core::TypeDescriptor *camera = nullptr;
+  const core::TypeDescriptor *characterController = nullptr;
 };
 
 /// Reflection descriptor for a reflected component type (one overload per
@@ -159,6 +160,12 @@ inline const core::TypeDescriptor &
 component_descriptor(const ReflectedComponentDescriptors &descs,
                      const SpringArmComponent *) noexcept {
   return *descs.springArm;
+}
+/// CharacterController descriptor selector.
+inline const core::TypeDescriptor &
+component_descriptor(const ReflectedComponentDescriptors &descs,
+                     const CharacterControllerComponent *) noexcept {
+  return *descs.characterController;
 }
 /// ReflectionProbe descriptor selector.
 inline const core::TypeDescriptor &

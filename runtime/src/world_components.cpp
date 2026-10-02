@@ -1251,6 +1251,38 @@ World::get_animation_component_ptr(Entity entity) const noexcept {
   return get_component_ptr_checked(m_animationComponents, entity);
 }
 
+bool World::add_character_controller(
+    Entity entity, const CharacterControllerComponent &component) noexcept {
+  if (!character_controller_is_valid(component)) {
+    log_component_error("add_character_controller",
+                        "slope limit, step offset or skin width is out of "
+                        "its range");
+    return false;
+  }
+  return static_cast<bool>(add_component_checked(
+      m_characterControllers, entity, component, "add_character_controller"));
+}
+
+bool World::remove_character_controller(Entity entity) noexcept {
+  return remove_component_checked(m_characterControllers, entity,
+                                  "remove_character_controller");
+}
+
+bool World::get_character_controller(
+    Entity entity, CharacterControllerComponent *outComponent) const noexcept {
+  return get_component_checked(m_characterControllers, entity, outComponent,
+                               "get_character_controller");
+}
+
+bool World::has_character_controller(Entity entity) const noexcept {
+  return is_valid_entity(entity) && m_characterControllers.contains(entity);
+}
+
+CharacterControllerComponent *
+World::get_character_controller_ptr(Entity entity) noexcept {
+  return get_component_ptr_checked(m_characterControllers, entity);
+}
+
 bool World::add_spring_arm(Entity entity,
                            const SpringArmComponent &component) noexcept {
   return static_cast<bool>(add_component_checked(m_springArms, entity, component,

@@ -11,7 +11,12 @@
 //   walking down a ramp, and ignores triggers, colliders on layers the
 //   matrix keeps apart, and its own collider;
 // - the same move twice gives the same bits, and a non-finite move is
-//   refused.
+//   refused;
+// - through the runtime, a character moves its entity and records grounded
+//   and its flags; a controller setting out of range is refused; and each
+//   refused move (outside the Input phase, no controller, no unrotated
+//   capsule, parented, scaled unevenly, a dynamic body, a non-finite
+//   displacement) leaves the entity where it was.
 
 #include <cmath>
 #include <cstdio>
@@ -27,6 +32,7 @@
 #include "engine/physics/collider.h"
 #include "engine/physics/physics.h"
 #include "engine/physics/physics_context.h"
+#include "engine/runtime/character_controller.h"
 #include "engine/runtime/physics_bridge.h"
 #include "engine/runtime/world.h"
 
@@ -424,6 +430,130 @@ void check_determinism_and_refusals() {
         "refusals: a non-finite move is refused and clears the result");
 }
 
+/// A character entity standing on the floor with its feet at `feet`.
+Entity add_character(World &world, const Vec3 &feet) noexcept {
+  const Entity entity = world.create_entity();
+  engine::runtime::Transform transform{};
+  transform.position = feet;
+  engine::runtime::Collider collider{};
+  collider.shape = engine::runtime::ColliderShape::Capsule;
+  collider.halfExtents = Vec3(kRadius, (kHeight * 0.5F) - kRadius, kRadius);
+  collider.localPosition = Vec3(0.0F, kHeight * 0.5F, 0.0F);
+  engine::runtime::CharacterControllerComponent controller{};
+  static_cast<void>(world.add_transform(entity, transform));
+  static_cast<void>(world.add_collider(entity, collider));
+  static_cast<void>(world.add_character_controller(entity, controller));
+  return entity;
+}
+
+Vec3 position_of(const World &world, Entity entity) noexcept {
+  engine::runtime::Transform transform{};
+  static_cast<void>(world.get_transform(entity, &transform));
+  return transform.position;
+}
+
+void check_runtime_move() {
+  std::unique_ptr<World> world = make_world();
+  check(world != nullptr, "runtime: world");
+  if (world == nullptr) {
+    return;
+  }
+  add_floor(*world);
+
+  engine::runtime::CharacterControllerComponent bad{};
+  const Entity probe = world->create_entity();
+  bad.slopeLimit = 90.0F;
+  const bool steep = world->add_character_controller(probe, bad);
+  bad = engine::runtime::CharacterControllerComponent{};
+  bad.skinWidth = 0.0F;
+  const bool skinless = world->add_character_controller(probe, bad);
+  bad = engine::runtime::CharacterControllerComponent{};
+  bad.stepOffset = std::numeric_limits<float>::quiet_NaN();
+  const bool nan = world->add_character_controller(probe, bad);
+  check(!steep && !skinless && !nan && !world->has_character_controller(probe),
+        "runtime: a setting out of its range is refused");
+
+  const Entity hero = add_character(*world, kStanding);
+  engine::runtime::CharacterMoveOutcome outcome{};
+  check(engine::runtime::move_character(*world, hero, Vec3(1.0F, -0.1F, 0.0F),
+                                        &outcome) &&
+            outcome.grounded &&
+            near(position_of(*world, hero).x, 1.0F, 1.0e-4F),
+        "runtime: a character walks its entity along the floor");
+  engine::runtime::CharacterControllerComponent stored{};
+  check(world->get_character_controller(hero, &stored) && stored.grounded &&
+            ((stored.collisionFlags &
+              engine::physics::kCharacterCollidedBelow) != 0U),
+        "runtime: the controller records grounded and what it touched");
+
+  // Each refusal leaves the entity where it was.
+  const auto refused = [&](Entity entity, const Vec3 &displacement) {
+    const Vec3 before = position_of(*world, entity);
+    const bool moved =
+        engine::runtime::move_character(*world, entity, displacement, nullptr);
+    const Vec3 after = position_of(*world, entity);
+    return !moved && (std::memcmp(&before, &after, sizeof(Vec3)) == 0);
+  };
+  check(refused(hero, Vec3(std::numeric_limits<float>::infinity(), 0.0F, 0.0F)),
+        "runtime: a non-finite displacement is refused");
+  world->begin_update_phase();
+  check(refused(hero, Vec3(1.0F, 0.0F, 0.0F)),
+        "runtime: a move outside the Input phase is refused");
+  world->commit_update_phase();
+  world->begin_render_prep_phase();
+  world->end_frame_phase();
+
+  const Entity noController = add_character(*world, Vec3(0.0F, kSkin, 5.0F));
+  static_cast<void>(world->remove_character_controller(noController));
+  check(refused(noController, Vec3(1.0F, 0.0F, 0.0F)),
+        "runtime: an entity without a controller is refused");
+
+  const Entity boxy = add_character(*world, Vec3(0.0F, kSkin, 10.0F));
+  engine::runtime::Collider box{};
+  static_cast<void>(world->add_collider(boxy, box));
+  check(refused(boxy, Vec3(1.0F, 0.0F, 0.0F)),
+        "runtime: a character without a Capsule Collider is refused");
+
+  const Entity tilted = add_character(*world, Vec3(0.0F, kSkin, 15.0F));
+  engine::runtime::Collider tiltedCollider{};
+  static_cast<void>(world->get_collider(tilted, &tiltedCollider));
+  tiltedCollider.localRotation = engine::math::from_euler(0.5F, 0.0F, 0.0F);
+  static_cast<void>(world->add_collider(tilted, tiltedCollider));
+  check(refused(tilted, Vec3(1.0F, 0.0F, 0.0F)),
+        "runtime: a rotated capsule is refused");
+
+  const Entity stretched = add_character(*world, Vec3(0.0F, kSkin, 20.0F));
+  engine::runtime::Transform stretch{};
+  static_cast<void>(world->get_transform(stretched, &stretch));
+  stretch.scale = Vec3(1.0F, 2.0F, 1.0F);
+  static_cast<void>(world->add_transform(stretched, stretch));
+  check(refused(stretched, Vec3(1.0F, 0.0F, 0.0F)),
+        "runtime: an unevenly scaled character is refused");
+
+  const Entity parent = world->create_scene_object();
+  const Entity child = add_character(*world, Vec3(0.0F, kSkin, 25.0F));
+  engine::runtime::Transform childTransform{};
+  static_cast<void>(world->get_transform(child, &childTransform));
+  childTransform.parentId = world->persistent_id(parent);
+  check(world->add_transform(child, childTransform) &&
+            refused(child, Vec3(1.0F, 0.0F, 0.0F)),
+        "runtime: a parented character is refused");
+
+  const Entity dynamic = add_character(*world, Vec3(0.0F, kSkin, 30.0F));
+  engine::runtime::RigidBody body{};
+  body.inverseMass = 1.0F;
+  static_cast<void>(world->add_rigid_body(dynamic, body));
+  check(refused(dynamic, Vec3(1.0F, 0.0F, 0.0F)),
+        "runtime: a character with a dynamic body is refused");
+  body.bodyType =
+      static_cast<std::uint32_t>(engine::runtime::BodyType::Kinematic);
+  static_cast<void>(world->add_rigid_body(dynamic, body));
+  check(engine::runtime::move_character(*world, dynamic, Vec3(1.0F, 0.0F, 0.0F),
+                                        nullptr) &&
+            near(position_of(*world, dynamic).x, 1.0F, 1.0e-4F),
+        "runtime: a character with a kinematic body moves");
+}
+
 } // namespace
 
 int main() {
@@ -433,6 +563,7 @@ int main() {
   check_ramps();
   check_depenetration_and_filters();
   check_determinism_and_refusals();
+  check_runtime_move();
   if (g_failures != 0) {
     std::fprintf(stderr, "%d character move check(s) failed\n", g_failures);
     return 1;

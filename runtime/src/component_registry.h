@@ -73,7 +73,10 @@
   X(SkyLightComponent, kJsonKeySkyLightComponent, get_sky_light_component,     \
     add_sky_light_component, remove_sky_light_component)                       \
   X(TagSetComponent, kJsonKeyTagSetComponent, get_tag_set_component,           \
-    add_tag_set_component, remove_tag_set_component)
+    add_tag_set_component, remove_tag_set_component)                           \
+  X(CharacterControllerComponent, kJsonKeyCharacterControllerComponent,        \
+    get_character_controller, add_character_controller,                        \
+    remove_character_controller)
 
 namespace engine::runtime {
 

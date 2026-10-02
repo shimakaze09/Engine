@@ -86,6 +86,14 @@ REFLECT_FIELD(collisionRadius, Float)
 REFLECT_FIELD(collisionEnabled, Bool)
 REFLECT_END()
 
+// Only the authored settings: grounded and collisionFlags are what the
+// last move found, rebuilt by the next one.
+REFLECT_TYPE(engine::runtime::CharacterControllerComponent)
+REFLECT_FIELD(slopeLimit, Float)
+REFLECT_FIELD(stepOffset, Float)
+REFLECT_FIELD(skinWidth, Float)
+REFLECT_END()
+
 REFLECT_TYPE(engine::runtime::PointLightComponent)
 REFLECT_FIELD(color, Vec3)
 REFLECT_FIELD(intensity, Float)

@@ -393,6 +393,22 @@ bool components_equal(const SkyLightComponent &a,
   return a.environmentRef == b.environmentRef;
 }
 
+void make_test_value(
+    engine::runtime::CharacterControllerComponent *out) noexcept {
+  out->slopeLimit = 37.5F;
+  out->stepOffset = 0.45F;
+  out->skinWidth = 0.035F;
+}
+
+/// The authored settings only: grounded and collisionFlags are what the
+/// last move found, never serialized.
+bool components_equal(
+    const engine::runtime::CharacterControllerComponent &a,
+    const engine::runtime::CharacterControllerComponent &b) noexcept {
+  return (a.slopeLimit == b.slopeLimit) && (a.stepOffset == b.stepOffset) &&
+         (a.skinWidth == b.skinWidth);
+}
+
 void make_test_value(engine::runtime::TagSetComponent *out) noexcept {
   static_cast<void>(engine::runtime::tag_set_add(out, "coin"));
   static_cast<void>(engine::runtime::tag_set_add(out, "Pickup.Gold"));
@@ -570,7 +586,7 @@ int verify_prefab_mesh_reference_parity() {
 // Count tripwire: bumping this is an intentional act that accompanies a new
 // registry row, a World::PersistentComponentTypes entry, and the test-value/
 // comparator overloads above.
-static_assert(engine::runtime::kPersistentComponentTypeCount == 17U,
+static_assert(engine::runtime::kPersistentComponentTypeCount == 18U,
               "new persistent component type: extend the registry table, the "
               "World type list, and this suite's overloads together");
 

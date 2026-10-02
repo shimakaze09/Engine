@@ -575,6 +575,7 @@ ComponentEditSnapshot default_component_snapshot(
   case ComponentEditType::Camera:
   case ComponentEditType::SkyLight:
   case ComponentEditType::Tags:
+  case ComponentEditType::CharacterController:
     break;
   }
   return snapshot;
