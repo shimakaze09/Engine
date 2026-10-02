@@ -37,8 +37,9 @@ PlatformCaps caps_for(PlatformId id, bool hasWindow) {
 
 /// Runs this executable or test program.
 int main() {
-  constexpr PlatformId kPlatforms[] = {PlatformId::Windows, PlatformId::Linux,
-                                       PlatformId::MacOS, PlatformId::Web};
+  constexpr PlatformId kPlatforms[] = {
+      PlatformId::Windows, PlatformId::Linux, PlatformId::MacOS,
+      PlatformId::Web,     PlatformId::IOS,   PlatformId::Android};
 
   // "auto": Vulkan on Windows, the library's pick elsewhere. A null or
   // unrecognized request reads as "auto".
@@ -48,7 +49,8 @@ int main() {
                                   request) == RendererBackendChoice::Vulkan,
           "auto on Windows is Vulkan");
     for (const PlatformId id :
-         {PlatformId::Linux, PlatformId::MacOS, PlatformId::Web}) {
+         {PlatformId::Linux, PlatformId::MacOS, PlatformId::Web,
+          PlatformId::IOS, PlatformId::Android}) {
       CHECK(select_renderer_backend(caps_for(id, true), request) ==
                 RendererBackendChoice::LibraryDefault,
             "auto off Windows leaves the choice to the library");

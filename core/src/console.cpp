@@ -6,6 +6,7 @@
 #include "engine/core/logging.h"
 
 #include <array>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <mutex>
@@ -118,13 +119,53 @@ void builtin_help(const char *const * /*args*/, int /*argCount*/,
   }
 }
 
+/// The registered type of a cvar; false when no cvar has that name.
+bool find_cvar_type(const char *name, CVarType *outType) noexcept {
+  constexpr std::size_t kMaxInfos = 256U;
+  CVarInfo infos[kMaxInfos] = {};
+  const std::size_t total = cvar_get_all(infos, kMaxInfos);
+  for (std::size_t i = 0U; i < total; ++i) {
+    if (std::strcmp(infos[i].name, name) == 0) {
+      *outType = infos[i].type;
+      return true;
+    }
+  }
+  return false;
+}
+
 void builtin_set(const char *const *args, int argCount,
                  void * /*userData*/) noexcept {
+  constexpr const char *kUsage =
+      "Usage: set <cvar_name> <value> (quote a value that holds spaces)";
   if (argCount < 3) {
-    console_print("Usage: set <cvar_name> <value>");
+    console_print(kUsage);
     return;
   }
-  if (!cvar_set_from_string(args[1], args[2])) {
+  // A text cvar takes the rest of the line, so `set r_fog_color 0.2 0.3 0.4`
+  // stores all three numbers; any other cvar takes exactly one value, and
+  // more than one changes nothing rather than keeping the first.
+  const char *value = args[2];
+  char joined[kMaxInputLen] = {};
+  if (argCount > 3) {
+    CVarType type = CVarType::Bool;
+    if (!find_cvar_type(args[1], &type) || (type != CVarType::String)) {
+      console_print(kUsage);
+      return;
+    }
+    std::size_t used = 0U;
+    for (int i = 2; i < argCount; ++i) {
+      const int written = std::snprintf(joined + used, sizeof(joined) - used,
+                                        "%s%s", (i > 2) ? " " : "", args[i]);
+      if ((written < 0) ||
+          (static_cast<std::size_t>(written) >= sizeof(joined) - used)) {
+        console_print("set: the value is too long; nothing was changed.");
+        return;
+      }
+      used += static_cast<std::size_t>(written);
+    }
+    value = joined;
+  }
+  if (!cvar_set_from_string(args[1], value)) {
     char buf[kMaxLineLen] = {};
     std::snprintf(buf, sizeof(buf), "CVar '%s' not found or type error.",
                   args[1]);
@@ -132,7 +173,7 @@ void builtin_set(const char *const *args, int argCount,
     return;
   }
   char buf[kMaxLineLen] = {};
-  std::snprintf(buf, sizeof(buf), "set %s = %s", args[1], args[2]);
+  std::snprintf(buf, sizeof(buf), "set %.63s = %.180s", args[1], value);
   console_print(buf);
 }
 
@@ -183,30 +224,68 @@ void builtin_get(const char *const *args, int argCount,
 }
 
 // ---- tokenizer ----
-// Splits `line` on whitespace into args[].  Returns arg count.
-// Writes null-terminators into `lineBuf` (caller provides a mutable copy).
-int tokenize(char *lineBuf, const char *const **outArgs, const char **argPtrs,
-             int maxArgs) noexcept {
+
+enum class TokenizeError : std::uint8_t {
+  None,
+  TooManyArgs,
+  UnterminatedQuote
+};
+
+struct Tokenized final {
   int count = 0;
-  char *p = lineBuf;
-  while ((*p != '\0') && (count < maxArgs)) {
-    while ((*p == ' ') || (*p == '\t')) {
-      ++p;
+  TokenizeError error = TokenizeError::None;
+};
+
+// Splits `lineBuf` in place into argPtrs[], as Unreal's and Source's
+// consoles do: whitespace separates tokens, and "a quoted run" is one token
+// with \" and \\ as escapes. A line with more than `maxArgs` tokens or an
+// unclosed quote is refused whole, so nothing runs on part of it.
+Tokenized tokenize(char *lineBuf, const char **argPtrs, int maxArgs) noexcept {
+  Tokenized result{};
+  const char *r = lineBuf;
+  char *w = lineBuf;
+  while (true) {
+    while ((*r == ' ') || (*r == '\t')) {
+      ++r;
     }
-    if (*p == '\0') {
+    if (*r == '\0') {
       break;
     }
-    argPtrs[count++] = p;
-    while ((*p != ' ') && (*p != '\t') && (*p != '\0')) {
-      ++p;
+    if (result.count == maxArgs) {
+      result.error = TokenizeError::TooManyArgs;
+      return result;
     }
-    if (*p != '\0') {
-      *p = '\0';
-      ++p;
+    argPtrs[result.count++] = w;
+    if (*r == '"') {
+      ++r;
+      while ((*r != '"') && (*r != '\0')) {
+        if ((*r == '\\') && ((r[1] == '"') || (r[1] == '\\'))) {
+          ++r;
+        }
+        *w++ = *r++;
+      }
+      if (*r == '\0') {
+        result.error = TokenizeError::UnterminatedQuote;
+        return result;
+      }
+      ++r; // the closing quote
+    } else {
+      while ((*r != ' ') && (*r != '\t') && (*r != '\0')) {
+        *w++ = *r++;
+      }
+    }
+    // The writer trails the reader by at least the separator or quotes it
+    // dropped, so ending the token here never overwrites unread input.
+    const bool atEnd = (*r == '\0');
+    if (!atEnd) {
+      ++r;
+    }
+    *w++ = '\0';
+    if (atEnd) {
+      break;
     }
   }
-  *outArgs = argPtrs;
-  return count;
+  return result;
 }
 
 } // namespace
@@ -228,7 +307,8 @@ bool initialize_console() noexcept {
   static_cast<void>(register_command_unlocked("help", builtin_help, nullptr,
                                               "List all registered commands"));
   static_cast<void>(register_command_unlocked(
-      "set", builtin_set, nullptr, "Set a CVar: set <name> <value>"));
+      "set", builtin_set, nullptr,
+      "Set a CVar: set <name> <value> (quote a value with spaces)"));
   static_cast<void>(register_command_unlocked("get", builtin_get, nullptr,
                                               "Get a CVar value: get <name>"));
   return true;
@@ -263,16 +343,21 @@ bool console_line_changes_world(const char *line) noexcept {
   if (line == nullptr) {
     return false;
   }
+  if (std::strlen(line) >= kMaxInputLen) {
+    return false;
+  }
   char lineBuf[kMaxInputLen] = {};
-  std::snprintf(lineBuf, kMaxInputLen - 1U + 1U, "%s", line);
+  std::snprintf(lineBuf, sizeof(lineBuf), "%s", line);
   const char *argPtrs[kMaxArgs] = {};
-  const char *const *args = nullptr;
-  if (tokenize(lineBuf, &args, argPtrs, kMaxArgs) == 0) {
+  const Tokenized tokens =
+      tokenize(lineBuf, argPtrs, static_cast<int>(kMaxArgs));
+  if ((tokens.error != TokenizeError::None) || (tokens.count == 0)) {
     return false;
   }
   std::lock_guard<std::mutex> lock(g_mutex);
   for (std::size_t i = 0U; i < g_commandCount; ++i) {
-    if (g_commands[i].used && (std::strcmp(g_commands[i].name, args[0]) == 0)) {
+    if (g_commands[i].used &&
+        (std::strcmp(g_commands[i].name, argPtrs[0]) == 0)) {
       return g_commands[i].changesWorld;
     }
   }
@@ -284,19 +369,45 @@ bool console_execute(const char *line) noexcept {
     return false;
   }
 
-  char lineBuf[kMaxInputLen] = {};
-  std::snprintf(lineBuf, kMaxInputLen - 1U + 1U, "%s", line);
-
-  const char *argPtrs[kMaxArgs] = {};
-  const char *const *args = nullptr;
-  const int argCount = tokenize(lineBuf, &args, argPtrs, kMaxArgs);
-  if (argCount == 0) {
-    return false;
-  }
-
   char echo[kMaxLineLen] = {};
   std::snprintf(echo, sizeof(echo), "> %s", line);
+
+  // An over-long line or argument list is refused whole: running a command
+  // on the part that fit would act on input the author did not write.
+  if (std::strlen(line) >= kMaxInputLen) {
+    console_print(echo);
+    char refused[kMaxLineLen] = {};
+    std::snprintf(refused, sizeof(refused),
+                  "The command line is longer than %zu characters; nothing "
+                  "was run.",
+                  kMaxInputLen - 1U);
+    console_print(refused);
+    return false;
+  }
+  char lineBuf[kMaxInputLen] = {};
+  std::snprintf(lineBuf, sizeof(lineBuf), "%s", line);
+
+  const char *argPtrs[kMaxArgs] = {};
+  const Tokenized tokens =
+      tokenize(lineBuf, argPtrs, static_cast<int>(kMaxArgs));
+  if ((tokens.error == TokenizeError::None) && (tokens.count == 0)) {
+    return false;
+  }
   console_print(echo);
+  if (tokens.error == TokenizeError::TooManyArgs) {
+    char refused[kMaxLineLen] = {};
+    std::snprintf(refused, sizeof(refused),
+                  "The command has more than %zu arguments; nothing was run.",
+                  kMaxArgs);
+    console_print(refused);
+    return false;
+  }
+  if (tokens.error == TokenizeError::UnterminatedQuote) {
+    console_print("The command line has an unclosed quote; nothing was run.");
+    return false;
+  }
+  const char *const *args = argPtrs;
+  const int argCount = tokens.count;
 
   ConsoleCommandFn fn = nullptr;
   void *userData = nullptr;

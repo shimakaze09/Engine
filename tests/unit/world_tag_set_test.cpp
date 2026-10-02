@@ -205,17 +205,24 @@ void check_scene_round_trip() {
   // that already have one save back byte for byte.
   const Entity plain = source->create_scene_object();
   const Entity tagged = source->create_scene_object();
+  // 敌人 ("enemy"): a tag in the author's own script (#1185).
+  const Entity enemy = source->create_scene_object();
   check((plain != kInvalidEntity) &&
-            source->add_tag_set_component(tagged, tags_of({"coin", "Gold"})),
+            source->add_tag_set_component(tagged, tags_of({"coin", "Gold"})) &&
+            source->add_tag_set_component(
+                enemy, tags_of({"\xE6\x95\x8C\xE4\xBA\xBA"})),
         "scene: source built");
   const std::string text = save(*source);
   check(text.find("\"Tags\":[\"coin\",\"Gold\"]") != std::string::npos,
         "scene: tags are written as a string array in order");
-  check(text.find("\"Tags\"") == text.rfind("\"Tags\""),
-        "scene: an untagged entity writes no Tags key");
+  check(text.find("\"Tags\":[\"\xE6\x95\x8C\xE4\xBA\xBA\"]") !=
+            std::string::npos,
+        "scene: a CJK tag is written as its UTF-8 bytes");
   check(engine::runtime::load_scene(*loaded, text.data(), text.size()) &&
-            (loaded->find_entities_by_tag("gold", nullptr, 0U) == 1U),
-        "scene: tags load back");
+            (loaded->find_entities_by_tag("gold", nullptr, 0U) == 1U) &&
+            (loaded->find_entities_by_tag("\xE6\x95\x8C\xE4\xBA\xBA", nullptr,
+                                          0U) == 1U),
+        "scene: tags load back, the CJK one included");
   check(save(*loaded) == text, "scene: a reload saves byte for byte the same");
 
   const char *const malformed[] = {

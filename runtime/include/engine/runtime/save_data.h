@@ -33,10 +33,10 @@ inline constexpr const char *kDefaultSaveSlot = "default";
 /// from a newer build and is not read.
 inline constexpr std::uint32_t kSaveSlotFormatVersion = 1U;
 
-/// True when `slot` is a slot name: a name token (letters, digits, '_',
-/// '-' and '.', 1 to 31 characters). Slot names ignore case: "Hero" and
-/// "hero" are one slot, stored lower-case, so a slot is the same file on
-/// every filesystem.
+/// True when `slot` is a slot name: a name token (letters, CJK, kana and
+/// Hangul included, digits, '_', '-' and '.', 1 to 31 bytes). Slot names ignore
+/// case: "Hero" and "hero" are one slot, stored lower-case, so a slot is the
+/// same file on every filesystem.
 bool save_slot_name_is_valid(const char *slot) noexcept;
 
 /// Sets the largest payload a save writes; false, with the bound

@@ -25,19 +25,72 @@ struct PlatformConfig final {
 };
 
 /// The platform a build targets.
-enum class PlatformId : std::uint8_t { Windows, Linux, MacOS, Web };
+enum class PlatformId : std::uint8_t {
+  Windows,
+  Linux,
+  MacOS,
+  Web,
+  IOS,
+  Android
+};
 
 /// What the running platform offers. Callers read this rather than test
-/// build macros or infer a capability from a null handle.
+/// build macros or infer a capability from a null handle. Every field but
+/// hasWindow is fixed per platform (platform_caps_for); hasWindow is the
+/// running state.
 struct PlatformCaps final {
   PlatformId id = PlatformId::Linux;
   /// A native window a GPU backend can present to. False before the
   /// platform initializes, after it shuts down, and when headless.
   bool hasWindow = false;
+  /// The OS drives frames through a callback (the browser's animation
+  /// frame, iOS's display link), so the engine must not run its own loop.
+  bool ownsMainLoop = false;
+  /// Worker threads can be created (on the web, from the page's prewarmed
+  /// pool, whose size the build fixes).
+  bool hasThreads = true;
+  /// Audio stays silent until the user's first gesture (browser
+  /// autoplay policy), so the audio device starts or resumes then.
+  bool needsAudioUnlock = false;
+  /// The main thread may wait: false where blocking it freezes the page
+  /// or gets the app killed by a watchdog.
+  bool mainThreadMayBlock = true;
+  /// Touch is the primary pointer, so UI and input default to it.
+  bool touchPrimary = false;
 };
+
+/// The fixed capabilities of `id`, with hasWindow false. Pure, so every
+/// platform's row is testable on any host.
+PlatformCaps platform_caps_for(PlatformId id) noexcept;
 
 /// The running platform's capabilities; valid at any time.
 PlatformCaps platform_caps() noexcept;
+
+/// What kind of native window a NativeWindow describes.
+enum class NativeWindowKind : std::uint8_t {
+  None,
+  Win32,
+  Cocoa,
+  X11,
+  Wayland,
+  WebCanvas,
+  UIKit,
+  Android,
+};
+
+/// The OS handles behind the platform window, tagged with their kind so a
+/// render backend never guesses how to read them (the shape of Rust's
+/// raw-window-handle).
+struct NativeWindow final {
+  NativeWindowKind kind = NativeWindowKind::None;
+  /// HWND, NSWindow*, wl_surface*, UIWindow*, ANativeWindow*, or the
+  /// canvas's CSS selector string; null for X11 and None.
+  void *window = nullptr;
+  /// The X11 window id; 0 for every other kind.
+  std::uint64_t x11Window = 0U;
+  /// The display connection: X11 Display* or wl_display*; null elsewhere.
+  void *display = nullptr;
+};
 
 /// Nanoseconds on the monotonic clock PlatformEvent::timestampNs is read
 /// from, so a caller can place an event in time relative to now.
@@ -49,6 +102,19 @@ bool initialize_platform() noexcept;
 bool initialize_platform(const PlatformConfig &config) noexcept;
 /// Shuts down the owning system for platform.
 void shutdown_platform() noexcept;
+/// One frame of a run loop; false ends the loop.
+using PlatformFrameFn = bool (*)(void *context) noexcept;
+/// Called once, after the last frame.
+using PlatformLoopEndFn = void (*)(void *context) noexcept;
+
+/// Runs `frame` until it returns false, then calls `end` once. Where the
+/// OS owns the main loop (PlatformCaps::ownsMainLoop) the frames run from
+/// its callback and this call never returns, so everything `frame` and
+/// `end` touch must outlive the caller's stack. Elsewhere the loop runs
+/// here and the call returns after `end`.
+void platform_run_loop(PlatformFrameFn frame, PlatformLoopEndFn end,
+                       void *context) noexcept;
+
 /// Returns whether is platform running.
 bool is_platform_running() noexcept;
 /// Requests the platform loop to exit after the current frame.
@@ -86,11 +152,6 @@ bool platform_gamepads_available() noexcept;
 void platform_open_gamepad(std::uint32_t instanceId) noexcept;
 /// Closes the device behind an instance id; a no-op for an unknown id.
 void platform_close_gamepad(std::uint32_t instanceId) noexcept;
-/// Underlying SDL_Window* (opaque). Its one sanctioned consumer is the
-/// editor's ImGui SDL3 backend, which is written against SDL and needs the
-/// window itself; everything else asks the platform for what it wants
-/// from the window through the functions below.
-void *get_sdl_window() noexcept;
 
 // ----- Window ----------------------------------------------------------------
 
@@ -279,16 +340,9 @@ void platform_set_scripted_file_dialogs(bool enabled) noexcept;
 bool platform_answer_scripted_file_dialog(FileDialogTicket ticket,
                                           const char *path) noexcept;
 
-/// Native window handle for external render backends: X11 window
-/// id / Wayland wl_surface / Win32 HWND / Cocoa NSWindow, null when
-/// headless or before initialization.
-void *platform_native_window_handle() noexcept;
-/// Native display handle for external render backends (X11 Display /
-/// Wayland wl_display); null on platforms without a display connection.
-void *platform_native_display_handle() noexcept;
-/// True when the platform window runs on the Wayland video driver (an
-/// external backend must use Wayland platform-data semantics).
-bool platform_window_is_wayland() noexcept;
+/// The platform window's native handles for a render backend; kind None
+/// when headless, before initialization and after shutdown.
+NativeWindow platform_native_window() noexcept;
 /// Resident memory of the process in bytes (0 when unsupported).
 std::size_t process_memory_bytes() noexcept;
 

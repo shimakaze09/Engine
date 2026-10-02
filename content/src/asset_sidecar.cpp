@@ -267,7 +267,7 @@ SidecarReadResult parse_sidecar(const char *path, const char *text,
           !asset_labels_add(&labels, label)) {
         log_sidecar_problem(path, "has a label that is not a distinct label "
                                   "of letters, digits, '_', '-' or '.' up to "
-                                  "31 characters");
+                                  "31 bytes");
         return SidecarReadResult::Malformed;
       }
     }

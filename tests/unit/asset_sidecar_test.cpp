@@ -279,6 +279,22 @@ void test_labels(engine::tests::TestContext &ctx) noexcept {
                 (read.labels == sidecar.labels),
             "the labels read back as written");
 
+  // A label in the author's own script (角色, "character") is written as its
+  // UTF-8 bytes and reads back byte for byte (#1185).
+  ct::AssetSidecar cjk{};
+  cjk.guid = sidecar.guid;
+  std::string cjkDocument;
+  ct::AssetSidecar cjkRead{};
+  ctx.check(ct::asset_labels_add(&cjk.labels, "\xE8\xA7\x92\xE8\x89\xB2") &&
+                ct::write_asset_sidecar(asset.c_str(), cjk) &&
+                read_text(asset + ".meta", &cjkDocument) &&
+                (cjkDocument.find("\"\xE8\xA7\x92\xE8\x89\xB2\"") !=
+                 std::string::npos) &&
+                (ct::read_asset_sidecar(asset.c_str(), &cjkRead) ==
+                 ct::SidecarReadResult::Ok) &&
+                (cjkRead.labels == cjk.labels),
+            "a CJK label is written as UTF-8 and reads back as written");
+
   // Labels and import settings live side by side and survive each other.
   sidecar.hasMeshImport = true;
   sidecar.meshImport.scaleFactor = 2.0F;

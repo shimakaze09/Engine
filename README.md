@@ -262,7 +262,10 @@ directory (`logs/player.log` for `engine_player`), keeping the previous run's as
 `editor-prev.log`, as Unity keeps `Editor.log`; a failed start shows an error
 box naming it. The same messages appear in the editor's own Log panel, whose
 command line runs console commands (`help` lists them, `get` and `set` read and
-write cvars; Tab completes, Up and Down recall), as Unreal's Output Log does.
+write cvars; Tab completes, Up and Down recall), as Unreal's Output Log does. A
+quoted value is one argument, and a text cvar takes the rest of the line, so
+`set r_fog_color 0.2 0.3 0.4` sets all three numbers; a line that is too long
+or has an unclosed quote is refused with a message rather than run in part.
 
 If the editor has to close on an internal error or a graphics-device failure
 (a driver reset, a lost GPU), it first saves the unsaved scene to `Recovery/`
@@ -565,8 +568,12 @@ the Inspector's Tags row under the name, or from Lua:
   entities that carry it, in entity-index order, and how many do (the list
   holds at most 1,024).
 
-A tag is 1 to 31 letters, digits, `_`, `-` or `.`, compared ignoring case;
-an entity carries up to 8. Scenes and prefabs save them as
+A tag is 1 to 31 bytes of letters, digits, `_`, `-` or `.`, compared ignoring
+case. Letters include Chinese, Japanese and Korean ones (`敌人` is a tag of six
+bytes), as asset labels, collision-layer names, save slots and recording
+names do. A decomposed spelling, such as `か` followed by a combining voiced
+mark, is refused, so a name has one spelling only. An entity carries up to 8
+tags. Scenes and prefabs save them as
 `"Tags": ["coin", "gold"]` (`engine_unit_world_tag_set`,
 `engine_integration_lua_entity_tags`, `engine_unit_editor_entity_tags`).
 
@@ -585,7 +592,7 @@ and bodies, and keep state across scene loads in Lua globals, which live
 for the whole run (`engine_integration_scene_flow`); `engine.save_data` and
 `engine.load_data` keep it between runs, in named save slots as Unreal's
 `SaveGameToSlot` has them. Each takes an optional slot name, `"default"`
-when left out: 1 to 31 letters, digits, `_`, `-` or `.`, case ignored
+when left out: 1 to 31 bytes of letters, digits, `_`, `-` or `.`, case ignored
 (`engine.save_data(t, "slot2")`); any other name is a Lua error rather
 than a save somewhere else. A slot is `saves/<slot>.save` in the
 project's per-user data, a one-line header (format version, save time,

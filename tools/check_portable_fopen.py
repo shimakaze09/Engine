@@ -26,6 +26,10 @@ matching. Where no `_s` variant fits, the fix is to avoid the function:
 the tree parses by hand rather than calling `sscanf`, and reads the
 environment through `core::non_empty_env` rather than `getenv`.
 
+A translation unit named `*_posix.cpp` is the non-Windows half of a per-OS
+pair that CMake selects, so the whole file counts as a branch Windows
+skips.
+
 `tools/` is not audited: the asset packer defines
 `_CRT_SECURE_NO_WARNINGS` for its own target, so the deprecation does not
 reach it.
@@ -86,6 +90,10 @@ AUDITED_CALLS = {
 AUDITED_CALL_PATTERNS = tuple(
     (name, replacement, re.compile(r"(?<![A-Za-z0-9_])" + name + r"\s*\("))
     for name, replacement in AUDITED_CALLS.items())
+# Translation units CMake never builds for Windows: the per-OS platform
+# file for every non-Windows target. Their whole body is a branch Windows
+# does not compile, so they need no `#ifndef _WIN32` wrapper to say so.
+NON_WINDOWS_FILE = re.compile(r"_posix\.(cpp|cc|cxx)$")
 CONDITIONAL = re.compile(r"^\s*#\s*(if|ifdef|ifndef|elif|else|endif)\b(.*)$")
 
 
@@ -149,6 +157,8 @@ def audit_file(path: pathlib.Path) -> list[tuple[int, str, str, str]]:
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
+        return []
+    if NON_WINDOWS_FILE.search(path.name):
         return []
     findings = []
     frames: list[dict] = []

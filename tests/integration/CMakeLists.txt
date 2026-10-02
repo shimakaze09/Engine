@@ -426,6 +426,23 @@ engine_add_test_executable(engine_integration_imgui_late_glyph_gpu
 set_tests_properties(engine_integration_imgui_late_glyph_gpu PROPERTIES
     SKIP_REGULAR_EXPRESSION "SKIPPED:")
 
+engine_add_test_executable(engine_integration_editor_cjk_glyph_gpu
+    SOURCES
+    editor_cjk_glyph_gpu_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/renderer/src
+    ${CMAKE_SOURCE_DIR}/editor/src
+    PRIVATE_DEPS
+    engine_runtime
+    engine_renderer
+    engine_content
+    engine_editor
+    LABELS
+    gpu;integration
+)
+set_tests_properties(engine_integration_editor_cjk_glyph_gpu PROPERTIES
+    SKIP_REGULAR_EXPRESSION "SKIPPED:")
+
 engine_add_test_executable(engine_integration_pipeline_tick_cadence
     SOURCES
     pipeline_tick_cadence_test.cpp

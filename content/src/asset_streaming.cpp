@@ -19,9 +19,9 @@ namespace {
 
 constexpr std::uint64_t kUnknownLoadBudgetBytes = 64ULL * 1024ULL * 1024ULL;
 
-#if defined(ENGINE_PLATFORM_WEB)
-// A web page's threads all come from its prewarmed pthread pool, shared
-// with the job system's workers (root CMakeLists).
+#if defined(ENGINE_WEB_PTHREAD_POOL_SIZE)
+// A build whose threads all come from a fixed prewarmed pool (the web
+// page's) shares it with the job system's workers (root CMakeLists).
 static_assert(AssetStreamingQueue::kWorkerCount + ENGINE_WEB_JOB_WORKERS <=
                   ENGINE_WEB_PTHREAD_POOL_SIZE,
               "the web thread budget cannot hold the streaming workers");

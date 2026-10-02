@@ -33,9 +33,10 @@ enum class PlayTransition : std::uint8_t { Start, Stop, Pause, Resume };
 
 /// Function-pointer bridge the runtime uses to reach the editor. Initialize,
 /// shutdown, new-frame, and render callbacks run with the render context
-/// current.
+/// current. Initialize takes no window: the editor finds the platform
+/// window itself, so core hands no SDL object across its public API.
 struct EditorBridge final {
-  bool (*initialize)(void *sdlWindow) noexcept = nullptr;
+  bool (*initialize)() noexcept = nullptr;
   void (*shutdown)() noexcept = nullptr;
   void (*new_frame)() noexcept = nullptr;
   void (*render)(float frameMs, float utilizationPct) noexcept = nullptr;

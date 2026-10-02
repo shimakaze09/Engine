@@ -15,9 +15,9 @@ int lua_engine_restore(lua_State *state) noexcept;
 void clear_persist_bindings(lua_State *state) noexcept;
 
 /// Every save binding takes an optional slot name, "default" when absent
-/// or nil: a name token (letters, digits, '_', '-' and '.', 1 to 31
-/// characters) that ignores case. Any other value is an argument error,
-/// never a save to some other slot.
+/// or nil: a name token (letters, CJK, kana and Hangul included, digits,
+/// '_', '-' and '.', 1 to 31 bytes) that ignores case. Any other value is an
+/// argument error, never a save to some other slot.
 
 /// Lua binding: engine.save_data(table [, slot]) -> bool. Serializes a
 /// flat table (string keys of at most 127 bytes; number/string/bool

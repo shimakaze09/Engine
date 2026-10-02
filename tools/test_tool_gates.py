@@ -204,6 +204,7 @@ def test_module_dependency_gate():
         # SDL where it belongs: the platform layer, and the one editor TU
         # that drives the ImGui SDL3 backend.
         write_source(clean, "core/src/platform.cpp", ["SDL3/SDL.h"])
+        write_source(clean, "core/src/platform_file_dialogs.cpp", ["SDL3/SDL.h"])
         write_source(clean, "editor/src/editor.cpp",
                      ["backends/imgui_impl_sdl3.h", "SDL3/SDL.h"])
         check(run([script, "--root", str(clean)]) == 0,
@@ -226,6 +227,23 @@ def test_module_dependency_gate():
                      ["backends/imgui_impl_sdl3.h"])
         check(run([script, "--root", str(sdl_backend)]) != 0,
               "module deps: the ImGui SDL3 backend outside editor.cpp fails")
+
+        # The web macro is the platform layer's alone (issue #312 item 10):
+        # a branch on it in the platform's own sources passes, one in the
+        # runtime fails.
+        web_ok = tmp / "web_ok"
+        write_source(web_ok, "core/src/platform.cpp", [])
+        with open(web_ok / "core/src/platform.cpp", "a", encoding="utf-8") as f:
+            f.write("#if defined(ENGINE_PLATFORM_WEB)\n#endif\n")
+        check(run([script, "--root", str(web_ok)]) == 0,
+              "module deps: the platform layer may branch on the web macro")
+        web_runtime = tmp / "web_runtime"
+        write_source(web_runtime, "runtime/src/engine.cpp", [])
+        with open(web_runtime / "runtime/src/engine.cpp", "a",
+                  encoding="utf-8") as f:
+            f.write("#if defined(ENGINE_PLATFORM_WEB)\n#endif\n")
+        check(run([script, "--root", str(web_runtime)]) != 0,
+              "module deps: a web-macro branch outside the platform fails")
 
         # Upward: the issue #309 class, a subsystem reaching into runtime.
         upward = tmp / "upward"
@@ -1409,6 +1427,10 @@ def test_portable_fopen_gate():
             "// Purpose.\n#ifdef _WIN32\nint x;\n#else\nint y;\n#endif\n"
             "FILE *g = std::fopen(p, m);\n")]) != 0,
               "portable fopen: a call after the #endif is unguarded again")
+        check(run([script, "--root", case(
+            "posixfile", "core/src/platform_os_posix.cpp",
+            "// Purpose.\nvoid f() { FILE *g = std::fopen(p, m); }\n")]) == 0,
+              "portable fopen: a *_posix.cpp file is a branch Windows skips")
         check(run([script, "--root", case(
             "lookalike", "core/src/a.cpp",
             "// Never call fopen( here.\nvoid f() { fopen_s(&g, p, m); my_fopen(p); "

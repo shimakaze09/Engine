@@ -583,8 +583,25 @@ bool editor_wants_capture_mouse() noexcept {
   return ImGui::GetIO().WantCaptureMouse;
 }
 
+namespace {
+
+/// The bridge's initialize: the ImGui SDL3 backend needs the SDL window
+/// itself, and this TU is the one sanctioned SDL consumer above the
+/// platform layer, so it asks SDL for the engine's only window rather
+/// than core handing an SDL object out through its public API.
+bool initialize_editor_on_platform_window() noexcept {
+  int count = 0;
+  SDL_Window **windows = SDL_GetWindows(&count);
+  SDL_Window *window =
+      ((windows != nullptr) && (count > 0)) ? windows[0] : nullptr;
+  SDL_free(windows);
+  return initialize_editor(window);
+}
+
+} // namespace
+
 const runtime::EditorBridge kRuntimeEditorBridge = {
-    &initialize_editor,
+    &initialize_editor_on_platform_window,
     &shutdown_editor,
     &editor_new_frame,
     &editor_render,

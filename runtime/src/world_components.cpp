@@ -1467,7 +1467,8 @@ bool World::add_tag_set_component(Entity entity,
   if (!tag_set_is_valid(component)) {
     core::log_message(core::LogLevel::Error, "world",
                       "add_tag_set_component rejected a tag set: each tag is "
-                      "1 to 31 letters, digits, '_', '-' or '.', at most 8, "
+                      "1 to 31 bytes of letters, digits, '_', '-' or '.', at "
+                      "most 8, "
                       "none repeated ignoring case");
     note_refusal(core::FailureKind::InvalidArgument);
     return false;
