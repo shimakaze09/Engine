@@ -92,6 +92,7 @@ pinned commit; only SDL3 is looked up locally first.
 - `math/`: math primitives and transforms
 - `content/`: asset catalog, identity and `.meta` sidecars, cook-stamp staleness checks, streaming
 - `physics/`: simulation and collision stepping
+- `navigation/`: the navigation mesh bake and path queries
 - `renderer/`: mesh, texture, shader, command buffer, bgfx backend
 - `audio/`: runtime audio services
 - `scripting/`: Lua runtime and engine bindings
