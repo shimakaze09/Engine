@@ -356,6 +356,12 @@ bool bootstrap(const EngineConfig &config) noexcept {
       "d3d11, d3d12, noop); read once at device initialization"));
 
   static_cast<void>(core::cvar_register_bool(
+      "r_bgfx_software_adapter", false,
+      "bgfx backend only: initialize on the software adapter (WARP on "
+      "d3d11/d3d12, a CPU device on vulkan); read once at device "
+      "initialization"));
+
+  static_cast<void>(core::cvar_register_bool(
       "r_bgfx_trace", false,
       "bgfx backend only: route bgfx trace output into the engine log"));
 

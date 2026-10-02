@@ -1467,6 +1467,12 @@ bool initialize_render_device() noexcept {
   bgfx::Init init{};
   init.callback = &callback;
   init.debug = core::cvar_get_bool("r_bgfx_debug", false);
+  // A software adapter (WARP on Direct3D, a CPU device such as lavapipe
+  // on Vulkan) lets a machine with no GPU draw real frames: CI runs the
+  // gpu-labelled suites this way.
+  if (core::cvar_get_bool("r_bgfx_software_adapter", false)) {
+    init.vendorId = BGFX_PCI_ID_SOFTWARE_RASTERIZER;
+  }
 
   // Renderer selection: r_bgfx_renderer names the API, and the platform's
   // capabilities decide what "auto" means and whether anything but Noop
