@@ -64,12 +64,12 @@ SplitSum integrate_split_sum(double nDotV, double roughness,
   roughness = (roughness < 0.001) ? 0.001 : roughness;
   const double a = roughness * roughness;
   const double k = a * 0.5;
-  const double viewX =
-      std::sqrt((1.0 - nDotV * nDotV > 0.0) ? (1.0 - nDotV * nDotV) : 0.0);
+  const double viewX = std::sqrt((1.0 - nDotV * nDotV > 0.0)
+                                     ? (1.0 - nDotV * nDotV)
+                                     : 0.0);
   SplitSum sum{};
   for (std::uint32_t i = 0U; i < sampleCount; ++i) {
-    const double xiX =
-        static_cast<double>(i) / static_cast<double>(sampleCount);
+    const double xiX = static_cast<double>(i) / static_cast<double>(sampleCount);
     const double xiY = radical_inverse(i);
     const double phi = 2.0 * kPi * xiX;
     const double cosTheta =
@@ -118,8 +118,9 @@ bool read_back_lookup(int lutSize, CapturedFrame *out) noexcept {
   dev->bind_render_target(r::kBackBufferTarget);
   dev->set_viewport(0, 0, lutSize, lutSize);
   dev->clear(r::ClearFlags::ColorDepth, 0.0F, 0.0F, 0.0F, 1.0F);
-  dev->apply_render_state(r::RenderState{
-      r::DepthTest::Disabled, true, r::BlendMode::Disabled, r::CullMode::None});
+  dev->apply_render_state(r::RenderState{r::DepthTest::Disabled, true,
+                                         r::BlendMode::Disabled,
+                                         r::CullMode::None});
   dev->bind_program(backend.presentBlitProgram);
   dev->bind_texture_slot(0U, backend.brdfLutTexture);
   if (backend.presentBlitInputLoc.valid()) {
@@ -214,8 +215,9 @@ int run(engine::EnginePipeline &pipeline, engine::runtime::World &) noexcept {
       worstRise = ((bias - previousBias) > worstRise) ? (bias - previousBias)
                                                       : worstRise;
       previousBias = bias;
-      worstEnergy = ((scale + bias - 255) > worstEnergy) ? (scale + bias - 255)
-                                                         : worstEnergy;
+      worstEnergy =
+          ((scale + bias - 255) > worstEnergy) ? (scale + bias - 255)
+                                               : worstEnergy;
 
       // The converged integral costs 128 times the bake's sum, so it is
       // taken at sixteen rows spread down the column.
@@ -245,10 +247,9 @@ int run(engine::EnginePipeline &pipeline, engine::runtime::World &) noexcept {
     // GPU's single-precision sum of 512 terms and the half-float target,
     // whose step below one is 2^-11, a fortieth of a level.
     if ((worstScale > 1.0) || (worstBias > 1.0)) {
-      std::fprintf(stderr,
-                   "FAIL: NdotV %.4f: the baked lookup is %.3f "
-                   "(scale) and %.3f (bias) levels from the "
-                   "reference sum\n",
+      std::fprintf(stderr, "FAIL: NdotV %.4f: the baked lookup is %.3f "
+                           "(scale) and %.3f (bias) levels from the "
+                           "reference sum\n",
                    nDotV, worstScale, worstBias);
       for (std::size_t i = 0U; i < sampleCount; ++i) {
         std::fprintf(stderr,
@@ -264,10 +265,9 @@ int run(engine::EnginePipeline &pipeline, engine::runtime::World &) noexcept {
     // levels of a full-white reflection. The baked texel is held to the
     // same bound plus the two thousandths its 8-bit readback rounds away.
     if ((worstConvergence > 0.01) || (worstBaked > 0.012)) {
-      std::fprintf(stderr,
-                   "FAIL: NdotV %.4f: the baked lookup is %.4f from "
-                   "the converged integral, the 512-sample sum "
-                   "%.4f\n",
+      std::fprintf(stderr, "FAIL: NdotV %.4f: the baked lookup is %.4f from "
+                           "the converged integral, the 512-sample sum "
+                           "%.4f\n",
                    nDotV, worstBaked, worstConvergence);
       result = 21;
     }
@@ -275,16 +275,14 @@ int run(engine::EnginePipeline &pipeline, engine::runtime::World &) noexcept {
     // never rises, and the two terms partition at most the whole of the
     // reflected energy.
     if ((worstRise > 0) || (worstEnergy > 0)) {
-      std::fprintf(stderr,
-                   "FAIL: NdotV %.4f: bias rises by %d levels with "
-                   "roughness, scale + bias passes one by %d\n",
+      std::fprintf(stderr, "FAIL: NdotV %.4f: bias rises by %d levels with "
+                           "roughness, scale + bias passes one by %d\n",
                    nDotV, worstRise, worstEnergy);
       result = 22;
     }
     if (blueSeen != 0) {
-      std::fprintf(stderr,
-                   "FAIL: NdotV %.4f: the copy is not the two-channel "
-                   "lookup (blue sums to %d)\n",
+      std::fprintf(stderr, "FAIL: NdotV %.4f: the copy is not the two-channel "
+                           "lookup (blue sums to %d)\n",
                    nDotV, blueSeen);
       result = 23;
     }
