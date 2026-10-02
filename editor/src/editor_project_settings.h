@@ -5,7 +5,8 @@
 // the Lua sandbox limits: the instructions every script shares per frame
 // and the memory the Lua allocator may hold. Its Physics section names the
 // collision layers and sets which layers collide (Unity's Layer Collision
-// Matrix). Each section's Apply saves the document through its staged
+// Matrix). Its Saves section sets the largest save slot the game may
+// write. Each section's Apply saves the document through its staged
 // writer and only then applies the change to the running engine.
 
 #pragma once
@@ -67,6 +68,22 @@ bool project_physics_problem(const content::ProjectCollisionLayers &layers,
 bool save_project_physics(const char *projectFile,
                           const content::ProjectCollisionLayers &layers,
                           runtime::World *world) noexcept;
+
+/// Why a save limit of `maxSlotMiB` cannot be applied, or nullptr when it
+/// can: it is outside [kProjectMinSaveSlotMiB, kProjectMaxSaveSlotMiB].
+const char *project_saves_problem(int maxSlotMiB) noexcept;
+
+/// The save limit, in MiB, `settings` puts in force: the one it sets, else
+/// the engine's default.
+int project_saves_draft(const content::ProjectSaveSettings &settings) noexcept;
+
+/// Saves a save limit of `maxSlotMiB` into the document at `projectFile`
+/// and, once it is written, makes it the running limit. The document is
+/// read afresh so nothing else in it is lost, and the engine's default is
+/// left unset, so a project that never changes it writes no "saves"
+/// section. A refused limit, a document that will not read or a failed
+/// write leaves the file and the running limit as they were, and logs why.
+bool save_project_saves(const char *projectFile, int maxSlotMiB) noexcept;
 
 /// Registers the cvar that shows the window.
 void register_project_settings() noexcept;
