@@ -264,18 +264,7 @@ include(FetchContent)
         GIT_REPOSITORY https://github.com/bkaradzic/bgfx.cmake.git
         GIT_TAG 12428216cfa33eb34dc91187ad3a3c92196c9849 # v1.153.9398-566
     )
-    if(DEFINED CMAKE_WARN_DEPRECATED)
-        set(_ENGINE_PREV_CMAKE_WARN_DEPRECATED "${CMAKE_WARN_DEPRECATED}")
-    endif()
-    set(CMAKE_WARN_DEPRECATED OFF CACHE BOOL
-        "Suppress third-party CMake deprecation warnings" FORCE)
-    FetchContent_MakeAvailable(bgfx)
-    if(DEFINED _ENGINE_PREV_CMAKE_WARN_DEPRECATED)
-        set(CMAKE_WARN_DEPRECATED "${_ENGINE_PREV_CMAKE_WARN_DEPRECATED}"
-            CACHE BOOL "Show CMake deprecation warnings" FORCE)
-    else()
-        unset(CMAKE_WARN_DEPRECATED CACHE)
-    endif()
+    engine_make_third_party_available(bgfx)
     if(NOT TARGET bgfx)
         message(FATAL_ERROR "bgfx backend requested but the bgfx target was "
                             "not created by the fetched superproject.")
@@ -297,18 +286,7 @@ if(NOT SDL3_FOUND)
         GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
         GIT_TAG f87239e71e42da91ca317a12eefb82cfbf3393eb # release-3.4.12
     )
-    if(DEFINED CMAKE_WARN_DEPRECATED)
-        set(_ENGINE_PREV_CMAKE_WARN_DEPRECATED "${CMAKE_WARN_DEPRECATED}")
-    endif()
-    set(CMAKE_WARN_DEPRECATED OFF CACHE BOOL
-        "Suppress third-party CMake deprecation warnings" FORCE)
-    FetchContent_MakeAvailable(SDL3)
-    if(DEFINED _ENGINE_PREV_CMAKE_WARN_DEPRECATED)
-        set(CMAKE_WARN_DEPRECATED "${_ENGINE_PREV_CMAKE_WARN_DEPRECATED}"
-            CACHE BOOL "Show CMake deprecation warnings" FORCE)
-    else()
-        unset(CMAKE_WARN_DEPRECATED CACHE)
-    endif()
+    engine_make_third_party_available(SDL3)
 endif()
 
 if(NOT SDL3_FOUND AND NOT TARGET SDL3::SDL3-static AND NOT TARGET SDL3::SDL3)
