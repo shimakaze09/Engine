@@ -20,6 +20,7 @@
 #include <cstring>
 #include <vector>
 
+#include "command_buffer_flush_internal.h"
 #include "engine/core/cvar.h"
 #include "engine/core/debug_draw.h"
 #include "engine/core/logging.h"
@@ -37,7 +38,6 @@
 #include "engine/renderer/shader_system.h"
 #include "engine/renderer/shadow_map.h"
 #include "engine/renderer/texture_loader.h"
-#include "command_buffer_flush_internal.h"
 
 namespace engine::renderer {
 
@@ -93,238 +93,215 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
   const bool doSpotShadows = ctx.doSpotShadows;
   const bool doPointShadows = ctx.doPointShadows;
   RendererFrameStats &frameStats = ctx.frameStats;
-    bool sceneDepthHasOpaque = false;
-    auto ensureSceneDepthHasOpaque = [&]() noexcept -> bool {
-      if (sceneDepthHasOpaque) {
-        return true;
-      }
-      const RenderTargetHandle gbufferTarget =
-          pass_resource_target(passRes.gbufferAlbedo);
-      const RenderTargetHandle sceneTarget =
-          pass_resource_target(passRes.sceneColor);
-      if (dev->caps.depthBlit && (dev->copy_depth != nullptr)) {
-        dev->copy_depth(gbufferTarget, sceneTarget, drawableWidth,
-                        drawableHeight);
-        dev->bind_render_target(sceneTarget);
-        // Every bind claims a fresh view, and a view without its own rect
-        // inherits the one its id last carried, so whatever draws next
-        // would land wherever an unrelated pass was drawing.
-        dev->set_viewport(0, 0, drawableWidth, drawableHeight);
-        sceneDepthHasOpaque = true;
-        return true;
-      }
-      // No depth blit: seed the scene target's depth with a fullscreen
-      // draw (DepthTest::Always writes every texel; colorWrite off
-      // leaves the lighting output untouched).
-      if (backend.depthCopyProgram == kInvalidDeviceProgram) {
-        return false;
-      }
-      dev->bind_render_target(sceneTarget);
-      dev->set_viewport(0, 0, drawableWidth, drawableHeight);
-      RenderState seedState{DepthTest::Always, true, BlendMode::Disabled,
-                            CullMode::None};
-      seedState.colorWrite = false;
-      dev->apply_render_state(seedState);
-      dev->bind_program(backend.depthCopyProgram);
-      dev->bind_texture_slot(0U, pass_resource_texture(passRes.gbufferDepth));
-      if (backend.depthCopyDepthLoc.valid()) {
-        dev->set_param_i32(backend.depthCopyDepthLoc, 0);
-      }
-      dev->draw(backend.emptyGeometry, PrimitiveTopology::Triangles, 0, 3);
-      dev->bind_texture_slot(0U, kInvalidDeviceTexture);
-      dev->bind_program(kInvalidDeviceProgram);
-      sceneDepthHasOpaque = true;
+  bool sceneDepthHasOpaque = false;
+  auto ensureSceneDepthHasOpaque = [&]() noexcept -> bool {
+    if (sceneDepthHasOpaque) {
       return true;
-    };
-
-    gpu_profiler_begin_pass(GpuPassId::GBuffer);
+    }
     const RenderTargetHandle gbufferTarget =
         pass_resource_target(passRes.gbufferAlbedo);
-    dev->bind_render_target(gbufferTarget);
+    const RenderTargetHandle sceneTarget =
+        pass_resource_target(passRes.sceneColor);
+    if (dev->caps.depthBlit && (dev->copy_depth != nullptr)) {
+      dev->copy_depth(gbufferTarget, sceneTarget, drawableWidth,
+                      drawableHeight);
+      dev->bind_render_target(sceneTarget);
+      // Every bind claims a fresh view, and a view without its own rect
+      // inherits the one its id last carried, so whatever draws next
+      // would land wherever an unrelated pass was drawing.
+      dev->set_viewport(0, 0, drawableWidth, drawableHeight);
+      sceneDepthHasOpaque = true;
+      return true;
+    }
+    // No depth blit: seed the scene target's depth with a fullscreen
+    // draw (DepthTest::Always writes every texel; colorWrite off
+    // leaves the lighting output untouched).
+    if (backend.depthCopyProgram == kInvalidDeviceProgram) {
+      return false;
+    }
+    dev->bind_render_target(sceneTarget);
     dev->set_viewport(0, 0, drawableWidth, drawableHeight);
-    dev->apply_render_state(RenderState{DepthTest::Less, true,
-                                        BlendMode::Disabled, CullMode::Back});
-    dev->clear(ClearFlags::ColorDepth, 0.0F, 0.0F, 0.0F, 0.0F);
-
-    dev->bind_program(backend.gbufferProgram);
-
-    if (backend.gbufViewLoc.valid()) {
-      dev->set_param_mat4(backend.gbufViewLoc, &viewMat.columns[0].x);
+    RenderState seedState{DepthTest::Always, true, BlendMode::Disabled,
+                          CullMode::None};
+    seedState.colorWrite = false;
+    dev->apply_render_state(seedState);
+    dev->bind_program(backend.depthCopyProgram);
+    dev->bind_texture_slot(0U, pass_resource_texture(passRes.gbufferDepth));
+    if (backend.depthCopyDepthLoc.valid()) {
+      dev->set_param_i32(backend.depthCopyDepthLoc, 0);
     }
-    if (backend.gbufProjectionLoc.valid()) {
-      dev->set_param_mat4(backend.gbufProjectionLoc, &projMat.columns[0].x);
+    dev->draw(backend.emptyGeometry, PrimitiveTopology::Triangles, 0, 3);
+    dev->bind_texture_slot(0U, kInvalidDeviceTexture);
+    dev->bind_program(kInvalidDeviceProgram);
+    if ((core::cvar_get_int("r_debug_probe", 0) & 1) != 0) {
+      dev->bind_render_target(sceneTarget);
+      dev->set_viewport(0, 0, drawableWidth, drawableHeight);
     }
-    if (backend.gbufTimeLoc.valid()) {
-      dev->set_param_f32(backend.gbufTimeLoc, timeSeconds);
-    }
+    sceneDepthHasOpaque = true;
+    return true;
+  };
 
-    auto drawGBufferBatches = [&]() {
-      DeviceTextureHandle boundAlbedoTex{};
-      DeviceTextureHandle boundMaterialTex[4] = {};
-      if (backend.gbufAlbedoTextureLoc.valid()) {
-        dev->set_param_i32(backend.gbufAlbedoTextureLoc, 0);
+  gpu_profiler_begin_pass(GpuPassId::GBuffer);
+  const RenderTargetHandle gbufferTarget =
+      pass_resource_target(passRes.gbufferAlbedo);
+  dev->bind_render_target(gbufferTarget);
+  dev->set_viewport(0, 0, drawableWidth, drawableHeight);
+  dev->apply_render_state(
+      RenderState{DepthTest::Less, true, BlendMode::Disabled, CullMode::Back});
+  dev->clear(ClearFlags::ColorDepth, 0.0F, 0.0F, 0.0F, 0.0F);
+
+  dev->bind_program(backend.gbufferProgram);
+
+  if (backend.gbufViewLoc.valid()) {
+    dev->set_param_mat4(backend.gbufViewLoc, &viewMat.columns[0].x);
+  }
+  if (backend.gbufProjectionLoc.valid()) {
+    dev->set_param_mat4(backend.gbufProjectionLoc, &projMat.columns[0].x);
+  }
+  if (backend.gbufTimeLoc.valid()) {
+    dev->set_param_f32(backend.gbufTimeLoc, timeSeconds);
+  }
+
+  auto drawGBufferBatches = [&]() {
+    DeviceTextureHandle boundAlbedoTex{};
+    DeviceTextureHandle boundMaterialTex[4] = {};
+    if (backend.gbufAlbedoTextureLoc.valid()) {
+      dev->set_param_i32(backend.gbufAlbedoTextureLoc, 0);
+    }
+    const MaterialTextureUniformLocs materialTexLocs{
+        backend.gbufHasMetallicRoughnessTextureLoc,
+        backend.gbufMetallicRoughnessTextureLoc,
+        backend.gbufHasEmissiveTextureLoc,
+        backend.gbufEmissiveTextureLoc,
+        backend.gbufHasOcclusionTextureLoc,
+        backend.gbufOcclusionTextureLoc,
+        backend.gbufHasOpacityTextureLoc,
+        backend.gbufOpacityTextureLoc,
+        backend.gbufAlphaModeLoc,
+        backend.gbufAlphaCutoffLoc,
+        backend.gbufUvTilingLoc,
+        backend.gbufUvOffsetLoc};
+    for (std::size_t batchIndex = 0U; batchIndex < opaqueBatchCount;
+         ++batchIndex) {
+      const StaticMeshBatch &batch = backend.staticMeshBatches[batchIndex];
+      const DrawCommand &command = commandBufferView.data[batch.first];
+      // The G-Buffer's three targets are fully assigned, so it carries
+      // no channel saying which model lit a pixel and the deferred
+      // lighting pass could only shade one. A batch of another model
+      // is therefore left out here and drawn forward over this pass's
+      // depth, which is what keeps a toon character in the same frame
+      // as a physically-lit environment.
+      if (draw_key_shading_model(command.sortKey) !=
+          static_cast<std::uint8_t>(ShadingModel::Pbr)) {
+        continue;
       }
-      const MaterialTextureUniformLocs materialTexLocs{
-          backend.gbufHasMetallicRoughnessTextureLoc,
-          backend.gbufMetallicRoughnessTextureLoc,
-          backend.gbufHasEmissiveTextureLoc,
-          backend.gbufEmissiveTextureLoc,
-          backend.gbufHasOcclusionTextureLoc,
-          backend.gbufOcclusionTextureLoc,
-          backend.gbufHasOpacityTextureLoc,
-          backend.gbufOpacityTextureLoc,
-          backend.gbufAlphaModeLoc,
-          backend.gbufAlphaCutoffLoc,
-          backend.gbufUvTilingLoc,
-          backend.gbufUvOffsetLoc};
-      for (std::size_t batchIndex = 0U; batchIndex < opaqueBatchCount;
-           ++batchIndex) {
-        const StaticMeshBatch &batch = backend.staticMeshBatches[batchIndex];
-        const DrawCommand &command = commandBufferView.data[batch.first];
-        // The G-Buffer's three targets are fully assigned, so it carries
-        // no channel saying which model lit a pixel and the deferred
-        // lighting pass could only shade one. A batch of another model
-        // is therefore left out here and drawn forward over this pass's
-        // depth, which is what keeps a toon character in the same frame
-        // as a physically-lit environment.
-        if (draw_key_shading_model(command.sortKey) !=
-            static_cast<std::uint8_t>(ShadingModel::Pbr)) {
-          continue;
-        }
-        const GpuMesh *mesh = lookup_gpu_mesh(registry, command.mesh);
-        if ((mesh == nullptr) || (mesh->geometry == kInvalidDeviceGeometry) ||
-            (mesh->vertexCount == 0U)) {
-          continue;
-        }
+      const GpuMesh *mesh = lookup_gpu_mesh(registry, command.mesh);
+      if ((mesh == nullptr) || (mesh->geometry == kInvalidDeviceGeometry) ||
+          (mesh->vertexCount == 0U)) {
+        continue;
+      }
 
-        if (backend.gbufAlbedoLoc.valid()) {
-          dev->set_param_vec3(backend.gbufAlbedoLoc,
-                                &command.material.albedo.x);
-        }
-        if (backend.gbufMetallicLoc.valid()) {
-          dev->set_param_f32(backend.gbufMetallicLoc,
-                                 command.material.metallic);
-        }
-        if (backend.gbufRoughnessLoc.valid()) {
-          dev->set_param_f32(backend.gbufRoughnessLoc,
-                                 command.material.roughness);
-        }
-        if (backend.gbufAOLoc.valid()) {
-          dev->set_param_f32(backend.gbufAOLoc, 1.0F);
-        }
-        if (backend.gbufEmissiveLoc.valid()) {
-          dev->set_param_vec3(backend.gbufEmissiveLoc,
-                                &command.material.emissive.x);
-        }
-        const DeviceTextureHandle albedoTex =
-            texture_device_handle(command.material.albedoTexture);
-        const bool hasAlbedoTex =
-            (command.material.albedoTexture != kInvalidTextureHandle) &&
-            (albedoTex != kInvalidDeviceTexture);
-        if (backend.gbufHasAlbedoTextureLoc.valid()) {
-          dev->set_param_i32(backend.gbufHasAlbedoTextureLoc,
-                               hasAlbedoTex ? 1 : 0);
-        }
-        if (hasAlbedoTex && (albedoTex != boundAlbedoTex)) {
-          dev->bind_texture_slot(0U, albedoTex);
-          boundAlbedoTex = albedoTex;
-        } else if (!hasAlbedoTex &&
-                   (boundAlbedoTex != backend.fallbackTexture2D)) {
-          // Fallback, not nothing: WebGL rejects draws whose declared
-          // samplers still reference the pass's render target.
-          dev->bind_texture_slot(0U, backend.fallbackTexture2D);
-          boundAlbedoTex = backend.fallbackTexture2D;
-        }
-        upload_material_texture_slots(materialTexLocs, dev, command.material,
-                                      backend.fallbackTexture2D,
-                                      boundMaterialTex);
-        upload_gbuffer_foliage_uniforms(backend, dev, command);
+      if (backend.gbufAlbedoLoc.valid()) {
+        dev->set_param_vec3(backend.gbufAlbedoLoc, &command.material.albedo.x);
+      }
+      if (backend.gbufMetallicLoc.valid()) {
+        dev->set_param_f32(backend.gbufMetallicLoc, command.material.metallic);
+      }
+      if (backend.gbufRoughnessLoc.valid()) {
+        dev->set_param_f32(backend.gbufRoughnessLoc,
+                           command.material.roughness);
+      }
+      if (backend.gbufAOLoc.valid()) {
+        dev->set_param_f32(backend.gbufAOLoc, 1.0F);
+      }
+      if (backend.gbufEmissiveLoc.valid()) {
+        dev->set_param_vec3(backend.gbufEmissiveLoc,
+                            &command.material.emissive.x);
+      }
+      const DeviceTextureHandle albedoTex =
+          texture_device_handle(command.material.albedoTexture);
+      const bool hasAlbedoTex =
+          (command.material.albedoTexture != kInvalidTextureHandle) &&
+          (albedoTex != kInvalidDeviceTexture);
+      if (backend.gbufHasAlbedoTextureLoc.valid()) {
+        dev->set_param_i32(backend.gbufHasAlbedoTextureLoc,
+                           hasAlbedoTex ? 1 : 0);
+      }
+      if (hasAlbedoTex && (albedoTex != boundAlbedoTex)) {
+        dev->bind_texture_slot(0U, albedoTex);
+        boundAlbedoTex = albedoTex;
+      } else if (!hasAlbedoTex &&
+                 (boundAlbedoTex != backend.fallbackTexture2D)) {
+        // Fallback, not nothing: WebGL rejects draws whose declared
+        // samplers still reference the pass's render target.
+        dev->bind_texture_slot(0U, backend.fallbackTexture2D);
+        boundAlbedoTex = backend.fallbackTexture2D;
+      }
+      upload_material_texture_slots(materialTexLocs, dev, command.material,
+                                    backend.fallbackTexture2D,
+                                    boundMaterialTex);
+      upload_gbuffer_foliage_uniforms(backend, dev, command);
 
-        // Instanced batching runs through the shader's runtime toggle
-        // (GL) or the INSTANCED sibling program (bgfx, whose ports
-        // carry no toggle); with neither, batches take the correct
-        // per-command path below.
-        const bool instancedViaProgram =
-            !backend.gbufUseInstancingLoc.valid() &&
-            (backend.gbufferInstancedProgram != kInvalidDeviceProgram);
-        if ((batch.count > 1U) && !mesh->hasSkin && (mesh->indexCount > 0U) &&
-            (backend.gbufUseInstancingLoc.valid() || instancedViaProgram) &&
-            upload_instance_matrices(backend, dev, *mesh, commandBufferView,
-                                     batch)) {
-          if (instancedViaProgram) {
-            dev->bind_program(backend.gbufferInstancedProgram);
-          } else {
-            dev->set_param_i32(backend.gbufUseInstancingLoc, 1);
-          }
-          ++frameStats.drawCalls;
-          frameStats.triangleCount +=
-              (mesh->indexCount / 3U) * static_cast<std::uint64_t>(batch.count);
-          dev->draw_indexed_instanced(
-              mesh->geometry, static_cast<std::int32_t>(mesh->indexCount),
-              static_cast<std::int32_t>(batch.count));
-          if (instancedViaProgram) {
+      // Instanced batching runs through the shader's runtime toggle
+      // (GL) or the INSTANCED sibling program (bgfx, whose ports
+      // carry no toggle); with neither, batches take the correct
+      // per-command path below.
+      const bool instancedViaProgram =
+          !backend.gbufUseInstancingLoc.valid() &&
+          (backend.gbufferInstancedProgram != kInvalidDeviceProgram);
+      if ((batch.count > 1U) && !mesh->hasSkin && (mesh->indexCount > 0U) &&
+          (backend.gbufUseInstancingLoc.valid() || instancedViaProgram) &&
+          upload_instance_matrices(backend, dev, *mesh, commandBufferView,
+                                   batch)) {
+        if (instancedViaProgram) {
+          dev->bind_program(backend.gbufferInstancedProgram);
+        } else {
+          dev->set_param_i32(backend.gbufUseInstancingLoc, 1);
+        }
+        ++frameStats.drawCalls;
+        frameStats.triangleCount +=
+            (mesh->indexCount / 3U) * static_cast<std::uint64_t>(batch.count);
+        dev->draw_indexed_instanced(mesh->geometry,
+                                    static_cast<std::int32_t>(mesh->indexCount),
+                                    static_cast<std::int32_t>(batch.count));
+        if (instancedViaProgram) {
+          dev->bind_program(backend.gbufferProgram);
+        }
+        continue;
+      }
+
+      if (backend.gbufUseInstancingLoc.valid()) {
+        dev->set_param_i32(backend.gbufUseInstancingLoc, 0);
+      }
+      for (std::uint32_t local = 0U; local < batch.count; ++local) {
+        const std::size_t commandIndex = static_cast<std::size_t>(batch.first) +
+                                         static_cast<std::size_t>(local);
+        const DrawCommand &singleCommand = commandBufferView.data[commandIndex];
+        const math::Mat4 model = compute_model_matrix(singleCommand);
+        float normalMatrix[9] = {};
+        extract_normal_matrix(model, normalMatrix);
+
+        // Param tokens resolve against the bound program on both
+        // backends, so the skinned program must be bound before its
+        // palette uploads (a stale bind sent the palette into the
+        // static program's uniforms).
+        bool skinnedDraw =
+            mesh->hasSkin &&
+            (singleCommand.skinPalette != kInvalidSkinPalette) &&
+            (backend.gbufferSkinnedProgram != kInvalidDeviceProgram);
+        if (skinnedDraw) {
+          dev->bind_program(backend.gbufferSkinnedProgram);
+          skinnedDraw = upload_bone_palette(dev, singleCommand.skinPalette,
+                                            backend.gbufSkinnedBonesParam,
+                                            &backend.lastGbufferBonePalette);
+          if (!skinnedDraw) {
             dev->bind_program(backend.gbufferProgram);
           }
-          continue;
         }
-
-        if (backend.gbufUseInstancingLoc.valid()) {
-          dev->set_param_i32(backend.gbufUseInstancingLoc, 0);
-        }
-        for (std::uint32_t local = 0U; local < batch.count; ++local) {
-          const std::size_t commandIndex =
-              static_cast<std::size_t>(batch.first) +
-              static_cast<std::size_t>(local);
-          const DrawCommand &singleCommand = commandBufferView.data[commandIndex];
-          const math::Mat4 model = compute_model_matrix(singleCommand);
-          float normalMatrix[9] = {};
-          extract_normal_matrix(model, normalMatrix);
-
-          // Param tokens resolve against the bound program on both
-          // backends, so the skinned program must be bound before its
-          // palette uploads (a stale bind sent the palette into the
-          // static program's uniforms).
-          bool skinnedDraw =
-              mesh->hasSkin &&
-              (singleCommand.skinPalette != kInvalidSkinPalette) &&
-              (backend.gbufferSkinnedProgram != kInvalidDeviceProgram);
-          if (skinnedDraw) {
-            dev->bind_program(backend.gbufferSkinnedProgram);
-            skinnedDraw = upload_bone_palette(dev, singleCommand.skinPalette,
-                                              backend.gbufSkinnedBonesParam,
-                                              &backend.lastGbufferBonePalette);
-            if (!skinnedDraw) {
-              dev->bind_program(backend.gbufferProgram);
-            }
-          }
-          if (skinnedDraw) {
-            upload_skinned_gbuffer_uniforms(backend, dev, viewMat, projMat,
-                                            timeSeconds, singleCommand, model,
-                                            normalMatrix, &boundAlbedoTex,
-                                            boundMaterialTex);
-            if (mesh->indexCount > 0U) {
-              ++frameStats.drawCalls;
-              frameStats.triangleCount += (mesh->indexCount / 3U);
-              dev->draw_indexed(mesh->geometry,
-                                static_cast<std::int32_t>(mesh->indexCount));
-            } else {
-              ++frameStats.drawCalls;
-              frameStats.triangleCount += (mesh->vertexCount / 3U);
-              dev->draw(mesh->geometry, PrimitiveTopology::Triangles, 0,
-                        static_cast<std::int32_t>(mesh->vertexCount));
-            }
-            dev->bind_program(backend.gbufferProgram);
-            continue;
-          }
-
-          upload_gbuffer_foliage_uniforms(backend, dev, singleCommand);
-          if (backend.gbufModelLoc.valid()) {
-            dev->set_param_mat4(backend.gbufModelLoc, &model.columns[0].x);
-          }
-          if (backend.gbufNormalMatrixLoc.valid()) {
-            dev->set_param_mat3(backend.gbufNormalMatrixLoc, normalMatrix);
-          }
-
+        if (skinnedDraw) {
+          upload_skinned_gbuffer_uniforms(
+              backend, dev, viewMat, projMat, timeSeconds, singleCommand, model,
+              normalMatrix, &boundAlbedoTex, boundMaterialTex);
           if (mesh->indexCount > 0U) {
             ++frameStats.drawCalls;
             frameStats.triangleCount += (mesh->indexCount / 3U);
@@ -336,746 +313,748 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
             dev->draw(mesh->geometry, PrimitiveTopology::Triangles, 0,
                       static_cast<std::int32_t>(mesh->vertexCount));
           }
+          dev->bind_program(backend.gbufferProgram);
+          continue;
         }
+
+        upload_gbuffer_foliage_uniforms(backend, dev, singleCommand);
+        if (backend.gbufModelLoc.valid()) {
+          dev->set_param_mat4(backend.gbufModelLoc, &model.columns[0].x);
+        }
+        if (backend.gbufNormalMatrixLoc.valid()) {
+          dev->set_param_mat3(backend.gbufNormalMatrixLoc, normalMatrix);
+        }
+
+        if (mesh->indexCount > 0U) {
+          ++frameStats.drawCalls;
+          frameStats.triangleCount += (mesh->indexCount / 3U);
+          dev->draw_indexed(mesh->geometry,
+                            static_cast<std::int32_t>(mesh->indexCount));
+        } else {
+          ++frameStats.drawCalls;
+          frameStats.triangleCount += (mesh->vertexCount / 3U);
+          dev->draw(mesh->geometry, PrimitiveTopology::Triangles, 0,
+                    static_cast<std::int32_t>(mesh->vertexCount));
+        }
+      }
+    }
+  };
+
+  drawGBufferBatches();
+
+  dev->bind_program(kInvalidDeviceProgram);
+  gpu_profiler_end_pass(GpuPassId::GBuffer);
+
+  const bool ssaoEnabled =
+      backend.ssaoAvailable && backend.cvars.ssao.get_bool(true);
+  if (ssaoEnabled) {
+    gpu_profiler_begin_pass(GpuPassId::SSAO);
+    dev->bind_render_target(pass_resource_target(passRes.ssaoTexture));
+    dev->set_viewport(0, 0, drawableWidth, drawableHeight);
+    dev->apply_render_state(RenderState{DepthTest::Disabled, true,
+                                        BlendMode::Disabled, CullMode::Back});
+
+    dev->bind_program(backend.ssaoProgram);
+
+    dev->bind_texture_slot(0U, pass_resource_texture(passRes.gbufferDepth));
+    dev->bind_texture_slot(1U, pass_resource_texture(passRes.gbufferNormal));
+    dev->bind_texture_slot(2U, backend.ssaoNoiseTexture);
+
+    if (backend.ssaoDepthLoc.valid())
+      dev->set_param_i32(backend.ssaoDepthLoc, 0);
+    if (backend.ssaoNormalLoc.valid())
+      dev->set_param_i32(backend.ssaoNormalLoc, 1);
+    if (backend.ssaoNoiseLoc.valid())
+      dev->set_param_i32(backend.ssaoNoiseLoc, 2);
+
+    if (backend.ssaoProjectionLoc.valid())
+      dev->set_param_mat4(backend.ssaoProjectionLoc, &projMat.columns[0].x);
+    if (backend.ssaoInvProjectionLoc.valid()) {
+      math::Mat4 ssaoInvProj{};
+      if (math::inverse(projMat, &ssaoInvProj)) {
+        dev->set_param_mat4(backend.ssaoInvProjectionLoc,
+                            &ssaoInvProj.columns[0].x);
+      }
+    }
+    if (backend.ssaoViewLoc.valid())
+      dev->set_param_mat4(backend.ssaoViewLoc, &viewMat.columns[0].x);
+
+    if (backend.ssaoNoiseScaleLoc.valid()) {
+      const float noiseScale[2] = {static_cast<float>(drawableWidth) / 4.0F,
+                                   static_cast<float>(drawableHeight) / 4.0F};
+      dev->set_param_vec2(backend.ssaoNoiseScaleLoc, noiseScale);
+    }
+    if (backend.ssaoRadiusLoc.valid())
+      dev->set_param_f32(backend.ssaoRadiusLoc,
+                         backend.cvars.ssaoRadius.get_float());
+    if (backend.ssaoBiasLoc.valid())
+      dev->set_param_f32(backend.ssaoBiasLoc,
+                         backend.cvars.ssaoBias.get_float());
+
+    if ((dev->set_param_vec4_array != nullptr) &&
+        backend.ssaoSamplesParam.valid()) {
+      float kernel[32 * 4] = {};
+      for (int i = 0; i < 32; ++i) {
+        kernel[i * 4 + 0] = backend.ssaoKernel[i * 3 + 0];
+        kernel[i * 4 + 1] = backend.ssaoKernel[i * 3 + 1];
+        kernel[i * 4 + 2] = backend.ssaoKernel[i * 3 + 2];
+      }
+      dev->set_param_vec4_array(backend.ssaoSamplesParam, kernel, 32);
+    }
+
+    dev->draw(backend.emptyGeometry, PrimitiveTopology::Triangles, 0, 3);
+
+    dev->bind_texture_slot(0U, kInvalidDeviceTexture);
+    dev->bind_texture_slot(1U, kInvalidDeviceTexture);
+    dev->bind_texture_slot(2U, kInvalidDeviceTexture);
+    dev->bind_program(kInvalidDeviceProgram);
+
+    dev->bind_render_target(pass_resource_target(passRes.ssaoBlurTexture));
+    dev->set_viewport(0, 0, drawableWidth, drawableHeight);
+
+    dev->bind_program(backend.ssaoBlurProgram);
+
+    dev->bind_texture_slot(0U, pass_resource_texture(passRes.ssaoTexture));
+    if (backend.ssaoBlurInputLoc.valid())
+      dev->set_param_i32(backend.ssaoBlurInputLoc, 0);
+    if (backend.ssaoBlurTexelSizeLoc.valid()) {
+      const float texelSize[2] = {1.0F / static_cast<float>(drawableWidth),
+                                  1.0F / static_cast<float>(drawableHeight)};
+      dev->set_param_vec2(backend.ssaoBlurTexelSizeLoc, texelSize);
+    }
+
+    dev->draw(backend.emptyGeometry, PrimitiveTopology::Triangles, 0, 3);
+
+    dev->bind_texture_slot(0U, kInvalidDeviceTexture);
+    dev->bind_program(kInvalidDeviceProgram);
+    gpu_profiler_end_pass(GpuPassId::SSAO);
+  }
+
+  // The table's shape is settled before the buffer is sized: a wrapped
+  // table ends in a partial row, and the upload covers the whole
+  // rectangle, so the buffer must reach past the last tile to the end
+  // of that row. The padding is never addressed — the shader's flat
+  // tile index stays inside the grid — it only has to exist.
+  // The diagnostic cvar can only lower the limit: a wrapped table is
+  // reachable natively only on a drawable wider than any common
+  // display, so this is how that layout is exercised on one.
+  int tileTableLimit = static_cast<int>(dev->caps.maxTextureDimension);
+  const int tileTableLimitOverride =
+      backend.cvars.tileTableMaxDimension.get_int(0);
+  if ((tileTableLimitOverride > 0) &&
+      (tileTableLimitOverride < tileTableLimit)) {
+    tileTableLimit = tileTableLimitOverride;
+  }
+  TileTextureLayout tileLayout{};
+  const bool tileLayoutValid = compute_tile_texture_layout(
+      (drawableWidth + kTileSize - 1) / kTileSize,
+      (drawableHeight + kTileSize - 1) / kTileSize, tileTableLimit, tileLayout);
+
+  std::size_t tileBufferSize =
+      compute_tile_buffer_size(drawableWidth, drawableHeight);
+  if (tileLayoutValid && (tileLayout.texelCount > tileBufferSize)) {
+    tileBufferSize = tileLayout.texelCount;
+  }
+  if (backend.tileBuffer.size() < tileBufferSize) {
+    // A failed grow leaves the buffer at zero capacity instead of
+    // terminating the process; the
+    // dataSize < requiredSize check inside cull_lights_tiled below
+    // already treats an undersized buffer as a graceful cull failure.
+    static_cast<void>(backend.tileBuffer.allocate(tileBufferSize));
+  }
+
+  TileLightData tileData{};
+  tileData.data = backend.tileBuffer.data();
+  tileData.dataSize = backend.tileBuffer.size();
+
+  // A table that cannot be laid out inside the device's texture limit
+  // is the same outcome as a failed cull: no tile table this frame.
+  const bool tileDataValid =
+      tileLayoutValid &&
+      cull_lights_tiled(lights, &viewMat.columns[0].x, &projMat.columns[0].x,
+                        device_depth_zero_one(), drawableWidth, drawableHeight,
+                        tileData);
+  if (!tileDataValid) {
+    static bool warnedCullFailure = false;
+    if (!warnedCullFailure) {
+      char message[192] = {};
+      std::snprintf(message, sizeof(message),
+                    "tiled light culling failed for a %dx%d drawable "
+                    "(texture limit %d); deferred lighting renders without "
+                    "local lights",
+                    drawableWidth, drawableHeight, tileTableLimit);
+      core::log_message(core::LogLevel::Warning, "renderer", message);
+      warnedCullFailure = true;
+    }
+    if (backend.view().tileLightTex != kInvalidDeviceTexture) {
+      dev->destroy_texture(backend.view().tileLightTex);
+      backend.view().tileLightTex = kInvalidDeviceTexture;
+      backend.view().tileLightTexWidth = 0;
+      backend.view().tileLightTexHeight = 0;
+    }
+  } else {
+    // The flat CPU buffer (tileIdx * kTileDataWidth) reinterprets
+    // exactly as rows of tilesPerRow tiles, so nothing is repacked:
+    // the layout only chooses the rectangle, and the shader recovers
+    // the row from the flat tile index with the same tilesPerRow.
+    const int tileTexWidth = tileLayout.width;
+    const int tileTexHeight = tileLayout.height;
+    if ((backend.view().tileLightTex != kInvalidDeviceTexture) &&
+        ((tileTexWidth != backend.view().tileLightTexWidth) ||
+         (tileTexHeight != backend.view().tileLightTexHeight))) {
+      dev->destroy_texture(backend.view().tileLightTex);
+      backend.view().tileLightTex = kInvalidDeviceTexture;
+      backend.view().tileLightTexWidth = 0;
+      backend.view().tileLightTexHeight = 0;
+    }
+    if (backend.view().tileLightTex == kInvalidDeviceTexture) {
+      backend.view().tileLightTex =
+          create_r32f_data_texture(dev, tileTexWidth, tileTexHeight);
+      if (backend.view().tileLightTex != kInvalidDeviceTexture) {
+        backend.view().tileLightTexWidth = tileTexWidth;
+        backend.view().tileLightTexHeight = tileTexHeight;
+      } else {
+        static bool warnedTileTexFailure = false;
+        if (!warnedTileTexFailure) {
+          core::log_message(core::LogLevel::Warning, "renderer",
+                            "tile light texture creation failed; deferred "
+                            "lighting renders without local lights");
+          warnedTileTexFailure = true;
+        }
+      }
+    }
+    if (backend.view().tileLightTex != kInvalidDeviceTexture) {
+      dev->update_texture(backend.view().tileLightTex,
+                          backend.tileBuffer.data(), tileTexWidth,
+                          tileTexHeight);
+    }
+  }
+
+  if (!pack_light_data(lights, backend.lightDataBuffer.data(),
+                       backend.lightDataBuffer.size())) {
+    static bool warnedPackFailure = false;
+    if (!warnedPackFailure) {
+      core::log_message(core::LogLevel::Warning, "renderer",
+                        "light data packing failed; per-light texture "
+                        "keeps its previous contents");
+      warnedPackFailure = true;
+    }
+  } else {
+    if (backend.lightDataTex == kInvalidDeviceTexture) {
+      backend.lightDataTex = create_r32f_data_texture(dev, kLightDataTexWidth,
+                                                      kLightDataTexHeight);
+    }
+    if (backend.lightDataTex != kInvalidDeviceTexture) {
+      dev->update_texture(backend.lightDataTex, backend.lightDataBuffer.data(),
+                          kLightDataTexWidth, kLightDataTexHeight);
+    }
+  }
+
+  if (gbufferDebugMode > 0 &&
+      backend.gbufferDebugProgram != kInvalidDeviceProgram) {
+    gpu_profiler_begin_pass(GpuPassId::GBufferDebug);
+    dev->bind_render_target(pass_resource_target(passRes.sceneColor));
+    dev->set_viewport(0, 0, drawableWidth, drawableHeight);
+    dev->apply_render_state(RenderState{DepthTest::Disabled, true,
+                                        BlendMode::Disabled, CullMode::Back});
+
+    dev->bind_program(backend.gbufferDebugProgram);
+
+    dev->bind_texture_slot(0U, pass_resource_texture(passRes.gbufferAlbedo));
+    dev->bind_texture_slot(1U, pass_resource_texture(passRes.gbufferNormal));
+    dev->bind_texture_slot(2U, pass_resource_texture(passRes.gbufferEmissive));
+    dev->bind_texture_slot(3U, pass_resource_texture(passRes.gbufferDepth));
+
+    if (backend.dbgGBufAlbedoLoc.valid())
+      dev->set_param_i32(backend.dbgGBufAlbedoLoc, 0);
+    if (backend.dbgGBufNormalLoc.valid())
+      dev->set_param_i32(backend.dbgGBufNormalLoc, 1);
+    if (backend.dbgGBufEmissiveLoc.valid())
+      dev->set_param_i32(backend.dbgGBufEmissiveLoc, 2);
+    if (backend.dbgGBufDepthLoc.valid())
+      dev->set_param_i32(backend.dbgGBufDepthLoc, 3);
+    // Debug mode:
+    // 0=albedo,1=normals,2=metallic,3=roughness,4=emissive,5=AO,6=depth CVar
+    // value 1..7 maps to shader 0..6.
+    if (backend.dbgModeLoc.valid())
+      dev->set_param_i32(backend.dbgModeLoc, gbufferDebugMode - 1);
+
+    dev->draw(backend.emptyGeometry, PrimitiveTopology::Triangles, 0, 3);
+
+    dev->bind_texture_slot(0U, kInvalidDeviceTexture);
+    dev->bind_texture_slot(1U, kInvalidDeviceTexture);
+    dev->bind_texture_slot(2U, kInvalidDeviceTexture);
+    dev->bind_texture_slot(3U, kInvalidDeviceTexture);
+    dev->bind_program(kInvalidDeviceProgram);
+    gpu_profiler_end_pass(GpuPassId::GBufferDebug);
+  } else {
+    gpu_profiler_begin_pass(GpuPassId::DeferredLighting);
+    dev->bind_render_target(pass_resource_target(passRes.sceneColor));
+    dev->set_viewport(0, 0, drawableWidth, drawableHeight);
+    dev->apply_render_state(RenderState{DepthTest::Disabled, true,
+                                        BlendMode::Disabled, CullMode::Back});
+
+    dev->bind_program(backend.deferredLightProgram);
+
+    // Bind G-Buffer textures on slots 0-3, tile on slot 4, SSAO on
+    // slot 5, per-light data on slot 6 (the shadow arrays and point
+    // cubes hold 7-12, IBL 13-15).
+    dev->bind_texture_slot(0U, pass_resource_texture(passRes.gbufferAlbedo));
+    dev->bind_texture_slot(1U, pass_resource_texture(passRes.gbufferNormal));
+    dev->bind_texture_slot(2U, pass_resource_texture(passRes.gbufferEmissive));
+    dev->bind_texture_slot(3U, pass_resource_texture(passRes.gbufferDepth));
+    dev->bind_texture_slot(4U, backend.view().tileLightTex);
+    dev->bind_texture_slot(static_cast<std::uint32_t>(kDeferredLightDataUnit),
+                           backend.lightDataTex);
+
+    if (ssaoEnabled) {
+      dev->bind_texture_slot(5U,
+                             pass_resource_texture(passRes.ssaoBlurTexture));
+    } else {
+      dev->bind_texture_slot(5U, backend.fallbackTexture2D);
+    }
+
+    if (backend.dlGBufAlbedoLoc.valid())
+      dev->set_param_i32(backend.dlGBufAlbedoLoc, 0);
+    if (backend.dlGBufNormalLoc.valid())
+      dev->set_param_i32(backend.dlGBufNormalLoc, 1);
+    if (backend.dlGBufEmissiveLoc.valid())
+      dev->set_param_i32(backend.dlGBufEmissiveLoc, 2);
+    if (backend.dlGBufDepthLoc.valid())
+      dev->set_param_i32(backend.dlGBufDepthLoc, 3);
+    if (backend.dlTileLightTexLoc.valid())
+      dev->set_param_i32(backend.dlTileLightTexLoc, 4);
+    if (backend.dlLightDataTexLoc.valid())
+      dev->set_param_i32(backend.dlLightDataTexLoc, kDeferredLightDataUnit);
+
+    // Sampler units are assigned even when IBL is off: a samplerCube
+    // uniform left at its default unit 0 aliases the sampler2D G-buffer
+    // there, which is a draw-time GL_INVALID_OPERATION that corrupts
+    // every deferred draw.
+    if (backend.dlIrradianceMapLoc.valid()) {
+      dev->set_param_i32(backend.dlIrradianceMapLoc, kIblIrradianceUnit);
+    }
+    if (backend.dlPrefilteredMapLoc.valid()) {
+      dev->set_param_i32(backend.dlPrefilteredMapLoc, kIblPrefilteredUnit);
+    }
+    if (backend.dlBrdfLutLoc.valid()) {
+      dev->set_param_i32(backend.dlBrdfLutLoc, kIblBrdfLutUnit);
+    }
+    const bool dlIblEnabled = ibl.available &&
+                              (backend.dlIblEnabledLoc.valid()) &&
+                              (dev->bind_texture_slot != nullptr);
+    if (backend.dlIblEnabledLoc.valid()) {
+      dev->set_param_i32(backend.dlIblEnabledLoc, dlIblEnabled ? 1 : 0);
+    }
+    upload_probe_uniforms(dev, backend.dlProbeBoxMinLoc,
+                          backend.dlProbeBoxMaxLoc, backend.dlProbeCenterLoc,
+                          ibl);
+    if (dlIblEnabled) {
+      dev->bind_texture_slot(kIblIrradianceUnit, ibl.irradiance);
+      dev->bind_texture_slot(kIblPrefilteredUnit, ibl.prefiltered);
+      dev->bind_texture_slot(kIblBrdfLutUnit, backend.brdfLutTexture);
+      if (backend.dlPrefilteredMipsLoc.valid()) {
+        dev->set_param_f32(backend.dlPrefilteredMipsLoc,
+                           static_cast<float>(ibl.prefilteredMipLevels));
+      }
+    } else if (dev->bind_texture_slot != nullptr) {
+      // Vulkan-family backends need valid descriptors on the declared
+      // IBL samplers even with the ambient path constant.
+      dev->bind_texture_slot(kIblIrradianceUnit, backend.fallbackCubemap);
+      dev->bind_texture_slot(kIblPrefilteredUnit, backend.fallbackCubemap);
+      dev->bind_texture_slot(kIblBrdfLutUnit, backend.fallbackTexture2D);
+    }
+
+    if (backend.dlSsaoTextureLoc.valid())
+      dev->set_param_i32(backend.dlSsaoTextureLoc, 5);
+    if (backend.dlSsaoEnabledLoc.valid())
+      dev->set_param_i32(backend.dlSsaoEnabledLoc, ssaoEnabled ? 1 : 0);
+
+    // Flat vocabulary: per-slot samplers, one mat4 array per
+    // shadow kind, splits/indices/pos+far as packed vec4 payloads.
+    {
+      // Atlas samplers: one depth atlas for all cascades. The
+      // disabled state still binds the 2-D fallback: Vulkan-family
+      // backends need every declared sampler descriptor valid at
+      // draw (same rule as the forward flush).
+      dev->bind_texture_slot(
+          static_cast<std::uint32_t>(kShadowCascadeAtlasUnit),
+          shadowEnabled ? backend.shadowState.depthAtlasTexture
+                        : backend.fallbackTexture2D);
+      if (backend.dlShadowAtlasLoc.valid()) {
+        dev->set_param_i32(backend.dlShadowAtlasLoc, kShadowCascadeAtlasUnit);
+      }
+      float shadowMatrices[kShadowCascadeCount * 16U] = {};
+      float cascadeSplits[4] = {};
+      for (std::size_t c = 0U; c < kShadowCascadeCount; ++c) {
+        std::memcpy(
+            &shadowMatrices[c * 16U],
+            &backend.shadowState.cascades[c].lightViewProjection.columns[0].x,
+            sizeof(float) * 16U);
+        cascadeSplits[c] = backend.shadowState.cascades[c].splitDistance;
+      }
+      if (shadowEnabled) {
+        if ((dev->set_param_mat4_array != nullptr) &&
+            backend.dlShadowMatrixParam.valid()) {
+          dev->set_param_mat4_array(
+              backend.dlShadowMatrixParam, shadowMatrices,
+              static_cast<std::int32_t>(kShadowCascadeCount));
+        }
+        if (backend.dlCascadeSplitsParam.valid()) {
+          dev->set_param_vec4(backend.dlCascadeSplitsParam, cascadeSplits);
+        }
+      }
+    }
+    if (backend.dlShadowEnabledLoc.valid()) {
+      dev->set_param_i32(backend.dlShadowEnabledLoc, shadowEnabled ? 1 : 0);
+    }
+
+    const bool spotShadowEnabled = doSpotShadows;
+    dev->bind_texture_slot(static_cast<std::uint32_t>(kSpotShadowAtlasUnit),
+                           spotShadowEnabled
+                               ? backend.spotShadowState.depthAtlasTexture
+                               : backend.fallbackTexture2D);
+    if (backend.dlSpotShadowAtlasLoc.valid()) {
+      dev->set_param_i32(backend.dlSpotShadowAtlasLoc, kSpotShadowAtlasUnit);
+    }
+    if (spotShadowEnabled) {
+      float spotMatrices[kMaxSpotShadowLights * 16U] = {};
+      float spotLightIdx[4] = {};
+      for (std::size_t s = 0U; s < kMaxSpotShadowLights; ++s) {
+        const auto &slot = backend.spotShadowState.slots[s];
+        std::memcpy(&spotMatrices[s * 16U],
+                    &slot.lightViewProjection.columns[0].x,
+                    sizeof(float) * 16U);
+        spotLightIdx[s] = static_cast<float>(slot.lightIndex);
+      }
+      if ((dev->set_param_mat4_array != nullptr) &&
+          backend.dlSpotShadowMatrixParam.valid()) {
+        dev->set_param_mat4_array(
+            backend.dlSpotShadowMatrixParam, spotMatrices,
+            static_cast<std::int32_t>(kMaxSpotShadowLights));
+      }
+      if (backend.dlSpotShadowLightIdxParam.valid()) {
+        dev->set_param_vec4(backend.dlSpotShadowLightIdxParam, spotLightIdx);
+      }
+    }
+    if (backend.dlSpotShadowEnabledLoc.valid()) {
+      dev->set_param_i32(backend.dlSpotShadowEnabledLoc,
+                         spotShadowEnabled ? 1 : 0);
+    }
+
+    // Bind point shadow cubemaps on their unit-map slots. The
+    // samplerCube uniforms must point at their units even when point
+    // shadows are off: left at the default unit 0 they alias the
+    // sampler2D G-buffer binding, which makes the whole draw
+    // GL_INVALID_OPERATION on conformant drivers.
+    const bool pointShadowEnabled = doPointShadows;
+    for (std::size_t s = 0U; s < kMaxPointShadowLights; ++s) {
+      if (backend.dlPointShadowMapLocs[s].valid()) {
+        dev->set_param_i32(backend.dlPointShadowMapLocs[s],
+                           kPointShadowUnitBase + static_cast<std::int32_t>(s));
+      }
+    }
+    if (pointShadowEnabled) {
+      float pointPosFar[kMaxPointShadowLights * 4U] = {};
+      float pointLightIdx[4] = {};
+      for (std::size_t s = 0U; s < kMaxPointShadowLights; ++s) {
+        const auto &slot = backend.pointShadowState.slots[s];
+        const auto texUnit = static_cast<std::uint32_t>(kPointShadowUnitBase) +
+                             static_cast<std::uint32_t>(s);
+        if (dev->bind_texture_slot != nullptr) {
+          dev->bind_texture_slot(texUnit, slot.depthCubemap);
+        }
+        const math::Vec3 lp =
+            point_shadow_slot_light_position(slot.lightIndex, lights);
+        pointPosFar[s * 4U + 0U] = lp.x;
+        pointPosFar[s * 4U + 1U] = lp.y;
+        pointPosFar[s * 4U + 2U] = lp.z;
+        pointPosFar[s * 4U + 3U] = slot.farPlane;
+        pointLightIdx[s] = static_cast<float>(slot.lightIndex);
+      }
+      if ((dev->set_param_vec4_array != nullptr) &&
+          backend.dlPointShadowPosFarParam.valid()) {
+        dev->set_param_vec4_array(
+            backend.dlPointShadowPosFarParam, pointPosFar,
+            static_cast<std::int32_t>(kMaxPointShadowLights));
+      }
+      if (backend.dlPointShadowLightIdxParam.valid()) {
+        dev->set_param_vec4(backend.dlPointShadowLightIdxParam, pointLightIdx);
+      }
+    }
+    if (backend.dlPointShadowEnabledLoc.valid()) {
+      dev->set_param_i32(backend.dlPointShadowEnabledLoc,
+                         pointShadowEnabled ? 1 : 0);
+    }
+
+    if (backend.dlTileCountXLoc.valid())
+      dev->set_param_i32(backend.dlTileCountXLoc, tileData.tileCountX);
+    if (backend.dlTileCountYLoc.valid())
+      dev->set_param_i32(backend.dlTileCountYLoc, tileData.tileCountY);
+    if (backend.dlTileTableRowTilesLoc.valid())
+      dev->set_param_i32(backend.dlTileTableRowTilesLoc,
+                         tileLayout.tilesPerRow);
+
+    math::Mat4 invProj{};
+    if (math::inverse(projMat, &invProj)) {
+      if (backend.dlInvProjectionLoc.valid())
+        dev->set_param_mat4(backend.dlInvProjectionLoc, &invProj.columns[0].x);
+    }
+    math::Mat4 invView{};
+    if (math::inverse(viewMat, &invView)) {
+      if (backend.dlInvViewLoc.valid())
+        dev->set_param_mat4(backend.dlInvViewLoc, &invView.columns[0].x);
+    }
+
+    // Every directional light the forward program shades, so the two
+    // paths light a surface alike. The shader shades each at unit
+    // intensity, so the authored intensity premultiplies into the
+    // colour here (the forward path multiplies it in the shader from a
+    // packed colour+intensity array). The count always uploads, so a
+    // scene that loses its suns stops shading them.
+    {
+      const std::size_t dirCount =
+          std::min(lights.directionalLightCount, kMaxDirectionalLights);
+      if (backend.dlDirLightCountLoc.valid()) {
+        dev->set_param_i32(backend.dlDirLightCountLoc,
+                           static_cast<std::int32_t>(dirCount));
+      }
+      if ((dirCount > 0U) && (dev->set_param_vec4_array != nullptr)) {
+        float direction[kMaxDirectionalLights * 4U] = {};
+        float color[kMaxDirectionalLights * 4U] = {};
+        for (std::size_t i = 0U; i < dirCount; ++i) {
+          const auto &sun = lights.directionalLights[i];
+          direction[(i * 4U) + 0U] = sun.direction.x;
+          direction[(i * 4U) + 1U] = sun.direction.y;
+          direction[(i * 4U) + 2U] = sun.direction.z;
+          color[(i * 4U) + 0U] = sun.color.x * sun.intensity;
+          color[(i * 4U) + 1U] = sun.color.y * sun.intensity;
+          color[(i * 4U) + 2U] = sun.color.z * sun.intensity;
+        }
+        if (backend.dlDirLightDirLoc.valid()) {
+          dev->set_param_vec4_array(backend.dlDirLightDirLoc, direction,
+                                    static_cast<std::int32_t>(dirCount));
+        }
+        if (backend.dlDirLightColorLoc.valid()) {
+          dev->set_param_vec4_array(backend.dlDirLightColorLoc, color,
+                                    static_cast<std::int32_t>(dirCount));
+        }
+      }
+    }
+
+    if (backend.dlCameraPosLoc.valid()) {
+      dev->set_param_vec3(backend.dlCameraPosLoc,
+                          &ctx.backend.view().camera.position.x);
+    }
+    if (backend.dlCameraForwardOrthoLoc.valid()) {
+      // xyz = normalized view direction, w = 1 when orthographic:
+      // the shader switches its view vector to the constant camera
+      // forward under ortho — parallel rays have no per-pixel eye vector.
+      const CameraState &activeCam = ctx.backend.view().camera;
+      const math::Vec3 fwd =
+          math::normalize(math::sub(activeCam.target, activeCam.position));
+      const float forwardOrtho[4] = {
+          fwd.x, fwd.y, fwd.z,
+          math::projection_is_orthographic(activeCam.projection) ? 1.0F : 0.0F};
+      dev->set_param_vec4(backend.dlCameraForwardOrthoLoc, forwardOrtho);
+    }
+    if (backend.dlScreenSizeLoc.valid()) {
+      const float screenSize[2] = {static_cast<float>(drawableWidth),
+                                   static_cast<float>(drawableHeight)};
+      dev->set_param_vec2(backend.dlScreenSizeLoc, screenSize);
+    }
+    upload_deferred_distance_fog_uniforms(backend, dev, fogSettings);
+    upload_deferred_height_fog_uniforms(backend, dev, heightFogSettings);
+
+    const auto plCount = static_cast<int>(std::min(
+        lights.pointLightCount, static_cast<std::size_t>(kMaxPointLights)));
+    if (backend.dlPointLightCountLoc.valid())
+      dev->set_param_i32(backend.dlPointLightCountLoc, plCount);
+    const auto slCount = static_cast<int>(std::min(
+        lights.spotLightCount, static_cast<std::size_t>(kMaxSpotLights)));
+    if (backend.dlSpotLightCountLoc.valid())
+      dev->set_param_i32(backend.dlSpotLightCountLoc, slCount);
+
+    dev->draw(backend.emptyGeometry, PrimitiveTopology::Triangles, 0, 3);
+
+    for (std::uint32_t slot = 0U; slot <= 4U; ++slot) {
+      dev->bind_texture_slot(slot, kInvalidDeviceTexture);
+    }
+    dev->bind_texture_slot(static_cast<std::uint32_t>(kDeferredLightDataUnit),
+                           kInvalidDeviceTexture);
+    if (dlIblEnabled) {
+      dev->bind_texture_slot(kIblIrradianceUnit, kInvalidDeviceTexture);
+      dev->bind_texture_slot(kIblPrefilteredUnit, kInvalidDeviceTexture);
+      dev->bind_texture_slot(kIblBrdfLutUnit, kInvalidDeviceTexture);
+    }
+    if (ssaoEnabled) {
+      dev->bind_texture_slot(5U, kInvalidDeviceTexture);
+    }
+    dev->bind_texture_slot(static_cast<std::uint32_t>(kShadowCascadeAtlasUnit),
+                           kInvalidDeviceTexture);
+    dev->bind_texture_slot(static_cast<std::uint32_t>(kSpotShadowAtlasUnit),
+                           kInvalidDeviceTexture);
+    dev->bind_program(kInvalidDeviceProgram);
+    gpu_profiler_end_pass(GpuPassId::DeferredLighting);
+  }
+
+  const SkyModel skyModel = selected_sky_model();
+  // The environment lights every sky model; only the cubemap model shows
+  // it as the sky.
+  const DeviceTextureHandle skyboxTexture = (skyModel == SkyModel::Cubemap)
+                                                ? envSkyboxTexture
+                                                : kInvalidDeviceTexture;
+  const math::Mat4 skyProj = sky_projection_matrix(
+      ctx.backend.view().camera, (drawableHeight > 0)
+                                     ? (static_cast<float>(drawableWidth) /
+                                        static_cast<float>(drawableHeight))
+                                     : 1.0F);
+  if (skyboxTexture != kInvalidDeviceTexture) {
+    dev->bind_render_target(pass_resource_target(passRes.sceneColor));
+    dev->set_viewport(0, 0, drawableWidth, drawableHeight);
+    if (ensureSceneDepthHasOpaque()) {
+      draw_skybox(backend, dev, viewMat, skyProj, skyboxTexture, frameStats);
+    }
+  } else if ((skyModel == SkyModel::Hosek) && backend.hosekSkyAvailable) {
+    dev->bind_render_target(pass_resource_target(passRes.sceneColor));
+    dev->set_viewport(0, 0, drawableWidth, drawableHeight);
+    if (((core::cvar_get_int("r_debug_probe", 0) & 2) != 0) ||
+        ensureSceneDepthHasOpaque()) {
+      draw_hosek_sky(backend, dev, viewMat, skyProj, lights, frameStats);
+    }
+  } else if (((skyModel == SkyModel::Preetham) ||
+              (skyModel == SkyModel::Hosek)) &&
+             backend.preethamSkyAvailable) {
+    dev->bind_render_target(pass_resource_target(passRes.sceneColor));
+    dev->set_viewport(0, 0, drawableWidth, drawableHeight);
+    if (ensureSceneDepthHasOpaque()) {
+      draw_preetham_sky(backend, dev, viewMat, skyProj, lights, frameStats);
+    }
+  }
+
+  // Opaque runs the G-Buffer could not express, in key order, plus the
+  // transparent tail. Both draw forward over the deferred depth.
+  std::size_t forwardOpaqueRuns = 0U;
+  {
+    ShadingProgramRun run{};
+    for (std::size_t cursor = 0U;
+         next_program_run(commandBufferView, &cursor, opaqueCount, &run);) {
+      if (run.programId != static_cast<std::uint8_t>(ShadingModel::Pbr)) {
+        ++forwardOpaqueRuns;
+      }
+    }
+  }
+
+  if ((opaqueCount < totalCount) || (forwardOpaqueRuns > 0U)) {
+    dev->bind_render_target(pass_resource_target(passRes.sceneColor));
+    dev->set_viewport(0, 0, drawableWidth, drawableHeight);
+
+    // Carry opaque deferred depth into the scene target so forward
+    // draws depth-test against G-Buffer geometry. This binds again on
+    // its blit path, so the viewport below is the one these draws use.
+    static_cast<void>(ensureSceneDepthHasOpaque());
+    dev->set_viewport(0, 0, drawableWidth, drawableHeight);
+    dev->bind_program(backend.pbrProgram);
+
+    if (backend.pbrTimeLocation.valid()) {
+      dev->set_param_f32(backend.pbrTimeLocation, timeSeconds);
+    }
+    if (backend.pbrCameraPosLocation.valid()) {
+      dev->set_param_vec3(backend.pbrCameraPosLocation,
+                          &ctx.backend.view().camera.position.x);
+    }
+    if (backend.pbrViewLocation.valid()) {
+      dev->set_param_mat4(backend.pbrViewLocation, &viewMat.columns[0].x);
+    }
+    if (backend.pbrViewProjectionLocation.valid()) {
+      dev->set_param_mat4(backend.pbrViewProjectionLocation,
+                          &viewProjection.columns[0].x);
+    }
+    if (backend.pbrUseInstancingLocation.valid()) {
+      dev->set_param_i32(backend.pbrUseInstancingLocation, 0);
+    }
+    upload_pbr_lighting_uniforms(backend, dev, lights);
+    apply_pbr_ibl_uniforms(backend, dev, ibl);
+    upload_pbr_distance_fog_uniforms(backend, dev, fogSettings);
+    upload_pbr_height_fog_uniforms(backend, dev, heightFogSettings);
+    bind_pbr_shadow_uniforms(backend, dev, lights, shadowEnabled, doSpotShadows,
+                             doPointShadows);
+    if (backend.pbrAlbedoMapLocation.valid())
+      dev->set_param_i32(backend.pbrAlbedoMapLocation, 0);
+
+    const ForwardDrawProgram transparentProgram =
+        pbr_forward_draw_program(backend);
+
+    auto drawForwardTransparent = [&](std::size_t start, std::size_t end,
+                                      std::uint8_t programId) {
+      ForwardDrawBindings bindings{};
+      bindings.lights = &lights;
+      for (std::size_t i = start; i < end; ++i) {
+        const DrawCommand &cmd = commandBufferView.data[i];
+        const GpuMesh *mesh = lookup_gpu_mesh(registry, cmd.mesh);
+        if ((mesh == nullptr) || (mesh->geometry == kInvalidDeviceGeometry) ||
+            (mesh->vertexCount == 0U)) {
+          continue;
+        }
+        select_forward_command_lights(backend, dev, cmd, *mesh, &bindings);
+        upload_forward_material(transparentProgram, backend, dev, cmd,
+                                &bindings);
+        draw_forward_command(transparentProgram, backend, dev, programId, cmd,
+                             *mesh, viewProjection, &frameStats);
       }
     };
 
-    drawGBufferBatches();
-
-    dev->bind_program(kInvalidDeviceProgram);
-    gpu_profiler_end_pass(GpuPassId::GBuffer);
-
-    const bool ssaoEnabled =
-        backend.ssaoAvailable && backend.cvars.ssao.get_bool(true);
-    if (ssaoEnabled) {
-      gpu_profiler_begin_pass(GpuPassId::SSAO);
-      dev->bind_render_target(pass_resource_target(passRes.ssaoTexture));
-      dev->set_viewport(0, 0, drawableWidth, drawableHeight);
-      dev->apply_render_state(RenderState{DepthTest::Disabled, true,
-                                          BlendMode::Disabled,
-                                          CullMode::Back});
-
-      dev->bind_program(backend.ssaoProgram);
-
-      dev->bind_texture_slot(0U, pass_resource_texture(passRes.gbufferDepth));
-      dev->bind_texture_slot(1U, pass_resource_texture(passRes.gbufferNormal));
-      dev->bind_texture_slot(2U, backend.ssaoNoiseTexture);
-
-      if (backend.ssaoDepthLoc.valid())
-        dev->set_param_i32(backend.ssaoDepthLoc, 0);
-      if (backend.ssaoNormalLoc.valid())
-        dev->set_param_i32(backend.ssaoNormalLoc, 1);
-      if (backend.ssaoNoiseLoc.valid())
-        dev->set_param_i32(backend.ssaoNoiseLoc, 2);
-
-      if (backend.ssaoProjectionLoc.valid())
-        dev->set_param_mat4(backend.ssaoProjectionLoc, &projMat.columns[0].x);
-      if (backend.ssaoInvProjectionLoc.valid()) {
-        math::Mat4 ssaoInvProj{};
-        if (math::inverse(projMat, &ssaoInvProj)) {
-          dev->set_param_mat4(backend.ssaoInvProjectionLoc,
-                              &ssaoInvProj.columns[0].x);
-        }
+    DeviceProgramHandle boundProgram = backend.pbrProgram;
+    const auto bindProgramForRun = [&](DeviceProgramHandle program) {
+      if (program == boundProgram) {
+        return;
       }
-      if (backend.ssaoViewLoc.valid())
-        dev->set_param_mat4(backend.ssaoViewLoc, &viewMat.columns[0].x);
-
-      if (backend.ssaoNoiseScaleLoc.valid()) {
-        const float noiseScale[2] = {static_cast<float>(drawableWidth) / 4.0F,
-                                     static_cast<float>(drawableHeight) / 4.0F};
-        dev->set_param_vec2(backend.ssaoNoiseScaleLoc, noiseScale);
-      }
-      if (backend.ssaoRadiusLoc.valid())
-        dev->set_param_f32(backend.ssaoRadiusLoc,
-                           backend.cvars.ssaoRadius.get_float());
-      if (backend.ssaoBiasLoc.valid())
-        dev->set_param_f32(backend.ssaoBiasLoc,
-                           backend.cvars.ssaoBias.get_float());
-
-      if ((dev->set_param_vec4_array != nullptr) &&
-          backend.ssaoSamplesParam.valid()) {
-        float kernel[32 * 4] = {};
-        for (int i = 0; i < 32; ++i) {
-          kernel[i * 4 + 0] = backend.ssaoKernel[i * 3 + 0];
-          kernel[i * 4 + 1] = backend.ssaoKernel[i * 3 + 1];
-          kernel[i * 4 + 2] = backend.ssaoKernel[i * 3 + 2];
-        }
-        dev->set_param_vec4_array(backend.ssaoSamplesParam, kernel, 32);
-      }
-
-      dev->draw(backend.emptyGeometry, PrimitiveTopology::Triangles, 0, 3);
-
-      dev->bind_texture_slot(0U, kInvalidDeviceTexture);
-      dev->bind_texture_slot(1U, kInvalidDeviceTexture);
-      dev->bind_texture_slot(2U, kInvalidDeviceTexture);
-      dev->bind_program(kInvalidDeviceProgram);
-
-      dev->bind_render_target(pass_resource_target(passRes.ssaoBlurTexture));
-      dev->set_viewport(0, 0, drawableWidth, drawableHeight);
-
-      dev->bind_program(backend.ssaoBlurProgram);
-
-      dev->bind_texture_slot(0U, pass_resource_texture(passRes.ssaoTexture));
-      if (backend.ssaoBlurInputLoc.valid())
-        dev->set_param_i32(backend.ssaoBlurInputLoc, 0);
-      if (backend.ssaoBlurTexelSizeLoc.valid()) {
-        const float texelSize[2] = {1.0F / static_cast<float>(drawableWidth),
-                                    1.0F / static_cast<float>(drawableHeight)};
-        dev->set_param_vec2(backend.ssaoBlurTexelSizeLoc, texelSize);
-      }
-
-      dev->draw(backend.emptyGeometry, PrimitiveTopology::Triangles, 0, 3);
-
-      dev->bind_texture_slot(0U, kInvalidDeviceTexture);
-      dev->bind_program(kInvalidDeviceProgram);
-      gpu_profiler_end_pass(GpuPassId::SSAO);
-    }
-
-    // The table's shape is settled before the buffer is sized: a wrapped
-    // table ends in a partial row, and the upload covers the whole
-    // rectangle, so the buffer must reach past the last tile to the end
-    // of that row. The padding is never addressed — the shader's flat
-    // tile index stays inside the grid — it only has to exist.
-    // The diagnostic cvar can only lower the limit: a wrapped table is
-    // reachable natively only on a drawable wider than any common
-    // display, so this is how that layout is exercised on one.
-    int tileTableLimit = static_cast<int>(dev->caps.maxTextureDimension);
-    const int tileTableLimitOverride =
-        backend.cvars.tileTableMaxDimension.get_int(0);
-    if ((tileTableLimitOverride > 0) &&
-        (tileTableLimitOverride < tileTableLimit)) {
-      tileTableLimit = tileTableLimitOverride;
-    }
-    TileTextureLayout tileLayout{};
-    const bool tileLayoutValid = compute_tile_texture_layout(
-        (drawableWidth + kTileSize - 1) / kTileSize,
-        (drawableHeight + kTileSize - 1) / kTileSize, tileTableLimit,
-        tileLayout);
-
-    std::size_t tileBufferSize =
-        compute_tile_buffer_size(drawableWidth, drawableHeight);
-    if (tileLayoutValid && (tileLayout.texelCount > tileBufferSize)) {
-      tileBufferSize = tileLayout.texelCount;
-    }
-    if (backend.tileBuffer.size() < tileBufferSize) {
-      // A failed grow leaves the buffer at zero capacity instead of
-      // terminating the process; the
-      // dataSize < requiredSize check inside cull_lights_tiled below
-      // already treats an undersized buffer as a graceful cull failure.
-      static_cast<void>(backend.tileBuffer.allocate(tileBufferSize));
-    }
-
-    TileLightData tileData{};
-    tileData.data = backend.tileBuffer.data();
-    tileData.dataSize = backend.tileBuffer.size();
-
-    // A table that cannot be laid out inside the device's texture limit
-    // is the same outcome as a failed cull: no tile table this frame.
-    const bool tileDataValid =
-        tileLayoutValid &&
-        cull_lights_tiled(lights, &viewMat.columns[0].x, &projMat.columns[0].x,
-                          device_depth_zero_one(), drawableWidth,
-                          drawableHeight, tileData);
-    if (!tileDataValid) {
-      static bool warnedCullFailure = false;
-      if (!warnedCullFailure) {
-        char message[192] = {};
-        std::snprintf(message, sizeof(message),
-                      "tiled light culling failed for a %dx%d drawable "
-                      "(texture limit %d); deferred lighting renders without "
-                      "local lights",
-                      drawableWidth, drawableHeight, tileTableLimit);
-        core::log_message(core::LogLevel::Warning, "renderer", message);
-        warnedCullFailure = true;
-      }
-      if (backend.view().tileLightTex != kInvalidDeviceTexture) {
-        dev->destroy_texture(backend.view().tileLightTex);
-        backend.view().tileLightTex = kInvalidDeviceTexture;
-        backend.view().tileLightTexWidth = 0;
-        backend.view().tileLightTexHeight = 0;
-      }
-    } else {
-      // The flat CPU buffer (tileIdx * kTileDataWidth) reinterprets
-      // exactly as rows of tilesPerRow tiles, so nothing is repacked:
-      // the layout only chooses the rectangle, and the shader recovers
-      // the row from the flat tile index with the same tilesPerRow.
-      const int tileTexWidth = tileLayout.width;
-      const int tileTexHeight = tileLayout.height;
-      if ((backend.view().tileLightTex != kInvalidDeviceTexture) &&
-          ((tileTexWidth != backend.view().tileLightTexWidth) ||
-           (tileTexHeight != backend.view().tileLightTexHeight))) {
-        dev->destroy_texture(backend.view().tileLightTex);
-        backend.view().tileLightTex = kInvalidDeviceTexture;
-        backend.view().tileLightTexWidth = 0;
-        backend.view().tileLightTexHeight = 0;
-      }
-      if (backend.view().tileLightTex == kInvalidDeviceTexture) {
-        backend.view().tileLightTex =
-            create_r32f_data_texture(dev, tileTexWidth, tileTexHeight);
-        if (backend.view().tileLightTex != kInvalidDeviceTexture) {
-          backend.view().tileLightTexWidth = tileTexWidth;
-          backend.view().tileLightTexHeight = tileTexHeight;
-        } else {
-          static bool warnedTileTexFailure = false;
-          if (!warnedTileTexFailure) {
-            core::log_message(core::LogLevel::Warning, "renderer",
-                              "tile light texture creation failed; deferred "
-                              "lighting renders without local lights");
-            warnedTileTexFailure = true;
-          }
-        }
-      }
-      if (backend.view().tileLightTex != kInvalidDeviceTexture) {
-        dev->update_texture(backend.view().tileLightTex,
-                            backend.tileBuffer.data(), tileTexWidth,
-                            tileTexHeight);
-      }
-    }
-
-    if (!pack_light_data(lights, backend.lightDataBuffer.data(),
-                         backend.lightDataBuffer.size())) {
-      static bool warnedPackFailure = false;
-      if (!warnedPackFailure) {
-        core::log_message(core::LogLevel::Warning, "renderer",
-                          "light data packing failed; per-light texture "
-                          "keeps its previous contents");
-        warnedPackFailure = true;
-      }
-    } else {
-      if (backend.lightDataTex == kInvalidDeviceTexture) {
-        backend.lightDataTex = create_r32f_data_texture(
-            dev, kLightDataTexWidth, kLightDataTexHeight);
-      }
-      if (backend.lightDataTex != kInvalidDeviceTexture) {
-        dev->update_texture(backend.lightDataTex,
-                            backend.lightDataBuffer.data(),
-                            kLightDataTexWidth, kLightDataTexHeight);
-      }
-    }
-
-    if (gbufferDebugMode > 0 &&
-        backend.gbufferDebugProgram != kInvalidDeviceProgram) {
-      gpu_profiler_begin_pass(GpuPassId::GBufferDebug);
-      dev->bind_render_target(pass_resource_target(passRes.sceneColor));
-      dev->set_viewport(0, 0, drawableWidth, drawableHeight);
-      dev->apply_render_state(RenderState{DepthTest::Disabled, true,
-                                          BlendMode::Disabled,
-                                          CullMode::Back});
-
-      dev->bind_program(backend.gbufferDebugProgram);
-
-      dev->bind_texture_slot(0U, pass_resource_texture(passRes.gbufferAlbedo));
-      dev->bind_texture_slot(1U, pass_resource_texture(passRes.gbufferNormal));
-      dev->bind_texture_slot(2U,
-                             pass_resource_texture(passRes.gbufferEmissive));
-      dev->bind_texture_slot(3U, pass_resource_texture(passRes.gbufferDepth));
-
-      if (backend.dbgGBufAlbedoLoc.valid())
-        dev->set_param_i32(backend.dbgGBufAlbedoLoc, 0);
-      if (backend.dbgGBufNormalLoc.valid())
-        dev->set_param_i32(backend.dbgGBufNormalLoc, 1);
-      if (backend.dbgGBufEmissiveLoc.valid())
-        dev->set_param_i32(backend.dbgGBufEmissiveLoc, 2);
-      if (backend.dbgGBufDepthLoc.valid())
-        dev->set_param_i32(backend.dbgGBufDepthLoc, 3);
-      // Debug mode:
-      // 0=albedo,1=normals,2=metallic,3=roughness,4=emissive,5=AO,6=depth CVar
-      // value 1..7 maps to shader 0..6.
-      if (backend.dbgModeLoc.valid())
-        dev->set_param_i32(backend.dbgModeLoc, gbufferDebugMode - 1);
-
-      dev->draw(backend.emptyGeometry, PrimitiveTopology::Triangles, 0, 3);
-
-      dev->bind_texture_slot(0U, kInvalidDeviceTexture);
-      dev->bind_texture_slot(1U, kInvalidDeviceTexture);
-      dev->bind_texture_slot(2U, kInvalidDeviceTexture);
-      dev->bind_texture_slot(3U, kInvalidDeviceTexture);
-      dev->bind_program(kInvalidDeviceProgram);
-      gpu_profiler_end_pass(GpuPassId::GBufferDebug);
-    } else {
-      gpu_profiler_begin_pass(GpuPassId::DeferredLighting);
-      dev->bind_render_target(pass_resource_target(passRes.sceneColor));
-      dev->set_viewport(0, 0, drawableWidth, drawableHeight);
-      dev->apply_render_state(RenderState{DepthTest::Disabled, true,
-                                          BlendMode::Disabled,
-                                          CullMode::Back});
-
-      dev->bind_program(backend.deferredLightProgram);
-
-      // Bind G-Buffer textures on slots 0-3, tile on slot 4, SSAO on
-      // slot 5, per-light data on slot 6 (the shadow arrays and point
-      // cubes hold 7-12, IBL 13-15).
-      dev->bind_texture_slot(0U, pass_resource_texture(passRes.gbufferAlbedo));
-      dev->bind_texture_slot(1U, pass_resource_texture(passRes.gbufferNormal));
-      dev->bind_texture_slot(2U,
-                             pass_resource_texture(passRes.gbufferEmissive));
-      dev->bind_texture_slot(3U, pass_resource_texture(passRes.gbufferDepth));
-      dev->bind_texture_slot(4U, backend.view().tileLightTex);
-      dev->bind_texture_slot(
-          static_cast<std::uint32_t>(kDeferredLightDataUnit),
-          backend.lightDataTex);
-
-      if (ssaoEnabled) {
-        dev->bind_texture_slot(5U,
-                               pass_resource_texture(passRes.ssaoBlurTexture));
-      } else {
-        dev->bind_texture_slot(5U, backend.fallbackTexture2D);
-      }
-
-      if (backend.dlGBufAlbedoLoc.valid())
-        dev->set_param_i32(backend.dlGBufAlbedoLoc, 0);
-      if (backend.dlGBufNormalLoc.valid())
-        dev->set_param_i32(backend.dlGBufNormalLoc, 1);
-      if (backend.dlGBufEmissiveLoc.valid())
-        dev->set_param_i32(backend.dlGBufEmissiveLoc, 2);
-      if (backend.dlGBufDepthLoc.valid())
-        dev->set_param_i32(backend.dlGBufDepthLoc, 3);
-      if (backend.dlTileLightTexLoc.valid())
-        dev->set_param_i32(backend.dlTileLightTexLoc, 4);
-      if (backend.dlLightDataTexLoc.valid())
-        dev->set_param_i32(backend.dlLightDataTexLoc,
-                           kDeferredLightDataUnit);
-
-      // Sampler units are assigned even when IBL is off: a samplerCube
-      // uniform left at its default unit 0 aliases the sampler2D G-buffer
-      // there, which is a draw-time GL_INVALID_OPERATION that corrupts
-      // every deferred draw.
-      if (backend.dlIrradianceMapLoc.valid()) {
-        dev->set_param_i32(backend.dlIrradianceMapLoc, kIblIrradianceUnit);
-      }
-      if (backend.dlPrefilteredMapLoc.valid()) {
-        dev->set_param_i32(backend.dlPrefilteredMapLoc, kIblPrefilteredUnit);
-      }
-      if (backend.dlBrdfLutLoc.valid()) {
-        dev->set_param_i32(backend.dlBrdfLutLoc, kIblBrdfLutUnit);
-      }
-      const bool dlIblEnabled = ibl.available &&
-                                (backend.dlIblEnabledLoc.valid()) &&
-                                (dev->bind_texture_slot != nullptr);
-      if (backend.dlIblEnabledLoc.valid()) {
-        dev->set_param_i32(backend.dlIblEnabledLoc, dlIblEnabled ? 1 : 0);
-      }
-      upload_probe_uniforms(dev, backend.dlProbeBoxMinLoc,
-                            backend.dlProbeBoxMaxLoc, backend.dlProbeCenterLoc,
-                            ibl);
-      if (dlIblEnabled) {
-        dev->bind_texture_slot(kIblIrradianceUnit, ibl.irradiance);
-        dev->bind_texture_slot(kIblPrefilteredUnit, ibl.prefiltered);
-        dev->bind_texture_slot(kIblBrdfLutUnit, backend.brdfLutTexture);
-        if (backend.dlPrefilteredMipsLoc.valid()) {
-          dev->set_param_f32(backend.dlPrefilteredMipsLoc,
-                             static_cast<float>(ibl.prefilteredMipLevels));
-        }
-      } else if (dev->bind_texture_slot != nullptr) {
-        // Vulkan-family backends need valid descriptors on the declared
-        // IBL samplers even with the ambient path constant.
-        dev->bind_texture_slot(kIblIrradianceUnit, backend.fallbackCubemap);
-        dev->bind_texture_slot(kIblPrefilteredUnit, backend.fallbackCubemap);
-        dev->bind_texture_slot(kIblBrdfLutUnit, backend.fallbackTexture2D);
-      }
-
-      if (backend.dlSsaoTextureLoc.valid())
-        dev->set_param_i32(backend.dlSsaoTextureLoc, 5);
-      if (backend.dlSsaoEnabledLoc.valid())
-        dev->set_param_i32(backend.dlSsaoEnabledLoc, ssaoEnabled ? 1 : 0);
-
-      // Flat vocabulary: per-slot samplers, one mat4 array per
-      // shadow kind, splits/indices/pos+far as packed vec4 payloads.
-      {
-        // Atlas samplers: one depth atlas for all cascades. The
-        // disabled state still binds the 2-D fallback: Vulkan-family
-        // backends need every declared sampler descriptor valid at
-        // draw (same rule as the forward flush).
-        dev->bind_texture_slot(
-            static_cast<std::uint32_t>(kShadowCascadeAtlasUnit),
-            shadowEnabled ? backend.shadowState.depthAtlasTexture
-                          : backend.fallbackTexture2D);
-        if (backend.dlShadowAtlasLoc.valid()) {
-          dev->set_param_i32(backend.dlShadowAtlasLoc, kShadowCascadeAtlasUnit);
-        }
-        float shadowMatrices[kShadowCascadeCount * 16U] = {};
-        float cascadeSplits[4] = {};
-        for (std::size_t c = 0U; c < kShadowCascadeCount; ++c) {
-          std::memcpy(&shadowMatrices[c * 16U],
-                      &backend.shadowState.cascades[c]
-                           .lightViewProjection.columns[0]
-                           .x,
-                      sizeof(float) * 16U);
-          cascadeSplits[c] = backend.shadowState.cascades[c].splitDistance;
-        }
-        if (shadowEnabled) {
-          if ((dev->set_param_mat4_array != nullptr) &&
-              backend.dlShadowMatrixParam.valid()) {
-            dev->set_param_mat4_array(
-                backend.dlShadowMatrixParam, shadowMatrices,
-                static_cast<std::int32_t>(kShadowCascadeCount));
-          }
-          if (backend.dlCascadeSplitsParam.valid()) {
-            dev->set_param_vec4(backend.dlCascadeSplitsParam, cascadeSplits);
-          }
-        }
-      }
-      if (backend.dlShadowEnabledLoc.valid()) {
-        dev->set_param_i32(backend.dlShadowEnabledLoc, shadowEnabled ? 1 : 0);
-      }
-
-      const bool spotShadowEnabled = doSpotShadows;
-      dev->bind_texture_slot(static_cast<std::uint32_t>(kSpotShadowAtlasUnit),
-                             spotShadowEnabled
-                                 ? backend.spotShadowState.depthAtlasTexture
-                                 : backend.fallbackTexture2D);
-      if (backend.dlSpotShadowAtlasLoc.valid()) {
-        dev->set_param_i32(backend.dlSpotShadowAtlasLoc, kSpotShadowAtlasUnit);
-      }
-      if (spotShadowEnabled) {
-        float spotMatrices[kMaxSpotShadowLights * 16U] = {};
-        float spotLightIdx[4] = {};
-        for (std::size_t s = 0U; s < kMaxSpotShadowLights; ++s) {
-          const auto &slot = backend.spotShadowState.slots[s];
-          std::memcpy(&spotMatrices[s * 16U],
-                      &slot.lightViewProjection.columns[0].x,
-                      sizeof(float) * 16U);
-          spotLightIdx[s] = static_cast<float>(slot.lightIndex);
-        }
-        if ((dev->set_param_mat4_array != nullptr) &&
-            backend.dlSpotShadowMatrixParam.valid()) {
-          dev->set_param_mat4_array(
-              backend.dlSpotShadowMatrixParam, spotMatrices,
-              static_cast<std::int32_t>(kMaxSpotShadowLights));
-        }
-        if (backend.dlSpotShadowLightIdxParam.valid()) {
-          dev->set_param_vec4(backend.dlSpotShadowLightIdxParam,
-                              spotLightIdx);
-        }
-      }
-      if (backend.dlSpotShadowEnabledLoc.valid()) {
-        dev->set_param_i32(backend.dlSpotShadowEnabledLoc,
-                             spotShadowEnabled ? 1 : 0);
-      }
-
-      // Bind point shadow cubemaps on their unit-map slots. The
-      // samplerCube uniforms must point at their units even when point
-      // shadows are off: left at the default unit 0 they alias the
-      // sampler2D G-buffer binding, which makes the whole draw
-      // GL_INVALID_OPERATION on conformant drivers.
-      const bool pointShadowEnabled = doPointShadows;
-      for (std::size_t s = 0U; s < kMaxPointShadowLights; ++s) {
-        if (backend.dlPointShadowMapLocs[s].valid()) {
-          dev->set_param_i32(backend.dlPointShadowMapLocs[s],
-                             kPointShadowUnitBase +
-                                 static_cast<std::int32_t>(s));
-        }
-      }
-      if (pointShadowEnabled) {
-        float pointPosFar[kMaxPointShadowLights * 4U] = {};
-        float pointLightIdx[4] = {};
-        for (std::size_t s = 0U; s < kMaxPointShadowLights; ++s) {
-          const auto &slot = backend.pointShadowState.slots[s];
-          const auto texUnit =
-              static_cast<std::uint32_t>(kPointShadowUnitBase) +
-              static_cast<std::uint32_t>(s);
-          if (dev->bind_texture_slot != nullptr) {
-            dev->bind_texture_slot(texUnit, slot.depthCubemap);
-          }
-          const math::Vec3 lp =
-              point_shadow_slot_light_position(slot.lightIndex, lights);
-          pointPosFar[s * 4U + 0U] = lp.x;
-          pointPosFar[s * 4U + 1U] = lp.y;
-          pointPosFar[s * 4U + 2U] = lp.z;
-          pointPosFar[s * 4U + 3U] = slot.farPlane;
-          pointLightIdx[s] = static_cast<float>(slot.lightIndex);
-        }
-        if ((dev->set_param_vec4_array != nullptr) &&
-            backend.dlPointShadowPosFarParam.valid()) {
-          dev->set_param_vec4_array(
-              backend.dlPointShadowPosFarParam, pointPosFar,
-              static_cast<std::int32_t>(kMaxPointShadowLights));
-        }
-        if (backend.dlPointShadowLightIdxParam.valid()) {
-          dev->set_param_vec4(backend.dlPointShadowLightIdxParam,
-                              pointLightIdx);
-        }
-      }
-      if (backend.dlPointShadowEnabledLoc.valid()) {
-        dev->set_param_i32(backend.dlPointShadowEnabledLoc,
-                             pointShadowEnabled ? 1 : 0);
-      }
-
-      if (backend.dlTileCountXLoc.valid())
-        dev->set_param_i32(backend.dlTileCountXLoc, tileData.tileCountX);
-      if (backend.dlTileCountYLoc.valid())
-        dev->set_param_i32(backend.dlTileCountYLoc, tileData.tileCountY);
-      if (backend.dlTileTableRowTilesLoc.valid())
-        dev->set_param_i32(backend.dlTileTableRowTilesLoc,
-                           tileLayout.tilesPerRow);
-
-      math::Mat4 invProj{};
-      if (math::inverse(projMat, &invProj)) {
-        if (backend.dlInvProjectionLoc.valid())
-          dev->set_param_mat4(backend.dlInvProjectionLoc,
-                                &invProj.columns[0].x);
-      }
-      math::Mat4 invView{};
-      if (math::inverse(viewMat, &invView)) {
-        if (backend.dlInvViewLoc.valid())
-          dev->set_param_mat4(backend.dlInvViewLoc, &invView.columns[0].x);
-      }
-
-      // Every directional light the forward program shades, so the two
-      // paths light a surface alike. The shader shades each at unit
-      // intensity, so the authored intensity premultiplies into the
-      // colour here (the forward path multiplies it in the shader from a
-      // packed colour+intensity array). The count always uploads, so a
-      // scene that loses its suns stops shading them.
-      {
-        const std::size_t dirCount =
-            std::min(lights.directionalLightCount, kMaxDirectionalLights);
-        if (backend.dlDirLightCountLoc.valid()) {
-          dev->set_param_i32(backend.dlDirLightCountLoc,
-                             static_cast<std::int32_t>(dirCount));
-        }
-        if ((dirCount > 0U) && (dev->set_param_vec4_array != nullptr)) {
-          float direction[kMaxDirectionalLights * 4U] = {};
-          float color[kMaxDirectionalLights * 4U] = {};
-          for (std::size_t i = 0U; i < dirCount; ++i) {
-            const auto &sun = lights.directionalLights[i];
-            direction[(i * 4U) + 0U] = sun.direction.x;
-            direction[(i * 4U) + 1U] = sun.direction.y;
-            direction[(i * 4U) + 2U] = sun.direction.z;
-            color[(i * 4U) + 0U] = sun.color.x * sun.intensity;
-            color[(i * 4U) + 1U] = sun.color.y * sun.intensity;
-            color[(i * 4U) + 2U] = sun.color.z * sun.intensity;
-          }
-          if (backend.dlDirLightDirLoc.valid()) {
-            dev->set_param_vec4_array(backend.dlDirLightDirLoc, direction,
-                                      static_cast<std::int32_t>(dirCount));
-          }
-          if (backend.dlDirLightColorLoc.valid()) {
-            dev->set_param_vec4_array(backend.dlDirLightColorLoc, color,
-                                      static_cast<std::int32_t>(dirCount));
-          }
-        }
-      }
-
-      if (backend.dlCameraPosLoc.valid()) {
-        dev->set_param_vec3(backend.dlCameraPosLoc,
-                            &ctx.backend.view().camera.position.x);
-      }
-      if (backend.dlCameraForwardOrthoLoc.valid()) {
-        // xyz = normalized view direction, w = 1 when orthographic:
-        // the shader switches its view vector to the constant camera
-        // forward under ortho — parallel rays have no per-pixel eye vector.
-        const CameraState &activeCam = ctx.backend.view().camera;
-        const math::Vec3 fwd = math::normalize(
-            math::sub(activeCam.target, activeCam.position));
-        const float forwardOrtho[4] = {
-            fwd.x, fwd.y, fwd.z,
-            math::projection_is_orthographic(activeCam.projection) ? 1.0F
-                                                                   : 0.0F};
-        dev->set_param_vec4(backend.dlCameraForwardOrthoLoc, forwardOrtho);
-      }
-      if (backend.dlScreenSizeLoc.valid()) {
-        const float screenSize[2] = {static_cast<float>(drawableWidth),
-                                     static_cast<float>(drawableHeight)};
-        dev->set_param_vec2(backend.dlScreenSizeLoc, screenSize);
-      }
-      upload_deferred_distance_fog_uniforms(backend, dev, fogSettings);
-      upload_deferred_height_fog_uniforms(backend, dev, heightFogSettings);
-
-      const auto plCount = static_cast<int>(std::min(
-          lights.pointLightCount, static_cast<std::size_t>(kMaxPointLights)));
-      if (backend.dlPointLightCountLoc.valid())
-        dev->set_param_i32(backend.dlPointLightCountLoc, plCount);
-      const auto slCount = static_cast<int>(std::min(
-          lights.spotLightCount, static_cast<std::size_t>(kMaxSpotLights)));
-      if (backend.dlSpotLightCountLoc.valid())
-        dev->set_param_i32(backend.dlSpotLightCountLoc, slCount);
-
-      dev->draw(backend.emptyGeometry, PrimitiveTopology::Triangles, 0, 3);
-
-      for (std::uint32_t slot = 0U; slot <= 4U; ++slot) {
-        dev->bind_texture_slot(slot, kInvalidDeviceTexture);
-      }
-      dev->bind_texture_slot(
-          static_cast<std::uint32_t>(kDeferredLightDataUnit),
-          kInvalidDeviceTexture);
-      if (dlIblEnabled) {
-        dev->bind_texture_slot(kIblIrradianceUnit, kInvalidDeviceTexture);
-        dev->bind_texture_slot(kIblPrefilteredUnit, kInvalidDeviceTexture);
-        dev->bind_texture_slot(kIblBrdfLutUnit, kInvalidDeviceTexture);
-      }
-      if (ssaoEnabled) {
-        dev->bind_texture_slot(5U, kInvalidDeviceTexture);
-      }
-      dev->bind_texture_slot(
-          static_cast<std::uint32_t>(kShadowCascadeAtlasUnit),
-          kInvalidDeviceTexture);
-      dev->bind_texture_slot(static_cast<std::uint32_t>(kSpotShadowAtlasUnit),
-                             kInvalidDeviceTexture);
-      dev->bind_program(kInvalidDeviceProgram);
-      gpu_profiler_end_pass(GpuPassId::DeferredLighting);
-    }
-
-    const SkyModel skyModel = selected_sky_model();
-    // The environment lights every sky model; only the cubemap model shows
-    // it as the sky.
-    const DeviceTextureHandle skyboxTexture = (skyModel == SkyModel::Cubemap)
-                                                  ? envSkyboxTexture
-                                                  : kInvalidDeviceTexture;
-    const math::Mat4 skyProj = sky_projection_matrix(
-        ctx.backend.view().camera, (drawableHeight > 0)
-                                       ? (static_cast<float>(drawableWidth) /
-                                          static_cast<float>(drawableHeight))
-                                       : 1.0F);
-    if (skyboxTexture != kInvalidDeviceTexture) {
-      dev->bind_render_target(pass_resource_target(passRes.sceneColor));
-      dev->set_viewport(0, 0, drawableWidth, drawableHeight);
-      if (ensureSceneDepthHasOpaque()) {
-        draw_skybox(backend, dev, viewMat, skyProj, skyboxTexture, frameStats);
-      }
-    } else if ((skyModel == SkyModel::Hosek) && backend.hosekSkyAvailable) {
-      dev->bind_render_target(pass_resource_target(passRes.sceneColor));
-      dev->set_viewport(0, 0, drawableWidth, drawableHeight);
-      if (ensureSceneDepthHasOpaque()) {
-        draw_hosek_sky(backend, dev, viewMat, skyProj, lights, frameStats);
-      }
-    } else if (((skyModel == SkyModel::Preetham) ||
-                (skyModel == SkyModel::Hosek)) &&
-               backend.preethamSkyAvailable) {
-      dev->bind_render_target(pass_resource_target(passRes.sceneColor));
-      dev->set_viewport(0, 0, drawableWidth, drawableHeight);
-      if (ensureSceneDepthHasOpaque()) {
-        draw_preetham_sky(backend, dev, viewMat, skyProj, lights, frameStats);
-      }
-    }
-
-    // Opaque runs the G-Buffer could not express, in key order, plus the
-    // transparent tail. Both draw forward over the deferred depth.
-    std::size_t forwardOpaqueRuns = 0U;
-    {
-      ShadingProgramRun run{};
-      for (std::size_t cursor = 0U;
-           next_program_run(commandBufferView, &cursor, opaqueCount, &run);) {
-        if (run.programId != static_cast<std::uint8_t>(ShadingModel::Pbr)) {
-          ++forwardOpaqueRuns;
-        }
-      }
-    }
-
-    if ((opaqueCount < totalCount) || (forwardOpaqueRuns > 0U)) {
-      dev->bind_render_target(pass_resource_target(passRes.sceneColor));
-      dev->set_viewport(0, 0, drawableWidth, drawableHeight);
-
-      // Carry opaque deferred depth into the scene target so forward
-      // draws depth-test against G-Buffer geometry. This binds again on
-      // its blit path, so the viewport below is the one these draws use.
-      static_cast<void>(ensureSceneDepthHasOpaque());
-      dev->set_viewport(0, 0, drawableWidth, drawableHeight);
-      dev->bind_program(backend.pbrProgram);
-
-      if (backend.pbrTimeLocation.valid()) {
-        dev->set_param_f32(backend.pbrTimeLocation, timeSeconds);
-      }
-      if (backend.pbrCameraPosLocation.valid()) {
-        dev->set_param_vec3(backend.pbrCameraPosLocation,
-                            &ctx.backend.view().camera.position.x);
-      }
-      if (backend.pbrViewLocation.valid()) {
-        dev->set_param_mat4(backend.pbrViewLocation, &viewMat.columns[0].x);
-      }
-      if (backend.pbrViewProjectionLocation.valid()) {
-        dev->set_param_mat4(backend.pbrViewProjectionLocation,
-                              &viewProjection.columns[0].x);
-      }
-      if (backend.pbrUseInstancingLocation.valid()) {
-        dev->set_param_i32(backend.pbrUseInstancingLocation, 0);
-      }
-      upload_pbr_lighting_uniforms(backend, dev, lights);
+      dev->bind_program(program);
+      boundProgram = program;
+      // Parameter values are registry-global by name and carry across a
+      // bind, but a sampler uniform left at its default unit aliases
+      // whatever sits there, so each newly bound program gets its units.
       apply_pbr_ibl_uniforms(backend, dev, ibl);
-      upload_pbr_distance_fog_uniforms(backend, dev, fogSettings);
-      upload_pbr_height_fog_uniforms(backend, dev, heightFogSettings);
-      bind_pbr_shadow_uniforms(backend, dev, lights, shadowEnabled,
-                               doSpotShadows, doPointShadows);
-      if (backend.pbrAlbedoMapLocation.valid())
+      if (backend.pbrAlbedoMapLocation.valid()) {
         dev->set_param_i32(backend.pbrAlbedoMapLocation, 0);
+      }
+    };
 
-      const ForwardDrawProgram transparentProgram =
-          pbr_forward_draw_program(backend);
+    // Opaque state, depth written: these are opaque draws that simply
+    // could not go through the G-Buffer.
+    ShadingProgramRun run{};
+    for (std::size_t cursor = 0U;
+         next_program_run(commandBufferView, &cursor, opaqueCount, &run);) {
+      if (run.programId == static_cast<std::uint8_t>(ShadingModel::Pbr)) {
+        continue;
+      }
+      bindProgramForRun(shading_program(backend, run.programId));
+      drawForwardTransparent(run.first, run.first + run.count, run.programId);
+    }
 
-      auto drawForwardTransparent = [&](std::size_t start, std::size_t end,
-                                        std::uint8_t programId) {
-        ForwardDrawBindings bindings{};
-        bindings.lights = &lights;
-        for (std::size_t i = start; i < end; ++i) {
-          const DrawCommand &cmd = commandBufferView.data[i];
-          const GpuMesh *mesh = lookup_gpu_mesh(registry, cmd.mesh);
-          if ((mesh == nullptr) ||
-              (mesh->geometry == kInvalidDeviceGeometry) ||
-              (mesh->vertexCount == 0U)) {
-            continue;
-          }
-          select_forward_command_lights(backend, dev, cmd, *mesh, &bindings);
-          upload_forward_material(transparentProgram, backend, dev, cmd,
-                                  &bindings);
-          draw_forward_command(transparentProgram, backend, dev, programId, cmd,
-                               *mesh, viewProjection, &frameStats);
-        }
-      };
-
-      DeviceProgramHandle boundProgram = backend.pbrProgram;
-      const auto bindProgramForRun = [&](DeviceProgramHandle program) {
-        if (program == boundProgram) {
-          return;
-        }
-        dev->bind_program(program);
-        boundProgram = program;
-        // Parameter values are registry-global by name and carry across a
-        // bind, but a sampler uniform left at its default unit aliases
-        // whatever sits there, so each newly bound program gets its units.
-        apply_pbr_ibl_uniforms(backend, dev, ibl);
-        if (backend.pbrAlbedoMapLocation.valid()) {
-          dev->set_param_i32(backend.pbrAlbedoMapLocation, 0);
-        }
-      };
-
-      // Opaque state, depth written: these are opaque draws that simply
-      // could not go through the G-Buffer.
-      ShadingProgramRun run{};
-      for (std::size_t cursor = 0U;
-           next_program_run(commandBufferView, &cursor, opaqueCount, &run);) {
-        if (run.programId == static_cast<std::uint8_t>(ShadingModel::Pbr)) {
-          continue;
-        }
+    if (opaqueCount < totalCount) {
+      dev->apply_render_state(RenderState{DepthTest::Less, false,
+                                          BlendMode::Alpha, CullMode::None});
+      // Depth-sorted, so programs alternate: each run binds as found.
+      for (std::size_t cursor = opaqueCount;
+           next_program_run(commandBufferView, &cursor, totalCount, &run);) {
         bindProgramForRun(shading_program(backend, run.programId));
         drawForwardTransparent(run.first, run.first + run.count, run.programId);
       }
-
-      if (opaqueCount < totalCount) {
-        dev->apply_render_state(RenderState{DepthTest::Less, false,
-                                            BlendMode::Alpha,
-                                            CullMode::None});
-        // Depth-sorted, so programs alternate: each run binds as found.
-        for (std::size_t cursor = opaqueCount;
-             next_program_run(commandBufferView, &cursor, totalCount, &run);) {
-          bindProgramForRun(shading_program(backend, run.programId));
-          drawForwardTransparent(run.first, run.first + run.count,
-                                 run.programId);
-        }
-        dev->apply_render_state(RenderState{DepthTest::Less, true,
-                                            BlendMode::Disabled,
-                                            CullMode::Back});
-      }
-      bindProgramForRun(backend.pbrProgram);
-      dev->bind_texture_slot(0U, kInvalidDeviceTexture);
-      unbind_pbr_shadow_textures(dev);
-      unbind_pbr_ibl_textures(dev);
-      dev->bind_program(kInvalidDeviceProgram);
+      dev->apply_render_state(RenderState{DepthTest::Less, true,
+                                          BlendMode::Disabled, CullMode::Back});
     }
+    bindProgramForRun(backend.pbrProgram);
+    dev->bind_texture_slot(0U, kInvalidDeviceTexture);
+    unbind_pbr_shadow_textures(dev);
+    unbind_pbr_ibl_textures(dev);
+    dev->bind_program(kInvalidDeviceProgram);
+  }
 
-    frameStats.gpuGBufferMs = gpu_profiler_pass_ms(GpuPassId::GBuffer);
-    frameStats.gpuDeferredLightMs =
-        gpu_profiler_pass_ms(GpuPassId::DeferredLighting);
-    frameStats.gpuSsaoMs = gpu_profiler_pass_ms(GpuPassId::SSAO);
+  frameStats.gpuGBufferMs = gpu_profiler_pass_ms(GpuPassId::GBuffer);
+  frameStats.gpuDeferredLightMs =
+      gpu_profiler_pass_ms(GpuPassId::DeferredLighting);
+  frameStats.gpuSsaoMs = gpu_profiler_pass_ms(GpuPassId::SSAO);
 }
 
 } // namespace engine::renderer

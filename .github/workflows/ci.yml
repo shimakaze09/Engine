@@ -169,7 +169,7 @@ jobs:
         env:
           ENGINE_CVAR_r_bgfx_software_adapter: "1"
           ENGINE_CVAR_r_bgfx_renderer: d3d12
-        run: ctest --test-dir build --output-on-failure --timeout 1200 --tests-regex "brdf_lut|deferred_sky"
+        run: ctest --test-dir build --output-on-failure --timeout 1200 --tests-regex "brdf_lut|deferred_sky|d3d12_probe"
 
       # ---- The frame the windowed coin_run play ended on, as the player
       # saw it: the test asserts only that it is a rendered picture, so a
