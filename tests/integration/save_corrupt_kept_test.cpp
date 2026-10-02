@@ -4,9 +4,14 @@
 // the production runtime services. The file must survive byte for byte:
 // load_data answers "corrupt" and holds the slot, and save_data is refused.
 // engine.discard_save then moves it aside to save.json.discarded-1, and the
-// next save writes a fresh save.json. Before, load_data returned the same nil
-// as for no save, and the first autosave replaced the only copy of the
-// player's progress.
+// next save writes a fresh default slot, saves/default.save. Before,
+// load_data returned the same nil as for no save, and the first autosave
+// replaced the only copy of the player's progress.
+//
+// The same holds for a slot file damaged after it was written: one changed
+// payload byte fails its checksum, load_data answers "corrupt" and the
+// autosave leaves the file as it is. A named slot round-trips through the
+// production services and engine.list_saves lists both slots.
 
 #include <cstdio>
 #include <cstdlib>
@@ -51,6 +56,18 @@ constexpr const char *kScript =
     "  if not engine.save_data({coins = 2}) then error('save refused') end\n"
     "  local data, status = engine.load_data()\n"
     "  if status ~= 'ok' or data.coins ~= 2 then error('fresh save lost') end\n"
+    "end\n"
+    "function named_slot()\n"
+    "  if not engine.save_data({lives = 3}, 'Hero') then\n"
+    "    error('named save refused')\n"
+    "  end\n"
+    "  local data, status = engine.load_data('hero')\n"
+    "  if status ~= 'ok' or data.lives ~= 3 then error('named slot lost') end\n"
+    "  local saves = engine.list_saves()\n"
+    "  if #saves ~= 2 or saves[1].slot ~= 'default' or\n"
+    "     saves[2].slot ~= 'hero' or saves[2].status ~= 'ok' then\n"
+    "    error('listing ' .. #saves)\n"
+    "  end\n"
     "end\n";
 
 /// Points the per-user save directory at a fresh directory of the run's
@@ -126,6 +143,22 @@ int main() {
   ctx.check(engine::scripting::call_script_function("discard_and_save") &&
                 (read_file(aside) == kCorrupt),
             "discard_save moves the save aside and a fresh save follows");
+  const fs::path slotFile = fs::path(directory) / "saves" / "default.save";
+  ctx.check(!fs::exists(slot) && fs::exists(slotFile),
+            "the fresh save is the default slot file");
+
+  std::string damaged = read_file(slotFile);
+  damaged[damaged.size() - 2U] =
+      (damaged[damaged.size() - 2U] == '2') ? '3' : '2';
+  ctx.check(write_file(slotFile, damaged.c_str()),
+            "damage one payload byte of the slot file");
+  static_cast<void>(engine::scripting::call_script_function("autosave"));
+  ctx.check(read_file(slotFile) == damaged,
+            "an autosave after a failed checksum leaves the slot intact");
+  ctx.check(engine::scripting::call_script_function("expect_corrupt"),
+            "load_data says the damaged slot is corrupt");
+  ctx.check(engine::scripting::call_script_function("named_slot"),
+            "a named slot round-trips and both slots are listed");
 
   engine::scripting::shutdown_scripting();
   engine::core::shutdown_logging();

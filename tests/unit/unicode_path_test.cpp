@@ -116,16 +116,20 @@ void check_save_data() {
       root_path() / std::filesystem::path(u8"存档");
   const std::string directoryUtf8 = utf8(directory.u8string());
   const char *json = "{\"coins\":8}";
-  g_tests.check(engine::runtime::save_game_data_to(directoryUtf8.c_str(), json,
-                                                   std::strlen(json)),
+  g_tests.check(engine::runtime::save_game_data_to(
+                    directoryUtf8.c_str(), "default", json, std::strlen(json)),
                 "save into a Unicode-named directory");
-  char buffer[64] = {};
-  std::size_t length = 0U;
-  g_tests.check(engine::runtime::load_game_data_from(
-                    directoryUtf8.c_str(), buffer, sizeof(buffer), &length) &&
-                    (std::strcmp(buffer, json) == 0),
+  engine::runtime::SaveSlotPayload payload{};
+  g_tests.check((engine::runtime::read_game_data_from(directoryUtf8.c_str(),
+                                                      "default", &payload) ==
+                 engine::runtime::SaveReadResult::Ok) &&
+                    (std::strcmp(payload.data, json) == 0),
                 "load it back");
-  g_tests.check(read_with_filesystem(directory / "save.json") == json,
+  const std::string onDisk =
+      read_with_filesystem(directory / "saves" / "default.save");
+  g_tests.check((onDisk.size() > std::strlen(json)) &&
+                    (onDisk.compare(onDisk.size() - std::strlen(json),
+                                    std::string::npos, json) == 0),
                 "the save exists under its Unicode name");
 }
 

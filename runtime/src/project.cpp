@@ -210,6 +210,11 @@ open_project(const char *path, ProjectStorage *storage,
   config->scriptInstructionLimit = limits.instructionLimit;
   config->scriptMemoryLimitBytes = limits.memoryLimitBytes;
   config->collisionLayers = storage->document.collisionLayers;
+  const content::ProjectSaveSettings &saves = storage->document.saveSettings;
+  config->saveSlotLimitBytes =
+      saves.maxSlotMiBSet
+          ? static_cast<std::size_t>(saves.maxSlotMiB) * 1024U * 1024U
+          : runtime::kDefaultSaveSlotLimitBytes;
   config->core.projectGuid = storage->document.guid;
 
   char message[512] = {};
@@ -271,6 +276,7 @@ void configure_without_project(EngineConfig *config) noexcept {
   config->scriptInstructionLimit = defaults.instructionLimit;
   config->scriptMemoryLimitBytes = defaults.memoryLimitBytes;
   config->collisionLayers = content::ProjectCollisionLayers{};
+  config->saveSlotLimitBytes = runtime::kDefaultSaveSlotLimitBytes;
   config->core.projectGuid = core::AssetGuid{};
 }
 

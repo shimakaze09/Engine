@@ -15,6 +15,11 @@
 // "corrupt" with where the document breaks, "unsupported" for a newer
 // version), holds the slot so save_data refuses, and discard_save lifts
 // the hold. The writer stamps the format version.
+//
+// Each binding takes a slot name (default "default"), slots are kept
+// apart, a slot argument that is not a name token is a Lua argument error
+// rather than a save somewhere else, engine.list_saves reports the slots
+// the runtime lists, and engine.get_save_limit the project's limit.
 
 #include "../test_harness.h"
 #include "engine/core/logging.h"
@@ -26,6 +31,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <map>
 #include <memory>
 #include <new>
 #include <string>
@@ -37,19 +43,32 @@ namespace {
 
 constexpr const char *kScriptPath = "save_data_bindings_test.lua";
 
-/// The in-memory save slot standing in for the on-disk one, holding up to
-/// the ceiling the runtime's slot enforces.
+/// The in-memory save slots standing in for the on-disk ones, holding up
+/// to the limit the runtime enforces. g_slot is the default slot.
+constexpr std::size_t kLimit = 4U * 1024U * 1024U;
+std::map<std::string, std::string> g_slots{};
 std::string g_slot{};
 bool g_slotWritten = false;
+std::string g_lastSlot{};
 
-/// The slot's hold, as the runtime keeps it: set by hold_game_save, it
-/// refuses saves until discard_game_save moves the document aside.
+/// The default slot's hold, as the runtime keeps it: set by hold_game_save,
+/// it refuses saves until discard_game_save moves the document aside.
 bool g_held = false;
 int g_holdCalls = 0;
 std::string g_discarded{};
+std::string g_loaded{};
 
-bool memory_save(const char *json, std::size_t length) noexcept {
-  if ((json == nullptr) || (length > sc::kMaxGameSaveBytes) || g_held) {
+bool memory_save(const char *slot, const char *json,
+                 std::size_t length) noexcept {
+  g_lastSlot = (slot != nullptr) ? slot : "";
+  if ((json == nullptr) || (length > kLimit)) {
+    return false;
+  }
+  if (g_lastSlot != "default") {
+    g_slots[g_lastSlot].assign(json, length);
+    return true;
+  }
+  if (g_held) {
     return false;
   }
   g_slot.assign(json, length);
@@ -57,33 +76,63 @@ bool memory_save(const char *json, std::size_t length) noexcept {
   return true;
 }
 
-sc::GameSaveRead memory_load(char *out, std::size_t capacity,
+sc::GameSaveRead memory_load(const char *slot, const char **outPayload,
                              std::size_t *outLength) noexcept {
-  if (!g_slotWritten) {
-    return sc::GameSaveRead::Absent;
+  g_lastSlot = (slot != nullptr) ? slot : "";
+  *outPayload = nullptr;
+  *outLength = 0U;
+  if (g_lastSlot != "default") {
+    const auto found = g_slots.find(g_lastSlot);
+    if (found == g_slots.end()) {
+      return sc::GameSaveRead::Absent;
+    }
+    g_loaded = found->second;
+  } else {
+    if (!g_slotWritten) {
+      return sc::GameSaveRead::Absent;
+    }
+    g_loaded = g_slot;
   }
-  if ((out == nullptr) || (outLength == nullptr) ||
-      (g_slot.size() >= capacity)) {
-    return sc::GameSaveRead::Unreadable;
-  }
-  std::memcpy(out, g_slot.data(), g_slot.size());
-  out[g_slot.size()] = '\0';
-  *outLength = g_slot.size();
+  *outPayload = g_loaded.c_str();
+  *outLength = g_loaded.size();
   return sc::GameSaveRead::Ok;
 }
 
-void memory_hold() noexcept {
+void memory_hold(const char * /*slot*/) noexcept {
   g_held = true;
   ++g_holdCalls;
 }
 
-bool memory_discard() noexcept {
+bool memory_discard(const char *slot) noexcept {
+  if ((slot != nullptr) && (std::strcmp(slot, "default") != 0)) {
+    g_slots.erase(slot);
+    return true;
+  }
   g_discarded = g_slot;
   g_slot.clear();
   g_slotWritten = false;
   g_held = false;
   return true;
 }
+
+std::size_t memory_list(sc::GameSaveSlotInfo *out,
+                        std::size_t capacity) noexcept {
+  std::size_t count = 0U;
+  for (const auto &[name, document] : g_slots) {
+    if (count < capacity) {
+      std::snprintf(out[count].slot, sizeof(out[count].slot), "%s",
+                    name.c_str());
+      out[count].status =
+          (name == "broken") ? sc::GameSaveRead::Corrupt : sc::GameSaveRead::Ok;
+      out[count].savedAt = 1700000000;
+      out[count].payloadBytes = document.size();
+    }
+    ++count;
+  }
+  return count;
+}
+
+std::size_t memory_limit() noexcept { return kLimit; }
 
 /// Error lines the bindings logged that say where a document breaks.
 int g_breakReports = 0;
@@ -219,6 +268,45 @@ constexpr const char *kScript =
     "  expect(engine.discard_save() == true, 'discard refused')\n"
     "  expect(engine.save_data({fresh = 1}) == true, 'save after discard')\n"
     "  load_status('ok')\n"
+    "end\n"
+    "function slots_are_apart()\n"
+    "  expect(engine.save_data({a = 1}, 'one') == true, 'slot one save')\n"
+    "  expect(engine.save_data({b = 2}, 'two') == true, 'slot two save')\n"
+    "  local one = engine.load_data('one')\n"
+    "  local two = engine.load_data('two')\n"
+    "  expect(one.a == 1 and one.b == nil, 'slot one holds its own')\n"
+    "  expect(two.b == 2 and two.a == nil, 'slot two holds its own')\n"
+    "  local _, status = engine.load_data('three')\n"
+    "  expect(status == 'absent', 'an unsaved slot is absent')\n"
+    "  expect(engine.discard_save('two') == true, 'slot two discard')\n"
+    "  _, status = engine.load_data('two')\n"
+    "  expect(status == 'absent', 'a discarded slot is absent')\n"
+    "end\n"
+    "function nil_slot_is_default()\n"
+    "  expect(engine.save_data({d = 4}, nil) == true, 'nil slot save')\n"
+    "  expect(engine.load_data(nil).d == 4, 'nil slot load')\n"
+    "end\n"
+    "function bad_slots_raise()\n"
+    "  local bad = {'a/b', '', 'has space', string.rep('x', 32), 7, true}\n"
+    "  for _, slot in ipairs(bad) do\n"
+    "    local ok, err = pcall(engine.save_data, {x = 1}, slot)\n"
+    "    expect(not ok and string.find(err, 'save slot', 1, true),\n"
+    "           'save_data accepted slot ' .. tostring(slot))\n"
+    "    expect(not pcall(engine.load_data, slot),\n"
+    "           'load_data accepted slot ' .. tostring(slot))\n"
+    "    expect(not pcall(engine.discard_save, slot),\n"
+    "           'discard_save accepted slot ' .. tostring(slot))\n"
+    "  end\n"
+    "end\n"
+    "function lists_slots()\n"
+    "  local saves = engine.list_saves()\n"
+    "  expect(#saves == 2, 'two slots listed, got ' .. #saves)\n"
+    "  expect(saves[1].slot == 'broken' and saves[1].status == 'corrupt',\n"
+    "         'a damaged slot lists as corrupt')\n"
+    "  expect(saves[2].slot == 'one' and saves[2].status == 'ok' and\n"
+    "         saves[2].saved_at == 1700000000 and saves[2].bytes > 0 and\n"
+    "         saves[2].legacy == false, 'a slot lists its fields')\n"
+    "  expect(engine.get_save_limit() == CEILING, 'the save limit')\n"
     "end\n";
 
 } // namespace
@@ -242,11 +330,13 @@ int main() {
   services.load_game_data = &memory_load;
   services.hold_game_save = &memory_hold;
   services.discard_game_save = &memory_discard;
+  services.list_game_saves = &memory_list;
+  services.game_save_limit = &memory_limit;
   sc::bind_runtime_services(&services, serviceLocator);
 
   engine::tests::TestContext ctx;
   const std::string script =
-      "CEILING = " + std::to_string(sc::kMaxGameSaveBytes) + "\n" + kScript;
+      "CEILING = " + std::to_string(kLimit) + "\n" + kScript;
   ctx.check(write_script_file(script), "write test script");
   ctx.check(sc::load_script(kScriptPath), "load test script");
 
@@ -300,7 +390,7 @@ int main() {
   ctx.check(engine::core::initialize_logging() &&
                 engine::core::log_register_sink(&note_error, nullptr),
             "log sink");
-  memory_discard();
+  memory_discard("default");
   g_holdCalls = 0;
   ctx.check(sc::call_script_function("want_absent") && (g_holdCalls == 0),
             "no save reads as absent and holds nothing");
@@ -321,12 +411,12 @@ int main() {
   plant_slot("{\"version\":2,\"entries\":[]}");
   ctx.check(sc::call_script_function("want_unsupported") && (g_holdCalls == 1),
             "a newer build's save is unsupported and held");
-  memory_discard();
+  memory_discard("default");
   g_holdCalls = 0;
   plant_slot("{\"version\":\"one\",\"entries\":[]}");
   ctx.check(sc::call_script_function("want_corrupt") && (g_holdCalls == 1),
             "a version that is not a positive integer is corrupt");
-  memory_discard();
+  memory_discard("default");
   g_holdCalls = 0;
   plant_slot("{\"entries\":[{\"k\":\"coins\",\"v\":3}]}");
   ctx.check(sc::call_script_function("want_ok") && (g_holdCalls == 0),
@@ -334,6 +424,17 @@ int main() {
   ctx.check(sc::call_script_function("case_one") &&
                 (g_slot.find("\"version\":1") != std::string::npos),
             "the writer stamps the format version");
+  ctx.check(sc::call_script_function("slots_are_apart") &&
+                (g_lastSlot == "two"),
+            "named slots are saved, loaded and discarded apart");
+  ctx.check(sc::call_script_function("nil_slot_is_default") &&
+                (g_lastSlot == "default"),
+            "a nil slot is the default slot");
+  ctx.check(sc::call_script_function("bad_slots_raise"),
+            "a slot that is not a name token is an argument error");
+  g_slots["broken"] = "x";
+  ctx.check(sc::call_script_function("lists_slots"),
+            "list_saves and get_save_limit report the runtime's slots");
   engine::core::log_unregister_sink(&note_error, nullptr);
   engine::core::shutdown_logging();
 

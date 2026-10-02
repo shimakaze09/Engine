@@ -482,6 +482,12 @@ bool bootstrap(const EngineConfig &config) noexcept {
   scripting::set_instruction_limit(g_activeConfig.scriptInstructionLimit);
   // Likewise the layers: the run's World and its scripts see this project's.
   runtime::set_project_collision_layers(g_activeConfig.collisionLayers);
+  // And the save limit, so a previous project's bound never applies here.
+  if (!runtime::set_save_slot_limit(g_activeConfig.saveSlotLimitBytes)) {
+    core::log_message(core::LogLevel::Error, "save",
+                      "the save slot limit is not from 1 byte to 256 MiB");
+    return fail_bootstrap();
+  }
   if (consume_injected_failure(BootstrapStage::Scripting) ||
       !scripting::initialize_scripting()) {
     core::log_message(core::LogLevel::Error, "scripting",
