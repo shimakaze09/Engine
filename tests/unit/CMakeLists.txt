@@ -2492,6 +2492,13 @@ engine_add_test_executable(engine_unit_platform_window
     engine_core
 )
 
+engine_add_test_executable(engine_unit_platform_caps
+    SOURCES
+    platform_caps_test.cpp
+    PRIVATE_DEPS
+    engine_core
+)
+
 engine_add_test_executable(engine_unit_platform_paths
     SOURCES
     platform_paths_test.cpp

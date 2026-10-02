@@ -838,8 +838,6 @@ void render_drawable_size(int *outWidth, int *outHeight) noexcept {
   static_cast<void>(SDL_GetWindowSizeInPixels(g_window, outWidth, outHeight));
 }
 
-void *get_sdl_window() noexcept { return g_window; }
-
 bool platform_poll_event(PlatformEvent *outEvent) noexcept {
   ENGINE_ASSERT_MAIN_THREAD();
   if ((outEvent == nullptr) || !SDL_PollEvent(&g_polledEvent)) {
@@ -1159,70 +1157,107 @@ std::uint64_t platform_ticks_ns() noexcept {
   return static_cast<std::uint64_t>(SDL_GetTicksNS());
 }
 
-PlatformCaps platform_caps() noexcept {
+PlatformCaps platform_caps_for(PlatformId id) noexcept {
   PlatformCaps caps{};
-#if defined(ENGINE_PLATFORM_WEB)
-  caps.id = PlatformId::Web;
-#elif defined(_WIN32)
-  caps.id = PlatformId::Windows;
-#elif defined(__APPLE__)
-  caps.id = PlatformId::MacOS;
-#else
-  caps.id = PlatformId::Linux;
-#endif
-  caps.hasWindow = platform_native_window_handle() != nullptr;
+  caps.id = id;
+  switch (id) {
+  case PlatformId::Web:
+    // The browser schedules frames and forbids blocking its thread, and
+    // audio waits for a user gesture. Threads come from the page's
+    // prewarmed pthread pool, whose size the build fixes.
+    caps.ownsMainLoop = true;
+    caps.needsAudioUnlock = true;
+    caps.mainThreadMayBlock = false;
+    break;
+  case PlatformId::IOS:
+    // The display link drives frames, and a main thread blocked too long
+    // is killed by the system watchdog.
+    caps.ownsMainLoop = true;
+    caps.mainThreadMayBlock = false;
+    caps.touchPrimary = true;
+    break;
+  case PlatformId::Android:
+    // SDL runs the game on its own thread, not the UI thread, so the
+    // engine's loop may block it.
+    caps.touchPrimary = true;
+    break;
+  case PlatformId::Windows:
+  case PlatformId::Linux:
+  case PlatformId::MacOS:
+  default:
+    break;
+  }
   return caps;
 }
 
-bool platform_window_is_wayland() noexcept {
-  const char *driver = SDL_GetCurrentVideoDriver();
-  return (driver != nullptr) && (SDL_strcmp(driver, "wayland") == 0);
+PlatformCaps platform_caps() noexcept {
+#if defined(ENGINE_PLATFORM_WEB)
+  constexpr PlatformId kId = PlatformId::Web;
+#elif defined(_WIN32)
+  constexpr PlatformId kId = PlatformId::Windows;
+#elif defined(SDL_PLATFORM_IOS)
+  constexpr PlatformId kId = PlatformId::IOS;
+#elif defined(SDL_PLATFORM_ANDROID)
+  constexpr PlatformId kId = PlatformId::Android;
+#elif defined(__APPLE__)
+  constexpr PlatformId kId = PlatformId::MacOS;
+#else
+  constexpr PlatformId kId = PlatformId::Linux;
+#endif
+  PlatformCaps caps = platform_caps_for(kId);
+  caps.hasWindow = platform_native_window().kind != NativeWindowKind::None;
+  return caps;
 }
 
-void *platform_native_window_handle() noexcept {
+NativeWindow platform_native_window() noexcept {
+  NativeWindow native{};
   if ((g_window == nullptr) || g_headless) {
-    return nullptr;
+    return native;
   }
 #if defined(ENGINE_PLATFORM_WEB)
-  // Emscripten: bgfx takes the canvas CSS selector as the window handle.
-  return const_cast<char *>("#canvas");
+  // bgfx takes the canvas's CSS selector as the window.
+  native.kind = NativeWindowKind::WebCanvas;
+  native.window = const_cast<char *>("#canvas");
 #else
   const SDL_PropertiesID props = SDL_GetWindowProperties(g_window);
 #if defined(_WIN32)
-  return SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WIN32_HWND_POINTER,
-                                nullptr);
+  native.kind = NativeWindowKind::Win32;
+  native.window = SDL_GetPointerProperty(
+      props, SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr);
+#elif defined(SDL_PLATFORM_IOS)
+  native.kind = NativeWindowKind::UIKit;
+  native.window = SDL_GetPointerProperty(
+      props, SDL_PROP_WINDOW_UIKIT_WINDOW_POINTER, nullptr);
+#elif defined(SDL_PLATFORM_ANDROID)
+  native.kind = NativeWindowKind::Android;
+  native.window = SDL_GetPointerProperty(
+      props, SDL_PROP_WINDOW_ANDROID_WINDOW_POINTER, nullptr);
 #elif defined(__APPLE__)
-  return SDL_GetPointerProperty(props, SDL_PROP_WINDOW_COCOA_WINDOW_POINTER,
-                                nullptr);
+  native.kind = NativeWindowKind::Cocoa;
+  native.window = SDL_GetPointerProperty(
+      props, SDL_PROP_WINDOW_COCOA_WINDOW_POINTER, nullptr);
 #else
-  if (platform_window_is_wayland()) {
-    return SDL_GetPointerProperty(
+  const char *driver = SDL_GetCurrentVideoDriver();
+  if ((driver != nullptr) && (SDL_strcmp(driver, "wayland") == 0)) {
+    native.kind = NativeWindowKind::Wayland;
+    native.window = SDL_GetPointerProperty(
         props, SDL_PROP_WINDOW_WAYLAND_SURFACE_POINTER, nullptr);
-  }
-  // X11 exposes the window as a numeric id; external backends consume
-  // it through the same opaque pointer channel.
-  const Sint64 xid =
-      SDL_GetNumberProperty(props, SDL_PROP_WINDOW_X11_WINDOW_NUMBER, 0);
-  return reinterpret_cast<void *>(static_cast<std::uintptr_t>(xid));
-#endif
-#endif
-}
-
-void *platform_native_display_handle() noexcept {
-  if ((g_window == nullptr) || g_headless) {
-    return nullptr;
-  }
-#if defined(_WIN32) || defined(__APPLE__)
-  return nullptr;
-#else
-  const SDL_PropertiesID props = SDL_GetWindowProperties(g_window);
-  if (platform_window_is_wayland()) {
-    return SDL_GetPointerProperty(
+    native.display = SDL_GetPointerProperty(
         props, SDL_PROP_WINDOW_WAYLAND_DISPLAY_POINTER, nullptr);
+  } else {
+    native.kind = NativeWindowKind::X11;
+    native.x11Window = static_cast<std::uint64_t>(
+        SDL_GetNumberProperty(props, SDL_PROP_WINDOW_X11_WINDOW_NUMBER, 0));
+    native.display = SDL_GetPointerProperty(
+        props, SDL_PROP_WINDOW_X11_DISPLAY_POINTER, nullptr);
   }
-  return SDL_GetPointerProperty(props, SDL_PROP_WINDOW_X11_DISPLAY_POINTER,
-                                nullptr);
 #endif
+#endif
+  // A window whose handle the OS would not give is no window to present to.
+  if ((native.window == nullptr) && (native.x11Window == 0U)) {
+    return NativeWindow{};
+  }
+  return native;
 }
 
 std::size_t process_memory_bytes() noexcept {

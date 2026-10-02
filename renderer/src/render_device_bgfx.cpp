@@ -1477,7 +1477,7 @@ bool initialize_render_device() noexcept {
   // Renderer selection: r_bgfx_renderer names the API, and the platform's
   // capabilities decide what "auto" means and whether anything but Noop
   // can present at all.
-  void *nativeWindow = core::platform_native_window_handle();
+  const core::NativeWindow nativeWindow = core::platform_native_window();
   switch (select_renderer_backend(
       core::platform_caps(),
       core::cvar_get_string("r_bgfx_renderer", "auto"))) {
@@ -1507,12 +1507,18 @@ bool initialize_render_device() noexcept {
     init.type = bgfx::RendererType::Count; // bgfx picks
     break;
   }
-  if (nativeWindow != nullptr) {
-    init.platformData.nwh = nativeWindow;
-    init.platformData.ndt = core::platform_native_display_handle();
-    init.platformData.type = core::platform_window_is_wayland()
-                                 ? bgfx::NativeWindowHandleType::Wayland
-                                 : bgfx::NativeWindowHandleType::Default;
+  if (nativeWindow.kind != core::NativeWindowKind::None) {
+    // bgfx reads an X11 window id through its pointer-sized handle.
+    init.platformData.nwh =
+        (nativeWindow.kind == core::NativeWindowKind::X11)
+            ? reinterpret_cast<void *>(
+                  static_cast<std::uintptr_t>(nativeWindow.x11Window))
+            : nativeWindow.window;
+    init.platformData.ndt = nativeWindow.display;
+    init.platformData.type =
+        (nativeWindow.kind == core::NativeWindowKind::Wayland)
+            ? bgfx::NativeWindowHandleType::Wayland
+            : bgfx::NativeWindowHandleType::Default;
   }
 
   int width = 0;

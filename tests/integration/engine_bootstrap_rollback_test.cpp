@@ -31,7 +31,7 @@ void check(bool condition, const char *name) noexcept {
   }
 }
 
-bool bridge_initialize(void *) noexcept {
+bool bridge_initialize() noexcept {
   ++g_bridgeInitialized;
   return true;
 }

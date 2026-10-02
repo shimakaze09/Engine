@@ -473,7 +473,7 @@ bool bootstrap(const EngineConfig &config) noexcept {
   const runtime::EditorBridge *bridge = runtime::editor_bridge();
   if ((bridge != nullptr) && (bridge->initialize != nullptr)) {
     if (consume_injected_failure(BootstrapStage::EditorBridge) ||
-        !bridge->initialize(core::get_sdl_window())) {
+        !bridge->initialize()) {
       core::log_message(core::LogLevel::Error, "editor",
                         "failed to initialize editor bridge");
       return fail_bootstrap();
