@@ -144,6 +144,40 @@ void probe_bake(const char *label, r::TextureFormat format, bool destroyNow,
   dev->destroy_texture(texture);
 }
 
+/// Draws the bake program straight into the back buffer's top-left and
+/// reads it back, so no render target or copy stands between the shader
+/// and the readback.
+void probe_bake_direct() noexcept {
+  const r::BackendState &backend = r::backend_state();
+  const r::RenderDevice *dev = r::render_device();
+  constexpr int kSize = 128;
+  const char *path = "d3d12_probe_direct.tga";
+  std::error_code ec{};
+  std::filesystem::remove(path, ec);
+  dev->bind_render_target(r::kBackBufferTarget);
+  dev->set_viewport(0, 0, kSize, kSize);
+  dev->clear(r::ClearFlags::ColorDepth, 0.0F, 0.0F, 0.0F, 1.0F);
+  dev->apply_render_state(r::RenderState{
+      r::DepthTest::Disabled, true, r::BlendMode::Disabled, r::CullMode::None});
+  dev->bind_program(backend.environmentBrdfLutProgram);
+  dev->draw(backend.emptyGeometry, r::PrimitiveTopology::Triangles, 0, 3);
+  dev->bind_program(r::kInvalidDeviceProgram);
+  CapturedFrame frame{};
+  bool captured = false;
+  if (r::render_device_bgfx_request_screenshot(path)) {
+    for (int i = 0; (i < 16) && !captured; ++i) {
+      r::present_render_device();
+      captured = std::filesystem::exists(path, ec) &&
+                 engine::tests::load_captured_tga(path, &frame);
+    }
+  }
+  if (captured) {
+    print_grid("direct", frame, kSize);
+  } else {
+    std::printf("probe direct: no readback\n");
+  }
+}
+
 /// Mean RGB over the frame's upper middle.
 void print_sky(const char *label, const CapturedFrame &frame) noexcept {
   double sum[3] = {};
@@ -174,6 +208,7 @@ int run(engine::EnginePipeline &pipeline,
                 "d3d12_probe_shipped.tga", &shipped)) {
     print_grid("shipped", shipped, backend.brdfLutSize);
   }
+  probe_bake_direct();
   probe_bake("rg16f_destroyed", r::TextureFormat::RG16F, true, false);
   probe_bake("rg16f_kept", r::TextureFormat::RG16F, false, false);
   probe_bake("rg16f_switched_destroyed", r::TextureFormat::RG16F, true, true);
