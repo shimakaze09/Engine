@@ -294,6 +294,26 @@ void check_steps() {
                 near(r.translation.x, 1.0F - kRadius - kSkin, 2.0e-3F),
             "steps: a ledge over the step offset blocks");
     }
+    // Walking onto it a frame at a time, as a script does: the capsule
+    // reaches the ledge's edge on a small move, and stepping onto the
+    // ledge's top must not be refused for the edge's tilted contact.
+    Vec3 feet = kStanding;
+    bool grounded = true;
+    for (int frame = 0; frame < 60; ++frame) {
+      const CharacterMoveResult r =
+          move(*world, feet, Vec3(0.05F, -0.003F, 0.0F), settings(grounded));
+      feet = engine::math::add(feet, r.translation);
+      grounded = r.grounded;
+    }
+    if (height < 0.3F) {
+      check((feet.x > 2.5F) && near(feet.y, height + kSkin, 2.0e-3F) &&
+                grounded,
+            "steps: frame by frame, a ledge under the step offset is "
+            "climbed and stood on");
+    } else {
+      check((feet.x < 1.0F) && (feet.y < 0.03F),
+            "steps: frame by frame, a ledge over the step offset blocks");
+    }
   }
 }
 

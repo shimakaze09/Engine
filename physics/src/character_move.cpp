@@ -11,6 +11,7 @@
 #include <cstddef>
 
 #include "engine/physics/convex_hull.h"
+#include "engine/physics/physics_query.h"
 #include "engine/physics/physics_world_view.h"
 #include "physics_internal.h"
 
@@ -212,6 +213,10 @@ constexpr float kMinMove = 1.0e-5F;
 constexpr float kTouchTravel = 1.0e-4F;
 /// Moves within this cosine of a touched surface's plane run along it.
 constexpr float kParallelCosine = 1.0e-3F;
+/// How far past a contact, and from how high, the surface probe looks for
+/// the face under it.
+constexpr float kSurfaceProbeInset = 0.01F;
+constexpr float kSurfaceProbeHeight = 0.05F;
 /// The least |cos| between a move and a surface normal used to turn the
 /// skin gap along the normal into a back-off along the move.
 constexpr float kMinBackOffCosine = 0.05F;
@@ -484,6 +489,36 @@ bool walkable(const math::Vec3 &normal,
   return normal.y >= settings.slopeLimitCos;
 }
 
+/// The normal of the face a contact lies on. A capsule resting on a
+/// ledge's edge touches it with a tilted normal, yet stands on the ledge's
+/// top: a short ray straight down onto the touched collider, just past the
+/// contact away from the capsule's axis, finds that face, as PhysX's
+/// controller judges a step by the touched face rather than the contact.
+math::Vec3 surface_normal(const PhysicsWorldView &world,
+                          const CharacterCapsule &capsule,
+                          const Contact &contact,
+                          const CharacterMoveSettings &settings) noexcept {
+  if (walkable(contact.normal, settings)) {
+    return contact.normal;
+  }
+  math::Vec3 outward(contact.onShape.x - capsule.bottom.x, 0.0F,
+                     contact.onShape.z - capsule.bottom.z);
+  const float outwardLengthSq = math::length_sq(outward);
+  if (outwardLengthSq > 1.0e-12F) {
+    outward =
+        math::mul(outward, kSurfaceProbeInset / std::sqrt(outwardLengthSq));
+  }
+  const math::Vec3 origin = math::add(math::add(contact.onShape, outward),
+                                      math::mul(kUp, kSurfaceProbeHeight));
+  PhysicsRaycastHit hit{};
+  if (raycast(world, origin, math::mul(kUp, -1.0F), 2.0F * kSurfaceProbeHeight,
+              &hit, settings.self) &&
+      (hit.entity == contact.entity)) {
+    return hit.normal;
+  }
+  return contact.normal;
+}
+
 /// Climbs a ledge no higher than the step offset: up, along `horizontal`,
 /// then down onto walkable ground. On success `*offset` moves to the top
 /// and the horizontal travel made is returned; on failure nothing changes.
@@ -521,7 +556,12 @@ bool try_step(const PhysicsWorldView &world, const CharacterCapsule &capsule,
   const math::Vec3 down = math::mul(kUp, -1.0F);
   if (!sweep(world, moved(capsule, raised), down, climb + (2.0F * skin),
              settings, &hit) ||
-      !walkable(hit.contact.normal, settings)) {
+      !walkable(
+          surface_normal(
+              world,
+              moved(capsule, math::add(raised, math::mul(down, hit.travel))),
+              hit.contact, settings),
+          settings)) {
     // Nothing walkable to stand on at the top: not a step.
     return false;
   }
@@ -728,9 +768,15 @@ bool move_character(const PhysicsWorldView &world,
   const float probe = (snap ? settings.stepOffset : 0.0F) + (2.0F * skin);
   const math::Vec3 down = math::mul(kUp, -1.0F);
   SweepContact below{};
+  math::Vec3 groundNormal{};
   if ((displacement.y <= 0.0F) &&
       sweep(world, moved(capsule, offset), down, probe, settings, &below) &&
-      walkable(below.contact.normal, settings)) {
+      walkable(
+          groundNormal = surface_normal(
+              world,
+              moved(capsule, math::add(offset, math::mul(down, below.travel))),
+              below.contact, settings),
+          settings)) {
     // Down to the skin gap above the ground, or up to it when closer.
     const float drop = below.travel - (skin / std::max(below.contact.normal.y,
                                                        kMinBackOffCosine));
@@ -739,7 +785,7 @@ bool move_character(const PhysicsWorldView &world,
       grounded = true;
       flags |= kCharacterCollidedBelow;
       out->ground = below.contact.entity;
-      out->groundNormal = below.contact.normal;
+      out->groundNormal = groundNormal;
     }
   }
   offset =
