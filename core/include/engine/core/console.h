@@ -49,8 +49,15 @@ bool console_register_world_command(const char *name, ConsoleCommandFn fn,
 // console_register_world_command.
 bool console_line_changes_world(const char *line) noexcept;
 
-// Parse `line`, find the command, and invoke its callback.
-// Returns false if the command is not found.
+// Parse `line`, find the command, and invoke its callback. Tokens are
+// separated by whitespace, and "a quoted run" is one token (a backslash
+// escapes a quote or a backslash inside it), as in Unreal's and Source's
+// consoles. A line longer
+// than 511 characters, with more than 32 tokens or with an unclosed quote is
+// refused whole with a message, never run on the part that fit. Returns
+// false when the line is refused or the command is not found. The built-in
+// `set` gives a text cvar the rest of the line (`set r_fog_color 0.2 0.3
+// 0.4`); any other cvar takes exactly one value.
 bool console_execute(const char *line) noexcept;
 
 // Append a string to the output ring buffer and log it on the "console"

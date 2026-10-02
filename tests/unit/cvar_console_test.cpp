@@ -348,6 +348,95 @@ static bool test_console_set_get_cvar() noexcept {
   return true;
 }
 
+/// True when some line of the console's output ring contains `needle`.
+static bool output_contains(const char *needle) noexcept {
+  char line[512] = {};
+  for (std::size_t i = 0U; i < console_output_line_count(); ++i) {
+    if (console_get_output_line(i, line, sizeof(line)) &&
+        (std::strstr(line, needle) != nullptr)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// A value with spaces reaches a text cvar whole, quoted or not, as
+// Unreal's and Source's consoles take it; a one-value cvar given several
+// refuses rather than keeping the first.
+static bool test_console_set_multi_word_values() noexcept {
+  initialize_cvars();
+  cvar_register_string("console.test.color", "0.55 0.65 0.75",
+                       "multi-word set test");
+  cvar_register_int("console.test.n", 7, "one-value set test");
+  initialize_console();
+
+  bool ok = console_execute("set console.test.color 0.2 0.3 0.4") &&
+            (std::strcmp(cvar_get_string("console.test.color", ""),
+                         "0.2 0.3 0.4") == 0) &&
+            output_contains("set console.test.color = 0.2 0.3 0.4");
+  ok = ok && console_execute("set console.test.color \"0.5 0.6 0.7\"") &&
+       (std::strcmp(cvar_get_string("console.test.color", ""), "0.5 0.6 0.7") ==
+        0);
+  ok = ok && console_execute("set console.test.color \"a \\\"quoted\\\" b\"") &&
+       (std::strcmp(cvar_get_string("console.test.color", ""),
+                    "a \"quoted\" b") == 0);
+  // Two values for an int: usage, and the value is unchanged.
+  ok = ok && console_execute("set console.test.n 5 6") &&
+       (cvar_get_int("console.test.n", 0) == 7) &&
+       output_contains("Usage: set");
+  shutdown_console();
+  shutdown_cvars();
+  return ok;
+}
+
+// `set` with no value prints its usage line.
+static bool test_console_set_without_value_prints_usage() noexcept {
+  initialize_cvars();
+  initialize_console();
+  const bool ok = console_execute("set console.test.missing") &&
+                  output_contains("Usage: set");
+  shutdown_console();
+  shutdown_cvars();
+  return ok;
+}
+
+// A line that does not fit -- too many tokens, an unclosed quote, or too
+// long -- is refused with a message and runs nothing.
+static bool test_console_refuses_lines_that_do_not_fit() noexcept {
+  initialize_cvars();
+  initialize_console();
+  static int s_calls = 0;
+  s_calls = 0;
+  auto cmd = [](const char *const *, int, void *) noexcept { ++s_calls; };
+  bool ok = console_register_command("count", cmd, nullptr, "counts calls");
+
+  // 32 tokens run; 33 are refused.
+  // "count" plus 31 " a" tokens is 32 tokens; one more " a" is 33.
+  char line[600] = {};
+  std::snprintf(line, sizeof(line), "count");
+  for (int i = 1; i < 32; ++i) {
+    const std::size_t used = std::strlen(line);
+    std::snprintf(line + used, sizeof(line) - used, " a");
+  }
+  ok = ok && console_execute(line) && (s_calls == 1);
+  const std::size_t used = std::strlen(line);
+  std::snprintf(line + used, sizeof(line) - used, " a");
+  ok = ok && !console_execute(line) && (s_calls == 1) &&
+       output_contains("more than 32 arguments");
+
+  ok = ok && !console_execute("count \"unclosed") && (s_calls == 1) &&
+       output_contains("unclosed quote");
+
+  char longLine[600] = "count ";
+  std::memset(longLine + 6, 'x', 510U);
+  longLine[516] = '\0';
+  ok = ok && !console_execute(longLine) && (s_calls == 1) &&
+       output_contains("longer than 511 characters");
+  shutdown_console();
+  shutdown_cvars();
+  return ok;
+}
+
 static bool test_console_custom_command() noexcept {
   initialize_cvars();
   initialize_console();
@@ -749,6 +838,11 @@ int main() {
       {"console_basic_execute", test_console_basic_execute},
       {"console_unknown_command", test_console_unknown_command},
       {"console_set_get_cvar", test_console_set_get_cvar},
+      {"console_set_multi_word_values", test_console_set_multi_word_values},
+      {"console_set_without_value_prints_usage",
+       test_console_set_without_value_prints_usage},
+      {"console_refuses_lines_that_do_not_fit",
+       test_console_refuses_lines_that_do_not_fit},
       {"console_custom_command", test_console_custom_command},
       {"console_output_ring_buffer", test_console_output_ring_buffer},
       {"console_output_reaches_the_log", test_console_output_reaches_the_log},

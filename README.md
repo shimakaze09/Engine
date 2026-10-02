@@ -262,7 +262,10 @@ directory (`logs/player.log` for `engine_player`), keeping the previous run's as
 `editor-prev.log`, as Unity keeps `Editor.log`; a failed start shows an error
 box naming it. The same messages appear in the editor's own Log panel, whose
 command line runs console commands (`help` lists them, `get` and `set` read and
-write cvars; Tab completes, Up and Down recall), as Unreal's Output Log does.
+write cvars; Tab completes, Up and Down recall), as Unreal's Output Log does. A
+quoted value is one argument, and a text cvar takes the rest of the line, so
+`set r_fog_color 0.2 0.3 0.4` sets all three numbers; a line that is too long
+or has an unclosed quote is refused with a message rather than run in part.
 
 If the editor has to close on an internal error or a graphics-device failure
 (a driver reset, a lost GPU), it first saves the unsaved scene to `Recovery/`
