@@ -14,16 +14,21 @@
 //   mesh is OffMesh, and a path longer than the output is TooLong;
 // - invalid settings are refused with the mesh unchanged;
 // - the same level bakes to the same mesh, and the same query gives the
-//   same path, bit for bit.
+//   same path, bit for bit;
+// - a .navmesh document round-trips to the same mesh and bytes, and one
+//   damaged, cut off, from another version or naming a polygon that does
+//   not exist is refused with the mesh unchanged.
 
 #include "engine/navigation/nav_mesh.h"
 
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <memory>
 #include <vector>
 
 #include "../test_harness.h"
+#include "engine/core/hash.h"
 
 namespace {
 
@@ -407,6 +412,87 @@ void check_determinism() {
       "the same query gives the same path, bit for bit");
 }
 
+/// Rewrites the trailing checksum of a .navmesh document after an edit, so
+/// the reader's other checks are what refuse it.
+void reseal(std::vector<std::uint8_t> *bytes) {
+  std::uint64_t hash = engine::core::kFnv1a64Offset;
+  for (std::size_t i = 0U; i + 8U < bytes->size(); ++i) {
+    hash = engine::core::fnv1a_64_append(hash, (*bytes)[i]);
+  }
+  for (std::size_t i = 0U; i < 8U; ++i) {
+    (*bytes)[bytes->size() - 8U + i] =
+        static_cast<std::uint8_t>((hash >> (8U * i)) & 0xFFU);
+  }
+}
+
+void check_file() {
+  Level level{};
+  level.boxes.push_back(floor_box());
+  level.boxes.push_back(Box{Vec3(-0.5F, 0.0F, -5.0F), Vec3(0.5F, 2.0F, 3.0F)});
+  nav::NavMesh mesh{};
+  std::unique_ptr<std::uint8_t[]> data;
+  std::size_t size = 0U;
+  g_tests.check(bake(level, settings_for(5.0F, 5.0F), &mesh) &&
+                    nav::write_nav_mesh(mesh, &data, &size) && (size > 0U),
+                "a baked mesh writes a .navmesh document");
+  nav::NavMesh read{};
+  std::unique_ptr<std::uint8_t[]> again;
+  std::size_t againSize = 0U;
+  g_tests.check(nav::read_nav_mesh(data.get(), size, &read) &&
+                    (read.content_hash() == mesh.content_hash()) &&
+                    nav::write_nav_mesh(read, &again, &againSize) &&
+                    (againSize == size) &&
+                    (std::memcmp(again.get(), data.get(), size) == 0),
+                "the document reads back to the same mesh and rewrites to "
+                "the same bytes");
+  nav::NavQuery query{};
+  Vec3 path[32] = {};
+  std::size_t count = 0U;
+  g_tests.check(
+      query.init(read) &&
+          (query.find_path(Vec3(-3.0F, 0.0F, 0.0F), Vec3(3.0F, 0.0F, 0.0F),
+                           path, 32U, &count) == nav::NavPathResult::Found) &&
+          (count == 6U),
+      "a mesh read from its document plans the same route");
+
+  const std::vector<std::uint8_t> good(data.get(), data.get() + size);
+  const std::uint64_t before = read.content_hash();
+  std::vector<std::uint8_t> bad = good;
+  bad[200] ^= 0x01U;
+  g_tests.check(!nav::read_nav_mesh(bad.data(), bad.size(), &read),
+                "a document with one changed byte fails its checksum");
+  g_tests.check(!nav::read_nav_mesh(good.data(), good.size() - 1U, &read) &&
+                    !nav::read_nav_mesh(good.data(), 12U, &read),
+                "a cut-off document is refused");
+  bad = good;
+  bad[4] = 2U;
+  reseal(&bad);
+  g_tests.check(!nav::read_nav_mesh(bad.data(), bad.size(), &read),
+                "a document from another format version is refused");
+  bad = good;
+  bad[0] = 'X';
+  reseal(&bad);
+  g_tests.check(!nav::read_nav_mesh(bad.data(), bad.size(), &read),
+                "a document without the magic is refused");
+  // The first surface's polygon index sits after the header (8 bytes),
+  // the settings (44), the grid and counts (16), the per-column counts
+  // and the first surface's height.
+  const std::size_t columns = static_cast<std::size_t>(mesh.columns_x()) *
+                              static_cast<std::size_t>(mesh.columns_z());
+  bad = good;
+  const std::size_t firstRect = 8U + 44U + 16U + columns + 4U;
+  bad[firstRect + 3U] = 0x7FU;
+  reseal(&bad);
+  g_tests.check(!nav::read_nav_mesh(bad.data(), bad.size(), &read),
+                "a surface naming a polygon that does not exist is refused");
+  g_tests.check(read.content_hash() == before,
+                "a refused document leaves the mesh unchanged");
+
+  nav::NavMesh empty{};
+  g_tests.check(!nav::write_nav_mesh(empty, &data, &size),
+                "an empty mesh is not written");
+}
+
 } // namespace
 
 int main() {
@@ -418,5 +504,6 @@ int main() {
   check_bridge();
   check_failures();
   check_determinism();
+  check_file();
   return g_tests.finish("navigation mesh tests");
 }
