@@ -1,4 +1,5 @@
-// Implements the shared fixed-capacity whole-file reader for the Engine core.
+// Implements the shared fixed-capacity file readers for the Engine core:
+// whole files, file prefixes and content fingerprints.
 
 #include "engine/core/file_read.h"
 
@@ -64,6 +65,30 @@ FileReadResult read_whole_file(const char *path, char *out,
   }
   if (overflow) {
     return FileReadResult::TooLarge;
+  }
+  out[readCount] = '\0';
+  if (outSize != nullptr) {
+    *outSize = readCount;
+  }
+  return FileReadResult::Ok;
+}
+
+FileReadResult read_file_prefix(const char *path, char *out,
+                                std::size_t capacity,
+                                std::size_t *outSize) noexcept {
+  if ((path == nullptr) || (out == nullptr) || (capacity == 0U)) {
+    return FileReadResult::Unreadable;
+  }
+  FileReadResult openFailure = FileReadResult::Absent;
+  std::FILE *file = open_file_for_read(path, &openFailure);
+  if (file == nullptr) {
+    return openFailure;
+  }
+  const std::size_t readCount = std::fread(out, 1U, capacity - 1U, file);
+  const bool hitError = std::ferror(file) != 0;
+  static_cast<void>(std::fclose(file));
+  if (hitError) {
+    return FileReadResult::Unreadable;
   }
   out[readCount] = '\0';
   if (outSize != nullptr) {

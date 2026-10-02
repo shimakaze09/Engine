@@ -1,6 +1,6 @@
-// Implements the Project Settings window: the drafts the Scripting and
-// Physics sections edit, the checks each Apply waits on, and the saves
-// that rewrite only their own part of the document before applying it to
+// Implements the Project Settings window: the drafts the Scripting,
+// Physics and Saves sections edit, the checks each Apply waits on, and the
+// saves that rewrite only their own part of the document before applying it to
 // the running engine.
 
 #include "editor_project_settings.h"
@@ -18,6 +18,7 @@
 #include "engine/engine.h"
 #include "engine/project.h"
 #include "engine/runtime/collision_layers.h"
+#include "engine/runtime/save_data.h"
 #include "engine/scripting/script_limits.h"
 #include "engine/scripting/scripting.h"
 
@@ -44,6 +45,10 @@ struct ProjectSettingsWindow final {
   /// applied.
   content::ProjectCollisionLayers savedLayers{};
   content::ProjectCollisionLayers draftLayers{};
+  /// The save limit in MiB the document puts in force, and the edit not
+  /// yet applied.
+  int savedSaveMiB = 0;
+  int draftSaveMiB = 0;
   /// The outcome of the last Apply, shown until the next.
   char status[160] = {};
   bool statusIsError = false;
@@ -81,6 +86,8 @@ void seed_window(const char *projectFile) noexcept {
   g_window.draft = g_window.saved;
   g_window.savedLayers = document->collisionLayers;
   g_window.draftLayers = g_window.savedLayers;
+  g_window.savedSaveMiB = project_saves_draft(document->saveSettings);
+  g_window.draftSaveMiB = g_window.savedSaveMiB;
 }
 
 bool layers_equal(const content::ProjectCollisionLayers &a,
@@ -154,6 +161,45 @@ void draw_scripting_section() noexcept {
       ImGui::TextDisabled("%s", g_window.status);
     }
   }
+}
+
+void draw_saves_section() noexcept {
+  ImGui::SeparatorText("Saves");
+  int &draft = g_window.draftSaveMiB;
+  ImGui::SetNextItemWidth(editor_px(180.0F));
+  ImGui::InputInt("Largest save (MiB)", &draft, 1, 16);
+  if (ImGui::IsItemHovered()) {
+    ImGui::SetTooltip("The largest save slot engine.save_data writes; a "
+                      "larger save is refused and the previous one kept. "
+                      "Saves written before a lower limit still load.");
+  }
+  const char *problem = project_saves_problem(draft);
+  if (problem != nullptr) {
+    ImGui::TextColored(ImVec4(1.0F, 0.55F, 0.35F, 1.0F), "%s", problem);
+  }
+  const bool changed = draft != g_window.savedSaveMiB;
+  ImGui::PushID("saves");
+  ImGui::BeginDisabled((problem != nullptr) || !changed);
+  if (ImGui::Button("Apply")) {
+    if (save_project_saves(g_window.projectFile, draft)) {
+      g_window.savedSaveMiB = draft;
+      set_status("Saved to the project and applied.", false);
+    } else {
+      set_status("Not saved; the Log says why.", true);
+    }
+  }
+  ImGui::EndDisabled();
+  ImGui::SameLine();
+  ImGui::BeginDisabled(!changed);
+  if (ImGui::Button("Revert")) {
+    draft = g_window.savedSaveMiB;
+  }
+  ImGui::EndDisabled();
+  ImGui::SameLine();
+  if (ImGui::Button("Restore Default")) {
+    draft = project_saves_draft(content::ProjectSaveSettings{});
+  }
+  ImGui::PopID();
 }
 
 /// The label a layer goes by in the matrix: its draft name, else
@@ -423,6 +469,53 @@ bool save_project_settings(const char *projectFile,
   return true;
 }
 
+const char *project_saves_problem(int maxSlotMiB) noexcept {
+  if ((maxSlotMiB < static_cast<int>(content::kProjectMinSaveSlotMiB)) ||
+      (maxSlotMiB > static_cast<int>(content::kProjectMaxSaveSlotMiB))) {
+    return "The largest save must be from 1 to 256 MiB.";
+  }
+  return nullptr;
+}
+
+int project_saves_draft(const content::ProjectSaveSettings &settings) noexcept {
+  return settings.maxSlotMiBSet
+             ? static_cast<int>(settings.maxSlotMiB)
+             : static_cast<int>(runtime::kDefaultSaveSlotLimitBytes /
+                                kBytesPerMiB);
+}
+
+bool save_project_saves(const char *projectFile, int maxSlotMiB) noexcept {
+  if ((projectFile == nullptr) || (projectFile[0] == '\0')) {
+    return false;
+  }
+  if (const char *problem = project_saves_problem(maxSlotMiB)) {
+    core::log_message(core::LogLevel::Error, kLogChannel, problem);
+    return false;
+  }
+  std::unique_ptr<content::ProjectDocument> document(
+      new (std::nothrow) content::ProjectDocument());
+  if ((document == nullptr) ||
+      !content::read_project_document(projectFile, document.get())
+           .has_value()) {
+    return false; // the reader logged why
+  }
+  content::ProjectSaveSettings &settings = document->saveSettings;
+  settings.maxSlotMiBSet =
+      maxSlotMiB != project_saves_draft(content::ProjectSaveSettings{});
+  settings.maxSlotMiB =
+      settings.maxSlotMiBSet ? static_cast<std::uint32_t>(maxSlotMiB) : 0U;
+  if (!content::write_project_document(projectFile, *document)) {
+    return false; // the writer logged why
+  }
+  static_cast<void>(runtime::set_save_slot_limit(
+      static_cast<std::size_t>(maxSlotMiB) * kBytesPerMiB));
+  char message[400] = {};
+  std::snprintf(message, sizeof(message),
+                "save limit saved to %.300s and applied", projectFile);
+  core::log_message(core::LogLevel::Info, kLogChannel, message);
+  return true;
+}
+
 void register_project_settings() noexcept {
   static_cast<void>(core::cvar_register_bool(
       kShowProjectSettingsCvar, false,
@@ -464,6 +557,7 @@ void draw_project_settings_window(const char *projectFile) noexcept {
       ImGui::PopStyleColor();
       draw_scripting_section();
       draw_physics_section();
+      draw_saves_section();
     }
   }
   ImGui::End();

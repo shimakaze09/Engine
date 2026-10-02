@@ -142,15 +142,19 @@ EMSCRIPTEN_KEEPALIVE void web_lifecycle_second_run() {
 /// Writes the save slot through the production path; 1 when it committed.
 EMSCRIPTEN_KEEPALIVE int web_lifecycle_save() {
   static constexpr char kSave[] = "{\"coins\":8,\"won\":true}";
-  return engine::runtime::save_game_data(kSave, sizeof(kSave) - 1U) ? 1 : 0;
+  return engine::runtime::save_game_data(engine::runtime::kDefaultSaveSlot,
+                                         kSave, sizeof(kSave) - 1U)
+             ? 1
+             : 0;
 }
 
 /// Prints what the save slot holds, or that it holds nothing.
 EMSCRIPTEN_KEEPALIVE void web_lifecycle_load() {
-  char buffer[256] = {};
-  std::size_t length = 0U;
-  if (engine::runtime::load_game_data(buffer, sizeof(buffer), &length)) {
-    std::printf("[web-lifecycle] loaded=%s\n", buffer);
+  engine::runtime::SaveSlotPayload payload{};
+  if (engine::runtime::read_game_data(engine::runtime::kDefaultSaveSlot,
+                                      &payload) ==
+      engine::runtime::SaveReadResult::Ok) {
+    std::printf("[web-lifecycle] loaded=%s\n", payload.data);
   } else {
     std::printf("[web-lifecycle] loaded=none\n");
   }

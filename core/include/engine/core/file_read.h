@@ -1,4 +1,5 @@
-// Declares the shared fixed-capacity whole-file reader for the Engine core.
+// Declares the shared fixed-capacity file readers for the Engine core: whole
+// files, file prefixes and content fingerprints.
 
 #pragma once
 
@@ -38,6 +39,14 @@ enum class FileReadResult : std::uint8_t {
 FileReadResult read_whole_file(const char *path, char *out,
                                std::size_t capacity,
                                std::size_t *outSize) noexcept;
+
+/// Reads the first bytes of the file at `path` into `out` (NUL-terminated,
+/// so at most capacity - 1 bytes) and reports how many in *outSize: Ok
+/// whether or not the file holds more, so a header can be read without
+/// reading what follows it. Absent and Unreadable as read_whole_file.
+FileReadResult read_file_prefix(const char *path, char *out,
+                                std::size_t capacity,
+                                std::size_t *outSize) noexcept;
 
 /// What a file on disk holds, compared rather than read: whether it
 /// exists, its size, and a 64-bit FNV-1a of its bytes. An editor keeps the

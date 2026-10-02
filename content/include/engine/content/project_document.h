@@ -97,6 +97,22 @@ struct ProjectScriptLimits final {
   std::uint32_t memoryLimitMiB = 0U;
 };
 
+/// The bound a project may set on one save slot, in MiB. The engine's
+/// default applies while it is unset; the top of the range is the
+/// ceiling every save read accepts, so a project can never set a bound
+/// its own reads refuse.
+inline constexpr std::uint32_t kProjectMinSaveSlotMiB = 1U;
+inline constexpr std::uint32_t kProjectMaxSaveSlotMiB = 256U;
+
+/// The game-save settings a project sets. Written as the optional
+/// "saves" object, omitted while nothing is set.
+struct ProjectSaveSettings final {
+  bool maxSlotMiBSet = false;
+  /// The largest save slot the game may write, in MiB, within
+  /// [kProjectMinSaveSlotMiB, kProjectMaxSaveSlotMiB].
+  std::uint32_t maxSlotMiB = 0U;
+};
+
 /// Physics collision layers: the 32 bits of Collider::collisionLayer and
 /// collisionMask, as Godot's and Unity's are.
 inline constexpr std::size_t kMaxCollisionLayers = 32U;
@@ -175,6 +191,8 @@ struct ProjectDocument final {
   ProjectScriptLimits scriptLimits{};
   /// The project's collision layer names and matrix.
   ProjectCollisionLayers collisionLayers{};
+  /// The project's game-save settings, if any.
+  ProjectSaveSettings saveSettings{};
   /// The packages the project depends on, in the author's order; none is
   /// written as no "dependencies" key.
   ProjectPackage packages[kMaxProjectPackages] = {};

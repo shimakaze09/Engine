@@ -83,12 +83,13 @@ bool bootstrap_project(const char *root) {
 
 /// What the running project's save slot holds; "<none>" when it is empty.
 std::string load_slot() {
-  char buffer[256] = {};
-  std::size_t length = 0U;
-  if (!engine::runtime::load_game_data(buffer, sizeof(buffer), &length)) {
+  engine::runtime::SaveSlotPayload payload{};
+  if (engine::runtime::read_game_data(engine::runtime::kDefaultSaveSlot,
+                                      &payload) !=
+      engine::runtime::SaveReadResult::Ok) {
     return "<none>";
   }
-  return std::string(buffer, length);
+  return std::string(payload.data, payload.length);
 }
 
 /// One bootstrap of `root`: checks what the slot holds on arrival, then
@@ -113,8 +114,10 @@ void visit(const char *root, const char *expected, const char *write,
   }
   g_tests.check(loaded == expected, what);
   if (write != nullptr) {
-    g_tests.check(engine::runtime::save_game_data(write, std::strlen(write)),
-                  "the project's save commits");
+    g_tests.check(
+        engine::runtime::save_game_data(engine::runtime::kDefaultSaveSlot,
+                                        write, std::strlen(write)),
+        "the project's save commits");
   }
   engine::shutdown();
 }
@@ -169,8 +172,10 @@ int main() {
 
   // No bootstrap, no project: the save is refused rather than written to
   // the directory every project shares.
-  g_tests.check(!engine::runtime::save_game_data(kSaveA, std::strlen(kSaveA)),
-                "a save with no project named is refused");
+  g_tests.check(
+      !engine::runtime::save_game_data(engine::runtime::kDefaultSaveSlot,
+                                       kSaveA, std::strlen(kSaveA)),
+      "a save with no project named is refused");
   g_tests.check(read_file(legacy) == kLegacySave,
                 "the refused save did not reach the shared directory");
 

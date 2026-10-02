@@ -7,6 +7,7 @@
 
 #include "engine/content/project_document.h"
 #include "engine/core/bootstrap.h"
+#include "engine/runtime/save_data.h"
 #include "engine/scripting/script_limits.h"
 
 namespace engine {
@@ -83,6 +84,10 @@ struct EngineConfig final {
   /// (runtime::project_collision_layers) and installed on the run's World.
   /// open_project sets them from the project's document.
   content::ProjectCollisionLayers collisionLayers{};
+  /// The largest save slot the game may write, in bytes, within [1,
+  /// runtime::kSaveSlotCeilingBytes]; bootstrap refuses any other.
+  /// open_project sets it from the project's "saves" setting.
+  std::size_t saveSlotLimitBytes = runtime::kDefaultSaveSlotLimitBytes;
   /// Mix audio into no device; a headless platform forces this on, the
   /// way it forces the null render device.
   bool audioNullDevice = false;

@@ -35,6 +35,8 @@
 #include "mesh_reference_resolution.h"
 
 #include <cstring>
+#include <memory>
+#include <new>
 
 namespace engine {
 
@@ -149,14 +151,20 @@ static_assert(scripting::kMaxWorldEntities == runtime::World::kMaxEntities,
               "scripting's entity capacity must match the World's");
 static_assert(scripting::kMaxTimerSlots == runtime::TimerManager::kMaxTimers,
               "scripting's timer slot count must match the timer manager's");
-static_assert(scripting::kMaxGameSaveBytes == runtime::kMaxSaveDataBytes,
-              "scripting save ceiling must match the runtime save slot");
+static_assert(scripting::kGameSaveSlotNameCapacity ==
+                      runtime::kSaveSlotNameCapacity &&
+                  scripting::kMaxGameSaveSlots == runtime::kMaxSaveSlots,
+              "scripting's save slot bounds must match the runtime's");
 static_assert(static_cast<int>(scripting::GameSaveRead::Ok) ==
                       static_cast<int>(runtime::SaveReadResult::Ok) &&
                   static_cast<int>(scripting::GameSaveRead::Absent) ==
                       static_cast<int>(runtime::SaveReadResult::Absent) &&
                   static_cast<int>(scripting::GameSaveRead::Unreadable) ==
-                      static_cast<int>(runtime::SaveReadResult::Unreadable),
+                      static_cast<int>(runtime::SaveReadResult::Unreadable) &&
+                  static_cast<int>(scripting::GameSaveRead::Corrupt) ==
+                      static_cast<int>(runtime::SaveReadResult::Corrupt) &&
+                  static_cast<int>(scripting::GameSaveRead::Unsupported) ==
+                      static_cast<int>(runtime::SaveReadResult::Unsupported),
               "scripting's save read results must match the runtime's");
 static_assert(scripting::kMaxEntityPoolSize ==
                   runtime::EntityPool::kMaxPoolSize,
@@ -571,22 +579,54 @@ bool scripting_play_music(const char *path, float volume,
 
 void scripting_stop_music() noexcept { audio::stop_music(); }
 
-bool scripting_save_game_data(const char *json,
+bool scripting_save_game_data(const char *slot, const char *payload,
                               std::size_t length) noexcept {
-  return runtime::save_game_data(json, length);
+  return runtime::save_game_data(slot, payload, length);
 }
+
+/// The payload the last load read, held until the next load: the binding
+/// parses it in place.
+runtime::SaveSlotPayload g_loadedSave{};
 
 scripting::GameSaveRead
-scripting_load_game_data(char *out, std::size_t capacity,
+scripting_load_game_data(const char *slot, const char **outPayload,
                          std::size_t *outLength) noexcept {
-  return static_cast<scripting::GameSaveRead>(
-      runtime::read_game_data(out, capacity, outLength));
+  const runtime::SaveReadResult result =
+      runtime::read_game_data(slot, &g_loadedSave);
+  *outPayload = g_loadedSave.data;
+  *outLength = g_loadedSave.length;
+  return static_cast<scripting::GameSaveRead>(result);
 }
 
-void scripting_hold_game_save() noexcept { runtime::hold_game_save(); }
+void scripting_hold_game_save(const char *slot) noexcept {
+  runtime::hold_game_save(slot);
+}
 
-bool scripting_discard_game_save() noexcept {
-  return runtime::discard_game_save();
+bool scripting_discard_game_save(const char *slot) noexcept {
+  return runtime::discard_game_save(slot);
+}
+
+std::size_t scripting_list_game_saves(scripting::GameSaveSlotInfo *out,
+                                      std::size_t capacity) noexcept {
+  std::unique_ptr<runtime::SaveSlotInfo[]> slots(
+      new (std::nothrow) runtime::SaveSlotInfo[capacity]);
+  if (slots == nullptr) {
+    return 0U;
+  }
+  const std::size_t total = runtime::list_game_saves(slots.get(), capacity);
+  const std::size_t count = (total < capacity) ? total : capacity;
+  for (std::size_t i = 0U; i < count; ++i) {
+    std::memcpy(out[i].slot, slots[i].slot, sizeof(out[i].slot));
+    out[i].status = static_cast<scripting::GameSaveRead>(slots[i].status);
+    out[i].savedAt = slots[i].savedAt;
+    out[i].payloadBytes = slots[i].payloadBytes;
+    out[i].legacy = slots[i].legacy;
+  }
+  return total;
+}
+
+std::size_t scripting_game_save_limit() noexcept {
+  return runtime::save_slot_limit();
 }
 
 bool scripting_save_scene(const runtime::World *world,
@@ -1470,6 +1510,8 @@ scripting::RuntimeServices make_scripting_runtime_services() noexcept {
   s.load_game_data = &scripting_load_game_data;
   s.hold_game_save = &scripting_hold_game_save;
   s.discard_game_save = &scripting_discard_game_save;
+  s.list_game_saves = &scripting_list_game_saves;
+  s.game_save_limit = &scripting_game_save_limit;
   s.save_scene = &scripting_save_scene;
   s.save_prefab = &scripting_save_prefab;
   s.instantiate_prefab = &scripting_instantiate_prefab;

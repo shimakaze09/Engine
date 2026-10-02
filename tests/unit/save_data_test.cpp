@@ -1,407 +1,75 @@
-// Verifies the single-slot game save over explicit directories: byte-exact
-// roundtrip, recursive directory creation, missing-file and oversized
-// rejections, a 1 MiB document and one exactly at the ceiling round-tripping
-// while one byte past it is refused with the previous save intact, the
-// capacity-overflow guard on load, the read-capacity boundaries, and that a
-// failed read is reported as a load failure rather than as a successful load
-// of truncated data. A held slot (one a load could not use) refuses every
-// save with the file untouched, and discarding it moves the file aside,
-// never deleting it, before the next save starts a new one.
+// Verifies the game's save slots over explicit directories:
+// - byte-exact round trips (directory creation, rewrites, an empty payload,
+//   1 MiB, exactly at the project's limit) and one byte past the limit
+//   refused with the previous save intact; a lowered limit still reads an
+//   earlier, larger save;
+// - slot names: tokens only, case ignored, slots independent;
+// - every damage a slot file can carry (cut off, extended, a changed byte,
+//   a broken header, a newer format, an unknown header key) read as
+//   Corrupt or Unsupported, never as a shorter or different save;
+// - a failed read reported as a failure, not a load;
+// - listing, sorted, from headers alone, with damaged and legacy slots
+//   and a capacity smaller than the slot count;
+// - at most kMaxSaveSlots slots;
+// - per-slot holds kept until discarded, discards moving files aside and
+//   never deleting them;
+// - a legacy save.json read as the default slot, retired on its first save
+//   and never brought back by a discard.
 
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <string>
 #include <system_error>
-#include <vector>
 
+#include "../test_harness.h"
 #include "engine/core/platform.h"
 #include "engine/runtime/save_data.h"
 
 namespace {
 
-/// Builds a scratch directory path under the OS temp dir.
-bool make_scratch_dir(char *out, std::size_t capacity) {
+namespace fs = std::filesystem;
+namespace rt = engine::runtime;
+
+engine::tests::TestContext g_tests;
+
+/// A fresh scratch directory under the OS temp dir, nested so the saves
+/// folder's parents are created too.
+std::string fresh_directory(const char *name) {
   char tempDir[512] = {};
   if (!engine::core::platform_get_temp_dir(tempDir, sizeof(tempDir))) {
-    return false;
+    return {};
   }
-  const int written = std::snprintf(
-      out, capacity, "%s/engine_save_test/nested", tempDir);
-  return (written > 0) && (static_cast<std::size_t>(written) < capacity);
-}
-
-/// Builds "<directory>/save.json", the slot path the production loader
-/// derives, so tests can plant a fault at that exact location.
-void make_slot_path(const char *directory, char *out, std::size_t capacity) {
-  std::snprintf(out, capacity, "%s/save.json", directory);
-}
-
-/// Writes `bytes` straight into the slot file, creating the directory
-/// first; used for on-disk states the production writer cannot produce.
-bool write_slot_bytes(const char *directory, const char *bytes,
-                      std::size_t length) {
+  const fs::path root = fs::path(tempDir) / "engine_save_test" / name;
   std::error_code ec{};
-  std::filesystem::create_directories(std::filesystem::path(directory), ec);
-  if (ec) {
-    return false;
-  }
-  char path[640] = {};
-  make_slot_path(directory, path, sizeof(path));
-  std::FILE *file = nullptr;
-#ifdef _WIN32
-  if (fopen_s(&file, path, "wb") != 0) {
-    file = nullptr;
-  }
-#else
-  file = std::fopen(path, "wb");
-#endif
-  if (file == nullptr) {
-    return false;
-  }
-  const bool written =
-      (length == 0U) || (std::fwrite(bytes, 1U, length, file) == length);
-  return (std::fclose(file) == 0) && written;
+  fs::remove_all(root, ec);
+  return (root / "nested").string();
 }
 
-/// Removes the scratch save file, whether it is the regular slot file or
-/// a directory planted in its place (directories may remain; empty).
-void cleanup(const char *directory) {
-  char path[640] = {};
-  make_slot_path(directory, path, sizeof(path));
-  static_cast<void>(std::remove(path));
+void remove_directory(const std::string &directory) {
   std::error_code ec{};
-  static_cast<void>(std::filesystem::remove_all(std::filesystem::path(path),
-                                                ec));
+  fs::remove_all(fs::path(directory).parent_path(), ec);
 }
 
-/// EXPECTATION: a save into a not-yet-existing nested directory succeeds
-/// (recursive creation) and loads back byte-exact with the exact length.
-int check_roundtrip_with_directory_creation() {
-  char directory[576] = {};
-  if (!make_scratch_dir(directory, sizeof(directory))) {
-    std::puts("temp dir unavailable");
-    return 1;
-  }
-  cleanup(directory);
-
-  const char *json = "{\"entries\":[{\"k\":\"best_time\",\"v\":12.5}]}";
-  const std::size_t length = std::strlen(json);
-  if (!engine::runtime::save_game_data_to(directory, json, length)) {
-    std::puts("save failed");
-    return 1;
-  }
-
-  char loaded[512] = {};
-  std::size_t loadedLength = 0U;
-  if (!engine::runtime::load_game_data_from(directory, loaded, sizeof(loaded),
-                                            &loadedLength)) {
-    std::puts("load failed");
-    cleanup(directory);
-    return 1;
-  }
-  if ((loadedLength != length) || (std::strcmp(loaded, json) != 0)) {
-    std::puts("roundtrip mismatch");
-    cleanup(directory);
-    return 1;
-  }
-
-  // A rewrite replaces the slot (single-slot semantics).
-  const char *second = "{\"entries\":[]}";
-  if (!engine::runtime::save_game_data_to(directory, second,
-                                          std::strlen(second)) ||
-      !engine::runtime::load_game_data_from(directory, loaded, sizeof(loaded),
-                                            &loadedLength) ||
-      (std::strcmp(loaded, second) != 0)) {
-    std::puts("rewrite mismatch");
-    cleanup(directory);
-    return 1;
-  }
-
-  cleanup(directory);
-  return 0;
+std::string slot_file(const std::string &directory, const char *slot) {
+  return (fs::path(directory) / "saves" / (std::string(slot) + ".save"))
+      .string();
 }
 
-/// EXPECTATION: loading a missing slot fails; oversized saves are
-/// rejected; a load buffer smaller than the file fails instead of
-/// truncating silently.
-int check_failure_paths() {
-  char directory[576] = {};
-  if (!make_scratch_dir(directory, sizeof(directory))) {
-    return 1;
-  }
-  cleanup(directory);
-
-  char loaded[64] = {};
-  std::size_t loadedLength = 0U;
-  if (engine::runtime::load_game_data_from(directory, loaded, sizeof(loaded),
-                                           &loadedLength)) {
-    std::puts("missing slot loaded");
-    return 1;
-  }
-
-  const std::string oversized(engine::runtime::kMaxSaveDataBytes + 1U, 'x');
-  if (engine::runtime::save_game_data_to(directory, oversized.c_str(),
-                                         oversized.size())) {
-    std::puts("oversized save accepted");
-    return 1;
-  }
-
-  const char *json = "{\"entries\":[{\"k\":\"a\",\"v\":1}]}";
-  if (!engine::runtime::save_game_data_to(directory, json,
-                                          std::strlen(json))) {
-    std::puts("small save failed");
-    return 1;
-  }
-  char tiny[8] = {};
-  if (engine::runtime::load_game_data_from(directory, tiny, sizeof(tiny),
-                                           &loadedLength)) {
-    std::puts("overflowing load succeeded");
-    cleanup(directory);
-    return 1;
-  }
-
-  cleanup(directory);
-  return 0;
-}
-
-/// A document of `length` bytes whose content varies with position, so a
-/// dropped, repeated or reordered block would not compare equal.
-std::string patterned_document(std::size_t length) {
-  std::string document(length, ' ');
-  for (std::size_t i = 0U; i < length; ++i) {
-    document[i] = static_cast<char>('!' + ((i * 7U + (i >> 10U)) % 90U));
-  }
-  return document;
-}
-
-/// Saves `document` and loads it back through a buffer that holds the
-/// whole ceiling; true when the bytes and length come back exactly.
-bool roundtrips(const char *directory, const std::string &document,
-                std::vector<char> *buffer) {
-  std::size_t loadedLength = 0U;
-  return engine::runtime::save_game_data_to(directory, document.data(),
-                                            document.size()) &&
-         engine::runtime::load_game_data_from(directory, buffer->data(),
-                                              buffer->size(), &loadedLength) &&
-         (loadedLength == document.size()) &&
-         (std::memcmp(buffer->data(), document.data(), document.size()) == 0);
-}
-
-/// EXPECTATION: a 1 MiB save round-trips byte for byte, as does one of
-/// exactly kMaxSaveDataBytes; one byte more is refused and the save on
-/// disk is still the previous document, byte for byte.
-int check_large_saves_and_ceiling() {
-  char directory[576] = {};
-  if (!make_scratch_dir(directory, sizeof(directory))) {
-    std::puts("temp dir unavailable");
-    return 1;
-  }
-  cleanup(directory);
-
-  std::vector<char> buffer(engine::runtime::kMaxSaveDataBytes + 1U, '\0');
-  const std::string megabyte = patterned_document(1024U * 1024U);
-  if (!roundtrips(directory, megabyte, &buffer)) {
-    std::puts("1 MiB save did not round-trip");
-    cleanup(directory);
-    return 1;
-  }
-  const std::string atCeiling =
-      patterned_document(engine::runtime::kMaxSaveDataBytes);
-  if (!roundtrips(directory, atCeiling, &buffer)) {
-    std::puts("save at the ceiling did not round-trip");
-    cleanup(directory);
-    return 1;
-  }
-
-  const std::string pastCeiling =
-      patterned_document(engine::runtime::kMaxSaveDataBytes + 1U);
-  if (engine::runtime::save_game_data_to(directory, pastCeiling.data(),
-                                         pastCeiling.size())) {
-    std::puts("save past the ceiling accepted");
-    cleanup(directory);
-    return 1;
-  }
-  std::size_t loadedLength = 0U;
-  if (!engine::runtime::load_game_data_from(directory, buffer.data(),
-                                            buffer.size(), &loadedLength) ||
-      (loadedLength != atCeiling.size()) ||
-      (std::memcmp(buffer.data(), atCeiling.data(), atCeiling.size()) != 0)) {
-    std::puts("refused save changed the previous save");
-    cleanup(directory);
-    return 1;
-  }
-
-  cleanup(directory);
-  return 0;
-}
-
-/// EXPECTATION: the read-capacity boundaries are exact — an empty slot
-/// loads as a zero-length document, a file of exactly capacity - 1 bytes
-/// loads whole, and one byte more is rejected instead of truncated.
-int check_read_capacity_boundaries() {
-  char directory[576] = {};
-  if (!make_scratch_dir(directory, sizeof(directory))) {
-    std::puts("temp dir unavailable");
-    return 1;
-  }
-  cleanup(directory);
-
-  char loaded[32] = {};
-  std::size_t loadedLength = 1U;
-  // core::atomic_write_file refuses a zero-byte payload, so the empty
-  // slot is planted directly: it is the on-disk state the loader must
-  // keep reporting as an empty document rather than as a read failure.
-  if (!write_slot_bytes(directory, nullptr, 0U)) {
-    std::puts("empty slot plant failed");
-    return 1;
-  }
-  if (!engine::runtime::load_game_data_from(directory, loaded, sizeof(loaded),
-                                            &loadedLength)) {
-    std::puts("empty slot rejected");
-    cleanup(directory);
-    return 1;
-  }
-  if ((loadedLength != 0U) || (loaded[0] != '\0')) {
-    std::puts("empty slot mislength");
-    cleanup(directory);
-    return 1;
-  }
-
-  const std::string exact(sizeof(loaded) - 1U, 'a');
-  if (!engine::runtime::save_game_data_to(directory, exact.c_str(),
-                                          exact.size())) {
-    std::puts("exact-capacity save failed");
-    cleanup(directory);
-    return 1;
-  }
-  if (!engine::runtime::load_game_data_from(directory, loaded, sizeof(loaded),
-                                            &loadedLength)) {
-    std::puts("exact-capacity load rejected");
-    cleanup(directory);
-    return 1;
-  }
-  if ((loadedLength != exact.size()) ||
-      (std::strcmp(loaded, exact.c_str()) != 0)) {
-    std::puts("exact-capacity mismatch");
-    cleanup(directory);
-    return 1;
-  }
-
-  const std::string oneOver(sizeof(loaded), 'a');
-  if (!engine::runtime::save_game_data_to(directory, oneOver.c_str(),
-                                          oneOver.size())) {
-    std::puts("over-capacity save failed");
-    cleanup(directory);
-    return 1;
-  }
-  loadedLength = 1U;
-  if (engine::runtime::load_game_data_from(directory, loaded, sizeof(loaded),
-                                           &loadedLength)) {
-    std::puts("over-capacity load succeeded");
-    cleanup(directory);
-    return 1;
-  }
-  if (loadedLength != 0U) {
-    std::puts("over-capacity load reported a length");
-    cleanup(directory);
-    return 1;
-  }
-
-  cleanup(directory);
-  return 0;
-}
-
-/// Reports whether reading `path` fails with the stream error flag set,
-/// which is what decides whether this platform actually exercises the
-/// loader's read-error branch.
-bool read_error_is_injectable(const char *path) {
-  std::FILE *file = nullptr;
-#ifdef _WIN32
-  if (fopen_s(&file, path, "rb") != 0) {
-    file = nullptr;
-  }
-#else
-  file = std::fopen(path, "rb");
-#endif
-  if (file == nullptr) {
-    return false;
-  }
-  char probe[4] = {};
-  const std::size_t probed = std::fread(probe, 1U, sizeof(probe), file);
-  const bool errored = (probed == 0U) && (std::ferror(file) != 0);
-  std::fclose(file);
-  return errored;
-}
-
-/// EXPECTATION: an I/O error at the read boundary is reported as a load
-/// failure, never as a successful load of the bytes read so far. The
-/// fault is injected into the production path by planting a directory
-/// where the slot file belongs: a POSIX CRT opens it and fails the read
-/// with EISDIR, setting the stream's error flag while leaving its EOF
-/// flag clear — the same stream state a mid-read device error produces,
-/// and the state an fgetc-only overflow check cannot distinguish from a
-/// complete short file.
-int check_read_error_is_not_a_successful_load() {
-  char directory[576] = {};
-  if (!make_scratch_dir(directory, sizeof(directory))) {
-    std::puts("temp dir unavailable");
-    return 1;
-  }
-  cleanup(directory);
-
-  char slotPath[640] = {};
-  make_slot_path(directory, slotPath, sizeof(slotPath));
-  std::error_code ec{};
-  std::filesystem::create_directories(std::filesystem::path(slotPath), ec);
-  if (ec) {
-    std::puts("read-fault injection unavailable: cannot plant the slot");
-    return 1;
-  }
-  if (!read_error_is_injectable(slotPath)) {
-    // Windows CRTs refuse the open outright, so the loader fails at the
-    // open instead of the read; the contract asserted below still holds,
-    // but the read-error branch itself is covered only where the open
-    // succeeds. The log line keeps that distinction visible in CI.
-    std::puts("note: this platform rejects the open; read branch not "
-              "exercised");
-  }
-
-  char loaded[64] = {};
-  std::memset(loaded, 'Z', sizeof(loaded));
-  std::size_t loadedLength = 1U;
-  const bool ok = engine::runtime::load_game_data_from(
-      directory, loaded, sizeof(loaded), &loadedLength);
-  cleanup(directory);
-  if (ok) {
-    std::puts("failed read reported as a successful load");
-    return 1;
-  }
-  if (loadedLength != 0U) {
-    std::puts("failed read reported a length");
-    return 1;
-  }
-  return 0;
-}
-
-} // namespace
-
-/// Runs this executable or test program.
-/// Reads a whole file into a string; empty when it cannot be read.
-std::string read_file_text(const char *path) {
+std::string read_text(const std::string &path) {
   std::string text{};
   std::FILE *file = nullptr;
 #ifdef _WIN32
-  if (fopen_s(&file, path, "rb") != 0) {
+  if (fopen_s(&file, path.c_str(), "rb") != 0) {
     file = nullptr;
   }
 #else
-  file = std::fopen(path, "rb");
+  file = std::fopen(path.c_str(), "rb");
 #endif
   if (file == nullptr) {
     return text;
   }
-  char chunk[256] = {};
+  char chunk[4096] = {};
   std::size_t read = 0U;
   while ((read = std::fread(chunk, 1U, sizeof(chunk), file)) > 0U) {
     text.append(chunk, read);
@@ -410,93 +78,368 @@ std::string read_file_text(const char *path) {
   return text;
 }
 
-/// EXPECTATION: a held slot is never overwritten. A save into it is
-/// refused and the corrupt file stays byte for byte; discarding moves it
-/// to save.json.discarded-1 and lifts the hold, so the next save writes a
-/// fresh save.json; a second discard picks discarded-2; discarding a slot
-/// with no file only lifts the hold.
-int check_held_slot_is_kept_until_discarded() {
-  namespace rt = engine::runtime;
-  char directory[576] = {};
-  if (!make_scratch_dir(directory, sizeof(directory))) {
-    std::puts("temp dir unavailable");
-    return 1;
+bool write_text(const std::string &path, const std::string &text) {
+  std::error_code ec{};
+  fs::create_directories(fs::path(path).parent_path(), ec);
+  std::FILE *file = nullptr;
+#ifdef _WIN32
+  if (fopen_s(&file, path.c_str(), "wb") != 0) {
+    file = nullptr;
   }
-  cleanup(directory);
-  char slot[640] = {};
-  make_slot_path(directory, slot, sizeof(slot));
-  char first[700] = {};
-  char second[700] = {};
-  std::snprintf(first, sizeof(first), "%s.discarded-1", slot);
-  std::snprintf(second, sizeof(second), "%s.discarded-2", slot);
-  static_cast<void>(std::remove(first));
-  static_cast<void>(std::remove(second));
-
-  const char corrupt[] = "{\"entries\":[{\"k\":\"coins\",\"v\":";
-  if (!write_slot_bytes(directory, corrupt, sizeof(corrupt) - 1U)) {
-    std::puts("corrupt slot plant failed");
-    return 1;
+#else
+  file = std::fopen(path.c_str(), "wb");
+#endif
+  if (file == nullptr) {
+    return false;
   }
-  rt::hold_game_save_in(directory);
-  const char fresh[] = "{\"version\":1,\"entries\":[]}";
-  if (!rt::game_save_held_in(directory) ||
-      rt::save_game_data_to(directory, fresh, sizeof(fresh) - 1U)) {
-    std::puts("a held slot accepted a save");
-    return 1;
-  }
-  if (read_file_text(slot) != corrupt) {
-    std::puts("the held save was changed");
-    return 1;
-  }
-
-  if (!rt::discard_game_save_in(directory) ||
-      rt::game_save_held_in(directory) || (read_file_text(first) != corrupt)) {
-    std::puts("discard did not move the save aside intact");
-    return 1;
-  }
-  if (!rt::save_game_data_to(directory, fresh, sizeof(fresh) - 1U) ||
-      (read_file_text(slot) != fresh)) {
-    std::puts("the save after a discard did not write");
-    return 1;
-  }
-  rt::hold_game_save_in(directory);
-  if (!rt::discard_game_save_in(directory) ||
-      (read_file_text(second) != fresh) || (read_file_text(first) != corrupt)) {
-    std::puts("a second discard overwrote the first");
-    return 1;
-  }
-  rt::hold_game_save_in(directory);
-  if (!rt::discard_game_save_in(directory) ||
-      rt::game_save_held_in(directory)) {
-    std::puts("discarding an empty slot did not lift the hold");
-    return 1;
-  }
-  static_cast<void>(std::remove(first));
-  static_cast<void>(std::remove(second));
-  cleanup(directory);
-  return 0;
+  const bool written =
+      text.empty() ||
+      (std::fwrite(text.data(), 1U, text.size(), file) == text.size());
+  return (std::fclose(file) == 0) && written;
 }
 
+/// Saves and reads back `payload`; true when the same bytes return.
+bool roundtrips(const std::string &directory, const char *slot,
+                const std::string &payload) {
+  rt::SaveSlotPayload loaded{};
+  return rt::save_game_data_to(directory.c_str(), slot, payload.data(),
+                               payload.size()) &&
+         (rt::read_game_data_from(directory.c_str(), slot, &loaded) ==
+          rt::SaveReadResult::Ok) &&
+         (loaded.length == payload.size()) &&
+         (std::memcmp(loaded.data, payload.data(), payload.size()) == 0) &&
+         (loaded.data[loaded.length] == '\0');
+}
+
+rt::SaveReadResult read_status(const std::string &directory, const char *slot) {
+  rt::SaveSlotPayload loaded{};
+  const rt::SaveReadResult result =
+      rt::read_game_data_from(directory.c_str(), slot, &loaded);
+  if ((result != rt::SaveReadResult::Ok) &&
+      ((loaded.data != nullptr) || (loaded.length != 0U))) {
+    return rt::SaveReadResult::Ok;
+  }
+  return result;
+}
+
+/// A payload whose bytes vary with position, so a dropped, repeated or
+/// reordered block would not compare equal.
+std::string patterned(std::size_t length) {
+  std::string text(length, ' ');
+  for (std::size_t i = 0U; i < length; ++i) {
+    text[i] = static_cast<char>('!' + ((i * 7U + (i >> 10U)) % 90U));
+  }
+  return text;
+}
+
+void check_round_trips() {
+  const std::string directory = fresh_directory("roundtrip");
+  const std::string first = "{\"entries\":[{\"k\":\"best_time\",\"v\":12.5}]}";
+  g_tests.check(roundtrips(directory, "default", first),
+                "a save into a new nested directory reads back exactly");
+  g_tests.check(roundtrips(directory, "default", "{\"entries\":[]}"),
+                "a rewrite replaces the slot");
+  g_tests.check(roundtrips(directory, "default", ""),
+                "an empty payload reads back empty");
+  const std::string text = read_text(slot_file(directory, "default"));
+  g_tests.check(text.rfind("{\"format\":\"engine-save\",\"version\":1,", 0) ==
+                        0U &&
+                    (text.back() == '\n'),
+                "the file is a one-line header and the payload");
+  remove_directory(directory);
+}
+
+void check_limit() {
+  const std::string directory = fresh_directory("limit");
+  g_tests.check(rt::save_slot_limit() == rt::kDefaultSaveSlotLimitBytes,
+                "the limit starts at the engine's default");
+  g_tests.check(roundtrips(directory, "big", patterned(1024U * 1024U)),
+                "a 1 MiB save round-trips");
+  const std::string atLimit = patterned(rt::kDefaultSaveSlotLimitBytes);
+  g_tests.check(roundtrips(directory, "big", atLimit),
+                "a save exactly at the limit round-trips");
+  const std::string past = patterned(rt::kDefaultSaveSlotLimitBytes + 1U);
+  g_tests.check(!rt::save_game_data_to(directory.c_str(), "big", past.data(),
+                                       past.size()),
+                "one byte past the limit is refused");
+  rt::SaveSlotPayload loaded{};
+  g_tests.check(
+      (rt::read_game_data_from(directory.c_str(), "big", &loaded) ==
+       rt::SaveReadResult::Ok) &&
+          (loaded.length == atLimit.size()) &&
+          (std::memcmp(loaded.data, atLimit.data(), atLimit.size()) == 0),
+      "the refused save left the previous one intact");
+
+  g_tests.check(!rt::set_save_slot_limit(0U) &&
+                    !rt::set_save_slot_limit(rt::kSaveSlotCeilingBytes + 1U) &&
+                    (rt::save_slot_limit() == rt::kDefaultSaveSlotLimitBytes),
+                "a limit of 0 or past the ceiling is refused");
+  g_tests.check(rt::set_save_slot_limit(1024U * 1024U),
+                "a 1 MiB limit is accepted");
+  const std::string twoMiB = patterned(2U * 1024U * 1024U);
+  g_tests.check(!rt::save_game_data_to(directory.c_str(), "other",
+                                       twoMiB.data(), twoMiB.size()),
+                "a lowered limit refuses a larger save");
+  g_tests.check(read_status(directory, "big") == rt::SaveReadResult::Ok,
+                "a lowered limit still reads a larger save written before");
+  g_tests.check(rt::set_save_slot_limit(rt::kDefaultSaveSlotLimitBytes),
+                "the default limit is restored");
+  remove_directory(directory);
+}
+
+void check_slot_names() {
+  const std::string directory = fresh_directory("names");
+  const char *const refused[] = {"",     "a/b",
+                                 "a\\b", "has space",
+                                 "x:y",  "abcdefghijklmnopqrstuvwxyz123456"};
+  for (const char *slot : refused) {
+    g_tests.check(!rt::save_game_data_to(directory.c_str(), slot, "{}", 2U),
+                  "a slot name that is not a token is refused");
+  }
+  g_tests.check(!rt::save_game_data_to(directory.c_str(), nullptr, "{}", 2U),
+                "a null slot name is refused");
+  g_tests.check(rt::save_slot_name_is_valid("abcdefghijklmnopqrstuvwxyz12345"),
+                "31 characters is a slot name");
+  g_tests.check(roundtrips(directory, "Hero_1", "{\"a\":1}"),
+                "a mixed-case slot saves");
+  g_tests.check(fs::exists(slot_file(directory, "hero_1")),
+                "it is stored lower-case");
+  rt::SaveSlotPayload loaded{};
+  g_tests.check((rt::read_game_data_from(directory.c_str(), "HERO_1",
+                                         &loaded) == rt::SaveReadResult::Ok) &&
+                    (std::strcmp(loaded.data, "{\"a\":1}") == 0),
+                "slot names ignore case");
+  g_tests.check(roundtrips(directory, "slot2", "{\"b\":2}") &&
+                    roundtrips(directory, "hero_1", "{\"a\":1}"),
+                "slots are independent");
+  g_tests.check(read_status(directory, "nothing") == rt::SaveReadResult::Absent,
+                "a slot never saved is absent");
+  remove_directory(directory);
+}
+
+/// Saves "{\"coins\":3}" to `slot`, then rewrites its file with `edit`
+/// applied and reads it back.
+template <typename Edit>
+rt::SaveReadResult read_after(const std::string &directory, const char *slot,
+                              Edit edit) {
+  const char payload[] = "{\"coins\":3}";
+  if (!rt::save_game_data_to(directory.c_str(), slot, payload,
+                             sizeof(payload) - 1U)) {
+    return rt::SaveReadResult::Ok;
+  }
+  std::string text = read_text(slot_file(directory, slot));
+  edit(&text);
+  if (!write_text(slot_file(directory, slot), text)) {
+    return rt::SaveReadResult::Ok;
+  }
+  return read_status(directory, slot);
+}
+
+void check_damage() {
+  const std::string directory = fresh_directory("damage");
+  using R = rt::SaveReadResult;
+  g_tests.check(read_after(directory, "cut",
+                           [](std::string *t) { t->pop_back(); }) == R::Corrupt,
+                "a save cut off by one byte is corrupt");
+  g_tests.check(read_after(directory, "longer",
+                           [](std::string *t) { t->push_back(' '); }) ==
+                    R::Corrupt,
+                "a save with a byte past its payload is corrupt");
+  g_tests.check(read_after(directory, "flipped",
+                           [](std::string *t) { t->back() = '4'; }) ==
+                    R::Corrupt,
+                "a save with a changed payload byte fails its checksum");
+  g_tests.check(read_after(directory, "noheader",
+                           [](std::string *t) { *t = "{\"coins\":3}"; }) ==
+                    R::Corrupt,
+                "a file without a header line is corrupt");
+  g_tests.check(read_after(directory, "notjson",
+                           [](std::string *t) { (*t)[0] = '['; }) == R::Corrupt,
+                "a header that is not an object is corrupt");
+  g_tests.check(read_after(directory, "format",
+                           [](std::string *t) {
+                             t->replace(t->find("engine-save"), 11U,
+                                        "other-save!");
+                           }) == R::Corrupt,
+                "a header of another format is corrupt");
+  g_tests.check(read_after(directory, "newer",
+                           [](std::string *t) {
+                             t->replace(t->find("\"version\":1"), 11U,
+                                        "\"version\":2");
+                           }) == R::Unsupported,
+                "a header from a newer format is unsupported");
+  g_tests.check(read_after(directory, "extra",
+                           [](std::string *t) { t->insert(1U, "\"x\":0,"); }) ==
+                    R::Corrupt,
+                "a header with a key it does not define is corrupt");
+  g_tests.check(read_after(directory, "checksum",
+                           [](std::string *t) {
+                             const std::size_t at = t->find("checksum\":\"");
+                             (*t)[at + 11U] = 'G';
+                           }) == R::Corrupt,
+                "a checksum that is not hex is corrupt");
+
+  // A directory planted where the slot file belongs: a read fault, never
+  // a successful read of nothing.
+  std::error_code ec{};
+  fs::create_directories(fs::path(slot_file(directory, "planted")), ec);
+  rt::SaveSlotPayload loaded{};
+  g_tests.check((rt::read_game_data_from(directory.c_str(), "planted",
+                                         &loaded) != rt::SaveReadResult::Ok) &&
+                    (loaded.data == nullptr) && (loaded.length == 0U),
+                "a failed read is a failure with nothing loaded");
+  remove_directory(directory);
+}
+
+void check_listing() {
+  const std::string directory = fresh_directory("listing");
+  rt::SaveSlotInfo slots[8] = {};
+  g_tests.check(rt::list_game_saves_in(directory.c_str(), slots, 8U) == 0U,
+                "a directory with no saves lists none");
+  const char *const names[] = {"zeta", "alpha", "mid"};
+  for (const char *name : names) {
+    g_tests.check(rt::save_game_data_to(directory.c_str(), name, "{}", 2U),
+                  "a listing fixture saves");
+  }
+  g_tests.check(write_text(slot_file(directory, "broken"), "not a save"),
+                "a damaged slot is planted");
+  g_tests.check(
+      write_text(slot_file(directory, "Upper"), "x") &&
+          write_text((fs::path(directory) / "saves" / "notes.txt").string(),
+                     "x"),
+      "files no save writes are planted");
+  const std::size_t total =
+      rt::list_game_saves_in(directory.c_str(), slots, 8U);
+  g_tests.check(total == 4U, "every slot file is listed and nothing else");
+  g_tests.check((std::strcmp(slots[0].slot, "alpha") == 0) &&
+                    (std::strcmp(slots[1].slot, "broken") == 0) &&
+                    (std::strcmp(slots[2].slot, "mid") == 0) &&
+                    (std::strcmp(slots[3].slot, "zeta") == 0),
+                "slots list sorted by name");
+  g_tests.check((slots[0].status == rt::SaveReadResult::Ok) &&
+                    (slots[0].payloadBytes == 2U) && (slots[0].savedAt > 0) &&
+                    !slots[0].legacy,
+                "a slot lists its size and save time");
+  g_tests.check(slots[1].status == rt::SaveReadResult::Corrupt,
+                "a damaged slot lists as corrupt");
+  rt::SaveSlotInfo two[2] = {};
+  g_tests.check((rt::list_game_saves_in(directory.c_str(), two, 2U) == 4U) &&
+                    (std::strcmp(two[0].slot, "alpha") == 0) &&
+                    (std::strcmp(two[1].slot, "broken") == 0),
+                "a short listing keeps the lowest names and counts them all");
+  remove_directory(directory);
+}
+
+void check_slot_count() {
+  const std::string directory = fresh_directory("count");
+  bool all = true;
+  char name[16] = {};
+  for (std::size_t i = 0U; i < rt::kMaxSaveSlots; ++i) {
+    std::snprintf(name, sizeof(name), "s%zu", i);
+    all = rt::save_game_data_to(directory.c_str(), name, "{}", 2U) && all;
+  }
+  g_tests.check(all, "kMaxSaveSlots slots save");
+  g_tests.check(!rt::save_game_data_to(directory.c_str(), "one_more", "{}", 2U),
+                "a new slot past kMaxSaveSlots is refused");
+  g_tests.check(rt::save_game_data_to(directory.c_str(), "s0", "{\"x\":1}", 7U),
+                "an existing slot still saves at the limit");
+  g_tests.check(
+      rt::discard_game_save_in(directory.c_str(), "s1") &&
+          rt::save_game_data_to(directory.c_str(), "one_more", "{}", 2U),
+      "discarding a slot makes room for a new one");
+  remove_directory(directory);
+}
+
+void check_holds() {
+  const std::string directory = fresh_directory("holds");
+  const char *dir = directory.c_str();
+  const std::string file = slot_file(directory, "kept");
+  g_tests.check(write_text(file, "damaged"), "a damaged slot is planted");
+  g_tests.check(read_status(directory, "kept") == rt::SaveReadResult::Corrupt,
+                "it reads as corrupt");
+  rt::hold_game_save_in(dir, "kept");
+  g_tests.check(rt::game_save_held_in(dir, "KEPT") &&
+                    !rt::save_game_data_to(dir, "kept", "{}", 2U) &&
+                    (read_text(file) == "damaged"),
+                "a held slot refuses saves and keeps its file");
+  g_tests.check(rt::save_game_data_to(dir, "other", "{}", 2U),
+                "other slots save while one is held");
+  g_tests.check(rt::discard_game_save_in(dir, "kept") &&
+                    !rt::game_save_held_in(dir, "kept") &&
+                    (read_text(file + ".discarded-1") == "damaged") &&
+                    !fs::exists(file),
+                "discarding moves the file aside intact and lifts the hold");
+  g_tests.check(roundtrips(directory, "kept", "{\"fresh\":1}"),
+                "the next save starts a new file");
+  rt::hold_game_save_in(dir, "kept");
+  g_tests.check(rt::discard_game_save_in(dir, "kept") &&
+                    fs::exists(file + ".discarded-2") &&
+                    (read_text(file + ".discarded-1") == "damaged"),
+                "a second discard takes the next free name");
+  rt::hold_game_save_in(dir, "kept");
+  g_tests.check(rt::discard_game_save_in(dir, "kept") &&
+                    !rt::game_save_held_in(dir, "kept"),
+                "discarding a slot with no file lifts the hold");
+  remove_directory(directory);
+}
+
+void check_legacy() {
+  const std::string directory = fresh_directory("legacy");
+  const char *dir = directory.c_str();
+  const std::string legacy = (fs::path(directory) / "save.json").string();
+  const std::string old = "{\"entries\":[{\"k\":\"coins\",\"v\":7}]}";
+  g_tests.check(write_text(legacy, old), "a legacy save.json is planted");
+  rt::SaveSlotPayload loaded{};
+  g_tests.check((rt::read_game_data_from(dir, "default", &loaded) ==
+                 rt::SaveReadResult::Ok) &&
+                    (std::string(loaded.data, loaded.length) == old),
+                "a legacy save reads as the default slot");
+  g_tests.check(read_status(directory, "other") == rt::SaveReadResult::Absent,
+                "a legacy save is the default slot only");
+  rt::SaveSlotInfo slots[2] = {};
+  g_tests.check((rt::list_game_saves_in(dir, slots, 2U) == 1U) &&
+                    (std::strcmp(slots[0].slot, "default") == 0) &&
+                    slots[0].legacy && (slots[0].payloadBytes == old.size()),
+                "a legacy save lists as the default slot");
+  g_tests.check(write_text(legacy, ""), "an empty legacy save is planted");
+  g_tests.check((rt::read_game_data_from(dir, "default", &loaded) ==
+                 rt::SaveReadResult::Ok) &&
+                    (loaded.length == 0U),
+                "an empty legacy save reads as an empty payload");
+  g_tests.check(write_text(legacy, old), "the legacy save is restored");
+
+  rt::hold_game_save_in(dir, "default");
+  g_tests.check(!rt::save_game_data_to(dir, "default", "{}", 2U) &&
+                    (read_text(legacy) == old),
+                "a held default slot keeps the legacy save");
+  rt::discard_game_save_in(dir, "default");
+  g_tests.check(!fs::exists(legacy) &&
+                    (read_text(legacy + ".discarded-1") == old),
+                "discarding the default slot moves the legacy save aside");
+
+  g_tests.check(write_text(legacy, old), "a legacy save is planted again");
+  g_tests.check(roundtrips(directory, "default", "{\"new\":1}"),
+                "the default slot saves over a legacy save");
+  g_tests.check(!fs::exists(legacy) &&
+                    (read_text(legacy + ".migrated-1") == old),
+                "its first save moves the legacy save aside, intact");
+  g_tests.check(
+      rt::discard_game_save_in(dir, "default") &&
+          (read_status(directory, "default") == rt::SaveReadResult::Absent),
+      "a discard never brings the legacy save back");
+  remove_directory(directory);
+}
+
+} // namespace
+
 int main() {
-  int result = check_roundtrip_with_directory_creation();
-  if (result != 0) {
-    return result;
-  }
-  result = check_held_slot_is_kept_until_discarded();
-  if (result != 0) {
-    return result;
-  }
-  result = check_failure_paths();
-  if (result != 0) {
-    return result;
-  }
-  result = check_large_saves_and_ceiling();
-  if (result != 0) {
-    return result;
-  }
-  result = check_read_capacity_boundaries();
-  if (result != 0) {
-    return result;
-  }
-  return check_read_error_is_not_a_successful_load();
+  check_round_trips();
+  check_limit();
+  check_slot_names();
+  check_damage();
+  check_listing();
+  check_slot_count();
+  check_holds();
+  check_legacy();
+  return g_tests.finish("save slot tests");
 }

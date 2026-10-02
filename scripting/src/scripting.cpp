@@ -215,6 +215,10 @@ void register_engine_bindings(lua_State *state) noexcept {
   lua_setfield(state, -2, "load_data");
   lua_pushcfunction(state, &lua_engine_discard_save);
   lua_setfield(state, -2, "discard_save");
+  lua_pushcfunction(state, &lua_engine_list_saves);
+  lua_setfield(state, -2, "list_saves");
+  lua_pushcfunction(state, &lua_engine_get_save_limit);
+  lua_setfield(state, -2, "get_save_limit");
 
   lua_pushcfunction(state, &lua_engine_set_timeout);
   lua_setfield(state, -2, "set_timeout");

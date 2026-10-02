@@ -4,15 +4,15 @@
 produced [0015](0015-commercial-anime-engine-on-six-platforms.md).
 
 **Status:** Point 5 is in place for a running game's per-user data: the
-save slot and the rebound input map live in a per-project directory
+save slots and the rebound input map live in a per-project directory
 (`core/include/engine/core/project_data.h`), named by the project's GUID
 when it was opened from its document (`engine_unit_project_data_guid`)
 and by its mounted content root otherwise. Point 1's document format
 exists: the `.project` reader and writer
 (`content/include/engine/content/project_document.h`) own identity, roots,
 the scene list, the startup scene, the main script and its sandbox
-budgets and the collision layers and their matrix (both edited in the
-editor's Project Settings) and the packages it depends on (each mounted at `packages/<name>`, #759), and
+budgets, the collision layers and their matrix, and the largest save
+slot (all edited in the editor's Project Settings) and the packages it depends on (each mounted at `packages/<name>`, #759), and
 `engine_unit_project_document` pins them. A project opens by path through
 `engine::open_project` (`runtime/include/engine/project.h`,
 `engine_integration_project_open`), which `engine_validate --project`

@@ -8,7 +8,8 @@
 // project's script limits reach the config (the engine's defaults where it
 // sets none, whatever the caller held) and the running VM at bootstrap,
 // and a later run of a project that sets none is back on the defaults; its
-// collision layers reach the config and the running engine the same way. A
+// collision layers and save limit reach the config and the running engine
+// the same way, and bootstrap refuses a save limit of 0. A
 // project's packages open with it, each mounted at packages/<name>; one
 // whose folder is missing refuses the open; and a package's assets are
 // catalogued under their own identities and its scripts load.
@@ -35,6 +36,7 @@
 #include "engine/runtime/collision_layers.h"
 #include "engine/runtime/editor_bridge.h"
 #include "engine/runtime/engine_pipeline.h"
+#include "engine/runtime/save_data.h"
 #include "engine/scripting/script_limits.h"
 #include "engine/scripting/scripting.h"
 
@@ -274,9 +276,9 @@ void test_bootstrap(const fs::path &root) {
   engine::shutdown();
 }
 
-/// A project that sets limits, in `dir`: 2,500,000 instructions and an
-/// unlimited allocator; it also names layer 3 "Player" and ignores the
-/// Player-layer 4 pair.
+/// A project that sets limits, in `dir`: 2,500,000 instructions, an
+/// unlimited allocator and 16 MiB save slots; it also names layer 3
+/// "Player" and ignores the Player-layer 4 pair.
 bool make_limited_project(const fs::path &dir) {
   if (!make_project(dir, false)) {
     return false;
@@ -290,6 +292,8 @@ bool make_limited_project(const fs::path &dir) {
                 sizeof(doc.collisionLayers.names[3]), "%s", "Player");
   engine::content::set_collision_layer_pair(&doc.collisionLayers, 3U, 4U,
                                             false);
+  doc.saveSettings.maxSlotMiBSet = true;
+  doc.saveSettings.maxSlotMiB = 16U;
   const std::string file = (dir / "Island.project").string();
   return engine::content::write_project_document(file.c_str(), doc);
 }
@@ -338,6 +342,12 @@ void test_script_limits(const fs::path &root) {
           engine::content::collision_layers_are_default(plain.collisionLayers),
       "a project's collision layers reach the config, and a project naming "
       "none has the defaults");
+  g_tests.check(
+      (limited.saveSlotLimitBytes == 16U * 1024U * 1024U) &&
+          (plain.saveSlotLimitBytes ==
+           engine::runtime::kDefaultSaveSlotLimitBytes),
+      "a project's save limit reaches the config, and a project setting "
+      "none has the default");
 
   engine::EngineConfig cleared = limited;
   engine::configure_without_project(&cleared);
@@ -345,8 +355,10 @@ void test_script_limits(const fs::path &root) {
       (cleared.scriptInstructionLimit == sc::kDefaultInstructionLimit) &&
           (cleared.scriptMemoryLimitBytes == sc::kDefaultMemoryLimit) &&
           engine::content::collision_layers_are_default(
-              cleared.collisionLayers),
-      "no project restores the default limits and layers");
+              cleared.collisionLayers) &&
+          (cleared.saveSlotLimitBytes ==
+           engine::runtime::kDefaultSaveSlotLimitBytes),
+      "no project restores the default limits, layers and save limit");
 
   const engine::content::ProjectScriptLimits memoryOnly{false, 0U, true, 32U};
   const engine::ScriptLimits resolved =
@@ -365,6 +377,8 @@ void test_script_limits(const fs::path &root) {
   g_tests.check(engine::content::find_collision_layer(
                     engine::runtime::project_collision_layers(), "player") == 3,
                 "bootstrap makes the project's layers the running ones");
+  g_tests.check(engine::runtime::save_slot_limit() == 16U * 1024U * 1024U,
+                "bootstrap makes the project's save limit the running one");
   engine::shutdown();
   if (!bootstrap_headless(plain)) {
     g_tests.fail("the project without limits bootstraps headless");
@@ -377,7 +391,14 @@ void test_script_limits(const fs::path &root) {
   g_tests.check(engine::content::collision_layers_are_default(
                     engine::runtime::project_collision_layers()),
                 "and its layers are the defaults again");
+  g_tests.check(engine::runtime::save_slot_limit() ==
+                    engine::runtime::kDefaultSaveSlotLimitBytes,
+                "and its save limit is the default again");
   engine::shutdown();
+  engine::EngineConfig badLimit = plain;
+  badLimit.saveSlotLimitBytes = 0U;
+  g_tests.check(!bootstrap_headless(badLimit),
+                "bootstrap refuses a save limit of 0");
 }
 
 /// A project in `dir` depending on the package "ui_kit", whose folder

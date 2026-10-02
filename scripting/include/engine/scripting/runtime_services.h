@@ -62,12 +62,27 @@ constexpr std::size_t kMaxTimerSlots = 256U;
 /// effects), so 16 kinds were met; a pool is about 13 KB of fixed storage.
 constexpr std::size_t kMaxEntityPools = 64U;
 constexpr std::size_t kMaxEntityPoolSize = 1024U;
-/// Largest document save_game_data accepts and load_game_data returns, the
-/// save slot's hard ceiling; the runtime asserts it matches.
-constexpr std::size_t kMaxGameSaveBytes = 4U * 1024U * 1024U;
-/// What reading the game save slot found; the runtime's SaveReadResult,
-/// asserted value for value.
-enum class GameSaveRead : std::uint8_t { Ok, Absent, Unreadable };
+/// A save slot name's capacity, terminator included, and how many slots a
+/// listing returns; the runtime asserts both match its own.
+constexpr std::size_t kGameSaveSlotNameCapacity = 32U;
+constexpr std::size_t kMaxGameSaveSlots = 256U;
+/// What reading a save slot found; the runtime's SaveReadResult, asserted
+/// value for value.
+enum class GameSaveRead : std::uint8_t {
+  Ok,
+  Absent,
+  Unreadable,
+  Corrupt,
+  Unsupported,
+};
+/// One save slot as a listing sees it; the runtime's SaveSlotInfo.
+struct GameSaveSlotInfo final {
+  char slot[kGameSaveSlotNameCapacity] = {};
+  GameSaveRead status = GameSaveRead::Ok;
+  std::int64_t savedAt = 0;
+  std::uint64_t payloadBytes = 0U;
+  bool legacy = false;
+};
 
 /// Visitor for the entity iteration operations.
 using EntityVisitFn = void (*)(core::Entity entity, void *context) noexcept;
@@ -418,16 +433,25 @@ struct RuntimeServices final {
   bool (*play_music)(const char *path, float volume,
                      bool loop) noexcept = nullptr;
   void (*stop_music)() noexcept = nullptr;
-  bool (*save_game_data)(const char *json,
+  /// Writes `payload` as the save slot `slot` (a valid slot name).
+  bool (*save_game_data)(const char *slot, const char *payload,
                          std::size_t length) noexcept = nullptr;
-  GameSaveRead (*load_game_data)(char *out, std::size_t capacity,
+  /// Reads the save slot `slot`; on Ok, *outPayload points at its
+  /// NUL-terminated payload, valid until the next load_game_data.
+  GameSaveRead (*load_game_data)(const char *slot, const char **outPayload,
                                  std::size_t *outLength) noexcept = nullptr;
-  /// Holds the save slot after a load could not read it or found its
-  /// document corrupt or from a newer build: save_game_data refuses until
+  /// Holds a slot after a load could not read it or found its document
+  /// corrupt or from a newer build: save_game_data refuses that slot until
   /// discard_game_save.
-  void (*hold_game_save)() noexcept = nullptr;
-  /// Moves the save aside (never deleting it) and lifts the hold.
-  bool (*discard_game_save)() noexcept = nullptr;
+  void (*hold_game_save)(const char *slot) noexcept = nullptr;
+  /// Moves a slot aside (never deleting it) and lifts its hold.
+  bool (*discard_game_save)(const char *slot) noexcept = nullptr;
+  /// Lists the save slots sorted by name into `out`; returns how many
+  /// there are, which may exceed `capacity`.
+  std::size_t (*list_game_saves)(GameSaveSlotInfo *out,
+                                 std::size_t capacity) noexcept = nullptr;
+  /// The largest payload save_game_data writes, the project's setting.
+  std::size_t (*game_save_limit)() noexcept = nullptr;
 
   bool (*save_scene)(const runtime::World *world,
                      const char *path) noexcept = nullptr;

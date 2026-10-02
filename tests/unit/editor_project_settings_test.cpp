@@ -16,8 +16,14 @@
 //   field, then makes them the project's and installs the matrix on the
 //   world; saving the defaults back leaves the document byte-identical,
 //   and a refused set changes neither the file nor the running layers;
+// - the Saves section refuses a save limit outside 1..256 MiB; its Apply
+//   writes the limit into the document, keeping every other field, and
+//   makes it the running limit; saving the default back leaves the
+//   document byte-identical, and a refused limit changes neither the file
+//   nor the running limit;
 // - the window, drawn on a headless ImGui frame, shows the project, its
-//   limits and its physics section, or says the document will not read.
+//   limits and its physics and saves sections, or says the document will
+//   not read.
 
 #if defined(__clang__) && (defined(__x86_64__) || defined(__i386__)) &&        \
     !defined(__PRFCHWINTRIN_H)
@@ -45,6 +51,7 @@
 #include "engine/physics/physics.h"
 #include "engine/physics/physics_context.h"
 #include "engine/runtime/collision_layers.h"
+#include "engine/runtime/save_data.h"
 #include "engine/runtime/world.h"
 #include "engine/scripting/script_limits.h"
 #include "engine/scripting/scripting.h"
@@ -343,6 +350,45 @@ std::string draw_frame(const char *projectFile) noexcept {
   return text;
 }
 
+void check_saves(const fs::path &root) {
+  const fs::path file = root / "Saves.project";
+  const std::string original = write_plain_project(file);
+  check(!original.empty(), "write a project that sets no save limit");
+  const std::string path = file.string();
+  ct::ProjectDocument reread{};
+  check(ct::read_project_document(path.c_str(), &reread).has_value() &&
+            (project_saves_draft(reread.saveSettings) == 4),
+        "the draft shows the engine's default save limit");
+  check((project_saves_problem(0) != nullptr) &&
+            (project_saves_problem(257) != nullptr) &&
+            (project_saves_problem(1) == nullptr) &&
+            (project_saves_problem(256) == nullptr),
+        "a save limit is from 1 to 256 MiB");
+
+  check(save_project_saves(path.c_str(), 32), "Apply saves a new save limit");
+  check(ct::read_project_document(path.c_str(), &reread).has_value() &&
+            reread.saveSettings.maxSlotMiBSet &&
+            (reread.saveSettings.maxSlotMiB == 32U) &&
+            (std::strcmp(reread.mainScript, "assets/main.lua") == 0) &&
+            (reread.sceneCount == 2U),
+        "the document holds the limit and every other field");
+  check(engine::runtime::save_slot_limit() == 32U * kMiB,
+        "the running save limit is the new one at once");
+
+  const std::string before = read_all(file);
+  check(!save_project_saves(path.c_str(), 0) && (read_all(file) == before) &&
+            (engine::runtime::save_slot_limit() == 32U * kMiB),
+        "a refused limit changes neither the file nor the running limit");
+
+  check(save_project_saves(path.c_str(), 4), "Apply saves the default back");
+  check(read_all(file) == original,
+        "the default leaves the document byte-identical to one that never "
+        "set it");
+  check(engine::runtime::save_slot_limit() ==
+            engine::runtime::kDefaultSaveSlotLimitBytes,
+        "and the running limit is the default again");
+}
+
 void check_window(const fs::path &root) {
   const fs::path file = root / "Island.project";
   const std::string path = file.string();
@@ -361,6 +407,9 @@ void check_window(const fs::path &root) {
             (text.find("Layer Names") != std::string::npos) &&
             (text.find("Layer Collision Matrix") != std::string::npos),
         "the window shows the physics section");
+  check((text.find("Saves") != std::string::npos) &&
+            (text.find("Largest save (MiB)") != std::string::npos),
+        "the window shows the saves section");
   const std::string broken = (root / "Broken.project").string();
   const std::string refused = draw_frame(broken.c_str());
   check((refused.find("will not read") != std::string::npos) &&
@@ -397,6 +446,7 @@ int main() {
   check_problems();
   check_save(root);
   check_physics(root);
+  check_saves(root);
   check_window(root);
 
   fs::remove_all(root, ec);

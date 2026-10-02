@@ -1,6 +1,8 @@
 // Verifies core::read_whole_file's outcome contract (issue #321): Ok versus
 // the ordinary Absent case versus the two fault classes (Unreadable,
-// TooLarge) that persisting callers must never mistake for "no stored file".
+// TooLarge) that persisting callers must never mistake for "no stored file",
+// and core::read_file_prefix, which reads the start of a file and nothing
+// more.
 
 #include "engine/core/file_read.h"
 #include "../test_harness.h"
@@ -135,6 +137,29 @@ int main() {
   check(read_whole_file(okPath.string().c_str(), buffer, 1U, &size) ==
             FileReadResult::TooLarge,
         "nonempty file overflows capacity one");
+
+  // A prefix read takes the start of a longer file and says Ok, takes a
+  // short file whole, and reports absence and faults as the whole read.
+  using engine::core::read_file_prefix;
+  char prefix[4] = {};
+  check(read_file_prefix(bigPath.string().c_str(), prefix, sizeof(prefix),
+                         &size) == FileReadResult::Ok,
+        "a prefix of a longer file reads Ok");
+  check((size == 3U) && (std::strcmp(prefix, "aaa") == 0),
+        "the prefix is capacity - 1 bytes, NUL-terminated");
+  check(read_file_prefix(emptyPath.string().c_str(), prefix, sizeof(prefix),
+                         &size) == FileReadResult::Ok &&
+            (size == 0U),
+        "an empty file's prefix is empty");
+  check(read_file_prefix(missingPath.string().c_str(), prefix, sizeof(prefix),
+                         &size) == FileReadResult::Absent,
+        "a missing file's prefix reads Absent");
+  check(read_file_prefix(dirPath.string().c_str(), prefix, sizeof(prefix),
+                         &size) == FileReadResult::Unreadable,
+        "a directory's prefix reads Unreadable");
+  check(read_file_prefix(okPath.string().c_str(), prefix, 0U, &size) ==
+            FileReadResult::Unreadable,
+        "a zero-capacity prefix is Unreadable");
 
   fs::remove_all(root, ec);
   return g_tests.finish("core file_read tests");

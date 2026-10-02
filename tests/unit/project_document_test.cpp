@@ -15,7 +15,9 @@
 // - the optional collision layers (names and ignored pairs) read in any
 //   order and write in one canonical order, stay out of a document with
 //   the default layers, and refuse a bad or repeated name, a repeated bit
-//   or pair, a bit outside 0..31, an empty section and a one-sided matrix.
+//   or pair, a bit outside 0..31, an empty section and a one-sided matrix;
+// - the optional save limit reads and writes exactly, stays out of a
+//   document that sets none, and is refused outside 1..256 MiB.
 
 #include "engine/content/project_document.h"
 
@@ -416,6 +418,83 @@ void check_script_limits(engine::tests::TestContext &t) {
           "the writer refuses a limit its reader would refuse");
 }
 
+/// The reference document with `saves` appended as its last member.
+std::string with_saves(const char *saves) {
+  return replaced(
+      reference_text(), "\"assets/main.lua\"\n}",
+      (std::string("\"assets/main.lua\",\n  \"saves\": ") + saves + "\n}")
+          .c_str());
+}
+
+void check_save_settings(engine::tests::TestContext &t) {
+  std::unique_ptr<char[]> out(
+      new (std::nothrow) char[ct::kMaxProjectDocumentBytes]);
+  std::size_t length = 0U;
+
+  const std::string plain = reference_text();
+  std::unique_ptr<ct::ProjectDocument> none = fresh();
+  t.check(ct::parse_project_document(plain.data(), plain.size(), none.get())
+                  .has_value() &&
+              !none->saveSettings.maxSlotMiBSet &&
+              ct::format_project_document(
+                  *none, out.get(), ct::kMaxProjectDocumentBytes, &length) &&
+              (std::string(out.get(), length) == plain),
+          "a document with no saves section sets nothing and writes none");
+
+  const std::string sixteen = with_saves("{\n    \"maxSlotMiB\": 16\n  }");
+  std::unique_ptr<ct::ProjectDocument> set = fresh();
+  t.check(ct::parse_project_document(sixteen.data(), sixteen.size(), set.get())
+                  .has_value() &&
+              set->saveSettings.maxSlotMiBSet &&
+              (set->saveSettings.maxSlotMiB == 16U) &&
+              ct::format_project_document(
+                  *set, out.get(), ct::kMaxProjectDocumentBytes, &length) &&
+              (std::string(out.get(), length) == sixteen),
+          "a save limit reads back and writes exactly its text");
+
+  struct Bound final {
+    const char *saves;
+    bool accepted;
+    const char *field;
+  };
+  const Bound bounds[] = {
+      {"{\"maxSlotMiB\": 1}", true, ""},
+      {"{\"maxSlotMiB\": 0}", false, "saves.maxSlotMiB"},
+      {"{\"maxSlotMiB\": 256}", true, ""},
+      {"{\"maxSlotMiB\": 257}", false, "saves.maxSlotMiB"},
+      {"{\"maxSlotMiB\": -1}", false, "saves.maxSlotMiB"},
+      {"{\"maxSlotMiB\": 1.5}", false, "saves.maxSlotMiB"},
+      {"{\"maxSlotMiB\": \"4\"}", false, "saves.maxSlotMiB"},
+      {"{\"maxSlotMiB\": 4294967300}", false, "saves.maxSlotMiB"},
+      {"{}", false, "saves"},
+      {"[]", false, "saves"},
+      {"{\"maxSlots\": 4}", false, "saves.maxSlots"},
+      {"{\"maxSlotMiB\": 4, \"maxSlotMiB\": 4}", false, "saves.maxSlotMiB"},
+  };
+  for (const Bound &bound : bounds) {
+    const std::string text = with_saves(bound.saves);
+    std::unique_ptr<ct::ProjectDocument> document = fresh();
+    const bool accepted =
+        ct::parse_project_document(text.data(), text.size(), document.get())
+            .has_value();
+    char label[160] = {};
+    std::snprintf(label, sizeof(label), "saves %s is %s", bound.saves,
+                  bound.accepted ? "accepted" : "refused");
+    t.check(bound.accepted ? accepted : refused_for(text, bound.field), label);
+  }
+
+  std::unique_ptr<ct::ProjectDocument> invalid = fresh();
+  t.check(ct::parse_project_document(plain.data(), plain.size(), invalid.get())
+              .has_value(),
+          "the reference parses for the save writer check");
+  invalid->saveSettings.maxSlotMiBSet = true;
+  invalid->saveSettings.maxSlotMiB = 0U;
+  t.check(!ct::format_project_document(*invalid, out.get(),
+                                       ct::kMaxProjectDocumentBytes, &length) &&
+              (out[0] == '\0'),
+          "the writer refuses a save limit its reader would refuse");
+}
+
 /// The reference document with `dependencies` appended as its last member.
 std::string with_dependencies(const char *dependencies) {
   return replaced(reference_text(), "\"assets/main.lua\"\n}",
@@ -710,6 +789,7 @@ int main() {
   engine::tests::TestContext t;
   check_round_trip(t);
   check_script_limits(t);
+  check_save_settings(t);
   check_packages(t);
   check_collision_layers(t);
   check_refusals(t);
