@@ -1,10 +1,33 @@
 # Configures engine helpers build settings for the Engine repository.
 
 include(CMakeParseArguments)
+include(FetchContent)
 
 # Embedded in every engine executable on Windows: UTF-8 as the active code
 # page, so a UTF-8 path names the same file there as everywhere else.
 set(ENGINE_WINDOWS_UTF8_MANIFEST "${CMAKE_CURRENT_LIST_DIR}/windows_utf8.manifest")
+
+# Adds a fetched third-party CMake project under the policy defaults its
+# code was written for, wherever the project leaves a policy unset. A
+# macro, so FetchContent's <name>_SOURCE_DIR and <name>_BINARY_DIR reach
+# the caller's scope.
+#
+# CMP0219 (CMake 4.4): code written before 4.4 doubles the backslashes in
+# macro arguments for the old unescaping rule, so it defaults to OLD.
+# SDL3's ELF dlopen-notes check depends on it: under NEW its test source
+# stops compiling and the notes are silently dropped. A
+# CMAKE_POLICY_DEFAULT_CMP0219 the user sets wins.
+macro(engine_make_third_party_available name)
+    if(NOT DEFINED CMAKE_POLICY_DEFAULT_CMP0219)
+        set(CMAKE_POLICY_DEFAULT_CMP0219 OLD)
+        set(_ENGINE_DEFAULTED_CMP0219 TRUE)
+    endif()
+    FetchContent_MakeAvailable(${name})
+    if(_ENGINE_DEFAULTED_CMP0219)
+        unset(CMAKE_POLICY_DEFAULT_CMP0219)
+        unset(_ENGINE_DEFAULTED_CMP0219)
+    endif()
+endmacro()
 
 function(engine_set_cxx23 target visibility)
     target_compile_features(${target} ${visibility} cxx_std_23)
