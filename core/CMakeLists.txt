@@ -64,6 +64,16 @@ add_custom_target(engine_build_info ALL
     VERBATIM
 )
 
+# The OS services that do not use SDL (environment, random bytes, process
+# memory, console attach, temp and save-base directories) are one file per
+# OS, chosen here so no source branches on _WIN32 for them. Every
+# non-Windows target, Emscripten and Apple included, takes the POSIX file.
+if(WIN32)
+    set(ENGINE_CORE_PLATFORM_OS_SOURCE src/platform_os_windows.cpp)
+else()
+    set(ENGINE_CORE_PLATFORM_OS_SOURCE src/platform_os_posix.cpp)
+endif()
+
 engine_add_module_library(engine_core
     SOURCES
     src/asset_identity.cpp
@@ -92,6 +102,8 @@ engine_add_module_library(engine_core
     src/linear_allocator.cpp
     src/logging.cpp
     src/platform.cpp
+    src/platform_file_dialogs.cpp
+    ${ENGINE_CORE_PLATFORM_OS_SOURCE}
     src/project_data.cpp
     src/profiler.cpp
     src/reflect.cpp

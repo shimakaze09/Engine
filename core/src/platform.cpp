@@ -1,44 +1,23 @@
-// Implements platform behavior for the Engine core engine.
-
-// rand_s (platform_random_bytes) is only declared when this is defined
-// before the CRT headers.
-#if defined(_WIN32) && !defined(_CRT_RAND_S)
-#define _CRT_RAND_S
-#endif
+// The SDL-facing half of the platform layer: SDL and window lifecycle, the
+// event pump and its translation to engine events, display scale, mouse
+// capture, window geometry, gamepads, capability and native-handle
+// reporting, and the application and save directories. The file dialogs and
+// the per-OS services live in platform_file_dialogs.cpp and platform_os_*.cpp.
 
 #include "engine/core/platform.h"
 #include "engine/core/platform_event.h"
 
-#if defined(__clang__) && (defined(__x86_64__) || defined(__i386__)) && !defined(__PRFCHWINTRIN_H)
+#if defined(__clang__) && (defined(__x86_64__) || defined(__i386__)) &&        \
+    !defined(__PRFCHWINTRIN_H)
 #define __PRFCHWINTRIN_H // NOLINT(bugprone-reserved-identifier)
 #endif
 
 #include <SDL3/SDL.h>
 
-#include <cstdint>
 #include <array>
-#include <atomic>
+#include <cstdint>
 #include <cstdio>
-#include <cerrno>
-#include <cstdlib>
 #include <cstring>
-
-#if defined(_WIN32)
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#include <psapi.h>
-#elif defined(__APPLE__)
-#include <mach/mach.h>
-#include <mach/task.h>
-#elif defined(__linux__)
-#include <sys/random.h>
-#include <unistd.h>
-#endif
 
 #if defined(ENGINE_PLATFORM_WEB)
 #include <emscripten.h>
@@ -47,13 +26,118 @@
 #include "engine/core/input.h"
 #include "engine/core/logging.h"
 #include "engine/core/thread_affinity.h"
+#include "platform_internal.h"
 
 namespace engine::core {
+
+namespace platform_detail {
+
+namespace {
+
+/// Clamps and fills settings into a safe runtime range for directory path.
+void normalize_directory_path(char *path) noexcept {
+  if (path == nullptr) {
+    return;
+  }
+
+  std::size_t length = std::strlen(path);
+  for (std::size_t i = 0U; i < length; ++i) {
+    if (path[i] == '\\') {
+      path[i] = '/';
+    }
+  }
+
+  while (length > 1U && path[length - 1U] == '/') {
+    if ((length == 3U) && (path[1] == ':')) {
+      break;
+    }
+    path[length - 1U] = '\0';
+    --length;
+  }
+}
+
+} // namespace
+
+bool validate_path_output(char *outBuffer,
+                          std::size_t bufferCapacity) noexcept {
+  if ((outBuffer == nullptr) || (bufferCapacity == 0U)) {
+    return false;
+  }
+  outBuffer[0] = '\0';
+  return true;
+}
+
+bool copy_normalized_path(const char *path, char *outBuffer,
+                          std::size_t bufferCapacity) noexcept {
+  if (!validate_path_output(outBuffer, bufferCapacity) || (path == nullptr) ||
+      (path[0] == '\0')) {
+    return false;
+  }
+
+  const std::size_t length = std::strlen(path);
+  if ((length + 1U) > bufferCapacity) {
+    return false;
+  }
+
+  std::memcpy(outBuffer, path, length + 1U);
+  normalize_directory_path(outBuffer);
+  return outBuffer[0] != '\0';
+}
+
+bool append_path_segment(char *base, std::size_t capacity,
+                         const char *segment) noexcept {
+  if ((base == nullptr) || (segment == nullptr) || (segment[0] == '\0')) {
+    return false;
+  }
+
+  normalize_directory_path(base);
+
+  const std::size_t baseLength = std::strlen(base);
+  const std::size_t segmentLength = std::strlen(segment);
+  const bool needsSeparator =
+      (baseLength > 0U) && (base[baseLength - 1U] != '/');
+  const std::size_t totalLength =
+      baseLength + (needsSeparator ? 1U : 0U) + segmentLength;
+  if ((totalLength + 1U) > capacity) {
+    return false;
+  }
+
+  std::size_t writeOffset = baseLength;
+  if (needsSeparator) {
+    base[writeOffset] = '/';
+    ++writeOffset;
+  }
+  std::memcpy(base + writeOffset, segment, segmentLength);
+  base[totalLength] = '\0';
+  normalize_directory_path(base);
+  return true;
+}
+
+void log_sdl_error(const char *message) noexcept {
+  const char *sdlError = SDL_GetError();
+  if ((sdlError == nullptr) || (sdlError[0] == '\0')) {
+    log_message(LogLevel::Error, "platform", message);
+    return;
+  }
+
+  char buffer[256] = {};
+  std::snprintf(buffer, sizeof(buffer), "%s: %s", message, sdlError);
+  log_message(LogLevel::Error, "platform", buffer);
+}
+
+} // namespace platform_detail
+
+using platform_detail::append_path_segment;
+using platform_detail::build_save_base;
+using platform_detail::copy_normalized_path;
+using platform_detail::g_window;
+using platform_detail::kPlatformPathMax;
+using platform_detail::log_sdl_error;
+using platform_detail::validate_path_output;
 
 namespace {
 
 bool g_platformRunning = false;
-SDL_Window *g_window = nullptr;
 /// The window's un-maximized size, followed through resize events while
 /// the window is neither maximized nor fullscreen, so a geometry read
 /// while maximized reports the size it restores to.
@@ -90,147 +174,8 @@ void shutdown_gamepads() noexcept {
     g_gamepadSubsystem = false;
   }
 }
-constexpr std::size_t kPlatformPathMax = 1024U;
 constexpr char kDefaultOrganizationName[] = "Engine";
 constexpr char kDefaultApplicationName[] = "Engine";
-
-bool validate_path_output(char *outBuffer,
-                          std::size_t bufferCapacity) noexcept {
-  if ((outBuffer == nullptr) || (bufferCapacity == 0U)) {
-    return false;
-  }
-  outBuffer[0] = '\0';
-  return true;
-}
-
-
-/// Clamps and fills settings into a safe runtime range for directory path.
-void normalize_directory_path(char *path) noexcept {
-  if (path == nullptr) {
-    return;
-  }
-
-  std::size_t length = std::strlen(path);
-  for (std::size_t i = 0U; i < length; ++i) {
-    if (path[i] == '\\') {
-      path[i] = '/';
-    }
-  }
-
-  while (length > 1U && path[length - 1U] == '/') {
-    if ((length == 3U) && (path[1] == ':')) {
-      break;
-    }
-    path[length - 1U] = '\0';
-    --length;
-  }
-}
-
-bool copy_normalized_path(const char *path, char *outBuffer,
-                          std::size_t bufferCapacity) noexcept {
-  if (!validate_path_output(outBuffer, bufferCapacity) || (path == nullptr) ||
-      (path[0] == '\0')) {
-    return false;
-  }
-
-  const std::size_t length = std::strlen(path);
-  if ((length + 1U) > bufferCapacity) {
-    return false;
-  }
-
-  std::memcpy(outBuffer, path, length + 1U);
-  normalize_directory_path(outBuffer);
-  return outBuffer[0] != '\0';
-}
-
-bool append_path_segment(char *base, std::size_t capacity,
-                         const char *segment) noexcept {
-  if ((base == nullptr) || (segment == nullptr) || (segment[0] == '\0')) {
-    return false;
-  }
-
-  normalize_directory_path(base);
-
-  const std::size_t baseLength = std::strlen(base);
-  const std::size_t segmentLength = std::strlen(segment);
-  const bool needsSeparator = (baseLength > 0U) && (base[baseLength - 1U] != '/');
-  const std::size_t totalLength =
-      baseLength + (needsSeparator ? 1U : 0U) + segmentLength;
-  if ((totalLength + 1U) > capacity) {
-    return false;
-  }
-
-  std::size_t writeOffset = baseLength;
-  if (needsSeparator) {
-    base[writeOffset] = '/';
-    ++writeOffset;
-  }
-  std::memcpy(base + writeOffset, segment, segmentLength);
-  base[totalLength] = '\0';
-  normalize_directory_path(base);
-  return true;
-}
-
-#if defined(ENGINE_PLATFORM_WEB)
-/// The page's IndexedDB-backed mount (core/web/persistent_storage.js); a
-/// save anywhere else lives in memory and is gone on the next load.
-constexpr const char *kWebPersistentRoot = "/persistent";
-#endif
-
-/// Builds the requested runtime data for save base.
-bool build_save_base(char *outBuffer, std::size_t bufferCapacity) noexcept {
-#if defined(ENGINE_PLATFORM_WEB)
-  return copy_normalized_path(kWebPersistentRoot, outBuffer, bufferCapacity);
-#else
-  char value[kPlatformPathMax] = {};
-#if defined(_WIN32)
-  if (non_empty_env("APPDATA", value, sizeof(value))) {
-    return copy_normalized_path(value, outBuffer, bufferCapacity);
-  }
-  if (non_empty_env("USERPROFILE", value, sizeof(value))) {
-    if (!copy_normalized_path(value, outBuffer, bufferCapacity)) {
-      return false;
-    }
-    return append_path_segment(outBuffer, bufferCapacity, "AppData") &&
-           append_path_segment(outBuffer, bufferCapacity, "Roaming");
-  }
-  return false;
-#elif defined(__APPLE__)
-  if (!non_empty_env("HOME", value, sizeof(value))) {
-    return false;
-  }
-  if (!copy_normalized_path(value, outBuffer, bufferCapacity)) {
-    return false;
-  }
-  return append_path_segment(outBuffer, bufferCapacity, "Library") &&
-         append_path_segment(outBuffer, bufferCapacity, "Application Support");
-#else
-  if (non_empty_env("XDG_DATA_HOME", value, sizeof(value))) {
-    return copy_normalized_path(value, outBuffer, bufferCapacity);
-  }
-  if (!non_empty_env("HOME", value, sizeof(value))) {
-    return false;
-  }
-  if (!copy_normalized_path(value, outBuffer, bufferCapacity)) {
-    return false;
-  }
-  return append_path_segment(outBuffer, bufferCapacity, ".local") &&
-         append_path_segment(outBuffer, bufferCapacity, "share");
-#endif
-#endif
-}
-
-void log_sdl_error(const char *message) noexcept {
-  const char *sdlError = SDL_GetError();
-  if ((sdlError == nullptr) || (sdlError[0] == '\0')) {
-    log_message(LogLevel::Error, "platform", message);
-    return;
-  }
-
-  char buffer[256] = {};
-  std::snprintf(buffer, sizeof(buffer), "%s: %s", message, sdlError);
-  log_message(LogLevel::Error, "platform", buffer);
-}
 
 /// Lets a held mouse go. With `restore`, the cursor is first put at
 /// (x, y): SDL records a warp made in relative mode and moves the cursor
@@ -335,9 +280,9 @@ bool initialize_platform_impl(int width, int height, const char *title,
 #else
   constexpr SDL_WindowFlags kStartHidden = SDL_WINDOW_HIDDEN;
 #endif
-  g_window = SDL_CreateWindow(
-      title, width, height,
-      SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | kStartHidden);
+  g_window = SDL_CreateWindow(title, width, height,
+                              SDL_WINDOW_RESIZABLE |
+                                  SDL_WINDOW_HIGH_PIXEL_DENSITY | kStartHidden);
   if (g_window == nullptr) {
     log_sdl_error("failed to create SDL window");
     shutdown_platform_resources();
@@ -364,102 +309,6 @@ bool initialize_platform_impl(int width, int height, const char *title,
       SDL_GetWindowSize(g_window, &g_restoredWidth, &g_restoredHeight));
   g_platformRunning = true;
   return true;
-}
-
-/// Where a dialog slot is in its life. The main thread moves a slot out
-/// of Free (claim) and out of Delivered (take); the thread that answers
-/// the dialog moves it out of Pending and Abandoned. Every transition is
-/// on `state`, so it is the slot's only cross-thread contract.
-enum class DialogSlotState : std::uint8_t {
-  Free,
-  /// Shown and not yet answered.
-  Pending,
-  /// Given up while still open; the answer frees the slot.
-  Abandoned,
-  /// Answered; the result waits for the requester to take it.
-  Delivered,
-};
-
-/// One dialog, from request to taken result. SDL reads the filter array
-/// after the show call returns, so a copy lives here until the dialog
-/// closes. The answering thread writes outcome and path, then publishes
-/// them with a release on state; the main thread reads them only after
-/// an acquire load sees Delivered. The main thread reuses a slot only
-/// once it is Free again, and an answer's last access to the slot is the
-/// store that frees or delivers it.
-struct DialogSlot final {
-  std::atomic<DialogSlotState> state{DialogSlotState::Free};
-  /// Set by the main thread after the claim, before the dialog is shown,
-  /// and kept until the next claim; state says whether it is still live.
-  /// Atomic because a scripted answer may look it up from another thread.
-  std::atomic<FileDialogTicket> ticket{kNoFileDialog};
-  bool scripted = false;
-  FileDialogOutcome outcome = FileDialogOutcome::Cancelled;
-  std::array<char, kMaxFileDialogPathLength> path{};
-  std::array<SDL_DialogFileFilter,
-             static_cast<std::size_t>(kMaxFileDialogFilters)>
-      filters{};
-};
-constexpr std::size_t kDialogSlotCount =
-    static_cast<std::size_t>(kMaxPendingFileDialogs);
-std::array<DialogSlot, kDialogSlotCount> g_dialogSlots{};
-// Main thread only. Counts claims; a ticket encodes it with the slot index,
-// so a slot's successive tickets never repeat.
-std::uint32_t g_dialogClaims = 0U;
-bool g_scriptedDialogs = false;
-
-/// The slot a ticket was issued for, or null for kNoFileDialog.
-DialogSlot *dialog_slot_for(FileDialogTicket ticket) noexcept {
-  if (ticket == kNoFileDialog) {
-    return nullptr;
-  }
-  return &g_dialogSlots[static_cast<std::size_t>(ticket - 1U) %
-                        kDialogSlotCount];
-}
-
-/// Records an answer and hands it to whoever holds the ticket, or frees
-/// the slot when nobody does any more. Runs on the answering thread, once
-/// per shown dialog.
-void deliver_dialog_answer(DialogSlot &slot, FileDialogOutcome outcome,
-                           const char *path) noexcept {
-  slot.path[0] = '\0';
-  if (outcome == FileDialogOutcome::Chosen) {
-    const std::size_t length = std::strlen(path);
-    if (length < slot.path.size()) {
-      std::memcpy(slot.path.data(), path, length + 1U);
-    } else {
-      outcome = FileDialogOutcome::PathTooLong;
-      log_message(LogLevel::Error, "platform",
-                  "the chosen path is longer than a file dialog result can "
-                  "hold; it was refused");
-    }
-  }
-  slot.outcome = outcome;
-  DialogSlotState expected = DialogSlotState::Pending;
-  if (!slot.state.compare_exchange_strong(expected, DialogSlotState::Delivered,
-                                          std::memory_order_acq_rel,
-                                          std::memory_order_acquire)) {
-    // Abandoned while open: nobody will take this answer.
-    slot.state.store(DialogSlotState::Free, std::memory_order_release);
-  }
-}
-
-/// SDL's callback, translated to the engine's outcomes: a null list is a
-/// failure, an empty list a cancel.
-void SDLCALL dialog_trampoline(void *userdata, const char *const *filelist,
-                               int /*filter*/) noexcept {
-  auto *slot = static_cast<DialogSlot *>(userdata);
-  if (slot == nullptr) {
-    return;
-  }
-  if (filelist == nullptr) {
-    log_sdl_error("native file dialog failed");
-    deliver_dialog_answer(*slot, FileDialogOutcome::Failed, nullptr);
-  } else if (filelist[0] == nullptr) {
-    deliver_dialog_answer(*slot, FileDialogOutcome::Cancelled, nullptr);
-  } else {
-    deliver_dialog_answer(*slot, FileDialogOutcome::Chosen, filelist[0]);
-  }
 }
 
 // SDL numbers its scancodes by the same HID keyboard usage IDs the engine
@@ -710,96 +559,6 @@ void platform_close_gamepad(std::uint32_t instanceId) noexcept {
   }
 }
 
-bool non_empty_env(const char *name, char *out, std::size_t capacity) noexcept {
-  if ((out == nullptr) || (capacity == 0U)) {
-    return false;
-  }
-  out[0] = '\0';
-  if ((name == nullptr) || (name[0] == '\0')) {
-    return false;
-  }
-#if defined(_WIN32)
-  // The API reports the length the value needs when the buffer is too
-  // small, and 0 when the variable is unset; an empty value fits and
-  // returns 0 too, which is the same answer here.
-  const DWORD length =
-      GetEnvironmentVariableA(name, out, static_cast<DWORD>(capacity));
-  if ((length == 0U) || (length >= capacity)) {
-    out[0] = '\0';
-    return false;
-  }
-  return true;
-#else
-  const char *value = std::getenv(name);
-  if ((value == nullptr) || (value[0] == '\0')) {
-    return false;
-  }
-  const std::size_t length = std::strlen(value);
-  if (length >= capacity) {
-    return false;
-  }
-  std::memcpy(out, value, length + 1U);
-  return true;
-#endif
-}
-
-bool platform_random_bytes(void *out, std::size_t size) noexcept {
-  if (out == nullptr) {
-    return false;
-  }
-  if (size == 0U) {
-    return true;
-  }
-  auto *bytes = static_cast<unsigned char *>(out);
-
-#if defined(_WIN32)
-  // rand_s draws from the OS CSPRNG and needs no extra import library,
-  // unlike BCryptGenRandom. It yields four bytes at a time.
-  std::size_t written = 0U;
-  while (written < size) {
-    unsigned int value = 0U;
-    if (rand_s(&value) != 0) {
-      return false;
-    }
-    const std::size_t chunk =
-        ((size - written) < sizeof(value)) ? (size - written) : sizeof(value);
-    std::memcpy(bytes + written, &value, chunk);
-    written += chunk;
-  }
-  return true;
-#elif defined(__APPLE__)
-  arc4random_buf(bytes, size);
-  return true;
-#elif defined(__linux__)
-  std::size_t written = 0U;
-  while (written < size) {
-    const ssize_t got = getrandom(bytes + written, size - written, 0);
-    if (got < 0) {
-      if (errno == EINTR) {
-        continue;
-      }
-      break;
-    }
-    written += static_cast<std::size_t>(got);
-  }
-  if (written == size) {
-    return true;
-  }
-  // getrandom is unavailable before Linux 3.17 and can be blocked by a
-  // sandbox; the device is the long-standing fallback.
-  FILE *device = std::fopen("/dev/urandom", "rb");
-  if (device == nullptr) {
-    return false;
-  }
-  const std::size_t read = std::fread(bytes, 1U, size, device);
-  static_cast<void>(std::fclose(device));
-  return read == size;
-#else
-  static_cast<void>(bytes);
-  return false;
-#endif
-}
-
 /// Initializes the owning system for platform.
 bool initialize_platform() noexcept {
   return initialize_platform_impl(1280, 720, "engine", false);
@@ -1047,149 +806,6 @@ bool platform_apply_window_geometry(const WindowGeometry &geometry) noexcept {
   return true;
 }
 
-FileDialogTicket
-platform_request_file_dialog(FileDialogKind kind,
-                             const FileDialogFilter *filters, int filterCount,
-                             const char *defaultLocation) noexcept {
-  ENGINE_ASSERT_MAIN_THREAD();
-  if (!g_scriptedDialogs && (g_window == nullptr)) {
-    log_message(LogLevel::Warning, "platform",
-                "native file dialog refused: no window to parent it");
-    return kNoFileDialog;
-  }
-  if ((filterCount < 0) || (filterCount > kMaxFileDialogFilters) ||
-      ((filterCount > 0) && (filters == nullptr)) ||
-      ((kind == FileDialogKind::Folder) && (filterCount != 0))) {
-    log_message(LogLevel::Warning, "platform",
-                "native file dialog refused: bad filter list");
-    return kNoFileDialog;
-  }
-
-  std::size_t index = kDialogSlotCount;
-  for (std::size_t i = 0U; i < kDialogSlotCount; ++i) {
-    DialogSlotState expected = DialogSlotState::Free;
-    if (g_dialogSlots[i].state.compare_exchange_strong(
-            expected, DialogSlotState::Pending, std::memory_order_acquire)) {
-      index = i;
-      break;
-    }
-  }
-  if (index == kDialogSlotCount) {
-    log_message(LogLevel::Warning, "platform",
-                "native file dialog refused: every dialog slot is held by "
-                "a dialog that has not closed");
-    return kNoFileDialog;
-  }
-
-  DialogSlot &slot = g_dialogSlots[index];
-  // Unsigned wraparound keeps (ticket - 1) % kDialogSlotCount == index,
-  // since the slot count divides 2^32; only zero is skipped.
-  FileDialogTicket ticket = kNoFileDialog;
-  while (ticket == kNoFileDialog) {
-    ++g_dialogClaims;
-    ticket = g_dialogClaims * static_cast<FileDialogTicket>(kDialogSlotCount) +
-             static_cast<FileDialogTicket>(index) + 1U;
-  }
-  slot.scripted = g_scriptedDialogs;
-  slot.ticket.store(ticket, std::memory_order_release);
-  if (slot.scripted) {
-    return ticket;
-  }
-
-  for (int i = 0; i < filterCount; ++i) {
-    slot.filters[static_cast<std::size_t>(i)] =
-        SDL_DialogFileFilter{filters[i].name, filters[i].pattern};
-  }
-  const SDL_DialogFileFilter *sdlFilters =
-      (filterCount > 0) ? slot.filters.data() : nullptr;
-  if (kind == FileDialogKind::Save) {
-    SDL_ShowSaveFileDialog(&dialog_trampoline, &slot, g_window, sdlFilters,
-                           filterCount, defaultLocation);
-  } else if (kind == FileDialogKind::Folder) {
-    SDL_ShowOpenFolderDialog(&dialog_trampoline, &slot, g_window,
-                             defaultLocation, false);
-  } else {
-    SDL_ShowOpenFileDialog(&dialog_trampoline, &slot, g_window, sdlFilters,
-                           filterCount, defaultLocation, false);
-  }
-  return ticket;
-}
-
-FileDialogPoll
-platform_take_file_dialog_result(FileDialogTicket ticket,
-                                 FileDialogResult *out) noexcept {
-  ENGINE_ASSERT_MAIN_THREAD();
-  DialogSlot *slot = dialog_slot_for(ticket);
-  if ((slot == nullptr) ||
-      (slot->ticket.load(std::memory_order_relaxed) != ticket)) {
-    return FileDialogPoll::Unknown;
-  }
-  switch (slot->state.load(std::memory_order_acquire)) {
-  case DialogSlotState::Pending:
-    return FileDialogPoll::Pending;
-  case DialogSlotState::Delivered:
-    break;
-  case DialogSlotState::Free:
-  case DialogSlotState::Abandoned:
-  default:
-    return FileDialogPoll::Unknown;
-  }
-  if (out != nullptr) {
-    out->ticket = ticket;
-    out->outcome = slot->outcome;
-    std::memcpy(out->path, slot->path.data(), sizeof(out->path));
-  }
-  slot->state.store(DialogSlotState::Free, std::memory_order_release);
-  return FileDialogPoll::Ready;
-}
-
-void platform_abandon_file_dialog(FileDialogTicket ticket) noexcept {
-  ENGINE_ASSERT_MAIN_THREAD();
-  DialogSlot *slot = dialog_slot_for(ticket);
-  if ((slot == nullptr) ||
-      (slot->ticket.load(std::memory_order_relaxed) != ticket)) {
-    return;
-  }
-  DialogSlotState expected = DialogSlotState::Pending;
-  if (slot->state.compare_exchange_strong(expected, DialogSlotState::Abandoned,
-                                          std::memory_order_acq_rel,
-                                          std::memory_order_acquire)) {
-    return; // the answer, when it comes, frees the slot
-  }
-  if (expected == DialogSlotState::Delivered) {
-    slot->state.store(DialogSlotState::Free, std::memory_order_release);
-  }
-}
-
-void platform_set_scripted_file_dialogs(bool enabled) noexcept {
-  ENGINE_ASSERT_MAIN_THREAD();
-  g_scriptedDialogs = enabled;
-}
-
-bool platform_answer_scripted_file_dialog(FileDialogTicket ticket,
-                                          const char *path) noexcept {
-  DialogSlot *slot = dialog_slot_for(ticket);
-  // The acquire on ticket pairs with the release that published it, so
-  // `scripted` is read as the request wrote it. An abandoned request still
-  // waits for its answer to free the slot, exactly as an open native
-  // dialog does.
-  if ((slot == nullptr) ||
-      (slot->ticket.load(std::memory_order_acquire) != ticket) ||
-      !slot->scripted) {
-    return false;
-  }
-  const DialogSlotState state = slot->state.load(std::memory_order_acquire);
-  if ((state != DialogSlotState::Pending) &&
-      (state != DialogSlotState::Abandoned)) {
-    return false;
-  }
-  deliver_dialog_answer(*slot,
-                        (path != nullptr) ? FileDialogOutcome::Chosen
-                                          : FileDialogOutcome::Cancelled,
-                        path);
-  return true;
-}
-
 std::uint64_t platform_ticks_ns() noexcept {
   return static_cast<std::uint64_t>(SDL_GetTicksNS());
 }
@@ -1297,85 +913,6 @@ NativeWindow platform_native_window() noexcept {
   return native;
 }
 
-std::size_t process_memory_bytes() noexcept {
-#if defined(_WIN32)
-  PROCESS_MEMORY_COUNTERS_EX pmc{};
-  if (GetProcessMemoryInfo(GetCurrentProcess(),
-                           reinterpret_cast<PROCESS_MEMORY_COUNTERS *>(&pmc),
-                           sizeof(pmc)) == 0) {
-    return 0U;
-  }
-  return static_cast<std::size_t>(pmc.WorkingSetSize);
-#elif defined(__APPLE__)
-  mach_task_basic_info info{};
-  mach_msg_type_number_t count = MACH_TASK_BASIC_INFO_COUNT;
-  const kern_return_t result =
-      task_info(mach_task_self(), MACH_TASK_BASIC_INFO,
-                reinterpret_cast<task_info_t>(&info), &count);
-  if (result != KERN_SUCCESS) {
-    return 0U;
-  }
-  return static_cast<std::size_t>(info.resident_size);
-#elif defined(__linux__)
-  const long pageSize = sysconf(_SC_PAGESIZE);
-  if (pageSize <= 0) {
-    return 0U;
-  }
-
-  FILE *fp = std::fopen("/proc/self/statm", "r");
-  if (fp == nullptr) {
-    return 0U;
-  }
-
-  unsigned long long totalPages = 0ULL;
-  unsigned long long residentPages = 0ULL;
-  const int scanned = std::fscanf(fp, "%llu %llu", &totalPages, &residentPages);
-  std::fclose(fp);
-  if (scanned != 2) {
-    return 0U;
-  }
-
-  return static_cast<std::size_t>(
-      residentPages * static_cast<unsigned long long>(pageSize));
-#else
-  return 0U;
-#endif
-}
-
-bool platform_attach_parent_console() noexcept {
-#if defined(_WIN32)
-  // A console-subsystem build already has one; only a GUI one attaches.
-  if (GetConsoleWindow() != nullptr) {
-    return false;
-  }
-  // A stream the parent redirected (a pipe, a file) already goes where the
-  // parent wants it; pointing it at the console would lose it.
-  const auto redirected = [](DWORD which) noexcept {
-    const HANDLE handle = GetStdHandle(which);
-    return (handle != nullptr) && (handle != INVALID_HANDLE_VALUE) &&
-           (GetFileType(handle) != FILE_TYPE_UNKNOWN);
-  };
-  const bool outRedirected = redirected(STD_OUTPUT_HANDLE);
-  const bool errRedirected = redirected(STD_ERROR_HANDLE);
-  if (outRedirected && errRedirected) {
-    return false;
-  }
-  if (AttachConsole(ATTACH_PARENT_PROCESS) == 0) {
-    return false;
-  }
-  std::FILE *stream = nullptr;
-  if (!outRedirected) {
-    static_cast<void>(freopen_s(&stream, "CONOUT$", "w", stdout));
-  }
-  if (!errRedirected) {
-    static_cast<void>(freopen_s(&stream, "CONOUT$", "w", stderr));
-  }
-  return true;
-#else
-  return false;
-#endif
-}
-
 void platform_show_error_box(const char *title, const char *message) noexcept {
   static_cast<void>(SDL_ShowSimpleMessageBox(
       SDL_MESSAGEBOX_ERROR, (title != nullptr) ? title : "Error",
@@ -1414,28 +951,6 @@ bool platform_get_save_dir(const char *organizationName,
   return copy_normalized_path(path, outBuffer, bufferCapacity);
 }
 
-bool platform_persist_after_write(const char *path) noexcept {
-#if defined(ENGINE_PLATFORM_WEB)
-  const std::size_t rootLength = std::strlen(kWebPersistentRoot);
-  if ((path == nullptr) ||
-      (std::strncmp(path, kWebPersistentRoot, rootLength) != 0) ||
-      (path[rootLength] != '/')) {
-    return false;
-  }
-  // FS lives on the page's main thread; a write committed on a worker
-  // queues the flush there instead of touching FS from the worker.
-  MAIN_THREAD_ASYNC_EM_ASM({
-    if (Module['enginePersist']) {
-      Module['enginePersist']();
-    }
-  });
-  return true;
-#else
-  static_cast<void>(path);
-  return false;
-#endif
-}
-
 bool platform_get_app_dir(char *outBuffer,
                           std::size_t bufferCapacity) noexcept {
   if (!validate_path_output(outBuffer, bufferCapacity)) {
@@ -1449,32 +964,6 @@ bool platform_get_app_dir(char *outBuffer,
   }
 
   return copy_normalized_path(basePath, outBuffer, bufferCapacity);
-}
-
-bool platform_get_temp_dir(char *outBuffer,
-                           std::size_t bufferCapacity) noexcept {
-  if (!validate_path_output(outBuffer, bufferCapacity)) {
-    return false;
-  }
-
-#if defined(_WIN32)
-  char tempPath[kPlatformPathMax] = {};
-  const DWORD length =
-      GetTempPathA(static_cast<DWORD>(sizeof(tempPath)), tempPath);
-  if ((length == 0U) || (length >= sizeof(tempPath))) {
-    return false;
-  }
-  return copy_normalized_path(tempPath, outBuffer, bufferCapacity);
-#else
-  char tempPath[kPlatformPathMax] = {};
-  const char *candidates[] = {"TMPDIR", "TMP", "TEMP", "TEMPDIR"};
-  for (const char *candidate : candidates) {
-    if (non_empty_env(candidate, tempPath, sizeof(tempPath))) {
-      return copy_normalized_path(tempPath, outBuffer, bufferCapacity);
-    }
-  }
-  return copy_normalized_path("/tmp", outBuffer, bufferCapacity);
-#endif
 }
 
 } // namespace engine::core

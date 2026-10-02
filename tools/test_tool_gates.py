@@ -204,6 +204,7 @@ def test_module_dependency_gate():
         # SDL where it belongs: the platform layer, and the one editor TU
         # that drives the ImGui SDL3 backend.
         write_source(clean, "core/src/platform.cpp", ["SDL3/SDL.h"])
+        write_source(clean, "core/src/platform_file_dialogs.cpp", ["SDL3/SDL.h"])
         write_source(clean, "editor/src/editor.cpp",
                      ["backends/imgui_impl_sdl3.h", "SDL3/SDL.h"])
         check(run([script, "--root", str(clean)]) == 0,
@@ -1426,6 +1427,10 @@ def test_portable_fopen_gate():
             "// Purpose.\n#ifdef _WIN32\nint x;\n#else\nint y;\n#endif\n"
             "FILE *g = std::fopen(p, m);\n")]) != 0,
               "portable fopen: a call after the #endif is unguarded again")
+        check(run([script, "--root", case(
+            "posixfile", "core/src/platform_os_posix.cpp",
+            "// Purpose.\nvoid f() { FILE *g = std::fopen(p, m); }\n")]) == 0,
+              "portable fopen: a *_posix.cpp file is a branch Windows skips")
         check(run([script, "--root", case(
             "lookalike", "core/src/a.cpp",
             "// Never call fopen( here.\nvoid f() { fopen_s(&g, p, m); my_fopen(p); "

@@ -275,6 +275,8 @@ SDL_INCLUDE_RE = re.compile(r"^(SDL3/|backends/imgui_impl_sdl3\.h$)")
 # hold on any root, the gate's self-tests included.
 SANCTIONED_SDL_USERS: dict[str, str] = {
     "core/src/platform.cpp": "the platform layer SDL is the implementation of",
+    "core/src/platform_file_dialogs.cpp":
+        "SDL's native dialogs and their filter and window types",
     "editor/src/editor.cpp": "the ImGui SDL3 backend's one driver",
 }
 
