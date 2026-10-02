@@ -93,7 +93,7 @@ from collections.abc import Iterator
 # (app -> editor -> runtime -> renderer/physics/scripting/audio ->
 #  content -> core/math) with the two documented narrowings applied:
 # `content` depends only on `core`, and within the bottom tier the
-# direction is math -> core, never the reverse. The four mid-tier
+# direction is math -> core, never the reverse. The mid-tier
 # subsystem modules are siblings and so are absent from each other's
 # sets; they meet only in `runtime`, which owns the bridges.
 ALLOWED_DEPENDENCIES: dict[str, frozenset[str]] = {
@@ -102,16 +102,29 @@ ALLOWED_DEPENDENCIES: dict[str, frozenset[str]] = {
     "content": frozenset({"core"}),
     "renderer": frozenset({"content", "core", "math"}),
     "physics": frozenset({"content", "core", "math"}),
+    # The navigation mesh is pure geometry over math and core; the runtime
+    # feeds it the level through a sampler, so it never sees physics.
+    "navigation": frozenset({"core", "math"}),
     "scripting": frozenset({"content", "core", "math"}),
     "audio": frozenset({"content", "core", "math"}),
     "runtime": frozenset(
-        {"renderer", "physics", "scripting", "audio", "content", "core", "math"}
+        {
+            "renderer",
+            "physics",
+            "navigation",
+            "scripting",
+            "audio",
+            "content",
+            "core",
+            "math",
+        }
     ),
     "editor": frozenset(
         {
             "runtime",
             "renderer",
             "physics",
+            "navigation",
             "scripting",
             "audio",
             "content",
@@ -125,6 +138,7 @@ ALLOWED_DEPENDENCIES: dict[str, frozenset[str]] = {
             "runtime",
             "renderer",
             "physics",
+            "navigation",
             "scripting",
             "audio",
             "content",
@@ -135,7 +149,17 @@ ALLOWED_DEPENDENCIES: dict[str, frozenset[str]] = {
     # The player runs a game without the editor (decision 0016, point 4):
     # the runtime and everything under it, and nothing from editor/.
     "player": frozenset(
-        {"runtime", "renderer", "physics", "scripting", "audio", "content", "core", "math"}
+        {
+            "runtime",
+            "renderer",
+            "physics",
+            "navigation",
+            "scripting",
+            "audio",
+            "content",
+            "core",
+            "math",
+        }
     ),
     # Offline tools sit above the engine and consume it like an
     # application would; they are never consumed by it.
@@ -145,6 +169,7 @@ ALLOWED_DEPENDENCIES: dict[str, frozenset[str]] = {
             "runtime",
             "renderer",
             "physics",
+            "navigation",
             "scripting",
             "audio",
             "content",

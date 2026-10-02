@@ -1729,6 +1729,21 @@ engine_add_test_executable(engine_unit_character_move
     engine_runtime
 )
 
+engine_add_test_executable(engine_unit_nav_mesh
+    SOURCES
+    nav_mesh_test.cpp
+    PRIVATE_DEPS
+    engine_navigation
+)
+
+engine_add_test_executable(engine_unit_navigation_bake
+    SOURCES
+    navigation_bake_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_navigation
+)
+
 engine_add_test_executable(engine_unit_collision_layer_matrix
     SOURCES
     collision_layer_matrix_test.cpp

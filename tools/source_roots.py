@@ -15,6 +15,7 @@ ENGINE_SOURCE_ROOTS: tuple[str, ...] = (
     "core",
     "editor",
     "math",
+    "navigation",
     "physics",
     "player",
     "renderer",
