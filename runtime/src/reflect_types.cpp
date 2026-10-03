@@ -102,6 +102,16 @@ REFLECT_FIELD(stepOffset, Float)
 REFLECT_FIELD(skinWidth, Float)
 REFLECT_END()
 
+// Only the authored settings: the destination, the path and the speed
+// reached are the frame pipeline's runtime state (runtime/nav_agent.h).
+REFLECT_TYPE(engine::runtime::NavAgentComponent)
+REFLECT_FIELD(speed, Float)
+REFLECT_FIELD(acceleration, Float)
+REFLECT_FIELD(angularSpeed, Float)
+REFLECT_FIELD(stoppingDistance, Float)
+REFLECT_FIELD(baseOffset, Float)
+REFLECT_END()
+
 REFLECT_TYPE(engine::runtime::PointLightComponent)
 REFLECT_FIELD(color, Vec3)
 REFLECT_FIELD(intensity, Float)

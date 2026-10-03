@@ -579,6 +579,24 @@ mesh), `"unreachable"` (no walkable route joins them), `"too_long"` (more
 than 256 corners) or `"invalid"` (an argument that is not a number). A query
 allocates nothing (`engine_integration_lua_navigation`).
 
+A Nav Agent (Add Component > Navigation) walks those meshes, as Unity's
+NavMeshAgent does: `engine.set_nav_destination(e, x, y, z)` sends it to a
+point, its path is found on its next fixed step, and each fixed step it
+walks the path at its Speed, speeding up and braking at its Acceleration so
+it comes to rest at its Stopping Distance, and turns at its Angular Speed
+to face where it walks. Base Offset is the height of the entity's origin
+above the ground it walks. An agent with a Character Controller walks
+through it, so it slides along what it meets; otherwise its transform is
+set. `engine.nav_agent_status(e)` returns `"idle"`, `"pending"` (no mesh
+loaded yet), `"moving"` or `"arrived"` with the path length left, or
+`"failed"` with why: `"off_mesh"`, `"unreachable"`, `"too_long"` (more than
+64 corners) or `"cannot_move"` (its controller refused). `engine.stop_nav_agent(e)`
+stops it where it stands. Agents step after the scripts' `on_fixed_tick`,
+in the order the World stores them, so a run is the same at any worker
+count (`engine_unit_nav_agent`, `engine_integration_lua_nav_agent`). Agents
+do not yet steer around each other or around obstacles that are not baked
+into the mesh.
+
 Entities carry gameplay tags, as Godot's groups and Unreal's actor Tags
 do, so scripts find what they act on without a unique name. Give tags in
 the Inspector's Tags row under the name, or from Lua:

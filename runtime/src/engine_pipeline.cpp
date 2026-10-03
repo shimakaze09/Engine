@@ -59,6 +59,7 @@
 #include "engine/runtime/collision_layers.h"
 #include "engine/runtime/content_catalog.h"
 #include "engine/runtime/editor_bridge.h"
+#include "engine/runtime/nav_agent.h"
 #include "engine/runtime/physics_bridge.h"
 #include "engine/runtime/play_recording.h"
 #include "engine/runtime/render_prep_pipeline.h"
@@ -655,6 +656,9 @@ struct EnginePipeline::Impl final {
   runtime::SceneEnvironment sceneEnvironment{};
   // The meshes the scene's navigation surfaces name, read in stage_assets.
   runtime::SceneNavigation sceneNavigation{};
+  // The navigation agents' destinations and paths, stepped in
+  // stage_scripting.
+  runtime::NavAgents navAgents{};
   runtime::EngineRendererService rendererService{};
 
   // --- Run lifetime ---
@@ -942,6 +946,7 @@ bool EnginePipeline::Impl::initialize(std::uint32_t maxFrameCount) noexcept {
   scripting::bind_game_state(&gameBindingState);
   // Scripts' path queries run on this run's navigation meshes.
   runtime::bind_scene_navigation(&sceneNavigation);
+  runtime::bind_nav_agents(&navAgents);
   if ((bridge != nullptr) && (bridge->set_world != nullptr)) {
     bridge->set_world(world.get());
   }
@@ -1202,6 +1207,7 @@ void EnginePipeline::Impl::teardown() noexcept {
     runtime::set_editor_mesh_registry(nullptr);
     scripting::bind_game_state(nullptr);
     runtime::bind_scene_navigation(nullptr);
+    runtime::bind_nav_agents(nullptr);
     runtime::unbind_scripting_runtime(serviceLocator);
   }
 
@@ -1211,6 +1217,7 @@ void EnginePipeline::Impl::teardown() noexcept {
                                      &release_material_texture_production,
                                      nullptr);
   sceneNavigation.clear();
+  navAgents.clear();
   serviceRegistry.unregister_services();
 
   content::shutdown_asset_streaming(assetStreamingQueue.get());
@@ -1506,6 +1513,10 @@ void EnginePipeline::Impl::stage_scripting() noexcept {
     while (core::advance_input_step()) {
       scripting::dispatch_entity_scripts_fixed_update(
           static_cast<float>(core::kFixedDeltaSeconds));
+      // Agents walk after the step's scripts, so a destination a script
+      // sets in on_fixed_tick is acted on in the same step.
+      navAgents.step(*world, sceneNavigation,
+                     static_cast<float>(core::kFixedDeltaSeconds));
     }
     core::end_input_steps();
   } else {

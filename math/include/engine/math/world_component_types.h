@@ -295,4 +295,37 @@ character_controller_is_valid(const CharacterControllerComponent &c) noexcept {
          (c.skinWidth >= 0.001F) && (c.skinWidth <= 1.0F);
 }
 
+/// Navigation agent (Unity's NavMeshAgent, Godot's NavigationAgent3D): its
+/// entity walks a path on the scene's navigation meshes to a destination a
+/// script sets, one fixed step at a time, through its Character Controller
+/// when it has one. Only the movement settings are authored; the
+/// destination, the path and the speed reached are runtime state the frame
+/// pipeline holds (runtime/nav_agent.h), never serialized.
+struct NavAgentComponent final {
+  /// The top speed, in metres per second, from 0.01 to 100.
+  float speed = 3.5F;
+  /// How fast it speeds up and brakes, in metres per second squared, from
+  /// 0.01 to 1000.
+  float acceleration = 8.0F;
+  /// How fast it turns to face where it walks, in degrees per second, from
+  /// 0 to 3600; 0 leaves its facing alone.
+  float angularSpeed = 360.0F;
+  /// How close to the destination counts as arrived, in metres, from 0 to
+  /// 10.
+  float stoppingDistance = 0.1F;
+  /// The height of the entity's origin above the surface it walks, in
+  /// metres, from -10 to 10: half a capsule's height for a character whose
+  /// origin is the capsule's centre.
+  float baseOffset = 0.0F;
+};
+
+/// True when every setting is finite and in its range.
+inline bool nav_agent_is_valid(const NavAgentComponent &c) noexcept {
+  return (c.speed >= 0.01F) && (c.speed <= 100.0F) &&
+         (c.acceleration >= 0.01F) && (c.acceleration <= 1000.0F) &&
+         (c.angularSpeed >= 0.0F) && (c.angularSpeed <= 3600.0F) &&
+         (c.stoppingDistance >= 0.0F) && (c.stoppingDistance <= 10.0F) &&
+         (c.baseOffset >= -10.0F) && (c.baseOffset <= 10.0F);
+}
+
 } // namespace engine::math

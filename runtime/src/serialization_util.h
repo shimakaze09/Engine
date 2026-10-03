@@ -140,6 +140,7 @@ struct ReflectedComponentDescriptors final {
   const core::TypeDescriptor *sceneCapture = nullptr;
   const core::TypeDescriptor *camera = nullptr;
   const core::TypeDescriptor *characterController = nullptr;
+  const core::TypeDescriptor *navAgent = nullptr;
 };
 
 /// Reflection descriptor for a reflected component type (one overload per
@@ -166,6 +167,12 @@ inline const core::TypeDescriptor &
 component_descriptor(const ReflectedComponentDescriptors &descs,
                      const CharacterControllerComponent *) noexcept {
   return *descs.characterController;
+}
+/// NavAgent descriptor selector.
+inline const core::TypeDescriptor &
+component_descriptor(const ReflectedComponentDescriptors &descs,
+                     const NavAgentComponent *) noexcept {
+  return *descs.navAgent;
 }
 /// ReflectionProbe descriptor selector.
 inline const core::TypeDescriptor &

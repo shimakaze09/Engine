@@ -577,6 +577,7 @@ ComponentEditSnapshot default_component_snapshot(
   case ComponentEditType::Tags:
   case ComponentEditType::CharacterController:
   case ComponentEditType::NavMeshSurface:
+  case ComponentEditType::NavAgent:
     break;
   }
   return snapshot;

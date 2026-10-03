@@ -42,6 +42,8 @@ using engine::math::LightComponent;
 using engine::math::LightType;
 using engine::math::MeshComponent;
 using engine::math::NameComponent;
+using engine::math::nav_agent_is_valid;
+using engine::math::NavAgentComponent;
 using engine::math::PointLightComponent;
 using engine::math::ScriptComponent;
 using engine::math::SpotLightComponent;

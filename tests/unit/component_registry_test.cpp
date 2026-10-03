@@ -432,6 +432,22 @@ bool components_equal(
          (std::strcmp(a.navMeshPath, b.navMeshPath) == 0);
 }
 
+void make_test_value(engine::runtime::NavAgentComponent *out) noexcept {
+  out->speed = 4.25F;
+  out->acceleration = 12.5F;
+  out->angularSpeed = 540.0F;
+  out->stoppingDistance = 0.35F;
+  out->baseOffset = 0.9F;
+}
+
+bool components_equal(const engine::runtime::NavAgentComponent &a,
+                      const engine::runtime::NavAgentComponent &b) noexcept {
+  return (a.speed == b.speed) && (a.acceleration == b.acceleration) &&
+         (a.angularSpeed == b.angularSpeed) &&
+         (a.stoppingDistance == b.stoppingDistance) &&
+         (a.baseOffset == b.baseOffset);
+}
+
 void make_test_value(engine::runtime::TagSetComponent *out) noexcept {
   static_cast<void>(engine::runtime::tag_set_add(out, "coin"));
   static_cast<void>(engine::runtime::tag_set_add(out, "Pickup.Gold"));
@@ -609,7 +625,7 @@ int verify_prefab_mesh_reference_parity() {
 // Count tripwire: bumping this is an intentional act that accompanies a new
 // registry row, a World::PersistentComponentTypes entry, and the test-value/
 // comparator overloads above.
-static_assert(engine::runtime::kPersistentComponentTypeCount == 19U,
+static_assert(engine::runtime::kPersistentComponentTypeCount == 20U,
               "new persistent component type: extend the registry table, the "
               "World type list, and this suite's overloads together");
 

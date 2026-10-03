@@ -627,6 +627,17 @@ engine_add_test_executable(engine_integration_lua_navigation
     integration
 )
 
+engine_add_test_executable(engine_integration_lua_nav_agent
+    SOURCES
+    lua_nav_agent_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_scripting
+    engine_navigation
+    LABELS
+    integration
+)
+
 engine_add_test_executable(engine_integration_lua_collision_layers
     SOURCES
     lua_collision_layers_test.cpp

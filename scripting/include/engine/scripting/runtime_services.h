@@ -124,6 +124,33 @@ struct RuntimePathPoint final {
   float z = 0.0F;
 };
 
+/// Where a navigation agent is in reaching its destination, mirroring
+/// runtime::NavAgentStatus.
+enum class RuntimeNavAgentStatus : std::uint8_t {
+  Idle,
+  Pending,
+  Moving,
+  Arrived,
+  Failed,
+};
+
+/// Why an agent's destination failed, mirroring runtime::NavAgentFailure.
+enum class RuntimeNavAgentFailure : std::uint8_t {
+  None,
+  OffMesh,
+  Unreachable,
+  TooLong,
+  CannotMove,
+};
+
+/// A navigation agent as scripting reads it.
+struct RuntimeNavAgentState final {
+  RuntimeNavAgentStatus status = RuntimeNavAgentStatus::Idle;
+  RuntimeNavAgentFailure failure = RuntimeNavAgentFailure::None;
+  float remainingDistance = 0.0F;
+  float speed = 0.0F;
+};
+
 /// Raycast hit mirrored into scripting-friendly fields.
 struct RuntimeRaycastHit final {
   core::Entity entity = core::kInvalidEntity;
@@ -315,6 +342,18 @@ struct RuntimeServices final {
                                     float sz, float ex, float ey, float ez,
                                     RuntimePathPoint *out, std::size_t capacity,
                                     std::size_t *outCount) noexcept = nullptr;
+  /// Sends the entity's navigation agent to (x, y, z); its path is found
+  /// on its next fixed step. False, with a logged reason, when it has no
+  /// Nav Agent, is parented, or the point is not finite.
+  bool (*set_nav_destination_op)(runtime::World *world, core::Entity entity,
+                                 float x, float y, float z) noexcept = nullptr;
+  /// Stops the entity's navigation agent where it stands; false when it
+  /// has none.
+  bool (*stop_nav_agent_op)(runtime::World *world,
+                            core::Entity entity) noexcept = nullptr;
+  /// Reads the entity's navigation agent; false when it has none.
+  bool (*nav_agent_state_op)(runtime::World *world, core::Entity entity,
+                             RuntimeNavAgentState *out) noexcept = nullptr;
   /// runtime::move_character: moves the character at once; false, with a
   /// logged reason and nothing changed, when it cannot.
   bool (*move_character_op)(runtime::World *world, core::Entity entity,
