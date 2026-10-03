@@ -106,6 +106,24 @@ struct RuntimeCharacterMove final {
   float normalZ = 0.0F;
 };
 
+/// What a path query found, mirroring navigation::NavPathResult.
+enum class RuntimePathResult : std::uint8_t {
+  Found,
+  /// The start or the end is not near a loaded mesh.
+  OffMesh,
+  /// Both are on the mesh but no walkable route joins them.
+  Unreachable,
+  /// The path has more corners than the output holds.
+  TooLong,
+};
+
+/// One corner of a path.
+struct RuntimePathPoint final {
+  float x = 0.0F;
+  float y = 0.0F;
+  float z = 0.0F;
+};
+
 /// Raycast hit mirrored into scripting-friendly fields.
 struct RuntimeRaycastHit final {
   core::Entity entity = core::kInvalidEntity;
@@ -290,6 +308,13 @@ struct RuntimeServices final {
       const math::CharacterControllerComponent &component) noexcept = nullptr;
   bool (*remove_character_controller_op)(
       runtime::World *world, core::Entity entity) noexcept = nullptr;
+  /// The scene's navigation path from start to end on the mesh whose bake
+  /// volume holds the start: on Found, `out` holds up to `capacity`
+  /// corners and *outCount their number. Allocates nothing.
+  RuntimePathResult (*find_path_op)(runtime::World *world, float sx, float sy,
+                                    float sz, float ex, float ey, float ez,
+                                    RuntimePathPoint *out, std::size_t capacity,
+                                    std::size_t *outCount) noexcept = nullptr;
   /// runtime::move_character: moves the character at once; false, with a
   /// logged reason and nothing changed, when it cannot.
   bool (*move_character_op)(runtime::World *world, core::Entity entity,

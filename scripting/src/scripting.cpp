@@ -25,6 +25,7 @@
 #include "light_bindings.h"
 #include "lua_state.h"
 #include "mesh_material_bindings.h"
+#include "navigation_bindings.h"
 #include "persist_bindings.h"
 #include "physics_bindings.h"
 #include "random_bindings.h"
@@ -155,6 +156,7 @@ void register_engine_bindings(lua_State *state) noexcept {
   register_body_bindings(state);
   register_mesh_material_bindings(state);
   register_physics_bindings(state);
+  register_navigation_bindings(state);
 
   register_input_bindings(state);
 

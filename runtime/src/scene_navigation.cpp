@@ -26,12 +26,33 @@ constexpr const char *kLogChannel = "navigation";
 constexpr std::uint64_t kMaxNavMeshFileBytes = 128ULL * 1024ULL * 1024ULL;
 
 std::atomic<std::uint32_t> g_reloadGeneration{0U};
+SceneNavigation *g_bound = nullptr;
+
+/// True when `point` lies in the volume `mesh` was baked over, with an
+/// agent's height of slack above it, so an agent standing on the top
+/// surface is inside.
+bool volume_holds(const navigation::NavMesh &mesh,
+                  const math::Vec3 &point) noexcept {
+  const navigation::NavBakeSettings &settings = mesh.settings();
+  return (point.x >= settings.boundsMin.x) &&
+         (point.x <= settings.boundsMax.x) &&
+         (point.z >= settings.boundsMin.z) &&
+         (point.z <= settings.boundsMax.z) &&
+         (point.y >= settings.boundsMin.y) &&
+         (point.y <= settings.boundsMax.y + settings.agentHeight);
+}
 
 void log_surface_error(const char *path, const char *what) noexcept {
   core::log_path_diagnostic(core::LogLevel::Error, kLogChannel, path, what);
 }
 
 } // namespace
+
+void bind_scene_navigation(SceneNavigation *navigation) noexcept {
+  g_bound = navigation;
+}
+
+SceneNavigation *bound_scene_navigation() noexcept { return g_bound; }
 
 void request_scene_navigation_reload() noexcept {
   g_reloadGeneration.fetch_add(1U, std::memory_order_relaxed);
@@ -110,7 +131,9 @@ void SceneNavigation::update(const World &world) noexcept {
     navigation::NavMesh mesh{};
     if ((slot.path[0] != '\0') && load_nav_mesh_file(slot.path, &mesh)) {
       slot.mesh = std::move(mesh);
-      slot.loaded = true;
+      // The query's scratch is sized here, at load, so a path query
+      // allocates nothing.
+      slot.loaded = slot.query.init(slot.mesh);
     }
   }
   for (std::size_t i = tracked; i < m_count; ++i) {
@@ -120,6 +143,19 @@ void SceneNavigation::update(const World &world) noexcept {
   m_contentEpoch = world.content_epoch();
   m_reloadGeneration = generation;
   m_bound = true;
+}
+
+navigation::NavPathResult
+SceneNavigation::find_path(const math::Vec3 &start, const math::Vec3 &end,
+                           math::Vec3 *out, std::size_t capacity,
+                           std::size_t *outCount) noexcept {
+  for (std::size_t i = 0U; i < m_count; ++i) {
+    Slot &slot = m_slots[i];
+    if (slot.loaded && volume_holds(slot.mesh, start)) {
+      return slot.query.find_path(start, end, out, capacity, outCount);
+    }
+  }
+  return navigation::NavPathResult::OffMesh;
 }
 
 Entity SceneNavigation::surface_at(std::size_t index) const noexcept {

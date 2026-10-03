@@ -50,12 +50,25 @@ public:
   /// The mesh of `surface`'s slot; nullptr when it has none.
   const navigation::NavMesh *mesh_for(Entity surface) const noexcept;
 
+  /// Finds a path from `start` to `end` on the first loaded mesh whose
+  /// bake volume holds `start`, as navigation::NavQuery::find_path does:
+  /// on Found, `out` holds the corners and *outCount their number.
+  /// OffMesh when no mesh's volume holds `start`. Allocates nothing; a
+  /// mesh's query scratch is sized when its file loads.
+  navigation::NavPathResult find_path(const math::Vec3 &start,
+                                      const math::Vec3 &end, math::Vec3 *out,
+                                      std::size_t capacity,
+                                      std::size_t *outCount) noexcept;
+
 private:
   struct Slot final {
     Entity surface{};
     char path[NavMeshSurfaceComponent::kMaxPathLength + 1U] = {};
     bool loaded = false;
     navigation::NavMesh mesh{};
+    /// Sized for `mesh` when it loads; it points at `mesh`, so a slot is
+    /// filled in place and never moved.
+    navigation::NavQuery query{};
   };
 
   Slot m_slots[kMaxSceneNavMeshes]{};
@@ -70,6 +83,12 @@ private:
 /// the editor's Bake calls it after writing a .navmesh, whose path is the
 /// one already loaded. Safe from any thread.
 void request_scene_navigation_reload() noexcept;
+
+/// Makes `navigation` the one scripts' path queries use; null unbinds.
+/// The frame pipeline binds its own while it runs.
+void bind_scene_navigation(SceneNavigation *navigation) noexcept;
+/// The bound SceneNavigation, or null.
+SceneNavigation *bound_scene_navigation() noexcept;
 
 /// Reads the .navmesh file at the VFS path `path` into `out`. False,
 /// logged, with `out` unchanged, when the file is missing, larger than a

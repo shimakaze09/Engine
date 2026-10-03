@@ -940,6 +940,8 @@ bool EnginePipeline::Impl::initialize(std::uint32_t maxFrameCount) noexcept {
   // The run's game-binding state is pipeline-owned; the binding
   // survives editor Stop's VM recycle because this Impl outlives it.
   scripting::bind_game_state(&gameBindingState);
+  // Scripts' path queries run on this run's navigation meshes.
+  runtime::bind_scene_navigation(&sceneNavigation);
   if ((bridge != nullptr) && (bridge->set_world != nullptr)) {
     bridge->set_world(world.get());
   }
@@ -1199,6 +1201,7 @@ void EnginePipeline::Impl::teardown() noexcept {
     runtime::set_editor_asset_service(nullptr);
     runtime::set_editor_mesh_registry(nullptr);
     scripting::bind_game_state(nullptr);
+    runtime::bind_scene_navigation(nullptr);
     runtime::unbind_scripting_runtime(serviceLocator);
   }
 
