@@ -49,6 +49,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <iterator>
 #include <memory>
 #include <mutex>
 #include <new>
@@ -104,7 +105,8 @@ std::uint32_t g_screenshotFramesSinceSubmit = 0U;
 ScreenshotResult g_screenshotResult{};
 
 /// Frames a submitted request may wait for its pixels before it is given
-/// up: bgfx delivers them within two.
+/// up: bgfx delivers them within two, three where the capture is held a
+/// frame (submit_capture).
 constexpr std::uint32_t kScreenshotDeliveryFrames = 8U;
 
 /// Records a finished public request. Caller holds g_screenshotMutex.
@@ -1638,6 +1640,56 @@ namespace {
 /// The one pending readback request; empty when none is pending.
 char g_requestedScreenshotPath[512] = {};
 
+/// The largest capture path any source hands submit_capture: the
+/// ENGINE_BGFX_SCREENSHOT diagnostic's buffer, which is the widest.
+constexpr std::size_t kMaxCapturePath = 1024U;
+
+/// Captures held for the next frame, at most one per source (a test's
+/// readback, the public request, the diagnostic), so three slots.
+struct HeldCapture final {
+  char path[kMaxCapturePath] = {};
+};
+HeldCapture g_heldCaptures[3] = {};
+std::size_t g_heldCaptureCount = 0U;
+
+/// Whether bgfx's capture on this backend reads the frame before the one
+/// it is submitted with. bgfx's Direct3D 12 backend takes the back buffer
+/// one behind the frame being rendered (requestScreenShot reads
+/// m_backBufferColor[idx - 1] while the submit renders into idx), so a
+/// capture submitted with frame F holds frame F - 1. Every other backend
+/// reads the frame the capture rides with.
+bool capture_reads_previous_frame() noexcept {
+  return bgfx::getRendererType() == bgfx::RendererType::Direct3D12;
+}
+
+/// Hands a capture of the frame being finished to bgfx. On a backend whose
+/// capture reads one frame behind it is held and submitted with the next
+/// frame, which reads back the one it was made for.
+void submit_capture(const char *path) noexcept {
+  if (!capture_reads_previous_frame()) {
+    bgfx::requestScreenShot(BGFX_INVALID_HANDLE, path);
+    return;
+  }
+  const std::size_t length = std::strlen(path);
+  if ((g_heldCaptureCount >= std::size(g_heldCaptures)) ||
+      (length >= kMaxCapturePath)) {
+    core::log_message(core::LogLevel::Error, "renderer",
+                      "screenshot dropped: no room to hold it for the frame "
+                      "it reads back");
+    return;
+  }
+  std::memcpy(g_heldCaptures[g_heldCaptureCount].path, path, length + 1U);
+  ++g_heldCaptureCount;
+}
+
+/// Submits the captures held from the previous frame with this one.
+void submit_held_captures() noexcept {
+  for (std::size_t i = 0U; i < g_heldCaptureCount; ++i) {
+    bgfx::requestScreenShot(BGFX_INVALID_HANDLE, g_heldCaptures[i].path);
+  }
+  g_heldCaptureCount = 0U;
+}
+
 } // namespace
 
 bool request_screenshot(const char *path,
@@ -1695,15 +1747,18 @@ void render_device_bgfx_frame() noexcept {
   if (!ctx.initialized || (ctx.mode != BgfxBackendMode::Bgfx)) {
     return;
   }
+  // Captures held from the last frame go first, so the ones made in this
+  // frame are not submitted with it on a backend that reads one behind.
+  submit_held_captures();
   if (g_requestedScreenshotPath[0] != '\0') {
-    bgfx::requestScreenShot(BGFX_INVALID_HANDLE, g_requestedScreenshotPath);
+    submit_capture(g_requestedScreenshotPath);
     g_requestedScreenshotPath[0] = '\0';
   } else {
     // A public request goes to bgfx with the frame after it was made, and
     // is given up, with a log line, if its pixels never come back.
     std::lock_guard<std::mutex> lock(g_screenshotMutex);
     if (g_screenshotWaiting && !g_screenshotSubmitted) {
-      bgfx::requestScreenShot(BGFX_INVALID_HANDLE, g_screenshotPath);
+      submit_capture(g_screenshotPath);
       g_screenshotSubmitted = true;
       g_screenshotFramesSinceSubmit = 0U;
     } else if (g_screenshotSubmitted &&
@@ -1730,7 +1785,7 @@ void render_device_bgfx_frame() noexcept {
           "ENGINE_BGFX_SCREENSHOT", screenshotPath, sizeof(screenshotPath)));
     }
     if ((screenshotPath[0] != '\0') && ((frameCounter++ % 120U) == 60U)) {
-      bgfx::requestScreenShot(BGFX_INVALID_HANDLE, screenshotPath);
+      submit_capture(screenshotPath);
     }
   }
   bgfx::frame();
