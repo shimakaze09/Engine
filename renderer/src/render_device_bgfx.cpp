@@ -319,9 +319,7 @@ const bgfx::Memory *stage_texels(const BgfxTexelUpload &shape,
 ///
 /// The chain goes to bgfx with the texture's creation, its own path for
 /// a texture's initial data on every backend, rather than as one update
-/// per level: on bgfx's Direct3D 12 backend the levels below 0 written by
-/// update did not hold the image, so a minified surface sampled something
-/// else (engine_integration_texture_mip_chain_gpu on WARP).
+/// per level, so a texture is never sampled with levels still unwritten.
 ///
 /// Returns nullptr, with a log line, when the contents overflow bgfx's
 /// 32-bit allocation limit or a level's scratch allocation fails.
