@@ -2216,6 +2216,30 @@ if(TARGET engine_validate)
         engine_validate_cli_fails_dangling_document_refs
         PROPERTIES LABELS "integration" TIMEOUT 60
             ENVIRONMENT "ENGINE_ROOT=${ENGINE_ENGINE_ASSET_OUTPUT_DIR}")
+
+    # --bake-navmesh writes what the editor's Bake button writes, and
+    # --check-navmesh refuses a mesh its level has moved away from.
+    engine_add_executable_target(editor_nav_mesh_bake_probe
+        SOURCES
+        editor_nav_mesh_bake_probe.cpp
+        PRIVATE_INCLUDE_DIRS
+        ${CMAKE_SOURCE_DIR}/editor/include
+        ${CMAKE_SOURCE_DIR}/editor/src
+        ${CMAKE_SOURCE_DIR}/runtime/src
+        PRIVATE_DEPS
+        engine_editor
+        COMPILE_DEFINITIONS
+        SDL_MAIN_HANDLED
+    )
+    add_test(NAME engine_integration_engine_validate_navmesh
+        COMMAND ${CMAKE_COMMAND}
+            "-DVALIDATE=$<TARGET_FILE:engine_validate>"
+            "-DPROBE=$<TARGET_FILE:editor_nav_mesh_bake_probe>"
+            "-DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/engine_validate_navmesh_work"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/engine_validate_navmesh_test.cmake)
+    set_tests_properties(engine_integration_engine_validate_navmesh
+        PROPERTIES LABELS "integration" TIMEOUT 120
+            ENVIRONMENT "ENGINE_ROOT=${ENGINE_ENGINE_ASSET_OUTPUT_DIR}")
 endif()
 
 # Every committed scene, prefab and material is what the engine writes.
