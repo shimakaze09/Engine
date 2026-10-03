@@ -1838,6 +1838,11 @@ void render_device_bgfx_frame() noexcept {
     bgfx::reset(static_cast<std::uint32_t>(width),
                 static_cast<std::uint32_t>(height),
                 vsync ? BGFX_RESET_VSYNC : BGFX_RESET_NONE);
+    char message[96] = {};
+    std::snprintf(message, sizeof(message),
+                  "swapchain reset to %dx%d, vsync %s", width, height,
+                  vsync ? "on" : "off");
+    core::log_message(core::LogLevel::Info, "render_device", message);
   }
   reset_views();
 }
