@@ -49,6 +49,12 @@ struct AssetSidecar final {
   /// with no settings of its own, which then cooks at the defaults.
   bool hasMeshImport = false;
   MeshImportSettings meshImport{};
+  /// How this source loads, when it is a texture source; absent for one
+  /// with no settings of its own, which loads at the defaults. Only the
+  /// block for the asset's own type (asset_import_settings.h) is read or
+  /// written.
+  bool hasTextureImport = false;
+  TextureImportSettings textureImport{};
   /// The author's labels, as Unity's Asset Labels: searchable in the
   /// editor and loaded into the catalog as tags. Written only when there
   /// are any, so an unlabelled sidecar is byte for byte what it was.
@@ -83,7 +89,10 @@ bool is_asset_sidecar_path(const char *path) noexcept;
 
 /// Reads the sidecar beside `assetOsPath`. `*out` is left untouched for
 /// every result but Ok. A key this build does not read (a newer build's,
-/// or a typo) is named in a logged Warning.
+/// or a typo) is named in a logged Warning. The "importSettings" block is
+/// read as the settings of the asset's type, which its path names; a block
+/// on a type with no settings, a value that will not read, or a block
+/// "version" newer than this build's is Malformed.
 SidecarReadResult read_asset_sidecar(const char *assetOsPath,
                                      AssetSidecar *out) noexcept;
 
@@ -93,7 +102,8 @@ SidecarReadResult read_asset_sidecar(const char *assetOsPath,
 /// that names no identity is worse than none, because a reader would
 /// take it as authoritative. Top-level members of the sidecar on disk that
 /// this build does not read are carried into the new one verbatim, so an
-/// older build never erases what a newer one wrote.
+/// older build never erases what a newer one wrote. Refuses settings for a
+/// type other than the asset's own.
 ///
 /// Call this ONLY from an import, migration or Duplicate transaction.
 bool write_asset_sidecar(const char *assetOsPath,
