@@ -52,6 +52,8 @@ void read_into_cache(const char *assetPath) noexcept {
   }
   g_cache.document.hasSettings = sidecar.hasMeshImport;
   g_cache.document.settings = sidecar.meshImport;
+  g_cache.document.hasTextureSettings = sidecar.hasTextureImport;
+  g_cache.document.textureSettings = sidecar.textureImport;
 }
 
 } // namespace
@@ -76,31 +78,52 @@ import_settings_for_asset(const char *assetPath) noexcept {
   return &g_cache.document;
 }
 
-bool save_import_settings(
-    const char *assetPath,
-    const content::MeshImportSettings &settings) noexcept {
+namespace {
+
+/// Reads the asset's sidecar, lets `apply` set its settings, and writes it
+/// back. Read first, so the write carries the asset's existing identity
+/// forward. A sidecar that is absent or will not read is left alone:
+/// minting one here would give the asset an identity nobody imported, and
+/// overwriting one would replace an identity references point at.
+template <typename Apply>
+bool rewrite_sidecar_settings(const char *assetPath, Apply apply) noexcept {
   if ((assetPath == nullptr) || (assetPath[0] == '\0')) {
     return false;
   }
-
-  // Read first, so the write carries the asset's existing identity
-  // forward. A sidecar that is absent or will not read is left alone:
-  // minting one here would give the asset an identity nobody imported,
-  // and overwriting one would replace an identity references point at.
   content::AssetSidecar sidecar{};
   if (content::read_asset_sidecar(assetPath, &sidecar) !=
       content::SidecarReadResult::Ok) {
     invalidate_import_settings_cache();
     return false;
   }
-  sidecar.hasMeshImport = true;
-  sidecar.meshImport = settings;
-
+  apply(&sidecar);
   const bool written = content::write_asset_sidecar(assetPath, sidecar);
   // Whether or not the write landed, the next frame re-reads the sidecar
   // as it is on disk.
   invalidate_import_settings_cache();
   return written;
+}
+
+} // namespace
+
+bool save_import_settings(
+    const char *assetPath,
+    const content::MeshImportSettings &settings) noexcept {
+  return rewrite_sidecar_settings(
+      assetPath, [&settings](content::AssetSidecar *sidecar) noexcept {
+        sidecar->hasMeshImport = true;
+        sidecar->meshImport = settings;
+      });
+}
+
+bool save_import_settings(
+    const char *assetPath,
+    const content::TextureImportSettings &settings) noexcept {
+  return rewrite_sidecar_settings(
+      assetPath, [&settings](content::AssetSidecar *sidecar) noexcept {
+        sidecar->hasTextureImport = true;
+        sidecar->textureImport = settings;
+      });
 }
 
 void invalidate_import_settings_cache() noexcept { g_cache.valid = false; }
