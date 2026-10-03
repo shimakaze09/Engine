@@ -12,6 +12,7 @@
 #include "engine/core/diagnostic.h"
 #include "engine/core/logging.h"
 #include "engine/core/vfs.h"
+#include "engine/runtime/nav_mesh_surface_file.h"
 #include "engine/runtime/world.h"
 
 namespace engine::runtime {
@@ -19,11 +20,6 @@ namespace engine::runtime {
 namespace {
 
 constexpr const char *kLogChannel = "navigation";
-
-/// The largest .navmesh file a scene reads: a full grid of the most
-/// columns a bake samples, each with the most surfaces, is about 40 MiB,
-/// so a file past this is not one the bake wrote.
-constexpr std::uint64_t kMaxNavMeshFileBytes = 128ULL * 1024ULL * 1024ULL;
 
 std::atomic<std::uint32_t> g_reloadGeneration{0U};
 SceneNavigation *g_bound = nullptr;
