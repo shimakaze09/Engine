@@ -116,28 +116,41 @@ Entity add_cube(World &world, const engine::math::Vec3 &position) {
              : kInvalidEntity;
 }
 
-/// After a failure, reads the far face again with the directional shadow
-/// maps re-rendered every frame and then with shadows off. On Direct3D 12
+/// After a failure, reads the far face again in three configurations:
+/// with the directional shadow maps re-rendered every frame, then with the
+/// cache back on for eight frames, then with shadows off. On Direct3D 12
 /// this test has failed with the far face at exactly its ambient-only
-/// level, as if shadowed (issue #1212); these readings show whether the
-/// cached cascade atlas or the shadow path as a whole is what darkens it.
+/// level, as if shadowed, and lit once the cache is off (issue #1212).
+/// The reading after the cache returns separates the two remaining
+/// causes: lit means the cascades cached at startup were drawn wrong,
+/// dark again means correctly drawn cascades do not survive while cached.
 void report_far_face_without_shadow_cache(engine::EnginePipeline &pipeline,
                                           int cx, int cy) noexcept {
   using engine::tests::capture_presented_frame;
   using engine::tests::settle_frames;
-  const char *const cvars[2] = {"r_shadow_cache", "r_shadows"};
-  const char *const files[2] = {"mip_chain_no_shadow_cache.tga",
-                                "mip_chain_no_shadows.tga"};
-  for (int step = 0; step < 2; ++step) {
+  struct Step final {
+    const char *cvar;
+    bool value;
+    int frames;
+    const char *file;
+  };
+  const Step steps[3] = {
+      {"r_shadow_cache", false, 4, "mip_chain_no_shadow_cache.tga"},
+      {"r_shadow_cache", true, 8, "mip_chain_shadow_cache_again.tga"},
+      {"r_shadows", false, 4, "mip_chain_no_shadows.tga"},
+  };
+  for (const Step &step : steps) {
     CapturedFrame frame{};
-    if (!engine::core::cvar_set_bool(cvars[step], false) ||
-        !settle_frames(pipeline, 4) ||
-        !capture_presented_frame(pipeline, files[step], &frame)) {
-      std::fprintf(stderr, "diagnosis: no frame with %s off\n", cvars[step]);
+    if (!engine::core::cvar_set_bool(step.cvar, step.value) ||
+        !settle_frames(pipeline, step.frames) ||
+        !capture_presented_frame(pipeline, step.file, &frame)) {
+      std::fprintf(stderr, "diagnosis: no frame with %s %s\n", step.cvar,
+                   step.value ? "on" : "off");
       return;
     }
-    std::fprintf(stderr, "diagnosis: far face %.1f with %s off\n",
-                 block_level(frame, cx, cy, 3), cvars[step]);
+    std::fprintf(stderr, "diagnosis: far face %.1f with %s %s\n",
+                 block_level(frame, cx, cy, 3), step.cvar,
+                 step.value ? "on" : "off");
   }
 }
 
