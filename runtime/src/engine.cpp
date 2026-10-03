@@ -291,7 +291,11 @@ bool bootstrap(const EngineConfig &config) noexcept {
   // keeps the active configuration intact when a string is rejected.
   EngineConfig adopted = config;
   char engineRoot[kMaxConfigStringLength + 1U] = {};
-  if ((adopted.engineRoot != nullptr) && (adopted.engineRoot[0] == '\0')) {
+  // Searched for when the config leaves it empty; a refusal then names
+  // where the search looked and what produces the content.
+  const bool engineRootSearched =
+      (adopted.engineRoot != nullptr) && (adopted.engineRoot[0] == '\0');
+  if (engineRootSearched) {
     adopted.engineRoot = resolve_engine_root(engineRoot, sizeof(engineRoot));
   }
   if (!adopt_config_strings(adopted) || !project_fields_consistent(adopted)) {
@@ -396,12 +400,18 @@ bool bootstrap(const EngineConfig &config) noexcept {
   }
   if (!core::mount(g_activeConfig.engineMount, g_activeConfig.engineRoot) ||
       !core::vfs_directory_exists(g_activeConfig.engineMount)) {
-    char message[kMaxConfigStringLength + 96U] = {};
+    char message[kMaxConfigStringLength + 320U] = {};
     static_cast<void>(std::snprintf(
         message, sizeof(message),
         "engine content root '%s' is not a directory; nothing the engine "
-        "ships (shaders, fonts) can load",
-        g_activeConfig.engineRoot));
+        "ships (shaders, fonts) can load%s",
+        g_activeConfig.engineRoot,
+        engineRootSearched
+            ? ". The engine looks in ENGINE_ROOT, then for engine_assets "
+              "beside the executable, then in the working directory; "
+              "building the editor or the player puts engine_assets, with "
+              "its cooked shaders, beside it"
+            : ""));
     core::log_message(core::LogLevel::Error, "engine", message);
     return fail_bootstrap();
   }

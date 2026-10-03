@@ -702,6 +702,19 @@ if(ENGINE_BUILD_TOOLS AND ENGINE_BGFX_SHADERC AND TARGET copy_engine_assets)
     add_dependencies(bgfx_shader_cook asset_packer shaderc copy_engine_assets)
 endif()
 
+# The editor and the player load the engine's content, the sample project
+# and the cooked shaders from beside themselves at startup. Each depends on
+# the targets that put them there, so building one alone (an IDE's run
+# button builds only its launch target) still produces everything it loads.
+foreach(_engine_app IN ITEMS engine_editor_app engine_player)
+    foreach(_engine_content IN ITEMS
+            copy_engine_assets copy_sample_project bgfx_shader_cook)
+        if(TARGET ${_engine_app} AND TARGET ${_engine_content})
+            add_dependencies(${_engine_app} ${_engine_content})
+        endif()
+    endforeach()
+endforeach()
+
 if(ENGINE_BUILD_TESTS AND (ENGINE_TARGET_PLATFORM STREQUAL "Web"))
     # The host suites stay host-side; a web build carries only the browser
     # tests.
