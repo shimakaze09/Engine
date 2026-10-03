@@ -84,9 +84,9 @@ device path, an unbound pass or a readback those suites assert fails
 there, as does a windowed coin_run play whose presented frame is not a
 rendered picture (the frame is kept as the `coin-run-final-frame`
 artifact). The Windows Release lane runs the same suites on WARP, Microsoft's
-software rasterizer, through D3D11 (`ENGINE_CVAR_r_bgfx_software_adapter=1`);
-D3D12 joins once its BRDF lookup bakes right (#1203). Nothing runs them on a
-hardware GPU, on D3D12, Metal or OpenGL, or judges what a frame looks like. The web lane draws frames on SwiftShader's
+software rasterizer, through D3D11 and through D3D12
+(`ENGINE_CVAR_r_bgfx_software_adapter=1`). Nothing runs them on a hardware
+GPU, on Metal or OpenGL, or judges what a frame looks like. The web lane draws frames on SwiftShader's
 WebGL2 but only fails on an error; it compares no image. Treat a green CI
 run as evidence for what those suites assert, and nothing more.
 
