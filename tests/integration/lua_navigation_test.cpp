@@ -1,9 +1,9 @@
 // Navigation end to end: a level is baked through the production bake and
-// written as a .navmesh file, and a real engine::bootstrap() and
-// EnginePipeline in player mode load a scene whose NavMeshSurface names
-// that file, through the production serializer. The level is a 20 by 20 m
-// floor with a wall across x = 0 that is open past z = 4, and a platform
-// 4 m off the floor's edge with nothing joining them. A script's
+// written as a .navmesh file in a directory of the test's own, and a real
+// engine::bootstrap() and EnginePipeline in player mode load a scene whose
+// NavMeshSurface names that file, through the production serializer. The level
+// is a 20 by 20 m floor with a wall across x = 0 that is open past z = 4, and a
+// platform 4 m off the floor's edge with nothing joining them. A script's
 // on_fixed_tick asks engine.find_path for:
 //   a. a path along the floor, from one end of the mesh to the other, on
 //      the floor's surface;
@@ -15,6 +15,7 @@
 // Two runs, at 1 and 4 workers, report the same checks.
 
 #include "../asset_root.h"
+#include "engine/core/vfs.h"
 #include "engine/engine.h"
 #include "engine/navigation/nav_mesh.h"
 #include "engine/runtime/engine_pipeline.h"
@@ -26,25 +27,24 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <memory>
 #include <new>
 #include <string>
+#include <system_error>
 
 namespace {
 
 constexpr const char *kScriptPath = "lua_navigation.lua";
 constexpr const char *kScenePath = "lua_navigation.scene";
-// The working directory is the sample project's, where "assets" is
-// mounted, so the file written at kNavMeshFile is kNavMeshVirtualPath.
-constexpr const char *kNavMeshFile = "assets/lua_navigation_test.navmesh";
-constexpr const char *kNavMeshVirtualPath =
-    "assets/lua_navigation_test.navmesh";
-// The sidecar the editor's Bake would give the file, so a catalog walk
-// another test runs meanwhile finds an asset with an identity.
-constexpr const char *kNavMeshMeta = "assets/lua_navigation_test.navmesh.meta";
-constexpr const char *kNavMeshMetaText =
-    "{\"schemaVersion\": 1, \"guid\": "
-    "\"2d6f0c1e-8a43-4b7e-9c55-3f1e7a9b0d42\"}\n";
+// The mesh is written to a directory of the test's own, mounted at its own
+// prefix after bootstrap, never into the sample project's assets: other
+// tests catalogue those in parallel, and would meet the file half written
+// or half removed.
+constexpr const char *kNavMeshDirectory = "lua_navigation_test_files";
+constexpr const char *kNavMeshFile = "lua_navigation_test_files/level.navmesh";
+constexpr const char *kNavMeshMount = "luanavtest";
+constexpr const char *kNavMeshVirtualPath = "luanavtest/level.navmesh";
 constexpr const char *kExpected = "abcde";
 
 int g_failures = 0;
@@ -127,8 +127,8 @@ bool write_file(const char *path, const void *bytes,
 void remove_fixtures() noexcept {
   static_cast<void>(std::remove(kScriptPath));
   static_cast<void>(std::remove(kScenePath));
-  static_cast<void>(std::remove(kNavMeshFile));
-  static_cast<void>(std::remove(kNavMeshMeta));
+  std::error_code ec{};
+  std::filesystem::remove_all(kNavMeshDirectory, ec);
 }
 
 /// Adds a static box.
@@ -176,12 +176,12 @@ bool write_fixtures() noexcept {
   engine::navigation::NavMesh mesh{};
   std::unique_ptr<std::uint8_t[]> bytes{};
   std::size_t size = 0U;
+  std::error_code ec{};
+  std::filesystem::create_directories(kNavMeshDirectory, ec);
   return engine::runtime::bake_nav_mesh_surface(*author, surfaceEntity,
                                                 &mesh) &&
          !mesh.empty() &&
          engine::navigation::write_nav_mesh(mesh, &bytes, &size) &&
-         write_file(kNavMeshMeta, kNavMeshMetaText,
-                    std::strlen(kNavMeshMetaText)) &&
          write_file(kNavMeshFile, bytes.get(), size) &&
          write_file(kScriptPath, kScript, std::strlen(kScript)) &&
          engine::runtime::save_scene(*author, kScenePath);
@@ -209,6 +209,11 @@ RunResult run(std::uint32_t workers) noexcept {
   config.editorScenePath = kScenePath;
   if (!engine::bootstrap(config)) {
     std::fprintf(stderr, "FAIL: bootstrap at %u workers\n", workers);
+    return result;
+  }
+  if (!engine::core::mount(kNavMeshMount, kNavMeshDirectory)) {
+    std::fprintf(stderr, "FAIL: mount the mesh's directory\n");
+    engine::shutdown();
     return result;
   }
   {
