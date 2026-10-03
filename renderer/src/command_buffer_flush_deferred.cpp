@@ -133,6 +133,14 @@ void flush_deferred_path(FrameFlushContext &ctx) noexcept {
       dev->draw(backend.emptyGeometry, PrimitiveTopology::Triangles, 0, 3);
       dev->bind_texture_slot(0U, kInvalidDeviceTexture);
       dev->bind_program(kInvalidDeviceProgram);
+      // The seed is a pass of its own, as the blit above is: what draws
+      // next starts a fresh view. On bgfx's Direct3D 12 backend the sky
+      // drawn in the seed's view after it took none of its own uniforms
+      // and came out one fixed colour whatever the turbidity, on WARP and
+      // reported on hardware; in a view of its own it draws as the forward
+      // path does (engine_integration_deferred_sky_gpu).
+      dev->bind_render_target(sceneTarget);
+      dev->set_viewport(0, 0, drawableWidth, drawableHeight);
       sceneDepthHasOpaque = true;
       return true;
     };

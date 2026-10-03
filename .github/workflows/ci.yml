@@ -147,17 +147,24 @@ jobs:
       # ---- The same suites on Windows through WARP, Microsoft's software
       # Direct3D rasterizer: the runner has no GPU and no Vulkan driver, so
       # r_bgfx_software_adapter asks bgfx for WARP. This is where the
-      # Windows-only render paths (the dx11 cook, the Win32 window) draw
-      # real frames. Direct3D 12 joins once its BRDF lookup bakes right
-      # (issue #1203). WARP draws several times slower than lavapipe, so a
-      # suite gets three times the time. Release only, the Windows lane
-      # with cooked shaders.
+      # Windows-only render paths (the dx11 and dxil cooks, the Win32
+      # window) draw real frames, once through each Direct3D backend. WARP
+      # draws several times slower than lavapipe, so a suite gets three
+      # times the time. Release only, the Windows lane with cooked shaders.
       - name: Test gpu suites on WARP (d3d11)
         if: matrix.os == 'windows-2025-vs2026' && matrix.config == 'Release'
         shell: bash
         env:
           ENGINE_CVAR_r_bgfx_software_adapter: "1"
           ENGINE_CVAR_r_bgfx_renderer: d3d11
+        run: ctest --test-dir build --parallel 2 --output-on-failure --timeout 1200 --label-regex gpu
+
+      - name: Test gpu suites on WARP (d3d12)
+        if: matrix.os == 'windows-2025-vs2026' && matrix.config == 'Release'
+        shell: bash
+        env:
+          ENGINE_CVAR_r_bgfx_software_adapter: "1"
+          ENGINE_CVAR_r_bgfx_renderer: d3d12
         run: ctest --test-dir build --parallel 2 --output-on-failure --timeout 1200 --label-regex gpu
 
       # ---- The frame the windowed coin_run play ended on, as the player

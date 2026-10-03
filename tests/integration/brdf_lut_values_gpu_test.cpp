@@ -28,6 +28,7 @@
 #include "command_buffer_context.h"
 
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 
@@ -185,12 +186,27 @@ int run(engine::EnginePipeline &pipeline, engine::runtime::World &) noexcept {
     int worstEnergy = 0;
     int blueSeen = 0;
     int previousBias = 255;
+    // Eight rows down the column, kept so a failure can show what the bake
+    // wrote beside what it should have.
+    struct Sample final {
+      std::uint32_t row = 0U;
+      int scale = 0;
+      int bias = 0;
+      double referenceScale = 0.0;
+      double referenceBias = 0.0;
+    };
+    Sample samples[8] = {};
+    std::size_t sampleCount = 0U;
     for (std::uint32_t row = 0U; row < size; ++row) {
       const double roughness = (static_cast<double>(row) + 0.5) / lutSize;
       const SplitSum reference = integrate_split_sum(nDotV, roughness, 512U);
       const int scale = frame.channel(column, row, 2U);
       const int bias = frame.channel(column, row, 1U);
       blueSeen += frame.channel(column, row, 0U);
+      if (((row % (size / 8U)) == 0U) && (sampleCount < 8U)) {
+        samples[sampleCount++] = Sample{
+            row, scale, bias, 255.0 * reference.scale, 255.0 * reference.bias};
+      }
 
       const double scaleError = std::fabs(scale - 255.0 * reference.scale);
       const double biasError = std::fabs(bias - 255.0 * reference.bias);
@@ -235,6 +251,13 @@ int run(engine::EnginePipeline &pipeline, engine::runtime::World &) noexcept {
                            "(scale) and %.3f (bias) levels from the "
                            "reference sum\n",
                    nDotV, worstScale, worstBias);
+      for (std::size_t i = 0U; i < sampleCount; ++i) {
+        std::fprintf(stderr,
+                     "  row %u: baked scale %d bias %d, reference %.1f "
+                     "%.1f\n",
+                     samples[i].row, samples[i].scale, samples[i].bias,
+                     samples[i].referenceScale, samples[i].referenceBias);
+      }
       result = 20;
     }
     // A Hammersley set of 512 has a discrepancy near log(N)/N, 0.012, and
