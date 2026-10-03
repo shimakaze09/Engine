@@ -32,9 +32,24 @@ enum class TextureColorSpace : std::uint8_t { Linear, Srgb };
 /// Loads an image file as a texture. An sRGB colour texture is decoded to
 /// RGBA8 and created sRGB, so the device samples it as linear light and
 /// its mips are averaged there; an HDR image is linear whatever is asked.
+/// The texture's import settings, from its ".meta" sidecar, apply: a
+/// colour space other than Auto replaces `space`, and its mips, filter
+/// and wrap are what the texture is created with. A texture with no
+/// settings, or a sidecar that will not read, loads at the defaults (a
+/// generated mip chain, linear filtering, repeat).
 TextureHandle
 load_texture(const char *virtualPath,
              TextureColorSpace space = TextureColorSpace::Linear) noexcept;
+
+/// True when `handle`'s colour space came from its import settings rather
+/// than from the slot that asked for it, so every slot samples the same
+/// texels whatever it asked. False for a stale or invalid handle.
+bool texture_color_space_authored(TextureHandle handle) noexcept;
+
+/// The newest write time of what a texture loads from: its file and its
+/// sidecar, so a changed import setting reloads it as a changed image
+/// does. 0 when neither exists.
+std::int64_t texture_input_write_time(const char *virtualPath) noexcept;
 /// Loads the requested resource for hdr equirect cubemap.
 TextureHandle load_hdr_equirect_cubemap(const char *virtualPath,
                                         std::int32_t faceSize) noexcept;

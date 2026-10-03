@@ -1626,6 +1626,7 @@ engine_add_test_executable(engine_unit_texture_loader_handles
     ${ENGINE_STB_INCLUDE_DIR}
     PRIVATE_DEPS
     engine_core
+    engine_content
     engine_math
 )
 
@@ -2217,6 +2218,7 @@ engine_add_test_executable(engine_unit_command_buffer_reload_contract
     ${ENGINE_STB_INCLUDE_DIR}
     PRIVATE_DEPS
     engine_core
+    engine_content
     engine_math
 )
 

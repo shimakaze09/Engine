@@ -567,7 +567,11 @@ SlotOutcome resolve_one_texture_slot(AssetDatabase *database,
   }
 
   const content::AssetState state = texture_asset_state(database, textureId);
+  // A texture whose import settings fix its colour space reads the same
+  // texels whatever slot asks, so only one left to the slot can conflict.
   if ((state != content::AssetState::Unloaded) &&
+      !texture_color_space_authored(
+          resolve_texture_asset(database, textureId)) &&
       claim_texture_color_space_conflict(database, textureId, space)) {
     const content::AssetMetadata *metadata =
         find_asset_metadata(catalog, textureId);
@@ -575,8 +579,9 @@ SlotOutcome resolve_one_texture_slot(AssetDatabase *database,
     std::snprintf(message, sizeof(message),
                   "one texture is used as both a colour map (base colour, "
                   "emissive) and a data map; it keeps the colour space it "
-                  "was first loaded in, so one of those uses shades wrong: "
-                  "%.400s",
+                  "was first loaded in, so one of those uses shades wrong "
+                  "(set its Color Space import setting to say which it "
+                  "holds): %.400s",
                   ((metadata != nullptr) && (metadata->filePath[0] != '\0'))
                       ? metadata->filePath.data()
                       : "(no source path)");
@@ -617,7 +622,7 @@ SlotOutcome resolve_one_texture_slot(AssetDatabase *database,
 
   // Read before the load, so a save that lands during it moves the time
   // off the recorded one and the hot-reload poll picks the file up again.
-  const std::int64_t writeTime = core::vfs_file_mtime(path);
+  const std::int64_t writeTime = texture_input_write_time(path);
   const TextureHandle loaded = loadFn(path, space, userData);
   if (loaded == kInvalidTextureHandle) {
     static_cast<void>(
