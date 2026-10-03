@@ -2,16 +2,14 @@
 // It prints what each variant reads and always passes; it exists only to
 // choose between causes, and leaves with the fix.
 //
-// The renderer's own lookup; the bake program drawn by this test straight
-// into the back buffer and into fresh targets of three formats and two
-// sizes, the target destroyed in the frame of its draw (as the renderer
-// does) or kept; and the renderer baking its lookup again long after its
-// first frame.
+// The renderer's own lookup read twice straight after pipeline frames,
+// to tell a wrong first readback from a wrong bake; the bake program drawn
+// straight into the back buffer; and test bakes read after pipeline
+// frames with their target destroyed or kept.
 
 #include "../gpu_scene_fixture.h"
 
 #include "command_buffer_context.h"
-#include "command_buffer_ibl.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -33,7 +31,8 @@ bool read_back(r::DeviceTextureHandle texture, int size, const char *path,
   std::filesystem::remove(path, ec);
   dev->bind_render_target(r::kBackBufferTarget);
   dev->set_viewport(0, 0, size, size);
-  dev->clear(r::ClearFlags::ColorDepth, 0.0F, 0.0F, 0.0F, 1.0F);
+  // A marker clear: where the copy draws nothing it reads 128/64.
+  dev->clear(r::ClearFlags::ColorDepth, 0.5F, 0.25F, 0.75F, 1.0F);
   dev->apply_render_state(r::RenderState{
       r::DepthTest::Disabled, true, r::BlendMode::Disabled, r::CullMode::None});
   dev->bind_program(backend.presentBlitProgram);
@@ -70,7 +69,13 @@ void print_grid(const char *label, const CapturedFrame &frame,
                   frame.channel(column, row, 1U));
     }
   }
-  std::printf("\n");
+  // One texel in full and one pixel right of the copy, which holds what
+  // the back buffer held before the readback's view.
+  std::printf(" | texel(1,1) bgra %d %d %d %d | outside %d %d %d\n",
+              frame.channel(1U, 1U, 0U), frame.channel(1U, 1U, 1U),
+              frame.channel(1U, 1U, 2U), frame.channel(1U, 1U, 3U),
+              frame.channel(s + 2U, 2U, 0U), frame.channel(s + 2U, 2U, 1U),
+              frame.channel(s + 2U, 2U, 2U));
 }
 
 /// Draws the bake program into a fresh target of `format`; the target is
@@ -134,12 +139,22 @@ void probe_bake(const char *label, int kSize, r::TextureFormat format,
     r::present_render_device();
   }
   CapturedFrame frame{};
-  char path[64] = {};
+  char path[128] = {};
   std::snprintf(path, sizeof(path), "d3d12_probe_%s.tga", label);
   if (read_back(texture, kSize, path, &frame)) {
     print_grid(label, frame, kSize);
   } else {
     std::printf("probe %s: no readback\n", label);
+  }
+  // A second readback in a frame of its own: whether the first one after
+  // pipeline frames is what reads wrong.
+  if (pipelineFrames > 0) {
+    char again[64] = {};
+    std::snprintf(again, sizeof(again), "%s_again", label);
+    std::snprintf(path, sizeof(path), "d3d12_probe_%s.tga", again);
+    if (read_back(texture, kSize, path, &frame)) {
+      print_grid(again, frame, kSize);
+    }
   }
   if (!destroyNow) {
     dev->destroy_render_target(target);
@@ -188,71 +203,37 @@ void probe_bake_direct() noexcept {
 }
 
 int run(engine::EnginePipeline &pipeline, engine::runtime::World &) noexcept {
-  using engine::tests::checked;
   if (!engine::tests::settle_frames(pipeline, 2)) {
     return 10;
   }
-  const r::BackendState &backend = r::backend_state();
-  CapturedFrame shipped{};
-  if (read_back(backend.brdfLutTexture, backend.brdfLutSize,
-                "d3d12_probe_shipped.tga", &shipped)) {
-    print_grid("shipped", shipped, backend.brdfLutSize);
-  }
-  probe_bake_direct();
-  probe_bake("rg16f_destroyed", 128, r::TextureFormat::RG16F, true, false);
-  probe_bake("rg16f_kept", 128, r::TextureFormat::RG16F, false, false);
-  probe_bake("rg16f_switched_destroyed", 128, r::TextureFormat::RG16F, true,
-             true);
-  probe_bake("rgba16f_kept", 128, r::TextureFormat::RGBA16F, false, false);
-  probe_bake("rgba8_kept", 128, r::TextureFormat::RGBA8, false, false);
-
-  probe_bake("rg16f_512_destroyed", 512, r::TextureFormat::RG16F, true, false);
   g_pipeline = &pipeline;
-  probe_bake("rg16f_512_linear_destroyed", 512, r::TextureFormat::RG16F, true,
-             false, r::TextureFilter::Linear);
-  probe_bake("rg16f_512_after_frames", 512, r::TextureFormat::RG16F, true,
-             false, r::TextureFilter::Nearest, 3);
-
-  // The renderer's own bake function, called here between frames rather
-  // than from inside a frame's flush.
-  {
-    // Only the texture goes: the bake program is the backend's to keep.
-    r::BackendState &mutableBackend = r::backend_state();
-    r::render_device()->destroy_texture(mutableBackend.brdfLutTexture);
-    mutableBackend.brdfLutTexture = r::kInvalidDeviceTexture;
-    mutableBackend.brdfLutSize = 0;
-    const r::DeviceTextureHandle lut = r::ensure_brdf_lut(
-        r::backend_state(), r::render_device(),
-        r::cvar_reflection_probe_bake_settings(backend.cvars));
-    CapturedFrame direct{};
-    if ((lut != r::kInvalidDeviceTexture) &&
-        read_back(lut, backend.brdfLutSize, "d3d12_probe_ensure.tga",
-                  &direct)) {
-      print_grid("ensure_outside_flush", direct, backend.brdfLutSize);
-    } else {
-      std::printf("probe ensure_outside_flush: no lookup or readback\n");
-    }
-  }
-
-  // The renderer's own bake again, in a frame long after the first: a
-  // new size makes the next flush bake a new lookup.
-  for (const int size : {256, 512}) {
-    checked(engine::core::cvar_set_int("r_env_brdf_lut_size", size),
-            "r_env_brdf_lut_size");
-    CapturedFrame rebaked{};
-    char label[32] = {};
-    std::snprintf(label, sizeof(label), "rebaked_%d", size);
+  const r::BackendState &backend = r::backend_state();
+  // The renderer's lookup read four times: straight after pipeline frames,
+  // again with only a readback frame between, and the same pair after one
+  // more pipeline frame.
+  const auto read_shipped = [&backend](const char *label) noexcept {
+    CapturedFrame frame{};
     char path[64] = {};
     std::snprintf(path, sizeof(path), "d3d12_probe_%s.tga", label);
-    if (engine::tests::settle_frames(pipeline, 3) &&
-        (backend.brdfLutSize == size) &&
-        read_back(backend.brdfLutTexture, size, path, &rebaked)) {
-      print_grid(label, rebaked, size);
+    if (read_back(backend.brdfLutTexture, backend.brdfLutSize, path, &frame)) {
+      print_grid(label, frame, backend.brdfLutSize);
     } else {
-      std::printf("probe %s: no rebake or readback (size %d)\n", label,
-                  backend.brdfLutSize);
+      std::printf("probe %s: no readback\n", label);
     }
+  };
+  read_shipped("shipped_first");
+  read_shipped("shipped_second");
+  if (!engine::tests::settle_frames(pipeline, 1)) {
+    return 11;
   }
+  read_shipped("shipped_after_frame_first");
+  read_shipped("shipped_after_frame_second");
+  probe_bake_direct();
+  probe_bake("rg16f_512_destroyed", 512, r::TextureFormat::RG16F, true, false);
+  probe_bake("rg16f_512_after_frames", 512, r::TextureFormat::RG16F, true,
+             false, r::TextureFilter::Nearest, 3);
+  probe_bake("rg16f_512_kept_after_frames", 512, r::TextureFormat::RG16F, false,
+             false, r::TextureFilter::Nearest, 3);
   return 0;
 }
 
