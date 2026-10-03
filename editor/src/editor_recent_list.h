@@ -1,6 +1,8 @@
 // Declares the editor's recently-used list: the paths a user opened last,
-// most recent first, kept per user in the platform save directory. Recent
-// scenes and recent projects are two lists of this one kind. Each is read
+// most recent first, kept per user: in the platform save directory, or in
+// a directory the list names (Recent Scenes lives in the open project's
+// per-user data). Recent scenes and recent projects are two lists of this
+// one kind. Each is read
 // once per session, drops entries that no longer exist, and is written
 // back through a staged atomic replacement after every change; a stored
 // list the session could not read is never overwritten, so a transient
@@ -28,7 +30,7 @@ inline constexpr std::size_t kMaxStoredRecentListBytes =
 /// One list: what it is stored as, how long it may grow, which entries
 /// are still worth offering, and its session cache.
 struct RecentList final {
-  /// The file in the save directory ("editor_recent_scenes.json").
+  /// The file in the list's directory ("editor_recent_scenes.json").
   const char *fileName = "";
   /// The JSON array holding the paths ("scenes").
   const char *arrayKey = "";
@@ -37,6 +39,10 @@ struct RecentList final {
   /// True for an entry still worth offering; the others are dropped on
   /// load. Null keeps every entry.
   bool (*stillExists)(const char *path) noexcept = nullptr;
+  /// Fills `out` with the directory the list is stored in. Null is the
+  /// per-user save directory. False when there is none (no project open):
+  /// the list then starts empty and is not saved.
+  bool (*directory)(char *out, std::size_t capacity) noexcept = nullptr;
 
   char entries[kMaxRecentEntries][kMaxRecentPathLength] = {};
   std::size_t count = 0U;
@@ -67,8 +73,8 @@ const char *recent_list_at(RecentList *list, std::size_t index) noexcept;
 /// again.
 void recent_list_forget(RecentList *list) noexcept;
 
-/// Test-only: stores every list under `directory` instead of the per-user
-/// save directory; "" restores the default. Lists already read keep their
+/// Test-only: stores every list under `directory` instead of its own
+/// directory; "" restores the default. Lists already read keep their
 /// cache until recent_list_forget.
 void recent_lists_set_directory_override_for_tests(
     const char *directory) noexcept;

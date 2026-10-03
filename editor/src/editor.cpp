@@ -417,9 +417,10 @@ void reset_editor_session_residue() noexcept {
   editor_session().playTransitionHead = 0U;
   editor_session().playTransitionCount = 0U;
   editor_layout_reset();
-  // The browser state is the open project's; the next project reads its
-  // own.
+  // The browser state and Recent Scenes are the open project's; the next
+  // project reads its own.
   content_browser_state_reset();
+  recent_scenes_forget();
   editor_session().pickers = ReferencePickerState{};
   editor_session().console = ConsolePanelState{};
   editor_session().inspector = InspectorPanelState{};

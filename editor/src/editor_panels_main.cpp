@@ -30,10 +30,8 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
-#include <filesystem>
 #include <limits>
 #include <memory>
-#include <string>
 #include <vector>
 
 #include "engine/core/cvar.h"
@@ -263,15 +261,20 @@ void draw_main_menu_bar() noexcept {
     if (ImGui::BeginMenu("Recent Scenes",
                          world_can_load_scene() && (recentCount > 0U))) {
       for (std::size_t i = 0U; i < recentCount; ++i) {
-        const char *path = recent_scene_at(i);
-        const std::string label =
-            std::filesystem::path(path).filename().string();
-        if (ImGui::MenuItem(label.empty() ? path : label.c_str())) {
+        // The entry is the scene's path in the project ("scenes/main.scene"),
+        // so two scenes of one name stay apart; the ID is the row's, so
+        // equal labels could never share one.
+        const char *entry = recent_scene_at(i);
+        char path[kMaxDocumentPathLength] = {};
+        const bool resolved = recent_scene_os_path(entry, path, sizeof(path));
+        ImGui::PushID(static_cast<int>(i));
+        if (ImGui::MenuItem(entry, nullptr, false, resolved)) {
           request_scene_open(path);
         }
-        if (ImGui::IsItemHovered()) {
+        if (resolved && ImGui::IsItemHovered()) {
           ImGui::SetTooltip("%s", path);
         }
+        ImGui::PopID();
       }
       ImGui::EndMenu();
     }
