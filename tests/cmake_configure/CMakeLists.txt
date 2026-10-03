@@ -76,3 +76,35 @@ set_tests_properties(
     cmake_configure_tests_are_opt_in
     cmake_configure_tests_opt_in_rejects_default_on
     PROPERTIES LABELS "cmake_configure" TIMEOUT 60)
+
+# The editor and the player each depend on the targets that put the
+# content they load at startup beside them, so building one alone, as an
+# IDE's run button does, still produces it. Read from the configured
+# targets; no build runs.
+set(_engine_startup_content copy_engine_assets copy_sample_project)
+if(TARGET bgfx_shader_cook)
+    list(APPEND _engine_startup_content bgfx_shader_cook)
+endif()
+foreach(_engine_app IN ITEMS engine_editor_app engine_player)
+    if(NOT TARGET ${_engine_app})
+        continue()
+    endif()
+    get_target_property(_engine_app_dependencies ${_engine_app}
+        MANUALLY_ADDED_DEPENDENCIES)
+    if(NOT _engine_app_dependencies)
+        set(_engine_app_dependencies "")
+    endif()
+    string(REPLACE ";" "|" _engine_app_dependencies
+        "${_engine_app_dependencies}")
+    string(REPLACE ";" "|" _engine_app_expected "${_engine_startup_content}")
+    add_test(
+        NAME cmake_configure_${_engine_app}_builds_its_content
+        COMMAND ${CMAKE_COMMAND}
+            "-DTARGET_NAME=${_engine_app}"
+            "-DDEPENDENCIES=${_engine_app_dependencies}"
+            "-DEXPECTED=${_engine_app_expected}"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/check_app_content_dependencies.cmake
+    )
+    set_tests_properties(cmake_configure_${_engine_app}_builds_its_content
+        PROPERTIES LABELS "cmake_configure" TIMEOUT 60)
+endforeach()

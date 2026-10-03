@@ -38,7 +38,10 @@ bool scratch_root(char *out, std::size_t capacity) noexcept {
   if (ec) {
     return false;
   }
-  const std::string asString = resolved.string();
+  // In the engine's one spelling, '/' separators: a scripted dialog
+  // delivers its answer that way, so the document's path compares equal to
+  // the path the test answered with on Windows too.
+  const std::string asString = resolved.generic_string();
   const int written = std::snprintf(out, capacity, "%s", asString.c_str());
   return (written > 0) && (static_cast<std::size_t>(written) < capacity);
 }

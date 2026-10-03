@@ -87,10 +87,11 @@ void deliver_dialog_answer(DialogSlot &slot, FileDialogOutcome outcome,
                            const char *path) noexcept {
   slot.path[0] = '\0';
   if (outcome == FileDialogOutcome::Chosen) {
-    const std::size_t length = std::strlen(path);
-    if (length < slot.path.size()) {
-      std::memcpy(slot.path.data(), path, length + 1U);
-    } else {
+    // Delivered with '/' separators, as the platform's other paths are, so
+    // a chosen file compares equal to the same file reached any other way
+    // (Windows dialogs answer with '\').
+    if (!platform_detail::copy_normalized_path(path, slot.path.data(),
+                                               slot.path.size())) {
       outcome = FileDialogOutcome::PathTooLong;
       log_message(LogLevel::Error, "platform",
                   "the chosen path is longer than a file dialog result can "
