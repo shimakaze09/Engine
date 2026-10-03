@@ -78,7 +78,9 @@
     get_character_controller, add_character_controller,                        \
     remove_character_controller)                                               \
   X(NavMeshSurfaceComponent, kJsonKeyNavMeshSurfaceComponent,                  \
-    get_nav_mesh_surface, add_nav_mesh_surface, remove_nav_mesh_surface)
+    get_nav_mesh_surface, add_nav_mesh_surface, remove_nav_mesh_surface)       \
+  X(NavAgentComponent, kJsonKeyNavAgentComponent, get_nav_agent,               \
+    add_nav_agent, remove_nav_agent)
 
 namespace engine::runtime {
 

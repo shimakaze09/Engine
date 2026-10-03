@@ -21,6 +21,7 @@
 #include "engine/runtime/character_controller.h"
 #include "engine/runtime/collision_layers.h"
 #include "engine/runtime/entity_pool.h"
+#include "engine/runtime/nav_agent.h"
 #include "engine/runtime/physics_bridge.h"
 #include "engine/runtime/prefab_serializer.h"
 #include "engine/runtime/primitive_collider.h"
@@ -1330,6 +1331,64 @@ scripting_find_path_op(runtime::World *, float sx, float sy, float sz, float ex,
   return static_cast<scripting::RuntimePathResult>(result);
 }
 
+// Scripting cannot see the runtime's agent types, so it spells them
+// itself.
+static_assert(
+    (static_cast<int>(scripting::RuntimeNavAgentStatus::Idle) ==
+     static_cast<int>(runtime::NavAgentStatus::Idle)) &&
+        (static_cast<int>(scripting::RuntimeNavAgentStatus::Pending) ==
+         static_cast<int>(runtime::NavAgentStatus::Pending)) &&
+        (static_cast<int>(scripting::RuntimeNavAgentStatus::Moving) ==
+         static_cast<int>(runtime::NavAgentStatus::Moving)) &&
+        (static_cast<int>(scripting::RuntimeNavAgentStatus::Arrived) ==
+         static_cast<int>(runtime::NavAgentStatus::Arrived)) &&
+        (static_cast<int>(scripting::RuntimeNavAgentStatus::Failed) ==
+         static_cast<int>(runtime::NavAgentStatus::Failed)),
+    "the scripting agent statuses mirror the runtime ones");
+static_assert(
+    (static_cast<int>(scripting::RuntimeNavAgentFailure::None) ==
+     static_cast<int>(runtime::NavAgentFailure::None)) &&
+        (static_cast<int>(scripting::RuntimeNavAgentFailure::OffMesh) ==
+         static_cast<int>(runtime::NavAgentFailure::OffMesh)) &&
+        (static_cast<int>(scripting::RuntimeNavAgentFailure::Unreachable) ==
+         static_cast<int>(runtime::NavAgentFailure::Unreachable)) &&
+        (static_cast<int>(scripting::RuntimeNavAgentFailure::TooLong) ==
+         static_cast<int>(runtime::NavAgentFailure::TooLong)) &&
+        (static_cast<int>(scripting::RuntimeNavAgentFailure::CannotMove) ==
+         static_cast<int>(runtime::NavAgentFailure::CannotMove)),
+    "the scripting agent failures mirror the runtime ones");
+
+bool scripting_set_nav_destination_op(runtime::World *world,
+                                      runtime::Entity entity, float x, float y,
+                                      float z) noexcept {
+  runtime::NavAgents *agents = runtime::bound_nav_agents();
+  return (world != nullptr) && (agents != nullptr) &&
+         agents->set_destination(*world, entity, math::Vec3(x, y, z));
+}
+
+bool scripting_stop_nav_agent_op(runtime::World *world,
+                                 runtime::Entity entity) noexcept {
+  runtime::NavAgents *agents = runtime::bound_nav_agents();
+  return (world != nullptr) && (agents != nullptr) &&
+         agents->stop(*world, entity);
+}
+
+bool scripting_nav_agent_state_op(
+    runtime::World *world, runtime::Entity entity,
+    scripting::RuntimeNavAgentState *out) noexcept {
+  runtime::NavAgents *agents = runtime::bound_nav_agents();
+  runtime::NavAgentInfo info{};
+  if ((world == nullptr) || (agents == nullptr) || (out == nullptr) ||
+      !agents->info(*world, entity, &info)) {
+    return false;
+  }
+  out->status = static_cast<scripting::RuntimeNavAgentStatus>(info.status);
+  out->failure = static_cast<scripting::RuntimeNavAgentFailure>(info.failure);
+  out->remainingDistance = info.remainingDistance;
+  out->speed = info.speed;
+  return true;
+}
+
 bool scripting_remove_tag_set_component_op(runtime::World *world,
                                            runtime::Entity entity) noexcept {
   return (world != nullptr) && world->remove_tag_set_component(entity);
@@ -1503,6 +1562,9 @@ scripting::RuntimeServices make_scripting_runtime_services() noexcept {
   s.remove_character_controller_op = &scripting_remove_character_controller_op;
   s.move_character_op = &scripting_move_character_op;
   s.find_path_op = &scripting_find_path_op;
+  s.set_nav_destination_op = &scripting_set_nav_destination_op;
+  s.stop_nav_agent_op = &scripting_stop_nav_agent_op;
+  s.nav_agent_state_op = &scripting_nav_agent_state_op;
   s.find_entities_by_tag = &scripting_find_entities_by_tag;
   s.primitive_collider = &scripting_primitive_collider;
   s.timer_set = &scripting_timer_set;

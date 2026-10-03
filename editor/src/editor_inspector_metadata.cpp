@@ -229,6 +229,25 @@ constexpr FieldMetadata kFieldMetadataTable[] = {
     {"engine::runtime::CharacterControllerComponent", "skinWidth", "Skin Width",
      "Character", "The gap kept between the capsule and what it touches.", "m",
      0.001F, 0.001F, 1.0F, InspectorWidget::Drag, false, false},
+    {"engine::runtime::NavAgentComponent", "speed", "Speed", "Agent",
+     "The top speed it walks at.", "m/s", 0.05F, 0.01F, 100.0F,
+     InspectorWidget::Drag, false, false},
+    {"engine::runtime::NavAgentComponent", "acceleration", "Acceleration",
+     "Agent", "How fast it speeds up and brakes.", "m/s^2", 0.1F, 0.01F,
+     1000.0F, InspectorWidget::Drag, false, false},
+    {"engine::runtime::NavAgentComponent", "angularSpeed", "Angular Speed",
+     "Agent",
+     "How fast it turns to face where it walks; 0 leaves it facing "
+     "as it is.",
+     "deg/s", 1.0F, 0.0F, 3600.0F, InspectorWidget::Drag, false, false},
+    {"engine::runtime::NavAgentComponent", "stoppingDistance",
+     "Stopping Distance", "Agent",
+     "How close to the destination counts as arrived.", "m", 0.01F, 0.0F, 10.0F,
+     InspectorWidget::Drag, false, false},
+    {"engine::runtime::NavAgentComponent", "baseOffset", "Base Offset", "Agent",
+     "The height of this object's origin above the ground it walks: half "
+     "the capsule's height when the origin is the capsule's centre.",
+     "m", 0.01F, -10.0F, 10.0F, InspectorWidget::Drag, false, false},
     {"engine::runtime::CameraComponent", "nearPlane", "Near Plane", "Camera",
      nullptr, "m", 0.01F, 0.001F, 0.0F, InspectorWidget::Drag, false, false},
     {"engine::runtime::CameraComponent", "farPlane", "Far Plane", "Camera",
@@ -283,6 +302,10 @@ constexpr ComponentMetadata kComponentMetadataTable[] = {
      "Where agents can walk: Bake samples the static colliders inside its "
      "box for an agent of its size and saves the mesh to a .navmesh file, "
      "which the scene loads."},
+    {"engine::runtime::NavAgentComponent", "Nav Agent", "Navigation",
+     "Walks the scene's navigation meshes to a destination a script sets "
+     "(engine.set_nav_destination), through this object's Character "
+     "Controller when it has one."},
     {"engine::runtime::CharacterControllerComponent", "Character Controller",
      "Physics",
      "Moves this object's Capsule Collider from a script "

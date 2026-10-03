@@ -304,6 +304,14 @@ void draw_component_sections(runtime::Entity entity, bool authoredEditable,
             g_showAdvanced);
       });
 
+  draw_component_section(entity, ComponentEditType::NavAgent, "Nav Agent",
+                         &ComponentEditSnapshot::navAgent, authoredEditable,
+                         liveEditable, true, [](runtime::NavAgentComponent &c) {
+                           return draw_reflected_component_fields(
+                               "engine::runtime::NavAgentComponent", &c,
+                               g_showAdvanced);
+                         });
+
   draw_component_section(
       entity, ComponentEditType::SpringArm, "Spring Arm",
       &ComponentEditSnapshot::springArm, authoredEditable, liveEditable, true,
@@ -368,9 +376,9 @@ void draw_component_sections(runtime::Entity entity, bool authoredEditable,
         return modified;
       });
 }
-// 16 sections above cover every registry row except Name, Tags and
+// 17 sections above cover every registry row except Name, Tags and
 // Transform; Name and Tags are rows under the entity header.
-static_assert(kComponentEditTypeCount == 19U,
+static_assert(kComponentEditTypeCount == 20U,
               "a new persistent-component registry row needs both a section "
               "in draw_component_sections and an entry in "
               "editor_inspector_metadata's ComponentMetadata table");

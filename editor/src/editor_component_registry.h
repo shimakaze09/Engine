@@ -38,6 +38,7 @@ namespace engine::editor {
 #define ENGINE_ICR_ALIAS_TagSetComponent Tags
 #define ENGINE_ICR_ALIAS_CharacterControllerComponent CharacterController
 #define ENGINE_ICR_ALIAS_NavMeshSurfaceComponent NavMeshSurface
+#define ENGINE_ICR_ALIAS_NavAgentComponent NavAgent
 
 #define ENGINE_ICR_MEMBER(Type) ENGINE_ICR_MEMBER_##Type
 #define ENGINE_ICR_MEMBER_Transform transform
@@ -59,6 +60,7 @@ namespace engine::editor {
 #define ENGINE_ICR_MEMBER_TagSetComponent tagSet
 #define ENGINE_ICR_MEMBER_CharacterControllerComponent characterController
 #define ENGINE_ICR_MEMBER_NavMeshSurfaceComponent navMeshSurface
+#define ENGINE_ICR_MEMBER_NavAgentComponent navAgent
 
 /// Enumerates component edit type values, one per persistent-component
 /// registry row (order follows the registry, not historical declaration

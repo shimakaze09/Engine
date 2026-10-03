@@ -297,6 +297,7 @@ constexpr const char *kSpringArmTypeName =
     "engine::runtime::SpringArmComponent";
 constexpr const char *kCharacterControllerTypeName =
     "engine::runtime::CharacterControllerComponent";
+constexpr const char *kNavAgentTypeName = "engine::runtime::NavAgentComponent";
 constexpr const char *kSceneCaptureTypeName =
     "engine::runtime::SceneCaptureComponent";
 constexpr const char *kCameraTypeName = "engine::runtime::CameraComponent";

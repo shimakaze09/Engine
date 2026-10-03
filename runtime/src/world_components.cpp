@@ -1329,6 +1329,50 @@ Entity World::nav_mesh_surface_entity_at(std::size_t index) const noexcept {
   return m_navMeshSurfaces.entity_at(index);
 }
 
+bool World::add_nav_agent(Entity entity,
+                          const NavAgentComponent &component) noexcept {
+  if (!nav_agent_is_valid(component)) {
+    log_component_error("add_nav_agent",
+                        "a speed, acceleration, angular speed, stopping "
+                        "distance or base offset is out of range");
+    return false;
+  }
+  return static_cast<bool>(
+      add_component_checked(m_navAgents, entity, component, "add_nav_agent"));
+}
+
+bool World::remove_nav_agent(Entity entity) noexcept {
+  return remove_component_checked(m_navAgents, entity, "remove_nav_agent");
+}
+
+bool World::get_nav_agent(Entity entity,
+                          NavAgentComponent *outComponent) const noexcept {
+  return get_component_checked(m_navAgents, entity, outComponent,
+                               "get_nav_agent");
+}
+
+bool World::has_nav_agent(Entity entity) const noexcept {
+  return is_valid_entity(entity) && m_navAgents.contains(entity);
+}
+
+std::size_t World::nav_agent_count() const noexcept {
+  return m_navAgents.count();
+}
+
+const NavAgentComponent *World::nav_agent_at(std::size_t index) const noexcept {
+  if (index >= m_navAgents.count()) {
+    return nullptr;
+  }
+  return &m_navAgents.component_at(index);
+}
+
+Entity World::nav_agent_entity_at(std::size_t index) const noexcept {
+  if (index >= m_navAgents.count()) {
+    return Entity{};
+  }
+  return m_navAgents.entity_at(index);
+}
+
 bool World::add_spring_arm(Entity entity,
                            const SpringArmComponent &component) noexcept {
   return static_cast<bool>(add_component_checked(m_springArms, entity, component,
