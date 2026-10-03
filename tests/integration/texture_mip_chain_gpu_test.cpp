@@ -116,6 +116,31 @@ Entity add_cube(World &world, const engine::math::Vec3 &position) {
              : kInvalidEntity;
 }
 
+/// After a failure, reads the far face again with the directional shadow
+/// maps re-rendered every frame and then with shadows off. On Direct3D 12
+/// this test has failed with the far face at exactly its ambient-only
+/// level, as if shadowed (issue #1212); these readings show whether the
+/// cached cascade atlas or the shadow path as a whole is what darkens it.
+void report_far_face_without_shadow_cache(engine::EnginePipeline &pipeline,
+                                          int cx, int cy) noexcept {
+  using engine::tests::capture_presented_frame;
+  using engine::tests::settle_frames;
+  const char *const cvars[2] = {"r_shadow_cache", "r_shadows"};
+  const char *const files[2] = {"mip_chain_no_shadow_cache.tga",
+                                "mip_chain_no_shadows.tga"};
+  for (int step = 0; step < 2; ++step) {
+    CapturedFrame frame{};
+    if (!engine::core::cvar_set_bool(cvars[step], false) ||
+        !settle_frames(pipeline, 4) ||
+        !capture_presented_frame(pipeline, files[step], &frame)) {
+      std::fprintf(stderr, "diagnosis: no frame with %s off\n", cvars[step]);
+      return;
+    }
+    std::fprintf(stderr, "diagnosis: far face %.1f with %s off\n",
+                 block_level(frame, cx, cy, 3), cvars[step]);
+  }
+}
+
 int run(engine::EnginePipeline &pipeline, World &world) noexcept {
   using engine::tests::capture_presented_frame;
   using engine::tests::checked;
@@ -169,6 +194,7 @@ int run(engine::EnginePipeline &pipeline, World &world) noexcept {
                  "FAIL: the minified face differs from the magnified one "
                  "(%.1f against %.1f)\n",
                  farLevel, nearLevel);
+    report_far_face_without_shadow_cache(pipeline, cx, cy);
     return 12;
   }
   return 0;
