@@ -62,6 +62,7 @@
 #include "engine/runtime/physics_bridge.h"
 #include "engine/runtime/play_recording.h"
 #include "engine/runtime/render_prep_pipeline.h"
+#include "engine/runtime/scene_navigation.h"
 #include "engine/runtime/scene_serializer.h"
 #include "engine/runtime/scripting_bridge.h"
 #include "engine/runtime/service_registry.h"
@@ -652,6 +653,8 @@ struct EnginePipeline::Impl final {
   UnresolvedMeshReports unresolvedMeshReports{};
   // The scene sky light's environment cubemap, bound in stage_assets.
   runtime::SceneEnvironment sceneEnvironment{};
+  // The meshes the scene's navigation surfaces name, read in stage_assets.
+  runtime::SceneNavigation sceneNavigation{};
   runtime::EngineRendererService rendererService{};
 
   // --- Run lifetime ---
@@ -1204,6 +1207,7 @@ void EnginePipeline::Impl::teardown() noexcept {
   runtime::release_scene_environment(&sceneEnvironment,
                                      &release_material_texture_production,
                                      nullptr);
+  sceneNavigation.clear();
   serviceRegistry.unregister_services();
 
   content::shutdown_asset_streaming(assetStreamingQueue.get());
@@ -1539,6 +1543,10 @@ void EnginePipeline::Impl::stage_assets() noexcept {
   runtime::update_scene_environment(world.get(), assetCatalog.get(), &sceneEnvironment,
                            &load_scene_environment_production,
                            &release_material_texture_production, nullptr);
+  // Each navigation surface's baked mesh is read when the surfaces, their
+  // paths or the scene change, or a bake asks; otherwise one comparison
+  // per surface.
+  sceneNavigation.update(*world);
 
   if ((assetStreamingQueue != nullptr) && (assetStreamingState != nullptr)) {
     static_cast<void>(content::update_asset_streaming(
@@ -2619,6 +2627,11 @@ bool EnginePipeline::had_fatal_error() const noexcept {
 
 runtime::World *EnginePipeline::world() noexcept {
   return m_impl ? m_impl->world.get() : nullptr;
+}
+
+const runtime::SceneNavigation *
+EnginePipeline::scene_navigation() const noexcept {
+  return m_impl ? &m_impl->sceneNavigation : nullptr;
 }
 
 bool EnginePipeline::set_frame_delta_override(double seconds) noexcept {

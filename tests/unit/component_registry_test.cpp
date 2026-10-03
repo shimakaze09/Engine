@@ -409,6 +409,29 @@ bool components_equal(
          (a.skinWidth == b.skinWidth);
 }
 
+void make_test_value(engine::runtime::NavMeshSurfaceComponent *out) noexcept {
+  out->halfExtents = engine::math::Vec3(12.5F, 4.0F, 30.0F);
+  out->cellSize = 0.5F;
+  out->agentRadius = 0.3F;
+  out->agentHeight = 1.6F;
+  out->maxClimb = 0.25F;
+  out->maxSlopeDegrees = 38.0F;
+  std::snprintf(out->navMeshPath, sizeof(out->navMeshPath),
+                "assets/levels/arena.navmesh");
+}
+
+bool components_equal(
+    const engine::runtime::NavMeshSurfaceComponent &a,
+    const engine::runtime::NavMeshSurfaceComponent &b) noexcept {
+  return (a.halfExtents.x == b.halfExtents.x) &&
+         (a.halfExtents.y == b.halfExtents.y) &&
+         (a.halfExtents.z == b.halfExtents.z) && (a.cellSize == b.cellSize) &&
+         (a.agentRadius == b.agentRadius) &&
+         (a.agentHeight == b.agentHeight) && (a.maxClimb == b.maxClimb) &&
+         (a.maxSlopeDegrees == b.maxSlopeDegrees) &&
+         (std::strcmp(a.navMeshPath, b.navMeshPath) == 0);
+}
+
 void make_test_value(engine::runtime::TagSetComponent *out) noexcept {
   static_cast<void>(engine::runtime::tag_set_add(out, "coin"));
   static_cast<void>(engine::runtime::tag_set_add(out, "Pickup.Gold"));
@@ -586,7 +609,7 @@ int verify_prefab_mesh_reference_parity() {
 // Count tripwire: bumping this is an intentional act that accompanies a new
 // registry row, a World::PersistentComponentTypes entry, and the test-value/
 // comparator overloads above.
-static_assert(engine::runtime::kPersistentComponentTypeCount == 18U,
+static_assert(engine::runtime::kPersistentComponentTypeCount == 19U,
               "new persistent component type: extend the registry table, the "
               "World type list, and this suite's overloads together");
 

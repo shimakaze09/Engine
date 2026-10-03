@@ -76,7 +76,9 @@
     add_tag_set_component, remove_tag_set_component)                           \
   X(CharacterControllerComponent, kJsonKeyCharacterControllerComponent,        \
     get_character_controller, add_character_controller,                        \
-    remove_character_controller)
+    remove_character_controller)                                               \
+  X(NavMeshSurfaceComponent, kJsonKeyNavMeshSurfaceComponent,                  \
+    get_nav_mesh_surface, add_nav_mesh_surface, remove_nav_mesh_surface)
 
 namespace engine::runtime {
 

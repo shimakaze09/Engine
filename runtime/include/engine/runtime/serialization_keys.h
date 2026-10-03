@@ -17,6 +17,7 @@ inline constexpr const char *kJsonKeyMeshComponent = "MeshComponent";
 inline constexpr const char *kJsonKeySpringArmComponent = "SpringArmComponent";
 inline constexpr const char *kJsonKeyCharacterControllerComponent =
     "CharacterController";
+inline constexpr const char *kJsonKeyNavMeshSurfaceComponent = "NavMeshSurface";
 inline constexpr const char *kJsonKeyPointLightComponent =
     "PointLightComponent";
 inline constexpr const char *kJsonKeySpotLightComponent = "SpotLightComponent";

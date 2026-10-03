@@ -1475,6 +1475,19 @@ engine_add_test_executable(engine_unit_editor_asset_place
     SDL_MAIN_HANDLED
 )
 
+engine_add_test_executable(engine_unit_editor_nav_mesh_bake
+    SOURCES
+    editor_nav_mesh_bake_test.cpp
+    PRIVATE_INCLUDE_DIRS
+    ${CMAKE_SOURCE_DIR}/editor/include
+    ${CMAKE_SOURCE_DIR}/editor/src
+    ${CMAKE_SOURCE_DIR}/runtime/src
+    PRIVATE_DEPS
+    engine_editor
+    COMPILE_DEFINITIONS
+    SDL_MAIN_HANDLED
+)
+
 engine_add_test_executable(engine_unit_editor_asset_index
     SOURCES
     editor_asset_index_test.cpp
@@ -1739,6 +1752,14 @@ engine_add_test_executable(engine_unit_nav_mesh
 engine_add_test_executable(engine_unit_navigation_bake
     SOURCES
     navigation_bake_test.cpp
+    PRIVATE_DEPS
+    engine_runtime
+    engine_navigation
+)
+
+engine_add_test_executable(engine_unit_nav_mesh_surface
+    SOURCES
+    nav_mesh_surface_test.cpp
     PRIVATE_DEPS
     engine_runtime
     engine_navigation

@@ -558,6 +558,19 @@ rigid body or a kinematic one; `engine.get_character_controller(e)` and
 Like the shape sweeps and overlaps, it meets a heightfield as its bounding
 box, so a character cannot yet walk heightfield terrain.
 
+A Nav Mesh Surface (Add Component > Navigation) marks where agents walk, as
+Unity's NavMeshSurface does. Its box (Half Extents, around the entity's
+position, never rotated or scaled) and its agent (radius, height, the step
+it climbs and the steepest slope it walks) set what its Bake button samples:
+the static colliders inside the box, through the physics ray queries. Bake
+writes the mesh to the surface's Nav Mesh File, a `.navmesh` asset, choosing
+`assets/<scene>.navmesh` when it has none and never writing over another
+file; a box with nothing walkable writes nothing. A loaded scene reads each
+surface's file, again whenever a bake rewrites it; a file that is missing
+or damaged leaves that surface without a mesh and is logged, and loading a
+scene reports a missing one as `missing_nav_mesh`
+(`engine_unit_nav_mesh_surface`, `engine_unit_editor_nav_mesh_bake`).
+
 Entities carry gameplay tags, as Godot's groups and Unreal's actor Tags
 do, so scripts find what they act on without a unique name. Give tags in
 the Inspector's Tags row under the name, or from Lua:

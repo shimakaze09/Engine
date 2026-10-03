@@ -8,6 +8,9 @@
 
 #include "engine/navigation/nav_mesh.h"
 
+#include "engine/math/vec3.h"
+#include "engine/runtime/world_component_types.h"
+
 namespace engine::runtime {
 
 class World;
@@ -19,5 +22,16 @@ class World;
 bool bake_navigation_mesh(const World &world,
                           const navigation::NavBakeSettings &settings,
                           navigation::NavMesh *out) noexcept;
+
+/// The bake settings a surface's volume makes around `center`.
+navigation::NavBakeSettings
+nav_bake_settings_for(const NavMeshSurfaceComponent &surface,
+                      const math::Vec3 &center) noexcept;
+
+/// Bakes the NavMeshSurface on `entity` over `world`: its volume around
+/// the entity's world position, for its agent. False, logged, with `out`
+/// unchanged, for an entity without a surface or a failed bake.
+bool bake_nav_mesh_surface(const World &world, Entity entity,
+                           navigation::NavMesh *out) noexcept;
 
 } // namespace engine::runtime

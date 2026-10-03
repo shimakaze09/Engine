@@ -89,6 +89,8 @@ bool decode_prefab_component(const core::JsonParser &parser,
     return read_mesh_component(parser, value, out);
   } else if constexpr (std::is_same_v<T, SkyLightComponent>) {
     return read_sky_light_component(parser, value, out);
+  } else if constexpr (std::is_same_v<T, NavMeshSurfaceComponent>) {
+    return read_nav_mesh_surface_component(parser, value, out);
   } else if constexpr (std::is_same_v<T, LightComponent>) {
     return read_light_component(parser, value, out);
   } else if constexpr (std::is_same_v<T, FoliagePatchComponent>) {
@@ -138,6 +140,9 @@ bool encode_prefab_component(core::JsonWriter &w, const char *key,
     return true;
   } else if constexpr (std::is_same_v<T, SkyLightComponent>) {
     write_sky_light_component(w, component);
+    return true;
+  } else if constexpr (std::is_same_v<T, NavMeshSurfaceComponent>) {
+    write_nav_mesh_surface_component(w, component);
     return true;
   } else if constexpr (std::is_same_v<T, LightComponent>) {
     write_light_component(w, component);

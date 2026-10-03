@@ -8,7 +8,8 @@
 // over the rectangles and straightened through their portals with a
 // funnel. The bake and every query run in a fixed order with deterministic
 // arithmetic, so the same level and settings give the same mesh and paths
-// on every platform and at any worker count.
+// on every platform and at any worker count. A baked mesh is stored as a
+// .navmesh document, written and read here.
 
 #pragma once
 
@@ -126,6 +127,8 @@ private:
   friend bool bake_nav_mesh(const NavBakeSettings &settings,
                             NavColumnSampler sampler, void *context,
                             NavMesh *out) noexcept;
+  friend bool read_nav_mesh(const std::uint8_t *data, std::size_t size,
+                            NavMesh *out) noexcept;
 
   NavBakeSettings m_settings{};
   std::int32_t m_columnsX = 0;
@@ -146,6 +149,24 @@ private:
 /// allocation. A level with nothing walkable bakes an empty mesh.
 bool bake_nav_mesh(const NavBakeSettings &settings, NavColumnSampler sampler,
                    void *context, NavMesh *out) noexcept;
+
+/// The .navmesh format's version. A file naming another is refused.
+inline constexpr std::uint32_t kNavMeshFormatVersion = 1U;
+
+/// Encodes `mesh` as a .navmesh document: a magic and version, the
+/// settings, the grid's surfaces, the polygons and the portals, little
+/// endian, then a 64-bit FNV-1a of everything before it. The same mesh
+/// always encodes to the same bytes. False, logged, for an empty mesh or a
+/// failed allocation.
+bool write_nav_mesh(const NavMesh &mesh, std::unique_ptr<std::uint8_t[]> *out,
+                    std::size_t *outSize) noexcept;
+
+/// Decodes a .navmesh document into `out`, checking the magic, version,
+/// checksum, settings and every index and range, so a damaged or
+/// hand-edited file is refused rather than trusted. False, logged, with
+/// `out` unchanged, when anything does not hold.
+bool read_nav_mesh(const std::uint8_t *data, std::size_t size,
+                   NavMesh *out) noexcept;
 
 /// What find_path reports.
 enum class NavPathResult : std::uint8_t {

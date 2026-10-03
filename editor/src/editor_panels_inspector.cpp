@@ -289,6 +289,13 @@ void draw_component_sections(runtime::Entity entity, bool authoredEditable,
                          });
 
   draw_component_section(
+      entity, ComponentEditType::NavMeshSurface, "Nav Mesh Surface",
+      &ComponentEditSnapshot::navMeshSurface, authoredEditable, false, true,
+      [entity, authoredEditable](runtime::NavMeshSurfaceComponent &c) {
+        return draw_nav_mesh_surface_fields(entity, c, authoredEditable);
+      });
+
+  draw_component_section(
       entity, ComponentEditType::CharacterController, "Character Controller",
       &ComponentEditSnapshot::characterController, authoredEditable,
       liveEditable, true, [](runtime::CharacterControllerComponent &c) {
@@ -361,9 +368,9 @@ void draw_component_sections(runtime::Entity entity, bool authoredEditable,
         return modified;
       });
 }
-// 15 sections above cover every registry row except Name, Tags and
+// 16 sections above cover every registry row except Name, Tags and
 // Transform; Name and Tags are rows under the entity header.
-static_assert(kComponentEditTypeCount == 18U,
+static_assert(kComponentEditTypeCount == 19U,
               "a new persistent-component registry row needs both a section "
               "in draw_component_sections and an entry in "
               "editor_inspector_metadata's ComponentMetadata table");

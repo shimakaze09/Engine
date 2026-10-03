@@ -285,6 +285,21 @@ bool read_tag_set_component(const core::JsonParser &parser,
                             const core::JsonValue &tagArray,
                             TagSetComponent *outComponent) noexcept;
 
+// --- NavMeshSurfaceComponent ----------------------------------------------
+
+/// Writes the navigation surface under kJsonKeyNavMeshSurfaceComponent:
+/// its volume, its agent and, once a bake has named one, its .navmesh
+/// path.
+void write_nav_mesh_surface_component(
+    core::JsonWriter &writer,
+    const NavMeshSurfaceComponent &component) noexcept;
+/// Reads a navigation surface. Absent fields keep their defaults; a
+/// present field of the wrong type, or a path that does not fit whole,
+/// fails the read.
+bool read_nav_mesh_surface_component(
+    const core::JsonParser &parser, const core::JsonValue &value,
+    NavMeshSurfaceComponent *outComponent) noexcept;
+
 // --- AnimationComponent ----------------------------------------------------
 
 /// Writes the animation component under `key`, carrying every authored

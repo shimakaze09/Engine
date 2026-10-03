@@ -551,10 +551,11 @@ constexpr MultiSectionDesc kMultiSections[] = {
 // declared once so the guard below can prove every
 // registry-generated ComponentEditType is either sectioned or deferred.
 constexpr ComponentEditType kMultiEditDeferredTypes[] = {
-    ComponentEditType::Name,         ComponentEditType::Mesh,
-    ComponentEditType::FoliagePatch, ComponentEditType::Script,
-    ComponentEditType::Animation,    ComponentEditType::SceneCapture,
-    ComponentEditType::SkyLight,     ComponentEditType::Tags,
+    ComponentEditType::Name,           ComponentEditType::Mesh,
+    ComponentEditType::FoliagePatch,   ComponentEditType::Script,
+    ComponentEditType::Animation,      ComponentEditType::SceneCapture,
+    ComponentEditType::SkyLight,       ComponentEditType::Tags,
+    ComponentEditType::NavMeshSurface,
 };
 
 constexpr bool multi_section_row_exists(ComponentEditType type) noexcept {

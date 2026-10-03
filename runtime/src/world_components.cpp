@@ -1283,6 +1283,52 @@ World::get_character_controller_ptr(Entity entity) noexcept {
   return get_component_ptr_checked(m_characterControllers, entity);
 }
 
+bool World::add_nav_mesh_surface(
+    Entity entity, const NavMeshSurfaceComponent &component) noexcept {
+  if (!nav_mesh_surface_is_valid(component)) {
+    log_component_error("add_nav_mesh_surface",
+                        "the volume or agent settings cannot bake, or the "
+                        "path names no .navmesh file");
+    return false;
+  }
+  return static_cast<bool>(add_component_checked(
+      m_navMeshSurfaces, entity, component, "add_nav_mesh_surface"));
+}
+
+bool World::remove_nav_mesh_surface(Entity entity) noexcept {
+  return remove_component_checked(m_navMeshSurfaces, entity,
+                                  "remove_nav_mesh_surface");
+}
+
+bool World::get_nav_mesh_surface(
+    Entity entity, NavMeshSurfaceComponent *outComponent) const noexcept {
+  return get_component_checked(m_navMeshSurfaces, entity, outComponent,
+                               "get_nav_mesh_surface");
+}
+
+bool World::has_nav_mesh_surface(Entity entity) const noexcept {
+  return is_valid_entity(entity) && m_navMeshSurfaces.contains(entity);
+}
+
+std::size_t World::nav_mesh_surface_count() const noexcept {
+  return m_navMeshSurfaces.count();
+}
+
+const NavMeshSurfaceComponent *
+World::nav_mesh_surface_at(std::size_t index) const noexcept {
+  if (index >= m_navMeshSurfaces.count()) {
+    return nullptr;
+  }
+  return &m_navMeshSurfaces.component_at(index);
+}
+
+Entity World::nav_mesh_surface_entity_at(std::size_t index) const noexcept {
+  if (index >= m_navMeshSurfaces.count()) {
+    return Entity{};
+  }
+  return m_navMeshSurfaces.entity_at(index);
+}
+
 bool World::add_spring_arm(Entity entity,
                            const SpringArmComponent &component) noexcept {
   return static_cast<bool>(add_component_checked(m_springArms, entity, component,

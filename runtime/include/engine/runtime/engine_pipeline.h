@@ -13,6 +13,7 @@ struct PlatformEvent;
 
 namespace runtime {
 class World;
+class SceneNavigation;
 struct EditorBridge;
 
 /// Result of routing one platform input event through editor capture.
@@ -82,6 +83,10 @@ public:
   /// The pipeline-owned World, for bridge-less embeddings (player mode)
   /// and tests; null before initialize() and after teardown().
   runtime::World *world() noexcept;
+
+  /// The navigation meshes the World's surfaces name, as of the last
+  /// frame; null before initialize() and after teardown().
+  const runtime::SceneNavigation *scene_navigation() const noexcept;
 
   /// Replaces the wall clock as the source of each playing frame's delta:
   /// every frame accumulates exactly `seconds` until the override is

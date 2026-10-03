@@ -169,6 +169,37 @@ struct AnimationComponent final {
   AnimParam params[kMaxParams] = {};
 };
 
+/// Navigation surface (Unity's NavMeshSurface, Godot's NavigationRegion3D):
+/// the volume its entity's bake covers, the agent the mesh is baked for,
+/// and the .navmesh file the editor's Bake writes and a loaded scene reads.
+/// The volume is a world-aligned box of halfExtents around the entity's
+/// world position; its rotation and scale do not apply, because the mesh
+/// is a grid of world-aligned columns. The baked mesh itself is runtime
+/// state, held by whoever loaded the file, never by the component.
+struct NavMeshSurfaceComponent final {
+  static constexpr std::size_t kMaxPathLength = 127U; // +1 for null
+  /// Half the size of the baked volume on each axis, in metres.
+  math::Vec3 halfExtents = math::Vec3(25.0F, 10.0F, 25.0F);
+  /// Side of one grid column, in metres.
+  float cellSize = 0.25F;
+  /// The agent's radius: walkable space keeps this far from walls.
+  float agentRadius = 0.4F;
+  /// The agent's height: walkable space has this much room above it.
+  float agentHeight = 1.8F;
+  /// The highest step the agent climbs between neighbouring columns.
+  float maxClimb = 0.4F;
+  /// The steepest walkable slope, in degrees.
+  float maxSlopeDegrees = 45.0F;
+  /// The .navmesh file, a VFS path; empty until the first bake names one.
+  char navMeshPath[kMaxPathLength + 1U] = {};
+};
+
+/// True when `surface` can be baked: positive, finite half extents whose
+/// volume and agent settings make valid bake settings (no more columns
+/// than one bake samples), and a path that is empty or names a .navmesh
+/// file.
+bool nav_mesh_surface_is_valid(const NavMeshSurfaceComponent &surface) noexcept;
+
 using TransformVisitor = void (*)(Entity entity, const Transform &transform,
                                   void *userData) noexcept;
 

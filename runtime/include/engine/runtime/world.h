@@ -53,7 +53,8 @@ namespace engine::runtime {
   X(CameraComponent, m_cameraComponents)                                       \
   X(SkyLightComponent, m_skyLights)                                            \
   X(TagSetComponent, m_tagSets)                                                \
-  X(CharacterControllerComponent, m_characterControllers)
+  X(CharacterControllerComponent, m_characterControllers)                      \
+  X(NavMeshSurfaceComponent, m_navMeshSurfaces)
 
 #ifndef ENGINE_MAX_ENTITIES
 #define ENGINE_MAX_ENTITIES 65536U
@@ -154,6 +155,9 @@ public:
   static constexpr std::size_t kMaxTagSetComponents = 8192U;
   /// Characters moving at once: every player, NPC and enemy a level runs.
   static constexpr std::size_t kMaxCharacterControllerComponents = 1024U;
+  /// Navigation surfaces at once: a level bakes one, or a few for areas
+  /// baked apart.
+  static constexpr std::size_t kMaxNavMeshSurfaceComponents = 64U;
   static constexpr std::size_t kNameLookupCapacity = kMaxNameComponents * 2U;
   static constexpr std::size_t kStateBufferCount = 2U;
   static constexpr std::size_t kPersistentIndexCapacity = kMaxEntities * 2U;
@@ -164,12 +168,14 @@ public:
   /// serialized name and World accessor pair and static-asserts exact
   /// agreement with this list, so extending the World's serializable set
   /// without a registry row (or vice versa) fails to compile.
-  using PersistentComponentTypes = std::tuple<
-      Transform, RigidBody, Collider, MeshComponent, NameComponent,
-      LightComponent, ScriptComponent, SpringArmComponent, PointLightComponent,
-      SpotLightComponent, ReflectionProbeComponent, SceneCaptureComponent,
-      FoliagePatchComponent, AnimationComponent, CameraComponent,
-      SkyLightComponent, TagSetComponent, CharacterControllerComponent>;
+  using PersistentComponentTypes =
+      std::tuple<Transform, RigidBody, Collider, MeshComponent, NameComponent,
+                 LightComponent, ScriptComponent, SpringArmComponent,
+                 PointLightComponent, SpotLightComponent,
+                 ReflectionProbeComponent, SceneCaptureComponent,
+                 FoliagePatchComponent, AnimationComponent, CameraComponent,
+                 SkyLightComponent, TagSetComponent,
+                 CharacterControllerComponent, NavMeshSurfaceComponent>;
   /// Number of persistent component types, derived from the list above.
   static constexpr std::size_t kPersistentComponentTypeCount =
       std::tuple_size_v<PersistentComponentTypes>;
@@ -632,6 +638,25 @@ public:
   CharacterControllerComponent *
   get_character_controller_ptr(Entity entity) noexcept;
 
+  /// Adds or replaces the navigation surface; settings that cannot bake
+  /// or a path that names no .navmesh file are refused with a logged
+  /// diagnostic and nothing changed.
+  bool add_nav_mesh_surface(Entity entity,
+                            const NavMeshSurfaceComponent &component) noexcept;
+  bool remove_nav_mesh_surface(Entity entity) noexcept;
+  bool
+  get_nav_mesh_surface(Entity entity,
+                       NavMeshSurfaceComponent *outComponent) const noexcept;
+  bool has_nav_mesh_surface(Entity entity) const noexcept;
+  /// Number of live navigation surfaces.
+  std::size_t nav_mesh_surface_count() const noexcept;
+  /// Dense-storage surface at `index` (0..count-1); nullptr out of range.
+  const NavMeshSurfaceComponent *
+  nav_mesh_surface_at(std::size_t index) const noexcept;
+  /// Entity owning the dense surface slot at `index`; kInvalidEntity out
+  /// of range.
+  Entity nav_mesh_surface_entity_at(std::size_t index) const noexcept;
+
   /// Adds or replaces the entity's spring arm. Requires the Input phase and a
   /// live entity; logs and returns false otherwise or when storage is full.
   bool add_spring_arm(Entity entity,
@@ -974,6 +999,9 @@ private:
   using CharacterControllerSet =
       core::CompactSparseSet<Entity, CharacterControllerComponent, kMaxEntities,
                              kMaxCharacterControllerComponents>;
+  using NavMeshSurfaceSet =
+      core::CompactSparseSet<Entity, NavMeshSurfaceComponent, kMaxEntities,
+                             kMaxNavMeshSurfaceComponents>;
   using PointLightSet =
       core::CompactSparseSet<Entity, PointLightComponent, kMaxEntities,
                              kMaxPointLightComponents>;
@@ -1361,6 +1389,7 @@ private:
   ScriptComponentSet m_scriptComponents{};
   SpringArmSet m_springArms{};
   CharacterControllerSet m_characterControllers{};
+  NavMeshSurfaceSet m_navMeshSurfaces{};
   PointLightSet m_pointLights{};
   SpotLightSet m_spotLights{};
   ReflectionProbeSet m_reflectionProbes{};

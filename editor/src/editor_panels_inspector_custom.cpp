@@ -18,6 +18,7 @@
 #include "editor_inspector_metadata.h"
 #include "editor_inspector_widgets.h"
 #include "editor_material_edit.h"
+#include "editor_nav_mesh_bake.h"
 #include "editor_reference_pickers.h"
 #include "editor_session.h"
 #include "engine/core/string_util.h"
@@ -173,6 +174,56 @@ bool draw_animation_component_fields(
                 inspector_drag_float("Playback Speed",
                                      &animation.playbackSpeed, 0.01F, 0.0F,
                                      8.0F));
+  return modified;
+}
+
+bool draw_nav_mesh_surface_fields(runtime::Entity entity,
+                                  runtime::NavMeshSurfaceComponent &surface,
+                                  bool bakeable) noexcept {
+  bool modified = inspector_drag_float3("Half Extents", &surface.halfExtents.x,
+                                        0.1F, 0.1F, 1000.0F);
+  mark_modified(&modified, inspector_drag_float("Cell Size", &surface.cellSize,
+                                                0.01F, 0.05F, 4.0F));
+  mark_modified(&modified,
+                inspector_drag_float("Agent Radius", &surface.agentRadius,
+                                     0.01F, 0.0F, 10.0F));
+  mark_modified(&modified,
+                inspector_drag_float("Agent Height", &surface.agentHeight,
+                                     0.01F, 0.1F, 20.0F));
+  mark_modified(&modified, inspector_drag_float("Max Climb", &surface.maxClimb,
+                                                0.01F, 0.0F, 10.0F));
+  mark_modified(&modified,
+                inspector_drag_float("Max Slope", &surface.maxSlopeDegrees,
+                                     0.5F, 0.0F, 89.0F, "%.1f deg"));
+  mark_modified(&modified, draw_path_reference_picker(
+                               "Nav Mesh File", surface.navMeshPath,
+                               sizeof(surface.navMeshPath), ".navmesh"));
+
+  // One report, for the surface baked last: a bake is one click, and its
+  // outcome belongs beside the button that made it.
+  static runtime::Entity reportedEntity{};
+  static NavMeshBakeReport report{};
+  if (!bakeable) {
+    ImGui::BeginDisabled();
+  }
+  if (ImGui::Button("Bake") && (editor_session().world != nullptr)) {
+    report = bake_nav_mesh_surface_file(*editor_session().world, entity,
+                                        surface.navMeshPath,
+                                        sizeof(surface.navMeshPath));
+    reportedEntity = entity;
+    // A bake that chose the file's name changed the surface: the edit
+    // records it, so Undo and Save see the path.
+    mark_modified(&modified, report.written);
+  }
+  if (!bakeable) {
+    ImGui::EndDisabled();
+  }
+  ImGui::SetItemTooltip("Bake where agents can walk inside the box and save "
+                        "it to the Nav Mesh File, choosing a name when it "
+                        "has none");
+  if ((reportedEntity == entity) && (report.message[0] != '\0')) {
+    ImGui::TextWrapped("%s", report.message);
+  }
   return modified;
 }
 
