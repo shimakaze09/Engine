@@ -235,6 +235,16 @@ core::AssetRef editor_asset_ref(std::uint64_t assetId) noexcept {
   return (metadata != nullptr) ? metadata->ref : core::AssetRef{};
 }
 
+std::uint64_t editor_asset_id(const core::AssetRef &ref) noexcept {
+  if (!core::asset_ref_is_valid(ref) || (g_editorAssetService == nullptr) ||
+      (g_editorAssetService->catalog == nullptr)) {
+    return content::kInvalidAssetId;
+  }
+  const content::AssetMetadata *metadata =
+      content::find_asset_metadata_by_ref(g_editorAssetService->catalog, ref);
+  return (metadata != nullptr) ? metadata->assetId : content::kInvalidAssetId;
+}
+
 bool editor_retag_asset(const char *virtualPath,
                         const content::AssetLabels &before,
                         const content::AssetLabels &after) noexcept {

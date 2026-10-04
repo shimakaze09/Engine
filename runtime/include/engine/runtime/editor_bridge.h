@@ -145,6 +145,10 @@ bool editor_asset_display_path(std::uint64_t assetId, char *outPath,
 /// this beside the id, because the id is where the bytes are this session
 /// and the reference is what a saved document names.
 core::AssetRef editor_asset_ref(std::uint64_t assetId) noexcept;
+/// The id the catalog gives the asset `ref` names this session, or 0 when
+/// it names none: what a picker shows for a field that saves only the
+/// reference.
+std::uint64_t editor_asset_id(const core::AssetRef &ref) noexcept;
 
 /// Moves the catalog's tags for the asset at `virtualPath` from the labels
 /// `before` to `after`, as a label edit in the editor does: a label only in

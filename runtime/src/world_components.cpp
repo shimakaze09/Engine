@@ -480,6 +480,7 @@ bool World::add_rigid_body(Entity entity, const RigidBody &rigidBody) noexcept {
   if (previousOwner != kInvalidEntity) {
     rederive_inverse_inertia(previousOwner);
   }
+  warn_if_moving_tri_mesh(entity);
   // New owner velocities must reach the next step's CCD snapshot.
   m_physicsContext.ccdSnapshotDirty = true;
   return true;
@@ -659,9 +660,27 @@ bool World::add_collider(Entity entity, const Collider &collider) noexcept {
   install_provenance_hull(m_physicsContext, entity,
                           m_entityPersistentIds[entity.index], sanitized);
   rederive_owner_inertia(entity);
+  warn_if_moving_tri_mesh(entity);
   // New colliders have no snapshot entry until the next resolve.
   m_physicsContext.ccdSnapshotDirty = true;
   return true;
+}
+
+void World::warn_if_moving_tri_mesh(Entity entity) noexcept {
+  const Collider *collider = m_colliders.get_ptr(entity, m_readStateIndex);
+  if ((collider == nullptr) || (collider->shape != ColliderShape::TriMesh)) {
+    return;
+  }
+  const Entity owner = find_rigid_body_owner(entity, m_readStateIndex);
+  const RigidBody *body = (owner != kInvalidEntity)
+                              ? m_rigidBodies.get_ptr(owner, m_readStateIndex)
+                              : nullptr;
+  if ((body != nullptr) && math::body_moves(*body)) {
+    log_entity_warning(m_entityPersistentIds[entity.index],
+                       "a Mesh collider is static geometry and collides with "
+                       "nothing on a body that moves; give a moving body a "
+                       "box, sphere, capsule or convex hull");
+  }
 }
 
 bool World::remove_collider(Entity entity) noexcept {

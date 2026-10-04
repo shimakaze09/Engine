@@ -1168,6 +1168,10 @@ private:
   void rederive_inverse_inertia(Entity body) noexcept;
   /// Rederives the body that owns `entity`'s subtree, when there is one.
   void rederive_owner_inertia(Entity entity) noexcept;
+  /// Warns when the collider on `entity` is a TriMesh owned by a body that
+  /// moves: a triangle mesh is static geometry and collides with nothing
+  /// there.
+  void warn_if_moving_tri_mesh(Entity entity) noexcept;
   /// Transform state buffer index reads should use in the current phase.
   std::size_t query_state_index() const noexcept;
   // Shared guard/log/dispatch bodies behind the per-component add/remove/get

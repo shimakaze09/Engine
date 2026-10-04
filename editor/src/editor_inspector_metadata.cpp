@@ -33,8 +33,10 @@ constexpr const char *kBodyTypeLabels[] = {"Dynamic", "Kinematic", "Static"};
 // the generic Auto path -- omission never hides a field.
 constexpr FieldMetadata kFieldMetadataTable[] = {
     {"engine::runtime::Collider", "shape", "Shape", "Shape",
-     "Analytic collider shapes only; convex hull and heightfield shapes "
-     "are set by primitive spawn/import, not this combo.",
+     "Box, Sphere and Capsule are analytic shapes; Mesh collides with the "
+     "triangles of a mesh asset and is static geometry only. Convex hull "
+     "and heightfield shapes are set by primitive spawn/import, not this "
+     "combo.",
      nullptr, 0.0F, 0.0F, 0.0F, InspectorWidget::Enum, false, false,
      kColliderShapeLabels, 3U, true},
     {"engine::runtime::LightComponent", "type", "Type", "Light", nullptr,
