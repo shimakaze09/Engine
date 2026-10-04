@@ -269,6 +269,19 @@ engine_add_test_executable(engine_integration_shadow_cache_far_cascade_gpu
 )
 set_tests_properties(engine_integration_shadow_cache_far_cascade_gpu PROPERTIES
     SKIP_REGULAR_EXPRESSION "SKIPPED:")
+# The same suite with the cascades' first render on other early frames:
+# one with nothing else changing, and one on which a swapchain reset takes
+# effect (the suite's file comment lists them).
+foreach(_first_render IN ITEMS settled after-reset)
+    string(REPLACE "-" "_" _first_render_suffix "${_first_render}")
+    set(_far_cascade_test
+        engine_integration_shadow_cache_far_cascade_gpu_${_first_render_suffix})
+    add_test(NAME ${_far_cascade_test}
+        COMMAND engine_integration_shadow_cache_far_cascade_gpu ${_first_render})
+    set_tests_properties(${_far_cascade_test} PROPERTIES
+        LABELS "gpu;integration"
+        SKIP_REGULAR_EXPRESSION "SKIPPED:")
+endforeach()
 
 engine_add_test_executable(engine_integration_srgb_texture_gpu
     SOURCES
