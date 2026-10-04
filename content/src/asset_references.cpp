@@ -457,13 +457,14 @@ DocumentIndexReport index_catalogued_documents(AssetCatalog *catalog) noexcept {
       sorted[sortedCount++] = RefEntry{record->ref, record->assetId};
     }
   }
-  std::sort(sorted.get(), sorted.get() + sortedCount,
+  RefEntry *const entries = sorted.get();
+  std::sort(entries, entries + sortedCount,
             [](const RefEntry &a, const RefEntry &b) {
               return ref_less(a.ref, b.ref);
             });
   RefResolver resolver{};
   resolver.catalog = catalog;
-  resolver.sorted = sorted.get();
+  resolver.sorted = entries;
   resolver.sortedCount = sortedCount;
   for (std::size_t i = 0U; i < records; ++i) {
     const AssetMetadata *record = asset_catalog_record(catalog, i);
