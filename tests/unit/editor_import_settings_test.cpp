@@ -4,6 +4,9 @@
 // missing sidecar is a cached answer too, and a thumbnail that cannot be
 // produced is remembered instead of being opened again on every frame.
 //
+// Also pins folder settings: a folder's own blocks, the settings an asset
+// inherits from it, an override and a revert.
+//
 // Also pins where the panel writes: the authored ".meta" beside the
 // source, which is the file the cook reads. Writing the cooked record
 // instead would let an author change a setting and watch the next cook
@@ -19,6 +22,7 @@
 #include <cstring>
 #include <filesystem>
 #include <string>
+#include <system_error>
 
 namespace {
 
@@ -185,6 +189,110 @@ int main() {
            engine::content::SidecarReadResult::Ok) &&
               !kept.hasMeshImport && (kept.textureImport == textureEdit),
           "the refused save left the texture's settings as they were");
+  }
+
+  // A sound source's settings are its own block too: read, written back,
+  // and refused as texture settings.
+  {
+    const std::string sound = dir + "/step.wav";
+    CHECK(write_file(sound, "not a real WAV") &&
+              write_file(sound + ".meta",
+                         "{\"schemaVersion\":1,"
+                         "\"guid\":\"5f1b2c33-9e84-4d0a-8c27-314f5e6d7c8b\","
+                         "\"importSettings\":{\"forceMono\":true}}"),
+          "a sound with settings written");
+    engine::editor::invalidate_import_settings_cache();
+    const ImportSettingsDocument *soundDoc =
+        engine::editor::import_settings_for_asset(sound.c_str());
+    CHECK((soundDoc != nullptr) &&
+              (soundDoc->state == ImportSettingsDocument::State::Valid) &&
+              soundDoc->hasAudioSettings && !soundDoc->hasTextureSettings &&
+              soundDoc->audioSettings.forceMono &&
+              (soundDoc->audioSettings.sampleRate == 0U),
+          "the panel reads a sound's settings as audio settings");
+    engine::content::AudioImportSettings soundEdit{};
+    soundEdit.sampleRate = 22050U;
+    engine::content::AssetSidecar soundAfter{};
+    CHECK(
+        engine::editor::save_import_settings(sound.c_str(), soundEdit) &&
+            (engine::content::read_asset_sidecar(sound.c_str(), &soundAfter) ==
+             engine::content::SidecarReadResult::Ok) &&
+            soundAfter.hasAudioImport && (soundAfter.audioImport == soundEdit),
+        "the decoder reads back exactly what the panel wrote");
+    CHECK(!engine::editor::save_import_settings(
+              sound.c_str(), engine::content::TextureImportSettings{}),
+          "texture settings are refused on a sound");
+    engine::content::AssetSidecar kept{};
+    CHECK((engine::content::read_asset_sidecar(sound.c_str(), &kept) ==
+           engine::content::SidecarReadResult::Ok) &&
+              !kept.hasTextureImport && (kept.audioImport == soundEdit),
+          "the refused save left the sound's settings as they were");
+  }
+
+  // A folder is given a sidecar of its own on request, sets a type's
+  // block for the assets below it, and an asset there shows the block it
+  // inherits until an edit gives it its own; reverting drops that again.
+  {
+    const std::string folder = dir + "/ui";
+    std::error_code folderEc{};
+    std::filesystem::create_directories(folder, folderEc);
+    CHECK(engine::editor::give_folder_import_settings(folder.c_str()) &&
+              !engine::editor::give_folder_import_settings(folder.c_str()),
+          "a folder is given a sidecar once");
+    engine::content::TextureImportSettings folderTexture{};
+    folderTexture.filter = engine::content::TextureFilterSetting::Nearest;
+    CHECK(engine::editor::save_import_settings(folder.c_str(), folderTexture),
+          "the folder sets texture settings");
+    const ImportSettingsDocument *folderDoc =
+        engine::editor::import_settings_for_asset(folder.c_str());
+    CHECK((folderDoc != nullptr) && folderDoc->folder &&
+              folderDoc->hasTextureSettings && !folderDoc->hasSettings &&
+              (folderDoc->textureSettings == folderTexture),
+          "the panel reads the folder's own blocks");
+
+    const std::string icon = folder + "/icon.png";
+    CHECK(write_file(icon, "not a real PNG") &&
+              write_file(icon + ".meta",
+                         "{\"schemaVersion\":1,"
+                         "\"guid\":\"6a2c3d44-0f95-4e1b-9d38-425a6f7e8d9c\"}"),
+          "an image with an identity and no settings");
+    const ImportSettingsDocument *iconDoc =
+        engine::editor::import_settings_for_asset(icon.c_str());
+    CHECK((iconDoc != nullptr) && iconDoc->resolvedReadable &&
+              (iconDoc->resolved.origin ==
+               engine::content::ImportSettingsOrigin::Folder) &&
+              (iconDoc->resolved.texture == folderTexture) &&
+              (std::strcmp(iconDoc->resolved.folder, folder.c_str()) == 0),
+          "the image shows the settings it inherits and from where");
+
+    engine::content::TextureImportSettings own{};
+    own.wrap = engine::content::TextureWrapSetting::Clamp;
+    CHECK(engine::editor::save_import_settings(icon.c_str(), own), "an edit");
+    iconDoc = engine::editor::import_settings_for_asset(icon.c_str());
+    CHECK((iconDoc != nullptr) &&
+              (iconDoc->resolved.origin ==
+               engine::content::ImportSettingsOrigin::Asset) &&
+              (iconDoc->resolved.texture == own),
+          "an edit gives the image its own block, whole");
+
+    CHECK(engine::editor::clear_import_settings(
+              icon.c_str(), engine::content::ImportSettingsKind::Texture),
+          "revert to inherited");
+    iconDoc = engine::editor::import_settings_for_asset(icon.c_str());
+    CHECK((iconDoc != nullptr) && !iconDoc->hasTextureSettings &&
+              (iconDoc->resolved.origin ==
+               engine::content::ImportSettingsOrigin::Folder) &&
+              (iconDoc->resolved.texture == folderTexture),
+          "reverting drops the image's block and it inherits again");
+
+    CHECK(engine::editor::clear_import_settings(
+              folder.c_str(), engine::content::ImportSettingsKind::Texture),
+          "the folder stops setting textures");
+    iconDoc = engine::editor::import_settings_for_asset(icon.c_str());
+    CHECK((iconDoc != nullptr) &&
+              (iconDoc->resolved.origin ==
+               engine::content::ImportSettingsOrigin::Defaults),
+          "with no folder setting it, the image is at the defaults");
   }
 
   // Thumbnails are one level, sampled without mipmaps (#549). They used to

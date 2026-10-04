@@ -38,6 +38,7 @@
 #include "engine/core/atomic_file.h"
 #include "engine/core/json.h"
 #include "engine/core/logging.h"
+#include "engine/core/vfs.h"
 #include "engine/renderer/camera.h"
 #include "engine/runtime/editor_bridge.h"
 #include "engine/runtime/world.h"
@@ -79,9 +80,191 @@ void draw_texture_import_settings(
   }
 }
 
+/// Draws a sound source's settings, as Unity's AudioImporter: the rate it
+/// is resampled to and Force To Mono. They apply to a sound load_sound
+/// decodes; play_music streams the file as it is.
+void draw_audio_import_settings(const char *assetPath,
+                                const content::AudioImportSettings &current) {
+  content::AudioImportSettings edited = current;
+  // Unity's Sample Rate Setting offers these, with "Preserve" for 0.
+  constexpr std::uint32_t kRates[] = {0U,     8000U,  11025U, 16000U, 22050U,
+                                      32000U, 44100U, 48000U, 96000U};
+  char preview[48] = {};
+  if (edited.sampleRate == 0U) {
+    std::snprintf(preview, sizeof(preview), "Preserve (file's own)");
+  } else {
+    std::snprintf(preview, sizeof(preview), "%u Hz",
+                  static_cast<unsigned>(edited.sampleRate));
+  }
+  bool changed = false;
+  if (ImGui::BeginCombo("Sample Rate", preview)) {
+    for (const std::uint32_t rate : kRates) {
+      char label[48] = {};
+      if (rate == 0U) {
+        std::snprintf(label, sizeof(label), "Preserve (file's own)");
+      } else {
+        std::snprintf(label, sizeof(label), "%u Hz",
+                      static_cast<unsigned>(rate));
+      }
+      if (ImGui::Selectable(label, rate == edited.sampleRate) &&
+          (rate != edited.sampleRate)) {
+        edited.sampleRate = rate;
+        changed = true;
+      }
+    }
+    ImGui::EndCombo();
+  }
+  changed |= ImGui::Checkbox("Force To Mono", &edited.forceMono);
+  ImGui::TextDisabled("Applies the next time the sound loads; music streams "
+                      "the file as it is.");
+  if (!changed) {
+    return;
+  }
+  if (!save_import_settings(assetPath, edited)) {
+    core::log_message(core::LogLevel::Error, "editor",
+                      "import settings save failed — the .meta on disk is "
+                      "unchanged");
+  }
+}
+
+/// Draws a mesh source's settings, which its cook reads, and saves an edit
+/// at once.
+void draw_mesh_import_settings(const char *path,
+                               const content::MeshImportSettings &current) {
+  content::MeshImportSettings edited = current;
+  int meshIndex = static_cast<int>(edited.meshIndex);
+  int primitiveIndex = static_cast<int>(edited.primitiveIndex);
+  int upAxis = static_cast<int>(edited.upAxis);
+
+  bool changed = false;
+  changed |= ImGui::InputInt("Mesh Index", &meshIndex);
+  changed |= ImGui::InputInt("Primitive Index", &primitiveIndex);
+  changed |= ImGui::DragFloat("Scale Factor", &edited.scaleFactor, 0.01F,
+                              0.001F, 1000.0F, "%.6g");
+  const char *axisLabels[] = {"X (0)", "Y (1)", "Z (2)"};
+  if ((upAxis >= 0) && (upAxis <= 2)) {
+    changed |= ImGui::Combo("Up Axis", &upAxis, axisLabels, 3);
+  }
+  changed |= ImGui::Checkbox("Generate Normals", &edited.generateNormals);
+
+  if (!changed) {
+    return;
+  }
+
+  edited.meshIndex = static_cast<std::int32_t>((meshIndex < 0) ? 0 : meshIndex);
+  edited.primitiveIndex =
+      static_cast<std::int32_t>((primitiveIndex < 0) ? 0 : primitiveIndex);
+  edited.upAxis = static_cast<std::int32_t>(upAxis);
+  if (edited.scaleFactor < 0.001F) {
+    edited.scaleFactor = 0.001F;
+  }
+
+  if (!save_import_settings(path, edited)) {
+    core::log_message(core::LogLevel::Error, "editor",
+                      "import settings save failed — the .meta on disk is "
+                      "unchanged");
+  }
+}
+
+/// Reports a failed sidecar edit; the file on disk is as it was.
+void report_settings_save(bool saved) noexcept {
+  if (!saved) {
+    core::log_message(core::LogLevel::Error, "editor",
+                      "import settings save failed — the .meta on disk is "
+                      "unchanged");
+  }
+}
+
+/// Draws a folder's import settings: for each type, whether the folder
+/// sets it for the assets below it, and if so the block it sets. A folder
+/// with no sidecar is offered one.
+void draw_folder_import_settings(const char *folderPath) noexcept {
+  const ImportSettingsDocument *doc = import_settings_for_asset(folderPath);
+  if (doc == nullptr) {
+    return;
+  }
+  ImGui::Separator();
+  if (!ImGui::CollapsingHeader("Folder Import Settings",
+                               ImGuiTreeNodeFlags_DefaultOpen)) {
+    return;
+  }
+  switch (doc->state) {
+  case ImportSettingsDocument::State::Missing:
+    ImGui::TextDisabled("This folder has no .meta yet.");
+    if (ImGui::Button("Add Folder Import Settings")) {
+      report_settings_save(give_folder_import_settings(folderPath));
+    }
+    return;
+  case ImportSettingsDocument::State::Unreadable:
+    ImGui::TextDisabled("The .meta beside this folder could not be read");
+    return;
+  case ImportSettingsDocument::State::Malformed:
+    ImGui::TextDisabled("The .meta beside this folder is malformed");
+    return;
+  case ImportSettingsDocument::State::Valid:
+    break;
+  }
+  if (!doc->folder) {
+    ImGui::TextDisabled("The .meta beside this folder is not a folder's");
+    return;
+  }
+  ImGui::TextWrapped("Applies to every asset below this folder that has no "
+                     "settings of its own; a nearer folder's win.");
+  // Copies: a save below invalidates the document this frame.
+  const ImportSettingsDocument settings = *doc;
+
+  ImGui::PushID("mesh");
+  bool setMesh = settings.hasSettings;
+  if (ImGui::Checkbox("Set Mesh Settings", &setMesh)) {
+    report_settings_save(
+        setMesh
+            ? save_import_settings(folderPath, content::MeshImportSettings{})
+            : clear_import_settings(folderPath,
+                                    content::ImportSettingsKind::Mesh));
+  } else if (settings.hasSettings) {
+    ImGui::Indent();
+    draw_mesh_import_settings(folderPath, settings.settings);
+    ImGui::Unindent();
+  }
+  ImGui::PopID();
+
+  ImGui::PushID("texture");
+  bool setTexture = settings.hasTextureSettings;
+  if (ImGui::Checkbox("Set Texture Settings", &setTexture)) {
+    report_settings_save(
+        setTexture
+            ? save_import_settings(folderPath, content::TextureImportSettings{})
+            : clear_import_settings(folderPath,
+                                    content::ImportSettingsKind::Texture));
+  } else if (settings.hasTextureSettings) {
+    ImGui::Indent();
+    draw_texture_import_settings(folderPath, settings.textureSettings);
+    ImGui::Unindent();
+  }
+  ImGui::PopID();
+
+  ImGui::PushID("audio");
+  bool setAudio = settings.hasAudioSettings;
+  if (ImGui::Checkbox("Set Audio Settings", &setAudio)) {
+    report_settings_save(
+        setAudio
+            ? save_import_settings(folderPath, content::AudioImportSettings{})
+            : clear_import_settings(folderPath,
+                                    content::ImportSettingsKind::Audio));
+  } else if (settings.hasAudioSettings) {
+    ImGui::Indent();
+    draw_audio_import_settings(folderPath, settings.audioSettings);
+    ImGui::Unindent();
+  }
+  ImGui::PopID();
+}
+
 /// Draws the Import Settings inspector for a source whose type has import
-/// settings (asset_import_settings.h): a mesh's, which its cook reads, or
-/// a texture's, which its load applies.
+/// settings (asset_import_settings.h): a mesh's, which its cook reads, a
+/// texture's, which its load applies, or a sound's, which its decode
+/// applies. It shows what applies, the asset's own block or the one it
+/// inherits from a folder; an edit gives the asset its own block, and
+/// Revert to Inherited drops it again. A folder shows the blocks it sets.
 ///
 /// Only for a source, because the authored sidecar lives beside the
 /// source. A cooked ".mesh" is derived: it has no settings of its own to
@@ -90,6 +273,10 @@ void draw_texture_import_settings(
 /// filename.
 void draw_import_settings_inspector(const char *assetPath) noexcept {
   if ((assetPath == nullptr) || (assetPath[0] == '\0')) {
+    return;
+  }
+  if (core::os_directory_exists(assetPath)) {
+    draw_folder_import_settings(assetPath);
     return;
   }
   const content::AssetClassification classification =
@@ -124,43 +311,44 @@ void draw_import_settings_inspector(const char *assetPath) noexcept {
                                ImGuiTreeNodeFlags_DefaultOpen)) {
     return;
   }
-  if (kind == content::ImportSettingsKind::Texture) {
-    draw_texture_import_settings(assetPath, doc->textureSettings);
+  // Copied: a save below invalidates the document this frame.
+  const content::ResolvedImportSettings resolved = doc->resolved;
+  if (!doc->resolvedReadable) {
+    ImGui::TextWrapped("The .meta of %s will not read, so this asset's "
+                       "settings are unknown; repair it.",
+                       resolved.unreadable);
     return;
   }
-
-  content::MeshImportSettings edited = doc->settings;
-  int meshIndex = static_cast<int>(edited.meshIndex);
-  int primitiveIndex = static_cast<int>(edited.primitiveIndex);
-  int upAxis = static_cast<int>(edited.upAxis);
-
-  bool changed = false;
-  changed |= ImGui::InputInt("Mesh Index", &meshIndex);
-  changed |= ImGui::InputInt("Primitive Index", &primitiveIndex);
-  changed |= ImGui::DragFloat("Scale Factor", &edited.scaleFactor, 0.01F,
-                              0.001F, 1000.0F, "%.6g");
-  const char *axisLabels[] = {"X (0)", "Y (1)", "Z (2)"};
-  if ((upAxis >= 0) && (upAxis <= 2)) {
-    changed |= ImGui::Combo("Up Axis", &upAxis, axisLabels, 3);
+  switch (resolved.origin) {
+  case content::ImportSettingsOrigin::Asset:
+    ImGui::TextDisabled("This asset's own settings");
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Revert to Inherited")) {
+      report_settings_save(clear_import_settings(assetPath, kind));
+      return;
+    }
+    break;
+  case content::ImportSettingsOrigin::Folder:
+    ImGui::TextWrapped("Inherited from folder %s; an edit gives this asset "
+                       "its own.",
+                       resolved.folder);
+    break;
+  case content::ImportSettingsOrigin::Defaults:
+    ImGui::TextDisabled("Defaults; an edit gives this asset its own.");
+    break;
   }
-  changed |= ImGui::Checkbox("Generate Normals", &edited.generateNormals);
-
-  if (!changed) {
-    return;
-  }
-
-  edited.meshIndex = static_cast<std::int32_t>((meshIndex < 0) ? 0 : meshIndex);
-  edited.primitiveIndex =
-      static_cast<std::int32_t>((primitiveIndex < 0) ? 0 : primitiveIndex);
-  edited.upAxis = static_cast<std::int32_t>(upAxis);
-  if (edited.scaleFactor < 0.001F) {
-    edited.scaleFactor = 0.001F;
-  }
-
-  if (!save_import_settings(assetPath, edited)) {
-    core::log_message(core::LogLevel::Error, "editor",
-                      "import settings save failed — the .meta on disk is "
-                      "unchanged");
+  switch (kind) {
+  case content::ImportSettingsKind::Mesh:
+    draw_mesh_import_settings(assetPath, resolved.mesh);
+    break;
+  case content::ImportSettingsKind::Texture:
+    draw_texture_import_settings(assetPath, resolved.texture);
+    break;
+  case content::ImportSettingsKind::Audio:
+    draw_audio_import_settings(assetPath, resolved.audio);
+    break;
+  case content::ImportSettingsKind::None:
+    break;
   }
 }
 
@@ -300,9 +488,10 @@ void draw_context_menu(const AssetIndexEntry &entry) noexcept {
   ImGui::EndPopup();
 }
 
-/// Draws one folder row in the folder-scoped view; double-click navigates
-/// into it (recorded in the back/forward history), and its menu opens it
-/// or creates inside it.
+/// Draws one folder row in the folder-scoped view; a click selects it, so
+/// its import settings show below, double-click navigates into it
+/// (recorded in the back/forward history), and its menu opens it or
+/// creates inside it.
 void draw_folder_row(const char *folderOsPath) noexcept {
   const std::filesystem::path path(folderOsPath);
   const std::string name = path.filename().string();
@@ -310,9 +499,18 @@ void draw_folder_row(const char *folderOsPath) noexcept {
   std::snprintf(label, sizeof(label), "[Folder] %s", name.c_str());
 
   ImGui::PushID(folderOsPath);
-  if (ImGui::Selectable(label, false, ImGuiSelectableFlags_AllowDoubleClick) &&
-      ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-    content_browser_navigate(folderOsPath);
+  const bool selected =
+      std::strcmp(editor_session().selectedAssetPath, folderOsPath) == 0;
+  if (ImGui::Selectable(label, selected,
+                        ImGuiSelectableFlags_AllowDoubleClick)) {
+    if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+      content_browser_navigate(folderOsPath);
+    } else {
+      // Selected, as an asset is, so the panel shows its import settings.
+      std::snprintf(editor_session().selectedAssetPath,
+                    sizeof(editor_session().selectedAssetPath), "%s",
+                    folderOsPath);
+    }
   }
   if (ImGui::BeginPopupContextItem()) {
     if (ImGui::MenuItem("Open")) {

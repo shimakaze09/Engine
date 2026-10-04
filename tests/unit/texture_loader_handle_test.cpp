@@ -1,7 +1,8 @@
 // Verifies texture handle generation prevents stale slot reuse, that the
 // loader serves every slot its handle can name, that a device whose
 // texture table is full refuses a texture before the file is read, and
-// that a texture's import settings decide how it is created.
+// that a texture's import settings, its own or its folder's, decide how it
+// is created.
 
 #include "engine/core/logging.h"
 #include "engine/core/vfs.h"
@@ -164,10 +165,52 @@ int check_import_settings_reach_the_device() {
         engine::core::vfs_file_mtime(kPath)))) {
     result = 83;
   }
+  // An image with no block of its own takes its folder's, and an edit to
+  // the folder's sidecar is the texture's input time.
+  constexpr const char kFolderSettings[] =
+      "{\n  \"schemaVersion\": 1,\n  \"guid\": "
+      "\"33333333-4444-4555-8666-777777777778\",\n  \"folder\": true,\n"
+      "  \"importSettings\": {\n    \"texture\": {\n      \"filter\": "
+      "\"nearest\"\n    }\n  }\n}\n";
+  std::filesystem::create_directories("texture_import_folder", ec);
+  engine::renderer::TextureHandle inherited =
+      engine::renderer::kInvalidTextureHandle;
+  if ((result == 0) &&
+      (!engine::core::vfs_write_binary("tex/texture_import_folder/grey.png",
+                                       kGreyPng, sizeof(kGreyPng)) ||
+       !engine::core::vfs_write_binary("tex/texture_import_folder.meta",
+                                       kFolderSettings,
+                                       sizeof(kFolderSettings) - 1U))) {
+    result = 84;
+  }
+  if (result == 0) {
+    inherited = engine::renderer::load_texture(
+        "tex/texture_import_folder/grey.png", TextureColorSpace::Srgb);
+    if ((inherited == engine::renderer::kInvalidTextureHandle) ||
+        (last.filter != TextureFilter::Nearest) ||
+        (last.wrap != TextureWrap::Repeat) || (last.mipLevels != 0)) {
+      result = 85;
+    }
+  }
+  const auto folderImageTime =
+      std::filesystem::last_write_time("texture_import_folder/grey.png", ec);
+  std::filesystem::last_write_time("texture_import_folder.meta",
+                                   folderImageTime + std::chrono::seconds(5),
+                                   ec);
+  if ((result == 0) && (ec || (engine::renderer::texture_input_write_time(
+                                   "tex/texture_import_folder/grey.png") !=
+                               engine::core::vfs_file_mtime(
+                                   "tex/texture_import_folder.meta")))) {
+    result = 86;
+  }
+
   engine::renderer::unload_texture(authored);
   engine::renderer::unload_texture(defaults);
+  engine::renderer::unload_texture(inherited);
   engine::renderer::shutdown_texture_system();
   static_cast<void>(std::remove("texture_import_settings.png"));
+  std::filesystem::remove_all("texture_import_folder", ec);
+  static_cast<void>(std::remove("texture_import_folder.meta"));
   engine::core::shutdown_vfs();
   return result;
 }

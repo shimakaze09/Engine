@@ -108,6 +108,119 @@ void log_sidecar_problem(const char *path, const char *problem) noexcept {
   core::log_message(core::LogLevel::Error, kLogChannel, message);
 }
 
+/// The import settings blocks a sidecar carries: an asset's one, of its
+/// own type, or a folder's, one per type it sets for the assets below it.
+struct ImportBlocks final {
+  bool hasMesh = false;
+  MeshImportSettings mesh{};
+  bool hasTexture = false;
+  TextureImportSettings texture{};
+  bool hasAudio = false;
+  AudioImportSettings audio{};
+};
+
+/// Every kind that has settings, in the order a folder's blocks are
+/// written.
+constexpr ImportSettingsKind kSettingsKinds[] = {ImportSettingsKind::Mesh,
+                                                 ImportSettingsKind::Texture,
+                                                 ImportSettingsKind::Audio};
+
+/// The key a folder's sidecar names a kind's block by.
+const char *settings_kind_key(ImportSettingsKind kind) noexcept {
+  switch (kind) {
+  case ImportSettingsKind::Mesh:
+    return "mesh";
+  case ImportSettingsKind::Texture:
+    return "texture";
+  case ImportSettingsKind::Audio:
+    return "audio";
+  case ImportSettingsKind::None:
+    break;
+  }
+  return nullptr;
+}
+
+/// Reads one kind's settings block, the object `block`, into `*out`.
+/// Absent fields keep their defaults; false, logged against `path`, when a
+/// field will not read or the block's version is one this build does not.
+bool read_settings_block(const char *path, const core::JsonParser &parser,
+                         ImportSettingsKind kind, const core::JsonValue &block,
+                         ImportBlocks *out) noexcept {
+  // The block's own version: absent is 1, and one newer than this build
+  // reads is refused, as the sidecar's schema version is.
+  std::int32_t blockVersion = 1;
+  const std::uint32_t newestVersion =
+      (kind == ImportSettingsKind::Mesh)      ? kMeshImportSettingsVersion
+      : (kind == ImportSettingsKind::Texture) ? kTextureImportSettingsVersion
+      : (kind == ImportSettingsKind::Audio)   ? kAudioImportSettingsVersion
+                                              : 0U;
+  if (!read_int_field(parser, block, "version", &blockVersion) ||
+      (blockVersion < 1)) {
+    log_sidecar_problem(path, "has an importSettings version that is not "
+                              "a positive integer");
+    return false;
+  }
+  bool read = false;
+  switch (kind) {
+  case ImportSettingsKind::None:
+    log_sidecar_problem(path, "has importSettings, but its asset type has "
+                              "no import settings");
+    return false;
+  case ImportSettingsKind::Mesh:
+    read = read_int_field(parser, block, "meshIndex", &out->mesh.meshIndex) &&
+           read_int_field(parser, block, "primitiveIndex",
+                          &out->mesh.primitiveIndex) &&
+           read_int_field(parser, block, "upAxis", &out->mesh.upAxis) &&
+           read_float_field(parser, block, "scaleFactor",
+                            &out->mesh.scaleFactor) &&
+           read_bool_field(parser, block, "generateNormals",
+                           &out->mesh.generateNormals);
+    out->hasMesh = true;
+    break;
+  case ImportSettingsKind::Texture:
+    read =
+        read_enum_field(parser, block, "colorSpace", kColorSpaceNames,
+                        &out->texture.colorSpace) &&
+        read_bool_field(parser, block, "generateMips",
+                        &out->texture.generateMips) &&
+        read_enum_field(parser, block, "filter", kFilterNames,
+                        &out->texture.filter) &&
+        read_enum_field(parser, block, "wrap", kWrapNames, &out->texture.wrap);
+    out->hasTexture = true;
+    break;
+  case ImportSettingsKind::Audio: {
+    std::int32_t sampleRate = 0;
+    read = read_int_field(parser, block, "sampleRate", &sampleRate) &&
+           read_bool_field(parser, block, "forceMono", &out->audio.forceMono) &&
+           // 0 keeps the file's rate; anything else is a rate a sound
+           // can be resampled to.
+           ((sampleRate == 0) ||
+            ((sampleRate >=
+              static_cast<std::int32_t>(kMinAudioImportSampleRate)) &&
+             (sampleRate <=
+              static_cast<std::int32_t>(kMaxAudioImportSampleRate))));
+    out->audio.sampleRate =
+        static_cast<std::uint32_t>((sampleRate > 0) ? sampleRate : 0);
+    out->hasAudio = true;
+    break;
+  }
+  }
+  if (static_cast<std::uint32_t>(blockVersion) > newestVersion) {
+    char problem[160] = {};
+    std::snprintf(problem, sizeof(problem),
+                  "has importSettings version %d, and this build reads %u",
+                  static_cast<int>(blockVersion), newestVersion);
+    log_sidecar_problem(path, problem);
+    return false;
+  }
+  if (!read) {
+    log_sidecar_problem(path, "has an importSettings field that will not "
+                              "read; the settings are not guessed at");
+    return false;
+  }
+  return true;
+}
+
 /// Unknown-key warnings logged this process; a newer build's key sits in
 /// every sidecar, so past the first few the scan says so once.
 std::size_t g_unknownKeyReports = 0U;
@@ -249,14 +362,12 @@ SidecarReadResult parse_sidecar(const char *path, ImportSettingsKind kind,
   }
 
   // Import settings are optional: a source with none cooks, or loads, at
-  // the defaults. Present-but-malformed is refused rather than defaulted,
-  // because silently using the defaults would throw away what the author
-  // typed and look like it worked. The block is read as the settings of
-  // the asset's own type.
-  MeshImportSettings meshImport{};
-  bool hasMeshImport = false;
-  TextureImportSettings textureImport{};
-  bool hasTextureImport = false;
+  // the defaults (or its folders'). Present-but-malformed is refused rather
+  // than defaulted, because silently using the defaults would throw away
+  // what the author typed and look like it worked. An asset's block is
+  // read as the settings of its own type; a folder's holds one block per
+  // type, keyed by the type, for the assets below it.
+  ImportBlocks blocks{};
   const core::JsonValue *settings =
       parser.get_object_field(*root, "importSettings");
   if (settings != nullptr) {
@@ -265,61 +376,33 @@ SidecarReadResult parse_sidecar(const char *path, ImportSettingsKind kind,
       return SidecarReadResult::Malformed;
     }
     const core::JsonValue settingsValue = *settings;
-    // The block's own version: absent is 1, and one newer than this build
-    // reads is refused, as the sidecar's schema version is.
-    std::int32_t blockVersion = 1;
-    const std::uint32_t newestVersion =
-        (kind == ImportSettingsKind::Mesh)      ? kMeshImportSettingsVersion
-        : (kind == ImportSettingsKind::Texture) ? kTextureImportSettingsVersion
-                                                : 0U;
-    if (!read_int_field(parser, settingsValue, "version", &blockVersion) ||
-        (blockVersion < 1)) {
-      log_sidecar_problem(path, "has an importSettings version that is not "
-                                "a positive integer");
-      return SidecarReadResult::Malformed;
-    }
-    bool read = false;
-    switch (kind) {
-    case ImportSettingsKind::None:
-      log_sidecar_problem(path, "has importSettings, but its asset type has "
-                                "no import settings");
-      return SidecarReadResult::Malformed;
-    case ImportSettingsKind::Mesh:
-      read =
-          read_int_field(parser, settingsValue, "meshIndex",
-                         &meshImport.meshIndex) &&
-          read_int_field(parser, settingsValue, "primitiveIndex",
-                         &meshImport.primitiveIndex) &&
-          read_int_field(parser, settingsValue, "upAxis", &meshImport.upAxis) &&
-          read_float_field(parser, settingsValue, "scaleFactor",
-                           &meshImport.scaleFactor) &&
-          read_bool_field(parser, settingsValue, "generateNormals",
-                          &meshImport.generateNormals);
-      hasMeshImport = true;
-      break;
-    case ImportSettingsKind::Texture:
-      read = read_enum_field(parser, settingsValue, "colorSpace",
-                             kColorSpaceNames, &textureImport.colorSpace) &&
-             read_bool_field(parser, settingsValue, "generateMips",
-                             &textureImport.generateMips) &&
-             read_enum_field(parser, settingsValue, "filter", kFilterNames,
-                             &textureImport.filter) &&
-             read_enum_field(parser, settingsValue, "wrap", kWrapNames,
-                             &textureImport.wrap);
-      hasTextureImport = true;
-      break;
-    }
-    if (static_cast<std::uint32_t>(blockVersion) > newestVersion) {
-      char problem[160] = {};
-      std::snprintf(problem, sizeof(problem),
-                    "has importSettings version %d, and this build reads %u",
-                    static_cast<int>(blockVersion), newestVersion);
-      log_sidecar_problem(path, problem);
-      return SidecarReadResult::Malformed;
-    }
-    if (!read) {
-      log_sidecar_problem(path, "has an importSettings field that will not "
-                                "read; the settings are not guessed at");
+    if (folder) {
+      std::size_t typed = 0U;
+      for (const ImportSettingsKind settingsKind : kSettingsKinds) {
+        core::JsonValue block{};
+        if (!parser.get_object_field(settingsValue,
+                                     settings_kind_key(settingsKind), &block)) {
+          continue;
+        }
+        ++typed;
+        if (block.type != core::JsonValue::Type::Object) {
+          log_sidecar_problem(path, "has a folder importSettings block that "
+                                    "is not an object");
+          return SidecarReadResult::Malformed;
+        }
+        if (!read_settings_block(path, parser, settingsKind, block, &blocks)) {
+          return SidecarReadResult::Malformed;
+        }
+      }
+      // A key naming no type is a typo, or a type this build does not
+      // have; either way the settings under it would be silently lost.
+      if (typed != parser.object_size(settingsValue)) {
+        log_sidecar_problem(path, "has a folder importSettings key that is "
+                                  "not mesh, texture or audio");
+        return SidecarReadResult::Malformed;
+      }
+    } else if (!read_settings_block(path, parser, kind, settingsValue,
+                                    &blocks)) {
       return SidecarReadResult::Malformed;
     }
   }
@@ -358,10 +441,12 @@ SidecarReadResult parse_sidecar(const char *path, ImportSettingsKind kind,
   out->schemaVersion = version;
   out->guid = guid;
   out->folder = folder;
-  out->hasMeshImport = hasMeshImport;
-  out->meshImport = meshImport;
-  out->hasTextureImport = hasTextureImport;
-  out->textureImport = textureImport;
+  out->hasMeshImport = blocks.hasMesh;
+  out->meshImport = blocks.mesh;
+  out->hasTextureImport = blocks.hasTexture;
+  out->textureImport = blocks.texture;
+  out->hasAudioImport = blocks.hasAudio;
+  out->audioImport = blocks.audio;
   out->labels = labels;
   return SidecarReadResult::Ok;
 }
@@ -457,40 +542,64 @@ bool write_asset_sidecar(const char *assetOsPath,
     append("%s", ",\n  \"folder\": true");
   }
   const ImportSettingsKind kind = settings_kind_of(assetOsPath);
-  if ((sidecar.hasMeshImport && (kind != ImportSettingsKind::Mesh)) ||
-      (sidecar.hasTextureImport && (kind != ImportSettingsKind::Texture))) {
+  if (!sidecar.folder &&
+      ((sidecar.hasMeshImport && (kind != ImportSettingsKind::Mesh)) ||
+       (sidecar.hasTextureImport && (kind != ImportSettingsKind::Texture)) ||
+       (sidecar.hasAudioImport && (kind != ImportSettingsKind::Audio)))) {
     log_sidecar_problem(path, "was not written: it carries import settings "
                               "for another type of asset");
     return false;
   }
+  // One field per line here too: a merge between two branches that each
+  // tuned one setting resolves to both edits rather than one winning. A
+  // folder's blocks nest one level deeper, under their type's key.
+  const char *const indent = sidecar.folder ? "      " : "    ";
+  const char *const close = sidecar.folder ? "\n    }" : "\n  }";
+  bool opened = false;
+  const auto open_block = [&](ImportSettingsKind blockKind) noexcept {
+    if (!sidecar.folder) {
+      append("%s", ",\n  \"importSettings\": {");
+      return;
+    }
+    append("%s\n    \"%s\": {", opened ? "," : ",\n  \"importSettings\": {",
+           settings_kind_key(blockKind));
+    opened = true;
+  };
   if (sidecar.hasMeshImport) {
-    // One field per line here too: a merge between two branches that each
-    // tuned one setting resolves to both edits rather than one winning.
-    append(",\n  \"importSettings\": {"
-           "\n    \"meshIndex\": %d,"
-           "\n    \"primitiveIndex\": %d,"
-           "\n    \"scaleFactor\": %.9g,"
-           "\n    \"upAxis\": %d,"
-           "\n    \"generateNormals\": %s"
-           "\n  }",
-           static_cast<int>(sidecar.meshImport.meshIndex),
-           static_cast<int>(sidecar.meshImport.primitiveIndex),
-           static_cast<double>(sidecar.meshImport.scaleFactor),
-           static_cast<int>(sidecar.meshImport.upAxis),
-           sidecar.meshImport.generateNormals ? "true" : "false");
+    open_block(ImportSettingsKind::Mesh);
+    append("\n%s\"meshIndex\": %d,"
+           "\n%s\"primitiveIndex\": %d,"
+           "\n%s\"scaleFactor\": %.9g,"
+           "\n%s\"upAxis\": %d,"
+           "\n%s\"generateNormals\": %s%s",
+           indent, static_cast<int>(sidecar.meshImport.meshIndex), indent,
+           static_cast<int>(sidecar.meshImport.primitiveIndex), indent,
+           static_cast<double>(sidecar.meshImport.scaleFactor), indent,
+           static_cast<int>(sidecar.meshImport.upAxis), indent,
+           sidecar.meshImport.generateNormals ? "true" : "false", close);
   }
   if (sidecar.hasTextureImport) {
     const TextureImportSettings &texture = sidecar.textureImport;
-    append(",\n  \"importSettings\": {"
-           "\n    \"colorSpace\": \"%s\","
-           "\n    \"generateMips\": %s,"
-           "\n    \"filter\": \"%s\","
-           "\n    \"wrap\": \"%s\""
-           "\n  }",
+    open_block(ImportSettingsKind::Texture);
+    append("\n%s\"colorSpace\": \"%s\","
+           "\n%s\"generateMips\": %s,"
+           "\n%s\"filter\": \"%s\","
+           "\n%s\"wrap\": \"%s\"%s",
+           indent,
            kColorSpaceNames[static_cast<std::size_t>(texture.colorSpace)],
-           texture.generateMips ? "true" : "false",
-           kFilterNames[static_cast<std::size_t>(texture.filter)],
-           kWrapNames[static_cast<std::size_t>(texture.wrap)]);
+           indent, texture.generateMips ? "true" : "false", indent,
+           kFilterNames[static_cast<std::size_t>(texture.filter)], indent,
+           kWrapNames[static_cast<std::size_t>(texture.wrap)], close);
+  }
+  if (sidecar.hasAudioImport) {
+    open_block(ImportSettingsKind::Audio);
+    append("\n%s\"sampleRate\": %u,"
+           "\n%s\"forceMono\": %s%s",
+           indent, static_cast<unsigned>(sidecar.audioImport.sampleRate),
+           indent, sidecar.audioImport.forceMono ? "true" : "false", close);
+  }
+  if (opened) {
+    append("%s", "\n  }");
   }
   if (sidecar.labels.count > 0U) {
     // One label per line, so labels two branches added both survive a merge.

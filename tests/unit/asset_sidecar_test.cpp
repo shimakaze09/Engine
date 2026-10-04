@@ -1,7 +1,11 @@
 // Pins the authored sidecar's contract on a scratch tree: the path it
 // derives and the predicate recognising one, a write/read round trip for an
 // asset and for a folder, labels (the exact bytes with and without them, a
-// round trip beside import settings, and a refusal per malformed form), the
+// round trip beside import settings, and a refusal per malformed form),
+// each asset type's own import settings (texture and audio: a round trip,
+// refusal on another type's asset, a refusal per malformed field), a
+// folder's one block per type (the bytes, a round trip, a refusal per
+// malformed form), the
 // atomic write refusing a nil identity, keys a newer build wrote surviving
 // an older build's rewrite (and being named on read), and — the
 // part that matters most — each read failure reporting which failure it was, so
@@ -249,6 +253,155 @@ void test_read_failures_are_distinct(
 /// own type's, a texture with no block reads the defaults and writes none,
 /// and a block that will not read, a block on a type with no settings, or a
 /// block version from the future is malformed rather than guessed at.
+void test_audio_settings(engine::tests::TestContext &ctx) noexcept {
+  const std::string sound = root_path("step.wav");
+  ct::AssetSidecar sidecar{};
+  ctx.check(write_text(sound, "x") &&
+                ct::parse_asset_guid("33333333-4444-4555-8666-777777777777",
+                                     &sidecar.guid),
+            "a sound file and a guid to write");
+  sidecar.hasAudioImport = true;
+  sidecar.audioImport.sampleRate = 22050U;
+  sidecar.audioImport.forceMono = true;
+  std::string document{};
+  ct::AssetSidecar reread{};
+  ctx.check(
+      ct::write_asset_sidecar(sound.c_str(), sidecar) &&
+          read_text(sound + ".meta", &document) &&
+          (document.find("\n    \"sampleRate\": 22050,\n") !=
+           std::string::npos) &&
+          (document.find("\n    \"forceMono\": true\n") != std::string::npos) &&
+          (ct::read_asset_sidecar(sound.c_str(), &reread) ==
+           ct::SidecarReadResult::Ok) &&
+          reread.hasAudioImport && !reread.hasTextureImport &&
+          (reread.audioImport == sidecar.audioImport),
+      "audio settings round-trip, one field per line");
+
+  ct::AssetSidecar onTexture = sidecar;
+  const std::string texture = root_path("not_a_sound.png");
+  ctx.check(write_text(texture, "x") &&
+                !ct::write_asset_sidecar(texture.c_str(), onTexture),
+            "audio settings on a texture are refused");
+
+  struct Row final {
+    const char *block;
+    const char *why;
+  };
+  const Row rows[] = {
+      {"{\"sampleRate\": 7999}", "a rate below 8000 Hz"},
+      {"{\"sampleRate\": 192001}", "a rate above 192000 Hz"},
+      {"{\"sampleRate\": -44100}", "a negative rate"},
+      {"{\"sampleRate\": \"44100\"}", "a rate that is not a number"},
+      {"{\"forceMono\": 1}", "forceMono that is not a boolean"},
+      {"{\"version\": 2}", "an audio block version newer than this build"},
+  };
+  for (const Row &row : rows) {
+    const std::string text = std::string("{\n  \"schemaVersion\": 1,\n  "
+                                         "\"guid\": \"33333333-4444-4555-"
+                                         "8666-777777777777\",\n  "
+                                         "\"importSettings\": ") +
+                             row.block + "\n}\n";
+    ct::AssetSidecar ignored{};
+    ctx.check(write_text(sound + ".meta", text.c_str()) &&
+                  (ct::read_asset_sidecar(sound.c_str(), &ignored) ==
+                   ct::SidecarReadResult::Malformed),
+              row.why);
+  }
+
+  // The ends of the range, and 0 for the file's own rate, are accepted.
+  const std::uint32_t accepted[] = {0U, ct::kMinAudioImportSampleRate,
+                                    ct::kMaxAudioImportSampleRate};
+  for (const std::uint32_t rate : accepted) {
+    char text[256] = {};
+    std::snprintf(text, sizeof(text),
+                  "{\n  \"schemaVersion\": 1,\n  \"guid\": "
+                  "\"33333333-4444-4555-8666-777777777777\",\n  "
+                  "\"importSettings\": {\"sampleRate\": %u}\n}\n",
+                  static_cast<unsigned>(rate));
+    ct::AssetSidecar read{};
+    char message[64] = {};
+    std::snprintf(message, sizeof(message), "a rate of %u Hz reads",
+                  static_cast<unsigned>(rate));
+    ctx.check(write_text(sound + ".meta", text) &&
+                  (ct::read_asset_sidecar(sound.c_str(), &read) ==
+                   ct::SidecarReadResult::Ok) &&
+                  read.hasAudioImport &&
+                  (read.audioImport.sampleRate == rate) &&
+                  !read.audioImport.forceMono,
+              message);
+  }
+}
+
+void test_folder_settings(engine::tests::TestContext &ctx) noexcept {
+  const std::string folder = root_path("art");
+  std::error_code ec{};
+  std::filesystem::create_directories(folder, ec);
+  ct::AssetSidecar sidecar{};
+  ctx.check(ct::parse_asset_guid("55555555-6666-4777-8888-999999999999",
+                                 &sidecar.guid),
+            "a folder guid to write");
+  sidecar.folder = true;
+  sidecar.hasTextureImport = true;
+  sidecar.textureImport.filter = ct::TextureFilterSetting::Nearest;
+  sidecar.hasAudioImport = true;
+  sidecar.audioImport.forceMono = true;
+  std::string document{};
+  ct::AssetSidecar reread{};
+  ctx.check(ct::write_asset_sidecar(folder.c_str(), sidecar) &&
+                read_text(folder + ".meta", &document) &&
+                (document.find("\n  \"importSettings\": {\n    "
+                               "\"texture\": {\n      \"colorSpace\"") !=
+                 std::string::npos) &&
+                (document.find("\n    },\n    \"audio\": {\n      "
+                               "\"sampleRate\": 0,") != std::string::npos) &&
+                (ct::read_asset_sidecar(folder.c_str(), &reread) ==
+                 ct::SidecarReadResult::Ok) &&
+                reread.folder && !reread.hasMeshImport &&
+                reread.hasTextureImport && reread.hasAudioImport &&
+                (reread.textureImport == sidecar.textureImport) &&
+                (reread.audioImport == sidecar.audioImport),
+            "a folder carries one block per type, keyed by the type, one "
+            "field per line");
+
+  sidecar.hasMeshImport = true;
+  sidecar.meshImport.scaleFactor = 0.01F;
+  ctx.check(ct::write_asset_sidecar(folder.c_str(), sidecar) &&
+                (ct::read_asset_sidecar(folder.c_str(), &reread) ==
+                 ct::SidecarReadResult::Ok) &&
+                reread.hasMeshImport &&
+                (reread.meshImport.scaleFactor == 0.01F),
+            "a folder carries all three blocks together");
+
+  struct Row final {
+    const char *block;
+    const char *why;
+  };
+  const Row rows[] = {
+      {"{\"textures\": {}}", "a key naming no type"},
+      {"{\"texture\": \"nearest\"}", "a type's block that is not an object"},
+      {"{\"audio\": {\"sampleRate\": 5}}", "a malformed block inside it"},
+      {"{\"mesh\": {\"version\": 9}}", "a block version newer than the "
+                                       "build"},
+      {"{\"filter\": \"nearest\"}",
+       "an asset-shaped block on a folder, which names no type"},
+  };
+  for (const Row &row : rows) {
+    const std::string text = std::string("{\n  \"schemaVersion\": 1,\n  "
+                                         "\"guid\": \"55555555-6666-4777-"
+                                         "8888-999999999999\",\n  "
+                                         "\"folder\": true,\n  "
+                                         "\"importSettings\": ") +
+                             row.block + "\n}\n";
+    ct::AssetSidecar ignored{};
+    char message[160] = {};
+    std::snprintf(message, sizeof(message), "a folder refuses %s", row.why);
+    ctx.check(write_text(folder + ".meta", text.c_str()) &&
+                  (ct::read_asset_sidecar(folder.c_str(), &ignored) ==
+                   ct::SidecarReadResult::Malformed),
+              message);
+  }
+}
+
 void test_texture_settings(engine::tests::TestContext &ctx) noexcept {
   const std::string texture = root_path("brick.png");
   ctx.check(write_text(texture, "x"), "the texture file exists");
@@ -621,14 +774,11 @@ int main() {
   test_read_failures_are_distinct(ctx);
   test_labels(ctx);
   test_texture_settings(ctx);
+  test_audio_settings(ctx);
+  test_folder_settings(ctx);
   ctx.check(engine::core::log_register_sink(&note_warning, nullptr),
             "warning sink");
   test_unknown_keys_survive_a_rewrite(ctx);
-  {
-    std::string d;
-    read_text(root_path("newer.gltf") + ".meta", &d);
-    std::fputs(d.c_str(), stderr);
-  }
   engine::core::log_unregister_sink(&note_warning, nullptr);
   test_write_refuses_nil(ctx);
   test_local_ids(ctx);

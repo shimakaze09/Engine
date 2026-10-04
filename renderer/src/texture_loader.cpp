@@ -12,7 +12,7 @@
 #include <memory>
 #include <new>
 
-#include "engine/content/asset_sidecar.h"
+#include "engine/content/import_settings_resolve.h"
 #include "engine/core/diagnostic.h"
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
@@ -495,12 +495,10 @@ namespace {
 content::TextureImportSettings
 texture_import_settings(const char *virtualPath) noexcept {
   char osPath[1024] = {};
-  content::AssetSidecar sidecar{};
+  content::ResolvedImportSettings resolved{};
   if (core::vfs_resolve_os_path(virtualPath, osPath, sizeof(osPath)) &&
-      (content::read_asset_sidecar(osPath, &sidecar) ==
-       content::SidecarReadResult::Ok) &&
-      sidecar.hasTextureImport) {
-    return sidecar.textureImport;
+      content::resolve_import_settings(osPath, &resolved)) {
+    return resolved.texture;
   }
   return content::TextureImportSettings{};
 }
@@ -512,15 +510,14 @@ std::int64_t texture_input_write_time(const char *virtualPath) noexcept {
     return 0;
   }
   const std::int64_t image = core::vfs_file_mtime(virtualPath);
-  char sidecarPath[kMaxPathLen + 8U] = {};
-  const int written =
-      std::snprintf(sidecarPath, sizeof(sidecarPath), "%s.meta", virtualPath);
-  if ((written <= 0) ||
-      (static_cast<std::size_t>(written) >= sizeof(sidecarPath))) {
+  char osPath[1024] = {};
+  if (!core::vfs_resolve_os_path(virtualPath, osPath, sizeof(osPath))) {
     return image;
   }
-  const std::int64_t sidecar = core::vfs_file_mtime(sidecarPath);
-  return (sidecar > image) ? sidecar : image;
+  // The texture's settings live in its own sidecar or an enclosing
+  // folder's, so an edit to any of them reloads it as an edited image does.
+  const std::int64_t settings = content::import_settings_write_time(osPath);
+  return (settings > image) ? settings : image;
 }
 
 bool texture_color_space_authored(TextureHandle handle) noexcept {

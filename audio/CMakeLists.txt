@@ -18,6 +18,8 @@ engine_add_module_library(engine_audio
     PUBLIC_DEPS
     engine_core
     engine_math
+    PRIVATE_DEPS
+    engine_content
 )
 
 # miniaudio is a single-header library — we only need its include path.
