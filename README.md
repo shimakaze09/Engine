@@ -28,7 +28,7 @@ Each fact has one home. Nothing mirrors anything else.
 - Generated Lua binding pipeline for annotated scripting accessors
 - A sample game, `samples/island/`: a project of its own (`island.project` and its `assets/`)
 - Test suites (unit, integration, smoke, benchmark, CMake configure-rejection) wired into CTest
-- Asset tooling: `asset_packer` (mesh, skeleton and animation cook, shader cook, metadata init) and the `engine_validate` content checker (`--project <dir>` catalogues the project as the engine does, checks every scene it lists, and loads every catalogued prefab, material and animation controller through its own loader; any reference that names no file or catalogued asset, a document that does not load, or a mount that does not index cleanly, fails it; `--bake-navmesh` writes each scene's navigation meshes and `--check-navmesh` fails on a stale one)
+- Asset tooling: `asset_packer` (mesh, skeleton and animation cook, shader cook, metadata init) and the `engine_validate` content checker (`--project <dir>` catalogues the project as the engine does, checks every scene it lists, and loads every catalogued prefab, material and animation controller through its own loader; any reference that names no file or catalogued asset, a document that does not load, or a mount that does not index cleanly, fails it; `--bake-navmesh` writes each scene's navigation meshes, `--check-navmesh` fails on a stale one, and `--list-dependencies` prints every asset each scene needs, directly or through the documents it names)
 - GitHub Actions CI under `.github/workflows/ci.yml`
 
 ## Core goals

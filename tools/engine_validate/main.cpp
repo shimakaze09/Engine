@@ -19,6 +19,11 @@
 // editor's Bake button would; with --check-navmesh each file must hold
 // exactly what that bake writes now, so a build refuses a mesh its level
 // has moved away from.
+//
+// With --list-dependencies each scene's dependency closure is printed, one
+// "dependency <scene> <asset>" line per asset it needs through the
+// catalog's edges (content::collect_asset_closure): what a package of the
+// scene would carry.
 
 #include <algorithm>
 #include <cstdint>
@@ -29,6 +34,7 @@
 #include <vector>
 
 #include "engine/content/asset_catalog.h"
+#include "engine/content/asset_references.h"
 #include "engine/core/command_line.h"
 #include "engine/core/logging.h"
 #include "engine/core/validation_report.h"
@@ -52,6 +58,7 @@ constexpr engine::core::CommandLineOption kOptions[] = {
     {"project", engine::core::CommandLineOptionKind::Value},
     {"bake-navmesh", engine::core::CommandLineOptionKind::Flag},
     {"check-navmesh", engine::core::CommandLineOptionKind::Flag},
+    {"list-dependencies", engine::core::CommandLineOptionKind::Flag},
 };
 
 /// What a run does with each scene's navigation surfaces.
@@ -60,9 +67,10 @@ enum class NavMeshMode : std::uint8_t { None, Bake, Check };
 void print_usage() {
   std::fprintf(stderr,
                "usage: engine_validate [--bake-navmesh | --check-navmesh] "
-               "[--assets <dir>] <scene.json>...\n"
+               "[--list-dependencies] [--assets <dir>] <scene.json>...\n"
                "       engine_validate [--bake-navmesh | --check-navmesh] "
-               "--project <dir or .project> [<scene.json>...]\n");
+               "[--list-dependencies] --project <dir or .project> "
+               "[<scene.json>...]\n");
 }
 
 const char *nav_mesh_write_text(engine::runtime::NavMeshWriteResult result) {
@@ -347,6 +355,47 @@ int validate_catalogued_documents(engine::runtime::World &world,
 } // namespace
 
 /// Runs this executable or test program.
+/// Prints every asset the scene at `virtualPath` needs, one
+/// "dependency <scene> <asset>" line each, from the catalog's edges
+/// (content::collect_asset_closure): what a package of the scene carries.
+void print_dependencies(const engine::content::AssetCatalog &catalog,
+                        const char *virtualPath) {
+  const engine::content::AssetId scene =
+      engine::content::make_asset_id_from_path(virtualPath);
+  const std::size_t count =
+      engine::content::collect_asset_closure(&catalog, scene, nullptr, 0U);
+  std::vector<engine::content::AssetId> ids(count);
+  static_cast<void>(engine::content::collect_asset_closure(
+      &catalog, scene, ids.data(), ids.size()));
+  for (const engine::content::AssetId id : ids) {
+    const engine::content::AssetMetadata *record =
+        engine::content::find_asset_metadata(&catalog, id);
+    if (record != nullptr) {
+      std::printf("dependency %s %s\n", virtualPath, record->filePath.data());
+    } else {
+      std::printf("dependency %s %016llx (not catalogued)\n", virtualPath,
+                  static_cast<unsigned long long>(id));
+    }
+  }
+}
+
+/// The catalog's virtual path for the scene file `osPath` under the assets
+/// directory, written to `out`; false when it is outside it.
+bool scene_virtual_path(const engine::EngineConfig &config, const char *osPath,
+                        char *out, std::size_t capacity) {
+  const std::size_t rootLength = std::strlen(config.assetRoot);
+  if (std::strncmp(osPath, config.assetRoot, rootLength) != 0) {
+    return false;
+  }
+  const char *relative = osPath + rootLength;
+  while ((*relative == '/') || (*relative == '\\')) {
+    ++relative;
+  }
+  const int written =
+      std::snprintf(out, capacity, "%s/%s", config.assetMount, relative);
+  return (written > 0) && (static_cast<std::size_t>(written) < capacity);
+}
+
 int main(int argc, char **argv) {
   const auto commandLine = engine::core::parse_command_line(
       argc, argv, kOptions, sizeof(kOptions) / sizeof(kOptions[0]),
@@ -371,6 +420,7 @@ int main(int argc, char **argv) {
       commandLine->has("bake-navmesh")    ? NavMeshMode::Bake
       : commandLine->has("check-navmesh") ? NavMeshMode::Check
                                           : NavMeshMode::None;
+  const bool listDependencies = commandLine->has("list-dependencies");
   const char *assetsDirectory =
       commandLine->has("assets") ? commandLine->value("assets") : "assets";
   // Static: about 18 KB, and it must outlive the mount that points at it.
@@ -449,11 +499,20 @@ int main(int argc, char **argv) {
       std::snprintf(osPath, sizeof(osPath), "%s/%s", project.contentRoot,
                     project.document.scenes[i] + mountLength);
       failures += validate_scene(*world, *catalog, osPath, navMeshMode);
+      if (listDependencies) {
+        print_dependencies(*catalog, project.document.scenes[i]);
+      }
     }
   }
   for (std::size_t i = 0U; i < commandLine->positional_count(); ++i) {
     failures += validate_scene(*world, *catalog, commandLine->positional(i),
                                navMeshMode);
+    char virtualPath[520] = {};
+    if (listDependencies &&
+        scene_virtual_path(config, commandLine->positional(i), virtualPath,
+                           sizeof(virtualPath))) {
+      print_dependencies(*catalog, virtualPath);
+    }
   }
   failures += validate_catalogued_documents(*world, *catalog);
 

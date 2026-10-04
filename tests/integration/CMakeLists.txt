@@ -2172,6 +2172,17 @@ if(TARGET engine_validate)
             "did not load|does not index cleanly|[1-9][0-9]* finding\\(s\\)")
     set_tests_properties(engine_validate_cli_refuses_missing_project
         PROPERTIES PASS_REGULAR_EXPRESSION "no project found")
+    # --list-dependencies prints each scene's dependency closure from the
+    # catalog's document edges: a script by path, a controller's clips by
+    # path through the controller, and materials by reference.
+    add_test(NAME engine_validate_cli_lists_dependencies
+        COMMAND $<TARGET_FILE:engine_validate> --list-dependencies
+            --project ${CMAKE_SOURCE_DIR}/samples/island)
+    set_tests_properties(engine_validate_cli_lists_dependencies
+        PROPERTIES PASS_REGULAR_EXPRESSION
+            "dependency assets/main.scene assets/main.lua.*dependency assets/coin_run.scene assets/character.animctrl.*dependency assets/coin_run.scene assets/character.idle.anim.*dependency assets/shading_models.scene assets/materials/pbr_example.mat"
+        FAIL_REGULAR_EXPRESSION
+            "did not load|does not index cleanly|[1-9][0-9]* finding\\(s\\)|[1-9][0-9]* documents not indexed")
     # A scene naming a material, a mesh and an environment the catalog does
     # not hold, and a mesh reference that names a scene: each is named, and
     # the tool fails. The built-in cube it also names resolves.
