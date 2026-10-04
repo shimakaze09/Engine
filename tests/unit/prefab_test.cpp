@@ -364,8 +364,9 @@ int verify_collider_prefab_round_trip() {
     return 105;
   }
 
+  // The first shape value past the last ColliderShape (TriMesh, 5).
   constexpr const char *kInvalidPrefab =
-      "{\"version\":5,\"components\":{\"Collider\":{\"shape\":5}}}";
+      "{\"version\":5,\"components\":{\"Collider\":{\"shape\":6}}}";
   if (!write_prefab_text(kInvalidPrefab)) {
     return 106;
   }
