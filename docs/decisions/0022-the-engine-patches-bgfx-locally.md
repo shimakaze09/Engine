@@ -10,17 +10,22 @@ command queue's fence with the value 0 and also numbers the first
 command list 0. `kick()` signals that number and arms the list's
 completion event on it. The fence already holds 0, so the event fires at
 once and the process's first command list counts as finished as soon as
-it is submitted. Its upload buffers are released before the GPU has run its
-copies, and the next frame runs on freed memory. On WARP this loses the
-second frame's GPU work. The far shadow cascade, which is cached once
-drawn, then stays wrong (#1223), and the Windows Release lane fails
-`engine_integration_shadow_cache_far_cascade_gpu_after_boot_unchanged`.
+it is submitted. Its upload buffers are released before the GPU has run
+its copies, so the GPU can read freed memory.
 
-There were three options:
+This was first taken for the cause of #1223, where WARP loses the
+device's second frame of GPU work. It is not the whole cause: with the fix
+applied, the Windows Release lane still failed
+`engine_integration_shadow_cache_far_cascade_gpu_after_boot_unchanged`
+(job 111535390413). The fix stays because the early release is a defect
+on its own; #1223 is held off by the Direct3D 12 device's two empty
+warm-up frames (`renderer/src/render_device_bgfx.cpp`) until its cause is
+found.
 
-1. **Hold off the engine's caches for the first frames of a device.**
-   This hides the symptom in the four caches that are known about, and
-   leaves every other upload of the first frame on freed memory.
+There were three options for carrying a fix like this:
+
+1. **Work around it in the engine.** This leaves the defect in place for
+   everything the engine does not know to guard.
 2. **Fork bgfx.** This fixes the cause, but a fork has to be rebased by
    hand on every bgfx update.
 3. **Patch the fetched source.** This fixes the cause at its owner and

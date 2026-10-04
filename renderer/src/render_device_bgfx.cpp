@@ -224,6 +224,11 @@ public:
   void captureFrame(const void *, std::uint32_t) override {}
 };
 
+/// Empty frames a Direct3D 12 device presents before engine content, so the
+/// device's second frame, whose work has been seen lost on WARP, carries
+/// none (see initialize_render_device).
+constexpr std::uint32_t kDirect3D12WarmUpFrames = 2U;
+
 /// Resets per-frame view allocation: view 0 targets the back buffer in
 /// submission order so state calls before the first bind have a home.
 void reset_views() noexcept {
@@ -1632,6 +1637,26 @@ bool initialize_render_device() noexcept {
                                0.0f,  -1.0f, 3.0f, 0.0f};
     bgfx::update(ctx.fullscreenVertex, 0U,
                  bgfx::copy(triangle, sizeof(triangle)));
+  }
+  // Direct3D 12 warm-up. On WARP the device's second frame has been seen
+  // to lose all of its GPU work: its capture reads black, and what it
+  // renders once and keeps (the shadow cascades) stays wrong. Its first
+  // frame and every frame from the third on render correctly. The cause
+  // inside bgfx's backend is not known, so the device spends those two
+  // frames empty -- a cleared back buffer and the uploads made above --
+  // before the engine draws anything, and no engine content can land on
+  // the frame that may be lost.
+  if (bgfx::getRendererType() == bgfx::RendererType::Direct3D12) {
+    for (std::uint32_t frame = 0U; frame < kDirect3D12WarmUpFrames; ++frame) {
+      bgfx::setViewFrameBuffer(0U, BGFX_INVALID_HANDLE);
+      bgfx::setViewRect(0U, 0U, 0U,
+                        static_cast<std::uint16_t>(ctx.backBufferWidth),
+                        static_cast<std::uint16_t>(ctx.backBufferHeight));
+      bgfx::setViewClear(0U, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, 0x000000FFU,
+                         1.0F, 0U);
+      bgfx::touch(0U);
+      bgfx::frame();
+    }
   }
   fill_bgfx_render_device(&ctx.device);
   reset_views();
