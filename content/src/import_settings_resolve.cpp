@@ -4,6 +4,8 @@
 
 #include "engine/content/import_settings_resolve.h"
 
+#include <array>
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -21,9 +23,26 @@ namespace {
 /// parents never end.
 constexpr int kMaxFolderDepth = 64;
 
-/// True when `directory` holds a project document: the project root,
-/// past which no folder's settings apply.
-bool is_project_root(const std::filesystem::path &directory) noexcept {
+/// Directories whose project-root answer is remembered per thread. A walk
+/// asks about the same few folders for every asset in them, and scanning a
+/// folder of thousands of assets each time made a load of N of them cost
+/// N^2 directory entries.
+constexpr std::size_t kRootMemoEntries = 8U;
+
+/// One remembered answer: valid while the directory's write time, which
+/// every create, delete or rename of an entry in it moves, is unchanged.
+struct RootMemoEntry final {
+  char path[ResolvedImportSettings::kMaxFolderPath] = {};
+  std::filesystem::file_time_type writeTime{};
+  bool isRoot = false;
+};
+
+thread_local std::array<RootMemoEntry, kRootMemoEntries> t_rootMemo{};
+thread_local std::size_t t_rootMemoNext = 0U;
+
+/// Scans `directory` for a project document.
+bool scan_for_project_document(
+    const std::filesystem::path &directory) noexcept {
   std::error_code ec{};
   std::filesystem::directory_iterator it(directory, ec);
   const std::filesystem::directory_iterator end{};
@@ -35,6 +54,35 @@ bool is_project_root(const std::filesystem::path &directory) noexcept {
     }
   }
   return false;
+}
+
+/// True when `directory` holds a project document: the project root,
+/// past which no folder's settings apply. Costs one stat when the answer
+/// for the directory, at its current write time, is remembered.
+bool is_project_root(const std::filesystem::path &directory) noexcept {
+  std::error_code ec{};
+  const std::filesystem::file_time_type writeTime =
+      std::filesystem::last_write_time(directory, ec);
+  const std::string text = directory.string();
+  const bool memoizable =
+      !ec && (text.size() < ResolvedImportSettings::kMaxFolderPath);
+  if (memoizable) {
+    for (const RootMemoEntry &entry : t_rootMemo) {
+      if ((entry.writeTime == writeTime) &&
+          (std::strcmp(entry.path, text.c_str()) == 0)) {
+        return entry.isRoot;
+      }
+    }
+  }
+  const bool isRoot = scan_for_project_document(directory);
+  if (memoizable) {
+    RootMemoEntry &entry = t_rootMemo[t_rootMemoNext];
+    t_rootMemoNext = (t_rootMemoNext + 1U) % kRootMemoEntries;
+    std::memcpy(entry.path, text.c_str(), text.size() + 1U);
+    entry.writeTime = writeTime;
+    entry.isRoot = isRoot;
+  }
+  return isRoot;
 }
 
 /// Copies the block of `kind` from `sidecar` into `*out`; false when the

@@ -6,7 +6,9 @@
 // - folders at or above the project root never apply;
 // - a malformed sidecar on the way fails the resolution at the defaults;
 // - the write time watched for reloads follows every sidecar consulted,
-//   and import_settings_write_time every one that could matter.
+//   and import_settings_write_time every one that could matter;
+// - a folder that gains or loses a project document is re-examined, though
+//   the answer for an unchanged folder is remembered.
 
 #include "engine/content/import_settings_resolve.h"
 
@@ -225,6 +227,55 @@ void check_watched_write_time() {
                 "nothing below the project root to watch reads 0");
 }
 
+/// Moves `directory`'s write time to `hours` from now: creating or deleting
+/// a file moves it too, but the filesystem clock may be too coarse for two
+/// steps of one test to land on different ticks.
+bool touch_directory(const std::string &directory, int hours) {
+  std::error_code ec{};
+  std::filesystem::last_write_time(
+      directory,
+      std::filesystem::file_time_type::clock::now() + std::chrono::hours(hours),
+      ec);
+  return !ec;
+}
+
+void check_project_root_change() {
+  std::error_code ec{};
+  std::filesystem::create_directories(base_path("project/assets/nest/inner"),
+                                      ec);
+  ct::AssetSidecar inner{};
+  inner.hasTextureImport = true;
+  inner.textureImport.filter = ct::TextureFilterSetting::Nearest;
+  g_tests.check(author_folder("project/assets/nest/inner", inner,
+                              "10000000-0000-4000-8000-000000000009"),
+                "nest/inner gets a texture block");
+  bool ok = false;
+  const ct::ResolvedImportSettings before =
+      resolve("project/assets/nest/inner/x.png", &ok);
+  g_tests.check(ok && (before.origin == ct::ImportSettingsOrigin::Folder),
+                "inner's block applies while inner is a plain folder");
+
+  // inner becomes a project of its own: its sidecar now sits beside a
+  // project root and no longer applies.
+  const std::string document = base_path("project/assets/nest/inner/i.project");
+  g_tests.check(write_text(document, "{}") &&
+                    touch_directory(base_path("project/assets/nest/inner"), 3),
+                "inner gains a project document");
+  const ct::ResolvedImportSettings nested =
+      resolve("project/assets/nest/inner/x.png", &ok);
+  g_tests.check(ok && (nested.origin == ct::ImportSettingsOrigin::Defaults),
+                "a folder that becomes a project root is re-examined");
+
+  std::filesystem::remove(document, ec);
+  g_tests.check(!ec &&
+                    touch_directory(base_path("project/assets/nest/inner"), 4),
+                "inner loses its project document");
+  const ct::ResolvedImportSettings after =
+      resolve("project/assets/nest/inner/x.png", &ok);
+  g_tests.check(ok && (after.origin == ct::ImportSettingsOrigin::Folder),
+                "a folder that stops being a project root is re-examined");
+}
+
 } // namespace
 
 /// Runs the import settings resolution suite.
@@ -240,6 +291,7 @@ int main() {
     check_inheritance();
     check_failures_and_write_time();
     check_watched_write_time();
+    check_project_root_change();
   }
   std::filesystem::remove_all(kBase, ec);
   engine::core::shutdown_logging();
