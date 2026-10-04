@@ -1,7 +1,8 @@
 // Verifies the pass that gives TriMesh colliders their meshes, on the
 // sample project's cooked meshes:
 // - a cooked mesh builds the collision mesh of its triangles, and a file
-//   that is missing does not, with a reason;
+//   that is missing, or whose cook was torn (its bytes no longer the ones
+//   its cook stamp certifies), does not, with a reason;
 // - a TriMesh collider naming a catalogued mesh gets it, and two colliders
 //   naming one mesh share one built copy;
 // - a later pass with nothing new builds and installs nothing;
@@ -10,6 +11,7 @@
 // - a collider that is not a TriMesh, or names nothing, is left alone.
 
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <new>
 #include <string>
@@ -63,6 +65,33 @@ void check_build_from_file(const std::string &assets) {
           (assets + "/props/no_such.mesh").c_str(), &missing, &reason) &&
           !missing && (reason != nullptr),
       "a missing cooked mesh builds nothing and says why");
+
+  // A copy of the barrel's cook whose mesh bytes changed after the stamp
+  // certified them, as an interrupted recook leaves it.
+  const std::filesystem::path scratch = "collider_mesh_resolution_torn";
+  std::error_code ec{};
+  std::filesystem::remove_all(scratch, ec);
+  std::filesystem::create_directories(scratch, ec);
+  for (const char *suffix : {"", ".cookmeta", ".cookstamp"}) {
+    std::filesystem::copy_file(assets + "/props/barrel.mesh" + suffix,
+                               scratch / (std::string("barrel.mesh") + suffix),
+                               ec);
+  }
+  {
+    std::ofstream append(scratch / "barrel.mesh",
+                         std::ios::binary | std::ios::app);
+    append << "torn";
+  }
+  physics::TriMeshRef torn{};
+  reason = nullptr;
+  g_tests.check(
+      !ec &&
+          !runtime::build_collision_mesh_from_file(
+              (scratch / "barrel.mesh").string().c_str(), &torn, &reason) &&
+          !torn && (reason != nullptr),
+      "a cooked mesh whose bytes its stamp does not certify builds "
+      "nothing and says why");
+  std::filesystem::remove_all(scratch, ec);
 }
 
 void check_pass(content::AssetCatalog &catalog) {
