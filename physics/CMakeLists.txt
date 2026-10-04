@@ -18,6 +18,7 @@ engine_add_module_library(engine_physics
     src/physics_query.cpp
     src/character_move.cpp
     src/primitive_hulls.cpp
+    src/tri_mesh.cpp
     src/joints/distance_joint.cpp
     src/joints/hinge_joint.cpp
     src/joints/ball_joint.cpp

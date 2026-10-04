@@ -11,6 +11,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "contact_clip.h"
+#include "contact_resolution.h"
 #include "engine/math/aabb.h"
 #include "engine/math/vec3.h"
 #include "engine/math/vec4.h"
@@ -18,8 +20,7 @@
 #include "engine/physics/convex_hull.h"
 #include "engine/physics/physics.h"
 #include "engine/physics/physics_material.h"
-#include "contact_clip.h"
-#include "contact_resolution.h"
+#include "engine/physics/tri_mesh.h"
 #include "physics_internal.h"
 
 namespace engine::physics {
@@ -112,61 +113,6 @@ closest_point_on_aabb(const engine::math::Vec3 &point,
 // --------------------------------------------------------------------------
 // Heightfield helpers
 // --------------------------------------------------------------------------
-
-// Closest point on triangle (a, b, c) to point p.
-// Voronoi region projection (Christer Ericson, Real-Time Collision Detection).
-engine::math::Vec3 closest_point_on_triangle(
-    const engine::math::Vec3 &p, const engine::math::Vec3 &a,
-    const engine::math::Vec3 &b, const engine::math::Vec3 &c) noexcept {
-  const engine::math::Vec3 ab = engine::math::sub(b, a);
-  const engine::math::Vec3 ac = engine::math::sub(c, a);
-  const engine::math::Vec3 ap = engine::math::sub(p, a);
-  const float d1 = engine::math::dot(ab, ap);
-  const float d2 = engine::math::dot(ac, ap);
-  if (d1 <= 0.0F && d2 <= 0.0F) {
-    return a; // vertex A region
-  }
-
-  const engine::math::Vec3 bp = engine::math::sub(p, b);
-  const float d3 = engine::math::dot(ab, bp);
-  const float d4 = engine::math::dot(ac, bp);
-  if (d3 >= 0.0F && d4 <= d3) {
-    return b; // vertex B region
-  }
-
-  const float vc = d1 * d4 - d3 * d2;
-  if (vc <= 0.0F && d1 >= 0.0F && d3 <= 0.0F) {
-    const float v = d1 / (d1 - d3);
-    return engine::math::add(a, engine::math::mul(ab, v)); // edge AB
-  }
-
-  const engine::math::Vec3 cp2 = engine::math::sub(p, c);
-  const float d5 = engine::math::dot(ab, cp2);
-  const float d6 = engine::math::dot(ac, cp2);
-  if (d6 >= 0.0F && d5 <= d6) {
-    return c; // vertex C region
-  }
-
-  const float vb = d5 * d2 - d1 * d6;
-  if (vb <= 0.0F && d2 >= 0.0F && d6 <= 0.0F) {
-    const float w = d2 / (d2 - d6);
-    return engine::math::add(a, engine::math::mul(ac, w)); // edge AC
-  }
-
-  const float va = d3 * d6 - d5 * d4;
-  if (va <= 0.0F && (d4 - d3) >= 0.0F && (d5 - d6) >= 0.0F) {
-    const float w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
-    return engine::math::add(
-        b, engine::math::mul(engine::math::sub(c, b), w)); // edge BC
-  }
-
-  const float denom = 1.0F / (va + vb + vc);
-  const float v2 = vb * denom;
-  const float w2 = vc * denom;
-  return engine::math::add(
-      a, engine::math::add(engine::math::mul(ab, v2),
-                           engine::math::mul(ac, w2))); // interior
-}
 
 // Map world X/Z to fractional heightfield grid coordinates.
 void heightfield_world_to_grid(const HeightfieldData &hf,

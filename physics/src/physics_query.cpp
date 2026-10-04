@@ -14,6 +14,7 @@
 
 #include "engine/physics/physics_context.h"
 #include "engine/physics/physics_world_view.h"
+#include "engine/physics/tri_mesh.h"
 #include "narrow_phase.h"
 #include "physics_internal.h"
 
@@ -246,33 +247,17 @@ bool ray_intersects_triangle(const math::Ray &ray, const math::Vec3 &a,
                              const math::Vec3 &b, const math::Vec3 &c,
                              float maxDistance, float *outT,
                              math::Vec3 *outNormal) noexcept {
-  const math::Vec3 edgeAB = math::sub(b, a);
-  const math::Vec3 edgeAC = math::sub(c, a);
-  const math::Vec3 crossDirection = math::cross(ray.direction, edgeAC);
-  const float determinant = math::dot(edgeAB, crossDirection);
-  if (std::fabs(determinant) <= 1.0e-10F) {
-    return false;
-  }
-  const float inverseDeterminant = 1.0F / determinant;
-  const math::Vec3 originOffset = math::sub(ray.origin, a);
-  const float u = math::dot(originOffset, crossDirection) * inverseDeterminant;
-  if ((u < 0.0F) || (u > 1.0F)) {
-    return false;
-  }
-  const math::Vec3 crossOffset = math::cross(originOffset, edgeAB);
-  const float v = math::dot(ray.direction, crossOffset) * inverseDeterminant;
-  if ((v < 0.0F) || ((u + v) > 1.0F)) {
-    return false;
-  }
-  const float candidate = math::dot(edgeAC, crossOffset) * inverseDeterminant;
-  if ((candidate < 0.0F) || (candidate > maxDistance)) {
+  float candidate = 0.0F;
+  if (!ray_triangle_intersect(ray.origin, ray.direction, a, b, c, maxDistance,
+                              &candidate)) {
     return false;
   }
   if (outT != nullptr) {
     *outT = candidate;
   }
   if (outNormal != nullptr) {
-    math::Vec3 normal = math::normalize(math::cross(edgeAB, edgeAC));
+    math::Vec3 normal =
+        math::normalize(math::cross(math::sub(b, a), math::sub(c, a)));
     if (normal.y < 0.0F) {
       normal = math::mul(normal, -1.0F);
     }
