@@ -169,9 +169,14 @@ struct RenderViewResources final {
 
   // Directional shadow cache: the key of the cascades this view last drew
   // into the shared atlas; valid only while no other view has drawn there
-  // since (BackendState::cascadeAtlasView).
+  // since (BackendState::cascadeAtlasView). The device reports no frame's
+  // completion, so one render is not trusted: the maps are kept only from
+  // the second consecutive render under the same key that the device
+  // dropped nothing from. `directionalShadowLandedKey` is the key
+  // of the last such render, 0 when the last render dropped something.
   std::uint64_t directionalShadowCacheKey = 0U;
   bool directionalShadowCacheValid = false;
+  std::uint64_t directionalShadowLandedKey = 0U;
 
   /// The camera this view is rendering, or rendered last.
   CameraState camera{};

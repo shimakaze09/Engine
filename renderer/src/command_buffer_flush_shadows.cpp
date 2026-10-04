@@ -47,6 +47,15 @@ struct ShadowCandidate final {
   std::size_t lightIndex = 0U;
   float distSq = 0.0F;
 };
+
+/// Operations the device has refused since it started, or 0 for a device
+/// that does not count them.
+std::uint64_t dropped_device_operations(const RenderDevice *dev) noexcept {
+  return ((dev != nullptr) && (dev->debug_stats != nullptr))
+             ? dev->debug_stats().droppedOperations
+             : 0U;
+}
+
 } // namespace
 
 void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
@@ -110,6 +119,7 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
       }
     } else {
       gpu_profiler_begin_pass(GpuPassId::ShadowMap);
+      const std::uint64_t droppedBefore = dropped_device_operations(dev);
 
       for (std::size_t c = 0U; c < kShadowCascadeCount; ++c) {
         const math::Mat4 &lightVP = lightMatrices[c];
@@ -144,13 +154,22 @@ void flush_shadow_passes(FrameFlushContext &ctx) noexcept {
       }
 
       gpu_profiler_end_pass(GpuPassId::ShadowMap);
-      backend.view().directionalShadowCacheKey = cacheKey;
-      backend.view().directionalShadowCacheValid = true;
+      // Kept only from a second consecutive render under this key that the
+      // device dropped nothing from: a first render into the atlas has
+      // been seen not to land on Direct3D 12, and the device gives
+      // no completion to check it by.
+      const bool landed = dropped_device_operations(dev) == droppedBefore;
+      RenderViewResources &view = backend.view();
+      view.directionalShadowCacheValid =
+          landed && (view.directionalShadowLandedKey == cacheKey);
+      view.directionalShadowLandedKey = landed ? cacheKey : 0U;
+      view.directionalShadowCacheKey = cacheKey;
       backend.cascadeAtlasView = backend.currentView;
     }
   } else {
     backend.view().directionalShadowCacheKey = 0U;
     backend.view().directionalShadowCacheValid = false;
+    backend.view().directionalShadowLandedKey = 0U;
   }
 
   const bool doSpotShadows =
