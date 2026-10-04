@@ -5,7 +5,8 @@
 // generation changes; a view is lit by the baked probe whose box holds its
 // camera (the smaller box winning) and by the sky otherwise; a device that
 // cannot capture is not asked again every frame; a probe no longer
-// requested gives its textures back.
+// requested gives its textures back; and no capture is taken on a frame a
+// swapchain reset applies to.
 
 #include "command_buffer_context.h"
 #include "command_buffer_flush_internal.h"
@@ -260,6 +261,33 @@ void test_capture_and_bake() noexcept {
   CHECK(!get_reflection_probe_status(1U, &status), "no request 1");
 }
 
+bool g_resetFrame = false;
+bool fake_frame_applies_reset() noexcept { return g_resetFrame; }
+
+/// EXPECTATION (#1212): no probe is captured on a frame a swapchain reset
+/// applies to, whose off-screen output has been seen not to land on
+/// Direct3D 12; the probe stays pending and is captured on the next frame.
+/// On base the capture was taken, recorded as done and kept.
+void test_no_capture_on_a_reset_frame() noexcept {
+  reset_renderer();
+  engine::tests::fake_device().frame_applies_reset = &fake_frame_applies_reset;
+  const ReflectionProbeRequest probe =
+      make_probe(9U, math::Vec3(0.0F, 1.0F, 0.0F), 4.0F);
+  set_reflection_probe_requests(&probe, 1U);
+  ReflectionProbeStatus status{};
+
+  g_resetFrame = true;
+  bake_frame();
+  CHECK((g_faceCount == 0) && get_reflection_probe_status(0U, &status) &&
+            !status.baked,
+        "a reset frame captures nothing and leaves the probe pending");
+  g_resetFrame = false;
+  bake_frame();
+  CHECK((g_faceCount == 6) && get_reflection_probe_status(0U, &status) &&
+            status.baked && (status.bakeCount == 1U),
+        "the next frame captures and bakes it");
+}
+
 /// Probes bake one per call, and again only when something they were
 /// captured for changes.
 void test_bakes_follow_what_changed() noexcept {
@@ -396,6 +424,7 @@ int main() {
   test_bakes_follow_what_changed();
   test_view_selection();
   test_failure_and_release();
+  test_no_capture_on_a_reset_frame();
   engine::core::shutdown_cvars();
 
   std::printf("\n%s (%d failure(s))\n",

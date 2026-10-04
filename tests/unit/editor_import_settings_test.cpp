@@ -146,6 +146,47 @@ int main() {
   CHECK(!std::filesystem::exists(other + ".meta"),
         "the refused save left no sidecar behind");
 
+  // A texture source's settings go in the same block, as texture settings:
+  // the panel reads them, writes them back, and mesh settings on a texture
+  // are refused with the file left as it was.
+  {
+    const std::string texture = dir + "/brick.png";
+    CHECK(write_file(texture, "not a real PNG") &&
+              write_file(texture + ".meta",
+                         "{\"schemaVersion\":1,"
+                         "\"guid\":\"4e0a1b22-8d73-4c9f-8b16-203e4d5c6b7a\","
+                         "\"importSettings\":{\"filter\":\"nearest\"}}"),
+          "a texture with settings written");
+    engine::editor::invalidate_import_settings_cache();
+    const ImportSettingsDocument *textureDoc =
+        engine::editor::import_settings_for_asset(texture.c_str());
+    CHECK((textureDoc != nullptr) &&
+              (textureDoc->state == ImportSettingsDocument::State::Valid) &&
+              textureDoc->hasTextureSettings && !textureDoc->hasSettings &&
+              (textureDoc->textureSettings.filter ==
+               engine::content::TextureFilterSetting::Nearest) &&
+              textureDoc->textureSettings.generateMips,
+          "the panel reads a texture's settings as texture settings");
+    engine::content::TextureImportSettings textureEdit{};
+    textureEdit.colorSpace = engine::content::TextureColorSpaceSetting::Srgb;
+    textureEdit.wrap = engine::content::TextureWrapSetting::Clamp;
+    engine::content::AssetSidecar textureAfter{};
+    CHECK(engine::editor::save_import_settings(texture.c_str(), textureEdit) &&
+              (engine::content::read_asset_sidecar(texture.c_str(),
+                                                   &textureAfter) ==
+               engine::content::SidecarReadResult::Ok) &&
+              textureAfter.hasTextureImport &&
+              (textureAfter.textureImport == textureEdit),
+          "the loader reads back exactly what the panel wrote");
+    CHECK(!engine::editor::save_import_settings(texture.c_str(), edited),
+          "mesh settings are refused on a texture");
+    engine::content::AssetSidecar kept{};
+    CHECK((engine::content::read_asset_sidecar(texture.c_str(), &kept) ==
+           engine::content::SidecarReadResult::Ok) &&
+              !kept.hasMeshImport && (kept.textureImport == textureEdit),
+          "the refused save left the texture's settings as they were");
+  }
+
   // Thumbnails are one level, sampled without mipmaps (#549). They used to
   // ask for a generated chain the bgfx backend leaves empty, then draw it
   // smaller than stored, which sampled the empty levels: black icons.

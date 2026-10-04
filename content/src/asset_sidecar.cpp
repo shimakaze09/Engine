@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "engine/content/asset_import_settings.h"
 #include "engine/core/atomic_file.h"
 #include "engine/core/file_read.h"
 #include "engine/core/json.h"
@@ -58,6 +59,41 @@ bool read_bool_field(const core::JsonParser &parser,
     return true;
   }
   return parser.as_bool(field, out);
+}
+
+/// Reads one optional string field that must be one of `names` (indexed
+/// by the enum's value), leaving `*out` at its default when absent; false
+/// when it is present and is not one of them.
+template <typename Enum, std::size_t Count>
+bool read_enum_field(const core::JsonParser &parser,
+                     const core::JsonValue &object, const char *name,
+                     const char *const (&names)[Count], Enum *out) noexcept {
+  core::JsonValue field{};
+  if (!parser.get_object_field(object, name, &field)) {
+    return true;
+  }
+  char text[16] = {};
+  if (!parser.copy_string_strict(field, text, sizeof(text))) {
+    return false;
+  }
+  for (std::size_t i = 0U; i < Count; ++i) {
+    if (std::strcmp(text, names[i]) == 0) {
+      *out = static_cast<Enum>(i);
+      return true;
+    }
+  }
+  return false;
+}
+
+constexpr const char *kColorSpaceNames[] = {"auto", "srgb", "linear"};
+constexpr const char *kFilterNames[] = {"linear", "nearest"};
+constexpr const char *kWrapNames[] = {"repeat", "clamp"};
+
+/// The settings kind of the asset a sidecar at `assetOsPath` belongs to.
+ImportSettingsKind settings_kind_of(const char *assetOsPath) noexcept {
+  return (assetOsPath != nullptr)
+             ? import_settings_kind(classify_asset_path(assetOsPath).tag)
+             : ImportSettingsKind::None;
 }
 
 /// Reports a sidecar the reader could not use, naming the file so the
@@ -147,8 +183,9 @@ namespace {
 /// nothing), into `*out` (left untouched for every result but Ok). With a
 /// tracker, every member the reader looks up is recorded in it, so the members
 /// it never looked up are the ones this build does not know.
-SidecarReadResult parse_sidecar(const char *path, const char *text,
-                                std::size_t size, core::JsonParser &parser,
+SidecarReadResult parse_sidecar(const char *path, ImportSettingsKind kind,
+                                const char *text, std::size_t size,
+                                core::JsonParser &parser,
                                 core::JsonReadTracker *tracker,
                                 AssetSidecar *out) noexcept {
   if (!parser.parse(text, size)) {
@@ -211,12 +248,15 @@ SidecarReadResult parse_sidecar(const char *path, const char *text,
     }
   }
 
-  // Import settings are optional: a source with none cooks at the
-  // defaults. Present-but-malformed is refused rather than defaulted,
-  // because silently cooking at the defaults would throw away what the
-  // author typed and look like it worked.
+  // Import settings are optional: a source with none cooks, or loads, at
+  // the defaults. Present-but-malformed is refused rather than defaulted,
+  // because silently using the defaults would throw away what the author
+  // typed and look like it worked. The block is read as the settings of
+  // the asset's own type.
   MeshImportSettings meshImport{};
   bool hasMeshImport = false;
+  TextureImportSettings textureImport{};
+  bool hasTextureImport = false;
   const core::JsonValue *settings =
       parser.get_object_field(*root, "importSettings");
   if (settings != nullptr) {
@@ -225,21 +265,63 @@ SidecarReadResult parse_sidecar(const char *path, const char *text,
       return SidecarReadResult::Malformed;
     }
     const core::JsonValue settingsValue = *settings;
-    if (!read_int_field(parser, settingsValue, "meshIndex",
-                        &meshImport.meshIndex) ||
-        !read_int_field(parser, settingsValue, "primitiveIndex",
-                        &meshImport.primitiveIndex) ||
-        !read_int_field(parser, settingsValue, "upAxis",
-                        &meshImport.upAxis) ||
-        !read_float_field(parser, settingsValue, "scaleFactor",
-                          &meshImport.scaleFactor) ||
-        !read_bool_field(parser, settingsValue, "generateNormals",
-                         &meshImport.generateNormals)) {
+    // The block's own version: absent is 1, and one newer than this build
+    // reads is refused, as the sidecar's schema version is.
+    std::int32_t blockVersion = 1;
+    const std::uint32_t newestVersion =
+        (kind == ImportSettingsKind::Mesh)      ? kMeshImportSettingsVersion
+        : (kind == ImportSettingsKind::Texture) ? kTextureImportSettingsVersion
+                                                : 0U;
+    if (!read_int_field(parser, settingsValue, "version", &blockVersion) ||
+        (blockVersion < 1)) {
+      log_sidecar_problem(path, "has an importSettings version that is not "
+                                "a positive integer");
+      return SidecarReadResult::Malformed;
+    }
+    bool read = false;
+    switch (kind) {
+    case ImportSettingsKind::None:
+      log_sidecar_problem(path, "has importSettings, but its asset type has "
+                                "no import settings");
+      return SidecarReadResult::Malformed;
+    case ImportSettingsKind::Mesh:
+      read =
+          read_int_field(parser, settingsValue, "meshIndex",
+                         &meshImport.meshIndex) &&
+          read_int_field(parser, settingsValue, "primitiveIndex",
+                         &meshImport.primitiveIndex) &&
+          read_int_field(parser, settingsValue, "upAxis", &meshImport.upAxis) &&
+          read_float_field(parser, settingsValue, "scaleFactor",
+                           &meshImport.scaleFactor) &&
+          read_bool_field(parser, settingsValue, "generateNormals",
+                          &meshImport.generateNormals);
+      hasMeshImport = true;
+      break;
+    case ImportSettingsKind::Texture:
+      read = read_enum_field(parser, settingsValue, "colorSpace",
+                             kColorSpaceNames, &textureImport.colorSpace) &&
+             read_bool_field(parser, settingsValue, "generateMips",
+                             &textureImport.generateMips) &&
+             read_enum_field(parser, settingsValue, "filter", kFilterNames,
+                             &textureImport.filter) &&
+             read_enum_field(parser, settingsValue, "wrap", kWrapNames,
+                             &textureImport.wrap);
+      hasTextureImport = true;
+      break;
+    }
+    if (static_cast<std::uint32_t>(blockVersion) > newestVersion) {
+      char problem[160] = {};
+      std::snprintf(problem, sizeof(problem),
+                    "has importSettings version %d, and this build reads %u",
+                    static_cast<int>(blockVersion), newestVersion);
+      log_sidecar_problem(path, problem);
+      return SidecarReadResult::Malformed;
+    }
+    if (!read) {
       log_sidecar_problem(path, "has an importSettings field that will not "
                                 "read; the settings are not guessed at");
       return SidecarReadResult::Malformed;
     }
-    hasMeshImport = true;
   }
 
   // Labels are optional. Every one must be a valid label and distinct, and
@@ -278,6 +360,8 @@ SidecarReadResult parse_sidecar(const char *path, const char *text,
   out->folder = folder;
   out->hasMeshImport = hasMeshImport;
   out->meshImport = meshImport;
+  out->hasTextureImport = hasTextureImport;
+  out->textureImport = textureImport;
   out->labels = labels;
   return SidecarReadResult::Ok;
 }
@@ -315,8 +399,8 @@ SidecarReadResult read_asset_sidecar(const char *assetOsPath,
 
   core::JsonParser parser{};
   core::JsonReadTracker tracker{};
-  const SidecarReadResult result =
-      parse_sidecar(path, buffer, size, parser, &tracker, out);
+  const SidecarReadResult result = parse_sidecar(
+      path, settings_kind_of(assetOsPath), buffer, size, parser, &tracker, out);
   if (result == SidecarReadResult::Ok) {
     report_unknown_sidecar_keys(path, *parser.root(), tracker);
   }
@@ -372,6 +456,13 @@ bool write_asset_sidecar(const char *assetOsPath,
   if (sidecar.folder) {
     append("%s", ",\n  \"folder\": true");
   }
+  const ImportSettingsKind kind = settings_kind_of(assetOsPath);
+  if ((sidecar.hasMeshImport && (kind != ImportSettingsKind::Mesh)) ||
+      (sidecar.hasTextureImport && (kind != ImportSettingsKind::Texture))) {
+    log_sidecar_problem(path, "was not written: it carries import settings "
+                              "for another type of asset");
+    return false;
+  }
   if (sidecar.hasMeshImport) {
     // One field per line here too: a merge between two branches that each
     // tuned one setting resolves to both edits rather than one winning.
@@ -387,6 +478,19 @@ bool write_asset_sidecar(const char *assetOsPath,
            static_cast<double>(sidecar.meshImport.scaleFactor),
            static_cast<int>(sidecar.meshImport.upAxis),
            sidecar.meshImport.generateNormals ? "true" : "false");
+  }
+  if (sidecar.hasTextureImport) {
+    const TextureImportSettings &texture = sidecar.textureImport;
+    append(",\n  \"importSettings\": {"
+           "\n    \"colorSpace\": \"%s\","
+           "\n    \"generateMips\": %s,"
+           "\n    \"filter\": \"%s\","
+           "\n    \"wrap\": \"%s\""
+           "\n  }",
+           kColorSpaceNames[static_cast<std::size_t>(texture.colorSpace)],
+           texture.generateMips ? "true" : "false",
+           kFilterNames[static_cast<std::size_t>(texture.filter)],
+           kWrapNames[static_cast<std::size_t>(texture.wrap)]);
   }
   if (sidecar.labels.count > 0U) {
     // One label per line, so labels two branches added both survive a merge.
@@ -413,7 +517,7 @@ bool write_asset_sidecar(const char *assetOsPath,
     core::JsonParser parser{};
     core::JsonReadTracker tracker{};
     AssetSidecar ignored{};
-    if (parse_sidecar(nullptr, previous, previousSize, parser, &tracker,
+    if (parse_sidecar(nullptr, kind, previous, previousSize, parser, &tracker,
                       &ignored) == SidecarReadResult::Ok) {
       const auto carry = [](const char *key, std::size_t keyLength,
                             const char *value, std::size_t valueLength,

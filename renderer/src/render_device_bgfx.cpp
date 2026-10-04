@@ -1418,6 +1418,10 @@ DeviceDebugStats bgfx_debug_stats() noexcept {
   return device_context().stats;
 }
 
+bool bgfx_frame_applies_reset() noexcept {
+  return device_context().frameAppliesReset;
+}
+
 /// Fills the device table with the bgfx backend entries and its honest
 /// capability set: instancing and cooked programs work; uniform blocks
 /// and timestamp queries do not exist in bgfx's model.
@@ -1506,6 +1510,7 @@ void fill_bgfx_render_device(RenderDevice *device) noexcept {
   device->timestamp_value = &bgfx_timestamp_value;
   device->native_texture_id = &bgfx_native_texture_id;
   device->debug_stats = &bgfx_debug_stats;
+  device->frame_applies_reset = &bgfx_frame_applies_reset;
 }
 
 } // namespace
@@ -1657,6 +1662,7 @@ void shutdown_render_device() noexcept {
   ctx.geometries.clear();
   ctx.targets.clear();
   ctx.stats = DeviceDebugStats{};
+  ctx.frameAppliesReset = false;
   ctx.currentState = RenderState{};
   ctx.currentProgram = 0U;
   ctx.currentView = 0U;
@@ -1865,7 +1871,11 @@ void render_device_bgfx_frame() noexcept {
   // issued while a frame's views are claimed sends each of its passes
   // there and leaves their targets unwritten — and whatever is rendered
   // once and then cached, the shadow cascades and the BRDF lookup among
-  // them, keeps the missing result.
+  // them, keeps the missing result. Even issued here, the frame the reset
+  // applies to has been seen to lose its off-screen output on Direct3D 12,
+  // so that frame is reported (frame_applies_reset) and what renders once
+  // and keeps its result renders again on a later frame.
+  ctx.frameAppliesReset = false;
   int width = 0;
   int height = 0;
   core::render_drawable_size(&width, &height);
@@ -1879,6 +1889,7 @@ void render_device_bgfx_frame() noexcept {
     bgfx::reset(static_cast<std::uint32_t>(width),
                 static_cast<std::uint32_t>(height),
                 vsync ? BGFX_RESET_VSYNC : BGFX_RESET_NONE);
+    ctx.frameAppliesReset = true;
     char message[96] = {};
     std::snprintf(message, sizeof(message),
                   "swapchain reset to %dx%d, vsync %s", width, height,

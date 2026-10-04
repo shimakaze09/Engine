@@ -61,7 +61,7 @@ TextureReload reload_texture_asset(AssetDatabase *database,
 
   // Read before the load, as the first load does, so a save that lands
   // during it is picked up by the next poll.
-  const std::int64_t writeTime = core::vfs_file_mtime(path);
+  const std::int64_t writeTime = texture_input_write_time(path);
   const TextureHandle loaded = loadFn(path, record->colorSpace, userData);
   record->sourceWriteTime = writeTime;
   if (loaded == kInvalidTextureHandle) {
@@ -113,7 +113,7 @@ std::size_t poll_texture_changes(AssetDatabase *database,
     }
     const char *path = texture_source_path(catalog, record);
     if ((path == nullptr) ||
-        (core::vfs_file_mtime(path) == record.sourceWriteTime)) {
+        (texture_input_write_time(path) == record.sourceWriteTime)) {
       continue;
     }
     if (reload_texture_asset(database, catalog, record.id, loadFn, releaseFn,

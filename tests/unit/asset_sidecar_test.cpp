@@ -244,6 +244,105 @@ void test_read_failures_are_distinct(
             "an oversized sidecar is Unreadable, never Absent");
 }
 
+/// A texture's sidecar carries texture settings in the same importSettings
+/// block a mesh's carries mesh settings: the block is read as the asset's
+/// own type's, a texture with no block reads the defaults and writes none,
+/// and a block that will not read, a block on a type with no settings, or a
+/// block version from the future is malformed rather than guessed at.
+void test_texture_settings(engine::tests::TestContext &ctx) noexcept {
+  const std::string texture = root_path("brick.png");
+  ctx.check(write_text(texture, "x"), "the texture file exists");
+  ct::AssetSidecar sidecar{};
+  ct::AssetGuid guid{};
+  ctx.check(ct::parse_asset_guid("22222222-3333-4444-8555-666666666666", &guid),
+            "a guid to write");
+  sidecar.guid = guid;
+  ctx.check(ct::write_asset_sidecar(texture.c_str(), sidecar),
+            "a texture sidecar with no settings writes");
+  std::string document{};
+  ct::AssetSidecar read{};
+  ctx.check(read_text(texture + ".meta", &document) &&
+                (document.find("importSettings") == std::string::npos) &&
+                (ct::read_asset_sidecar(texture.c_str(), &read) ==
+                 ct::SidecarReadResult::Ok) &&
+                !read.hasTextureImport &&
+                (read.textureImport == ct::TextureImportSettings{}),
+            "no settings write no block and read the defaults");
+
+  sidecar.hasTextureImport = true;
+  sidecar.textureImport.colorSpace = ct::TextureColorSpaceSetting::Linear;
+  sidecar.textureImport.generateMips = false;
+  sidecar.textureImport.filter = ct::TextureFilterSetting::Nearest;
+  sidecar.textureImport.wrap = ct::TextureWrapSetting::Clamp;
+  ct::AssetSidecar reread{};
+  ctx.check(
+      ct::write_asset_sidecar(texture.c_str(), sidecar) &&
+          read_text(texture + ".meta", &document) &&
+          (document.find("\"colorSpace\": \"linear\"") != std::string::npos) &&
+          (document.find("\"filter\": \"nearest\"") != std::string::npos) &&
+          (ct::read_asset_sidecar(texture.c_str(), &reread) ==
+           ct::SidecarReadResult::Ok) &&
+          reread.hasTextureImport && !reread.hasMeshImport &&
+          (reread.textureImport == sidecar.textureImport),
+      "texture settings round-trip, one field per line");
+
+  ct::AssetSidecar meshOnTexture = sidecar;
+  meshOnTexture.hasTextureImport = false;
+  meshOnTexture.hasMeshImport = true;
+  ct::AssetSidecar unchanged{};
+  ctx.check(!ct::write_asset_sidecar(texture.c_str(), meshOnTexture) &&
+                (ct::read_asset_sidecar(texture.c_str(), &unchanged) ==
+                 ct::SidecarReadResult::Ok) &&
+                (unchanged.textureImport == sidecar.textureImport),
+            "mesh settings on a texture are refused and the file is kept");
+
+  struct Row final {
+    const char *leaf;
+    const char *block;
+    const char *why;
+  };
+  const Row rows[] = {
+      {"bad_space.png", "{\"colorSpace\": \"cmyk\"}",
+       "a colour space that is none of auto, srgb or linear"},
+      {"bad_filter.png", "{\"filter\": 1}", "a filter that is not a name"},
+      {"bad_mips.png", "{\"generateMips\": \"yes\"}",
+       "generateMips that is not a boolean"},
+      {"future_block.png", "{\"version\": 2}",
+       "a texture block version newer than this build reads"},
+      {"zero_block.png", "{\"version\": 0}", "a block version of 0"},
+      {"settings.lua", "{}", "a block on a type with no import settings"},
+  };
+  for (const Row &row : rows) {
+    const std::string asset = root_path(row.leaf);
+    const std::string text = std::string("{\n  \"schemaVersion\": 1,\n  "
+                                         "\"guid\": \"22222222-3333-4444-"
+                                         "8555-666666666666\",\n  "
+                                         "\"importSettings\": ") +
+                             row.block + "\n}\n";
+    ct::AssetSidecar ignored{};
+    ctx.check(write_text(asset, "x") &&
+                  write_text(asset + ".meta", text.c_str()) &&
+                  (ct::read_asset_sidecar(asset.c_str(), &ignored) ==
+                   ct::SidecarReadResult::Malformed),
+              row.why);
+  }
+
+  const std::string versioned = root_path("versioned.png");
+  ct::AssetSidecar explicitVersion{};
+  ctx.check(write_text(versioned, "x") &&
+                write_text(versioned + ".meta",
+                           "{\n  \"schemaVersion\": 1,\n  \"guid\": "
+                           "\"22222222-3333-4444-8555-666666666666\",\n  "
+                           "\"importSettings\": {\"version\": 1, \"wrap\": "
+                           "\"clamp\"}\n}\n") &&
+                (ct::read_asset_sidecar(versioned.c_str(), &explicitVersion) ==
+                 ct::SidecarReadResult::Ok) &&
+                (explicitVersion.textureImport.wrap ==
+                 ct::TextureWrapSetting::Clamp) &&
+                explicitVersion.textureImport.generateMips,
+            "version 1 reads, and an absent field keeps its default");
+}
+
 void test_labels(engine::tests::TestContext &ctx) noexcept {
   const std::string asset = root_path("labelled.gltf");
   ctx.check(write_text(asset, "x"), "the asset exists");
@@ -447,7 +546,7 @@ std::size_t count_of(const std::string &text, const char *needle) {
 /// read names each unknown key, nested ones included.
 void test_unknown_keys_survive_a_rewrite(
     engine::tests::TestContext &ctx) noexcept {
-  const std::string asset = root_path("newer.png");
+  const std::string asset = root_path("newer.gltf");
   ctx.check(write_text(asset, "x") &&
                 write_text(asset + ".meta",
                            "{\n  \"schemaVersion\": 1,\n  \"guid\": "
@@ -521,12 +620,13 @@ int main() {
   test_folder_sidecar(ctx);
   test_read_failures_are_distinct(ctx);
   test_labels(ctx);
+  test_texture_settings(ctx);
   ctx.check(engine::core::log_register_sink(&note_warning, nullptr),
             "warning sink");
   test_unknown_keys_survive_a_rewrite(ctx);
   {
     std::string d;
-    read_text(root_path("newer.png") + ".meta", &d);
+    read_text(root_path("newer.gltf") + ".meta", &d);
     std::fputs(d.c_str(), stderr);
   }
   engine::core::log_unregister_sink(&note_warning, nullptr);

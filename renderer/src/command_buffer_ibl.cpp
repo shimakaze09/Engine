@@ -159,6 +159,11 @@ ensure_prefiltered_environment(BackendState &backend, const RenderDevice *dev,
       (set.prefilteredMipLevels == mipLevels)) {
     return set.prefilteredTexture;
   }
+  // A bake is rendered once and kept, so none starts on a frame a
+  // swapchain reset applies to; the next frame bakes instead.
+  if (device_frame_applies_reset(dev)) {
+    return set.prefilteredTexture;
+  }
 
   release_prefiltered_environment(set);
 
@@ -297,6 +302,9 @@ ensure_irradiance_environment(BackendState &backend, const RenderDevice *dev,
       (set.irradianceFaceSize == faceSize)) {
     return set.irradianceTexture;
   }
+  if (device_frame_applies_reset(dev)) {
+    return set.irradianceTexture;
+  }
 
   release_irradiance_environment(set);
 
@@ -393,6 +401,9 @@ ensure_brdf_lut(BackendState &backend, const RenderDevice *dev,
   const int lutSize = static_cast<int>(settings.brdfLutSize);
   if ((backend.brdfLutTexture != kInvalidDeviceTexture) &&
       (backend.brdfLutSize == lutSize)) {
+    return backend.brdfLutTexture;
+  }
+  if (device_frame_applies_reset(dev)) {
     return backend.brdfLutTexture;
   }
 

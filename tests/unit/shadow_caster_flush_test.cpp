@@ -10,7 +10,8 @@
 // program with its mask, cutoff and UV transform bound, in the spot and the
 // point passes alike, and every other caster through the pass's own.
 // The directional cascades are cached, and reused only while the casters'
-// resolved geometry and masks are unchanged.
+// resolved geometry and masks are unchanged, and never from a frame a
+// swapchain reset applies to or the device dropped an operation from.
 
 #include "command_buffer_context.h"
 #include "command_buffer_flush_internal.h"
@@ -89,8 +90,24 @@ void fake_clear(ClearFlags, float, float, float, float) noexcept {
     ++g_log.clearsOnTargets;
   }
 }
+/// Dropped operations the fake device reports; the draw stub adds one per
+/// draw while g_dropDraws is set.
+std::uint64_t g_droppedOperations = 0U;
+bool g_dropDraws = false;
+DeviceDebugStats fake_debug_stats() noexcept {
+  DeviceDebugStats stats{};
+  stats.droppedOperations = g_droppedOperations;
+  return stats;
+}
+/// Whether the fake device reports the frame as one a reset applies to.
+bool g_resetFrame = false;
+bool fake_frame_applies_reset() noexcept { return g_resetFrame; }
+
 void fake_draw(DeviceGeometryHandle, PrimitiveTopology, std::int32_t,
                std::int32_t) noexcept {
+  if (g_dropDraws) {
+    ++g_droppedOperations;
+  }
   if (g_log.currentTarget != 0U) {
     if (g_log.drawsOnTargets < FakeDeviceLog::kMaxDraws) {
       g_log.drawPrograms[g_log.drawsOnTargets] = g_log.currentProgram;
@@ -644,6 +661,43 @@ void test_directional_cache_follows_what_casters_draw() noexcept {
   g_draws[1].material = Material{};
 }
 
+/// EXPECTATION (#1212): cascades drawn on a frame a swapchain reset applies
+/// to, or on one the device dropped an operation from, are not kept: the
+/// next frame draws them again, and that render is kept. On base the maps
+/// were kept from whatever frame drew them, so a render that did not land
+/// on Direct3D 12 stayed on screen for as long as the scene was still.
+void test_directional_cache_keeps_only_landed_renders() noexcept {
+  reset_backend();
+  g_backend.shadowAvailable = true;
+  SceneLightData lights{};
+  lights.directionalLightCount = 1U;
+  lights.directionalLights[0].direction = engine::math::Vec3(0.3F, -1.0F, 0.2F);
+  lights.directionalLights[0].intensity = 1.0F;
+  const auto flush = [&]() noexcept {
+    reset_fake_device();
+    engine::tests::fake_device().debug_stats = &fake_debug_stats;
+    engine::tests::fake_device().frame_applies_reset =
+        &fake_frame_applies_reset;
+    FrameFlushContext ctx = make_context(lights);
+    flush_shadow_passes(ctx);
+    return g_log.clearsOnTargets == kShadowCascadeCount;
+  };
+
+  g_resetFrame = true;
+  CHECK(flush(), "a reset frame draws the cascades");
+  g_resetFrame = false;
+  CHECK(flush(), "the frame after draws them again rather than keep them");
+  CHECK(!flush() && (g_log.bindCount == 0U), "and that render is kept");
+
+  lights.directionalLights[0].intensity = 2.0F;
+  g_dropDraws = true;
+  CHECK(flush() && flush(), "a pass the device drops from is drawn again");
+  g_dropDraws = false;
+  CHECK(flush(), "the first clean render under the key is drawn");
+  CHECK(!flush() && (g_log.bindCount == 0U), "and kept at once");
+  g_droppedOperations = 0U;
+}
+
 /// EXPECTATION (#690): the four cascades render into the four tiles of
 /// the one cascade atlas, each through a viewport covering its whole tile,
 /// and each tile is cleared on its own, so no cascade draws over another.
@@ -702,6 +756,7 @@ int main() {
   test_unmasked_casters_keep_the_pass_program();
   test_skinned_masked_casters_pick_the_fitting_program();
   test_directional_cache_follows_what_casters_draw();
+  test_directional_cache_keeps_only_landed_renders();
   test_cascades_render_into_their_own_tiles();
 
   if (g_failures != 0) {
