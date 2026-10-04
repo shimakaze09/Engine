@@ -404,10 +404,13 @@ int main(int argc, char **argv) {
     }
   }
 
-  // From the source's authored sidecar. The cooked record is derived and
-  // regenerable, so it can never be where an author's settings live.
+  // From the source's authored sidecar, or an enclosing folder's. The
+  // cooked record is derived and regenerable, so it can never be where an
+  // author's settings live.
   ImportSettings importSettings{};
-  switch (read_authored_import_settings(inputPath, &importSettings)) {
+  std::string unreadableSidecar{};
+  switch (read_authored_import_settings(inputPath, &importSettings,
+                                        &unreadableSidecar)) {
   case engine::content::SidecarReadResult::Ok:
   case engine::content::SidecarReadResult::Absent:
     break;
@@ -416,9 +419,9 @@ int main(int argc, char **argv) {
     // Cooking at the defaults would throw away what the author typed and
     // look like it worked.
     std::fprintf(stderr,
-                 "error: the source's sidecar could not be read, so its "
-                 "import settings are unknown; fix or remove it: %s.meta\n",
-                 inputPath);
+                 "error: the source's import settings are unknown: a "
+                 "sidecar could not be read; fix or remove it: %s.meta\n",
+                 unreadableSidecar.c_str());
     return 22;
   }
   // The cook key pairs the settings with the mesh cook's logic revision,

@@ -46,9 +46,10 @@ load_texture(const char *virtualPath,
 /// texels whatever it asked. False for a stale or invalid handle.
 bool texture_color_space_authored(TextureHandle handle) noexcept;
 
-/// The newest write time of what a texture loads from: its file and its
-/// sidecar, so a changed import setting reloads it as a changed image
-/// does. 0 when neither exists.
+/// The newest write time of what a texture loads from: its file, its
+/// sidecar and every enclosing folder's up to the project root (whose
+/// import settings it may inherit), so a changed import setting reloads it
+/// as a changed image does. 0 when none exists.
 std::int64_t texture_input_write_time(const char *virtualPath) noexcept;
 /// Loads the requested resource for hdr equirect cubemap.
 TextureHandle load_hdr_equirect_cubemap(const char *virtualPath,

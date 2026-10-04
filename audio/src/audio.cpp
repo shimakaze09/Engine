@@ -11,7 +11,7 @@
 #include <cstring>
 
 #include "audio_diagnostics.h"
-#include "engine/content/asset_sidecar.h"
+#include "engine/content/import_settings_resolve.h"
 #include "engine/core/cvar.h"
 #include "engine/core/logging.h"
 #include "engine/core/platform.h"
@@ -461,17 +461,16 @@ void reset_sound_entry(SoundEntry &entry) noexcept {
   entry.generation = generation;
 }
 
-/// The import settings authored in the ".meta" sidecar beside
-/// `virtualPath`; the defaults when it has none.
+/// The import settings that apply to the sound at `virtualPath`: its own
+/// ".meta" block, else an enclosing folder's; the defaults when neither
+/// has one.
 content::AudioImportSettings
 sound_import_settings(const char *virtualPath) noexcept {
   char osPath[1024] = {};
-  content::AssetSidecar sidecar{};
+  content::ResolvedImportSettings resolved{};
   if (core::vfs_resolve_os_path(virtualPath, osPath, sizeof(osPath)) &&
-      (content::read_asset_sidecar(osPath, &sidecar) ==
-       content::SidecarReadResult::Ok) &&
-      sidecar.hasAudioImport) {
-    return sidecar.audioImport;
+      content::resolve_import_settings(osPath, &resolved)) {
+    return resolved.audio;
   }
   return content::AudioImportSettings{};
 }

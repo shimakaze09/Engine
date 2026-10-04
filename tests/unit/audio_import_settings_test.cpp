@@ -7,7 +7,7 @@
 //   the count is exact);
 // - with both at once;
 // and a sidecar whose settings do not read leaves the sound at its own
-// format.
+// format. A sound with no block of its own decodes with its folder's.
 
 #include "engine/audio/audio.h"
 
@@ -188,6 +188,38 @@ void check_settings_reach_the_decode(const std::string &osPath) noexcept {
                 "written");
 }
 
+/// A sound with no block of its own decodes with its folder's.
+void check_folder_settings_reach_the_decode() noexcept {
+  using namespace engine::audio;
+  std::error_code ec{};
+  const std::string folder = std::string(kDirectory) + "/sfx";
+  std::filesystem::create_directories(folder, ec);
+  engine::content::AssetSidecar sidecar{};
+  sidecar.folder = true;
+  sidecar.hasAudioImport = true;
+  sidecar.audioImport.forceMono = true;
+  sidecar.audioImport.sampleRate = 22050U;
+  g_tests.check(
+      write_tone(folder + "/step.wav") &&
+          engine::content::parse_asset_guid(
+              "44444444-5555-4666-8777-888888888889", &sidecar.guid) &&
+          engine::content::write_asset_sidecar(folder.c_str(), sidecar),
+      "sfx/step.wav and a folder sidecar asking for mono 22050 Hz");
+  const SoundHandle sound = load_sound("importfx/sfx/step.wav");
+  std::uint32_t channels = 0U;
+  std::uint32_t sampleRate = 0U;
+  std::uint64_t frames = 0U;
+  g_tests.check(
+      (sound != kInvalidSound) &&
+          audio_sound_format(sound, &channels, &sampleRate, &frames) &&
+          (channels == 1U) && (sampleRate == 22050U) &&
+          (frames == kFrames / 2U),
+      "the folder's settings decode the sound below it");
+  unload_sound(sound);
+  update_audio();
+  std::filesystem::remove(folder + ".meta", ec);
+}
+
 } // namespace
 
 /// Runs the audio import settings suite.
@@ -207,6 +239,7 @@ int main() {
     g_tests.fail("initialize audio on the null device");
   } else {
     check_settings_reach_the_decode(osPath);
+    check_folder_settings_reach_the_decode();
     engine::audio::shutdown_audio();
   }
   engine::core::shutdown_vfs();
