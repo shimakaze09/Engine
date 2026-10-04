@@ -74,6 +74,7 @@
 #include "editor_recovery.h"
 #include "editor_scene_document.h"
 #include "editor_screenshot.h"
+#include "editor_script_properties.h"
 #include "editor_session.h"
 #include "editor_shortcuts.h"
 
@@ -420,6 +421,7 @@ void reset_editor_session_residue() noexcept {
   // The browser state and Recent Scenes are the open project's; the next
   // project reads its own.
   content_browser_state_reset();
+  reset_script_property_schemas();
   recent_scenes_forget();
   editor_session().pickers = ReferencePickerState{};
   editor_session().console = ConsolePanelState{};
