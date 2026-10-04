@@ -183,6 +183,14 @@ enum class EditorIdentityResult : std::uint8_t {
 EditorIdentityResult
 editor_establish_asset_identity(const char *osPath) noexcept;
 
+/// Records in the catalog the references the document at `osPath` (under
+/// the project's asset root) makes, replacing what it held for it. The
+/// editor calls it after it writes a document (a saved scene, a created
+/// asset; a saved material is indexed by editor_save_material), so
+/// dependency queries follow the file as saved; a document that will not
+/// read is logged and keeps no references.
+void editor_index_document_references(const char *osPath) noexcept;
+
 // --- Material editor bridge ---
 //
 // The material editor panel (editor/) never touches renderer::AssetDatabase

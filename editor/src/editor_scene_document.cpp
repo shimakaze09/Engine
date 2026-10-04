@@ -433,6 +433,9 @@ bool perform_scene_save_as(const char *path) noexcept {
   session.document.lastSaveError[0] = '\0';
   record_disk_fingerprint(session.document);
   recent_scenes_add(path);
+  // What the scene references, as written, is what the catalog answers
+  // dependency queries with.
+  runtime::editor_index_document_references(path);
   return true;
 }
 

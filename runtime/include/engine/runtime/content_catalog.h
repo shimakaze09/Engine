@@ -23,9 +23,11 @@ std::unique_ptr<content::AssetCatalog> create_asset_catalog() noexcept;
 /// identities take precedence: the engine's own content (skipped when
 /// `config.engineRoot` is empty), the project's content (skipped when
 /// `config.assetRoot` is empty), each package after it, and the built-in
-/// meshes, which ship with the engine and are found on no disk. False when
-/// any mount does not index cleanly; the walk has already logged every
-/// offending path.
+/// meshes, which ship with the engine and are found on no disk; then
+/// records the references every catalogued document makes
+/// (content::index_catalogued_documents). False when any mount does not
+/// index cleanly; the walk has already logged every offending path, and a
+/// document whose references cannot be read is logged without failing it.
 bool catalogue_engine_content(content::AssetCatalog *catalog,
                               const EngineConfig &config) noexcept;
 
