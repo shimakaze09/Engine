@@ -79,9 +79,57 @@ void draw_texture_import_settings(
   }
 }
 
+/// Draws a sound source's settings, as Unity's AudioImporter: the rate it
+/// is resampled to and Force To Mono. They apply to a sound load_sound
+/// decodes; play_music streams the file as it is.
+void draw_audio_import_settings(const char *assetPath,
+                                const content::AudioImportSettings &current) {
+  content::AudioImportSettings edited = current;
+  // Unity's Sample Rate Setting offers these, with "Preserve" for 0.
+  constexpr std::uint32_t kRates[] = {0U,     8000U,  11025U, 16000U, 22050U,
+                                      32000U, 44100U, 48000U, 96000U};
+  char preview[48] = {};
+  if (edited.sampleRate == 0U) {
+    std::snprintf(preview, sizeof(preview), "Preserve (file's own)");
+  } else {
+    std::snprintf(preview, sizeof(preview), "%u Hz",
+                  static_cast<unsigned>(edited.sampleRate));
+  }
+  bool changed = false;
+  if (ImGui::BeginCombo("Sample Rate", preview)) {
+    for (const std::uint32_t rate : kRates) {
+      char label[48] = {};
+      if (rate == 0U) {
+        std::snprintf(label, sizeof(label), "Preserve (file's own)");
+      } else {
+        std::snprintf(label, sizeof(label), "%u Hz",
+                      static_cast<unsigned>(rate));
+      }
+      if (ImGui::Selectable(label, rate == edited.sampleRate) &&
+          (rate != edited.sampleRate)) {
+        edited.sampleRate = rate;
+        changed = true;
+      }
+    }
+    ImGui::EndCombo();
+  }
+  changed |= ImGui::Checkbox("Force To Mono", &edited.forceMono);
+  ImGui::TextDisabled("Applies the next time the sound loads; music streams "
+                      "the file as it is.");
+  if (!changed) {
+    return;
+  }
+  if (!save_import_settings(assetPath, edited)) {
+    core::log_message(core::LogLevel::Error, "editor",
+                      "import settings save failed — the .meta on disk is "
+                      "unchanged");
+  }
+}
+
 /// Draws the Import Settings inspector for a source whose type has import
-/// settings (asset_import_settings.h): a mesh's, which its cook reads, or
-/// a texture's, which its load applies.
+/// settings (asset_import_settings.h): a mesh's, which its cook reads, a
+/// texture's, which its load applies, or a sound's, which its decode
+/// applies.
 ///
 /// Only for a source, because the authored sidecar lives beside the
 /// source. A cooked ".mesh" is derived: it has no settings of its own to
@@ -126,6 +174,10 @@ void draw_import_settings_inspector(const char *assetPath) noexcept {
   }
   if (kind == content::ImportSettingsKind::Texture) {
     draw_texture_import_settings(assetPath, doc->textureSettings);
+    return;
+  }
+  if (kind == content::ImportSettingsKind::Audio) {
+    draw_audio_import_settings(assetPath, doc->audioSettings);
     return;
   }
 

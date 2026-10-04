@@ -187,6 +187,44 @@ int main() {
           "the refused save left the texture's settings as they were");
   }
 
+  // A sound source's settings are its own block too: read, written back,
+  // and refused as texture settings.
+  {
+    const std::string sound = dir + "/step.wav";
+    CHECK(write_file(sound, "not a real WAV") &&
+              write_file(sound + ".meta",
+                         "{\"schemaVersion\":1,"
+                         "\"guid\":\"5f1b2c33-9e84-4d0a-8c27-314f5e6d7c8b\","
+                         "\"importSettings\":{\"forceMono\":true}}"),
+          "a sound with settings written");
+    engine::editor::invalidate_import_settings_cache();
+    const ImportSettingsDocument *soundDoc =
+        engine::editor::import_settings_for_asset(sound.c_str());
+    CHECK((soundDoc != nullptr) &&
+              (soundDoc->state == ImportSettingsDocument::State::Valid) &&
+              soundDoc->hasAudioSettings && !soundDoc->hasTextureSettings &&
+              soundDoc->audioSettings.forceMono &&
+              (soundDoc->audioSettings.sampleRate == 0U),
+          "the panel reads a sound's settings as audio settings");
+    engine::content::AudioImportSettings soundEdit{};
+    soundEdit.sampleRate = 22050U;
+    engine::content::AssetSidecar soundAfter{};
+    CHECK(
+        engine::editor::save_import_settings(sound.c_str(), soundEdit) &&
+            (engine::content::read_asset_sidecar(sound.c_str(), &soundAfter) ==
+             engine::content::SidecarReadResult::Ok) &&
+            soundAfter.hasAudioImport && (soundAfter.audioImport == soundEdit),
+        "the decoder reads back exactly what the panel wrote");
+    CHECK(!engine::editor::save_import_settings(
+              sound.c_str(), engine::content::TextureImportSettings{}),
+          "texture settings are refused on a sound");
+    engine::content::AssetSidecar kept{};
+    CHECK((engine::content::read_asset_sidecar(sound.c_str(), &kept) ==
+           engine::content::SidecarReadResult::Ok) &&
+              !kept.hasTextureImport && (kept.audioImport == soundEdit),
+          "the refused save left the sound's settings as they were");
+  }
+
   // Thumbnails are one level, sampled without mipmaps (#549). They used to
   // ask for a generated chain the bgfx backend leaves empty, then draw it
   // smaller than stored, which sampled the empty levels: black icons.

@@ -54,6 +54,8 @@ void read_into_cache(const char *assetPath) noexcept {
   g_cache.document.settings = sidecar.meshImport;
   g_cache.document.hasTextureSettings = sidecar.hasTextureImport;
   g_cache.document.textureSettings = sidecar.textureImport;
+  g_cache.document.hasAudioSettings = sidecar.hasAudioImport;
+  g_cache.document.audioSettings = sidecar.audioImport;
 }
 
 } // namespace
@@ -123,6 +125,16 @@ bool save_import_settings(
       assetPath, [&settings](content::AssetSidecar *sidecar) noexcept {
         sidecar->hasTextureImport = true;
         sidecar->textureImport = settings;
+      });
+}
+
+bool save_import_settings(
+    const char *assetPath,
+    const content::AudioImportSettings &settings) noexcept {
+  return rewrite_sidecar_settings(
+      assetPath, [&settings](content::AssetSidecar *sidecar) noexcept {
+        sidecar->hasAudioImport = true;
+        sidecar->audioImport = settings;
       });
 }
 

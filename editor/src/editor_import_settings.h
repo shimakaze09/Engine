@@ -2,7 +2,7 @@
 // source's authored ".meta" sidecar is read and parsed once per
 // selection, or after the panel rewrites it, instead of once per drawn
 // frame. A mesh source's settings feed its cook; a texture source's are
-// applied when the texture loads.
+// applied when the texture loads, and a sound source's when it decodes.
 //
 // The authored sidecar is the only place import settings live. The cook
 // reads them from there and writes them nowhere, so the panel edits the
@@ -40,6 +40,10 @@ struct ImportSettingsDocument final {
   /// defaults.
   bool hasTextureSettings = false;
   content::TextureImportSettings textureSettings{};
+  /// A sound source's settings; false `hasAudioSettings` decodes at the
+  /// defaults.
+  bool hasAudioSettings = false;
+  content::AudioImportSettings audioSettings{};
 };
 
 /// Returns the authored sidecar for `assetPath`, reading the file only
@@ -60,6 +64,10 @@ bool save_import_settings(const char *assetPath,
 bool save_import_settings(
     const char *assetPath,
     const content::TextureImportSettings &settings) noexcept;
+/// The same for a sound source's settings.
+bool save_import_settings(
+    const char *assetPath,
+    const content::AudioImportSettings &settings) noexcept;
 
 /// Drops the cached document so the next call re-reads it (after the panel
 /// rewrote the sidecar, or a recook replaced it).
